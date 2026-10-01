@@ -1,0 +1,24 @@
+// Negative test (LEC-006, F-OP-1): a generic operator is still matched by
+// EXACT operand type. `operator<T> +(a: Cell<T>, k: int)` accepts a Cell and
+// an int; the double 1.5 must not be widened or narrowed to fit, exactly as
+// fail_operator_exact_match_no_coercion.tr holds a concrete operator to.
+// Expected: E066, "cannot apply '+' to 'Cell<string>' and 'double'".
+struct Cell<T> {
+    v: T,
+    n: int
+}
+
+fn<T> Cell.new(v: T): void {
+    self.v = v;
+    self.n = 1;
+}
+
+operator<T> +(a: Cell<T>, k: int): Cell<T> {
+    return a;
+}
+
+fn main(): int {
+    mut c: Cell<string> = Cell::new("s");
+    mut d: Cell<string> = c + 1.5;
+    return 0;
+}

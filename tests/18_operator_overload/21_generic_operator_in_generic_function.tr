@@ -1,0 +1,56 @@
+// LEC-006: a generic operator used from inside a generic FUNCTION's body.
+// While the template `firstOf<T>` / `bumped<T>` is checked, the operand type is
+// still the open `List<T>` / `Cell<T>`; the operator must NOT be instantiated
+// for that open T (a clone with an unresolved type parameter in its signature
+// would reach Codegen). It is instantiated when each clone of the function
+// is re-checked at a concrete type, which is the nested-discovery path of the
+// monomorphizer's fixed point.
+import list::List;
+import test;
+
+struct Cell<T> {
+    v: T,
+    n: int
+}
+
+fn<T> Cell.new(v: T): void {
+    self.v = v;
+    self.n = 1;
+}
+
+operator<T> +(a: Cell<T>, k: int): Cell<T> {
+    mut r: Cell<T> = a;
+    r.n = a.n + k;
+    return r;
+}
+
+fn<T> firstOf(l: List<T>): T {
+    return l[0];
+}
+
+fn<T> setFirst(l: List<T>, v: T): void {
+    l[0] = v;
+}
+
+fn<T> bumped(c: Cell<T>): Cell<T> {
+    return c + 1;
+}
+
+fn main(): int {
+    mut li: List<int> = List::default();
+    li.push(1);
+    mut ls: List<string> = List::default();
+    ls.push("a");
+
+    setFirst(li, 9);
+    setFirst(ls, "z");
+    test::assert(firstOf(li) == 9, "firstOf<int> after setFirst");
+    test::assert(firstOf(ls) == "z", "firstOf<string> after setFirst");
+
+    mut ci: Cell<int> = Cell::new(3);
+    mut cs: Cell<string> = Cell::new("s");
+    test::assert(bumped(ci).n == 2, "bumped<int>");
+    test::assert(bumped(cs).n == 2, "bumped<string>");
+    test::assert(bumped(bumped(cs)).n == 3, "bumped<string> twice");
+    return 0;
+}

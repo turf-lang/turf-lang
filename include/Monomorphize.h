@@ -43,6 +43,7 @@
 #include <vector>
 
 class ExprAST;
+class FuncDefExprAST;
 class Resolver;
 struct ResolverFunctionSymbol;
 
@@ -78,12 +79,21 @@ struct InstantiationRequest {
                        ///< reporting; the full site LIST lives on the
                        ///< collector's entry, see below).
 
+  /// LEC-006: the exact template declaration, when the requester knows it
+  /// (ResolverFunctionSymbol::Decl -- see its doc comment for why a name is
+  /// not enough: overloads share one). Two requests for different overloads
+  /// are different instantiations even at identical type arguments, and the
+  /// drain instantiates THIS declaration instead of whichever overload the
+  /// name registry happens to hold. Null falls back to the name registry,
+  /// the behaviour of every request kind that does not set it.
+  const FuncDefExprAST *Decl = nullptr;
+
   /// Structural equality, deliberately never by getName() string
   /// (INV-TYPE-1) -- two requests are the same instantiation only if every
   /// type argument is pairwise isEquivalent(), not merely same-spelled.
   bool sameInstantiationAs(const InstantiationRequest &Other) const {
     if (Kind != Other.Kind || DeclKey != Other.DeclKey ||
-        SourceModule != Other.SourceModule)
+        SourceModule != Other.SourceModule || Decl != Other.Decl)
       return false;
     if (TypeArgs.size() != Other.TypeArgs.size())
       return false;

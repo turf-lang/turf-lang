@@ -62,7 +62,10 @@ std::string instantiatedDeclName(const std::string &BaseName,
                                  const std::vector<TurfTypePtr> &TypeArgs,
                                  const std::string &Module) {
   std::string S = Module.empty() ? "" : Module + "_";
-  S += BaseName + "_gen" + std::to_string(TypeArgs.size());
+  // LEC-006: a generic `operator[]` instantiates under the same symbol-safe
+  // spelling an ordinary operator mangles to (sanitizeSymbolName(): a no-op
+  // for every non-operator name), so `[]`/`=`/`+` never reach an LLVM symbol.
+  S += sanitizeSymbolName(BaseName) + "_gen" + std::to_string(TypeArgs.size());
   for (const auto &A : TypeArgs)
     if (A) S += "_" + A->getMangledName();
   return S;
@@ -568,6 +571,35 @@ std::shared_ptr<ResolverFunctionSymbol> finishInstantiation(
   return ClonedSymbol;
 }
 
+/// LEC-006: point an OPERATOR node at its instantiated clone. A generic
+/// `operator<T>` is a FreeFunction-kind request whose sites are the operator
+/// expressions themselves, not calls (TypeChecker::matchOperatorOverload()),
+/// and each kind keeps its target in its own field. @p DeclKey, the
+/// synthesized operator name, is what tells apart the two things one node can
+/// need: an `a[i]` node is the site of BOTH an `operator[]` read and an
+/// `operator[]=` write request, and a user-written `!x` is a BinaryExprAST
+/// that reads `operator!` into a different field than its `!=` target.
+void retargetOperatorSite(ExprAST *Site, const std::string &DeclKey,
+                          const std::shared_ptr<ResolverFunctionSymbol> &Clone) {
+  if (auto *AA = dynamic_cast<ArrayAccessExprAST *>(Site)) {
+    if (DeclKey == OperatorIndexSetName())
+      AA->ResolvedIndexSetTarget = Clone;
+    else
+      AA->ResolvedIndexGetTarget = Clone;
+  } else if (auto *B = dynamic_cast<BinaryExprAST *>(Site)) {
+    if (DeclKey == operatorFunctionName('!'))
+      B->ResolvedNotOperatorTarget = Clone;
+    else
+      B->ResolvedOperatorTarget = Clone;
+  } else if (auto *U = dynamic_cast<UnaryExprAST *>(Site)) {
+    U->ResolvedOperatorTarget = Clone;
+  } else if (auto *CA = dynamic_cast<CompoundAssignmentExprAST *>(Site)) {
+    CA->ResolvedOperatorTarget = Clone;
+  } else if (auto *P = dynamic_cast<PostfixExprAST *>(Site)) {
+    P->ResolvedOperatorTarget = Clone;
+  }
+}
+
 /// TYPE-002 (S15/D1): rewrite Entry.Sites[Entry.SitesRewritten..) to
 /// Entry.ClonedSymbol, for a FuncCallExprAST-keyed entry (FreeFunction or
 /// constructor kind). Called both right after an entry is first drained
@@ -584,6 +616,9 @@ void rewriteNewFuncCallSites(InstantiationEntry &Entry) {
   for (size_t i = Entry.SitesRewritten; i < Entry.Sites.size(); ++i) {
     if (auto *FC = dynamic_cast<FuncCallExprAST *>(Entry.Sites[i]))
       FC->ResolvedCallTarget = Entry.ClonedSymbol;
+    else
+      retargetOperatorSite(Entry.Sites[i], Entry.Request.DeclKey,
+                           Entry.ClonedSymbol);
   }
   Entry.SitesRewritten = Entry.Sites.size();
 }
@@ -636,9 +671,19 @@ bool drainFreeFunctionRequests(
     if (Entry.Sites.empty())
       continue; // Defensive -- record() always pushes at least one site.
 
+    // LEC-006: a request that names its exact declaration (every free-
+    // function call and every operator) instantiates THAT one. The name
+    // registry keeps a single declaration per (module, name), so with
+    // overloads it silently picked the last one declared for all of them.
+    // Anything without a Decl (or whose Decl is not a template) falls back
+    // to the registry, unchanged.
+    FuncDefExprAST *DirectTemplate = nullptr;
+    if (Entry.Request.Decl && !Entry.Request.Decl->getTypeParams().empty())
+      DirectTemplate = const_cast<FuncDefExprAST *>(Entry.Request.Decl);
+
     auto RegIt = Registry.find(
         registryKey(Entry.Request.SourceModule, Entry.Request.DeclKey));
-    if (RegIt == Registry.end()) {
+    if (!DirectTemplate && RegIt == Registry.end()) {
       // Should be unreachable: every FreeFunction request's DeclKey/
       // SourceModule came from a real, already-resolved ResolvedCallTarget
       // at TypeCheck time (TypeCheckerCall.cpp), which means a real
@@ -652,7 +697,7 @@ bool drainFreeFunctionRequests(
           .raise();
       return DidWork;
     }
-    FuncDefExprAST *Template = RegIt->second;
+    FuncDefExprAST *Template = DirectTemplate ? DirectTemplate : RegIt->second;
 
     // Struct-bound declarations routed through the free-function call path
     // -- `Box::new(...)`/`Box::default()` (a "self-stripped candidate",
@@ -675,7 +720,12 @@ bool drainFreeFunctionRequests(
     // struct layout existed to make it correct) drains it instead, sharing
     // this function's own registry/Sites-rewrite shape but the METHOD-style
     // self-substitution technique (cloneAndSubstituteSelfBound()).
-    if (!Template->getParams().empty() && Template->getParams()[0].Name == "self")
+    //
+    // LEC-006: not for an operator. Its first parameter is just its first
+    // operand, and the operator's own name says it is not a method -- an
+    // operand a user happened to call `self` must still be instantiated.
+    if (!Template->getParams().empty() && Template->getParams()[0].Name == "self" &&
+        Template->getName().rfind("operator", 0) != 0)
       continue;
 
     if (++TotalDrained > kMaxInstantiationDepth) {
@@ -859,9 +909,15 @@ bool drainMethodRequests(
     if (Entry.Sites.empty())
       continue; // Defensive -- record() always pushes at least one site.
 
+    // LEC-006: instantiate the exact overload the call resolved to, not the
+    // one the name registry holds -- see drainFreeFunctionRequests().
+    FuncDefExprAST *DirectTemplate = nullptr;
+    if (Entry.Request.Decl && !Entry.Request.Decl->getTypeParams().empty())
+      DirectTemplate = const_cast<FuncDefExprAST *>(Entry.Request.Decl);
+
     auto RegIt = Registry.find(
         registryKey(Entry.Request.SourceModule, Entry.Request.DeclKey));
-    if (RegIt == Registry.end()) {
+    if (!DirectTemplate && RegIt == Registry.end()) {
       // Should be unreachable: every Method-kind request's DeclKey came
       // from visitMethodCall's own struct-instance branch resolving a
       // real candidate (TypeCheckerCall.cpp) -- see CodegenFunc.cpp's
@@ -874,7 +930,7 @@ bool drainMethodRequests(
           .raise();
       return DidWork;
     }
-    FuncDefExprAST *Template = RegIt->second;
+    FuncDefExprAST *Template = DirectTemplate ? DirectTemplate : RegIt->second;
 
     if (Template->getParams().empty() || Template->getParams()[0].Name != "self") {
       // Should be unreachable: a Method-kind request is only ever recorded
@@ -990,9 +1046,15 @@ bool drainConstructorRequests(
     if (Entry.Sites.empty())
       continue; // Defensive -- record() always pushes at least one site.
 
+    // LEC-006: the exact overload (`Box::new(v)` vs `Box::new(v, w)`), as in
+    // drainFreeFunctionRequests().
+    FuncDefExprAST *DirectTemplate = nullptr;
+    if (Entry.Request.Decl && !Entry.Request.Decl->getTypeParams().empty())
+      DirectTemplate = const_cast<FuncDefExprAST *>(Entry.Request.Decl);
+
     auto RegIt = Registry.find(
         registryKey(Entry.Request.SourceModule, Entry.Request.DeclKey));
-    if (RegIt == Registry.end()) {
+    if (!DirectTemplate && RegIt == Registry.end()) {
       // A genuinely missing declaration is drainFreeFunctionRequests()'s
       // error to raise (it runs the identical lookup against the SAME
       // registry for every FreeFunction-kind entry, struct-bound or not,
@@ -1007,9 +1069,12 @@ bool drainConstructorRequests(
           .raise();
       return DidWork;
     }
-    FuncDefExprAST *Template = RegIt->second;
+    FuncDefExprAST *Template = DirectTemplate ? DirectTemplate : RegIt->second;
 
-    if (Template->getParams().empty() || Template->getParams()[0].Name != "self")
+    // LEC-006: an operator is never struct-bound, whatever its first operand
+    // is called -- drainFreeFunctionRequests() owns it.
+    if (Template->getParams().empty() || Template->getParams()[0].Name != "self" ||
+        Template->getName().rfind("operator", 0) == 0)
       continue; // Not struct-bound -- drainFreeFunctionRequests()'s job.
 
     if (++TotalDrained > kMaxInstantiationDepth) {

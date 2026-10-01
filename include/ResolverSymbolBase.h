@@ -52,6 +52,8 @@
 #include <unordered_map>
 #include <vector>
 
+class FuncDefExprAST; // ResolverFunctionSymbol::Decl -- a pointer only
+
 // ─── Source location (same layout as Lexer.h's SourceLocation) ───────────────
 // Duplicated as a plain POD here so this header has no dependency on Lexer.h.
 struct ResolverSourceLocation {
@@ -422,6 +424,23 @@ struct ResolverFunctionSymbol {
   /// alongside the struct's (`fn<T, U> Wrap.pick(other: U): U` -- T
   /// redeclares Wrap's own, U is pick's own) -- see D6 in the change record.
   std::vector<std::string> TypeParams;
+
+  /// LEC-006: the declaration this symbol was built from, set by
+  /// Resolver::buildFunctionSymbol(). Lets a monomorphizer request name the
+  /// EXACT generic template it instantiates. `(SourceModule, BaseName)` is
+  /// not enough: overloads share both, and operators overload one name
+  /// constantly -- unary `-` and binary `-` are both "operator-", as are
+  /// `operator+(Cell<T>, int)` and `operator+(Cell<T>, Cell<T>)`. Keyed by
+  /// name alone the two collapsed into ONE instantiation whose clone served
+  /// every call (found live: a call to the unary clone passed two arguments,
+  /// "Incorrect number of arguments", at codegen). An ordinary
+  /// `fn<T> f(x: T)` / `fn<T> f(x: T, y: T)` pair had the same bug.
+  ///
+  /// Never owned and never dereferenced except by the monomorphizer: the
+  /// declaration lives in the pre-pass AST list for the whole compile, and a
+  /// copy of this symbol (candidate lists copy it) names the same one. Null
+  /// for a symbol not built from a source declaration.
+  const FuncDefExprAST *Decl = nullptr;
 
   /// Arity of this overload.
   /// For variadic functions, this is the number of *named* (declared) params.

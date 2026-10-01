@@ -1,0 +1,29 @@
+// Negative test (LEC-006): `operator<T> ==(a: Cell<T>, b: Cell<T>)` binds T
+// from the operands and then requires EVERY substituted parameter to match
+// its operand exactly. T binds to int from the left operand; the right is a
+// Cell<string>, which is not `Cell<int>`, so no overload matches. (The binder
+// alone would accept this -- unify() skips a mismatch silently -- which is
+// why the substituted signature is re-checked.)
+// Expected: E066, "Cannot compare 'Cell<int>' with 'Cell<string>'".
+struct Cell<T> {
+    v: T,
+    n: int
+}
+
+fn<T> Cell.new(v: T): void {
+    self.v = v;
+    self.n = 1;
+}
+
+operator<T> ==(a: Cell<T>, b: Cell<T>): bool {
+    return true;
+}
+
+fn main(): int {
+    mut a: Cell<int> = Cell::new(1);
+    mut b: Cell<string> = Cell::new("x");
+    if (a == b) {
+        return 1;
+    }
+    return 0;
+}

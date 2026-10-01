@@ -1126,7 +1126,8 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
 //
 // `operator +(a: string, b: string): string { ... }`. Deliberately does NOT
 // share a body with ParseFuncDef(): operators are top-level-only (no '.'/'::'
-// method-name handling), non-generic (no '<T>' block), and have no 'static'
+// method-name handling), take their '<T>' block after the keyword rather
+// than before a name (LEC-006, below), and have no 'static'
 // keyword -- so reusing ParseFuncDef() directly would mean threading a bunch
 // of "but not for operators" conditionals through an already-long function.
 // Instead this reuses ParseFuncDef()'s PARAM-LIST/RETURN-TYPE/BODY parsing
@@ -1138,9 +1139,53 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
 // STRING_UFCS_OPERATOR_CHAR_RFC.md §4 and §7 step 3, and LANG-001
 // (docs/development/changes/LANG-001.md) for the binary-set extension,
 // unary support, and `[]`/`[]=` addition below.
+//
+// LEC-006: `operator<T> [](l: List<T>, i: int): T` -- an optional `<...>`
+// type-parameter list straight after the keyword, exactly where `fn<T>`
+// puts it. The declaration is still an ordinary FuncDefExprAST (now with a
+// non-empty TypeParams), which is all the monomorphizer needs to treat it
+// as a template like any `fn<T>`.
 std::unique_ptr<ExprAST> ParseOperatorDecl() {
   SourceLocation OpLoc = CurLoc;
   getNextToken(); // consume 'operator'
+
+  // `operator<` is ambiguous on its face: the less-than operator
+  // (`operator <(a: V, b: V): bool`) or the start of a type-parameter list
+  // (`operator<T> ...`). One token settles it -- a type-parameter list is
+  // `<` IDENT, and a `<` operator is always followed by its '(' parameter
+  // list. No lookahead buffer is needed: the `<` is consumed either way, and
+  // a '(' after it just means it was the operator.
+  std::vector<std::string> TypeParams;
+  bool LessIsOperator = false;
+  if (CurTok == '<') {
+    getNextToken(); // eat '<'
+    if (CurTok == TOK_IDENTIFIER) {
+      while (CurTok == TOK_IDENTIFIER) {
+        TypeParams.push_back(IdentifierStr);
+        getNextToken();
+        if (CurTok == ',')
+          getNextToken();
+        else
+          break;
+      }
+      if (CurTok != '>') {
+        LogErrorAt(CurLoc, "Expected '>' after generic type parameters", SLM::ErrorCategory::DECLARATION);
+        return nullptr;
+      }
+      getNextToken(); // eat '>'
+    } else {
+      LessIsOperator = true;
+    }
+  }
+
+  // Same scoped registration ParseFuncDef() does, so ParseType() turns `T`
+  // in the operand and return types into a TurfGenericParamType. Lives until
+  // the function returns, covering the body too.
+  SymbolScopeGuard Guard(!TypeParams.empty());
+  if (GlobalSymbolTable && !TypeParams.empty()) {
+    for (const auto &TP : TypeParams)
+      GlobalSymbolTable->RegisterType(TP, std::make_shared<TurfGenericParamType>(TP));
+  }
 
   // `operator[]` / `operator[]=` -- no single Lexer token to switch on (`[`
   // is also array-literal/array-access syntax elsewhere), so this is a
@@ -1152,7 +1197,10 @@ std::unique_ptr<ExprAST> ParseOperatorDecl() {
   bool IsIndexGet = false, IsIndexSet = false;
   int OpTok = 0;
   std::string FuncName;
-  if (CurTok == '[') {
+  if (LessIsOperator) {
+    OpTok = '<';
+    FuncName = operatorFunctionName(OpTok);
+  } else if (CurTok == '[') {
     getNextToken(); // eat '['
     if (CurTok != ']') {
       LogErrorAt(OpLoc, "Expected ']' to close 'operator['.", SLM::ErrorCategory::DECLARATION);
@@ -1308,7 +1356,7 @@ std::unique_ptr<ExprAST> ParseOperatorDecl() {
   if (CurTok == ';') {
     getNextToken(); // eat ';'
     return std::make_unique<FuncDefExprAST>(OpLoc, FuncName, OpLoc, RetType, Params,
-                                            nullptr, std::vector<std::string>{},
+                                            nullptr, TypeParams,
                                             /*IsStaticMethodDecl=*/false);
   }
 
@@ -1323,7 +1371,7 @@ std::unique_ptr<ExprAST> ParseOperatorDecl() {
     return nullptr;
 
   auto Def = std::make_unique<FuncDefExprAST>(OpLoc, FuncName, OpLoc, RetType, Params,
-                                              std::move(Body), std::vector<std::string>{},
+                                              std::move(Body), TypeParams,
                                               /*IsStaticMethodDecl=*/false);
   Def->UsesTry = TryScope.used();
   return Def;

@@ -1,0 +1,16 @@
+// Negative test (LEC-006): operator calls have no type-argument syntax, so a
+// type parameter that appears only in the RETURN type can never be inferred.
+// Rejected at the declaration, not at every use.
+// Expected: E097, "declares type parameter 'T', but no operand mentions it".
+struct Cell<T> {
+    v: T,
+    n: int
+}
+
+operator<T> [](p: Cell<int>, i: int): T {
+    return p.v;
+}
+
+fn main(): int {
+    return 0;
+}

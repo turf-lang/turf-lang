@@ -1,0 +1,15 @@
+// Negative test (LEC-006): `operator<T> +(a: T, b: T): T` mentions no type
+// this file declares, so it would match `+` between ANY two values of the
+// same type -- including types from modules that never imported this file.
+// A concrete operator over only builtins is rejected too
+// (OperatorBuiltinPairError); the orphan rule cannot be satisfied vacuously
+// for a generic one.
+// Expected: E097, "is generic but none of its operands is a type declared in
+// this file".
+operator<T> +(a: T, b: T): T {
+    return a;
+}
+
+fn main(): int {
+    return 0;
+}

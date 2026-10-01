@@ -292,24 +292,21 @@ pub fn<K, V> Map.length(): int {
 //
 // `m[key]` / `m[key] = v`, wrapping get()/put() -- both already go through
 // the hash index above, so these need no changes at all for this group.
-// Declared for the CONCRETE `Map<string, int>` only (this file's own doc
-// comment's example pairing), not genuinely generic over `K, V` -- see
-// list.tr's identical operator[] doc comment for why `operator`
-// declarations can't be generic at all (ParseOperatorDecl() parses no
-// `<K, V>` block) and why specializing on one concrete pairing is the
-// right-sized fix rather than a parser feature.
+// Generic over `K, V` (LEC-006) -- these were `Map<string, int>`-only until
+// `operator` declarations could take a `<K, V>` list. See list.tr's
+// operator[] doc comment.
 //
-// Self is `&Map<string, int>` here, NOT by value, unlike List<int>'s
+// Self is `&Map<K, V>` here, NOT by value, unlike List<T>'s
 // operator[]=: put() can REALLOCATE `keys`/`values`/`buckets` and always
 // updates `len`/`cap`/`bcap` -- mutations to the struct's OWN fields, not
-// just through an already-shared heap pointer the way List<int>.data's
+// just through an already-shared heap pointer the way List<T>.data's
 // writes are. A by-value `m` here would let put() grow/mutate only a
 // local copy that vanishes when this function returns, silently losing
 // every write.
-operator [](m: Map<string, int>, key: string): int {
+operator<K, V> [](m: Map<K, V>, key: K): V {
   return m.get(key);
 }
 
-operator []=(m: &Map<string, int>, key: string, value: int): void {
+operator<K, V> []=(m: &Map<K, V>, key: K, value: V): void {
   m.put(key, value);
 }

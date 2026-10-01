@@ -224,10 +224,11 @@ void TypeChecker::visitBinary(BinaryExprAST &Node) {
   // doc comment (ASTExpr.h) for why this is layered onto the existing
   // desugared shape instead of a real UnaryExprAST('!', ...) node.
   if (Node.IsDesugaredNot && !Node.ResolvedNotOperatorCandidates.empty() && LhsTy) {
+    TurfTypePtr NotResultTy;
     for (const auto &C : Node.ResolvedNotOperatorCandidates) {
-      if (!C || C->arity() != 1)
-        continue;
-      if (sameTypeExact(C->Params[0].Type.get(), LhsTy)) {
+      TurfTypePtr R;
+      if (matchOperatorOverload(C, {getType(Node.getLHS())}, /*RelaxSelf=*/false,
+                                &Node, Node.getLoc(), R)) {
         if (Node.ResolvedNotOperatorTarget) {
           reportError(Node.getLoc(),
                       "Ambiguous 'operator!(" + LhsTy->getName() +
@@ -236,10 +237,11 @@ void TypeChecker::visitBinary(BinaryExprAST &Node) {
           break;
         }
         Node.ResolvedNotOperatorTarget = C;
+        NotResultTy = R;
       }
     }
     if (Node.ResolvedNotOperatorTarget) {
-      setType(&Node, Node.ResolvedNotOperatorTarget->ReturnType);
+      setType(&Node, NotResultTy);
       return;
     }
   }
@@ -254,11 +256,11 @@ void TypeChecker::visitBinary(BinaryExprAST &Node) {
   // resolve. Exact-type-match only (sameTypeExact, no numeric coercion).
   if (isOverloadableBinaryOp(Op) && !Node.ResolvedOperatorCandidates.empty() &&
       LhsTy && RhsTy) {
+    TurfTypePtr OpResultTy;
     for (const auto &C : Node.ResolvedOperatorCandidates) {
-      if (!C || C->arity() != 2)
-        continue;
-      if (sameTypeExact(C->Params[0].Type.get(), LhsTy) &&
-          sameTypeExact(C->Params[1].Type.get(), RhsTy)) {
+      TurfTypePtr R;
+      if (matchOperatorOverload(C, {getType(Node.getLHS()), getType(Node.getRHS())},
+                                /*RelaxSelf=*/false, &Node, Node.getLoc(), R)) {
         if (Node.ResolvedOperatorTarget) {
           // Two visible candidates with an identical operand-type signature
           // -- RFC §4.3's universal conflict rule, enforced here at the call
@@ -273,10 +275,11 @@ void TypeChecker::visitBinary(BinaryExprAST &Node) {
           break;
         }
         Node.ResolvedOperatorTarget = C;
+        OpResultTy = R;
       }
     }
     if (Node.ResolvedOperatorTarget) {
-      setType(&Node, Node.ResolvedOperatorTarget->ReturnType);
+      setType(&Node, OpResultTy);
       return;
     }
   }
@@ -374,10 +377,11 @@ void TypeChecker::visitUnary(UnaryExprAST &Node) {
   // Exact-type-match only (F-OP-1, sameTypeExact, no numeric coercion).
   if (isOverloadableUnaryOp(Op) && !Node.ResolvedOperatorCandidates.empty() &&
       OperandTy) {
+    TurfTypePtr OpResultTy;
     for (const auto &C : Node.ResolvedOperatorCandidates) {
-      if (!C || C->arity() != 1)
-        continue;
-      if (sameTypeExact(C->Params[0].Type.get(), OperandTy.get())) {
+      TurfTypePtr R;
+      if (matchOperatorOverload(C, {OperandTy}, /*RelaxSelf=*/false, &Node,
+                                Node.getLoc(), R)) {
         if (Node.ResolvedOperatorTarget) {
           reportError(Node.getLoc(),
                       "Ambiguous 'operator " + OpToDisplayString(Op) + "(" +
@@ -387,10 +391,11 @@ void TypeChecker::visitUnary(UnaryExprAST &Node) {
           break;
         }
         Node.ResolvedOperatorTarget = C;
+        OpResultTy = R;
       }
     }
     if (Node.ResolvedOperatorTarget) {
-      setType(&Node, Node.ResolvedOperatorTarget->ReturnType);
+      setType(&Node, OpResultTy);
       return;
     }
   }
@@ -511,11 +516,12 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
     TurfTypePtr ArrIndexTy = getType(ArrAcc->getIndex());
     if (!ArrAcc->ResolvedIndexSetCandidates.empty() && ArrBaseTy && ArrIndexTy && RhsTy) {
       for (const auto &C : ArrAcc->ResolvedIndexSetCandidates) {
-        if (!C || C->arity() != 3)
-          continue;
-        if (operatorSelfOperandMatches(C->Params[0].Type.get(), ArrBaseTy.get()) &&
-            sameTypeExact(C->Params[1].Type.get(), ArrIndexTy.get()) &&
-            sameTypeExact(C->Params[2].Type.get(), RhsTy.get())) {
+        TurfTypePtr Unused;
+        // The site is the ArrayAccessExprAST, not the assignment: it is the
+        // node Codegen reads ResolvedIndexSetTarget from.
+        if (matchOperatorOverload(C, {ArrBaseTy, ArrIndexTy, RhsTy},
+                                  /*RelaxSelf=*/true, MutableArrAcc,
+                                  MutableArrAcc->getLoc(), Unused)) {
           if (MutableArrAcc->ResolvedIndexSetTarget) {
             reportError(Node.getLoc(),
                         "Ambiguous 'operator[]=(" + ArrBaseTy->getName() +
@@ -700,11 +706,11 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
   // (§13.5's explicit concern) if this had chosen that route instead.
   if (isOverloadableBinaryOp(Op) && !Node.ResolvedOperatorCandidates.empty() &&
       LhsTy && RhsTy) {
+    TurfTypePtr OpResultTy;
     for (const auto &C : Node.ResolvedOperatorCandidates) {
-      if (!C || C->arity() != 2)
-        continue;
-      if (sameTypeExact(C->Params[0].Type.get(), LhsTy.get()) &&
-          sameTypeExact(C->Params[1].Type.get(), RhsTy.get())) {
+      TurfTypePtr R;
+      if (matchOperatorOverload(C, {LhsTy, RhsTy}, /*RelaxSelf=*/false, &Node,
+                                Node.getLoc(), R)) {
         if (Node.ResolvedOperatorTarget) {
           reportError(Node.getLoc(),
                       "Ambiguous 'operator " + OpToDisplayString(Op) + "=(" +
@@ -714,6 +720,7 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
           break;
         }
         Node.ResolvedOperatorTarget = C;
+        OpResultTy = R;
       }
     }
     if (Node.ResolvedOperatorTarget) {
@@ -723,7 +730,6 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
       // ResultTy, LhsTy) check further below, except an operator overload's
       // result must match the LHS's declared type exactly, the same "no
       // coercion" rule every other operator-overload call site enforces).
-      TurfTypePtr OpResultTy = Node.ResolvedOperatorTarget->ReturnType;
       if (OpResultTy && !sameTypeExact(OpResultTy.get(), LhsTy.get())) {
         reportError(Node.getLoc(),
                     "'operator " + OpToDisplayString(Op) + "' returns '" +
@@ -937,11 +943,12 @@ void TypeChecker::visitPostfixExpr(PostfixExprAST &Node) {
   bool HandledViaOperator = false;
   if (!Node.ResolvedOperatorCandidates.empty() && OpTy) {
     TurfTypePtr IntTy = TurfInt();
+    TurfTypePtr OpResultTy;
     for (const auto &C : Node.ResolvedOperatorCandidates) {
-      if (!C || C->arity() != 2)
-        continue;
-      if (sameTypeExact(C->Params[0].Type.get(), OpTy.get()) &&
-          sameTypeExact(C->Params[1].Type.get(), IntTy.get())) {
+      TurfTypePtr R;
+      if (matchOperatorOverload(C, {OpTy, IntTy}, /*RelaxSelf=*/false, &Node,
+                                Node.getLoc(), R)) {
+        OpResultTy = R;
         if (Node.ResolvedOperatorTarget) {
           reportError(Node.getLoc(),
                       "Ambiguous " + std::string(Dir) + " 'operator " + OpSpelling + "(" +
@@ -954,7 +961,6 @@ void TypeChecker::visitPostfixExpr(PostfixExprAST &Node) {
       }
     }
     if (Node.ResolvedOperatorTarget) {
-      TurfTypePtr OpResultTy = Node.ResolvedOperatorTarget->ReturnType;
       if (OpResultTy && !sameTypeExact(OpResultTy.get(), OpTy.get())) {
         reportError(Node.getLoc(),
                     "'operator " + OpSpelling + "' returns '" +

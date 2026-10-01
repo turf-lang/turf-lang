@@ -1,0 +1,15 @@
+// Negative test (LEC-006, INV-OP-2): the orphan rule applies to a generic
+// operator through the generic struct's BASE. `List` is declared in module
+// `list`, so the main file may not declare `operator[]` over `List<T>` --
+// otherwise this file's import order would change what `l[i]` means for
+// every program that imports list.
+// Expected: E080 (operator does not own any of its operand types).
+import list::List;
+
+operator<T> [](l: List<T>, i: int): T {
+    return l.get(i);
+}
+
+fn main(): int {
+    return 0;
+}

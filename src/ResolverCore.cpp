@@ -375,6 +375,7 @@ Resolver::buildFunctionSymbol(const FuncDefExprAST &Node,
   }
   Sym.ReturnType = substituteTypeParams(Node.getReturnTypePtr(), TypeParams);
   Sym.TypeParams = TypeParams;
+  Sym.Decl = &Node; // see ResolverFunctionSymbol::Decl
   Sym.HasCallerLocation = Node.hasCallerLocation();
   Sym.IsPublic = Node.isPublic();
   ResolverSourceLocation DeclLoc;
@@ -461,6 +462,94 @@ void Resolver::validateOperatorDecl(const ResolverFunctionSymbol &Sym) const {
       Operands.push_back(P.Type.get());
   } else {
     return; // arity mismatch is caught elsewhere (parser)
+  }
+
+  // LEC-006: a generic operator (`operator<T> [](l: List<T>, i: int): T`)
+  // gets two extra rules, both because it is matched by unification rather
+  // than by an exact operand name, so a sloppy declaration would not just be
+  // wrong, it would apply to far more than its author meant.
+  if (!Sym.TypeParams.empty()) {
+    // (1) Every type parameter must be bound by an operand. Operator calls
+    // have no explicit type-argument syntax, and a parameter that appears
+    // only in the return type (`operator<T> [](l: List<int>, i: int): T`)
+    // could never be inferred -- it would be rejected at every use, with an
+    // error that names the call and not the declaration that caused it.
+    std::vector<std::string> Bound;
+    for (const auto &P : Sym.Params)
+      TypeWalk::collectParamOrder(P.Type, Bound);
+    for (const auto &TP : Sym.TypeParams) {
+      if (std::find(Bound.begin(), Bound.end(), TP) == Bound.end()) {
+        GenericOperatorError(
+            toSourceLocation(Sym.DeclLoc),
+            "'operator " + OpSpelling + "' declares type parameter '" + TP +
+                "', but no operand mentions it.",
+            "A generic operator's type arguments are inferred from its "
+            "operands (there is no way to write them at a use). Use '" + TP +
+                "' in an operand type, or drop it from the '<...>' list.")
+            .raise();
+        return;
+      }
+    }
+
+    // (2) The orphan rule below must be satisfied, not vacuously passed.
+    // For a concrete operator, "no operand is a declared struct/enum" means
+    // the operands are all builtins/`string`, so there is nobody else's type
+    // to redefine and the rule has nothing to say. A generic operator is
+    // different: `operator<T> +(a: T, b: T): T` has no declared type in it
+    // and yet matches EVERY type, including `Vec2`s that belong to other
+    // modules -- the exact import-order dependence the orphan rule exists to
+    // prevent. So an owned, declared type must appear in the operands, and
+    // it is looked for through `&`/`*` and generic arguments' base
+    // (`List<T>` is owned by whoever declares `List`).
+    auto OwnedBase = [&](const TurfType *T) -> const TurfType * {
+      while (T && T->isPointer()) {
+        const auto *P = dynamic_cast<const TurfPointerType *>(T);
+        T = P ? P->getPointee().get() : nullptr;
+      }
+      return T;
+    };
+    auto BaseNameOf = [](const TurfType *T) -> std::string {
+      if (const auto *G = dynamic_cast<const GenericType *>(T))
+        return G->getBaseName();
+      return T->getName();
+    };
+    bool OwnsOne = false;
+    std::string ForeignName, ForeignModule;
+    for (const auto *Op : Operands) {
+      const TurfType *T = OwnedBase(Op);
+      if (!T)
+        continue;
+      const std::string Base = BaseNameOf(T);
+      if (!SymTable_.isKnownStruct(Base) && !SymTable_.isEnumName(Base))
+        continue;
+      if (SymTable_.getTypeOwningModule(Base) == Sym.SourceModule) {
+        OwnsOne = true;
+        break;
+      }
+      if (ForeignName.empty()) {
+        ForeignName = Base;
+        ForeignModule = SymTable_.getTypeOwningModule(Base);
+      }
+    }
+    if (!OwnsOne) {
+      if (!ForeignName.empty()) {
+        OperatorOrphanRuleError(toSourceLocation(Sym.DeclLoc), OpSpelling,
+                                Sym.SourceModule, ForeignName, ForeignModule)
+            .raise();
+      } else {
+        GenericOperatorError(
+            toSourceLocation(Sym.DeclLoc),
+            "'operator " + OpSpelling + "' is generic but none of its "
+            "operands is a type declared in this " +
+                (Sym.SourceModule.empty() ? "file" : "module") + ".",
+            "A bare type parameter matches every type, so the operator would "
+            "apply to types this module does not own. Make an operand a "
+            "struct or enum declared here, e.g. 'List<T>' in the module that "
+            "declares List.")
+            .raise();
+      }
+      return;
+    }
   }
 
   // All-primitive rejection (existing behaviour, §13.4) -- skipped for

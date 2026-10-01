@@ -114,34 +114,28 @@ pub fn<T> List.set(i: int, value: T): void {
 // ─── operator[] / operator[]= (LANG-001) ────────────────────────────────────
 //
 // The better form of the `get`/`set` this file's own LIMITATIONS.md §4 entry
-// asked for -- `l[i]` and `l[i] = v` instead of named methods. Declared for
-// the CONCRETE `List<int>` only, not genuinely generic over `T`, for the
-// identical reason list_sort()/list_binary_search()/list_find() above are
-// concrete rather than `fn<T> List....`: `operator` declarations are
-// deliberately non-generic (ParseOperatorDecl() parses no `<T>` block at
-// all -- see its own doc comment, src/ParserDecl.cpp) -- lifting that
-// restriction is a genuinely separate parser/Resolver/Monomorphizer feature,
-// not something LANG-001 asked for, and specializing on one concrete element
-// type (matching this file's own established precedent) is what keeps this
-// addition small and self-contained instead. Bounds-checked, matching
+// asked for -- `l[i]` and `l[i] = v` instead of named methods. Generic over
+// `T` (LEC-006): these were `List<int>`-only until `operator` declarations
+// could take a `<T>` list, which left `l[i]` working for `List<int>` and
+// failing to compile for every other element type. Bounds-checked, matching
 // index_of()'s absence of a bounds guard being the ODD one out here, not the
 // norm -- every other List accessor (push/pop/the raw `self.data[i]` reads
 // above) already trusts the caller; operator[] deliberately does not,
 // since `l[i]` reads exactly like array indexing to a caller and array
 // indexing IS bounds-checked everywhere else in the language.
-operator [](l: List<int>, i: int): int {
+operator<T> [](l: List<T>, i: int): T {
   if (i < 0 || i >= l.len) {
     sys::panic("List[]: index out of bounds");
   }
   return l.data[i];
 }
 
-// Self taken BY VALUE, not `&List<int>` -- unlike a plain value struct,
+// Self taken BY VALUE, not `&List<T>` -- unlike a plain value struct,
 // that's sufficient for this write to persist: `data` is a heap pointer
 // (list_sort()'s own doc comment above makes the identical point about
-// List<int> more generally), so copying the List<int> header still shares
+// List<int> more generally), so copying the List<T> header still shares
 // the same backing buffer, and `l.data[i] = value` writes through it.
-operator []=(l: List<int>, i: int, value: int): void {
+operator<T> []=(l: List<T>, i: int, value: T): void {
   if (i < 0 || i >= l.len) {
     sys::panic("List[]=: index out of bounds");
   }

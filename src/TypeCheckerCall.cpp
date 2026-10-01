@@ -200,6 +200,95 @@ static TurfTypePtr substituteReturnType(
 }
 
 
+/**
+ * @brief LEC-006: does operator candidate @p C accept @p Operands, and if so
+ *        what does the call return?
+ *
+ * A concrete candidate is the long-standing rule, unchanged: every operand
+ * `sameTypeExact()` its parameter (F-OP-1 -- no widening, ever).
+ *
+ * A generic candidate (`operator<T> [](l: List<T>, i: int): T`) is matched
+ * in two steps, and the order is the point. First `TypeWalk::unify()` binds
+ * the type parameters from the operands; unify is a best-effort binder that
+ * silently skips a structural mismatch, so on its own it would accept
+ * `operator<T> ==(a: Pair<T>, b: Pair<T>)` for `Pair<int> == Pair<string>`
+ * (T binds to int, the second operand's mismatch is ignored). Second, the
+ * parameters are SUBSTITUTED with that binding and each is compared to its
+ * operand with the same `sameTypeExact()` a concrete candidate gets, which
+ * is what rejects it. So generics add inference to operator resolution and
+ * nothing else: no operand is ever widened to make a generic candidate fit.
+ *
+ * @p RelaxSelf applies `operatorSelfOperandMatches()` to operand 0 (the
+ * `operator[]`/`operator[]=` self position, which may be declared `&T`); for
+ * a generic candidate that also means unifying the pointee of a `&List<T>`
+ * parameter, or the binding would be skipped as a shape mismatch.
+ *
+ * On a generic match the call is recorded as a FreeFunction instantiation
+ * request keyed by @p C's synthesized name (`operator[]`), with @p Site as
+ * the node to point at the clone once it exists -- the monomorphizer treats
+ * an operator exactly like `fn<T>`. TypeArgs follow the declaration's own
+ * `<T, U>` order, which is the order the drain pairs them with. Recorded only
+ * when fully concrete: inside a generic template's own body an operand can
+ * still be an open `T`, and instantiating `operator[]<T>` for that would be
+ * the bogus non-concrete request visitFuncCall() also guards against.
+ */
+bool TypeChecker::matchOperatorOverload(
+    const std::shared_ptr<ResolverFunctionSymbol> &C,
+    const std::vector<TurfTypePtr> &Operands, bool RelaxSelf, ExprAST *Site,
+    SourceLocation Loc, TurfTypePtr &ResultTy) {
+  if (!C || C->arity() != static_cast<int>(Operands.size()))
+    return false;
+  for (const auto &Op : Operands)
+    if (!Op)
+      return false;
+
+  const bool IsGeneric = !C->TypeParams.empty();
+  std::unordered_map<std::string, TurfTypePtr> Subst;
+  if (IsGeneric) {
+    for (size_t i = 0; i < Operands.size(); ++i) {
+      TurfTypePtr Pattern = C->Params[i].Type;
+      if (i == 0 && RelaxSelf && Pattern && Pattern->isReference() &&
+          !Operands[0]->isReference()) {
+        if (const auto *Ref = dynamic_cast<const TurfReferenceType *>(Pattern.get()))
+          Pattern = Ref->getPointee();
+      }
+      TypeWalk::unify(Pattern, Operands[i], Subst);
+    }
+    for (const auto &TP : C->TypeParams)
+      if (!Subst.count(TP))
+        return false;
+  }
+
+  for (size_t i = 0; i < Operands.size(); ++i) {
+    TurfTypePtr ParamTy =
+        IsGeneric ? substituteReturnType(C->Params[i].Type, Subst) : C->Params[i].Type;
+    const bool Ok = (i == 0 && RelaxSelf)
+                        ? operatorSelfOperandMatches(ParamTy.get(), Operands[0].get())
+                        : sameTypeExact(ParamTy.get(), Operands[i].get());
+    if (!Ok)
+      return false;
+  }
+
+  ResultTy = IsGeneric ? substituteReturnType(C->ReturnType, Subst) : C->ReturnType;
+
+  if (IsGeneric && MonoCollector_ && Site) {
+    std::vector<TurfTypePtr> TypeArgs;
+    bool AllConcrete = true;
+    for (const auto &TP : C->TypeParams) {
+      TypeArgs.push_back(Subst[TP]);
+      if (!isFullyConcreteType(Subst[TP].get()))
+        AllConcrete = false;
+    }
+    if (AllConcrete)
+      MonoCollector_->record({Monomorphize::InstantiationKind::FreeFunction,
+                              C->BaseName, C->SourceModule, std::move(TypeArgs),
+                              Loc, C->Decl},
+                             Site);
+  }
+  return true;
+}
+
+
 void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
   // 1. Visit callee expression so it gets a type annotation too.
   if (Node.getCallee())
@@ -611,7 +700,7 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
           // declaration found for 'new'" before this fix.
           MonoCollector_->record({Monomorphize::InstantiationKind::FreeFunction,
                                  Best->BaseName, Best->SourceModule,
-                                 std::move(TypeArgs), Node.getLoc()},
+                                 std::move(TypeArgs), Node.getLoc(), Best->Decl},
                                 &Node);
         }
       }
@@ -1426,7 +1515,7 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
                     MonoCollector_->record({Monomorphize::InstantiationKind::Method,
                                            StructName + "." + MethodName,
                                            Best->SourceModule, std::move(MethodTypeArgs),
-                                           Node.getLoc()},
+                                           Node.getLoc(), Best->Decl},
                                           &Node);
                 }
               } else if (!MethodOwnSubst.empty()) {
@@ -1450,7 +1539,7 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
                   MonoCollector_->record({Monomorphize::InstantiationKind::Method,
                                          StructName + "." + MethodName,
                                          Best->SourceModule, std::move(TypeArgs),
-                                         Node.getLoc()},
+                                         Node.getLoc(), Best->Decl},
                                         &Node);
                 }
               }
@@ -2100,11 +2189,11 @@ void TypeChecker::visitArrayAccess(ArrayAccessExprAST &Node) {
   // resolve between the two paths -- exactly one of them can ever apply to
   // a given BaseTy. Exact-type-match only (F-OP-1).
   if (!Node.ResolvedIndexGetCandidates.empty() && BaseTy && IndexTy) {
+    TurfTypePtr ElemResultTy;
     for (const auto &C : Node.ResolvedIndexGetCandidates) {
-      if (!C || C->arity() != 2)
-        continue;
-      if (operatorSelfOperandMatches(C->Params[0].Type.get(), BaseTy.get()) &&
-          sameTypeExact(C->Params[1].Type.get(), IndexTy.get())) {
+      TurfTypePtr R;
+      if (matchOperatorOverload(C, {BaseTy, IndexTy}, /*RelaxSelf=*/true, &Node,
+                                Node.getLoc(), R)) {
         if (Node.ResolvedIndexGetTarget) {
           reportError(Node.getLoc(),
                       "Ambiguous 'operator[](" + BaseTy->getName() + ", " +
@@ -2114,10 +2203,11 @@ void TypeChecker::visitArrayAccess(ArrayAccessExprAST &Node) {
           break;
         }
         Node.ResolvedIndexGetTarget = C;
+        ElemResultTy = R;
       }
     }
     if (Node.ResolvedIndexGetTarget) {
-      setType(&Node, Node.ResolvedIndexGetTarget->ReturnType);
+      setType(&Node, ElemResultTy);
       return;
     }
   }

@@ -1,0 +1,23 @@
+// Negative test (LEC-006): operand ORDER is part of the signature. The
+// operator is declared for `Cell<T> + int`; `1 + c` is `int + Cell<int>`, and
+// no operator is commutative by itself.
+// Expected: E066, "cannot apply '+' to 'int' and 'Cell<int>'".
+struct Cell<T> {
+    v: T,
+    n: int
+}
+
+fn<T> Cell.new(v: T): void {
+    self.v = v;
+    self.n = 1;
+}
+
+operator<T> +(a: Cell<T>, k: int): Cell<T> {
+    return a;
+}
+
+fn main(): int {
+    mut c: Cell<int> = Cell::new(1);
+    mut d: Cell<int> = 1 + c;
+    return 0;
+}

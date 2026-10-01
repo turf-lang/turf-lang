@@ -1104,6 +1104,73 @@ static void testErrorPayloadDiagnostics() {
   CHECK(NeverReturns(W, "neverFails"));
 }
 
+// LEC-006: generic `operator<T>` declarations. The runner only sees that a
+// fail_*.tr failed, not why, and these two rules (E097) are new, so each code
+// and a hint fragment is asserted here. The exact-match cases assert the
+// message, since E066 is shared with every other type mismatch.
+static void testGenericOperatorDiagnostics() {
+  CurrentTest = "generic operator diagnostics";
+  const std::string Prelude =
+      "struct Cell<T> { v: T, n: int }\n"
+      "fn<T> Cell.new(v: T): void { self.v = v; self.n = 1; }\n";
+  struct Case {
+    const char *Label;
+    const char *Body;
+    const char *Code;
+    const char *Fragment; // in the hint for E097, in the message otherwise
+  };
+  const Case Cases[] = {
+      {"type parameter only in the return type",
+       "operator<T> [](p: Cell<int>, i: int): T { return p.v; }\n"
+       "fn main(): int { return 0; }",
+       "E097", "Use 'T' in an operand type"},
+      {"no operand is an owned type",
+       "operator<T> +(a: T, b: T): T { return a; }\nfn main(): int { return 0; }", "E097",
+       "A bare type parameter matches every type"},
+      {"right operand of the wrong type is not widened",
+       "operator<T> +(a: Cell<T>, k: int): Cell<T> { return a; }\n"
+       "fn main(): int { mut c: Cell<string> = Cell::new(\"s\"); mut d: Cell<string> = c + 1.5; "
+       "return 0; }",
+       "E066", "cannot apply '+' to 'Cell<string>' and 'double'"},
+      {"two instantiations do not unify",
+       "operator<T> ==(a: Cell<T>, b: Cell<T>): bool { return true; }\n"
+       "fn main(): int { mut a: Cell<int> = Cell::new(1); mut b: Cell<string> = Cell::new(\"x\"); "
+       "if (a == b) { return 1; } return 0; }",
+       "E066", "Cannot compare 'Cell<int>' with 'Cell<string>'"},
+  };
+  for (const auto &C : Cases) {
+    auto R = turf::analyze({{"genop.tr", Prelude + C.Body + "\n"}});
+    CHECK(!R.succeeded());
+    const bool InHint = std::string(C.Code) == "E097";
+    bool Found = false;
+    for (const auto &D : R.diagnostics()) {
+      if (D.Code != C.Code)
+        continue;
+      const std::string &Haystack = InHint ? D.Hint : D.Message;
+      if (Haystack.find(C.Fragment) == std::string::npos)
+        continue;
+      Found = true;
+      break;
+    }
+    CHECK(Found);
+    if (!Found)
+      std::cerr << "    case '" << C.Label << "' produced:\n" << render(R);
+  }
+
+  // A well-formed generic operator, used at two instantiations, succeeds.
+  auto Ok = turf::analyze(
+      {{"genok.tr",
+        Prelude + "operator<T> +(a: Cell<T>, k: int): Cell<T> { return a; }\n"
+                  "operator<T> [](c: Cell<T>, i: int): T { return c.v; }\n"
+                  "fn main(): int { mut a: Cell<int> = Cell::new(1); "
+                  "mut b: Cell<string> = Cell::new(\"x\"); mut a2: Cell<int> = a + 1; "
+                  "mut b2: Cell<string> = b + 1; mut x: int = a2[0]; mut y: string = b2[0]; "
+                  "return x; }\n"}});
+  CHECK(Ok.succeeded());
+  if (!Ok.succeeded())
+    std::cerr << render(Ok);
+}
+
 int main() {
   ScratchDir Dir;
   testCleanProgramQueries();
@@ -1125,6 +1192,7 @@ int main() {
   testModuleNotFoundHintsAtProject(Dir);
   testPatternDiagnostics();
   testErrorPayloadDiagnostics();
+  testGenericOperatorDiagnostics();
 
   if (Failures) {
     std::cerr << Failures << " check(s) failed\n";

@@ -1,0 +1,73 @@
+// LEC-006: `l[i]` / `l[i] = v` work for EVERY List<T>, not just List<int>.
+// list.tr declares `operator<T> [](l: List<T>, i: int): T` and the matching
+// `operator<T> []=`, and the monomorphizer instantiates one clone per element
+// type -- including a 24-byte struct, which an erased (one pointer-sized slot)
+// implementation could not have carried by value.
+//
+// `bs[1].c` / `bs[1].sum()` also pin the codegen half: an operator[] read is
+// a call returning the element by value, so a field access or method call on
+// it has no address to take and must evaluate it as an r-value instead.
+import list::List;
+import test;
+
+struct Big {
+    a: int,
+    b: int,
+    c: int
+}
+
+fn Big.new(a: int, b: int, c: int): void {
+    self.a = a;
+    self.b = b;
+    self.c = c;
+}
+
+fn Big.sum(): int {
+    return self.a + self.b + self.c;
+}
+
+fn main(): int {
+    mut ss: List<string> = List::default();
+    ss.push("alpha");
+    ss.push("beta");
+    test::assert(ss[0] == "alpha", "List<string>[0]");
+    test::assert(ss[1] == "beta", "List<string>[1]");
+    ss[0] = "gamma";
+    test::assert(ss[0] == "gamma", "List<string>[]= should overwrite");
+    test::assert(ss[1] == "beta", "List<string>[]= should not touch a neighbour");
+
+    mut bs: List<Big> = List::default();
+    bs.push(Big::new(1, 2, 3));
+    bs.push(Big::new(4, 5, 6));
+    immut second: Big = bs[1];
+    test::assert(second.c == 6, "List<Big>[1] is the whole struct");
+    bs[0] = Big::new(7, 8, 9);
+    immut first: Big = bs[0];
+    test::assert(first.b == 8, "List<Big>[]= should store a whole struct");
+    test::assert(second.a == 4, "List<Big>[]= should not touch a neighbour");
+
+    mut ds: List<double> = List::default();
+    ds.push(1.5);
+    ds[0] = 2.5;
+    test::assert(ds[0] == 2.5, "List<double>[]=");
+
+    mut bl: List<bool> = List::default();
+    bl.push(false);
+    bl[0] = true;
+    test::assert(bl[0], "List<bool>[]=");
+
+    // The List<int> case that worked before LEC-006 must be unchanged.
+    mut li: List<int> = List::default();
+    li.push(3);
+    li[0] = 4;
+    test::assert(li[0] == 4, "List<int>[]= still works");
+
+    // Nested: List<List<int>>, read twice.
+    mut outer: List<List<int>> = List::default();
+    mut inner: List<int> = List::default();
+    inner.push(10);
+    inner.push(20);
+    outer.push(inner);
+    test::assert(outer[0][1] == 20, "List<List<int>>[0][1]");
+    return 0;
+}

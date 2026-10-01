@@ -254,6 +254,11 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // E092/E093.
     {"E095", "TryMisuseError", "Misplaced try", SLM::ErrorCategory::CONTROL_FLOW},
     {"E096", "ErrorPayloadError", "Invalid error payload", SLM::ErrorCategory::DECLARATION},
+
+    // LEC-006 (docs/development/changes/LEC-006.md): a generic `operator<T>`
+    // declaration whose type parameter no operand binds, or that owns none
+    // of its operand types.
+    {"E097", "GenericOperatorError", "Invalid generic operator", SLM::ErrorCategory::DECLARATION},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

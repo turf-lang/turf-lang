@@ -551,6 +551,18 @@ private:
   /// typesCompatible() itself has no ExprAST access to tell the two apart.
   bool untypedLiteralAcquiresInt32(const ExprAST *Val, const TurfType *Dest);
 
+  /// LEC-006: the one place an `operator` overload candidate is matched
+  /// against concrete operand types -- every operator form (binary, unary,
+  /// compound assignment, `++`/`--`, `[]`, `[]=`) calls this instead of
+  /// comparing `sameTypeExact()` inline, so a generic candidate gets the
+  /// same rules everywhere. See the definition's doc comment
+  /// (TypeCheckerCall.cpp) for the rules; @p Site is the operator node, to
+  /// be rewritten to the instantiated clone by the monomorphizer.
+  bool matchOperatorOverload(const std::shared_ptr<ResolverFunctionSymbol> &C,
+                             const std::vector<TurfTypePtr> &Operands,
+                             bool RelaxSelf, ExprAST *Site, SourceLocation Loc,
+                             TurfTypePtr &ResultTy);
+
   // ── State ─────────────────────────────────────────────────────────────────
 
   /// Reference to the symbol table filled by the Resolver.

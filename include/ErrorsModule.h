@@ -131,6 +131,20 @@ public:
     Category_ = SLM::ErrorCategory::DECLARATION;
   }
 };
+// LEC-006: a generic `operator<T> ...` declaration that cannot work as
+// written -- a type parameter no operand mentions (it could never be
+// inferred at a use), or no operand that is a type the declaring module
+// owns (a bare `T` operand would match types from every module, so the
+// orphan rule cannot be satisfied vacuously for a generic operator the way
+// it is for a concrete all-builtin one).
+class GenericOperatorError : public TurfError {
+public:
+  GenericOperatorError(SourceLocation Loc, const std::string &Problem,
+                       const std::string &Hint)
+      : TurfError(Loc, Colors::BRIGHT_RED + Problem + Colors::RESET, Hint) {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+  }
+};
 // Two `extern fn` declarations for the same raw C name with genuinely
 // different signatures (arity, parameter types, return type, or variadic-
 // ness). Extern mangled names are just the bare C symbol name (not

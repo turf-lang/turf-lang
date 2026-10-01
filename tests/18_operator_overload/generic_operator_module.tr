@@ -1,0 +1,30 @@
+// Companion module (no main()) -- named *_module.tr so scripts/test_runner.sh
+// skips it as a standalone test (see AGENTS.md's documented convention).
+// Declares a generic struct and generic operators owned by THIS module, to be
+// used from another file (20_generic_operator_across_module.tr). The operators
+// carry no `pub`: an operator is visible wherever its operand types are.
+pub struct Wrap<T> {
+    pub v: T,
+    pub n: int
+}
+
+pub fn<T> Wrap.new(v: T): void {
+    self.v = v;
+    self.n = 0;
+}
+
+// Reads a PRIVATE helper, so the instantiated clone must still be checked as
+// this module's code, not the caller's.
+fn bump(n: int): int {
+    return n + 1;
+}
+
+operator<T> +(a: Wrap<T>, k: int): Wrap<T> {
+    mut r: Wrap<T> = a;
+    r.n = bump(a.n) + k;
+    return r;
+}
+
+operator<T> [](w: Wrap<T>, i: int): T {
+    return w.v;
+}

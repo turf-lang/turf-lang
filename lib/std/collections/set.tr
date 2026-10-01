@@ -197,9 +197,7 @@ pub fn<T> Set.length(): int {
 // file's header: the dense `items` array is unchanged storage, so this
 // keeps working exactly as before -- `tests/18_operator_overload/
 // 14_stdlib_set_index.tr` requires this ordering guarantee explicitly).
-// Declared for the CONCRETE `Set<int>` only -- see list.tr's operator[]
-// doc comment for why `operator` declarations can't be generic over T at
-// all.
+// Generic over `T` (LEC-006) -- see list.tr's operator[] doc comment.
 //
 // Deliberately NO `operator[]=` for Set<T>: unlike List/Map, a set's
 // invariant is uniqueness -- `s[i] = v` would let a caller silently
@@ -207,7 +205,7 @@ pub fn<T> Set.length(): int {
 // corrupting that invariant with no check at all (and would leave the
 // hash index pointing at stale data besides). add()/remove() stay the
 // only way to mutate a Set's contents.
-operator [](s: Set<int>, i: int): int {
+operator<T> [](s: Set<T>, i: int): T {
   if (i < 0 || i >= s.len) {
     sys::panic("Set[]: index out of bounds");
   }
