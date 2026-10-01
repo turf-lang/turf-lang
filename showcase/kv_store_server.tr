@@ -87,6 +87,7 @@ fn main(): int {
         io::printline("Could not start the store -- is port 8181 already in use?");
         return 1;
     };
+    defer server.close();
     io::printline("Turf key-value store listening on port 8181...");
 
     mut requestCount: int = 0;
@@ -97,6 +98,8 @@ fn main(): int {
             io::printline("accept() failed, skipping.");
             continue;
         };
+        // Runs at the end of THIS iteration on every path out of it.
+        defer conn.close();
         immut line: string = strings::trim(conn.read(4096));
 
         immut firstSpace: int = strings::index_of(line, " ");
@@ -143,11 +146,9 @@ fn main(): int {
             }
         }
 
-        conn.close();
         requestCount = requestCount + 1;
     }
 
-    server.close();
     io::printline("Handled 1000 requests, shutting down.");
     return 0;
 }

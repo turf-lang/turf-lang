@@ -83,6 +83,7 @@
 //       };
 //       while true {
 //           mut conn: net::TcpConnection = listener.accept() recover run { continue; };
+//           defer conn.close();   // runs at the end of this iteration
 //           mut req: http::Request = http::parse_request(conn);
 //           mut res: http::Response;
 //           res.conn = conn;
@@ -91,7 +92,6 @@
 //           } else {
 //               res.send_text(404, "not found");
 //           }
-//           conn.close();
 //       }
 //       return 0;
 //   }
@@ -356,17 +356,18 @@ pub fn Server.listen(port: int): void {
         mut conn: net::TcpConnection = self.listener.accept() recover run {
             continue;
         };
+        // Per-iteration (F-MEM-2: no finalizers, so closing is explicit): runs
+        // on the 404 `continue` and on normal fall-through alike.
+        defer conn.close();
         mut req: Request = parse_request(conn);
         mut res: Response = Response::default();
         res.conn = conn;
 
         if !self.has_route(req.path) {
             res.send_text(404, "Not Found");
-            conn.close();
             continue;
         }
         mut handler: fn(Request, Response): void = self.get_route(req.path);
         handler(req, res);
-        conn.close();
     }
 }

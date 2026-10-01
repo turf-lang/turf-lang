@@ -33,10 +33,10 @@ fn main(): int {
         }
         return 1;
     };
+    defer conn.close();
     conn.write(request);
 
     immut response: string = conn.read(4096);
-    conn.close();
 
     io::printline("--- response from the Turf HTTP server ---");
     io::printline(response);

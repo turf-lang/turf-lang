@@ -279,10 +279,27 @@ pub fn TcpConnection.write(data: string): void {
     send(self.fd, data, strlen(data), 0);
 }
 
-// Closes the connection. Safe to call once; the underlying fd is not
-// reusable afterward.
+// The underlying file descriptor, for handing to FFI (`poll`, `fcntl`, ...) --
+// the other half of TcpConnection::new(fd), which wraps one. -1 after close().
+// A plain accessor, not a `pub fd` field: a public field would let a caller
+// assign the descriptor, and a connection pointing at someone else's fd closes
+// it.
+pub fn TcpConnection.raw_fd(): int {
+    return self.fd;
+}
+
+// Closes the connection. Idempotent (LEC-007): the descriptor is set to -1
+// afterwards and a second close() does nothing. The reason is `defer
+// conn.close();` plus an explicit close on an early path -- the second call
+// used to close(2) the stale number, which by then can name a DIFFERENT, newly
+// opened descriptor (the kernel reuses the lowest free one) and silently shuts
+// an unrelated socket or file.
 pub fn TcpConnection.close(): void {
+    if self.fd < 0 {
+        return;
+    }
     close(self.fd);
+    self.fd = -1;
 }
 
 // ─── TcpListener ─────────────────────────────────────────────────────────
@@ -342,7 +359,17 @@ pub fn TcpListener.accept(): !TcpConnection {
     return TcpConnection::new(clientFd);
 }
 
-// Stops listening and closes the socket.
+// The underlying file descriptor; -1 after close(). See TcpConnection.raw_fd.
+pub fn TcpListener.raw_fd(): int {
+    return self.fd;
+}
+
+// Stops listening and closes the socket. Idempotent, for the same reason as
+// TcpConnection.close.
 pub fn TcpListener.close(): void {
+    if self.fd < 0 {
+        return;
+    }
     close(self.fd);
+    self.fd = -1;
 }
