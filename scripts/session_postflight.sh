@@ -132,6 +132,16 @@ else
     echo "$SURFACE_OUT" | head -8 | sed 's/^/       /'
   fi
 
+  # Issue #263: the error-code registry may not lie. Every registered code has
+  # its own `--explain` page and is raised by something; a code that is
+  # documented but never raised, or raised but undocumented, fails here.
+  if CODES_OUT=$(./scripts/error_codes_check.sh 2>&1); then
+    pass "$(echo "$CODES_OUT" | tail -1)"
+  else
+    fail "the error-code registry (include/ErrorCodes.h) is inconsistent:"
+    echo "$CODES_OUT" | head -8 | sed 's/^/       /'
+  fi
+
   # OVH-012: a plain 'import io; import json; import http;' ("hello world")
   # must print NO warning by default. A warning anchored inside lib/std is a
   # "system-module warning" -- recorded but not printed unless

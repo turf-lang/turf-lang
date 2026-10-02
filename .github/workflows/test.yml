@@ -122,6 +122,13 @@ jobs:
       - name: Stdlib public surface is fully locked
         run: ./scripts/stdlib_surface_check.sh
 
+      # Issue #263: `turf --explain Exxx` is a promise to a beginner. This fails
+      # if a registered error code has no docs/errors/codes/Exxx.txt, or is
+      # documented but raised by nothing (the state E002/E056/E057/E064/E067
+      # sat in until #263 -- pages describing errors that never appeared).
+      - name: Error-code registry is consistent
+        run: ./scripts/error_codes_check.sh
+
       # LEC-001 stage 2: the `turf` front end (cli/). The Go tests cover argv
       # classification, discovery order and the version handshake in isolation;
       # cli_smoke.sh covers what only a real build shows -- byte-identical
