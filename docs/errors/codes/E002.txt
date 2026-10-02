@@ -17,4 +17,9 @@ If the value you have really is meant to be a whole number, convert it first wit
 
     mut val: int = primes[d to int];
 
+A `char` is not allowed as an index either -- a character is a letter, not a position. If you want its character code (say, to count how often each letter appears), convert it explicitly:
+
+    mut code: int = (word[i] to int);
+    counts[code] = counts[code] + 1;
+
 Once the value you're indexing with is a genuine `int`, this error goes away. This one usually shows up early on, right around when you're first mixing doubles and array indices together -- a quick `to int` sorts it out.

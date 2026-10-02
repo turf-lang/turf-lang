@@ -2249,6 +2249,31 @@ void TypeChecker::visitArrayAccess(ArrayAccessExprAST &Node) {
     }
   }
 
+  // Builtin indexing (array, string, raw pointer) takes an integer. This was
+  // never checked: `arr["one"]` and `arr[1.5]` compiled with no diagnostic at
+  // all, while E002's `--explain` page told a beginner "the compiler stops you
+  // here" (issue #263: found because that page described an error nothing
+  // raised). A struct base with an `operator[]` overload has already been
+  // resolved above and may take any index type, so it never reaches this.
+  //
+  // `char` is NOT accepted either. It used to be (as its byte value, for the
+  // `freq[s[i]] += 1` character-count idiom), but a character is not a
+  // position: the owner banned it before the public release, so a `char`
+  // index now needs an explicit `(c to int)` like any other non-int value.
+  // Anything that is not a whole number (a char, a string, a decimal, a bool,
+  // a struct) is the mistake this reports.
+  if (BaseTy && IndexTy && !IndexTy->isInt() && !IndexTy->isInt32() &&
+      (BaseTy->isArray() || BaseTy->isString() ||
+       dynamic_cast<const TurfPointerType *>(BaseTy.get()))) {
+    reportError(Node.getLoc(), ErrCode::ArrayNonIntegerIndex,
+                "You used a value of type '" + IndexTy->getName() +
+                    "' as an index into '" + BaseTy->getName() + "'.",
+                {}, "Use an 'int' to index, like arr[0] or arr[i] where i is "
+                    "an int. To turn a number or a char into an int: "
+                    "(x to int).",
+                "Index must be an integer!");
+  }
+
   if (BaseTy && BaseTy->isArray()) {
     const auto *ArrTy = dynamic_cast<const ArrayType *>(BaseTy.get());
     TurfTypePtr ElemTy = ArrTy ? ArrTy->getElementTypePtr() : nullptr;

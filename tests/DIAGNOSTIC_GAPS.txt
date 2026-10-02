@@ -98,5 +98,3 @@ CASCADE tests/07_functions_modules/fail_nested_broken_import.tr errors=2 -- same
 CASCADE tests/07_functions_modules/fail_no_intrinsic_decorator.tr errors=2 -- after "'@' is not valid here" (E103) the parser, left inside the removed `@intrinsic("name")` decorator, reports a bogus "Expected '{' ..." (E107)
 CASCADE tests/07_functions_modules/visibility/fail_pub_before_decorator.tr errors=2 -- after "'pub' has to come after a decorator" (E087) the decorator is left without a function, so a bogus "'caller_location' can only be used inside a function declared '@caller_location'" (E084) follows
 CASCADE tests/47_diagnostic_file_headers/fail_header_names_main_file.tr errors=3 -- the test is written for TWO errors (a missing ';' in each of two functions); the third is bogus: the abandoned declaration of `first` makes its one call in `main` report "Unknown function 'first'" (E041), so a beginner who forgot one semicolon is told a function that exists does not
-
-ALSO (from me, on check): we will completely ban `char` indexing on arrays later next week before the public release.
