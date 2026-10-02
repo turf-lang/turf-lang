@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E048
+// EXPECT-DIAG: 'io' is a module, not an instance
 // Regression test: `.` is instance-member-access only -- a module-qualified
 // function call MUST use `::` (io::printline(...)), never `.`
 // (io.printline(...)).

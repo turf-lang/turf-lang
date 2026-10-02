@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E047
+// EXPECT-DIAG: takes no arguments, but got 2
 // Regression test: `StructName::default()` is always zero-argument -- it
 // has no user code to pass values to at all, unlike `::new(...)`. Must
 // raise DefaultConstructorArityError, not a generic arity-mismatch message.

@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E056
+// EXPECT-DIAG: No overload of 'takesNonNull' matches argument types (&?Node<int>)
 // Regression test: OVH-008's own explicit non-goal, and INV-NREF-2
 // (docs/development/INVARIANTS.md) -- "`&?T -> &T` is never implicit, in
 // either direction, permanently." OVH-008 fixed the implicit `&T -> &?T`

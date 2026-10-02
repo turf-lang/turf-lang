@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E100
+// EXPECT-DIAG: Unknown escape sequence
 // Regression test: an unrecognized escape sequence in a string literal
 // (e.g. \q) must be a clean compile error, not a silent pass-through that
 // drops the backslash and keeps the letter (the pre-fix behavior -- see

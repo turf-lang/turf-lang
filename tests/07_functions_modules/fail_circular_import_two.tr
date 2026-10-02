@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E019
+// EXPECT-DIAG: Circular import detected
 // Regression test: a direct 2-module import cycle (cycle_a_module imports
 // cycle_b_module, which imports cycle_a_module right back) must be rejected
 // with a clean CircularImportError, not silently truncated.

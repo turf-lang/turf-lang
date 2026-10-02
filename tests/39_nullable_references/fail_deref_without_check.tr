@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E081
+// EXPECT-DIAG: Possible null dereference: 'b' might be 'null' here
 // LANG-002: NullabilityPass's dereference gate -- field-accessing a `&?T`
 // with NO null check anywhere on the path must be rejected (E081).
 struct Box { val: int }

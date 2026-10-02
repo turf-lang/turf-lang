@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E053
+// EXPECT-DIAG: 'static' can only be used on a struct-bound method
 // Regression test: `static` is only meaningful on a struct-bound method
 // declaration (`fn StructName.method(...) static: RetType`) -- on a free,
 // non-struct-bound function it's meaningless (there was never a `self` to

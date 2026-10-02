@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E092
+// EXPECT-DIAG: which is not an error
 // LEC-004: an error-variant pattern matches an error value. Matched against an
 // int it can never succeed, which is E092 rather than a silent never-taken arm.
 error IOError {

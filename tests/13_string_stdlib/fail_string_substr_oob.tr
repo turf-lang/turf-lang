@@ -1,4 +1,5 @@
 // tests/13_string_stdlib/fail_string_substr_oob.tr
+// EXPECT-RUNTIME: strings.substring: index out of bounds
 // NEGATIVE TEST — must compile successfully, then abort at RUNTIME.
 // strings::substring with an out-of-bounds end index must call test::fail().
 // RUNTIME_ABORT_EXPECTED

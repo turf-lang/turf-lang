@@ -1,0 +1,102 @@
+# DIAGNOSTIC_GAPS.txt -- the register of `fail_*.tr` tests whose diagnostic is
+# not (yet) pinned by an error code. Read by scripts/test_runner.sh (INV-TEST-2).
+#
+# Turf is meant to be a beginner-friendly language, so these are bugs in their
+# own right, not just test debt:
+#   (a) a test that is rejected for a DIFFERENT reason than the one it was
+#       written to exercise (the beginner gets the wrong advice),
+#   (b) an error that carries no `[Exxx]` code (the beginner has no
+#       `turf --explain Exxx` to run),
+#   (c) the right error filed under a catch-all code whose --explain page does
+#       not describe it, and
+#   (d) one mistake that prints several errors.
+# This file is where all four are kept visible. Nothing here is "expected":
+# every entry is work owed, and the file should only ever shrink.
+#
+# THE RULE (enforced by the runner, for every compile-time `fail_*.tr`):
+#   A test either carries `// EXPECT-DIAG: Exxx` for the code the compiler
+#   emits, or it has a line below (UNPINNED, or WRONG-REASON). A codeless error
+#   forces NO-CODE and an E066 that is not a type mismatch forces GENERIC-CODE
+#   even for a test that does pin a code. Anything else fails the suite.
+#   Entries are also checked against reality, so a stale line fails too --
+#   fix the test/compiler, then delete the line.
+#
+# FORMAT -- one entry per line, `KIND  path  [fields]  [-- note]`:
+#
+#   UNPINNED      path
+#       Back-fill not done yet: nobody has yet confirmed the compiler rejects
+#       this test for the reason its name/comment claims. Transient baseline.
+#       Fix: read the test, confirm the code that is emitted is the intended
+#       one, add `// EXPECT-DIAG: Exxx` to the test, delete this line. If the
+#       emitted code is NOT the intended one, re-file as WRONG-REASON; if no
+#       code is emitted, re-file as NO-CODE.
+#
+#   NO-CODE       path
+#       (b) At least one error the compiler prints for this test is a plain
+#       error with no `[Exxx]` code, so the beginner has no `--explain` page.
+#       The runner detects this itself: ANY `── error` header without a code
+#       forces an entry, even when the test also pins some other error's code
+#       (e.g. a parse error followed by a recovered E040). The test MUST carry
+#       a prose `// EXPECT-DIAG: <text>` pin for the plain error so it still
+#       cannot pass for the wrong reason. Stale (delete the line) the moment
+#       every error it prints has a code -- then pin that code instead.
+#       Fix the compiler: give the error a code and an --explain page.
+#       STATUS (issue #263): this kind is now empty and should stay empty.
+#       LogErrorAt() REQUIRES a code and TypeChecker::reportError() and
+#       SyntaxError do too, so a codeless error can only come from a typed
+#       TurfError subclass with no registry row. The runner's detection is
+#       kept as the tripwire for exactly that.
+#
+#   WRONG-REASON  path  emits=E040[,E041]|none  intended=<what it should say> [-- note]
+#       (a) The compiler rejects it, but with `emits=` (`none` = a plain error
+#       with no code) and not what the test was written for. `emits=` is
+#       checked against the real output, so the entry cannot drift. Fix the
+#       compiler (or rewrite the test) so the intended diagnostic fires, pin
+#       its code, delete this line.
+#
+#   GENERIC-CODE  path  code=E066  title="Missing initializer!" [-- note]
+#       The compiler says the right thing, but files it under a catch-all
+#       code. E066 is `TypeError`, the one class every TypeChecker diagnostic
+#       goes through; its banner ("Type mismatch!", "No matching overload!",
+#       "Missing initializer!", ...) is free text, so a beginner who runs
+#       `turf --explain E066` is told about type mismatches. The runner finds
+#       these itself by banner: any E066 whose banner is not "Type mismatch!"
+#       forces an entry, so a new one cannot slip in. The test carries its
+#       code pin AND the title pin as usual; this line records the debt.
+#       `code=` and `title=` are checked against the real output. Stale
+#       once the mistake gets its own code -- re-pin the new code, delete.
+#       STATUS (issue #263): empty. TypeChecker::reportError() now takes the
+#       code at every site (E056 E057 E064 E067 E124-E133 ...), so E066 means
+#       "type mismatch" and nothing else. The detector stays as the tripwire.
+#
+#   CASCADE       path  errors=N [-- note]
+#       One mistake makes the compiler print N errors, some of them bogus
+#       follow-ons, so a beginner sees noise on top of the real error. Only a
+#       human can tell a cascade from a test that deliberately has two real
+#       errors, so these are added by review; `errors=N` is checked against the
+#       "(N errors)" the compiler prints, so the entry cannot drift. Fixing it:
+#       delete the line and pin `// EXPECT-NO-DIAG: <the bogus message>`.
+#
+# A test may have one line of EACH kind (e.g. NO-CODE plus CASCADE), but
+# UNPINNED stands alone. Keep entries sorted by path.
+#
+# RUNTIME-ABORT tests (`// RUNTIME_ABORT_EXPECTED`) follow the same rule: pin
+# what they abort with, `// EXPECT-RUNTIME: <text>`, or -- when the abort is
+# silent by design (`sys::abort()`, or a `recover run { return 1; }` path) --
+# the exit status, `// EXPECT-EXIT: 134`. Their only register kind is UNPINNED.
+#
+CASCADE tests/01_syntax/fail_deeply_nested_expression.tr errors=2 -- after the real error it adds a bogus second one: "Unexpected token -- expected a value, variable name, or expression here" at the next line
+WRONG-REASON tests/01_syntax/fail_multi_dot.tr emits=E102 intended="a malformed-number diagnostic for `3.14.15` (a second '.' in one number)" -- the test now reaches the number, but the compiler has no such diagnostic: it lexes `3.14` then `.15` and reports the generic, codeless "Expected ';' after statement" at the second '.'. Missing diagnostic, not a test bug
+CASCADE tests/01_syntax/fail_unterminated_string.tr errors=2 -- the lexer error is followed by a bogus "Expected ';' after statement" on the next line (the parser sees the string token end at the line break and the statement as unfinished): a beginner sees two errors for one mistake
+WRONG-REASON tests/35_numeric_literals/fail_bare_trailing_dot.tr emits=E108 intended="a malformed-number diagnostic for `5.` (a trailing dot with no digit after it)" -- no such diagnostic exists: the lexer returns `5` and leaves `.` for the parser, which reports "Expected a method name after '.'" -- a beginner who wrote a decimal is told about method calls. The test's own comment records this as pre-existing
+CASCADE tests/01_syntax/fail_array_size_zero.tr errors=2 -- after "Array size must be a positive integer" the parser is left in the middle of the declaration and reports a bogus "Unexpected token" on the closing brace of the function
+CASCADE tests/01_syntax/fail_missing_colon_before_return_type.tr errors=2 -- the declaration of `add` is abandoned, so its one use in main reports a bogus "Unknown function 'add'" (E041): a beginner who forgot one colon is told the function doesn't exist
+CASCADE tests/07_functions_modules/fail_circular_import_three_module_chain.tr errors=2 -- the importer's FIRST printed error is a false "Could not find module 'chain_z_module'" (E027) -- the file exists, it is part of the cycle; the true cause, "Circular import detected" (E019), is printed second, under another file's header. A beginner is told a file is missing when it is not
+CASCADE tests/07_functions_modules/fail_circular_import_two.tr errors=2 -- same: a false "Could not find module 'cycle_b_module'" (E027) is printed before the real "Circular import detected" (E019)
+CASCADE tests/07_functions_modules/fail_import_syntax_error.tr errors=2 -- a syntax error INSIDE an imported module (E108, printed second, under the module's own header) makes the importer print "Could not find module" (E027): the module exists and has a typo, and the beginner is told it is missing
+CASCADE tests/07_functions_modules/fail_nested_broken_import.tr errors=2 -- same as fail_import_syntax_error, two import levels deep: "Could not find module 'nested_broken_import_level_b_module'" (E027) for a module that exists
+CASCADE tests/07_functions_modules/fail_no_intrinsic_decorator.tr errors=2 -- after "'@' is not valid here" (E103) the parser, left inside the removed `@intrinsic("name")` decorator, reports a bogus "Expected '{' ..." (E107)
+CASCADE tests/07_functions_modules/visibility/fail_pub_before_decorator.tr errors=2 -- after "'pub' has to come after a decorator" (E087) the decorator is left without a function, so a bogus "'caller_location' can only be used inside a function declared '@caller_location'" (E084) follows
+CASCADE tests/47_diagnostic_file_headers/fail_header_names_main_file.tr errors=3 -- the test is written for TWO errors (a missing ';' in each of two functions); the third is bogus: the abandoned declaration of `first` makes its one call in `main` report "Unknown function 'first'" (E041), so a beginner who forgot one semicolon is told a function that exists does not
+
+ALSO (from me, on check): we will completely ban `char` indexing on arrays later next week before the public release.

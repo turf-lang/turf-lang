@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E030
+// EXPECT-DIAG: Module 'mem' has nothing named 'List'
 // Regression test: same wrong-module check as
 // fail_scope_type_wrong_module.tr, but for qualified CONSTRUCTION
 // (mem::List::default()) rather than a type annotation -- confirms

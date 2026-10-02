@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E092
+// EXPECT-DIAG: this is a struct pattern, but the value it is matched against has type 'int', which is not a struct
 // LEC-003: a struct pattern needs a struct subject. Expected: E092.
 struct P { x: int }
 fn main(): int {

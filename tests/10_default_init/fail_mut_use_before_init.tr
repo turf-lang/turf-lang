@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E008
+// EXPECT-DIAG: You're using 'x' (type 'int') before it has a value
 // Test: reading a mut primitive before any assignment — must fail
 fn main(): int {
     mut x: int;

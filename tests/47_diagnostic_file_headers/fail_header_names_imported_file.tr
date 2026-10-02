@@ -1,3 +1,4 @@
+// EXPECT-DIAG: E064
 // EXPECT-DIAG: header_broken_module.tr (1 error)
 // EXPECT-NO-DIAG: , in file
 // #266: an error inside an imported module is reported under that module's

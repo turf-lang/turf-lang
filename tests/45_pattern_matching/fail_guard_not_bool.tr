@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E092
+// EXPECT-DIAG: a guard must be a 'bool' condition, but this one has type 'int'
 // LEC-003: a guard is a bool condition. Expected: E092.
 struct P { x: int }
 fn main(): int {

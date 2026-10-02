@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E103
+// EXPECT-DIAG: '@' is not valid here
 // Regression test: the @intrinsic("name") decorator has been removed from
 // the compiler entirely (its only consumer, lib/std/io.tr's print/printline/
 // input, was rewritten to ordinary Turf functions delegating to extern fn

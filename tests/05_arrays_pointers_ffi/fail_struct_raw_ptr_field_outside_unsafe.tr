@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E130
+// EXPECT-DIAG: Raw pointer type 'Node*' cannot be used outside an 'unsafe' block
 // Regression test (issue #238): a struct declaration with a raw
 // ptr/T*-typed field must be rejected when the struct decl itself is
 // outside `unsafe { }` -- this is stricter than gating the field's later

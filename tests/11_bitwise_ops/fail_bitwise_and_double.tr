@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E057
+// EXPECT-DIAG: Bitwise operator requires integer operands, but left operand is 'double'
 // FAIL TEST: Bitwise AND with non-integer types
 // 1.5 & 2 should emit a TypeError (double is not an integer type)
 

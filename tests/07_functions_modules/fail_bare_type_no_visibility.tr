@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E032
+// EXPECT-DIAG: 'Rect' isn't visible here without qualification
 // Regression test: the bare struct/enum type visibility gate. A plain
 // `import module;` (bare form) grants QUALIFIED access to that module's
 // types (module::Type) but NOT bare/unqualified access -- unlike before

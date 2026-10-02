@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E126
+// EXPECT-DIAG: Compound assignment through 'operator[]' is not supported
 // Negative test: LANG-001 scope boundary -- compound assignment THROUGH
 // operator[] (`box[i] += 1`) is deliberately not supported (it would need a
 // read-modify-write through both operator[] AND operator[]= together, a

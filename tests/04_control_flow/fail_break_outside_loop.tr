@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E007
+// EXPECT-DIAG: 'break' used outside of a loop
 fn main(): int {
     if true {
         break;

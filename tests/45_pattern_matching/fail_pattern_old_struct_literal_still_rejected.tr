@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E113
+// EXPECT-DIAG: 'P { ... }' is no longer valid syntax for constructing a struct
 // LEC-003 must not resurrect struct brace-literals: `P { x: 1 }` as an
 // EXPRESSION is still the removed syntax. Expected: a parse error.
 struct P { x: int }

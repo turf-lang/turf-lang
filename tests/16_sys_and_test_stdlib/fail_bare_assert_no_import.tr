@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E041
+// EXPECT-DIAG: Unknown function 'assert'
 // Regression test: `assert` is no longer a compiler builtin -- it's an
 // ordinary Turf function in lib/std/test.tr. A bare, unqualified
 // `assert(...)` call with NO `import test;` must be rejected as an

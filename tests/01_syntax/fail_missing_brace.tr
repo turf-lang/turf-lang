@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E104
+// EXPECT-DIAG: Missing closing '}'
 fn main(): int {
     mut x: int = 10;
     

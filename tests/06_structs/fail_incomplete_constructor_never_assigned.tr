@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E049
+// EXPECT-DIAG: Not definitely assigned on every path: y
 // Regression test for ConstructorFieldAssignmentPass: a field never
 // assigned anywhere in the constructor body at all -- the simplest possible
 // case, must still raise IncompleteConstructorError naming 'y' (not crash,

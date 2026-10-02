@@ -1,3 +1,6 @@
+// EXPECT-DIAG: E040
+// EXPECT-DIAG: E108
+// EXPECT-DIAG: Expected a parameter name in the parameter list
 // Regression test for issue #245: SkipToNextTopLevelBoundary()'s brace-depth
 // counter used to permanently mis-track when a failed top-level construct
 // opened a '(' it never got to close (the parse error fires before any

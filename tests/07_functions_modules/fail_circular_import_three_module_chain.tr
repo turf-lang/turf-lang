@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E019
+// EXPECT-DIAG: Circular import detected
 // Regression test: a longer import cycle (chain_x_module -> chain_y_module
 // -> chain_z_module -> chain_x_module) must also be detected and rendered
 // as a full multi-hop chain, not just the direct-2-module case (see

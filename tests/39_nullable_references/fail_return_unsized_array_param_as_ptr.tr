@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E134
+// EXPECT-DIAG: Cannot explicitly cast 'int[]' to 'ptr'
 // FDN-002 (docs/planning/ROADMAP_v2.0.0.md §27 D23, docs/development/changes/
 // FDN-002.md): D23's own wording is "an unsized T[] parameter converted to
 // ptr and returned must be rejected". EscapePass DOES carry that rule
@@ -6,7 +8,7 @@
 // ptr` for an array-typed `arr` is ALREADY rejected today, one pass
 // earlier, by the pre-existing array/pointer type-compatibility rule
 // (Types.cpp's typesCompatible(), "one side is an array, the other isn't"
-// -- E066 "Cannot explicitly cast 'int[]' to 'ptr'") -- there is currently
+// -- now E134 "Cannot explicitly cast 'int[]' to 'ptr'") -- there is currently
 // NO legal way to produce a `ptr` from a `T[]` at all, by cast or by
 // implicit coercion (only `string` has an extern-call ptr coercion,
 // isExternStringToPtrCoercion(), TypeCheckerCall.cpp; arrays have none).

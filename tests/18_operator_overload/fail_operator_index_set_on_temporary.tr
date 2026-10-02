@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E098
+// EXPECT-DIAG: Cannot assign through 'operator[]=' on the value another 'operator[]' read returned
 // Negative test (LEC-006): `mm["a"]["b"] = 1` writes into the Map that
 // `mm["a"]` RETURNS -- operator[] returns the element by value, so that is a
 // copy, and `operator<K, V> []=` takes its container by reference to mutate

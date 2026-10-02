@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E006
+// EXPECT-DIAG: 'int[]' is an unsized array parameter
 fn sumAll(arr: int[]): int {
     mut total: int = 0;
     for value in arr {

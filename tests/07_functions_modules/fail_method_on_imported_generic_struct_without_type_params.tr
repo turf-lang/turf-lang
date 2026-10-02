@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E138
+// EXPECT-DIAG: must declare its type parameters too
 // Same rule as tests/38_monomorphization/fail_method_on_generic_struct_without_type_params.tr,
 // on a struct imported from another module -- the shape first found live
 // (FDN-003's record): `fn List.extra()` declared in this file on the

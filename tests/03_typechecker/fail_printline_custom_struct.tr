@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E025
+// EXPECT-DIAG: No overload of 'io::printline' matches argument types (Point)
 // Regression test (was DISCOVERED_ISSUES.md #11): passing a custom struct
 // value directly to io::printline() (no matching overload exists) must be
 // rejected with a clean TypeChecker type-mismatch error, not crash the

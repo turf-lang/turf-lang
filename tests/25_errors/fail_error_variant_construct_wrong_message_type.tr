@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E096
+// EXPECT-DIAG: the last argument of 'MathError::DivisionByZero(...)' is its message, which must be a 'string', but it has type 'int'
 // STD-002: `ErrorType::Variant(messageExpr)` requires messageExpr to be a
 // 'string' -- a non-string argument is a type mismatch, not silently
 // coerced.

@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E044
+// EXPECT-DIAG: 'multiply' was called with 1 argument
 import io;
 
 fn multiply(x: int, y: int): int {

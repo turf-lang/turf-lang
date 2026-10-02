@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E110
+// EXPECT-DIAG: Expected 'while' after do-block
 // Missing `while` after the closing `}` of a do-block must be rejected with
 // the exact error "Expected 'while' after do-block".
 fn main(): int {

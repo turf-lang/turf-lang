@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E096
+// EXPECT-DIAG: 'IOError::NotFound' has empty parentheses
 // LEC-004: a variant with no fields is written without parentheses. Empty
 // parentheses in a declaration are E096, with the hint saying how to write
 // either meaning.

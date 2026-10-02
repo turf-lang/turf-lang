@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E059
+// EXPECT-DIAG: Subject has type 'int' but a matches arm has type 'string'
 import io;
 
 fn main(): int {

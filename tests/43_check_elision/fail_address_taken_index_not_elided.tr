@@ -1,4 +1,5 @@
 // RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: Array index out of bounds
 // OPT-002 safety guard: `i`'s address is taken and handed to `mutate()`,
 // which writes through it via a raw pointer inside `unsafe { }`.
 // markElidableChecks() must treat ANY address-taken variable as never

@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E086
+// EXPECT-DIAG: can't be returned
 // FDN-002 (docs/planning/ROADMAP_v2.0.0.md; docs/development/changes/
 // FDN-002.md): the audit's F-16 program -- before EscapePass existed, this
 // compiled silently and returned a reference to a stack frame that had

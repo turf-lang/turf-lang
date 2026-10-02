@@ -1,4 +1,5 @@
 // RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: String index out of bounds
 // FDN-004 (D17, ROADMAP_v2.0.0.md): `s[i]` on a `string` is now bounds-
 // checked at runtime -- before this, `"abc"[5]` compiled and silently read
 // past the terminator, returning garbage (audit finding F-17). Unlike a

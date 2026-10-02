@@ -1,3 +1,4 @@
+// EXPECT-DIAG: E044
 // Companion to fail_assert_no_args.tr: `test::assert()` called with 3+ arguments
 // must also be rejected -- assert takes a condition and an optional
 // message, never more. Back when assert was a compiler intrinsic this

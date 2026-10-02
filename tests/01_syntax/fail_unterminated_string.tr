@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E099
+// EXPECT-DIAG: Unterminated string literal
 // Regression test: a string literal missing its closing quote must be
 // rejected with a clean "Unterminated string literal" diagnostic pointing at
 // the opening quote's line, not silently swallow the rest of the file

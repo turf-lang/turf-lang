@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E092
+// EXPECT-DIAG: doesn't mention the field 'secret' of 'shapes_module::Shape'
 // LEC-003: listing only the public field is not enough -- the private one
 // must be waved off with `..`. Expected: E092.
 import shapes_module::Shape;

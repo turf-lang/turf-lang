@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E103
+// EXPECT-DIAG: Unexpected ';'
 // Regression test (Issue #180 follow-up): a do-while already consumes its
 // own trailing ';' inside ParseDoWhileExpr() -- unlike if/while/for, which
 // never have one to begin with. ParseBlock()'s statement dispatcher treats

@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E132
+// EXPECT-DIAG: 'recover run' must end every path with 'return'
 // Test (fail): a 'recover run { ... }' block that doesn't 'produce' a value
 // must diverge (end in 'return') on every path -- otherwise there's nothing
 // for the recovered expression to evaluate to.

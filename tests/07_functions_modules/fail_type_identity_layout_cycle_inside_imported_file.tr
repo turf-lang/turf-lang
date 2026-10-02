@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E069
+// EXPECT-DIAG: cycle: type_identity_cycle_module::P -> type_identity_cycle_module::Q -> type_identity_cycle_module::P
 // FDN-003 + INV-LAYOUT-1: the struct-layout cycle check runs in Pass 1 on
 // field types, and a module's field types must already be resolved to
 // identities by then (`Q` inside the module is `type_identity_cycle_module::Q`).

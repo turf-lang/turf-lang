@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E086
+// EXPECT-DIAG: can't be pushed into a collection
 // FDN-002 (docs/planning/ROADMAP_v2.0.0.md; docs/development/changes/
 // FDN-002.md): pushing a Stack-provenance reference into a List -- the
 // List's own backing buffer lives on the GC heap and outlives this call,

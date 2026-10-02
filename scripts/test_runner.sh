@@ -227,6 +227,193 @@ check_runtime_expectations() {
 }
 export -f check_runtime_expectations
 
+# EXPECT-EXIT (issue #263): for a runtime-abort test whose reason has no text to
+# pin because it is silent by design -- `sys::abort()` (SIGABRT, 134) prints
+# nothing, and a `recover run { return 1; }` test proves its failure path was
+# reached only by its exit code. `// EXPECT-EXIT: 134` requires exactly that
+# exit status. $1 test file, $2 the program's exit status.
+check_exit_expectation() {
+    local file="$1" status="$2" want
+    want=$(grep -E '^[[:space:]]*//[[:space:]]*EXPECT-EXIT:' "$file" | head -1 \
+               | sed -E 's/^[[:space:]]*\/\/[[:space:]]*EXPECT-EXIT:[[:space:]]*//; s/[[:space:]]+$//')
+    [ -n "$want" ] || return 0
+    [ "$status" = "$want" ] && return 0
+    echo "EXPECT-EXIT missed: the program exited with $status, not $want"
+    return 1
+}
+export -f check_exit_expectation
+
+# Diagnostic policy (issue #263, INV-TEST-2): EXPECT-DIAG only protects the
+# tests that opt in, and ~400 `fail_*.tr` did not, so each of them could still
+# be rejected for a reason other than the one it was written for. Closing that
+# hole by review alone does not stay closed, so this makes it a rule: a
+# compile-time `fail_*.tr` either carries `// EXPECT-DIAG: Exxx` or has exactly
+# one entry in tests/DIAGNOSTIC_GAPS.txt, which doubles as the work list for
+# the two things a beginner-friendly compiler must not do -- reject a program
+# for the wrong reason (WRONG-REASON) or reject it with no error code
+# (NO-CODE). See that file's header for the entry format. Entries are checked
+# against the real output so the register cannot rot: a line that stopped
+# being true fails the suite until it is deleted.
+#
+# $1 test file (cwd-relative), $2 its path as `find` printed it (the register's
+# key), $3 the compile output. Prints one line per problem; returns 1 on any.
+check_diag_policy() {
+    local file="$1" key="$2" output="$3" esc plain emitted codeless catchall actual_errors
+    local entries kinds line codepin=0 bad=0 want code title n field
+    esc=$(printf '\033')
+    plain=$(printf '%s' "$output" | sed "s/${esc}\[[0-9;]*m//g")
+    emitted=$(grep -oE '\[E[0-9]{3}\]' <<< "$plain" | tr -d '[]' | sort -u | paste -sd, -)
+    # NO-CODE: a `── error` header with no `[Exxx]` is a plain error -- the
+    # beginner has no `--explain` page for it. Warnings carry no codes by design.
+    codeless=$(grep -E '^── error' <<< "$plain" | grep -vcE '\[E[0-9]{3}\]')
+    # GENERIC-CODE: E066 is `TypeError`, the one class every TypeChecker
+    # diagnostic funnels through, so it also carries "No matching overload!",
+    # "Missing initializer!", ... whose --explain page it does not describe.
+    # The banner is the line under the header; anything but the real
+    # "Type mismatch!" under E066 is a more specific mistake wearing the
+    # catch-all's code. Found by banner, not by test, so a NEW one cannot slip in.
+    catchall=$(awk '/^── error.*\[E066\]/ { f = 1; next } f && NF { print; f = 0 }' <<< "$plain" \
+                   | sed -E 's/^[[:space:]]+//' | grep -vxF 'Type mismatch!' | head -1)
+    # CASCADE: the "(N errors)" count the compiler prints under the file name.
+    # Summed over every header: an error in an imported module prints under its
+    # OWN file header ("(1 error)" for the main file, "(1 error)" for the module),
+    # and a cascade across files (a syntax error in a module reported as "module
+    # not found" in the importer) is the sum of them.
+    actual_errors=$(grep -oE '^[^ ]+ \(([0-9]+) errors?\)' <<< "$plain" | grep -oE '[0-9]+' | awk '{ s += $1 } END { if (NR) print s }')
+    entries=$(awk -v k="$key" '$1 !~ /^#/ && $2 == k' "$REGISTER")
+    kinds=" $(awk '{ print $1 }' <<< "$entries" | tr '\n' ' ')"
+    grep -qE '^[[:space:]]*//[[:space:]]*EXPECT-DIAG:[[:space:]]*E[0-9]{3}[[:space:]]*$' "$file" && codepin=1
+
+    # Every entry must be a known kind.
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        case "${line%% *}" in
+            UNPINNED|NO-CODE|WRONG-REASON|GENERIC-CODE|CASCADE) ;;
+            *) echo "DIAG-POLICY: $key has an entry of unknown kind '${line%% *}' in tests/DIAGNOSTIC_GAPS.txt (expected UNPINNED, NO-CODE, WRONG-REASON, GENERIC-CODE or CASCADE)"
+               bad=1 ;;
+        esac
+    done <<< "$entries"
+    [ "$bad" = 0 ] || return 1
+
+    if [[ "$kinds" == *" UNPINNED "* ]]; then
+        if [ "$codepin" = 1 ]; then
+            echo "DIAG-POLICY stale: $key pins an error code but is still listed UNPINNED in tests/DIAGNOSTIC_GAPS.txt -- delete that line"
+            return 1
+        fi
+        return 0   # baseline: nothing else is checked until the test is pinned
+    fi
+
+    if [ "$codepin" = 1 ] && [[ "$kinds" == *" WRONG-REASON "* ]]; then
+        echo "DIAG-POLICY stale: $key pins an error code but is still listed WRONG-REASON -- if it now fires the diagnostic it was written for, delete that line"
+        bad=1
+    fi
+    if [ "$codepin" = 0 ] && [[ "$kinds" == " " ]]; then
+        echo "DIAG-POLICY: $key has no '// EXPECT-DIAG: Exxx' line and is not in tests/DIAGNOSTIC_GAPS.txt."
+        echo "  The compiler emitted: ${emitted:-no error code at all}."
+        echo "  Pin the code the test is MEANT to produce. If the compiler emits a different one, list it as WRONG-REASON; if none, as NO-CODE."
+        bad=1
+    fi
+
+    # --- NO-CODE ---------------------------------------------------------
+    if [ "$codeless" -gt 0 ] && [[ "$kinds" != *" NO-CODE "* ]] && [[ "$kinds" != *" WRONG-REASON "* ]]; then
+        echo "DIAG-POLICY: $key makes the compiler print $codeless error(s) with no [Exxx] code -- a beginner cannot 'turf --explain' those."
+        echo "  List it as NO-CODE in tests/DIAGNOSTIC_GAPS.txt (and pin its message text with '// EXPECT-DIAG: <text>'), or give the error a code."
+        bad=1
+    fi
+    if [[ "$kinds" == *" NO-CODE "* ]]; then
+        if [ "$codeless" -eq 0 ]; then
+            echo "DIAG-POLICY stale: $key is listed NO-CODE but every error it prints now has a code (${emitted:-none}) -- pin '// EXPECT-DIAG: ${emitted%%,*}' and delete the line"
+            bad=1
+        elif ! grep -E '^[[:space:]]*//[[:space:]]*EXPECT-DIAG:' "$file" | grep -qvE 'EXPECT-DIAG:[[:space:]]*E[0-9]{3}[[:space:]]*$'; then
+            echo "DIAG-POLICY: $key is NO-CODE, so it must pin its reason by text: add '// EXPECT-DIAG: <fragment of the message>'"
+            bad=1
+        fi
+    fi
+
+    # --- GENERIC-CODE ----------------------------------------------------
+    if [ -n "$catchall" ] && [[ "$kinds" != *" GENERIC-CODE "* ]] && [[ "$kinds" != *" WRONG-REASON "* ]]; then
+        echo "DIAG-POLICY: $key reports '$catchall' under E066, the type-mismatch catch-all, so a beginner's 'turf --explain E066' will not describe it."
+        echo "  List it as GENERIC-CODE (code=E066 title=\"$catchall\") in tests/DIAGNOSTIC_GAPS.txt, or give that mistake its own code."
+        bad=1
+    fi
+    if [[ "$kinds" == *" GENERIC-CODE "* ]]; then
+        line=$(grep -E '^GENERIC-CODE ' <<< "$entries" | head -1)
+        code=$(grep -oE 'code=E[0-9]{3}' <<< "$line" | head -1); code="${code#code=}"
+        title=$(sed -nE 's/.*title="([^"]*)".*/\1/p' <<< "$line")
+        if [ -z "$code" ] || [ -z "$title" ]; then
+            echo "DIAG-POLICY: $key's GENERIC-CODE entry needs 'code=Exxx' and 'title=\"...\"'"
+            bad=1
+        elif ! grep -qF "[$code]" <<< "$plain" || ! grep -qF -- "$title" <<< "$plain"; then
+            echo "DIAG-POLICY stale: $key is listed as '$title' under $code but the output no longer has both (${emitted:-no code}) -- update or delete the entry"
+            bad=1
+        fi
+    fi
+
+    # --- CASCADE ---------------------------------------------------------
+    if [[ "$kinds" == *" CASCADE "* ]]; then
+        line=$(grep -E '^CASCADE ' <<< "$entries" | head -1)
+        field=$(grep -oE 'errors=[0-9]+' <<< "$line" | head -1); want="${field#errors=}"
+        if [ -z "$want" ]; then
+            echo "DIAG-POLICY: $key's CASCADE entry needs 'errors=N' (how many errors the compiler prints today)"
+            bad=1
+        elif [ "$actual_errors" != "$want" ]; then
+            echo "DIAG-POLICY stale: $key is listed as printing $want errors but now prints ${actual_errors:-?} -- update the entry, or delete it if the cascade is fixed (and then pin '// EXPECT-NO-DIAG: <the bogus message>')"
+            bad=1
+        fi
+    fi
+
+    # --- WRONG-REASON ----------------------------------------------------
+    if [[ "$kinds" == *" WRONG-REASON "* ]]; then
+        line=$(grep -E '^WRONG-REASON ' <<< "$entries" | head -1)
+        field=$(grep -oE 'emits=[A-Za-z0-9,]+' <<< "$line" | head -1)
+        if [ -z "$field" ] || ! grep -q 'intended=' <<< "$line"; then
+            echo "DIAG-POLICY: $key's WRONG-REASON entry needs 'emits=Exxx' (or 'emits=none') and 'intended=...'"
+            bad=1
+        elif [ "${field#emits=}" = "none" ]; then
+            if [ -n "$emitted" ]; then
+                echo "DIAG-POLICY stale: $key is listed as emitting no code but the output has $emitted -- update or delete the entry"
+                bad=1
+            fi
+        else
+            while IFS= read -r n; do
+                if ! grep -qF "[$n]" <<< "$plain"; then
+                    echo "DIAG-POLICY stale: $key is listed as emitting $n but the output has ${emitted:-no code} -- update or delete the entry"
+                    bad=1
+                fi
+            done < <(tr ',' '\n' <<< "${field#emits=}")
+        fi
+    fi
+    return $bad
+}
+export -f check_diag_policy
+
+# The runtime half of the same policy: a `// RUNTIME_ABORT_EXPECTED` test must
+# say what it aborts WITH (`// EXPECT-RUNTIME: <text>`), else it could keep
+# passing because some other trap fired first. Runtime aborts carry no codes, so
+# this is about the reason, and the register line is just UNPINNED.
+# $1 test file, $2 its register key. Returns 1 and prints why on a violation.
+check_runtime_policy() {
+    local file="$1" key="$2" kind pinned=0
+    kind=$(awk -v k="$key" '$1 !~ /^#/ && $2 == k { print $1; exit }' "$REGISTER")
+    grep -qE '^[[:space:]]*//[[:space:]]*EXPECT-(RUNTIME|EXIT):[[:space:]]*[^[:space:]]' "$file" && pinned=1
+    if [ "$pinned" = 1 ]; then
+        [ -z "$kind" ] && return 0
+        echo "DIAG-POLICY stale: $key has an EXPECT-RUNTIME pin but is still listed $kind in tests/DIAGNOSTIC_GAPS.txt -- delete that line"
+        return 1
+    fi
+    case "$kind" in
+        UNPINNED) return 0 ;;
+        "")
+            echo "DIAG-POLICY: $key aborts at runtime but has no '// EXPECT-RUNTIME: <text>' line and is not in tests/DIAGNOSTIC_GAPS.txt."
+            echo "  Pin the message it is MEANT to abort with, so another trap firing first cannot keep it green."
+            return 1 ;;
+        *)
+            echo "DIAG-POLICY: $key is a runtime-abort test; only UNPINNED is a valid register kind for it, not '$kind'"
+            return 1 ;;
+    esac
+}
+export -f check_runtime_policy
+
 # Runs exactly one test file end to end (compile, classify, execute, judge)
 # and writes its outcome to $RESULTS_DIR. This is the SAME logic the old
 # sequential loop body had, unchanged test-classification-wise (fail_*
@@ -316,6 +503,21 @@ run_one_test() {
                 echo "$DIAG_MISS"
                 echo "$RUN_OUTPUT"
             } > "$RESULT_FILE"
+        elif ! DIAG_MISS=$(check_exit_expectation "$FILE_NAME" "$RUN_STATUS"); then
+            echo -e "[${CYAN}${SUITE}${RESET}] ${FILE_NAME} ... ${RED}FAILED (Aborted, but EXPECT-EXIT not met)${RESET}"
+            {
+                echo "STATUS=FAIL"
+                echo "DETAIL=$test_file (Aborted at runtime, but EXPECT-EXIT not met):"
+                echo "$DIAG_MISS"
+                echo "$RUN_OUTPUT"
+            } > "$RESULT_FILE"
+        elif ! DIAG_MISS=$(check_runtime_policy "$FILE_NAME" "$test_file"); then
+            echo -e "[${CYAN}${SUITE}${RESET}] ${FILE_NAME} ... ${RED}FAILED (Aborted, but its reason is not pinned: see DIAGNOSTIC_GAPS.txt)${RESET}"
+            {
+                echo "STATUS=FAIL"
+                echo "DETAIL=$test_file (Diagnostic policy, tests/DIAGNOSTIC_GAPS.txt):"
+                echo "$DIAG_MISS"
+            } > "$RESULT_FILE"
         else
             echo -e "[${CYAN}${SUITE}${RESET}] ${FILE_NAME} ... ${GREEN}PASS (Aborted at runtime as expected)${RESET}"
             echo "STATUS=PASS" > "$RESULT_FILE"
@@ -354,6 +556,13 @@ run_one_test() {
                 echo "DETAIL=$test_file (Rejected, but EXPECT-DIAG not met):"
                 echo "$DIAG_MISS"
                 echo "$COMPILE_OUTPUT"
+            } > "$RESULT_FILE"
+        elif ! DIAG_MISS=$(check_diag_policy "$FILE_NAME" "$test_file" "$COMPILE_OUTPUT"); then
+            echo -e "[${CYAN}${SUITE}${RESET}] ${FILE_NAME} ... ${RED}FAILED (Rejected, but its reason is not pinned: see DIAGNOSTIC_GAPS.txt)${RESET}"
+            {
+                echo "STATUS=FAIL"
+                echo "DETAIL=$test_file (Diagnostic policy, tests/DIAGNOSTIC_GAPS.txt):"
+                echo "$DIAG_MISS"
             } > "$RESULT_FILE"
         else
             echo -e "[${CYAN}${SUITE}${RESET}] ${FILE_NAME} ... ${GREEN}PASS (Rejected properly)${RESET}"
@@ -445,6 +654,12 @@ run_one_test() {
     rm -f "$PROGRAM" "$LOGFILE"
 }
 export -f run_one_test
+REGISTER="$(pwd)/$TEST_DIR/DIAGNOSTIC_GAPS.txt"
+if [ ! -f "$REGISTER" ]; then
+    echo -e "${RED}Missing $REGISTER (the register of unpinned diagnostics, see check_diag_policy).${RESET}"
+    exit 1
+fi
+export REGISTER
 export RESULTS_DIR COMPILER TURF_OPT_FLAG RUN_TIMEOUT_SEC # + check_*_expectations, above
 export BOLD GREEN RED YELLOW CYAN RESET
 
@@ -487,6 +702,10 @@ echo -e "${BOLD}=== Test Summary ===${RESET}"
 echo -e "Total Tests: ${TOTAL_TESTS}"
 echo -e "Passed:      ${GREEN}${PASSED}${RESET}"
 echo -e "Failed:      ${RED}${FAILED}${RESET}"
+
+# The register is owed work, never "expected": say how much, every run, so the
+# number is visible and can only be seen to go down.
+echo -e "Diagnostic register (tests/DIAGNOSTIC_GAPS.txt): $(awk '$1=="UNPINNED"' "$REGISTER" | wc -l) unpinned, $(awk '$1=="NO-CODE"' "$REGISTER" | wc -l) no-code, $(awk '$1=="WRONG-REASON"' "$REGISTER" | wc -l) wrong-reason, $(awk '$1=="GENERIC-CODE"' "$REGISTER" | wc -l) generic-code, $(awk '$1=="CASCADE"' "$REGISTER" | wc -l) cascade"
 
 if [ $FAILED -gt 0 ]; then
     echo -e "\n${BOLD}${RED}Failed Tests Details:${RESET}"

@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E131
+// EXPECT-DIAG: Cannot call method 'nonexistent_method' on type 'int'
 // Negative test: a method call on a primitive with no UFCS candidate at
 // all must be a clean type error, not the old "internal compiler error"
 // abort (confirmed live before this feature existed).

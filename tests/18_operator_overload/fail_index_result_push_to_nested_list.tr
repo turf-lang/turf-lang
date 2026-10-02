@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E098
+// EXPECT-DIAG: Cannot call 'push' on the value an 'operator[]' read returned
 // Negative test (LEC-006, E098): the same lost write as a mutating method, in
 // the form people actually write. `outer[0]` is a COPY of the inner List's
 // header; `push` bumps `len` in that copy, so `outer[0].length()` stays 0.

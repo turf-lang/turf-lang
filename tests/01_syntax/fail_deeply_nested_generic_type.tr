@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E111
+// EXPECT-DIAG: Type nested too deeply to parse
 // Regression test: ParseType() recurses into itself directly for nested
 // generic type arguments (list<list<list<...>>>) without ever going back
 // through ParseExpression() in between -- found via code review to be

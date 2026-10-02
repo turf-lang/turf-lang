@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E096
+// EXPECT-DIAG: 'IOError::Denied' declares 2 fields (path: string, mode: int) but was given 1 argument
 // LEC-004 (FREEZE.md §6.18): a variant with N >= 1 declared fields takes N
 // arguments (or N + 1 with a trailing message). One argument for a two-field
 // variant is E096, and its hint names the declared fields.

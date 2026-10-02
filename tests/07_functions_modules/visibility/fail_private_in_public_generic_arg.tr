@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E089
+// EXPECT-DIAG: Public function 'all' exposes the private type 'Hidden'
 // LEC-002 E089: the private type hides inside `List<Hidden>`; the rule looks
 // through generic arguments (and pointer targets, references, arrays, `!T`
 // success types and function-type parameters).

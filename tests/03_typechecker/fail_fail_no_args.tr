@@ -1,3 +1,4 @@
+// EXPECT-DIAG: E044
 // Regression test: `test::fail()` with zero arguments must be a clean compile
 // error, not a compiler crash. `fail` is registered with a correct fixed
 // arity (1) in Builtins.cpp, so TypeChecker::visitFuncCall's generic arity

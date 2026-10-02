@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E034
+// EXPECT-DIAG: A struct named 'P' is already declared
 // Two functions in one file each declaring a local `struct P` with a
 // different layout. A type's identity is (module, name) with no
 // function-level scope (FREEZE.md §6.11), so these are two declarations of

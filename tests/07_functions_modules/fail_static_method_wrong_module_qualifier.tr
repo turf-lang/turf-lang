@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E030
+// EXPECT-DIAG: Module 'mem' has nothing named 'Vec2'
 // Regression test: `Module::StructName::method(...)` where StructName is
 // real but declared in a DIFFERENT module (not Module) must be rejected --
 // the 3-part chain's leading ModuleQualifier used to be silently ignored

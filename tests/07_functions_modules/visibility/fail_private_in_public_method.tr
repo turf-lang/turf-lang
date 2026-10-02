@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E089
+// EXPECT-DIAG: Public method 'Lexer.accept' exposes the private type 'Token'
 // LEC-002 E089: a `pub` method whose parameter is a private type.
 import fail_private_in_public_method_module;
 

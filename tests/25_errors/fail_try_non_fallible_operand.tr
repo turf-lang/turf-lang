@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E095
+// EXPECT-DIAG: 'try' needs a fallible operand, but this has type 'int'
 // LEC-004: `try` propagates the error of a `!T`. An ordinary call has none,
 // so `try` on it is E095 (drop the `try`), not silently accepted.
 error IOError {

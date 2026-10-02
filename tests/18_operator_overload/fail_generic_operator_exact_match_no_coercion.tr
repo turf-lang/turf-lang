@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E057
+// EXPECT-DIAG: cannot apply '+' to 'Cell<string>' and 'double'
 // Negative test (LEC-006, F-OP-1): a generic operator is still matched by
 // EXACT operand type. `operator<T> +(a: Cell<T>, k: int)` accepts a Cell and
 // an int; the double 1.5 must not be widened or narrowed to fit, exactly as

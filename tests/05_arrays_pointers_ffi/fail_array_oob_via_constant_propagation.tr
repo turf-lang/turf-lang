@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E001
+// EXPECT-DIAG: You tried to access 'arr[5]'
 // Regression test: ValueRangePass must reject an array access indexed by a
 // LOCAL VARIABLE whose value is provably a constant out-of-bounds index --
 // not just a literal index (see the pre-existing fail_array_out_of_bounds.tr,

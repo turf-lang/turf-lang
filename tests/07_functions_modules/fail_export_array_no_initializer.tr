@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E022
+// EXPECT-DIAG: requires an explicit initializer value
 // An array-typed `export immut` with no initializer has nothing to export
 // (ParseLetStatement() produces an ArrayDeclExprAST here, not a
 // VarDeclExprAST -- ParseExportDecl() rejects that shape explicitly).

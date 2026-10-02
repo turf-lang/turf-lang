@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E106
+// EXPECT-DIAG: Expected ':' followed by return type after parameter list
+// Issue #263: forgetting the colon before a function's return type -- the most
+// common beginner slip in a function declaration -- is E106, "a colon is
+// missing".
+fn add(a: int, b: int) int {
+    return a + b;
+}
+
+fn main(): int {
+    return add(1, 2);
+}

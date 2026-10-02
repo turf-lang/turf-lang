@@ -1,3 +1,4 @@
+// EXPECT-DIAG: E026
 import io;
 
 fn main(): int {

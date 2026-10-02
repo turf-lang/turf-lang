@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E130
+// EXPECT-DIAG: Function 'takesRaw' cannot use raw pointer type 'ptr' for parameter 'p'
 // LANG-002/STD-001: a plain function may never take a raw `ptr`/`T*`
 // parameter (even inside `unsafe { }`) unless its file declared the
 // raw-pointer capability (`unsafe module;`) -- this file deliberately does

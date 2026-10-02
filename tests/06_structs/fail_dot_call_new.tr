@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E045
+// EXPECT-DIAG: 'new' can't be called on an instance
 // Regression test: `new` is registered internally as an ordinary
 // '.'-declared instance method (self at Params[0]) -- so without an
 // explicit guard, `instance.new(...)` would resolve and codegen completely

@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E092
+// EXPECT-DIAG: 'v' is bound as 'string' here but as 'int' in another header of the same arm
 // LEC-003: same name, different types across stacked headers. Expected: E092.
 struct P { x: int, s: string }
 fn main(): int {

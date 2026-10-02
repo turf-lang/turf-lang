@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E083
+// EXPECT-DIAG: A deferred statement can't 'return'
 // INV-DEFER-2: a deferred statement may not return out of the function it is
 // deferred in. A `return` inside a `recover` block returns from the function
 // CONTAINING the recover (errors_and_recover.md §1.4.2), so one inside a

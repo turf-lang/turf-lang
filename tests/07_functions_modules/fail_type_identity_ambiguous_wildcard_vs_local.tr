@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E085
+// EXPECT-DIAG: 'Node' is ambiguous here
 // FDN-003: E085 AmbiguousTypeReferenceError. `import M::[*];` brings M's
 // `Node` into this file's bare namespace, and this file declares its own
 // `Node` -- both declarations are legal on their own (type identity is

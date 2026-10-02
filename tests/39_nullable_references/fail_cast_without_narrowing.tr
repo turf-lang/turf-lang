@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E082
+// EXPECT-DIAG: Cannot cast 'b' to a non-null reference here
 // LANG-002: the `p to &T` narrowing cast is syntactically legal (no
 // `unsafe` needed -- see TurfNullableReferenceType's doc comment, Types.h)
 // but must still be REJECTED (E082) when NullabilityPass can't prove the

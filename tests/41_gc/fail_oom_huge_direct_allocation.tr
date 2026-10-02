@@ -1,4 +1,5 @@
 // RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: out of memory
 // tests/41_gc/fail_oom_huge_direct_allocation.tr
 // FDN-006 stage 2 (docs/planning/ROADMAP_v2.0.0.md): verifies the fail-fast
 // OOM policy RT-001 put "in one place" (turf_rt_alloc/turf_rt_alloc_zeroed/

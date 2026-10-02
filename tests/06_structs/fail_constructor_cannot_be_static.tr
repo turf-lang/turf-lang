@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E046
+// EXPECT-DIAG: 'new' can't be 'static'
 // Regression test: `new` always constructs via `self` -- `static` (meaning
 // no self at all) directly contradicts that, and must be rejected with
 // ConstructorCannotBeStaticError rather than silently accepted or crashing

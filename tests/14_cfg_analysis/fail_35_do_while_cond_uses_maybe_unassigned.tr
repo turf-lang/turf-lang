@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E008
+// EXPECT-DIAG: You're using 'y' (type 'int') before it has a value
 // Regression test (Issue #180 follow-up): DefiniteAssignmentPass must reach
 // a do-while's condition. CFGBuilder::visitDoWhile() adds the condition
 // expression to `dowhile.cond`'s own statement list (see CFG.cpp), so a read

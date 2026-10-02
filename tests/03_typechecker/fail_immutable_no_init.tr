@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E128
+// EXPECT-DIAG: Missing initializer!
 fn main(): int {
     immutable PI: double;
     return 0;

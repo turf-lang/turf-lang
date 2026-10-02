@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E114
+// EXPECT-DIAG: already has a field named 'name'
 // Regression test: a struct declaring the same field name twice must be
 // rejected at parse time. Before the fix this compiled silently --
 // TurfStructType::getFieldIndex()'s linear search bound every access to the

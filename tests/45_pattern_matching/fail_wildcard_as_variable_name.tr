@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E092
+// EXPECT-DIAG: '_' is the wildcard pattern, so it can't be used as a name
 // LEC-003: a lone `_` is reserved for the wildcard. Expected: E092.
 fn main(): int {
     mut _: int = 3;

@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E044
+// EXPECT-DIAG: 'f' expects 1 argument, got 2
 // Calling a function-typed parameter with the wrong number of arguments must
 // be caught by the TypeChecker's indirect-call arity check, same as an
 // ordinary direct call would be.

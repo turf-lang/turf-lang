@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E024
+// EXPECT-DIAG: 'shared' is imported from two different modules
 // Regression test: this is the user's explicit ask -- "user will be
 // errored when two symbols with the same name exist in the same
 // namespace". Two separate on-demand imports flattening a same-named

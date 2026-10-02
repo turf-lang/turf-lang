@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E088
+// EXPECT-DIAG: Field 'Shape.secret' is private to module 'shapes_module'
 // LEC-003: a pattern reads fields exactly as `.field` does, so another
 // module's private field is refused. Expected: E088.
 import shapes_module::Shape;

@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E087
+// EXPECT-DIAG: 'pub' can't be applied to an operator
 // LEC-002: E087 -- an operator is visible wherever its operand types are, so
 // `pub` on one is meaningless and rejected (hint: make the TYPE pub).
 struct Money { cents: int }

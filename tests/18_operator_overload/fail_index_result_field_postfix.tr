@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E098
+// EXPECT-DIAG: Cannot update part of the value an 'operator[]' read returned
 // Negative test (LEC-006, E098): the `++` form of fail_index_result_field_assign.tr.
 // Expected: E098, "Cannot update part of the value an 'operator[]' read returned".
 import list::List;

@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E138
+// EXPECT-DIAG: 'Box' is generic -- it needs type arguments here
 // A generic struct named without type arguments in a type annotation is
 // rejected in the Resolver ("Missing type arguments!"). Before FDN-003 this
 // shape compiled all the way to Codegen and failed there as "Internal

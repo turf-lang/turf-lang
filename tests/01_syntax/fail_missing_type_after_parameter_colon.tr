@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E109
+// EXPECT-DIAG: Expected a type name
+// Issue #263: `b:` with nothing after it. This used to be the generic E015 (a
+// typed SyntaxError, which never went through LogErrorAt) -- the parser's
+// type-name errors now name the real mistake: a type was expected.
+fn add(a: int, b:): int {
+    return a;
+}
+
+fn main(): int {
+    return 0;
+}

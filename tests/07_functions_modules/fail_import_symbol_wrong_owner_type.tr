@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E030
+// EXPECT-DIAG: Module 'mem' has nothing named 'List'
 // Regression test: `import Module::TypeName;` where TypeName is a REAL
 // struct/enum but declared in a DIFFERENT module, not Module, must be
 // rejected -- registerOnDemandImports() used to only check the flat,

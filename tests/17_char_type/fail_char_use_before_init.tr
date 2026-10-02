@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E008
+// EXPECT-DIAG: You're using 'c' (type 'char') before it has a value
 // SEM-004 (F-INIT-1): a `char` local declared without an initializer is
 // statically unassigned, same as int/double/bool/string -- reading it
 // before any assignment is DefiniteAssignmentError (E008). Before SEM-004,

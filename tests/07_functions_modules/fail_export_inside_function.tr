@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E023
+// EXPECT-DIAG: 'export' can't be used inside a function
 // `export` is only legal at the top level of a file or module -- a variable
 // declared inside a function is destroyed when its scope ends, so no logic
 // allows exporting it.

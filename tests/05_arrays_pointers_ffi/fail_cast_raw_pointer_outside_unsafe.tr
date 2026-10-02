@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E130
+// EXPECT-DIAG: Raw pointer type 'int*' cannot be used outside an 'unsafe' block
 // Regression test (issue #238): a `to`-cast whose destination type is a
 // raw pointer (`ptr`/`T*`) must be rejected outside `unsafe { }` -- this
 // is the "cast" leg of the three explicitly gated uses (declaration,

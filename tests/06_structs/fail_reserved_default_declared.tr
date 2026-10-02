@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E051
+// EXPECT-DIAG: 'default' is reserved and can't be declared by hand
 // Regression test: `default` is reserved for the compiler-synthesized
 // StructName::default() and can never be declared by hand, static or not --
 // must raise ReservedConstructorNameError at the declaration site.

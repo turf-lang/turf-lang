@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E058
+// EXPECT-DIAG: Expected 'done' after matches arm body
 import io;
 
 fn main(): int {

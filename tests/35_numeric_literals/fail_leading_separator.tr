@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E072
+// EXPECT-DIAG: A digit run can't start with '_'
 // SEM-001: a digit run can't START with '_' -- E072 (MisplacedSeparatorError,
 // docs/errors/codes/E072.txt). Uses a hex literal (`0x_5`, separator right
 // after the radix prefix) rather than a bare `_5` at the very start of a

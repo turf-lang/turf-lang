@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E096
+// EXPECT-DIAG: field 'cause' of 'Outer::Wrapped' is the error type 'Inner'
 // LEC-004: an error value carries data about what went wrong, not another
 // error, so a payload field can't have an error type (E096).
 error Inner {

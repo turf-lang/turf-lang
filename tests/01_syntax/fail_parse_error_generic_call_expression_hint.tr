@@ -1,3 +1,4 @@
+// EXPECT-DIAG: E110
 // EXPECT-DIAG: Expected 'mutable' or 'immutable' to begin a declaration
 // EXPECT-DIAG: put the type on the variable instead
 // EXPECT-NO-DIAG: Statements are not allowed outside of a function

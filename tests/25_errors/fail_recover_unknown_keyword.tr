@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E110
+// EXPECT-DIAG: Expected 'produce', 'run', or 'as' after 'recover'
 // Test (fail): `recover` followed by anything other than 'produce', 'run',
 // or 'as' must be rejected at parse time.
 fn main(): int {

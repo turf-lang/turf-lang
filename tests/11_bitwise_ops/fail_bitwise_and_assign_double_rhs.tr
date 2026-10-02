@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E057
+// EXPECT-DIAG: Bitwise compound assignment requires an integer operand, but the right operand is 'double'
 // FAIL TEST: Compound bitwise-AND assignment with a non-integer RHS (the
 // LHS is a valid int -- this exercises the RHS-side check specifically,
 // as opposed to fail_bitwise_and_assign_double.tr which is LHS-side).

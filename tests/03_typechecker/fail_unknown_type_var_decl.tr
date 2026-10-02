@@ -1,3 +1,4 @@
+// EXPECT-DIAG: E042
 // Regression test: an unknown/misspelled type name in a plain variable
 // declaration must be rejected with a clean "unknown type" diagnostic.
 // Before this fix, Resolver::visitVarDecl() never called

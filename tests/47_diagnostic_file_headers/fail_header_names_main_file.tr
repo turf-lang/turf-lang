@@ -1,3 +1,4 @@
+// EXPECT-DIAG: E102
 // EXPECT-DIAG: fail_header_names_main_file.tr (
 // EXPECT-DIAG: errors)
 // EXPECT-NO-DIAG: , in file

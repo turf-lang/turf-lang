@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E092
+// EXPECT-DIAG: 'IOError::NotFound' has 1 field, so a pattern for it must say what to do with it
 // LEC-004: a bare `E::V:` header matches a variant that has nothing to
 // destructure. One that has fields must say what happens to them -- here it
 // must be `E::V(..)` -- so the pattern can't keep compiling, meaning something

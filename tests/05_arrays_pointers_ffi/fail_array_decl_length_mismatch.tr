@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E003
+// EXPECT-DIAG: Array declared with size 3 but initialized with 5 elements
 // Regression test: an array declaration's initializer list length must
 // match the declared array size. Before this fix, TypeChecker::
 // visitArrayDecl() never checked this at all -- `int[3] arr = [1,2,3,4,5]`

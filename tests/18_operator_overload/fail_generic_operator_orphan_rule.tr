@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E080
+// EXPECT-DIAG: 'operator []' does not own any of its operand types
 // Negative test (LEC-006, INV-OP-2): the orphan rule applies to a generic
 // operator through the generic struct's BASE. `List` is declared in module
 // `list`, so the main file may not declare `operator[]` over `List<T>` --

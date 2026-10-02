@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E092
+// EXPECT-DIAG: 'strings::to_upper(...)' is not an error variant, so it can't be destructured
 // LEC-004: a `Name::Name(...)` header whose `Name` is NOT an error type falls
 // back to the function call it was written as -- so pattern-only syntax inside
 // it (`_`) has nothing to mean and is E092, not silently dropped.

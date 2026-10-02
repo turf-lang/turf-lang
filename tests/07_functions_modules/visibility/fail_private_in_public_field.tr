@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E089
+// EXPECT-DIAG: Public field 'Outer.inner' exposes the private type 'Inner'
 // LEC-002 E089: `pub inner: Inner` -- an importer reading `outer.inner` would
 // hold an `Inner` it cannot name. Making the field private (drop its `pub`) or
 // `Inner` public both fix it; the hint says so.

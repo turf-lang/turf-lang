@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E111
+// EXPECT-DIAG: Expression nested too deeply to parse
 // Regression test: the recursive-descent parser has no depth limit on its
 // own -- deeply nested parens used to risk a raw C++ stack overflow (an
 // uncatchable process crash, not a diagnosable compile error), exactly the

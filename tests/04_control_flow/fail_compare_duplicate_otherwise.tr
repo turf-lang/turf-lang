@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E058
+// EXPECT-DIAG: Duplicate 'otherwise' arm
 import io;
 
 fn main(): int {

@@ -1,3 +1,6 @@
+// EXPECT-DIAG: E068
+// EXPECT-DIAG: has no field named 'pasword'
+// EXPECT-DIAG: It may be from the current file: 'password'
 // Regression test: a misspelled struct field access is rejected AND the
 // suggestion engine (SuggestionIndex::suggestVisible) fires for it, same as
 // it already did for misspelled variables/functions/struct methods -- the

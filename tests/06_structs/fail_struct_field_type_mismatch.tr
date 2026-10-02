@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E066
+// EXPECT-DIAG: Cannot assign value of type 'string' to variable of type 'int'
 // Regression test: assigning a value to a struct field must be type-checked
 // against that field's declared type, same as assigning to an ordinary
 // variable. Originally written against the old brace-literal struct

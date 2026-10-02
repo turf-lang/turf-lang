@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E024
+// EXPECT-DIAG: 'Mode' is imported from two different modules
 // FDN-003: two wildcard imports whose modules BOTH declare `Node`, `Mode`
 // and `Oops` are rejected at the second import (E024
 // ImportSymbolCollisionError, the same rule as for two same-named

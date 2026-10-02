@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E098
+// EXPECT-DIAG: Cannot call 'outer' on the value an 'operator[]' read returned
 // Negative test (LEC-006 follow-up, E098): E098 used to rely on a method's own
 // body assigning to self. `bs[0].outer()` assigns nothing itself -- it calls
 // `self.wrapper()`, which calls `self.bump()`, which does the assignment -- so

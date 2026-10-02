@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E098
+// EXPECT-DIAG: Cannot call 'fill' on the value an 'operator[]' read returned
 // Negative test (LEC-006 follow-up, E098): `bs[0].fill()` assigns to
 // `self.arr[0]`, an element of a fixed-array field inside the struct value. The
 // element bs[0] returned is a copy, so the list never sees it. E098 depends on

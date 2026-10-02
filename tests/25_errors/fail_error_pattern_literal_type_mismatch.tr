@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E092
+// EXPECT-DIAG: the field has type 'int' but this pattern has type 'string'
 // LEC-004: a literal sub-pattern must have its field's type. `mode` is an int,
 // `"rw"` is a string: E092, the same rule a struct pattern's field has.
 error IOError {

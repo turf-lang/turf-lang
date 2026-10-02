@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E085
+// EXPECT-DIAG: 'Node' is ambiguous here
 // FDN-003: E085 through an explicit single-symbol import rather than a
 // wildcard -- `import M::Node;` plus this file's own `Node` make the bare
 // spelling ambiguous exactly the same way (see

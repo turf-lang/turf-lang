@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E057
+// EXPECT-DIAG: cannot apply '+' to 'char' and 'int'
 // Negative test: char does not implicitly participate in numeric arithmetic
 // with int either -- 'a' + 1 must be rejected, same as char + char.
 fn main(): int {

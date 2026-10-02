@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E131
+// EXPECT-DIAG: No such method!
 // Regression test: calling a method on a non-struct value (int, string,
 // pointer-to-non-struct) must be a clean compile error.
 //

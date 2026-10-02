@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E010
+// EXPECT-DIAG: Infinite recursion detected in 'foo'
 // Regression test (#186): fn foo(): int { return foo(); }
 // Every path passes through a self-call with no base case.
 // Must emit RecursionWithoutBaseError and fail to compile.

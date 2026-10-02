@@ -1,4 +1,5 @@
 // RUNTIME_ABORT_EXPECTED
+// EXPECT-EXIT: 1
 //
 // Reading a nonexistent file must go through the `!string` error path via
 // `recover`, not crash/segfault on a null FILE* or garbage read. Compiles

@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E093
+// EXPECT-DIAG: Non-exhaustive error comparison on 'IOError'
 // LEC-004: a variant pattern only covers its variant when every field pattern
 // matches anything. `Denied(_, 0)` matches only mode 0, so `Denied` is still
 // uncovered without `otherwise` (E093).

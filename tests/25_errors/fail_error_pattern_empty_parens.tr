@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E092
+// EXPECT-DIAG: 'IOError::NotFound' has empty parentheses
 // LEC-004: `IOError::NotFound()` -- empty parentheses -- is neither "no fields"
 // (write it bare) nor "ignore the fields" (write `(..)`): E092 says so.
 error IOError {

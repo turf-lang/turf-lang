@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E092
+// EXPECT-DIAG: 'p' is bound twice in the same pattern
 // LEC-004: one name can't bind two fields of one pattern (E092), the same rule
 // a struct pattern has.
 error IOError {

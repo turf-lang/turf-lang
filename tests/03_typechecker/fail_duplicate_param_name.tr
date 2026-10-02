@@ -1,3 +1,4 @@
+// EXPECT-DIAG: E033
 // Regression test: a function with two parameters sharing the same name
 // must be rejected. Also exercises ParamDecl::Loc (AST.h) -- previously
 // ParamDecl had no source location field at all, so Resolver::visitFuncDef's

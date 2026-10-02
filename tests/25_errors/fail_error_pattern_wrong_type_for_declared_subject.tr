@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E092
+// EXPECT-DIAG: this pattern is over 'NetError::Refused', but the value being matched is a 'IOError'
 // LEC-004: a subject of a DECLARED error type can only hold that type's own
 // variants, so a pattern naming another error type's variant can never match:
 // E092.

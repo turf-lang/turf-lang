@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E095
+// EXPECT-DIAG: 'main' returns 'int', so there is nowhere to propagate an error to
 // LEC-004: `main` returns `int`, so nothing can fail out of it and `try` has
 // nowhere to propagate to (E095). The hint says how to handle the error
 // instead -- this is the case the message is most needed for.

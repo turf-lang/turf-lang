@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E135
+// EXPECT-DIAG: 'MathError::DivisionByZero' is an error variant, not a function
 // STD-002: exactly ONE argument is the only legal call arity on an error
 // variant -- two arguments stays rejected the same "not a function" way
 // zero arguments already does (fail_error_variant_not_callable.tr), not

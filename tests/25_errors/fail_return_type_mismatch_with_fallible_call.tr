@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E064
+// EXPECT-DIAG: function declares 'int' but returns '!int'
 // Test (fail): Errors.md's own explicit forbidden example -- a plain-'int'
 // function can't just forward a '!int' call's result without recovering it
 // first, even via a bare 'return'.

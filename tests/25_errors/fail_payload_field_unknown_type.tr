@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E042
+// EXPECT-DIAG: Unknown type 'Strng'
 // LEC-004: a payload field's type is validated like a struct field's: an
 // unknown name is rejected (with the usual suggestions), not silently turned
 // into an empty LLVM struct.

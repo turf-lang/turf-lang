@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E097
+// EXPECT-DIAG: 'operator +' is generic but none of its operands is a type declared in this file
 // Negative test (LEC-006): `operator<T> +(a: T, b: T): T` mentions no type
 // this file declares, so it would match `+` between ANY two values of the
 // same type -- including types from modules that never imported this file.

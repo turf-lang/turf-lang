@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E069
+// EXPECT-DIAG: cycle: Box -> Box
 // Regression test: a GENERIC struct whose own field re-uses its own base
 // name by value is a cycle regardless of what the type parameter is ever
 // instantiated with -- TYPE-001's "Generic interactions" note

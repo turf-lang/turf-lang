@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E092
+// EXPECT-DIAG: stacked `matches` headers must bind the same names
 // LEC-003: stacked headers share one body, so they bind the same names.
 // Expected: E092.
 struct P { x: int, y: int }

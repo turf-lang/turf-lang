@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E124
+// EXPECT-DIAG: Cannot compare 'char' with 'int'
 // Negative test: char is deliberately NOT isNumeric() (RFC §3's exact-match
 // philosophy), so comparing a char against an int without an explicit cast
 // must be rejected, not silently coerced.

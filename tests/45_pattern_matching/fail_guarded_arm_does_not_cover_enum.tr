@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E093
+// EXPECT-DIAG: Non-exhaustive enum comparison on 'Color'
 // LEC-003: a guarded arm never counts toward exhaustiveness -- its guard may
 // be false. Expected: E093.
 enum Color { Red, Green }

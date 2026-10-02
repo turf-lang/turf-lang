@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E096
+// EXPECT-DIAG: 'IOError::Denied' already has a field named 'path'
 // LEC-004: a variant's field names are unique. A repeat is E096.
 error IOError {
     Denied(path: string, path: int)

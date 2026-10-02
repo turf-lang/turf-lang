@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E066
+// EXPECT-DIAG: Type mismatch!
 fn main(): int {
     // bool should not implicitly cast to int
     mut x: int = true;

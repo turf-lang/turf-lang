@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E056
+// EXPECT-DIAG: No overload of 'takesInt32' matches argument types (int)
 // Negative test: a genuinely `int`-TYPED value narrowing to `int32` must
 // still be rejected without an explicit `to int32` cast, same as
 // double -> int is rejected -- OVH-005 only changes what happens to an

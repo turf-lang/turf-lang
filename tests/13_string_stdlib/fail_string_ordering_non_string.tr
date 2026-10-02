@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E124
+// EXPECT-DIAG: Cannot compare 'string' with 'int' using '<'
 // tests/13_string_stdlib/fail_string_ordering_non_string.tr
 // NEGATIVE TEST — must NOT compile (or must error at runtime).
 // Applying a string ordering operator to mixed types (string and int)

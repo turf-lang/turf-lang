@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E125
+// EXPECT-DIAG: 'combine' is overloaded
 // A bare, overloaded function name has no single unambiguous signature to
 // use as a first-class value -- must be rejected rather than silently
 // picking one overload (see Resolver::visitVariable's ResolvedFunctionRef

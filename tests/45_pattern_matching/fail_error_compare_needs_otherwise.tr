@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E093
+// EXPECT-DIAG: Non-exhaustive comparison on '<error>'
 // LEC-003: an error value is an open union -- its variants can't be listed --
 // so a compare over it needs an arm that takes the rest, and a GUARDED arm
 // never counts (its guard may be false). Expected: E093.

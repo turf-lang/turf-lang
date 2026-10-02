@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E066
+// EXPECT-DIAG: 'recover produce int' doesn't match this call's success type 'Point'
 // Test (fail): 'recover produce value' must match the wrapped call's
 // SUCCESS type exactly, including when that success type is a struct, not
 // just a primitive -- producing an int against a !Point call must be

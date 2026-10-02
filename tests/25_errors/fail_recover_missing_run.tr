@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E110
+// EXPECT-DIAG: Expected 'run' after 'recover as err'
 // Test (fail): `recover as err` without a trailing 'run' block must be
 // rejected at parse time.
 error MathError {

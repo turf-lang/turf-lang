@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E035
+// EXPECT-DIAG: 'ConnectionState' has no transition from 'Idle' to 'Closing'
 // Test: a .transition() call inside a single-pattern 'matches' arm that has
 // narrowed the receiver to one specific state must be REJECTED AT COMPILE
 // TIME (InvalidTransitionError) when the declared machine has no edge from

@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E061
+// EXPECT-DIAG: Cannot assign to this expression
 // Negative test: prefix ++/-- on a non-lvalue operand is a clean
 // InvalidAssignmentTargetError at TypeCheck time now (LANG-001 follow-up
 // lifted the old "must be a bare identifier" PARSE-time restriction, which

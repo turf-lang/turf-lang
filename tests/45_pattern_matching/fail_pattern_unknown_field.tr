@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E068
+// EXPECT-DIAG: Struct 'P' has no field named 'z'
 // LEC-003: a field the struct does not have (did-you-mean applies).
 // Expected: E068.
 struct P { x: int, y: int }

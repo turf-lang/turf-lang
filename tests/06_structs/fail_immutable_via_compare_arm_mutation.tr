@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E060
+// EXPECT-DIAG: You can't change the value of 'c' because it's immutable
 // Regression test (LEC-006 follow-up): the scan recursed through blocks, `if`,
 // `while` and `for` but not `compare`, so a mutation inside an arm was missed.
 // Expected: ImmutableAssignmentError on `c`.

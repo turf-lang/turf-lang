@@ -1,4 +1,5 @@
 // RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: Array index out of bounds
 // RT-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): regression test for
 // "the new panic path still aborts" -- CodegenPanic() (src/Builtins.cpp)
 // now calls libturfrt's turf_rt_panic() instead of an inline

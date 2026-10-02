@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E095
+// EXPECT-DIAG: a deferred statement can't use 'try'
 // LEC-004 / INV-DEFER-2: a deferred statement runs while the function is
 // already returning, so it may not return out of it -- and `try` is a return.
 // E095, even though the function itself is `!int`. (A `try` is an expression,

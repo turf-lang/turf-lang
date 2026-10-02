@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E086
+// EXPECT-DIAG: can't be stored into a field that outlives this function
 // FDN-002 (docs/planning/ROADMAP_v2.0.0.md; docs/development/changes/
 // FDN-002.md): storing a Stack-provenance reference into a field reached
 // through a Param-provenance base -- `p` outlives this call (it's the

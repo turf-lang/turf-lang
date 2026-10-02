@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E056
+// EXPECT-DIAG: No overload of 'list::List.push' matches argument types (string)
 // Regression test: List<int>.push() must reject an argument of the wrong
 // type at COMPILE time. Before this fix, struct method calls (unlike free
 // function / module calls) never checked argument TYPES at all -- only

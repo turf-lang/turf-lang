@@ -1,3 +1,4 @@
+// EXPECT-DIAG: E040
 import test;
 
 fn main(): int {

@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E092
+// EXPECT-DIAG: this field's pattern must be a literal, an enum variant, '_', a name to bind, or a nested struct pattern
 // LEC-003: a field pattern is a literal, variant, `_`, binding or nested
 // struct pattern -- never an arbitrary expression (use a guard). Expected: E092.
 struct P { x: int }

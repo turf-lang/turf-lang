@@ -1,4 +1,5 @@
 // RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: stack overflow
 // tests/41_gc/fail_stack_overflow_deep_recursion.tr
 // FDN-006 stage 1 (docs/planning/ROADMAP_v2.0.0.md): before this group, a
 // stack overflow was a bare SIGSEGV (exit 139, no message -- the Overhaul

@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E088
+// EXPECT-DIAG: Type 'HiddenColor' is private to module
 // LEC-002 E088: a variant is public exactly when its enum is, so
 // `m::HiddenColor::A` on a private enum is rejected.
 import visibility_lib_module;

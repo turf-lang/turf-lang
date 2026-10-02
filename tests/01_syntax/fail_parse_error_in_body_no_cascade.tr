@@ -1,3 +1,4 @@
+// EXPECT-DIAG: E108
 // EXPECT-DIAG: Expected a function name after 'fn'
 // EXPECT-NO-DIAG: Statements are not allowed outside of a function
 // LEC-005: a syntax error INSIDE a function body (here a lambda attempt --

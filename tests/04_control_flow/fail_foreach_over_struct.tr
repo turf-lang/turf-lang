@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E005
+// EXPECT-DIAG: value of type 'Point'
 struct Point {
     x: int,
     y: int

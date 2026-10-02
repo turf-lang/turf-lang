@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E112
+// EXPECT-DIAG: 'void' cannot be a struct field's type
 // Regression test: 'void' as a struct field's type must be rejected at parse
 // time. Before the fix this silently compiled -- LLVM has no valid layout
 // for a void struct member, so this previously produced a struct the rest

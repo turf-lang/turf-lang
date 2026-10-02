@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E095
+// EXPECT-DIAG: this function returns 'int', which can't carry an error
 // LEC-004: `try` returns the error from the function it is in, so that
 // function must return `!V`. One that returns a plain `int` is E095, and the
 // hint says to declare it `!int`.

@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E014
+// EXPECT-DIAG: Hmm, I don't know the word 'retrun'
 // SLM-001 §16.3 item 1: fixture for the deterministic-fix layer's
 // KeywordError path (ErrorsLex.h -- distinct from the RankedSuggestions
 // classes ErrorsScope.h/Struct.h/Module.h use, since SuggestionIndex::

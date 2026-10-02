@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E137
+// EXPECT-DIAG: 'io::printline' can't be used as a value
 // Regression test: `io::printline` referenced WITHOUT being called (e.g.
 // assigned to a variable) must be a clean TypeError -- this language has
 // no first-class functions, so a bare module-qualified reference has no

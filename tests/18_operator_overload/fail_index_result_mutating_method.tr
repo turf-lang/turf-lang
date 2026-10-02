@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E098
+// EXPECT-DIAG: Cannot call 'bump' on the value an 'operator[]' read returned
 // Negative test (LEC-006, E098): `bs[0].bump()` assigns to `self.a`, but the
 // receiver is the copy bs[0] returned, so the list's element never changes.
 // Expected: E098, "Cannot call 'bump' on the value an 'operator[]' read returned".

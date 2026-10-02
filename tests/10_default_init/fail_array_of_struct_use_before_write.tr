@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E008
+// EXPECT-DIAG: You're using 'pts' (type 'Point[3]') before it has a value
 // SEM-004 (§12.6): an array of structs declared with no element write or
 // initializer at all is statically unassigned as a whole, same as an
 // array of primitives -- DefiniteAssignmentError (E008). See

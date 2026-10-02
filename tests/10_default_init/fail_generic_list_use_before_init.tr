@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E008
+// EXPECT-DIAG: You're using 'l' (type 'list::List<int>') before it has a value
 // SEM-004 (F-INIT-1): a generic-typed local declared without an
 // initializer is statically unassigned -- calling a method on it before
 // any assignment is DefiniteAssignmentError (E008). Before SEM-004,

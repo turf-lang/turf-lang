@@ -1,4 +1,5 @@
 // RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: cross-heap free
 // tests/41_gc/fail_free_gc_pointer.tr
 // MEM-002's own "Breaking changes" entry (docs/planning/ARCHITECTURE_OVERHAUL.md
 // §8): "Programs that mem::free something they got from strings::* or a

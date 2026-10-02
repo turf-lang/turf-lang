@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E041
+// EXPECT-DIAG: 'assert(bool cond) -> void'
 // Regression test (was DISCOVERED_ISSUES.md #8): a typo'd bare language
 // intrinsic (assert, fail, typeof — callable without a module qualifier)
 // must get a real "did you mean" suggestion, not a bare "Unknown function"

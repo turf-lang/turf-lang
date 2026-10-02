@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E098
+// EXPECT-DIAG: Cannot assign to part of the value an 'operator[]' read returned
 // Negative test (LEC-006, E098): `bs[0]` is the element returned BY VALUE by
 // operator[], so `bs[0].a = 50` would change a copy and the list would never see
 // it. Before E098 this compiled and silently lost the write.

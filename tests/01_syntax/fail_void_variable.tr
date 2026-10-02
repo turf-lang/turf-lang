@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E112
+// EXPECT-DIAG: 'void' cannot be a variable's type
 // Regression test: 'void' as a variable's declared type must be rejected at
 // parse time with a clean diagnostic, not silently accepted and not hang the
 // compiler. Before the fix, `mut x: void;` hung the compiler indefinitely

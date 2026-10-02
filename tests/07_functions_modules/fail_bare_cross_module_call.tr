@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E041
+// EXPECT-DIAG: Unknown function 'helperFn'
 // Regression test: this is the literal bug report. Before this fix,
 // Resolver::visitFuncCall resolved ANY bare (unqualified) function call by
 // searching EVERY module ever transitively imported anywhere in the

@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E067
+// EXPECT-DIAG: but returns 'void'
+// Returning a `void` call's result from a function that declares `int`: the
+// same E067 as initialising from it (not E064, wrong return type -- the
+// function does return the right kind of thing; there is just no value).
+fn nothing(): void {
+}
+
+fn main(): int {
+    return nothing();
+}

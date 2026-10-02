@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E092
+// EXPECT-DIAG: doesn't mention the field 'mode' of 'IOError::Denied'
 // LEC-004: like a struct pattern, an error-variant pattern lists every field
 // or ends in `..`. `Denied(path)` leaves `mode` unmentioned: E092.
 error IOError {

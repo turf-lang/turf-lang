@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E093
+// EXPECT-DIAG: Non-exhaustive error comparison on 'IOError'
 // LEC-004: a subject of a DECLARED error type has a listable set of variants,
 // so leaving one uncovered without `otherwise` is E093 naming it.
 error IOError {

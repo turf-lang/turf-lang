@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E066
+// EXPECT-DIAG: 'recover produce string' doesn't match this call's success type 'int'
 // Test (fail): "a recover block must evaluate to the function's success
 // type" (Errors.md) -- producing a string when the success type is int.
 error MathError {

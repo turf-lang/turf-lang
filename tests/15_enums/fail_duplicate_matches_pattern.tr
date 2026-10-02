@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E133
+// EXPECT-DIAG: Duplicate 'matches' pattern
 // Regression test (was CODE_REVIEW_GAPS_2026-07.md gap #4): a duplicate
 // 'matches' pattern across two arms of the same compare block must be
 // rejected at compile time, not silently accepted.

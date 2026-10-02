@@ -1,4 +1,5 @@
 // RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: List[]: index out of bounds
 // LEC-006: the generic `operator[]` keeps the bounds check the concrete
 // List<int> one had -- `l[i]` reads like array indexing, and array indexing is
 // checked everywhere else in the language. List<string> has one element, so

@@ -1,4 +1,5 @@
 // RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: deliberately false, to trigger a panic/abort
 // LANG-003: TurfLang has no unwinding -- a panic aborts WITHOUT running any
 // deferred statements. This is the main semantic difference from Go's
 // `defer`, and is deliberate (docs/planning/ARCHITECTURE_OVERHAUL.md §8).

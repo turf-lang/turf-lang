@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E113
+// EXPECT-DIAG: 'fn MathUtil::method(...)' is no longer valid syntax
 // Regression test: the old `fn StructName::method(...)` static-method
 // DECLARATION syntax is gone -- static methods are still fully supported
 // (see 07_functions_modules' scope_static_method*.tr), but are now always

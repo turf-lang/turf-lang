@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E001
+// EXPECT-DIAG: You tried to access 'arr[3]'
 fn main(): int {
     mut arr: int[3] = [1, 2, 3];
     

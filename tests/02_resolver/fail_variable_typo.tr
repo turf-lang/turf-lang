@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E040
+// EXPECT-DIAG: It may be from the current file: 'myvar'
 import test;
 
 fn main(): int {
