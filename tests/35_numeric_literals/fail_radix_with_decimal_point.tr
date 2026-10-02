@@ -1,0 +1,7 @@
+// EXPECT-DIAG: E139
+// EXPECT-DIAG: '0xFF' is followed by a '.', but hexadecimal, binary and octal numbers are whole numbers
+// Hex, binary and octal literals are integers; they cannot have a fraction.
+fn main(): int {
+    mut x: double = 0xFF.5;
+    return 0;
+}

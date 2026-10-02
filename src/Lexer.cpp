@@ -970,6 +970,30 @@ static int gettokScan() {
     };
     auto IsDecDigit = [](int c) { return isdigit(c) != 0; };
 
+    // A '.' sitting right where this literal ended is never silently left for
+    // the parser: `3.14.15` used to lex as `3.14` then `.15` ("Expected ';'")
+    // and `5.` as `5` then `.` ("Expected a method name"), each telling a
+    // beginner about the wrong mistake. Only `..`/`...` (the range and
+    // ellipsis operators: `1..5`) and `.name` (member access on a literal) are
+    // legitimate continuations; everything else is E139. LastChar is the '.',
+    // peek() the character after it.
+    auto RejectStrayPoint = [&](bool Radix, bool AlreadyFloat) {
+      if (LastChar != '.')
+        return;
+      int Next = SourceFile->peek();
+      if (Next == '.' || isalpha(Next) || Next == '_')
+        return;
+      using K = MalformedNumberError::Kind;
+      if (Radix) {
+        if (isdigit(Next)) // `0xFF.` alone is left to the parser, as before
+          MalformedNumberError(NumLoc, Spelling, K::RadixPoint).raise();
+        return;
+      }
+      MalformedNumberError(NumLoc, Spelling,
+                           AlreadyFloat ? K::SecondPoint : K::TrailingPoint)
+          .raise();
+    };
+
     // Radix-prefixed integer. Only recognized when the token starts with
     // exactly '0' followed immediately by one of these six letters -- '0'
     // alone, or '0' followed by an ORDINARY digit (the legacy-octal-
@@ -1008,6 +1032,7 @@ static int gettokScan() {
       else if (DigitsConsumed == 0)
         MalformedRadixPrefixError(NumLoc, Spelling).raise();
 
+      RejectStrayPoint(/*Radix=*/true, /*AlreadyFloat=*/false);
       NumLitSpelling = Spelling;
       NumLitClean = Clean;
       return TOK_INT_LITERAL;
@@ -1059,6 +1084,7 @@ static int gettokScan() {
         MalformedExponentError(NumLoc, Spelling).raise();
     }
 
+    RejectStrayPoint(/*Radix=*/false, IsFloat);
     NumLitSpelling = Spelling;
     NumLitClean = Clean;
     return IsFloat ? TOK_NUMBER : TOK_INT_LITERAL;

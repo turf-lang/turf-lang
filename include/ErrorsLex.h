@@ -4,8 +4,9 @@
 #include "Errors.h"
 
 // Below SyntaxError/KeywordError (raised from the PARSER, despite this
-// file's name) are four classes raised directly from inside the LEXER's own
-// number-scanning branch (gettokScan(), Lexer.cpp) -- SEM-001
+// file's name) are five classes raised directly from inside the LEXER's own
+// number-scanning branch (gettokScan(), Lexer.cpp) -- SEM-001 (the fifth,
+// MalformedNumberError, E139, was added with issue #263)
 // (docs/planning/ARCHITECTURE_OVERHAUL.md §8). Lexer.cpp does not normally
 // construct a coded TurfError (its own diagnostics go through the raw
 // LogErrorAt(), which names its code by ErrCode::, e.g. the malformed-char-
@@ -172,6 +173,67 @@ public:
     Category_ = SLM::ErrorCategory::SYNTAX_ERROR;
     Hint_ = "After 'e'/'E' (optionally followed by '+' or '-'), at least "
             "one digit is required -- e.g. '1e6', '1.5e-3', '1E+10'.";
+  }
+};
+
+// A number whose decimal point is wrong (E139). One code for the three ways it
+// goes wrong, because to a beginner they are one mistake -- "that isn't a
+// number" -- and the message says which:
+//   SecondPoint   `3.14.15`, `1e5.5`, `3.14.;` -- a number can only have one
+//                 '.', and it comes before any exponent. The lexer used to
+//                 stop at `3.14` and hand `.15` to the parser, which then said
+//                 "Expected ';'" at the second dot.
+//   TrailingPoint `5.` -- a '.' with no digit after it. FREEZE.md's dotted
+//                 float needs a fractional digit, so `5.` was never a float;
+//                 the lexer left the '.' for the parser, which said "Expected a
+//                 method name after '.'" to someone who was writing a decimal.
+//                 (`5.name` -- a letter after the '.' -- is still member access
+//                 and is NOT this error.)
+//   RadixPoint    `0xFF.5` -- hex, binary and octal literals are whole numbers.
+class MalformedNumberError : public TurfError {
+public:
+  enum class Kind { SecondPoint, TrailingPoint, RadixPoint };
+
+  MalformedNumberError(SourceLocation Loc, const std::string &SpellingSoFar,
+                       Kind K)
+      : TurfError(Loc, Colors::BRIGHT_RED + "'" + Colors::CYAN + SpellingSoFar +
+                           (K == Kind::TrailingPoint ? "." : "") +
+                           Colors::BRIGHT_RED + "' " + describe(K) +
+                           Colors::RESET) {
+    Category_ = SLM::ErrorCategory::SYNTAX_ERROR;
+    Hint_ = hintFor(K, SpellingSoFar);
+  }
+
+private:
+  static std::string describe(Kind K) {
+    switch (K) {
+    case Kind::SecondPoint:
+      return "is followed by a second '.', but a number can have only one "
+             "decimal point.";
+    case Kind::TrailingPoint:
+      return "ends in a '.' with no digit after it.";
+    case Kind::RadixPoint:
+      return "is followed by a '.', but hexadecimal, binary and octal "
+             "numbers are whole numbers.";
+    }
+    return "is not a valid number.";
+  }
+  static std::string hintFor(Kind K, const std::string &S) {
+    switch (K) {
+    case Kind::SecondPoint:
+      return "'" + S + "' is already a complete number, so what follows the "
+             "second '.' looks like a second number run together with it. "
+             "Keep one '.' for a single decimal number, or put a ',' or an "
+             "operator between two separate values.";
+    case Kind::TrailingPoint:
+      return "A decimal number needs a digit after the point. Write '" + S +
+             ".0' for the decimal, or just '" + S + "' for the whole number.";
+    case Kind::RadixPoint:
+      return "Drop the '.' and what follows it, or write the value as a "
+             "decimal number (with a '.') instead of hexadecimal, binary or "
+             "octal.";
+    }
+    return "";
   }
 };
 

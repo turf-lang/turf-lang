@@ -1,0 +1,26 @@
+// Companion to the E139 (malformed number) tests: the '.' checks must not
+// reject the legitimate places a '.' touches a number -- the `..` range
+// operator (`1..5`), a leading-dot float (`.5`), an ordinary dotted float,
+// and a float with an exponent.
+
+import test;
+
+fn main(): int {
+    mut total: int = 0;
+    for i in 1..5 step i += 1 {
+        total += i;
+    }
+    test::assert(total == 10, "1..5 is a range, not the number `1.` then `.5`");
+
+    mut a: double = .5;
+    mut b: double = 0.5;
+    test::assert(a == b, "a leading-dot float equals the same value with a zero");
+
+    mut c: double = 1.5e3;
+    test::assert(c == 1500.0, "dotted float with exponent");
+
+    mut d: double = 1e3;
+    test::assert(d == 1000.0, "dotless exponent float");
+
+    return 0;
+}

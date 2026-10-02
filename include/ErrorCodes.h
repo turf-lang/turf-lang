@@ -411,6 +411,7 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     {ErrCode::InvalidModuleQualifier, "InvalidModuleQualifierError", "Invalid module qualifier", SLM::ErrorCategory::DECLARATION},
     {ErrCode::NotAValue, "NotAValueError", "Not a value", SLM::ErrorCategory::FUNCTION_SIGNATURE},
     {ErrCode::MissingTypeArguments, "MissingTypeArgumentsError", "Missing type arguments", SLM::ErrorCategory::DECLARATION},
+    {"E139", "MalformedNumberError", "Malformed number", SLM::ErrorCategory::SYNTAX_ERROR},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);
