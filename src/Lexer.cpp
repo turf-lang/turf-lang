@@ -28,6 +28,7 @@
 #include "SLMIntegration.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cctype>
 #include <cstdlib>
 #include <filesystem>
@@ -238,11 +239,16 @@ static void printDiag(const DiagnosticEngine::Diag &D) {
   // ->AccentColor round-trip mid-line -- one color switch (AccentColor for
   // the "error"/"warning" label, then a single RESET+BRIGHT_BLACK for
   // everything after it), same as before E0NN codes existed.
+  //
+  // A diagnostic about a whole file rather than a place in it -- "no `main`
+  // function" is the one today -- is raised at Line 0 and prints without a
+  // position ("\u2500\u2500 error [E119]") instead of claiming "line 0, col 0".
   std::cerr << Colors::BOLD << AccentColor << "\u2500\u2500 " << TypeLabel
-            << " " << Colors::RESET << Colors::BRIGHT_BLACK << "at line "
-            << D.Loc.Line << ", col " << D.Loc.Col;
+            << " " << Colors::RESET << Colors::BRIGHT_BLACK;
+  if (D.Loc.Line > 0)
+    std::cerr << "at line " << D.Loc.Line << ", col " << D.Loc.Col;
   if (!D.Code.empty())
-    std::cerr << " [" << D.Code << "]";
+    std::cerr << (D.Loc.Line > 0 ? " " : "") << "[" << D.Code << "]";
   // No ", in file X" here any more: flushAll() prints a file header (#266)
   // before each file's batch, so every diagnostic's file is already named
   // above it -- the main file's included, not only an imported module's.
@@ -319,9 +325,9 @@ static void printDiag(const DiagnosticEngine::Diag &D) {
   // Point at `turf --explain E0NN` for the longer, beginner-facing
   // writeup -- same Code the header already showed, so no separate
   // lookup on the reader's part. Only for diagnostics that actually have
-  // a code (warnings and the raw LogErrorAt() path never do -- see
-  // DiagnosticEngine::Diag::Code's own doc comment in Lexer.h), so this
-  // never dangles into "for more details on ''" for those.
+  // a code (every error does, issue #263; a warning without a registry row
+  // does not -- see DiagnosticEngine::Diag::Code's own doc comment in
+  // Lexer.h), so this never dangles into "for more details on ''".
   //
   // A small curated set of codes (ErrorCodeEntry::Important -- raw-
   // pointer lifetime rules, unbounded recursion, state-machine
@@ -585,9 +591,17 @@ void DiagnosticEngine::restoreDiagnostics(const std::vector<Diag> &Saved) {
 // warning message (the SLM path is gated on !IsWarning, same as
 // TurfWarning::Category_), same as every other diagnostic sink in the
 // compiler.
-void LogErrorAt(SourceLocation Loc, const std::string &Msg,
+void LogErrorAt(SourceLocation Loc, const char *Code, const std::string &Msg,
                 SLM::ErrorCategory Category) {
-  DiagnosticEngine::add(Loc, Msg, "", isMessageWarning(Msg), {}, Category);
+  // An unregistered code would print a "[E0NN]" that `--explain` rejects as
+  // unknown -- exactly the dead end this parameter exists to remove -- so a
+  // typo'd or never-registered code must be caught the first time a
+  // developer's build hits that site, not shipped. (tests/api checks every
+  // ErrCode:: constant too; this catches a raw string literal.)
+  assert(ErrorCodes::lookupByCode(Code) &&
+         "LogErrorAt: code is not a row of AllErrorCodes (ErrorCodes.h)");
+  DiagnosticEngine::add(Loc, Msg, "", isMessageWarning(Msg), {}, Category,
+                        Code);
 }
 
 void resetLexer() {
@@ -723,7 +737,7 @@ static int gettokScan() {
           // That's exactly the kind of mistake that should be caught at
           // compile time, not silently miscompiled: an unrecognized
           // escape is now a clean error instead of a quiet pass-through.
-          LogErrorAt(EscapeLoc,
+          LogErrorAt(EscapeLoc, ErrCode::InvalidEscapeSequence,
                      std::string("Unknown escape sequence '\\") +
                          static_cast<char>(LastChar) +
                          "' in string literal.\n  Hint: Recognized escapes "
@@ -757,8 +771,9 @@ static int gettokScan() {
       // Ran off the end of the file with no closing '"' anywhere -- there is
       // truly nothing left to lex, so end the token stream here exactly as
       // the pre-existing behavior did.
-      LogErrorAt(CurLoc, std::string("Unterminated string literal") +
-                             UnterminatedStringHint, SLM::ErrorCategory::SYNTAX_ERROR);
+      LogErrorAt(CurLoc, ErrCode::UnterminatedLiteral,
+                 std::string("Unterminated string literal") +
+                     UnterminatedStringHint, SLM::ErrorCategory::SYNTAX_ERROR);
       return TOK_EOF;
     }
 
@@ -771,8 +786,9 @@ static int gettokScan() {
       // top of this function, which correctly bumps CurLine and resets
       // CurCol -- so lexing (and line tracking) of the rest of the file
       // recovers cleanly instead of desyncing for every line that follows.
-      LogErrorAt(CurLoc, std::string("Unterminated string literal") +
-                             UnterminatedStringHint, SLM::ErrorCategory::SYNTAX_ERROR);
+      LogErrorAt(CurLoc, ErrCode::UnterminatedLiteral,
+                 std::string("Unterminated string literal") +
+                     UnterminatedStringHint, SLM::ErrorCategory::SYNTAX_ERROR);
       return TOK_STRING_LITERAL;
     }
 
@@ -798,7 +814,7 @@ static int gettokScan() {
     if (LastChar == '\'') {
       // Empty literal '' -- consume the closing quote so the lexer doesn't
       // desync, report, and recover with a placeholder value.
-      LogErrorAt(CurLoc,
+      LogErrorAt(CurLoc, ErrCode::InvalidCharLiteral,
                  "Empty char literal.\n  Hint: A char literal must contain "
                  "exactly one character, e.g. 'a'.", SLM::ErrorCategory::SYNTAX_ERROR);
       LastChar = SourceFile->get();
@@ -811,7 +827,7 @@ static int gettokScan() {
       // Same rationale as the unterminated-string case above: don't consume
       // the newline, so the next gettok() call's whitespace-skip recovers
       // line tracking cleanly instead of desyncing for the rest of the file.
-      LogErrorAt(CurLoc,
+      LogErrorAt(CurLoc, ErrCode::UnterminatedLiteral,
                  std::string("Unterminated char literal") +
                      "\n  Hint: Add a closing ''' after the character.", SLM::ErrorCategory::SYNTAX_ERROR);
       return LastChar == EOF ? TOK_EOF : TOK_CHAR_LITERAL;
@@ -844,7 +860,7 @@ static int gettokScan() {
       } else if (LastChar == '\'') {
         CharVal = '\'';
       } else {
-        LogErrorAt(EscapeLoc,
+        LogErrorAt(EscapeLoc, ErrCode::InvalidEscapeSequence,
                    std::string("Unknown escape sequence '\\") +
                        static_cast<char>(LastChar) +
                        "' in char literal.\n  Hint: Recognized escapes are "
@@ -864,7 +880,7 @@ static int gettokScan() {
       // forward to the next ''' (or EOF/newline) so the rest of the file
       // keeps lexing from a sane point instead of every later token being
       // offset by the stray characters.
-      LogErrorAt(CurLoc,
+      LogErrorAt(CurLoc, ErrCode::InvalidCharLiteral,
                  "Char literal must contain exactly one character.\n  Hint: "
                  "Use a string literal (\"ab\") for multiple characters, or "
                  "check for a missing closing '.", SLM::ErrorCategory::SYNTAX_ERROR);
@@ -915,7 +931,7 @@ static int gettokScan() {
   //
   // This whole branch reports its own lexical errors directly, as real
   // TurfError subclasses (ErrorsLex.h) -- unlike every other diagnostic in
-  // this file, which goes through the raw, code-less LogErrorAt() (see
+  // this file, which goes through the raw LogErrorAt() (and names its code) (see
   // ErrorsLex.h's own top comment for why that's safe to do from here).
   // NumLitSpelling/NumLitClean/NumLitRadix (Lexer.h) carry the exact result
   // back to ParseNumberExpr (ParserLiteral.cpp), which builds the real

@@ -1,0 +1,21 @@
+A comma is missing
+
+Turf was reading a list -- the fields of a struct, the variants of an enum, the arguments of a call, the items of an array -- and found a second item without a comma in front of it. (The message says what it was looking for: usually "`,` or the closing bracket".)
+
+    struct Point {
+        x: int
+        y: int           // no comma after `x: int`
+    }
+
+    add(1 2)             // no comma between the arguments
+
+Separate the items with commas:
+
+    struct Point {
+        x: int,
+        y: int
+    }
+
+    add(1, 2)
+
+It can also mean the list was supposed to end and the closing bracket is missing (see E104); the message names both possibilities because from where Turf stands it can't tell which one you meant. A trailing comma after the last item is fine.

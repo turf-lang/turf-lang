@@ -1,0 +1,19 @@
+An opening brace or parenthesis is missing
+
+Turf expected `{` to start a block (or `(` to start a parameter list) and found something else.
+
+In Turf the body of a function, `if`, `elseif`, `while`, `for`, `do`, `unsafe`, `compare`, `struct`, `enum` and `machine` is *always* wrapped in braces -- there is no single-statement shortcut:
+
+    if x > 0 return 1;           // no braces
+
+    if x > 0 {
+        return 1;
+    }
+
+The same goes for a function name that isn't followed by its parameter list:
+
+    fn main: int { ... }         // needs ()
+
+    fn main(): int { ... }
+
+If you want a one-line choice between two values, use the ternary form instead of a braceless `if`: `give a otherwise b`.

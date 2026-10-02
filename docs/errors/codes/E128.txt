@@ -1,0 +1,20 @@
+This variable needs a starting value
+
+Some declarations can't exist without a value. Turf found one that has none.
+
+An `immutable` variable can never be assigned after it is created, so it has to get its one and only value right where it is declared:
+
+    immutable PI: double;             // never gets a value, and can't later
+
+    immutable PI: double = 3.14159;
+
+`guess` asks Turf to work out the type from the value, so it has nothing to work with if there isn't one:
+
+    mut x: guess;                     // guess from what?
+
+    mut x: guess = 5;                 // an int
+
+Either give the variable its value, or -- for a `mut` variable whose value comes later -- say its type instead of using `guess`:
+
+    mut x: int;
+    x = 5;

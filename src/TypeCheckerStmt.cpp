@@ -79,7 +79,7 @@ void TypeChecker::visitIf(IfExprAST &Node) {
           setType(&Node, TurfInt());
         }
       } else {
-        reportError(Node.getLoc(),
+        reportError(Node.getLoc(), ErrCode::TypeMismatch,
                     "Type mismatch in ternary expression: 'then' type '" +
                         ThenTy->getName() + "' and 'else' type '" +
                         ElseTy->getName() + "' are incompatible.");
@@ -389,16 +389,19 @@ void TypeChecker::visitReturn(ReturnExprAST &Node) {
                     "or declare this function '" + RetTy->getName() +
                         "' so it can pass the error on -- then `return f();` or "
                         "`try f()` both work.";
-          reportError(Node.getLoc(),
+          reportError(Node.getLoc(), ErrCode::ReturnTypeMismatch,
                       "Return type mismatch: function declares '" +
                           Declared->getName() + "' but returns '" +
                           RetTy->getName() + "'.",
                       {}, Hint);
         } else {
           reportError(Node.getLoc(),
+                      codeForMismatch(RetTy.get(), nullptr,
+                                      ErrCode::ReturnTypeMismatch),
                       "Return type mismatch: function declares '" +
                           Declared->getName() + "' but returns '" +
-                          RetTy->getName() + "'.");
+                          RetTy->getName() + "'.",
+                      {}, hintForMismatch(RetTy.get(), nullptr, ""));
         }
       } else {
         // SEM-002 -- see visitVarDecl()'s identical comment

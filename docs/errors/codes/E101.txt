@@ -1,0 +1,16 @@
+A character literal must hold exactly one character
+
+A `char` is a single character, written between single quotes: `'a'`. Turf found something between the quotes that isn't exactly one character -- either nothing at all, or more than one.
+
+    mut empty: char = '';       // nothing between the quotes
+    mut two: char = 'ab';       // two characters
+
+A character literal holds exactly one:
+
+    mut letter: char = 'a';
+
+If you wanted several characters, you want a string, which uses double quotes:
+
+    mut word: string = "ab";
+
+An escape sequence like `'\n'` is still one character (a new line), so that is fine. And if you meant a single quote itself, write `'\''`.

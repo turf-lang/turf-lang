@@ -163,7 +163,7 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
     if (SymTable_.isEnumName(LeftName)) {
       // e.g. `Color::Red(...)` -- a real enum, but variants aren't callable.
       ScopeCallee->ResolvedKind = ScopeAccessKind::EnumVariant;
-      TypeError(Node.getLoc(), "'" + LeftName + "::" + CalleeName +
+      TypeError(Node.getLoc(), ErrCode::NotCallable, "'" + LeftName + "::" + CalleeName +
                                    "' is an enum variant, not a function -- "
                                    "it can't be called.",
                 "Drop the '(...)' -- '" + LeftName + "::" + CalleeName +
@@ -209,7 +209,7 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
         // a variant with no fields is a value, not a function, exactly like a
         // plain `enum` variant just above.
         ScopeCallee->ResolvedKind = ScopeAccessKind::ErrorVariantRef;
-        TypeError(Node.getLoc(), "'" + Full + "' is an error variant, not a function -- "
+        TypeError(Node.getLoc(), ErrCode::NotCallable, "'" + Full + "' is an error variant, not a function -- "
                                      "it can't be called.",
                   "Drop the '(...)' -- '" + Full + "' is already a complete value on "
                       "its own, or pass exactly one 'string' message: '" + Full +
@@ -444,7 +444,7 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
       // identically to `io::printline(...)` regardless of what the leading
       // qualifier said. Confirmed live before this check existed.
       if (!ScopeCallee->getModuleQualifier().empty()) {
-        TypeError(Node.getLoc(), "'" + ScopeCallee->getModuleQualifier() +
+        TypeError(Node.getLoc(), ErrCode::InvalidModuleQualifier, "'" + ScopeCallee->getModuleQualifier() +
                                      "::" + LeftName +
                                      "' -- modules can't be qualified by "
                                      "another module; just write '" +
@@ -955,7 +955,7 @@ void Resolver::visitScopeAccess(ScopeAccessExprAST &Node) {
     }
     // A module name IS real, but referencing `module::function` without
     // calling it has no meaning in this language yet.
-    TypeError(Node.getLoc(), "'" + LeftName + "::" + RightName +
+    TypeError(Node.getLoc(), ErrCode::NotAValue, "'" + LeftName + "::" + RightName +
                                  "' can't be used as a value -- functions "
                                  "aren't first-class yet, only calls like '" +
                                  LeftName + "::" + RightName + "(...)' work.",
@@ -971,7 +971,7 @@ void Resolver::visitScopeAccess(ScopeAccessExprAST &Node) {
     // calling it has no meaning either -- same "no first-class functions"
     // rule as the module case just above, worded for the static-method form.
     Node.ResolvedKind = ScopeAccessKind::StaticMethodRef;
-    TypeError(Node.getLoc(), "'" + LeftName + "::" + RightName +
+    TypeError(Node.getLoc(), ErrCode::NotAValue, "'" + LeftName + "::" + RightName +
                                  "' can't be used as a value -- functions "
                                  "aren't first-class yet, only calls like '" +
                                  LeftName + "::" + RightName + "(...)' work.",

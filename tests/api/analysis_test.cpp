@@ -1131,12 +1131,12 @@ static void testGenericOperatorDiagnostics() {
        "operator<T> +(a: Cell<T>, k: int): Cell<T> { return a; }\n"
        "fn main(): int { mut c: Cell<string> = Cell::new(\"s\"); mut d: Cell<string> = c + 1.5; "
        "return 0; }",
-       "E066", "cannot apply '+' to 'Cell<string>' and 'double'"},
+       "E057", "cannot apply '+' to 'Cell<string>' and 'double'"},
       {"two instantiations do not unify",
        "operator<T> ==(a: Cell<T>, b: Cell<T>): bool { return true; }\n"
        "fn main(): int { mut a: Cell<int> = Cell::new(1); mut b: Cell<string> = Cell::new(\"x\"); "
        "if (a == b) { return 1; } return 0; }",
-       "E066", "Cannot compare 'Cell<int>' with 'Cell<string>'"},
+       "E124", "Cannot compare 'Cell<int>' with 'Cell<string>'"},
   };
   for (const auto &C : Cases) {
     auto R = turf::analyze({{"genop.tr", Prelude + C.Body + "\n"}});

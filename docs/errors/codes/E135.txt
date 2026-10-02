@@ -1,0 +1,14 @@
+That isn't something you can call
+
+Writing `(...)` after a name means "run this". Turf found a name that is a plain value, not a function.
+
+An enum variant is already a complete value. It doesn't take arguments:
+
+    enum Color { Red, Green }
+
+    mut c: Color = Color::Red();        // Red is a value, not a function
+    mut c: Color = Color::Red;          // just the name
+
+The same goes for an `error` variant that carries no payload fields: write `IOError::NotFound`, not `IOError::NotFound()` -- unless it takes a message, in which case you pass exactly one string: `IOError::NotFound("a.txt")`.
+
+If you meant to build a struct, that is a call to its constructor: `Point::new(1, 2)` or `Point::default()`.

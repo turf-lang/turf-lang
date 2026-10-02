@@ -1,0 +1,22 @@
+You can't turn a maybe-`null` reference into a plain one without checking
+
+`&?Box` is "a Box or nothing"; `&Box` is "definitely a Box". Converting the first into the second with `to &Box` is a promise that it isn't `null`, and Turf only accepts that promise where it can see it kept.
+
+    struct Box { val: int }
+
+    fn bad(b: &?Box): int {
+        mut safe: &Box = b to &Box;      // b might be null
+        return safe.val;
+    }
+
+Check it first, and convert inside the check:
+
+    fn good(b: &?Box): int {
+        if b != null {
+            mut safe: &Box = b to &Box;  // proven non-null here
+            return safe.val;
+        }
+        return 0;
+    }
+
+Often you don't need the conversion at all: inside the `if b != null { ... }`, `b` can be used directly.

@@ -1,0 +1,18 @@
+Turf can't take the address of that
+
+`&x` gives you a reference to something that lives in memory, so it only works on things that have a place: a variable, a struct field, or an array element.
+
+    mut x: int = 5;
+    mut r: &int = &x;                 // a variable: fine
+    mut p: &int = &point.x;           // a field: fine
+    mut q: &int = &numbers[2];        // an array element: fine
+
+A computed result has no place -- it is a temporary value that disappears -- so there is nothing to point at:
+
+    mut r: &int = &(x + 1);           // (x + 1) is a value, not a place
+    mut r: &int = &compute();         // so is a function's result
+
+Store the value in a variable first, then take the address of the variable:
+
+    mut tmp: int = x + 1;
+    mut r: &int = &tmp;

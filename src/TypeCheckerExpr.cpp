@@ -230,7 +230,7 @@ void TypeChecker::visitBinary(BinaryExprAST &Node) {
       if (matchOperatorOverload(C, {getType(Node.getLHS())}, /*RelaxSelf=*/false,
                                 &Node, Node.getLoc(), R)) {
         if (Node.ResolvedNotOperatorTarget) {
-          reportError(Node.getLoc(),
+          reportError(Node.getLoc(), ErrCode::AmbiguousCall,
                       "Ambiguous 'operator!(" + LhsTy->getName() +
                           ")' call: more than one visible overload matches "
                           "at this call site.");
@@ -267,7 +267,7 @@ void TypeChecker::visitBinary(BinaryExprAST &Node) {
           // site (declaration-site detection needs RFC step 5's
           // TurfModule::registerFunction origin-tracking fix, out of scope
           // for this pass).
-          reportError(Node.getLoc(),
+          reportError(Node.getLoc(), ErrCode::AmbiguousCall,
                       "Ambiguous 'operator " + OpToDisplayString(Op) +
                           "(" + LhsTy->getName() + ", " + RhsTy->getName() +
                           ")' call: more than one visible overload matches "
@@ -313,12 +313,12 @@ void TypeChecker::visitBinary(BinaryExprAST &Node) {
     bool rhsOk = !RhsTy || RhsTy->isNamed("int");
 
     if (!lhsOk) {
-      reportError(Node.getLoc(),
+      reportError(Node.getLoc(), ErrCode::ArithmeticOperand,
                   "Bitwise operator requires integer operands, but left operand is '" +
                       LhsTy->getName() + "'.");
     }
     if (!rhsOk) {
-      reportError(Node.getLoc(),
+      reportError(Node.getLoc(), ErrCode::ArithmeticOperand,
                   "Bitwise operator requires integer operands, but right operand is '" +
                       RhsTy->getName() + "'.");
     }
@@ -335,14 +335,14 @@ void TypeChecker::visitBinary(BinaryExprAST &Node) {
   // Exponentiation: ** (TOK_POWER = -78) — numeric operands, promotes to double
   if (Op == -78 /*TOK_POWER*/) {
     if (LhsTy && !LhsTy->isNumeric()) {
-      reportError(Node.getLoc(),
+      reportError(Node.getLoc(), ErrCode::ArithmeticOperand,
                   "Exponentiation operator '**' requires numeric operands, but left operand is '" +
                       LhsTy->getName() + "'.");
       setType(&Node, nullptr);
       return;
     }
     if (RhsTy && !RhsTy->isNumeric()) {
-      reportError(Node.getLoc(),
+      reportError(Node.getLoc(), ErrCode::ArithmeticOperand,
                   "Exponentiation operator '**' requires numeric operands, but right operand is '" +
                       RhsTy->getName() + "'.");
       setType(&Node, nullptr);
@@ -383,7 +383,7 @@ void TypeChecker::visitUnary(UnaryExprAST &Node) {
       if (matchOperatorOverload(C, {OperandTy}, /*RelaxSelf=*/false, &Node,
                                 Node.getLoc(), R)) {
         if (Node.ResolvedOperatorTarget) {
-          reportError(Node.getLoc(),
+          reportError(Node.getLoc(), ErrCode::AmbiguousCall,
                       "Ambiguous 'operator " + OpToDisplayString(Op) + "(" +
                           OperandTy->getName() +
                           ")' call: more than one visible overload matches "
@@ -406,7 +406,7 @@ void TypeChecker::visitUnary(UnaryExprAST &Node) {
     // `+5` next to `-5`); still type-checked the same way so `+"str"` is
     // rejected rather than silently passing the string through.
     if (OperandTy && !OperandTy->isNumeric()) {
-      reportError(Node.getLoc(),
+      reportError(Node.getLoc(), ErrCode::ArithmeticOperand,
                   "Unary '" + std::string(1, static_cast<char>(Op)) +
                       "' requires a numeric operand, got '" +
                       OperandTy->getName() + "'.");
@@ -426,7 +426,7 @@ void TypeChecker::visitUnary(UnaryExprAST &Node) {
   if (Op == '~') {
     // Bitwise NOT: operand must be int
     if (OperandTy && !OperandTy->isNamed("int")) {
-      reportError(Node.getLoc(),
+      reportError(Node.getLoc(), ErrCode::ArithmeticOperand,
                   "Unary '~' (bitwise NOT) requires an integer operand, got '" +
                       OperandTy->getName() + "'.");
       setType(&Node, nullptr);
@@ -593,7 +593,7 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
                                   /*RelaxSelf=*/true, MutableArrAcc,
                                   MutableArrAcc->getLoc(), Unused)) {
           if (MutableArrAcc->ResolvedIndexSetTarget) {
-            reportError(Node.getLoc(),
+            reportError(Node.getLoc(), ErrCode::AmbiguousCall,
                         "Ambiguous 'operator[]=(" + ArrBaseTy->getName() +
                             ", " + ArrIndexTy->getName() + ", " +
                             RhsTy->getName() +
@@ -628,7 +628,7 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
     // ordinary binary operators to (tests/18_operator_overload/).
     if (!HandledViaOperatorIndexSet && ArrBaseTy &&
         needsOperatorIndex(ArrBaseTy.get())) {
-      reportError(Node.getLoc(),
+      reportError(Node.getLoc(), ErrCode::ArgumentType,
                   "No 'operator[]=' overload matches '" + ArrBaseTy->getName() +
                       "[" + (ArrIndexTy ? ArrIndexTy->getName() : "?") +
                       "] = " + (RhsTy ? RhsTy->getName() : "?") + "'.");
@@ -692,9 +692,10 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
             "'" + RHSVar->getName() + "' (assigned value) was declared "
             "with 'guess' and inferred as '" + RhsTy->getName() + "'.");
       reportError(Node.getLoc(),
+                  codeForMismatch(RhsTy.get(), nullptr, ErrCode::TypeMismatch),
                   "Cannot assign value of type '" + RhsTy->getName() +
                       "' to variable of type '" + LhsTy->getName() + "'.",
-                  Related, "", "", Hints);
+                  Related, hintForMismatch(RhsTy.get(), nullptr, ""), "", Hints);
     } else {
       // SEM-002 -- see visitVarDecl()'s identical comment (TypeCheckerDecl.cpp).
       checkLiteralRepresentable(Node.getRHS(), LhsTy.get(), Node.getLoc());
@@ -809,7 +810,7 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
       if (matchOperatorOverload(C, {LhsTy, RhsTy}, /*RelaxSelf=*/false, &Node,
                                 Node.getLoc(), R)) {
         if (Node.ResolvedOperatorTarget) {
-          reportError(Node.getLoc(),
+          reportError(Node.getLoc(), ErrCode::AmbiguousCall,
                       "Ambiguous 'operator " + OpToDisplayString(Op) + "=(" +
                           LhsTy->getName() + ", " + RhsTy->getName() +
                           ")' call: more than one visible overload matches "
@@ -828,7 +829,7 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
       // result must match the LHS's declared type exactly, the same "no
       // coercion" rule every other operator-overload call site enforces).
       if (OpResultTy && !sameTypeExact(OpResultTy.get(), LhsTy.get())) {
-        reportError(Node.getLoc(),
+        reportError(Node.getLoc(), ErrCode::TypeMismatch,
                     "'operator " + OpToDisplayString(Op) + "' returns '" +
                         OpResultTy->getName() + "', which cannot be "
                         "assigned back to '" + LhsTy->getName() +
@@ -859,7 +860,7 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
     // LhsTy a perfectly real type (operator[]'s return type) here, which
     // would otherwise defeat a "LhsTy is null" check entirely.
     if (ArrBaseTy && needsOperatorIndex(ArrBaseTy.get())) {
-      reportError(Node.getLoc(),
+      reportError(Node.getLoc(), ErrCode::UnsupportedOperation,
                   "Compound assignment through 'operator[]' is not "
                   "supported -- write 'x[i] = x[i] " + OpToDisplayString(Op) +
                       " " + (RhsTy ? RhsTy->getName() : "value") +
@@ -882,12 +883,12 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
   };
   if (isBitwiseOp(Op)) {
     if (LhsTy && !LhsTy->isNamed("int")) {
-      reportError(Node.getLoc(),
+      reportError(Node.getLoc(), ErrCode::ArithmeticOperand,
                   "Bitwise compound assignment requires an integer operand, "
                   "but the left operand is '" + LhsTy->getName() + "'.");
     }
     if (RhsTy && !RhsTy->isNamed("int")) {
-      reportError(Node.getLoc(),
+      reportError(Node.getLoc(), ErrCode::ArithmeticOperand,
                   "Bitwise compound assignment requires an integer operand, "
                   "but the right operand is '" + RhsTy->getName() + "'.");
     }
@@ -905,12 +906,12 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
     // reject that as "cannot assign double to int", which is wrong for this
     // one operator specifically.
     if (LhsTy && !LhsTy->isNumeric()) {
-      reportError(Node.getLoc(),
+      reportError(Node.getLoc(), ErrCode::ArithmeticOperand,
                   "Exponentiation compound assignment requires a numeric "
                   "operand, but the left operand is '" + LhsTy->getName() + "'.");
     }
     if (RhsTy && !RhsTy->isNumeric()) {
-      reportError(Node.getLoc(),
+      reportError(Node.getLoc(), ErrCode::ArithmeticOperand,
                   "Exponentiation compound assignment requires a numeric "
                   "operand, but the right operand is '" + RhsTy->getName() + "'.");
     }
@@ -929,7 +930,7 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
     // says why and a concrete rewrite.
     const VariableExprAST *LHSVar_i32 = findRootVariable(Node.getLHS());
     std::string VarSpelling = LHSVar_i32 ? LHSVar_i32->getName() : "x";
-    reportError(Node.getLoc(),
+    reportError(Node.getLoc(), ErrCode::UnsupportedOperation,
                 "Compound assignment '" + OpToDisplayString(Op) +
                     "=' is not supported on 'int32' -- int32 is never "
                     "itself an arithmetic result type.",
@@ -946,7 +947,7 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
         if (LHSVar_early && LHSVar_early->ResolvedSymbol)
           Related.push_back({toSourceLocation(LHSVar_early->ResolvedSymbol->DeclLoc),
                              "declared here"});
-        reportError(Node.getLoc(),
+        reportError(Node.getLoc(), ErrCode::TypeMismatch,
                     "Cannot assign value of type '" + ResultTy->getName() +
                         "' to variable of type '" + LhsTy->getName() + "'.",
                     Related);
@@ -1034,7 +1035,7 @@ void TypeChecker::visitPostfixExpr(PostfixExprAST &Node) {
   if (const auto *ArrAcc = dynamic_cast<const ArrayAccessExprAST *>(Node.getOperand())) {
     TurfTypePtr ArrBaseTy = getType(ArrAcc->getBase());
     if (ArrBaseTy && needsOperatorIndex(ArrBaseTy.get())) {
-      reportError(Node.getLoc(),
+      reportError(Node.getLoc(), ErrCode::UnsupportedOperation,
                   std::string(Dir) + " '" + OpSpelling + OpSpelling +
                       "' through 'operator[]' is not supported -- write "
                       "'x[i] = x[i] " + OpSpelling + " 1' explicitly instead.");
@@ -1059,7 +1060,7 @@ void TypeChecker::visitPostfixExpr(PostfixExprAST &Node) {
                                 Node.getLoc(), R)) {
         OpResultTy = R;
         if (Node.ResolvedOperatorTarget) {
-          reportError(Node.getLoc(),
+          reportError(Node.getLoc(), ErrCode::AmbiguousCall,
                       "Ambiguous " + std::string(Dir) + " 'operator " + OpSpelling + "(" +
                           OpTy->getName() +
                           ", int)' call: more than one visible overload "
@@ -1071,7 +1072,7 @@ void TypeChecker::visitPostfixExpr(PostfixExprAST &Node) {
     }
     if (Node.ResolvedOperatorTarget) {
       if (OpResultTy && !sameTypeExact(OpResultTy.get(), OpTy.get())) {
-        reportError(Node.getLoc(),
+        reportError(Node.getLoc(), ErrCode::TypeMismatch,
                     "'operator " + OpSpelling + "' returns '" +
                         OpResultTy->getName() +
                         "', which cannot be stored back into '" +
@@ -1095,7 +1096,7 @@ void TypeChecker::visitPostfixExpr(PostfixExprAST &Node) {
   if (!HandledViaOperator && OpTy && OpTy->isInt32()) {
     const VariableExprAST *OperandVar = findRootVariable(Node.getOperand());
     std::string VarSpelling = OperandVar ? OperandVar->getName() : "x";
-    reportError(Node.getLoc(),
+    reportError(Node.getLoc(), ErrCode::UnsupportedOperation,
                 std::string(Dir) + " '" + OpSpelling + OpSpelling +
                     "' is not supported on 'int32' -- int32 is never itself "
                     "an arithmetic result type.",
@@ -1107,7 +1108,7 @@ void TypeChecker::visitPostfixExpr(PostfixExprAST &Node) {
   }
 
   if (!HandledViaOperator && OpTy && !OpTy->isNumeric()) {
-    reportError(Node.getLoc(),
+    reportError(Node.getLoc(), ErrCode::ArithmeticOperand,
                 (std::string(Dir) + " operator requires a numeric operand, got '") +
                     OpTy->getName() + "'.");
   }
@@ -1174,7 +1175,7 @@ void TypeChecker::visitCast(CastExprAST &Node) {
       if (Lit->isInteger()) {
         long long V = Lit->getIntVal();
         if (V < 0 || V >= ET->numVariants()) {
-          reportError(Node.getLoc(),
+          reportError(Node.getLoc(), ErrCode::EnumValueOutOfRange,
                       "Value " + std::to_string(V) + " is out of range for enum '" +
                           ET->getName() + "' (valid range: 0 to " +
                           std::to_string(ET->numVariants() - 1) + ").",
@@ -1268,7 +1269,13 @@ void TypeChecker::visitCast(CastExprAST &Node) {
 
       if (!Legal) {
 #ifndef TYPECHECKER_NO_ERRORS
-        TypeError(Node.getLoc(), "Cannot explicitly cast '" + SrcName +
+        // `x to string` of something with no text form is E065, whose page
+        // lists what DOES convert; E065 was raised only from a Codegen backstop
+        // this check always pre-empts, so it was documented and unreachable.
+        TypeError(Node.getLoc(),
+                  DstName == "string" ? ErrCode::StringConversion
+                                      : ErrCode::InvalidCast,
+                  "Cannot explicitly cast '" + SrcName +
                                       "' to '" + DstName + "'")
             .raise();
 #else
@@ -1459,7 +1466,7 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
       // unguarded one is a duplicate -- and only an unguarded one is
       // remembered for the next header to collide with.
       if (PatternKey && !Guard && !SeenPatternKeys.insert(*PatternKey).second) {
-        reportError(Arm.Loc,
+        reportError(Arm.Loc, ErrCode::DuplicateMatchArm,
                     "Duplicate 'matches' pattern: this value is already "
                     "handled by an earlier arm in this compare block, so "
                     "this arm can never run.",

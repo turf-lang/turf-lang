@@ -18,4 +18,4 @@ the catch-all.
 
 A guarded header doesn't count as a catch-all, because its guard may be false.
 A duplicate value pattern (`matches 1:` twice) is a different and still
-hard error.
+hard error: see E133.

@@ -1,0 +1,19 @@
+The same value is matched twice in one `compare`
+
+A `compare` tries its `matches` arms from top to bottom and runs the first one that fits. If a later arm matches a value an earlier arm already handles, the later arm can never run -- and Turf treats that as a mistake rather than letting dead code sit quietly, because it nearly always means one of the two arms was meant to match something else.
+
+    compare day {
+        matches 1: ... done
+        matches 2: ... done
+        matches 1: ... done          // 1 is already handled above
+    }
+
+Either change the repeated value to the one you meant, delete the extra arm, or -- if both arms should do the same thing -- stack them so they share one body:
+
+    compare day {
+        matches 1:
+        matches 7: ... done          // 1 or 7
+        matches 2: ... done
+    }
+
+(A different situation: an arm that can never run because an earlier *catch-all* arm matches everything -- `matches _:` -- is only a warning, E094.)

@@ -1,0 +1,18 @@
+That operation isn't supported in this form
+
+Some shorthand forms don't work in places where the longer way does. The message says which form and shows the longer way to write it.
+
+`int32` is a storage type: arithmetic on it produces an `int`, never another `int32`, so the shorthand that would store the result straight back isn't available:
+
+    mut x: int32 = 5 to int32;
+    x += 1;                       // not supported on int32
+
+Write the arithmetic out and convert the result back yourself:
+
+    x = (x + 1) to int32;
+
+The same applies to `x++` and `x--` on an `int32`.
+
+Compound assignment through an `operator[]` that you defined (`grid[i] += 1`) isn't supported either. Write the read and the write out explicitly:
+
+    grid[i] = grid[i] + 1;

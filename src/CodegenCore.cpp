@@ -1981,7 +1981,7 @@ Value *CastToType(Value *Val, const TurfType *DestType,
 
   // Strings cannot be cast to/from non-pointer types implicitly
   if (SrcType->isNamed("string") || DestType->isNamed("string")) {
-    TypeError(CurLoc, "Cannot cast between string and non-pointer types. SrcType: " + SrcType->getName() + ", DestType: " + DestType->getName() + ", Context Name: " + Name)
+    TypeError(CurLoc, ErrCode::InvalidCast, "Cannot cast between string and non-pointer types. SrcType: " + SrcType->getName() + ", DestType: " + DestType->getName() + ", Context Name: " + Name)
         .raise();
     return Val;
   }

@@ -138,8 +138,17 @@ public:
   // being compared/assigned between two types at all. When non-empty,
   // this overrides that header the same way CustomHint overrides the
   // default hint.
+  //
+  // Code (issue #263): the ErrCode:: (ErrorCodes.h) naming WHICH mistake this
+  // is. Every diagnostic used to be the one `TypeError` class and so the one
+  // code E066, with the banner as free text -- a wrong argument count, a
+  // missing initializer and a raw pointer outside `unsafe` all told a beginner
+  // "type mismatch", and the dedicated codes written for them (E056 E057 E064
+  // E067 ...) sat documented and unraised. The code is the second parameter of
+  // every report, never defaulted, so a new type error cannot be filed without
+  // deciding which mistake it is.
   using ErrorHandler =
-      std::function<void(SourceLocation, const std::string &,
+      std::function<void(SourceLocation, const char *, const std::string &,
                          const std::vector<RelatedLocation> &,
                          const std::string &, const std::string &,
                          const SLM::DiagnosticHints &)>;
@@ -341,11 +350,23 @@ private:
   /// doc comment (ErrorCategory.h). Empty for the overwhelming majority of
   /// call sites, which is a complete no-op, identical to before this param
   /// existed.
-  void reportError(SourceLocation Loc, const std::string &Msg,
+  void reportError(SourceLocation Loc, const char *Code, const std::string &Msg,
                    const std::vector<RelatedLocation> &Related = {},
                    const std::string &CustomHint = "",
                    const std::string &CustomBanner = "",
                    const SLM::DiagnosticHints &Hints = {});
+
+  /// A value of type `void` used where a value is needed -- initialising,
+  /// assigning, returning, an operand -- is its own mistake (E067), not "type
+  /// mismatch": there is no type to convert, there is no value at all. Every
+  /// mismatch site that has both types passes them here so a void on either
+  /// side picks E067 and the hint that says what to do about it; otherwise
+  /// the caller's own code and hint stand. (issue #263: E067's page described
+  /// exactly this, and the code was raised for `heap(void)` only.)
+  static const char *codeForMismatch(const TurfType *A, const TurfType *B,
+                                     const char *Default);
+  static std::string hintForMismatch(const TurfType *A, const TurfType *B,
+                                     const std::string &Default);
 
   // ── `unsafe { }` gate (issue #238) ──────────────────────────────────────
 

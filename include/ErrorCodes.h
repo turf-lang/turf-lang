@@ -71,11 +71,86 @@ struct ErrorCodeEntry {
   bool Important = false;
 };
 
+// The codes the raw LogErrorAt() path (Lexer.h) uses -- named, so a call site
+// reads `ErrCode::MissingSemicolon`, not a magic "E102" that nothing checks.
+// Each constant is also the first column of its row in AllErrorCodes below
+// (one source of truth), and tests/api/analysis_test.cpp checks that every
+// one resolves. The first block is the SYNTAX FAMILIES added for issue #263;
+// the last block names pre-existing codes a raw site reuses because they
+// already describe that exact mistake (their `docs/errors/codes/` pages are
+// written for it). Never reassign a number: append, like the table.
+namespace ErrCode {
+inline constexpr const char *UnterminatedLiteral = "E099";
+inline constexpr const char *InvalidEscapeSequence = "E100";
+inline constexpr const char *InvalidCharLiteral = "E101";
+inline constexpr const char *MissingSemicolon = "E102";
+inline constexpr const char *UnexpectedToken = "E103";
+inline constexpr const char *UnclosedDelimiter = "E104";
+inline constexpr const char *MissingComma = "E105";
+inline constexpr const char *MissingColon = "E106";
+inline constexpr const char *MissingOpeningDelimiter = "E107";
+inline constexpr const char *ExpectedName = "E108";
+inline constexpr const char *ExpectedType = "E109";
+inline constexpr const char *ExpectedKeyword = "E110";
+inline constexpr const char *NestingTooDeep = "E111";
+inline constexpr const char *VoidTypeNotAllowed = "E112";
+inline constexpr const char *RemovedSyntax = "E113";
+inline constexpr const char *DuplicateMember = "E114";
+inline constexpr const char *InvalidOperatorDeclaration = "E115";
+inline constexpr const char *ExternFunctionBody = "E116";
+inline constexpr const char *InvalidErrorDeclaration = "E117";
+inline constexpr const char *StatementOutsideFunction = "E118";
+inline constexpr const char *MissingEntryPoint = "E119";
+inline constexpr const char *InvalidLoopForm = "E120";
+inline constexpr const char *InternalCompilerError = "E121";
+inline constexpr const char *NonAddressableExpression = "E122";
+inline constexpr const char *InvalidArraySize = "E123";
+// The TypeChecker's (TypeChecker::reportError() requires one, issue #263):
+// new families first, then pre-existing rows whose class was never raised
+// (E002 E003 E004 E056 E057 E064 E067) or whose class is raised elsewhere.
+inline constexpr const char *InvalidComparison = "E124";
+inline constexpr const char *AmbiguousCall = "E125";
+inline constexpr const char *UnsupportedOperation = "E126";
+inline constexpr const char *EnumValueOutOfRange = "E127";
+inline constexpr const char *MissingInitializer = "E128";
+inline constexpr const char *NothingToInfer = "E129";
+inline constexpr const char *RawPointerOutsideUnsafe = "E130";
+inline constexpr const char *MethodOnNonStruct = "E131";
+inline constexpr const char *InvalidRecover = "E132";
+inline constexpr const char *ArrayNonIntegerIndex = "E002";
+inline constexpr const char *ArraySizeMismatch = "E003";
+inline constexpr const char *ArrayTypeMismatch = "E004";
+inline constexpr const char *WrongArity = "E044";
+inline constexpr const char *ArgumentType = "E056";
+inline constexpr const char *ArithmeticOperand = "E057";
+inline constexpr const char *ReturnTypeMismatch = "E064";
+inline constexpr const char *TypeMismatch = "E066";
+inline constexpr const char *VoidValue = "E067";
+inline constexpr const char *DuplicateMatchArm = "E133";
+inline constexpr const char *StringConversion = "E065";
+inline constexpr const char *InvalidCast = "E134";
+inline constexpr const char *NotCallable = "E135";
+inline constexpr const char *InvalidModuleQualifier = "E136";
+inline constexpr const char *NotAValue = "E137";
+inline constexpr const char *MissingTypeArguments = "E138";
+inline constexpr const char *ErrorPayload = "E096";
+// Pre-existing codes a raw site reuses (see above).
+inline constexpr const char *ExportMutNotSupported = "E021";
+inline constexpr const char *ExportNonConstantInitializer = "E022";
+inline constexpr const char *UnknownStructField = "E068";
+inline constexpr const char *OperatorTemporaryWrite = "E098";
+inline constexpr const char *ModuleArityOrType = "E025";
+inline constexpr const char *DuplicateDeclaration = "E033";
+} // namespace ErrCode
+
 inline const ErrorCodeEntry AllErrorCodes[] = {
     {"E001", "ArrayBoundsError", "Array bounds", SLM::ErrorCategory::ARRAY_ERROR},
-    {"E002", "ArrayNonIntegerIndexError", "Array non integer index", SLM::ErrorCategory::ARRAY_ERROR},
-    {"E003", "ArraySizeMismatchError", "Array size mismatch", SLM::ErrorCategory::ARRAY_ERROR},
-    {"E004", "ArrayTypeMismatchError", "Array type mismatch", SLM::ErrorCategory::ARRAY_ERROR},
+    // E002/E003/E004 had classes and pages and nothing raised them (found by
+    // scripts/error_codes_check.sh, issue #263); the TypeChecker raises them now,
+    // through TypeError's code override -- the dead classes are deleted.
+    {ErrCode::ArrayNonIntegerIndex, "ArrayNonIntegerIndexError", "Index must be an integer", SLM::ErrorCategory::ARRAY_ERROR},
+    {ErrCode::ArraySizeMismatch, "ArraySizeMismatchError", "Array size mismatch", SLM::ErrorCategory::ARRAY_ERROR},
+    {ErrCode::ArrayTypeMismatch, "ArrayTypeMismatchError", "Array element type mismatch", SLM::ErrorCategory::ARRAY_ERROR},
     {"E005", "ForEachNonArrayError", "For each non array", SLM::ErrorCategory::ARRAY_ERROR},
     {"E006", "ForEachUnsizedArrayError", "For each unsized array", SLM::ErrorCategory::ARRAY_ERROR},
     {"E007", "ControlFlowError", "Control flow", SLM::ErrorCategory::CONTROL_FLOW},
@@ -86,7 +161,12 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     {"E012", "StatementAfterTerminatorError", "Statement after terminator", SLM::ErrorCategory::CONTROL_FLOW},
     {"E013", "UnreachableCodeError", "Unreachable code", SLM::ErrorCategory::CONTROL_FLOW},
     {"E014", "KeywordError", "Keyword", SLM::ErrorCategory::SYNTAX_ERROR},
-    {"E015", "SyntaxError", "Syntax", SLM::ErrorCategory::SYNTAX_ERROR},
+    // RETIRED (issue #263): one code for every "the shape of this code is wrong"
+    // message told a beginner nothing about WHICH shape. Nothing raises E015
+    // any more -- SyntaxError now takes its code from the caller (ErrCode::,
+    // E099-E123) -- and the number is never reassigned. The row stays so an old
+    // log's `turf --explain E015` still answers, pointing at the specific codes.
+    {"E015", "SyntaxError", "Syntax (retired: now E099-E123)", SLM::ErrorCategory::SYNTAX_ERROR},
     {"E016", "BareErrorAsBindingError", "Bare error as binding", SLM::ErrorCategory::CONTROL_FLOW},
     {"E017", "DoubleFreeError", "Double free", SLM::ErrorCategory::MEMORY_ERROR, true},
     {"E018", "UseAfterFreeError", "Use after free", SLM::ErrorCategory::MEMORY_ERROR, true},
@@ -96,7 +176,7 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     {"E022", "ExportNonConstantInitializerError", "Export non constant initializer", SLM::ErrorCategory::DECLARATION},
     {"E023", "ExportOutsideTopLevelError", "Export outside top level", SLM::ErrorCategory::DECLARATION},
     {"E024", "ImportSymbolCollisionError", "Import symbol collision", SLM::ErrorCategory::DECLARATION},
-    {"E025", "ModuleArityOrTypeError", "Module arity or type", SLM::ErrorCategory::FUNCTION_SIGNATURE},
+    {ErrCode::ModuleArityOrType, "ModuleArityOrTypeError", "No matching overload", SLM::ErrorCategory::FUNCTION_SIGNATURE},
     {"E026", "ModuleMethodNotFoundError", "Module method not found", SLM::ErrorCategory::GENERAL},
     {"E027", "ModuleNotFoundError", "Module not found", SLM::ErrorCategory::DECLARATION},
     {"E028", "OperatorBuiltinPairError", "Operator builtin pair", SLM::ErrorCategory::DECLARATION},
@@ -115,7 +195,7 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     {"E041", "UnknownFunctionError", "Unknown function", SLM::ErrorCategory::UNDECLARED_VAR},
     {"E042", "UnknownTypeError", "Unknown type", SLM::ErrorCategory::DECLARATION},
     {"E043", "UseBeforeDeclarationError", "Use before declaration", SLM::ErrorCategory::UNDECLARED_VAR},
-    {"E044", "WrongArityError", "Wrong arity", SLM::ErrorCategory::FUNCTION_SIGNATURE},
+    {ErrCode::WrongArity, "WrongArityError", "Wrong number of arguments", SLM::ErrorCategory::FUNCTION_SIGNATURE},
     {"E045", "ConstructorCalledOnInstanceError", "Constructor called on instance", SLM::ErrorCategory::DECLARATION},
     {"E046", "ConstructorCannotBeStaticError", "Constructor cannot be static", SLM::ErrorCategory::DECLARATION},
     {"E047", "DefaultConstructorArityError", "Default constructor arity", SLM::ErrorCategory::FUNCTION_SIGNATURE},
@@ -126,19 +206,24 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     {"E052", "StaticMethodCalledOnInstanceError", "Static method called on instance", SLM::ErrorCategory::DECLARATION},
     {"E053", "StaticOutsideStructError", "Static outside struct", SLM::ErrorCategory::DECLARATION},
     {"E054", "StructMethodNotFoundError", "Struct method not found", SLM::ErrorCategory::UNDECLARED_VAR},
-    {"E055", "AbsArgTypeError", "Abs arg type", SLM::ErrorCategory::BUILTIN_FUNCTION},
-    {"E056", "ArgumentTypeError", "Argument type", SLM::ErrorCategory::TYPE_MISMATCH},
-    {"E057", "ArithmeticError", "Arithmetic", SLM::ErrorCategory::ARITHMETIC},
+    // RETIRED (issue #263): E055/E063 described `abs`/`power` as compiler
+    // intrinsics. They have been ordinary overloaded stdlib functions for a long
+    // time, so a bad argument is now the ordinary E056 -- and the codes sat
+    // documented, raised by nothing. Numbers are never reassigned; the pages
+    // say so and point at E056.
+    {"E055", "AbsArgTypeError", "Abs arg type (retired: now E056)", SLM::ErrorCategory::BUILTIN_FUNCTION},
+    {ErrCode::ArgumentType, "ArgumentTypeError", "Wrong argument type", SLM::ErrorCategory::TYPE_MISMATCH},
+    {ErrCode::ArithmeticOperand, "ArithmeticError", "Operator applied to the wrong kind of value", SLM::ErrorCategory::ARITHMETIC},
     {"E058", "CompareError", "Compare", SLM::ErrorCategory::CONTROL_FLOW},
     {"E059", "CompareTypeError", "Compare type", SLM::ErrorCategory::TYPE_MISMATCH},
     {"E060", "ImmutableAssignmentError", "Immutable assignment", SLM::ErrorCategory::DECLARATION},
     {"E061", "InvalidAssignmentTargetError", "Invalid assignment target", SLM::ErrorCategory::DECLARATION},
     {"E062", "NullAssignmentError", "Null assignment", SLM::ErrorCategory::TYPE_MISMATCH},
-    {"E063", "PowerArgTypeError", "Power arg type", SLM::ErrorCategory::BUILTIN_FUNCTION},
-    {"E064", "ReturnTypeMismatchError", "Return type mismatch", SLM::ErrorCategory::TYPE_MISMATCH},
+    {"E063", "PowerArgTypeError", "Power arg type (retired: now E056)", SLM::ErrorCategory::BUILTIN_FUNCTION},
+    {ErrCode::ReturnTypeMismatch, "ReturnTypeMismatchError", "Wrong return type", SLM::ErrorCategory::TYPE_MISMATCH},
     {"E065", "StringConversionError", "String conversion", SLM::ErrorCategory::STRING_CONVERSION},
     {"E066", "TypeError", "Type", SLM::ErrorCategory::TYPE_MISMATCH},
-    {"E067", "VoidValueError", "Void value", SLM::ErrorCategory::FUNCTION_SIGNATURE},
+    {ErrCode::VoidValue, "VoidValueError", "A void value can't be used here", SLM::ErrorCategory::FUNCTION_SIGNATURE},
     // Appended after the initial 67-entry generation (see this file's own
     // doc comment on why new entries go at the end, not resorted in).
     {"E068", "UnknownStructFieldError", "Unknown struct field", SLM::ErrorCategory::UNDECLARED_VAR},
@@ -261,6 +346,66 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     {"E097", "GenericOperatorError", "Invalid generic operator", SLM::ErrorCategory::DECLARATION},
     // LEC-006: a write into the by-value result of an `operator[]` read.
     {"E098", "OperatorTemporaryWriteError", "Write to a temporary", SLM::ErrorCategory::TYPE_MISMATCH},
+
+    // Issue #263 (parse-error codes): the SYNTAX FAMILIES. The 181 diagnostics
+    // the Lexer/Parser/Codegen/driver used to print through the raw, untyped
+    // LogErrorAt() path had no C++ class and so, because a code is looked up
+    // BY CLASS, no code and no `--explain` page -- every parse error a beginner
+    // can hit was a dead end. These rows are not classes: each is one KIND of
+    // mistake (a missing ';', a bracket that is never closed, a name that was
+    // expected) shared by every site that makes it, so a beginner learns the
+    // kind once. The "ClassName" column is only the label `--explain` prints;
+    // LogErrorAt() takes the code from the ErrCode:: constants above, and
+    // LogErrorAt() REQUIRES one, so a raw diagnostic can never be codeless again.
+    // Each category is the family's dominant one; a call site keeps passing its
+    // own SLM category, exactly as before.
+    {ErrCode::UnterminatedLiteral, "UnterminatedLiteralError", "Unterminated string or character literal", SLM::ErrorCategory::SYNTAX_ERROR},
+    {ErrCode::InvalidEscapeSequence, "InvalidEscapeSequenceError", "Invalid escape sequence", SLM::ErrorCategory::SYNTAX_ERROR},
+    {ErrCode::InvalidCharLiteral, "InvalidCharLiteralError", "Invalid character literal", SLM::ErrorCategory::SYNTAX_ERROR},
+    {ErrCode::MissingSemicolon, "MissingSemicolonError", "Missing semicolon", SLM::ErrorCategory::SYNTAX_ERROR},
+    {ErrCode::UnexpectedToken, "UnexpectedTokenError", "Unexpected token", SLM::ErrorCategory::SYNTAX_ERROR},
+    {ErrCode::UnclosedDelimiter, "UnclosedDelimiterError", "Unclosed bracket, brace or parenthesis", SLM::ErrorCategory::SYNTAX_ERROR},
+    {ErrCode::MissingComma, "MissingCommaError", "Missing comma", SLM::ErrorCategory::SYNTAX_ERROR},
+    {ErrCode::MissingColon, "MissingColonError", "Missing colon", SLM::ErrorCategory::SYNTAX_ERROR},
+    {ErrCode::MissingOpeningDelimiter, "MissingOpeningDelimiterError", "Missing opening brace or parenthesis", SLM::ErrorCategory::SYNTAX_ERROR},
+    {ErrCode::ExpectedName, "ExpectedNameError", "Expected a name", SLM::ErrorCategory::SYNTAX_ERROR},
+    {ErrCode::ExpectedType, "ExpectedTypeError", "Expected a type", SLM::ErrorCategory::SYNTAX_ERROR},
+    {ErrCode::ExpectedKeyword, "ExpectedKeywordError", "Expected a specific word or symbol", SLM::ErrorCategory::SYNTAX_ERROR},
+    {ErrCode::NestingTooDeep, "NestingTooDeepError", "Nested too deeply", SLM::ErrorCategory::SYNTAX_ERROR},
+    {ErrCode::VoidTypeNotAllowed, "VoidTypeNotAllowedError", "void used as a type", SLM::ErrorCategory::DECLARATION},
+    {ErrCode::RemovedSyntax, "RemovedSyntaxError", "Syntax that no longer exists", SLM::ErrorCategory::DECLARATION},
+    {ErrCode::DuplicateMember, "DuplicateMemberError", "Duplicate member", SLM::ErrorCategory::DECLARATION},
+    {ErrCode::InvalidOperatorDeclaration, "InvalidOperatorDeclarationError", "Invalid operator declaration", SLM::ErrorCategory::DECLARATION},
+    {ErrCode::ExternFunctionBody, "ExternFunctionBodyError", "extern function with a body", SLM::ErrorCategory::DECLARATION},
+    {ErrCode::InvalidErrorDeclaration, "InvalidErrorDeclarationError", "Invalid error declaration", SLM::ErrorCategory::DECLARATION},
+    {ErrCode::StatementOutsideFunction, "StatementOutsideFunctionError", "Statement outside a function", SLM::ErrorCategory::SYNTAX_ERROR},
+    {ErrCode::MissingEntryPoint, "MissingEntryPointError", "No main function", SLM::ErrorCategory::DECLARATION},
+    {ErrCode::InvalidLoopForm, "InvalidLoopFormError", "Unsupported loop form", SLM::ErrorCategory::CONTROL_FLOW},
+    {ErrCode::InternalCompilerError, "InternalCompilerError", "Internal compiler error", SLM::ErrorCategory::GENERAL, true},
+    {ErrCode::NonAddressableExpression, "NonAddressableExpressionError", "Cannot take the address of this", SLM::ErrorCategory::GENERAL},
+    {ErrCode::InvalidArraySize, "InvalidArraySizeError", "Invalid array size", SLM::ErrorCategory::ARRAY_ERROR},
+
+    // The TypeChecker's kinds that had no code of their own (all of them were
+    // E066 "Type mismatch!" with a free-text banner). Same convention as the
+    // syntax families above: a kind of mistake, not a class.
+    {ErrCode::InvalidComparison, "InvalidComparisonError", "Values can't be compared", SLM::ErrorCategory::TYPE_MISMATCH},
+    {ErrCode::AmbiguousCall, "AmbiguousCallError", "Ambiguous call", SLM::ErrorCategory::FUNCTION_SIGNATURE},
+    {ErrCode::UnsupportedOperation, "UnsupportedOperationError", "Operation not supported here", SLM::ErrorCategory::TYPE_MISMATCH},
+    {ErrCode::EnumValueOutOfRange, "EnumValueOutOfRangeError", "Enum value out of range", SLM::ErrorCategory::ARITHMETIC},
+    {ErrCode::MissingInitializer, "MissingInitializerError", "Missing initializer", SLM::ErrorCategory::DECLARATION},
+    {ErrCode::NothingToInfer, "NothingToInferError", "Nothing to infer a type from", SLM::ErrorCategory::DECLARATION},
+    {ErrCode::RawPointerOutsideUnsafe, "RawPointerOutsideUnsafeError", "Raw pointer outside unsafe", SLM::ErrorCategory::MEMORY_ERROR, true},
+    {ErrCode::MethodOnNonStruct, "MethodOnNonStructError", "Method called on a non-struct", SLM::ErrorCategory::UNDECLARED_VAR},
+    {ErrCode::InvalidRecover, "InvalidRecoverError", "Invalid recover", SLM::ErrorCategory::CONTROL_FLOW},
+    {ErrCode::DuplicateMatchArm, "DuplicateMatchArmError", "Duplicate matches pattern", SLM::ErrorCategory::CONTROL_FLOW},
+
+    // The Resolver/Codegen constructed TypeError directly (not through
+    // TypeChecker::reportError), so they were E066 too: five more kinds.
+    {ErrCode::InvalidCast, "InvalidCastError", "That conversion isn't allowed", SLM::ErrorCategory::TYPE_MISMATCH},
+    {ErrCode::NotCallable, "NotCallableError", "Not callable", SLM::ErrorCategory::FUNCTION_SIGNATURE},
+    {ErrCode::InvalidModuleQualifier, "InvalidModuleQualifierError", "Invalid module qualifier", SLM::ErrorCategory::DECLARATION},
+    {ErrCode::NotAValue, "NotAValueError", "Not a value", SLM::ErrorCategory::FUNCTION_SIGNATURE},
+    {ErrCode::MissingTypeArguments, "MissingTypeArgumentsError", "Missing type arguments", SLM::ErrorCategory::DECLARATION},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);
@@ -268,9 +413,10 @@ inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllE
 namespace ErrorCodes {
 
 // Returns nullptr if ClassName has no registered code (e.g. a TurfError
-// subclass added after this table was last regenerated, or a diagnostic
-// raised through the raw, untyped LogErrorAt() path that has no TurfError
-// instance -- and therefore no C++ class -- behind it at all).
+// subclass added after this table was last regenerated). A diagnostic raised
+// through the raw LogErrorAt() path never reaches this lookup at all: it has no
+// TurfError class to look up, so it names its code directly (ErrCode::, above),
+// which LogErrorAt() requires.
 inline const ErrorCodeEntry *lookupByClassName(const std::string &ClassName) {
   for (const auto &Entry : AllErrorCodes)
     if (ClassName == Entry.ClassName)

@@ -1,0 +1,21 @@
+The same name is declared twice in one declaration
+
+Inside a struct, an enum, an `error` type or a `machine`, every member needs its own name. Turf found a second member with a name that was already taken, and with two of them it couldn't tell which one you meant.
+
+    struct User {
+        name: string,
+        name: int            // `name` is already a field
+    }
+
+    enum Color { Red, Green, Red }
+
+    machine Door { Open -> Closed, Open -> Closed }     // the same transition twice
+
+Rename one, or delete the extra one:
+
+    struct User {
+        name: string,
+        age: int
+    }
+
+(This is about *members*. Declaring two variables with the same name in one scope is a different mistake -- see E033.)

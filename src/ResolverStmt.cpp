@@ -102,7 +102,7 @@ void Resolver::visitVarDecl(VarDeclExprAST &Node) {
       DuplicateDeclarationError(Node.getLoc(), Node.getName(), PrevLoc).raise();
     } else {
       // Fallback (should not happen, but be safe).
-      SyntaxError(Node.getLoc(), "Variable '" + Node.getName() +
+      SyntaxError(Node.getLoc(), ErrCode::DuplicateDeclaration, "Variable '" + Node.getName() +
                                      "' is already declared in this scope.")
           .raise();
     }
@@ -183,7 +183,7 @@ void Resolver::visitFor(ForExprAST &Node) {
       SourceLocation PrevLoc{Prev->DeclLoc.Line, Prev->DeclLoc.Col};
       DuplicateDeclarationError(ErrLoc, Node.getVarName(), PrevLoc).raise();
     } else {
-      SyntaxError(ErrLoc, "Loop variable '" + Node.getVarName() +
+      SyntaxError(ErrLoc, ErrCode::DuplicateDeclaration, "Loop variable '" + Node.getVarName() +
                                "' conflicts with an existing declaration.")
           .raise();
     }
@@ -227,7 +227,7 @@ void Resolver::visitForEach(ForEachExprAST &Node) {
       SourceLocation PrevLoc{Prev->DeclLoc.Line, Prev->DeclLoc.Col};
       DuplicateDeclarationError(ErrLoc, Node.getValueVarName(), PrevLoc).raise();
     } else {
-      SyntaxError(ErrLoc, "Loop variable '" + Node.getValueVarName() +
+      SyntaxError(ErrLoc, ErrCode::DuplicateDeclaration, "Loop variable '" + Node.getValueVarName() +
                                "' conflicts with an existing declaration.")
           .raise();
     }
@@ -248,7 +248,7 @@ void Resolver::visitForEach(ForEachExprAST &Node) {
         SourceLocation PrevLoc{Prev->DeclLoc.Line, Prev->DeclLoc.Col};
         DuplicateDeclarationError(ErrLoc, Node.getIndexVarName(), PrevLoc).raise();
       } else {
-        SyntaxError(ErrLoc, "Loop variable '" + Node.getIndexVarName() +
+        SyntaxError(ErrLoc, ErrCode::DuplicateDeclaration, "Loop variable '" + Node.getIndexVarName() +
                                  "' conflicts with an existing declaration.")
             .raise();
       }

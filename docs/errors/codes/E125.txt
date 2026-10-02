@@ -1,0 +1,19 @@
+More than one definition fits this call equally well
+
+Turf found the function or operator you used -- twice. Two definitions both match this call *exactly*, so Turf can't know which one you mean, and it refuses to guess: the answer would depend on the order of your imports, which is the kind of thing that silently changes when someone reorders two lines.
+
+The usual way to meet it is two modules that each define the same helper:
+
+    import ufcs_ambiguous_a_module;     // defines describe_int(n: int)
+    import ufcs_ambiguous_b_module;     // defines describe_int(n: int) too
+
+    mut r: string = n.describe_int();   // which one?
+
+Any of these removes the ambiguity:
+
+- Remove one of the two imports, if you don't need both.
+- Import only the names you want from each: `import a::[describe_int];`.
+- Call the one you mean through its module: `a::describe_int(n)`.
+- Rename one of the definitions, if you wrote both.
+
+Operators have the same rule: if two visible `operator+(Vec, Vec)` definitions exist, `a + b` is ambiguous until one of them goes.

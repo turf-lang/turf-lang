@@ -1,0 +1,13 @@
+A function can't be used as a value here
+
+`io::printline` on its own is the function itself, not a result. Turf can't store it in a variable or pass it around in this form -- you have to *call* it, with parentheses and arguments, where you need what it produces:
+
+    import io;
+
+    mut f: int = io::printline;             // the function itself, not a value
+
+    io::printline("hello");                 // a call: this runs it
+
+If you need to hand behaviour to something else, wrap the call in your own function and call that function where it's needed:
+
+    fn greet(): void { io::printline("hello"); }

@@ -120,7 +120,7 @@ Value *VarDeclExprAST::codegen() {
     if (Prev) {
       DuplicateDeclarationError(Loc, Name, Prev->DeclLoc).raise();
     } else {
-      SyntaxError(Loc, "Variable already declared").raise();
+      SyntaxError(Loc, ErrCode::DuplicateDeclaration, "Variable already declared").raise();
     }
     return nullptr;
   }
@@ -319,7 +319,7 @@ Value *AssignmentExprAST::codegen() {
         // backstop so a path that skips that check cannot silently drop the
         // write (a null here reads to every caller as "an error was already
         // reported").
-        LogErrorAt(Loc,
+        LogErrorAt(Loc, ErrCode::OperatorTemporaryWrite,
                    "Cannot assign through 'operator[]=' on a temporary: the "
                    "container being indexed is the result of another "
                    "'operator[]' call, so the write would only change a copy."

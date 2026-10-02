@@ -44,12 +44,16 @@ namespace {
 
 #ifndef TYPECHECKER_NO_ERRORS
 /// Default error handler: uses the real TypeError class from Errors.h.
-void productionErrorHandler(SourceLocation Loc, const std::string &Msg,
+void productionErrorHandler(SourceLocation Loc, const char *Code,
+                            const std::string &Msg,
                             const std::vector<RelatedLocation> &Related,
                             const std::string &CustomHint,
                             const std::string &CustomBanner,
                             const SLM::DiagnosticHints &Hints) {
-  TypeError Err(Loc, Msg, CustomHint, CustomBanner);
+  // The code is the site's (see TypeChecker.h's ErrorHandler doc comment).
+  // TypeError's constructor derives the heading, the default hint and the SLM
+  // category from it (ErrorsType.h), the same for every construction of it.
+  TypeError Err(Loc, Code, Msg, CustomHint, CustomBanner);
   for (const auto &R : Related)
     Err.withRelated(R.Loc, R.Description);
   for (const auto &Fact : Hints.KnownTypes)
@@ -59,7 +63,7 @@ void productionErrorHandler(SourceLocation Loc, const std::string &Msg,
 #else
 /// Stub used when TYPECHECKER_NO_ERRORS is defined (unit-test builds).
 /// Throws std::runtime_error so tests can catch it with EXPECT_THROWS.
-void unitTestErrorHandler(SourceLocation, const std::string &Msg,
+void unitTestErrorHandler(SourceLocation, const char *, const std::string &Msg,
                           const std::vector<RelatedLocation> &,
                           const std::string &, const std::string &,
                           const SLM::DiagnosticHints &) {
@@ -134,14 +138,29 @@ void TypeChecker::setType(const ExprAST *Node, TurfTypePtr Ty) {
 }
 
 
-void TypeChecker::reportError(SourceLocation Loc, const std::string &Msg,
+const char *TypeChecker::codeForMismatch(const TurfType *A, const TurfType *B,
+                                         const char *Default) {
+  return (A && A->isVoid()) || (B && B->isVoid()) ? ErrCode::VoidValue : Default;
+}
+
+std::string TypeChecker::hintForMismatch(const TurfType *A, const TurfType *B,
+                                         const std::string &Default) {
+  if ((A && A->isVoid()) || (B && B->isVoid()))
+    return "A function declared ': void' produces no value, so there is "
+           "nothing to use here. Call it as a statement on its own, or give "
+           "the function a return type and a `return` that gives the value.";
+  return Default;
+}
+
+void TypeChecker::reportError(SourceLocation Loc, const char *Code,
+                              const std::string &Msg,
                               const std::vector<RelatedLocation> &Related,
                               const std::string &CustomHint,
                               const std::string &CustomBanner,
                               const SLM::DiagnosticHints &Hints) {
   HadError_ = true;
   if (ErrorHandler_)
-    ErrorHandler_(Loc, Msg, Related, CustomHint, CustomBanner, Hints);
+    ErrorHandler_(Loc, Code, Msg, Related, CustomHint, CustomBanner, Hints);
 }
 
 
@@ -170,7 +189,7 @@ bool TypeChecker::checkUnsafeGate(const TurfType *T, SourceLocation Loc,
   const auto *PtrTy = dynamic_cast<const TurfPointerType *>(T);
   std::string SuggestedRef = PtrTy ? "&" + PtrTy->getPointee()->getName() : "&T";
   reportError(
-      Loc,
+      Loc, ErrCode::RawPointerOutsideUnsafe,
       "Raw pointer type '" + T->getName() +
           "' cannot be used outside an 'unsafe' block.",
       {},
@@ -196,7 +215,7 @@ void TypeChecker::checkNoRawPointersInSignature(const FuncDefExprAST &Node) {
       continue;
     if (isRawPointer(Param.Type.get())) {
       reportError(
-          Node.getLoc(),
+          Node.getLoc(), ErrCode::RawPointerOutsideUnsafe,
           "Function '" + Node.getName() + "' cannot use raw pointer type '" +
               Param.Type->getName() + "' for parameter '" + Param.Name + "'.",
           {},
@@ -208,7 +227,7 @@ void TypeChecker::checkNoRawPointersInSignature(const FuncDefExprAST &Node) {
   }
   if (isRawPointer(Node.getReturnType())) {
     reportError(
-        Node.getLoc(),
+        Node.getLoc(), ErrCode::RawPointerOutsideUnsafe,
         "Function '" + Node.getName() + "' cannot return raw pointer type '" +
             Node.getReturnType()->getName() + "'.",
         {},
@@ -492,10 +511,11 @@ bool TypeChecker::inferArithmeticType(SourceLocation Loc, int Op,
            "widens int to double the way an ordinary function call does).";
   }
   reportError(Loc,
+              codeForMismatch(LhsTy, RhsTy, ErrCode::ArithmeticOperand),
               "Type mismatch: cannot apply '" + OpToDisplayString(Op) +
                   "' to '" + LhsTy->getName() + "' and '" +
                   RhsTy->getName() + "'.",
-              {}, Hint);
+              {}, hintForMismatch(LhsTy, RhsTy, Hint));
   ResultOut = nullptr;
   return false;
 }
@@ -527,7 +547,8 @@ TurfTypePtr TypeChecker::inferRelationalType(SourceLocation Loc, int Op,
   if (Op == -20 /*TOK_AND*/ || Op == -21 /*TOK_OR*/) {
     if (LhsTy->isNumeric() && RhsTy->isNumeric())
       return TurfBool();
-    reportError(Loc, "Cannot use '" + std::string(Op == -20 ? "&&" : "||") +
+    reportError(Loc, ErrCode::ArithmeticOperand,
+                "Cannot use '" + std::string(Op == -20 ? "&&" : "||") +
                          "' with '" + LhsTy->getName() + "' and '" +
                          RhsTy->getName() + "'.");
     return TurfBool();
@@ -557,7 +578,7 @@ TurfTypePtr TypeChecker::inferRelationalType(SourceLocation Loc, int Op,
     // actually just an unsupported (for now) language feature, not a
     // compiler bug.
     if (LhsTy->isStruct() || RhsTy->isStruct()) {
-      reportError(Loc,
+      reportError(Loc, ErrCode::InvalidComparison,
                   "Cannot compare struct values with '" +
                       OpToDisplayString(Op) + "'.",
                   {},
@@ -602,7 +623,8 @@ TurfTypePtr TypeChecker::inferRelationalType(SourceLocation Loc, int Op,
         return TurfBool();
     }
 
-    reportError(Loc, "Cannot compare '" + LhsTy->getName() + "' with '" +
+    reportError(Loc, ErrCode::InvalidComparison,
+                "Cannot compare '" + LhsTy->getName() + "' with '" +
                          RhsTy->getName() + "'.",
                 {},
                 (LhsTy->isNull() || RhsTy->isNull())
@@ -630,7 +652,8 @@ TurfTypePtr TypeChecker::inferRelationalType(SourceLocation Loc, int Op,
 
   if (LhsTy->isEnum() || RhsTy->isEnum()) {
     std::string EnumName = LhsTy->isEnum() ? LhsTy->getName() : RhsTy->getName();
-    reportError(Loc, "Cannot use ordering operators on enum type '" + EnumName + 
+    reportError(Loc, ErrCode::InvalidComparison,
+                "Cannot use ordering operators on enum type '" + EnumName +
                      "'. Cast to int first: (a to int) < (b to int)");
     return TurfBool();
   }
@@ -638,7 +661,8 @@ TurfTypePtr TypeChecker::inferRelationalType(SourceLocation Loc, int Op,
   if (LhsTy->isNumeric() && RhsTy->isNumeric())
     return TurfBool();
 
-  reportError(Loc, "Cannot compare '" + LhsTy->getName() + "' with '" +
+  reportError(Loc, ErrCode::InvalidComparison,
+              "Cannot compare '" + LhsTy->getName() + "' with '" +
                        RhsTy->getName() + "' using '" +
                        OpToDisplayString(Op) + "'.");
   return TurfBool(); // continue with bool

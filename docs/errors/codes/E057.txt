@@ -1,20 +1,22 @@
-You tried to do math with something that isn't a number
+You used an operator on a kind of value it doesn't work for
 
-Operators like `+`, `-`, `*`, `/`, and `%` are for numbers. If one side of the operation isn't actually a number -- a `string`, a `bool`, or anything else -- Turf can't figure out what the math is supposed to mean, so it stops and tells you.
+Operators have a job: `+ - * / %` do arithmetic on numbers, `& | ^ << >>` work on whole numbers, `&&` and `||` combine true/false conditions, `!` and `~` flip a bool or an int. If a value isn't the kind the operator works on -- a `string`, a struct, a `bool` where a number belongs -- Turf can't tell what the operation is supposed to mean, so it stops and names the operator and the two types.
 
-This works fine:
+This works:
 
     mut sum: int = 3 + 4;
     mut avg: double = 7.0 / 2.0;
 
 This doesn't, because `"4"` is text, not a number:
 
-    mut bad: int = 3 + "4";
+    mut bad: int = 3 + "4";            // cannot apply '+' to 'int' and 'string'
 
-The other common way to see this error is dividing (or taking the remainder) by a literal zero:
+The same goes for the shorthand forms (`x += "4"`), `x++` on a string, `a && b` on structs, and `**` or `&` on a type that isn't a number.
 
-    mut boom: int = 10 / 0;
+To fix it, make both sides genuinely the kind the operator wants. If you have a number stored as text you need an actual numeric value first -- Turf doesn't parse text into numbers on its own.
 
-Turf catches an obvious `/ 0` or `% 0` at compile time, before your program even runs, since dividing by zero has no sensible answer.
+If you wanted to *join* two pieces of text, `+` on two strings does that; it is a number and a string that can't be mixed.
 
-To fix a type mismatch, make sure everything on both sides of the operator is genuinely a number -- if you have a number stored as text, you'll need an actual numeric value in hand before doing math with it, since Turf doesn't automatically parse text into numbers. To fix a divide-by-zero, double-check the math -- it's usually a sign that something upstream (like a size or a count) isn't what you expected it to be.
+A struct can get its own `+` (or `==`, `[]`, ...) by declaring an `operator`; without one, the operators above don't apply to it.
+
+(Division or remainder by a literal zero is a different thing: Turf warns about it at compile time -- "this will crash at runtime" -- and the program stops when it runs. It is not this error.)

@@ -158,7 +158,7 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
         std::string Params;
         for (size_t i = 0; i < Generic->second.size(); ++i)
           Params += (i ? ", " : "") + Generic->second[i];
-        TypeError(Node.getNameLoc(),
+        TypeError(Node.getNameLoc(), ErrCode::MissingTypeArguments,
                   "'" + Bare + "' is generic, so its method '" + MethodPart +
                       "' must declare its type parameters too.",
                   "Declare it as 'fn<" + Params + "> " + Bare + "." +
@@ -256,7 +256,7 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
         SourceLocation PrevLoc{Prev->DeclLoc.Line, Prev->DeclLoc.Col};
         DuplicateDeclarationError(ErrLoc, Param.Name, PrevLoc).raise();
       } else {
-        SyntaxError(ErrLoc, "Duplicate declaration of '" + Param.Name + "'").raise();
+        SyntaxError(ErrLoc, ErrCode::DuplicateDeclaration, "Duplicate declaration of '" + Param.Name + "'").raise();
       }
     }
   }
@@ -277,6 +277,8 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
     SymTable_.noteInstanceMethod(&Node, currentModuleName(), Sym->MutatesSelf);
   const FuncDefExprAST *SavedFuncDef = CurrentFuncDef_;
   CurrentFuncDef_ = IsInstanceMethod ? &Node : nullptr;
+  const FuncDefExprAST *SavedEnclosing = EnclosingFuncDef_;
+  EnclosingFuncDef_ = &Node;
 
   // See CurrentFuncTypeParams_'s doc comment in Resolver.h.
   CurrentFuncTypeParams_ = Node.getTypeParams();
@@ -284,6 +286,7 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
   visitChild(Node.getBody());
   CurrentFuncTypeParams_.clear();
   CurrentFuncDef_ = SavedFuncDef;
+  EnclosingFuncDef_ = SavedEnclosing;
 
   // "Never returns an error" warning (docs/architecture/errors_and_recover.md):
   // a `!T`- declared function is PERMITTED, not obliged, to fail -- so this is
@@ -589,7 +592,7 @@ void Resolver::validateNamedType(
       if (AllowBareGeneric || !GenericStructIdentities_.count(Id))
         return;
       const std::string Bare = TypeIdentity::bareName(Id);
-      TypeError(Loc,
+      TypeError(Loc, ErrCode::MissingTypeArguments,
                 "'" + Bare + "' is generic -- it needs type arguments here.",
                 "Write the instantiation you mean, e.g. '" + Bare + "<int>'.",
                 "Missing type arguments!")
@@ -805,7 +808,7 @@ void Resolver::visitArrayDecl(ArrayDeclExprAST &Node) {
       SourceLocation PrevLoc{Prev->DeclLoc.Line, Prev->DeclLoc.Col};
       DuplicateDeclarationError(Node.getLoc(), Node.getName(), PrevLoc).raise();
     } else {
-      SyntaxError(Node.getLoc(), "Duplicate declaration of '" + Node.getName() + "'").raise();
+      SyntaxError(Node.getLoc(), ErrCode::DuplicateDeclaration, "Duplicate declaration of '" + Node.getName() + "'").raise();
     }
   }
 }

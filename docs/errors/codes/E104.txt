@@ -1,0 +1,25 @@
+A bracket, brace or parenthesis was never closed
+
+Every opening `(`, `[`, `{` and `<` needs a matching closing `)`, `]`, `}` and `>`. Turf got to a place where the closing one had to be, and it wasn't there.
+
+    fn main(): int {
+        mut total: int = add(1, 2;       // the ) is missing
+        return total;
+    }
+
+Put the missing one back:
+
+    mut total: int = add(1, 2);
+
+For a missing `}` Turf points at the `{` that was never closed, not at the end of the file, so you can see which block is unfinished:
+
+    fn main(): int {
+        if true {
+            return 1;
+        // <- the } for the `if` is missing here
+        return 0;
+    }
+
+Inside a list -- array items, struct fields, call arguments -- the message may instead say it expected "`,` or `]`". That is E105: from that spot Turf can't tell a missing comma from a missing closing bracket, so it names both. Look at what comes next: if it is another item, add the comma; if the list was meant to end, add the bracket.
+
+Two habits make this rare: type the closing character as soon as you type the opening one, and let an editor with bracket matching show you which brackets pair up.

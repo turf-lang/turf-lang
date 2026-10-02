@@ -218,7 +218,7 @@ printf 'unsafe module;\npub fn raw(): int {\n    mut p: int* = null;\n    return
 printf 'import rawmod;\n' | cat - geometry/src/geometry.tr > t && mv t geometry/src/geometry.tr
 run unsafe_denied --check --package-graph g.json myapp/src/main.tr
 expect_rc "dependency's unsafe module, not allowed" unsafe_denied 1
-expect_out "dependency's unsafe module, not allowed" unsafe_denied "[E066]"
+expect_out "dependency's unsafe module, not allowed" unsafe_denied "[E130]"
 # The global flag does not grant it in a package build: consent is per package.
 run unsafe_flag --check --allow-unsafe-modules --package-graph g.json myapp/src/main.tr
 expect_rc "--allow-unsafe-modules does not override the graph" unsafe_flag 1

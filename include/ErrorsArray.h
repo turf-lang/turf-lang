@@ -24,54 +24,11 @@ public:
     Category_ = SLM::ErrorCategory::ARRAY_ERROR;
   }
 };
-// Array initializer size mismatch
-class ArraySizeMismatchError : public TurfError {
-public:
-  ArraySizeMismatchError(SourceLocation Loc, const std::string &ArrayName,
-                         int DeclaredSize, int InitSize)
-      : TurfError(Loc, Colors::BRIGHT_RED + "Array size mismatch!\n" +
-                           Colors::RESET + "  '" + Colors::CYAN + ArrayName +
-                           Colors::RESET + "' was declared with size " +
-                           Colors::CYAN + std::to_string(DeclaredSize) +
-                           Colors::RESET + ", but you gave " + Colors::CYAN +
-                           std::to_string(InitSize) + Colors::RESET +
-                           " initial values.",
-                  "The number of values in [...] must match the "
-                  "declared array size.") {
-    Category_ = SLM::ErrorCategory::ARRAY_ERROR;
-  }
-};
-// Non-integer array index
-class ArrayNonIntegerIndexError : public TurfError {
-public:
-  ArrayNonIntegerIndexError(SourceLocation Loc, const std::string &GotType)
-      : TurfError(Loc, Colors::BRIGHT_RED +
-                           "Array index must be an integer!\n" + Colors::RESET +
-                           "  You used a value of type '" + Colors::CYAN +
-                           GotType + Colors::RESET +
-                           "' as an array index.",
-                  "Use an 'int' value to index into an array, "
-                  "like arr[0] or arr[i] where i is an int.") {
-    Category_ = SLM::ErrorCategory::ARRAY_ERROR;
-  }
-};
-// Array element type mismatch
-class ArrayTypeMismatchError : public TurfError {
-public:
-  ArrayTypeMismatchError(SourceLocation Loc, const std::string &ArrayName,
-                         const std::string &ExpectedType,
-                         const std::string &GotType)
-      : TurfError(
-            Loc, Colors::BRIGHT_RED + "Array element type mismatch!\n" +
-                     Colors::RESET + "  Array '" + Colors::CYAN + ArrayName +
-                     Colors::RESET + "' holds '" + Colors::CYAN + ExpectedType +
-                     Colors::RESET + "' values, but you tried to store a '" +
-                     Colors::CYAN + GotType + Colors::RESET + "'.",
-            "All elements in the array must match the declared "
-            "element type.") {
-    Category_ = SLM::ErrorCategory::ARRAY_ERROR;
-  }
-};
+// (ArraySizeMismatchError E003, ArrayNonIntegerIndexError E002 and
+// ArrayTypeMismatchError E004 were deleted in issue #263: documented and
+// registered, never constructed. The TypeChecker reports all three through
+// reportError() with those codes -- see ErrorCodes.h's ErrCode:: block. E002's
+// check did not exist at all until then: `arr["one"]` compiled silently.)
 // for-each target isn't an array at all (scalar, bare struct, List<T>/Map<K,V>, etc.)
 class ForEachNonArrayError : public TurfError {
 public:

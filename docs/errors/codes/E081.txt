@@ -1,0 +1,22 @@
+That value might be `null` when you use it
+
+A reference written `&?Box` means "a Box, or nothing". The `?` is Turf's way of making you deal with "nothing" *before* it can crash your program: you may only read a field of a `&?Box` where Turf can prove it isn't `null`.
+
+    struct Box { val: int }
+
+    fn bad(b: &?Box): int {
+        return b.val;            // b might be null here
+    }
+
+Check first, and use the value only inside the check:
+
+    fn good(b: &?Box): int {
+        if b != null {
+            return b.val;        // here Turf knows b is not null
+        }
+        return 0;
+    }
+
+The proof only lasts as far as the check does: if the variable is changed in between, or the check was in a different branch, Turf asks again.
+
+If a value can never be `null`, say so in its type: `&Box` (no `?`) needs no check at all.

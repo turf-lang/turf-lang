@@ -715,7 +715,7 @@ A module that begins `unsafe module;` may use raw pointers (`int*`) outside an
 $ turf build
 ../ffi/src/rawmod.tr (1 error)
 
-── error at line 3, col 5 [E066]
+── error at line 3, col 5 [E130]
 
   Unsafe pointer use!
   Raw pointer type 'int*' cannot be used outside an 'unsafe' block.
@@ -739,9 +739,9 @@ With that line the same build compiles.
 - **Listing is not transitive.** The root lists every package, direct or
   indirect, that needs it.
 - **A dependency cannot allow itself.** An `[unsafe]` table in a dependency's
-  own `turf.toml` is ignored; the build above still fails with E066.
+  own `turf.toml` is ignored; the build above still fails with E130.
 - **`--allow-unsafe-modules` does not apply in a project.** It is a single-file
-  flag, and passing it to `turf build` still fails with the same E066, because
+  flag, and passing it to `turf build` still fails with the same E130, because
   one global switch would grant every dependency at once, which is the consent
   `[unsafe] allow` makes explicit.
 - A name in `allow` that is not in the graph, or the root package's own name,

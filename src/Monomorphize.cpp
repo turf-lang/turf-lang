@@ -579,7 +579,8 @@ std::shared_ptr<ResolverFunctionSymbol> finishInstantiation(
   SourceLocation InnerLoc;
   std::string InnerMsg, InnerHint;
   TypeChecker CloneTC(PreR.symbolTable(),
-                      [&](SourceLocation Loc, const std::string &Msg,
+                      [&](SourceLocation Loc, const char *,
+                          const std::string &Msg,
                           const std::vector<RelatedLocation> &,
                           const std::string &Hint, const std::string &,
                           const SLM::DiagnosticHints &) {

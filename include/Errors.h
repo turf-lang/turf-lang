@@ -69,6 +69,8 @@ protected:
   // LogErrorAt() path (Lexer.h) takes an explicit SLM::ErrorCategory
   // argument at every call site instead of falling back to text matching.
   SLM::ErrorCategory Category_ = SLM::ErrorCategory::GENERAL;
+  // See withCode(): a per-instance code that wins over the class-implied one.
+  const char *CodeOverride_ = nullptr;
   // SLM-001 §16.3 items 1/3: structured facts for the SLM pipeline (a
   // deterministic rename candidate, known-but-not-visible-in-source types).
   // Empty by default -- see DiagnosticHints's own doc comment
@@ -98,9 +100,31 @@ public:
   // not yet in the registry, e.g. one added after ErrorCodes.h was last
   // regenerated -- callers must treat that as "no code", not an error.
   std::string getCode() const {
+    if (CodeOverride_)
+      return CodeOverride_;
     const ErrorCodeEntry *Entry =
         ErrorCodes::lookupByClassName(demangleTypeName(typeid(*this).name()));
     return Entry ? Entry->Code : "";
+  }
+
+  // A code that is NOT the one the C++ class implies. A code is looked up by
+  // class (above), which is exactly right for a class that means one mistake
+  // -- and wrong for one that is a vehicle for many: SyntaxError carries
+  // every "the shape of this code is wrong" message, and a beginner needs
+  // the code for WHICH shape (a missing ')' is not a missing type). Such a
+  // class takes its ErrCode:: (ErrorCodes.h) in its constructor and records it
+  // here. Must name a row of AllErrorCodes. (issue #263)
+  TurfError &withCode(const char *Code) {
+    CodeOverride_ = Code;
+    return *this;
+  }
+
+  // The category follows the code when the code is the caller's (withCode()):
+  // a TypeError that is really a wrong argument count is a FUNCTION_SIGNATURE
+  // problem to the SLM layer, whatever the class's constructor defaulted to.
+  TurfError &setCategory(SLM::ErrorCategory C) {
+    Category_ = C;
+    return *this;
   }
 
   // Chainable: TurfError(loc, msg).withRelated(declLoc, "declared here").raise();

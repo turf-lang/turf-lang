@@ -366,12 +366,12 @@ std::vector<std::unique_ptr<ExprAST>> parseEntryFile(std::size_t &PreludeCount) 
         SkipToNextTopLevelBoundary();
       } else if (isDeclarationStart(StartTok)) {
         if (CurTok == ';')
-          LogErrorAt(CurLoc, "Unexpected ';'",
+          LogErrorAt(CurLoc, ErrCode::UnexpectedToken, "Unexpected ';'",
                      SLM::ErrorCategory::SYNTAX_ERROR);
         AppendFlattenedTopLevelDecl(std::move(AST), Program, true);
       } else {
         if (CurTok != ';')
-          LogErrorAt(CurLoc, "Expected ';' after statement",
+          LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement",
                      SLM::ErrorCategory::SYNTAX_ERROR);
         else
           getNextToken();
@@ -379,7 +379,7 @@ std::vector<std::unique_ptr<ExprAST>> parseEntryFile(std::size_t &PreludeCount) 
           RecordParsedTopLevelAST(AST.get());
           Program.push_back(std::move(AST));
         } else {
-          LogErrorAt(spanOf(*AST).Loc,
+          LogErrorAt(spanOf(*AST).Loc, ErrCode::StatementOutsideFunction,
                      "Statements are not allowed outside of a function. "
                      "Please define 'fn main(): int' and move this code "
                      "inside.",

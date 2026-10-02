@@ -230,7 +230,7 @@ void recordGenericFieldInstantiations(const TurfTypePtr &Ty, SourceLocation Loc,
 
 void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
   if (Node.isImmutable() && !Node.hasExplicitInit()) {
-    reportError(Node.getLoc(),
+    reportError(Node.getLoc(), ErrCode::MissingInitializer,
                 "Immutable variable '" + Node.getName() + "' requires an explicit initializer.",
                 {},
                 "'immutable'/'immut' variables can never be assigned to "
@@ -266,7 +266,7 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
       // declaration now (SEM-004, F-INIT-1 -- no type-specific default is
       // ever synthesized there any more), so this is the only place
       // 'mut x: guess;' is ever caught: nothing to infer the type from.
-      reportError(Node.getLoc(), "'guess' needs an initializer to infer from.",
+      reportError(Node.getLoc(), ErrCode::MissingInitializer, "'guess' needs an initializer to infer from.",
                   {}, "", "Missing initializer!");
       setType(&Node, nullptr);
       return;
@@ -296,7 +296,7 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
       return;
     }
     if (InitTy->isVoid()) {
-      reportError(Node.getLoc(), "Cannot infer a type from a 'void' expression.",
+      reportError(Node.getLoc(), ErrCode::NothingToInfer, "Cannot infer a type from a 'void' expression.",
                   {},
                   "'guess' needs a value to infer a type from -- give '" +
                       Node.getName() + "' an explicit type annotation instead.",
@@ -305,7 +305,7 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
       return;
     }
     if (InitTy->isNull()) {
-      reportError(Node.getLoc(), "Cannot infer a type from 'null'.",
+      reportError(Node.getLoc(), ErrCode::NothingToInfer, "Cannot infer a type from 'null'.",
                   {},
                   "Annotate the reference type explicitly, e.g. 'mut " +
                       Node.getName() + ": &?Point = null;'.",
@@ -314,7 +314,7 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
       return;
     }
     if (containsUninstantiatedGenericParam(InitTy.get())) {
-      reportError(Node.getLoc(),
+      reportError(Node.getLoc(), ErrCode::NothingToInfer,
                   "Cannot infer the type arguments of a generic type.",
                   {},
                   "'guess' has nothing to infer the type argument from here "
@@ -433,9 +433,11 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
       if (!typesCompatible(InitTy.get(), DeclTy.get()) &&
           !untypedLiteralAcquiresInt32(Node.getInitializer(), DeclTy.get())) {
         reportError(Node.getLoc(),
+                    codeForMismatch(InitTy.get(), nullptr, ErrCode::TypeMismatch),
                     "Cannot initialise '" + DeclTy->getName() +
                         "' variable '" + Node.getName() + "' with value of type '" +
-                        InitTy->getName() + "'.");
+                        InitTy->getName() + "'.",
+                    {}, hintForMismatch(InitTy.get(), nullptr, ""));
       } else {
         // SEM-002: typesCompatible() only checks the KIND of conversion
         // (e.g. "int-literal -> int is fine"), never the literal's own
@@ -622,7 +624,7 @@ void TypeChecker::visitArrayDecl(ArrayDeclExprAST &Node) {
   // elements into a declared size-3 array) also compiled clean.
   if (!Node.getInitList().empty()) {
     if (Node.getInitList().size() != static_cast<size_t>(Node.getSize())) {
-      reportError(Node.getLoc(),
+      reportError(Node.getLoc(), ErrCode::ArraySizeMismatch,
                   "Array declared with size " + std::to_string(Node.getSize()) +
                       " but initialized with " +
                       std::to_string(Node.getInitList().size()) +
@@ -642,7 +644,7 @@ void TypeChecker::visitArrayDecl(ArrayDeclExprAST &Node) {
       TurfTypePtr InitTy = getType(Init.get());
       if (DeclaredElemTy && InitTy) {
         if (!typesCompatible(InitTy.get(), DeclaredElemTy.get())) {
-          reportError(Node.getLoc(),
+          reportError(Node.getLoc(), ErrCode::ArrayTypeMismatch,
                       "Cannot initialize an array of '" +
                           DeclaredElemTy->getName() + "' with a value of type '" +
                           InitTy->getName() + "'.",
@@ -661,7 +663,7 @@ void TypeChecker::visitArrayDecl(ArrayDeclExprAST &Node) {
 
 void TypeChecker::visitArrayLiteral(ArrayLiteralExprAST &Node) {
   if (Node.getElements().empty()) {
-    TypeError(Node.getLoc(), "Cannot infer type of empty array literal").raise();
+    TypeError(Node.getLoc(), ErrCode::NothingToInfer, "Cannot infer type of empty array literal").raise();
     return;
   }
 
@@ -678,7 +680,7 @@ void TypeChecker::visitArrayLiteral(ArrayLiteralExprAST &Node) {
     TurfTypePtr ElemIType = getType(Node.getElements()[i].get());
     if (!ElemIType || ElemIType->getName() != ElemType->getName()) {
       std::string gotName = ElemIType ? ElemIType->getName() : "unknown";
-      TypeError(Node.getLoc(), "Array literal type mismatch: expected " + ElemType->getName() + ", got " + gotName).raise();
+      TypeError(Node.getLoc(), ErrCode::ArrayTypeMismatch, "Array literal type mismatch: expected " + ElemType->getName() + ", got " + gotName).raise();
     } else {
       // SEM-002 -- see visitVarDecl()'s identical comment. Element 0 also
       // establishes ElemType itself, so it's checked against that same

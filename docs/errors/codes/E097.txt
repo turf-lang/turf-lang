@@ -1,0 +1,23 @@
+A generic operator's type parameter has to be tied to its operands
+
+A generic operator is written `operator<T> ...`: one definition that works for many types. Turf decides which `T` to use by looking at the operands at each use, so every type parameter has to appear in the operands, and at least one operand has to be a type that this module owns.
+
+A parameter no operand mentions can never be decided:
+
+    struct Cell<T> { v: T, n: int }
+
+    operator<T> [](p: Cell<int>, i: int): T {    // T appears only in the result
+        return p.v;
+    }
+
+Tie it to an operand:
+
+    operator<T> [](p: Cell<T>, i: int): T {
+        return p.v;
+    }
+
+And an operator whose operands are *all* bare `T` would redefine `+` for every type in the program, including ones this module doesn't own, so that is rejected too:
+
+    operator<T> +(a: T, b: T): T { return a; }   // for which types?
+
+Make at least one operand a type you declared -- `Cell<T>`, `Vec<T>`, your own struct.

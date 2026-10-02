@@ -1,0 +1,13 @@
+A type was expected here
+
+Turf was waiting for a type -- `int`, `string`, `bool`, `double`, `char`, a struct's name, `List<int>`, ... -- and found something that isn't one.
+
+    fn add(a: int, b:): int { ... }        // parameter `b` has no type
+    fn get(): { ... }                       // the return type is missing
+    mut values: List<> = ...;               // nothing between the < >
+
+Write the type:
+
+    fn add(a: int, b: int): int { ... }
+
+A function that returns nothing says so with `void`: `fn log(msg: string): void { ... }`. A type name is case sensitive -- `Int` is not `int` -- and a struct or enum you declared works as a type too.

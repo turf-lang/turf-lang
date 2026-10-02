@@ -413,7 +413,7 @@ printf 'import ffi;\n\nfn main(): int {\n    return ffi::go();\n}\n' > "$P8/app/
 cp "$P8/app/turf.toml" "$WORK/toml8"
 t unsafe_denied "$P8/app" build
 expect_rc "a dependency's unsafe module, not allowed" unsafe_denied 1
-expect_out "a dependency's unsafe module, not allowed" unsafe_denied "[E066]"
+expect_out "a dependency's unsafe module, not allowed" unsafe_denied "[E130]"
 unsafe_case() { # unsafe_case <label> <rc> <fragment> <allow list>
   { cat "$WORK/toml8"; printf '\n[unsafe]\nallow = [%s]\n' "$4"; } > "$P8/app/turf.toml"
   t unsafe_case "$P8/app" build
@@ -428,7 +428,7 @@ cp "$WORK/toml8" "$P8/app/turf.toml"
 printf '\n[unsafe]\nallow = ["ffi"]\n' >> "$P8/ffi/turf.toml"
 t unsafe_self "$P8/app" build
 expect_rc "a dependency cannot allow itself" unsafe_self 1
-expect_out "a dependency cannot allow itself" unsafe_self "[E066]"
+expect_out "a dependency cannot allow itself" unsafe_self "[E130]"
 
 # --- refusals -------------------------------------------------------------------
 LOOSE=$WORK/loose

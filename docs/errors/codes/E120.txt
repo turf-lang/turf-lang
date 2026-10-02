@@ -1,0 +1,13 @@
+That loop form isn't supported
+
+Turf has two kinds of `for` loop, and they take different shapes:
+
+    for i in 0..10 step i += 1 { ... }          // a counting loop: ONE variable and a range
+    for value in numbers { ... }                // for-each over an array
+    for (index, value) in numbers { ... }       // for-each that also gives you the position
+
+The `(index, value)` pair only makes sense when you walk an array, because a range like `0..10` *is* the index -- there is no second thing to bind:
+
+    for (i, x) in 0..10 { ... }                 // not supported
+
+Pick the form that matches what you are looping over: a range gets a single variable; an array can get one or two.

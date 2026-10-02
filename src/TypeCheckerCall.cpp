@@ -422,7 +422,7 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
     if (BI) {
       // Arity check using the canonical arity from Builtins.h.
       if (BI->Arity >= 0 && ArgCount != BI->Arity) {
-        reportError(Node.getLoc(),
+        reportError(Node.getLoc(), ErrCode::WrongArity,
                     "'" + CalleeName + "' expects " +
                         std::to_string(BI->Arity) + " argument" +
                         (BI->Arity == 1 ? "" : "s") + ", got " +
@@ -505,7 +505,7 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
         // not this milestone's -- see FDN-001's own "Design" note in the
         // roadmap and FDN-002's Prereqs row.
         if (ArgTy->isVoid()) {
-          reportError(Node.getLoc(),
+          reportError(Node.getLoc(), ErrCode::VoidValue,
                       "'heap(...)' cannot allocate a 'void' value -- there "
                       "is nothing to copy onto the heap.",
                       {}, "Pass an expression that produces a real value.",
@@ -554,7 +554,7 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
                              "overload: " + Cand->signature()});
         }
       }
-      reportError(Node.getLoc(),
+      reportError(Node.getLoc(), ErrCode::WrongArity,
                   "'" + CalleeName + "' called with " +
                       std::to_string(ArgCount) + " argument" +
                       (ArgCount == 1 ? "" : "s") +
@@ -602,12 +602,31 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
         if (ArgTypes[i] && ArgTypes[i]->isNull())
           AnyNullArg = true;
       }
-      for (const auto &Cand : ArityMatches)
-        if (Cand)
-          Related.push_back({toSourceLocation(Cand->DeclLoc),
-                             "candidate: " + Cand->signature()});
+      // A call every candidate of which lives in ONE imported module
+      // (`math::abs(true)`) is a module call: E025, and the message names the
+      // module the way the user wrote it. E025 used to be raised only from the
+      // `module.fn(...)` branch of visitMethodCall(), which the '.'-is-instance-
+      // only rule (E048) made unreachable -- so the code, its page and its class
+      // all described an error no program could produce.
+      std::string CandidateModule;
+      bool OneModule = true;
+      for (const auto &Cand : ArityMatches) {
+        if (!Cand)
+          continue;
+        Related.push_back({toSourceLocation(Cand->DeclLoc),
+                           "candidate: " + Cand->signature()});
+        if (Cand->SourceModule.empty() ||
+            (!CandidateModule.empty() && Cand->SourceModule != CandidateModule))
+          OneModule = false;
+        else
+          CandidateModule = Cand->SourceModule;
+      }
+      const bool IsModuleCall = OneModule && !CandidateModule.empty();
       reportError(Node.getLoc(),
-                  "No overload of '" + CalleeName +
+                  IsModuleCall ? ErrCode::ModuleArityOrType : ErrCode::ArgumentType,
+                  "No overload of '" +
+                      (IsModuleCall ? CandidateModule + "::" : std::string()) +
+                      CalleeName +
                       "' matches argument types (" + ArgTypeStr + ").",
                   Related,
                   AnyNullArg
@@ -726,7 +745,7 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
         const auto *FT = static_cast<const FuncType *>(CalleeTy.get());
         const auto &ParamTypes = FT->getParamTypes();
         if (static_cast<int>(ParamTypes.size()) != ArgCount) {
-          reportError(Node.getLoc(),
+          reportError(Node.getLoc(), ErrCode::WrongArity,
                       "'" + CalleeName + "' expects " +
                           std::to_string(ParamTypes.size()) + " argument" +
                           (ParamTypes.size() == 1 ? "" : "s") + ", got " +
@@ -739,7 +758,7 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
         for (int i = 0; i < ArgCount; ++i) {
           if (ParamTypes[i] && ArgTypes[i] &&
               !typesCompatible(ArgTypes[i].get(), ParamTypes[i].get())) {
-            reportError(Node.getLoc(),
+            reportError(Node.getLoc(), ErrCode::ArgumentType,
                         "Argument " + std::to_string(i + 1) + " to '" +
                             CalleeName + "' expects '" +
                             ParamTypes[i]->getName() + "', got '" +
@@ -872,7 +891,7 @@ bool TypeChecker::tryUFCSFallback(MethodCallExprAST &Node,
     }
     if (ExactAll) {
       if (ExactMatch) {
-        reportError(Node.getLoc(),
+        reportError(Node.getLoc(), ErrCode::AmbiguousCall,
                     "Ambiguous UFCS call to '" + MethodName +
                         "': more than one visible free-function overload "
                         "matches this call site exactly.",
@@ -956,8 +975,8 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
         Related.push_back({toSourceLocation(Cand->DeclLoc),
                            "overload: " + ModuleName + "." + Cand->signature()});
       }
-      reportError(Node.getLoc(),
-                  "'" + ModuleName + "." + MethodName + "' called with " +
+      reportError(Node.getLoc(), ErrCode::WrongArity,
+                  "'" + ModuleName + "::" + MethodName + "' called with " +
                       std::to_string(ArgCount) + " argument" +
                       (ArgCount == 1 ? "" : "s") +
                       "; known overloads: " + Overloads + ".",
@@ -996,8 +1015,8 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
       for (const auto *Cand : ArityMatches)
         Related.push_back({toSourceLocation(Cand->DeclLoc),
                            "candidate: " + ModuleName + "." + Cand->signature()});
-      reportError(Node.getLoc(),
-                  "No overload of '" + ModuleName + "." + MethodName +
+      reportError(Node.getLoc(), ErrCode::ModuleArityOrType,
+                  "No overload of '" + ModuleName + "::" + MethodName +
                       "' matches argument types (" + ArgTypeStr + ").",
                   Related, "", "No matching overload!");
       setType(&Node, nullptr);
@@ -1148,7 +1167,7 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
       if (auto *MT = dynamic_cast<const TurfMachineType *>(BaseTy.get())) {
         if (MethodName == "transition") {
           if (ArgCount != 1) {
-            reportError(Node.getLoc(),
+            reportError(Node.getLoc(), ErrCode::WrongArity,
                         "'transition' expects exactly 1 argument (the target "
                         "state), got " + std::to_string(ArgCount) + ".",
                         {}, "", "Wrong argument count!");
@@ -1313,7 +1332,7 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
           for (const auto *Cand : ArityMatches)
             Related.push_back({toSourceLocation(Cand->DeclLoc),
                                "candidate: " + Cand->signature()});
-          reportError(Node.getLoc(),
+          reportError(Node.getLoc(), ErrCode::ArgumentType,
                       "No overload of '" + StructName + "." + MethodName +
                           "' matches argument types (" + ArgTypeStr + ").",
                       Related, "", "No matching overload!");
@@ -1658,7 +1677,7 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
       if (tryUFCSFallback(Node, BaseTy.get(), ArgTypes, &NamedCandidates))
         return;
       if (NamedCandidates.empty()) {
-        reportError(Node.getLoc(),
+        reportError(Node.getLoc(), ErrCode::MethodOnNonStruct,
                     "Cannot call method '" + MethodName + "' on type '" +
                         BaseTy->getName() +
                         "' -- only struct instances have methods.",
@@ -1676,7 +1695,7 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
         for (const auto *Cand : NamedCandidates)
           Related.push_back({toSourceLocation(Cand->DeclLoc),
                              "candidate: " + Cand->signature()});
-        reportError(Node.getLoc(),
+        reportError(Node.getLoc(), ErrCode::ArgumentType,
                     "No visible '" + MethodName + "' overload accepts a '" +
                         BaseTy->getName() + "' receiver via UFCS.",
                     Related,
@@ -1698,7 +1717,7 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
   // cheap safety net against ever reaching Codegen's fatal-error fallback
   // with zero diagnostic printed at all, in case some future code path
   // reaches here with a null BaseTy that ISN'T already covered elsewhere.
-  reportError(Node.getLoc(),
+  reportError(Node.getLoc(), ErrCode::InternalCompilerError,
               "Cannot determine the type of this method call's target -- "
               "the expression before '." + MethodName + "' has no known type.",
               {});
@@ -1800,7 +1819,7 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
     if (Node.getFieldName() == "message") {
       setType(&Node, TurfString());
     } else {
-      reportError(Node.getNameLoc(),
+      reportError(Node.getNameLoc(), ErrCode::ErrorPayload,
                   "An error value has no field '" + Node.getFieldName() +
                       "' -- only 'message' is readable.",
                   {}, "Use '.message' to read the string attached at "
@@ -1992,7 +2011,7 @@ void TypeChecker::visitRecoverExpr(RecoverExprAST &Node) {
   TurfTypePtr WrappedTy = getType(Node.getWrapped());
 
   if (!WrappedTy || !WrappedTy->isErrorUnion()) {
-    reportError(Node.getLoc(),
+    reportError(Node.getLoc(), ErrCode::InvalidRecover,
                "'recover' can only be used on a fallible ('!T') expression.",
                {},
                "Only a call whose declared return type is '!T' can be "
@@ -2019,7 +2038,7 @@ void TypeChecker::visitRecoverExpr(RecoverExprAST &Node) {
     // example: typesCompatible() already rejects int-vs-void generically,
     // no special-casing needed here.
     if (ProduceTy && SuccessTy && !typesCompatible(ProduceTy.get(), SuccessTy.get())) {
-      reportError(Node.getLoc(),
+      reportError(Node.getLoc(), ErrCode::TypeMismatch,
                   "'recover produce " + ProduceTy->getName() +
                       "' doesn't match this call's success type '" +
                       SuccessTy->getName() + "'.");
@@ -2037,7 +2056,7 @@ void TypeChecker::visitRecoverExpr(RecoverExprAST &Node) {
     if (Node.getBlock())
       const_cast<ExprAST *>(Node.getBlock())->accept(*this);
     if (!(SuccessTy && SuccessTy->isVoid()) && !AllPathsDiverge(Node.getBlock())) {
-      reportError(Node.getLoc(),
+      reportError(Node.getLoc(), ErrCode::InvalidRecover,
                   "'recover " +
                       std::string(Node.getKind() == RecoverKind::AsRun
                                       ? "as " + Node.getBoundName() + " run"
@@ -2213,7 +2232,7 @@ void TypeChecker::visitArrayAccess(ArrayAccessExprAST &Node) {
       if (matchOperatorOverload(C, {BaseTy, IndexTy}, /*RelaxSelf=*/true, &Node,
                                 Node.getLoc(), R)) {
         if (Node.ResolvedIndexGetTarget) {
-          reportError(Node.getLoc(),
+          reportError(Node.getLoc(), ErrCode::AmbiguousCall,
                       "Ambiguous 'operator[](" + BaseTy->getName() + ", " +
                           IndexTy->getName() +
                           ")' call: more than one visible overload matches "

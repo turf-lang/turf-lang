@@ -24,19 +24,101 @@
 //                 between two types (e.g. "Non-exhaustive match!",
 //                 "Missing initializer!", "Duplicate pattern!") so the
 //                 header doesn't misdescribe what's actually wrong.
+//
+// Code (issue #263): REQUIRED. This class used to be the one code, E066, for
+// every diagnostic that went through it, with the banner as free text -- a
+// wrong argument count, a missing initializer and a raw pointer outside
+// `unsafe` all told a beginner "type mismatch". The code is now the caller's
+// (an ErrCode::), and it also decides the defaults the two knobs above fall
+// back to: the heading is the code's registry description (E066 alone is "Type
+// mismatch!"), the hint is defaultHintFor() -- "Check that both sides have
+// compatible types." is advice for a type mismatch and nothing else.
+inline const char *typeErrorDefaultHint(const std::string &Code) {
+  if (Code == ErrCode::ArithmeticOperand)
+    return "Check that both sides of the operator are values it works on: "
+           "numbers for + - * / %, whole numbers for & | ^ << >>.";
+  if (Code == ErrCode::InvalidComparison)
+    return "Compare values of the same kind (two ints, two strings, ...). To "
+           "compare structs, compare the fields you care about.";
+  if (Code == ErrCode::AmbiguousCall)
+    return "More than one definition fits equally well. Remove one of the "
+           "conflicting definitions or imports, or call it in a way only one "
+           "of them accepts.";
+  if (Code == ErrCode::UnsupportedOperation)
+    return "Write the operation out in full instead, e.g. `x = x + 1;`.";
+  if (Code == ErrCode::MissingInitializer)
+    return "Give the variable its value on the spot: `immut X: int = 5;`, "
+           "`mut x: guess = 5;`.";
+  if (Code == ErrCode::MethodOnNonStruct)
+    return "Only structs have methods. `x.f()` on another type works only when "
+           "a function `f` that takes that type is imported -- check the "
+           "spelling and the import.";
+  if (Code == ErrCode::ArgumentType || Code == ErrCode::ModuleArityOrType)
+    return "Check the type of each argument against the function's "
+           "parameters; the candidates are listed above.";
+  if (Code == ErrCode::ReturnTypeMismatch)
+    return "Return a value of the declared type, or change the function's "
+           "declared return type.";
+  if (Code == ErrCode::ArrayTypeMismatch)
+    return "Every value in the list must be the array's element type.";
+  if (Code == ErrCode::WrongArity)
+    return "Check the number of arguments.";
+  if (Code == ErrCode::VoidValue)
+    return "A function declared ': void' produces no value, so there is "
+           "nothing to use here.";
+  if (Code == ErrCode::InvalidCast)
+    return "Only some conversions are allowed with `to`; see `turf --explain "
+           "E134` for the list.";
+  if (Code == ErrCode::StringConversion)
+    return "Only these convert to text: `intExpr to string`, `doubleExpr to "
+           "string`, `boolExpr to string` (and enum values).";
+  if (Code == ErrCode::NotCallable)
+    return "Drop the '(...)': it is already a complete value on its own.";
+  if (Code == ErrCode::NotAValue)
+    return "Call it directly where you need its result.";
+  if (Code == ErrCode::InvalidModuleQualifier)
+    return "Modules aren't nested inside each other: use one module name, "
+           "e.g. `io::printline(...)`.";
+  if (Code == ErrCode::MissingTypeArguments)
+    return "Write the type arguments, e.g. `List<int>`.";
+  if (Code == ErrCode::NothingToInfer)
+    return "Say the type yourself instead of relying on inference.";
+  return nullptr;
+}
+
 class TypeError : public TurfError {
+  static std::string bannerFor(const char *Code, const std::string &Custom) {
+    if (!Custom.empty())
+      return Custom;
+    if (std::string(Code) != ErrCode::TypeMismatch)
+      if (const ErrorCodeEntry *Row = ErrorCodes::lookupByCode(Code))
+        return std::string(Row->Description) + "!";
+    return "Type mismatch!";
+  }
+  static std::string hintFor(const char *Code, const std::string &Custom) {
+    if (!Custom.empty())
+      return Custom;
+    if (std::string(Code) != ErrCode::TypeMismatch)
+      if (const char *Default = typeErrorDefaultHint(Code))
+        return Default;
+    return "Check that both sides have compatible types.";
+  }
+
 public:
-  TypeError(SourceLocation Loc, const std::string &Msg,
-           const std::string &CustomHint = "",
-           const std::string &CustomBanner = "")
+  TypeError(SourceLocation Loc, const char *Code, const std::string &Msg,
+            const std::string &CustomHint = "",
+            const std::string &CustomBanner = "")
       : TurfError(Loc,
-                  Colors::BRIGHT_RED +
-                      (CustomBanner.empty() ? "Type mismatch!" : CustomBanner) +
-                      "\n" + Colors::RESET + "  " + Msg,
-                  CustomHint.empty()
-                      ? "Check that both sides have compatible types."
-                      : CustomHint) {
+                  Colors::BRIGHT_RED + bannerFor(Code, CustomBanner) + "\n" +
+                      Colors::RESET + "  " + Msg,
+                  hintFor(Code, CustomHint)) {
     Category_ = SLM::ErrorCategory::TYPE_MISMATCH;
+    withCode(Code);
+    // The registry row is the audited answer for what KIND of mistake the code
+    // is: a wrong argument count reaches `--smart` as FUNCTION_SIGNATURE, not
+    // as the TYPE_MISMATCH this class used to default everything to.
+    if (const ErrorCodeEntry *Row = ErrorCodes::lookupByCode(Code))
+      Category_ = Row->Category;
   }
 };
 // String Conversion Error : Unsupported type cast with `... to string`
@@ -54,44 +136,10 @@ public:
     Category_ = SLM::ErrorCategory::STRING_CONVERSION;
   }
 };
-// abs() Argument Type Error : non-int/double passed to abs
-class AbsArgTypeError : public TurfError {
-public:
-  AbsArgTypeError(SourceLocation Loc, const std::string &GotTypeName)
-      : TurfError(
-            Loc,
-            Colors::BRIGHT_RED +
-                "Oops! 'abs' only works with int or double, but you gave "
-                "it a '" +
-                Colors::CYAN + GotTypeName + Colors::BRIGHT_RED + "'.\n" +
-                Colors::RESET + "  " + Colors::BRIGHT_GREEN + "Valid uses:\n" +
-                "    abs(int)    → int\n" + "    abs(double) → double" +
-                Colors::RESET,
-            "abs gives the absolute (positive) value of a number.") {
-    Category_ = SLM::ErrorCategory::BUILTIN_FUNCTION;
-  }
-};
-// power() Argument Type Error : non-int/double passed to power
-class PowerArgTypeError : public TurfError {
-public:
-  PowerArgTypeError(SourceLocation Loc, const std::string &GotType1,
-                    const std::string &GotType2)
-      : TurfError(
-            Loc,
-            Colors::BRIGHT_RED +
-                "Oops! 'power' only works with int or double, but you gave it "
-                "'" +
-                Colors::CYAN + GotType1 + Colors::BRIGHT_RED + "' and '" +
-                Colors::CYAN + GotType2 + Colors::BRIGHT_RED + "'.\n" +
-                Colors::RESET + "  " + Colors::BRIGHT_GREEN +
-                "Valid overloads:\n" + "    power(int, int)       → int\n" +
-                "    power(int, double)    → double\n" +
-                "    power(double, int)    → double\n" +
-                "    power(double, double) → double" + Colors::RESET,
-            "power raises the first number to the power of the second.") {
-    Category_ = SLM::ErrorCategory::BUILTIN_FUNCTION;
-  }
-};
+// (AbsArgTypeError / PowerArgTypeError, E055 / E063, were deleted in issue
+// #263: `abs` and `power` stopped being compiler intrinsics long ago, nothing
+// constructed these, and their hint text described a world that no longer
+// exists. A bad argument to either is now an ordinary E056/E025.)
 // Compare Statement Structural Error : parse-time violations in compare blocks
 class CompareError : public TurfError {
 public:
@@ -210,67 +258,13 @@ public:
     Category_ = SLM::ErrorCategory::ARITHMETIC;
   }
 };
-class ArithmeticError : public TurfError {
-public:
-  ArithmeticError(SourceLocation Loc, const std::string &Msg)
-      : TurfError(
-            Loc,
-            Colors::BRIGHT_RED + "Math trouble! " + Colors::RESET + Msg,
-            "Are you trying to divide by zero? Or combining things "
-            "that can't be added together like a number and a word?") {
-    Category_ = SLM::ErrorCategory::ARITHMETIC;
-  }
-};
-// Argument type mismatch in function call
-class ArgumentTypeError : public TurfError {
-public:
-  ArgumentTypeError(SourceLocation Loc, const std::string &FuncName,
-                    const std::string &ParamName, unsigned ArgIndex,
-                    const std::string &ExpectedType, const std::string &GotType)
-      : TurfError(
-            Loc,
-            Colors::BRIGHT_RED + "Type mismatch in call to '" + Colors::CYAN +
-                FuncName + Colors::BRIGHT_RED + "'!\n" + Colors::RESET +
-                "  Parameter '" + Colors::CYAN + ParamName + Colors::RESET +
-                "' (argument " + std::to_string(ArgIndex) + ") expects '" +
-                Colors::CYAN + ExpectedType + Colors::RESET + "', but got '" +
-                Colors::CYAN + GotType + Colors::RESET + "'.",
-            "You might need an explicit cast like " + ExpectedType +
-                "(value), or pass a different value.") {
-    Category_ = SLM::ErrorCategory::TYPE_MISMATCH;
-  }
-};
-// Return type mismatch
-class ReturnTypeMismatchError : public TurfError {
-public:
-  ReturnTypeMismatchError(SourceLocation Loc, const std::string &FuncName,
-                          const std::string &ExpectedType,
-                          const std::string &GotType)
-      : TurfError(Loc, Colors::BRIGHT_RED + "Wrong return type in '" +
-                           Colors::CYAN + FuncName + Colors::BRIGHT_RED +
-                           "'!\n" + Colors::RESET + "  The function returns '" +
-                           Colors::CYAN + ExpectedType + Colors::RESET +
-                           "', but you're trying to return '" + Colors::CYAN +
-                           GotType + Colors::RESET + "'.",
-                  "Use an explicit cast like " + ExpectedType +
-                  "(value), or change the function's return type.") {
-    Category_ = SLM::ErrorCategory::TYPE_MISMATCH;
-  }
-};
-// Using the result of a void function as a value
-class VoidValueError : public TurfError {
-public:
-  VoidValueError(SourceLocation Loc, const std::string &Context)
-      : TurfError(
-            Loc,
-            Colors::BRIGHT_RED + "Oops! You can't use a void value here!\n" +
-                Colors::RESET + "  " + Context,
-            "A void function doesn't produce a value. You can "
-            "call it as a statement, but not use its result in an "
-            "expression or assignment.") {
-    Category_ = SLM::ErrorCategory::FUNCTION_SIGNATURE;
-  }
-};
+// (ArithmeticError E057, ArgumentTypeError E056, ReturnTypeMismatchError E064
+// and VoidValueError E067 were deleted in issue #263. Each was documented and
+// registered and none was ever constructed -- every such mistake was reported
+// as E066 "Type mismatch!" instead -- and their hint texts were stale ("an
+// explicit cast like int(value)" is not Turf syntax). The codes live on:
+// TypeChecker::reportError() names them per site and keeps the curated
+// messages, see ErrorCodes.h's ErrCode:: block.)
 class ImmutableAssignmentError : public TurfError {
 public:
   ImmutableAssignmentError(SourceLocation Loc, const std::string &VarName)

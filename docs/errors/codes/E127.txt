@@ -1,0 +1,16 @@
+That number isn't one of the enum's values
+
+An enum is a fixed list of named values. Converting a number to an enum only makes sense for the numbers that correspond to a variant: the first variant is `0`, the next `1`, and so on.
+
+    enum Color { Red, Green }         // Red is 0, Green is 1
+
+    mut c: Color = 1 to Color;        // fine -- Green
+    mut d: Color = 7 to Color;        // there is no variant number 7
+
+Turf checks a literal number at compile time and tells you the valid range (here 0 to 1), so a mistake like this never reaches your running program.
+
+Usually the better fix is to skip the number entirely and use the variant by name:
+
+    mut c: Color = Color::Green;
+
+If you are converting a number you computed or read in, check that it is in range first -- a value that isn't a variant has no sensible meaning.

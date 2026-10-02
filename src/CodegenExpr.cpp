@@ -584,7 +584,8 @@ Value *UnaryExprAST::codegen() {
 Value *AddressOfExprAST::codegen() {
   Value *LVal = Operand->codegenLValue();
   if (!LVal) {
-    LogErrorAt(Loc, "Cannot take the address of a non-addressable expression."
+    LogErrorAt(Loc, ErrCode::NonAddressableExpression,
+               "Cannot take the address of a non-addressable expression."
                     "\n  Hint: Only variables, struct fields, and array elements"
                     " are addressable.", SLM::ErrorCategory::GENERAL);
     return nullptr;
@@ -1029,7 +1030,7 @@ Value *CastExprAST::codegen() {
   }
 
   // Everything else is unsupported
-  TypeError(Loc, std::string("Cannot explicitly cast '") + SrcName + "' to '" +
+  TypeError(Loc, ErrCode::InvalidCast, std::string("Cannot explicitly cast '") + SrcName + "' to '" +
                      DstName + "'")
       .raise();
   return nullptr;

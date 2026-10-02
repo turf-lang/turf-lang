@@ -183,7 +183,8 @@ Value *MethodCallExprAST::codegen() {
       // If it's null the TypeChecker already emitted a type-mismatch error; just
       // propagate nullptr so Codegen can bail out cleanly.
       if (!ResolvedCallTarget) {
-        LogErrorAt(Loc, "No matching overload found for '" + ModuleName + "." +
+        LogErrorAt(Loc, ErrCode::ModuleArityOrType,
+                   "No matching overload found for '" + ModuleName + "." +
                             Method + "' (see type-mismatch error above)", SLM::ErrorCategory::FUNCTION_SIGNATURE);
         return nullptr;
       }
@@ -573,7 +574,7 @@ Value *ScopeAccessExprAST::codegen() {
   // first since every other branch below assumes LeftName names an enum.
   if (ResolvedKind == ScopeAccessKind::ModuleConstantRef) {
     if (!ResolvedConstant) {
-      LogErrorAt(Loc, "Internal error: exported constant not resolved in codegen", SLM::ErrorCategory::GENERAL);
+      LogErrorAt(Loc, ErrCode::InternalCompilerError, "Internal error: exported constant not resolved in codegen", SLM::ErrorCategory::GENERAL);
       return nullptr;
     }
     return CodegenConstantValue(*ResolvedConstant);
@@ -590,7 +591,7 @@ Value *ScopeAccessExprAST::codegen() {
   auto EnumTy = GlobalSymbolTable->LookupType(LeftName);
   auto *ET = dynamic_cast<const TurfEnumType *>(EnumTy.get());
   if (!ET) {
-    LogErrorAt(Loc, "Internal error: enum type not found in codegen", SLM::ErrorCategory::GENERAL);
+    LogErrorAt(Loc, ErrCode::InternalCompilerError, "Internal error: enum type not found in codegen", SLM::ErrorCategory::GENERAL);
     return nullptr;
   }
 
@@ -1000,7 +1001,7 @@ Value *StructDeclExprAST::codegen() {
     // runtime-visible name are both derived from this LLVM name.
     ST = StructType::create(*TheContext, TypeIdentity::llvmName(Name));
     if (!ST) {
-      LogErrorAt(Loc, "Failed to create LLVM StructType for '" + Name + "'", SLM::ErrorCategory::GENERAL);
+      LogErrorAt(Loc, ErrCode::InternalCompilerError, "Failed to create LLVM StructType for '" + Name + "'", SLM::ErrorCategory::GENERAL);
       return nullptr;
     }
   }
@@ -1018,7 +1019,7 @@ Value *StructDeclExprAST::codegen() {
   for (const auto &Field : Fields) {
     Type *LLVMType = getLLVMType(Field.Type.get());
     if (!LLVMType) {
-      LogErrorAt(Loc, "Unknown type for field '" + Field.Name + "'", SLM::ErrorCategory::GENERAL);
+      LogErrorAt(Loc, ErrCode::InternalCompilerError, "Unknown type for field '" + Field.Name + "'", SLM::ErrorCategory::GENERAL);
       return nullptr;
     }
     LLVMFieldTypes.push_back(LLVMType);
@@ -1105,13 +1106,14 @@ Value *FieldAccessExprAST::codegenLValue() {
   }
   auto *SType = dynamic_cast<const TurfStructType *>(BaseType);
   if (!SType) {
-    LogErrorAt(Loc, "Cannot access field on non-struct type", SLM::ErrorCategory::DECLARATION);
+    LogErrorAt(Loc, ErrCode::InternalCompilerError, "Cannot access field on non-struct type", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
 
   int FieldIdx = SType->getFieldIndex(FieldName);
   if (FieldIdx < 0) {
-    LogErrorAt(Loc, "Struct '" + SType->getName() + "' has no field named '" +
+    LogErrorAt(Loc, ErrCode::UnknownStructField,
+               "Struct '" + SType->getName() + "' has no field named '" +
                         FieldName + "'", SLM::ErrorCategory::UNDECLARED_VAR);
     return nullptr;
   }
@@ -1173,7 +1175,7 @@ Value *FieldAccessExprAST::codegen() {
 
   auto *SType = dynamic_cast<const TurfStructType *>(BaseType);
   if (!SType) {
-    LogErrorAt(Loc, "Cannot load field on non-struct type", SLM::ErrorCategory::DECLARATION);
+    LogErrorAt(Loc, ErrCode::InternalCompilerError, "Cannot load field on non-struct type", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
   TurfTypePtr FieldType = SType->getFieldType(FieldName);

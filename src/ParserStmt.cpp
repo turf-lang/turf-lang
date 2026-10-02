@@ -45,7 +45,7 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
     return nullptr;
 
   if (CurTok != '{') {
-    LogErrorAt(CurLoc, "Expected '{' after if-condition. Use 'give ... otherwise ...' for single-expression ternary.", SLM::ErrorCategory::CONTROL_FLOW);
+    LogErrorAt(CurLoc, ErrCode::MissingOpeningDelimiter, "Expected '{' after if-condition. Use 'give ... otherwise ...' for single-expression ternary.", SLM::ErrorCategory::CONTROL_FLOW);
     return nullptr;
   }
 
@@ -64,7 +64,8 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
       return nullptr;
 
     if (CurTok != '{') {
-      LogErrorAt(ElseifLoc, "Expected '{' to open the elseif-block body."
+      LogErrorAt(ElseifLoc, ErrCode::MissingOpeningDelimiter,
+                 "Expected '{' to open the elseif-block body."
                             "\n  Hint: 'elseif' blocks must always use braces: "
                             "elseif condition { ... }", SLM::ErrorCategory::CONTROL_FLOW);
       return nullptr;
@@ -113,14 +114,14 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
 std::unique_ptr<ExprAST> ParseBlock() {
   ParseRecursionGuard RecursionGuard;
   if (RecursionGuard.tooDeep()) {
-    LogErrorAt(CurLoc,
+    LogErrorAt(CurLoc, ErrCode::NestingTooDeep,
                "Block nested too deeply to parse."
                "\n  Hint: check for unbalanced '{'.", SLM::ErrorCategory::SYNTAX_ERROR);
     return nullptr;
   }
 
   if (CurTok != '{') {
-    LogErrorAt(CurLoc, "Expected '{' to open a block", SLM::ErrorCategory::SYNTAX_ERROR);
+    LogErrorAt(CurLoc, ErrCode::MissingOpeningDelimiter, "Expected '{' to open a block", SLM::ErrorCategory::SYNTAX_ERROR);
     return nullptr;
   }
 
@@ -178,7 +179,7 @@ std::unique_ptr<ExprAST> ParseBlock() {
       auto Expr = ParseExpression();
       if (!Expr) return nullptr;
       if (CurTok == ';') {
-        LogErrorAt(CurLoc, "Unexpected ';'", SLM::ErrorCategory::SYNTAX_ERROR);
+        LogErrorAt(CurLoc, ErrCode::UnexpectedToken, "Unexpected ';'", SLM::ErrorCategory::SYNTAX_ERROR);
         return nullptr;
       }
       Exprs.push_back(std::move(Expr));
@@ -207,7 +208,7 @@ std::unique_ptr<ExprAST> ParseBlock() {
           }
         }
       }
-      LogErrorAt(CurLoc, "Expected ';' after statement." + Hint, SLM::ErrorCategory::SYNTAX_ERROR);
+      LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement." + Hint, SLM::ErrorCategory::SYNTAX_ERROR);
       return nullptr;
     }
     getNextToken(); // eat ';'
@@ -215,7 +216,7 @@ std::unique_ptr<ExprAST> ParseBlock() {
   }
 
   if (CurTok != '}') {
-    LogErrorAt(OpenBraceLoc,
+    LogErrorAt(OpenBraceLoc, ErrCode::UnclosedDelimiter,
                "Missing closing '}' — every '{' must have a matching '}'."
                "\n  Hint: Check that all your blocks are properly closed.", SLM::ErrorCategory::SYNTAX_ERROR);
     return nullptr;
@@ -236,7 +237,7 @@ std::unique_ptr<ExprAST> ParseWhileExpr() {
 
   if (CurTok != '{') {
     LogErrorAt(
-        KeywordLoc,
+        KeywordLoc, ErrCode::MissingOpeningDelimiter,
         "Expected '{' to open the while-loop body."
         "\n  Hint: while loops must use braces: while condition { ... }", SLM::ErrorCategory::CONTROL_FLOW);
     return nullptr;
@@ -271,7 +272,7 @@ std::unique_ptr<ExprAST> ParseWhileExpr() {
 // re-consuming 'unsafe' a second time.
 std::unique_ptr<ExprAST> ParseUnsafeBlockBody(SourceLocation KeywordLoc) {
   if (CurTok != '{') {
-    LogErrorAt(KeywordLoc,
+    LogErrorAt(KeywordLoc, ErrCode::MissingOpeningDelimiter,
                "Expected '{' to open an unsafe block."
                "\n  Hint: unsafe blocks must use braces: unsafe { ... }", SLM::ErrorCategory::SYNTAX_ERROR);
     return nullptr;
@@ -302,7 +303,7 @@ std::unique_ptr<ExprAST> ParseDoWhileExpr() {
 
   if (CurTok != '{') {
     LogErrorAt(
-        KeywordLoc,
+        KeywordLoc, ErrCode::MissingOpeningDelimiter,
         "Expected '{' to open the do-block body."
         "\n  Hint: do-while loops must use braces: do { ... } while cond;", SLM::ErrorCategory::CONTROL_FLOW);
     return nullptr;
@@ -313,7 +314,7 @@ std::unique_ptr<ExprAST> ParseDoWhileExpr() {
     return nullptr;
 
   if (CurTok != TOK_WHILE) {
-    LogErrorAt(CurLoc, "Expected 'while' after do-block", SLM::ErrorCategory::CONTROL_FLOW);
+    LogErrorAt(CurLoc, ErrCode::ExpectedKeyword, "Expected 'while' after do-block", SLM::ErrorCategory::CONTROL_FLOW);
     return nullptr;
   }
   getNextToken(); // eat 'while'
@@ -326,7 +327,7 @@ std::unique_ptr<ExprAST> ParseDoWhileExpr() {
     return nullptr;
 
   if (CurTok != ';') {
-    LogErrorAt(CurLoc, "Expected ';' after do-while loop.", SLM::ErrorCategory::CONTROL_FLOW);
+    LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after do-while loop.", SLM::ErrorCategory::CONTROL_FLOW);
     return nullptr;
   }
   getNextToken(); // eat ';'
@@ -356,7 +357,8 @@ std::unique_ptr<ExprAST> ParseForExpr() {
     getNextToken(); // eat '('
 
     if (CurTok != TOK_IDENTIFIER) {
-      LogErrorAt(CurLoc, "Expected an index variable name after '(' in a for-each loop."
+      LogErrorAt(CurLoc, ErrCode::ExpectedName,
+                 "Expected an index variable name after '(' in a for-each loop."
                          "\n  Hint: Correct syntax: for (index, value) in numbers { }", SLM::ErrorCategory::CONTROL_FLOW);
       return nullptr;
     }
@@ -364,14 +366,16 @@ std::unique_ptr<ExprAST> ParseForExpr() {
     getNextToken();
 
     if (CurTok != ',') {
-      LogErrorAt(CurLoc, "Expected ',' between the index and value variable names."
+      LogErrorAt(CurLoc, ErrCode::MissingComma,
+                 "Expected ',' between the index and value variable names."
                          "\n  Hint: Correct syntax: for (index, value) in numbers { }", SLM::ErrorCategory::CONTROL_FLOW);
       return nullptr;
     }
     getNextToken(); // eat ','
 
     if (CurTok != TOK_IDENTIFIER) {
-      LogErrorAt(CurLoc, "Expected a value variable name after ',' in a for-each loop."
+      LogErrorAt(CurLoc, ErrCode::ExpectedName,
+                 "Expected a value variable name after ',' in a for-each loop."
                          "\n  Hint: Correct syntax: for (index, value) in numbers { }", SLM::ErrorCategory::CONTROL_FLOW);
       return nullptr;
     }
@@ -379,7 +383,8 @@ std::unique_ptr<ExprAST> ParseForExpr() {
     getNextToken();
 
     if (CurTok != ')') {
-      LogErrorAt(CurLoc, "Expected ')' to close the '(index, value)' pair."
+      LogErrorAt(CurLoc, ErrCode::UnclosedDelimiter,
+                 "Expected ')' to close the '(index, value)' pair."
                          "\n  Hint: Correct syntax: for (index, value) in numbers { }", SLM::ErrorCategory::CONTROL_FLOW);
       return nullptr;
     }
@@ -388,7 +393,8 @@ std::unique_ptr<ExprAST> ParseForExpr() {
     VarName = IdentifierStr;
     getNextToken();
   } else {
-    LogErrorAt(CurLoc, "Expected a loop variable name (or '(index, value)') after 'for'."
+    LogErrorAt(CurLoc, ErrCode::ExpectedName,
+               "Expected a loop variable name (or '(index, value)') after 'for'."
                        "\n  Hint: for i in 0..10 step i += 1 { }"
                        "\n    or: for value in numbers { }"
                        "\n    or: for (index, value) in numbers { }", SLM::ErrorCategory::CONTROL_FLOW);
@@ -396,7 +402,8 @@ std::unique_ptr<ExprAST> ParseForExpr() {
   }
 
   if (CurTok != TOK_IN) {
-    LogErrorAt(ForLoc, "Expected 'in' after the loop variable in a for-loop."
+    LogErrorAt(ForLoc, ErrCode::ExpectedKeyword,
+               "Expected 'in' after the loop variable in a for-loop."
                        "\n  Hint: Correct syntax: for " +
                            VarName + " in 0..10 step " + VarName + "++ { }", SLM::ErrorCategory::CONTROL_FLOW);
     return nullptr;
@@ -410,7 +417,7 @@ std::unique_ptr<ExprAST> ParseForExpr() {
   // Range-based for: `for i in 0..10 step i += 1 { }`
   if (CurTok == TOK_RANGE) {
     if (IsPairForm) {
-      LogErrorAt(ForLoc,
+      LogErrorAt(ForLoc, ErrCode::InvalidLoopForm,
                  "The '(index, value)' form isn't supported for a range-based for-loop."
                  "\n  Hint: Range-based for only binds a single scalar variable: "
                  "for i in 0..10 step i += 1 { }", SLM::ErrorCategory::CONTROL_FLOW);
@@ -440,7 +447,8 @@ std::unique_ptr<ExprAST> ParseForExpr() {
     }
 
     if (CurTok != '{') {
-      LogErrorAt(ForLoc, "Expected '{' to open the for-loop body."
+      LogErrorAt(ForLoc, ErrCode::MissingOpeningDelimiter,
+                 "Expected '{' to open the for-loop body."
                          "\n  Hint: Correct syntax: for " +
                              VarName + " in 0..10 step " + VarName + "++ { }", SLM::ErrorCategory::CONTROL_FLOW);
       return nullptr;
@@ -457,7 +465,8 @@ std::unique_ptr<ExprAST> ParseForExpr() {
 
   // For-each: `for value in numbers { }`  /  `for (index, value) in numbers { }`
   if (CurTok != '{') {
-    LogErrorAt(ForLoc, "Expected '..' (range-based for) or '{' (for-each loop) here."
+    LogErrorAt(ForLoc, ErrCode::ExpectedKeyword,
+               "Expected '..' (range-based for) or '{' (for-each loop) here."
                        "\n  Hint: for i in 0..10 step i += 1 { }"
                        "\n    or: for value in numbers { }"
                        "\n    or: for (index, value) in numbers { }", SLM::ErrorCategory::CONTROL_FLOW);
@@ -520,7 +529,7 @@ std::unique_ptr<ExprAST> ParseErrorVariantPatternBody(std::unique_ptr<ExprAST> H
 
   while (CurTok != ')') {
     if (CurTok == TOK_EOF) {
-      LogErrorAt(Loc, "Missing closing ')' for error pattern.",
+      LogErrorAt(Loc, ErrCode::UnclosedDelimiter, "Missing closing ')' for error pattern.",
                  SLM::ErrorCategory::CONTROL_FLOW);
       return nullptr;
     }
@@ -577,7 +586,7 @@ std::unique_ptr<ExprAST> ParseStructPatternBody(SourceLocation Loc,
 
   while (CurTok != '}') {
     if (CurTok == TOK_EOF) {
-      LogErrorAt(Loc, "Missing closing '}' for struct pattern.",
+      LogErrorAt(Loc, ErrCode::UnclosedDelimiter, "Missing closing '}' for struct pattern.",
                  SLM::ErrorCategory::CONTROL_FLOW);
       return nullptr;
     }
@@ -743,7 +752,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
 
   if (HasParen) {
     if (CurTok != ')') {
-      LogErrorAt(CurLoc, "Expected ')' to close the compare subject", SLM::ErrorCategory::CONTROL_FLOW);
+      LogErrorAt(CurLoc, ErrCode::UnclosedDelimiter, "Expected ')' to close the compare subject", SLM::ErrorCategory::CONTROL_FLOW);
       return nullptr;
     }
     getNextToken(); // eat ')'
@@ -751,7 +760,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
 
   // ── Opening brace ────────────────────────────────────────────────────────
   if (CurTok != '{') {
-    LogErrorAt(CompareLoc, "Expected '{' to open the compare block.", SLM::ErrorCategory::CONTROL_FLOW);
+    LogErrorAt(CompareLoc, ErrCode::MissingOpeningDelimiter, "Expected '{' to open the compare block.", SLM::ErrorCategory::CONTROL_FLOW);
     return nullptr;
   }
   getNextToken(); // eat '{'
@@ -782,7 +791,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
       getNextToken(); // eat 'otherwise'
 
       if (CurTok != TOK_COLON) {
-        LogErrorAt(CurLoc, "Expected ':' after 'otherwise'.", SLM::ErrorCategory::CONTROL_FLOW);
+        LogErrorAt(CurLoc, ErrCode::MissingColon, "Expected ':' after 'otherwise'.", SLM::ErrorCategory::CONTROL_FLOW);
         return nullptr;
       }
       getNextToken(); // eat ':'
@@ -827,7 +836,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
         auto E = ParseExpression();
         if (!E) return nullptr;
         if (CurTok != ';') {
-          LogErrorAt(CurLoc, "Expected ';' after statement in 'otherwise' arm.", SLM::ErrorCategory::CONTROL_FLOW);
+          LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement in 'otherwise' arm.", SLM::ErrorCategory::CONTROL_FLOW);
           return nullptr;
         }
         getNextToken(); // eat ';'
@@ -858,7 +867,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
     // ── 'matches' arm ────────────────────────────────────────────────────
     if (CurTok != TOK_MATCHES) {
       // Unexpected token inside compare block — could be a keyword typo
-      LogErrorAt(CurLoc,
+      LogErrorAt(CurLoc, ErrCode::ExpectedKeyword,
                  "Expected 'matches' or 'otherwise' inside compare block.", SLM::ErrorCategory::CONTROL_FLOW);
       return nullptr;
     }
@@ -886,7 +895,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
         Val = ParseExpression();
         if (!Val) return nullptr;
         if (CurTok != ')') {
-          LogErrorAt(CurLoc, "Expected ')' to close matches pattern.", SLM::ErrorCategory::CONTROL_FLOW);
+          LogErrorAt(CurLoc, ErrCode::UnclosedDelimiter, "Expected ')' to close matches pattern.", SLM::ErrorCategory::CONTROL_FLOW);
           return nullptr;
         }
         getNextToken(); // eat ')'
@@ -906,7 +915,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
       }
 
       if (CurTok != TOK_COLON) {
-        LogErrorAt(CurLoc, "Expected ':' after matches pattern.", SLM::ErrorCategory::CONTROL_FLOW);
+        LogErrorAt(CurLoc, ErrCode::MissingColon, "Expected ':' after matches pattern.", SLM::ErrorCategory::CONTROL_FLOW);
         return nullptr;
       }
       getNextToken(); // eat ':'
@@ -978,7 +987,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
       auto E = ParseExpression();
       if (!E) return nullptr;
       if (CurTok != ';') {
-        LogErrorAt(CurLoc, "Expected ';' after statement in matches arm body.", SLM::ErrorCategory::CONTROL_FLOW);
+        LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement in matches arm body.", SLM::ErrorCategory::CONTROL_FLOW);
         return nullptr;
       }
       getNextToken(); // eat ';'
@@ -1005,7 +1014,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
 
   // ── Closing brace ────────────────────────────────────────────────────────
   if (CurTok != '}') {
-    LogErrorAt(CompareLoc,
+    LogErrorAt(CompareLoc, ErrCode::UnclosedDelimiter,
                "Missing closing '}' for compare block.", SLM::ErrorCategory::CONTROL_FLOW);
     return nullptr;
   }
@@ -1028,7 +1037,7 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
   if (CurTok != TOK_IDENTIFIER) {
     if (RejectReservedWordAsName())
       return nullptr;
-    LogErrorAt(CurLoc, "Expected a variable name after 'mutable' or 'immutable'.", SLM::ErrorCategory::DECLARATION);
+    LogErrorAt(CurLoc, ErrCode::ExpectedName, "Expected a variable name after 'mutable' or 'immutable'.", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
 
@@ -1056,7 +1065,7 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
   // doc comment for why this must be caught here rather than left to a
   // later pass -- it isn't a style nit, it's a compiler hang).
   if (isDisallowedVoidType(Type.get())) {
-    LogErrorAt(TypeLoc,
+    LogErrorAt(TypeLoc, ErrCode::VoidTypeNotAllowed,
                "'void' cannot be a variable's type."
                "\n  Hint: 'void' only makes sense as a function's return "
                "type, e.g. fn f(): void { ... }. Give '" +
@@ -1072,7 +1081,7 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
       TurfTypePtr ElemType = AT ? AT->getElementTypePtr() : Type;
 
       if (CurTok != ';') {
-        LogErrorAt(CurLoc, "Expected ';' after array declaration.", SLM::ErrorCategory::DECLARATION);
+        LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after array declaration.", SLM::ErrorCategory::DECLARATION);
         return nullptr;
       }
       getNextToken(); // eat ';'
@@ -1089,7 +1098,7 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
     // §11.6) against this same null-Init declaration.
     std::unique_ptr<ExprAST> Init = nullptr;
     if (CurTok != ';') {
-      LogErrorAt(CurLoc, "Expected ';' after variable declaration.", SLM::ErrorCategory::DECLARATION);
+      LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after variable declaration.", SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
     getNextToken(); // eat ';'
@@ -1117,7 +1126,7 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
           if (CurTok == ']')
             break;
           if (CurTok != ',') {
-            LogErrorAt(CurLoc, "Expected ',' or ']' in array initializer list", SLM::ErrorCategory::ARRAY_ERROR);
+            LogErrorAt(CurLoc, ErrCode::MissingComma, "Expected ',' or ']' in array initializer list", SLM::ErrorCategory::ARRAY_ERROR);
             return nullptr;
           }
           getNextToken(); // eat ','
@@ -1130,7 +1139,7 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
         return nullptr;
     }
     if (CurTok != ';') {
-      LogErrorAt(CurLoc, "Expected ';' after statement.", SLM::ErrorCategory::SYNTAX_ERROR);
+      LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement.", SLM::ErrorCategory::SYNTAX_ERROR);
       return nullptr;
     }
     getNextToken(); // eat ';'
@@ -1141,7 +1150,7 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
   if (!Init) return nullptr;
 
   if (CurTok != ';') {
-    LogErrorAt(CurLoc, "Expected ';' after statement.", SLM::ErrorCategory::SYNTAX_ERROR);
+    LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement.", SLM::ErrorCategory::SYNTAX_ERROR);
     return nullptr;
   }
   getNextToken(); // eat ';'

@@ -7,8 +7,9 @@
 // file's name) are four classes raised directly from inside the LEXER's own
 // number-scanning branch (gettokScan(), Lexer.cpp) -- SEM-001
 // (docs/planning/ARCHITECTURE_OVERHAUL.md §8). Lexer.cpp does not normally
-// construct a coded TurfError (its own diagnostics go through the raw,
-// code-less LogErrorAt(), e.g. the malformed-char-literal check) precisely
+// construct a coded TurfError (its own diagnostics go through the raw
+// LogErrorAt(), which names its code by ErrCode::, e.g. the malformed-char-
+// literal check) precisely
 // because Lexer.h stays deliberately LLVM/AST-free and TurfError subclasses
 // used to live only in headers reachable from the Parser/Resolver/
 // TypeChecker layers -- but SEM-001 needs a real E0NN code on each of these
@@ -19,15 +20,29 @@
 // Lexer.cpp for exactly what each one catches.
 
 // Syntax Error : Parser issues
+//
+// A vehicle, not a mistake: the code is the caller's (an ErrCode::), because
+// "the shape of this code is wrong" is a dozen different mistakes and a
+// beginner needs to be told which. It used to carry one code for all of them
+// (E015, now retired) and so `--explain` could only say "something is wrong
+// somewhere". The `Code` parameter is required on purpose: forgetting it is a
+// compile error, not a quiet return to the old catch-all. (issue #263)
 class SyntaxError : public TurfError {
 public:
-  SyntaxError(SourceLocation Loc, const std::string &Msg)
+  // `Hint` replaces the default "check your punctuation" advice, which is
+  // only right for a missing or misplaced token; a code that is not about
+  // punctuation (a duplicate name, an invalid array size) must say its own.
+  SyntaxError(SourceLocation Loc, const char *Code, const std::string &Msg,
+              const std::string &Hint = "")
       : TurfError(Loc, Colors::BRIGHT_RED +
                            "Oops! There's a tiny mistake here:\n" +
                            Colors::RESET + "  " + Msg,
-                  "Check your spelling, punctuation like ';' or "
-                  "'}', and make sure everything is closed properly.") {
+                  Hint.empty()
+                      ? "Check your spelling, punctuation like ';' or "
+                        "'}', and make sure everything is closed properly."
+                      : Hint) {
     Category_ = SLM::ErrorCategory::SYNTAX_ERROR;
+    withCode(Code);
   }
 };
 // Keyword Error : Misspelled keywords

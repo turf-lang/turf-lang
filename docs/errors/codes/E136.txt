@@ -1,0 +1,14 @@
+A module name can't be qualified by another module
+
+`module::function(...)` reaches into one module. Modules aren't nested inside each other, so there is no `a::b::function` -- you have written two module names in a row.
+
+    import io;
+    import mem;
+
+    mem::io::printline("hi");           // `io` is not inside `mem`
+
+Use the one module that actually has the function:
+
+    io::printline("hi");
+
+If you meant a type or an enum inside a module, that is the one form with three parts: `module::Type::Variant`, e.g. `shapes::Color::Red`. The check only complains when the middle name is itself a module.

@@ -588,35 +588,12 @@ public:
     trySetDeterministicRename(MethodName, Suggestions);
   }
 };
-// Phase 2: Module-scoped argument type mismatch error
-// Raised when the function name is found in a module but no overload matches
-// the given argument types (e.g. math::abs(true) — no abs(bool) overload).
-//
-// Currently unreachable: grep confirms no call site anywhere in the
-// compiler actually constructs this class (module-qualified arity/type
-// mismatches are reported through a different path today). Kept
-// registered (E025) rather than deleted since the class/message are
-// still correct for the scenario it names and it may get wired up again;
-// the '.'-form syntax in its message/hint was stale from before the
-// module-call migration to '::' and has been corrected here even though
-// it isn't live, so it's right if this class is ever raised again.
-class ModuleArityOrTypeError : public TurfError {
-public:
-  ModuleArityOrTypeError(SourceLocation Loc,
-                         const std::string &ModuleName,
-                         const std::string &MethodName,
-                         const std::string &Detail)
-      : TurfError(Loc,
-                  Colors::BRIGHT_RED + "No matching overload of '" +
-                      Colors::CYAN + ModuleName + "::" + MethodName +
-                      Colors::BRIGHT_RED + "' for the arguments you gave.\n" +
-                      Colors::RESET + "  " + Detail,
-                  "Check the argument types and count. Use the "
-                  "correct overload, e.g. 'math::abs(int)' or "
-                  "'math::abs(double)'.") {
-    Category_ = SLM::ErrorCategory::FUNCTION_SIGNATURE;
-  }
-};
+// (ModuleArityOrTypeError, E025, was deleted in issue #263. It was "kept
+// registered since it may get wired up again" while nothing constructed it --
+// exactly how a documented code ends up describing an error that never
+// appears. A module call that no overload accepts, `math::abs(true)`, is now
+// reported with E025 by TypeChecker::reportError() and the curated "No
+// overload of 'math.abs' matches argument types (...)" message.)
 
 // LEC-002 (docs/development/changes/LEC-002.md, FREEZE.md §6.15): `pub` /
 // `public` written where visibility means nothing. Deliberately an error and

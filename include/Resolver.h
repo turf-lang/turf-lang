@@ -258,6 +258,7 @@ public:
     ModuleStack_.clear();
     CurrentFuncTypeParams_.clear();
     CurrentFuncDef_ = nullptr; // a failed body never reaches visitFuncDef()'s restore
+    EnclosingFuncDef_ = nullptr;
   }
 
   // ── ASTVisitor overrides ───────────────────────────────────────────────────
@@ -393,6 +394,11 @@ private:
   // a static method, outside any function). Lets visitMethodCall() attribute a
   // `self.m()` call to its caller -- ResolverSymbolTable::noteSelfCall().
   const FuncDefExprAST *CurrentFuncDef_ = nullptr;
+  // The function whose body is being visited, whatever kind it is (null outside
+  // any). CurrentFuncDef_ above is deliberately instance-methods-only, so it
+  // cannot say which function a failed name lookup happened in; this can
+  // (visitVariable()'s E043 check).
+  const FuncDefExprAST *EnclosingFuncDef_ = nullptr;
   // How many `defer` statements enclose the node being visited (LEC-004): a
   // `try` inside one is an error, since it would return out of a statement
   // that has already been scheduled to run on the way out (INV-DEFER-2).

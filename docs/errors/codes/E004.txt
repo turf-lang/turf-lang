@@ -8,7 +8,7 @@ If one of the values is the wrong type:
 
     immut primes: int[3] = [2, 3, "five"];   // "five" is a string, not an int
 
-Turf tells you exactly which array and which type it expected versus what it actually found, so you don't have to scan the whole list yourself looking for the odd one out.
+Turf tells you the element type the array holds and the type of the value it found, so you know what to look for when you scan the list for the odd one out.
 
 To fix it, make sure every value in the list is really the array's declared type. If you have a value of a different type that should logically become that type, convert it explicitly:
 

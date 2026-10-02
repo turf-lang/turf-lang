@@ -256,7 +256,7 @@ TurfTypePtr ParseType() {
   // guards existed). See ParseRecursionGuard's doc comment in Lexer.h.
   ParseRecursionGuard RecursionGuard;
   if (RecursionGuard.tooDeep()) {
-    LogErrorAt(CurLoc,
+    LogErrorAt(CurLoc, ErrCode::NestingTooDeep,
                "Type nested too deeply to parse."
                "\n  Hint: check for unbalanced '<', '[', or '!'.", SLM::ErrorCategory::SYNTAX_ERROR);
     return nullptr;
@@ -313,7 +313,7 @@ TurfTypePtr ParseType() {
   if (CurTok == TOK_FN) {
     getNextToken(); // consume 'fn'
     if (CurTok != '(') {
-      SyntaxError(CurLoc, "Expected '(' after 'fn' in a function type").raise();
+      SyntaxError(CurLoc, ErrCode::MissingOpeningDelimiter, "Expected '(' after 'fn' in a function type").raise();
       return nullptr;
     }
     getNextToken(); // consume '('
@@ -332,12 +332,12 @@ TurfTypePtr ParseType() {
       }
     }
     if (CurTok != ')') {
-      SyntaxError(CurLoc, "Expected ')' to close a function type's parameter list").raise();
+      SyntaxError(CurLoc, ErrCode::UnclosedDelimiter, "Expected ')' to close a function type's parameter list").raise();
       return nullptr;
     }
     getNextToken(); // consume ')'
     if (CurTok != TOK_COLON) {
-      SyntaxError(CurLoc, "Expected ':' before a function type's return type").raise();
+      SyntaxError(CurLoc, ErrCode::MissingColon, "Expected ':' before a function type's return type").raise();
       return nullptr;
     }
     getNextToken(); // consume ':'
@@ -353,7 +353,7 @@ TurfTypePtr ParseType() {
       CurTok != TOK_TYPE_CHAR &&
       CurTok != TOK_TYPE_STRING && CurTok != TOK_TYPE_VOID &&
       CurTok != TOK_PTR && CurTok != TOK_GUESS) {
-    SyntaxError(CurLoc, "Expected a type name").raise();
+    SyntaxError(CurLoc, ErrCode::ExpectedType, "Expected a type name").raise();
     return nullptr;
   }
 
@@ -403,7 +403,7 @@ TurfTypePtr ParseType() {
   if (CurTok == TOK_SCOPE) {
     getNextToken(); // eat '::'
     if (CurTok != TOK_IDENTIFIER) {
-      SyntaxError(CurLoc, "Expected a type name after '::'").raise();
+      SyntaxError(CurLoc, ErrCode::ExpectedType, "Expected a type name after '::'").raise();
       return nullptr;
     }
     // LEC-001 stage 4: the qualifier as written may be an alias for a
@@ -455,7 +455,7 @@ TurfTypePtr ParseType() {
         break;
       }
       if (CurTok != ',') {
-        SyntaxError(CurLoc, "Expected '>' or ',' in generic type").raise();
+        SyntaxError(CurLoc, ErrCode::MissingComma, "Expected '>' or ',' in generic type").raise();
         return nullptr;
       }
       getNextToken(); // consume ','
@@ -485,13 +485,14 @@ TurfTypePtr ParseType() {
         // value-position literal takes instead.
         Size = static_cast<int>(strtoll(NumLitClean.c_str(), nullptr, NumLitRadix));
         if (Size <= 0) {
-          SyntaxError(CurLoc, "Array size must be positive").raise();
+          SyntaxError(CurLoc, ErrCode::InvalidArraySize, "Array size must be positive",
+                    "An array's size counts its slots: write a positive whole number, e.g. int[5].").raise();
           return nullptr;
         }
         getNextToken();
       }
       if (CurTok != ']') {
-        SyntaxError(CurLoc, "Expected ']' to close array size").raise();
+        SyntaxError(CurLoc, ErrCode::UnclosedDelimiter, "Expected ']' to close array size").raise();
         return nullptr;
       }
       getNextToken();
@@ -540,15 +541,16 @@ TurfTypePtr ParseType() {
       // NumLitClean/NumLitRadix reading is the right choice here too.
       Size = static_cast<int>(strtoll(NumLitClean.c_str(), nullptr, NumLitRadix));
       if (Size <= 0) {
-        SyntaxError(CurLoc,
-                    "Array size must be a positive integer (greater than 0)")
+        SyntaxError(CurLoc, ErrCode::InvalidArraySize,
+                    "Array size must be a positive integer (greater than 0)",
+                    "An array's size counts its slots: write a positive whole number, e.g. int[5].")
             .raise();
         return nullptr;
       }
       getNextToken(); // eat the literal
     }
     if (CurTok != ']') {
-      SyntaxError(CurLoc, "Expected ']' to close array size — e.g. mut arr: int[5];")
+      SyntaxError(CurLoc, ErrCode::UnclosedDelimiter, "Expected ']' to close array size — e.g. mut arr: int[5];")
           .raise();
       return nullptr;
     }
@@ -602,7 +604,7 @@ static std::unique_ptr<ExprAST> ParseParenExpr() {
     return nullptr;
 
   if (CurTok != ')') {
-    SyntaxError(CurLoc,
+    SyntaxError(CurLoc, ErrCode::UnclosedDelimiter,
                 "Missing closing ')' — every '(' must have a matching ')'")
         .raise();
     return nullptr;
@@ -617,7 +619,8 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
   switch (CurTok) {
   default:
 
-    LogErrorAt(CurLoc, "Unexpected token — expected a value, variable name, or "
+    LogErrorAt(CurLoc, ErrCode::UnexpectedToken,
+               "Unexpected token — expected a value, variable name, or "
                        "expression here."
                        "\n  Hint: Check for stray characters, a missing "
                        "operator, or an incomplete statement.", SLM::ErrorCategory::SYNTAX_ERROR);
@@ -627,7 +630,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     SourceLocation Loc = CurLoc;
     getNextToken(); // eat sizeof
     if (CurTok != '(') {
-      LogErrorAt(CurLoc, "Expected '(' after sizeof", SLM::ErrorCategory::SYNTAX_ERROR);
+      LogErrorAt(CurLoc, ErrCode::MissingOpeningDelimiter, "Expected '(' after sizeof", SLM::ErrorCategory::SYNTAX_ERROR);
       return nullptr;
     }
     getNextToken(); // eat '('
@@ -635,7 +638,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     if (!Ty)
       return nullptr;
     if (CurTok != ')') {
-      LogErrorAt(CurLoc, "Expected ')' to close sizeof", SLM::ErrorCategory::SYNTAX_ERROR);
+      LogErrorAt(CurLoc, ErrCode::UnclosedDelimiter, "Expected ')' to close sizeof", SLM::ErrorCategory::SYNTAX_ERROR);
       return nullptr;
     }
     getNextToken(); // eat ')'
@@ -680,7 +683,8 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
       if (auto T = GlobalSymbolTable->LookupType(
               TypeIdentity::make(CurrentParseModule(), IdName))) {
         if (dynamic_cast<TurfStructType *>(T.get())) {
-          LogErrorAt(IdLoc, "'" + IdName + " { ... }' is no longer valid syntax "
+          LogErrorAt(IdLoc, ErrCode::RemovedSyntax,
+                     "'" + IdName + " { ... }' is no longer valid syntax "
                              "for constructing a struct."
                              "\n  Hint: use '" + IdName + "::new(...)' (if '" +
                              IdName + "' declares a constructor) or '" + IdName +
@@ -702,7 +706,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     if (CurTok == TOK_SCOPE) {
       getNextToken(); // eat '::'
       if (CurTok != TOK_IDENTIFIER) {
-        LogErrorAt(CurLoc, "Expected a name after '::'", SLM::ErrorCategory::DECLARATION);
+        LogErrorAt(CurLoc, ErrCode::ExpectedName, "Expected a name after '::'", SLM::ErrorCategory::DECLARATION);
         return nullptr;
       }
       std::string RightName = IdentifierStr;
@@ -724,7 +728,8 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
         if (auto T = GlobalSymbolTable->LookupType(
                 TypeIdentity::make(IdName, RightName))) {
           if (dynamic_cast<TurfStructType *>(T.get())) {
-            LogErrorAt(IdLoc, "'" + IdName + "::" + RightName + " { ... }' is no "
+            LogErrorAt(IdLoc, ErrCode::RemovedSyntax,
+                       "'" + IdName + "::" + RightName + " { ... }' is no "
                                "longer valid syntax for constructing a struct."
                                "\n  Hint: use '" + IdName + "::" + RightName +
                                "::new(...)' or '" + IdName + "::" + RightName +
@@ -744,7 +749,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
       if (CurTok == TOK_SCOPE) {
         getNextToken(); // eat second '::'
         if (CurTok != TOK_IDENTIFIER) {
-          LogErrorAt(CurLoc, "Expected a variant name after '::'", SLM::ErrorCategory::DECLARATION);
+          LogErrorAt(CurLoc, ErrCode::ExpectedName, "Expected a variant name after '::'", SLM::ErrorCategory::DECLARATION);
           return nullptr;
         }
         std::string VariantName = IdentifierStr;
@@ -834,12 +839,12 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
       if (CurTok == ',') {
         getNextToken(); // eat ','
       } else if (CurTok != ']') {
-        LogErrorAt(CurLoc, "Expected ',' or ']' in array literal", SLM::ErrorCategory::ARRAY_ERROR);
+        LogErrorAt(CurLoc, ErrCode::MissingComma, "Expected ',' or ']' in array literal", SLM::ErrorCategory::ARRAY_ERROR);
         return nullptr;
       }
     }
     if (CurTok != ']') {
-      LogErrorAt(CurLoc, "Expected ']' to close array literal", SLM::ErrorCategory::ARRAY_ERROR);
+      LogErrorAt(CurLoc, ErrCode::UnclosedDelimiter, "Expected ']' to close array literal", SLM::ErrorCategory::ARRAY_ERROR);
       return nullptr;
     }
     getNextToken(); // eat ']'
@@ -871,7 +876,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     SourceLocation KeywordLoc = CurLoc;
     std::string IdName = IdentifierStr;
     getNextToken();
-    LogErrorAt(KeywordLoc,
+    LogErrorAt(KeywordLoc, ErrCode::UnexpectedToken,
                "Unexpected '" + IdName +
                    "' keyword here — expected a value or expression."
                    "\n  Hint: '" +
@@ -892,7 +897,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     // (`List<int>::default()` parses as `List < int ...`), which Turf does not
     // have (FUTURE F-6c) -- say where the type goes instead of leaving the
     // user to guess from "begin a declaration".
-    LogErrorAt(CurLoc,
+    LogErrorAt(CurLoc, ErrCode::ExpectedKeyword,
                "Expected 'mutable' or 'immutable' to begin a declaration."
                "\n  Hint: if this is a generic type argument in an expression "
                "(`List<int>::default()`), put the type on the variable "
@@ -901,7 +906,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     return nullptr;
 
   case TOK_TYPE_VOID:
-    SyntaxError(CurLoc, "'void' may only be used as a function return type")
+    SyntaxError(CurLoc, ErrCode::VoidTypeNotAllowed, "'void' may only be used as a function return type")
         .raise();
     return nullptr;
 
@@ -932,7 +937,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
         getNextToken(); // eat 'pub'/'public'
       }
       if (CurTok != TOK_FN) {
-        LogErrorAt(CurLoc,
+        LogErrorAt(CurLoc, ErrCode::ExpectedKeyword,
                    "Expected 'fn' after '@caller_location'."
                    "\n  Hint: '@caller_location' only decorates a function "
                    "declaration, e.g. '@caller_location\\nfn foo(...): T "
@@ -944,7 +949,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
         static_cast<FuncDefExprAST *>(Fn.get())->setVisibility(DecoratedVis);
       return Fn;
     }
-    LogErrorAt(AtLoc,
+    LogErrorAt(AtLoc, ErrCode::UnexpectedToken,
                "'@' is not valid here.\n  Hint: the only supported decorator "
                "is '@caller_location', immediately before a function "
                "declaration.", SLM::ErrorCategory::SYNTAX_ERROR);
@@ -1118,7 +1123,7 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
 std::unique_ptr<ExprAST> ParseExpression() {
   ParseRecursionGuard RecursionGuard;
   if (RecursionGuard.tooDeep()) {
-    LogErrorAt(CurLoc,
+    LogErrorAt(CurLoc, ErrCode::NestingTooDeep,
                "Expression nested too deeply to parse."
                "\n  Hint: check for unbalanced '(', '[', or '{'.", SLM::ErrorCategory::SYNTAX_ERROR);
     return nullptr;
@@ -1139,7 +1144,7 @@ std::unique_ptr<ExprAST> ParseExpression() {
     if (!ThenExpr)
       return nullptr;
     if (CurTok != TOK_OTHERWISE) {
-      LogErrorAt(CurLoc, "Expected 'otherwise' after 'give' expression in ternary", SLM::ErrorCategory::CONTROL_FLOW);
+      LogErrorAt(CurLoc, ErrCode::ExpectedKeyword, "Expected 'otherwise' after 'give' expression in ternary", SLM::ErrorCategory::CONTROL_FLOW);
       return nullptr;
     }
     SourceLocation ElseLoc = CurLoc;
@@ -1186,7 +1191,8 @@ std::unique_ptr<ExprAST> ParseExpression() {
     if (CurTok == TOK_AS) {
       getNextToken(); // consume 'as'
       if (CurTok != TOK_IDENTIFIER) {
-        LogErrorAt(CurLoc, "Expected an identifier after 'recover as' to "
+        LogErrorAt(CurLoc, ErrCode::ExpectedName,
+                   "Expected an identifier after 'recover as' to "
                            "bind the failing error value."
                            "\n  Hint: `recover as err run { ... }`.", SLM::ErrorCategory::CONTROL_FLOW);
         return nullptr;
@@ -1195,7 +1201,8 @@ std::unique_ptr<ExprAST> ParseExpression() {
       getNextToken(); // consume the bound name
 
       if (CurTok != TOK_RUN) {
-        LogErrorAt(CurLoc, "Expected 'run' after 'recover as " + BoundName +
+        LogErrorAt(CurLoc, ErrCode::ExpectedKeyword,
+                   "Expected 'run' after 'recover as " + BoundName +
                                "'."
                                "\n  Hint: `recover as " +
                                BoundName + " run { ... }`.", SLM::ErrorCategory::CONTROL_FLOW);
@@ -1211,7 +1218,8 @@ std::unique_ptr<ExprAST> ParseExpression() {
                                               BoundName, std::move(Block));
     }
 
-    LogErrorAt(CurLoc, "Expected 'produce', 'run', or 'as' after 'recover'."
+    LogErrorAt(CurLoc, ErrCode::ExpectedKeyword,
+               "Expected 'produce', 'run', or 'as' after 'recover'."
                        "\n  Hint: `recover produce value`, "
                        "`recover run { ... }`, or "
                        "`recover as err run { ... }`.", SLM::ErrorCategory::CONTROL_FLOW);
@@ -1242,7 +1250,7 @@ std::unique_ptr<ExprAST> ParseUnary() {
   // close). See ParseRecursionGuard's doc comment in Lexer.h.
   ParseRecursionGuard RecursionGuard;
   if (RecursionGuard.tooDeep()) {
-    LogErrorAt(CurLoc,
+    LogErrorAt(CurLoc, ErrCode::NestingTooDeep,
                "Expression nested too deeply to parse."
                "\n  Hint: check for a runaway chain of unary operators.", SLM::ErrorCategory::SYNTAX_ERROR);
     return nullptr;

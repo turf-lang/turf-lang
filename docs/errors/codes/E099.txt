@@ -1,0 +1,18 @@
+A string or character was opened but never closed
+
+Text in Turf is wrapped in quotes: `"hello"` for a string, `'a'` for a single character. This error means Turf found the opening quote and then ran out of line (or out of file) before it found the matching closing one.
+
+    mut greeting: string = "hello;       // the closing " is missing
+    mut letter: char = 'a;                // the closing ' is missing
+
+Add the missing quote:
+
+    mut greeting: string = "hello";
+    mut letter: char = 'a';
+
+Two things worth knowing:
+
+- A string can't continue onto the next line. If you want a line break inside your text, write `\n` in it: `"first line\nsecond line"`.
+- A quote inside your text needs a backslash in front of it, or Turf thinks the text has ended there: `"she said \"hi\""`.
+
+When this error appears, look at the line it points to first. Very often the quote is right there, one character short of where you meant it to be.

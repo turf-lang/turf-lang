@@ -17,6 +17,7 @@
 
 #include "AST.h"
 #include "Builtins.h"        // LookupBuiltin — for skipping bare intrinsics in visitFuncCall
+#include "ASTChildWalker.h"  // LaterLocalFinder (E043)
 #include "Errors.h"          // ReferenceError, DuplicateDeclarationError
 #include "ResolverSymbolTable.h"
 #include "ResolverInternal.h"
@@ -28,6 +29,38 @@
 
 
 // Walk Variable (VarExpr) nodes: look up; emit ReferenceError on miss.
+namespace {
+// Is there a local `mut`/`immut`/array declaration of `Name` in a function body
+// that sits AFTER `Use`? Run only once a name has already FAILED to resolve, so
+// it costs nothing for a program that compiles and cannot change one: it only
+// picks which of two diagnostics describes a mistake that is an error anyway.
+class LaterLocalFinder : public ASTChildWalker {
+  const std::string &Name;
+  const SourceLocation &Use;
+  bool Found = false;
+
+  bool after(const SourceLocation &L) const {
+    return L.Line > Use.Line || (L.Line == Use.Line && L.Col > Use.Col);
+  }
+
+public:
+  LaterLocalFinder(const std::string &Name, const SourceLocation &Use)
+      : Name(Name), Use(Use) {}
+  bool found() const { return Found; }
+
+  void visitVarDecl(VarDeclExprAST &Node) override {
+    if (Node.getName() == Name && after(Node.getLoc()))
+      Found = true;
+    ASTChildWalker::visitVarDecl(Node);
+  }
+  void visitArrayDecl(ArrayDeclExprAST &Node) override {
+    if (Node.getName() == Name && after(Node.getLoc()))
+      Found = true;
+    ASTChildWalker::visitArrayDecl(Node);
+  }
+};
+} // namespace
+
 void Resolver::visitVariable(VariableExprAST &Node) {
   auto Sym = SymTable_.lookupVariable(Node.getName());
   if (Sym) {
@@ -94,7 +127,7 @@ void Resolver::visitVariable(VariableExprAST &Node) {
       return;
     }
     if (Candidates.size() > 1) {
-      TypeError(Node.getLoc(), "'" + Node.getName() +
+      TypeError(Node.getLoc(), ErrCode::AmbiguousCall, "'" + Node.getName() +
                                    "' is overloaded -- it can't be used as a "
                                    "first-class function value without an "
                                    "unambiguous single signature.",
@@ -111,6 +144,20 @@ void Resolver::visitVariable(VariableExprAST &Node) {
   RankedSuggestions Suggestions;
   Suggestions.Local =
       SuggestionIndex::suggestVisible(Node.getName(), VisibleNames);
+
+  // `y` used on a line ABOVE `mut y: ... = ...;` in the same function is not a
+  // missing variable, it is a variable used too early -- and "did you forget to
+  // create it?" is exactly the wrong thing to tell someone who did. That is
+  // E043. Until #263 this fired only from a Codegen backstop the Resolver
+  // always pre-empted, so E043 was documented and never seen.
+  if (EnclosingFuncDef_ && EnclosingFuncDef_->getBody() &&
+      visibleTypeKind(Node.getName()).empty()) {
+    LaterLocalFinder Finder(Node.getName(), Node.getLoc());
+    const_cast<ExprAST *>(EnclosingFuncDef_->getBody())->accept(Finder);
+    if (Finder.found())
+      UseBeforeDeclarationError(Node.getLoc(), Node.getName(), Suggestions)
+          .raise();
+  }
 
   ReferenceError(Node.getLoc(), Node.getName(), Suggestions,
                  visibleTypeKind(Node.getName()))

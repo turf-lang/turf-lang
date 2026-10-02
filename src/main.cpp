@@ -1152,7 +1152,7 @@ static int runCompilerMain(int argc, char **argv) {
             auto AST = ParseExpression();
             if (AST) {
               if (CurTok == ';') {
-                LogErrorAt(CurLoc, "Unexpected ';'", SLM::ErrorCategory::SYNTAX_ERROR);
+                LogErrorAt(CurLoc, ErrCode::UnexpectedToken, "Unexpected ';'", SLM::ErrorCategory::SYNTAX_ERROR);
               }
               // NOTE: no LintExpression() call here (deliberately -- see the
               // "Phase Separation: Lint All" comment near FnASTs' declaration
@@ -1189,7 +1189,7 @@ static int runCompilerMain(int argc, char **argv) {
             auto AST = ParseExpression();
             if (AST) {
               if (CurTok != ';') {
-                LogErrorAt(CurLoc, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR);
+                LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR);
               } else {
                 getNextToken(); // eat ';'
               }
@@ -1568,7 +1568,7 @@ static int runCompilerMain(int argc, char **argv) {
         auto AST = ParseExpression();
         if (AST) {
           if (CurTok == ';') {
-            LogErrorAt(CurLoc, "Unexpected ';'", SLM::ErrorCategory::SYNTAX_ERROR);
+            LogErrorAt(CurLoc, ErrCode::UnexpectedToken, "Unexpected ';'", SLM::ErrorCategory::SYNTAX_ERROR);
           }
           // lint only — not re-codegenned. Also transparently flattens a
           // top-level `unsafe { }` block -- see AppendFlattenedTopLevelDecl()'s
@@ -1595,7 +1595,7 @@ static int runCompilerMain(int argc, char **argv) {
         auto AST = ParseExpression();
         if (AST) {
           if (CurTok != ';') {
-            LogErrorAt(CurLoc, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR);
+            LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR);
           } else {
             getNextToken(); // eat ';'
           }
@@ -1613,10 +1613,14 @@ static int runCompilerMain(int argc, char **argv) {
 
     g_recoverActive = true;
     if (setjmp(g_recoverJmp) == 0) {
+      // Where the statement STARTS, for the "not allowed outside a function"
+      // diagnostic below -- CurLoc will be past it once ParseExpression()
+      // returns.
+      const SourceLocation StmtLoc = CurLoc;
       auto AST = ParseExpression();
       if (AST) {
         if (CurTok != ';') {
-          LogErrorAt(CurLoc, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR);
+          LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR);
         } else {
           getNextToken(); // eat ';'
         }
@@ -1636,9 +1640,15 @@ static int runCompilerMain(int argc, char **argv) {
             g_recoverActive = false; // `continue` skips the reset below
             continue;
           }
-          std::cerr
-              << "Error: Statements are not allowed outside of a function. "
-                 "Please define 'fn main(): int' and move this code inside.\n";
+          // Through the engine, not a raw std::cerr: this used to print
+          // "Error: ..." with no `[E0NN]`, no source line, no caret and no
+          // `--explain` page -- the one message every first-time beginner who
+          // pastes code at the top level meets. (issue #263)
+          LogErrorAt(StmtLoc, ErrCode::StatementOutsideFunction,
+                     "Statements are not allowed outside of a function. "
+                     "Please define 'fn main(): int' and move this code "
+                     "inside.",
+                     SLM::ErrorCategory::SYNTAX_ERROR);
           DiagnosticEngine::flushAll();
           // _Exit (not exit): this raw exit point bypasses the rest of the
           // call stack, so the SLMCleanup guard in runCompilerMain() never
@@ -1859,11 +1869,19 @@ static int runCompilerMain(int argc, char **argv) {
     // Verify that an explicit 'main' function was defined in the primary module
     Function *MainFunc = TheModule->getFunction("main");
     if (!MainFunc || MainFunc->empty()) {
-      std::cerr << "Error: No entry point found. Please define 'fn main(): int' "
-                   "in your file.\n";
+      // Through the diagnostic engine (issue #263), not a raw std::cerr: a
+      // beginner who forgets `main` -- or runs `turf` on an importable module
+      // -- used to get one uncoded "Error:" line and no `--explain`. Raised at
+      // Line 0: it is about the whole file, not a place in it (printDiag()
+      // then prints no "at line").
+      std::string NoMain =
+          "No entry point found. Please define 'fn main(): int' in your file.";
       if (opts.Check)
-        std::cerr << "  (checking a module that is only ever imported? add "
-                     "--module: `turf check --module <file.tr>`)\n";
+        NoMain += "\n  Hint: checking a module that is only ever imported? add "
+                  "--module: `turf check --module <file.tr>`";
+      LogErrorAt(SourceLocation{0, 0, ""}, ErrCode::MissingEntryPoint, NoMain,
+                 SLM::ErrorCategory::DECLARATION);
+      DiagnosticEngine::flushAll();
       return 1;
     }
   }

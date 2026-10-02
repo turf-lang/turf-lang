@@ -1,0 +1,13 @@
+`void` can't be the type of a variable, field or parameter
+
+`void` means "nothing". It describes a function that gives nothing back, so it can only appear as a function's return type:
+
+    fn log(msg: string): void { ... }        // fine
+
+A variable, a struct field or a parameter holds a value, and "nothing" can't be held:
+
+    mut x: void;                  // what would x contain?
+    struct Box { item: void }
+    fn show(thing: void): void { ... }
+
+Give it a real type -- `int`, `string`, a struct, ... If you need a pointer to something whose type you don't know (in `extern` code), use `ptr` or `void*` instead.

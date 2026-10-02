@@ -2,6 +2,7 @@
 #define LEXER_H
 
 #include "ErrorCategory.h" // SLM::ErrorCategory -- lightweight, no LLVM/AST deps
+#include "ErrorCodes.h"    // ErrCode:: -- LogErrorAt() requires one (issue #263)
 #include <cctype>
 #include <csetjmp>
 #include <fstream>
@@ -263,10 +264,12 @@ public:
     // to select the right entry out of AllSourceLines at print time, since
     // Line numbers alone are ambiguous across files.
     std::string Filename;
-    // Stable "E0NN" code (see ErrorCodes.h), set only for diagnostics raised
-    // through a TurfError subclass (TurfError::raise() passes getCode()).
-    // Empty for the raw, untyped LogErrorAt() path and for warnings -- both
-    // print without a "[E0NN]" tag in printDiag().
+    // Stable "E0NN" code (see ErrorCodes.h). A TurfError subclass supplies it
+    // (TurfError::raise() passes getCode(): the class's code, or the
+    // instance's withCode() override); the raw LogErrorAt() path takes a
+    // REQUIRED ErrCode:: argument. Empty only for a warning -- a TurfWarning
+    // subclass that has no registry row prints without a "[E0NN]" tag in
+    // printDiag() -- so every ERROR carries one (issue #263).
     std::string Code;
     // SLM-001: structured hints (deterministic-fix candidate, known types)
     // from the raising TurfError, if any -- see DiagnosticHints's doc
@@ -470,8 +473,19 @@ void resetLexer();
 // explicitly (DIAG-001 audit); GENERAL is a deliberate choice for a site,
 // never an unaudited default. See ErrorCategory.h's removed classifyError()
 // -- category is no longer re-derived from message text.
-void LogErrorAt(SourceLocation Loc, const std::string &Msg,
-                SLM::ErrorCategory Category = SLM::ErrorCategory::GENERAL);
+//
+// `Code` is REQUIRED (issue #263): one of the ErrCode:: constants
+// (ErrorCodes.h), which must be a row of AllErrorCodes. Before this, this path
+// was the one way to print an error with no `[E0NN]` and so no
+// `turf --explain` page -- 181 call sites, every parse error a beginner can
+// hit. A typed TurfError gets its code from its C++ class; this untyped path
+// has no class, so the call site names the KIND of mistake instead. Making the
+// parameter mandatory (and not defaulted) is the point: a new raw diagnostic
+// that forgets its code is a compile error, not a silent dead end. Warnings
+// never come through here (they are TurfWarning, or a "Warning:" message that
+// isMessageWarning() recognises and which carries no code by design).
+void LogErrorAt(SourceLocation Loc, const char *Code, const std::string &Msg,
+                SLM::ErrorCategory Category);
 int GetLastChar();
 void SetLastChar(int c);
 

@@ -1,0 +1,21 @@
+A reference to a local variable can't leave the function
+
+A function's local variables live only until it returns; then that memory is reused. A reference (`&T`) into it would keep pointing at the reused memory -- a "dangling" reference -- so Turf refuses to let one escape: not as the return value, not stored into a list, not stored into a struct that outlives the call.
+
+    struct Node { val: int }
+
+    fn make(): &Node {
+        mut n: Node = Node::default();
+        n.val = 42;
+        return &n;                 // n is gone when make() returns
+    }
+
+To hand a value back, copy it onto the heap with `heap(...)`. That copy is managed for you and lives as long as anything refers to it:
+
+    fn make(): &Node {
+        mut n: Node = Node::default();
+        n.val = 42;
+        return heap(n);
+    }
+
+A reference you *received* as a parameter is fine to return or store -- it already outlives this function. Only references into this function's own locals are the problem.

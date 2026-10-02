@@ -166,10 +166,14 @@ public:
                            Colors::CYAN + Name + Colors::BRIGHT_RED +
                            "' before telling me what it is.") {
     Category_ = SLM::ErrorCategory::UNDECLARED_VAR;
-    Hint_ = suggestionsOrFallback(Suggestions,
-      "Did you forget to create this variable? You have to "
-      "create it before you can use it, like this: `mut " +
-      Name + ": int = 5;`");
+    // NOT "did you forget to create this variable?" -- this variable IS
+    // created, further down; the mistake is the order. (Suggestions are not
+    // offered either: a rename would point at a different variable, see this
+    // class's own comment above.)
+    (void)Suggestions;
+    Hint_ = "'" + Name + "' is declared further down in this function, but a "
+            "variable only exists from its declaration onwards. Move that "
+            "declaration above this line.";
   }
 };
 class DuplicateDeclarationError : public TurfError {
