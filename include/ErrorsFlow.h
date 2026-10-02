@@ -28,18 +28,9 @@ public:
     // other bucket, not an oversight.
   }
 };
-class UnreachableCodeError : public TurfError {
-public:
-  UnreachableCodeError(SourceLocation Loc, const std::string &What,
-                       const std::string &Terminator = "return")
-      : TurfError(Loc, Colors::BRIGHT_RED + "This " + What +
-                           " will never happen because you used '" +
-                           Terminator + "' before it!" + Colors::RESET,
-                  "Move this code before the '" + Terminator +
-                  "' statement if you want it to run.") {
-    Category_ = SLM::ErrorCategory::CONTROL_FLOW;
-  }
-};
+// (UnreachableCodeError, E013, was deleted in issue #263: the same mistake as
+// StatementAfterTerminatorError / E012, raised only from a Codegen backstop
+// that E012 always pre-empted. The backstop now raises E012.)
 // Control Flow Errors
 class MissingReturnError : public TurfError {
 public:

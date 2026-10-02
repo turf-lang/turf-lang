@@ -159,7 +159,10 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     {"E010", "RecursionWithoutBaseError", "Recursion without base", SLM::ErrorCategory::CONTROL_FLOW, true},
     {"E011", "SemanticError", "Semantic", SLM::ErrorCategory::GENERAL},
     {"E012", "StatementAfterTerminatorError", "Statement after terminator", SLM::ErrorCategory::CONTROL_FLOW},
-    {"E013", "UnreachableCodeError", "Unreachable code", SLM::ErrorCategory::CONTROL_FLOW},
+    // RETIRED (issue #263): the same mistake as E012 ("code after a return /
+    // break / continue"), reported only from a Codegen backstop that the CFG
+    // pass always pre-empted with E012. The backstop now raises E012 itself.
+    {"E013", "UnreachableCodeError", "Unreachable code (retired: now E012)", SLM::ErrorCategory::CONTROL_FLOW},
     {"E014", "KeywordError", "Keyword", SLM::ErrorCategory::SYNTAX_ERROR},
     // RETIRED (issue #263): one code for every "the shape of this code is wrong"
     // message told a beginner nothing about WHICH shape. Nothing raises E015
@@ -188,7 +191,9 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     {"E034", "DuplicateTypeNameError", "Duplicate type name", SLM::ErrorCategory::DECLARATION},
     {"E035", "InvalidTransitionError", "Invalid transition", SLM::ErrorCategory::TYPE_MISMATCH, true},
     {"E036", "InvalidTransitionTargetError", "Invalid transition target", SLM::ErrorCategory::TYPE_MISMATCH, true},
-    {"E037", "LookupError", "Lookup", SLM::ErrorCategory::UNDECLARED_VAR},
+    // RETIRED (issue #263): `LookupError` was never constructed anywhere -- an
+    // unknown function is E041 (UnknownFunctionError). Its own page said so.
+    {"E037", "LookupError", "Lookup (retired: unknown functions are E041)", SLM::ErrorCategory::UNDECLARED_VAR},
     {"E038", "NestedFunctionError", "Nested function", SLM::ErrorCategory::FUNCTION_SIGNATURE},
     {"E039", "NoSuchVariantError", "No such variant", SLM::ErrorCategory::DECLARATION},
     {"E040", "ReferenceError", "Reference", SLM::ErrorCategory::UNDECLARED_VAR},

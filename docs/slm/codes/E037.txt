@@ -1,22 +1,12 @@
-TURF E037 -- LOOKUP ERROR:
+TURF E037 -- RETIRED (an unknown function is E041):
 
-CAUSE:
-  Defined as "can't find a function named 'X'" (same shape as
-  UnknownFunctionError E041 -- an unresolved function-call name, run
-  through the same suggestion engine as every other unknown-name
-  diagnostic). As of this writing, this specific class has no active
-  call site in the compiler -- the function-name-not-found case in
-  practice is raised through UnknownFunctionError (E041) instead. This
-  entry exists because the class and its E037 code are both registered,
-  but the class is not currently wired to fire anywhere.
+STATUS:
+  No longer raised, and never was: the `LookupError` class behind this code was defined but
+  nothing in the compiler constructed it. The number is kept so an old log that mentions it
+  still resolves, and is never reused.
 
-WHAT TO DO IF YOU SEE THIS CODE:
-  If you actually encounter "[E037]" in real compiler output, that means
-  a new call site was added since this doc was written -- treat it the
-  same as UnknownFunctionError (E041): the named function doesn't
-  resolve. Double-check the spelling, and make sure the module that
-  declares it is imported if it's not a local/prelude function.
+WHAT YOU WANT INSTEAD:
+  A call to a function the compiler does not know (typically a misspelling) is E041:
+    mut n: int = lenght("hello");     // E041, with a spelling suggestion
 
-SEE INSTEAD:
-  UnknownFunctionError (E041) documents the actual, currently-reachable
-  version of this same mistake.
+SEE: E041 (unknown function), E040 (unknown/undeclared variable or name).

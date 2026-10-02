@@ -1,5 +1,7 @@
-This one's rare -- if you hit it, treat it like "unknown function"
+E037 is retired -- an unknown function is E041
 
-Honestly, you're very unlikely to ever see this exact error in practice -- it's defined in the compiler for "I can't find a function named this," but the actual code path that would trigger it isn't currently wired up to anything. The much more common version of this same mistake shows up as a different error, "Unknown function", which fires for the real case.
+This code was defined for "I can't find a function named this", but nothing in the compiler ever produced it: a call to a function Turf doesn't know has always been reported as E041 ("Unknown function"). The number is kept so an old log that mentions it still has somewhere to land, and is never reused.
 
-If you do somehow see this one, treat it exactly like that: it means a function call didn't resolve to anything Turf knows about, most likely because of a typo in the name or a missing import for the module that defines it. Double-check the spelling and make sure you've imported whatever module the function comes from, and you should be back on track.
+    mut n: int = lenght("hello");     // misspelled -- E041, with a "did you mean" suggestion
+
+Run `turf --explain E041` for the explanation. In short: check the spelling, and check that you have imported the module the function lives in.

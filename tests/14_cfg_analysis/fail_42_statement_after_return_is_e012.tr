@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E012
+// Issue #263: pins E012 for the plain (non-declaration) case too.
+fn helper(): int {
+    return 1;
+}
+
+fn main(): int {
+    return 0;
+    helper();
+}

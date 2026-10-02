@@ -152,7 +152,7 @@ public:
   }
 
   // Convenience for the common "unknown name" shape: every RankedSuggestions-
-  // based error class (LookupError, ReferenceError, UnknownStructFieldError,
+  // based error class (UnknownFunctionError, ReferenceError, UnknownStructFieldError,
   // ...) calls this right after computing its Hint_, passing the exact name
   // that failed to resolve. Sets a deterministic-fix candidate only when the
   // lookup was genuinely UNAMBIGUOUS -- exactly one local candidate and zero

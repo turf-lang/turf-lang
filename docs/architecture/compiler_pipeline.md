@@ -627,14 +627,10 @@ one, because they're raised through completely different code paths:
   (`src/CFG.cpp:511-522`) raises `StatementAfterTerminatorError` (**E012**,
   fatal) the moment it's asked to visit a statement while the current
   block already has an explicit terminator, anchored at the terminator's
-  own location (not the unreachable statement's). A **variable
-  declaration** specifically after a terminator takes an entirely
-  separate path: `VarDeclExprAST::codegen()` has its own, earlier check
-  against a `SymbolTable`-tracked early-exit flag
-  (`CurrentScopeHasEarlyExit()`) and raises `UnreachableCodeError`
-  (**E013**) instead, with different wording — this CFG-block-terminator
-  check never even runs for that case, since Codegen's own check fires
-  first, before the CFG pass gets a chance to see the declaration at all.
+  own location (not the unreachable statement's). Variable declarations
+  go through the same check. `VarDeclExprAST::codegen()` keeps a
+  `SymbolTable`-tracked early-exit backstop (`CurrentScopeHasEarlyExit()`),
+  but it raises E012 too; the old separate code, E013, is retired.
 - **Missing return** — `reportFlowDiagnostics()` (`src/CFG.cpp:375-400`)
   raises `MissingReturnError` (**E009**, fatal) when the function's
   declared return type is non-`void` and `allPathsReturn()`

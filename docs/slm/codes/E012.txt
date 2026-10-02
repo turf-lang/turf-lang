@@ -23,10 +23,11 @@ INCORRECT:
     }
 
 WHAT THIS ERROR IS NOT:
-  - Not the same as UnreachableCodeError (E013), which flags an entire
-    unreachable BLOCK (e.g. an `else` after a condition that's always
-    true) rather than a single trailing statement in the same block as its
-    terminator. The two overlap in spirit but fire from different checks.
+  - Not the unreachable-BLOCK warning (E074), which flags a whole block
+    that no path reaches (e.g. the code after `while true { return 1; }`)
+    rather than a statement in the same block as its terminator.
+  - A variable DECLARATION after a terminator is also E012. It used to be
+    a separate code, E013, which is now retired.
 
 FIX:
   Delete the dead statement(s), or move them BEFORE the terminator if they

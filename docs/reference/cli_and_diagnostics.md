@@ -472,33 +472,21 @@ fn maybeGetValue(flag: bool): int {
 
 ### Statement after terminator
 
-Turf actually has **two separate diagnostics** for dead code following a `return`/`break`/`continue`, depending on what the dead code is.
-
-**Anything except a variable declaration** — triggered as soon as the CFG builder visits a statement in a block that already has a terminator:
-
 **Diagnostic:** `StatementAfterTerminatorError` (**E012**, fatal) — *"This code comes after a return/break/continue, so it's impossible to reach it!"*
+
+Triggered as soon as the CFG builder visits a statement in a block that already has a terminator. This covers every kind of statement, variable declarations included:
 
 ```turflang
 fn main(): int {
     return 0;
     print_thing();   // [E012], reported at the `return 0;` line
+    mut x: int = 5;  // [E012] as well
 }
 ```
 
 > **Note:** the error is anchored at the *terminator's* location (the `return` line), not at the unreachable statement's own line — confirmed by compiling the example above.
 
-**A variable declaration**, specifically, takes a completely different, earlier code path — a `SymbolTable`-tracked "current scope has early exit" flag, not CFG block-terminator state:
-
-**Diagnostic:** `UnreachableCodeError` (**E013**, fatal) — *"This declaration will never happen because you used 'return' before it!"*
-
-```turflang
-fn main(): int {
-    return 0;
-    mut x: int = 5;   // [E013], NOT [E012]
-}
-```
-
-> **Verified live**: this exact snippet produces `[E013]`, not `[E012]`. Don't treat "statement after terminator" as one warning class — it's two distinct diagnostics, chosen based on whether the dead statement is a declaration or anything else.
+> **History:** a declaration in this position used to be reported as a separate code, **E013**, from a Codegen backstop. That was the same mistake under a second number, and the CFG pass always got there first, so E013 is retired (the row stays in the registry; the Codegen backstop now raises E012 itself).
 
 ### Use-before-initialization
 

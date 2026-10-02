@@ -110,7 +110,9 @@ Value *VarDeclExprAST::codegen() {
 
   // Check for unreachable declaration
   if (GlobalSymbolTable && GlobalSymbolTable->CurrentScopeHasEarlyExit()) {
-    UnreachableCodeError(Loc, "declaration").raise();
+    // E012, not the retired E013: the same mistake, and the code the CFG pass
+    // reports for it before Codegen ever runs (this is only the backstop).
+    StatementAfterTerminatorError(Loc, "return, break or continue").raise();
     return nullptr;
   }
 

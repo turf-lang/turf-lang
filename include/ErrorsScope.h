@@ -29,26 +29,8 @@ inline std::string typeUsedAsValueHint(const std::string &Name,
   return Is + (Called ? ", not a function." : ", not a value.");
 }
 
-// Lookup Error : Typo/Unknown function name
-class LookupError : public TurfError {
-public:
-  LookupError(SourceLocation Loc, const std::string &Name,
-              const RankedSuggestions &Suggestions)
-      : TurfError(Loc, Colors::BRIGHT_RED + "Oops! I can't find a function named '" +
-                           Colors::CYAN + Name + Colors::BRIGHT_RED + "'." +
-                           Colors::RESET) {
-    // UNDECLARED_VAR, not BUILTIN_FUNCTION: this is about an unresolved
-    // *name* (could be a typo'd user function), not a builtin's own
-    // argument-type rules -- matches the enum's own stated definition
-    // better than the old text-matcher's (accidental) BUILTIN_FUNCTION
-    // routing for "Unknown function" text.
-    Category_ = SLM::ErrorCategory::UNDECLARED_VAR;
-    Hint_ = suggestionsOrFallback(Suggestions,
-      "Double-check the spelling against the built-in "
-      "functions like 'printline' or 'typeof'.");
-    trySetDeterministicRename(Name, Suggestions);
-  }
-};
+// (LookupError, E037, was deleted in issue #263: nothing ever constructed it --
+// an unknown function is UnknownFunctionError / E041 below.)
 // Arithmetic Error : Math issues
 
 class UnknownFunctionError : public TurfError {
@@ -63,7 +45,9 @@ public:
       : TurfError(Loc, Colors::BRIGHT_RED + "Error: Unknown function '" +
                            Colors::CYAN + Name + Colors::BRIGHT_RED + "'." +
                            Colors::RESET) {
-    Category_ = SLM::ErrorCategory::UNDECLARED_VAR; // see LookupError's note above
+    // UNDECLARED_VAR, not BUILTIN_FUNCTION: this is about an unresolved *name*
+    // (could be a typo'd user function), not a builtin's own argument-type rules.
+    Category_ = SLM::ErrorCategory::UNDECLARED_VAR;
     if (!TypeKind.empty()) {
       Hint_ = typeUsedAsValueHint(Name, TypeKind, /*Called=*/true);
       return;
