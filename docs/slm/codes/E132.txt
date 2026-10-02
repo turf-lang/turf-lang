@@ -1,0 +1,31 @@
+TURF E132 -- INVALID RECOVER:
+
+CAUSE:
+  `recover` handles a call that can fail, and two rules were broken.
+    1. It needs a FALLIBLE operand: only a call whose declared return type starts with `!`
+       (`fn read(): !string`) can be followed by `recover`.
+    2. A `recover run { ... }` block that does not `produce` a value must END IN `return`
+       on every path, because the expression has no value to become.
+
+INCORRECT:
+    fn f(): int { return 1; }
+    mut v: int = f() recover produce 0;          // f() cannot fail
+
+    mut text: string = read("a.txt") recover run {
+        io::printline("couldn't read it");
+    };                                           // falls out the bottom
+
+CORRECT:
+    fn f(): !int { ... }                         // make it fallible if it can fail
+    mut text: string = read("a.txt") recover run {
+        io::printline("couldn't read it");
+        return 1;
+    };
+    mut text: string = read("a.txt") recover produce "";
+
+FIX:
+  Drop the `recover` or declare the callee `!T`; and make a `run` block `return` (or use
+  `recover produce <value>`).
+
+RELATED: E095 (try misuse), E096 (error payloads), E093 (error compare must have
+  `otherwise`).

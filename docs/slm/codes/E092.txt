@@ -1,0 +1,47 @@
+TURF E092 -- INVALID PATTERN:
+
+CAUSE:
+  A `matches` header in a `compare` is not a legal pattern. One code covers every
+  way a header can be wrong; the message says which. A header can be a plain value
+  (`matches 3:`), `_`, a struct pattern (`Point { x: 0, y }`), an error-variant
+  pattern (`IOError::Denied(path, ..)`), any of those followed by a guard
+  (`... if x == y:`).
+
+THE CASES:
+  - Struct pattern over a non-struct value, over a struct of a different name, or
+    over a `&?T` / raw-pointer subject. (A field the struct does not have is E068.)
+  - A field left out without `..`: list every field or end with `..`.
+  - A field pattern that is not a literal (int, char, string, bool), an enum
+    variant, `_`, a binding name or a nested struct pattern. To compare with a
+    variable or expression, bind and use a guard:
+        matches Point { x, .. } if x == limit:
+    A `double` literal is never a pattern; test it in a guard.
+  - A name bound twice in one pattern, or a field listed twice.
+  - Stacked `matches` headers (sharing one body) that bind different names/types.
+  - A guard that is not `bool`.
+  - A lone `_` used as a variable, parameter or function name (`_name` is fine).
+  - Error-variant patterns: payload fields must all be listed or end with `..`
+    (`IOError::Denied(path)` is wrong when there are two fields); a variant that has
+    fields cannot be written bare (`IOError::NotFound` -> `IOError::NotFound(..)`);
+    empty parentheses; matching an error pattern against a non-error value; naming
+    a variant of a different error type.
+
+INCORRECT:
+    compare p {
+        matches Point { x }:              // does not mention 'y'
+        matches Point { x: 1 + 2, .. }:   // an expression is not a pattern
+        matches Q { x, .. }:              // subject is a Point, not a Q
+    }
+
+CORRECT:
+    compare p {
+        matches Point { x, .. }:
+        matches Point { x: 0, y }:
+        matches Point { x, .. } if x == limit:
+    }
+
+NOTE: inside a destructuring pattern a bare identifier always BINDS; at the top of
+  a header it is a variable compared by equality.
+
+RELATED: E068 (unknown struct field), E093 (non-exhaustive compare), E094 (dead
+  arm), E133 (duplicate pattern).

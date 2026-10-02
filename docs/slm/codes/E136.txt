@@ -1,0 +1,20 @@
+TURF E136 -- INVALID MODULE QUALIFIER:
+
+CAUSE:
+  `module::function(...)` reaches into ONE module. Modules are not nested inside each other,
+  so `a::b::function` with two module names in a row is invalid. The one three-part form is
+  `module::Type::Variant` (e.g. `shapes::Color::Red`); the check only complains when the middle
+  name is itself a module.
+
+INCORRECT:
+    import io;
+    import mem;
+    mem::io::printline("hi");           // `io` is not inside `mem`
+
+CORRECT:
+    io::printline("hi");
+
+FIX:
+  Use the single module that actually owns the function.
+
+RELATED: E025 (no matching module overload), E027 (module not found), E088 (private name).

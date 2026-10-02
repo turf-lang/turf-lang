@@ -1,36 +1,35 @@
-TURF E015 -- SYNTAX ERROR (GENERAL PARSER CATCH-ALL):
+TURF E015 -- RETIRED (split into specific syntax codes E099-E123):
 
-CAUSE:
-  The parser hit source text that doesn't match the grammar at that
-  point -- a missing/extra token, wrong punctuation, or something in the
-  wrong order. This class wraps an arbitrary explanation string set per
-  call site (dozens of them across the parser), so the specific message
-  always names the exact thing the parser expected, e.g. "Expected '('
-  after 'fn' in a function type", "Expected a type name", "Expected ']'
-  to close array size".
+STATUS:
+  No longer raised. It was the single catch-all for every parser/lexer error. Each mistake now
+  has its own code and --explain page. The number is kept so an old log that mentions it still
+  resolves, and is never reused.
 
-CORRECT:
-    fn add(a: int, b: int): int {
-        return a + b;
-    }
+WHERE THE OLD CASES WENT:
+  E099  unterminated string or character literal
+  E100  invalid escape sequence
+  E101  invalid character literal
+  E102  missing semicolon
+  E103  unexpected token
+  E104  unclosed bracket, brace or parenthesis
+  E105  missing comma
+  E106  missing colon
+  E107  missing opening brace or parenthesis
+  E108  name expected
+  E109  type expected
+  E110  a specific word or symbol expected
+  E111  nested too deeply
+  E112  `void` used as a variable/field/parameter type
+  E113  removed syntax
+  E114  duplicate member
+  E115  invalid operator declaration
+  E116  `extern fn` with a body
+  E117  invalid `error` declaration
+  E118  statement outside a function
+  E119  no `main` function
+  E120  unsupported loop form
+  E121  internal compiler error
+  E122  cannot take the address of an expression
+  E123  invalid array size
 
-INCORRECT (a few common shapes):
-    fn add(a: int, b: int) int {    // ERROR: missing ':' before return type
-        return a + b;
-    }
-
-    struct Point {
-        x: int
-        y: int                       // ERROR: missing ',' between fields
-    }
-
-WHAT THIS ERROR IS NOT:
-  Not KeywordError (E014) -- that's specifically a misspelled reserved
-  word; this is any other shape-of-the-code mistake (wrong punctuation,
-  missing token, wrong nesting).
-
-FIX:
-  Read the specific message -- it names exactly what the parser expected
-  and didn't find. Check punctuation (',', ':', ';', matching
-  brackets/braces/parens) around the reported line and column first;
-  that covers the large majority of real cases.
+SEE: the page of whichever code the compiler actually printed.

@@ -1,0 +1,20 @@
+TURF E127 -- ENUM VALUE OUT OF RANGE:
+
+CAUSE:
+  A literal number was converted `to` an enum, but it does not correspond to a variant.
+  The first variant is 0, the next 1, and so on. The compiler checks literals at compile
+  time and states the valid range.
+
+INCORRECT:
+    enum Color { Red, Green }         // Red = 0, Green = 1
+    mut d: Color = 7 to Color;        // no variant number 7
+
+CORRECT:
+    mut c: Color = 1 to Color;        // Green
+    mut c: Color = Color::Green;      // better: use the variant by name
+
+FIX:
+  Use the variant name, or a number within the stated range. For a computed number, check
+  the range before converting.
+
+RELATED: E134 (conversion not allowed), E093 (non-exhaustive compare).

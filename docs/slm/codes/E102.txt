@@ -1,0 +1,26 @@
+TURF E102 -- MISSING SEMICOLON:
+
+CAUSE:
+  Every statement ends with `;`. The parser finished a statement and found the start
+  of the next one with no `;` between. The reported position is where the NEXT thing
+  started -- just after where the `;` belongs -- so look at the end of the line ABOVE
+  the one pointed at.
+
+APPLIES TO: variable declarations, assignments, a call used as a statement, `return`,
+  `break`, `continue`, and the `;` after `do { ... } while condition;`.
+DOES NOT APPLY TO: statements ending in a block's `}` (`if`, `while`, `for`, function,
+  struct, enum).
+
+INCORRECT:
+    mut x: int = 5            // no semicolon
+    return x;
+
+CORRECT:
+    mut x: int = 5;
+    return x;
+
+FIX:
+  Add `;` at the end of the previous statement.
+
+RELATED: E103 (unexpected token), E104 (unclosed bracket -- an earlier missing
+  bracket can make a later token look wrong).

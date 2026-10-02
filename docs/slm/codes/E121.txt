@@ -1,0 +1,18 @@
+TURF E121 -- INTERNAL COMPILER ERROR:
+
+CAUSE:
+  A compiler invariant was violated: a state earlier passes should have made
+  impossible (an unresolved type, a field lookup on a non-struct). The compiler stops
+  rather than risk producing a program that does the wrong thing. This is a BUG IN THE
+  COMPILER, not a mistake in the user's code.
+
+WHAT TO DO:
+  Report it with: the smallest program that still prints this message (cut lines until
+  it stops, then restore the last one), the full error text including line and column,
+  and the output of `turf --version`.
+
+WORKAROUND:
+  A small change near the reported line often steps around it: name an intermediate
+  value with `mut`, add an explicit type annotation.
+
+RELATED: none. Do not treat the user's code as wrong when this code appears.

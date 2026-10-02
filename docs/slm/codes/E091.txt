@@ -1,0 +1,24 @@
+TURF E091 -- MODULE NOT IMPORTABLE FROM THIS PACKAGE:
+
+CAUSE:
+  In a project (turf.toml), `import m;` may name only: (1) a module of the
+  importing package itself (any `m.tr` under src/), (2) a package listed under
+  [dependencies], by package name, or (3) a standard-library module. The module
+  EXISTS in this build but is none of those for the importing package. Two forms:
+
+  TRANSITIVE DEPENDENCY: the package is built only because something you depend
+    on depends on it. Using it would break when that dependency stops needing it.
+        // myapp depends on plotter; plotter depends on geometry
+        import geometry;     // ERROR: not a dependency of 'myapp'
+  INTERNAL MODULE: every module of a package except its root module
+    (src/<package name>.tr) is internal to that package.
+        import shapes;       // ERROR: Module 'shapes' is internal to 'geometry'
+
+FIX:
+  Transitive: add the package to your own [dependencies] in turf.toml.
+  Internal: import the package itself (`import geometry;`) and use what its root
+  module makes `pub`; if `shapes` should be public API, the package author must
+  expose it from the root module.
+
+RELATED: E027 (could not find the module at all -- here the file exists and a
+  rule puts it out of reach), E090 (more than one file matches the name).

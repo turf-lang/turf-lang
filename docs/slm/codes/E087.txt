@@ -1,0 +1,35 @@
+TURF E087 -- MISPLACED VISIBILITY MODIFIER:
+
+CAUSE:
+  `pub` (synonym `public`) was written where it can never change who sees
+  something. It is rejected rather than ignored, because an ignored `pub` turns
+  a typo into the false belief "I exported that". `pub` is meaningful ONLY
+  right before `fn`, `struct`, `enum`, `error`, `machine` or `extern fn` at the
+  top level of a file, and before a field inside a struct body.
+
+EACH MISUSE AND ITS FIX:
+    pub export immut LIMIT: int = 10;     // `export` already IS a constant's pub
+    pub operator +(a: Money, b: Money): Money { ... }
+        // operators are visible wherever their operand types are; make the
+        // TYPE pub instead
+    pub import io;                        // imports are never re-exported
+    pub immut LIMIT: int = 10;            // write `export immut NAME: T = v;`
+    enum Color { Red, pub Green }         // variants are public iff the enum is
+    fn add(pub a: int, b: int): int       // parameters are local; `pub fn add`
+    pub unsafe { ... }                    // put pub on the declarations inside
+    fn main(): int { pub struct P {..} }  // local declarations are never visible
+    pub @caller_location fn here() ...    // decorator first, then pub
+    mut pub: int = 1;                     // `pub`/`public` are reserved words
+
+CORRECT:
+    pub struct Point { pub x: int, pub y: int, cache: int }
+    pub fn Point.len(): int { ... }
+    @caller_location
+    pub fn here(): string { ... }
+
+FIX:
+  Remove the `pub`, or move it to the declaration it was meant for. The message
+  names which of the cases above applies.
+
+RELATED: E088 (using a private name from another module), E089 (a pub item
+  mentioning a private type).

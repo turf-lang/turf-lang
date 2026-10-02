@@ -1,0 +1,28 @@
+TURF E130 -- RAW POINTER OUTSIDE UNSAFE:
+
+CAUSE:
+  A raw pointer (`ptr`, `int*`, `Point*`, ...) is a memory address with none of Turf's
+  safety checks (it can be null, dangling, or read past its end). It may be used only
+  inside an `unsafe { }` block. A raw pointer also cannot appear in an ordinary
+  function's signature, even inside `unsafe`: only `extern fn` declarations (C bindings)
+  may use raw pointers there.
+
+INCORRECT:
+    fn main(): int {
+        mut p: ptr = null;            // outside unsafe
+        return 0;
+    }
+
+CORRECT:
+    fn main(): int {
+        unsafe {
+            mut p: ptr = null;
+        }
+        return 0;
+    }
+
+FIX:
+  Put the code inside `unsafe { ... }`, or avoid raw pointers: `&T` covers most needs and
+  `&?T` is the version that may be `null`. Use `&T` in parameters and return values.
+
+RELATED: E086 (dangling reference escape), E081/E082 (nullable references).

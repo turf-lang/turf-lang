@@ -1,0 +1,21 @@
+TURF E109 -- TYPE EXPECTED:
+
+CAUSE:
+  The parser was waiting for a type (`int`, `string`, `bool`, `double`, `char`, a
+  struct/enum name, `List<int>`, ...) and found something that is not one. Type names
+  are case sensitive (`Int` is not `int`).
+
+INCORRECT:
+    fn add(a: int, b:): int { ... }      // parameter `b` has no type
+    fn get(): { ... }                    // return type missing
+    mut values: List<> = ...;            // nothing between < >
+
+CORRECT:
+    fn add(a: int, b: int): int { ... }
+    fn log(msg: string): void { ... }    // a function returning nothing says `void`
+
+FIX:
+  Write the type. A struct or enum you declared works as a type too.
+
+RELATED: E108 (name expected), E112 (void as a variable/field/parameter type), E106
+  (missing colon before a type).

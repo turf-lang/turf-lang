@@ -1,0 +1,29 @@
+TURF E081 -- POSSIBLE NULL DEREFERENCE:
+
+CAUSE:
+  A field of a nullable reference `&?T` ("a T, or nothing") was read where the
+  compiler cannot prove the value is non-null. The `?` forces the null check
+  to happen BEFORE the access. The proof lasts only as far as the check: if the
+  variable is reassigned in between, or the check was in a different branch,
+  the compiler asks again.
+
+INCORRECT:
+    struct Box { val: int }
+
+    fn bad(b: &?Box): int {
+        return b.val;            // b might be null here
+    }
+
+CORRECT:
+    fn good(b: &?Box): int {
+        if b != null {
+            return b.val;        // b is known non-null inside the check
+        }
+        return 0;
+    }
+
+FIX:
+  Wrap the access in `if b != null { ... }`. If the value can never be null,
+  declare it `&Box` (no `?`) and no check is needed.
+
+RELATED: E082 (converting `&?T` to `&T` with `to` without the same proof).

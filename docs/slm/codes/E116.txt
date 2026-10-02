@@ -1,0 +1,20 @@
+TURF E116 -- EXTERN FUNCTION WITH A BODY:
+
+CAUSE:
+  `extern fn` ANNOUNCES a function that already exists elsewhere (usually C); the code
+  is not in this file, so it must not have a `{ ... }` body.
+
+INCORRECT:
+    extern fn malloc(size: int): ptr {
+        return null;
+    }
+
+CORRECT:
+    extern fn malloc(size: int): ptr;          // declaration ends with `;`
+    fn my_alloc(size: int): ptr { ... }        // to define it in Turf, drop `extern`
+
+FIX:
+  End the extern declaration with `;`, or remove `extern` if the function should be
+  written in Turf.
+
+RELATED: E110 (`fn` expected after `extern`), E087 (`pub` placement for `extern fn`).

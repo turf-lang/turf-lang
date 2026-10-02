@@ -1,0 +1,22 @@
+TURF E123 -- INVALID ARRAY SIZE:
+
+CAUSE:
+  An array's declared size (`int[N]`) is a count of slots and must be a positive whole
+  number. Zero, negative and fractional sizes are rejected.
+
+INCORRECT:
+    mut empty: int[0];               // no slots can hold nothing
+    mut negative: int[-3];
+    mut half: int[2.5];
+
+CORRECT:
+    mut numbers: int[5];             // five slots
+
+FIX:
+  Use a positive whole size. If the count is not known in advance, an array is the
+  wrong tool: use `List<T>` (`import list;`), which grows.
+
+NOTE: `int[0]` may additionally print a second error (a registered cascade); the size
+  is the real mistake.
+
+RELATED: E003 (array size mismatch), E002 (array index must be an integer).

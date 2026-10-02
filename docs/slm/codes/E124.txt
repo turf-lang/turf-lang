@@ -1,0 +1,28 @@
+TURF E124 -- INVALID COMPARISON:
+
+CAUSE:
+  `== != < > <= >=` were applied to two values that cannot be compared: the types differ,
+  or the type does not support the operator. The message names both types. Cases:
+    - different kinds: `x == null` for an int (only pointers and references can be
+      compared to `null`), `x == "5"` for an int and a string;
+    - structs compared directly (`a == b`) -- not supported;
+    - enum values ordered with `<`, `>`, ... -- not supported (variant order is not
+      something a program should rely on).
+
+INCORRECT:
+    mut x: int = 5;
+    if x == null { ... }
+    if x == "5" { ... }
+    if a == b { ... }                 // both Point
+    if color_a < color_b { ... }      // enums
+
+CORRECT:
+    if x == 5 { ... }
+    if a.x == b.x && a.y == b.y { ... }
+    if (color_a to int) < (color_b to int) { ... }
+
+FIX:
+  Compare like with like; compare struct fields individually; convert enums to `int`
+  first if an order is really intended.
+
+RELATED: E066 (type mismatch), E126 (unsupported operation).

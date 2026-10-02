@@ -1,0 +1,24 @@
+TURF E097 -- INVALID GENERIC OPERATOR:
+
+CAUSE:
+  A generic operator `operator<T> ...` is one definition for many types; the
+  compiler picks `T` by looking at the operands at each use. So every type
+  parameter must appear in the operands, and at least one operand must be a type
+  this module owns. Two ways to break that:
+    - a type parameter no operand mentions can never be decided;
+    - an operator whose operands are ALL bare `T` would redefine the operator for
+      every type in the program, including ones this module does not own.
+
+INCORRECT:
+    struct Cell<T> { v: T, n: int }
+    operator<T> [](p: Cell<int>, i: int): T { return p.v; }   // T only in the result
+    operator<T> +(a: T, b: T): T { return a; }                 // for which types?
+
+CORRECT:
+    operator<T> [](p: Cell<T>, i: int): T { return p.v; }
+
+FIX:
+  Tie every type parameter to an operand, and make at least one operand a type you
+  declared (`Cell<T>`, `Vec<T>`, your own struct).
+
+RELATED: E080 (operator orphan rule), E028 (operator on two builtin types).

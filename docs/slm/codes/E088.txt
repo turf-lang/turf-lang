@@ -1,0 +1,43 @@
+TURF E088 -- PRIVATE SYMBOL ACCESS:
+
+CAUSE:
+  A name declared in ANOTHER module without `pub` was used. Everything a module
+  declares at top level (functions, structs, enums, errors, machines, extern
+  fns) is private to that module unless written `pub`/`public`. Members of a
+  `pub` type are checked the same way: a struct's fields and methods are
+  private unless written `pub`, even when the struct itself is `pub`.
+
+  The error appears however the private name is reached: a qualified call
+  (`util::helper()`), a type annotation (`util::Hidden`), construction
+  (`util::Hidden::default()`), an enum variant of a private enum, or an import
+  by name (`import util::helper;`, `import util::[api, helper];`). UFCS cannot
+  get around it either: `p.secret(x)` resolves to a free function that must
+  itself be `pub`.
+
+INCORRECT:
+    // util.tr
+    pub fn api(): int { return helper() + 1; }
+    fn helper(): int { return 41; }
+    // main.tr
+    import util;
+    fn main(): int { return util::helper(); }   // helper is private
+
+    // shapes.tr: pub struct Point { pub x: int, cache: int }
+    p.cache      // ERROR: field 'Point.cache' is private to module 'shapes'
+
+CORRECT:
+    pub fn helper(): int { return 41; }     // if it is meant to be shared
+    // or call what the module does offer: util::api()
+
+NOT ERRORS:
+  A module using its own private names; a `pub` generic whose body uses a
+  private helper (the instantiated copy is still checked as the module that
+  wrote it); `Point::default()` (zero-fill only); `[*]` imports (they silently
+  skip private names); `export immut` constants (always public).
+
+FIX:
+  If the name is yours and meant to be shared, add `pub` in the owning module's
+  file. Otherwise use the module's public surface (the hint lists its `pub`
+  functions or the type's public methods).
+
+RELATED: E087 (misplaced pub), E089 (pub item exposing a private type).

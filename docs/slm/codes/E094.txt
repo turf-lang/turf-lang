@@ -1,0 +1,25 @@
+TURF E094 -- UNREACHABLE COMPARE ARM (WARNING):
+
+CAUSE:
+  Arms of a `compare` are tried in source order and the first header that matches
+  wins. An UNGUARDED header that matches every value (`_`, or a struct pattern whose
+  fields are all bindings or `_`) makes every later arm, and `otherwise`,
+  unreachable. This is a WARNING, not an error: the dead arm is harmless and often
+  left behind while editing. A guarded header is never a catch-all (its guard may
+  be false).
+
+INCORRECT:
+    compare p {
+        matches _:               // matches everything
+            ...
+        done
+        matches Point { x: 3 }:  // WARNING: can never run
+            ...
+        done
+    }
+
+FIX:
+  Delete the dead arm, or move it ABOVE the catch-all.
+
+RELATED: E133 (a DUPLICATE value pattern, e.g. `matches 1:` twice, is a hard
+  error), E093 (not covering every value), E075 (dead branch in unreachable code).

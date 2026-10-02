@@ -1,0 +1,34 @@
+TURF E089 -- PRIVATE TYPE IN PUBLIC SIGNATURE:
+
+CAUSE:
+  A `pub` function, method, extern function or field mentions a type of the same
+  module that is NOT `pub`. Importers could receive values of a type they cannot
+  name, which defeats the type's privacy, so it is rejected where the leak is
+  written. The private type can be anywhere in the signature: parameter, return
+  type, inside `!T`, behind `&`, as a generic argument (`List<Hidden>`), or as a
+  `pub` field's type.
+
+INCORRECT:
+    // shapes.tr
+    struct Hidden { pub n: int }          // no `pub`
+    pub fn make(): Hidden { ... }         // exposes it
+    pub fn a(x: Hidden): int { ... }
+    pub fn c(): !Hidden { ... }
+    pub fn e(): List<Hidden> { ... }
+    pub struct Outer { pub inner: Hidden }
+
+CORRECT (either of two ways):
+    pub struct Hidden { pub n: int }      // make the type public
+    fn make(): Hidden { ... }             // or drop `pub` from the function
+
+NOT ERRORS:
+  A private type used inside a `pub` function's BODY; a `pub` method of a private
+  type; signatures over a type parameter (`pub fn<T> f(x: T): T`); a private
+  field of a private type in a `pub` struct; and ANYTHING in a single-file
+  program (no importer to leak to).
+
+FIX:
+  If importers should hold and name the type, make it `pub`. If it is an
+  implementation detail, remove `pub` from the item that leaks it.
+
+RELATED: E087, E088 (the other visibility rules).

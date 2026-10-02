@@ -1,0 +1,20 @@
+TURF E137 -- NOT A VALUE:
+
+CAUSE:
+  A function was named without calling it (`io::printline` on its own). The function itself is
+  not a value that can be stored in a variable or passed around in this form; it must be CALLED,
+  with parentheses and arguments, where its result is needed. (First-class functions are not
+  part of the language yet.)
+
+INCORRECT:
+    import io;
+    mut f: int = io::printline;          // the function itself
+
+CORRECT:
+    io::printline("hello");              // a call
+
+FIX:
+  Call the function. To hand behaviour elsewhere, wrap the call in your own function and call
+  that: `fn greet(): void { io::printline("hello"); }`.
+
+RELATED: E135 (calling something that is not a function), E067 (using a void result).

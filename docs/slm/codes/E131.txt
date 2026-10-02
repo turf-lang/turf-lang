@@ -1,0 +1,22 @@
+TURF E131 -- METHOD ON A NON-STRUCT:
+
+CAUSE:
+  `thing.method(...)` was written on a value whose type declares no methods (`int`,
+  `bool`, `double`, ...). Likely causes: a misspelled name, a function that lives in a
+  module (`math::abs(x)`, not `x.abs()`), the wrong variable, or a variable whose type is
+  not the struct the author thinks.
+
+INCORRECT:
+    mut x: int = 5;
+    x.foo();                          // an int has no `foo`
+
+NOTE:
+  `x.f()` DOES work on a non-struct when a free function `f` taking that type is imported
+  (UFCS; this is how `text.length()` works on a `string`). So check the spelling and that
+  the module is imported.
+
+FIX:
+  Call the function through its module (`module::function(x)`), fix the spelling/import,
+  or correct the variable's type.
+
+RELATED: E041 (unknown function), E054 (unknown struct method).

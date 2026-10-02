@@ -1,0 +1,22 @@
+TURF E119 -- NO MAIN FUNCTION:
+
+CAUSE:
+  The compiled file has no `fn main(): int`. A program starts at `main`, whose
+  returned number is the process exit status (0 = success). Usual causes:
+    - the function is missing or misspelled (`Main`, `mian`; the name is case
+      sensitive);
+    - the wrong file was compiled (a project's entry point is `src/main.tr`);
+    - the file is a MODULE (a library other files `import`) that was never meant to run
+      on its own. A module does not need a `main`. To check one without running it:
+      `turf check --module file.tr`.
+
+CORRECT:
+    fn main(): int {
+        return 0;
+    }
+
+FIX:
+  Add `fn main(): int`, fix its spelling, compile the right file, or check a library
+  with `--module`.
+
+RELATED: E118 (statement outside a function).

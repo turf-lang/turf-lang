@@ -1,0 +1,37 @@
+TURF E074 -- UNREACHABLE BLOCK (WARNING):
+
+CAUSE:
+  Control-flow analysis found a whole basic block -- not one statement, the
+  entire block -- that no path from the function's entry can reach. Typical
+  producer: a loop that can only be left by `return`, followed by more code.
+  This is a WARNING: compilation still succeeds.
+
+INCORRECT:
+    fn pick(): int {
+        while true {
+            return 1;
+        }
+        return 2;   // unreachable: the loop never exits any other way
+    }
+
+CORRECT (give the loop a real exit):
+    fn pick(): int {
+        mut i: int = 0;
+        while true {
+            i += 1;
+            if i > 10 {
+                break;
+            }
+        }
+        return 2;
+    }
+
+FIX:
+  Either add a `break` / a non-literal-`true` loop condition so the code after
+  the loop is reachable, or delete the leftover code if the loop is meant to
+  never exit normally. Unreachable code usually means the logic does not do
+  what the author thinks.
+
+RELATED: E075 (a dead branch inside the same dead code -- usually reported
+  together with this one), E012 (code after a return/break/continue in the
+  SAME block is an error, not a warning).

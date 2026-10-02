@@ -1,0 +1,23 @@
+TURF E126 -- UNSUPPORTED OPERATION:
+
+CAUSE:
+  A shorthand form is not available where the longer form works. The message names the
+  form and shows the long way.
+    - `int32` is a storage type: arithmetic on it yields `int`, never `int32`, so
+      `x += 1`, `x++` and `x--` on an `int32` are not supported;
+    - compound assignment through a user-defined `operator[]` (`grid[i] += 1`).
+
+INCORRECT:
+    mut x: int32 = 5 to int32;
+    x += 1;
+    grid[i] += 1;
+
+CORRECT:
+    x = (x + 1) to int32;             // arithmetic, then convert back
+    grid[i] = grid[i] + 1;            // write the read and the write out
+
+FIX:
+  Expand the shorthand as shown.
+
+RELATED: E124 (invalid comparison), E134 (conversion not allowed), E098 (write to a
+  temporary).

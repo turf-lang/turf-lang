@@ -1,0 +1,23 @@
+TURF E134 -- INVALID CAST:
+
+CAUSE:
+  `value to Type` was used for a conversion with no defined meaning. The message names both
+  types.
+
+ALLOWED:
+    5 to double        // whole number -> decimal
+    3.9 to int         // decimal -> whole number (drops the fraction)
+    42 to string       // number -> text
+    65 to char         // character code -> char
+    'a' to int         // char -> its code
+
+NOT ALLOWED:
+    5 to bool          // no "5 as true/false"
+    true to int        // a bool is not secretly 0 or 1
+
+FIX:
+  Say what is meant: to test a number for zero compare it (`n != 0`); to get a number from
+  a condition choose the numbers (`give 1 otherwise 0`).
+
+RELATED: E127 (enum value out of range), E066 (type mismatch), E002 (use `to int` for a
+  char/double index).

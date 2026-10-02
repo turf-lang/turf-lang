@@ -1,0 +1,24 @@
+TURF E122 -- CANNOT TAKE THE ADDRESS OF THIS:
+
+CAUSE:
+  `&x` references something that lives in memory, so it works only on a PLACE: a
+  variable, a struct field, an array element. A computed result (an expression value
+  or a function's return value) is a temporary with no place.
+
+CORRECT:
+    mut x: int = 5;
+    mut r: &int = &x;                 // variable
+    mut p: &int = &point.x;           // field
+    mut q: &int = &numbers[2];        // array element
+
+INCORRECT:
+    mut r: &int = &(x + 1);           // a value, not a place
+    mut r: &int = &compute();         // a function result
+
+FIX:
+  Store the value in a variable, then take the variable's address:
+    mut tmp: int = x + 1;
+    mut r: &int = &tmp;
+
+RELATED: E086 (a reference to a local escaping the function), E098 (write to a
+  temporary).
