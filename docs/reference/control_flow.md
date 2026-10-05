@@ -163,13 +163,18 @@ for row in matrix {          // matrix: int[2][3]
 | A scalar (e.g. `int`) | rejected — not an array |
 | A bare `struct` value | rejected — not an array |
 | `List<T>` | rejected — it's a generic struct, not a fixed-size array, even though it behaves like a collection |
-| An unsized array parameter (`arr: int[]`) | rejected separately — the array has no compile-time-known length to bound the loop with |
+
+An unsized array parameter (`arr: int[]`) **can** be for-each'd: it carries
+the caller's length, so the loop visits every element whatever size of array
+was passed ([Unsized parameters](arrays.md#unsized-parameters-t)).
 
 ```turflang
 fn sumAll(arr: int[]): int {
-    for value in arr {   // ERROR: unsized array parameter has no bound
-        ...
+    mut total: int = 0;
+    for value in arr {   // visits arr.length() elements
+        total += value;
     }
+    return total;
 }
 ```
 

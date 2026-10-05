@@ -101,23 +101,25 @@ same is true when an array is passed as a function argument or returned
 from a function — each of those is a full, independent copy, not a shared
 reference.
 
-**The unsized spelling `T[]` is a parameter-only escape hatch, and it is
-*not* a value type.** It exists so one function can accept an array
-argument of any length (`fn sum(arr: int[]): int` called with either an
-`int[5]` or an `int[10]`). Passing an array to a `T[]` parameter does **not**
-copy it — the callee receives the actual address of the caller's
-stack-allocated array (verified in §2.3.2). This is the one place a fixed
-array's storage is genuinely shared rather than copied, and the compiler
-performs **no escape analysis or lifetime checking** on it at all: nothing
-stops you from casting that address to a `ptr`/`T*` inside the callee and
-handing it further outward (returning it, storing it in a struct field,
-etc.). If you do, and the value outlives the caller's own stack frame, you
-have a dangling pointer — the exact same hazard as returning the address of
-any other local variable in a language with manual memory management.
-`T[]` cannot be used as a local variable type, a struct field type, or a
-return type (`docs/reference/arrays.md` §"Unsized parameters") — precisely
-because there's no way to give it a well-defined lifetime once it's
-detached from "the argument I was just handed."
+**The unsized spelling `T[]` is a slice (a parameter or a local view), and it
+is *not* a value type.** It exists so one function can accept an array argument of any
+length (`fn sum(arr: int[]): int` called with either an `int[5]` or an
+`int[10]`). Passing an array to a `T[]` parameter does **not** copy it — the
+callee receives a slice: the address of the caller's own array plus its
+element count (issue #260, §2.3.2). This is the one place a fixed array's
+storage is genuinely shared rather than copied, so its lifetime is kept to
+the call by construction rather than by analysis: `T[]` may only be a
+parameter's own type or a local variable's (a view, from a range slice
+`arr[a..b]`, or an array or another slice; a literal does not make a view,
+it sizes the declaration, §2.3.1), and a local lives no longer than its function. Everywhere that could outlive the frame is E140
+(field, return type, element type, generic argument, function type, behind
+`&`/`*`; no cast produces one), and `arr to ptr` on one is rejected (E134).
+A write through a slice changes the original array, so passing an `immut`
+array (or a slice of one) to a parameter the callee writes through is E141,
+and a `mut` view of an `immut` array is E144. A slice into a `heap()` block's
+array field holds an interior pointer, which the conservative collector's
+interior-pointer retention (`tests/41_gc/03_interior_pointer_retention.tr`) already keeps alive, so the GC needed no
+change (`tests/41_gc/12_slice_into_heap_struct_survives_collection.tr`).
 
 ### 1.4 `string`
 
@@ -402,42 +404,67 @@ stack garbage, matching `docs/reference/arrays.md`'s documented behavior.
 `getLLVMType()`'s array branch (`CodegenCore.cpp:332-337`) reflects the same
 split the type carries: `Size > 0` (a concrete `T[N]`) lowers to a real
 fixed-length array type; `Size == -1` (the unsized `T[]` spelling) lowers to
-a bare opaque pointer — there is no array-length metadata carried at
-runtime for the unsized form at all.
+the slice `{ ptr, i64 }` (`getSliceLLVMType()`): the first element's address
+and the element count. For-each, `arr.length()` and the bounds check on
+`arr[i]` all read the count from the second field. A **local** `T[]` variable
+is a `{ ptr, i64 }` slot too: `ArrayDeclExprAST::codegen()` stores the slice
+built from its initializer into it. An array literal initializer does not
+take this path: the Parser (`src/ParserStmt.cpp`) gives an unsized declaration
+with a literal initializer `ArraySize` = the literal's length, so
+`mut nums: int[] = [10, 20, 30];` is simply `int[3]`, an ordinary owned stack
+array (only the outermost dimension is inferred; `int[][2]` becomes
+`int[2][2]`). An empty literal has no length to give (E123). Only an array or
+slice initializer still yields a `{ ptr, i64 }` view.
 
-#### 2.3.2 Passing an array: copy for `T[N]`, address for `T[]`
+**`arr.copy()`** is the way to get an independent `T[]`. In
+`MethodCallExprAST::codegen()` (`src/CodegenStruct.cpp`) the receiver is
+turned into `{ data, len }` with the same `CodegenSliceArgument()`, then
+`len * elemSize` bytes are allocated with `turf_rt_alloc`, passing the
+descriptor from `getOrCreateElementTurfTypeDesc(elem)` so the collector traces
+the elements precisely (a `string[]` copy keeps its strings alive,
+`tests/41_gc/13_array_copy_elements_survive_collection.tr`), and the elements
+are `memcpy`'d. The result is the slice `{ block, len }`; the only reference
+to the block is that slice on the stack, which the conservative stack scan
+finds. Since the result is a fresh block, not a view of the receiver, it is
+never an E144/E141 concern and an `immut` receiver is fine.
 
-The distinction that produces §1.3's aliasing hazard is made explicit, with
-its own comment, at every call site (`src/CodegenFunc.cpp:955-971`):
+#### 2.3.2 Passing an array: copy for `T[N]`, slice for `T[]`
 
-```cpp
-// Unsized array params: the function expects a pointer to the array data.
-// We must pass the raw AllocaInst of the caller's array, not a loaded
-// value. TypeChecker has already verified the caller is passing an array
-// variable with a compatible element type.
-// Note: Fixed-size arrays (Size > 0) are passed by value, so V remains the
-// evaluated argument (the loaded array value).
-if (isArrayType(DeclaredType.get())) {
-  const auto *ArrTy = dynamic_cast<const ::ArrayType *>(DeclaredType.get());
-  if (ArrTy && ArrTy->getSize() == -1) {
-    if (auto *VE = dynamic_cast<VariableExprAST *>(Args[Idx].get())) {
-      V = VE->codegenLValue();   // the caller's own AllocaInst, not a copy
-      ...
-```
-
-For a `T[N]` argument, `V` is left as whatever the argument expression's
-ordinary `codegen()` already produced — for a plain array variable, that's
+For a `T[N]` parameter, the argument is whatever the argument expression's
+ordinary `codegen()` produces — for a plain array variable, that's
 `VariableExprAST::codegen()`'s `CreateLoad` of the *entire* aggregate
 (`src/CodegenVar.cpp`, the same load path every scalar variable read goes
 through) — i.e. a genuine bit-for-bit copy of every element gets passed by
-value. For a `T[]` argument, the special-cased branch above instead passes
-the caller's own stack address directly, with **no copy anywhere in this
-path** — which is exactly why a `T[]` parameter aliases the caller's frame
-rather than owning independent storage, and why the TypeChecker enforces
-that a `T[]` argument must be a plain variable (`assert(V && ...)`
-above; a `T[]` argument that isn't literally a named variable has no
-addressable storage for this branch to take the address of in the first
-place).
+value.
+
+For a `T[]` parameter, every call form (ordinary, UFCS receiver and
+arguments, method, static method, constructor, module function) evaluates
+that argument with `CodegenSliceArgument()` (`src/CodegenArray.cpp`)
+instead, which builds `{ address, N }`:
+
+- an argument with storage of its own (a variable, a struct field, a row of
+  a 2D array) contributes its own address — **no copy**, which is why a
+  `T[]` parameter aliases the caller's array;
+- an argument without (a literal, a call returning `T[N]`) is first stored
+  in a temporary in the caller's frame, which outlives the call;
+- an argument that is already a `T[]` (a parameter handed on) is passed as
+  the slice it is.
+
+A range slice `arr[a..b]` is built by `SliceExprAST::codegen()`
+(`src/CodegenArray.cpp`). It takes the base's `{ data, length }` from the same
+`CodegenSliceArgument()` (so a `T[N]` is viewed in place and a `T[]` passes
+through), evaluates each present bound once and adds the length to a
+negative one, then checks `0 <= start <= end <= length`. A failing check
+branches to a runtime panic (`Slice range out of bounds for 'NAME'`); the
+TypeChecker has already turned the provable cases into E143. The result is
+`{ data + start, end - start }`: no element is copied, so the view aliases the
+original array exactly as a `T[]` parameter does. Slicing a slice, indexing a
+slice expression and passing one to a `T[]` parameter all compose from this.
+
+Before issue #260 this was a bare pointer taken with `codegenLValue()` on a
+plain variable only: a literal or call-result argument was an internal
+compiler error, and forwarding a `T[]` parameter passed the address of the
+slot holding the pointer, so the next callee read garbage.
 
 #### 2.3.3 Assignment and return: whole-aggregate copy
 
@@ -928,7 +955,8 @@ is documented in that same comment.
 `getLLVMType()`'s pointer branch (`CodegenCore.cpp:340-341`) maps every
 `TurfPointerType` — which `TurfReferenceType` (`&T`) inherits from, per
 `pointers_and_references.md` §2.1 — to the same bare opaque pointer as
-`ptr`/`string`/an unsized array parameter. There is no separate "reference"
+`ptr`/`string` (an unsized array parameter is a `{ ptr, i64 }` slice since
+issue #260, §2.3). There is no separate "reference"
 representation anywhere in Codegen; `&T`'s entire contribution to the
 compiled program is a compile-time-only non-null contract enforced earlier
 in the pipeline (the TypeChecker's `unsafe` gate,

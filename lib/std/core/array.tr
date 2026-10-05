@@ -11,15 +11,13 @@
 //    element type can still reach for the equivalent `list<T>` (list.tr),
 //    which IS a real generic type.
 //
-// 2. An "unsized" array parameter (`arr: int[]`, the spelling that accepts
-//    an argument of ANY concrete length) has its size erased entirely --
-//    `arr.length()` inside such a function returns -1, not the caller's
-//    real length, because Size == -1 is baked into the parameter's static
-//    type. There is no way to recover it at runtime. Every function here
-//    therefore takes an explicit `len: int` alongside the array, exactly
-//    like the existing `sumFive`-style pattern already used elsewhere in
-//    the codebase (tests/05_arrays_pointers_ffi/10_array_unsized_param.tr).
-//    Call as `arr.sum(len)`, `array::sum(arr, len)`, etc.
+// 2. Every function here takes an explicit `len: int` alongside the array.
+//    They were written when an unsized parameter (`arr: int[]`) could not
+//    know its own length; since issue #260 it can (`arr.length()`, for-each,
+//    bounds-checked `arr[i]`), so `len` is no longer needed to stay in
+//    bounds -- a `len` past the end now panics instead of reading past it.
+//    The signatures are part of the 2.x stdlib surface (FREEZE.md §6.20),
+//    so they stay. Call as `arr.sum(len)`, `array::sum(arr, len)`, etc.
 
 pub fn sum(arr: int[], len: int): int {
     mut total: int = 0;

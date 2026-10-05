@@ -260,13 +260,14 @@ function here:
    concrete overload per element type (`int[]`, `double[]`, `string[]`), not
    a single `fn<T>` version. Need another element type? Reach for
    [`List<T>`](./collections.md) instead — a real generic.
-2. **An unsized array parameter erases its length.** `arr: int[]` (accepting
-   an argument of any concrete length) loses its size entirely — calling
-   `arr.length()` *inside* such a function returns `-1`, not the caller's
-   real length, because `Size == -1` is baked into the parameter's static
-   type and there's no runtime way to recover it. Every function below
-   therefore takes an explicit `len: int` alongside the array. Call as
-   `arr.sum(len)` or `array::sum(arr, len)`.
+2. **Every function takes an explicit `len: int`.** These helpers predate
+   unsized parameters knowing their length (issue #260) and keep their
+   signatures. They look at `arr[0..len)`. A `len` larger than the array is
+   now a runtime panic ("Array index out of bounds"), where it used to read
+   past the end. Call as `arr.sum(len)` or `array::sum(arr, len)`; passing
+   `arr.length()` as `len` covers the whole array. Your own functions don't
+   need a `len` parameter: `for v in arr` and `arr.length()` work inside any
+   function taking `arr: T[]`.
 
 ### `sum(arr: int[], len: int): int` / `sum(arr: double[], len: int): double`
 
