@@ -17,6 +17,7 @@
 
 #include "SLMEngine.h"
 #include "llama.h"
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
@@ -160,8 +161,21 @@ std::string SLMEngine::generateSuggestion(const std::string &systemPrompt,
     int n_sys = llama_tokenize(vocab_tok, systemPrompt.c_str(), systemPrompt.size(),
                                sysTokens.data(), n_ctx,
                                /*add_special=*/true, /*parse_special=*/true);
-    if (n_sys > n_batch)
+    // Too long: drop tokens from the MIDDLE, not the end. The prompt is
+    // preamble, docs, then RULES and the closing `<|im_end|>`, and the old
+    // cut-the-tail clamp removed exactly those -- general.txt alone is ~3500
+    // tokens, so every GENERAL/BUILTIN_FUNCTION/MEMORY_ERROR prompt lost its
+    // output rules and never closed the system turn (measured with
+    // llama-tokenize, issue #267). The kept tail covers the rules with room
+    // to spare; what is dropped is the end of the category doc, which
+    // fetchSuggestion() places after the more specific per-code page.
+    if (n_sys > n_batch) {
+      const int tail = std::min(1024, n_batch / 4);
+      const int head = n_batch - tail;
+      std::copy(sysTokens.begin() + (n_sys - tail), sysTokens.begin() + n_sys,
+                sysTokens.begin() + head);
       n_sys = n_batch;
+    }
 
     if (n_sys > 0) {
       sysTokens.resize(n_sys);
