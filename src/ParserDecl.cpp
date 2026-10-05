@@ -768,7 +768,8 @@ std::unique_ptr<ExprAST> ParseExternDecl() {
   // Expect ';'
   if (CurTok != ';') {
     LogErrorAt(CurLoc, ErrCode::MissingSemicolon,
-               "Expected ';' after extern function declaration '" + Name + "'.", SLM::ErrorCategory::DECLARATION);
+               "Expected ';' after extern function declaration '" + Name + "'.", SLM::ErrorCategory::DECLARATION,
+               MissingSemicolonHints());
     return nullptr;
   }
   getNextToken(); // eat ';'
@@ -1432,9 +1433,22 @@ std::unique_ptr<ExprAST> ParseVisibilityPrefixed() {
   case TOK_UNSAFE:
     MisplacedVisibilityError(Mark.Loc, Where::OnUnsafeBlock).raise();
     return nullptr;
-  case TOK_AT:
-    MisplacedVisibilityError(Mark.Loc, Where::BeforeDecorator).raise();
+  case TOK_AT: {
+    MisplacedVisibilityError Err(Mark.Loc, Where::BeforeDecorator);
+    // The fix moves `pub` to just before the `fn` the decorator is attached
+    // to, so read ahead to it -- but only for the one shape the hint
+    // describes, `@caller_location` straight into `fn`. Anything else keeps
+    // the diagnostic exactly as it was. Error recovery skips to the next
+    // declaration either way, so having consumed these tokens changes nothing.
+    getNextToken(); // eat '@'
+    if (CurTok == TOK_CALLER_LOCATION) {
+      getNextToken(); // eat 'caller_location'
+      if (CurTok == TOK_FN)
+        Err.withDecoratorOrderFixIt(CurLoc);
+    }
+    Err.raise();
     return nullptr;
+  }
   default:
     MisplacedVisibilityError(Mark.Loc, Where::NotFollowedByDeclaration).raise();
     return nullptr;

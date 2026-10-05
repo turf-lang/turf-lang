@@ -149,6 +149,10 @@ public:
     Category_ = SLM::ErrorCategory::DECLARATION;
     Hint_ = "'" + StructName + ".new' always initializes 'self' -- remove "
             "'static' from its declaration.";
+    withWordDeletionFixIt(
+        "static", "'" + StructName + ".new' always initializes 'self', and "
+                  "'static' means there is no 'self' -- removing 'static' is "
+                  "the fix.");
   }
 };
 // `StructName::default(x, ...)` -- default() is always zero-argument; it
@@ -237,6 +241,11 @@ public:
     Category_ = SLM::ErrorCategory::DECLARATION;
     Hint_ = "'.' is for instance-member access only. Use '" + Name + "::" +
             MethodName + "(...)' instead.";
+    // The hint spells the exact spelling out, so --smart writes it for us.
+    withDeterministicFix(Name + "." + MethodName, Name + "::" + MethodName,
+                         "'.' is for instance-member access only, and '" + Name +
+                             "' is a " + Kind + ", not an instance -- a call "
+                             "on it is written with '::'.");
   }
 };
 // The reverse of DotOperatorOnNonInstanceError: the base IS a real

@@ -443,6 +443,13 @@ public:
     Hint_ = "'::' is for namespace-qualified access (enum variants, module "
             "functions, static methods) -- '" + Name + "' holds an "
             "instance. Did you mean '" + Name + "." + RightName + "(...)'?";
+    // `Name` is a declared variable here (both raise sites check that), so
+    // `Name::member` can only have meant `Name.member`; the sandbox still has
+    // to agree that member exists on it.
+    withDeterministicFix(Name + "::" + RightName, Name + "." + RightName,
+                         "'" + Name + "' is a variable holding an instance, "
+                         "and a member of an instance is reached with '.', "
+                         "not '::'.");
   }
 };
 // Raised when `import module::symbol;` / `module::[a, b]` / `module::[*]`
@@ -712,6 +719,89 @@ public:
       break;
     }
     Message = Colors::BRIGHT_RED + What + Colors::RESET;
+
+    // Fix-it: delete the `pub` -- but only for the shapes where deleting it IS
+    // the whole fix. Every case above that ends "Remove `pub`" with no
+    // alternative qualifies; the rest do not: `pub` on a variable could mean
+    // `export` at the top level or nothing at all in a function (the site
+    // does not know which), inside a function the hint offers "or move the
+    // declaration", a `pub` parameter or name needs a new name, `pub unsafe {`
+    // means the writer wants `pub` on what is inside, and a missing
+    // declaration or a decorator order needs text this site never saw.
+    switch (W) {
+    case Where::WithExport:
+      removePub("'export' already makes the constant visible to every module "
+                "that imports this one, so `pub` adds nothing -- removing it "
+                "is the whole fix.");
+      break;
+    case Where::OnOperator:
+      removePub("An operator is visible wherever its operand types are, so "
+                "`pub` has nothing to export here -- removing it is the fix.");
+      break;
+    case Where::OnImport:
+      removePub("An `import` only affects the file that writes it and is "
+                "never re-exported, so `pub` has no meaning here -- removing "
+                "it is the fix.");
+      break;
+    case Where::OnEnumVariant:
+    case Where::OnErrorVariant:
+    case Where::OnMachineState:
+      removePub("A variant (or state) is public exactly when its enclosing "
+                "declaration is, so `pub` on it is meaningless -- removing it "
+                "is the fix. Mark the enclosing declaration `pub` if importers "
+                "should see it.");
+      break;
+    default:
+      break;
+    }
+  }
+
+  // BeforeDecorator: `pub @caller_location fn f()` -> `@caller_location pub fn
+  // f()`. The raising parser site (ParseVisibilityPrefixed) has to read ahead
+  // to the `fn` the decorator is attached to -- the one place a column the
+  // message did not already point at is needed -- so it calls this with that
+  // token's location, and only when the decorator and `fn` really are what it
+  // expected. Moves the writer's own spelling (`pub` or `public`).
+  MisplacedVisibilityError &withDecoratorOrderFixIt(const SourceLocation &FnLoc) {
+    const std::string Spelling = pubSpellingAtLoc();
+    const std::string *FnLine = FixItSourceLine(FnLoc);
+    if (Spelling.empty() || !FnLine || FnLoc.Col < 1 ||
+        FnLine->compare(FnLoc.Col - 1, 2, "fn") != 0)
+      return *this;
+    withTokenFixIt(Loc, Spelling, "", EatBlanks::After);
+    withFixIt(FnLoc.Line, FnLoc.Col, FnLoc.Col, Spelling + " ");
+    withFixReason("A decorator comes first, then the visibility: `@caller_location` "
+                  "followed by `pub fn ...`. This moves `" + Spelling +
+                  "` from before the decorator to just before `fn`.");
+    return *this;
+  }
+
+private:
+  // The `pub`/`public` token at Loc, or "" if the source line does not read
+  // that way there (a mis-pointed Loc must never lead to an edit).
+  std::string pubSpellingAtLoc() const {
+    const std::string *Line = FixItSourceLine(Loc);
+    if (!Line || Loc.Col < 1)
+      return "";
+    for (const char *Word : {"public", "pub"}) {
+      const std::string W(Word);
+      const size_t End = Loc.Col - 1 + W.size();
+      if (Line->compare(Loc.Col - 1, W.size(), W) == 0 &&
+          (End >= Line->size() || !isIdentChar((*Line)[End])))
+        return W;
+    }
+    return "";
+  }
+
+  // Deletes the `pub`/`public` token at Loc together with the blanks after it
+  // (`pub import x;` -> `import x;`), only if the source really has that
+  // token there.
+  void removePub(const std::string &Reason) {
+    const std::string Spelling = pubSpellingAtLoc();
+    if (Spelling.empty())
+      return;
+    withTokenFixIt(Loc, Spelling, "", EatBlanks::After);
+    withFixReason(Reason);
   }
 };
 

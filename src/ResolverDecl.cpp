@@ -167,11 +167,11 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
                   "Missing type parameters!")
             // The hint above already IS the fix, so --smart applies it
             // without asking the model (issue #267: given this exact hint,
-            // the model still answered `-> int` and `fn<Box<T>>`). `fn` is a
-            // keyword, so a word-boundary replace on this line can only hit
-            // the declaration's own.
-            .withDeterministicFix(
-                "fn", "fn<" + Params + ">",
+            // the model still answered `-> int` and `fn<Box<T>>`): insert the
+            // parameters right after the declaration's own `fn` keyword, which
+            // is where Node.getLoc() points (the builder checks the text).
+            .withInsertAfterTokenFixIt(Node.getLoc(), "fn", "<" + Params + ">")
+            .withFixReason(
                 "'" + Bare + "' is generic, so each of its methods declares "
                 "the same type parameters as 'struct " + Bare + "<" + Params +
                     ">' -- this adds them.")

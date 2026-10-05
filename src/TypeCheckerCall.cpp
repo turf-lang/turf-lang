@@ -1708,8 +1708,27 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
             if (C->arity() != ArgCount) return false;
           return true;
         }()) {
-          StaticMethodCalledOnInstanceError(Node.getLoc(), StructName, MethodName)
-              .raise();
+          StaticMethodCalledOnInstanceError Err(Node.getLoc(), StructName,
+                                                MethodName);
+          // The hint's `Struct::method(...)` replaces `receiver.method`. Only
+          // when the receiver is a plain variable (nothing to evaluate, so
+          // dropping it changes nothing) and the struct is a bare name in this
+          // file (a module-qualified identity is not the spelling to write).
+          const auto *RecvVar =
+              dynamic_cast<const VariableExprAST *>(Node.getBase());
+          const bool BareStruct =
+              !StructName.empty() &&
+              std::all_of(StructName.begin(), StructName.end(), [](char C) {
+                return std::isalnum(static_cast<unsigned char>(C)) || C == '_';
+              });
+          if (RecvVar && BareStruct)
+            Err.withDeterministicFix(
+                RecvVar->getName() + "." + MethodName,
+                StructName + "::" + MethodName,
+                "'" + MethodName + "' is declared 'static', so it has no "
+                "'self' and is called on the struct itself: " + StructName +
+                    "::" + MethodName + "(...), not through an instance.");
+          Err.raise();
         } else {
           // Unlike module functions (whose BaseName is the bare method
           // name, with the module qualifier added by the import), a struct
