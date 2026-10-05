@@ -61,7 +61,11 @@ struct AISuggestion {
   bool fromCache = false;
 };
 
-// Extracts +/- `contextSize` lines around the given error line.
+// The source lines [errorLine - contextSize, errorLine + contextSize], joined
+// with '\n' and exactly as the file has them: no line numbers, no header, no
+// marker. Verbatim on purpose, so any line copied out of it is a valid
+// `original_code`; which line the error is on travels in the prompt's own
+// "error_line" field. Empty when no source has been loaded.
 std::string getCodeContext(int errorLine, int contextSize = 10);
 
 // The coloured before/after of a validated suggestion, ready to print under
@@ -88,15 +92,22 @@ std::string renderPatchDiff(const AISuggestion &suggestion);
 // when `original_code` was not found in the program -- fed back into the
 // prompt so a retry (validateAndApplySuggestion()'s retry loop) can
 // course-correct instead of re-guessing blind. Empty on a first attempt.
-// `hints`: see DiagnosticHints -- item 3's known-type facts are folded into
-// the prompt as an extra "Known types" section; item 1's deterministic-fix
-// fields are NOT consulted here (only validateAndApplySuggestion() tries
-// those, before ever calling this function at all).
+// `hints`: see DiagnosticHints -- the known-type facts and the receiver
+// struct's declaration become their own fields in the prompt's JSON header
+// (buildUserPrompt()); the deterministic-fix fields are NOT consulted here
+// (only validateAndApplySuggestion() tries those, before ever calling this
+// function at all).
 // `errorCode`: the diagnostic's stable "E0NN" code (TurfError::getCode()),
 // or "" for the raw LogErrorAt() path/warnings. Part of the on-disk cache
-// key (item 4) alongside the normalized message and a hash of the pinned
-// context -- see the cache key comment above fetchSuggestion()'s definition
-// (SLMIntegration.cpp) for exactly what "normalized" means and why.
+// key alongside the normalized message, the whole user-prompt body (code
+// window and every fact beside it) and the documentation text -- see
+// slmCacheKey() (SLMIntegration.cpp) for exactly what is hashed and why. Only
+// a suggestion that passed sandbox validation is ever cached as a fix. The
+// other outcome, "the model could not fix this" (it answered NONE, or all
+// three attempts failed), is remembered separately for 24 hours as a negative
+// entry that carries no suggestion: a first-attempt fetchSuggestion() that hits
+// one returns an invalid NONE suggestion with fromCache set, without loading
+// the model. A retry (non-empty previousAttemptFailed) never consults it.
 AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
                              const std::string &hint = "",
                              const std::vector<RelatedLocation> &related = {},

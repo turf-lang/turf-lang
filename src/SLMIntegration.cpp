@@ -29,6 +29,7 @@
 #include "llvm/Support/Path.h"
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -953,9 +954,10 @@ static float finalizeConfidence(float structuralPrior, bool sandboxValidated) {
 
 // ── Item 4: on-disk suggestion cache (~/.cache/turf/slm/) ───────────────────
 //
-// Keyed on (error code, normalized message, hash of the pinned context) --
-// exactly the tuple §16.3 item 4 names -- so an IDENTICAL diagnostic (same
-// code, same message text, same surrounding source) on a later compile skips
+// Keyed on (error code, normalized message, hash of the user-prompt body and
+// of the documentation) -- §16.3 item 4's tuple, widened since -- so an
+// IDENTICAL diagnostic (same code, same message text, same surrounding source,
+// same facts and docs shown to the model) on a later compile skips
 // the model call entirely. "Normalized message" here means exactly
 // cleanError (already ANSI-code-stripped by stripAnsiCodes() before this
 // ever runs): no further whitespace/number normalization is attempted, since
@@ -1099,6 +1101,91 @@ static void evictSlmCache(const std::string &Key) {
     (void)llvm::sys::fs::remove(Dir + "/" + Key + ".json");
 }
 
+// ── Negative cache: "the model could not fix this" (SLM plan, D4) ───────────
+//
+// Only a VALIDATED suggestion is cached above, so an error the model answers
+// `NONE` to, or whose three attempts all fail the sandbox, paid the whole model
+// cost (load + up to three generations) on every later `--smart` run. This
+// remembers that outcome, separately, so a repeat run skips the model and shows
+// the plain diagnostic -- exactly what the first run ended with.
+//
+// It is a different file from a positive entry (`<key>.neg`, next to
+// `<key>.json`) and holds no suggestion at all, only the fingerprint line and
+// the word `none` (the model answered NONE) or `failed` (it ran out of
+// attempts). readSlmCache() never looks at it, so a negative can never be
+// served as a fix: the worst a stale or wrong one can do is skip the model.
+//
+// It is the same key as the positive entry (the first-attempt diagnostic), and
+// is consulted only on a first attempt, so a retry -- which exists because the
+// previous suggestion failed -- is never blocked by one.
+//
+// Lifetime: kSlmNegativeTtl, measured from the file's mtime. A negative is a
+// statement about a 1.5B model on one prompt, so it is allowed to go stale: 24
+// hours is long enough that fixing a file by hand and re-running does not
+// re-pay for the errors that are still there, and short enough that a model,
+// prompt or docs change is picked up the next day. A compiler rebuild, a
+// docs/slm edit or any change to the diagnostic's facts invalidates it at once
+// (fingerprint line, and the key's own hash). Rewriting an entry resets its age.
+// There is no bypass flag: delete ~/.cache/turf/slm to force a fresh run.
+static constexpr std::chrono::hours kSlmNegativeTtl{24};
+
+static std::string slmNegativePath(const std::string &Dir,
+                                   const std::string &Key) {
+  return Dir + "/" + Key + ".neg";
+}
+
+// True (and `Reason` set to "none" or "failed") when a live negative entry
+// exists for `Key`. An expired or stale-fingerprint one is deleted on the way.
+static bool readSlmNegativeCache(const std::string &Key, std::string &Reason) {
+  std::string Dir = slmCacheDir();
+  if (Dir.empty())
+    return false;
+  const std::string Path = slmNegativePath(Dir, Key);
+  llvm::sys::fs::file_status Status;
+  if (llvm::sys::fs::status(Path, Status))
+    return false; // no such entry
+  auto Age = std::chrono::system_clock::now() - Status.getLastModificationTime();
+  std::ifstream File(Path);
+  std::string FingerprintLine, ReasonLine;
+  const bool wellFormed = Age < kSlmNegativeTtl && File.is_open() &&
+                          std::getline(File, FingerprintLine) &&
+                          FingerprintLine == slmCompilerFingerprint() &&
+                          std::getline(File, ReasonLine) &&
+                          (ReasonLine == "none" || ReasonLine == "failed");
+  if (!wellFormed) {
+    (void)llvm::sys::fs::remove(Path);
+    return false;
+  }
+  Reason = ReasonLine;
+  return true;
+}
+
+static void writeSlmNegativeCache(const std::string &Key,
+                                  const std::string &Reason) {
+  std::string Dir = slmCacheDir();
+  if (Dir.empty() || llvm::sys::fs::create_directories(Dir))
+    return;
+  std::ofstream File(slmNegativePath(Dir, Key), std::ios::trunc);
+  if (File.is_open())
+    File << slmCompilerFingerprint() << "\n" << Reason << "\n";
+}
+
+static void evictSlmNegativeCache(const std::string &Key) {
+  std::string Dir = slmCacheDir();
+  if (!Dir.empty())
+    (void)llvm::sys::fs::remove(slmNegativePath(Dir, Key));
+}
+
+// TURF_SLM_REPLAY runs bypass the whole cache (positive and negative), in both
+// directions, so a test never depends on or pollutes ~/.cache/turf/slm.
+// TURF_SLM_REPLAY_CACHE=1 turns that bypass off, for the one smoke test that
+// has to exercise the cache itself (scripts/slm_cache_smoke.sh, which points
+// HOME at a temp directory first).
+static bool slmCacheBypassed() {
+  return std::getenv("TURF_SLM_REPLAY") != nullptr &&
+         std::getenv("TURF_SLM_REPLAY_CACHE") == nullptr;
+}
+
 // TURF_SLM_REPLAY=<file>: answer each model call with the next recorded
 // response from <file> (responses separated by a line that is exactly
 // `%%`) instead of running the model. Everything after the model --
@@ -1165,13 +1252,10 @@ static std::string jsonStringArray(const std::vector<std::string> &items) {
   return out + "]";
 }
 
-// TURF_SLM_RAW_CODE=1 puts the code after the JSON header as it is, one real
-// line per line, instead of as a "\n"-escaped JSON string. Only to measure
-// which of the two a model copies more exactly (C5); see buildUserPrompt().
-static bool rawCodeBlock() { return std::getenv("TURF_SLM_RAW_CODE") != nullptr; }
-
-// The JSON object the user turn opens with, without its final newline, and
-// followed (raw-code mode only) by the code block. Field order matters to a
+// The JSON object the user turn opens with. The code is a "\n"-escaped JSON
+// string, not a raw block after the object: measured live on 8 programs
+// (2026-10-05), the model found its copy in 7 of 8 either way, so the simpler
+// form stayed. Field order matters to a
 // small model: the question (error, hint), then what is known about it, and
 // "code" last, right before the retry feedback and the schema, so the text it
 // must copy from is the text nearest its answer.
@@ -1182,7 +1266,6 @@ static bool rawCodeBlock() { return std::getenv("TURF_SLM_RAW_CODE") != nullptr;
 // for a prompt that no longer exists.
 static std::string buildUserPrompt(const PromptFacts &f,
                                    const std::string &previousAttemptFailed) {
-  const bool raw = rawCodeBlock();
   std::string out = "{\n";
   out += "  \"error\": \"" + escapeJsonString(f.error) + "\",\n";
   out += "  \"hint\": \"" + escapeJsonString(f.hint) + "\",\n";
@@ -1209,15 +1292,11 @@ static std::string buildUserPrompt(const PromptFacts &f,
     }
     out += "]";
   }
-  if (!raw)
-    out += ",\n  \"code\": \"" + escapeJsonString(f.code) + "\"";
+  out += ",\n  \"code\": \"" + escapeJsonString(f.code) + "\"";
   if (!previousAttemptFailed.empty())
     out += ",\n  \"previous_attempt_failed\": \"" +
            escapeJsonString(previousAttemptFailed) + "\"";
   out += "\n}\n";
-  if (raw)
-    out += "code (copy original_code from these lines exactly):\n" + f.code +
-           "\nend of code\n";
   return out;
 }
 
@@ -1347,7 +1426,8 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
     docContent = syntaxCard + "\n" + docContent;
 
   // Item 4 (caching): key on (error code, normalized message, hash of the
-  // pinned context) -> the model's raw JSON fields, persisted under
+  // user-prompt body and of the documentation) -> the model's raw JSON
+  // fields, persisted under
   // ~/.cache/turf/slm/, invalidated whenever the compiler binary itself
   // changes. Only consulted on a FIRST attempt (previousAttemptFailed
   // empty) -- a retry exists specifically because the last suggestion (quite
@@ -1364,7 +1444,7 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
       slmCacheKey(errorCode, cleanError, promptBody, docContent);
   suggestion.cacheKey = cacheKey;
   const bool replaying = std::getenv("TURF_SLM_REPLAY") != nullptr;
-  if (previousAttemptFailed.empty() && !replaying) {
+  if (previousAttemptFailed.empty() && !slmCacheBypassed()) {
     AISuggestion cached;
     if (readSlmCache(cacheKey, cached)) {
       if (std::getenv("TURF_SLM_DEBUG")) {
@@ -1373,6 +1453,20 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
       cached.cacheKey = cacheKey;
       cached.fromCache = true;
       return cached;
+    }
+    // A live negative entry (see readSlmNegativeCache()): the model already
+    // failed on this exact diagnostic recently. Not valid and NONE, which is
+    // what the run that wrote it ended with, so the caller shows the plain
+    // diagnostic. Checked only AFTER the positive entry, and only on a first
+    // attempt: a retry is never short-circuited.
+    std::string negativeReason;
+    if (readSlmNegativeCache(cacheKey, negativeReason)) {
+      if (std::getenv("TURF_SLM_DEBUG")) {
+        std::cerr << "[SLM] Negative cache hit (" << negativeReason
+                  << " within the last 24h) -- skipping the model.\n";
+      }
+      suggestion.fromCache = true;
+      return suggestion; // valid = false, fix_mode = "NONE"
     }
   }
 
@@ -2143,6 +2237,12 @@ AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
       std::cerr << Colors::BRIGHT_BLACK
                 << "[Sandbox] Fix mode is NONE, skipping validation"
                 << Colors::RESET << "\n";
+      // The model's answer is "no fix": remember it for a day (D4) so the
+      // next run on this diagnostic does not ask again. Never for a
+      // suggestion that came out of the cache.
+      if (!slmCacheBypassed() && !suggestion.cacheKey.empty() &&
+          !suggestion.fromCache)
+        writeSlmNegativeCache(suggestion.cacheKey, "none");
       return suggestion;
     }
 
@@ -2159,12 +2259,18 @@ AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
     // validated fix, or to promote an unvalidated one past the display gate.
     suggestion.confidence = finalizeConfidence(suggestion.confidence, isValid);
 
-    const bool replaying = std::getenv("TURF_SLM_REPLAY") != nullptr;
-    if (!replaying && !suggestion.cacheKey.empty()) {
-      if (isValid && !suggestion.fromCache)
+    if (!slmCacheBypassed() && !suggestion.cacheKey.empty()) {
+      if (isValid && !suggestion.fromCache) {
         writeSlmCache(suggestion.cacheKey, suggestion);
-      else if (!isValid && suggestion.fromCache)
+        // A fix now exists for this diagnostic; an older "no fix" must not
+        // outlive it (the positive entry is read first, but don't leave it).
+        evictSlmNegativeCache(suggestion.cacheKey);
+      } else if (!isValid && suggestion.fromCache)
         evictSlmCache(suggestion.cacheKey);
+      // Out of attempts below: every one of the three failed the sandbox, so
+      // the next run would pay for three generations again (D4).
+      if (!isValid && attempt == kMaxSlmAttempts)
+        writeSlmNegativeCache(suggestion.cacheKey, "failed");
     }
 
     if (isValid) {
