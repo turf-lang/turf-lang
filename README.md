@@ -109,6 +109,18 @@ Once set, verify it from a fresh terminal: `cd` somewhere completely unrelated t
 turf version                      # prints both the turf and turfc versions
 ```
 
+`turf version` (or `turf --version`) prints something like this, and is what to paste into a bug report:
+
+```
+turf 1.0.0-dev  (needs turfc interface 1.1+)
+turfc 2.0.0-dev  (interface 1.2, /home/you/turf/build/turfc)
+  llvm 22.1.8
+  runtime turf_rt_abi_2_0
+  root /home/you/turf
+```
+
+`turf help` lists the commands and `turf help <command>` shows one command's options. `turf` exits 0 on success, 1 when it reports a problem (a compile error, a bad manifest), and 2 when the command line itself is wrong.
+
 (`--no-smart` skips the llama.cpp model runtime for `--smart` and its slow first build; see [Building from Source](#building-from-source).)
 
 **A first project.** `turf new` makes a directory with a `turf.toml`, a starter `src/main.tr` and a `README.md` of the everyday commands, and `turf run` builds and runs it:

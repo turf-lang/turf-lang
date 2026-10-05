@@ -532,8 +532,9 @@ interface* below). Full account: `docs/development/changes/LEC-001.md`.
     it did is `fetch`, and `install` is left free for installing a built
     program later (FUTURE).
 - **Exit status.** `turf compile`/`check`/passthrough return `turfc`'s
-  status unchanged; `turf run` returns the program's. Codes for the CLI's
-  own failures (usage, manifest, fetch) are REL-001's decision.
+  status unchanged; `turf run` returns the program's. The codes for the CLI's
+  own failures were frozen by REL-001 in §6.21: 0 success, 1 an error was
+  reported, 2 a usage error.
 
 **Layout, manifest and module resolution (F-PKG-2)**
 
@@ -896,6 +897,44 @@ statement: `docs/reference/stdlib/README.md`.
   `remove()`, and `mem::malloc_usable_size`/`usable_size`, which are glibc-only
   and may be unavailable on a platform the release adds.
 
+### 6.21 Exit statuses and the version surface — FROZEN (REL-001, 2026-10-06)
+
+Decided by the owner on 2026-10-06: **0 success, 1 compile error, 2 usage
+error.**
+
+- **Exit statuses (F-CLI-1).** Both `turf` and `turfc` exit with
+  - **0** — it did what was asked;
+  - **1** — the tool ran and reported a problem: a compile error in the
+    user's program, a file it could not read or write, a malformed manifest or
+    package graph, a failed fetch, a compiler that does not speak the driver
+    interface;
+  - **2** — the command line is wrong, so nothing was attempted: an unknown
+    command or option, an option missing its value, no input file, an input
+    that is not a `.tr` file, a bad `-O` level, an unknown `--migrate=` name or
+    error code, a project command outside a project.
+
+  Two things are outside the rule: `turf run` exits with the **program's own
+  status** once the program has started (a program that returns 2 is
+  indistinguishable from a usage error there, by design: `turf run` is
+  `exec`), and anything above 2 is the shell's or the OS's (126/127, 128 plus
+  a signal). `turf publish` (reserved in 2.0) exits 1. Before this decision a
+  `turfc` usage error exited 1; `turf`'s own usage errors were already 2.
+- **Unknown options (F-CLI-2).** An unknown option or command is always a
+  usage error, never ignored and never forwarded as a file. The message offers
+  the nearest known spelling when one is within edit distance 2.
+- **`help`, not `--help`, on the compiler (F-CLI-3).** `turf help [<cmd>]`,
+  `turf <cmd> --help` and `turfc help` print usage and exit 0; `turfc --help` is
+  an unknown option whose message says to run `turfc help`.
+- **`--version` (F-CLI-4).** `turfc --version` prints, one fact per line: line 1
+  `turfc <release>`, line 2 `interface <major>.<minor>` (the contract, §6.16),
+  then `llvm <version>`, `runtime <ABI symbol>` and `root <install root>`, and
+  these three may be followed by more `<key> <value>` lines. `turf version` /
+  `turf --version` prints `turf` and `turfc` lines and shows the compiler's
+  extra lines indented under its own. The runtime ABI symbol is the one
+  constant `RuntimeAbiSymbol` (`include/Codegen.h`) used for both the emitted
+  call and this line; `scripts/cli_smoke.sh` checks `lib/libturfrt.a` defines
+  it. Driver interface **1.2** is this decision; `turf` still needs only 1.1.
+
 ---
 
 ## Appendix — frozen-decision IDs
@@ -957,6 +996,10 @@ Overhaul (F-TYPE-1), whose third column points at their section above.
 | **F-API-2** | Public stdlib functions, methods and fields are `snake_case`; no aliases are kept for a renamed name. | §6.20 above |
 | **F-API-3** | Stdlib failure shapes: input/environment failure → `!T` carrying what failed; violated precondition → panic naming the caller's `file:line:`; a question → `bool` or sentinel. A panicking lookup has a predicate to ask first and, where useful, a `try_` twin. | §6.20 above |
 | **F-API-4** | A function that does a job a real program might want is public whether or not the repository uses it; a struct's internals are public only if a real program does something with them; raw C bindings stay private behind checked Turf wrappers. | §6.20 above (owner's rule, 2026-10-01) |
+| **F-CLI-1** | Exit statuses of `turf` and `turfc`: 0 success, 1 an error was reported (compile error, unreadable file, bad manifest, failed fetch), 2 the command line is wrong. `turf run` returns the program's own status. | §6.21 above (owner decision 2026-10-06) |
+| **F-CLI-2** | An unknown option or command is a usage error (2) with a nearest-spelling suggestion; never ignored, never forwarded as a file. | §6.21 above |
+| **F-CLI-3** | Help is `turf help`/`turf <cmd> --help`/`turfc help`; `turfc --help` is deliberately an unknown option pointing at `turfc help`. | §6.21 above (owner decision 2026-10-06) |
+| **F-CLI-4** | `turfc --version` lines 1-2 are the driver-interface contract; later `<key> <value>` lines (`llvm`, `runtime`, `root`) are informational and extendable. | §6.21 above |
 
 ---
 

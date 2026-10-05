@@ -68,11 +68,13 @@ Compiled to hello_a.o
 Successfully compiled to hello_a
 $ turf compile notes.txt
 Error: Input file must have a '.tr' extension (got: notes.txt).
-$ turf compile hello.tr --bogus
-Unknown option: --bogus
+$ turf compile hello.tr --chek
+Unknown option: --chek
+  did you mean '--check'?
+Run `turfc help` for the options.
 ```
 
-Flags that `turf compile` does not know about are forwarded to the compiler unchanged, so a new compiler flag works through `turf` the day it lands. Any other token starting with `-` that the *compiler* does not recognize is rejected with `Unknown option: <arg>` and exit code 1.
+Flags that `turf compile` does not know about are forwarded to the compiler unchanged, so a new compiler flag works through `turf` the day it lands. Any other token starting with `-` that the *compiler* does not recognize is rejected with `Unknown option: <arg>` and exit code 2, with the nearest known flag suggested when one is close. `turfc help` lists every flag; `turfc --help` is deliberately not one, and says so.
 
 A bare word that neither starts with `-` nor ends in `.tr` is not passed to the compiler as a missing file; it is an unknown command, with a spelling suggestion:
 
@@ -171,8 +173,8 @@ turf explain E001
 
 `turf explain E001` and `turf --explain E001` are the same command (the second is the compiler's own spelling, and it is what error footers print). It takes a code and no `.tr` input file at all.
 
-- No code → `turf: explain: expected exactly one error code, for example: turf explain E001`, exit 2 (through `turfc --explain` with no code it is `Usage: turfc --explain E0NN`, exit 1).
-- Unknown code → `Unknown error code: E999`, then a line saying what a code looks like, exit 1.
+- No code → `turf: explain: expected exactly one error code, for example: turf explain E001`, exit 2 (through `turfc --explain` with no code it is `Usage: turfc --explain E0NN`, also exit 2).
+- Unknown code → `Unknown error code: E999`, then a line saying what a code looks like, exit 2.
 - On success: prints a bold-cyan `E0NN  ClassName (CATEGORY)` header, then the explanation text, then exits 0.
 
 The explanation text is read from the **installation** (the directory holding `lib/std`: `$TURF_HOME`, or the directory above the compiler binary), not from the current directory, so it is the same wherever you run the command. It uses a three-tier fallback, most specific first:
@@ -207,7 +209,15 @@ You tried to reach past the end of an array
 
 ### Exit status
 
-`turf compile`, `turf check` and `turf <file.tr>` return the compiler's status unchanged (0 success, 1 a reported error). `turf run` returns the program's. For `turf`'s own failures the codes today are **2** for a usage error (an unknown command, a missing argument, a project command outside a project) and **1** for everything else (a manifest error, a failed fetch, a compile error inside a project build). The final numbering of those is REL-001's decision.
+`turf` and `turfc` use the same three statuses (frozen in 2.0, `FREEZE.md` §6.21):
+
+| Status | Meaning |
+|---|---|
+| **0** | It did what was asked. |
+| **1** | It ran and reported a problem: a compile error in your program, a file it could not read or write, a bad manifest, a failed fetch. |
+| **2** | The command line is wrong, so nothing was attempted: an unknown command or option, a missing value or input file, a bad `-O` level, a project command outside a project. |
+
+`turf compile`, `turf check` and `turf <file.tr>` return the compiler's status unchanged. `turf run` is the exception: once your program has started it returns **the program's own** status, so a program that returns 2 looks like a usage error there. Anything above 2 (126, 127, 128 plus a signal) comes from the shell or the operating system.
 
 ### Versions
 
@@ -216,8 +226,13 @@ You tried to reach past the end of an array
 ```
 $ turf version
 turf 1.0.0-dev  (needs turfc interface 1.1+)
-turfc 2.0.0-dev  (interface 1.1, …/build/turfc)
+turfc 2.0.0-dev  (interface 1.2, …/build/turfc)
+  llvm 22.1.8
+  runtime turf_rt_abi_2_0
+  root …
 ```
+
+The indented lines are the compiler's own: the LLVM it was built against, the runtime ABI stamp every program it compiles carries (a `libturfrt.a` without it fails at link time rather than misbehaving), and the install root it reads `lib/std` and the runtime from. Paste this output into a bug report. `turfc --version` prints the same facts without the `turf` line.
 
 The two need not match. What must fit is the **driver interface**, a `major.minor` pair that `turfc` reports and `turf` needs: the same major and at least the minor `turf` names. Before it runs anything, `turf` checks this and refuses a compiler that does not fit, naming both sides and which one to upgrade (`TURF_COMPILER` does not bypass the check):
 

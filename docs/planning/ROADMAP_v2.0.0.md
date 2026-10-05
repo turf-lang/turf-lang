@@ -1206,6 +1206,14 @@ programs' release versions are independent, and `turf version` prints both.
 **Tests** a `scripts/cli_smoke.sh`. **Completion** the smoke passes; README
 shows `turf --version` output.
 
+**Status 2026-10-06: CLOSED by the owner.** Done: `--version`
+(llvm/runtime/root), `turf help` and `turfc help` (owner: no `turfc --help`),
+unknown-flag suggestions, exit statuses frozen at 0/1/2 (`FREEZE.md` §6.21),
+`cli_smoke.sh` coverage, README. Deferred to REL-003/REL-008: single-sourcing
+the version into the archive name and README (tag = `VERSION` = README line;
+until then checked by hand before tagging). Record:
+`docs/development/changes/REL-001.md`.
+
 ---
 
 ### REL-002 — Developer tooling: `turf test`, `turf fmt`, LSP, editor
