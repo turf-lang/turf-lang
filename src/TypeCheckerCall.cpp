@@ -110,8 +110,9 @@ static bool ufcsReceiverTypeMatches(const TurfType *ParamTy,
     const auto *AArr = dynamic_cast<const ArrayType *>(ActualTy);
     if (!sameTypeExact(PArr->getElementType(), AArr->getElementType()))
       return false;
-    return PArr->getSize() == -1 || AArr->getSize() == -1 ||
-           PArr->getSize() == AArr->getSize();
+    // A `T[]` receiver never matches a sized `T[N]` parameter -- see
+    // typesCompatible()'s array rule (Types.cpp).
+    return PArr->getSize() == -1 || PArr->getSize() == AArr->getSize();
   }
   return sameTypeExact(ParamTy, ActualTy);
 }
@@ -664,6 +665,8 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
 
     // SEM-002 -- see visitVarDecl()'s identical comment (TypeCheckerDecl.cpp).
     checkCallArgsRepresentable(Node.getArgs(), Best->Params, Node.getLoc());
+    noteSliceArguments(Node.getArgs(), nullptr, Node.ResolvedCallTarget, 0,
+                       Node.getLoc()); // E141
 
     // If Best's return type mentions one of its own generic type parameters
     // (e.g. `fn<T> firstElem(arr: T[]): T`), report the CONCRETE type it was
@@ -675,6 +678,7 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
     int SubstCheckCount = std::min(ArgCount, Best->arity());
     for (int i = 0; i < SubstCheckCount; ++i)
       TypeWalk::unify(Best->Params[i].Type, ArgTypes[i], Subst);
+    checkSliceTypeArguments(Subst, CalleeName, Node.getLoc()); // E140
 
     // TYPE-002 (S11b): persist onto the node instead of letting Subst go
     // out of scope unread -- see FuncCallExprAST::GenericSubstitution's
@@ -859,6 +863,18 @@ bool TypeChecker::tryUFCSFallback(MethodCallExprAST &Node,
         ufcsReceiverTypeMatches(C->Params[0].Type.get(), BaseTy))
       ReceiverMatches.push_back(C);
   }
+  // `fn f(a: int[3])` and `fn f(a: int[])` both accept an int[3] receiver;
+  // the exact one wins, as it does for the ordinary call `f(a)` (whose
+  // tie-break compares type names). Without this the UFCS form reported the
+  // pair as ambiguous while `f(a)` quietly picked `int[3]`.
+  {
+    std::vector<const ResolverFunctionSymbol *> ExactReceiver;
+    for (const auto *C : ReceiverMatches)
+      if (C->Params[0].Type && C->Params[0].Type->getName() == BaseTy->getName())
+        ExactReceiver.push_back(C);
+    if (!ExactReceiver.empty() && ExactReceiver.size() < ReceiverMatches.size())
+      ReceiverMatches = ExactReceiver;
+  }
   if (ReceiverMatches.empty()) {
     // LEC-002: nothing visible fits -- but if a PRIVATE function would have,
     // say that instead of a bare "no such method", so the writer learns the
@@ -939,6 +955,8 @@ bool TypeChecker::tryUFCSFallback(MethodCallExprAST &Node,
   // corresponding entry in Node.getArgs() -- the explicit args start at
   // Params[1], per this function's own receiver-binding comments above.
   checkCallArgsRepresentable(Node.getArgs(), Best->Params, Node.getLoc(), 1);
+  noteSliceArguments(Node.getArgs(), Node.getBase(), Node.ResolvedCallTarget,
+                     1, Node.getLoc()); // E141
   setType(&Node, Best->ReturnType);
   return true;
 }
@@ -1074,6 +1092,8 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
     Node.ResolvedCallTarget = std::make_shared<ResolverFunctionSymbol>(*Best);
     // SEM-002 -- see visitVarDecl()'s identical comment (TypeCheckerDecl.cpp).
     checkCallArgsRepresentable(Node.getArgs(), Best->Params, Node.getLoc());
+    noteSliceArguments(Node.getArgs(), nullptr, Node.ResolvedCallTarget, 0,
+                       Node.getLoc()); // E141
     setType(&Node, Best->ReturnType);
     return;
   }
@@ -1105,6 +1125,18 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
     if (BaseTy && isArrayType(BaseTy.get()) && MethodName == "length" &&
         ArgCount == 0) {
       setType(&Node, TurfInt());
+      return;
+    }
+    // `arr.copy()` (any array: `T[N]`, a `T[]`, a slice expression) -- a
+    // new array holding the same elements in storage of its own, so it can
+    // be edited without touching `arr`. A `T[]`, because a slice's length may
+    // only be known at run time; its storage is on the GC heap
+    // (MethodCallExprAST::codegen()). It is not a view of `arr`, so neither
+    // E144 nor E141 follow it back to `arr` (rootVariable() stops at a call).
+    if (BaseTy && isArrayType(BaseTy.get()) && MethodName == "copy" &&
+        ArgCount == 0) {
+      const auto *ArrTy = static_cast<const ArrayType *>(BaseTy.get());
+      setType(&Node, makeArrayType(ArrTy->getElementTypePtr(), -1));
       return;
     }
 
@@ -1375,6 +1407,8 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
           // instance method) as the type-compatibility filter just above.
           checkCallArgsRepresentable(Node.getArgs(), Best->Params, Node.getLoc(),
                                      IsStaticMethod ? 0 : 1);
+          noteSliceArguments(Node.getArgs(), nullptr, Node.ResolvedCallTarget,
+                             IsStaticMethod ? 0 : 1, Node.getLoc()); // E141
 
           // Calling a method that mutates self through an immutable
           // variable was previously silently allowed -- direct field
@@ -1422,6 +1456,19 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
 #endif
               }
             }
+          } else if (!IsStaticMethod && Best->Decl) {
+            // A method can also change self through a slice of one of its
+            // array fields (`fill(self.data[..], 0)`, or a local view of
+            // it) -- something MutatesSelf's direct scan can't see, and that
+            // needs the method body's calls resolved. Deferred to
+            // checkSliceWrites() with the E141 checks.
+            if (auto *BaseVarForImmut =
+                    dynamic_cast<const VariableExprAST *>(Node.getBase()))
+              if (BaseVarForImmut->ResolvedSymbol &&
+                  BaseVarForImmut->ResolvedSymbol->IsImmutable)
+                PendingSelfSliceWrites_.push_back(
+                    {Node.getLoc(), BaseVarForImmut->ResolvedSymbol.get(),
+                     BaseVarForImmut->getName(), Node.ResolvedCallTarget, 0});
           }
 
           // If the ORIGINAL (pre-struct-resolution) base type was a
@@ -1485,6 +1532,7 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
               TypeWalk::unify(Best->Params[i + ParamOffset].Type,
                               ArgTypes[i], MethodOwnSubst);
           }
+          checkSliceTypeArguments(MethodOwnSubst, MethodName, Node.getLoc()); // E140
 
           std::unordered_map<std::string, TurfTypePtr> CombinedSubst = Subst;
           for (const auto &KV : MethodOwnSubst)
@@ -1703,7 +1751,24 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
       std::vector<const ResolverFunctionSymbol *> NamedCandidates;
       if (tryUFCSFallback(Node, BaseTy.get(), ArgTypes, &NamedCandidates))
         return;
-      if (NamedCandidates.empty()) {
+      if (NamedCandidates.empty() && BaseTy->isArray()) {
+        // An array is not a struct, but it does have two built-ins (handled
+        // above, only with no arguments) -- say so instead of "only struct
+        // instances have methods", which `a.length()` itself contradicts.
+        const bool IsBuiltinName = MethodName == "length" || MethodName == "copy";
+        reportError(Node.getLoc(), ErrCode::MethodOnNonStruct,
+                    IsBuiltinName
+                        ? "'" + MethodName + "()' on an array takes no "
+                          "arguments, but was given " +
+                              std::to_string(ArgCount) + "."
+                        : "Arrays have no method '" + MethodName + "'.",
+                    {},
+                    "An array (here '" + BaseTy->getName() +
+                        "') has two built-in methods: length() and copy(). "
+                        "Slice a part first if you want only some elements: "
+                        "arr[1..3].copy().",
+                    "No such method!");
+      } else if (NamedCandidates.empty()) {
         reportError(Node.getLoc(), ErrCode::MethodOnNonStruct,
                     "Cannot call method '" + MethodName + "' on type '" +
                         BaseTy->getName() +

@@ -431,6 +431,18 @@ CollectChangedNodeIDsInternal(const ExprAST *OriginalAST,
     return ChangedIDs;
   }
 
+  // SliceExprAST: base and both (optional) bounds
+  if (auto *OrigSlice = dynamic_cast<const SliceExprAST *>(OriginalAST)) {
+    auto *ModSlice = dynamic_cast<const SliceExprAST *>(ModifiedAST);
+    CollectChangedNodeIDsInternal(OrigSlice->getBase(), ModSlice->getBase(),
+                                  ChangedIDs);
+    CollectChangedNodeIDsInternal(OrigSlice->getStart(), ModSlice->getStart(),
+                                  ChangedIDs);
+    CollectChangedNodeIDsInternal(OrigSlice->getEnd(), ModSlice->getEnd(),
+                                  ChangedIDs);
+    return ChangedIDs;
+  }
+
 
 
   // SizeOfExprAST: Compare type

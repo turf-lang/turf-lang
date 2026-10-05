@@ -671,6 +671,19 @@ Value *WrapFallibleValue(Value *RawVal, bool IsError) {
 }
 
 
+llvm::StructType *getSliceLLVMType() {
+  return llvm::StructType::get(*TheContext,
+                               {llvm::PointerType::get(*TheContext, 0),
+                                llvm::Type::getInt64Ty(*TheContext)});
+}
+
+
+bool isUnsizedArrayType(const TurfType *T) {
+  const auto *AT = dynamic_cast<const ::ArrayType *>(T);
+  return AT && AT->getSize() < 0;
+}
+
+
 /**
  * @brief Maps a frontend TurfType to its corresponding backend llvm::Type.
  *
@@ -714,12 +727,20 @@ llvm::Type *getLLVMType(const TurfType *T) {
   if (T->isFunc())
     return LLVMTypeCache[Key] = llvm::PointerType::get(*TheContext, 0);
 
-  // Array types — return ArrayType for fixed size, opaque pointer for unsized.
+  // Array types — an llvm::ArrayType for a fixed size; a slice for `T[]`.
+  //
+  // Issue #260: `T[]` used to be a bare pointer to the caller's elements, so
+  // the callee could never learn how many there were -- no for-each, no
+  // bounds check, and `arr.length()` answered -1. It is now a `{ ptr, i64 }`
+  // pair: where the elements live and how many there are. The TypeChecker
+  // only lets `T[]` appear as a function parameter's own type (E140), so a
+  // slice is always built at a call site (CodegenSliceArgument()) and never
+  // has to be stored anywhere longer-lived than the callee's frame.
   if (isArrayType(T)) {
     const auto *AT = dynamic_cast<const ::ArrayType *>(T);
     if (AT && AT->getSize() > 0)
       return LLVMTypeCache[Key] = llvm::ArrayType::get(getLLVMType(AT->getElementTypePtr().get()), AT->getSize());
-    return LLVMTypeCache[Key] = llvm::PointerType::get(*TheContext, 0);
+    return LLVMTypeCache[Key] = getSliceLLVMType();
   }
 
   // PointerType — lowers to ptr
@@ -1213,6 +1234,27 @@ const TurfType *getExprType(const ExprAST *E) {
       if (Sym)
         return Sym->Type.get();
     }
+  }
+  // `arr[a..b]` is a `T[]` slice of the base's element type, whatever the
+  // base's own size. getExprType() hands out a borrowed pointer, so each
+  // element type's slice type is kept alive in a cache.
+  // `arr.copy()` is the same `T[]` (TypeChecker::visitMethodCall()).
+  const auto *CopyCall = dynamic_cast<const MethodCallExprAST *>(E);
+  const bool IsArrayCopy = CopyCall && CopyCall->getMethod() == "copy" &&
+                           CopyCall->getArgs().empty() &&
+                           dynamic_cast<const ::ArrayType *>(getExprType(CopyCall->getBase()));
+  if (IsArrayCopy || dynamic_cast<const SliceExprAST *>(E)) {
+    const ExprAST *SliceBase = IsArrayCopy
+                                   ? CopyCall->getBase()
+                                   : static_cast<const SliceExprAST *>(E)->getBase();
+    const auto *BaseArr = dynamic_cast<const ::ArrayType *>(getExprType(SliceBase));
+    if (!BaseArr)
+      return nullptr;
+    static std::unordered_map<const TurfType *, TurfTypePtr> SliceTypes;
+    TurfTypePtr &Slot = SliceTypes[BaseArr->getElementType()];
+    if (!Slot)
+      Slot = makeArrayType(BaseArr->getElementTypePtr(), -1);
+    return Slot.get();
   }
   if (auto *ArrAcc = dynamic_cast<const ArrayAccessExprAST *>(E)) {
     // LANG-001: `operator[]` -- checked before the array/pointer/string
@@ -2084,6 +2126,9 @@ llvm::Constant *GetDefaultValue(const TurfType *T) {
   if (T->isNamed("string"))
     return Builder->CreateGlobalStringPtr("");
 
+  if (isUnsizedArrayType(T))
+    return llvm::Constant::getNullValue(getSliceLLVMType());
+
   if (isArrayType(T) || dynamic_cast<const TurfPointerType *>(T) ||
       dynamic_cast<const TurfGenericParamType *>(T) || T->isFunc()) {
     return llvm::ConstantPointerNull::get(llvm::PointerType::get(*TheContext, 0));
@@ -2237,13 +2282,26 @@ DIType *getDebugType(const TurfType *T) {
               DBuilder->createPointerType(CharTy, 64, 64, std::nullopt, "string");
   }
 
-  // Fixed-size arrays (`T[N]`) -- getLLVMType() only gives a real
-  // llvm::ArrayType for a KNOWN positive size; an unsized `T[]` parameter
-  // is already an opaque pointer at the LLVM level (§27 D3: no escape
-  // analysis exists for it yet), so its debug type is just "pointer to T",
-  // same as any other opaque-pointer-shaped Turf type below.
+  // Arrays. A fixed-size `T[N]` is a real llvm::ArrayType; an unsized `T[]`
+  // parameter is the `{ ptr, i64 }` slice (getSliceLLVMType()), so a
+  // debugger is shown exactly that: a struct of `data` (pointer to T) and
+  // `length`.
   if (isArrayType(T)) {
     const auto *AT = dynamic_cast<const ::ArrayType *>(T);
+    if (AT && AT->getSize() < 0) {
+      DIFile *File = DebugCU ? DebugCU->getFile() : nullptr;
+      DIType *DataTy = DBuilder->createPointerType(
+          getDebugType(AT->getElementTypePtr().get()), 64);
+      DIType *LenTy = DBuilder->createBasicType("int", 64, dwarf::DW_ATE_signed);
+      Metadata *Members[] = {
+          DBuilder->createMemberType(DebugCU, "data", File, 0, 64, 0, 0,
+                                     DINode::FlagZero, DataTy),
+          DBuilder->createMemberType(DebugCU, "length", File, 0, 64, 0, 64,
+                                     DINode::FlagZero, LenTy)};
+      return DebugTypeCache[Key] = DBuilder->createStructType(
+                DebugCU, AT->getName(), File, 0, 128, 0, DINode::FlagZero,
+                nullptr, DBuilder->getOrCreateArray(Members));
+    }
     if (AT && AT->getSize() > 0) {
       DIType *ElemTy = getDebugType(AT->getElementTypePtr().get());
       llvm::Type *ElemLLVMTy = getLLVMType(AT->getElementTypePtr().get());
@@ -2383,6 +2441,7 @@ SourceLocation GetNodeDebugLoc(const ExprAST *E) {
   TRY_LOC(FieldAccessExprAST)
   TRY_LOC(ArrayLiteralExprAST)
   TRY_LOC(ArrayAccessExprAST)
+  TRY_LOC(SliceExprAST)
   TRY_LOC(MethodCallExprAST)
   TRY_LOC(IfExprAST)
   TRY_LOC(UnsafeBlockExprAST)

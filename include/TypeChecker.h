@@ -75,6 +75,7 @@
 #include "llvm/ADT/APSInt.h"
 
 #include <functional>
+#include <map>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -326,6 +327,7 @@ public:
   void visitArrayDecl(ArrayDeclExprAST &Node) override;
   void visitArrayLiteral(ArrayLiteralExprAST &Node) override;
   void visitArrayAccess(ArrayAccessExprAST &Node) override;
+  void visitSlice(SliceExprAST &Node) override;
   // ── Modules & misc ────────────────────────────────────────────────────────
   void visitModuleImport(ModuleImportExprAST &Node) override;
   void visitSizeOf(SizeOfExprAST &Node) override;
@@ -411,6 +413,79 @@ private:
   /// addendum. `extern fn` goes through visitExternFuncDecl() instead and
   /// is unaffected by this check.
   void checkNoRawPointersInSignature(const FuncDefExprAST &Node);
+
+  /// Issue #260 (E140): a `T[]` is a slice that borrows its caller's array
+  /// for the length of one call, so the only place it may appear is as a
+  /// function parameter's OWN type (@p AllowAtTop). Anywhere else -- a
+  /// variable, a field, a return type, an element type (`int[][]`'s inner
+  /// one), behind `&`, as a generic type argument, inside a function type --
+  /// it would either outlive the array it points into or need a length
+  /// nothing stores. Reports the first such use inside @p T against @p Loc;
+  /// @p What names the place for the message ("variable 'x'"). Returns true
+  /// if it reported.
+  bool checkUnsizedArrayPlacement(const TurfType *T, bool AllowAtTop,
+                                  SourceLocation Loc, const std::string &What,
+                                  const std::string &Hint);
+
+  /// E140 for a generic call: no type parameter may stand for (or contain) a
+  /// `T[]`, since a `T`-typed value can be stored or returned. Passing a
+  /// slice to `fn<T> f(arr: T[])` binds T to the ELEMENT type, which is fine.
+  /// A slice bound's value when it folds to a constant, else nullopt.
+  std::optional<long long> constantSliceBound(const ExprAST *E);
+
+  /// E144: @p Source (an array expression) is about to become a `mut` view
+  /// named @p ViewName -- refuse it when the array it is rooted at is
+  /// immutable, since writes through the view would change that array.
+  /// Returns true if it reported.
+  bool checkMutableViewSource(const ExprAST *Source, SourceLocation Loc,
+                              const std::string &ViewName);
+
+  void checkSliceTypeArguments(
+      const std::unordered_map<std::string, TurfTypePtr> &Subst,
+      const std::string &CalleeName, SourceLocation Loc);
+
+  /// Issue #260 (E141): records every argument a call hands to a `T[]`
+  /// parameter of @p Target, so checkSliceWrites() can refuse the call if the
+  /// argument is an `immut` array and the callee writes through that slice.
+  /// @p Receiver is a UFCS receiver (Params[0]); @p ParamOffset is where
+  /// @p Args start in Target.Params.
+  void noteSliceArguments(const std::vector<std::unique_ptr<ExprAST>> &Args,
+                          const ExprAST *Receiver,
+                          const std::shared_ptr<ResolverFunctionSymbol> &Target,
+                          size_t ParamOffset, SourceLocation Loc);
+
+  /// Runs the checks noteSliceArguments() recorded. Deferred to the end of
+  /// checkAll(): whether a callee writes through a slice depends on the calls
+  /// in ITS body (it may hand the slice on), and those are only resolved once
+  /// that body has been checked.
+  void checkSliceWrites();
+
+public:
+  /// Does the body of @p Decl write through its @p ParamIdx-th parameter (a
+  /// `T[]`), directly or by passing it to another function that does?
+  bool writesThroughSliceParam(const FuncDefExprAST *Decl, size_t ParamIdx);
+  /// writesThroughSliceParam() for a call target's @p ParamIdx-th parameter
+  /// (Target.Params and the declaration's own list differ for a constructor).
+  bool targetWritesThroughSlice(const ResolverFunctionSymbol &Target,
+                                size_t ParamIdx);
+  bool mutatesSelfTransitively(const FuncDefExprAST *Decl) const;
+
+private:
+  struct PendingSliceWrite {
+    SourceLocation Loc;
+    const VariableSymbol *Array; ///< the immutable array handed over
+    std::string ArrayName;
+    std::shared_ptr<ResolverFunctionSymbol> Callee;
+    size_t ParamIdx;
+  };
+  std::vector<PendingSliceWrite> PendingSliceWrites_;
+  /// Method calls on an `immut` receiver whose method doesn't mutate self
+  /// directly; checkSliceWrites() refuses those that write self through a
+  /// slice (ParamIdx is unused: always `self`).
+  std::vector<PendingSliceWrite> PendingSelfSliceWrites_;
+  /// writesThroughSliceParam() memo: 0 = in progress (a recursive cycle counts
+  /// as "no write" unless some other path writes), 1 = no, 2 = yes.
+  std::map<std::pair<const FuncDefExprAST *, size_t>, int> SliceWriteMemo_;
 
   /**
    * @brief Infer the result type of a binary arithmetic/string operation.

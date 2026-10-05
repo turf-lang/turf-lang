@@ -1133,6 +1133,24 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
         }
       }
       getNextToken(); // eat ']'
+
+      // `mut nums: int[] = [10, 20, 30];` -- the literal gives the array its
+      // size: this IS `int[3]`, an owned array with value semantics, exactly
+      // as if the 3 had been written (and the type `guess` infers from the
+      // same literal). `int[]` stays a view only when initialized from an
+      // existing array (`= a`, `= a[1..]`), which has storage to share; a
+      // literal has none until this declaration gives it some. Only the
+      // outermost size is inferred -- an inner `[]` is still E140.
+      if (ArraySize < 0) {
+        if (InitList.empty()) {
+          LogErrorAt(NameLoc, ErrCode::InvalidArraySize,
+                     "An empty literal can't give '" + Name +
+                         "' a size -- an array needs at least one element.",
+                     SLM::ErrorCategory::ARRAY_ERROR);
+          return nullptr;
+        }
+        ArraySize = static_cast<int>(InitList.size());
+      }
     } else {
       InitExpr = ParseExpression();
       if (!InitExpr)

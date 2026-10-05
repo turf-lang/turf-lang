@@ -90,6 +90,7 @@ void TypeChecker::checkAll(const std::vector<std::unique_ptr<ExprAST>> &Nodes,
   if (!RecoverPerDeclaration) {
     for (const auto &Node : Nodes)
       check(Node.get());
+    checkSliceWrites(); // needs every body checked first -- see its comment
     return;
   }
 
@@ -110,6 +111,21 @@ void TypeChecker::checkAll(const std::vector<std::unique_ptr<ExprAST>> &Nodes,
     g_recoverActive = SavedRecoverActive;
     std::memcpy(g_recoverJmp, SavedJmpBuf, sizeof(jmp_buf));
   }
+
+  // Same recovery for the deferred E141 pass. checkSliceWrites() takes its
+  // whole queue before reporting, so a longjmp out of it reports each entry
+  // at most once (the rest are dropped with it -- one E141 per run in this
+  // mode is enough to act on).
+  const bool SavedRecoverActive = g_recoverActive;
+  jmp_buf SavedJmpBuf;
+  std::memcpy(SavedJmpBuf, g_recoverJmp, sizeof(jmp_buf));
+  g_recoverActive = true;
+  if (setjmp(g_recoverJmp) == 0)
+    checkSliceWrites();
+  else
+    resetForRecovery();
+  g_recoverActive = SavedRecoverActive;
+  std::memcpy(g_recoverJmp, SavedJmpBuf, sizeof(jmp_buf));
 }
 
 
@@ -585,6 +601,21 @@ TurfTypePtr TypeChecker::inferRelationalType(SourceLocation Loc, int Op,
                   "Structs don't support direct comparison yet -- compare "
                   "the fields you care about individually instead (e.g. "
                   "`a.x == b.x`).");
+      return TurfBool();
+    }
+    // Arrays, for the same reason: two `int[3]`s share a type name, so the
+    // check below let `a == b` through to a raw FCmp on the whole aggregate
+    // (an internal compiler error), and two slices compared their
+    // `{ ptr, length }` pairs the same way. Whether two views are "equal"
+    // could mean same elements or same storage, so it is spelled out instead.
+    if (LhsTy->isArray() || RhsTy->isArray()) {
+      reportError(Loc, ErrCode::InvalidComparison,
+                  "Cannot compare arrays with '" + OpToDisplayString(Op) + "'.",
+                  {},
+                  "Arrays (and slices) can't be compared directly -- compare "
+                  "their lengths and elements in a loop, e.g. for (i, x) in a "
+                  "{ if x != b[i] { ... } }.",
+                  "Values can't be compared!");
       return TurfBool();
     }
     // `err == MathError::DivisionByZero` inside `recover as err run { ... }`

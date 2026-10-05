@@ -59,6 +59,7 @@ class FieldAccessExprAST;
 class ArrayDeclExprAST;
 class ArrayLiteralExprAST;
 class ArrayAccessExprAST;
+class SliceExprAST;
 class FieldAccessExprAST;
 class EnumDeclExprAST;
 class MachineDeclExprAST;
@@ -149,6 +150,7 @@ class ErrorVariantPatternExprAST;
   X(ArrayDecl, ArrayDeclExprAST)                                               \
   X(ArrayLiteral, ArrayLiteralExprAST)                                         \
   X(ArrayAccess, ArrayAccessExprAST)                                           \
+  X(Slice, SliceExprAST)                                                       \
   /* Modules & misc */                                                         \
   X(ModuleImport, ModuleImportExprAST)                                         \
   X(SizeOf, SizeOfExprAST)                                                     \

@@ -41,6 +41,135 @@
 using namespace llvm;
 
 
+// Issue #260: the `{ data, length }` slice a `T[]` parameter receives.
+//
+// The data pointer is the argument's OWN storage whenever it has one (a
+// variable, a field, an element of an outer array), not a copy: writing
+// `arr[i] = v` in the callee changes the caller's array, which is what `T[]`
+// has always meant (and what makes `fill(arr, 0)`-style helpers possible).
+// The TypeChecker refuses that write when the caller's array is `immut`
+// (E141, TypeChecker::checkSliceWrites()). An argument with no storage of its
+// own -- a literal `[1, 2, 3]`, a call returning `int[3]` -- is spilled to a
+// slot in the caller's frame first; it used to be an internal compiler error
+// ("array argument must be a variable"). Either way the storage outlives the
+// call, and nothing can keep the slice past it: E140 keeps `T[]` out of every
+// local, field and return type.
+//
+// An argument that is already a `T[]` (a parameter handed on to another
+// function) is passed as it is. It used to pass the address of the slot that
+// HELD the pointer, so the second function read garbage.
+// > 0 while building a view that a VARIABLE will keep (CodegenStoredView()).
+// Then a temporary is spilled to a fresh GC heap block rather than to the
+// fixed entry-block slot: that slot is ONE per source location, so with
+// `w = v; v = mk(i);` in a loop, w and v would both view it and w would
+// silently change when v was refilled. An argument doesn't need this -- the
+// slot is only read during the call it was made for.
+static int StoredViewDepth = 0;
+
+Value *CodegenStoredView(ExprAST *Source) {
+  ++StoredViewDepth;
+  Value *V = CodegenSliceArgument(Source);
+  --StoredViewDepth;
+  return V;
+}
+
+Value *CodegenSliceArgument(ExprAST *Arg) {
+  const TurfType *ArgTy = getExprType(Arg);
+  const auto *ArrTy = dynamic_cast<const ::ArrayType *>(ArgTy);
+  if (!ArrTy) {
+    llvm::report_fatal_error(
+        "Internal error: a 'T[]' parameter was given a non-array argument. "
+        "This should have been caught by the TypeChecker.");
+    return nullptr;
+  }
+  if (ArrTy->getSize() < 0)
+    return Arg->codegen();
+
+  Value *Data = Arg->codegenLValue();
+  if (!Data) {
+    Value *Agg = Arg->codegen();
+    if (!Agg)
+      return nullptr;
+    if (StoredViewDepth > 0) {
+      Data = HeapAllocateValue(Agg); // traced per element, see its comment
+    } else {
+      Function *TheFunction = Builder->GetInsertBlock()->getParent();
+      AllocaInst *Tmp = CreateEntryBlockAlloca(TheFunction, "slice.tmp", ArgTy);
+      Builder->CreateStore(Agg, Tmp);
+      Data = Tmp;
+    }
+  }
+  Value *Slice = PoisonValue::get(getSliceLLVMType());
+  Slice = Builder->CreateInsertValue(Slice, Data, 0, "slice.data");
+  return Builder->CreateInsertValue(
+      Slice, ConstantInt::get(Type::getInt64Ty(*TheContext), ArrTy->getSize()),
+      1, "slice");
+}
+
+
+// `arr[start..end]`: a view of elements start..end-1 of the base array.
+//
+// The base's own `{ data, length }` comes from CodegenSliceArgument() (so a
+// `T[N]` is viewed in place and a `T[]` passes through). Each bound present
+// is evaluated once, left to right, and a negative one has the length added
+// to it, as a negative index does. The range must then satisfy
+// 0 <= start <= end <= length, or the program panics -- the TypeChecker has
+// already refused the ranges it can prove wrong (E143). The result is
+// `{ data + start, end - start }`: no element is copied.
+Value *SliceExprAST::codegen() {
+  Value *BaseSlice = CodegenSliceArgument(Base.get());
+  if (!BaseSlice)
+    return nullptr;
+  Type *I64 = Type::getInt64Ty(*TheContext);
+  Value *Data = Builder->CreateExtractValue(BaseSlice, 0, "slice.base");
+  Value *Len = Builder->CreateExtractValue(BaseSlice, 1, "slice.baselen");
+  Value *Zero = ConstantInt::get(I64, 0);
+
+  auto Bound = [&](ExprAST *E, Value *Default, const char *Name) -> Value * {
+    if (!E)
+      return Default;
+    Value *V = E->codegen();
+    if (!V)
+      return nullptr;
+    V = CastToType(V, TurfInt(), Name, Loc);
+    Value *IsNeg = Builder->CreateICmpSLT(V, Zero, "slice.isneg");
+    return Builder->CreateSelect(IsNeg, Builder->CreateAdd(V, Len), V, Name);
+  };
+  Value *StartV = Bound(Start.get(), Zero, "slice.start");
+  if (!StartV)
+    return nullptr;
+  Value *EndV = Bound(End.get(), Len, "slice.end");
+  if (!EndV)
+    return nullptr;
+
+  // 0 <= start <= end <= length (a still-negative bound fails the first).
+  Value *Bad = Builder->CreateOr(
+      Builder->CreateOr(Builder->CreateICmpSLT(StartV, Zero),
+                        Builder->CreateICmpSGT(StartV, EndV)),
+      Builder->CreateICmpSGT(EndV, Len), "slice.oob");
+  Function *TheFunction = Builder->GetInsertBlock()->getParent();
+  BasicBlock *OobBB = BasicBlock::Create(*TheContext, "slice_oob", TheFunction);
+  BasicBlock *OkBB = BasicBlock::Create(*TheContext, "slice_ok");
+  Builder->CreateCondBr(Bad, OobBB, OkBB);
+  Builder->SetInsertPoint(OobBB);
+  const auto *BaseVar = dynamic_cast<const VariableExprAST *>(Base.get());
+  CodegenPanic(Builder->CreateGlobalString(
+                   "Slice range out of bounds for '" +
+                   (BaseVar ? BaseVar->getName() : std::string("array")) + "'"),
+               Loc);
+  if (!Builder->GetInsertBlock()->getTerminator())
+    Builder->CreateUnreachable();
+  TheFunction->insert(TheFunction->end(), OkBB);
+  Builder->SetInsertPoint(OkBB);
+
+  const auto *ArrTy = dynamic_cast<const ::ArrayType *>(getExprType(Base.get()));
+  Type *ElemTy = getLLVMType(ArrTy->getElementType());
+  Value *NewData = Builder->CreateInBoundsGEP(ElemTy, Data, StartV, "slice.data");
+  Value *Result = Builder->CreateInsertValue(PoisonValue::get(getSliceLLVMType()),
+                                             NewData, 0);
+  return Builder->CreateInsertValue(Result, Builder->CreateSub(EndV, StartV), 1,
+                                    "slice");
+}
 
 
 // Ensure malloc / realloc / free are declared in the module.
@@ -55,10 +184,28 @@ Value *ArrayDeclExprAST::codegen() {
   Function *TheFunction = Builder->GetInsertBlock()->getParent();
 
   Type *ElemTy = getLLVMType(ElementType.get());
-  llvm::ArrayType *ArrTy = llvm::ArrayType::get(ElemTy, Size);
-
   IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
                    TheFunction->getEntryBlock().begin());
+
+  // A local `T[]` (issue #260's range slicing) is a view of an existing
+  // array (`= a`, `= a[1..]`, a `T[]` parameter, `= a.copy()`), built in place
+  // exactly as an argument to a `T[]` parameter is. (`int[] = [1, 2, 3]` never
+  // gets here: the Parser gives it the literal's size, so it is an int[3].)
+  if (Size < 0) {
+    AllocaInst *SliceSlot = TmpB.CreateAlloca(getSliceLLVMType(), nullptr, Name);
+    Value *SliceVal = InitExpr ? CodegenStoredView(InitExpr.get()) : nullptr;
+    if (!SliceVal)
+      return nullptr; // the TypeChecker requires an initializer (E128)
+    Builder->CreateStore(SliceVal, SliceSlot);
+
+    TurfTypePtr SliceType = makeArrayType(ElementType, Size);
+    if (GlobalSymbolTable)
+      GlobalSymbolTable->DeclareSymbol(Name, SliceType, Loc, SliceSlot);
+    NamedValues[Name] = {SliceSlot, SliceType};
+    return Constant::getNullValue(Type::getInt64Ty(*TheContext));
+  }
+
+  llvm::ArrayType *ArrTy = llvm::ArrayType::get(ElemTy, Size);
   AllocaInst *Alloca = TmpB.CreateAlloca(ArrTy, nullptr, Name);
 
   // Zero-initialize the entire array (memset to 0)
@@ -147,12 +294,13 @@ Value *ArrayLiteralExprAST::codegen() {
 // here -- the callers fold them at compile time and raise ArrayBoundsError.
 //
 // Returns the normalized, non-negative index to GEP with.
-static Value *EmitRuntimeBoundsCheck(Value *IndexVal, int ArraySize,
+// @p SizeVal is the element count as an i64: a constant for a `T[N]`, the
+// slice's own length field for a `T[]` parameter (issue #260).
+static Value *EmitRuntimeBoundsCheck(Value *IndexVal, Value *SizeVal,
                                      const std::string &ArrayName,
                                      SourceLocation Loc) {
   Function *TheFunction = Builder->GetInsertBlock()->getParent();
 
-  Value *SizeVal = ConstantInt::get(Type::getInt64Ty(*TheContext), ArraySize);
   Value *Zero = ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
 
   Value *IsNeg = Builder->CreateICmpSLT(IndexVal, Zero, "idx_isneg");
@@ -361,12 +509,22 @@ Value *ArrayAccessExprAST::codegenLValue() {
     return nullptr;
   }
 
-  Value *BaseLVal = Base->codegenLValue();
-  if (!BaseLVal)
-    return nullptr;
-
   int ArraySize = dynamic_cast<const ::ArrayType *>(BaseTy)->getSize();
   const TurfType *ElemType = getArrayElementType(BaseTy);
+
+  // A `T[N]` is indexed in place (its address); a `T[]` by its slice VALUE,
+  // which also covers a base with no address of its own -- `nums[1..][0]`.
+  Value *BaseLVal = nullptr;
+  Value *Slice = nullptr;
+  if (ArraySize >= 0) {
+    BaseLVal = Base->codegenLValue();
+    if (!BaseLVal)
+      return nullptr;
+  } else {
+    Slice = Base->codegen();
+    if (!Slice)
+      return nullptr;
+  }
 
   Value *IndexVal = Index->codegen();
   if (!IndexVal)
@@ -387,7 +545,9 @@ Value *ArrayAccessExprAST::codegenLValue() {
       // -- see that call site's own comment (CodegenFunc.cpp). F-OPT-2
       // (ARCHITECTURE_OVERHAUL.md §17.3): removal by proof only, independent
       // of `-O` level -- this is not gated on any optimization flag.
-      IndexVal = EmitRuntimeBoundsCheck(IndexVal, ArraySize, "array", Loc);
+      IndexVal = EmitRuntimeBoundsCheck(
+          IndexVal, ConstantInt::get(Type::getInt64Ty(*TheContext), ArraySize),
+          "array", Loc);
     }
   }
 
@@ -397,11 +557,18 @@ Value *ArrayAccessExprAST::codegenLValue() {
     Value *Indices[] = {ConstantInt::get(Type::getInt64Ty(*TheContext), 0),
                         IndexVal};
     return Builder->CreateInBoundsGEP(ArrTy, BaseLVal, Indices, "arrelemptr");
-  } else {
-    Type *PtrTy = PointerType::get(*TheContext, 0);
-    Value *ArrPtr = Builder->CreateLoad(PtrTy, BaseLVal, "arrptr");
-    return Builder->CreateGEP(ElemTy, ArrPtr, IndexVal, "arrelemptr");
   }
+
+  // A `T[]` parameter (issue #260): the slice carries its length, so the
+  // same `-len <= i < len` rule a `T[N]` gets applies here too, checked at
+  // run time -- even a constant index, since no length is known before the
+  // call. Before slices this was raw, unchecked pointer arithmetic.
+  Value *DataPtr = Builder->CreateExtractValue(Slice, 0, "slice.data");
+  Value *LenVal = Builder->CreateExtractValue(Slice, 1, "slice.len");
+  auto *BaseVar = dynamic_cast<const VariableExprAST *>(Base.get());
+  IndexVal = EmitRuntimeBoundsCheck(IndexVal, LenVal,
+                                    BaseVar ? BaseVar->getName() : "array", Loc);
+  return Builder->CreateInBoundsGEP(ElemTy, DataPtr, IndexVal, "arrelemptr");
 }
 
 
@@ -529,7 +696,9 @@ Value *ArrayAccessExprAST::codegen() {
       // reason the compile-time-constant check just above is duplicated
       // rather than shared between the two branches.
       if (!ProvenInBounds)
-        IndexVal = EmitRuntimeBoundsCheck(IndexVal, ArraySize, "array", Loc);
+        IndexVal = EmitRuntimeBoundsCheck(
+            IndexVal, ConstantInt::get(Type::getInt64Ty(*TheContext), ArraySize),
+            "array", Loc);
 
       Type *ElemTy = getLLVMType(ElemType);
       llvm::ArrayType *ArrTy = llvm::ArrayType::get(ElemTy, ArraySize);

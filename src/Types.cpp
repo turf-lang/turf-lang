@@ -214,7 +214,7 @@ bool typesCompatible(const TurfType *From, const TurfType *To) {
   // overflow, reproduced and confirmed before this fix.
   //
   // Two arrays are compatible when their element types are equivalent AND
-  // either their sizes match exactly OR at least one side is "unsized"
+  // either their sizes match exactly OR the destination is "unsized"
   // (Size == -1, the `int[]` spelling used for array function parameters
   // that must accept an argument of any concrete length, e.g.
   // `fn sum(arr: int[]): int` called with an int[5] or int[10] argument --
@@ -225,8 +225,13 @@ bool typesCompatible(const TurfType *From, const TurfType *To) {
       return false; // one side is an array, the other isn't
     const auto *FromArr = dynamic_cast<const ArrayType *>(From);
     const auto *ToArr = dynamic_cast<const ArrayType *>(To);
+    // One direction only (issue #260): any array may become a `T[]` view,
+    // but a `T[]` (whose length is only known at run time) never silently
+    // becomes a `T[N]` -- `mut b: int[5] = someSlice;` or passing a slice to
+    // an `int[5]` parameter used to be accepted here, and Codegen then
+    // stored a slice (or, before slices, a pointer) into a 5-element array.
     bool SizeOk = FromArr->getSize() == ToArr->getSize() ||
-                  FromArr->getSize() == -1 || ToArr->getSize() == -1;
+                  ToArr->getSize() == -1;
     if (!SizeOk)
       return false;
 

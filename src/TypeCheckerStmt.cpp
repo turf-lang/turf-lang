@@ -198,18 +198,10 @@ void TypeChecker::visitForEach(ForEachExprAST &Node) {
     return;
   }
 
+  // A `T[]` parameter is accepted like a `T[N]`: since issue #260 it is a
+  // slice that carries its length at run time (E006, which refused it, is
+  // retired).
   const auto *ArrTy = dynamic_cast<const ArrayType *>(IterableTy.get());
-  if (ArrTy->getSize() < 0) {
-    // Unsized array parameter (`T[]`) -- no runtime length to bound the
-    // loop with. See ArrayType's getSize() doc comment for why this genuinely
-    // can't be made to work without a much bigger calling-convention change
-    // (originally tracked as Issue #192, whose spec doc was retired in
-    // 2026-08 -- git history).
-    ForEachUnsizedArrayError(Node.getLoc(), IterableTy->getName()).raise();
-    setType(&Node, TurfVoid());
-    return;
-  }
-
   TurfTypePtr ElemTy = ArrTy->getElementTypePtr();
 
   // If the element type is a NamedType (e.g. "User"), resolve it to the

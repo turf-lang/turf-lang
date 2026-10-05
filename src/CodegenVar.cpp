@@ -137,7 +137,10 @@ Value *VarDeclExprAST::codegen() {
 
   Value *Init = nullptr;
   if (InitVal) {
-    Init = InitVal->codegen();
+    // An inferred view (`mut v = mk()[1..];`) keeps its source, so a
+    // temporary needs storage of its own -- CodegenStoredView().
+    Init = isUnsizedArrayType(Type.get()) ? CodegenStoredView(InitVal.get())
+                                          : InitVal->codegen();
     if (!Init)
       return nullptr;
 
@@ -353,17 +356,31 @@ Value *AssignmentExprAST::codegen() {
     }
   }
 
+  // Determine the LHS type without evaluating it (avoid double-evaluation side effects)
+  const TurfType *LHSTy = getExprType(LHS.get());
+  if (!LHSTy)
+    return nullptr;
+
+  // Rebinding a `T[]` view (`view = other[1..];`, `view = someArray;`): the
+  // RHS becomes a slice the same way a `T[]` argument does, viewing an
+  // array's storage instead of loading a copy of it.
+  if (isUnsizedArrayType(LHSTy)) {
+    Value *SliceVal = CodegenStoredView(RHS.get());
+    if (!SliceVal)
+      return nullptr;
+    Value *Ptr = LHS->codegenLValue();
+    if (!Ptr)
+      return nullptr;
+    Builder->CreateStore(SliceVal, Ptr);
+    return SliceVal;
+  }
+
   // Generate code for the RHS first
   Value *Val = RHS->codegen();
   if (!Val)
     return nullptr;
 
     // Void value check is handled by TypeChecker.
-
-  // Determine the LHS type without evaluating it (avoid double-evaluation side effects)
-  const TurfType *LHSTy = getExprType(LHS.get());
-  if (!LHSTy)
-    return nullptr;
 
   // Cast directly against LHSTy (the raw-pointer CastToType overload) rather
   // than round-tripping it through getLLVMType()/getTurfTypeFromLLVM() to

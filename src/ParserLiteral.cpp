@@ -147,9 +147,35 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
     if (CurTok == '[') {
       SourceLocation Loc = CurLoc;
       getNextToken();
-      auto Index = ParseExpression();
-      if (!Index)
-        return nullptr;
+      // `[start..end]` (either bound optional) is a slice. A `..` right
+      // after '[' or after the first expression is what tells it apart from
+      // an index -- `..` is never an operator inside an expression, so
+      // ParseExpression() always stops in front of it.
+      std::unique_ptr<ExprAST> Index;
+      if (CurTok != TOK_RANGE) {
+        Index = ParseExpression();
+        if (!Index)
+          return nullptr;
+      }
+      if (CurTok == TOK_RANGE) {
+        getNextToken(); // eat '..'
+        std::unique_ptr<ExprAST> End;
+        if (CurTok != ']') {
+          End = ParseExpression();
+          if (!End)
+            return nullptr;
+        }
+        if (CurTok != ']') {
+          LogErrorAt(CurLoc, ErrCode::UnclosedDelimiter,
+                     "Expected ']' to close the slice -- e.g. arr[1..3]",
+                     SLM::ErrorCategory::SYNTAX_ERROR);
+          return nullptr;
+        }
+        getNextToken();
+        Base = std::make_unique<SliceExprAST>(Loc, std::move(Base),
+                                              std::move(Index), std::move(End));
+        continue;
+      }
       if (CurTok != ']') {
         LogErrorAt(CurLoc, ErrCode::UnclosedDelimiter, "Expected ']' to close the array index", SLM::ErrorCategory::SYNTAX_ERROR);
         return nullptr;

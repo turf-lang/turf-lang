@@ -245,6 +245,15 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
 
   TurfTypePtr DeclTy = Node.getTypePtr();
 
+  // E140 (issue #260): `mut r: &int[]`, `mut l: List<int[]>`, ... A plain
+  // `mut a: int[]` is an ArrayDeclExprAST instead (visitArrayDecl()).
+  if (checkUnsizedArrayPlacement(DeclTy.get(), /*AllowAtTop=*/!Node.isExported(),
+                                 Node.getLoc(),
+                                 "Variable '" + Node.getName() + "'", "")) {
+    setType(&Node, nullptr);
+    return;
+  }
+
   // SEM-003 (§11.8): `guess` is resolved HERE, not the Parser. ParseType()/
   // ParseLetStatement() only ever produce the TurfGuess() placeholder (for
   // both spellings, §11.2); Resolver::visitVarDecl declares the variable
@@ -310,6 +319,24 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
                   "Annotate the reference type explicitly, e.g. 'mut " +
                       Node.getName() + ": &?Point = null;'.",
                   "Nothing to infer!");
+      setType(&Node, nullptr);
+      return;
+    }
+    // `immut tail = nums[2..];` (or `= arr` for a `T[]` parameter) makes a
+    // local slice: a view that lives as long as this function's frame, which
+    // is never longer than the array it views. E140 still refuses a slice
+    // nested inside the inferred type, and an exported constant.
+    if (checkUnsizedArrayPlacement(
+            InitTy.get(), /*AllowAtTop=*/!Node.isExported(), Node.getLoc(),
+            "Variable '" + Node.getName() + "'", "")) {
+      setType(&Node, nullptr);
+      return;
+    }
+    // E144: a `mut` view lets its owner write the array it looks at.
+    if (!Node.isImmutable() && InitTy->isArray() &&
+        static_cast<const ArrayType *>(InitTy.get())->getSize() < 0 &&
+        checkMutableViewSource(Node.getInitializer(), Node.getLoc(),
+                               Node.getName())) {
       setType(&Node, nullptr);
       return;
     }
@@ -481,6 +508,23 @@ void TypeChecker::visitFuncDef(FuncDefExprAST &Node) {
   // `unsafe { }`, so this runs regardless of UnsafeDepth_.
   checkNoRawPointersInSignature(Node);
 
+  // E140 (issue #260): `T[]` is legal as a parameter's own type -- that is
+  // what it is for -- and nowhere else in a signature.
+  for (const auto &Param : Node.getParams()) {
+    if (Param.Name == "self")
+      continue;
+    checkUnsizedArrayPlacement(
+        Param.Type.get(), /*AllowAtTop=*/true,
+        Param.TypeLoc.Line > 0 ? Param.TypeLoc : Node.getLoc(),
+        "Parameter '" + Param.Name + "' of '" + Node.getName() + "'", "");
+  }
+  checkUnsizedArrayPlacement(
+      Node.getReturnType(), /*AllowAtTop=*/false, Node.getLoc(),
+      "The return type of '" + Node.getName() + "'",
+      "A function can't return an unsized array: the caller would get a "
+      "slice of storage that no longer exists. Return a sized array (e.g. "
+      "'int[5]') or a List<T> instead.");
+
   // Push the declared return type so visitReturn() can validate it
   ReturnTypeStack_.push_back(Node.getReturnTypePtr());
 
@@ -561,6 +605,11 @@ void TypeChecker::visitErrorDecl(ErrorDeclExprAST &Node) {
   bool Gated = false;
   for (const auto &Variant : Node.getVariantInfos()) {
     for (const auto &Field : Variant.Fields) {
+      checkUnsizedArrayPlacement(Field.Type.get(), /*AllowAtTop=*/false,
+                                 Node.getLoc(),
+                                 "Payload field '" + Field.Name + "' of '" +
+                                     Node.getName() + "::" + Variant.Name + "'",
+                                 ""); // E140
       if (!Gated && isRawPointer(Field.Type.get())) {
         checkUnsafeGate(Field.Type.get(), Node.getLoc(), &Node);
         Gated = true;
@@ -589,6 +638,16 @@ void TypeChecker::visitStructDecl(StructDeclExprAST &Node) {
     }
   }
 
+  // E140 (issue #260): a field outlives any one call, so it can't hold a
+  // slice of someone else's array.
+  for (const auto &Field : Node.getFields())
+    checkUnsizedArrayPlacement(
+        Field.Type.get(), /*AllowAtTop=*/false,
+        Field.TypeLoc.Line > 0 ? Field.TypeLoc : Node.getLoc(),
+        "Field '" + Field.Name + "' of '" + Node.getName() + "'",
+        "A struct field needs a fixed size (e.g. 'int[5]'), or use a "
+        "List<T> for a collection that grows.");
+
   // TYPE-002 (S15/D2): a generic type used only as a struct FIELD (no
   // variable of that type, no method called on it, anywhere in the
   // program) was never recorded as an instantiation request -- see
@@ -612,6 +671,89 @@ void TypeChecker::visitArrayDecl(ArrayDeclExprAST &Node) {
   if (Node.getInitExpr())
     Node.getInitExpr()->accept(*this);
 
+  const TurfTypePtr DeclArrTy =
+      makeArrayType(Node.getElementTypePtr(), Node.getSize());
+
+  // A local `T[]` is a view (issue #260's range slicing): of an array
+  // literal, which gets a slot in this frame (`immut nums: int[] = [1, 2]`),
+  // or of an existing array (`= a`, `= a[1..]`, `= someParam`), whose storage
+  // it shares. Only the outermost dimension may be unsized (E140 for
+  // `int[2][]`), and it always needs something to view.
+  if (checkUnsizedArrayPlacement(DeclArrTy.get(), /*AllowAtTop=*/true,
+                                 Node.getLoc(),
+                                 "Variable '" + Node.getName() + "'", "")) {
+    setType(&Node, nullptr);
+    return;
+  }
+  // A sized array's initializer EXPRESSION (`mut b: int[5] = a;`) was never
+  // checked at all: an `int[2]` copied into an `int[5]` compiled, and read
+  // the three missing elements from whatever followed `a` on the stack. A
+  // `T[]` source can't be copied into a `T[N]` either: its length is only
+  // known at run time (typesCompatible(), Types.cpp).
+  if (Node.getSize() >= 0 && Node.getInitExpr()) {
+    TurfTypePtr SrcTy = getType(Node.getInitExpr().get());
+    if (SrcTy && !typesCompatible(SrcTy.get(), DeclArrTy.get())) {
+      const auto *SrcArr = dynamic_cast<const ArrayType *>(SrcTy.get());
+      const bool SameElem =
+          SrcArr && SrcArr->getElementType()->isEquivalent(Node.getElementType());
+      reportError(Node.getLoc(),
+                  SameElem ? ErrCode::ArraySizeMismatch : ErrCode::ArrayTypeMismatch,
+                  "Cannot initialize '" + Node.getName() + "' ('" +
+                      DeclArrTy->getName() + "') from a value of type '" +
+                      SrcTy->getName() + "'.",
+                  {},
+                  SrcArr && SrcArr->getSize() < 0
+                      ? "A slice's length is only known when the program runs, "
+                        "so it can't be copied into a fixed-size array. Declare '" +
+                            Node.getName() + "' as '" +
+                            Node.getElementTypePtr()->getName() +
+                            "[]' to view it, or copy the elements in a loop."
+                      : "An array can only be initialized from an array of "
+                        "the same size and element type.",
+                  SameElem ? "Array size mismatch!" : "Array element type mismatch!");
+      setType(&Node, nullptr);
+      return;
+    }
+  }
+
+  if (Node.getSize() < 0) {
+    if (Node.getInitList().empty() && !Node.getInitExpr()) {
+      reportError(Node.getLoc(), ErrCode::MissingInitializer,
+                  "The slice '" + Node.getName() + "' needs an initializer.",
+                  {},
+                  "A '" + DeclArrTy->getName() + "' is a view of an array, so "
+                  "it needs one to look at, e.g. 'immut " + Node.getName() +
+                  ": " + DeclArrTy->getName() + " = other[1..];'. For an "
+                  "empty array of your own, give it a size: 'mut " +
+                  Node.getName() + ": " + Node.getElementTypePtr()->getName() +
+                  "[5];'.",
+                  "Missing initializer!");
+      setType(&Node, nullptr);
+      return;
+    }
+    if (const ExprAST *Src = Node.getInitExpr().get()) {
+      TurfTypePtr SrcTy = getType(Src);
+      if (SrcTy && !typesCompatible(SrcTy.get(), DeclArrTy.get())) {
+        reportError(Node.getLoc(), ErrCode::ArrayTypeMismatch,
+                    "Cannot make the slice '" + Node.getName() + "' ('" +
+                        DeclArrTy->getName() + "') from a value of type '" +
+                        SrcTy->getName() + "'.",
+                    {},
+                    "A slice views an array with the same element type, "
+                    "e.g. an int[5] or another int[] for an int[].",
+                    "Array element type mismatch!");
+        setType(&Node, nullptr);
+        return;
+      }
+      // E144: a `mut` view of an immutable array.
+      if (!Node.isImmutable() &&
+          checkMutableViewSource(Src, Node.getLoc(), Node.getName())) {
+        setType(&Node, nullptr);
+        return;
+      }
+    }
+  }
+
   // Neither the init list's LENGTH nor its elements' TYPES were ever
   // checked against the declared array type here -- unlike the sibling
   // ArrayLiteralExprAST (visitArrayLiteral, just below), whose elements
@@ -623,7 +765,9 @@ void TypeChecker::visitArrayDecl(ArrayDeclExprAST &Node) {
   // pointer bits reinterpreted as an int. `int[3] arr = [1,2,3,4,5]` (5
   // elements into a declared size-3 array) also compiled clean.
   if (!Node.getInitList().empty()) {
-    if (Node.getInitList().size() != static_cast<size_t>(Node.getSize())) {
+    // A slice's literal sets its length, so there is no size to disagree with.
+    if (Node.getSize() >= 0 &&
+        Node.getInitList().size() != static_cast<size_t>(Node.getSize())) {
       reportError(Node.getLoc(), ErrCode::ArraySizeMismatch,
                   "Array declared with size " + std::to_string(Node.getSize()) +
                       " but initialized with " +
@@ -657,7 +801,7 @@ void TypeChecker::visitArrayDecl(ArrayDeclExprAST &Node) {
     }
   }
 
-  setType(&Node, makeArrayType(Node.getElementTypePtr(), Node.getSize()));
+  setType(&Node, DeclArrTy);
 }
 
 
@@ -742,6 +886,24 @@ void TypeChecker::visitExternFuncDecl(ExternFuncDeclExprAST &Node) {
   checkType(Node.getReturnType(), "return type");
   for (const auto &[PName, PType] : Node.getParams())
     checkType(PType, "parameter '" + PName + "'");
+
+  // E140 (issue #260): C has no slice type, so an `extern fn` can't take or
+  // return a `T[]` at all -- not even as a parameter's own type.
+  const std::string ExternHint =
+      "C has no unsized-array type to match: declare the C parameter as a "
+      "pointer ('T*') plus a separate length, and pass 'arr to T*' inside "
+      "'unsafe { }'.";
+  for (const auto &[PName, PType] : Node.getParams())
+    if (checkUnsizedArrayPlacement(PType.get(), /*AllowAtTop=*/false,
+                                   Node.getLoc(),
+                                   "Parameter '" + PName + "' of extern fn '" +
+                                       Node.getName() + "'",
+                                   ExternHint))
+      break;
+  checkUnsizedArrayPlacement(Node.getReturnType().get(), /*AllowAtTop=*/false,
+                             Node.getLoc(),
+                             "The return type of extern fn '" + Node.getName() + "'",
+                             ExternHint);
 
   // The declaration itself has no runtime value.
   setType(&Node, TurfVoid());

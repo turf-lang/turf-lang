@@ -11,6 +11,8 @@
 #include <map>
 #include <memory>
 
+class ExprAST;
+
 // Common LLVM tools to be used everywhere.
 extern std::unique_ptr<llvm::LLVMContext> TheContext;
 extern std::unique_ptr<llvm::IRBuilder<>> Builder;
@@ -55,6 +57,18 @@ llvm::AllocaInst *CreateEntryBlockAlloca(llvm::Function *TheFunction,
                                          const TurfType *Type);
 // Map a TurfType to the corresponding LLVM Type (Monomorphizing)
 llvm::Type *getLLVMType(const TurfType *Type);
+// The LLVM shape of an unsized `T[]` parameter: `{ ptr data, i64 length }`
+// (issue #260). Field 0 is the first element, field 1 the element count.
+llvm::StructType *getSliceLLVMType();
+// Builds the slice a `T[]` parameter receives from the argument expression
+// @p Arg (a `T[N]` array or another `T[]`). See its definition
+// (CodegenArray.cpp) for why the argument's own storage is shared, not copied.
+llvm::Value *CodegenSliceArgument(ExprAST *Arg);
+// The same, for a view a VARIABLE keeps: a temporary source gets its own GC
+// block instead of a per-location stack slot (see its definition).
+llvm::Value *CodegenStoredView(ExprAST *Source);
+// True when @p T is the unsized `T[]` spelling.
+bool isUnsizedArrayType(const TurfType *T);
 
 // Current function context (nullptr at top level)
 extern TurfTypePtr CurrentFuncReturnType;

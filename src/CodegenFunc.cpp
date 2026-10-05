@@ -1107,8 +1107,15 @@ Value *FuncCallExprAST::codegen() {
     }
 
     std::vector<Value *> EvaluatedArgs;
-    for (auto &Arg : Args) {
-      Value *V = Arg->codegen();
+    // Params[0] is `self` only for a monomorphized generic constructor (see
+    // just above); otherwise the list is self-stripped and lines up with Args.
+    const size_t CtorParamOffset =
+        (!Target->Params.empty() && Target->Params[0].Name == "self") ? 1 : 0;
+    for (size_t I = 0; I < Args.size(); ++I) {
+      const size_t P = I + CtorParamOffset;
+      const bool ToSlice = P < Target->Params.size() &&
+                           isUnsizedArrayType(Target->Params[P].Type.get());
+      Value *V = ToSlice ? CodegenSliceArgument(Args[I].get()) : Args[I]->codegen();
       if (!V)
         return nullptr;
       EvaluatedArgs.push_back(V);
@@ -1330,8 +1337,13 @@ Value *FuncCallExprAST::codegen() {
   }
 
   std::vector<Value *> EvaluatedArgs;
-  for (auto &Arg : Args) {
-    Value *V = Arg->codegen();
+  for (size_t I = 0; I < Args.size(); ++I) {
+    // A `T[]` parameter takes a slice, which needs the argument's address,
+    // not its loaded value -- see CodegenSliceArgument().
+    const bool ToSlice = ResolvedCallTarget &&
+                         I < ResolvedCallTarget->Params.size() &&
+                         isUnsizedArrayType(ResolvedCallTarget->Params[I].Type.get());
+    Value *V = ToSlice ? CodegenSliceArgument(Args[I].get()) : Args[I]->codegen();
     if (!V)
       return nullptr;
     EvaluatedArgs.push_back(V);
@@ -1400,24 +1412,18 @@ Value *FuncCallExprAST::codegen() {
     else
       DeclaredType = getTurfTypeFromLLVM(Arg.getType());
 
-    // Unsized array params: the function expects a pointer to the array data.
-    // We must pass the raw AllocaInst of the caller's array, not a loaded
-    // value. TypeChecker has already verified the caller is passing an array
-    // variable with a compatible element type.
-    // Note: Fixed-size arrays (Size > 0) are passed by value, so V remains the
-    // evaluated argument (the loaded array value).
+    // Arrays pass through unchanged: a `T[]` argument is already the slice
+    // the evaluation loop above built (CodegenSliceArgument()), and a
+    // fixed-size `T[N]` is passed by value as the loaded array.
     if (isArrayType(DeclaredType.get())) {
-      const auto *ArrTy = dynamic_cast<const ::ArrayType *>(DeclaredType.get());
-      if (ArrTy && ArrTy->getSize() == -1) {
-        if (auto *VE = dynamic_cast<VariableExprAST *>(Args[Idx].get())) {
-          V = VE->codegenLValue();
-          assert(V && "Array argument LValue generation failed");
-        } else {
-          llvm::report_fatal_error(
-              "Internal error: array argument must be a variable. "
-              "This should have been caught by the TypeChecker.");
-          return nullptr;
-        }
+      if (isUnsizedArrayType(DeclaredType.get()) &&
+          V->getType() != getSliceLLVMType()) {
+        // The callee wants a slice, but ResolvedCallTarget did not say so
+        // when the arguments were evaluated -- a compiler bug, not a user's.
+        llvm::report_fatal_error(
+            "Internal error: a 'T[]' argument reached the call without being "
+            "made into a slice.");
+        return nullptr;
       }
     } else {
       // Standard scalar type casting.

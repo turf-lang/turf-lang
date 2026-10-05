@@ -585,9 +585,10 @@ Value *ForExprAST::codegen() {
 
 
 // ForEachExprAST::codegen : desugars to a compiler-generated ascending
-// 0..Size-1 counted loop over the array's compile-time-known size (the
-// TypeChecker already guarantees the iterable is an array with Size > 0 --
-// see TypeChecker::visitForEach()). Unlike ForExprAST, direction is always
+// 0..Size-1 counted loop over the array's size -- compile-time for a `T[N]`,
+// the slice's run-time length for a `T[]` parameter (the TypeChecker already
+// guarantees the iterable is an array -- see TypeChecker::visitForEach()).
+// Unlike ForExprAST, direction is always
 // ascending and step is always 1, so there's no need for the
 // ascending/descending dance ForExprAST::codegen() does for user-supplied
 // ranges.
@@ -606,23 +607,30 @@ Value *ForEachExprAST::codegen() {
 
   const auto *ArrTy = dynamic_cast<const ::ArrayType *>(IterableTy);
   int Size = ArrTy->getSize();
-  if (Size <= 0) {
-    llvm::report_fatal_error(
-        "Internal error: for-each over an unsized array reached Codegen. "
-        "This should have been caught by the TypeChecker.");
-    return nullptr;
-  }
+  const bool IsSlice = Size < 0;
 
   TurfTypePtr ElemTy = ArrTy->getElementTypePtr();
   Type *ElemLLVMTy = getLLVMType(ElemTy.get());
-  llvm::ArrayType *ArrLLVMTy = llvm::ArrayType::get(ElemLLVMTy, Size);
 
-  // 1. Get an address for the iterable to GEP into. Same dual-path pattern
+  // 1. Get an address for the iterable to GEP into, and the bound. A `T[]`
+  //    parameter (issue #260) is a slice that carries both: its data pointer
+  //    and its run-time length. Otherwise, the same dual-path pattern
   //    ArrayAccessExprAST::codegenLValue()/codegen() use: prefer the
   //    l-value form (a variable, field, or nested index), falling back to
   //    dumping an r-value (e.g. a function call returning an array) into a
   //    fresh temp alloca.
-  Value *ArrPtr = Iterable->codegenLValue();
+  Value *ArrPtr = nullptr;
+  Value *SizeVal = nullptr;
+  if (IsSlice) {
+    Value *Slice = Iterable->codegen();
+    if (!Slice)
+      return nullptr;
+    ArrPtr = Builder->CreateExtractValue(Slice, 0, "foreach.data");
+    SizeVal = Builder->CreateExtractValue(Slice, 1, "foreach.len");
+  } else {
+    SizeVal = ConstantInt::get(Type::getInt64Ty(*TheContext), Size);
+    ArrPtr = Iterable->codegenLValue();
+  }
   if (!ArrPtr) {
     Value *AggVal = Iterable->codegen();
     if (!AggVal)
@@ -692,8 +700,7 @@ Value *ForEachExprAST::codegen() {
   Builder->SetInsertPoint(CondBB);
   Value *CounterVal = Builder->CreateLoad(Type::getInt64Ty(*TheContext),
                                           CounterAlloca, "foreach.idxval");
-  Value *SizeConst = ConstantInt::get(Type::getInt64Ty(*TheContext), Size);
-  Value *CondV = Builder->CreateICmpSLT(CounterVal, SizeConst, "foreach.cond");
+  Value *CondV = Builder->CreateICmpSLT(CounterVal, SizeVal, "foreach.cond");
   Builder->CreateCondBr(CondV, BodyBB, AfterBB);
 
   // 6. Body: load array[counter] into the value var's alloca.
@@ -702,13 +709,13 @@ Value *ForEachExprAST::codegen() {
 
   Value *IdxForGEP = Builder->CreateLoad(Type::getInt64Ty(*TheContext),
                                          CounterAlloca, "foreach.idxval");
-  Value *Indices[] = {ConstantInt::get(Type::getInt64Ty(*TheContext), 0),
-                      IdxForGEP};
   // The index is compiler-generated and provably in [0, Size) -- no runtime
   // bounds check needed here, unlike ordinary user-supplied array indexing
-  // (ArrayAccessExprAST::codegen()).
-  Value *ElemPtr =
-      Builder->CreateInBoundsGEP(ArrLLVMTy, ArrPtr, Indices, "foreach.elemptr");
+  // (ArrayAccessExprAST::codegen()). Both shapes address the element as
+  // "the IdxForGEP-th T after ArrPtr": a `T[N]`'s storage and a slice's data
+  // pointer each point at element 0.
+  Value *ElemPtr = Builder->CreateInBoundsGEP(ElemLLVMTy, ArrPtr, IdxForGEP,
+                                              "foreach.elemptr");
   Value *ElemVal = Builder->CreateLoad(ElemLLVMTy, ElemPtr, "foreach.elem");
   Builder->CreateStore(ElemVal, ValueAlloca);
 

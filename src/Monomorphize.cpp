@@ -313,6 +313,12 @@ void substituteTypesInBody(const ExprAST *Node,
     substituteTypesInBody(AA->getIndex(), Subst);
     return;
   }
+  if (auto *Sl = dynamic_cast<const SliceExprAST *>(Node)) {
+    substituteTypesInBody(Sl->getBase(), Subst);
+    if (Sl->getStart()) substituteTypesInBody(Sl->getStart(), Subst);
+    if (Sl->getEnd()) substituteTypesInBody(Sl->getEnd(), Subst);
+    return;
+  }
   if (auto *AL = dynamic_cast<const ArrayLiteralExprAST *>(Node)) {
     for (const auto &Elem : AL->getElements())
       substituteTypesInBody(Elem.get(), Subst);

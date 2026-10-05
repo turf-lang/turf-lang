@@ -853,6 +853,15 @@ void Resolver::visitArrayAccess(ArrayAccessExprAST &Node) {
 }
 
 
+// A slice has no `operator[]` form to gather candidates for: it only applies
+// to built-in arrays (the TypeChecker reports anything else, E142).
+void Resolver::visitSlice(SliceExprAST &Node) {
+  visitChild(Node.getBase());
+  visitChild(Node.getStart());
+  visitChild(Node.getEnd());
+}
+
+
 void Resolver::visitModuleImport(ModuleImportExprAST &Node) {
   ModuleStack_.push_back(Node.getModuleName());
   visitChild(Node.getBody());

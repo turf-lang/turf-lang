@@ -171,10 +171,14 @@ Value *MethodCallExprAST::codegen() {
     const std::string &ModuleName = Var->ResolvedModuleName;
     bool IsModule = !ModuleName.empty();
     if (IsModule) {
-      // Codegen all arguments.
+      // Codegen all arguments (a `T[]` parameter takes a slice --
+      // CodegenSliceArgument()).
       std::vector<Value *> ArgVals;
-      for (auto &Arg : Args) {
-        Value *V = Arg->codegen();
+      for (size_t I = 0; I < Args.size(); ++I) {
+        const bool ToSlice =
+            ResolvedCallTarget && I < ResolvedCallTarget->Params.size() &&
+            isUnsizedArrayType(ResolvedCallTarget->Params[I].Type.get());
+        Value *V = ToSlice ? CodegenSliceArgument(Args[I].get()) : Args[I]->codegen();
         if (!V) return nullptr;
         ArgVals.push_back(V);
       }
@@ -253,43 +257,24 @@ Value *MethodCallExprAST::codegen() {
           "This is a compiler bug.");
       return nullptr;
     }
-    // Unsized-array receiver (`fn sum(arr: int[]): int` called as
-    // `arr.sum()`): mirrors FuncCallExprAST::codegen()'s identical special
-    // case for ordinary calls -- the callee's real LLVM parameter type is an
-    // opaque pointer (getLLVMType()'s unsized-array branch), not the
-    // aggregate array value Base->codegen() would load. Passing the loaded
-    // aggregate here would build an ill-typed llvm::CallInst (wrong argument
-    // type for the callee's declared parameter). TypeChecker's
-    // ufcsReceiverTypeMatches() only accepts a receiver whose base is
-    // array-typed to begin with, and UFCS call syntax's Base is always
-    // itself an addressable expression (a variable, field, or index), so
-    // codegenLValue() here has the exact same safety guarantee ordinary
-    // calls already rely on.
-    Value *ReceiverVal;
-    const TurfType *ReceiverParamTy =
-        !ResolvedCallTarget->Params.empty()
-            ? ResolvedCallTarget->Params[0].Type.get()
-            : nullptr;
-    const auto *ReceiverArrTy =
-        ReceiverParamTy ? dynamic_cast<const ::ArrayType *>(ReceiverParamTy)
-                         : nullptr;
-    if (ReceiverArrTy && ReceiverArrTy->getSize() == -1) {
-      ReceiverVal = Base->codegenLValue();
-      if (!ReceiverVal) {
-        llvm::report_fatal_error(
-            "Internal error: UFCS array receiver must be addressable. "
-            "This should have been caught by the TypeChecker.");
-        return nullptr;
-      }
-    } else {
-      ReceiverVal = Base->codegen();
-      if (!ReceiverVal)
-        return nullptr;
-    }
+    // A `T[]` receiver or argument (`fn sum(arr: int[]): int` called as
+    // `arr.sum()`) takes a slice, exactly as in an ordinary call --
+    // CodegenSliceArgument() also covers a receiver with no address of its
+    // own (`makeArr().sum()`), which used to be an internal error here.
+    const auto &Params = ResolvedCallTarget->Params;
+    auto EvalArg = [&](ExprAST *E, size_t ParamIdx) -> Value * {
+      if (ParamIdx < Params.size() &&
+          isUnsizedArrayType(Params[ParamIdx].Type.get()))
+        return CodegenSliceArgument(E);
+      return E->codegen();
+    };
+    Value *ReceiverVal = EvalArg(Base.get(), 0);
+    if (!ReceiverVal)
+      return nullptr;
     std::vector<Value *> ArgVals;
     ArgVals.push_back(ReceiverVal);
-    for (auto &Arg : Args) {
-      Value *V = Arg->codegen();
+    for (size_t I = 0; I < Args.size(); ++I) {
+      Value *V = EvalArg(Args[I].get(), I + 1);
       if (!V)
         return nullptr;
       ArgVals.push_back(V);
@@ -351,9 +336,48 @@ Value *MethodCallExprAST::codegen() {
     return nullptr;
   }
 
+  // `arr.copy()`: a new `T[]` with storage of its own (TypeChecker::
+  // visitMethodCall()). The storage is a GC heap block, because the length
+  // may only be known at run time (`a[i..j].copy()`) and a frame slot can't
+  // be sized then. It is allocated with the per-ELEMENT type descriptor a
+  // List's buffer uses, so the collector traces each element precisely: a
+  // `string[]` copy keeps its strings alive. The block's only reference is
+  // the slice's data pointer, held on the stack (the conservative scan sees
+  // it) -- once the slice is gone, the copy is garbage.
+  if (Method == "copy" && Args.empty() && isArrayType(BaseTy)) {
+    Value *Src = CodegenSliceArgument(Base.get());
+    if (!Src)
+      return nullptr;
+    Type *I64 = Type::getInt64Ty(*TheContext);
+    Type *ElemTy = getLLVMType(dynamic_cast<const ::ArrayType *>(BaseTy)->getElementType());
+    uint64_t ElemSize = TheModule->getDataLayout().getTypeAllocSize(ElemTy);
+    Value *SrcData = Builder->CreateExtractValue(Src, 0, "copy.src");
+    Value *Len = Builder->CreateExtractValue(Src, 1, "copy.len");
+    Value *Bytes = Builder->CreateMul(Len, ConstantInt::get(I64, ElemSize), "copy.bytes");
+    // Never ask for 0 bytes: an empty copy still gets a real (unused) block.
+    Value *AllocBytes = Builder->CreateSelect(
+        Builder->CreateICmpEQ(Bytes, ConstantInt::get(I64, 0)),
+        ConstantInt::get(I64, ElemSize ? ElemSize : 1), Bytes, "copy.allocbytes");
+    Value *Dst = Builder->CreateCall(
+        getOrCreateTurfRtAllocFn(),
+        {AllocBytes, getOrCreateElementTurfTypeDesc(ElemTy)}, "copy.data");
+    Builder->CreateMemCpy(Dst, MaybeAlign(8), SrcData, MaybeAlign(8), Bytes);
+    Value *Result = Builder->CreateInsertValue(PoisonValue::get(getSliceLLVMType()),
+                                               Dst, 0);
+    return Builder->CreateInsertValue(Result, Len, 1, "copy");
+  }
+
   if (Method == "length") {
     if (isArrayType(BaseTy)) {
       int ArraySize = dynamic_cast<const ::ArrayType *>(BaseTy)->getSize();
+      // A `T[]` parameter's length is the slice's second field (issue #260).
+      // Before slices it was the static Size, so this answered -1.
+      if (ArraySize < 0) {
+        Value *Slice = Base->codegen();
+        if (!Slice)
+          return nullptr;
+        return Builder->CreateExtractValue(Slice, 1, "slice.len");
+      }
       return ConstantInt::get(Type::getInt64Ty(*TheContext), ArraySize);
     }
     // For non-array types (e.g. list<T>), fall through to struct method dispatch.
@@ -375,9 +399,17 @@ Value *MethodCallExprAST::codegen() {
   }
 
   if (!StructNameStr.empty()) {
+    // A `T[]` parameter takes a slice (CodegenSliceArgument()). An instance
+    // method's Params[0] is `self`, which has no entry in Args.
+    const auto *BaseVarForSlice = dynamic_cast<const VariableExprAST *>(Base.get());
+    const size_t SliceParamOffset =
+        (BaseVarForSlice && BaseVarForSlice->IsStructName) ? 0 : 1;
     std::vector<Value *> EvaluatedArgs;
-    for (auto &Arg : Args) {
-      Value *V = Arg->codegen();
+    for (size_t I = 0; I < Args.size(); ++I) {
+      const size_t P = I + SliceParamOffset;
+      const bool ToSlice = ResolvedCallTarget && P < ResolvedCallTarget->Params.size() &&
+                           isUnsizedArrayType(ResolvedCallTarget->Params[P].Type.get());
+      Value *V = ToSlice ? CodegenSliceArgument(Args[I].get()) : Args[I]->codegen();
       if (!V)
         return nullptr;
       EvaluatedArgs.push_back(V);

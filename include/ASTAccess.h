@@ -326,6 +326,40 @@ public:
   }
 };
 
+// Range slicing: `arr[start..end]`, `arr[start..]`, `arr[..end]`, `arr[..]`.
+// A view, not a copy: the result is a `T[]` slice into the base array's own
+// storage (the same `{ ptr, i64 }` a `T[]` parameter receives). `end` is
+// exclusive, as in `0..n`; a negative bound counts from the end, as in
+// `arr[-1]`. Its own node rather than an ArrayAccessExprAST flag because
+// every pass treats an ArrayAccessExprAST as ONE element -- an lvalue slot,
+// a bounds-checked index, an `operator[]` site -- and a slice is none of
+// those.
+class SliceExprAST : public ExprAST {
+  std::unique_ptr<ExprAST> Base;
+  std::unique_ptr<ExprAST> Start; ///< null when omitted (`arr[..e]`) = 0
+  std::unique_ptr<ExprAST> End;   ///< null when omitted (`arr[s..]`) = length
+  SourceLocation Loc;             ///< the '[' token
+
+public:
+  SliceExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> Base,
+               std::unique_ptr<ExprAST> Start, std::unique_ptr<ExprAST> End)
+      : Base(std::move(Base)), Start(std::move(Start)), End(std::move(End)),
+        Loc(Loc) {}
+
+  const SourceLocation &getLoc() const { return Loc; }
+  const ExprAST *getBase() const { return Base.get(); }
+  const ExprAST *getStart() const { return Start.get(); }
+  const ExprAST *getEnd() const { return End.get(); }
+
+  llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitSlice(*this); }
+  std::unique_ptr<ExprAST> clone() const override {
+    return std::make_unique<SliceExprAST>(Loc, CloneExprAST(Base.get()),
+                                          CloneExprAST(Start.get()),
+                                          CloneExprAST(End.get()));
+  }
+};
+
 // list method call: nums.push(val)  /  nums.pop()  /  nums.length
 // Note: list<T> *declaration* is now a plain VarDeclExprAST with a
 // GenericType("list", [elemType]) — no separate ListDeclExprAST needed.

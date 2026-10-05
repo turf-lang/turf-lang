@@ -133,6 +133,13 @@ inline constexpr const char *NotCallable = "E135";
 inline constexpr const char *InvalidModuleQualifier = "E136";
 inline constexpr const char *NotAValue = "E137";
 inline constexpr const char *MissingTypeArguments = "E138";
+// Issue #260: `T[]` is a slice that only a parameter can hold.
+inline constexpr const char *UnsizedArrayPlacement = "E140";
+inline constexpr const char *ImmutableArrayWrittenThroughSlice = "E141";
+// Range slicing, `arr[a..b]`.
+inline constexpr const char *SliceOfNonArray = "E142";
+inline constexpr const char *SliceRangeOutOfBounds = "E143";
+inline constexpr const char *MutableViewOfImmutableArray = "E144";
 inline constexpr const char *ErrorPayload = "E096";
 // Pre-existing codes a raw site reuses (see above).
 inline constexpr const char *ExportMutNotSupported = "E021";
@@ -152,7 +159,7 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     {ErrCode::ArraySizeMismatch, "ArraySizeMismatchError", "Array size mismatch", SLM::ErrorCategory::ARRAY_ERROR},
     {ErrCode::ArrayTypeMismatch, "ArrayTypeMismatchError", "Array element type mismatch", SLM::ErrorCategory::ARRAY_ERROR},
     {"E005", "ForEachNonArrayError", "For each non array", SLM::ErrorCategory::ARRAY_ERROR},
-    {"E006", "ForEachUnsizedArrayError", "For each unsized array", SLM::ErrorCategory::ARRAY_ERROR},
+    {"E006", "ForEachUnsizedArrayError", "For each unsized array (retired: T[] carries its length now)", SLM::ErrorCategory::ARRAY_ERROR},
     {"E007", "ControlFlowError", "Control flow", SLM::ErrorCategory::CONTROL_FLOW},
     {"E008", "DefiniteAssignmentError", "Definite assignment", SLM::ErrorCategory::UNDECLARED_VAR},
     {"E009", "MissingReturnError", "Missing return", SLM::ErrorCategory::CONTROL_FLOW},
@@ -412,6 +419,11 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     {ErrCode::NotAValue, "NotAValueError", "Not a value", SLM::ErrorCategory::FUNCTION_SIGNATURE},
     {ErrCode::MissingTypeArguments, "MissingTypeArgumentsError", "Missing type arguments", SLM::ErrorCategory::DECLARATION},
     {"E139", "MalformedNumberError", "Malformed number", SLM::ErrorCategory::SYNTAX_ERROR},
+    {ErrCode::UnsizedArrayPlacement, "UnsizedArrayPlacementError", "Unsized array where a size is needed", SLM::ErrorCategory::ARRAY_ERROR},
+    {ErrCode::ImmutableArrayWrittenThroughSlice, "ImmutableArrayWrittenThroughSliceError", "Immutable array passed to a function that changes it", SLM::ErrorCategory::ARRAY_ERROR},
+    {ErrCode::SliceOfNonArray, "SliceOfNonArrayError", "Slicing something that isn't an array", SLM::ErrorCategory::ARRAY_ERROR},
+    {ErrCode::SliceRangeOutOfBounds, "SliceRangeOutOfBoundsError", "Slice range out of bounds", SLM::ErrorCategory::ARRAY_ERROR},
+    {ErrCode::MutableViewOfImmutableArray, "MutableViewOfImmutableArrayError", "Mutable view of an immutable array", SLM::ErrorCategory::ARRAY_ERROR},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

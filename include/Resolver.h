@@ -337,6 +337,7 @@ public:
   void visitArrayDecl(ArrayDeclExprAST &Node) override;
   void visitArrayLiteral(ArrayLiteralExprAST &Node) override;
   void visitArrayAccess(ArrayAccessExprAST &Node) override;
+  void visitSlice(SliceExprAST &Node) override;
   void visitModuleImport(ModuleImportExprAST &Node) override;
   void visitSizeOf(SizeOfExprAST &Node) override {
     // FDN-003: `sizeof(Node)` names a type -- same silent resolution as a

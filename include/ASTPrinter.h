@@ -496,6 +496,19 @@ public:
     print(const_cast<ExprAST *>(N.getIndex()), Depth_);
     ascend();
   }
+
+  void visitSlice(SliceExprAST &N) override {
+    printIndent(Depth_);
+    std::cout << "Slice" << (N.getStart() ? "" : " (from start)")
+              << (N.getEnd() ? "" : " (to end)") << "\n";
+    descend();
+    print(const_cast<ExprAST *>(N.getBase()), Depth_);
+    if (N.getStart())
+      print(const_cast<ExprAST *>(N.getStart()), Depth_);
+    if (N.getEnd())
+      print(const_cast<ExprAST *>(N.getEnd()), Depth_);
+    ascend();
+  }
   // ── Modules & misc ───────────────────────────────────────────────────────────
   void visitModuleImport(ModuleImportExprAST &N) override {
     printIndent(Depth_);

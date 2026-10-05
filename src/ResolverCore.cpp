@@ -227,6 +227,8 @@ static bool WritesSelfValueStorage(const ExprAST *Target,
       E = FA->getBase();
     else if (const auto *AA = dynamic_cast<const ArrayAccessExprAST *>(E))
       E = AA->getBase();
+    else if (const auto *Sl = dynamic_cast<const SliceExprAST *>(E))
+      E = Sl->getBase(); // `self.data[1..][0] = v` writes self.data
     else
       break;
   }
@@ -261,6 +263,10 @@ static bool WritesSelfValueStorage(const ExprAST *Target,
         for (const StructField &F : Inner->getFields())
           if (F.Name == FA->getFieldName()) { FieldTy = F.Type.get(); break; }
       Slot = FieldTy;
+    } else if (dynamic_cast<const SliceExprAST *>(Next)) {
+      if (!Slot->isArray())
+        return false;
+      // A view of the same elements: Slot stays an array of the same type.
     } else {
       return false;
     }

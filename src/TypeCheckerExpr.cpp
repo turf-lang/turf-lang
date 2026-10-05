@@ -45,6 +45,9 @@ const VariableExprAST *findRootVariable(const ExprAST *Base) {
     } else if (auto *ArrAccess =
                    dynamic_cast<const ArrayAccessExprAST *>(Base)) {
       Base = ArrAccess->getBase();
+    } else if (auto *Sl = dynamic_cast<const SliceExprAST *>(Base)) {
+      // `nums[1..][0] = v` writes nums itself: a slice is a view.
+      Base = Sl->getBase();
     } else if (auto *FieldAccess =
                    dynamic_cast<const FieldAccessExprAST *>(Base)) {
       Base = FieldAccess->getBase();
@@ -552,6 +555,19 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
 
   TurfTypePtr LhsTy = getType(Node.getLHS());
   TurfTypePtr RhsTy = getType(Node.getRHS());
+
+  // E144: rebinding a `mut` slice variable (`view = other[1..];`) to an
+  // immutable array would let later writes through `view` change it.
+  if (const auto *LV = dynamic_cast<const VariableExprAST *>(Node.getLHS())) {
+    const auto *LArr = dynamic_cast<const ArrayType *>(LhsTy.get());
+    if (LArr && LArr->getSize() < 0 && LV->getResolvedSymbol() &&
+        !LV->getResolvedSymbol()->IsImmutable &&
+        checkMutableViewSource(Node.getRHS(), Node.getLoc(), LV->getName())) {
+      setType(&Node, nullptr);
+      return;
+    }
+  }
+
   const VariableExprAST *LHSVar = findRootVariable(Node.getLHS());
   // findRootVariable() unwraps FieldAccessExprAST/ArrayAccessExprAST down to
   // the base variable (e.g. 'u' in 'u.age = ...'), which is exactly what's
@@ -1164,6 +1180,16 @@ void TypeChecker::visitCast(CastExprAST &Node) {
   // first, the dynamic_cast below could never match, silently defeating
   // this whole check.
   TurfTypePtr DestTy = Node.getDestTypePtr();
+  // E140 (issue #260): nothing converts TO a slice -- a `T[N]` becomes one
+  // only by being passed to a `T[]` parameter.
+  if (checkUnsizedArrayPlacement(
+          DestTy.get(), /*AllowAtTop=*/false, Node.getLoc(),
+          "A conversion",
+          "There is no conversion to an unsized array. Pass the array "
+          "straight to the 'T[]' parameter; it is accepted as it is.")) {
+    setType(&Node, nullptr);
+    return;
+  }
   if (auto *NT = dynamic_cast<const NamedType *>(DestTy.get())) {
     if (GlobalSymbolTable) {
       if (auto Resolved = GlobalSymbolTable->LookupType(NT->getName()))

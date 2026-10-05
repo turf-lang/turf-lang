@@ -222,6 +222,7 @@ public:
   TURF_SPAN_LOC(visitArrayDecl, ArrayDeclExprAST)
   TURF_SPAN_LOC(visitArrayLiteral, ArrayLiteralExprAST)
   TURF_SPAN_LOC(visitArrayAccess, ArrayAccessExprAST)
+  TURF_SPAN_LOC(visitSlice, SliceExprAST)
   TURF_SPAN_LOC(visitSizeOf, SizeOfExprAST)
 #undef TURF_SPAN_LOC
 

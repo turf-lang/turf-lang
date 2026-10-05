@@ -180,6 +180,11 @@ public:
     visitChild(Node.getBase());
     visitChild(Node.getIndex());
   }
+  void visitSlice(SliceExprAST &Node) override {
+    visitChild(Node.getBase());
+    visitChild(Node.getStart());
+    visitChild(Node.getEnd());
+  }
 };
 
 /// Inserts the node ID of every node it reaches. One override per node kind,

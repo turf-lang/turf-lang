@@ -43,20 +43,7 @@ public:
     Category_ = SLM::ErrorCategory::ARRAY_ERROR;
   }
 };
-// for-each target is an unsized array parameter (`T[]`), which carries no
-// length at runtime -- there's no safe way to bound the loop.
-class ForEachUnsizedArrayError : public TurfError {
-public:
-  ForEachUnsizedArrayError(SourceLocation Loc, const std::string &GotType)
-      : TurfError(Loc,
-                  Colors::BRIGHT_RED + "for-each requires a known array size!\n" +
-                      Colors::RESET + "  '" + Colors::CYAN + GotType + Colors::RESET +
-                      "' is an unsized array parameter, which carries no "
-                      "length at runtime.",
-                  "Pass a concrete-size array, or add a separate 'len: int' "
-                  "parameter and use an ordinary for-loop instead.") {
-    Category_ = SLM::ErrorCategory::ARRAY_ERROR;
-  }
-};
+// (ForEachUnsizedArrayError, E006, is gone: a `T[]` parameter carries its
+// length since issue #260, so for-each over one is legal.)
 
 #endif
