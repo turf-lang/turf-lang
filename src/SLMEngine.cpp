@@ -113,6 +113,21 @@ bool SLMEngine::initialize(const std::string &modelPath) {
   return true;
 }
 
+namespace {
+/// Shrinks `tokens[0..n)` to at most `n_batch` entries by dropping tokens from
+/// the middle: the head is kept, plus a tail of min(1024, n_batch / 4) tokens
+/// (where closing rules / the ChatML turn markers live). Returns the new count.
+int clampMiddleDrop(std::vector<llama_token> &tokens, int n, int n_batch) {
+  if (n <= n_batch)
+    return n;
+  const int tail = std::min(1024, n_batch / 4);
+  const int head = n_batch - tail;
+  std::copy(tokens.begin() + (n - tail), tokens.begin() + n,
+            tokens.begin() + head);
+  return n_batch;
+}
+} // namespace
+
 /**
  * @brief Generates an AI suggestion based on the provided prompt.
  *
@@ -169,13 +184,7 @@ std::string SLMEngine::generateSuggestion(const std::string &systemPrompt,
     // llama-tokenize, issue #267). The kept tail covers the rules with room
     // to spare; what is dropped is the end of the category doc, which
     // fetchSuggestion() places after the more specific per-code page.
-    if (n_sys > n_batch) {
-      const int tail = std::min(1024, n_batch / 4);
-      const int head = n_batch - tail;
-      std::copy(sysTokens.begin() + (n_sys - tail), sysTokens.begin() + n_sys,
-                sysTokens.begin() + head);
-      n_sys = n_batch;
-    }
+    n_sys = clampMiddleDrop(sysTokens, n_sys, n_batch);
 
     if (n_sys > 0) {
       sysTokens.resize(n_sys);
@@ -204,8 +213,9 @@ std::string SLMEngine::generateSuggestion(const std::string &systemPrompt,
     }
     return "";
   }
-  if (n_user > n_batch)
-    n_user = n_batch;
+  // Same middle-drop as the system prompt: the END of the user turn holds
+  // `<|im_end|><|im_start|>assistant`, which the model needs to answer at all.
+  n_user = clampMiddleDrop(userTokens, n_user, n_batch);
   userTokens.resize(n_user);
 
   int total_tokens = CachedSystemTokens.size() + n_user;
