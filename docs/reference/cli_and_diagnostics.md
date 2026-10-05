@@ -133,7 +133,9 @@ $ turf check hello.tr
 
 **`turf dump <what> <file.tr>`** prints an intermediate form without producing an executable, and a file with no `main` (a module) dumps the same as a program. `<what>` is `ast`, `resolved`, `typechecked`, `modules`, `symbols` or `instantiations`, which are `--dump-ast`, `--dump-resolved`, `--dump-typechecked`, `--dump-modules`, `--dump-resolver-symbols` and `--dump-instantiations`.
 
-**`turf fmt <file.tr>`** prints the formatted file to stdout, and `turf fmt --write <file.tr>...` rewrites files in place (each is attempted, and the exit status is the first failure's). Without `--write` exactly one file is accepted, because the output goes to stdout. The formatter re-derives **indentation** from the bracket structure, strips trailing whitespace, collapses runs of blank lines and ends the file with one newline. It never changes anything else on a line. It is idempotent, and it does not normalize spacing inside a line: `fn   main( ):int{return   0;}` is left exactly as written.
+**`turf fmt <file.tr>`** prints the formatted file to stdout, and `turf fmt --write <path>...` rewrites in place the files that differ (a file that is already formatted is not touched). `turf fmt --check <path>...` changes nothing: it names each file that would change (`would reformat src/main.tr`) and exits 1 if there is any, which is what CI wants. A path is a file or a directory (every `.tr` file under it, not hidden directories and not a `build/`); `--exclude <path>` skips a file or a directory. With no path, inside a project, `--write` and `--check` apply to the project's `src/` and `tests/`; one of the two is required then, because the output would otherwise be many files at once. Without `--write` or `--check` exactly one file is accepted, because the output goes to stdout. A path that does not exist is an error, never skipped. Every file is attempted, and the exit status is 1 if any failed.
+
+The formatter re-derives **indentation** from the bracket structure, strips trailing whitespace, collapses runs of blank lines and ends the file with one newline. It never changes anything else on a line, and it does not normalize spacing inside a line: `fn   main( ):int{return   0;}` is left exactly as written. These are checked, not assumed: before a result is written or reported, `turfc` verifies that no non-whitespace byte changed, that the lexer reads the same tokens from both texts, and that formatting the result again changes nothing. A file that fails a check is left alone and reported as a formatter bug. A file with a lexical error (an unterminated string, a malformed number) cannot be formatted and is reported with the lexer's reason; the other files are still done.
 
 ```
 $ turf fmt messy.tr
@@ -145,7 +147,10 @@ fn main(): int {
 
 }
 $ turf fmt a.tr b.tr
-turf: fmt: without --write the formatted text goes to stdout, so exactly one file is accepted; pass --write to format several in place
+turf: fmt: without --write or --check the formatted text goes to stdout, so exactly one file is accepted; pass --write to reformat files in place, or --check to only report
+$ turf fmt --check src
+would reformat src/main.tr
+Would reformat 1 file; 3 already formatted.
 ```
 
 **`turf migrate pub [--write] <files…>`** adds `pub` to every top-level declaration and struct field, which keeps the pre-2.0 behaviour where everything a module declared was importable (see [Functions & Modules](functions_and_modules.md)). Without `--write` it only reports what it would change:
@@ -309,7 +314,7 @@ The interface covers exactly what `turf` relies on: the flags it passes (`--chec
   ```
 
   Given that file, `turfc --package-graph build/package-graph.json src/main.tr -o direct` builds the program by itself, and a bad graph is one line naming the file, exit 1 (`Error: package graph bad1.json: "format" must be 1 (this turfc reads package-graph format 1)`). Without the flag `turfc` is in single-file mode. In a package build the file you name must be inside the root package's `src` (otherwise: `Error: package graph …: the file being compiled (…) is not inside the root package's src …`); which file is the program is up to the caller, and `turf` always passes `src/main.tr`.
-- `turfc --format [--write] <file.tr>`, `turfc --migrate=pub [--write] <files…>` and `turfc --explain E0NN` are what `turf fmt`, `turf migrate` and `turf explain` run.
+- `turfc --format [--write | --check] <file.tr>...`, `turfc --migrate=pub [--write] <files…>` and `turfc --explain E0NN` are what `turf fmt`, `turf migrate` and `turf explain` run.
 
 **`turf` never rewrites a compiler diagnostic.** A tool that runs `turf check` or `turfc --check` sees the same text and the same `[E0NN]` codes either way, and can match on them. The footer of a coded diagnostic still spells the command as ``Run `turf --explain E0NN` ``, which works through the passthrough.
 

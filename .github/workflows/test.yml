@@ -168,6 +168,12 @@ jobs:
       # tests importing its own modules, a dependency and a helper.
       - name: turf test smoke test (conventions, tests/ required, project tests)
         run: CI=1 ./scripts/test_cmd_smoke.sh
+      # REL-002 stage 2: `turf fmt` / `turfc --format`. Checks the three modes
+      # and their statuses, that one bad file does not stop the rest, and --
+      # on a copy of the repository's own ~1200 files -- that a second pass
+      # finds nothing to do and no result is refused as a formatter bug.
+      - name: turf fmt smoke test (modes, verification, idempotence on the repo's files)
+        run: CI=1 ./scripts/fmt_smoke.sh
       # LEC-001 stage 6: git dependencies -- the fetch cache, turf.lock pinning
       # commit and tree hash, --offline/--locked, fetch/update/add --git. Every
       # upstream is a local bare repository the script builds, so there is no

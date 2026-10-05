@@ -1247,7 +1247,7 @@ suite in its repo green against the release candidate.
 **Non-goals** debugger adapter (gdb works via `-g`), doc generator (FUTURE
 F-11c), REPL.
 
-**Status 2026-10-06: IN PROGRESS.** *Stage 1, `turf test`: done, uncommitted.*
+**Status 2026-10-06: IN PROGRESS.** *Stage 1, `turf test`: done (`dfd0068`, `96f3379`, `8ddab67`).*
 Owner rules: a project without `tests/` is an error, and the command exists on
 both `turfc` and `turf`. `turfc --test [<dir>]` (`TestRunner.cpp`,
 `TestExpectations.cpp`) is the one implementation of the conventions; `turf test`
@@ -1258,9 +1258,19 @@ identical per-test results. The diagnostic policy it ported had a check that nev
 fired (an unpinned `fail_*` test passed); it is now enforced and no existing test
 trips it. Open from the stage: the owner's confirmation of F-TEST-2/3
 (`FREEZE.md` §6.22), a name filter, `turfc --test` on Windows (REL-008).
-*Stages 2 (`turf fmt` project mode, `--check`, the idempotence and token-stream
-guarantees, CI) and 3 (`turf-lsp` on the SMP-001 facade, the VS Code extension)
-not started.* Record: `docs/development/changes/REL-002.md`.
+*Stage 2, `turf fmt`: implemented, uncommitted.* `turfc --format [--write |
+--check] <files>...` verifies every result (only whitespace changed, same token
+stream from the real lexer, idempotent) and leaves a file it cannot vouch for
+alone; a source with a lexical error is declined instead of ending the process;
+`turf fmt` takes files and directories, `--exclude`, and formats `src/` and
+`tests/` of a project (driver interface 1.4); `scripts/fmt_smoke.sh` and a
+formatter unit test are in CI. On the repo's own 1244 files: a second pass is
+clean, nothing refused as a bug, and the whole suite passes on the formatted
+copy. **Open (owner):** 142 repo files are not formatted yet and 13 `fail_*`
+tests cannot be, so the roadmap's "`turf fmt --check` clean on the repo" CI gate
+waits on a whitespace-only reformat commit.
+*Stage 3 (`turf-lsp` on the SMP-001 facade, the VS Code extension) not started.*
+Record: `docs/development/changes/REL-002.md`.
 
 ---
 

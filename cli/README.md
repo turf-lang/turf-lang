@@ -27,7 +27,7 @@ is forwarded the same way.
 | `turf run <file.tr> [flags] [-- args]` | compile to a temporary executable, run it, delete it; exits with the program's status |
 | `turf check <file.tr>` | every diagnostic a compile would print, no output file (`turfc --check`) |
 | `turf dump <what> <file.tr>` | `ast`, `resolved`, `typechecked`, `modules`, `symbols` or `instantiations`, no output file |
-| `turf fmt [--write] <files...>` | `turfc --format` |
+| `turf fmt [--write \| --check] [--exclude <path>] [<files or dirs>...]` | `turfc --format [--write \| --check] <files...>`; with no path in a project, its `src/` and `tests/`. turf picks the files, turfc formats and verifies |
 | `turf explain <code>` | `turfc --explain` |
 | `turf migrate <name> [--write] <files...>` | `turfc --migrate=<name>` (`pub`) |
 | `turf version`, `turf help [command]` | |
