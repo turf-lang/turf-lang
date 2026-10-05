@@ -53,8 +53,11 @@ layout and rules). Run these anywhere inside one; `turf` walks up to the nearest
 | `turf update [name...]` | re-resolve the named git dependencies (all of them with no names) and write the new commits to `turf.lock`; the only command that moves a pin |
 
 `-o` and `--package-graph` are refused in a project build: `turf` owns both, as
-it does `--offline` and `--locked`, which are never passed to `turfc`. `test` is
-REL-002 and says so and exits 2. `publish` is reserved: there is no registry in
+it does `--offline` and `--locked`, which are never passed to `turfc`. `test`
+(REL-002) checks that `tests/` exists, writes the graph with the root package's
+`"tests"` directory in it (the only command that does) and runs
+`turfc --test tests --package-graph …` from the project root; how a test is judged
+is `turfc`'s, never `turf`'s. `publish` is reserved: there is no registry in
 2.0. The pre-2.0 registry-model code (semver resolver, checksums, archives,
 `install`/`update`/`publish`) is deleted; it is in git history (`350acd8`).
 

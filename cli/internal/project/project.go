@@ -72,6 +72,9 @@ type GitPin struct {
 // Src is the package's source root.
 func (p *Package) Src() string { return filepath.Join(p.Dir, "src") }
 
+// Tests is tests/: the package's test programs, run by `turf test`.
+func (p *Package) Tests() string { return filepath.Join(p.Dir, "tests") }
+
 // RootModule is src/<name>.tr: the file that makes a package a library and the
 // only module another package can import.
 func (p *Package) RootModule() string { return filepath.Join(p.Src(), p.Name+".tr") }
@@ -419,11 +422,20 @@ func (g *Graph) CheckStdlibNames(std map[string]bool) error {
 // package keys are sorted (encoding/json sorts map keys) and each dependency
 // list keeps the manifest's declaration order, so rebuilding writes identical
 // bytes and the file is safe to diff and to commit to a cache key.
-func (g *Graph) JSON() ([]byte, error) {
+func (g *Graph) JSON() ([]byte, error) { return g.json(false) }
+
+// JSONWithTests is JSON plus the root package's tests/ directory, which is what
+// `turfc --test` needs and no other compiler run should be given: a turfc older
+// than driver interface 1.3 rejects the key as unknown, so `turf build` must
+// keep writing the graph without it.
+func (g *Graph) JSONWithTests() ([]byte, error) { return g.json(true) }
+
+func (g *Graph) json(withTests bool) ([]byte, error) {
 	type pkg struct {
 		Src         string   `json:"src"`
 		Deps        []string `json:"deps"`
 		AllowUnsafe bool     `json:"allow_unsafe"`
+		Tests       string   `json:"tests,omitempty"`
 	}
 	out := struct {
 		Format   int            `json:"format"`
@@ -436,6 +448,11 @@ func (g *Graph) JSON() ([]byte, error) {
 			deps = []string{}
 		}
 		out.Packages[name] = pkg{Src: p.Src(), Deps: deps, AllowUnsafe: p.AllowUnsafe}
+		if withTests && p == g.Root {
+			e := out.Packages[name]
+			e.Tests = p.Tests()
+			out.Packages[name] = e
+		}
 	}
 	b, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {

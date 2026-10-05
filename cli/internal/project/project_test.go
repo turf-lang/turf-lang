@@ -304,6 +304,48 @@ func TestJSONIsDeterministicAndShaped(t *testing.T) {
 	}
 }
 
+// The "tests" key is only for `turfc --test`: a turfc older than driver
+// interface 1.3 rejects it as unknown, so JSON() (what build, run and check
+// write) must never carry it, and JSONWithTests() carries it for the root alone.
+func TestJSONWithTestsNamesOnlyTheRootsTests(t *testing.T) {
+	root := layout(t,
+		pkgSpec{dir: "app", name: "app", main: true, deps: "lib = " + dep("../lib")},
+		pkgSpec{dir: "lib", name: "lib", lib: true},
+	)
+	g, err := build(t, root, "app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	type shape struct {
+		Packages map[string]struct {
+			Tests string `json:"tests"`
+		}
+	}
+	read := func(b []byte, err error) shape {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var s shape
+		if err := json.Unmarshal(b, &s); err != nil {
+			t.Fatalf("not JSON: %v\n%s", err, b)
+		}
+		return s
+	}
+
+	plain := g.JSON
+	if b, _ := plain(); strings.Contains(string(b), `"tests"`) {
+		t.Errorf("JSON() must not name tests/:\n%s", b)
+	}
+	with := read(g.JSONWithTests())
+	if want := filepath.Join(root, "app", "tests"); with.Packages["app"].Tests != want {
+		t.Errorf("root tests = %q, want %q", with.Packages["app"].Tests, want)
+	}
+	if with.Packages["lib"].Tests != "" {
+		t.Errorf("a dependency must not get a tests key, got %q", with.Packages["lib"].Tests)
+	}
+}
+
 func TestCheckStdlibNames(t *testing.T) {
 	std := map[string]bool{"list": true, "io": true}
 	root := layout(t,

@@ -21,3 +21,9 @@ type Interface struct {
 // only together with a turfc that raised its own. 1.1 is the package graph
 // (`--package-graph`, LEC-001 stage 4), which project builds pass.
 var Required = Interface{Major: 1, Minor: 1}
+
+// RequiredForTest is what `turf test` additionally needs: `turfc --test` and the
+// package graph's "tests" key (REL-002) arrived in interface 1.3. It is checked
+// by `turf test` alone, not by the handshake every command runs, so a turfc
+// that predates it still serves build, run and check.
+var RequiredForTest = Interface{Major: 1, Minor: 3}

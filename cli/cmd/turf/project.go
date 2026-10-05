@@ -90,6 +90,13 @@ func loadRootManifest() (*manifest.Manifest, int) {
 // name check have passed, so a build that fails for another reason does not
 // leave turf.lock half updated.
 func withProject(nf netFlags, fn func(p *projectBuild) int) int {
+	return withProjectGraph(nf, false, fn)
+}
+
+// withProjectGraph is withProject, and withTests also puts the root package's
+// tests/ directory in the graph it writes (only `turf test` asks: see
+// Graph.JSONWithTests for why no other command may).
+func withProjectGraph(nf netFlags, withTests bool, fn func(p *projectBuild) int) int {
 	m, code := loadRootManifest()
 	if code != 0 {
 		return code
@@ -126,7 +133,11 @@ func withProject(nf netFlags, fn func(p *projectBuild) int) int {
 			return failf("%v", err)
 		}
 
-		data, err := g.JSON()
+		render := g.JSON
+		if withTests {
+			render = g.JSONWithTests
+		}
+		data, err := render()
 		if err != nil {
 			return failf("cannot render the package graph: %v", err)
 		}
