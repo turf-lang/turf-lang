@@ -15,6 +15,8 @@ INCORRECT:
     }
 
 CORRECT:
+    struct Box { val: int }
+
     fn good(b: &?Box): int {
         if b != null {
             return b.val;        // b is known non-null inside the check

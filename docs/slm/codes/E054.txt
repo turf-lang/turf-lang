@@ -19,6 +19,10 @@ CAUSE:
      StaticMethodCalledOnInstanceError for that specific case).
 
 CORRECT METHOD CALL SYNTAX:
+    struct Counter {
+        val: int
+    }
+
     fn Counter.increment(): void {
         self.val = self.val + 1;
     }

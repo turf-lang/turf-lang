@@ -6,8 +6,11 @@ CAUSE:
   isn't a real keyword at all -- almost always a typo of one.
 
 CORRECT:
-    if x > 0 {
-        return x;
+    fn positive(x: int): int {
+        if x > 0 {
+            return x;
+        }
+        return 0;
     }
 
 INCORRECT:

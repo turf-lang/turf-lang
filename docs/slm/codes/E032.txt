@@ -9,11 +9,11 @@ CAUSE:
 
 CORRECT SYNTAX (two options):
     // Option 1: use it fully qualified, no import needed for this form
-    mut l: list::List<int> = list::List::default();
+    mut a: list::List<int> = list::List::default();
 
     // Option 2: bring the bare name into scope with an on-demand import
     import list::List;
-    mut l: List<int> = List::default();
+    mut b: List<int> = List::default();
 
 INCORRECT:
     mut l: List<int> = List::default();

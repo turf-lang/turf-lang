@@ -32,7 +32,6 @@ COMMON SYNTAX ERRORS:
      if x > 0 then { }           // ERROR: there is no 'then' keyword at all;
                                   // block form uses '{' directly
      if x > 0 { } elif x < 0 { } // ERROR: use 'elseif' (one word), not 'elif'
-                                  // or 'else if' (two words)
      mut x int = 5;              // ERROR: missing ':' between name and type
      mut x: int 5;                // ERROR: missing '=' before the value
      mut x: int = 5               // ERROR: missing terminating ';'

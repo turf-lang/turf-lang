@@ -16,8 +16,12 @@ INCORRECT:
     for { ... }                  // expected a loop variable name after 'for'
 
 CORRECT:
-    mut count: int = 5;
-    fn add(a: int): int { ... }
+    fn add(a: int): int { return a + 1; }
+
+    fn main(): int {
+        mut count: int = 5;
+        return add(count) - 6;
+    }
 
 FIX:
   Give it a name, or rename an identifier that collides with a reserved word.

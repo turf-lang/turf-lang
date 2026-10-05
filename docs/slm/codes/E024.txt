@@ -13,6 +13,21 @@ EXAMPLE:
     import shapes::area;
     import geometry::area;   // ERROR: 'area' now means two different things
 
+CORRECT (import the modules and qualify every call):
+    // shapes.tr
+    pub fn area(): int { return 1; }
+
+    // geometry.tr
+    pub fn area(): int { return 2; }
+    pub fn perimeter(): int { return 3; }
+
+    // main.tr
+    import shapes;
+    import geometry::[perimeter];
+    fn main(): int {
+        return shapes::area() + geometry::area() + perimeter() - 6;
+    }
+
 FIX:
   Either qualify one (or both) of the calls explicitly instead of relying
   on the bare on-demand import:

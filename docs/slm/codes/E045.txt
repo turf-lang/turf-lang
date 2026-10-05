@@ -10,6 +10,16 @@ CAUSE:
   on an already-existing instance of the same struct.
 
 CORRECT SYNTAX:
+    struct Point {
+        x: int,
+        y: int
+    }
+
+    fn Point.new(x: int, y: int): void {
+        self.x = x;
+        self.y = y;
+    }
+
     mut p: Point = Point::new(1, 2);      // '::' constructs a NEW instance
     mut d: Point = Point::default();
 

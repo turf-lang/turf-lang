@@ -7,14 +7,25 @@ CAUSE:
 
 INCORRECT:
     fn add(a: int, b: int) int { return a + b; }   // needs `:` before the return type
-    fn greet(name string) { }                      // should be `name: string`
+    fn greet(name string): void { }                // should be `name: string`
     struct User { age int }                        // should be `age: int`
 
 CORRECT:
     fn add(a: int, b: int): int { return a + b; }
-    fn greet(name: string) { }
+    fn greet(name: string): void { }
     struct User { age: int }
-    compare x { otherwise: { ... } }
+
+    fn main(): int {
+        mut x: int = 1;
+        compare x {
+            matches 1:
+                x = 2;
+            done
+            otherwise:
+                x = 3;
+        }
+        return 0;
+    }
 
 FIX:
   Add the `:` the message points at. The commonest case is the colon before a

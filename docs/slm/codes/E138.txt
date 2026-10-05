@@ -11,9 +11,19 @@ INCORRECT:
     fn Box.get(): T { ... }                 // method of a generic struct without <T>
 
 CORRECT:
-    mut b: Box<int> = Box::default();
-    mut names: List<string> = List::default();
-    fn<T> Box.get(): T { ... }
+    import list::List;
+
+    struct Box<T> { v: T }
+
+    fn<T> Box.get(): T {                    // the method repeats the struct's <T>
+        return self.v;
+    }
+
+    fn main(): int {
+        mut b: Box<int> = Box::default();
+        mut names: List<string> = List::default();
+        return b.get();
+    }
 
 FIX:
   Write the type arguments: `Box<int>`, `List<string>`; declare generic methods as

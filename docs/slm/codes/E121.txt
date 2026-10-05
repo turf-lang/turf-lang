@@ -15,4 +15,10 @@ WORKAROUND:
   A small change near the reported line often steps around it: name an intermediate
   value with `mut`, add an explicit type annotation.
 
+CORRECT (the workaround, written out):
+    fn main(): int {
+        mut total: int = 2 + 3;      // a named, typed intermediate value
+        return total - 5;
+    }
+
 RELATED: none. Do not treat the user's code as wrong when this code appears.

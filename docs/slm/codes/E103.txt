@@ -11,6 +11,17 @@ CAUSE:
     - a declaration keyword in the wrong place: a top-level `mut x: int = 5;` outside
       any function is not accepted (share a constant across files with `export immut`).
 
+CORRECT:
+    export immut LIMIT: int = 5;       // a constant shared across files: `export immut`
+
+    fn main(): int {
+        mut x: int = 5 + 1;            // every operand present
+        do {
+            x = x - 1;
+        } while (x > 0);               // one `;` after the loop
+        return x;
+    }
+
 FIX:
   Delete the stray token or add what was supposed to be there. If the highlighted
   spot looks fine, check the line above: an unclosed bracket earlier is often what

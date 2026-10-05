@@ -13,6 +13,16 @@ INCORRECT:
     // a local list.tr exists next to main.tr, and the standard library has list
     import list;        // ERROR: Module 'list' is ambiguous: 2 files answer
 
+CORRECT (the local file has a name no other module has):
+    // my_list.tr
+    pub fn size(): int { return 3; }
+
+    // main.tr
+    import my_list;
+    fn main(): int {
+        return my_list::size() - 3;
+    }
+
 FIX:
   A local file that collides with a standard-library module: rename the local
   file (e.g. `my_list.tr`) and import it by the new name -- the standard

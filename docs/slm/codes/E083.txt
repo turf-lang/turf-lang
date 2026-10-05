@@ -13,6 +13,12 @@ INCORRECT:
     }
 
 CORRECT:
+    import io;
+
+    fn cleanup(): void {
+        io::printline("done");
+    }
+
     fn main(): int {
         defer cleanup();
         return 5;

@@ -21,7 +21,12 @@ CAUSE:
 CORRECT (declared in the SAME module that owns one of the operands):
     // geometry.tr:
     struct Vec2 { x: int, y: int }
-    operator +(a: Vec2, b: Vec2): Vec2 { ... }
+    operator +(a: Vec2, b: Vec2): Vec2 {
+        mut r: Vec2 = Vec2::default();
+        r.x = a.x + b.x;
+        r.y = a.y + b.y;
+        return r;
+    }
 
 INCORRECT (declared somewhere that owns neither type):
     import a_module::A;

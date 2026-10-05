@@ -13,10 +13,16 @@ INCORRECT:
     }
 
 CORRECT (stack headers to share one body):
+    mut day: int = 3;
+    mut n: int = 0;
     compare day {
         matches 1:
-        matches 7: ... done          // 1 or 7
-        matches 2: ... done
+        matches 7:                   // 1 or 7
+            n = 1;
+        done
+        matches 2:
+            n = 2;
+        done
     }
 
 FIX:

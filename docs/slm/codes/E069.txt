@@ -21,17 +21,18 @@ CAUSE:
   even for a long chain.
 
 WHAT IS NOT AN EDGE (does NOT trigger this error):
-  - A pointer field of any kind: `T*` (raw), `&T` (non-null reference),
-    `&?T` (nullable reference). All three are a fixed one-word size
-    regardless of what they point to, which is exactly why they are the
-    correct way to write a real recursive data structure (linked list,
-    tree, etc.) -- `struct Node { next: Node* }` is fine and stays fine.
-  - `string`, `ptr`, and any other type that is itself pointer-shaped.
+  - A reference field: `&T` (non-null reference), `&?T` (nullable
+    reference). Both are a fixed one-word size regardless of what they
+    point to, which is exactly why they are the correct way to write a
+    real recursive data structure (linked list, tree, etc.). A raw `T*`
+    breaks the cycle too, but a raw pointer outside `unsafe` is its own
+    error (E130), so a struct field is written `&?T`, not `T*`.
+  - `string` and any other type that is itself pointer-shaped.
 
-CORRECT (pointer breaks the cycle):
+CORRECT (a reference breaks the cycle):
     struct Node {
         value: int,
-        next: Node*     // fixed size -- always legal
+        next: &?Node    // fixed size -- always legal, and may be null
     }
 
 INCORRECT (rejected):
@@ -48,7 +49,7 @@ INCORRECT (rejected):
     //   Note: field 'B::a' has type 'A' (line N, col N)
 
 WHAT THIS ERROR IS NOT:
-  - Not about pointer/reference fields at all -- `next: Node*` is the
+  - Not about reference fields at all -- `next: &?Node` is the
     INTENDED, unaffected way to write self-referential data. Do not "fix"
     this error by making default-value construction depth-limited or by
     special-casing the pointee's initialization; the cycle in the TYPE
@@ -59,6 +60,6 @@ WHAT THIS ERROR IS NOT:
 
 FIX:
   Change exactly ONE field anywhere in the reported cycle from holding the
-  struct by value to holding a pointer or reference to it (`T*`, `&T`, or
-  `&?T`) -- whichever fits how that field is read/written elsewhere. The
+  struct by value to holding a reference to it (`&T`, or `&?T` when it may
+  be null) -- whichever fits how that field is read/written elsewhere. The
   rest of the cycle's fields do not need to change.

@@ -10,9 +10,11 @@ INCORRECT (reports E056 or E025):
     mut bad: int = math::power(true, 2);
 
 VALID:
-    math::power(int, int)       -> int
-    math::power(int, double)    -> double
-    math::power(double, int)    -> double
-    math::power(double, double) -> double
+    import math;
+
+    mut a: int = math::power(2, 3);          // int, int -> int
+    mut b: double = math::power(2, 0.5);     // int, double -> double
+    mut c: double = math::power(2.0, 3);     // double, int -> double
+    mut d: double = math::power(2.0, 0.5);   // double, double -> double
 
 SEE: E056 (wrong argument type to a function), E025 (no matching module overload).

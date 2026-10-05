@@ -21,6 +21,10 @@ CORRECT FIELD ACCESS SYNTAX:
         password: string
     }
 
+    fn User.new(password: string): void {
+        self.password = password;
+    }
+
     mut u: User = User::new("secret");
     mut pw: string = u.password;   // read
     u.password = "new-secret";     // write

@@ -1,51 +1,38 @@
 TURF E079 -- GENERIC INSTANTIATION DEPTH EXCEEDED:
 
 CAUSE:
-  Turf's generics are monomorphized (TYPE-002): a distinct compiled copy
-  is generated per distinct tuple of concrete type arguments a generic
-  function/method/struct is ever used with. The monomorphizer caps the LENGTH
-  of a chain of instantiation requests (each one made while instantiating the
-  previous) at Monomorphize::kMaxInstantiationDepth (64) rather than run to
-  real exhaustion, and the total number of instantiations at
-  kMaxTotalInstantiations (4096) as a backstop for a generic that fans out.
+  A generic function or method is compiled once per distinct type it is used with
+  (`wrap<int>`, `wrap<&int>`, ...). This one keeps asking for a NEW type at every
+  level of its own recursion, so the chain never reaches a copy that already
+  exists and the compiler stops it at 64 levels (or 4096 instantiations in all).
+  The usual shape is a recursive call whose argument is built AROUND the type
+  parameter (`&x`, a `Box<T>`) instead of being a `T`:
 
-  This fires when a chain of instantiation requests never bottoms out --
-  each request asks for a new, distinct type-argument tuple, so the
-  monomorphizer never reaches a cache hit and keeps cloning + substituting
-  forever. Concretely: a generic that calls/constructs itself with a type
-  that strictly grows at every level, e.g.:
-
-    fn<T> wrap(x: T) {
-        wrap(Box { val: x });   // wrap<T> -> wrap<Box<T>> -> wrap<Box<Box<T>>> -> ...
+    fn<T> wrap(x: &T): int {
+        return wrap(&x);        // wrap<int> -> wrap<&int> -> wrap<&&int> -> ...
+    }
+    fn main(): int {
+        mut v: int = 1;
+        return wrap(&v);
     }
 
-  Each instantiation is a genuinely DIFFERENT type tuple (Box<T> != T), so
-  InstantiationCache::contains() (Monomorphize.h) never returns true for
-  it, and the request never resolves to an already-compiled copy the way a
-  finite, cache-hitting recursive generic would.
+  The message shows the chain, `wrap<int> -> wrap<&int> -> wrap<&&int> ...`: the
+  type that starts growing is near its START.
 
-DIAGNOSTIC SHAPE:
-  The primary location is the outermost request in YOUR code. The real
-  request chain (not every instantiation the compiler has made) is rendered
-  in traversal order, with very long names clipped and the middle of a long
-  chain elided (`chain: wrap<int> ->
-  wrap<Box<int>> -> wrap<Box<Box<int>>> -> ...`), the same convention as
-  E069 (StructLayoutCycleError)'s cycle path -- show the whole chain, not
-  just where the cap was hit, since the interesting fact is usually near
-  the START of the chain (which type first started growing), not the end.
+CORRECT (the recursive call passes the SAME type it was given):
+    fn<T> count(x: T, n: int): int {
+        if n <= 0 {
+            return 0;
+        }
+        return 1 + count(x, n - 1);   // count<int> -> count<int>: one instantiation
+    }
+
+    fn main(): int {
+        return count(5, 3) - 3;
+    }
 
 FIX:
-  Almost always: the recursive call/construction should hold the
-  recursive value behind a pointer or reference (`T*`/`&T`), which keeps
-  the generic's OWN type argument fixed across the recursion -- only the
-  runtime VALUE recurses, not the type being monomorphized. If the growing
-  type is genuinely intentional (a type-level Peano/depth count), it is
-  past what this compiler is designed to monomorphize; restructure it to
-  stop growing the type at some fixed, concrete depth instead.
-
-STATUS (S11b, docs/development/changes/TYPE-002.md):
-  The class and this E079 registration exist as of S11b, alongside the
-  depth constant they guard. Nothing raises this yet -- the worklist it
-  would guard isn't drained until S12a starts actually processing
-  instantiation requests. Do not treat "no S11b test reproduces E079" as
-  a gap; there is deliberately nothing to trigger it against yet.
+  Make the recursive call pass a value of the generic's own type `T` (the same
+  `x`, or another `T`) so the type stays fixed and only the VALUE changes. A type
+  that is meant to grow with the depth is not something this compiler
+  monomorphizes: stop it growing at some fixed, concrete depth.

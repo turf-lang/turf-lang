@@ -7,9 +7,13 @@ CAUSE:
 
 CORRECT USAGE:
     immut a: int[3] = [1, 2, 3];
-    a[0..3]    // whole array        a[1..]   // [2, 3]
-    a[-2..]    // last two           a[1..-1] // [2]
-    a[3..]     // valid EMPTY slice  a[i..i]  // valid empty slice
+    mut i: int = 1;
+    immut whole = a[0..3];     // whole array
+    immut tail = a[1..];       // [2, 3]
+    immut last2 = a[-2..];     // last two
+    immut mid = a[1..-1];      // [2]
+    immut none = a[3..];       // valid EMPTY slice
+    immut empty = a[i..i];     // valid empty slice
 
 INCORRECT:
     a[1..4]    // end past the length

@@ -14,6 +14,10 @@ CAUSE:
     (src/<package name>.tr) is internal to that package.
         import shapes;       // ERROR: Module 'shapes' is internal to 'geometry'
 
+CORRECT (the importing package's turf.toml lists what it imports):
+    [dependencies]
+    geometry = { path = "../geometry" }
+
 FIX:
   Transitive: add the package to your own [dependencies] in turf.toml.
   Internal: import the package itself (`import geometry;`) and use what its root

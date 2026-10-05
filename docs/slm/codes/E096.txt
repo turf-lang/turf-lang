@@ -30,10 +30,40 @@ EXAMPLE:
     IOError::Denied("a.txt", "rw")         // ERROR: 'mode' is an int
     IOError::NotFound                      // ERROR: has fields, not a value
 
-    compare err {
-        matches IOError::NotFound(path):  ...
-        matches IOError::Denied(path, _): ...
-        otherwise:                        ...
+CORRECT:
+    error IOError {
+        NotFound(path: string),
+        Denied(path: string, mode: int),
+        Timeout
+    }
+
+    fn open(which: int): !int {
+        if which == 0 {
+            return IOError::NotFound("a.txt");                 // one argument per field
+        }
+        if which == 1 {
+            return IOError::NotFound("a.txt", "no such file"); // fields, then a string message
+        }
+        if which == 2 {
+            return IOError::Denied("a.txt", 7);
+        }
+        return IOError::Timeout;                               // no fields: no parentheses
+    }
+
+    fn main(): int {
+        immut n: int = open(2) recover as err run {
+            compare err {                                      // a payload is read in a pattern
+                matches IOError::NotFound(path):
+                    return 1;
+                done
+                matches IOError::Denied(path, _):
+                    return 2;
+                done
+                otherwise:
+                    return 3;
+            }
+        };
+        return n;
     }
 
 FIX:

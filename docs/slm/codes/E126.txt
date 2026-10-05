@@ -13,6 +13,19 @@ INCORRECT:
     grid[i] += 1;
 
 CORRECT:
+    struct Grid { n: int }
+
+    operator [](g: Grid, i: int): int {
+        return g.n + i;
+    }
+
+    operator []=(g: Grid, i: int, v: int): void {
+        g.n = v;
+    }
+
+    mut x: int32 = 5 to int32;
+    mut grid: Grid = Grid::default();
+    mut i: int = 0;
     x = (x + 1) to int32;             // arithmetic, then convert back
     grid[i] = grid[i] + 1;            // write the read and the write out
 

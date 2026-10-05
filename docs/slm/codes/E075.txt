@@ -17,6 +17,20 @@ INCORRECT:
         return 3;
     }
 
+CORRECT:
+    fn pick(x: int): int {
+        while true {
+            if x > 5 {
+                break;          // the loop can exit, so what follows is reachable
+            }
+            return 1;
+        }
+        if x > 0 {
+            return 2;
+        }
+        return 3;
+    }
+
 FIX:
   Same as E074: make the loop exit somewhere (a `break`, or a condition that
   is not a literal `true`), or delete the code after it if it was never meant

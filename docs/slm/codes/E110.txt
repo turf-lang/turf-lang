@@ -12,6 +12,40 @@ CAUSE:
     export immut MAX: int = 3;           // `immut` after `export`
     machine Door { Open -> Closed }      // `->` between two states
 
+CORRECT (each fixed shape, written out):
+    error Oops;
+    machine Door {
+        Open -> Closed,
+        Closed -> Open,
+    }
+    export immut MAX: int = 3;
+    extern fn malloc(n: int): ptr;
+
+    fn risky(): !int {
+        return Oops::DEFAULT;
+    }
+
+    fn main(): int {
+        mut keepGoing: bool = true;
+        mut x: int = 0;
+        for i in 0..10 {
+            x = x + i;
+        }
+        do {
+            keepGoing = false;
+        } while keepGoing;
+        mut y: int = x > 3 give 1 otherwise 2;
+        compare y {
+            matches 1:
+                y = 2;
+            done
+            otherwise:
+                y = 3;
+        }
+        mut z: int = risky() recover produce 0;
+        return y - 3 + z;
+    }
+
 FIX:
   Compare what was written with the shape above and add or fix the piece the message
   asks for. A lookalike (`then` instead of `{`, `:=` instead of `=`) is the thing to

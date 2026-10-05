@@ -7,6 +7,11 @@ CAUSE:
   "no `self` at all" -- directly contradicts what `new` exists to do.
 
 CORRECT SYNTAX:
+    struct Point {
+        x: int,
+        y: int
+    }
+
     fn Point.new(x: int, y: int): void {
         self.x = x;
         self.y = y;

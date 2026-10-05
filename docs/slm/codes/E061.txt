@@ -7,6 +7,11 @@ CAUSE:
   Turf.
 
 CORRECT USAGE:
+    struct Point {
+        x: int,
+        y: int
+    }
+
     mut x: int = 5;
     x = 10;              // variable -- valid target
 

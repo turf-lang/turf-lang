@@ -23,11 +23,22 @@ INCORRECT:
     }
 
 CORRECT:
+    error IOError { NotFound(path: string) }
+
+    fn open(p: string): !int {
+        return IOError::NotFound(p);
+    }
+
     fn load(): !int {
         immut n: int = try open("x");
         return n;
     }
-    // or handle it here:  open("x") recover as err run { ... }
+
+    // or handle it where it happens, in a function that is not `!T`:
+    fn main(): int {
+        immut n: int = open("x") recover produce -1;
+        return n + 1;
+    }
 
 FIX:
   Declare the function `!T` so errors can leave it, handle the error in place with

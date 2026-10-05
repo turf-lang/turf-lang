@@ -21,6 +21,22 @@ EXAMPLE:
     // net.tr
     extern fn strlen(s: int32): int32;   // ERROR: different param type
 
+CORRECT (the same C name declared identically in both files):
+    // first.tr
+    extern fn atoi(s: string): int32;
+    pub fn one(): int { return 1; }
+
+    // second.tr
+    extern fn atoi(s: string): int32;
+    pub fn two(): int { return 2; }
+
+    // main.tr
+    import first;
+    import second;
+    fn main(): int {
+        return first::one() + second::two() - 3;
+    }
+
 FIX:
   Make every `extern fn` declaration of the same C name match EXACTLY
   (same parameter types, same return type, same variadic-ness), or give

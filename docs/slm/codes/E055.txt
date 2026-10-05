@@ -10,7 +10,9 @@ INCORRECT (reports E056 or E025):
     mut bad: int = math::abs("negative five");
 
 VALID:
-    math::abs(int)    -> int
-    math::abs(double) -> double
+    import math;
+
+    mut a: int = math::abs(-5);        // the int overload
+    mut b: double = math::abs(-5.0);   // the double overload
 
 SEE: E056 (wrong argument type to a function), E025 (no matching module overload).

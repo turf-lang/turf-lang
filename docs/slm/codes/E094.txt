@@ -10,11 +10,25 @@ CAUSE:
 
 INCORRECT:
     compare p {
-        matches _:               // matches everything
-            ...
+        matches _:                  // matches everything
+            n = 1;
         done
-        matches Point { x: 3 }:  // WARNING: can never run
-            ...
+        matches Point { x: 3, .. }: // WARNING: can never run
+            n = 2;
+        done
+    }
+
+CORRECT (the specific arm goes first):
+    struct Point { x: int, y: int }
+
+    mut p: Point = Point::default();
+    mut n: int = 0;
+    compare p {
+        matches Point { x: 3, .. }:
+            n = 2;
+        done
+        matches _:
+            n = 1;
         done
     }
 

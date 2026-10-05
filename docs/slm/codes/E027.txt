@@ -9,6 +9,10 @@ CAUSE:
 EXAMPLE:
     import strnigs;   // ERROR: no such module -- typo for 'strings'
 
+CORRECT:
+    import strings;
+    mut n: int = strings::length("abc");   // the module exists under that exact name
+
 FIX:
   Check the spelling of the module name (it should exactly match the
   `.tr` file's name, without the extension). If it's meant to be your own

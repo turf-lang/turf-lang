@@ -18,7 +18,14 @@ INCORRECT:
     }
 
 CORRECT:
-    mut total: int = add(1, 2);
+    fn add(a: int, b: int): int {
+        return a + b;
+    }
+
+    fn main(): int {
+        mut total: int = add(1, 2);
+        return total;
+    }
 
 NOTE:
   Inside a list (array items, struct fields, call arguments) the message may instead

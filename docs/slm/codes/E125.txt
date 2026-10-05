@@ -12,6 +12,21 @@ INCORRECT:
     import b_module;     // defines describe_int(n: int) too
     mut r: string = n.describe_int();     // which one?
 
+CORRECT (call through the module):
+    // a_module.tr
+    pub fn describe_int(n: int): string { return "a"; }
+
+    // b_module.tr
+    pub fn describe_int(n: int): string { return "b"; }
+
+    // main.tr
+    import a_module;
+    import b_module;
+    fn main(): int {
+        mut r: string = a_module::describe_int(5);
+        return 0;
+    }
+
 FIX (any one):
   - remove one of the two imports;
   - import only the names wanted: `import a::[describe_int];`;

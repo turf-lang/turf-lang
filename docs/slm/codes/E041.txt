@@ -7,11 +7,16 @@ CAUSE:
   suggestion engine as every other unknown-name diagnostic.
 
 CORRECT:
+    import io;
+
     fn greet(name: string): void {
-        printline("Hello, " + name);
+        io::printline("Hello, " + name);
     }
 
-    greet("world");   // 'greet' is declared above
+    fn main(): int {
+        greet("world");   // 'greet' is declared above
+        return 0;
+    }
 
 INCORRECT:
     grete("world");

@@ -18,15 +18,14 @@ CAUSE:
      DuplicateDeclarationError E033, which is about variables).
 
 CORRECT:
-    fn main(): int {
-        return 0;
-    }
-
     fn helper(): int {
         return 1;
     }
 
-    mut result: int = helper();   // call ordinary functions, not main
+    fn main(): int {
+        mut result: int = helper();   // call ordinary functions, never main()
+        return result - 1;            // main's return value is the exit status
+    }
 
 INCORRECT:
     fn main(x: int): int {   // ERROR: main can't declare parameters

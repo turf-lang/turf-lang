@@ -10,6 +10,10 @@ CAUSE:
 EXAMPLE:
     io::pritn("hello");   // ERROR: no such function -- typo for printline
 
+CORRECT:
+    import io;
+    io::printline("hello");        // 'printline' really is declared in io
+
 FIX:
   Check the spelling against the module's real exported function names
   (Turf will usually suggest the closest match itself), or check that the

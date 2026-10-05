@@ -17,9 +17,15 @@ INCORRECT:
     pub fn e(): List<Hidden> { ... }
     pub struct Outer { pub inner: Hidden }
 
-CORRECT (either of two ways):
-    pub struct Hidden { pub n: int }      // make the type public
-    fn make(): Hidden { ... }             // or drop `pub` from the function
+CORRECT (way 1, make the type public):
+    // shapes.tr
+    pub struct Hidden { pub n: int }
+    pub fn make(): Hidden { return Hidden::default(); }
+
+CORRECT (way 2, keep the type private and drop `pub` from the function):
+    // shapes.tr
+    struct Hidden { pub n: int }
+    fn make(): Hidden { return Hidden::default(); }
 
 NOT ERRORS:
   A private type used inside a `pub` function's BODY; a `pub` method of a private

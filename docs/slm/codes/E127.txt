@@ -10,8 +10,10 @@ INCORRECT:
     mut d: Color = 7 to Color;        // no variant number 7
 
 CORRECT:
+    enum Color { Red, Green }
+
     mut c: Color = 1 to Color;        // Green
-    mut c: Color = Color::Green;      // better: use the variant by name
+    mut d: Color = Color::Green;      // better: use the variant by name
 
 FIX:
   Use the variant name, or a number within the stated range. For a computed number, check

@@ -11,7 +11,9 @@ INCORRECT:
 
 CORRECT:
     extern fn malloc(size: int): ptr;          // declaration ends with `;`
-    fn my_alloc(size: int): ptr { ... }        // to define it in Turf, drop `extern`
+    fn my_alloc(size: int): int {              // to define it in Turf, drop `extern`
+        return size + 1;
+    }
 
 FIX:
   End the extern declaration with `;`, or remove `extern` if the function should be

@@ -6,7 +6,11 @@ CAUSE:
   or a function's return value) is a temporary with no place.
 
 CORRECT:
+    struct Point { x: int, y: int }
+
     mut x: int = 5;
+    mut point: Point = Point::default();
+    mut numbers: int[3] = [1, 2, 3];
     mut r: &int = &x;                 // variable
     mut p: &int = &point.x;           // field
     mut q: &int = &numbers[2];        // array element

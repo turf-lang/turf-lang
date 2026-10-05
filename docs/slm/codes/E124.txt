@@ -17,9 +17,24 @@ INCORRECT:
     if color_a < color_b { ... }      // enums
 
 CORRECT:
-    if x == 5 { ... }
-    if a.x == b.x && a.y == b.y { ... }
-    if (color_a to int) < (color_b to int) { ... }
+    struct Point { x: int, y: int }
+    enum Color { Red, Green }
+
+    mut x: int = 5;
+    mut a: Point = Point::default();
+    mut b: Point = Point::default();
+    mut color_a: Color = Color::Red;
+    mut color_b: Color = Color::Green;
+
+    if x == 5 {
+        x = 6;
+    }
+    if a.x == b.x && a.y == b.y {
+        x = 7;
+    }
+    if (color_a to int) < (color_b to int) {
+        x = 8;
+    }
 
 FIX:
   Compare like with like; compare struct fields individually; convert enums to `int`

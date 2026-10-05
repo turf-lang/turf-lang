@@ -34,10 +34,21 @@ INCORRECT:
     }
 
 CORRECT:
+    struct Point { x: int, y: int }
+
+    mut p: Point = Point::default();
+    immut limit: int = 5;
+
     compare p {
-        matches Point { x, .. }:
-        matches Point { x: 0, y }:
-        matches Point { x, .. } if x == limit:
+        matches Point { x: 0, y }:                // a literal field, binds y
+            p.y = y + 1;
+        done
+        matches Point { x, .. } if x == limit:    // `..` skips the other fields; a guard compares with a variable
+            p.x = 0;
+        done
+        matches Point { x, y }:                   // or list every field
+            p.x = x + y;
+        done
     }
 
 NOTE: inside a destructuring pattern a bare identifier always BINDS; at the top of

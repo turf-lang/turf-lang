@@ -23,9 +23,9 @@ EACH MISUSE AND ITS FIX:
 
 CORRECT:
     pub struct Point { pub x: int, pub y: int, cache: int }
-    pub fn Point.len(): int { ... }
+    pub fn Point.len(): int { return self.x + self.y; }
     @caller_location
-    pub fn here(): string { ... }
+    pub fn here(): string { return caller_location; }
 
 FIX:
   Remove the `pub`, or move it to the declaration it was meant for. The message

@@ -4,12 +4,15 @@ CAUSE:
   `value to Type` was used for a conversion with no defined meaning. The message names both
   types.
 
-ALLOWED:
-    5 to double        // whole number -> decimal
-    3.9 to int         // decimal -> whole number (drops the fraction)
-    42 to string       // number -> text
-    65 to char         // character code -> char
-    'a' to int         // char -> its code
+CORRECT (the allowed conversions):
+    mut a: double = 5 to double;     // whole number -> decimal
+    mut b: int = 3.9 to int;         // decimal -> whole number (drops the fraction)
+    mut c: string = 42 to string;    // number -> text
+    mut d: char = 65 to char;        // character code -> char
+    mut e: int = 'a' to int;         // char -> its code
+    mut n: int = 7;
+    mut flag: bool = n != 0;         // a number tested for zero: compare it
+    mut bit: int = flag give 1 otherwise 0;   // a number from a condition: choose the numbers
 
 NOT ALLOWED:
     5 to bool          // no "5 as true/false"

@@ -15,9 +15,16 @@ INCORRECT:
     }
 
 CORRECT (read, modify, store back):
-    mut e: Big = bs[0];
-    e.a = 50;
-    bs[0] = e;
+    import list::List;
+    struct Big { a: int }
+    fn main(): int {
+        mut bs: List<Big> = List::default();
+        bs.push(Big::default());
+        mut e: Big = bs[0];
+        e.a = 50;
+        bs[0] = e;
+        return 0;
+    }
 
 NOT AN ERROR:
   Writing THROUGH a pointer or reference element, and writing into a nested list

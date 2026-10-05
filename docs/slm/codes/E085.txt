@@ -20,6 +20,13 @@ INCORRECT:
     }
 
 CORRECT (list the names actually used, qualify the other type):
+    // shapes.tr
+    pub struct Point { pub x: int }
+    pub struct Circle { pub r: int }
+    pub fn area(c: Circle): int { return c.r * c.r; }
+    pub fn origin(): Point { return Point::default(); }
+
+    // main.tr
     import shapes::[Circle, area];
 
     struct Point { x: int }
@@ -27,7 +34,8 @@ CORRECT (list the names actually used, qualify the other type):
     fn main(): int {
         mut mine: Point = Point::default();
         mut theirs: shapes::Point = shapes::origin();
-        return 0;
+        mut c: Circle = Circle::default();
+        return area(c);
     }
 
 FIX:

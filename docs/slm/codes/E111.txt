@@ -12,6 +12,14 @@ INCORRECT:
     mut y: bool = !!!!!!!!!!!!!!!!!...;
     mut z: List<List<List<List<...>>>> ...;
 
+CORRECT (name the inner pieces and build the result step by step):
+    fn main(): int {
+        mut inner: int = (1 + 2) * 3;
+        mut outer: int = (inner + 1) * 2;
+        mut y: bool = !(outer > 5);
+        return outer - 20;
+    }
+
 FIX:
   Look at the reported line for a repeated character and delete the extras. For truly
   deep data, name the inner pieces with `mut` and build the result step by step.

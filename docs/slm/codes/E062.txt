@@ -7,7 +7,9 @@ CAUSE:
   struct.
 
 CORRECT USAGE:
-    mut ptr: int* = null;    // fine -- ptr's type is a pointer
+    unsafe {
+        mut p: int* = null;  // fine -- p's type is a pointer (raw pointers need `unsafe`)
+    }
 
 INCORRECT:
     mut n: int = null;

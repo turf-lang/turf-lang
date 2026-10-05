@@ -16,9 +16,18 @@ SLICES FOLLOW:
   (`immut v = m[..]; fill(v, 0);`) is E141 as well.
 
 CORRECT USAGE:
-    fn sum(arr: int[]): int { ... }      // only reads
-    immut a: int[3] = [1, 2, 3];
-    sum(a);                              // fine
+    fn sum(arr: int[]): int {            // only reads
+        mut total: int = 0;
+        for value in arr {
+            total = total + value;
+        }
+        return total;
+    }
+
+    fn main(): int {
+        immut a: int[3] = [1, 2, 3];
+        return sum(a);                   // fine
+    }
 
 INCORRECT:
     fn fill(arr: int[], v: int): void {

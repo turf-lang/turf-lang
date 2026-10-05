@@ -11,10 +11,14 @@ INCORRECT:
     fn main: int { ... }         // missing ()
 
 CORRECT:
-    if x > 0 {
-        return 1;
+    fn main(): int {
+        mut x: int = 5;
+        if x > 0 {
+            return 1;
+        }
+        mut y: int = x > 3 give 10 otherwise 20;   // one-line choice between two values
+        return y;
     }
-    fn main(): int { ... }
 
 FIX:
   Add the `{` / `(`. For a one-line choice between two values use the ternary form

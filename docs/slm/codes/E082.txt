@@ -14,6 +14,8 @@ INCORRECT:
     }
 
 CORRECT:
+    struct Box { val: int }
+
     fn good(b: &?Box): int {
         if b != null {
             mut safe: &Box = b to &Box;  // proven non-null here

@@ -18,7 +18,14 @@ CORRECT:
         x: int,
         y: int
     }
-    add(1, 2)
+
+    fn add(a: int, b: int): int {
+        return a + b;
+    }
+
+    fn main(): int {
+        return add(1, 2) - 3;
+    }
 
 FIX:
   Separate the items with commas (a trailing comma after the last item is fine), or

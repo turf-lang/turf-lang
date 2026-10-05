@@ -10,7 +10,7 @@ INCORRECT:
     fn show(thing: void): void { ... }
 
 CORRECT:
-    fn log(msg: string): void { ... }    // return type: fine
+    fn log(msg: string): void { }        // return type: fine
 
 FIX:
   Give the variable/field/parameter a real type (`int`, `string`, a struct, ...). For

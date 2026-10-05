@@ -13,8 +13,8 @@ INCORRECT:
 CORRECT:
     immutable PI: double = 3.14159;
     mut x: guess = 5;                 // an int
-    mut x: int;                       // value comes later: state the type instead
-    x = 5;
+    mut y: int;                       // value comes later: state the type instead
+    y = 5;
 
 FIX:
   Give the variable a value, or for a `mut` whose value comes later write its type

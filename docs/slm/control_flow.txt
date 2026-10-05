@@ -21,7 +21,8 @@ IF STATEMENT: block form only -- there is NO single-line `then`/`else` form.
     }
 
   RULES:
-  - `elseif` is one keyword (no space). `else if` (with space) is a parse error.
+  - `elseif` is one keyword (no space). `else if` (with a space) also works: it
+    is an `else` whose body is an `if`.
   - `else` branch is optional.
   - There is no `then` keyword at all in this language.
 
@@ -57,7 +58,8 @@ BREAK AND CONTINUE:
     }
 
 FOR LOOP:
-  Syntax: for <var> in <start>..<end> step <step_expr> { <body> }
+  Syntax: for <var> in <start>..<end> [step <step_expr>] { <body> }
+  `step` is optional: `for i in 0..10 { }` counts up by one.
 
   IMPORTANT: the `step` clause is an arbitrary EXPRESSION executed after
   each iteration, most commonly an assignment (i += 1). It does NOT have
@@ -92,13 +94,10 @@ FOR LOOP:
     for i in 0 to 10 step i += 1 { } // ERROR: use '..' for the range, not
                                      // 'to' (that's the cast keyword)
     for (i = 0; i < 10; i++) { }     // ERROR: C-style for loops do not exist
-    for i in 0..10 { }               // ERROR: 'step' clause is required
 
 COMMON MISTAKES:
-- Using `else if` (with space) instead of `elseif`.
 - Trying to use a `then`/single-line `if` form -- it doesn't exist; use
   `give ... otherwise ...` instead.
-- Forgetting the `step` clause in a `for` loop.
 - Writing a `step` (or body) that never actually updates the loop variable
   -- syntactically valid, but produces a real infinite loop at runtime; the
   compiler only warns, it doesn't refuse to compile.

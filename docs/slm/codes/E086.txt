@@ -16,6 +16,8 @@ INCORRECT:
     }
 
 CORRECT (copy onto the managed heap):
+    struct Node { val: int }
+
     fn make(): &Node {
         mut n: Node = Node::default();
         n.val = 42;

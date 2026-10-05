@@ -8,6 +8,11 @@ CAUSE:
   omit in the first place, so `static` on one is meaningless.
 
 CORRECT SYNTAX:
+    struct Point {
+        x: int,
+        y: int
+    }
+
     fn Point.origin() static: Point {   // correct -- struct-bound,
         return Point::default();        // 'static' means "no self"
     }

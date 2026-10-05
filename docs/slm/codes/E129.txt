@@ -11,6 +11,12 @@ INCORRECT:
     mut c: guess = List::default();   // which kind of List?
 
 CORRECT:
+    import list::List;
+
+    struct Point { x: int, y: int }
+
+    fn print_it(): void { }
+
     mut a: &?Point = null;
     mut c: List<int> = List::default();
     print_it();                       // call a void function as a statement

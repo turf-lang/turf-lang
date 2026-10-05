@@ -26,12 +26,22 @@ INCORRECT:
     }
 
 CORRECT:
+    enum Color { Red, Green, Blue }
+
+    mut c: Color = Color::Red;
+    mut n: int = 0;
     compare c {
-        matches Color::Red:  ...  done
-        matches Color::Green ...  done
-        matches Color::Blue: ...  done
+        matches Color::Red:
+            n = 1;
+        done
+        matches Color::Green:
+            n = 2;
+        done
+        matches Color::Blue:
+            n = 3;
+        done
     }
-    // or end with `otherwise:` / `matches _:`
+    // or end with `otherwise:` / `matches _:` instead of listing every variant
 
 FIX:
   Add an arm for each missing variant (the message lists them), or add

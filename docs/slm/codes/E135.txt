@@ -11,8 +11,13 @@ INCORRECT:
     mut c: Color = Color::Red();        // Red is a value, not a function
 
 CORRECT:
+    enum Color { Red, Green }
+
+    struct Point { x: int, y: int }
+
     mut c: Color = Color::Red;
-    // building a struct is a constructor call: Point::new(1, 2) or Point::default()
+    mut p: Point = Point::default();    // building a struct is a constructor call:
+                                        // Point::default(), or Point::new(1, 2) if a `new` is declared
 
 FIX:
   Remove the parentheses.

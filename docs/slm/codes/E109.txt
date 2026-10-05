@@ -11,8 +11,15 @@ INCORRECT:
     mut values: List<> = ...;            // nothing between < >
 
 CORRECT:
-    fn add(a: int, b: int): int { ... }
-    fn log(msg: string): void { ... }    // a function returning nothing says `void`
+    import list::List;
+
+    fn add(a: int, b: int): int { return a + b; }
+    fn log(msg: string): void { }        // a function returning nothing says `void`
+
+    fn main(): int {
+        mut values: List<int> = List::default();
+        return add(1, 2) - 3;
+    }
 
 FIX:
   Write the type. A struct or enum you declared works as a type too.
