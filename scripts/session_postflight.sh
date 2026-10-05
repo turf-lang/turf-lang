@@ -142,6 +142,25 @@ else
     echo "$CODES_OUT" | head -8 | sed 's/^/       /'
   fi
 
+  # SLM_IMPROVEMENT_PLAN C1/C2: every CORRECT example in docs/slm/ (and the
+  # syntax card) compiles, and every non-retired per-code page has one. The
+  # model copies what the docs show it.
+  if DOCS_OUT=$(./scripts/slm_doc_examples_check.sh 2>&1); then
+    pass "$(echo "$DOCS_OUT" | tail -1)"
+  else
+    fail "a doc under docs/slm/ shows Turf the compiler rejects (or has no example):"
+    echo "$DOCS_OUT" | head -8 | sed 's/^/       /'
+  fi
+
+  # SLM_IMPROVEMENT_PLAN C3: the system prompt fits the model's 4096-token batch
+  # for every category doc (SKIPs if llama.cpp's tokenizer is not built).
+  if BUDGET_OUT=$(./scripts/slm_prompt_budget.sh 2>&1); then
+    pass "$(echo "$BUDGET_OUT" | tail -1)"
+  else
+    fail "an SLM system prompt exceeds the model's batch:"
+    echo "$BUDGET_OUT" | head -20 | sed 's/^/       /'
+  fi
+
   # OVH-012: a plain 'import io; import json; import http;' ("hello world")
   # must print NO warning by default. A warning anchored inside lib/std is a
   # "system-module warning" -- recorded but not printed unless

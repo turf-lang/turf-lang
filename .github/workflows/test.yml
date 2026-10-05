@@ -129,6 +129,22 @@ jobs:
       - name: Error-code registry is consistent
         run: ./scripts/error_codes_check.sh
 
+      # SLM_IMPROVEMENT_PLAN C1/C2: everything under docs/slm/ is pasted into
+      # the --smart model's prompt, and a model copies what it sees. This
+      # compiles every CORRECT example in the per-code pages, the category docs
+      # and the syntax card, and fails a page that has none -- a doc showing
+      # `fn<T> Box.get(): T { ... }` taught the model code the compiler rejects.
+      - name: SLM docs show only Turf the compiler accepts
+        run: ./scripts/slm_doc_examples_check.sh
+
+      # SLM_IMPROVEMENT_PLAN C3: the system prompt (rules + syntax card + the
+      # biggest code page + a category doc) must fit n_batch (4096 tokens), or
+      # the model silently loses the middle of its docs. Measured with
+      # llama.cpp's own tokenizer on the prompt the compiler really builds; it
+      # SKIPs (and says so) if llama-tokenize was not built in this job.
+      - name: SLM system prompt fits the model's batch
+        run: ./scripts/slm_prompt_budget.sh
+
       # LEC-001 stage 2: the `turf` front end (cli/). The Go tests cover argv
       # classification, discovery order and the version handshake in isolation;
       # cli_smoke.sh covers what only a real build shows -- byte-identical
