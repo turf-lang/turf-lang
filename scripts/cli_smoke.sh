@@ -156,7 +156,7 @@ identical "compile fail_x.tr" c2.turf c2.turfc
 capture o9.turf  "$TURF"  compile pass.tr -O9
 capture o9.turfc "$TURFC" pass.tr -O9
 identical "compile -O9" o9.turf o9.turfc
-expect_rc "compile -O9" o9.turf 1
+expect_rc "compile -O9" o9.turf 2
 expect_err "compile -O9" o9.turf "unknown optimization level"
 
 # --- check: every diagnostic, no file ----------------------------------------
@@ -182,7 +182,7 @@ expect_rc "check --module m.tr" ck_module 0
 capture ck_modprog "$TURF" check --module pass.tr
 expect_rc "check --module pass.tr (a program is a fine module too)" ck_modprog 0
 capture mod_nock   "$TURFC" --module pass.tr
-expect_rc "turfc --module without --check" mod_nock 1
+expect_rc "turfc --module without --check" mod_nock 2
 expect_err "turfc --module without --check" mod_nock "only applies with --check"
 
 # --- dump: turfc --check --module --dump-<what>, no file ---------------------
@@ -268,6 +268,81 @@ capture v2.turf "$TURF" --version
 identical "--version vs version" v.turf v2.turf
 "$TURFC" --version | sed -n 2p | grep -qE '^interface [0-9]+\.[0-9]+$' || fail "turfc --version line 2 is not 'interface M.m'"
 
+# --- REL-001: what --version reports, and the frozen exit statuses ------------
+# Lines 3+ of `turfc --version` are `<key> <value>`: the LLVM it was built
+# against, the runtime ABI stamp its programs demand, and its install root.
+capture tv "$TURFC" --version
+expect_rc "turfc --version" tv 0
+grep -qE '^llvm [0-9]+\.[0-9]+' "$WORK/tv.out" || fail "turfc --version has no 'llvm <version>' line"
+grep -qE '^root /' "$WORK/tv.out" || fail "turfc --version has no absolute 'root <path>' line"
+ABI=$(sed -n 's/^runtime //p' "$WORK/tv.out")
+[ -n "$ABI" ] || fail "turfc --version has no 'runtime <abi symbol>' line"
+# The symbol is defined in C (runtime/turfrt_abi.c) and named in C++
+# (RuntimeAbiSymbol), so only a check against the real archive keeps them
+# from drifting apart.
+if [ -f "$ROOT/lib/libturfrt.a" ] && command -v nm > /dev/null 2>&1; then
+  nm "$ROOT/lib/libturfrt.a" 2> /dev/null | grep -qE " T $ABI\$" || fail "lib/libturfrt.a does not define the ABI symbol '$ABI' that turfc --version reports"
+fi
+# turf version shows turfc's extra lines too.
+grep -qE '^  llvm ' "$WORK/v.turf.out" || fail "turf version does not show turfc's llvm line"
+grep -qE '^  runtime ' "$WORK/v.turf.out" || fail "turf version does not show turfc's runtime line"
+grep -qE '^  root ' "$WORK/v.turf.out" || fail "turf version does not show turfc's root line"
+
+# `turfc help` is the spelling (no --help); both front ends say what the
+# statuses mean.
+capture th "$TURFC" help
+expect_rc "turfc help" th 0
+grep -q 'Usage: turfc' "$WORK/th.out" || fail "turfc help does not print the usage"
+grep -q 'Exit status' "$WORK/th.out" || fail "turfc help does not document the exit statuses"
+capture thf "$TURFC" --help
+expect_rc "turfc --help" thf 2
+expect_err "turfc --help" thf "turfc help"
+
+# An unknown flag is a usage error (2), with a suggestion when one is near, and
+# `turf` passes it through byte for byte. Nothing is compiled, so no file appears.
+d=$(fresh pass.tr)
+before=$(listing "$d")
+capture_in "$d" uf.turfc "$TURFC" pass.tr --chek
+capture_in "$d" uf.turf  "$TURF"  pass.tr --chek
+identical "unknown flag --chek" uf.turf uf.turfc
+expect_rc "unknown flag --chek" uf.turfc 2
+expect_err "unknown flag --chek" uf.turfc "Unknown option: --chek"
+expect_err "unknown flag --chek" uf.turfc "did you mean '--check'"
+[ "$(listing "$d")" = "$before" ] || fail "an unknown flag still produced a file: before='$before' after='$(listing "$d")'"
+capture uf2 "$TURFC" --verison
+expect_rc "unknown flag --verison" uf2 2
+expect_err "unknown flag --verison" uf2 "did you mean '--version'"
+capture uf3 "$TURFC" pass.tr --targt=x86_64-linux-gnu
+expect_rc "unknown flag --targt=" uf3 2
+expect_err "unknown flag --targt=" uf3 "did you mean '--target='"
+capture uf4 "$TURF" --bogus
+expect_rc "turf --bogus" uf4 2
+expect_err "turf --bogus" uf4 "Unknown option: --bogus"
+# Nothing near: no guess is better than a wrong one.
+capture uf5 "$TURFC" pass.tr --zzzzzzzz
+expect_rc "unknown flag with no near match" uf5 2
+grep -q 'did you mean' "$WORK/uf5.err" && fail "a far-off flag got a 'did you mean' guess"
+
+# The other usage errors are 2 as well, and a missing value says so.
+capture uv "$TURFC" pass.tr -o
+expect_rc "-o without a value" uv 2
+expect_err "-o without a value" uv "needs a value"
+capture un1 "$TURFC"
+expect_rc "turfc with no input" un1 2
+capture un2 "$TURFC" notes.txt
+expect_rc "turfc non-.tr input" un2 2
+capture un3 "$TURFC" --explain
+expect_rc "turfc --explain (no code)" un3 2
+capture un4 "$TURFC" --explain E99999
+expect_rc "turfc --explain unknown code" un4 2
+capture un5 "$TURFC" --migrate=bogus pass.tr
+expect_rc "turfc --migrate=bogus" un5 2
+# ...while a program with a mistake, and a file that is not there, are 1.
+capture er1 "$TURFC" --check fail_x.tr
+expect_rc "compile error" er1 1
+capture er2 "$TURFC" --check no_such_file.tr
+expect_rc "missing input file" er2 1
+
 # A different RELEASE version is fine when the interface fits: the pairing
 # F-PKG-1's amendment exists for (TurfLang 2.0.0 driven by CLI 1.0.0). The fake
 # forwards everything but --version to the real compiler, so the compile must
@@ -334,6 +409,13 @@ grep -q -- '--check' "$WORK/h.turf.out" || fail "compile --help does not list --
 capture h2.turf "$TURF" --help
 expect_rc "--help" h2.turf 0
 grep -q 'Project' "$WORK/h2.turf.out" || fail "--help does not list the project commands"
+grep -q 'Exit status: 0 success, 1 .*2 the command line is wrong' <(tr '\n' ' ' < "$WORK/h2.turf.out" | sed 's/  */ /g') || fail "--help does not document the exit statuses"
+capture bh.turf "$TURF" build --help
+capture h3.turf "$TURF" help build
+expect_rc "help build" h3.turf 0
+identical "help build vs build --help" h3.turf bh.turf
+capture h4.turf "$TURF" help biuld
+expect_rc "help biuld" h4.turf 2
 
 if [ $FAILED -ne 0 ]; then
   echo "cli_smoke: $FAILED check(s) failed"
