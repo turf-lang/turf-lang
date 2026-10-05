@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E003
+// EXPECT-DIAG: Cannot initialize 'b' ('int[5]') from a value of type 'int[2]'.
+// Regression test: a sized array declaration's initializer EXPRESSION was
+// never type-checked (only an initializer LIST was). `mut b: int[5] = a;`
+// with `a: int[2]` compiled, and b[2..4] read whatever followed `a` on the
+// stack. Found while adding range slicing, whose `T[]` -> `T[N]` case went
+// through the same unchecked path.
+fn main(): int {
+    mut a: int[2] = [1, 2];
+    mut b: int[5] = a;
+    return b[4];
+}

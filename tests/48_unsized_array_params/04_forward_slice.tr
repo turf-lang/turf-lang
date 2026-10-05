@@ -1,0 +1,46 @@
+// Issue #260: a `T[]` parameter handed on to another function's `T[]`
+// parameter. This used to pass the address of the stack slot that HELD the
+// array pointer, so the second function read garbage -- `outer(x)` below
+// returned 32, not 4. Now the slice (pointer and length) is passed as it is.
+import test;
+
+fn first(a: int[]): int {
+    return a[0];
+}
+
+fn len(a: int[]): int {
+    return a.length();
+}
+
+fn outer(a: int[]): int {
+    return first(a);
+}
+
+fn outer_len(a: int[]): int {
+    return len(a);
+}
+
+// Three levels, with a write at the bottom.
+fn zero_first(a: int[]): void {
+    a[0] = 0;
+}
+
+fn middle(a: int[]): void {
+    zero_first(a);
+}
+
+fn top(a: int[]): void {
+    middle(a);
+}
+
+fn main(): int {
+    mut x: int[2] = [4, 5];
+    test::assert(outer(x) == 4, "a forwarded slice still points at the caller's elements");
+    test::assert(outer_len(x) == 2, "a forwarded slice keeps its length");
+
+    mut y: int[3] = [9, 9, 9];
+    top(y);
+    test::assert(y[0] == 0, "a write three calls down reaches the caller's array");
+    test::assert(y[1] == 9, "...and only the element written");
+    return 0;
+}

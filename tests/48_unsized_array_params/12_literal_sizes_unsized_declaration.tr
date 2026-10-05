@@ -1,0 +1,82 @@
+// An unsized declaration with a LITERAL initializer is not a view: the
+// literal gives it its size, so `mut nums: int[] = [10, 20, 30, 40, 50];` is
+// exactly `int[5]` (an owned array with value semantics, fixed length). Only
+// the outermost size is inferred (`int[][2]` is `int[2][2]`). Initialized from
+// an existing array or slice, `int[]` is still a view that shares storage
+// (range slicing, issue #260).
+import test;
+
+struct Point {
+    x: int,
+    y: int
+}
+
+fn Point.new(x: int, y: int): void {
+    self.x = x;
+    self.y = y;
+}
+
+fn sum5(arr: int[5]): int {
+    return arr[0] + arr[1] + arr[2] + arr[3] + arr[4];
+}
+
+fn sumAny(arr: int[]): int {
+    mut t: int = 0;
+    for v in arr {
+        t += v;
+    }
+    return t;
+}
+
+fn setFirst(arr: int[], v: int): void {
+    arr[0] = v;
+}
+
+fn main(): int {
+    mut nums: int[] = [10, 20, 30, 40, 50];
+    test::assert(typeof(nums) == "int[5]", "a literal gives the declaration its size");
+    test::assert(nums.length() == 5, "the length is the literal's");
+
+    immut fixed: int[] = [1, 2, 3];
+    test::assert(typeof(fixed) == "int[3]", "an immut declaration is sized too");
+
+    // Value semantics: copying copies.
+    // (The edits go through a function: a plain element write to a local copy
+    // trips the dead-store lint.)
+    mut b = nums;
+    setFirst(b, 9);
+    test::assert(nums[0] == 10 && b[0] == 9, "assigning copies the array");
+    mut c: int[5] = nums;
+    setFirst(c, 0);
+    test::assert(nums[0] == 10 && c[0] == 0, "a sized declaration accepts it and copies");
+
+    // It fits both an `int[5]` and an `int[]` parameter.
+    test::assert(sum5(nums) == 150, "passed to an int[5] parameter");
+    test::assert(sumAny(nums) == 150, "passed to an int[] parameter");
+
+    // Reassignment with a same-length literal.
+    nums = [1, 1, 1, 1, 1];
+    test::assert(sum5(nums) == 5, "reassigned with a literal of the same length");
+
+    mut words: string[] = ["a", "bb", "ccc"];
+    test::assert(typeof(words) == "string[3]" && words[2].length() == 3, "string elements");
+
+    mut ds: double[] = [1.5, 2.5];
+    test::assert(typeof(ds) == "double[2]" && ds[0] + ds[1] == 4.0, "double elements");
+
+    mut pts: Point[] = [Point::new(1, 2), Point::new(3, 4)];
+    test::assert(typeof(pts) == "Point[2]" && pts[1].y == 4, "struct elements");
+
+    mut g: int[][2] = [[1, 2], [3, 4]];
+    test::assert(typeof(g) == "int[2][2]" && g[1][0] == 3, "only the outermost size is inferred");
+
+    // Contrast: initialized from an array, `int[]` is a view and shares.
+    mut arr: int[3] = [1, 2, 3];
+    mut v: int[] = arr;
+    test::assert(typeof(v) == "int[]", "from an existing array it stays unsized");
+    v[0] = 100;
+    test::assert(arr[0] == 100, "a mut view writes through to the array");
+    immut ro: int[] = arr[1..];
+    test::assert(typeof(ro) == "int[]" && ro[0] == 2, "an immut slice view reads the array");
+    return 0;
+}

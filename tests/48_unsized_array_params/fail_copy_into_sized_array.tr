@@ -1,0 +1,9 @@
+// EXPECT-DIAG: E003
+// EXPECT-DIAG: Cannot initialize 'b' ('int[3]') from a value of type 'int[]'.
+// copy() returns a T[] (its length is not a compile-time fact), so it can't
+// initialize a T[N] variable.
+fn main(): int {
+    mut a: int[3] = [1, 2, 3];
+    mut b: int[3] = a.copy();
+    return b[0];
+}

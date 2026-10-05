@@ -1220,6 +1220,79 @@ static void testGenericOperatorDiagnostics() {
     std::cerr << render(Ok);
 }
 
+// Issue #260. A `T[]` parameter is a slice of the caller's array: E140 keeps
+// it out of every place but a parameter, E141 keeps an `immut` array from
+// being written through one. E141 is checked after every body (it follows a
+// slice handed on to another function), so this also covers the facade's
+// per-declaration recovery running that deferred pass.
+static void testUnsizedArrayDiagnostics() {
+  CurrentTest = "unsized array (slice) diagnostics";
+  struct Case {
+    const char *Label;
+    const char *Body;
+    const char *Code;
+    const char *MessageFragment;
+  };
+  const Case Cases[] = {
+      {"local slice with an unsized inner dimension",
+       "fn main(): int { mut a: int[2][] = [[1], [2]]; return 0; }", "E140",
+       "Variable 'a' can't use the unsized array type 'int[]'"},
+      {"slicing a string",
+       "fn main(): int { immut s: string = \"hey\"; immut t = s[1..]; return 0; }", "E142",
+       "Cannot slice a value of type 'string'"},
+      {"constant slice range past the end",
+       "fn main(): int { immut a: int[3] = [1, 2, 3]; immut t = a[1..4]; return 0; }", "E143",
+       "the end is outside 0..3"},
+      {"mut view of an immutable array",
+       "fn main(): int { immut a: int[3] = [1, 2, 3]; mut t = a[1..]; return t[0]; }", "E144",
+       "'t' is a 'mut' view of 'a', which is immutable."},
+      {"return type", "fn f(): int[] { mut a: int[1] = [1]; return a; }\n"
+                      "fn main(): int { return 0; }",
+       "E140", "The return type of 'f'"},
+      {"inner dimension", "fn f(r: int[3][]): int { return 0; }\nfn main(): int { return 0; }",
+       "E140", "(inside 'int[3][]')"},
+      {"written through a forwarded slice",
+       "fn inner(x: int[]): void { x[0] = 1; }\n"
+       "fn outer(a: int[]): void { inner(a); }\n"
+       "fn main(): int { immut v: int[2] = [1, 2]; outer(v); return 0; }",
+       "E141", "'v' is immutable, but 'outer' writes to the array"},
+  };
+  for (const auto &C : Cases) {
+    auto R = turf::analyze({{"slice.tr", std::string(C.Body) + "\n"}});
+    CHECK(!R.succeeded());
+    bool Found = false;
+    for (const auto &D : R.diagnostics())
+      if (D.Code == C.Code && D.Message.find(C.MessageFragment) != std::string::npos)
+        Found = true;
+    CHECK(Found);
+    if (!Found)
+      std::cerr << "    case '" << C.Label << "' produced:\n" << render(R);
+  }
+
+  // Reading an `immut` array through a slice, for-each and length included,
+  // is fine.
+  auto Ok = turf::analyze(
+      {{"sliceok.tr",
+        "fn sum(a: int[]): int { mut t: int = 0; for x in a { t += x; } "
+        "return t + a.length(); }\n"
+        "fn main(): int { immut v: int[2] = [1, 2]; return sum(v) - 5; }\n"}});
+  CHECK(Ok.succeeded());
+  if (!Ok.succeeded())
+    std::cerr << render(Ok);
+
+  // Range slicing: local views, negative and omitted bounds, writes through
+  // a `mut` view of a `mut` array.
+  auto SliceOk = turf::analyze(
+      {{"rangeok.tr",
+        "fn main(): int { immut nums: int[] = [10, 20, 30, 40, 50]; "
+        "immut a = nums[2..]; immut b = nums[..3]; immut c = nums[1..-1]; "
+        "mut m: int[4] = [1, 2, 3, 4]; mut v: int[] = m[1..3]; v[0] = 9; "
+        "return a[0] + b[0] + c.length() + m[1] - 52; }\n"}});
+  CHECK(SliceOk.succeeded());
+  if (!SliceOk.succeeded())
+    std::cerr << render(SliceOk);
+}
+
 // LEC-005. The facade recovers from a parse error with the same
 // SkipToNextTopLevelBoundary() the compiler driver uses, so an editor shows the
 // same cascade -- or the lack of one -- as the command line.
@@ -1333,6 +1406,7 @@ int main() {
   testPatternDiagnostics();
   testErrorPayloadDiagnostics();
   testGenericOperatorDiagnostics();
+  testUnsizedArrayDiagnostics();
 
   if (Failures) {
     std::cerr << Failures << " check(s) failed\n";

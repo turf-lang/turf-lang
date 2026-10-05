@@ -1,0 +1,49 @@
+// tests/41_gc/13_array_copy_elements_survive_collection.tr
+// `arr.copy()` puts its elements in a fresh GC block. Two things must hold
+// for a copy of GC-managed values (here, strings built at run time):
+//   1. the block itself stays alive while the copy is in use -- its only
+//      reference is the slice's data pointer on the stack;
+//   2. the strings INSIDE it stay alive once nothing else refers to them --
+//      which needs the block allocated with the element type's descriptor
+//      (traced), not as opaque bytes.
+// The original array's slots are overwritten before collecting, so the copy
+// is the strings' only owner. Run under TURF_GC_STRESS=1 and at -O0 too.
+import test;
+import io;
+
+fn churn(depth: int): void {
+    mut s: string = (depth * 7) to string;
+    test::assert(s.length() > 0, "churn: a fresh string");
+    if depth > 0 {
+        churn(depth - 1);
+    }
+}
+
+fn main(): int {
+    mut words: string[4] = ["", "", "", ""];
+    mut i: int = 0;
+    while i < 4 {
+        words[i] = (1000 + i) to string;   // run-time strings, on the GC heap
+        i++;
+    }
+
+    immut kept = words[1..].copy();       // "1001", "1002", "1003"
+    i = 0;
+    while i < 4 {
+        words[i] = "gone";                 // the copy is now their only owner
+        i++;
+    }
+
+    churn(24);
+    gc_collect();
+    churn(24);
+    gc_collect();
+
+    test::assert(kept.length() == 3, "the copy keeps its length");
+    test::assert(kept[0] == "1001" && kept[1] == "1002" && kept[2] == "1003",
+                 "the copy's strings survive collection");
+    test::assert(words[1] == "gone", "the original was overwritten, not the copy");
+
+    io::printline("41/13 PASS: an array copy and its elements survive collections");
+    return 0;
+}

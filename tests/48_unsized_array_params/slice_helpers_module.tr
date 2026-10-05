@@ -1,0 +1,16 @@
+// Companion for 06_every_call_form.tr: a `T[]` parameter on a function in
+// another module, reached as `slice_helpers_module::module_total(arr)`.
+
+pub fn module_total(arr: int[]): int {
+    mut t: int = 0;
+    for v in arr {
+        t += v;
+    }
+    return t;
+}
+
+pub fn set_all(arr: int[], v: int): void {
+    for (i, _x) in arr {
+        arr[i] = v;
+    }
+}

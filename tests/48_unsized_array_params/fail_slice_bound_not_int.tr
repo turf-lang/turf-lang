@@ -1,0 +1,8 @@
+// EXPECT-DIAG: E002
+// EXPECT-DIAG: You used a value of type 'double' as a slice bound of 'int[3]'.
+// Slice bounds are ints, exactly as indices are.
+fn main(): int {
+    immut a: int[3] = [1, 2, 3];
+    immut t = a[1.5..];
+    return t.length();
+}

@@ -1,0 +1,78 @@
+// Issue #260: every way of calling a function builds the same slice for a
+// `T[]` parameter -- each call form has its own argument-passing code in the
+// compiler (ordinary call, UFCS receiver and argument, instance method,
+// static method, constructor, module function), and each one had to learn it.
+import test;
+import slice_helpers_module;
+
+fn total(arr: int[]): int {
+    mut t: int = 0;
+    for v in arr {
+        t += v;
+    }
+    return t;
+}
+
+// UFCS with the slice in the second position too.
+fn dot(a: int[], b: int[]): int {
+    mut t: int = 0;
+    for (i, x) in a {
+        t += x * b[i];
+    }
+    return t;
+}
+
+struct Stats {
+    sum: int,
+    count: int
+}
+
+fn Stats.new(values: int[]): void {
+    self.sum = 0;
+    self.count = values.length();
+    for v in values {
+        self.sum += v;
+    }
+}
+
+fn Stats.add(values: int[]): void {
+    for v in values {
+        self.sum += v;
+        self.count += 1;
+    }
+}
+
+fn Stats.max_of(values: int[]) static: int {
+    mut best: int = values[0];
+    for v in values {
+        if v > best {
+            best = v;
+        }
+    }
+    return best;
+}
+
+fn make(): int[2] {
+    return [100, 200];
+}
+
+fn main(): int {
+    mut a: int[3] = [1, 2, 3];
+    mut b: int[3] = [4, 5, 6];
+
+    test::assert(total(a) == 6, "ordinary call");
+    test::assert(a.total() == 6, "UFCS receiver");
+    test::assert(make().total() == 300, "UFCS receiver with no storage of its own");
+    test::assert(a.dot(b) == 32, "UFCS receiver and slice argument");
+
+    mut s: Stats = Stats::new(a);
+    test::assert(s.sum == 6 && s.count == 3, "constructor argument");
+    s.add([10, 20]);
+    test::assert(s.sum == 36 && s.count == 5, "instance method argument");
+    test::assert(Stats::max_of(b) == 6, "static method argument");
+
+    test::assert(slice_helpers_module::module_total(b) == 15, "module function");
+    slice_helpers_module::set_all(b, 2);
+    test::assert(b[0] == 2 && b[2] == 2, "module function writing through the slice");
+    return 0;
+}

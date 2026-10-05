@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E140
+// EXPECT-DIAG: Parameter 'rows' of 'f' can't use the unsized array type 'int[]' (inside 'int[3][]')
+// Issue #260: only the OUTERMOST dimension of a parameter may be unsized --
+// `int[][3]` (any number of rows of 3) is fine, but `int[3][]` would be three
+// slices, each needing a length nothing stores.
+fn f(rows: int[3][]): int {
+    return 0;
+}
+
+fn main(): int {
+    return 0;
+}

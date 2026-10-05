@@ -1,0 +1,14 @@
+// EXPECT-DIAG: E141
+// EXPECT-DIAG: 'a' is immutable, but 'fill' writes to the array it is given as 'arr'.
+// A slice expression of an immutable array is rooted at that array.
+fn fill(arr: int[], x: int): void {
+    for (i, _y) in arr {
+        arr[i] = x;
+    }
+}
+
+fn main(): int {
+    immut a: int[3] = [1, 2, 3];
+    fill(a[1..], 0);
+    return 0;
+}

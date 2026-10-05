@@ -1,0 +1,76 @@
+// Issue #260: a `T[]` parameter shares the caller's array (it is not a
+// copy, unlike a by-value `T[N]` parameter), so writing an element changes
+// the caller's `mut` array. That is what makes in-place helpers like `fill`
+// and `reverse` possible for arrays of any length. An `immut` array may not
+// be passed to such a function -- see fail_immut_array_*.tr (E141).
+import test;
+
+fn fill(arr: int[], value: int): void {
+    for (i, _old) in arr {
+        arr[i] = value;
+    }
+}
+
+fn reverse(arr: int[]): void {
+    mut lo: int = 0;
+    mut hi: int = arr.length() - 1;
+    while lo < hi {
+        immut tmp: int = arr[lo];
+        arr[lo] = arr[hi];
+        arr[hi] = tmp;
+        lo++;
+        hi--;
+    }
+}
+
+fn increment_all(arr: int[]): void {
+    for (i, _v) in arr {
+        arr[i]++;
+    }
+}
+
+struct Counter {
+    n: int
+}
+
+fn Counter.new(): void {
+    self.n = 0;
+}
+
+fn Counter.bump(): void {
+    self.n += 1;
+}
+
+// A mutating method on an element writes the caller's element too.
+fn bump_all(counters: Counter[]): void {
+    for (i, _c) in counters {
+        counters[i].bump();
+    }
+}
+
+// By value, for contrast: a sized parameter is a copy.
+fn fill_copy(arr: int[3], value: int): void {
+    arr[0] = value;
+}
+
+fn main(): int {
+    mut a: int[5] = [1, 2, 3, 4, 5];
+    reverse(a);
+    test::assert(a[0] == 5 && a[4] == 1 && a[2] == 3, "reverse in place");
+
+    increment_all(a);
+    test::assert(a[0] == 6 && a[4] == 2, "postfix ++ through a slice");
+
+    fill(a, 7);
+    test::assert(a[0] == 7 && a[4] == 7, "fill in place");
+
+    mut b: int[3] = [1, 2, 3];
+    fill_copy(b, 99);
+    test::assert(b[0] == 1, "a sized T[N] parameter is still a copy");
+
+    mut cs: Counter[2] = [Counter::new(), Counter::new()];
+    bump_all(cs);
+    bump_all(cs);
+    test::assert(cs[0].n == 2 && cs[1].n == 2, "mutating methods on slice elements");
+    return 0;
+}

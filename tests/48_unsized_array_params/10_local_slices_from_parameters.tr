@@ -1,0 +1,56 @@
+// Range slicing: a function can keep views of its own `T[]` parameter in
+// local variables -- including through `guess`-style inference
+// (`immut rest = arr[1..];`, `immut whole = arr;`). They live as long as the
+// function's frame, which is never longer than the caller's array.
+import test;
+
+fn tail_sum(arr: int[]): int {
+    immut rest = arr[1..];
+    mut t: int = 0;
+    for v in rest {
+        t += v;
+    }
+    return t;
+}
+
+fn last_two(arr: int[]): int {
+    immut whole = arr;
+    immut end = whole[-2..];
+    return end[0] * 10 + end[1];
+}
+
+// Halving recursion over views, no copies.
+fn bsearch(arr: int[], x: int): bool {
+    if arr.length() == 0 {
+        return false;
+    }
+    immut mid: int = arr.length() / 2;
+    if arr[mid] == x {
+        return true;
+    }
+    if arr[mid] < x {
+        return bsearch(arr[mid + 1..], x);
+    }
+    return bsearch(arr[..mid], x);
+}
+
+fn zero_tail(arr: int[]): void {
+    mut rest: int[] = arr[1..];
+    for (i, _v) in rest {
+        rest[i] = 0;
+    }
+}
+
+fn main(): int {
+    mut a: int[5] = [1, 2, 3, 4, 5];
+    test::assert(tail_sum(a) == 14, "a view of a parameter");
+    test::assert(last_two(a) == 45, "a view of a view of a parameter");
+
+    immut sorted: int[7] = [1, 3, 5, 7, 9, 11, 13];
+    test::assert(bsearch(sorted, 11), "binary search finds 11");
+    test::assert(!bsearch(sorted, 4), "binary search misses 4");
+
+    zero_tail(a);
+    test::assert(a[0] == 1 && a[1] == 0 && a[4] == 0, "writes through a local view of a parameter");
+    return 0;
+}

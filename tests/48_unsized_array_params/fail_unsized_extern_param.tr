@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E140
+// EXPECT-DIAG: Parameter 'buf' of extern fn 'c_sum' can't use the unsized array type 'int[]'
+// EXPECT-DIAG: C has no unsized-array type to match
+// Issue #260: a `T[]` is a { pointer, length } pair that no C function
+// expects, so it can't cross the FFI boundary even as a parameter.
+extern fn c_sum(buf: int[], n: int): int;
+
+fn main(): int {
+    return 0;
+}
