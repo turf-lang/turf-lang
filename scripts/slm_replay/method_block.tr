@@ -1,0 +1,19 @@
+struct Box {
+    v: int,
+    n: int
+}
+
+fn Box.put(x: int): void {
+    self.v = x;
+    self.n = 1;
+}
+
+fn Box.count(): string {
+    return self.n;
+}
+
+fn main(): int {
+    mut b: Box = Box::default();
+    b.put(3);
+    return b.n - 1;
+}

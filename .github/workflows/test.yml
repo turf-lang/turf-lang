@@ -310,6 +310,8 @@ jobs:
         run: ./scripts/std002_caller_location_smoke.sh
       - name: SLM deterministic-fix layer smoke test (never loads the model)
         run: ./scripts/slm_deterministic_fix_smoke.sh
+      - name: SLM replay smoke test (recorded responses, never loads the model)
+        run: ./scripts/slm_replay_smoke.sh
 
   # FDN-005 stage 3 (docs/planning/ROADMAP_v2.0.0.md): independent validation
   # of the collector via an ASan+UBSan-instrumented libturfrt

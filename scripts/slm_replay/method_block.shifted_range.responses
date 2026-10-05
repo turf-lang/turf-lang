@@ -1,0 +1,1 @@
+{"explanation": "x", "fix_mode": "MODIFY", "suggested_comment": "", "code_patch": "", "warning": "", "category": "TYPE_MISMATCH", "replacement_line": "fn Box.count(): int {\n    return self.n;\n}", "target_line": 10, "end_line": 12}
