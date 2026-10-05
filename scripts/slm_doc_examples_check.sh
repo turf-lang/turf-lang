@@ -257,7 +257,7 @@ for f in "${FILES[@]}"; do
             # what was compiled without opening the program.
             plain=$(sed -E 's/\x1b\[[0-9;]*m//g' <<<"$out")
             head=$(grep -m1 -E '^── error' <<<"$plain")
-            code=$(grep -oE '\[E[0-9]{3}\]' <<<"$head" | head -1)
+            code=$(grep -oE '\[E[0-9]{3}' <<<"$head" | head -1)
             at=$(grep -oE 'line [0-9]+' <<<"$head" | head -1)
             msg=$(grep -A3 -m1 -E '^── error' <<<"$plain" | grep -v -E '^── error|^\s*$' | head -1 | sed -E 's/^ +//')
             src=$(grep -m1 -E '^ +[0-9]+ │' <<<"$plain" | sed -E 's/^ +//')

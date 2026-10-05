@@ -266,8 +266,21 @@ static void printDiag(const DiagnosticEngine::Diag &D) {
             << " " << Colors::RESET << Colors::BRIGHT_BLACK;
   if (D.Loc.Line > 0)
     std::cerr << "at line " << D.Loc.Line << ", col " << D.Loc.Col;
-  if (!D.Code.empty())
-    std::cerr << (D.Loc.Line > 0 ? " " : "") << "[" << D.Code << "]";
+  if (!D.Code.empty()) {
+    // "[E138 · declaration]": the category comes from the registry row of the
+    // code (ErrorCodes.h), so a warning with a code shows it too. Anything
+    // that matches a code in the output matches on the "[E138" prefix, never
+    // on a closing bracket.
+    std::string CategoryText;
+    if (const ErrorCodeEntry *Row = ErrorCodes::lookupByCode(D.Code)) {
+      CategoryText = SLM::getCategoryName(Row->Category);
+      for (char &C : CategoryText)
+        C = C == '_' ? ' ' : static_cast<char>(std::tolower(
+                                 static_cast<unsigned char>(C)));
+    }
+    std::cerr << (D.Loc.Line > 0 ? " " : "") << "[" << D.Code
+              << (CategoryText.empty() ? "" : " · " + CategoryText) << "]";
+  }
   // No ", in file X" here any more: flushAll() prints a file header (#266)
   // before each file's batch, so every diagnostic's file is already named
   // above it -- the main file's included, not only an imported module's.

@@ -155,7 +155,7 @@ export -f wait_with_timeout
 # was written for) -- and a warning, which never fails a compile, could not be
 # asserted at all.
 #
-#   // EXPECT-DIAG: E011          the output contains the code `[E011]`
+#   // EXPECT-DIAG: E011          the output contains the code `[E011` (header: `[E011 · control flow]`)
 #   // EXPECT-DIAG: dead store    the output contains this text (use this for a
 #                                 warning: warnings carry no code)
 #   // EXPECT-NO-DIAG: dead store the output does NOT contain this text (the
@@ -187,7 +187,8 @@ check_diag_expectations() {
                 missed=1
             fi
         elif [[ "$arg" =~ ^E[0-9]{3}$ ]]; then
-            if ! grep -qF -- "[$arg]" <<< "$plain"; then
+            # `[E011 · control flow]` -- the code is followed by ` ·` or `]`.
+            if ! grep -qE -- "\\[$arg( |\\])" <<< "$plain"; then
                 echo "EXPECT-DIAG missed: no [$arg] in the compiler output"
                 missed=1
             fi
@@ -262,17 +263,18 @@ check_diag_policy() {
     local entries kinds line codepin=0 bad=0 want code title n field
     esc=$(printf '\033')
     plain=$(printf '%s' "$output" | sed "s/${esc}\[[0-9;]*m//g")
-    emitted=$(grep -oE '\[E[0-9]{3}\]' <<< "$plain" | tr -d '[]' | sort -u | paste -sd, -)
+    # The header reads `[E138 · declaration]`: match on the `[E138` prefix only.
+    emitted=$(grep -oE '\[E[0-9]{3}' <<< "$plain" | tr -d '[' | sort -u | paste -sd, -)
     # NO-CODE: a `── error` header with no `[Exxx]` is a plain error -- the
     # beginner has no `--explain` page for it. Warnings carry no codes by design.
-    codeless=$(grep -E '^── error' <<< "$plain" | grep -vcE '\[E[0-9]{3}\]')
+    codeless=$(grep -E '^── error' <<< "$plain" | grep -vcE '\[E[0-9]{3}')
     # GENERIC-CODE: E066 is `TypeError`, the one class every TypeChecker
     # diagnostic funnels through, so it also carries "No matching overload!",
     # "Missing initializer!", ... whose --explain page it does not describe.
     # The banner is the line under the header; anything but the real
     # "Type mismatch!" under E066 is a more specific mistake wearing the
     # catch-all's code. Found by banner, not by test, so a NEW one cannot slip in.
-    catchall=$(awk '/^── error.*\[E066\]/ { f = 1; next } f && NF { print; f = 0 }' <<< "$plain" \
+    catchall=$(awk '/^── error.*\[E066[] ]/ { f = 1; next } f && NF { print; f = 0 }' <<< "$plain" \
                    | sed -E 's/^[[:space:]]+//' | grep -vxF 'Type mismatch!' | head -1)
     # CASCADE: the "(N errors)" count the compiler prints under the file name.
     # Summed over every header: an error in an imported module prints under its

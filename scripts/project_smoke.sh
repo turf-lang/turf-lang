@@ -129,7 +129,7 @@ printf 'pub fn broken(): int {\n    return nope;\n}\n' > "$P1/geometry/src/geome
 t build_geo_bad "$P1/geometry" build
 expect_rc "library errors surface" build_geo_bad 1
 expect_out "library errors surface" build_geo_bad "nope"
-expect_out "library errors keep their code" build_geo_bad "[E040]"
+expect_out "library errors keep their code" build_geo_bad "[E040"
 printf 'pub fn answer(): int {\n    return 42;\n}\n' > "$P1/geometry/src/geometry.tr"
 
 # --- add, and the library's value through the CLI ------------------------------
@@ -180,7 +180,7 @@ cp "$WORK/main_good.tr" "$P1/app/src/main.tr"
 # The single-file path inside a project: E027 with the `turf build` hint.
 t compile_in_proj "$P1/app" compile src/main.tr
 expect_rc "turf compile of a file that imports a dependency" compile_in_proj 1
-expect_out "turf compile of a file that imports a dependency" compile_in_proj "[E027]"
+expect_out "turf compile of a file that imports a dependency" compile_in_proj "[E027"
 expect_out "turf compile of a file that imports a dependency" compile_in_proj "only visible to \`turf build\`"
 
 # --- manifest edits leave a hand-written file alone ------------------------------
@@ -279,7 +279,7 @@ cp "$P4/app/src/main.tr" "$WORK/main4.tr"
 printf 'import pa;\nimport pc;\n\nfn main(): int {\n    return pa::fa() + pc::one();\n}\n' > "$P4/app/src/main.tr"
 t trans "$P4/app" build
 expect_rc "importing a transitive dependency" trans 1
-expect_out "importing a transitive dependency" trans "[E091]"
+expect_out "importing a transitive dependency" trans "[E091"
 cp "$WORK/main4.tr" "$P4/app/src/main.tr"
 
 # Name conflict: two different directories both holding a package called pc.
@@ -413,7 +413,7 @@ printf 'import ffi;\n\nfn main(): int {\n    return ffi::go();\n}\n' > "$P8/app/
 cp "$P8/app/turf.toml" "$WORK/toml8"
 t unsafe_denied "$P8/app" build
 expect_rc "a dependency's unsafe module, not allowed" unsafe_denied 1
-expect_out "a dependency's unsafe module, not allowed" unsafe_denied "[E130]"
+expect_out "a dependency's unsafe module, not allowed" unsafe_denied "[E130"
 unsafe_case() { # unsafe_case <label> <rc> <fragment> <allow list>
   { cat "$WORK/toml8"; printf '\n[unsafe]\nallow = [%s]\n' "$4"; } > "$P8/app/turf.toml"
   t unsafe_case "$P8/app" build
@@ -428,7 +428,7 @@ cp "$WORK/toml8" "$P8/app/turf.toml"
 printf '\n[unsafe]\nallow = ["ffi"]\n' >> "$P8/ffi/turf.toml"
 t unsafe_self "$P8/app" build
 expect_rc "a dependency cannot allow itself" unsafe_self 1
-expect_out "a dependency cannot allow itself" unsafe_self "[E130]"
+expect_out "a dependency cannot allow itself" unsafe_self "[E130"
 
 # --- refusals -------------------------------------------------------------------
 LOOSE=$WORK/loose

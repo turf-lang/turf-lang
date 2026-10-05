@@ -39,7 +39,7 @@ fail() { echo "FAIL: $1"; exit 1; }
 
 # 1. As written (1.x style) the project must not compile: nothing is exported.
 out=$("$TURF" main.tr -o main.out 2>&1 | strip)
-echo "$out" | grep -q '\[E088\]' || fail "the un-migrated project should be rejected with E088"
+echo "$out" | grep -q '\[E088' || fail "the un-migrated project should be rejected with E088"
 
 # 2. Report only: says what it would do, touches nothing.
 cp geometry.tr geometry.orig

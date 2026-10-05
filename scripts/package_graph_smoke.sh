@@ -171,7 +171,7 @@ graph gt.json '{"format": 1, "root": "myapp", "packages": {
   "geometry": {"src": "geometry/src", "deps": []}}}'
 run transitive --check --package-graph gt.json myapp/src/main.tr
 expect_rc "transitive dependency" transitive 1
-expect_out "transitive dependency" transitive "[E091]"
+expect_out "transitive dependency" transitive "[E091"
 expect_out "transitive dependency" transitive "'plotter' depends on it"
 expect_out "transitive dependency" transitive "Add 'geometry' to [dependencies]"
 
@@ -180,13 +180,13 @@ as_main internal.tr
 run internal --check --package-graph g.json myapp/src/main.tr
 restore_main
 expect_rc "another package's internal module" internal 1
-expect_out "another package's internal module" internal "[E091]"
+expect_out "another package's internal module" internal "[E091"
 expect_out "another package's internal module" internal "internal to package 'geometry'"
 
 cp myapp/src/util.tr myapp/src/geometry.tr
 run owndep --check --package-graph g.json myapp/src/main.tr
 expect_rc "own module named like a dependency" owndep 1
-expect_out "own module named like a dependency" owndep "[E090]"
+expect_out "own module named like a dependency" owndep "[E090"
 expect_out "own module named like a dependency" owndep "dependency 'geometry'"
 expect_out "own module named like a dependency" owndep "may not share its name with a dependency"
 rm myapp/src/geometry.tr
@@ -199,7 +199,7 @@ as_main stray_user.tr
 run stray --check --package-graph g.json myapp/src/main.tr
 restore_main
 expect_rc "cwd is not searched" stray 1
-expect_out "cwd is not searched" stray "[E027]"
+expect_out "cwd is not searched" stray "[E027"
 # ...and the hint names the places a package build does look, not the cwd.
 expect_out "cwd is not searched" stray "In a project, \`import stray;\` names one of three things"
 
@@ -209,7 +209,7 @@ as_main priv.tr
 run priv --check --package-graph g.json myapp/src/main.tr
 restore_main
 expect_rc "private function of a dependency" priv 1
-expect_out "private function of a dependency" priv "[E088]"
+expect_out "private function of a dependency" priv "[E088"
 expect_out "private function of a dependency" priv "is private to module 'geometry'"
 expect_out "private function of a dependency" priv "mark it \`pub\` in geometry.tr"
 
@@ -218,7 +218,7 @@ printf 'unsafe module;\npub fn raw(): int {\n    mut p: int* = null;\n    return
 printf 'import rawmod;\n' | cat - geometry/src/geometry.tr > t && mv t geometry/src/geometry.tr
 run unsafe_denied --check --package-graph g.json myapp/src/main.tr
 expect_rc "dependency's unsafe module, not allowed" unsafe_denied 1
-expect_out "dependency's unsafe module, not allowed" unsafe_denied "[E130]"
+expect_out "dependency's unsafe module, not allowed" unsafe_denied "[E130"
 # The global flag does not grant it in a package build: consent is per package.
 run unsafe_flag --check --allow-unsafe-modules --package-graph g.json myapp/src/main.tr
 expect_rc "--allow-unsafe-modules does not override the graph" unsafe_flag 1
