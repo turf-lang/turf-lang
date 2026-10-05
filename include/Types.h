@@ -506,10 +506,20 @@ public:
    * equal (which they still do), so this is a strict improvement with no
    * behavioral loss.
    */
+  ///
+  /// Dimensions print in source order, outermost first: `int[2][3]` (two rows
+  /// of three) is ArrayType(ArrayType(int, 3), 2), and appending this level's
+  /// "[2]" after the element's own name used to print it "int[3][2]" -- which
+  /// read as the opposite type once `T[]` made the order matter (`int[][3]`,
+  /// any number of rows of three, vs. the invalid `int[3][]`).
   std::string getName() const override {
-    if (Size < 0)
-      return ElementType->getName() + "[]";
-    return ElementType->getName() + "[" + std::to_string(Size) + "]";
+    std::string Dims;
+    const TurfType *Base = this;
+    while (const auto *AT = dynamic_cast<const ArrayType *>(Base)) {
+      Dims += AT->Size < 0 ? "[]" : "[" + std::to_string(AT->Size) + "]";
+      Base = AT->ElementType.get();
+    }
+    return Base->getName() + Dims;
   }
   std::string getMangledName() const override {
     return ElementType->getMangledName() + "_arr_" + std::to_string(Size);
