@@ -26,6 +26,39 @@
 
 ---
 
+## Known gaps
+
+Behaviour found while testing that is neither a deliberate exclusion (§A) nor
+a rejected idea (§E): the language does not say what should happen, or the
+compiler cannot express it yet.
+
+### G-1 — No syntax for an array of function values
+
+- **Found** 2026-10-05, while probing first-class functions after the
+  call-through-a-non-function fix. First-class functions themselves are
+  supported (`fn(T): R` types; named functions passed, stored in variables and
+  returned; see `docs/reference/functions_and_modules.md` §2). Only the
+  array-of-function-values spelling is missing.
+- **What happens.** `mut fs: fn(int): int[2] = [inc, inc];` does not declare an
+  array of two functions: `fn(int): int[2]` parses as *one* function type whose
+  return type is `int[2]`, so the initializer is rejected with a generic `E066`
+  ("Cannot initialise 'fn(int): int[2]' variable 'fs' with value of type
+  'fn(int): int[2]'") — a message that reads as a self-contradiction. Wrapping
+  the element type, `(fn(int): int)[2]`, is rejected too, with `E109`
+  ("Expected a type name"): the type grammar has no parenthesised type.
+- **Why it is a gap, not a bug.** Neither the reference nor this file says an
+  array of function values is allowed or forbidden, and the grammar offers no
+  way to write one. It is an unspecified corner of the type grammar.
+- **To decide.** (1) A spelling for a parenthesised/grouped type (or a type
+  alias) so the element type can be written; (2) whether `fn(T): R[N]` keeps
+  its current meaning (it must, in 2.x: changing it is a breaking change, see
+  ROADMAP_v2.0.0.md Part VI); (3) a clearer diagnostic for the E066 above
+  whichever way (1) goes, since the current text names two identical types.
+  Related to F-1 (closures): a `{code, env}` representation changes the element
+  size, so decide the two together.
+
+---
+
 ## A. Deliberately excluded from 2.0 — first candidates afterwards
 
 Each was considered for 2.0 and excluded under the roadmap's inclusion rule
