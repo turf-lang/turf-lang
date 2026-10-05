@@ -88,11 +88,30 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
     // ResolvedCallTarget) -- Codegen detects this shape from the callee's
     // own resolved symbol type and emits an indirect call instead of the
     // usual mangled-name lookup.
+    //
+    // A variable that is NOT of function type but shares the callee's name
+    // (`mut printline: int = 0; printline("x");`, or a parameter) used to
+    // fall straight through to the function lookup below and silently call
+    // the same-named top-level/imported function: the local is in scope, so it
+    // is what the name means, and it cannot be called. (The old comment's
+    // "can never share a name" only holds within ONE scope -- a local lives in
+    // an inner scope and so never collided with the global `fn`.) Reject it,
+    // as every language where a local shadows a function does.
     if (auto VarSym = SymTable_.lookupVariable(CalleeName)) {
       if (VarSym->Type && VarSym->Type->isFunc()) {
         const_cast<VariableExprAST *>(VarCallee)->ResolvedSymbol = VarSym;
         return;
       }
+      const std::string VarType = VarSym->Type ? VarSym->Type->getName() : "a value";
+      TypeError(Node.getLoc(), ErrCode::NotCallable,
+                "'" + CalleeName + "' is a variable of type '" + VarType +
+                    "', not a function -- it can't be called.",
+                "The variable '" + CalleeName + "' shadows the function of the "
+                    "same name. Rename the variable, or drop the '(...)' if you "
+                    "meant to use its value.",
+                "Not callable!")
+          .raise();
+      return;
     }
 
     CurrentFileMatches = SymTable_.lookupCurrentFileFunctions(CalleeName);
