@@ -406,7 +406,10 @@ endif()
 # `turfc` is the compiler. The name `turf` belongs to the Go front end under
 # cli/ (LEC-001, FREEZE.md 6.16 F-PKG-1); the two are built into the same
 # directory, so they cannot share a name.
-add_executable(turfc src/main.cpp)
+# The test runner (REL-002, `turfc --test`) belongs to the executable, not to
+# turfcore: it starts processes and is of no use to a tool linking the
+# front-end library.
+add_executable(turfc src/main.cpp src/TestRunner.cpp src/TestExpectations.cpp)
 
 target_link_libraries(turfc PRIVATE turfcore)
 target_compile_definitions(turfc PRIVATE TURF_VERSION="${TURF_VERSION}")

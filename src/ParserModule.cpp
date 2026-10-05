@@ -891,8 +891,14 @@ static std::string DependencyModuleKey(const PackageInfo &Pkg, const std::string
 // DIRECT dependency of P named m, or (c) the stdlib module m -- and nothing
 // else. lib/usr, the importing file's directory and the cwd are not searched:
 // a package build depends on the graph and nothing ambient.
+//
+// REL-002: a file under the root package's tests/ (only a `turfc --test` graph
+// names that directory) also sees the helper modules beside it in tests/. The
+// reverse is not true -- a src/ module never imports a test helper -- and a
+// helper whose name matches a src/ module is ambiguous like any other pair.
 static std::vector<ModuleCandidate>
-CollectPackageModuleCandidates(const std::string &ModuleName, const PackageInfo &P) {
+CollectPackageModuleCandidates(const std::string &ModuleName, const PackageInfo &P,
+                               const std::string &ImportingFile) {
   std::vector<ModuleCandidate> Found;
   const bool IsRoot = P.Name == g_PackageGraph.Root;
 
@@ -905,6 +911,13 @@ CollectPackageModuleCandidates(const std::string &ModuleName, const PackageInfo 
     for (const auto &Path : It->second)
       Found.push_back({ModuleRootKind::OwnModule, Path,
                        IsRoot ? "" : DependencyModuleKey(P, Path), P.Name});
+
+  if (IsRoot && g_PackageGraph.inTests(ImportingFile)) {
+    const auto &Helpers = IndexPackageSources(P.TestsRoot);
+    if (auto It = Helpers.find(ModuleName); It != Helpers.end())
+      for (const auto &Path : It->second)
+        Found.push_back({ModuleRootKind::OwnModule, Path, "", P.Name});
+  }
 
   if (std::find(P.Deps.begin(), P.Deps.end(), ModuleName) != P.Deps.end()) {
     const PackageInfo *D = g_PackageGraph.find(ModuleName);
@@ -1000,7 +1013,7 @@ CollectModuleCandidates(const std::string &ModuleName,
   // not describe -- gets the stdlib and nothing ambient.
   if (g_PackageGraph.Active && !StdlibOnly) {
     if (const PackageInfo *P = g_PackageGraph.packageOf(ImportingFile))
-      return CollectPackageModuleCandidates(ModuleName, *P);
+      return CollectPackageModuleCandidates(ModuleName, *P, ImportingFile);
     StdlibOnly = true;
   }
 

@@ -247,6 +247,50 @@ run outside --check --package-graph g.json plotter/src/plotter.tr
 expect_rc "entry file outside the root package" outside 1
 expect_out "entry file outside the root package" outside "is not inside the root package"
 
+# --- the "tests" key (REL-002, driver interface 1.3) ----------------------------
+# A graph that names the root package's tests/ lets any file there be the entry
+# (each test is its own program), and makes it the root package's own code: it
+# imports the package's src/ modules, its direct dependencies and the helper
+# modules beside it -- and is held to the same E091 as src/ is.
+mkdir -p myapp/tests
+printf 'pub fn twice(x: int): int {\n    return x * 2;\n}\n' > myapp/src/doubling.tr
+printf 'pub fn three(): int {\n    return 3;\n}\n' > myapp/tests/support.tr
+cat > myapp/tests/t.tr <<'EOF'
+import geometry;
+import doubling;
+import support;
+fn main(): int {
+    return doubling::twice(support::three()) - geometry::area() + 14;
+}
+EOF
+printf 'import shapes;\nfn main(): int {\n    return 0;\n}\n' > myapp/tests/internals.tr
+GT='{"format":1,"root":"myapp","packages":{
+  "myapp":    {"src": "myapp/src",    "deps": ["geometry"], "allow_unsafe": true, "tests": "myapp/tests"},
+  "geometry": {"src": "geometry/src", "deps": [], "allow_unsafe": true}}}'
+graph gt.json "$GT"
+run tests_entry --check --package-graph gt.json myapp/tests/t.tr
+expect_rc "a test file as the entry, importing src/, a dependency and a helper" tests_entry 0
+run tests_entry_internals --check --package-graph gt.json myapp/tests/internals.tr
+expect_rc "a test cannot import a dependency's internal module" tests_entry_internals 1
+expect_out "a test cannot import a dependency's internal module" tests_entry_internals "[E091"
+# The helper beside a test is the tests' own: a src/ module never sees it.
+printf 'import support;\npub fn bad(): int {\n    return support::three();\n}\n' > myapp/src/leaky.tr
+printf 'import leaky;\nfn main(): int {\n    return leaky::bad();\n}\n' > myapp/src/leakmain.tr
+run tests_helper_from_src --check --module --package-graph gt.json myapp/src/leaky.tr
+expect_rc "a src/ module does not see tests/ helpers" tests_helper_from_src 1
+expect_out "a src/ module does not see tests/ helpers" tests_helper_from_src "support"
+# Without the key a tests/ file is outside the package, as before.
+run tests_without_key --check --package-graph g.json myapp/tests/t.tr
+expect_rc "a tests/ file with no \"tests\" key" tests_without_key 1
+expect_out "a tests/ file with no \"tests\" key" tests_without_key "is not inside the root package"
+# Naming tests/ does not loosen src/: the one program there is still main.tr.
+run tests_src_not_main --check --package-graph gt.json myapp/src/doubling.tr
+expect_rc "src/ still has one entry point when tests/ is named" tests_src_not_main 1
+expect_out "src/ still has one entry point when tests/ is named" tests_src_not_main "entry point is the root package's src/main.tr"
+bad "tests on a dependency" '{"format":1,"root":"myapp","packages":{"myapp":{"src":"myapp/src","deps":["geometry"]},"geometry":{"src":"geometry/src","tests":"myapp/tests"}}}' "only the root package can have \"tests\""
+bad "tests directory that does not exist" '{"format":1,"root":"myapp","packages":{"myapp":{"src":"myapp/src","tests":"nosuch"}}}' "tests directory"
+bad "tests that is not a path" '{"format":1,"root":"myapp","packages":{"myapp":{"src":"myapp/src","tests":3}}}' '"tests" must be a directory path'
+
 if [ "$FAILED" -ne 0 ]; then
   echo "package_graph_smoke: $FAILED check(s) failed"
   exit 1

@@ -31,6 +31,7 @@
 #include "Monomorphize.h" // TYPE-002 (S11b): --dump-instantiations
 #include "Resolver.h"
 #include "TypeChecker.h"
+#include "TestRunner.h"
 #include "SLMEngine.h"
 #include "SymbolTable.h"
 #include "Types.h"
@@ -55,6 +56,7 @@
 #include "llvm/Passes/PassBuilder.h"
 #include <cctype>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include "llvm/ADT/SmallString.h"
@@ -102,9 +104,11 @@ using namespace llvm;
 // llvm/runtime/root lines of `--version`, and freezes exit status 2 for a
 // usage error (it was 1, indistinguishable from a compile error). A driver
 // that does not look at the status of a malformed command line is unaffected,
-// which is why this is a minor bump and `turf` still needs only 1.1.
+// which is why this is a minor bump and `turf` still needs only 1.1. 1.3
+// (REL-002) adds `turfc --test` and the `"tests"` key of the package graph;
+// only `turf test` asks for it, so every other command still needs only 1.1.
 static constexpr int TurfcInterfaceMajor = 1;
-static constexpr int TurfcInterfaceMinor = 2;
+static constexpr int TurfcInterfaceMinor = 3;
 
 // The exit statuses (FREEZE.md 6.21, F-CLI-1, REL-001). The split exists so a script
 // or an editor can tell "your program has a mistake" (1: the compiler ran and
@@ -403,6 +407,10 @@ static const char *turfcUsage() {
          "         [--dump-instantiations]\n"
          "       turfc --format [--write] <filename.tr>\n"
          "       turfc --migrate=pub [--write] <module.tr>...\n"
+         "       turfc --test [<tests-dir>] [--package-graph <file>] [--exclude <path>]\n"
+         "         [-O0|-O1|-O2|-O3|-Os] [-g] [--link <libname>] [--jobs <n>]\n"
+         "         [--timeout <seconds>] [--diag-register <file>]\n"
+         "         [--allow-unsafe-modules] [--stdlib-warnings]\n"
          "       turfc --explain E0NN\n"
          "       turfc --version\n"
          "       turfc help\n"
@@ -424,6 +432,8 @@ static const char *const KnownOptions[] = {
     "--dump-modules",     "--format",       "--write",
     "--migrate=",         "--package-graph", "--link",
     "--target=",          "--explain",      "-mcpu=",
+    "--test",             "--jobs",         "--timeout",
+    "--diag-register",    "--exclude",
 };
 
 /// An unknown option is a usage error, never something to ignore: a typo'd
@@ -513,6 +523,13 @@ static CompilerOptions parseArgs(int argc, char **argv) {
       // hoisting has run, same as every other --dump-* flag.
       opts.RunResolver = true;
       opts.DumpModules = true;
+    } else if (arg == "--test") {
+      // It is a mode, not a flag: its own options (--jobs, --exclude, ...)
+      // mean nothing to a compile, so runCompilerMain() hands over everything
+      // after it. Anywhere but first it would be a compile that silently
+      // did not test.
+      std::cerr << "Error: --test must be the first argument (`turfc --test [<tests-dir>] ...`).\n";
+      std::exit(ExitUsage);
     } else if (arg == "--format") {
       opts.Format = true;
     } else if (arg == "--write") {
@@ -605,6 +622,82 @@ static CompilerOptions parseArgs(int argc, char **argv) {
   }
 
   return opts;
+}
+
+/// `turfc --test [<tests-dir>] [options]` (REL-002): runs every test under the
+/// directory (default `tests`, which must exist) and returns the process exit
+/// status. Parsed apart from parseArgs() because none of a compile's options
+/// apply and a runner's (--jobs, --exclude, ...) mean nothing to a compile.
+/// Like every other usage error, a bad option stops with status 2 before
+/// anything runs.
+static int runTestMode(int argc, char **argv) {
+  TestRunOptions T;
+  T.Compiler = CompilerExecutablePath;
+  bool DirGiven = false;
+
+  auto NeedValue = [&](int &I, const std::string &Arg) -> std::string {
+    if (I + 1 >= argc) {
+      std::cerr << "Error: option '" << Arg << "' needs a value.\nRun `turfc help` for the options.\n";
+      std::exit(ExitUsage);
+    }
+    return argv[++I];
+  };
+  auto PositiveInt = [&](const std::string &Arg, const std::string &Text) {
+    char *End = nullptr;
+    long V = std::strtol(Text.c_str(), &End, 10);
+    if (Text.empty() || *End != '\0' || V <= 0 || V > 100000) {
+      std::cerr << "Error: option '" << Arg << "' needs a positive whole number (got '" << Text << "').\n";
+      std::exit(ExitUsage);
+    }
+    return static_cast<int>(V);
+  };
+
+  for (int I = 2; I < argc; ++I) {
+    const std::string Arg = argv[I];
+    if (Arg == "--package-graph") {
+      std::string P = NeedValue(I, Arg);
+      // The compiles run in each test's own directory, so a relative path
+      // would point somewhere else for every one of them.
+      T.PackageGraph = std::filesystem::absolute(P).string();
+    } else if (Arg == "--exclude") {
+      std::string X = NeedValue(I, Arg);
+      while (X.size() > 1 && X.back() == '/')
+        X.pop_back();
+      T.Excludes.push_back(X);
+    } else if (Arg == "--diag-register") {
+      T.DiagRegister = NeedValue(I, Arg);
+    } else if (Arg == "--jobs") {
+      T.Jobs = PositiveInt(Arg, NeedValue(I, Arg));
+    } else if (Arg == "--timeout") {
+      T.TimeoutSec = PositiveInt(Arg, NeedValue(I, Arg));
+    } else if (Arg == "--link") {
+      T.CompileFlags.push_back(Arg);
+      T.CompileFlags.push_back(NeedValue(I, Arg));
+    } else if (Arg == "-g" || Arg == "--allow-unsafe-modules" || Arg == "--stdlib-warnings") {
+      T.CompileFlags.push_back(Arg);
+    } else if (Arg == "-O0" || Arg == "-O1" || Arg == "-O2" || Arg == "-O3" || Arg == "-Os") {
+      T.CompileFlags.push_back(Arg);
+    } else if (Arg.size() >= 2 && Arg[0] == '-' && Arg[1] == 'O') {
+      std::cerr << "Error: unknown optimization level '" << Arg
+                << "' (expected one of -O0, -O1, -O2, -O3, -Os).\n";
+      std::exit(ExitUsage);
+    } else if (!Arg.empty() && Arg[0] == '-') {
+      unknownOption(Arg);
+    } else {
+      if (DirGiven) {
+        std::cerr << "Error: --test takes one tests directory (got '" << T.Dir << "' and '" << Arg << "').\n";
+        std::exit(ExitUsage);
+      }
+      if (Arg.size() >= 3 && Arg.compare(Arg.size() - 3, 3, ".tr") == 0) {
+        std::cerr << "Error: --test takes a directory of tests, not a file ('" << Arg
+                  << "'); to run one file, compile it and run the result.\n";
+        std::exit(ExitUsage);
+      }
+      T.Dir = Arg;
+      DirGiven = true;
+    }
+  }
+  return RunTests(T);
 }
 
 // OPT-001: `-O0`/`-O1`/`-O2`/`-O3` map onto LLVM's own `CodeGenOptLevel`
@@ -1085,6 +1178,12 @@ static int runCompilerMain(int argc, char **argv) {
     std::cout << turfcUsage();
     return ExitOk;
   }
+
+  // REL-002: a mode, recognised only as the first argument for the same reason
+  // as `help`, and before parseArgs() because a runner's options are not a
+  // compile's.
+  if (argc >= 2 && std::string(argv[1]) == "--test")
+    return runTestMode(argc, argv);
 
   handleExplainFlagIfPresent(argc, argv);
 

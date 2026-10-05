@@ -24,6 +24,13 @@ struct PackageInfo {
   std::string SrcRoot;           ///< canonical absolute path of the package's src/
   std::vector<std::string> Deps; ///< direct dependencies, by package name
   bool AllowUnsafe = false;      ///< honor `unsafe module;` in this package's files
+  /// Canonical path of the package's tests/ directory, or empty. Only the
+  /// root package ever has one, and only when the driver passed it for
+  /// `turfc --test` (REL-002): a test file is a program entry point that
+  /// belongs to the root package, so it imports what that package's own
+  /// modules can (src/**, direct dependencies, the stdlib) plus the helper
+  /// modules next to it in tests/.
+  std::string TestsRoot;
 };
 
 struct PackageGraph {
@@ -36,6 +43,8 @@ struct PackageGraph {
   /// A file under lib/std is in no package here: the stdlib is resolved by
   /// its own rule (imports inside it are stdlib-only).
   const PackageInfo *packageOf(const std::string &Path) const;
+  /// True when @p Path (canonicalized) lies under the root package's tests/.
+  bool inTests(const std::string &Path) const;
 };
 
 /// The graph in force for this compile. Set once by the driver before
@@ -48,7 +57,9 @@ extern PackageGraph g_PackageGraph;
 /// is not well formed. @p EntryFile must lie inside the root package's src/,
 /// and unless @p EntryIsModule (`--check --module`, checking a library's root
 /// module) it must be exactly the root package's src/main.tr: a package has
-/// one program entry point.
+/// one program entry point. The one exception is a graph that names the root
+/// package's `"tests"` directory (REL-002): any file under it may be the entry,
+/// since each test is its own program.
 std::optional<PackageGraph> LoadPackageGraph(const std::string &File,
                                              const std::string &EntryFile,
                                              bool EntryIsModule,

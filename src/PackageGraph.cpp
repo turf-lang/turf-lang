@@ -49,10 +49,30 @@ const PackageInfo *PackageGraph::packageOf(const std::string &Path) const {
   // Longest SrcRoot wins, so a package vendored inside another package's
   // directory tree is still attributed to itself.
   const PackageInfo *Best = nullptr;
-  for (const auto &P : Packages)
-    if (IsUnder(C, P.SrcRoot) && (!Best || P.SrcRoot.size() > Best->SrcRoot.size()))
+  size_t BestLen = 0;
+  auto Consider = [&](const PackageInfo &P, const std::string &Dir) {
+    if (!Dir.empty() && IsUnder(C, Dir) && (!Best || Dir.size() > BestLen)) {
       Best = &P;
+      BestLen = Dir.size();
+    }
+  };
+  for (const auto &P : Packages) {
+    Consider(P, P.SrcRoot);
+    // A test file is the root package's own code (REL-002), so an import
+    // inside it resolves with that package's rules.
+    Consider(P, P.TestsRoot);
+  }
   return Best;
+}
+
+bool PackageGraph::inTests(const std::string &Path) const {
+  if (!Active || Path.empty())
+    return false;
+  const PackageInfo *R = find(Root);
+  if (!R || R->TestsRoot.empty())
+    return false;
+  std::string C = Canonical(Path);
+  return !C.empty() && IsUnder(C, R->TestsRoot);
 }
 
 // A package name is spelled in `import`, so it must lex as one identifier.
@@ -137,13 +157,30 @@ std::optional<PackageGraph> LoadPackageGraph(const std::string &File,
     }
     if (auto U = P->getBoolean("allow_unsafe"))
       Info.AllowUnsafe = *U;
+    if (P->get("tests")) {
+      auto Tests = P->getString("tests");
+      if (!Tests)
+        return Fail("package '" + Name + "': \"tests\" must be a directory path");
+      if (Name != G.Root)
+        return Fail("package '" + Name + "': only the root package can have \"tests\"");
+      llvm::SmallString<256> TestsPath(*Tests);
+      if (!llvm::sys::path::is_absolute(TestsPath)) {
+        llvm::SmallString<256> Joined(BaseDir);
+        llvm::sys::path::append(Joined, TestsPath);
+        TestsPath = Joined;
+      }
+      if (!llvm::sys::fs::is_directory(TestsPath))
+        return Fail("package '" + Name + "': tests directory " + TestsPath.str().str() +
+                    " does not exist");
+      Info.TestsRoot = Canonical(TestsPath.str().str());
+    }
 
     // Unknown keys are an error, the same rule the manifest follows
     // (FREEZE.md 6.16): a misspelled "allow_unsafe" must not silently mean
     // "no".
     for (const auto &Field : *P) {
       llvm::StringRef K = Field.first;
-      if (K != "src" && K != "deps" && K != "allow_unsafe")
+      if (K != "src" && K != "deps" && K != "allow_unsafe" && K != "tests")
         return Fail("package '" + Name + "': unknown key \"" + K.str() + "\"");
     }
     G.Packages.push_back(std::move(Info));
@@ -183,15 +220,19 @@ std::optional<PackageGraph> LoadPackageGraph(const std::string &File,
   }
 
   std::string Entry = Canonical(EntryFile);
-  if (Entry.empty() || !IsUnder(Entry, Root->SrcRoot))
+  // A graph that names tests/ is the one `turfc --test` hands each test
+  // compile (REL-002): the file may be any test, not just src/main.tr.
+  const bool EntryIsTest =
+      !Entry.empty() && !Root->TestsRoot.empty() && IsUnder(Entry, Root->TestsRoot);
+  if (Entry.empty() || (!IsUnder(Entry, Root->SrcRoot) && !EntryIsTest))
     return Fail("the file being compiled (" + EntryFile + ") is not inside the root package's src " +
-                Root->SrcRoot);
+                Root->SrcRoot + (Root->TestsRoot.empty() ? "" : " or tests " + Root->TestsRoot));
   // A package has ONE program entry point, src/main.tr (FREEZE.md 6.16's
   // layout; owner decision 2026-09-30). Accepting any file under src/ as a
   // program made "which file is the program?" a question each driver answered
   // for itself, and let a helper module with a stray `fn main` be built as a
   // second program. Any other file is a module, checked with --module.
-  if (!EntryIsModule) {
+  if (!EntryIsModule && !EntryIsTest) {
     llvm::SmallString<256> Main(Root->SrcRoot);
     llvm::sys::path::append(Main, "main.tr");
     if (Entry != Canonical(Main.str().str()))
