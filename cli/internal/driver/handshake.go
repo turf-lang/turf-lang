@@ -15,11 +15,15 @@ import (
 type CompilerInfo struct {
 	Release   string
 	Interface version.Interface
+	// Extra holds the later `<key> <value>` lines (llvm, runtime, root), in the
+	// compiler's order, for `turf version` to show. Nothing decides anything
+	// from them: only lines 1 and 2 are a contract.
+	Extra []string
 }
 
 // Probe runs `compiler --version` and parses its first two lines. Later lines
-// are ignored, so the compiler may add more (LLVM version, runtime ABI)
-// without breaking this turf.
+// are kept verbatim in Extra but never interpreted, so the compiler may add
+// more without breaking this turf.
 func Probe(compiler string) (CompilerInfo, error) {
 	out, err := exec.Command(compiler, "--version").Output()
 	if err != nil {
@@ -50,6 +54,11 @@ func Probe(compiler string) (CompilerInfo, error) {
 				release, compiler, version.Version, version.Required.Major,
 				version.Required.Minor, version.Required.Major),
 			Hint: "upgrade turfc, or point TURF_COMPILER at a newer one",
+		}
+	}
+	for _, l := range lines[2:] {
+		if l != "" {
+			info.Extra = append(info.Extra, l)
 		}
 	}
 	return info, nil

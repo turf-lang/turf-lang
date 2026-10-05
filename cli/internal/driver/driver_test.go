@@ -3,6 +3,7 @@ package driver
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -269,10 +270,14 @@ func TestHandshake(t *testing.T) {
 }
 
 func TestProbe(t *testing.T) {
-	c := fakeTurfc(t, t.TempDir(), "turfc 2.0.0-dev\r\ninterface 1.4\r\nextra\n")
+	c := fakeTurfc(t, t.TempDir(), "turfc 2.0.0-dev\r\ninterface 1.4\r\nllvm 22.1.8\r\nruntime turf_rt_abi_2_0\n\n")
 	got, err := Probe(c)
-	want := CompilerInfo{Release: "2.0.0-dev", Interface: version.Interface{Major: 1, Minor: 4}}
-	if err != nil || got != want {
+	want := CompilerInfo{
+		Release:   "2.0.0-dev",
+		Interface: version.Interface{Major: 1, Minor: 4},
+		Extra:     []string{"llvm 22.1.8", "runtime turf_rt_abi_2_0"},
+	}
+	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v, %v; want %+v", got, err, want)
 	}
 }

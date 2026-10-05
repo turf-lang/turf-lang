@@ -33,6 +33,11 @@ func cmdVersion([]string) int {
 	}
 	fmt.Printf("turfc %s  (interface %d.%d, %s)\n",
 		info.Release, info.Interface.Major, info.Interface.Minor, compiler)
+	// llvm / runtime / root, as the compiler reports them (REL-001): what a bug
+	// report needs, shown indented so they read as belonging to turfc's line.
+	for _, l := range info.Extra {
+		fmt.Printf("  %s\n", l)
+	}
 	turfPath, _ := os.Executable()
 	if err := driver.Handshake(compiler, turfPath); err != nil {
 		fmt.Fprintf(os.Stderr, "turf: %v\n", err)
@@ -47,7 +52,8 @@ Usage:
   turf version
   turf --version
 
-Prints turf's version and the discovered compiler's version and path. The two
+Prints turf's version and the discovered compiler's version and path, then the
+compiler's LLVM version, runtime ABI and install root. The two
 are released independently and need not match; what must fit is the driver
 interface: turf needs a turfc with the same interface major and at least the
 minor it names. A compiler that does not fit is reported, and turf refuses to

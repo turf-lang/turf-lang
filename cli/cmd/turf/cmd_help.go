@@ -22,7 +22,10 @@ func overallHelp() string {
 		}
 		b.WriteString("\n")
 	}
-	b.WriteString("Run 'turf help <command>' for a command's options.\n")
+	b.WriteString("Run 'turf help <command>' for a command's options.\n\n")
+	b.WriteString("Exit status: 0 success, 1 an error was reported (a compile error, a bad\n")
+	b.WriteString("manifest, a failed fetch), 2 the command line is wrong. `turf run` exits with\n")
+	b.WriteString("the program's own status once the program has started.\n")
 	return b.String()
 }
 
