@@ -32,6 +32,7 @@ myapp/
   src/main.tr        present: the package is a program
   src/myapp.tr       present: the package is a library; this is its root module
   src/**.tr          the package's other (internal) modules
+  tests/**.tr        the package's tests, run by `turf test`
   build/             output: the executable and package-graph.json; not committed
 ```
 
@@ -81,8 +82,7 @@ myapp/
   under `src/` are an ambiguity (section 4).
 - `turf.lock` is created by the first `turf build`, `run`, `check` or `fetch`,
   even when there is nothing to pin. `build/` is disposable: `turf clean`
-  deletes it. `tests/` is reserved for `turf test`, which does not exist yet
-  (`turf test` says `'test' is not implemented yet (REL-002)`).
+  deletes it. `tests/` is what `turf test` runs (see *Tests* below).
 
 ### `turf new` and `turf init`
 
@@ -144,6 +144,73 @@ turf: 'my-app' is not a valid package name: it must match [A-Za-z_][A-Za-z0-9_]*
 
 A *program* named like a stdlib module is fine (`turf new json` works), since
 nothing can import a program.
+
+### Tests: `turf test`
+
+`turf test` compiles and runs every `.tr` file under the project's `tests/`
+directory, at any depth, in parallel, and exits 0 only if all of them pass.
+**A project with no `tests/` directory is an error**, and so is one whose
+`tests/` holds no tests: a run of zero tests that reports success is how an
+untested project goes unnoticed.
+
+```
+$ turf test
+turf: this project has no tests/ directory (looked for /home/me/app/tests)
+hint: create it and put test files in it, for example tests/basic.tr:
+
+        import test;
+
+        fn main(): int {
+            test::assert(1 + 1 == 2, "arithmetic still works");
+            return 0;
+        }
+```
+
+A test is an ordinary program with a `main` that returns 0, and the stdlib's
+`test` module (`import test;`) has the assertions. What decides pass or fail is
+the file's name:
+
+| File | Passes when |
+|---|---|
+| `name.tr` | it compiles and exits with status 0 |
+| `fail_name.tr` | it **fails to compile** (the compiler crashing does not count) |
+| `fail_name.tr` containing the comment `// RUNTIME_ABORT_EXPECTED` | it compiles and then aborts (exits non-zero) |
+| `name_module.tr` | never run: a companion for a test to `import` |
+
+Comments can pin the reason, not only the outcome, so a test cannot keep passing
+because it broke in some other way:
+
+| Comment | Holds when |
+|---|---|
+| `// EXPECT-DIAG: E011` | the compiler's output has the error code `E011` |
+| `// EXPECT-DIAG: some text` | ... or this text (for a warning, which has no code) |
+| `// EXPECT-NO-DIAG: some text` | the compiler's output does **not** have this text |
+| `// EXPECT-RUNTIME: some text` | the aborting program printed this text |
+| `// EXPECT-EXIT: 134` | the aborting program exited with this status |
+
+Each test runs in its own directory (so it can open a data file beside it) with
+no standard input, and is stopped after 5 seconds. A test imports what the
+package itself can: its own modules under `src/`, its direct dependencies and
+the standard library, plus the `*_module.tr` helpers in `tests/`. The
+internal-module rules of section 4 apply to a test exactly as to `src/`: it
+cannot import another package's internal module (E091).
+
+`turf test` takes `--offline` and `--locked` (it resolves the project first,
+like `turf build`), and hands the rest to the compiler's runner:
+
+| Flag | Meaning |
+|---|---|
+| `--jobs <n>` | tests running at once (default: every processor, or `$TURF_TEST_JOBS`) |
+| `--timeout <seconds>` | how long one test program may run (default 5, or `$TURF_TEST_TIMEOUT_SEC`) |
+| `--exclude <path>` | skip a file or directory, relative to `tests/`; repeatable |
+| `-O0`..`-Os`, `-g`, `--link <lib>` | passed to every test's compile |
+
+`-o` and `--package-graph` are refused, as for `turf build`. The exit status is 0
+when every test passed and 1 when one failed or nothing could run.
+
+The same runner is `turfc --test [<dir>] [--package-graph <file>] ...`, for a
+directory of tests that is not a project (it needs no manifest): it is also what
+runs the compiler's own suite. `turfc --test` needs a Unix-like system for now.
 
 ## 2. `turf.toml`
 
@@ -674,7 +741,7 @@ is 1.
 | `turf add <name> --path <dir>` / `--git <url> (--tag\|--branch\|--rev) <ref>` | Add a dependency (section 3). |
 | `turf remove <name>` | Remove one. |
 | `turf publish` | Reserved. There is no registry in 2.0. |
-| `turf test` | Reserved; not implemented yet (REL-002). |
+| `turf test [--offline] [--locked] [--jobs n] [--timeout s] [--exclude path]` | Compile and run every test under `tests/`; an error if there is no `tests/` (section 1, *Tests*). |
 
 **Compiler flags are forwarded.** `turf build -O2`, `turf build -g` and
 `turf run -O0` reach the compiler unchanged. **`-o` and `--package-graph` are
@@ -780,7 +847,8 @@ The standard library is always trusted.
 - **Renaming a dependency**, per-package compiler flags, and `pub(package)`.
 - **`std::`-qualified imports** to spell which candidate an ambiguous import
   means (tracked as GitHub issue #264): today the E090 tells you to rename.
-- `turf test` (REL-002), and a download-and-run installer (REL-008).
+- A download-and-run installer (REL-008). `turf test` has no name filter yet
+  (`--exclude` is the only selector), and `turfc --test` does not run on Windows.
 
 ## Design record
 

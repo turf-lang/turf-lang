@@ -861,7 +861,7 @@ Compiles, runs, and cleans up the produced binary.
 
 What's next is tracked in **[`docs/planning/FUTURE.md`](docs/planning/FUTURE.md)**, roughly in priority order:
 
-- Developer tooling: an LSP server and `turf test` (REL-002). `turf fmt` and a project/dependency tool (`turf new`, `build`, `add`; path and git dependencies) exist today; a package registry does not (`FUTURE.md` F-7c).
+- Developer tooling: an LSP server that builds against this compiler (REL-002). `turf test` (runs a project's `tests/`), `turf fmt` and a project/dependency tool (`turf new`, `build`, `add`; path and git dependencies) exist today; a package registry does not (`FUTURE.md` F-7c).
 - `@slm { }` in-source syntax (Prompt-Oriented Programming) — the `--smart` error-healing pipeline is live today; writing natural-language blocks that generate real code is not.
 - LoRA fine-tuning for the local SLM.
 - A hashed `HashMap<K, V>` (today's `map`/`set` are linear-scan association lists — see the Standard Library section above; a struct key can supply its own `hash()` now that generics are monomorphized, see `docs/reference/stdlib/collections.md`).

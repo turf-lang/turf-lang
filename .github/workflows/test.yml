@@ -161,6 +161,13 @@ jobs:
       # `add`/`remove` edit one line and keep the user's comments.
       - name: turf project smoke test (new, add, build, run, manifests, graph errors)
         run: CI=1 ./scripts/project_smoke.sh
+      # REL-002: `turfc --test` and `turf test`. test_runner.sh (above) proves
+      # the runner agrees with the conventions on tests that pass; this breaks
+      # each convention on purpose and checks the run fails for THAT reason,
+      # plus the "tests/ is required" rule, option errors, and a project's
+      # tests importing its own modules, a dependency and a helper.
+      - name: turf test smoke test (conventions, tests/ required, project tests)
+        run: CI=1 ./scripts/test_cmd_smoke.sh
       # LEC-001 stage 6: git dependencies -- the fetch cache, turf.lock pinning
       # commit and tree hash, --offline/--locked, fetch/update/add --git. Every
       # upstream is a local bare repository the script builds, so there is no

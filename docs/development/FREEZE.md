@@ -935,6 +935,58 @@ error.**
   call and this line; `scripts/cli_smoke.sh` checks `lib/libturfrt.a` defines
   it. Driver interface **1.2** is this decision; `turf` still needs only 1.1.
 
+### 6.22 Tests — `turf test` and `turfc --test` — F-TEST-1 FROZEN, F-TEST-2/3 PROPOSED (REL-002 stage 1, 2026-10-06)
+
+F-TEST-1 is the owner's rule. F-TEST-2 and F-TEST-3 are the design that landed
+with stage 1 and are **proposed**: they follow the roadmap's REL-002 text and
+`scripts/test_runner.sh`'s existing behaviour, and await the owner's
+confirmation before they are relied on as frozen.
+
+`turf test` runs a project's tests; `turfc --test` is the one implementation
+under it, and `scripts/test_runner.sh` (the compiler's own suite) is a wrapper
+over the same code, so how a test is judged exists once.
+
+- **`tests/` is required (F-TEST-1).** Owner rule, 2026-10-06: a project (or
+  `turfc --test`'s directory) that has no `tests/` directory is an **error**,
+  exit 1, with a hint showing a first test. It is never "0 tests, all passed".
+  The same holds for a directory with no tests in it. The check comes before
+  the compiler is located and before dependencies are resolved or fetched. The
+  directory is `tests/` at the project root; there is no manifest key to move it.
+- **Judged by file name and markers (F-TEST-2).** Under the tests directory, at
+  any depth, every `.tr` file is a test, except a file named `*_module.tr` (a
+  companion to import) and hidden entries. A plain file must compile and exit 0;
+  `fail_*.tr` must fail to compile (a compiler killed by a signal does not count);
+  `fail_*.tr` containing `RUNTIME_ABORT_EXPECTED` must compile, then exit
+  non-zero (not by timeout); `// EXPECT-DIAG`, `// EXPECT-NO-DIAG`,
+  `// EXPECT-RUNTIME` and `// EXPECT-EXIT` markers pin *why* (LEC-005). Each test
+  runs in its own child process with **its own directory as the working
+  directory**, standard input from the null device, and a time limit
+  (default 5 seconds, `--timeout` / `TURF_TEST_TIMEOUT_SEC`). The diagnostic
+  register (`tests/DIAGNOSTIC_GAPS.txt`, issue #263) is the compiler suite's own
+  policy: it is enforced only when `--diag-register <file>` is given, which only
+  `scripts/test_runner.sh` does.
+- **A test is the root package's code (F-TEST-3).** In a project, `turf test`
+  gives the compiler a package graph whose root package names its `"tests"`
+  directory (driver interface **1.3**; `include/PackageGraph.h`). A test file
+  may then be the program entry point (any file there, not only `src/main.tr`)
+  and imports what `src/**` of the package can: the package's own modules, its
+  direct dependencies' root modules, the standard library, and the helper
+  modules (`*_module.tr`) in `tests/`. The E090/E091 rules apply to it
+  unchanged. A `src/` module never sees a test helper. Only `turf test` writes
+  the key, so a turfc older than 1.3 still serves every other command and
+  `turf test` refuses it with a message about the interface.
+- **Command line.** `turfc --test [<dir>]` (default `tests`; must be the first
+  argument, takes a directory, never a file) with `--package-graph <file>`,
+  `--exclude <path>` (repeatable), `--jobs <n>` (`TURF_TEST_JOBS`), `--timeout
+  <seconds>`, `--diag-register <file>`, and the compile flags `-O0..-Os`, `-g`,
+  `--link <lib>`, `--allow-unsafe-modules`, `--stdlib-warnings`, applied to
+  every test's compile. `turf test` runs it from the project root and passes
+  unknown flags through. Exit status: 0 every test passed; 1 a test failed or
+  the run could not start; 2 a usage error (§6.21).
+- **Not frozen:** the wording of the per-test report lines, the order tests
+  finish in, and `turfc --test`'s behaviour on Windows (not supported yet; it
+  needs a process runner for that platform, REL-008).
+
 ---
 
 ## Appendix — frozen-decision IDs
@@ -1000,6 +1052,9 @@ Overhaul (F-TYPE-1), whose third column points at their section above.
 | **F-CLI-2** | An unknown option or command is a usage error (2) with a nearest-spelling suggestion; never ignored, never forwarded as a file. | §6.21 above |
 | **F-CLI-3** | Help is `turf help`/`turf <cmd> --help`/`turfc help`; `turfc --help` is deliberately an unknown option pointing at `turfc help`. | §6.21 above (owner decision 2026-10-06) |
 | **F-CLI-4** | `turfc --version` lines 1-2 are the driver-interface contract; later `<key> <value>` lines (`llvm`, `runtime`, `root`) are informational and extendable. | §6.21 above |
+| **F-TEST-1** | A project without a `tests/` directory (or with no tests in it) is an error for `turf test` and `turfc --test`, never a silent pass. | §6.22 above (owner rule, 2026-10-06) |
+| **F-TEST-2** (proposed) | A test is judged by its file name (plain / `fail_*` / `RUNTIME_ABORT_EXPECTED`, `*_module.tr` skipped) and its `EXPECT-*` markers, by one implementation (`turfc --test`) that `turf test` and `scripts/test_runner.sh` both drive; each test runs in its own directory. | §6.22 above |
+| **F-TEST-3** (proposed) | In a project a test file is the root package's code: it may be the entry point and imports the package's modules, direct dependencies, stdlib and `tests/` helpers (package-graph `"tests"` key, driver interface 1.3). | §6.22 above |
 
 ---
 

@@ -37,8 +37,8 @@
 > collision-free module resolution (E090/E091), `[unsafe] allow`, `examples/`,
 > and `docs/reference/projects_and_packages.md`. One completion criterion is
 > handed on rather than met: the Part IX walkthrough "verbatim on a clean
-> machine" needs REL-008's installer and `turf test` is REL-002 (Part IX now
-> says line by line what works today). Part I's sequence has the
+> machine" needs REL-008's installer (`turf test`, once REL-002's, landed in
+> stage 1 on 2026-10-06; Part IX now says line by line what works today). Part I's sequence has the
 > current state of every Phase 1 item; the rest of Phase 1 and the other
 > Phase 2+ items remain unimplemented. Items marked
 > **DECISION** need an explicit answer from the project owner before their
@@ -1247,6 +1247,21 @@ suite in its repo green against the release candidate.
 **Non-goals** debugger adapter (gdb works via `-g`), doc generator (FUTURE
 F-11c), REPL.
 
+**Status 2026-10-06: IN PROGRESS.** *Stage 1, `turf test`: done, uncommitted.*
+Owner rules: a project without `tests/` is an error, and the command exists on
+both `turfc` and `turf`. `turfc --test [<dir>]` (`TestRunner.cpp`,
+`TestExpectations.cpp`) is the one implementation of the conventions; `turf test`
+runs it over the project's package graph (new `"tests"` key, driver interface
+1.3), so a test imports the package's own modules, its dependencies and `tests/`
+helpers; `scripts/test_runner.sh` is a wrapper over it and its 1138 tests give
+identical per-test results. The diagnostic policy it ported had a check that never
+fired (an unpinned `fail_*` test passed); it is now enforced and no existing test
+trips it. Open from the stage: the owner's confirmation of F-TEST-2/3
+(`FREEZE.md` §6.22), a name filter, `turfc --test` on Windows (REL-008).
+*Stages 2 (`turf fmt` project mode, `--check`, the idempotence and token-stream
+guarantees, CI) and 3 (`turf-lsp` on the SMP-001 facade, the VS Code extension)
+not started.* Record: `docs/development/changes/REL-002.md`.
+
 ---
 
 ### REL-003 — Platforms, distribution, installation (includes D20)
@@ -1712,7 +1727,7 @@ target and is unchanged):
 | `import geometry;` `import jsonx;` `import io;` | Real. |
 | `turf build` "fetches, writes `turf.lock`, compiles everything from source" | Real. It also prints `turf: fetching <name> (<url>)` per repository, and `turf.lock` pins the commit and a SHA-256 of the tree. |
 | `turf run` | Real. |
-| `turf test` | **Not implemented.** It exits 2 with `turf: 'test' is not implemented yet (REL-002)`. |
+| `turf test` | Real (REL-002 stage 1, 2026-10-06). Runs `tests/**/*.tr`; a project with no `tests/` is an error. |
 | `git tag v0.1.0 && git push --tags` | Plain git; consumers then write `{ git = "…", tag = "v0.1.0" }`, which is real. |
 | `cp build/plotter /somewhere` | Real: the copy runs from any directory. "Static-runtime" is accurate (`libturfrt` is linked in), but the program is not fully static: `ldd` shows `libm`, `libc` and the loader, and `turfc` still links with the system `cc`. Fully static programs and a `turfc` that needs no C toolchain are REL-008. |
 

@@ -51,7 +51,7 @@ Other:
 Run 'turf help <command>' for a command's options.
 ```
 
-`turf help <command>` prints each command's options. The project commands (`new`, `init`, `build`, `run` without a file, `check` without a file, `clean`, `fetch`, `add`, `remove`, `update`) are documented in [Projects & Packages](projects_and_packages.md). `turf test` is reserved for REL-002 and says so; `turf publish` is reserved because there is no registry in 2.0.
+`turf help <command>` prints each command's options. The project commands (`new`, `init`, `build`, `run` without a file, `check` without a file, `clean`, `fetch`, `add`, `remove`, `update`) are documented in [Projects & Packages](projects_and_packages.md). `turf test` runs the project's `tests/` (an error if there is none; see [Projects & Packages](projects_and_packages.md)); the same runner is `turfc --test [<dir>]`. `turf publish` is reserved because there is no registry in 2.0.
 
 ### Compiling a file
 
