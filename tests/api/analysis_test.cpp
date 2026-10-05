@@ -1225,6 +1225,52 @@ static void testGenericOperatorDiagnostics() {
 // being written through one. E141 is checked after every body (it follows a
 // slice handed on to another function), so this also covers the facade's
 // per-declaration recovery running that deferred pass.
+// A candidate overload of an IMPORTED function is declared in the module's file,
+// not the program's. Its location used to carry no file, which every consumer
+// reads as "a line of the file being compiled": the note printed
+// `(line 40, col 8)` as if that were in the user's program, and --smart showed
+// the model an unrelated line of it as "the candidate" (SLM_IMPROVEMENT_PLAN
+// C4). Both the arity error (Resolver) and the overload error (TypeChecker)
+// must name the module's own file.
+static void testImportedCandidateLocation() {
+  CurrentTest = "imported candidate overloads name their own file";
+  struct Case {
+    const char *Label;
+    const char *Body;
+    const char *Code;
+  };
+  const Case Cases[] = {
+      {"wrong argument count",
+       "import math;\nfn main(): int { return math::abs(0, 0); }", "E044"},
+      {"wrong argument type",
+       "import math;\nfn main(): int { return math::abs(true); }", "E025"},
+  };
+  for (const auto &C : Cases) {
+    auto R = turf::analyze({{"callsite.tr", std::string(C.Body) + "\n"}});
+    CHECK(!R.succeeded());
+    bool Found = false;
+    for (const auto &D : R.diagnostics()) {
+      if (D.Code != C.Code)
+        continue;
+      Found = true;
+      CHECK(!D.Related.empty());
+      for (const auto &Rel : D.Related) {
+        const bool InMath = Rel.Where.Path.size() >= 7 &&
+                            Rel.Where.Path.compare(Rel.Where.Path.size() - 7, 7,
+                                                   "math.tr") == 0;
+        CHECK(InMath);
+        CHECK(Rel.Where.Line > 0);
+        if (!InMath)
+          std::cerr << "    case '" << C.Label << "': related note at '"
+                    << Rel.Where.Path << "' line " << Rel.Where.Line << "\n";
+      }
+    }
+    CHECK(Found);
+    if (!Found)
+      std::cerr << "    case '" << C.Label << "' produced:\n" << render(R);
+  }
+}
+
 static void testUnsizedArrayDiagnostics() {
   CurrentTest = "unsized array (slice) diagnostics";
   struct Case {
@@ -1407,6 +1453,7 @@ int main() {
   testErrorPayloadDiagnostics();
   testGenericOperatorDiagnostics();
   testUnsizedArrayDiagnostics();
+  testImportedCandidateLocation();
 
   if (Failures) {
     std::cerr << Failures << " check(s) failed\n";

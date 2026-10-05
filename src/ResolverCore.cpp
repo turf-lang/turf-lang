@@ -20,6 +20,7 @@
 #include "Errors.h"          // ReferenceError, DuplicateDeclarationError
 #include "ErrorsStruct.h"    // StructLayoutCycleError
 #include "Monomorphize.h"    // Monomorphize::instantiatedDeclName() -- byValueEdgeTarget()'s clone-name resolution, OVH-004
+#include "Parser.h"          // ResolveModuleFile() -- candidateLocation()
 #include "ResolverSymbolTable.h"
 #include "ResolverInternal.h"
 #include "SuggestionIndex.h" // SuggestionIndex::suggestVisible
@@ -33,6 +34,17 @@
 #include <memory>
 #include <unordered_map> // checkStructLayoutAcyclicity()'s name -> AST / colour maps
 #include <unordered_set>
+
+
+SourceLocation candidateLocation(const ResolverFunctionSymbol &Cand) {
+  SourceLocation L = toSourceLocation(Cand.DeclLoc);
+  if (!Cand.SourceModule.empty()) {
+    L.Filename = ResolveModuleFile(Cand.SourceModule, SourceFilename);
+    if (L.Filename.empty())
+      L.Filename = "<module " + Cand.SourceModule + ">";
+  }
+  return L;
+}
 
 
 // ─── Public entry points ──────────────────────────────────────────────────────

@@ -551,7 +551,7 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
         if (Cand) {
           if (!Overloads.empty()) Overloads += ", ";
           Overloads += Cand->signature();
-          Related.push_back({toSourceLocation(Cand->DeclLoc),
+          Related.push_back({candidateLocation(*Cand),
                              "overload: " + Cand->signature()});
         }
       }
@@ -614,7 +614,7 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
       for (const auto &Cand : ArityMatches) {
         if (!Cand)
           continue;
-        Related.push_back({toSourceLocation(Cand->DeclLoc),
+        Related.push_back({candidateLocation(*Cand),
                            "candidate: " + Cand->signature()});
         if (Cand->SourceModule.empty() ||
             (!CandidateModule.empty() && Cand->SourceModule != CandidateModule))
@@ -623,6 +623,12 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
           CandidateModule = Cand->SourceModule;
       }
       const bool IsModuleCall = OneModule && !CandidateModule.empty();
+      // Which variable each argument type came from, for the SLM: the message
+      // lists the types in order, the candidates (Related) are the signatures
+      // to match them against, and this ties each type to a name.
+      SLM::DiagnosticHints Hints;
+      for (const auto &Arg : Node.getArgs())
+        addIdentifierTypes(Arg.get(), Hints);
       reportError(Node.getLoc(),
                   IsModuleCall ? ErrCode::ModuleArityOrType : ErrCode::ArgumentType,
                   "No overload of '" +
@@ -634,7 +640,7 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
                       ? "'null' is only valid for pointer-typed parameters -- "
                         "none of the overloads above take a pointer here."
                       : "",
-                  "No matching overload!");
+                  "No matching overload!", Hints);
       setType(&Node, nullptr);
       return;
     }
@@ -1017,7 +1023,7 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
       for (const auto *Cand : Candidates) {
         if (!Overloads.empty()) Overloads += ", ";
         Overloads += ModuleName + "." + Cand->signature();
-        Related.push_back({toSourceLocation(Cand->DeclLoc),
+        Related.push_back({candidateLocation(*Cand),
                            "overload: " + ModuleName + "." + Cand->signature()});
       }
       reportError(Node.getLoc(), ErrCode::WrongArity,
@@ -1058,7 +1064,7 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
         ArgTypeStr += (ArgTypes[i] ? ArgTypes[i]->getName() : "unknown");
       }
       for (const auto *Cand : ArityMatches)
-        Related.push_back({toSourceLocation(Cand->DeclLoc),
+        Related.push_back({candidateLocation(*Cand),
                            "candidate: " + ModuleName + "." + Cand->signature()});
       reportError(Node.getLoc(), ErrCode::ModuleArityOrType,
                   "No overload of '" + ModuleName + "::" + MethodName +
@@ -1389,7 +1395,7 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
             ArgTypeStr += (ArgTypes[i] ? ArgTypes[i]->getName() : "unknown");
           }
           for (const auto *Cand : ArityMatches)
-            Related.push_back({toSourceLocation(Cand->DeclLoc),
+            Related.push_back({candidateLocation(*Cand),
                                "candidate: " + Cand->signature()});
           reportError(Node.getLoc(), ErrCode::ArgumentType,
                       "No overload of '" + StructName + "." + MethodName +
@@ -1690,8 +1696,13 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
               BareMethodNames.push_back(N.substr(Prefix.size()));
           Suggestions.Local =
               SuggestionIndex::suggestVisible(MethodName, BareMethodNames);
+          // The receiver's declaration goes to the SLM as its own field: the
+          // methods a struct has are written outside it, but its fields are
+          // what a method body may use, and the model cannot see them if the
+          // struct is declared outside its code window.
           StructMethodNotFoundError(Node.getNameLoc(), StructName, MethodName,
                                     Suggestions)
+              .withReceiverDecl(describeStruct(BaseTy.get()))
               .raise();
         } else if (!IsStaticMethod && [&] {
           // This '.' call expected every candidate's arity to be
@@ -1741,7 +1752,7 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
           std::vector<RelatedLocation> Related;
           for (const auto *Cand : Candidates) {
             KnownSigs.push_back(Cand->signature());
-            Related.push_back({toSourceLocation(Cand->DeclLoc),
+            Related.push_back({candidateLocation(*Cand),
                                "candidate: " + Cand->signature()});
           }
           auto Err = WrongArityError(Node.getLoc(), StructName + "." + MethodName,
@@ -1804,7 +1815,7 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
         // opposite of what a near-miss like this actually means.
         std::vector<RelatedLocation> Related;
         for (const auto *Cand : NamedCandidates)
-          Related.push_back({toSourceLocation(Cand->DeclLoc),
+          Related.push_back({candidateLocation(*Cand),
                              "candidate: " + Cand->signature()});
         reportError(Node.getLoc(), ErrCode::ArgumentType,
                     "No visible '" + MethodName + "' overload accepts a '" +
@@ -2030,6 +2041,7 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
             SuggestionIndex::suggestVisible(Node.getFieldName(), FieldNames);
         UnknownStructFieldError(Node.getNameLoc(), STy->getName(),
                                 Node.getFieldName(), Suggestions)
+            .withReceiverDecl(describeStruct(STy))
             .raise();
         return;
       }

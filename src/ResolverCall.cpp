@@ -374,7 +374,7 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
           for (const auto *Sym : RawCurrentFileMatches)
             Err.withRelated(toSourceLocation(Sym->DeclLoc), "candidate");
           for (const auto &Match : RawModuleMatches)
-            Err.withRelated(toSourceLocation(Match.Symbol->DeclLoc), "candidate");
+            Err.withRelated(candidateLocation(*Match.Symbol), "candidate");
           Err.raise();
           return;
         }
@@ -644,7 +644,7 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
     for (const auto *Sym : CurrentFileMatches)
       Err.withRelated(toSourceLocation(Sym->DeclLoc), "candidate");
     for (const auto &Match : ModuleMatches)
-      Err.withRelated(toSourceLocation(Match.Symbol->DeclLoc), "candidate");
+      Err.withRelated(candidateLocation(*Match.Symbol), "candidate");
     Err.raise();
     return;
   }
