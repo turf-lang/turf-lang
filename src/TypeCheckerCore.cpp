@@ -25,6 +25,7 @@
 
 #include "TypeCheckerInternal.h"
 #include "Parser.h"
+#include "ASTChildWalker.h"
 
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/SmallString.h"
@@ -58,6 +59,8 @@ void productionErrorHandler(SourceLocation Loc, const char *Code,
     Err.withRelated(R.Loc, R.Description);
   for (const auto &Fact : Hints.KnownTypes)
     Err.withKnownType(Fact);
+  if (!Hints.ReceiverDecl.empty())
+    Err.withReceiverDecl(Hints.ReceiverDecl);
   Err.raise();
 }
 #else
@@ -157,6 +160,67 @@ void TypeChecker::setType(const ExprAST *Node, TurfTypePtr Ty) {
 const char *TypeChecker::codeForMismatch(const TurfType *A, const TurfType *B,
                                          const char *Default) {
   return (A && A->isVoid()) || (B && B->isVoid()) ? ErrCode::VoidValue : Default;
+}
+
+std::string TypeChecker::describeStruct(const TurfType *T) {
+  const auto *S = dynamic_cast<const TurfStructType *>(T);
+  if (!S)
+    return "";
+  std::string out = "struct " + S->getName() + " {";
+  bool first = true;
+  for (const auto &F : S->getFields()) {
+    out += first ? " " : ", ";
+    first = false;
+    out += F.Name + ": " + (F.Type ? F.Type->getName() : "?");
+  }
+  return out + (first ? "}" : " }");
+}
+
+namespace {
+/// Collects every VariableExprAST under an expression (ASTChildWalker says
+/// where each node's children are, so this misses none -- a call argument, an
+/// operand inside a cast, a condition).
+class VariableCollector : public ASTChildWalker {
+public:
+  std::vector<const VariableExprAST *> Vars;
+  void visitVariable(VariableExprAST &Node) override { Vars.push_back(&Node); }
+};
+} // namespace
+
+void TypeChecker::addIdentifierTypes(const ExprAST *E,
+                                     SLM::DiagnosticHints &Hints) {
+  // How many identifiers one diagnostic reports types for: past a few the list
+  // is the whole function's locals, which the model can already read.
+  constexpr size_t kMaxFacts = 6;
+  if (!E)
+    return;
+  VariableCollector C;
+  C.visitChild(E);
+  for (const VariableExprAST *V : C.Vars) {
+    if (Hints.KnownTypes.size() >= kMaxFacts)
+      return;
+    // A bare name that is not a variable (a function used as a value, an
+    // `export immut` constant) has no declared type of its own to report.
+    if (!V->getResolvedSymbol())
+      continue;
+    TurfTypePtr Ty = getType(V);
+    if (!Ty || Ty->isFunc())
+      continue;
+    const std::string &Name = V->getName();
+    // A site that already described this name (the `guess` facts in
+    // visitAssignment, which say more than the bare type) is not repeated.
+    bool Seen = false;
+    for (const std::string &F : Hints.KnownTypes)
+      Seen = Seen || F.compare(0, Name.size() + 2, Name + ": ") == 0 ||
+             F.find("'" + Name + "'") != std::string::npos;
+    if (Seen)
+      continue;
+    Hints.KnownTypes.push_back(
+        Name + ": " + Ty->getName() +
+        (V->getResolvedSymbol()->WasGuessInferred
+             ? " (declared with 'guess': this type was inferred)"
+             : ""));
+  }
 }
 
 std::string TypeChecker::hintForMismatch(const TurfType *A, const TurfType *B,

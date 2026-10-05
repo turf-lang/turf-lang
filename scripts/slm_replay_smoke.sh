@@ -65,8 +65,10 @@ CASES=(
   "method_block.fuzzy_copy:validated|candidate [12, 12] (fuzzy copy): validated"
   # A copy that is nowhere in the program: no guessing a line for new_code
   # (which would have validated, being right for line 12). The attempt fails
-  # with the copying message, which reaches the model, and attempt 2 wins.
-  "method_block.not_in_program:validated|original_code does not appear in the program; copy the lines exactly|(attempt 2/3)"
+  # with the copying message, which reaches the model, and attempt 2 wins. The
+  # message quotes the error line instead of numbering it: the model is shown no
+  # line numbers (C5), so a number would only invite it to count again.
+  "method_block.not_in_program:validated|original_code does not appear in the program; copy the lines exactly|The line the error is on reads: return self.n;|!The error is on line|(attempt 2/3)"
   # The same line twice: the copy nearest the error wins, in either order.
   "dup_second.nearest_wins:validated|candidate [11, 11] (exact copy): validated|!candidate [7, 7]"
   "dup_first.nearest_wins:validated|candidate [7, 7] (exact copy): validated|!candidate [11, 11]"
@@ -75,6 +77,25 @@ CASES=(
   "insert_line.empty_original:validated|candidate [1, 1] (insertion after the error line): validated"
   # An empty new_code is never a fix (it would delete the line), and says so.
   "method_block.empty_new_code:rejected|new_code was empty"
+
+  # What the model is shown (workstream C). The logs carry both prompts
+  # (TURF_SLM_DEBUG prints the user turn, TURF_SLM_DUMP_PROMPT the system turn).
+  #
+  # C5: the code is the file's own text, verbatim: no `>> 12 |` / `   11 |`
+  # gutter, no "Code Context" header, no marker in any line. The error line is
+  # its own field, so a copy of any line of "code" is a valid original_code. The
+  # system prompt's rule 2 no longer talks about numbers or markers to leave out.
+  "method_block.exact_copy:validated|\"error_line\": \"    return self.n;\"|fn Box.count(): string {\\n    return self.n;\\n}|!>> 12 |!Code Context|!   11 | |!WITHOUT the line numbers|line(s) of \"code\" that your fix changes"
+  # C2: the syntax card is always in the system prompt, ahead of the docs.
+  "method_block.exact_copy:validated|TURF SYNTAX (only this; not C, Python or Rust):|fn<T> Box.get(): T { return self.v; }|Syntax card: docs/slm/syntax_card.txt"
+  # C4: the declaration an error sits in, when the code window does not reach
+  # its header (describe() is longer than the +-8 lines shown) ...
+  "long_function.facts:validated|\"inside\": \"fn describe(n: int): string\"|\"known_types\": [\"sum: int\"]|\"error_line\": \"    return sum;\""
+  # ... the struct a field error is about, whole, from the compiler's own type ...
+  "unknown_field.receiver:validated|\"receiver\": \"struct Box { v: int, n: int }\""
+  # ... and the candidate overloads of an IMPORTED function, with the lines
+  # read from the module's own file (these used to be lines of the program).
+  "imported_callee.related:validated|\"related\": [{\"code\": \"pub fn abs(val: double): double {\", \"note\": \"candidate\"}|math.tr, line"
 )
 
 FAILED=0
@@ -90,7 +111,7 @@ for entry in "${CASES[@]}"; do
   responses="$DIR/$name.responses"
   fixed="$TMP/$name.fixed.tr"
 
-  output=$(TURF_SLM_DEBUG=1 TURF_SLM_REPLAY="$responses" \
+  output=$(TURF_SLM_DEBUG=1 TURF_SLM_DUMP_PROMPT=1 TURF_SLM_REPLAY="$responses" \
     "$TURF" --smart "--smart-write-fix=$fixed" "$program" 2>&1)
 
   ok=1

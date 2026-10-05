@@ -387,13 +387,17 @@ void TypeChecker::visitReturn(ReturnExprAST &Node) {
                           RetTy->getName() + "'.",
                       {}, Hint);
         } else {
+          // The types of the identifiers in the returned expression, for the
+          // SLM (see visitVarDecl()).
+          SLM::DiagnosticHints Hints;
+          addIdentifierTypes(Node.getVal(), Hints);
           reportError(Node.getLoc(),
                       codeForMismatch(RetTy.get(), nullptr,
                                       ErrCode::ReturnTypeMismatch),
                       "Return type mismatch: function declares '" +
                           Declared->getName() + "' but returns '" +
                           RetTy->getName() + "'.",
-                      {}, hintForMismatch(RetTy.get(), nullptr, ""));
+                      {}, hintForMismatch(RetTy.get(), nullptr, ""), "", Hints);
         }
       } else {
         // SEM-002 -- see visitVarDecl()'s identical comment

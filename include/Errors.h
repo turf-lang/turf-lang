@@ -153,6 +153,13 @@ public:
     return *this;
   }
 
+  // SLM_IMPROVEMENT_PLAN C4: the declaration of the struct this diagnostic is
+  // about (DiagnosticHints::ReceiverDecl). Chainable.
+  TurfError &withReceiverDecl(const std::string &Decl) {
+    Hints_.ReceiverDecl = Decl;
+    return *this;
+  }
+
   // ── Fix-its (SLM-001 item 1, DiagnosticHints::FixIts) ──────────────────────
   //
   // A fix-it is an exact edit the raise site already knows, applied by --smart

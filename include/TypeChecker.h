@@ -367,6 +367,21 @@ private:
   /// exactly this, and the code was raised for `heap(void)` only.)
   static const char *codeForMismatch(const TurfType *A, const TurfType *B,
                                      const char *Default);
+
+  /// SLM_IMPROVEMENT_PLAN C4 (DiagnosticHints::ReceiverDecl): the declaration
+  /// of the struct @p T as the model should see it -- `struct Box<int> { v:
+  /// int, n: int }`, built from the type's own name and fields, so a generic
+  /// instantiation shows the concrete field types. "" when @p T is not a
+  /// struct.
+  static std::string describeStruct(const TurfType *T);
+
+  /// SLM_IMPROVEMENT_PLAN C4: adds `name: type` to @p Hints.KnownTypes for each
+  /// variable under @p E whose type is known and that no existing fact already
+  /// describes -- the type the TYPE CHECKER settled on, which for an
+  /// identifier declared far from the error (or with `guess`) is not on any
+  /// line the model is shown. Call it at a raise site with the expression the
+  /// message is about, before reportError(). Bounded (6 facts per diagnostic).
+  void addIdentifierTypes(const ExprAST *E, SLM::DiagnosticHints &Hints);
   static std::string hintForMismatch(const TurfType *A, const TurfType *B,
                                      const std::string &Default);
 

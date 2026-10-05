@@ -1,0 +1,1 @@
+{"explanation": "Box has no field zzz; its fields are v and n.", "fix_mode": "MODIFY", "original_code": "    b.zzz = 3;", "new_code": "    b.v = 3;", "suggested_comment": "Use the field v.", "warning": "", "category": "UNDECLARED_VARIABLE"}

@@ -221,7 +221,9 @@ bool TypeChecker::checkPattern(
           FieldNames.push_back(SF.Name);
         RankedSuggestions Suggestions;
         Suggestions.Local = SuggestionIndex::suggestVisible(F.Name, FieldNames);
-        UnknownStructFieldError(F.Loc, STy->getName(), F.Name, Suggestions).raise();
+        UnknownStructFieldError(F.Loc, STy->getName(), F.Name, Suggestions)
+            .withReceiverDecl(describeStruct(STy))
+            .raise();
         return false;
       }
       // A private field is as unreadable through a pattern as through `.`.

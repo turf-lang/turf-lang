@@ -61,6 +61,19 @@ static std::string loadDocFile(const std::string &path) {
 
 namespace SLM {
 
+// The source around the error, exactly as the file has it: the lines
+// [errorLine - contextSize, errorLine + contextSize] joined with '\n', with no
+// numbers, no header and no marker on any line.
+//
+// Until the model stopped reporting line numbers (SLM_IMPROVEMENT_PLAN
+// workstream B) every line carried a `>> 21 | ` / `   20 | ` gutter so it could
+// say where the fix went. Afterwards the gutter was pure noise the model had to
+// be told NOT to copy (rule 2), and the cause of a whole failure mode
+// (stripLineNumberPrefix() exists for it): a model that echoes `12 |` into
+// original_code makes its copy match nothing. With the text verbatim, a copy of
+// any line IS a valid original_code, so there is nothing to strip and nothing
+// to forget. Which line the error is on travels in its own field
+// ("error_line", see buildUserPrompt()), so the line's text is never altered.
 std::string getCodeContext(int errorLine, int contextSize) {
   if (SourceLines.empty()) {
     return "";
@@ -72,15 +85,11 @@ std::string getCodeContext(int errorLine, int contextSize) {
 
   std::string context;
   context.reserve(512);
-
-  context += "Code Context\n";
   for (int i = startLine; i <= endLine; ++i) {
-    std::string prefix = (i == errorLine) ? ">> " : "   ";
-    context += prefix + std::to_string(i) + " | " + SourceLines[i - 1] + "\n";
+    if (i > startLine)
+      context += "\n";
+    context += SourceLines[i - 1];
   }
-
-  context += "\n";
-
   return context;
 }
 
@@ -113,56 +122,149 @@ static int contextSizeForCategory(ErrorCategory cat) {
   return 5; // unreachable, but satisfies -Wreturn-type
 }
 
-// Builds the standard context window then appends one or more "pinned" lines
-// that are outside the window but directly relevant to the error (e.g. the
-// site where a function was declared). Pinned lines are shown with a '*'
-// prefix so the model knows they are a deliberate anchor, not part of the
-// surrounding range.
-// Lines that already fall within the [errorLine ± contextSize] window are
-// silently skipped to avoid duplication.
+// ── What the model is told besides the code window (C4 / C5) ────────────────
 //
-// Takes the full RelatedLocation list (not just line numbers): each one's
-// Description ("declared here", "candidate", "first freed here", ...) is a
-// real, meaningful label every .withRelated() call site already computes --
-// previously only rel.Loc.Line survived into this function, so the model
-// saw an unlabeled source line with no indication of WHY it was pinned or
-// how it relates to the error (especially bad for a multi-candidate arity
-// error, or telling a double-free's "declared here" apart from its "first
-// freed here").
-static std::string
-getCodeContextWithPinnedLines(int errorLine, int contextSize,
-                              const std::vector<RelatedLocation> &related) {
-  std::string context = getCodeContext(errorLine, contextSize);
+// Each fact is a field of its own in the user prompt, never folded into the
+// "code" string: the code must stay a verbatim copy of the file so that a copy
+// of any line of it is a valid original_code, and a model that has to tell
+// code from commentary inside one string reads the commentary as code.
 
-  if (related.empty() || SourceLines.empty())
-    return context;
+// One line the diagnostic points at -- the declaration an error refers back to,
+// a candidate overload -- with the reason the raise site gave for it. `code` is
+// the line exactly as it is in its file; it is empty when that file's text is
+// not available, in which case `note` alone still carries the information
+// (a candidate's note IS its signature).
+struct PinnedLine {
+  std::string code;
+  std::string note;
+};
 
-  // Compute the window boundaries to avoid pinning lines already visible.
-  int windowStart = std::max(1, errorLine - contextSize);
-  int windowEnd =
-      std::min(static_cast<int>(SourceLines.size()), errorLine + contextSize);
+// How many related lines reach the model. A diagnostic can name a dozen
+// overloads; past a few the rest cost tokens and tell it nothing new.
+static constexpr size_t kMaxPinnedLines = 6;
 
-  bool headerAdded = false;
-  for (const auto &rel : related) {
-    int lineNo = rel.Loc.Line;
-    if (lineNo < 1 || lineNo > static_cast<int>(SourceLines.size()))
-      continue;
-    // Skip lines already inside the normal context window.
-    if (lineNo >= windowStart && lineNo <= windowEnd)
-      continue;
-    if (!headerAdded) {
-      context += "Relevant definition(s)\n";
-      headerAdded = true;
-    }
-    context += "*  " + std::to_string(lineNo) + " | " +
-              SourceLines[lineNo - 1];
-    if (!rel.Description.empty())
-      context += "   // " + rel.Description;
-    context += "\n";
+// A location's source text from ITS file. DiagnosticEngine reports locations
+// of imported modules (the callee of a call, a type declared elsewhere) with
+// that module's line numbers, and the old pinned-lines code indexed the MAIN
+// file's lines with them: it showed an unrelated line of the program as "the
+// candidate". AllSourceLines is the persistent per-file cache, so the right
+// line is still there even though the module finished parsing long ago.
+static std::string relatedLineText(const RelatedLocation &rel) {
+  const std::vector<std::string> *lines = &SourceLines;
+  if (!rel.Loc.Filename.empty() && rel.Loc.Filename != SourceFilename) {
+    auto it = AllSourceLines.find(rel.Loc.Filename);
+    if (it == AllSourceLines.end())
+      return "";
+    lines = &it->second;
   }
-  if (headerAdded)
-    context += "\n";
-  return context;
+  if (rel.Loc.Line < 1 || rel.Loc.Line > static_cast<int>(lines->size()))
+    return "";
+  return (*lines)[rel.Loc.Line - 1];
+}
+
+// True when `rel` points into the file being fixed. Only those can be an
+// anchor for locating the model's copy, since the copy is searched for in
+// SourceLines.
+static bool relatedIsInMainFile(const RelatedLocation &rel) {
+  return rel.Loc.Filename.empty() || rel.Loc.Filename == SourceFilename;
+}
+
+// The related locations as the model sees them. Takes the full
+// RelatedLocation list, not just line numbers: each Description ("declared
+// here", "candidate: fn f(int)", "first freed here", ...) is a label every
+// .withRelated() call site already computes. A line that is also inside the
+// code window is kept, because the label is the point (which of these lines is
+// "the declaration"?); two entries with the same text and label are one.
+static std::vector<PinnedLine>
+collectPinnedLines(const std::vector<RelatedLocation> &related) {
+  std::vector<PinnedLine> out;
+  for (const auto &rel : related) {
+    PinnedLine p{relatedLineText(rel), rel.Description};
+    if (p.code.empty() && p.note.empty())
+      continue;
+    bool dup = false;
+    for (const auto &q : out)
+      dup = dup || (q.code == p.code && q.note == p.note);
+    if (!dup && out.size() < kMaxPinnedLines)
+      out.push_back(std::move(p));
+  }
+  return out;
+}
+
+// True for a declaration header line that starts at column 0. Turf's top-level
+// declarations are never indented (`turf --format` keeps them so), which is
+// what makes "the nearest header above the error" a reliable way to find the
+// declaration an error sits in without parsing anything.
+static bool isDeclHeader(const std::string &line, std::string &kind) {
+  static const char *kinds[] = {"fn", "struct", "enum", "error", "machine",
+                                "operator"};
+  size_t at = 0;
+  if (line.compare(0, 4, "pub ") == 0)
+    at = 4;
+  else if (line.compare(0, 7, "public ") == 0)
+    at = 7;
+  for (const char *k : kinds) {
+    const size_t n = std::strlen(k);
+    if (line.compare(at, n, k) == 0 &&
+        (line.size() == at + n || !(std::isalnum(static_cast<unsigned char>(
+                                        line[at + n])) ||
+                                    line[at + n] == '_'))) {
+      kind = k;
+      return true;
+    }
+  }
+  return false;
+}
+
+// The declaration the error line sits in -- `fn Box.count(): string`,
+// `struct Point` -- as its header up to (not including) the opening brace, and
+// the line it starts on. Empty when the error is between declarations. A fix
+// to a `return` or a call is only as good as the signature it must agree with,
+// and in a function longer than the code window that signature is not shown.
+//
+// Walks up from the error line to the nearest column-0 header. A column-0 `}`
+// above the error line means that line closed an earlier declaration, so the
+// error is not inside one. (An error ON a column-0 `}` -- "missing return" is
+// reported there -- is inside the declaration that brace closes, so that one
+// line is skipped.) A signature that continues onto the next lines is joined,
+// up to four lines.
+static std::string enclosingDeclaration(int errorLine, int &headerLine) {
+  headerLine = 0;
+  const int n = static_cast<int>(SourceLines.size());
+  if (errorLine < 1 || errorLine > n)
+    return "";
+  int i = errorLine;
+  if (!SourceLines[i - 1].empty() && SourceLines[i - 1][0] == '}')
+    --i;
+  for (; i >= 1; --i) {
+    const std::string &line = SourceLines[i - 1];
+    if (line.empty() || line[0] == ' ' || line[0] == '\t')
+      continue;
+    std::string kind;
+    if (isDeclHeader(line, kind)) {
+      std::string sig;
+      for (int j = i; j <= std::min(n, i + 3); ++j) {
+        const std::string &part = SourceLines[j - 1];
+        const size_t brace = part.find('{');
+        std::string piece = part.substr(0, brace);
+        const size_t first = piece.find_first_not_of(" \t");
+        if (first != std::string::npos)
+          piece = piece.substr(first);
+        const size_t last = piece.find_last_not_of(" \t");
+        piece = last == std::string::npos ? "" : piece.substr(0, last + 1);
+        if (!sig.empty() && !piece.empty())
+          sig += " ";
+        sig += piece;
+        if (brace != std::string::npos || (!part.empty() && part.back() == ';'))
+          break;
+      }
+      headerLine = i;
+      return sig;
+    }
+    if (line[0] == '}')
+      return "";
+  }
+  return "";
 }
 
 
@@ -186,15 +288,17 @@ static std::string escapeJsonString(const std::string &src) {
   return result;
 }
 
-// Defensive cleanup for a known small-model failure mode: despite explicit
-// prompt instructions not to, the model occasionally echoes the "N |  code"
-// line-number-prefix formatting used to display context lines (see
-// getCodeContext()/getCodeContextWithPinnedLines()) back inside
-// original_code or new_code itself, e.g. "6 |     mut b: int = 5;" instead of
-// just "    mut b: int = 5;". That prefix is never valid Turf-Lang syntax at the
-// start of a line, so stripping it here is safe and turns an otherwise
-// guaranteed sandbox-parse failure (new_code), or a copy that matches nothing
-// in the source (original_code), into a usable patch.
+// Defensive cleanup, kept as a FALLBACK now that the model is no longer shown
+// line numbers (getCodeContext() prints the code verbatim, C5). It was written
+// for a failure mode of the old display: the model echoed the "N |  code"
+// gutter that prefixed every context line back inside original_code or
+// new_code, e.g. "6 |     mut b: int = 5;" instead of just
+// "    mut b: int = 5;". A model can still produce that shape from habit (it has
+// seen `12 | code` listings in training), and that prefix is never valid
+// Turf-Lang syntax at the start of a line, so stripping it here is safe and
+// turns an otherwise guaranteed sandbox-parse failure (new_code), or a copy
+// that matches nothing in the source (original_code), into a usable patch.
+// The replay case method_block.echoed_gutter keeps it honest.
 //
 // A multi-line value echoes the prefix on EVERY line ("11 | fn ...",
 // "12 |     return ...", "13 | }"); stripping only the first (issue #267)
@@ -627,7 +731,7 @@ locateOriginal(const std::string &originalCode, int errorLine,
 
   std::vector<int> anchors{errorLine};
   for (const auto &rel : related)
-    if (rel.Loc.Line >= 1 && rel.Loc.Line <= n &&
+    if (relatedIsInMainFile(rel) && rel.Loc.Line >= 1 && rel.Loc.Line <= n &&
         std::find(anchors.begin(), anchors.end(), rel.Loc.Line) == anchors.end())
       anchors.push_back(rel.Loc.Line);
   auto nearest = [&](int s, int e) {
@@ -879,14 +983,25 @@ static std::string fnv1aHex(const std::string &Data) {
   return Out.str();
 }
 
+// `PromptBody` is the whole diagnostic-dependent part of the user prompt
+// (buildUserPrompt()): the code window and every structured fact beside it
+// (enclosing declaration, receiver struct, known types, related lines, the
+// hint). It used to be just the numbered code context, so a fact the model
+// was shown but the key did not cover could change without the key changing,
+// and a changed prompt would be answered from the cache with what the model
+// said to the old one. `Docs` is the same for the system prompt: the pages
+// under docs/slm/ are files read at run time, not part of the binary the
+// fingerprint covers, so editing one used to change the prompt and not the key.
 static std::string slmCacheKey(const std::string &ErrorCode,
                                const std::string &NormalizedMessage,
-                               const std::string &CodeContext) {
+                               const std::string &PromptBody,
+                               const std::string &Docs) {
   // '\x1f' (ASCII unit separator) as the join delimiter -- never appears in
-  // any of the three inputs (error codes are "E0NN", messages/context are
+  // any of the inputs (error codes are "E0NN", messages/context are
   // printable source text), so no input can be crafted to collide two
   // otherwise-different keys by shifting a delimiter.
-  return fnv1aHex(ErrorCode + "\x1f" + NormalizedMessage + "\x1f" + CodeContext);
+  return fnv1aHex(ErrorCode + "\x1f" + NormalizedMessage + "\x1f" + PromptBody +
+                  "\x1f" + Docs);
 }
 
 static std::string slmCacheDir() {
@@ -910,10 +1025,13 @@ static std::string slmCacheDir() {
 // depending on the binary (a release build stamping a version, say) would
 // otherwise let an entry in the previous field layout parse "successfully" as
 // an empty edit. Bump kSlmSchemaVersion whenever the fields the model is asked
-// for, or the cache file's own, change.
+// for, or the cache file's own, change -- and when what it is SHOWN changes in
+// a way the key (slmCacheKey()) does not already hash.
 //   1: replacement_line / target_line / end_line / code_patch
 //   2: original_code / new_code (workstream B)
-static constexpr int kSlmSchemaVersion = 2;
+//   3: the code is shown verbatim, with no line-number gutter, and the
+//      diagnostic's facts are structured fields (workstream C, C4/C5)
+static constexpr int kSlmSchemaVersion = 3;
 
 static std::string slmCompilerFingerprint() {
   llvm::sys::fs::file_status Status;
@@ -1014,6 +1132,95 @@ static std::string nextReplayResponse() {
   return Next < Responses.size() ? Responses[Next++] : "";
 }
 
+// ── The user prompt's JSON header ──────────────────────────────────────────
+
+// Everything the model is told about one diagnostic. `code` is the verbatim
+// window (getCodeContext()); every other member is a structured fact that is
+// emitted only when it exists, so a diagnostic that has no enclosing
+// declaration or no receiver struct simply has no such field.
+struct PromptFacts {
+  std::string error, hint;
+  // The text of the line the diagnostic is on, unaltered: how the model learns
+  // WHICH line of "code" the error is on now that the code carries no numbers
+  // or markers (a marker inside the line would change the text it copies).
+  std::string errorLine;
+  std::string code;
+  // `fn Box.count(): string` -- the declaration the error line sits in, only
+  // when it is not already in the window (enclosingDeclaration()).
+  std::string enclosing;
+  // `struct Box { v: int, n: int }` -- the struct a field or method error is
+  // about, from the raise site's own type information
+  // (DiagnosticHints::ReceiverDecl).
+  std::string receiver;
+  // DiagnosticHints::KnownTypes: `x: int`, `n was declared with 'guess' ...`.
+  std::vector<std::string> knownTypes;
+  // The raise site's related locations (candidates, "declared here", ...).
+  std::vector<PinnedLine> related;
+};
+
+static std::string jsonStringArray(const std::vector<std::string> &items) {
+  std::string out = "[";
+  for (size_t i = 0; i < items.size(); ++i)
+    out += (i ? ", \"" : "\"") + escapeJsonString(items[i]) + "\"";
+  return out + "]";
+}
+
+// TURF_SLM_RAW_CODE=1 puts the code after the JSON header as it is, one real
+// line per line, instead of as a "\n"-escaped JSON string. Only to measure
+// which of the two a model copies more exactly (C5); see buildUserPrompt().
+static bool rawCodeBlock() { return std::getenv("TURF_SLM_RAW_CODE") != nullptr; }
+
+// The JSON object the user turn opens with, without its final newline, and
+// followed (raw-code mode only) by the code block. Field order matters to a
+// small model: the question (error, hint), then what is known about it, and
+// "code" last, right before the retry feedback and the schema, so the text it
+// must copy from is the text nearest its answer.
+//
+// The prompt cache key is derived from this string (previousAttemptFailed
+// empty), so a change to ANY fact -- a different enclosing declaration, a new
+// receiver -- is a different key, instead of serving an answer the model gave
+// for a prompt that no longer exists.
+static std::string buildUserPrompt(const PromptFacts &f,
+                                   const std::string &previousAttemptFailed) {
+  const bool raw = rawCodeBlock();
+  std::string out = "{\n";
+  out += "  \"error\": \"" + escapeJsonString(f.error) + "\",\n";
+  out += "  \"hint\": \"" + escapeJsonString(f.hint) + "\",\n";
+  out += "  \"error_line\": \"" + escapeJsonString(f.errorLine) + "\"";
+  if (!f.enclosing.empty())
+    out += ",\n  \"inside\": \"" + escapeJsonString(f.enclosing) + "\"";
+  if (!f.receiver.empty())
+    out += ",\n  \"receiver\": \"" + escapeJsonString(f.receiver) + "\"";
+  if (!f.knownTypes.empty())
+    out += ",\n  \"known_types\": " + jsonStringArray(f.knownTypes);
+  if (!f.related.empty()) {
+    out += ",\n  \"related\": [";
+    for (size_t i = 0; i < f.related.size(); ++i) {
+      out += i ? ", {" : "{";
+      bool first = true;
+      if (!f.related[i].code.empty()) {
+        out += "\"code\": \"" + escapeJsonString(f.related[i].code) + "\"";
+        first = false;
+      }
+      if (!f.related[i].note.empty())
+        out += std::string(first ? "" : ", ") + "\"note\": \"" +
+               escapeJsonString(f.related[i].note) + "\"";
+      out += "}";
+    }
+    out += "]";
+  }
+  if (!raw)
+    out += ",\n  \"code\": \"" + escapeJsonString(f.code) + "\"";
+  if (!previousAttemptFailed.empty())
+    out += ",\n  \"previous_attempt_failed\": \"" +
+           escapeJsonString(previousAttemptFailed) + "\"";
+  out += "\n}\n";
+  if (raw)
+    out += "code (copy original_code from these lines exactly):\n" + f.code +
+           "\nend of code\n";
+  return out;
+}
+
 /**
  * @brief Fetches and parses an AI suggestion for a given compilation error.
  *
@@ -1059,10 +1266,85 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
   // loading the GGUF model into RAM, which is the single most expensive
   // part of this function on a cold cache miss and pure waste on a hit.
   int contextSize = contextSizeForCategory(category);
-  std::string codeContext = related.empty()
-      ? getCodeContext(errorLine, contextSize)
-      : getCodeContextWithPinnedLines(errorLine, contextSize, related);
+  PromptFacts facts;
+  facts.error = cleanError;
+  facts.hint = hint;
+  facts.code = getCodeContext(errorLine, contextSize);
+  if (errorLine >= 1 && errorLine <= static_cast<int>(SourceLines.size()))
+    facts.errorLine = SourceLines[errorLine - 1];
+  {
+    int headerLine = 0;
+    const std::string sig = enclosingDeclaration(errorLine, headerLine);
+    // Not repeated when the window already shows the header: the model has it
+    // verbatim, and a second copy is just tokens.
+    if (!sig.empty() && headerLine < errorLine - contextSize)
+      facts.enclosing = sig;
+  }
+  facts.receiver = hints.ReceiverDecl;
+  facts.knownTypes = hints.KnownTypes;
+  facts.related = collectPinnedLines(related);
   std::string categoryName = getCategoryName(category);
+  // Everything in the prompt that depends on the diagnostic -- hashed into the
+  // cache key below.
+  const std::string promptBody = buildUserPrompt(facts, "");
+
+  // The documentation the model is given, assembled BEFORE the cache lookup
+  // (it is a few small file reads, nothing next to loading the model) because
+  // the cache key covers it: an edit to a page under docs/slm/ changes what
+  // the model would be told, and must not be answered from the cache with
+  // what it said to the old page.
+  //
+  // 3. The most specific documentation available for the category.
+  const std::string docPath = getCategoryDocPath(category, contextKeyword);
+
+  // 4. Load the targeted documentation for this error category
+  std::string docContent = loadDocFile(docPath);
+  if (docContent.empty()) {
+    // Fallback: try the general doc if the specific one is missing
+    docContent = loadDocFile("docs/slm/general.txt");
+  }
+  if (docContent.empty()) {
+    // Hard fallback: inline minimal reference
+    docContent =
+        "Turf is a statically-typed language with types: int, double, bool, "
+        "string.\n"
+        "Declarations: type name = value. Explicit casts: int(), double(), "
+        "string().\n"
+        "Control flow: if/else, while, break, continue, return.\n"
+        "Functions: fn name(type param) -> type { return val }\n";
+  }
+
+  // The page for this exact error code (docs/slm/codes/Exxx.txt), ahead of
+  // the category doc. All 144 pages were written for the model, with the
+  // construct's correct syntax and the fix, but nothing ever loaded them
+  // (getSlmCodeDocPath() had no caller): the model only saw the coarse
+  // category doc -- for E138, declaration.txt, which never shows
+  // `fn<T> Box.m()` -- and answered with `-> int` (issue #267). First,
+  // because an over-long system prompt loses the end of its docs
+  // (SLMEngine::generateSuggestion()), and the code's own page is the more
+  // specific of the two.
+  std::string codeDocPath;
+  if (!errorCode.empty()) {
+    codeDocPath = ErrorCodes::getSlmCodeDocPath(errorCode);
+    std::string codeDoc = codeDocPath.empty() ? "" : loadDocFile(codeDocPath);
+    if (codeDoc.empty())
+      codeDocPath.clear();
+    else
+      docContent = "THIS ERROR (" + errorCode + "):\n" + codeDoc +
+                   "\nGENERAL REFERENCE:\n" + docContent;
+  }
+
+  // The syntax card (docs/slm/syntax_card.txt, C2): the Turf every fix has to
+  // be written in, always, ahead of both pages. The model was told to take its
+  // syntax only from the documentation, and a code page shows the one construct
+  // it is about -- E064's page says `expr to string` in a sentence, and the
+  // model wrote `self.n.to_string()` three times in a row (issue #267 live
+  // run). Ahead of everything because the engine drops tokens from the MIDDLE
+  // of an over-long system prompt, never the head.
+  // scripts/slm_doc_examples_check.sh compiles every example in it.
+  const std::string syntaxCard = loadDocFile("docs/slm/syntax_card.txt");
+  if (!syntaxCard.empty())
+    docContent = syntaxCard + "\n" + docContent;
 
   // Item 4 (caching): key on (error code, normalized message, hash of the
   // pinned context) -> the model's raw JSON fields, persisted under
@@ -1078,7 +1360,8 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
   // Only ever written for a suggestion that validated (see
   // AISuggestion::cacheKey), so a hit is a known-good answer, not just the
   // model's last guess.
-  const std::string cacheKey = slmCacheKey(errorCode, cleanError, codeContext);
+  const std::string cacheKey =
+      slmCacheKey(errorCode, cleanError, promptBody, docContent);
   suggestion.cacheKey = cacheKey;
   const bool replaying = std::getenv("TURF_SLM_REPLAY") != nullptr;
   if (previousAttemptFailed.empty() && !replaying) {
@@ -1127,60 +1410,21 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
   // This eliminates the second model call in exchange for less
   // category-tailored context on GENERAL-class errors.
 
-  // Step 3: dynamic context window -- contextSize/codeContext/categoryName
-  // are computed further up now (see the comment above the cache-lookup
-  // block), before the model/grammar load, so a cache hit can skip that
-  // load entirely. Debug echo kept here, at the point they're actually used.
+  // Step 3: the context window, the diagnostic's facts and the documentation
+  // are all computed further up now (see the comment above the cache-lookup
+  // block), before the model/grammar load, so a cache hit can skip that load
+  // entirely. Debug echo kept here, at the point they're actually used.
   if (std::getenv("TURF_SLM_DEBUG")) {
     std::cerr << "[SLM] Context window: ±" << contextSize
               << " lines (category: " << categoryName << ")\n";
-    std::cerr << "--- PINNED CONTEXT ---\n" << codeContext << "\n----------------------\n";
-  }
-
-  // 3. Get the most specific documentation available
-  std::string docPath = getCategoryDocPath(category, contextKeyword);
-
-  if (std::getenv("TURF_SLM_DEBUG")) {
     std::cerr << "[SLM] Error category: " << categoryName << " | Keyword: "
               << (contextKeyword.empty() ? "(none)" : contextKeyword)
               << " | Context: ±" << contextSize << " | Doc: " << docPath << "\n";
-  }
-
-  // 4. Load the targeted documentation for this error category
-  std::string docContent = loadDocFile(docPath);
-  if (docContent.empty()) {
-    // Fallback: try the general doc if the specific one is missing
-    docContent = loadDocFile("docs/slm/general.txt");
-  }
-  if (docContent.empty()) {
-    // Hard fallback: inline minimal reference
-    docContent =
-        "Turf is a statically-typed language with types: int, double, bool, "
-        "string.\n"
-        "Declarations: type name = value. Explicit casts: int(), double(), "
-        "string().\n"
-        "Control flow: if/else, while, break, continue, return.\n"
-        "Functions: fn name(type param) -> type { return val }\n";
-  }
-
-  // The page for this exact error code (docs/slm/codes/Exxx.txt), ahead of
-  // the category doc. All 144 pages were written for the model, with the
-  // construct's correct syntax and the fix, but nothing ever loaded them
-  // (getSlmCodeDocPath() had no caller): the model only saw the coarse
-  // category doc -- for E138, declaration.txt, which never shows
-  // `fn<T> Box.m()` -- and answered with `-> int` (issue #267). First,
-  // because an over-long system prompt loses the end of its docs
-  // (SLMEngine::generateSuggestion()), and the code's own page is the more
-  // specific of the two.
-  if (!errorCode.empty()) {
-    std::string codeDocPath = ErrorCodes::getSlmCodeDocPath(errorCode);
-    std::string codeDoc = codeDocPath.empty() ? "" : loadDocFile(codeDocPath);
-    if (!codeDoc.empty())
-      docContent = "THIS ERROR (" + errorCode + "):\n" + codeDoc +
-                   "\nGENERAL REFERENCE:\n" + docContent;
-    if (std::getenv("TURF_SLM_DEBUG"))
-      std::cerr << "[SLM] Code doc: "
-                << (codeDoc.empty() ? "(none)" : codeDocPath) << "\n";
+    std::cerr << "[SLM] Code doc: "
+              << (codeDocPath.empty() ? "(none)" : codeDocPath) << "\n";
+    std::cerr << "[SLM] Syntax card: "
+              << (syntaxCard.empty() ? "(none)" : "docs/slm/syntax_card.txt")
+              << "\n";
   }
 
   // 5. Build a focused prompt with only the relevant documentation.
@@ -1249,18 +1493,21 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
       "1. Follow Turf-Lang type and ownership rules exactly, as shown in "
       "the documentation above -- not general programming intuition.\n"
       "2. original_code: COPY, character for character, the existing "
-      "line(s) of the code above that your fix changes, WITHOUT the line "
-      "numbers or the >> and * markers. You never say where the code is; "
-      "it is found by matching your copy, so copy exactly and do not "
-      "correct anything while copying -- the correction belongs in "
+      "line(s) of \"code\" that your fix changes. \"code\" is the program "
+      "exactly as it is in the file and \"error_line\" is the line the error "
+      "is on. You never say where the code is; it is found by matching your "
+      "copy, so copy exactly, spaces at the start of the line included, and "
+      "do not correct anything while copying -- the correction belongs in "
       "new_code. Copy only what the fix touches: usually one line, more "
       "only when the fix really changes more than one existing line (e.g. "
       "a whole function header and body), with the lines separated by \\n. "
-      "The line to change may be one of the other lines shown above (e.g. "
-      "a declaration), not only the line the error is on. If the fix only "
-      "ADDS a line, copy the line it goes next to and repeat that line in "
-      "new_code. Leave original_code empty only to insert new lines "
-      "directly after the line the error is on.\n"
+      "The line to change may be another line of \"code\", or one in "
+      "\"related\" (e.g. a declaration), not only the line the error is on. "
+      "If the fix only ADDS a line, copy the line it goes next to and "
+      "repeat that line in new_code. Leave original_code empty only to "
+      "insert new lines directly after the line the error is on. "
+      "\"inside\", \"receiver\" and \"known_types\" are facts the compiler "
+      "knows: rely on them, they are not lines to copy.\n"
       "3. new_code: the Turf-Lang code that replaces original_code -- the "
       "same lines with your fix applied, lines separated by \\n. It must "
       "differ from original_code, and it is just code: no explanation, no "
@@ -1286,33 +1533,14 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
       "-- warm and human-sized, not a one-word reply, but never rambling.\n"
       "<|im_end|>\n";
 
-  std::string userPrompt =
-      "<|im_start|>user\n"
-      "{\n"
-      "  \"error\": \"" + escapeJsonString(cleanError) + "\",\n"
-      "  \"hint\": \"" + escapeJsonString(hint) + "\",\n"
-      "  \"code\": \"" + escapeJsonString(codeContext) + "\"";
-  // Item 3: known concrete types the type checker already computed that are
-  // NOT visible just by reading the code above (see DiagnosticHints's doc
-  // comment, ErrorCategory.h, for exactly which facts qualify and why --
-  // currently a `guess`-inferred local's resolved type, the one piece of
-  // type information a Turf-Lang source line can never spell out itself).
-  // A structured field, not folded into the free-text "code"/"error"
-  // strings above, so the model doesn't have to parse it back out of prose.
-  if (!hints.KnownTypes.empty()) {
-    std::string knownTypes;
-    for (size_t i = 0; i < hints.KnownTypes.size(); ++i) {
-      if (i)
-        knownTypes += " ";
-      knownTypes += hints.KnownTypes[i];
-    }
-    userPrompt += ",\n  \"known_types\": \"" + escapeJsonString(knownTypes) + "\"";
-  }
-  if (!previousAttemptFailed.empty()) {
-    userPrompt += ",\n  \"previous_attempt_failed\": \"" +
-                  escapeJsonString(previousAttemptFailed) + "\"";
-  }
-  userPrompt += "\n}\n";
+  // The user turn: buildUserPrompt() renders the JSON header -- the error, the
+  // verbatim code, and every structured fact the raise site holds (item 3's
+  // known types, C4's receiver struct and enclosing declaration, the related
+  // lines), each its own field and never folded into the free-text "code"
+  // and "error" strings, so the model doesn't have to parse a fact back out
+  // of prose and a copy of a line of "code" is a copy of the file.
+  std::string userPrompt = "<|im_start|>user\n" +
+                           buildUserPrompt(facts, previousAttemptFailed);
   if (!previousAttemptFailed.empty()) {
     userPrompt +=
         "Your previous suggested fix was rejected -- "
@@ -1325,8 +1553,8 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
       "Respond with ONLY this JSON object — fill every field yourself:\n"
       "{\"explanation\": <string>, \"fix_mode\": <MODIFY|NONE>, "
       "\"original_code\": <the existing line(s) you change, copied exactly "
-      "from the code above without line numbers, separated by \\n if more "
-      "than one — see rule 2>, "
+      "from \"code\" or \"related\", separated by \\n if more than one — "
+      "see rule 2>, "
       "\"new_code\": <THE EXACT Turf-Lang code that replaces "
       "original_code — no explanation, no prose, just the raw code, lines "
       "separated by \\n if more than one>, "
@@ -1340,12 +1568,19 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
       "<|im_start|>assistant\n";
 
   if (std::getenv("TURF_SLM_DEBUG")) {
-    // Full user prompt, including the "known_types" field (item 3) when
-    // present -- verified live during SLM-001 that this is exactly what a
-    // guess-inferred operand's resolved type looks like once it reaches the
-    // model, distinct from "Clean Error"/"PINNED CONTEXT" above (which show
-    // the error text and source window, not this structured JSON payload).
+    // Full user prompt, every structured field included -- verified live
+    // during SLM-001 that this is exactly what a guess-inferred operand's
+    // resolved type looks like once it reaches the model. The replay smoke test
+    // (scripts/slm_replay_smoke.sh) greps this block to prove what the model is
+    // and is not shown.
     std::cerr << "--- USER PROMPT ---\n" << userPrompt << "\n-------------------\n";
+  }
+  // The system prompt too, but only on request: it is ~4000 tokens of
+  // documentation that would bury every debug log. scripts/slm_prompt_budget.sh
+  // asks for it to measure the real prompt instead of re-deriving it.
+  if (std::getenv("TURF_SLM_DUMP_PROMPT")) {
+    std::cerr << "--- SYSTEM PROMPT ---\n" << systemPrompt
+              << "--- END SYSTEM PROMPT ---\n";
   }
   std::string rawResponse =
       replaying ? nextReplayResponse()
@@ -1465,10 +1700,13 @@ bool verifySuggestion(AISuggestion &suggestion, int errorLine,
   const std::vector<OriginalMatch> located =
       locateOriginal(suggestion.original_code, errorLine, related);
   if (located.empty())
+    // The error line is quoted, not numbered: the model is not shown line
+    // numbers any more (getCodeContext()), and a number it cannot see in its
+    // input would only invite it to count lines again.
     return reject(
         "original_code does not appear in the program; copy the lines "
-        "exactly as shown, without the line numbers. The error is on line " +
-        std::to_string(errorLine) + ": " + normalizeLine(lineText(errorLine)));
+        "exactly as they are in \"code\", character for character. The line "
+        "the error is on reads: " + normalizeLine(lineText(errorLine)));
 
   // Candidate edits, tried in order until one validates: each located range
   // (nearest the error first; for an exact copy that is the only one that

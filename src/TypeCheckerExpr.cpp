@@ -707,6 +707,9 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
         Hints.KnownTypes.push_back(
             "'" + RHSVar->getName() + "' (assigned value) was declared "
             "with 'guess' and inferred as '" + RhsTy->getName() + "'.");
+      // Every other identifier in the assigned value (SLM C4): its type is
+      // what the mismatch is about, and it may be declared out of sight.
+      addIdentifierTypes(Node.getRHS(), Hints);
       reportError(Node.getLoc(),
                   codeForMismatch(RhsTy.get(), nullptr, ErrCode::TypeMismatch),
                   "Cannot assign value of type '" + RhsTy->getName() +

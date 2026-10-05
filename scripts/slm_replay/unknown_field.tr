@@ -1,0 +1,10 @@
+struct Box {
+    v: int,
+    n: int
+}
+
+fn main(): int {
+    mut b: Box = Box::default();
+    b.zzz = 3;
+    return b.n;
+}

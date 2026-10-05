@@ -1,0 +1,19 @@
+fn describe(n: int): string {
+    mut total: int = 0;
+    mut stride: int = 1;
+    mut i: int = 0;
+    while i < 10 {
+        total = total + stride;
+        i = i + 1;
+    }
+    mut doubled: int = total * 2;
+    mut tripled: int = total * 3;
+    mut sum: int = doubled + tripled;
+    mut diff: int = doubled - tripled;
+    return sum;
+}
+
+fn main(): int {
+    mut s: string = describe(1);
+    return 0;
+}

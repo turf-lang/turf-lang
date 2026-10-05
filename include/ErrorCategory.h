@@ -43,6 +43,16 @@ struct DiagnosticHints {
   // site that already computed them, not re-inferred here.
   std::vector<std::string> KnownTypes;
 
+  // SLM_IMPROVEMENT_PLAN C4: the declaration of the struct a field or method
+  // diagnostic is about, from the raise site's own type information --
+  // `struct Box<T> { v: T, n: int }`. The pinned source lines can show a
+  // `struct Box {` header, but a struct is usually declared across several
+  // lines and the model needs ALL its fields to say which one the user meant
+  // (`pasword` -> `password`) or what a method may use. Empty unless the raise
+  // site knows the receiver's type; shown to the model as its own field,
+  // "receiver", never inside the code.
+  std::string ReceiverDecl;
+
   // Item 1 (deterministic-fix layer): the exact edit the raising site already
   // knows fixes this diagnostic -- an unambiguous "did you mean" rename, a
   // missing `<T>`, a misplaced `pub`, a missing ';' (see the withFixIt() family
@@ -58,7 +68,9 @@ struct DiagnosticHints {
   // as the suggestion's explanation, so a fix with FixIts should always set it.
   std::string FixReason;
 
-  bool empty() const { return KnownTypes.empty() && FixIts.empty(); }
+  bool empty() const {
+    return KnownTypes.empty() && ReceiverDecl.empty() && FixIts.empty();
+  }
 };
 
 enum class ErrorCategory {

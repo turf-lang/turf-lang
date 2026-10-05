@@ -459,12 +459,17 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
       // -- see untypedLiteralAcquiresInt32()'s own doc comment.
       if (!typesCompatible(InitTy.get(), DeclTy.get()) &&
           !untypedLiteralAcquiresInt32(Node.getInitializer(), DeclTy.get())) {
+        // The types of the identifiers in the initializer, for the SLM: the
+        // initializer is what the fix usually edits, and a name declared above
+        // the code window (or by `guess`) has its type on no line the model sees.
+        SLM::DiagnosticHints Hints;
+        addIdentifierTypes(Node.getInitializer(), Hints);
         reportError(Node.getLoc(),
                     codeForMismatch(InitTy.get(), nullptr, ErrCode::TypeMismatch),
                     "Cannot initialise '" + DeclTy->getName() +
                         "' variable '" + Node.getName() + "' with value of type '" +
                         InitTy->getName() + "'.",
-                    {}, hintForMismatch(InitTy.get(), nullptr, ""));
+                    {}, hintForMismatch(InitTy.get(), nullptr, ""), "", Hints);
       } else {
         // SEM-002: typesCompatible() only checks the KIND of conversion
         // (e.g. "int-literal -> int is fine"), never the literal's own
