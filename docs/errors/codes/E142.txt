@@ -1,0 +1,16 @@
+A range slice `[a..b]` was used on something that isn't an array
+
+`x[1..3]` takes part of an array: a view of the elements from 1 up to (not including) 3. It only makes sense for a built-in array (`int[5]`, a row of a 2D array, an `int[]` parameter or another slice). Anything else is refused:
+
+    immut s: string = "hello";
+    immut t = s[1..3];                 // E142 -- a string is not an array
+
+    mut l: List<int> = List::default();
+    immut u = l[0..1];                 // E142 -- a List keeps its elements behind its own buffer
+
+    immut n: int = 5;
+    immut v = n[0..1];                 // E142 -- an int has no elements
+
+A string is text that ends at a zero byte, so a view into its middle would have no end marker. To take part of a string, build a new string with `strings::substring(s, start, end)`. To take part of a List, copy the elements you need in a loop (or into an array).
+
+The same applies to a struct: `p[0..1]` on a struct value is E142. Indexing a single element, `l[i]`, still works on a List; only the range form is limited to arrays.

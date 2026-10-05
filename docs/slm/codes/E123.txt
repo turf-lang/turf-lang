@@ -9,6 +9,12 @@ INCORRECT:
     mut negative: int[-3];
     mut half: int[2.5];
 
+EMPTY LITERAL:
+  An unsized declaration takes its size from a literal initializer (`mut nums: int[] = [1, 2,
+  3];` is `int[3]`). An empty literal gives no size and is also E123:
+    mut a: int[] = [];               // "An empty literal can't give 'a' a size"
+  Fix: give the literal at least one element, or declare the size (`mut a: int[5];`).
+
 CORRECT:
     mut numbers: int[5];             // five slots
 

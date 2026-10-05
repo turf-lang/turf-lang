@@ -1,0 +1,27 @@
+A `mut` view was taken of an immutable array
+
+A slice (`a[1..]`) or an `int[]` variable doesn't copy the array it looks at: it shares it. Writing through a `mut` view changes the original, which is useful:
+
+    mut a: int[5] = [1, 2, 3, 4, 5];
+    mut view: int[] = a[1..3];
+    view[0] = 20;                      // a[1] is now 20
+
+For an `immut` array that would change something you said can never change, so Turf stops you:
+
+    immut a: int[3] = [1, 2, 3];
+    mut t: int[] = a[1..];             // E144 -- 't' is a 'mut' view of 'a', which is immutable
+    mut u = a[..];                     // E144 -- the same, with the type inferred
+    mut w: int[] = a;                  // E144 -- a whole array is a view too
+
+It is refused again when an existing `mut` view is pointed at an immutable array later:
+
+    mut scratch: int[3] = [4, 5, 6];
+    mut view: int[] = scratch[..];
+    immut fixed: int[3] = [1, 2, 3];
+    view = fixed[1..];                 // E144 -- 'view' is a 'mut' view of 'fixed'
+
+To fix it, declare the view `immut` if you only read it (`immut t = a[1..];`), or make the array `mut` if it is meant to change. If you want to change a copy, take an editable copy with `.copy()`, which is a new array and not a view, so it is allowed:
+
+    immut a: int[3] = [1, 2, 3];
+    mut c = a.copy();                  // an independent int[]
+    c[0] = 9;                          // a is untouched

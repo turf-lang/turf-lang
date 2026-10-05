@@ -10,4 +10,10 @@ These are rejected:
     mut negative: int[-3];           // you can't have -3 slots
     mut half: int[2.5];              // slots come in whole numbers
 
+The size can also come from a literal: `mut nums: int[] = [1, 2, 3];` is exactly `int[3]`. An empty literal has no size to give, so it is the same mistake:
+
+    mut a: int[] = [];               // 'a' has no size -- an array needs at least one element
+
+Give it at least one element, or write the size yourself (`mut a: int[5];`).
+
 If you don't know how many items you will need in advance, an array is the wrong tool: `List<T>` (from `import list;`) grows as you add to it.

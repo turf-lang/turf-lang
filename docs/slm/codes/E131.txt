@@ -10,6 +10,14 @@ INCORRECT:
     mut x: int = 5;
     x.foo();                          // an int has no `foo`
 
+ARRAYS:
+  An array has two built-in methods, `length()` and `copy()`, both with no arguments. Messages:
+    a.copy(1)       -> "'copy()' on an array takes no arguments, but was given 1."
+    a.reverse()     -> "Arrays have no method 'reverse'."
+    s.copy()        -> "Cannot call method 'copy' on type 'string' -- only struct instances
+                       have methods."  (copy() is arrays only)
+  Fix: drop the argument, use `length()`/`copy()`, or slice first (`a[1..3].copy()`).
+
 NOTE:
   `x.f()` DOES work on a non-struct when a free function `f` taking that type is imported
   (UFCS; this is how `text.length()` works on a `string`). So check the spelling and that

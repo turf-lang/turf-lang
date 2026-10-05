@@ -1,0 +1,35 @@
+An immutable array was passed to a function that changes it
+
+A parameter written `arr: int[]` doesn't get a copy of your array. It works on your array directly, which is what lets a helper like this one fill an array of any length in place:
+
+    fn fill(arr: int[], value: int): void {
+        for (i, _old) in arr {
+            arr[i] = value;
+        }
+    }
+
+    fn main(): int {
+        mut a: int[3] = [1, 2, 3];
+        fill(a, 0);                    // a is now [0, 0, 0]
+        return 0;
+    }
+
+That means passing an `immut` array to such a function would change something you said can never change, so Turf stops you:
+
+    fn main(): int {
+        immut a: int[3] = [1, 2, 3];
+        fill(a, 0);                    // E141 -- 'a' is immutable, but 'fill'
+        return 0;                      //   writes to the array it is given as 'arr'
+    }
+
+The check looks at what the function actually does with that parameter: assigning to an element (`arr[i] = v`, `arr[i] += v`, `arr[i]++`), calling a method that changes an element (`arr[i].bump()`), or handing the array on to another function that does one of those. A function that only reads the array is fine to call with an `immut` one; `sum(a)` compiles. An array field of an `immut` struct counts as immutable too (`clear(h.data)`). So does a slice of an immutable array (`fill(a[1..], 0)`) and an `immut` slice variable (`immut v = m[..]; fill(v, 0);`). Inside the function, writing through a local view of the parameter (`mut rest: int[] = arr[1..]; rest[0] = 0;`) counts as writing the parameter.
+
+To fix it, declare the array with `mut` if it's meant to change. If it isn't, and you only want the function's result, copy the array into a `mut` one and pass the copy:
+
+    immut a: int[3] = [1, 2, 3];
+    mut scratch: int[3] = a;
+    fill(scratch, 0);                  // a is untouched
+
+or pass `a.copy()`, a new independent array, straight to the function (`fill(a.copy(), 0);`).
+
+A parameter with a size, like `arr: int[3]`, is the other way round: it always gets its own copy, so changes inside the function never reach the caller.
