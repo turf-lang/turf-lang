@@ -61,6 +61,9 @@ CEILING_SECONDS=5
 FIXTURES=(
   "tests/44_slm_diagnostics/fail_deterministic_typo_variable.tr:cuont:count"
   "tests/44_slm_diagnostics/fail_deterministic_typo_keyword.tr:retrun:return"
+  # Not a typo: E138 already knows the missing `<T>` (issue #267).
+  "tests/38_monomorphization/fail_method_on_generic_struct_without_type_params.tr:fn:fn<T>"
+  "tests/07_functions_modules/fail_method_on_imported_generic_struct_without_type_params.tr:fn:fn<T>"
 )
 
 FAILED=0

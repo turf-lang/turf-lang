@@ -165,6 +165,16 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
                       MethodPart + "(...)' -- the same parameters as 'struct " +
                       Bare + "<" + Params + ">'.",
                   "Missing type parameters!")
+            // The hint above already IS the fix, so --smart applies it
+            // without asking the model (issue #267: given this exact hint,
+            // the model still answered `-> int` and `fn<Box<T>>`). `fn` is a
+            // keyword, so a word-boundary replace on this line can only hit
+            // the declaration's own.
+            .withDeterministicFix(
+                "fn", "fn<" + Params + ">",
+                "'" + Bare + "' is generic, so each of its methods declares "
+                "the same type parameters as 'struct " + Bare + "<" + Params +
+                    ">' -- this adds them.")
             .raise();
         return;
       }

@@ -144,10 +144,14 @@ public:
   // SLM-001 item 1: record an unambiguous rename candidate directly, for a
   // call site that already knows both the wrong and right spelling without
   // going through a RankedSuggestions lookup at all.
+  // `Reason` (optional) explains a fix that is not a typo correction -- see
+  // DiagnosticHints::DeterministicReason.
   TurfError &withDeterministicFix(const std::string &OldName,
-                                  const std::string &NewName) {
+                                  const std::string &NewName,
+                                  const std::string &Reason = "") {
     Hints_.DeterministicOldName = OldName;
     Hints_.DeterministicNewName = NewName;
+    Hints_.DeterministicReason = Reason;
     return *this;
   }
 
