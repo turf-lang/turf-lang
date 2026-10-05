@@ -13,6 +13,7 @@
 
 #include "turf/Analysis.h"
 
+#include "Formatter.h"
 #include "Lexer.h"
 #include "MigratePub.h"
 #include "Parser.h"
@@ -1429,8 +1430,65 @@ static void testParseErrorRecoveryAndTypeNameHints() {
   }
 }
 
+// REL-002 stage 2: `turf fmt` verifies every result before writing or reporting
+// it. A verifier that has only ever seen correct output proves nothing, so this
+// hands verifyFormatting() texts a buggy formatter could produce and requires
+// each to be refused for ITS reason, and checks that a file the lexer rejects
+// is declined without ending the process (a TurfError raised outside a recovery
+// guard calls exit(1): it used to end `turfc --format` at the first such file).
+static void testFormatterGuarantees() {
+  CurrentTest = "formatter guarantees";
+  using namespace turf::format;
+
+  const std::string Src = "fn main(): int {\n        return 1;\n}\n\n\n";
+  FormatResult R = formatChecked(Src);
+  CHECK(R.Ok);
+  CHECK_EQ(R.Text, std::string("fn main(): int {\n    return 1;\n}\n"));
+  CHECK_EQ(verifyFormatting(Src, R.Text), std::string(""));
+  // Already formatted text is a fixed point.
+  CHECK_EQ(formatChecked(R.Text).Text, R.Text);
+
+  auto Refused = [&](const std::string &Bad, const char *Fragment) {
+    std::string Why = verifyFormatting(Src, Bad);
+    CHECK(Why.find(Fragment) != std::string::npos);
+    if (Why.find(Fragment) == std::string::npos)
+      std::cerr << "    '" << Bad << "' gave: '" << Why << "'\n";
+  };
+  // A byte other than whitespace moved or vanished.
+  Refused("fn main(): int {\n    return 2;\n}\n", "something other than whitespace");
+  Refused("fn main(): int {\n    return 1;\n", "something other than whitespace");
+  // Same non-whitespace bytes, different program: whitespace moved inside a
+  // token, which only the token stream can see.
+  Refused("fn ma in(): int {\n    return 1;\n}\n", "token stream");
+  // Right tokens, but not what formatting again would leave.
+  Refused("fn main(): int {\n  return 1;\n}\n", "not idempotent");
+  Refused("fn main(): int {\n    return 1;\n}\n\n", "not idempotent");
+
+  // A source the lexer rejects is declined with the lexer's reason, and the
+  // process survives to answer the next call. Both the raising kind (a
+  // malformed number) and the merely-recorded kind (an unterminated string).
+  for (const char *Bad : {"fn main(): int {\n    return 3.14.15;\n}\n",
+                          "fn main(): int {\n    mut s: string = \"open;\n    return 0;\n}\n"}) {
+    FormatResult B = formatChecked(Bad);
+    CHECK(!B.Ok);
+    CHECK(B.Error.find("lexical error") != std::string::npos);
+    CHECK(B.Text.empty());
+  }
+  // The refusal left no diagnostics behind for the host to print.
+  CHECK(!DiagnosticEngine::hasErrors());
+  FormatResult After = formatChecked(Src);
+  CHECK(After.Ok);
+
+  // Empty input, and CRLF files keep their line endings.
+  CHECK(formatChecked("").Ok);
+  FormatResult Crlf = formatChecked("fn main(): int {\r\nreturn 1;\r\n}\r\n");
+  CHECK(Crlf.Ok);
+  CHECK_EQ(Crlf.Text, std::string("fn main(): int {\r\n    return 1;\r\n}\r\n"));
+}
+
 int main() {
   ScratchDir Dir;
+  testFormatterGuarantees();
   testParseErrorRecoveryAndTypeNameHints();
   testCleanProgramQueries();
   testErrorDiagnostic();

@@ -107,8 +107,11 @@ using namespace llvm;
 // which is why this is a minor bump and `turf` still needs only 1.1. 1.3
 // (REL-002) adds `turfc --test` and the `"tests"` key of the package graph;
 // only `turf test` asks for it, so every other command still needs only 1.1.
+// 1.4 (REL-002 stage 2) makes `--format` take several files, adds `--format
+// --check`, and verifies every result before it is written; only `turf fmt`
+// asks for it.
 static constexpr int TurfcInterfaceMajor = 1;
-static constexpr int TurfcInterfaceMinor = 3;
+static constexpr int TurfcInterfaceMinor = 4;
 
 // The exit statuses (FREEZE.md 6.21, F-CLI-1, REL-001). The split exists so a script
 // or an editor can tell "your program has a mistake" (1: the compiler ran and
@@ -405,7 +408,7 @@ static const char *turfcUsage() {
          "         [--resolve] [--typecheck] [--dump-ast] [--dump-resolver-symbols]\n"
          "         [--dump-resolved] [--dump-typechecked] [--dump-modules]\n"
          "         [--dump-instantiations]\n"
-         "       turfc --format [--write] <filename.tr>\n"
+         "       turfc --format [--write | --check] <filename.tr>...\n"
          "       turfc --migrate=pub [--write] <module.tr>...\n"
          "       turfc --test [<tests-dir>] [--package-graph <file>] [--exclude <path>]\n"
          "         [-O0|-O1|-O2|-O3|-Os] [-g] [--link <libname>] [--jobs <n>]\n"
@@ -622,6 +625,92 @@ static CompilerOptions parseArgs(int argc, char **argv) {
   }
 
   return opts;
+}
+
+/// `turfc --format [--write | --check] <file.tr>...` (REL-002 stage 2). Needs
+/// only the files' text, so it runs before any compiler state exists.
+///
+///   (neither)  one file; the formatted text goes to stdout. Several would
+///              concatenate into output nobody could tell apart, so that is a
+///              usage error rather than a guess.
+///   --write    each file whose formatted text differs is rewritten in place;
+///              one that already matches is not touched (its mtime stays, so a
+///              build system does not see a change).
+///   --check    nothing is written; each file that would change is named, and
+///              the status is 1 if there is any: what CI wants.
+///
+/// Every result is verified before it is written or reported
+/// (turf::format::formatChecked): a formatter that rewrites people's files
+/// must not be trusted on a design argument alone. A file that fails
+/// verification is left unchanged and reported as a formatter bug, and the
+/// remaining files are still attempted, so one bad file does not leave the
+/// rest unformatted.
+static int runFormat(const std::vector<std::string> &Files, bool Write, bool CheckOnly) {
+  if (Write && CheckOnly) {
+    std::cerr << "Error: --format takes --write or --check, not both (one rewrites the "
+                 "files, the other promises not to).\n";
+    return ExitUsage;
+  }
+  if (!Write && !CheckOnly && Files.size() > 1) {
+    std::cerr << "Error: without --write or --check the formatted text goes to stdout, so "
+                 "--format takes exactly one file (got "
+              << Files.size() << ").\n";
+    return ExitUsage;
+  }
+  for (const auto &F : Files)
+    if (F.size() < 3 || F.compare(F.size() - 3, 3, ".tr") != 0) {
+      std::cerr << "Error: Input file must have a '.tr' extension (got: " << F << ").\n";
+      return ExitUsage;
+    }
+
+  int Status = ExitOk;
+  size_t Changed = 0, Unchanged = 0;
+  for (const auto &File : Files) {
+    std::ifstream In(File, std::ios::binary);
+    if (!In) {
+      std::cerr << "Error: Could not open file " << File << "\n";
+      Status = ExitError;
+      continue;
+    }
+    std::stringstream Buf;
+    Buf << In.rdbuf();
+    const std::string Original = Buf.str();
+
+    turf::format::FormatResult R = turf::format::formatChecked(Original);
+    if (!R.Ok) {
+      std::cerr << "Error: Could not format " << File
+                << (R.Error.empty() ? "" : ": " + R.Error + "; the file was left unchanged") << "\n";
+      Status = ExitError;
+      continue;
+    }
+
+    if (!Write && !CheckOnly) {
+      std::cout << R.Text;
+      continue;
+    }
+    if (R.Text == Original) {
+      ++Unchanged;
+      continue;
+    }
+    ++Changed;
+    if (CheckOnly) {
+      std::cout << "would reformat " << File << "\n";
+      Status = ExitError;
+      continue;
+    }
+    std::ofstream Out(File, std::ios::trunc | std::ios::binary);
+    Out << R.Text;
+    Out.flush();
+    if (!Out) {
+      std::cerr << "Error: Could not write file " << File << "\n";
+      Status = ExitError;
+    }
+  }
+
+  if (Write || CheckOnly)
+    std::cout << (CheckOnly ? "Would reformat " : "Reformatted ") << Changed << " file"
+              << (Changed == 1 ? "" : "s") << "; " << Unchanged << " already formatted.\n";
+  return Status;
 }
 
 /// `turfc --test [<tests-dir>] [options]` (REL-002): runs every test under the
@@ -1235,27 +1324,8 @@ static int runCompilerMain(int argc, char **argv) {
   // pipeline below -- just the raw source text -- so it short-circuits
   // before any of that global state (GlobalSymbolTable, LLVM
   // module, ...) gets initialized at all.
-  if (opts.Format) {
-    std::ifstream FormatInput(opts.InputFile);
-    if (!FormatInput) {
-      std::cerr << "Error: Could not open file " << opts.InputFile << "\n";
-      return 1;
-    }
-    std::stringstream FormatBuf;
-    FormatBuf << FormatInput.rdbuf();
-    auto Result = turf::format::format(FormatBuf.str());
-    if (!Result.Ok) {
-      std::cerr << "Error: Could not format " << opts.InputFile << "\n";
-      return 1;
-    }
-    if (opts.FormatWrite) {
-      std::ofstream FormatOutput(opts.InputFile, std::ios::trunc | std::ios::binary);
-      FormatOutput << Result.Text;
-    } else {
-      std::cout << Result.Text;
-    }
-    return 0;
-  }
+  if (opts.Format)
+    return runFormat(opts.PositionalFiles, opts.FormatWrite, opts.Check);
 
   if (!OpenSourceFile(opts.InputFile)) {
     std::cerr << "Error: Could not open file " << opts.InputFile << "\n";

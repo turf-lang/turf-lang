@@ -8,9 +8,11 @@
 #include "Lexer.h"
 #include "Parser.h"
 
+#include <algorithm>
 #include <cstring>
 #include <sstream>
 #include <unordered_map>
+#include <vector>
 
 namespace turf::format {
 
@@ -29,6 +31,29 @@ bool isCloseBracket(int Tok) { return Tok == '}' || Tok == ')' || Tok == ']'; }
 // on its own line directly after an opening `{` was landing at the
 // OUTER depth instead of the new block's inner one.
 struct LineDepth { int Display; int Raw; };
+
+// The lexer state beyond the stream and the current token, which running the
+// lexer over a buffer leaves wherever that buffer ended: its one character of
+// look-behind, the position counters and the bracket depths. A caller in the
+// middle of its own lexing (the language server's worker, the facade's host
+// compile) must find them as it left them -- tests/api's "host state restored"
+// checks exactly this for the facade, and formatting is called from the same
+// places. Restored on every path out, including the one a lexical error takes.
+struct LexerGlobalsSaver {
+  int LastChar = GetLastChar();
+  int Line = CurLine, Col = CurCol;
+  int PrevEndLine = PrevTokEndLine, PrevEndCol = PrevTokEndCol;
+  int BraceDepth = g_braceDepth, CurlyDepth = g_curlyDepth;
+  ~LexerGlobalsSaver() {
+    SetLastChar(LastChar);
+    CurLine = Line;
+    CurCol = Col;
+    PrevTokEndLine = PrevEndLine;
+    PrevTokEndCol = PrevEndCol;
+    g_braceDepth = BraceDepth;
+    g_curlyDepth = CurlyDepth;
+  }
+};
 
 // Runs the real lexer/token-advance machinery (getNextToken(), the exact
 // same entry point the actual parser uses) over `Source` and records, for
@@ -49,6 +74,7 @@ struct LineDepth { int Display; int Raw; };
 // purposes regardless of whether THIS line happens to be a closer.
 std::unordered_map<int, LineDepth> computeLineIndents(std::string_view Source) {
   std::unordered_map<int, LineDepth> LineIndent;
+  LexerGlobalsSaver GlobalsSaver;
 
   // Save every piece of lexer/parser global state this touches, mirroring
   // turf-lsp's CompilerService::analyze() -- format() must be safe to call
@@ -132,11 +158,26 @@ bool isBlank(const std::string &Line) {
   return Line.find_first_not_of(" \t") == std::string::npos;
 }
 
+// Defined with the verification code below; format() asks it first whether
+// the source lexes at all.
+bool tokenKeys(std::string_view Source, std::vector<std::string> &Keys, std::string &Why);
+
 } // namespace
 
 FormatResult format(std::string_view Source, const FormatOptions &Options) {
   if (Source.empty()) {
-    return {Options.InsertFinalNewline ? "" : "", true};
+    return {Options.InsertFinalNewline ? "" : "", true, ""};
+  }
+
+  // A source the lexer rejects is not formatted: its bracket depths are not
+  // trustworthy, and the lexer would otherwise end the process on the first
+  // such error (see tokenKeys()). This is the "couldn't be tokenized at all"
+  // case the header always said Ok = false was for.
+  {
+    std::vector<std::string> Ignored;
+    std::string Why;
+    if (!tokenKeys(Source, Ignored, Why))
+      return {"", false, "it has a lexical error (" + Why + ")"};
   }
 
   std::unordered_map<int, LineDepth> LineIndent = computeLineIndents(Source);
@@ -212,7 +253,160 @@ FormatResult format(std::string_view Source, const FormatOptions &Options) {
     }
   }
 
-  return {std::move(Out), true};
+  return {std::move(Out), true, ""};
+}
+
+namespace {
+
+// The token stream the REAL lexer reads from `Source`, one key per token:
+// the kind, plus the value for the kinds that carry one. Never a position, so
+// two texts that differ only in whitespace give equal streams -- and one that
+// differs in a name, a literal or an operator does not. Saves and restores the
+// same lexer globals computeLineIndents() does, for the same reason.
+//
+// Returns false, with the first error in `Why`, if the source does not lex
+// cleanly. That is the one place the formatter learns a file is not valid
+// TurfLang, and it must not take the process with it: a TurfError raised
+// outside a recovery guard prints and calls exit(1), which for `turf fmt` over
+// a project would end the run at the first broken file and for the language
+// server would kill the server. So the lexing runs inside the same setjmp
+// guard the parser uses, against a private diagnostic list -- nothing the
+// lexer reports reaches the user as a compiler error, since the formatter's
+// own message says what it could not do.
+struct LexJob {
+  std::vector<std::string> *Keys;
+};
+
+// Runs inside the guard; a longjmp out of getNextToken() skips the rest of it.
+void lexJob(LexJob &Job) {
+  CurTok = 0;
+  getNextToken();
+  while (CurTok != TOK_EOF) {
+    std::string Key = CurTok >= 0 ? std::string(1, static_cast<char>(CurTok))
+                                  : "token" + std::to_string(CurTok);
+    switch (CurTok) {
+    case TOK_IDENTIFIER: Key += ":" + IdentifierStr; break;
+    case TOK_STRING_LITERAL: Key += ":" + StringVal; break;
+    case TOK_INT_LITERAL:
+    case TOK_NUMBER: Key += ":" + NumLitSpelling; break;
+    case TOK_CHAR_LITERAL: Key += ":" + std::string(1, CharVal); break;
+    case TOK_BOOL_LITERAL: Key += BoolVal ? ":true" : ":false"; break;
+    default: break;
+    }
+    Job.Keys->push_back(std::move(Key));
+    getNextToken();
+  }
+}
+
+bool tokenKeys(std::string_view Source, std::vector<std::string> &Keys, std::string &Why) {
+  LexerGlobalsSaver GlobalsSaver;
+  std::istream *SavedSourceFile = SourceFile;
+  std::string SavedSourceFilename = SourceFilename;
+  SourceLocation SavedCurLoc = CurLoc;
+  int SavedCurTok = CurTok;
+  const bool SavedRecoverActive = g_recoverActive;
+  jmp_buf SavedRecoverJmp;
+  std::memcpy(SavedRecoverJmp, g_recoverJmp, sizeof(jmp_buf));
+  DiagnosticEngine::State SavedDiagnostics = DiagnosticEngine::saveState();
+  DiagnosticEngine::restoreState({});
+
+  std::istringstream Buffer{std::string(Source)};
+  SetSourceBuffer(Buffer);
+  SourceFilename = "<format>";
+  resetLexer();
+
+  LexJob Job{&Keys};
+  g_recoverActive = true;
+  if (setjmp(g_recoverJmp) == 0)
+    lexJob(Job);
+
+  // A lexical error that raised stopped the loop above; one that was only
+  // recorded (an unterminated string) let it finish. Either way the file is
+  // not valid, and formatting it would indent by brackets the lexer could not
+  // honestly count.
+  bool Clean = true;
+  for (const auto &D : DiagnosticEngine::getDiagnostics()) {
+    if (D.IsWarning)
+      continue;
+    Clean = false;
+    std::string Msg = D.Msg.substr(0, D.Msg.find('\n'));
+    Why = "line " + std::to_string(D.Loc.Line) + ": " + Msg;
+    break;
+  }
+
+  g_recoverActive = SavedRecoverActive;
+  std::memcpy(g_recoverJmp, SavedRecoverJmp, sizeof(jmp_buf));
+  DiagnosticEngine::restoreState(std::move(SavedDiagnostics));
+  SourceFile = SavedSourceFile;
+  SourceFilename = SavedSourceFilename;
+  CurLoc = SavedCurLoc;
+  CurTok = SavedCurTok;
+  return Clean;
+}
+
+std::string withoutWhitespace(std::string_view Text) {
+  std::string Out;
+  Out.reserve(Text.size());
+  for (char C : Text)
+    if (C != ' ' && C != '\t' && C != '\r' && C != '\n')
+      Out += C;
+  return Out;
+}
+
+int firstDifferingLine(std::string_view A, std::string_view B) {
+  int Line = 1;
+  size_t N = std::min(A.size(), B.size());
+  for (size_t I = 0; I < N; ++I) {
+    if (A[I] != B[I])
+      return Line;
+    if (A[I] == '\n')
+      ++Line;
+  }
+  return Line;
+}
+
+} // namespace
+
+std::string verifyFormatting(std::string_view Original, std::string_view Formatted,
+                             const FormatOptions &Options) {
+  // 1. Content. Whitespace is the only thing a formatter may touch.
+  if (withoutWhitespace(Original) != withoutWhitespace(Formatted))
+    return "the formatter changed something other than whitespace";
+
+  // 2. The program. Equal non-whitespace bytes still allow a changed token
+  // stream when whitespace moved INSIDE a token, which is the case this
+  // exists for.
+  std::vector<std::string> Before, After;
+  std::string Why;
+  if (!tokenKeys(Original, Before, Why))
+    return "the original does not lex cleanly (" + Why + ")";
+  if (!tokenKeys(Formatted, After, Why))
+    return "the formatted text does not lex cleanly (" + Why + ")";
+  if (Before != After) {
+    size_t I = 0;
+    while (I < Before.size() && I < After.size() && Before[I] == After[I])
+      ++I;
+    return "the formatter changed the token stream (token " + std::to_string(I + 1) + ": '" +
+           (I < Before.size() ? Before[I] : "<end>") + "' became '" +
+           (I < After.size() ? After[I] : "<end>") + "')";
+  }
+
+  // 3. Stability. A second pass must find nothing left to do, or running
+  // `turf fmt --check` right after `turf fmt` would report the file again.
+  FormatResult Again = format(Formatted, Options);
+  if (!Again.Ok || Again.Text != Formatted)
+    return "formatting is not idempotent (a second pass changes line " +
+           std::to_string(firstDifferingLine(Formatted, Again.Text)) + ")";
+  return "";
+}
+
+FormatResult formatChecked(std::string_view Source, const FormatOptions &Options) {
+  FormatResult R = format(Source, Options);
+  if (!R.Ok)
+    return R;
+  if (std::string Problem = verifyFormatting(Source, R.Text, Options); !Problem.empty())
+    return {"", false, "formatter bug: " + Problem};
+  return R;
 }
 
 } // namespace turf::format
