@@ -189,9 +189,8 @@ std::unique_ptr<Sandbox> CreateSandbox();
 // check that diagnostic is actually gone afterward (isOriginalErrorResolved).
 // `applyLine`/`applyEndLine` are the 1-based inclusive line range fixedText
 // gets patched into -- normally both equal errorLine (a single-line edit),
-// but may differ when suggestion.target_line/end_line point at a
-// declaration/related site or a multi-line block instead (see
-// AISuggestion::target_line and AISuggestion::end_line).
+// but may differ when the edit was located elsewhere (a declaration/related
+// site, or a multi-line block: SLMIntegration.cpp's locateOriginal()).
 // Returns true if the fix was applied and committed successfully.
 // `reportFailure` false silences the per-rejection lines: verifySuggestion()
 // tries one replacement at several candidate ranges, and only the summary

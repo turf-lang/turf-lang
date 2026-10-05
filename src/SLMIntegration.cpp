@@ -186,49 +186,17 @@ static std::string escapeJsonString(const std::string &src) {
   return result;
 }
 
-// Extracts an unquoted integer JSON field (e.g. "target_line": 42). Returns
-// 0 (the "unset" sentinel -- see AISuggestion::target_line) if the field is
-// missing or not a plain integer.
-static int extractJsonFieldInt(const std::string &json,
-                               const std::string &field) {
-  std::string key = "\"" + field + "\":";
-  size_t pos = json.find(key);
-  if (pos == std::string::npos)
-    return 0;
-  pos += key.length();
-
-  while (pos < json.length() && (json[pos] == ' ' || json[pos] == '\t' ||
-                                 json[pos] == '\n' || json[pos] == '\r')) {
-    pos++;
-  }
-
-  bool negative = false;
-  if (pos < json.length() && json[pos] == '-') {
-    negative = true;
-    pos++;
-  }
-
-  size_t start = pos;
-  while (pos < json.length() && std::isdigit(static_cast<unsigned char>(json[pos])))
-    pos++;
-
-  if (pos == start)
-    return 0;
-
-  int value = std::atoi(json.substr(start, pos - start).c_str());
-  return negative ? -value : value;
-}
-
 // Defensive cleanup for a known small-model failure mode: despite explicit
 // prompt instructions not to, the model occasionally echoes the "N |  code"
 // line-number-prefix formatting used to display context lines (see
 // getCodeContext()/getCodeContextWithPinnedLines()) back inside
-// replacement_line itself, e.g. "6 |     mut b: int = 5;" instead of just
-// "    mut b: int = 5;". That prefix is never valid Turf-Lang syntax at the
+// original_code or new_code itself, e.g. "6 |     mut b: int = 5;" instead of
+// just "    mut b: int = 5;". That prefix is never valid Turf-Lang syntax at the
 // start of a line, so stripping it here is safe and turns an otherwise
-// guaranteed sandbox-parse failure into a usable patch.
+// guaranteed sandbox-parse failure (new_code), or a copy that matches nothing
+// in the source (original_code), into a usable patch.
 //
-// A multi-line replacement echoes the prefix on EVERY line ("11 | fn ...",
+// A multi-line value echoes the prefix on EVERY line ("11 | fn ...",
 // "12 |     return ...", "13 | }"); stripping only the first (issue #267)
 // left "12 |" on the rest, a guaranteed parse failure the model was then
 // told was its own mistake. Every line is stripped, but only when every
@@ -265,12 +233,12 @@ static std::string stripLineNumberPrefix(const std::string &text) {
 }
 
 // Defensive cleanup for another known small-model failure mode: wrapping
-// replacement_line in a markdown code fence (```turf ... ``` or ``` ... ```)
-// despite rule 6 explicitly saying "no markdown code blocks". A leading or
-// trailing fence line is never valid Turf-Lang syntax, so stripping it here
-// is safe and turns an otherwise guaranteed sandbox-parse failure (the
+// new_code (or original_code) in a markdown code fence (```turf ... ``` or
+// ``` ... ```) despite the rules saying "no markdown code blocks". A leading
+// or trailing fence line is never valid Turf-Lang syntax, so stripping it
+// here is safe and turns an otherwise guaranteed sandbox-parse failure (the
 // parser chokes on a literal "```" token) into a usable patch. Observed
-// especially often on multi-line replacement_line values.
+// especially often on multi-line values.
 static std::string stripMarkdownFences(const std::string &text) {
   static const std::regex leadingFence("^\\s*```[A-Za-z]*[ \\t]*\\n?");
   static const std::regex trailingFence("\\n?[ \\t]*```\\s*$");
@@ -340,11 +308,11 @@ static std::string extractJsonFieldString(const std::string &json,
 //
 // A real JSON parser first (issue #267). The hand-rolled extractors above
 // decode only \n \t \" \\, but grammars/slm_suggestion.gbnf also lets the
-// model emit \r, \/, \b, \f and \uXXXX -- and `<`/`>` for `<`/`>`
+// model emit \r, \/, \b, \f and \uXXXX -- and \u003c/\u003e for `<`/`>`
 // is a common JSON habit that lands squarely on generic syntax (`fn<T>`),
-// so a correct fix reached the sandbox with a literal "<" in it. They
+// so a correct fix reached the sandbox with a literal "\u003c" in it. They
 // also find a key by raw substring, so a string value that happens to
-// contain `"end_line":` (an explanation quoting the schema) shadows the real
+// contain `"new_code":` (an explanation quoting the schema) shadows the real
 // field. The extractors stay as the fallback for a response that is not one
 // well-formed object (no grammar loaded, or generation cut short), which is
 // exactly what they were written for.
@@ -358,26 +326,11 @@ static void parseSuggestionJson(const std::string &Json,
           return S->str();
         return "";
       };
-      // A grammar-constrained response always has a JSON integer here; a
-      // cache file or an unconstrained one may quote it ("12"), which the
-      // old extractor silently read as 0 -- "the error's own line".
-      auto Int = [&](llvm::StringRef Key) -> int {
-        if (auto I = Obj->getInteger(Key))
-          return static_cast<int>(*I);
-        if (auto S = Obj->getString(Key)) {
-          int V = 0;
-          if (!S->trim().getAsInteger(10, V))
-            return V;
-        }
-        return 0;
-      };
       Out.explanation = Str("explanation");
       Out.fix_mode = Str("fix_mode");
+      Out.original_code = Str("original_code");
+      Out.new_code = Str("new_code");
       Out.suggested_comment = Str("suggested_comment");
-      Out.code_patch = Str("code_patch");
-      Out.replacement_line = Str("replacement_line");
-      Out.target_line = Int("target_line");
-      Out.end_line = Int("end_line");
       Out.warning = Str("warning");
       Out.self_reported_category = Str(categoryKey);
       return;
@@ -387,36 +340,428 @@ static void parseSuggestionJson(const std::string &Json,
   }
   Out.explanation = extractJsonFieldString(Json, "explanation");
   Out.fix_mode = extractJsonFieldString(Json, "fix_mode");
+  Out.original_code = extractJsonFieldString(Json, "original_code");
+  Out.new_code = extractJsonFieldString(Json, "new_code");
   Out.suggested_comment = extractJsonFieldString(Json, "suggested_comment");
-  Out.code_patch = extractJsonFieldString(Json, "code_patch");
-  Out.replacement_line = extractJsonFieldString(Json, "replacement_line");
-  Out.target_line = extractJsonFieldInt(Json, "target_line");
-  Out.end_line = extractJsonFieldInt(Json, "end_line");
   Out.warning = extractJsonFieldString(Json, "warning");
   Out.self_reported_category = extractJsonFieldString(Json, categoryKey);
+}
+
+// ── Finding `original_code` in the source ───────────────────────────────────
+//
+// The model reports no line numbers (SLM_IMPROVEMENT_PLAN workstream B): it
+// copies the lines it wants to change and the harness looks them up. These
+// helpers are that lookup, kept free of the sandbox so they can be reasoned
+// about -- and tested through the replay harness -- on their own.
+
+// Splits `text` on '\n' (a trailing '\r' on a line is dropped).
+static std::vector<std::string> splitTextLines(const std::string &text) {
+  std::vector<std::string> lines;
+  size_t pos = 0;
+  while (true) {
+    size_t nl = text.find('\n', pos);
+    std::string line =
+        text.substr(pos, nl == std::string::npos ? std::string::npos : nl - pos);
+    if (!line.empty() && line.back() == '\r')
+      line.pop_back();
+    lines.push_back(std::move(line));
+    if (nl == std::string::npos)
+      break;
+    pos = nl + 1;
+  }
+  return lines;
+}
+
+static bool isBlankLine(const std::string &s) {
+  return s.find_first_not_of(" \t\r") == std::string::npos;
+}
+
+// A line as the locator compares it: surrounding whitespace dropped and every
+// inner run of whitespace reduced to one space, so a copy that differs only in
+// indentation, tabs versus spaces, or `a  =  b` spacing is still an exact
+// copy. Turf does not care about any of those, and a model cannot be expected
+// to reproduce them: it sees the source through a tokenizer.
+static std::string normalizeLine(const std::string &s) {
+  std::string out;
+  bool pendingSpace = false;
+  for (char c : s) {
+    if (c == ' ' || c == '\t' || c == '\r') {
+      pendingSpace = !out.empty();
+      continue;
+    }
+    if (pendingSpace)
+      out += ' ';
+    pendingSpace = false;
+    out += c;
+  }
+  return out;
+}
+
+// Drops wholly blank lines from both ends of `text` (not indentation: a
+// leading-space first line is real code). A model often pads its string with a
+// newline, and a blank edge line would otherwise be spliced into the program
+// or make a copy miss its source.
+static std::string trimBlankEdgeLines(const std::string &text) {
+  std::vector<std::string> lines = splitTextLines(text);
+  size_t lo = 0, hi = lines.size();
+  while (lo < hi && isBlankLine(lines[lo]))
+    ++lo;
+  while (hi > lo && isBlankLine(lines[hi - 1]))
+    --hi;
+  std::string out;
+  for (size_t i = lo; i < hi; ++i) {
+    if (i > lo)
+      out += "\n";
+    out += lines[i];
+  }
+  return out;
+}
+
+// How alike two source lines are, ignoring whitespace: 1.0 for identical,
+// else 1 - (edit distance / longer length).
+static double lineSimilarity(const std::string &a, const std::string &b) {
+  std::string x = normalizeLine(a), y = normalizeLine(b);
+  if (x == y)
+    return 1.0;
+  if (x.empty() || y.empty())
+    return 0.0;
+  std::vector<size_t> prev(y.size() + 1), cur(y.size() + 1);
+  for (size_t j = 0; j <= y.size(); ++j)
+    prev[j] = j;
+  for (size_t i = 1; i <= x.size(); ++i) {
+    cur[0] = i;
+    for (size_t j = 1; j <= y.size(); ++j)
+      cur[j] = std::min({prev[j] + 1, cur[j - 1] + 1,
+                         prev[j - 1] + (x[i - 1] == y[j - 1] ? 0 : 1)});
+    std::swap(prev, cur);
+  }
+  return 1.0 - static_cast<double>(prev[y.size()]) /
+                   static_cast<double>(std::max(x.size(), y.size()));
+}
+
+// One place `original_code` was found, best first in locateOriginal()'s
+// answer. [Start, End] is the 1-based inclusive source range the model's copy
+// stands for; the harness replaces exactly that range with `new_code`.
+struct OriginalMatch {
+  enum Kind {
+    Exact,    // every line equal after normalizeLine()
+    Fuzzy,    // aligned line by line, each at least 0.6 alike (a typo'd copy)
+    Insertion // original_code was empty: after the error line
+  };
+  Kind How;
+  int Start, End;
+};
+
+// How far a range is from the diagnostic: 0 when it contains the line, else
+// the gap in lines.
+static int rangeDistance(int start, int end, int line) {
+  if (line >= start && line <= end)
+    return 0;
+  return line < start ? start - line : line - end;
+}
+
+// Exact copies of `orig` (its blank lines ignored) in the source. A source
+// line that is blank may sit between two matched lines -- the model leaves out
+// or invents blank lines freely -- but the range starts and ends on a real
+// line. Every start position is reported, so the caller can pick the nearest.
+static std::vector<std::pair<int, int>>
+findExactCopies(const std::vector<std::string> &orig) {
+  std::vector<std::pair<int, int>> found;
+  const int n = static_cast<int>(SourceLines.size());
+  if (orig.empty())
+    return found;
+  for (int s = 1; s <= n; ++s) {
+    if (normalizeLine(SourceLines[s - 1]) != orig[0])
+      continue;
+    int line = s;
+    size_t matched = 1;
+    while (matched < orig.size() && line < n) {
+      ++line;
+      if (isBlankLine(SourceLines[line - 1]))
+        continue;
+      if (normalizeLine(SourceLines[line - 1]) != orig[matched])
+        break;
+      ++matched;
+    }
+    if (matched == orig.size())
+      found.push_back({s, line});
+  }
+  return found;
+}
+
+// The fuzzy half of the locator, the old alignReplacement() turned around to
+// align the model's COPY instead of its replacement (issue #267 wrote it for
+// replacements, but a copy is what a model can be held to). Finds the source
+// window whose lines best line up with `orig`'s lines, among windows near
+// `anchor` (within kFuzzyReach lines of it, at most two lines longer than the
+// copy). A one-typo copy matches; a paraphrase does not.
+//
+// Scored as a sequence alignment of the copy's lines against each candidate
+// window [s, e]: an aligned pair earns its similarity (pairs under 0.6 don't
+// align; a line of two characters or fewer, like `}`, earns 0.3 of it, since a
+// lone brace matches every block's end); a window line left unaligned costs
+// 0.5 (0.25 if blank), because the splice deletes it; a copy line left
+// unaligned is a line the model invented and costs nothing. The best window
+// must score at least 0.6 -- one convincing match -- or there is no answer.
+// Ties go to the smaller window, then the one nearest `anchor`. `outScore`
+// receives the winner's score, which orders the answers for different anchors.
+//
+// A wrong answer here is as safe as a wrong model line number: the result is
+// only a candidate verifySuggestion() hands to the full sandbox re-check.
+static bool alignOriginal(const std::vector<std::string> &repl, int anchor,
+                          int &outStart, int &outEnd, double &outScore) {
+  constexpr int kFuzzyReach = 10;
+  const int n = static_cast<int>(SourceLines.size());
+  const int k = static_cast<int>(repl.size());
+  if (anchor < 1 || anchor > n || k == 0)
+    return false;
+
+  // Every window lies inside [lo, hi]; similarity of each copy line against
+  // each source line there is computed once (an edit distance per cell).
+  const int lo = std::max(1, anchor - kFuzzyReach - k - 1);
+  const int hi = std::min(n, anchor + kFuzzyReach + k + 1);
+  std::vector<std::vector<double>> pairScore(k,
+                                              std::vector<double>(hi - lo + 1));
+  for (int i = 0; i < k; ++i) {
+    const size_t len = normalizeLine(repl[i]).size();
+    for (int line = lo; line <= hi; ++line) {
+      double sim = lineSimilarity(repl[i], SourceLines[line - 1]);
+      pairScore[i][line - lo] =
+          sim < 0.6 ? -1.0 : (len <= 2 ? sim * 0.3 : sim); // -1: no alignment
+    }
+  }
+
+  double bestScore = 0.0;
+  int bestStart = 0, bestEnd = 0;
+  for (int s = lo; s <= hi; ++s) {
+    for (int e = s; e <= std::min(hi, s + k + 1); ++e) {
+      if (rangeDistance(s, e, anchor) > kFuzzyReach)
+        continue;
+      const int m = e - s + 1;
+      // dp[i][j]: best score aligning repl[0..i) with window lines [0..j).
+      std::vector<std::vector<double>> dp(k + 1, std::vector<double>(m + 1));
+      for (int j = 1; j <= m; ++j)
+        dp[0][j] = dp[0][j - 1] -
+                   (isBlankLine(SourceLines[s + j - 2]) ? 0.25 : 0.5);
+      for (int i = 1; i <= k; ++i) {
+        dp[i][0] = dp[i - 1][0];
+        for (int j = 1; j <= m; ++j) {
+          const int line = s + j - 1;
+          double best =
+              std::max(dp[i - 1][j],
+                       dp[i][j - 1] -
+                           (isBlankLine(SourceLines[line - 1]) ? 0.25 : 0.5));
+          double ps = pairScore[i - 1][line - lo];
+          if (ps >= 0)
+            best = std::max(best, dp[i - 1][j - 1] + ps);
+          dp[i][j] = best;
+        }
+      }
+      double score = dp[k][m];
+      auto dist = [&](int a, int b) { return rangeDistance(a, b, anchor); };
+      bool better = score > bestScore + 1e-9 ||
+                    (bestStart != 0 && std::abs(score - bestScore) <= 1e-9 &&
+                     (m < bestEnd - bestStart + 1 ||
+                      (m == bestEnd - bestStart + 1 &&
+                       dist(s, e) < dist(bestStart, bestEnd))));
+      if (better && score >= 0.6) {
+        bestScore = score;
+        bestStart = s;
+        bestEnd = e;
+      }
+    }
+  }
+  if (bestStart == 0)
+    return false;
+  // A blank edge line never earns score (only costs), so dropping it can only
+  // improve the alignment -- and the splice should not eat a blank line the
+  // model never copied.
+  while (bestStart < bestEnd && isBlankLine(SourceLines[bestStart - 1]))
+    ++bestStart;
+  while (bestEnd > bestStart && isBlankLine(SourceLines[bestEnd - 1]))
+    --bestEnd;
+  outStart = bestStart;
+  outEnd = bestEnd;
+  outScore = bestScore;
+  return true;
+}
+
+// Where in the program `original_code` is: the model's own answer to "which
+// lines do you want to change", as text instead of numbers. Returns the
+// places it could mean, best first, or nothing when it appears nowhere.
+//
+//  1. Exact: every non-blank line equal to a source line after normalizeLine()
+//     (indentation, tab/space and spacing differences do not matter). Several
+//     exact copies -- the same `return x;` in two functions -- are ordered by
+//     distance from the error line, or from a pinned related line (the
+//     declaration an error points back to), whichever is nearer; the nearest
+//     wins and the rest follow, so a wrong guess costs one more sandbox run.
+//  2. Otherwise fuzzy: alignOriginal() around the error line and around each
+//     related line; answers are ordered by alignment score.
+//  3. Empty `original_code` is an INSERTION: new_code goes on the line(s) right
+//     after the error line, nowhere else. Anything the model wants placed
+//     elsewhere it must anchor by copying the line it sits next to (and
+//     repeating that line in new_code). Deleting lines is not expressible: an
+//     empty new_code is rejected (verifySuggestion()) -- a forgotten field
+//     would otherwise "fix" an error by deleting the line it is on, and pass
+//     validation.
+//  4. Not found: the list is empty. verifySuggestion() then splices nothing --
+//     a copy that matches nowhere is a copying failure, and says so in its
+//     feedback, instead of guessing a line for new_code.
+static std::vector<OriginalMatch>
+locateOriginal(const std::string &originalCode, int errorLine,
+               const std::vector<RelatedLocation> &related) {
+  std::vector<OriginalMatch> out;
+  const int n = static_cast<int>(SourceLines.size());
+  if (errorLine < 1 || errorLine > n)
+    return out;
+
+  std::vector<std::string> orig;
+  for (const std::string &line : splitTextLines(originalCode))
+    if (!isBlankLine(line))
+      orig.push_back(normalizeLine(line));
+  if (orig.empty()) {
+    out.push_back({OriginalMatch::Insertion, errorLine, errorLine});
+    return out;
+  }
+
+  std::vector<int> anchors{errorLine};
+  for (const auto &rel : related)
+    if (rel.Loc.Line >= 1 && rel.Loc.Line <= n &&
+        std::find(anchors.begin(), anchors.end(), rel.Loc.Line) == anchors.end())
+      anchors.push_back(rel.Loc.Line);
+  auto nearest = [&](int s, int e) {
+    int best = rangeDistance(s, e, anchors[0]);
+    for (int a : anchors)
+      best = std::min(best, rangeDistance(s, e, a));
+    return best;
+  };
+
+  std::vector<std::pair<int, int>> exact = findExactCopies(orig);
+  if (!exact.empty()) {
+    std::stable_sort(exact.begin(), exact.end(),
+                     [&](const auto &a, const auto &b) {
+                       int da = nearest(a.first, a.second);
+                       int db = nearest(b.first, b.second);
+                       if (da != db)
+                         return da < db;
+                       // Equally near: the one that actually holds the error
+                       // line's neighbourhood, not a pinned declaration.
+                       return rangeDistance(a.first, a.second, errorLine) <
+                              rangeDistance(b.first, b.second, errorLine);
+                     });
+    for (const auto &r : exact)
+      out.push_back({OriginalMatch::Exact, r.first, r.second});
+    return out;
+  }
+
+  struct Scored {
+    double score;
+    int start, end;
+  };
+  std::vector<Scored> fuzzy;
+  for (int anchor : anchors) {
+    int s = 0, e = 0;
+    double score = 0;
+    if (!alignOriginal(orig, anchor, s, e, score))
+      continue;
+    bool dup = false;
+    for (const auto &f : fuzzy)
+      dup = dup || (f.start == s && f.end == e);
+    if (!dup)
+      fuzzy.push_back({score, s, e});
+  }
+  std::stable_sort(fuzzy.begin(), fuzzy.end(),
+                   [](const Scored &a, const Scored &b) {
+                     return a.score > b.score;
+                   });
+  for (const auto &f : fuzzy)
+    out.push_back({OriginalMatch::Fuzzy, f.start, f.end});
+  return out;
+}
+
+// `newCode` moved to the indentation the source actually has. A model that
+// copies `    return self.n;` as `return self.n;` writes new_code unindented too,
+// and splicing that as it is would leave the fix flush left in the middle of a
+// method (it compiles, but it is what the user is shown). When every
+// non-blank new_code line starts with the whitespace the model's own copy
+// started with, that prefix is swapped for the source's; anything else is left
+// exactly as written, since the shift would be a guess.
+static std::string reindentNewCode(const std::string &newCode,
+                                   const std::string &originalCode,
+                                   const std::string &sourceFirstLine) {
+  auto indentOf = [](const std::string &s) {
+    return s.substr(0, s.find_first_not_of(" \t"));
+  };
+  std::string modelIndent;
+  for (const std::string &line : splitTextLines(originalCode))
+    if (!isBlankLine(line)) {
+      modelIndent = indentOf(line);
+      break;
+    }
+  const std::string sourceIndent = indentOf(sourceFirstLine);
+  if (modelIndent == sourceIndent)
+    return newCode;
+  std::vector<std::string> lines = splitTextLines(newCode);
+  for (const std::string &line : lines)
+    if (!isBlankLine(line) && line.compare(0, modelIndent.size(), modelIndent) != 0)
+      return newCode;
+  std::string out;
+  for (size_t i = 0; i < lines.size(); ++i) {
+    if (i)
+      out += "\n";
+    if (!isBlankLine(lines[i]))
+      out += sourceIndent + lines[i].substr(modelIndent.size());
+  }
+  return out;
+}
+
+// True when `a` and `b` are the same code once indentation, spacing and blank
+// lines are ignored: the model "changed" nothing that matters to a compiler.
+static bool sameCode(const std::string &a, const std::string &b) {
+  auto norm = [](const std::string &s) {
+    std::vector<std::string> out;
+    for (const std::string &line : splitTextLines(s))
+      if (!isBlankLine(line))
+        out.push_back(normalizeLine(line));
+    return out;
+  };
+  return norm(a) == norm(b);
 }
 
 // Computes a structural prior for confidence from shallow, pre-sandbox signals.
 // This is NOT the final confidence — sandbox validation hasn't run yet.
 // The score is meant to estimate plausibility; finalizeConfidence() then
 // incorporates the strongest signal (empirical sandbox pass/fail) to produce
-// the true confidence used by the display gate.
+// the true confidence used by the display gate. (In practice that makes the
+// prior matter only for logging and for ranking an unvalidated answer below
+// the display gate; keep it cheap and honest rather than clever.)
 //
 //   +0.4  Error category resolved by hardcoded rules (not SLM fallback)
 //   +0.2  fix_mode == MODIFY
-//   +0.2  replacement_line is non-empty (actual code, not prose)
-//   +0.1  replacement_line is a single clean line (no newlines or bare braces)
-//   +0.1  replacement_line contains the error keyword on a word boundary
+//   +0.2  new_code is non-empty (actual code, not an empty field)
+//   +0.1  original_code is an exact copy of source lines -- the model read
+//         the real program, which is the strongest cheap sign it is fixing
+//         THIS program and not one from its training data. A fuzzy copy or an
+//         insertion earns nothing: not a penalty, just no evidence.
+//   +0.1  the edit is local: new_code is within one line of original_code's
+//         length and not a bare brace. A regenerated declaration is not
+//         wrong (the sandbox decides), but a small edit to what was copied is
+//         the shape of a real fix. Replaces "a single clean line": a block
+//         edit is now expected, a block rewrite is what is suspicious.
+//   +0.1  new_code contains the error's keyword on a word boundary
 //
-// Note: If replacement_line is empty, patchCode is NOT used as a fallback —
-// code_patch is prose, and scoring prose as code produces misleading results
-// since verifySuggestion() refuses to validate it anyway.
+// Hard 0.0, whatever else holds: new_code is original_code again once
+// whitespace is ignored. A small-model failure mode that passes every other
+// check while fixing nothing.
 //
-// Maximum score: 1.0  |  Minimum: 0.0
+// Maximum score: 1.0 (the bonuses sum to 1.1 and are clamped, as before)
+// Minimum: 0.0
 static float computeStructuralPrior(const AISuggestion &s, ErrorCategory category,
                                     bool deterministic,
                                     const std::string &contextKeyword,
-                                    int errorLine) {
+                                    int errorLine,
+                                    const std::vector<RelatedLocation> &related) {
   float score = 0.0f;
 
   // +0.4 if the category was resolved by deterministic rules (not SLM fallback)
@@ -427,84 +772,53 @@ static float computeStructuralPrior(const AISuggestion &s, ErrorCategory categor
   if (s.fix_mode == "MODIFY")
     score += 0.2f;
 
-  // Only score replacement_line — code_patch is human-readable prose, not
-  // parseable code. If replacement_line is empty, all code-quality checks
-  // are skipped entirely (verifySuggestion would reject it regardless).
-  const std::string &patchCode = s.replacement_line;
+  const std::string &newCode = s.new_code;
+  if (newCode.empty())
+    return std::min(score, 1.0f); // verifySuggestion() rejects it regardless
 
-  if (!patchCode.empty()) {
-    // Hard-reject: the model echoed back the original text unchanged.
-    // This is a known small-model failure mode. An identical replacement is
-    // actively harmful — it passes every other check while fixing nothing.
-    // Compared against the actual text being patched: s.target_line (if set
-    // and in range) through s.end_line when a multi-line range was given,
-    // otherwise just the single line (s.target_line if set, else errorLine)
-    // -- comparing against errorLine when target_line points elsewhere, or
-    // against only the first line of a multi-line range, would check the
-    // wrong original text entirely.
-    int compareStart = (s.target_line > 0 &&
-                        s.target_line <= static_cast<int>(SourceLines.size()))
-                           ? s.target_line
-                           : errorLine;
-    int compareEnd = (s.end_line >= compareStart &&
-                      s.end_line <= static_cast<int>(SourceLines.size()))
-                          ? s.end_line
-                          : compareStart;
-    std::string originalText;
-    if (compareStart >= 1 &&
-        compareEnd <= static_cast<int>(SourceLines.size())) {
-      for (int ln = compareStart; ln <= compareEnd; ++ln) {
-        if (ln > compareStart)
-          originalText += "\n";
-        originalText += SourceLines[ln - 1];
+  // Hard-reject: an identical edit. Insertions (empty original_code) cannot be
+  // identical to anything.
+  if (!isBlankLine(s.original_code) && sameCode(s.original_code, newCode))
+    return 0.0f; // can never clear the gate
+
+  // +0.2 for a non-empty new_code
+  score += 0.2f;
+
+  // +0.1 if the copy is exact
+  std::vector<OriginalMatch> where =
+      locateOriginal(s.original_code, errorLine, related);
+  if (!where.empty() && where.front().How == OriginalMatch::Exact)
+    score += 0.1f;
+
+  // +0.1 if the edit is local
+  const int origLines = static_cast<int>(splitTextLines(s.original_code).size());
+  const int newLines = static_cast<int>(splitTextLines(newCode).size());
+  const bool isBareBrace = (newCode == "{" || newCode == "}");
+  if (!isBlankLine(s.original_code) && !isBareBrace &&
+      std::abs(newLines - origLines) <= 1)
+    score += 0.1f;
+
+  // +0.1 if new_code contains the keyword at a word boundary.
+  // Raw substring matching is avoided because short identifiers (e.g. i, n)
+  // appear inside unrelated tokens, making the signal nearly unconditional.
+  if (!contextKeyword.empty()) {
+    size_t kwPos = 0;
+    while ((kwPos = newCode.find(contextKeyword, kwPos)) != std::string::npos) {
+      // Check that the characters immediately surrounding the match are not
+      // alphanumeric or underscore (i.e. it is a word boundary).
+      bool leftOk = (kwPos == 0) ||
+                    (!std::isalnum(static_cast<unsigned char>(newCode[kwPos - 1])) &&
+                     newCode[kwPos - 1] != '_');
+      bool rightOk =
+          (kwPos + contextKeyword.size() >= newCode.size()) ||
+          (!std::isalnum(static_cast<unsigned char>(
+               newCode[kwPos + contextKeyword.size()])) &&
+           newCode[kwPos + contextKeyword.size()] != '_');
+      if (leftOk && rightOk) {
+        score += 0.1f;
+        break; // only count once
       }
-    }
-    // Trim leading/trailing whitespace for comparison
-    auto trim = [](const std::string &s) {
-      size_t l = s.find_first_not_of(" \t\r\n");
-      size_t r = s.find_last_not_of(" \t\r\n");
-      return (l == std::string::npos) ? std::string{} : s.substr(l, r - l + 1);
-    };
-    if (!originalText.empty() && trim(patchCode) == trim(originalText)) {
-      // Hard override — this score can never clear the gate.
-      return 0.0f;
-    }
-
-    // +0.2 if a non-empty replacement_line was produced
-    score += 0.2f;
-
-    // +0.1 if it is a single, clean line (no embedded newlines or lone
-    // braces). A genuine multi-line range fix (end_line > compareStart) is
-    // expected to contain newlines, so it simply doesn't earn this bonus
-    // rather than being penalized -- the sandbox's empirical pass/fail is
-    // what ultimately decides those cases (see finalizeConfidence()).
-    bool hasNewline = patchCode.find('\n') != std::string::npos;
-    bool isBareBrace = (patchCode == "{" || patchCode == "}");
-    if (!hasNewline && !isBareBrace)
-      score += 0.1f;
-
-    // +0.1 if the replacement contains the keyword at a word boundary.
-    // Raw substring matching is avoided because short identifiers (e.g. i, n)
-    // appear inside unrelated tokens, making the signal nearly unconditional.
-    if (!contextKeyword.empty()) {
-      size_t kwPos = 0;
-      while ((kwPos = patchCode.find(contextKeyword, kwPos)) != std::string::npos) {
-        // Check that the characters immediately surrounding the match are not
-        // alphanumeric or underscore (i.e. it is a word boundary).
-        bool leftOk = (kwPos == 0) ||
-                      (!std::isalnum(static_cast<unsigned char>(patchCode[kwPos - 1])) &&
-                       patchCode[kwPos - 1] != '_');
-        bool rightOk =
-            (kwPos + contextKeyword.size() >= patchCode.size()) ||
-            (!std::isalnum(static_cast<unsigned char>(
-                 patchCode[kwPos + contextKeyword.size()])) &&
-             patchCode[kwPos + contextKeyword.size()] != '_');
-        if (leftOk && rightOk) {
-          score += 0.1f;
-          break; // only count once
-        }
-        kwPos += contextKeyword.size();
-      }
+      kwPos += contextKeyword.size();
     }
   }
 
@@ -588,12 +902,26 @@ static std::string slmCacheDir() {
 // per process: fetchSuggestion() is never hot enough for one extra stat()
 // to matter, and this keeps the cache free of its own global init-order
 // state.
+//
+// The suggestion schema's version is part of the fingerprint line too. The
+// binary's own size+mtime already changes with every rebuild, so on a dev
+// machine it would invalidate a stale entry by itself -- but that is an
+// accident of how it is computed, not a promise: a fingerprint that stops
+// depending on the binary (a release build stamping a version, say) would
+// otherwise let an entry in the previous field layout parse "successfully" as
+// an empty edit. Bump kSlmSchemaVersion whenever the fields the model is asked
+// for, or the cache file's own, change.
+//   1: replacement_line / target_line / end_line / code_patch
+//   2: original_code / new_code (workstream B)
+static constexpr int kSlmSchemaVersion = 2;
+
 static std::string slmCompilerFingerprint() {
   llvm::sys::fs::file_status Status;
   if (llvm::sys::fs::status(CompilerExecutablePath, Status))
     return ""; // stat() failed -- never matches a real cache entry below
   auto Mtime = Status.getLastModificationTime().time_since_epoch().count();
-  return std::to_string(Status.getSize()) + ":" + std::to_string(Mtime);
+  return "schema" + std::to_string(kSlmSchemaVersion) + ":" +
+         std::to_string(Status.getSize()) + ":" + std::to_string(Mtime);
 }
 
 static bool readSlmCache(const std::string &Key, AISuggestion &Out) {
@@ -639,11 +967,9 @@ static void writeSlmCache(const std::string &Key, const AISuggestion &S) {
        << "{"
        << "\"explanation\":\"" << escapeJsonString(S.explanation) << "\","
        << "\"fix_mode\":\"" << escapeJsonString(S.fix_mode) << "\","
+       << "\"original_code\":\"" << escapeJsonString(S.original_code) << "\","
+       << "\"new_code\":\"" << escapeJsonString(S.new_code) << "\","
        << "\"suggested_comment\":\"" << escapeJsonString(S.suggested_comment) << "\","
-       << "\"code_patch\":\"" << escapeJsonString(S.code_patch) << "\","
-       << "\"replacement_line\":\"" << escapeJsonString(S.replacement_line) << "\","
-       << "\"target_line\":" << S.target_line << ","
-       << "\"end_line\":" << S.end_line << ","
        << "\"warning\":\"" << escapeJsonString(S.warning) << "\","
        << "\"self_reported_category\":\"" << escapeJsonString(S.self_reported_category)
        << "\"}\n";
@@ -862,7 +1188,7 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
   //    Small models latch onto literal values in the template and copy them
   //    verbatim (template anchoring), making the confidence gate useless.
   //    Instead, describe the schema and let the model reason about the values.
-  //    Likewise, code_patch must be constrained to Turf-Lang syntax only to
+  //    Likewise, new_code must be constrained to Turf-Lang syntax only to
   //    prevent the model from falling back to its C/Java training data.
   // NOTE: confidence is intentionally NOT part of the JSON the model is asked
   // to produce. Small models "anchor" to example values in the prompt and copy
@@ -888,7 +1214,7 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
   //     for a language with genuinely unusual syntax choices (postfix `to`
   //     casts, `mut`/`immut`, `give...otherwise` ternaries). Explicitly
   //     permitting the model to say "I'm not sure" instead of guessing
-  //     matters because a wrong `replacement_line` only gets caught by
+  //     matters because a wrong `new_code` only gets caught by
   //     sandbox validation -- but a wrong, confidently-stated claim in
   //     `explanation` is never validated at all; it just gets shown to the
   //     user as fact.
@@ -914,7 +1240,7 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
       "something is valid Turf-Lang, SAY SO in explanation rather than "
       "guessing confidently -- an honest 'I'm not certain this is right' "
       "is more useful than a fluent wrong answer, since only "
-      "replacement_line gets sandbox-validated before a user sees it; "
+      "new_code gets sandbox-validated before a user sees it; "
       "explanation and suggested_comment do not.\n\n"
       "Error category: " +
       categoryName + "\n\n" + docContent +
@@ -922,45 +1248,39 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
       "RULES:\n"
       "1. Follow Turf-Lang type and ownership rules exactly, as shown in "
       "the documentation above -- not general programming intuition.\n"
-      "2. Prefer a SINGLE LINE of valid Turf-Lang syntax in replacement_line.\n"
+      "2. original_code: COPY, character for character, the existing "
+      "line(s) of the code above that your fix changes, WITHOUT the line "
+      "numbers or the >> and * markers. You never say where the code is; "
+      "it is found by matching your copy, so copy exactly and do not "
+      "correct anything while copying -- the correction belongs in "
+      "new_code. Copy only what the fix touches: usually one line, more "
+      "only when the fix really changes more than one existing line (e.g. "
+      "a whole function header and body), with the lines separated by \\n. "
+      "The line to change may be one of the other lines shown above (e.g. "
+      "a declaration), not only the line the error is on. If the fix only "
+      "ADDS a line, copy the line it goes next to and repeat that line in "
+      "new_code. Leave original_code empty only to insert new lines "
+      "directly after the line the error is on.\n"
+      "3. new_code: the Turf-Lang code that replaces original_code -- the "
+      "same lines with your fix applied, lines separated by \\n. It must "
+      "differ from original_code, and it is just code: no explanation, no "
+      "prose.\n"
       "   Do NOT use C, Java, Python, or any other language syntax.\n"
       "   Do NOT include multiple statements, semicolons, or braces unless\n"
-      "   they are required by Turf-Lang syntax for that construct -- unless\n"
-      "   the fix genuinely needs more than one line (see rule 5), in which\n"
-      "   case replacement_line may span multiple lines. NEVER wrap "
-      "replacement_line\n"
-      "   in a markdown code fence (```) -- it is fed directly to the "
-      "compiler,\n"
-      "   not rendered as markdown, so a fence is a guaranteed syntax "
-      "error.\n"
-      "3. If you cannot produce a valid Turf-Lang patch, set fix_mode to NONE\n"
-      "   and leave code_patch empty. This is not a failure -- 'NONE' is\n"
+      "   they are required by Turf-Lang syntax for that construct. NEVER "
+      "wrap original_code or new_code in a markdown code fence (```) -- "
+      "they are fed directly to the compiler, not rendered as markdown, so "
+      "a fence is a guaranteed syntax error.\n"
+      "4. If you cannot produce a valid Turf-Lang patch, set fix_mode to NONE\n"
+      "   and leave original_code and new_code empty. This is not a "
+      "failure -- 'NONE' is\n"
       "   the right answer whenever you're not sure, and is far better than\n"
       "   a wrong patch.\n"
-      "4. Set fix_mode to one of: MODIFY, NONE.\n"
-      "   Use MODIFY when you have a concrete patch (single-line or, per "
-      "rule 5,\n"
-      "   a small multi-line block). Use NONE when you are not confident "
-      "enough\n"
+      "5. Set fix_mode to one of: MODIFY, NONE.\n"
+      "   Use MODIFY when you have a concrete patch (usually a single "
+      "line, sometimes a small block). Use NONE when you are not "
+      "confident enough\n"
       "   to suggest a specific change.\n"
-      "5. target_line/end_line: usually target_line=0, end_line=0 (fix is a\n"
-      "   single line, the error's own line). If the real fix site is a\n"
-      "   different line shown above (e.g. a declaration), set target_line "
-      "to\n"
-      "   that line number. If the fix genuinely requires replacing MORE "
-      "THAN\n"
-      "   ONE existing line (e.g. wrapping a statement in a new loop, "
-      "adding a\n"
-      "   multi-line function signature), set target_line to the first "
-      "line of\n"
-      "   that range and end_line to the last line (both from the code "
-      "shown\n"
-      "   above), and put the ENTIRE replacement block in replacement_line, "
-      "with\n"
-      "   its lines separated by \\n. Keep the range as small as it can "
-      "possibly\n"
-      "   be -- never replace more existing lines than the fix strictly "
-      "needs.\n"
       "6. Respond ONLY in valid JSON without markdown code blocks.\n"
       "7. Keep explanation, suggested_comment, and warning to 1-3 sentences "
       "-- warm and human-sized, not a one-word reply, but never rambling.\n"
@@ -995,23 +1315,22 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
   userPrompt += "\n}\n";
   if (!previousAttemptFailed.empty()) {
     userPrompt +=
-        "Your previous suggested fix did not compile -- "
-        "\"previous_attempt_failed\" above is the compiler's own error for "
-        "that attempt. Produce a DIFFERENT replacement_line that actually "
-        "addresses that specific feedback, not the same patch again.\n";
+        "Your previous suggested fix was rejected -- "
+        "\"previous_attempt_failed\" above says why: the compiler's own "
+        "error for that attempt, or a problem with how you copied "
+        "original_code. Address that specific feedback; do not send the "
+        "same fix again.\n";
   }
   userPrompt +=
       "Respond with ONLY this JSON object — fill every field yourself:\n"
       "{\"explanation\": <string>, \"fix_mode\": <MODIFY|NONE>, "
-      "\"suggested_comment\": <string>, \"code_patch\": <human-readable "
-      "description of what changed>, "
-      "\"replacement_line\": <THE EXACT Turf-Lang code that replaces "
-      "target_line, or the whole [target_line, end_line] range if end_line "
-      "is set — no explanation, no prose, just the raw code, lines "
+      "\"original_code\": <the existing line(s) you change, copied exactly "
+      "from the code above without line numbers, separated by \\n if more "
+      "than one — see rule 2>, "
+      "\"new_code\": <THE EXACT Turf-Lang code that replaces "
+      "original_code — no explanation, no prose, just the raw code, lines "
       "separated by \\n if more than one>, "
-      "\"target_line\": <0, or a different line number — see rule 5>, "
-      "\"end_line\": <0, or the last line of a multi-line range — see rule "
-      "5>, "
+      "\"suggested_comment\": <string>, "
       "\"warning\": <string>, "
       "\"category\": <one of: TYPE_MISMATCH, UNDECLARED_VARIABLE, "
       "CONTROL_FLOW, SYNTAX_ERROR, ARITHMETIC, STRING_CONVERSION, "
@@ -1051,8 +1370,13 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
         rawResponse.substr(startJson, endJson - startJson + 1);
 
     parseSuggestionJson(jsonStr, "category", suggestion);
-    suggestion.replacement_line = stripLineNumberPrefix(
-        stripMarkdownFences(suggestion.replacement_line));
+    // Both fields get the same cleanup: a model that echoes the gutter or a
+    // fence in one does it in the other (a gutter left on original_code
+    // makes the copy match nothing).
+    suggestion.original_code = trimBlankEdgeLines(
+        stripLineNumberPrefix(stripMarkdownFences(suggestion.original_code)));
+    suggestion.new_code = trimBlankEdgeLines(
+        stripLineNumberPrefix(stripMarkdownFences(suggestion.new_code)));
 
     // B3-2: If the deterministic classifier returned GENERAL (i.e. it couldn't
     // identify the category), try using the model's self-reported category
@@ -1079,16 +1403,15 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
     // empirical sandbox result to produce the true, gate-relevant score.
     suggestion.confidence = computeStructuralPrior(
         suggestion, category, categoryWasDeterministic, contextKeyword,
-        errorLine);
+        errorLine, related);
 
     if (std::getenv("TURF_SLM_DEBUG")) {
       std::cerr << "Structural Prior (pre-sandbox): "
                 << suggestion.confidence << "\n";
       std::cerr << "  category_deterministic=" << categoryWasDeterministic
                 << " fix_mode=" << suggestion.fix_mode
-                << " replacement_line_empty=" << suggestion.replacement_line.empty()
-                << " target_line=" << suggestion.target_line
-                << " end_line=" << suggestion.end_line << "\n";
+                << " original_code_empty=" << suggestion.original_code.empty()
+                << " new_code_empty=" << suggestion.new_code.empty() << "\n";
       std::cerr << "Parsed Fix Mode: " << suggestion.fix_mode << "\n";
     }
 
@@ -1105,345 +1428,103 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
 
 // Sandbox-Based Suggestion Validation
 
-// Recover the intended [start, end] source range for a multi-line
-// replacement_line whose end_line the model left unset (== 0 or an
-// out-of-range/backwards value that didn't resolve to a real range).
-//
-// This is the fix for the single most impactful defect found while
-// benchmarking the pipeline (benchmark writeup A.4 §7, kept outside this
-// repository):
-// when the model decides the right fix is to "regenerate an enclosing
-// declaration" (a struct / error / machine / function block), it naturally
-// emits the WHOLE corrected block in replacement_line but still reports
-// target_line as just the error's own line and leaves end_line at 0. The
-// old code then spliced that N-line block into that ONE line, leaving the
-// other M-1 original block lines in place and producing a nested, duplicated
-// construct that fails re-validation no matter how correct the model's fix
-// idea was. This reproduced verbatim on state machines, structs, AND error
-// types -- i.e. across entirely ordinary syntax, not just novel constructs --
-// and is a large part of why 06_structs / 25_errors / 26_state_machines
-// scored so low. A 1.5B model does not reliably set end_line no matter how
-// the prompt is worded, so the robust fix belongs here, in the harness.
-//
-// Recovery strategy: content-anchoring. The first and last lines of a
-// regenerated block are structural markers ("struct User {" ... "}",
-// "machine ConnectionState {" ... "}") that appear verbatim in the source.
-// Find the source line matching the replacement's first line, then the next
-// source line matching its last line, and accept that range only if it is
-// strictly multi-line (end > start) and brackets target_line -- so a spurious
-// match can't run away. A wrong guess is still completely safe: the spliced
-// result is re-parsed, re-resolved, and re-typechecked in full by the sandbox
-// (same path as every other fix), so it can only ever fail validation, never
-// silently apply incorrect code.
-//
-// NOTE this deliberately does NOT fire for the "wrap a single statement in a
-// new loop" shape (fix A.4 §5): there the replacement is multi-line but is
-// meant to replace exactly ONE original line, its first line ("while ... {")
-// does not appear in the source, so anchoring fails and the caller correctly
-// falls back to a single-line [target, target] splice -- which is exactly
-// right for a wrap/insert.
-static bool inferBlockRange(const std::string &replacement, int targetLine,
-                            int &outStart, int &outEnd) {
-  auto trim = [](const std::string &s) {
-    size_t l = s.find_first_not_of(" \t\r\n");
-    size_t r = s.find_last_not_of(" \t\r\n");
-    return (l == std::string::npos) ? std::string{} : s.substr(l, r - l + 1);
-  };
-
-  // Split replacement into trimmed, non-empty lines.
-  std::vector<std::string> lines;
-  size_t pos = 0;
-  while (pos <= replacement.size()) {
-    size_t nl = replacement.find('\n', pos);
-    std::string raw = (nl == std::string::npos)
-                          ? replacement.substr(pos)
-                          : replacement.substr(pos, nl - pos);
-    std::string t = trim(raw);
-    if (!t.empty())
-      lines.push_back(t);
-    if (nl == std::string::npos)
-      break;
-    pos = nl + 1;
-  }
-  if (lines.size() < 2)
-    return false;
-
-  const std::string &firstRepl = lines.front();
-  const std::string &lastRepl = lines.back();
-  const int n = static_cast<int>(SourceLines.size());
-  if (targetLine < 1 || targetLine > n)
-    return false;
-
-  // For each source line matching the replacement's first line, find the next
-  // source line matching its last line; accept the tightest resulting range
-  // that is strictly multi-line and brackets targetLine.
-  int bestStart = 0, bestEnd = 0;
-  for (int s = 1; s <= n; ++s) {
-    if (trim(SourceLines[s - 1]) != firstRepl)
-      continue;
-    for (int e = s + 1; e <= n; ++e) {
-      if (trim(SourceLines[e - 1]) != lastRepl)
-        continue;
-      if (s <= targetLine && targetLine <= e &&
-          (bestStart == 0 || (e - s) < (bestEnd - bestStart))) {
-        bestStart = s;
-        bestEnd = e;
-      }
-      break; // only the first lastRepl match after this s
-    }
-  }
-  if (bestStart == 0)
-    return false;
-  outStart = bestStart;
-  outEnd = bestEnd;
-  return true;
-}
-
-// How alike two source lines are, ignoring surrounding whitespace: 1.0 for
-// identical, else 1 - (edit distance / longer length).
-static double lineSimilarity(const std::string &a, const std::string &b) {
-  auto trim = [](const std::string &s) {
-    size_t l = s.find_first_not_of(" \t\r");
-    size_t r = s.find_last_not_of(" \t\r");
-    return (l == std::string::npos) ? std::string{} : s.substr(l, r - l + 1);
-  };
-  std::string x = trim(a), y = trim(b);
-  if (x == y)
-    return 1.0;
-  if (x.empty() || y.empty())
-    return 0.0;
-  std::vector<size_t> prev(y.size() + 1), cur(y.size() + 1);
-  for (size_t j = 0; j <= y.size(); ++j)
-    prev[j] = j;
-  for (size_t i = 1; i <= x.size(); ++i) {
-    cur[0] = i;
-    for (size_t j = 1; j <= y.size(); ++j)
-      cur[j] = std::min({prev[j] + 1, cur[j - 1] + 1,
-                         prev[j - 1] + (x[i - 1] == y[j - 1] ? 0 : 1)});
-    std::swap(prev, cur);
-  }
-  return 1.0 - static_cast<double>(prev[y.size()]) /
-                   static_cast<double>(std::max(x.size(), y.size()));
-}
-
-// Find the source range a replacement most plausibly rewrites, from its
-// content alone (issue #267): the window around `anchor` whose lines best
-// line up with the replacement's lines. inferBlockRange() needs the
-// replacement's first and last lines VERBATIM in the source, but a fix
-// usually changes exactly one of them (`fn Box.count()` -> `fn<T>
-// Box.count()`), so it declined on the very block rewrites it was written
-// for. Here lines match when they are merely similar.
-//
-// Scored as a sequence alignment of the replacement's lines against each
-// candidate window [s, e] containing `anchor` (at most two lines longer than
-// the replacement): an aligned pair earns its similarity (pairs under 0.6
-// don't align; a line of two characters or fewer, like `}`, earns 0.3 of it,
-// since a lone brace matches every block's end); a window line left
-// unaligned costs 0.5 (0.25 if blank), because the splice deletes it; a
-// replacement line left unaligned is a new line and costs nothing. The best
-// window must score at least 0.6 -- one convincing match -- or there is no
-// answer. Ties go to the smaller window, then the one nearest `anchor`.
-//
-// A wrong answer here is as safe as a wrong model line number: the result
-// is only a candidate verifySuggestion() hands to the full sandbox re-check.
-static bool alignReplacement(const std::string &replacement, int anchor,
-                             int &outStart, int &outEnd) {
-  const int n = static_cast<int>(SourceLines.size());
-  if (anchor < 1 || anchor > n)
-    return false;
-  std::vector<std::string> repl;
-  size_t pos = 0;
-  while (true) {
-    size_t nl = replacement.find('\n', pos);
-    std::string line = replacement.substr(pos, nl == std::string::npos
-                                                   ? std::string::npos
-                                                   : nl - pos);
-    if (line.find_first_not_of(" \t\r") != std::string::npos)
-      repl.push_back(line);
-    if (nl == std::string::npos)
-      break;
-    pos = nl + 1;
-  }
-  const int k = static_cast<int>(repl.size());
-  if (k == 0)
-    return false;
-
-  auto isBlank = [](const std::string &s) {
-    return s.find_first_not_of(" \t\r") == std::string::npos;
-  };
-  auto pairScore = [&](const std::string &r, const std::string &src) {
-    double sim = lineSimilarity(r, src);
-    if (sim < 0.6)
-      return -1.0; // does not align
-    size_t len = r.find_first_not_of(" \t") == std::string::npos
-                     ? 0
-                     : r.substr(r.find_first_not_of(" \t")).size();
-    return len <= 2 ? sim * 0.3 : sim;
-  };
-
-  double bestScore = 0.0;
-  int bestStart = 0, bestEnd = 0;
-  for (int s = std::max(1, anchor - k - 1); s <= anchor; ++s) {
-    for (int e = anchor; e <= std::min(n, s + k + 1); ++e) {
-      const int m = e - s + 1;
-      // dp[i][j]: best score aligning repl[0..i) with window lines [0..j).
-      std::vector<std::vector<double>> dp(k + 1, std::vector<double>(m + 1));
-      for (int j = 1; j <= m; ++j)
-        dp[0][j] = dp[0][j - 1] -
-                   (isBlank(SourceLines[s + j - 2]) ? 0.25 : 0.5);
-      for (int i = 1; i <= k; ++i) {
-        dp[i][0] = dp[i - 1][0];
-        for (int j = 1; j <= m; ++j) {
-          const std::string &src = SourceLines[s + j - 2];
-          double best = std::max(dp[i - 1][j],
-                                 dp[i][j - 1] - (isBlank(src) ? 0.25 : 0.5));
-          double ps = pairScore(repl[i - 1], src);
-          if (ps >= 0)
-            best = std::max(best, dp[i - 1][j - 1] + ps);
-          dp[i][j] = best;
-        }
-      }
-      double score = dp[k][m];
-      auto dist = [&](int a, int b) {
-        return std::abs((a + b) / 2 - anchor);
-      };
-      bool better = score > bestScore + 1e-9 ||
-                    (bestStart != 0 && std::abs(score - bestScore) <= 1e-9 &&
-                     (m < bestEnd - bestStart + 1 ||
-                      (m == bestEnd - bestStart + 1 &&
-                       dist(s, e) < dist(bestStart, bestEnd))));
-      if (better && score >= 0.6) {
-        bestScore = score;
-        bestStart = s;
-        bestEnd = e;
-      }
-    }
-  }
-  if (bestStart == 0)
-    return false;
-  // The window had to contain `anchor`, which a model often points at the
-  // blank line beside the real code; the splice should not eat that blank
-  // line too. A blank edge line never earns score (only costs), so dropping
-  // it can only improve the alignment.
-  while (bestStart < bestEnd && isBlank(SourceLines[bestStart - 1]))
-    ++bestStart;
-  while (bestEnd > bestStart && isBlank(SourceLines[bestEnd - 1]))
-    --bestEnd;
-  outStart = bestStart;
-  outEnd = bestEnd;
-  return true;
-}
-
 bool verifySuggestion(AISuggestion &suggestion, int errorLine,
-                      std::string *outDiagnostics) {
-  // Use replacement_line (exact Turf-Lang code) for sandbox validation.
-  // code_patch is a human-readable description and must NOT be fed to the
-  // parser. If replacement_line is empty, there is no valid code to validate.
-  if (suggestion.replacement_line.empty()) {
-    return false; // no valid code to validate; code_patch is prose-only
-  }
-  const std::string &fixLine = suggestion.replacement_line;
+                      std::string *outDiagnostics,
+                      const std::vector<RelatedLocation> &related) {
   const int n = static_cast<int>(SourceLines.size());
   const bool debug = std::getenv("TURF_SLM_DEBUG") != nullptr;
+  // A rejection that never reaches the sandbox still owes the retry loop a
+  // reason: without one the next attempt is told "failed to compile", which
+  // for a copying mistake is false and teaches the model nothing.
+  auto reject = [&](const std::string &why) {
+    if (outDiagnostics)
+      *outDiagnostics = why;
+    return false;
+  };
+  auto lineText = [&](int line) {
+    return line >= 1 && line <= n ? SourceLines[line - 1] : std::string();
+  };
 
-  // target_line == 0 means "same line as the error" (the common case). A
-  // positive target_line is only honored if it's within the actual source
-  // range -- a model-hallucinated out-of-range value silently falls back to
-  // errorLine rather than crashing applyFix().
-  int applyLine = errorLine;
-  if (suggestion.target_line > 0 &&
-      suggestion.target_line <= static_cast<int>(SourceLines.size())) {
-    applyLine = suggestion.target_line;
-  }
+  // new_code is what gets compiled. An empty one is rejected rather than
+  // spliced as a deletion: a model that leaves the field blank by mistake
+  // would otherwise "fix" most errors by deleting the line they are on, and
+  // the sandbox -- which only asks "does it compile and is the error gone?" --
+  // would approve it.
+  if (suggestion.new_code.empty())
+    return reject("new_code was empty. Put the corrected Turf code in "
+                  "new_code; the harness cannot delete lines for you.");
+  if (!isBlankLine(suggestion.original_code) &&
+      sameCode(suggestion.original_code, suggestion.new_code))
+    return reject("new_code is the same code as original_code. Change "
+                  "something: the error is still there.");
 
-  // end_line == 0 (or an out-of-range/backwards value) means "just
-  // applyLine" -- a single-line edit, the common case. Only honored as a
-  // genuine range when it's within source bounds and doesn't precede
-  // applyLine -- a hallucinated value silently falls back to a single-line
-  // edit rather than crashing applyFix() with an inverted range.
-  int applyEndLine = applyLine;
-  if (suggestion.end_line >= applyLine &&
-      suggestion.end_line <= static_cast<int>(SourceLines.size())) {
-    applyEndLine = suggestion.end_line;
-  }
+  // Where the model's copy is. See locateOriginal() for the whole contract;
+  // the one thing to know here is that a copy found nowhere stops the attempt
+  // instead of falling back to some line, and says so (issue #267 was a model
+  // being told its CODE was wrong when only its line number was).
+  const std::vector<OriginalMatch> located =
+      locateOriginal(suggestion.original_code, errorLine, related);
+  if (located.empty())
+    return reject(
+        "original_code does not appear in the program; copy the lines "
+        "exactly as shown, without the line numbers. The error is on line " +
+        std::to_string(errorLine) + ": " + normalizeLine(lineText(errorLine)));
 
-  // Recover the intended range when replacement_line is multi-line but
-  // end_line didn't resolve to a real range above (applyEndLine collapsed
-  // back to applyLine). Two distinct shapes land here, and only one needs
-  // recovery:
-  //   (a) block rewrite -- the model regenerated a whole enclosing
-  //       declaration (struct/error/machine/fn) and left end_line at 0.
-  //       inferBlockRange() content-anchors the replacement's first/last
-  //       lines to the source to recover [start, end]. This is the A.4 §7
-  //       fix -- without it these validate at ~0% despite a correct fix idea.
-  //   (b) wrap/insert -- the model wrapped ONE original line in a new
-  //       construct (e.g. a bare `break;` into a loop). The replacement is
-  //       multi-line but replaces exactly one source line; its first line
-  //       does not appear in the source, so inferBlockRange() declines and we
-  //       correctly keep the [applyLine, applyLine] single-line splice.
-  // Either way the sandbox below re-validates the full spliced result, so a
-  // mis-inferred range can only fail validation, never apply bad code.
-  //
-  // Candidate ranges, tried in order until one validates (issue #267). The
-  // model's line numbers are a hint, not ground truth: a 1.5B model reads
-  // the `>> 11 |` gutter and still answers target_line=10 (the blank line
-  // above), and splicing a correct `fn<T> Box.count(): int {...}` into that
-  // blank line left the original `fn Box.count()` below it -- the same
-  // error again, which the retry loop then reported to the model as "your
-  // fix did not compile". The fix was right; only its placement was wrong,
-  // and every retry was poisoned by that false feedback. So the harness
-  // also tries where the replacement's own CONTENT says it belongs
-  // (alignReplacement()), around the model's line and around the error's.
-  // Order keeps every placement that validated before this change winning
-  // exactly as before: the recovered block range (when the old code would
-  // have used it), then the model's literal range, then the aligned ones,
-  // then the error's own line. Each candidate gets a fresh sandbox, so a
-  // failed one leaves nothing behind; all of them must clear the same full
-  // re-check, so a wider search can only find more fixes that compile and
-  // clear the error, never apply one that doesn't.
+  // Candidate edits, tried in order until one validates: each located range
+  // (nearest the error first; for an exact copy that is the only one that
+  // matters unless the same lines occur more than once), then the error line
+  // itself as a fallback for a copy that matched the wrong lines but whose
+  // new_code was written for the error line. Each candidate gets a fresh
+  // sandbox, so a failed one leaves nothing behind; all of them must clear
+  // the same full re-check, so trying more places can only find more fixes
+  // that compile and clear the error, never apply one that doesn't.
   struct Candidate {
     int start, end;
+    std::string text; // what replaces [start, end]
     const char *why;
+    OriginalMatch::Kind how;
   };
   std::vector<Candidate> candidates;
-  auto add = [&](int s, int e, const char *why) {
+  auto add = [&](int s, int e, const std::string &text, const char *why,
+                 OriginalMatch::Kind how) {
     if (s < 1 || e < s || e > n)
       return;
     for (const auto &c : candidates)
       if (c.start == s && c.end == e)
         return;
-    candidates.push_back({s, e, why});
+    candidates.push_back({s, e, text, why, how});
   };
-  const bool multiLine = fixLine.find('\n') != std::string::npos;
-  if (multiLine && applyEndLine == applyLine) {
-    int inferredStart = 0, inferredEnd = 0;
-    if (inferBlockRange(fixLine, applyLine, inferredStart, inferredEnd) ||
-        inferBlockRange(fixLine, errorLine, inferredStart, inferredEnd))
-      add(inferredStart, inferredEnd, "block anchors");
-  }
-  add(applyLine, applyEndLine, "model's range");
-  int alignStart = 0, alignEnd = 0;
-  // The aligned range whose diagnostics are fed back to the model if no
-  // candidate validates: the best evidence of where the model MEANT its
-  // code to go, so the feedback describes its code, not a misplacement.
-  int feedbackStart = 0, feedbackEnd = 0;
-  if (alignReplacement(fixLine, applyLine, alignStart, alignEnd)) {
-    add(alignStart, alignEnd, "content-aligned (model's line)");
-    feedbackStart = alignStart;
-    feedbackEnd = alignEnd;
-  }
-  if (alignReplacement(fixLine, errorLine, alignStart, alignEnd)) {
-    add(alignStart, alignEnd, "content-aligned (error line)");
-    if (feedbackStart == 0) {
-      feedbackStart = alignStart;
-      feedbackEnd = alignEnd;
+  for (const OriginalMatch &m : located) {
+    // The first line of the copied range is what the model's indentation is
+    // measured against.
+    const std::string text = reindentNewCode(
+        suggestion.new_code, suggestion.original_code, lineText(m.Start));
+    switch (m.How) {
+    case OriginalMatch::Exact:
+      add(m.Start, m.End, text, "exact copy", m.How);
+      break;
+    case OriginalMatch::Fuzzy:
+      add(m.Start, m.End, text, "fuzzy copy", m.How);
+      break;
+    case OriginalMatch::Insertion:
+      // New line(s) after the error line: replace that line with itself plus
+      // the new code, which the sandbox's existing range edit can express.
+      add(m.Start, m.End, lineText(m.Start) + "\n" + text,
+          "insertion after the error line", m.How);
+      break;
     }
   }
-  add(errorLine, errorLine, "error line");
-  if (feedbackStart == 0 && !candidates.empty()) {
-    feedbackStart = candidates.front().start;
-    feedbackEnd = candidates.front().end;
-  }
+  if (located.front().How != OriginalMatch::Insertion)
+    add(errorLine, errorLine,
+        reindentNewCode(suggestion.new_code, suggestion.original_code,
+                        lineText(errorLine)),
+        "error line", located.front().How);
+
+  // The candidate whose diagnostics are fed back to the model if none
+  // validates: the best placement of its copy, so the feedback describes its
+  // code, not a misplacement.
+  const int feedbackStart = candidates.front().start;
+  const int feedbackEnd = candidates.front().end;
 
   std::string feedback;
   for (const auto &c : candidates) {
@@ -1453,6 +1534,7 @@ bool verifySuggestion(AISuggestion &suggestion, int errorLine,
                 << Colors::RESET << "\n";
       return false;
     }
+    const std::string &fixLine = c.text;
     bool ok = ApplyAndValidateFix(*sandbox, errorLine, c.start, c.end, fixLine,
                                   suggestion, /*reportFailure=*/debug);
     if (debug)
@@ -1473,6 +1555,11 @@ bool verifySuggestion(AISuggestion &suggestion, int errorLine,
         joined += "\n";
       }
       suggestion.appliedSource = std::move(joined);
+      // Where it went, for renderPatchDiff() -- the lines that were really
+      // replaced, which for a fuzzy copy are not the model's words.
+      suggestion.patchStart = c.start;
+      suggestion.patchEnd = c.end;
+      suggestion.patchText = fixLine;
       return true;
     }
 
@@ -1498,11 +1585,22 @@ bool verifySuggestion(AISuggestion &suggestion, int errorLine,
                              std::count(fixLine.begin(), fixLine.end(), '\n'));
       int lo = std::max(1, c.start - 1);
       int hi = std::min(static_cast<int>(patched.size()), c.start + newLines);
-      feedback += "\nYour replacement_line replaced line";
-      feedback += c.start == c.end ? " " + std::to_string(c.start)
-                                   : "s " + std::to_string(c.start) + "-" +
-                                         std::to_string(c.end);
-      feedback += "; afterwards the code read:\n";
+      const std::string where =
+          c.start == c.end ? " " + std::to_string(c.start)
+                           : "s " + std::to_string(c.start) + "-" +
+                                 std::to_string(c.end);
+      // A copy that was only approximately right was still located, but the
+      // model should know what it was taken to mean, and that it was off.
+      if (c.how == OriginalMatch::Fuzzy) {
+        feedback += "\nYour original_code was not an exact copy of the "
+                    "program; it was matched to line" + where +
+                    ", which read:\n";
+        for (int i = c.start; i <= c.end; ++i)
+          feedback += "  " + SourceLines[i - 1] + "\n";
+        feedback += "Copy the lines exactly next time.";
+      }
+      feedback += "\nYour new_code replaced line" + where +
+                  "; afterwards the code read:\n";
       for (int i = lo; i <= hi; ++i)
         feedback += "  " + patched[i - 1] + "\n";
     }
@@ -1511,6 +1609,50 @@ bool verifySuggestion(AISuggestion &suggestion, int errorLine,
   if (outDiagnostics)
     *outDiagnostics = feedback;
   return false;
+}
+
+// Shown under "Suggested fix:" for every validated suggestion, whoever made
+// it. Built from the spliced range and text rather than the model's
+// original_code/new_code so that the old lines are the ones really replaced
+// (a fuzzy copy shows what it matched, not what the model typed) and so the
+// compiler's fix-its need no display field of their own: they fill the same
+// three patch fields. Lines equal at both ends of the range are left out, which
+// is what makes an inserted `;` or a renamed word one `-` and one `+` line, and
+// an insertion after the error line just `+` lines. The first `+` line carries
+// the line number, the rest `..`, because new lines have no number of their own
+// in the file being compiled.
+std::string renderPatchDiff(const AISuggestion &s) {
+  const int n = static_cast<int>(SourceLines.size());
+  if (s.patchStart < 1 || s.patchEnd < s.patchStart || s.patchEnd > n)
+    return "";
+  std::vector<std::string> oldLines(SourceLines.begin() + (s.patchStart - 1),
+                                    SourceLines.begin() + s.patchEnd);
+  std::vector<std::string> newLines = splitTextLines(s.patchText);
+
+  size_t head = 0;
+  while (head < oldLines.size() && head < newLines.size() &&
+         oldLines[head] == newLines[head])
+    ++head;
+  size_t tail = 0;
+  while (tail < oldLines.size() - head && tail < newLines.size() - head &&
+         oldLines[oldLines.size() - 1 - tail] ==
+             newLines[newLines.size() - 1 - tail])
+    ++tail;
+
+  std::string out;
+  auto emit = [&](const std::string &line) {
+    if (!out.empty())
+      out += "\n    ";
+    out += line;
+  };
+  for (size_t i = head; i < oldLines.size() - tail; ++i)
+    emit(Colors::BRIGHT_RED + "- " + std::to_string(s.patchStart + i) + " | " +
+         oldLines[i] + Colors::RESET);
+  for (size_t i = head; i < newLines.size() - tail; ++i)
+    emit(Colors::BRIGHT_GREEN + "+ " +
+         (i == head ? std::to_string(s.patchStart + head) : std::string("..")) +
+         " | " + newLines[i] + Colors::RESET);
+  return out;
 }
 
 // ── Item 1: deterministic-fix layer ─────────────────────────────────────────
@@ -1524,8 +1666,8 @@ bool verifySuggestion(AISuggestion &suggestion, int errorLine,
 // goes through. A wrong fix-it is therefore exactly as safe as a wrong model
 // guess: it can only fail validation, never apply bad code. It deliberately
 // does not go through verifySuggestion(): that function searches for WHERE a
-// model's replacement belongs, and a fix-it already says where, to the
-// column. Returns an invalid (default-constructed) AISuggestion when there is
+// model's copied original_code is (locateOriginal()), and a fix-it already says
+// where, to the column. Returns an invalid (default-constructed) AISuggestion when there is
 // nothing to try, the edits do not fit the source, or the sandbox rejects
 // them -- the caller (validateAndApplySuggestion()) then falls through to the
 // ordinary model path, unaffected.
@@ -1533,14 +1675,15 @@ bool verifySuggestion(AISuggestion &suggestion, int errorLine,
 // Applies `FixIts` to SourceLines without touching them. On success fills the
 // line range [firstLine, lastLine] the edits span, the patched text that
 // replaces exactly that range ('\n'-joined, so it can be spliced like a model's
-// replacement), and one rendered before/after line pair group for display.
+// new_code), and a short "'old' -> 'new'" label per edit for the status line.
+// The before/after display is not built here: renderPatchDiff() makes it from
+// the range and text, the same way for a model suggestion.
 // Fails (returns false) for an edit outside the source, two edits that overlap
 // or tie on one position (their order would be a guess), or edits that change
 // nothing.
 static bool applyFixIts(const std::vector<FixIt> &FixIts, int errorLine,
                         int &firstLine, int &lastLine, std::string &patched,
-                        std::vector<std::string> &labels,
-                        std::string &renderedDiff) {
+                        std::vector<std::string> &labels) {
   const int n = static_cast<int>(SourceLines.size());
   if (FixIts.empty())
     return false;
@@ -1576,7 +1719,6 @@ static bool applyFixIts(const std::vector<FixIt> &FixIts, int errorLine,
   };
 
   patched.clear();
-  renderedDiff.clear();
   bool changed = false;
   size_t next = 0;
   for (int line = firstLine; line <= lastLine; ++line) {
@@ -1639,20 +1781,6 @@ static bool applyFixIts(const std::vector<FixIt> &FixIts, int errorLine,
       patched += "\n";
     patched += out;
 
-    if (out != orig) {
-      if (!renderedDiff.empty())
-        renderedDiff += "\n    ";
-      renderedDiff += Colors::BRIGHT_RED + "- " + std::to_string(line) + " | " +
-                      orig + Colors::RESET;
-      std::istringstream newLines(out);
-      std::string piece;
-      int shown = 0;
-      while (std::getline(newLines, piece)) {
-        renderedDiff += "\n    " + Colors::BRIGHT_GREEN + "+ " +
-                        (shown++ == 0 ? std::to_string(line) : std::string("..")) +
-                        " | " + piece + Colors::RESET;
-      }
-    }
   }
   return changed;
 }
@@ -1664,9 +1792,9 @@ static AISuggestion tryDeterministicFix(int errorLine,
                                         std::string &summaryOut) {
   AISuggestion result;
   int first = 0, last = 0;
-  std::string patched, diff;
+  std::string patched;
   std::vector<std::string> labels;
-  if (!applyFixIts(Hints.FixIts, errorLine, first, last, patched, labels, diff))
+  if (!applyFixIts(Hints.FixIts, errorLine, first, last, patched, labels))
     return result;
 
   std::string summary;
@@ -1674,10 +1802,14 @@ static AISuggestion tryDeterministicFix(int errorLine,
     summary += (summary.empty() ? "" : ", ") + label;
 
   result.fix_mode = "MODIFY";
-  result.replacement_line = patched;
-  result.target_line = first;
-  result.end_line = last;
-  result.code_patch = diff;
+  // The same fields a model suggestion fills, so everything downstream treats
+  // the two alike: the lines the edits span, and what they became.
+  for (int line = first; line <= last; ++line)
+    result.original_code += (line > first ? "\n" : "") + SourceLines[line - 1];
+  result.new_code = patched;
+  result.patchStart = first;
+  result.patchEnd = last;
+  result.patchText = patched;
   result.suggested_comment = "Compiler fix: " + summary + ".";
   result.explanation = Hints.FixReason;
   result.self_reported_category = getCategoryName(category);
@@ -1778,7 +1910,8 @@ AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
 
     // Verify the suggestion in a sandbox
     std::string diagnosticText;
-    bool isValid = verifySuggestion(suggestion, errorLine, &diagnosticText);
+    bool isValid =
+        verifySuggestion(suggestion, errorLine, &diagnosticText, related);
 
     // Finalize confidence NOW — after sandbox validation.
     // The structural prior (computed before sandbox ran) is only a prior;
@@ -1824,7 +1957,7 @@ AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
     // Attempts remain: feed this attempt's real compiler diagnostic back
     // into the next fetchSuggestion() call and try again.
     previousAttemptFailed = diagnosticText.empty()
-        ? "The previous suggested replacement_line failed to compile."
+        ? "The previous suggested new_code failed to compile."
         : diagnosticText;
     std::cerr << Colors::BRIGHT_YELLOW << "[Sandbox] Attempt " << attempt
               << "/" << kMaxSlmAttempts

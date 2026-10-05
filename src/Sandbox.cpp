@@ -509,13 +509,13 @@ std::unique_ptr<Sandbox> CreateSandbox() {
  *                  used only to confirm that diagnostic is actually gone.
  * @param applyLine The 1-based first source line of the range fixedText is
  *                  patched into. Equal to errorLine in the common case;
- *                  differs when the model targets a declaration/related
- *                  line instead (see AISuggestion::target_line).
+ *                  differs when the copied code was found on a
+ *                  declaration/related line instead (see
+ *                  SLMIntegration.cpp's locateOriginal()).
  * @param applyEndLine The 1-based last source line (inclusive) of the range
  *                  fixedText is patched into. Equal to applyLine for a
  *                  single-line edit (the common case); greater when the fix
- *                  is a multi-line block replacement (see
- *                  AISuggestion::end_line).
+ *                  is a multi-line block replacement.
  * @param fixedText The replacement text for [applyLine, applyEndLine] --
  *                  may itself contain embedded '\n's for a multi-line block.
  * @param suggestion The AI suggestion metadata (confidence, fix_mode).

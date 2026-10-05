@@ -17,24 +17,27 @@ struct AISuggestion {
   std::string explanation;
   std::string fix_mode = "NONE";
   std::string suggested_comment;
-  std::string code_patch;       // Human-readable description of the patch
-  std::string replacement_line; // Exact Turf-Lang source line to substitute
-  // Which line replacement_line should be applied to. 0 (the default) means
-  // "the line the diagnostic was raised on" -- the common case. A model can
-  // set this to a different line (e.g. a declaration site shown in the
-  // prompt's pinned context) when the correct fix belongs there instead of
-  // at the line the error fired on -- see target_line's doc comment in
-  // grammars/slm_suggestion.gbnf for the motivating case.
-  int target_line = 0;
-  // Last line (inclusive, same 1-based numbering as target_line) of the
-  // range replacement_line replaces. 0 (the default) means "just
-  // target_line" -- a single-line edit, the common case. Set > target_line
-  // when the fix genuinely requires replacing more than one existing line
-  // (e.g. wrapping a statement in a new loop, adding a multi-line function
-  // signature) -- replacement_line then holds the full new block, with
-  // individual lines separated by the JSON "\n" escape. See
-  // grammars/slm_suggestion.gbnf for the matching grammar rule.
-  int end_line = 0;
+  // The edit, as the model states it (schema version kSlmSchemaVersion, see
+  // SLMIntegration.cpp): the lines it wants to change, copied from the code
+  // it was shown, and what they should become. The model never says WHERE --
+  // a 1.5B model copies text far more reliably than it counts lines, and a
+  // wrong line number was how correct fixes were lost (issue #267).
+  // verifySuggestion() finds original_code in the source (locateOriginal()).
+  // An empty original_code means "insert new_code on the line(s) after the
+  // error line".
+  std::string original_code;
+  std::string new_code;
+  // Where the validated edit went, set by verifySuggestion() and the
+  // compiler's own fix-it path once the sandbox accepts it, and zero
+  // otherwise: the 1-based inclusive source range that was replaced, and the
+  // exact text it was replaced with ('\n'-joined). These are what the
+  // suggestion's before/after is rendered from (renderPatchDiff()), for the
+  // model path and the fix-it path alike, so the display never depends on
+  // what the model claimed to be editing -- a fuzzy copy shows the lines it
+  // really matched.
+  int patchStart = 0;
+  int patchEnd = 0;
+  std::string patchText;
   std::string warning;
   std::string self_reported_category; // Model's own assessment of error category
   bool valid = false;
@@ -61,6 +64,16 @@ struct AISuggestion {
 // Extracts +/- `contextSize` lines around the given error line.
 std::string getCodeContext(int errorLine, int contextSize = 10);
 
+// The coloured before/after of a validated suggestion, ready to print under
+// "Suggested fix:" (src/Lexer.cpp): the replaced source lines `- N | ...`,
+// then the new ones `+ N | ...`, with the lines that are the same at either
+// end of the range left out so an inserted `;` shows one line, not a whole
+// block. Built from patchStart/patchEnd/patchText and the ORIGINAL source
+// (SourceLines is never committed to), not from original_code/new_code, so a
+// fuzzy-matched copy shows what was really replaced. Empty when the
+// suggestion carries no validated patch.
+std::string renderPatchDiff(const AISuggestion &suggestion);
+
 // Fetches a suggestion from the SLM based on the error message, source
 // context, and optional hint. Returns an empty AISuggestion if the SLM fails or times out.
 // `category`: ground-truth category, either from the raising TurfError
@@ -69,11 +82,12 @@ std::string getCodeContext(int errorLine, int contextSize = 10);
 // re-derived from message text (DIAG-001 deleted that fallback, formerly
 // ErrorCategory.h's classifyError()). GENERAL is itself a real, audited
 // answer for a site, not "no category available."
-// `previousAttemptFailed`: the real compiler diagnostic text from the
-// sandbox's rejection of a prior attempt's replacement_line (see
-// Sandbox::getValidationDiagnostics()), fed back into the prompt so a retry
-// (validateAndApplySuggestion()'s retry loop) can course-correct instead of
-// re-guessing blind. Empty on a first attempt.
+// `previousAttemptFailed`: why a prior attempt was rejected -- the real
+// compiler diagnostic text from the sandbox (see
+// Sandbox::getValidationDiagnostics()), or verifySuggestion()'s own message
+// when `original_code` was not found in the program -- fed back into the
+// prompt so a retry (validateAndApplySuggestion()'s retry loop) can
+// course-correct instead of re-guessing blind. Empty on a first attempt.
 // `hints`: see DiagnosticHints -- item 3's known-type facts are folded into
 // the prompt as an extra "Known types" section; item 1's deterministic-fix
 // fields are NOT consulted here (only validateAndApplySuggestion() tries
@@ -95,9 +109,10 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
 // 0. If `hints` carries fix-its (item 1: DiagnosticHints::FixIts -- a rename,
 //    a missing `<T>`, a missing ';', ...), apply them together as one sandboxed
 //    patch first. On success, returns it directly -- fetchSuggestion() (and
-//    therefore the model) is never called at all; `code_patch` holds the real
-//    before/after of the edited lines. On failure (or no fix-its), falls
-//    through to the steps below exactly as before.
+//    therefore the model) is never called at all; patchStart/patchEnd/
+//    patchText hold the edit, which renderPatchDiff() shows as a before/after.
+//    On failure (or no fix-its), falls through to the steps below exactly as
+//    before.
 // 1. Calls fetchSuggestion() to query the SLM.
 // 2. Extracts the resulting patch, comment, explanation, and fix strategy.
 // 3. Performs basic validation (e.g. ensuring syntax isn't obviously broken).
@@ -109,19 +124,28 @@ AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
                                         const DiagnosticHints &hints = {},
                                         const std::string &errorCode = "");
 
-// Applies `suggestion.replacement_line` in a fresh Sandbox and validates it
-// (parse + semantic check + confirms the original error is actually gone).
+// Finds `suggestion.original_code` in the source, replaces it with
+// `suggestion.new_code` in a fresh Sandbox and validates the result (parse +
+// semantic check + confirms the original error is actually gone). Where the
+// code is found, and what happens when it is not, is locateOriginal()'s
+// contract (SLMIntegration.cpp).
 // `suggestion` is a non-const reference (not just read from) because a
-// SUCCESSFUL validation writes the full patched source back into
-// `suggestion.appliedSource` (SLM-001 follow-up) -- every other field is
-// read-only here, same as before.
-// If validation fails and `outDiagnostics` is non-null, it's filled with the
-// sandbox's own compiler diagnostics for the failed attempt (joined into one
-// string) -- validateAndApplySuggestion()'s retry loop feeds this back into
-// the next fetchSuggestion() call as `previousAttemptFailed` so a retry has
-// the real reason the last patch didn't compile, not just "try again".
+// SUCCESSFUL validation writes the full patched source into
+// `suggestion.appliedSource` (SLM-001 follow-up) and the range and text that
+// were spliced into patchStart/patchEnd/patchText -- every other field is
+// read-only here.
+// `related` is the diagnostic's pinned locations: a copy of one of those
+// lines (the declaration an error points back to) is as legitimate a place
+// to look as the error line itself.
+// If validation fails and `outDiagnostics` is non-null, it's filled with why
+// -- the sandbox's own compiler diagnostics for the failed attempt (joined
+// into one string), or the message for a copy that matched nothing --
+// validateAndApplySuggestion()'s retry loop feeds this back into the next
+// fetchSuggestion() call as `previousAttemptFailed` so a retry has the real
+// reason the last patch was rejected, not just "try again".
 bool verifySuggestion(AISuggestion &suggestion, int errorLine,
-                      std::string *outDiagnostics = nullptr);
+                      std::string *outDiagnostics = nullptr,
+                      const std::vector<RelatedLocation> &related = {});
 
 } // namespace SLM
 

@@ -1,9 +1,18 @@
 # GBNF grammar for SLM suggestion JSON output.
-# Constrains the model to emit a well-formed JSON object with exactly the six
-# required fields in order, and token-constrains fix_mode to only "MODIFY" or
-# "NONE" — it is physically impossible for the model to emit any other value.
+# Constrains the model to emit a well-formed JSON object with exactly the
+# seven required fields in order, and token-constrains fix_mode to only
+# "MODIFY" or "NONE" — it is physically impossible for the model to emit any
+# other value.
 #
-# Field order is fixed; update this file if the prompt schema changes.
+# Field order is fixed; update this file if the prompt schema changes. It is
+# also the order that suits a small model: `explanation` first (it reasons
+# before it commits), then `original_code` (copying the real text anchors it
+# on the program it was shown), then `new_code` (the edit, written against
+# that copy). The model gives no line numbers: the harness finds
+# `original_code` in the source (SLMIntegration.cpp, locateOriginal()). Both
+# code fields are plain JSON strings, with lines joined by the \n escape, and
+# either may be empty (`original_code` empty means "insert after the error
+# line"; both empty goes with fix_mode NONE).
 #
 # IMPORTANT -- multi-line rule bodies MUST be wrapped in parentheses.
 # llama.cpp's GBNF parser does NOT support bare line-continuation: a rule
@@ -25,30 +34,14 @@
 root ::= "{" ws (
          "\"explanation\":"      ws string "," ws
          "\"fix_mode\":"         ws fix-mode "," ws
+         "\"original_code\":"    ws string "," ws
+         "\"new_code\":"         ws string "," ws
          "\"suggested_comment\":" ws string "," ws
-         "\"code_patch\":"       ws string "," ws
-         "\"replacement_line\":" ws string "," ws
-         "\"target_line\":"      ws integer "," ws
-         "\"end_line\":"         ws integer "," ws
          "\"warning\":"          ws string "," ws
          "\"category\":"         ws category
          ) ws "}"
 
 fix-mode ::= "\"MODIFY\"" | "\"NONE\""
-
-# target_line: 0 means "same line the error was raised on" (the common
-# case). Any other positive value means "apply replacement_line at this line
-# instead" -- used when the correct fix targets a declaration/related site
-# shown in the prompt's context rather than the line the diagnostic fired
-# on (e.g. a use-before-init error, where the error fires at the *use* but
-# the fix belongs at the *declaration*).
-#
-# end_line: 0 means "just target_line" (a single-line edit, the common
-# case). A value greater than target_line means replacement_line replaces
-# the whole [target_line, end_line] range instead of one line -- used when
-# a fix genuinely requires editing more than one existing line (e.g.
-# wrapping a statement in a new loop).
-integer ::= "0" | [1-9] [0-9]*
 
 category ::= ("\"TYPE_MISMATCH\""       | "\"UNDECLARED_VARIABLE\""
            | "\"CONTROL_FLOW\""        | "\"SYNTAX_ERROR\""

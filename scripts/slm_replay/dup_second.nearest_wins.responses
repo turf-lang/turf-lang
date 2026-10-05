@@ -1,0 +1,1 @@
+{"explanation": "x", "fix_mode": "MODIFY", "original_code": "    return self.v;", "new_code": "    return self.v to string;", "suggested_comment": "", "warning": "", "category": "TYPE_MISMATCH"}

@@ -35,21 +35,46 @@ fi
 
 DIR="scripts/slm_replay"
 
-# program.case:expectation[:required text in the debug log]
+# program.case:expectation[|check]...
+#
+# The model gives no line numbers (original_code / new_code), so the cases are
+# about the harness finding the copy. Each `check` is text the TURF_SLM_DEBUG
+# log must contain; `!text` means it must NOT; `fixed:text` means the written
+# fix file must contain it. (Checks are split on `|`, so they cannot contain
+# one.)
 CASES=(
   # The issue #267 shape: attempt 1 is genuinely wrong (no field `m`), and
-  # attempt 2 is the right block but says target_line=10, the blank line
-  # above it. The feedback after attempt 1 must describe attempt 1's own
-  # mistake, not a misplacement.
-  "method_block.wrong_line_after_retry:validated:no field named 'm'"
+  # attempt 2 is the right block. The feedback after attempt 1 must describe
+  # attempt 1's own mistake, not a misplacement, and attempt 2 is what wins.
+  "method_block.wrong_line_after_retry:validated|no field named 'm'|(attempt 2/3)"
   # A `:` sent as \u003a, which the old decoder left as literal text.
   "method_block.unicode_escape:validated"
-  # The `>> 11 |` gutter echoed on every line, not just the first.
-  "method_block.echoed_gutter:validated"
-  # A multi-line range shifted one line up: [10, 12] for [11, 13].
-  "method_block.shifted_range:validated"
-  # A change that does not fix the error must not validate anywhere.
-  "method_block.unchanged:rejected"
+  # The `>> 12 |` gutter echoed on every line of original_code and new_code.
+  "method_block.echoed_gutter:validated|(exact copy): validated"
+  # A change that does not fix the error must not validate anywhere, and the
+  # model is told why instead of "it did not compile".
+  "method_block.unchanged:rejected|new_code is the same code as original_code"
+
+  # Locating original_code.
+  # Exact copy, indentation and all: the error line itself.
+  "method_block.exact_copy:validated|candidate [12, 12] (exact copy): validated|fixed:    return self.n to string;"
+  # The same copy with its indentation stripped still matches, and the fix is
+  # put back at the indentation the source has.
+  "method_block.different_indentation:validated|candidate [12, 12] (exact copy): validated|fixed:    return self.n to string;"
+  # One typo in the copy (`slef`): fuzzy-matched to the same line.
+  "method_block.fuzzy_copy:validated|candidate [12, 12] (fuzzy copy): validated"
+  # A copy that is nowhere in the program: no guessing a line for new_code
+  # (which would have validated, being right for line 12). The attempt fails
+  # with the copying message, which reaches the model, and attempt 2 wins.
+  "method_block.not_in_program:validated|original_code does not appear in the program; copy the lines exactly|(attempt 2/3)"
+  # The same line twice: the copy nearest the error wins, in either order.
+  "dup_second.nearest_wins:validated|candidate [11, 11] (exact copy): validated|!candidate [7, 7]"
+  "dup_first.nearest_wins:validated|candidate [7, 7] (exact copy): validated|!candidate [11, 11]"
+  # An empty original_code is an insertion right after the error line (the
+  # function header, line 1).
+  "insert_line.empty_original:validated|candidate [1, 1] (insertion after the error line): validated"
+  # An empty new_code is never a fix (it would delete the line), and says so.
+  "method_block.empty_new_code:rejected|new_code was empty"
 )
 
 FAILED=0
@@ -57,11 +82,10 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
 for entry in "${CASES[@]}"; do
-  name="${entry%%:*}"
-  rest="${entry#*:}"
-  expect="${rest%%:*}"
-  needle=""
-  [ "$rest" != "$expect" ] && needle="${rest#*:}"
+  head="${entry%%|*}"
+  checks="${entry#"$head"}" # empty, or "|check|check..."
+  name="${head%%:*}"
+  expect="${head#*:}"
   program="$DIR/${name%%.*}.tr"
   responses="$DIR/$name.responses"
   fixed="$TMP/$name.fixed.tr"
@@ -90,10 +114,30 @@ for entry in "${CASES[@]}"; do
       ok=0
     fi
   fi
-  if [ -n "$needle" ] && ! grep -qF "$needle" <<<"$output"; then
-    echo -e "${RED}✗${RESET} $name -- log lacks: $needle"
-    ok=0
-  fi
+  IFS='|' read -r -a check_list <<<"${checks#|}"
+  for check in "${check_list[@]}"; do
+    [ -z "$check" ] && continue
+    case "$check" in
+    "!"*)
+      if grep -qF -- "${check#!}" <<<"$output"; then
+        echo -e "${RED}✗${RESET} $name -- log has: ${check#!}"
+        ok=0
+      fi
+      ;;
+    "fixed:"*)
+      if ! grep -qF -- "${check#fixed:}" "$fixed" 2>/dev/null; then
+        echo -e "${RED}✗${RESET} $name -- written fix lacks: ${check#fixed:}"
+        ok=0
+      fi
+      ;;
+    *)
+      if ! grep -qF -- "$check" <<<"$output"; then
+        echo -e "${RED}✗${RESET} $name -- log lacks: $check"
+        ok=0
+      fi
+      ;;
+    esac
+  done
 
   if [ "$ok" -eq 1 ]; then
     echo -e "${GREEN}✓${RESET} $name -- $expect"

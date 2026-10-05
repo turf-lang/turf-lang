@@ -458,10 +458,15 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
                           "Explanation: " + Colors::RESET + ai.explanation;
         }
 
-        if (ai.fix_mode == "MODIFY" && !ai.code_patch.empty()) {
+        // The before/after is rendered from the validated patch (the lines
+        // actually replaced and their replacement), not from anything the
+        // model wrote about it -- one renderer for a model suggestion and a
+        // compiler fix-it alike (SLM::renderPatchDiff()).
+        const std::string patchDiff = SLM::renderPatchDiff(ai);
+        if (ai.fix_mode == "MODIFY" && !patchDiff.empty()) {
           finalMessage += "\n  " + Colors::BRIGHT_GREEN +
                           "Suggested fix:" + Colors::RESET + "\n    " +
-                          Colors::BRIGHT_GREEN + ai.code_patch + Colors::RESET;
+                          patchDiff;
         }
 
         if (!ai.warning.empty()) {

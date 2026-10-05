@@ -1,0 +1,17 @@
+struct Box {
+    v: int,
+    n: int
+}
+
+fn Box.get(): int {
+    return self.v;
+}
+
+fn Box.label(): string {
+    return self.v;
+}
+
+fn main(): int {
+    mut b: Box = Box::default();
+    return b.get();
+}
