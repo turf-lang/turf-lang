@@ -89,7 +89,11 @@ else
   STD_BAD=0
   while IFS= read -r f; do
     out=$(./build/turfc --resolve "$f" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
-    errs=$(echo "$out" | grep -E '^── error|^Error:' | grep -v 'No entry point found')
+    # The expected "No entry point found" is matched by its CODE (E119,
+    # MissingEntryPoint): the header `── error [E119 · declaration]` and the
+    # message are on separate lines, so filtering on the message text alone
+    # (as this once did) let every library file through as a failure.
+    errs=$(echo "$out" | grep -E '^── error|^Error:' | grep -v -e 'No entry point found' -e '\[E119[] ·]')
     [ -z "$errs" ] && continue
     fail "$f does not resolve:"
     echo "$errs" | head -3 | sed 's/^/       /'
