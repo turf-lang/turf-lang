@@ -56,14 +56,39 @@ fi
 # under this is unambiguous proof the model path was never entered.
 CEILING_SECONDS=5
 
-# Each fixture's OLD and NEW identifier, so a change to either fixture file
-# doesn't silently desync from what this script asserts happened.
+# `file|summary`: the fixture and the exact "'old' -> 'new'" text the
+# [Deterministic Fix] line must report for it (the edit widened to the word it
+# touches -- see applyFixIts() in SLMIntegration.cpp), so a change to either the
+# fixture or the fix-it doesn't silently desync from what this script asserts
+# happened. A fixture's fixed program must compile AND run to exit 0, and must
+# not import a sibling file (the fixed copy is written to /tmp).
 FIXTURES=(
-  "tests/44_slm_diagnostics/fail_deterministic_typo_variable.tr:cuont:count"
-  "tests/44_slm_diagnostics/fail_deterministic_typo_keyword.tr:retrun:return"
-  # Not a typo: E138 already knows the missing `<T>` (issue #267).
-  "tests/38_monomorphization/fail_method_on_generic_struct_without_type_params.tr:fn:fn<T>"
-  "tests/07_functions_modules/fail_method_on_imported_generic_struct_without_type_params.tr:fn:fn<T>"
+  # Renames: an unambiguous "did you mean".
+  "tests/44_slm_diagnostics/fail_deterministic_typo_variable.tr|'cuont' -> 'count'"
+  "tests/44_slm_diagnostics/fail_deterministic_typo_keyword.tr|'retrun' -> 'return'"
+  "tests/15_enums/fail_enum_wrong_variant.tr|'Norht' -> 'North'"
+  "tests/06_structs/fail_misspelled_method_struct.tr|'Usre' -> 'User'"
+  # Not a typo: E138 already knows the missing `<T>` (issue #267). An
+  # insertion after `fn`, not a rename.
+  "tests/38_monomorphization/fail_method_on_generic_struct_without_type_params.tr|'fn' -> 'fn<T>'"
+  "tests/07_functions_modules/fail_method_on_imported_generic_struct_without_type_params.tr|'fn' -> 'fn<T>'"
+  # E102: the ';' goes at the end of the PREVIOUS statement's line, not the
+  # line the error points at (fix-it Line != 0).
+  "tests/01_syntax/fail_missing_semicolon_end_of_line.tr|'io::printline(\"hello\")' -> 'io::printline(\"hello\");'"
+  "tests/04_control_flow/fail_do_while_missing_semicolon.tr|'0)' -> '0);'"
+  # E087: a `pub` that means nothing is deleted; a `pub` before a decorator
+  # moves to just before `fn` (two edits on two places, one fix).
+  "tests/07_functions_modules/visibility/fail_pub_with_export.tr|'pub' -> ''"
+  "tests/07_functions_modules/visibility/fail_pub_on_operator.tr|'pub' -> ''"
+  "tests/07_functions_modules/visibility/fail_pub_enum_variant.tr|'pub' -> ''"
+  "tests/07_functions_modules/visibility/fail_pub_before_decorator.tr|'pub' -> '', 'fn' -> 'pub fn'"
+  # E048 / E029 / E052: '.' vs '::' where the hint spells out the call.
+  "tests/07_functions_modules/fail_dot_call_on_module_ref.tr|'io.printline' -> 'io::printline'"
+  "tests/07_functions_modules/fail_dot_call_on_struct_static.tr|'MathUtil.square' -> 'MathUtil::square'"
+  "tests/07_functions_modules/fail_scope_operator_on_instance_call.tr|'p::get' -> 'p.get'"
+  "tests/07_functions_modules/fail_static_method_via_instance.tr|'mu.square' -> 'MathUtil::square'"
+  # E046: `static` on `.new` is deleted.
+  "tests/06_structs/fail_constructor_cannot_be_static.tr|'static' -> ''"
 )
 
 FAILED=0
@@ -75,10 +100,8 @@ FAILED=0
 rm -rf "${HOME:-/nonexistent}/.cache/turf/slm"
 
 for fixture in "${FIXTURES[@]}"; do
-  file="${fixture%%:*}"
-  rest="${fixture#*:}"
-  old="${rest%%:*}"
-  new="${rest#*:}"
+  file="${fixture%%|*}"
+  summary="${fixture#*|}"
 
   if [ ! -f "$file" ]; then
     echo -e "${RED}✗${RESET} $file -- fixture missing"
@@ -104,8 +127,8 @@ for fixture in "${FIXTURES[@]}"; do
     echo -e "${RED}✗${RESET} $file -- output didn't confirm the model was skipped"
     ok=0
   fi
-  if ! grep -q "'$old' -> '$new'" <<<"$output"; then
-    echo -e "${RED}✗${RESET} $file -- expected rename '$old' -> '$new' not reported"
+  if ! grep -qF "[Deterministic Fix] ✓ $summary validated" <<<"$output"; then
+    echo -e "${RED}✗${RESET} $file -- expected fix $summary not reported"
     ok=0
   fi
   if awk -v e="$elapsed" -v c="$CEILING_SECONDS" 'BEGIN { exit !(e > c) }'; then
@@ -113,13 +136,13 @@ for fixture in "${FIXTURES[@]}"; do
     ok=0
   fi
 
-  # Deliberately NOT grepping the written file's text for "$old"/"$new":
-  # this fixture's own doc comment names both words in prose (describing
-  # what it tests), so a naive substring check false-positives on the
-  # COMMENT, not the code -- found live while writing this check. Whether
-  # the fix is real is instead proven the strong way: the written file
-  # must actually compile and run to completion, which a stray uncorrected
-  # '$old' token in the live code could never do.
+  # Deliberately NOT grepping the written file's text for the old/new words:
+  # a fixture's own doc comment names them in prose (describing what it
+  # tests), so a naive substring check false-positives on the COMMENT, not
+  # the code -- found live while writing this check. Whether the fix is real
+  # is instead proven the strong way: the written file must actually compile
+  # and run to completion, which a stray uncorrected token in the live code
+  # could never do.
   if [ ! -s "$fixed_out" ]; then
     echo -e "${RED}✗${RESET} $file -- --smart-write-fix didn't write a (non-empty) fixed file"
     ok=0
@@ -133,7 +156,7 @@ for fixture in "${FIXTURES[@]}"; do
   rm -f "$fixed_out" "$fixed_bin"
 
   if [ "$ok" -eq 1 ]; then
-    echo -e "${GREEN}✓${RESET} $file -- '$old' -> '$new' in ${elapsed}s, model never called, written fix compiles and runs"
+    echo -e "${GREEN}✓${RESET} $file -- $summary in ${elapsed}s, model never called, written fix compiles and runs"
   else
     FAILED=$((FAILED + 1))
     echo "$output" | sed 's/^/    /'

@@ -51,7 +51,26 @@ std::string MainSourceFilename;
 SourceLocation CurLoc = {1, 0};
 int CurLine = 1;
 int CurCol = 0;
+int PrevTokEndLine = -1;
+int PrevTokEndCol = -1;
 static int LastChar = ' ';
+
+const std::string *FixItSourceLine(const SourceLocation &Loc) {
+  if (Loc.Line < 1)
+    return nullptr;
+  const std::string &File = Loc.Filename.empty() ? SourceFilename : Loc.Filename;
+  // AllSourceLines is keyed by the file's path, which is how a diagnostic raised
+  // in a later pass still finds the right file's text; the transient
+  // SourceLines is the same content for the file being parsed right now.
+  auto It = AllSourceLines.find(File);
+  const std::vector<std::string> &Lines =
+      It != AllSourceLines.end() ? It->second : SourceLines;
+  if (It == AllSourceLines.end() && File != SourceFilename)
+    return nullptr;
+  if (Loc.Line > static_cast<int>(Lines.size()))
+    return nullptr;
+  return &Lines[Loc.Line - 1];
+}
 
 // DiagnosticEngine : static storage
 std::vector<DiagnosticEngine::Diag> DiagnosticEngine::Diagnostics;
@@ -416,7 +435,17 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
           "fresh analysis." +
           Colors::RESET;
     } else {
-      SLM::AISuggestion ai = SLM::validateAndApplySuggestion(Msg, Loc.Line, Hint, Related, Category, Hints, Code);
+      // A fix-it's columns describe ITS file's text, but the sandbox patches
+      // SourceLines, the file being compiled right now: for a diagnostic
+      // raised inside an imported module, applying them there would edit an
+      // unrelated line of the importer. Such a fix goes to the model (which has
+      // the same placement limit, but proposes whole lines and is validated).
+      SLM::DiagnosticHints UsableHints = Hints;
+      if (!Loc.Filename.empty() && Loc.Filename != SourceFilename) {
+        UsableHints.FixIts.clear();
+        UsableHints.FixReason.clear();
+      }
+      SLM::AISuggestion ai = SLM::validateAndApplySuggestion(Msg, Loc.Line, Hint, Related, Category, UsableHints, Code);
 
       if (ai.valid && ai.confidence >= 0.8f && ai.fix_mode != "NONE") {
         // Replace compiler message with high-confidence AI suggestion.
@@ -592,7 +621,7 @@ void DiagnosticEngine::restoreDiagnostics(const std::vector<Diag> &Saved) {
 // TurfWarning::Category_), same as every other diagnostic sink in the
 // compiler.
 void LogErrorAt(SourceLocation Loc, const char *Code, const std::string &Msg,
-                SLM::ErrorCategory Category) {
+                SLM::ErrorCategory Category, const SLM::DiagnosticHints &Hints) {
   // An unregistered code would print a "[E0NN]" that `--explain` rejects as
   // unknown -- exactly the dead end this parameter exists to remove -- so a
   // typo'd or never-registered code must be caught the first time a
@@ -601,7 +630,7 @@ void LogErrorAt(SourceLocation Loc, const char *Code, const std::string &Msg,
   assert(ErrorCodes::lookupByCode(Code) &&
          "LogErrorAt: code is not a row of AllErrorCodes (ErrorCodes.h)");
   DiagnosticEngine::add(Loc, Msg, "", isMessageWarning(Msg), {}, Category,
-                        Code);
+                        Code, Hints);
 }
 
 void resetLexer() {
@@ -609,6 +638,8 @@ void resetLexer() {
   CurLine = 1;
   CurCol = 0;
   CurLoc = {1, 0};
+  PrevTokEndLine = -1;
+  PrevTokEndCol = -1;
   g_braceDepth = 0;
   g_curlyDepth = 0;
 }
@@ -1364,6 +1395,10 @@ static int gettokScan() {
  * safe invariant to rely on unconditionally, not just for identifiers.
  */
 int gettok() {
+  // CurLoc still describes the token about to become the previous one, with
+  // its end stamped below by the call that scanned it.
+  PrevTokEndLine = CurLoc.EndLine;
+  PrevTokEndCol = CurLoc.EndCol;
   int Tok = gettokScan();
   CurLoc.EndLine = CurLine;
   CurLoc.EndCol = CurCol;

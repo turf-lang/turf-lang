@@ -1515,84 +1515,189 @@ bool verifySuggestion(AISuggestion &suggestion, int errorLine,
 
 // ── Item 1: deterministic-fix layer ─────────────────────────────────────────
 //
-// Given an unambiguous rename candidate (DeterministicOldName/NewName -- see
-// DiagnosticHints's own doc comment, ErrorCategory.h, for exactly which
-// call sites earn one and why "unambiguous" is required), synthesize a
-// word-boundary search/replace patch on the error's own line and
-// sandbox-verify it through verifySuggestion() -- the EXACT SAME path every
-// model-produced suggestion goes through. A wrong guess here is therefore
-// exactly as safe as a wrong model guess: it can only fail sandbox
-// validation, never apply bad code. Returns an invalid (default-constructed)
-// AISuggestion when there's no hint to try or the sandboxed replace didn't
-// validate -- either way the caller (validateAndApplySuggestion()) falls
-// through to the ordinary model path, unaffected.
+// A diagnostic whose raising site already holds the exact edit (the rename an
+// unambiguous "did you mean" names, a generic method's missing `<T>`, the `;`
+// a statement lacks -- DiagnosticHints::FixIts, ErrorCategory.h, and the
+// withFixIt() family in Errors.h for which sites earn one) is fixed here,
+// BEFORE the model is ever asked: the fix-its are applied to a fresh sandbox
+// and validated by the same ApplyAndValidateFix() every model suggestion
+// goes through. A wrong fix-it is therefore exactly as safe as a wrong model
+// guess: it can only fail validation, never apply bad code. It deliberately
+// does not go through verifySuggestion(): that function searches for WHERE a
+// model's replacement belongs, and a fix-it already says where, to the
+// column. Returns an invalid (default-constructed) AISuggestion when there is
+// nothing to try, the edits do not fit the source, or the sandbox rejects
+// them -- the caller (validateAndApplySuggestion()) then falls through to the
+// ordinary model path, unaffected.
+
+// Applies `FixIts` to SourceLines without touching them. On success fills the
+// line range [firstLine, lastLine] the edits span, the patched text that
+// replaces exactly that range ('\n'-joined, so it can be spliced like a model's
+// replacement), and one rendered before/after line pair group for display.
+// Fails (returns false) for an edit outside the source, two edits that overlap
+// or tie on one position (their order would be a guess), or edits that change
+// nothing.
+static bool applyFixIts(const std::vector<FixIt> &FixIts, int errorLine,
+                        int &firstLine, int &lastLine, std::string &patched,
+                        std::vector<std::string> &labels,
+                        std::string &renderedDiff) {
+  const int n = static_cast<int>(SourceLines.size());
+  if (FixIts.empty())
+    return false;
+
+  struct Edit {
+    int line, start, end; // 0-based start/end offsets into the line
+    const std::string *replacement;
+  };
+  std::vector<Edit> edits;
+  for (const FixIt &F : FixIts) {
+    const int line = F.Line == 0 ? errorLine : F.Line;
+    if (line < 1 || line > n)
+      return false;
+    const int len = static_cast<int>(SourceLines[line - 1].size());
+    if (F.StartCol < 1 || F.EndCol < F.StartCol || F.EndCol > len + 1)
+      return false;
+    edits.push_back({line, F.StartCol - 1, F.EndCol - 1, &F.Replacement});
+  }
+  std::sort(edits.begin(), edits.end(), [](const Edit &a, const Edit &b) {
+    return a.line != b.line ? a.line < b.line : a.start < b.start;
+  });
+  for (size_t i = 1; i < edits.size(); ++i)
+    if (edits[i].line == edits[i - 1].line &&
+        (edits[i].start < edits[i - 1].end ||
+         (edits[i].start == edits[i - 1].start)))
+      return false;
+
+  firstLine = edits.front().line;
+  lastLine = edits.back().line;
+
+  auto isIdent = [](char c) {
+    return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
+  };
+
+  patched.clear();
+  renderedDiff.clear();
+  bool changed = false;
+  size_t next = 0;
+  for (int line = firstLine; line <= lastLine; ++line) {
+    const std::string &orig = SourceLines[line - 1];
+    std::string out;
+    size_t at = 0;
+    while (next < edits.size() && edits[next].line == line) {
+      const Edit &e = edits[next++];
+      out += orig.substr(at, e.start - at);
+      out += *e.replacement;
+      at = e.end;
+      if (orig.compare(e.start, e.end - e.start, *e.replacement) != 0)
+        changed = true;
+
+      // A short "'old' -> 'new'" for the status line: the edit widened to the
+      // whole word it touches, so `fn` + `<T>` reads `'fn' -> 'fn<T>'` and a
+      // ';' after `5` reads `'5' -> '5;'`, not a bare `'' -> '<T>'`.
+      size_t lo = e.start, hi = e.end;
+      const std::string removed = orig.substr(e.start, e.end - e.start);
+      if (removed.empty()) {
+        // An insertion: show the unbroken run of text it lands against
+        // (`fn`, `5`, `io::printline("hi")`), capped so a long call stays one
+        // readable status line.
+        while (lo > 0 && !std::isspace(static_cast<unsigned char>(orig[lo - 1])) &&
+               e.start - lo < 24)
+          --lo;
+        // Nothing before it on the line (`pub` moved to sit before `fn`):
+        // show the run it lands in front of instead.
+        if (lo == e.start)
+          while (hi < orig.size() &&
+                 !std::isspace(static_cast<unsigned char>(orig[hi])) &&
+                 hi - e.end < 24)
+            ++hi;
+      } else {
+        while (isIdent(removed.front()) && lo > 0 && isIdent(orig[lo - 1]))
+          --lo;
+      }
+      while (!removed.empty() && isIdent(removed.back()) && hi < orig.size() &&
+             isIdent(orig[hi]))
+        ++hi;
+      const std::string before = orig.substr(lo, hi - lo);
+      const std::string after = orig.substr(lo, e.start - lo) + *e.replacement +
+                                orig.substr(e.end, hi - e.end);
+      auto trim = [](std::string s) {
+        const char *ws = " \t";
+        s.erase(0, s.find_first_not_of(ws) == std::string::npos
+                       ? s.size()
+                       : s.find_first_not_of(ws));
+        s.erase(s.find_last_not_of(ws) == std::string::npos
+                    ? 0
+                    : s.find_last_not_of(ws) + 1);
+        return s;
+      };
+      const std::string label = "'" + trim(before) + "' -> '" + trim(after) + "'";
+      if (std::find(labels.begin(), labels.end(), label) == labels.end())
+        labels.push_back(label);
+    }
+    out += orig.substr(at);
+    if (line > firstLine)
+      patched += "\n";
+    patched += out;
+
+    if (out != orig) {
+      if (!renderedDiff.empty())
+        renderedDiff += "\n    ";
+      renderedDiff += Colors::BRIGHT_RED + "- " + std::to_string(line) + " | " +
+                      orig + Colors::RESET;
+      std::istringstream newLines(out);
+      std::string piece;
+      int shown = 0;
+      while (std::getline(newLines, piece)) {
+        renderedDiff += "\n    " + Colors::BRIGHT_GREEN + "+ " +
+                        (shown++ == 0 ? std::to_string(line) : std::string("..")) +
+                        " | " + piece + Colors::RESET;
+      }
+    }
+  }
+  return changed;
+}
+
+// `summaryOut` receives the "'old' -> 'new'" status text on success.
 static AISuggestion tryDeterministicFix(int errorLine,
                                         const DiagnosticHints &Hints,
-                                        ErrorCategory category) {
+                                        ErrorCategory category,
+                                        std::string &summaryOut) {
   AISuggestion result;
-  if (Hints.DeterministicOldName.empty() || Hints.DeterministicNewName.empty())
-    return result;
-  if (errorLine < 1 || errorLine > static_cast<int>(SourceLines.size()))
+  int first = 0, last = 0;
+  std::string patched, diff;
+  std::vector<std::string> labels;
+  if (!applyFixIts(Hints.FixIts, errorLine, first, last, patched, labels, diff))
     return result;
 
-  const std::string &Line = SourceLines[errorLine - 1];
-  const std::string &OldName = Hints.DeterministicOldName;
-  std::string Patched;
-  Patched.reserve(Line.size());
-  size_t Pos = 0;
-  bool ReplacedAny = false;
-  while (Pos < Line.size()) {
-    size_t Found = Line.find(OldName, Pos);
-    if (Found == std::string::npos) {
-      Patched += Line.substr(Pos);
-      break;
-    }
-    Patched += Line.substr(Pos, Found - Pos);
-    // Word-boundary check on both sides, same shape as
-    // computeStructuralPrior()'s keyword-boundary check above -- a bare
-    // substring match would wrongly rewrite e.g. "cnt" inside "recnt" for an
-    // OldName of "cnt".
-    bool LeftOk = (Found == 0) ||
-        (!std::isalnum(static_cast<unsigned char>(Line[Found - 1])) &&
-         Line[Found - 1] != '_');
-    size_t After = Found + OldName.size();
-    bool RightOk = (After >= Line.size()) ||
-        (!std::isalnum(static_cast<unsigned char>(Line[After])) &&
-         Line[After] != '_');
-    if (LeftOk && RightOk) {
-      Patched += Hints.DeterministicNewName;
-      ReplacedAny = true;
-    } else {
-      Patched += OldName;
-    }
-    Pos = After;
-  }
-  if (!ReplacedAny)
-    return result; // OldName never appeared as a real token on this line
+  std::string summary;
+  for (const auto &label : labels)
+    summary += (summary.empty() ? "" : ", ") + label;
 
   result.fix_mode = "MODIFY";
-  result.replacement_line = Patched;
-  // target_line/end_line left at 0 ("same line as the error, single line") --
-  // verifySuggestion() already treats that as the common case.
-  result.code_patch = "Replaced '" + OldName + "' with '" +
-                      Hints.DeterministicNewName + "'.";
-  if (Hints.DeterministicReason.empty()) {
-    result.suggested_comment = "Looks like a typo -- I replaced '" + OldName +
-                               "' with '" + Hints.DeterministicNewName + "'.";
-    result.explanation = "'" + OldName + "' isn't declared anywhere visible, "
-                         "but '" + Hints.DeterministicNewName + "' is an exact, "
-                         "unambiguous match nearby, so this is almost "
-                         "certainly a typo.";
-  } else {
-    result.suggested_comment = "I replaced '" + OldName + "' with '" +
-                               Hints.DeterministicNewName + "'.";
-    result.explanation = Hints.DeterministicReason;
-  }
+  result.replacement_line = patched;
+  result.target_line = first;
+  result.end_line = last;
+  result.code_patch = diff;
+  result.suggested_comment = "Compiler fix: " + summary + ".";
+  result.explanation = Hints.FixReason;
   result.self_reported_category = getCategoryName(category);
 
-  if (!verifySuggestion(result, errorLine, nullptr)) {
-    return AISuggestion{}; // didn't validate -- not this rename, try the model
+  // The model path's sandbox gate, minus the search for where the code goes:
+  // the fix-its already name the range [first, last].
+  auto sandbox = CreateSandbox();
+  if (!sandbox)
+    return AISuggestion{};
+  if (!ApplyAndValidateFix(*sandbox, errorLine, first, last, patched, result,
+                           /*reportFailure=*/std::getenv("TURF_SLM_DEBUG") !=
+                               nullptr))
+    return AISuggestion{}; // didn't validate -- not this fix, try the model
+  std::string joined;
+  for (const auto &line : sandbox->getModifiedSource()) {
+    joined += line;
+    joined += "\n";
   }
+  result.appliedSource = std::move(joined);
+  summaryOut = summary;
   // Sandbox-proven, same as a validated model suggestion: finalizeConfidence()
   // clamps to >= 0.9 regardless of the structural-prior argument once
   // sandboxValidated is true (see its own doc comment above), so the exact
@@ -1635,13 +1740,14 @@ AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
   // Item 1: try the deterministic-fix layer FIRST -- fetchSuggestion() (and
   // therefore the model) is never called at all if this validates. See
   // tryDeterministicFix()'s own doc comment for the safety argument.
-  if (!hints.DeterministicOldName.empty()) {
-    AISuggestion detFix = tryDeterministicFix(errorLine, hints, category);
+  if (!hints.FixIts.empty()) {
+    std::string summary;
+    AISuggestion detFix = tryDeterministicFix(errorLine, hints, category, summary);
     if (detFix.valid) {
-      std::cerr << Colors::BRIGHT_GREEN << "[Deterministic Fix] ✓ '"
-                << hints.DeterministicOldName << "' -> '"
-                << hints.DeterministicNewName
-                << "' validated -- the model was never called."
+      // scripts/slm_deterministic_fix_smoke.sh greps this line, including the
+      // `'old' -> 'new'` summary and "the model was never called".
+      std::cerr << Colors::BRIGHT_GREEN << "[Deterministic Fix] ✓ " << summary
+                << " validated -- the model was never called."
                 << Colors::RESET << "\n";
       return detFix;
     }

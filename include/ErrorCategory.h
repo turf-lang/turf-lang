@@ -7,9 +7,24 @@
 
 namespace SLM {
 
+// One compiler-made edit to the source text: replace the columns
+// [StartCol, EndCol) of `Line` with `Replacement`. Columns are 1-based and
+// count bytes, exactly like SourceLocation::Col; EndCol is exclusive, so
+// StartCol == EndCol is a pure insertion (before the character at StartCol)
+// and an empty Replacement is a pure deletion. `Replacement` may contain '\n'
+// to start new lines. Line 0 means "the diagnostic's own line", which is not
+// always where the fix goes: a missing ';' is reported at the NEXT statement
+// but belongs at the end of the previous one.
+struct FixIt {
+  int Line = 0;
+  int StartCol = 1;
+  int EndCol = 1;
+  std::string Replacement;
+};
+
 // SLM-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §16.3 items 1 and 3):
 // structured facts a diagnostic's own raising site already knows, attached
-// via TurfError::withKnownType()/withDeterministicFix()/
+// via TurfError::withKnownType()/withFixIt()/withDeterministicFix()/
 // trySetDeterministicRename() (Errors.h) and threaded through
 // DiagnosticEngine::add() (Lexer.h) unchanged -- never re-derived from
 // message text (the exact anti-pattern DIAG-001 removed for ErrorCategory
@@ -28,24 +43,22 @@ struct DiagnosticHints {
   // site that already computed them, not re-inferred here.
   std::vector<std::string> KnownTypes;
 
-  // Item 1 (deterministic-fix layer): an unambiguous, single-candidate
-  // rename already computed by a RankedSuggestions-based "did you mean"
-  // lookup at the raising site (exactly one local candidate, zero module
-  // candidates -- see TurfError::trySetDeterministicRename()). When both are
-  // non-empty, SLM::tryDeterministicFix() (SLMIntegration.cpp) attempts a
-  // sandboxed search/replace of DeterministicOldName -> DeterministicNewName
-  // on the error's own line BEFORE ever invoking the model; the model is
-  // never called at all if that sandbox validation succeeds.
-  std::string DeterministicOldName;
-  std::string DeterministicNewName;
-  // Why the replacement is right, for a fix that is not a typo (e.g. adding
-  // a generic method's missing `<T>`). Empty means a rename, and
-  // tryDeterministicFix() then explains it as a typo.
-  std::string DeterministicReason;
+  // Item 1 (deterministic-fix layer): the exact edit the raising site already
+  // knows fixes this diagnostic -- an unambiguous "did you mean" rename, a
+  // missing `<T>`, a misplaced `pub`, a missing ';' (see the withFixIt() family
+  // in Errors.h for which sites attach one, and why the rest do not). All of
+  // them together are ONE fix: SLM::tryDeterministicFix() (SLMIntegration.cpp)
+  // applies them to a fresh sandbox BEFORE ever invoking the model, and the
+  // model is never called at all if that sandbox validation succeeds. A fix
+  // that does not validate falls through to the model like any other
+  // diagnostic.
+  std::vector<FixIt> FixIts;
+  // Why the edit is right, in a sentence a beginner can read ("'x' isn't
+  // declared anywhere visible, but 'y' is an exact match nearby ..."). Shown
+  // as the suggestion's explanation, so a fix with FixIts should always set it.
+  std::string FixReason;
 
-  bool empty() const {
-    return KnownTypes.empty() && DeterministicOldName.empty();
-  }
+  bool empty() const { return KnownTypes.empty() && FixIts.empty(); }
 };
 
 enum class ErrorCategory {

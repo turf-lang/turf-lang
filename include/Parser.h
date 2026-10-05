@@ -9,6 +9,18 @@ extern int CurTok;
 int getNextToken();
 void InitializePrecedence();
 
+// The fix-it for an "Expected ';'" raised while CurTok is the token AFTER the
+// statement: insert ';' immediately after the statement's last token (which
+// may be on an earlier line than the token the error points at). Empty unless
+// the missing ';' is unambiguous -- the next token starts a later line or is a
+// '}' -- because `x = 5 6;` or `f(a b)` on one line are not a missing ';'
+// (inserting one there would "validate" a different program than the one the
+// writer meant). Also empty when the source line does not show the previous
+// token ending where the lexer says it did. Pass it as LogErrorAt()'s last
+// argument at every site that reports ErrCode::MissingSemicolon after parsing
+// a complete statement. Defined in ParserCore.cpp.
+SLM::DiagnosticHints MissingSemicolonHints();
+
 // Both InitializePrecedence() (this file, defined ParserCore.cpp -- populates
 // the file-local BinopPrecedence table ParseBinOpRHS() depends on for every
 // binary expression) and InitializeSymbolTable() (SymbolTable.h, defined

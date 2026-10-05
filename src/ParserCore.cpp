@@ -68,6 +68,33 @@ int getNextToken() {
   return CurTok = gettok();
 }
 
+SLM::DiagnosticHints MissingSemicolonHints() {
+  SLM::DiagnosticHints Hints;
+  // Only an unambiguous missing ';': the next token begins a later line (the
+  // classic "forgot it at the end of the line"), or closes the block. On the
+  // same line anything else could be a missing operator or comma, and a ';'
+  // there would validate as a different program than the one meant.
+  const bool NextLine = PrevTokEndLine > 0 && CurLoc.Line > PrevTokEndLine;
+  if (!NextLine && CurTok != '}')
+    return Hints;
+  if (PrevTokEndLine < 1 || PrevTokEndCol < 2)
+    return Hints;
+  // The source must show the previous token ending exactly where the lexer
+  // says: text on the line up to that column, and not whitespace just before
+  // it. A multi-line token (a string with a raw newline) ends on a line this
+  // column does not describe, so it never passes.
+  const std::string *Line =
+      FixItSourceLine(SourceLocation{PrevTokEndLine, PrevTokEndCol, CurLoc.Filename});
+  if (!Line || PrevTokEndCol > static_cast<int>(Line->size()) + 1 ||
+      std::isspace(static_cast<unsigned char>((*Line)[PrevTokEndCol - 2])))
+    return Hints;
+  Hints.FixIts.push_back({PrevTokEndLine, PrevTokEndCol, PrevTokEndCol, ";"});
+  Hints.FixReason = "Every statement has to end with ';', and this one runs "
+                    "straight into what follows it, so the ';' is missing "
+                    "right after its last token.";
+  return Hints;
+}
+
 void InitializePrecedence() {
   // Assignment (incl. all compound-assignment forms)
   BinopPrecedence['='] = 10;

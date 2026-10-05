@@ -77,6 +77,18 @@ protected:
   // (SLMIntegration.h) for what each field means and who populates it.
   SLM::DiagnosticHints Hints_;
 
+  static bool isIdentChar(char C) {
+    return std::isalnum(static_cast<unsigned char>(C)) || C == '_';
+  }
+  // True when `Other` is in the same file as this diagnostic (an empty
+  // Filename means "the file being compiled", as everywhere in SourceLocation).
+  // A fix-it's columns are only meaningful against the text of the file the
+  // diagnostic is in -- see withTokenFixIt().
+  bool sameFileAsError(const SourceLocation &Other) const {
+    return Other.Filename.empty() || Loc.Filename.empty() ||
+           Other.Filename == Loc.Filename;
+  }
+
 public:
   TurfError(SourceLocation Loc, const std::string &Msg,
             const std::string &Hint = "")
@@ -141,17 +153,135 @@ public:
     return *this;
   }
 
-  // SLM-001 item 1: record an unambiguous rename candidate directly, for a
-  // call site that already knows both the wrong and right spelling without
-  // going through a RankedSuggestions lookup at all.
-  // `Reason` (optional) explains a fix that is not a typo correction -- see
-  // DiagnosticHints::DeterministicReason.
+  // ── Fix-its (SLM-001 item 1, DiagnosticHints::FixIts) ──────────────────────
+  //
+  // A fix-it is an exact edit the raise site already knows, applied by --smart
+  // without asking the model (SLM::tryDeterministicFix()). Attach one ONLY
+  // where this site holds the whole edit -- the hint says what to write AND the
+  // site knows where. Never one the writer might not have meant: a hint that
+  // offers two fixes ("remove `pub`, or move the declaration"), or one that
+  // only gives an example ("write the instantiation you mean, e.g. `Box<int>`"),
+  // is advice, and --smart's model answers it. The sandbox re-checks every
+  // fix-it, so a wrong one cannot be applied, but a wrong one that happens to
+  // compile would still be shown to a beginner as "the compiler's own fix".
+  //
+  // Every builder below checks the source line before it adds anything, and
+  // adds nothing if the text is not what this site expects, so a stale or
+  // mis-pointed Loc degrades to "no fix-it", never to a bad edit.
+
+  // The raw edit: replace [StartCol, EndCol) of `Line` (see FixIt).
+  TurfError &withFixIt(int Line, int StartCol, int EndCol,
+                       const std::string &Replacement) {
+    Hints_.FixIts.push_back({Line, StartCol, EndCol, Replacement});
+    return *this;
+  }
+
+  // Why the fix is right (DiagnosticHints::FixReason), in a sentence.
+  TurfError &withFixReason(const std::string &Reason) {
+    Hints_.FixReason = Reason;
+    return *this;
+  }
+
+  // Which neighbouring blanks a deleted token takes with it, so the edit leaves
+  // `fn f()` and not `  fn f()` / `f ()`.
+  enum class EatBlanks { None, Before, After };
+
+  // Replace (or, with an empty Replacement, delete) the token `Expected` that
+  // starts exactly at `At`. Does nothing unless the line really reads
+  // `Expected` there, in the same file as this diagnostic.
+  TurfError &withTokenFixIt(const SourceLocation &At,
+                            const std::string &Expected,
+                            const std::string &Replacement,
+                            EatBlanks Eat = EatBlanks::None) {
+    const std::string *Line = FixItSourceLine(At);
+    if (!Line || At.Col < 1 || !sameFileAsError(At) ||
+        Line->compare(At.Col - 1, Expected.size(), Expected) != 0)
+      return *this;
+    size_t Start = At.Col - 1, End = Start + Expected.size();
+    if (Eat == EatBlanks::After)
+      while (End < Line->size() && ((*Line)[End] == ' ' || (*Line)[End] == '\t'))
+        ++End;
+    if (Eat == EatBlanks::Before)
+      while (Start > 0 && ((*Line)[Start - 1] == ' ' || (*Line)[Start - 1] == '\t'))
+        --Start;
+    return withFixIt(At.Line, static_cast<int>(Start) + 1,
+                     static_cast<int>(End) + 1, Replacement);
+  }
+
+  // Insert `Text` right after the token `Token` that starts exactly at `At`
+  // (`fn` -> `fn<T>`). Same check as withTokenFixIt().
+  TurfError &withInsertAfterTokenFixIt(const SourceLocation &At,
+                                       const std::string &Token,
+                                       const std::string &Text) {
+    const std::string *Line = FixItSourceLine(At);
+    if (!Line || At.Col < 1 || !sameFileAsError(At) ||
+        Line->compare(At.Col - 1, Token.size(), Token) != 0)
+      return *this;
+    const int Col = At.Col + static_cast<int>(Token.size());
+    return withFixIt(At.Line, Col, Col, Text);
+  }
+
+  // Delete the whole word `Word` (with the blanks before it) from the
+  // diagnostic's own line -- only when it appears there EXACTLY ONCE. For a
+  // keyword the raise site knows is on the line but never recorded the column
+  // of (`static` in `fn S.new() static: void`): a second occurrence (a comment
+  // mentioning it) means this site cannot tell which one it meant, and adds
+  // nothing.
+  TurfError &withWordDeletionFixIt(const std::string &Word,
+                                   const std::string &Reason) {
+    const std::string *Line = FixItSourceLine(Loc);
+    if (!Line || Word.empty())
+      return *this;
+    size_t Found = std::string::npos;
+    int Count = 0;
+    for (size_t Pos = Line->find(Word); Pos != std::string::npos;
+         Pos = Line->find(Word, Pos + Word.size())) {
+      const size_t After = Pos + Word.size();
+      if ((Pos == 0 || !isIdentChar((*Line)[Pos - 1])) &&
+          (After >= Line->size() || !isIdentChar((*Line)[After]))) {
+        Found = Pos;
+        ++Count;
+      }
+    }
+    if (Count != 1)
+      return *this;
+    withTokenFixIt({Loc.Line, static_cast<int>(Found) + 1, Loc.Filename}, Word,
+                   "", EatBlanks::Before);
+    return withFixReason(Reason);
+  }
+
+  // Rename: replace EVERY whole-word `OldName` on the diagnostic's own line with
+  // `NewName` (a name that fails to resolve usually fails at each use on the
+  // line, and fixing one use would leave the same error on the next). A match
+  // must not touch an identifier character on either side, so `cnt` never
+  // rewrites the inside of `recnt`. Adds nothing if `OldName` is not on the line
+  // as a whole word. `Reason` (optional) explains a fix that is not a typo;
+  // empty means "a typo", which is the sentence used.
   TurfError &withDeterministicFix(const std::string &OldName,
                                   const std::string &NewName,
                                   const std::string &Reason = "") {
-    Hints_.DeterministicOldName = OldName;
-    Hints_.DeterministicNewName = NewName;
-    Hints_.DeterministicReason = Reason;
+    const std::string *Line = FixItSourceLine(Loc);
+    if (!Line || OldName.empty())
+      return *this;
+    bool Any = false;
+    for (size_t Pos = Line->find(OldName); Pos != std::string::npos;
+         Pos = Line->find(OldName, Pos + OldName.size())) {
+      const size_t After = Pos + OldName.size();
+      const bool LeftOk = Pos == 0 || !isIdentChar((*Line)[Pos - 1]);
+      const bool RightOk = After >= Line->size() || !isIdentChar((*Line)[After]);
+      if (!LeftOk || !RightOk)
+        continue;
+      withFixIt(Loc.Line, static_cast<int>(Pos) + 1, static_cast<int>(After) + 1,
+                NewName);
+      Any = true;
+    }
+    if (Any)
+      Hints_.FixReason =
+          Reason.empty()
+              ? "'" + OldName + "' isn't declared anywhere visible, but '" +
+                    NewName + "' is an exact, unambiguous match nearby, so "
+                    "this is almost certainly a typo."
+              : Reason;
     return *this;
   }
 
@@ -168,10 +298,8 @@ public:
   TurfError &trySetDeterministicRename(const std::string &OldName,
                                        const RankedSuggestions &Suggestions) {
     if (Suggestions.Local.size() == 1 && Suggestions.Module.empty() &&
-        !OldName.empty() && Suggestions.Local[0] != OldName) {
-      Hints_.DeterministicOldName = OldName;
-      Hints_.DeterministicNewName = Suggestions.Local[0];
-    }
+        !OldName.empty() && Suggestions.Local[0] != OldName)
+      withDeterministicFix(OldName, Suggestions.Local[0]);
     return *this;
   }
 

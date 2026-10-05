@@ -373,7 +373,7 @@ std::vector<std::unique_ptr<ExprAST>> parseEntryFile(std::size_t &PreludeCount) 
       } else {
         if (CurTok != ';')
           LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement",
-                     SLM::ErrorCategory::SYNTAX_ERROR);
+                     SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
         else
           getNextToken();
         if (StartTok == TOK_IMPORT || isAllowedTopLevelStatement(AST.get())) {

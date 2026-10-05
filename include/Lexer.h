@@ -135,6 +135,19 @@ extern std::map<std::string, std::vector<std::string>> AllSourceLines;
 extern SourceLocation CurLoc;
 extern int CurLine;
 extern int CurCol;
+// Where the token BEFORE the current one ended (the same Line / exclusive-Col
+// convention as SourceLocation::EndLine/EndCol), or -1/-1 before the first
+// token. CurLoc only describes the current token, but "expected ';'" is
+// raised at the token AFTER the statement and the ';' belongs right after the
+// statement's last token, which may be on an earlier line -- gettok() records
+// it for MissingSemicolonHints().
+extern int PrevTokEndLine;
+extern int PrevTokEndCol;
+// The text of `Loc`'s line (`Loc.Filename`, or the file being compiled when it
+// has none), or nullptr when that file or line is not known. What a
+// FixIt-building call site reads to check that the source really says what it
+// is about to edit -- see TurfError::withFixIt() in Errors.h.
+const std::string *FixItSourceLine(const SourceLocation &Loc);
 // Reserved-word -> token-id table, consulted by gettok() after scanning any
 // identifier-shaped run of characters. Mutable (not const) purely because it
 // is a translation-unit-scope global initialized at static-init time in
@@ -484,8 +497,14 @@ void resetLexer();
 // that forgets its code is a compile error, not a silent dead end. Warnings
 // never come through here (they are TurfWarning, or a "Warning:" message that
 // isMessageWarning() recognises and which carries no code by design).
+//
+// `Hints` (optional) is the same structured payload a typed TurfError carries
+// (TurfError::Hints_): the way for a raw site that knows the exact fix, such as
+// the parser's "expected ';'", to attach a FixIt without becoming a class. Most
+// sites pass nothing, and the diagnostic is unchanged.
 void LogErrorAt(SourceLocation Loc, const char *Code, const std::string &Msg,
-                SLM::ErrorCategory Category);
+                SLM::ErrorCategory Category,
+                const SLM::DiagnosticHints &Hints = {});
 int GetLastChar();
 void SetLastChar(int c);
 

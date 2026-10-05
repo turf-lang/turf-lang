@@ -92,11 +92,12 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
                              const std::string &errorCode = "");
 
 // ── End-to-End Helper ────────────────────────────────────────────────────────
-// 0. If `hints` carries an unambiguous deterministic rename (item 1), try it
-//    first as a sandboxed search/replace patch. On success, returns it
-//    directly -- fetchSuggestion() (and therefore the model) is never
-//    called at all. On failure (or no deterministic hint), falls through to
-//    the steps below exactly as before.
+// 0. If `hints` carries fix-its (item 1: DiagnosticHints::FixIts -- a rename,
+//    a missing `<T>`, a missing ';', ...), apply them together as one sandboxed
+//    patch first. On success, returns it directly -- fetchSuggestion() (and
+//    therefore the model) is never called at all; `code_patch` holds the real
+//    before/after of the edited lines. On failure (or no fix-its), falls
+//    through to the steps below exactly as before.
 // 1. Calls fetchSuggestion() to query the SLM.
 // 2. Extracts the resulting patch, comment, explanation, and fix strategy.
 // 3. Performs basic validation (e.g. ensuring syntax isn't obviously broken).
