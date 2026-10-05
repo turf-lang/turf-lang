@@ -15,6 +15,7 @@
  * @date 2026-05-25
  */
 
+#include "Algorithms.h"
 #include "Builtins.h"
 #include "Codegen.h"
 #include "Colors.h"
@@ -86,9 +87,9 @@ using namespace llvm;
 //
 // Covered: the flags a driver passes (--check, --module, --dump-*, --format,
 // --write, --migrate=, --explain, -o; the package-graph input from LEC-001
-// stage 4), the two-line `--version` format, exit statuses (0 success, 1 a
-// reported error), and every other argument being accepted exactly as a
-// direct invocation accepts it.
+// stage 4), the first two lines of `--version`, exit statuses (ExitOk,
+// ExitError, ExitUsage below), and every other argument being accepted
+// exactly as a direct invocation accepts it.
 //
 // Bump MINOR for anything additive (a new flag, a new input); a driver that
 // needs it asks for the new minor, and older drivers keep working. Bump MAJOR,
@@ -97,9 +98,22 @@ using namespace llvm;
 // misbehaving with it.
 //
 // History: 1.0 (LEC-001 stage 2) the first interface; 1.1 (stage 4) adds
-// `--package-graph <file>`.
+// `--package-graph <file>`; 1.2 (REL-001) adds the `help` command, the
+// llvm/runtime/root lines of `--version`, and freezes exit status 2 for a
+// usage error (it was 1, indistinguishable from a compile error). A driver
+// that does not look at the status of a malformed command line is unaffected,
+// which is why this is a minor bump and `turf` still needs only 1.1.
 static constexpr int TurfcInterfaceMajor = 1;
-static constexpr int TurfcInterfaceMinor = 1;
+static constexpr int TurfcInterfaceMinor = 2;
+
+// The exit statuses (FREEZE.md 6.21, F-CLI-1, REL-001). The split exists so a script
+// or an editor can tell "your program has a mistake" (1: the compiler ran and
+// reported it, or could not read/write a file it was asked to) from "you
+// called the tool wrongly" (2: nothing was compiled). Anything else a shell
+// reports (126/127, 128+signal) is the shell's or the OS's, not ours.
+static constexpr int ExitOk = 0;
+static constexpr int ExitError = 1;
+static constexpr int ExitUsage = 2;
 
 // OPT-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §17.2): the five levels
 // the CLI's `-O` flag selects. Os is not "O1 through O3 plus one more" --
@@ -254,7 +268,7 @@ static int runMigratePub(const std::vector<std::string> &Files, bool Write) {
                  "  Adds `pub` to every top-level fn/struct/enum/error/machine/extern fn and\n"
                  "  every struct field, i.e. the exact 1.x behaviour, as a starting point.\n"
                  "  Without --write it only reports what it would change.\n";
-    return 1;
+    return ExitUsage;
   }
 
   auto splitLines = [](const std::string &Text) {
@@ -335,7 +349,7 @@ static void handleExplainFlagIfPresent(int argc, char **argv) {
 
     if (i + 1 >= argc) {
       std::cerr << "Usage: turfc --explain E0NN\n";
-      std::exit(1);
+      std::exit(ExitUsage);
     }
 
     std::string Code = argv[i + 1];
@@ -344,7 +358,7 @@ static void handleExplainFlagIfPresent(int argc, char **argv) {
       std::cerr << "Unknown error code: " << Code
                 << "\nRun `turf --explain E0NN` with a code shown in an "
                    "error's \"[E0NN]\" header, e.g. `turf --explain E001`.\n";
-      std::exit(1);
+      std::exit(ExitUsage);
     }
 
     std::cout << Colors::BOLD << Colors::BRIGHT_CYAN << Entry->Code
@@ -371,6 +385,78 @@ static void handleExplainFlagIfPresent(int argc, char **argv) {
 
     std::exit(0);
   }
+}
+
+/// The text of `turfc help`, and the same block after "Usage:" when no input
+/// file was given. `turfc --help` is deliberately NOT accepted: the owner's
+/// REL-001 decision is `turfc help` and `turf help` (a flag-free spelling, so
+/// no source file can be mistaken for it), and the unknown-option message
+/// below points there.
+static const char *turfcUsage() {
+  return "Usage: turfc <filename.tr> [-o output] [--emit-llvm] [--smart]\n"
+         "         [--smart-write-fix=<path>] [--link <libname>]\n"
+         "         [--allow-unsafe-modules] [--stdlib-warnings]\n"
+         "         [-O0|-O1|-O2|-O3|-Os] [-g] [--target=<triple>] [-mcpu=<cpu>]\n"
+         "         [--check [--module]] [--package-graph <file>]\n"
+         "         [--resolve] [--typecheck] [--dump-ast] [--dump-resolver-symbols]\n"
+         "         [--dump-resolved] [--dump-typechecked] [--dump-modules]\n"
+         "         [--dump-instantiations]\n"
+         "       turfc --format [--write] <filename.tr>\n"
+         "       turfc --migrate=pub [--write] <module.tr>...\n"
+         "       turfc --explain E0NN\n"
+         "       turfc --version\n"
+         "       turfc help\n"
+         "\n"
+         "Exit status: 0 success, 1 the program has an error (or a file could not\n"
+         "be read or written), 2 the command line is wrong (nothing was compiled).\n"
+         "The `turf` command is the friendly front end for all of this.\n";
+}
+
+/// Every spelling parseArgs() accepts, for "did you mean". A trailing `=`
+/// marks a flag that takes its value after it, so `--targt=x86` is compared
+/// as `--targt=` against `--target=`.
+static const char *const KnownOptions[] = {
+    "--emit-llvm",        "--smart",        "--smart-write-fix=",
+    "--allow-unsafe-modules", "--stdlib-warnings", "--check",
+    "--module",           "--version",      "--dump-ast",
+    "--dump-instantiations", "--resolve",   "--dump-resolver-symbols",
+    "--dump-resolved",    "--typecheck",    "--dump-typechecked",
+    "--dump-modules",     "--format",       "--write",
+    "--migrate=",         "--package-graph", "--link",
+    "--target=",          "--explain",      "-mcpu=",
+};
+
+/// An unknown option is a usage error, never something to ignore: a typo'd
+/// `--chek` that was silently dropped would compile and link a program the
+/// user only meant to check. The nearest known spelling (edit distance <= 2,
+/// the same bar `turf`'s command suggestions use) is offered, because a
+/// beginner sees "Unknown option" and cannot tell a typo from a missing
+/// feature.
+[[noreturn]] static void unknownOption(const std::string &Arg) {
+  std::cerr << "Unknown option: " << Arg << "\n";
+  if (Arg == "--help" || Arg == "-h") {
+    std::cerr << "  turfc has no --help; run `turfc help` (or `turf help`).\n";
+    std::exit(ExitUsage);
+  }
+  const size_t Eq = Arg.find('=');
+  const std::string Key = Eq == std::string::npos ? Arg : Arg.substr(0, Eq + 1);
+  // Single-dash spellings are too short for a distance of 2 to mean anything
+  // (`-x` is within 2 of `-g`), so only longer arguments get a guess.
+  if (Key.size() > 3) {
+    const char *Best = nullptr;
+    int BestD = 3;
+    for (const char *Known : KnownOptions) {
+      int D = getDamerauLevenshteinDistance(Key, Known);
+      if (D < BestD) {
+        Best = Known;
+        BestD = D;
+      }
+    }
+    if (Best)
+      std::cerr << "  did you mean '" << Best << "'?\n";
+  }
+  std::cerr << "Run `turfc help` for the options.\n";
+  std::exit(ExitUsage);
 }
 
 static CompilerOptions parseArgs(int argc, char **argv) {
@@ -439,7 +525,7 @@ static CompilerOptions parseArgs(int argc, char **argv) {
       if (Kind != "pub") {
         std::cerr << "Error: unknown migration '" << Kind
                   << "' (the only one is --migrate=pub).\n";
-        std::exit(1);
+        std::exit(ExitUsage);
       }
       opts.MigratePub = true;
     } else if (arg == "-o" && i + 1 < argc) {
@@ -468,11 +554,16 @@ static CompilerOptions parseArgs(int argc, char **argv) {
       else {
         std::cerr << "Error: unknown optimization level '" << arg
                   << "' (expected one of -O0, -O1, -O2, -O3, -Os).\n";
-        std::exit(1);
+        std::exit(ExitUsage);
       }
+    } else if (arg == "-o" || arg == "--package-graph" || arg == "--link") {
+      // Reaching here means the value-taking branches above did not match, i.e.
+      // the option is the last argument. "Unknown option: -o" would be a lie.
+      std::cerr << "Error: option '" << arg << "' needs a value.\n"
+                << "Run `turfc help` for the options.\n";
+      std::exit(ExitUsage);
     } else if (arg[0] == '-') {
-      std::cerr << "Unknown option: " << arg << "\n";
-      std::exit(1);
+      unknownOption(arg);
     } else {
       opts.InputFile = arg;
       opts.PositionalFiles.push_back(arg);
@@ -491,28 +582,17 @@ static CompilerOptions parseArgs(int argc, char **argv) {
   if (opts.CheckAsModule && !opts.Check) {
     std::cerr << "Error: --module only applies with --check (a module has no "
                  "entry point, so it cannot be linked).\n";
-    std::exit(1);
+    std::exit(ExitUsage);
   }
 
   if (opts.InputFile.empty()) {
-    std::cerr
-        << "Usage: turfc <filename.tr> [-o output] [--emit-llvm] [--smart] "
-           "[--smart-write-fix=<path>] "
-           "[--dump-ast] [--resolve] [--dump-resolver-symbols] "
-           "[--dump-resolved] [--typecheck] [--dump-typechecked] "
-           "[--dump-modules] [--dump-instantiations] [--link <libname>] "
-           "[--allow-unsafe-modules] [--stdlib-warnings] "
-           "[-O0|-O1|-O2|-O3|-Os] [-g] [--target=<triple>] [-mcpu=<cpu>] "
-           "[--check [--module]] [--package-graph <file>]\n"
-           "       turfc --format [--write] <filename.tr>\n"
-           "       turfc --migrate=pub [--write] <module.tr>...\n"
-           "       turfc --explain E0NN\n";
-    std::exit(1);
+    std::cerr << "Error: no input file.\n" << turfcUsage();
+    std::exit(ExitUsage);
   }
 
   if (opts.InputFile.size() < 3 || opts.InputFile.substr(opts.InputFile.size() - 3) != ".tr") {
     std::cerr << "Error: Input file must have a '.tr' extension (got: " << opts.InputFile << ").\n";
-    std::exit(1);
+    std::exit(ExitUsage);
   }
 
   if (opts.OutputName.empty()) {
@@ -969,18 +1049,42 @@ static int runCompilerMain(int argc, char **argv) {
   // this answers before anything else that costs time or touches global
   // state (the SLM engine, source files, the install-root lookup).
   // Lines 1 and 2 are a contract: `turfc <release version>`, then
-  // `interface <major>.<minor>`. Later lines (LLVM version, runtime ABI, ...)
-  // may be added, but never by changing these two.
+  // `interface <major>.<minor>`. Later lines are `<key> <value>` and may be
+  // added, but never by changing these two.
+  CompilerExecutablePath = llvm::sys::fs::getMainExecutable(argv[0], (void *)(intptr_t)runCompilerMain);
+
   for (int i = 1; i < argc; ++i) {
     if (std::string(argv[i]) == "--version") {
+      // REL-001: what someone pastes into a bug report. `llvm` is the LLVM
+      // this binary was built against (a mismatch with the machine's own LLVM
+      // is a classic source of "works for me"), `runtime` is the ABI stamp
+      // every program it compiles will demand of libturfrt.a, and `root` is
+      // where it looks for lib/std and the runtime -- the three facts that
+      // decide "why does my install behave differently". TurfInstallRoot()
+      // only reads the environment and CompilerExecutablePath, so this still
+      // touches no compiler state.
+      // The default root is `<bin dir>/..`; print it resolved, not as
+      // `.../build/..`, when the directory exists.
+      std::string Root = TurfInstallRoot();
+      llvm::SmallString<256> RealRoot;
+      if (!llvm::sys::fs::real_path(Root, RealRoot))
+        Root = RealRoot.str().str();
       std::cout << "turfc " << TURF_VERSION << "\n"
                 << "interface " << TurfcInterfaceMajor << "."
-                << TurfcInterfaceMinor << "\n";
-      return 0;
+                << TurfcInterfaceMinor << "\n"
+                << "llvm " << LLVM_VERSION_STRING << "\n"
+                << "runtime " << RuntimeAbiSymbol << "\n"
+                << "root " << Root << "\n";
+      return ExitOk;
     }
   }
 
-  CompilerExecutablePath = llvm::sys::fs::getMainExecutable(argv[0], (void *)(intptr_t)runCompilerMain);
+  // `turfc help`: the spelling REL-001 chose over `--help` (see turfcUsage()).
+  // Only as the first argument, so it can never shadow a file operand.
+  if (argc >= 2 && std::string(argv[1]) == "help") {
+    std::cout << turfcUsage();
+    return ExitOk;
+  }
 
   handleExplainFlagIfPresent(argc, argv);
 

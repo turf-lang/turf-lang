@@ -239,12 +239,12 @@ void WrapMainWithRuntimeBootstrap() {
   // runtime that renamed it) fails at LINK TIME ("undefined reference to
   // `turf_rt_abi_2_0`"), never silently at run time against a runtime this
   // compiler no longer agrees with.
-  Function *AbiStampFn = TheModule->getFunction("turf_rt_abi_2_0");
+  Function *AbiStampFn = TheModule->getFunction(RuntimeAbiSymbol);
   if (!AbiStampFn) {
     FunctionType *AbiStampFT =
         FunctionType::get(Type::getVoidTy(*TheContext), false);
     AbiStampFn = Function::Create(AbiStampFT, Function::ExternalLinkage,
-                                  "turf_rt_abi_2_0", TheModule.get());
+                                  RuntimeAbiSymbol, TheModule.get());
   }
 
   Function *Wrapper =

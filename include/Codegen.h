@@ -74,6 +74,14 @@ bool isUnsizedArrayType(const TurfType *T);
 extern TurfTypePtr CurrentFuncReturnType;
 extern llvm::Function *CurrentFunction;
 
+// The compiler/runtime ABI stamp's symbol (FDN-006 stage 3). One constant so
+// the call WrapMainWithRuntimeBootstrap() emits and the "runtime" line of
+// `turfc --version` (REL-001) cannot disagree; runtime/turfrt_abi.c defines
+// the same name and scripts/cli_smoke.sh checks that libturfrt.a exports what
+// this says, since C code cannot read a C++ constant. Renaming it is an ABI
+// break: rename all three together.
+inline constexpr const char *RuntimeAbiSymbol = "turf_rt_abi_2_0";
+
 // RT-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §8, F-MEM-4): wraps the
 // already-fully-codegenned LLVM function literally named "main" (built by
 // FuncDefExprAST::codegen()'s existing `Name == "main"` special-casing,
