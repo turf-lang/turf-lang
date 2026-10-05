@@ -27,3 +27,9 @@ var Required = Interface{Major: 1, Minor: 1}
 // by `turf test` alone, not by the handshake every command runs, so a turfc
 // that predates it still serves build, run and check.
 var RequiredForTest = Interface{Major: 1, Minor: 3}
+
+// RequiredForFmt is what `turf fmt` needs: the batch form of `turfc --format`
+// (several files, `--check`, a verified result), interface 1.4 (REL-002 stage
+// 2). Like RequiredForTest it is checked by the one command, not by the
+// handshake every command runs.
+var RequiredForFmt = Interface{Major: 1, Minor: 4}
