@@ -1169,7 +1169,9 @@ static std::string ProjectManifestHint(const std::string &ImportingFile) {
     llvm::StringRef Parent = llvm::sys::path::parent_path(Dir);
     if (Parent.empty() || Parent == Dir.str())
       return "";
-    Dir = Parent;
+    // Copy first: `Parent` points INTO `Dir`, and assigning a SmallString from
+    // a view of itself trips LLVM's aliasing assertion (a crash in assert builds).
+    Dir = Parent.str();
   }
 }
 
