@@ -208,7 +208,13 @@ std::unique_ptr<ExprAST> ParseBlock() {
           }
         }
       }
-      LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement." + Hint, SLM::ErrorCategory::SYNTAX_ERROR);
+      // The keyword hint above looks at the statement's first word, which is
+      // any identifier within a typo's distance of a keyword (`io::printline(..)`
+      // trips it for `if`/`do`), so it does not make "the ';' is missing" a
+      // guess: a statement that really starts with a misspelled keyword is an
+      // unresolved name once the ';' is in, and the sandbox rejects that.
+      LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement." + Hint, SLM::ErrorCategory::SYNTAX_ERROR,
+                 MissingSemicolonHints());
       return nullptr;
     }
     getNextToken(); // eat ';'
@@ -327,7 +333,7 @@ std::unique_ptr<ExprAST> ParseDoWhileExpr() {
     return nullptr;
 
   if (CurTok != ';') {
-    LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after do-while loop.", SLM::ErrorCategory::CONTROL_FLOW);
+    LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after do-while loop.", SLM::ErrorCategory::CONTROL_FLOW, MissingSemicolonHints());
     return nullptr;
   }
   getNextToken(); // eat ';'
@@ -836,7 +842,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
         auto E = ParseExpression();
         if (!E) return nullptr;
         if (CurTok != ';') {
-          LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement in 'otherwise' arm.", SLM::ErrorCategory::CONTROL_FLOW);
+          LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement in 'otherwise' arm.", SLM::ErrorCategory::CONTROL_FLOW, MissingSemicolonHints());
           return nullptr;
         }
         getNextToken(); // eat ';'
@@ -987,7 +993,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
       auto E = ParseExpression();
       if (!E) return nullptr;
       if (CurTok != ';') {
-        LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement in matches arm body.", SLM::ErrorCategory::CONTROL_FLOW);
+        LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement in matches arm body.", SLM::ErrorCategory::CONTROL_FLOW, MissingSemicolonHints());
         return nullptr;
       }
       getNextToken(); // eat ';'
@@ -1081,7 +1087,7 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
       TurfTypePtr ElemType = AT ? AT->getElementTypePtr() : Type;
 
       if (CurTok != ';') {
-        LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after array declaration.", SLM::ErrorCategory::DECLARATION);
+        LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after array declaration.", SLM::ErrorCategory::DECLARATION, MissingSemicolonHints());
         return nullptr;
       }
       getNextToken(); // eat ';'
@@ -1098,7 +1104,7 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
     // §11.6) against this same null-Init declaration.
     std::unique_ptr<ExprAST> Init = nullptr;
     if (CurTok != ';') {
-      LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after variable declaration.", SLM::ErrorCategory::DECLARATION);
+      LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after variable declaration.", SLM::ErrorCategory::DECLARATION, MissingSemicolonHints());
       return nullptr;
     }
     getNextToken(); // eat ';'
@@ -1157,7 +1163,7 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
         return nullptr;
     }
     if (CurTok != ';') {
-      LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement.", SLM::ErrorCategory::SYNTAX_ERROR);
+      LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement.", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
       return nullptr;
     }
     getNextToken(); // eat ';'
@@ -1168,7 +1174,7 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
   if (!Init) return nullptr;
 
   if (CurTok != ';') {
-    LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement.", SLM::ErrorCategory::SYNTAX_ERROR);
+    LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement.", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
     return nullptr;
   }
   getNextToken(); // eat ';'

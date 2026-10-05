@@ -1189,7 +1189,7 @@ static int runCompilerMain(int argc, char **argv) {
             auto AST = ParseExpression();
             if (AST) {
               if (CurTok != ';') {
-                LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR);
+                LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
               } else {
                 getNextToken(); // eat ';'
               }
@@ -1595,7 +1595,7 @@ static int runCompilerMain(int argc, char **argv) {
         auto AST = ParseExpression();
         if (AST) {
           if (CurTok != ';') {
-            LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR);
+            LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
           } else {
             getNextToken(); // eat ';'
           }
@@ -1620,7 +1620,7 @@ static int runCompilerMain(int argc, char **argv) {
       auto AST = ParseExpression();
       if (AST) {
         if (CurTok != ';') {
-          LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR);
+          LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
         } else {
           getNextToken(); // eat ';'
         }

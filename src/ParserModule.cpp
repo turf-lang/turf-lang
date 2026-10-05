@@ -562,7 +562,7 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
       auto Expr = ParseExpression();
       if (Expr) {
         if (CurTok != ';') {
-          LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement.", SLM::ErrorCategory::SYNTAX_ERROR);
+          LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement.", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
           return nullptr;
         }
         getNextToken(); // eat ';'
@@ -578,7 +578,7 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
     auto Expr = ParseExpression();
     if (Expr) {
       if (CurTok != ';') {
-        LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement.", SLM::ErrorCategory::SYNTAX_ERROR);
+        LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement.", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
         return nullptr;
       }
       getNextToken(); // eat ';'
