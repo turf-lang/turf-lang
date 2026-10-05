@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E126
+// EXPECT-DIAG: can only be called through a variable
+// Regression test: `make()(3)` is well-typed but Codegen cannot emit an
+// indirect call except through a variable; it used to die with an LLVM
+// internal error. It is now a clean diagnostic with the workaround.
+fn inc(x: int): int { return x + 1; }
+fn make(): fn(int): int { return inc; }
+
+fn main(): int {
+    mut r: int = make()(3);
+    return r;
+}

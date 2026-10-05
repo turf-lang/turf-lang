@@ -773,6 +773,33 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
     }
   }
 
+  // ── Call through an arbitrary expression: `5()`, `a[0]()`, `f()()` ────────
+  // Neither a name nor `Left::Right`, so Resolver::visitFuncCall() only walked
+  // the callee and nothing validated it; Codegen then hit "First-class
+  // functions are not supported yet" and the COMPILER died with an LLVM
+  // internal error. A function VALUE can only be called through a variable
+  // (the indirect-call block above), so reject both shapes here: a callee that
+  // is not a function at all, and one that is a function but is not a name.
+  if (!ScopeCallee && !dynamic_cast<const VariableExprAST *>(Node.getCallee())) {
+    TurfTypePtr CalleeTy = getType(Node.getCallee());
+    if (CalleeTy && CalleeTy->isFunc()) {
+      reportError(Node.getLoc(), ErrCode::UnsupportedOperation,
+                  "A function value can only be called through a variable, not "
+                  "straight from an expression.",
+                  {}, "Store the value in a variable first (`mut f: " +
+                          CalleeTy->getName() + " = ...;`), then call `f(...)`.");
+    } else if (CalleeTy) {
+      reportError(Node.getLoc(), ErrCode::NotCallable,
+                  "This expression has type '" + CalleeTy->getName() +
+                      "', not a function -- it can't be called.",
+                  {}, "Only a function, or a variable holding one, can be "
+                      "followed by '(...)'.",
+                  "Not callable!");
+    }
+    setType(&Node, nullptr);
+    return;
+  }
+
   // ── Unknown call (no builtin, no candidates) — be permissive. ─────────────
   // The Resolver should have caught truly unknown functions already.  Leave
   // the type as null so we don't cascade spurious errors.
