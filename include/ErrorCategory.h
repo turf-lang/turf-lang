@@ -38,6 +38,10 @@ struct DiagnosticHints {
   // never called at all if that sandbox validation succeeds.
   std::string DeterministicOldName;
   std::string DeterministicNewName;
+  // Why the replacement is right, for a fix that is not a typo (e.g. adding
+  // a generic method's missing `<T>`). Empty means a rename, and
+  // tryDeterministicFix() then explains it as a typo.
+  std::string DeterministicReason;
 
   bool empty() const {
     return KnownTypes.empty() && DeterministicOldName.empty();

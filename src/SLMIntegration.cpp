@@ -25,6 +25,7 @@
 #include "AST.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/JSON.h"
 #include "llvm/Support/Path.h"
 #include <algorithm>
 #include <cctype>
@@ -226,9 +227,41 @@ static int extractJsonFieldInt(const std::string &json,
 // "    mut b: int = 5;". That prefix is never valid Turf-Lang syntax at the
 // start of a line, so stripping it here is safe and turns an otherwise
 // guaranteed sandbox-parse failure into a usable patch.
-static std::string stripLineNumberPrefix(const std::string &line) {
-  static const std::regex prefixPattern("^\\s*(?:>>\\s*)?[0-9]+\\s*\\|\\s?");
-  return std::regex_replace(line, prefixPattern, "", std::regex_constants::format_first_only);
+//
+// A multi-line replacement echoes the prefix on EVERY line ("11 | fn ...",
+// "12 |     return ...", "13 | }"); stripping only the first (issue #267)
+// left "12 |" on the rest, a guaranteed parse failure the model was then
+// told was its own mistake. Every line is stripped, but only when every
+// non-blank line carries a prefix: a lone "1 | flags" in the middle of a real
+// block is code, not an echo, and a single-line value keeps the old rule.
+static std::string stripLineNumberPrefix(const std::string &text) {
+  static const std::regex prefixPattern(
+      "^[ \\t]*(?:>>|\\*)?[ \\t]*[0-9]+[ \\t]*\\|[ \\t]?");
+  std::vector<std::string> lines;
+  size_t pos = 0;
+  while (true) {
+    size_t nl = text.find('\n', pos);
+    lines.push_back(text.substr(pos, nl == std::string::npos ? nl : nl - pos));
+    if (nl == std::string::npos)
+      break;
+    pos = nl + 1;
+  }
+  bool allPrefixed = true;
+  for (const auto &l : lines)
+    if (l.find_first_not_of(" \t\r") != std::string::npos &&
+        !std::regex_search(l, prefixPattern))
+      allPrefixed = false;
+  if (!allPrefixed)
+    return std::regex_replace(text, prefixPattern, "",
+                              std::regex_constants::format_first_only);
+  std::string out;
+  for (size_t i = 0; i < lines.size(); ++i) {
+    if (i)
+      out += "\n";
+    out += std::regex_replace(lines[i], prefixPattern, "",
+                              std::regex_constants::format_first_only);
+  }
+  return out;
 }
 
 // Defensive cleanup for another known small-model failure mode: wrapping
@@ -299,6 +332,68 @@ static std::string extractJsonFieldString(const std::string &json,
     }
   }
   return result;
+}
+
+// Fills the model-produced fields of `Out` from one suggestion JSON object
+// (a model response, or a cache file -- which spells the category key
+// `categoryKey` differently, hence the parameter).
+//
+// A real JSON parser first (issue #267). The hand-rolled extractors above
+// decode only \n \t \" \\, but grammars/slm_suggestion.gbnf also lets the
+// model emit \r, \/, \b, \f and \uXXXX -- and `<`/`>` for `<`/`>`
+// is a common JSON habit that lands squarely on generic syntax (`fn<T>`),
+// so a correct fix reached the sandbox with a literal "<" in it. They
+// also find a key by raw substring, so a string value that happens to
+// contain `"end_line":` (an explanation quoting the schema) shadows the real
+// field. The extractors stay as the fallback for a response that is not one
+// well-formed object (no grammar loaded, or generation cut short), which is
+// exactly what they were written for.
+static void parseSuggestionJson(const std::string &Json,
+                                const std::string &categoryKey,
+                                AISuggestion &Out) {
+  if (auto Parsed = llvm::json::parse(Json)) {
+    if (const llvm::json::Object *Obj = Parsed->getAsObject()) {
+      auto Str = [&](llvm::StringRef Key) -> std::string {
+        if (auto S = Obj->getString(Key))
+          return S->str();
+        return "";
+      };
+      // A grammar-constrained response always has a JSON integer here; a
+      // cache file or an unconstrained one may quote it ("12"), which the
+      // old extractor silently read as 0 -- "the error's own line".
+      auto Int = [&](llvm::StringRef Key) -> int {
+        if (auto I = Obj->getInteger(Key))
+          return static_cast<int>(*I);
+        if (auto S = Obj->getString(Key)) {
+          int V = 0;
+          if (!S->trim().getAsInteger(10, V))
+            return V;
+        }
+        return 0;
+      };
+      Out.explanation = Str("explanation");
+      Out.fix_mode = Str("fix_mode");
+      Out.suggested_comment = Str("suggested_comment");
+      Out.code_patch = Str("code_patch");
+      Out.replacement_line = Str("replacement_line");
+      Out.target_line = Int("target_line");
+      Out.end_line = Int("end_line");
+      Out.warning = Str("warning");
+      Out.self_reported_category = Str(categoryKey);
+      return;
+    }
+  } else {
+    llvm::consumeError(Parsed.takeError());
+  }
+  Out.explanation = extractJsonFieldString(Json, "explanation");
+  Out.fix_mode = extractJsonFieldString(Json, "fix_mode");
+  Out.suggested_comment = extractJsonFieldString(Json, "suggested_comment");
+  Out.code_patch = extractJsonFieldString(Json, "code_patch");
+  Out.replacement_line = extractJsonFieldString(Json, "replacement_line");
+  Out.target_line = extractJsonFieldInt(Json, "target_line");
+  Out.end_line = extractJsonFieldInt(Json, "end_line");
+  Out.warning = extractJsonFieldString(Json, "warning");
+  Out.self_reported_category = extractJsonFieldString(Json, categoryKey);
 }
 
 // Computes a structural prior for confidence from shallow, pre-sandbox signals.
@@ -518,15 +613,7 @@ static bool readSlmCache(const std::string &Key, AISuggestion &Out) {
   std::string Json = Rest.str();
   if (Json.empty())
     return false;
-  Out.explanation = extractJsonFieldString(Json, "explanation");
-  Out.fix_mode = extractJsonFieldString(Json, "fix_mode");
-  Out.suggested_comment = extractJsonFieldString(Json, "suggested_comment");
-  Out.code_patch = extractJsonFieldString(Json, "code_patch");
-  Out.replacement_line = extractJsonFieldString(Json, "replacement_line");
-  Out.target_line = extractJsonFieldInt(Json, "target_line");
-  Out.end_line = extractJsonFieldInt(Json, "end_line");
-  Out.warning = extractJsonFieldString(Json, "warning");
-  Out.self_reported_category = extractJsonFieldString(Json, "self_reported_category");
+  parseSuggestionJson(Json, "self_reported_category", Out);
   if (Out.fix_mode.empty())
     Out.fix_mode = "NONE";
   Out.valid = true;
@@ -560,6 +647,45 @@ static void writeSlmCache(const std::string &Key, const AISuggestion &S) {
        << "\"warning\":\"" << escapeJsonString(S.warning) << "\","
        << "\"self_reported_category\":\"" << escapeJsonString(S.self_reported_category)
        << "\"}\n";
+}
+
+static void evictSlmCache(const std::string &Key) {
+  std::string Dir = slmCacheDir();
+  if (!Dir.empty())
+    (void)llvm::sys::fs::remove(Dir + "/" + Key + ".json");
+}
+
+// TURF_SLM_REPLAY=<file>: answer each model call with the next recorded
+// response from <file> (responses separated by a line that is exactly
+// `%%`) instead of running the model. Everything after the model --
+// parsing, splice-site resolution, the sandbox, the retry loop and its
+// feedback -- runs unchanged, which is the point: until this existed, the
+// only way to exercise that path was a live ~1GB model whose output is not
+// reproducible, so a harness bug that discarded correct fixes (issue #267)
+// had no regression test at all. Works in a -DTURF_SMART=OFF build too, and
+// bypasses the suggestion cache in both directions so a test never depends
+// on (or pollutes) ~/.cache/turf/slm. A call past the last response gets ""
+// -- "the model produced nothing" -- which ends the retry loop.
+static std::string nextReplayResponse() {
+  static std::vector<std::string> Responses;
+  static size_t Next = 0;
+  static bool Loaded = false;
+  if (!Loaded) {
+    Loaded = true;
+    std::ifstream File(std::getenv("TURF_SLM_REPLAY"));
+    std::string Line, Current;
+    while (std::getline(File, Line)) {
+      if (Line == "%%") {
+        Responses.push_back(Current);
+        Current.clear();
+      } else {
+        Current += Line + "\n";
+      }
+    }
+    if (Current.find_first_not_of(" \t\r\n") != std::string::npos)
+      Responses.push_back(Current);
+  }
+  return Next < Responses.size() ? Responses[Next++] : "";
 }
 
 /**
@@ -622,22 +748,33 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
   // of letting the retry reach the model with real feedback. See
   // slmCacheKey()/readSlmCache()/writeSlmCache() below for the on-disk
   // format and the version-fingerprint invalidation rule.
-  if (previousAttemptFailed.empty()) {
+  //
+  // Only ever written for a suggestion that validated (see
+  // AISuggestion::cacheKey), so a hit is a known-good answer, not just the
+  // model's last guess.
+  const std::string cacheKey = slmCacheKey(errorCode, cleanError, codeContext);
+  suggestion.cacheKey = cacheKey;
+  const bool replaying = std::getenv("TURF_SLM_REPLAY") != nullptr;
+  if (previousAttemptFailed.empty() && !replaying) {
     AISuggestion cached;
-    if (readSlmCache(slmCacheKey(errorCode, cleanError, codeContext), cached)) {
+    if (readSlmCache(cacheKey, cached)) {
       if (std::getenv("TURF_SLM_DEBUG")) {
         std::cerr << "[SLM] Cache hit -- skipping model load entirely.\n";
       }
+      cached.cacheKey = cacheKey;
+      cached.fromCache = true;
       return cached;
     }
   }
 
-  llvm::SmallString<128> ModelPath(CompilerExecutablePath);
-  llvm::sys::path::remove_filename(ModelPath);
-  llvm::sys::path::append(ModelPath, "..", "models",
-                          "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf");
-  if (!SLMEngine::getInstance().initialize(ModelPath.str().str())) {
-    return suggestion;
+  if (!replaying) {
+    llvm::SmallString<128> ModelPath(CompilerExecutablePath);
+    llvm::sys::path::remove_filename(ModelPath);
+    llvm::sys::path::append(ModelPath, "..", "models",
+                            "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf");
+    if (!SLMEngine::getInstance().initialize(ModelPath.str().str())) {
+      return suggestion;
+    }
   }
 
   // Resolve the GBNF grammar file (same binary-relative pattern as model path).
@@ -698,6 +835,26 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
         "string().\n"
         "Control flow: if/else, while, break, continue, return.\n"
         "Functions: fn name(type param) -> type { return val }\n";
+  }
+
+  // The page for this exact error code (docs/slm/codes/Exxx.txt), ahead of
+  // the category doc. All 144 pages were written for the model, with the
+  // construct's correct syntax and the fix, but nothing ever loaded them
+  // (getSlmCodeDocPath() had no caller): the model only saw the coarse
+  // category doc -- for E138, declaration.txt, which never shows
+  // `fn<T> Box.m()` -- and answered with `-> int` (issue #267). First,
+  // because an over-long system prompt loses the end of its docs
+  // (SLMEngine::generateSuggestion()), and the code's own page is the more
+  // specific of the two.
+  if (!errorCode.empty()) {
+    std::string codeDocPath = ErrorCodes::getSlmCodeDocPath(errorCode);
+    std::string codeDoc = codeDocPath.empty() ? "" : loadDocFile(codeDocPath);
+    if (!codeDoc.empty())
+      docContent = "THIS ERROR (" + errorCode + "):\n" + codeDoc +
+                   "\nGENERAL REFERENCE:\n" + docContent;
+    if (std::getenv("TURF_SLM_DEBUG"))
+      std::cerr << "[SLM] Code doc: "
+                << (codeDoc.empty() ? "(none)" : codeDocPath) << "\n";
   }
 
   // 5. Build a focused prompt with only the relevant documentation.
@@ -872,7 +1029,9 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
     std::cerr << "--- USER PROMPT ---\n" << userPrompt << "\n-------------------\n";
   }
   std::string rawResponse =
-      SLMEngine::getInstance().generateSuggestion(systemPrompt, userPrompt, grammarStr);
+      replaying ? nextReplayResponse()
+                : SLMEngine::getInstance().generateSuggestion(
+                      systemPrompt, userPrompt, grammarStr);
 
   if (std::getenv("TURF_SLM_DEBUG")) {
     std::cerr << "Clean Error: " << cleanError << "\n";
@@ -891,18 +1050,9 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
     std::string jsonStr =
         rawResponse.substr(startJson, endJson - startJson + 1);
 
-    suggestion.explanation = extractJsonFieldString(jsonStr, "explanation");
-    suggestion.fix_mode = extractJsonFieldString(jsonStr, "fix_mode");
-    suggestion.suggested_comment =
-        extractJsonFieldString(jsonStr, "suggested_comment");
-    suggestion.code_patch = extractJsonFieldString(jsonStr, "code_patch");
-    suggestion.replacement_line = stripLineNumberPrefix(stripMarkdownFences(
-        extractJsonFieldString(jsonStr, "replacement_line")));
-    suggestion.target_line = extractJsonFieldInt(jsonStr, "target_line");
-    suggestion.end_line = extractJsonFieldInt(jsonStr, "end_line");
-    suggestion.warning = extractJsonFieldString(jsonStr, "warning");
-    suggestion.self_reported_category =
-        extractJsonFieldString(jsonStr, "category");
+    parseSuggestionJson(jsonStr, "category", suggestion);
+    suggestion.replacement_line = stripLineNumberPrefix(
+        stripMarkdownFences(suggestion.replacement_line));
 
     // B3-2: If the deterministic classifier returned GENERAL (i.e. it couldn't
     // identify the category), try using the model's self-reported category
@@ -946,17 +1096,8 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
       suggestion.fix_mode = "NONE";
     }
     suggestion.valid = true;
-
-    // Item 4: persist this fresh, first-attempt model result so an
-    // IDENTICAL future diagnostic (same key -- see the cache-lookup comment
-    // above) can skip the model entirely. Only on a first attempt: a retry
-    // exists because a prior cached-or-not suggestion already failed
-    // sandbox validation, and this attempt's own result is conditioned on
-    // `previousAttemptFailed`, so it isn't a valid answer for the FIRST-
-    // attempt cache key at all.
-    if (previousAttemptFailed.empty()) {
-      writeSlmCache(slmCacheKey(errorCode, cleanError, codeContext), suggestion);
-    }
+    // Not cached here: validateAndApplySuggestion() caches it once (and
+    // only if) the sandbox validates it -- see AISuggestion::cacheKey.
   }
 
   return suggestion;
@@ -1058,16 +1199,143 @@ static bool inferBlockRange(const std::string &replacement, int targetLine,
   return true;
 }
 
+// How alike two source lines are, ignoring surrounding whitespace: 1.0 for
+// identical, else 1 - (edit distance / longer length).
+static double lineSimilarity(const std::string &a, const std::string &b) {
+  auto trim = [](const std::string &s) {
+    size_t l = s.find_first_not_of(" \t\r");
+    size_t r = s.find_last_not_of(" \t\r");
+    return (l == std::string::npos) ? std::string{} : s.substr(l, r - l + 1);
+  };
+  std::string x = trim(a), y = trim(b);
+  if (x == y)
+    return 1.0;
+  if (x.empty() || y.empty())
+    return 0.0;
+  std::vector<size_t> prev(y.size() + 1), cur(y.size() + 1);
+  for (size_t j = 0; j <= y.size(); ++j)
+    prev[j] = j;
+  for (size_t i = 1; i <= x.size(); ++i) {
+    cur[0] = i;
+    for (size_t j = 1; j <= y.size(); ++j)
+      cur[j] = std::min({prev[j] + 1, cur[j - 1] + 1,
+                         prev[j - 1] + (x[i - 1] == y[j - 1] ? 0 : 1)});
+    std::swap(prev, cur);
+  }
+  return 1.0 - static_cast<double>(prev[y.size()]) /
+                   static_cast<double>(std::max(x.size(), y.size()));
+}
+
+// Find the source range a replacement most plausibly rewrites, from its
+// content alone (issue #267): the window around `anchor` whose lines best
+// line up with the replacement's lines. inferBlockRange() needs the
+// replacement's first and last lines VERBATIM in the source, but a fix
+// usually changes exactly one of them (`fn Box.count()` -> `fn<T>
+// Box.count()`), so it declined on the very block rewrites it was written
+// for. Here lines match when they are merely similar.
+//
+// Scored as a sequence alignment of the replacement's lines against each
+// candidate window [s, e] containing `anchor` (at most two lines longer than
+// the replacement): an aligned pair earns its similarity (pairs under 0.6
+// don't align; a line of two characters or fewer, like `}`, earns 0.3 of it,
+// since a lone brace matches every block's end); a window line left
+// unaligned costs 0.5 (0.25 if blank), because the splice deletes it; a
+// replacement line left unaligned is a new line and costs nothing. The best
+// window must score at least 0.6 -- one convincing match -- or there is no
+// answer. Ties go to the smaller window, then the one nearest `anchor`.
+//
+// A wrong answer here is as safe as a wrong model line number: the result
+// is only a candidate verifySuggestion() hands to the full sandbox re-check.
+static bool alignReplacement(const std::string &replacement, int anchor,
+                             int &outStart, int &outEnd) {
+  const int n = static_cast<int>(SourceLines.size());
+  if (anchor < 1 || anchor > n)
+    return false;
+  std::vector<std::string> repl;
+  size_t pos = 0;
+  while (true) {
+    size_t nl = replacement.find('\n', pos);
+    std::string line = replacement.substr(pos, nl == std::string::npos
+                                                   ? std::string::npos
+                                                   : nl - pos);
+    if (line.find_first_not_of(" \t\r") != std::string::npos)
+      repl.push_back(line);
+    if (nl == std::string::npos)
+      break;
+    pos = nl + 1;
+  }
+  const int k = static_cast<int>(repl.size());
+  if (k == 0)
+    return false;
+
+  auto isBlank = [](const std::string &s) {
+    return s.find_first_not_of(" \t\r") == std::string::npos;
+  };
+  auto pairScore = [&](const std::string &r, const std::string &src) {
+    double sim = lineSimilarity(r, src);
+    if (sim < 0.6)
+      return -1.0; // does not align
+    size_t len = r.find_first_not_of(" \t") == std::string::npos
+                     ? 0
+                     : r.substr(r.find_first_not_of(" \t")).size();
+    return len <= 2 ? sim * 0.3 : sim;
+  };
+
+  double bestScore = 0.0;
+  int bestStart = 0, bestEnd = 0;
+  for (int s = std::max(1, anchor - k - 1); s <= anchor; ++s) {
+    for (int e = anchor; e <= std::min(n, s + k + 1); ++e) {
+      const int m = e - s + 1;
+      // dp[i][j]: best score aligning repl[0..i) with window lines [0..j).
+      std::vector<std::vector<double>> dp(k + 1, std::vector<double>(m + 1));
+      for (int j = 1; j <= m; ++j)
+        dp[0][j] = dp[0][j - 1] -
+                   (isBlank(SourceLines[s + j - 2]) ? 0.25 : 0.5);
+      for (int i = 1; i <= k; ++i) {
+        dp[i][0] = dp[i - 1][0];
+        for (int j = 1; j <= m; ++j) {
+          const std::string &src = SourceLines[s + j - 2];
+          double best = std::max(dp[i - 1][j],
+                                 dp[i][j - 1] - (isBlank(src) ? 0.25 : 0.5));
+          double ps = pairScore(repl[i - 1], src);
+          if (ps >= 0)
+            best = std::max(best, dp[i - 1][j - 1] + ps);
+          dp[i][j] = best;
+        }
+      }
+      double score = dp[k][m];
+      auto dist = [&](int a, int b) {
+        return std::abs((a + b) / 2 - anchor);
+      };
+      bool better = score > bestScore + 1e-9 ||
+                    (bestStart != 0 && std::abs(score - bestScore) <= 1e-9 &&
+                     (m < bestEnd - bestStart + 1 ||
+                      (m == bestEnd - bestStart + 1 &&
+                       dist(s, e) < dist(bestStart, bestEnd))));
+      if (better && score >= 0.6) {
+        bestScore = score;
+        bestStart = s;
+        bestEnd = e;
+      }
+    }
+  }
+  if (bestStart == 0)
+    return false;
+  // The window had to contain `anchor`, which a model often points at the
+  // blank line beside the real code; the splice should not eat that blank
+  // line too. A blank edge line never earns score (only costs), so dropping
+  // it can only improve the alignment.
+  while (bestStart < bestEnd && isBlank(SourceLines[bestStart - 1]))
+    ++bestStart;
+  while (bestEnd > bestStart && isBlank(SourceLines[bestEnd - 1]))
+    --bestEnd;
+  outStart = bestStart;
+  outEnd = bestEnd;
+  return true;
+}
+
 bool verifySuggestion(AISuggestion &suggestion, int errorLine,
                       std::string *outDiagnostics) {
-  // Create a sandbox from the current compiler state
-  auto sandbox = CreateSandbox();
-  if (!sandbox) {
-    std::cerr << Colors::BRIGHT_BLACK << "[Verify] Failed to create sandbox"
-              << Colors::RESET << "\n";
-    return false;
-  }
-
   // Use replacement_line (exact Turf-Lang code) for sandbox validation.
   // code_patch is a human-readable description and must NOT be fed to the
   // parser. If replacement_line is empty, there is no valid code to validate.
@@ -1075,6 +1343,8 @@ bool verifySuggestion(AISuggestion &suggestion, int errorLine,
     return false; // no valid code to validate; code_patch is prose-only
   }
   const std::string &fixLine = suggestion.replacement_line;
+  const int n = static_cast<int>(SourceLines.size());
+  const bool debug = std::getenv("TURF_SLM_DEBUG") != nullptr;
 
   // target_line == 0 means "same line as the error" (the common case). A
   // positive target_line is only honored if it's within the actual source
@@ -1113,54 +1383,134 @@ bool verifySuggestion(AISuggestion &suggestion, int errorLine,
   //       correctly keep the [applyLine, applyLine] single-line splice.
   // Either way the sandbox below re-validates the full spliced result, so a
   // mis-inferred range can only fail validation, never apply bad code.
-  if (fixLine.find('\n') != std::string::npos && applyEndLine == applyLine) {
+  //
+  // Candidate ranges, tried in order until one validates (issue #267). The
+  // model's line numbers are a hint, not ground truth: a 1.5B model reads
+  // the `>> 11 |` gutter and still answers target_line=10 (the blank line
+  // above), and splicing a correct `fn<T> Box.count(): int {...}` into that
+  // blank line left the original `fn Box.count()` below it -- the same
+  // error again, which the retry loop then reported to the model as "your
+  // fix did not compile". The fix was right; only its placement was wrong,
+  // and every retry was poisoned by that false feedback. So the harness
+  // also tries where the replacement's own CONTENT says it belongs
+  // (alignReplacement()), around the model's line and around the error's.
+  // Order keeps every placement that validated before this change winning
+  // exactly as before: the recovered block range (when the old code would
+  // have used it), then the model's literal range, then the aligned ones,
+  // then the error's own line. Each candidate gets a fresh sandbox, so a
+  // failed one leaves nothing behind; all of them must clear the same full
+  // re-check, so a wider search can only find more fixes that compile and
+  // clear the error, never apply one that doesn't.
+  struct Candidate {
+    int start, end;
+    const char *why;
+  };
+  std::vector<Candidate> candidates;
+  auto add = [&](int s, int e, const char *why) {
+    if (s < 1 || e < s || e > n)
+      return;
+    for (const auto &c : candidates)
+      if (c.start == s && c.end == e)
+        return;
+    candidates.push_back({s, e, why});
+  };
+  const bool multiLine = fixLine.find('\n') != std::string::npos;
+  if (multiLine && applyEndLine == applyLine) {
     int inferredStart = 0, inferredEnd = 0;
-    if (inferBlockRange(fixLine, applyLine, inferredStart, inferredEnd)) {
-      if (std::getenv("TURF_SLM_DEBUG")) {
-        std::cerr << Colors::BRIGHT_BLACK
-                  << "[Sandbox] Recovered multi-line range [" << inferredStart
-                  << ", " << inferredEnd << "] for a block rewrite the model "
-                  << "left end_line=0 on (target_line=" << applyLine << ")"
-                  << Colors::RESET << "\n";
+    if (inferBlockRange(fixLine, applyLine, inferredStart, inferredEnd) ||
+        inferBlockRange(fixLine, errorLine, inferredStart, inferredEnd))
+      add(inferredStart, inferredEnd, "block anchors");
+  }
+  add(applyLine, applyEndLine, "model's range");
+  int alignStart = 0, alignEnd = 0;
+  // The aligned range whose diagnostics are fed back to the model if no
+  // candidate validates: the best evidence of where the model MEANT its
+  // code to go, so the feedback describes its code, not a misplacement.
+  int feedbackStart = 0, feedbackEnd = 0;
+  if (alignReplacement(fixLine, applyLine, alignStart, alignEnd)) {
+    add(alignStart, alignEnd, "content-aligned (model's line)");
+    feedbackStart = alignStart;
+    feedbackEnd = alignEnd;
+  }
+  if (alignReplacement(fixLine, errorLine, alignStart, alignEnd)) {
+    add(alignStart, alignEnd, "content-aligned (error line)");
+    if (feedbackStart == 0) {
+      feedbackStart = alignStart;
+      feedbackEnd = alignEnd;
+    }
+  }
+  add(errorLine, errorLine, "error line");
+  if (feedbackStart == 0 && !candidates.empty()) {
+    feedbackStart = candidates.front().start;
+    feedbackEnd = candidates.front().end;
+  }
+
+  std::string feedback;
+  for (const auto &c : candidates) {
+    auto sandbox = CreateSandbox();
+    if (!sandbox) {
+      std::cerr << Colors::BRIGHT_BLACK << "[Verify] Failed to create sandbox"
+                << Colors::RESET << "\n";
+      return false;
+    }
+    bool ok = ApplyAndValidateFix(*sandbox, errorLine, c.start, c.end, fixLine,
+                                  suggestion, /*reportFailure=*/debug);
+    if (debug)
+      std::cerr << Colors::BRIGHT_BLACK << "[Sandbox] candidate [" << c.start
+                << ", " << c.end << "] (" << c.why << "): "
+                << (ok ? "validated" : "rejected") << Colors::RESET << "\n";
+
+    // SLM-001 follow-up: on success, capture the FULL patched source -- not
+    // just the one line that changed -- so a caller can write out (or
+    // recompile+run) the whole corrected program, not just read a
+    // description of the fix. `sandbox` (and its Snapshot.SourceCode) is
+    // about to go out of scope, so this is the only point this data is
+    // available at all.
+    if (ok) {
+      std::string joined;
+      for (const auto &line : sandbox->getModifiedSource()) {
+        joined += line;
+        joined += "\n";
       }
-      applyLine = inferredStart;
-      applyEndLine = inferredEnd;
+      suggestion.appliedSource = std::move(joined);
+      return true;
+    }
+
+    // Hand the sandbox's own compiler diagnostics back to the caller
+    // (validateAndApplySuggestion()'s retry loop) so the next
+    // fetchSuggestion() call can tell the model exactly why the last patch
+    // didn't compile, instead of blindly re-guessing -- from the feedback
+    // candidate only (see feedbackStart), each distinct message once, and
+    // with what the patched lines actually became, so the model can tell
+    // "my code is wrong" from "it was placed somewhere I didn't mean".
+    if (c.start == feedbackStart && c.end == feedbackEnd) {
+      std::vector<std::string> seen;
+      for (const auto &diag : sandbox->getValidationDiagnostics()) {
+        if (std::find(seen.begin(), seen.end(), diag.Message) != seen.end())
+          continue;
+        seen.push_back(diag.Message);
+        if (!feedback.empty())
+          feedback += " | ";
+        feedback += diag.Message;
+      }
+      const auto &patched = sandbox->getModifiedSource();
+      int newLines = 1 + static_cast<int>(
+                             std::count(fixLine.begin(), fixLine.end(), '\n'));
+      int lo = std::max(1, c.start - 1);
+      int hi = std::min(static_cast<int>(patched.size()), c.start + newLines);
+      feedback += "\nYour replacement_line replaced line";
+      feedback += c.start == c.end ? " " + std::to_string(c.start)
+                                   : "s " + std::to_string(c.start) + "-" +
+                                         std::to_string(c.end);
+      feedback += "; afterwards the code read:\n";
+      for (int i = lo; i <= hi; ++i)
+        feedback += "  " + patched[i - 1] + "\n";
     }
   }
 
-  bool ok = ApplyAndValidateFix(*sandbox, errorLine, applyLine, applyEndLine,
-                                fixLine, suggestion);
-
-  // SLM-001 follow-up: on success, capture the FULL patched source -- not
-  // just the one line that changed -- so a caller can write out (or
-  // recompile+run) the whole corrected program, not just read a
-  // description of the fix. `sandbox` (and its Snapshot.SourceCode) is
-  // about to go out of scope, so this is the only point this data is
-  // available at all.
-  if (ok) {
-    std::string joined;
-    for (const auto &line : sandbox->getModifiedSource()) {
-      joined += line;
-      joined += "\n";
-    }
-    suggestion.appliedSource = std::move(joined);
-  }
-
-  // On failure, hand the sandbox's own compiler diagnostics back to the
-  // caller (validateAndApplySuggestion()'s retry loop) so the next
-  // fetchSuggestion() call can tell the model exactly why the last patch
-  // didn't compile, instead of blindly re-guessing.
-  if (!ok && outDiagnostics) {
-    std::string joined;
-    for (const auto &diag : sandbox->getValidationDiagnostics()) {
-      if (!joined.empty())
-        joined += " | ";
-      joined += diag.Message;
-    }
-    *outDiagnostics = joined;
-  }
-
-  return ok;
+  if (outDiagnostics)
+    *outDiagnostics = feedback;
+  return false;
 }
 
 // ── Item 1: deterministic-fix layer ─────────────────────────────────────────
@@ -1226,12 +1576,18 @@ static AISuggestion tryDeterministicFix(int errorLine,
   // verifySuggestion() already treats that as the common case.
   result.code_patch = "Replaced '" + OldName + "' with '" +
                       Hints.DeterministicNewName + "'.";
-  result.suggested_comment = "Looks like a typo -- I replaced '" + OldName +
-                             "' with '" + Hints.DeterministicNewName + "'.";
-  result.explanation = "'" + OldName + "' isn't declared anywhere visible, "
-                       "but '" + Hints.DeterministicNewName + "' is an exact, "
-                       "unambiguous match nearby, so this is almost "
-                       "certainly a typo.";
+  if (Hints.DeterministicReason.empty()) {
+    result.suggested_comment = "Looks like a typo -- I replaced '" + OldName +
+                               "' with '" + Hints.DeterministicNewName + "'.";
+    result.explanation = "'" + OldName + "' isn't declared anywhere visible, "
+                         "but '" + Hints.DeterministicNewName + "' is an exact, "
+                         "unambiguous match nearby, so this is almost "
+                         "certainly a typo.";
+  } else {
+    result.suggested_comment = "I replaced '" + OldName + "' with '" +
+                               Hints.DeterministicNewName + "'.";
+    result.explanation = Hints.DeterministicReason;
+  }
   result.self_reported_category = getCategoryName(category);
 
   if (!verifySuggestion(result, errorLine, nullptr)) {
@@ -1325,6 +1681,14 @@ AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
     // at <= 0.5, making it impossible for a pre-validation guess to veto a
     // validated fix, or to promote an unvalidated one past the display gate.
     suggestion.confidence = finalizeConfidence(suggestion.confidence, isValid);
+
+    const bool replaying = std::getenv("TURF_SLM_REPLAY") != nullptr;
+    if (!replaying && !suggestion.cacheKey.empty()) {
+      if (isValid && !suggestion.fromCache)
+        writeSlmCache(suggestion.cacheKey, suggestion);
+      else if (!isValid && suggestion.fromCache)
+        evictSlmCache(suggestion.cacheKey);
+    }
 
     if (isValid) {
       suggestion.valid = true;

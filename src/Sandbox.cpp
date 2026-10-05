@@ -524,7 +524,8 @@ std::unique_ptr<Sandbox> CreateSandbox() {
  */
 bool ApplyAndValidateFix(Sandbox &sandbox, int errorLine, int applyLine,
                          int applyEndLine, const std::string &fixedText,
-                         const SLM::AISuggestion &suggestion) {
+                         const SLM::AISuggestion &suggestion,
+                         bool reportFailure) {
   // NOTE: there used to be a confidence gate here ("only proceed if
   // suggestion.confidence >= 0.9") that ran BEFORE the sandbox validation
   // below. That was backwards: at this point in the call chain
@@ -557,7 +558,8 @@ bool ApplyAndValidateFix(Sandbox &sandbox, int errorLine, int applyLine,
 
   // Apply the fix
   if (!sandbox.applyFix(applyLine, applyEndLine, fixedText)) {
-    std::cerr << Colors::BRIGHT_BLACK << "[Sandbox] " << Colors::BRIGHT_YELLOW
+    if (reportFailure)
+      std::cerr << Colors::BRIGHT_BLACK << "[Sandbox] " << Colors::BRIGHT_YELLOW
               << "Failed to apply fix at line(s) [" << applyLine << ", "
               << applyEndLine << "]" << Colors::RESET << "\n";
     return false;
@@ -565,7 +567,8 @@ bool ApplyAndValidateFix(Sandbox &sandbox, int errorLine, int applyLine,
 
   // Validate the fix (using incremental validation for efficiency)
   if (!sandbox.validateIncremental()) {
-    std::cerr << Colors::BRIGHT_BLACK << "[Sandbox] " << Colors::BRIGHT_YELLOW
+    if (reportFailure)
+      std::cerr << Colors::BRIGHT_BLACK << "[Sandbox] " << Colors::BRIGHT_YELLOW
               << "Validation failed after fix" << Colors::RESET << "\n";
     return false;
   }
@@ -575,7 +578,8 @@ bool ApplyAndValidateFix(Sandbox &sandbox, int errorLine, int applyLine,
   // the line that must now be clean, even when the patch itself landed
   // elsewhere (e.g. a declaration line fixing a later use-before-init read).
   if (!sandbox.isOriginalErrorResolved(errorLine)) {
-    std::cerr << Colors::BRIGHT_BLACK << "[Sandbox] " << Colors::BRIGHT_YELLOW
+    if (reportFailure)
+      std::cerr << Colors::BRIGHT_BLACK << "[Sandbox] " << Colors::BRIGHT_YELLOW
               << "Original error still present at line " << errorLine
               << Colors::RESET << "\n";
     return false;

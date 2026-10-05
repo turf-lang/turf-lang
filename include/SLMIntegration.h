@@ -48,6 +48,14 @@ struct AISuggestion {
   // recompile and RUN the corrected program instead of only ever reading a
   // description of the fix.
   std::string appliedSource;
+  // The first-attempt cache key (item 4) of the diagnostic this suggestion
+  // answers, set by fetchSuggestion() on every attempt, and whether this
+  // suggestion was served from that cache. validateAndApplySuggestion()
+  // writes the cache only once a suggestion has VALIDATED, and evicts a
+  // cached one that no longer does (issue #267): caching every raw first
+  // answer meant a wrong one was replayed as attempt 1 on every later run.
+  std::string cacheKey;
+  bool fromCache = false;
 };
 
 // Extracts +/- `contextSize` lines around the given error line.

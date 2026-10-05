@@ -192,9 +192,13 @@ std::unique_ptr<Sandbox> CreateSandbox();
 // but may differ when suggestion.target_line/end_line point at a
 // declaration/related site or a multi-line block instead (see
 // AISuggestion::target_line and AISuggestion::end_line).
-// Returns true if the fix was applied and committed successfully
+// Returns true if the fix was applied and committed successfully.
+// `reportFailure` false silences the per-rejection lines: verifySuggestion()
+// tries one replacement at several candidate ranges, and only the summary
+// of the whole attempt belongs in front of the user.
 bool ApplyAndValidateFix(Sandbox &sandbox, int errorLine, int applyLine,
                          int applyEndLine, const std::string &fixedText,
-                         const SLM::AISuggestion &suggestion);
+                         const SLM::AISuggestion &suggestion,
+                         bool reportFailure = true);
 
 #endif
