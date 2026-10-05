@@ -143,6 +143,14 @@ what 2.0 does that this item builds on.
 
 ### F-3 — `Slice<T>`: a non-owning view (§27 D3)
 
+- **Status (2026-10-05).** Partly done. `T[]` parameters (#260), range slicing
+  `arr[a..b]` and local `T[]` views now provide the non-owning `{ptr, len}`
+  view with bounds-checked indexing and sub-slicing (`sub(from, to)` is
+  `arr[from..to]`). Its soundness half (D23) is closed by construction: a view
+  can't be returned or stored (E140), and no write reaches an immutable array
+  through one (E141, E144). **What remains of F-3:** a *storable* view (struct
+  fields, return values, collections of views) and views into `List<T>`
+  buffers, which would need escape analysis.
 - **Complexity** M · **Excluded from 2.0:** yes (additive). Its soundness
   half — `T[]` parameters escaping the caller's frame (D23) — **is** 2.0
   (ROADMAP FDN-002).

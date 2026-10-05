@@ -196,7 +196,7 @@ backlog.
 |---|---|---|---|
 | D1 | Closures / lambdas | **FUTURE** (F-1) | Additive; first-class non-capturing functions already exist. Its prerequisites *are* in 2.0 (FDN-001 typed GC allocation for environments, OVH-010 roots for environments held by C). Detailed design sketch in FUTURE F-1. |
 | D2 | Iteration over collections | **FUTURE** (F-2) | Additive. OVH-003's bounds-checked `get(i)` makes index loops safe; `for x in list` adds no new capability. Protocol sketch in FUTURE F-2. |
-| D3 | `Slice<T>` | **FUTURE** (F-3) | Additive. Its *soundness* half — `T[]` parameters escaping the caller's frame (D23) — is **2.0** in FDN-002. |
+| D3 | `Slice<T>` | **FUTURE** (F-3) | Additive. Its *soundness* half — `T[]` parameters escaping the caller's frame (D23) — is **2.0** in FDN-002. (2026-10-05: the non-owning view and its soundness half are closed by #260 + range slicing — see FUTURE.md F-3; a storable view remains.) |
 | D4 | `Map`/`Set` hashing | **Superseded** | Done by STD-003 item 6 (`hashing.tr`, O(1) average lookup). |
 | D5 | Full nullability analysis (interprocedural, field narrowing, narrowed args/returns) | **FUTURE** (F-5) | Additive precision; the current intraprocedural pass is sound (INV-NREF-1/2). |
 | D6 | Manual-heap leak detection | **FUTURE** (F-6) | Additive diagnostics; scope shrank with GC exactly as §27 predicted. |

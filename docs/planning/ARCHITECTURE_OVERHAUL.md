@@ -623,8 +623,8 @@ architecturally unsound) · **Missing-Important** · **Missing-Unnecessary** ·
 | References `&T` | **Partial** | Compile-time non-null only; no lifetime. Cannot be null → cannot terminate a list. |
 | Raw pointers `T*` | **Weak** | Usable in user code only inside a top-level `unsafe` struct decl, and **never** in any user function signature. §1.7. |
 | Nullable safe reference | **Missing-Important** | The single missing type that makes linked structures writable without `unsafe`. LANG-002. |
-| Arrays | **Partial** | `T[N]` value semantics + bounds checks are solid. `T[]` aliases the caller's frame with no escape analysis. No slices/views. |
-| Slices / views | **Missing-Important** | `T[]` is a parameter-only escape hatch, not a type. A real `Slice<T>` (ptr+len, non-owning) becomes natural once generics are monomorphized. |
+| Arrays | **Partial** | `T[N]` value semantics + bounds checks are solid. `T[]` aliases the caller's frame with no escape analysis. No slices/views. (2026-10-05: closed by #260 + range slicing — see FUTURE.md F-3.) |
+| Slices / views | **Missing-Important** | `T[]` is a parameter-only escape hatch, not a type. A real `Slice<T>` (ptr+len, non-owning) becomes natural once generics are monomorphized. (2026-10-05: closed by #260 + range slicing — see FUTURE.md F-3.) |
 | Strings | **Partial** | Correct as a C-compatible byte pointer; every producing operation leaks. §14, §15. |
 | Collections | **Weak** | `List`/`Stack`/`Queue`/`Map`/`Set` exist but: leak unconditionally, break for >8-byte `T` (ICE), and compare `string` keys by pointer identity. All three are generics consequences. |
 | Iterators / ranges | **Partial** | `for x in arr` over real arrays; `for i in a..b step e`. No iteration over any collection. **Blocked** on closures or an iterator protocol; deliberately not in this milestone. |
@@ -5338,7 +5338,7 @@ what the *Unblocked by* column is for.
 | D20 | **Cross-compilation needs a runtime built for the target.** OPT-001 adds `--target`/`-mcpu`; RT-001 adds a linked `libturfrt`. Those two combine into a real problem. | RT-001's risk section flags it. The expected resolution is to **declare cross-compilation unsupported** until the runtime is cross-buildable, rather than shipping a `--target` that silently links a host runtime. Decide explicitly in RT-001. |
 | D21 | **Postfix `++`/`--` and operator overloading.** Prefix desugars to `x = x + 1` and so inherits `operator+` for free; postfix does not desugar. | LANG-001 must **decide and record** whether postfix picks up an overload. Listed here so the decision is not silently skipped. |
 | D22 | **`int → double` above 2^53 loses precision silently** and stays implicitly allowed (§10.5). | An acknowledged soft spot, argued in §10.5. A future opt-in lint is the intended answer — never an error. |
-| D23 | **`T[]` parameters alias the caller's stack frame with no escape analysis.** | Superseded in practice by D3 (`Slice<T>`). Until then it is documented behaviour, not a bug. |
+| D23 | **`T[]` parameters alias the caller's stack frame with no escape analysis.** | Superseded in practice by D3 (`Slice<T>`). Until then it is documented behaviour, not a bug. (2026-10-05: closed by #260 + range slicing — see FUTURE.md F-3.) |
 
 ### 27.4 Rejected, not deferred
 
