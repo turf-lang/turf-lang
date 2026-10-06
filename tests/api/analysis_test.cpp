@@ -386,6 +386,33 @@ static void testCancellation() {
   CHECK_EQ(render(turf::analyze({{"c.tr", UndefinedVariable}})), Uncancelled);
 }
 
+// A toolchain whose standard library cannot be found (an editor extension
+// installed without its lib/std, a TURF_HOME pointing nowhere) must produce a
+// diagnostic that says so, not end the process: the facade's promise is that
+// a problem with the analysed source never does, and an editor's language
+// server that dies on the first keystroke gives the user nothing to act on.
+// The prelude imports are what fail first (they load lib/std/core).
+static void testMissingStdlibIsADiagnostic(const ScratchDir &Dir) {
+  CurrentTest = "missing stdlib";
+  const std::string EmptyRoot = Dir.Root.string() + "/no-stdlib";
+  fs::create_directories(EmptyRoot);
+
+  turf::AnalysisOptions NoStdlib;
+  NoStdlib.InstallRoot = EmptyRoot;
+  auto R = turf::analyze({{"nostd.tr", "import io;\n\nfn main(): int {\n    return 0;\n}\n"}},
+                         NoStdlib);
+  CHECK(!R.succeeded());
+  CHECK(hasDiagnostic(R, "Could not find module"));
+  CHECK_EQ(R.preludeImportCount(), 0u);
+
+  // The failure left nothing behind: the next analysis, with the real
+  // standard library, is exactly what it would have been.
+  const std::string Clean = render(turf::analyze({{"clean.tr", CleanProgram}}));
+  CHECK_EQ(Clean, std::string());
+  auto Again = turf::analyze({{"clean.tr", CleanProgram}});
+  CHECK(Again.preludeImportCount() > 0);
+}
+
 // Buffers after the first replace the disk text of the file an import
 // loads; diagnostics and definitions inside it name that file.
 static void testImportedModuleOverlay(const ScratchDir &Dir) {
@@ -1578,6 +1605,7 @@ int main() {
   testHostStateIsRestored();
   testCancellation();
   testImportedModuleOverlay(Dir);
+  testMissingStdlibIsADiagnostic(Dir);
   testWarningDedupeIsPerFile(Dir);
   testLintIsOptIn();
   testEmptyInput();

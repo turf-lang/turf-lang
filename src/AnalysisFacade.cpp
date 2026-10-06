@@ -347,7 +347,17 @@ std::vector<std::unique_ptr<ExprAST>> parseEntryFile(std::size_t &PreludeCount) 
   }
   g_recoverActive = false;
 
-  std::vector<std::unique_ptr<ExprAST>> Program = ParsePreludeImports(CurLoc);
+  // The prelude imports load lib/std/core, so they fail when the standard
+  // library cannot be found at all. That has to be a diagnostic (E027 "Could
+  // not find module 'int'", at the top of the file) and not the end of the
+  // process: an editor whose server cannot find its stdlib is far more useful
+  // showing that message than disappearing. The program is then parsed
+  // without the prelude, and each of its own imports reports the same thing.
+  std::vector<std::unique_ptr<ExprAST>> Program;
+  g_recoverActive = true;
+  if (setjmp(g_recoverJmp) == 0)
+    Program = ParsePreludeImports(CurLoc);
+  g_recoverActive = false;
   PreludeCount = Program.size();
   for (auto &AST : Leading)
     Program.push_back(std::move(AST));
