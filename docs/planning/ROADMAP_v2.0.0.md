@@ -16,8 +16,8 @@
 > `docs/development/changes/FDN-002.md` (landed 2026-09-27; its design was
 > stated directly in this roadmap rather than needing a DEC- decision,
 > frozen as `FREEZE.md` §6.13). **`SMP-001` (compiler query facade) is
-> in progress** — the facade and the Sandbox port landed 2026-09-28; the
-> `turf-lsp` port (stage 3, its own repository) remains — see
+> done** — the facade and the Sandbox port landed 2026-09-28, the `turf-lsp`
+> port (its own repository) and the VS Code extension 2026-10-06 — see
 > `docs/development/changes/SMP-001.md`. **`FDN-004` and `FDN-006` are
 > done** (both landed 2026-09-28). **`FDN-005` (GC hardening) is done
 > pending one CI confirmation** — see `docs/development/changes/FDN-005.md`
@@ -129,7 +129,7 @@ PHASE 1  Foundation                   SMP-002  one generic type walker      DONE
    │                                  FDN-002  reference & array escape rules  DONE (FDN-002.md, 2026-09-27)
    │                                  FDN-004  string indexing: bounds + `char` (D17)  DONE (FDN-004.md, 2026-09-28)
    │                                  FDN-006  runtime contract (stack overflow, OOM, ABI stamp)  DONE (FDN-006.md, 2026-09-28)
-   │                                  SMP-001  compiler query facade (parallel, any time in 1–2)  stages 1–2 DONE, turf-lsp port pending (SMP-001.md, 2026-09-28)
+   │                                  SMP-001  compiler query facade (parallel, any time in 1–2)  DONE incl. the turf-lsp port (SMP-001.md, 2026-10-06)
    │                                  FDN-005  GC hardening  stages 1–4 DONE (FDN-005.md, 2026-09-28/29); runs on to RC as a CI gate
    ▼
 PHASE 2  Language & ecosystem         LEC-002  visibility — `pub`/`public` (D13)  DONE (LEC-002.md, 2026-09-29)
@@ -668,6 +668,14 @@ and diffs results against isolated runs. **Non-goals** No removal of
 globals, no concurrency, no incremental re-analysis (all FUTURE F-S*).
 **Completion** `Sandbox` and `turf-lsp` use only the facade; the API header is
 documented as the 2.0 tool API (semver-stable for 2.x).
+
+**Status 2026-10-06: DONE.** All three stages landed; `turf-lsp` touches none of
+the pipeline's globals. Stage 3 grew with the owner's requirement that the VS
+Code extension work after one install: the facade gained cancellation, a package
+graph, `importableModules()`, `resolveModuleFile()` and `keywords()`, and the
+server finds its standard library from where it is installed. Verified on Linux;
+the Windows/macOS and static-link proofs are CI-only. Record:
+`docs/development/changes/SMP-001.md` (*Stage 3 — outcome*).
 
 ---
 
@@ -1270,7 +1278,19 @@ formatter unit test are in CI. The repository was reformatted in one
 whitespace-only commit (142 files; the suite passes on it) and CI runs
 `turf fmt --check lib/std tests`, so the "`turf fmt --check` clean on the repo"
 gate holds.
-*Stage 3 (`turf-lsp` on the SMP-001 facade, the VS Code extension) not started.*
+*Stage 3, the language server and the VS Code extension: done and verified on
+Linux (2026-10-06); Windows, macOS and the self-contained release link are
+written but unproven until CI runs.* `turf-lsp` (its own repository) runs on the
+SMP-001 facade and ships inside a per-platform extension together with the
+standard library and the `turf graph` helper, so installing the extension is all
+a user does: diagnostics, scope-aware completion with auto-import, signature
+help, inlay hints, hover, definitions, references, rename, formatting, folding,
+workspace symbols, quick fixes, project-aware imports. Run, Build and Test use the
+toolchain when installed and say so when not. 14 integration checks drive the
+packaged `.vsix` in a real VS Code. The roadmap's non-goals stay (debugger, doc
+generator, REPL); beyond what the roadmap listed, the server also does
+completion, rename, references and format-on-save, which the roadmap had left to
+FUTURE F-11.
 Record: `docs/development/changes/REL-002.md`.
 
 ---
