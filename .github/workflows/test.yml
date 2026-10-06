@@ -174,6 +174,12 @@ jobs:
       # finds nothing to do and no result is refused as a formatter bug.
       - name: turf fmt smoke test (modes, verification, idempotence on the repo's files)
         run: CI=1 ./scripts/fmt_smoke.sh
+      # REL-002 stage 2: the formatting gate. Every .tr file under lib/std and
+      # tests must already be formatted; a file that does not lex (the fail_*
+      # tests that are invalid on purpose) is skipped and listed, not a failure.
+      # To fix a failure: ./build/turf fmt --write lib/std tests
+      - name: turf fmt --check (lib/std and tests are formatted)
+        run: ./build/turf fmt --check lib/std tests
       # LEC-001 stage 6: git dependencies -- the fetch cache, turf.lock pinning
       # commit and tree hash, --offline/--locked, fetch/update/add --git. Every
       # upstream is a local bare repository the script builds, so there is no
