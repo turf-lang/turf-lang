@@ -627,6 +627,39 @@ const ResolverSymbolTable &AnalysisResult::symbols() const {
   return I_->R->symbolTable();
 }
 
+// ── keywords() ──────────────────────────────────────────────────────────────
+
+const std::vector<Keyword> &keywords() {
+  // The lexer's table is filled once, statically, and never changes.
+  static const std::vector<Keyword> All = [] {
+    std::vector<Keyword> Out;
+    for (const auto &[Name, Tok] : ::Keywords) {
+      KeywordKind Kind = KeywordKind::Keyword;
+      switch (Tok) {
+      case TOK_TYPE_INT:
+      case TOK_TYPE_INT32:
+      case TOK_TYPE_DOUBLE:
+      case TOK_TYPE_BOOL:
+      case TOK_TYPE_CHAR:
+      case TOK_TYPE_STRING:
+      case TOK_TYPE_VOID:
+      case TOK_PTR:
+        Kind = KeywordKind::Type;
+        break;
+      case TOK_BOOL_LITERAL:
+      case TOK_NULL:
+        Kind = KeywordKind::Literal;
+        break;
+      default:
+        break;
+      }
+      Out.push_back({Name, Kind});
+    }
+    return Out; // std::map iteration is already sorted by name
+  }();
+  return All;
+}
+
 // ── runIsolated() ───────────────────────────────────────────────────────────
 
 namespace detail {

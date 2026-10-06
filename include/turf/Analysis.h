@@ -101,6 +101,23 @@ struct AnalysisOptions {
   std::function<bool()> ShouldCancel;
 };
 
+// A reserved word. Read from the lexer's own table, so a tool offering
+// keywords (completion, a highlighter) cannot fall behind the language.
+enum class KeywordKind {
+  Keyword, // control flow and declarations: fn, if, compare, recover, pub, ...
+  Type,    // a built-in type's name: int, string, ptr, ...
+  Literal, // true, false, null
+};
+
+struct Keyword {
+  std::string Name;
+  KeywordKind Kind = KeywordKind::Keyword;
+};
+
+// Every reserved word, sorted by name, including the synonyms (`mut` and
+// `mutable`, `pub` and `public`).
+const std::vector<Keyword> &keywords();
+
 // A 1-based position in a named file -- the compiler's own convention
 // everywhere (not the 0-based lines of the Language Server Protocol).
 // Col counts bytes.

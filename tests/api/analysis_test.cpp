@@ -311,6 +311,32 @@ static void testHostStateIsRestored() {
   g_braceDepth = 0;
 }
 
+// turf::keywords() is the lexer's own table: every word the language reserves,
+// with its kind, sorted -- so a tool's completion list cannot go stale.
+static void testKeywords() {
+  CurrentTest = "keywords";
+  const auto &K = turf::keywords();
+  auto Kind = [&](const std::string &Name) {
+    for (const auto &W : K)
+      if (W.Name == Name)
+        return static_cast<int>(W.Kind);
+    return -1;
+  };
+  const int Kw = static_cast<int>(turf::KeywordKind::Keyword);
+  const int Ty = static_cast<int>(turf::KeywordKind::Type);
+  const int Lit = static_cast<int>(turf::KeywordKind::Literal);
+  for (const char *W : {"fn", "if", "elseif", "compare", "matches", "recover", "try", "defer",
+                        "pub", "public", "mut", "mutable", "self", "import", "operator"})
+    CHECK_EQ(Kind(W), Kw);
+  for (const char *W : {"int", "int32", "double", "bool", "char", "string", "void", "ptr"})
+    CHECK_EQ(Kind(W), Ty);
+  for (const char *W : {"true", "false", "null"})
+    CHECK_EQ(Kind(W), Lit);
+  CHECK_EQ(Kind("notakeyword"), -1);
+  for (std::size_t I = 1; I < K.size(); ++I)
+    CHECK(K[I - 1].Name < K[I].Name);
+}
+
 // AnalysisOptions::ShouldCancel (an editor abandons an analysis of text a
 // later keystroke has already replaced). Cancelling at either boundary gives
 // an empty result, not a partial one, and leaves the host's state as it
@@ -1696,6 +1722,7 @@ int main() {
   testUnsafeCapabilityDoesNotOutliveThePragma();
   testHostStateIsRestored();
   testCancellation();
+  testKeywords();
   testImportedModuleOverlay(Dir);
   testMissingStdlibIsADiagnostic(Dir);
   testPackageGraph(Dir);
