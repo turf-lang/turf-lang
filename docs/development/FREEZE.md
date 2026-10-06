@@ -935,12 +935,12 @@ error.**
   call and this line; `scripts/cli_smoke.sh` checks `lib/libturfrt.a` defines
   it. Driver interface **1.2** is this decision; `turf` still needs only 1.1.
 
-### 6.22 Tests — `turf test` and `turfc --test` — F-TEST-1 FROZEN, F-TEST-2/3 PROPOSED (REL-002 stage 1, 2026-10-06)
+### 6.22 Tests — `turf test` and `turfc --test` — FROZEN (REL-002 stage 1, 2026-10-06)
 
 F-TEST-1 is the owner's rule. F-TEST-2 and F-TEST-3 are the design that landed
-with stage 1 and are **proposed**: they follow the roadmap's REL-002 text and
-`scripts/test_runner.sh`'s existing behaviour, and await the owner's
-confirmation before they are relied on as frozen.
+with stage 1 (following the roadmap's REL-002 text and
+`scripts/test_runner.sh`'s existing behaviour); the owner **confirmed both,
+2026-10-06**.
 
 `turf test` runs a project's tests; `turfc --test` is the one implementation
 under it, and `scripts/test_runner.sh` (the compiler's own suite) is a wrapper
@@ -1099,8 +1099,8 @@ Overhaul (F-TYPE-1), whose third column points at their section above.
 | **F-CLI-3** | Help is `turf help`/`turf <cmd> --help`/`turfc help`; `turfc --help` is deliberately an unknown option pointing at `turfc help`. | §6.21 above (owner decision 2026-10-06) |
 | **F-CLI-4** | `turfc --version` lines 1-2 are the driver-interface contract; later `<key> <value>` lines (`llvm`, `runtime`, `root`) are informational and extendable. | §6.21 above |
 | **F-TEST-1** | A project without a `tests/` directory (or with no tests in it) is an error for `turf test` and `turfc --test`, never a silent pass. | §6.22 above (owner rule, 2026-10-06) |
-| **F-TEST-2** (proposed) | A test is judged by its file name (plain / `fail_*` / `RUNTIME_ABORT_EXPECTED`, `*_module.tr` skipped) and its `EXPECT-*` markers, by one implementation (`turfc --test`) that `turf test` and `scripts/test_runner.sh` both drive; each test runs in its own directory. | §6.22 above |
-| **F-TEST-3** (proposed) | In a project a test file is the root package's code: it may be the entry point and imports the package's modules, direct dependencies, stdlib and `tests/` helpers (package-graph `"tests"` key, driver interface 1.3). | §6.22 above |
+| **F-TEST-2** | A test is judged by its file name (plain / `fail_*` / `RUNTIME_ABORT_EXPECTED`, `*_module.tr` skipped) and its `EXPECT-*` markers, by one implementation (`turfc --test`) that `turf test` and `scripts/test_runner.sh` both drive; each test runs in its own directory. | §6.22 above |
+| **F-TEST-3** | In a project a test file is the root package's code: it may be the entry point and imports the package's modules, direct dependencies, stdlib and `tests/` helpers (package-graph `"tests"` key, driver interface 1.3). | §6.22 above |
 | **F-FMT-1** | `turfc --format` verifies every result before writing or reporting it: only whitespace changed, the lexer reads the same tokens, formatting again changes nothing; a result that fails is not written. | §6.23 above |
 | **F-FMT-2** | A source with a lexical error is not formatted: reported with the lexer's reason, left unchanged, exit 1 if the user named it, the rest of the batch still done. A file only found under a directory is skipped (listed, counted, not a failure). | §6.23 above (owner decision 2026-10-06) |
 | **F-FMT-3** | `turfc --format` modes: stdout (one file), `--write` (only files that differ), `--check` (names what would change, exit 1 if any); `--write` with `--check` is a usage error. | §6.23 above |
