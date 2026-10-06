@@ -44,6 +44,7 @@
 #define TURF_ANALYSIS_H
 
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -80,6 +81,14 @@ struct AnalysisOptions {
   // the CLI does: $TURF_HOME, else the directory above the running
   // executable.
   std::string InstallRoot;
+  // Asked at the two boundaries the pipeline already has: after parsing and
+  // after resolving. When it returns true the analysis stops there and the
+  // result reports cancelled(). Meant for an editor, where the text a
+  // keystroke produced is already out of date by the time a slow analysis of
+  // it finishes. Empty (the default) is never called. It runs on the thread
+  // that called analyze(), inside the analysis, so it must be quick and must
+  // not call analyze() itself.
+  std::function<bool()> ShouldCancel;
 };
 
 // A 1-based position in a named file -- the compiler's own convention
@@ -136,6 +145,11 @@ public:
 
   // True when no diagnostic is an error.
   bool succeeded() const;
+
+  // True when AnalysisOptions::ShouldCancel stopped the analysis. Such a
+  // result is empty, not partial: no diagnostics (so succeeded() is true --
+  // check this first), every query answers nothing, program() is empty.
+  bool cancelled() const;
 
   // The type of the expression whose identifier covers (Line, Col): a
   // variable use or declaration, a field access, or a call's result.

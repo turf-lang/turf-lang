@@ -13,6 +13,7 @@
  */
 
 #include "turf/Analysis.h"
+#include "turf/FrontEndIsolation.h"
 
 #include "AST.h"
 #include "Lexer.h"
@@ -402,6 +403,10 @@ std::vector<std::unique_ptr<ExprAST>> parseEntryFile(std::size_t &PreludeCount) 
 struct AnalysisResult::Impl {
   std::string EntryPath;
   std::string EntryKey;
+  // AnalysisOptions::ShouldCancel stopped the analysis. The Impl is then a
+  // fresh, empty one (see analyze()), so every query already answers
+  // nothing; this only lets a caller ask.
+  bool Cancelled = false;
 
   std::vector<std::unique_ptr<ExprAST>> Program;
   std::size_t PreludeCount = 0;
@@ -480,6 +485,8 @@ bool AnalysisResult::succeeded() const {
       return false;
   return true;
 }
+
+bool AnalysisResult::cancelled() const { return I_->Cancelled; }
 
 const TurfType *AnalysisResult::typeOf(const ExprAST *Node) const {
   if (!I_->TC || !Node)
@@ -594,6 +601,18 @@ const ResolverSymbolTable &AnalysisResult::symbols() const {
   return I_->R->symbolTable();
 }
 
+// ── runIsolated() ───────────────────────────────────────────────────────────
+
+namespace detail {
+
+void runIsolated(const std::function<void()> &Work) {
+  std::lock_guard<std::recursive_mutex> Lock(AnalysisMutex);
+  GlobalStateScope Scope;
+  Work();
+}
+
+} // namespace detail
+
 // ── analyze() ───────────────────────────────────────────────────────────────
 
 AnalysisResult analyze(const std::vector<SourceBuffer> &Buffers,
@@ -642,6 +661,21 @@ AnalysisResult analyze(const std::vector<SourceBuffer> &Buffers,
   CurTok = 0;
 
   I->Program = parseEntryFile(I->PreludeCount);
+
+  // A cancelled analysis hands back an empty result rather than a partial
+  // one: a half-resolved program answers some queries wrongly and others not
+  // at all, and a caller that asked to cancel wants neither. The old state is
+  // destroyed here, while this analysis's globals are still the ones in
+  // force, and what is returned is built the way an empty analysis is.
+  auto Abandon = [&]() {
+    I.reset();
+    auto Empty = std::make_unique<AnalysisResult::Impl>();
+    Empty->R = std::make_unique<Resolver>();
+    Empty->Cancelled = true;
+    return AnalysisResult(std::move(Empty));
+  };
+  if (Options.ShouldCancel && Options.ShouldCancel())
+    return Abandon();
 
   // The position index, filled as the Resolver reaches each node. Only
   // nodes in files the caller supplied are indexed: those are the files a
@@ -704,6 +738,9 @@ AnalysisResult analyze(const std::vector<SourceBuffer> &Buffers,
     HoistingClean = false;
   g_recoverActive = false;
   I->R->setScopeSnapshotCallback(nullptr);
+
+  if (Options.ShouldCancel && Options.ShouldCancel())
+    return Abandon();
 
   if (HoistingClean) {
     I->TC = std::make_unique<TypeChecker>(I->R->symbolTable());

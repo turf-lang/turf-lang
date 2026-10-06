@@ -7,9 +7,10 @@
 #include "Formatter.h"
 #include "Lexer.h"
 #include "Parser.h"
+#include "turf/FrontEndIsolation.h"
 
 #include <algorithm>
-#include <cstring>
+#include <csetjmp>
 #include <sstream>
 #include <unordered_map>
 #include <vector>
@@ -32,28 +33,12 @@ bool isCloseBracket(int Tok) { return Tok == '}' || Tok == ')' || Tok == ']'; }
 // OUTER depth instead of the new block's inner one.
 struct LineDepth { int Display; int Raw; };
 
-// The lexer state beyond the stream and the current token, which running the
-// lexer over a buffer leaves wherever that buffer ended: its one character of
-// look-behind, the position counters and the bracket depths. A caller in the
-// middle of its own lexing (the language server's worker, the facade's host
-// compile) must find them as it left them -- tests/api's "host state restored"
-// checks exactly this for the facade, and formatting is called from the same
-// places. Restored on every path out, including the one a lexical error takes.
-struct LexerGlobalsSaver {
-  int LastChar = GetLastChar();
-  int Line = CurLine, Col = CurCol;
-  int PrevEndLine = PrevTokEndLine, PrevEndCol = PrevTokEndCol;
-  int BraceDepth = g_braceDepth, CurlyDepth = g_curlyDepth;
-  ~LexerGlobalsSaver() {
-    SetLastChar(LastChar);
-    CurLine = Line;
-    CurCol = Col;
-    PrevTokEndLine = PrevEndLine;
-    PrevTokEndCol = PrevEndCol;
-    g_braceDepth = BraceDepth;
-    g_curlyDepth = CurlyDepth;
-  }
-};
+// Everything below that drives the lexer does it inside
+// turf::detail::runIsolated(): a caller in the middle of its own lexing (the
+// language server's worker, the facade's host compile) must find the front
+// end's globals as it left them, and the one place that knows which globals
+// those are is the query facade's GlobalStateScope (INV-API-1). A hand-written
+// save/restore here would go stale the day the lexer gains a global.
 
 // Runs the real lexer/token-advance machinery (getNextToken(), the exact
 // same entry point the actual parser uses) over `Source` and records, for
@@ -74,41 +59,27 @@ struct LexerGlobalsSaver {
 // purposes regardless of whether THIS line happens to be a closer.
 std::unordered_map<int, LineDepth> computeLineIndents(std::string_view Source) {
   std::unordered_map<int, LineDepth> LineIndent;
-  LexerGlobalsSaver GlobalsSaver;
 
-  // Save every piece of lexer/parser global state this touches, mirroring
-  // turf-lsp's CompilerService::analyze() -- format() must be safe to call
-  // from the SAME worker thread the LSP already serializes all other
-  // compiler access onto, without corrupting whatever analysis is
-  // (sequentially) running around it.
-  std::istream *SavedSourceFile = SourceFile;
-  std::string SavedSourceFilename = SourceFilename;
-  SourceLocation SavedCurLoc = CurLoc;
-  int SavedCurTok = CurTok;
-
-  std::istringstream Buffer{std::string(Source)};
-  SetSourceBuffer(Buffer);
-  SourceFilename = "<format>";
-  resetLexer();
-  CurTok = 0;
-  getNextToken();
-
-  int LastSeenLine = -1;
-  while (CurTok != TOK_EOF) {
-    int Line = CurLoc.Line;
-    if (Line != LastSeenLine) {
-      int Raw = g_braceDepth;
-      int Display = (isCloseBracket(CurTok) && Raw > 0) ? Raw - 1 : Raw;
-      LineIndent[Line] = {Display, Raw};
-      LastSeenLine = Line;
-    }
+  turf::detail::runIsolated([&] {
+    std::istringstream Buffer{std::string(Source)};
+    SetSourceBuffer(Buffer);
+    SourceFilename = "<format>";
+    resetLexer();
+    CurTok = 0;
     getNextToken();
-  }
 
-  SourceFile = SavedSourceFile;
-  SourceFilename = SavedSourceFilename;
-  CurLoc = SavedCurLoc;
-  CurTok = SavedCurTok;
+    int LastSeenLine = -1;
+    while (CurTok != TOK_EOF) {
+      int Line = CurLoc.Line;
+      if (Line != LastSeenLine) {
+        int Raw = g_braceDepth;
+        int Display = (isCloseBracket(CurTok) && Raw > 0) ? Raw - 1 : Raw;
+        LineIndent[Line] = {Display, Raw};
+        LastSeenLine = Line;
+      }
+      getNextToken();
+    }
+  });
 
   return LineIndent;
 }
@@ -261,8 +232,8 @@ namespace {
 // The token stream the REAL lexer reads from `Source`, one key per token:
 // the kind, plus the value for the kinds that carry one. Never a position, so
 // two texts that differ only in whitespace give equal streams -- and one that
-// differs in a name, a literal or an operator does not. Saves and restores the
-// same lexer globals computeLineIndents() does, for the same reason.
+// differs in a name, a literal or an operator does not. Isolated from the
+// caller's globals the same way computeLineIndents() is.
 //
 // Returns false, with the first error in `Why`, if the source does not lex
 // cleanly. That is the one place the formatter learns a file is not valid
@@ -270,9 +241,9 @@ namespace {
 // outside a recovery guard prints and calls exit(1), which for `turf fmt` over
 // a project would end the run at the first broken file and for the language
 // server would kill the server. So the lexing runs inside the same setjmp
-// guard the parser uses, against a private diagnostic list -- nothing the
-// lexer reports reaches the user as a compiler error, since the formatter's
-// own message says what it could not do.
+// guard the parser uses, against the isolated scope's own diagnostic list --
+// nothing the lexer reports reaches the user as a compiler error, since the
+// formatter's own message says what it could not do.
 struct LexJob {
   std::vector<std::string> *Keys;
 };
@@ -299,48 +270,34 @@ void lexJob(LexJob &Job) {
 }
 
 bool tokenKeys(std::string_view Source, std::vector<std::string> &Keys, std::string &Why) {
-  LexerGlobalsSaver GlobalsSaver;
-  std::istream *SavedSourceFile = SourceFile;
-  std::string SavedSourceFilename = SourceFilename;
-  SourceLocation SavedCurLoc = CurLoc;
-  int SavedCurTok = CurTok;
-  const bool SavedRecoverActive = g_recoverActive;
-  jmp_buf SavedRecoverJmp;
-  std::memcpy(SavedRecoverJmp, g_recoverJmp, sizeof(jmp_buf));
-  DiagnosticEngine::State SavedDiagnostics = DiagnosticEngine::saveState();
-  DiagnosticEngine::restoreState({});
-
-  std::istringstream Buffer{std::string(Source)};
-  SetSourceBuffer(Buffer);
-  SourceFilename = "<format>";
-  resetLexer();
-
-  LexJob Job{&Keys};
-  g_recoverActive = true;
-  if (setjmp(g_recoverJmp) == 0)
-    lexJob(Job);
-
-  // A lexical error that raised stopped the loop above; one that was only
-  // recorded (an unterminated string) let it finish. Either way the file is
-  // not valid, and formatting it would indent by brackets the lexer could not
-  // honestly count.
   bool Clean = true;
-  for (const auto &D : DiagnosticEngine::getDiagnostics()) {
-    if (D.IsWarning)
-      continue;
-    Clean = false;
-    std::string Msg = D.Msg.substr(0, D.Msg.find('\n'));
-    Why = "line " + std::to_string(D.Loc.Line) + ": " + Msg;
-    break;
-  }
 
-  g_recoverActive = SavedRecoverActive;
-  std::memcpy(g_recoverJmp, SavedRecoverJmp, sizeof(jmp_buf));
-  DiagnosticEngine::restoreState(std::move(SavedDiagnostics));
-  SourceFile = SavedSourceFile;
-  SourceFilename = SavedSourceFilename;
-  CurLoc = SavedCurLoc;
-  CurTok = SavedCurTok;
+  turf::detail::runIsolated([&] {
+    std::istringstream Buffer{std::string(Source)};
+    SetSourceBuffer(Buffer);
+    SourceFilename = "<format>";
+    resetLexer();
+
+    LexJob Job{&Keys};
+    g_recoverActive = true;
+    if (setjmp(g_recoverJmp) == 0)
+      lexJob(Job);
+    g_recoverActive = false;
+
+    // A lexical error that raised stopped the loop above; one that was only
+    // recorded (an unterminated string) let it finish. Either way the file is
+    // not valid, and formatting it would indent by brackets the lexer could
+    // not honestly count.
+    for (const auto &D : DiagnosticEngine::getDiagnostics()) {
+      if (D.IsWarning)
+        continue;
+      Clean = false;
+      std::string Msg = D.Msg.substr(0, D.Msg.find('\n'));
+      Why = "line " + std::to_string(D.Loc.Line) + ": " + Msg;
+      break;
+    }
+  });
+
   return Clean;
 }
 

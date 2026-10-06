@@ -311,6 +311,81 @@ static void testHostStateIsRestored() {
   g_braceDepth = 0;
 }
 
+// AnalysisOptions::ShouldCancel (an editor abandons an analysis of text a
+// later keystroke has already replaced). Cancelling at either boundary gives
+// an empty result, not a partial one, and leaves the host's state as it
+// found it; a callback that never fires changes nothing.
+static void testCancellation() {
+  CurrentTest = "cancellation";
+  const std::string Uncancelled = render(turf::analyze({{"c.tr", UndefinedVariable}}));
+  CHECK(!Uncancelled.empty());
+
+  // A callback that never fires: same diagnostics, same answers, and it was
+  // asked exactly at the two boundaries.
+  int Asked = 0;
+  turf::AnalysisOptions Never;
+  Never.ShouldCancel = [&] { ++Asked; return false; };
+  auto Full = turf::analyze({{"c.tr", UndefinedVariable}}, Never);
+  CHECK(!Full.cancelled());
+  CHECK_EQ(render(Full), Uncancelled);
+  CHECK_EQ(Asked, 2);
+  auto CleanFull = turf::analyze({{"clean.tr", CleanProgram}}, Never);
+  CHECK(!CleanFull.cancelled());
+  CHECK(!CleanFull.program().empty());
+  CHECK(CleanFull.typeAt("clean.tr", 2, 12) != nullptr);
+
+  // Cancelled after each boundary in turn (the first asks, the second asks).
+  for (int FireAt : {1, 2}) {
+    InitializeCompilerGlobals();
+    SymbolTable *HostTable = GlobalSymbolTable.get();
+    SourceFilename = "host.tr";
+    MainSourceFilename = "host.tr";
+    SourceLines = {"host line 1"};
+    CurTok = TOK_IDENTIFIER;
+    IdentifierStr = "hostIdent";
+    CurLine = 41;
+    g_braceDepth = 2;
+    DiagnosticEngine::clearDiagnostics();
+    DiagnosticEngine::setCollectAllDiagnostics(false);
+    DiagnosticEngine::add({3, 4, "host.tr"}, "host diagnostic");
+
+    int Calls = 0;
+    turf::AnalysisOptions Opts;
+    Opts.ShouldCancel = [&] { return ++Calls == FireAt; };
+    auto R = turf::analyze({{"clean.tr", CleanProgram}}, Opts);
+
+    CHECK(R.cancelled());
+    CHECK_EQ(Calls, FireAt);
+    // Empty, not partial.
+    CHECK(R.diagnostics().empty());
+    CHECK(R.program().empty());
+    CHECK_EQ(R.preludeImportCount(), 0u);
+    CHECK(R.typeAt("clean.tr", 2, 12) == nullptr);
+    CHECK(!R.definitionOf("clean.tr", 2, 12).has_value());
+    CHECK(R.symbolsInScope("clean.tr", 2, 12).empty());
+    // And the host is exactly where it left off.
+    CHECK(GlobalSymbolTable.get() == HostTable);
+    CHECK_EQ(SourceFilename, std::string("host.tr"));
+    CHECK_EQ(SourceLines.size(), 1u);
+    CHECK_EQ(CurTok, static_cast<int>(TOK_IDENTIFIER));
+    CHECK_EQ(IdentifierStr, std::string("hostIdent"));
+    CHECK_EQ(CurLine, 41);
+    CHECK_EQ(g_braceDepth, 2);
+    CHECK(!DiagnosticEngine::getCollectAllDiagnostics());
+    CHECK_EQ(DiagnosticEngine::getDiagnosticCount(), 1u);
+    CHECK(DiagnosticEngine::hasErrorAt(3));
+  }
+  DiagnosticEngine::clearDiagnostics();
+  AllSourceLines.clear();
+  SourceLines.clear();
+  SourceFilename.clear();
+  MainSourceFilename.clear();
+  g_braceDepth = 0;
+
+  // The next analysis is not affected by a cancelled one.
+  CHECK_EQ(render(turf::analyze({{"c.tr", UndefinedVariable}})), Uncancelled);
+}
+
 // Buffers after the first replace the disk text of the file an import
 // loads; diagnostics and definitions inside it name that file.
 static void testImportedModuleOverlay(const ScratchDir &Dir) {
@@ -1501,6 +1576,7 @@ int main() {
   testWarningSurvivesReanalysis();
   testUnsafeCapabilityDoesNotOutliveThePragma();
   testHostStateIsRestored();
+  testCancellation();
   testImportedModuleOverlay(Dir);
   testWarningDedupeIsPerFile(Dir);
   testLintIsOptIn();
