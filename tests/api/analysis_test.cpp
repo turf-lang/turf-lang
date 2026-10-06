@@ -445,6 +445,32 @@ static void testPackageGraph(const ScratchDir &Dir) {
   Opts.PackageGraphFile = GraphPath;
   auto R = turf::analyze({{MainPath, MainText}}, Opts);
   CHECK_EQ(render(R), std::string());
+  // `import <cursor>` completion lists what an import here could name: the
+  // package's own modules wherever they are under src/, its dependency, the
+  // standard library -- and not the file itself. Without the graph `util` (in
+  // a subdirectory) and `dep` (another package) are not on offer.
+  auto Has = [](const std::vector<std::string> &L, const char *N) {
+    return std::find(L.begin(), L.end(), N) != L.end();
+  };
+  CHECK(Has(R.importableModules(), "util"));
+  CHECK(Has(R.importableModules(), "dep"));
+  CHECK(Has(R.importableModules(), "io"));
+  CHECK(!Has(R.importableModules(), "main"));
+  auto Alone = turf::analyze({{MainPath, MainText}});
+  CHECK(!Has(Alone.importableModules(), "util"));
+  CHECK(!Has(Alone.importableModules(), "dep"));
+  CHECK(Has(Alone.importableModules(), "io"));
+
+  // The file behind a module name, outside any analysis, under the same
+  // options: the project's modules and dependency resolve, single-file mode
+  // does not know them.
+  const std::string UtilFile = turf::resolveModuleFile("util", MainPath, Opts);
+  CHECK(UtilFile.size() > 7 && UtilFile.compare(UtilFile.size() - 7, 7, "util.tr") == 0);
+  const std::string DepFile = turf::resolveModuleFile("dep", MainPath, Opts);
+  CHECK(DepFile.size() > 6 && DepFile.compare(DepFile.size() - 6, 6, "dep.tr") == 0);
+  CHECK(turf::resolveModuleFile("util", MainPath).empty());
+  CHECK(!turf::resolveModuleFile("io", MainPath).empty());
+
   auto Def = R.definitionOf(MainPath, 5, 20); // inside `double_it`
   CHECK(Def.has_value());
   if (Def)

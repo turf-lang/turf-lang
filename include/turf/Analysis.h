@@ -156,6 +156,16 @@ public:
   // True when no diagnostic is an error.
   bool succeeded() const;
 
+  // Every name a bare `import <name>;` could legally name from the analysed
+  // file, sorted and without duplicates -- for `import <cursor>` completion.
+  // Worked out inside the analysis, so it follows the context the analysis
+  // ran in: with a package graph it is the standard library, the package's
+  // own modules and its direct dependencies (and nothing ambient); without
+  // one, the standard library, installed packages and the files next to the
+  // analysed one. It lists names, not whether the module is valid. Empty for
+  // a cancelled result.
+  const std::vector<std::string> &importableModules() const;
+
   // True when AnalysisOptions::ShouldCancel stopped the analysis. Such a
   // result is empty, not partial: no diagnostics (so succeeded() is true --
   // check this first), every query answers nothing, program() is empty.
@@ -216,6 +226,18 @@ private:
 // piece of global compiler state is left exactly as analyze() found it.
 AnalysisResult analyze(const std::vector<SourceBuffer> &Buffers,
                        const AnalysisOptions &Options = {});
+
+// The file `import <ModuleName>;` loads when written in ImportingFile,
+// resolved with the same installation and package graph (Options.InstallRoot,
+// Options.PackageGraphFile) that analyze() applies to that file; "" when the
+// name resolves to no single file (not found, or ambiguous). For a tool that
+// opens the file behind a module name (go to definition, hover
+// documentation) outside any analysis: resolving it with the compiler's own
+// single-file rules would miss a project's modules and dependencies. Leaves
+// every piece of global compiler state as it found it.
+std::string resolveModuleFile(const std::string &ModuleName,
+                              const std::string &ImportingFile,
+                              const AnalysisOptions &Options = {});
 
 } // namespace turf
 

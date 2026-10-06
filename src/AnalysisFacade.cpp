@@ -439,6 +439,9 @@ struct AnalysisResult::Impl {
   // Module name -> the file an import of it loaded, resolved while the
   // analysis's install root was in force (see definitionOf()).
   std::unordered_map<std::string, std::string> ModuleFiles;
+  // ListAvailableModules(entry), taken while the install root and package
+  // graph of this analysis were in force (see importableModules()).
+  std::vector<std::string> ImportableModules;
 
   // One entry per located node the Resolver reached in a buffer file.
   struct IndexedNode {
@@ -506,6 +509,10 @@ bool AnalysisResult::succeeded() const {
 }
 
 bool AnalysisResult::cancelled() const { return I_->Cancelled; }
+
+const std::vector<std::string> &AnalysisResult::importableModules() const {
+  return I_->ImportableModules;
+}
 
 const TurfType *AnalysisResult::typeOf(const ExprAST *Node) const {
   if (!I_->TC || !Node)
@@ -632,6 +639,35 @@ void runIsolated(const std::function<void()> &Work) {
 
 } // namespace detail
 
+// What decides how an `import` resolves, from AnalysisOptions: where the
+// installation (lib/std) is and which package graph is in force. Shared by
+// analyze() and resolveModuleFile() so the two can never disagree about where
+// a module is. Called inside a GlobalStateScope, which puts it all back.
+// Returns why the graph could not be used (the caller reports it), if so.
+static std::optional<std::string>
+applyResolutionOptions(const AnalysisOptions &Options, const std::string &EntryPath) {
+  // TurfInstallRoot() falls back to the running executable's location; an
+  // embedder that is not the `turf` binary never set this.
+  if (CompilerExecutablePath.empty())
+    CompilerExecutablePath =
+        llvm::sys::fs::getMainExecutable(nullptr, (void *)&fileKey);
+  if (!Options.InstallRoot.empty())
+    SetInstallRootOverride(Options.InstallRoot);
+
+  // A package build's graph, as `turfc --check --module --package-graph`
+  // loads it: the entry file may be any file of the root package (an editor
+  // analyses whichever file is open, not only src/main.tr).
+  if (Options.PackageGraphFile.empty())
+    return std::nullopt;
+  std::string GraphError;
+  if (auto Graph = LoadPackageGraph(Options.PackageGraphFile, EntryPath,
+                                    /*EntryIsModule=*/true, GraphError)) {
+    g_PackageGraph = std::move(*Graph);
+    return std::nullopt;
+  }
+  return GraphError;
+}
+
 // ── analyze() ───────────────────────────────────────────────────────────────
 
 AnalysisResult analyze(const std::vector<SourceBuffer> &Buffers,
@@ -651,34 +687,17 @@ AnalysisResult analyze(const std::vector<SourceBuffer> &Buffers,
   g_AIEnabled = false; // a query, not a --smart compile
   g_AllowUnsafeModules = Options.AllowUnsafeModules;
   DiagnosticEngine::setCollectAllDiagnostics(true);
-  // TurfInstallRoot() falls back to the running executable's location; an
-  // embedder that is not the `turf` binary never set this.
-  if (CompilerExecutablePath.empty())
-    CompilerExecutablePath =
-        llvm::sys::fs::getMainExecutable(nullptr, (void *)&fileKey);
-  if (!Options.InstallRoot.empty())
-    SetInstallRootOverride(Options.InstallRoot);
-
-  // A package build's graph, as `turfc --check --module --package-graph`
-  // loads it: the entry file may be any file of the root package (an editor
-  // analyses whichever file is open, not only src/main.tr). A graph that
-  // cannot be used -- unreadable, malformed, or one the file is not part of --
-  // is reported as the first diagnostic of the analysis and the file is
-  // analysed on its own, so a broken manifest costs the project's imports,
-  // not every feature.
+  // The install root and the package graph (see applyResolutionOptions()). A
+  // graph that cannot be used is the first diagnostic of the analysis, and the
+  // file is analysed on its own, so a broken manifest costs the project's
+  // imports, not every feature.
   std::optional<Diagnostic> GraphProblem;
-  if (!Options.PackageGraphFile.empty()) {
-    std::string GraphError;
-    if (auto Graph = LoadPackageGraph(Options.PackageGraphFile, Entry.Path,
-                                      /*EntryIsModule=*/true, GraphError)) {
-      g_PackageGraph = std::move(*Graph);
-    } else {
-      Diagnostic D;
-      D.Level = Severity::Error;
-      D.Message = GraphError;
-      D.Where = Location{Entry.Path, 1, 1};
-      GraphProblem = std::move(D);
-    }
+  if (auto GraphError = applyResolutionOptions(Options, Entry.Path)) {
+    Diagnostic D;
+    D.Level = Severity::Error;
+    D.Message = std::move(*GraphError);
+    D.Where = Location{Entry.Path, 1, 1};
+    GraphProblem = std::move(D);
   }
 
   std::unordered_map<std::string, bool> BufferFiles; // fileKey -> true
@@ -800,7 +819,9 @@ AnalysisResult analyze(const std::vector<SourceBuffer> &Buffers,
     }
   }
 
-  // Resolved now, while this analysis's install root is the one in force.
+  // Resolved now, while this analysis's install root and package graph are
+  // the ones in force.
+  I->ImportableModules = ListAvailableModules(Entry.Path);
   for (const auto &Name : I->R->symbolTable().getAllModuleNames()) {
     std::string File = ResolveModuleFile(Name, Entry.Path);
     if (!File.empty())
@@ -818,6 +839,17 @@ AnalysisResult analyze(const std::vector<SourceBuffer> &Buffers,
 
   I->Types = std::move(GlobalSymbolTable);
   return AnalysisResult(std::move(I));
+}
+
+std::string resolveModuleFile(const std::string &ModuleName,
+                              const std::string &ImportingFile,
+                              const AnalysisOptions &Options) {
+  std::lock_guard<std::recursive_mutex> Lock(AnalysisMutex);
+  GlobalStateScope Scope;
+  // A graph that cannot be loaded is analyze()'s to report; here it just
+  // means the single-file answer.
+  applyResolutionOptions(Options, ImportingFile);
+  return ResolveModuleFile(ModuleName, ImportingFile);
 }
 
 } // namespace turf

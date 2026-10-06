@@ -1137,6 +1137,42 @@ std::vector<std::string> ListAvailableModules(const std::string &ImportingFile) 
   std::map<std::string, bool> Names; // value unused, std::set would do but
                                      // keeps this symmetric with IndexModuleDir's map style
 
+  // A package build (the importing file is a file of a package in the active
+  // graph) lists what CollectPackageModuleCandidates() would find, and
+  // nothing else: the standard library, the package's own modules anywhere
+  // under its src/ (and the helpers beside a test file), and its direct
+  // dependencies. lib/usr, the importing file's directory and the cwd are not
+  // searched there, so they must not be offered either.
+  if (g_PackageGraph.Active && !ImportingFile.empty() &&
+      !ImportsResolveInStdlibOnly(ImportingFile)) {
+    if (const PackageInfo *P = g_PackageGraph.packageOf(ImportingFile)) {
+      auto AddSources = [&](const std::string &Dir) {
+        for (const auto &Entry : IndexPackageSources(Dir)) {
+          for (const auto &Path : Entry.second) {
+            // The importing file cannot import itself.
+            if (!llvm::sys::fs::equivalent(Path, ImportingFile)) {
+              Names.emplace(Entry.first, true);
+              break;
+            }
+          }
+        }
+      };
+      for (const auto &Entry : IndexModuleDir(Root, "std"))
+        Names.emplace(Entry.first, true);
+      AddSources(P->SrcRoot);
+      if (P->Name == g_PackageGraph.Root && g_PackageGraph.inTests(ImportingFile))
+        AddSources(P->TestsRoot);
+      for (const auto &Dep : P->Deps)
+        Names.emplace(Dep, true);
+
+      std::vector<std::string> Result;
+      Result.reserve(Names.size());
+      for (const auto &Entry : Names)
+        Result.push_back(Entry.first);
+      return Result;
+    }
+  }
+
   for (const auto &Entry : IndexModuleDir(Root, "std"))
     Names.emplace(Entry.first, true);
   for (const auto &Entry : IndexModuleDir(Root, "usr"))
