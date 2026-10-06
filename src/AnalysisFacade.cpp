@@ -18,6 +18,7 @@
 #include "AST.h"
 #include "Lexer.h"
 #include "Lint.h"
+#include "PackageGraph.h"
 #include "Parser.h"
 #include "Resolver.h"
 #include "SymbolTable.h"
@@ -98,6 +99,12 @@ public:
     SavedDiagnostics_ = DiagnosticEngine::saveState();
     DiagnosticEngine::restoreState({});
 
+    // The package graph decides what `import` can reach (LEC-001); an
+    // analysis starts with none, as a plain single-file compile does, and
+    // gets one only from AnalysisOptions::PackageGraphFile.
+    SavedPackageGraph_ = std::move(g_PackageGraph);
+    g_PackageGraph = PackageGraph();
+
     // InitializeCompilerGlobals() replaces GlobalSymbolTable outright; the
     // host's must survive it.
     SavedGlobalSymbolTable_ = std::move(GlobalSymbolTable);
@@ -114,6 +121,7 @@ public:
   }
 
   ~GlobalStateScope() {
+    g_PackageGraph = std::move(SavedPackageGraph_);
     PopResolverCompileState();
     PopParserCompileState();
 
@@ -171,6 +179,7 @@ private:
   bool SavedRecoverActive_, SavedAIEnabled_, SavedAllowUnsafeModules_;
   std::string SavedCompilerExecutablePath_;
   DiagnosticEngine::State SavedDiagnostics_;
+  PackageGraph SavedPackageGraph_;
   std::unique_ptr<SymbolTable> SavedGlobalSymbolTable_;
 };
 
@@ -650,6 +659,28 @@ AnalysisResult analyze(const std::vector<SourceBuffer> &Buffers,
   if (!Options.InstallRoot.empty())
     SetInstallRootOverride(Options.InstallRoot);
 
+  // A package build's graph, as `turfc --check --module --package-graph`
+  // loads it: the entry file may be any file of the root package (an editor
+  // analyses whichever file is open, not only src/main.tr). A graph that
+  // cannot be used -- unreadable, malformed, or one the file is not part of --
+  // is reported as the first diagnostic of the analysis and the file is
+  // analysed on its own, so a broken manifest costs the project's imports,
+  // not every feature.
+  std::optional<Diagnostic> GraphProblem;
+  if (!Options.PackageGraphFile.empty()) {
+    std::string GraphError;
+    if (auto Graph = LoadPackageGraph(Options.PackageGraphFile, Entry.Path,
+                                      /*EntryIsModule=*/true, GraphError)) {
+      g_PackageGraph = std::move(*Graph);
+    } else {
+      Diagnostic D;
+      D.Level = Severity::Error;
+      D.Message = GraphError;
+      D.Where = Location{Entry.Path, 1, 1};
+      GraphProblem = std::move(D);
+    }
+  }
+
   std::unordered_map<std::string, bool> BufferFiles; // fileKey -> true
   for (const auto &B : Buffers) {
     SetSourceOverlay(B.Path, B.Text);
@@ -776,6 +807,8 @@ AnalysisResult analyze(const std::vector<SourceBuffer> &Buffers,
       I->ModuleFiles.emplace(Name, std::move(File));
   }
 
+  if (GraphProblem)
+    I->Diagnostics.push_back(std::move(*GraphProblem));
   for (const auto &D : DiagnosticEngine::getDiagnostics()) {
     if (D.IsWarning && !Options.IncludeStdlibWarnings &&
         IsLibStdWarningLocation(D.Filename))

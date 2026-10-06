@@ -46,6 +46,7 @@ layout and rules). Run these anywhere inside one; `turf` walks up to the nearest
 | `turf run [--offline] [--locked] [flags] [-- args]` | with no `.tr` argument: `turf build`, then run `build/<name>` |
 | `turf check [--offline] [--locked] [flags]` | with no `.tr` argument: the same compiler runs as `build`, each with `--check`, and no executable |
 | `turf clean` | remove `build/` |
+| `turf graph [--offline] [--locked]` | print the project's package graph (the JSON `turf build` hands the compiler) on stdout, with tests/ if present; writes nothing and needs no compiler. For editors and other tools |
 | `turf add <name> --path <dir>` | add a path dependency (one line of `turf.toml`; comments and layout are kept) |
 | `turf add <name> --git <url> (--tag T \| --branch B \| --rev R)` | fetch and check a git dependency, then add its one line |
 | `turf remove <name>` | delete that dependency's line |

@@ -413,6 +413,72 @@ static void testMissingStdlibIsADiagnostic(const ScratchDir &Dir) {
   CHECK(Again.preludeImportCount() > 0);
 }
 
+// AnalysisOptions::PackageGraphFile: a project's imports resolve as `turf
+// build` resolves them. src/lib/util.tr is not next to src/main.tr, so only
+// the graph (`import util;` means src/**/util.tr) finds it; `dep` is a
+// dependency package named in the graph. A module created after an analysis
+// already ran must be found by the next one (the per-package source index is
+// dropped between analyses), and a graph that cannot be used becomes the
+// first diagnostic instead of ending anything.
+static void testPackageGraph(const ScratchDir &Dir) {
+  CurrentTest = "package graph";
+  const fs::path Proj = Dir.Root / "pkg" / "proj";
+  const fs::path Dep = Dir.Root / "pkg" / "dep";
+  fs::create_directories(Proj / "src" / "lib");
+  fs::create_directories(Dep / "src");
+  const std::string MainText = "import util;\nimport dep;\n\n"
+                               "fn main(): int {\n    return util::double_it(dep::answer());\n}\n";
+  const std::string MainPath = (Proj / "src" / "main.tr").string();
+  std::ofstream(MainPath) << MainText;
+  std::ofstream(Proj / "src" / "lib" / "util.tr")
+      << "pub fn double_it(x: int): int {\n    return x * 2;\n}\n";
+  std::ofstream(Dep / "src" / "dep.tr") << "pub fn answer(): int {\n    return 21;\n}\n";
+  const std::string GraphPath = (Dir.Root / "pkg" / "package-graph.json").string();
+  std::ofstream(GraphPath) << "{\"format\": 1, \"root\": \"proj\", \"packages\": {"
+                              "\"proj\": {\"src\": \"" << (Proj / "src").string() << "\", \"deps\": [\"dep\"]}, "
+                              "\"dep\": {\"src\": \"" << (Dep / "src").string() << "\"}}}";
+
+  // Without the graph the nested module and the dependency are invisible.
+  CHECK(!turf::analyze({{MainPath, MainText}}).succeeded());
+
+  turf::AnalysisOptions Opts;
+  Opts.PackageGraphFile = GraphPath;
+  auto R = turf::analyze({{MainPath, MainText}}, Opts);
+  CHECK_EQ(render(R), std::string());
+  auto Def = R.definitionOf(MainPath, 5, 20); // inside `double_it`
+  CHECK(Def.has_value());
+  if (Def)
+    CHECK(Def->Path.find("util.tr") != std::string::npos);
+
+  // A module another file of the package gains later is importable by the
+  // next analysis. The first analysis above already indexed src/.
+  std::ofstream(Proj / "src" / "late.tr") << "pub fn late(): int {\n    return 7;\n}\n";
+  auto Late = turf::analyze({{MainPath, "import late;\n\nfn main(): int {\n    return late::late();\n}\n"}}, Opts);
+  CHECK_EQ(render(Late), std::string());
+
+  // Any file of the package can be the entry, not only src/main.tr.
+  const std::string UtilPath = (Proj / "src" / "lib" / "util.tr").string();
+  auto AsModule = turf::analyze({{UtilPath, "pub fn double_it(x: int): int {\n    return x * 2;\n}\n"}}, Opts);
+  CHECK_EQ(render(AsModule), std::string());
+
+  // A graph the file is not part of, or that is not there: the first
+  // diagnostic says so, and the file is still analysed on its own.
+  const std::string Outside = Dir.write("outside.tr", CleanProgram);
+  auto NotIn = turf::analyze({{Outside, CleanProgram}}, Opts);
+  CHECK(!NotIn.diagnostics().empty());
+  CHECK(NotIn.diagnostics().front().Message.find("package graph") != std::string::npos);
+  CHECK(NotIn.diagnostics().front().Code.empty());
+  turf::AnalysisOptions Missing;
+  Missing.PackageGraphFile = (Dir.Root / "pkg" / "nope.json").string();
+  auto NoGraph = turf::analyze({{MainPath, MainText}}, Missing);
+  CHECK(!NoGraph.diagnostics().empty());
+  CHECK(NoGraph.diagnostics().front().Message.find("cannot read it") != std::string::npos);
+
+  // And none of it outlives the call: with no graph again, a plain analysis
+  // behaves as before.
+  CHECK_EQ(render(turf::analyze({{"clean.tr", CleanProgram}})), std::string());
+}
+
 // Buffers after the first replace the disk text of the file an import
 // loads; diagnostics and definitions inside it name that file.
 static void testImportedModuleOverlay(const ScratchDir &Dir) {
@@ -1606,6 +1672,7 @@ int main() {
   testCancellation();
   testImportedModuleOverlay(Dir);
   testMissingStdlibIsADiagnostic(Dir);
+  testPackageGraph(Dir);
   testWarningDedupeIsPerFile(Dir);
   testLintIsOptIn();
   testEmptyInput();

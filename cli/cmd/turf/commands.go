@@ -49,6 +49,7 @@ func init() {
 		{"build", groupProject, "build the project", helpBuild, cmdBuild},
 		{"test", groupProject, "run the project's tests", helpTest, cmdTest},
 		{"clean", groupProject, "remove build output", helpClean, cmdClean},
+		{"graph", groupProject, "print the package graph as JSON", helpGraph, cmdGraph},
 		{"fetch", groupProject, "download dependencies", helpFetch, cmdFetch},
 		{"add", groupProject, "add a dependency", helpAdd, cmdAdd},
 		{"remove", groupProject, "remove a dependency", helpRemove, cmdRemove},

@@ -173,7 +173,10 @@ struct ParserCompileState {
 };
 static std::vector<ParserCompileState> SavedParserCompileStates;
 
+static void ClearPackageSourceIndex(); // defined beside the cache it empties
+
 void PushParserCompileState() {
+  ClearPackageSourceIndex();
   SavedParserCompileStates.push_back(
       {std::move(ParsedTopLevelASTs), std::move(ImportedFiles),
        std::move(ImportStack), std::move(UnsafeTopLevelDecls),
@@ -189,6 +192,7 @@ void PushParserCompileState() {
 }
 
 void PopParserCompileState() {
+  ClearPackageSourceIndex();
   auto &Saved = SavedParserCompileStates.back();
   ParsedTopLevelASTs = std::move(Saved.ParsedTopLevelASTs);
   ImportedFiles = std::move(Saved.ImportedFiles);
@@ -854,10 +858,20 @@ bool IsStdlibModuleName(const std::string &Name) {
 // stem: within a package, `import util;` means `src/**/util.tr`, and two such
 // files are an ambiguity (E090), not "the first one the directory walk
 // happened to return". Cached per root for the compiler invocation, like
-// IndexModuleDir(), since every import in the package consults it.
+// IndexModuleDir(), since every import in the package consults it -- and
+// dropped at the start and end of every isolated compile
+// (Push/PopParserCompileState), because a language server's process outlives
+// the files it analyses: a module created after the first analysis must be
+// importable by the next one. (IndexModuleDir() is not dropped: lib/std does
+// not change under a running tool.)
+static std::map<std::string, std::map<std::string, std::vector<std::string>>>
+    PackageSourceIndexCache;
+
+static void ClearPackageSourceIndex() { PackageSourceIndexCache.clear(); }
+
 static const std::map<std::string, std::vector<std::string>> &
 IndexPackageSources(const std::string &SrcRoot) {
-  static std::map<std::string, std::map<std::string, std::vector<std::string>>> Cache;
+  auto &Cache = PackageSourceIndexCache;
   auto Cached = Cache.find(SrcRoot);
   if (Cached != Cache.end())
     return Cached->second;

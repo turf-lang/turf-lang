@@ -81,6 +81,16 @@ struct AnalysisOptions {
   // the CLI does: $TURF_HOME, else the directory above the running
   // executable.
   std::string InstallRoot;
+  // A package's graph, the JSON `turf graph` prints (format 1, see
+  // include/PackageGraph.h): which packages exist, where each one's src/ is
+  // and who depends on whom. With it `import` resolves exactly as it does in
+  // `turf build` -- the package's own modules anywhere under src/, its direct
+  // dependencies, the standard library -- instead of only the standard
+  // library and the files next to the analysed one. Empty means a single
+  // file. The entry file may be any file of the root package's src/ or
+  // tests/. A graph that cannot be loaded, or that the file is not part of,
+  // becomes the first diagnostic (no code) and the file is analysed alone.
+  std::string PackageGraphFile;
   // Asked at the two boundaries the pipeline already has: after parsing and
   // after resolving. When it returns true the analysis stops there and the
   // result reports cancelled(). Meant for an editor, where the text a
