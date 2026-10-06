@@ -736,7 +736,7 @@ is 1.
 | `turf run [--offline] [--locked] [flags] [-- args]` | `turf build`, then run `build/<name>`, passing the arguments after `--`, in the directory you typed the command in. The exit status is the program's. A library says `turf: 'lb' is a library; there is nothing to run` (exit 1). |
 | `turf check [--offline] [--locked] [flags]` | Every diagnostic, no executable. |
 | `turf clean` | Delete `build/`. Nothing to delete is not an error. |
-| `turf graph [--offline] [--locked]` | Print the package graph (the JSON `turf build` writes to `build/package-graph.json`, format in `include/PackageGraph.h`) on stdout, including the root's `tests/` when the project has one. Writes nothing (no `turf.lock`, no `build/`) and needs no compiler. This is what the language server asks for, so that `import` in the editor resolves as in `turf build`. |
+| `turf graph [--project <dir>] [--offline] [--locked]` | Print the package graph (the JSON `turf build` writes to `build/package-graph.json`, format in `include/PackageGraph.h`) on stdout, including the root's `tests/` when the project has one. Writes nothing (no `turf.lock`, no `build/`) and needs no compiler. This is what the language server asks for, so that `import` in the editor resolves as in `turf build`. |
 | `turf fetch [--offline] [--locked]` | Do everything `build` does up to `turf.lock`, without compiling. Prints one line per git dependency: `jsonx de7262e335ed (tag=v1.0.0)`. Needs no compiler. |
 | `turf update [name…]` | Move git dependencies to what their refs point at now (section 5). |
 | `turf add <name> --path <dir>` / `--git <url> (--tag\|--branch\|--rev) <ref>` | Add a dependency (section 3). |

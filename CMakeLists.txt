@@ -26,6 +26,26 @@ find_package(LLVM REQUIRED CONFIG)
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 
+# By default the monolithic libLLVM shared library is linked, which keeps dev
+# builds small and fast but leaves every binary needing LLVM installed on the
+# machine it runs on. TURF_STATIC_LLVM links LLVM's static component libraries
+# instead, so a binary built that way (the language server the VS Code extension
+# bundles, and the releases of REL-008 stage 2) carries what it needs. The
+# component list is what the compiler's sources include (IR, Support, Analysis,
+# Passes, Target, TargetParser, MC, Transforms) plus the native backend; the
+# libraries' own dependencies are added by llvm_map_components_to_libnames().
+# Needs a LLVM installation that ships the static libraries (Debian/Ubuntu's
+# llvm-dev and Homebrew's llvm do; some distributions, Arch among them, ship only
+# the shared library).
+option(TURF_STATIC_LLVM "Link LLVM statically (component libraries) instead of the shared libLLVM" OFF)
+if(TURF_STATIC_LLVM)
+  llvm_map_components_to_libnames(TURF_LLVM_LINK
+    core support irreader analysis passes target targetparser mc transformutils instcombine scalaropts native)
+  message(STATUS "Linking LLVM statically: ${TURF_LLVM_LINK}")
+else()
+  set(TURF_LLVM_LINK LLVM)
+endif()
+
 # ─── --smart's local-model runtime: optional ─────────────────────────────────
 # llama.cpp is only what `--smart` runs its model on, yet it used to be a hard
 # build dependency: a source build that only wanted to print hello world had to
@@ -309,7 +329,7 @@ target_compile_options(turfcore PRIVATE
 
 target_link_libraries(turfcore PUBLIC
   ${LLAMA_IMPORTED_TARGETS}
-  LLVM
+  ${TURF_LLVM_LINK}
   ${OPENMP_LINK_FLAGS}
   ${PLATFORM_LIBS}
   pthread
