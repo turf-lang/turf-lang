@@ -68,7 +68,13 @@ func loadRootManifest() (*manifest.Manifest, int) {
 	if err != nil {
 		return nil, failf("cannot determine the current directory: %v", err)
 	}
-	dir, err := project.FindRoot(cwd)
+	return loadManifestFrom(cwd)
+}
+
+// loadManifestFrom is loadRootManifest for a project found upward from start
+// instead of from the current directory.
+func loadManifestFrom(start string) (*manifest.Manifest, int) {
+	dir, err := project.FindRoot(start)
 	if errors.Is(err, project.ErrNoProject) {
 		return nil, usagef("%s", noProjectMsg)
 	} else if err != nil {

@@ -88,6 +88,34 @@ func TestGraphPrintsTheProjectsPackages(t *testing.T) {
 	}
 }
 
+// --project lets a tool that cannot choose its child's working directory ask
+// about any directory inside a project; the project is found upward from it.
+func TestGraphProjectFlag(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "app", "turf.toml"),
+		"[package]\nname = \"app\"\nversion = \"0.1.0\"\nturf = \"2.0\"\n")
+	writeFile(t, filepath.Join(dir, "app", "src", "util", "deep.tr"), "pub fn f(): int { return 1; }\n")
+	writeFile(t, filepath.Join(dir, "app", "src", "main.tr"), "fn main(): int { return 0; }\n")
+	elsewhere := t.TempDir()
+	t.Chdir(elsewhere)
+
+	for _, arg := range [][]string{
+		{"--project", filepath.Join(dir, "app", "src", "util")},
+		{"--project=" + filepath.Join(dir, "app")},
+	} {
+		code, out := graphOf(t, arg...)
+		if code != 0 || !strings.Contains(out, `"root": "app"`) {
+			t.Errorf("%v: exit %d, output:\n%s", arg, code, out)
+		}
+	}
+	if code, _ := graphOf(t, "--project", elsewhere); code != exitUsage {
+		t.Errorf("a directory outside any project: exit %d, want %d", code, exitUsage)
+	}
+	if code, _ := graphOf(t, "--project"); code != exitUsage {
+		t.Errorf("--project with no directory: exit %d, want %d", code, exitUsage)
+	}
+}
+
 func TestGraphOutsideAProjectAndWithStrayArguments(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)

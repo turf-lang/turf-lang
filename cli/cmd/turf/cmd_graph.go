@@ -3,7 +3,12 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
+
+	"github.com/turf-lang/turf-lang/cli/internal/manifest"
 )
+
+const graphUsage = "usage: turf graph [--project <dir>] [--offline] [--locked]"
 
 // cmdGraph prints the project's package graph (the JSON format of
 // include/PackageGraph.h) on stdout and writes nothing.
@@ -21,10 +26,32 @@ import (
 // never reach the network passes --offline.
 func cmdGraph(args []string) int {
 	nf, rest := splitNetFlags(args)
-	if len(rest) > 0 {
-		return usagef("graph: unexpected argument '%s' (usage: turf graph [--offline] [--locked])", rest[0])
+	start := ""
+	for i := 0; i < len(rest); i++ {
+		switch a := rest[i]; {
+		case a == "--project":
+			if i+1 >= len(rest) {
+				return usagef("graph: --project needs a directory (%s)", graphUsage)
+			}
+			i++
+			start = rest[i]
+		case strings.HasPrefix(a, "--project="):
+			start = strings.TrimPrefix(a, "--project=")
+		default:
+			return usagef("graph: unexpected argument '%s' (%s)", a, graphUsage)
+		}
 	}
-	m, code := loadRootManifest()
+	var m *manifest.Manifest
+	var code int
+	if start == "" {
+		m, code = loadRootManifest()
+	} else {
+		abs, err := filepath.Abs(start)
+		if err != nil {
+			return failf("graph: %v", err)
+		}
+		m, code = loadManifestFrom(abs)
+	}
 	if code != 0 {
 		return code
 	}
@@ -50,7 +77,10 @@ func cmdGraph(args []string) int {
 const helpGraph = `turf graph - print the project's package graph
 
 Usage:
-  turf graph [--offline] [--locked]        (inside a project)
+  turf graph [--project <dir>] [--offline] [--locked]
+
+Run inside a project, or give --project <dir> (a directory in it: the project is
+found upward from there, as everywhere else).
 
 Prints, as JSON on stdout, the graph 'turf build' hands the compiler: the root
 package, its dependencies (path and git, resolved as for a build) and where
