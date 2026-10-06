@@ -3,7 +3,7 @@
 fn main(): int {
     mut a: string = "hello";
     mut b: int = 5;
-    
+
     mut c: int = a + b;
     return 0;
 }

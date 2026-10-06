@@ -25,9 +25,9 @@ fn main(): int {
     m.put(dup, 99); // must UPDATE the existing "hello" entry, not add a new one
 
     test::assert(m.length() == 2,
-                "Map<string,int>: put() with a content-equal key should update, not insert");
+        "Map<string,int>: put() with a content-equal key should update, not insert");
     test::assert(m.get("hello") == 99,
-                "Map<string,int>: put(dup, 99) should have updated 'hello''s value");
+        "Map<string,int>: put(dup, 99) should have updated 'hello''s value");
     test::assert(m.contains(dup), "Map<string,int> should recognize dup as an existing key");
 
     return 0;

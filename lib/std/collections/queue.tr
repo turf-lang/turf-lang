@@ -24,64 +24,64 @@ unsafe module;
 import sys;
 
 pub struct Queue<T> {
-  data: T*,
-  len: int,
-  cap: int,
-  head: int
+    data: T*,
+    len: int,
+    cap: int,
+    head: int
 }
 
 pub fn<T> Queue.enqueue(item: T): void {
-  if (self.head + self.len == self.cap) {
-    if (self.head > 0) {
-      // Compact: shift live elements to the front of the buffer
-      mut i: int = 0;
-      while i < self.len {
-        self.data[i] = self.data[self.head + i];
-        i = i + 1;
-      }
-      self.head = 0;
-    } else {
-      // Buffer is full and already at front — grow it.
-      // TYPE-002 (S15/D3): was `self.cap * 8` under Type Erasure -- wrong
-      // for a T over 8 bytes, which under-allocated this buffer and
-      // silently overran it a few enqueues later. sizeof(T) is correct per
-      // instantiation (monomorphized, TYPE-002) -- see list.tr's identical
-      // fix, S14b, for the first instance of this.
-      if (self.cap == 0) {
-        self.cap = 8;
-        self.data = gc_alloc(self.cap * sizeof(T)) to T*;
-      } else {
-        self.cap = self.cap * 2;
-        self.data = gc_realloc(self.data, self.cap * sizeof(T)) to T*;
-      }
+    if (self.head + self.len == self.cap) {
+        if (self.head > 0) {
+            // Compact: shift live elements to the front of the buffer
+            mut i: int = 0;
+            while i < self.len {
+                self.data[i] = self.data[self.head + i];
+                i = i + 1;
+            }
+            self.head = 0;
+        } else {
+            // Buffer is full and already at front — grow it.
+            // TYPE-002 (S15/D3): was `self.cap * 8` under Type Erasure -- wrong
+            // for a T over 8 bytes, which under-allocated this buffer and
+            // silently overran it a few enqueues later. sizeof(T) is correct per
+            // instantiation (monomorphized, TYPE-002) -- see list.tr's identical
+            // fix, S14b, for the first instance of this.
+            if (self.cap == 0) {
+                self.cap = 8;
+                self.data = gc_alloc(self.cap * sizeof(T)) to T*;
+            } else {
+                self.cap = self.cap * 2;
+                self.data = gc_realloc(self.data, self.cap * sizeof(T)) to T*;
+            }
+        }
     }
-  }
 
-  self.data[self.head + self.len] = item;
-  self.len = self.len + 1;
+    self.data[self.head + self.len] = item;
+    self.len = self.len + 1;
 }
 
 @caller_location
 pub fn<T> Queue.dequeue(): T {
-  if (self.len == 0) {
-    sys::panic(caller_location + ": Queue.dequeue: dequeue on empty queue");
-  }
+    if (self.len == 0) {
+        sys::panic(caller_location + ": Queue.dequeue: dequeue on empty queue");
+    }
 
-  immutable item: T = self.data[self.head];
-  self.head = self.head + 1;
-  self.len = self.len - 1;
-  return item;
+    immutable item: T = self.data[self.head];
+    self.head = self.head + 1;
+    self.len = self.len - 1;
+    return item;
 }
 
 @caller_location
 pub fn<T> Queue.peek(): T {
-  if (self.len == 0) {
-    sys::panic(caller_location + ": Queue.peek: peek on empty queue");
-  }
+    if (self.len == 0) {
+        sys::panic(caller_location + ": Queue.peek: peek on empty queue");
+    }
 
-  return self.data[self.head];
+    return self.data[self.head];
 }
 
 pub fn<T> Queue.length(): int {
-  return self.len;
+    return self.len;
 }

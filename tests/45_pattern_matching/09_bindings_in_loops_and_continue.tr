@@ -12,14 +12,14 @@ fn main(): int {
         p.y = i * 2;
         compare p {
             matches P { x: 0, .. }:
-                total = total + 100;
+            total = total + 100;
             done
             matches P { y, .. } if y > 4:
-                total = total + y;
-                continue;
+            total = total + y;
+            continue;
             done
             matches P { x, .. }:
-                total = total + x;
+            total = total + x;
             done
         }
     }

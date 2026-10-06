@@ -6,9 +6,9 @@ fn main(): int {
     mut x: int = 1;
     compare x {
         otherwise:
-            x = 0;
+        x = 0;
         matches 1:
-            x = 1;
+        x = 1;
         done
     }
     return 0;

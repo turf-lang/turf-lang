@@ -11,7 +11,7 @@ fn main(): int {
     mut e: IOError = IOError::Denied("x", 1);
     compare e {
         matches IOError::Denied(_, 0):
-            return 1;
+        return 1;
         done
     }
     return 0;

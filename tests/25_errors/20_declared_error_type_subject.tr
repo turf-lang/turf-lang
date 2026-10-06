@@ -14,13 +14,13 @@ error IOError {
 fn weight(e: IOError): int {
     compare e {
         matches IOError::NotFound(_path):
-            return 1;
+        return 1;
         done
         matches IOError::Denied(_, mode):
-            return 10 + mode;
+        return 10 + mode;
         done
         matches IOError::Timeout:
-            return 100;
+        return 100;
         done
     }
 }
@@ -28,10 +28,10 @@ fn weight(e: IOError): int {
 fn weightWithCatchAll(e: IOError): int {
     compare e {
         matches IOError::Denied(_, 3):
-            return 3;
+        return 3;
         done
         otherwise:
-            return 0;
+        return 0;
     }
 }
 

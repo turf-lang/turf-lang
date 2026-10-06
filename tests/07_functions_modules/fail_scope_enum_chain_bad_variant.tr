@@ -11,6 +11,6 @@ import functionless_module_enum_module;
 
 fn main(): int {
     immut s: functionless_module_enum_module::Shade =
-        functionless_module_enum_module::Shade::NoSuchVariant;
+    functionless_module_enum_module::Shade::NoSuchVariant;
     return 0;
 }

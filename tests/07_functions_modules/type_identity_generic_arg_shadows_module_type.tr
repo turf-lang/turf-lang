@@ -18,7 +18,7 @@ fn main(): int {
     n.s = "main";
 
     mut h: type_identity_holder_module::Holder<Node> =
-        type_identity_holder_module::Holder::new(n);
+    type_identity_holder_module::Holder::new(n);
     test::assert(h.get().s == "main", "T stays the main file's Node");
     test::assert(h.ownBig() == 42, "the clone's own field stays the module's Node");
     test::assert(typeof(h.get()) == "Node", "typeof the substituted T");
@@ -28,9 +28,9 @@ fn main(): int {
     // T inferred from a construction's result type -- a type the
     // TypeChecker synthesizes, not one a source annotation spelled.
     test::assert(type_identity_holder_module::localMix(Node::default()) == 5,
-                 "T inferred from Node::default()");
+        "T inferred from Node::default()");
     mut h2: type_identity_holder_module::Holder<Node> =
-        type_identity_holder_module::Holder::new(Node::default());
+    type_identity_holder_module::Holder::new(Node::default());
     test::assert(h2.ownBig() == 42, "Holder::new(Node::default())");
     test::assert(h2.get().s == "", "zero-initialized main Node string");
     return 0;

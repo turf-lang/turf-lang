@@ -6,7 +6,7 @@ fn main(): int {
     mut x: int = 1;
     compare x {
         matches "hello":
-            x = 99;
+        x = 99;
         done
     }
     return 0;

@@ -8,7 +8,7 @@ import test;
 
 fn main(): int {
     test::assert(os::env("TURF_TEST_DEFINITELY_UNSET_VAR_239") == "",
-                 "reading an unset environment variable returns \"\", not a null crash");
+        "reading an unset environment variable returns \"\", not a null crash");
 
     // set_env is `!void` (LEC-007; it returned bool): the recover block runs
     // only on failure, so reaching the next line is the success check.

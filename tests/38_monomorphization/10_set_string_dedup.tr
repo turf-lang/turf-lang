@@ -34,7 +34,7 @@ fn main(): int {
     s.add(dup); // must be a no-op (duplicate)
 
     test::assert(s.length() == 2,
-                "Set<string> dedup: duplicate add should be a no-op");
+        "Set<string> dedup: duplicate add should be a no-op");
     test::assert(s.contains("hello"), "Set<string> should still contain 'hello'");
     test::assert(s.contains(dup), "Set<string> should recognize dup as already present");
 

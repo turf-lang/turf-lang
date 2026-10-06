@@ -22,14 +22,14 @@ import test;
 struct Wrap<T> { v: T }
 fn<T> Wrap.set(x: T): void { self.v = x; }
 fn<T> Wrap.makeFrom(raw: T): T {
-  mut c: Wrap<T> = Wrap::default();
-  c.set(raw);
-  return c.v;
+    mut c: Wrap<T> = Wrap::default();
+    c.set(raw);
+    return c.v;
 }
 
 fn main(): int {
-  mut w: Wrap<int> = Wrap::default();
-  w.set(1); // drains Wrap.set<int> before Wrap.makeFrom<int> is even requested
-  test::assert(w.makeFrom(42) == 42, "late-discovered c.set(raw) call inside makeFrom's clone must still dispatch");
-  return 0;
+    mut w: Wrap<int> = Wrap::default();
+    w.set(1); // drains Wrap.set<int> before Wrap.makeFrom<int> is even requested
+    test::assert(w.makeFrom(42) == 42, "late-discovered c.set(raw) call inside makeFrom's clone must still dispatch");
+    return 0;
 }

@@ -34,52 +34,52 @@ unsafe module;
 import sys;
 
 pub struct List<T> {
-  data: T*,
-  len: int,
-  cap: int
+    data: T*,
+    len: int,
+    cap: int
 }
 
 pub fn<T> List.push(item: T): void {
-  if (self.len == self.cap) {
-    if (self.cap == 0) {
-      self.cap = 8;
-    } else {
-      self.cap = self.cap * 2;
+    if (self.len == self.cap) {
+        if (self.cap == 0) {
+            self.cap = 8;
+        } else {
+            self.cap = self.cap * 2;
+        }
+
+        // TYPE-002 (S14b): was `self.cap * 8` under Type Erasure, where every T
+        // was assumed to fit in one uniform 8-byte slot -- wrong for a T over
+        // 8 bytes (a real by-value struct element, S13b/S14a's own completion
+        // criterion 2), which would under-allocate this buffer and silently
+        // overflow it a few pushes later. sizeof(T) is now correct per
+        // instantiation (monomorphized, S12a's own completion criterion 4) --
+        // this is the ONE stdlib change this whole group permits itself
+        // (ARCHITECTURE_OVERHAUL.md §8's TYPE-002 entry).
+        immutable byteSize: int = self.cap * sizeof(T);
+
+        if (self.data == null) {
+            self.data = gc_alloc(byteSize) to T*;
+        } else {
+            self.data = gc_realloc(self.data, byteSize) to T*;
+        }
     }
 
-    // TYPE-002 (S14b): was `self.cap * 8` under Type Erasure, where every T
-    // was assumed to fit in one uniform 8-byte slot -- wrong for a T over
-    // 8 bytes (a real by-value struct element, S13b/S14a's own completion
-    // criterion 2), which would under-allocate this buffer and silently
-    // overflow it a few pushes later. sizeof(T) is now correct per
-    // instantiation (monomorphized, S12a's own completion criterion 4) --
-    // this is the ONE stdlib change this whole group permits itself
-    // (ARCHITECTURE_OVERHAUL.md §8's TYPE-002 entry).
-    immutable byteSize: int = self.cap * sizeof(T);
-
-    if (self.data == null) {
-      self.data = gc_alloc(byteSize) to T*;
-    } else {
-      self.data = gc_realloc(self.data, byteSize) to T*;
-    }
-  }
-
-  self.data[self.len] = item;
-  self.len = self.len + 1;
+    self.data[self.len] = item;
+    self.len = self.len + 1;
 }
 
 @caller_location
 pub fn<T> List.pop(): T {
-  if (self.len == 0) {
-    sys::panic(caller_location + ": List.pop: pop on empty list");
-  }
+    if (self.len == 0) {
+        sys::panic(caller_location + ": List.pop: pop on empty list");
+    }
 
-  self.len = self.len - 1;
-  return self.data[self.len];
+    self.len = self.len - 1;
+    return self.data[self.len];
 }
 
 pub fn<T> List.length(): int {
-  return self.len;
+    return self.len;
 }
 
 // ─── get / set (OVH-003) ─────────────────────────────────────────────────────
@@ -98,18 +98,18 @@ pub fn<T> List.length(): int {
 // consumer (json.tr, http.tr, ...) actually benefits from.
 @caller_location
 pub fn<T> List.get(i: int): T {
-  if (i < 0 || i >= self.len) {
-    sys::panic(caller_location + ": List.get: index out of bounds");
-  }
-  return self.data[i];
+    if (i < 0 || i >= self.len) {
+        sys::panic(caller_location + ": List.get: index out of bounds");
+    }
+    return self.data[i];
 }
 
 @caller_location
 pub fn<T> List.set(i: int, value: T): void {
-  if (i < 0 || i >= self.len) {
-    sys::panic(caller_location + ": List.set: index out of bounds");
-  }
-  self.data[i] = value;
+    if (i < 0 || i >= self.len) {
+        sys::panic(caller_location + ": List.set: index out of bounds");
+    }
+    self.data[i] = value;
 }
 
 // ─── operator[] / operator[]= (LANG-001) ────────────────────────────────────
@@ -131,14 +131,14 @@ pub fn<T> List.set(i: int, value: T): void {
 // range. `get`/`set` above keep their strict `0 <= i < len` contract: they are
 // named calls, not array-shaped syntax.
 operator<T> [](l: List<T>, i: int): T {
-  mut idx: int = i;
-  if (idx < 0) {
-    idx = idx + l.len;
-  }
-  if (idx < 0 || idx >= l.len) {
-    sys::panic("List[]: index out of bounds");
-  }
-  return l.data[idx];
+    mut idx: int = i;
+    if (idx < 0) {
+        idx = idx + l.len;
+    }
+    if (idx < 0 || idx >= l.len) {
+        sys::panic("List[]: index out of bounds");
+    }
+    return l.data[idx];
 }
 
 // Self taken BY VALUE, not `&List<T>` -- unlike a plain value struct,
@@ -147,14 +147,14 @@ operator<T> [](l: List<T>, i: int): T {
 // value), so copying the List<T> header still shares
 // the same backing buffer, and `l.data[i] = value` writes through it.
 operator<T> []=(l: List<T>, i: int, value: T): void {
-  mut idx: int = i;
-  if (idx < 0) {
-    idx = idx + l.len;
-  }
-  if (idx < 0 || idx >= l.len) {
-    sys::panic("List[]=: index out of bounds");
-  }
-  l.data[idx] = value;
+    mut idx: int = i;
+    if (idx < 0) {
+        idx = idx + l.len;
+    }
+    if (idx < 0 || idx >= l.len) {
+        sys::panic("List[]=: index out of bounds");
+    }
+    l.data[idx] = value;
 }
 
 // ─── sort / search ──────────────────────────────────────────────────────────
@@ -187,17 +187,17 @@ operator<T> []=(l: List<T>, i: int, value: T): void {
 // "small collections, correctness over cleverness" reasoning for its own
 // hash-collision handling).
 pub fn<T> List.sort(cmp: fn(T, T): int): void {
-  mut i: int = 1;
-  while i < self.length() {
-    immutable key: T = self.data[i];
-    mut j: int = i - 1;
-    while j >= 0 && cmp(self.data[j], key) > 0 {
-      self.data[j + 1] = self.data[j];
-      j = j - 1;
+    mut i: int = 1;
+    while i < self.length() {
+        immutable key: T = self.data[i];
+        mut j: int = i - 1;
+        while j >= 0 && cmp(self.data[j], key) > 0 {
+            self.data[j + 1] = self.data[j];
+            j = j - 1;
+        }
+        self.data[j + 1] = key;
+        i = i + 1;
     }
-    self.data[j + 1] = key;
-    i = i + 1;
-  }
 }
 
 // Binary search for `target` using the same `fn(T, T): int` comparator
@@ -207,20 +207,20 @@ pub fn<T> List.sort(cmp: fn(T, T): int): void {
 // pairing in C. Returns the index of a matching element if found, -1
 // otherwise.
 pub fn<T> List.binary_search(target: T, cmp: fn(T, T): int): int {
-  mut lo: int = 0;
-  mut hi: int = self.length() - 1;
-  while lo <= hi {
-    immutable mid: int = lo + (hi - lo) / 2;
-    immutable c: int = cmp(self.data[mid], target);
-    if (c == 0) {
-      return mid;
-    } else if (c < 0) {
-      lo = mid + 1;
-    } else {
-      hi = mid - 1;
+    mut lo: int = 0;
+    mut hi: int = self.length() - 1;
+    while lo <= hi {
+        immutable mid: int = lo + (hi - lo) / 2;
+        immutable c: int = cmp(self.data[mid], target);
+        if (c == 0) {
+            return mid;
+        } else if (c < 0) {
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
     }
-  }
-  return -1;
+    return -1;
 }
 
 // Linear search over an unsorted (or sorted, doesn't matter) List<T> for
@@ -228,12 +228,12 @@ pub fn<T> List.binary_search(target: T, cmp: fn(T, T): int): int {
 // aren't simple equality/ordering (sort()/binary_search() above cover
 // that case).
 pub fn<T> List.find(predicate: fn(T): bool): int {
-  mut i: int = 0;
-  while i < self.length() {
-    if (predicate(self.data[i])) {
-      return i;
+    mut i: int = 0;
+    while i < self.length() {
+        if (predicate(self.data[i])) {
+            return i;
+        }
+        i = i + 1;
     }
-    i = i + 1;
-  }
-  return -1;
+    return -1;
 }

@@ -23,18 +23,18 @@ fn code(p: string, m: int): int {
     immut v: int = open(p, m) recover as err run {
         compare err {
             matches IOError::NotFound(path):
-                test::assert(path == "a.txt", "NotFound carries its path");
-                return 10;
+            test::assert(path == "a.txt", "NotFound carries its path");
+            return 10;
             done
             matches IOError::Denied(path, mode):
-                test::assert(path == "b.txt", "Denied carries its path");
-                return 20 + mode;
+            test::assert(path == "b.txt", "Denied carries its path");
+            return 20 + mode;
             done
             matches IOError::Timeout:
-                return 30;
+            return 30;
             done
             otherwise:
-                return 99;
+            return 99;
         }
     };
     return v;

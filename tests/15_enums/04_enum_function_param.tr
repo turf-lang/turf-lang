@@ -6,16 +6,16 @@ enum Priority { Low, Medium, High, Critical }
 fn is_urgent(p: Priority): bool {
     compare p {
         matches Priority::High:
-            return true;
+        return true;
         done
         matches Priority::Critical:
-            return true;
+        return true;
         done
         matches Priority::Low:
-            return false;
+        return false;
         done
         matches Priority::Medium:
-            return false;
+        return false;
         done
     }
     return false;
@@ -24,16 +24,16 @@ fn is_urgent(p: Priority): bool {
 fn escalate(p: Priority): Priority {
     compare p {
         matches Priority::Low:
-            return Priority::Medium;
+        return Priority::Medium;
         done
         matches Priority::Medium:
-            return Priority::High;
+        return Priority::High;
         done
         matches Priority::High:
-            return Priority::Critical;
+        return Priority::Critical;
         done
         matches Priority::Critical:
-            return Priority::Critical;
+        return Priority::Critical;
         done
     }
     return Priority::Critical;

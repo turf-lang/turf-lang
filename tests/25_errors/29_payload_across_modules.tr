@@ -11,15 +11,15 @@ fn where(n: int): int {
     immut _v: int = payload_module::parse(n) recover as err run {
         compare err {
             matches payload_module::ParseFailure::Syntax(payload_module::Where { file, line }, expected):
-                test::assert(file == "in.tr", "a module struct nested in a payload");
-                test::assert(expected == "a number", "a string field");
-                return line;
+            test::assert(file == "in.tr", "a module struct nested in a payload");
+            test::assert(expected == "a number", "a string field");
+            return line;
             done
             matches payload_module::ParseFailure::Eof:
-                return 0 - 1;
+            return 0 - 1;
             done
             otherwise:
-                return 0 - 2;
+            return 0 - 2;
         }
     };
     return 0;

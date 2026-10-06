@@ -25,7 +25,6 @@ fn sum_grid(rows: int[][3]): int {
     return t;
 }
 
-
 fn main(): int {
     // The issue's own example.
     immut nums: int[] = [10, 20, 30, 40, 50];

@@ -68,7 +68,7 @@ fn test_file_io(): void {
 
 fn test_math(): void {
     section("Math (libm via extern from)");
-    
+
     test::assert(floor(3.99) == 3.0, "");
     // Note: Can't easily use test::assert(sqrt(2.0) == 1.414...) with floats due to precision,
     // but we know pow(2.0, 10.0) is exactly 1024.0.

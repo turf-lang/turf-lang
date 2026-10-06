@@ -31,35 +31,35 @@
 import test;
 
 struct Box<T> {
-  v: T
+    v: T
 }
 
 // Deliberately takes a CONCRETE `int`, not `T` -- the exact shape that used
 // to break. `Box.grow` exists purely to be called from `Box.fill` below,
 // mirroring map.tr/set.tr's real `bucketRehash(newCap: int)` shape.
 fn<T> Box.grow(extra: int): int {
-  return extra * 2;
+    return extra * 2;
 }
 
 fn<T> Box.fill(x: T, extra: int): int {
-  self.v = x;
-  immutable grown: int = self.grow(extra);
-  return grown;
+    self.v = x;
+    immutable grown: int = self.grow(extra);
+    return grown;
 }
 
 fn main(): int {
-  mut b: Box<int> = Box::default();
-  immutable r1: int = b.fill(5, 3);
-  test::assert(r1 == 6, "Box<int>.fill -> grow(3) should be 6");
-  test::assert(b.v == 5, "Box<int>.fill should still set v");
+    mut b: Box<int> = Box::default();
+    immutable r1: int = b.fill(5, 3);
+    test::assert(r1 == 6, "Box<int>.fill -> grow(3) should be 6");
+    test::assert(b.v == 5, "Box<int>.fill should still set v");
 
-  // A second, DIFFERENT instantiation (Box<string>) exercising the same
-  // self-call shape, to prove the fix isn't accidentally specific to one
-  // concrete type argument.
-  mut sb: Box<string> = Box::default();
-  immutable r2: int = sb.fill("hello", 10);
-  test::assert(r2 == 20, "Box<string>.fill -> grow(10) should be 20");
-  test::assert(sb.v == "hello", "Box<string>.fill should still set v");
+    // A second, DIFFERENT instantiation (Box<string>) exercising the same
+    // self-call shape, to prove the fix isn't accidentally specific to one
+    // concrete type argument.
+    mut sb: Box<string> = Box::default();
+    immutable r2: int = sb.fill("hello", 10);
+    test::assert(r2 == 20, "Box<string>.fill -> grow(10) should be 20");
+    test::assert(sb.v == "hello", "Box<string>.fill should still set v");
 
-  return 0;
+    return 0;
 }

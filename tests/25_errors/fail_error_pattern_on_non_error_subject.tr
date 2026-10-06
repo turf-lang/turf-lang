@@ -10,10 +10,10 @@ fn main(): int {
     mut n: int = 3;
     compare n {
         matches IOError::NotFound(path):
-            return 1;
+        return 1;
         done
         otherwise:
-            return 2;
+        return 2;
     }
     return 0;
 }

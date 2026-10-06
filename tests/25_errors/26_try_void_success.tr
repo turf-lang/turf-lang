@@ -22,10 +22,10 @@ fn outcome(a: int, b: int): int {
     writeBoth(a, b) recover as err run {
         compare err {
             matches IoError::Closed(f):
-                return f;
+            return f;
             done
             otherwise:
-                return 99;
+            return 99;
         }
     };
     return 0;

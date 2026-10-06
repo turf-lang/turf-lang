@@ -8,10 +8,10 @@ fn set_env_failure(name: string): string {
     os::set_env(name, "v", 1) recover as err run {
         compare err {
             matches os::OsError::SetEnvFailed(n):
-                return n;
+            return n;
             done
             otherwise:
-                return "wrong variant";
+            return "wrong variant";
         }
     };
     return "";

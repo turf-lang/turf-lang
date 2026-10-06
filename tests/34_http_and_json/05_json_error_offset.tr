@@ -8,19 +8,19 @@ fn offsetOf(text: string): int {
     immut _v: json::JsonValue = json::parse(text) recover as err run {
         compare err {
             matches json::JsonError::UnexpectedChar(at):
-                return at;
+            return at;
             done
             matches json::JsonError::UnexpectedEnd(at):
-                return 1000 + at;
+            return 1000 + at;
             done
             matches json::JsonError::ExpectedComma(at):
-                return 2000 + at;
+            return 2000 + at;
             done
             matches json::JsonError::ExpectedColon(at):
-                return 3000 + at;
+            return 3000 + at;
             done
             otherwise:
-                return 0 - 1;
+            return 0 - 1;
         }
     };
     return 0 - 2;

@@ -10,7 +10,7 @@ fn main(): int {
     mut a: int = 1 << 2 & 15;
     test::assert(a == 4, "1 << 2 & 15 should equal 4 (shift before AND)");
 
-    // & binds tighter than ^ 
+    // & binds tighter than ^
     // 3 ^ 5 & 6 == 3 ^ (5 & 6) == 3 ^ 4 == 7
     mut b: int = 3 ^ 5 & 6;
     test::assert(b == 7, "3 ^ 5 & 6 should equal 7 (AND before XOR)");

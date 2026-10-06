@@ -21,10 +21,10 @@ fn main(): int {
     test::assert(c to int == 1, "pub enum, qualified, including its variants");
 
     test::assert(visibility_lib_module::wrap_generic("x") == 46,
-                 "pub generic calling private generic + private fn");
+        "pub generic calling private generic + private fn");
     test::assert(visibility_lib_module::wrap_generic(1.5) == 46,
-                 "second instantiation of the same pub generic");
+        "second instantiation of the same pub generic");
     test::assert(visibility_lib_module::length_of("abcd") == 4,
-                 "pub fn wrapping a private extern");
+        "pub fn wrapping a private extern");
     return 0;
 }

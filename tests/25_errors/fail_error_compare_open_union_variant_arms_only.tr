@@ -16,10 +16,10 @@ fn code(): int {
     immut v: int = open("x") recover as err run {
         compare err {
             matches IOError::NotFound(path):
-                return 1;
+            return 1;
             done
             matches IOError::Timeout:
-                return 2;
+            return 2;
             done
         }
     };

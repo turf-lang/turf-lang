@@ -6,12 +6,12 @@ fn main(): int {
     mut x: int = 1;
     compare x {
         matches 1:
-            x = 10;
+        x = 10;
         done
         otherwise:
-            x = 0;
+        x = 0;
         otherwise:
-            x = -1;
+        x = -1;
     }
     return 0;
 }

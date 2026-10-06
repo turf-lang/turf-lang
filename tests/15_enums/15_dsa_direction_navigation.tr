@@ -7,13 +7,13 @@ enum Direction { North, East, South, West }
 fn move_x(dir: Direction): int {
     compare dir {
         matches Direction::East:
-            return 1;
+        return 1;
         done
         matches Direction::West:
-            return -1;
+        return -1;
         done
         otherwise:
-            return 0;
+        return 0;
     }
     return 0;
 }
@@ -21,13 +21,13 @@ fn move_x(dir: Direction): int {
 fn move_y(dir: Direction): int {
     compare dir {
         matches Direction::North:
-            return -1;
+        return -1;
         done
         matches Direction::South:
-            return 1;
+        return 1;
         done
         otherwise:
-            return 0;
+        return 0;
     }
     return 0;
 }

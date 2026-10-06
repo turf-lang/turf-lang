@@ -10,13 +10,13 @@ fn describe(px: Pixel): int {
     mut r: int;
     compare px {
         matches Pixel { at: Point { x: 0, y }, color: Color::Red, .. }:
-            r = 100 + y;
+        r = 100 + y;
         done
         matches Pixel { label: "hi", at: _, .. }:
-            r = 200;
+        r = 200;
         done
         matches _:
-            r = -1;
+        r = -1;
         done
     }
     return r;

@@ -15,11 +15,11 @@ fn classify(c: Color): string {
     compare c {
         matches Color::Red:
         matches Color::Yellow:
-            name = "warm";
+        name = "warm";
         done
         matches Color::Green:
         matches Color::Blue:
-            name = "cool";
+        name = "cool";
         done
     }
     return name;
@@ -36,16 +36,16 @@ fn main(): int {
     mut result: int = 0;
     compare x {
         matches 1:
-            result = 10;
+        result = 10;
         done
         matches 2:
-            result = 20;
+        result = 20;
         done
         matches 3:
-            result = 30;
+        result = 30;
         done
         otherwise:
-            result = -1;
+        result = -1;
     }
     test::assert(result == 20, "");
 

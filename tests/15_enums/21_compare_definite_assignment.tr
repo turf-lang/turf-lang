@@ -25,13 +25,13 @@ fn main(): int {
     mut y: int;
     compare c {
         matches Color::Red:
-            y = 1;
+        y = 1;
         done
         matches Color::Green:
-            y = 2;
+        y = 2;
         done
         matches Color::Blue:
-            y = 3;
+        y = 3;
         done
     }
     test::assert(y == 2, "");
@@ -42,13 +42,13 @@ fn main(): int {
     mut z: int;
     compare x {
         matches 1:
-            z = 10;
+        z = 10;
         done
         matches 2:
-            z = 20;
+        z = 20;
         done
         otherwise:
-            z = 99;
+        z = 99;
     }
     test::assert(z == 99, "");
 

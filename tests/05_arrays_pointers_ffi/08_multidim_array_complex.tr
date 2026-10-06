@@ -10,23 +10,23 @@ fn get_3d_array(): int[2][2][2] {
 fn main(): int {
     // 1. Array of arrays of arrays directly accessed
     test::assert(get_3d_array()[1][0][1] == 6, "3D array r-value inline indexing failed");
-    
+
     // 2. Multidimensional array assignment and reassignment
     mut arr: int[2][3] = [[1, 2, 3], [4, 5, 6]];
     test::assert(arr[1][2] == 6, "Initial 2D access failed");
-    
+
     arr = [[10, 20, 30], [40, 50, 60]];
     test::assert(arr[1][1] == 50, "Reassigned 2D access failed");
-    
+
     // 3. Partial array assignment (assigning a 1D array into a 2D array row)
     arr[0] = [100, 200, 300];
     test::assert(arr[0][2] == 300, "Row reassignment failed");
-    
+
     // 4. Testing pointer decay (arrays passed to array types)
     // Wait, arrays are passed by value right now, but let's test if it parses and copies correctly.
     mut copy_arr: int[2][3] = arr;
     copy_arr[1][0] = 999;
-    
+
     // Since arrays are true values, copy_arr is a distinct copy. arr should be unchanged!
     test::assert(arr[1][0] == 40, "Value semantics failed: original array was modified");
     test::assert(copy_arr[1][0] == 999, "Value semantics failed: copy was not modified");

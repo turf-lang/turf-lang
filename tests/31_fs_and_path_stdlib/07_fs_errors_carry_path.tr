@@ -14,10 +14,10 @@ fn mkdir_failure(path: string): string {
     fs::mkdir(path) recover as err run {
         compare err {
             matches fs::FsError::MkdirFailed(p):
-                return p;
+            return p;
             done
             otherwise:
-                return "wrong variant";
+            return "wrong variant";
         }
     };
     return "";
@@ -27,10 +27,10 @@ fn remove_file_failure(path: string): string {
     fs::remove_file(path) recover as err run {
         compare err {
             matches fs::FsError::RemoveFileFailed(p):
-                return p;
+            return p;
             done
             otherwise:
-                return "wrong variant";
+            return "wrong variant";
         }
     };
     return "";
@@ -40,10 +40,10 @@ fn remove_dir_failure(path: string): string {
     fs::remove_dir(path) recover as err run {
         compare err {
             matches fs::FsError::RemoveDirFailed(p):
-                return p;
+            return p;
             done
             otherwise:
-                return "wrong variant";
+            return "wrong variant";
         }
     };
     return "";
@@ -59,7 +59,7 @@ fn main(): int {
 
     // MkdirFailed: the parent does not exist.
     test::assert(mkdir_failure("tmp_fs_errors_no_parent/child") == "tmp_fs_errors_no_parent/child",
-                 "mkdir with a missing parent fails with MkdirFailed(path)");
+        "mkdir with a missing parent fails with MkdirFailed(path)");
 
     fs::mkdir(dir) recover run { test::fail("setup: mkdir should succeed"); };
 

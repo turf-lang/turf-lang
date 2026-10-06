@@ -8,16 +8,16 @@ fn classify(p: Point): int {
     mut r: int;
     compare p {
         matches Point { x: 0, y: 0 }:
-            r = 1;
+        r = 1;
         done
         matches Point { x, y } if x == y:
-            r = 2;
+        r = 2;
         done
         matches Point { x: 0, .. }:
-            r = 3;
+        r = 3;
         done
         matches Point { x, y }:
-            r = x + y;
+        r = x + y;
         done
     }
     return r;

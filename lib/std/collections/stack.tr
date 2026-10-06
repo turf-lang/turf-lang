@@ -18,59 +18,59 @@ unsafe module;
 import sys;
 
 pub struct Stack<T> {
-  data: T*,
-  len: int,
-  cap: int
+    data: T*,
+    len: int,
+    cap: int
 }
 
 pub fn<T> Stack.push(item: T): void {
-  if (self.len == self.cap) {
-    if (self.cap == 0) {
-      self.cap = 8;
-    } else {
-      self.cap = self.cap * 2;
+    if (self.len == self.cap) {
+        if (self.cap == 0) {
+            self.cap = 8;
+        } else {
+            self.cap = self.cap * 2;
+        }
+
+        // TYPE-002 (S15/D3): was `self.cap * 8` under Type Erasure, where every
+        // T was assumed to fit in one uniform 8-byte slot -- wrong for a T over
+        // 8 bytes (a real by-value struct element), which under-allocated this
+        // buffer and silently overran it a few pushes later (glibc
+        // "realloc(): invalid next size" once the heap's own metadata got
+        // corrupted). sizeof(T) is correct per instantiation (monomorphized,
+        // TYPE-002) -- see list.tr's identical fix, S14b, for the first
+        // instance of this.
+        immutable byteSize: int = self.cap * sizeof(T);
+
+        if (self.data == null) {
+            self.data = gc_alloc(byteSize) to T*;
+        } else {
+            self.data = gc_realloc(self.data, byteSize) to T*;
+        }
     }
 
-    // TYPE-002 (S15/D3): was `self.cap * 8` under Type Erasure, where every
-    // T was assumed to fit in one uniform 8-byte slot -- wrong for a T over
-    // 8 bytes (a real by-value struct element), which under-allocated this
-    // buffer and silently overran it a few pushes later (glibc
-    // "realloc(): invalid next size" once the heap's own metadata got
-    // corrupted). sizeof(T) is correct per instantiation (monomorphized,
-    // TYPE-002) -- see list.tr's identical fix, S14b, for the first
-    // instance of this.
-    immutable byteSize: int = self.cap * sizeof(T);
-
-    if (self.data == null) {
-      self.data = gc_alloc(byteSize) to T*;
-    } else {
-      self.data = gc_realloc(self.data, byteSize) to T*;
-    }
-  }
-
-  self.data[self.len] = item;
-  self.len = self.len + 1;
+    self.data[self.len] = item;
+    self.len = self.len + 1;
 }
 
 @caller_location
 pub fn<T> Stack.pop(): T {
-  if (self.len == 0) {
-    sys::panic(caller_location + ": Stack.pop: pop on empty stack");
-  }
+    if (self.len == 0) {
+        sys::panic(caller_location + ": Stack.pop: pop on empty stack");
+    }
 
-  self.len = self.len - 1;
-  return self.data[self.len];
+    self.len = self.len - 1;
+    return self.data[self.len];
 }
 
 @caller_location
 pub fn<T> Stack.peek(): T {
-  if (self.len == 0) {
-    sys::panic(caller_location + ": Stack.peek: peek on empty stack");
-  }
+    if (self.len == 0) {
+        sys::panic(caller_location + ": Stack.peek: peek on empty stack");
+    }
 
-  return self.data[self.len - 1];
+    return self.data[self.len - 1];
 }
 
 pub fn<T> Stack.length(): int {
-  return self.len;
+    return self.len;
 }

@@ -18,14 +18,14 @@ fn main(): int {
     immut w2: int = time::now_seconds();
     immut deltaMs: int = w2 - w1;
     test::assert(deltaMs >= 1 && deltaMs <= 4,
-                 "sleep_ms(1500) should advance wall-clock now_seconds() by roughly 1-2 seconds (generous band for 1s resolution)");
+        "sleep_ms(1500) should advance wall-clock now_seconds() by roughly 1-2 seconds (generous band for 1s resolution)");
 
     immut w3: int = time::now_seconds();
     time::sleep_seconds(1);
     immut w4: int = time::now_seconds();
     immut deltaSeconds: int = w4 - w3;
     test::assert(deltaSeconds >= 1 && deltaSeconds <= 3,
-                 "sleep_seconds(1) should advance wall-clock now_seconds() by roughly 1 second (generous band for 1s resolution)");
+        "sleep_seconds(1) should advance wall-clock now_seconds() by roughly 1 second (generous band for 1s resolution)");
 
     io::printline("02 PASS: time::sleep_ms / time::sleep_seconds advance real wall-clock time");
     return 0;

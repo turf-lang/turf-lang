@@ -63,28 +63,28 @@ unsafe module;
 import strings;
 
 pub fn hash(x: string): int {
-  mut h: int = 5381;
-  immutable n: int = strings::strlen(x);
-  mut i: int = 0;
-  while i < n {
-    // FDN-004: `x[i]` is `char`; widen to `int` before the arithmetic (no
-    // implicit char<->numeric conversion, FREEZE.md §6.2 row 4).
-    h = (h * 33 + (x[i] to int)) & 0xFFFFFFFF;
-    i = i + 1;
-  }
-  return h;
+    mut h: int = 5381;
+    immutable n: int = strings::strlen(x);
+    mut i: int = 0;
+    while i < n {
+        // FDN-004: `x[i]` is `char`; widen to `int` before the arithmetic (no
+        // implicit char<->numeric conversion, FREEZE.md §6.2 row 4).
+        h = (h * 33 + (x[i] to int)) & 0xFFFFFFFF;
+        i = i + 1;
+    }
+    return h;
 }
 
 pub fn<T> hash(x: T): int {
-  mut h: int = 5381;
-  unsafe {
-    immutable p: char* = &x to char*;
-    immutable n: int = sizeof(T);
-    mut i: int = 0;
-    while i < n {
-      h = (h * 33 + (p[i] to int)) & 0xFFFFFFFF;
-      i = i + 1;
+    mut h: int = 5381;
+    unsafe {
+        immutable p: char* = &x to char*;
+        immutable n: int = sizeof(T);
+        mut i: int = 0;
+        while i < n {
+            h = (h * 33 + (p[i] to int)) & 0xFFFFFFFF;
+            i = i + 1;
+        }
     }
-  }
-  return h;
+    return h;
 }

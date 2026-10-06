@@ -9,7 +9,7 @@ fn main(): int {
     compare p {
         matches P { x, .. }:
         matches P { y, .. }:
-            r = 1;
+        r = 1;
         done
         otherwise: r = 2;
     }

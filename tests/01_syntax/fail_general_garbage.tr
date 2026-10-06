@@ -3,6 +3,6 @@
 fn main(): int {
     // Testing the parser's resilience against complete garbage tokens
     @#$$%^^^&*()_
-    
+
     return 0;
 }

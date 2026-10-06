@@ -53,10 +53,10 @@ fn badAt(n: int): int {
     immut v: int = viaParse(n) recover as err run {
         compare err {
             matches ParseError::Bad(at):
-                return at;
+            return at;
             done
             otherwise:
-                return 99;
+            return 99;
         }
     };
     return v;

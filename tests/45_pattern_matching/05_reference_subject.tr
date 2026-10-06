@@ -7,10 +7,10 @@ fn viaRef(p: &Point): int {
     mut r: int;
     compare p {
         matches Point { x, y } if x > y:
-            r = x;
+        r = x;
         done
         matches Point { y, .. }:
-            r = y;
+        r = y;
         done
     }
     return r;
@@ -20,10 +20,10 @@ fn Point.larger(): int {
     mut r: int;
     compare self {
         matches Point { x, y } if x >= y:
-            r = x;
+        r = x;
         done
         matches Point { y, .. }:
-            r = y;
+        r = y;
         done
     }
     return r;

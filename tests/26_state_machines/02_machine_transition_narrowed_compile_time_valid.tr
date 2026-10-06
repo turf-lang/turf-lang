@@ -16,19 +16,19 @@ fn advance(conn_ref: ConnectionState): ConnectionState {
     mut conn: ConnectionState = conn_ref;
     compare conn {
         matches ConnectionState::Idle:
-            conn.transition(ConnectionState::Connecting);
+        conn.transition(ConnectionState::Connecting);
         done
         matches ConnectionState::Connecting:
-            conn.transition(ConnectionState::Connected);
+        conn.transition(ConnectionState::Connected);
         done
         matches ConnectionState::Connected:
-            conn.transition(ConnectionState::Closing);
+        conn.transition(ConnectionState::Closing);
         done
         matches ConnectionState::Closing:
-            conn.transition(ConnectionState::Idle);
+        conn.transition(ConnectionState::Idle);
         done
         otherwise:
-            mut noop: int = 0;
+        mut noop: int = 0;
     }
     return conn;
 }

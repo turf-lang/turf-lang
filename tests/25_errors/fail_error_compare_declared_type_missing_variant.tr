@@ -12,10 +12,10 @@ fn main(): int {
     mut e: IOError = IOError::Timeout;
     compare e {
         matches IOError::NotFound(_):
-            return 1;
+        return 1;
         done
         matches IOError::Timeout:
-            return 2;
+        return 2;
         done
     }
     return 0;

@@ -61,7 +61,7 @@ fn main(): int {
         test::assert(ptrs.length() == 1, "List<Point*> length wrong");
         mut pp: Point* = ptrs.pop();
         test::assert(pp != null && pp == (&pt1 to Point*),
-                    "List<Point*> pop wrong");
+            "List<Point*> pop wrong");
         // Direct field reads (not just address-of) -- see Lint.cpp's own
         // known VarDecl gap (docs/development, not this session's job):
         // AddressOf-only use of a variable doesn't register as a "read"
@@ -81,13 +81,13 @@ fn main(): int {
     test::assert(nested.length() == 1, "List<List<int>> length wrong");
     mut got: List<int> = nested.pop();
     test::assert(got.length() == 1 && got.get(0) == 42,
-                "List<List<int>> pop wrong");
+        "List<List<int>> pop wrong");
 
     // Coexistence sanity: List<int> from earlier is still correct after
     // every other instantiation above has been created and used.
     test::assert(ints.length() == 2, "List<int> corrupted by later instantiations");
     test::assert(ints.get(0) == 1 && ints.get(1) == 2,
-                "List<int> contents corrupted by later instantiations");
+        "List<int> contents corrupted by later instantiations");
 
     return 0;
 }

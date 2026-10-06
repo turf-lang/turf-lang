@@ -10,11 +10,11 @@ fn main(): int {
         matches 1:
         matches 2:
         matches 3:
-            result = 100;
+        result = 100;
         done
 
         otherwise:
-            result = 999;
+        result = 999;
     }
     test::assert(result == 100, "stacked matches: x=2 should hit shared body");
 
@@ -24,10 +24,10 @@ fn main(): int {
         matches 1:
         matches 2:
         matches 3:
-            result2 = 100;
+        result2 = 100;
         done
         otherwise:
-            result2 = 200;
+        result2 = 200;
     }
     test::assert(result2 == 200, "stacked matches: x=5 should hit otherwise");
 

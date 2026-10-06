@@ -13,10 +13,10 @@ fn code(): int {
     immut v: int = open("x") recover as err run {
         compare err {
             matches IOError::NotFound(path, extra):
-                return 1;
+            return 1;
             done
             otherwise:
-                return 2;
+            return 2;
         }
     };
     return v;

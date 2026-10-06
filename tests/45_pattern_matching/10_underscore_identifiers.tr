@@ -14,10 +14,10 @@ fn main(): int {
     mut r: int = 0;
     compare p {
         matches P { x, y: _why }:
-            r = _helper(1, x);
+        r = _helper(1, x);
         done
         matches _:
-            r = -1;
+        r = -1;
         done
     }
     test::assert(r == 7, "_why binds but is deliberately unused");

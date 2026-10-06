@@ -12,10 +12,10 @@ fn main(): int {
     mut r: int;
     compare s {
         matches Shape { kind: 3, .. }:
-            r = 1;
+        r = 1;
         done
         matches _:
-            r = 2;
+        r = 2;
         done
     }
     test::assert(r == 1, "public field literal, private field ignored by ..");
@@ -26,10 +26,10 @@ fn main(): int {
     mut q: int;
     compare w {
         matches shapes_module::Wrap { inner, tag: 1 }:
-            q = inner + 1;
+        q = inner + 1;
         done
         matches _:
-            q = -1;
+        q = -1;
         done
     }
     test::assert(q == 42, "module-qualified generic struct pattern");

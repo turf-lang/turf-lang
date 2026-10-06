@@ -9,10 +9,10 @@ fn missingPath(path: string): string {
     immut _s: string = io::read_to_string(path) recover as err run {
         compare err {
             matches io::FileError::NotFound(p):
-                return p;
+            return p;
             done
             otherwise:
-                return "?";
+            return "?";
         }
     };
     return "";
@@ -22,10 +22,10 @@ fn linesMissingPath(path: string): string {
     immut _l: List<string> = io::read_lines(path) recover as err run {
         compare err {
             matches io::FileError::NotFound(p):
-                return p;
+            return p;
             done
             otherwise:
-                return "?";
+            return "?";
         }
     };
     return "";

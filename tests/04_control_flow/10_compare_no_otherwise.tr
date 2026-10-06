@@ -7,10 +7,10 @@ fn main(): int {
 
     compare x {
         matches 1:
-            result = 1;
+        result = 1;
         done
         matches 3:
-            result = 3;
+        result = 3;
         done
     }
     test::assert(result == 3, "compare no-otherwise: x=3 should hit arm 3");
@@ -19,7 +19,7 @@ fn main(): int {
     mut result2: int = -1;
     compare y {
         matches 1:
-            result2 = 1;
+        result2 = 1;
         done
     }
     // y=99 doesn't match anything, result2 stays -1

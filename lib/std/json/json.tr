@@ -247,25 +247,25 @@ pub fn JsonValue.length(): int {
 pub fn stringify(v: JsonValue): string {
     compare v {
         matches JsonValue { kind: JsonType::Null, .. }:
-            return "null";
+        return "null";
         done
         matches JsonValue { kind: JsonType::Bool, bool_val: true, .. }:
-            return "true";
+        return "true";
         done
         matches JsonValue { kind: JsonType::Bool, .. }:
-            return "false";
+        return "false";
         done
         matches JsonValue { kind: JsonType::Number, num_val, .. }:
-            return num_val to string;
+        return num_val to string;
         done
         matches JsonValue { kind: JsonType::String, str_val, .. }:
-            return "\"" + escape_string(str_val) + "\"";
+        return "\"" + escape_string(str_val) + "\"";
         done
         matches JsonValue { kind: JsonType::Array, .. }:
-            return stringify_array(v);
+        return stringify_array(v);
         done
         otherwise:
-            return stringify_object(v);
+        return stringify_object(v);
     }
 }
 

@@ -17,15 +17,15 @@ fn main(): int {
     mut conn: ConnectionState = ConnectionState::Idle;
     conn.transition(ConnectionState::Connecting);
     test::assert(conn == ConnectionState::Connecting,
-                "conn should now be Connecting");
+        "conn should now be Connecting");
 
     conn.transition(ConnectionState::Connected);
     test::assert(conn == ConnectionState::Connected,
-                "conn should now be Connected");
+        "conn should now be Connected");
 
     conn.transition(ConnectionState::Closing);
     test::assert(conn == ConnectionState::Closing,
-                "conn should now be Closing");
+        "conn should now be Closing");
 
     return 0;
 }

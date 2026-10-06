@@ -24,7 +24,7 @@ fn main(): int {
 
     // It agrees with index_of when there is exactly one occurrence.
     test::assert(strings::last_index_of("hello world", "world") == strings::index_of("hello world", "world"),
-                 "single occurrence: first == last");
+        "single occurrence: first == last");
 
     return 0;
 }

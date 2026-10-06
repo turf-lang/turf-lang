@@ -1,4 +1,4 @@
-// Test: Bitwise XOR operator  
+// Test: Bitwise XOR operator
 // 5 ^ 3 == 6  (0b101 ^ 0b011 = 0b110)
 
 import test;

@@ -16,13 +16,13 @@ fn classify(n: int): int {
     if (n > 0) { s = Sign::Pos; }
     compare s {
         matches Sign::Neg:
-            return -1;
+        return -1;
         done
         matches Sign::Zero:
-            return 0;
+        return 0;
         done
         matches Sign::Pos:
-            return 1;
+        return 1;
         done
     }
     return 99;

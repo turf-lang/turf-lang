@@ -33,11 +33,11 @@ import sys;
 import hashing;
 
 pub struct Set<T> {
-  items: T*,
-  len: int,
-  cap: int,
-  buckets: int*,
-  bcap: int
+    items: T*,
+    len: int,
+    cap: int,
+    buckets: int*,
+    bcap: int
 }
 
 // ─── hash index (internal) ──────────────────────────────────────────────
@@ -46,44 +46,44 @@ pub struct Set<T> {
 // header for the full design rationale.
 
 fn<T> Set.bucketFind(item: T): int {
-  if (self.bcap == 0) {
+    if (self.bcap == 0) {
+        return -1;
+    }
+    mut slot: int = hashing::hash(item) & (self.bcap - 1);
+    mut probes: int = 0;
+    while probes < self.bcap {
+        immutable b: int = self.buckets[slot];
+        if (b == -1) {
+            return -1;
+        }
+        if (b != -2 && self.items[b] == item) {
+            return slot;
+        }
+        slot = (slot + 1) & (self.bcap - 1);
+        probes = probes + 1;
+    }
     return -1;
-  }
-  mut slot: int = hashing::hash(item) & (self.bcap - 1);
-  mut probes: int = 0;
-  while probes < self.bcap {
-    immutable b: int = self.buckets[slot];
-    if (b == -1) {
-      return -1;
-    }
-    if (b != -2 && self.items[b] == item) {
-      return slot;
-    }
-    slot = (slot + 1) & (self.bcap - 1);
-    probes = probes + 1;
-  }
-  return -1;
 }
 
 fn<T> Set.bucketInsertSlot(item: T): int {
-  mut slot: int = hashing::hash(item) & (self.bcap - 1);
-  mut tomb: int = -1;
-  mut probes: int = 0;
-  while probes < self.bcap {
-    immutable b: int = self.buckets[slot];
-    if (b == -1) {
-      if (tomb >= 0) {
-        return tomb;
-      }
-      return slot;
+    mut slot: int = hashing::hash(item) & (self.bcap - 1);
+    mut tomb: int = -1;
+    mut probes: int = 0;
+    while probes < self.bcap {
+        immutable b: int = self.buckets[slot];
+        if (b == -1) {
+            if (tomb >= 0) {
+                return tomb;
+            }
+            return slot;
+        }
+        if (b == -2 && tomb < 0) {
+            tomb = slot;
+        }
+        slot = (slot + 1) & (self.bcap - 1);
+        probes = probes + 1;
     }
-    if (b == -2 && tomb < 0) {
-      tomb = slot;
-    }
-    slot = (slot + 1) & (self.bcap - 1);
-    probes = probes + 1;
-  }
-  return tomb;
+    return tomb;
 }
 
 // Grows+rehashes the bucket index once occupancy would exceed a 70% load
@@ -91,30 +91,30 @@ fn<T> Set.bucketInsertSlot(item: T): int {
 // `Map.bucketRehash()` for the full rationale (can't be a realloc -- every
 // entry's bucket slot depends on `bcap` itself).
 fn<T> Set.bucketRehash(newBcap: int): void {
-  self.buckets = gc_alloc(newBcap * sizeof(int)) to int*;
-  mut z: int = 0;
-  while z < newBcap {
-    self.buckets[z] = -1;
-    z = z + 1;
-  }
-  self.bcap = newBcap;
+    self.buckets = gc_alloc(newBcap * sizeof(int)) to int*;
+    mut z: int = 0;
+    while z < newBcap {
+        self.buckets[z] = -1;
+        z = z + 1;
+    }
+    self.bcap = newBcap;
 
-  mut i: int = 0;
-  while i < self.len {
-    immutable slot: int = self.bucketInsertSlot(self.items[i]);
-    self.buckets[slot] = i;
-    i = i + 1;
-  }
+    mut i: int = 0;
+    while i < self.len {
+        immutable slot: int = self.bucketInsertSlot(self.items[i]);
+        self.buckets[slot] = i;
+        i = i + 1;
+    }
 }
 
 fn<T> Set.bucketMaybeGrow(): void {
-  if (self.bcap == 0) {
-    self.bucketRehash(8);
-    return;
-  }
-  if ((self.len + 1) * 10 >= self.bcap * 7) {
-    self.bucketRehash(self.bcap * 2);
-  }
+    if (self.bcap == 0) {
+        self.bucketRehash(8);
+        return;
+    }
+    if ((self.len + 1) * 10 >= self.bcap * 7) {
+        self.bucketRehash(self.bcap * 2);
+    }
 }
 
 // ─── public API ──────────────────────────────────────────────────────────
@@ -122,45 +122,45 @@ fn<T> Set.bucketMaybeGrow(): void {
 // Returns the DENSE-array index of `item`, or -1 if absent. O(1) average
 // (was O(n) before this group, see this file's header).
 pub fn<T> Set.index_of(item: T): int {
-  immutable slot: int = self.bucketFind(item);
-  if (slot < 0) {
-    return -1;
-  }
-  return self.buckets[slot];
+    immutable slot: int = self.bucketFind(item);
+    if (slot < 0) {
+        return -1;
+    }
+    return self.buckets[slot];
 }
 
 pub fn<T> Set.contains(item: T): bool {
-  return self.index_of(item) >= 0;
+    return self.index_of(item) >= 0;
 }
 
 pub fn<T> Set.add(item: T): void {
-  if (self.contains(item)) {
-    return;
-  }
-
-  if (self.len == self.cap) {
-    if (self.cap == 0) {
-      self.cap = 8;
-    } else {
-      self.cap = self.cap * 2;
+    if (self.contains(item)) {
+        return;
     }
 
-    // TYPE-002 (S15/D3): real per-instantiation byte size -- see
-    // list.tr's identical fix for the first instance of this class of fix.
-    immutable byteSize: int = self.cap * sizeof(T);
+    if (self.len == self.cap) {
+        if (self.cap == 0) {
+            self.cap = 8;
+        } else {
+            self.cap = self.cap * 2;
+        }
 
-    if (self.items == null) {
-      self.items = gc_alloc(byteSize) to T*;
-    } else {
-      self.items = gc_realloc(self.items, byteSize) to T*;
+        // TYPE-002 (S15/D3): real per-instantiation byte size -- see
+        // list.tr's identical fix for the first instance of this class of fix.
+        immutable byteSize: int = self.cap * sizeof(T);
+
+        if (self.items == null) {
+            self.items = gc_alloc(byteSize) to T*;
+        } else {
+            self.items = gc_realloc(self.items, byteSize) to T*;
+        }
     }
-  }
-  self.bucketMaybeGrow();
+    self.bucketMaybeGrow();
 
-  immutable insertSlot: int = self.bucketInsertSlot(item);
-  self.buckets[insertSlot] = self.len;
-  self.items[self.len] = item;
-  self.len = self.len + 1;
+    immutable insertSlot: int = self.bucketInsertSlot(item);
+    self.buckets[insertSlot] = self.len;
+    self.items[self.len] = item;
+    self.len = self.len + 1;
 }
 
 // Removal: tombstone item's bucket entry, then swap-with-last on the dense
@@ -169,26 +169,26 @@ pub fn<T> Set.add(item: T): void {
 // entry must be retargeted to the new dense index (mirrors Map.remove()'s
 // identical concern; see that file's doc comment for the full reasoning).
 pub fn<T> Set.remove(item: T): bool {
-  immutable bslot: int = self.bucketFind(item);
-  if (bslot < 0) {
-    return false;
-  }
-  immutable idx: int = self.buckets[bslot];
-  self.buckets[bslot] = -2;
-
-  self.len = self.len - 1;
-  if (idx != self.len) {
-    immutable movedSlot: int = self.bucketFind(self.items[self.len]);
-    if (movedSlot >= 0) {
-      self.buckets[movedSlot] = idx;
+    immutable bslot: int = self.bucketFind(item);
+    if (bslot < 0) {
+        return false;
     }
-    self.items[idx] = self.items[self.len];
-  }
-  return true;
+    immutable idx: int = self.buckets[bslot];
+    self.buckets[bslot] = -2;
+
+    self.len = self.len - 1;
+    if (idx != self.len) {
+        immutable movedSlot: int = self.bucketFind(self.items[self.len]);
+        if (movedSlot >= 0) {
+            self.buckets[movedSlot] = idx;
+        }
+        self.items[idx] = self.items[self.len];
+    }
+    return true;
 }
 
 pub fn<T> Set.length(): int {
-  return self.len;
+    return self.len;
 }
 
 // ─── operator[] (LANG-001) ───────────────────────────────────────────────────
@@ -206,8 +206,8 @@ pub fn<T> Set.length(): int {
 // hash index pointing at stale data besides). add()/remove() stay the
 // only way to mutate a Set's contents.
 operator<T> [](s: Set<T>, i: int): T {
-  if (i < 0 || i >= s.len) {
-    sys::panic("Set[]: index out of bounds");
-  }
-  return s.items[i];
+    if (i < 0 || i >= s.len) {
+        sys::panic("Set[]: index out of bounds");
+    }
+    return s.items[i];
 }

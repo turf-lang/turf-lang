@@ -26,9 +26,9 @@ fn bErrorKind(): int {
 
 fn main(): int {
     mut a: type_identity_ops_a_module::Vec =
-        type_identity_ops_a_module::vec(2) + type_identity_ops_a_module::vec(3);
+    type_identity_ops_a_module::vec(2) + type_identity_ops_a_module::vec(3);
     mut b: type_identity_ops_b_module::Vec =
-        type_identity_ops_b_module::vec(1.5) + type_identity_ops_b_module::vec(2.0);
+    type_identity_ops_b_module::vec(1.5) + type_identity_ops_b_module::vec(2.0);
     test::assert(a.x == 5, "a::Vec's operator +");
     test::assert(b.x == 3.5, "b::Vec's operator +");
     test::assert(b.y == 1.0, "b::Vec's second field");

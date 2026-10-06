@@ -10,10 +10,10 @@ fn write_failure_path(path: string): string {
     io::write_string(path, "data") recover as err run {
         compare err {
             matches io::FileError::WriteFailed(p):
-                return p;
+            return p;
             done
             otherwise:
-                return "wrong variant";
+            return "wrong variant";
         }
     };
     return "";

@@ -27,10 +27,10 @@ enum Direction { North, East, South, West }
 fn describe(d: Direction): int {
     compare d {
         matches Direction::North:
-            return 1;
+        return 1;
         done
         matches Direction::South:
-            return 2;
+        return 2;
         done
     }
     return 99;

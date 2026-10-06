@@ -37,10 +37,10 @@ fn failedAt(t: &Trail, limit: int): int {
     immut v: int = walk(t, limit) recover as err run {
         compare err {
             matches StopError::Stop(at):
-                return at;
+            return at;
             done
             otherwise:
-                return 99;
+            return 99;
         }
     };
     return v;

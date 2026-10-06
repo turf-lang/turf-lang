@@ -9,13 +9,13 @@ import test;
 fn classify(s: string): int {
     compare s {
         matches strings::to_upper("ab"):
-            return 1;
+        return 1;
         done
         matches strings::to_lower("CD"):
-            return 2;
+        return 2;
         done
         otherwise:
-            return 3;
+        return 3;
     }
 }
 

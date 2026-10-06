@@ -84,12 +84,12 @@ import hashing;
 import list::List;
 
 pub struct Map<K, V> {
-  keys: K*,
-  values: V*,
-  len: int,
-  cap: int,
-  buckets: int*,
-  bcap: int
+    keys: K*,
+    values: V*,
+    len: int,
+    cap: int,
+    buckets: int*,
+    bcap: int
 }
 
 // ─── hash index (internal) ──────────────────────────────────────────────
@@ -100,23 +100,23 @@ pub struct Map<K, V> {
 // every occupied-then-removed slot leaves a TOMBSTONE, not an EMPTY, so a
 // real probe chain is never broken by a deletion elsewhere on it).
 fn<K, V> Map.bucketFind(key: K): int {
-  if (self.bcap == 0) {
+    if (self.bcap == 0) {
+        return -1;
+    }
+    mut slot: int = hashing::hash(key) & (self.bcap - 1);
+    mut probes: int = 0;
+    while probes < self.bcap {
+        immutable b: int = self.buckets[slot];
+        if (b == -1) {
+            return -1;
+        }
+        if (b != -2 && self.keys[b] == key) {
+            return slot;
+        }
+        slot = (slot + 1) & (self.bcap - 1);
+        probes = probes + 1;
+    }
     return -1;
-  }
-  mut slot: int = hashing::hash(key) & (self.bcap - 1);
-  mut probes: int = 0;
-  while probes < self.bcap {
-    immutable b: int = self.buckets[slot];
-    if (b == -1) {
-      return -1;
-    }
-    if (b != -2 && self.keys[b] == key) {
-      return slot;
-    }
-    slot = (slot + 1) & (self.bcap - 1);
-    probes = probes + 1;
-  }
-  return -1;
 }
 
 // Finds the bucket slot to store a NEW key's dense index at -- an EMPTY or
@@ -126,24 +126,24 @@ fn<K, V> Map.bucketFind(key: K): int {
 // (a fresh `bucketFind()` returned -1) and that `self.bcap > 0`
 // (`bucketMaybeGrow()` runs first in every caller below).
 fn<K, V> Map.bucketInsertSlot(key: K): int {
-  mut slot: int = hashing::hash(key) & (self.bcap - 1);
-  mut tomb: int = -1;
-  mut probes: int = 0;
-  while probes < self.bcap {
-    immutable b: int = self.buckets[slot];
-    if (b == -1) {
-      if (tomb >= 0) {
-        return tomb;
-      }
-      return slot;
+    mut slot: int = hashing::hash(key) & (self.bcap - 1);
+    mut tomb: int = -1;
+    mut probes: int = 0;
+    while probes < self.bcap {
+        immutable b: int = self.buckets[slot];
+        if (b == -1) {
+            if (tomb >= 0) {
+                return tomb;
+            }
+            return slot;
+        }
+        if (b == -2 && tomb < 0) {
+            tomb = slot;
+        }
+        slot = (slot + 1) & (self.bcap - 1);
+        probes = probes + 1;
     }
-    if (b == -2 && tomb < 0) {
-      tomb = slot;
-    }
-    slot = (slot + 1) & (self.bcap - 1);
-    probes = probes + 1;
-  }
-  return tomb;
+    return tomb;
 }
 
 // Grows+rehashes the bucket index once occupancy would exceed a 70% load
@@ -152,32 +152,32 @@ fn<K, V> Map.bucketInsertSlot(key: K): int {
 // `hash(key) & (bcap - 1)`, which changes the moment `bcap` does, so every
 // entry must be re-probed into its new home slot, not merely copied.
 fn<K, V> Map.bucketRehash(newBcap: int): void {
-  self.buckets = gc_alloc(newBcap * sizeof(int)) to int*;
-  mut z: int = 0;
-  while z < newBcap {
-    self.buckets[z] = -1;
-    z = z + 1;
-  }
-  self.bcap = newBcap;
+    self.buckets = gc_alloc(newBcap * sizeof(int)) to int*;
+    mut z: int = 0;
+    while z < newBcap {
+        self.buckets[z] = -1;
+        z = z + 1;
+    }
+    self.bcap = newBcap;
 
-  mut i: int = 0;
-  while i < self.len {
-    immutable slot: int = self.bucketInsertSlot(self.keys[i]);
-    self.buckets[slot] = i;
-    i = i + 1;
-  }
+    mut i: int = 0;
+    while i < self.len {
+        immutable slot: int = self.bucketInsertSlot(self.keys[i]);
+        self.buckets[slot] = i;
+        i = i + 1;
+    }
 }
 
 // Grows the bucket index once occupancy would exceed a 70% load factor (or
 // on first use).
 fn<K, V> Map.bucketMaybeGrow(): void {
-  if (self.bcap == 0) {
-    self.bucketRehash(8);
-    return;
-  }
-  if ((self.len + 1) * 10 >= self.bcap * 7) {
-    self.bucketRehash(self.bcap * 2);
-  }
+    if (self.bcap == 0) {
+        self.bucketRehash(8);
+        return;
+    }
+    if ((self.len + 1) * 10 >= self.bcap * 7) {
+        self.bucketRehash(self.bcap * 2);
+    }
 }
 
 // ─── public API ──────────────────────────────────────────────────────────
@@ -185,60 +185,60 @@ fn<K, V> Map.bucketMaybeGrow(): void {
 // Returns the DENSE-array index of `key`, or -1 if absent. O(1) average
 // (was O(n) before this group, see this file's header).
 pub fn<K, V> Map.index_of(key: K): int {
-  immutable slot: int = self.bucketFind(key);
-  if (slot < 0) {
-    return -1;
-  }
-  return self.buckets[slot];
+    immutable slot: int = self.bucketFind(key);
+    if (slot < 0) {
+        return -1;
+    }
+    return self.buckets[slot];
 }
 
 pub fn<K, V> Map.contains(key: K): bool {
-  return self.index_of(key) >= 0;
+    return self.index_of(key) >= 0;
 }
 
 pub fn<K, V> Map.put(key: K, value: V): void {
-  immutable existingSlot: int = self.bucketFind(key);
-  if (existingSlot >= 0) {
-    self.values[self.buckets[existingSlot]] = value;
-    return;
-  }
-
-  if (self.len == self.cap) {
-    if (self.cap == 0) {
-      self.cap = 8;
-    } else {
-      self.cap = self.cap * 2;
+    immutable existingSlot: int = self.bucketFind(key);
+    if (existingSlot >= 0) {
+        self.values[self.buckets[existingSlot]] = value;
+        return;
     }
 
-    // TYPE-002 (S15/D3): real per-instantiation byte sizes -- see
-    // list.tr's identical fix for the first instance of this class of fix.
-    immutable keyByteSize: int = self.cap * sizeof(K);
-    immutable valueByteSize: int = self.cap * sizeof(V);
+    if (self.len == self.cap) {
+        if (self.cap == 0) {
+            self.cap = 8;
+        } else {
+            self.cap = self.cap * 2;
+        }
 
-    if (self.keys == null) {
-      self.keys = gc_alloc(keyByteSize) to K*;
-      self.values = gc_alloc(valueByteSize) to V*;
-    } else {
-      self.keys = gc_realloc(self.keys, keyByteSize) to K*;
-      self.values = gc_realloc(self.values, valueByteSize) to V*;
+        // TYPE-002 (S15/D3): real per-instantiation byte sizes -- see
+        // list.tr's identical fix for the first instance of this class of fix.
+        immutable keyByteSize: int = self.cap * sizeof(K);
+        immutable valueByteSize: int = self.cap * sizeof(V);
+
+        if (self.keys == null) {
+            self.keys = gc_alloc(keyByteSize) to K*;
+            self.values = gc_alloc(valueByteSize) to V*;
+        } else {
+            self.keys = gc_realloc(self.keys, keyByteSize) to K*;
+            self.values = gc_realloc(self.values, valueByteSize) to V*;
+        }
     }
-  }
-  self.bucketMaybeGrow();
+    self.bucketMaybeGrow();
 
-  immutable insertSlot: int = self.bucketInsertSlot(key);
-  self.buckets[insertSlot] = self.len;
-  self.keys[self.len] = key;
-  self.values[self.len] = value;
-  self.len = self.len + 1;
+    immutable insertSlot: int = self.bucketInsertSlot(key);
+    self.buckets[insertSlot] = self.len;
+    self.keys[self.len] = key;
+    self.values[self.len] = value;
+    self.len = self.len + 1;
 }
 
 @caller_location
 pub fn<K, V> Map.get(key: K): V {
-  immutable idx: int = self.index_of(key);
-  if (idx < 0) {
-    sys::panic(caller_location + ": Map.get: no such key");
-  }
-  return self.values[idx];
+    immutable idx: int = self.index_of(key);
+    if (idx < 0) {
+        sys::panic(caller_location + ": Map.get: no such key");
+    }
+    return self.values[idx];
 }
 
 // Recoverable alternative to get() (docs/planning/Errors.md): a missing key
@@ -249,15 +249,15 @@ pub fn<K, V> Map.get(key: K): V {
 // unconditional abort. get() itself is left as-is (unchanged behavior,
 // still the right choice when a missing key really would be a bug).
 pub error MapError {
-  KeyNotFound,
+    KeyNotFound,
 }
 
 pub fn<K, V> Map.try_get(key: K): !V {
-  immutable idx: int = self.index_of(key);
-  if (idx < 0) {
-    return MapError::KeyNotFound;
-  }
-  return self.values[idx];
+    immutable idx: int = self.index_of(key);
+    if (idx < 0) {
+        return MapError::KeyNotFound;
+    }
+    return self.values[idx];
 }
 
 // Removal: tombstone the key's bucket entry, then swap-with-last on the
@@ -268,26 +268,26 @@ pub fn<K, V> Map.try_get(key: K): !V {
 // worse, the bucket for the just-removed key could be found first and
 // mistakenly matched against the moved-in key at the same dense index).
 pub fn<K, V> Map.remove(key: K): void {
-  immutable bslot: int = self.bucketFind(key);
-  if (bslot < 0) {
-    return;
-  }
-  immutable idx: int = self.buckets[bslot];
-  self.buckets[bslot] = -2;
-
-  self.len = self.len - 1;
-  if (idx != self.len) {
-    immutable movedSlot: int = self.bucketFind(self.keys[self.len]);
-    if (movedSlot >= 0) {
-      self.buckets[movedSlot] = idx;
+    immutable bslot: int = self.bucketFind(key);
+    if (bslot < 0) {
+        return;
     }
-    self.keys[idx] = self.keys[self.len];
-    self.values[idx] = self.values[self.len];
-  }
+    immutable idx: int = self.buckets[bslot];
+    self.buckets[bslot] = -2;
+
+    self.len = self.len - 1;
+    if (idx != self.len) {
+        immutable movedSlot: int = self.bucketFind(self.keys[self.len]);
+        if (movedSlot >= 0) {
+            self.buckets[movedSlot] = idx;
+        }
+        self.keys[idx] = self.keys[self.len];
+        self.values[idx] = self.values[self.len];
+    }
 }
 
 pub fn<K, V> Map.length(): int {
-  return self.len;
+    return self.len;
 }
 
 // ─── iteration (LEC-007) ────────────────────────────────────────────────────
@@ -301,23 +301,23 @@ pub fn<K, V> Map.length(): int {
 // values()[i] belong to the same entry as long as the map is not modified
 // between the two calls.
 pub fn<K, V> Map.keys(): List<K> {
-  mut out: List<K> = List::default();
-  mut i: int = 0;
-  while i < self.len {
-    out.push(self.keys[i]);
-    i = i + 1;
-  }
-  return out;
+    mut out: List<K> = List::default();
+    mut i: int = 0;
+    while i < self.len {
+        out.push(self.keys[i]);
+        i = i + 1;
+    }
+    return out;
 }
 
 pub fn<K, V> Map.values(): List<V> {
-  mut out: List<V> = List::default();
-  mut i: int = 0;
-  while i < self.len {
-    out.push(self.values[i]);
-    i = i + 1;
-  }
-  return out;
+    mut out: List<V> = List::default();
+    mut i: int = 0;
+    while i < self.len {
+        out.push(self.values[i]);
+        i = i + 1;
+    }
+    return out;
 }
 
 // ─── operator[] / operator[]= (LANG-001) ────────────────────────────────────
@@ -336,9 +336,9 @@ pub fn<K, V> Map.values(): List<V> {
 // local copy that vanishes when this function returns, silently losing
 // every write.
 operator<K, V> [](m: Map<K, V>, key: K): V {
-  return m.get(key);
+    return m.get(key);
 }
 
 operator<K, V> []=(m: &Map<K, V>, key: K, value: V): void {
-  m.put(key, value);
+    m.put(key, value);
 }

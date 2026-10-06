@@ -23,16 +23,16 @@ fn report(which: int): string {
     immut _n: int = failWith(which) recover as err run {
         compare err {
             matches IOError::NotFound(path):
-                return path + "|" + err.message;
+            return path + "|" + err.message;
             done
             matches IOError::Denied(path, _):
-                return path + "|" + err.message;
+            return path + "|" + err.message;
             done
             matches IOError::Timeout:
-                return "t|" + err.message;
+            return "t|" + err.message;
             done
             otherwise:
-                return "?";
+            return "?";
         }
     };
     return "ok";

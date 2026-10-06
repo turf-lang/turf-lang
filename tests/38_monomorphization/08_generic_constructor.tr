@@ -43,6 +43,6 @@ fn main(): int {
     // struct-by-value parameter, not an erased pointer.
     mut big: Box<Big> = Box::new(Big::new(1, 2, 3));
     test::assert(big.val.a == 1 && big.val.b == 2 && big.val.c == 3,
-                "Box<Big>::new(...) wrong");
+        "Box<Big>::new(...) wrong");
     return 0;
 }

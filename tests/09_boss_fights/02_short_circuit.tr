@@ -11,7 +11,7 @@ fn Flag.side_effect(): bool {
 
 fn main(): int {
     mut f: Flag = Flag::default();
-    
+
     if false && f.side_effect() {
         test::assert(false, "Entered if block");
     }

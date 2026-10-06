@@ -148,8 +148,8 @@ pub fn Request.get_header(name: string): string {
     return self.headers.try_get(name) recover run {
         sys::panic(caller_location + ": Request.get_header: no such header '" + name + "'");
         return ""; // unreachable (sys::panic never returns) -- see
-                    // Server.listen()'s identical 'recover run'
-                    // non-diverging-block rule, below.
+        // Server.listen()'s identical 'recover run'
+        // non-diverging-block rule, below.
     };
 }
 
@@ -253,11 +253,11 @@ pub fn status_text(status: int): string {
 pub fn Response.send_raw(status: int, contentType: string, body: string): void {
     immut bodyLen: int = strings::length(body);
     immut response: string = "HTTP/1.1 " + status_text(status) + "\r\n" +
-        "Content-Type: " + contentType + "\r\n" +
-        "Content-Length: " + (bodyLen to string) + "\r\n" +
-        "Connection: close\r\n" +
-        "\r\n" +
-        body;
+    "Content-Type: " + contentType + "\r\n" +
+    "Content-Length: " + (bodyLen to string) + "\r\n" +
+    "Connection: close\r\n" +
+    "\r\n" +
+    body;
     self.conn.write(response);
 }
 
@@ -355,7 +355,7 @@ pub fn Server.listen(port: int): void {
         io::printline("http::Server.listen: could not bind port " + (port to string) + ".");
         sys::exit(1);
         return; // unreachable (sys::exit never returns) -- see the
-                 // 'recover run' non-diverging-block rule this satisfies.
+        // 'recover run' non-diverging-block rule this satisfies.
     };
     self.listener = listener;
 

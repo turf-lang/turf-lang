@@ -31,13 +31,13 @@ fn describe(r: int, a: int, b: int): int {
     immut v: int = sum(a, b) recover as err run {
         compare err {
             matches MathError::Negative(v):
-                return 0 - v;
+            return 0 - v;
             done
             matches MathError::TooBig(v, limit):
-                return v - limit;
+            return v - limit;
             done
             otherwise:
-                return 999;
+            return 999;
         }
     };
     return v;

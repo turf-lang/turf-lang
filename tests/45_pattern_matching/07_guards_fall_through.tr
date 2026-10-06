@@ -9,13 +9,13 @@ fn pick(v: int): int {
     mut r: int;
     compare b {
         matches Box { n } if n > 100:
-            r = 1;
+        r = 1;
         done
         matches Box { n } if n > 10:
-            r = 2;
+        r = 2;
         done
         matches Box { .. }:
-            r = 3;
+        r = 3;
         done
     }
     return r;

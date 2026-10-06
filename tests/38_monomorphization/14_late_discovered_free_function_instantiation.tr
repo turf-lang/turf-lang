@@ -18,7 +18,7 @@ fn<T> inner(x: T): T { return x; }
 fn<T> outer(x: T): T { return inner(x); }
 
 fn main(): int {
-  test::assert(inner(7) == 7, "inner(7) directly should still work");
-  test::assert(outer(9) == 9, "outer(9)'s nested inner(x) call, discovered after inner<int> already drained, must still dispatch");
-  return 0;
+    test::assert(inner(7) == 7, "inner(7) directly should still work");
+    test::assert(outer(9) == 9, "outer(9)'s nested inner(x) call, discovered after inner<int> already drained, must still dispatch");
+    return 0;
 }

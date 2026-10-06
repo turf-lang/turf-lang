@@ -7,7 +7,7 @@ struct Pair<A, B> { first: A, second: B }
 fn<T, U> firstOf(p: Pair<T, U>): T {
     compare p {
         matches Pair { first, .. }:
-            return first;
+        return first;
         done
     }
     return p.first;
@@ -17,11 +17,11 @@ fn score(p: Pair<int, string>): int {
     mut r: int;
     compare p {
         matches Pair { first: 0, second: "zero" }:
-            r = 1000;
+        r = 1000;
         done
         matches Pair { first, second }:
-            test::assert(second == "five", "second is a string binding");
-            r = first + 1;
+        test::assert(second == "five", "second is a string binding");
+        r = first + 1;
         done
     }
     return r;

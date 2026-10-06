@@ -9,10 +9,10 @@ fn f(p: Point): int {
     compare p {
         matches Point { x: 0, y }:
         matches Point { x: 1, y }:
-            r = y * 10;
+        r = y * 10;
         done
         matches Point { .. }:
-            r = -1;
+        r = -1;
         done
     }
     return r;

@@ -34,11 +34,11 @@ fn main(): int {
     mut names: string[2] = ["", ""];
     names[0] = "hello";
     names[1] = "world";
-    
+
     // Assert string lengths to verify string arrays work properly
     test::assert(strlen(names[0]) == 5, "");
     test::assert(strlen(names[1]) == 5, "");
-    
+
     mut flags: bool[2] = [false, false];
     flags[0] = true;
     flags[1] = false;

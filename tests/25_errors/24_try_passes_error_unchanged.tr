@@ -35,13 +35,13 @@ fn trace(id: int): string {
     immut _f: bool = fetchFlag(id) recover as err run {
         compare err {
             matches DbError::Missing(table, row):
-                return table + "#" + (row to string) + ":" + err.message;
+            return table + "#" + (row to string) + ":" + err.message;
             done
             matches DbError::Locked:
-                return "locked";
+            return "locked";
             done
             otherwise:
-                return "?";
+            return "?";
         }
     };
     return "ok";

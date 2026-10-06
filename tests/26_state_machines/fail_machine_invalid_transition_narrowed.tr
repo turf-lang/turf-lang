@@ -17,12 +17,12 @@ fn main(): int {
     mut conn: ConnectionState = ConnectionState::Idle;
     compare conn {
         matches ConnectionState::Idle:
-            // Idle has no declared edge straight to Closing -- the arm has
-            // narrowed conn to Idle, so this must be a compile error.
-            conn.transition(ConnectionState::Closing);
+        // Idle has no declared edge straight to Closing -- the arm has
+        // narrowed conn to Idle, so this must be a compile error.
+        conn.transition(ConnectionState::Closing);
         done
         otherwise:
-            mut noop: int = 0;
+        mut noop: int = 0;
     }
     return 0;
 }

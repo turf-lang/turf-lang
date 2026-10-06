@@ -21,10 +21,10 @@ fn codeOf(refuse: bool): int {
     immut _s: string = relay("text", refuse) recover as err run {
         compare err {
             matches GenError::Refused(code):
-                return code;
+            return code;
             done
             otherwise:
-                return 0 - 1;
+            return 0 - 1;
         }
     };
     return 0;
