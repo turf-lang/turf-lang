@@ -987,11 +987,13 @@ over the same code, so how a test is judged exists once.
   finish in, and `turfc --test`'s behaviour on Windows (not supported yet; it
   needs a process runner for that platform, REL-008).
 
-### 6.23 `turf fmt` — guarantees — PROPOSED (REL-002 stage 2, 2026-10-06)
+### 6.23 `turf fmt` — guarantees — FROZEN (REL-002 stage 2, 2026-10-06)
 
-Proposed with stage 1's design (the roadmap's REL-002 text), awaiting the owner's
-confirmation like F-TEST-2/3. The formatter itself is unchanged by this
-section: indentation only (`include/Formatter.h`).
+Designed with stage 1 (the roadmap's REL-002 text) and **confirmed by the owner,
+2026-10-06**: F-FMT-1 ("yes, absolutely"), F-FMT-2 and F-FMT-3, each as written
+below, with one refinement to F-FMT-2 that the owner decided at the same time
+(files found under a directory are skipped when they do not lex). The formatter
+itself is unchanged by this section: indentation only (`include/Formatter.h`).
 
 - **Verified, not argued (F-FMT-1).** `turfc --format` checks every result
   before it writes or reports it (`turf::format::verifyFormatting`): (1) no
@@ -1006,7 +1008,16 @@ section: indentation only (`include/Formatter.h`).
   compiler's diagnostic and never the end of the run. (Before, the lexer's
   `exit(1)` on a malformed number ended `turfc --format` at the first such file,
   and an unterminated string was formatted best-effort and followed by the
-  compiler's error output.)
+  compiler's error output.) **Named versus found (owner, 2026-10-06):** that is
+  the rule for a file the user *named*. A file that `turf fmt` only *found* by
+  walking a directory is **skipped** when it does not lex: listed as
+  `skipped <file>: it has a lexical error (…)`, counted in the summary, and not a
+  failure, because a tree can hold sources that are invalid on purpose (this
+  repository's 13 `fail_*` tests). `turf fmt` passes `turfc --format
+  --skip-unlexable` for those files only (driver interface **1.5**); a file named
+  on the command line is never skipped, even if a directory also reaches it. Only
+  a lexical error is skippable: a result that fails verification (F-FMT-1) is a
+  formatter bug and fails whatever its origin.
 - **Modes (F-FMT-3).** `turfc --format [--write | --check] <file.tr>...`:
   neither mode takes exactly one file and prints the text; `--write` rewrites only
   a file whose text differs (an already formatted file keeps its modification
@@ -1017,7 +1028,8 @@ section: indentation only (`include/Formatter.h`).
   `.tr` under it, not hidden directories, not a `build/`); `--exclude <path>`
   drops a file or a directory; with no path inside a project it is the root
   package's `src/` and `tests/`, and one of `--write` / `--check` is then
-  required. Driver interface **1.4**; `turf fmt` asks for it, no other command does.
+  required. Driver interface **1.5** (1.4 added the batch form, 1.5 the skip);
+  `turf fmt` asks for it, no other command does.
 - **Not in 2.0:** a pretty-printer that re-spaces or re-flows code. It needs a
   trivia-preserving lexer (`FUTURE.md` F-11b).
 
@@ -1089,9 +1101,9 @@ Overhaul (F-TYPE-1), whose third column points at their section above.
 | **F-TEST-1** | A project without a `tests/` directory (or with no tests in it) is an error for `turf test` and `turfc --test`, never a silent pass. | §6.22 above (owner rule, 2026-10-06) |
 | **F-TEST-2** (proposed) | A test is judged by its file name (plain / `fail_*` / `RUNTIME_ABORT_EXPECTED`, `*_module.tr` skipped) and its `EXPECT-*` markers, by one implementation (`turfc --test`) that `turf test` and `scripts/test_runner.sh` both drive; each test runs in its own directory. | §6.22 above |
 | **F-TEST-3** (proposed) | In a project a test file is the root package's code: it may be the entry point and imports the package's modules, direct dependencies, stdlib and `tests/` helpers (package-graph `"tests"` key, driver interface 1.3). | §6.22 above |
-| **F-FMT-1** (proposed) | `turfc --format` verifies every result before writing or reporting it: only whitespace changed, the lexer reads the same tokens, formatting again changes nothing; a result that fails is not written. | §6.23 above |
-| **F-FMT-2** (proposed) | A source with a lexical error is not formatted: reported with the lexer's reason, left unchanged, exit 1, the rest of the batch still done. | §6.23 above |
-| **F-FMT-3** (proposed) | `turfc --format` modes: stdout (one file), `--write` (only files that differ), `--check` (names what would change, exit 1 if any); `--write` with `--check` is a usage error. | §6.23 above |
+| **F-FMT-1** | `turfc --format` verifies every result before writing or reporting it: only whitespace changed, the lexer reads the same tokens, formatting again changes nothing; a result that fails is not written. | §6.23 above |
+| **F-FMT-2** | A source with a lexical error is not formatted: reported with the lexer's reason, left unchanged, exit 1 if the user named it, the rest of the batch still done. A file only found under a directory is skipped (listed, counted, not a failure). | §6.23 above (owner decision 2026-10-06) |
+| **F-FMT-3** | `turfc --format` modes: stdout (one file), `--write` (only files that differ), `--check` (names what would change, exit 1 if any); `--write` with `--check` is a usage error. | §6.23 above |
 
 ---
 

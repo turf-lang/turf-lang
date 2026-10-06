@@ -1473,7 +1473,11 @@ static void testFormatterGuarantees() {
     CHECK(!B.Ok);
     CHECK(B.Error.find("lexical error") != std::string::npos);
     CHECK(B.Text.empty());
+    // Marked as such, because `--skip-unlexable` may skip exactly this and
+    // never a verification failure ("formatter bug"), which has no such mark.
+    CHECK(B.Unlexable);
   }
+  CHECK(!formatChecked(Src).Unlexable);
   // The refusal left no diagnostics behind for the host to print.
   CHECK(!DiagnosticEngine::hasErrors());
   FormatResult After = formatChecked(Src);

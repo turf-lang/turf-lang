@@ -46,6 +46,10 @@ struct FormatResult {
   // Why Ok is false, for formatChecked() (empty otherwise): which of the
   // guarantees below the formatter would have broken.
   std::string Error;
+  // True when Ok is false *because the lexer rejected the source* (as opposed
+  // to a verification failure, which is a formatter bug). `turfc --format
+  // --skip-unlexable` skips the former and still fails on the latter.
+  bool Unlexable = false;
 };
 
 // Formats `Source`. Never deletes or reorders any non-whitespace content

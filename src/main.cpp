@@ -109,9 +109,10 @@ using namespace llvm;
 // only `turf test` asks for it, so every other command still needs only 1.1.
 // 1.4 (REL-002 stage 2) makes `--format` take several files, adds `--format
 // --check`, and verifies every result before it is written; only `turf fmt`
-// asks for it.
+// asks for it. 1.5 adds `--format --skip-unlexable`, which `turf fmt` passes
+// for the files it found by walking a directory.
 static constexpr int TurfcInterfaceMajor = 1;
-static constexpr int TurfcInterfaceMinor = 4;
+static constexpr int TurfcInterfaceMinor = 5;
 
 // The exit statuses (FREEZE.md 6.21, F-CLI-1, REL-001). The split exists so a script
 // or an editor can tell "your program has a mistake" (1: the compiler ran and
@@ -152,6 +153,7 @@ struct CompilerOptions {
   bool DumpInstantiations = false;    // --dump-instantiations: TYPE-002 (S11b) report-only census
   bool Format = false;                // --format: print the formatted source to stdout and exit
   bool FormatWrite = false;           // --write (with --format or --migrate=pub): rewrite the file(s) in place instead
+  bool FormatSkipUnlexable = false;   // --skip-unlexable (with --format --write|--check): a file the lexer rejects is reported as skipped, not as a failure
   bool MigratePub = false;            // --migrate=pub: LEC-002 -- add `pub` to every top-level declaration and struct field of the given files
   std::vector<std::string> PositionalFiles; // every non-option argument, in order (--migrate=pub takes several)
   std::vector<std::string> LinkLibs;  // --link <name>: extra libraries to pass to the linker as -l<name>
@@ -408,7 +410,7 @@ static const char *turfcUsage() {
          "         [--resolve] [--typecheck] [--dump-ast] [--dump-resolver-symbols]\n"
          "         [--dump-resolved] [--dump-typechecked] [--dump-modules]\n"
          "         [--dump-instantiations]\n"
-         "       turfc --format [--write | --check] <filename.tr>...\n"
+         "       turfc --format [--write | --check [--skip-unlexable]] <filename.tr>...\n"
          "       turfc --migrate=pub [--write] <module.tr>...\n"
          "       turfc --test [<tests-dir>] [--package-graph <file>] [--exclude <path>]\n"
          "         [-O0|-O1|-O2|-O3|-Os] [-g] [--link <libname>] [--jobs <n>]\n"
@@ -437,6 +439,7 @@ static const char *const KnownOptions[] = {
     "--target=",          "--explain",      "-mcpu=",
     "--test",             "--jobs",         "--timeout",
     "--diag-register",    "--exclude",
+    "--skip-unlexable",
 };
 
 /// An unknown option is a usage error, never something to ignore: a typo'd
@@ -537,6 +540,8 @@ static CompilerOptions parseArgs(int argc, char **argv) {
       opts.Format = true;
     } else if (arg == "--write") {
       opts.FormatWrite = true;
+    } else if (arg == "--skip-unlexable") {
+      opts.FormatSkipUnlexable = true;
     } else if (arg.rfind("--migrate=", 0) == 0) {
       // Only one migration exists (LEC-002). An unknown name is a hard error,
       // like an unknown -O level: a typo must not silently do nothing to a
@@ -638,6 +643,14 @@ static CompilerOptions parseArgs(int argc, char **argv) {
 ///              build system does not see a change).
 ///   --check    nothing is written; each file that would change is named, and
 ///              the status is 1 if there is any: what CI wants.
+///   --skip-unlexable (with --write or --check)
+///              a file the lexer rejects is named as skipped and does not
+///              change the status. `turf fmt` passes it for the files it found
+///              by walking a directory (a tree may hold sources that are
+///              invalid on purpose); a file named on the command line is not
+///              skipped, since the user asked for it. Only a lexical error is
+///              skipped: a result that fails verification is a formatter bug
+///              and still fails.
 ///
 /// Every result is verified before it is written or reported
 /// (turf::format::formatChecked): a formatter that rewrites people's files
@@ -645,10 +658,15 @@ static CompilerOptions parseArgs(int argc, char **argv) {
 /// verification is left unchanged and reported as a formatter bug, and the
 /// remaining files are still attempted, so one bad file does not leave the
 /// rest unformatted.
-static int runFormat(const std::vector<std::string> &Files, bool Write, bool CheckOnly) {
+static int runFormat(const std::vector<std::string> &Files, bool Write, bool CheckOnly, bool SkipUnlexable) {
   if (Write && CheckOnly) {
     std::cerr << "Error: --format takes --write or --check, not both (one rewrites the "
                  "files, the other promises not to).\n";
+    return ExitUsage;
+  }
+  if (SkipUnlexable && !Write && !CheckOnly) {
+    std::cerr << "Error: --skip-unlexable goes with --write or --check; without either, the one file "
+                 "is printed and a file that cannot be formatted has nothing to print.\n";
     return ExitUsage;
   }
   if (!Write && !CheckOnly && Files.size() > 1) {
@@ -664,7 +682,7 @@ static int runFormat(const std::vector<std::string> &Files, bool Write, bool Che
     }
 
   int Status = ExitOk;
-  size_t Changed = 0, Unchanged = 0;
+  size_t Changed = 0, Unchanged = 0, Skipped = 0;
   for (const auto &File : Files) {
     std::ifstream In(File, std::ios::binary);
     if (!In) {
@@ -677,6 +695,11 @@ static int runFormat(const std::vector<std::string> &Files, bool Write, bool Che
     const std::string Original = Buf.str();
 
     turf::format::FormatResult R = turf::format::formatChecked(Original);
+    if (!R.Ok && R.Unlexable && SkipUnlexable) {
+      ++Skipped;
+      std::cout << "skipped " << File << ": " << R.Error << "\n";
+      continue;
+    }
     if (!R.Ok) {
       std::cerr << "Error: Could not format " << File
                 << (R.Error.empty() ? "" : ": " + R.Error + "; the file was left unchanged") << "\n";
@@ -709,7 +732,9 @@ static int runFormat(const std::vector<std::string> &Files, bool Write, bool Che
 
   if (Write || CheckOnly)
     std::cout << (CheckOnly ? "Would reformat " : "Reformatted ") << Changed << " file"
-              << (Changed == 1 ? "" : "s") << "; " << Unchanged << " already formatted.\n";
+              << (Changed == 1 ? "" : "s") << "; " << Unchanged << " already formatted"
+              << (Skipped ? "; " + std::to_string(Skipped) + " skipped (lexical error)" : std::string())
+              << ".\n";
   return Status;
 }
 
@@ -1325,7 +1350,7 @@ static int runCompilerMain(int argc, char **argv) {
   // before any of that global state (GlobalSymbolTable, LLVM
   // module, ...) gets initialized at all.
   if (opts.Format)
-    return runFormat(opts.PositionalFiles, opts.FormatWrite, opts.Check);
+    return runFormat(opts.PositionalFiles, opts.FormatWrite, opts.Check, opts.FormatSkipUnlexable);
 
   if (!OpenSourceFile(opts.InputFile)) {
     std::cerr << "Error: Could not open file " << opts.InputFile << "\n";

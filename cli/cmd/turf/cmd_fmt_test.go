@@ -49,26 +49,31 @@ func TestCollectFmtFiles(t *testing.T) {
 		"src/main.tr", "src/util/text.tr", "src/.hidden/x.tr", "src/.swap.tr",
 		"src/build/out.tr", "tests/a.tr", "tests/fail_b.tr", "tests/known/c.tr", "notes.txt")
 
-	got, err := collectFmtFiles(root, []string{"src", "tests"}, []string{"tests/known", "tests/fail_b.tr"})
+	named, got, err := collectFmtFiles(root, []string{"src", "tests"}, []string{"tests/known", "tests/fail_b.tr"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"src/main.tr", "src/util/text.tr", "tests/a.tr"}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("got %v, want %v (hidden entries, build/ and the excludes must be dropped, order stable)", got, want)
+	if !reflect.DeepEqual(got, want) || len(named) != 0 {
+		t.Errorf("walked %v named %v, want walked %v (hidden entries, build/ and the excludes must be dropped, order stable)", got, named, want)
 	}
 
-	// A file stands for itself, a repeat is one entry, and the spelling is kept.
-	got, err = collectFmtFiles(root, []string{"src/main.tr", "src", "src/main.tr"}, nil)
+	// A file stands for itself, a repeat is one entry, the spelling is kept,
+	// and a file that is both named and found by a walk is named: the user
+	// asked for it, so a lexical error in it must not be skipped.
+	named, got, err = collectFmtFiles(root, []string{"src/main.tr", "src", "src/main.tr"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"src/main.tr", "src/util/text.tr"}; !reflect.DeepEqual(got, want) {
-		t.Errorf("got %v, want %v", got, want)
+	if want := []string{"src/main.tr"}; !reflect.DeepEqual(named, want) {
+		t.Errorf("named %v, want %v", named, want)
+	}
+	if want := []string{"src/util/text.tr"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("walked %v, want %v", got, want)
 	}
 
 	// A path that is not there is an error naming it, not a silent skip.
-	if _, err := collectFmtFiles(root, []string{"srcc"}, nil); err == nil || !strings.Contains(err.Error(), "srcc") {
+	if _, _, err := collectFmtFiles(root, []string{"srcc"}, nil); err == nil || !strings.Contains(err.Error(), "srcc") {
 		t.Errorf("a missing path must be an error naming it, got %v", err)
 	}
 }

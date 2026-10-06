@@ -30,6 +30,7 @@ var RequiredForTest = Interface{Major: 1, Minor: 3}
 
 // RequiredForFmt is what `turf fmt` needs: the batch form of `turfc --format`
 // (several files, `--check`, a verified result), interface 1.4 (REL-002 stage
-// 2). Like RequiredForTest it is checked by the one command, not by the
-// handshake every command runs.
-var RequiredForFmt = Interface{Major: 1, Minor: 4}
+// 2) and `--skip-unlexable`, which it passes for the files it found under a
+// directory: interface 1.5. Like RequiredForTest it is checked by the one
+// command, not by the handshake every command runs.
+var RequiredForFmt = Interface{Major: 1, Minor: 5}

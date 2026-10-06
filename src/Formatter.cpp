@@ -177,7 +177,7 @@ FormatResult format(std::string_view Source, const FormatOptions &Options) {
     std::vector<std::string> Ignored;
     std::string Why;
     if (!tokenKeys(Source, Ignored, Why))
-      return {"", false, "it has a lexical error (" + Why + ")"};
+      return {"", false, "it has a lexical error (" + Why + ")", /*Unlexable=*/true};
   }
 
   std::unordered_map<int, LineDepth> LineIndent = computeLineIndents(Source);

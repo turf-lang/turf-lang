@@ -159,6 +159,28 @@ c single_bad "$B" --format lexbad.tr
 expect_rc "--format on a file with a lexical error" single_bad 1
 [ ! -s "$WORK/_single_bad.out" ] || fail "--format printed text for a file it could not format"
 
+# --skip-unlexable (what `turf fmt` passes for files it found under a
+# directory): a lexical error is named as skipped and is not a failure. Nothing
+# else is: a missing file still fails, and a usage error stays one.
+messy "$B/a.tr"
+messy "$B/z.tr"
+c skip "$B" --format --write --skip-unlexable a.tr lexbad.tr unterminated.tr z.tr
+expect_rc "--skip-unlexable: lexical errors are not failures" skip 0
+expect_out "--skip-unlexable names what it skipped" skip "skipped lexbad.tr: it has a lexical error (line 2:"
+expect_out "--skip-unlexable names an unterminated string too" skip "skipped unterminated.tr: it has a lexical error"
+expect_out "--skip-unlexable counts them" skip "Reformatted 2 files; 0 already formatted; 2 skipped (lexical error)."
+same "--skip-unlexable still formats the rest" "$B/a.tr" "$D/want.tr"
+same "--skip-unlexable leaves a skipped file byte for byte" "$B/lexbad.tr" "$B/lexbad.orig"
+c skip_chk "$B" --format --check --skip-unlexable a.tr lexbad.tr
+expect_rc "--check --skip-unlexable on formatted files" skip_chk 0
+expect_out "--check --skip-unlexable" skip_chk "Would reformat 0 files; 1 already formatted; 1 skipped (lexical error)."
+c skip_missing "$B" --format --check --skip-unlexable a.tr missing.tr
+expect_rc "--skip-unlexable does not excuse a missing file" skip_missing 1
+expect_err "--skip-unlexable does not excuse a missing file" skip_missing "Could not open file missing.tr"
+c skip_nomode "$B" --format --skip-unlexable a.tr
+expect_rc "--skip-unlexable without --write or --check" skip_nomode 2
+expect_err "--skip-unlexable without --write or --check" skip_nomode "goes with --write or --check"
+
 # --- the repository's own files -----------------------------------------------------
 # Formatting is idempotent and never refused as a formatter bug across ~1200 real
 # files. Run on a copy, since this repository's files are not rewritten here. The
@@ -180,6 +202,13 @@ grep -q "^Would reformat 0 files;" "$WORK/_cc.out" || fail "corpus: a second pas
 W1=$(strip "$WORK/_cw.err" | grep -c "Could not format")
 W2=$(strip "$WORK/_cc.err" | grep -c "Could not format")
 [ "$W1" = "$W2" ] || fail "corpus: $W1 files could not be formatted, then $W2"
+# With --skip-unlexable the same set is skipped and the run is clean: that is the
+# state `turf fmt --check` has to reach for CI. (--check on the already
+# formatted copy; the number skipped is the number that could not be formatted.)
+(cd "$CORPUS" && "$TURFC" --format --check --skip-unlexable $(cat files.txt)) > "$WORK/_cs.out" 2> "$WORK/_cs.err" < /dev/null
+echo $? > "$WORK/_cs.rc"
+expect_rc "corpus: --check --skip-unlexable is clean" cs 0
+grep -q "; $W1 skipped (lexical error)\.$" "$WORK/_cs.out" || fail "corpus: expected $W1 skipped, got: $(tail -1 "$WORK/_cs.out")"
 # Everything that could not be formatted is a deliberately invalid test.
 if strip "$WORK/_cw.err" | grep "Could not format" | grep -v "lexical error" | grep -q .; then
   fail "corpus: a file failed for a reason other than a lexical error: $(strip "$WORK/_cw.err" | grep 'Could not format' | grep -v 'lexical error' | head -2)"
@@ -237,6 +266,25 @@ else
   same "an excluded file is untouched" "$A/tests/known/invalid.tr" "$D/messy.orig"
   t proj_after "$A" fmt --check --exclude tests/known
   expect_rc "turf fmt --check after --write" proj_after 0
+
+  # A file the lexer rejects: skipped when found under a directory (a tree can
+  # hold sources that are invalid on purpose), an error when named.
+  printf 'fn main(): int {\n    return 3.14.15;\n}\n' > "$A/tests/lexbad.tr"
+  cp "$A/tests/lexbad.tr" "$A/tests/lexbad.orig"
+  t skip_dir "$A" fmt --check --exclude tests/known
+  expect_rc "turf fmt --check skips an unlexable file found in a directory" skip_dir 0
+  expect_out "the skip is named" skip_dir "skipped tests/lexbad.tr: it has a lexical error"
+  expect_out "the skip is counted" skip_dir "1 skipped (lexical error)."
+  t skip_write "$A" fmt --write --exclude tests/known
+  expect_rc "turf fmt --write skips it too" skip_write 0
+  same "a skipped file is left byte for byte" "$A/tests/lexbad.tr" "$A/tests/lexbad.orig"
+  t skip_named "$A" fmt --check tests/lexbad.tr
+  expect_rc "a named file with a lexical error is an error" skip_named 1
+  expect_err "a named file with a lexical error is an error" skip_named "Could not format tests/lexbad.tr: it has a lexical error"
+  t skip_both "$A" fmt --check --exclude tests/known tests tests/lexbad.tr
+  expect_rc "named wins over found: the directory must not excuse it" skip_both 1
+  expect_err "named wins over found" skip_both "Could not format tests/lexbad.tr"
+  rm -f "$A/tests/lexbad.tr" "$A/tests/lexbad.orig"
 
   # Named paths: files, directories, a typo.
   t path_file "$A" fmt tests/ok.tr

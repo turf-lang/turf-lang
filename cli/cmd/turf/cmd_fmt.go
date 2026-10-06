@@ -26,7 +26,8 @@ import (
 // formatted, and the guarantees about it (it only moves whitespace, the token
 // stream is unchanged, formatting twice changes nothing), are turfc's: every
 // result is verified there before it is written or reported (FREEZE.md 6.23).
-// turf only decides which files.
+// turf only decides which files, and which of them may be skipped when the
+// lexer rejects them (the ones found under a directory, not the ones named).
 //
 // Without --write or --check the formatted text goes to stdout, so several
 // files would concatenate into output nobody could tell apart; that is refused
@@ -38,7 +39,6 @@ func cmdFmt(args []string) int {
 		return code
 	}
 
-	var files []string
 	dir := "" // where turfc runs; empty is where the user is
 	if len(opts.paths) == 0 {
 		if !opts.write && !opts.check {
@@ -59,15 +59,15 @@ func cmdFmt(args []string) int {
 		}
 	}
 
-	files, err := collectFmtFiles(dir, opts.paths, opts.excludes)
+	named, walked, err := collectFmtFiles(dir, opts.paths, opts.excludes)
 	if err != nil {
 		return failf("fmt: %v", err)
 	}
-	if len(files) == 0 {
+	if len(named)+len(walked) == 0 {
 		return failf("fmt: no .tr files found in %s", strings.Join(opts.paths, ", "))
 	}
 	stdout := !opts.write && !opts.check
-	if stdout && (len(files) > 1 || fmtGivenDirectory(dir, opts.paths)) {
+	if stdout && (len(named)+len(walked) > 1 || fmtGivenDirectory(dir, opts.paths)) {
 		return usagef("fmt: without --write or --check the formatted text goes to stdout, so exactly one file is accepted; pass --write to reformat files in place, or --check to only report")
 	}
 
@@ -87,15 +87,22 @@ func cmdFmt(args []string) int {
 			return failf("%v", err)
 		}
 		if stdout {
-			return driver.Exec(c, append(flags, files[0]))
+			return driver.Exec(c, append(flags, named[0]))
 		}
+		// Files the user named must format; files only found under a
+		// directory are skipped if the lexer rejects them (see
+		// collectFmtFiles). Two kinds of run, so turfc is told which.
 		status := 0
-		for _, batch := range chunkFiles(files, fmtArgBudget()) {
-			argv := append(append([]string{}, flags...), batch...)
-			if s := driver.RunIn(dir, c, argv); s != 0 && status == 0 {
-				status = s
+		run := func(files, extra []string) {
+			for _, batch := range chunkFiles(files, fmtArgBudget()) {
+				argv := append(append(append([]string{}, flags...), extra...), batch...)
+				if s := driver.RunIn(dir, c, argv); s != 0 && status == 0 {
+					status = s
+				}
 			}
 		}
+		run(named, nil)
+		run(walked, []string{"--skip-unlexable"})
 		return status
 	})
 }
@@ -168,7 +175,14 @@ func fmtGivenDirectory(dir string, paths []string) bool {
 // file or everything under a directory, spelled the way the path was. A path
 // that does not exist is an error naming it, never skipped: a typo would
 // otherwise pass `--check` having checked nothing.
-func collectFmtFiles(dir string, paths, excludes []string) ([]string, error) {
+//
+// The files come back in two lists because they are not held to the same
+// rule: `named` are files the user spelled out, which must be formatted or the
+// run fails; `walked` were only found under a directory, and a tree may hold
+// sources that are invalid on purpose (this repository's `fail_*` tests), so
+// one the lexer rejects is skipped, not a failure. A file that is both named
+// and found by a walk is `named`: asking for it explicitly wins.
+func collectFmtFiles(dir string, paths, excludes []string) (named, walked []string, err error) {
 	excluded := func(f string) bool {
 		f = filepath.ToSlash(filepath.Clean(f))
 		for _, x := range excludes {
@@ -179,22 +193,20 @@ func collectFmtFiles(dir string, paths, excludes []string) ([]string, error) {
 		}
 		return false
 	}
-	seen := map[string]bool{}
-	var out []string
-	add := func(f string) {
-		if !seen[f] && !excluded(f) {
-			seen[f] = true
-			out = append(out, f)
-		}
-	}
+	seenNamed := map[string]bool{}
+	seenWalked := map[string]bool{}
+	var walkedAll []string
 	for _, p := range paths {
 		abs := filepath.Join(dir, p)
 		st, err := os.Stat(abs)
 		if err != nil {
-			return nil, fmt.Errorf("%s: no such file or directory", p)
+			return nil, nil, fmt.Errorf("%s: no such file or directory", p)
 		}
 		if !st.IsDir() {
-			add(p)
+			if !seenNamed[p] && !excluded(p) {
+				seenNamed[p] = true
+				named = append(named, p)
+			}
 			continue
 		}
 		var found []string
@@ -216,14 +228,22 @@ func collectFmtFiles(dir string, paths, excludes []string) ([]string, error) {
 			return nil
 		})
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		sort.Strings(found)
 		for _, f := range found {
-			add(f)
+			if !seenWalked[f] && !excluded(f) {
+				seenWalked[f] = true
+				walkedAll = append(walkedAll, f)
+			}
 		}
 	}
-	return out, nil
+	for _, f := range walkedAll {
+		if !seenNamed[f] {
+			walked = append(walked, f)
+		}
+	}
+	return named, walked, nil
 }
 
 // fmtArgBudget is how many bytes of file names one turfc run is given. A
@@ -295,7 +315,10 @@ checked before it is written or reported: no non-whitespace byte changed, the
 lexer reads the same tokens from both texts, and formatting the result again
 changes nothing. A file that fails a check is left alone and reported as a
 formatter bug. A file with a lexical error (an unterminated string, a malformed
-number) cannot be formatted and is reported; the rest are still done. The exit
-status is 0 when every file was formatted (or, with --check, already formatted)
+number) cannot be formatted; the rest are still done. If you named that file, it
+is an error. If it was only found under a directory it is listed as "skipped"
+and is not an error, because a tree can hold sources that are invalid on
+purpose (a test of the compiler's own error messages). The exit status is 0
+when every file was formatted or skipped (or, with --check, already formatted)
 and 1 otherwise. Runs turfc --format.
 `
