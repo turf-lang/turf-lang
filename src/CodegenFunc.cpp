@@ -713,6 +713,16 @@ Value *FuncDefExprAST::codegen() {
     if (IsDead) {
       // Dead block left behind by a return statement — erase it cleanly.
       CurBB->eraseFromParent();
+      // The builder still points at the block just freed. A nested function
+      // restores its caller's insert point below, but a TOP-LEVEL one (a
+      // module's own function) has none to restore, so the freed block stayed
+      // "current" -- and the module body's BlockExprAST::codegen() then asked
+      // it for its terminator (CodegenControlFlow.cpp, which already says
+      // GetInsertBlock() may legitimately be null there). Usually a harmless
+      // read of freed memory; segfaulted (exit 139) once the prelude grew to
+      // nine modules and the allocator happened to reuse it. Found with ASan:
+      // `turfc --check --module` on a file under a temp directory.
+      Builder->ClearInsertionPoint();
     } else if (ReturnType->isVoid()) {
       Builder->CreateRetVoid();
     } else {
