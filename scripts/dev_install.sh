@@ -22,7 +22,9 @@
 # and runtime instead of its own.
 #
 # This is a developer convenience, not the release install. A real install
-# is an unpacked release archive (REL-003).
+# is a release archive installed with the repo-root install.sh (REL-003), which
+# also edits your shell start-up file so `turf` is on PATH in new terminals;
+# this script never edits one.
 #
 # Usage: scripts/dev_install.sh [--prefix DIR] [--with-turfc] [--uninstall]
 

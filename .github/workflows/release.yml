@@ -68,9 +68,13 @@ jobs:
         uses: ./.github/actions/package-release
         with:
           platform-suffix: linux-x86_64
-          binary-path: build/turfc
           archive-format: tar.gz
-          extra-files: build/turf
+
+      # REL-003: install the archive that is about to be published with
+      # install.sh and use it (layout, checksum, PATH block, turf new/run/
+      # build, uninstall). A release that fails this is not uploaded.
+      - name: Release archive smoke test
+        run: CI=1 ./scripts/release_smoke.sh --archive "${{ steps.package.outputs.archive-path }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -121,9 +125,7 @@ jobs:
         uses: ./.github/actions/package-release
         with:
           platform-suffix: linux-arch-x86_64
-          binary-path: build/turfc
           archive-format: tar.gz
-          extra-files: build/turf
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -162,9 +164,13 @@ jobs:
         uses: ./.github/actions/package-release
         with:
           platform-suffix: macos-arm64
-          binary-path: build/turfc
           archive-format: tar.gz
-          extra-files: build/turf
+
+      # REL-003: as for linux-x86_64. Written without a macOS machine; this
+      # runner is where the script's Darwin branches (bash login shell,
+      # ~/.bash_profile, BSD tools) get their first real run.
+      - name: Release archive smoke test
+        run: CI=1 ./scripts/release_smoke.sh --archive "${{ steps.package.outputs.archive-path }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -243,13 +249,10 @@ jobs:
         uses: ./.github/actions/package-release
         with:
           platform-suffix: windows-x86_64
-          binary-path: build/turfc.exe
           archive-format: zip
           # turf.exe has no DLL dependencies (CGO_ENABLED=0 in the CMake target),
-          # so it needs no ldd sweep; it is listed here only to be bundled.
-          extra-files: |
-            build/turf.exe
-            ${{ steps.dlls.outputs.list }}
+          # so only the DLLs turfc.exe needs go beside them in bin/.
+          bin-extra: ${{ steps.dlls.outputs.list }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -264,6 +267,14 @@ jobs:
     needs: [linux-x86_64, linux-arch-x86_64, macos-arm64, windows-x86_64]
     runs-on: ubuntu-latest
     steps:
+      # install.sh is published with the release so the one-liner in the README
+      # can point at the version being installed, and it is the file the
+      # smoke tests above ran against.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: install.sh
+          sparse-checkout-cone-mode: false
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -272,6 +283,12 @@ jobs:
       - name: Combine checksums
         run: cat *.sha256 > checksums.txt
 
+      # REL-003 stage 4: Homebrew / Scoop / AUR recipes for the platforms this
+      # release actually shipped, attached so whoever bumps those repositories
+      # takes them from one place. Publishing to them is not done from here.
+      - name: Generate package recipes
+        run: ./scripts/gen_recipes.sh --checksums checksums.txt --version "${GITHUB_REF_NAME}" --out recipes
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -279,4 +296,8 @@ jobs:
           files: |
             turf-*.tar.gz
             turf-*.zip
+            install.sh
             checksums.txt
+            recipes/homebrew/turf.rb
+            recipes/scoop/turf.json
+            recipes/aur/PKGBUILD

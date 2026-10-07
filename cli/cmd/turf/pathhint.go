@@ -18,10 +18,11 @@ import (
 // FOR NOW ONLY. It is shown by `turf version` and `turf help`, the commands
 // someone runs first, and it only ever prints: turf does not edit shell
 // start-up files or the Windows registry behind the user's back. Real PATH
-// management on every OS (bash/zsh/fish, macOS login shells, the Windows user
-// PATH) is the release installers' job (ROADMAP_v2.0.0.md REL-008 stage 7,
-// install.sh / install.ps1). When those land, revisit this and the matching
-// note in scripts/dev_install.sh.
+// management is the release installers' job: install.sh (Linux, macOS; REL-003)
+// does it for bash/zsh/fish and macOS login shells, install.ps1 for the Windows
+// user PATH is REL-008 stage 7 and does not exist yet. The hint stays because a
+// user may still run an unpacked archive or a build by its full path; point it
+// at install.sh once install.ps1 lands too.
 func pathHint() string {
 	exe, err := os.Executable()
 	if err != nil {
