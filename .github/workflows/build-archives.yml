@@ -49,8 +49,20 @@ jobs:
       # REL-008 stage 2: the static archives the self-contained link takes
       # zlib, zstd and terminfo from (libz.a, libzstd.a, libtinfo.a). Not in the
       # LLVM cache above, so installed on every run.
-      - name: Install static system libraries
-        run: sudo apt-get install -y zlib1g-dev libzstd-dev libncurses-dev
+      #
+      # REL-008 stage 3: lld's static libraries and headers (liblld-22 /
+      # liblld-22-dev). The cache restores files but not the apt.llvm.org
+      # repository, so it is registered here, and llvm-22-dev is installed again
+      # in the same command so lld and the LLVM headers are always one version
+      # (LLDConfig.cmake asks for exactly the LLVM it was built with; a cached
+      # llvm-22-dev older than the repository's lld would fail that).
+      - name: Install lld, and static system libraries
+        run: |
+          CODENAME=$(lsb_release -cs)
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
+          echo "deb http://apt.llvm.org/${CODENAME}/ llvm-toolchain-${CODENAME}-22 main" | sudo tee /etc/apt/sources.list.d/llvm-22.list
+          sudo apt-get update
+          sudo apt-get install -y llvm-22-dev liblld-22-dev zlib1g-dev libzstd-dev libncurses-dev
 
       # Go, before the CMake build, so it builds build/turf (the front end under
       # cli/, LEC-001) beside build/turfc; the archive ships both.
@@ -61,10 +73,18 @@ jobs:
 
       # --release-static: static LLVM and C++ runtime, no --smart model runtime
       # (so no llama.cpp submodule, no OpenMP).
+      # --embed-lld (REL-008 stage 3): Linux only for now; the Windows and macOS
+      # drivers arrive with their C runtimes (stages 5 and 6).
       - name: Build Turf
         run: |
           chmod +x scripts/cmake_build.sh
-          ./scripts/cmake_build.sh --release-static
+          ./scripts/cmake_build.sh --release-static --embed-lld
+
+      # The embedded linker against a stand-in C runtime from this runner's
+      # static glibc (the shipped one is musl, stage 4): which programs are
+      # linked in-process and which go to cc, what a broken runtime reports.
+      - name: Embedded linker smoke test
+        run: CI=1 ./scripts/bundled_link_smoke.sh
 
       - name: Package
         id: package

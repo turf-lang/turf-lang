@@ -17,6 +17,9 @@ SMART="ON"
 # Release build with LLVM and the C++ runtime linked statically and --smart's
 # model runtime off. Needs an LLVM that ships static libraries; CI uses it.
 RELEASE_STATIC="OFF"
+# --embed-lld (with --release-static): embed lld so a program naming no system C
+# library is linked in-process against the bundled runtime (REL-008 stage 3).
+EMBED_LLD="OFF"
 # Parse arguments
 for arg in "$@"; do
   case $arg in
@@ -24,9 +27,10 @@ for arg in "$@"; do
     --debug)     BUILD_TYPE="Debug" ;;
     --no-smart)  SMART="OFF" ;;
     --release-static) BUILD_TYPE="Release"; SMART="OFF"; RELEASE_STATIC="ON" ;;
+    --embed-lld) EMBED_LLD="ON" ;;
     --clean)     rm -rf "$BUILD_DIR" && echo -e "${YELLOW}Cleaned build directory.${RESET}" ;;
     --help)
-      echo "Usage: $0 [--debug] [--release] [--release-static] [--no-smart] [--clean]"
+      echo "Usage: $0 [--debug] [--release] [--release-static [--embed-lld]] [--no-smart] [--clean]"
       exit 0
       ;;
   esac
@@ -36,6 +40,7 @@ cmake -S . -B "$BUILD_DIR" \
   -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
   -DTURF_SMART="$SMART" \
   -DTURF_RELEASE_STATIC="$RELEASE_STATIC" \
+  -DTURF_EMBED_LLD="$EMBED_LLD" \
   -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 # Symlink compile_commands.json to project root for clangd/IDEs
 if [ -f "$BUILD_DIR/compile_commands.json" ] && [ ! -L "compile_commands.json" ]; then

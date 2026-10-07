@@ -17,6 +17,7 @@
 
 #include "Algorithms.h"
 #include "Builtins.h"
+#include "BundledLink.h"
 #include "Codegen.h"
 #include "Colors.h"
 #include "ErrorCategory.h"
@@ -1150,6 +1151,48 @@ static int linkObject(const std::string &ObjFile,
     return 1;
   }
 
+  // REL-008 stage 3 (DEC-14's hybrid rule): a program that names no system C
+  // library beyond the C runtime itself (the stdlib's `math` names "m") is
+  // linked by the linker built into turfc, statically, against the C runtime
+  // the release archive ships under lib/rt/<platform>/. Anything else named
+  // (`extern from "lib"`, --link) needs that library's own development files
+  // and goes to the system toolchain below, as does every
+  // build without a bundled runtime (a checkout, a dev build, an archive from
+  // before REL-008 stage 4), a sanitizer build, and a run with
+  // TURF_LINKER=system (the escape hatch if the embedded linker misbehaves).
+#ifndef TURF_RT_ASAN_BUILD
+  {
+    const char *Forced = std::getenv("TURF_LINKER");
+    const bool ForceSystem = Forced && std::string(Forced) == "system";
+    const std::string Platform = turf::BundledRuntimePlatform();
+    bool NamesOtherLib = false;
+    for (const auto &L : AllLibs)
+      if (!turf::BundledRuntimeProvides(L))
+        NamesOtherLib = true;
+    if (!ForceSystem && !NamesOtherLib && !Platform.empty()) {
+      const std::string RuntimeDir = TurfLibDir + "/rt/" + Platform;
+      if (turf::BundledLinkAvailable(RuntimeDir)) {
+        turf::BundledLinkRequest Req;
+        Req.ObjectFile = ObjFile;
+        Req.Output = OutputName;
+        Req.RuntimeDir = RuntimeDir;
+        Req.TurfLibDir = TurfLibDir;
+        Req.TurfRtName = RtLibName;
+        std::string Diagnostics;
+        if (turf::BundledLink(Req, Diagnostics) != 0) {
+          std::cerr << "Linking failed (the linker built into turfc, against "
+                    << RuntimeDir << ")\n"
+                    << Diagnostics
+                    << "Setting TURF_LINKER=system links with the system "
+                       "toolchain instead.\n";
+          return 1;
+        }
+        return 0;
+      }
+    }
+  }
+#endif
+
 #ifdef _WIN32
   std::string FinalOutput = WindowsExecutableName(OutputName);
   std::vector<std::string> Args = {"gcc",       ObjFile, "-o", FinalOutput,
@@ -1302,6 +1345,19 @@ static int runCompilerMain(int argc, char **argv) {
                 << "llvm " << LLVM_VERSION_STRING << "\n"
                 << "runtime " << RuntimeAbiSymbol << "\n"
                 << "root " << Root << "\n";
+      // REL-008 stage 3: which linker links a program, and whether this install
+      // has the C runtime that linker needs (so "why did it run cc?" is
+      // answerable from a bug report). `bundled-runtime` appears only when it is
+      // usable: an embedded linker and a complete lib/rt/<platform>/.
+      const std::string RtPlatform = turf::BundledRuntimePlatform();
+      if (RtPlatform.empty()) {
+        std::cout << "linker system-cc\n";
+      } else {
+        std::cout << "linker embedded-lld\n";
+        const std::string RtDir = Root + "/lib/rt/" + RtPlatform;
+        if (turf::BundledLinkAvailable(RtDir))
+          std::cout << "bundled-runtime " << RtDir << "\n";
+      }
       return ExitOk;
     }
   }

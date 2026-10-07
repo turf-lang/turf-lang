@@ -60,3 +60,8 @@ compile_commands.json
 docs/patent/
 docs/patent.zip
 
+
+# Bundled C runtime a release archive carries (REL-008 stage 4 builds it in CI;
+# a developer may assemble one to try the embedded linker, see
+# scripts/bundled_link_smoke.sh).
+/lib/rt/

@@ -6,6 +6,8 @@
 #   turf-v<ver>-<platform>/
 #     bin/turf  bin/turfc           (+ .exe on Windows, and any --bin-extra DLLs)
 #     lib/libturfrt.a  lib/std/**
+#     lib/rt/<platform>/**          (the bundled C runtime, only when built:
+#                                    REL-008 stage 4; turfc's embedded linker uses it)
 #     docs/errors/**  docs/slm/**   (`turf explain` and `--smart` read these)
 #     share/turf/examples/**
 #     LICENSE  README.md
@@ -104,6 +106,13 @@ done
 # sanitizer build for developers and is not what a program should link.
 cp lib/libturfrt.a "$DIR/lib/"
 cp -r lib/std "$DIR/lib/"
+# The bundled C runtime the embedded linker links programs against. Absent until
+# REL-008 stage 4 builds it; an archive without it still works (turfc then runs
+# the system cc), and with it, a program that names no other C library links
+# without one.
+if [ -d lib/rt ]; then
+  cp -r lib/rt "$DIR/lib/"
+fi
 cp -r docs/errors docs/slm "$DIR/docs/"
 cp -r examples "$DIR/share/turf/examples"
 # A project built inside the checkout leaves build/ and .turf/ behind.

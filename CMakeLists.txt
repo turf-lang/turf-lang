@@ -67,10 +67,29 @@ if(TURF_RELEASE_STATIC)
   set(TURF_STATIC_LLVM ON)
 endif()
 
+# REL-008 stage 3: lld inside turfc, so a program that names no system C
+# library is linked in-process (src/BundledLink.cpp) instead of by `cc`. Only
+# the linker driver for the host's object format is linked (ELF on Linux so far;
+# COFF/MinGW and Mach-O arrive with the Windows and macOS runtimes of stages 4-6).
+# It needs the static lld archives (Ubuntu's liblld-22 + liblld-22-dev), which is
+# why it requires TURF_RELEASE_STATIC.
+option(TURF_EMBED_LLD "Embed lld in turfc for in-process linking against the bundled C runtime (release builds)" OFF)
+if(TURF_EMBED_LLD AND NOT TURF_RELEASE_STATIC)
+  message(FATAL_ERROR "TURF_EMBED_LLD needs TURF_RELEASE_STATIC=ON (lld's static libraries are linked against the static LLVM components).")
+endif()
+set(TURF_LLD_COMPONENTS "")
+if(TURF_EMBED_LLD)
+  # What lld's drivers use beyond what the compiler already links (LTO, object
+  # files, option parsing, symbolization for its diagnostics, ...).
+  set(TURF_LLD_COMPONENTS lto dtlto object option binaryformat debuginfodwarf symbolize textapi
+      bitreader bitwriter linker ipo)
+endif()
+
 if(TURF_RELEASE_STATIC)
   llvm_map_components_to_libnames(TURF_LLVM_NAMES
     core support irreader analysis passes target targetparser mc transformutils instcombine scalaropts native
-    AllTargetsAsmParsers AllTargetsCodeGens AllTargetsDescs AllTargetsInfos)
+    AllTargetsAsmParsers AllTargetsCodeGens AllTargetsDescs AllTargetsInfos
+    ${TURF_LLD_COMPONENTS})
   # Imported targets, so CMake adds each component's own LLVM dependencies
   # (CodeGen, SelectionDAG, ...) itself; only the *system* libraries LLVMSupport
   # asks for are replaced, below.
@@ -120,6 +139,36 @@ if(TURF_RELEASE_STATIC)
     endif()
   endforeach()
   set_property(TARGET LLVMSupport PROPERTY INTERFACE_LINK_LIBRARIES ${_sup_llvm} ${TURF_LLVM_SYSLIBS})
+
+  if(TURF_EMBED_LLD)
+    # Ubuntu's lld is built against the shared libLLVM, and its exported targets
+    # say so (`INTERFACE_LINK_LIBRARIES "LLVM"`), which would pull the shared
+    # library back in. Its objects only need LLVM's symbols, which the static
+    # components above provide, so keep just the lld-to-lld edges.
+    find_package(LLD CONFIG REQUIRED)
+    # LLVMLTO (which lld's ELF driver needs) links LLVMExtensions, which on
+    # Debian/Ubuntu is exported as depending on Polly, a separate package this
+    # compiler has no use for. Keep LLVMExtensions, drop the edge; if a Polly
+    # symbol is really referenced, the link says so.
+    if(TARGET LLVMExtensions)
+      set_property(TARGET LLVMExtensions PROPERTY INTERFACE_LINK_LIBRARIES LLVMSupport)
+    endif()
+    set(TURF_LLD_LIBS lldCommon)
+    if(WIN32)
+      message(FATAL_ERROR "TURF_EMBED_LLD: the COFF/MinGW driver is not wired yet (REL-008 stage 5).")
+    elseif(APPLE)
+      message(FATAL_ERROR "TURF_EMBED_LLD: the Mach-O driver is not wired yet (REL-008 stage 6).")
+    else()
+      list(PREPEND TURF_LLD_LIBS lldELF)
+    endif()
+    set_property(TARGET lldCommon PROPERTY INTERFACE_LINK_LIBRARIES "")
+    foreach(_l ${TURF_LLD_LIBS})
+      if(NOT _l STREQUAL "lldCommon")
+        set_property(TARGET ${_l} PROPERTY INTERFACE_LINK_LIBRARIES lldCommon)
+      endif()
+    endforeach()
+    message(STATUS "Embedded linker: ${TURF_LLD_LIBS}")
+  endif()
   message(STATUS "Release link: static LLVM, LLVMSupport's system libs replaced by: ${TURF_LLVM_SYSLIBS}")
 
   if(WIN32)
@@ -532,9 +581,24 @@ endif()
 # The test runner (REL-002, `turfc --test`) belongs to the executable, not to
 # turfcore: it starts processes and is of no use to a tool linking the
 # front-end library.
-add_executable(turfc src/main.cpp src/TestRunner.cpp src/TestExpectations.cpp)
+add_executable(turfc src/main.cpp src/TestRunner.cpp src/TestExpectations.cpp
+  src/BundledLink.cpp)
 
-target_link_libraries(turfc PRIVATE turfcore)
+if(TURF_EMBED_LLD)
+  target_compile_definitions(turfc PRIVATE TURF_EMBED_LLD)
+  # Before turfcore: a static archive only resolves symbols from archives that
+  # come after it, and lld needs LLVM's.
+  target_link_libraries(turfc PRIVATE ${TURF_LLD_LIBS} turfcore)
+else()
+  target_link_libraries(turfc PRIVATE turfcore)
+endif()
+if(TURF_EMBED_LLD)
+  # LLD_INCLUDE_DIRS comes from LLDConfig.cmake; fall back to LLVM's own include
+  # directory, where Debian puts lld/Common/Driver.h.
+  if(LLD_INCLUDE_DIRS)
+    target_include_directories(turfc PRIVATE ${LLD_INCLUDE_DIRS})
+  endif()
+endif()
 if(TURF_RELEASE_STATIC AND NOT APPLE)
   # The C++ runtime and the compiler's support library go into turfc (macOS
   # links the system's libc++, which every Mac has). MinGW is linked fully
