@@ -172,6 +172,22 @@ ProcResult RunProcess(const std::string &Exe, const std::vector<std::string> &Ar
   return R;
 }
 
+#else
+
+// `turfc --test` is POSIX-only until REL-008, and RunTests()/Runner::runOne()
+// return before they would call any of this. The Runner class below is still
+// compiled on Windows and names both, so they have to exist or the whole
+// compiler fails to build there (v2.0.0-rc1's Windows release job did).
+std::atomic<bool> g_Interrupted{false};
+
+ProcResult RunProcess(const std::string &, const std::vector<std::string> &,
+                      const std::string &, int) {
+  ProcResult R;
+  R.Status = 1;
+  R.Output = "unsupported platform";
+  return R;
+}
+
 #endif // !_WIN32
 
 std::string ReadFile(const fs::path &P) {
