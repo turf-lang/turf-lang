@@ -1037,6 +1037,26 @@ static int emitObjectFile(Module &M, TargetMachine &TM,
   return 0;
 }
 
+// D20 (ROADMAP_v2.0.0.md, REL-003): true when `--target` names a machine this
+// compiler's own `libturfrt` and system linker cannot build a program for.
+// Architecture, OS and ABI environment are compared and the vendor field is
+// not: `x86_64-linux-gnu` and the host's `x86_64-pc-linux-gnu` are the same
+// machine, and a strict string/Triple compare would call them foreign and
+// refuse a perfectly good native link. An empty target is the host.
+//
+// The environment is compared on purpose: libturfrt is compiled against the
+// host's libc, so `x86_64-linux-musl` cannot link against it even though the
+// CPU and OS match. REL-008 changes this when it bundles a musl runtime; this
+// is the one place that then has to learn which triples the archive carries.
+static bool isForeignTarget(const std::string &Requested) {
+  if (Requested.empty())
+    return false;
+  Triple Want(Triple::normalize(Requested));
+  Triple Host(Triple::normalize(sys::getDefaultTargetTriple()));
+  return Want.getArch() != Host.getArch() || Want.getOS() != Host.getOS() ||
+         Want.getEnvironment() != Host.getEnvironment();
+}
+
 // g_RequiredLibs is populated by ExternFuncDeclExprAST::codegen() for every
 // 'extern from "libname" fn' declaration encountered during code generation.
 extern std::set<std::string> g_RequiredLibs;
@@ -2335,6 +2355,26 @@ static int runCompilerMain(int argc, char **argv) {
       return 1;
 
     std::cout << "Compiled to " << ObjFile << "\n";
+
+    // D20: the object above is real code for the requested machine, which is
+    // what `--target` is for. Linking it needs a libturfrt built for that
+    // machine and a linker that knows its format, and neither exists, so the
+    // host `cc` used to answer with its own "file in wrong format" and a
+    // `-lturfrt` command line that says nothing about the real cause. Stop
+    // here with the reason, and keep the object: deleting it would throw away
+    // the only thing the user asked for that did work.
+    if (isForeignTarget(opts.TargetTriple)) {
+      std::cerr << "Error: cannot link a program for '" << opts.TargetTriple
+                << "': cross-linking is not supported in 2.0; the runtime "
+                   "(libturfrt) is built for "
+                << sys::getDefaultTargetTriple() << ".\n"
+                << "  The object file for '" << opts.TargetTriple
+                << "' was kept as " << ObjFile
+                << ". Link it with a toolchain and a runtime built for that "
+                   "target, or compile for this machine by leaving "
+                   "--target out.\n";
+      return 1;
+    }
 
     if (linkObject(ObjFile, opts.OutputName, opts.LinkLibs) != 0)
       return 1;
