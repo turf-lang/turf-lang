@@ -1,10 +1,16 @@
 # Core: `int`, `double`, `bool`, `char`, `array`, `strings`
 
-These six modules make up **the entire Turflang prelude** — the compiler
-synthesizes `import int; import double; import bool; import char; import
-strings; import array;` as the first lines of whatever top-level file you
+These six modules, together with `io`, `math` and `sys` (documented in
+[`io_and_net.md`](./io_and_net.md) and [`math_and_os.md`](./math_and_os.md)),
+make up **the entire Turflang prelude** — the compiler synthesizes `import int;
+import double; import bool; import char; import strings; import array; import io;
+import math; import sys;` as the first lines of whatever top-level file you
 compile, so every symbol documented on this page is available with **zero
-explicit imports**. This is the complete list; nothing else is prelude.
+explicit imports**. This is the complete list; nothing else is prelude. The
+six modules on this page are reached through UFCS (`c.is_digit()`), operators
+and `strings::length(s)`; only `io`, `math` and `sys` can also be called by
+their bare names (`printline("hi")`, `abs(-3)`) — see
+[Functions and Modules §4.5](../functions_and_modules.md).
 
 > **Note.** `strings` is prelude even though its own header comment doesn't
 > say so and its usage example shows `import strings;`. Every other prelude
@@ -470,8 +476,9 @@ test::assert(strings::trim("  hello world  ") == "hello world", "trim: interior 
 Splits `s` on every occurrence of `delimiter`. An empty `delimiter`, or a
 `delimiter` that never occurs in `s`, both return a single-element list
 containing all of `s` unchanged (treated as "no real delimiter given," not
-an error). Requires `import list::List;` (or `list::List<string>` written
-out fully) since it returns a generic collection.
+an error). Spelling the result type needs `import list::List;` (or
+`import list;` and `list::List<string>` written out fully) since it returns a
+generic collection; just using the returned value needs neither.
 
 ```turflang
 import list::List;

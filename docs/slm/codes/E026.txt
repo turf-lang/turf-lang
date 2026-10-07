@@ -18,7 +18,7 @@ FIX:
   Check the spelling against the module's real exported function names
   (Turf will usually suggest the closest match itself), or check that the
   module you're importing actually defines what you're looking for --
-  grep the module's own `.tr` file (e.g. `lib/std/io/io.tr`) for its `fn`
+  grep the module's own `.tr` file (e.g. `lib/std/core/io.tr`) for its `fn`
   declarations if you aren't sure.
 
 WHAT THIS ERROR IS NOT:

@@ -364,6 +364,7 @@ These get a stronger, differently-colored footer nudge (see below) urging you to
 - **E027** `ModuleNotFoundError`: nothing answers to that module name. Inside a project, a single-file compile adds a hint that a dependency is only visible to `turf build`.
 - **E090** `AmbiguousModuleError`: two or more different files answer to one name (your own module and the standard library, your own module and a dependency, or two of your own). The message lists every candidate with its kind and path, and the hint says which to rename.
 - **E091** `ModuleNotImportableError`: the module exists in this build but this package may not import it, because it belongs to a *transitive* dependency or is another package's *internal* module.
+- **E145** `ModuleNotImportedError`: `m::name` was written in a file that has no plain `import m;` of its own. The module exists, but only because another file imported it, or because this file imported one *name* from it (`import m::name;` does not allow `m::`). The hint is the line to add.
 - **E088** `PrivateSymbolAccessError` (and **E089** `PrivateInPublicError`): the module is reachable but the item is not `pub`.
 
 Real examples of each, and the rules behind them, are in [Projects & Packages](projects_and_packages.md#4-how-imports-resolve); E090 and E091 have `turf explain` pages.

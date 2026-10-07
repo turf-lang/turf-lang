@@ -7,14 +7,20 @@ THE CORE RULE: `.` IS FOR A VALUE YOU HOLD, `::` IS FOR A NAME.
     io::printline("hi");      Color::Red      Point::new(1, 2)      Point::default()
   `io.printline("hi")` and `p::sum()` are both wrong.
 
-IMPORT FORMS (a file imports every module it uses, except the six prelude
-modules int, double, bool, char, strings and array, which are always there:
-`s.length()`, `strings::length(s)`). There is no automatic `io`.
-    import io;                      // qualified only: io::printline("hi")
-    import io::printline;           // one name, also usable bare: printline("hi")
-    import io::[print, printline];  // several names
-    import math::[*];               // every public name (clashes are errors)
+IMPORT FORMS (a file imports every module it uses, except the nine prelude
+modules int, double, bool, char, strings, array, io, math and sys, which are
+always there: `s.length()`, `strings::length(s)`, `io::printline("hi")`). The
+functions of io, math and sys are also callable BARE with no import:
+`printline("hi")`, `abs(-3)`, `max(a, b)`, `exit(1)`; a function of your own with
+the same name hides the prelude's.
+    import shapes;                  // qualified only: shapes::area(c)
+    import shapes::area;            // one name, also usable bare: area(c)
+    import shapes::[area, perimeter]; // several names
+    import shapes::[*];             // every public name (clashes are errors)
   Naming something the module does not have is an error on the import line.
+  `m::` is allowed only for a module THIS file imports with a plain `import m;`
+  (error E145 otherwise, even if another import loaded `m`): `import m::name;`
+  gives the bare name only, never `m::name`.
 
 TYPES BELONG TO THEIR MODULE: `import list;` gives `list::List<int>` and
   `list::List::default()` only; a bare `List<int>` needs `import list::List;`

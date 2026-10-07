@@ -75,11 +75,13 @@ STRUCTS AND ENUMS:
   called `p.sum()`. A struct cannot be compared with `==`: compare its fields.
   `enum Color { Red, Green }`; a variant is `Color::Red`.
 
-MODULES: `import io;` then `io::printline("hi");` -- `::` for modules, enum
-  variants and static methods, `.` only on a value. `int`, `double`, `bool`,
-  `char`, `strings` and `array` are imported for you (`s.length()`, `a.length()`);
-  every other module (`io`, `math`, `mem`, `sys`, `test`, `list`, `map`, ...) needs
-  its own `import` in every file that uses it. See modules.txt.
+MODULES: `printline("hi");` -- `::` for modules, enum variants and static
+  methods, `.` only on a value. `int`, `double`, `bool`, `char`, `strings`,
+  `array`, `io`, `math` and `sys` are imported for you (`s.length()`,
+  `a.length()`), and the functions of `io`, `math` and `sys` are callable bare
+  (`printline("hi")`, `abs(-3)`, `exit(1)`); every other module (`mem`, `test`,
+  `list`, `map`, ...) needs its own `import` in every file that uses it. See
+  modules.txt.
 
 BUILT IN: `typeof(x)` (the type's name) and `sizeof(Type)` need no import.
 

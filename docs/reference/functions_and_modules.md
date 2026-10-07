@@ -300,6 +300,23 @@ Only `import module::symbol;`, `import module::[a, b, c];`, and
 `import module::[*];` add names to the current file's flat (unqualified)
 namespace. A plain `import module;` only ever grants `::`-qualified access.
 
+The two are independent: `import module::symbol;` does **not** let you write
+`module::other` (or `module::symbol`), and `import module;` does not make
+anything bare. A file that wants both writes both lines:
+
+```turflang
+import list;           // list::List<int>, list::List::default()
+import list::List;     // bare List<int>, List::default()
+```
+
+**A file may use `module::` only for a module it imports itself.** Importing
+`json` (which itself imports `list`) does not let you write `list::List<int>`:
+that is error `E145`, and its hint is the line to add, `import list;`. The
+prelude modules (4.5) are the exception: they need no import. Methods,
+UFCS calls and operators are not affected (they follow the value's type, see
+the UFCS note in section 3), and neither is holding a value whose type comes
+from a module you did not import; only *writing* `io::Something` needs the import.
+
 ### 4.2 `::` scope resolution
 
 `::` is Turflang's general namespace-resolution operator. It is used for:
@@ -396,24 +413,42 @@ subfolders never breaks an `import`.
 
 ### 4.5 The prelude — modules auto-imported for you
 
-Six standard-library modules are automatically imported into every
-top-level compile, with no `import` statement needed:
+Nine standard-library modules are automatically available in every file —
+the program and every module — with no `import` statement needed:
 
 ```
-int, double, bool, char, strings, array
+int, double, bool, char, strings, array     // reached by UFCS, operators, strings::length(s)
+io, math, sys                               // ALSO callable by their bare names
 ```
 
-> **Note — read this carefully, it's a real distinction:** the prelude
-> import is a **bare** import (as if you'd written `import int;`), and a
-> bare import only grants `::`-qualified access and UFCS/operator-overload
-> candidacy — it does **not** flatten the module's functions into
-> bare-callable names. There is no such thing as an auto-flattened module
-> in Turflang; that has to be requested explicitly with
-> `import module::symbol;` or `import module::[*];`.
+**The console, math and process modules are bare-callable.** `printline("hi")`,
+`print(3)`, `input()`, `abs(-5)`, `max(a, b)`, `sqrt(2.0)`, `exit(1)` and
+`panic("message")` all work with no import and no `io::` — every public free
+function of `io`, `math` and `sys` (the constants stay qualified:
+`math::PI`). The qualified forms (`io::printline`, `math::abs`) work too, with
+no import. The other six modules are not flattened into bare names: their
+functions read as methods (`c.is_digit()`, `s.length()`).
+
+A bare name is the **last resort**, so the prelude can never make a program
+ambiguous. In order, a bare call `f(...)` looks at: (1) the functions this file
+declares, (2) for code inside a module, that module's own functions, (3) names
+you explicitly imported (`import m::f;`), and only if none of those has any
+function called `f`, (4) the prelude. So declaring your own `max(a: int, b:
+int)` simply hides math's `max`, and `math::max(...)` still reaches it. The
+price is that once your file declares *any* `max`, a bare `max(1.5, 0.5)` is
+checked against yours alone and reports a type mismatch naming your function;
+write `math::max` for the prelude's.
+
+> **Note — two different things.** *Being known* to the compile (every prelude
+> module is) gives UFCS and operator candidacy and the `::` qualifier. *Being
+> bare-callable* is the extra step only `io`, `math` and `sys` take. A module
+> you add to your program with `import list;` is neither automatic nor bare.
 
 What the prelude buys you with zero imports:
 
-- `::`-qualified calls: `strings::length(s)`.
+- `::`-qualified calls: `strings::length(s)`, `io::printline(x)`, `math::PI`.
+  (`int`, `double`, `bool` and `char` are also type keywords, so their module
+  functions are reached through UFCS, `n.is_even()`, never `int::is_even(n)`.)
 - UFCS and operator-overload candidacy, since that visibility rule is
   "known anywhere in the compile" and the prelude modules are always known:
 
@@ -437,7 +472,7 @@ What it does **not** buy you:
 // No imports.
 fn main(): int {
     mut c: char = '7';
-    is_digit(c); // ERROR — bare call, not UFCS; prelude does not flatten names
+    is_digit(c); // ERROR — bare call, not UFCS; only io, math and sys are bare-callable
     return 0;
 }
 ```
@@ -459,7 +494,7 @@ a cycle and compiles fine.
 ### 4.7 `export immut` — module-level constants
 
 ```turflang
-// lib/std/math/math.tr
+// lib/std/core/math.tr
 export immut PI: double = 3.14159265358979323846;
 ```
 

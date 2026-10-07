@@ -42,7 +42,7 @@ extern from "m" fn sqrt(val: double): double; // links against libm (-lm)
 ### A realistic example — libm bindings wrapped by Turf code
 
 ```turflang
-// lib/std/math/math.tr
+// lib/std/core/math.tr
 extern from "m" fn sqrt(val: double): double;
 extern from "m" fn pow(base: double, exp: double): double;
 

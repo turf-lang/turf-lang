@@ -23,6 +23,7 @@ CORRECT (import the modules and qualify every call):
 
     // main.tr
     import shapes;
+    import geometry;
     import geometry::[perimeter];
     fn main(): int {
         return shapes::area() + geometry::area() + perimeter() - 6;

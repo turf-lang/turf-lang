@@ -1,0 +1,35 @@
+TURF E145 -- MODULE NOT IMPORTED IN THIS FILE:
+
+CAUSE:
+  `m::name` was written in a file (or module) that has no `import m;` of its own. The
+  module `m` exists in the program only because ANOTHER import loaded it; a file may
+  use `m::` only for a module it imports itself. `import m::name;` (or `m::[a, b]`,
+  `m::[*]`) brings in those names only: it does not allow the `m::` qualifier.
+
+CORRECT USAGE:
+    import list;
+    import list::List;
+
+    fn main(): int {
+        mut a: list::List<int> = list::List::default();
+        mut b: List<int> = List::default();
+        printline("both spellings need their own import");
+        return 0;
+    }
+
+INCORRECT:
+    import json;                  // json imports list itself
+    mut l: list::List<int> = list::List::default();
+    // ERROR [E145]: Module 'list' is not imported in this file.
+
+    import list::List;            // brings in the name `List` only
+    mut l: list::List<int> = ...; // ERROR [E145]: the `list::` qualifier needs `import list;`
+
+FIX:
+  Add `import m;` at the top of the same file (the hint names the exact line). Do not
+  rely on another module's import. A method call `x.f()` or an operator never needs one:
+  they follow the type of the value, not the import list. The prelude modules (int,
+  double, bool, char, strings, array, io, math, sys) never need an import at all.
+
+RELATED: E027 (module file not found at all), E031 (unknown qualifier -- a typo, not a
+  missing import), E088 (the module is imported but the name is private).

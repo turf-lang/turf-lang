@@ -133,20 +133,24 @@ answers "is opting in ambient or does it need an explicit flag." See
 
 ## 4. Prelude module specification
 
-`int`, `double`, `bool`, `char`, `strings`, `array` are auto-imported into
-every top-level compile with no `import` statement
-(`ParsePreludeImports()`, `src/ParserModule.cpp`) — see
+`int`, `double`, `bool`, `char`, `strings`, `array`, `io`, `math`, `sys` are
+auto-imported into every top-level compile with no `import` statement
+(`ParsePreludeImports()`, `src/ParserModule.cpp`), and `io`, `math` and `sys`
+also have their public free functions callable by bare name
+(`PreludeBareModuleNames`; `FREEZE.md` §6.25) — see
 `docs/architecture/modules_and_scope_resolution.md` Part 1.3/2.4 for the
 user-facing and internal mechanics. Before STD-001, this list
 (`PreludeModuleNames`) was a bare hardcoded C++ array with no written
-specification of *why* these six and no check that it was complete or
-correct.
+specification of *why* these modules and no check that it was complete or
+correct. (It was six until 2026-10-07, when the owner added `io`, `math` and
+`sys`; those three files moved into `core/` so the rule below stayed true.)
 
 **The specification**: the prelude is exactly the set of `.tr` files under
 `lib/std/core/`. This is not incidental — `ARCHITECTURE_OVERHAUL.md` §3.2's
-target boundary diagram already labels that layer `core (prelude)`. Six
+target boundary diagram already labels that layer `core (prelude)`. Nine
 files live there today (`int.tr`, `double.tr`, `bool.tr`, `char.tr`,
-`strings.tr`, `array.tr`), matching `PreludeModuleNames` exactly.
+`strings.tr`, `array.tr`, `io.tr`, `math.tr`, `sys.tr`), matching
+`PreludeModuleNames` exactly.
 
 **Deliberately not derived from a directory listing at compile time.**
 `lib/std`'s other subfolders (`collections/`, `io/`, `mem/`, `math/`, …)

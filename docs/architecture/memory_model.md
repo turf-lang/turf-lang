@@ -550,7 +550,7 @@ Every other buffer-returning function in the same file (`to_upper`,
 free — `replace` and `repeat` additionally call `operator +` (via plain `+`)
 in a loop, so each one leaks once per concatenation performed internally, on
 top of its own final result. `io::input()`/`io::read_to_string()`
-(`lib/std/io/io.tr`) and `net::TcpConnection.read()`
+(`lib/std/core/io.tr`) and `net::TcpConnection.read()`
 (`lib/std/io/net.tr`) follow the same shape with `gc_alloc_zeroed(n)`
 instead — see §2.6's MEM-001 subsection for the full site-by-site
 allocation classification.

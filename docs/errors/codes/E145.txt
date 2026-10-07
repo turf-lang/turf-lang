@@ -1,0 +1,33 @@
+A module is used, but this file never imported it
+
+A file may write `m::something` only for a module it imports itself. Another module that happens to import `m` does not count:
+
+    import json;                       // json itself imports list, so list is loaded...
+    fn main(): int {
+        mut l: list::List<int> = list::List::default();   // E145 -- ...but this file never imported it
+        return 0;
+    }
+
+The fix is the line the error prints:
+
+    import list;
+    import json;
+
+It means the file keeps working if `json` stops importing `list` one day, and a reader can see where every `module::` in the file comes from.
+
+The modules every program already has -- `int`, `double`, `bool`, `char`, `strings`, `array`, `io`, `math` and `sys`, the prelude -- are the exception: `io::printline("hi")`, or just `printline("hi")`, needs no import at all.
+
+An import of one name is not an import of the module. `import list::List;` lets you write `List`, but not `list::List`; for the qualified spelling the file needs its own `import list;`, and if it uses both spellings it has both lines:
+
+    import list;
+    import list::List;
+
+    fn main(): int {
+        mut a: list::List<int> = list::List::default();
+        mut b: List<int> = List::default();
+        return 0;
+    }
+
+What is not affected: you can still hold, pass and return a value whose type comes from a module you did not import, call its methods (`b.get()`), call a free function on it through the dot (`b.twice()`), and use its operators (`b + b`). Those follow the value's type. Only *spelling* `module::name` needs the import.
+
+This is a different mistake from a misspelled module name (a typo, which gets a "did you mean" suggestion): here the module exists, and the file just has not asked for it.

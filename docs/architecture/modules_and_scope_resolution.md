@@ -31,11 +31,13 @@ Exactly four, all starting with `import <module-name>`:
 | Form | Syntax | Effect |
 |---|---|---|
 | Bare | `import io;` | Module reachable **only** via `io::` qualification. Nothing pasted unqualified. |
-| Single symbol | `import io::printline;` | `printline` also becomes bare-callable, in addition to `io::printline` still working. |
+| Single symbol | `import io::printline;` | `printline` becomes bare-callable. It does **not** make `io::printline` legal: that needs `import io;` as well. |
 | Symbol list | `import io::[print, printline];` | Same as above, for every listed name. |
-| Wildcard | `import io::[*];` | Every function the module exports becomes bare-callable. |
+| Wildcard | `import io::[*];` | Every function the module exports becomes bare-callable (and, again, no `io::`). |
 
 A module is **always fully parsed** regardless of form — even a single-symbol import reads the whole target file, it just doesn't flatten more than what was asked for into the importing file's own namespace.
+
+**No transitive imports (LEC-008, `FREEZE.md` §6.24, F-IMP-1/2).** A file may write `m::` — a call, a constant, a type, `m::T::new()` — only if it wrote a plain `import m;` itself. The prelude's modules, and the module's own body, are the only exceptions. A module that some *other* import happened to load is not visible: after `import json;` (which imports `list`), `list::List<int>` is `E145`, with a hint naming the line to add. The symbol forms import names, not the qualifier, so a file that wants both `List` and `list::List` writes both `import list::List;` and `import list;`. What is deliberately *not* gated (F-IMP-4) is anything that follows the **type** rather than a name: methods, UFCS calls (`x.f()`), operators, and holding or passing a value whose type came from a module the file never imported — only *spelling* `io::T` needs the import (F-IMP-3).
 
 ### 1.3 Visibility rules
 
@@ -46,9 +48,10 @@ A module is **always fully parsed** regardless of form — even a single-symbol 
 **Bare calls to functions** resolve only to:
 1. Something declared directly in the current file — *when that file is the main program*. A module's body never sees the main program's functions (an importer cannot leak into what it imports; this used to be violated, so a module's bare `helper()` could silently call the importer's unrelated `helper()`), or
 2. If the call is textually inside a module's own body, another function declared in that **same** module (self-reference — e.g. `math.tr`'s `power()` calling its own `pow()` bare, no import needed, since this is same-file visibility, not a module feature), or
-3. A name explicitly brought in via an on-demand import (forms 2–4 above), scoped to whichever file/module's own `import` statement requested it.
+3. A name explicitly brought in via an on-demand import (forms 2–4 above), scoped to whichever file/module's own `import` statement requested it, or
+4. **Only if none of 1–3 has any function of that name** — the prelude tier (`FREEZE.md` §6.25): a public free function of `io`, `math` or `sys`. So `printline("x")`, `abs(-3)` and `exit(1)` work with no import, and a declaration of your own (or an explicit import) of the same name hides the prelude's rather than making the call ambiguous.
 
-There is **no always-auto-imported module** — `io` must be imported like anything else. (This used to be different and was a real bug: `lib/std/prelude.tr` used to silently `import io;` for every compile, and the bare-call lookup searched every module ever loaded anywhere in the program with no check that the *current* file asked for that visibility — see Part 2.5 and Part 3 for the fix.)
+The six core prelude modules (`int`, `double`, `bool`, `char`, `strings`, `array`) are known to every compile and reached through UFCS, operators and `m::`, but are **not** bare-callable; `io`, `math` and `sys` are the three that are (owner decision 2026-10-07). Before that decision there was no always-auto-imported *flattened* module — a real bug had once been `lib/std/prelude.tr` silently `import io;`-ing for every compile while the bare-call lookup searched every module ever loaded, with no check that the *current* file asked for that visibility (see Part 2.5 and Part 3 for that fix). The prelude tier is not that bug: it is a closed, named list (`PreludeBareModuleNames` in `src/ParserModule.cpp`), consulted last, and shadowed by anything the file says.
 
 **Struct/enum type names** follow the identical rule bare function-call visibility does (2.7.1): a plain bare `import list;` grants **qualified** access only (`list::List`) — bare `List` is visible unqualified only if it's declared in the same file/module, or brought in via an on-demand import (`import list::List;` / `import list::[List, ...];` / `import list::[*];`). This used to be more lenient (any import form, including bare, made the type bare-visible) — that was a deliberately-kept gap, closed by 2.7.1; see Part 5.1 for the history.
 
@@ -59,19 +62,21 @@ There is **no always-auto-imported module** — `io` must be imported like anyth
 Both of these are valid and mean the same thing:
 
 ```turf
+import list;
 import list::List;
 
 mut a: List<int>      = List::default();
 mut b: list::List<int> = list::List::default();
 ```
 
-(`import list::List;` is what makes the bare `List` spelling on the first line legal at all — see 1.3/2.7.1. A plain bare `import list;` alone would only make the second, qualified line compile.)
+(Each spelling needs its own import: `import list::List;` is what makes the bare `List` on the first line legal — see 1.3/2.7.1 — and `import list;` is what makes the qualified `list::List` on the second legal, symbol imports granting no qualifier. See the "No transitive imports" paragraph in 1.2.)
 
 (Struct construction is `StructName::new(args...)`/`StructName::default()` only — see the struct-construction-overhaul work; there is no brace-literal form anymore. `List` has no user-defined `.new`, so `::default()` is the only way to construct it.)
 
-Qualifying is **validated**, not decorative. Two independent checks run whenever a `Module::Name` appears, in type position or construction position (`new`/`default` included):
-1. Is `Module` a real, imported module at all? (`UnknownScopeQualifierError` if not.)
-2. Does `Module` actually declare `Name`? (`UnknownModuleSymbolError` if some *other* real module owns it instead — e.g. `mem::List` is rejected even though `mem` is real, because `List` lives in `list`.)
+Qualifying is **validated**, not decorative. Three independent checks run whenever a `Module::Name` appears, in type position or construction position (`new`/`default` included):
+1. Is `Module` a real module at all? (`UnknownScopeQualifierError` if not.)
+2. Did *this file* import it? (`ModuleNotImportedError`, E145, if the module exists but only another file's import loaded it — LEC-008.)
+3. Does `Module` actually declare `Name`? (`UnknownModuleSymbolError` if some *other* real module owns it instead — e.g. `mem::List` is rejected even though `mem` is real, because `List` lives in `list`.)
 
 ```turf
 import list;
@@ -172,6 +177,7 @@ VERSION                 // bare access -- only after an on-demand import (or sel
 | `ModuleNotFoundError` | `import xyz;` and no `xyz.tr` exists anywhere on the search path |
 | `CircularImportError` | A module import chain loops back on itself |
 | `UnknownScopeQualifierError` | `Left::Right` where `Left` is neither a known enum, struct, module, nor a declared variable |
+| `ModuleNotImportedError` (E145) | `m::name` (call, constant, type, construction) in a file that has no plain `import m;` of its own — the module exists only because another file imported it, or the file only has `import m::name;` (LEC-008); the hint prints the `import m;` line |
 | `ScopeOperatorOnInstanceError` | `::` used with a base that's a real declared variable (an instance) instead of a type/module/enum name -- e.g. `p::method(...)` where `p: SomeStruct`; points at `.` instead |
 | `UnknownModuleSymbolError` | `import module::symbol;` (or a qualified type/construction/static-method-call qualifier) names a symbol/owner the module doesn't actually have |
 | `ImportSymbolCollisionError` | Two on-demand imports flatten two different symbols under one bare name |
@@ -304,6 +310,22 @@ Modules_               : unordered_map<ModuleName, ResolverModule>
                           Every function/extern declared in EVERY transitively-imported
                           module, namespaced per module. Backs qualified calls
                           (Module::func(...)) and findInModules() suggestions.
+                          GLOBAL on purpose: it answers "was this module loaded anywhere",
+                          which UFCS, operators and suggestions need. It does NOT answer
+                          "may THIS file write `Module::`" -- that is BareImports_ below.
+
+BareImports_           : unordered_map<ContextLabel, unordered_set<ModuleName>>
+                          (ResolverModuleTable, LEC-008.) Per file/module ("" = main
+                          file), the modules that file named with a plain `import m;`.
+                          Filled in Pass 1a (hoistTypesIn's import branch -- the first
+                          place a file's imports are seen, before Pass 1b resolves
+                          qualified spellings). isModuleImportedBy(m, ctx) is true for
+                          m == ctx or m in BareImports_[ctx]; every place a `m::` is
+                          spelled asks it (Resolver::requireModuleImported -> E145).
+                          A symbol import is recorded separately (SymbolImports_) and
+                          grants nothing; it only lets the hint say "that is not the
+                          qualifier". A monomorphized clone is checked against its
+                          TEMPLATE's module (resolveMonomorphizedClone pushes it).
 
 CurrentFileFunctions_  : unordered_map<Name, vector<Overload>>
                           The MAIN FILE's own top-level fn/extern declarations ONLY --
@@ -423,6 +445,7 @@ bool Resolver::validateModuleQualifier(const std::string &Qualifier,
                                        SourceLocation Loc) const {
   if (Qualifier.empty()) return true;                       // unqualified, nothing to check
   if (!SymTable_.hasModule(Qualifier)) { UnknownScopeQualifierError(...).raise(); return false; }
+  if (!requireModuleImported(Qualifier, currentModuleName(), Loc, ...)) return false;   // E145, LEC-008
   if (SymTable_.getTypeOwningModule(TypeName) != Qualifier) { UnknownModuleSymbolError(...).raise(); return false; }
   return true;
 }

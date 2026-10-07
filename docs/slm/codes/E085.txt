@@ -27,6 +27,7 @@ CORRECT (list the names actually used, qualify the other type):
     pub fn origin(): Point { return Point::default(); }
 
     // main.tr
+    import shapes;
     import shapes::[Circle, area];
 
     struct Point { x: int }
@@ -41,7 +42,8 @@ CORRECT (list the names actually used, qualify the other type):
 FIX:
   Keep the bare name for one type (usually your own). Replace `[*]` with the
   explicit list of names you need, and write the other type qualified
-  (`shapes::Point`). Or rename one of the two types.
+  (`shapes::Point`, which needs its own `import shapes;`). Or rename one of the
+  two types.
 
 RELATED: E033 (duplicate declaration within one module), E090 (a module NAME
   that more than one file answers to).

@@ -91,7 +91,7 @@ doc comment for why widening its signature to carry one wasn't worth doing
 in this group (all 9 call sites would need touching for a diagnostic-text
 change only, no behavioural difference).
 
-This is **not** the same path `lib/std/io/sys.tr`'s `panic()`/`assert`/`fail`
+This is **not** the same path `lib/std/core/sys.tr`'s `panic()`/`assert`/`fail`
 use — those are ordinary Turf functions, built on a separate `write(2)`-based
 mechanism, deliberately untouched by RT-001. `CodegenPanic()` is reachable
 only from the compiler's own inline safety checks, never from Turf source
@@ -416,11 +416,11 @@ it is now a TurfLang diagnostic naming the exact path that was checked.
 | Any other `SIGSEGV` | `panic: segmentation fault (this is a bug in unsafe code or in TurfLang) at address <addr>` | 134 (`SIGABRT`) |
 | Out of memory (GC heap or manual heap) | `panic: out of memory: <desc> (<site>:0)` (GC heap) or `sys::panic()`'s own format (manual heap) | 134 (`SIGABRT`) |
 | A cross-heap `mem::free()`, an unbalanced `mem::unroot()`, ... | `panic: <kind>: <msg> (<site>:0)` | 134 (`SIGABRT`) |
-| `lib/std/io/sys.tr`'s `panic()`/`assert`/`fail` | that function's own message | 134 (`SIGABRT`) |
+| `lib/std/core/sys.tr`'s `panic()`/`assert`/`fail` | that function's own message | 134 (`SIGABRT`) |
 | `sys::exit(n)` | (none) | `n` |
 
 Every panic path — the compiler's own inline checks, the runtime's own
-`turf_rt_panic()` call sites, and `lib/std/io/sys.tr`'s separate
+`turf_rt_panic()` call sites, and `lib/std/core/sys.tr`'s separate
 `write(2)`-based path — terminates via `abort()`, hence the same `SIGABRT`/
 134 across the whole table. Only `sys::exit(n)` is a deliberate,
 non-panic process exit with a caller-chosen code.

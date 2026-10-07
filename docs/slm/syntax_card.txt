@@ -1,5 +1,5 @@
 TURF SYNTAX (only this; not C, Python or Rust):
-    import io; // io::printline("hi")
+    import list; // io, math, sys need no import: printline("hi"); list, map, test do
     struct Point { x: int, y: int } // no `Point { x: 1 }` literals
     struct Box<T> { v: T }
     fn Point.sum(): int { return self.x + self.y; } // p.sum()

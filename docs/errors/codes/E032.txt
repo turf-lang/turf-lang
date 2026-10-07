@@ -4,9 +4,10 @@ This one shows up when you write a bare type name like `List`, but `List` is act
 
 You've got two ways to fix this, and either one works:
 
+    import list;
     mut l: list::List<int> = list::List::default();
 
-That fully-qualified form works with no import needed. Or, if you'd rather use the short name everywhere in the file:
+That fully-qualified form needs the plain `import list;` (without it the error is E145, "module not imported"). Or, if you'd rather use the short name everywhere in the file:
 
     import list::List;
     mut l: List<int> = List::default();

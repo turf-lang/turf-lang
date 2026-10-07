@@ -1033,6 +1033,93 @@ itself is unchanged by this section: indentation only (`include/Formatter.h`).
 - **Not in 2.0:** a pretty-printer that re-spaces or re-flows code. It needs a
   trivia-preserving lexer (`FUTURE.md` F-11b).
 
+### 6.24 No transitive imports — FROZEN (LEC-008, 2026-10-07)
+
+Recorded on the project owner's decision of 2026-10-06 ("there are to be NO
+transitive imports", `SMP-001.md` unresolved question 4) and the five
+refinements the owner settled on 2026-10-07 after reading the Resolver's
+current behaviour. §6.0 rule 3's explicit request. Full account:
+`docs/development/changes/LEC-008.md`.
+
+Before this, the Resolver registered every module any import loaded in one
+global table, so `import json;` also made `list::List` compile. That is
+now an error (for any module outside the prelude, §6.25).
+
+- **A file may spell `m::` only for a module it imports itself (F-IMP-1).**
+  "Spell" means every use of the qualifier: `m::f()`, `m::CONST`, `m::T` in a
+  type, `m::T::new()` / `m::T::default()` / `m::T::method()`. The module must
+  be named by a plain `import m;` **in that same file**; a module's own body
+  always sees itself; the prelude's modules count as imported. An import in
+  another file never counts, whichever way that file was reached.
+- **A symbol import does not import the qualifier (F-IMP-2).**
+  `import m::name;`, `import m::[a, b];` and `import m::[*];` bring in those
+  names, bare, and nothing else: `m::other` still needs `import m;`. Written
+  out, `import list::List;` lets a file say `List` but not `list::List`; a
+  file that wants both writes both imports. This is the strictest reading,
+  chosen because it is the easiest to state and to check.
+- **Only the spelling is gated, never the use of a value (F-IMP-3).** A
+  function may return, and a caller may hold and use, a value whose type
+  belongs to a module the caller did not import (`json::parse` handing back a
+  type from `io`); the caller just cannot *write* `io::T` without importing
+  `io`. Type identity (`M::Name`, §6.11) is unchanged and global.
+- **Methods, UFCS and operators are not gated (F-IMP-4).** They follow the
+  receiver's or operands' *type*, not an import: `x.f()` finds a free function
+  `f` of any loaded module whose receiver matches (subject to `pub`, §6.15),
+  and an operator is visible wherever its operand types are (§6.7, F-OP-3), or
+  `a + b` would change meaning with the file's import list. This is the one
+  place the old global visibility is kept on purpose.
+- **A new diagnostic with a fix (F-IMP-5).** A module that exists in the
+  program but is not imported by the file is its own error, distinct from an
+  unknown qualifier, and its hint names the exact `import m;` to add (and, when
+  the file has `import m::name;` for it, says that a symbol import is not
+  enough). Suggestion and "did you mean" lists keep searching **every** loaded
+  module, so the fix can be offered; only legality is gated. The editor's
+  auto-import offer for such a module is therefore correct as it stands.
+
+### 6.25 The prelude: nine modules, three of them bare-callable — FROZEN (owner decision, 2026-10-07)
+
+Recorded on the project owner's instruction ("everything from io, math and
+anything extra that should be there … they can just write `printline()` and
+`print()` and it will work"), made right after the owner confirmed that prelude
+modules are spellable in every file (§6.24, F-IMP-1). §6.0 rule 3's explicit
+request. Account: `docs/development/changes/LEC-008.md`. It **reverses** the
+older documented rule "there is no always-auto-imported module — `io` must be
+imported like anything else" (`modules_and_scope_resolution.md` §1.3); what that
+rule guarded against was a *hidden, unscoped* global lookup (a `prelude.tr` that
+`import io;`-ed for everyone while the bare-call search ignored who asked), not
+a named, closed, last-resort list.
+
+- **The prelude is nine modules (F-PRE-1):** `int`, `double`, `bool`, `char`,
+  `strings`, `array`, `io`, `math`, `sys`. Every one is loaded in every compile,
+  spellable as `m::` in every file with no import (§6.24), and visible to UFCS
+  and operators. The spec "the prelude is exactly `lib/std/core/*.tr`"
+  (`boundary.md` §4, `scripts/check_boundary.sh` check 2) is kept: `io.tr`,
+  `math.tr` and `sys.tr` moved into `lib/std/core/`. A module's subfolder is
+  invisible to `import`, so no import changed.
+- **Three of them are bare-callable (F-PRE-2):** every `pub` free function of
+  `io`, `math` and `sys` can be called unqualified — `printline("x")`, `abs(-3)`,
+  `max(a, b)`, `sqrt(2.0)`, `exit(1)`, `panic("m")`. The other six are not
+  flattened (their functions read as methods: `c.is_digit()`). Constants stay
+  qualified (`math::PI`); methods (`Type.name`) are never bare. The list is
+  closed and named (`PreludeBareModuleNames`, `src/ParserModule.cpp`); adding a
+  module to either list is a change-recorded act (F-STD-2's standard).
+- **It is the last resort of a bare call (F-PRE-3).** In order, `f(...)` looks at:
+  the file's own functions; for code inside a module, that module's own;
+  explicit on-demand imports; and only when none of those has *any* function
+  named `f`, the prelude. So the prelude never makes a program ambiguous: a
+  declaration or explicit import of your own hides it (Rust's rule for a local
+  item over a prelude name). Knowingly accepted cost: once a file declares any
+  `f`, a call shaped for the prelude's `f` is checked against the file's alone
+  and reports a mismatch naming the file's function; `m::f` reaches the
+  prelude's. Not reversible after 2.0 without a break.
+- **UFCS tie-break (F-PRE-4).** Making `math` always-loaded put its public libm
+  `floor`/`ceil`/`round` beside `double.tr`'s own in every `double`'s UFCS
+  candidate set, an exact tie that read as an ambiguity. When the exact matches
+  of a UFCS call tie, the one declared in the **receiver type's own prelude
+  module** (`double` for a `double`, `strings` for a `string`) wins, provided it
+  is exactly one. Two identical definitions anywhere else are still a conflict.
+  No public name was removed or renamed.
+
 ---
 
 ## Appendix — frozen-decision IDs
@@ -1073,6 +1160,10 @@ Overhaul (F-TYPE-1), whose third column points at their section above.
 | **F-STD-1** | Standard-library privileges are **declared in source**, never inferred from a file path. | §15 |
 | **F-STD-2** | The intrinsic/builtin list is **closed and enumerated** in one place. | §15 |
 | **F-STD-3** | `string` remains a NUL-terminated byte pointer. | §15, §25 |
+| **F-PRE-1** | The prelude is nine modules (`int`, `double`, `bool`, `char`, `strings`, `array`, `io`, `math`, `sys`), all in `lib/std/core/`, loaded in every compile and spellable as `m::` in every file with no import. | §6.25 above (owner decision 2026-10-07) |
+| **F-PRE-2** | Every `pub` free function of `io`, `math` and `sys` is callable by its bare name; the other six prelude modules are not flattened; constants stay qualified. | §6.25 above |
+| **F-PRE-3** | A bare call reaches the prelude only if the file's own functions, the module's own and explicit imports have no function of that name; so the prelude never creates an ambiguity and your declaration hides it. | §6.25 above |
+| **F-PRE-4** | In a UFCS exact tie, the candidate declared in the receiver type's own prelude module wins when it is exactly one. | §6.25 above |
 | **F-DIAG-1** | Sandbox verification of SLM suggestions is **never removed**. | §16 |
 | **F-DIAG-2** | An unvalidated suggestion can never clear the display gate. | §16 |
 | **F-DIAG-3** | No new `SLM::ErrorCategory` values without an explicit request. | §16 |
@@ -1085,6 +1176,11 @@ Overhaul (F-TYPE-1), whose third column points at their section above.
 | **F-STR-1** | `s[i]` on a `string` is `char`, bounds-checked against `strlen(s)` on read (`i < 0` or `i >= strlen(s)` panics); a write checks `i < 0` only, by design — no upper bound, since a `string` under construction has no recoverable capacity to check against. | §6.14 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-004) |
 | **F-VIS-1** | A top-level declaration and a struct field are private to their module unless prefixed `pub`/`public` (synonyms, one token); enum/error variants and machine states follow their type; operators are visible wherever their operand types are; `export immut` is its own `pub`; a `pub` signature may not mention a private type; UFCS and monomorphized clones never bypass or leak visibility; every visibility diagnostic carries a fix-naming hint. | §6.15 above (post-Overhaul: `ROADMAP_v2.0.0.md` LEC-002) |
 | **F-PKG-1** | Two independently versioned programs: `turf` (Go, `cli/`) is the user's tool and drives; `turfc` compiles and is the tooling interface (users are never asked to type it). They agree on a `major.minor` driver interface reported by `turfc --version` (same major, minor at least what `turf` needs), not on release versions. The compiler owns everything that depends on TurfLang source (import resolution, visibility, capabilities) and never touches the network or the manifest; the CLI owns files, network and reproducibility, never parses TurfLang, and never rewrites a diagnostic; they meet at an explicit package graph. `turf <non-subcommand args>` is `turfc <args>` unchanged. | §6.16 above (owner decisions 2026-09-30: overturning `ROADMAP_v2.0.0.md` LEC-001 entry 1 / DEC-8, then replacing "same version" with the driver interface) |
+| **F-IMP-1** | A file may spell `m::` (call, constant, type, construction, static method) only for a module it imports itself with a plain `import m;`; its own module and the prelude's modules count; another file's import never does. | §6.24 above |
+| **F-IMP-2** | `import m::name;`, `m::[..]` and `m::[*]` bring in those names only, not the `m::` qualifier. | §6.24 above |
+| **F-IMP-3** | Only the spelling of `m::T` is gated; holding and using a value of a type from an unimported module is allowed. Type identity stays global. | §6.24 above |
+| **F-IMP-4** | Methods, UFCS and operators are deliberately not gated by imports (they follow the type; operator coherence). | §6.24 above |
+| **F-IMP-5** | "Module exists but is not imported" is its own diagnostic, with the `import m;` fix in its hint; suggestions still search all loaded modules. | §6.24 above |
 | **F-PKG-2** | A module is (package, path under `src/`). `import foo;` resolves to exactly one of {own module, **direct** dependency's root module, stdlib module}; more than one is a hard error naming every candidate, never silent shadowing, also in single-file mode. Internal modules are package-private. The manifest rejects unknown keys. | §6.16 above (`ROADMAP_v2.0.0.md` LEC-001 entries 2–4, DEC-9) |
 | **F-PKG-3** | Dependencies are `path` or `git` (`tag`/`rev`/`branch`) only; the root's `turf.lock` pins commit + SHA-256, verified on every build; one version per package name; `--offline`, `--locked`. | §6.16 above (`ROADMAP_v2.0.0.md` LEC-001 entry 5) |
 | **F-PKG-4** | A dependency's `unsafe module;` is honored only if the root manifest's `[unsafe] allow` names it (not transitive); the root package's own modules need no listing; the compiler enforces, the CLI only passes the bit. | §6.16 above (`ROADMAP_v2.0.0.md` LEC-001 entry 6) |

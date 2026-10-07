@@ -524,7 +524,7 @@ A message-carrying variant (`return MathError::DivisionByZero("division by " + (
 | `src/CodegenStruct.cpp` | `FieldAccessExprAST::codegen()`'s `err.message` branch (STD-002) |
 | `src/CodegenExpr.cpp` | `BinaryExprAST::codegen()`'s equality dispatch |
 | `include/Errors.h`, `include/ErrorsFlow.h` | `NeverReturnsErrorWarning`, `BareErrorAsBindingError` |
-| `lib/std/io/net.tr`, `lib/std/math/math.tr`, `lib/std/collections/map.tr` | Real stdlib usage: `NetworkError` (`connect`/`bind`/`accept`), `MathError` (`divide`), `MapError` (`try_get`) |
+| `lib/std/io/net.tr`, `lib/std/core/math.tr`, `lib/std/collections/map.tr` | Real stdlib usage: `NetworkError` (`connect`/`bind`/`accept`), `MathError` (`divide`), `MapError` (`try_get`) |
 | `tests/25_errors/` | The full regression suite for this feature |
 
 ---
