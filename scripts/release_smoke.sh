@@ -107,6 +107,15 @@ fi
   && pass "gen_recipes.sh writes a formula carrying the archive's SHA-256" \
   || fail "gen_recipes.sh: $(cat "$WORK/recipes.out")"
 
+# sha256sum on Windows writes `<hash> *<name>`; that line used to match nothing,
+# so a release had no Scoop manifest (v2.0.0-rc4). Same data, star form.
+sed 's/  turf-/ *turf-/' "$REL/checksums.txt" > "$WORK/star-checksums.txt"
+printf '%s *turf-%s-windows-x86_64.zip\n' "$(printf z | sha256sum | cut -d' ' -f1)" "$TAG" >> "$WORK/star-checksums.txt"
+./scripts/gen_recipes.sh --checksums "$WORK/star-checksums.txt" --version "$TAG" --out "$WORK/recipes-star" > "$WORK/recipes-star.out" 2>&1 \
+  && [ -f "$WORK/recipes-star/scoop/turf.json" ] && [ -f "$WORK/recipes-star/homebrew/turf.rb" ] \
+  && pass "gen_recipes.sh reads '<hash> *<name>' lines (Scoop manifest and formula both written)" \
+  || fail "gen_recipes.sh with starred names: $(cat "$WORK/recipes-star.out")"
+
 # ---- install ----------------------------------------------------------------
 echo "== install.sh"
 export TURF_INSTALL_BASE_URL="file://$WORK/release"
@@ -133,6 +142,16 @@ if [ "$STATUS" != 0 ] && grep -q "SHA-256 mismatch" "$WORK/bad.out" && [ ! -e "$
 else
   fail "corrupted archive: status $STATUS, $(tail -n 2 "$WORK/bad.out")"
 fi
+
+# The same star form must not stop install.sh finding its archive.
+STAR="$WORK/starrelease"
+mkdir -p "$STAR/download/$TAG"
+cp "$REL/$ARCHIVE_FILE" "$STAR/download/$TAG/"
+sed 's/  turf-/ *turf-/' "$REL/checksums.txt" > "$STAR/download/$TAG/checksums.txt"
+TURF_INSTALL_BASE_URL="file://$STAR" HOME="$WORK/starhome" SHELL=/bin/bash sh "$ROOT/install.sh" --version "$TAG" --no-modify-path > "$WORK/star.out" 2>&1 \
+  && [ -x "$WORK/starhome/.turf/bin/turf" ] \
+  && pass "install.sh finds its archive in a '<hash> *<name>' checksums.txt" \
+  || fail "install.sh with starred names: $(tail -n 2 "$WORK/star.out")"
 
 # The user's existing start-up file, with a blank line and no PATH of ours.
 printf 'alias ll="ls -l"\n\nexport EDITOR=vi\n' > "$HOME_DIR/$BASH_RC"

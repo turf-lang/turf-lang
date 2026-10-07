@@ -50,8 +50,13 @@ DESC="TurfLang: a statically typed, LLVM-backed, ahead-of-time compiled language
 # hash_of <platform> <ext>: the SHA-256 listed for turf-<tag>-<platform>.<ext>,
 # empty when the release has no such archive. The name is matched whole, so
 # `linux-x86_64` never picks up `linux-arch-x86_64`.
+#
+# A file name may carry a leading `*`: sha256sum on Windows writes
+# `<hash> *<name>` (binary mode), so the windows zip's line has one and an
+# exact compare silently found no hash, and v2.0.0-rc4's release had no Scoop
+# manifest. Strip it before comparing.
 hash_of() {
-  awk -v n="turf-$TAG-$1.$2" '$2 == n { print $1 }' "$CHECKSUMS"
+  awk -v n="turf-$TAG-$1.$2" '{ f = $2; sub(/^\*/, "", f) } f == n { print $1 }' "$CHECKSUMS"
 }
 url_of() { printf '%s/turf-%s-%s.%s\n' "$BASE_URL" "$TAG" "$1" "$2"; }
 

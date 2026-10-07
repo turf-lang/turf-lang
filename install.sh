@@ -223,7 +223,7 @@ fetch "$DL/checksums.txt" "$WORK/checksums.txt" || die "could not download $DL/c
 
 # The one line for this platform. `-linux-x86_64.tar.gz` cannot match
 # `-linux-arch-x86_64.tar.gz`, so the Arch build is never picked by accident.
-LINE=$(awk -v p="$PLATFORM" '$2 ~ ("^turf-v.*-" p "\\.tar\\.gz$") { print }' "$WORK/checksums.txt")
+LINE=$(awk -v p="$PLATFORM" '{ f = $2; sub(/^\*/, "", f) } f ~ ("^turf-v.*-" p "\\.tar\\.gz$") { print $1, f }' "$WORK/checksums.txt")
 [ -n "$LINE" ] || die "this release has no $PLATFORM archive. checksums.txt lists: $(awk '{print $2}' "$WORK/checksums.txt" | tr '\n' ' ')"
 [ "$(printf '%s\n' "$LINE" | wc -l | tr -d ' ')" = 1 ] || die "this release lists more than one $PLATFORM archive; refusing to guess."
 WANT=$(printf '%s\n' "$LINE" | awk '{print $1}')
