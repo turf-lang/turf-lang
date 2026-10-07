@@ -78,8 +78,13 @@ int BundledLink(const BundledLinkRequest &Req, std::string &Diagnostics) {
 
   // The runtime, then the C library it needs. A group, because libturfrt needs
   // libc, libc (static glibc) needs libgcc, and libgcc_eh needs libc back.
-  Args.push_back("-L" + Req.TurfLibDir);
+  // The runtime directory is searched FIRST: it holds its own libturfrt.a,
+  // built against the bundled C library (musl on Linux). The one in lib/ is
+  // built against the system's glibc and cannot be linked into a program that
+  // carries musl; it is only the fallback for a runtime directory that has
+  // none (the glibc stand-in of scripts/bundled_link_smoke.sh).
   Args.push_back("-L" + Rt);
+  Args.push_back("-L" + Req.TurfLibDir);
   Args.push_back("--start-group");
   Args.push_back("-l" + Req.TurfRtName);
   for (const char *Lib : {"m", "c", "gcc", "gcc_eh"})

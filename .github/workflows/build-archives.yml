@@ -81,10 +81,18 @@ jobs:
           ./scripts/cmake_build.sh --release-static --embed-lld
 
       # The embedded linker against a stand-in C runtime from this runner's
-      # static glibc (the shipped one is musl, stage 4): which programs are
-      # linked in-process and which go to cc, what a broken runtime reports.
-      - name: Embedded linker smoke test
+      # static glibc: which programs are linked in-process and which go to cc,
+      # what a broken runtime reports. (The archive's own runtime is checked
+      # below, after packaging.)
+      - name: Embedded linker smoke test (stand-in runtime)
         run: CI=1 ./scripts/bundled_link_smoke.sh
+
+      # REL-008 stage 4: the C runtime the archive carries, which the embedded
+      # linker links programs against instead of running cc. musl built from a
+      # pinned, hash-checked source tarball, libturfrt compiled against it.
+      # Built before Package: package_release.sh ships lib/rt/ when it exists.
+      - name: Build the bundled C runtime (musl)
+        run: ./scripts/build_bundled_runtime.sh --platform linux-x86_64
 
       - name: Package
         id: package
@@ -92,6 +100,12 @@ jobs:
         with:
           platform-suffix: linux-x86_64
           archive-format: tar.gz
+
+      # The archive's own turfc and runtime, not a stand-in: runtime-only
+      # programs link in-process (a decoy cc on PATH is never run), the result
+      # is static, and a host-name lookup works, which static glibc cannot do.
+      - name: Embedded linker smoke test (the archive's runtime)
+        run: CI=1 ./scripts/bundled_link_smoke.sh --archive "${{ steps.package.outputs.archive-path }}"
 
       # REL-003: install the archive that is about to be published with
       # install.sh and use it (layout, checksum, PATH block, turf new/run/
