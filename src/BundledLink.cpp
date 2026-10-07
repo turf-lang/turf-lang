@@ -178,7 +178,12 @@ int BundledLink(const BundledLinkRequest &Req, std::string &Diagnostics) {
   // libgcc_eh, libmoldname, libmingwex, the UCRT import library, then the
   // Win32 import libraries); COFF linking does not need the repeats gcc adds
   // for GNU ld's one-pass archive scan.
-  std::vector<std::string> Args = {"ld.lld", "-m", "i386pep", "-o", Req.Output};
+  // --stack: lld's MinGW default is a 1 MB main-thread stack (GNU ld's is 2 MB,
+  // a Linux process gets 8 MB), so a recursion that works on Linux overflows
+  // here first. 8 MB makes the platforms agree (measured with llvm-readobj on a
+  // linked program: SizeOfStackReserve 1048576 -> 8388608).
+  std::vector<std::string> Args = {"ld.lld", "-m", "i386pep", "-o", Req.Output,
+                                   "--stack=8388608"};
   Args.push_back(Rt + "/crt2.o");
   if (Has(Rt, "crtbegin.o"))
     Args.push_back(Rt + "/crtbegin.o");

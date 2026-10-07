@@ -119,5 +119,9 @@ void turf_rt_checked_free(void *p) {
                   "heap -- the two heaps do not merge",
                   "<mem::free>", 0);
   }
+#ifdef _WIN32
+  if (turf_win32_free_aligned(p))
+    return; /* an _aligned_malloc block, already released */
+#endif
   free(p);
 }

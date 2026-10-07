@@ -206,15 +206,56 @@ void turf_rt_install_segv_handler(void) {
 #else /* _WIN32 */
 
 /*
- * FUTURE (ROADMAP_v2.0.0.md DEC-2: Windows is not Tier 1/2 for 2.0). A
- * Windows stack overflow is not delivered as SIGSEGV at all -- it's a
- * Structured Exception (STATUS_STACK_OVERFLOW), a completely different
- * mechanism (a vectored exception handler, not sigaction/sigaltstack) --
- * so there is nothing to wire up here without a real Windows port. A crash
- * on Windows is unchanged from before FDN-006, exactly as it already is for
- * `TURF_GC_STACKBASE_WIN32`'s own untested-on-real-hardware status
- * (INVARIANTS.md INV-RT-4).
+ * REL-008 stage 5. A Windows stack overflow is not a signal: it is a structured
+ * exception, EXCEPTION_STACK_OVERFLOW, raised on the thread whose stack just ran
+ * out. A VECTORED exception handler sees it first, process-wide, with no
+ * try/except frame needed in compiled Turf code. It must run on what the thread
+ * has left, so SetThreadStackGuarantee() reserves extra stack for exactly this
+ * (the Windows counterpart of POSIX's sigaltstack): the guarantee is per thread,
+ * and this is installed from the main thread (turf_rt_init, before `main`), which
+ * is the only thread a Turf program has.
+ *
+ * Both outcomes print what the POSIX handler above prints, word for word, so a
+ * program's behaviour (and a test's EXPECT-RUNTIME text) is the same on every
+ * platform: a stack overflow is the documented `panic: stack overflow`, any
+ * other access violation says it is a bug in unsafe code or in TurfLang. Both
+ * end in abort() (SIGABRT, status 134 in the test runner's vocabulary).
+ *
+ * abort() and a crash would otherwise open Windows' error-reporting dialog and
+ * wait for a click, which a headless runner never gets; the error mode and the
+ * abort behaviour are set so a crash is just a process that ends.
  */
-void turf_rt_install_segv_handler(void) {}
+#include <stdlib.h>
+#include <windows.h>
+
+static LONG WINAPI turf_rt_veh(EXCEPTION_POINTERS *ep) {
+  const DWORD code = ep->ExceptionRecord->ExceptionCode;
+  if (code == EXCEPTION_STACK_OVERFLOW) {
+    turf_rt_panic("stack overflow",
+                  "the call stack exceeded its limit -- check for unbounded "
+                  "or missing-base-case recursion",
+                  "<runtime>", 0);
+  } else if (code == EXCEPTION_ACCESS_VIOLATION) {
+    /* ExceptionInformation[0] is read/write/execute, [1] the faulting address. */
+    void *addr = ep->ExceptionRecord->NumberParameters >= 2
+                     ? (void *)ep->ExceptionRecord->ExceptionInformation[1]
+                     : NULL;
+    fprintf(stderr,
+            "panic: segmentation fault (this is a bug in unsafe code or in "
+            "TurfLang) at address %p\n",
+            addr);
+    fflush(stderr);
+    abort();
+  }
+  return EXCEPTION_CONTINUE_SEARCH; /* not ours: let it take its course */
+}
+
+void turf_rt_install_segv_handler(void) {
+  ULONG guarantee = 128 * 1024;
+  SetThreadStackGuarantee(&guarantee); /* best effort: a failure only shrinks the room */
+  SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
+  _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+  AddVectoredExceptionHandler(1, turf_rt_veh);
+}
 
 #endif

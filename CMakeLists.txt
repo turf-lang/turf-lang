@@ -535,9 +535,11 @@ add_library(turfrt STATIC
   runtime/turfrt_abi.c
   runtime/turfrt_alloc.c
   runtime/turfrt_gc.c
+  runtime/turfrt_net.c
   runtime/turfrt_panic.c
   runtime/turfrt_signal.c
   runtime/turfrt_types.c
+  runtime/turfrt_win32.c
 )
 target_include_directories(turfrt PRIVATE runtime)
 set_target_properties(turfrt PROPERTIES
@@ -577,9 +579,11 @@ if(TURF_RT_SANITIZE)
     runtime/turfrt_abi.c
     runtime/turfrt_alloc.c
     runtime/turfrt_gc.c
+    runtime/turfrt_net.c
     runtime/turfrt_panic.c
     runtime/turfrt_signal.c
     runtime/turfrt_types.c
+    runtime/turfrt_win32.c
   )
   target_include_directories(turfrt_asan PRIVATE runtime)
   set_target_properties(turfrt_asan PROPERTIES

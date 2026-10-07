@@ -1199,8 +1199,13 @@ static int linkObject(const std::string &ObjFile,
 
 #ifdef _WIN32
   std::string FinalOutput = WindowsExecutableName(OutputName);
+  // -Wl,--stack: an 8 MB main-thread stack, as on Linux (GNU ld's default is
+  // 2 MB), so deep recursion behaves the same here and under the embedded
+  // linker. -lws2_32: libturfrt's socket layer (runtime/turfrt_net.c) calls
+  // Winsock, and an archive member's own library needs are not recorded in it.
   std::vector<std::string> Args = {"gcc",       ObjFile, "-o", FinalOutput,
-                                    "-L" + TurfLibDir, "-l" + RtLibName, "-lm"};
+                                    "-L" + TurfLibDir, "-l" + RtLibName, "-lm",
+                                    "-Wl,--stack,8388608", "-lws2_32"};
 #else
   std::string FinalOutput = OutputName;
   std::vector<std::string> Args = {"cc",        ObjFile, "-o", FinalOutput,

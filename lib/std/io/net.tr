@@ -55,22 +55,34 @@ unsafe module;
 
 import mem;
 
-// ─── POSIX socket bindings (private to this module) ────────────────────────
+// ─── Socket bindings (private to this module) ──────────────────────────────
 // Every call below that returns a C `int` is declared `int32`, not `int`: a
 // callee writing -1 to the 32-bit return register leaves the upper half
 // zero, so an `int` declaration reads 4294967295 and `fd >= 0` accepts every
 // failure (tests/33_net_dns/02_accept_failure_is_reported.tr). recv()/send()
-// return a 64-bit ssize_t, so `int` is right for those.
+// return a 64-bit ssize_t on POSIX but a 32-bit int on Windows; they are
+// declared `int32` for that reason, and their result is only ever a byte count
+// far below 2^31 here (and is not read at all by this module).
+//
+// The things about TCP sockets that are NOT the same on every platform are in
+// libturfrt, not here (runtime/turfrt_net.c has the reasons): starting Winsock,
+// closing a socket (closesocket on Windows), SO_REUSEADDR (different numbers on
+// Windows) and building a `struct sockaddr_in` (BSD/macOS has a length byte).
+// bind, listen, accept, connect, recv, send and gethostbyname are the same
+// function everywhere and are bound directly. A socket is an `int` here, which
+// holds a Windows SOCKET too: its handles are small multiples of four.
 
-extern fn socket(domain: int, socktype: int, protocol: int): int32;
+extern fn turf_net_startup(): int32;
+extern fn turf_net_socket(): int;
+extern fn turf_net_close(fd: int): int32;
+extern fn turf_net_reuseaddr(fd: int): int32;
+extern fn turf_net_sockaddr(a: int, b: int, c: int, d: int, port: int): void*;
 extern fn bind(fd: int, addr: void*, len: int): int32;
 extern fn listen(fd: int, backlog: int): int32;
 extern fn accept(fd: int, addr: void*, len: void*): int32;
 extern fn connect(fd: int, addr: void*, len: int): int32;
-extern fn recv(fd: int, buf: void*, len: int, flags: int): int;
-extern fn send(fd: int, buf: string, len: int, flags: int): int;
-extern fn close(fd: int): int32;
-extern fn setsockopt(fd: int, level: int, optname: int, optval: void*, optlen: int): int32;
+extern fn recv(fd: int, buf: void*, len: int, flags: int): int32;
+extern fn send(fd: int, buf: string, len: int, flags: int): int32;
 extern fn strlen(s: string): int;
 
 // The classic (deprecated, but still universally present and ABI-stable on
@@ -80,6 +92,11 @@ extern fn gethostbyname(name: string): ptr;
 
 // Named POSIX constants, exported so callers of net.tr could reference them
 // too if they ever needed to (e.g. a future UdpSocket built the same way).
+// They are the Linux values, and are exported API, so they are unchanged.
+// AF_INET and SOCK_STREAM are the same on every platform; SOL_SOCKET and
+// SO_REUSEADDR are NOT (0xffff and 4 on Windows and macOS). This module does not
+// use these two itself any more (turf_net_reuseaddr does the setsockopt), so
+// only a caller passing them to its own FFI call needs to know.
 export immut AF_INET: int = 2;
 export immut SOCK_STREAM: int = 1;
 export immut SOL_SOCKET: int = 1;
@@ -154,6 +171,7 @@ pub error NetworkError {
 // "a.b.c.d"), since network byte order for a dotted-decimal address is
 // just left-to-right, same as buildSockAddr()'s own addrPart comment notes.
 pub fn resolve_hostname(host: string): !string {
+    turf_net_startup();
     mut h: ptr = gethostbyname(host);
     if h == null {
         return NetworkError::ResolutionFailed;
@@ -188,32 +206,15 @@ pub fn resolve_hostname(host: string): !string {
     return (a to string) + "." + (b to string) + "." + (c to string) + "." + (d to string);
 }
 
-// Builds a 16-byte `struct sockaddr_in` memory image for address a.b.c.d
-// (all zero = INADDR_ANY, "any local interface") on the given port, ready
-// to pass straight to bind()/connect().
-//
-// Every Turf `int` is 64 bits, but C's sockaddr_in has 16-bit fields
-// (sin_family, sin_port) -- there's no way to declare a Turf struct whose
-// field sizes match that layout. Instead this computes the correct 16-byte
-// image as one packed little-endian integer and writes it through a
-// `void* to int*` indexed store -- the same pointer-indexing idiom
-// list.tr/stack.tr already use for their own `data: T*` fields.
+// Builds a `struct sockaddr_in` for address a.b.c.d (all zero = INADDR_ANY,
+// "any local interface") on the given port, ready to hand to bind()/connect().
+// The runtime builds it with the platform's own struct, so the layout is right
+// everywhere -- the Linux byte image this used to assemble by hand (family in the
+// first two bytes, port and address in network order) is wrong on BSD/macOS,
+// where the first byte is a length. Allocated with calloc: release it with
+// mem::free(), as before.
 fn buildSockAddr(a: int, b: int, c: int, d: int, port: int): void* {
-    mut addr: void* = mem::alloc_zeroed(1, 16);
-    mut iaddr: int* = addr to int*;
-
-    // Byte layout (little-endian host store, network-order port/address):
-    //   byte 0-1: sin_family = AF_INET
-    //   byte 2-3: sin_port, HIGH byte first (network/big-endian order)
-    //   byte 4-7: sin_addr = a.b.c.d, byte4=a .. byte7=d (also network order,
-    //             which for a dotted-decimal address is just left-to-right)
-    immut portHigh: int = (port / 256) % 256;
-    immut portLow: int = port % 256;
-    immut addrPart: int = a + (b * 256) + (c * 65536) + (d * 16777216);
-    immut packed: int = AF_INET + (portHigh * 65536) + (portLow * 16777216) + (addrPart * 4294967296);
-    iaddr[0] = packed;
-
-    return addr;
+    return turf_net_sockaddr(a, b, c, d, port);
 }
 
 // ─── TcpConnection ───────────────────────────────────────────────────────
@@ -234,7 +235,7 @@ pub fn TcpConnection.new(fd: int): void {
 // (nothing listening) or a local socket() failure are both ordinary,
 // expected outcomes -- the caller decides how to recover.
 pub fn TcpConnection.connect(a: int, b: int, c: int, d: int, port: int) static: !TcpConnection {
-    mut fd: int = socket(AF_INET, SOCK_STREAM, 0);
+    mut fd: int = turf_net_socket();
     if !(fd >= 0) {
         return NetworkError::SocketCreationFailed;
     }
@@ -298,7 +299,7 @@ pub fn TcpConnection.close(): void {
     if self.fd < 0 {
         return;
     }
-    close(self.fd);
+    turf_net_close(self.fd);
     self.fd = -1;
 }
 
@@ -321,16 +322,12 @@ pub fn TcpListener.new(fd: int): void {
 // handle (most programs will just treat it as fatal via `recover run {
 // sys::exit(1); }`, but that's the caller's call, not this function's).
 pub fn TcpListener.bind(port: int) static: !TcpListener {
-    mut fd: int = socket(AF_INET, SOCK_STREAM, 0);
+    mut fd: int = turf_net_socket();
     if !(fd >= 0) {
         return NetworkError::SocketCreationFailed;
     }
 
-    mut optVal: void* = mem::alloc(8);
-    mut iOpt: int* = optVal to int*;
-    iOpt[0] = 1;
-    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, optVal, 4);
-    mem::free(optVal);
+    turf_net_reuseaddr(fd);
 
     mut addr: void* = buildSockAddr(0, 0, 0, 0, port);
     immut bindResult: int = bind(fd, addr, 16);
@@ -370,6 +367,6 @@ pub fn TcpListener.close(): void {
     if self.fd < 0 {
         return;
     }
-    close(self.fd);
+    turf_net_close(self.fd);
     self.fd = -1;
 }

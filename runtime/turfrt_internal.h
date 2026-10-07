@@ -68,6 +68,16 @@ void turf_gc_note_alloc(size_t bytes);
  */
 int turf_gc_is_registered(const void *p);
 
+#ifdef _WIN32
+/*
+ * REL-008 stage 5 (runtime/turfrt_win32.c): on Windows a block from the aligned
+ * allocator must be released with _aligned_free, not free(). Called first by
+ * turf_rt_checked_free(); returns 1 if `p` was such a block and has been
+ * released, 0 if the caller should free() it as usual.
+ */
+int turf_win32_free_aligned(void *p);
+#endif
+
 /*
  * Captures the process's stack base -- the high-address end of the range
  * conservative scanning walks down from. Called exactly once, from
