@@ -18,7 +18,7 @@
 set -u
 cd "$(dirname "$0")/.." || exit 1
 ROOT=$(pwd)
-TURFC="$ROOT/build/turfc"
+TURFC="${TURFC:-$ROOT/build/turfc}"
 [ -x "$TURFC" ] || { echo "FAIL: $TURFC not built"; exit 1; }
 
 # The build tree's own lib/ and lib/std, never a developer's TURF_HOME.

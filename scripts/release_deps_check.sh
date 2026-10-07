@@ -30,7 +30,8 @@
 #            lists libSystem only; libc++ is added because it ships with the
 #            OS (in the dyld shared cache), so a static libstdc++ equivalent is
 #            not needed for it. Remove those two lines if the owner disagrees.
-#            libresolv is added for the Go front end (turf), which cannot drop it.
+#            libresolv is added for the Go front end (turf), which cannot drop it;
+#            libz and libncurses for a static LLVM (zlib and terminfo are the OS's).
 #   windows  KERNEL32 KERNELBASE NTDLL UCRTBASE api-ms-win-* WS2_32 ADVAPI32,
 #            plus ole32 shell32 bcrypt version psapi (what a static LLVM still
 #            imports). msvcrt.dll is NOT allowed: the target is UCRT (Windows
@@ -129,6 +130,8 @@ allowed() {
         /usr/lib/libSystem.B.dylib|/usr/lib/libc++.1.dylib|/usr/lib/libc++abi.dylib) return 0 ;;
         # Go's net package on darwin: the front end (turf) imports it.
         /usr/lib/libresolv.9.dylib) return 0 ;;
+        # What a static LLVM links on macOS: zlib and terminfo, both part of the OS.
+        /usr/lib/libz.1.dylib|/usr/lib/libncurses.5.4.dylib) return 0 ;;
       esac ;;
     windows-*)
       local l

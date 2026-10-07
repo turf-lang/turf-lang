@@ -38,7 +38,90 @@ message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 # llvm-dev and Homebrew's llvm do; some distributions, Arch among them, ship only
 # the shared library).
 option(TURF_STATIC_LLVM "Link LLVM statically (component libraries) instead of the shared libLLVM" OFF)
-if(TURF_STATIC_LLVM)
+
+# REL-008 stage 2: the self-contained `turfc` of a release archive. Stricter
+# than TURF_STATIC_LLVM, which it implies:
+#   * every LLVM target is linked, because main.cpp calls InitializeAll*() and
+#     `--target=aarch64-...` must keep producing a real object file (REL-003,
+#     scripts/cross_target_smoke.sh);
+#   * LLVM's archives are named by path and its own system-library list is NOT
+#     used. LLVMExports.cmake hands the linker whatever the machine that built
+#     LLVM linked it with (on Ubuntu, `libz3.so`, a *shared* zlib and zstd), so
+#     the "static" binary would still need those. The libraries a link of the
+#     compiler needs are listed here, and zlib/zstd are taken as static archives;
+#   * the C++ runtime is static (-static-libstdc++ -static-libgcc; MinGW is fully
+#     static apart from the C runtime, which is the system's);
+#   * --smart's model runtime is off (llama.cpp pulls in OpenMP, and on macOS
+#     Metal/Accelerate/Foundation). `turfc --smart` says it is not built in.
+# What this does NOT do: remove the dependency on the C library and the system
+# linker (`cc`) that links a compiled program (stages 3 and 4).
+# Dev builds stay on the shared libLLVM (link time).
+option(TURF_RELEASE_STATIC "Self-contained turfc for release archives (static LLVM and C++ runtime, no --smart)" OFF)
+if(TURF_RELEASE_STATIC)
+  if(TURF_SMART)
+    message(FATAL_ERROR
+      "TURF_RELEASE_STATIC needs TURF_SMART=OFF: the model runtime links OpenMP and, on macOS, "
+      "system frameworks, so the compiler would not be self-contained. Configure with "
+      "-DTURF_SMART=OFF (scripts/cmake_build.sh --release-static does).")
+  endif()
+  set(TURF_STATIC_LLVM ON)
+endif()
+
+if(TURF_RELEASE_STATIC)
+  llvm_map_components_to_libnames(TURF_LLVM_NAMES
+    core support irreader analysis passes target targetparser mc transformutils instcombine scalaropts native
+    AllTargetsAsmParsers AllTargetsCodeGens AllTargetsDescs AllTargetsInfos)
+  # Imported targets, so CMake adds each component's own LLVM dependencies
+  # (CodeGen, SelectionDAG, ...) itself; only the *system* libraries LLVMSupport
+  # asks for are replaced, below.
+  set(TURF_LLVM_LINK ${TURF_LLVM_NAMES})
+  foreach(_n ${TURF_LLVM_NAMES})
+    if(NOT TARGET ${_n})
+      message(FATAL_ERROR "TURF_RELEASE_STATIC: LLVM target ${_n} does not exist in this installation.")
+    endif()
+    get_target_property(_type ${_n} TYPE)
+    if(NOT _type STREQUAL "STATIC_LIBRARY")
+      message(FATAL_ERROR "TURF_RELEASE_STATIC: ${_n} is a ${_type}, not a static library. This LLVM installation does not ship static component libraries (Debian/Ubuntu llvm-dev, Homebrew llvm and MSYS2 llvm do; Arch's llvm does not).")
+    endif()
+  endforeach()
+
+  # zlib and zstd (LLVM compresses debug sections with them) must be static
+  # archives; a shared one is a runtime dependency the user would lack.
+  find_library(TURF_STATIC_ZSTD NAMES libzstd.a REQUIRED
+    HINTS "$ENV{HOMEBREW_PREFIX}/lib" /opt/homebrew/lib /usr/local/lib)
+  set(TURF_LLVM_SYSLIBS "${TURF_STATIC_ZSTD}")
+  if(APPLE)
+    # The SDK has no static zlib, and /usr/lib/libz.dylib is part of macOS.
+    list(APPEND TURF_LLVM_SYSLIBS z)
+  else()
+    find_library(TURF_STATIC_ZLIB NAMES libz.a REQUIRED)
+    list(APPEND TURF_LLVM_SYSLIBS "${TURF_STATIC_ZLIB}")
+  endif()
+  if(WIN32)
+    # Imported by LLVM's Support on Windows; every Windows ships them.
+    list(APPEND TURF_LLVM_SYSLIBS psapi shell32 ole32 uuid advapi32 ws2_32 ntdll version)
+  elseif(APPLE)
+    list(APPEND TURF_LLVM_SYSLIBS curses)
+  else()
+    # Support's terminal-colour probing (terminfo); static, like the others.
+    find_library(TURF_STATIC_TINFO NAMES libtinfo.a REQUIRED)
+    list(APPEND TURF_LLVM_SYSLIBS "${TURF_STATIC_TINFO}" dl rt)
+  endif()
+
+  # LLVMExports.cmake gives LLVMSupport the system libraries the machine that
+  # built LLVM linked it with: on Ubuntu `libz3.so` and a *shared* zlib and zstd,
+  # which would make this "static" binary need them. Keep its LLVM entries and
+  # swap the rest for the list above.
+  get_target_property(_sup LLVMSupport INTERFACE_LINK_LIBRARIES)
+  set(_sup_llvm "")
+  foreach(_e ${_sup})
+    if(_e MATCHES "^LLVM")
+      list(APPEND _sup_llvm "${_e}")
+    endif()
+  endforeach()
+  set_property(TARGET LLVMSupport PROPERTY INTERFACE_LINK_LIBRARIES ${_sup_llvm} ${TURF_LLVM_SYSLIBS})
+  message(STATUS "Release link: static LLVM, LLVMSupport's system libs replaced by: ${TURF_LLVM_SYSLIBS}")
+elseif(TURF_STATIC_LLVM)
   llvm_map_components_to_libnames(TURF_LLVM_LINK
     core support irreader analysis passes target targetparser mc transformutils instcombine scalaropts native)
   message(STATUS "Linking LLVM statically: ${TURF_LLVM_LINK}")
@@ -432,6 +515,17 @@ endif()
 add_executable(turfc src/main.cpp src/TestRunner.cpp src/TestExpectations.cpp)
 
 target_link_libraries(turfc PRIVATE turfcore)
+if(TURF_RELEASE_STATIC AND NOT APPLE)
+  # The C++ runtime and the compiler's support library go into turfc (macOS
+  # links the system's libc++, which every Mac has). MinGW is linked fully
+  # static: libwinpthread is the other DLL it would bring along; the C runtime
+  # stays the system's either way.
+  if(WIN32)
+    target_link_options(turfc PRIVATE -static)
+  else()
+    target_link_options(turfc PRIVATE -static-libstdc++ -static-libgcc)
+  endif()
+endif()
 target_compile_definitions(turfc PRIVATE TURF_VERSION="${TURF_VERSION}")
 if(TURF_RT_SANITIZE)
   target_compile_definitions(turfc PRIVATE TURF_RT_ASAN_BUILD)

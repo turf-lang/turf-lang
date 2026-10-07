@@ -13,15 +13,20 @@ BUILD_DIR="build"
 # no ML build, no OpenMP -- the fast path for anyone who just wants the
 # compiler. See TURF_SMART in CMakeLists.txt.
 SMART="ON"
+# --release-static: the self-contained release `turfc` (REL-008 stage 2): a
+# Release build with LLVM and the C++ runtime linked statically and --smart's
+# model runtime off. Needs an LLVM that ships static libraries; CI uses it.
+RELEASE_STATIC="OFF"
 # Parse arguments
 for arg in "$@"; do
   case $arg in
     --release)   BUILD_TYPE="Release" ;;
     --debug)     BUILD_TYPE="Debug" ;;
     --no-smart)  SMART="OFF" ;;
+    --release-static) BUILD_TYPE="Release"; SMART="OFF"; RELEASE_STATIC="ON" ;;
     --clean)     rm -rf "$BUILD_DIR" && echo -e "${YELLOW}Cleaned build directory.${RESET}" ;;
     --help)
-      echo "Usage: $0 [--debug] [--release] [--no-smart] [--clean]"
+      echo "Usage: $0 [--debug] [--release] [--release-static] [--no-smart] [--clean]"
       exit 0
       ;;
   esac
@@ -30,6 +35,7 @@ echo -e "${GREEN}[1 / 3]${RESET} ${BOLD}Configuring (${BUILD_TYPE}, --smart runt
 cmake -S . -B "$BUILD_DIR" \
   -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
   -DTURF_SMART="$SMART" \
+  -DTURF_RELEASE_STATIC="$RELEASE_STATIC" \
   -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 # Symlink compile_commands.json to project root for clangd/IDEs
 if [ -f "$BUILD_DIR/compile_commands.json" ] && [ ! -L "compile_commands.json" ]; then
