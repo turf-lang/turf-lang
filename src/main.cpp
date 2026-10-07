@@ -1174,7 +1174,11 @@ static int linkObject(const std::string &ObjFile,
       if (turf::BundledLinkAvailable(RuntimeDir)) {
         turf::BundledLinkRequest Req;
         Req.ObjectFile = ObjFile;
+#ifdef _WIN32
+        Req.Output = WindowsExecutableName(OutputName);
+#else
         Req.Output = OutputName;
+#endif
         Req.RuntimeDir = RuntimeDir;
         Req.TurfLibDir = TurfLibDir;
         Req.TurfRtName = RtLibName;

@@ -50,8 +50,12 @@ skip() {
   if [ -n "${CI:-}" ]; then echo "bundled_link_smoke: but CI is set, so a skip is a failure"; exit 1; fi
   exit 0
 }
+# Per-platform: the runtime directory name, a file the contract requires (moved
+# away to prove an incomplete directory is not used), and a file whose being
+# empty makes the link fail (to prove a broken runtime is reported, not hidden).
 case "$(uname -s)/$(uname -m)" in
-  Linux/x86_64) PLATFORM=linux-x86_64 ;;
+  Linux/x86_64) PLATFORM=linux-x86_64; REQUIRED_FILE=crt1.o; BREAK_FILE=libc.a ;;
+  Darwin/arm64) PLATFORM=macos-arm64; REQUIRED_FILE=libSystem.tbd; BREAK_FILE=libSystem.tbd ;;
   *) skip "no bundled link for $(uname -s)/$(uname -m) yet" ;;
 esac
 unset TURF_HOME TURF_LINKER
@@ -73,6 +77,7 @@ if [ -n "$ARCHIVE" ]; then
   RT="$INST/lib/rt/$PLATFORM"
   REAL_RUNTIME=1
 else
+  [ "$PLATFORM" = linux-x86_64 ] || skip "the stand-in runtime is Linux-only; pass --archive on this platform"
   [ -x "$TURFC" ] || skip "$TURFC not built"
   command -v cc >/dev/null 2>&1 || skip "no cc here to take a stand-in C runtime from"
   # An install tree: bin/turfc beside lib/ (copied, not symlinked: the compiler
@@ -94,7 +99,7 @@ else
   REAL_RUNTIME=0
 fi
 "$INST/bin/turfc" --version 2>/dev/null | grep -q '^linker embedded-lld' || skip "this turfc has no embedded linker"
-if [ -n "$ARCHIVE" ] && [ ! -f "$RT/crt1.o" ]; then
+if [ -n "$ARCHIVE" ] && [ ! -f "$RT/$REQUIRED_FILE" ]; then
   echo "bundled_link_smoke: the archive has no $RT (REL-008 stage 4 builds it: scripts/build_bundled_runtime.sh)"; exit 1
 fi
 
@@ -124,7 +129,14 @@ fn main(): int {
 }
 TR
 compile() { PATH="$DECOY:$PATH" "$INST/bin/turfc" "$@" > out.log 2>&1; }
-is_static() { ! readelf -lW "$1" 2>/dev/null | grep -q INTERP; }
+# "Needs nothing installed": a Linux executable is static (no interpreter); a
+# macOS one can only load the system's libSystem.
+is_self_contained() {
+  case "$PLATFORM" in
+    linux-x86_64) ! readelf -lW "$1" 2>/dev/null | grep -q INTERP ;;
+    macos-arm64) [ "$(otool -L "$1" | sed 1d | grep -vc 'libSystem')" = 0 ] ;;
+  esac
+}
 
 echo "== --version reports the embedded linker and the usable runtime"
 V=$("$INST/bin/turfc" --version)
@@ -135,7 +147,7 @@ echo "== a program naming only the C runtime's own libraries links in-process"
 reset_cc
 if compile hello.tr -o hello; then pass "compiled"; else fail "compile failed: $(tail -3 out.log)"; fi
 ran_cc && fail "the system cc was run" || pass "the system cc was not run"
-if [ -x hello ] && is_static hello; then pass "the executable is static"; else fail "the executable is not static"; fi
+if [ -x hello ] && is_self_contained hello; then pass "the executable needs nothing installed"; else fail "the executable depends on more than the system"; fi
 OUT=$(./hello 2>&1)
 echo "$OUT" | grep -q "hello from the bundled link" && echo "$OUT" | grep -q "^4" && pass "it runs and prints" || fail "wrong output: $OUT"
 
@@ -153,22 +165,22 @@ compile hello.tr -o hello2 --link z && fail "--link z: expected the decoy cc to 
 ran_cc && pass "--link z: cc was run" || fail "--link z: cc was not run"
 
 echo "== a runtime directory missing a required file is not used"
-mv "$RT/crt1.o" "$RT/crt1.o.off"; reset_cc
+mv "$RT/$REQUIRED_FILE" "$RT/$REQUIRED_FILE.off"; reset_cc
 compile hello.tr -o hello3 && fail "expected the decoy cc to fail the link" || pass "the link failed (decoy cc exit 99)"
 ran_cc && pass "the decoy cc was run (fell back)" || fail "no fallback to cc"
 "$INST/bin/turfc" --version | grep -q '^bundled-runtime' && fail "--version still lists a runtime" || pass "--version no longer lists a bundled-runtime"
-mv "$RT/crt1.o.off" "$RT/crt1.o"
+mv "$RT/$REQUIRED_FILE.off" "$RT/$REQUIRED_FILE"
 
 echo "== a runtime that is present but broken fails clearly, without falling back"
-cp "$RT/libc.a" "$RT/libc.a.good"; : > "$RT/libc.a"; reset_cc
+cp "$RT/$BREAK_FILE" "$RT/$BREAK_FILE.good"; : > "$RT/$BREAK_FILE"; reset_cc
 if compile hello.tr -o hello4; then fail "expected the link to fail"; else pass "the link failed"; fi
 grep -q "the linker built into turfc" out.log && pass "the message names the embedded linker" || fail "message does not name the embedded linker: $(tail -3 out.log)"
 grep -q "TURF_LINKER=system" out.log && pass "the message names the escape hatch" || fail "message does not name TURF_LINKER=system"
 ran_cc && fail "it fell back to cc after a bundled failure" || pass "no silent fallback to cc"
-mv "$RT/libc.a.good" "$RT/libc.a"
+mv "$RT/$BREAK_FILE.good" "$RT/$BREAK_FILE"
 
 if [ "$REAL_RUNTIME" = 1 ]; then
-  echo "== the shipped runtime resolves host names in a static program (static glibc cannot)"
+  echo "== the shipped runtime resolves host names (static glibc cannot)"
   cat > dns.tr <<'TR'
 import io;
 import net;

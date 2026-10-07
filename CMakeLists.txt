@@ -67,12 +67,13 @@ if(TURF_RELEASE_STATIC)
   set(TURF_STATIC_LLVM ON)
 endif()
 
-# REL-008 stage 3: lld inside turfc, so a program that names no system C
-# library is linked in-process (src/BundledLink.cpp) instead of by `cc`. Only
-# the linker driver for the host's object format is linked (ELF on Linux so far;
-# COFF/MinGW and Mach-O arrive with the Windows and macOS runtimes of stages 4-6).
-# It needs the static lld archives (Ubuntu's liblld-22 + liblld-22-dev), which is
-# why it requires TURF_RELEASE_STATIC.
+# REL-008 stages 3-4: lld inside turfc, so a program that names no system C
+# library beyond the C runtime is linked in-process (src/BundledLink.cpp) against
+# the runtime the archive carries (lib/rt/<platform>/) instead of by `cc`. Only
+# the linker driver for the host's object format is linked: ELF on Linux, MinGW
+# (COFF) on Windows, Mach-O on macOS. It needs the static lld archives (Ubuntu's
+# liblld-22 + liblld-22-dev, MSYS2's lld, Homebrew's lld@22), which is why it
+# requires TURF_RELEASE_STATIC.
 option(TURF_EMBED_LLD "Embed lld in turfc for in-process linking against the bundled C runtime (release builds)" OFF)
 if(TURF_EMBED_LLD AND NOT TURF_RELEASE_STATIC)
   message(FATAL_ERROR "TURF_EMBED_LLD needs TURF_RELEASE_STATIC=ON (lld's static libraries are linked against the static LLVM components).")
@@ -83,6 +84,12 @@ if(TURF_EMBED_LLD)
   # files, option parsing, symbolization for its diagnostics, ...).
   set(TURF_LLD_COMPONENTS lto dtlto object option binaryformat debuginfodwarf symbolize textapi
       bitreader bitwriter linker ipo)
+  if(WIN32)
+    # The COFF driver also writes PDBs and merges Windows manifests and import
+    # libraries.
+    list(APPEND TURF_LLD_COMPONENTS debuginfopdb debuginfocodeview debuginfomsf
+         windowsdriver windowsmanifest libdriver)
+  endif()
 endif()
 
 if(TURF_RELEASE_STATIC)
@@ -153,17 +160,28 @@ if(TURF_RELEASE_STATIC)
     if(TARGET LLVMExtensions)
       set_property(TARGET LLVMExtensions PROPERTY INTERFACE_LINK_LIBRARIES LLVMSupport)
     endif()
-    set(TURF_LLD_LIBS lldCommon)
+    # LLVMWindowsManifest (lld's COFF driver merges manifests with it) is
+    # exported as linking libxml2, a DLL on MSYS2 that would end up beside
+    # turfc.exe. turfc never merges a manifest; src/BundledLinkWindowsShims.cpp
+    # provides the few symbols the object file references.
+    if(TARGET LLVMWindowsManifest)
+      set_property(TARGET LLVMWindowsManifest PROPERTY INTERFACE_LINK_LIBRARIES LLVMSupport)
+    endif()
+    # Dependents before what they depend on: a static archive only resolves
+    # symbols from archives after it. Each driver is linked to lldCommon (and
+    # the MinGW one to the COFF driver it hands over to) and nothing else.
     if(WIN32)
-      message(FATAL_ERROR "TURF_EMBED_LLD: the COFF/MinGW driver is not wired yet (REL-008 stage 5).")
+      set(TURF_LLD_LIBS lldMinGW lldCOFF lldCommon)
     elseif(APPLE)
-      message(FATAL_ERROR "TURF_EMBED_LLD: the Mach-O driver is not wired yet (REL-008 stage 6).")
+      set(TURF_LLD_LIBS lldMachO lldCommon)
     else()
-      list(PREPEND TURF_LLD_LIBS lldELF)
+      set(TURF_LLD_LIBS lldELF lldCommon)
     endif()
     set_property(TARGET lldCommon PROPERTY INTERFACE_LINK_LIBRARIES "")
     foreach(_l ${TURF_LLD_LIBS})
-      if(NOT _l STREQUAL "lldCommon")
+      if(_l STREQUAL "lldMinGW")
+        set_property(TARGET ${_l} PROPERTY INTERFACE_LINK_LIBRARIES lldCOFF)
+      elseif(NOT _l STREQUAL "lldCommon")
         set_property(TARGET ${_l} PROPERTY INTERFACE_LINK_LIBRARIES lldCommon)
       endif()
     endforeach()
@@ -586,6 +604,11 @@ add_executable(turfc src/main.cpp src/TestRunner.cpp src/TestExpectations.cpp
 
 if(TURF_EMBED_LLD)
   target_compile_definitions(turfc PRIVATE TURF_EMBED_LLD)
+  if(WIN32)
+    # MSYS2's lld archives call libxml2 and llvm::demangle through import-table
+    # slots a static link does not have; see the file's own comment.
+    target_sources(turfc PRIVATE src/BundledLinkWindowsShims.cpp)
+  endif()
   # Before turfcore: a static archive only resolves symbols from archives that
   # come after it, and lld needs LLVM's.
   target_link_libraries(turfc PRIVATE ${TURF_LLD_LIBS} turfcore)
