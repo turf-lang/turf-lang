@@ -1,0 +1,324 @@
+name: Build release archives
+
+# REL-008 stage 1. The four release builds, packaged and inspected, as one
+# reusable workflow so that the tag release (release.yml) and the every-push CI
+# (release-shaped-ci.yml) run the same steps: CI that built something else would
+# prove nothing about the release. A tagged run checks the pushed tag against
+# VERSION; any other run packages whatever VERSION says (a -dev version) and
+# publishes nothing.
+on:
+  workflow_call:
+    inputs:
+      allowlist:
+        description: >-
+          What a failed dependency check (scripts/release_deps_check.sh) does.
+          'enforce' fails the job; 'report' prints the same report and carries
+          on. The check fails today by design (the archive's turfc links LLVM
+          dynamically; REL-008 stages 2-4 fix that), so a caller that must
+          still be able to ship passes 'report' until stage 4 lands.
+        type: string
+        default: enforce
+
+jobs:
+  # Linux (Ubuntu/Debian) - x86_64
+  linux-x86_64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Cache LLVM
+        id: cache-llvm
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/lib/llvm-22
+            /usr/include/llvm-22
+            /usr/include/llvm-c-22
+          key: llvm-22-${{ runner.os }}-v1
+
+      - name: Install LLVM
+        if: steps.cache-llvm.outputs.cache-hit != 'true'
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 22
+          sudo apt-get install -y llvm-22-dev cmake libomp-dev
+      - run: echo "/usr/lib/llvm-22/bin" >> $GITHUB_PATH
+
+      - name: Get llama.cpp commit hash
+        id: llama-sha
+        run: echo "sha=$(git -C external/llama.cpp rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache llama.cpp build
+        id: cache-llama
+        uses: actions/cache@v4
+        with:
+          path: external/llama.cpp/build
+          key: llama-build-linux-x86_64-${{ steps.llama-sha.outputs.sha }}
+
+      # Go, before the CMake build, so it builds build/turf (the front end under
+      # cli/, LEC-001) beside build/turfc; the archive ships both.
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+
+      - name: Build Turf
+        run: |
+          chmod +x scripts/cmake_build.sh
+          ./scripts/cmake_build.sh --release
+
+      - name: Package
+        id: package
+        uses: ./.github/actions/package-release
+        with:
+          platform-suffix: linux-x86_64
+          archive-format: tar.gz
+
+      # REL-003: install the archive that is about to be published with
+      # install.sh and use it (layout, checksum, PATH block, turf new/run/
+      # build, uninstall). A release that fails this is not uploaded.
+      - name: Release archive smoke test
+        run: CI=1 ./scripts/release_smoke.sh --archive "${{ steps.package.outputs.archive-path }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64
+          path: |
+            turf-*-linux-x86_64.tar.gz
+            turf-*-linux-x86_64.tar.gz.sha256
+
+      # REL-008 stage 1; last, so the smoke test and the upload always happen.
+      - name: Archive dependency check (REL-008)
+        continue-on-error: ${{ inputs.allowlist != 'enforce' }}
+        run: ./scripts/release_deps_check.sh --archive "${{ steps.package.outputs.archive-path }}"
+
+  # Linux (Arch) - x86_64 via Docker
+  linux-arch-x86_64:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+    steps:
+      # archlinux:latest ships no `git` at all, so actions/checkout's own
+      # `submodules: recursive` clone can't run yet -- it silently falls
+      # back to the GitHub REST API tarball download instead, which has no
+      # way to fetch submodules, and fails outright ("Input 'submodules'
+      # not supported when falling back to download using the GitHub REST
+      # API"). Confirmed live: this is exactly how the v0.8.0 release run
+      # failed. `git` has to be installed in a step BEFORE checkout, not
+      # folded into the "Install dependencies" step below (which runs
+      # after and is too late).
+      - name: Install git (required before actions/checkout can clone submodules)
+        run: pacman -Sy --noconfirm --needed git
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # The compiler needs LLVM 22 (22.1.8 here). Arch ships one LLVM at a time
+      # and `llvm` is already 23, which removed APIs the code generator uses
+      # (IRBuilder::CreateGlobalStringPtr); v2.0.0-rc1's Arch build failed on
+      # exactly that. The Arch Linux Archive keeps old builds, so install the
+      # pinned ones with `pacman -U` (it verifies their signatures) and tell
+      # pacman never to upgrade them. `openmp` (LLVM's libomp) is not installed:
+      # gcc's libgomp is what an OpenMP build here uses, and a libomp built for
+      # LLVM 23 would not belong next to LLVM 22 anyway.
+      - name: Install dependencies
+        run: |
+          pacman -Sy --noconfirm --needed base-devel cmake git tar
+          A=https://archive.archlinux.org/packages
+          pacman -U --noconfirm \
+            "$A/l/llvm-libs/llvm-libs-22.1.8-2-x86_64.pkg.tar.zst" \
+            "$A/l/llvm/llvm-22.1.8-2-x86_64.pkg.tar.zst" \
+            "$A/c/clang/clang-22.1.8-1-x86_64.pkg.tar.zst"
+          echo "IgnorePkg = llvm llvm-libs clang" >> /etc/pacman.conf
+          llvm-config --version | grep -q '^22\.' || { echo "::error::LLVM is $(llvm-config --version), not 22"; exit 1; }
+
+      # The checkout is owned by another user inside this container, so git
+      # refuses it and `go build` fails with "error obtaining VCS status".
+      - name: Let git use the checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+
+      - name: Build Turf
+        run: |
+          chmod +x scripts/cmake_build.sh
+          ./scripts/cmake_build.sh --release
+
+      - name: Package
+        id: package
+        uses: ./.github/actions/package-release
+        with:
+          platform-suffix: linux-arch-x86_64
+          archive-format: tar.gz
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-arch-x86_64
+          path: |
+            turf-*-linux-arch-x86_64.tar.gz
+            turf-*-linux-arch-x86_64.tar.gz.sha256
+
+      - name: Archive dependency check (REL-008)
+        continue-on-error: ${{ inputs.allowlist != 'enforce' }}
+        run: ./scripts/release_deps_check.sh --archive "${{ steps.package.outputs.archive-path }}"
+
+  # macOS - ARM64 (Apple Silicon)
+  macos-arm64:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # LLVM 22, not the latest: `brew install llvm` is 23, which the compiler
+      # does not build against (v2.0.0-rc1's macOS build failed on it).
+      # llvm@22 is keg-only, so CMake is pointed at it explicitly; PATH alone
+      # could still find another LLVM first.
+      - name: Install LLVM
+        run: |
+          brew install llvm@22 cmake
+          LLVM_PREFIX="$(brew --prefix llvm@22)"
+          echo "$LLVM_PREFIX/bin" >> $GITHUB_PATH
+          echo "CMAKE_PREFIX_PATH=$LLVM_PREFIX" >> $GITHUB_ENV
+          "$LLVM_PREFIX/bin/llvm-config" --version | grep -q '^22\.' || { echo "::error::LLVM is not 22"; exit 1; }
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+
+      - name: Build Turf
+        run: |
+          export PATH="$(brew --prefix llvm@22)/bin:$PATH"
+          chmod +x scripts/cmake_build.sh
+          ./scripts/cmake_build.sh --release
+
+      - name: Package
+        id: package
+        uses: ./.github/actions/package-release
+        with:
+          platform-suffix: macos-arm64
+          archive-format: tar.gz
+
+      # REL-003: as for linux-x86_64. Written without a macOS machine; this
+      # runner is where the script's Darwin branches (bash login shell,
+      # ~/.bash_profile, BSD tools) get their first real run.
+      - name: Release archive smoke test
+        run: CI=1 ./scripts/release_smoke.sh --archive "${{ steps.package.outputs.archive-path }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64
+          path: |
+            turf-*-macos-arm64.tar.gz
+            turf-*-macos-arm64.tar.gz.sha256
+
+      # otool -L on the runner: the first real run of the macOS branch of the
+      # check, written without a Mac like the smoke test's Darwin branches.
+      - name: Archive dependency check (REL-008)
+        continue-on-error: ${{ inputs.allowlist != 'enforce' }}
+        run: ./scripts/release_deps_check.sh --archive "${{ steps.package.outputs.archive-path }}"
+
+  # macOS - x86_64 (Intel) -- DROPPED. `macos-13` (the last Intel-hosted
+  # runner label GitHub offers) queued for 9+ hours without ever starting
+  # during the v1.0.0-rc1 dry run while every other platform completed in
+  # minutes -- GitHub has been winding down Intel macOS runner capacity,
+  # and this job is no longer reliably schedulable at all, not just slow.
+  # macOS - x86_64 (via Rosetta 2 on an ARM runner) is a possible future
+  # replacement if Intel Mac support is ever needed again, but that's a
+  # deliberate follow-up, not a like-for-like swap done here.
+
+  # Windows - x86_64 (via MSYS2 MinGW)
+  windows-x86_64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          # setup-go puts Go on the WINDOWS path, which a default
+          # (`path-type: minimal`) MSYS2 shell does not see, so CMake printed
+          # "Go not found: build/turf ... will not be built" in v2.0.0-rc1's
+          # Windows job. `inherit` appends the Windows PATH after MSYS2's own,
+          # so the MINGW64 toolchain still wins and `go` is found.
+          path-type: inherit
+          # mingw-w64-x86_64-openmp was renamed to mingw-w64-x86_64-llvm-openmp
+          # upstream in the MSYS2 repos -- the old name now 404s ("target not
+          # found"), confirmed live via the v1.0.0-rc1 dry-run release build.
+          install: mingw-w64-x86_64-llvm mingw-w64-x86_64-clang mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja mingw-w64-x86_64-llvm-openmp
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+
+      - name: Build Turf
+        shell: msys2 {0}
+        run: |
+          chmod +x scripts/cmake_build.sh
+          ./scripts/cmake_build.sh --release
+
+      # CMake only builds build/turf.exe if it can find `go` from inside the
+      # MSYS2 shell (`path-type: inherit` above is what lets it). Never ship an
+      # archive without the front end: if this fires, fix the Go lookup, do not
+      # drop the check.
+      - name: Check the turf front end was built
+        shell: msys2 {0}
+        run: |
+          test -f build/turf.exe || { echo "::error::build/turf.exe was not built: CMake did not find Go inside the MSYS2 shell"; exit 1; }
+
+      - name: Collect runtime DLL dependencies
+        id: dlls
+        shell: msys2 {0}
+        run: |
+          mkdir -p dll_bundle
+          ldd build/turfc.exe | grep -i '/mingw64/bin/' | awk '{print $3}' | sort -u | while read -r dll; do
+            cp "$dll" dll_bundle/
+          done
+          # Format as newline-separated Windows paths for the composite action input
+          {
+            echo "list<<EOF"
+            find dll_bundle -type f | sed 's#^#dll_bundle/#' | sed 's#dll_bundle/dll_bundle/#dll_bundle/#'
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Package
+        id: package
+        uses: ./.github/actions/package-release
+        with:
+          platform-suffix: windows-x86_64
+          archive-format: zip
+          # turf.exe has no DLL dependencies (CGO_ENABLED=0 in the CMake target),
+          # so only the DLLs turfc.exe needs go beside them in bin/.
+          bin-extra: ${{ steps.dlls.outputs.list }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: |
+            turf-*-windows-x86_64.zip
+            turf-*-windows-x86_64.zip.sha256
+
+      # The self-containment check (REL-008 stage 1) runs last so that the
+      # smoke test and the upload above always happen: what it reports is a
+      # property of the archive, not a reason to hide the archive.
+      - name: Archive dependency check (REL-008)
+        continue-on-error: ${{ inputs.allowlist != 'enforce' }}
+        shell: msys2 {0}
+        run: ./scripts/release_deps_check.sh --archive "${{ steps.package.outputs.archive-path }}"

@@ -29,9 +29,16 @@ runs:
         while IFS= read -r f; do
           [ -n "$f" ] && EXTRA+=(--bin-extra "$f")
         done <<< "${{ inputs.bin-extra }}"
+        # Only a tag run is a release. The every-push CI (REL-008 stage 1)
+        # runs this same action on a branch, where GITHUB_REF_NAME is a branch
+        # name and VERSION is the -dev line; both would trip the tag check.
+        TAG=()
+        if [ "${GITHUB_REF_TYPE:-}" = tag ]; then
+          TAG=(--expect-tag "${GITHUB_REF_NAME}")
+        fi
         ARCHIVE=$(./scripts/package_release.sh \
           --platform "${{ inputs.platform-suffix }}" \
           --format "${{ inputs.archive-format }}" \
-          --expect-tag "${GITHUB_REF_NAME}" \
+          ${TAG[@]+"${TAG[@]}"} \
           ${EXTRA[@]+"${EXTRA[@]}"})
         echo "archive-path=${ARCHIVE}" >> "$GITHUB_OUTPUT"
