@@ -563,6 +563,21 @@ private:
   // public alternatives) cannot drift between the ways a private name can be
   // reached: `m::f()`, `m::T`, and `import m::name;`.
 
+  /// LEC-008 (FREEZE.md 6.24): true if code in @p Context ("" = main file) may
+  /// spell `Module::`. Otherwise raises ModuleNotImportedError (E145) naming
+  /// @p Spelled (what the user wrote after the module, e.g. `printline`) and
+  /// returns false. The module may EXIST (that is the point: it was loaded by
+  /// someone else's import) -- callers have already ruled out an unknown name,
+  /// which is a different error. Every place a module qualifier is spelled
+  /// goes through here; the silent type-spelling resolver asks
+  /// `SymTable_.isModuleImportedBy` directly because it must not report.
+  bool requireModuleImported(const std::string &Module, const std::string &Context,
+                             SourceLocation Loc, const std::string &Spelled) const;
+  /// The silent form of the same question (no diagnostic): the prelude's
+  /// modules, the context's own module, and what it imported with a plain
+  /// `import m;`.
+  bool mayQualifyWith(const std::string &Module, const std::string &Context) const;
+
   /// Raises PrivateSymbolAccessError (E088) for private function @p Name of
   /// module @p Module, pointing at its declaration.
   void raisePrivateFunction(SourceLocation Loc, const std::string &Module,

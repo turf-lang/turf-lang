@@ -107,6 +107,30 @@ bool ResolverModuleTable::hasModule(const std::string &ModuleName) const {
   return Modules_.count(ModuleName) > 0;
 }
 
+void ResolverModuleTable::noteBareImport(const std::string &ContextLabel,
+                                         const std::string &ModuleName) {
+  BareImports_[ContextLabel].insert(ModuleName);
+}
+
+void ResolverModuleTable::noteSymbolImport(const std::string &ContextLabel,
+                                           const std::string &ModuleName) {
+  SymbolImports_[ContextLabel].insert(ModuleName);
+}
+
+bool ResolverModuleTable::hasSymbolImport(const std::string &ModuleName,
+                                          const std::string &ContextLabel) const {
+  auto It = SymbolImports_.find(ContextLabel);
+  return It != SymbolImports_.end() && It->second.count(ModuleName) > 0;
+}
+
+bool ResolverModuleTable::isModuleImportedBy(
+    const std::string &ModuleName, const std::string &ContextLabel) const {
+  if (ModuleName == ContextLabel)
+    return true;
+  auto It = BareImports_.find(ContextLabel);
+  return It != BareImports_.end() && It->second.count(ModuleName) > 0;
+}
+
 std::vector<std::string> ResolverModuleTable::getAllModuleNames() const {
   std::vector<std::string> Names;
   Names.reserve(Modules_.size());

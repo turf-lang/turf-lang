@@ -101,7 +101,7 @@ typedef struct TurfTypeDesc {
  * returns -- including on every path (RT-001 does not special-case abrupt
  * termination via turf_rt_panic()'s abort(): a panic is not something a
  * program is expected to recover from and shut down cleanly after, exactly
- * like sys::panic()'s own abort() in lib/std/io/sys.tr).
+ * like sys::panic()'s own abort() in lib/std/core/sys.tr).
  *
  * In this group both are effectively no-ops (there is no heap to stand up
  * yet -- MEM-002 gives turf_rt_init() a real block table to initialize).
@@ -150,7 +150,7 @@ void *turf_rt_alloc(size_t bytes, const TurfTypeDesc *desc);
  *
  * MEM-001 needs this because two of the GC-heap call sites it reroutes
  * genuinely rely on zero-initialization, not just convenience:
- * `io::read_to_string()` (lib/std/io/io.tr) and
+ * `io::read_to_string()` (lib/std/core/io.tr) and
  * `net::TcpConnection.read()` (lib/std/io/net.tr) both allocate a buffer
  * sized one byte larger than the maximum they will read into, and rely on
  * that trailing byte (and, on a short read, everything past what was
@@ -344,7 +344,7 @@ TurfRtStats turf_rt_stats(void);
  * only "non-zero, and not a timeout/OOM-kill status") every one of these
  * checks has always produced; the destination is C's own runtime safety
  * guards ONLY (bounds/div-by-zero/overflow), never a call reachable from
- * ordinary Turf source -- lib/std/io/sys.tr's own panic()/abort() is a
+ * ordinary Turf source -- lib/std/core/sys.tr's own panic()/abort() is a
  * completely separate, pre-existing path this function does not touch or
  * replace.
  */

@@ -6,6 +6,7 @@
 // the receiver VALUE's type.
 
 import test;
+import type_identity_node_a_module;
 import type_identity_node_a_module::Node;
 
 fn Node.doubled(): int {

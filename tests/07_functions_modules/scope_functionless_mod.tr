@@ -25,6 +25,7 @@
 // as bare function calls already needed. Hence `Shade` specifically below.
 
 import io;
+import functionless_module_enum_module;
 import functionless_module_enum_module::Shade;
 
 import test;

@@ -10,6 +10,7 @@
 // implied.
 
 import io;
+import empty_struct_helper_module;
 import empty_struct_helper_module::Empty;
 
 fn main(): int {

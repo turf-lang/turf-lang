@@ -11,6 +11,7 @@
 // only qualified access now (see the bare-type visibility gate).
 
 import io;
+import generic_struct_custom_module;
 import generic_struct_custom_module::Box;
 
 import test;

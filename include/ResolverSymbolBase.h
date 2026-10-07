@@ -602,7 +602,7 @@ inline SourceLocation toSourceLocation(ResolverSourceLocation R) {
 /// location with no file reads as a line of the file being compiled -- the
 /// candidate was shown to the --smart model as an unrelated line of the program
 /// (or dropped when the number was past its end). Naming the module's file makes
-/// the note say where it really is (`lib/std/math/math.tr, line 24`) and lets
+/// the note say where it really is (`lib/std/core/math.tr, line 24`) and lets
 /// SLM::collectPinnedLines() fetch that file's text. If the module cannot be
 /// resolved to a file the location still names the module, so it is never
 /// mistaken for the program's own. Defined in ResolverCore.cpp.

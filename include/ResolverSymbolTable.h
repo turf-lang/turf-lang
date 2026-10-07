@@ -123,6 +123,26 @@ public:
     return ModuleTable_.hasModule(ModuleName);
   }
 
+  void noteBareImport(const std::string &ContextLabel,
+                      const std::string &ModuleName) {
+    ModuleTable_.noteBareImport(ContextLabel, ModuleName);
+  }
+
+  void noteSymbolImport(const std::string &ContextLabel,
+                        const std::string &ModuleName) {
+    ModuleTable_.noteSymbolImport(ContextLabel, ModuleName);
+  }
+
+  bool hasSymbolImport(const std::string &ModuleName,
+                       const std::string &ContextLabel) const {
+    return ModuleTable_.hasSymbolImport(ModuleName, ContextLabel);
+  }
+
+  bool isModuleImportedBy(const std::string &ModuleName,
+                          const std::string &ContextLabel) const {
+    return ModuleTable_.isModuleImportedBy(ModuleName, ContextLabel);
+  }
+
   std::vector<std::string> getAllModuleNames() const {
     return ModuleTable_.getAllModuleNames();
   }

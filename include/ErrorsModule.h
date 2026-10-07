@@ -352,6 +352,35 @@ public:
   }
 };
 
+// LEC-008 (FREEZE.md 6.24, F-IMP-1/2/5): `m::...` is spelled in a file that did
+// not write `import m;` itself. The module exists, so this is not
+// UnknownScopeQualifierError (a typo) -- the fix is one line, and the hint
+// prints it. DECLARATION: the same family as the other import errors, and its
+// SLM page can state the fix, so no new category was needed.
+class ModuleNotImportedError : public TurfError {
+public:
+  /// @p InModule is the module whose file wrote the use ("" = the main file).
+  /// @p HadSymbolImport: the file already has `import m::name;` -- common, and
+  /// the one case where "you did import it" is a natural thing to think.
+  ModuleNotImportedError(SourceLocation Loc, const std::string &Module,
+                         const std::string &InModule, bool HadSymbolImport,
+                         const std::string &Spelled)
+      : TurfError(Loc, Colors::BRIGHT_RED + "Module '" + Colors::CYAN + Module +
+                           Colors::BRIGHT_RED + "' is not imported " +
+                           (InModule.empty() ? std::string("in this file")
+                                             : "in module '" + InModule + "'") +
+                           "." + Colors::RESET) {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+    Hint_ = "Add `import " + Module + ";` at the top of " +
+            (InModule.empty() ? std::string("this file") : "'" + InModule + "'") +
+            " to use '" + Spelled + "'. ";
+    if (HadSymbolImport)
+      Hint_ += "`import " + Module + "::name;` brings in only that name, not the `" +
+               Module + "::` qualifier, so both lines are needed to use both. ";
+    Hint_ += "A module is not visible just because another import loaded it.";
+  }
+};
+
 // A single hop in a detected import cycle: which module, and the location
 // of the `import` statement that pulled it onto the in-progress stack.
 struct ImportChainEntry {

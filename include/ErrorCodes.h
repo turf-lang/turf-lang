@@ -424,6 +424,8 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     {ErrCode::SliceOfNonArray, "SliceOfNonArrayError", "Slicing something that isn't an array", SLM::ErrorCategory::ARRAY_ERROR},
     {ErrCode::SliceRangeOutOfBounds, "SliceRangeOutOfBoundsError", "Slice range out of bounds", SLM::ErrorCategory::ARRAY_ERROR},
     {ErrCode::MutableViewOfImmutableArray, "MutableViewOfImmutableArrayError", "Mutable view of an immutable array", SLM::ErrorCategory::ARRAY_ERROR},
+    // LEC-008: `m::` spelled in a file that did not import `m` itself.
+    {"E145", "ModuleNotImportedError", "Module not imported in this file", SLM::ErrorCategory::DECLARATION},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

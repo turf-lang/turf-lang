@@ -15,6 +15,27 @@
 #include "Resolver.h"
 
 #include "Errors.h"
+#include "Parser.h"
+
+bool Resolver::mayQualifyWith(const std::string &Module, const std::string &Context) const {
+  // The prelude is "always there" (docs/slm/modules.txt): ParsePreludeImports()
+  // injects it into the main file only, so a module that uses `strings::` would
+  // otherwise newly fail where it always worked.
+  return IsPreludeModuleName(Module) || SymTable_.isModuleImportedBy(Module, Context);
+}
+
+bool Resolver::requireModuleImported(const std::string &Module, const std::string &Context,
+                                     SourceLocation Loc, const std::string &Spelled) const {
+  if (mayQualifyWith(Module, Context))
+    return true;
+  // A clone of a generic is resolved in its template's module (Context), never
+  // the instantiating file, so a `pub fn<T>` that uses `io::` is judged by its
+  // own imports.
+  ModuleNotImportedError(Loc, Module, Context, SymTable_.hasSymbolImport(Module, Context),
+                         Module + "::" + Spelled)
+      .raise();
+  return false;
+}
 
 void Resolver::raisePrivateFunction(SourceLocation Loc, const std::string &Module,
                                     const std::string &Name) const {

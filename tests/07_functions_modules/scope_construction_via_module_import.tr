@@ -10,6 +10,7 @@
 // bare-visible (via the on-demand `Shape`/`ShapeUtil` imports below).
 
 import io;
+import construction_shape_module;
 import construction_shape_module::[Shape, ShapeUtil];
 
 import test;

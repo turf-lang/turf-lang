@@ -1,0 +1,15 @@
+// LEC-008 (F-IMP-3, F-IMP-4): a value whose type comes from a module this file
+// never imported can be held and used. Methods, UFCS calls and operators follow
+// the TYPE, not the import list; only the spelling `inner::T` is gated.
+import import_scope_outer_module;
+
+import test;
+fn main(): int {
+    immut b = import_scope_outer_module::outer_make(5);
+    test::assert(b.get() == 5, "a method of a transitively-loaded type works");
+    test::assert(b.inner_twice() == 10, "a UFCS call of a transitively-loaded module's function works");
+    immut sum = b + b;
+    test::assert(sum.get() == 10, "an operator of a transitively-loaded type works");
+    test::assert(b.value == 5, "a pub field of a transitively-loaded type works");
+    return 0;
+}

@@ -26,6 +26,7 @@
 #include "TypeCheckerInternal.h"
 
 #include "Monomorphize.h" // TYPE-002 (S11b): report-only instantiation collector
+#include "Parser.h"       // IsPreludeModuleName — UFCS home-module tie-break
 #include "TypeWalk.h" // SMP-002: shared unify()/collectParamOrder() walkers
 
 #include <algorithm>
@@ -927,7 +928,7 @@ bool TypeChecker::tryUFCSFallback(MethodCallExprAST &Node,
   // genuine identical-signature conflict (RFC §5.4's universal conflict
   // rule / §4.3), not a preference to silently resolve.
   const ResolverFunctionSymbol *Best = TypeMatches[0];
-  const ResolverFunctionSymbol *ExactMatch = nullptr;
+  std::vector<const ResolverFunctionSymbol *> ExactMatches;
   for (const auto *C : TypeMatches) {
     bool ExactAll = true;
     for (int i = 0; i < ArgCount; ++i) {
@@ -938,21 +939,40 @@ bool TypeChecker::tryUFCSFallback(MethodCallExprAST &Node,
         break;
       }
     }
-    if (ExactAll) {
-      if (ExactMatch) {
-        reportError(Node.getLoc(), ErrCode::AmbiguousCall,
-                    "Ambiguous UFCS call to '" + MethodName +
-                        "': more than one visible free-function overload "
-                        "matches this call site exactly.",
-                    {}, "", "Ambiguous call!");
-        setType(&Node, nullptr);
-        return true; // handled (as an error) -- caller must not also report
-      }
-      ExactMatch = C;
-    }
+    if (ExactAll)
+      ExactMatches.push_back(C);
   }
-  if (ExactMatch)
-    Best = ExactMatch;
+
+  // The receiver type's own prelude module wins a TIE, the way an inherent
+  // method beats an unrelated free function. Needed since `math` joined the
+  // prelude (LEC-008 follow-up): it is now loaded in every compile, so its
+  // public libm `floor`/`ceil`/`round` became UFCS candidates for every
+  // `double` and tied with `double.tr`'s own, reporting `x.floor()` as
+  // ambiguous in programs that never mention math. Both stay public and both
+  // stay callable qualified; only the dot form needs a winner. Narrow on
+  // purpose: exactly one candidate from the home module, and only on a tie --
+  // two identical definitions elsewhere are still a genuine conflict.
+  if (ExactMatches.size() > 1) {
+    const std::string &Receiver = BaseTy->getName();
+    const std::string Home = Receiver == "string" ? "strings" : Receiver;
+    std::vector<const ResolverFunctionSymbol *> InHome;
+    for (const auto *C : ExactMatches)
+      if (IsPreludeModuleName(Home) && C->SourceModule == Home)
+        InHome.push_back(C);
+    if (InHome.size() == 1)
+      ExactMatches = InHome;
+  }
+  if (ExactMatches.size() > 1) {
+    reportError(Node.getLoc(), ErrCode::AmbiguousCall,
+                "Ambiguous UFCS call to '" + MethodName +
+                    "': more than one visible free-function overload "
+                    "matches this call site exactly.",
+                {}, "", "Ambiguous call!");
+    setType(&Node, nullptr);
+    return true; // handled (as an error) -- caller must not also report
+  }
+  if (ExactMatches.size() == 1)
+    Best = ExactMatches[0];
 
   Node.ResolvedCallTarget = std::make_shared<ResolverFunctionSymbol>(*Best);
   Node.ResolvedViaUFCS = true;

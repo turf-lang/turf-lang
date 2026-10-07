@@ -1336,8 +1336,40 @@ ParseModuleImportByName(const std::string &ModuleName, SourceLocation Loc,
 // correspondence is deliberate). scripts/check_boundary.sh's check 2
 // enforces this mechanically; update both this array and lib/std/core/
 // together, in the same change, or that script fails.
+//
+// LEC-008 follow-up (owner decision, 2026-10-07): the console, math and
+// process-exit modules are part of the prelude too, and their functions are
+// callable BARE (`printline("x")`, `abs(-3)`, `exit(1)`), not only as
+// `io::printline`. They moved into lib/std/core/ to keep the rule above true.
 static const char *const PreludeModuleNames[] = {
-    "int", "double", "bool", "char", "strings", "array"};
+    "int", "double", "bool", "char", "strings", "array", "io", "math", "sys"};
+
+// The subset whose public free functions a bare, unqualified call may reach
+// when nothing the file declares or explicitly imports has that name. The
+// other six are reached through UFCS, operators and `m::` only: their
+// function names (`length`, `max` over arrays, `is_even`) read as methods and
+// would be wrong as free names.
+static const char *const PreludeBareModuleNames[] = {"io", "math", "sys"};
+
+bool IsPreludeModuleName(const std::string &Name) {
+  for (const char *Prelude : PreludeModuleNames)
+    if (Name == Prelude)
+      return true;
+  return false;
+}
+
+bool IsPreludeBareModule(const std::string &Name) {
+  for (const char *Prelude : PreludeBareModuleNames)
+    if (Name == Prelude)
+      return true;
+  return false;
+}
+
+const std::vector<std::string> &PreludeBareModuleList() {
+  static const std::vector<std::string> All(std::begin(PreludeBareModuleNames),
+                                            std::end(PreludeBareModuleNames));
+  return All;
+}
 
 // OVH-011 (docs/development/changes/OVH-011.md): the entry file's own
 // top-level parse (main.cpp's own token-consuming loop, further down this

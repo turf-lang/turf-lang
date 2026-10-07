@@ -82,6 +82,22 @@ std::unique_ptr<ExprAST> Parse();
 // to load (these are compiler-shipped files expected to always exist).
 std::vector<std::unique_ptr<ExprAST>> ParsePreludeImports(SourceLocation Loc);
 
+// LEC-008 (FREEZE.md 6.24, F-IMP-1): true for a prelude module name. The
+// Resolver asks it so `strings::length(s)` stays spellable in EVERY file, not
+// only in the main program that ParsePreludeImports() injects them into.
+// Reads the same PreludeModuleNames array, so it cannot drift from it.
+bool IsPreludeModuleName(const std::string &Name);
+
+// True for the prelude modules whose public free functions are callable bare
+// (`io`, `math`, `sys`): the Resolver's last-resort tier for an unqualified
+// call that nothing in the file declares or explicitly imports.
+bool IsPreludeBareModule(const std::string &Name);
+
+// The same names as a list, for a tool that has to enumerate them
+// (turf::preludeBareModules(), include/turf/Analysis.h). One array behind both,
+// so the predicate and the list cannot disagree.
+const std::vector<std::string> &PreludeBareModuleList();
+
 // OVH-011 (docs/development/changes/OVH-011.md): called by main.cpp
 // once per parse pass, right after that pass's own ParsePreludeImports()
 // call and before the entry file's own top-level declaration loop starts.

@@ -1,0 +1,12 @@
+// FREEZE.md 6.25: the prelude is for every file, not just the program: a MODULE
+// that imports nothing can call `io::printline`, `max`, `min` bare. Here
+// `shout` uses its own module's `abs` (a module's own function outranks the
+// prelude's) and the prelude's `max`/`min`.
+import prelude_shadow_helper_module;
+import test;
+
+fn main(): int {
+    test::assert(prelude_shadow_helper_module::shout("from a module") == 11,
+        "a module uses prelude names bare, and its own abs wins");
+    return 0;
+}

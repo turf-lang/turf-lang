@@ -101,11 +101,11 @@ else
   done < <(find lib/std -name '*.tr' | sort)
   [ $STD_BAD -eq 0 ] && pass "every lib/std module resolves ($(find lib/std -name '*.tr' | wc -l) files)"
 
-  # The six prelude modules, compiled directly: the ONLY regression coverage
+  # The nine prelude modules, compiled directly: the ONLY regression coverage
   # for the prelude-self-import bug class (AGENTS.md). A regression shows up
   # as "Ambiguous ... call" on a module's own internal UFCS self-call.
   PRELUDE_BAD=0
-  for m in int double bool char strings array; do
+  for m in int double bool char strings array io math sys; do
     f="lib/std/core/$m.tr"
     out=$(./build/turfc --resolve "$f" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
     if echo "$out" | grep -qi 'ambiguous'; then
@@ -113,7 +113,7 @@ else
       PRELUDE_BAD=$((PRELUDE_BAD + 1))
     fi
   done
-  [ $PRELUDE_BAD -eq 0 ] && pass "all six prelude modules compile directly with no ambiguity (the self-import check)"
+  [ $PRELUDE_BAD -eq 0 ] && pass "all nine prelude modules compile directly with no ambiguity (the self-import check)"
 
   SHOW_BAD=0
   while IFS= read -r f; do

@@ -660,6 +660,10 @@ const std::vector<Keyword> &keywords() {
   return All;
 }
 
+const std::vector<std::string> &preludeBareModules() {
+  return PreludeBareModuleList();
+}
+
 // ── runIsolated() ───────────────────────────────────────────────────────────
 
 namespace detail {

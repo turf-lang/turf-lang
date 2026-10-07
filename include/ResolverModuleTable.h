@@ -8,6 +8,7 @@
 #include <ostream>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 // ─── ResolverModule ──────────────────────────────────────────────────────────
@@ -105,6 +106,34 @@ public:
    * declare any functions.
    */
   bool hasModule(const std::string &ModuleName) const;
+
+  /**
+   * @brief Record that the file/module @p ContextLabel ("" = main file)
+   * wrote a plain `import @p ModuleName;`. Only this form counts: a symbol
+   * import (`import m::f;`) names a symbol, not the module's qualifier.
+   */
+  void noteBareImport(const std::string &ContextLabel,
+                      const std::string &ModuleName);
+
+  /// Record `import m::name;` / `m::[..]` / `m::[*]` written by @p
+  /// ContextLabel. Grants no qualifier (F-IMP-2); kept only so the
+  /// not-imported diagnostic can say "you imported a symbol of it, which is
+  /// not the same thing".
+  void noteSymbolImport(const std::string &ContextLabel,
+                        const std::string &ModuleName);
+  bool hasSymbolImport(const std::string &ModuleName,
+                       const std::string &ContextLabel) const;
+
+  /**
+   * @brief Whether code in @p ContextLabel ("" = main file) may spell
+   * `@p ModuleName::...`: the module is its own context, or that file wrote
+   * `import @p ModuleName;` itself. hasModule() is a different question
+   * ("was it loaded anywhere in the program") and stays the right one for
+   * suggestions; a module another import happened to load is NOT visible
+   * here (no transitive imports).
+   */
+  bool isModuleImportedBy(const std::string &ModuleName,
+                          const std::string &ContextLabel) const;
 
   /**
    * @brief Return the name of every module imported somewhere in this
@@ -326,6 +355,14 @@ private:
   /// else a module name), then by the bare imported name.
   std::unordered_map<std::string, std::unordered_map<std::string, FlatImportedSymbol>>
       FlatImportedFunctions_;
+
+  /// Plain `import m;` statements, keyed by the context that wrote them
+  /// ("" = main file, else a module name) -> the modules it imported. What
+  /// makes `m::` spellable in that context; see isModuleImportedBy().
+  std::unordered_map<std::string, std::unordered_set<std::string>> BareImports_;
+
+  /// Same keying, for the symbol-list forms; see noteSymbolImport().
+  std::unordered_map<std::string, std::unordered_set<std::string>> SymbolImports_;
 
   /// On-demand flat struct/enum TYPE imports -- same shape and keying as
   /// FlatImportedFunctions_ above, kept as a separate map.

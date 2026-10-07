@@ -131,6 +131,10 @@ void Resolver::hoistTypesIn(const ExprAST *Node, const std::string &ModuleName) 
     // qualified spellings (`list::List`) before hoistModuleBody() runs, and
     // a qualifier is only valid if its module is known.
     SymTable_.registerModule(Inner);
+    if (Import->getMode() == ImportMode::Bare)
+      SymTable_.noteBareImport(ModuleName, Inner);
+    else
+      SymTable_.noteSymbolImport(ModuleName, Inner);
     if (const auto *Block = dynamic_cast<const BlockExprAST *>(Import->getBody()))
       for (const auto &Expr : Block->getExpressions())
         hoistTypesIn(Expr.get(), Inner);
@@ -293,6 +297,11 @@ Resolver::tryResolveTypeSpelling(const std::string &Qualifier, const std::string
                                                : std::nullopt;
   if (!Qualifier.empty()) {
     if (!SymTable_.hasModule(Qualifier))
+      return std::nullopt;
+    // LEC-008: silent, like the private-type case just below -- Pass 2's
+    // validateNamedType() sees the unresolved spelling and reports E145 with
+    // the location and the fix.
+    if (!mayQualifyWith(Qualifier, Context))
       return std::nullopt;
     std::string Id = TypeIdentity::make(Qualifier, Name);
     // LEC-002: a private type stays UNRESOLVED here, silently, so Pass 2's

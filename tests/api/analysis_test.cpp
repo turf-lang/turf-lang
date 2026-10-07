@@ -691,6 +691,121 @@ public fn main(): int { return helper(); }
     std::cerr << render(R);
 }
 
+// LEC-008 (FREEZE.md 6.24): `m::` is spellable only in a file that imports `m`
+// itself. The runner cannot see WHY a fail_*.tr failed, so the code, the module
+// the message names and the hint (which prints the fix, and says why a symbol
+// import is not enough) are asserted here, along with what must keep working.
+static void testModuleNotImported(const ScratchDir &Dir) {
+  CurrentTest = "module not imported";
+  Dir.write("nideep.tr", R"(pub struct Deep { pub v: int }
+pub fn deep(): int { return 7; }
+pub fn make(): Deep { return Deep::default(); }
+pub fn twice(d: Deep): int { return d.v * 2; }
+export immut DEEP_LIMIT: int = 9;
+)");
+  Dir.write("nimid.tr", R"(import nideep;
+pub fn mid(): int { return nideep::deep(); }
+pub fn made(): nideep::Deep { return nideep::make(); }
+)");
+  const std::string Main = Dir.write("niuser.tr", "");
+  struct Case {
+    const char *Label;
+    const char *Src;
+    const char *HintFragment;
+    bool SymbolImport;
+  };
+  const Case Cases[] = {
+      {"transitive call", "import nimid;\nfn main(): int { return nideep::deep(); }",
+       "Add `import nideep;`", false},
+      {"transitive constant",
+       "import nimid;\nfn main(): int { return nideep::DEEP_LIMIT; }",
+       "Add `import nideep;`", false},
+      {"transitive type",
+       "import nimid;\nfn main(): int { mut d: nideep::Deep = nimid::made(); return d.v; }",
+       "Add `import nideep;`", false},
+      {"static construction",
+       "import nimid;\nfn main(): int { mut d = nideep::Deep::default(); return d.v; }",
+       "Add `import nideep;`", false},
+      {"symbol import is not the qualifier",
+       "import nideep::deep;\nfn main(): int { return nideep::make().v + deep(); }",
+       "brings in only that name", true},
+  };
+  for (const auto &C : Cases) {
+    auto R = turf::analyze({{Main, C.Src}});
+    CHECK(!R.succeeded());
+    bool Found = false;
+    for (const auto &D : R.diagnostics()) {
+      if (D.Code != "E145")
+        continue;
+      Found = true;
+      CHECK(D.Message.find("Module 'nideep' is not imported in this file") != std::string::npos);
+      CHECK(D.Hint.find(C.HintFragment) != std::string::npos);
+      if (D.Hint.find(C.HintFragment) == std::string::npos)
+        std::cerr << "    case '" << C.Label << "': hint was: " << D.Hint << "\n";
+      // The "symbol import" sentence appears exactly when the file has one.
+      CHECK((D.Hint.find("brings in only that name") != std::string::npos) == C.SymbolImport);
+      break;
+    }
+    CHECK(Found);
+    if (!Found)
+      std::cerr << "    case '" << C.Label << "' produced:\n" << render(R);
+  }
+
+  // A module is held to the rule too, and the message names it.
+  Dir.write("nileaky.tr", "import nimid;\npub fn leaky(): int { return nideep::deep(); }\n");
+  {
+    auto R = turf::analyze({{Main, "import nileaky;\nfn main(): int { return nileaky::leaky(); }\n"}});
+    CHECK(!R.succeeded());
+    bool Found = false;
+    for (const auto &D : R.diagnostics())
+      if (D.Code == "E145" && D.Message.find("in module 'nileaky'") != std::string::npos)
+        Found = true;
+    CHECK(Found);
+  }
+
+  // What must NOT be rejected: the file's own imports in every form, and a
+  // value of a type from a module it did not import -- fields, methods, UFCS.
+  const char *Accepted = R"(import nimid;
+import nideep;
+import nideep::Deep;
+fn main(): int {
+  mut a: Deep = nideep::make();
+  mut b: nideep::Deep = nimid::made();
+  return a.v + b.twice() + nideep::deep() + nideep::DEEP_LIMIT;
+}
+)";
+  auto R = turf::analyze({{Main, Accepted}});
+  CHECK(R.succeeded());
+  if (!R.succeeded())
+    std::cerr << render(R);
+  const char *HeldOnly = R"(import nimid;
+fn main(): int {
+  mut d = nimid::made();
+  return d.v + d.twice();
+}
+)";
+  auto H = turf::analyze({{Main, HeldOnly}});
+  CHECK(H.succeeded());
+  if (!H.succeeded())
+    std::cerr << render(H);
+
+  // The prelude (FREEZE.md 6.25), as a tool sees it: every prelude module is
+  // "imported" by the entry file with no import written, `list` is loaded (the
+  // prelude's own `strings` imports it) but is NOT this file's to spell, and the
+  // bare-callable ones are the three named. A language server that offers
+  // `printline` unqualified, or an auto-import for `list::`, reads exactly this.
+  auto P = turf::analyze({{Main, "fn main(): int { return 0; }\n"}});
+  CHECK(P.succeeded());
+  for (const char *M : {"int", "double", "bool", "char", "strings", "array", "io", "math", "sys"})
+    CHECK(P.symbols().isModuleImportedBy(M, ""));
+  CHECK(P.symbols().hasModule("list"));
+  CHECK(!P.symbols().isModuleImportedBy("list", ""));
+  const auto &Bare = turf::preludeBareModules();
+  CHECK(Bare.size() == 3);
+  for (const char *M : {"io", "math", "sys"})
+    CHECK(std::find(Bare.begin(), Bare.end(), M) != Bare.end());
+}
+
 // LEC-002 stage 3: every way of reaching another module's private function or
 // type is E088, and the diagnostic carries what a reader needs to act on it --
 // a note at the declaration and a hint naming the file, the keyword and the
@@ -1731,6 +1846,7 @@ int main() {
   testEmptyInput();
   testVisibilityModifierPlacement();
   testPrivateSymbolAccess(Dir);
+  testModuleNotImported(Dir);
   testPrivateInPublic(Dir);
   testMigratePub(Dir);
   testAmbiguousModuleImport(Dir);

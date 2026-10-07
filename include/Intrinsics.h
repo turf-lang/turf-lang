@@ -231,12 +231,12 @@
 // closed vocabulary this header exists to name.
 
 // ─── 4. The prelude module list (STD-001) ──────────────────────────────────
-// int, double, bool, char, strings, array -- auto-imported into every
+// int, double, bool, char, strings, array, io, math, sys -- auto-imported into every
 // top-level compile (as if the user's file began with `import int; import
 // double; ...`), by ParsePreludeImports() (src/ParserModule.cpp), reading
 // the array PreludeModuleNames right above it in the same file.
 //
-// This is a SPECIFICATION, not an arbitrary hardcode: these six names are
+// This is a SPECIFICATION, not an arbitrary hardcode: these nine names are
 // exactly the `.tr` files under lib/std/core/ -- see
 // docs/architecture/boundary.md's "Prelude module specification" section
 // for why that correspondence is deliberate (core/ is what the target

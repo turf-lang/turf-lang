@@ -5,6 +5,7 @@
 // no EnumDeclExprAST branch at all).
 
 import io;
+import enum_in_module;
 import enum_in_module::Status;
 
 import test;

@@ -19,6 +19,7 @@
 #include "Builtins.h"        // LookupBuiltin — for skipping bare intrinsics in visitFuncCall
 #include "Errors.h"          // ReferenceError, DuplicateDeclarationError
 #include "ErrorsFlow.h"      // SemanticError
+#include "Parser.h"          // IsPreludeBareModule — the prelude tier of a bare call
 #include "ResolverSymbolTable.h"
 #include "ResolverInternal.h"
 #include "SuggestionIndex.h" // SuggestionIndex::suggestVisible
@@ -168,6 +169,20 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
       // it that the module did not mark `pub` must not join resolution.
       for (const auto &Match : SymTable_.findInModules(CalleeName))
         if (Match.ModuleName == Flat->SourceModule && Match.Symbol->IsPublic)
+          ModuleMatches.push_back(Match);
+    }
+
+    // Prelude tier (owner decision 2026-10-07): `printline("x")`, `abs(-3)` and
+    // `exit(1)` work with no import. It is the LAST resort, consulted only when
+    // nothing else answers to the name -- not this file's own functions, not the
+    // module's own, not an explicit on-demand import. So the prelude can never
+    // make a program ambiguous: declaring your own `max(a: int, b: int)` just
+    // hides math's, the way a local item hides a prelude name in Rust. (The
+    // cost: a local `print` of three arguments also hides io's `print`, and a
+    // call to io's one-argument one then reports an arity error naming yours.)
+    if (CurrentFileMatches.empty() && ModuleMatches.empty()) {
+      for (const auto &Match : SymTable_.findInModules(CalleeName))
+        if (IsPreludeBareModule(Match.ModuleName) && Match.Symbol->IsPublic)
           ModuleMatches.push_back(Match);
     }
   } else {
@@ -453,6 +468,10 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
           .raise();
       return;
     } else {
+      // LEC-008: the module exists, but this FILE must have imported it.
+      if (!requireModuleImported(LeftName, currentModuleName(),
+                                 ScopeCallee->getLeftLoc(), CalleeName))
+        return;
       ScopeCallee->ResolvedKind = ScopeAccessKind::ModuleFunctionRef;
       // A 3-part `ModuleQualifier::LeftName::RightName` chain only has a
       // defined meaning when LeftName is an enum or struct (Module owns
@@ -963,6 +982,8 @@ void Resolver::visitScopeAccess(ScopeAccessExprAST &Node) {
   }
 
   if (SymTable_.hasModule(LeftName)) {
+    if (!requireModuleImported(LeftName, currentModuleName(), Node.getLoc(), RightName))
+      return;
     // `module::CONST` -- a qualified reference to an `export immut`
     // constant. Checked BEFORE the "functions aren't first-class" fallback
     // just below, since a constant genuinely IS usable as a value (unlike a

@@ -1,5 +1,5 @@
 // Regression coverage for the new buffered-file-I/O primitives added to
-// lib/std/io/io.tr: io::write_string / io::read_to_string round-trip.
+// lib/std/core/io.tr: io::write_string / io::read_to_string round-trip.
 import io;
 import strings;
 import test;

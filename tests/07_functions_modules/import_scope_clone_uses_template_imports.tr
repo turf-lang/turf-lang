@@ -1,0 +1,11 @@
+// LEC-008: a generic function's clone is resolved in its TEMPLATE's module, so
+// the `import_scope_inner_module::` inside `pick` is judged by the generic
+// module's own imports. This file never imports the inner module.
+import import_scope_generic_module;
+
+import test;
+fn main(): int {
+    test::assert(import_scope_generic_module::pick(3) == 3, "int clone resolves in the template's module");
+    test::assert(import_scope_generic_module::pick(true), "bool clone resolves in the template's module");
+    return 0;
+}

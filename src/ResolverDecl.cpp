@@ -498,6 +498,10 @@ void Resolver::validateNamedType(
     if (!Qualifier.empty()) {
       std::string Id = TypeIdentity::make(Qualifier, Spelling);
       if (SymTable_.hasModule(Qualifier) && SymTable_.isKnownTypeIdentity(Id)) {
+        // LEC-008: tryResolveTypeSpelling() leaves a spelling whose module
+        // this file did not import UNRESOLVED, silently, so it ends up here.
+        if (!requireModuleImported(Qualifier, currentModuleName(), Loc, Spelling))
+          return std::nullopt;
         // LEC-002: a qualified spelling of another module's private type.
         if (!SymTable_.isTypeVisibleFrom(Id, currentModuleName())) {
           raisePrivateType(Loc, Id);
@@ -670,6 +674,12 @@ bool Resolver::validateModuleQualifier(const std::string &Qualifier,
     UnknownScopeQualifierError(Loc, Qualifier, Suggestions).raise();
     return false;
   }
+  // LEC-008: after the existence check (a typo is a different error), before
+  // anything else about the type is looked at.
+  // `TypeName` may already be an identity (`m::T`); the hint wants just `T`.
+  if (!requireModuleImported(Qualifier, currentModuleName(), Loc,
+                             TypeIdentity::bareName(TypeName)))
+    return false;
 
   // FDN-003: @p TypeName may be a spelling (`List` in `list::List`) or an
   // identity the caller already resolved (`list::List`); either way the

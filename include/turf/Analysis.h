@@ -118,6 +118,16 @@ struct Keyword {
 // `mutable`, `pub` and `public`).
 const std::vector<Keyword> &keywords();
 
+// The prelude modules whose public free functions can be called by their bare
+// names with no import (`printline("hi")`, `abs(-3)`, `exit(1)`): `io`, `math`
+// and `sys` (FREEZE.md 6.25, F-PRE-2). Read from the compiler's own list, so a
+// tool that completes or explains a bare call cannot fall behind the language.
+// Every prelude module (these and `int`, `double`, `bool`, `char`, `strings`,
+// `array`) is also spellable as `m::` in every file without an import; that
+// part needs no list, because the analysis already reports those modules as
+// imported by the entry file (`AnalysisResult::symbols().isModuleImportedBy`).
+const std::vector<std::string> &preludeBareModules();
+
 // A 1-based position in a named file -- the compiler's own convention
 // everywhere (not the 0-based lines of the Language Server Protocol).
 // Col counts bytes.

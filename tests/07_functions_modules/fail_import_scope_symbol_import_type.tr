@@ -1,0 +1,12 @@
+// LEC-008 (F-IMP-2): importing the type by name lets the bare spelling in, not
+// `module::Type`.
+// EXPECT-DIAG: E145
+// EXPECT-DIAG: brings in only that name
+import import_scope_outer_module;
+import import_scope_inner_module::InnerBox;
+
+fn main(): int {
+    immut bare: InnerBox = import_scope_outer_module::outer_make(1);
+    immut spelled: import_scope_inner_module::InnerBox = bare;
+    return spelled.get();
+}
