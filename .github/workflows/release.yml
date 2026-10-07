@@ -106,9 +106,29 @@ jobs:
         with:
           submodules: recursive
 
+      # The compiler needs LLVM 22 (22.1.8 here). Arch ships one LLVM at a time
+      # and `llvm` is already 23, which removed APIs the code generator uses
+      # (IRBuilder::CreateGlobalStringPtr); v2.0.0-rc1's Arch build failed on
+      # exactly that. The Arch Linux Archive keeps old builds, so install the
+      # pinned ones with `pacman -U` (it verifies their signatures) and tell
+      # pacman never to upgrade them. `openmp` (LLVM's libomp) is not installed:
+      # gcc's libgomp is what an OpenMP build here uses, and a libomp built for
+      # LLVM 23 would not belong next to LLVM 22 anyway.
       - name: Install dependencies
         run: |
-          pacman -Sy --noconfirm --needed base-devel llvm clang cmake openmp git tar
+          pacman -Sy --noconfirm --needed base-devel cmake git tar
+          A=https://archive.archlinux.org/packages
+          pacman -U --noconfirm \
+            "$A/l/llvm-libs/llvm-libs-22.1.8-2-x86_64.pkg.tar.zst" \
+            "$A/l/llvm/llvm-22.1.8-2-x86_64.pkg.tar.zst" \
+            "$A/c/clang/clang-22.1.8-1-x86_64.pkg.tar.zst"
+          echo "IgnorePkg = llvm llvm-libs clang" >> /etc/pacman.conf
+          llvm-config --version | grep -q '^22\.' || { echo "::error::LLVM is $(llvm-config --version), not 22"; exit 1; }
+
+      # The checkout is owned by another user inside this container, so git
+      # refuses it and `go build` fails with "error obtaining VCS status".
+      - name: Let git use the checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -143,10 +163,17 @@ jobs:
         with:
           submodules: recursive
 
+      # LLVM 22, not the latest: `brew install llvm` is 23, which the compiler
+      # does not build against (v2.0.0-rc1's macOS build failed on it).
+      # llvm@22 is keg-only, so CMake is pointed at it explicitly; PATH alone
+      # could still find another LLVM first.
       - name: Install LLVM
         run: |
-          brew install llvm cmake
-          echo "$(brew --prefix llvm)/bin" >> $GITHUB_PATH
+          brew install llvm@22 cmake
+          LLVM_PREFIX="$(brew --prefix llvm@22)"
+          echo "$LLVM_PREFIX/bin" >> $GITHUB_PATH
+          echo "CMAKE_PREFIX_PATH=$LLVM_PREFIX" >> $GITHUB_ENV
+          "$LLVM_PREFIX/bin/llvm-config" --version | grep -q '^22\.' || { echo "::error::LLVM is not 22"; exit 1; }
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -155,7 +182,7 @@ jobs:
 
       - name: Build Turf
         run: |
-          export PATH="$(brew --prefix llvm)/bin:$PATH"
+          export PATH="$(brew --prefix llvm@22)/bin:$PATH"
           chmod +x scripts/cmake_build.sh
           ./scripts/cmake_build.sh --release
 
