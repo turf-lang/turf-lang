@@ -146,13 +146,16 @@ jobs:
       # does not build against (v2.0.0-rc1's macOS build failed on it).
       # llvm@22 is keg-only, so CMake is pointed at it explicitly; PATH alone
       # could still find another LLVM first. zstd is for its static libzstd.a
-      # (REL-008 stage 2: LLVM's zstd must not be Homebrew's dylib).
+      # (REL-008 stage 2: LLVM's zstd must not be Homebrew's dylib). lld@22 is
+      # the static lld archives and headers the embedded linker is built from
+      # (stage 3/4); it is keg-only too, so its prefix joins CMAKE_PREFIX_PATH.
       - name: Install LLVM
         run: |
-          brew install llvm@22 cmake zstd
+          brew install llvm@22 lld@22 cmake zstd
           LLVM_PREFIX="$(brew --prefix llvm@22)"
+          LLD_PREFIX="$(brew --prefix lld@22)"
           echo "$LLVM_PREFIX/bin" >> $GITHUB_PATH
-          echo "CMAKE_PREFIX_PATH=$LLVM_PREFIX" >> $GITHUB_ENV
+          echo "CMAKE_PREFIX_PATH=$LLVM_PREFIX:$LLD_PREFIX" >> $GITHUB_ENV
           "$LLVM_PREFIX/bin/llvm-config" --version | grep -q '^22\.' || { echo "::error::LLVM is not 22"; exit 1; }
 
       - name: Set up Go
@@ -164,7 +167,13 @@ jobs:
         run: |
           export PATH="$(brew --prefix llvm@22)/bin:$PATH"
           chmod +x scripts/cmake_build.sh
-          ./scripts/cmake_build.sh --release-static
+          ./scripts/cmake_build.sh --release-static --embed-lld
+
+      # REL-008 stage 4: the bundled runtime: a stub libSystem.tbd written by the
+      # script (no Apple file) and libturfrt for this machine. The embedded
+      # linker's Mach-O driver links against it; first real run on a Mac.
+      - name: Build the bundled C runtime (libSystem stub)
+        run: ./scripts/build_bundled_runtime.sh --platform macos-arm64
 
       - name: Package
         id: package
@@ -172,6 +181,11 @@ jobs:
         with:
           platform-suffix: macos-arm64
           archive-format: tar.gz
+
+      # The archive's own turfc and runtime: a runtime-only program links
+      # in-process (a decoy cc first on PATH is never run) and runs.
+      - name: Embedded linker smoke test (the archive's runtime)
+        run: CI=1 ./scripts/bundled_link_smoke.sh --archive "${{ steps.package.outputs.archive-path }}"
 
       # REL-003: as for linux-x86_64. Written without a macOS machine; this
       # runner is where the script's Darwin branches (bash login shell,
@@ -212,7 +226,10 @@ jobs:
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW64
+          # UCRT64, not MINGW64 (REL-008 stage 4): turfc.exe and the runtime it
+          # ships are built against the Universal C Runtime (Windows 10+), not
+          # the old msvcrt.dll, which the dependency check rejects.
+          msystem: UCRT64
           update: true
           # setup-go puts Go on the WINDOWS path, which a default
           # (`path-type: minimal`) MSYS2 shell does not see, so CMake printed
@@ -224,7 +241,8 @@ jobs:
           # the release build leaves out (REL-008 stage 2). zlib and zstd are
           # here for their static archives (libz.a, libzstd.a), which the
           # self-contained turfc.exe links instead of their DLLs.
-          install: mingw-w64-x86_64-llvm mingw-w64-x86_64-clang mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja mingw-w64-x86_64-zlib mingw-w64-x86_64-zstd
+          # lld: the static lld archives and headers the embedded linker is built from.
+          install: mingw-w64-ucrt-x86_64-llvm mingw-w64-ucrt-x86_64-clang mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-zlib mingw-w64-ucrt-x86_64-zstd mingw-w64-ucrt-x86_64-lld
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -235,7 +253,7 @@ jobs:
         shell: msys2 {0}
         run: |
           chmod +x scripts/cmake_build.sh
-          ./scripts/cmake_build.sh --release-static
+          ./scripts/cmake_build.sh --release-static --embed-lld
 
       # CMake only builds build/turf.exe if it can find `go` from inside the
       # MSYS2 shell (`path-type: inherit` above is what lets it). Never ship an
@@ -250,6 +268,15 @@ jobs:
       # linked statically, so bin/ holds turf.exe and turfc.exe and nothing
       # else. Bundling whatever `ldd` listed would hide a regression; if a DLL
       # comes back, the dependency check below names it and fails.
+      #
+      # REL-008 stage 4: the bundled C runtime, taken from this UCRT64
+      # toolchain's MinGW-w64 CRT (crt2.o, libmingw32.a, libucrt.a, the Win32
+      # import libraries) with libturfrt compiled by it. Built before Package:
+      # package_release.sh ships lib/rt/ when it exists.
+      - name: Build the bundled C runtime (MinGW-w64 UCRT)
+        shell: msys2 {0}
+        run: ./scripts/build_bundled_runtime.sh --platform windows-x86_64
+
       - name: Package
         id: package
         uses: ./.github/actions/package-release
@@ -257,12 +284,10 @@ jobs:
           platform-suffix: windows-x86_64
           archive-format: zip
 
-      # The Windows archive has no install smoke yet (that is the Windows port,
-      # REL-008 stage 5), and turfc.exe has never been *run* by anything in CI.
-      # A static link that produced a file is not a turfc that starts, so unpack
-      # the archive and run it. --version is the stage 2 requirement: the
-      # self-contained binary loads and answers. Compiling a program is the
-      # Windows port's job, so that step only reports (continue-on-error).
+      # The Windows archive has no install smoke yet (the Windows port is
+      # REL-008 stage 5), so unpack it and use turfc.exe directly. --version is
+      # the stage 2 requirement (the self-contained binary loads and answers) and
+      # must show the embedded linker and a usable bundled runtime.
       - name: Run the archived turfc.exe
         shell: msys2 {0}
         run: |
@@ -274,19 +299,30 @@ jobs:
           rm -rf win_smoke && mkdir win_smoke && cd win_smoke
           7z x -y "$(cygpath -w "$PWD/../$z")" > /dev/null || unzip -q "../$z"
           d=$(echo turf-v*-windows-x86_64)
-          "$d/bin/turfc.exe" --version
+          "$d/bin/turfc.exe" --version | tee version.out
+          grep -q '^linker embedded-lld' version.out
+          grep -q '^bundled-runtime ' version.out
           "$d/bin/turf.exe" version || true
 
-      - name: Compile and run hello with the archived turfc.exe (informational until REL-008 stage 5)
-        continue-on-error: true
+      # Stage 4's Windows deliverable: a program that names no C library beyond
+      # the runtime is linked by the embedded lld against the archive's own CRT,
+      # with NO gcc reachable. A decoy gcc.cmd first on PATH records that it
+      # was run (the CRT's spawn finds .cmd) and fails, so the check observes
+      # that gcc was not used. Compiling and *running* it is also the first
+      # time a Turf program has been linked and run on Windows by anything here.
+      - name: Compile and run hello with the archived turfc.exe, no gcc (REL-008 stage 4)
         shell: msys2 {0}
         run: |
           cd win_smoke
           d=$(echo turf-v*-windows-x86_64)
-          printf 'fn main(): int {\n    printline("hello windows");\n    return 0;\n}\n' > hello.tr
-          "$d/bin/turfc.exe" hello.tr -o hello.exe
+          mkdir decoy
+          printf '@echo off\r\necho %%* >> "%s"\r\nexit /b 99\r\n' "$(cygpath -w "$PWD/decoy.log")" > decoy/gcc.cmd
+          printf 'import math;\n\nfn main(): int {\n    printline("hello windows");\n    printline(math::sqrt(16.0));\n    return 0;\n}\n' > hello.tr
+          PATH="$PWD/decoy:$PATH" "$d/bin/turfc.exe" hello.tr -o hello.exe
+          test ! -s decoy.log || { echo "::error::the system gcc was run:"; cat decoy.log; exit 1; }
           ./hello.exe | tee hello.out
           grep -q "hello windows" hello.out
+          grep -q "^4" hello.out
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
