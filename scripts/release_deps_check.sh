@@ -30,10 +30,12 @@
 #            lists libSystem only; libc++ is added because it ships with the
 #            OS (in the dyld shared cache), so a static libstdc++ equivalent is
 #            not needed for it. Remove those two lines if the owner disagrees.
-#   windows  KERNEL32 KERNELBASE NTDLL UCRTBASE api-ms-win-* WS2_32 ADVAPI32.
-#            msvcrt.dll is NOT allowed: the target is UCRT (Windows 10+), and
-#            MinGW64's default C runtime is msvcrt. Any DLL shipped in bin/ is
-#            reported as bundled, whatever it imports.
+#            libresolv is added for the Go front end (turf), which cannot drop it.
+#   windows  KERNEL32 KERNELBASE NTDLL UCRTBASE api-ms-win-* WS2_32 ADVAPI32,
+#            plus ole32 shell32 bcrypt version psapi (what a static LLVM still
+#            imports). msvcrt.dll is NOT allowed: the target is UCRT (Windows
+#            10+), and MinGW64's default C runtime is msvcrt. Any DLL shipped in
+#            bin/ is reported as bundled, whatever it imports.
 #
 # Usage: scripts/release_deps_check.sh --archive FILE [--platform NAME]
 #   --archive FILE   a .tar.gz or .zip made by scripts/package_release.sh
@@ -50,7 +52,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --archive) ARCHIVE="${2:?--archive needs a file}"; shift 2 ;;
     --platform) PLATFORM="${2:?--platform needs a name}"; shift 2 ;;
-    -h|--help) sed -n '3,43p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '3,45p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "release_deps_check.sh: unknown option '$1' (try --help)" >&2; exit 2 ;;
   esac
 done
@@ -102,7 +104,15 @@ deps_of() {
       # First line is the file's own name; the rest are `<path> (compatibility ...)`.
       otool -L "$1" 2>/dev/null | sed '1d' | sed 's/^[[:space:]]*//; s/ (.*$//' ;;
     windows-*)
-      objdump -p "$1" 2>/dev/null | sed -n 's/^[[:space:]]*DLL Name: *//p' ;;
+      # llvm-readobj first: GNU objdump cannot read the import directory of a
+      # Go-built PE (turf.exe's lands in a section it calls .zdebug_info and it
+      # prints no DLL names; found on the first real Windows run). The MSYS2
+      # LLVM package that builds turfc.exe provides llvm-readobj.
+      if command -v llvm-readobj >/dev/null 2>&1; then
+        llvm-readobj --coff-imports "$1" 2>/dev/null | sed -n 's/^[[:space:]]*Name: *\(.*\.[dD][lL][lL]\)[[:space:]]*$/\1/p'
+      else
+        objdump -p "$1" 2>/dev/null | sed -n 's/^[[:space:]]*DLL Name: *//p'
+      fi ;;
   esac
 }
 
@@ -117,12 +127,19 @@ allowed() {
     macos-*)
       case "$d" in
         /usr/lib/libSystem.B.dylib|/usr/lib/libc++.1.dylib|/usr/lib/libc++abi.dylib) return 0 ;;
+        # Go's net package on darwin: the front end (turf) imports it.
+        /usr/lib/libresolv.9.dylib) return 0 ;;
       esac ;;
     windows-*)
       local l
       l=$(printf '%s' "$d" | tr '[:upper:]' '[:lower:]')
       case "$l" in
         kernel32.dll|kernelbase.dll|ntdll.dll|ucrtbase.dll|ws2_32.dll|advapi32.dll|api-ms-win-*.dll) return 0 ;;
+        # What a static LLVM still imports on Windows (ole32, shell32 and
+        # bcrypt were seen in the first real run, imported by libLLVM-22.dll
+        # and libxml2; version and psapi are LLVM's own and not yet seen).
+        # All ship with every Windows, so no stage of REL-008 removes them.
+        ole32.dll|shell32.dll|bcrypt.dll|version.dll|psapi.dll) return 0 ;;
       esac ;;
   esac
   return 1
@@ -132,7 +149,7 @@ TOOL_CHECK=""
 case "$PLATFORM" in
   linux-*)   command -v readelf >/dev/null 2>&1 || command -v objdump >/dev/null 2>&1 || TOOL_CHECK="readelf or objdump" ;;
   macos-*)   command -v otool >/dev/null 2>&1 || TOOL_CHECK="otool" ;;
-  windows-*) command -v objdump >/dev/null 2>&1 || TOOL_CHECK="objdump" ;;
+  windows-*) command -v llvm-readobj >/dev/null 2>&1 || command -v objdump >/dev/null 2>&1 || TOOL_CHECK="llvm-readobj or objdump" ;;
 esac
 [ -z "$TOOL_CHECK" ] || { echo "release_deps_check.sh: $TOOL_CHECK not found; cannot inspect a $PLATFORM archive here" >&2; exit 2; }
 
