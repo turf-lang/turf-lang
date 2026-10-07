@@ -94,7 +94,7 @@ run `turf help` for the list of commands
 |---|---|---|
 | `-O0` `-O1` `-O2` `-O3` `-Os` | — | Optimization level; `-O2` is the default. Any other spelling is a hard error (`Error: unknown optimization level '-O4' (expected one of -O0, -O1, -O2, -O3, -Os).`), never a silent fallback. Levels change speed and size only, never what a program does. |
 | `-g` | — | Emits DWARF debug info. |
-| `--target=<triple>` | — | Cross-compiles for that target triple (default: the host). |
+| `--target=<triple>` | — | Compiles for that target triple (default: the host). For a machine other than this one it writes the object file (`<output>.o`) and stops with exit 1: *cannot link a program for '<triple>': cross-linking is not supported in 2.0*. A different vendor spelling of the host (`x86_64-linux-gnu`) is still the host. |
 | `-mcpu=<cpu>` | — | Target CPU (default: `generic`). |
 | `--check` | — | Reports every diagnostic and writes no file. Also `turf check`. |
 | `--module` | `--check` only | With `--check`: the file is a module that is only ever imported, so it needs no `main`. Without `--check` it is an error (`Error: --module only applies with --check (a module has no entry point, so it cannot be linked).`). |

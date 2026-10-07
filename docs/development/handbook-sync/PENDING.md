@@ -111,3 +111,4 @@ the commit that did it — do not delete it.
 
 A changelog says what changed. This says **what someone else must now go and
 rewrite**, keyed by where they will be sitting when they do it.
+| REL-003 | The handbook's "installing / running the compiler" chapter (paused) and `docs/MIGRATING_TO_2.md` (REL-006 writes it) | Nothing breaks for a 1.x program. Reference half done (`README.md` Installation, `docs/reference/cli_and_diagnostics.md` `--target`). The chapter must say: install with `install.sh` (checksum verified, `~/.turf`, a marked PATH block, `--uninstall`) or unpack an archive (`bin/ lib/ docs/ share/`, no `TURF_HOME`); `--target` for another machine writes the object and stops with "cross-linking is not supported in 2.0". Do not yet promise a self-contained install: LLVM and `cc` are still needed until REL-008. |

@@ -1120,6 +1120,54 @@ a named, closed, last-resort list.
   is exactly one. Two identical definitions anywhere else are still a conflict.
   No public name was removed or renamed.
 
+### 6.26 Release archives, installation and `--target` — FROZEN (REL-003, 2026-10-07)
+
+Confirmed by the owner on 2026-10-07 ("yes") when asked whether the D20
+behaviour is right and whether a `-c` object-only flag should come later: F-REL-1..4
+stand as built, and `-c` (object only, exit 0, no diagnostic) is a planned
+later, separate flag, not part of this decision. D20 was left to REL-003 with a
+recommendation; these rows record it as built, plus the layout and installer the
+roadmap's REL-003/REL-008 text describes. Self-containment (static LLVM,
+embedded lld, bundled C runtime) is REL-008, not this section.
+
+- **The archive layout (F-REL-1).** `turf-v<VERSION>-<platform>.tar.gz` (`.zip`
+  on Windows) unpacks to one directory holding `bin/turf`, `bin/turfc` (plus the
+  DLLs `turfc.exe` needs, in `bin/`), `lib/libturfrt.a`, `lib/std/**`,
+  `docs/errors/**`, `docs/slm/**` (both read from the install root by `turf
+  explain` and `--smart`), `share/turf/examples/**`, `LICENSE`, `README.md`.
+  `libturfrt_asan.a` is never shipped. The shape is not cosmetic: `turfc` derives
+  its install root from its own real path, `<bin>/..`, and `turf` finds `turfc`
+  beside itself, so this layout works unpacked, symlinked or relocated with no
+  `TURF_HOME`. The pre-REL-003 archives put the binary at the top level, one
+  directory too high for that rule. `lib/usr` is not shipped.
+- **`--target` and linking (F-REL-2, D20).** `--target=<triple>` always emits a
+  real object file for that machine. When the machine is not the host
+  (architecture, OS or ABI environment differs; the vendor field is ignored, so
+  `x86_64-linux-gnu` is the host on an `x86_64-pc-linux-gnu` machine), `turfc`
+  keeps the object, exits **1** and says: *cannot link a program for '<triple>':
+  cross-linking is not supported in 2.0; the runtime (libturfrt) is built for
+  <host>* — never the host linker's own error. `x86_64-linux-musl` on a glibc
+  host is foreign (`libturfrt` is built against the host libc). Cross-linking
+  stays FUTURE F-20. No new flag now: the object is a by-product of the failure;
+  an object-only `-c` is a later addition (owner, 2026-10-07).
+- **`install.sh` (F-REL-3).** Linux x86-64 and macOS arm64. It reads the
+  release's `checksums.txt`, downloads the one archive for the platform,
+  **verifies its SHA-256 and installs nothing if the check fails or cannot run**,
+  and unpacks into `~/.turf` (`--prefix`, `TURF_INSTALL_DIR`). It adds `bin` to
+  the user's PATH with **one marked block** (`# >>> turf >>>` … `# <<< turf
+  <<<`) in the login shell's start-up file (zsh `.zshrc`; bash `.bashrc`, macOS
+  `.bash_profile`; fish `conf.d/turf.fish`; anything else `.profile`, said
+  aloud), idempotently, `--no-modify-path` to skip. `--uninstall` removes exactly
+  the names in `<prefix>/.turf-install` and the marked blocks, and never the
+  package cache or a project. The checksum is from the same release as the
+  archive: it catches a damaged download, not a compromised release (signing is
+  REL-008).
+- **One version (F-REL-4).** The archive name comes from the root `VERSION` file.
+  A tag that is not `v<VERSION>`, or a `-dev` `VERSION`, stops packaging
+  (`scripts/package_release.sh --expect-tag`). This closes REL-001's deferred
+  single-sourcing item for the archive name; the README's version line and
+  `turf`'s own constant (independent by F-PKG-1) are still checked by hand.
+
 ---
 
 ## Appendix — frozen-decision IDs
@@ -1194,6 +1242,10 @@ Overhaul (F-TYPE-1), whose third column points at their section above.
 | **F-CLI-2** | An unknown option or command is a usage error (2) with a nearest-spelling suggestion; never ignored, never forwarded as a file. | §6.21 above |
 | **F-CLI-3** | Help is `turf help`/`turf <cmd> --help`/`turfc help`; `turfc --help` is deliberately an unknown option pointing at `turfc help`. | §6.21 above (owner decision 2026-10-06) |
 | **F-CLI-4** | `turfc --version` lines 1-2 are the driver-interface contract; later `<key> <value>` lines (`llvm`, `runtime`, `root`) are informational and extendable. | §6.21 above |
+| **F-REL-1** | Release archive layout: `bin/` (turf, turfc, DLLs), `lib/` (libturfrt.a, std), `docs/`, `share/turf/examples`, `LICENSE`, `README.md`; install root = `<bin>/..`; no `libturfrt_asan.a`, no `lib/usr`. | §6.26 above (owner-confirmed 2026-10-07) |
+| **F-REL-2** | `--target` for a non-host machine emits its object, then exits 1 with a TurfLang "cross-linking is not supported in 2.0" diagnostic naming the target and the host; vendor-only differences are the host; cross-linking is F-20. | §6.26 above (D20, owner-confirmed 2026-10-07) |
+| **F-REL-3** | `install.sh` verifies the SHA-256 or installs nothing; one marked, idempotent PATH block; `--no-modify-path`; `--uninstall` removes exactly what it added and never the cache. | §6.26 above (owner-confirmed 2026-10-07) |
+| **F-REL-4** | The archive version is `VERSION`; a tag other than `v<VERSION>`, or a `-dev` VERSION, refuses to package. | §6.26 above (owner-confirmed 2026-10-07) |
 | **F-TEST-1** | A project without a `tests/` directory (or with no tests in it) is an error for `turf test` and `turfc --test`, never a silent pass. | §6.22 above (owner rule, 2026-10-06) |
 | **F-TEST-2** | A test is judged by its file name (plain / `fail_*` / `RUNTIME_ABORT_EXPECTED`, `*_module.tr` skipped) and its `EXPECT-*` markers, by one implementation (`turfc --test`) that `turf test` and `scripts/test_runner.sh` both drive; each test runs in its own directory. | §6.22 above |
 | **F-TEST-3** | In a project a test file is the root package's code: it may be the entry point and imports the package's modules, direct dependencies, stdlib and `tests/` helpers (package-graph `"tests"` key, driver interface 1.3). | §6.22 above |

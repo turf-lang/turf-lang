@@ -1332,6 +1332,15 @@ review*.
 shipped platform. Since DEC-14 that means with *nothing* installed but the
 archive (REL-008), not "only `cc`".
 
+**Status (2026-10-07).** Stages 1 (layout, `install.sh`, `release_smoke.sh`,
+without self-containment and without a container run), 2 (the D20 diagnostic)
+and 4 (recipes, generated, not published) are built and verified on Linux
+x86-64; uncommitted. Stage 3 (macOS port) and self-containment moved to
+REL-008 (DEC-2, DEC-14). The D20 row above is implemented as recommended and
+owner-confirmed 2026-10-07 (`FREEZE.md` §6.26, F-REL-2); a later `-c` flag is
+the follow-up.
+Record: `docs/development/changes/REL-003.md`.
+
 ---
 
 ### REL-008 — Self-contained distribution: Linux, Windows, macOS
