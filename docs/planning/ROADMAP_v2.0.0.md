@@ -1339,6 +1339,11 @@ x86-64; uncommitted. Stage 3 (macOS port) and self-containment moved to
 REL-008 (DEC-2, DEC-14). The D20 row above is implemented as recommended and
 owner-confirmed 2026-10-07 (`FREEZE.md` §6.26, F-REL-2); a later `-c` flag is
 the follow-up.
+**Closed 2026-10-07 (owner).** Stages 1, 2 and 4 landed as above and were proven by
+release dry runs; stage 3 (macOS) and the self-containment/clean-machine criterion
+are REL-008 (stages 6 and 8). The remaining open items (first-release version bump,
+the package-manager repositories' credentials, the private repository's download
+URLs, `-c`) are listed in the record's *Hand-offs*.
 Record: `docs/development/changes/REL-003.md`.
 
 ---
