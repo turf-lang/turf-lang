@@ -300,10 +300,14 @@ jobs:
     steps:
       # install.sh is published with the release so the one-liner in the README
       # can point at the version being installed, and it is the file the
-      # smoke tests above ran against.
+      # smoke tests above ran against. gen_recipes.sh is what the recipe step
+      # below runs; v2.0.0-rc3's publish job failed with "No such file" because
+      # only install.sh was checked out.
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: install.sh
+          sparse-checkout: |
+            install.sh
+            scripts/gen_recipes.sh
           sparse-checkout-cone-mode: false
 
       - name: Download all artifacts
