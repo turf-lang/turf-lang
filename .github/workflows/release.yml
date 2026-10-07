@@ -17,16 +17,16 @@ jobs:
   # same workflow the every-push CI runs (build-archives.yml), so a release is
   # not built any differently from what CI already proved.
   #
-  # 'report', not 'enforce': the dependency check (scripts/release_deps_check.sh)
-  # fails today by design, until REL-008 stages 2-4 make the archive
-  # self-contained, and enforcing it here would make every tag, including a dry
-  # run of the publishing steps below, unpublishable. Flip this to 'enforce'
-  # (or delete the line) when stage 4 lands: from then on a release that needs
-  # more than the operating system provides must not ship.
+  # 'enforce' (REL-008 stage 4): the dependency check
+  # (scripts/release_deps_check.sh) passes on all three platforms, so a release
+  # whose archive needs more than the operating system provides is refused.
+  # Until then this was 'report', because the check failed by design (a dynamic
+  # LLVM, MinGW DLLs, msvcrt) and enforcing it would have made every tag,
+  # including a dry run of the publishing steps below, unpublishable.
   build:
     uses: ./.github/workflows/build-archives.yml
     with:
-      allowlist: report
+      allowlist: enforce
 
   # Create GitHub Release with all artifacts
   release:
