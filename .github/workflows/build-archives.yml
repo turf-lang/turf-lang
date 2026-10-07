@@ -232,8 +232,13 @@ jobs:
       - name: Run the archived turfc.exe
         shell: msys2 {0}
         run: |
+          # The archive is in the workspace root (cwd). Not the action's
+          # archive-path output: that is an absolute /d/a/... path, which the
+          # Windows 7z cannot read (v2.0.0-dev's first run of this step failed
+          # on exactly that), so use the file name and give 7z a Windows path.
+          z=$(echo turf-v*-windows-x86_64.zip)
           rm -rf win_smoke && mkdir win_smoke && cd win_smoke
-          7z x -y "../${{ steps.package.outputs.archive-path }}" > /dev/null || unzip -q "../${{ steps.package.outputs.archive-path }}"
+          7z x -y "$(cygpath -w "$PWD/../$z")" > /dev/null || unzip -q "../$z"
           d=$(echo turf-v*-windows-x86_64)
           "$d/bin/turfc.exe" --version
           "$d/bin/turf.exe" version || true
