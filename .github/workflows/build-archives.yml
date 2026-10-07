@@ -296,6 +296,43 @@ jobs:
         shell: msys2 {0}
         run: ./scripts/build_bundled_runtime.sh --platform windows-x86_64
 
+      # REL-008 stage 5: the whole test suite on Windows, with the compiler just
+      # built (so, because lib/rt now exists, linked by the embedded lld against
+      # the bundled CRT). `turfc --test` runs natively here (its Windows process
+      # runner is src/TestRunner.cpp's); the flags are scripts/test_runner.sh's.
+      # INFORMATIONAL until the port is done (continue-on-error): its job is to
+      # produce the full list of what fails, in the log artifact, in one run
+      # instead of one failure per CI round trip. The generous per-test timeout
+      # is for process start-up on a runner with a virus scanner, not for hangs.
+      - name: Test suite on Windows (REL-008 stage 5, informational)
+        continue-on-error: true
+        shell: msys2 {0}
+        env:
+          TURF_TEST_TIMEOUT_SEC: "60"
+        run: |
+          set -o pipefail
+          ./build/turfc.exe --test tests \
+            --diag-register tests/DIAGNOSTIC_GAPS.txt \
+            --exclude custom --exclude 99_known_bugs 2>&1 | tee windows-suite.log
+          # (set -o pipefail: the step fails when the suite does)
+
+      - name: Summarise the Windows suite run
+        if: always()
+        shell: msys2 {0}
+        run: |
+          [ -f windows-suite.log ] || { echo "no windows-suite.log"; exit 0; }
+          grep -E "^(Total Tests|Passed|Failed):" windows-suite.log || true
+          echo "--- failures by headline ---"
+          grep -E "\.\.\. " windows-suite.log | grep -vE "PASS" | sed -E 's/^\[[^]]*\] //' | head -150 || true
+
+      - name: Upload the Windows suite log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-suite-log
+          path: windows-suite.log
+          if-no-files-found: ignore
+
       - name: Package
         id: package
         uses: ./.github/actions/package-release

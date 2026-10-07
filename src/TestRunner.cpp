@@ -25,6 +25,21 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#else
+// REL-008 stage 5: the Windows process runner. WIN32_LEAN_AND_MEAN keeps
+// winsock.h out (nothing here needs it, and it would clash with a later
+// winsock2.h).
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0A00 // Windows 10: the attribute-list and job APIs below
+#endif
+#include <io.h>
+#include <windows.h>
 #endif
 
 namespace fs = std::filesystem;
@@ -172,19 +187,212 @@ ProcResult RunProcess(const std::string &Exe, const std::vector<std::string> &Ar
   return R;
 }
 
-#else
+#else // _WIN32
 
-// `turfc --test` is POSIX-only until REL-008, and RunTests()/Runner::runOne()
-// return before they would call any of this. The Runner class below is still
-// compiled on Windows and names both, so they have to exist or the whole
-// compiler fails to build there (v2.0.0-rc1's Windows release job did).
+// REL-008 stage 5. The same contract as the POSIX RunProcess above, in Win32
+// terms: a child with stdin from NUL and stdout+stderr in one pipe, a working
+// directory, a timeout, the caller's Ctrl-C, and the child's whole process TREE
+// killed on either (a Job Object does for the tree what a process group does
+// on POSIX), so a test that started a helper cannot leave it behind.
+
 std::atomic<bool> g_Interrupted{false};
 
-ProcResult RunProcess(const std::string &, const std::vector<std::string> &,
-                      const std::string &, int) {
+BOOL WINAPI onConsoleControl(DWORD Type) {
+  if (Type == CTRL_C_EVENT || Type == CTRL_BREAK_EVENT || Type == CTRL_CLOSE_EVENT) {
+    g_Interrupted = true;
+    return TRUE;
+  }
+  return FALSE;
+}
+
+std::wstring Widen(const std::string &S) {
+  if (S.empty())
+    return {};
+  const int N = MultiByteToWideChar(CP_UTF8, 0, S.data(), static_cast<int>(S.size()), nullptr, 0);
+  std::wstring W(static_cast<size_t>(N), L'\0');
+  MultiByteToWideChar(CP_UTF8, 0, S.data(), static_cast<int>(S.size()), W.data(), N);
+  return W;
+}
+
+/// One argument, quoted so the C runtime's startup code (and
+/// CommandLineToArgvW) parses it back to exactly @p A: wrap in quotes when it
+/// holds whitespace, a quote, or nothing; double the backslashes that precede
+/// a quote or the closing quote; escape each quote.
+std::wstring QuoteArg(const std::wstring &A) {
+  if (!A.empty() && A.find_first_of(L" \t\n\v\"") == std::wstring::npos)
+    return A;
+  std::wstring Out = L"\"";
+  for (size_t I = 0;; ++I) {
+    size_t Slashes = 0;
+    while (I < A.size() && A[I] == L'\\') {
+      ++Slashes;
+      ++I;
+    }
+    if (I == A.size()) {
+      Out.append(Slashes * 2, L'\\');
+      break;
+    }
+    if (A[I] == L'"') {
+      Out.append(Slashes * 2 + 1, L'\\');
+      Out.push_back(L'"');
+    } else {
+      Out.append(Slashes, L'\\');
+      Out.push_back(A[I]);
+    }
+  }
+  Out.push_back(L'"');
+  return Out;
+}
+
+/// A Windows exit code in the vocabulary the markers and the rest of the runner
+/// speak: 128 + N for "ended by signal N". The C runtime's abort() exits with 3
+/// (SIGABRT, 134), and an unhandled exception ends the process with its NTSTATUS
+/// (an access violation or a stack overflow is SIGSEGV, 139). Anything else is
+/// the program's own exit code, except an unknown NTSTATUS, which is a crash.
+int WindowsExitStatus(DWORD Code) {
+  switch (Code) {
+  case 3:
+    return 134; // abort()
+  case 0xC0000005: // STATUS_ACCESS_VIOLATION
+  case 0xC00000FD: // STATUS_STACK_OVERFLOW
+  case 0xC0000409: // STATUS_STACK_BUFFER_OVERRUN (__fastfail)
+    return 139;
+  case 0xC000001D: // STATUS_ILLEGAL_INSTRUCTION
+  case 0xC0000096: // STATUS_PRIVILEGED_INSTRUCTION
+    return 132;
+  case 0xC0000094: // STATUS_INTEGER_DIVIDE_BY_ZERO
+  case 0xC0000095: // STATUS_INTEGER_OVERFLOW
+  case 0xC000008E: // STATUS_FLOAT_DIVIDE_BY_ZERO
+    return 136;
+  case 0xC000013A: // STATUS_CONTROL_C_EXIT
+    return 130;
+  default:
+    break;
+  }
+  if (Code >= 0xC0000000u)
+    return 255; // some other unhandled exception
+  return static_cast<int>(Code);
+}
+
+ProcResult RunProcess(const std::string &Exe, const std::vector<std::string> &Args,
+                      const std::string &Cwd, int TimeoutSec) {
   ProcResult R;
-  R.Status = 1;
-  R.Output = "unsupported platform";
+  auto Fail = [&](const char *What) {
+    R.Status = 127;
+    R.Output = std::string(What) + " (Win32 error " + std::to_string(GetLastError()) + ")";
+    return R;
+  };
+
+  SECURITY_ATTRIBUTES Inheritable{sizeof Inheritable, nullptr, TRUE};
+  HANDLE ReadEnd = nullptr, WriteEnd = nullptr;
+  if (!CreatePipe(&ReadEnd, &WriteEnd, &Inheritable, 0))
+    return Fail("cannot create a pipe");
+  SetHandleInformation(ReadEnd, HANDLE_FLAG_INHERIT, 0); // the child gets only the write end
+  HANDLE Nul = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &Inheritable,
+                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+
+  // Only these two handles are inherited. Without an explicit list, "inherit
+  // every inheritable handle" lets a test process started by another worker
+  // thread at the same moment inherit THIS pipe's write end, and this pipe then
+  // never reaches end-of-file while that unrelated process lives.
+  HANDLE Inherit[2] = {WriteEnd, Nul};
+  const DWORD InheritCount = Nul != INVALID_HANDLE_VALUE ? 2 : 1;
+  SIZE_T AttrSize = 0;
+  InitializeProcThreadAttributeList(nullptr, 1, 0, &AttrSize);
+  std::vector<char> AttrBuf(AttrSize);
+  auto *Attrs = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(AttrBuf.data());
+  InitializeProcThreadAttributeList(Attrs, 1, 0, &AttrSize);
+  UpdateProcThreadAttribute(Attrs, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, Inherit,
+                            InheritCount * sizeof(HANDLE), nullptr, nullptr);
+
+  STARTUPINFOEXW SI{};
+  SI.StartupInfo.cb = sizeof SI;
+  SI.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+  SI.StartupInfo.hStdInput = Nul != INVALID_HANDLE_VALUE ? Nul : GetStdHandle(STD_INPUT_HANDLE);
+  SI.StartupInfo.hStdOutput = WriteEnd;
+  SI.StartupInfo.hStdError = WriteEnd;
+  SI.lpAttributeList = Attrs;
+
+  std::wstring Cmd = QuoteArg(Widen(Exe));
+  for (const auto &A : Args)
+    Cmd += L" " + QuoteArg(Widen(A));
+  const std::wstring CwdW = Widen(Cwd);
+
+  PROCESS_INFORMATION PI{};
+  // Suspended, so it is in the job before it can start a child of its own.
+  const BOOL Started =
+      CreateProcessW(nullptr, Cmd.data(), nullptr, nullptr, TRUE,
+                     EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED | CREATE_NO_WINDOW, nullptr,
+                     CwdW.empty() ? nullptr : CwdW.c_str(), &SI.StartupInfo, &PI);
+  const DWORD StartError = GetLastError();
+  DeleteProcThreadAttributeList(Attrs);
+  CloseHandle(WriteEnd); // the child holds its own copy
+  if (Nul != INVALID_HANDLE_VALUE)
+    CloseHandle(Nul);
+  if (!Started) {
+    CloseHandle(ReadEnd);
+    R.Status = 127;
+    R.Output = "cannot start '" + Exe + "' (Win32 error " + std::to_string(StartError) + ")";
+    return R;
+  }
+
+  HANDLE Job = CreateJobObjectW(nullptr, nullptr);
+  if (Job) {
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION Info{};
+    Info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    SetInformationJobObject(Job, JobObjectExtendedLimitInformation, &Info, sizeof Info);
+    AssignProcessToJobObject(Job, PI.hProcess);
+  }
+  ResumeThread(PI.hThread);
+
+  using Clock = std::chrono::steady_clock;
+  const auto Start = Clock::now();
+  bool Killed = false;
+  char Buf[65536];
+  // Reads whatever the pipe holds now; false when there was nothing.
+  auto Drain = [&]() -> bool {
+    DWORD Avail = 0;
+    if (!PeekNamedPipe(ReadEnd, nullptr, 0, nullptr, &Avail, nullptr) || Avail == 0)
+      return false;
+    DWORD Got = 0;
+    if (!ReadFile(ReadEnd, Buf, static_cast<DWORD>(std::min<size_t>(sizeof Buf, Avail)), &Got, nullptr) || Got == 0)
+      return false;
+    if (R.Output.size() < MaxCapturedBytes)
+      R.Output.append(Buf, Got);
+    return true;
+  };
+
+  for (;;) {
+    if (Drain())
+      continue;
+    if (!Killed) {
+      const bool Expired = TimeoutSec > 0 && Clock::now() - Start >= std::chrono::seconds(TimeoutSec);
+      if (Expired || g_Interrupted) {
+        if (Job)
+          TerminateJobObject(Job, 137);
+        else
+          TerminateProcess(PI.hProcess, 137);
+        Killed = true;
+        R.TimedOut = Expired;
+      }
+    }
+    if (WaitForSingleObject(PI.hProcess, 20) == WAIT_OBJECT_0)
+      break;
+  }
+  while (Drain()) {
+  } // what the process wrote just before it exited
+  if (Job)
+    TerminateJobObject(Job, 137); // a helper the test left running
+
+  DWORD Code = 0;
+  GetExitCodeProcess(PI.hProcess, &Code);
+  R.Status = Killed ? 137 : WindowsExitStatus(Code);
+
+  CloseHandle(ReadEnd);
+  CloseHandle(PI.hThread);
+  CloseHandle(PI.hProcess);
+  if (Job)
+    CloseHandle(Job);
   return R;
 }
 
@@ -307,13 +515,16 @@ private:
   }
 
   TestResult runOne(size_t Index) {
-#ifdef _WIN32
-    (void)Index;
-    return {false, "unsupported platform"};
-#else
     const TestFile &T = Tests_[Index];
     const std::string Source = ReadFile(T.Path);
+#ifdef _WIN32
+    // turfc writes <name>.exe for `-o <name>` (and keeps a name that already ends
+    // in .exe), so name the program with the suffix the existence checks and the
+    // run below look for.
+    const fs::path Program = Temp_ / ("t" + std::to_string(Index) + ".exe");
+#else
     const fs::path Program = Temp_ / ("t" + std::to_string(Index));
+#endif
     struct Cleanup {
       fs::path P;
       ~Cleanup() {
@@ -424,7 +635,6 @@ private:
       if (StartsWith(L, "TURF_GC_VALIDATE:"))
         sayExtra("[" + T.Suite() + "/" + T.Name() + "] " + L);
     return Done;
-#endif
   }
 };
 
@@ -461,12 +671,6 @@ std::vector<TestFile> Discover(const fs::path &Dir, const std::string &DirSpelli
 } // namespace
 
 int RunTests(const TestRunOptions &O) {
-#ifdef _WIN32
-  (void)O;
-  std::cerr << "Error: `turfc --test` is not supported on Windows yet (it needs a process "
-               "runner for that platform).\n";
-  return 1;
-#else
   std::error_code EC;
   fs::path Dir = fs::absolute(O.Dir, EC);
   if (!fs::exists(Dir, EC)) {
@@ -527,6 +731,25 @@ int RunTests(const TestRunOptions &O) {
 
   fs::path Temp = fs::temp_directory_path(EC) / "turf-test-XXXXXX";
   std::string TempTemplate = Temp.string();
+#ifdef _WIN32
+  // No mkdtemp: a name made of the process id and the clock, created exclusively
+  // (create_directory fails if it exists, so two runs never share one).
+  {
+    bool Made = false;
+    for (int Try = 0; Try < 100 && !Made; ++Try) {
+      const auto Tick = std::chrono::steady_clock::now().time_since_epoch().count();
+      TempTemplate = (Temp.parent_path() / ("turf-test-" + std::to_string(GetCurrentProcessId()) + "-" +
+                                            std::to_string(Tick + Try)))
+                         .string();
+      Made = fs::create_directory(TempTemplate, EC) && !EC;
+    }
+    if (!Made) {
+      std::cerr << "Error: cannot create a temporary directory under " << Temp.parent_path().string() << ".\n";
+      return 1;
+    }
+  }
+  SetConsoleCtrlHandler(onConsoleControl, TRUE);
+#else
   if (!mkdtemp(TempTemplate.data())) {
     std::cerr << "Error: cannot create a temporary directory under " << Temp.parent_path().string() << ".\n";
     return 1;
@@ -537,9 +760,21 @@ int RunTests(const TestRunOptions &O) {
   sigemptyset(&SA.sa_mask);
   sigaction(SIGINT, &SA, nullptr);
   sigaction(SIGTERM, &SA, nullptr);
+#endif
 
   Palette Pal;
+#ifdef _WIN32
+  Pal.On = _isatty(_fileno(stdout)) && !std::getenv("NO_COLOR");
+  if (Pal.On) {
+    // A console does not interpret the colour escapes until asked to.
+    HANDLE Out = GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD Mode = 0;
+    if (Out != INVALID_HANDLE_VALUE && GetConsoleMode(Out, &Mode))
+      SetConsoleMode(Out, Mode | 0x0004 /* ENABLE_VIRTUAL_TERMINAL_PROCESSING */);
+  }
+#else
   Pal.On = isatty(STDOUT_FILENO) && !std::getenv("NO_COLOR");
+#endif
 
   std::string OptNote;
   for (const auto &F : O.CompileFlags)
@@ -583,5 +818,4 @@ int RunTests(const TestRunOptions &O) {
   }
   std::cout << "\n" << Pal.green(Pal.bold("All tests passed successfully!")) << "\n";
   return 0;
-#endif
 }
