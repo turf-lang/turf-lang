@@ -9,11 +9,17 @@
 // confirmed-live failure this test's positive counterpart would be).
 //
 // #256: a negative index is now counted from the end, so the write is bad only
-// when it reaches past the start. A fresh `gc_alloc` buffer has strlen 0, so
-// even `buf[-1]` wraps to -1 and still panics -- which is what this pins.
+// when it reaches past the start. A zero-filled buffer has strlen 0, so even
+// `buf[-1]` wraps to -1 and still panics -- which is what this pins.
+//
+// The buffer is `gc_alloc_zeroed`, not `gc_alloc`: a negative index makes the
+// write path call `strlen()` on the buffer, and `gc_alloc` is plain malloc, so
+// its first bytes are whatever the heap held. This test used to rely on that
+// being zero; AddressSanitizer (the gc_hardening_asan CI job) caught the
+// `strlen` reading 5 bytes past a 4-byte block.
 fn main(): int {
     unsafe {
-        mut buf: string = gc_alloc(4) to string;
+        mut buf: string = gc_alloc_zeroed(4) to string;
         immut i: int = 0 - 1;
         buf[i] = 'x';
     }

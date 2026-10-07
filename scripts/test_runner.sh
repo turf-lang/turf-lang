@@ -54,7 +54,15 @@ if [ ! -f "$COMPILER" ]; then
     exit 1
 fi
 
+# TURF_TEST_EXTRA_EXCLUDE: space-separated paths under tests/ to skip as well,
+# for a run whose build cannot pass them by design. The one user is the ASan CI
+# job, which skips the stack-overflow test because an ASan runtime installs no
+# SIGSEGV handler of its own (runtime/turfrt_signal.c, INV-RT-5).
+EXTRA_EXCLUDE=()
+for x in ${TURF_TEST_EXTRA_EXCLUDE:-}; do EXTRA_EXCLUDE+=(--exclude "$x"); done
+
 exec "$COMPILER" --test tests \
     --diag-register tests/DIAGNOSTIC_GAPS.txt \
     --exclude custom --exclude 99_known_bugs \
+    ${EXTRA_EXCLUDE[@]+"${EXTRA_EXCLUDE[@]}"} \
     "${OPT_ARGS[@]}"

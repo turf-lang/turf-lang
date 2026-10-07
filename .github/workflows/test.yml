@@ -191,6 +191,18 @@ jobs:
       # builds examples/; the docs quote its output.
       - name: turf examples smoke test (examples/ build, run, locked and offline)
         run: CI=1 ./scripts/examples_smoke.sh
+      # REL-003 stage 2 (D20): `--target` for another machine writes its object
+      # and stops with a TurfLang diagnostic instead of the host linker's
+      # "file in wrong format"; the host's own triple spellings must still link.
+      - name: "Cross-target smoke test (--target link diagnostic, D20)"
+        run: ./scripts/cross_target_smoke.sh
+      # REL-003 stage 1: the release archive's layout, install.sh (checksum,
+      # PATH block, uninstall) and `turf new`/`run`/`build` from an install
+      # that has only the archive's files. The release workflow runs the same
+      # script on the archive it publishes; this keeps the packaging honest on
+      # every push, not only on a tag.
+      - name: "Release archive + install.sh smoke test"
+        run: CI=1 ./scripts/release_smoke.sh
 
       # OPT-001 (docs/development/changes/OPT-001.md, INV-OPT-1): optimization
       # levels must never change a program's observable behaviour. The default
@@ -431,10 +443,23 @@ jobs:
       # positive against this project's own frozen design, not a real bug.
       # AddressSanitizer's actual bug-finding (freed-block reuse, wild
       # pointers, buffer overflows) is unaffected by this flag.
+      # Two tests assert a runtime message that an ASan runtime pre-empts, and
+      # both used to "pass" on exit status alone until #263 made EXPECT-RUNTIME
+      # binding (which is when this job started failing on every run):
+      #   * allocator_may_return_null=1: tests/41_gc/fail_oom_huge_direct_allocation.tr
+      #     asks for 2^63-1 bytes. ASan's malloc aborts with its own
+      #     "allocation-size-too-big" report; with this flag it returns NULL and
+      #     turf_rt_alloc()'s "out of memory" panic, the path under test, runs.
+      #   * TURF_TEST_EXTRA_EXCLUDE: tests/41_gc/fail_stack_overflow_deep_recursion.tr
+      #     expects "panic: stack overflow" from the runtime's SIGSEGV handler,
+      #     and an ASan build installs none (runtime/turfrt_signal.c: INV-RT-5's
+      #     documented FDN-005 exception; handle_segv=0 just gives a bare 139).
+      #     ASan reports the overflow itself, and the plain jobs cover the
+      #     handler at every -O level.
       - name: Run Test Suites under ASan -- (default level)
-        run: TURF_COMPILER="$(pwd)/build_asan/turfc" ASAN_OPTIONS=detect_leaks=0 ./scripts/test_runner.sh
+        run: TURF_COMPILER="$(pwd)/build_asan/turfc" ASAN_OPTIONS=detect_leaks=0:allocator_may_return_null=1 TURF_TEST_EXTRA_EXCLUDE=41_gc/fail_stack_overflow_deep_recursion.tr ./scripts/test_runner.sh
       - name: Run Test Suites under ASan -- (-O0)
-        run: TURF_COMPILER="$(pwd)/build_asan/turfc" ASAN_OPTIONS=detect_leaks=0 ./scripts/test_runner.sh -O0
+        run: TURF_COMPILER="$(pwd)/build_asan/turfc" ASAN_OPTIONS=detect_leaks=0:allocator_may_return_null=1 TURF_TEST_EXTRA_EXCLUDE=41_gc/fail_stack_overflow_deep_recursion.tr ./scripts/test_runner.sh -O0
 
       # FDN-005's own roadmap completion criterion names this exact
       # combination explicitly: "the whole suite green under
@@ -449,11 +474,11 @@ jobs:
       # seconds either way, so this one step's wall time is dominated
       # entirely by that single file, not a general slowdown.
       - name: GC stress test under ASan -- collect on every allocation (-O0)
-        run: TURF_COMPILER="$(pwd)/build_asan/turfc" ASAN_OPTIONS=detect_leaks=0 TURF_GC_STRESS=1 TURF_TEST_TIMEOUT_SEC=700 ./scripts/test_runner.sh -O0
+        run: TURF_COMPILER="$(pwd)/build_asan/turfc" ASAN_OPTIONS=detect_leaks=0:allocator_may_return_null=1 TURF_TEST_EXTRA_EXCLUDE=41_gc/fail_stack_overflow_deep_recursion.tr TURF_GC_STRESS=1 TURF_TEST_TIMEOUT_SEC=700 ./scripts/test_runner.sh -O0
       # The roadmap's criterion names -O2 as well; the FDN-005 landing ran
       # only -O0 under this combination.
       - name: GC stress test under ASan -- collect on every allocation (-O2)
-        run: TURF_COMPILER="$(pwd)/build_asan/turfc" ASAN_OPTIONS=detect_leaks=0 TURF_GC_STRESS=1 TURF_TEST_TIMEOUT_SEC=700 ./scripts/test_runner.sh -O2
+        run: TURF_COMPILER="$(pwd)/build_asan/turfc" ASAN_OPTIONS=detect_leaks=0:allocator_may_return_null=1 TURF_TEST_EXTRA_EXCLUDE=41_gc/fail_stack_overflow_deep_recursion.tr TURF_GC_STRESS=1 TURF_TEST_TIMEOUT_SEC=700 ./scripts/test_runner.sh -O2
 
       - name: Tool API tests (compiler query facade) under ASan
         run: ./build_asan/turf-api-tests
