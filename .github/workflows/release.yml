@@ -229,6 +229,12 @@ jobs:
         with:
           msystem: MINGW64
           update: true
+          # setup-go puts Go on the WINDOWS path, which a default
+          # (`path-type: minimal`) MSYS2 shell does not see, so CMake printed
+          # "Go not found: build/turf ... will not be built" in v2.0.0-rc1's
+          # Windows job. `inherit` appends the Windows PATH after MSYS2's own,
+          # so the MINGW64 toolchain still wins and `go` is found.
+          path-type: inherit
           # mingw-w64-x86_64-openmp was renamed to mingw-w64-x86_64-llvm-openmp
           # upstream in the MSYS2 repos -- the old name now 404s ("target not
           # found"), confirmed live via the v1.0.0-rc1 dry-run release build.
@@ -246,11 +252,9 @@ jobs:
           ./scripts/cmake_build.sh --release
 
       # CMake only builds build/turf.exe if it can find `go` from inside the
-      # MSYS2 shell, and setup-go puts Go on the WINDOWS path, which a default
-      # (`path-type: minimal`) MSYS2 shell does not see. Untested here (no
-      # Windows runner in the authoring session): if this fires, the fix is
-      # `path-type: inherit` on Setup MSYS2 or a separate `go build` step, not
-      # shipping an archive without the front end.
+      # MSYS2 shell (`path-type: inherit` above is what lets it). Never ship an
+      # archive without the front end: if this fires, fix the Go lookup, do not
+      # drop the check.
       - name: Check the turf front end was built
         shell: msys2 {0}
         run: |
