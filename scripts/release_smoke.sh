@@ -176,7 +176,10 @@ echo "== turf, from the installed archive only"
 USERENV() { env -i HOME="$HOME_DIR" PATH="$PREFIX/bin:$SYSPATH" TURF_CACHE_DIR="$WORK/cache" TERM=dumb "$@"; }
 
 VER=$(USERENV turf version 2>&1 | strip)
-printf '%s\n' "$VER" | grep -q "root $PREFIX\$" && pass "turfc's install root is the prefix" || fail "turf version: $VER"
+# turfc reports its install root by real path, and a temp directory is not one on
+# macOS (/var is a symlink to /private/var), so compare against the physical path.
+PREFIX_REAL=$(cd "$PREFIX" && pwd -P)
+printf '%s\n' "$VER" | grep -q "root $PREFIX_REAL\$" && pass "turfc's install root is the prefix" || fail "turf version: $VER"
 printf '%s\n' "$VER" | grep -q "is not on your PATH\|not this one" && fail "turf version says it is not the one on PATH" || pass "turf version raises no PATH note"
 
 mkdir "$WORK/proj" && cd "$WORK/proj" || exit 1
