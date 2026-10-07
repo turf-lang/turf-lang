@@ -146,17 +146,36 @@ jobs:
       # does not build against (v2.0.0-rc1's macOS build failed on it).
       # llvm@22 is keg-only, so CMake is pointed at it explicitly; PATH alone
       # could still find another LLVM first. zstd is for its static libzstd.a
-      # (REL-008 stage 2: LLVM's zstd must not be Homebrew's dylib). lld@22 is
-      # the static lld archives and headers the embedded linker is built from
-      # (stage 3/4); it is keg-only too, so its prefix joins CMAKE_PREFIX_PATH.
+      # (REL-008 stage 2: LLVM's zstd must not be Homebrew's dylib).
       - name: Install LLVM
         run: |
-          brew install llvm@22 lld@22 cmake zstd
+          brew install llvm@22 cmake zstd
           LLVM_PREFIX="$(brew --prefix llvm@22)"
-          LLD_PREFIX="$(brew --prefix lld@22)"
           echo "$LLVM_PREFIX/bin" >> $GITHUB_PATH
-          echo "CMAKE_PREFIX_PATH=$LLVM_PREFIX:$LLD_PREFIX" >> $GITHUB_ENV
+          echo "LLVM_PREFIX=$LLVM_PREFIX" >> $GITHUB_ENV
           "$LLVM_PREFIX/bin/llvm-config" --version | grep -q '^22\.' || { echo "::error::LLVM is not 22"; exit 1; }
+          echo "LLVM_VERSION=$("$LLVM_PREFIX/bin/llvm-config" --version)" >> $GITHUB_ENV
+
+      # lld, as STATIC archives, for the embedded linker (REL-008 stages 3/4).
+      # Homebrew's lld@22 ships only liblld*.dylib (its bottle was unpacked to
+      # check): linking those made turfc need /opt/homebrew/opt/lld@22/lib/...
+      # at run time, which the dependency check caught on the first macOS run.
+      # So lld is built from LLVM's own pinned source (scripts/build_static_lld.sh,
+      # ~10 minutes), and cached; the key covers the script (its pinned hash and
+      # flags) and the LLVM it is built against.
+      - name: Cache static lld
+        id: cache-lld
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/lld
+          key: static-lld-macos-arm64-${{ hashFiles('scripts/build_static_lld.sh') }}-${{ env.LLVM_VERSION }}
+
+      - name: Build static lld
+        if: steps.cache-lld.outputs.cache-hit != 'true'
+        run: ./scripts/build_static_lld.sh --llvm-dir "$LLVM_PREFIX/lib/cmake/llvm" --prefix "${{ runner.temp }}/lld"
+
+      - name: Point CMake at the static lld
+        run: echo "CMAKE_PREFIX_PATH=$LLVM_PREFIX:${{ runner.temp }}/lld" >> $GITHUB_ENV
 
       - name: Set up Go
         uses: actions/setup-go@v5
