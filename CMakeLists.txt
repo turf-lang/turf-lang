@@ -121,6 +121,23 @@ if(TURF_RELEASE_STATIC)
   endforeach()
   set_property(TARGET LLVMSupport PROPERTY INTERFACE_LINK_LIBRARIES ${_sup_llvm} ${TURF_LLVM_SYSLIBS})
   message(STATUS "Release link: static LLVM, LLVMSupport's system libs replaced by: ${TURF_LLVM_SYSLIBS}")
+
+  if(WIN32)
+    # --allow-multiple-definition: GNU ld on MinGW fails with "multiple
+    # definition of ... std::__detail::_AnyMatcher<...>::operator()::__nul"
+    # (and its guard variable): a static local of an inline std::regex function
+    # that both libstdc++.a and libLLVMMipsCodeGen.a (an unrelated backend,
+    # linked only because every target is) carry as .bss$ COMDATs, which PE
+    # linking does not merge when their sizes differ (ld also warns "duplicate
+    # section ... has different size" inside libstdc++.a itself, harmlessly).
+    # Both are the same libstdc++ header's definitions, so taking the first is
+    # correct. Found on the first Windows run of REL-008 stage 2; reproduced
+    # with MSYS2's mingw-w64-x86_64-llvm 22.1.8-3 and a MinGW GCC 16.2.0
+    # cross compiler. The cost: ld no longer reports a genuine duplicate symbol
+    # in these links. Needed by every executable that links turfcore (turfc,
+    # turf-api-tests), so it is on the library, not on turfc.
+    set(TURF_WIN_LINK_OPTIONS -Wl,--allow-multiple-definition)
+  endif()
 elseif(TURF_STATIC_LLVM)
   llvm_map_components_to_libnames(TURF_LLVM_LINK
     core support irreader analysis passes target targetparser mc transformutils instcombine scalaropts native)
@@ -410,6 +427,9 @@ target_compile_options(turfcore PRIVATE
   $<$<CONFIG:Release>:-O3>
 )
 
+if(TURF_WIN_LINK_OPTIONS)
+  target_link_options(turfcore PUBLIC ${TURF_WIN_LINK_OPTIONS})
+endif()
 target_link_libraries(turfcore PUBLIC
   ${LLAMA_IMPORTED_TARGETS}
   ${TURF_LLVM_LINK}
@@ -521,7 +541,9 @@ if(TURF_RELEASE_STATIC AND NOT APPLE)
   # static: libwinpthread is the other DLL it would bring along; the C runtime
   # stays the system's either way.
   if(WIN32)
-    target_link_options(turfc PRIVATE -static)
+    # -s: 216 MB unstripped, 134 MB stripped. (The duplicate-definition flag
+    # every Windows release link needs is on turfcore, above.)
+    target_link_options(turfc PRIVATE -static -s)
   else()
     target_link_options(turfc PRIVATE -static-libstdc++ -static-libgcc)
   endif()

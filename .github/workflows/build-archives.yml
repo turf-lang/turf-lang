@@ -223,6 +223,32 @@ jobs:
           platform-suffix: windows-x86_64
           archive-format: zip
 
+      # The Windows archive has no install smoke yet (that is the Windows port,
+      # REL-008 stage 5), and turfc.exe has never been *run* by anything in CI.
+      # A static link that produced a file is not a turfc that starts, so unpack
+      # the archive and run it. --version is the stage 2 requirement: the
+      # self-contained binary loads and answers. Compiling a program is the
+      # Windows port's job, so that step only reports (continue-on-error).
+      - name: Run the archived turfc.exe
+        shell: msys2 {0}
+        run: |
+          rm -rf win_smoke && mkdir win_smoke && cd win_smoke
+          7z x -y "../${{ steps.package.outputs.archive-path }}" > /dev/null || unzip -q "../${{ steps.package.outputs.archive-path }}"
+          d=$(echo turf-v*-windows-x86_64)
+          "$d/bin/turfc.exe" --version
+          "$d/bin/turf.exe" version || true
+
+      - name: Compile and run hello with the archived turfc.exe (informational until REL-008 stage 5)
+        continue-on-error: true
+        shell: msys2 {0}
+        run: |
+          cd win_smoke
+          d=$(echo turf-v*-windows-x86_64)
+          printf 'fn main(): int {\n    printline("hello windows");\n    return 0;\n}\n' > hello.tr
+          "$d/bin/turfc.exe" hello.tr -o hello.exe
+          ./hello.exe | tee hello.out
+          grep -q "hello windows" hello.out
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
