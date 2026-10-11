@@ -137,7 +137,7 @@ class BinaryExprAST : public ExprAST {
   std::unique_ptr<ExprAST> RHS;
 
 public:
-  BinaryExprAST(SourceLocation Loc, char Op, std::unique_ptr<ExprAST> LHS,
+  BinaryExprAST(SourceLocation Loc, int Op, std::unique_ptr<ExprAST> LHS,
                 std::unique_ptr<ExprAST> RHS)
       : Loc(Loc), Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
 
@@ -217,7 +217,7 @@ public:
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitBinary(*this); }
   std::unique_ptr<ExprAST> clone() const override {
-    auto Cloned = std::make_unique<BinaryExprAST>(Loc, static_cast<char>(Op),
+    auto Cloned = std::make_unique<BinaryExprAST>(Loc, Op,
                                                    CloneExprAST(LHS.get()),
                                                    CloneExprAST(RHS.get()));
     Cloned->IsDesugaredNot = IsDesugaredNot;
@@ -446,7 +446,7 @@ public:
   // directly, producing "error at line 0, col 0" with no code snippet
   // shown. Every construction site (Parser.cpp) now passes the operator
   // token's real location explicitly.
-  UnaryExprAST(SourceLocation Loc, char Opcode, std::unique_ptr<ExprAST> Operand)
+  UnaryExprAST(SourceLocation Loc, int Opcode, std::unique_ptr<ExprAST> Operand)
       : Loc(Loc), Opcode(Opcode), Operand(std::move(Operand)) {}
 
   const SourceLocation &getLoc() const { return Loc; }
@@ -485,7 +485,7 @@ public:
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitUnary(*this); }
   std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<UnaryExprAST>(Loc, static_cast<char>(Opcode),
+    return std::make_unique<UnaryExprAST>(Loc, Opcode,
                                           CloneExprAST(Operand.get()));
   }
 }; // UnaryExprAST
