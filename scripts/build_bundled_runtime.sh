@@ -8,7 +8,9 @@
 # script is the one place that produces it for each platform, so CI and a
 # developer build the same thing:
 #
-#   linux-x86_64   musl libc, built from a pinned, hash-verified source tarball
+#   linux-x86_64, linux-arm64
+#                  (built natively: run it on the architecture it is for)
+#                  musl libc, built from a pinned, hash-verified source tarball
 #                  (crt1.o crti.o crtn.o libc.a libm.a), gcc's libgcc.a, and
 #                  libturfrt.a COMPILED AGAINST THAT MUSL (a glibc-built runtime
 #                  cannot be linked into a program that carries musl)
@@ -68,6 +70,7 @@ done
 if [ -z "$PLATFORM" ]; then
   case "$(uname -s)/$(uname -m)" in
     Linux/x86_64) PLATFORM=linux-x86_64 ;;
+    Linux/aarch64|Linux/arm64) PLATFORM=linux-arm64 ;;
     Darwin/arm64) PLATFORM=macos-arm64 ;;
     MINGW64*|MSYS*|CYGWIN*) PLATFORM=windows-x86_64 ;;
     *) echo "build_bundled_runtime.sh: no bundled runtime for $(uname -s)/$(uname -m); pass --platform" >&2; exit 2 ;;
@@ -86,7 +89,13 @@ fetch() { # url dest
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
-build_linux_x86_64() {
+build_linux() {
+  # musl and libturfrt are built by the host's gcc for the host, so the
+  # platform asked for has to be the machine this runs on.
+  case "$PLATFORM/$(uname -m)" in
+    linux-x86_64/x86_64|linux-arm64/aarch64|linux-arm64/arm64) ;;
+    *) echo "build_bundled_runtime.sh: $PLATFORM is built natively, and this machine is $(uname -m)" >&2; exit 1 ;;
+  esac
   command -v gcc >/dev/null 2>&1 || { echo "build_bundled_runtime.sh: gcc is required" >&2; exit 1; }
 
   # musl: pinned, verified, built static-only into a private prefix.
@@ -131,7 +140,7 @@ build_linux_x86_64() {
   cp "$WORK/rt/libturfrt.a" "$OUT/"
   cp "$WORK/musl-$MUSL_VERSION/COPYRIGHT" "$OUT/COPYRIGHT.musl"
   {
-    echo "TurfLang bundled C runtime, linux-x86_64 (scripts/build_bundled_runtime.sh)"
+    echo "TurfLang bundled C runtime, $PLATFORM (scripts/build_bundled_runtime.sh)"
     echo "musl        $MUSL_VERSION  sha256 $MUSL_SHA256  (MIT; see COPYRIGHT.musl)"
     echo "libgcc.a    from $(gcc --version | head -n 1) (GPL-3.0 with the GCC Runtime Library Exception)"
     echo "libturfrt.a built from this repository's runtime/*.c against the musl above"
@@ -218,7 +227,7 @@ TBD
 }
 
 case "$PLATFORM" in
-  linux-x86_64) build_linux_x86_64 ;;
+  linux-x86_64|linux-arm64) build_linux ;;
   windows-x86_64) build_windows_x86_64 ;;
   macos-arm64) build_macos_arm64 ;;
   *) echo "build_bundled_runtime.sh: the $PLATFORM runtime is not implemented here yet" >&2; exit 2 ;;

@@ -6,6 +6,7 @@
 // available" and linkObject() uses the system toolchain. One driver per host:
 //
 //   Linux x86-64   lld's ELF driver, static, against musl            (lib/rt/linux-x86_64)
+//   Linux arm64    the same driver and recipe                        (lib/rt/linux-arm64)
 //   Windows x86-64 lld's MinGW (COFF) driver, against MinGW-w64's UCRT CRT (lib/rt/windows-x86_64)
 //   macOS arm64    lld's Mach-O driver, against a stub libSystem     (lib/rt/macos-arm64)
 //
@@ -24,7 +25,7 @@
 #include "lld/Common/Driver.h"
 #include "llvm/Config/llvm-config.h"
 #include "llvm/Plugins/PassPlugin.h"
-#if defined(__linux__) && defined(__x86_64__)
+#if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
 #define TURF_BUNDLED_LINK_ELF 1
 LLD_HAS_DRIVER(elf)
 #elif defined(_WIN32) && defined(__x86_64__)
@@ -94,10 +95,16 @@ static int RunLld(const std::vector<std::string> &Args,
 
 #endif
 
-// ═════ Linux x86-64: ELF ════════════════════════════════════════════════════
+// ═════ Linux x86-64 and arm64: ELF ════════════════════════════════════════════════════
 #ifdef TURF_BUNDLED_LINK_ELF
 
+// lld's ELF driver takes the machine from the object file, so the two
+// architectures differ only in which runtime directory they read.
+#if defined(__aarch64__)
+std::string BundledRuntimePlatform() { return "linux-arm64"; }
+#else
 std::string BundledRuntimePlatform() { return "linux-x86_64"; }
+#endif
 
 bool BundledRuntimeProvides(const std::string &Lib) {
   // Folded into libc by musl and by glibc 2.34+.

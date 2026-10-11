@@ -15,7 +15,7 @@
 // statically, against the bundled runtime. A program that does name one needs
 // that library's own development files, so it goes to the system toolchain.
 //
-// The runtime directory contract (Linux; <root>/lib/rt/linux-x86_64/):
+// The runtime directory contract (Linux; <root>/lib/rt/linux-x86_64/ or linux-arm64/):
 //   required   crt1.o  crti.o  crtn.o  libc.a
 //   optional   crtbeginT.o crtend.o   (a glibc-style start-up pair)
 //              libm.a libgcc.a libgcc_eh.a
@@ -27,7 +27,7 @@
 namespace turf {
 
 // The directory name under <root>/lib/rt for the machine turfc runs on
-// ("linux-x86_64"), or "" when this host has no bundled link (a platform whose
+// ("linux-x86_64", "linux-arm64"), or "" when this host has no bundled link (a platform whose
 // runtime and linker driver have not landed yet).
 std::string BundledRuntimePlatform();
 
