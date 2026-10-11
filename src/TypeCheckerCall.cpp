@@ -2501,6 +2501,43 @@ void TypeChecker::visitArrayAccess(ArrayAccessExprAST &Node) {
       }
       setType(&Node, ElemTy);
     } else {
+      // Nothing above could index this value. A struct with only an
+      // `operator[]=` legitimately lands here with no type (a write-only
+      // container -- the assignment path looks the setter up itself), and an
+      // open generic parameter is judged once it is instantiated. Anything
+      // else has no `operator[]` of either kind and no builtin indexing:
+      // `n[0]` on an `int` used to type-check and reach Codegen's
+      // "Base is not an array or pointer" fatal error (REL-004 fuzzer).
+      //
+      // The Resolver gathers `operator[]` candidates by NAME alone, from every
+      // visible file, so "no candidates" is never true once the prelude is in
+      // play. What decides it is whether any candidate is written for THIS
+      // base type: its first parameter, with `&`/`*` and generic arguments
+      // stripped, names the base. A primitive can never be one.
+      auto Head = [](std::string N) {
+        while (!N.empty() && (N.front() == '&' || N.front() == '*' || N.front() == '?'))
+          N.erase(N.begin());
+        return N.substr(0, N.find('<'));
+      };
+      const std::string BaseHead = Head(BaseTy->getName());
+      auto DeclaredFor = [&](const std::vector<std::shared_ptr<ResolverFunctionSymbol>> &Cs) {
+        for (const auto &C : Cs)
+          if (C && !C->Params.empty() && C->Params[0].Type &&
+              (Head(C->Params[0].Type->getName()) == BaseHead ||
+               C->Params[0].Type->isGenericParam()))
+            return true;
+        return false;
+      };
+      const bool Primitive = BaseTy->isNumeric() || BaseTy->isChar() || BaseTy->isInt32() ||
+                             BaseTy->isVoid();
+      if (&Node != IndexWriteTarget_ && !BaseTy->isGenericParam() &&
+          (Primitive || !(DeclaredFor(Node.ResolvedIndexGetCandidates) ||
+                          DeclaredFor(Node.ResolvedIndexSetCandidates)))) {
+        reportError(Node.getLoc(), ErrCode::UnsupportedOperation,
+                    "Cannot index a value of type '" + BaseTy->getName() + "'.",
+                    {}, "Only arrays, strings, pointers, and types that define "
+                        "an 'operator []' can be indexed with [ ].");
+      }
       setType(&Node, nullptr);
     }
   } else {

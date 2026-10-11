@@ -5,12 +5,16 @@ CAUSE:
   form and shows the long way.
     - `int32` is a storage type: arithmetic on it yields `int`, never `int32`, so
       `x += 1`, `x++` and `x--` on an `int32` are not supported;
-    - compound assignment through a user-defined `operator[]` (`grid[i] += 1`).
+    - compound assignment through a user-defined `operator[]` (`grid[i] += 1`);
+    - indexing a value that cannot be indexed (`n[0]` on an `int`): only arrays, strings,
+      pointers and types that define `operator[]` can use `[ ]`.
 
 INCORRECT:
     mut x: int32 = 5 to int32;
     x += 1;
     grid[i] += 1;
+    mut n: int = 3;
+    n[0];
 
 CORRECT:
     struct Grid { n: int }

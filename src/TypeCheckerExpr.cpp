@@ -523,8 +523,11 @@ bool TypeChecker::rejectOperatorTemporaryWrite(const ExprAST *Place,
 
 
 void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
-  if (Node.getLHS())
+  if (Node.getLHS()) {
+    IndexWriteTarget_ = dynamic_cast<const ArrayAccessExprAST *>(Node.getLHS());
     const_cast<ExprAST *>(Node.getLHS())->accept(*this);
+    IndexWriteTarget_ = nullptr;
+  }
   if (Node.getRHS())
     const_cast<ExprAST *>(Node.getRHS())->accept(*this);
 

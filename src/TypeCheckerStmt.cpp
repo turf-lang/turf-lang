@@ -414,6 +414,25 @@ void TypeChecker::visitReturn(ReturnExprAST &Node) {
     }
   }
 
+  // A bare `return;` hands back nothing, so it is only for a function that
+  // returns nothing (`void`, or `!void`). Checked above only when there was a
+  // value, so `fn main(): int { return; }` reached Codegen, which emitted
+  // `ret void` in an i64 function -- "Internal compiler error: generated LLVM
+  // IR is invalid" from one missing expression (REL-004 fuzzer).
+  if (!Node.getVal() && !ReturnTypeStack_.empty() && ReturnTypeStack_.back()) {
+    const TurfType *Declared = ReturnTypeStack_.back().get();
+    const TurfType *Effective =
+        Declared->isErrorUnion()
+            ? static_cast<const TurfErrorUnionType *>(Declared)->getSuccessType()
+            : Declared;
+    if (Effective && !Effective->isVoid()) {
+      reportError(Node.getLoc(), ErrCode::ReturnTypeMismatch,
+                  "Return type mismatch: function declares '" + Declared->getName() +
+                      "' but this 'return' gives back no value.",
+                  {}, "Write the value to return, e.g. `return 0;`, or declare the function as returning void.");
+    }
+  }
+
   setType(&Node, RetTy ? RetTy : TurfVoid());
 }
 

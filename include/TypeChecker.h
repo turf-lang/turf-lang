@@ -732,6 +732,11 @@ private:
   /// Stack of expected return types for nested function definitions.
   /// Empty when we are at the top level.
   std::vector<TurfTypePtr> ReturnTypeStack_;
+  /// The `base[i]` on the left of the assignment being checked, if any.
+  /// visitArrayAccess() reports "cannot index a value of type X" for a base
+  /// nothing can index, but an assignment target has a more specific diagnostic
+  /// of its own (E056, "no operator[]= matches"), so it stays quiet there.
+  const ArrayAccessExprAST *IndexWriteTarget_ = nullptr;
 
   /// One frame per enclosing `compare` arm that narrows a TurfMachineType-
   /// typed, plain-variable subject to exactly one specific state -- pushed
