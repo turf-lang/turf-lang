@@ -136,7 +136,8 @@ for entry in "${CASES[@]}"; do
     fi
   fi
   IFS='|' read -r -a check_list <<<"${checks#|}"
-  for check in "${check_list[@]}"; do
+  # ${a[@]+...}: bash 3.2 (macOS) calls an empty array unbound under `set -u`.
+  for check in ${check_list[@]+"${check_list[@]}"}; do
     [ -z "$check" ] && continue
     case "$check" in
     "!"*)

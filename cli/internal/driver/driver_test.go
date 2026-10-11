@@ -52,7 +52,12 @@ func isolate(t *testing.T) {
 
 func TestDiscoverOrder(t *testing.T) {
 	isolate(t)
-	base := t.TempDir()
+	// DiscoverFrom resolves symlinks, and macOS's temp directory is under one
+	// (/var -> /private/var).
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	beside := filepath.Join(base, "beside")
 	touch(t, filepath.Join(beside, "turf"))

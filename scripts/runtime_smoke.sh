@@ -80,7 +80,7 @@ if "$TURF" "$WORKDIR/hello.tr" -o "$WORKDIR/hello" > "$WORKDIR/hello.compile.log
 else
   fail "compile failed"; cat "$WORKDIR/hello.compile.log"
 fi
-if nm "$WORKDIR/hello" 2>/dev/null | grep -q "T turf_rt_init"; then
+if nm "$WORKDIR/hello" 2>/dev/null | grep -qE "T _?turf_rt_init"; then
   pass "turf_rt_init linked in (nm)"
 else
   fail "turf_rt_init not found in linked binary"

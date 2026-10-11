@@ -281,7 +281,7 @@ ABI=$(sed -n 's/^runtime //p' "$WORK/tv.out")
 # (RuntimeAbiSymbol), so only a check against the real archive keeps them
 # from drifting apart.
 if [ -f "$ROOT/lib/libturfrt.a" ] && command -v nm > /dev/null 2>&1; then
-  nm "$ROOT/lib/libturfrt.a" 2> /dev/null | grep -qE " T $ABI\$" || fail "lib/libturfrt.a does not define the ABI symbol '$ABI' that turfc --version reports"
+  nm "$ROOT/lib/libturfrt.a" 2> /dev/null | grep -qE " T _?$ABI\$" || fail "lib/libturfrt.a does not define the ABI symbol '$ABI' that turfc --version reports"
 fi
 # turf version shows turfc's extra lines too.
 grep -qE '^  llvm ' "$WORK/v.turf.out" || fail "turf version does not show turfc's llvm line"
