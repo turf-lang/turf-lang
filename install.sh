@@ -4,6 +4,7 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/turf-lang/turf-lang/master/install.sh | sh
 #   sh install.sh --version v2.0.0 --prefix ~/tools/turf --no-modify-path
+#   sh install.sh --smart          # the build that can run a --smart model
 #   sh install.sh --uninstall
 #
 # What it does: finds the archive for this machine in the release's
@@ -20,6 +21,12 @@
 # Options:
 #   --version V        install release V (v2.0.0 or 2.0.0); default: the latest
 #   --prefix DIR       install here instead of ~/.turf  (env: TURF_INSTALL_DIR)
+#   --smart            install the "smart" build: the same compiler with the
+#                      runtime for `turf file.tr --smart` in it, and a models/
+#                      folder for the ONE .gguf model you choose (none is
+#                      shipped or downloaded; see models/README.txt). Without
+#                      this flag you get the plain build, where --smart only
+#                      says it is not included.  (env: TURF_INSTALL_SMART=1)
 #   --no-modify-path   edit no start-up file; print the line to add instead
 #   --uninstall        remove what this script installed and its PATH block
 #   -h, --help         this text
@@ -27,25 +34,35 @@
 # Environment: TURF_INSTALL_BASE_URL points at a mirror, or a directory of
 # `download/<tag>/...` files (file:// works), instead of
 # https://github.com/turf-lang/turf-lang/releases. TURF_INSTALL_PLATFORM
-# overrides platform detection (linux-x86_64, macos-arm64).
+# overrides platform detection (linux-x86_64, linux-arm64, macos-arm64).
 #
 # Uninstall removes exactly what is listed in <prefix>/.turf-install and the
 # marked PATH blocks; it never touches your projects or the package cache
-# (~/.cache/turf, or $TURF_CACHE_DIR), which is disposable and not ours.
+# (~/.cache/turf, or $TURF_CACHE_DIR), which is disposable and not ours. A
+# model you put in <prefix>/models is yours too: installing over an existing
+# install and uninstalling both leave it where it is.
 
 set -eu
 
+# The oldest glibc the Linux archives run on: that of the image CI builds them
+# in (ubuntu:22.04, build-archives.yml), checked by release_deps_check.sh.
+# Only used in a message here.
+GLIBC_FLOOR=2.34
 BASE_URL="${TURF_INSTALL_BASE_URL:-https://github.com/turf-lang/turf-lang/releases}"
 PREFIX="${TURF_INSTALL_DIR:-$HOME/.turf}"
 VERSION=""
 MODIFY_PATH=1
 UNINSTALL=0
+SMART=0
+[ "${TURF_INSTALL_SMART:-0}" = 1 ] && SMART=1
 
 MARK_BEGIN="# >>> turf >>>"
 MARK_END="# <<< turf <<<"
 # What a release archive puts at its top level; install and uninstall touch
 # these names and nothing else under the prefix.
-OWNED="bin lib docs share LICENSE README.md"
+# (grammars is the smart archive's; models/ is deliberately NOT here: what is
+# in it is the user's.)
+OWNED="bin lib docs share grammars LICENSE README.md"
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'install.sh: %s\n' "$*" >&2; exit 1; }
@@ -54,9 +71,10 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --version) [ $# -ge 2 ] || die "--version needs a value"; VERSION="$2"; shift 2 ;;
     --prefix) [ $# -ge 2 ] || die "--prefix needs a directory"; PREFIX="$2"; shift 2 ;;
+    --smart) SMART=1; shift ;;
     --no-modify-path) MODIFY_PATH=0; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
-    -h|--help) sed -n '3,34p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '3,44p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) printf 'install.sh: unknown option %s (try --help)\n' "$1" >&2; exit 2 ;;
   esac
 done
@@ -150,6 +168,11 @@ if [ "$UNINSTALL" = 1 ]; then
     [ -e "$PREFIX/$name" ] && rm -rf "${PREFIX:?}/$name" && say "removed $PREFIX/$name"
   done
   rm -f "$manifest"
+  # models/: our README goes; a model in it is the user's and stays.
+  if [ -d "$PREFIX/models" ]; then
+    rm -f "$PREFIX/models/README.txt"
+    rmdir "$PREFIX/models" 2>/dev/null || say "kept $PREFIX/models (your model files are in it)"
+  fi
   rmdir "$PREFIX" 2>/dev/null || true
   for f in $(all_rc_files); do
     if [ -f "$f" ] && grep -qF "$MARK_BEGIN" "$f" 2>/dev/null; then
@@ -172,9 +195,10 @@ else
   os=$(uname -s); arch=$(uname -m)
   case "$os/$arch" in
     Linux/x86_64|Linux/amd64) PLATFORM=linux-x86_64 ;;
+    Linux/aarch64|Linux/arm64) PLATFORM=linux-arm64 ;;
     Darwin/arm64|Darwin/aarch64) PLATFORM=macos-arm64 ;;
     MINGW*|MSYS*|CYGWIN*) die "this is Windows; use install.ps1 from PowerShell instead (irm https://raw.githubusercontent.com/turf-lang/turf-lang/master/install.ps1 | iex), or download the .zip from $BASE_URL." ;;
-    *) die "there is no TurfLang release for $os on $arch. Supported: Linux x86-64, macOS arm64 (Windows x86-64 from the .zip)." ;;
+    *) die "there is no TurfLang release for $os on $arch. Supported: Linux x86-64 and arm64, macOS arm64 (Windows x86-64 from the .zip)." ;;
   esac
 fi
 
@@ -218,30 +242,48 @@ command -v tar >/dev/null 2>&1 || die "need tar to unpack the release."
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT INT TERM
 
-say "[1/4] Looking up the release ($DL)"
+say "[1/5] Looking up the release ($DL)"
 fetch "$DL/checksums.txt" "$WORK/checksums.txt" || die "could not download $DL/checksums.txt (is there a release${VERSION:+ $VERSION}?)"
 
 # The one line for this platform. `-linux-x86_64.tar.gz` cannot match
 # `-linux-arch-x86_64.tar.gz`, so the Arch build is never picked by accident.
-LINE=$(awk -v p="$PLATFORM" '{ f = $2; sub(/^\*/, "", f) } f ~ ("^turf-v.*-" p "\\.tar\\.gz$") { print $1, f }' "$WORK/checksums.txt")
-[ -n "$LINE" ] || die "this release has no $PLATFORM archive. checksums.txt lists: $(awk '{print $2}' "$WORK/checksums.txt" | tr '\n' ' ')"
-[ "$(printf '%s\n' "$LINE" | wc -l | tr -d ' ')" = 1 ] || die "this release lists more than one $PLATFORM archive; refusing to guess."
+# The smart build is its own archive, <platform>-smart; `-macos-arm64.tar.gz`
+# cannot match `-macos-arm64-smart.tar.gz` either, so neither is picked for
+# the other.
+WHAT="$PLATFORM"
+[ "$SMART" = 1 ] && WHAT="$PLATFORM-smart"
+LINE=$(awk -v p="$WHAT" '{ f = $2; sub(/^\*/, "", f) } f ~ ("^turf-v.*-" p "\\.tar\\.gz$") { print $1, f }' "$WORK/checksums.txt")
+[ -n "$LINE" ] || die "this release has no $WHAT archive. checksums.txt lists: $(awk '{print $2}' "$WORK/checksums.txt" | tr '\n' ' ')"
+[ "$(printf '%s\n' "$LINE" | wc -l | tr -d ' ')" = 1 ] || die "this release lists more than one $WHAT archive; refusing to guess."
 WANT=$(printf '%s\n' "$LINE" | awk '{print $1}')
 ARCHIVE=$(printf '%s\n' "$LINE" | awk '{print $2}')
 
-say "[2/4] Downloading $ARCHIVE"
+say "[2/5] Downloading $ARCHIVE"
 fetch "$DL/$ARCHIVE" "$WORK/$ARCHIVE" progress || die "could not download $DL/$ARCHIVE"
 GOT=$(sha256_of "$WORK/$ARCHIVE")
 if [ "$GOT" != "$WANT" ]; then
   die "SHA-256 mismatch for $ARCHIVE: the release says $WANT, the download is $GOT. Nothing was installed."
 fi
-say "[3/4] SHA-256 verified."
+say "[3/5] SHA-256 verified."
 
-say "[4/4] Unpacking into $PREFIX"
+say "[4/5] Unpacking"
 mkdir "$WORK/unpacked"
 tar -xzf "$WORK/$ARCHIVE" -C "$WORK/unpacked"
 SRC=$(ls -d "$WORK"/unpacked/turf-v* 2>/dev/null | head -n 1)
 [ -n "$SRC" ] && [ -x "$SRC/bin/turf" ] && [ -x "$SRC/bin/turfc" ] || die "$ARCHIVE does not have the expected layout (bin/turf, bin/turfc); nothing was installed."
+
+say "[5/5] Checking the compiler starts, and installing into $PREFIX"
+# The compiler must start on this machine before anything is replaced. The
+# usual reason it does not: a Linux system whose C library is older than the
+# one the release was built against (see GLIBC_FLOOR below).
+if ! "$SRC/bin/turfc" --version > "$WORK/turfc-version.out" 2>&1; then
+  WHY=$(head -n 1 "$WORK/turfc-version.out")
+  HINT=""
+  case "$PLATFORM" in
+    linux-*) HINT=" TurfLang's Linux release needs glibc $GLIBC_FLOOR or newer (Ubuntu 22.04, Debian 12, RHEL 9, Amazon Linux 2023 and later); this system has: $( (ldd --version 2>&1 || true) | head -n 1)." ;;
+  esac
+  die "the compiler in $ARCHIVE does not start on this system (${WHY:-no output}).$HINT Nothing was installed."
+fi
 
 # ---- install ----------------------------------------------------------------
 
@@ -264,6 +306,14 @@ for name in $OWNED; do
   fi
 done
 
+# The smart archive's models/ holds only a README. The folder under the prefix
+# is created if it is not there and never replaced: a model already in it
+# survives an upgrade, and a switch to the plain build and back.
+if [ -d "$SRC/models" ]; then
+  mkdir -p "$PREFIX/models"
+  cp "$SRC/models/README.txt" "$PREFIX/models/README.txt"
+fi
+
 INSTALLED=$("$PREFIX/bin/turfc" --version 2>/dev/null | head -n 1 || true)
 {
   printf 'archive=%s\n' "$ARCHIVE"
@@ -271,6 +321,22 @@ INSTALLED=$("$PREFIX/bin/turfc" --version 2>/dev/null | head -n 1 || true)
 } > "$PREFIX/.turf-install"
 
 say "Installed $INSTALLED into $PREFIX"
+if [ "$SMART" = 1 ]; then
+  N=$(find "$PREFIX/models" -maxdepth 1 \( -type f -o -type l \) -iname '*.gguf' ! -name '.*' 2>/dev/null | wc -l | tr -d ' ')
+  say
+  say "This is the smart build. --smart runs the ONE .gguf model in:"
+  say "  $PREFIX/models"
+  case "$N" in
+    0) say "There is none yet, so --smart will show the compiler's own diagnostics until you add one."
+       say "Recommended (about 1 GB on disk, about 1.5 GB of RAM while it works on an error):"
+       say "  qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
+       say "  https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF" ;;
+    1) say "It has one model, so --smart is ready." ;;
+    *) say "It has $N models. --smart uses none when there is more than one: leave exactly one there." ;;
+  esac
+  say "See $PREFIX/models/README.txt."
+  say
+fi
 
 # ---- PATH -------------------------------------------------------------------
 

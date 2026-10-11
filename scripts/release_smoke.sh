@@ -47,6 +47,7 @@ done
 
 case "$(uname -s)/$(uname -m)" in
   Linux/x86_64) PLATFORM=linux-x86_64 ;;
+  Linux/aarch64|Linux/arm64) PLATFORM=linux-arm64 ;;
   Darwin/arm64) PLATFORM=macos-arm64 ;;
   *) echo "SKIP (no install.sh archive for $(uname -s)/$(uname -m))"; exit 0 ;;
 esac
@@ -79,6 +80,11 @@ else
     || { echo "FAIL: packaging: $(cat "$WORK/package.err")"; exit 1; }
 fi
 ARCHIVE_FILE=$(cd "$REL" && ls turf-v*.tar.gz)
+# The "smart" archive (package_release.sh --smart) is told by its name. It is
+# installed with install.sh --smart and has checks of its own below; a plain
+# archive is checked for NOT having any of it.
+SMART=0
+case "$ARCHIVE_FILE" in *-smart.tar.gz) SMART=1 ;; esac
 cat "$REL"/*.sha256 > "$REL/checksums.txt"
 (cd "$REL" && { sha256sum -c "$ARCHIVE_FILE.sha256" >/dev/null 2>&1 || shasum -a 256 -c "$ARCHIVE_FILE.sha256" >/dev/null 2>&1; }) \
   && pass "the .sha256 file verifies the archive" || fail "the .sha256 file does not verify the archive"
@@ -89,6 +95,14 @@ for want in bin/turf bin/turfc lib/libturfrt.a lib/std/core/char.tr docs/errors/
             docs/slm/syntax_card.txt share/turf/examples/plotter/turf.toml LICENSE README.md; do
   printf '%s\n' "$LISTING" | grep -qx "$TOP/$want" && pass "contains $want" || fail "archive lacks $want"
 done
+if [ "$SMART" = 1 ]; then
+  for want in grammars/slm_suggestion.gbnf models/README.txt; do
+    printf '%s\n' "$LISTING" | grep -qx "$TOP/$want" && pass "contains $want" || fail "the smart archive lacks $want"
+  done
+else
+  printf '%s\n' "$LISTING" | grep -qE "^$TOP/(models|grammars)/" && fail "a plain archive has models/ or grammars/" || pass "no models/ or grammars/ in a plain archive"
+fi
+printf '%s\n' "$LISTING" | grep -qi '\.gguf$' && fail "a model file is in the archive (none is ever shipped)" || pass "no model file in the archive"
 printf '%s\n' "$LISTING" | grep -q "libturfrt_asan" && fail "the sanitizer runtime is in the archive" || pass "no sanitizer runtime"
 printf '%s\n' "$LISTING" | grep -qE "^$TOP/(turf|turfc)$" && fail "a binary sits at the archive top level (the pre-REL-003 layout)" || pass "binaries only in bin/"
 
@@ -101,7 +115,10 @@ else
   fail "tag check failed for the wrong reason: $(cat "$WORK/tag.err")"
 fi
 
-# Package recipes are generated from the same checksums install.sh reads.
+# Package recipes are generated from the same checksums install.sh reads. They
+# are for the plain archives; a release directory holding only a smart one has
+# nothing for them, so these two checks are the plain archive's.
+if [ "$SMART" = 0 ]; then
 ./scripts/gen_recipes.sh --checksums "$REL/checksums.txt" --version "$TAG" --out "$WORK/recipes" > "$WORK/recipes.out" 2>&1 \
   && grep -q "$(awk '{print $1}' "$REL/$ARCHIVE_FILE.sha256")" "$WORK/recipes"/homebrew/turf.rb \
   && pass "gen_recipes.sh writes a formula carrying the archive's SHA-256" \
@@ -116,8 +133,11 @@ printf '%s *turf-%s-windows-x86_64.zip\n' "$(printf z | sha256sum | cut -d' ' -f
   && pass "gen_recipes.sh reads '<hash> *<name>' lines (Scoop manifest and formula both written)" \
   || fail "gen_recipes.sh with starred names: $(cat "$WORK/recipes-star.out")"
 
+fi
+
 # ---- install ----------------------------------------------------------------
 echo "== install.sh"
+[ "$SMART" = 1 ] && export TURF_INSTALL_SMART=1
 export TURF_INSTALL_BASE_URL="file://$WORK/release"
 export TURF_INSTALL_PLATFORM="$PLATFORM"
 HOME_DIR="$WORK/home"
@@ -218,6 +238,49 @@ printf '%s\n' "$OUT" | grep -qF "distance squared: 25" && pass "a project with a
 # An error explanation reads docs/ from the install root.
 OUT=$(USERENV turf explain E001 2>&1 | strip)
 [ "$(printf '%s\n' "$OUT" | wc -l)" -gt 3 ] && pass "turf explain reads the installed docs/errors" || fail "turf explain E001 was one line: $OUT"
+
+# ---- --smart ----------------------------------------------------------------
+echo "== --smart"
+mkdir -p "$WORK/smart" && cd "$WORK/smart" || exit 1
+printf 'fn main(): int {\n    mut total: int = 0;\n    total = "five";\n    return 0;\n}\n' > bad.tr
+# HOME is a fresh one so no earlier run's suggestion cache answers for the model.
+smart_compile() { env -i HOME="$WORK/smarthome" PATH="$PREFIX/bin:$SYSPATH" TERM=dumb turfc bad.tr --smart -o bad 2>&1 | strip; }
+USERENV turfc --version | grep -qx "smart $([ "$SMART" = 1 ] && echo built-in || echo not-built)" \
+  && pass "turfc --version says whether --smart's runtime is in it" || fail "turfc --version: no matching 'smart' line"
+if [ "$SMART" = 0 ]; then
+  OUT=$(smart_compile)
+  printf '%s\n' "$OUT" | grep -q "note: --smart is not part of this TurfLang build" && pass "--smart in the plain build says it is not included" || fail "plain --smart: $OUT"
+  printf '%s\n' "$OUT" | grep -q "E066" && pass "and the compiler's own diagnostic follows" || fail "plain --smart lost the diagnostic: $OUT"
+  [ ! -e "$PREFIX/models" ] && pass "the plain install has no models/" || fail "the plain install has a models/ folder"
+else
+  grep -q "This is the smart build" "$WORK/install1.out" && grep -qF "$PREFIX/models" "$WORK/install1.out" \
+    && pass "install.sh --smart says where the model goes" || fail "install.sh --smart did not name the models folder"
+  [ -f "$PREFIX/models/README.txt" ] && [ -f "$PREFIX/grammars/slm_suggestion.gbnf" ] && pass "models/README.txt and grammars/ are installed" || fail "models/README.txt or grammars/ is missing"
+  PREFIX_REAL=$(cd "$PREFIX" && pwd -P)
+  OUT=$(smart_compile)
+  printf '%s\n' "$OUT" | grep -qF "note: --smart has no model to run. Put one .gguf file in $PREFIX_REAL/models" && pass "no model: --smart says so and names the folder" || fail "no model: $OUT"
+  printf '%s\n' "$OUT" | grep -q "E066" && pass "no model: the compiler's own diagnostic follows" || fail "no model lost the diagnostic: $OUT"
+  # Not real models: which file is chosen is decided before any is opened.
+  echo x > "$PREFIX/models/one.gguf"; echo x > "$PREFIX/models/two.gguf"
+  OUT=$(smart_compile)
+  printf '%s\n' "$OUT" | grep -qF "uses exactly one model and found 2" && printf '%s\n' "$OUT" | grep -qF "(one.gguf, two.gguf)" \
+    && pass "two models: --smart uses neither and lists them" || fail "two models: $OUT"
+  printf '%s\n' "$OUT" | grep -q "E066" && pass "two models: the compiler's own diagnostic follows" || fail "two models lost the diagnostic: $OUT"
+  rm "$PREFIX/models/two.gguf"
+  OUT=$(smart_compile)
+  printf '%s\n' "$OUT" | grep -q "has no model\|exactly one model" && fail "one model: still refused: $OUT" || pass "one model: it is the one chosen"
+  printf '%s\n' "$OUT" | grep -q "E066" && pass "a model that does not load still leaves the compiler's diagnostic" || fail "a bad model lost the diagnostic: $OUT"
+  # The model is the user's: an upgrade and an uninstall both leave it.
+  run_installer --version "$TAG" > "$WORK/install3.out" 2>&1 || fail "reinstall failed: $(tail -n 3 "$WORK/install3.out")"
+  [ -f "$PREFIX/models/one.gguf" ] && pass "installing again keeps the model" || fail "the model was removed by a reinstall"
+  grep -q "It has one model, so --smart is ready" "$WORK/install3.out" && pass "install.sh reports the model it found" || fail "install.sh did not report the model: $(tail -n 8 "$WORK/install3.out")"
+  run_installer --uninstall > "$WORK/uninstall0.out" 2>&1 || fail "uninstall with a model failed: $(cat "$WORK/uninstall0.out")"
+  [ -f "$PREFIX/models/one.gguf" ] && [ ! -e "$PREFIX/bin" ] && [ ! -e "$PREFIX/models/README.txt" ] && grep -q "kept $PREFIX/models" "$WORK/uninstall0.out" \
+    && pass "uninstall removes TurfLang and keeps the model" || fail "uninstall with a model: $(cat "$WORK/uninstall0.out"); left: $(ls -A "$PREFIX" 2>/dev/null)"
+  # Back to a clean install with no model, for the uninstall checks below.
+  rm -rf "$PREFIX/models"
+  run_installer --version "$TAG" > "$WORK/install4.out" 2>&1 || fail "install after uninstall failed: $(tail -n 3 "$WORK/install4.out")"
+fi
 
 # ---- uninstall --------------------------------------------------------------
 echo "== uninstall"

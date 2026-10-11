@@ -32,6 +32,10 @@
 #            not needed for it. Remove those two lines if the owner disagrees.
 #            libresolv is added for the Go front end (turf), which cannot drop it;
 #            libz and libncurses for a static LLVM (zlib and terminfo are the OS's).
+#            A SMART archive (its name ends -smart) may also use the frameworks
+#            ggml's Metal and Accelerate backends call, which are the OS's too:
+#            Accelerate, Metal, MetalKit, Foundation, CoreFoundation, and libobjc.
+#            The plain archive may not: it has no reason to.
 #   windows  KERNEL32 KERNELBASE NTDLL UCRTBASE api-ms-win-* WS2_32 ADVAPI32,
 #            plus ole32 shell32 bcrypt version psapi (what a static LLVM still
 #            imports). msvcrt.dll is NOT allowed: the target is UCRT (Windows
@@ -71,6 +75,9 @@ if [ -z "$PLATFORM" ]; then
     *-windows-*) PLATFORM="windows-${base#*-windows-}" ;;
   esac
 fi
+# "macos-arm64-smart" is the smart archive of macos-arm64.
+SMART=0
+case "$PLATFORM" in *-smart) SMART=1; PLATFORM=${PLATFORM%-smart} ;; esac
 case "$PLATFORM" in
   linux-*|macos-*|windows-*) ;;
   *) echo "release_deps_check.sh: cannot tell the platform from '$PLATFORM'; pass --platform" >&2; exit 2 ;;
@@ -132,7 +139,14 @@ allowed() {
         /usr/lib/libresolv.9.dylib) return 0 ;;
         # What a static LLVM links on macOS: zlib and terminfo, both part of the OS.
         /usr/lib/libz.1.dylib|/usr/lib/libncurses.5.4.dylib) return 0 ;;
-      esac ;;
+      esac
+      if [ "$SMART" = 1 ]; then
+        case "$d" in
+          /System/Library/Frameworks/Accelerate.framework/*|/System/Library/Frameworks/Metal.framework/*) return 0 ;;
+          /System/Library/Frameworks/MetalKit.framework/*|/System/Library/Frameworks/Foundation.framework/*) return 0 ;;
+          /System/Library/Frameworks/CoreFoundation.framework/*|/usr/lib/libobjc.A.dylib) return 0 ;;
+        esac
+      fi ;;
     windows-*)
       local l
       l=$(printf '%s' "$d" | tr '[:upper:]' '[:lower:]')
@@ -155,6 +169,17 @@ case "$PLATFORM" in
   windows-*) command -v llvm-readobj >/dev/null 2>&1 || command -v objdump >/dev/null 2>&1 || TOOL_CHECK="llvm-readobj or objdump" ;;
 esac
 [ -z "$TOOL_CHECK" ] || { echo "release_deps_check.sh: $TOOL_CHECK not found; cannot inspect a $PLATFORM archive here" >&2; exit 2; }
+
+# The newest glibc a Linux binary may ask for. The archives are built in
+# ubuntu:22.04 (build-archives.yml) and need 2.34; a binary that asks for more
+# was built somewhere newer and will not start on the systems the release
+# promises. install.sh's GLIBC_FLOOR is the same number: change them together.
+GLIBC_FLOOR=2.34
+# The highest GLIBC_x.y symbol version the file imports, or "" for a static one.
+glibc_needed() {
+  { readelf -W --version-info "$1" 2>/dev/null || objdump -T "$1" 2>/dev/null; } |
+    grep -o 'GLIBC_[0-9][0-9.]*' | sed 's/^GLIBC_//' | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1
+}
 
 echo "== $(basename "$ARCHIVE") ($PLATFORM) =="
 BAD=0
@@ -193,6 +218,19 @@ while IFS= read -r f; do
       BAD=$((BAD + 1))
     fi
   done <<< "$deps"
+  case "$PLATFORM" in
+    linux-*)
+      need=$(glibc_needed "$f")
+      if [ -n "$need" ]; then
+        newest=$(printf '%s\n%s\n' "$need" "$GLIBC_FLOOR" | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)
+        if [ "$newest" = "$GLIBC_FLOOR" ]; then
+          echo "    ok           needs glibc $need (floor $GLIBC_FLOOR)"
+        else
+          echo "    NOT ALLOWED  needs glibc $need, newer than the floor $GLIBC_FLOOR (build in the older image)"
+          BAD=$((BAD + 1))
+        fi
+      fi ;;
+  esac
 done < <(find "$BIN" -maxdepth 1 -type f | sort)
 
 if [ "$CHECKED" -eq 0 ]; then

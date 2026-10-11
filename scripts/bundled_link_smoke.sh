@@ -55,6 +55,7 @@ skip() {
 # empty makes the link fail (to prove a broken runtime is reported, not hidden).
 case "$(uname -s)/$(uname -m)" in
   Linux/x86_64) PLATFORM=linux-x86_64; REQUIRED_FILE=crt1.o; BREAK_FILE=libc.a ;;
+  Linux/aarch64|Linux/arm64) PLATFORM=linux-arm64; REQUIRED_FILE=crt1.o; BREAK_FILE=libc.a ;;
   Darwin/arm64) PLATFORM=macos-arm64; REQUIRED_FILE=libSystem.tbd; BREAK_FILE=libSystem.tbd ;;
   *) skip "no bundled link for $(uname -s)/$(uname -m) yet" ;;
 esac
@@ -77,7 +78,7 @@ if [ -n "$ARCHIVE" ]; then
   RT="$INST/lib/rt/$PLATFORM"
   REAL_RUNTIME=1
 else
-  [ "$PLATFORM" = linux-x86_64 ] || skip "the stand-in runtime is Linux-only; pass --archive on this platform"
+  case "$PLATFORM" in linux-*) ;; *) skip "the stand-in runtime is Linux-only; pass --archive on this platform" ;; esac
   [ -x "$TURFC" ] || skip "$TURFC not built"
   command -v cc >/dev/null 2>&1 || skip "no cc here to take a stand-in C runtime from"
   # An install tree: bin/turfc beside lib/ (copied, not symlinked: the compiler
@@ -133,7 +134,7 @@ compile() { PATH="$DECOY:$PATH" "$INST/bin/turfc" "$@" > out.log 2>&1; }
 # macOS one can only load the system's libSystem.
 is_self_contained() {
   case "$PLATFORM" in
-    linux-x86_64) ! readelf -lW "$1" 2>/dev/null | grep -q INTERP ;;
+    linux-*) ! readelf -lW "$1" 2>/dev/null | grep -q INTERP ;;
     macos-arm64) [ "$(otool -L "$1" | sed 1d | grep -vc 'libSystem')" = 0 ] ;;
   esac
 }

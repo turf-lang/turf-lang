@@ -3,6 +3,7 @@
 #
 #   irm https://raw.githubusercontent.com/turf-lang/turf-lang/master/install.ps1 | iex
 #   powershell -ExecutionPolicy Bypass -File install.ps1 -Version v2.0.0 -Prefix D:\tools\turf -NoModifyPath
+#   powershell -ExecutionPolicy Bypass -File install.ps1 -Smart
 #   powershell -ExecutionPolicy Bypass -File install.ps1 -Uninstall
 #
 # What it does: finds the archive for this machine in the release's checksums.txt,
@@ -20,6 +21,11 @@
 #   -Version V        install release V (v2.0.0 or 2.0.0); default: the latest
 #                     (env: TURF_INSTALL_VERSION)
 #   -Prefix DIR       install here instead of %LOCALAPPDATA%\turf  (env: TURF_INSTALL_DIR)
+#   -Smart            install the "smart" build: the same compiler with the runtime for
+#                     `turf file.tr --smart` in it, and a models\ folder for the ONE
+#                     .gguf model you choose (none is shipped or downloaded; see
+#                     models\README.txt). Without it you get the plain build, where
+#                     --smart only says it is not included. (env: TURF_INSTALL_SMART=1)
 #   -NoModifyPath     change no PATH; print the command to run instead
 #   -Uninstall        remove what this script installed and its PATH entry
 #   -Help             this text
@@ -33,7 +39,8 @@
 #
 # Uninstall removes exactly what is listed in <prefix>\.turf-install and the one PATH
 # entry; it never touches your projects or the package cache (%LOCALAPPDATA%\turf-cache,
-# or $env:TURF_CACHE_DIR), which is disposable and not ours.
+# or $env:TURF_CACHE_DIR), which is disposable and not ours. A model you put in
+# <prefix>\models is yours too: installing over an install and uninstalling leave it.
 #
 # Windows PowerShell 5.1 (the one in every Windows 10/11) and PowerShell 7 both run this.
 # This file is ASCII only on purpose: 5.1 reads a BOM-less file as the ANSI code page.
@@ -41,6 +48,7 @@
 param(
   [string]$Version = '',
   [string]$Prefix = '',
+  [switch]$Smart,
   [switch]$NoModifyPath,
   [switch]$Uninstall,
   [switch]$Help
@@ -48,7 +56,9 @@ param(
 
 # What a release archive puts at its top level; install and uninstall touch these names
 # and nothing else under the prefix.
-$script:Owned = @('bin', 'lib', 'docs', 'share', 'LICENSE', 'README.md')
+# (grammars is the smart archive's; models\ is deliberately NOT here: what is in it is
+# the user's.)
+$script:Owned = @('bin', 'lib', 'docs', 'share', 'grammars', 'LICENSE', 'README.md')
 
 function Say([string]$Text = '') { Write-Host $Text }
 
@@ -107,20 +117,58 @@ public static extern System.IntPtr SendMessageTimeout(System.IntPtr hWnd, uint M
 
 # ---- download ---------------------------------------------------------------------------
 
-function Get-RemoteFile([string]$Url, [string]$Dest) {
+# Get-RemoteFile URL DEST [-Progress]: quiet by default. With -Progress and a console to
+# write to, one line that is redrawn as the bytes arrive ("  31 MB of 52 MB (59%)"): the
+# archive is tens of MB, and a silent download looks exactly like a hang. Output that is
+# redirected (a CI log, a file) gets no bar, since a line redrawn a hundred times is
+# noise there, and the step lines around it still say what is happening. The copy is done
+# by hand, not with Invoke-WebRequest, whose own progress display makes a download in
+# Windows PowerShell 5.1 many times slower.
+function Get-RemoteFile([string]$Url, [string]$Dest, [switch]$Progress) {
   # PowerShell 5.1 on older Windows 10 builds defaults to TLS 1.0/1.1, which GitHub refuses.
   try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072 } catch { }
+  $show = $false
+  if ($Progress) { try { $show = -not [Console]::IsOutputRedirected } catch { } }
   $lastError = $null
   for ($try = 1; $try -le 3; $try++) {
-    $wc = New-Object System.Net.WebClient
+    $resp = $null; $in = $null; $out = $null
     try {
-      $wc.DownloadFile($Url, $Dest)
+      $resp = [Net.WebRequest]::Create($Url).GetResponse()
+      $total = $resp.ContentLength
+      $in = $resp.GetResponseStream()
+      $out = [IO.File]::Create($Dest)
+      $buf = New-Object byte[] 1048576
+      $done = [long]0
+      $shown = -1
+      while (($n = $in.Read($buf, 0, $buf.Length)) -gt 0) {
+        $out.Write($buf, 0, $n)
+        $done += $n
+        if ($show) {
+          $mb = [int][Math]::Floor($done / 1MB)
+          if ($mb -ne $shown) {
+            $shown = $mb
+            if ($total -gt 0) {
+              $line = '  {0} MB of {1} MB ({2}%)' -f $mb, [int][Math]::Ceiling($total / 1MB), [int][Math]::Floor(100 * $done / $total)
+            } else {
+              $line = '  {0} MB' -f $mb
+            }
+            Write-Host -NoNewline ("`r" + $line.PadRight(40))
+          }
+        }
+      }
+      if ($show) {
+        # The last redraw was at a whole megabyte; finish on the real total.
+        Write-Host ("`r" + ('  {0} MB (100%)' -f [int][Math]::Ceiling($done / 1MB)).PadRight(40))
+      }
       return
     } catch {
+      if ($show) { Write-Host '' }
       $lastError = $_.Exception.Message
       if ($try -lt 3) { Start-Sleep -Seconds 2 }
     } finally {
-      $wc.Dispose()
+      if ($out) { $out.Dispose() }
+      if ($in) { $in.Dispose() }
+      if ($resp) { $resp.Close() }
     }
   }
   throw "could not download $Url ($lastError)"
@@ -146,6 +194,13 @@ function Invoke-Uninstall([string]$PrefixDir) {
     }
   }
   Remove-Item -LiteralPath $manifest -Force
+  # models\: our README goes; a model in it is the user's and stays.
+  $models = Join-Path $PrefixDir 'models'
+  if (Test-Path -LiteralPath $models) {
+    Remove-Item -LiteralPath (Join-Path $models 'README.txt') -Force -ErrorAction SilentlyContinue
+    if (@(Get-ChildItem -LiteralPath $models -Force).Count -eq 0) { Remove-Item -LiteralPath $models -Force }
+    else { Say "kept $models (your model files are in it)" }
+  }
   try { Remove-Item -LiteralPath $PrefixDir -ErrorAction Stop } catch { }   # only if empty
   if (Update-UserPath (Join-Path $PrefixDir 'bin') $false) {
     Send-EnvironmentChange
@@ -154,7 +209,7 @@ function Invoke-Uninstall([string]$PrefixDir) {
   Say 'TurfLang is uninstalled. Your projects and the package cache were not touched.'
 }
 
-function Invoke-Install([string]$PrefixDir, [string]$Ver, [bool]$EditPath) {
+function Invoke-Install([string]$PrefixDir, [string]$Ver, [bool]$EditPath, [bool]$WantSmart) {
   $base = 'https://github.com/turf-lang/turf-lang/releases'
   if ($env:TURF_INSTALL_BASE_URL) { $base = $env:TURF_INSTALL_BASE_URL.TrimEnd('/') }
 
@@ -168,6 +223,10 @@ function Invoke-Install([string]$PrefixDir, [string]$Ver, [bool]$EditPath) {
       throw "there is no TurfLang release for Windows on $arch. Supported: Windows x86-64."
     }
   }
+
+  # The smart build is its own archive, <platform>-smart; `-windows-x86_64.zip` cannot
+  # match `-windows-x86_64-smart.zip` either, so neither is picked for the other.
+  if ($WantSmart) { $platform = "$platform-smart" }
 
   if ($Ver) {
     $tag = $Ver
@@ -209,7 +268,7 @@ function Invoke-Install([string]$PrefixDir, [string]$Ver, [bool]$EditPath) {
 
     Say "[2/4] Downloading $archive"
     $zip = Join-Path $work $archive
-    Get-RemoteFile "$dl/$archive" $zip
+    Get-RemoteFile "$dl/$archive" $zip -Progress
     $got = Get-Sha256 $zip
     if ($got -ne $want) {
       throw "SHA-256 mismatch for ${archive}: the release says $want, the download is $got. Nothing was installed."
@@ -257,10 +316,37 @@ function Invoke-Install([string]$PrefixDir, [string]$Ver, [bool]$EditPath) {
       throw "could not move the new files into $PrefixDir ($why). The previous install (if any) was restored. If turf is running, close it and try again."
     }
 
+    # The smart archive's models\ holds only a README. The folder under the prefix is
+    # created if it is not there and never replaced: a model already in it survives an
+    # upgrade, and a switch to the plain build and back.
+    $srcModels = Join-Path $src 'models'
+    $models = Join-Path $PrefixDir 'models'
+    if (Test-Path -LiteralPath $srcModels) {
+      New-Item -ItemType Directory -Force -Path $models | Out-Null
+      Copy-Item -LiteralPath (Join-Path $srcModels 'README.txt') -Destination (Join-Path $models 'README.txt') -Force
+    }
+
     $installed = ''
     try { $installed = (@(& (Join-Path $PrefixDir 'bin\turfc.exe') --version 2>$null))[0] } catch { }
     [IO.File]::WriteAllText((Join-Path $PrefixDir '.turf-install'), "archive=$archive`ncompiler=$installed`n")
     Say "Installed $installed into $PrefixDir"
+    if ($WantSmart) {
+      $n = @(Get-ChildItem -LiteralPath $models -File -Filter '*.gguf' -ErrorAction SilentlyContinue).Count
+      Say ''
+      Say 'This is the smart build. --smart runs the ONE .gguf model in:'
+      Say "  $models"
+      if ($n -eq 0) {
+        Say "There is none yet, so --smart will show the compiler's own diagnostics until you add one."
+        Say 'Recommended (about 1 GB on disk, about 1.5 GB of RAM while it works on an error):'
+        Say '  qwen2.5-coder-1.5b-instruct-q4_k_m.gguf'
+        Say '  https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF'
+      } elseif ($n -eq 1) {
+        Say 'It has one model, so --smart is ready.'
+      } else {
+        Say "It has $n models. --smart uses none when there is more than one: leave exactly one there."
+      }
+      Say "See $(Join-Path $models 'README.txt')."
+    }
   } finally {
     Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
   }
@@ -290,7 +376,7 @@ function Invoke-Main {
 
   if ($Help) {
     $self = $PSCommandPath
-    if ($self) { Get-Content -LiteralPath $self | Select-Object -First 36 | ForEach-Object { $_ -replace '^# ?', '' } }
+    if ($self) { Get-Content -LiteralPath $self | Select-Object -First 43 | ForEach-Object { $_ -replace '^# ?', '' } }
     else { Say 'install.ps1: see the comment at the top of the file (https://github.com/turf-lang/turf-lang).' }
     return
   }
@@ -306,7 +392,9 @@ function Invoke-Main {
   $prefixDir = [IO.Path]::GetFullPath($prefixDir)
 
   if ($Uninstall) { Invoke-Uninstall $prefixDir; return }
-  Invoke-Install $prefixDir $ver (-not $NoModifyPath)
+  $wantSmart = [bool]$Smart
+  if (-not $wantSmart -and $env:TURF_INSTALL_SMART -eq '1') { $wantSmart = $true }
+  Invoke-Install $prefixDir $ver (-not $NoModifyPath) $wantSmart
 }
 
 try {
