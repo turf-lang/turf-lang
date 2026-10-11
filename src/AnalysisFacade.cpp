@@ -346,7 +346,16 @@ bool isAllowedTopLevelStatement(const ExprAST *AST) {
 // boundary instead of ending the compile.
 std::vector<std::unique_ptr<ExprAST>> parseEntryFile(std::size_t &PreludeCount,
                                                      bool SkipPrelude) {
-  getNextToken();
+  // The first token is lexed under a recovery guard too: a lexer error there
+  // (a file that starts with `0E`) used to raise with no guard armed, which
+  // calls exit() -- ending turf-lsp, or any host, instead of reporting a
+  // diagnostic (found by turf-fuzz's libFuzzer engine).
+  g_recoverActive = true;
+  if (setjmp(g_recoverJmp) == 0)
+    getNextToken();
+  else
+    SkipToNextTopLevelBoundary();
+  g_recoverActive = false;
 
   // Parsed before the prelude -- only here is the file's first token still
   // current -- but placed after it: preludeImportCount() promises a prefix.

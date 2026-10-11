@@ -812,6 +812,21 @@ static void testSkipPrelude() {
   CHECK(turf::analyze({{"bare.tr", Bare}}).succeeded());
 }
 
+// A lexer error in the very first token was raised before any recovery guard
+// was armed, so analyze() called exit() and took its host (turf-lsp) down.
+// Reaching the checks below at all is most of the test.
+static void testLexErrorInFirstToken() {
+  CurrentTest = "lex error in the first token";
+  for (const char *Source : {"0E\n", "0E\nfn main(): int {\n    return 0;\n}\n"}) {
+    auto R = turf::analyze({{"lex.tr", Source}});
+    CHECK(!R.succeeded());
+    CHECK(!R.diagnostics().empty());
+  }
+  // The next analysis is unaffected.
+  CHECK(turf::analyze({{"ok.tr", "fn main(): int {\n    return 0;\n}\n"}})
+            .succeeded());
+}
+
 static void testEmptyInput() {
   CurrentTest = "empty input";
   auto R = turf::analyze({});
@@ -2113,6 +2128,7 @@ int main() {
   testFlowAnalysisIsOptIn();
   testFlowWarningsAreInSourceOrder();
   testSkipPrelude();
+  testLexErrorInFirstToken();
   testEmptyInput();
   testVisibilityModifierPlacement();
   testPrivateSymbolAccess(Dir);
