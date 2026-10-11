@@ -514,6 +514,33 @@ target_compile_options(turfcore PRIVATE
 if(TURF_WIN_LINK_OPTIONS)
   target_link_options(turfcore PUBLIC ${TURF_WIN_LINK_OPTIONS})
 endif()
+
+# REL-004 stage 3: the COMPILER under ASan + UBSan. TURF_RT_SANITIZE (below)
+# sanitizes the runtime that compiled programs link; it says nothing about
+# turfc itself, whose parser/resolver/checker are recursive C++ over
+# pointer-linked trees (the classic home of a use-after-free that a normal
+# build survives by luck). The flags are PUBLIC on turfcore so turfc,
+# turf-api-tests and turf-lsp's own targets all link the sanitizer runtime.
+# -fno-sanitize=vptr: LLVM is built without RTTI, so its headers cannot be
+# vptr-checked. -fno-sanitize-recover makes a UBSan report fatal, so the test
+# runner sees a crash instead of a line in a log nobody reads. A separate
+# build directory (build_san/) is expected, not build/.
+# REL-004: gcov coverage of the compiler, to see what the test suite never
+# reaches (a gap finder, not a gate). turfc leaves through _Exit(), so
+# main.cpp flushes the counters itself when TURF_COVERAGE is defined.
+option(TURF_COVERAGE "Build the compiler with gcov instrumentation (--coverage)" OFF)
+if(TURF_COVERAGE)
+  target_compile_options(turfcore PUBLIC --coverage)
+  target_link_options(turfcore PUBLIC --coverage)
+  target_compile_definitions(turfcore PUBLIC TURF_COVERAGE)
+endif()
+option(TURF_SANITIZE_COMPILER "Build the compiler (turfcore, turfc, turf-api-tests) with -fsanitize=address,undefined" OFF)
+if(TURF_SANITIZE_COMPILER)
+  set(TURF_COMPILER_SAN_FLAGS -fsanitize=address,undefined -fno-sanitize=vptr
+      -fno-sanitize-recover=undefined -fno-omit-frame-pointer)
+  target_compile_options(turfcore PUBLIC ${TURF_COMPILER_SAN_FLAGS})
+  target_link_options(turfcore PUBLIC ${TURF_COMPILER_SAN_FLAGS})
+endif()
 target_link_libraries(turfcore PUBLIC
   ${LLAMA_IMPORTED_TARGETS}
   ${TURF_LLVM_LINK}
