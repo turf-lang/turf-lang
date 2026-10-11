@@ -265,6 +265,8 @@ Value *ArrayLiteralExprAST::codegen() {
   }
 
   const TurfType *ElemType = getExprType(Elements[0].get());
+  if (!ElemType)
+    llvm::report_fatal_error("Internal error: array literal element has no type");
   Type *LLVMElemTy = getLLVMType(ElemType);
   llvm::ArrayType *ArrTy = llvm::ArrayType::get(LLVMElemTy, Elements.size());
 

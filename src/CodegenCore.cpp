@@ -1252,6 +1252,13 @@ const TurfType *getExprType(const ExprAST *E) {
       Slot = makeArrayType(BaseArr->getElementTypePtr(), -1);
     return Slot.get();
   }
+  // `arr.length()` on any array or slice is the builtin `int` count
+  // (TypeChecker::visitMethodCall()). Without this case the type came back
+  // null, and an array literal whose first element was `a.length()` crashed
+  // ArrayLiteralExprAST::codegen() (found by turf-fuzz).
+  if (CopyCall && CopyCall->getMethod() == "length" && CopyCall->getArgs().empty() &&
+      dynamic_cast<const ::ArrayType *>(getExprType(CopyCall->getBase())))
+    return TurfInt().get();
   if (auto *ArrAcc = dynamic_cast<const ArrayAccessExprAST *>(E)) {
     // LANG-001: `operator[]` -- checked before the array/pointer/string
     // paths below for the identical reason TypeChecker::visitArrayAccess()
