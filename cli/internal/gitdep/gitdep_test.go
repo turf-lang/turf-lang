@@ -537,6 +537,21 @@ func TestGitMissingFromPath(t *testing.T) {
 	}
 }
 
+// macOS ships /usr/bin/git on every machine, as a shim that fails without the
+// developer tools; RequireGit must name that, not let xcrun's error through.
+func TestMacGitPlaceholderIsNamed(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS only")
+	}
+	t.Setenv("PATH", "/usr/bin")
+	t.Setenv("DEVELOPER_DIR", filepath.Join(t.TempDir(), "gone"))
+	err := RequireGit("jsonx", "/p/turf.toml")
+	mustFailWith(t, err, "/usr/bin/git is only macOS's placeholder", "xcode-select --install", "('jsonx' in /p/turf.toml)")
+	if macGitIsPlaceholder("/opt/homebrew/bin/git") {
+		t.Fatal("a git outside /usr/bin is a real one")
+	}
+}
+
 func TestNoCacheDirectoryIsReportedOnUse(t *testing.T) {
 	needGit(t)
 	t.Setenv("TURF_CACHE_DIR", "")

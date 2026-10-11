@@ -148,7 +148,7 @@ lock_has "tag dependency records the FULL commit" "$A1" "commit = \"$C1\""
 grep -Eq '^hash = "sha256:[0-9a-f]{64}"$' "$A1/turf.lock" || fail "tag dependency: hash is not sha256:<64 hex>"
 [ -f "$CACHE/src/jsonx-$C1/src/jsonx.tr" ] || fail "tag dependency: the tree is not at cache/src/jsonx-<commit>"
 [ -z "$(find "$CACHE/src" -name .git)" ] || fail "an extracted tree must never contain .git"
-[ "$(ls "$CACHE/git" | wc -l)" = 1 ] || fail "one URL should have exactly one mirror"
+[ "$(ls "$CACHE/git" | wc -l)" -eq 1 ] || fail "one URL should have exactly one mirror"
 grep -q "$CACHE/src/jsonx-$C1/src" "$A1/build/package-graph.json" || fail "the package graph should point at the extracted tree"
 
 # --- 16: building twice leaves turf.lock byte-identical ---------------------------
@@ -329,7 +329,7 @@ printf '[package]\nname = "app"\nversion = "0.1.0"\n\n[dependencies]\nalpha = { 
 printf 'import alpha;\nimport beta;\n\nfn main(): int {\n    return alpha::v() + beta::v();\n}\n' > "$D9/app/src/main.tr"
 t run_d9 "$D9/app" run
 expect_rc "a diamond on one URL and tag" run_d9 16
-[ "$(ls -d "$CACHE"/src/shared-* | wc -l)" = 1 ] || fail "a diamond must extract one tree"
+[ "$(ls -d "$CACHE"/src/shared-* | wc -l)" -eq 1 ] || fail "a diamond must extract one tree"
 [ "$(grep -c '^name = "shared"$' "$D9/app/turf.lock")" = 1 ] || fail "a diamond must be one lock entry"
 [ "$(strip "$WORK/_run_d9.out" | grep -c 'turf: fetching shared')" = 1 ] || fail "a diamond must fetch once"
 lock_has "path packages are in the lock too" "$D9/app" 'source = "path+../alpha"'
@@ -410,6 +410,15 @@ PATH=$NOGIT t nogit "$A1" build
 expect_rc "git not on PATH" nogit 1
 expect_out "git not on PATH" nogit "git dependencies need the 'git' program, which is not on PATH ('jsonx' in "
 expect_out "git not on PATH names the manifest" nogit "$A1/turf.toml"
+# macOS: /usr/bin/git exists on every Mac but is a shim for the developer tools.
+# With none installed turf must say so itself, not pass xcrun's error through.
+if [ "$(uname -s)" = Darwin ]; then
+  DEVELOPER_DIR=$WORK/no-developer-dir PATH=/usr/bin:/bin t macgit "$A1" build
+  expect_rc "macOS git placeholder" macgit 1
+  expect_out "macOS git placeholder is named" macgit "/usr/bin/git is only macOS's placeholder for the Xcode Command Line Tools"
+  expect_out "macOS git placeholder says how to install git" macgit 'xcode-select --install'
+  expect_out "macOS git placeholder names the manifest" macgit "$A1/turf.toml"
+fi
 # A project with no git dependency does not care.
 A13=$WORK/app13
 mkdir -p "$A13/src"

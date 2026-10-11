@@ -694,6 +694,16 @@ A git dependency is fetched once into a cache and extracted from there:
   turf: git dependencies need the 'git' program, which is not on PATH ('lib1' in …/app/turf.toml)
   ```
 
+  **On macOS, `git` is not there until you install it.** `/usr/bin/git` exists
+  on every Mac, but it is a placeholder for the Xcode Command Line Tools and
+  does nothing without them. Compiling and running Turf programs needs neither
+  Xcode nor a C toolchain; git dependencies need a real `git`
+  (`xcode-select --install`, or `brew install git`). `turf` tells the two apart:
+
+  ```
+  turf: git dependencies need the 'git' program, and /usr/bin/git is only macOS's placeholder for the Xcode Command Line Tools, which are not installed; install git with `xcode-select --install` or `brew install git` ('lib1' in …/app/turf.toml)
+  ```
+
   `turf` runs the system `git` and `turf.lock` records the URL exactly as you
   wrote it in the manifest.
 - **The tree is `git archive` output, not a checkout.** A path marked

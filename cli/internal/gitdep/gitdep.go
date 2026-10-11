@@ -27,6 +27,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -114,10 +115,36 @@ var hexRe = regexp.MustCompile(`^[0-9a-fA-F]{4,40}$`)
 // because of what happens to be cached is harder to debug than one that says
 // plainly what it needs.
 func RequireGit(name, file string) error {
-	if _, err := exec.LookPath("git"); err != nil {
+	path, err := exec.LookPath("git")
+	if err != nil {
 		return fmt.Errorf("git dependencies need the 'git' program, which is not on PATH ('%s' in %s)", name, file)
 	}
+	if macGitIsPlaceholder(path) {
+		return fmt.Errorf("git dependencies need the 'git' program, and %s is only macOS's placeholder for the Xcode Command Line Tools, which are not installed; install git with `xcode-select --install` or `brew install git` ('%s' in %s)", path, name, file)
+	}
 	return nil
+}
+
+// macGitIsPlaceholder reports whether path is macOS's /usr/bin/git with no
+// developer tools behind it. That file exists on every Mac, so LookPath finds
+// it, but it is a shim that forwards to Xcode or the Command Line Tools and,
+// with neither installed, fails with an xcrun error (and opens an install
+// dialog). The developer directory is looked up the way the shim does it,
+// without running the shim: DEVELOPER_DIR, else `xcode-select -p`.
+func macGitIsPlaceholder(path string) bool {
+	if runtime.GOOS != "darwin" || path != "/usr/bin/git" {
+		return false
+	}
+	dev := os.Getenv("DEVELOPER_DIR")
+	if dev == "" {
+		out, err := exec.Command("/usr/bin/xcode-select", "-p").Output()
+		if err != nil {
+			return true
+		}
+		dev = strings.TrimSpace(string(out))
+	}
+	st, err := os.Stat(dev)
+	return err != nil || !st.IsDir()
 }
 
 // ready checks what every operation needs before it can start: the git
