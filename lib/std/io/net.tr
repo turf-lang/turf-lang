@@ -72,11 +72,11 @@ import mem;
 // function everywhere and are bound directly. A socket is an `int` here, which
 // holds a Windows SOCKET too: its handles are small multiples of four.
 
-extern fn turf_net_startup(): int32;
-extern fn turf_net_socket(): int;
-extern fn turf_net_close(fd: int): int32;
-extern fn turf_net_reuseaddr(fd: int): int32;
-extern fn turf_net_sockaddr(a: int, b: int, c: int, d: int, port: int): void*;
+extern fn turfrt_net_startup(): int32;
+extern fn turfrt_net_socket(): int;
+extern fn turfrt_net_close(fd: int): int32;
+extern fn turfrt_net_reuseaddr(fd: int): int32;
+extern fn turfrt_net_sockaddr(a: int, b: int, c: int, d: int, port: int): void*;
 extern fn bind(fd: int, addr: void*, len: int): int32;
 extern fn listen(fd: int, backlog: int): int32;
 extern fn accept(fd: int, addr: void*, len: void*): int32;
@@ -95,7 +95,7 @@ extern fn gethostbyname(name: string): ptr;
 // They are the Linux values, and are exported API, so they are unchanged.
 // AF_INET and SOCK_STREAM are the same on every platform; SOL_SOCKET and
 // SO_REUSEADDR are NOT (0xffff and 4 on Windows and macOS). This module does not
-// use these two itself any more (turf_net_reuseaddr does the setsockopt), so
+// use these two itself any more (turfrt_net_reuseaddr does the setsockopt), so
 // only a caller passing them to its own FFI call needs to know.
 export immut AF_INET: int = 2;
 export immut SOCK_STREAM: int = 1;
@@ -171,7 +171,7 @@ pub error NetworkError {
 // "a.b.c.d"), since network byte order for a dotted-decimal address is
 // just left-to-right, same as buildSockAddr()'s own addrPart comment notes.
 pub fn resolve_hostname(host: string): !string {
-    turf_net_startup();
+    turfrt_net_startup();
     mut h: ptr = gethostbyname(host);
     if h == null {
         return NetworkError::ResolutionFailed;
@@ -214,7 +214,7 @@ pub fn resolve_hostname(host: string): !string {
 // where the first byte is a length. Allocated with calloc: release it with
 // mem::free(), as before.
 fn buildSockAddr(a: int, b: int, c: int, d: int, port: int): void* {
-    return turf_net_sockaddr(a, b, c, d, port);
+    return turfrt_net_sockaddr(a, b, c, d, port);
 }
 
 // ─── TcpConnection ───────────────────────────────────────────────────────
@@ -235,7 +235,7 @@ pub fn TcpConnection.new(fd: int): void {
 // (nothing listening) or a local socket() failure are both ordinary,
 // expected outcomes -- the caller decides how to recover.
 pub fn TcpConnection.connect(a: int, b: int, c: int, d: int, port: int) static: !TcpConnection {
-    mut fd: int = turf_net_socket();
+    mut fd: int = turfrt_net_socket();
     if !(fd >= 0) {
         return NetworkError::SocketCreationFailed;
     }
@@ -299,7 +299,7 @@ pub fn TcpConnection.close(): void {
     if self.fd < 0 {
         return;
     }
-    turf_net_close(self.fd);
+    turfrt_net_close(self.fd);
     self.fd = -1;
 }
 
@@ -322,12 +322,12 @@ pub fn TcpListener.new(fd: int): void {
 // handle (most programs will just treat it as fatal via `recover run {
 // sys::exit(1); }`, but that's the caller's call, not this function's).
 pub fn TcpListener.bind(port: int) static: !TcpListener {
-    mut fd: int = turf_net_socket();
+    mut fd: int = turfrt_net_socket();
     if !(fd >= 0) {
         return NetworkError::SocketCreationFailed;
     }
 
-    turf_net_reuseaddr(fd);
+    turfrt_net_reuseaddr(fd);
 
     mut addr: void* = buildSockAddr(0, 0, 0, 0, port);
     immut bindResult: int = bind(fd, addr, 16);
@@ -367,6 +367,6 @@ pub fn TcpListener.close(): void {
     if self.fd < 0 {
         return;
     }
-    turf_net_close(self.fd);
+    turfrt_net_close(self.fd);
     self.fd = -1;
 }

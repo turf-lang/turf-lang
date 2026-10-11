@@ -24,6 +24,12 @@ unsafe module;
 //     durations there is no cheap high-resolution primitive in this binding
 //     set; now_seconds() is the only wall-clock reference point available,
 //     at 1-second resolution.
+//   - (REL-008 stage 5) clock_ticks() no longer calls libc's clock(): it calls
+//     the runtime's turfrt_clock_us(), CPU time in microseconds on every platform.
+//     This hardcoded 1_000_000 was true of glibc's clock() and false of Windows',
+//     where clock() is WALL-CLOCK time in MILLISECONDS (CLOCKS_PER_SEC is 1000):
+//     elapsed_ms() read a thousand times too small and measured the wrong thing.
+//     The raw `pub extern fn clock()` binding is unchanged for callers who use it.
 //   - CLOCKS_PER_SEC is hardcoded to 1_000_000, not read from a `<time.h>`
 //     macro (Turf's `extern fn` mechanism can only bind real C functions,
 //     not preprocessor macros/constants). POSIX only requires
@@ -60,6 +66,10 @@ unsafe module;
 
 pub extern fn time(t: ptr): int;
 pub extern fn clock(): int;
+// CPU time in microseconds, the same on every platform (runtime/turfrt_sys.c):
+// clock_ticks() below uses it instead of clock(), whose unit and meaning are not
+// the same everywhere (on Windows it is wall-clock milliseconds).
+extern fn turfrt_clock_us(): int;
 // usleep genuinely takes/returns a 32-bit C `int` (`useconds_t`/`int` under
 // POSIX), not Turf's 64-bit `int` -- see this file's own design note above.
 pub extern fn usleep(usec: int32): int32;
@@ -89,7 +99,7 @@ pub fn now_seconds(): int {
 // this file's design note above). Meant to be paired with elapsed_ms()/
 // elapsed_seconds() below, not read as an absolute timestamp on its own.
 pub fn clock_ticks(): int {
-    return clock();
+    return turfrt_clock_us();
 }
 
 // elapsed_ms: CPU milliseconds elapsed since `start_clock_ticks` (a value

@@ -42,13 +42,13 @@
 #endif
 
 #ifdef _WIN32
-static void turf_net_cleanup(void) { WSACleanup(); }
+static void turfrt_net_cleanup(void) { WSACleanup(); }
 #endif
 
 /* Winsock must be started once, before the first socket call. A no-op elsewhere.
  * Returns 0 on success, -1 on failure. (A Turf program is single-threaded at the
  * point it first touches a socket, so the flag needs no lock.) */
-int32_t turf_net_startup(void) {
+int32_t turfrt_net_startup(void) {
 #ifdef _WIN32
   static int started = 0;
   if (started)
@@ -57,14 +57,14 @@ int32_t turf_net_startup(void) {
   if (WSAStartup(MAKEWORD(2, 2), &data) != 0)
     return -1;
   started = 1;
-  atexit(turf_net_cleanup);
+  atexit(turfrt_net_cleanup);
 #endif
   return 0;
 }
 
 /* A TCP/IPv4 stream socket. -1 on failure. */
-int64_t turf_net_socket(void) {
-  if (turf_net_startup() != 0)
+int64_t turfrt_net_socket(void) {
+  if (turfrt_net_startup() != 0)
     return -1;
 #ifdef _WIN32
   SOCKET s = socket(AF_INET, SOCK_STREAM, 0);
@@ -75,8 +75,8 @@ int64_t turf_net_socket(void) {
 #endif
 }
 
-/* Closes a socket from turf_net_socket() or accept(). 0 on success. */
-int32_t turf_net_close(int64_t s) {
+/* Closes a socket from turfrt_net_socket() or accept(). 0 on success. */
+int32_t turfrt_net_close(int64_t s) {
 #ifdef _WIN32
   return closesocket((SOCKET)s) == 0 ? 0 : -1;
 #else
@@ -86,7 +86,7 @@ int32_t turf_net_close(int64_t s) {
 
 /* SO_REUSEADDR = 1, so a restarted server can bind while the old socket sits in
  * TIME_WAIT. 0 on success. */
-int32_t turf_net_reuseaddr(int64_t s) {
+int32_t turfrt_net_reuseaddr(int64_t s) {
   int one = 1;
 #ifdef _WIN32
   return setsockopt((SOCKET)s, SOL_SOCKET, SO_REUSEADDR, (const char *)&one, (int)sizeof one) == 0 ? 0 : -1;
@@ -98,7 +98,7 @@ int32_t turf_net_reuseaddr(int64_t s) {
 /* A `struct sockaddr_in` for a.b.c.d:port, in this platform's own layout,
  * allocated with calloc so the caller releases it with mem::free() (as net.tr's
  * hand-built one was). NULL if out of memory. All zero octets is INADDR_ANY. */
-void *turf_net_sockaddr(int64_t a, int64_t b, int64_t c, int64_t d, int64_t port) {
+void *turfrt_net_sockaddr(int64_t a, int64_t b, int64_t c, int64_t d, int64_t port) {
   struct sockaddr_in *sa = (struct sockaddr_in *)calloc(1, sizeof *sa);
   if (sa == NULL)
     return NULL;

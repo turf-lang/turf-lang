@@ -538,6 +538,7 @@ add_library(turfrt STATIC
   runtime/turfrt_net.c
   runtime/turfrt_panic.c
   runtime/turfrt_signal.c
+  runtime/turfrt_sys.c
   runtime/turfrt_types.c
   runtime/turfrt_win32.c
 )
@@ -582,6 +583,7 @@ if(TURF_RT_SANITIZE)
     runtime/turfrt_net.c
     runtime/turfrt_panic.c
     runtime/turfrt_signal.c
+    runtime/turfrt_sys.c
     runtime/turfrt_types.c
     runtime/turfrt_win32.c
   )
@@ -634,7 +636,12 @@ if(TURF_RELEASE_STATIC AND NOT APPLE)
   if(WIN32)
     # -s: 216 MB unstripped, 134 MB stripped. (The duplicate-definition flag
     # every Windows release link needs is on turfcore, above.)
-    target_link_options(turfc PRIVATE -static -s)
+    # --stack: GNU ld gives an executable 2 MB of main-thread stack, a Linux
+    # process 8 MB. The compiler is recursive (the parser, resolver and type
+    # checker walk the tree), and tests/01_syntax/fail_deeply_nested_expression.tr
+    # crashed turfc.exe with an access violation, instead of reaching the nesting
+    # limit that rejects it cleanly, when run on Windows. 8 MB matches Linux.
+    target_link_options(turfc PRIVATE -static -s -Wl,--stack,8388608)
   else()
     target_link_options(turfc PRIVATE -static-libstdc++ -static-libgcc)
   endif()
