@@ -419,8 +419,12 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
   // Resolver's module registry (lengthof's replacement is
   // strings::length(s), part of the prelude).
   // LookupBuiltin() returns null for all stdlib functions since Issue #9.
-  if (Node.ResolvedCandidates.empty() && !CalleeName.empty()) {
-    const BuiltinInfo *BI = LookupBuiltin(CalleeName);
+  //
+  // Gated on the Resolver's tag, not on the callee's spelling: the tag is set
+  // only when no declared function of that name exists, so a program's own
+  // `heap()` or `typeof()` is checked below like any other function.
+  if (Node.ResolvedIntrinsic != BareIntrinsic::None) {
+    const BuiltinInfo *BI = LookupBuiltin(IntrinsicName(Node.ResolvedIntrinsic));
     if (BI) {
       // Arity check using the canonical arity from Builtins.h.
       if (BI->Arity >= 0 && ArgCount != BI->Arity) {
@@ -436,7 +440,7 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
       }
 
       // ── typeof(x) → string ───────────────────────────────────────────────
-      if (CalleeName == "typeof") {
+      if (Node.isIntrinsic(BareIntrinsic::TypeOf)) {
         setType(&Node, TurfString());
         return;
       }
@@ -452,8 +456,9 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
       // simply codegen with whatever LLVM width Args[0]->codegen() produces
       // (both runtime parameters are already-64-bit size_t, matching Turf's
       // 64-bit `int`).
-      if (CalleeName == "gc_alloc" || CalleeName == "gc_alloc_zeroed" ||
-          CalleeName == "gc_realloc") {
+      if (Node.isIntrinsic(BareIntrinsic::GcAlloc) ||
+          Node.isIntrinsic(BareIntrinsic::GcAllocZeroed) ||
+          Node.isIntrinsic(BareIntrinsic::GcRealloc)) {
         setType(&Node, std::make_shared<TurfPointerType>(TurfVoid()));
         return;
       }
@@ -463,15 +468,15 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
       // gc_is_managed(p) is the exact-block-start query lib/std/mem/mem.tr's
       // checked free() uses to diagnose a cross-heap mem::free() call. Same
       // minimal-validation convention as gc_alloc's own branch above.
-      if (CalleeName == "gc_collect") {
+      if (Node.isIntrinsic(BareIntrinsic::GcCollect)) {
         setType(&Node, TurfVoid());
         return;
       }
-      if (CalleeName == "gc_is_managed") {
+      if (Node.isIntrinsic(BareIntrinsic::GcIsManaged)) {
         setType(&Node, TurfBool());
         return;
       }
-      if (CalleeName == "gc_checked_free") {
+      if (Node.isIntrinsic(BareIntrinsic::GcCheckedFree)) {
         setType(&Node, TurfVoid());
         return;
       }
@@ -479,7 +484,7 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
       // ── gc_pin(p) / gc_unpin(p) → void ──────────────────────────────────
       // OVH-010. Same minimal-validation convention as gc_checked_free's
       // own branch just above.
-      if (CalleeName == "gc_pin" || CalleeName == "gc_unpin") {
+      if (Node.isIntrinsic(BareIntrinsic::GcPin) || Node.isIntrinsic(BareIntrinsic::GcUnpin)) {
         setType(&Node, TurfVoid());
         return;
       }
@@ -493,7 +498,7 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
       // type is data-dependent: &T, where T is the OPERAND's own inferred
       // type, not a fixed signature -- so it's computed here from ArgTypes[0]
       // rather than a single setType(&Node, TurfXxx()) call.
-      if (CalleeName == "heap") {
+      if (Node.isIntrinsic(BareIntrinsic::Heap)) {
         TurfTypePtr ArgTy = ArgTypes.empty() ? nullptr : ArgTypes[0];
         if (!ArgTy) {
           setType(&Node, nullptr);
@@ -987,6 +992,27 @@ bool TypeChecker::tryUFCSFallback(MethodCallExprAST &Node,
   return true;
 }
 
+bool TypeChecker::tryUFCSOnReceiver(MethodCallExprAST &Node,
+                                    const TurfType *ReceiverTy,
+                                    const TurfType *BaseTy,
+                                    const std::vector<TurfTypePtr> &ArgTypes,
+                                    std::vector<const ResolverFunctionSymbol *> *OutNamedCandidates) {
+  Node.UFCSLoadsReceiver = false;
+  if (!ReceiverTy || ReceiverTy == BaseTy ||
+      !dynamic_cast<const TurfPointerType *>(ReceiverTy))
+    return tryUFCSFallback(Node, BaseTy, ArgTypes, OutNamedCandidates);
+  if (tryUFCSFallback(Node, ReceiverTy, ArgTypes, OutNamedCandidates))
+    return true;
+  if (!dynamic_cast<const TurfStructType *>(BaseTy))
+    return false;
+  // The pointer's own candidates already went to OutNamedCandidates; the
+  // struct's are the same names, so this attempt need not report them.
+  if (!tryUFCSFallback(Node, BaseTy, ArgTypes))
+    return false;
+  Node.UFCSLoadsReceiver = Node.ResolvedViaUFCS;
+  return true;
+}
+
 
 void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
   // 1. Visit the base expression (e.g. `io` in io.printline(...)).
@@ -1166,7 +1192,9 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
       return;
     }
 
-    // Unwrap pointer-to-struct (self inside methods)
+    // Unwrap pointer-to-struct (self inside methods). UFCS still sees the
+    // receiver as written (tryUFCSOnReceiver()).
+    const TurfTypePtr ReceiverTy = BaseTy;
     if (BaseTy && !IsStaticMethod) {
       if (auto *PtrTy = dynamic_cast<const TurfPointerType *>(BaseTy.get()))
         BaseTy = PtrTy->getPointee();
@@ -1399,7 +1427,7 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
           // exact call -- right types don't exist for this arity. Try tier
           // 2 (UFCS) before reporting this as an error (RFC §5.2's tiering:
           // "this tier is exhausted in full before falling through").
-          if (tryUFCSFallback(Node, BaseTy.get(), ArgTypes))
+          if (tryUFCSOnReceiver(Node, ReceiverTy.get(), BaseTy.get(), ArgTypes))
             return;
 
           // Method name and argument COUNT are both right, but no overload's
@@ -1694,7 +1722,7 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
         // zero matches (whether because the method name doesn't exist at
         // all, or exists but not at this arity). Try tier 2 (UFCS) before
         // reporting either error.
-        if (tryUFCSFallback(Node, BaseTy.get(), ArgTypes))
+        if (tryUFCSOnReceiver(Node, ReceiverTy.get(), BaseTy.get(), ArgTypes))
           return;
 
         // Distinguish "this method doesn't exist on
@@ -1799,7 +1827,7 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
       // invariant violation. Confirmed via `x.foo()` on an int, a string,
       // and an `int*`.
       std::vector<const ResolverFunctionSymbol *> NamedCandidates;
-      if (tryUFCSFallback(Node, BaseTy.get(), ArgTypes, &NamedCandidates))
+      if (tryUFCSOnReceiver(Node, ReceiverTy.get(), BaseTy.get(), ArgTypes, &NamedCandidates))
         return;
       if (NamedCandidates.empty() && BaseTy->isArray()) {
         // An array is not a struct, but it does have two built-ins (handled
@@ -1821,7 +1849,7 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
       } else if (NamedCandidates.empty()) {
         reportError(Node.getLoc(), ErrCode::MethodOnNonStruct,
                     "Cannot call method '" + MethodName + "' on type '" +
-                        BaseTy->getName() +
+                        ReceiverTy->getName() +
                         "' -- only struct instances have methods.",
                     {}, "", "No such method!");
       } else {
@@ -1839,7 +1867,7 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
                              "candidate: " + Cand->signature()});
         reportError(Node.getLoc(), ErrCode::ArgumentType,
                     "No visible '" + MethodName + "' overload accepts a '" +
-                        BaseTy->getName() + "' receiver via UFCS.",
+                        ReceiverTy->getName() + "' receiver via UFCS.",
                     Related,
                     "UFCS matches the receiver's type exactly -- it never "
                     "coerces or widens it (e.g. char -> int). Either change "

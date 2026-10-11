@@ -426,6 +426,9 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     {ErrCode::MutableViewOfImmutableArray, "MutableViewOfImmutableArrayError", "Mutable view of an immutable array", SLM::ErrorCategory::ARRAY_ERROR},
     // LEC-008: `m::` spelled in a file that did not import `m` itself.
     {"E145", "ModuleNotImportedError", "Module not imported in this file", SLM::ErrorCategory::DECLARATION},
+    // `@name(args)` that no pass claims, or whose arguments do not fit the
+    // declaration under it (ResolverDecl.cpp's checkAnnotations()).
+    {"E146", "InvalidAnnotationError", "Invalid annotation", SLM::ErrorCategory::DECLARATION},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

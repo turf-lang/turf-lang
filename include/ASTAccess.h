@@ -2,6 +2,7 @@
 #define AST_ACCESS_H
 
 #include "AST.h"
+#include "Intrinsics.h"
 
 #include <unordered_map>
 
@@ -39,6 +40,18 @@ public:
   const ResolverFunctionSymbol *getResolvedCallTarget() const {
     return ResolvedCallTarget.get();
   }
+
+  /// Which language-level bare intrinsic (`heap`, `typeof`, `gc_alloc`, ...)
+  /// this call is, or BareIntrinsic::None. Set by the Resolver ONLY when no
+  /// declared function of the callee's name exists, so a program's own
+  /// `heap()` is an ordinary call and never this. Every pass after the
+  /// Resolver reads this tag instead of comparing the callee's name
+  /// (include/Intrinsics.h).
+  /// clone() returns a fresh node, so this is None in cloned trees -- the
+  /// same clone-semantics contract as ResolvedCallTarget; the Resolver sets it
+  /// again when it re-resolves the clone.
+  BareIntrinsic ResolvedIntrinsic = BareIntrinsic::None;
+  bool isIntrinsic(BareIntrinsic I) const { return ResolvedIntrinsic == I; }
 
   /// TYPE-002 (docs/development/changes/TYPE-002.md, S11b): the concrete
   /// type-parameter-name -> concrete-type map TypeChecker::visitFuncCall()
@@ -400,6 +413,12 @@ public:
   /// contract as ResolvedCallTarget.
   bool ResolvedViaUFCS = false;
 
+  /// True when the UFCS callee takes a struct and the receiver is a pointer
+  /// to it (`self.f()` inside a method): Codegen loads the receiver and
+  /// passes the value (TypeChecker::tryUFCSOnReceiver()). Not copied by
+  /// clone() -- same contract as ResolvedViaUFCS.
+  bool UFCSLoadsReceiver = false;
+
   /// True once TypeChecker::visitMethodCall() confirms this is a
   /// `.transition(State)` call on a `TurfMachineType`-typed receiver (see
   /// include/Types.h's TurfMachineType doc comment). Codegen branches on
@@ -433,7 +452,7 @@ public:
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<MethodCallExprAST>(Loc, CloneExprAST(Base.get()),
                                                Method, NameLoc, CloneExprList(Args));
-    // Note: ResolvedCallTarget, ResolvedViaUFCS, IsMachineTransition,
+    // Note: ResolvedCallTarget, ResolvedViaUFCS, UFCSLoadsReceiver, IsMachineTransition,
     // TransitionCompileTimeProven, and GenericSubstitution intentionally
     // NOT copied — cloned ASTs are stale until re-resolved. ✓
   }

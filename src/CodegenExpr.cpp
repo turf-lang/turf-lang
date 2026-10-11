@@ -640,12 +640,9 @@ Value *CastExprAST::codegen() {
   // pointer words", which is precise, not a fallback, for a raw byte
   // buffer.
   if (auto *FC = dynamic_cast<const FuncCallExprAST *>(Operand.get())) {
-    std::string GCCalleeName;
-    if (auto *VarCallee =
-            dynamic_cast<const VariableExprAST *>(FC->getCallee()))
-      GCCalleeName = VarCallee->getName();
-    if (GCCalleeName == "gc_alloc" || GCCalleeName == "gc_alloc_zeroed" ||
-        GCCalleeName == "gc_realloc") {
+    if (FC->isIntrinsic(BareIntrinsic::GcAlloc) ||
+        FC->isIntrinsic(BareIntrinsic::GcAllocZeroed) ||
+        FC->isIntrinsic(BareIntrinsic::GcRealloc)) {
       if (auto *DestPtr = dynamic_cast<const TurfPointerType *>(DestType.get())) {
         llvm::Type *ElemTy = getLLVMType(DestPtr->getPointee().get());
         if (ElemTy && !ElemTy->isVoidTy()) {

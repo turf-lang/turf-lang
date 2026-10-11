@@ -1,13 +1,146 @@
 #include "AliasAnalysis.h"
 #include "AST.h"
 #include "Errors.h"
+#include "SuggestionIndex.h"
 #include "SymbolTable.h"
 
+#include <functional>
+#include <iterator>
 #include <unordered_map>
+#include <unordered_set>
 #include <queue>
 #include <optional>
 
 using AllocSiteID = size_t;
+
+namespace OwnershipAnnotation {
+
+bool acquires(const ResolverFunctionSymbol &Callee) {
+  for (const Annotation *A : Callee.annotationsNamed(Name))
+    if (A->hasWord("acquires"))
+      return true;
+  return false;
+}
+
+namespace {
+
+// calledFunction(), plus the call's arguments in parameter order when `Args`
+// is given: a UFCS call's receiver fills the first parameter.
+const ResolverFunctionSymbol *callTarget(const ExprAST &Call,
+                                         std::vector<const ExprAST *> *Args) {
+  if (const auto *FC = dynamic_cast<const FuncCallExprAST *>(&Call)) {
+    if (Args)
+      for (const auto &A : FC->getArgs())
+        Args->push_back(A.get());
+    return FC->getResolvedCallTarget();
+  }
+  const auto *MC = dynamic_cast<const MethodCallExprAST *>(&Call);
+  if (!MC || !MC->ResolvedViaUFCS)
+    return nullptr;
+  if (Args) {
+    Args->push_back(MC->getBase());
+    for (const auto &A : MC->getArgs())
+      Args->push_back(A.get());
+  }
+  return MC->getResolvedCallTarget();
+}
+
+} // namespace
+
+const ResolverFunctionSymbol *calledFunction(const ExprAST &Call) {
+  return callTarget(Call, nullptr);
+}
+
+bool releases(const ExprAST &Call) {
+  const ResolverFunctionSymbol *Target = calledFunction(Call);
+  if (!Target)
+    return false;
+  for (const Annotation *A : Target->annotationsNamed(Name))
+    if (A->findKeyed("releases"))
+      return true;
+  return false;
+}
+
+const ExprAST *releasedArgument(const ExprAST &Call) {
+  std::vector<const ExprAST *> Args;
+  const ResolverFunctionSymbol *Target = callTarget(Call, &Args);
+  if (!Target)
+    return nullptr;
+  for (const Annotation *A : Target->annotationsNamed(Name)) {
+    const AnnotationArg *Released = A->findKeyed("releases");
+    if (!Released)
+      continue;
+    for (size_t I = 0; I < Target->Params.size() && I < Args.size(); ++I)
+      if (Target->Params[I].Name == Released->Value)
+        return Args[I];
+  }
+  return nullptr;
+}
+
+std::string validate(const Annotation &Ann,
+                     const std::vector<std::pair<std::string, TurfTypePtr>> &Params,
+                     const TurfTypePtr &ReturnType, bool /*IsExtern*/,
+                     const std::vector<Annotation> & /*All*/) {
+  if (Ann.Args.empty())
+    return "'@ownership' needs an argument: 'acquires' or 'releases: <parameter>'.";
+
+  // The pass reads the annotation off function CALLS; an instance method is
+  // reached through `x.method()`, which it does not look at, so the claim
+  // would silently check nothing. A static method (`T::m()`) is a call.
+  if (!Params.empty() && Params[0].first == "self")
+    return "'@ownership' cannot go on an instance method yet: the double-free "
+           "check reads it only from calls to plain functions and static "
+           "methods.";
+
+  const std::string WordsNotStrings =
+      "The arguments of '@ownership' are words, not strings: 'acquires' or "
+      "'releases: <parameter>'.";
+
+  for (const AnnotationArg &Arg : Ann.Args) {
+    if (Arg.Key.empty()) {
+      if (Arg.IsString)
+        return WordsNotStrings;
+      if (Arg.Value == "acquires") {
+        if (!ReturnType || !ReturnType->isPointer())
+          return "'@ownership(acquires)' says the function returns a fresh "
+                 "allocation, but it does not return a pointer.";
+        continue;
+      }
+      if (Arg.Value == "releases")
+        return "'releases' needs the parameter it frees: "
+               "'@ownership(releases: p)'.";
+      std::string Msg = "Unknown '@ownership' argument '" + Arg.Value + "'.";
+      auto Near = SuggestionIndex::suggestVisible(Arg.Value, {"acquires", "releases"});
+      if (!Near.empty())
+        Msg += " Did you mean '" + Near.front() + "'?";
+      return Msg + " Use 'acquires' or 'releases: <parameter>'.";
+    }
+
+    if (Arg.Key != "releases")
+      return "Unknown '@ownership' argument '" + Arg.Key + ":'. The only keyed "
+             "argument is 'releases: <parameter>'.";
+    if (Arg.IsString)
+      return WordsNotStrings;
+    const std::pair<std::string, TurfTypePtr> *Param = nullptr;
+    for (const auto &P : Params)
+      if (P.first == Arg.Value)
+        Param = &P;
+    if (!Param)
+      return "'@ownership(releases: " + Arg.Value + ")' names '" + Arg.Value +
+             "', which is not a parameter of this function.";
+    if (!Param->second || !Param->second->isPointer())
+      return "'@ownership(releases: " + Arg.Value + ")' says the call frees '" +
+             Arg.Value + "', but that parameter is not a pointer.";
+    // A `&T`/`&?T` is GC-managed: nothing frees it, so the claim cannot be true.
+    if (Param->second->isReference() || Param->second->isNullableReference())
+      return "'@ownership(releases: " + Arg.Value + ")' says the call frees '" +
+             Arg.Value + "', but that parameter is a reference ('&T'), which "
+             "the garbage collector owns; only a raw pointer is released.";
+  }
+  return "";
+}
+
+} // namespace OwnershipAnnotation
 
 void AliasAnalysisPass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> & /*InitialAssigned*/) {
 
@@ -40,17 +173,44 @@ void AliasAnalysisPass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> & /*Initi
   // identity-based fix already applied to DefiniteAssignmentPass and
   // ValueRangePass (see Analysis.cpp / ValueRange.cpp).
   using VarKey = const VariableSymbol *;
-  std::vector<std::unordered_map<VarKey, std::optional<AllocSiteID>>> IN(N), OUT(N);
-  std::vector<std::unordered_set<AllocSiteID>> Freed(N);
 
-  AllocSiteID NextAllocID = 1;
+  // The dataflow fact at one program point.
+  //
+  // Freed state is tracked twice, because the two answers mean different
+  // things to the user. MustFreed holds the sites released on EVERY path
+  // reaching this point (intersection at a join): a second release or a use
+  // is certainly wrong, so it is an error. MayFreed holds the sites released
+  // on SOME path (union at a join): whether a second release is wrong depends
+  // on a condition this pass cannot evaluate, e.g.
+  //
+  //     if flag { mem::free(p); freed = true; }
+  //     if !freed { mem::free(p); }
+  //
+  // which is correct code, so that is a warning, never an error.
+  struct State {
+    std::unordered_map<VarKey, std::optional<AllocSiteID>> Points;
+    std::unordered_set<AllocSiteID> MayFreed;
+    std::unordered_set<AllocSiteID> MustFreed;
+    bool operator==(const State &) const = default;
+  };
+  std::vector<State> IN(N), OUT(N);
+  // A block's OUT means something only once it has been processed; a join
+  // ignores the predecessors that have not been (the standard optimistic
+  // start for an intersection), so a loop's back edge does not empty
+  // MustFreed before the loop body has even been looked at.
+  std::vector<bool> Visited(N, false);
 
-  // Records where each AllocSiteID was first free()'d, so DoubleFreeError /
-  // UseAfterFreeError can pin that call site as a RelatedLocation ("freed
-  // here") instead of leaving the user to search the function for it.
-  // Shared across the whole worklist pass (like NextAllocID); re-setting the
-  // same aid's location to the same value on a later dataflow iteration is
-  // harmless -- it's always the same free() call site.
+  // An allocation site is the acquiring call itself, so it keeps one ID however
+  // often the worklist revisits its block and the fixpoint is reached.
+  std::unordered_map<const ExprAST *, AllocSiteID> SiteIDs;
+  auto siteFor = [&SiteIDs](const ExprAST *Call) -> AllocSiteID {
+    return SiteIDs.try_emplace(Call, SiteIDs.size() + 1).first->second;
+  };
+
+  // Where each AllocSiteID was first released, so DoubleFreeError /
+  // UseAfterFreeError (and their "may" warnings) can pin that call site as a
+  // RelatedLocation ("freed here") instead of leaving the user to search the
+  // function for it. Filled during the reporting pass, in block order.
   std::unordered_map<AllocSiteID, SourceLocation> FreeLoc;
 
   // Worklist
@@ -63,69 +223,134 @@ void AliasAnalysisPass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> & /*Initi
     return V->getResolvedSymbol();
   };
 
-  while (!work.empty()) {
-    size_t b = work.front(); work.pop();
-    TurfBasicBlock *BB = Blocks[b].get();
+  // Helper: does this call's resolved target declare `@ownership(acquires)`?
+  // Asked of the callee's declaration, never of its name (Article V).
+  // A call is a FuncCallExprAST or a UFCS method call (calledFunction()).
+  auto isAcquire = [](const ExprAST *E) -> bool {
+    const ResolverFunctionSymbol *Target =
+        E ? OwnershipAnnotation::calledFunction(*E) : nullptr;
+    return Target && OwnershipAnnotation::acquires(*Target);
+  };
 
-    // IN = merge of preds (conservative: prefer existing mapping, do not try to join alloc sites)
-    std::unordered_map<VarKey, std::optional<AllocSiteID>> newIN;
-    std::unordered_set<AllocSiteID> newFreed;
-    const auto &Preds = BB->getPredecessors();
-    if (Preds.empty()) {
-      newIN = IN[b];
-      newFreed = Freed[b];
-    } else {
-      bool first = true;
-      for (auto *P : Preds) {
-        size_t pi = index[P];
-        if (first) { newIN = OUT[pi]; newFreed = Freed[pi]; first = false; }
-        else {
-          // merge maps: keep value only if equal across preds, else unknown
-          std::unordered_map<VarKey, std::optional<AllocSiteID>> tmp;
-          for (const auto &kv : newIN) {
-            VarKey key = kv.first;
-            auto it = OUT[pi].find(key);
-            if (it != OUT[pi].end() && it->second == kv.second) tmp[key] = kv.second;
-            else tmp[key] = std::nullopt;
-          }
-          newIN.swap(tmp);
-          // merge freed sets: union
-          for (auto fs : Freed[pi]) newFreed.insert(fs);
-        }
+  // Helper: the variable a releasing call frees, or null if the call releases
+  // nothing, or releases something that is not a plain variable.
+  auto releasedVariable = [](const ExprAST *E) -> const VariableExprAST * {
+    return dynamic_cast<const VariableExprAST *>(OwnershipAnnotation::releasedArgument(*E));
+  };
+
+  // Where a call is, for a diagnostic (ExprAST has no virtual getLoc()).
+  auto callLoc = [](const ExprAST *E) -> SourceLocation {
+    if (auto *MC = dynamic_cast<const MethodCallExprAST *>(E))
+      return MC->getLoc();
+    return static_cast<const FuncCallExprAST *>(E)->getLoc();
+  };
+
+  // `V`'s allocation is released at `Loc`. With `Report`, a release of
+  // something already released is reported first (an error if it was
+  // released on every path here, a warning if only on some).
+  auto release = [&](State &S, const VariableExprAST *V, SourceLocation Loc,
+                     bool Report) {
+    VarKey key = getVarSymbol(V);
+    if (!key) return;
+    auto it = S.Points.find(key);
+    if (it == S.Points.end() || !it->second.has_value()) return;
+    AllocSiteID aid = *(it->second);
+    if (Report) {
+      auto FreeIt = FreeLoc.find(aid);
+      if (S.MustFreed.count(aid)) {
+        DoubleFreeError err(Loc, V->getName());
+        if (FreeIt != FreeLoc.end())
+          err.withRelated(FreeIt->second, "first freed here");
+        err.raise();
+      } else if (S.MayFreed.count(aid)) {
+        PossibleDoubleFreeWarning W(Loc, V->getName());
+        if (FreeIt != FreeLoc.end())
+          W.withRelated(FreeIt->second, "freed here, on some paths");
+        W.emit();
+      } else {
+        FreeLoc.try_emplace(aid, Loc);
       }
     }
+    // Keep the mapping so later accesses can detect use-after-free
+    S.MayFreed.insert(aid);
+    S.MustFreed.insert(aid);
+  };
 
-    if (newIN != IN[b] || newFreed != Freed[b]) {
-      IN[b] = newIN;
-      Freed[b] = newFreed;
+  // `V`'s memory is read or written at `Loc` (only checked when reporting).
+  auto use = [&](const State &S, const VariableExprAST *V, SourceLocation Loc,
+                 bool Report) {
+    if (!Report) return;
+    VarKey key = getVarSymbol(V);
+    if (!key) return;
+    auto it = S.Points.find(key);
+    if (it == S.Points.end() || !it->second.has_value()) return;
+    AllocSiteID aid = *(it->second);
+    auto FreeIt = FreeLoc.find(aid);
+    if (S.MustFreed.count(aid)) {
+      UseAfterFreeError err(Loc, V->getName());
+      if (FreeIt != FreeLoc.end())
+        err.withRelated(FreeIt->second, "freed here");
+      err.raise();
+    } else if (S.MayFreed.count(aid)) {
+      PossibleUseAfterFreeWarning W(Loc, V->getName());
+      if (FreeIt != FreeLoc.end())
+        W.withRelated(FreeIt->second, "freed here, on some paths");
+      W.emit();
     }
+  };
 
-    // Transfer: scan statements
-    auto cur = IN[b];
-    auto curFreed = Freed[b];
+  // `key` now holds a fresh allocation from the acquiring call `Call`. Whatever
+  // that site handed out earlier (a previous loop iteration) is a different
+  // block, so the site is no longer freed.
+  auto acquire = [&](State &S, VarKey key, const ExprAST *Call) {
+    AllocSiteID aid = siteFor(Call);
+    S.MayFreed.erase(aid);
+    S.MustFreed.erase(aid);
+    S.Points[key] = aid;
+  };
 
-    for (ExprAST *Stmt : BB->getStatements()) {
+  // IN of block `b`: the join of its processed predecessors' OUT.
+  auto join = [&](size_t b) -> State {
+    State In;
+    bool first = true;
+    for (auto *P : Blocks[b]->getPredecessors()) {
+      size_t pi = index[P];
+      if (!Visited[pi]) continue;
+      const State &PO = OUT[pi];
+      if (first) { In = PO; first = false; continue; }
+      // points-to: keep a value only if equal across preds, else unknown
+      for (auto &kv : In.Points) {
+        auto it = PO.Points.find(kv.first);
+        if (it == PO.Points.end() || it->second != kv.second)
+          kv.second = std::nullopt;
+      }
+      for (AllocSiteID aid : PO.MayFreed) In.MayFreed.insert(aid);
+      for (auto It = In.MustFreed.begin(); It != In.MustFreed.end();)
+        It = PO.MustFreed.count(*It) ? std::next(It) : In.MustFreed.erase(It);
+    }
+    return In;
+  };
+
+  // The effect of block `b`'s statements on `S`; diagnostics only with
+  // `Report`, which is set once, after the fixpoint (below), so nothing is
+  // reported from a fact a later iteration would have changed.
+  auto transfer = [&](size_t b, State S, bool Report) -> State {
+    for (ExprAST *Stmt : Blocks[b]->getStatements()) {
       // Detect assignment of malloc: x = malloc(n) or alias: p = q
       if (auto A = dynamic_cast<AssignmentExprAST *>(Stmt)) {
         if (auto L = dynamic_cast<const VariableExprAST *>(A->getLHS())) {
           VarKey lhsKey = getVarSymbol(L);
           if (lhsKey) {
             bool handled = false;
-            if (auto RHS = dynamic_cast<const FuncCallExprAST *>(A->getRHS())) {
-              if (auto CalleeVar = dynamic_cast<const VariableExprAST *>(RHS->getCallee())) {
-                std::string cname = CalleeVar->getName();
-                if (cname == "malloc" || cname == "realloc") {
-                  AllocSiteID aid = NextAllocID++;
-                  cur[lhsKey] = aid;
-                  handled = true;
-                }
-              }
+            if (isAcquire(A->getRHS())) {
+              acquire(S, lhsKey, A->getRHS());
+              handled = true;
             } else if (auto RHSVar = dynamic_cast<const VariableExprAST *>(A->getRHS())) {
               VarKey rhsKey = getVarSymbol(RHSVar);
-              if (rhsKey && cur.count(rhsKey)) {
-                cur[lhsKey] = cur.at(rhsKey);
+              if (rhsKey && S.Points.count(rhsKey)) {
+                S.Points[lhsKey] = S.Points.at(rhsKey);
               } else {
-                cur.erase(lhsKey);
+                S.Points.erase(lhsKey);
               }
               handled = true;
             }
@@ -139,21 +364,15 @@ void AliasAnalysisPass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> & /*Initi
         VarKey key = Vd->getResolvedSymbol();
         if (key) {
           bool handled = false;
-          if (auto Init = dynamic_cast<const FuncCallExprAST *>(Vd->getInitializer())) {
-            if (auto CalleeVar = dynamic_cast<const VariableExprAST *>(Init->getCallee())) {
-              std::string cname = CalleeVar->getName();
-              if (cname == "malloc" || cname == "realloc") {
-                AllocSiteID aid = NextAllocID++;
-                cur[key] = aid;
-                handled = true;
-              }
-            }
+          if (isAcquire(Vd->getInitializer())) {
+            acquire(S, key, Vd->getInitializer());
+            handled = true;
           } else if (auto InitVar = dynamic_cast<const VariableExprAST *>(Vd->getInitializer())) {
             VarKey rhsKey = getVarSymbol(InitVar);
-            if (rhsKey && cur.count(rhsKey)) {
-              cur[key] = cur.at(rhsKey);
+            if (rhsKey && S.Points.count(rhsKey)) {
+              S.Points[key] = S.Points.at(rhsKey);
             } else {
-              cur.erase(key);
+              S.Points.erase(key);
             }
             handled = true;
           }
@@ -161,109 +380,29 @@ void AliasAnalysisPass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> & /*Initi
         }
       }
 
-      // free(x)
-      if (auto FC = dynamic_cast<FuncCallExprAST *>(Stmt)) {
-        if (auto CalleeVar = dynamic_cast<const VariableExprAST *>(FC->getCallee())) {
-          std::string cname = CalleeVar->getName();
-          if (cname == "free") {
-            if (!FC->getArgs().empty()) {
-              const ExprAST *Arg0 = FC->getArgs()[0].get();
-              if (auto V = dynamic_cast<const VariableExprAST *>(Arg0)) {
-                VarKey key = getVarSymbol(V);
-                if (key) {
-                  auto it = cur.find(key);
-                  if (it != cur.end() && it->second.has_value()) {
-                    AllocSiteID aid = *(it->second);
-                    if (curFreed.count(aid)) {
-
-                      DoubleFreeError err(FC->getLoc(), V->getName());
-                      auto FreeIt = FreeLoc.find(aid);
-                      if (FreeIt != FreeLoc.end())
-                        err.withRelated(FreeIt->second, "first freed here");
-                      err.raise();
-                    } else {
-
-                      curFreed.insert(aid);
-                      FreeLoc[aid] = FC->getLoc();
-                      // Keep mapping so later accesses can detect use-after-free
-                    }
-                  }
-                }
-              }
-            }
-            continue;
-          }
-        }
+      // A call to a function declared `@ownership(releases: p)`, e.g. free(x)
+      // or x.free()
+      if (OwnershipAnnotation::releases(*Stmt)) {
+        if (auto V = releasedVariable(Stmt))
+          release(S, V, callLoc(Stmt), Report);
+        continue;
       }
 
       // Array access -> check if base points to a freed alloc site
       if (auto AA = dynamic_cast<ArrayAccessExprAST *>(Stmt)) {
-        if (auto BaseV = dynamic_cast<const VariableExprAST *>(AA->getBase())) {
-          VarKey key = getVarSymbol(BaseV);
-          if (key) {
-            auto it = cur.find(key);
-            if (it != cur.end() && it->second.has_value()) {
-              AllocSiteID aid = *(it->second);
-              if (curFreed.count(aid)) {
-
-                UseAfterFreeError err(AA->getLoc(), BaseV->getName());
-                auto FreeIt = FreeLoc.find(aid);
-                if (FreeIt != FreeLoc.end())
-                  err.withRelated(FreeIt->second, "freed here");
-                err.raise();
-              }
-            }
-          }
-        }
+        if (auto BaseV = dynamic_cast<const VariableExprAST *>(AA->getBase()))
+          use(S, BaseV, AA->getLoc(), Report);
       }
 
       // Recurse into statement children for nested calls / accesses
       std::function<void(const ExprAST*)> recurse = [&](const ExprAST *N) {
         if (!N) return;
-        if (auto F = dynamic_cast<const FuncCallExprAST*>(N)) {
-          // free inside expression
-          if (auto CalleeVar = dynamic_cast<const VariableExprAST *>(F->getCallee())) {
-            if (CalleeVar->getName() == "free" && !F->getArgs().empty()) {
-              if (auto V = dynamic_cast<const VariableExprAST *>(F->getArgs()[0].get())) {
-                VarKey key = getVarSymbol(V);
-                if (key) {
-                  auto it = cur.find(key);
-                  if (it != cur.end() && it->second.has_value()) {
-                    AllocSiteID aid = *(it->second);
-                    if (curFreed.count(aid)) {
-                      DoubleFreeError err(F->getLoc(), V->getName());
-                      auto FreeIt = FreeLoc.find(aid);
-                      if (FreeIt != FreeLoc.end())
-                        err.withRelated(FreeIt->second, "first freed here");
-                      err.raise();
-                    } else {
-                      curFreed.insert(aid);
-                      FreeLoc[aid] = F->getLoc();
-                      // Preserve mapping for later detection
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
+        // a releasing call inside an expression
+        if (auto V = releasedVariable(N))
+          release(S, V, callLoc(N), Report);
         if (auto AA2 = dynamic_cast<const ArrayAccessExprAST*>(N)) {
-          if (auto BaseV = dynamic_cast<const VariableExprAST*>(AA2->getBase())) {
-            VarKey key = getVarSymbol(BaseV);
-            if (key) {
-              auto it = cur.find(key);
-              if (it != cur.end() && it->second.has_value()) {
-                AllocSiteID aid = *(it->second);
-                if (curFreed.count(aid)) {
-                  UseAfterFreeError err(AA2->getLoc(), BaseV->getName());
-                  auto FreeIt = FreeLoc.find(aid);
-                  if (FreeIt != FreeLoc.end())
-                    err.withRelated(FreeIt->second, "freed here");
-                  err.raise();
-                }
-              }
-            }
-          }
+          if (auto BaseV = dynamic_cast<const VariableExprAST*>(AA2->getBase()))
+            use(S, BaseV, AA2->getLoc(), Report);
         }
 
         // descend
@@ -278,11 +417,23 @@ void AliasAnalysisPass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> & /*Initi
 
       recurse(Stmt);
     }
+    return S;
+  };
 
-    if (cur != OUT[b] || curFreed != Freed[b]) {
-      OUT[b] = cur;
-      Freed[b] = curFreed;
-      for (auto *S : BB->getSuccessors()) work.push(index[S]);
+  while (!work.empty()) {
+    size_t b = work.front(); work.pop();
+    IN[b] = join(b);
+    State Out = transfer(b, IN[b], /*Report=*/false);
+    if (!Visited[b] || Out != OUT[b]) {
+      Visited[b] = true;
+      OUT[b] = std::move(Out);
+      for (auto *Succ : Blocks[b]->getSuccessors()) work.push(index[Succ]);
     }
   }
+
+  // Report once, from the converged facts, in block order (so "first freed
+  // here" names the earlier call where both are in straight-line code).
+  for (size_t b = 0; b < N; ++b)
+    if (Visited[b])
+      transfer(b, IN[b], /*Report=*/true);
 }

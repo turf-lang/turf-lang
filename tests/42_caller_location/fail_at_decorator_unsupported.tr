@@ -1,7 +1,7 @@
-// EXPECT-DIAG: E103
-// EXPECT-DIAG: '@' is not valid here
-// STD-002 added back exactly one legal use of '@' (`@caller_location`) --
-// every other spelling still has no decorator syntax at all.
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: Unknown annotation '@intrinsic'
+// STD-002 added `@caller_location`; the general annotation mechanism accepts
+// only names some compiler pass consumes, so an unclaimed name is an error.
 @intrinsic("foo")
 fn main(): int {
     return 0;

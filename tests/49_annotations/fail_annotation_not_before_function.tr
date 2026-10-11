@@ -1,0 +1,14 @@
+// EXPECT-DIAG: E110
+// EXPECT-DIAG: Expected 'fn' or 'extern fn' after an annotation
+// An annotation describes a function declaration; before a struct it has
+// nothing to describe.
+
+@ownership(acquires)
+struct Point {
+    x: int,
+    y: int,
+}
+
+fn main(): int {
+    return 0;
+}

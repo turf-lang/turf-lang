@@ -575,14 +575,16 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
     // compiler intrinsics; they're now ordinary, real Turf functions in
     // lib/std, resolved through the exact same module-function path as
     // everything else in this comment.
-    static const std::unordered_set<std::string> BareIntrinsics = {
-        "typeof", "gc_alloc", "gc_alloc_zeroed", "gc_realloc",
-        "gc_collect", "gc_is_managed", "gc_checked_free",
-        "gc_pin", "gc_unpin",
-        "heap", // FDN-001 (DEC-5) -- safe-heap-allocation intrinsic, heap(expr): &T
-    };
-    if (BareIntrinsics.count(CalleeName)) {
+    //
+    // We are only on this branch because NO declared function (the file's,
+    // the module's, an import's, the prelude's) has this name, so a program
+    // that declares its own `heap`/`typeof`/`gc_alloc` never gets here and its
+    // function is called like any other. The answer is recorded on the call
+    // (Node.ResolvedIntrinsic); no later pass compares the name again. The one
+    // list of names is LookupIntrinsic() in include/Intrinsics.h.
+    if (BareIntrinsic Which = LookupIntrinsic(CalleeName); Which != BareIntrinsic::None) {
       // True bare intrinsic — skip error, TypeChecker validates arity/types.
+      Node.ResolvedIntrinsic = Which;
       return;
     }
 

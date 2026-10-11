@@ -145,4 +145,20 @@ public:
   void runOnCFG(CFG &Cfg);
 };
 
+// Every flow check a function gets once its CFG is built, in order: missing
+// return / unreachable code (CFG::reportFlowDiagnostics()), the complexity and
+// infinite-loop warnings, definite assignment, value range, alias (E017/E018),
+// nullability, escape, liveness, recursion without a base case, and, for a
+// `fn S.new()`, the constructor's field assignment (needs GlobalSymbolTable to
+// know S). The one sequence both FuncDefExprAST::codegen() and the query
+// facade's AnalysisOptions::RunFlowAnalysis run, so they cannot drift apart.
+// An error raises, ending the sequence for this function.
+//
+// @param Name     The function's name as declared (`S.new` for a constructor).
+// @param Loc      Where the warnings and the recursion error point.
+// @param ParamIDs Parameter symbols, for the passes that take them (none of
+//                 them reads it today).
+void runFunctionFlowPasses(CFG &Cfg, const std::string &Name, SourceLocation Loc,
+                           const std::vector<SymbolID> &ParamIDs);
+
 #endif

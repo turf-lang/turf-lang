@@ -1,0 +1,22 @@
+// EXPECT-DIAG: E018
+// EXPECT-DIAG: after it was freed
+// EXPECT-NO-DIAG: Unsafe pointer use
+// The use-after-free check follows the same declarations as the double-free
+// one: here a user's own `pool_take` / `pool_release`.
+
+import io;
+
+@ownership(acquires)
+extern fn pool_take(size: int): int*;
+
+@ownership(releases: slot)
+extern fn pool_release(slot: int*): void;
+
+fn main(): int {
+    unsafe {
+        mut buf: int* = pool_take(sizeof(int) * 4);
+        pool_release(buf);
+        buf[0] = 1;
+    }
+    return 0;
+}

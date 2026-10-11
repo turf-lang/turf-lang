@@ -10,7 +10,12 @@
 
 import io;
 
+// The alias analysis knows these two only because they say so (Article V):
+// there is no built-in list of allocator names.
+@ownership(acquires)
 extern fn malloc(size: int): int*;
+
+@ownership(releases: p)
 extern fn free(p: int*): void;
 
 fn main(): int {

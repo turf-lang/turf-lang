@@ -1,0 +1,36 @@
+TURF E146 -- INVALID ANNOTATION:
+
+CAUSE:
+  An `@name(args)` annotation before a function or `extern fn` either has a name
+  no compiler pass knows, or arguments that do not fit the declaration under it.
+  The known annotations are `@ownership` (`acquires`, or `releases: <param>`)
+  and `@ffi` (`linux:`/`macos:`/`windows:` followed by a C symbol name, on an
+  `extern fn` only). An annotation states a fact about the declaration; a wrong
+  one is rejected so it cannot silently switch a check off.
+
+CORRECT USAGE:
+    @ownership(acquires)
+    extern fn arena_take(size: int): int*;
+
+    @ownership(releases: block)
+    extern fn arena_give_back(block: int*): void;
+
+    @ffi(macos: malloc_size)
+    extern fn malloc_usable_size(p: void*): int;
+
+INCORRECT:
+    @ownrship(acquires)                        // ERROR [E146]: Unknown annotation
+    @ownership(aquires)                        // ERROR [E146]: Unknown argument
+    @ownership(acquires) fn n(): int { ... }   // ERROR [E146]: does not return a pointer
+    @ownership(releases: q) extern fn f(p: int*): void;  // ERROR [E146]: q is not a parameter
+    @ffi(macos: malloc_size) fn g(): int { ... }         // ERROR [E146]: only on an extern fn
+
+FIX:
+  Correct the misspelt name or argument (the message suggests one), make the
+  argument match the declaration (name a real pointer parameter, return a
+  pointer for `acquires`), or remove the annotation. Never invent a new
+  annotation name: only the ones above exist.
+
+RELATED: E087 (`pub` written before the annotation instead of after it),
+  E017/E018 (the double free / use after free that `@ownership` lets the
+  compiler find).

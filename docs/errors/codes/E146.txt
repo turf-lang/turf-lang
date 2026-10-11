@@ -1,0 +1,46 @@
+An annotation the declaration under it cannot carry
+
+    @ownrship(acquires)
+    pub extern fn malloc(size: int): void*;
+    // ERROR [E146]: Unknown annotation '@ownrship'.
+    //   Hint: Did you mean '@ownership'? The known annotations are: @ownership, @ffi.
+
+An annotation, `@name(arguments)` written on the line before a function or an
+`extern fn`, tells the compiler a fact about that declaration. The compiler
+knows what a function does only because its declaration says so, never because
+of the function's name: `malloc` is understood as an allocator because it says
+`@ownership(acquires)`, and your own allocator is understood the same way when
+it says the same thing.
+
+That is why a wrong annotation is an error rather than something quietly
+skipped. A misspelt one would otherwise switch off the very check it was
+written to turn on, and you would never find out.
+
+There are two ways to get this error.
+
+The name is not one the compiler knows. The message suggests the closest one
+and lists them all:
+
+    @ownership(acquires)                  // the double-free / use-after-free check
+    @ffi(macos: malloc_size)              // which C symbol an extern binds to, per platform
+
+The arguments do not fit the declaration. The message says what is wrong:
+
+    @ownership(acquires)
+    fn count(): int { return 0; }
+    // '@ownership(acquires)' says the function returns a fresh allocation,
+    // but it does not return a pointer.
+
+    @ownership(releases: q)
+    pub extern fn free(p: void*): void;
+    // 'q' is not a parameter of this function -- write 'releases: p'.
+
+    @ffi(macos: malloc_size)
+    fn helper(): int { return 0; }
+    // '@ffi' can only sit on an 'extern fn'.
+
+The fix is to correct the spelling, or to say what is actually true of the
+declaration, or to remove the annotation.
+
+A malformed annotation -- a missing ')' or a number where a word belongs -- is
+a syntax error instead, reported where the parser stopped.

@@ -1,5 +1,7 @@
 #include "Analysis.h"
+#include "AliasAnalysis.h"
 #include "Errors.h"
+#include "ValueRange.h"
 #include "AST.h"
 #include "ASTChildWalker.h"
 #include "SymbolTable.h"
@@ -1262,9 +1264,8 @@ std::optional<RefProvenance> classifyProvenance(const ExprAST *E,
     return lookupProv(VE->getResolvedSymbol(), Map);
 
   if (const auto *FC = dynamic_cast<const FuncCallExprAST *>(E)) {
-    if (const auto *Callee = dynamic_cast<const VariableExprAST *>(FC->getCallee()))
-      if (Callee->getName() == "heap")
-        return RefProvenance::Heap; // FDN-001: always a fresh GC-heap block
+    if (FC->isIntrinsic(BareIntrinsic::Heap))
+      return RefProvenance::Heap; // FDN-001: always a fresh GC-heap block
     return std::nullopt; // no interprocedural summaries -- an ordinary call's result is Unknown
   }
 
@@ -1459,9 +1460,8 @@ public:
     // documented residual gap), so `heap(structWithADanglingField)` is not
     // caught here.
     if (DoReport) {
-      if (const auto *Callee = dynamic_cast<const VariableExprAST *>(Node.getCallee()))
-        if (Callee->getName() == "heap" && !Node.getArgs().empty())
-          flagIfStack(Node.getArgs()[0].get(), Node.getLoc(), "boxed with heap()");
+      if (Node.isIntrinsic(BareIntrinsic::Heap) && !Node.getArgs().empty())
+        flagIfStack(Node.getArgs()[0].get(), Node.getLoc(), "boxed with heap()");
     }
   }
   void visitMethodCall(MethodCallExprAST &Node) override {
@@ -1582,4 +1582,78 @@ void EscapePass::runOnCFG(CFG &Cfg) {
   // ── Step 2: report, using the fixed-point IN sets ─────────────────────────
   for (size_t b = 0; b < N; ++b)
     computeOut(b, /*DoReport=*/true);
+}
+
+// ── The per-function flow sequence ──────────────────────────────────────────
+// Moved here from FuncDefExprAST::codegen() so the query facade runs the same
+// passes in the same order (Analysis.h).
+void runFunctionFlowPasses(CFG &Cfg, const std::string &Name, SourceLocation Loc,
+                           const std::vector<SymbolID> &ParamIDs) {
+  // Missing returns in a non-void function (raises), unreachable code.
+  Cfg.reportFlowDiagnostics();
+
+  // CFG Phase 1 (Issue #185): Cyclomatic complexity check.
+  // M = E - N + 2P; threshold 15. Warning only — does not stop compilation.
+  int M = Cfg.calculateCyclomaticComplexity();
+  if (M > 15)
+    CyclomaticComplexityWarning(Loc, Name, M).emit();
+
+  // CFG Phase 1 (Issue #185): Infinite loop detection.
+  // A back-edge cycle with no Break/Return terminator AND no outside-cycle
+  // successor means the loop can never exit. Warning only.
+  if (Cfg.hasUnbreakableLoop())
+    InfiniteLoopWarning(Loc, Name).emit();
+
+  // Definite assignment (parameters are considered assigned).
+  DefiniteAssignmentPass().runOnCFG(Cfg, ParamIDs);
+
+  // Value-range (constant) propagation.
+  ValueRangePass().runOnCFG(Cfg, ParamIDs);
+
+  // Alias/lifetime analysis (use-after-free, double-free).
+  AliasAnalysisPass().runOnCFG(Cfg, ParamIDs);
+
+  // LANG-002: nullable-reference (&?T) dereference/narrowing analysis. The
+  // TypeChecker has already validated the STATIC shape of every &?T use
+  // (typesCompatible()'s rules, Types.cpp); this pass verifies the
+  // FLOW-sensitive half: was a `p != null`/`p == null` check actually proven
+  // on the path reaching each `.field` access or `to &T` cast.
+  NullabilityPass().runOnCFG(Cfg);
+
+  // FDN-002 (docs/development/changes/FDN-002.md; FREEZE.md §6.13, F-MEM-5):
+  // reference/array escape analysis -- a Stack-provenance reference (points
+  // into THIS frame) can't reach a return, a field of a longer-lived object,
+  // a collection mutator/operator[]=, or heap()'s own operand.
+  EscapePass().runOnCFG(Cfg);
+
+  // CFG Phase 2 (Issue #186): Liveness analysis (dead stores & unused vars).
+  // Parameters never appear as VarDeclExprAST nodes in the body, so the
+  // excluded-symbol set can stay empty.
+  LivenessAnalysisPass().runOnCFG(Cfg, {});
+
+  // CFG Phase 2 (Issue #186): Infinite recursion detection.
+  // Check if every path from entry to exit passes through a self-call.
+  // This is a fatal error — infinite recursion guarantees a stack overflow.
+  if (Cfg.allPathsRecurse())
+    RecursionWithoutBaseError(Loc, Name).raise();
+
+  // Constructor field-assignment analysis: `fn StructName.new(...): void`
+  // must assign every field of StructName on every path (see
+  // ConstructorFieldAssignmentPass). The internal name suffix ".new"
+  // unambiguously identifies a real constructor here -- Resolver::
+  // visitFuncDef already guarantees 'new' can never be declared 'static' and
+  // 'default' can never be declared by hand at all, so nothing else can
+  // produce this exact suffix on a struct-bound method.
+  size_t Dot = Name.rfind('.');
+  if (Dot != std::string::npos && Name.substr(Dot + 1) == "new") {
+    std::string CtorStructName = Name.substr(0, Dot);
+    TurfTypePtr CtorStructT =
+        GlobalSymbolTable ? GlobalSymbolTable->LookupType(CtorStructName) : nullptr;
+    if (auto *CtorSType = dynamic_cast<TurfStructType *>(CtorStructT.get())) {
+      std::vector<std::string> FieldNames;
+      for (const auto &F : CtorSType->getFields())
+        FieldNames.push_back(F.Name);
+      ConstructorFieldAssignmentPass().runOnCFG(Cfg, CtorStructName, FieldNames, Loc);
+    }
+  }
 }

@@ -9,7 +9,7 @@ public:
   UseAfterFreeError(SourceLocation Loc, const std::string &Name)
       : TurfError(Loc,
                   Colors::BRIGHT_RED + "Oops! You're using memory from '" + Colors::CYAN + Name + Colors::BRIGHT_RED + "' after it was freed." + Colors::RESET,
-                  "Don't use memory after calling free(). Consider setting the pointer to null after freeing.") {
+                  "Don't use memory after it has been released (by free() or any function declared '@ownership(releases: ...)'). Consider setting the pointer to null after releasing it.") {
     Category_ = SLM::ErrorCategory::MEMORY_ERROR;
   }
 };
@@ -19,7 +19,39 @@ public:
   DoubleFreeError(SourceLocation Loc, const std::string &Name)
       : TurfError(Loc,
                   Colors::BRIGHT_RED + "Double free detected for '" + Colors::CYAN + Name + Colors::BRIGHT_RED + "'." + Colors::RESET,
-                  "Avoid calling free() on the same pointer more than once.") {
+                  "Release a pointer once: free() and every function declared '@ownership(releases: ...)' release what they are given.") {
+    Category_ = SLM::ErrorCategory::MEMORY_ERROR;
+  }
+};
+
+// The "may" halves of the two errors above. The alias pass reports an ERROR
+// only when the pointer was released on EVERY path reaching this point; when
+// it was released on SOME paths only, whether this is a bug depends on a
+// condition the pass cannot evaluate (a `freed` flag, say), so it warns.
+class PossibleUseAfterFreeWarning : public TurfWarning {
+public:
+  PossibleUseAfterFreeWarning(SourceLocation Loc, const std::string &Name)
+      : TurfWarning(Loc,
+                    TurfWarning::WarningLabel() + "'" + Colors::CYAN + Name +
+                        Colors::BRIGHT_YELLOW +
+                        "' may already have been freed on some path reaching this use." +
+                        Colors::RESET,
+                    "It is released on at least one path that leads here. If a condition "
+                    "rules that path out, this is fine; otherwise don't use it after "
+                    "releasing it.") {
+    Category_ = SLM::ErrorCategory::MEMORY_ERROR;
+  }
+};
+class PossibleDoubleFreeWarning : public TurfWarning {
+public:
+  PossibleDoubleFreeWarning(SourceLocation Loc, const std::string &Name)
+      : TurfWarning(Loc,
+                    TurfWarning::WarningLabel() + "'" + Colors::CYAN + Name +
+                        Colors::BRIGHT_YELLOW +
+                        "' may already have been freed on some path reaching this call." +
+                        Colors::RESET,
+                    "It is released on at least one path that leads here. If a condition "
+                    "rules that path out, this is fine; otherwise release it only once.") {
     Category_ = SLM::ErrorCategory::MEMORY_ERROR;
   }
 };

@@ -458,6 +458,13 @@ private:
   ResolverFunctionSymbol buildFunctionSymbol(const FuncDefExprAST &Node,
                                              const std::string &ModuleName) const;
 
+  /// The one place an `extern fn`'s symbol is built. File-level externs,
+  /// externs inside an imported module, and externs inside a function body all
+  /// come through here, so a field added to the symbol (an annotation, say)
+  /// cannot reach two of them and miss the third.
+  ResolverFunctionSymbol buildExternSymbol(const ExternFuncDeclExprAST &Node,
+                                           const std::string &ModuleName) const;
+
   /**
    * @brief Reject an `operator` declaration whose BOTH operand types are
    *        already in the compiler's builtin set (int/double/bool/char/

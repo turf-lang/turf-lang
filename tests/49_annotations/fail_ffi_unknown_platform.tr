@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: Unknown '@ffi' platform 'lunix'
+// EXPECT-DIAG: Did you mean 'linux'
+// A misspelt platform would leave the declaration unforwarded on the platform
+// it was written for, so it is an error rather than a silent no-op.
+
+@ffi(lunix: strlen)
+extern fn text_length(s: string): int;
+
+fn main(): int {
+    return 0;
+}

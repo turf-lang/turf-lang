@@ -18,7 +18,7 @@ EACH MISUSE AND ITS FIX:
     fn add(pub a: int, b: int): int       // parameters are local; `pub fn add`
     pub unsafe { ... }                    // put pub on the declarations inside
     fn main(): int { pub struct P {..} }  // local declarations are never visible
-    pub @caller_location fn here() ...    // decorator first, then pub
+    pub @caller_location fn here() ...    // annotations first, then pub
     mut pub: int = 1;                     // `pub`/`public` are reserved words
 
 CORRECT:

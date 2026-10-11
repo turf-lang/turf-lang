@@ -576,6 +576,24 @@ private:
                        const std::vector<TurfTypePtr> &ArgTypes,
                        std::vector<const ResolverFunctionSymbol *> *OutNamedCandidates = nullptr);
 
+  /**
+   * tryUFCSFallback() for a receiver that may be a pointer. visitMethodCall()
+   * unwraps `T*` to `T` before looking for bound methods (so `self.m()` finds
+   * `T`'s methods), but UFCS matches the receiver as WRITTEN first: `p.free()`
+   * with `p: void*` is `free(p)`. Only when that fails and the pointer points
+   * at a struct is the struct itself tried (`self.f()` inside a method, for a
+   * `fn f(t: T)`), with Node.UFCSLoadsReceiver set so Codegen passes the
+   * value, not the pointer. A pointer to anything else is never loaded
+   * implicitly.
+   *
+   * @param ReceiverTy  The receiver's type before any unwrapping.
+   * @param BaseTy      What visitMethodCall() unwrapped it to.
+   */
+  bool tryUFCSOnReceiver(MethodCallExprAST &Node, const TurfType *ReceiverTy,
+                         const TurfType *BaseTy,
+                         const std::vector<TurfTypePtr> &ArgTypes,
+                         std::vector<const ResolverFunctionSymbol *> *OutNamedCandidates = nullptr);
+
   /// True if @p T is a numeric primitive (int, double, or bool).
   static bool isNumericType(const TurfType *T);
 

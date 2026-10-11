@@ -943,45 +943,10 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
   case TOK_OPERATOR:
     return ParseOperatorDecl();
 
-  case TOK_AT: {
-    // The @intrinsic("name") decorator (used to bind print/printline/input
-    // to compiler-native codegen) has been removed -- those functions are
-    // now ordinary Turf code delegating to `extern fn` FFI bindings, see
-    // lib/std/io.tr. STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(a)) adds
-    // back exactly ONE decorator, `@caller_location fn ...` -- not a
-    // general decorator syntax; any other `@word` still falls through to
-    // the rejection below.
-    SourceLocation AtLoc = CurLoc;
-    getNextToken(); // eat '@'
-    if (CurTok == TOK_CALLER_LOCATION) {
-      getNextToken(); // eat 'caller_location'
-      // LEC-002: `@caller_location` then `pub fn` -- the decorator comes
-      // first, like an attribute before its modifiers (`pub @caller_location`
-      // is rejected in ParseVisibilityPrefixed() with a hint saying so).
-      VisibilityMark DecoratedVis;
-      if (CurTok == TOK_PUB) {
-        DecoratedVis = {true, CurLoc};
-        getNextToken(); // eat 'pub'/'public'
-      }
-      if (CurTok != TOK_FN) {
-        LogErrorAt(CurLoc, ErrCode::ExpectedKeyword,
-                   "Expected 'fn' after '@caller_location'."
-                   "\n  Hint: '@caller_location' only decorates a function "
-                   "declaration, e.g. '@caller_location\\nfn foo(...): T "
-                   "{ ... }'.", SLM::ErrorCategory::SYNTAX_ERROR);
-        return nullptr;
-      }
-      auto Fn = ParseFuncDef(/*HasCallerLocation=*/true);
-      if (Fn && DecoratedVis.IsPublic)
-        static_cast<FuncDefExprAST *>(Fn.get())->setVisibility(DecoratedVis);
-      return Fn;
-    }
-    LogErrorAt(AtLoc, ErrCode::UnexpectedToken,
-               "'@' is not valid here.\n  Hint: the only supported decorator "
-               "is '@caller_location', immediately before a function "
-               "declaration.", SLM::ErrorCategory::SYNTAX_ERROR);
-    return nullptr;
-  }
+  case TOK_AT:
+    // `@caller_location` (STD-002) and the general `@name(args)` annotations
+    // share one entry point; see ParseAnnotatedDecl() in ParserDecl.cpp.
+    return ParseAnnotatedDecl();
 
   case TOK_IMPORT:
     return ParseImport();

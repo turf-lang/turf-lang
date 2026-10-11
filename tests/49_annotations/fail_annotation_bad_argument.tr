@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E103
+// EXPECT-DIAG: Expected a word or a string in the arguments of '@ownership'
+// Arguments are words or strings only; the grammar accepts no expressions, so
+// no pass ever has to evaluate one.
+
+@ownership(1 + 2)
+fn make(): int {
+    return 1;
+}
+
+fn main(): int {
+    return make();
+}

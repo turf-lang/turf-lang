@@ -271,6 +271,12 @@ Value *MethodCallExprAST::codegen() {
     Value *ReceiverVal = EvalArg(Base.get(), 0);
     if (!ReceiverVal)
       return nullptr;
+    // `self.f()` for a `fn f(t: T)`: the receiver is a `T*`, the callee
+    // takes the struct by value (TypeChecker::tryUFCSOnReceiver()).
+    if (UFCSLoadsReceiver && ReceiverVal->getType()->isPointerTy() &&
+        !Params.empty())
+      ReceiverVal = Builder->CreateLoad(getLLVMType(Params[0].Type.get()),
+                                        ReceiverVal, "ufcsrecv");
     std::vector<Value *> ArgVals;
     ArgVals.push_back(ReceiverVal);
     for (size_t I = 0; I < Args.size(); ++I) {

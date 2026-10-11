@@ -175,7 +175,10 @@ std::unique_ptr<ExprAST> ParseBlock() {
     if (CurTok == TOK_IF || CurTok == TOK_WHILE || CurTok == TOK_DO || CurTok == TOK_FOR ||
         CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM || CurTok == TOK_MACHINE ||
         CurTok == TOK_COMPARE || CurTok == TOK_ERROR || CurTok == TOK_UNSAFE ||
-        CurTok == TOK_PUB) {
+        CurTok == TOK_PUB || CurTok == TOK_AT) {
+      // TOK_AT: `@name(args)` before a nested `extern fn` (or `fn`). Like
+      // `pub`, it ends in a declaration that has already consumed its own
+      // ';' (an extern) or needs none (a fn), so no ';' is expected here.
       auto Expr = ParseExpression();
       if (!Expr) return nullptr;
       if (CurTok == ';') {

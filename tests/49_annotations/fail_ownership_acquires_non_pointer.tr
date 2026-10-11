@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: does not return a pointer
+// `acquires` says the return value is a fresh allocation; a function returning
+// an int cannot be one.
+
+@ownership(acquires)
+extern fn count(): int;
+
+fn main(): int {
+    return 0;
+}

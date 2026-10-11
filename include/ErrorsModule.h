@@ -743,8 +743,9 @@ public:
       break;
     case Where::BeforeDecorator:
       What = "'" + Pub + "' has to come after a decorator, not before it.";
-      Hint_ = "Write the decorator first, then `pub`: `@caller_location` on "
-              "its own line, followed by `pub fn name(...)`.";
+      Hint_ = "Write the annotations first, then `pub`: `@caller_location` "
+              "or `@ownership(...)` on its own line, followed by `pub fn "
+              "name(...)` or `pub extern fn name(...)`.";
       break;
     }
     Message = Colors::BRIGHT_RED + What + Colors::RESET;
@@ -946,6 +947,19 @@ public:
             TypeName + "` in " + File + " -- or keep " +
             (IsField ? "the field" : "the " + ItemKind) +
             " internal by removing its `pub`.";
+  }
+};
+
+// An `@name(args)` annotation the declaration under it cannot carry: a name no
+// compiler pass claims, or arguments the claiming pass rejects for this
+// declaration (include/AnnotationRegistry.h). A malformed `@` itself -- a
+// missing ')' -- is a syntax error, not this.
+class InvalidAnnotationError : public TurfError {
+public:
+  InvalidAnnotationError(SourceLocation Loc, const std::string &What,
+                         const std::string &Hint)
+      : TurfError(Loc, Colors::BRIGHT_RED + What + Colors::RESET, Hint) {
+    Category_ = SLM::ErrorCategory::DECLARATION;
   }
 };
 

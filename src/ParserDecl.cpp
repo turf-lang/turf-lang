@@ -1379,6 +1379,150 @@ std::unique_ptr<ExprAST> ParseOperatorDecl() {
   return Def;
 }
 
+// ParseAnnotatedDecl - called when CurTok == TOK_AT.
+//
+// Parses one or more `@name`, `@name(arg, key: arg, ...)` annotations in front
+// of a function or `extern fn`, plus the older `@caller_location` decorator
+// (STD-002), in any order. An annotation's arguments are words (identifiers or
+// keywords) or string literals, nothing richer, so the grammar knows no
+// annotation's meaning: the
+// Resolver rejects a name no pass has claimed, and the one pass that consumes a
+// name checks that name's arguments (include/Annotation.h).
+//
+// Order, as for `@caller_location` before it (LEC-002): annotations first,
+// then `pub`, then `fn`/`extern`. `pub @name` is rejected in
+// ParseVisibilityPrefixed() with a hint saying so.
+std::unique_ptr<ExprAST> ParseAnnotatedDecl() {
+  std::vector<Annotation> Annotations;
+  bool HasCallerLocation = false;
+
+  while (CurTok == TOK_AT) {
+    SourceLocation AtLoc = CurLoc;
+    getNextToken(); // eat '@'
+    if (CurTok == TOK_CALLER_LOCATION) {
+      HasCallerLocation = true;
+      getNextToken(); // eat 'caller_location'
+      continue;
+    }
+    if (CurTok != TOK_IDENTIFIER) {
+      LogErrorAt(AtLoc, ErrCode::UnexpectedToken,
+                 "'@' is not valid here.\n  Hint: '@' starts an annotation "
+                 "such as '@ownership(acquires)', or the '@caller_location' "
+                 "decorator, immediately before a function declaration.",
+                 SLM::ErrorCategory::SYNTAX_ERROR);
+      return nullptr;
+    }
+
+    Annotation Ann;
+    Ann.Name = IdentifierStr;
+    Ann.Loc = AtLoc;
+    getNextToken(); // eat the annotation's name
+
+    if (CurTok == '(') {
+      getNextToken(); // eat '('
+      // A "word" in an argument is an identifier OR a keyword, spelled as
+      // written: `@diagnostics(error: ...)` must be able to say `error`. The
+      // lexer leaves a keyword's spelling in IdentifierStr; checking that it
+      // maps back to CurTok keeps a non-word token (a number, '_') out.
+      auto IsWord = []() {
+        if (CurTok == TOK_IDENTIFIER)
+          return true;
+        auto It = Keywords.find(IdentifierStr);
+        return It != Keywords.end() && It->second == CurTok;
+      };
+      while (CurTok != ')') {
+        AnnotationArg Arg;
+        Arg.Loc = CurLoc;
+        // A value is a word or a string; ReadValue fills Arg from whichever
+        // it finds and reports if it finds neither.
+        auto ReadValue = [&]() {
+          if (CurTok == TOK_STRING_LITERAL) {
+            Arg.Value = StringVal;
+            Arg.IsString = true;
+          } else if (IsWord()) {
+            Arg.Value = IdentifierStr;
+          } else {
+            LogErrorAt(CurLoc, ErrCode::UnexpectedToken,
+                       "Expected a word or a string in the arguments of '@" +
+                           Ann.Name + "'.",
+                       SLM::ErrorCategory::SYNTAX_ERROR);
+            return false;
+          }
+          getNextToken();
+          return true;
+        };
+        if (IsWord()) {
+          std::string Word = IdentifierStr;
+          getNextToken();
+          if (CurTok == TOK_COLON) {
+            getNextToken(); // eat ':'
+            Arg.Key = std::move(Word);
+            if (!ReadValue())
+              return nullptr;
+          } else {
+            Arg.Value = std::move(Word);
+          }
+        } else if (!ReadValue()) {
+          return nullptr;
+        }
+        Ann.Args.push_back(std::move(Arg));
+
+        if (CurTok == ',') {
+          getNextToken(); // eat ','
+        } else if (CurTok != ')') {
+          LogErrorAt(CurLoc, ErrCode::UnexpectedToken,
+                     "Expected ',' or ')' in the arguments of '@" + Ann.Name +
+                         "'.",
+                     SLM::ErrorCategory::SYNTAX_ERROR);
+          return nullptr;
+        }
+      }
+      getNextToken(); // eat ')'
+    }
+    Annotations.push_back(std::move(Ann));
+  }
+
+  VisibilityMark DecoratedVis;
+  if (CurTok == TOK_PUB) {
+    DecoratedVis = {true, CurLoc};
+    getNextToken(); // eat 'pub'/'public'
+  }
+
+  std::unique_ptr<ExprAST> Decl;
+  if (CurTok == TOK_FN) {
+    Decl = ParseFuncDef(HasCallerLocation);
+  } else if (CurTok == TOK_EXTERN && !HasCallerLocation) {
+    Decl = ParseExternDecl();
+  } else if (HasCallerLocation) {
+    LogErrorAt(CurLoc, ErrCode::ExpectedKeyword,
+               "Expected 'fn' after '@caller_location'."
+               "\n  Hint: '@caller_location' only decorates a function "
+               "declaration, e.g. '@caller_location\\nfn foo(...): T "
+               "{ ... }'.", SLM::ErrorCategory::SYNTAX_ERROR);
+    return nullptr;
+  } else {
+    LogErrorAt(CurLoc, ErrCode::ExpectedKeyword,
+               "Expected 'fn' or 'extern fn' after an annotation."
+               "\n  Hint: an annotation describes the function declaration "
+               "that follows it, e.g. '@ownership(acquires)\\nextern fn "
+               "malloc(size: int): void*;'.",
+               SLM::ErrorCategory::SYNTAX_ERROR);
+    return nullptr;
+  }
+  if (!Decl)
+    return nullptr;
+
+  if (DecoratedVis.IsPublic) {
+    if (auto *Visible = dynamic_cast<VisibleDecl *>(Decl.get()))
+      Visible->setVisibility(DecoratedVis);
+  }
+  if (!Annotations.empty()) {
+    if (auto *Annotated = dynamic_cast<AnnotatedDecl *>(Decl.get()))
+      Annotated->setAnnotations(std::move(Annotations));
+  }
+  return Decl;
+}
+
 // ParseVisibilityPrefixed - called when CurTok == TOK_PUB (`pub`/`public`).
 //
 // The ONE place a declaration's visibility mark is set, so "pub on something

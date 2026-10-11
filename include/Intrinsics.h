@@ -9,8 +9,14 @@
  *        the compiler-level intrinsics that already existed with no such
  *        registry.
  *
- * @details This header is documentation-as-code, not a dispatch table --
- *          nothing #includes it to drive a switch statement. Its job is to
+ * @details This header is documentation-as-code, with ONE piece of code in
+ *          it: `BareIntrinsic` / `LookupIntrinsic()` just below, the single
+ *          place a bare intrinsic's NAME is compared. The Resolver calls it
+ *          only for a bare call that no declared function matched, and
+ *          records the answer on the call node (`FuncCallExprAST::
+ *          ResolvedIntrinsic`); every later pass reads that tag and never
+ *          compares a name, so a program that declares its own `heap` or
+ *          `typeof` gets its own function, not the built-in. Its job is to
  *          be the one place grep'd (or read) before adding a new
  *          special-cased symbol name anywhere in the compiler, so that act
  *          is never silent. Three genuinely different kinds of "intrinsic"
@@ -44,6 +50,65 @@
 
 #ifndef TURF_INTRINSICS_H
 #define TURF_INTRINSICS_H
+
+#include <string>
+
+/// The closed set of category-1 bare intrinsics (see below): language
+/// vocabulary with no declaration anywhere. `None` is every other call.
+///
+/// Named `BareIntrinsic` because `Intrinsic` alone collides with
+/// `llvm::Intrinsic` in every file that says `using namespace llvm`.
+enum class BareIntrinsic {
+  None,
+  TypeOf,
+  GcAlloc,
+  GcAllocZeroed,
+  GcRealloc,
+  GcCollect,
+  GcIsManaged,
+  GcCheckedFree,
+  GcPin,
+  GcUnpin,
+  Heap,
+};
+
+/// The intrinsic spelled `Name`, or `BareIntrinsic::None`. The one place an
+/// intrinsic's name is compared -- and it is only asked when no declared
+/// function of that name exists (ResolverCall.cpp), so a user's own `heap`,
+/// `typeof` or `gc_alloc` always wins over the built-in.
+inline BareIntrinsic LookupIntrinsic(const std::string &Name) {
+  if (Name == "typeof")          return BareIntrinsic::TypeOf;
+  if (Name == "gc_alloc")        return BareIntrinsic::GcAlloc;
+  if (Name == "gc_alloc_zeroed") return BareIntrinsic::GcAllocZeroed;
+  if (Name == "gc_realloc")      return BareIntrinsic::GcRealloc;
+  if (Name == "gc_collect")      return BareIntrinsic::GcCollect;
+  if (Name == "gc_is_managed")   return BareIntrinsic::GcIsManaged;
+  if (Name == "gc_checked_free") return BareIntrinsic::GcCheckedFree;
+  if (Name == "gc_pin")          return BareIntrinsic::GcPin;
+  if (Name == "gc_unpin")        return BareIntrinsic::GcUnpin;
+  if (Name == "heap")            return BareIntrinsic::Heap;
+  return BareIntrinsic::None;
+}
+
+/// The spelling of `I` -- the key of its entry in the builtin registry
+/// (Builtins.cpp), which holds its arity. The other direction of
+/// LookupIntrinsic(); `None` has no spelling.
+inline const char *IntrinsicName(BareIntrinsic I) {
+  switch (I) {
+  case BareIntrinsic::TypeOf:        return "typeof";
+  case BareIntrinsic::GcAlloc:       return "gc_alloc";
+  case BareIntrinsic::GcAllocZeroed: return "gc_alloc_zeroed";
+  case BareIntrinsic::GcRealloc:     return "gc_realloc";
+  case BareIntrinsic::GcCollect:     return "gc_collect";
+  case BareIntrinsic::GcIsManaged:   return "gc_is_managed";
+  case BareIntrinsic::GcCheckedFree: return "gc_checked_free";
+  case BareIntrinsic::GcPin:         return "gc_pin";
+  case BareIntrinsic::GcUnpin:       return "gc_unpin";
+  case BareIntrinsic::Heap:          return "heap";
+  case BareIntrinsic::None:          break;
+  }
+  return "";
+}
 
 // ─── 1. Language-level bare intrinsics ─────────────────────────────────────
 // Real TOK_* keywords (include/Lexer.h's Keywords table, src/Lexer.cpp) or

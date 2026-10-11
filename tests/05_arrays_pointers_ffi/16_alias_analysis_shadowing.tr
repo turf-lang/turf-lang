@@ -11,7 +11,10 @@
 
 import io;
 
+@ownership(acquires)
 extern fn malloc(size: int): int*;
+
+@ownership(releases: p)
 extern fn free(p: int*): void;
 
 // (issue #238) Every raw `int*` local below needs `unsafe { }` around its

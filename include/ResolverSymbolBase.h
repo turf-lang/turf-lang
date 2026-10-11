@@ -44,6 +44,7 @@
 #ifndef RESOLVER_SYMBOL_BASE_H
 #define RESOLVER_SYMBOL_BASE_H
 
+#include "Annotation.h" // Annotation -- attached to ResolverFunctionSymbol
 #include "Lexer.h" // TOK_EQ/TOK_NEQ/TOK_LEQ/TOK_GEQ -- operator token constants, lightweight/no LLVM
 #include "Types.h" // TurfTypePtr, TurfType — pure C++ header, no LLVM
 
@@ -350,6 +351,21 @@ struct ResolverFunctionSymbol {
   /// flag intentionally has no corresponding entry in Params above (see
   /// FuncDefExprAST's own doc comment, ASTDecl.h, for why).
   bool                     HasCallerLocation = false;
+
+  /// The `@name(args)` annotations written on this declaration, in source
+  /// order (include/Annotation.h). A pass that consumes one asks the CALLEE'S
+  /// symbol, never its name, so a user function carries exactly the same
+  /// facts as a standard-library one.
+  std::vector<Annotation>  Annotations;
+
+  /// Every annotation on this declaration spelled `Name`.
+  std::vector<const Annotation *> annotationsNamed(const std::string &Name) const {
+    std::vector<const Annotation *> Out;
+    for (const auto &A : Annotations)
+      if (A.Name == Name)
+        Out.push_back(&A);
+    return Out;
+  }
 
   /// True if this is a struct instance method (Params[0].Name == "self")
   /// whose body directly assigns to a `self.<field>` somewhere. Computed

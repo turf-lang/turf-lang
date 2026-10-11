@@ -30,8 +30,16 @@ import sys;
 
 // ─── C allocator bindings ─────────────────────────────────────────────────────
 
+// `@ownership` is how the compiler's double-free / use-after-free check learns
+// what allocates and what releases: from these declarations, never from the
+// names `malloc` or `free`. Any function, in any module, can say the same.
+@ownership(acquires)
 pub extern fn malloc(size: int): void*;
+
+@ownership(acquires)
 pub extern fn calloc(count: int, size: int): void*;
+
+@ownership(acquires)
 pub extern fn realloc(p: void*, new_size: int): void*;
 
 // MEM-002: there used to be a plain `extern fn free(p: void*): void;` here,
@@ -62,6 +70,14 @@ pub extern fn posix_memalign(memptr: void*, alignment: int, size: int): int;
 // bytes are ACTUALLY usable at `p`, which is often more than what was
 // requested (malloc rounds up internally) -- useful for code that wants to
 // opportunistically use any slack space without a realloc.
+//
+// Darwin spells the same function `malloc_size`, so this declaration says so
+// with `@ffi(macos: ...)` and the compiler forwards to it there; the compiler
+// has no table of libc names. There is deliberately no `windows:` entry: the C
+// runtime's `_msize` is wrong for a block from posix_memalign (it corrupts the
+// heap), and libturfrt defines `malloc_usable_size` itself on Windows, so the
+// name binds to that.
+@ffi(macos: malloc_size)
 pub extern fn malloc_usable_size(p: void*): int;
 
 // ─── Memory primitive bindings ────────────────────────────────────────────────
@@ -74,6 +90,7 @@ pub extern fn memcmp(a: void*, b: void*, n: int): int;
 // ─── Turf-level safe helpers ──────────────────────────────────────────────────
 
 // alloc: allocate `size` bytes. Aborts on OOM.
+@ownership(acquires)
 pub fn alloc(size: int): void* {
     mut result: void* = malloc(size);
     if result == null {
@@ -83,6 +100,7 @@ pub fn alloc(size: int): void* {
 }
 
 // alloc_zeroed: allocate `count * elem_size` zero-initialised bytes. Aborts on OOM.
+@ownership(acquires)
 pub fn alloc_zeroed(count: int, elem_size: int): void* {
     mut result: void* = calloc(count, elem_size);
     if result == null {
@@ -92,6 +110,7 @@ pub fn alloc_zeroed(count: int, elem_size: int): void* {
 }
 
 // grow: reallocate `p` to `new_size` bytes. Aborts on OOM.
+@ownership(acquires)
 pub fn grow(p: void*, new_size: int): void* {
     mut result: void* = realloc(p, new_size);
     if result == null {
@@ -101,6 +120,7 @@ pub fn grow(p: void*, new_size: int): void* {
 }
 
 // dup: copy `n` bytes from `src` into a fresh heap buffer. Aborts on OOM.
+@ownership(acquires)
 pub fn dup(src: void*, n: int): void* {
     mut dst: void* = alloc(n);
     memcpy(dst, src, n);
@@ -116,6 +136,7 @@ pub fn zero(p: void*, n: int): void {
 // (`alignment` must be a power of two and a multiple of `sizeof(void*)`,
 // same requirement as the underlying posix_memalign()). Aborts on OOM or a
 // bad alignment argument, matching every other checked helper in this file.
+@ownership(acquires)
 pub fn alloc_aligned(alignment: int, size: int): void* {
     mut outSlot: void* = malloc(8);
     immut result: int = posix_memalign(outSlot, alignment, size);
@@ -137,6 +158,7 @@ pub fn alloc_aligned(alignment: int, size: int): void* {
 // runtime/turfrt.h's turf_rt_checked_free) is what turns that from
 // undiagnosed corruption into a diagnosable runtime panic naming the
 // mistake. Usage is unchanged from before this group: `mem::free(buf)`.
+@ownership(releases: p)
 pub fn free(p: void*): void {
     gc_checked_free(p);
 }

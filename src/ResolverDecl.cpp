@@ -21,6 +21,7 @@
 #include "ErrorsFlow.h"      // SemanticError
 #include "ResolverSymbolTable.h"
 #include "ResolverInternal.h"
+#include "AnnotationRegistry.h" // KnownAnnotations
 #include "SuggestionIndex.h" // SuggestionIndex::suggestVisible
 #include "Types.h"           // RankedSuggestions
 
@@ -74,11 +75,65 @@ static void rejectLocalVisibility(const VisibleDecl &D, int FunctionNestingDepth
         .raise();
 }
 
+/// Checks every annotation on a declaration. The Parser accepts any `@name`,
+/// so this is what stops a misspelt `@ownrship(acquires)` -- or a misspelt
+/// argument, `@ownership(aquires)` -- from silently turning a check off: an
+/// annotation no pass has claimed is an error with a "did you mean", and a
+/// claimed one is checked by the pass that owns it (AnnotationRegistry.h)
+/// against the parameters and return type it sits on.
+static void checkAnnotations(const AnnotatedDecl &Decl,
+                             const std::vector<std::pair<std::string, TurfTypePtr>> &Params,
+                             const TurfTypePtr &ReturnType, bool IsExtern) {
+  for (const Annotation &Ann : Decl.getAnnotations()) {
+    const auto &Known = KnownAnnotations();
+    const AnnotationSpec *Spec = nullptr;
+    std::vector<std::string> Names;
+    for (const auto &S : Known) {
+      Names.push_back(S.Name);
+      if (Ann.Name == S.Name)
+        Spec = &S;
+    }
+    if (!Spec) {
+      std::string Hint = "The known annotations are: ";
+      for (size_t I = 0; I < Names.size(); ++I)
+        Hint += (I ? ", @" : "@") + Names[I];
+      Hint += ".";
+      auto Near = SuggestionIndex::suggestVisible(Ann.Name, Names);
+      if (!Near.empty())
+        Hint = "Did you mean '@" + Near.front() + "'? " + Hint;
+      InvalidAnnotationError(Ann.Loc, "Unknown annotation '@" + Ann.Name + "'.",
+                             Hint)
+          .raise();
+      continue;
+    }
+    std::string Problem =
+        Spec->Validate(Ann, Params, ReturnType, IsExtern, Decl.getAnnotations());
+    if (!Problem.empty())
+      InvalidAnnotationError(Ann.Loc, Problem,
+                             "An annotation states a fact about the declaration "
+                             "under it (e.g. '@ownership(acquires)' on a "
+                             "function that returns a fresh allocation).")
+          .raise();
+  }
+}
+
+static void checkAnnotations(const FuncDefExprAST &Node) {
+  std::vector<std::pair<std::string, TurfTypePtr>> Params;
+  for (const auto &P : Node.getParams())
+    Params.emplace_back(P.Name, P.Type);
+  checkAnnotations(Node, Params, Node.getReturnTypePtr(), /*IsExtern=*/false);
+}
+
+static void checkAnnotations(const ExternFuncDeclExprAST &Node) {
+  checkAnnotations(Node, Node.getParams(), Node.getReturnType(), /*IsExtern=*/true);
+}
+
 void Resolver::visitFuncDef(FuncDefExprAST &Node) {
   if (FunctionNestingDepth_ > 0) {
     NestedFunctionError(Node.getLoc(), Node.getName()).raise();
     return;
   }
+  checkAnnotations(Node);
 
   // LEC-002 stage 5: a `pub` signature may not mention this module's private
   // types. The receiver (`self`) is skipped: a `pub` method of a private type
@@ -923,6 +978,7 @@ void Resolver::visitModuleImport(ModuleImportExprAST &Node) {
 // §8 LANG-004: "Low value, but it is one switch case").
 void Resolver::visitExternFuncDecl(ExternFuncDeclExprAST &Node) {
   rejectLocalVisibility(Node, FunctionNestingDepth_);
+  checkAnnotations(Node);
   for (const auto &[ParamName, ParamType] : Node.getParams())
     validateNamedType(ParamType, Node.getLoc());
   validateNamedType(Node.getReturnType(), Node.getLoc());
@@ -936,15 +992,6 @@ void Resolver::visitExternFuncDecl(ExternFuncDeclExprAST &Node) {
     checkNoPrivateInPublic(Node.getNameLoc(), "extern function", Node.getName(), Mentioned);
   }
 
-  if (FunctionNestingDepth_ > 0) {
-    ResolverFunctionSymbol Sym;
-    Sym.BaseName = Node.getName();
-    Sym.SourceModule = ""; // extern fns are in the global (file) namespace
-    Sym.ReturnType = Node.getReturnType();
-    Sym.IsExtern = true; // see IsExtern's doc comment in ResolverSymbolTable.h
-    Sym.IsVarArg = Node.isVarArg();
-    for (const auto &[PName, PType] : Node.getParams())
-      Sym.Params.push_back({PName, PType});
-    SymTable_.registerCurrentFileFunction(Sym);
-  }
+  if (FunctionNestingDepth_ > 0)
+    SymTable_.registerCurrentFileFunction(buildExternSymbol(Node, ""));
 }

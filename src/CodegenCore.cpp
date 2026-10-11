@@ -999,7 +999,7 @@ const TurfType *getExprType(const ExprAST *E) {
     if (VarCallee || ScopeCallee) {
       std::string CalleeName = VarCallee ? VarCallee->getName() : ScopeCallee->getRightName();
 
-      if (CalleeName == "typeof")
+      if (FuncCall->isIntrinsic(BareIntrinsic::TypeOf))
         return TurfString().get();
 
       // MEM-001: gc_alloc/gc_alloc_zeroed/gc_realloc always evaluate to a
@@ -1008,8 +1008,9 @@ const TurfType *getExprType(const ExprAST *E) {
       // intrinsics with no ResolverFunctionSymbol/FuncReturnTypes entry, so
       // falling through to the mangled-name reconstruction below would just
       // fail to find one and return nullptr instead of the real answer).
-      if (CalleeName == "gc_alloc" || CalleeName == "gc_alloc_zeroed" ||
-          CalleeName == "gc_realloc") {
+      if (FuncCall->isIntrinsic(BareIntrinsic::GcAlloc) ||
+          FuncCall->isIntrinsic(BareIntrinsic::GcAllocZeroed) ||
+          FuncCall->isIntrinsic(BareIntrinsic::GcRealloc)) {
         static const TurfPointerType VoidPtrTy(TurfVoid());
         return &VoidPtrTy;
       }
@@ -1026,7 +1027,7 @@ const TurfType *getExprType(const ExprAST *E) {
       // or a long-lived GlobalSymbolTable/ResolvedSymbol entry, per every
       // branch in this function -- so aliasing it with a no-op deleter is
       // safe: nothing here ever outlives what InnerTy already points at).
-      if (CalleeName == "heap") {
+      if (FuncCall->isIntrinsic(BareIntrinsic::Heap)) {
         const TurfType *InnerTy = getExprType(FuncCall->getArgs()[0].get());
         if (!InnerTy)
           return nullptr;
@@ -1051,7 +1052,7 @@ const TurfType *getExprType(const ExprAST *E) {
       // gc_collect() returns void, which needs no branch here at all --
       // getExprType() is only ever asked about a VALUE-producing
       // expression, and a bare `gc_collect();` statement is never one.
-      if (CalleeName == "gc_is_managed") {
+      if (FuncCall->isIntrinsic(BareIntrinsic::GcIsManaged)) {
         static const BoolType BoolTy;
         return &BoolTy;
       }
@@ -1194,11 +1195,6 @@ const TurfType *getExprType(const ExprAST *E) {
           }
         }
       }
-      // Fallback for intrinsic path: malloc/realloc return ptr, free returns void
-      if (CalleeName == "malloc" || CalleeName == "realloc")
-        return TurfPtr().get();
-      if (CalleeName == "free")
-        return TurfVoid().get();
     }
     return nullptr;
   }
@@ -1367,16 +1363,6 @@ const TurfType *getExprType(const ExprAST *E) {
       }
     }
 
-    if (MethodCall->getMethod() == "pop" || MethodCall->getMethod() == "peek" ||
-        MethodCall->getMethod() == "dequeue") {
-      // For a concrete generic instantiation like List<int>, return the
-      // first type argument as the element type so callers know how to
-      // un-erase the returned void* back to the concrete type.
-      if (auto *GenTy = dynamic_cast<const GenericType *>(BaseTy)) {
-        if (!GenTy->getTypeArgs().empty())
-          return GenTy->getTypeArg(0);
-      }
-    }
     // Resolve a GenericType base (e.g. List<int>) to its underlying
     // TurfStructType, mirroring the NamedType unwrap just above -- without
     // this, the general lookup just below (which only matches

@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: names the platform 'linux' twice
+// Only one symbol can be forwarded to per platform; a second entry used to be
+// silently ignored.
+
+@ffi(linux: strlen, linux: strnlen)
+extern fn text_length(s: string): int;
+
+fn main(): int {
+    return 0;
+}

@@ -460,6 +460,23 @@ static void CollectReturnedErrorTypeNames(
 
 
 ResolverFunctionSymbol
+Resolver::buildExternSymbol(const ExternFuncDeclExprAST &Node,
+                            const std::string &ModuleName) const {
+  ResolverFunctionSymbol Sym;
+  Sym.BaseName = Node.getName();
+  Sym.SourceModule = ModuleName;
+  Sym.ReturnType = Node.getReturnType();
+  Sym.IsExtern = true; // see IsExtern's doc comment in ResolverSymbolTable.h
+  Sym.IsVarArg = Node.isVarArg(); // propagate '...' to the arity check
+  Sym.IsPublic = Node.isPublic();
+  Sym.Annotations = Node.getAnnotations();
+  Sym.DeclLoc = {Node.getNameLoc().Line, Node.getNameLoc().Col};
+  for (const auto &[PName, PType] : Node.getParams())
+    Sym.Params.push_back({PName, PType});
+  return Sym;
+}
+
+ResolverFunctionSymbol
 Resolver::buildFunctionSymbol(const FuncDefExprAST &Node,
                               const std::string &ModuleName) const {
   ResolverFunctionSymbol Sym;
@@ -475,6 +492,7 @@ Resolver::buildFunctionSymbol(const FuncDefExprAST &Node,
   Sym.TypeParams = TypeParams;
   Sym.Decl = &Node; // see ResolverFunctionSymbol::Decl
   Sym.HasCallerLocation = Node.hasCallerLocation();
+  Sym.Annotations = Node.getAnnotations();
   Sym.IsPublic = Node.isPublic();
   ResolverSourceLocation DeclLoc;
   // getNameLoc(), not getLoc() -- getLoc() is the 'fn'/'operator' keyword's
@@ -833,17 +851,8 @@ void Resolver::hoistTopLevel(const ExprAST *Node) {
   // current-file function registry with an IsExtern flag so forward-calling
   // code can resolve the name.  No body exists, so no body recursion.
   if (const auto *Extern = dynamic_cast<const ExternFuncDeclExprAST *>(Node)) {
-    ResolverFunctionSymbol Sym;
-    Sym.BaseName = Extern->getName();
-    Sym.SourceModule = ""; // extern fns are in the global (file) namespace
-    Sym.ReturnType = Extern->getReturnType();
-    Sym.IsExtern    = true; // see IsExtern's doc comment in ResolverSymbolTable.h
-    Sym.IsVarArg    = Extern->isVarArg(); // propagate '...' to arity check
-    Sym.IsPublic    = Extern->isPublic();
-    Sym.DeclLoc     = {Extern->getNameLoc().Line, Extern->getNameLoc().Col};
-    for (const auto &[PName, PType] : Extern->getParams())
-      Sym.Params.push_back({PName, PType});
-    SymTable_.registerCurrentFileFunction(Sym);
+    // "" = the global (file) namespace
+    SymTable_.registerCurrentFileFunction(buildExternSymbol(*Extern, ""));
     return;
   }
 
@@ -887,17 +896,8 @@ void Resolver::hoistModuleBody(const ExprAST *Body,
       registerFunctionSignature(*Func, ModuleName);
     } else if (const auto *Extern =
                    dynamic_cast<const ExternFuncDeclExprAST *>(Expr.get())) {
-      ResolverFunctionSymbol Sym;
-      Sym.BaseName = Extern->getName();
-      Sym.SourceModule = ModuleName;
-      Sym.ReturnType = Extern->getReturnType();
-      Sym.IsExtern = true; // see IsExtern's doc comment in ResolverSymbolTable.h
-      Sym.IsVarArg = Extern->isVarArg();
-      Sym.IsPublic = Extern->isPublic();
-      Sym.DeclLoc = {Extern->getNameLoc().Line, Extern->getNameLoc().Col};
-      for (const auto &[PName, PType] : Extern->getParams())
-        Sym.Params.push_back({PName, PType});
-      SymTable_.registerModuleFunction(ModuleName, Sym);
+      SymTable_.registerModuleFunction(ModuleName,
+                                       buildExternSymbol(*Extern, ModuleName));
     } else if (const auto *Import =
                    dynamic_cast<const ModuleImportExprAST *>(Expr.get())) {
       // Nested module imports (unusual but possible)

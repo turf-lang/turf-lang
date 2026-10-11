@@ -24,6 +24,7 @@
 #include "Errors.h"
 #include "Analysis.h"
 #include "AliasAnalysis.h"
+#include "FfiAnnotation.h"
 #include "Lexer.h"
 #include "ValueRange.h"
 #include "Lint.h"
@@ -51,6 +52,11 @@ static std::map<std::string, SourceLocation> ExternDeclLocations;
 // Populated during codegen; consumed by main.cpp::linkObject() (which has its
 // own separate `extern std::set<std::string> g_RequiredLibs;` declaration).
 std::set<std::string> g_RequiredLibs;
+
+// The platform key `@ffi` is read for (include/FfiAnnotation.h): the host's,
+// unless main.cpp sets the `--target` platform before code generation (it has
+// its own separate `extern std::string g_FfiPlatform;` declaration).
+std::string g_FfiPlatform = FfiAnnotation::hostPlatformKey();
 
 // ─── argv/argc plumbing for main ───────────────────────────────────────────
 // Turf's `main` is compiled directly AS the real C-ABI `main` (no wrapper --
@@ -603,104 +609,9 @@ Value *FuncDefExprAST::codegen() {
     // Store CFG for later use (push before analyses so it survives raises)
     GlobalCFGs.push_back(std::move(FuncCFG));
 
-    // Run flow analysis and report diagnostics (will raise error for missing
-    // returns in non-void)
-    CFG *CfgPtr = GlobalCFGs.back().get();
-    CfgPtr->reportFlowDiagnostics();
-
-    // CFG Phase 1 (Issue #185): Cyclomatic complexity check.
-    // M = E - N + 2P; threshold 15. Warning only — does not stop compilation.
-    int M = CfgPtr->calculateCyclomaticComplexity();
-    if (M > 15)
-      CyclomaticComplexityWarning(Loc, Name, M).emit();
-
-    // CFG Phase 1 (Issue #185): Infinite loop detection.
-    // A back-edge cycle with no Break/Return terminator AND no outside-cycle
-    // successor means the loop can never exit. Warning only.
-    if (CfgPtr->hasUnbreakableLoop())
-      InfiniteLoopWarning(Loc, Name).emit();
-
-    // Run definite-assignment analysis (parameters are considered assigned)
-    DefiniteAssignmentPass DAP;
-    DAP.runOnCFG(*CfgPtr, ParamIDs);
-
-    // Run value-range (constant) propagation
-    ValueRangePass VRP;
-    VRP.runOnCFG(*CfgPtr, ParamIDs);
-
-    // Run alias/lifetime analysis (detect use-after-free, double-free)
-    AliasAnalysisPass AAP;
-    AAP.runOnCFG(*CfgPtr, ParamIDs);
-
-    // LANG-002: nullable-reference (&?T) dereference/narrowing analysis.
-    // Same pipeline position as every other CFG pass here -- after the
-    // TypeChecker has already validated the STATIC shape of every &?T use
-    // (typesCompatible()'s rules, Types.cpp), this pass is what verifies the
-    // FLOW-sensitive half: was a `p != null`/`p == null` check actually
-    // proven on the path reaching each `.field` access or `to &T` cast.
-    NullabilityPass NP;
-    NP.runOnCFG(*CfgPtr);
-
-    // FDN-002 (docs/development/changes/FDN-002.md; FREEZE.md §6.13,
-    // F-MEM-5): reference/array escape analysis -- a Stack-provenance
-    // reference (points into THIS frame) can't reach a return, a field of a
-    // longer-lived object, a collection mutator/operator[]=, or heap()'s
-    // own operand. Same pipeline position as NullabilityPass just above:
-    // after the TypeChecker has validated every reference's STATIC shape,
-    // this is the FLOW-sensitive half.
-    EscapePass EP;
-    EP.runOnCFG(*CfgPtr);
-
-    // CFG Phase 2 (Issue #186): Liveness analysis (dead stores & unused vars).
-    // Collect parameter VariableSymbol* pointers to exclude from warnings.
-    {
-      std::unordered_set<const VariableSymbol *> ParamSyms;
-      // Parameters are registered in the body scope; their ResolvedSymbols
-      // are attached to the parameter VarDeclExprAST nodes created by Codegen.
-      // We collect them via the ParamIDs workaround already used by DAP:
-      // iterate GlobalSymbolTable for the current function's param entries.
-      // (Implementation detail: we use the same ParamIDs vector already
-      //  available at this point in FuncDefExprAST::codegen().)
-      // NOTE: The simplest correct approach: build ParamSyms by walking the
-      // function params from the FuncDefExprAST node directly (Params_ vector),
-      // using the ResolvedSymbol attached to each param's VarDeclExprAST.
-      // This mirrors exactly how DefiniteAssignmentPass receives InitialAssigned.
-      // For now, pass an empty set — parameters are excluded by AllBodyDeclared
-      // (they don't appear in VarDeclExprAST nodes in the body).
-      LivenessAnalysisPass LAP;
-      LAP.runOnCFG(*CfgPtr, ParamSyms);
-    }
-
-    // CFG Phase 2 (Issue #186): Infinite recursion detection.
-    // Check if every path from entry to exit passes through a self-call.
-    // This is a fatal error — infinite recursion guarantees a stack overflow.
-    if (CfgPtr->allPathsRecurse()) {
-      RecursionWithoutBaseError(Loc, Name).raise();
-    }
-
-    // Constructor field-assignment analysis: `fn StructName.new(...): void`
-    // must assign every field of StructName on every path (see
-    // ConstructorFieldAssignmentPass, Analysis.h/Analysis.cpp). The
-    // internal name suffix ".new" unambiguously identifies a real
-    // constructor here -- Resolver::visitFuncDef already guarantees 'new'
-    // can never be declared 'static' and 'default' can never be declared
-    // by hand at all, so nothing else can produce this exact suffix on a
-    // struct-bound method.
-    {
-      size_t Dot = Name.rfind('.');
-      if (Dot != std::string::npos && Name.substr(Dot + 1) == "new") {
-        std::string CtorStructName = Name.substr(0, Dot);
-        TurfTypePtr CtorStructT =
-            GlobalSymbolTable ? GlobalSymbolTable->LookupType(CtorStructName) : nullptr;
-        if (auto *CtorSType = dynamic_cast<TurfStructType *>(CtorStructT.get())) {
-          std::vector<std::string> FieldNames;
-          for (const auto &F : CtorSType->getFields())
-            FieldNames.push_back(F.Name);
-          ConstructorFieldAssignmentPass CFAP;
-          CFAP.runOnCFG(*CfgPtr, CtorStructName, FieldNames, Loc);
-        }
-      }
-    }
+    // Every flow check (missing return, definite assignment, E017/E018, ...),
+    // shared with the query facade (Analysis.h).
+    runFunctionFlowPasses(*GlobalCFGs.back(), Name, Loc, ParamIDs);
   }
 
   // Emit a return if the block has no terminator yet.
@@ -790,35 +701,24 @@ Value *FuncDefExprAST::codegen() {
 // successfully on glibc/Linux -- confirmed via a real link failure
 // ("Undefined symbols ... _malloc_usable_size") on macOS/arm64.
 //
-// Rather than push platform knowledge into every extern declaration site
-// (there's only this one case today), ExternFuncDeclExprAST::codegen()
-// consults this small, explicit table for the specific extern name being
-// declared and, if the HOST platform this compiler itself was built for
-// has a same-signature equivalent under a different name, emits a
-// one-line DEFINED wrapper under the Turf-visible name that forwards to
-// the real platform symbol -- instead of a bare external declaration.
+// The declaration itself says so: `@ffi(macos: malloc_size)` on the extern
+// (include/FfiAnnotation.h). ExternFuncDeclExprAST::codegen() asks the
+// declaration for a forwarding target on the platform being compiled for
+// (g_FfiPlatform) and, if there is one, emits a one-line DEFINED wrapper under the
+// Turf-visible name that forwards to the real platform symbol -- instead of a
+// bare external declaration. There used to be a table of libc names in this
+// file that did the same; no compiler table keyed on a function's name
+// remains (CONSTITUTION.md, Article V).
+//
 // Every other extern-fn code path (call resolution, the symbol table,
 // FuncParamTypes/FuncReturnTypes) keeps treating this exactly like an
 // ordinary external declaration; only this one function's LLVM IR shape
 // (defined body vs. no body) differs.
 //
-// Returns the real symbol to forward `Name` to, or empty if `Name` needs
-// no remapping on this platform (either because the literal libc name
-// already resolves here, or because `Name` isn't one of the small set of
-// known-portability-hazard symbols this table covers).
-static std::string PlatformExternForward(const std::string &Name) {
-#if defined(__APPLE__)
-  if (Name == "malloc_usable_size")
-    return "malloc_size";
-#elif defined(_WIN32)
-  // Same void* -> size_t shape as malloc_usable_size(); MSVC CRT's name
-  // for it. Untested on Windows in this environment -- guarded behind
-  // _WIN32 so it can only ever affect a Windows build, never Linux/macOS.
-  if (Name == "malloc_usable_size")
-    return "_msize";
-#endif
-  (void)Name;
-  return "";
+// Returns the real symbol to forward to, or empty if the declaration names
+// none for this platform.
+static std::string PlatformExternForward(const ExternFuncDeclExprAST &Decl) {
+  return FfiAnnotation::forwardTarget(Decl, g_FfiPlatform);
 }
 
 
@@ -859,32 +759,19 @@ Value *ExternFuncDeclExprAST::codegen() {
   // declaration came first UNCONDITIONALLY, with no signature check at
   // all, silently binding any call resolved against a conflicting second
   // declaration to the first one's real (different) LLVM type.
-  if (Function *Existing = TheModule->getFunction(Name_)) {
-    if (Existing->getFunctionType() != FT) {
-      auto It = ExternDeclLocations.find(Name_);
-      auto Err = ConflictingExternDeclarationError(Loc_, Name_);
-      if (It != ExternDeclLocations.end())
-        Err.withRelated(It->second, "first declared here");
-      Err.raise();
-    }
-    return Existing;
-  }
-  ExternDeclLocations[Name_] = Loc_;
-
-  Function *F;
-  std::string ForwardTo = PlatformExternForward(Name_);
-  if (!ForwardTo.empty()) {
-    // This platform doesn't export `Name_` under that literal name --
-    // declare the real symbol (same FT, since it's a documented
-    // same-signature equivalent) and define Name_ as a one-line wrapper
-    // that forwards every argument to it. See PlatformExternForward()'s
-    // doc comment for why this happens here instead of at the call site.
+  // This platform doesn't export `Name_` under that literal name -- declare
+  // the real symbol (same FT, since it's a documented same-signature
+  // equivalent) and give `F` a one-line body that forwards every argument to
+  // it. See PlatformExternForward()'s doc comment for why this happens here
+  // instead of at the call site.
+  std::string ForwardTo = PlatformExternForward(*this);
+  if (ForwardTo == Name_)
+    ForwardTo.clear(); // `@ffi(linux: f)` on `f` itself: a wrapper would call itself
+  auto defineForwarder = [&](Function *F) {
     Function *RealF = TheModule->getFunction(ForwardTo);
     if (!RealF)
       RealF = Function::Create(FT, Function::ExternalLinkage, ForwardTo,
                                TheModule.get());
-
-    F = Function::Create(FT, Function::ExternalLinkage, Name_, TheModule.get());
     BasicBlock *WrapperBB = BasicBlock::Create(*TheContext, "entry", F);
     IRBuilder<> WrapperBuilder(WrapperBB);
     std::vector<Value *> ForwardArgs;
@@ -895,10 +782,30 @@ Value *ExternFuncDeclExprAST::codegen() {
       WrapperBuilder.CreateRetVoid();
     else
       WrapperBuilder.CreateRet(ForwardResult);
-  } else {
-    // Create with ExternalLinkage — no body block is created.
-    F = Function::Create(FT, Function::ExternalLinkage, Name_, TheModule.get());
+  };
+
+  if (Function *Existing = TheModule->getFunction(Name_)) {
+    if (Existing->getFunctionType() != FT) {
+      auto It = ExternDeclLocations.find(Name_);
+      auto Err = ConflictingExternDeclarationError(Loc_, Name_);
+      if (It != ExternDeclLocations.end())
+        Err.withRelated(It->second, "first declared here");
+      Err.raise();
+    }
+    // The `@ffi` forwarding is a fact about the C symbol, so it holds whichever
+    // declaration of it carries the annotation: an earlier, unannotated one
+    // (still a bare declaration) gets the forwarding body now.
+    if (!ForwardTo.empty() && Existing->isDeclaration())
+      defineForwarder(Existing);
+    return Existing;
   }
+  ExternDeclLocations[Name_] = Loc_;
+
+  // Create with ExternalLinkage — no body block unless it forwards.
+  Function *F =
+      Function::Create(FT, Function::ExternalLinkage, Name_, TheModule.get());
+  if (!ForwardTo.empty())
+    defineForwarder(F);
 
   // Name the parameters for IR readability.
   unsigned Idx = 0;
@@ -1184,7 +1091,7 @@ Value *FuncCallExprAST::codegen() {
   // mem::alloc?"). `typeof` is the only real intrinsic left (`lengthof`
   // was the other one -- STRING_UFCS_OPERATOR_CHAR_RFC.md §7 step 7 deleted
   // it, `strings::length(s)` is the real replacement).
-  if (CalleeName == "typeof") {
+  if (isIntrinsic(BareIntrinsic::TypeOf)) {
 
     std::vector<Value *> ArgVals;
     for (auto &Arg : Args) {
@@ -1231,8 +1138,9 @@ Value *FuncCallExprAST::codegen() {
   // null pointer -- MEM-002 defines that as "opaque, no pointer words
   // traced", correct (not a fallback) for a raw byte buffer like a string
   // (see turf_rt_alloc's own doc comment in runtime/turfrt.h).
-  if (CalleeName == "gc_alloc" || CalleeName == "gc_alloc_zeroed" ||
-      CalleeName == "gc_realloc") {
+  if (isIntrinsic(BareIntrinsic::GcAlloc) ||
+      isIntrinsic(BareIntrinsic::GcAllocZeroed) ||
+      isIntrinsic(BareIntrinsic::GcRealloc)) {
     PointerType *PtrTy = PointerType::getUnqual(*TheContext);
     Type *I64Ty = Type::getInt64Ty(*TheContext);
     Value *DescArg = PendingGCAllocDescOverride
@@ -1240,7 +1148,7 @@ Value *FuncCallExprAST::codegen() {
                           : (Value *)ConstantPointerNull::get(PtrTy);
     PendingGCAllocDescOverride = nullptr;
 
-    if (CalleeName == "gc_realloc") {
+    if (isIntrinsic(BareIntrinsic::GcRealloc)) {
       Value *PVal = Args[0]->codegen();
       Value *NVal = Args[1]->codegen();
       if (!PVal || !NVal)
@@ -1259,7 +1167,7 @@ Value *FuncCallExprAST::codegen() {
     if (!NVal)
       return nullptr;
     const char *RtFuncName =
-        (CalleeName == "gc_alloc") ? "turf_rt_alloc" : "turf_rt_alloc_zeroed";
+        isIntrinsic(BareIntrinsic::GcAlloc) ? "turf_rt_alloc" : "turf_rt_alloc_zeroed";
     Function *AllocFunc = TheModule->getFunction(RtFuncName);
     if (!AllocFunc) {
       FunctionType *FT =
@@ -1273,7 +1181,7 @@ Value *FuncCallExprAST::codegen() {
   // ── gc_collect() / gc_is_managed(p) ───────────────────────────────────────
   // MEM-002. Same dispatch shape as gc_alloc above -- bare intrinsics, no
   // ResolvedCallTarget/MangledName.
-  if (CalleeName == "gc_collect") {
+  if (isIntrinsic(BareIntrinsic::GcCollect)) {
     Function *CollectFunc = TheModule->getFunction("turf_rt_collect");
     if (!CollectFunc) {
       FunctionType *FT =
@@ -1283,7 +1191,7 @@ Value *FuncCallExprAST::codegen() {
     }
     return Builder->CreateCall(CollectFunc, {});
   }
-  if (CalleeName == "gc_is_managed") {
+  if (isIntrinsic(BareIntrinsic::GcIsManaged)) {
     PointerType *PtrTy = PointerType::getUnqual(*TheContext);
     Value *PVal = Args[0]->codegen();
     if (!PVal)
@@ -1301,7 +1209,7 @@ Value *FuncCallExprAST::codegen() {
         IntResult, ConstantInt::get(Type::getInt32Ty(*TheContext), 0),
         "gc_is_managed");
   }
-  if (CalleeName == "gc_checked_free") {
+  if (isIntrinsic(BareIntrinsic::GcCheckedFree)) {
     PointerType *PtrTy = PointerType::getUnqual(*TheContext);
     Value *PVal = Args[0]->codegen();
     if (!PVal)
@@ -1316,13 +1224,13 @@ Value *FuncCallExprAST::codegen() {
     }
     return Builder->CreateCall(CheckedFreeFunc, {PVal});
   }
-  if (CalleeName == "gc_pin" || CalleeName == "gc_unpin") {
+  if (isIntrinsic(BareIntrinsic::GcPin) || isIntrinsic(BareIntrinsic::GcUnpin)) {
     PointerType *PtrTy = PointerType::getUnqual(*TheContext);
     Value *PVal = Args[0]->codegen();
     if (!PVal)
       return nullptr;
     const char *RtFuncName =
-        (CalleeName == "gc_pin") ? "turf_rt_pin" : "turf_rt_unpin";
+        isIntrinsic(BareIntrinsic::GcPin) ? "turf_rt_pin" : "turf_rt_unpin";
     Function *PinFunc = TheModule->getFunction(RtFuncName);
     if (!PinFunc) {
       FunctionType *FT = FunctionType::get(Type::getVoidTy(*TheContext),
@@ -1339,7 +1247,7 @@ Value *FuncCallExprAST::codegen() {
   // -- but the actual allocation logic (size + real TurfTypeDesc selection +
   // turf_rt_alloc + store) is shared with BoxToI64Slot()'s identical
   // aggregate-boxing need, via HeapAllocateValue() (CodegenCore.cpp).
-  if (CalleeName == "heap") {
+  if (isIntrinsic(BareIntrinsic::Heap)) {
     Value *ArgVal = Args[0]->codegen();
     if (!ArgVal)
       return nullptr;

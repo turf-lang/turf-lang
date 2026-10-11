@@ -2,6 +2,7 @@
 #define AST_DECL_H
 
 #include "AST.h"
+#include "Annotation.h"
 
 
 // Which of the four `import` forms this statement used. Bare is the
@@ -191,7 +192,7 @@ public:
 };
 
 // fn RetType Name<T>(params...) { body }
-class FuncDefExprAST : public ExprAST, public VisibleDecl {
+class FuncDefExprAST : public ExprAST, public VisibleDecl, public AnnotatedDecl {
   std::string Name;
   TurfTypePtr ReturnType;
   std::vector<ParamDecl> Params;
@@ -299,6 +300,7 @@ public:
         Loc, Name, NameLoc, ReturnType, Params, CloneExprAST(Body.get()), TypeParams,
         IsStaticDecl, HasCallerLocation);
     Cloned->setVisibility(getVisibility());
+    Cloned->setAnnotations(getAnnotations());
     Cloned->UsesTry = UsesTry;
     return Cloned;
     // Note: ResolvedDef is intentionally NOT copied — cloned ASTs are stale
@@ -309,7 +311,7 @@ public:
 // extern fn Name(param: type, ...): ReturnType;
 // Declares a C external function visible to this compilation unit.
 // No function body is generated — only an LLVM ExternalLinkage prototype.
-class ExternFuncDeclExprAST : public ExprAST, public VisibleDecl {
+class ExternFuncDeclExprAST : public ExprAST, public VisibleDecl, public AnnotatedDecl {
   std::string Name_;
   std::vector<std::pair<std::string, TurfTypePtr>> Params_;
   TurfTypePtr ReturnType_;
@@ -343,6 +345,7 @@ public:
     auto Cloned = std::make_unique<ExternFuncDeclExprAST>(
         Loc_, Name_, NameLoc_, Params_, ReturnType_, IsVarArg_, LibName_);
     Cloned->setVisibility(getVisibility());
+    Cloned->setAnnotations(getAnnotations());
     return Cloned;
   }
 };
