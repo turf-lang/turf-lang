@@ -31,9 +31,26 @@ public:
   /// price: `accept()` is non-const but every AST getter hands out const
   /// pointers.
   void visitChild(const ExprAST *Node) {
-    if (Node)
-      const_cast<ExprAST *>(Node)->accept(*this);
+    if (!Node)
+      return;
+    // Optional depth fence (see AstDepthExceeds()): past the limit it records
+    // the fact and stops descending, so the walk itself never goes deeper than
+    // the limit. Unlimited (0) for every ordinary pass.
+    if (DepthLimit_ && Depth_ >= DepthLimit_) {
+      TooDeep_ = true;
+      return;
+    }
+    ++Depth_;
+    const_cast<ExprAST *>(Node)->accept(*this);
+    --Depth_;
   }
+
+protected:
+  int DepthLimit_ = 0;
+  int Depth_ = 0;
+  bool TooDeep_ = false;
+
+public:
 
   // ── Leaves: no child expressions ──────────────────────────────────────────
   void visitNumber(NumberExprAST &) override {}
@@ -222,6 +239,33 @@ inline void CollectAllNodeIDsInternal(const ExprAST *Node,
     return;
   ASTNodeIDCollector Collector(NodeIDs);
   const_cast<ExprAST *>(Node)->accept(Collector);
+}
+
+
+/// Walks an expression tree and reports whether it is deeper than @p Limit
+/// levels. The walk is recursive like every other, but fenced: it stops
+/// descending at the limit, so it uses at most @p Limit levels of stack
+/// however deep the tree is -- the property no ordinary pass has.
+///
+/// Why this exists: the parser bounds *recursion* (ParseRecursionGuard) and
+/// postfix-chain length, not the depth of the tree it builds, and a tree built
+/// from finished pieces -- `(((n--…--)--…--)--…--)`, each piece within the
+/// limit -- is as deep as their sum. Every later pass recurses over the tree,
+/// so such a tree segfaulted the type checker (exit 139) with no diagnostic.
+/// The check is made once per top-level declaration, before anything recurses
+/// over it (AppendFlattenedTopLevelDecl()).
+class AstDepthProbe : public ASTChildWalker {
+public:
+  explicit AstDepthProbe(int Limit) { DepthLimit_ = Limit; }
+  bool exceeded(const ExprAST *Root) {
+    visitChild(Root);
+    return TooDeep_;
+  }
+};
+
+inline bool AstDepthExceeds(const ExprAST *Root, int Limit) {
+  AstDepthProbe Probe(Limit);
+  return Probe.exceeded(Root);
 }
 
 #endif // AST_CHILD_WALKER_H

@@ -273,6 +273,8 @@ static int GetTokPrecedence() {
 // Handles primitives, void, generics like list<int>, and arrays like int[5].
 // Trailing [N] brackets are consumed here, making array types fully
 // first-class. Returns nullptr on failure.
+bool g_AllowGuessType = false;
+
 TurfTypePtr ParseType() {
   // Recurses into itself directly (generic type args, `!T` error unions,
   // pointer types) without ever going back through ParseExpression() --
@@ -410,6 +412,25 @@ TurfTypePtr ParseType() {
     // above. TypeChecker::visitVarDecl replaces it with the initializer's
     // real type; nothing between here and there ever inspects it beyond
     // the isGuess() checks ParseLetStatement/Resolver/TypeChecker add.
+    //
+    // F-GUESS-3 (FREEZE.md §6.3): inference is for a local variable's
+    // initializer only -- never a parameter, return type, struct field, error
+    // payload or generic argument, none of which has an initializer. This used
+    // to parse everywhere, and what the user then saw depended on the position:
+    // a struct field `x: guess` compiled, a parameter failed at the CALL with
+    // "No matching overload", a return type with "declares 'guess' but returns
+    // 'int'". Found while anchoring the conformance map to the frozen
+    // decisions (REL-004). Only the local-declaration parse sets the flag.
+    if (!g_AllowGuessType) {
+      LogErrorAt(CurLoc, ErrCode::MissingInitializer,
+                 "'guess' needs an initializer to infer from, so it can only "
+                 "declare a local variable."
+                 "\n  Hint: a parameter, return type or struct field has no "
+                 "initializer; write its type, e.g. `x: int`.",
+                 SLM::ErrorCategory::DECLARATION);
+      getNextToken(); // consume 'guess' so the caller's recovery starts after it
+      return nullptr;
+    }
     getNextToken(); // consume 'guess'
     return TurfGuess();
   }
@@ -1124,6 +1145,21 @@ std::unique_ptr<ExprAST> ParseExpression() {
   auto LHS = ParseUnary();
   if (!LHS)
     return nullptr;
+
+  // A declaration is a whole statement, never the left operand of anything:
+  // `fn f(): int { return 0; } % 5` must not read the `%` as an operator and
+  // pull the NEXT declaration in as its right-hand side. That was the cause
+  // of `import test %` hiding `main` and printing an error from inside
+  // lib/std (the import case now has its own entry point, ParseImport(); this
+  // closes the same hole for the declarations ParseExpression() still builds).
+  if (dynamic_cast<FuncDefExprAST *>(LHS.get()) ||
+      dynamic_cast<StructDeclExprAST *>(LHS.get()) ||
+      dynamic_cast<EnumDeclExprAST *>(LHS.get()) ||
+      dynamic_cast<ErrorDeclExprAST *>(LHS.get()) ||
+      dynamic_cast<MachineDeclExprAST *>(LHS.get()) ||
+      dynamic_cast<ExternFuncDeclExprAST *>(LHS.get()) ||
+      dynamic_cast<ModuleImportExprAST *>(LHS.get()))
+    return LHS;
 
   LHS = ParseBinOpRHS(0, std::move(LHS));
   if (!LHS)

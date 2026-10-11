@@ -18,3 +18,11 @@ Either give the variable its value, or -- for a `mut` variable whose value comes
 
     mut x: int;
     x = 5;
+
+`guess` only works on a local variable that is given its value on the same line. A function's parameters, its return type and a struct's fields have no value to look at, so there you always write the type:
+
+    fn double_it(x: guess): int { ... }       // x: guess has nothing to infer from
+    fn double_it(x: int): int { ... }
+
+    struct Counter { count: guess }           // so does a field
+    struct Counter { count: int }

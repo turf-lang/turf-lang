@@ -139,7 +139,28 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
   const bool StopAtPatternCall = PatternHeadCallPending;
   PatternHeadCallPending = false;
 
+  // A postfix chain is parsed by this LOOP, not by recursion, so
+  // ParseRecursionGuard never saw it -- yet each link wraps the previous one,
+  // so `0` followed by 100000 `--` is an AST 100000 deep and the first
+  // recursive visitor (the type checker, found by the REL-004 fuzzer) overflows
+  // the C++ stack: a segfault where a clean E111 belongs. Every link therefore
+  // counts against the same depth budget as nesting does, and gives it back
+  // when the chain ends.
+  struct ChainDepth {
+    int Links = 0;
+    ~ChainDepth() { g_parseRecursionDepth -= Links; }
+  } Chain;
+
   while (true) {
+    ++g_parseRecursionDepth;
+    ++Chain.Links;
+    if (g_parseRecursionDepth > MaxParseRecursionDepth) {
+      LogErrorAt(CurLoc, ErrCode::NestingTooDeep,
+                 "Expression nested too deeply to parse."
+                 "\n  Hint: check for a runaway chain of '.', '[]', '()' or '++'/'--'.",
+                 SLM::ErrorCategory::SYNTAX_ERROR);
+      return nullptr;
+    }
     if (StopAtPatternCall && CurTok == '(' &&
         dynamic_cast<ScopeAccessExprAST *>(Base.get()))
       return Base;

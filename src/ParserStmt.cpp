@@ -1064,7 +1064,12 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
   if (CurTok == TOK_COLON) {
     getNextToken();
     TypeLoc = CurLoc;
+    // `guess` is a terminal type token, so setting the flag only when the type
+    // STARTS with it keeps it out of any generic argument or pointee.
+    const bool SavedAllowGuess = g_AllowGuessType;
+    g_AllowGuessType = (CurTok == TOK_GUESS);
     Type = ParseType();
+    g_AllowGuessType = SavedAllowGuess;
     if (!Type) return nullptr;
   } else {
     Type = TurfGuess();

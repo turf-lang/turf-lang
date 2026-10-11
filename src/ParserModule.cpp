@@ -18,6 +18,7 @@
 
 #include "Parser.h"
 #include "AST.h"
+#include "ASTChildWalker.h"
 #include "Algorithms.h"
 #include "Builtins.h"
 #include "Codegen.h"
@@ -235,8 +236,40 @@ void AppendFlattenedTopLevelDecl(std::unique_ptr<ExprAST> AST,
                                  bool RecordForSandbox) {
   if (!AST)
     return;
+  // Every top-level declaration passes through here before any pass recurses
+  // over it (the sandbox clone just below is the first). A tree deeper than
+  // the parser's own nesting limit was built from pieces that were each within
+  // it -- see AstDepthProbe -- and would overflow the stack in a later pass.
+  // Reject it as the nesting error it is. The tree is released, not destroyed:
+  // freeing it recurses exactly as deep as the passes would have.
+  auto TooDeep = [](ExprAST *Node) {
+    return AstDepthExceeds(Node, MaxParseRecursionDepth);
+  };
+  // Point at the declaration's own line when it has one; the parser has
+  // already moved past its end, so CurLoc is the fallback.
+  auto WhereIs = [](ExprAST *Node) {
+    if (auto *F = dynamic_cast<FuncDefExprAST *>(Node))
+      return F->getLoc();
+    return CurLoc;
+  };
+  if (TooDeep(AST.get())) {
+    LogErrorAt(WhereIs(AST.get()), ErrCode::NestingTooDeep,
+               "Expression nested too deeply to parse."
+               "\n  Hint: split this declaration into smaller parts.",
+               SLM::ErrorCategory::SYNTAX_ERROR);
+    (void)AST.release();
+    return;
+  }
   if (auto *UB = dynamic_cast<UnsafeBlockExprAST *>(AST.get())) {
     for (auto &Child : UB->takeChildren()) {
+      if (TooDeep(Child.get())) {
+        LogErrorAt(WhereIs(Child.get()), ErrCode::NestingTooDeep,
+                   "Expression nested too deeply to parse."
+                   "\n  Hint: split this declaration into smaller parts.",
+                   SLM::ErrorCategory::SYNTAX_ERROR);
+        (void)Child.release();
+        continue;
+      }
       UnsafeTopLevelDecls.insert(Child.get());
       if (RecordForSandbox)
         RecordParsedTopLevelAST(Child.get());
@@ -563,7 +596,7 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
     }
 
     if (CurTok == TOK_IMPORT) {
-      auto Expr = ParseExpression();
+      auto Expr = ParseImport();
       if (Expr) {
         if (CurTok != ';') {
           LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement.", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());

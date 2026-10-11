@@ -74,6 +74,17 @@
 #else
 #include <sys/wait.h> // waitpid, WIFEXITED, WEXITSTATUS
 #include <unistd.h>   // fork, execvp
+
+// REL-004: a TURF_COVERAGE build (gcov) writes its counters from an atexit
+// handler, and this file leaves through std::_Exit() on purpose (see main()),
+// which skips every atexit handler -- so such a build reported 0% for the whole
+// compiler. Flush by hand at each _Exit. Compiles to nothing otherwise.
+#ifdef TURF_COVERAGE
+extern "C" void __gcov_dump(void);
+#define TURF_FLUSH_COVERAGE() __gcov_dump()
+#else
+#define TURF_FLUSH_COVERAGE() ((void)0)
+#endif
 #endif
 
 using namespace llvm;
@@ -1662,7 +1673,7 @@ static int runCompilerMain(int argc, char **argv) {
         } else if (CurTok == TOK_IMPORT) {
           g_recoverActive = true;
           if (setjmp(g_recoverJmp) == 0) {
-            auto AST = ParseExpression();
+            auto AST = ParseImport();
             if (AST) {
               if (CurTok != ';') {
                 LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
@@ -2068,7 +2079,7 @@ static int runCompilerMain(int argc, char **argv) {
     if (CurTok == TOK_IMPORT) {
       g_recoverActive = true;
       if (setjmp(g_recoverJmp) == 0) {
-        auto AST = ParseExpression();
+        auto AST = ParseImport();
         if (AST) {
           if (CurTok != ';') {
             LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
@@ -2136,6 +2147,7 @@ static int runCompilerMain(int argc, char **argv) {
           // explanation.
           std::cout.flush();
           std::cerr.flush();
+          TURF_FLUSH_COVERAGE();
           std::_Exit(1);
         }
         RecordParsedTopLevelAST(AST.get());
@@ -2590,5 +2602,6 @@ int main(int argc, char **argv) {
   int ExitCode = runCompilerMain(argc, argv);
   std::cout.flush();
   std::cerr.flush();
+  TURF_FLUSH_COVERAGE();
   std::_Exit(ExitCode);
 }

@@ -1099,12 +1099,17 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
     return nullptr;
   }
 
-  // If CurTok == ';': external declaration (forward decl)
+  // `fn f(): int;` used to build a FuncDefExprAST with a null Body as a
+  // "forward declaration". Turf has none (the program is one pass over all
+  // declarations, and a C function is declared with `extern fn`), and nothing
+  // downstream accepts a null Body: CodegenFunc dereferenced it, so a stray `;`
+  // after a signature -- found by the REL-004 fuzzer, e.g. `operator [](b: Box,
+  // i: int): int ;` -- crashed the compiler instead of being diagnosed.
   if (CurTok == ';') {
-    getNextToken(); // eat ';'
-    return std::make_unique<FuncDefExprAST>(FnLoc, FuncName, NameLoc, RetType, Params,
-                                            nullptr, TypeParams,
-                                            IsStaticMethodDecl, HasCallerLocation);
+    LogErrorAt(FnLoc, ErrCode::MissingOpeningDelimiter,
+               "'" + FuncName + "' has no body. A function needs a '{ ... }' body; to call a C function, declare it with 'extern fn'.",
+               SLM::ErrorCategory::DECLARATION);
+    return nullptr;
   }
 
   // Expect '{' to open function body
@@ -1355,11 +1360,12 @@ std::unique_ptr<ExprAST> ParseOperatorDecl() {
     return nullptr;
   }
 
+  // Same null-Body hazard as ParseFunction's `;` case: no consumer accepts it.
   if (CurTok == ';') {
-    getNextToken(); // eat ';'
-    return std::make_unique<FuncDefExprAST>(OpLoc, FuncName, OpLoc, RetType, Params,
-                                            nullptr, TypeParams,
-                                            /*IsStaticMethodDecl=*/false);
+    LogErrorAt(OpLoc, ErrCode::MissingOpeningDelimiter,
+               "'operator " + FuncName.substr(8) + "' has no body. An operator needs a '{ ... }' body.",
+               SLM::ErrorCategory::DECLARATION);
+    return nullptr;
   }
 
   if (CurTok != '{') {

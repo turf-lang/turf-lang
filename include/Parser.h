@@ -70,6 +70,13 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
                                    const std::string &ModuleName = "",
                                    SourceLocation ImportLoc = SourceLocation{});
 std::unique_ptr<ExprAST> ParseExpression();
+/// Parses one `import ...` declaration, and nothing after it. A top-level
+/// `import` must not go through ParseExpression(): that would let a binary
+/// operator typed after the module name (`import test %`) swallow the next
+/// declaration as its right-hand side, hiding both the import and the
+/// declaration from the Resolver's hoisting pass -- which then reported a
+/// bogus error from inside lib/std (found by the REL-004 fuzzer).
+std::unique_ptr<ExprAST> ParseImport();
 std::unique_ptr<ExprAST> Parse();
 
 // Synthesizes an `import <name>;` AST node for each of the fixed prelude

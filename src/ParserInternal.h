@@ -19,6 +19,10 @@
 TurfTypePtr ParseType();
 bool isDisallowedVoidType(const TurfType *T);
 
+/// True only while the local-variable declaration parse reads its type
+/// annotation: the one place `guess` may appear (F-GUESS-3). See ParseType().
+extern bool g_AllowGuessType;
+
 // Defined in ParserLiteral.cpp
 std::unique_ptr<ExprAST> ParseNumberExpr(bool IsInteger);
 std::unique_ptr<ExprAST> ParseBoolExpr();

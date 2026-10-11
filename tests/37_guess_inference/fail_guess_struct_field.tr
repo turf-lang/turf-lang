@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E128
+// EXPECT-DIAG: can only declare a local variable
+// F-GUESS-3: never for a struct field. Before, the declaration itself compiled
+// without a word, and only a later assignment failed with a type mismatch
+// against 'guess'.
+struct Counter {
+    count: guess,
+}
+
+fn main(): int {
+    return 0;
+}
