@@ -11,6 +11,17 @@ What is already proven, so you know what is NOT in question: on the macOS CI run
 Turf object to a valid Mach-O all worked. **What nobody has ever done: run a compiled
 Turf program on macOS from this tree, run the test suite there, or run the GC there.**
 
+**Step 0, before touching a Mac: read the CI run.** The macOS job of
+`build-archives.yml` now runs the suite, the GC directory under stress and validate, and
+fifteen of the smoke scripts (section 5's list, minus `bundled_link_smoke`), all
+informational (`continue-on-error`) and uploaded as the `macos-suite-logs` artifact. The
+first push after the Actions minutes return is the first time any of it executes on
+macOS. Read those logs first: a failure there that matches section 7 tells you where to
+look, and what passes there needs no hand run of sections 3 to 5 (record the CI run id
+instead). Sections 2 and 6 cannot be done by CI (6 needs the toolchain removed), so
+those are by hand either way. When the logs are green, make the macOS steps enforcing:
+delete `continue-on-error` from them in `build-archives.yml`.
+
 You need: an Apple-silicon Mac on macOS 11 or later, admin rights for one step
 (section 6), Xcode Command Line Tools (to BUILD only; section 6 removes them from the
 picture), Homebrew, `git`, ~15 GB free disk and ~30 minutes of build time.
@@ -113,7 +124,10 @@ for s in cli_smoke project_smoke test_cmd_smoke fmt_smoke package_graph_smoke \
 done
 ```
 
-Pass: every `rc=0`. Known not applicable on macOS, record as "N/A, reason", do not fix:
+Pass: every `rc=0`. (`runtime_smoke` now includes check 6d, the "a library Turf does not
+bundle" diagnostics; on macOS its empty-`PATH` half should print `linking needs a C
+compiler`. The PowerShell twins `scripts/*.ps1` are Windows-only: nothing to run here.)
+Known not applicable on macOS, record as "N/A, reason", do not fix:
 `gc_no_procfs_smoke.sh` (Linux `/proc`), and `gc_rss_smoke.sh` / `gc_stress_corpus_smoke.sh`
 need GNU `time -v` (`brew install gnu-time` and a `/usr/bin/time` that is not BSD's,
 or record N/A). Any other failure: read the log and decide whether the SCRIPT assumes
@@ -181,6 +195,22 @@ program that imports `net` and talks to itself over loopback (copy
 answers within one process).
 Pass: each builds and runs.
 
+One more check in the same stripped environment, for the library diagnostics added with
+`docs/reference/ffi_and_unsafe.md` "Linking external libraries": a program that names a
+library the archive does not bundle must say so, not fail obscurely.
+
+```sh
+printf 'fn main(): int { return 0; }\n' > p.tr
+turfc p.tr -o p --link nosuchlib; echo "exit=$?"
+```
+
+Pass: exit 1 and the output names `"nosuchlib"`. With the toolchain moved aside
+`/usr/bin/cc` still exists as a shim that fails, so expect `Linking failed (exit code 1)`
+followed by `This program links against "nosuchlib", which Turf does not bundle`; the
+`linking needs a C compiler` wording appears only when no `cc` can be started at all. A
+plain `printf 'fn main(): int { return 0; }\n'` program with no `--link` must still link
+and run (that is the promise).
+
 Finally prove nothing hidden ran a compiler. With the toolchain still moved aside,
 any attempt to execute `clang`/`ld`/`cc` already fails, so a pass above IS the proof.
 Add, for the record: `sudo fs_usage -w -f exec` in another terminal during `turf run`,
@@ -210,7 +240,9 @@ Be explicit in the record, so "closed" is not claimed early:
 - **Stage 7:** `install.ps1` (Windows installer and user-PATH handling) does not exist;
   only `install.sh` does.
 - **Stage 8:** the Windows clean-machine proof (a `PATH` of `System32` plus the archive,
-  with no MSYS2, MinGW or Git) and its `.ps1` twin do not exist; Linux's `docker run
+  with no MSYS2, MinGW or Git) and its `.ps1` twin do not exist (what does exist: the
+  empty-`PATH` diagnostic check in `runtime_smoke.ps1`, which shows a missing compiler is
+  reported properly, not that a no-compiler program links); Linux's `docker run
   ubuntu:24.04` with no `cc` is not built either (`release_smoke.sh` says the clean-machine half is
   stage 8's, and keeps `cc` on `PATH`).
 - **Stage 9:** Homebrew/Scoop/AUR recipes bumped by CI after a release.
