@@ -563,8 +563,9 @@ Value *CompoundAssignmentExprAST::codegen() {
       Builder->CreateUnreachable();
 
     Builder->SetInsertPoint(DivContBB);
+    // INT_MIN %= -1 gives 0, never poison -- see EmitSafeSRem().
     Result = isDouble ? Builder->CreateFRem(LHSVal, CastRHS, "modtmp")
-                      : Builder->CreateSRem(LHSVal, CastRHS, "modtmp");
+                      : EmitSafeSRem(LHSVal, CastRHS, "modtmp");
     break;
   }
   // Bitwise compound-assign: TypeChecker::visitCompoundAssignment() already

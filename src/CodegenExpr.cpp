@@ -372,8 +372,9 @@ Value *BinaryExprAST::codegen() {
 
     Builder->SetInsertPoint(DivContBB);
 
+    // INT_MIN % -1 is 0, never poison -- see EmitSafeSRem().
     return NumericType->isNamed("double") ? Builder->CreateFRem(L, R, "modtmp")
-                                          : Builder->CreateSRem(L, R, "modtmp");
+                                          : EmitSafeSRem(L, R, "modtmp");
   }
 
   // Comparison

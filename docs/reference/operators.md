@@ -77,6 +77,11 @@ the bitwise operators are.
 > a compile-time concern, and it means float division by zero panics rather
 > than silently producing `inf`/`NaN`.
 
+`%` takes the sign of the dividend (`-7 % 2` is `-1`). `INT_MIN % -1` is `0`,
+the exact result, at every optimization level; unlike `INT_MIN / -1`, which
+has no representable result and panics with `"Integer overflow"`, nothing
+overflows.
+
 ## Exponentiation: `**`
 
 ```turflang

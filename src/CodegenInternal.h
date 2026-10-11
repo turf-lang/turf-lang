@@ -234,11 +234,14 @@ llvm::Value *EmitCheckedIntNegate(llvm::Value *V, SourceLocation Loc);
 /// directly rather than via an intrinsic call).
 llvm::Value *EmitCheckedShl(llvm::Value *L, llvm::Value *R, SourceLocation Loc);
 
-/// Traps if computing `L / R` (or `L % R`) would be INT64_MIN / -1 -- the
-/// one signed-division overflow case (ARCHITECTURE_OVERHAUL.md §10.2).
+/// Traps if computing `L / R` would be INT64_MIN / -1 -- the one
+/// signed-division overflow case (ARCHITECTURE_OVERHAUL.md §10.2).
 /// Call after the existing divide-by-zero check (so R != 0 is already
-/// established) and before emitting the actual CreateSDiv/CreateSRem.
+/// established) and before emitting the actual CreateSDiv.
 void EmitSignedDivOverflowGuard(llvm::Value *L, llvm::Value *R, SourceLocation Loc);
+/// `L % R` for signed integers, after the zero check: INT_MIN % -1 is 0
+/// (representable, so no trap), never `srem`'s poison.
+llvm::Value *EmitSafeSRem(llvm::Value *L, llvm::Value *R, const llvm::Twine &Name);
 
 // ── TOOL-001: `-g` debug info helpers ────────────────────────────────────
 // All defined in CodegenCore.cpp. Every one of these is safe to call

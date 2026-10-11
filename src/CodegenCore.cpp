@@ -1870,7 +1870,7 @@ Value *EmitCheckedShl(Value *L, Value *R, SourceLocation Loc) {
 // must be caught explicitly, same shape as the pre-existing divide-by-zero
 // check this always runs alongside. Call this AFTER the zero check (so the
 // insert point is already the "R != 0" continuation block) and BEFORE
-// emitting the actual CreateSDiv/CreateSRem.
+// emitting the actual CreateSDiv. ('%' needs no trap: see EmitSafeSRem.)
 void EmitSignedDivOverflowGuard(Value *L, Value *R, SourceLocation Loc) {
   Function *TheFunction = Builder->GetInsertBlock()->getParent();
   Value *IsIntMin = Builder->CreateICmpEQ(
@@ -1893,6 +1893,20 @@ void EmitSignedDivOverflowGuard(Value *L, Value *R, SourceLocation Loc) {
     Builder->CreateUnreachable();
 
   Builder->SetInsertPoint(ContBB);
+}
+
+// Signed remainder with the one poison input removed. `srem` is poison for
+// INT_MIN % -1 (hardware `idiv` traps on it: SIGFPE at -O0, whatever the
+// optimizer likes at -O1+), yet the mathematical result, 0, is representable,
+// so unlike '/' there is nothing to trap on. x % -1 == x % 1 == 0 for every
+// x, so a divisor of -1 is replaced by 1: a select, not a branch, so the
+// vectorizer is not blocked. Call AFTER the zero check. Any integer width.
+Value *EmitSafeSRem(Value *L, Value *R, const llvm::Twine &Name) {
+  Value *IsNegOne = Builder->CreateICmpEQ(
+      R, ConstantInt::getSigned(R->getType(), -1), "isnegone");
+  Value *Divisor = Builder->CreateSelect(
+      IsNegOne, ConstantInt::get(R->getType(), 1), R, "srem.divisor");
+  return Builder->CreateSRem(L, Divisor, Name);
 }
 
 
