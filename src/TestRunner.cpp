@@ -245,14 +245,17 @@ std::wstring QuoteArg(const std::wstring &A) {
 }
 
 /// A Windows exit code in the vocabulary the markers and the rest of the runner
-/// speak: 128 + N for "ended by signal N". The C runtime's abort() exits with 3
-/// (SIGABRT, 134), and an unhandled exception ends the process with its NTSTATUS
-/// (an access violation or a stack overflow is SIGSEGV, 139). Anything else is
-/// the program's own exit code, except an unknown NTSTATUS, which is a crash.
+/// speak: 128 + N for "ended by signal N". A Turf program's (and turfc's) abort()
+/// ends with 0xE0545254, a status chosen so it cannot be an ordinary exit code
+/// (the C runtime's own abort() exits with 3, which `return 3;` also gives; the
+/// runtime and turfc override it: runtime/turfrt_signal.c, src/main.cpp). That is
+/// SIGABRT, 134. An unhandled exception ends the process with its NTSTATUS (an
+/// access violation or a stack overflow is SIGSEGV, 139). Anything else is the
+/// program's own exit code, except an unknown NTSTATUS, which is a crash.
 int WindowsExitStatus(DWORD Code) {
   switch (Code) {
-  case 3:
-    return 134; // abort()
+  case 0xE0545254: // abort(), see above
+    return 134;
   case 0xC0000005: // STATUS_ACCESS_VIOLATION
   case 0xC00000FD: // STATUS_STACK_OVERFLOW
   case 0xC0000409: // STATUS_STACK_BUFFER_OVERRUN (__fastfail)

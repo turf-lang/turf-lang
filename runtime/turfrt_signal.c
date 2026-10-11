@@ -225,6 +225,7 @@ void turf_rt_install_segv_handler(void) {
  * wait for a click, which a headless runner never gets; the error mode and the
  * abort behaviour are set so a crash is just a process that ends.
  */
+#include <signal.h>
 #include <stdlib.h>
 #include <windows.h>
 
@@ -250,11 +251,27 @@ static LONG WINAPI turf_rt_veh(EXCEPTION_POINTERS *ep) {
   return EXCEPTION_CONTINUE_SEARCH; /* not ours: let it take its course */
 }
 
+/* The status a Turf program that called abort() ends with on Windows. The C runtime's
+ * own abort() exits with 3, which is also what `fn main(): int { return 3; }` exits
+ * with, so a test runner could not tell a panic from an ordinary exit code. This is
+ * in the NTSTATUS "customer" range (bit 29 set), which no program returns on purpose.
+ * src/TestRunner.cpp (WindowsExitStatus) and src/main.cpp (turfc's own abort handler)
+ * spell the same number; change all three together. */
+#define TURF_WIN_ABORT_STATUS 0xE0545254u
+
+static void turf_rt_on_sigabrt(int sig) {
+  (void)sig;
+  /* TerminateProcess, not exit(): abort() means the process state is not trusted, so
+   * no atexit handlers or stdio flush. stderr is unbuffered, the message is out. */
+  TerminateProcess(GetCurrentProcess(), TURF_WIN_ABORT_STATUS);
+}
+
 void turf_rt_install_segv_handler(void) {
   ULONG guarantee = 128 * 1024;
   SetThreadStackGuarantee(&guarantee); /* best effort: a failure only shrinks the room */
   SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
   _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+  signal(SIGABRT, turf_rt_on_sigabrt);
   AddVectoredExceptionHandler(1, turf_rt_veh);
 }
 

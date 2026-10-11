@@ -66,6 +66,9 @@
 #include <sstream>
 #include <vector>
 #ifdef _WIN32
+#include <csignal>   // signal, SIGABRT
+#include <fcntl.h>   // _O_BINARY
+#include <io.h>      // _setmode, _fileno
 #include <process.h> // _spawnvp, _P_WAIT
 #else
 #include <sys/wait.h> // waitpid, WIFEXITED, WEXITSTATUS
@@ -2488,6 +2491,20 @@ static int runCompilerMain(int argc, char **argv) {
  * a vendored-library issue outside this compiler's control.
  */
 int main(int argc, char **argv) {
+#ifdef _WIN32
+  // The C runtime opens stdin/stdout/stderr in text mode on Windows, which writes
+  // every "\n" as "\r\n". Everything turfc prints is a stream other tools read
+  // (`--format` output redirected to a file, `--version` parsed by turf, diagnostics
+  // compared byte for byte), and it must be the same bytes on every platform.
+  _setmode(_fileno(stdin), _O_BINARY);
+  _setmode(_fileno(stdout), _O_BINARY);
+  _setmode(_fileno(stderr), _O_BINARY);
+  // abort() exits with status 3 on Windows, which is also an ordinary exit code
+  // (the test runner could not tell a compiler crash from `return 3`). Same status
+  // as a Turf program's abort: runtime/turfrt_signal.c defines it, and
+  // WindowsExitStatus() in src/TestRunner.cpp reads it.
+  std::signal(SIGABRT, [](int) { std::_Exit(static_cast<int>(0xE0545254u)); });
+#endif
   // A crash in the compiler itself (SIGSEGV etc.) otherwise dies silently:
   // nothing reaches stderr, and stdout's pipe buffer is lost with the
   // process. Seen once in CI as a "Compile Error" with empty output that
