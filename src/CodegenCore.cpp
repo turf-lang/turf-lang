@@ -2356,7 +2356,12 @@ DIType *getDebugType(const TurfType *T) {
         dwarf::DW_TAG_structure_type, DebugName, DebugCU, File, 0);
     DebugTypeCache[Key] = Stub;
 
-    if (!LLVMStructTy || LLVMStructTy->isOpaque()) {
+    // isSized(), not just !isOpaque(): a struct whose body is set can still
+    // contain a field that is itself an opaque struct nobody has codegenned
+    // yet, and DataLayout asserts on (or miscomputes) an unsized type. With -g,
+    // tests/34_http_and_json/fail_server_routes_private.tr hit that assertion --
+    // found by running the whole suite at -g (REL-004 stage 5), which nothing did.
+    if (!LLVMStructTy || LLVMStructTy->isOpaque() || !LLVMStructTy->isSized()) {
       // Struct decl hasn't codegenned yet (a forward reference Codegen
       // itself hasn't resolved either) -- leave the forward declaration in
       // place. main.cpp's DBuilder->finalize() call (before verifyModule())
