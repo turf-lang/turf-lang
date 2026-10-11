@@ -194,6 +194,67 @@ jobs:
       - name: Build the bundled C runtime (libSystem stub)
         run: ./scripts/build_bundled_runtime.sh --platform macos-arm64
 
+      # REL-008 stage 6: the whole suite, GC stress and the smoke scripts on macOS, with
+      # the compiler just built (programs linked by the embedded Mach-O linker against
+      # the bundled stub). INFORMATIONAL (continue-on-error) until the first run on a Mac
+      # has been read: nothing of this has ever executed on macOS, and its job is to list
+      # everything that fails in one run (the log artifact), not one failure per round
+      # trip. Make it enforcing, as Windows's is, once it has been green once. The exact
+      # by-hand version of this is docs/planning/REL-008_MACOS_VERIFICATION.md.
+      - name: Test suite on macOS (REL-008 stage 6, informational)
+        continue-on-error: true
+        env:
+          TURF_TEST_TIMEOUT_SEC: "60"
+        run: |
+          set -o pipefail
+          ./build/turfc --test tests --jobs 3 \
+            --diag-register tests/DIAGNOSTIC_GAPS.txt \
+            --exclude custom --exclude 99_known_bugs 2>&1 | tee macos-suite.log
+
+      - name: GC stress and validate on macOS (informational)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        env:
+          TURF_TEST_TIMEOUT_SEC: "120"
+        run: |
+          set -o pipefail
+          { TURF_GC_STRESS=1 ./build/turfc --test tests/41_gc
+            TURF_GC_VALIDATE=1 ./build/turfc --test tests/41_gc
+            TURF_GC_STRESS=1 TURF_GC_VALIDATE=1 ./build/turfc --test tests/41_gc; } 2>&1 | tee macos-gc.log
+
+      - name: Smoke scripts on macOS (informational)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          fail=0
+          for s in cli_smoke project_smoke test_cmd_smoke fmt_smoke package_graph_smoke git_deps_smoke \
+                   examples_smoke pattern_warnings_smoke migrate_pub_smoke opt_levels_smoke runtime_smoke \
+                   mem_smoke gc_smoke debuginfo_smoke std002_caller_location_smoke; do
+            echo "=== $s"
+            CI=1 ./scripts/$s.sh 2>&1 | tee -a macos-smokes.log || true
+            [ "${PIPESTATUS[0]}" = 0 ] || { echo "::warning::$s failed on macOS"; fail=1; }
+          done
+          exit $fail
+
+      - name: Summarise the macOS runs
+        if: always()
+        run: |
+          for f in macos-suite.log macos-gc.log; do
+            [ -f "$f" ] && { echo "--- $f"; grep -E "^(Total Tests|Passed|Failed):" "$f" || true; grep -E "\.\.\. " "$f" | grep -v PASS | head -80 || true; }
+          done
+          true
+
+      - name: Upload the macOS suite logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-suite-logs
+          path: |
+            macos-suite.log
+            macos-gc.log
+            macos-smokes.log
+          if-no-files-found: ignore
+
       - name: Package
         id: package
         uses: ./.github/actions/package-release
@@ -300,12 +361,15 @@ jobs:
       # built (so, because lib/rt now exists, linked by the embedded lld against
       # the bundled CRT). `turfc --test` runs natively here (its Windows process
       # runner is src/TestRunner.cpp's); the flags are scripts/test_runner.sh's.
-      # INFORMATIONAL until the port is done (continue-on-error): its job is to
-      # produce the full list of what fails, in the log artifact, in one run
-      # instead of one failure per CI round trip. The generous per-test timeout
-      # is for process start-up on a runner with a virus scanner, not for hangs.
-      - name: Test suite on Windows (REL-008 stage 5, informational)
-        continue-on-error: true
+      # ENFORCING since 2026-10-11, when the same command passed 1191/1191 on a
+      # real Windows 11 machine (also at -O0 and with TURF_GC_STRESS=1): a Windows
+      # regression now fails the commit that caused it, like Linux's does. The log
+      # artifact below still lists every failure of a run at once. The generous
+      # per-test timeout is for process start-up on a runner with a virus scanner,
+      # not for hangs. (Not yet seen green ON THIS RUNNER: Actions minutes ran out
+      # before the first run; a failure here that does not reproduce locally is
+      # about the runner, and the log says which test.)
+      - name: Test suite on Windows (REL-008 stage 5)
         shell: msys2 {0}
         env:
           TURF_TEST_TIMEOUT_SEC: "60"
@@ -332,6 +396,39 @@ jobs:
           name: windows-suite-log
           path: windows-suite.log
           if-no-files-found: ignore
+
+      # The GC on Windows: Win64 register capture and stack bounds, under a collection
+      # on every allocation and with the heap validated after each one.
+      - name: GC stress and validate on Windows (tests/41_gc)
+        if: ${{ !cancelled() }}
+        shell: msys2 {0}
+        env:
+          TURF_TEST_TIMEOUT_SEC: "120"
+          TURF_GC_STRESS: "1"
+          TURF_GC_VALIDATE: "1"
+        run: ./build/turfc.exe --test tests/41_gc
+
+      # The smoke scripts, on Windows. Each bash script has a PowerShell twin
+      # (scripts/*_smoke.ps1: same checks, the Windows spelling of the host parts, every
+      # skipped check named); windows_smokes.ps1 runs all eight and prints one table.
+      # Run from the MSYS2 shell so gcc is on PATH for runtime_smoke's C API check.
+      - name: Smoke scripts on Windows (PowerShell twins)
+        if: ${{ !cancelled() }}
+        shell: msys2 {0}
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows_smokes.ps1
+
+      # The bash smoke scripts that need nothing POSIX-only run as they are.
+      - name: Smoke scripts on Windows (bash)
+        if: ${{ !cancelled() }}
+        shell: msys2 {0}
+        run: |
+          fail=0
+          for s in package_graph_smoke examples_smoke pattern_warnings_smoke migrate_pub_smoke \
+                   debuginfo_smoke mem_smoke gc_smoke test_cmd_smoke fmt_smoke; do
+            echo "=== $s"
+            CI=1 ./scripts/$s.sh || { echo "::error::$s failed"; fail=1; }
+          done
+          exit $fail
 
       - name: Package
         id: package
