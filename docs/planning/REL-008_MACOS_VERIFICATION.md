@@ -175,6 +175,7 @@ Now the walkthrough by hand, in a **new** terminal with a stripped environment:
 ```sh
 export TURF_INSTALL_BASE_URL="file:///tmp/dist-site"       # a dir laid out as download/<tag>/<archive>(.sha256)
 mkdir -p /tmp/dist-site/download/v$(head -1 VERSION) && cp /tmp/dist/turf-* /tmp/dist-site/download/v$(head -1 VERSION)/
+cat /tmp/dist/*.sha256 > /tmp/dist-site/download/v$(head -1 VERSION)/checksums.txt   # install.sh reads checksums.txt, not the .sha256
 TURF_INSTALL_PLATFORM=macos-arm64 sh ./install.sh --version v$(head -1 VERSION) --prefix "$HOME/turf-clean"
 env -i HOME="$HOME" PATH="$HOME/turf-clean/bin:/usr/bin:/bin:/usr/sbin:/sbin" TERM=xterm bash -c '
   set -e

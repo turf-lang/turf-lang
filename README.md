@@ -57,17 +57,28 @@ Runs the pipeline above on error only — no cost, no model inference, nothing h
 turf my_program.tr --smart -o my_program
 ```
 
+**`--smart` needs two things: the smart build, and one model.**
+
+- **The smart build.** Every release has two archives per platform: the plain one, and a `-smart` one that is the same compiler with the model runtime in it. Install it with `install.sh --smart` (Windows: `install.ps1 -Smart`). In the plain build `--smart` prints one note saying it is not included and you get the compiler's own diagnostics. A source build has the runtime unless you pass `--no-smart`.
+- **One model, which you choose.** No model is shipped or downloaded for you. Put exactly **one** `.gguf` file in the `models/` folder of your install (`~/.turf/models`, `%LOCALAPPDATA%\turf\models`; in a checkout, `models/` at its root). Its name does not matter.
+  - **None there:** `--smart` says so, names the folder, and shows the compiler's own diagnostics.
+  - **One:** it is used.
+  - **More than one:** `--smart` uses none of them, because it cannot know which you meant; it lists what it found. Leave one.
+- **Recommended:** [`qwen2.5-coder-1.5b-instruct-q4_k_m.gguf`](https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF), about 1 GB on disk and about 1.5 GB of RAM at its peak while it works on an error. It is the model TurfLang is developed and continuously tested with. Any GGUF model `llama.cpp` can run will load, so with more memory you can try a larger one; the prompts are tuned on the recommended model, and every suggestion is checked by the compiler before you see it whichever model made it.
+
+Installing a new version or uninstalling leaves your `models/` folder and the model in it alone.
+
 Useful compiler introspection flags, beyond ordinary compilation: `--dump-ast`, `--dump-resolved`, `--dump-typechecked`, `--dump-modules` (everything the compiler knows about the current program's modules — every imported module's functions, struct/enum type ownership, and every on-demand import), `--emit-llvm`.
 
 ## Installation
 
-**Linux (x86-64) and macOS (Apple Silicon):**
+**Linux (x86-64 and arm64) and macOS (Apple Silicon):**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/turf-lang/turf-lang/master/install.sh | sh
 ```
 
-`install.sh` downloads the release archive for your machine, **checks its SHA-256 (and installs nothing if that fails)**, unpacks it into `~/.turf`, and adds `~/.turf/bin` to your `PATH` with one marked block in your shell's start-up file, so `turf` works in any **new** terminal. `--prefix DIR` installs elsewhere, `--version v2.0.0` picks a release, `--no-modify-path` leaves your start-up files alone, and `--uninstall` removes exactly what it added (never your projects or the package cache). It is also attached to every release.
+`install.sh` downloads the release archive for your machine, **checks its SHA-256 (and installs nothing if that fails)**, unpacks it into `~/.turf`, and adds `~/.turf/bin` to your `PATH` with one marked block in your shell's start-up file, so `turf` works in any **new** terminal. `--smart` installs the build that can run a [`--smart`](#--smart) model. Nothing else is needed to compile and run programs (on Linux the compiler needs glibc 2.34 or newer: Ubuntu 22.04, Debian 12, RHEL 9, Amazon Linux 2023 and later; the programs it builds are static and run anywhere); **git dependencies need `git`**, which a Mac does not have until you install it (`xcode-select --install` or `brew install git`; `/usr/bin/git` alone is only a placeholder). `--prefix DIR` installs elsewhere, `--version v2.0.0` picks a release, `--no-modify-path` leaves your start-up files alone, and `--uninstall` removes exactly what it added (never your projects or the package cache). It is also attached to every release.
 
 **Windows (x86-64), from PowerShell:**
 
@@ -75,9 +86,9 @@ curl -fsSL https://raw.githubusercontent.com/turf-lang/turf-lang/master/install.
 irm https://raw.githubusercontent.com/turf-lang/turf-lang/master/install.ps1 | iex
 ```
 
-`install.ps1` does the same: it downloads the Windows archive, **checks its SHA-256 (and installs nothing if that fails)**, unpacks it into `%LOCALAPPDATA%\turf`, and adds `%LOCALAPPDATA%\turf\bin` to your **user** `PATH` (no administrator rights; nothing machine-wide), so `turf` works in any **new** terminal. A piped `irm | iex` cannot take options, so use the environment variables `TURF_INSTALL_VERSION` and `TURF_INSTALL_DIR`, or save the script and run `powershell -ExecutionPolicy Bypass -File install.ps1 -Version v2.0.0 -Prefix D:\tools\turf -NoModifyPath`; `-Uninstall` removes exactly what it added (never your projects or the package cache). It is also attached to every release.
+`install.ps1` does the same: it downloads the Windows archive, **checks its SHA-256 (and installs nothing if that fails)**, unpacks it into `%LOCALAPPDATA%\turf`, and adds `%LOCALAPPDATA%\turf\bin` to your **user** `PATH` (no administrator rights; nothing machine-wide), so `turf` works in any **new** terminal. A piped `irm | iex` cannot take options, so use the environment variables `TURF_INSTALL_VERSION`, `TURF_INSTALL_DIR` and `TURF_INSTALL_SMART=1` (the build that can run a [`--smart`](#--smart) model; `-Smart` as an option), or save the script and run `powershell -ExecutionPolicy Bypass -File install.ps1 -Version v2.0.0 -Prefix D:\tools\turf -NoModifyPath`; `-Uninstall` removes exactly what it added (never your projects or the package cache). It is also attached to every release.
 
-**By hand (any platform):** download the archive from the [Releases page](../../releases) (Linux x86_64, macOS Apple Silicon, Windows x86_64; Intel Mac releases were dropped, and the separate Arch archive is gone because the compiler in the Linux archive now carries its own LLVM; see `build-archives.yml`'s comments. Release archives do not include `--smart`'s local-model runtime: build from source for that) and unpack it. It is one folder: `bin/` (`turf`, `turfc`), `lib/` (the runtime and standard library), `docs/`, `share/turf/examples/`. Run `bin/turf` from where it is, or put `bin/` on your `PATH`; no `TURF_HOME` is needed.
+**By hand (any platform):** download the archive from the [Releases page](../../releases) (Linux x86_64 and arm64, macOS Apple Silicon, Windows x86_64; Intel Mac releases were dropped, and the separate Arch archive is gone because the compiler in the Linux archive now carries its own LLVM; see `build-archives.yml`'s comments. each platform has a plain archive and a `-smart` one, see [`--smart`](#--smart)) and unpack it. It is one folder: `bin/` (`turf`, `turfc`), `lib/` (the runtime and standard library), `docs/`, `share/turf/examples/`. Run `bin/turf` from where it is, or put `bin/` on your `PATH`; no `TURF_HOME` is needed.
 
 > A release does not yet bundle everything it needs: the compiler still links LLVM dynamically and links your programs with the system `cc` (a self-contained release is `ROADMAP_v2.0.0.md` REL-008). Homebrew/Scoop/AUR packages (generated by `scripts/gen_recipes.sh` and attached to each release) follow that.
 
@@ -855,7 +866,7 @@ cd turf
 ./scripts/cmake_build.sh --release --no-smart   # same as cmake -DTURF_SMART=OFF
 ```
 
-A `--no-smart` build is the same compiler: every diagnostic, deterministic fix and feature works. The only difference is that `--smart` says its model runtime isn't built in and shows the compiler's own diagnostics.
+A `--no-smart` build is the same compiler: every diagnostic, deterministic fix and feature works. The only difference is that `--smart` says it is not part of this build and shows the compiler's own diagnostics. With the runtime built in, `--smart` runs the one `.gguf` file in `models/` at the checkout's root (see [`--smart`](#--smart)).
 
 `cmake_build.sh` detects available CPU cores and builds in parallel. The compiler is placed at `build/turfc` and, if Go is installed, the front end at `build/turf`. On the first `--smart`-enabled configure, CMake builds `llama.cpp`'s static libraries before building Turf itself, which takes a while the first time.
 

@@ -12,7 +12,7 @@ An LLVM-backed, statically-typed, AOT-compiled language. Pipeline: `Lexer → Pa
 ./scripts/cmake_build.sh --release   # first run also builds the vendored llama.cpp submodule — slow once, fast after
 ```
 
-`--no-smart` (`-DTURF_SMART=OFF`) builds without `--smart`'s model runtime: no llama.cpp submodule, no OpenMP. `src/SLMEngineDisabled.cpp` replaces `src/SLMEngine.cpp`, the only file that includes `llama.h`, so keep llama.cpp out of every other file or this build breaks. The test suite and `turf-api-tests` pass either way (neither needs a model).
+`--no-smart` (`-DTURF_SMART=OFF`) builds without `--smart`'s model runtime: no llama.cpp submodule, no OpenMP. `src/SLMEngineDisabled.cpp` replaces `src/SLMEngine.cpp`, the only file that includes `llama.h`, so keep llama.cpp out of every other file or this build breaks. The test suite and `turf-api-tests` pass either way (neither needs a model). With the runtime, `--smart` loads the ONE `.gguf` file in `<root>/models` (`resolveSmartModel()` in `src/SLMIntegration.cpp`; none or several means a note and the compiler's own diagnostics), and `turfc --version` ends with `smart built-in` or `smart not-built`. A release ships both: `cmake_build.sh --release-static --embed-lld` (plain) and the same with `--smart --build-dir=build-smart` (packaged by `package_release.sh --smart` as `<platform>-smart`, with `grammars/` and an empty `models/`; no model is ever shipped).
 
 The build produces **two binaries** (LEC-001, `docs/development/FREEZE.md` §6.16, F-PKG-1):
 - `build/turfc` is the compiler. Everything in this file that says "the compiler" means it: the test runner, the smoke scripts and CI run it directly, and `TURF_COMPILER` (the override the runner reads) points at `turfc`, never at `turf`.
