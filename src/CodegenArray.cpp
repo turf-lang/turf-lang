@@ -296,6 +296,13 @@ Value *ArrayLiteralExprAST::codegen() {
 // Returns the normalized, non-negative index to GEP with.
 // @p SizeVal is the element count as an i64: a constant for a `T[N]`, the
 // slice's own length field for a `T[]` parameter (issue #260).
+// The name a bounds diagnostic or panic gives the indexed array: the
+// variable's own name, or "array" for any other base (a field, a call).
+static std::string ArrayDisplayName(const ExprAST *Base) {
+  auto *BaseVar = dynamic_cast<const VariableExprAST *>(Base);
+  return BaseVar ? BaseVar->getName() : std::string("array");
+}
+
 static Value *EmitRuntimeBoundsCheck(Value *IndexVal, Value *SizeVal,
                                      const std::string &ArrayName,
                                      SourceLocation Loc) {
@@ -547,7 +554,7 @@ Value *ArrayAccessExprAST::codegenLValue() {
       // of `-O` level -- this is not gated on any optimization flag.
       IndexVal = EmitRuntimeBoundsCheck(
           IndexVal, ConstantInt::get(Type::getInt64Ty(*TheContext), ArraySize),
-          "array", Loc);
+          ArrayDisplayName(Base.get()), Loc);
     }
   }
 
@@ -565,9 +572,8 @@ Value *ArrayAccessExprAST::codegenLValue() {
   // call. Before slices this was raw, unchecked pointer arithmetic.
   Value *DataPtr = Builder->CreateExtractValue(Slice, 0, "slice.data");
   Value *LenVal = Builder->CreateExtractValue(Slice, 1, "slice.len");
-  auto *BaseVar = dynamic_cast<const VariableExprAST *>(Base.get());
   IndexVal = EmitRuntimeBoundsCheck(IndexVal, LenVal,
-                                    BaseVar ? BaseVar->getName() : "array", Loc);
+                                    ArrayDisplayName(Base.get()), Loc);
   return Builder->CreateInBoundsGEP(ElemTy, DataPtr, IndexVal, "arrelemptr");
 }
 
@@ -698,7 +704,7 @@ Value *ArrayAccessExprAST::codegen() {
       if (!ProvenInBounds)
         IndexVal = EmitRuntimeBoundsCheck(
             IndexVal, ConstantInt::get(Type::getInt64Ty(*TheContext), ArraySize),
-            "array", Loc);
+            ArrayDisplayName(Base.get()), Loc);
 
       Type *ElemTy = getLLVMType(ElemType);
       llvm::ArrayType *ArrTy = llvm::ArrayType::get(ElemTy, ArraySize);

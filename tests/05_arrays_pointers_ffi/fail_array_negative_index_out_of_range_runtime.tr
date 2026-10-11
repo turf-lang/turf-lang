@@ -1,5 +1,5 @@
 // RUNTIME_ABORT_EXPECTED
-// EXPECT-RUNTIME: Array index out of bounds
+// EXPECT-RUNTIME: Array index out of bounds for 'a'
 // #256: the run-time half of fail_array_negative_index_out_of_range.tr. The
 // index comes back from a call, so the compiler cannot fold it and the
 // select-based wrap in EmitRuntimeBoundsCheck() decides. -4 on an `int[3]`
