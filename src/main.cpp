@@ -1560,6 +1560,21 @@ static int runCompilerMain(int argc, char **argv) {
 
   // Builtin registry removed
   InitializeModule(); // Initialize LLVM Context, Module, Builder
+
+  // The target's triple and data layout go on the module BEFORE any codegen:
+  // codegen computes byte sizes with getDataLayout() (`.copy()`, sizeof,
+  // element type descriptors), and LLVM's default layout aligns i64 to 4
+  // bytes, so `{bool, int, bool[4]}` came out 16 bytes instead of the
+  // target's 24 -- `.copy()` of such an array overflowed its heap block
+  // (found by turf-fuzz). Reused for object emission below.
+  TargetMachine *EarlyTM = createTurfTargetMachine(opts, *TheModule);
+  if (!EarlyTM) {
+    std::cerr << "Error: could not create a target machine for '"
+              << (opts.TargetTriple.empty() ? sys::getDefaultTargetTriple()
+                                             : opts.TargetTriple)
+              << "'.\n";
+    return 1;
+  }
   ClearGlobalCFGs();
   InitializeCompilerGlobals(); // GlobalSymbolTable + BinopPrecedence -- see Parser.h
 
@@ -2476,32 +2491,13 @@ static int runCompilerMain(int argc, char **argv) {
 
   // Phase 5: OPT-001 optimization pipeline (runOptimizationPipeline() above).
   //
-  // The TargetMachine is built here, BEFORE optimization runs, and shared
-  // with object emission below -- previously it was built entirely inside
-  // emitObjectFile(), strictly AFTER this phase, so the optimizer ran with
-  // no target triple/data layout set on the module at all. Building it
-  // first (when it's needed) means SROA/vectorization-adjacent passes now
-  // see the real target's pointer size/alignment instead of LLVM's
-  // triple-less defaults -- a correctness improvement, not an observable
-  // behavior change (F-OPT-1): the host target this module already linked
-  // against unconditionally is the same host emitObjectFile() always used.
-  //
-  // `--emit-llvm` never had a real TargetMachine before this change either
-  // (M.setTargetTriple()/setDataLayout() were only ever reached from inside
-  // emitObjectFile(), which that flag skips entirely) -- preserved as-is:
-  // PassBuilder(nullptr) is well-defined and simply runs no target-aware
-  // transform, which is what "just show me the IR" has always meant here.
-  TargetMachine *TM = nullptr;
-  if (!opts.EmitLLVM) {
-    TM = createTurfTargetMachine(opts, *TheModule);
-    if (!TM) {
-      std::cerr << "Error: could not create a target machine for '"
-                << (opts.TargetTriple.empty() ? sys::getDefaultTargetTriple()
-                                               : opts.TargetTriple)
-                << "'.\n";
-      return 1;
-    }
-  }
+  // The TargetMachine was built right after InitializeModule(), before
+  // codegen, so the module carries the real target's triple and data layout
+  // through codegen, optimization and object emission alike. `--emit-llvm`
+  // runs the pipeline with no TargetMachine: PassBuilder(nullptr) runs no
+  // target-aware transform, which is what "just show me the IR" has always
+  // meant here (its IR now states the target's layout, though).
+  TargetMachine *TM = opts.EmitLLVM ? nullptr : EarlyTM;
   runOptimizationPipeline(*TheModule, opts.OptLevel, TM);
 
   // Output stage: either emit LLVM IR text or compile to native binary
