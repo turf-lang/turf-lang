@@ -23,7 +23,26 @@ jobs:
   # Linux (Ubuntu/Debian) - x86_64
   linux-x86_64:
     runs-on: ubuntu-latest
+    # The archive runs on the glibc of the system it is built on and anything
+    # newer, so it is built in the OLDEST image the release supports, not on the
+    # runner itself (ubuntu-latest's glibc 2.39 gave a turfc that needed
+    # GLIBC_2.38 and did not start on Debian 12 or Ubuntu 22.04). install.sh and
+    # release_deps_check.sh name the resulting floor (GLIBC_FLOOR): change them
+    # together.
+    container: ubuntu:22.04
     steps:
+      # A bare image: no sudo (the job is root), no compiler, no git. sudo is
+      # installed so the steps below read the same as on a runner.
+      - name: Prepare the container
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y sudo wget curl gnupg lsb-release ca-certificates \
+            build-essential cmake git file binutils python3 time
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global user.email ci@turf-lang.invalid
+          git config --global user.name CI
+          git config --global init.defaultBranch main
+
       # No submodules: the release build has no --smart runtime (llama.cpp).
       - uses: actions/checkout@v4
 
@@ -35,7 +54,8 @@ jobs:
             /usr/lib/llvm-22
             /usr/include/llvm-22
             /usr/include/llvm-c-22
-          key: llvm-22-${{ runner.os }}-v1
+          # "jammy": the cache is the container's LLVM, not the runner's.
+          key: llvm-22-jammy-${{ runner.os }}-${{ runner.arch }}-v1
 
       - name: Install LLVM
         if: steps.cache-llvm.outputs.cache-hit != 'true'
@@ -125,6 +145,214 @@ jobs:
       - name: Archive dependency check (REL-008)
         continue-on-error: ${{ inputs.allowlist != 'enforce' }}
         run: ./scripts/release_deps_check.sh --archive "${{ steps.package.outputs.archive-path }}"
+
+      # ---- the smart archive ---------------------------------------------------
+      # The same compiler with --smart's model runtime in it (llama.cpp, built
+      # for a release: no OpenMP, no -march=native), packaged as
+      # <platform>-smart with grammars/ and an EMPTY models/ folder: no model is
+      # shipped, the user puts one .gguf there (scripts/models_README.txt). A
+      # second build directory, after the plain archive is uploaded, so nothing
+      # here can change or delay it.
+      - name: Fetch llama.cpp (the smart build only)
+        run: git submodule update --init --depth 1 external/llama.cpp
+
+      - name: Build Turf with --smart's runtime
+        run: |
+          ./scripts/cmake_build.sh --release-static --embed-lld --smart --build-dir=build-smart
+
+      - name: Package (smart)
+        id: package-smart
+        uses: ./.github/actions/package-release
+        with:
+          platform-suffix: linux-x86_64
+          archive-format: tar.gz
+          smart: "true"
+          build-dir: build-smart
+
+      # What the plain archive's smoke checks, plus: the models folder, the notes
+      # for no model and for two, and that a model survives reinstall and uninstall.
+      - name: Release archive smoke test (smart)
+        run: CI=1 ./scripts/release_smoke.sh --archive "${{ steps.package-smart.outputs.archive-path }}"
+
+      - name: Upload artifact (smart)
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64-smart
+          path: |
+            turf-*-linux-x86_64-smart.tar.gz
+            turf-*-linux-x86_64-smart.tar.gz.sha256
+
+      - name: Archive dependency check (smart)
+        continue-on-error: ${{ inputs.allowlist != 'enforce' }}
+        run: ./scripts/release_deps_check.sh --archive "${{ steps.package-smart.outputs.archive-path }}"
+
+  # Linux (Ubuntu/Debian) - arm64. The x86_64 job on GitHub's arm64 runner: the
+  # same packages (apt.llvm.org publishes arm64), the same scripts, and the
+  # bundled runtime is musl built natively for aarch64. First verified by hand
+  # in an arm64 Ubuntu 24.04 container (REL-008.md, "Linux arm64").
+  linux-arm64:
+    runs-on: ubuntu-24.04-arm
+    # The archive runs on the glibc of the system it is built on and anything
+    # newer, so it is built in the OLDEST image the release supports, not on the
+    # runner itself (ubuntu-latest's glibc 2.39 gave a turfc that needed
+    # GLIBC_2.38 and did not start on Debian 12 or Ubuntu 22.04). install.sh's
+    # GLIBC_FLOOR names the same floor: change them together.
+    container: ubuntu:22.04
+    steps:
+      # A bare image: no sudo (the job is root), no compiler, no git. sudo is
+      # installed so the steps below read the same as on a runner.
+      - name: Prepare the container
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y sudo wget curl gnupg lsb-release ca-certificates \
+            build-essential cmake git file binutils python3 time
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global user.email ci@turf-lang.invalid
+          git config --global user.name CI
+          git config --global init.defaultBranch main
+
+      # No submodules: the release build has no --smart runtime (llama.cpp).
+      - uses: actions/checkout@v4
+
+      - name: Cache LLVM
+        id: cache-llvm
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/lib/llvm-22
+            /usr/include/llvm-22
+            /usr/include/llvm-c-22
+          # runner.arch in the key: runner.os is "Linux" for the x86_64 job too.
+          key: llvm-22-jammy-${{ runner.os }}-${{ runner.arch }}-v1
+
+      - name: Install LLVM
+        if: steps.cache-llvm.outputs.cache-hit != 'true'
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 22
+          sudo apt-get install -y llvm-22-dev cmake libomp-dev
+      - run: echo "/usr/lib/llvm-22/bin" >> $GITHUB_PATH
+
+      # REL-008 stage 2: the static archives the self-contained link takes
+      # zlib, zstd and terminfo from (libz.a, libzstd.a, libtinfo.a). Not in the
+      # LLVM cache above, so installed on every run.
+      #
+      # REL-008 stage 3: lld's static libraries and headers (liblld-22 /
+      # liblld-22-dev). The cache restores files but not the apt.llvm.org
+      # repository, so it is registered here, and llvm-22-dev is installed again
+      # in the same command so lld and the LLVM headers are always one version
+      # (LLDConfig.cmake asks for exactly the LLVM it was built with; a cached
+      # llvm-22-dev older than the repository's lld would fail that).
+      - name: Install lld, and static system libraries
+        run: |
+          CODENAME=$(lsb_release -cs)
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
+          echo "deb http://apt.llvm.org/${CODENAME}/ llvm-toolchain-${CODENAME}-22 main" | sudo tee /etc/apt/sources.list.d/llvm-22.list
+          sudo apt-get update
+          sudo apt-get install -y llvm-22-dev liblld-22-dev zlib1g-dev libzstd-dev libncurses-dev
+
+      # Go, before the CMake build, so it builds build/turf (the front end under
+      # cli/, LEC-001) beside build/turfc; the archive ships both.
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+
+      # --release-static: static LLVM and C++ runtime, no --smart model runtime
+      # (so no llama.cpp submodule, no OpenMP).
+      # --embed-lld (REL-008 stage 3): Linux only for now; the Windows and macOS
+      # drivers arrive with their C runtimes (stages 5 and 6).
+      - name: Build Turf
+        run: |
+          chmod +x scripts/cmake_build.sh
+          ./scripts/cmake_build.sh --release-static --embed-lld
+
+      # The embedded linker against a stand-in C runtime from this runner's
+      # static glibc: which programs are linked in-process and which go to cc,
+      # what a broken runtime reports. (The archive's own runtime is checked
+      # below, after packaging.)
+      - name: Embedded linker smoke test (stand-in runtime)
+        run: CI=1 ./scripts/bundled_link_smoke.sh
+
+      # REL-008 stage 4: the C runtime the archive carries, which the embedded
+      # linker links programs against instead of running cc. musl built from a
+      # pinned, hash-checked source tarball, libturfrt compiled against it.
+      # Built before Package: package_release.sh ships lib/rt/ when it exists.
+      - name: Build the bundled C runtime (musl)
+        run: ./scripts/build_bundled_runtime.sh --platform linux-arm64
+
+      - name: Package
+        id: package
+        uses: ./.github/actions/package-release
+        with:
+          platform-suffix: linux-arm64
+          archive-format: tar.gz
+
+      # The archive's own turfc and runtime, not a stand-in: runtime-only
+      # programs link in-process (a decoy cc on PATH is never run), the result
+      # is static, and a host-name lookup works, which static glibc cannot do.
+      - name: Embedded linker smoke test (the archive's runtime)
+        run: CI=1 ./scripts/bundled_link_smoke.sh --archive "${{ steps.package.outputs.archive-path }}"
+
+      # REL-003: install the archive that is about to be published with
+      # install.sh and use it (layout, checksum, PATH block, turf new/run/
+      # build, uninstall). A release that fails this is not uploaded.
+      - name: Release archive smoke test
+        run: CI=1 ./scripts/release_smoke.sh --archive "${{ steps.package.outputs.archive-path }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm64
+          path: |
+            turf-*-linux-arm64.tar.gz
+            turf-*-linux-arm64.tar.gz.sha256
+
+      # REL-008 stage 1; last, so the smoke test and the upload always happen.
+      - name: Archive dependency check (REL-008)
+        continue-on-error: ${{ inputs.allowlist != 'enforce' }}
+        run: ./scripts/release_deps_check.sh --archive "${{ steps.package.outputs.archive-path }}"
+
+      # ---- the smart archive ---------------------------------------------------
+      # The same compiler with --smart's model runtime in it (llama.cpp, built
+      # for a release: no OpenMP, no -march=native), packaged as
+      # <platform>-smart with grammars/ and an EMPTY models/ folder: no model is
+      # shipped, the user puts one .gguf there (scripts/models_README.txt). A
+      # second build directory, after the plain archive is uploaded, so nothing
+      # here can change or delay it.
+      - name: Fetch llama.cpp (the smart build only)
+        run: git submodule update --init --depth 1 external/llama.cpp
+
+      - name: Build Turf with --smart's runtime
+        run: |
+          ./scripts/cmake_build.sh --release-static --embed-lld --smart --build-dir=build-smart
+
+      - name: Package (smart)
+        id: package-smart
+        uses: ./.github/actions/package-release
+        with:
+          platform-suffix: linux-arm64
+          archive-format: tar.gz
+          smart: "true"
+          build-dir: build-smart
+
+      # What the plain archive's smoke checks, plus: the models folder, the notes
+      # for no model and for two, and that a model survives reinstall and uninstall.
+      - name: Release archive smoke test (smart)
+        run: CI=1 ./scripts/release_smoke.sh --archive "${{ steps.package-smart.outputs.archive-path }}"
+
+      - name: Upload artifact (smart)
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm64-smart
+          path: |
+            turf-*-linux-arm64-smart.tar.gz
+            turf-*-linux-arm64-smart.tar.gz.sha256
+
+      - name: Archive dependency check (smart)
+        continue-on-error: ${{ inputs.allowlist != 'enforce' }}
+        run: ./scripts/release_deps_check.sh --archive "${{ steps.package-smart.outputs.archive-path }}"
 
   # Linux (Arch) - REMOVED by REL-008 stage 2. It existed because the Ubuntu
   # archive's turfc linked Ubuntu's *shared* libLLVM, which an Arch machine
@@ -286,6 +514,47 @@ jobs:
       - name: Archive dependency check (REL-008)
         continue-on-error: ${{ inputs.allowlist != 'enforce' }}
         run: ./scripts/release_deps_check.sh --archive "${{ steps.package.outputs.archive-path }}"
+
+      # ---- the smart archive ---------------------------------------------------
+      # The same compiler with --smart's model runtime in it (llama.cpp, built
+      # for a release: no OpenMP, no -march=native), packaged as
+      # <platform>-smart with grammars/ and an EMPTY models/ folder: no model is
+      # shipped, the user puts one .gguf there (scripts/models_README.txt). A
+      # second build directory, after the plain archive is uploaded, so nothing
+      # here can change or delay it.
+      - name: Fetch llama.cpp (the smart build only)
+        run: git submodule update --init --depth 1 external/llama.cpp
+
+      - name: Build Turf with --smart's runtime
+        run: |
+          export PATH="$(brew --prefix llvm@22)/bin:$PATH"
+          ./scripts/cmake_build.sh --release-static --embed-lld --smart --build-dir=build-smart
+
+      - name: Package (smart)
+        id: package-smart
+        uses: ./.github/actions/package-release
+        with:
+          platform-suffix: macos-arm64
+          archive-format: tar.gz
+          smart: "true"
+          build-dir: build-smart
+
+      # What the plain archive's smoke checks, plus: the models folder, the notes
+      # for no model and for two, and that a model survives reinstall and uninstall.
+      - name: Release archive smoke test (smart)
+        run: CI=1 ./scripts/release_smoke.sh --archive "${{ steps.package-smart.outputs.archive-path }}"
+
+      - name: Upload artifact (smart)
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64-smart
+          path: |
+            turf-*-macos-arm64-smart.tar.gz
+            turf-*-macos-arm64-smart.tar.gz.sha256
+
+      - name: Archive dependency check (smart)
+        continue-on-error: ${{ inputs.allowlist != 'enforce' }}
+        run: ./scripts/release_deps_check.sh --archive "${{ steps.package-smart.outputs.archive-path }}"
 
   # macOS - x86_64 (Intel) -- DROPPED. `macos-13` (the last Intel-hosted
   # runner label GitHub offers) queued for 9+ hours without ever starting
@@ -505,3 +774,47 @@ jobs:
         continue-on-error: ${{ inputs.allowlist != 'enforce' }}
         shell: msys2 {0}
         run: ./scripts/release_deps_check.sh --archive "${{ steps.package.outputs.archive-path }}"
+
+      # ---- the smart archive ---------------------------------------------------
+      # The same compiler with --smart's model runtime in it (llama.cpp, built
+      # for a release: no OpenMP, no -march=native), packaged as
+      # <platform>-smart with grammars/ and an EMPTY models/ folder: no model is
+      # shipped, the user puts one .gguf there (scripts/models_README.txt). A
+      # second build directory, after the plain archive is uploaded, so nothing
+      # here can change or delay it.
+      # NOT yet proven on Windows (no machine, no runner minutes when this was
+      # written): continue-on-error keeps a failure here from costing the plain
+      # archive. Remove it from these steps after the first green run.
+      - name: Fetch llama.cpp (the smart build only)
+        continue-on-error: true
+        run: git submodule update --init --depth 1 external/llama.cpp
+
+      - name: Build Turf with --smart's runtime
+        shell: msys2 {0}
+        continue-on-error: true
+        run: |
+          ./scripts/cmake_build.sh --release-static --embed-lld --smart --build-dir=build-smart
+
+      - name: Package (smart)
+        id: package-smart
+        continue-on-error: true
+        uses: ./.github/actions/package-release
+        with:
+          platform-suffix: windows-x86_64
+          archive-format: zip
+          smart: "true"
+          build-dir: build-smart
+
+      - name: Upload artifact (smart)
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64-smart
+          path: |
+            turf-*-windows-x86_64-smart.zip
+            turf-*-windows-x86_64-smart.zip.sha256
+
+      - name: Archive dependency check (smart)
+        shell: msys2 {0}
+        continue-on-error: true
+        run: ./scripts/release_deps_check.sh --archive "${{ steps.package-smart.outputs.archive-path }}"

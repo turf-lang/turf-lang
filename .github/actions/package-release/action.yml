@@ -11,6 +11,14 @@ inputs:
     description: "Newline-separated files to put in bin/ next to turf and turfc (the DLLs turfc.exe needs)"
     required: false
     default: ""
+  smart:
+    description: "'true' for the smart archive (package_release.sh --smart): <platform>-smart, with grammars/ and an empty models/"
+    required: false
+    default: "false"
+  build-dir:
+    description: "Where turf and turfc were built (default: build)"
+    required: false
+    default: ""
 outputs:
   archive-path:
     description: "Path to the produced archive"
@@ -36,9 +44,13 @@ runs:
         if [ "${GITHUB_REF_TYPE:-}" = tag ]; then
           TAG=(--expect-tag "${GITHUB_REF_NAME}")
         fi
+        VARIANT=()
+        [ "${{ inputs.smart }}" = true ] && VARIANT+=(--smart)
+        [ -n "${{ inputs.build-dir }}" ] && VARIANT+=(--build-dir "${{ inputs.build-dir }}")
         ARCHIVE=$(./scripts/package_release.sh \
           --platform "${{ inputs.platform-suffix }}" \
           --format "${{ inputs.archive-format }}" \
+          ${VARIANT[@]+"${VARIANT[@]}"} \
           ${TAG[@]+"${TAG[@]}"} \
           ${EXTRA[@]+"${EXTRA[@]}"})
         echo "archive-path=${ARCHIVE}" >> "$GITHUB_OUTPUT"
