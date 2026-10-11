@@ -1,5 +1,5 @@
 // RUNTIME_ABORT_EXPECTED
-// EXPECT-RUNTIME: List[]: index out of bounds
+// EXPECT-RUNTIME: _out_of_range.tr:11: List[]: index out of bounds
 // #256: `-len - 1` is one past the start of a List. The wrap happens once, so
 // it stays negative and panics -- it must not land back on the last element.
 import list::List;

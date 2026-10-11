@@ -314,6 +314,13 @@ Value *AssignmentExprAST::codegen() {
       const bool SelfByRef = !ArrAcc->ResolvedIndexSetTarget->Params.empty() &&
           ArrAcc->ResolvedIndexSetTarget->Params[0].Type &&
           ArrAcc->ResolvedIndexSetTarget->Params[0].Type->isReference();
+      // The value is evaluated first, then the container and the index, as
+      // for every other assignment (`a[i] = e` on an array, `s.f = e`):
+      // assignment is value-first everywhere (owner decision 2026-10-11;
+      // before it, `l[i] = e` evaluated `i` before `e`).
+      Value *ValueVal = RHS->codegen();
+      if (!ValueVal)
+        return nullptr;
       Value *BaseVal = SelfByRef
           ? const_cast<ExprAST *>(ArrAcc->getBase())->codegenLValue()
           : const_cast<ExprAST *>(ArrAcc->getBase())->codegen();
@@ -338,9 +345,6 @@ Value *AssignmentExprAST::codegen() {
       Value *IndexVal = const_cast<ExprAST *>(ArrAcc->getIndex())->codegen();
       if (!IndexVal)
         return nullptr;
-      Value *ValueVal = RHS->codegen();
-      if (!ValueVal)
-        return nullptr;
       std::string MangledName = ArrAcc->ResolvedIndexSetTarget->mangledName();
       Function *CalleeF = TheModule->getFunction(MangledName);
       if (!CalleeF) {
@@ -349,7 +353,7 @@ Value *AssignmentExprAST::codegen() {
                             MangledName + "' was resolved but never codegenned."));
         return nullptr;
       }
-      Builder->CreateCall(CalleeF, {BaseVal, IndexVal, ValueVal});
+      CallOperator(CalleeF, *ArrAcc->ResolvedIndexSetTarget, {BaseVal, IndexVal, ValueVal}, Loc);
       // Assignment expressions usually return the value assigned (allows
       // x = arr[i] = 5) -- same convention as the ordinary store path below.
       return ValueVal;
@@ -457,7 +461,8 @@ Value *CompoundAssignmentExprAST::codegen() {
                           MangledName + "' was resolved but never codegenned."));
       return nullptr;
     }
-    Value *Result = Builder->CreateCall(CalleeF, {LHSVal, Val}, "compassign.optmp");
+    Value *Result = CallOperator(CalleeF, *ResolvedOperatorTarget, {LHSVal, Val}, Loc,
+                                 "compassign.optmp");
     Builder->CreateStore(Result, Ptr);
     return Result;
   }
@@ -626,7 +631,8 @@ Value *PostfixExprAST::codegen() {
       return nullptr;
     }
     Value *DeltaOne = ConstantInt::get(*TheContext, APInt(64, 1, true));
-    Value *NewVal = Builder->CreateCall(CalleeF, {OldVal, DeltaOne}, "postfix.optmp");
+    Value *NewVal = CallOperator(CalleeF, *ResolvedOperatorTarget, {OldVal, DeltaOne}, Loc,
+                                 "postfix.optmp");
     Builder->CreateStore(NewVal, Ptr);
     return IsPrefix ? NewVal : OldVal;
   }

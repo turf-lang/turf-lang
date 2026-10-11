@@ -56,6 +56,13 @@ Standard assignment. The left-hand side must be a mutable, assignable
 location — assigning to an `immut`/`immutable` binding, or to a variable
 before its declaration, is a compile error.
 
+The right-hand side is evaluated **first**, then the location: in
+`a[i][j] = e` the order is `e`, then `i`, then `j`, then the bounds checks.
+The same holds for a compound assignment (`a[i] += e`), for a type's own
+`operator []=` (`l[i] = e` on a `List` evaluates `e` before `i`), and for a
+method call, whose arguments are evaluated before the receiver's indices
+(`a[i].m(e)` evaluates `e` before `i`).
+
 ## Arithmetic: `+ - * / %`
 
 ```turflang
@@ -72,8 +79,9 @@ arithmetic path as `+ - * /` — it is not restricted to `int` operands the way
 the bitwise operators are.
 
 > **Note — runtime division/modulo-by-zero check.** `/` and `%` both insert
-> a genuine **runtime** check that panics with `"Division by zero"` if the
-> divisor is zero, for both `int` and `double` operands. This is not purely
+> a genuine **runtime** check that panics if the divisor is zero, for both
+> `int` and `double` operands: `"Division by zero"` for `/` and
+> `"Modulo by zero"` for `%` (`/=` and `%=` add `" in compound assignment"`). This is not purely
 > a compile-time concern, and it means float division by zero panics rather
 > than silently producing `inf`/`NaN`.
 

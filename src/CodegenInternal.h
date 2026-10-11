@@ -106,6 +106,15 @@ llvm::Value *HeapAllocateValue(llvm::Value *Val);
 /// names the true, textual call site, never a placeholder.
 llvm::Value *BuildCallerLocationValue(const SourceLocation &StampLoc);
 
+/// Calls a resolved `operator` overload @p F with @p Args, appending the
+/// hidden caller-location argument when @p Target is `@caller_location`
+/// (stamped from @p Loc, the operator expression). Every operator dispatch
+/// site goes through here, so a `@caller_location` operator never receives
+/// one argument too few.
+llvm::Value *CallOperator(llvm::Function *F, const ResolverFunctionSymbol &Target,
+                          std::vector<llvm::Value *> Args, const SourceLocation &Loc,
+                          const llvm::Twine &Name = "");
+
 /// True if @p E is an error-tag-shaped operand for `==`/`!=`. Needed by
 /// CodegenExpr.cpp (BinaryExprAST).
 bool IsErrorTagExpr(const ExprAST *E);

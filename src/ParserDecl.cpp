@@ -1152,7 +1152,7 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
 // puts it. The declaration is still an ordinary FuncDefExprAST (now with a
 // non-empty TypeParams), which is all the monomorphizer needs to treat it
 // as a template like any `fn<T>`.
-std::unique_ptr<ExprAST> ParseOperatorDecl() {
+std::unique_ptr<ExprAST> ParseOperatorDecl(bool HasCallerLocation) {
   SourceLocation OpLoc = CurLoc;
   getNextToken(); // consume 'operator'
 
@@ -1380,7 +1380,8 @@ std::unique_ptr<ExprAST> ParseOperatorDecl() {
 
   auto Def = std::make_unique<FuncDefExprAST>(OpLoc, FuncName, OpLoc, RetType, Params,
                                               std::move(Body), TypeParams,
-                                              /*IsStaticMethodDecl=*/false);
+                                              /*IsStaticMethodDecl=*/false,
+                                              HasCallerLocation);
   Def->UsesTry = TryScope.used();
   return Def;
 }
@@ -1499,12 +1500,17 @@ std::unique_ptr<ExprAST> ParseAnnotatedDecl() {
     Decl = ParseFuncDef(HasCallerLocation);
   } else if (CurTok == TOK_EXTERN && !HasCallerLocation) {
     Decl = ParseExternDecl();
+  } else if (CurTok == TOK_OPERATOR && HasCallerLocation && Annotations.empty()) {
+    // An operator that panics on a broken precondition (`List`'s `[]`) names
+    // its caller's line like any other stdlib function (FREEZE F-API-3).
+    // Every operator dispatch site passes the hidden location argument.
+    Decl = ParseOperatorDecl(HasCallerLocation);
   } else if (HasCallerLocation) {
     LogErrorAt(CurLoc, ErrCode::ExpectedKeyword,
-               "Expected 'fn' after '@caller_location'."
+               "Expected 'fn' or 'operator' after '@caller_location'."
                "\n  Hint: '@caller_location' only decorates a function "
-               "declaration, e.g. '@caller_location\\nfn foo(...): T "
-               "{ ... }'.", SLM::ErrorCategory::SYNTAX_ERROR);
+               "or operator declaration, e.g. '@caller_location\\nfn "
+               "foo(...): T { ... }'.", SLM::ErrorCategory::SYNTAX_ERROR);
     return nullptr;
   } else {
     LogErrorAt(CurLoc, ErrCode::ExpectedKeyword,

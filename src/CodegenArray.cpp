@@ -628,7 +628,7 @@ Value *ArrayAccessExprAST::codegen() {
                           MangledName + "' was resolved but never codegenned."));
       return nullptr;
     }
-    return Builder->CreateCall(CalleeF, {BaseVal, IndexVal}, "idxoptmp");
+    return CallOperator(CalleeF, *ResolvedIndexGetTarget, {BaseVal, IndexVal}, Loc, "idxoptmp");
   }
 
   const TurfType *BaseTy = getExprType(Base.get());

@@ -79,7 +79,7 @@ std::unique_ptr<ExprAST> ParseErrorDecl();
 std::unique_ptr<ExprAST> ParseExternDecl();
 std::unique_ptr<ExprAST> ParseExportDecl();
 std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation = false);
-std::unique_ptr<ExprAST> ParseOperatorDecl();
+std::unique_ptr<ExprAST> ParseOperatorDecl(bool HasCallerLocation = false);
 std::unique_ptr<ExprAST> ParseVisibilityPrefixed();
 // Called when CurTok == TOK_AT: one or more `@name(args)` annotations (plus the
 // `@caller_location` decorator), then an optional `pub`, then the `fn` or

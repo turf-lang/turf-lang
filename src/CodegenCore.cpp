@@ -567,6 +567,16 @@ Value *BuildCallerLocationValue(const SourceLocation &StampLoc) {
   return Builder->CreateGlobalString(LocStr, "caller_loc");
 }
 
+Value *CallOperator(Function *F, const ResolverFunctionSymbol &Target,
+                    std::vector<Value *> Args, const SourceLocation &Loc,
+                    const llvm::Twine &Name) {
+  if (Target.HasCallerLocation)
+    Args.push_back(BuildCallerLocationValue(Loc));
+  if (F->getReturnType()->isVoidTy())
+    return Builder->CreateCall(F, Args);
+  return Builder->CreateCall(F, Args, Name);
+}
+
 
 /// True if `E` is an error-tag-shaped operand for `==`/`!=`
 /// (docs/architecture/errors_and_recover.md): either a bare

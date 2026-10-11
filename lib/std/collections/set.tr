@@ -205,9 +205,10 @@ pub fn<T> Set.length(): int {
 // corrupting that invariant with no check at all (and would leave the
 // hash index pointing at stale data besides). add()/remove() stay the
 // only way to mutate a Set's contents.
+@caller_location
 operator<T> [](s: Set<T>, i: int): T {
     if (i < 0 || i >= s.len) {
-        sys::panic("Set[]: index out of bounds");
+        sys::panic(caller_location + ": Set[]: index out of bounds");
     }
     return s.items[i];
 }

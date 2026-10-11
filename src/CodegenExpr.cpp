@@ -211,7 +211,7 @@ Value *BinaryExprAST::codegen() {
                           MangledName + "' was resolved but never codegenned."));
       return nullptr;
     }
-    return Builder->CreateCall(CalleeF, {L}, "nottmp");
+    return CallOperator(CalleeF, *ResolvedNotOperatorTarget, {L}, Loc, "nottmp");
   }
 
   // ── Operator overload dispatch ──────────────────────────────────────────
@@ -232,7 +232,7 @@ Value *BinaryExprAST::codegen() {
                           MangledName + "' was resolved but never codegenned."));
       return nullptr;
     }
-    return Builder->CreateCall(CalleeF, {L, R}, "optmp");
+    return CallOperator(CalleeF, *ResolvedOperatorTarget, {L, R}, Loc, "optmp");
   }
 
   // Type validation (void checks, compatibility, etc.) is handled by the TypeChecker.
@@ -514,7 +514,7 @@ Value *UnaryExprAST::codegen() {
                           MangledName + "' was resolved but never codegenned."));
       return nullptr;
     }
-    return Builder->CreateCall(CalleeF, {OperandV}, "unaryoptmp");
+    return CallOperator(CalleeF, *ResolvedOperatorTarget, {OperandV}, Loc, "unaryoptmp");
   }
 
   TurfTypePtr OperandType = getTurfTypeFromLLVM(OperandV->getType());

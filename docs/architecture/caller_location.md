@@ -31,6 +31,14 @@ fn fail(msg: string): void {
 }
 ```
 
+An `operator` declaration takes it the same way (`@caller_location` then
+`operator`), with no other annotation beside it. Every operator dispatch path
+(binary, unary, compound assignment, postfix, index read, index write) passes
+the hidden argument through `CallOperator()` (CodegenCore.cpp), stamped with
+the operator expression's line. `List`'s and `Set`'s `[]`/`[]=` use it, so an
+out-of-range index names the caller's line (`tests/42_caller_location/
+02_caller_location_on_operators.tr`).
+
 **Reading** the value — the bare keyword `caller_location`, legal only
 inside such a function's body, typed `string`:
 

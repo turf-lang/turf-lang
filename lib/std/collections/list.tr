@@ -129,14 +129,16 @@ pub fn<T> List.set(i: int, value: T): void {
 // array -- `l[-1]` is the last element. Valid range is `-len <= i < len`; the
 // wrap happens once, so `l[-len - 1]` still panics instead of landing back in
 // range. `get`/`set` above keep their strict `0 <= i < len` contract: they are
-// named calls, not array-shaped syntax.
+// named calls, not array-shaped syntax. `@caller_location` so the panic names
+// the line that indexed, like every precondition panic (FREEZE F-API-3).
+@caller_location
 operator<T> [](l: List<T>, i: int): T {
     mut idx: int = i;
     if (idx < 0) {
         idx = idx + l.len;
     }
     if (idx < 0 || idx >= l.len) {
-        sys::panic("List[]: index out of bounds");
+        sys::panic(caller_location + ": List[]: index out of bounds");
     }
     return l.data[idx];
 }
@@ -146,13 +148,14 @@ operator<T> [](l: List<T>, i: int): T {
 // (the same reason `List.sort` below can reorder a list it was handed by
 // value), so copying the List<T> header still shares
 // the same backing buffer, and `l.data[i] = value` writes through it.
+@caller_location
 operator<T> []=(l: List<T>, i: int, value: T): void {
     mut idx: int = i;
     if (idx < 0) {
         idx = idx + l.len;
     }
     if (idx < 0 || idx >= l.len) {
-        sys::panic("List[]=: index out of bounds");
+        sys::panic(caller_location + ": List[]=: index out of bounds");
     }
     l.data[idx] = value;
 }
