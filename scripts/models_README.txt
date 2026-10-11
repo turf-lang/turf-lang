@@ -22,8 +22,12 @@ Recommended (the model TurfLang is developed and continuously tested with):
   https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF
 
 Any GGUF model llama.cpp can run will load, so with more memory you can try a
-larger one. TurfLang's prompts and checks are tuned on the model above; another
-model may give worse suggestions, or none. Every suggestion is checked by the
+larger one. The question is put to the model in the chat format stored in its
+own file (Llama, Mistral, Gemma, Phi and ChatML models each get theirs); a model
+whose file has no chat format llama.cpp knows is asked in ChatML, the format the
+recommended model uses. TurfLang's prompts and checks are tuned on the model
+above; another model may give worse suggestions, or none, and a small one may
+not follow the output format at all. Every suggestion is checked by the
 compiler before you see it, whichever model made it.
 
 A model is only read when a compile fails with --smart; programs that compile

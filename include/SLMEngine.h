@@ -41,8 +41,10 @@ public:
   bool initialize(const std::string &modelPath);
 
   // Generates the suggestion based on the prompt.
-  // The systemPrompt is evaluated and cached. If the systemPrompt matches the
-  // previously cached prompt, it reuses the KV cache for those tokens.
+  // Both prompts are plain text, with no chat-format markers: the engine puts
+  // them into the loaded model's own chat template (from its GGUF; ChatML if it
+  // has none llama.cpp knows). The system part is evaluated and cached. If it
+  // matches the previously cached one, the KV cache for those tokens is reused.
   // If grammarStr is non-empty, grammar-constrained sampling is applied.
   std::string generateSuggestion(const std::string &systemPrompt,
                                  const std::string &userPrompt,

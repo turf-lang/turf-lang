@@ -1632,8 +1632,10 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
   //     sandbox validation -- but a wrong, confidently-stated claim in
   //     `explanation` is never validated at all; it just gets shown to the
   //     user as fact.
+  // Plain text, no chat markers: SLMEngine puts it in the loaded model's own chat
+  // format (for ChatML models the result is byte for byte what was written here
+  // before: <|im_start|>system, this text, <|im_end|>).
   std::string systemPrompt =
-      "<|im_start|>system\n"
       "You are a friendly compiler assistant for Turf-Lang, writing in the "
       "SAME voice as this compiler's own built-in error messages: warm, "
       "direct, second-person ('you'), never robotic or condescending. For "
@@ -1700,8 +1702,7 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
       "   to suggest a specific change.\n"
       "6. Respond ONLY in valid JSON without markdown code blocks.\n"
       "7. Keep explanation, suggested_comment, and warning to 1-3 sentences "
-      "-- warm and human-sized, not a one-word reply, but never rambling.\n"
-      "<|im_end|>\n";
+      "-- warm and human-sized, not a one-word reply, but never rambling.\n";
 
   // The user turn: buildUserPrompt() renders the JSON header -- the error, the
   // verbatim code, and every structured fact the raise site holds (item 3's
@@ -1709,8 +1710,7 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
   // lines), each its own field and never folded into the free-text "code"
   // and "error" strings, so the model doesn't have to parse a fact back out
   // of prose and a copy of a line of "code" is a copy of the file.
-  std::string userPrompt = "<|im_start|>user\n" +
-                           buildUserPrompt(facts, previousAttemptFailed);
+  std::string userPrompt = buildUserPrompt(facts, previousAttemptFailed);
   if (!previousAttemptFailed.empty()) {
     userPrompt +=
         "Your previous suggested fix was rejected -- "
@@ -1733,9 +1733,7 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
       "\"category\": <one of: TYPE_MISMATCH, UNDECLARED_VARIABLE, "
       "CONTROL_FLOW, SYNTAX_ERROR, ARITHMETIC, STRING_CONVERSION, "
       "ARRAY_ERROR, DECLARATION, FUNCTION_SIGNATURE, BUILTIN_FUNCTION, "
-      "MEMORY_ERROR, GENERAL>}\n"
-      "<|im_end|>\n"
-      "<|im_start|>assistant\n";
+      "MEMORY_ERROR, GENERAL>}\n";
 
   if (std::getenv("TURF_SLM_DEBUG")) {
     // Full user prompt, every structured field included -- verified live

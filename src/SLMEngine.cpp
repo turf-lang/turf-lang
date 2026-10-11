@@ -128,16 +128,114 @@ int clampMiddleDrop(std::vector<llama_token> &tokens, int n, int n_batch) {
             tokens.begin() + head);
   return n_batch;
 }
+
+/// A conversation (one system message, one user message, the assistant's turn
+/// opened) rendered in a model's own chat format and cut in two: `Prefix` is
+/// everything that does not depend on the user message (the part whose KV cache
+/// is kept between calls), `Rest` is everything after it.
+struct ChatPrompt {
+  std::string Prefix, Rest;
+  bool FromModelTemplate = false;
+};
+
+/// llama_chat_apply_template() into a std::string. False when the template is
+/// not one llama.cpp knows (it has a list of formats, not a Jinja engine).
+bool applyChatTemplate(const char *Tmpl,
+                       const std::vector<llama_chat_message> &Msgs,
+                       bool AddAssistant, std::string &Out) {
+  size_t Chars = 256;
+  for (const llama_chat_message &M : Msgs)
+    Chars += 2 * std::string_view(M.content).size();
+  std::vector<char> Buf(Chars);
+  int32_t N = llama_chat_apply_template(Tmpl, Msgs.data(), Msgs.size(),
+                                        AddAssistant, Buf.data(),
+                                        static_cast<int32_t>(Buf.size()));
+  if (N < 0)
+    return false;
+  if (static_cast<size_t>(N) > Buf.size()) {
+    Buf.resize(N);
+    N = llama_chat_apply_template(Tmpl, Msgs.data(), Msgs.size(), AddAssistant,
+                                  Buf.data(), static_cast<int32_t>(Buf.size()));
+    if (N < 0 || static_cast<size_t>(N) > Buf.size())
+      return false;
+  }
+  Out.assign(Buf.data(), N);
+  return true;
+}
+
+/// Renders System + User with template `Tmpl` and splits the result in two.
+/// Three ways, each tried only if the one before cannot work for this template:
+///  1. the system message rendered alone is the start of the whole rendering:
+///     that is the cached prefix, exactly where the system turn ends;
+///  2. otherwise render with a marker standing in for the user's text and cut
+///     at the marker (the user's turn opener then lands in the prefix);
+///  3. a template with no system role at all (Gemma's): the system text goes
+///     in front of the user's, in the user message, and is cut the same way.
+bool splitChatPrompt(const char *Tmpl, const std::string &System,
+                     const std::string &User, ChatPrompt &Out) {
+  static const std::string Marker = "@@TURF_USER_TEXT@@";
+  std::string Full, SysOnly;
+  std::vector<llama_chat_message> Both = {{"system", System.c_str()},
+                                          {"user", User.c_str()}};
+  if (applyChatTemplate(Tmpl, Both, true, Full)) {
+    std::vector<llama_chat_message> OnlySys = {{"system", System.c_str()}};
+    if (applyChatTemplate(Tmpl, OnlySys, false, SysOnly) && !SysOnly.empty() &&
+        Full.compare(0, SysOnly.size(), SysOnly) == 0) {
+      Out.Prefix = SysOnly;
+      Out.Rest = Full.substr(SysOnly.size());
+      return true;
+    }
+  }
+  auto CutAtMarker = [&](const std::vector<llama_chat_message> &Msgs) {
+    std::string S;
+    if (!applyChatTemplate(Tmpl, Msgs, true, S))
+      return false;
+    size_t At = S.find(Marker);
+    if (At == std::string::npos)
+      return false;
+    Out.Prefix = S.substr(0, At);
+    Out.Rest = User + S.substr(At + Marker.size());
+    return true;
+  };
+  std::vector<llama_chat_message> WithMarker = {{"system", System.c_str()},
+                                                {"user", Marker.c_str()}};
+  if (CutAtMarker(WithMarker))
+    return true;
+  std::string Merged = System + "\n\n" + Marker;
+  std::vector<llama_chat_message> UserOnly = {{"user", Merged.c_str()}};
+  return CutAtMarker(UserOnly);
+}
+
+/// The prompt in the loaded model's own chat format, read from its GGUF
+/// (tokenizer.chat_template). A model with no template, or one llama.cpp does
+/// not recognise, gets ChatML, the format the recommended Qwen model uses and
+/// the one this was written for.
+ChatPrompt formatChatPrompt(const llama_model *Model, const std::string &System,
+                            const std::string &User) {
+  ChatPrompt P;
+  if (const char *T = llama_model_chat_template(Model, nullptr)) {
+    if (*T && splitChatPrompt(T, System, User, P)) {
+      P.FromModelTemplate = true;
+      return P;
+    }
+  }
+  splitChatPrompt("chatml", System, User, P);
+  return P;
+}
 } // namespace
 
 /**
  * @brief Generates an AI suggestion based on the provided prompt.
  *
- * Tokenizes the input, runs inference using greedy sampling, and stops
- * generation upon encountering ChatML stop tokens. Suppresses underlying
- * backend logs to maintain compiler output cleanliness.
+ * Puts the two texts into the loaded model's own chat format (its GGUF's
+ * chat template; ChatML when it has none llama.cpp knows), tokenizes them, runs
+ * inference using greedy sampling, and stops on the model's end-of-generation
+ * token (or a ChatML turn marker). Suppresses underlying backend logs to
+ * maintain compiler output cleanliness.
  *
- * @param prompt The formatted ChatML prompt containing the error context.
+ * @param systemPrompt The system message, plain text with no chat markers.
+ *        Its rendered prefix is what the KV cache keeps between calls.
+ * @param userPrompt The user message, plain text with no chat markers.
  * @return std::string The raw generated response from the model.
  */
 std::string SLMEngine::generateSuggestion(const std::string &systemPrompt,
@@ -170,14 +268,39 @@ std::string SLMEngine::generateSuggestion(const std::string &systemPrompt,
   int n_batch = static_cast<int>(llama_n_batch(ctx));
   const llama_vocab *vocab_tok = llama_model_get_vocab(llama_get_model(ctx));
 
+  // The two texts are plain; the model's own chat format goes around them here.
+  const ChatPrompt Chat =
+      formatChatPrompt(llama_get_model(ctx), systemPrompt, userPrompt);
+  if (std::getenv("TURF_SLM_DEBUG") && saved_stderr != -1) {
+    auto Escaped = [](const std::string &S, bool Tail) {
+      std::string E;
+      for (char C : Tail ? S.substr(S.size() > 48 ? S.size() - 48 : 0)
+                         : S.substr(0, 48))
+        E += C == '\n' ? std::string("\\n") : std::string(1, C);
+      return E;
+    };
+    std::string Msg = std::string("[SLM] chat format: ") +
+                      (Chat.FromModelTemplate ? "the model's own template"
+                                              : "ChatML (the model has no template llama.cpp knows)") +
+                      "; cached part starts \"" + Escaped(Chat.Prefix, false) +
+                      "\" and ends \"" + Escaped(Chat.Prefix, true) +
+                      "\"; the rest ends \"" + Escaped(Chat.Rest, true) + "\"\n";
+    write(saved_stderr, Msg.data(), Msg.size());
+  }
+  // A template that writes the BOS token itself must not get a second one.
+  const char *BosText = llama_vocab_get_text(vocab_tok, llama_vocab_bos(vocab_tok));
+  const bool TemplateHasBos =
+      BosText && *BosText && Chat.Prefix.rfind(BosText, 0) == 0;
+
   // ── 1. Evaluate System Prompt (Cached) ──
-  if (systemPrompt != CurrentCachedSystemPrompt || CachedSystemTokens.empty()) {
+  if (Chat.Prefix != CurrentCachedSystemPrompt || CachedSystemTokens.empty()) {
     llama_memory_clear(llama_get_memory(ctx), false);
 
     std::vector<llama_token> sysTokens(n_ctx);
-    int n_sys = llama_tokenize(vocab_tok, systemPrompt.c_str(), systemPrompt.size(),
+    int n_sys = llama_tokenize(vocab_tok, Chat.Prefix.c_str(), Chat.Prefix.size(),
                                sysTokens.data(), n_ctx,
-                               /*add_special=*/true, /*parse_special=*/true);
+                               /*add_special=*/!TemplateHasBos,
+                               /*parse_special=*/true);
     // Too long: drop tokens from the MIDDLE, not the end. The prompt is
     // preamble, docs, then RULES and the closing `<|im_end|>`, and the old
     // cut-the-tail clamp removed exactly those -- general.txt alone is ~3500
@@ -194,7 +317,7 @@ std::string SLMEngine::generateSuggestion(const std::string &systemPrompt,
       if (llama_decode(ctx, sysBatch) == 0) {
         CachedSystemTokens.clear();
         for (int tok : sysTokens) CachedSystemTokens.push_back(tok);
-        CurrentCachedSystemPrompt = systemPrompt;
+        CurrentCachedSystemPrompt = Chat.Prefix;
       } else {
         CachedSystemTokens.clear();
         CurrentCachedSystemPrompt.clear();
@@ -204,7 +327,7 @@ std::string SLMEngine::generateSuggestion(const std::string &systemPrompt,
 
   // ── 2. Evaluate User Prompt ──
   std::vector<llama_token> userTokens(n_ctx);
-  int n_user = llama_tokenize(vocab_tok, userPrompt.c_str(), userPrompt.size(),
+  int n_user = llama_tokenize(vocab_tok, Chat.Rest.c_str(), Chat.Rest.size(),
                               userTokens.data(), n_ctx,
                               /*add_special=*/false, /*parse_special=*/true);
 
@@ -216,7 +339,8 @@ std::string SLMEngine::generateSuggestion(const std::string &systemPrompt,
     return "";
   }
   // Same middle-drop as the system prompt: the END of the user turn holds
-  // `<|im_end|><|im_start|>assistant`, which the model needs to answer at all.
+  // the turn-closing marker and the opening of the assistant's turn, which the
+  // model needs to answer at all.
   n_user = clampMiddleDrop(userTokens, n_user, n_batch);
   userTokens.resize(n_user);
 
