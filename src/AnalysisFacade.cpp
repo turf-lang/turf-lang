@@ -16,6 +16,8 @@
 #include "turf/FrontEndIsolation.h"
 
 #include "AST.h"
+#include "Analysis.h"
+#include "CFG.h"
 #include "Lexer.h"
 #include "Lint.h"
 #include "PackageGraph.h"
@@ -27,8 +29,10 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/FileSystem.h"
 
+#include <algorithm>
 #include <csetjmp>
 #include <cstring>
+#include <limits>
 #include <mutex>
 #include <sstream>
 #include <unordered_map>
@@ -58,7 +62,8 @@ namespace {
 //   - IndexModuleDir()'s directory index (ParserModule.cpp): a cache of
 //     what exists under lib/std, not per-compile state.
 //   - ExprAST::NextNodeID: only ever compared for equality within one tree.
-//   - Codegen's globals and GlobalCFGs: no pass analyze() runs touches them.
+//   - Codegen's globals and GlobalCFGs: no pass analyze() runs touches them
+//     (RunFlowAnalysis builds its CFGs locally).
 class GlobalStateScope {
 public:
   GlobalStateScope() {
@@ -852,6 +857,57 @@ AnalysisResult analyze(const std::vector<SourceBuffer> &Buffers,
       g_recoverActive = true;
       if (setjmp(g_recoverJmp) == 0)
         LintExpression(AST.get());
+      g_recoverActive = false;
+    }
+  }
+
+  // The flow passes read what the Resolver and TypeChecker attached, so they
+  // need a program that got that far. Each function gets a CFG of its own,
+  // built and analysed as FuncDefExprAST::codegen() does, and thrown away
+  // here (never GlobalCFGs, which belongs to Codegen).
+  if (Options.RunFlowAnalysis && HoistingClean) {
+    // A function has no end location; its lines run up to the next
+    // top-level item's. One with an error in them is skipped
+    // (AnalysisOptions::RunFlowAnalysis).
+    std::vector<int> ErrorLines;
+    for (const auto &D : DiagnosticEngine::getDiagnostics())
+      if (!D.IsWarning &&
+          (D.Filename.empty() || fileKey(D.Filename) == I->EntryKey))
+        ErrorLines.push_back(D.Loc.Line);
+    for (size_t K = 0; K < I->Program.size(); ++K) {
+      auto *F = dynamic_cast<FuncDefExprAST *>(I->Program[K].get());
+      if (!F || !F->getBody() || !F->getTypeParams().empty())
+        continue;
+      const int First = F->getLoc().Line;
+      int End = std::numeric_limits<int>::max();
+      for (size_t J = K + 1; J < I->Program.size(); ++J) {
+        NodeSpanVisitor Next = spanOf(*I->Program[J]);
+        if (Next.Found && Next.Loc.Line > First) {
+          End = Next.Loc.Line;
+          break;
+        }
+      }
+      if (std::any_of(ErrorLines.begin(), ErrorLines.end(),
+                      [&](int L) { return L >= First && L < End; }))
+        continue;
+
+      // The name codegen gives it (FuncDefExprAST::codegen(); the analysed
+      // file is never a module), so allPathsRecurse() can tell a call to
+      // itself from a call to a same-named overload.
+      std::string Mangled = F->getName();
+      if (Mangled != "main") {
+        Mangled = "turf_" + sanitizeSymbolName(F->getName());
+        for (const auto &P : F->getParams())
+          if (P.Type)
+            Mangled += "_" + P.Type->getMangledName();
+      }
+
+      g_recoverActive = true;
+      if (setjmp(g_recoverJmp) == 0) {
+        auto Cfg = CFGBuilder().buildCFG(F->getName(), F->getReturnTypePtr(),
+                                         F->getBodyMut(), F->getLoc(), Mangled);
+        runFunctionFlowPasses(*Cfg, F->getName(), F->getLoc(), {});
+      }
       g_recoverActive = false;
     }
   }

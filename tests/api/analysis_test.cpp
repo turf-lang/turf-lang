@@ -608,6 +608,154 @@ static void testLintIsOptIn() {
   CHECK(Linted.diagnostics().size() > Plain.diagnostics().size());
 }
 
+// The flow checks a real compile runs on each function's CFG during Codegen
+// (runFunctionFlowPasses()); analyze() reports them only when asked (the LSP
+// asks), with the same code, line and related notes the CLI prints.
+static void testFlowAnalysisIsOptIn() {
+  CurrentTest = "flow analysis is opt-in";
+  // One error per function, as in a compile (an error ends that function's
+  // analysis); the facade then goes on to the next function.
+  const char *Source = "import mem;\n"                          // 1
+                       "\n"                                     // 2
+                       "fn twice(): int {\n"                    // 3
+                       "    unsafe {\n"                         // 4
+                       "        mut p: void* = mem::alloc(8);\n" // 5
+                       "        mem::free(p);\n"                // 6
+                       "        p.free();\n"                    // 7
+                       "    }\n"                                // 8
+                       "    return 0;\n"                        // 9
+                       "}\n"                                    // 10
+                       "\n"                                     // 11
+                       "fn late(): int {\n"                     // 12
+                       "    unsafe {\n"                         // 13
+                       "        mut q: int* = mem::alloc(8);\n" // 14
+                       "        mem::free(q);\n"                // 15
+                       "        q[0] = 1;\n"                    // 16
+                       "    }\n"                                // 17
+                       "    return 0;\n"                        // 18
+                       "}\n"                                    // 19
+                       "\n"                                     // 20
+                       "fn main(): int {\n"                     // 21
+                       "    return twice() + late();\n"         // 22
+                       "}\n";
+  auto count = [](const turf::AnalysisResult &R, const std::string &Code) {
+    int N = 0;
+    for (const auto &D : R.diagnostics())
+      N += D.Code == Code;
+    return N;
+  };
+  auto Plain = turf::analyze({{"mem.tr", Source}});
+  CHECK_EQ(count(Plain, "E017"), 0);
+  CHECK_EQ(count(Plain, "E018"), 0);
+
+  turf::AnalysisOptions Opts;
+  Opts.RunFlowAnalysis = true;
+  auto R = turf::analyze({{"mem.tr", Source}}, Opts);
+  CHECK_EQ(count(R, "E017"), 1);
+  CHECK_EQ(count(R, "E018"), 1);
+  for (const auto &D : R.diagnostics()) {
+    if (D.Code == "E017") {
+      CHECK_EQ(D.Where.Line, 7); // the UFCS release, p.free()
+      CHECK_EQ(D.Related.size(), 1u);
+      if (!D.Related.empty())
+        CHECK_EQ(D.Related[0].Where.Line, 6);
+    }
+    if (D.Code == "E018")
+      CHECK_EQ(D.Where.Line, 16);
+  }
+
+  // Released on some paths only: the warning, not an error.
+  const char *Maybe = "import mem;\n\nfn main(): int {\n    mut c: int = 1;\n"
+                      "    unsafe {\n        mut p: void* = mem::alloc(8);\n"
+                      "        if c == 1 {\n            mem::free(p);\n        }\n"
+                      "        mem::free(p);\n    }\n    return 0;\n}\n";
+  auto M = turf::analyze({{"maybe.tr", Maybe}}, Opts);
+  CHECK_EQ(count(M, "E017"), 0);
+  int Warned = 0;
+  for (const auto &D : M.diagnostics())
+    if (D.Level == turf::Severity::Warning &&
+        D.Message.find("may already have been freed") != std::string::npos)
+      ++Warned;
+  CHECK_EQ(Warned, 1);
+
+  // The other passes, one function each: missing return (E009), use before
+  // assignment (E008), recursion with no base case (E010), an unused
+  // variable (a warning with no code).
+  const char *Flow = "fn noret(c: bool): int {\n"   // 1
+                     "    if c {\n"                 // 2
+                     "        return 1;\n"          // 3
+                     "    }\n"                      // 4
+                     "}\n"                          // 5
+                     "\n"                           // 6
+                     "fn unset(c: bool): int {\n"   // 7
+                     "    mut x: int;\n"            // 8
+                     "    if c {\n"                 // 9
+                     "        x = 1;\n"             // 10
+                     "    }\n"                      // 11
+                     "    return x;\n"              // 12
+                     "}\n"                          // 13
+                     "\n"                           // 14
+                     "fn forever(n: int): int {\n"  // 15
+                     "    return forever(n - 1);\n" // 16
+                     "}\n"                          // 17
+                     "\n"                           // 18
+                     "fn idle(): int {\n"           // 19
+                     "    mut y: int = 1;\n"        // 20
+                     "    return 0;\n"              // 21
+                     "}\n"                          // 22
+                     "\n"                           // 23
+                     "fn main(): int {\n"           // 24
+                     "    return noret(true) + unset(true) + forever(1) + idle();\n"
+                     "}\n";
+  auto unusedWarnings = [](const turf::AnalysisResult &Res) {
+    int N = 0;
+    for (const auto &D : Res.diagnostics())
+      N += D.Level == turf::Severity::Warning &&
+           D.Message.find("'y' is declared but never used") != std::string::npos;
+    return N;
+  };
+  auto FlowPlain = turf::analyze({{"flow.tr", Flow}});
+  CHECK_EQ(count(FlowPlain, "E009"), 0);
+  CHECK_EQ(count(FlowPlain, "E008"), 0);
+  CHECK_EQ(count(FlowPlain, "E010"), 0);
+  CHECK_EQ(unusedWarnings(FlowPlain), 0);
+  auto F = turf::analyze({{"flow.tr", Flow}}, Opts);
+  CHECK_EQ(count(F, "E009"), 1);
+  CHECK_EQ(count(F, "E008"), 1);
+  CHECK_EQ(count(F, "E010"), 1);
+  CHECK_EQ(unusedWarnings(F), 1);
+  for (const auto &D : F.diagnostics()) {
+    if (D.Code == "E009")
+      CHECK_EQ(D.Where.Line, 1);
+    if (D.Code == "E008")
+      CHECK_EQ(D.Where.Line, 12);
+    if (D.Code == "E010")
+      CHECK_EQ(D.Where.Line, 15);
+  }
+
+  // Not checked, as in a compile: a function that already has an error (its
+  // flow would be judged on a half-checked body), and a generic function.
+  const char *Skipped = "fn broken(c: bool): int {\n"   // 1
+                        "    mut s: int = \"text\";\n"  // 2
+                        "    if c {\n"                  // 3
+                        "        return s;\n"           // 4
+                        "    }\n"                       // 5
+                        "}\n"                           // 6
+                        "\n"                            // 7
+                        "fn<T> pick(c: bool, a: T): T {\n"
+                        "    if c {\n"
+                        "        return a;\n"
+                        "    }\n"
+                        "}\n"
+                        "\n"
+                        "fn main(): int {\n"
+                        "    return 0;\n"
+                        "}\n";
+  auto S = turf::analyze({{"skipped.tr", Skipped}}, Opts);
+  CHECK(count(S, "E009") == 0);
+  CHECK(!S.succeeded()); // the type error itself is still reported
+}
+
 static void testEmptyInput() {
   CurrentTest = "empty input";
   auto R = turf::analyze({});
@@ -642,7 +790,7 @@ static void testVisibilityModifierPlacement() {
       {"machine state", {"", "machine M { pub A -> B }", "pub machine Name"}},
       {"parameter", {"", "fn f(pub x: int): int { return x; }", "before `fn`"}},
       {"pub unsafe", {"", "pub unsafe { }", "declarations inside the block"}},
-      {"before decorator", {"", "pub @caller_location\nfn f(): string { return caller_location; }", "decorator first"}},
+      {"before decorator", {"", "pub @caller_location\nfn f(): string { return caller_location; }", "annotations first"}},
       {"not a declaration", {"", "pub 5;", "right before `fn`"}},
       {"public spelling", {"", "public export immut X: int = 1;", "Just remove `pub`"}},
       {"reserved as variable", {"", "fn g(): int { mut pub: int = 1; return pub; }", "is_public"}},
@@ -1237,6 +1385,69 @@ static void testModuleNotFoundHintsAtProject(const ScratchDir &Dir) {
 // fail_*.tr failed, so each diagnostic's code and a fragment of its hint are
 // asserted here, and the warnings the runner never sees at all (an arm that
 // can never run, an unused binding, `_name` silencing one) are asserted too.
+// E146: an annotation the declaration cannot carry. The runner only sees that a
+// fail_*.tr failed, so the code, and which half of the diagnostic names the
+// problem, are asserted here; and so is the line between E146 and a syntax
+// error, and the alias pass's error/warning split for `@ownership` calls.
+static void testAnnotationDiagnostics() {
+  CurrentTest = "annotation diagnostics";
+  struct Case {
+    const char *Label;
+    const char *Source;
+    const char *Code;
+    const char *MessageFragment;
+    const char *HintFragment;
+  };
+  const Case Cases[] = {
+      {"unknown name", "@ownrship(acquires)\nextern fn m(n: int): int*;\nfn main(): int { return 0; }\n",
+       "E146", "Unknown annotation '@ownrship'", "Did you mean '@ownership'"},
+      {"argument does not fit", "@ownership(acquires)\nfn n(): int { return 0; }\nfn main(): int { return 0; }\n",
+       "E146", "does not return a pointer", "states a fact about the declaration"},
+      {"ffi on a function", "@ffi(macos: x)\nfn g(): int { return 0; }\nfn main(): int { return 0; }\n",
+       "E146", "only sit on an 'extern fn'", "states a fact about the declaration"},
+      {"keyword key reaches the owning pass", "@ownership(error: x)\nextern fn m(n: int): int*;\nfn main(): int { return 0; }\n",
+       "E146", "Unknown '@ownership' argument 'error:'", "states a fact about the declaration"},
+      {"malformed is still a syntax error", "@ownership(1)\nextern fn m(n: int): int*;\nfn main(): int { return 0; }\n",
+       "E103", "Expected a word or a string", ""},
+  };
+  for (const auto &C : Cases) {
+    auto R = turf::analyze({{"ann.tr", C.Source}});
+    CHECK(!R.succeeded());
+    bool Found = false;
+    for (const auto &D : R.diagnostics()) {
+      if (D.Code != C.Code)
+        continue;
+      Found = true;
+      CHECK(D.Message.find(C.MessageFragment) != std::string::npos);
+      CHECK(D.Hint.find(C.HintFragment) != std::string::npos);
+      break;
+    }
+    CHECK(Found);
+    if (!Found)
+      std::cerr << "    case '" << C.Label << "' produced:\n" << render(R);
+  }
+
+  // An annotated `extern fn` inside a function body parses, and a release on
+  // only one path is not E017. (The "may already have been freed" warning
+  // itself comes from the alias pass, which runs at codegen and so not in the
+  // facade; tests/49_annotations/conditional_free_is_a_warning.tr pins it.)
+  auto Ok = turf::analyze(
+      {{"annok.tr",
+        "fn main(): int {\n"
+        "    @ownership(acquires)\n    extern fn malloc(size: int): int*;\n"
+        "    @ownership(releases: p)\n    extern fn free(p: int*): void;\n"
+        "    mut released: bool = false;\n"
+        "    unsafe {\n"
+        "        mut p: int* = malloc(8);\n"
+        "        if !released { free(p); released = true; }\n"
+        "        if !released { free(p); }\n"
+        "    }\n"
+        "    return 0;\n}\n"}});
+  CHECK(Ok.succeeded());
+  if (!Ok.succeeded())
+    std::cerr << render(Ok);
+}
+
 static void testPatternDiagnostics() {
   CurrentTest = "pattern diagnostics";
   const std::string Prelude = "struct P { x: int, y: int }\nenum Color { Red, Green }\n";
@@ -1843,6 +2054,7 @@ int main() {
   testPackageGraph(Dir);
   testWarningDedupeIsPerFile(Dir);
   testLintIsOptIn();
+  testFlowAnalysisIsOptIn();
   testEmptyInput();
   testVisibilityModifierPlacement();
   testPrivateSymbolAccess(Dir);
@@ -1851,6 +2063,7 @@ int main() {
   testMigratePub(Dir);
   testAmbiguousModuleImport(Dir);
   testModuleNotFoundHintsAtProject(Dir);
+  testAnnotationDiagnostics();
   testPatternDiagnostics();
   testErrorPayloadDiagnostics();
   testGenericOperatorDiagnostics();

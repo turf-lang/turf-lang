@@ -77,6 +77,18 @@ struct AnalysisOptions {
   // during Codegen, which this facade never runs, so lint findings are
   // absent unless asked for here.
   bool RunLint = false;
+  // Also run the flow checks a real compile runs on each function's
+  // control-flow graph during Codegen (runFunctionFlowPasses(), Analysis.h):
+  // missing return, unreachable code, use before assignment, double free
+  // (E017), use after free (E018), unchecked nullable references, escaping
+  // references, unused variables and dead stores, recursion with no base
+  // case, constructors that miss a field. Like RunLint, it covers the
+  // analysed file's own functions, not those of the modules it imports.
+  // As in a compile, a generic function is not checked (only its
+  // instantiations are, and an analysis makes none), and neither is a
+  // function that already has an error: a compile never gets this far with
+  // one, and its flow would be judged on a half-checked body.
+  bool RunFlowAnalysis = false;
   // The TurfLang installation root lib/std is found under. Empty means what
   // the CLI does: $TURF_HOME, else the directory above the running
   // executable.
