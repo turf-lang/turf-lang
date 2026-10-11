@@ -1,0 +1,9 @@
+// EXPECT-DIAG: E076
+// EXPECT-DIAG: not representable in type 'int'
+// Negative twin of fail_int_literal_too_large_right_of_runtime_operand.tr:
+// -9223372036854775809 is one below INT_MIN, in the right-hand position.
+fn main(): int {
+    mut c: int = 1;
+    mut r: int = c + -9223372036854775809;
+    return 0;
+}

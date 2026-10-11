@@ -54,7 +54,11 @@ otherwise each answer differently, producing an incoherent language.
 
 - `-9223372036854775808` is writable: unary `-` applied directly to an
   untyped integer literal folds into the literal *before* representability is
-  checked.
+  checked. The negated value is what must be representable, so the literal
+  is accepted in every operand position (`-9223372036854775808 + c`,
+  `c + -9223372036854775808`, `1 + -9223372036854775808`), and a literal one
+  step past either end (`9223372036854775808`, `-9223372036854775809`) is an
+  E076 on either side of a runtime operand.
 - Division and modulo by zero continue to trap at runtime for both `int` and
   `double` (existing behaviour, deliberately preserved — it is why IEEE
   `inf`/`NaN` are largely unreachable in TurfLang, and that asymmetry is now

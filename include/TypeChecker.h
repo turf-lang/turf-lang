@@ -627,6 +627,13 @@ private:
   /// top-level literal (this function called directly on a NumberExprAST)
   /// defers instead to checkLiteralRepresentable()'s own
   /// destination-aware message.
+  ///
+  /// Two refinements, both from turf-fuzz findings: unary '-' written
+  /// directly on a literal is ONE literal, so the leaf check judges the
+  /// NEGATED value (`-9223372036854775808` fits in any operand position, the
+  /// magnitude alone does not); and both operands of a binary node are folded
+  /// before either's failure returns, so a runtime-variable operand on one side
+  /// does not hide an out-of-range literal on the other.
   std::optional<llvm::APSInt> tryFoldUntypedIntConstant(const ExprAST *E,
                                                          bool IsTopLevel);
 

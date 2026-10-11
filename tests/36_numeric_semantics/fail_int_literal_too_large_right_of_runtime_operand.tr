@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E076
+// EXPECT-DIAG: not representable in type 'int'
+// The out-of-range literal is the RIGHT operand of a runtime expression. The
+// leaf check lived inside a fold that stopped at the runtime left operand, so
+// `c + 9223372036854775808` compiled and silently added INT_MIN while the
+// mirror `9223372036854775808 + c` was rejected (found by turf-fuzz).
+fn main(): int {
+    mut c: int = 1;
+    mut r: int = c + 9223372036854775808;
+    return 0;
+}

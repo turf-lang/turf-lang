@@ -379,15 +379,41 @@ TypeChecker::tryFoldUntypedIntConstant(const ExprAST *E, bool IsTopLevel) {
   if (const auto *UE = dynamic_cast<const UnaryExprAST *>(E)) {
     if (UE->getOpcode() != '-')
       return std::nullopt;
-    // Propagates IsTopLevel: folding "-BIG" is still the same single
-    // literal (just negated), per FREEZE.md's own `-9223372036854775808`
-    // example -- see this method's own doc comment.
-    auto Operand = tryFoldUntypedIntConstant(UE->getOperand(), IsTopLevel);
+    // `-N` written directly on a literal is ONE literal (FREEZE.md §6.2:
+    // `-9223372036854775808` is writable), so it is the NEGATED value that has
+    // to be representable, not the magnitude N. Folding the operand as an
+    // ordinary nested leaf rejected the magnitude 9223372036854775808 and with
+    // it every `-9223372036854775808 + c`, `c - -9223372036854775808` and
+    // `1 + -9223372036854775808` (found by turf-fuzz): the INT_MIN literal was
+    // writable only in the one position where a plain `c + -9223372036854775808`
+    // left this fold before it reached the literal. The leaf rule (OVH-014's
+    // accepted narrowing) still applies to the negated value, so
+    // `-99999999999999999999 + 1` stays rejected.
+    const bool OperandIsLiteral =
+        dynamic_cast<const NumberExprAST *>(UE->getOperand()) != nullptr;
+    // For a direct literal operand the magnitude check is deferred to the
+    // negated value below; for anything else IsTopLevel propagates as before
+    // ("-(a + b)" is not "the same literal", and "- -BIG" keeps top-level-ness).
+    auto Operand = tryFoldUntypedIntConstant(UE->getOperand(),
+                                             OperandIsLiteral ? true : IsTopLevel);
     if (!Operand)
       return std::nullopt;
     llvm::APInt Widened = llvm::APInt(*Operand).sext(Operand->getBitWidth() + 1);
     llvm::APInt Negated = -Widened;
-    return llvm::APSInt(std::move(Negated), /*isUnsigned=*/false);
+    llvm::APSInt Result(std::move(Negated), /*isUnsigned=*/false);
+    if (OperandIsLiteral && !IsTopLevel && !Result.isSignedIntN(64)) {
+      llvm::SmallString<48> S;
+      Result.toString(S, 10, /*Signed=*/true);
+#ifndef TYPECHECKER_NO_ERRORS
+      IntegerLiteralOutOfRangeError(UE->getLoc(), S.str().str(), "int",
+                                    "-9223372036854775808 .. 9223372036854775807")
+          .raise();
+#else
+      throw std::runtime_error("IntegerLiteralOutOfRangeError");
+#endif
+      return std::nullopt;
+    }
+    return Result;
   }
 
   if (const auto *BE = dynamic_cast<const BinaryExprAST *>(E)) {
@@ -396,11 +422,16 @@ TypeChecker::tryFoldUntypedIntConstant(const ExprAST *E, bool IsTopLevel) {
       return std::nullopt;
     // Always false: a binary operator's own operands are independent
     // leaves, not "the same literal" -- see this method's own doc comment.
+    //
+    // Both sides are folded before either's failure is acted on: the leaf
+    // check inside the fold raises as a side effect, so bailing out after a
+    // non-constant LHS meant a runtime-variable on the left skipped the check
+    // on the right -- `c + 9223372036854775808` compiled and silently added
+    // INT_MIN (found by turf-fuzz, with the mirror `9223372036854775808 + c`
+    // correctly rejected).
     auto L = tryFoldUntypedIntConstant(BE->getLHS(), false);
-    if (!L)
-      return std::nullopt;
     auto R = tryFoldUntypedIntConstant(BE->getRHS(), false);
-    if (!R)
+    if (!L || !R)
       return std::nullopt;
     // Generous headroom (never itself a source of overflow -- only the
     // FINAL destination check, in checkLiteralRepresentable(), is allowed
