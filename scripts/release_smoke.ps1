@@ -237,6 +237,19 @@ try {
   if ([IO.File]::ReadAllText((Join-Path $cache 'marker')) -eq 'keep') { Write-Pass 'the package cache was not touched' } else { Write-Fail 'the cache marker file vanished' }
   $r = Invoke-Installer @('-Uninstall', '-Prefix', $prefix) $base
   if ($r.Rc -ne 0) { Write-Pass 'uninstalling when nothing is installed is an error, not a silent pass' } else { Write-Fail 'uninstalling twice did not complain' }
+
+  # A model the user put in models\ stays, and the uninstall still finishes (the twin of the
+  # kept-model checks in release_smoke.sh). Not a guard for the interactive "has children,
+  # continue?" prompt install.ps1 once raised on the non-empty prefix: the installer runs here
+  # with stdin closed, where that prompt resolves to "no" by itself, so only a person at a
+  # console sees it.
+  $r = Invoke-Installer @('-Version', $tag, '-Prefix', $prefix) $base
+  if ($r.Rc -ne 0) { Write-Fail "reinstall for the kept-model check failed: $(Join-Output $r)" }
+  New-Item -ItemType Directory -Force -Path (Join-Path $prefix 'models') | Out-Null
+  [IO.File]::WriteAllText((Join-Path $prefix 'models\my.gguf'), 'x')
+  $r = Invoke-Installer @('-Uninstall', '-Prefix', $prefix) $base
+  if ($r.Rc -eq 0 -and (Test-Path -LiteralPath (Join-Path $prefix 'models\my.gguf')) -and -not (Test-Path -LiteralPath (Join-Path $prefix 'bin'))) { Write-Pass 'uninstall with a model in models\ finishes and keeps the model' } else { Write-Fail "uninstall with a model: rc $($r.Rc), $(Join-Output $r)" }
+  if ((Get-Raw $testKey) -eq $before -and (Get-Kind $testKey) -eq 'ExpandString') { Write-Pass 'and it still removed the PATH entry' } else { Write-Fail "PATH after the kept-model uninstall: $(Get-Raw $testKey)" }
 } finally {
   try { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($testKeyRoot, $false) } catch { }
 }

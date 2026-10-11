@@ -201,7 +201,12 @@ function Invoke-Uninstall([string]$PrefixDir) {
     if (@(Get-ChildItem -LiteralPath $models -Force).Count -eq 0) { Remove-Item -LiteralPath $models -Force }
     else { Say "kept $models (your model files are in it)" }
   }
-  try { Remove-Item -LiteralPath $PrefixDir -ErrorAction Stop } catch { }   # only if empty
+  # Only if empty. Not by trying Remove-Item and ignoring the failure: on a folder with
+  # children it asks "Continue?" instead of failing, which hangs a non-interactive run
+  # (and stops the PATH entry below from being removed) when a model is kept in models\.
+  if (@(Get-ChildItem -LiteralPath $PrefixDir -Force -ErrorAction SilentlyContinue).Count -eq 0) {
+    Remove-Item -LiteralPath $PrefixDir -Force -ErrorAction SilentlyContinue
+  }
   if (Update-UserPath (Join-Path $PrefixDir 'bin') $false) {
     Send-EnvironmentChange
     Say 'removed the turf entry from your user PATH'
