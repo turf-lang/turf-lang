@@ -142,10 +142,10 @@ PHASE 2  Language & ecosystem         LEC-002  visibility — `pub`/`public` (D1
    ▼
 ═══════  LANGUAGE FREEZE  (Part VI)   tag v2.0.0-freeze
    ▼
-PHASE 3  Stabilization & release      REL-001  version, CLI, runtime ABI stamp
-                                      REL-002  tooling: `turf test`, `turf fmt`, LSP, VS Code
-                                      REL-003  platforms & distribution (D20)
-                                      REL-008  self-contained Linux/Windows/macOS (DEC-2/14/15)  CLOSED 2026-10-11 (REL-008.md; first CI runs and hand-offs owed)
+PHASE 3  Stabilization & release      REL-001  version, CLI, runtime ABI stamp  DONE (REL-001.md, 2026-10-06)
+                                      REL-002  tooling: `turf test`, `turf fmt`, LSP, VS Code  DONE (REL-002.md, 2026-10-06; CI-only proofs are separate issues)
+                                      REL-003  platforms & distribution (D20)  DONE (REL-003.md, 2026-10-07)
+                                      REL-008  self-contained Linux/Windows/macOS (DEC-2/14/15)  DONE (REL-008.md, 2026-10-11; the CI runs and hand-offs are separate issues)
                                       REL-004  conformance suite, CI, fuzzing, sanitizers
                                       REL-005  performance baseline (starts in Phase 1)
                                       REL-006  documentation (reference rewrite, migration guide)
