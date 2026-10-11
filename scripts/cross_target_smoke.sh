@@ -103,6 +103,36 @@ case "$HOST" in
     ;;
 esac
 
+echo "== @ffi reads the --target platform, not the host's"
+# Only the macOS key is written: a darwin target forwards text_length to
+# strlen, any linux target binds text_length itself. -O0, or the call to
+# strlen("abc") is inlined and folded to 3.
+cat > ffi.tr <<'EOF'
+@ffi(macos: strlen)
+extern fn text_length(s: string): int;
+
+fn main(): int {
+    return text_length("abc");
+}
+EOF
+forwards_to_strlen() {
+  grep -A4 '^define.*@text_length(' "$1" | grep -q 'call .*@strlen('
+}
+rm -f ffi_mac.ll
+"$TURFC" ffi.tr -O0 --target=x86_64-apple-darwin --emit-llvm -o ffi_mac > ffi_mac.out 2> ffi_mac.err
+if [ -f ffi_mac.ll ] && forwards_to_strlen ffi_mac.ll; then
+  pass "--target=x86_64-apple-darwin forwards text_length to strlen"
+else
+  fail "darwin target did not forward: $(cat ffi_mac.err; ls)"
+fi
+rm -f ffi_linux.ll
+"$TURFC" ffi.tr -O0 --target=aarch64-unknown-linux-gnu --emit-llvm -o ffi_linux > ffi_linux.out 2> ffi_linux.err
+if [ -f ffi_linux.ll ] && ! grep -q '^define.*@text_length(' ffi_linux.ll && grep -q '^declare.*@text_length(' ffi_linux.ll; then
+  pass "--target=aarch64-unknown-linux-gnu binds text_length itself"
+else
+  fail "linux target should declare text_length: $(cat ffi_linux.err; ls)"
+fi
+
 echo "== no --target is the host, unchanged"
 rm -f plain
 if "$TURFC" hello.tr -o plain > plain.out 2> plain.err && ./plain | grep -q "hello from a cross target smoke"; then

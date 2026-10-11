@@ -1062,6 +1062,17 @@ static bool isForeignTarget(const std::string &Requested) {
 // 'extern from "libname" fn' declaration encountered during code generation.
 extern std::set<std::string> g_RequiredLibs;
 
+// The `@ffi` platform key code generation reads (src/CodegenFunc.cpp). Any
+// OS other than macOS and Windows reads `linux`, as on such a host.
+extern std::string g_FfiPlatform;
+static std::string ffiPlatformKey(const Triple &T) {
+  if (T.isOSDarwin())
+    return "macos";
+  if (T.isOSWindows())
+    return "windows";
+  return "linux";
+}
+
 #ifdef _WIN32
 // The file a Windows link writes for `-o Name`: Name with ".exe" appended,
 // unless it already ends in ".exe" (any case). Appending unconditionally
@@ -1391,6 +1402,8 @@ static int runCompilerMain(int argc, char **argv) {
   } cleanup;
 
   auto opts = parseArgs(argc, argv);
+  if (!opts.TargetTriple.empty())
+    g_FfiPlatform = ffiPlatformKey(Triple(Triple::normalize(opts.TargetTriple)));
 
   // LEC-002 stage 6: needs only the files' text, like --format below, so it
   // runs before any compiler state is initialized.
