@@ -19,10 +19,12 @@
 #     build/turf, the Go front end, so the suite needs no Go toolchain
 #     (LEC-001, FREEZE.md 6.16).
 #
-# Usage: scripts/test_runner.sh [-O0|-O1|-O2|-O3|-Os]
+# Usage: scripts/test_runner.sh [-O0|-O1|-O2|-O3|-Os] [-g]
 #   The optional level is forwarded to every compile (OPT-001, INV-OPT-1); absent,
 #   it is whatever the compiler's own default is. CI runs the whole suite once
-#   per level.
+#   per level. -g compiles every test with debug info (REL-004 stage 5: a debug
+#   build must run every program exactly as a plain one does); it combines with
+#   a level.
 #
 # Environment (read by turfc --test): TURF_TEST_JOBS caps how many tests run at
 # once (default: every processor); TURF_TEST_TIMEOUT_SEC bounds one test
@@ -39,15 +41,19 @@ RED="\033[0;31m"
 RESET="\033[0m"
 
 OPT_ARGS=()
-if [ $# -gt 0 ]; then
+while [ $# -gt 0 ]; do
     case "$1" in
-        -O0|-O1|-O2|-O3|-Os) OPT_ARGS=("$1"); shift ;;
+        -O0|-O1|-O2|-O3|-Os|-g) OPT_ARGS+=("$1"); shift ;;
         -O*)
             echo -e "${RED}Unknown optimization level '$1' (expected one of -O0, -O1, -O2, -O3, -Os).${RESET}"
             exit 1
             ;;
+        *)
+            echo -e "${RED}Unknown argument '$1' (expected -O0|-O1|-O2|-O3|-Os and/or -g).${RESET}"
+            exit 1
+            ;;
     esac
-fi
+done
 
 if [ ! -f "$COMPILER" ]; then
     echo -e "${RED}Compiler not found at $COMPILER. Please build Turf first.${RESET}"
