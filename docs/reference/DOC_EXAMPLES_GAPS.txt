@@ -139,6 +139,4 @@ docs/reference/structs_and_enums.md#8 e7db285e  E009 NOT-SELF-CONTAINED
 docs/reference/variables_and_types.md#13 f9aead1e  E042 NOT-SELF-CONTAINED
 docs/reference/variables_and_types.md#2 af6f34ab  E128 SHOWS-ERROR
 docs/reference/variables_and_types.md#3 7324d92b  E008 SHOWS-ERROR
-docs/reference/variables_and_types.md#5 32f8a7b0  E008 NOT-SELF-CONTAINED
-docs/reference/variables_and_types.md#6 ecba3501  E008 NOT-SELF-CONTAINED
 docs/reference/variables_and_types.md#8 145d32ef  E134 SHOWS-ERROR

@@ -50,23 +50,19 @@ Hint: 'immutable'/'immut' variables can never be assigned to later, so they
 must get their only value right here.
 ```
 
-This applies to *every* type, including ones that would otherwise get an
-automatic default value (see below) — `immut c: char;` fails with the exact
-same error as `immut x: int;`, even though `mut c: char;` compiles fine.
+This applies to *every* type: `immut c: char;` fails with the exact same
+error as `immut x: int;`, even though `mut c: char;` compiles fine.
 
 ## Default initialization
 
-> **Note — this is the single most important gotcha in the type system.**
-> Declaring a `mut` variable without an initializer does **not** behave
-> uniformly across types. Depending on the declared type, you get one of two
-> completely different behaviors.
+A `mut` variable declared without an initializer follows **one rule for every
+type** (`FREEZE.md` §6.4): it must be definitely assigned before it is read.
 
-### Mechanism A: definite assignment required (`int`, `double`, `bool`, `string`, pointers)
+### Definite assignment
 
-For `int`, `double`, `bool`, `string`, and any pointer type (`ptr`, `void*`,
-`T*`), declaring without an initializer leaves the variable **undefined**.
-The compiler statically tracks whether a variable has been assigned, and
-rejects any *read* that occurs before an explicit assignment:
+Declaring without an initializer leaves the variable **unassigned**. The
+compiler statically tracks whether a variable has been assigned on every
+path, and rejects any *read* that occurs before an assignment (E008):
 
 ```turflang
 mut x: int;
@@ -84,66 +80,59 @@ mut y: int = x;   // OK
 This is a purely static, compile-time check — it does not mean the variable
 holds garbage memory underneath (see the note at the end of this section).
 
-### Mechanism B: eager auto-default (`char`, `int32`, structs, arrays)
+The same holds for `char`, `int32`, structs and arrays; an older design gave
+those a readable default at the declaration, and that mechanism is gone:
 
-For every other type — notably `char`, `int32`, struct types, and arrays —
-the compiler synthesizes a real default value *at the declaration itself*.
-The variable is immediately readable, with no assignment required:
-
+<!-- doc-example: fails E008 -->
 ```turflang
 mut c: char;
-test::assert((c to int) == 0, "default-initialized char should be byte 0");  // PASSES
+mut n: int = c to int;   // ERROR: E008, c read before assignment
 ```
 
-The same holds for structs — every field gets its own recursively-computed
-default, and the whole struct is immediately readable:
+For a struct, assign the whole value, most simply its zero value with
+[`T::default()`](structs_and_enums.md#construction-new-and-default). Writing
+one field of an unassigned struct (`mut p: Point; p.x = 4;`) is E008 too:
+struct *fields* are never tracked on their own, since a struct value is
+either fully constructed by `::new` or fully zeroed by `::default`.
+
+An **array** is tracked as a whole. It is unassigned until it is assigned
+whole or **any one element** is written; from then on every element can be
+read, and the ones never written are zero:
 
 ```turflang
-struct AllTypes { i: int, d: double, b: bool, s: string }
+struct Point { x: int, y: int }
 
 fn main(): int {
-    mut a: AllTypes;
-    test::assert(a.i == 0, "int field default 0");
-    test::assert(a.d == 0.0, "double field default 0.0");
-    test::assert(a.b == false, "bool field default false");
-    test::assert(a.s == "", "string field default empty");
-    return 0;
+    mut p: Point = Point::default();   // every field zeroed, readable at once
+
+    mut arr: int[3];
+    // mut first: int = arr[1];        // ERROR: E008, no element written yet
+    arr[0] = 10;
+    mut x: int = arr[1];               // OK: 0
+    return p.x + x;
 }
 ```
 
-Note the asymmetry here: `AllTypes.i` is an `int` *field*, and it gets a
-usable zero default immediately — because the definite-assignment gate
-(Mechanism A) only applies to top-level local variables inside a function
-body, not to struct fields. A local `int` declared bare is unusable until
-assigned; an `int` field inside an auto-defaulted struct is usable right
-away.
-
-Arrays are always treated as defined the moment they're declared, regardless
-of their contents.
-
 ### Default value table
 
-| Type | Default value |
-|---|---|
-| `int` | `0` (not readable until assigned — Mechanism A) |
-| `int32` | `0` (readable immediately — Mechanism B) |
-| `double` | `0.0` (not readable until assigned — Mechanism A) |
-| `bool` | `false` (not readable until assigned — Mechanism A) |
-| `char` | byte `0` / `'\0'` (readable immediately — Mechanism B) |
-| `string` | `""` (not readable until assigned — Mechanism A) |
-| array / pointer / generic-param / function type | null pointer |
-| struct | struct literal of each field's own default, recursively (readable immediately — Mechanism B) |
+The value storage holds before its first assignment. Definite assignment
+keeps a whole variable from being read in that state, but it is what an
+array's unwritten elements and `T::default()`'s fields read as.
 
-> **Note.** Underneath both mechanisms, the actual memory Turf allocates for
-> a bare declaration is always zero-initialized. The difference between
-> Mechanism A and Mechanism B is entirely about whether the *compiler* lets
-> you read the variable before an explicit assignment — not about what value
-> would be there if you could. In other words: the definite-assignment check
-> is a static safety net that exists for `int`/`double`/`bool`/`string`/
-> pointers, but is not applied to `char`, `int32`, structs, or arrays. If
-> you're coming from a language with one uniform rule for "declared but not
-> initialized," don't assume Turf has one — check which bucket your type
-> falls into.
+| Type | Zero value |
+|---|---|
+| `int`, `int32` | `0` |
+| `double` | `0.0` |
+| `bool` | `false` |
+| `char` | byte `0` / `'\0'` |
+| `string` | `""` |
+| pointer / generic-param / function type | null pointer |
+| array | every element its own zero value |
+| struct | every field its own zero value, recursively |
+
+> **Note.** The memory Turf allocates for a bare declaration is always
+> zero-filled. Definite assignment is a static safety net over memory that
+> already reads as zero, not protection against garbage.
 
 ## Primitive types
 
