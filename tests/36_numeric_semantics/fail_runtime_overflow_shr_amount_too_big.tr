@@ -1,0 +1,10 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: runtime check: Integer overflow
+// '>>' by 64 or more traps, the same rule and text as '<<' (found by
+// turf-fuzz: the unchecked ashr was poison, so the value varied by -O level).
+fn main(): int {
+    mut a: int = -5;
+    mut s: int = 64;
+    mut b: int = a >> s;
+    return 0;
+}

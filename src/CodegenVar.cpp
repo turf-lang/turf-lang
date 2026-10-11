@@ -587,7 +587,7 @@ Value *CompoundAssignmentExprAST::codegen() {
                               : EmitCheckedShl(LHSVal, CastRHS, Loc);
     break;
   case TOK_RSHIFT:
-    Result = Builder->CreateAShr(LHSVal, CastRHS, "rshiftassigntmp");
+    Result = EmitCheckedShr(LHSVal, CastRHS, Loc);
     break;
   default:
     llvm::report_fatal_error("Unknown compound assignment operator");

@@ -467,9 +467,10 @@ Value *BinaryExprAST::codegen() {
     return ProvenNoOverflow ? Builder->CreateShl(L, R, "lshifttmp")
                             : EmitCheckedShl(L, R, Loc);
 
-  // Bitwise right shift (arithmetic, preserves sign)
+  // Bitwise right shift (arithmetic, preserves sign) -- amount checked,
+  // see EmitCheckedShr().
   case TOK_RSHIFT:
-    return Builder->CreateAShr(L, R, "rshifttmp");
+    return EmitCheckedShr(L, R, Loc);
 
   // Exponentiation: ** (replaces the old ^ operator)
   case TOK_POWER: {

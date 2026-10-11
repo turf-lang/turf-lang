@@ -135,6 +135,9 @@ mut r: int = a >> 2;
 
 - `>>` is an **arithmetic** (sign-extending) right shift, not a logical one:
   `-8 >> 1 == -4`, `-1 >> 1 == -1`.
+- Both shifts take an amount in `[0, 63]`. An amount outside that range
+  panics with `"Integer overflow"`, as does a `<<` that shifts a set bit out
+  past the sign. The compound forms `<<=` and `>>=` follow the same rule.
 - `~x == -(x + 1)` (standard two's-complement bitwise NOT); `~0 == -1`.
 - `^` is XOR only. Exponentiation is the separate `**` operator (see above).
 

@@ -234,6 +234,10 @@ llvm::Value *EmitCheckedIntNegate(llvm::Value *V, SourceLocation Loc);
 /// directly rather than via an intrinsic call).
 llvm::Value *EmitCheckedShl(llvm::Value *L, llvm::Value *R, SourceLocation Loc);
 
+/// Checked '>>' (arithmetic) -- traps if the shift amount is outside
+/// [0, 64), the same rule and panic text as EmitCheckedShl().
+llvm::Value *EmitCheckedShr(llvm::Value *L, llvm::Value *R, SourceLocation Loc);
+
 /// Traps if computing `L / R` would be INT64_MIN / -1 -- the one
 /// signed-division overflow case (ARCHITECTURE_OVERHAUL.md §10.2).
 /// Call after the existing divide-by-zero check (so R != 0 is already

@@ -1863,6 +1863,31 @@ Value *EmitCheckedShl(Value *L, Value *R, SourceLocation Loc) {
   return ShlResult;
 }
 
+// '>>' never loses a set bit, so the only check is the one '<<' runs first:
+// the amount must be in [0, 64), with the same panic text. Without it the
+// ashr is poison for such an amount and the value differs between -O0 and
+// -O1+ (found by turf-fuzz).
+Value *EmitCheckedShr(Value *L, Value *R, SourceLocation Loc) {
+  Function *TheFunction = Builder->GetInsertBlock()->getParent();
+  Value *Zero64 = ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
+  Value *SixtyFour = ConstantInt::get(Type::getInt64Ty(*TheContext), 64);
+  Value *AmtBad = Builder->CreateOr(
+      Builder->CreateICmpSLT(R, Zero64, "shiftamt.neg"),
+      Builder->CreateICmpSGE(R, SixtyFour, "shiftamt.toobig"), "shiftamt.bad");
+
+  BasicBlock *OverflowBB = BasicBlock::Create(*TheContext, "shr.overflow", TheFunction);
+  BasicBlock *ContBB = BasicBlock::Create(*TheContext, "shr.cont", TheFunction);
+  Builder->CreateCondBr(AmtBad, OverflowBB, ContBB);
+
+  Builder->SetInsertPoint(OverflowBB);
+  CodegenPanic(Builder->CreateGlobalString("Integer overflow"), Loc);
+  if (!Builder->GetInsertBlock()->getTerminator())
+    Builder->CreateUnreachable();
+
+  Builder->SetInsertPoint(ContBB);
+  return Builder->CreateAShr(L, R, "rshifttmp");
+}
+
 // The one signed-division overflow case (ARCHITECTURE_OVERHAUL.md §10.2):
 // INT64_MIN / -1 has no representable int64 result (the mathematical
 // result, 2^63, overflows by exactly one past INT64_MAX). LLVM's `sdiv` is

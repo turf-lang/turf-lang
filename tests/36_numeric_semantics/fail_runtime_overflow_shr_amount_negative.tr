@@ -1,0 +1,10 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: runtime check: Integer overflow
+// '>>=' by a negative amount traps like '<<' and '>>' do. The compound form
+// has its own codegen path (CodegenVar.cpp), so it is pinned separately.
+fn main(): int {
+    mut a: int = 7;
+    mut s: int = -1;
+    a >>= s;
+    return 0;
+}
