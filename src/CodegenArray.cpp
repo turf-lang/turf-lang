@@ -264,7 +264,16 @@ Value *ArrayLiteralExprAST::codegen() {
     return nullptr;
   }
 
-  const TurfType *ElemType = getExprType(Elements[0].get());
+  // The element type TypeChecker::visitArrayLiteral() settled on (element
+  // 0's). Codegen's own getExprType() cannot type every expression -- a
+  // `give`/`otherwise` or, before e2560c1, `a.length()` as element 0 came
+  // back null and crashed here (found by turf-fuzz) -- so it is only the
+  // fallback for a literal the TypeChecker never visited.
+  const TurfType *ElemType = nullptr;
+  if (const auto *Cached = dynamic_cast<const ::ArrayType *>(CachedType.get()))
+    ElemType = Cached->getElementType();
+  if (!ElemType)
+    ElemType = getExprType(Elements[0].get());
   if (!ElemType)
     llvm::report_fatal_error("Internal error: array literal element has no type");
   Type *LLVMElemTy = getLLVMType(ElemType);

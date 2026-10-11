@@ -1,0 +1,30 @@
+// `give`/`otherwise` as an array literal's element, and indexing a ternary
+// whose arms are arrays (found by turf-fuzz). Codegen's own getExprType()
+// had no case for the ternary, so the first shape aborted with "array
+// literal element has no type" (a segfault before that guard) and the second
+// with "Could not determine type of array/list base". The literal now takes
+// its element type from the TypeChecker, and the ternary has the type of its
+// arms.
+
+import test;
+
+fn first(p: int[2]): int {
+    return p[0];
+}
+
+fn main(): int {
+    mut c: int = 3;
+    test::assert(first([(c > 2 give 3 otherwise 4), 5]) == 3, "as a call argument");
+
+    mut b: int[2] = [0, 0];
+    b = [(c < 2 give 3 otherwise 4), 5];
+    test::assert(b[0] == 4, "on the right of an assignment");
+
+    mut f: bool[2] = [false, false];
+    f = [(c > 2 give true otherwise false), false];
+    test::assert(f[0], "bool elements");
+
+    test::assert((c > 2 give [7, 2] otherwise [3, 4])[0] == 7, "indexing a ternary of arrays");
+    test::assert(first([(c > 2 give [1, 2] otherwise [3, 4])[1], 5]) == 2, "both at once");
+    return 0;
+}

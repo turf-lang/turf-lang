@@ -1707,6 +1707,14 @@ const TurfType *getExprType(const ExprAST *E) {
   if (auto *ArrLit = dynamic_cast<const ArrayLiteralExprAST *>(E)) {
     return ArrLit->CachedType.get();
   }
+  // `(c give a otherwise b)`: both arms share one type (TypeChecker), so it
+  // is the first arm's. A statement `if` has block bodies, which have no
+  // type, so it still answers null.
+  if (auto *If = dynamic_cast<const IfExprAST *>(E)) {
+    if (If->getBranches().size() == 1 && If->getElse() &&
+        !dynamic_cast<const BlockExprAST *>(If->getThen()))
+      return getExprType(If->getThen());
+  }
   // Address-of: &expr produces a pointer to the operand's type.
   // We cache one TurfPointerType per call site inside a static map keyed by
   // the pointee's mangled name so the returned pointer stays valid for the
