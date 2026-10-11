@@ -160,6 +160,24 @@ extern std::map<std::string, int> Keywords;
 // RecoverableError : setjmp/longjmp based (LLVM disables C++ exceptions)
 // The main loop calls setjmp(g_recoverJmp) before each statement.
 // raise() calls longjmp(g_recoverJmp, 1) to unwind back to that point.
+//
+// POSIX longjmp semantics on Windows (REL-008 stage 5). This whole error-recovery
+// design depends on longjmp NOT running C++ destructors in the frames it skips:
+// raise() resets by hand what a destructor would have touched, and says so. On
+// Windows x64 the C runtime's longjmp is different: MinGW's setjmp records a stack
+// frame, and longjmp then UNWINDS to it through the OS, which with GCC's SEH
+// unwinder runs the cleanup (destructor) landing pads of every frame it crosses.
+// In turfc.exe that faulted inside ntdll the first time any program was rejected
+// with a resolver or type error (an access violation reading just above the
+// stack's top, before a word of the diagnostic was printed; found by running the
+// test suite on Windows: 461 of 467 failures were this one crash). Passing no frame
+// to the C runtime's _setjmp makes longjmp a plain register restore, which is what
+// every POSIX libc does and what this code was written against.
+#if defined(_WIN32) && defined(__MINGW32__)
+#undef setjmp
+#define setjmp(buf) _setjmp((buf), NULL)
+#endif
+
 extern jmp_buf g_recoverJmp;
 extern bool g_recoverActive; // true only while inside a setjmp guard
 extern bool g_protoOnlyPass; // true during sub-pass 3a: emit prototypes only
