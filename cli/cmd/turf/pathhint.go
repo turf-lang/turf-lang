@@ -19,10 +19,10 @@ import (
 // someone runs first, and it only ever prints: turf does not edit shell
 // start-up files or the Windows registry behind the user's back. Real PATH
 // management is the release installers' job: install.sh (Linux, macOS; REL-003)
-// does it for bash/zsh/fish and macOS login shells, install.ps1 for the Windows
-// user PATH is REL-008 stage 7 and does not exist yet. The hint stays because a
-// user may still run an unpacked archive or a build by its full path; point it
-// at install.sh once install.ps1 lands too.
+// does it for bash/zsh/fish and macOS login shells, and install.ps1 (REL-008
+// stage 7) for the Windows user PATH. The hint stays because a user may still
+// run an unpacked archive or a build by its full path; pointing it at the
+// installers is still to do.
 func pathHint() string {
 	exe, err := os.Executable()
 	if err != nil {

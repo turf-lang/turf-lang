@@ -477,6 +477,19 @@ jobs:
           grep -q "hello windows" hello.out
           grep -q "^4" hello.out
 
+      # REL-008 stage 7+8, Windows: install.ps1 installs the archive just built into a
+      # throwaway prefix (its PATH edit goes to a throwaway registry key, never the
+      # runner's real user PATH), then the installed turf is used on a PATH of the
+      # Windows system directories plus the install - no gcc, git or MSYS2 on it. It is
+      # run by Windows PowerShell directly, not from the msys2 shell, so that shell's
+      # tools cannot be on the PATH under test. Never run on a runner before this step.
+      - name: Install the archive with install.ps1 and use it on a clean PATH
+        shell: pwsh
+        run: |
+          $z = (Get-ChildItem -Path . -Filter 'turf-v*-windows-x86_64.zip' | Select-Object -First 1).FullName
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\release_smoke.ps1 -Archive $z
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

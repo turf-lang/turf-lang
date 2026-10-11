@@ -237,12 +237,12 @@ Restore the toolchain (command above) and confirm `clang --version` works again.
 ## 8. What else keeps REL-008 open after macOS is green
 
 Be explicit in the record, so "closed" is not claimed early:
-- **Stage 7:** `install.ps1` (Windows installer and user-PATH handling) does not exist;
-  only `install.sh` does.
-- **Stage 8:** the Windows clean-machine proof (a `PATH` of `System32` plus the archive,
-  with no MSYS2, MinGW or Git) and its `.ps1` twin do not exist (what does exist: the
-  empty-`PATH` diagnostic check in `runtime_smoke.ps1`, which shows a missing compiler is
-  reported properly, not that a no-compiler program links); Linux's `docker run
+- **Stage 7:** `install.ps1` exists and passes `scripts/release_smoke.ps1` on a real
+  Windows machine (35 checks); its CI step has not run on a runner. Archive signing
+  (minisign/cosign) is not done for any platform.
+- **Stage 8:** the Windows clean-machine proof is `release_smoke.ps1` (a `PATH` of
+  `System32` plus the install, no gcc/git; passes locally, CI step unrun; no git-dependency
+  project, since git is not on that PATH). Linux's `docker run
   ubuntu:24.04` with no `cc` is not built either (`release_smoke.sh` says the clean-machine half is
   stage 8's, and keeps `cc` on `PATH`).
 - **Stage 9:** Homebrew/Scoop/AUR recipes bumped by CI after a release.

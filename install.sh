@@ -173,7 +173,7 @@ else
   case "$os/$arch" in
     Linux/x86_64|Linux/amd64) PLATFORM=linux-x86_64 ;;
     Darwin/arm64|Darwin/aarch64) PLATFORM=macos-arm64 ;;
-    MINGW*|MSYS*|CYGWIN*) die "this is Windows; download the .zip from $BASE_URL instead (an install.ps1 is planned)." ;;
+    MINGW*|MSYS*|CYGWIN*) die "this is Windows; use install.ps1 from PowerShell instead (irm https://raw.githubusercontent.com/turf-lang/turf-lang/master/install.ps1 | iex), or download the .zip from $BASE_URL." ;;
     *) die "there is no TurfLang release for $os on $arch. Supported: Linux x86-64, macOS arm64 (Windows x86-64 from the .zip)." ;;
   esac
 fi
