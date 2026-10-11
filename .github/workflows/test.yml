@@ -18,6 +18,12 @@ jobs:
         run: |
           chmod +x scripts/check_doc_links.sh
           ./scripts/check_doc_links.sh
+      # REL-004 stage 1: tests/CONFORMANCE.md maps every Part VII area to the
+      # tests that cover it, positive and negative. Also needs no build: it
+      # fails when a mapped test was renamed or deleted, or an area is left
+      # without a negative test.
+      - name: Conformance map is consistent
+        run: python3 scripts/conformance_check.py
 
   build_and_test:
     runs-on: ubuntu-latest
@@ -203,6 +209,20 @@ jobs:
       # every push, not only on a tag.
       - name: "Release archive + install.sh smoke test"
         run: CI=1 ./scripts/release_smoke.sh
+      # REL-004 stage 2: test_runner.sh covers tests/ only. This is the CI run
+      # of what only session_postflight.sh checked by hand: every lib/std
+      # module type-checks as a library, the prelude modules compile directly
+      # (the self-import bug class), and every showcase/ program compiles at
+      # -O0/-O2/-g with a clean `llvm-dwarfdump --verify`.
+      - name: "lib/std and showcase compile (REL-004 stage 2)"
+        run: CI=1 ./scripts/tree_programs_smoke.sh
+      # REL-004 / REL-006: every ```turflang block in docs/reference/ is compiled
+      # (fragments get the imports and earlier declarations the page supplies).
+      # Blocks that do not compile are in docs/reference/DOC_EXAMPLES_GAPS.txt, a
+      # register that can only shrink: new drift fails here, a register line for
+      # a block that now compiles fails here too.
+      - name: "Reference-doc examples compile (REL-004 / REL-006)"
+        run: python3 scripts/doc_examples.py -v
 
       # OPT-001 (docs/development/changes/OPT-001.md, INV-OPT-1): optimization
       # levels must never change a program's observable behaviour. The default
@@ -225,6 +245,14 @@ jobs:
         run: ./scripts/test_runner.sh -O3
       - name: Run Test Suites (-Os)
         run: ./scripts/test_runner.sh -Os
+      # REL-004 stage 5: debug info is a code-generation mode of its own
+      # (metadata on every instruction, a different path through lowering), so
+      # the suite runs with it too. -O0 -g is what a debugger user compiles; the
+      # default level with -g is the one a release-with-symbols build uses.
+      - name: Run Test Suites (-O0 -g)
+        run: ./scripts/test_runner.sh -O0 -g
+      - name: Run Test Suites (-g)
+        run: ./scripts/test_runner.sh -g
 
       - name: Optimization-level smoke test (cross-level output equality)
         run: ./scripts/opt_levels_smoke.sh
@@ -482,3 +510,83 @@ jobs:
 
       - name: Tool API tests (compiler query facade) under ASan
         run: ./build_asan/turf-api-tests
+
+  # REL-004 stage 3 (docs/planning/ROADMAP_v2.0.0.md): the COMPILER under
+  # AddressSanitizer + UndefinedBehaviorSanitizer (CMakeLists.txt's
+  # TURF_SANITIZE_COMPILER). gc_hardening_asan above instruments the runtime
+  # that compiled programs link; nothing instrumented `turfc` itself, whose
+  # passes walk pointer-linked trees. Part VII makes "any sanitizer report in
+  # the compiler or runtime" an automatic release blocker, so the whole suite
+  # runs against this build: a report aborts the compile (-fno-sanitize-recover)
+  # and the runner counts that as a crash.
+  #
+  # ulimit -s 65536: the parser caps nesting at 2000 levels (E111), sized for
+  # an uninstrumented 8 MB stack. ASan's redzoned frames are several times
+  # larger, so tests/01_syntax/fail_deeply_nested_* overflow the stack before
+  # reaching the cap -- an artefact of the instrumentation, measured, not a
+  # compiler bug (the plain build needs under 4 MB for the same input).
+  # detect_leaks=0: a compiler that exits owns nothing worth freeing.
+  compiler_sanitizers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Cache LLVM
+        id: cache-llvm
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/lib/llvm-22
+            /usr/include/llvm-22
+            /usr/include/llvm-c-22
+          key: llvm-22-${{ runner.os }}-v1
+      - name: Install LLVM
+        if: steps.cache-llvm.outputs.cache-hit != 'true'
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 22
+          sudo apt-get install -y llvm-22-dev cmake
+      - run: echo "/usr/lib/llvm-22/bin" >> $GITHUB_PATH
+      - name: Install ccache
+        run: sudo apt-get install -y ccache
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-compsan-${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
+          restore-keys: |
+            ccache-compsan-${{ runner.os }}-${{ github.ref }}-
+            ccache-compsan-${{ runner.os }}-
+      - name: Configure and build the sanitized Turf compiler
+        run: |
+          export CC="ccache gcc"
+          export CXX="ccache g++"
+          cmake -S . -B build_san -DCMAKE_BUILD_TYPE=Release -DTURF_SANITIZE_COMPILER=ON -DTURF_SMART=OFF -DTURF_BUILD_CLI=OFF
+          cmake --build build_san -j $(nproc)
+      - name: Run Test Suites with a sanitized compiler (default level)
+        run: |
+          ulimit -s 65536
+          TURF_COMPILER="$(pwd)/build_san/turfc" ASAN_OPTIONS=detect_leaks=0:allocator_may_return_null=1 ./scripts/test_runner.sh
+      - name: Run Test Suites with a sanitized compiler (-O0)
+        run: |
+          ulimit -s 65536
+          TURF_COMPILER="$(pwd)/build_san/turfc" ASAN_OPTIONS=detect_leaks=0:allocator_may_return_null=1 ./scripts/test_runner.sh -O0
+      - name: Tool API tests (compiler query facade) with a sanitized compiler
+        run: |
+          ulimit -s 65536
+          ASAN_OPTIONS=detect_leaks=0 ./build_san/turf-api-tests
+      # A short crash-fuzz pass over the same sanitized binary: invalid input
+      # must produce diagnostics, not memory errors (REL-004 stage 4). The long
+      # run is fuzz.yml's nightly job.
+      - name: Crash fuzz smoke (sanitized compiler, 3 minutes)
+        run: |
+          ulimit -s 65536
+          python3 scripts/fuzz/crash_fuzz.py --seconds 180 --compiler "$(pwd)/build_san/turfc" --out fuzz-findings
+      - name: Upload fuzz findings
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-findings-sanitized
+          path: fuzz-findings/
