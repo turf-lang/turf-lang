@@ -756,6 +756,62 @@ static void testFlowAnalysisIsOptIn() {
   CHECK(!S.succeeded()); // the type error itself is still reported
 }
 
+// The unused-variable warnings used to come out in pointer-hash order, so one
+// buffer analyzed twice in the same process could list them differently
+// (found by turf-fuzz's re-entrancy check; the CLI hid it by sorting at print
+// time). Source order is checked directly, on every run, so the test cannot
+// pass by an allocator's luck.
+static void testFlowWarningsAreInSourceOrder() {
+  CurrentTest = "flow warnings are in source order";
+  std::string Source = "fn main(): int {\n";
+  for (char C = 'a'; C <= 'l'; ++C)
+    Source += std::string("    mut ") + C + ": int = 1;\n";
+  Source += "    return 0;\n}\n";
+  turf::AnalysisOptions Opts;
+  Opts.RunFlowAnalysis = true;
+  std::string First;
+  for (int Run = 0; Run < 8; ++Run) {
+    auto R = turf::analyze({{"order.tr", Source}}, Opts);
+    unsigned Prev = 0, Count = 0;
+    for (const auto &D : R.diagnostics()) {
+      if (D.Message.find("declared but never used") == std::string::npos)
+        continue;
+      ++Count;
+      CHECK(D.Where.Line > Prev);
+      Prev = D.Where.Line;
+    }
+    CHECK_EQ(Count, 12u);
+    if (Run == 0)
+      First = render(R);
+    else
+      CHECK_EQ(render(R), First);
+  }
+}
+
+static void testSkipPrelude() {
+  CurrentTest = "SkipPrelude";
+  turf::AnalysisOptions Opts;
+  Opts.SkipPrelude = true;
+  auto Explicit = turf::analyze(
+      {{"explicit.tr", "import io;\n"
+                       "fn main(): int {\n"
+                       "    io::printline(1);\n"
+                       "    return 0;\n"
+                       "}\n"}},
+      Opts);
+  CHECK(Explicit.succeeded());
+  CHECK_EQ(Explicit.preludeImportCount(), 0u);
+
+  const char *Bare = "fn main(): int {\n"
+                     "    printline(1);\n"
+                     "    return 0;\n"
+                     "}\n";
+  CHECK(turf::analyze({{"bare.tr", Bare}}).succeeded());
+  CHECK(!turf::analyze({{"bare.tr", Bare}}, Opts).succeeded());
+  // And the next ordinary analysis has its prelude back.
+  CHECK(turf::analyze({{"bare.tr", Bare}}).succeeded());
+}
+
 static void testEmptyInput() {
   CurrentTest = "empty input";
   auto R = turf::analyze({});
@@ -2055,6 +2111,8 @@ int main() {
   testWarningDedupeIsPerFile(Dir);
   testLintIsOptIn();
   testFlowAnalysisIsOptIn();
+  testFlowWarningsAreInSourceOrder();
+  testSkipPrelude();
   testEmptyInput();
   testVisibilityModifierPlacement();
   testPrivateSymbolAccess(Dir);

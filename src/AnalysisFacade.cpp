@@ -344,7 +344,8 @@ bool isAllowedTopLevelStatement(const ExprAST *AST) {
 // OVH-011 self-import check, then one declaration or statement at a time),
 // except that every failure is recovered from at the next top-level
 // boundary instead of ending the compile.
-std::vector<std::unique_ptr<ExprAST>> parseEntryFile(std::size_t &PreludeCount) {
+std::vector<std::unique_ptr<ExprAST>> parseEntryFile(std::size_t &PreludeCount,
+                                                     bool SkipPrelude) {
   getNextToken();
 
   // Parsed before the prelude -- only here is the file's first token still
@@ -369,7 +370,7 @@ std::vector<std::unique_ptr<ExprAST>> parseEntryFile(std::size_t &PreludeCount) 
   // without the prelude, and each of its own imports reports the same thing.
   std::vector<std::unique_ptr<ExprAST>> Program;
   g_recoverActive = true;
-  if (setjmp(g_recoverJmp) == 0)
+  if (!SkipPrelude && setjmp(g_recoverJmp) == 0)
     Program = ParsePreludeImports(CurLoc);
   g_recoverActive = false;
   PreludeCount = Program.size();
@@ -762,7 +763,7 @@ AnalysisResult analyze(const std::vector<SourceBuffer> &Buffers,
   resetLexer();
   CurTok = 0;
 
-  I->Program = parseEntryFile(I->PreludeCount);
+  I->Program = parseEntryFile(I->PreludeCount, Options.SkipPrelude);
 
   // A cancelled analysis hands back an empty result rather than a partial
   // one: a half-resolved program answers some queries wrongly and others not

@@ -89,6 +89,13 @@ struct AnalysisOptions {
   // function that already has an error: a compile never gets this far with
   // one, and its flow would be judged on a half-checked body.
   bool RunFlowAnalysis = false;
+  // Do not auto-import the prelude (lib/std/core: io, math, sys and the
+  // primitive types' methods), so bare `printline` or `x.abs()` no longer
+  // resolve; explicit `import` lines still work. Analysing the prelude is
+  // almost all of the cost of analysing a small file, so this exists for
+  // tools that analyse millions of small inputs (turf-fuzz's libFuzzer
+  // engine). Not a language mode: an editor or a build never sets it.
+  bool SkipPrelude = false;
   // The TurfLang installation root lib/std is found under. Empty means what
   // the CLI does: $TURF_HOME, else the directory above the running
   // executable.

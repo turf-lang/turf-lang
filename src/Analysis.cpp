@@ -7,6 +7,7 @@
 #include "SymbolTable.h"
 #include "ResolverSymbolTable.h"
 
+#include <algorithm>
 #include <queue>
 #include <unordered_map>
 #include <unordered_set>
@@ -475,6 +476,11 @@ void LivenessAnalysisPass::runOnCFG(
   // ── Step 3: Report UnusedVariableWarning ─────────────────────────────────
   // A variable declared in the body that's never in EverRead (collected
   // above, in Step 1) is never read anywhere. Flag it at its declaration site.
+  // Emitted in source order: AllBodyDeclared is keyed by pointer, so
+  // iterating it directly gave an address-dependent order that changed from
+  // one analysis to the next in the same process (turf-fuzz's re-entrancy
+  // check; turf-lsp saw it, the CLI hid it by sorting at print time).
+  std::vector<std::pair<SourceLocation, const VariableSymbol *>> Unused;
   for (const VariableSymbol *Sym : AllBodyDeclared) {
     // A name starting with '_' says "deliberately unused" -- the convention
     // the warning's own hint recommends, which only became true once `_name`
@@ -484,9 +490,18 @@ void LivenessAnalysisPass::runOnCFG(
     if (!EverRead.count(Sym) && !ParamSymbols.count(Sym)) {
       auto LocIt = DeclLocMap.find(Sym);
       SourceLocation Loc = (LocIt != DeclLocMap.end()) ? LocIt->second : SourceLocation{0, 0};
-      UnusedVariableWarning(Loc, Sym->Name).emit();
+      Unused.push_back({Loc, Sym});
     }
   }
+  std::sort(Unused.begin(), Unused.end(), [](const auto &A, const auto &B) {
+    if (A.first.Line != B.first.Line)
+      return A.first.Line < B.first.Line;
+    if (A.first.Col != B.first.Col)
+      return A.first.Col < B.first.Col;
+    return A.second->Name < B.second->Name;
+  });
+  for (const auto &[Loc, Sym] : Unused)
+    UnusedVariableWarning(Loc, Sym->Name).emit();
 
   // ── Step 4: Report DeadStoreWarning ──────────────────────────────────────
   // Walk each block again, simulating the live set from LiveOut[B] backward.
