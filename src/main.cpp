@@ -1452,6 +1452,12 @@ static int runCompilerMain(int argc, char **argv) {
         if (turf::BundledLinkAvailable(RtDir))
           std::cout << "bundled-runtime " << RtDir << "\n";
       }
+      // Whether --smart's model runtime is in this turfc (the "smart" archive,
+      // or a source build without --no-smart). It runs the one .gguf file in
+      // <root>/models; package_release.sh and the installers read this line.
+      std::cout << "smart "
+                << (SLM::SLMEngine::builtIn() ? "built-in" : "not-built")
+                << "\n";
       return ExitOk;
     }
   }

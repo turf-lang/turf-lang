@@ -28,8 +28,8 @@
 #
 # Usage: scripts/package_release.sh --platform <name> [--build-dir DIR]
 #            [--out DIR] [--format tar.gz|zip] [--bin-extra FILE]...
-#            [--expect-tag vX.Y.Z]
-#   --platform     linux-x86_64, linux-arch-x86_64, macos-arm64, windows-x86_64
+#            [--expect-tag vX.Y.Z] [--smart]
+#   --platform     linux-x86_64, linux-arm64, linux-arch-x86_64, macos-arm64, windows-x86_64
 #   --build-dir    where turf/turfc were built (default: <repo>/build)
 #   --out          where the archive and its checksum go (default: the current
 #                  directory); relative paths are relative to where you run it
@@ -37,6 +37,12 @@
 #   --bin-extra    an extra file for bin/ (a DLL the compiler needs); repeatable
 #   --expect-tag   fail unless this equals v<VERSION> (the release workflow
 #                  passes the pushed tag)
+#   --smart        the "smart" archive, turf-v<VERSION>-<platform>-smart: the
+#                  build must have --smart's model runtime in it (turfc
+#                  --version says `smart built-in`). It adds grammars/ and an
+#                  empty models/ with a README: no model is shipped, the user
+#                  puts ONE .gguf file there. Without --smart the build must
+#                  NOT have the runtime, so the two archives cannot be mixed up.
 # Prints the archive path on the last line of stdout.
 
 set -eu
@@ -51,6 +57,7 @@ BUILD=""
 OUT="$CALLER"
 FORMAT=""
 EXPECT_TAG=""
+SMART=0
 EXTRAS=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -59,6 +66,7 @@ while [ $# -gt 0 ]; do
     --out) OUT=$(abs "${2:?--out needs a directory}"); shift 2 ;;
     --format) FORMAT="${2:?--format needs tar.gz or zip}"; shift 2 ;;
     --bin-extra) EXTRAS+=("$(abs "${2:?--bin-extra needs a file}")"); shift 2 ;;
+    --smart) SMART=1; shift ;;
     --expect-tag) EXPECT_TAG="${2:?--expect-tag needs a tag}"; shift 2 ;;
     -h|--help) sed -n '3,40p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "package_release.sh: unknown option '$1' (try --help)" >&2; exit 2 ;;
@@ -91,7 +99,19 @@ for f in "$BUILD/turfc$EXE" "$BUILD/turf$EXE" lib/libturfrt.a; do
   [ -f "$f" ] || { echo "package_release.sh: $f not found; build first (./scripts/cmake_build.sh --release)" >&2; exit 1; }
 done
 
+# The archive's name must say what its compiler is: a "smart" archive whose
+# turfc has no model runtime would be a release that silently does nothing,
+# and a plain one with the runtime would not be the self-contained build.
+HAS_SMART=$("$BUILD/turfc$EXE" --version 2>/dev/null | sed -n 's/^smart //p' | tr -d '\r')
+if [ "$SMART" = 1 ] && [ "$HAS_SMART" != built-in ]; then
+  echo "package_release.sh: --smart, but $BUILD/turfc$EXE has no model runtime (turfc --version: smart ${HAS_SMART:-<no line>}). Build with ./scripts/cmake_build.sh --release-static --embed-lld --smart" >&2; exit 1
+fi
+if [ "$SMART" = 0 ] && [ "$HAS_SMART" = built-in ]; then
+  echo "package_release.sh: $BUILD/turfc$EXE has --smart's model runtime in it; pass --smart to package the smart archive, or build without it" >&2; exit 1
+fi
+
 NAME="turf-v$VERSION-$PLATFORM"
+[ "$SMART" = 1 ] && NAME="$NAME-smart"
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 DIR="$STAGE/$NAME"
@@ -118,6 +138,13 @@ cp -r examples "$DIR/share/turf/examples"
 # A project built inside the checkout leaves build/ and .turf/ behind.
 find "$DIR/share/turf/examples" \( -name build -o -name .turf \) -prune -exec rm -rf {} + 2>/dev/null || true
 cp LICENSE README.md "$DIR/"
+if [ "$SMART" = 1 ]; then
+  # What --smart reads beside the compiler: the grammar its output is held to,
+  # and the folder the user's model goes in.
+  cp -r grammars "$DIR/"
+  mkdir -p "$DIR/models"
+  cp scripts/models_README.txt "$DIR/models/README.txt"
+fi
 
 mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)

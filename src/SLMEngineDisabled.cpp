@@ -9,7 +9,8 @@
  *          model. initialize() returns false, which is exactly the path a
  *          missing model file already takes (SLMIntegration.cpp returns the
  *          compiler's own diagnostic unchanged), so nothing downstream needs to
- *          know which engine it has. The one difference is a single note, so a
+ *          know which engine it has (SLMIntegration.cpp asks builtIn() first,
+ *          so it does not look for a model either). The one difference is a single note, so a
  *          user who asked for `--smart` learns why they got no suggestion
  *          instead of assuming the model had nothing to say.
  *
@@ -30,14 +31,17 @@ SLMEngine &SLMEngine::getInstance() {
   return instance;
 }
 
+bool SLMEngine::builtIn() { return false; }
+
 bool SLMEngine::initialize(const std::string &) {
   // Once per compile: initialize() is reached once per diagnostic --smart
   // tries to improve, and one explanation is enough.
   static bool Noted = false;
   if (!Noted) {
     Noted = true;
-    std::cerr << "note: --smart's model runtime is not built into this turfc "
-                 "(it was configured with -DTURF_SMART=OFF); showing the "
+    std::cerr << "note: --smart is not part of this TurfLang build. Install "
+                 "the smart build (install.sh --smart, or install.ps1 -Smart), "
+                 "or build from source without --no-smart; showing the "
                  "compiler's own diagnostics.\n";
   }
   return false;

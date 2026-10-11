@@ -42,6 +42,8 @@ SLMEngine &SLMEngine::getInstance() {
   return instance;
 }
 
+bool SLMEngine::builtIn() { return true; }
+
 bool SLMEngine::initialize(const std::string &modelPath) {
   if (model)
     return true;

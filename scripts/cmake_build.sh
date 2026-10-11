@@ -16,7 +16,12 @@ SMART="ON"
 # --release-static: the self-contained release `turfc` (REL-008 stage 2): a
 # Release build with LLVM and the C++ runtime linked statically and --smart's
 # model runtime off. Needs an LLVM that ships static libraries; CI uses it.
+# --smart (with --release-static): the same build WITH the model runtime, for
+# the "smart" archive (needs the external/llama.cpp submodule).
 RELEASE_STATIC="OFF"
+WITH_SMART="OFF"
+# --build-dir=DIR: build somewhere other than build/ (the plain and the smart
+# release compilers are two builds of one checkout). Give it before --clean.
 # --embed-lld (with --release-static): embed lld so a program naming no system C
 # library is linked in-process against the bundled runtime (REL-008 stage 3).
 EMBED_LLD="OFF"
@@ -28,13 +33,17 @@ for arg in "$@"; do
     --no-smart)  SMART="OFF" ;;
     --release-static) BUILD_TYPE="Release"; SMART="OFF"; RELEASE_STATIC="ON" ;;
     --embed-lld) EMBED_LLD="ON" ;;
+    --smart)     WITH_SMART="ON" ;;
+    --build-dir=*) BUILD_DIR="${arg#--build-dir=}" ;;
     --clean)     rm -rf "$BUILD_DIR" && echo -e "${YELLOW}Cleaned build directory.${RESET}" ;;
     --help)
-      echo "Usage: $0 [--debug] [--release] [--release-static [--embed-lld]] [--no-smart] [--clean]"
+      echo "Usage: $0 [--debug] [--release] [--release-static [--embed-lld] [--smart]] [--no-smart] [--build-dir=DIR] [--clean]"
       exit 0
       ;;
   esac
 done
+# After the loop, so the order of --release-static and --smart does not matter.
+[ "$WITH_SMART" = "ON" ] && SMART="ON"
 echo -e "${GREEN}[1 / 3]${RESET} ${BOLD}Configuring (${BUILD_TYPE}, --smart runtime ${SMART})...${RESET}"
 cmake -S . -B "$BUILD_DIR" \
   -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \

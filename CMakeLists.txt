@@ -51,19 +51,20 @@ option(TURF_STATIC_LLVM "Link LLVM statically (component libraries) instead of t
 #     compiler needs are listed here, and zlib/zstd are taken as static archives;
 #   * the C++ runtime is static (-static-libstdc++ -static-libgcc; MinGW is fully
 #     static apart from the C runtime, which is the system's);
-#   * --smart's model runtime is off (llama.cpp pulls in OpenMP, and on macOS
-#     Metal/Accelerate/Foundation). `turfc --smart` says it is not built in.
+#   * --smart's model runtime is a choice, and the release ships both: OFF is
+#     the plain archive (`turfc --smart` says it is not part of this build); ON
+#     is the "smart" archive. With ON, llama.cpp is built for a release, not
+#     for this machine (see LLAMA_RELEASE_ARGS): no OpenMP (ggml then uses its
+#     own threads, so no libgomp/libomp is needed at run time) and no
+#     -march=native. On macOS it links Metal/Accelerate/Foundation, which are
+#     the operating system's own frameworks (scripts/release_deps_check.sh
+#     allows them for a smart archive only). No model is built in or shipped:
+#     --smart runs the one .gguf the user puts in <root>/models.
 # What this does NOT do: remove the dependency on the C library and the system
 # linker (`cc`) that links a compiled program (stages 3 and 4).
 # Dev builds stay on the shared libLLVM (link time).
-option(TURF_RELEASE_STATIC "Self-contained turfc for release archives (static LLVM and C++ runtime, no --smart)" OFF)
+option(TURF_RELEASE_STATIC "Self-contained turfc for release archives (static LLVM and C++ runtime)" OFF)
 if(TURF_RELEASE_STATIC)
-  if(TURF_SMART)
-    message(FATAL_ERROR
-      "TURF_RELEASE_STATIC needs TURF_SMART=OFF: the model runtime links OpenMP and, on macOS, "
-      "system frameworks, so the compiler would not be self-contained. Configure with "
-      "-DTURF_SMART=OFF (scripts/cmake_build.sh --release-static does).")
-  endif()
   set(TURF_STATIC_LLVM ON)
 endif()
 
@@ -242,6 +243,19 @@ if(TURF_SMART)
 # path whenever turf-lang is consumed via add_subdirectory() (e.g. turf-lsp).
 # CMAKE_CURRENT_SOURCE_DIR is this file's own directory in both cases.
 set(LLAMA_BUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/llama.cpp/build")
+# A release build of llama.cpp is a different build, in a different directory,
+# so a developer's native one (OpenMP, -march=native) is never linked into an
+# archive by accident:
+#   GGML_OPENMP=OFF  no libgomp/libomp to find on the user's machine;
+#   GGML_NATIVE=OFF  not tuned to the CPU of the machine that built it. ggml's
+#                    own non-native baseline is then used: on x86-64 that is
+#                    AVX2/FMA/F16C/BMI2 (2013's Haswell and later), on arm64
+#                    plain ARMv8 NEON.
+set(LLAMA_RELEASE_ARGS "")
+if(TURF_RELEASE_STATIC)
+  set(LLAMA_BUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/llama.cpp/build-release")
+  set(LLAMA_RELEASE_ARGS -DGGML_OPENMP=OFF -DGGML_NATIVE=OFF -DCMAKE_BUILD_TYPE=Release)
+endif()
 
 # ggml/CMakeLists.txt has its own `# remove the lib prefix on win32 mingw`
 # step (`set(CMAKE_STATIC_LIBRARY_PREFIX "")`) that only takes effect
@@ -286,6 +300,7 @@ if(NOT EXISTS "${LIBLLAMA}" OR NOT EXISTS "${LIBGGML}")
       # don't declare, so it fails to compile at all ("has not been
       # declared"). Confirmed live via a release-workflow dry run.
       -DLLAMA_BUILD_COMMON=OFF
+      ${LLAMA_RELEASE_ARGS}
     RESULT_VARIABLE LLAMA_CONFIG_RESULT
   )
   if(NOT LLAMA_CONFIG_RESULT EQUAL 0)
@@ -353,8 +368,10 @@ foreach(_lib ${LLAMA_STATIC_LIBS})
 endforeach()
 
 # ─── OpenMP (conditional, mirroring the build script logic) ──────────────────
-# ggml's threading; only linked when TURF_SMART builds the model runtime.
-if(APPLE)
+# ggml's threading; only linked when TURF_SMART builds the model runtime, and
+# never in a release build, whose llama.cpp is built without it (above).
+if(TURF_RELEASE_STATIC)
+elseif(APPLE)
   find_package(OpenMP QUIET)
   if(OpenMP_CXX_FOUND)
     set(OPENMP_LINK_FLAGS OpenMP::OpenMP_CXX)

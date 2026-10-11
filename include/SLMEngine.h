@@ -32,6 +32,11 @@ public:
   // Get the global instance
   static SLMEngine &getInstance();
 
+  // True in a turfc built with the model runtime (TURF_SMART=ON), false in one
+  // built without it (SLMEngineDisabled.cpp). Asked before looking for a model,
+  // so a build that cannot run one never tells the user to go and fetch one.
+  static bool builtIn();
+
   // Loads the model into RAM. Safe to call multiple times (no-op if loaded).
   bool initialize(const std::string &modelPath);
 

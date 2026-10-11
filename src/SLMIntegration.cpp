@@ -1006,6 +1006,84 @@ static std::string slmCacheKey(const std::string &ErrorCode,
                   "\x1f" + Docs);
 }
 
+// The model --smart loads: the ONE .gguf file in <root>/models, where <root>
+// is the directory above the one turfc is in (the checkout for build/turfc,
+// the install for bin/turfc). The file's name does not matter, so a user can
+// drop in any GGUF model llama.cpp can run; the recommended, tested one is
+// RecommendedSmartModel. Exactly one, deliberately: with none there is
+// nothing to run, and with two there is no telling which the user meant, so
+// neither is guessed at. In both cases, and in a build without the model
+// runtime, the compile carries on with the compiler's own diagnostics and one
+// note says why. Resolved once per compile: this is reached once per
+// diagnostic --smart tries to improve, and one explanation is enough.
+static const char *const RecommendedSmartModel =
+    "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf";
+
+static bool resolveSmartModel(std::string &ModelPath) {
+  static bool Resolved = false, Found = false;
+  static std::string Cached;
+  if (Resolved) {
+    ModelPath = Cached;
+    return Found;
+  }
+  Resolved = true;
+  auto Note = [](const std::string &Why) {
+    std::cerr << "note: " << Why
+              << "; showing the compiler's own diagnostics.\n";
+  };
+
+  // A build without the runtime says so itself (SLMEngineDisabled.cpp), and
+  // must not send the user after a model it could not run.
+  if (!SLMEngine::builtIn()) {
+    Found = true; // initialize() then prints its note and returns false
+    return true;
+  }
+
+  llvm::SmallString<128> Dir(CompilerExecutablePath);
+  llvm::sys::fs::make_absolute(Dir);
+  llvm::sys::path::remove_filename(Dir);
+  llvm::sys::path::append(Dir, "..", "models");
+  llvm::sys::path::remove_dots(Dir, /*remove_dot_dot=*/true);
+
+  std::vector<std::string> Models;
+  std::error_code EC;
+  for (llvm::sys::fs::directory_iterator It(Dir, EC), End; !EC && It != End;
+       It.increment(EC)) {
+    llvm::StringRef Name = llvm::sys::path::filename(It->path());
+    if (Name.starts_with(".") || !Name.ends_with_insensitive(".gguf"))
+      continue;
+    // status(), not the entry's own type: a model symlinked in from wherever
+    // the user keeps their models is a model.
+    llvm::sys::fs::file_status St;
+    if (llvm::sys::fs::status(It->path(), St) ||
+        !llvm::sys::fs::is_regular_file(St))
+      continue;
+    Models.push_back(Name.str());
+  }
+  std::sort(Models.begin(), Models.end());
+
+  if (Models.empty()) {
+    Note("--smart has no model to run. Put one .gguf file in " +
+         std::string(Dir.str()) + " (recommended: " + RecommendedSmartModel +
+         ")");
+    return false;
+  }
+  if (Models.size() > 1) {
+    std::string List;
+    for (const std::string &M : Models)
+      List += (List.empty() ? "" : ", ") + M;
+    Note("--smart uses exactly one model and found " +
+         std::to_string(Models.size()) + " in " + std::string(Dir.str()) +
+         " (" + List + "). Leave one .gguf file there");
+    return false;
+  }
+  llvm::sys::path::append(Dir, Models.front());
+  Cached = std::string(Dir.str());
+  ModelPath = Cached;
+  Found = true;
+  return true;
+}
+
 static std::string slmCacheDir() {
   const char *Home = std::getenv("HOME");
   if (!Home || !*Home)
@@ -1471,11 +1549,9 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
   }
 
   if (!replaying) {
-    llvm::SmallString<128> ModelPath(CompilerExecutablePath);
-    llvm::sys::path::remove_filename(ModelPath);
-    llvm::sys::path::append(ModelPath, "..", "models",
-                            "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf");
-    if (!SLMEngine::getInstance().initialize(ModelPath.str().str())) {
+    std::string ModelPath;
+    if (!resolveSmartModel(ModelPath) ||
+        !SLMEngine::getInstance().initialize(ModelPath)) {
       return suggestion;
     }
   }
