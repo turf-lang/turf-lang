@@ -237,6 +237,34 @@ if ($c.Rc -eq 0) {
   Write-Indented $o
 }
 
+# 6d. A program that names a library the C runtime does not provide goes to the system
+# toolchain (gcc). With no gcc on PATH that is a TurfLang diagnostic naming the library, not
+# a bare spawn failure; with one, a library the linker cannot find gets the hint that follows
+# the linker's own line.
+$emptyPath = New-WorkDir
+$c = Invoke-Turfc -ArgList @($hello, '-o', (Join-Path $work 'nolib_nocc.exe'), '--link', 'nosuchlib') -Env @{ PATH = $emptyPath }
+$o = Join-Output $c
+if ($c.Rc -eq 0) {
+  Write-Fail 'expected the link to fail with no C compiler on PATH, it succeeded'
+} elseif ($o.Contains('linking needs a C compiler') -and $o.Contains('"nosuchlib"')) {
+  Write-Pass 'no C compiler: a diagnostic that names the library the program links'
+} else {
+  Write-Fail "expected 'linking needs a C compiler' naming nosuchlib, got:"
+  Write-Indented $o
+}
+$c = Invoke-Turfc -ArgList @($hello, '-o', (Join-Path $work 'nolib_nofile.exe'), '--link', 'nosuchlib')
+$o = Join-Output $c
+if ($c.Rc -eq 0) {
+  Write-Fail 'expected the link to fail for a library that does not exist, it succeeded'
+} elseif ($o.Contains('links against "nosuchlib", which Turf does not bundle')) {
+  Write-Pass 'a library the linker cannot find: the hint names it and says what to install'
+} elseif ($o.Contains('linking needs a C compiler')) {
+  Write-Skip 'no gcc on PATH on this machine, so the linker-ran-and-failed hint cannot be checked'
+} else {
+  Write-Fail "expected the 'does not bundle' hint, got:"
+  Write-Indented $o
+}
+
 # --- 7 ---------------------------------------------------------------------------------
 Write-Heading '7. a SIGBUS is reported like a SIGSEGV, not a bare crash'
 Write-Skip 'no SIGBUS on Windows; a bad access to a mapped page raises EXCEPTION_IN_PAGE_ERROR, which the vectored handler reports as an access violation (covered by the stack-overflow check above and tests/)'

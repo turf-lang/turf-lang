@@ -119,6 +119,49 @@ unsafe {
 > immediately after a line that looks fine, check whether an `extern fn`
 > snuck into a function body — move it to file/top level instead.
 
+### Linking external libraries
+
+`extern from "name"` (and `turfc --link name`) adds `-lname` to the link. What that
+needs on the machine depends on the library:
+
+| The program names | How it is linked | What the machine needs |
+|---|---|---|
+| nothing, or only the C runtime (`c`, `m`; on Linux also `pthread dl rt util`; on Windows also `ucrt kernel32 user32 advapi32 shell32 ws2_32`; on macOS `System`) | by the linker built into `turfc`, statically, against the C runtime in the release archive (`lib/rt/<platform>/`) | nothing. No C compiler, no libc development files |
+| any other library (`"z"`, `"sqlite3"`, `"LLVM"`) | by the **system C compiler** (`cc`; `gcc` on Windows) | a C compiler **and** that library's development files |
+
+The release archive bundles no third-party library. A program that binds one is
+a normal C-FFI program: you install the library, as you would for any C program
+that uses it.
+
+**Linux and macOS.** Install the library's `-dev`/`-devel` package (or `brew install`),
+which provides the `.so`/`.dylib`/`.a` the linker searches for. A library in a
+non-default directory is found by adding that directory to `LIBRARY_PATH`.
+
+**Windows.** Install a MinGW-w64 `gcc` (for example through MSYS2) and put it on
+`PATH`; `turfc` runs the command `gcc`. The library must be one MinGW's linker can
+link: an import library or static archive that the name resolves to (`-lfoo` finds
+`libfoo.a`, `libfoo.dll.a` or `foo.lib`), with the matching DLL beside the program or
+on `PATH` when it runs. Point `LIBRARY_PATH` at its directory if it is not in the
+compiler's own. The library name you write in `extern from "..."` must be the name
+that import library actually has, which a vendor may spell differently from the
+library's Linux name. (`showcase/llvm_ffi_selfhost_demo.tr` writes `from "LLVM"`, the
+Linux `libLLVM`; on Windows check the name of the import library in the LLVM you
+installed before expecting it to link.)
+
+`turfc` says which of these is wrong:
+
+- *`Error: linking needs a C compiler, and 'gcc' was not found on PATH.`*: the
+  program names a library from the second row (the message lists it) and there is no
+  compiler. Install one, or remove the declarations that name the library.
+- *`Linking failed ... This program links against "foo", which Turf does not
+  bundle.`*: the compiler ran and the linker could not use the library. The
+  linker's own line above it (`cannot find -lfoo`) is the specific cause; the fix is
+  its development files, or `LIBRARY_PATH`.
+
+`turfc --version` shows which path a given install takes (`linker embedded-lld` with a
+`bundled-runtime` line is the first row; `linker system-cc` means every program is
+linked by `cc`). `TURF_LINKER=system` forces the second row for any program.
+
 ---
 
 ## 2. `unsafe { }`

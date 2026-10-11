@@ -56,6 +56,7 @@
 #include "llvm/IR/PassManager.h"
 #include "llvm/Passes/PassBuilder.h"
 #include <cctype>
+#include <cerrno>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -1094,6 +1095,64 @@ static std::string WindowsExecutableName(const std::string &Name) {
 }
 #endif
 
+// The libraries a program names that the C runtime Turf links against does not
+// provide ("c" and "m" are system libraries on every platform, so they are never
+// the reason a link needs more than the C runtime). These are the ones that make
+// the link go to the system toolchain and need their own development files.
+static std::vector<std::string>
+externalLibraries(const std::set<std::string> &AllLibs) {
+  std::vector<std::string> Out;
+  for (const auto &L : AllLibs)
+    if (L != "c" && L != "m" && !turf::BundledRuntimeProvides(L))
+      Out.push_back(L);
+  return Out;
+}
+
+static std::string joinLibraries(const std::vector<std::string> &Libs) {
+  std::string S;
+  for (size_t I = 0; I < Libs.size(); ++I)
+    S += (I ? ", \"" : "\"") + Libs[I] + "\"";
+  return S;
+}
+
+// The system toolchain could not be started at all: nothing is installed under
+// that name. Say why the toolchain is needed (the program names a library the
+// C runtime does not provide), and the two ways out.
+static void explainMissingCompiler(const std::string &Compiler,
+                                   const std::vector<std::string> &Ext) {
+  std::cerr << "Error: linking needs a C compiler, and '" << Compiler
+            << "' was not found on PATH.\n";
+  if (!Ext.empty())
+    std::cerr << "  This program links against " << joinLibraries(Ext)
+              << ", which Turf's own C runtime does not provide, so turfc hands "
+                 "the link to the system toolchain.\n"
+              << "  Either install a C compiler and that library's development "
+                 "files, or remove the 'extern from' declarations (and any "
+                 "--link flags) that name it.\n";
+  else
+    std::cerr << "  This Turf install has no complete bundled C runtime "
+                 "(see 'turfc --version'), so turfc links with the system "
+                 "toolchain.\n  Install a C compiler, or use a release "
+                 "archive, which links without one.\n";
+  std::cerr << "  See docs/reference/ffi_and_unsafe.md, \"Linking external "
+               "libraries\".\n";
+}
+
+// The system toolchain ran and the link failed. When the program names a
+// library the C runtime does not provide, that library is the usual reason, and
+// the linker's own message ("cannot find -lLLVM") does not say what to do.
+static void explainExternalLinkFailure(const std::vector<std::string> &Ext) {
+  if (Ext.empty())
+    return;
+  std::cerr << "  This program links against " << joinLibraries(Ext)
+            << ", which Turf does not bundle. If the linker could not find it, "
+               "install that library's development files (the import library "
+               "or .so/.dylib/.a, not only the runtime DLL) and, if they are "
+               "not in a default location, add the directory to LIBRARY_PATH.\n"
+            << "  See docs/reference/ffi_and_unsafe.md, \"Linking external "
+               "libraries\".\n";
+}
+
 // Invoke system linker
 //
 // Runs the linker directly via fork+exec (POSIX) / _spawnvp (Windows) with
@@ -1240,9 +1299,14 @@ static int linkObject(const std::string &ObjFile,
   for (const auto &A : Args) Argv.push_back(A.c_str());
   Argv.push_back(nullptr);
   intptr_t Ret = _spawnvp(_P_WAIT, Argv[0], Argv.data());
+  if (Ret == -1 && errno == ENOENT) {
+    explainMissingCompiler(Argv[0], externalLibraries(AllLibs));
+    return 1;
+  }
   if (Ret != 0) {
     std::cerr << "Linking failed (exit code " << Ret << ")\n";
     std::cerr << "Command was: " << CmdForDisplay << "\n";
+    explainExternalLinkFailure(externalLibraries(AllLibs));
     return 1;
   }
 #else
@@ -1257,19 +1321,26 @@ static int linkObject(const std::string &ObjFile,
   }
   if (Pid == 0) {
     execvp(Argv[0], Argv.data());
-    // execvp only returns on failure.
-    std::cerr << "Linking failed: could not exec '" << Argv[0] << "'\n";
-    _exit(127);
+    // execvp only returns on failure. 127 is the shell convention for "command
+    // not found"; the parent reads it below and explains.
+    _exit(errno == ENOENT ? 127 : 126);
   }
   int Status = 0;
   if (waitpid(Pid, &Status, 0) < 0) {
     std::cerr << "Linking failed: waitpid() error\n";
     return 1;
   }
+  if (WIFEXITED(Status) && WEXITSTATUS(Status) == 127) {
+    // Our own child could not find the compiler (a real cc that fails to link
+    // exits 1).
+    explainMissingCompiler(Argv[0], externalLibraries(AllLibs));
+    return 1;
+  }
   if (!WIFEXITED(Status) || WEXITSTATUS(Status) != 0) {
     std::cerr << "Linking failed (exit code "
               << (WIFEXITED(Status) ? WEXITSTATUS(Status) : -1) << ")\n";
     std::cerr << "Command was: " << CmdForDisplay << "\n";
+    explainExternalLinkFailure(externalLibraries(AllLibs));
     return 1;
   }
 #endif

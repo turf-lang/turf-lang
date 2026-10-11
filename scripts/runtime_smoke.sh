@@ -345,6 +345,30 @@ else
 fi
 rm -rf "$FAKE_HOME"
 
+# 6d. A program that names a library the C runtime does not provide goes to the
+# system toolchain. With no compiler on PATH that is a TurfLang diagnostic naming the
+# library, not a bare "could not exec"; with one, a library the linker cannot find
+# gets the hint that follows the linker's own line.
+EMPTY_PATH=$(mktemp -d)
+if PATH="$EMPTY_PATH" "$TURF" "$WORKDIR/hello.tr" -o "$WORKDIR/nolib_nocc" --link nosuchlib \
+     > "$WORKDIR/nocc.out" 2>&1; then
+  fail "expected the link to fail with no C compiler on PATH, it succeeded"
+elif grep -q "linking needs a C compiler" "$WORKDIR/nocc.out" \
+     && grep -qF '"nosuchlib"' "$WORKDIR/nocc.out"; then
+  pass "no C compiler: a diagnostic that names the library the program links"
+else
+  fail "expected 'linking needs a C compiler' naming nosuchlib, got:"; cat "$WORKDIR/nocc.out"
+fi
+rm -rf "$EMPTY_PATH"
+if "$TURF" "$WORKDIR/hello.tr" -o "$WORKDIR/nolib_nofile" --link nosuchlib \
+     > "$WORKDIR/nolib.out" 2>&1; then
+  fail "expected the link to fail for a library that does not exist, it succeeded"
+elif grep -q 'links against "nosuchlib", which Turf does not bundle' "$WORKDIR/nolib.out"; then
+  pass "a library the linker cannot find: the hint names it and says what to install"
+else
+  fail "expected the 'does not bundle' hint, got:"; cat "$WORKDIR/nolib.out"
+fi
+
 # SIGBUS gets the same handler as SIGSEGV: macOS reports protection faults,
 # stack-guard hits among them, as SIGBUS, so a SIGSEGV-only handler left
 # them as bare crashes. Linux raises a real SIGBUS on touching an mmap'd page
