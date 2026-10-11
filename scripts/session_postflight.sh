@@ -315,6 +315,24 @@ else
   head -8 /tmp/turf_postflight_links.log | sed 's/^/       /'
 fi
 
+# ── 6b. Conformance map (REL-004) ───────────────────────────────────────────
+echo -e "\n${BOLD}6b. Conformance map${RESET}"
+if CONF_OUT=$(python3 scripts/conformance_check.py 2>&1); then
+  pass "$CONF_OUT"
+else
+  fail "tests/CONFORMANCE.md is out of step with the tree:"
+  echo "$CONF_OUT" | head -8 | sed 's/^/       /'
+fi
+
+# ── 6c. Reference-doc examples (REL-004 / REL-006) ──────────────────────────
+echo -e "\n${BOLD}6c. Reference-doc examples${RESET}"
+if DOCEX_OUT=$(python3 scripts/doc_examples.py 2>&1); then
+  pass "$(echo "$DOCEX_OUT" | head -1)"
+else
+  fail "docs/reference/ examples drifted:"
+  echo "$DOCEX_OUT" | head -8 | sed 's/^/       /'
+fi
+
 # ── 7. The part no script can check ─────────────────────────────────────────
 echo -e "\n${BOLD}7. Completion criteria (manual)${RESET}"
 note "§8's numbered 'Completion criteria' for $FEATURE must each be DEMONSTRATED,"
