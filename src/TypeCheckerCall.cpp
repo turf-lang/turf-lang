@@ -2502,12 +2502,15 @@ void TypeChecker::visitArrayAccess(ArrayAccessExprAST &Node) {
       setType(&Node, ElemTy);
     } else {
       // Nothing above could index this value. A struct with only an
-      // `operator[]=` legitimately lands here with no type (a write-only
-      // container -- the assignment path looks the setter up itself), and an
-      // open generic parameter is judged once it is instantiated. Anything
-      // else has no `operator[]` of either kind and no builtin indexing:
-      // `n[0]` on an `int` used to type-check and reach Codegen's
-      // "Base is not an array or pointer" fatal error (REL-004 fuzzer).
+      // `operator[]=` reaches here too, but only legitimately as the TARGET of
+      // a plain `box[i] = v` (the assignment path looks the setter up itself,
+      // IndexWriteTarget_). Anywhere else the node is a READ and needs an
+      // `operator[]` that accepts the index; a setter does not make a read
+      // legal. Counting the setter here once let `box[0]` on a setter-only
+      // type reach Codegen's "Base is not an array or pointer" fatal error
+      // (found by turf-fuzz). An open generic parameter is judged once it is
+      // instantiated. `n[0]` on an `int` is the same mistake and used to take
+      // the same route (REL-004 fuzzer).
       //
       // The Resolver gathers `operator[]` candidates by NAME alone, from every
       // visible file, so "no candidates" is never true once the prelude is in
@@ -2530,13 +2533,22 @@ void TypeChecker::visitArrayAccess(ArrayAccessExprAST &Node) {
       };
       const bool Primitive = BaseTy->isNumeric() || BaseTy->isChar() || BaseTy->isInt32() ||
                              BaseTy->isVoid();
-      if (&Node != IndexWriteTarget_ && !BaseTy->isGenericParam() &&
-          (Primitive || !(DeclaredFor(Node.ResolvedIndexGetCandidates) ||
-                          DeclaredFor(Node.ResolvedIndexSetCandidates)))) {
-        reportError(Node.getLoc(), ErrCode::UnsupportedOperation,
-                    "Cannot index a value of type '" + BaseTy->getName() + "'.",
-                    {}, "Only arrays, strings, pointers, and types that define "
-                        "an 'operator []' can be indexed with [ ].");
+      const bool IsRead = &Node != IndexWriteTarget_;
+      if (IsRead && !BaseTy->isGenericParam()) {
+        if (Primitive || !DeclaredFor(Node.ResolvedIndexGetCandidates)) {
+          reportError(Node.getLoc(), ErrCode::UnsupportedOperation,
+                      "Cannot index a value of type '" + BaseTy->getName() + "'.",
+                      {}, "Only arrays, strings, pointers, and types that define "
+                          "an 'operator []' can be indexed with [ ].");
+        } else if (IndexTy && !TypeWalk::containsOpenParam(BaseTy.get(), TypeWalk::ParamScope::ThroughGenericArgs) &&
+                   !TypeWalk::containsOpenParam(IndexTy.get(), TypeWalk::ParamScope::ThroughGenericArgs)) {
+          // The type does declare an `operator[]`, but none takes this index
+          // type (exact match only, F-OP-1). Same shape as the `[]=` message
+          // in visitAssign().
+          reportError(Node.getLoc(), ErrCode::ArgumentType,
+                      "No 'operator[]' overload matches '" + BaseTy->getName() +
+                          "[" + IndexTy->getName() + "]'.");
+        }
       }
       setType(&Node, nullptr);
     }

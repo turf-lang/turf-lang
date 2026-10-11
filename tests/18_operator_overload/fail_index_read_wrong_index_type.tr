@@ -1,0 +1,19 @@
+// EXPECT-DIAG: E056
+// EXPECT-DIAG: No 'operator[]' overload matches 'IntBox[string]'
+// The type has an `operator []`, but it takes an `int` index and the read
+// passes a string. Operator overloads match exactly (F-OP-1). This used to be
+// accepted with no type and then died in Codegen ("Base is not an array or
+// pointer"); the write twin has always said "No 'operator[]=' overload
+// matches".
+struct IntBox {
+    a: int
+}
+
+operator [](box: IntBox, index: int): int {
+    return box.a;
+}
+
+fn main(): int {
+    mut box: IntBox = IntBox::default();
+    return box["zero"];
+}

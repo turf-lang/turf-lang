@@ -27,3 +27,14 @@ If you meant to look inside a type of your own, give it an `operator []`:
     operator [](b: Box, i: int): int {
         return b.value + i;
     }
+
+Reading through a type that only has `operator []=` is the same error. The setter lets you write `box[0] = 5`, but a read needs the getter:
+
+    return box[0];                // IntBox declares operator []=, not operator []
+
+Declare `operator []` as well. A getter that takes a different index type than the one you passed ("No 'operator[]' overload matches") is reported separately; the index type must match exactly.
+
+`void` has no size, so `sizeof(void)` isn't supported. Use `sizeof(void*)` for the size of a pointer, or the size of the type you actually mean:
+
+    malloc(sizeof(void));         // not supported
+    malloc(sizeof(int));          // fine
