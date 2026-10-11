@@ -599,6 +599,15 @@ Value *SizeOfExprAST::codegen() {
   llvm::Type *LLVMTy = getLLVMType(TypeArg.get());
   if (!LLVMTy)
     return nullptr;
+  // TypeChecker::visitSizeOf() rejects `sizeof(void)`; getTypeAllocSize() on
+  // an unsized type loops forever inside LLVM rather than failing, so never
+  // hand it one even if a future type slips past the checker.
+  if (!LLVMTy->isSized()) {
+    LogErrorAt(Loc, ErrCode::InternalCompilerError,
+               "Internal error: sizeof of an unsized type reached codegen",
+               SLM::ErrorCategory::GENERAL);
+    return nullptr;
+  }
   uint64_t AllocSize = TheModule->getDataLayout().getTypeAllocSize(LLVMTy);
   return ConstantInt::get(Type::getInt64Ty(*TheContext), AllocSize);
 }

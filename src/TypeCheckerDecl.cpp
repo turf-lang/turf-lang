@@ -861,6 +861,20 @@ void TypeChecker::visitModuleImport(ModuleImportExprAST &Node) {
 
 
 void TypeChecker::visitSizeOf(SizeOfExprAST &Node) {
+  // `void` has no size. Codegen answers `sizeof` with DataLayout::
+  // getTypeAllocSize(), which on LLVM's unsized `void` type never returns --
+  // `malloc(sizeof(void))` hung the compiler forever (found by turf-fuzz).
+  // Reject it here so the program never reaches Codegen. `void*` is fine: a
+  // pointer is sized. Every other type the parser accepts after `sizeof(`
+  // lowers to a sized LLVM type.
+  if (Node.getTypeArg() && Node.getTypeArg()->isVoid()) {
+    reportError(Node.getLoc(), ErrCode::UnsupportedOperation,
+                "'sizeof(void)' is not supported -- 'void' has no size.",
+                {},
+                "Use 'sizeof' on a type that holds a value, e.g. "
+                "'sizeof(int)'. If you meant the size of an untyped pointer, "
+                "write 'sizeof(void*)'.");
+  }
   // sizeof(T) always produces int
   setType(&Node, TurfInt());
 }
