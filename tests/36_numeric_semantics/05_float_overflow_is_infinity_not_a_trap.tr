@@ -1,0 +1,14 @@
+import test;
+
+// F-NUM-4: floating-point overflow at runtime produces IEEE infinity and does
+// NOT trap (integer overflow does, F-NUM-3). 1.0e308 * 10.0 is not
+// representable, so the result is +inf, which compares greater than any finite
+// double -- and the program carries on.
+fn main(): int {
+    mut big: double = 1.0e308;
+    mut scale: double = 10.0;
+    mut overflowed: double = big * scale;
+    test::assert(overflowed > big, "the product overflowed to infinity");
+    test::assert(overflowed * 2.0 > big, "arithmetic on infinity carries on");
+    return 0;
+}
