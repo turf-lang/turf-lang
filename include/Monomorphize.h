@@ -180,15 +180,22 @@ struct InstantiationEntry {
   size_t SitesRewritten = 0;
 };
 
-/// Deliberately linear-scan dedup, not a hash map: S11a's U-2 census found
-/// ~18-20 concrete instantiations in the entire corpus today, so an
-/// O(n^2) worst case over `insert` calls is not a real cost, and a linear
-/// scan lets every comparison go through `sameInstantiationAs()`
-/// (pairwise isEquivalent()) with no risk of a hand-rolled hash function
-/// silently falling back to identity-by-getName() (INV-TYPE-1) the way a
-/// naive `std::hash` specialization over TurfTypePtr would invite. Revisit
-/// if S11b/S12a's real-corpus numbers ever look different from S11a's
-/// census.
+/// Dedup is a hash lookup followed by `sameInstantiationAs()` on the bucket's
+/// few candidates -- never by the hash alone. The hash is built from each type
+/// argument's getName(), and that is sound only because every isEquivalent()
+/// that exists (the default, ArrayType, FuncType) implies equal getName(): a
+/// hash may be coarser than equality but must never separate two equivalent
+/// requests, so a NEW isEquivalent() override that is more lenient than the
+/// spelling must also change instHash() below. Equality itself still goes
+/// through `sameInstantiationAs()` (pairwise isEquivalent(), INV-TYPE-1).
+///
+/// This was a deliberate linear scan while S11a's census found ~20 concrete
+/// instantiations in the whole corpus. LEC-005's fan-out backstop
+/// (kMaxTotalInstantiations = 4096) made the worst case real: scanning all
+/// entries for every request, each comparison rebuilding two deeply nested
+/// type names, took ~20 s to reach the cap (tests/38_monomorphization/
+/// fail_generic_fanout_instantiation_limit.tr, measured by sampling: all of
+/// it in find()).
 ///
 /// `std::deque`, not `std::vector` (S12a correction -- see the change
 /// record's *Removed assumptions*): drainFreeFunctionRequests() holds an
@@ -201,17 +208,36 @@ struct InstantiationEntry {
 /// here holds across an insert.
 class InstantiationCache {
   std::deque<InstantiationEntry> Entries_;
+  /// instHash() -> index into Entries_. A multimap: unequal requests may share
+  /// a hash, and find() checks each candidate with sameInstantiationAs().
+  std::unordered_multimap<size_t, size_t> ByHash_;
+
+  static size_t instHash(const InstantiationRequest &R) {
+    size_t H = std::hash<std::string>()(R.DeclKey);
+    auto Mix = [&H](size_t V) { H ^= V + 0x9e3779b97f4a7c15ULL + (H << 6) + (H >> 2); };
+    Mix(static_cast<size_t>(R.Kind));
+    Mix(std::hash<std::string>()(R.SourceModule));
+    Mix(std::hash<const void *>()(R.Decl));
+    Mix(R.TypeArgs.size());
+    for (const auto &T : R.TypeArgs)
+      Mix(T ? std::hash<std::string>()(T->getName()) : 0);
+    return H;
+  }
 
 public:
   /// Returns the existing entry for an equivalent request, or nullptr.
   InstantiationEntry *find(const InstantiationRequest &Req) {
-    for (auto &E : Entries_)
+    auto Range = ByHash_.equal_range(instHash(Req));
+    for (auto It = Range.first; It != Range.second; ++It) {
+      auto &E = Entries_[It->second];
       if (E.Request.sameInstantiationAs(Req))
         return &E;
+    }
     return nullptr;
   }
   InstantiationEntry &insert(InstantiationRequest Req) {
     InstantiationEntry NewEntry;
+    ByHash_.emplace(instHash(Req), Entries_.size());
     NewEntry.Request = std::move(Req);
     NewEntry.Index = Entries_.size();
     Entries_.push_back(std::move(NewEntry));
