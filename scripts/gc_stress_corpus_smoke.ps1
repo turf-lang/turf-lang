@@ -58,23 +58,34 @@ Test-BoundedRss "$corpus\map_of_lists_churn.tr" 40000 '2. Map<string, List<strin
 
 # 3. A long-lived server driven by a scripted client for 10^5 sequential requests over
 # loopback; the server exits on its own after its request count, so its peak is real.
-Write-Heading '3. http_server-shaped load: 100,000 sequential requests'
-# Not run by default on Windows, and not because of the collector: the client opens one
-# TCP connection per request, and Windows' default ephemeral port range is 16384 ports
-# (49152-65535; `netsh int ipv4 show dynamicport tcp`), each held in TIME_WAIT for
-# 120 s after it closes. Measured 2026-10-11: connect() fails at request 16593, with the
-# server's memory flat at ~6 MB. Linux has ~28000 ports and reuses TIME_WAIT ones, so the
-# bash twin gets through all 100000. Set TURF_SMOKE_HTTP_LOAD=1 to run it anyway (on a
-# machine whose range was widened: `netsh int ipv4 set dynamicport tcp start=10000 num=55000`).
-if (-not $env:TURF_SMOKE_HTTP_LOAD) {
-  Write-Skip 'skipped on Windows: 100000 sequential connections exceed the default 16384-port range (see the comment above); set TURF_SMOKE_HTTP_LOAD=1 to run'
-  Complete-Smoke
+# The client opens one TCP connection per request, and Windows' default ephemeral port
+# range is 16384 ports (49152-65535; `netsh int ipv4 show dynamicport tcp`), each held in
+# TIME_WAIT for 120 s after it closes. Measured 2026-10-11: with 100000 requests connect()
+# fails at request 16593, with the server's memory flat at ~6 MB. Linux has ~28000 ports
+# and reuses TIME_WAIT ones, so the bash twin gets through all 100000. So by default this
+# runs 5000 requests on Windows (three back-to-back runs still fit in the range), by
+# compiling copies of the two programs with REQUEST_COUNT changed; the bound is the same.
+# Set TURF_SMOKE_HTTP_LOAD=1 for the full 100000 (on a machine whose range was widened:
+# `netsh int ipv4 set dynamicport tcp start=10000 num=55000`).
+$requests = if ($env:TURF_SMOKE_HTTP_LOAD) { 100000 } else { 5000 }
+Write-Heading "3. http_server-shaped load: $requests sequential requests"
+$serverSrc = "$corpus\http_load_server.tr"
+$clientSrc = "$corpus\http_load_client.tr"
+if ($requests -ne 100000) {
+  foreach ($name in 'http_load_server', 'http_load_client') {
+    $text = [System.IO.File]::ReadAllText("$corpus\$name.tr")
+    $short = $text.Replace('REQUEST_COUNT: int = 100000;', "REQUEST_COUNT: int = $requests;")
+    if ($short -eq $text) { Write-Fail "$name.tr has no REQUEST_COUNT line to shorten"; Complete-Smoke }
+    Write-TextFile (Join-Path $work "$name.tr") $short
+  }
+  $serverSrc = Join-Path $work 'http_load_server.tr'
+  $clientSrc = Join-Path $work 'http_load_client.tr'
 }
 $serverExe = Join-Path $work 'http_load_server.exe'
 $clientExe = Join-Path $work 'http_load_client.exe'
-$sc = Invoke-Turfc -ArgList @("$corpus\http_load_server.tr", '-o', $serverExe)
+$sc = Invoke-Turfc -ArgList @($serverSrc, '-o', $serverExe)
 if ($sc.Rc -eq 0) { Write-Pass 'server compiled' } else { Write-Fail 'server failed to compile'; Write-Indented ($sc.Out + $sc.Err) }
-$cc = Invoke-Turfc -ArgList @("$corpus\http_load_client.tr", '-o', $clientExe)
+$cc = Invoke-Turfc -ArgList @($clientSrc, '-o', $clientExe)
 if ($cc.Rc -eq 0) { Write-Pass 'client compiled' } else { Write-Fail 'client failed to compile'; Write-Indented ($cc.Out + $cc.Err) }
 
 if ((Test-Path $serverExe) -and (Test-Path $clientExe) -and $sc.Rc -eq 0 -and $cc.Rc -eq 0) {
