@@ -193,22 +193,41 @@ rm -rf "$CORPUS/lib/usr"
 (cd "$CORPUS" && find tests lib examples showcase -name '*.tr' | sort > files.txt)
 N=$(wc -l < "$CORPUS/files.txt")
 [ "$N" -gt 1000 ] || fail "corpus: expected the repository's .tr files, found $N"
-(cd "$CORPUS" && "$TURFC" --format --write $(cat files.txt)) > "$WORK/_cw.out" 2> "$WORK/_cw.err" < /dev/null
+# The files go to turfc in batches of 200: one command line holding ~1200 paths is
+# over Windows' 32 KB limit (`turf fmt` batches the same way, cmd_fmt.go). Each
+# batch prints its own "Would reformat N files; ..." summary, so the checks below
+# read every summary line instead of one.
+(cd "$CORPUS" && split -l 200 files.txt batch_)
+# corpus_run <name> <turfc flags...>: every batch, stdout and stderr appended to
+# $WORK/_<name>.out / .err, and <name>.rc is 1 if any batch exited non-zero.
+corpus_run() {
+  local name=$1 b rc=0
+  shift
+  : > "$WORK/_$name.out"; : > "$WORK/_$name.err"
+  for b in "$CORPUS"/batch_*; do
+    (cd "$CORPUS" && "$TURFC" --format "$@" $(cat "$b")) >> "$WORK/_$name.out" 2>> "$WORK/_$name.err" < /dev/null || rc=1
+  done
+  echo $rc > "$WORK/_$name.rc"
+}
+corpus_run cw --write
 if strip "$WORK/_cw.err" | grep -q "formatter bug"; then
   fail "corpus: a result was refused as a formatter bug: $(strip "$WORK/_cw.err" | grep 'formatter bug' | head -2)"
 fi
-(cd "$CORPUS" && "$TURFC" --format --check $(cat files.txt)) > "$WORK/_cc.out" 2> "$WORK/_cc.err" < /dev/null
-grep -q "^Would reformat 0 files;" "$WORK/_cc.out" || fail "corpus: a second pass still wants to reformat: $(grep -m3 'would reformat' "$WORK/_cc.out")"
+corpus_run cc --check
+# Every batch must say it has nothing left to reformat.
+if [ -z "$(grep '^Would reformat' "$WORK/_cc.out")" ] || grep '^Would reformat' "$WORK/_cc.out" | grep -qv '^Would reformat 0 files;'; then
+  fail "corpus: a second pass still wants to reformat: $(grep -m3 'would reformat' "$WORK/_cc.out")"
+fi
 W1=$(strip "$WORK/_cw.err" | grep -c "Could not format")
 W2=$(strip "$WORK/_cc.err" | grep -c "Could not format")
 [ "$W1" = "$W2" ] || fail "corpus: $W1 files could not be formatted, then $W2"
 # With --skip-unlexable the same set is skipped and the run is clean: that is the
 # state `turf fmt --check` has to reach for CI. (--check on the already
 # formatted copy; the number skipped is the number that could not be formatted.)
-(cd "$CORPUS" && "$TURFC" --format --check --skip-unlexable $(cat files.txt)) > "$WORK/_cs.out" 2> "$WORK/_cs.err" < /dev/null
-echo $? > "$WORK/_cs.rc"
+corpus_run cs --check --skip-unlexable
 expect_rc "corpus: --check --skip-unlexable is clean" cs 0
-grep -q "; $W1 skipped (lexical error)\.$" "$WORK/_cs.out" || fail "corpus: expected $W1 skipped, got: $(tail -1 "$WORK/_cs.out")"
+SKIPPED=$(sed -n 's/.*; \([0-9][0-9]*\) skipped (lexical error)\.$/\1/p' "$WORK/_cs.out" | awk '{ n += $1 } END { print n + 0 }')
+[ "$SKIPPED" = "$W1" ] || fail "corpus: expected $W1 skipped, got $SKIPPED"
 # Everything that could not be formatted is a deliberately invalid test.
 if strip "$WORK/_cw.err" | grep "Could not format" | grep -v "lexical error" | grep -q .; then
   fail "corpus: a file failed for a reason other than a lexical error: $(strip "$WORK/_cw.err" | grep 'Could not format' | grep -v 'lexical error' | head -2)"

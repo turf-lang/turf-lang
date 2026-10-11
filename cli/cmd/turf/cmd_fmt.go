@@ -223,7 +223,9 @@ func collectFmtFiles(dir string, paths, excludes []string) (named, walked []stri
 			}
 			if strings.HasSuffix(name, ".tr") && !strings.HasPrefix(name, ".") {
 				rel, _ := filepath.Rel(abs, path)
-				found = append(found, filepath.Join(p, rel))
+				// Slashes on every OS: these names are echoed in turfc's output
+				// ("would reformat src/main.tr") and in the docs, which spell them one way.
+				found = append(found, filepath.ToSlash(filepath.Join(p, rel)))
 			}
 			return nil
 		})
