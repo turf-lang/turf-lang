@@ -1345,6 +1345,21 @@ std::optional<RefProvenance> classifyProvenance(const ExprAST *E,
     return Inner;
   }
 
+  // `(c give a otherwise b)` parses as a one-branch IfExprAST whose bodies are
+  // the two value expressions. Its value is a's or b's, so when both have the
+  // same provenance it has that one: `return (c give &x otherwise &y);` is a
+  // Stack value returned, and compiled clean while this was Unknown. Branches
+  // that disagree stay Unknown, like disagreeing paths at a CFG merge.
+  if (const auto *IE = dynamic_cast<const IfExprAST *>(E)) {
+    if (IE->getBranches().size() == 1 && IE->getElse()) {
+      auto A = classifyProvenance(IE->getThen(), Map);
+      auto B = classifyProvenance(IE->getElse(), Map);
+      if (A && A == B)
+        return A;
+    }
+    return std::nullopt;
+  }
+
   return std::nullopt;
 }
 
