@@ -24,6 +24,7 @@
 #include "Builtins.h"
 
 #include "TypeCheckerInternal.h"
+#include "ASTChildWalker.h"
 
 #include <cassert>
 #include <functional>
@@ -36,12 +37,118 @@
 
 // ─── Control flow visitors ────────────────────────────────────────────────────
 
+namespace {
+
+const VariableSymbol *nullableVar(const ExprAST *E) {
+  const auto *VE = dynamic_cast<const VariableExprAST *>(E);
+  if (!VE)
+    return nullptr;
+  const VariableSymbol *Sym = VE->getResolvedSymbol();
+  return Sym && Sym->Type && Sym->Type->isNullableReference() ? Sym : nullptr;
+}
+
+// Where a deferred statement reads through a `&?T` variable: a field, a bound
+// method's receiver, a cast to `&T` (the uses NullabilityPass checks).
+struct DeferredNullableUse {
+  const VariableSymbol *Sym;
+  std::string Name, Member;
+  SourceLocation Loc;
+  enum { Field, Method, Cast } Kind;
+};
+
+class DeferredNullableUses : public ASTChildWalker {
+public:
+  std::vector<DeferredNullableUse> Uses;
+  void visitFieldAccess(FieldAccessExprAST &N) override {
+    if (const VariableSymbol *S = nullableVar(N.getBase()))
+      Uses.push_back({S, S->Name, N.getFieldName(), N.getLoc(), DeferredNullableUse::Field});
+    ASTChildWalker::visitFieldAccess(N);
+  }
+  void visitMethodCall(MethodCallExprAST &N) override {
+    if (N.getResolvedCallTarget() && (!N.ResolvedViaUFCS || N.UFCSLoadsReceiver))
+      if (const VariableSymbol *S = nullableVar(N.getBase()))
+        Uses.push_back({S, S->Name, N.getMethod(), N.getLoc(), DeferredNullableUse::Method});
+    ASTChildWalker::visitMethodCall(N);
+  }
+  void visitCast(CastExprAST &N) override {
+    const TurfType *D = N.getDestType();
+    if (D && D->isReference() && !D->isNullableReference())
+      if (const VariableSymbol *S = nullableVar(N.getOperand()))
+        Uses.push_back({S, S->Name, "", N.getLoc(), DeferredNullableUse::Cast});
+    ASTChildWalker::visitCast(N);
+  }
+};
+
+// `&?T` variables assigned a value that may be null, and where first.
+class NullableAssignments : public ASTChildWalker {
+  TypeChecker &TC;
+
+public:
+  explicit NullableAssignments(TypeChecker &TC) : TC(TC) {}
+  std::unordered_map<const VariableSymbol *, SourceLocation> First;
+  void visitAssignment(AssignmentExprAST &N) override {
+    if (const VariableSymbol *S = nullableVar(N.getLHS())) {
+      // `&x` or a `&T` value cannot be null; anything else might be.
+      TurfTypePtr R = TC.getType(N.getRHS());
+      bool NonNull = dynamic_cast<const AddressOfExprAST *>(N.getRHS()) ||
+                     (R && R->isReference() && !R->isNullableReference());
+      if (!NonNull)
+        First.emplace(S, N.getLoc());
+    }
+    ASTChildWalker::visitAssignment(N);
+  }
+};
+
+} // namespace
+
+void TypeChecker::rejectDeferredNullableUse(const BlockExprAST &Block) {
+  const auto &Stmts = Block.getExpressions();
+  for (size_t I = 0; I < Stmts.size(); ++I) {
+    const auto *Def = dynamic_cast<const DeferExprAST *>(Stmts[I].get());
+    if (!Def || !Def->getStmt())
+      continue;
+    DeferredNullableUses Uses;
+    Uses.visitChild(Def->getStmt());
+    if (Uses.Uses.empty())
+      continue;
+    NullableAssignments Later(*this);
+    for (size_t J = I + 1; J < Stmts.size(); ++J)
+      Later.visitChild(Stmts[J].get());
+    for (const auto &U : Uses.Uses) {
+      auto It = Later.First.find(U.Sym);
+      if (It == Later.First.end())
+        continue;
+#ifndef TYPECHECKER_NO_ERRORS
+      if (U.Kind == DeferredNullableUse::Cast) {
+        UnnarrowedNullableCastError Err(U.Loc, U.Name);
+        Err.withRelated({It->second.Line, It->second.Col},
+                        "the deferred statement runs when the block exits, after '" +
+                            U.Name + "' is assigned here");
+        Err.raise();
+      }
+      PossibleNullDereferenceError Err(
+          U.Loc, U.Name, U.Member,
+          U.Kind == DeferredNullableUse::Method
+              ? PossibleNullDereferenceError::Member::Method
+              : PossibleNullDereferenceError::Member::Field);
+      Err.withRelated({It->second.Line, It->second.Col},
+                      "the deferred statement runs when the block exits, after '" +
+                          U.Name + "' is assigned here");
+      Err.raise();
+#else
+      throw std::runtime_error("PossibleNullDereferenceError");
+#endif
+    }
+  }
+}
+
 void TypeChecker::visitBlock(BlockExprAST &Node) {
   TurfTypePtr LastTy;
   for (const auto &Expr : Node.getExpressions()) {
     Expr->accept(*this);
     LastTy = getType(Expr.get());
   }
+  rejectDeferredNullableUse(Node);
   // The block's type is its last expression's type (or void if empty)
   setType(&Node, LastTy ? LastTy : TurfVoid());
 }

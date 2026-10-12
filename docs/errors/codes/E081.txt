@@ -21,6 +21,8 @@ The proof only lasts as far as the check does: if the variable is changed in bet
 
 Calling a method counts as a use, exactly like reading a field: `b.grow()` needs the same check.
 
+A `defer`red use happens when the block ends, not where it is written: `defer io::printline(b.val);` followed later in the same block by `b = b.next;` is rejected, because `b` may be null by the time the deferred line runs.
+
 The check works on a variable, and only on a variable. A `&?Box` you got from somewhere else (a field, a call, a list element) has to be put in one first:
 
     struct Node { val: int, next: &?Node }

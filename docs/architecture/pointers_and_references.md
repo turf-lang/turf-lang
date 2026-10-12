@@ -460,6 +460,13 @@ garbage):
   followed by a loop that never assigns `p` leaves `p` non-null inside the
   loop and after it; a loop that may assign it ends the proof.
 
+- **A deferred use is checked where it runs.** `defer use(q.val);` runs when
+  its block exits, so a later statement of that block that may set `q` to
+  null (anything but `&x` or a `&T` value; a later `defer` too) makes it E081
+  (`TypeChecker::rejectDeferredNullableUse()`). Before, a list walk
+  `while (w != null && ..) { defer use(w.val); w = w.next; }` compiled and
+  read address 0x8.
+
 Tests: `08_narrowing_survives_loops.tr`, `09_method_call_after_check.tr`,
 `10_nullable_field_through_a_variable.tr` and the `fail_*` files beside them.
 

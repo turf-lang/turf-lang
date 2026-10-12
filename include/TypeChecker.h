@@ -296,6 +296,15 @@ public:
 
   // ── Control flow ──────────────────────────────────────────────────────────
   void visitBlock(BlockExprAST &Node) override;
+  /// E081/E082 for a deferred statement that reads through a `&?T` variable
+  /// (a field, a method, a cast to `&T`) which a later statement of the same
+  /// block may set to null. NullabilityPass checks a deferred statement where
+  /// it is written, but it runs when the block exits: in
+  /// `while (w != null && ..) { defer use(w.val); w = w.next; }` the check that
+  /// covered `w.val` at the `defer` no longer holds when it runs, and a null was
+  /// dereferenced in safe code. Assigning `&x` or a `&T` value is fine; a later
+  /// `defer` counts too (it runs first).
+  void rejectDeferredNullableUse(const BlockExprAST &Block);
   void visitUnsafeBlock(UnsafeBlockExprAST &Node) override;
   void visitIf(IfExprAST &Node) override;
   void visitWhile(WhileExprAST &Node) override;

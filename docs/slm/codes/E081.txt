@@ -26,7 +26,9 @@ CORRECT:
 
 FIX:
   Wrap the access in `if b != null { ... }`. A method call (`b.grow()`) needs
-  the same check as a field read. If the value can never be null, declare it
+  the same check as a field read. A deferred use (`defer f(b.val);`) runs
+  when the block ends: if the block later assigns `b`, move the use out of
+  the `defer`. If the value can never be null, declare it
   `&Box` (no `?`) and no check is needed.
 
   Only a VARIABLE can be checked. If the message says "this '&?T' value" (the
