@@ -1,0 +1,17 @@
+// EXPECT-DIAG: E147
+// EXPECT-DIAG: 'A' has no default value
+// LEC-009 (F-COLL-2): the cycle may pass through a field held by value. `A`
+// holds a `B`, and `B` points back at an `A`, so defaulting `A` would never
+// end. A by-value cycle with no `&` at all is the separate layout error.
+struct A {
+    b: B
+}
+
+struct B {
+    a: &A
+}
+
+fn main(): int {
+    mut x: A = A::default();
+    return 0;
+}

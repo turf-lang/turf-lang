@@ -208,6 +208,13 @@ llvm::Value *CastToType(llvm::Value *Val, TurfTypePtr DestType,
 /// no-initializer struct/char/int32/array/generic declaration).
 llvm::Constant *GetDefaultValue(const TurfType *T);
 
+/// What `T::default()` evaluates to (LEC-009): GetDefaultValue()'s zero
+/// value, except that every non-null `&U` field reachable by value gets a
+/// fresh GC-heap `U::default()` of its own, so a `&U` is never null. That is
+/// what gives a collection its one shared header. A type that reaches itself
+/// through `&` fields has no finite default: E147 at `Loc`, nullptr.
+llvm::Value *EmitDefaultValue(const TurfType *T, SourceLocation Loc);
+
 /// Emits the LLVM constant for an already-resolved `export immut` value.
 /// Needed by CodegenStruct.cpp (ScopeAccessExprAST's `Module::CONST` case)
 /// and CodegenVar.cpp (VariableExprAST's self-reference-to-a-constant case).

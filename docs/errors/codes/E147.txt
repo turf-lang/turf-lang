@@ -1,0 +1,35 @@
+A type has no default value because it reaches itself through `&` fields
+
+`T::default()` gives every field its default: 0, false, "", an empty collection. A `&U` field can never be null, so its default is a new `U::default()` of its own, made on the heap. That is what lets every collection share one header from the moment it is created.
+
+A type that reaches itself through `&` fields cannot be defaulted this way, because each new value would need another new value inside it, forever:
+
+    struct Node {
+        v: int,
+        next: &Node
+    }
+
+    fn main(): int {
+        mut n: Node = Node::default();   // E147 -- 'Node' reaches itself through '&' fields
+        return n.v;
+    }
+
+The cycle can be longer (`A` has a `&B`, `B` has a `&A`), and it can pass through fields that hold a struct by value; the error names the type you defaulted and the type that repeats.
+
+Two ways out:
+
+1. Make one field on the cycle a nullable reference, `&?Node`. It defaults to null, which ends the chain; check it with `if (n.next != null)` before using it:
+
+    struct Node {
+        v: int,
+        next: &?Node
+    }
+
+    fn main(): int {
+        mut n: Node = Node::default();   // fine: next is null
+        return n.v;
+    }
+
+2. Build the value with a constructor, `Node::new(...)`, and pass it the `&Node` it should point to.
+
+A `&U` field that does not lead back to its own type is fine: `struct Holder { h: &Counter }` defaults to a fresh `Counter::default()`.

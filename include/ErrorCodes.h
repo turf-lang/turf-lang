@@ -140,6 +140,7 @@ inline constexpr const char *ImmutableArrayWrittenThroughSlice = "E141";
 inline constexpr const char *SliceOfNonArray = "E142";
 inline constexpr const char *SliceRangeOutOfBounds = "E143";
 inline constexpr const char *MutableViewOfImmutableArray = "E144";
+inline constexpr const char *DefaultThroughReferenceCycle = "E147";
 inline constexpr const char *ErrorPayload = "E096";
 // Pre-existing codes a raw site reuses (see above).
 inline constexpr const char *ExportMutNotSupported = "E021";
@@ -429,6 +430,10 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // `@name(args)` that no pass claims, or whose arguments do not fit the
     // declaration under it (ResolverDecl.cpp's checkAnnotations()).
     {"E146", "InvalidAnnotationError", "Invalid annotation", SLM::ErrorCategory::DECLARATION},
+    // LEC-009: `T::default()` on a type that reaches itself through `&`
+    // fields, which would allocate a fresh default forever (CodegenCore.cpp's
+    // EmitDefaultValue()).
+    {ErrCode::DefaultThroughReferenceCycle, "DefaultThroughReferenceCycleError", "No default through a reference cycle", SLM::ErrorCategory::DECLARATION},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

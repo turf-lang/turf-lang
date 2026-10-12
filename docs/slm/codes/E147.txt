@@ -1,0 +1,33 @@
+TURF E147 -- NO DEFAULT THROUGH A REFERENCE CYCLE:
+
+CAUSE:
+  `T::default()` gives each non-null `&U` field a fresh heap `U::default()`. When `T`
+  reaches itself through `&` fields (directly, `next: &Node`, or through other structs),
+  that never ends, so the default does not exist.
+
+CORRECT USAGE:
+    struct Node {
+        v: int,
+        next: &?Node
+    }
+
+    fn main(): int {
+        mut n: Node = Node::default();
+        printline("next defaults to null");
+        return n.v;
+    }
+
+INCORRECT:
+    struct Node {
+        v: int,
+        next: &Node
+    }
+    mut n: Node = Node::default();
+    // ERROR [E147]: 'Node' has no default value: ... reaches itself through '&' fields
+
+FIX:
+  Change one field on the cycle from `&Node` to `&?Node` (nullable; it defaults to null
+  and must be null-checked before use), or build the value with `Node::new(...)`
+  instead of `::default()`.
+
+RELATED: E008 (a variable read before it has a value; `T::default()` is the usual fix).

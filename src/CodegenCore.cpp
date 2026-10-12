@@ -2206,6 +2206,97 @@ llvm::Constant *GetDefaultValue(const TurfType *T) {
 }
 
 
+// A by-name struct reference (a field typed `Point`, an instantiation
+// `ListHeader<int>`) is a NamedType/GenericType here; its layout lives on
+// the registered TurfStructType, looked up the same way getDebugType() does.
+static const TurfStructType *defaultStructOf(const TurfType *T) {
+  if (auto *ST = dynamic_cast<const TurfStructType *>(T))
+    return ST;
+  if (!GlobalSymbolTable)
+    return nullptr;
+  TurfTypePtr Registered;
+  if (const auto *NT = dynamic_cast<const NamedType *>(T))
+    Registered = GlobalSymbolTable->LookupType(NT->getName());
+  else if (const auto *GT = dynamic_cast<const GenericType *>(T))
+    Registered = GlobalSymbolTable->LookupType(
+        Monomorphize::instantiatedDeclName(GT->getBaseName(), GT->getTypeArgs()));
+  return dynamic_cast<const TurfStructType *>(Registered.get());
+}
+
+// `InProgress` holds the structs whose default is being built by the
+// current chain of `&` fields; reaching one again means the default would
+// allocate forever (`struct Node { next: &Node }`).
+static llvm::Value *emitDefaultValueRec(const TurfType *T, SourceLocation Loc,
+                                        std::vector<const TurfStructType *> &InProgress,
+                                        bool &Failed) {
+  if (Failed)
+    return nullptr;
+  if (auto *RT = dynamic_cast<const TurfReferenceType *>(T)) {
+    const TurfType *Pointee = RT->getPointee().get();
+    const TurfStructType *PST = defaultStructOf(Pointee);
+    if (PST && std::find(InProgress.begin(), InProgress.end(), PST) != InProgress.end()) {
+      LogErrorAt(Loc, ErrCode::DefaultThroughReferenceCycle,
+                 "'" + TypeIdentity::bareName(InProgress.front()->getName()) +
+                     "' has no default value: defaulting it gives every '&' field a "
+                     "new default value, and '" + TypeIdentity::bareName(PST->getName()) +
+                     "' reaches itself through '&' fields, so that never ends."
+                     "\n  Hint: Make one of the fields on the cycle '&?" +
+                     TypeIdentity::bareName(PST->getName()) +
+                     "' (it defaults to null), or build the value with '::new(...)'.",
+                 SLM::ErrorCategory::DECLARATION);
+      Failed = true;
+      return nullptr;
+    }
+    if (PST)
+      InProgress.push_back(PST);
+    llvm::Value *PointeeVal = emitDefaultValueRec(PST ? PST : Pointee, Loc, InProgress, Failed);
+    if (PST)
+      InProgress.pop_back();
+    return PointeeVal ? HeapAllocateValue(PointeeVal) : nullptr;
+  }
+
+  if (auto *AT = dynamic_cast<const ::ArrayType *>(T)) {
+    llvm::Type *ArrTy = getLLVMType(T);
+    if (AT->getSize() <= 0 || !ArrTy->isArrayTy())
+      return GetDefaultValue(T);
+    llvm::Value *Result = llvm::UndefValue::get(ArrTy);
+    // One default per element: each `&` inside gets its own allocation.
+    for (int i = 0; i < AT->getSize(); ++i) {
+      llvm::Value *Elem = emitDefaultValueRec(AT->getElementType(), Loc, InProgress, Failed);
+      if (!Elem)
+        return nullptr;
+      Result = Builder->CreateInsertValue(Result, Elem, static_cast<unsigned>(i));
+    }
+    return Result;
+  }
+
+  if (const TurfStructType *ST = defaultStructOf(T)) {
+    auto *StructTy = llvm::dyn_cast<llvm::StructType>(getLLVMType(ST));
+    if (!StructTy || StructTy->isOpaque())
+      return GetDefaultValue(ST);
+    if (InProgress.empty())
+      InProgress.push_back(ST);
+    llvm::Value *Result = llvm::UndefValue::get(StructTy);
+    unsigned Idx = 0;
+    for (const auto &Field : ST->getFields()) {
+      llvm::Value *FV = emitDefaultValueRec(Field.Type.get(), Loc, InProgress, Failed);
+      if (!FV)
+        return nullptr;
+      Result = Builder->CreateInsertValue(Result, FV, Idx++);
+    }
+    return Result;
+  }
+
+  return GetDefaultValue(T);
+}
+
+llvm::Value *EmitDefaultValue(const TurfType *T, SourceLocation Loc) {
+  std::vector<const TurfStructType *> InProgress;
+  bool Failed = false;
+  return emitDefaultValueRec(T, Loc, InProgress, Failed);
+}
+
+
 // Emit the literal value of an `export immut` constant directly at a
 // reference site -- exported constants have no LLVM storage of their own
 // (see ResolverConstantSymbol's doc comment in ResolverSymbolTable.h), so

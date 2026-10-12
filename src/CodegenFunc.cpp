@@ -974,7 +974,10 @@ Value *FuncCallExprAST::codegen() {
 
     if (ScopeCallee->ResolvedKind == ScopeAccessKind::DefaultConstruct) {
       AllocaInst *Alloca = TmpB.CreateAlloca(LLVMStructType, nullptr, StructName + "_default");
-      Builder->CreateStore(GetDefaultValue(T.get()), Alloca);
+      llvm::Value *Default = EmitDefaultValue(T.get(), Loc);
+      if (!Default)
+        return nullptr;
+      Builder->CreateStore(Default, Alloca);
       return Builder->CreateLoad(LLVMStructType, Alloca, "structval");
     }
 
