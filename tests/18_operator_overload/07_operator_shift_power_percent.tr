@@ -44,7 +44,7 @@ fn main(): int {
     test::assert(md == 1, "Wrapped % int should call the user overload");
 
     // Builtin numeric **/%% still work unaffected.
-    test::assert(2 ** 3 == 8.0, "builtin ** still works");
+    test::assert(2 ** 3 == 8, "builtin ** still works");
     test::assert(7 % 3 == 1, "builtin % still works");
 
     return 0;

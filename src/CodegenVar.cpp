@@ -479,6 +479,15 @@ Value *CompoundAssignmentExprAST::codegen() {
   // path) but additionally casts the double result back down to LHSTy
   // before the store, since a compound assignment must leave the variable's
   // own declared type unchanged.
+  if (Opcode == TOK_POWER && !LLVMTy->isDoubleTy() && !Val->getType()->isDoubleTy()) {
+    // Int on both sides: exact, the same path as `a ** b` (EmitCheckedIntPow()).
+    Value *BaseI = CastToType(LHSVal, TurfInt(), "compassign.powbase", Loc);
+    Value *ExpI = CastToType(Val, TurfInt(), "compassign.powexp", Loc);
+    Value *Result = CastToType(EmitCheckedIntPow(BaseI, ExpI, Loc), VarType,
+                               "compassign.powcast", Loc);
+    Builder->CreateStore(Result, Ptr);
+    return Result;
+  }
   if (Opcode == TOK_POWER) {
     Value *BaseD = CastToType(LHSVal, TurfDouble(), "compassign.powbase", Loc);
     Value *ExpD = CastToType(Val, TurfDouble(), "compassign.powexp", Loc);

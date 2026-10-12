@@ -335,7 +335,10 @@ void TypeChecker::visitBinary(BinaryExprAST &Node) {
     return;
   }
 
-  // Exponentiation: ** (TOK_POWER = -78) — numeric operands, promotes to double
+  // Exponentiation: ** (TOK_POWER = -78) — numeric operands. A double on
+  // either side makes it double (llvm.pow); otherwise it is an exact,
+  // overflow-checked int (EmitCheckedIntPow(), owner decision 2026-10-12:
+  // pow() on doubles was wrong above 2^53).
   if (Op == -78 /*TOK_POWER*/) {
     if (LhsTy && !LhsTy->isNumeric()) {
       reportError(Node.getLoc(), ErrCode::ArithmeticOperand,
@@ -351,7 +354,8 @@ void TypeChecker::visitBinary(BinaryExprAST &Node) {
       setType(&Node, nullptr);
       return;
     }
-    setType(&Node, TurfDouble());
+    bool AnyDouble = (LhsTy && LhsTy->isDouble()) || (RhsTy && RhsTy->isDouble());
+    setType(&Node, AnyDouble ? TurfDouble() : TurfInt());
     return;
   }
 
@@ -926,14 +930,12 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
   } else if (Op == TOK_POWER) {
     // `**=` -- same numeric-operand rule as the plain `**` binary form.
     // Deliberately does NOT run the generic typesCompatible(ResultTy, LhsTy)
-    // check below: `**`'s result is always double (see visitBinary()'s
-    // TOK_POWER branch and Codegen's CompoundAssignmentExprAST::codegen(),
-    // which lowers this through the same llvm.pow-on-doubles path and casts
-    // the result back down to LhsTy for the store), so an int LHS is
-    // perfectly valid here (`x **= 2;` narrows the pow result back to int)
-    // even though ResultTy itself is double -- the generic check would
-    // reject that as "cannot assign double to int", which is wrong for this
-    // one operator specifically.
+    // check below: with an int LHS and a double RHS, `**`'s result is double
+    // (Codegen's CompoundAssignmentExprAST::codegen() lowers that through
+    // llvm.pow and casts the result back down to LhsTy for the store), so
+    // `x **= 2.5;` is valid on an int x -- the generic check would reject
+    // that as "cannot assign double to int", which is wrong for this one
+    // operator specifically. Int on both sides is exact (EmitCheckedIntPow()).
     if (LhsTy && !LhsTy->isNumeric()) {
       reportError(Node.getLoc(), ErrCode::ArithmeticOperand,
                   "Exponentiation compound assignment requires a numeric "

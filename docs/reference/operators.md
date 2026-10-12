@@ -93,12 +93,17 @@ overflows.
 ## Exponentiation: `**`
 
 ```turflang
-mut r: double = 2 ** 10;   // 1024
+mut r: int = 2 ** 10;       // 1024
+mut h: double = 2 ** 0.5;   // 1.41421
 ```
 
-`**` is numeric (accepts `int` or `double` operands) and always produces
-`double`, regardless of the operand types. It is right-associative (see the
-precedence table above).
+`**` is numeric (accepts `int` or `double` operands). With `int` (or `int32`)
+on both sides the result is an exact `int`: each multiply traps on overflow
+like `*` (`"Integer overflow"`), and a negative exponent panics with
+`"Negative exponent in integer '**'"`, since an `int` cannot hold `2 ** -1`;
+write `2 ** -1.0` for `0.5`. A `double` on either side gives a `double`,
+computed with `pow()`. It is right-associative (see the precedence table
+above).
 
 > **Note.** `^` does **not** mean exponentiation in Turf — it means bitwise
 > XOR (below). If you're used to a language or older Turf docs where `^` was
@@ -165,17 +170,18 @@ same as in C.
 The bitwise compound forms (`&= |= ^= <<= >>=`) inherit the same int-only
 restriction as their plain counterparts. `**=` is the interesting exception:
 unlike the bitwise compound forms, it does **not** require `int` operands —
-like `**` itself, it accepts any numeric operand, computes through a
-`double` intermediate, and then narrows the result back to the left-hand
-side's own declared type for storage:
+like `**` itself, it accepts any numeric operand. With `int` on both sides it
+is the exact `int` form above; with a `double` on either side it computes
+through `pow()` and then narrows the result back to the left-hand side's own
+declared type for storage (a result outside `int`'s range traps):
 
 ```turflang
 mut b: int = 3;
-b **= 4;               // 81 -- double pow() result narrowed back to int for storage
+b **= 4;               // 81 -- exact int exponentiation
 
 mut d: int = 2;
 mut exp: double = 3.0;
-d **= exp;              // 8 -- RHS type need not match LHS's
+d **= exp;              // 8 -- double pow() result narrowed back to int
 ```
 
 ## Increment/decrement: `++`/`--`

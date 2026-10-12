@@ -59,6 +59,11 @@ otherwise each answer differently, producing an incoherent language.
   `c + -9223372036854775808`, `1 + -9223372036854775808`), and a literal one
   step past either end (`9223372036854775808`, `-9223372036854775809`) is an
   E076 on either side of a runtime operand.
+- `int ** int` (either side `int` or `int32`) is an exact `int`, computed by
+  squaring with each multiply checked as row 6's runtime trap; a negative
+  exponent panics. A `double` on either side gives a `double` via `pow()`.
+  (Owner decision 2026-10-12; it was always `double` via `pow()`, so an
+  integer power above 2^53 was rounded. Found by turf-fuzz.)
 - Division and modulo by zero continue to trap at runtime for both `int` and
   `double` (existing behaviour, deliberately preserved — it is why IEEE
   `inf`/`NaN` are largely unreachable in TurfLang, and that asymmetry is now

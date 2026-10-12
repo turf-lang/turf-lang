@@ -482,8 +482,13 @@ Value *BinaryExprAST::codegen() {
   case TOK_RSHIFT:
     return EmitCheckedShr(L, R, Loc);
 
-  // Exponentiation: ** (replaces the old ^ operator)
+  // Exponentiation: ** (replaces the old ^ operator). Exact for int on both
+  // sides; llvm.pow on doubles once either side is double (visitBinary()).
   case TOK_POWER: {
+    if (!NumericType->isNamed("double")) {
+      CastBoth(TurfInt());
+      return EmitCheckedIntPow(L, R, Loc);
+    }
     CastBoth(TurfDouble());
 #if LLVM_VERSION_MAJOR >= 19
     Function *PowFunc = llvm::Intrinsic::getOrInsertDeclaration(

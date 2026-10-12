@@ -987,11 +987,13 @@ const TurfType *getExprType(const ExprAST *E) {
     if (Op == '&' || Op == '|' || Op == '^' ||
         Op == TOK_LSHIFT || Op == TOK_RSHIFT)
       return TurfInt().get();
-    // Exponentiation returns double
-    if (Op == TOK_POWER)
-      return TurfDouble().get();
     const TurfType *LType = getExprType(Bin->getLHS());
     const TurfType *RType = getExprType(Bin->getRHS());
+    // Exponentiation is int unless either side is double (visitBinary()).
+    if (Op == TOK_POWER)
+      return ((LType && LType->isDouble()) || (RType && RType->isDouble()))
+                 ? TurfDouble().get()
+                 : TurfInt().get();
     if (!LType)
       return RType;
     if (!RType)
@@ -1943,6 +1945,75 @@ Value *EmitCheckedShr(Value *L, Value *R, SourceLocation Loc) {
 
   Builder->SetInsertPoint(ContBB);
   return Builder->CreateAShr(L, R, "rshifttmp");
+}
+
+// `int ** int` is exact (owner decision 2026-10-12): llvm.pow on doubles was
+// wrong above 2^53 (`3 ** 39` off by 11, found by turf-fuzz). Exponentiation
+// by squaring, each multiply checked like `*` ("Integer overflow"). The base
+// is squared only while exponent bits remain, and every such square divides
+// the final result (|base| >= 2), so a square overflows only when the result
+// would: (-2) ** 63 == INT_MIN does not trap. A negative exponent has no int
+// result and panics.
+Value *EmitCheckedIntPow(Value *Base, Value *Exp, SourceLocation Loc) {
+  Function *TheFunction = Builder->GetInsertBlock()->getParent();
+  Type *I64 = Type::getInt64Ty(*TheContext);
+  Value *Zero = ConstantInt::get(I64, 0);
+  Value *One = ConstantInt::get(I64, 1);
+
+  BasicBlock *EntryBB = Builder->GetInsertBlock();
+  BasicBlock *NegBB = BasicBlock::Create(*TheContext, "ipow.negexp", TheFunction);
+  BasicBlock *LoopBB = BasicBlock::Create(*TheContext, "ipow.loop", TheFunction);
+  BasicBlock *BitBB = BasicBlock::Create(*TheContext, "ipow.bit", TheFunction);
+  BasicBlock *OddBB = BasicBlock::Create(*TheContext, "ipow.odd", TheFunction);
+  BasicBlock *NextBB = BasicBlock::Create(*TheContext, "ipow.next", TheFunction);
+  BasicBlock *SquareBB = BasicBlock::Create(*TheContext, "ipow.square", TheFunction);
+  BasicBlock *DoneBB = BasicBlock::Create(*TheContext, "ipow.done", TheFunction);
+
+  Builder->CreateCondBr(Builder->CreateICmpSLT(Exp, Zero, "ipow.isneg"), NegBB, LoopBB);
+
+  Builder->SetInsertPoint(NegBB);
+  CodegenPanic(Builder->CreateGlobalString("Negative exponent in integer '**'"), Loc);
+  if (!Builder->GetInsertBlock()->getTerminator())
+    Builder->CreateUnreachable();
+
+  Builder->SetInsertPoint(LoopBB);
+  PHINode *Res = Builder->CreatePHI(I64, 2, "ipow.res");
+  PHINode *B = Builder->CreatePHI(I64, 2, "ipow.base");
+  PHINode *E = Builder->CreatePHI(I64, 2, "ipow.exp");
+  Res->addIncoming(One, EntryBB);
+  B->addIncoming(Base, EntryBB);
+  E->addIncoming(Exp, EntryBB);
+  Builder->CreateCondBr(Builder->CreateICmpEQ(E, Zero, "ipow.end"), DoneBB, BitBB);
+
+  Builder->SetInsertPoint(BitBB);
+  Value *Odd = Builder->CreateICmpNE(Builder->CreateAnd(E, One), Zero, "ipow.isodd");
+  Builder->CreateCondBr(Odd, OddBB, NextBB);
+
+  Builder->SetInsertPoint(OddBB);
+  Value *Mul = EmitCheckedIntArith('*', Res, B, Loc);
+  BasicBlock *OddEndBB = Builder->GetInsertBlock();
+  Builder->CreateBr(NextBB);
+
+  Builder->SetInsertPoint(NextBB);
+  PHINode *Res2 = Builder->CreatePHI(I64, 2, "ipow.res2");
+  Res2->addIncoming(Res, BitBB);
+  Res2->addIncoming(Mul, OddEndBB);
+  Value *E2 = Builder->CreateLShr(E, One, "ipow.exp2");
+  Builder->CreateCondBr(Builder->CreateICmpEQ(E2, Zero, "ipow.last"), DoneBB, SquareBB);
+
+  Builder->SetInsertPoint(SquareBB);
+  Value *Sq = EmitCheckedIntArith('*', B, B, Loc);
+  BasicBlock *SquareEndBB = Builder->GetInsertBlock();
+  Builder->CreateBr(LoopBB);
+  Res->addIncoming(Res2, SquareEndBB);
+  B->addIncoming(Sq, SquareEndBB);
+  E->addIncoming(E2, SquareEndBB);
+
+  Builder->SetInsertPoint(DoneBB);
+  PHINode *Final = Builder->CreatePHI(I64, 2, "ipow.result");
+  Final->addIncoming(Res, LoopBB);
+  Final->addIncoming(Res2, NextBB);
+  return Final;
 }
 
 // `double -> int`/`int32` truncates toward zero (FREEZE §6.2 row 5); a value
