@@ -1762,6 +1762,13 @@ const TurfType *getExprType(const ExprAST *E) {
     if (EA->ResolvedKind == ScopeAccessKind::ModuleConstantRef &&
         EA->ResolvedConstant)
       return EA->ResolvedConstant->Type.get();
+    // `En::COUNT` is an int (TypeChecker::visitScopeAccess agrees), not the
+    // enum: typed as the enum, `(En::COUNT to string)` printed
+    // "<unknown enum>" and `(En::COUNT to double)` was E134 (found by
+    // turf-fuzz).
+    if (EA->ResolvedKind == ScopeAccessKind::EnumVariant &&
+        EA->getRightName() == "COUNT")
+      return TurfInt().get();
     if (GlobalSymbolTable) {
       if (auto Registered = GlobalSymbolTable->LookupType(EA->getLeftName()))
         return Registered.get();

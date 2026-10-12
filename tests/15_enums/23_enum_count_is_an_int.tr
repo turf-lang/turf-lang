@@ -1,0 +1,15 @@
+// `En::COUNT` is an int in every position, casts included. Codegen typed it
+// as the enum, so `(En::COUNT to string)` gave "<unknown enum>" and
+// `(En::COUNT to double)` was rejected with E134 "Cannot explicitly cast
+// 'Color' to 'double'", while arithmetic on it worked. Found by turf-fuzz.
+import test;
+
+enum Color { Red, Green, Blue }
+
+fn main(): int {
+    test::assert((Color::COUNT to string) == "3", "COUNT to string is the number");
+    immut d: double = Color::COUNT to double;
+    test::assert(d == 3.0, "COUNT to double");
+    test::assert((Color::COUNT to int) + Color::COUNT == 6, "COUNT as an int");
+    return 0;
+}
