@@ -871,6 +871,40 @@ void TypeChecker::visitArrayLiteral(ArrayLiteralExprAST &Node) {
     setType(&Node, nullptr);
     return;
   }
+  // References to one struct, with `null` among them or some nullable: the
+  // literal is an array of `&?N` (`[heap(n), null]`). Only the reference
+  // kinds are unified; any other mix is still the mismatch below. Found by
+  // turf-fuzz once arrays of references existed (FREEZE §6.28).
+  {
+    TurfTypePtr Pointee;
+    bool AllRefs = true, AnyNullable = false;
+    for (const auto &E : Node.getElements()) {
+      TurfTypePtr T = getType(E.get());
+      if (!T) {
+        AllRefs = false;
+        break;
+      }
+      if (T->isNull()) {
+        AnyNullable = true;
+        continue;
+      }
+      const auto *PT = dynamic_cast<const TurfPointerType *>(T.get());
+      if (!PT || !(T->isReference() || T->isNullableReference()) ||
+          (Pointee && Pointee->getName() != PT->getPointee()->getName())) {
+        AllRefs = false;
+        break;
+      }
+      Pointee = PT->getPointee();
+      AnyNullable |= T->isNullableReference();
+    }
+    if (AllRefs && Pointee && AnyNullable) {
+      ElemType = std::make_shared<TurfNullableReferenceType>(Pointee);
+      auto ArrTy = makeArrayType(ElemType, Node.getElements().size());
+      Node.CachedType = ArrTy;
+      setType(&Node, ArrTy);
+      return;
+    }
+  }
   for (size_t i = 1; i < Node.getElements().size(); ++i) {
     TurfTypePtr ElemIType = getType(Node.getElements()[i].get());
     if (!ElemIType || ElemIType->getName() != ElemType->getName()) {

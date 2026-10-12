@@ -1241,7 +1241,11 @@ types as `&N[2]`.
   of references is an ordinary array (a value; copying it copies the references,
   not what they point to), and a store of a reference to this frame's storage
   into an element of an array that is not this frame's own (a `(&N)[]`
-  parameter) is an F-MEM-5 escape (E086).
+  parameter) is an F-MEM-5 escape (E086). Element types match exactly, with
+  one exception: an array *literal* is a fresh value, so `[r, null]` is a
+  `(&?N)[2]` and a literal of `&N` may initialize or be assigned to a
+  `(&?N)[k]`; a variable or a `(&N)[]` view never widens (a view would let
+  `null` be stored into a `&N` array).
 - **`(&N)[k]` needs an initializer (F-REFARR-2).** A non-null reference has no
   zero value, so a declaration without one is E128; `(&?N)[k]` starts with
   every element null. `T::default()` gives each element of a `(&N)[k]` field
