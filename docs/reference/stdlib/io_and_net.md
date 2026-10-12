@@ -24,7 +24,8 @@ wraps raw POSIX `socket`/`bind`/`listen`/`accept`/`connect`/`recv`/`send`/
 ### `print(val: int|double|bool|char|string): void`
 
 Writes `val` with no trailing newline. Format per type: `%lld` for `int`,
-`%g` for `double`, `%d` for `bool` (prints `0`/`1`, not `"true"`/`"false"`),
+`%g` for `double` (a NaN is always `nan`, never `-nan`: its sign bit varies
+with the optimization level), `%d` for `bool` (prints `0`/`1`, not `"true"`/`"false"`),
 `%c` for `char`, `%s` for `string`. Dispatch to the right format happens via
 ordinary function overload resolution, not runtime type inspection.
 

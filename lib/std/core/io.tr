@@ -66,7 +66,21 @@ pub fn print(val: int): void {
     printf("%lld", val);
 }
 
+// A NaN prints "nan" whatever its sign bit (owner decision 2026-10-12): `%g`
+// prints the sign, which differs between run-time arithmetic ("-nan") and
+// constant folding ("nan"), so the output changed with -O (found by
+// turf-fuzz). `(x to string)` follows the same rule in Codegen. Written
+// without `x != x`, which the self-comparison lint flags in every program,
+// since this file is in the prelude (see double.tr's header).
+fn is_nan_value(x: double): bool {
+    return !(x >= 0.0) && !(x < 0.0);
+}
+
 pub fn print(val: double): void {
+    if is_nan_value(val) {
+        printf("nan");
+        return;
+    }
     printf("%g", val);
 }
 
@@ -89,6 +103,10 @@ pub fn printline(val: int): void {
 }
 
 pub fn printline(val: double): void {
+    if is_nan_value(val) {
+        printf("nan\n");
+        return;
+    }
     printf("%g\n", val);
 }
 
