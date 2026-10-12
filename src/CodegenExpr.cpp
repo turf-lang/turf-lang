@@ -768,10 +768,27 @@ Value *CastExprAST::codegen() {
   if (SrcEnum && DstName == "int")
     return Builder->CreateIntCast(Val, Type::getInt64Ty(*TheContext), false, "enum_to_int");
 
-  // int → enum : reinterpret the integer as the enum's underlying type
+  // int → enum : checked against the variant range [0, numVariants), then
+  // reinterpreted as the enum's underlying type. Unchecked, `7 to En` was a
+  // value with no variant that slipped past an exhaustive `compare` (owner
+  // decision 2026-10-12, found by turf-fuzz); a constant literal out of
+  // range is already E127 in visitCast(). One unsigned
+  // compare also catches a negative value.
   if (SrcName == "int" && DstEnum) {
     const TurfEnumType *ET = dynamic_cast<const TurfEnumType *>(DstEnum.get());
     if (ET) {
+      Function *TheFunction = Builder->GetInsertBlock()->getParent();
+      Value *Count = ConstantInt::get(Val->getType(), ET->numVariants());
+      BasicBlock *BadBB = BasicBlock::Create(*TheContext, "int_to_enum_bad", TheFunction);
+      BasicBlock *OkBB = BasicBlock::Create(*TheContext, "int_to_enum_ok", TheFunction);
+      Builder->CreateCondBr(Builder->CreateICmpUGE(Val, Count, "int_to_enum_oob"),
+                            BadBB, OkBB);
+      Builder->SetInsertPoint(BadBB);
+      CodegenPanic(Builder->CreateGlobalString(
+          "Runtime Error: Invalid int to enum conversion."), Loc);
+      if (!Builder->GetInsertBlock()->getTerminator())
+        Builder->CreateUnreachable();
+      Builder->SetInsertPoint(OkBB);
       llvm::Type *LLVMTy = getLLVMType(ET->getUnderlyingType());
       return Builder->CreateIntCast(Val, LLVMTy, false, "int_to_enum");
     }

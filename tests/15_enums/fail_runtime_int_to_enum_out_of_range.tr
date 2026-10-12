@@ -1,0 +1,21 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: Invalid int to enum conversion
+// A run-time int cast to an enum is checked against the variant range (owner
+// decision 2026-10-12): unchecked, `7 to Color` was a value with no variant
+// that an exhaustive `compare` let through (found by turf-fuzz). A constant
+// literal out of range is E127 at compile time instead.
+enum Color {
+    Red,
+    Green,
+    Blue
+}
+
+fn id(x: int): int {
+    return x;
+}
+
+fn main(): int {
+    mut c: Color = id(7) to Color;
+    io::printline(c to int);
+    return 0;
+}

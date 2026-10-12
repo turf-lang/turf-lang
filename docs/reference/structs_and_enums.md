@@ -415,8 +415,10 @@ unsafe {
 
 Casting an out-of-range compile-time constant integer literal to an enum
 type (e.g. `(99 to Direction)` for a 4-variant enum) is a compile error. A
-cast from a variable whose value isn't known at compile time cannot be
-validated this way and is allowed through.
+cast from a value known only at run time is checked when it runs: outside
+`0 <= v < number of variants` it panics with `Invalid int to enum
+conversion`, so every enum value is one of its variants and an exhaustive
+`compare` stays exhaustive.
 
 ### Constraints
 
