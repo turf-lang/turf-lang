@@ -534,6 +534,18 @@ void TypeChecker::visitFuncDef(FuncDefExprAST &Node) {
       "slice of storage that no longer exists. Return a sized array (e.g. "
       "'int[5]') or a List<T> instead.");
 
+  // A generic type named only by this signature (`fn f(p: Box<int>)` with no
+  // other `Box<int>` in the program) still needs its layout: the function's
+  // parameter slot is that struct. Before, nothing recorded it and the
+  // compile died with "monomorphized struct instantiation 'Box_gen1_int' was
+  // never given a real layout" (found by turf-fuzz: a helper taking a
+  // `List<int>` that no local instantiates). Same census as a struct field's.
+  for (const auto &Param : Node.getParams())
+    if (Param.Name != "self")
+      recordGenericFieldInstantiations(Param.Type, Node.getLoc(), &Node, MonoCollector_);
+  recordGenericFieldInstantiations(Node.getReturnTypePtr(), Node.getLoc(), &Node,
+                                   MonoCollector_);
+
   // Push the declared return type so visitReturn() can validate it
   ReturnTypeStack_.push_back(Node.getReturnTypePtr());
 
