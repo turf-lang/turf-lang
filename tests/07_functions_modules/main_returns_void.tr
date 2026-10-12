@@ -1,0 +1,14 @@
+// `fn main(): void` is accepted (the Resolver only checks that main takes no
+// parameters) and the program exits 0. It used to be an internal compiler
+// error: the runtime wrapper around main copied the void type and gave the
+// void call a result name ("generated LLVM IR is invalid"), and a C `main`
+// returning void would have left the exit status undefined anyway. The
+// wrapper is now `i32 main()` returning 0 for a void main. Found while
+// testing LEC-009.
+import test;
+
+fn main(): void {
+    test::assert(1 + 1 == 2, "a void main runs");
+    printline("void main ran");
+    return;
+}

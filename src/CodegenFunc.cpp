@@ -253,8 +253,17 @@ void WrapMainWithRuntimeBootstrap() {
                                   RuntimeAbiSymbol, TheModule.get());
   }
 
-  Function *Wrapper =
-      Function::Create(FT, Function::ExternalLinkage, "main", TheModule.get());
+  // `fn main(): void` is accepted (only parameters are checked, Resolver),
+  // and the process still needs a status, so its wrapper is `i32 main()`
+  // returning 0. Before, the wrapper copied the void type and named the void
+  // call's result, which the verifier rejected as an internal error.
+  const bool VoidMain = FT->getReturnType()->isVoidTy();
+  FunctionType *WrapperFT =
+      VoidMain ? FunctionType::get(Type::getInt32Ty(*TheContext), FT->params(),
+                                   FT->isVarArg())
+               : FT;
+  Function *Wrapper = Function::Create(WrapperFT, Function::ExternalLinkage,
+                                       "main", TheModule.get());
   BasicBlock *EntryBB = BasicBlock::Create(*TheContext, "entry", Wrapper);
   IRBuilder<> WB(EntryBB);
 
@@ -264,17 +273,12 @@ void WrapMainWithRuntimeBootstrap() {
   std::vector<Value *> ForwardedArgs;
   for (Argument &A : Wrapper->args())
     ForwardedArgs.push_back(&A);
-  Value *Result = WB.CreateCall(UserMain, ForwardedArgs, "user_main_result");
+  Value *Result =
+      WB.CreateCall(UserMain, ForwardedArgs, VoidMain ? "" : "user_main_result");
 
   WB.CreateCall(ShutdownFn, {});
-  // Nothing in the Resolver actually requires `fn main(): int` (only that
-  // it declare no params -- ResolverDecl.cpp's own comment on the `main`
-  // check above this file), so a void return is reachable even though
-  // every current test declares `int`. CreateRet() on a void-typed Value
-  // is invalid IR ("Found return instr that returns non-void in Function
-  // of void return type" is the mirror-image verifier failure this avoids).
-  if (FT->getReturnType()->isVoidTy())
-    WB.CreateRetVoid();
+  if (VoidMain)
+    WB.CreateRet(ConstantInt::get(Type::getInt32Ty(*TheContext), 0));
   else
     WB.CreateRet(Result);
 }
