@@ -1126,6 +1126,31 @@ const TurfType *getExprType(const ExprAST *E) {
       if (ItRaw != FuncReturnTypes.end())
         return ItRaw->second.get();
 
+      // An overload or instantiation whose parameters are EXACTLY the
+      // argument types wins over the merely compatible ones below. With
+      // `g0<double>` and `g0<int32>` both instantiated, `g0(c, x, y)` on
+      // int32 arguments is compatible with the double clone too (int32
+      // widens), and whichever the map yielded first typed the call: as
+      // double, `(g0(...) to int)` emitted an fptosi on an i32 (invalid IR;
+      // found by turf-fuzz).
+      for (const auto &[Name, ParamTypes] : FuncParamTypes) {
+        std::string Prefix = "turf_" + ModulePrefix + CalleeName;
+        if (!(Name == Prefix ||
+              (Name.size() > Prefix.size() && Name[Prefix.size()] == '_' &&
+               Name.compare(0, Prefix.size(), Prefix) == 0)) ||
+            ParamTypes.size() != ArgTypes.size())
+          continue;
+        bool Exact = true;
+        for (size_t i = 0; i < ArgTypes.size() && Exact; ++i)
+          Exact = ParamTypes[i] &&
+                  ParamTypes[i]->getMangledName() == ArgTypes[i]->getMangledName();
+        if (!Exact)
+          continue;
+        auto RetIt = FuncReturnTypes.find(Name);
+        if (RetIt != FuncReturnTypes.end() && RetIt->second)
+          return RetIt->second.get();
+      }
+
       for (const auto &[Name, ParamTypes] : FuncParamTypes) {
         std::string Prefix = "turf_" + ModulePrefix + CalleeName;
         if (Name == Prefix ||
