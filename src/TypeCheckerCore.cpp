@@ -102,33 +102,27 @@ void TypeChecker::checkAll(const std::vector<std::unique_ptr<ExprAST>> &Nodes,
   // function's own doc comment for the full save/restore rationale.
   for (const auto &Node : Nodes) {
     const bool SavedRecoverActive = g_recoverActive;
-    jmp_buf SavedJmpBuf;
-    std::memcpy(SavedJmpBuf, g_recoverJmp, sizeof(jmp_buf));
-
     g_recoverActive = true;
-    if (setjmp(g_recoverJmp) == 0) {
+    try {
       check(Node.get());
-    } else {
+    } catch (const RecoverUnwind &) {
       resetForRecovery();
     }
     g_recoverActive = SavedRecoverActive;
-    std::memcpy(g_recoverJmp, SavedJmpBuf, sizeof(jmp_buf));
   }
 
   // Same recovery for the deferred E141 pass. checkSliceWrites() takes its
-  // whole queue before reporting, so a longjmp out of it reports each entry
+  // whole queue before reporting, so an error out of it reports each entry
   // at most once (the rest are dropped with it -- one E141 per run in this
   // mode is enough to act on).
   const bool SavedRecoverActive = g_recoverActive;
-  jmp_buf SavedJmpBuf;
-  std::memcpy(SavedJmpBuf, g_recoverJmp, sizeof(jmp_buf));
   g_recoverActive = true;
-  if (setjmp(g_recoverJmp) == 0)
+  try {
     checkSliceWrites();
-  else
+  } catch (const RecoverUnwind &) {
     resetForRecovery();
+  }
   g_recoverActive = SavedRecoverActive;
-  std::memcpy(g_recoverJmp, SavedJmpBuf, sizeof(jmp_buf));
 }
 
 

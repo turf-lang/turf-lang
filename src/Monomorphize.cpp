@@ -521,10 +521,8 @@ std::shared_ptr<ResolverFunctionSymbol> finishInstantiation(
   bool ResolveFailed = false;
   {
     const bool SavedRecoverActive = g_recoverActive;
-    jmp_buf SavedJmpBuf;
-    std::memcpy(SavedJmpBuf, g_recoverJmp, sizeof(jmp_buf));
     g_recoverActive = true;
-    if (setjmp(g_recoverJmp) == 0) {
+    try {
       // resolveMonomorphizedClone(), not resolve(): the clone must resolve
       // its own struct-name references (self's type) the same way the
       // ORIGINAL declaration did, AND accept substituted type arguments
@@ -532,11 +530,10 @@ std::shared_ptr<ResolverFunctionSymbol> finishInstantiation(
       // see that method's own doc comment (Resolver.h) for the two real
       // bugs this fixes.
       PreR.resolveMonomorphizedClone(Clone, Entry.Request.SourceModule);
-    } else {
+    } catch (const RecoverUnwind &) {
       ResolveFailed = true;
     }
     g_recoverActive = SavedRecoverActive;
-    std::memcpy(g_recoverJmp, SavedJmpBuf, sizeof(jmp_buf));
   }
   if (ResolveFailed) {
     SemanticError(Entry.Request.Site,
@@ -578,7 +575,7 @@ std::shared_ptr<ResolverFunctionSymbol> finishInstantiation(
 
   // Re-typecheck the clone -- THIS is where an instantiation-site error
   // (§9.5, "where errors are reported") is discovered. A custom error
-  // handler captures the inner failure instead of letting it longjmp past
+  // handler captures the inner failure instead of letting it unwind past
   // this whole function, so it can be re-raised anchored at the
   // INSTANTIATION SITE (every requesting call, via withRelated()), not at
   // the clone's own copied-from-the-template location.
@@ -597,7 +594,7 @@ std::shared_ptr<ResolverFunctionSymbol> finishInstantiation(
                           InnerMsg = Msg;
                           InnerHint = Hint;
                         }
-                        longjmp(g_recoverJmp, 1);
+                        throw RecoverUnwind{};
                       });
   // The collector must keep collecting through this second, nested
   // TypeChecker instance -- a generic call INSIDE this clone's body needs
@@ -612,19 +609,18 @@ std::shared_ptr<ResolverFunctionSymbol> finishInstantiation(
   CloneTC.setCurrentModule(Entry.Request.SourceModule);
   {
     const bool SavedRecoverActive = g_recoverActive;
-    jmp_buf SavedJmpBuf;
-    std::memcpy(SavedJmpBuf, g_recoverJmp, sizeof(jmp_buf));
     g_recoverActive = true;
     // LEC-005 (D25): every request this body discovers is a child of Entry.
-    // Restored on BOTH exits -- the error path leaves via longjmp.
+    // Restored on BOTH exits -- the error path leaves through the catch.
     const int SavedParent =
         Collector.setCurrentParent(static_cast<int>(Entry.Index));
-    if (setjmp(g_recoverJmp) == 0) {
+    try {
       CloneTC.check(Clone);
+    } catch (const RecoverUnwind &) {
+      // CheckFailed was set by the handler above.
     }
     Collector.setCurrentParent(SavedParent);
     g_recoverActive = SavedRecoverActive;
-    std::memcpy(g_recoverJmp, SavedJmpBuf, sizeof(jmp_buf));
   }
   if (CheckFailed) {
     // D25: the user wrote `s.add(b)`; the error is three instantiations down
@@ -1397,26 +1393,23 @@ bool drainStructRequests(
     // context) and substituted-type visibility (a field type naming a
     // struct from a module the template's own declaring module never
     // imports, e.g. Map<string, JsonValue>'s V=JsonValue). Wrapped in the
-    // same nested setjmp/longjmp harness finishInstantiation() uses for the
+    // same nested recovery point finishInstantiation() uses for the
     // identical defensive reason: this should never legitimately fail for a
     // field type that already passed this exact check once, at the original
     // call site -- if it does, that is a compiler bug, not a user error.
     bool ResolveFailed = false;
     {
       const bool SavedRecoverActive = g_recoverActive;
-      jmp_buf SavedJmpBuf;
-      std::memcpy(SavedJmpBuf, g_recoverJmp, sizeof(jmp_buf));
       g_recoverActive = true;
-      if (setjmp(g_recoverJmp) == 0) {
+      try {
         // TemplateModule, NOT Entry.Request.SourceModule -- see
         // buildStructDeclRegistry()'s own doc comment (StructRegistryEntry)
         // for why the request's own SourceModule is unreliable here.
         PreR.resolveMonomorphizedClone(Clone, TemplateModule);
-      } else {
+      } catch (const RecoverUnwind &) {
         ResolveFailed = true;
       }
       g_recoverActive = SavedRecoverActive;
-      std::memcpy(g_recoverJmp, SavedJmpBuf, sizeof(jmp_buf));
     }
     if (ResolveFailed) {
       SemanticError(Entry.Request.Site,

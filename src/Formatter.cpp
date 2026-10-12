@@ -10,7 +10,6 @@
 #include "turf/FrontEndIsolation.h"
 
 #include <algorithm>
-#include <csetjmp>
 #include <sstream>
 #include <unordered_map>
 #include <vector>
@@ -248,7 +247,7 @@ struct LexJob {
   std::vector<std::string> *Keys;
 };
 
-// Runs inside the guard; a longjmp out of getNextToken() skips the rest of it.
+// Runs inside the guard; an error raised by getNextToken() skips the rest of it.
 void lexJob(LexJob &Job) {
   CurTok = 0;
   getNextToken();
@@ -280,8 +279,10 @@ bool tokenKeys(std::string_view Source, std::vector<std::string> &Keys, std::str
 
     LexJob Job{&Keys};
     g_recoverActive = true;
-    if (setjmp(g_recoverJmp) == 0)
+    try {
       lexJob(Job);
+    } catch (const RecoverUnwind &) {
+    }
     g_recoverActive = false;
 
     // A lexical error that raised stopped the loop above; one that was only

@@ -30,7 +30,6 @@
 #include "llvm/Support/FileSystem.h"
 
 #include <algorithm>
-#include <csetjmp>
 #include <cstring>
 #include <limits>
 #include <mutex>
@@ -95,7 +94,6 @@ public:
     // host compile has read, lib/std included.
     SavedAllSourceLines_.swap(AllSourceLines);
 
-    std::memcpy(SavedRecoverJmp_, g_recoverJmp, sizeof(jmp_buf));
     SavedRecoverActive_ = g_recoverActive;
     SavedAIEnabled_ = g_AIEnabled;
     SavedAllowUnsafeModules_ = g_AllowUnsafeModules;
@@ -137,7 +135,6 @@ public:
     g_AllowUnsafeModules = SavedAllowUnsafeModules_;
     g_AIEnabled = SavedAIEnabled_;
     g_recoverActive = SavedRecoverActive_;
-    std::memcpy(g_recoverJmp, SavedRecoverJmp_, sizeof(jmp_buf));
 
     AllSourceLines.swap(SavedAllSourceLines_);
     SourceLines = std::move(SavedSourceLines_);
@@ -180,7 +177,6 @@ private:
   std::string SavedSourceFilename_, SavedMainSourceFilename_;
   std::vector<std::string> SavedSourceLines_;
   std::map<std::string, std::vector<std::string>> SavedAllSourceLines_;
-  jmp_buf SavedRecoverJmp_;
   bool SavedRecoverActive_, SavedAIEnabled_, SavedAllowUnsafeModules_;
   std::string SavedCompilerExecutablePath_;
   DiagnosticEngine::State SavedDiagnostics_;
@@ -351,10 +347,11 @@ std::vector<std::unique_ptr<ExprAST>> parseEntryFile(std::size_t &PreludeCount,
   // calls exit() -- ending turf-lsp, or any host, instead of reporting a
   // diagnostic (found by turf-fuzz's libFuzzer engine).
   g_recoverActive = true;
-  if (setjmp(g_recoverJmp) == 0)
+  try {
     getNextToken();
-  else
+  } catch (const RecoverUnwind &) {
     SkipToNextTopLevelBoundary();
+  }
   g_recoverActive = false;
 
   // Parsed before the prelude -- only here is the file's first token still
@@ -362,11 +359,11 @@ std::vector<std::unique_ptr<ExprAST>> parseEntryFile(std::size_t &PreludeCount,
   std::vector<std::unique_ptr<ExprAST>> Leading;
   std::unique_ptr<ExprAST> LeadingUnsafeBlock;
   g_recoverActive = true;
-  if (setjmp(g_recoverJmp) == 0) {
+  try {
     if (!ParseLeadingUnsafeModuleDecl(LeadingUnsafeBlock) && LeadingUnsafeBlock)
       AppendFlattenedTopLevelDecl(std::move(LeadingUnsafeBlock), Leading,
                                   true);
-  } else {
+  } catch (const RecoverUnwind &) {
     SkipToNextTopLevelBoundary();
   }
   g_recoverActive = false;
@@ -379,8 +376,11 @@ std::vector<std::unique_ptr<ExprAST>> parseEntryFile(std::size_t &PreludeCount,
   // without the prelude, and each of its own imports reports the same thing.
   std::vector<std::unique_ptr<ExprAST>> Program;
   g_recoverActive = true;
-  if (!SkipPrelude && setjmp(g_recoverJmp) == 0)
-    Program = ParsePreludeImports(CurLoc);
+  try {
+    if (!SkipPrelude)
+      Program = ParsePreludeImports(CurLoc);
+  } catch (const RecoverUnwind &) {
+  }
   g_recoverActive = false;
   PreludeCount = Program.size();
   for (auto &AST : Leading)
@@ -396,7 +396,7 @@ std::vector<std::unique_ptr<ExprAST>> parseEntryFile(std::size_t &PreludeCount,
     }
     const int StartTok = CurTok;
     g_recoverActive = true;
-    if (setjmp(g_recoverJmp) == 0) {
+    try {
       auto AST = ParseExpression();
       if (!AST) {
         SkipToNextTopLevelBoundary();
@@ -422,7 +422,7 @@ std::vector<std::unique_ptr<ExprAST>> parseEntryFile(std::size_t &PreludeCount,
                      SLM::ErrorCategory::SYNTAX_ERROR);
         }
       }
-    } else {
+    } catch (const RecoverUnwind &) {
       SkipToNextTopLevelBoundary();
     }
     g_recoverActive = false;
@@ -841,13 +841,13 @@ AnalysisResult analyze(const std::vector<SourceBuffer> &Buffers,
   // (hoisting) failure is the one thing that still aborts resolveAll()
   // whole; the TypeChecker is then skipped, as main.cpp skips it, rather
   // than run against a half-registered program.
-  // volatile: assigned after a longjmp back to the setjmp below.
-  volatile bool HoistingClean = true;
+  bool HoistingClean = true;
   g_recoverActive = true;
-  if (setjmp(g_recoverJmp) == 0)
+  try {
     I->R->resolveAll(I->Program, /*RecoverPerDeclaration=*/true);
-  else
+  } catch (const RecoverUnwind &) {
     HoistingClean = false;
+  }
   g_recoverActive = false;
   I->R->setScopeSnapshotCallback(nullptr);
 
@@ -857,16 +857,20 @@ AnalysisResult analyze(const std::vector<SourceBuffer> &Buffers,
   if (HoistingClean) {
     I->TC = std::make_unique<TypeChecker>(I->R->symbolTable());
     g_recoverActive = true;
-    if (setjmp(g_recoverJmp) == 0)
+    try {
       I->TC->checkAll(I->Program, /*RecoverPerDeclaration=*/true);
+    } catch (const RecoverUnwind &) {
+    }
     g_recoverActive = false;
   }
 
   if (Options.RunLint) {
     for (auto &AST : I->Program) {
       g_recoverActive = true;
-      if (setjmp(g_recoverJmp) == 0)
+      try {
         LintExpression(AST.get());
+      } catch (const RecoverUnwind &) {
+      }
       g_recoverActive = false;
     }
   }
@@ -913,10 +917,11 @@ AnalysisResult analyze(const std::vector<SourceBuffer> &Buffers,
       }
 
       g_recoverActive = true;
-      if (setjmp(g_recoverJmp) == 0) {
+      try {
         auto Cfg = CFGBuilder().buildCFG(F->getName(), F->getReturnTypePtr(),
                                          F->getBodyMut(), F->getLoc(), Mangled);
         runFunctionFlowPasses(*Cfg, F->getName(), F->getLoc(), {});
+      } catch (const RecoverUnwind &) {
       }
       g_recoverActive = false;
     }

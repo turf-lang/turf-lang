@@ -2,6 +2,7 @@
 // EXPECT-DIAG: fail_header_names_main_file.tr (
 // EXPECT-DIAG: errors)
 // EXPECT-NO-DIAG: , in file
+// EXPECT-NO-DIAG: E041
 // #266: every batch of diagnostics opens with the path of the file it belongs
 // to and a count, so a reader never has to infer the file from the command
 // line. The parser recovers after an error (the type checker stops at its

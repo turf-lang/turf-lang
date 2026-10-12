@@ -220,6 +220,15 @@ void SetSourceOverlay(const std::string &Path, const std::string &Text);
 void SetInstallRootOverride(const std::string &Root);
 
 void RecordParsedTopLevelAST(const ExprAST *AST);
+
+// A function whose definition failed to parse after its name was read: its
+// own error is already reported, so a call to the name is not reported again
+// as an unknown function (E041). ParseFuncDef() notes the name when it reads
+// it and forgets it when the definition parses. Reset by
+// PushParserCompileState().
+void NoteFunctionParseStarted(const std::string &Name);
+void NoteFunctionParsed(const std::string &Name);
+bool FunctionFailedToParse(const std::string &Name);
 std::unique_ptr<ExprAST> BuildProgramASTFromCache();
 
 // True if @p Node was spliced out of a top-level `unsafe { }` block by

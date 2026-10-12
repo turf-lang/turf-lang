@@ -315,26 +315,10 @@ public:
                           RelatedLocations_, Category_, getCode(), Hints_);
 
     if (g_recoverActive) {
-      // longjmp() skips C++ destructors between here and the setjmp() point
-      // -- including every live ParseRecursionGuard on the abandoned call
-      // stack, which would otherwise leave g_parseRecursionDepth
-      // permanently inflated by however deep parsing had gotten when this
-      // error fired. Reset explicitly here (still on the deep side of the
-      // jump, so this runs regardless of which of the many setjmp() call
-      // sites ends up catching it) -- mirrors g_braceDepth's own defensive
-      // per-pass reset in resetLexer(), just at the point that actually
-      // needs it for a counter that longjmp can desync. See ParseExpression/
-      // ParseBlock's recursion-guard doc comment in Lexer.h.
-      g_parseRecursionDepth = 0;
-      // The jump abandons this object's frame without destroying it, and
-      // raise() never returns, so destroy it here: DiagnosticEngine::add()
-      // above already copied everything it needs. Without this, every
-      // diagnostic raised under the query facade leaked its message, hint and
-      // related locations (~170 bytes each; turf-lsp analyses on every
-      // keystroke). The destructor is virtual, so a subclass's own members go
-      // too. Found by turf-fuzz's libFuzzer target with leak detection on.
-      const_cast<TurfError *>(this)->~TurfError();
-      longjmp(g_recoverJmp, 1);
+      // Unwinds to the innermost recovery point (RecoverUnwind, Lexer.h),
+      // destroying this error object, the temporaries that built it and
+      // every abandoned frame's locals on the way.
+      throw RecoverUnwind{};
     } else {
       DiagnosticEngine::flushAll();
       std::exit(1);

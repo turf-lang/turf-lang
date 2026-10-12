@@ -1661,7 +1661,7 @@ static int runCompilerMain(int argc, char **argv) {
             CurTok == TOK_OPERATOR || CurTok == TOK_ERROR || CurTok == TOK_UNSAFE ||
             CurTok == TOK_PUB) {
           g_recoverActive = true;
-          if (setjmp(g_recoverJmp) == 0) {
+          try {
             auto AST = ParseExpression();
             if (AST) {
               if (CurTok == ';') {
@@ -1687,18 +1687,18 @@ static int runCompilerMain(int argc, char **argv) {
               AppendFlattenedTopLevelDecl(std::move(AST), PrePassASTs, true);
             } else {
               // ParseExpression() already reported a real error and
-              // returned nullptr NORMALLY (no longjmp) -- see
+              // returned nullptr NORMALLY (no raise) -- see
               // SkipToNextTopLevelBoundary()'s doc comment for why a
               // depth-aware skip is needed here instead of a flat scan.
               SkipToNextTopLevelBoundary();
             }
-          } else {
+          } catch (const RecoverUnwind &) {
             SkipToNextTopLevelBoundary();
           }
           g_recoverActive = false;
         } else if (CurTok == TOK_IMPORT) {
           g_recoverActive = true;
-          if (setjmp(g_recoverJmp) == 0) {
+          try {
             auto AST = ParseImport();
             if (AST) {
               if (CurTok != ';') {
@@ -1713,7 +1713,7 @@ static int runCompilerMain(int argc, char **argv) {
             } else {
               SkipToNextTopLevelBoundary();
             }
-          } else {
+          } catch (const RecoverUnwind &) {
             SkipToNextTopLevelBoundary();
           }
           g_recoverActive = false;
@@ -1732,9 +1732,9 @@ static int runCompilerMain(int argc, char **argv) {
       {
         bool PreResolverClean = true;
         g_recoverActive = true;
-        if (setjmp(g_recoverJmp) == 0) {
+        try {
           PreR.resolveAll(PrePassASTs);
-        } else {
+        } catch (const RecoverUnwind &) {
           PreResolverClean = false;
         }
         g_recoverActive = false;
@@ -1768,9 +1768,9 @@ static int runCompilerMain(int argc, char **argv) {
         // sense while nothing consumed the worklist.
         PreTC.setMonomorphizationCollector(&MonoCollector);
         g_recoverActive = true;
-        if (setjmp(g_recoverJmp) == 0) {
+        try {
           PreTC.checkAll(PrePassASTs);
-        } else {
+        } catch (const RecoverUnwind &) {
           PreTCClean = false;
         }
         // ── Pre-pass sub-pass 2b.5: Monomorphize ──────────────────────────
@@ -1801,7 +1801,7 @@ static int runCompilerMain(int argc, char **argv) {
         // keeps discovering brand-new work forever.
         if (PreTCClean) {
           g_recoverActive = true;
-          if (setjmp(g_recoverJmp) == 0) {
+          try {
             bool Progress = true;
             while (Progress) {
               Progress = false;
@@ -1825,7 +1825,7 @@ static int runCompilerMain(int argc, char **argv) {
               // guaranteed by discovery order alone.
               Progress |= Monomorphize::drainStructRequests(PrePassASTs, MonoCollector, PreR);
             }
-          } else {
+          } catch (const RecoverUnwind &) {
             PreTCClean = false;
           }
         }
@@ -1882,8 +1882,9 @@ static int runCompilerMain(int argc, char **argv) {
       for (auto &AST : PrePassASTs) {
         if (dynamic_cast<StructDeclExprAST *>(AST.get())) {
           g_recoverActive = true;
-          if (setjmp(g_recoverJmp) == 0) {
+          try {
             AST->codegen();
+          } catch (const RecoverUnwind &) {
           }
           g_recoverActive = false;
         }
@@ -1931,8 +1932,9 @@ static int runCompilerMain(int argc, char **argv) {
             dynamic_cast<ExternFuncDeclExprAST *>(AST.get()) ||
             dynamic_cast<ModuleImportExprAST *>(AST.get())) {
           g_recoverActive = true;
-          if (setjmp(g_recoverJmp) == 0) {
+          try {
             AST->codegen();
+          } catch (const RecoverUnwind &) {
           }
           g_recoverActive = false;
         }
@@ -1977,9 +1979,9 @@ static int runCompilerMain(int argc, char **argv) {
             continue;
           size_t SavedDepth = GlobalSymbolTable ? GlobalSymbolTable->GetDepth() : 0;
           g_recoverActive = true;
-          if (setjmp(g_recoverJmp) == 0) {
+          try {
             AST->codegen();
-          } else {
+          } catch (const RecoverUnwind &) {
             if (GlobalSymbolTable) {
               GlobalSymbolTable->ResetToDepth(SavedDepth);
               GlobalSymbolTable->ResetEarlyExitForCurrentScope();
@@ -2077,7 +2079,7 @@ static int runCompilerMain(int argc, char **argv) {
         CurTok == TOK_OPERATOR || CurTok == TOK_ERROR || CurTok == TOK_UNSAFE ||
             CurTok == TOK_PUB) {
       g_recoverActive = true;
-      if (setjmp(g_recoverJmp) == 0) {
+      try {
         auto AST = ParseExpression();
         if (AST) {
           if (CurTok == ';') {
@@ -2095,7 +2097,7 @@ static int runCompilerMain(int argc, char **argv) {
           // of a flat token scan.
           SkipToNextTopLevelBoundary();
         }
-      } else {
+      } catch (const RecoverUnwind &) {
         SkipToNextTopLevelBoundary();
       }
       g_recoverActive = false;
@@ -2104,7 +2106,7 @@ static int runCompilerMain(int argc, char **argv) {
 
     if (CurTok == TOK_IMPORT) {
       g_recoverActive = true;
-      if (setjmp(g_recoverJmp) == 0) {
+      try {
         auto AST = ParseImport();
         if (AST) {
           if (CurTok != ';') {
@@ -2117,7 +2119,7 @@ static int runCompilerMain(int argc, char **argv) {
         } else {
           SkipToNextTopLevelBoundary();
         }
-      } else {
+      } catch (const RecoverUnwind &) {
         SkipToNextTopLevelBoundary();
       }
       g_recoverActive = false;
@@ -2125,7 +2127,7 @@ static int runCompilerMain(int argc, char **argv) {
     }
 
     g_recoverActive = true;
-    if (setjmp(g_recoverJmp) == 0) {
+    try {
       // Where the statement STARTS, for the "not allowed outside a function"
       // diagnostic below -- CurLoc will be past it once ParseExpression()
       // returns.
@@ -2181,13 +2183,17 @@ static int runCompilerMain(int argc, char **argv) {
       } else {
         getNextToken();
       }
-    } else {
-      // longjmp landed here: skip to next statement boundary.
+    } catch (const RecoverUnwind &) {
+      // An error was raised: skip to next statement boundary. A lexer error
+      // in the skipped text is skipped too (see SkipToNextTopLevelBoundary()).
       while (CurTok != ';' && CurTok != TOK_EOF && CurTok != TOK_FN &&
              CurTok != TOK_STRUCT && CurTok != TOK_MUTABLE &&
              CurTok != TOK_IMMUTABLE && CurTok != TOK_IF &&
              CurTok != TOK_WHILE && CurTok != TOK_FOR && CurTok != TOK_RETURN) {
-        getNextToken();
+        try {
+          getNextToken();
+        } catch (const RecoverUnwind &) {
+        }
       }
     }
     g_recoverActive = false;
@@ -2232,10 +2238,10 @@ static int runCompilerMain(int argc, char **argv) {
   {
     bool ResolverClean = true;
     g_recoverActive = true;
-    if (setjmp(g_recoverJmp) == 0) {
+    try {
       R.resolveAll(FnASTs);
       R.resolveAll(TopLevelASTs);
-    } else {
+    } catch (const RecoverUnwind &) {
       ResolverClean = false;
     }
     g_recoverActive = false;
@@ -2295,10 +2301,10 @@ static int runCompilerMain(int argc, char **argv) {
   {
     bool TCClean = true;
     g_recoverActive = true;
-    if (setjmp(g_recoverJmp) == 0) {
+    try {
       TC.checkAll(FnASTs);
       TC.checkAll(TopLevelASTs);
-    } else {
+    } catch (const RecoverUnwind &) {
       TCClean = false;
     }
     g_recoverActive = false;
@@ -2342,9 +2348,9 @@ static int runCompilerMain(int argc, char **argv) {
   size_t SavedDepth = GlobalSymbolTable ? GlobalSymbolTable->GetDepth() : 0;
   for (auto &AST : TopLevelASTs) {
     g_recoverActive = true;
-    if (setjmp(g_recoverJmp) == 0) {
+    try {
       AST->codegen();
-    } else {
+    } catch (const RecoverUnwind &) {
       if (GlobalSymbolTable) {
         GlobalSymbolTable->ResetToDepth(SavedDepth);
         GlobalSymbolTable->ResetEarlyExitForCurrentScope();
@@ -2615,7 +2621,16 @@ int main(int argc, char **argv) {
   // process. Seen once in CI as a "Compile Error" with empty output that
   // never reproduced; this at least leaves a stack trace next time.
   llvm::sys::PrintStackTraceOnErrorSignal(argv[0]);
-  int ExitCode = runCompilerMain(argc, argv);
+  int ExitCode;
+  try {
+    ExitCode = runCompilerMain(argc, argv);
+  } catch (const RecoverUnwind &) {
+    // An error raised while recovery was armed but outside every recovery
+    // point (RecoverUnwind, Lexer.h): its diagnostic is recorded, so end the
+    // way an error with recovery off does, not with std::terminate.
+    DiagnosticEngine::flushAll();
+    ExitCode = 1;
+  }
   std::cout.flush();
   std::cerr.flush();
   TURF_FLUSH_COVERAGE();

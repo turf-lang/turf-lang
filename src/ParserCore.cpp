@@ -242,8 +242,16 @@ void SkipToNextTopLevelBoundary() {
   // sitting on a real boundary -- always making at least one token of
   // forward progress, since we already know from the guard above that we
   // are NOT currently sitting on one.
+  //
+  // A lexer error in the skipped text is reported and skipped too. This runs
+  // inside a recovery point's catch block, where a raise would escape the
+  // recovery point (under the old longjmp it jumped back into the same
+  // recovery branch, which called this function again).
   do {
-    getNextToken();
+    try {
+      getNextToken();
+    } catch (const RecoverUnwind &) {
+    }
   } while (CurTok != TOK_EOF &&
            (g_braceDepth > 0 || !IsTopLevelBoundaryToken(CurTok)));
 

@@ -4,7 +4,6 @@
 #include "ErrorCategory.h" // SLM::ErrorCategory -- lightweight, no LLVM/AST deps
 #include "ErrorCodes.h"    // ErrCode:: -- LogErrorAt() requires one (issue #263)
 #include <cctype>
-#include <csetjmp>
 #include <fstream>
 #include <map>
 #include <memory>
@@ -157,29 +156,26 @@ const std::string *FixItSourceLine(const SourceLocation &Loc);
 // Resolver against lib/std/*.tr, not lexer-level keywords.
 extern std::map<std::string, int> Keywords;
 
-// RecoverableError : setjmp/longjmp based (LLVM disables C++ exceptions)
-// The main loop calls setjmp(g_recoverJmp) before each statement.
-// raise() calls longjmp(g_recoverJmp, 1) to unwind back to that point.
+// Error recovery. While g_recoverActive is set, TurfError::raise() (Errors.h)
+// records its diagnostic and throws RecoverUnwind; each recovery point
+// (main.cpp's per-declaration loops, the Resolver's and TypeChecker's
+// per-declaration loops, ParseFile(), the query facade) catches it, abandons
+// that one declaration and goes on. Without it, raise() exits.
 //
-// POSIX longjmp semantics on Windows (REL-008 stage 5). This whole error-recovery
-// design depends on longjmp NOT running C++ destructors in the frames it skips:
-// raise() resets by hand what a destructor would have touched, and says so. On
-// Windows x64 the C runtime's longjmp is different: MinGW's setjmp records a stack
-// frame, and longjmp then UNWINDS to it through the OS, which with GCC's SEH
-// unwinder runs the cleanup (destructor) landing pads of every frame it crosses.
-// In turfc.exe that faulted inside ntdll the first time any program was rejected
-// with a resolver or type error (an access violation reading just above the
-// stack's top, before a word of the diagnostic was printed; found by running the
-// test suite on Windows: 461 of 467 failures were this one crash). Passing no frame
-// to the C runtime's _setjmp makes longjmp a plain register restore, which is what
-// every POSIX libc does and what this code was written against.
-#if defined(_WIN32) && defined(__MINGW32__)
-#undef setjmp
-#define setjmp(buf) _setjmp((buf), NULL)
-#endif
+// This was setjmp/longjmp until 2026-10-12. A longjmp skips every destructor
+// between raise() and the setjmp, so every diagnostic leaked the temporaries
+// of the raising expression and the locals of each abandoned frame (turf-fuzz
+// findings/leak/diagnostic-longjmp; turf-lsp analyses on every keystroke),
+// and counters kept by RAII guards had to be reset by hand. An exception runs
+// them. The compiler's own code is built with exceptions; no raise() is ever
+// reached from inside a precompiled LLVM frame (built without), only from
+// this compiler's own passes.
+//
+// Not derived from std::exception on purpose: the Resolver's
+// `catch (const std::runtime_error &)` blocks must never swallow it.
+struct RecoverUnwind {};
 
-extern jmp_buf g_recoverJmp;
-extern bool g_recoverActive; // true only while inside a setjmp guard
+extern bool g_recoverActive; // true only while a recovery point is armed
 extern bool g_protoOnlyPass; // true during sub-pass 3a: emit prototypes only
 
 // Current '{'/'('/'[' nesting depth relative to the top level (0), tracked

@@ -171,8 +171,27 @@ struct ParserCompileState {
   std::set<std::string> UnsafeModuleFiles;
   std::map<std::string, std::string> SourceOverlays;
   std::string InstallRootOverride;
+  std::unordered_set<std::string> UnparsedFunctionNames;
 };
 static std::vector<ParserCompileState> SavedParserCompileStates;
+
+// See NoteFunctionParseStarted() (Parser.h). Holds a name from the moment
+// ParseFuncDef() reads it until the definition parses, so a definition that
+// fails anywhere after its name -- a reported error returning nullptr, or a
+// longjmp out of the body -- leaves its name here.
+static std::unordered_set<std::string> UnparsedFunctionNames;
+
+void NoteFunctionParseStarted(const std::string &Name) {
+  UnparsedFunctionNames.insert(Name);
+}
+
+void NoteFunctionParsed(const std::string &Name) {
+  UnparsedFunctionNames.erase(Name);
+}
+
+bool FunctionFailedToParse(const std::string &Name) {
+  return UnparsedFunctionNames.count(Name) != 0;
+}
 
 static void ClearPackageSourceIndex(); // defined beside the cache it empties
 
@@ -182,7 +201,7 @@ void PushParserCompileState() {
       {std::move(ParsedTopLevelASTs), std::move(ImportedFiles),
        std::move(ImportStack), std::move(UnsafeTopLevelDecls),
        std::move(UnsafeModuleFiles), std::move(SourceOverlays),
-       std::move(InstallRootOverride)});
+       std::move(InstallRootOverride), std::move(UnparsedFunctionNames)});
   ParsedTopLevelASTs.clear();
   ImportedFiles.clear();
   ImportStack.clear();
@@ -190,6 +209,7 @@ void PushParserCompileState() {
   UnsafeModuleFiles.clear();
   SourceOverlays.clear();
   InstallRootOverride.clear();
+  UnparsedFunctionNames.clear();
 }
 
 void PopParserCompileState() {
@@ -202,6 +222,7 @@ void PopParserCompileState() {
   UnsafeModuleFiles = std::move(Saved.UnsafeModuleFiles);
   SourceOverlays = std::move(Saved.SourceOverlays);
   InstallRootOverride = std::move(Saved.InstallRootOverride);
+  UnparsedFunctionNames = std::move(Saved.UnparsedFunctionNames);
   SavedParserCompileStates.pop_back();
 }
 
@@ -306,6 +327,8 @@ BuildCircularImportChain(const std::vector<ImportStackFrame> &Stack,
   return Chain;
 }
 
+static std::unique_ptr<ExprAST> ParseFileDeclarations(const std::string &Path);
+
 std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
                                    const std::string &ModuleName,
                                    SourceLocation ImportLoc) {
@@ -344,16 +367,14 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
   // save/restore (so this doesn't corrupt whatever OUTER recovery scope --
   // main.cpp's own loop, or any embedder's -- is already active around
   // the `import` statement that triggered this call).
+  //
+  // (Recovery is a RecoverUnwind exception now, not a longjmp, so the
+  // guards would unwind even without the local boundary; the boundary still
+  // decides that a broken import fails alone, not the importing declaration.)
   struct RecoveryBoundaryGuard {
     bool PrevActive;
-    jmp_buf PrevJmpBuf;
-    RecoveryBoundaryGuard() : PrevActive(g_recoverActive) {
-      std::memcpy(PrevJmpBuf, g_recoverJmp, sizeof(jmp_buf));
-    }
-    ~RecoveryBoundaryGuard() {
-      g_recoverActive = PrevActive;
-      std::memcpy(g_recoverJmp, PrevJmpBuf, sizeof(jmp_buf));
-    }
+    RecoveryBoundaryGuard() : PrevActive(g_recoverActive) {}
+    ~RecoveryBoundaryGuard() { g_recoverActive = PrevActive; }
   } RecovBoundary;
 
   // Circular-import check FIRST, before the ImportedFiles cache check below:
@@ -522,16 +543,19 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
   // Arm this function's own local recovery boundary (see
   // RecoveryBoundaryGuard's doc comment above for the full rationale): any
   // TurfError raised from here on -- directly in this file's own parsing,
-  // or bubbling up through a transitively nested `import` -- longjmps back
-  // to this exact setjmp() call, still well within RecovBoundary/IGuard/
-  // LGuard's scope, so their destructors run normally once this function
-  // returns (either the ordinary success path below, an ordinary early
-  // `return nullptr;` inside the loop, or the `else` branch here).
+  // or bubbling up through a transitively nested `import` -- is caught here,
+  // and this one import fails.
   g_recoverActive = true;
-  if (setjmp(g_recoverJmp) != 0) {
+  try {
+    return ParseFileDeclarations(Path);
+  } catch (const RecoverUnwind &) {
     return nullptr;
   }
+}
 
+// ParseFile()'s parse loop, run inside its recovery point with the lexer
+// pointed at Path.
+static std::unique_ptr<ExprAST> ParseFileDeclarations(const std::string &Path) {
   getNextToken();
 
   std::vector<std::unique_ptr<ExprAST>> Exprs;

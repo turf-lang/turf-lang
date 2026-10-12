@@ -588,6 +588,17 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
       return;
     }
 
+    // The file has a definition of this name that failed to parse; its own
+    // syntax error is already reported. Reporting every call to it as an
+    // unknown function too only buries that error (turf-fuzz: a bad
+    // `defer { }` in f() also gave E041 at each call of f). The calling
+    // declaration is abandoned exactly as E041's raise() would abandon it --
+    // it cannot be compiled without its callee -- just without a diagnostic.
+    // With no recovery point armed raise() would exit instead, so E041 is
+    // reported as before.
+    if (FunctionFailedToParse(CalleeName) && g_recoverActive)
+      throw RecoverUnwind{};
+
     RankedSuggestions Suggestions;
 
     auto CurrentNames = SuggestionIndex::suggestVisible(

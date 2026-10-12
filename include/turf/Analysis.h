@@ -9,7 +9,7 @@
  *
  *          The front end is built on process-wide mutable globals (the
  *          lexer cursor, `GlobalSymbolTable`, the diagnostic list, the
- *          import caches, the setjmp recovery buffer -- see
+ *          import caches, the error-recovery flag -- see
  *          docs/planning/ARCHITECTURE_SIMPLIFICATION.md §1). Every tool that
  *          drove the pipeline directly had to save and restore those around
  *          each run, and every tool got a different subset wrong: turf-lsp

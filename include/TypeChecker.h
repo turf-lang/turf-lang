@@ -227,10 +227,10 @@ public:
                bool RecoverPerDeclaration = false);
 
   /**
-   * @brief Reset internal per-declaration state after a longjmp recovery.
+   * @brief Reset internal per-declaration state after a recovered error.
    *
    * Mirrors Resolver::resetForRecovery() (Resolver.h) -- see issue #246.
-   * A TypeError raised mid-body and caught via setjmp/longjmp skips
+   * A TypeError raised mid-body and caught at a recovery point skips
    * whatever push/pop pairs were mid-flight (visitFuncDef()'s
    * ReturnTypeStack_ push, visitCompare()'s MachineNarrowStack_ push,
    * visitFor()'s LoopVarTypes_ insert), leaving them non-empty/stale for

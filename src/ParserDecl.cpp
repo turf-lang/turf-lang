@@ -955,6 +955,11 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
     return nullptr;
   }
 
+  // From here on every failure has reported its own error, so the name stays
+  // noted (forgotten again only at the successful return below) and a call
+  // to it is not reported as an unknown function as well.
+  NoteFunctionParseStarted(FuncName);
+
   // Expect '('
   if (CurTok != '(') {
     LogErrorAt(FnLoc, ErrCode::MissingOpeningDelimiter, "Expected '(' after function name '" + FuncName + "'.", SLM::ErrorCategory::DECLARATION);
@@ -1126,6 +1131,7 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
                                               std::move(Body), TypeParams,
                                               IsStaticMethodDecl, HasCallerLocation);
   Def->UsesTry = TryScope.used();
+  NoteFunctionParsed(FuncName);
   return Def;
 }
 

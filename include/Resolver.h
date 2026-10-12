@@ -198,13 +198,13 @@ public:
    * @param RecoverPerDeclaration  See issue #246. When false (the default,
    *        unchanged behavior for every existing caller -- main.cpp's real
    *        compile pipeline relies on this): Pass 2 is one uninterrupted
-   *        walk, so the FIRST TurfError raised anywhere longjmps straight
-   *        back out of this whole call, matching the caller's own single
-   *        outer setjmp() guard -- the correct, deliberate behavior for a
+   *        walk, so the FIRST TurfError raised anywhere unwinds straight
+   *        back out of this whole call, to the caller's own single
+   *        outer recovery point -- the correct, deliberate behavior for a
    *        pipeline that must never let Codegen run on a partially-
    *        resolved AST (main.cpp's own "Codegen must never run on an
    *        unresolved AST" invariant). When true, each top-level node
-   *        instead gets its OWN setjmp() guard (mirroring #228's identical
+   *        instead gets its OWN recovery point (mirroring #228's identical
    *        fix for the parser's per-statement loop), so one declaration's
    *        semantic error doesn't prevent every OTHER declaration in the
    *        buffer from being resolved and having its own errors surfaced
@@ -226,10 +226,10 @@ public:
                   bool RecoverPerDeclaration = false);
 
   /**
-   * @brief Reset internal scope tracking after a longjmp recovery.
+   * @brief Reset internal scope tracking after a recovered error.
    *
    * Must be called before resuming resolution on subsequent top-level nodes
-   * if a previous node raised an error caught by `setjmp`.
+   * if a previous node raised an error (RecoverUnwind, Lexer.h).
    * Warning: Do not loop-with-recovery over multiple top-level nodes without
    * resetting scope depth, FunctionNestingDepth_, ModuleStack_, and
    * CurrentFuncTypeParams_ between iterations.
@@ -238,7 +238,7 @@ public:
    * this method's first use in resolveAll()'s RecoverPerDeclaration loop):
    * both are set-before/cleared-after patterns around visitModuleImport()'s
    * and visitFuncDef()'s own body traversal (ResolverDecl.cpp), with no
-   * RAII guard -- a longjmp mid-body skips the clear the same way it used
+   * RAII guard -- an error mid-body skips the clear the same way it used
    * to skip FunctionNestingDepth_/scope depth's reset before this method
    * existed. Left stale, a failing `import`'s ModuleStack_ entry makes
    * currentModuleName() return the wrong module for every UNRELATED

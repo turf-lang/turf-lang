@@ -310,11 +310,10 @@ public:
   /// cache index of the entry whose clone is being re-typechecked), or a root
   /// for -1. Returns the previous value so the caller can put it back.
   ///
-  /// Deliberately a set/restore pair, not an RAII guard: the monomorphizer's
-  /// nested TypeChecker reports an error by `longjmp`, which skips
-  /// destructors, so a guard would never restore on exactly the path that
-  /// matters. The nested TypeChecker shares this collector, which is how "the
-  /// current parent" reaches it.
+  /// A set/restore pair, written when errors were reported by `longjmp`
+  /// (which skipped destructors, so a guard would never have restored); the
+  /// caller restores after its catch. The nested TypeChecker shares this
+  /// collector, which is how "the current parent" reaches it.
   int setCurrentParent(int Parent) {
     const int Previous = CurrentParent_;
     CurrentParent_ = Parent;

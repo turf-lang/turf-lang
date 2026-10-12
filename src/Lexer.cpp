@@ -77,8 +77,7 @@ std::vector<DiagnosticEngine::Diag> DiagnosticEngine::Diagnostics;
 std::set<int> DiagnosticEngine::ErrorLines;
 bool DiagnosticEngine::CollectAllDiagnostics = false;
 
-// setjmp/longjmp recovery buffers
-jmp_buf g_recoverJmp;
+// Error recovery: see RecoverUnwind (Lexer.h)
 bool g_recoverActive = false;
 bool g_protoOnlyPass = false; // set by pre-pass 3a to stop after prototype
 
@@ -94,9 +93,8 @@ bool g_protoOnlyPass = false; // set by pre-pass 3a to stop after prototype
 int g_braceDepth = 0;
 int g_curlyDepth = 0; // see Lexer.h
 
-// See Lexer.h for the full doc comment. Reset to 0 on longjmp (TurfError::
-// raise(), Errors.h) since a RAII ParseRecursionGuard's destructor never
-// runs for a stack frame longjmp skips past.
+// See Lexer.h for the full doc comment. A recovered error unwinds through
+// every live ParseRecursionGuard, which decrements it.
 int g_parseRecursionDepth = 0;
 
 // AI/SLM flag: only true when --smart is passed on the CLI.

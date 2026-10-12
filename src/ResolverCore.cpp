@@ -108,31 +108,27 @@ void Resolver::resolveAll(
 
   // Per-top-level-node recovery (issue #246, opt-in -- see
   // RecoverPerDeclaration's doc comment). Mirrors #228's identical fix for
-  // the PARSER's own per-statement loop: each node gets its own setjmp()
-  // instead of one guard around the whole Pass-2 loop, so one
+  // the PARSER's own per-statement loop: each node gets its own recovery
+  // point instead of one around the whole Pass-2 loop, so one
   // declaration's error doesn't prevent every other declaration from being
   // resolved and having its own errors surfaced too.
   //
-  // g_recoverJmp/g_recoverActive are saved and restored around each node's
-  // own setjmp() so this doesn't corrupt whatever OUTER recovery scope the
-  // caller already has active around this whole resolveAll() call.
+  // g_recoverActive is saved and restored around each node so this doesn't
+  // change whatever OUTER recovery scope the caller already has active
+  // around this whole resolveAll() call.
   for (const auto &Node : Nodes) {
     const bool SavedRecoverActive = g_recoverActive;
-    jmp_buf SavedJmpBuf;
-    std::memcpy(SavedJmpBuf, g_recoverJmp, sizeof(jmp_buf));
-
     g_recoverActive = true;
-    if (setjmp(g_recoverJmp) == 0) {
+    try {
       resolve(Node.get());
-    } else {
+    } catch (const RecoverUnwind &) {
       // See resetForRecovery()'s own doc comment: scope depth and
-      // FunctionNestingDepth_ can be left non-zero by a longjmp that
-      // skipped whatever enterScope()/exitScope() pairs or nesting-depth
-      // increments were mid-flight when the error fired.
+      // FunctionNestingDepth_ can be left non-zero when the error fired
+      // between an enterScope()/exitScope() pair or a nesting-depth
+      // increment and its decrement, which are not RAII.
       resetForRecovery();
     }
     g_recoverActive = SavedRecoverActive;
-    std::memcpy(g_recoverJmp, SavedJmpBuf, sizeof(jmp_buf));
   }
 }
 
