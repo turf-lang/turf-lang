@@ -102,6 +102,7 @@ run `turf help` for the list of commands
 | `--stdlib-warnings` | — | Shows warnings anchored inside the standard library, which are hidden by default. |
 | `--allow-unsafe-modules` | — | Honors `unsafe module;` outside the install root, in a single-file compile. It does not apply in a project, where the manifest's `[unsafe] allow` decides ([Projects & Packages](projects_and_packages.md)). |
 | `--emit-llvm` | — | Writes human-readable LLVM IR to `<output>.ll` instead of compiling and linking a native binary. |
+| `--emit-obj` | — | Compiles everything, code generation included, and writes the object file `<output>.o` instead of linking a native binary. With `--target` it is the way to get an object for another machine (exit 0, no cross-linking error). Not combinable with `--emit-llvm` (exit 2). Driver interface 1.6. |
 | `--smart` | — | Enables the SLM (AI-assisted) fix-suggestion pipeline. See below — deliberately not documented in depth here. `--smart-write-fix=<path>` writes the first validated fix there. |
 | `--dump-ast` | — | Prints the parsed AST (functions/structs, then top-level statements) via `ASTPrinter`. Runs *before* the Resolver, so nodes show no resolution annotations. |
 | `--resolve` | — | Prints a `[Resolver] ...` banner confirming the Resolver pass succeeded, plus the final scope depth. |

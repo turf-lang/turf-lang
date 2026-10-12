@@ -128,7 +128,9 @@ using namespace llvm;
 // asks for it. 1.5 adds `--format --skip-unlexable`, which `turf fmt` passes
 // for the files it found by walking a directory.
 static constexpr int TurfcInterfaceMajor = 1;
-static constexpr int TurfcInterfaceMinor = 5;
+// 1.6 adds `--emit-obj` (write the object, never link); a driver that wants
+// it asks for 1.6, everything else still needs 1.1.
+static constexpr int TurfcInterfaceMinor = 6;
 
 // The exit statuses (FREEZE.md 6.21, F-CLI-1, REL-001). The split exists so a script
 // or an editor can tell "your program has a mistake" (1: the compiler ran and
@@ -152,6 +154,7 @@ struct CompilerOptions {
   std::string InputFile;
   std::string OutputName;             // default derived from input later
   bool EmitLLVM = false;              // --emit-llvm: write .ll instead
+  bool EmitObj = false;               // --emit-obj: write the .o, never link
   bool AIEnabled = false;             // --smart: enable SLM AI suggestions
   std::string SmartFixOutPath;        // --smart-write-fix=<path>: write the first validated --smart fix's full patched source here (SLM-001 follow-up)
   bool AllowUnsafeModules = false;    // --allow-unsafe-modules: LANG-002, honor `unsafe module;` outside the install root
@@ -418,7 +421,7 @@ static void handleExplainFlagIfPresent(int argc, char **argv) {
 /// no source file can be mistaken for it), and the unknown-option message
 /// below points there.
 static const char *turfcUsage() {
-  return "Usage: turfc <filename.tr> [-o output] [--emit-llvm] [--smart]\n"
+  return "Usage: turfc <filename.tr> [-o output] [--emit-llvm | --emit-obj] [--smart]\n"
          "         [--smart-write-fix=<path>] [--link <libname>]\n"
          "         [--allow-unsafe-modules] [--stdlib-warnings]\n"
          "         [-O0|-O1|-O2|-O3|-Os] [-g] [--target=<triple>] [-mcpu=<cpu>]\n"
@@ -445,7 +448,7 @@ static const char *turfcUsage() {
 /// marks a flag that takes its value after it, so `--targt=x86` is compared
 /// as `--targt=` against `--target=`.
 static const char *const KnownOptions[] = {
-    "--emit-llvm",        "--smart",        "--smart-write-fix=",
+    "--emit-llvm",        "--emit-obj",     "--smart",        "--smart-write-fix=",
     "--allow-unsafe-modules", "--stdlib-warnings", "--check",
     "--module",           "--version",      "--dump-ast",
     "--dump-instantiations", "--resolve",   "--dump-resolver-symbols",
@@ -499,6 +502,8 @@ static CompilerOptions parseArgs(int argc, char **argv) {
 
     if (arg == "--emit-llvm") {
       opts.EmitLLVM = true;
+    } else if (arg == "--emit-obj") {
+      opts.EmitObj = true;
     } else if (arg == "--smart") {
       opts.AIEnabled = true;
     } else if (arg.rfind("--smart-write-fix=", 0) == 0) {
@@ -623,6 +628,12 @@ static CompilerOptions parseArgs(int argc, char **argv) {
   if (opts.CheckAsModule && !opts.Check) {
     std::cerr << "Error: --module only applies with --check (a module has no "
                  "entry point, so it cannot be linked).\n";
+    std::exit(ExitUsage);
+  }
+
+  if (opts.EmitLLVM && opts.EmitObj) {
+    std::cerr << "Error: --emit-llvm and --emit-obj each name the one output; "
+                 "pass one of them.\n";
     std::exit(ExitUsage);
   }
 
@@ -2521,6 +2532,15 @@ static int runCompilerMain(int argc, char **argv) {
       return 1;
 
     std::cout << "Compiled to " << ObjFile << "\n";
+
+    // --emit-obj: the object is the whole product. Everything that can reject
+    // or crash in this compiler has run (codegen and LLVM's backend
+    // included); only the system linker is left, which a tool compiling
+    // thousands of programs to look for compiler faults (turf-fuzz's process
+    // tier) does not need and pays for on every one. Also the way to get an
+    // object to link by hand, for any target.
+    if (opts.EmitObj)
+      return 0;
 
     // D20: the object above is real code for the requested machine, which is
     // what `--target` is for. Linking it needs a libturfrt built for that

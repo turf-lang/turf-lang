@@ -141,6 +141,33 @@ else
   fail "plain build failed: $(cat plain.err)"
 fi
 
+echo "== --emit-obj writes the object and never links"
+# Driver interface 1.6: turf-fuzz compiles thousands of programs it never
+# runs, and the system linker was about half of each compile.
+rm -f only only.o
+if "$TURFC" hello.tr --emit-obj -o only > only.out 2> only.err && [ -f only.o ] && [ ! -e only ]; then
+  pass "host object only.o, no binary"
+  if [ "$(od -An -tu2 -j16 -N2 only.o | tr -d ' ')" = 1 ]; then pass "only.o is a relocatable object"; else fail "only.o e_type is not ET_REL"; fi
+  if grep -q "Compiled to only.o" only.out; then pass "says where the object went"; else fail "no 'Compiled to only.o': $(cat only.out)"; fi
+else
+  fail "--emit-obj: rc or files wrong: $(cat only.err; ls)"
+fi
+rm -f armonly.o
+# For another machine it is the object the user asked for, so no D20 error.
+if "$TURFC" hello.tr --emit-obj --target=aarch64-unknown-linux-gnu -o armonly > armonly.out 2> armonly.err \
+    && [ "$(elf_machine armonly.o)" = 183 ] && ! grep -q "cannot link" armonly.err; then
+  pass "--emit-obj --target=aarch64 exits 0 with an AArch64 object"
+else
+  fail "--emit-obj for a foreign target: $(cat armonly.err)"
+fi
+"$TURFC" hello.tr --emit-obj --emit-llvm -o both > both.out 2> both.err
+rc=$?
+if [ "$rc" = 2 ] && grep -q "pass one of them" both.err; then
+  pass "--emit-obj with --emit-llvm is a usage error (exit 2)"
+else
+  fail "--emit-obj --emit-llvm: rc $rc, $(cat both.err)"
+fi
+
 echo
 if [ "$FAILED" -eq 0 ]; then
   echo "cross_target_smoke: all checks passed"
