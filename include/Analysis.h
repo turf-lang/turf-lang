@@ -149,7 +149,10 @@ public:
 // a local array is Stack; and a call to a function that returns one of its
 // reference parameters unchanged (ResolverFunctionSymbol::ReturnsParam) has
 // that argument's provenance. `Unknown` is stored explicitly where a
-// parameter's implicit default (Param) no longer holds.
+// parameter's implicit default (Param) no longer holds. Since 2026-10-13
+// (owner decisions on turf-fuzz's escape-boundary questions) an error payload
+// is a sink, and a call none of whose arguments can reach this frame -- or a
+// stdlib collection's element -- is Heap.
 enum class RefProvenance { Stack, Param, Heap, Unknown };
 
 class EscapePass {

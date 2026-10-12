@@ -350,7 +350,11 @@ request, not a session's own initiative. Full account:
 - **Amended 2026-10-13 (owner decisions 2026-10-12 on the turf-fuzz
   escape-boundary questions).** An error value's payload (`E1::P(&local)`)
   is a sink, unconditionally, like `heap()`'s operand: the payload is copied
-  to the heap so the error can be returned.
+  to the heap so the error can be returned. A call's result is long-lived
+  (`Heap`) when no argument can reach this frame (each is `Param`/`Heap`, or
+  of a type that holds no address), since a callee cannot return its own
+  locals; so is an element of a stdlib collection (`l[0]`, `l.get(0)`), whose
+  every way in is a sink. `mut h: &N = mk(); h.next = &local;` is an error.
 
 ### 6.14 String indexing — FROZEN (FDN-004, 2026-09-28)
 

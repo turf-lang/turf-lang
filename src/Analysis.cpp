@@ -1466,6 +1466,91 @@ std::optional<ValuePlace> valuePlaceOf(const ExprAST *E) {
 
 std::optional<RefProvenance> classifyProvenance(const ExprAST *E, const ProvMap &Map);
 
+bool isCollectionCall(const ResolverFunctionSymbol *Target);
+
+// Whether a value of type T can hold an address at all: a positive list
+// (scalars, `string`, an enum, and structs/sized arrays made only of those).
+// A pointer, a reference, a view, a generic parameter, or a type whose layout
+// is not registered can, so they answer false. With ExceptRefs, a `&T`/`&?T`
+// inside counts as no address (the caller checks those itself).
+bool typeHoldsNoAddress(const TurfType *T, bool ExceptRefs = false, int Depth = 0) {
+  if (!T || Depth > 16)
+    return false;
+  if (T->isInt() || T->isInt32() || T->isDouble() || T->isBool() ||
+      T->isNamed("char") || T->isNamed("string"))
+    return true;
+  if (ExceptRefs && isRefType(T))
+    return true;
+  if (T->isPointer())
+    return false;
+  if (dynamic_cast<const TurfEnumType *>(T))
+    return true;
+  if (dynamic_cast<const NamedType *>(T) && GlobalSymbolTable)
+    if (dynamic_cast<const TurfEnumType *>(GlobalSymbolTable->LookupType(T->getName()).get()))
+      return true;
+  if (const auto *AT = dynamic_cast<const ArrayType *>(T))
+    return AT->getSize() >= 0 &&
+           typeHoldsNoAddress(AT->getElementType(), ExceptRefs, Depth + 1);
+  if (const TurfStructType *ST = escapeStructOf(T)) {
+    for (const auto &F : ST->getFields())
+      if (!typeHoldsNoAddress(F.Type.get(), ExceptRefs, Depth + 1))
+        return false;
+    return true;
+  }
+  return false;
+}
+
+// Whether argument Arg, passed for a parameter of type ParamTy, gives the
+// callee no way into this frame: its type holds no address, or it is a
+// reference this pass knows outlives the frame (Param/Heap), or a struct or
+// array value whose every reference is one.
+bool argOutlivesFrame(const ExprAST *Arg, const TurfType *ParamTy, const ProvMap &Map) {
+  if (typeHoldsNoAddress(ParamTy))
+    return true;
+  auto P = classifyProvenance(Arg, Map);
+  if (P == RefProvenance::Param || P == RefProvenance::Heap)
+    return true;
+  auto Place = valuePlaceOf(Arg);
+  if (!Place || !Place->Exact || !ParamTy || ParamTy->isPointer())
+    return false;
+  std::vector<std::string> Refs;
+  collectRefPaths(Place->Type, "", Refs);
+  for (const auto &S : Refs) {
+    RefProvenance R = getPlace(Map, {Place->Sym, Place->Path + S});
+    if (R != RefProvenance::Param && R != RefProvenance::Heap)
+      return false;
+  }
+  // Every reference is accounted for; nothing else in it may be an address
+  // (a raw pointer field, a view).
+  return typeHoldsNoAddress(Place->Type, /*ExceptRefs=*/true);
+}
+
+// Whether a call's reference result outlives this frame. A callee cannot
+// return its own locals (E086 there), so its result can point into THIS
+// frame only through an argument: when no argument can, the result is
+// long-lived, and storing `&local` into it is an escape (owner decision
+// 2026-10-12, found by turf-fuzz: `mut h: &N = mk(); h.next = &n;` compiled).
+// Receiver is the method-call base, or null for a plain call.
+bool callOutlivesFrame(const ResolverFunctionSymbol *T, const ExprAST *Receiver,
+                       const std::vector<std::unique_ptr<ExprAST>> &Args,
+                       const ProvMap &Map) {
+  if (!T)
+    return false;
+  size_t First = 0;
+  if (Receiver) {
+    if (T->Params.empty() || !argOutlivesFrame(Receiver, T->Params[0].Type.get(), Map))
+      return false;
+    First = 1;
+  }
+  for (size_t I = 0; I < Args.size(); ++I) {
+    const TurfType *PT =
+        First + I < T->Params.size() ? T->Params[First + I].Type.get() : nullptr;
+    if (!argOutlivesFrame(Args[I].get(), PT, Map))
+      return false;
+  }
+  return true;
+}
+
 // The operand of `&expr`, where `expr` is a (possibly nested) field access
 // chain rooted at a plain variable. Two genuinely different cases:
 //   - the ROOT variable is itself a handle (&T/&?T/self/T[] param): the
@@ -1558,11 +1643,14 @@ std::optional<RefProvenance> classifyProvenance(const ExprAST *E,
       return RefProvenance::Heap; // FDN-001: always a fresh GC-heap block
     // A function that returns one of its reference parameters unchanged
     // (ResolverFunctionSymbol::ReturnsParam): the result is that argument.
-    // Any other call's result is Unknown.
+    // Otherwise it is long-lived when no argument reaches this frame
+    // (callOutlivesFrame()), else Unknown.
     const ResolverFunctionSymbol *T = FC->getResolvedCallTarget();
     if (T && T->ReturnsParam >= 0 &&
         static_cast<size_t>(T->ReturnsParam) < FC->getArgs().size())
       return classifyProvenance(FC->getArgs()[T->ReturnsParam].get(), Map);
+    if (callOutlivesFrame(T, nullptr, FC->getArgs(), Map))
+      return RefProvenance::Heap;
     return std::nullopt;
   }
 
@@ -1570,13 +1658,21 @@ std::optional<RefProvenance> classifyProvenance(const ExprAST *E,
     // Same summary; the receiver is the target's parameter 0 (`self`, or a
     // UFCS function's first parameter), the call's arguments the rest.
     const ResolverFunctionSymbol *T = MC->getResolvedCallTarget();
-    if (!T || T->ReturnsParam < 0)
+    if (!T)
       return std::nullopt;
     if (T->ReturnsParam == 0)
       return classifyProvenance(MC->getBase(), Map);
-    size_t I = static_cast<size_t>(T->ReturnsParam) - 1;
-    if (I < MC->getArgs().size())
-      return classifyProvenance(MC->getArgs()[I].get(), Map);
+    if (T->ReturnsParam > 0) {
+      size_t I = static_cast<size_t>(T->ReturnsParam) - 1;
+      if (I < MC->getArgs().size())
+        return classifyProvenance(MC->getArgs()[I].get(), Map);
+      return std::nullopt;
+    }
+    // A stdlib collection returns an element, which lives in its heap
+    // buffer and was checked on the way in (the push/set/`[]=` sinks); no
+    // collection method returns an address inside the collection value.
+    if (isCollectionCall(T) || callOutlivesFrame(T, MC->getBase(), MC->getArgs(), Map))
+      return RefProvenance::Heap;
     return std::nullopt;
   }
 
@@ -1591,7 +1687,10 @@ std::optional<RefProvenance> classifyProvenance(const ExprAST *E,
       dynamic_cast<const ArrayAccessExprAST *>(E)) {
     if (const auto *AA = dynamic_cast<const ArrayAccessExprAST *>(E))
       if (AA->ResolvedIndexGetTarget || AA->ResolvedIndexSetTarget)
-        return std::nullopt;
+        // `l[0]` of a stdlib collection: an element, as for its methods above.
+        return isCollectionCall(AA->ResolvedIndexGetTarget.get())
+                   ? std::optional<RefProvenance>(RefProvenance::Heap)
+                   : std::nullopt;
     if (auto Place = valuePlaceOf(E))
       return Place->Exact ? known(getPlace(Map, {Place->Sym, Place->Path}))
                           : std::nullopt;
@@ -1678,14 +1777,17 @@ std::string stripModuleQualifier(const std::string &Name) {
 }
 
 bool isCollectionMutatorCall(const MethodCallExprAST &Node) {
-  const ResolverFunctionSymbol *Target = Node.getResolvedCallTarget();
-  if (!Target || Target->Params.empty() || !Target->Params[0].Type)
-    return false;
   static const std::unordered_set<std::string> MutatorNames = {
       "push", "set", "put", "add", "enqueue"};
-  if (!MutatorNames.count(Node.getMethod()))
-    return false;
+  return MutatorNames.count(Node.getMethod()) &&
+         isCollectionCall(Node.getResolvedCallTarget());
+}
 
+// Whether Target is a method or operator of a stdlib collection: its first
+// parameter (`self`, or an operator's collection operand) is one.
+bool isCollectionCall(const ResolverFunctionSymbol *Target) {
+  if (!Target || Target->Params.empty() || !Target->Params[0].Type)
+    return false;
   const TurfType *SelfTy = Target->Params[0].Type.get();
   if (const auto *PtrTy = dynamic_cast<const TurfPointerType *>(SelfTy))
     SelfTy = PtrTy->getPointee().get();
@@ -1693,9 +1795,9 @@ bool isCollectionMutatorCall(const MethodCallExprAST &Node) {
   if (!GT)
     return false;
 
-  static const std::unordered_set<std::string> MutatorStructs = {
+  static const std::unordered_set<std::string> CollectionStructs = {
       "List", "Map", "Set", "Stack", "Queue"};
-  return MutatorStructs.count(stripModuleQualifier(GT->getBaseName()));
+  return CollectionStructs.count(stripModuleQualifier(GT->getBaseName()));
 }
 
 // Walks every statement, both TRANSFERRING provenance (VarDecl/plain-
