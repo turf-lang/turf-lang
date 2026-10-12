@@ -359,7 +359,13 @@ request, not a session's own initiative. Full account:
   **MayStack**, flagged like `Stack` at every sink: the path that carries the
   local is a real escape (`p = heap(n); if c { p = &n; } return p;`, or a
   loop that may run zero times). Paths that disagree without a `Stack` stay
-  Unknown, never flagged.
+  Unknown, never flagged. A `defer`'s statement counts where it runs: at
+  every exit of its block (falling off the end, `break`/`continue` for the
+  loop body's blocks, and after a `return`'s value is computed), LIFO, so
+  `p = heap(n); defer p = &n; return p;` is accepted and `p = &n; defer
+  p = heap(n); return p;` is an error. A `defer` nested inside one CFG
+  statement (a `recover run { }` block's) counts as maybe-run from its
+  position on.
 
 ### 6.14 String indexing — FROZEN (FDN-004, 2026-09-28)
 

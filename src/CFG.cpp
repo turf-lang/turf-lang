@@ -485,6 +485,8 @@ std::unique_ptr<CFG> CFGBuilder::buildCFG(const std::string &FunctionName,
   auto CFGPtr = std::make_unique<CFG>(FunctionName, std::move(ReturnType), FuncLoc,
                                       MangledFunctionName);
   CurrentCFG = CFGPtr.get();
+  DeferScopes.clear();
+  LoopDeferDepth = 0;
 
   // Create entry and exit blocks
   TurfBasicBlock *Entry = CurrentCFG->createBlock("entry");
@@ -513,6 +515,9 @@ std::unique_ptr<CFG> CFGBuilder::buildRegionCFG(const std::string &Name,
                                                 ExprAST *Body, SourceLocation Loc) {
   auto CFGPtr = std::make_unique<CFG>(Name, nullptr, Loc, "");
   CurrentCFG = CFGPtr.get();
+  // A region's own `return`/`break` leaves every scope inside it.
+  DeferScopes.clear();
+  LoopDeferDepth = 0;
   TurfBasicBlock *Entry = CurrentCFG->createBlock("entry");
   TurfBasicBlock *Exit = CurrentCFG->createBlock("exit");
   CurrentCFG->setEntryBlock(Entry);
@@ -587,9 +592,24 @@ void CFGBuilder::visitExpr(ExprAST *E) {
   } else if (dynamic_cast<ContinueExprAST *>(E)) {
     visitContinue(E);
   } else {
-    // Regular statement - add to current block
+    // Regular statement - add to current block. A `defer` stays where it is
+    // written for every pass but EscapePass, and its statement is also
+    // recorded to run at each exit of the enclosing scope (owner decision
+    // 2026-10-12: `p = heap(n); defer p = &n; return p;` was a false E086,
+    // the return value being computed before the defer runs).
+    if (auto *D = dynamic_cast<DeferExprAST *>(E))
+      if (!DeferScopes.empty() && D->getStmt())
+        DeferScopes.back().push_back(D->getStmt());
     CurrentBlock->addStatement(E);
   }
+}
+
+void CFGBuilder::emitDeferredRuns(size_t Depth) {
+  if (!CurrentBlock)
+    return;
+  for (size_t S = DeferScopes.size(); S > Depth; --S)
+    for (auto It = DeferScopes[S - 1].rbegin(); It != DeferScopes[S - 1].rend(); ++It)
+      CurrentBlock->addDeferredRun(*It);
 }
 
 void CFGBuilder::visitBlock(ExprAST *E) {
@@ -597,12 +617,17 @@ void CFGBuilder::visitBlock(ExprAST *E) {
   if (!Block)
     return;
 
+  DeferScopes.emplace_back();
   // Visit each statement in the block sequentially
   for (const auto &Expr : Block->getExpressions()) {
     visitExpr(Expr.get());
     // Continue processing all statements - visitExpr will handle unreachable
     // code
   }
+  // Falling off the end of the block runs its defers.
+  if (CurrentBlock && !CurrentBlock->hasExplicitTerminator())
+    emitDeferredRuns(DeferScopes.size() - 1);
+  DeferScopes.pop_back();
 }
 
 void CFGBuilder::visitIf(ExprAST *E) {
@@ -888,7 +913,10 @@ void CFGBuilder::visitWhile(ExprAST *E) {
   // Build body
   setInsertPoint(BodyBB);
   if (While->getBody()) {
+    size_t SavedDeferDepth = LoopDeferDepth;
+    LoopDeferDepth = DeferScopes.size();
     visitExpr(While->getBody());
+    LoopDeferDepth = SavedDeferDepth;
   }
   // Loop back to condition if no explicit terminator
   if (CurrentBlock && !CurrentBlock->hasExplicitTerminator()) {
@@ -933,7 +961,10 @@ void CFGBuilder::visitDoWhile(ExprAST *E) {
   // Build body
   setInsertPoint(BodyBB);
   if (DoWhile->getBody()) {
+    size_t SavedDeferDepth = LoopDeferDepth;
+    LoopDeferDepth = DeferScopes.size();
     visitExpr(DoWhile->getBody());
+    LoopDeferDepth = SavedDeferDepth;
   }
   // Fall through to the condition check if no explicit terminator
   if (CurrentBlock && !CurrentBlock->hasExplicitTerminator()) {
@@ -1006,7 +1037,10 @@ void CFGBuilder::visitFor(ExprAST *E) {
   // Build body
   setInsertPoint(BodyBB);
   if (For->getBody()) {
+    size_t SavedDeferDepth = LoopDeferDepth;
+    LoopDeferDepth = DeferScopes.size();
     visitExpr(For->getBody());
+    LoopDeferDepth = SavedDeferDepth;
   }
   // Fall through to step if no explicit terminator
   if (CurrentBlock && !CurrentBlock->hasExplicitTerminator()) {
@@ -1060,7 +1094,10 @@ void CFGBuilder::visitForEach(ExprAST *E) {
   // Build body
   setInsertPoint(BodyBB);
   if (ForEach->getBody()) {
+    size_t SavedDeferDepth = LoopDeferDepth;
+    LoopDeferDepth = DeferScopes.size();
     visitExpr(ForEach->getBody());
+    LoopDeferDepth = SavedDeferDepth;
   }
   // Fall through to step if no explicit terminator
   if (CurrentBlock && !CurrentBlock->hasExplicitTerminator()) {
@@ -1085,6 +1122,8 @@ void CFGBuilder::visitReturn(ExprAST *E) {
     return;
 
   CurrentBlock->addStatement(Ret);
+  // After the value is computed, every enclosing scope's defers run.
+  emitDeferredRuns(0);
   LastTerminatorLoc = Ret->getLoc();
   CurrentBlock->setTerminator(TerminatorKind::Return, LastTerminatorLoc);
 
@@ -1105,6 +1144,7 @@ void CFGBuilder::visitBreak(ExprAST *E) {
     return;
   }
 
+  emitDeferredRuns(LoopDeferDepth); // the loop body's scopes, then jump
   CurrentBlock->addStatement(Brk);
   LastTerminatorLoc = Brk->getLoc();
   CurrentBlock->setTerminator(TerminatorKind::Break, LastTerminatorLoc);
@@ -1124,6 +1164,7 @@ void CFGBuilder::visitContinue(ExprAST *E) {
     return;
   }
 
+  emitDeferredRuns(LoopDeferDepth);
   CurrentBlock->addStatement(Cont);
   LastTerminatorLoc = Cont->getLoc();
   CurrentBlock->setTerminator(TerminatorKind::Continue, LastTerminatorLoc);

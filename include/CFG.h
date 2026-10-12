@@ -34,6 +34,10 @@ private:
   BlockID ID;       // Unique identifier
   std::string Name; // Human-readable name (e.g., "entry", "if.then")
   std::vector<ExprAST *> Statements; // Statements in this block (non-owning)
+  // Statements plus, interleaved where they run, each `defer`'s statement at
+  // the exits of its scope (CFGBuilder's DeferScopes). Read by EscapePass
+  // only; every other pass still sees a `defer` where it is written.
+  std::vector<ExprAST *> StatementsWithDeferredRuns;
   std::vector<TurfBasicBlock *> Predecessors; // Blocks that can jump here
   std::vector<TurfBasicBlock *> Successors;   // Blocks this can jump to
   TerminatorKind Terminator;                  // How this block ends
@@ -49,6 +53,9 @@ public:
   BlockID getID() const { return ID; }
   const std::string &getName() const { return Name; }
   const std::vector<ExprAST *> &getStatements() const { return Statements; }
+  const std::vector<ExprAST *> &getStatementsWithDeferredRuns() const {
+    return StatementsWithDeferredRuns;
+  }
   const std::vector<TurfBasicBlock *> &getPredecessors() const {
     return Predecessors;
   }
@@ -61,7 +68,12 @@ public:
   bool isEmpty() const { return Statements.empty(); }
   
   // Mutators
-  void addStatement(ExprAST *Stmt) { Statements.push_back(Stmt); }
+  void addStatement(ExprAST *Stmt) {
+    Statements.push_back(Stmt);
+    StatementsWithDeferredRuns.push_back(Stmt);
+  }
+  // A deferred statement running here, at an exit of its scope.
+  void addDeferredRun(ExprAST *Stmt) { StatementsWithDeferredRuns.push_back(Stmt); }
   void addPredecessor(TurfBasicBlock *BB) { Predecessors.push_back(BB); }
   void addSuccessor(TurfBasicBlock *BB) { Successors.push_back(BB); }
   void setTerminator(TerminatorKind Kind, SourceLocation Loc) {
@@ -177,6 +189,13 @@ private:
       *LoopContinueTarget; // Target for 'continue' (innermost loop header)
   TurfBasicBlock *LoopBreakTarget;  // Target for 'break' (innermost loop exit)
   SourceLocation LastTerminatorLoc; // Location of last terminator encountered
+  // One entry per `{ }` being built, innermost last: the statements of the
+  // `defer`s written directly in it, in order. Run (LIFO) at each exit of
+  // that scope -- see emitDeferredRuns().
+  std::vector<std::vector<ExprAST *>> DeferScopes;
+  // DeferScopes.size() at the innermost loop's body: `break`/`continue`
+  // leave the scopes above it.
+  size_t LoopDeferDepth = 0;
 
 public:
   CFGBuilder()
@@ -211,6 +230,10 @@ private:
   void visitCompare(ExprAST *E);
   void visitFor(ExprAST *E);
   void visitForEach(ExprAST *E);
+
+  // Records, in the current block, the deferred statements of every scope
+  // from the innermost down to (not including) depth Depth, LIFO.
+  void emitDeferredRuns(size_t Depth);
 
   // Utility methods
   TurfBasicBlock *createBlock(std::string Name);

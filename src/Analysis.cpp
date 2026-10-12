@@ -1832,6 +1832,8 @@ bool isCollectionCall(const ResolverFunctionSymbol *Target) {
 // branch for `recover`, so `mut v: int = g() recover run { return &local; };`
 // returned a reference to a dead frame and compiled clean (confirmed live).
 // Nodes without a branch below now take the walker's plain recursion.
+ProvMap meetProv(const ProvMap &A, const ProvMap &B);
+
 class EscapeCheckVisitor : public ASTChildWalker {
   ProvMap &Map;
   bool DoReport;
@@ -2069,6 +2071,17 @@ public:
         flagIfStack(A.get(), Node.getLoc(), "pushed into a collection");
     }
   }
+  // A `defer` nested inside one CFG statement (a `recover run { }` block's
+  // own): the CFG does not split that statement, so where the deferred
+  // statement runs is not modelled. Both before and after it are possible
+  // states from here on, merged -- a Stack on either side stays flagged.
+  // A `defer` that is a CFG statement itself never reaches here: EscapePass
+  // runs its statement at the scope's exits instead.
+  void visitDefer(DeferExprAST &Node) override {
+    ProvMap Before = Map;
+    recurse(Node.getStmt());
+    Map = meetProv(Before, Map);
+  }
   void visitPostfixExpr(PostfixExprAST &Node) override { recurse(Node.getOperand()); }
   void visitUnary(UnaryExprAST &Node) override { recurse(Node.getOperand()); }
   void visitTry(TryExprAST &Node) override { recurse(Node.getOperand()); } // LEC-004
@@ -2154,10 +2167,13 @@ void EscapePass::runOnCFG(CFG &Cfg) {
   // returned a reference into a dead frame and compiled clean.
   std::vector<bool> Reached(N, false);
 
+  // A block's statements with each `defer`'s statement where it runs, at the
+  // exits of its scope (CFGBuilder::emitDeferredRuns()); the `defer` itself,
+  // where it is written, does nothing yet.
   auto computeOut = [&](size_t b, bool DoReport) {
     ProvMap Cur = IN[b];
-    for (ExprAST *Stmt : Blocks[b]->getStatements()) {
-      if (!Stmt)
+    for (ExprAST *Stmt : Blocks[b]->getStatementsWithDeferredRuns()) {
+      if (!Stmt || dynamic_cast<DeferExprAST *>(Stmt))
         continue;
       EscapeCheckVisitor V(Cur, DoReport);
       const_cast<ExprAST *>(static_cast<const ExprAST *>(Stmt))->accept(V);
