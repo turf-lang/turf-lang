@@ -110,24 +110,34 @@ fn main(): int {
     l.sort(cmp_int);
     test::assert(l.get(0) == 1 && l.binary_search(2, cmp_int) == 1 && l.find(is_three) == 2, "List.sort / binary_search / find");
     test::assert(l.pop() == 3, "List.pop");
+    mut lc: List<int> = l.copy();
+    lc.push(9);
+    test::assert(lc.length() == 3 && l.length() == 2, "List.copy");
 
     // ── stack ──────────────────────────────────────────────────────────────
     mut s: Stack<int> = Stack::default();
     s.push(1);
     s.push(2);
     test::assert(s.peek() == 2 && s.length() == 2 && s.pop() == 2, "Stack.push / peek / length / pop");
+    mut sc: Stack<int> = s.copy();
+    test::assert(sc.pop() == 1 && s.length() == 1, "Stack.copy");
 
     // ── queue ──────────────────────────────────────────────────────────────
     mut q: Queue<int> = Queue::default();
     q.enqueue(1);
     q.enqueue(2);
     test::assert(q.peek() == 1 && q.length() == 2 && q.dequeue() == 1, "Queue.enqueue / peek / length / dequeue");
+    mut qc: Queue<int> = q.copy();
+    test::assert(qc.dequeue() == 2 && q.length() == 1, "Queue.copy");
 
     // ── set ────────────────────────────────────────────────────────────────
     mut st: Set<int> = Set::default();
     st.add(5);
     st.add(6);
     test::assert(st.contains(5) && st.index_of(6) == 1 && st.length() == 2 && st.remove(5), "Set.add / contains / index_of / length / remove");
+    mut stc: Set<int> = st.copy();
+    stc.add(7);
+    test::assert(stc.length() == 2 && st.length() == 1, "Set.copy");
 
     // ── map ────────────────────────────────────────────────────────────────
     mut m: Map<string, int> = Map::default();
@@ -140,6 +150,9 @@ fn main(): int {
     test::assert(m.keys().length() == 2 && m.values().length() == 2, "Map.keys / values");
     m.remove("a");
     test::assert(m.length() == 1, "Map.remove");
+    mut mc: Map<string, int> = m.copy();
+    mc.put("c", 3);
+    test::assert(mc.length() == 2 && m.length() == 1 && mc.get("b") == 2, "Map.copy");
 
     return 0;
 }

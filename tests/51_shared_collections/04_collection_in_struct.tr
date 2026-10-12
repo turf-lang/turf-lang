@@ -1,0 +1,45 @@
+// LEC-009 (F-COLL-1): a struct holding a collection is copied by value, but
+// the collection inside is a handle, so both copies of the struct name the
+// same collection. `S::default()` gives the field its own empty collection
+// (F-COLL-2), so even a struct that was never pushed to shares correctly.
+import list::List;
+import map::Map;
+import test;
+
+struct Registry {
+    names: List<string>,
+    ids: Map<string, int>,
+    count: int
+}
+
+fn register(r: Registry, name: string): void {
+    r.ids.put(name, r.names.length());
+    r.names.push(name);
+    r.count = r.count + 1;
+}
+
+fn main(): int {
+    mut r: Registry = Registry::default();
+    register(r, "a");
+    register(r, "b");
+    test::assert(r.names.length() == 2 && r.ids.get("b") == 1, "callee changes the shared collections");
+    test::assert(r.count == 0, "the int field is still a copy");
+
+    mut other: Registry = Registry::default();
+    test::assert(other.names.length() == 0, "a second default has its own list");
+
+    // Independent copy of the struct's contents.
+    mut snapshot: Registry = Registry::default();
+    snapshot.names = r.names.copy();
+    r.names.push("c");
+    test::assert(snapshot.names.length() == 2 && r.names.length() == 3, "copy() of a field");
+
+    // Lists of lists: an element is a handle too.
+    mut grid: List<List<int>> = List::default();
+    mut row: List<int> = List::default();
+    grid.push(row);
+    grid[0].push(4);
+    test::assert(grid[0].length() == 1 && grid[0][0] == 4, "grid[0].push lands");
+    test::assert(row.length() == 1, "the pushed row is the same list");
+    return 0;
+}

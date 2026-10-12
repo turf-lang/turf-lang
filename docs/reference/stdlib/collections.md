@@ -18,6 +18,49 @@ List<int>;` with no initializer no longer works, since SEM-004 removed the
 old eager-zero-init mechanism that used to make it equivalent — see
 `docs/reference/variables_and_types.md`'s initialization chapter.)
 
+## Shared by default, copied on demand
+
+A collection value is a **handle** to one collection (FREEZE F-COLL-1). `=`,
+passing it to a function, returning it, and storing it in a field or in another
+collection all share that one collection, its length included. `.copy()` gives
+you an independent one.
+
+```turflang
+import list::List;
+import test;
+
+fn fill(l: List<int>): void {
+    l.push(1);   // the caller's list grows
+}
+
+fn main(): int {
+    mut l: List<int> = List::default();
+    fill(l);
+    mut m: List<int> = l;     // same list, two names
+    m.push(2);
+    test::assert(l.length() == 2, "m and l are one list");
+
+    mut c: List<int> = l.copy();   // a new list with the same elements
+    c.push(3);
+    test::assert(l.length() == 2 && c.length() == 3, "the copy is independent");
+    return 0;
+}
+```
+
+The same holds for `Stack`, `Queue`, `Set` and `Map`, and for every collection
+added later. A struct holding a collection is still copied field by field, so
+both copies of the struct name the same collection; copy the field with
+`.copy()` when you want them apart. `copy()` copies the elements as values: a
+`List<&Node>` copy holds the same nodes.
+
+How it works: each type is one private field, `h`, a `&` reference to a header
+on the GC heap that holds the storage and the counts. `List::default()` gives
+that field a fresh header (a `&U` field's default is a new `U::default()`,
+F-COLL-2), so even an empty list is shared from the start. Before this rule
+(LEC-009, 2.0) a collection was the header itself, copied by value: copies
+shared the element buffer but not the length, so a callee's `push` was lost
+and a copy's `push` could overwrite an element the original still counted.
+
 ## Shared design: real per-instantiation storage, real growth
 
 Every collection in this module — `List<T>`, `Stack<T>`, `Queue<T>`, `Map<K,
@@ -51,12 +94,19 @@ before this group too, just for a different underlying reason now).
 
 ## `List<T>` (`collections/list.tr`)
 
+<!-- doc-example: skip private layout, not a program -->
 ```turflang
-struct List<T> { data: T*, len: int, cap: int }
+struct ListHeader<T> { data: T*, len: int, cap: int }   // private
+pub struct List<T> { h: &ListHeader<T> }                // h is private
 ```
 
 A dynamically-growing array — the general-purpose sequence type. Internally
 `import sys;`.
+
+### `List.copy(): List<T>`
+
+A new, independent list with the same elements in the same order (see
+[Shared by default](#shared-by-default-copied-on-demand)).
 
 ### `List.push(item: T): void`
 
@@ -94,7 +144,7 @@ array: `l[-1]` is the last element, and the valid range is `-len <= i < len`
 (`l[-len - 1]` panics; it does not wrap twice). `l.get(i)` / `l.set(i, v)` are
 the same operations as named methods, **except** that they take only
 `0 <= i < len`: a negative index to `get`/`set` panics. Indexing a `List<T>`
-is never `unsafe`; the raw `l.data[i]` is, and is unchecked.
+is never `unsafe`, and the raw storage is private to `list.tr`.
 
 ```turflang
 mut l: List<int> = List::default();
@@ -111,8 +161,10 @@ test::assert(names[0] == "grace", "");
 
 `l[i]` yields the element **by value**, so `l[i].field` and `l[i].method()`
 read through it (for a struct element of any size), but you cannot assign
-into a field of it (`l[i].f = v`), or call a method that changes it
-(`outer[i].push(v)`) — those are E098; `grid[i][j] = v` is fine. See
+into a field of a struct element (`l[i].f = v`), or call a method that
+assigns to one (`l[i].bump()`) — those are E098. A collection element is a
+handle, so `grid[i][j] = v` and `outer[i].push(v)` change the inner
+collection itself and are fine. See
 [Generics and Operators](../generics_and_operators.md#gotcha-xi-is-a-value-not-a-place-e098).
 
 ### `List.sort(cmp: fn(T, T): int): void` / `List.binary_search(target: T, cmp: fn(T, T): int): int` / `List.find(predicate: fn(T): bool): int`
@@ -158,12 +210,18 @@ test::assert(nums.find(isEven) >= 0, "found an even number");
 
 ## `Stack<T>` (`collections/stack.tr`)
 
+<!-- doc-example: skip private layout, not a program -->
 ```turflang
-struct Stack<T> { data: T*, len: int, cap: int }
+struct StackHeader<T> { data: T*, len: int, cap: int }   // private
+pub struct Stack<T> { h: &StackHeader<T> }               // h is private
 ```
 
 LIFO. Structurally identical growth logic to `List<T>` — same
 doubling-from-8 scheme, same real per-instantiation element sizes.
+
+### `Stack.copy(): Stack<T>`
+
+A new, independent stack with the same elements in the same order.
 
 ### `Stack.push(item: T): void`
 
@@ -198,12 +256,19 @@ Current element count.
 
 ## `Queue<T>` (`collections/queue.tr`)
 
+<!-- doc-example: skip private layout, not a program -->
 ```turflang
-struct Queue<T> { data: T*, len: int, cap: int, head: int }
+struct QueueHeader<T> { data: T*, len: int, cap: int, head: int }   // private
+pub struct Queue<T> { h: &QueueHeader<T> }                          // h is private
 ```
 
 FIFO, implemented as a dynamic array plus a `head` offset — **not** a ring
 buffer.
+
+### `Queue.copy(): Queue<T>`
+
+A new, independent queue holding the waiting elements in the same order (the
+copy starts at its own `head` 0).
 
 `enqueue` appends at `data[head + len]`. When the buffer is exhausted
 (`head + len == cap`):
@@ -253,8 +318,10 @@ Current element count (`self.len` — not `cap`, and not `head + len`).
 
 ## `Map<K, V>` (`collections/map.tr`)
 
+<!-- doc-example: skip private layout, not a program -->
 ```turflang
-struct Map<K, V> { keys: K*, values: V*, len: int, cap: int, buckets: int*, bcap: int }
+struct MapHeader<K, V> { keys: K*, values: V*, len: int, cap: int, buckets: int*, bcap: int }   // private
+pub struct Map<K, V> { h: &MapHeader<K, V> }                                                     // h is private
 ```
 
 Every field above is **private** (LEC-002) — the layout is described here for
@@ -385,6 +452,11 @@ test::assert(m.contains("b") == false, "");
 
 Current key/value pair count.
 
+### `Map.copy(): Map<K, V>`
+
+A new, independent map with the same entries in the same dense order, so
+`m.copy().keys()` lists what `m.keys()` lists until either map changes.
+
 ### `Map.keys(): List<K>` / `Map.values(): List<V>`
 
 How to iterate a map (2.0). The storage (`keys`, `values`, the hash index) is
@@ -422,8 +494,10 @@ test::assert(m["k"][0] == 10, "");
 
 ## `Set<T>` (`collections/set.tr`)
 
+<!-- doc-example: skip private layout, not a program -->
 ```turflang
-struct Set<T> { items: T*, len: int, cap: int, buckets: int*, bcap: int }
+struct SetHeader<T> { items: T*, len: int, cap: int, buckets: int*, bcap: int }   // private
+pub struct Set<T> { h: &SetHeader<T> }                                            // h is private
 ```
 
 Same underlying design as `Map<K, V>` — a real hash-index lookup layered
@@ -444,6 +518,10 @@ average-removal/insertion-order-breaking tradeoff as `Map.remove` above).
 Returns whether it was actually present and removed.
 
 ### `Set.length(): int`
+
+### `Set.copy(): Set<T>`
+
+A new, independent set with the same members in the same order.
 
 ```turflang
 import set::Set;

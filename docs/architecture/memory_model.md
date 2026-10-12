@@ -41,7 +41,7 @@ Related docs:
 | Struct (local, or via `::new`/`::default`) | Stack, at the point of construction | Copied on assignment/pass/return | Automatic, *if* it never leaves the stack — see §1.5 |
 | `ptr` / `T*` (raw pointer) | Wherever it was given — usually the manual heap, via `mem::alloc`/`malloc` | Aliased | **You.** Manual `mem::free`/`free`, or nothing |
 | `&T` (safe reference) | Same representation as `T*` | Aliased | Same as `T*` — the only difference is a compile-time non-null guarantee, not a lifetime guarantee (see `pointers_and_references.md`) |
-| `List<T>`/`Stack<T>`/`Queue<T>`/`Map<K,V>`'s backing buffer | **GC heap** | Aliased, grown via `gc_realloc` | **The collector** (MEM-002) |
+| `List<T>`/`Stack<T>`/`Queue<T>`/`Set<T>`/`Map<K,V>`: the value is a one-pointer handle; its header and backing buffer(s) | Handle: wherever the variable is. Header and buffers: **GC heap** | Aliased: `=`/pass/return share one collection, `.copy()` is independent (LEC-009, F-COLL-1) | **The collector** (MEM-002) |
 | `mem::Pool<T>`'s backing buffer | Manual heap | Aliased, grown via `realloc` | **You**, via `mem::free_pool()` — deliberately NOT collected, see §1.7 |
 
 The one-sentence version of Turflang's safety story, as of **MEM-002**
@@ -679,10 +679,14 @@ level, the identical shape:
 
 ```turf
 // lib/std/collections/list.tr
-struct List<T> {
+struct ListHeader<T> {
   data: T*,
   len: int,
   cap: int
+}
+
+pub struct List<T> {
+  h: &ListHeader<T>
 }
 ```
 
@@ -690,10 +694,16 @@ struct List<T> {
 bare intrinsics exactly like a hand-written dynamic array in C (`list.tr`'s
 `List.push`: doubling growth starting at capacity 8) — `Stack<T>`/
 `Queue<T>`/`Set<T>`/`Map<K,V>` (the last with *two* backing arrays,
-`keys`/`values`) all follow the identical pattern. The **struct itself** —
-the small, fixed header — lives wherever the collection variable holding
-it lives (stack, by default, per §1.5); only the buffer(s) it points at
-are ever on the GC heap.
+`keys`/`values`) all follow the identical pattern. The **`List` value** is
+one pointer, `h`, and lives wherever the collection variable holding it
+lives (stack, by default, per §1.5). The **header** it points at is a
+GC-heap block allocated by `List::default()` (a `&U` field's default is a
+fresh `heap(U::default())`, FREEZE F-COLL-2, `EmitDefaultValue()` in
+`CodegenCore.cpp`), traced through its descriptor like any `heap()` value,
+and it holds the pointer to the buffer. So copying a `List` copies one
+pointer and both copies name one collection (F-COLL-1, LEC-009). Before
+LEC-009 the `List` *was* the header, copied by value: the buffer was shared,
+`len`/`cap` were not.
 
 **The collector, in outline** (`runtime/turfrt_gc.c`; full design in
 `docs/development/changes/MEM-002.md`): a **block table** records every

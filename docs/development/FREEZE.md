@@ -136,6 +136,8 @@ otherwise each answer differently, producing an incoherent language.
 - Struct *fields* are not subject to definite assignment; a struct value is
   either fully constructed (`::new` — already checked by
   `ConstructorFieldAssignmentPass`) or fully defaulted (`::default`).
+  Fully defaulted means a non-null `&U` field points at a fresh `U::default()`
+  (§6.27, F-COLL-2, 2026-10-12), not at null.
 
 ### 6.5 Memory model — FROZEN
 
@@ -839,12 +841,13 @@ changes. Full account: `docs/development/changes/LEC-006.md`.
   that copy, or `self` of a method that assigns to it, would be silently lost,
   so it is rejected: `bs[0].a = v`, `bs[0].a += v`, `bs[0].a++`,
   `bs[0].bump()` (a method that assigns to `self`, directly or through a chain
-  of `self.m()` calls), `outer[0].push(v)`, and a `[]=`
+  of `self.m()` calls), and a `[]=`
   whose container is declared `&T` applied to another `[]`'s result
   (`mm["a"]["b"] = v`). It stops at a pointer or reference: an element that is
-  `&T`/`T*` is written through. `grid[i][j] = v` for a `List` is allowed — its
-  `[]=` takes the header by value and stores through the shared buffer, which
-  writes no field of the copy. The same rule C# calls CS1612 and Go applies to a
+  `&T`/`T*` is written through. `grid[i][j] = v` and `outer[0].push(v)` for a
+  `List` are allowed: a collection is a handle (§6.27, F-COLL-1, 2026-10-12;
+  `outer[0].push(v)` was rejected here until then), so its methods and `[]=`
+  write the shared header, not a field of the copy. The same rule C# calls CS1612 and Go applies to a
   struct in a map. Index operators that yield a place (Rust's `IndexMut`) are out
   of scope: they conflict with F-MEM-5 and need their own design.
 - **Excluded:** explicit type arguments at a use, generic arithmetic on types
@@ -1172,6 +1175,38 @@ embedded lld, bundled C runtime) is REL-008, not this section.
   single-sourcing item for the archive name; the README's version line and
   `turf`'s own constant (independent by F-PKG-1) are still checked by hand.
 
+### 6.27 Collections are shared, copied on demand — FROZEN (owner decision, 2026-10-12)
+
+Recorded on the project owner's explicit decision (2026-10-12: "every collection
+type, present and future, is shared by default, copied on demand"), and their
+choice, the same day, of how a fresh collection gets its one header (F-COLL-2,
+over rejecting `::default()` for such types or allocating the header lazily).
+§6.0 rule 3's explicit request. Account: `docs/development/changes/LEC-009.md`.
+Found by turf-fuzz's typed generator: a `List` was `{data, len, cap}` copied by
+value, so a copy shared the buffer but not the length.
+
+- **A collection value is a handle (F-COLL-1).** A `List`, `Stack`, `Queue`,
+  `Set` or `Map` value names one collection. `=`, passing as an argument,
+  returning, storing in a field or in another collection all share it, length
+  included: after `m = l; m.push(7)`, `l.length()` has grown too, and a
+  callee's `push` is visible to its caller. `.copy()` gives an independent
+  collection with the same elements (copied as values) in the same order.
+  Every collection type added to `lib/std` later follows the same rule and has
+  a `copy()`. A struct that holds a collection is still copied by value, and the
+  copy names the same collection.
+- **`T::default()` gives a `&U` field a fresh `U::default()` (F-COLL-2).** A
+  non-null `&U` field reachable by value from `T` (directly, through by-value
+  struct fields, or in a fixed array's elements) is set to a new GC-heap
+  `heap(U::default())`, one per field and element; its own fields follow the
+  same rule. This is what gives a collection its header at creation, so even an
+  empty collection is shared, with no compiler knowledge of collections (B3).
+  It also closes a hole: the zero-filled `&U` used to be null, and reading
+  through it segfaulted in safe code. A type that reaches itself again through
+  `&` fields has no finite default: `T::default()` is E147
+  `DefaultThroughReferenceCycleError`, whose hint offers `&?U` (defaults to
+  null) or `::new`. Declarations without an initializer are unchanged: their
+  storage is zero-filled and definite assignment (F-INIT-1/2) forbids reading it.
+
 ---
 
 ## Appendix — frozen-decision IDs
@@ -1256,6 +1291,8 @@ Overhaul (F-TYPE-1), whose third column points at their section above.
 | **F-FMT-1** | `turfc --format` verifies every result before writing or reporting it: only whitespace changed, the lexer reads the same tokens, formatting again changes nothing; a result that fails is not written. | §6.23 above |
 | **F-FMT-2** | A source with a lexical error is not formatted: reported with the lexer's reason, left unchanged, exit 1 if the user named it, the rest of the batch still done. A file only found under a directory is skipped (listed, counted, not a failure). | §6.23 above (owner decision 2026-10-06) |
 | **F-FMT-3** | `turfc --format` modes: stdout (one file), `--write` (only files that differ), `--check` (names what would change, exit 1 if any); `--write` with `--check` is a usage error. | §6.23 above |
+| **F-COLL-1** | A collection value (`List`, `Stack`, `Queue`, `Set`, `Map`, and any later one) is a handle to one collection: `=`, passing, returning and storing share it, length included; `.copy()` gives an independent one. | §6.27 above (owner decision 2026-10-12) |
+| **F-COLL-2** | `T::default()` sets every non-null `&U` field reachable by value to a fresh `heap(U::default())`; a type that reaches itself through `&` fields has no default (E147). | §6.27 above (owner decision 2026-10-12) |
 
 ---
 

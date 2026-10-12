@@ -1,7 +1,7 @@
 # Conformance items: one row per frozen decision
 
 `docs/development/FREEZE.md`'s appendix is the specification of the 2.0 language:
-72 numbered decisions, `F-GEN-1` to `F-FMT-3`. This file says, for each one,
+74 numbered decisions, `F-GEN-1` to `F-COLL-2`. This file says, for each one,
 which tests and scripts show it holds. `tests/CONFORMANCE.md` maps *areas* to
 folders; this maps *rules* to evidence, which is the question a conformance
 suite has to answer: "this sentence of the spec: where is it checked?"
@@ -106,3 +106,5 @@ Read the Note, then the test.
 | **F-FMT-1** | S | `scripts/fmt_smoke.sh` | — | Every result is verified before it is written. |
 | **F-FMT-2** | S | `scripts/fmt_smoke.sh` | — | A lexical error is reported, left unchanged, and the batch continues. |
 | **F-FMT-3** | S | `scripts/fmt_smoke.sh` | — | stdout / `--write` / `--check`. |
+| **F-COLL-1** | PN | `tests/51_shared_collections/01_list_shared_and_copy.tr`, `tests/51_shared_collections/02_stack_queue_shared_and_copy.tr`, `tests/51_shared_collections/03_set_map_shared_and_copy.tr`, `tests/51_shared_collections/04_collection_in_struct.tr`, `tests/41_gc/14_shared_collection_header_survives_collection.tr` | `tests/07_functions_modules/visibility/fail_private_stdlib_list_data.tr` | `=`, passing and storing share one header; `.copy()` is independent; the header is private. |
+| **F-COLL-2** | PN | `tests/10_default_init/18_reference_field_default.tr`, `tests/38_monomorphization/15_generic_struct_field_only.tr` | `tests/10_default_init/fail_default_reference_cycle.tr`, `tests/10_default_init/fail_default_reference_cycle_through_value.tr` | A `&U` field defaults to a fresh `U::default()`; a cycle through `&` is E147. |

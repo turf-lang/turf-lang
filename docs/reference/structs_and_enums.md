@@ -155,13 +155,34 @@ A constructor may also validate or transform its inputs rather than just
 copy them straight into fields — it's an ordinary function body.
 
 **`StructName::default()`** is always available for every struct, is
-compiler-synthesized, takes no arguments, and recursively zero-initializes
-every field (including nested struct fields). It can never be manually
-declared, and it never takes arguments — both are compile errors.
+compiler-synthesized, takes no arguments, and recursively defaults every
+field (including nested struct fields and array elements): numbers are 0,
+strings `""`, a `&?T` null. It can never be manually declared, and it never
+takes arguments — both are compile errors.
 
 ```turflang
-mut u2: User = User::default(); // age == 0, name == "" (or null, for strings)
+mut u2: User = User::default(); // age == 0, name == ""
 ```
+
+A `&T` field cannot be null, so its default is a new `T::default()` on the
+heap, one per field (FREEZE F-COLL-2). Two copies of the struct then point at
+the same `T`, which is how a collection field is shared:
+
+```turflang
+struct Counter { n: int }
+struct Holder { c: &Counter }
+
+fn main(): int {
+    mut a: Holder = Holder::default();   // a.c points at a fresh Counter
+    mut b: Holder = a;
+    b.c.n = 5;
+    return a.c.n;                        // 5: one Counter
+}
+```
+
+A type that leads back to itself through `&` fields (`struct Node { next:
+&Node }`) has no default, since each value would need another one: that is
+**E147**. Make a field on the cycle `&?Node`, or construct with `::new(...)`.
 
 If a struct declares no `.new` method, `::new(...)` is simply not available
 for it — `::default()` remains the only construction path.

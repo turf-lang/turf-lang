@@ -3,8 +3,12 @@ unsafe module;
 // Queue<T> — FIFO (First In, First Out) collection.
 // Usage:
 //   import queue::Queue;   // (or `import queue;` + spell it `queue::Queue<int>` below)
-//   mut q: Queue<int>;   // default-initialized -- no need to write out the fields
-//   q.enqueue(1)  q.dequeue()  q.peek()  q.length()
+//   mut q: Queue<int> = Queue::default();
+//   q.enqueue(1)  q.dequeue()  q.peek()  q.length()  q.copy()
+//
+// Shared by default, copied on demand (LEC-009, FREEZE.md §6.27): a
+// `Queue<T>` is a handle to one `QueueHeader<T>`, so `=` and passing share it
+// and `copy()` gives an independent queue. See list.tr's header.
 //
 // Implementation: dynamic array with a head offset.
 //   - enqueue appends at data[head + len]
@@ -23,23 +27,27 @@ unsafe module;
 
 import sys;
 
-pub struct Queue<T> {
+struct QueueHeader<T> {
     data: T*,
     len: int,
     cap: int,
     head: int
 }
 
+pub struct Queue<T> {
+    h: &QueueHeader<T>
+}
+
 pub fn<T> Queue.enqueue(item: T): void {
-    if (self.head + self.len == self.cap) {
-        if (self.head > 0) {
+    if (self.h.head + self.h.len == self.h.cap) {
+        if (self.h.head > 0) {
             // Compact: shift live elements to the front of the buffer
             mut i: int = 0;
-            while i < self.len {
-                self.data[i] = self.data[self.head + i];
+            while i < self.h.len {
+                self.h.data[i] = self.h.data[self.h.head + i];
                 i = i + 1;
             }
-            self.head = 0;
+            self.h.head = 0;
         } else {
             // Buffer is full and already at front — grow it.
             // TYPE-002 (S15/D3): was `self.cap * 8` under Type Erasure -- wrong
@@ -47,41 +55,52 @@ pub fn<T> Queue.enqueue(item: T): void {
             // silently overran it a few enqueues later. sizeof(T) is correct per
             // instantiation (monomorphized, TYPE-002) -- see list.tr's identical
             // fix, S14b, for the first instance of this.
-            if (self.cap == 0) {
-                self.cap = 8;
-                self.data = gc_alloc(self.cap * sizeof(T)) to T*;
+            if (self.h.cap == 0) {
+                self.h.cap = 8;
+                self.h.data = gc_alloc(self.h.cap * sizeof(T)) to T*;
             } else {
-                self.cap = self.cap * 2;
-                self.data = gc_realloc(self.data, self.cap * sizeof(T)) to T*;
+                self.h.cap = self.h.cap * 2;
+                self.h.data = gc_realloc(self.h.data, self.h.cap * sizeof(T)) to T*;
             }
         }
     }
 
-    self.data[self.head + self.len] = item;
-    self.len = self.len + 1;
+    self.h.data[self.h.head + self.h.len] = item;
+    self.h.len = self.h.len + 1;
 }
 
 @caller_location
 pub fn<T> Queue.dequeue(): T {
-    if (self.len == 0) {
+    if (self.h.len == 0) {
         sys::panic(caller_location + ": Queue.dequeue: dequeue on empty queue");
     }
 
-    immutable item: T = self.data[self.head];
-    self.head = self.head + 1;
-    self.len = self.len - 1;
+    immutable item: T = self.h.data[self.h.head];
+    self.h.head = self.h.head + 1;
+    self.h.len = self.h.len - 1;
     return item;
 }
 
 @caller_location
 pub fn<T> Queue.peek(): T {
-    if (self.len == 0) {
+    if (self.h.len == 0) {
         sys::panic(caller_location + ": Queue.peek: peek on empty queue");
     }
 
-    return self.data[self.head];
+    return self.h.data[self.h.head];
 }
 
 pub fn<T> Queue.length(): int {
-    return self.len;
+    return self.h.len;
+}
+
+// An independent queue with the same elements in the same order (F-COLL-1).
+pub fn<T> Queue.copy(): Queue<T> {
+    mut out: Queue<T> = Queue::default();
+    mut i: int = 0;
+    while i < self.h.len {
+        out.enqueue(self.h.data[self.h.head + i]);
+        i = i + 1;
+    }
+    return out;
 }

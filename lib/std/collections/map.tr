@@ -11,6 +11,13 @@ unsafe module;
 //   mut n: int = m.length();         // 2
 //   mut y: int = m.try_get("z") recover produce -1; // -1, no abort
 //
+// Shared by default, copied on demand (LEC-009, FREEZE.md §6.27): a
+// `Map<K, V>` is a handle to one `MapHeader<K, V>`, so `=` and passing share
+// it and `copy()` gives an independent map. Before LEC-009 a by-value copy
+// shared `keys`/`values`/`buckets` but not `len`/`bcap`, so a `put` through
+// one copy could rehash the buckets under the other's stale count. See
+// list.tr's header.
+//
 // Design (STD-003, ARCHITECTURE_OVERHAUL.md §8, item 6 -- rewritten from
 // the pre-TYPE-002 linear-scan version this file used to be):
 //   - Storage is still the two parallel, DENSE, insertion-ordered arrays
@@ -83,13 +90,17 @@ import sys;
 import hashing;
 import list::List;
 
-pub struct Map<K, V> {
+struct MapHeader<K, V> {
     keys: K*,
     values: V*,
     len: int,
     cap: int,
     buckets: int*,
     bcap: int
+}
+
+pub struct Map<K, V> {
+    h: &MapHeader<K, V>
 }
 
 // ─── hash index (internal) ──────────────────────────────────────────────
@@ -100,20 +111,20 @@ pub struct Map<K, V> {
 // every occupied-then-removed slot leaves a TOMBSTONE, not an EMPTY, so a
 // real probe chain is never broken by a deletion elsewhere on it).
 fn<K, V> Map.bucketFind(key: K): int {
-    if (self.bcap == 0) {
+    if (self.h.bcap == 0) {
         return -1;
     }
-    mut slot: int = hashing::hash(key) & (self.bcap - 1);
+    mut slot: int = hashing::hash(key) & (self.h.bcap - 1);
     mut probes: int = 0;
-    while probes < self.bcap {
-        immutable b: int = self.buckets[slot];
+    while probes < self.h.bcap {
+        immutable b: int = self.h.buckets[slot];
         if (b == -1) {
             return -1;
         }
-        if (b != -2 && self.keys[b] == key) {
+        if (b != -2 && self.h.keys[b] == key) {
             return slot;
         }
-        slot = (slot + 1) & (self.bcap - 1);
+        slot = (slot + 1) & (self.h.bcap - 1);
         probes = probes + 1;
     }
     return -1;
@@ -123,14 +134,14 @@ fn<K, V> Map.bucketFind(key: K): int {
 // TOMBSTONE slot along the probe chain, preferring the FIRST tombstone
 // seen (keeps probe chains from growing unboundedly long as churn
 // accumulates tombstones). Caller must already know `key` isn't present
-// (a fresh `bucketFind()` returned -1) and that `self.bcap > 0`
+// (a fresh `bucketFind()` returned -1) and that `self.h.bcap > 0`
 // (`bucketMaybeGrow()` runs first in every caller below).
 fn<K, V> Map.bucketInsertSlot(key: K): int {
-    mut slot: int = hashing::hash(key) & (self.bcap - 1);
+    mut slot: int = hashing::hash(key) & (self.h.bcap - 1);
     mut tomb: int = -1;
     mut probes: int = 0;
-    while probes < self.bcap {
-        immutable b: int = self.buckets[slot];
+    while probes < self.h.bcap {
+        immutable b: int = self.h.buckets[slot];
         if (b == -1) {
             if (tomb >= 0) {
                 return tomb;
@@ -140,7 +151,7 @@ fn<K, V> Map.bucketInsertSlot(key: K): int {
         if (b == -2 && tomb < 0) {
             tomb = slot;
         }
-        slot = (slot + 1) & (self.bcap - 1);
+        slot = (slot + 1) & (self.h.bcap - 1);
         probes = probes + 1;
     }
     return tomb;
@@ -152,18 +163,18 @@ fn<K, V> Map.bucketInsertSlot(key: K): int {
 // `hash(key) & (bcap - 1)`, which changes the moment `bcap` does, so every
 // entry must be re-probed into its new home slot, not merely copied.
 fn<K, V> Map.bucketRehash(newBcap: int): void {
-    self.buckets = gc_alloc(newBcap * sizeof(int)) to int*;
+    self.h.buckets = gc_alloc(newBcap * sizeof(int)) to int*;
     mut z: int = 0;
     while z < newBcap {
-        self.buckets[z] = -1;
+        self.h.buckets[z] = -1;
         z = z + 1;
     }
-    self.bcap = newBcap;
+    self.h.bcap = newBcap;
 
     mut i: int = 0;
-    while i < self.len {
-        immutable slot: int = self.bucketInsertSlot(self.keys[i]);
-        self.buckets[slot] = i;
+    while i < self.h.len {
+        immutable slot: int = self.bucketInsertSlot(self.h.keys[i]);
+        self.h.buckets[slot] = i;
         i = i + 1;
     }
 }
@@ -171,12 +182,12 @@ fn<K, V> Map.bucketRehash(newBcap: int): void {
 // Grows the bucket index once occupancy would exceed a 70% load factor (or
 // on first use).
 fn<K, V> Map.bucketMaybeGrow(): void {
-    if (self.bcap == 0) {
+    if (self.h.bcap == 0) {
         self.bucketRehash(8);
         return;
     }
-    if ((self.len + 1) * 10 >= self.bcap * 7) {
-        self.bucketRehash(self.bcap * 2);
+    if ((self.h.len + 1) * 10 >= self.h.bcap * 7) {
+        self.bucketRehash(self.h.bcap * 2);
     }
 }
 
@@ -189,7 +200,7 @@ pub fn<K, V> Map.index_of(key: K): int {
     if (slot < 0) {
         return -1;
     }
-    return self.buckets[slot];
+    return self.h.buckets[slot];
 }
 
 pub fn<K, V> Map.contains(key: K): bool {
@@ -199,37 +210,37 @@ pub fn<K, V> Map.contains(key: K): bool {
 pub fn<K, V> Map.put(key: K, value: V): void {
     immutable existingSlot: int = self.bucketFind(key);
     if (existingSlot >= 0) {
-        self.values[self.buckets[existingSlot]] = value;
+        self.h.values[self.h.buckets[existingSlot]] = value;
         return;
     }
 
-    if (self.len == self.cap) {
-        if (self.cap == 0) {
-            self.cap = 8;
+    if (self.h.len == self.h.cap) {
+        if (self.h.cap == 0) {
+            self.h.cap = 8;
         } else {
-            self.cap = self.cap * 2;
+            self.h.cap = self.h.cap * 2;
         }
 
         // TYPE-002 (S15/D3): real per-instantiation byte sizes -- see
         // list.tr's identical fix for the first instance of this class of fix.
-        immutable keyByteSize: int = self.cap * sizeof(K);
-        immutable valueByteSize: int = self.cap * sizeof(V);
+        immutable keyByteSize: int = self.h.cap * sizeof(K);
+        immutable valueByteSize: int = self.h.cap * sizeof(V);
 
-        if (self.keys == null) {
-            self.keys = gc_alloc(keyByteSize) to K*;
-            self.values = gc_alloc(valueByteSize) to V*;
+        if (self.h.keys == null) {
+            self.h.keys = gc_alloc(keyByteSize) to K*;
+            self.h.values = gc_alloc(valueByteSize) to V*;
         } else {
-            self.keys = gc_realloc(self.keys, keyByteSize) to K*;
-            self.values = gc_realloc(self.values, valueByteSize) to V*;
+            self.h.keys = gc_realloc(self.h.keys, keyByteSize) to K*;
+            self.h.values = gc_realloc(self.h.values, valueByteSize) to V*;
         }
     }
     self.bucketMaybeGrow();
 
     immutable insertSlot: int = self.bucketInsertSlot(key);
-    self.buckets[insertSlot] = self.len;
-    self.keys[self.len] = key;
-    self.values[self.len] = value;
-    self.len = self.len + 1;
+    self.h.buckets[insertSlot] = self.h.len;
+    self.h.keys[self.h.len] = key;
+    self.h.values[self.h.len] = value;
+    self.h.len = self.h.len + 1;
 }
 
 @caller_location
@@ -238,7 +249,7 @@ pub fn<K, V> Map.get(key: K): V {
     if (idx < 0) {
         sys::panic(caller_location + ": Map.get: no such key");
     }
-    return self.values[idx];
+    return self.h.values[idx];
 }
 
 // Recoverable alternative to get() (docs/planning/Errors.md): a missing key
@@ -257,7 +268,7 @@ pub fn<K, V> Map.try_get(key: K): !V {
     if (idx < 0) {
         return MapError::KeyNotFound;
     }
-    return self.values[idx];
+    return self.h.values[idx];
 }
 
 // Removal: tombstone the key's bucket entry, then swap-with-last on the
@@ -272,22 +283,35 @@ pub fn<K, V> Map.remove(key: K): void {
     if (bslot < 0) {
         return;
     }
-    immutable idx: int = self.buckets[bslot];
-    self.buckets[bslot] = -2;
+    immutable idx: int = self.h.buckets[bslot];
+    self.h.buckets[bslot] = -2;
 
-    self.len = self.len - 1;
-    if (idx != self.len) {
-        immutable movedSlot: int = self.bucketFind(self.keys[self.len]);
+    self.h.len = self.h.len - 1;
+    if (idx != self.h.len) {
+        immutable movedSlot: int = self.bucketFind(self.h.keys[self.h.len]);
         if (movedSlot >= 0) {
-            self.buckets[movedSlot] = idx;
+            self.h.buckets[movedSlot] = idx;
         }
-        self.keys[idx] = self.keys[self.len];
-        self.values[idx] = self.values[self.len];
+        self.h.keys[idx] = self.h.keys[self.h.len];
+        self.h.values[idx] = self.h.values[self.h.len];
     }
 }
 
 pub fn<K, V> Map.length(): int {
-    return self.len;
+    return self.h.len;
+}
+
+// An independent map with the same entries in the same dense order
+// (F-COLL-1), so `copy().keys()` lists what `keys()` lists until either map
+// changes.
+pub fn<K, V> Map.copy(): Map<K, V> {
+    mut out: Map<K, V> = Map::default();
+    mut i: int = 0;
+    while i < self.h.len {
+        out.put(self.h.keys[i], self.h.values[i]);
+        i = i + 1;
+    }
+    return out;
 }
 
 // ─── iteration (LEC-007) ────────────────────────────────────────────────────
@@ -303,8 +327,8 @@ pub fn<K, V> Map.length(): int {
 pub fn<K, V> Map.keys(): List<K> {
     mut out: List<K> = List::default();
     mut i: int = 0;
-    while i < self.len {
-        out.push(self.keys[i]);
+    while i < self.h.len {
+        out.push(self.h.keys[i]);
         i = i + 1;
     }
     return out;
@@ -313,8 +337,8 @@ pub fn<K, V> Map.keys(): List<K> {
 pub fn<K, V> Map.values(): List<V> {
     mut out: List<V> = List::default();
     mut i: int = 0;
-    while i < self.len {
-        out.push(self.values[i]);
+    while i < self.h.len {
+        out.push(self.h.values[i]);
         i = i + 1;
     }
     return out;
@@ -328,13 +352,9 @@ pub fn<K, V> Map.values(): List<V> {
 // `operator` declarations could take a `<K, V>` list. See list.tr's
 // operator[] doc comment.
 //
-// Self is `&Map<K, V>` here, NOT by value, unlike List<T>'s
-// operator[]=: put() can REALLOCATE `keys`/`values`/`buckets` and always
-// updates `len`/`cap`/`bcap` -- mutations to the struct's OWN fields, not
-// just through an already-shared heap pointer the way List<T>.data's
-// writes are. A by-value `m` here would let put() grow/mutate only a
-// local copy that vanishes when this function returns, silently losing
-// every write.
+// `[]=` takes `&Map<K, V>`, a leftover of the by-value Map (before LEC-009 a
+// by-value `m` grew only a local copy and lost the write). A handle copy
+// would now do; the signature stays because it is part of the 2.x surface.
 operator<K, V> [](m: Map<K, V>, key: K): V {
     return m.get(key);
 }

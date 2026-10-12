@@ -134,6 +134,12 @@ array's unwritten elements and `T::default()`'s fields read as.
 > zero-filled. Definite assignment is a static safety net over memory that
 > already reads as zero, not protection against garbage.
 
+One difference for `T::default()`: a `&U` reference can never be null, so a
+`&U` field of a defaulted struct points at a fresh `U::default()` of its own
+instead (FREEZE F-COLL-2). That is how every collection gets its one shared
+header. A `&?U` field stays null. See
+[`::default()`](structs_and_enums.md#construction-new-and-default).
+
 ## Primitive types
 
 Turf has six true primitive types plus `void`:

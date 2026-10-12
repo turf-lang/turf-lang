@@ -396,8 +396,7 @@ bs[0].a = 50;          // assign to a field of the copy
 bs[0].a += 1;          // ... or update it
 bs[0].a++;
 bs[0].bump();          // a method that assigns to self
-outer[0].push(5);      // push bumps `len` in the copy of the inner list's header
-mm["a"]["b"] = 1;      // a Map's []= mutates the Map header, which is the copy
+mm["a"]["b"] = 1;      // a Map's []= is declared on `&Map`, and the inner map is a copy
 ```
 
 This is the rule C# calls CS1612 and Go applies to a struct stored in a map.
@@ -405,14 +404,16 @@ What is *not* rejected, because the write reaches real storage:
 
 ```turflang
 mut e: Big = bs[0];  e.a = 50;  bs[0] = e;   // read, change, store back (the fix)
-grid[i][j] = v;      // List's []= takes the header by value but writes through
-                     // the shared buffer, so the row you wrote to is the real row
+grid[i][j] = v;      // a collection element is a handle (F-COLL-1): the write
+outer[0].push(5);    // lands in the inner list's shared header, the real row
 nodes[0].v = 10;     // an element that is a `&T`/`T*`: the write goes through it
 ```
 
 The test is whether the destination is a *field or `self` of the returned
-copy*: `grid[i][j] = v` stores through a pointer inside the copy, `outer[0].push(v)`
-assigns `len` inside it. "Changes its receiver" means the method assigns to
+copy*: `grid[i][j] = v` and `outer[0].push(v)` write through the `&` header
+inside the copied handle, never a field of the copy. (Until collections became
+handles, LEC-009, `push` assigned `len` inside the copy and was E098.)
+"Changes its receiver" means the method assigns to
 `self.<field>` itself, or calls (through any chain of `self.m()` calls) a method
 that does — the same answer the immutable-variable check uses, so
 `bs[0].wrapper()` is rejected when `wrapper` only calls `self.bump()`. Two

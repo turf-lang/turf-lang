@@ -3,11 +3,22 @@ unsafe module;
 // list.tr — List<T>: a dynamically-growing array.
 // Usage:
 //   import list::List;   // (or `import list;` + spell it `list::List<int>` below)
-//   mut l: List<int>;   // default-initialized -- no need to write out the fields
+//   mut l: List<int> = List::default();
 //   l.push(1);
 //   l.push(2);
 //   mut x: int = l.pop();   // 2
 //   mut n: int = l.length(); // 1
+//
+// Shared by default, copied on demand (LEC-009, FREEZE.md §6.27): a
+// `List<T>` value is a handle to ONE `ListHeader<T>` on the GC heap, so
+// `m = l` and passing `l` to a function share the elements AND the length:
+// `m.push(7)` is visible through `l`, and so is a callee's `push`.
+// `l.copy()` is an independent list. `List::default()` allocates the header
+// (a `&U` field's default is a fresh `heap(U::default())`, F-COLL-2), which
+// is why even an empty list is shared. Before LEC-009 a List was this
+// header itself, copied by value: the buffer was shared but `len`/`cap`
+// were not, so a copy's `push` could overwrite elements the original still
+// counted, and a callee's `push` was lost.
 //
 // STD-003 item 8 considered (ARCHITECTURE_OVERHAUL.md §8) and DELIBERATELY
 // NOT DONE: making `data` a safe `&T` instead of a raw `T*` looked
@@ -33,18 +44,22 @@ unsafe module;
 
 import sys;
 
-pub struct List<T> {
+struct ListHeader<T> {
     data: T*,
     len: int,
     cap: int
 }
 
+pub struct List<T> {
+    h: &ListHeader<T>
+}
+
 pub fn<T> List.push(item: T): void {
-    if (self.len == self.cap) {
-        if (self.cap == 0) {
-            self.cap = 8;
+    if (self.h.len == self.h.cap) {
+        if (self.h.cap == 0) {
+            self.h.cap = 8;
         } else {
-            self.cap = self.cap * 2;
+            self.h.cap = self.h.cap * 2;
         }
 
         // TYPE-002 (S14b): was `self.cap * 8` under Type Erasure, where every T
@@ -55,31 +70,45 @@ pub fn<T> List.push(item: T): void {
         // instantiation (monomorphized, S12a's own completion criterion 4) --
         // this is the ONE stdlib change this whole group permits itself
         // (ARCHITECTURE_OVERHAUL.md §8's TYPE-002 entry).
-        immutable byteSize: int = self.cap * sizeof(T);
+        immutable byteSize: int = self.h.cap * sizeof(T);
 
-        if (self.data == null) {
-            self.data = gc_alloc(byteSize) to T*;
+        if (self.h.data == null) {
+            self.h.data = gc_alloc(byteSize) to T*;
         } else {
-            self.data = gc_realloc(self.data, byteSize) to T*;
+            self.h.data = gc_realloc(self.h.data, byteSize) to T*;
         }
     }
 
-    self.data[self.len] = item;
-    self.len = self.len + 1;
+    self.h.data[self.h.len] = item;
+    self.h.len = self.h.len + 1;
 }
 
 @caller_location
 pub fn<T> List.pop(): T {
-    if (self.len == 0) {
+    if (self.h.len == 0) {
         sys::panic(caller_location + ": List.pop: pop on empty list");
     }
 
-    self.len = self.len - 1;
-    return self.data[self.len];
+    self.h.len = self.h.len - 1;
+    return self.h.data[self.h.len];
 }
 
 pub fn<T> List.length(): int {
-    return self.len;
+    return self.h.len;
+}
+
+// An independent list holding the same elements: pushing to, popping from or
+// writing into either one never touches the other (F-COLL-1). Elements are
+// copied as values, so a `List<SomeStruct*>` copy still points at the same
+// structs.
+pub fn<T> List.copy(): List<T> {
+    mut out: List<T> = List::default();
+    mut i: int = 0;
+    while i < self.h.len {
+        out.push(self.h.data[i]);
+        i = i + 1;
+    }
+    return out;
 }
 
 // ─── get / set (OVH-003) ─────────────────────────────────────────────────────
@@ -98,18 +127,18 @@ pub fn<T> List.length(): int {
 // consumer (json.tr, http.tr, ...) actually benefits from.
 @caller_location
 pub fn<T> List.get(i: int): T {
-    if (i < 0 || i >= self.len) {
+    if (i < 0 || i >= self.h.len) {
         sys::panic(caller_location + ": List.get: index out of bounds");
     }
-    return self.data[i];
+    return self.h.data[i];
 }
 
 @caller_location
 pub fn<T> List.set(i: int, value: T): void {
-    if (i < 0 || i >= self.len) {
+    if (i < 0 || i >= self.h.len) {
         sys::panic(caller_location + ": List.set: index out of bounds");
     }
-    self.data[i] = value;
+    self.h.data[i] = value;
 }
 
 // ─── operator[] / operator[]= (LANG-001) ────────────────────────────────────
@@ -135,29 +164,26 @@ pub fn<T> List.set(i: int, value: T): void {
 operator<T> [](l: List<T>, i: int): T {
     mut idx: int = i;
     if (idx < 0) {
-        idx = idx + l.len;
+        idx = idx + l.h.len;
     }
-    if (idx < 0 || idx >= l.len) {
+    if (idx < 0 || idx >= l.h.len) {
         sys::panic(caller_location + ": List[]: index out of bounds");
     }
-    return l.data[idx];
+    return l.h.data[idx];
 }
 
-// Self taken BY VALUE, not `&List<T>` -- unlike a plain value struct,
-// that's sufficient for this write to persist: `data` is a heap pointer
-// (the same reason `List.sort` below can reorder a list it was handed by
-// value), so copying the List<T> header still shares
-// the same backing buffer, and `l.data[i] = value` writes through it.
+// Taking `l` by value is enough for the write to land in the caller's list:
+// a List is a handle, so the copy names the same header (F-COLL-1).
 @caller_location
 operator<T> []=(l: List<T>, i: int, value: T): void {
     mut idx: int = i;
     if (idx < 0) {
-        idx = idx + l.len;
+        idx = idx + l.h.len;
     }
-    if (idx < 0 || idx >= l.len) {
+    if (idx < 0 || idx >= l.h.len) {
         sys::panic(caller_location + ": List[]=: index out of bounds");
     }
-    l.data[idx] = value;
+    l.h.data[idx] = value;
 }
 
 // ─── sort / search ──────────────────────────────────────────────────────────
@@ -192,13 +218,13 @@ operator<T> []=(l: List<T>, i: int, value: T): void {
 pub fn<T> List.sort(cmp: fn(T, T): int): void {
     mut i: int = 1;
     while i < self.length() {
-        immutable key: T = self.data[i];
+        immutable key: T = self.h.data[i];
         mut j: int = i - 1;
-        while j >= 0 && cmp(self.data[j], key) > 0 {
-            self.data[j + 1] = self.data[j];
+        while j >= 0 && cmp(self.h.data[j], key) > 0 {
+            self.h.data[j + 1] = self.h.data[j];
             j = j - 1;
         }
-        self.data[j + 1] = key;
+        self.h.data[j + 1] = key;
         i = i + 1;
     }
 }
@@ -214,7 +240,7 @@ pub fn<T> List.binary_search(target: T, cmp: fn(T, T): int): int {
     mut hi: int = self.length() - 1;
     while lo <= hi {
         immutable mid: int = lo + (hi - lo) / 2;
-        immutable c: int = cmp(self.data[mid], target);
+        immutable c: int = cmp(self.h.data[mid], target);
         if (c == 0) {
             return mid;
         } else if (c < 0) {
@@ -233,7 +259,7 @@ pub fn<T> List.binary_search(target: T, cmp: fn(T, T): int): int {
 pub fn<T> List.find(predicate: fn(T): bool): int {
     mut i: int = 0;
     while i < self.length() {
-        if (predicate(self.data[i])) {
+        if (predicate(self.h.data[i])) {
             return i;
         }
         i = i + 1;
