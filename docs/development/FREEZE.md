@@ -373,6 +373,14 @@ account: `docs/development/changes/FDN-004.md`.
   caller that has already established `i` is in range some other way and
   cannot afford the repeated `strlen()` — unchecked, like any other raw
   pointer read.
+- **Amended 2026-10-12 (owner decision: the frozen text yields to #256,
+  turflang 2853007).** A negative index counts back from the end, as it does
+  for arrays and `List`: `s[i]` with `i < 0` means `s[strlen(s) + i]`, so
+  `s[-1]` is the last byte. A **read** panics outside `-strlen(s) <= i <
+  strlen(s)`. A **write** wraps a negative index the same way (one `strlen()`
+  call, on the negative path only) and panics only if the wrapped index is
+  still below zero; its missing upper bound is unchanged. The two bullets
+  above that say `i < 0` panics are superseded by this one.
 
 ### 6.15 Per-declaration visibility — FROZEN (LEC-002, 2026-09-29)
 
@@ -1304,7 +1312,7 @@ Overhaul (F-TYPE-1), whose third column points at their section above.
 | **F-TYPE-1** | A named type's identity is (owning module, name); the main file's module is `main`, never spelled. Bare-spelling ambiguity is an error, not "local wins". | §6.11 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-003, not `ARCHITECTURE_OVERHAUL.md` §4) |
 | **F-HEAP-1** | `heap(expr): &T` is the closed-list intrinsic for safe heap allocation — no `new T` keyword, no grammar change. Always allocates with `T`'s real `TurfTypeDesc`, never `NULL`. | §6.12 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-001) |
 | **F-MEM-5** | A `Stack`-provenance reference (points into the current frame) can never flow into a `return`, a field of a `Param`/`Heap`-owned object, a collection mutator/`operator[]=`, or `heap()`'s own operand, nor be carried there inside a struct or array value — enforced by `EscapePass`, with per-field tracking and one call summary (a function returning a reference parameter unchanged), no lifetime syntax. | §6.13 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-002; amended 2026-10-12) |
-| **F-STR-1** | `s[i]` on a `string` is `char`, bounds-checked against `strlen(s)` on read (`i < 0` or `i >= strlen(s)` panics); a write checks `i < 0` only, by design — no upper bound, since a `string` under construction has no recoverable capacity to check against. | §6.14 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-004) |
+| **F-STR-1** | `s[i]` on a `string` is `char`; a negative `i` counts from the end (`s[-1]` is the last byte). A read panics outside `-strlen(s) <= i < strlen(s)`; a write wraps a negative index the same way and panics only if it is still below zero, by design — no upper bound, since a `string` under construction has no recoverable capacity to check against. | §6.14 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-004; amended 2026-10-12 for #256) |
 | **F-VIS-1** | A top-level declaration and a struct field are private to their module unless prefixed `pub`/`public` (synonyms, one token); enum/error variants and machine states follow their type; operators are visible wherever their operand types are; `export immut` is its own `pub`; a `pub` signature may not mention a private type; UFCS and monomorphized clones never bypass or leak visibility; every visibility diagnostic carries a fix-naming hint. | §6.15 above (post-Overhaul: `ROADMAP_v2.0.0.md` LEC-002) |
 | **F-PKG-1** | Two independently versioned programs: `turf` (Go, `cli/`) is the user's tool and drives; `turfc` compiles and is the tooling interface (users are never asked to type it). They agree on a `major.minor` driver interface reported by `turfc --version` (same major, minor at least what `turf` needs), not on release versions. The compiler owns everything that depends on TurfLang source (import resolution, visibility, capabilities) and never touches the network or the manifest; the CLI owns files, network and reproducibility, never parses TurfLang, and never rewrites a diagnostic; they meet at an explicit package graph. `turf <non-subcommand args>` is `turfc <args>` unchanged. | §6.16 above (owner decisions 2026-09-30: overturning `ROADMAP_v2.0.0.md` LEC-001 entry 1 / DEC-8, then replacing "same version" with the driver interface) |
 | **F-IMP-1** | A file may spell `m::` (call, constant, type, construction, static method) only for a module it imports itself with a plain `import m;`; its own module and the prelude's modules count; another file's import never does. | §6.24 above |
