@@ -854,6 +854,13 @@ bool classifyRHSNonNull(const ExprAST *RHS, const NonNullSet &In,
   return false;
 }
 
+// The fixed-point dataflow and the reporting walk over one CFG, starting
+// from `EntryIn` (empty for a function body). Defined after NarrowingVisitor,
+// which also runs it on a `recover run` block.
+void runNullabilityDataflow(CFG &Cfg,
+                            const std::unordered_set<const VariableSymbol *> &Tracked,
+                            const NonNullSet &EntryIn);
+
 /**
  * @brief Evaluates ONE statement/expression against an incoming NonNullSet,
  *        both (a) computing the narrowed sets that hold when it evaluates
@@ -1055,6 +1062,27 @@ public:
   void visitCompare(CompareExprAST &Node) override {
     checkOnly(Node.getSubject(), OnTrue, Tracked, DoReport);
   }
+
+  // `g() recover run { return p.val; }`: the CFG holds the whole statement
+  // as one node, so the block's own control flow (an `if (p != null)` guard,
+  // a `return`) is invisible here. Recursing into the block with the
+  // incoming facts would reject correctly guarded code, because a nested
+  // `if` narrows nothing without its edges; so the block gets a CFG of its
+  // own and the same dataflow, entered with the facts that hold where the
+  // wrapped expression failed. A `recover run` block must diverge (E066), so
+  // nothing it does reaches the code after the statement: OnTrue/OnFalse
+  // stay those of the wrapped expression's success path. Run only in the
+  // reporting walk, which sees the converged IN sets. LEC-005 left this
+  // unchecked (tests/99_known_bugs, now tests/39_nullable_references).
+  void visitRecoverExpr(RecoverExprAST &Node) override {
+    checkOnly(Node.getWrapped(), OnTrue, Tracked, DoReport);
+    checkOnly(Node.getProduceExpr(), OnTrue, Tracked, DoReport);
+    if (!DoReport || !Node.getBlock())
+      return;
+    auto BlockCfg = CFGBuilder().buildCFG("recover", nullptr, Node.getBlock(),
+                                          Node.getLoc());
+    runNullabilityDataflow(*BlockCfg, Tracked, OnTrue);
+  }
 };
 
 struct NarrowedStatement {
@@ -1071,25 +1099,13 @@ NarrowedStatement evalStatement(const ExprAST *Stmt, const NonNullSet &In,
   return {V.OnTrue, V.OnFalse};
 }
 
-} // namespace
-
-void NullabilityPass::runOnCFG(CFG &Cfg) {
+void runNullabilityDataflow(CFG &Cfg,
+                            const std::unordered_set<const VariableSymbol *> &Tracked,
+                            const NonNullSet &EntryIn) {
   const auto &Blocks = Cfg.getBlocks();
   size_t N = Blocks.size();
   if (N == 0)
     return;
-
-  // Discover every &?T-typed symbol the function touches at all, across
-  // every block -- the SAME approach DefiniteAssignmentPass uses for its own
-  // "AllBodyDeclared" set (Step 0 above), just keyed on type instead of "was
-  // this declared here" (see NullableRefCollector's own doc comment).
-  NullableRefCollector Collector;
-  for (size_t b = 0; b < N; ++b)
-    for (ExprAST *Stmt : Blocks[b]->getStatements())
-      if (Stmt) const_cast<ExprAST *>(static_cast<const ExprAST *>(Stmt))->accept(Collector);
-  const auto &Tracked = Collector.Tracked;
-  if (Tracked.empty())
-    return; // nothing this pass could possibly flag -- skip the walk entirely
 
   std::unordered_map<const TurfBasicBlock *, size_t> index;
   for (size_t i = 0; i < N; ++i)
@@ -1120,8 +1136,7 @@ void NullabilityPass::runOnCFG(CFG &Cfg) {
   // from its own top (AllBodyDeclared).
   std::vector<NonNullSet> IN(N);
   for (size_t i = 0; i < N; ++i)
-    if (i != entryIdx)
-      IN[i] = NonNullSet(Tracked.begin(), Tracked.end());
+    IN[i] = i == entryIdx ? EntryIn : NonNullSet(Tracked.begin(), Tracked.end());
   std::vector<NonNullSet> SingleOut(N), TrueOut(N), FalseOut(N);
   std::vector<bool> HasEdgeSplit(N, false);
 
@@ -1193,6 +1208,22 @@ void NullabilityPass::runOnCFG(CFG &Cfg) {
   // ── Step 2: report, using the fixed-point IN sets ─────────────────────────
   for (size_t b = 0; b < N; ++b)
     computeBlockOutputs(b, /*DoReport=*/true);
+}
+
+} // namespace
+
+void NullabilityPass::runOnCFG(CFG &Cfg) {
+  // Discover every &?T-typed symbol the function touches at all, across
+  // every block -- the SAME approach DefiniteAssignmentPass uses for its own
+  // "AllBodyDeclared" set (Step 0 above), just keyed on type instead of "was
+  // this declared here" (see NullableRefCollector's own doc comment).
+  NullableRefCollector Collector;
+  for (const auto &BB : Cfg.getBlocks())
+    for (ExprAST *Stmt : BB->getStatements())
+      if (Stmt) Stmt->accept(Collector);
+  if (Collector.Tracked.empty())
+    return; // nothing this pass could possibly flag -- skip the walk entirely
+  runNullabilityDataflow(Cfg, Collector.Tracked, NonNullSet());
 }
 
 // ═════════════════════════════════════════════════════════════════════════

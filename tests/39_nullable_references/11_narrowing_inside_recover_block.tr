@@ -1,0 +1,55 @@
+// Narrowing reaches into a `recover run { }` block: a guard inside the block
+// narrows within it, and a check before the statement holds inside it. The
+// block gets its own CFG for this; without one, checking the block at all
+// (fail_deref_inside_recover_block.tr) would reject the guarded form.
+import test;
+
+struct Node { val: int }
+
+error Fail { Always }
+
+fn bad(): !int {
+    return Fail::Always;
+}
+
+fn guarded(p: &?Node): int {
+    mut v: int = bad() recover run {
+        if (p != null) {
+            return p.val;
+        }
+        return -1;
+    };
+    return v;
+}
+
+fn checked_before(p: &?Node): int {
+    if (p == null) {
+        return -2;
+    }
+    mut v: int = bad() recover run { return p.val; };
+    return v;
+}
+
+fn nested(p: &?Node): int {
+    mut v: int = bad() recover run {
+        if (p == null) {
+            return -3;
+        }
+        mut w: int = bad() recover run { return p.val; };
+        return w;
+    };
+    return v;
+}
+
+fn main(): int {
+    mut n: Node = Node::default();
+    n.val = 7;
+    mut none: &?Node = null;
+    test::assert_eq(guarded(&n), 7, "guard inside the block");
+    test::assert_eq(guarded(none), -1, "guard inside the block, null");
+    test::assert_eq(checked_before(&n), 7, "check before the statement");
+    test::assert_eq(checked_before(none), -2, "check before the statement, null");
+    test::assert_eq(nested(&n), 7, "nested recover");
+    test::assert_eq(nested(none), -3, "nested recover, null");
+    return 0;
+}
