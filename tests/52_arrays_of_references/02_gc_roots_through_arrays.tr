@@ -1,0 +1,46 @@
+// Nodes reachable only through an array of references -- on the stack, in a
+// heap struct's field, or in a `.copy()` on the GC heap -- survive collection.
+// Run under TURF_GC_STRESS=1 / TURF_GC_VALIDATE=1 as well (AGENTS.md).
+import test;
+
+struct N { val: int, next: &?N }
+
+struct Box { xs: (&N)[3], k: int }
+
+fn mk(v: int): &N {
+    mut n: N = N::default();
+    n.val = v;
+    return heap(n);
+}
+
+fn churn(): int {
+    mut t: int = 0;
+    for i in 0..200 {
+        mut junk: &N = mk(i);
+        t = t + junk.val;
+    }
+    return t;
+}
+
+fn main(): int {
+    mut a: (&N)[3] = [mk(1), mk(2), mk(3)];
+    mut b: &Box = heap(Box::default());
+    b.xs[0] = mk(10);
+    b.xs[1] = mk(20);
+    b.xs[2] = mk(30);
+    mut c: (&N)[] = a.copy();
+    churn();
+    churn();
+    mut t: int = 0;
+    for x in a {
+        t = t + x.val;
+    }
+    for x in b.xs {
+        t = t + x.val;
+    }
+    for x in c {
+        t = t + x.val;
+    }
+    test::assert_eq(t, 72, "every node is still reachable");
+    return 0;
+}

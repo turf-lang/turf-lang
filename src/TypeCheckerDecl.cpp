@@ -459,12 +459,27 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
         // the code window (or by `guess`) has its type on no line the model sees.
         SLM::DiagnosticHints Hints;
         addIdentifierTypes(Node.getInitializer(), Hints);
+        std::string Hint = hintForMismatch(InitTy.get(), nullptr, "");
+        // `mut a: &N[2] = [r1, r2];`: `&` takes the whole type after it, so
+        // the declaration is a reference to an array, and the literal is an
+        // array of references (turf-fuzz findings/wrong-message/
+        // array-of-references-type-name).
+        const auto *DeclPtr = dynamic_cast<const TurfPointerType *>(DeclTy.get());
+        const auto *InitArr = dynamic_cast<const ::ArrayType *>(InitTy.get());
+        if (DeclPtr && (DeclTy->isReference() || DeclTy->isNullableReference()) &&
+            DeclPtr->getPointee()->isArray() && InitArr &&
+            (InitArr->getElementType()->isReference() ||
+             InitArr->getElementType()->isNullableReference()))
+          Hint = "'" + DeclTy->getName() + "' is a reference to an array: '&' "
+                 "takes the whole type after it. An array of references is "
+                 "written with parentheses, e.g. 'mut " + Node.getName() + ": " +
+                 InitTy->getName() + " = ...'.";
         reportError(Node.getLoc(),
                     codeForMismatch(InitTy.get(), nullptr, ErrCode::TypeMismatch),
                     "Cannot initialise '" + DeclTy->getName() +
                         "' variable '" + Node.getName() + "' with value of type '" +
                         InitTy->getName() + "'.",
-                    {}, hintForMismatch(InitTy.get(), nullptr, ""), "", Hints);
+                    {}, Hint, "", Hints);
       } else {
         // SEM-002: typesCompatible() only checks the KIND of conversion
         // (e.g. "int-literal -> int is fine"), never the literal's own
@@ -763,6 +778,30 @@ void TypeChecker::visitArrayDecl(ArrayDeclExprAST &Node) {
         setType(&Node, nullptr);
         return;
       }
+    }
+  }
+
+  // An array of non-null references, `(&N)[2]`, has no valid zero value: the
+  // storage is zero-filled, so an element nothing wrote would read as a null
+  // `&N` (owner, 2026-10-12). It needs an initializer; `(&?N)[2]` starts with
+  // every element null and does not.
+  if (Node.getSize() >= 0 && Node.getInitList().empty() && !Node.getInitExpr()) {
+    const TurfType *Elem = Node.getElementType();
+    while (const auto *Inner = dynamic_cast<const ::ArrayType *>(Elem))
+      Elem = Inner->getElementType();
+    if (Elem && Elem->isReference()) {
+      reportError(Node.getLoc(), ErrCode::MissingInitializer,
+                  "The array '" + Node.getName() + "' ('" + DeclArrTy->getName() +
+                      "') needs an initializer.",
+                  {},
+                  "An array of '" + Elem->getName() + "' starts zero-filled, "
+                  "and a reference can't be null: give every element a value, "
+                  "e.g. '= [a, b]'. To start with no references, declare it '(&?" +
+                      static_cast<const TurfPointerType *>(Elem)->getPointee()->getName() +
+                      ")[" + std::to_string(Node.getSize()) + "]' instead.",
+                  "Missing initializer!");
+      setType(&Node, nullptr);
+      return;
     }
   }
 

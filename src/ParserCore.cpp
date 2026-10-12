@@ -283,6 +283,8 @@ static int GetTokPrecedence() {
 // first-class. Returns nullptr on failure.
 bool g_AllowGuessType = false;
 
+static TurfTypePtr ParseTrailingArrayDims(TurfTypePtr Base);
+
 TurfTypePtr ParseType() {
   // Recurses into itself directly (generic type args, `!T` error unions,
   // pointer types) without ever going back through ParseExpression() --
@@ -325,6 +327,46 @@ TurfTypePtr ParseType() {
   // ParseType() is a wholly separate function only ever called from type
   // positions. The one-token '?' lookahead right after '&' is similarly
   // unambiguous: '?' has no other meaning anywhere in this grammar.
+  // `(&N)[2]` -- an array (or `(&N)[]` slice) of references. `&N[2]` is a
+  // reference to an array, because `&` takes the whole type after it, so an
+  // array of references needs the parentheses (owner, 2026-10-12; turf-fuzz
+  // findings/wrong-message/array-of-references-type-name). Only a reference
+  // type may be parenthesised, and only to put array dimensions after it:
+  // every other type already takes `[N]` directly.
+  if (CurTok == '(') {
+    SourceLocation OpenLoc = CurLoc;
+    getNextToken(); // consume '('
+    if (CurTok != '&') {
+      SyntaxError(OpenLoc, ErrCode::ExpectedType,
+                  "Parentheses in a type are only for an array of references, "
+                  "e.g. (&Node)[4].",
+                  "Write the type without the parentheses, e.g. `int[4]`.")
+          .raise();
+      return nullptr;
+    }
+    TurfTypePtr Elem = ParseType();
+    if (!Elem)
+      return nullptr;
+    if (CurTok != ')') {
+      SyntaxError(CurLoc, ErrCode::UnclosedDelimiter,
+                  "Expected ')' to close the parenthesised reference type, "
+                  "e.g. (&Node)[4].")
+          .raise();
+      return nullptr;
+    }
+    getNextToken(); // consume ')'
+    if (CurTok != '[') {
+      SyntaxError(OpenLoc, ErrCode::ExpectedType,
+                  "Parentheses in a type are only for an array of references; "
+                  "expected '[' after ')'.",
+                  "A single reference needs no parentheses: write `" +
+                      Elem->getName() + "`.")
+          .raise();
+      return nullptr;
+    }
+    return ParseTrailingArrayDims(std::move(Elem));
+  }
+
   if (CurTok == '&') {
     getNextToken(); // consume '&'
     bool IsNullable = false;
@@ -585,8 +627,13 @@ TurfTypePtr ParseType() {
     Base = std::make_shared<TurfPointerType>(Base);
   }
 
-  // Recursively consume trailing array dimensions: int[5] or int[5][10]
-  // Size may be omitted (int[]) to indicate a pointer-parameter (size = -1).
+  return ParseTrailingArrayDims(std::move(Base));
+}
+
+// The `[N]` / `[]` suffixes after an element type: int[5], int[5][10], and
+// int[] (an unsized slice parameter, size -1). Returns Base unchanged when
+// none follow.
+static TurfTypePtr ParseTrailingArrayDims(TurfTypePtr Base) {
   std::vector<int> ArraySizes;
   while (CurTok == '[') {
     getNextToken(); // eat '['

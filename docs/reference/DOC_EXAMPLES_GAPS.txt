@@ -3,8 +3,8 @@
 # the first error code the example produces. A changed block gets a new hash, so its line
 # goes stale and must be re-triaged: fix the doc or mark the block.
 docs/reference/arrays.md#11 23fc862a  E103 NEEDS-REVIEW
-docs/reference/arrays.md#16 eee34e42  E001 SHOWS-ERROR
-docs/reference/arrays.md#17 39b9abbb  E001 SHOWS-ERROR
+docs/reference/arrays.md#17 eee34e42  E001 SHOWS-ERROR
+docs/reference/arrays.md#18 39b9abbb  E001 SHOWS-ERROR
 docs/reference/arrays.md#6 b8180fad  E118 NEEDS-REVIEW
 docs/reference/cli_and_diagnostics.md#10 9ab59e00  E105 SHOWS-ERROR
 docs/reference/cli_and_diagnostics.md#11 ba50e3e4  E001 NEEDS-REVIEW

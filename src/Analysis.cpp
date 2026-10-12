@@ -1514,8 +1514,19 @@ public:
       // array/fixed-array write (no ResolvedIndexSetTarget) is NOT a sink:
       // a stack array that never itself escapes is not made unsafe by
       // storing a same-frame reference into it.
-      if (AA->ResolvedIndexSetTarget)
+      if (AA->ResolvedIndexSetTarget) {
         flagIfStack(Node.getRHS(), Node.getLoc(), "pushed into a collection");
+        return;
+      }
+      // Sink: an element of an array that is not this frame's own -- a
+      // `(&N)[]` parameter views the caller's array -- same rule as a field
+      // store above. Possible since arrays of references, `(&N)[2]`, exist
+      // (2026-10-12); `xs[0] = &local` used to compile and leave the caller
+      // a dangling element.
+      auto BaseProv = classifyProvenance(AA->getBase(), Map);
+      if (BaseProv == RefProvenance::Param || BaseProv == RefProvenance::Heap)
+        flagIfStack(Node.getRHS(), Node.getLoc(),
+                    "stored into an array that outlives this function");
       return;
     }
     if (const auto *VE = dynamic_cast<const VariableExprAST *>(Node.getLHS())) {

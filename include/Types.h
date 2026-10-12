@@ -519,6 +519,10 @@ public:
       Dims += AT->Size < 0 ? "[]" : "[" + std::to_string(AT->Size) + "]";
       Base = AT->ElementType.get();
     }
+    // `(&N)[2]`, an array of references, is spelled with parentheses (a bare
+    // `&N[2]` is a reference to an array), and prints the way it is written.
+    if (Base->isReference() || Base->isNullableReference())
+      return "(" + Base->getName() + ")" + Dims;
     return Base->getName() + Dims;
   }
   std::string getMangledName() const override {
@@ -586,7 +590,11 @@ public:
   explicit TurfReferenceType(TurfTypePtr Pointee)
       : TurfPointerType(std::move(Pointee)) {}
 
+  // A reference to an array prints as `&(N[2])`, so it never reads like the
+  // array of references `(&N)[2]` (turf-fuzz: both used to print `&N[2]`).
   std::string getName() const override {
+    if (getPointee()->isArray())
+      return "&(" + getPointee()->getName() + ")";
     return "&" + getPointee()->getName();
   }
   std::string getMangledName() const override {
@@ -651,6 +659,8 @@ public:
       : TurfPointerType(std::move(Pointee)) {}
 
   std::string getName() const override {
+    if (getPointee()->isArray())
+      return "&?(" + getPointee()->getName() + ")";
     return "&?" + getPointee()->getName();
   }
   std::string getMangledName() const override {

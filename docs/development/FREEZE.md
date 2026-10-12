@@ -1211,6 +1211,30 @@ value, so a copy shared the buffer but not the length.
   null) or `::new`. Declarations without an initializer are unchanged: their
   storage is zero-filled and definite assignment (F-INIT-1/2) forbids reading it.
 
+### 6.28 Arrays of references — FROZEN (owner decision, 2026-10-12)
+
+Recorded on the project owner's explicit choice (2026-10-12) of the spelling
+(over flipping `&N[2]` to mean an array, or leaving arrays of references out)
+and of the empty-declaration rule (over zero-filling with a run-time check, or
+deciding every zero-filled element type at once). Found by turf-fuzz: there was
+no way to write an array of references, and the error for trying printed both
+types as `&N[2]`.
+
+- **`(&N)[k]` is an array of references (F-REFARR-1).** `&` takes the whole
+  type after it, so `&N[2]` stays a reference to an array. Parentheses around a
+  reference type, followed by array dimensions, make an array of references:
+  `(&N)[2]`, `(&?N)[2]`, `(&N)[2][3]`, and the slice parameter `(&N)[]`.
+  Parentheses around any other type, or with no `[` after them, are E109. The
+  two types print the way they are written: `(&N)[2]` and `&(N[2])`. An array
+  of references is an ordinary array (a value; copying it copies the references,
+  not what they point to), and a store of a reference to this frame's storage
+  into an element of an array that is not this frame's own (a `(&N)[]`
+  parameter) is an F-MEM-5 escape (E086).
+- **`(&N)[k]` needs an initializer (F-REFARR-2).** A non-null reference has no
+  zero value, so a declaration without one is E128; `(&?N)[k]` starts with
+  every element null. `T::default()` gives each element of a `(&N)[k]` field
+  its own node (F-COLL-2).
+
 ---
 
 ## Appendix — frozen-decision IDs
@@ -1297,6 +1321,8 @@ Overhaul (F-TYPE-1), whose third column points at their section above.
 | **F-FMT-3** | `turfc --format` modes: stdout (one file), `--write` (only files that differ), `--check` (names what would change, exit 1 if any); `--write` with `--check` is a usage error. | §6.23 above |
 | **F-COLL-1** | A collection value (`List`, `Stack`, `Queue`, `Set`, `Map`, and any later one) is a handle to one collection: `=`, passing, returning and storing share it, length included; `.copy()` gives an independent one. | §6.27 above (owner decision 2026-10-12) |
 | **F-COLL-2** | `T::default()` sets every non-null `&U` field reachable by value to a fresh `heap(U::default())`; a type that reaches itself through `&` fields has no default (E147). | §6.27 above (owner decision 2026-10-12) |
+| **F-REFARR-1** | An array of references is spelled `(&N)[k]` (also `(&?N)[k]`, `(&N)[]`); `&N[k]` is a reference to an array. The two print as written. A Stack reference stored into an element of a non-local array is E086. | §6.28 above (owner decision 2026-10-12) |
+| **F-REFARR-2** | A `(&N)[k]` declaration needs an initializer (E128); `(&?N)[k]` starts all-null. | §6.28 above (owner decision 2026-10-12) |
 
 ---
 

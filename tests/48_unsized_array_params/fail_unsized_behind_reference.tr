@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E140
-// EXPECT-DIAG: Parameter 'r' of 'f' can't use the unsized array type 'int[]' (inside '&int[]')
+// EXPECT-DIAG: Parameter 'r' of 'f' can't use the unsized array type 'int[]' (inside '&(int[])')
 // Issue #260: a `T[]` parameter already shares the caller's array; a
 // reference to one would point at the callee-side slice itself.
 fn f(r: &int[]): int {

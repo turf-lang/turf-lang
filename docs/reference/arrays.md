@@ -355,6 +355,56 @@ struct (`E140`), and it can't initialize a `T[N]` (`E003`).
 `copy()` are the only methods an array has (`a.reverse()` is `E131`). Strings
 and `List<T>` have no `copy()`.
 
+### Arrays of references: `(&T)[N]`
+
+`&` takes the whole type after it, so `&Node[2]` is a *reference to* an array
+of two nodes. An array *of* references puts the reference type in parentheses:
+
+```turflang
+import io;
+
+struct Node { val: int, next: &?Node }
+
+fn make(v: int): &Node {
+    mut n: Node = Node::default();
+    n.val = v;
+    return heap(n);
+}
+
+fn total(nodes: (&Node)[]): int {
+    mut t: int = 0;
+    for n in nodes {
+        t = t + n.val;
+    }
+    return t;
+}
+
+fn main(): int {
+    mut pair: (&Node)[2] = [make(1), make(2)];
+    pair[1] = make(5);
+    io::printline(total(pair));  // 6
+
+    mut slots: (&?Node)[3];      // every element starts null
+    slots[0] = make(7);
+    mut first: &?Node = slots[0];
+    if (first != null) {
+        io::printline(first.val);  // 7
+    }
+    return 0;
+}
+```
+
+- A `(&T)[N]` must be initialized (`E128`): a reference can't be null, and an
+  element nothing wrote would be. A `(&?T)[N]` needs no initializer; its
+  elements start as `null`, and an element is checked like any `&?T` that is
+  not a variable (store it in one, then check it).
+- Copying the array copies the references, not the nodes they point to.
+- `(&T)[]` is a slice parameter like any `T[]`. A reference to the function's
+  own local can't be stored into one of its elements (`E086`): the caller's
+  array would be left pointing at a dead frame.
+- Parentheses are only for this: `(int)[2]` and `(&T)` with no `[` after them
+  are `E109`.
+
 ## Type-checking constraints
 
 - An initializer list's length must match the declared array size exactly.

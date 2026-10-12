@@ -1,0 +1,25 @@
+// EXPECT-DIAG: E086
+// EXPECT-DIAG: stored into an array that outlives this function
+// F-MEM-5: a `(&N)[]` parameter views the caller's array, so storing a
+// reference to this frame's local into one of its elements leaves the caller
+// a dangling element. Compiled clean (and printed garbage) when arrays of
+// references were first added.
+struct N { val: int }
+
+fn mk(v: int): &N {
+    mut n: N = N::default();
+    n.val = v;
+    return heap(n);
+}
+
+fn put(xs: (&N)[]): void {
+    mut n: N = N::default();
+    n.val = 42;
+    xs[0] = &n;
+}
+
+fn main(): int {
+    mut a: (&N)[1] = [mk(1)];
+    put(a);
+    return a[0].val;
+}
