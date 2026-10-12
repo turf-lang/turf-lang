@@ -1,13 +1,14 @@
-name: Nightly (the expensive test axes)
+name: Weekly (the expensive test axes)
 # REL-004 stage 5 (docs/planning/ROADMAP_v2.0.0.md Part VII). test.yml runs on
 # every push and holds to a time budget; the test-suite axes that cost minutes
-# each (GC stress at the optimization levels test.yml skips) run here once a
-# day. The long crash fuzz that also ran here moved to turf-fuzz's weekly
-# workflow (owner decision 2026-10-12), against the sanitized compiler built
-# from master; test.yml's job `compiler_sanitizers` keeps a short pass per push.
+# each (GC stress and root validation at the optimization levels test.yml
+# skips) run here once a week, Monday 00:00 IST (owner decision 2026-10-12;
+# it ran nightly until then). The long crash fuzz that also ran here moved to
+# turf-fuzz's weekly workflow, against the sanitized compiler built from
+# master; test.yml's job `compiler_sanitizers` keeps a short pass per push.
 on:
   schedule:
-    - cron: "17 2 * * *"
+    - cron: "30 18 * * 0"  # Sunday 18:30 UTC = Monday 00:00 IST
   workflow_dispatch:
 permissions:
   contents: read

@@ -67,7 +67,7 @@ inventory it sits in.
 |---|---|
 | Every `-O` level gives the same behaviour (INV-OPT-1) | `.github/workflows/test.yml`: the suite at `-O0/-O1/-O2/-O3/-Os`, plus `scripts/opt_levels_smoke.sh` |
 | `-g` changes nothing observable | the suite at `-O0 -g` and `-g` (`test.yml`); `llvm-dwarfdump --verify` on every showcase (`scripts/tree_programs_smoke.sh`) |
-| The collector finds every root | the suite under `TURF_GC_STRESS=1`, `TURF_GC_VALIDATE=1`, with an ASan runtime (`test.yml`); the other `-O` levels nightly (`.github/workflows/nightly.yml`) |
+| The collector finds every root | the suite under `TURF_GC_STRESS=1`, `TURF_GC_VALIDATE=1`, with an ASan runtime (`test.yml`); the other `-O` levels weekly (`.github/workflows/weekly.yml`) |
 | No sanitizer report in the compiler or the runtime | the suite with `TURF_SANITIZE_COMPILER` (job `compiler_sanitizers`) and with `TURF_RT_SANITIZE` (job `gc_hardening_asan`) |
 | Invalid input produces diagnostics, never a crash | `scripts/fuzz/crash_fuzz.py`: a short pass per push (job `compiler_sanitizers`); the long run is turf-fuzz's weekly workflow (sanitized compiler, master); a finding's minimized program is added to `tests/` with its fix |
 | `lib/std` and `showcase/` build | `scripts/tree_programs_smoke.sh` (the test runner only covers `tests/`) |

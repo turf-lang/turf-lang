@@ -579,7 +579,8 @@ jobs:
           ASAN_OPTIONS=detect_leaks=0 ./build_san/turf-api-tests
       # A short crash-fuzz pass over the same sanitized binary: invalid input
       # must produce diagnostics, not memory errors (REL-004 stage 4). The long
-      # run is fuzz.yml's nightly job.
+      # run is turf-fuzz's weekly `sanitized` job (it ran nightly here until
+      # 2026-10-12).
       - name: Crash fuzz smoke (sanitized compiler, 3 minutes)
         run: |
           ulimit -s 65536
