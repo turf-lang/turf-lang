@@ -1459,9 +1459,20 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
 
         // Arity: struct methods have `self` as first param, user args = arity - 1 (unless static)
         int ExpectedArity = IsStaticMethod ? ArgCount : (ArgCount + 1);
+        // A '.' call passes the receiver as `self`, so only a candidate that
+        // takes one can match it (the parser keeps a struct method's leading
+        // `self` and `static` in lockstep). Matching on the count alone let
+        // `mu.square()` reach a `static` `square(x: int)`: the receiver
+        // counted as `x`, and Codegen built a call passing a pointer as an
+        // int (an internal compiler error; found by turf-fuzz's sanitized
+        // tier 0).
+        auto TakesSelf = [](const ResolverFunctionSymbol *C) {
+          return !C->Params.empty() && C->Params[0].Name == "self";
+        };
         std::vector<const ResolverFunctionSymbol *> ArityMatches;
         for (const auto *C : Candidates)
-          if (C->arity() == ExpectedArity) ArityMatches.push_back(C);
+          if (C->arity() == ExpectedArity && (IsStaticMethod || TakesSelf(C)))
+            ArityMatches.push_back(C);
 
         // Argument type compatibility -- previously MISSING entirely for
         // struct methods (unlike the module-call path above, which already
@@ -1838,8 +1849,9 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
           // with '.' -- see StaticMethodCalledOnInstanceError's doc
           // comment for why the generic WrongArityError below is actively
           // self-contradictory for this specific case.
+          // Whatever the argument count: every candidate is static.
           for (const auto *C : Candidates)
-            if (C->arity() != ArgCount) return false;
+            if (TakesSelf(C)) return false;
           return true;
         }()) {
           StaticMethodCalledOnInstanceError Err(Node.getLoc(), StructName,
