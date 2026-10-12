@@ -86,6 +86,12 @@ fn sum(head: &?Node): int {
 }
 ```
 
+A method call (`current.grow()`) is a use like a field read and needs the
+same check. The check works on a **variable** only: a `&?Node` that is a
+field, a call result or a list element (`current.next.val`) has to be stored
+in a variable and checked there (`mut n: &?Node = current.next; if (n != null)
+{ ... }`).
+
 Accessing `current.val` with no preceding `current != null` (or
 `current == null` with an early return, or a `&&` chain, or any other
 direct comparison) is a compile error — see

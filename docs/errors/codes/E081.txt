@@ -17,6 +17,24 @@ Check first, and use the value only inside the check:
         return 0;
     }
 
-The proof only lasts as far as the check does: if the variable is changed in between, or the check was in a different branch, Turf asks again.
+The proof only lasts as far as the check does: if the variable is changed in between, or the check was in a different branch, Turf asks again. A loop that does not assign the variable keeps the proof, inside it and after it.
+
+Calling a method counts as a use, exactly like reading a field: `b.grow()` needs the same check.
+
+The check works on a variable, and only on a variable. A `&?Box` you got from somewhere else (a field, a call, a list element) has to be put in one first:
+
+    struct Node { val: int, next: &?Node }
+
+    fn bad(n: &Node): int {
+        return n.next.val;       // n.next might be null, and no check can be written around it
+    }
+
+    fn good(n: &Node): int {
+        mut r: &?Node = n.next;
+        if r != null {
+            return r.val;
+        }
+        return 0;
+    }
 
 If a value can never be `null`, say so in its type: `&Box` (no `?`) needs no check at all.

@@ -441,6 +441,28 @@ fn maybeSum(p: &?Node): int {
 See `tests/39_nullable_references/04_narrowed_cast.tr` (the passing
 counterpart) and `fail_cast_without_narrowing.tr`.
 
+**Every use is checked, not only `variable.field`** (2026-10-12; before it
+the three cases below compiled, and a null faulted or, once optimized, read
+garbage):
+
+- **A method call is a use.** `q.bump()` passes `q` as `self`, so it needs
+  the same proof as `q.val` (E081). A UFCS call whose callee takes the `&?T`
+  itself (`fn count(p: &?Node)` called as `q.count()`) reads nothing and
+  needs none.
+- **A `&?T` that is not a variable cannot be used at all.** Narrowing is
+  per-variable (below), so nothing can prove `p.next`, `find()` or `list[i]`
+  non-null: `p.next.val`, `find().val`, `list[i].val`, a method call on one
+  (E081) and `(p.next to &Node)` (E082) are rejected by the type checker
+  (`TypeChecker::rejectNullableNonVariableUse()`), with a hint to store the
+  value in a variable and check that. Comparing such a value with `null`,
+  storing it and passing it to a `&?T` parameter stay legal.
+- **A loop keeps a proof it does not disturb.** `if (p == null) { return; }`
+  followed by a loop that never assigns `p` leaves `p` non-null inside the
+  loop and after it; a loop that may assign it ends the proof.
+
+Tests: `08_narrowing_survives_loops.tr`, `09_method_call_after_check.tr`,
+`10_nullable_field_through_a_variable.tr` and the `fail_*` files beside them.
+
 **Known, deliberate limitations** (documented, not silently missing —
 matching this doc's own §2.7 precedent for the raw-pointer gate):
 narrowing is tracked **per-variable only**, never for a general expression

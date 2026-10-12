@@ -1223,6 +1223,22 @@ void TypeChecker::visitCast(CastExprAST &Node) {
   if (!checkUnsafeGate(Node.getDestTypePtr().get(), Node.getLoc(), &Node))
     checkUnsafeGate(OperandTy.get(), Node.getLoc(), &Node);
 
+  // `(h.next to &Node)`: NullabilityPass proves `&?T -> &T` only for a
+  // variable operand, and used to let every other operand through unchecked
+  // (a null became a `&T`). Nothing narrows a non-variable, so it is E082.
+  if (OperandTy && OperandTy->isNullableReference() && DestTy &&
+      DestTy->isReference() && !DestTy->isNullableReference() &&
+      !dynamic_cast<const VariableExprAST *>(Node.getOperand())) {
+#ifndef TYPECHECKER_NO_ERRORS
+    UnnarrowedNullableCastError(Node.getLoc(),
+                                UnnarrowedNullableCastError::NotAVariable{},
+                                OperandTy->getName())
+        .raise();
+#else
+    throw std::runtime_error("UnnarrowedNullableCastError");
+#endif
+  }
+
   // SEM-002 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): 'to'-cast
   // legality, Rule B1 -- moved here from Codegen (CastExprAST::codegen(),
   // CodegenExpr.cpp) so an illegal cast is caught at the TypeChecker

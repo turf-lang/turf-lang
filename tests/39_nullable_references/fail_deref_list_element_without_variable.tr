@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E081
+// EXPECT-DIAG: this '&?Node' value might be 'null', but you're accessing its 'val' field
+// An element of a `List<&?Node>` read directly: unchecked before, like
+// fail_deref_field_chain_without_variable.tr.
+import list::List;
+
+struct Node { val: int, next: &?Node }
+
+fn main(): int {
+    mut l: List<&?Node> = List::default();
+    l.push(null);
+    return l[0].val;
+}

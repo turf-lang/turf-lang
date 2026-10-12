@@ -20,3 +20,16 @@ Check it first, and convert inside the check:
     }
 
 Often you don't need the conversion at all: inside the `if b != null { ... }`, `b` can be used directly.
+
+Only a variable can be checked, so only a variable can be converted. For a `&?Box` that is a field, a call result or a list element (`h.item to &Box`), store it in a variable first, check that, and convert inside the check:
+
+    struct Holder { item: &?Box }
+
+    fn good(h: Holder): int {
+        mut b: &?Box = h.item;
+        if b != null {
+            mut safe: &Box = b to &Box;
+            return safe.val;
+        }
+        return 0;
+    }

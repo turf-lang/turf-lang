@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E081
+// EXPECT-DIAG: this '&?Node' value might be 'null', but you're accessing its 'val' field
+// A call's `&?T` result read directly: unchecked before, like
+// fail_deref_field_chain_without_variable.tr.
+struct Node { val: int, next: &?Node }
+
+fn find(): &?Node {
+    return null;
+}
+
+fn main(): int {
+    return find().val;
+}

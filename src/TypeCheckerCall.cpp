@@ -1047,7 +1047,40 @@ bool TypeChecker::tryUFCSOnReceiver(MethodCallExprAST &Node,
 }
 
 
+bool TypeChecker::rejectNullableNonVariableUse(const ExprAST *Base,
+                                               const TurfType *BaseTy,
+                                               SourceLocation Loc,
+                                               const std::string &Member,
+                                               bool IsMethod) {
+  if (!Base || !BaseTy || !BaseTy->isNullableReference())
+    return false;
+  if (dynamic_cast<const VariableExprAST *>(Base))
+    return false; // flow-sensitive: NullabilityPass decides, per path
+#ifndef TYPECHECKER_NO_ERRORS
+  PossibleNullDereferenceError(
+      Loc, PossibleNullDereferenceError::NotAVariable{}, BaseTy->getName(), Member,
+      IsMethod ? PossibleNullDereferenceError::Member::Method
+               : PossibleNullDereferenceError::Member::Field)
+      .raise();
+#else
+  throw std::runtime_error("PossibleNullDereferenceError");
+#endif
+  return true;
+}
+
 void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
+  visitMethodCallImpl(Node);
+  // After resolution, because only then is it known whether the receiver is
+  // dereferenced: a bound method reads it as `self`; a UFCS callee declared
+  // `fn f(p: &?Node)` just receives it (rejectNullableNonVariableUse()).
+  if (Node.getResolvedCallTarget() &&
+      (!Node.ResolvedViaUFCS || Node.UFCSLoadsReceiver) && Node.getBase())
+    rejectNullableNonVariableUse(Node.getBase(), getType(Node.getBase()).get(),
+                                 Node.getLoc(), Node.getMethod(),
+                                 /*IsMethod=*/true);
+}
+
+void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
   // 1. Visit the base expression (e.g. `io` in io.printline(...)).
   if (Node.getBase())
     const_cast<ExprAST *>(Node.getBase())->accept(*this);
@@ -2011,6 +2044,9 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
     IsSelfBase = BaseVar->getName() == "self";
   if (!IsSelfBase)
     checkUnsafeGate(BaseTy.get(), Node.getLoc(), &Node);
+
+  rejectNullableNonVariableUse(Node.getBase(), BaseTy.get(), Node.getLoc(),
+                               Node.getFieldName(), /*IsMethod=*/false);
 
   // STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(c)): `err.message` --
   // `err`'s type (AnyErrorType) is never a struct, so this must be checked

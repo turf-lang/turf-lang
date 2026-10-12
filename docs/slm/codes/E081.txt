@@ -25,7 +25,22 @@ CORRECT:
     }
 
 FIX:
-  Wrap the access in `if b != null { ... }`. If the value can never be null,
-  declare it `&Box` (no `?`) and no check is needed.
+  Wrap the access in `if b != null { ... }`. A method call (`b.grow()`) needs
+  the same check as a field read. If the value can never be null, declare it
+  `&Box` (no `?`) and no check is needed.
+
+  Only a VARIABLE can be checked. If the message says "this '&?T' value" (the
+  `&?T` is a field, a call result or a list element, as in `n.next.val`),
+  store it in a variable first and check that:
+
+    struct Node { val: int, next: &?Node }
+
+    fn good(n: &Node): int {
+        mut r: &?Node = n.next;
+        if r != null {
+            return r.val;
+        }
+        return 0;
+    }
 
 RELATED: E082 (converting `&?T` to `&T` with `to` without the same proof).

@@ -312,6 +312,20 @@ public:
   void visitFuncDef(FuncDefExprAST &Node) override;
   void visitFuncCall(FuncCallExprAST &Node) override;
   void visitMethodCall(MethodCallExprAST &Node) override;
+  /// Resolution proper; visitMethodCall() adds the check that needs its result.
+  void visitMethodCallImpl(MethodCallExprAST &Node);
+
+  /// Reports E081 when @p Base, of type @p BaseTy, is a `&?T` that is not a
+  /// plain variable and @p Member (a field, or a method if @p IsMethod) is
+  /// reached through it: `p.next.val`, `get().val`, `list[i].val`.
+  /// NullabilityPass narrows variables only, by design, and its check looked
+  /// at variables only, so every other `&?T` base was dereferenced with no
+  /// check at all: a null one faulted, or read garbage once optimized
+  /// (FREEZE §6.6: a `&?T` "must be null-tested before use"). A variable base
+  /// is left to that pass. Returns true if it reported.
+  bool rejectNullableNonVariableUse(const ExprAST *Base, const TurfType *BaseTy,
+                                    SourceLocation Loc, const std::string &Member,
+                                    bool IsMethod);
 
   // ── Structs & field access ────────────────────────────────────────────────
   void visitFieldAccess(FieldAccessExprAST &Node) override;
