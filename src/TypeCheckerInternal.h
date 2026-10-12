@@ -15,6 +15,11 @@
 #include "ResolverSymbolBase.h"    // ResolverSourceLocation
 #include "Types.h"                 // TurfType
 
+class ExprAST;
+namespace Monomorphize {
+class InstantiationCollector;
+}
+
 // toSourceLocation() is a single `inline` function shared with the Resolver
 // split -- see ResolverSymbolBase.h's doc comment (already pulled in
 // transitively via ResolverSymbolBase.h below).
@@ -45,6 +50,14 @@ bool operatorSelfOperandMatches(const TurfType *ParamTy,
 // assertion failure once erasure is gone).
 bool isOrWrapsGenericParam(const TurfType *Ty);
 bool isFullyConcreteType(const TurfType *Ty);
+
+// Defined and documented in TypeCheckerDecl.cpp. Also called by
+// Monomorphize::drainStructRequests() for a struct clone's own fields, since a
+// clone is never type-checked: `List<Big>`'s `h: &ListHeader<Big>` (LEC-009)
+// has no other site that would request `ListHeader<Big>`.
+void recordGenericFieldInstantiations(const TurfTypePtr &Ty, SourceLocation Loc,
+                                      ExprAST *Site,
+                                      Monomorphize::InstantiationCollector *Collector);
 
 // LEC-003: defined in ResolverDecl.cpp and documented in Resolver.h (declared
 // here too so the TypeChecker needn't pull in the whole Resolver). True the

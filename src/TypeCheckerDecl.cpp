@@ -160,12 +160,17 @@ bool containsUninstantiatedGenericParam(const TurfType *Ty) {
   if (isOrWrapsGenericParam(Ty))
     return true;
   if (const auto *ST = dynamic_cast<const TurfStructType *>(Ty)) {
+    // !isFullyConcreteType, not isOrWrapsGenericParam: a collection's only
+    // field is its header handle (`h: &ListHeader<T>`, LEC-009), where the
+    // open `T` sits in a GenericType's arguments. This still reads only the
+    // field's own type, never the fields of a struct it names.
     for (const auto &F : ST->getFields())
-      if (isOrWrapsGenericParam(F.Type.get()))
+      if (F.Type && !isFullyConcreteType(F.Type.get()))
         return true;
   }
   return false;
 }
+} // namespace
 
 /// TYPE-002 (S15/D2): record a Struct-kind instantiation request for every
 /// concrete GenericType occurrence reachable from a struct FIELD's declared
@@ -226,7 +231,6 @@ void recordGenericFieldInstantiations(const TurfTypePtr &Ty, SourceLocation Loc,
     return;
   }
 }
-} // namespace
 
 void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
   if (Node.isImmutable() && !Node.hasExplicitInit()) {

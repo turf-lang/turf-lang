@@ -9,6 +9,7 @@
 #include "SymbolTable.h" // GlobalSymbolTable -- RegisterType()'s target, distinct from Resolver's own SymTable_
 #include "TypeChecker.h"
 #include "TypeWalk.h" // SMP-002: shared substitute() walker
+#include "TypeCheckerInternal.h" // recordGenericFieldInstantiations(): a clone's own generic fields
 
 #include <algorithm>
 #include <cassert>
@@ -1347,6 +1348,13 @@ bool drainStructRequests(
     auto *Clone = static_cast<StructDeclExprAST *>(ClonedUP.get());
     for (auto &Field : Clone->getFieldsMut())
       Field.Type = substituteConcreteTypes(Field.Type, Subst);
+    // A generic type a field names (`List<Big>`'s `h: &ListHeader<Big>`,
+    // LEC-009) is requested here: a clone is never type-checked, so nothing
+    // else would, and the field's layout would stay an opaque stub. The
+    // caller re-runs this drain until no entry is left (main.cpp).
+    for (const auto &Field : Clone->getFields())
+      recordGenericFieldInstantiations(Field.Type, Entry.Request.Site,
+                                       Entry.Sites.front(), &Collector);
 
     // Rename to the SAME mangling scheme drainFreeFunctionRequests()/
     // drainMethodRequests() already use (§9.5) -- "List" + [int] ->
