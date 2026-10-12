@@ -285,6 +285,12 @@ Value *MethodCallExprAST::codegen() {
         return nullptr;
       ArgVals.push_back(V);
     }
+    // The hidden trailing argument of a `@caller_location` callee, as the
+    // struct-method branch below supplies it: `s.substring(1, 3)` read past
+    // ArgVals in the cast loop and asserted (found by REL-005's benchmarks;
+    // `strings::substring(s, 1, 3)` was fine).
+    if (ResolvedCallTarget->HasCallerLocation)
+      ArgVals.push_back(BuildCallerLocationValue(Loc));
 
     std::string MangledName = ResolvedCallTarget->mangledName();
     llvm::Function *CalleeF = TheModule->getFunction(MangledName);
