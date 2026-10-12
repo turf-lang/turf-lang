@@ -414,6 +414,12 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
             .raise();
       } else if (Field.Type) {
         checkLiteralRepresentable(Arg, Field.Type.get(), Node.getLoc());
+        // `E::Full(List::default())`: the field's declared `List<int>` is the
+        // only place the argument's instantiation is written. Without this
+        // the bare template `List` reached Codegen ("Cannot allocate unsized
+        // type", an internal compiler error), as it once did for a call
+        // argument and a `return` (noteConstructedArgs()).
+        noteConstructedType(Arg, Field.Type);
       }
     }
     if (NArgs == FieldCount + 1 && ArgTypes[FieldCount] &&
