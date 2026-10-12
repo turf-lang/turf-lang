@@ -355,6 +355,12 @@ pub fn<K, V> Map.values(): List<V> {
 // `[]=` takes `&Map<K, V>`, a leftover of the by-value Map (before LEC-009 a
 // by-value `m` grew only a local copy and lost the write). A handle copy
 // would now do; the signature stays because it is part of the 2.x surface.
+//
+// `@caller_location` on `[]`: get() is itself `@caller_location`, and a
+// marked function forwards its own caller to the one it calls, so `m[k]` on
+// a missing key names the line that indexed (F-API-3). Without it the panic
+// named this file's own `return m.get(key);` line (found by turf-fuzz).
+@caller_location
 operator<K, V> [](m: Map<K, V>, key: K): V {
     return m.get(key);
 }
