@@ -4,7 +4,8 @@ CAUSE:
   A reference (`&T`) to a LOCAL variable was allowed to outlive the function.
   Locals live only until the function returns, then the memory is reused, so
   the reference would dangle. It is rejected as a return value, stored into a
-  list, or stored into a struct that outlives the call.
+  list, stored into a struct that outlives the call, or put in an error
+  payload (`return E1::P(&n);`).
 
 INCORRECT:
     struct Node { val: int }

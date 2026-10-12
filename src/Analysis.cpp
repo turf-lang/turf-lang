@@ -1930,6 +1930,16 @@ public:
     if (DoReport) {
       if (Node.isIntrinsic(BareIntrinsic::Heap) && !Node.getArgs().empty())
         flagIfStack(Node.getArgs()[0].get(), Node.getLoc(), "boxed with heap()");
+      // Sink: an error value's payload (`E1::P(&n)`). Codegen copies the
+      // fields into a heap block (CodegenErrorVariantConstruct()), which is
+      // what lets the error travel out through a `return`, so this is the
+      // same unconditional sink as heap()'s operand (owner decision
+      // 2026-10-12, found by turf-fuzz: the reference was read back after
+      // the frame died).
+      const auto *SC = dynamic_cast<const ScopeAccessExprAST *>(Node.getCallee());
+      if (SC && SC->ResolvedKind == ScopeAccessKind::ErrorVariantConstruct)
+        for (const auto &A : Node.getArgs())
+          flagIfStack(A.get(), Node.getLoc(), "stored in an error payload");
     }
   }
   void visitMethodCall(MethodCallExprAST &Node) override {

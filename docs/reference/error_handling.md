@@ -74,7 +74,7 @@ error IOError {
 
 Any sized type is allowed — primitives, enums, structs, arrays, generic instances such as `List<string>` — except an error type, a `!T` or `void` (an error value describes what went wrong; it does not contain another failure). A field's type follows the same visibility rules as a struct field's.
 
-**Constructing.** Arguments are positional, one per field, in order: `IOError::Denied("a.txt", 7)`. A trailing `string` after the fields is the message: `IOError::NotFound("a.txt", "no such file")`. A variant with *N* fields takes *N* or *N+1* arguments; one with no fields takes none, or exactly one (the message). Anything else is error **E096**, which names the declared fields.
+**Constructing.** Arguments are positional, one per field, in order: `IOError::Denied("a.txt", 7)`. A trailing `string` after the fields is the message: `IOError::NotFound("a.txt", "no such file")`. A variant with *N* fields takes *N* or *N+1* arguments; one with no fields takes none, or exactly one (the message). Anything else is error **E096**, which names the declared fields. The payload is copied to the heap, so it outlives the function that built it: a reference field may hold a parameter or a `heap()` value, but not `&local` (E086).
 
 **A variant with fields is not a value on its own.** `return IOError::NotFound;` is E096 — there is no `path` to fill in. A bare reference is still legal in two places, where only *which* variant occurred is read: as an operand of `==`/`!=`, and as the head of a pattern.
 
