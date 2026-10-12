@@ -377,10 +377,14 @@ Value *BinaryExprAST::codegen() {
                                           : EmitSafeSRem(L, R, "modtmp");
   }
 
-  // Comparison
+  // Comparison. A `char` is an unsigned byte (0-255, variables_and_types.md),
+  // so its ordering predicates are unsigned: with signed ones `(200 to char)
+  // > 'a'` was false, though `char -> int` zero-extends (found by turf-fuzz).
   case '<': {
     TurfTypePtr CmpType = CommonType->isNamed("bool") ? TurfInt() : CommonType;
     CastBoth(CmpType);
+    if (CmpType->isNamed("char"))
+      return Builder->CreateICmpULT(L, R, "cmptmp");
     return CmpType->isNamed("double") ? Builder->CreateFCmpOLT(L, R, "cmptmp")
                                       : Builder->CreateICmpSLT(L, R, "cmptmp");
   }
@@ -388,6 +392,8 @@ Value *BinaryExprAST::codegen() {
   case '>': {
     TurfTypePtr CmpType = CommonType->isNamed("bool") ? TurfInt() : CommonType;
     CastBoth(CmpType);
+    if (CmpType->isNamed("char"))
+      return Builder->CreateICmpUGT(L, R, "cmptmp");
     return CmpType->isNamed("double") ? Builder->CreateFCmpOGT(L, R, "cmptmp")
                                       : Builder->CreateICmpSGT(L, R, "cmptmp");
   }
@@ -418,6 +424,8 @@ Value *BinaryExprAST::codegen() {
   case TOK_GEQ: {
     TurfTypePtr CmpType = CommonType->isNamed("bool") ? TurfInt() : CommonType;
     CastBoth(CmpType);
+    if (CmpType->isNamed("char"))
+      return Builder->CreateICmpUGE(L, R, "cmptmp");
     return CmpType->isNamed("double") ? Builder->CreateFCmpOGE(L, R, "cmptmp")
                                       : Builder->CreateICmpSGE(L, R, "cmptmp");
   }
@@ -425,6 +433,8 @@ Value *BinaryExprAST::codegen() {
   case TOK_LEQ: {
     TurfTypePtr CmpType = CommonType->isNamed("bool") ? TurfInt() : CommonType;
     CastBoth(CmpType);
+    if (CmpType->isNamed("char"))
+      return Builder->CreateICmpULE(L, R, "cmptmp");
     return CmpType->isNamed("double") ? Builder->CreateFCmpOLE(L, R, "cmptmp")
                                       : Builder->CreateICmpSLE(L, R, "cmptmp");
   }
