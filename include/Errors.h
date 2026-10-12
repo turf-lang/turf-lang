@@ -326,6 +326,14 @@ public:
       // needs it for a counter that longjmp can desync. See ParseExpression/
       // ParseBlock's recursion-guard doc comment in Lexer.h.
       g_parseRecursionDepth = 0;
+      // The jump abandons this object's frame without destroying it, and
+      // raise() never returns, so destroy it here: DiagnosticEngine::add()
+      // above already copied everything it needs. Without this, every
+      // diagnostic raised under the query facade leaked its message, hint and
+      // related locations (~170 bytes each; turf-lsp analyses on every
+      // keystroke). The destructor is virtual, so a subclass's own members go
+      // too. Found by turf-fuzz's libFuzzer target with leak detection on.
+      const_cast<TurfError *>(this)->~TurfError();
       longjmp(g_recoverJmp, 1);
     } else {
       DiagnosticEngine::flushAll();
