@@ -736,18 +736,7 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
   // codegen was skipped (S14a, this session) -- the construction fell back
   // to the now-permanently-opaque bare "List" struct instead of the real,
   // per-instantiation one.
-  if (LhsTy) {
-    if (dynamic_cast<const GenericType *>(LhsTy.get())) {
-      if (auto *FC = dynamic_cast<FuncCallExprAST *>(
-              const_cast<ExprAST *>(Node.getRHS()))) {
-        if (auto *SC = dynamic_cast<const ScopeAccessExprAST *>(FC->getCallee())) {
-          if (SC->ResolvedKind == ScopeAccessKind::DefaultConstruct ||
-              SC->ResolvedKind == ScopeAccessKind::ConstructorCall)
-            FC->ConstructedType = LhsTy;
-        }
-      }
-    }
-  }
+  noteConstructedType(Node.getRHS(), LhsTy);
 
   // The assignment expression type is the RHS type
   setType(&Node, RhsTy);

@@ -202,6 +202,37 @@ static TurfTypePtr substituteReturnType(
 }
 
 
+void noteConstructedType(const ExprAST *E, const TurfTypePtr &Expected) {
+  if (!Expected || !dynamic_cast<const GenericType *>(Expected.get()) ||
+      !isFullyConcreteType(Expected.get()))
+    return;
+  auto *FC = dynamic_cast<FuncCallExprAST *>(const_cast<ExprAST *>(E));
+  if (!FC)
+    return;
+  auto *SC = dynamic_cast<const ScopeAccessExprAST *>(FC->getCallee());
+  if (SC && (SC->ResolvedKind == ScopeAccessKind::DefaultConstruct ||
+             SC->ResolvedKind == ScopeAccessKind::ConstructorCall))
+    FC->ConstructedType = Expected;
+}
+
+// noteConstructedType() for every argument, against its parameter's type
+// with the receiver's own type arguments substituted (`List<Box<int>>.push`'s
+// `item: T` is `Box<int>`). Without it `bs.push(Box::default())` built the
+// bare template `Box` and died in Codegen with "struct method call argument
+// type mismatch".
+static void noteConstructedArgs(
+    const std::vector<std::unique_ptr<ExprAST>> &Args,
+    const std::vector<FunctionParam> &Params, size_t ParamOffset,
+    const std::unordered_map<std::string, TurfTypePtr> *Subst = nullptr) {
+  for (size_t i = 0; i < Args.size() && i + ParamOffset < Params.size(); ++i) {
+    TurfTypePtr ParamTy = Params[i + ParamOffset].Type;
+    if (Subst && !Subst->empty())
+      ParamTy = substituteReturnType(ParamTy, *Subst);
+    noteConstructedType(Args[i].get(), ParamTy);
+  }
+}
+
+
 /**
  * @brief LEC-006: does operator candidate @p C accept @p Operands, and if so
  *        what does the call return?
@@ -677,6 +708,7 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
 
     // SEM-002 -- see visitVarDecl()'s identical comment (TypeCheckerDecl.cpp).
     checkCallArgsRepresentable(Node.getArgs(), Best->Params, Node.getLoc());
+    noteConstructedArgs(Node.getArgs(), Best->Params, 0);
     noteSliceArguments(Node.getArgs(), nullptr, Node.ResolvedCallTarget, 0,
                        Node.getLoc()); // E141
 
@@ -986,6 +1018,7 @@ bool TypeChecker::tryUFCSFallback(MethodCallExprAST &Node,
   // corresponding entry in Node.getArgs() -- the explicit args start at
   // Params[1], per this function's own receiver-binding comments above.
   checkCallArgsRepresentable(Node.getArgs(), Best->Params, Node.getLoc(), 1);
+  noteConstructedArgs(Node.getArgs(), Best->Params, 1);
   noteSliceArguments(Node.getArgs(), Node.getBase(), Node.ResolvedCallTarget,
                      1, Node.getLoc()); // E141
   setType(&Node, Best->ReturnType);
@@ -1144,6 +1177,7 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
     Node.ResolvedCallTarget = std::make_shared<ResolverFunctionSymbol>(*Best);
     // SEM-002 -- see visitVarDecl()'s identical comment (TypeCheckerDecl.cpp).
     checkCallArgsRepresentable(Node.getArgs(), Best->Params, Node.getLoc());
+    noteConstructedArgs(Node.getArgs(), Best->Params, 0);
     noteSliceArguments(Node.getArgs(), nullptr, Node.ResolvedCallTarget, 0,
                        Node.getLoc()); // E141
     setType(&Node, Best->ReturnType);
@@ -1461,6 +1495,8 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
           // instance method) as the type-compatibility filter just above.
           checkCallArgsRepresentable(Node.getArgs(), Best->Params, Node.getLoc(),
                                      IsStaticMethod ? 0 : 1);
+          noteConstructedArgs(Node.getArgs(), Best->Params, IsStaticMethod ? 0 : 1,
+                              &Subst);
           noteSliceArguments(Node.getArgs(), nullptr, Node.ResolvedCallTarget,
                              IsStaticMethod ? 0 : 1, Node.getLoc()); // E141
 

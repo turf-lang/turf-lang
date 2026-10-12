@@ -302,6 +302,16 @@ void TypeChecker::visitReturn(ReturnExprAST &Node) {
 
   TurfTypePtr RetTy = getType(Node.getVal());
 
+  // `return Box::default();` in a `fn f(): Box<int>` builds a `Box<int>`
+  // (the success type for a `!Box<int>`); it built the bare template before,
+  // an unsized LLVM type the verifier rejected.
+  if (Node.getVal() && !ReturnTypeStack_.empty() && ReturnTypeStack_.back()) {
+    TurfTypePtr Want = ReturnTypeStack_.back();
+    if (Want->isErrorUnion())
+      Want = static_cast<const TurfErrorUnionType *>(Want.get())->getSuccessTypePtr();
+    noteConstructedType(Node.getVal(), Want);
+  }
+
   // Check against the enclosing function's declared return type
   if (!ReturnTypeStack_.empty() && ReturnTypeStack_.back()) {
     const TurfType *Declared = ReturnTypeStack_.back().get();

@@ -419,16 +419,7 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
   // DefaultConstruct/ConstructorCall branch (CodegenFunc.cpp) so its own
   // alloca uses the per-instantiation TurfStructType (drainStructRequests(),
   // S13a), not the shared, erasure-era base struct.
-  if (dynamic_cast<const GenericType *>(DeclTy.get())) {
-    if (auto *FC = dynamic_cast<FuncCallExprAST *>(
-            const_cast<ExprAST *>(Node.getInitializer()))) {
-      if (auto *SC = dynamic_cast<const ScopeAccessExprAST *>(FC->getCallee())) {
-        if (SC->ResolvedKind == ScopeAccessKind::DefaultConstruct ||
-            SC->ResolvedKind == ScopeAccessKind::ConstructorCall)
-          FC->ConstructedType = DeclTy;
-      }
-    }
-  }
+  noteConstructedType(Node.getInitializer(), DeclTy);
 
   // `unsafe { }` gate (issue #238): declaring a raw ptr/T*-typed variable
   // is one of the three explicitly-gated "uses" (declaration, cast,

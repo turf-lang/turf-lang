@@ -51,6 +51,13 @@ bool operatorSelfOperandMatches(const TurfType *ParamTy,
 bool isOrWrapsGenericParam(const TurfType *Ty);
 bool isFullyConcreteType(const TurfType *Ty);
 
+// `G::default()`/`G::new(...)` has the bare type `G` and cannot know its own
+// type arguments; when the place it flows into wants a concrete `G<A>` (a
+// declaration, an assignment, an argument, a `return`), this hands that type
+// to the call (FuncCallExprAST::ConstructedType), which Codegen builds.
+// Defined in TypeCheckerCall.cpp.
+void noteConstructedType(const ExprAST *E, const TurfTypePtr &Expected);
+
 // Defined and documented in TypeCheckerDecl.cpp. Also called by
 // Monomorphize::drainStructRequests() for a struct clone's own fields, since a
 // clone is never type-checked: `List<Big>`'s `h: &ListHeader<Big>` (LEC-009)
