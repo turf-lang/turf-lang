@@ -68,18 +68,60 @@ public:
 // point in the pipeline (FuncDefExprAST::codegen(), CodegenFunc.cpp).
 class PossibleNullDereferenceError : public TurfError {
 public:
+  /// What is reached through the reference. A method call dereferences its
+  /// receiver exactly as a field read does (`self` is the receiver).
+  enum class Member { Field, Method };
+  /// Selects the constructor for a base that is not a variable.
+  struct NotAVariable {};
+
   PossibleNullDereferenceError(SourceLocation Loc, const std::string &Name,
-                               const std::string &FieldName)
+                               const std::string &MemberName,
+                               Member Kind = Member::Field)
       : TurfError(Loc,
                   Colors::BRIGHT_RED + "Possible null dereference: '" +
                       Colors::CYAN + Name + Colors::BRIGHT_RED +
-                      "' might be 'null' here, but you're accessing its '" +
-                      Colors::CYAN + FieldName + Colors::BRIGHT_RED +
-                      "' field." + Colors::RESET,
+                      "' might be 'null' here, but you're " + verb(Kind) +
+                      " its '" + Colors::CYAN + MemberName +
+                      Colors::BRIGHT_RED + "' " + noun(Kind) + "." +
+                      Colors::RESET,
                   "Add a null check first, e.g. 'if (" + Name +
-                      " != null) { ... }', and access '." + FieldName +
+                      " != null) { ... }', and " + hintVerb(Kind) + " '." +
+                      MemberName + (Kind == Member::Method ? "()" : "") +
                       "' only inside it.") {
     Category_ = SLM::ErrorCategory::MEMORY_ERROR;
+  }
+
+  /// A `&?T` value that is not a variable: `p.next.val`, `get().val`,
+  /// `list[i].val`. Only a variable compared with `null` is ever narrowed
+  /// (NullabilityPass), so no check written around such an expression can
+  /// prove it; the fix is always to name the value first.
+  PossibleNullDereferenceError(SourceLocation Loc, NotAVariable,
+                               const std::string &TypeName,
+                               const std::string &MemberName,
+                               Member Kind = Member::Field)
+      : TurfError(Loc,
+                  Colors::BRIGHT_RED + "Possible null dereference: this '" +
+                      Colors::CYAN + TypeName + Colors::BRIGHT_RED +
+                      "' value might be 'null', but you're " + verb(Kind) +
+                      " its '" + Colors::CYAN + MemberName +
+                      Colors::BRIGHT_RED + "' " + noun(Kind) + "." +
+                      Colors::RESET,
+                  "A null check only works on a variable. Store the value in "
+                  "one and check that: 'mut r: " + TypeName +
+                      " = ...; if (r != null) { ... r." + MemberName +
+                      (Kind == Member::Method ? "()" : "") + " ... }'.") {
+    Category_ = SLM::ErrorCategory::MEMORY_ERROR;
+  }
+
+private:
+  static const char *verb(Member K) {
+    return K == Member::Method ? "calling" : "accessing";
+  }
+  static const char *noun(Member K) {
+    return K == Member::Method ? "method" : "field";
+  }
+  static const char *hintVerb(Member K) {
+    return K == Member::Method ? "call" : "access";
   }
 };
 
@@ -94,6 +136,9 @@ public:
 // with the same dataflow state.
 class UnnarrowedNullableCastError : public TurfError {
 public:
+  /// Selects the constructor for an operand that is not a variable.
+  struct NotAVariable {};
+
   UnnarrowedNullableCastError(SourceLocation Loc, const std::string &Name)
       : TurfError(Loc,
                   Colors::BRIGHT_RED + "Cannot cast '" + Colors::CYAN + Name +
@@ -104,6 +149,21 @@ public:
                       Name + " != null) { ... " + Name +
                       " to &T ... }', so the cast only runs where it's "
                       "known to be safe.") {
+    Category_ = SLM::ErrorCategory::TYPE_MISMATCH;
+  }
+
+  /// `(h.next to &Node)`: the operand is not a variable, so nothing can have
+  /// narrowed it (see PossibleNullDereferenceError's second constructor).
+  UnnarrowedNullableCastError(SourceLocation Loc, NotAVariable,
+                              const std::string &TypeName)
+      : TurfError(Loc,
+                  Colors::BRIGHT_RED + "Cannot cast this '" + Colors::CYAN +
+                      TypeName + Colors::BRIGHT_RED +
+                      "' value to a non-null reference -- it might be 'null'."
+                      + Colors::RESET,
+                  "A null check only works on a variable. Store the value in "
+                  "one, check it, and cast inside the check: 'mut r: " +
+                      TypeName + " = ...; if (r != null) { ... r to &T ... }'.") {
     Category_ = SLM::ErrorCategory::TYPE_MISMATCH;
   }
 };

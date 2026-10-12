@@ -1,0 +1,22 @@
+// EXPECT-DIAG: E081
+// EXPECT-DIAG: Possible null dereference: 'q' might be 'null' here
+// The other direction of 08_narrowing_survives_loops.tr: a loop that may
+// assign the variable ends its null check, on the back edge and at the exit.
+struct Node { val: int, next: &?Node }
+
+fn f(r: &?Node): int {
+    mut q: &?Node = r;
+    if (q != null) {
+        mut k: int = 0;
+        while k < 6 {
+            k += 1;
+            if k == 5 { q = null; }
+        }
+        return q.val;
+    }
+    return 0;
+}
+
+fn main(): int {
+    return f(null);
+}

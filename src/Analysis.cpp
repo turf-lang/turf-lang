@@ -1016,6 +1016,25 @@ public:
   }
   void visitMethodCall(MethodCallExprAST &Node) override {
     checkOnly(Node.getBase(), OnTrue, Tracked, DoReport);
+    // `q.bump()` dereferences `q` as surely as `q.val` does: the receiver is
+    // the callee's `self`. Only the field form was checked at first, so a
+    // method call on a null `&?T` compiled and faulted. A UFCS call hands the
+    // receiver over as an ordinary first argument (`fn total(p: &?Node)`
+    // called as `q.total()`), which reads nothing here, unless the callee
+    // takes the struct by value and Codegen loads it (UFCSLoadsReceiver).
+    if (Node.getResolvedCallTarget() &&
+        (!Node.ResolvedViaUFCS || Node.UFCSLoadsReceiver)) {
+      if (const auto *BaseVar = dynamic_cast<const VariableExprAST *>(Node.getBase())) {
+        const VariableSymbol *Sym = BaseVar->getResolvedSymbol();
+        if (Sym && Tracked.count(Sym) && !OnTrue.count(Sym) && DoReport) {
+          PossibleNullDereferenceError Err(
+              Node.getLoc(), BaseVar->getName(), Node.getMethod(),
+              PossibleNullDereferenceError::Member::Method);
+          Err.withRelated({Sym->DeclLoc.Line, Sym->DeclLoc.Col}, "declared here");
+          Err.raise();
+        }
+      }
+    }
     for (const auto &A : Node.getArgs())
       checkOnly(A.get(), OnTrue, Tracked, DoReport);
   }
@@ -1091,7 +1110,18 @@ void NullabilityPass::runOnCFG(CFG &Cfg) {
   TurfBasicBlock *Entry = Cfg.getEntryBlock();
   size_t entryIdx = Entry ? index[Entry] : 0;
 
+  // A must-analysis starts every block but the entry at the top of the
+  // lattice ("everything proven") and only ever removes. Starting them empty,
+  // as this pass first did, is still sound but loses every fact at a loop
+  // header: the back edge's contribution is the empty set until the body has
+  // been processed, the intersection with it is empty, and nothing ever grows
+  // back. `if (p == null) { return 0; } while (...) { } p.val` was E081, in
+  // the loop and after it. DefiniteAssignmentPass above has always started
+  // from its own top (AllBodyDeclared).
   std::vector<NonNullSet> IN(N);
+  for (size_t i = 0; i < N; ++i)
+    if (i != entryIdx)
+      IN[i] = NonNullSet(Tracked.begin(), Tracked.end());
   std::vector<NonNullSet> SingleOut(N), TrueOut(N), FalseOut(N);
   std::vector<bool> HasEdgeSplit(N, false);
 
