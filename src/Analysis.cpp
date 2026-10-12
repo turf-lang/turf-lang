@@ -1405,6 +1405,21 @@ RefProvenance getPlace(const ProvMap &Map, const PlaceKey &K) {
   return implicitProv(K);
 }
 
+// Stack on some path reaching here: flagged at every sink.
+bool isStackish(std::optional<RefProvenance> P) {
+  return P == RefProvenance::Stack || P == RefProvenance::MayStack;
+}
+
+// Two paths' provenance for one place, merged: equal stays, a Stack on
+// either side makes MayStack, any other disagreement is Unknown.
+RefProvenance mergeProv(RefProvenance A, RefProvenance B) {
+  if (A == B)
+    return A;
+  if (isStackish(A) || isStackish(B))
+    return RefProvenance::MayStack;
+  return RefProvenance::Unknown;
+}
+
 std::optional<RefProvenance> known(RefProvenance P) {
   if (P == RefProvenance::Unknown)
     return std::nullopt;
@@ -1740,13 +1755,14 @@ std::optional<RefProvenance> classifyProvenance(const ExprAST *E,
   // the two value expressions. Its value is a's or b's, so when both have the
   // same provenance it has that one: `return (c give &x otherwise &y);` is a
   // Stack value returned, and compiled clean while this was Unknown. Branches
-  // that disagree stay Unknown, like disagreeing paths at a CFG merge.
+  // that disagree merge like paths at a CFG merge (mergeProv()): one Stack
+  // branch makes the whole `give` MayStack.
   if (const auto *IE = dynamic_cast<const IfExprAST *>(E)) {
     if (IE->getBranches().size() == 1 && IE->getElse()) {
       auto A = classifyProvenance(IE->getThen(), Map);
       auto B = classifyProvenance(IE->getElse(), Map);
-      if (A && A == B)
-        return A;
+      return known(mergeProv(A.value_or(RefProvenance::Unknown),
+                             B.value_or(RefProvenance::Unknown)));
     }
     return std::nullopt;
   }
@@ -1833,7 +1849,7 @@ class EscapeCheckVisitor : public ASTChildWalker {
   bool holdsStack(const ExprAST *E) {
     if (!E)
       return false;
-    if (classifyProvenance(E, Map) == RefProvenance::Stack)
+    if (isStackish(classifyProvenance(E, Map)))
       return true;
     if (const auto *AL = dynamic_cast<const ArrayLiteralExprAST *>(E)) {
       for (const auto &El : AL->getElements())
@@ -1851,7 +1867,7 @@ class EscapeCheckVisitor : public ASTChildWalker {
         break;
       if (!K.empty() && K.back() == '#')
         continue;
-      if (It->second == RefProvenance::Stack)
+      if (isStackish(It->second))
         return true;
     }
     return false;
@@ -1861,7 +1877,7 @@ class EscapeCheckVisitor : public ASTChildWalker {
                    const std::string &SinkDescription) {
     if (!DoReport)
       return;
-    if (classifyProvenance(ValueExpr, Map) == RefProvenance::Stack)
+    if (isStackish(classifyProvenance(ValueExpr, Map)))
       DanglingReferenceEscapeError(Loc, SinkDescription).raise();
     if (holdsStack(ValueExpr))
       DanglingReferenceEscapeError(
@@ -2089,8 +2105,9 @@ public:
 // The meet at a merge: a place keeps a provenance only where both paths
 // agree on it -- comparing what each path READS there, implicit defaults
 // included, so a parameter overwritten on one path only is Unknown after the
-// merge -- and a region marker from either path survives (an overwrite on
-// any path means the parameter's default no longer holds).
+// merge -- except that Stack on either path makes MayStack (mergeProv()), and
+// a region marker from either path survives (an overwrite on any path means
+// the parameter's default no longer holds).
 ProvMap meetProv(const ProvMap &A, const ProvMap &B) {
   ProvMap R;
   auto Take = [&](const PlaceKey &K) {
@@ -2101,7 +2118,7 @@ ProvMap meetProv(const ProvMap &A, const ProvMap &B) {
       return;
     }
     RefProvenance PA = getPlace(A, K), PB = getPlace(B, K);
-    R[K] = PA == PB ? PA : RefProvenance::Unknown;
+    R[K] = mergeProv(PA, PB);
   };
   for (const auto &KV : A)
     Take(KV.first);

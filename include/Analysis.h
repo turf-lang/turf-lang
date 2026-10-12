@@ -153,7 +153,11 @@ public:
 // (owner decisions on turf-fuzz's escape-boundary questions) an error payload
 // is a sink, and a call none of whose arguments can reach this frame -- or a
 // stdlib collection's element -- is Heap.
-enum class RefProvenance { Stack, Param, Heap, Unknown };
+// MayStack is a merge where at least one path holds Stack and another does
+// not (`p = heap(n); if c { p = &n; }`): flagged like Stack at every sink,
+// since that path is a real escape (owner decision 2026-10-12; Unknown on the
+// other path does not excuse it). Unknown alone is still never flagged.
+enum class RefProvenance { Stack, Param, Heap, Unknown, MayStack };
 
 class EscapePass {
 public:
