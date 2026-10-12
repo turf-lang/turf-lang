@@ -1577,6 +1577,16 @@ void EscapePass::runOnCFG(CFG &Cfg) {
   size_t entryIdx = Entry ? index[Entry] : 0;
 
   std::vector<ProvMap> IN(N), OUT(N);
+  // A block's OUT is meaningful only once the block has been computed from a
+  // real IN. The meet ("keep an entry where every predecessor agrees") then
+  // skips predecessors not yet reached, which is the top of this lattice.
+  // Meeting an uncomputed predecessor as an empty map instead, as this pass
+  // first did, is the same mistake NullabilityPass had (fixed in d896209): a
+  // loop header met its not-yet-processed back edge, came out empty, and the
+  // emptiness went round the loop for good. Every provenance became Unknown,
+  // which is never flagged, so `mut p: &N = &n; while ... { } return p;`
+  // returned a reference into a dead frame and compiled clean.
+  std::vector<bool> Reached(N, false);
 
   auto computeOut = [&](size_t b, bool DoReport) {
     ProvMap Cur = IN[b];
@@ -1590,8 +1600,8 @@ void EscapePass::runOnCFG(CFG &Cfg) {
   };
 
   // ── Step 1: silent dataflow to a fixed point ──────────────────────────────
-  for (size_t i = 0; i < N; ++i)
-    computeOut(i, /*DoReport=*/false);
+  computeOut(entryIdx, /*DoReport=*/false);
+  Reached[entryIdx] = true;
 
   bool changed = true;
   while (changed) {
@@ -1602,23 +1612,24 @@ void EscapePass::runOnCFG(CFG &Cfg) {
 
       ProvMap newIN;
       bool first = true;
-      bool hasPred = false;
       for (size_t p = 0; p < N; ++p) {
+        if (!Reached[p])
+          continue;
         const auto &Succs = Blocks[p]->getSuccessors();
         for (auto *S : Succs) {
           if (!index.count(S) || index.at(S) != b)
             continue;
-          hasPred = true;
           newIN = first ? OUT[p] : meetProv(newIN, OUT[p]);
           first = false;
         }
       }
-      if (!hasPred)
-        continue;
+      if (first)
+        continue; // no reached predecessor yet (or unreachable)
 
-      if (newIN != IN[b]) {
+      if (!Reached[b] || newIN != IN[b]) {
         IN[b] = std::move(newIN);
         computeOut(b, /*DoReport=*/false);
+        Reached[b] = true;
         changed = true;
       }
     }
