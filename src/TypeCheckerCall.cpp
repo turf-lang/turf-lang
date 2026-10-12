@@ -2186,6 +2186,17 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
       setType(&Node, instantiatedFieldType(*STy, GenericTypeArgs, FieldTy));
       return;
     }
+    // A concrete type that is not a struct has no fields at all. An open
+    // generic parameter (a template's body, checked before it is cloned) is
+    // left to its instantiations.
+    if (GlobalSymbolTable && isFullyConcreteType(BaseTy.get()) &&
+        !dynamic_cast<const NamedType *>(BaseTy.get()) &&
+        !dynamic_cast<const GenericType *>(BaseTy.get())) {
+      UnknownStructFieldError(Node.getNameLoc(), UnknownStructFieldError::NotAStruct{},
+                              BaseTy->getName(), Node.getFieldName())
+          .raise();
+      return;
+    }
   }
 #endif
   // Field type unknown or TypeChecker running without struct registry.

@@ -81,6 +81,24 @@ public:
                          StructName + "'.");
     trySetDeterministicRename(FieldName, Suggestions);
   }
+
+  /// The base is not a struct at all (`"x".a`, `n.len` on an int): it has no
+  /// fields, so no name is right. Before this the type checker let it
+  /// through and Codegen reported it as an internal compiler error (E121),
+  /// after retrying each link of a chain two ways: `s.a.a...a` took time
+  /// doubling with every `.a` (turf-fuzz tier 0 found a 60-second compile).
+  struct NotAStruct {};
+  UnknownStructFieldError(SourceLocation Loc, NotAStruct, const std::string &TypeName,
+                          const std::string &FieldName)
+      : TurfError(Loc, Colors::BRIGHT_RED + "A value of type '" + Colors::CYAN +
+                           TypeName + Colors::BRIGHT_RED +
+                           "' has no fields, so it has no field named '" +
+                           Colors::CYAN + FieldName + Colors::BRIGHT_RED + "'." +
+                           Colors::RESET) {
+    Category_ = SLM::ErrorCategory::UNDECLARED_VAR;
+    Hint_ = "Only a struct has fields. If you meant a method, call it with "
+            "parentheses: '." + FieldName + "()'.";
+  }
 };
 // `StructName::new(...)` was called but `StructName` has no `.new`
 // constructor declared at all -- unlike a static method, `new` has no

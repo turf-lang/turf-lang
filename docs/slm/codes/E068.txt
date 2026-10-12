@@ -11,7 +11,10 @@ CAUSE:
   1. A typo in the field name (`user.pasword` instead of `user.password`).
   2. The field exists on a DIFFERENT struct, not this one.
   3. The field was renamed/removed but call sites weren't updated.
-  4. `.` was used where `::` was meant, or vice versa -- `.` is for an
+  4. The base is not a struct at all ("A value of type 'string' has no
+     fields"): a string, int, enum or array has no fields. Call a method
+     with parentheses (`s.length()`) or use a `strings::` function.
+  5. `.` was used where `::` was meant, or vice versa -- `.` is for an
      instance's fields/methods; `::` is for `StructName::new(...)` /
      `StructName::default()` / a static method. `p.new(...)` is always
      wrong regardless of field names.

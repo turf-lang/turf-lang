@@ -29,3 +29,10 @@ A couple of other things worth checking if it's NOT a typo:
     }
 
 Once the field name matches exactly what the struct declares, this error goes away and your code compiles like normal. This is a very normal thing to run into while you're still learning your way around a struct's shape -- nothing to worry about.
+
+The same code covers a field on something that is not a struct at all: a `string`, an `int`, an enum, an array. Those have no fields, so no name is right:
+
+    mut s: string = "abc";
+    mut n: int = s.size;          // a string has no fields
+
+If you meant a method, call it with parentheses (`s.length()`), or use the functions in `strings::`.
