@@ -476,7 +476,13 @@ the other way (rawer → safer) always needs an explicit `to` cast, gated by
 &?T ──explicit, checked──▶ &T   (`p to &T`, but ONLY where narrowed — E082 otherwise)
 T*  ──explicit, unsafe──▶ &T    (`p to &T` inside `unsafe {}` — the compiler can't prove it)
 ptr ──explicit, unsafe──▶ T*    (`p to SomeType*` inside `unsafe {}`)
+int, string, &U ──explicit, unsafe──▶ &T   (forges an address — E130 outside `unsafe {}`)
 ```
+
+Any other cast that produces a reference, from something that is not
+already a reference to the same type (`0 to &N`, `s to &N`, `r to &M` with
+`r: &N`), makes an address the compiler knows nothing about, so it is
+E130 outside `unsafe { }` as well.
 
 ### Do I need `--allow-unsafe-modules`?
 

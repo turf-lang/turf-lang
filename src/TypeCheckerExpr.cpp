@@ -1259,6 +1259,30 @@ void TypeChecker::visitCast(CastExprAST &Node) {
 #endif
   }
 
+  // Making a reference out of something that is not already a reference to
+  // the same type (`0 to &N`, `s to &N`, `n to &M`) forges an address the
+  // way `p to &N` from a raw pointer does, so it needs `unsafe` too (E130;
+  // owner decision 2026-10-12, found by turf-fuzz: these faulted in safe
+  // code). A raw-pointer operand was already gated above; `&T -> &?T` and
+  // a narrowed `&?T -> &T` keep the pointee and stay safe.
+  if (OperandTy && DestTy && (DestTy->isReference() || DestTy->isNullableReference()) &&
+      !isRawPointer(OperandTy.get()) && !isUnsafeGateExempt(Node.getLoc(), &Node)) {
+    const auto *SrcRef = dynamic_cast<const TurfPointerType *>(OperandTy.get());
+    const auto *DstRef = static_cast<const TurfPointerType *>(DestTy.get());
+    bool SamePointee =
+        SrcRef && (OperandTy->isReference() || OperandTy->isNullableReference()) &&
+        typesCompatible(SrcRef->getPointee().get(), DstRef->getPointee().get()) &&
+        typesCompatible(DstRef->getPointee().get(), SrcRef->getPointee().get());
+    if (!SamePointee && !typesCompatible(OperandTy.get(), DestTy.get()))
+      reportError(Node.getLoc(), ErrCode::RawPointerOutsideUnsafe,
+                  "Converting '" + OperandTy->getName() + "' to the reference '" +
+                      DestTy->getName() + "' cannot be done outside an 'unsafe' block.",
+                  {},
+                  "A reference made this way may point at nothing. Wrap the "
+                  "conversion in 'unsafe { }' if the address is known to be valid.",
+                  "Unsafe reference conversion!");
+  }
+
   // SEM-002 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): 'to'-cast
   // legality, Rule B1 -- moved here from Codegen (CastExprAST::codegen(),
   // CodegenExpr.cpp) so an illegal cast is caught at the TypeChecker

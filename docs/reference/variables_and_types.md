@@ -385,6 +385,10 @@ the conversions the compiler explicitly implements.
 > an illegal cast still produces a clear compile-time error rather than
 > succeeding silently or crashing.
 
+A cast that produces a reference (`&T` or `&?T`) from an `int`, a `string`,
+a raw pointer or a reference to a different type is allowed only inside
+`unsafe { }` (E130); `&T to &?T` and a narrowed `&?T to &T` stay safe.
+
 Raw-pointer casts performed via `to` inside `unsafe { }` blocks, and
 `sizeof`/enum-literal-range checks, are enforced as part of the same cast
 machinery — see [Pointers and references](../architecture/pointers_and_references.md)
