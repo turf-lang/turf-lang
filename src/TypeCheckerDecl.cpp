@@ -40,6 +40,43 @@
 #include <unordered_set>
 
 
+// Whether a value of type Ty holds a non-null reference (`&U`, never `&?U`)
+// inside it -- a struct field, at any depth through struct and sized-array
+// fields, but never through a reference (what that points to is not part of
+// the value). Path is set to the field that does, spelled from Name
+// (`H.own`, `H.inner.own`). Structs are resolved through the registry, a
+// generic instance by its instantiated name; one that can't be resolved
+// answers false (nothing to require).
+static bool nonNullRefFieldPath(const TurfType *Ty, const std::string &Name,
+                                std::string &Path, int Depth = 0) {
+  if (!Ty || Depth > 16)
+    return false;
+  if (Ty->isReference()) {
+    Path = Name;
+    return true;
+  }
+  if (const auto *AT = dynamic_cast<const ::ArrayType *>(Ty))
+    return AT->getSize() >= 0 &&
+           nonNullRefFieldPath(AT->getElementType(), Name + "[i]", Path, Depth + 1);
+  const TurfStructType *ST = dynamic_cast<const TurfStructType *>(Ty);
+  if (!ST && GlobalSymbolTable) {
+    TurfTypePtr Registered;
+    if (dynamic_cast<const NamedType *>(Ty))
+      Registered = GlobalSymbolTable->LookupType(Ty->getName());
+    else if (const auto *GT = dynamic_cast<const GenericType *>(Ty))
+      Registered = GlobalSymbolTable->LookupType(
+          Monomorphize::instantiatedDeclName(GT->getBaseName(), GT->getTypeArgs()));
+    ST = dynamic_cast<const TurfStructType *>(Registered.get());
+  }
+  if (!ST)
+    return false;
+  for (const auto &F : ST->getFields())
+    if (nonNullRefFieldPath(F.Type.get(), Name + "." + F.Name, Path, Depth + 1))
+      return true;
+  return false;
+}
+
+
 // True if Ty is, after unwrapping any number of pointer/reference/array
 // layers, an uninstantiated generic type parameter -- i.e. built directly
 // from a generic template's own type parameter (FREEZE.md §6.1).
@@ -784,11 +821,26 @@ void TypeChecker::visitArrayDecl(ArrayDeclExprAST &Node) {
   // An array of non-null references, `(&N)[2]`, has no valid zero value: the
   // storage is zero-filled, so an element nothing wrote would read as a null
   // `&N` (owner, 2026-10-12). It needs an initializer; `(&?N)[2]` starts with
-  // every element null and does not.
+  // every element null and does not. The same holds for an element that
+  // carries a `&U` inside it, `H[2]` with `H { own: &U }` (owner decision
+  // 2026-10-12, found by turf-fuzz: `a[1].own` was null).
   if (Node.getSize() >= 0 && Node.getInitList().empty() && !Node.getInitExpr()) {
     const TurfType *Elem = Node.getElementType();
     while (const auto *Inner = dynamic_cast<const ::ArrayType *>(Elem))
       Elem = Inner->getElementType();
+    std::string Holder; // "H.own" when the reference is a field of Elem
+    if (Elem && !Elem->isReference() && nonNullRefFieldPath(Elem, Elem->getName(), Holder)) {
+      reportError(Node.getLoc(), ErrCode::MissingInitializer,
+                  "The array '" + Node.getName() + "' ('" + DeclArrTy->getName() +
+                      "') needs an initializer.",
+                  {},
+                  "An array starts zero-filled, and '" + Holder +
+                      "' is a reference that can't be null: give every element "
+                      "a value, e.g. '= [" + Elem->getName() + "::default(), ...]'.",
+                  "Missing initializer!");
+      setType(&Node, nullptr);
+      return;
+    }
     if (Elem && Elem->isReference()) {
       reportError(Node.getLoc(), ErrCode::MissingInitializer,
                   "The array '" + Node.getName() + "' ('" + DeclArrTy->getName() +

@@ -1281,7 +1281,12 @@ types as `&N[2]`.
 - **`(&N)[k]` needs an initializer (F-REFARR-2).** A non-null reference has no
   zero value, so a declaration without one is E128; `(&?N)[k]` starts with
   every element null. `T::default()` gives each element of a `(&N)[k]` field
-  its own node (F-COLL-2).
+  its own node (F-COLL-2). **Amended 2026-10-13 (owner decision
+  2026-10-12):** the same holds for an element type that carries a `&U`
+  anywhere inside it (`H[2]` with `H { own: &U }`, E128 naming `H.own`); and
+  an unwritten element of a type holding a `string` reads as its default
+  (`""` for each string), not a null pointer, as the zero-value table in
+  `variables_and_types.md` always said.
 
 ---
 
@@ -1370,7 +1375,7 @@ Overhaul (F-TYPE-1), whose third column points at their section above.
 | **F-COLL-1** | A collection value (`List`, `Stack`, `Queue`, `Set`, `Map`, and any later one) is a handle to one collection: `=`, passing, returning and storing share it, length included; `.copy()` gives an independent one. | §6.27 above (owner decision 2026-10-12) |
 | **F-COLL-2** | `T::default()` sets every non-null `&U` field reachable by value to a fresh `heap(U::default())`; a type that reaches itself through `&` fields has no default (E147). | §6.27 above (owner decision 2026-10-12) |
 | **F-REFARR-1** | An array of references is spelled `(&N)[k]` (also `(&?N)[k]`, `(&N)[]`); `&N[k]` is a reference to an array. The two print as written. A Stack reference stored into an element of a non-local array is E086. | §6.28 above (owner decision 2026-10-12) |
-| **F-REFARR-2** | A `(&N)[k]` declaration needs an initializer (E128); `(&?N)[k]` starts all-null. | §6.28 above (owner decision 2026-10-12) |
+| **F-REFARR-2** | A `(&N)[k]` declaration, or one whose element type carries a `&U` inside it, needs an initializer (E128); `(&?N)[k]` starts all-null; an unwritten `string` inside an element reads `""`. | §6.28 above (owner decisions 2026-10-12; amended 2026-10-13) |
 
 ---
 

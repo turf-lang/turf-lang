@@ -175,6 +175,27 @@ Value *SliceExprAST::codegen() {
 // Ensure malloc / realloc / free are declared in the module.
 
 
+// Whether a value of type T has a `string` in it: itself, or a field or
+// element at any depth (not through a pointer). Its zero value is then not
+// its default, since a zero string is null and a default one is "".
+static bool typeHoldsString(const TurfType *T, int Depth = 0) {
+  if (!T || Depth > 16)
+    return false;
+  if (T->isNamed("string"))
+    return true;
+  if (const auto *AT = dynamic_cast<const ::ArrayType *>(T))
+    return AT->getSize() > 0 && typeHoldsString(AT->getElementType(), Depth + 1);
+  const auto *ST = dynamic_cast<const TurfStructType *>(T);
+  if (!ST && GlobalSymbolTable && dynamic_cast<const NamedType *>(T))
+    ST = dynamic_cast<const TurfStructType *>(GlobalSymbolTable->LookupType(T->getName()).get());
+  if (!ST)
+    return false;
+  for (const auto &F : ST->getFields())
+    if (typeHoldsString(F.Type.get(), Depth + 1))
+      return true;
+  return false;
+}
+
 // Array Codegen
 Value *ArrayDeclExprAST::codegen() {
   // Validation (void type, keywords, duplicates, bounds, etc.) is handled by the
@@ -216,6 +237,32 @@ Value *ArrayDeclExprAST::codegen() {
       Alloca, ConstantInt::get(Type::getInt8Ty(*TheContext), 0),
       ConstantInt::get(Type::getInt64Ty(*TheContext), TotalBytes),
       Alloca->getAlign());
+
+  // A zero `string` is a null pointer, not "": an element nothing wrote read
+  // as null and segfaulted on use (owner decision 2026-10-12, found by
+  // turf-fuzz). When any element is left unwritten and the element type
+  // holds a string, every element gets its default value ("" for each
+  // string, zero otherwise) in a loop, so a big array costs no code size.
+  // A non-null `&U` inside the element is E128 without an initializer.
+  if (!InitExpr && Size > 0 && static_cast<int>(InitList.size()) < Size &&
+      typeHoldsString(ElementType.get())) {
+    Value *Def = EmitDefaultValue(ElementType.get(), Loc);
+    Type *I64 = Type::getInt64Ty(*TheContext);
+    BasicBlock *PreBB = Builder->GetInsertBlock();
+    BasicBlock *LoopBB = BasicBlock::Create(*TheContext, "arrfill", TheFunction);
+    BasicBlock *DoneBB = BasicBlock::Create(*TheContext, "arrfill.done", TheFunction);
+    Builder->CreateBr(LoopBB);
+    Builder->SetInsertPoint(LoopBB);
+    PHINode *I = Builder->CreatePHI(I64, 2, "arrfill.i");
+    I->addIncoming(ConstantInt::get(I64, 0), PreBB);
+    Value *Indices[] = {ConstantInt::get(I64, 0), I};
+    Builder->CreateStore(Def, Builder->CreateInBoundsGEP(ArrTy, Alloca, Indices, "arrfill.elem"));
+    Value *Next = Builder->CreateAdd(I, ConstantInt::get(I64, 1), "arrfill.next");
+    I->addIncoming(Next, LoopBB);
+    Builder->CreateCondBr(Builder->CreateICmpULT(Next, ConstantInt::get(I64, Size)),
+                          LoopBB, DoneBB);
+    Builder->SetInsertPoint(DoneBB);
+  }
 
   // If we have an initializer list, store each element
   if (InitExpr) {
