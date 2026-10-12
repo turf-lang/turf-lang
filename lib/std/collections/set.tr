@@ -43,7 +43,8 @@ struct SetHeader<T> {
     len: int,
     cap: int,
     buckets: int*,
-    bcap: int
+    bcap: int,
+    tombs: int
 }
 
 pub struct Set<T> {
@@ -108,6 +109,7 @@ fn<T> Set.bucketRehash(newBcap: int): void {
         z = z + 1;
     }
     self.h.bcap = newBcap;
+    self.h.tombs = 0;
 
     mut i: int = 0;
     while i < self.h.len {
@@ -117,13 +119,20 @@ fn<T> Set.bucketRehash(newBcap: int): void {
     }
 }
 
+// Counts tombstones as occupancy, and rebuilds at the same size when they,
+// not live items, are what fills it -- see map.tr's `Map.bucketMaybeGrow()`
+// for the churn this prevents.
 fn<T> Set.bucketMaybeGrow(): void {
     if (self.h.bcap == 0) {
         self.bucketRehash(8);
         return;
     }
-    if ((self.h.len + 1) * 10 >= self.h.bcap * 7) {
-        self.bucketRehash(self.h.bcap * 2);
+    if ((self.h.len + self.h.tombs + 1) * 10 >= self.h.bcap * 7) {
+        if ((self.h.len + 1) * 20 >= self.h.bcap * 7) {
+            self.bucketRehash(self.h.bcap * 2);
+        } else {
+            self.bucketRehash(self.h.bcap);
+        }
     }
 }
 
@@ -168,6 +177,9 @@ pub fn<T> Set.add(item: T): void {
     self.bucketMaybeGrow();
 
     immutable insertSlot: int = self.bucketInsertSlot(item);
+    if (self.h.buckets[insertSlot] == -2) {
+        self.h.tombs = self.h.tombs - 1;
+    }
     self.h.buckets[insertSlot] = self.h.len;
     self.h.items[self.h.len] = item;
     self.h.len = self.h.len + 1;
@@ -185,6 +197,7 @@ pub fn<T> Set.remove(item: T): bool {
     }
     immutable idx: int = self.h.buckets[bslot];
     self.h.buckets[bslot] = -2;
+    self.h.tombs = self.h.tombs + 1;
 
     self.h.len = self.h.len - 1;
     if (idx != self.h.len) {

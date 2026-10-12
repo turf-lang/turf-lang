@@ -58,10 +58,17 @@ unsafe module;
 //     fallback covering everything else).
 //   - Growth: the dense arrays grow exactly as before (doubling from 8,
 //     `sizeof(K)`/`sizeof(V)` real per-instantiation byte sizes since
-//     TYPE-002). The bucket index grows independently, on its OWN load
-//     factor (doubling from 8 once occupancy would exceed 70%), via a full
+//     TYPE-002). The bucket index is rebuilt on its OWN load factor, once
+//     live entries plus tombstones (`tombs`) would exceed 70% of it: doubled
+//     when the live entries alone fill more than 35%, otherwise rebuilt at
+//     the same size, which clears the tombstones. Counting only live
+//     entries, as this file first did, let a map under steady churn fill
+//     every EMPTY slot with tombstones, so every lookup of a missing key
+//     (one per `put`) probed the whole table (found by REL-005's
+//     benchmarks: cost grew with the table, 30 us a step at 5000 keys).
+//     A rebuild is a full
 //     rehash -- rebuilding `buckets` from scratch by re-probing every live
-//     dense entry into the new, larger table. This can't be a `realloc`
+//     dense entry into the new table. This can't be a `realloc`
 //     the way the dense arrays' growth is: every entry's bucket slot is a
 //     function of `hash(key) & (bcap - 1)`, which changes the moment
 //     `bcap` does, so every entry must be re-probed into its new home
@@ -96,7 +103,8 @@ struct MapHeader<K, V> {
     len: int,
     cap: int,
     buckets: int*,
-    bcap: int
+    bcap: int,
+    tombs: int
 }
 
 pub struct Map<K, V> {
@@ -170,6 +178,7 @@ fn<K, V> Map.bucketRehash(newBcap: int): void {
         z = z + 1;
     }
     self.h.bcap = newBcap;
+    self.h.tombs = 0;
 
     mut i: int = 0;
     while i < self.h.len {
@@ -179,15 +188,20 @@ fn<K, V> Map.bucketRehash(newBcap: int): void {
     }
 }
 
-// Grows the bucket index once occupancy would exceed a 70% load factor (or
-// on first use).
+// Rebuilds the bucket index once live entries plus tombstones would exceed a
+// 70% load factor (or on first use): twice the size if the live entries
+// alone fill more than 35%, else the same size, to clear the tombstones.
 fn<K, V> Map.bucketMaybeGrow(): void {
     if (self.h.bcap == 0) {
         self.bucketRehash(8);
         return;
     }
-    if ((self.h.len + 1) * 10 >= self.h.bcap * 7) {
-        self.bucketRehash(self.h.bcap * 2);
+    if ((self.h.len + self.h.tombs + 1) * 10 >= self.h.bcap * 7) {
+        if ((self.h.len + 1) * 20 >= self.h.bcap * 7) {
+            self.bucketRehash(self.h.bcap * 2);
+        } else {
+            self.bucketRehash(self.h.bcap);
+        }
     }
 }
 
@@ -237,6 +251,9 @@ pub fn<K, V> Map.put(key: K, value: V): void {
     self.bucketMaybeGrow();
 
     immutable insertSlot: int = self.bucketInsertSlot(key);
+    if (self.h.buckets[insertSlot] == -2) {
+        self.h.tombs = self.h.tombs - 1;
+    }
     self.h.buckets[insertSlot] = self.h.len;
     self.h.keys[self.h.len] = key;
     self.h.values[self.h.len] = value;
@@ -285,6 +302,7 @@ pub fn<K, V> Map.remove(key: K): void {
     }
     immutable idx: int = self.h.buckets[bslot];
     self.h.buckets[bslot] = -2;
+    self.h.tombs = self.h.tombs + 1;
 
     self.h.len = self.h.len - 1;
     if (idx != self.h.len) {
