@@ -124,8 +124,10 @@ if ($c.Rc -eq 0) {
   Test-Desc 'Plain' 16 2 '0'
   # WithPointer { p: Plain (16B), tag: string (8B @16, a pointer) } -- bit 2 => 4.
   Test-Desc 'WithPointer' 24 3 '4'
-  # List<int> { data: T* @0, len @8, cap @16 } -- bit 0 => 1 (module-owned type, FDN-003).
-  Test-Desc 'list.List_gen1_int' 24 3 '1'
+  # ListHeader<int> { data: T* @0, len @8, cap @16 } -- bit 0 => 1; List<int> is
+  # one `h: &ListHeader<int>` pointer (LEC-009). Module-owned names (FDN-003).
+  Test-Desc 'list.ListHeader_gen1_int' 24 3 '1'
+  Test-Desc 'list.List_gen1_int' 8 1 '1'
   # OVH-001: Big70 -- word 70 falls in the SECOND bitmap word at bit 6 => 64.
   Test-Desc 'Big70' 568 71 '0,64'
 } else { Write-Fail 'types.tr failed to compile' }
