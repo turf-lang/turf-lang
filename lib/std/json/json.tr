@@ -269,34 +269,42 @@ pub fn stringify(v: JsonValue): string {
     }
 }
 
+// Built through a StringBuilder: `result = result + piece` copied everything
+// written so far on every element, quadratic in the output (8000 items took
+// 1.2 s; found by REL-005's benchmarks).
 fn stringify_array(v: JsonValue): string {
-    mut result: string = "[";
+    mut sb: strings::StringBuilder = strings::StringBuilder::default();
+    sb.append_char('[');
     mut i: int = 0;
     mut n: int = v.arr_val.length();
     while i < n {
         if i > 0 {
-            result = result + ",";
+            sb.append_char(',');
         }
-        result = result + stringify(v.arr_val.get(i));
+        sb.append(stringify(v.arr_val.get(i)));
         i = i + 1;
     }
-    result = result + "]";
-    return result;
+    sb.append_char(']');
+    return sb.to_string();
 }
 
 fn stringify_object(v: JsonValue): string {
-    mut result: string = "{";
+    mut sb: strings::StringBuilder = strings::StringBuilder::default();
+    sb.append_char('{');
     mut i: int = 0;
     mut n: int = v.obj_keys.length();
     while i < n {
         if i > 0 {
-            result = result + ",";
+            sb.append_char(',');
         }
-        result = result + "\"" + escape_string(v.obj_keys.get(i)) + "\":" + stringify(v.obj_vals.get(i));
+        sb.append_char('"');
+        sb.append(escape_string(v.obj_keys.get(i)));
+        sb.append("\":");
+        sb.append(stringify(v.obj_vals.get(i)));
         i = i + 1;
     }
-    result = result + "}";
-    return result;
+    sb.append_char('}');
+    return sb.to_string();
 }
 
 // escape_string: the body of a JSON string literal for `s` (WITHOUT the
@@ -383,19 +391,40 @@ struct Parser {
     pub len: int
 }
 
+// The byte at `self.pos`, as an int. Precondition: `self.pos < self.len`;
+// every caller has just checked it. Unchecked on purpose: `self.s[self.pos]`
+// is bounds-checked against strlen() of the WHOLE document (F-STR-1), and
+// LLVM cannot hoist that strlen() out of a loop that reads `s` through
+// `self` while writing `self.pos`, so the parser was quadratic in the input
+// (100 KB took 0.33 s, 1 MB ~30 s; found by REL-005's benchmarks).
+fn Parser.at(): int {
+    return strings::byte_at_unchecked(self.s, self.pos) to int;
+}
+
+// The bytes of the document from `a` up to `b`, appended to `sb`.
+// Precondition: `0 <= a <= b <= self.len`. Not strings::substring(), which
+// measures the whole document with strlen() to check the range: called for
+// every number and string value, that kept parse() quadratic after `at()`.
+fn Parser.copy_into(sb: &strings::StringBuilder, a: int, b: int): void {
+    mut i: int = a;
+    while i < b {
+        sb.append_char(strings::byte_at_unchecked(self.s, i));
+        i = i + 1;
+    }
+}
+
 fn Parser.peek(): int {
     if self.pos >= self.len {
         return 0 - 1;
     }
-    // FDN-004: `self.s[self.pos]` is `char`; this function's own return
-    // type stays `int` (the `-1` end-of-input sentinel below needs a value
-    // outside 0..255, which `char` can't represent).
-    return self.s[self.pos] to int;
+    // The return type stays `int`: the `-1` end-of-input sentinel needs a
+    // value outside 0..255, which `char` can't represent (FDN-004).
+    return self.at();
 }
 
 fn Parser.skip_ws(): void {
     while self.pos < self.len {
-        immut c: int = self.s[self.pos] to int;
+        immut c: int = self.at();
         if c == 32 || c == 9 || c == 10 || c == 13 {
             self.pos = self.pos + 1;
         } else {
@@ -443,7 +472,7 @@ fn Parser.parse_literal(lit: string, value: JsonValue): !JsonValue {
     immut n: int = strings::length(lit);
     mut i: int = 0;
     while i < n {
-        if self.pos >= self.len || self.s[self.pos] != lit[i] {
+        if self.pos >= self.len || self.at() != (lit[i] to int) {
             return JsonError::InvalidLiteral(self.pos);
         }
         self.pos = self.pos + 1;
@@ -456,40 +485,45 @@ fn Parser.parse_string(): !string {
     // Precondition: self.peek() == '"' (only ever called from a context
     // that already checked this).
     self.pos = self.pos + 1; // consume opening quote
-    mut result: string = "";
+    // Each run of plain bytes is copied in one append, not one byte at a time
+    // into `result = result + ...` (quadratic in the string's length).
+    mut sb: strings::StringBuilder = strings::StringBuilder::default();
+    mut seg: int = self.pos; // start of the current run of plain bytes
     while self.pos < self.len {
-        immut c: int = self.s[self.pos] to int;
+        immut c: int = self.at();
         if c == 34 { // closing quote
+            self.copy_into(&sb, seg, self.pos);
             self.pos = self.pos + 1;
-            return result;
+            return sb.to_string();
         }
         if c == 92 { // backslash
+            self.copy_into(&sb, seg, self.pos);
             self.pos = self.pos + 1;
             if self.pos >= self.len {
                 return JsonError::UnterminatedString(self.pos);
             }
-            immut esc: int = self.s[self.pos] to int;
+            immut esc: int = self.at();
             if esc == 34 {
-                result = result + "\"";
+                sb.append_char('"');
             } elseif esc == 92 {
-                result = result + "\\";
+                sb.append_char('\\');
             } elseif esc == 47 {
-                result = result + "/";
+                sb.append_char('/');
             } elseif esc == 110 {
-                result = result + "\n";
+                sb.append_char('\n');
             } elseif esc == 116 {
-                result = result + "\t";
+                sb.append_char('\t');
             } elseif esc == 114 {
-                result = result + "\r";
+                sb.append_char('\r');
             } else {
                 // Unrecognized escape (including the unsupported \uXXXX --
                 // see this file's header comment) -- append the character
                 // itself literally rather than fail the whole parse.
-                result = result + strings::substring(self.s, self.pos, self.pos + 1);
+                sb.append_char(strings::byte_at_unchecked(self.s, self.pos));
             }
             self.pos = self.pos + 1;
+            seg = self.pos;
         } else {
-            result = result + strings::substring(self.s, self.pos, self.pos + 1);
             self.pos = self.pos + 1;
         }
     }
@@ -497,22 +531,20 @@ fn Parser.parse_string(): !string {
 }
 
 fn Parser.parse_number(): !JsonValue {
-    // FDN-004: `self.s[self.pos]` is `char`; every raw comparison below is
-    // cast to `int` at the point of use rather than through an intermediate
-    // variable, since this function reads a different position on almost
-    // every line.
+    // Every `self.at()` below follows a `self.pos < self.len` in the same
+    // condition (short-circuit), which is its precondition.
     immut start: int = self.pos;
-    if self.pos < self.len && (self.s[self.pos] to int) == 45 { // '-'
+    if self.pos < self.len && self.at() == 45 { // '-'
         self.pos = self.pos + 1;
     }
     mut sawDigit: bool = false;
-    while self.pos < self.len && (self.s[self.pos] to int) >= 48 && (self.s[self.pos] to int) <= 57 {
+    while self.pos < self.len && self.at() >= 48 && self.at() <= 57 {
         self.pos = self.pos + 1;
         sawDigit = true;
     }
-    if self.pos < self.len && (self.s[self.pos] to int) == 46 { // '.'
+    if self.pos < self.len && self.at() == 46 { // '.'
         self.pos = self.pos + 1;
-        while self.pos < self.len && (self.s[self.pos] to int) >= 48 && (self.s[self.pos] to int) <= 57 {
+        while self.pos < self.len && self.at() >= 48 && self.at() <= 57 {
             self.pos = self.pos + 1;
             sawDigit = true;
         }
@@ -521,19 +553,21 @@ fn Parser.parse_number(): !JsonValue {
     // document, but see this file's header comment -- the resulting
     // NUMERIC VALUE is wrong (strings::parse_double doesn't understand
     // exponents), a documented gap.
-    if self.pos < self.len && ((self.s[self.pos] to int) == 101 || (self.s[self.pos] to int) == 69) { // 'e'/'E'
+    if self.pos < self.len && (self.at() == 101 || self.at() == 69) { // 'e'/'E'
         self.pos = self.pos + 1;
-        if self.pos < self.len && ((self.s[self.pos] to int) == 43 || (self.s[self.pos] to int) == 45) {
+        if self.pos < self.len && (self.at() == 43 || self.at() == 45) {
             self.pos = self.pos + 1;
         }
-        while self.pos < self.len && (self.s[self.pos] to int) >= 48 && (self.s[self.pos] to int) <= 57 {
+        while self.pos < self.len && self.at() >= 48 && self.at() <= 57 {
             self.pos = self.pos + 1;
         }
     }
     if !sawDigit {
         return JsonError::InvalidNumber(start);
     }
-    immut numStr: string = strings::substring(self.s, start, self.pos);
+    mut digits: strings::StringBuilder = strings::StringBuilder::default();
+    self.copy_into(&digits, start, self.pos);
+    immut numStr: string = digits.to_string();
     immut n: double = strings::parse_double(numStr) recover run {
         return JsonError::InvalidNumber(start);
     };
