@@ -216,7 +216,7 @@ Value *MethodCallExprAST::codegen() {
           else if (ExpTy->isDoubleTy() && V->getType()->isIntegerTy(1))
             V = Builder->CreateUIToFP(V, ExpTy, "argcast");
           else if (ExpTy->isIntegerTy(64) && V->getType()->isDoubleTy())
-            V = Builder->CreateFPToSI(V, ExpTy, "argcast");
+            V = EmitCheckedFPToSI(V, ExpTy, Loc, "argcast");
           else if (ExpTy->isIntegerTy(64) && V->getType()->isIntegerTy(1))
             V = Builder->CreateZExt(V, ExpTy, "argcast");
           else if (ExpTy->isIntegerTy(1) && V->getType()->isIntegerTy(64))
@@ -310,7 +310,7 @@ Value *MethodCallExprAST::codegen() {
         else if (ExpTy->isDoubleTy() && V->getType()->isIntegerTy(1))
           V = Builder->CreateUIToFP(V, ExpTy, "argcast");
         else if (ExpTy->isIntegerTy(64) && V->getType()->isDoubleTy())
-          V = Builder->CreateFPToSI(V, ExpTy, "argcast");
+          V = EmitCheckedFPToSI(V, ExpTy, Loc, "argcast");
         else if (ExpTy->isIntegerTy(64) && V->getType()->isIntegerTy(1))
           V = Builder->CreateZExt(V, ExpTy, "argcast");
         else if (ExpTy->isIntegerTy(1) && V->getType()->isIntegerTy(64))

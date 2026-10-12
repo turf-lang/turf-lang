@@ -706,7 +706,7 @@ Value *CastExprAST::codegen() {
     return Builder->CreateSIToFP(Val, Type::getDoubleTy(*TheContext), "itod");
 
   if (SrcName == "double" && DstName == "int")
-    return Builder->CreateFPToSI(Val, Type::getInt64Ty(*TheContext), "dtoi");
+    return EmitCheckedFPToSI(Val, Type::getInt64Ty(*TheContext), Loc, "dtoi");
 
   // int32 -> int : sign-extend. Widening, no precision loss -- int32 exists
   // purely as an honest extern-fn ABI declaration type (see Int32Type's doc
@@ -724,7 +724,7 @@ Value *CastExprAST::codegen() {
   if (SrcName == "int32" && DstName == "double")
     return Builder->CreateSIToFP(Val, Type::getDoubleTy(*TheContext), "i32tod");
   if (SrcName == "double" && DstName == "int32")
-    return Builder->CreateFPToSI(Val, Type::getInt32Ty(*TheContext), "dtoi32");
+    return EmitCheckedFPToSI(Val, Type::getInt32Ty(*TheContext), Loc, "dtoi32");
 
   // char -> int : zero-extend. char is treated as an unsigned byte (0-255),
   // not a signed C-style char, per STRING_UFCS_OPERATOR_CHAR_RFC.md §3's
@@ -883,7 +883,14 @@ Value *CastExprAST::codegen() {
     Value *Buf = Builder->CreateCall(getOrCreateTurfRtAllocFn(), {BufSize, NullDesc}, "dbl_to_str_buf");
     Value *Fmt = Builder->CreateGlobalString("%g", "dblfmt");
     Builder->CreateCall(SnprintfF, {Buf, BufSize, Fmt, Val}, "snprintf_dbl");
-    return Buf;
+    // A NaN is "nan" whatever its sign bit (owner decision 2026-10-12). %g
+    // prints the sign, and that bit differs between run-time arithmetic
+    // ("-nan" from x86's default NaN) and constant folding ("nan"), so the
+    // text changed with -O (found by turf-fuzz). The choice is made on the
+    // string, never by rewriting the value, which LLVM may fold away.
+    Value *IsNaN = Builder->CreateFCmpUNO(Val, Val, "dbl_isnan");
+    return Builder->CreateSelect(IsNaN, Builder->CreateGlobalString("nan", "str_nan"),
+                                 Buf, "dbl_to_str");
   }
 
   // bool → string : select(val, "true", "false")

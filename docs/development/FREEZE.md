@@ -49,7 +49,7 @@ otherwise each answer differently, producing an incoherent language.
 | 2 | Literal representability | An integer literal is held exactly (arbitrary precision) until typed. A float literal is held as the exactly-rounded `double` **plus a flag for whether rounding overflowed to `inf`**. |
 | 3 | Destination representability | Checked when the literal's type is fixed. Out of range → **hard error**, never a clamp. A float literal that overflowed to `inf` → hard error. |
 | 4 | Implicit conversion | `int32 → int`, `int32 → double`, `int → double`. Nothing else. No narrowing, no `bool` ↔ numeric, no `char` ↔ numeric. |
-| 5 | Explicit conversion (`to`) | Per the table in `docs/reference/variables_and_types.md`, **enforced in the TypeChecker**, not Codegen. `double → int` truncates toward zero. `int → int32` truncates. |
+| 5 | Explicit conversion (`to`) | Per the table in `docs/reference/variables_and_types.md`, **enforced in the TypeChecker**, not Codegen. `double → int` truncates toward zero. `int → int32` truncates. A `double` with no such integer (NaN, ±inf, outside the destination's range) **traps** `Integer overflow` for `int` and `int32` alike (owner decision 2026-10-12; it was LLVM poison, so the value varied with `-O`). |
 | 6 | Arithmetic overflow | Compile-time on untyped literals: exact, arbitrary precision, error only if the *result* is not representable in the destination. Compile-time on typed constants: **error**. Runtime, signed integer: **trap** (panic). Runtime, floating point: IEEE (`inf`/`NaN`), **no trap**. |
 
 - `-9223372036854775808` is writable: unary `-` applied directly to an
@@ -63,6 +63,10 @@ otherwise each answer differently, producing an incoherent language.
   `double` (existing behaviour, deliberately preserved — it is why IEEE
   `inf`/`NaN` are largely unreachable in TurfLang, and that asymmetry is now
   a documented decision rather than an accident).
+- A NaN prints and converts to `string` as `nan`, whatever its sign bit
+  (owner decision 2026-10-12): the sign of a NaN differs between run-time
+  arithmetic and constant folding, so printing it would make output depend
+  on `-O` (F-OPT-1). Every other `double` is formatted with `%g`.
 - `int` is 64-bit signed; `int32` is 32-bit signed and exists solely for
   honest `extern fn` ABI declarations. **No further integer widths, and no
   unsigned types, are to be added.**

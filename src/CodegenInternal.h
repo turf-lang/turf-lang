@@ -253,6 +253,10 @@ llvm::Value *EmitCheckedShl(llvm::Value *L, llvm::Value *R, SourceLocation Loc);
 /// Checked '>>' (arithmetic) -- traps if the shift amount is outside
 /// [0, 64), the same rule and panic text as EmitCheckedShl().
 llvm::Value *EmitCheckedShr(llvm::Value *L, llvm::Value *R, SourceLocation Loc);
+/// fptosi to i64/i32 that panics "Integer overflow" on NaN, +-inf or an
+/// out-of-range value instead of producing poison (CodegenCore.cpp).
+llvm::Value *EmitCheckedFPToSI(llvm::Value *Val, llvm::Type *DestTy,
+                               SourceLocation Loc, const std::string &Name);
 
 /// Traps if computing `L / R` would be INT64_MIN / -1 -- the one
 /// signed-division overflow case (ARCHITECTURE_OVERHAUL.md §10.2).

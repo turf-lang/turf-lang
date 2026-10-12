@@ -357,9 +357,9 @@ operators reference), so `y = x to int;` parses as `y = (x to int)`.
 
 | From → To | Behavior |
 |---|---|
-| `int ↔ double` | Standard int/float conversion (also implicit `int → double`) |
+| `int ↔ double` | Standard int/float conversion (also implicit `int → double`); `double → int` truncates toward zero and **panics** `Integer overflow` for a NaN, ±inf or a value outside `int`'s range |
 | `int32 ↔ int` | Sign-extend / truncate (`int32 → int` also implicit) |
-| `int32 ↔ double` | Standard conversion (`int32 → double` also implicit) |
+| `int32 ↔ double` | Standard conversion (`int32 → double` also implicit); `double → int32` panics like `double → int` outside `int32`'s range |
 | `char ↔ int` | Zero-extend / truncate |
 | `enum ↔ int` | Zero-extend / reinterpret |
 | `string ↔ int` | Parses/formats the number; **runtime panic on an unparseable `string → int`** |

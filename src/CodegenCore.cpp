@@ -1913,6 +1913,39 @@ Value *EmitCheckedShr(Value *L, Value *R, SourceLocation Loc) {
   return Builder->CreateAShr(L, R, "rshifttmp");
 }
 
+// `double -> int`/`int32` truncates toward zero (FREEZE §6.2 row 5); a value
+// with no such integer (NaN, +-inf, or outside the destination's range)
+// panics "Integer overflow", like every other unrepresentable integer result
+// (F-NUM-3; owner decision 2026-10-12). A bare fptosi is poison for those
+// inputs, so the result differed between levels: INT_MIN at -O0, garbage at
+// -O2 (found by turf-fuzz). The bounds are exact doubles: [-2^63, 2^63) for
+// int; (-2^31 - 1, 2^31) for int32, since truncation brings -2^31 - 0.5 back
+// in range. NaN fails both ordered comparisons.
+Value *EmitCheckedFPToSI(Value *Val, Type *DestTy, SourceLocation Loc,
+                         const std::string &Name) {
+  Function *TheFunction = Builder->GetInsertBlock()->getParent();
+  const bool Is32 = DestTy->isIntegerTy(32);
+  Type *DblTy = Type::getDoubleTy(*TheContext);
+  Value *Lo = ConstantFP::get(DblTy, Is32 ? -2147483649.0 : -9223372036854775808.0);
+  Value *Hi = ConstantFP::get(DblTy, Is32 ? 2147483648.0 : 9223372036854775808.0);
+  Value *AboveLo = Is32 ? Builder->CreateFCmpOGT(Val, Lo, "dtoi.lo")
+                        : Builder->CreateFCmpOGE(Val, Lo, "dtoi.lo");
+  Value *InRange = Builder->CreateAnd(AboveLo, Builder->CreateFCmpOLT(Val, Hi, "dtoi.hi"),
+                                      "dtoi.inrange");
+
+  BasicBlock *BadBB = BasicBlock::Create(*TheContext, "dtoi.overflow", TheFunction);
+  BasicBlock *ContBB = BasicBlock::Create(*TheContext, "dtoi.cont", TheFunction);
+  Builder->CreateCondBr(InRange, ContBB, BadBB);
+
+  Builder->SetInsertPoint(BadBB);
+  CodegenPanic(Builder->CreateGlobalString("Integer overflow"), Loc);
+  if (!Builder->GetInsertBlock()->getTerminator())
+    Builder->CreateUnreachable();
+
+  Builder->SetInsertPoint(ContBB);
+  return Builder->CreateFPToSI(Val, DestTy, Name);
+}
+
 // The one signed-division overflow case (ARCHITECTURE_OVERHAUL.md §10.2):
 // INT64_MIN / -1 has no representable int64 result (the mathematical
 // result, 2^63, overflows by exactly one past INT64_MAX). LLVM's `sdiv` is
@@ -2091,7 +2124,7 @@ Value *CastToType(Value *Val, const TurfType *DestType,
     if (SrcType->isNamed("int"))
       return Builder->CreateTrunc(Val, Type::getInt32Ty(*TheContext), Name);
     if (SrcType->isNamed("double"))
-      return Builder->CreateFPToSI(Val, Type::getInt32Ty(*TheContext), Name);
+      return EmitCheckedFPToSI(Val, Type::getInt32Ty(*TheContext), Loc, Name);
     if (SrcType->isNamed("bool"))
       return Builder->CreateZExt(Val, Type::getInt32Ty(*TheContext), Name);
   }
@@ -2103,7 +2136,7 @@ Value *CastToType(Value *Val, const TurfType *DestType,
   }
   if (DestType->isNamed("int")) {
     if (SrcType->isNamed("double"))
-      return Builder->CreateFPToSI(Val, Type::getInt64Ty(*TheContext), Name);
+      return EmitCheckedFPToSI(Val, Type::getInt64Ty(*TheContext), Loc, Name);
     if (SrcType->isNamed("bool"))
       return Builder->CreateZExt(Val, Type::getInt64Ty(*TheContext), Name);
     // FDN-004: a `char`-typed value used where Codegen needs a plain `int`
