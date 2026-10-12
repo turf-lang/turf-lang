@@ -36,7 +36,8 @@ private:
   std::vector<ExprAST *> Statements; // Statements in this block (non-owning)
   // Statements plus, interleaved where they run, each `defer`'s statement at
   // the exits of its scope (CFGBuilder's DeferScopes). Read by EscapePass
-  // only; every other pass still sees a `defer` where it is written.
+  // and LivenessAnalysisPass; every other pass still sees a `defer` where it
+  // is written.
   std::vector<ExprAST *> StatementsWithDeferredRuns;
   std::vector<TurfBasicBlock *> Predecessors; // Blocks that can jump here
   std::vector<TurfBasicBlock *> Successors;   // Blocks this can jump to

@@ -418,9 +418,21 @@ void LivenessAnalysisPass::runOnCFG(
   // "was this ever read" without disturbing Gen[]'s dataflow semantics.
   LiveSet EverRead;
 
+  // A `defer`'s statement counts where it runs, at its scope's exits
+  // (getStatementsWithDeferredRuns(), CFGBuilder::emitDeferredRuns()), not
+  // where it is written: `mut p = a; defer p = b; return p;` reads the `a`
+  // store, which was reported dead while the `defer` counted at its site.
+  // The site still marks what the statement reads as read, so a `defer`
+  // that never runs (before an endless loop) is not "never used".
   for (size_t b = 0; b < N; ++b) {
     LiveSet WrittenSoFar; // tracks defs seen in this block so far (left to right)
-    for (ExprAST *Stmt : Blocks[b]->getStatements()) {
+    for (ExprAST *Stmt : Blocks[b]->getStatementsWithDeferredRuns()) {
+      if (dynamic_cast<DeferExprAST *>(Stmt)) {
+        collectReadsAndDefs(Stmt,
+          [&](SourceLocation, const VariableSymbol *Sym) { EverRead.insert(Sym); },
+          [](SourceLocation, const VariableSymbol *) {});
+        continue;
+      }
       collectReadsAndDefs(Stmt,
         [&](SourceLocation, const VariableSymbol *Sym) {
           EverRead.insert(Sym);
@@ -512,12 +524,15 @@ void LivenessAnalysisPass::runOnCFG(
     // current = set of variables live AFTER the current statement
     // We start at the end of the block with LiveOut[b] and walk backward.
     LiveSet Current = LiveOut[b];
-    const auto &Stmts = Blocks[b]->getStatements();
+    // Same statement list as Step 1: a `defer` at its exits, not its site.
+    const auto &Stmts = Blocks[b]->getStatementsWithDeferredRuns();
     // For dead-store detection we need statement-level granularity:
     // re-walk in statement order, maintaining a "live after" set that
     // shrinks when we pass a def and grows when we pass a use.
     LiveSet LiveAfter = LiveOut[b];
     for (size_t s = Stmts.size(); s-- > 0;) {
+      if (dynamic_cast<DeferExprAST *>(Stmts[s]))
+        continue;
       // This statement's reads and defs as ONE ordered event list. They used
       // to be two separate lists applied "reads, then defs", which is wrong
       // exactly for a read-modify-write: `x += 1` reads x and then defines it,

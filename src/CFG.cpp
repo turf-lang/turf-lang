@@ -593,7 +593,8 @@ void CFGBuilder::visitExpr(ExprAST *E) {
     visitContinue(E);
   } else {
     // Regular statement - add to current block. A `defer` stays where it is
-    // written for every pass but EscapePass, and its statement is also
+    // written for every pass but EscapePass and LivenessAnalysisPass, and
+    // its statement is also
     // recorded to run at each exit of the enclosing scope (owner decision
     // 2026-10-12: `p = heap(n); defer p = &n; return p;` was a false E086,
     // the return value being computed before the defer runs).
