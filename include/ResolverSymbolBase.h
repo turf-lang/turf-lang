@@ -386,6 +386,15 @@ struct ResolverFunctionSymbol {
   /// so the answer cannot be written back onto this flag.
   bool                     MutatesSelf = false;
 
+  /// The index of the reference parameter this function always returns
+  /// unchanged (`fn id(p: &N): &N { return p; }`), or -1. Set only when
+  /// EVERY `return` in the body is that bare parameter and nothing assigns
+  /// or redeclares its name, so a call's result is exactly that argument.
+  /// Computed once by Resolver::buildFunctionSymbol(); EscapePass (F-MEM-5)
+  /// gives the call the argument's provenance, so `return id(&local);` is
+  /// E086 (FDN-002's "through an intermediate call" gap).
+  int                      ReturnsParam = -1;
+
   /// Candidate scope-qualifier names (`Left` in every `Left::Right` or
   /// `Left::Right(...)` shape) found among this function's own `return`
   /// statements (docs/architecture/errors_and_recover.md), computed once by

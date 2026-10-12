@@ -41,6 +41,27 @@ fn nested(p: &?Node): int {
     return v;
 }
 
+// A `continue`/`break` inside the block belongs to a loop outside it. The
+// block's own CFG treats it as leaving the block; this used to be E007
+// "'continue' used outside of a loop" (turf-fuzz differential seed 424234).
+fn in_loop(p: &?Node): int {
+    mut t: int = 0;
+    for i in 0..3 {
+        mut v: int = bad() recover run {
+            if (p == null) {
+                continue;
+            }
+            if (i == 2) {
+                break;
+            }
+            t = t + p.val;
+            continue;
+        };
+        t = t + v;
+    }
+    return t;
+}
+
 fn main(): int {
     mut n: Node = Node::default();
     n.val = 7;
@@ -51,5 +72,7 @@ fn main(): int {
     test::assert_eq(checked_before(none), -2, "check before the statement, null");
     test::assert_eq(nested(&n), 7, "nested recover");
     test::assert_eq(nested(none), -3, "nested recover, null");
+    test::assert_eq(in_loop(&n), 14, "continue and break inside the block");
+    test::assert_eq(in_loop(none), 0, "continue inside the block, null");
     return 0;
 }

@@ -1,0 +1,19 @@
+// EXPECT-DIAG: E086
+// EXPECT-DIAG: can't be stored into a field that outlives this function
+// `h.own` is read through the parameter `h`, so the node it points at is the
+// caller's; storing `&n` in its `next` leaves the caller a dangling field.
+// Only the field's immediate base used to be classified.
+struct N { val: int, next: &?N }
+struct H2 { k: int, own: &N }
+
+fn link(h: &H2): void {
+    mut n: N = N::default();
+    n.val = 42;
+    h.own.next = &n;
+}
+
+fn main(): int {
+    mut h: &H2 = heap(H2::default());
+    link(h);
+    return 0;
+}

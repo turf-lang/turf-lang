@@ -509,6 +509,26 @@ std::unique_ptr<CFG> CFGBuilder::buildCFG(const std::string &FunctionName,
   return CFGPtr;
 }
 
+std::unique_ptr<CFG> CFGBuilder::buildRegionCFG(const std::string &Name,
+                                                ExprAST *Body, SourceLocation Loc) {
+  auto CFGPtr = std::make_unique<CFG>(Name, nullptr, Loc, "");
+  CurrentCFG = CFGPtr.get();
+  TurfBasicBlock *Entry = CurrentCFG->createBlock("entry");
+  TurfBasicBlock *Exit = CurrentCFG->createBlock("exit");
+  CurrentCFG->setEntryBlock(Entry);
+  CurrentCFG->setExitBlock(Exit);
+  setInsertPoint(Entry);
+  // The enclosing function's loops are outside the region: jumping to one
+  // leaves it. A loop inside the region sets (and restores) its own targets.
+  LoopBreakTarget = Exit;
+  LoopContinueTarget = Exit;
+  visitExpr(Body);
+  if (CurrentBlock && !CurrentBlock->hasExplicitTerminator())
+    CurrentCFG->addEdge(CurrentBlock, Exit);
+  CurrentCFG->computeReachability();
+  return CFGPtr;
+}
+
 TurfBasicBlock *CFGBuilder::createBlock(std::string Name) {
   return CurrentCFG->createBlock(std::move(Name));
 }

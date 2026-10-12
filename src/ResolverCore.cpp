@@ -16,6 +16,7 @@
 #include <algorithm> // std::find
 
 #include "AST.h"
+#include "ASTChildWalker.h"  // ReturnedParamScan
 #include "Builtins.h"        // LookupBuiltin — for skipping bare intrinsics in visitFuncCall
 #include "Errors.h"          // ReferenceError, DuplicateDeclarationError
 #include "ErrorsStruct.h"    // StructLayoutCycleError
@@ -282,6 +283,73 @@ static bool WritesSelfValueStorage(const ExprAST *Target,
   return true; // the assigned slot is inside self's own storage
 }
 
+// ResolverFunctionSymbol::ReturnsParam: the one parameter every `return` in a
+// body names, bare, when nothing in the body assigns that name or declares
+// another variable with it. Runs in Pass 1, before names are resolved, so it
+// works on spellings; any doubt (a second name returned, an expression
+// returned, a shadowing declaration, a void `return;`) gives no summary.
+namespace {
+class ReturnedParamScan : public ASTChildWalker {
+public:
+  std::set<std::string> Returned; // names returned bare
+  bool OtherReturn = false;        // something else, or nothing, returned
+  std::set<std::string> Written;   // names assigned or (re)declared
+
+  void visitReturn(ReturnExprAST &Node) override {
+    if (const auto *VE = dynamic_cast<const VariableExprAST *>(Node.getVal()))
+      Returned.insert(VE->getName());
+    else
+      OtherReturn = true;
+    ASTChildWalker::visitReturn(Node);
+  }
+  void visitAssignment(AssignmentExprAST &Node) override {
+    if (const auto *VE = dynamic_cast<const VariableExprAST *>(Node.getLHS()))
+      Written.insert(VE->getName());
+    ASTChildWalker::visitAssignment(Node);
+  }
+  void visitVarDecl(VarDeclExprAST &Node) override {
+    Written.insert(Node.getName());
+    ASTChildWalker::visitVarDecl(Node);
+  }
+  void visitArrayDecl(ArrayDeclExprAST &Node) override {
+    Written.insert(Node.getName());
+    ASTChildWalker::visitArrayDecl(Node);
+  }
+  void visitFor(ForExprAST &Node) override {
+    Written.insert(Node.getVarName());
+    ASTChildWalker::visitFor(Node);
+  }
+  void visitForEach(ForEachExprAST &Node) override {
+    Written.insert(Node.getValueVarName());
+    Written.insert(Node.getIndexVarName());
+    ASTChildWalker::visitForEach(Node);
+  }
+  void visitBindingPattern(BindingPatternExprAST &Node) override {
+    Written.insert(Node.getName());
+  }
+  void visitRecoverExpr(RecoverExprAST &Node) override {
+    Written.insert(Node.getBoundName());
+    ASTChildWalker::visitRecoverExpr(Node);
+  }
+};
+} // namespace
+
+static int ReturnedParamIndex(const FuncDefExprAST &Node) {
+  ReturnedParamScan Scan;
+  Scan.visitChild(Node.getBody());
+  if (Scan.OtherReturn || Scan.Returned.size() != 1)
+    return -1;
+  const std::string &Name = *Scan.Returned.begin();
+  if (Scan.Written.count(Name))
+    return -1;
+  const auto &Params = Node.getParams();
+  for (size_t I = 0; I < Params.size(); ++I)
+    if (Params[I].Name == Name && Params[I].Type &&
+        (Params[I].Type->isReference() || Params[I].Type->isNullableReference()))
+      return static_cast<int>(I);
+  return -1;
+}
+
 static bool MutatesSelfField(const ExprAST *E, const StructDeclExprAST *SelfDecl,
                              const StructFinder &FindStruct) {
   if (!E)
@@ -534,6 +602,7 @@ Resolver::buildFunctionSymbol(const FuncDefExprAST &Node,
         Dot == std::string::npos ? nullptr : FindStructDecl(FnName.substr(0, Dot));
     Sym.MutatesSelf = MutatesSelfField(Node.getBody(), SelfDecl, FindStruct);
   }
+  Sym.ReturnsParam = ReturnedParamIndex(Node);
   CollectReturnedErrorTypeNames(Node.getBody(), Sym.PossibleErrorTypeNames,
                                 Sym.ReturnsReboundError);
   // LEC-004: a `try` returns another call's error, unchanged -- no type name

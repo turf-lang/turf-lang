@@ -611,6 +611,46 @@ static void testLintIsOptIn() {
 // The flow checks a real compile runs on each function's CFG during Codegen
 // (runFunctionFlowPasses()); analyze() reports them only when asked (the LSP
 // asks), with the same code, line and related notes the CLI prints.
+// F-MEM-5 per-field tracking (2026-10-12) needs struct layouts, which the
+// facade has from parsing (ParseStructDecl() registers them), not from
+// codegen. Each of these is E086 in a compile; the editor must see it too.
+static void testEscapeThroughStructFieldsInFacade() {
+  CurrentTest = "escape through struct fields (facade)";
+  const std::string Prelude = "struct N { val: int, next: &?N }\n"
+                              "struct H { k: int, head: &?N }\n"
+                              "struct H2 { k: int, own: &N }\n"
+                              "fn id(p: &N): &N {\n    return p;\n}\n";
+  const char *Escaping[] = {
+      "fn f(): H {\n    mut n: N = N::default();\n    mut h: H = H::default();\n"
+      "    h.head = &n;\n    mut g: H = h;\n    return g;\n}\n",
+      "fn f(): &N {\n    mut n: N = N::default();\n    mut m: N = N::default();\n"
+      "    m.next = &n;\n    return heap(m);\n}\n",
+      "fn f(): &N {\n    mut n: N = N::default();\n    return id(&n);\n}\n",
+      "fn f(): &N {\n    mut a: N[2] = [N::default(), N::default()];\n    return &a[0];\n}\n",
+      "fn f(h: &H2): void {\n    mut n: N = N::default();\n    h.own.next = &n;\n}\n",
+      "fn f(h: H2): void {\n    mut n: N = N::default();\n    h.own.next = &n;\n}\n",
+  };
+  turf::AnalysisOptions Opts;
+  Opts.RunFlowAnalysis = true;
+  for (const char *Fn : Escaping) {
+    std::string Source = Prelude + Fn + "fn main(): int {\n    return 0;\n}\n";
+    auto R = turf::analyze({{"esc.tr", Source}}, Opts);
+    int N = 0;
+    for (const auto &D : R.diagnostics())
+      N += D.Code == "E086";
+    CHECK_EQ(N, 1);
+  }
+  // Kept local, so allowed: the struct and the node it points at share a frame.
+  std::string Local = Prelude +
+                      "fn f(): int {\n    mut n: N = N::default();\n    n.val = 3;\n"
+                      "    mut h: H = H::default();\n    h.head = &n;\n"
+                      "    mut q: &?N = h.head;\n    if (q != null) {\n        return q.val;\n"
+                      "    }\n    return 0;\n}\nfn main(): int {\n    return f();\n}\n";
+  auto L = turf::analyze({{"local.tr", Local}}, Opts);
+  for (const auto &D : L.diagnostics())
+    CHECK(D.Code != "E086");
+}
+
 static void testFlowAnalysisIsOptIn() {
   CurrentTest = "flow analysis is opt-in";
   // One error per function, as in a compile (an error ends that function's
@@ -2126,6 +2166,7 @@ int main() {
   testWarningDedupeIsPerFile(Dir);
   testLintIsOptIn();
   testFlowAnalysisIsOptIn();
+  testEscapeThroughStructFieldsInFacade();
   testFlowWarningsAreInSourceOrder();
   testSkipPrelude();
   testLexErrorInFirstToken();

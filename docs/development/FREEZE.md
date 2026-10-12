@@ -330,6 +330,18 @@ request, not a session's own initiative. Full account:
   (including a `return`) — this pass trusts a reference the caller already
   handed in for exactly as long as ordinary reference semantics already did,
   and does not attempt to verify further up the call chain.
+- **Amended 2026-10-12 (owner decision: reopen FDN-002's per-field Non-goal,
+  keeping "never a false positive").** Provenance is also tracked for a
+  reference stored at a fixed path inside a value variable (a struct local's
+  `&` field, a constant-index array element), so a struct or array value
+  holding a `Stack` reference is an error at every sink above (returned,
+  boxed, pushed, stored); an element of a `(&N)[]` parameter is a sink (§6.28);
+  a reference read through a `Param`/`Heap` base, or a by-value parameter's
+  `&` field, is long-lived (`p.next.f = &local` is an error); `&a[i]` of a
+  local `T[N]` is `Stack`. One interprocedural fact is used: a function whose
+  every `return` is one reference parameter, unchanged, passes that argument's
+  provenance to its call (`return id(&local)` is an error). Unknown stays
+  never-flagged.
 
 ### 6.14 String indexing — FROZEN (FDN-004, 2026-09-28)
 
@@ -1287,7 +1299,7 @@ Overhaul (F-TYPE-1), whose third column points at their section above.
 | **F-TRACK-1** | Every implementation session updates a change record under `docs/development/`. | §18 |
 | **F-TYPE-1** | A named type's identity is (owning module, name); the main file's module is `main`, never spelled. Bare-spelling ambiguity is an error, not "local wins". | §6.11 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-003, not `ARCHITECTURE_OVERHAUL.md` §4) |
 | **F-HEAP-1** | `heap(expr): &T` is the closed-list intrinsic for safe heap allocation — no `new T` keyword, no grammar change. Always allocates with `T`'s real `TurfTypeDesc`, never `NULL`. | §6.12 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-001) |
-| **F-MEM-5** | A `Stack`-provenance reference (points into the current frame) can never flow into a `return`, a field of a `Param`/`Heap`-owned object, a collection mutator/`operator[]=`, or `heap()`'s own operand — enforced by `EscapePass`, intraprocedurally, with no lifetime syntax. | §6.13 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-002) |
+| **F-MEM-5** | A `Stack`-provenance reference (points into the current frame) can never flow into a `return`, a field of a `Param`/`Heap`-owned object, a collection mutator/`operator[]=`, or `heap()`'s own operand, nor be carried there inside a struct or array value — enforced by `EscapePass`, with per-field tracking and one call summary (a function returning a reference parameter unchanged), no lifetime syntax. | §6.13 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-002; amended 2026-10-12) |
 | **F-STR-1** | `s[i]` on a `string` is `char`, bounds-checked against `strlen(s)` on read (`i < 0` or `i >= strlen(s)` panics); a write checks `i < 0` only, by design — no upper bound, since a `string` under construction has no recoverable capacity to check against. | §6.14 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-004) |
 | **F-VIS-1** | A top-level declaration and a struct field are private to their module unless prefixed `pub`/`public` (synonyms, one token); enum/error variants and machine states follow their type; operators are visible wherever their operand types are; `export immut` is its own `pub`; a `pub` signature may not mention a private type; UFCS and monomorphized clones never bypass or leak visibility; every visibility diagnostic carries a fix-naming hint. | §6.15 above (post-Overhaul: `ROADMAP_v2.0.0.md` LEC-002) |
 | **F-PKG-1** | Two independently versioned programs: `turf` (Go, `cli/`) is the user's tool and drives; `turfc` compiles and is the tooling interface (users are never asked to type it). They agree on a `major.minor` driver interface reported by `turfc --version` (same major, minor at least what `turf` needs), not on release versions. The compiler owns everything that depends on TurfLang source (import resolution, visibility, capabilities) and never touches the network or the manifest; the CLI owns files, network and reproducibility, never parses TurfLang, and never rewrites a diagnostic; they meet at an explicit package graph. `turf <non-subcommand args>` is `turfc <args>` unchanged. | §6.16 above (owner decisions 2026-09-30: overturning `ROADMAP_v2.0.0.md` LEC-001 entry 1 / DEC-8, then replacing "same version" with the driver interface) |

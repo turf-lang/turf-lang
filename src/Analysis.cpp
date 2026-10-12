@@ -6,6 +6,7 @@
 #include "ASTChildWalker.h"
 #include "SymbolTable.h"
 #include "ResolverSymbolTable.h"
+#include "Monomorphize.h" // instantiatedDeclName(): a generic struct's registered layout
 
 #include <algorithm>
 #include <queue>
@@ -1079,8 +1080,8 @@ public:
     checkOnly(Node.getProduceExpr(), OnTrue, Tracked, DoReport);
     if (!DoReport || !Node.getBlock())
       return;
-    auto BlockCfg = CFGBuilder().buildCFG("recover", nullptr, Node.getBlock(),
-                                          Node.getLoc());
+    auto BlockCfg = CFGBuilder().buildRegionCFG("recover", Node.getBlock(),
+                                                Node.getLoc());
     runNullabilityDataflow(*BlockCfg, Tracked, OnTrue);
   }
 };
@@ -1233,7 +1234,22 @@ void NullabilityPass::runOnCFG(CFG &Cfg) {
 // ═════════════════════════════════════════════════════════════════════════
 namespace {
 
-using ProvMap = std::unordered_map<const VariableSymbol *, RefProvenance>;
+// A place this pass tracks: a variable itself (Path "") or a reference
+// stored at a fixed path inside a value variable -- `.head` in a struct
+// local, `[0].next` in an array local. A path segment is `.field`, `[k]` for
+// a constant index, or `[*]` for an index known only at run time. A key whose
+// Path ends in `#` is a region marker: everything under that path was
+// overwritten in this frame, so a parameter's implicit default no longer
+// applies below it.
+struct PlaceKey {
+  const VariableSymbol *Sym;
+  std::string Path;
+  bool operator<(const PlaceKey &O) const {
+    return Sym != O.Sym ? std::less<const VariableSymbol *>()(Sym, O.Sym) : Path < O.Path;
+  }
+  bool operator==(const PlaceKey &O) const { return Sym == O.Sym && Path == O.Path; }
+};
+using ProvMap = std::map<PlaceKey, RefProvenance>;
 
 // A parameter (including `self`) or unsized-array (`T[]`) parameter is the
 // only kind of symbol this pass ever gives an IMPLICIT provenance to (Param)
@@ -1267,16 +1283,185 @@ bool isRawPointerDest(const TurfType *T) {
   return T && T->isPointer() && !T->isReference() && !T->isNullableReference();
 }
 
+// ── Types along a path ──────────────────────────────────────────────────────
+// A struct's fields, by the registered layout (what ConstructorFieldAssignment-
+// Pass and codegen's default construction use). Null when unknown, which every
+// caller below treats as "can't say" -- never as a reason to flag.
+const TurfStructType *escapeStructOf(const TurfType *T) {
+  if (const auto *ST = dynamic_cast<const TurfStructType *>(T))
+    return ST;
+  if (!T || !GlobalSymbolTable)
+    return nullptr;
+  TurfTypePtr Registered;
+  if (dynamic_cast<const NamedType *>(T))
+    Registered = GlobalSymbolTable->LookupType(T->getName());
+  else if (const auto *GT = dynamic_cast<const GenericType *>(T))
+    Registered = GlobalSymbolTable->LookupType(
+        Monomorphize::instantiatedDeclName(GT->getBaseName(), GT->getTypeArgs()));
+  return dynamic_cast<const TurfStructType *>(Registered.get());
+}
+
+bool isRefType(const TurfType *T) {
+  return T && (T->isReference() || T->isNullableReference());
+}
+
+// A value aggregate: a struct or a sized array, whose storage is the
+// variable's own (not a view, not a pointer).
+bool isValueAggregate(const TurfType *T) {
+  if (!T)
+    return false;
+  if (const auto *AT = dynamic_cast<const ArrayType *>(T))
+    return AT->getSize() >= 0;
+  return escapeStructOf(T) != nullptr;
+}
+
+// The type one segment below T: `.f` of a struct, `[k]`/`[*]` of a sized
+// array. Null for anything else (a pointer would be a dereference: the
+// result is no longer inside the variable's own storage).
+const TurfType *stepType(const TurfType *T, const std::string &Seg) {
+  if (!T || Seg.empty())
+    return nullptr;
+  if (Seg[0] == '[') {
+    const auto *AT = dynamic_cast<const ArrayType *>(T);
+    return AT && AT->getSize() >= 0 ? AT->getElementType() : nullptr;
+  }
+  if (const TurfStructType *ST = escapeStructOf(T))
+    for (const auto &F : ST->getFields())
+      if ("." + F.Name == Seg)
+        return F.Type.get();
+  return nullptr;
+}
+
+// Splits a path into its segments: ".own.next" -> {".own", ".next"}.
+std::vector<std::string> pathSegments(const std::string &Path) {
+  std::vector<std::string> Out;
+  for (size_t I = 0; I < Path.size();) {
+    size_t J = I + 1;
+    while (J < Path.size() && Path[J] != '.' && Path[J] != '[')
+      ++J;
+    Out.push_back(Path.substr(I, J - I));
+    I = J;
+  }
+  return Out;
+}
+
+const TurfType *typeAtPath(const VariableSymbol *Sym, const std::string &Path) {
+  const TurfType *T = Sym ? Sym->Type.get() : nullptr;
+  for (const auto &Seg : pathSegments(Path))
+    T = stepType(T, Seg);
+  return T;
+}
+
+// Every path, below a value of type T, at which a reference is stored by
+// value: `.head`, `.inner.r`, `[0]`, `[1].next`. Capped: an aggregate
+// bigger than this is simply not enumerated past the cap.
+void collectRefPaths(const TurfType *T, const std::string &Prefix,
+                     std::vector<std::string> &Out, int Depth = 0) {
+  if (!T || Out.size() >= 256 || Depth > 16)
+    return;
+  if (isRefType(T)) {
+    Out.push_back(Prefix);
+    return;
+  }
+  if (const auto *AT = dynamic_cast<const ArrayType *>(T)) {
+    if (AT->getSize() < 0)
+      return;
+    for (int I = 0; I < AT->getSize() && Out.size() < 256; ++I)
+      collectRefPaths(AT->getElementType(), Prefix + "[" + std::to_string(I) + "]",
+                      Out, Depth + 1);
+    return;
+  }
+  if (const TurfStructType *ST = escapeStructOf(T))
+    for (const auto &F : ST->getFields())
+      collectRefPaths(F.Type.get(), Prefix + "." + F.Name, Out, Depth + 1);
+}
+
+// ── Reading a place ─────────────────────────────────────────────────────────
+// What a place holds when the map has no entry for it: a parameter handle,
+// and a reference inside a by-value parameter, hold what the caller gave
+// (Param); everything else is Unknown until assigned.
+RefProvenance implicitProv(const PlaceKey &K) {
+  if (!K.Sym || !K.Sym->IsParameter)
+    return RefProvenance::Unknown;
+  if (K.Path.empty())
+    return isTrackableHandle(K.Sym) ? RefProvenance::Param : RefProvenance::Unknown;
+  if (K.Path.find("[*]") != std::string::npos)
+    return RefProvenance::Unknown;
+  return isRefType(typeAtPath(K.Sym, K.Path)) ? RefProvenance::Param
+                                              : RefProvenance::Unknown;
+}
+
+RefProvenance getPlace(const ProvMap &Map, const PlaceKey &K) {
+  auto It = Map.find(K);
+  if (It != Map.end())
+    return It->second;
+  // A region marker on this path or above it: overwritten in this frame.
+  for (size_t Cut = 0; Cut <= K.Path.size(); ++Cut) {
+    if (Cut < K.Path.size() && Cut != 0 && K.Path[Cut] != '.' && K.Path[Cut] != '[')
+      continue;
+    if (Map.count({K.Sym, K.Path.substr(0, Cut) + "#"}))
+      return RefProvenance::Unknown;
+  }
+  return implicitProv(K);
+}
+
+std::optional<RefProvenance> known(RefProvenance P) {
+  if (P == RefProvenance::Unknown)
+    return std::nullopt;
+  return P;
+}
+
 std::optional<RefProvenance> lookupProv(const VariableSymbol *Sym,
                                         const ProvMap &Map) {
   if (!Sym)
     return std::nullopt;
-  auto It = Map.find(Sym);
-  if (It != Map.end())
-    return It->second;
-  if (Sym->IsParameter && isTrackableHandle(Sym))
-    return RefProvenance::Param; // untouched parameter -- still what the caller gave us
-  return std::nullopt;
+  return known(getPlace(Map, {Sym, ""}));
+}
+
+// The place inside a value variable that E names -- `h`, `h.head`,
+// `a[0].next`, `a[i]` (Exact false) -- with its type. nullopt when E is not
+// inside one variable's own storage: rooted at a reference or a view,
+// passing through a pointer, an `operator []`, or anything but a variable.
+struct ValuePlace {
+  const VariableSymbol *Sym;
+  std::string Path;
+  bool Exact;
+  const TurfType *Type;
+};
+
+std::optional<ValuePlace> valuePlaceOf(const ExprAST *E) {
+  if (const auto *VE = dynamic_cast<const VariableExprAST *>(E)) {
+    const VariableSymbol *Sym = VE->getResolvedSymbol();
+    if (!Sym || !Sym->Type || isTrackableHandle(Sym) || !isValueAggregate(Sym->Type.get()))
+      return std::nullopt;
+    return ValuePlace{Sym, "", true, Sym->Type.get()};
+  }
+  std::optional<ValuePlace> Base;
+  std::string Seg;
+  bool Exact = true;
+  if (const auto *FA = dynamic_cast<const FieldAccessExprAST *>(E)) {
+    Base = valuePlaceOf(FA->getBase());
+    Seg = "." + FA->getFieldName();
+  } else if (const auto *AA = dynamic_cast<const ArrayAccessExprAST *>(E)) {
+    if (AA->ResolvedIndexGetTarget || AA->ResolvedIndexSetTarget)
+      return std::nullopt;
+    Base = valuePlaceOf(AA->getBase());
+    const auto *Num = dynamic_cast<const NumberExprAST *>(AA->getIndex());
+    if (Num && Num->isInteger() && Num->getIntVal() >= 0) {
+      Seg = "[" + std::to_string(Num->getIntVal()) + "]";
+    } else {
+      Seg = "[*]";
+      Exact = false;
+    }
+  } else {
+    return std::nullopt;
+  }
+  if (!Base)
+    return std::nullopt;
+  const TurfType *T = stepType(Base->Type, Seg);
+  if (!T)
+    return std::nullopt;
+  return ValuePlace{Base->Sym, Base->Path + Seg, Base->Exact && Exact, T};
 }
 
 std::optional<RefProvenance> classifyProvenance(const ExprAST *E, const ProvMap &Map);
@@ -1295,7 +1480,8 @@ std::optional<RefProvenance> classifyProvenance(const ExprAST *E, const ProvMap 
 // Anything whose root isn't a plain variable at all (e.g. `&f().field`) is
 // Unknown: this pass never chases through a call's return value.
 //
-// Deliberately does NOT recurse through ArrayAccessExprAST (`&expr[i]`),
+// (History, superseded by the 2026-10-12 note below.) Deliberately did NOT
+// recurse through ArrayAccessExprAST (`&expr[i]`),
 // unlike the FieldAccessExprAST case just above -- verified live while
 // sweeping lib/std/showcase for regressions (FDN-002.md's own account):
 // `&l.data[1]` (tests/41_gc/03_interior_pointer_retention.tr) indexes
@@ -1307,10 +1493,38 @@ std::optional<RefProvenance> classifyProvenance(const ExprAST *E, const ProvMap 
 // local `T[N]`. Rather than guess, `&expr[i]` for ANY base is Unknown --
 // the documented residual gap (INV-MEM-3): a dangling `&localFixedArr[i]`
 // returned directly is NOT caught by this milestone.
+//
+// 2026-10-12 (item 14): with field types available, the `&expr[i]` case is
+// decided by the array's type instead. Anything inside a value variable's own
+// storage -- `&a[i]` of a local `T[N]`, `&h.arr[0]`, `&h.inner.x` -- is Stack
+// (valuePlaceOf() never steps through a pointer, so `&l.data[1]` is not one of
+// them); `&p.field` and `&xs[i]` with `p`/`xs` a reference or a view take the
+// provenance of what the base points to.
 std::optional<RefProvenance> classifyAddressOfProvenance(const ExprAST *E,
                                                           const ProvMap &Map) {
-  if (const auto *FA = dynamic_cast<const FieldAccessExprAST *>(E))
-    return classifyAddressOfProvenance(FA->getBase(), Map);
+  if (valuePlaceOf(E))
+    return RefProvenance::Stack;
+  if (const auto *FA = dynamic_cast<const FieldAccessExprAST *>(E)) {
+    // Without a registered layout for the root's struct, valuePlaceOf() can't
+    // walk it; a field chain rooted at a plain value variable is then taken
+    // as that variable's storage, as before field types were consulted. With
+    // a layout, valuePlaceOf() failing means the chain went through a
+    // reference (`&h.own.val`), and the address is wherever that points.
+    const ExprAST *Root = FA->getBase();
+    while (const auto *Inner = dynamic_cast<const FieldAccessExprAST *>(Root))
+      Root = Inner->getBase();
+    if (const auto *RV = dynamic_cast<const VariableExprAST *>(Root)) {
+      const VariableSymbol *RS = RV->getResolvedSymbol();
+      if (RS && !isTrackableHandle(RS) && RS->Type && !isValueAggregate(RS->Type.get()))
+        return RefProvenance::Stack;
+    }
+    return classifyProvenance(FA->getBase(), Map);
+  }
+  if (const auto *AA = dynamic_cast<const ArrayAccessExprAST *>(E)) {
+    if (AA->ResolvedIndexGetTarget || AA->ResolvedIndexSetTarget)
+      return std::nullopt;
+    return classifyProvenance(AA->getBase(), Map);
+  }
   if (const auto *VE = dynamic_cast<const VariableExprAST *>(E)) {
     const VariableSymbol *Sym = VE->getResolvedSymbol();
     if (!Sym)
@@ -1342,7 +1556,54 @@ std::optional<RefProvenance> classifyProvenance(const ExprAST *E,
   if (const auto *FC = dynamic_cast<const FuncCallExprAST *>(E)) {
     if (FC->isIntrinsic(BareIntrinsic::Heap))
       return RefProvenance::Heap; // FDN-001: always a fresh GC-heap block
-    return std::nullopt; // no interprocedural summaries -- an ordinary call's result is Unknown
+    // A function that returns one of its reference parameters unchanged
+    // (ResolverFunctionSymbol::ReturnsParam): the result is that argument.
+    // Any other call's result is Unknown.
+    const ResolverFunctionSymbol *T = FC->getResolvedCallTarget();
+    if (T && T->ReturnsParam >= 0 &&
+        static_cast<size_t>(T->ReturnsParam) < FC->getArgs().size())
+      return classifyProvenance(FC->getArgs()[T->ReturnsParam].get(), Map);
+    return std::nullopt;
+  }
+
+  if (const auto *MC = dynamic_cast<const MethodCallExprAST *>(E)) {
+    // Same summary; the receiver is the target's parameter 0 (`self`, or a
+    // UFCS function's first parameter), the call's arguments the rest.
+    const ResolverFunctionSymbol *T = MC->getResolvedCallTarget();
+    if (!T || T->ReturnsParam < 0)
+      return std::nullopt;
+    if (T->ReturnsParam == 0)
+      return classifyProvenance(MC->getBase(), Map);
+    size_t I = static_cast<size_t>(T->ReturnsParam) - 1;
+    if (I < MC->getArgs().size())
+      return classifyProvenance(MC->getArgs()[I].get(), Map);
+    return std::nullopt;
+  }
+
+  // A field or element read. Inside a value variable's own storage it is
+  // what that place holds (`h.head` after `h.head = &n` is Stack; a by-value
+  // parameter's `&` field is the caller's). Read through a reference instead
+  // (`p.next`, `h.own.next`, `xs[i]` of a `(&N)[]` parameter), the value
+  // lives in the object the base refers to: if that object outlives this
+  // frame, so does what is stored in it -- storing a Stack reference there is
+  // itself an escape this pass reports.
+  if (dynamic_cast<const FieldAccessExprAST *>(E) ||
+      dynamic_cast<const ArrayAccessExprAST *>(E)) {
+    if (const auto *AA = dynamic_cast<const ArrayAccessExprAST *>(E))
+      if (AA->ResolvedIndexGetTarget || AA->ResolvedIndexSetTarget)
+        return std::nullopt;
+    if (auto Place = valuePlaceOf(E))
+      return Place->Exact ? known(getPlace(Map, {Place->Sym, Place->Path}))
+                          : std::nullopt;
+    const ExprAST *Base = nullptr;
+    if (const auto *FA = dynamic_cast<const FieldAccessExprAST *>(E))
+      Base = FA->getBase();
+    else
+      Base = static_cast<const ArrayAccessExprAST *>(E)->getBase();
+    auto BaseProv = classifyProvenance(Base, Map);
+    if (BaseProv == RefProvenance::Param || BaseProv == RefProvenance::Heap)
+      return BaseProv;
+    return std::nullopt;
   }
 
   if (const auto *CE = dynamic_cast<const CastExprAST *>(E)) {
@@ -1463,12 +1724,104 @@ class EscapeCheckVisitor : public ASTChildWalker {
     const_cast<ExprAST *>(E)->accept(*this);
   }
 
+  // Whether E's value is, or contains, a Stack reference: a reference
+  // classified Stack, a struct or array place holding one at a tracked path
+  // (`h` after `h.head = &n`), or an array literal with such an element. An
+  // element at a run-time index (`a[i]`) is not looked into.
+  bool holdsStack(const ExprAST *E) {
+    if (!E)
+      return false;
+    if (classifyProvenance(E, Map) == RefProvenance::Stack)
+      return true;
+    if (const auto *AL = dynamic_cast<const ArrayLiteralExprAST *>(E)) {
+      for (const auto &El : AL->getElements())
+        if (holdsStack(El.get()))
+          return true;
+      return false;
+    }
+    auto Place = valuePlaceOf(E);
+    if (!Place || !Place->Exact)
+      return false;
+    for (auto It = Map.lower_bound({Place->Sym, Place->Path});
+         It != Map.end() && It->first.Sym == Place->Sym; ++It) {
+      const std::string &K = It->first.Path;
+      if (K.compare(0, Place->Path.size(), Place->Path) != 0)
+        break;
+      if (!K.empty() && K.back() == '#')
+        continue;
+      if (It->second == RefProvenance::Stack)
+        return true;
+    }
+    return false;
+  }
+
   void flagIfStack(const ExprAST *ValueExpr, SourceLocation Loc,
                    const std::string &SinkDescription) {
     if (!DoReport)
       return;
     if (classifyProvenance(ValueExpr, Map) == RefProvenance::Stack)
       DanglingReferenceEscapeError(Loc, SinkDescription).raise();
+    if (holdsStack(ValueExpr))
+      DanglingReferenceEscapeError(
+          Loc, SinkDescription + " inside a struct or array value").raise();
+  }
+
+  // What a value of type T, computed by RHS, stores at each reference path
+  // below it: {"", P} for a reference itself, {".head", P} for a struct...
+  // Empty when nothing is known (a call's result, a default).
+  void collectFacts(const TurfType *T, const ExprAST *RHS, const std::string &Prefix,
+                    std::vector<std::pair<std::string, RefProvenance>> &Out) {
+    if (isRefType(T)) {
+      Out.push_back({Prefix, classifyProvenance(RHS, Map).value_or(RefProvenance::Unknown)});
+      return;
+    }
+    if (const auto *AL = dynamic_cast<const ArrayLiteralExprAST *>(RHS)) {
+      const auto *AT = dynamic_cast<const ArrayType *>(T);
+      const auto &Els = AL->getElements();
+      for (size_t I = 0; I < Els.size(); ++I)
+        collectFacts(AT ? AT->getElementType() : nullptr, Els[I].get(),
+                     Prefix + "[" + std::to_string(I) + "]", Out);
+      return;
+    }
+    auto Src = valuePlaceOf(RHS);
+    if (!Src || !Src->Exact)
+      return;
+    std::vector<std::string> Refs;
+    collectRefPaths(T, "", Refs);
+    for (const auto &S : Refs)
+      Out.push_back({Prefix + S, getPlace(Map, {Src->Sym, Src->Path + S})});
+  }
+
+  // Forget everything known at or below Path in Sym, and mark the region
+  // overwritten (a parameter's implicit default no longer applies there).
+  void killUnder(const VariableSymbol *Sym, const std::string &Path) {
+    for (auto It = Map.lower_bound({Sym, Path});
+         It != Map.end() && It->first.Sym == Sym;) {
+      if (It->first.Path.compare(0, Path.size(), Path) != 0)
+        break;
+      It = Map.erase(It);
+    }
+    Map[{Sym, Path + "#"}] = RefProvenance::Unknown;
+  }
+
+  // A store of RHS into a place inside a value variable -- TRANSFER, not a
+  // sink: the variable is this frame's own storage.
+  void storeIntoPlace(const ValuePlace &Place, const ExprAST *RHS) {
+    if (!Place.Exact) {
+      // `a[i] = x`: some element changed; nothing known about the array's
+      // elements survives.
+      killUnder(Place.Sym, Place.Path.substr(0, Place.Path.find("[*]")));
+      return;
+    }
+    std::vector<std::pair<std::string, RefProvenance>> Facts;
+    collectFacts(Place.Type, RHS, "", Facts);
+    killUnder(Place.Sym, Place.Path);
+    for (const auto &F : Facts)
+      Map[{Place.Sym, Place.Path + F.first}] = F.second;
+  }
+
+  void setHandle(const VariableSymbol *Sym, const ExprAST *RHS) {
+    Map[{Sym, ""}] = classifyProvenance(RHS, Map).value_or(RefProvenance::Unknown);
   }
 
 public:
@@ -1477,29 +1830,50 @@ public:
   void visitVarDecl(VarDeclExprAST &Node) override {
     recurse(Node.getInitializer());
     const VariableSymbol *Sym = Node.getResolvedSymbol();
-    if (Sym && isTrackableHandle(Sym) && Node.getInitializer()) {
-      auto P = classifyProvenance(Node.getInitializer(), Map);
-      if (P)
-        Map[Sym] = *P;
-      else
-        Map.erase(Sym);
-    }
+    if (!Sym || !Node.getInitializer())
+      return;
+    if (isTrackableHandle(Sym))
+      setHandle(Sym, Node.getInitializer());
+    else if (Sym->Type && isValueAggregate(Sym->Type.get()))
+      storeIntoPlace({Sym, "", true, Sym->Type.get()}, Node.getInitializer());
   }
   void visitArrayDecl(ArrayDeclExprAST &Node) override {
     for (const auto &I : Node.getInitList())
       recurse(I.get());
     if (Node.getInitExpr())
       recurse(Node.getInitExpr().get());
+    const VariableSymbol *Sym = Node.ResolvedSymbol.get();
+    if (!Sym || !Sym->Type || !isValueAggregate(Sym->Type.get()))
+      return;
+    if (Node.getInitExpr()) {
+      storeIntoPlace({Sym, "", true, Sym->Type.get()}, Node.getInitExpr().get());
+      return;
+    }
+    std::vector<std::pair<std::string, RefProvenance>> Facts;
+    const auto *AT = dynamic_cast<const ArrayType *>(Sym->Type.get());
+    const auto &Init = Node.getInitList();
+    for (size_t I = 0; I < Init.size(); ++I)
+      collectFacts(AT ? AT->getElementType() : nullptr, Init[I].get(),
+                   "[" + std::to_string(I) + "]", Facts);
+    killUnder(Sym, "");
+    for (const auto &F : Facts)
+      Map[{Sym, F.first}] = F.second;
   }
   void visitAssignment(AssignmentExprAST &Node) override {
     recurse(Node.getLHS());
     recurse(Node.getRHS());
 
+    if (auto Place = valuePlaceOf(Node.getLHS())) {
+      storeIntoPlace(*Place, Node.getRHS());
+      return;
+    }
+
     if (const auto *FA = dynamic_cast<const FieldAccessExprAST *>(Node.getLHS())) {
-      // Sink: storing a Stack-provenance value into a field reached through
-      // a Param- or Heap-provenance base. A base this pass can't classify
-      // (Unknown) is NOT flagged -- see the class doc comment's residual
-      // gap (a field two hops deep is one such case).
+      // Sink: storing a Stack-provenance value (or a value holding one) into
+      // a field reached through a Param- or Heap-provenance base, however
+      // many hops deep (classifyProvenance() reads a field through a
+      // long-lived base as long-lived). A base this pass can't classify
+      // (Unknown, e.g. a call result's field) is NOT flagged.
       auto BaseProv = classifyProvenance(FA->getBase(), Map);
       if (BaseProv == RefProvenance::Param || BaseProv == RefProvenance::Heap)
         flagIfStack(Node.getRHS(), Node.getLoc(),
@@ -1530,15 +1904,11 @@ public:
       return;
     }
     if (const auto *VE = dynamic_cast<const VariableExprAST *>(Node.getLHS())) {
-      // Ordinary reassignment -- TRANSFER, not a sink.
+      // Ordinary reassignment -- TRANSFER, not a sink. (A value variable's
+      // whole reassignment is a place store, handled above.)
       const VariableSymbol *Sym = VE->getResolvedSymbol();
-      if (Sym && isTrackableHandle(Sym)) {
-        auto P = classifyProvenance(Node.getRHS(), Map);
-        if (P)
-          Map[Sym] = *P;
-        else
-          Map.erase(Sym);
-      }
+      if (Sym && isTrackableHandle(Sym))
+        setHandle(Sym, Node.getRHS());
     }
   }
   void visitCompoundAssignment(CompoundAssignmentExprAST &Node) override {
@@ -1554,13 +1924,9 @@ public:
     recurse(Node.getCallee());
     for (const auto &A : Node.getArgs())
       recurse(A.get());
-    // Sink: heap()'s own operand. Only ever fires when the operand is
-    // ITSELF reference-shaped (heap(&local), or heap(x) where x is already
-    // a &T/&?T/raw pointer) -- classifyProvenance() returns Unknown for a
-    // plain by-value struct/primitive operand, which is exactly right: this
-    // pass does not track provenance through a struct's OWN fields (the
-    // documented residual gap), so `heap(structWithADanglingField)` is not
-    // caught here.
+    // Sink: heap()'s own operand -- a Stack reference (heap(&local)), or a
+    // struct or array value holding one at a tracked path (`heap(m)` after
+    // `m.next = &n`; flagIfStack() looks inside, 2026-10-12).
     if (DoReport) {
       if (Node.isIntrinsic(BareIntrinsic::Heap) && !Node.getArgs().empty())
         flagIfStack(Node.getArgs()[0].get(), Node.getLoc(), "boxed with heap()");
@@ -1608,13 +1974,27 @@ public:
   }
 };
 
+// The meet at a merge: a place keeps a provenance only where both paths
+// agree on it -- comparing what each path READS there, implicit defaults
+// included, so a parameter overwritten on one path only is Unknown after the
+// merge -- and a region marker from either path survives (an overwrite on
+// any path means the parameter's default no longer holds).
 ProvMap meetProv(const ProvMap &A, const ProvMap &B) {
   ProvMap R;
-  for (const auto &KV : A) {
-    auto It = B.find(KV.first);
-    if (It != B.end() && It->second == KV.second)
-      R.emplace(KV.first, KV.second);
-  }
+  auto Take = [&](const PlaceKey &K) {
+    if (R.count(K))
+      return;
+    if (!K.Path.empty() && K.Path.back() == '#') {
+      R[K] = RefProvenance::Unknown;
+      return;
+    }
+    RefProvenance PA = getPlace(A, K), PB = getPlace(B, K);
+    R[K] = PA == PB ? PA : RefProvenance::Unknown;
+  };
+  for (const auto &KV : A)
+    Take(KV.first);
+  for (const auto &KV : B)
+    Take(KV.first);
   return R;
 }
 

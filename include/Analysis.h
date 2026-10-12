@@ -129,16 +129,28 @@ public:
 // merely failed to classify (see EscapePass.cpp's classifyProvenance() doc
 // comment for the exact, deliberately small set of expression shapes this
 // covers, and docs/development/changes/FDN-002.md's "Known pitfalls" for
-// the residual gap this leaves: a reference smuggled out inside a by-value
-// struct copy, or through an intermediate function call, is NOT caught).
+// the residual gap this leaves; the by-value struct copy and the
+// intermediate call it once listed are caught since 2026-10-12, below).
 //
 // A Param- or Heap-provenance value is always allowed to flow anywhere,
-// including a return -- this pass has no interprocedural summaries (a
-// deliberate Non-goal, Overhaul §0.6's "small language" constraint), so it
+// including a return. The one interprocedural fact used is the callee's
+// own "returns this parameter unchanged" (ReturnsParam); beyond it the pass
 // extends the SAME trust ordinary reference-parameter semantics already
 // grant (the caller is responsible for what it hands in) rather than trying
 // to verify further up the call chain.
-enum class RefProvenance { Stack, Param, Heap };
+//
+// Since 2026-10-12 (owner: FDN-002's per-field Non-goal reopened, still
+// "never a false positive") the pass also tracks references stored INSIDE a
+// value variable -- a struct local's `&` field, a constant-index array
+// element (`h.head`, `a[0].next`) -- so a struct or array holding a Stack
+// reference is caught when it is returned, boxed, pushed or stored; a
+// reference loaded through a long-lived object (`h.own.next` with `h` a
+// parameter, or a by-value parameter's `&` field) is long-lived; `&a[i]` of
+// a local array is Stack; and a call to a function that returns one of its
+// reference parameters unchanged (ResolverFunctionSymbol::ReturnsParam) has
+// that argument's provenance. `Unknown` is stored explicitly where a
+// parameter's implicit default (Param) no longer holds.
+enum class RefProvenance { Stack, Param, Heap, Unknown };
 
 class EscapePass {
 public:

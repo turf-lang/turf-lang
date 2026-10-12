@@ -191,6 +191,13 @@ public:
                                 SourceLocation FuncLoc = {0, 0},
                                 const std::string &MangledFunctionName = "");
 
+  // A CFG of one block nested inside a function (NullabilityPass analyses a
+  // `recover run { }` block this way). A `break`/`continue` aimed at a loop
+  // outside the block leaves the region: an edge to its exit, like `return`,
+  // instead of the "outside of a loop" error a whole function would get.
+  std::unique_ptr<CFG> buildRegionCFG(const std::string &Name, ExprAST *Body,
+                                      SourceLocation Loc);
+
 private:
   // Visit methods for different AST nodes
   void visitExpr(ExprAST *E);
