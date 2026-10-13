@@ -434,7 +434,7 @@ fn Parser.parse_value(): !JsonValue {
     self.skip_ws();
     immut c: int = self.peek();
     if c == (0 - 1) {
-        return JsonError::UnexpectedEnd(self.pos);
+        return JsonError::UnexpectedEnd(self.pos, "unexpected end of JSON at offset " + (self.pos to string));
     }
     // `return self.parse_object();` would do for the `{`/`[` cases (LEC-004: a
     // `!T` returned from a function declaring exactly that `!T` passes
@@ -462,7 +462,7 @@ fn Parser.parse_value(): !JsonValue {
     if (c >= 48 && c <= 57) || c == 45 { // digit or '-'
         return self.parse_number();
     }
-    return JsonError::UnexpectedChar(self.pos);
+    return JsonError::UnexpectedChar(self.pos, "unexpected character at offset " + (self.pos to string));
 }
 
 fn Parser.parse_literal(lit: string, value: JsonValue): !JsonValue {
@@ -470,7 +470,7 @@ fn Parser.parse_literal(lit: string, value: JsonValue): !JsonValue {
     mut i: int = 0;
     while i < n {
         if self.pos >= self.len || self.at() != (lit[i] to int) {
-            return JsonError::InvalidLiteral(self.pos);
+            return JsonError::InvalidLiteral(self.pos, "invalid literal at offset " + (self.pos to string));
         }
         self.pos = self.pos + 1;
         i = i + 1;
@@ -497,7 +497,7 @@ fn Parser.parse_string(): !string {
             self.copy_into(&sb, seg, self.pos);
             self.pos = self.pos + 1;
             if self.pos >= self.len {
-                return JsonError::UnterminatedString(self.pos);
+                return JsonError::UnterminatedString(self.pos, "unterminated string at offset " + (self.pos to string));
             }
             immut esc: int = self.at();
             if esc == 34 {
@@ -524,7 +524,7 @@ fn Parser.parse_string(): !string {
             self.pos = self.pos + 1;
         }
     }
-    return JsonError::UnterminatedString(self.pos);
+    return JsonError::UnterminatedString(self.pos, "unterminated string at offset " + (self.pos to string));
 }
 
 fn Parser.parse_number(): !JsonValue {
@@ -558,13 +558,13 @@ fn Parser.parse_number(): !JsonValue {
         }
     }
     if !sawDigit {
-        return JsonError::InvalidNumber(start);
+        return JsonError::InvalidNumber(start, "invalid number at offset " + (start to string));
     }
     mut digits: strings::StringBuilder = strings::StringBuilder::default();
     self.copy_into(&digits, start, self.pos);
     immut numStr: string = digits.to_string();
     immut n: double = strings::parse_double(numStr) recover run {
-        return JsonError::InvalidNumber(start);
+        return JsonError::InvalidNumber(start, "invalid number at offset " + (start to string));
     };
     return JsonValue::from_number(n);
 }
@@ -589,7 +589,7 @@ fn Parser.parse_array(): !JsonValue {
             self.pos = self.pos + 1;
             return arr;
         } else {
-            return JsonError::ExpectedComma(self.pos);
+            return JsonError::ExpectedComma(self.pos, "expected ',' at offset " + (self.pos to string));
         }
     }
     // No trailing `return arr;` here: every path through the loop above
@@ -611,12 +611,12 @@ fn Parser.parse_object(): !JsonValue {
     while true {
         self.skip_ws();
         if self.peek() != 34 { // '"'
-            return JsonError::UnexpectedChar(self.pos);
+            return JsonError::UnexpectedChar(self.pos, "unexpected character at offset " + (self.pos to string));
         }
         immut key: string = try self.parse_string();
         self.skip_ws();
         if self.peek() != 58 { // ':'
-            return JsonError::ExpectedColon(self.pos);
+            return JsonError::ExpectedColon(self.pos, "expected ':' at offset " + (self.pos to string));
         }
         self.pos = self.pos + 1;
         self.skip_ws();
@@ -630,7 +630,7 @@ fn Parser.parse_object(): !JsonValue {
             self.pos = self.pos + 1;
             return obj;
         } else {
-            return JsonError::ExpectedComma(self.pos);
+            return JsonError::ExpectedComma(self.pos, "expected ',' at offset " + (self.pos to string));
         }
     }
     // No trailing `return obj;` here -- same unreachable-`while true`-tail

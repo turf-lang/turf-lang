@@ -145,7 +145,7 @@ pub error FsError {
 // exist, `path` already exists, or the process lacks permission.
 pub fn mkdir(path: string): !void {
     if mkdir(path, 493 to int32) != (0 to int32) { // 493 == 0755 octal
-        return FsError::MkdirFailed(path);
+        return FsError::MkdirFailed(path, "could not create directory '" + path + "'");
     }
     return;
 }
@@ -154,7 +154,7 @@ pub fn mkdir(path: string): !void {
 // use remove_dir for those. Fails with FsError::RemoveFileFailed(path).
 pub fn remove_file(path: string): !void {
     if remove(path) != (0 to int32) {
-        return FsError::RemoveFileFailed(path);
+        return FsError::RemoveFileFailed(path, "could not remove file '" + path + "'");
     }
     return;
 }
@@ -163,7 +163,7 @@ pub fn remove_file(path: string): !void {
 // FsError::RemoveDirFailed(path) -- including when the directory is not empty.
 pub fn remove_dir(path: string): !void {
     if rmdir(path) != (0 to int32) {
-        return FsError::RemoveDirFailed(path);
+        return FsError::RemoveDirFailed(path, "could not remove directory '" + path + "'");
     }
     return;
 }

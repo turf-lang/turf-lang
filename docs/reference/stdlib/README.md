@@ -72,7 +72,7 @@ A function reports failure in the way that matches *why* it can fail.
 
 | Why it fails | Shape | Examples |
 |---|---|---|
-| **The input or the environment**: a file that is not there, text that is not a number, a refused connection. Not a bug in the caller. | returns `!T`, with an error variant that carries what failed (the path, the offset, the name) | `io::read_to_string`, `io::write_string`, `fs::mkdir`, `os::set_env`, `strings::parse_int`, `json::parse`, `math::divide`, `net::TcpConnection::connect`, `Map.try_get` |
+| **The input or the environment**: a file that is not there, text that is not a number, a refused connection. Not a bug in the caller. | returns `!T`, with an error variant that carries what failed (the path, the offset, the name) and a message saying so (`err.message`) | `io::read_to_string`, `io::write_string`, `fs::mkdir`, `os::set_env`, `strings::parse_int`, `json::parse`, `math::divide`, `net::TcpConnection::connect`, `Map.try_get` |
 | **A violated precondition**: popping an empty stack, an index out of range, `random_int(7, 3)`. A bug in the caller that no recovery makes correct. | panics, and the message starts with the **caller's** `file:line:`, so you learn which of your calls was wrong, not which line of the library noticed | `List.pop`, `Stack.pop`, `Queue.dequeue`, `Map.get`, `strings::substring`, `JsonValue.get`, `random::random_int` |
 | **A question**: is it there, is it a directory, does it start with this? Absence is a normal answer. | returns `bool`, or a sentinel (`-1` from `index_of`, `""` from `os::env` for an unset variable) | `io::exists`, `fs::is_dir`, `Set.contains`, `strings::index_of` |
 

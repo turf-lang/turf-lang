@@ -134,14 +134,14 @@ pub error MathError {
 
 pub fn divide(a: int, b: int): !int {
     if b == 0 {
-        return MathError::DivisionByZero;
+        return MathError::DivisionByZero("division by zero");
     }
     return a / b;
 }
 
 pub fn divide(a: double, b: double): !double {
     if b == 0.0 {
-        return MathError::DivisionByZero;
+        return MathError::DivisionByZero("division by zero");
     }
     return a / b;
 }

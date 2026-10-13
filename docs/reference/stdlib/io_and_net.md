@@ -137,8 +137,8 @@ error FileError {
 
 Each variant carries the path it failed on. Read it with a pattern inside a
 `compare` (`matches io::FileError::NotFound(path):`); `err == io::FileError::NotFound`
-compares the variant alone; `err.message` is the message text, empty here
-([Error handling](../error_handling.md)).
+compares the variant alone; `err.message` says what failed, such as
+`file not found: 'notes.txt'` ([Error handling](../error_handling.md)).
 
 | Function | Returns | Behaviour |
 |---|---|---|

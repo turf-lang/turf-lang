@@ -174,7 +174,7 @@ pub fn resolve_hostname(host: string): !string {
     turfrt_net_startup();
     mut h: ptr = gethostbyname(host);
     if h == null {
-        return NetworkError::ResolutionFailed;
+        return NetworkError::ResolutionFailed("could not resolve host '" + host + "'");
     }
 
     // Byte offset 24 == int* element index 3 (24 / 8 == 3) -- see doc
@@ -182,7 +182,7 @@ pub fn resolve_hostname(host: string): !string {
     mut ih: int* = h to int*;
     immut hAddrListRaw: int = ih[3];
     if hAddrListRaw == 0 {
-        return NetworkError::ResolutionFailed;
+        return NetworkError::ResolutionFailed("could not resolve host '" + host + "'");
     }
 
     // h_addr_list[0]: the first entry of the NULL-terminated
@@ -191,7 +191,7 @@ pub fn resolve_hostname(host: string): !string {
     mut hAddrList: int* = hAddrListRaw to int*;
     immut firstAddrRaw: int = hAddrList[0];
     if firstAddrRaw == 0 {
-        return NetworkError::ResolutionFailed;
+        return NetworkError::ResolutionFailed("could not resolve host '" + host + "'");
     }
 
     // Now read the 4 individual address bytes at BYTE granularity --
@@ -237,14 +237,14 @@ pub fn TcpConnection.new(fd: int): void {
 pub fn TcpConnection.connect(a: int, b: int, c: int, d: int, port: int) static: !TcpConnection {
     mut fd: int = turfrt_net_socket();
     if !(fd >= 0) {
-        return NetworkError::SocketCreationFailed;
+        return NetworkError::SocketCreationFailed("could not create a socket");
     }
 
     mut addr: void* = buildSockAddr(a, b, c, d, port);
     immut result: int = connect(fd, addr, 16);
     mem::free(addr);
     if !(result == 0) {
-        return NetworkError::ConnectionRefused;
+        return NetworkError::ConnectionRefused("connection to port " + (port to string) + " refused");
     }
 
     return TcpConnection::new(fd);
@@ -324,7 +324,7 @@ pub fn TcpListener.new(fd: int): void {
 pub fn TcpListener.bind(port: int) static: !TcpListener {
     mut fd: int = turfrt_net_socket();
     if !(fd >= 0) {
-        return NetworkError::SocketCreationFailed;
+        return NetworkError::SocketCreationFailed("could not create a socket");
     }
 
     turfrt_net_reuseaddr(fd);
@@ -333,12 +333,12 @@ pub fn TcpListener.bind(port: int) static: !TcpListener {
     immut bindResult: int = bind(fd, addr, 16);
     mem::free(addr);
     if !(bindResult == 0) {
-        return NetworkError::BindFailed;
+        return NetworkError::BindFailed("could not bind port " + (port to string));
     }
 
     immut listenResult: int = listen(fd, 128);
     if !(listenResult == 0) {
-        return NetworkError::ListenFailed;
+        return NetworkError::ListenFailed("could not listen on port " + (port to string));
     }
 
     return TcpListener::new(fd);
@@ -351,7 +351,7 @@ pub fn TcpListener.bind(port: int) static: !TcpListener {
 pub fn TcpListener.accept(): !TcpConnection {
     mut clientFd: int = accept(self.fd, null, null);
     if !(clientFd >= 0) {
-        return NetworkError::AcceptFailed;
+        return NetworkError::AcceptFailed("could not accept a connection");
     }
     return TcpConnection::new(clientFd);
 }

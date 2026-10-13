@@ -1010,7 +1010,7 @@ The standard library picks the mechanism by *why* a call can fail:
 
 | Why it fails | Shape | Example |
 |---|---|---|
-| The input or the environment: a missing file, text that is not a number, a refused connection | returns `!T`, with a variant that carries what failed | `io::read_to_string(path)`, `strings::parse_int(s)`, `json::parse(text)`, `Map.try_get(key)` |
+| The input or the environment: a missing file, text that is not a number, a refused connection | returns `!T`, with a variant that carries what failed, and a message (`err.message`) | `io::read_to_string(path)`, `strings::parse_int(s)`, `json::parse(text)`, `Map.try_get(key)` |
 | The caller broke a precondition: popping an empty stack, an index out of range | **panics**, and the message starts with the caller's `file:line:` | `List.pop()`, `Map.get(key)`, `strings::substring` |
 | A question: is it there, does it start with this | returns `bool` or a sentinel (`-1`, `""`) | `io::exists(path)`, `Set.contains(x)`, `strings::index_of` |
 

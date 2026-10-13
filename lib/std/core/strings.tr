@@ -673,7 +673,7 @@ pub error StringParseError {
 pub fn parse_int(s: string): !int {
     mut n: int = strlen(s);
     if n == 0 {
-        return StringParseError::InvalidInt;
+        return StringParseError::InvalidInt("not an int: '" + s + "'");
     }
     mut i: int = 0;
     mut neg: bool = false;
@@ -684,7 +684,7 @@ pub fn parse_int(s: string): !int {
         i = 1;
     }
     if i >= n {
-        return StringParseError::InvalidInt;
+        return StringParseError::InvalidInt("not an int: '" + s + "'");
     }
     // -9223372036854775808 / 10 and the last digit it allows.
     immut min_div10: int = -922337203685477580;
@@ -692,11 +692,11 @@ pub fn parse_int(s: string): !int {
     while i < n {
         mut c: int = s[i] to int;
         if c < 48 || c > 57 {
-            return StringParseError::InvalidInt;
+            return StringParseError::InvalidInt("not an int: '" + s + "'");
         }
         immut d: int = c - 48;
         if result < min_div10 || (result == min_div10 && d > 8) {
-            return StringParseError::InvalidInt;
+            return StringParseError::InvalidInt("not an int: '" + s + "'");
         }
         result = result * 10 - d;
         i = i + 1;
@@ -705,7 +705,7 @@ pub fn parse_int(s: string): !int {
         return result;
     }
     if result == min_div10 * 10 - 8 {
-        return StringParseError::InvalidInt;
+        return StringParseError::InvalidInt("not an int: '" + s + "'");
     }
     return 0 - result;
 }
@@ -747,7 +747,7 @@ pub fn parse_double(s: string): !double {
         }
     }
     if digits == 0 {
-        return StringParseError::InvalidDouble;
+        return StringParseError::InvalidDouble("not a double: '" + s + "'");
     }
     if i < n && ((byte_at_unchecked(s, i) to int) == 101 || (byte_at_unchecked(s, i) to int) == 69) { // e E
         i = i + 1;
@@ -760,11 +760,11 @@ pub fn parse_double(s: string): !double {
             exp_digits = exp_digits + 1;
         }
         if exp_digits == 0 {
-            return StringParseError::InvalidDouble;
+            return StringParseError::InvalidDouble("not a double: '" + s + "'");
         }
     }
     if i != n {
-        return StringParseError::InvalidDouble;
+        return StringParseError::InvalidDouble("not a double: '" + s + "'");
     }
     return s to double;
 }

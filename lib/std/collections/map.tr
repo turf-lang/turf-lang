@@ -283,7 +283,7 @@ pub error MapError {
 pub fn<K, V> Map.try_get(key: K): !V {
     immutable idx: int = self.index_of(key);
     if (idx < 0) {
-        return MapError::KeyNotFound;
+        return MapError::KeyNotFound("key not found");
     }
     return self.h.values[idx];
 }
