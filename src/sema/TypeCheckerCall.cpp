@@ -1468,29 +1468,41 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
             }
           }
 
-          const std::string *NarrowedState = nullptr;
+          // The innermost frame for this variable decides; any outer frame
+          // for it is stale once the value moves inside the inner arm.
+          MachineNarrowFrame *Frame = nullptr;
           if (const auto *BaseVar =
                   dynamic_cast<const VariableExprAST *>(Node.getBase())) {
             for (auto It = MachineNarrowStack_.rbegin();
                  It != MachineNarrowStack_.rend(); ++It) {
-              if (It->VarName == BaseVar->getName() &&
-                  It->MachineName == MT->getName()) {
-                NarrowedState = &It->StateName;
-                break;
-              }
+              if (It->VarName != BaseVar->getName() ||
+                  It->MachineName != MT->getName())
+                continue;
+              if (!Frame)
+                Frame = &*It;
+              else
+                It->Known = false;
             }
           }
 
-          if (NarrowedState) {
-            std::string TargetState = TargetAccess->getVariant();
-            if (!MT->hasEdge(*NarrowedState, TargetState)) {
-              InvalidTransitionError(Node.getLoc(), MT->getName(),
-                                     *NarrowedState, TargetState)
-                  .raise();
-              setType(&Node, TurfVoid());
-              return;
+          if (Frame && Frame->Known) {
+            if (LoopDepth_ > Frame->LoopDepth) {
+              Frame->Known = false;
+            } else {
+              const std::string TargetState = TargetAccess->getVariant();
+              if (!MT->hasEdge(Frame->StateName, TargetState)) {
+                InvalidTransitionError(Node.getLoc(), MT->getName(),
+                                       Frame->StateName, TargetState)
+                    .raise();
+                setType(&Node, TurfVoid());
+                return;
+              }
+              Node.TransitionCompileTimeProven = true;
+              if (ControlDepth_ == Frame->Depth)
+                Frame->StateName = TargetState;
+              else
+                Frame->Known = false;
             }
-            Node.TransitionCompileTimeProven = true;
           }
 
           Node.IsMachineTransition = true;
@@ -2421,8 +2433,10 @@ void TypeChecker::visitRecoverExpr(RecoverExprAST &Node) {
     // no value needed in that case, so simply running the block and falling
     // through is fine; only a non-void success type actually needs a value
     // to come from somewhere.
-    if (Node.getBlock())
+    if (Node.getBlock()) {
+      ControlScope Scope(*this, /*Loop=*/false);
       const_cast<ExprAST *>(Node.getBlock())->accept(*this);
+    }
     if (!(SuccessTy && SuccessTy->isVoid()) && !AllPathsDiverge(Node.getBlock())) {
       reportError(Node.getLoc(), ErrCode::InvalidRecover,
                   "'recover " +

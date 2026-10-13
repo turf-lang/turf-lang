@@ -12,10 +12,10 @@ fn go(c: C, t: C): C {
     mut x: C = c;
     compare x {
         matches C::Idle:
-            x.transition(t);
+        x.transition(t);
         done
         otherwise:
-            return x;
+        return x;
     }
     return x;
 }

@@ -460,10 +460,21 @@ void TypeChecker::visitUnary(UnaryExprAST &Node) {
 }
 
 
+void TypeChecker::forgetMachineNarrowing(const ExprAST *Place) {
+  const auto *Var = dynamic_cast<const VariableExprAST *>(Place);
+  if (!Var)
+    return;
+  for (auto &Frame : MachineNarrowStack_)
+    if (Frame.VarName == Var->getName())
+      Frame.Known = false;
+}
+
 void TypeChecker::visitAddressOf(AddressOfExprAST &Node) {
   // Recurse into the operand so its type is inferred first.
   if (Node.getOperand())
     const_cast<ExprAST *>(Node.getOperand())->accept(*this);
+  // A reference can move the value without a `.transition` on its name.
+  forgetMachineNarrowing(Node.getOperand());
 
   TurfTypePtr OperandTy = getType(Node.getOperand());
   if (!OperandTy) {
@@ -543,6 +554,7 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
     IndexWriteTarget_ = dynamic_cast<const ArrayAccessExprAST *>(Node.getLHS());
     const_cast<ExprAST *>(Node.getLHS())->accept(*this);
     IndexWriteTarget_ = nullptr;
+    forgetMachineNarrowing(Node.getLHS());
   }
   if (Node.getRHS())
     const_cast<ExprAST *>(Node.getRHS())->accept(*this);
@@ -1613,8 +1625,9 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
                 dynamic_cast<const VariableExprAST *>(Node.getSubject())) {
           if (const auto *EA =
                   dynamic_cast<const ScopeAccessExprAST *>(Arm.Values[0].get())) {
-            MachineNarrowStack_.push_back(
-                {SubjVar->getName(), MT->getName(), EA->getVariant()});
+            MachineNarrowStack_.push_back({SubjVar->getName(), MT->getName(),
+                                           EA->getVariant(), ControlDepth_ + 1,
+                                           LoopDepth_, true});
             PushedNarrow = true;
           }
         }
@@ -1622,7 +1635,10 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
     }
 
     // Type-check arm body
-    check(Arm.Body.get());
+    {
+      ControlScope ArmScope(*this, /*Loop=*/false);
+      check(Arm.Body.get());
+    }
 
     if (PushedNarrow)
       MachineNarrowStack_.pop_back();
@@ -1637,6 +1653,7 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
   if (Node.getOtherBodyMut()) {
     if (CatchAllLoc && FirstWarningAt("unreachable-arm", Node.getOtherLoc()))
       UnreachableArmWarning(Node.getOtherLoc(), "The 'otherwise' arm", *CatchAllLoc).emit();
+    ControlScope OtherScope(*this, /*Loop=*/false);
     check(Node.getOtherBodyMut());
   }
 

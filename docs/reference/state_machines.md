@@ -226,12 +226,16 @@ error [E035]: 'ConnectionState' has no transition from 'Idle' to 'Closing'.
   declaration, or transition to a state 'Idle' actually has an edge to.
 ```
 
-The check compares the target with the state the **arm matched**. Make one
-transition per arm: a second `.transition` in the same arm is also checked
-against the matched state, not the state the first call produced, and is
-rejected unless the machine declares that edge from the matched state
-itself. To chain moves, use one call per `compare`, or a loop that matches
-again.
+The check compares the target with the state the value is in at that point
+of the arm. A transition written directly in the arm body moves that state
+along, so `matches Idle:` followed by `.transition(Connecting)` and then
+`.transition(Connected)` checks the second move from `Connecting`. A
+transition inside an `if`, a nested `compare` or a `recover` block is still
+checked from the current state, but after it the state is no longer known.
+One inside a loop or a `defer` body, which can run more than once or later,
+is checked when it runs. Once the state is unknown (also after the value is
+assigned or `&` is taken of it), the arm's later transitions are checked when
+they run, as described next.
 
 ## Checked when it runs
 

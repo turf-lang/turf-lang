@@ -806,12 +806,42 @@ private:
   /// a stacked-pattern arm (`matches A, matches B:`) or a non-variable
   /// subject (e.g. a field access) is a v1 scope limit and is left
   /// unnarrowed, per polymorphic-seeking-lark.md.
+  ///
+  /// A proven transition moves StateName to its target when it runs straight
+  /// through the arm (Depth == ControlDepth_). One nested in a branch is still
+  /// checked against StateName but leaves the state unknown afterwards, and
+  /// one in a loop or `defer` body (LoopDepth_ > LoopDepth), which may run
+  /// again or later, is left to the runtime guard and also leaves it unknown.
   struct MachineNarrowFrame {
     std::string VarName;
     std::string MachineName;
     std::string StateName;
+    int Depth = 0;
+    int LoopDepth = 0;
+    bool Known = true;
   };
   std::vector<MachineNarrowFrame> MachineNarrowStack_;
+  /// Marks every narrowing of @p Place (if it is a plain variable) unknown:
+  /// an assignment or a `&` can change its state without a `.transition`.
+  void forgetMachineNarrowing(const ExprAST *Place);
+  /// Bodies entered conditionally (if/compare arms/recover blocks) or
+  /// repeatedly/out of order (loops, `defer`), and the second kind alone.
+  int ControlDepth_ = 0;
+  int LoopDepth_ = 0;
+  struct ControlScope {
+    TypeChecker &TC;
+    bool Loop;
+    ControlScope(TypeChecker &TC, bool Loop) : TC(TC), Loop(Loop) {
+      ++TC.ControlDepth_;
+      if (Loop)
+        ++TC.LoopDepth_;
+    }
+    ~ControlScope() {
+      --TC.ControlDepth_;
+      if (Loop)
+        --TC.LoopDepth_;
+    }
+  };
 
   /// Loop variable types: populated by visitFor(), consulted by visitVariable().
   /// Maps loop variable name → inferred type (always int for range-for).

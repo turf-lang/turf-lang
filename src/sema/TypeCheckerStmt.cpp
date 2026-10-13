@@ -186,11 +186,14 @@ void TypeChecker::visitIf(IfExprAST &Node) {
 
   for (const auto &Branch : Node.getBranches()) {
     checkCondition(Branch.Cond.get(), Branch.Loc, IsTernary ? "give" : "if");
+    ControlScope Scope(*this, /*Loop=*/false);
     if (Branch.Body)
       Branch.Body->accept(*this);
   }
-  if (Node.getElseBody())
+  if (Node.getElseBody()) {
+    ControlScope Scope(*this, /*Loop=*/false);
     Node.getElseBody()->accept(*this);
+  }
 
   if (IsTernary) {
     TurfTypePtr ThenTy = getType(Node.getThen());
@@ -222,15 +225,19 @@ void TypeChecker::visitIf(IfExprAST &Node) {
 
 void TypeChecker::visitWhile(WhileExprAST &Node) {
   checkCondition(const_cast<ExprAST *>(Node.getCond()), Node.getLoc(), "while");
-  if (Node.getBody())
+  if (Node.getBody()) {
+    ControlScope Scope(*this, /*Loop=*/true);
     Node.getBody()->accept(*this);
+  }
   setType(&Node, TurfVoid());
 }
 
 
 void TypeChecker::visitDoWhile(DoWhileExprAST &Node) {
-  if (Node.getBody())
+  if (Node.getBody()) {
+    ControlScope Scope(*this, /*Loop=*/true);
     Node.getBody()->accept(*this);
+  }
   checkCondition(const_cast<ExprAST *>(Node.getCond()), Node.getLoc(),
                  "do-while");
   setType(&Node, TurfVoid());
@@ -313,8 +320,10 @@ void TypeChecker::visitFor(ForExprAST &Node) {
     const_cast<ExprAST *>(Node.getStep())->accept(*this);
 
   // Visit body
-  if (Node.getBody())
+  if (Node.getBody()) {
+    ControlScope Scope(*this, /*Loop=*/true);
     Node.getBody()->accept(*this);
+  }
 
   // Remove loop variable from scope
   LoopVarTypes_.erase(Node.getVarName());
@@ -367,8 +376,10 @@ void TypeChecker::visitForEach(ForEachExprAST &Node) {
   if (Node.hasIndexVar() && Node.ResolvedIndexVar)
     Node.ResolvedIndexVar->Type = TurfInt();
 
-  if (Node.getBody())
+  if (Node.getBody()) {
+    ControlScope Scope(*this, /*Loop=*/true);
     Node.getBody()->accept(*this);
+  }
 
   LoopVarTypes_.erase(Node.getValueVarName());
 
@@ -607,8 +618,12 @@ void TypeChecker::visitDefer(DeferExprAST &Node) {
   // deferred statement's own expressions never went through the TypeChecker
   // at all (every visit*() call is a DIRECT `Node->accept(*this)` from the
   // parent, not an implicit recursive walk -- see visitBlock() just above).
-  if (Node.getStmt())
+  // It runs when the block exits, after the statements that follow it, so a
+  // machine transition in it is treated like one in a loop body.
+  if (Node.getStmt()) {
+    ControlScope Scope(*this, /*Loop=*/true);
     const_cast<ExprAST *>(Node.getStmt())->accept(*this);
+  }
 
   // A `defer` statement is always used in statement position (parsed via
   // the same generic ParseExpression()-then-';' path as any other
