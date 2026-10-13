@@ -485,7 +485,7 @@ fn main(): int {
 0
 ```
 
-The fallback is checked against `T`: a `string` fallback for a `!int` call, or an `int` for a `!Point`, is E066. `recover produce` on a `!void` call is E066 as well, since there is no value to produce.
+The fallback is checked against `T` exactly: a `string` fallback for a `!int` call, or an `int` for a `!Point`, is E066, and so is an `int` for a `!double`, since the fallback is not widened (write `0.0`, or convert with `to double`). An integer literal for a `!int32` is an `int32`. `recover produce` on a `!void` call is E066 as well, since there is no value to produce.
 
 <!-- doc-example: fails E066 -->
 ```turflang

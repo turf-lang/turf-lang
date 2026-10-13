@@ -2450,11 +2450,26 @@ void TypeChecker::visitRecoverExpr(RecoverExprAST &Node) {
     // invalid when writeFile's success type is void, exactly like the doc's own
     // example: typesCompatible() already rejects int-vs-void generically,
     // no special-casing needed here.
-    if (ProduceTy && SuccessTy && !typesCompatible(ProduceTy.get(), SuccessTy.get())) {
+    if (ProduceTy && SuccessTy && !typesCompatible(ProduceTy.get(), SuccessTy.get()) &&
+        !untypedLiteralAcquiresInt32(Node.getProduceExpr(), SuccessTy.get())) {
       reportError(Node.getLoc(), ErrCode::TypeMismatch,
                   "'recover produce " + ProduceTy->getName() +
                       "' doesn't match this call's success type '" +
                       SuccessTy->getName() + "'.");
+    } else if (ProduceTy && SuccessTy && ProduceTy->isNumeric() && SuccessTy->isNumeric() &&
+               !sameTypeExact(ProduceTy.get(), SuccessTy.get()) &&
+               !untypedLiteralAcquiresInt32(Node.getProduceExpr(), SuccessTy.get())) {
+      // The fallback stands in for the call's own value, so it has the call's
+      // type exactly; an `int` for a `!double` is not widened (owner decision
+      // 2026-10-13).
+      reportError(Node.getLoc(), ErrCode::TypeMismatch,
+                  "'recover produce " + ProduceTy->getName() +
+                      "' doesn't match this call's success type '" +
+                      SuccessTy->getName() + "' exactly.",
+                  {},
+                  "The fallback is not widened. Write a '" + SuccessTy->getName() +
+                      "' value" +
+                      (SuccessTy->isDouble() ? " (`0.0`, or `(n to double)`)." : "."));
     }
   } else {
     // Run / AsRun: per docs/architecture/errors_and_recover.md, a block that
