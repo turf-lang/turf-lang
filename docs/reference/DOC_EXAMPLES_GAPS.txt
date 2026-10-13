@@ -12,14 +12,6 @@ docs/reference/cli_and_diagnostics.md#3 d1c376ff  E009 SHOWS-ERROR
 docs/reference/cli_and_diagnostics.md#4 3c4ae04a  E041 NOT-SELF-CONTAINED
 docs/reference/cli_and_diagnostics.md#8 92cbb28b  E010 NEEDS-REVIEW
 docs/reference/cli_and_diagnostics.md#9 86cd7868  E041 NOT-SELF-CONTAINED
-docs/reference/ffi_and_unsafe.md#11 2def845e  E038 NEEDS-REVIEW
-docs/reference/ffi_and_unsafe.md#13 fb090806  E130 SHOWS-ERROR
-docs/reference/ffi_and_unsafe.md#14 d6e7ace3  E040 SHOWS-ERROR
-docs/reference/ffi_and_unsafe.md#15 d37c4b1b  E040 SHOWS-ERROR
-docs/reference/ffi_and_unsafe.md#16 ed368601  E130 SHOWS-ERROR
-docs/reference/ffi_and_unsafe.md#17 fba34860  E038 SHOWS-ERROR
-docs/reference/ffi_and_unsafe.md#2 3d3a61fe  E009 NOT-SELF-CONTAINED
-docs/reference/ffi_and_unsafe.md#8 b7815478  E040 NOT-SELF-CONTAINED
 docs/reference/stdlib/collections.md#10 752d3b7a  E040 NOT-SELF-CONTAINED
 docs/reference/stdlib/collections.md#14 04e1a96d  E042 NOT-SELF-CONTAINED
 docs/reference/stdlib/collections.md#15 511aedb9  E040 NOT-SELF-CONTAINED
