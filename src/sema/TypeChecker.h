@@ -381,6 +381,11 @@ private:
                    const std::string &CustomBanner = "",
                    const SLM::DiagnosticHints &Hints = {});
 
+  /// Visits @p Cond and reports E066 at @p Loc unless it is a `bool`.
+  /// Conditions have no truthiness: Codegen branches on an `i1` and has no
+  /// conversion for any other type. @p Construct names the statement ("if").
+  void checkCondition(ExprAST *Cond, SourceLocation Loc, const char *Construct);
+
   /// A value of type `void` used where a value is needed -- initialising,
   /// assigning, returning, an operand -- is its own mistake (E067), not "type
   /// mismatch": there is no type to convert, there is no value at all. Every

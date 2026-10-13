@@ -7,7 +7,7 @@ Reference for TurfLang's control-flow constructs:
 - leaving early: [`break` / `continue`](#break-and-continue) and [`defer`](#defer);
 - and how all of these meet [error values](#control-flow-and-error-values).
 
-Conditions are bare expressions: `if x > 0 { ... }`. Parentheses are accepted for grouping (`while (x > 0)`) but never required. The body of every `if`, `elseif`, `else`, `while`, `do` and `for` is a braced block; a `compare` arm has its own `:` ... `done` body.
+Conditions are bare expressions: `if x > 0 { ... }`. Parentheses are accepted for grouping (`while (x > 0)`) but never required. A condition must be a `bool`: there is no truthiness, so `if n { ... }` with an `int` `n` is a type mismatch (E066); write `if n != 0 { ... }`. The body of every `if`, `elseif`, `else`, `while`, `do` and `for` is a braced block; a `compare` arm has its own `:` ... `done` body.
 
 ---
 

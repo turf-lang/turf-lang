@@ -154,16 +154,27 @@ void TypeChecker::visitBlock(BlockExprAST &Node) {
 }
 
 
-void TypeChecker::visitIf(IfExprAST &Node) {
-  for (const auto &Branch : Node.getBranches()) {
-    if (Branch.Cond)
-      Branch.Cond->accept(*this);
-    if (Branch.Body)
-      Branch.Body->accept(*this);
-  }
-  if (Node.getElseBody())
-    Node.getElseBody()->accept(*this);
+void TypeChecker::checkCondition(ExprAST *Cond, SourceLocation Loc,
+                                 const char *Construct) {
+  if (!Cond)
+    return;
+  Cond->accept(*this);
+  TurfTypePtr Ty = getType(Cond);
+  if (!Ty || Ty->isBool())
+    return;
+  reportError(Loc,
+              codeForMismatch(Ty.get(), TurfBool().get(), ErrCode::TypeMismatch),
+              std::string("The condition of '") + Construct +
+                  "' must be a 'bool', but this one has type '" +
+                  Ty->getName() + "'.",
+              {},
+              Ty->isErrorUnion()
+                  ? "A fallible call is not a condition. Handle its failure with "
+                    "`recover`, e.g. `f() recover run { ... }`."
+                  : "Write a comparison, e.g. `n != 0` or `s.length() > 0`.");
+}
 
+void TypeChecker::visitIf(IfExprAST &Node) {
   bool IsTernary = false;
   if (Node.getBranches().size() == 1 && Node.getElseBody()) {
     bool BodyIsBlock = dynamic_cast<BlockExprAST*>(Node.getThen()) != nullptr;
@@ -172,6 +183,14 @@ void TypeChecker::visitIf(IfExprAST &Node) {
       IsTernary = true;
     }
   }
+
+  for (const auto &Branch : Node.getBranches()) {
+    checkCondition(Branch.Cond.get(), Branch.Loc, IsTernary ? "give" : "if");
+    if (Branch.Body)
+      Branch.Body->accept(*this);
+  }
+  if (Node.getElseBody())
+    Node.getElseBody()->accept(*this);
 
   if (IsTernary) {
     TurfTypePtr ThenTy = getType(Node.getThen());
@@ -202,8 +221,7 @@ void TypeChecker::visitIf(IfExprAST &Node) {
 
 
 void TypeChecker::visitWhile(WhileExprAST &Node) {
-  if (Node.getCond())
-    const_cast<ExprAST *>(Node.getCond())->accept(*this);
+  checkCondition(const_cast<ExprAST *>(Node.getCond()), Node.getLoc(), "while");
   if (Node.getBody())
     Node.getBody()->accept(*this);
   setType(&Node, TurfVoid());
@@ -213,8 +231,8 @@ void TypeChecker::visitWhile(WhileExprAST &Node) {
 void TypeChecker::visitDoWhile(DoWhileExprAST &Node) {
   if (Node.getBody())
     Node.getBody()->accept(*this);
-  if (Node.getCond())
-    const_cast<ExprAST *>(Node.getCond())->accept(*this);
+  checkCondition(const_cast<ExprAST *>(Node.getCond()), Node.getLoc(),
+                 "do-while");
   setType(&Node, TurfVoid());
 }
 
