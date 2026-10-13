@@ -1,0 +1,19 @@
+// `.transition` on a `&M` moves the machine value the reference points at,
+// checked at run time.
+import test;
+
+machine C {
+    Idle -> Connecting,
+    Connecting -> Connected
+}
+
+fn advance(p: &C): void {
+    p.transition(C::Connecting);
+}
+
+fn main(): int {
+    mut c: C = C::Idle;
+    advance(&c);
+    test::assert(c to int == 1, "moved through the reference");
+    return 0;
+}

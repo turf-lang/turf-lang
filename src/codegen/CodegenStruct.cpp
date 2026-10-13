@@ -62,7 +62,17 @@ Value *MethodCallExprAST::codegen() {
     if (!TargetVal)
       return nullptr;
 
-    Value *Ptr = Base->codegenLValue();
+    // A `&M` receiver already holds the machine value's address; anything
+    // else is the variable or field that stores it.
+    const TurfType *BaseTy = getExprType(Base.get());
+    const auto *RefTy = dynamic_cast<const TurfPointerType *>(BaseTy);
+    if (RefTy)
+      BaseTy = RefTy->getPointee().get();
+    if (auto *NT = dynamic_cast<const NamedType *>(BaseTy)) {
+      if (GlobalSymbolTable)
+        BaseTy = GlobalSymbolTable->LookupType(NT->getName()).get();
+    }
+    Value *Ptr = RefTy ? Base->codegen() : Base->codegenLValue();
     if (!Ptr)
       return nullptr;
 
@@ -84,11 +94,6 @@ Value *MethodCallExprAST::codegen() {
     // per declared source state that has an edge to the target, default =
     // panic. Mirrors CompareExprAST::codegen()'s int/enum switch and
     // EmitRuntimeBoundsCheck()'s panic-on-default pattern (CodegenArray.cpp).
-    const TurfType *BaseTy = getExprType(Base.get());
-    if (auto *NT = dynamic_cast<const NamedType *>(BaseTy)) {
-      if (GlobalSymbolTable)
-        BaseTy = GlobalSymbolTable->LookupType(NT->getName()).get();
-    }
     const auto *MT = dynamic_cast<const TurfMachineType *>(BaseTy);
     if (!MT) {
       llvm::report_fatal_error(
@@ -101,7 +106,8 @@ Value *MethodCallExprAST::codegen() {
         dynamic_cast<const ScopeAccessExprAST *>(Args[0].get());
     std::string TargetState = TargetAccess ? TargetAccess->getRightName() : "";
 
-    Value *CurVal = Base->codegen();
+    Value *CurVal = RefTy ? Builder->CreateLoad(TargetVal->getType(), Ptr, "machcur")
+                          : Base->codegen();
     if (!CurVal)
       return nullptr;
 

@@ -1,0 +1,17 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: C::transition(Connected) -- no such transition from the current state
+// The run-time guard reads the current state through the reference.
+machine C {
+    Idle -> Connecting,
+    Connecting -> Connected
+}
+
+fn jump(p: &C): void {
+    p.transition(C::Connected);
+}
+
+fn main(): int {
+    mut c: C = C::Idle;
+    jump(&c);
+    return 0;
+}
