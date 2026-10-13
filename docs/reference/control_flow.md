@@ -194,7 +194,7 @@ fn main(): int {
 10
 ```
 
-`for i in a..b { ... }` runs the body with `i` taking the values `a`, `a + 1`, ... up to **but not including** `b`. The range is always half-open; there is no inclusive form (`a..=b` is a syntax error), so write `a..b + 1` for "up to and including `b`".
+`for i in a..b { ... }` runs the body with `i` taking the values `a`, `a + 1`, ... up to **but not including** `b`. The range is always half-open; there is no inclusive form (`a..=b` is a syntax error), so write `a..b + 1` for "up to and including `b`". Both bounds are numbers: an `int`, `int32` or `double` (a `bool`, `string` or struct bound is E066); with a `double` bound, `i` is a `double`.
 
 ### `step`
 

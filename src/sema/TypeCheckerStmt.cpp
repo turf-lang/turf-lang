@@ -250,6 +250,20 @@ void TypeChecker::visitFor(ForExprAST &Node) {
   TurfTypePtr StartTy = getType(Node.getStart());
   TurfTypePtr EndTy   = getType(Node.getEnd());
 
+  // A range counts with `<` and a numeric step, so each bound is a number.
+  for (const TurfTypePtr &Bound : {StartTy, EndTy}) {
+    if (Bound && !Bound->isInt() && !Bound->isInt32() && !Bound->isDouble()) {
+      reportError(Node.getLoc(),
+                  codeForMismatch(Bound.get(), TurfInt().get(), ErrCode::TypeMismatch),
+                  "A 'for' range bound must be an 'int', 'int32' or 'double', "
+                  "but this one has type '" + Bound->getName() + "'.",
+                  {},
+                  "Range over numbers (`for i in 0..n`), or use `for x in arr` "
+                  "to walk an array.");
+      break;
+    }
+  }
+
   TurfTypePtr LoopVarTy = TurfInt(); // default: int for integer ranges
   if ((StartTy && StartTy->isDouble()) || (EndTy && EndTy->isDouble()))
     LoopVarTy = TurfDouble();
