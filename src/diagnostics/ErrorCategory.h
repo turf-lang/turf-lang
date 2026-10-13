@@ -43,6 +43,13 @@ struct DiagnosticHints {
   // site that already computed them, not re-inferred here.
   std::vector<std::string> KnownTypes;
 
+  // The construct a diagnostic is about, when the raise site knows it is a
+  // built-in one (`typeof`, from FuncCallExprAST::ResolvedIntrinsic): routes
+  // the model to that construct's page (getCategoryDocPath()). Never derived
+  // from the message text, where a program's own `fn typeof(...)` would look
+  // the same.
+  std::string Construct;
+
   // SLM_IMPROVEMENT_PLAN C4: the declaration of the struct a field or method
   // diagnostic is about, from the raise site's own type information --
   // `struct Box<T> { v: T, n: int }`. The pinned source lines can show a
@@ -98,27 +105,10 @@ enum class ErrorCategory {
 inline std::string
 extractContextKeyword(const std::string &msg,
                       const std::string & /*codeContext*/ = "") {
-  // Check for TRUE intrinsic names mentioned in the error message itself --
-  // typeof/sizeof, the only names actually wired directly into
-  // the compiler (see general.txt's "TRUE INTRINSICS vs. STANDARD LIBRARY"
-  // section for the full explanation). This list previously also contained
-  // "printline"/"print"/"input" (ordinary stdlib functions declared in
-  // lib/std/io.tr, requiring `import io;` like any other module -- no
-  // longer even implemented via @intrinsic, which has been removed from
-  // the compiler entirely), "abs"/"power" (used to be @intrinsic stubs, now
-  // pure-Turf/extern-fn stdlib in lib/std/math.tr, per Builtins.cpp's own
-  // comments), "assert"/"fail" (used to be compiler intrinsics with
-  // their own CodegenIntrinsic branches; now ordinary, real overloaded Turf
-  // functions in lib/std/test.tr), and "lengthof" (deleted entirely,
-  // STRING_UFCS_OPERATOR_CHAR_RFC.md §7 step 7 -- strings::length(s) is the
-  // real replacement, an ordinary stdlib function) -- all eight were
-  // wrongly routed to the BUILTIN_FUNCTION category below as a result.
-  // Order: longer/more-specific names first to avoid partial matches.
-  static const char *builtinNames[] = {"typeof", "sizeof"};
-  for (const char *name : builtinNames) {
-    if (msg.find(name) != std::string::npos)
-      return name;
-  }
+  // A built-in function (`typeof`) is NOT recognized here: its name in a
+  // message is just as likely to be a program's own function of that name.
+  // The raise site that knows it is the built-in says so
+  // (DiagnosticHints::Construct).
 
   // Struct/enum construct keywords -- checked BEFORE controlKeywords below,
   // not after. "for" (a controlKeyword) is a short, common substring that

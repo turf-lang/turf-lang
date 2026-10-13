@@ -19,6 +19,7 @@
 #include "sema/Types.h"
 #include "tooling/Formatter.h"
 #include "tooling/MigratePub.h"
+#include "diagnostics/ErrorCategory.h"
 
 #include <filesystem>
 #include <fstream>
@@ -1890,6 +1891,20 @@ static void testGenericOperatorDiagnostics() {
 // the model an unrelated line of it as "the candidate" (SLM_IMPROVEMENT_PLAN
 // C4). Both the arity error (Resolver) and the overload error (TypeChecker)
 // must name the module's own file.
+// The --smart model's page for the built-in `typeof` is chosen by the raise
+// site (DiagnosticHints::Construct), never from the name in the message: a
+// program's own `fn typeof(...)` produces the same text and got the built-in's
+// page.
+static void testBuiltinDocRouting() {
+  const std::string Msg = "'typeof' was called with 2 arguments, but no overload accepts that many.";
+  CHECK(SLM::extractContextKeyword(Msg) != "typeof");
+  CHECK_EQ(SLM::getCategoryDocPath(SLM::ErrorCategory::FUNCTION_SIGNATURE,
+                                   SLM::extractContextKeyword(Msg)),
+           std::string("docs/slm/function_signature.txt"));
+  CHECK_EQ(SLM::getCategoryDocPath(SLM::ErrorCategory::FUNCTION_SIGNATURE, "typeof"),
+           std::string("docs/slm/builtin_typeof.txt"));
+}
+
 static void testImportedCandidateLocation() {
   CurrentTest = "imported candidate overloads name their own file";
   struct Case {
@@ -2184,6 +2199,7 @@ int main() {
   testGenericOperatorDiagnostics();
   testUnsizedArrayDiagnostics();
   testImportedCandidateLocation();
+  testBuiltinDocRouting();
 
   if (Failures) {
     std::cerr << Failures << " check(s) failed\n";

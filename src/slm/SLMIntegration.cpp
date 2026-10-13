@@ -1402,7 +1402,8 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
   // Extract a keyword hint for doc-path routing (getCategoryDocPath's
   // constructDocs map) and the structural-prior patch-keyword bonus
   // (computeStructuralPrior above) -- independent of category classification.
-  std::string contextKeyword = extractContextKeyword(cleanError);
+  std::string contextKeyword =
+      hints.Construct.empty() ? extractContextKeyword(cleanError) : hints.Construct;
 
   // `category` (the parameter) is the GROUND-TRUTH category: either the
   // raising TurfError subclass's own Category_ (Errors.h), or an explicit

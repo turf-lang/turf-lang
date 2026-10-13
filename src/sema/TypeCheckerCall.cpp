@@ -502,13 +502,15 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
     if (BI) {
       // Arity check using the canonical arity from Builtins.h.
       if (BI->Arity >= 0 && ArgCount != BI->Arity) {
+        SLM::DiagnosticHints Hints;
+        Hints.Construct = IntrinsicName(Node.ResolvedIntrinsic);
         reportError(Node.getLoc(), ErrCode::WrongArity,
                     "'" + CalleeName + "' expects " +
                         std::to_string(BI->Arity) + " argument" +
                         (BI->Arity == 1 ? "" : "s") + ", got " +
                         std::to_string(ArgCount) + ".",
                     {}, "Check the number of arguments.",
-                    "Wrong argument count!");
+                    "Wrong argument count!", Hints);
         setType(&Node, nullptr);
         return;
       }

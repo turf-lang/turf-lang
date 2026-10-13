@@ -155,6 +155,13 @@ public:
 
   // SLM_IMPROVEMENT_PLAN C4: the declaration of the struct this diagnostic is
   // about (DiagnosticHints::ReceiverDecl). Chainable.
+  // The built-in construct the diagnostic is about (DiagnosticHints::
+  // Construct): which documentation page the --smart model is given.
+  TurfError &withConstruct(const std::string &Construct) {
+    Hints_.Construct = Construct;
+    return *this;
+  }
+
   TurfError &withReceiverDecl(const std::string &Decl) {
     Hints_.ReceiverDecl = Decl;
     return *this;

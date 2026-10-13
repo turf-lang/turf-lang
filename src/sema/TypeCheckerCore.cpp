@@ -61,6 +61,8 @@ void productionErrorHandler(SourceLocation Loc, const char *Code,
     Err.withKnownType(Fact);
   if (!Hints.ReceiverDecl.empty())
     Err.withReceiverDecl(Hints.ReceiverDecl);
+  if (!Hints.Construct.empty())
+    Err.withConstruct(Hints.Construct);
   Err.raise();
 }
 #else
