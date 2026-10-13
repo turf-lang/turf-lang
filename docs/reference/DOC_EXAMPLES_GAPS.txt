@@ -56,8 +56,6 @@ docs/reference/generics_and_operators.md#4 d2285d94  E042 PLACEHOLDER
 docs/reference/generics_and_operators.md#6 815d0f03  E042 PLACEHOLDER
 docs/reference/generics_and_operators.md#7 5894e2a9  E068 NEEDS-REVIEW
 docs/reference/generics_and_operators.md#9 22a6d819  E028 SHOWS-ERROR
-docs/reference/operators.md#4 16219fee  E040 NOT-SELF-CONTAINED
-docs/reference/operators.md#8 bd1ba020  E103 NEEDS-REVIEW
 docs/reference/state_machines.md#5 06d99f2f  E110 SHOWS-ERROR
 docs/reference/state_machines.md#7 8a77571c  E040 NOT-SELF-CONTAINED
 docs/reference/stdlib/collections.md#10 752d3b7a  E040 NOT-SELF-CONTAINED
@@ -114,7 +112,3 @@ docs/reference/structs_and_enums.md#19 f31d8908  E042 NOT-SELF-CONTAINED
 docs/reference/structs_and_enums.md#3 9c730e79  E130 NEEDS-REVIEW
 docs/reference/structs_and_enums.md#7 f792887e  E009 NOT-SELF-CONTAINED
 docs/reference/structs_and_enums.md#8 e7db285e  E009 NOT-SELF-CONTAINED
-docs/reference/variables_and_types.md#13 f9aead1e  E042 NOT-SELF-CONTAINED
-docs/reference/variables_and_types.md#2 af6f34ab  E128 SHOWS-ERROR
-docs/reference/variables_and_types.md#3 7324d92b  E008 SHOWS-ERROR
-docs/reference/variables_and_types.md#8 145d32ef  E134 SHOWS-ERROR
