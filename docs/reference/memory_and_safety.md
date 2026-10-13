@@ -635,7 +635,7 @@ fn main(): int {
 ```
 
 ```text
-panic: cross-heap free: mem::free() was called on a pointer that belongs to the GC heap (a string or collection buffer), not the manual heap -- the two heaps do not merge
+panic: cross-heap free: mem::free() was called on a pointer that belongs to the GC heap (a string, a collection buffer, a heap(...) value, anything the collector owns), not the manual heap -- the two heaps do not merge
 ```
 
 (Calling the C `free` directly through your own `extern fn` has no such check.)

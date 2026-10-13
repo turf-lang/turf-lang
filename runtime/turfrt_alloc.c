@@ -125,7 +125,8 @@ void turf_rt_checked_free(void *p) {
   if (p != NULL && turf_gc_is_registered(p)) {
     turf_rt_panic("cross-heap free",
                   "mem::free() was called on a pointer that belongs to the "
-                  "GC heap (a string or collection buffer), not the manual "
+                  "GC heap (a string, a collection buffer, a heap(...) "
+                  "value, anything the collector owns), not the manual "
                   "heap -- the two heaps do not merge",
                   NULL, 0);
   }
