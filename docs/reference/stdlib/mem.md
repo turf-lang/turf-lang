@@ -250,18 +250,19 @@ The number of tracked items.
 Calls `mem::free` on every tracked pointer, then releases the pool's own storage.
 It takes a `Pool<void*>` exactly; another element type is **E025** ("No matching
 overload"). Every tracked pointer must therefore follow `free`'s rules: a pool
-that tracks a GC pointer panics with the cross-heap free message. Do not use the
-pool afterwards.
+that tracks a GC pointer panics with the cross-heap free message. The pool is
+left empty, so freeing it again does nothing and it can track a new batch.
 
-A `Pool` is an ordinary value, **not** a shared handle like a `List`: passing it
-by value to a function gives that function its own copy, and what it tracks is
-lost to the caller. Pass `&mem::Pool<void*>` to share one:
+A `Pool` is a **shared handle**, like a `List`: assigning it, or passing it to a
+function, shares the one set of tracked items, so a callee's `track` is seen by
+its caller. There is no `copy()`, since two pools freeing the same pointers
+would free them twice.
 
 ```turflang
 import mem;
 import io;
 
-fn track_two(pool: &mem::Pool<void*>): void {
+fn track_two(pool: mem::Pool<void*>): void {
     unsafe {
         pool.track(mem::alloc(16));
         pool.track(mem::alloc(16));
@@ -272,7 +273,7 @@ fn main(): int {
     unsafe {
         mut pool: mem::Pool<void*> = mem::Pool::default();
         pool.track(mem::alloc(16));
-        track_two(&pool);
+        track_two(pool);
         io::printline(pool.length() to string);   // 3
         mem::free_pool(pool);
     }

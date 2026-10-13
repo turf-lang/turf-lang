@@ -231,10 +231,19 @@ pub fn unroot(p: void*): void {
 //   // ... use buf, and any number of other pool.track()'d allocations ...
 //   mem::free_pool(pool);         // frees every tracked allocation
 
-pub struct Pool<T> {
+// A Pool is a handle to one shared header, like every collection (FREEZE.md
+// §6.27): copying it, or passing it by value, shares the tracked items, so a
+// function that tracks into a pool it was handed tracks into the caller's.
+// `Pool::default()` allocates the header (a `&U` field's default is a fresh
+// `heap(U::default())`, F-COLL-2).
+struct PoolHeader<T> {
     items: T*,
     len: int,
     cap: int
+}
+
+pub struct Pool<T> {
+    h: &PoolHeader<T>
 }
 
 // Registers `item` with this pool -- does NOT allocate anything itself;
@@ -242,13 +251,13 @@ pub struct Pool<T> {
 // value you already own) and pass the result here to hand its lifetime to
 // the pool.
 pub fn<T> Pool.track(item: T): void {
-    if self.len == self.cap {
-        if self.cap == 0 {
-            self.cap = 8;
+    if self.h.len == self.h.cap {
+        if self.h.cap == 0 {
+            self.h.cap = 8;
         } else {
-            self.cap = self.cap * 2;
+            self.h.cap = self.h.cap * 2;
         }
-        // TYPE-002 (S15/D3): was `self.cap * 8` under Type Erasure. In
+        // TYPE-002 (S15/D3): was `self.h.cap * 8` under Type Erasure. In
         // practice `Pool<T>` is always instantiated at a pointer type (see
         // free_pool()'s own comment below -- a pool tracks allocations, so
         // T is always some *T/void*), and every pointer is 8 bytes anyway,
@@ -256,20 +265,20 @@ pub fn<T> Pool.track(item: T): void {
         // consistency with every other collection's identical fix
         // (list.tr/stack.tr/queue.tr/set.tr/map.tr) rather than because a
         // live corruption was reproduced here.
-        immut byteSize: int = self.cap * sizeof(T);
-        if self.items == null {
-            self.items = malloc(byteSize) to T*;
+        immut byteSize: int = self.h.cap * sizeof(T);
+        if self.h.items == null {
+            self.h.items = malloc(byteSize) to T*;
         } else {
-            self.items = realloc(self.items, byteSize) to T*;
+            self.h.items = realloc(self.h.items, byteSize) to T*;
         }
     }
-    self.items[self.len] = item;
-    self.len = self.len + 1;
+    self.h.items[self.h.len] = item;
+    self.h.len = self.h.len + 1;
 }
 
 // How many allocations this pool is currently tracking.
 pub fn<T> Pool.length(): int {
-    return self.len;
+    return self.h.len;
 }
 
 // Frees every tracked allocation and this pool's own backing array.
@@ -278,24 +287,30 @@ pub fn<T> Pool.length(): int {
 // `Pool<void*>`, not a `fn<T> Pool.free_all()` method -- a generic
 // method's body is type-checked exactly ONCE, generically, against the
 // abstract `T`, never re-checked per instantiation; from inside such a
-// method, `self.items[i]`'s type is genuinely just the opaque, erased `T`
+// method, `self.h.items[i]`'s type is genuinely just the opaque, erased `T`
 // with no way to treat it as anything more specific (confirmed live: even
-// an explicit `self.items[i] to void*` cast is rejected from inside a
+// an explicit `self.h.items[i] to void*` cast is rejected from inside a
 // generic method body, with "Cannot explicitly cast 'T' to 'void*'").
 // A plain function taking a CONCRETE `Pool<void*>` parameter doesn't have
 // that problem -- the type is fully known at the call site, so
-// `pool.items[i]` correctly resolves to a real `void*`. This is also why
+// `pool.h.items[i]` correctly resolves to a real `void*`. This is also why
 // `Pool<T>` can only meaningfully be bulk-freed when instantiated as
 // `Pool<void*>` specifically (or any other single concrete pointer type,
 // via your own equivalent free function) -- not a general `Pool<T>`
 // operation.
+//
+// The pool is left empty, and every copy of it with it, so freeing it again,
+// or tracking into it afterwards, is safe.
 pub fn free_pool(pool: Pool<void*>): void {
     mut i: int = 0;
-    while i < pool.len {
-        free(pool.items[i]);
+    while i < pool.h.len {
+        free(pool.h.items[i]);
         i = i + 1;
     }
-    if pool.items != null {
-        free(pool.items);
+    if pool.h.items != null {
+        free(pool.h.items);
     }
+    pool.h.items = null;
+    pool.h.len = 0;
+    pool.h.cap = 0;
 }
