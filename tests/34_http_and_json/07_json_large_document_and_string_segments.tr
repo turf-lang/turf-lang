@@ -5,8 +5,9 @@
 // benchmarks). The rewrite copies string values in segments between escapes,
 // so this checks every place a segment starts or ends: escapes at the start,
 // the end and back to back, an empty string, bytes above 0x7F, and numbers
-// with signs and fractions, then round-trips a 4000-object document (about
-// 100 KB, where the old parser alone took a third of a second). Exponents
+// with signs and fractions, then round-trips a 400-object document. Speed is
+// bench/json_roundtrip.tr's job: under TURF_GC_STRESS (a collection per
+// allocation) a 4000-object round trip took over 700 s. Exponents
 // are left out: strings::parse_double() rejects them, so any number with one
 // fails the whole parse (the header says only the value is wrong).
 
@@ -29,9 +30,9 @@ fn main(): int {
     test::assert_eq(v.at(6).num_val, -12.5, "negative fraction");
     test::assert_eq(v.at(7).num_val, 0.0, "zero");
 
-    // 4000 objects round-tripped, every field read back.
+    // 400 objects round-tripped, every field read back.
     mut arr: json::JsonValue = json::JsonValue::new_array();
-    for i in 0..4000 {
+    for i in 0..400 {
         mut o: json::JsonValue = json::JsonValue::new_object();
         o.set("id", json::JsonValue::from_number(i to double));
         o.set("name", json::JsonValue::from_string("item \"" + (i to string) + "\""));
@@ -42,7 +43,7 @@ fn main(): int {
         test::fail("a stringified document parses");
         return 1;
     };
-    test::assert_eq(back.length(), 4000, "every element came back");
+    test::assert_eq(back.length(), 400, "every element came back");
     mut sum: int = 0;
     for i in 0..back.length() {
         immut o: json::JsonValue = back.at(i);
@@ -51,6 +52,6 @@ fn main(): int {
             test::fail("element " + (i to string) + " has the wrong name");
         }
     }
-    test::assert_eq(sum, 7998000, "every id came back");
+    test::assert_eq(sum, 79800, "every id came back");
     return 0;
 }
