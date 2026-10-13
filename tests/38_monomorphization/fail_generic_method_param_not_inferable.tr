@@ -1,0 +1,16 @@
+// EXPECT-DIAG: E129
+// EXPECT-DIAG: 'Plain.make' declares type parameter 'U', but no parameter mentions it
+// A method's own type parameter needs a parameter too; only the struct's
+// parameters come from the receiver.
+struct Plain {
+    n: int
+}
+
+fn<U> Plain.make(): int {
+    return self.n;
+}
+
+fn main(): int {
+    mut p: Plain = Plain::default();
+    return p.make();
+}

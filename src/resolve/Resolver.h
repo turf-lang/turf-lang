@@ -483,6 +483,12 @@ private:
    * overwhelming majority of calls), so ordinary functions pay one prefix
    * check and nothing else.
    */
+  /// E129 for a generic function whose type parameter no parameter
+  /// mentions (`fn<T> mk(): T`): calls cannot write type arguments, so it
+  /// could never be instantiated.
+  void validateGenericParamsInferable(const FuncDefExprAST &Node,
+                                      const ResolverFunctionSymbol &Sym,
+                                      const std::string &ModuleName) const;
   void validateOperatorDecl(const ResolverFunctionSymbol &Sym) const;
 
   /**

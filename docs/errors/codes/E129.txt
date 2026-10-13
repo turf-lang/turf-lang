@@ -14,3 +14,9 @@ Say the type yourself, the same way you would without `guess`:
 For the `void` case, the real problem is usually that the function was supposed to return something. Call it as a statement on its own if you only want what it does:
 
     print_it();
+
+The same error is reported at a generic function whose type parameter no parameter mentions. Type arguments are worked out from the arguments of each call, and there is no way to write them yourself, so `T` here could never be decided:
+
+    fn<T> make(): T { ... }           // which T would `make()` be?
+
+Use the type parameter in a parameter (`fn<T> make(seed: T): T`), or drop it and name a real type.

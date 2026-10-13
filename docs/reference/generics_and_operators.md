@@ -140,7 +140,8 @@ exactly like ordinary overloads.
 **Calls to a generic function infer the type arguments from the arguments.**
 `identity(42)` binds `T` to `int` because the argument is an `int`; `first(arr)`
 binds `T` to `int` because `arr` is `int[3]`. Every type parameter must appear
-in the parameter list, since that is the only place it can be inferred from.
+in the parameter list, since that is the only place it can be inferred from
+(`fn<T> make(): T` is E129 at the declaration).
 
 **Every argument that mentions a type parameter must agree on it.** Inference
 never widens: with `fn<T> pair(a: T, b: T): T`, `pair(1, 2.5)` and

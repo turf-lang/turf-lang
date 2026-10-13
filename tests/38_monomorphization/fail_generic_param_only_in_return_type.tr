@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E129
+// EXPECT-DIAG: 'mk' declares type parameter 'T', but no parameter mentions it
+// T can only be inferred from an argument; reported at the declaration
+// rather than as a missing function at codegen.
+fn<T> mk(): T {
+    mut x: T = T::default();
+    return x;
+}
+
+fn main(): int {
+    mut x: int = mk();
+    return x;
+}

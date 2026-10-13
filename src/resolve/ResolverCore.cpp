@@ -633,10 +633,47 @@ void Resolver::registerFunctionSignature(const FuncDefExprAST &Node,
                                          const std::string &ModuleName) {
   auto Sym = buildFunctionSymbol(Node, ModuleName);
   validateOperatorDecl(Sym);
+  validateGenericParamsInferable(Node, Sym, ModuleName);
   if (ModuleName.empty()) {
     SymTable_.registerCurrentFileFunction(Sym);
   } else {
     SymTable_.registerModuleFunction(ModuleName, Sym);
+  }
+}
+
+
+void Resolver::validateGenericParamsInferable(const FuncDefExprAST &Node,
+                                              const ResolverFunctionSymbol &Sym,
+                                              const std::string &ModuleName) const {
+  // Operators have their own rule and message (E097, validateOperatorDecl).
+  if (Sym.TypeParams.empty() || Sym.BaseName.rfind("operator", 0) == 0)
+    return;
+  std::vector<std::string> Bound;
+  for (const auto &P : Sym.Params)
+    TypeWalk::collectParamOrder(P.Type, Bound);
+  // A method's struct parameters come from the receiver, or for a static
+  // method such as `Box::new` from the declared type it initializes.
+  const std::string &FnName = Node.getName();
+  const size_t Dot = FnName.find('.');
+  if (Dot != std::string::npos) {
+    const std::string StructName = FnName.substr(0, Dot);
+    for (const auto *D : HoistedStructDecls_)
+      if (D->getName() == StructName ||
+          (!ModuleName.empty() && D->getName() == ModuleName + "::" + StructName))
+        for (const auto &TP : D->getTypeParams())
+          Bound.push_back(TP);
+  }
+  for (const auto &TP : Sym.TypeParams) {
+    if (std::find(Bound.begin(), Bound.end(), TP) != Bound.end())
+      continue;
+    TypeError(toSourceLocation(Sym.DeclLoc), ErrCode::NothingToInfer,
+              "'" + FnName + "' declares type parameter '" + TP +
+                  "', but no parameter mentions it, so no call can infer it.",
+              "Type arguments are inferred from the arguments, and there is no "
+              "way to write them at a call. Use '" + TP +
+                  "' in a parameter type, or drop it from the '<...>' list.")
+        .raise();
+    return;
   }
 }
 
