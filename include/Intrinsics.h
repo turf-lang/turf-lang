@@ -70,6 +70,7 @@ enum class BareIntrinsic {
   GcPin,
   GcUnpin,
   Heap,
+  HashOf,
 };
 
 /// The intrinsic spelled `Name`, or `BareIntrinsic::None`. The one place an
@@ -87,6 +88,7 @@ inline BareIntrinsic LookupIntrinsic(const std::string &Name) {
   if (Name == "gc_pin")          return BareIntrinsic::GcPin;
   if (Name == "gc_unpin")        return BareIntrinsic::GcUnpin;
   if (Name == "heap")            return BareIntrinsic::Heap;
+  if (Name == "hash_of")         return BareIntrinsic::HashOf;
   return BareIntrinsic::None;
 }
 
@@ -105,6 +107,7 @@ inline const char *IntrinsicName(BareIntrinsic I) {
   case BareIntrinsic::GcPin:         return "gc_pin";
   case BareIntrinsic::GcUnpin:       return "gc_unpin";
   case BareIntrinsic::Heap:          return "heap";
+  case BareIntrinsic::HashOf:        return "hash_of";
   case BareIntrinsic::None:          break;
   }
   return "";
@@ -188,6 +191,17 @@ inline const char *IntrinsicName(BareIntrinsic I) {
 //                  Registered in Builtins.cpp's g_builtins (Arity 1);
 //                  dispatched in FuncCallExprAST::codegen() via the shared
 //                  HeapAllocateValue() helper (CodegenCore.cpp).
+//   hash_of(expr) -- REL-005 follow-up (owner decision 2026-10-13). `int`:
+//                  a hash of `expr`'s VALUE that agrees with field-by-field
+//                  `==`, generated from its static type
+//                  (EmitStructuralHash(), CodegenCore.cpp): a string by its
+//                  bytes, a double with -0.0 taken as 0.0, a struct field by
+//                  field (never its padding), a fixed array element by
+//                  element, a reference or pointer by address. What
+//                  hashing::hash() (and so every Map/Set key) uses; the old
+//                  byte hash read padding and missed equal keys (1999 of 2000
+//                  struct keys at -O0). Registered in Builtins.cpp's
+//                  g_builtins (Arity 1).
 //   caller_location -- STD-002. Unlike every other bare intrinsic above, a
 //                  real reserved LEXER KEYWORD (TOK_CALLER_LOCATION,
 //                  include/Lexer.h), not a g_builtins entry -- it's a

@@ -225,6 +225,14 @@ otherwise each answer differently, producing an incoherent language.
 - The intrinsic list is **closed and enumerated in one header**
   (`include/Intrinsics.h`). Adding an intrinsic is an explicit,
   change-recorded act.
+  - **Added 2026-10-13 (owner decision, REL-005): `hash_of(expr): int`**, a
+    hash that agrees with field-by-field `==` (a string by its text, `-0.0`
+    as `0.0`, a struct field by field and never its padding, an array element
+    by element, a reference by address). A hash depends on the type system
+    (B1), so the compiler generates it. `hashing::hash` (and so every
+    `Map`/`Set` key) uses it in place of the old raw-byte hash. That hash
+    broke `a == b ⇒ hash(a) == hash(b)` for padded structs, signed zeros, and
+    string fields. Record: `docs/development/changes/REL-005.md`.
 - Standard-library privileges are declared in source (a module-level
   capability declaration), never inferred from a file path.
 - `libturfrt` is written in C, versioned lock-step with the compiler, and

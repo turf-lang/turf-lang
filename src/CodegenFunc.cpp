@@ -1098,6 +1098,12 @@ Value *FuncCallExprAST::codegen() {
   // mem::alloc?"). `typeof` is the only real intrinsic left (`lengthof`
   // was the other one -- STRING_UFCS_OPERATOR_CHAR_RFC.md §7 step 7 deleted
   // it, `strings::length(s)` is the real replacement).
+  if (isIntrinsic(BareIntrinsic::HashOf)) {
+    Value *V = Args[0]->codegen();
+    if (!V)
+      return nullptr;
+    return EmitStructuralHash(V, getExprType(Args[0].get()));
+  }
   if (isIntrinsic(BareIntrinsic::TypeOf)) {
 
     std::vector<Value *> ArgVals;

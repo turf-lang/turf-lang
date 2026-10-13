@@ -111,6 +111,10 @@ static void ensure_builtins_registered() {
   // unbuildable without `unsafe`). See include/Intrinsics.h category 1 for
   // the full contract.
   RegisterBuiltin("heap", {1, "Allocate a copy of a value on the GC heap, returning &T"});
+
+  // A hash that agrees with field-by-field `==`, what Map/Set keys use
+  // (hashing::hash). See include/Intrinsics.h category 1.
+  RegisterBuiltin("hash_of", {1, "Hash of a value, consistent with field-by-field =="});
 }
 
 // CodegenIntrinsic() used to live here -- the Codegen-side implementation

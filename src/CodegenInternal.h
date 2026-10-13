@@ -215,6 +215,12 @@ llvm::Constant *GetDefaultValue(const TurfType *T);
 /// through `&` fields has no finite default: E147 at `Loc`, nullptr.
 llvm::Value *EmitDefaultValue(const TurfType *T, SourceLocation Loc);
 
+/// `hash_of(V)` for a value of static type T (may be null: then by LLVM type
+/// alone): an `i64` that agrees with field-by-field `==` -- a string by its
+/// bytes, -0.0 as 0.0, a struct field by field (not its padding), an array
+/// element by element, a pointer or reference by address.
+llvm::Value *EmitStructuralHash(llvm::Value *V, const TurfType *T);
+
 /// Emits the LLVM constant for an already-resolved `export immut` value.
 /// Needed by CodegenStruct.cpp (ScopeAccessExprAST's `Module::CONST` case)
 /// and CodegenVar.cpp (VariableExprAST's self-reference-to-a-constant case).

@@ -429,6 +429,38 @@ test::assert(typeof([1, 2]) == "int[2]", "");
 `typeof` is not a keyword — it's a built-in function callable without a
 module prefix, evaluated directly against the argument's static AST type.
 
+### `hash_of(expr)` — an `int` hash that agrees with `==`
+
+`hash_of` takes any value and returns an `int` such that values `==` calls
+equal hash equally. It is built from the value's static type: a `string` by
+its text, a `double` with `-0.0` taken as `0.0`, a struct field by field
+(never the padding between fields), a fixed array or `T[]` element by
+element, and a reference or pointer by its address. `Map` and `Set` hash
+their keys with it (through `hashing::hash`), so a struct key works as long
+as its `operator ==` compares field by field. A key compared some other way
+(say, case-insensitively) needs its fields normalized before it goes in. A
+NaN never equals anything, itself included, so a NaN key is never found.
+
+```turflang
+struct P {
+    c: char,
+    n: int
+}
+
+fn mk(n: int): P {
+    mut p: P = P::default();
+    p.c = 'a';
+    p.n = n;
+    return p;
+}
+
+fn main(): int {
+    test::assert(hash_of(mk(5)) == hash_of(mk(5)), "equal structs");
+    test::assert(hash_of("ab" + "c") == hash_of("abc"), "strings by text");
+    return 0;
+}
+```
+
 ---
 
 See also: [Operators](operators.md) for the full operator reference,

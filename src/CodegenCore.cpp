@@ -1013,6 +1013,8 @@ const TurfType *getExprType(const ExprAST *E) {
 
       if (FuncCall->isIntrinsic(BareIntrinsic::TypeOf))
         return TurfString().get();
+      if (FuncCall->isIntrinsic(BareIntrinsic::HashOf))
+        return TurfInt().get();
 
       // MEM-001: gc_alloc/gc_alloc_zeroed/gc_realloc always evaluate to a
       // raw `void*`, exactly like typeof always evaluates to `string` above
@@ -2430,6 +2432,159 @@ llvm::Value *EmitDefaultValue(const TurfType *T, SourceLocation Loc) {
   std::vector<const TurfStructType *> InProgress;
   bool Failed = false;
   return emitDefaultValueRec(T, Loc, InProgress, Failed);
+}
+
+// ─── hash_of(x) ──────────────────────────────────────────────────────────
+// A hash that agrees with field-by-field `==` (owner decision 2026-10-13):
+// the old generic hashing::hash() hashed a value's raw bytes, so equal
+// struct keys with different padding (1999 of 2000 at -O0), -0.0 vs 0.0, and
+// strings compared by content all hashed apart. Built from the static type:
+// every part is folded into a running 64-bit state with plain wrapping
+// arithmetic (a hash never traps), finished with splitmix64 so Map/Set's
+// `hash & (bcap - 1)` sees well-mixed low bits.
+
+// splitmix64's finalizer.
+static llvm::Value *hashMix(llvm::Value *X) {
+  llvm::Type *I64 = llvm::Type::getInt64Ty(*TheContext);
+  X = Builder->CreateXor(X, Builder->CreateLShr(X, 30));
+  X = Builder->CreateMul(X, llvm::ConstantInt::get(I64, 0xbf58476d1ce4e5b9ULL));
+  X = Builder->CreateXor(X, Builder->CreateLShr(X, 27));
+  X = Builder->CreateMul(X, llvm::ConstantInt::get(I64, 0x94d049bb133111ebULL));
+  return Builder->CreateXor(X, Builder->CreateLShr(X, 31), "hash.mix");
+}
+
+static llvm::Value *hashCombine(llvm::Value *H, llvm::Value *Part) {
+  llvm::Type *I64 = llvm::Type::getInt64Ty(*TheContext);
+  H = Builder->CreateMul(H, llvm::ConstantInt::get(I64, 0x100000001b3ULL));
+  return hashMix(Builder->CreateXor(H, Part));
+}
+
+// `i64 __turf_hash_cstr(ptr)`: FNV-1a over a NUL-terminated string's bytes,
+// one per module (a null string hashes as "").
+static llvm::Function *getHashCStrFn() {
+  if (llvm::Function *F = TheModule->getFunction("__turf_hash_cstr"))
+    return F;
+  llvm::Type *I64 = llvm::Type::getInt64Ty(*TheContext);
+  llvm::Type *I8 = llvm::Type::getInt8Ty(*TheContext);
+  llvm::Type *Ptr = llvm::PointerType::get(*TheContext, 0);
+  auto *F = llvm::Function::Create(llvm::FunctionType::get(I64, {Ptr}, false),
+                                   llvm::Function::InternalLinkage,
+                                   "__turf_hash_cstr", TheModule.get());
+  llvm::IRBuilder<> B(*TheContext);
+  auto *Entry = llvm::BasicBlock::Create(*TheContext, "entry", F);
+  auto *Loop = llvm::BasicBlock::Create(*TheContext, "loop", F);
+  auto *Body = llvm::BasicBlock::Create(*TheContext, "body", F);
+  auto *Done = llvm::BasicBlock::Create(*TheContext, "done", F);
+  llvm::Value *S = F->getArg(0);
+  llvm::Value *Offset = llvm::ConstantInt::get(I64, 0xcbf29ce484222325ULL);
+  B.SetInsertPoint(Entry);
+  B.CreateCondBr(B.CreateIsNull(S), Done, Loop);
+  B.SetInsertPoint(Loop);
+  llvm::PHINode *I = B.CreatePHI(I64, 2, "i");
+  llvm::PHINode *H = B.CreatePHI(I64, 2, "h");
+  I->addIncoming(llvm::ConstantInt::get(I64, 0), Entry);
+  H->addIncoming(Offset, Entry);
+  llvm::Value *C = B.CreateLoad(I8, B.CreateInBoundsGEP(I8, S, I));
+  B.CreateCondBr(B.CreateIsNull(C), Done, Body);
+  B.SetInsertPoint(Body);
+  llvm::Value *H2 = B.CreateMul(B.CreateXor(H, B.CreateZExt(C, I64)),
+                                llvm::ConstantInt::get(I64, 0x100000001b3ULL));
+  I->addIncoming(B.CreateAdd(I, llvm::ConstantInt::get(I64, 1)), Body);
+  H->addIncoming(H2, Body);
+  B.CreateBr(Loop);
+  B.SetInsertPoint(Done);
+  llvm::PHINode *R = B.CreatePHI(I64, 2, "hash");
+  R->addIncoming(Offset, Entry);
+  R->addIncoming(H, Loop);
+  B.CreateRet(R);
+  return F;
+}
+
+static llvm::Value *emitHashRec(llvm::Value *V, const TurfType *T, llvm::Value *H,
+                                int Depth);
+
+// Folds `Count` elements of type ElemT (LLVM type ElemTy) at `Base` into H.
+static llvm::Value *emitHashElements(llvm::Value *Base, llvm::Type *ElemTy,
+                                     const TurfType *ElemT, llvm::Value *Count,
+                                     llvm::Value *H, int Depth) {
+  llvm::Type *I64 = llvm::Type::getInt64Ty(*TheContext);
+  llvm::Function *F = Builder->GetInsertBlock()->getParent();
+  llvm::BasicBlock *Pre = Builder->GetInsertBlock();
+  auto *Loop = llvm::BasicBlock::Create(*TheContext, "hash.loop", F);
+  auto *Body = llvm::BasicBlock::Create(*TheContext, "hash.elem", F);
+  auto *Done = llvm::BasicBlock::Create(*TheContext, "hash.done", F);
+  Builder->CreateBr(Loop);
+  Builder->SetInsertPoint(Loop);
+  llvm::PHINode *I = Builder->CreatePHI(I64, 2, "hash.i");
+  llvm::PHINode *Acc = Builder->CreatePHI(I64, 2, "hash.acc");
+  I->addIncoming(llvm::ConstantInt::get(I64, 0), Pre);
+  Acc->addIncoming(H, Pre);
+  Builder->CreateCondBr(Builder->CreateICmpSLT(I, Count), Body, Done);
+  Builder->SetInsertPoint(Body);
+  llvm::Value *E = Builder->CreateLoad(ElemTy, Builder->CreateInBoundsGEP(ElemTy, Base, I));
+  llvm::Value *Next = emitHashRec(E, ElemT, Acc, Depth + 1);
+  I->addIncoming(Builder->CreateAdd(I, llvm::ConstantInt::get(I64, 1)),
+                 Builder->GetInsertBlock());
+  Acc->addIncoming(Next, Builder->GetInsertBlock());
+  Builder->CreateBr(Loop);
+  Builder->SetInsertPoint(Done);
+  return Acc;
+}
+
+static llvm::Value *emitHashRec(llvm::Value *V, const TurfType *T, llvm::Value *H,
+                                int Depth) {
+  llvm::Type *I64 = llvm::Type::getInt64Ty(*TheContext);
+  llvm::Type *VT = V->getType();
+  if (Depth > 16)
+    return H;
+  if (T && T->isNamed("string") && VT->isPointerTy())
+    return hashCombine(H, Builder->CreateCall(getHashCStrFn(), {V}));
+  if (VT->isDoubleTy()) {
+    // -0.0 == 0.0, so both hash as +0.0. (A NaN is never == anything.)
+    llvm::Value *Zero = llvm::ConstantFP::get(VT, 0.0);
+    llvm::Value *D = Builder->CreateSelect(Builder->CreateFCmpOEQ(V, Zero), Zero, V);
+    return hashCombine(H, Builder->CreateBitCast(D, I64));
+  }
+  if (VT->isIntegerTy()) // int, int32, char, bool, an enum
+    return hashCombine(H, Builder->CreateIntCast(V, I64, VT->getIntegerBitWidth() > 8));
+  if (VT->isPointerTy()) // a reference, a pointer, a function: by address
+    return hashCombine(H, Builder->CreatePtrToInt(V, I64));
+  if (const auto *AT = dynamic_cast<const ::ArrayType *>(T)) {
+    llvm::Type *ElemTy = getLLVMType(AT->getElementType());
+    if (AT->getSize() < 0 && VT->isStructTy()) { // a slice: {ptr, len}
+      return emitHashElements(Builder->CreateExtractValue(V, 0), ElemTy,
+                              AT->getElementType(), Builder->CreateExtractValue(V, 1),
+                              H, Depth);
+    }
+    if (VT->isArrayTy()) {
+      llvm::Function *F = Builder->GetInsertBlock()->getParent();
+      llvm::IRBuilder<> TmpB(&F->getEntryBlock(), F->getEntryBlock().begin());
+      llvm::AllocaInst *Slot = TmpB.CreateAlloca(VT, nullptr, "hash.arr");
+      Builder->CreateStore(V, Slot);
+      return emitHashElements(Slot, ElemTy, AT->getElementType(),
+                              llvm::ConstantInt::get(I64, VT->getArrayNumElements()),
+                              H, Depth);
+    }
+    return H;
+  }
+  if (VT->isStructTy()) {
+    // Field by field, never the padding between them.
+    const TurfStructType *ST = defaultStructOf(T);
+    unsigned N = VT->getStructNumElements();
+    for (unsigned Idx = 0; Idx < N; ++Idx) {
+      const TurfType *FT = nullptr;
+      if (ST && Idx < ST->getFields().size())
+        FT = ST->getFields()[Idx].Type.get();
+      H = emitHashRec(Builder->CreateExtractValue(V, Idx), FT, H, Depth + 1);
+    }
+    return H;
+  }
+  return H; // nothing to read (an empty value)
+}
+
+llvm::Value *EmitStructuralHash(llvm::Value *V, const TurfType *T) {
+  llvm::Type *I64 = llvm::Type::getInt64Ty(*TheContext);
+  return emitHashRec(V, T, llvm::ConstantInt::get(I64, 0x243f6a8885a308d3ULL), 0);
 }
 
 

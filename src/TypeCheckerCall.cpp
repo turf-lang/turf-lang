@@ -482,6 +482,22 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
         return;
       }
 
+      // ── hash_of(x) → int ──────────────────────────────────────────────
+      // Any value has one (EmitStructuralHash(), CodegenCore.cpp); `void`
+      // has nothing to hash.
+      if (Node.isIntrinsic(BareIntrinsic::HashOf)) {
+        if (!ArgTypes.empty() && ArgTypes[0] && ArgTypes[0]->isVoid()) {
+          reportError(Node.getLoc(), ErrCode::VoidValue,
+                      "'hash_of(...)' has no value to hash: the argument is 'void'.",
+                      {}, "Pass an expression that produces a real value.",
+                      "Cannot hash 'void'!");
+          setType(&Node, nullptr);
+          return;
+        }
+        setType(&Node, TurfInt());
+        return;
+      }
+
       // ── gc_alloc(n) / gc_alloc_zeroed(n) / gc_realloc(p, n) → void* ────────
       // MEM-001. All three always evaluate to a raw `void*` -- exactly the
       // same "untyped result, caller casts" contract mem::alloc()/
