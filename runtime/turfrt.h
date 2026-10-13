@@ -338,7 +338,9 @@ TurfRtStats turf_rt_stats(void);
  * classification ("division by zero", "array bounds", "integer overflow",
  * ...) baked in at the call site as a string literal; `msg` is the
  * pre-existing human-readable message; `file`/`line` are the Turf source
- * location, not a C source location. Flushes stdout, formats a single
+ * location, not a C source location, or NULL/0 for a panic the runtime
+ * raises on its own behalf (out of memory, stack overflow), which prints no
+ * location. Flushes stdout, formats a single
  * consistent line to stderr, then abort()s -- same terminal signal (SIGABRT, matching
  * `scripts/test_runner.sh`'s RUNTIME_ABORT_EXPECTED contract, which checks
  * only "non-zero, and not a timeout/OOM-kill status") every one of these

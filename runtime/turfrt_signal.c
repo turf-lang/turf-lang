@@ -137,13 +137,13 @@ static void turf_rt_segv_handler(int sig, siginfo_t *info, void *ucontext) {
     turf_rt_panic("stack overflow",
                   "the call stack exceeded its limit -- check for unbounded "
                   "or missing-base-case recursion",
-                  "<runtime>", 0);
+                  NULL, 0);
   } else {
     fprintf(stderr,
             "panic: %s (this is a bug in unsafe code or in TurfLang) at "
-            "address %p\n",
+            "address 0x%llx\n",
             sig == SIGBUS ? "bus error" : "segmentation fault",
-            info->si_addr);
+            (unsigned long long)(uintptr_t)info->si_addr);
     fflush(stderr);
     abort();
   }
@@ -235,7 +235,7 @@ static LONG WINAPI turf_rt_veh(EXCEPTION_POINTERS *ep) {
     turf_rt_panic("stack overflow",
                   "the call stack exceeded its limit -- check for unbounded "
                   "or missing-base-case recursion",
-                  "<runtime>", 0);
+                  NULL, 0);
   } else if (code == EXCEPTION_ACCESS_VIOLATION) {
     /* ExceptionInformation[0] is read/write/execute, [1] the faulting address. */
     void *addr = ep->ExceptionRecord->NumberParameters >= 2
@@ -243,8 +243,8 @@ static LONG WINAPI turf_rt_veh(EXCEPTION_POINTERS *ep) {
                      : NULL;
     fprintf(stderr,
             "panic: segmentation fault (this is a bug in unsafe code or in "
-            "TurfLang) at address %p\n",
-            addr);
+            "TurfLang) at address 0x%llx\n",
+            (unsigned long long)(uintptr_t)addr);
     fflush(stderr);
     abort();
   }

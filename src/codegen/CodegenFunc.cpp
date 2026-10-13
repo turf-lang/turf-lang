@@ -18,6 +18,8 @@
 
 #include "codegen/Codegen.h"
 #include "frontend/AST.h"
+#include "frontend/ASTChildWalker.h"
+#include "frontend/Parser.h" // WasDeclaredInsideTopLevelUnsafe()
 #include "analysis/Algorithms.h"
 #include "sema/Builtins.h"
 #include "analysis/CFG.h"
@@ -289,6 +291,18 @@ void WrapMainWithRuntimeBootstrap() {
 //   Pass 2 (body):      if function has no body yet, fill it in.
 // Calling codegen() twice is what makes forward calls work: main.cpp's
 // pre-pass creates prototypes, then the normal loop fills bodies.
+namespace {
+// Whether a function body holds an `unsafe { }` block.
+class UnsafeBlockFinder : public ASTChildWalker {
+public:
+  bool Found = false;
+  void visitUnsafeBlock(UnsafeBlockExprAST &Node) override {
+    Found = true;
+    ASTChildWalker::visitUnsafeBlock(Node);
+  }
+};
+} // namespace
+
 Value *FuncDefExprAST::codegen() {
   // TYPE-002 (S14a): a FuncDefExprAST with non-empty TypeParams is an
   // uninstantiated generic TEMPLATE -- the monomorphizer (Monomorphize.cpp)
@@ -473,6 +487,18 @@ Value *FuncDefExprAST::codegen() {
             ? GlobalSymbolTable->GetCurrentModule()
             : "main";
     GlobalSymbolTable->RegisterModuleFunction(ModuleName, FSym);
+  }
+
+  // Code that can dereference a raw pointer (an `unsafe` block, or a
+  // function declared inside a top-level `unsafe`) keeps every null
+  // dereference: LLVM otherwise treats one as undefined behaviour and drops
+  // it, so `p[0] = 5` with a null `p` faulted somewhere else at -O2 (at a
+  // nonzero address) and a null read returned garbage instead of faulting.
+  {
+    UnsafeBlockFinder Finder;
+    Finder.visitChild(Body.get());
+    if (Finder.Found || WasDeclaredInsideTopLevelUnsafe(this))
+      TheFunc->addFnAttr(llvm::Attribute::NullPointerIsValid);
   }
 
   // Fill in the function body

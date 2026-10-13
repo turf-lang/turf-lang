@@ -376,7 +376,7 @@ static void gc_arr_grow(void **arr, size_t *cap, size_t elem_size,
     new_cap *= 2;
   void *p = realloc(*arr, new_cap * elem_size);
   if (!p) {
-    turf_rt_panic("out of memory", "<gc block table>", "<turfrt_gc.c>", 0);
+    turf_rt_panic("out of memory", "could not grow the collector's block table", NULL, 0);
   }
   *arr = p;
   *cap = new_cap;
@@ -505,7 +505,7 @@ void turf_gc_record_stack_base(void) {
     turf_rt_panic("cannot locate the stack",
                   "the garbage collector could not determine this thread's "
                   "stack bounds on this platform",
-                  "<runtime>", 0);
+                  NULL, 0);
   }
 }
 
@@ -567,7 +567,7 @@ static void pidx_rebuild(void) {
   g_pidx_keys = calloc(cap, sizeof(uintptr_t)); /* all PIDX_EMPTY */
   g_pidx_vals = malloc(cap * sizeof(size_t));
   if (!g_pidx_keys || !g_pidx_vals)
-    turf_rt_panic("out of memory", "<gc block table>", "<turfrt_gc.c>", 0);
+    turf_rt_panic("out of memory", "could not grow the collector's block table", NULL, 0);
   g_pidx_cap = cap;
   g_pidx_used = 0;
   for (size_t i = 0; i < g_pending_count; i++)
@@ -831,7 +831,7 @@ void turf_rt_unpin(void *p) {
     turf_rt_panic("unpin of unpinned object",
                   "mem::unroot() was called on an object with no matching "
                   "mem::root() pin outstanding",
-                  "<mem::unroot>", 0);
+                  NULL, 0);
   }
   if (--g_pins[idx].count == 0) {
     g_pins[idx] = g_pins[--g_pin_count];
@@ -1210,8 +1210,7 @@ static unsigned char *gc_independent_mark(void) {
 
   unsigned char *marks = malloc(g_block_count ? g_block_count : 1);
   if (!marks)
-    turf_rt_panic("out of memory", "<gc validate mark set>", "<turfrt_gc.c>",
-                  0);
+    turf_rt_panic("out of memory", "could not allocate the TURF_GC_VALIDATE mark set", NULL, 0);
   for (size_t i = 0; i < g_block_count; i++) {
     marks[i] = g_blocks[i].marked;
     g_blocks[i].marked = 0;
@@ -1245,7 +1244,7 @@ static void gc_compare_mark_sets(const unsigned char *indep) {
                   "TURF_GC_VALIDATE: the production root scan missed a "
                   "block the independent scan reaches -- sweeping would "
                   "free a live object",
-                  "<runtime>", 0);
+                  NULL, 0);
   }
 }
 #endif /* TURF_GC_VALIDATE_SUPPORTED */

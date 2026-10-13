@@ -498,11 +498,13 @@ jobs:
       #     and an ASan build installs none (runtime/turfrt_signal.c: INV-RT-5's
       #     documented FDN-005 exception; handle_segv=0 just gives a bare 139).
       #     ASan reports the overflow itself, and the plain jobs cover the
-      #     handler at every -O level.
+      #     handler at every -O level. The two 05_arrays_pointers_ffi
+      #     fail_null_raw_pointer_*_faults_at_zero.tr tests expect the same
+      #     handler's "segmentation fault ... at address 0x0" for the same reason.
       - name: Run Test Suites under ASan -- (default level)
-        run: TURF_COMPILER="$(pwd)/build_asan/turfc" ASAN_OPTIONS=detect_leaks=0:allocator_may_return_null=1 TURF_TEST_EXTRA_EXCLUDE=41_gc/fail_stack_overflow_deep_recursion.tr ./scripts/test_runner.sh
+        run: TURF_COMPILER="$(pwd)/build_asan/turfc" ASAN_OPTIONS=detect_leaks=0:allocator_may_return_null=1 TURF_TEST_EXTRA_EXCLUDE='41_gc/fail_stack_overflow_deep_recursion.tr 05_arrays_pointers_ffi/fail_null_raw_pointer_write_faults_at_zero.tr 05_arrays_pointers_ffi/fail_null_raw_pointer_read_faults_at_zero.tr' ./scripts/test_runner.sh
       - name: Run Test Suites under ASan -- (-O0)
-        run: TURF_COMPILER="$(pwd)/build_asan/turfc" ASAN_OPTIONS=detect_leaks=0:allocator_may_return_null=1 TURF_TEST_EXTRA_EXCLUDE=41_gc/fail_stack_overflow_deep_recursion.tr ./scripts/test_runner.sh -O0
+        run: TURF_COMPILER="$(pwd)/build_asan/turfc" ASAN_OPTIONS=detect_leaks=0:allocator_may_return_null=1 TURF_TEST_EXTRA_EXCLUDE='41_gc/fail_stack_overflow_deep_recursion.tr 05_arrays_pointers_ffi/fail_null_raw_pointer_write_faults_at_zero.tr 05_arrays_pointers_ffi/fail_null_raw_pointer_read_faults_at_zero.tr' ./scripts/test_runner.sh -O0
 
       # FDN-005's own roadmap completion criterion names this exact
       # combination explicitly: "the whole suite green under

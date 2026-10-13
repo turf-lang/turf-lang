@@ -324,8 +324,9 @@ the three places change together. The runner reports that status as 134.
 
 `turf_rt_alloc`, `turf_rt_alloc_zeroed` and `turf_rt_realloc`
 (`runtime/turfrt_alloc.c`) call `turf_rt_panic("out of memory", ...)` the moment
-the system allocator returns `NULL`, with the descriptor's name (or `<raw>`) as
-the message. The collector's own bookkeeping arrays do the same. No caller ever
+the system allocator returns `NULL`, with the size asked for and the
+descriptor's name, if any, as the message (`could not allocate 64 bytes for
+'Node'`). The collector's own bookkeeping arrays do the same. No caller ever
 sees a silent `NULL` from the GC heap. The manual heap has its own, separately
 implemented policy: `mem::alloc` and friends call `sys::panic()` on `NULL`
 (`lib/std/mem/mem.tr`). Both fail loudly, but they are different code (F-MEM-3).
@@ -350,11 +351,11 @@ bumps the suffix (`_2_0` to `_2_1`, ...) in both places together (INV-RT-6).
 | Termination | Message | Exit code |
 |---|---|---|
 | A compiler-inserted runtime check (division by zero, overflow, array bounds, ...) | `panic: runtime check: <msg> (<file>:<line>)` | 134 (`SIGABRT`) |
-| Stack overflow | `panic: stack overflow: <msg> (<runtime>:0)` | 134 |
+| Stack overflow | `panic: stack overflow: <msg>` | 134 |
 | Any other `SIGSEGV` (and `SIGBUS` on POSIX) | `panic: segmentation fault (this is a bug in unsafe code or in TurfLang) at address <addr>` | 134 |
-| Out of memory, GC heap | `panic: out of memory: <desc or <raw>> (<site>:0)` | 134 |
+| Out of memory, GC heap | `panic: out of memory: could not allocate <n> bytes[ for '<type>']` | 134 |
 | Out of memory, manual heap | `sys::panic()`'s own format | 134 |
-| A cross-heap `mem::free()`, an unbalanced `mem::unroot()`, an undiscoverable stack | `panic: <kind>: <msg> (<site>:0)` | 134 |
+| A cross-heap `mem::free()`, an unbalanced `mem::unroot()`, an undiscoverable stack | `panic: <kind>: <msg>` | 134 |
 | `TURF_GC_VALIDATE` finding a missed root | `panic: GC root missed: ...` | 134 |
 | `lib/std/core/sys.tr`'s `panic()`/`assert`/`fail` | that function's own message | 134 |
 | `sys::exit(n)` | none | `n` |

@@ -15,8 +15,14 @@ void turf_rt_panic(const char *kind, const char *msg, const char *file,
    * does not flush stdio, so a piped stdout lost it. Flushed before the
    * message, so a terminal shows the two in order. */
   fflush(stdout);
-  fprintf(stderr, "panic: %s: %s (%s:%d)\n", kind ? kind : "panic",
-          msg ? msg : "", file ? file : "<unknown>", line);
+  /* A runtime-internal panic (out of memory, stack overflow) has no Turf
+   * source location and passes line 0; it prints none rather than a made-up
+   * "(<turf_rt_alloc>:0)". */
+  if (file && line > 0)
+    fprintf(stderr, "panic: %s: %s (%s:%d)\n", kind ? kind : "panic",
+            msg ? msg : "", file, line);
+  else
+    fprintf(stderr, "panic: %s: %s\n", kind ? kind : "panic", msg ? msg : "");
   fflush(stderr);
   abort();
 }
