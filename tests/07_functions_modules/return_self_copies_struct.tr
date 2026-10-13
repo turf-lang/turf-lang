@@ -1,0 +1,21 @@
+// `return self;` from a method declared to return the struct by value
+// copies it out; narrowing the pointer-return rule to structs keeps this.
+import test;
+
+struct P {
+    x: int
+}
+
+fn P.snapshot(): P {
+    return self;
+}
+
+fn main(): int {
+    mut v: P = P::default();
+    v.x = 4;
+    mut w: P = v.snapshot();
+    w.x = 9;
+    test::assert(v.x == 4, "original unchanged");
+    test::assert(w.x == 9, "copy changed");
+    return 0;
+}

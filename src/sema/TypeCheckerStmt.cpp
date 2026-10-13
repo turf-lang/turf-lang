@@ -488,9 +488,23 @@ void TypeChecker::visitReturn(ReturnExprAST &Node) {
       // struct name, never a TurfStructType, and Declared/the pointee here
       // commonly still are NamedType at this point. Codegen's CastToType()
       // performs the actual load (see its "Implicit dereference" comment).
+      //
+      // Only a struct is copied out this way: Codegen's load handles a struct
+      // pointee, and `return p;` with `p: &int` from an `int` function is a
+      // reference where a value belongs. A bare type parameter is checked
+      // again in each clone, where it is concrete.
       if (!Compatible) {
         if (const auto *PT = dynamic_cast<const TurfPointerType *>(RetTy.get())) {
-          if (PT->getPointee() && PT->getPointee()->getName() == Declared->getName())
+          const TurfType *DeclaredBase = Declared;
+          TurfTypePtr Resolved;
+          if (const auto *NT = dynamic_cast<const NamedType *>(Declared)) {
+            if (GlobalSymbolTable)
+              Resolved = GlobalSymbolTable->LookupType(NT->getName());
+            if (Resolved)
+              DeclaredBase = Resolved.get();
+          }
+          if (PT->getPointee() && PT->getPointee()->getName() == Declared->getName() &&
+              (DeclaredBase->isStruct() || DeclaredBase->isGenericParam()))
             Compatible = true;
         }
       }

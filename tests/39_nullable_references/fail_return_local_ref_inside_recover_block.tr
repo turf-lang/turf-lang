@@ -19,5 +19,5 @@ fn f(): &int {
 
 fn main(): int {
     mut r: &int = f();
-    return r;
+    return 0;
 }
