@@ -616,10 +616,31 @@ std::shared_ptr<ResolverFunctionSymbol> finishInstantiation(
     // Restored on BOTH exits -- the error path leaves through the catch.
     const int SavedParent =
         Collector.setCurrentParent(static_cast<int>(Entry.Index));
+    // A typed error (`UnknownStructFieldError(...).raise()`) goes straight
+    // to the DiagnosticEngine instead of through the handler above, so it
+    // would be reported at the template's own line and the clone counted as
+    // checked. Take it back out and treat it as the handler's inner error.
+    const size_t DiagsBefore = DiagnosticEngine::getDiagnostics().size();
+    DiagnosticEngine::State Saved = DiagnosticEngine::saveState();
     try {
       CloneTC.check(Clone);
     } catch (const RecoverUnwind &) {
-      // CheckFailed was set by the handler above.
+      // CheckFailed was set by the handler above, or a typed error was raised.
+    }
+    if (!CheckFailed) {
+      const auto &Now = DiagnosticEngine::getDiagnostics();
+      for (size_t i = DiagsBefore; i < Now.size(); ++i) {
+        if (Now[i].IsWarning)
+          continue;
+        CheckFailed = true;
+        InnerLoc = Now[i].Loc;
+        InnerLoc.Filename = Now[i].Filename;
+        InnerMsg = Now[i].Msg;
+        InnerHint = Now[i].Hint;
+        InnerCode = Now[i].Code.empty() ? nullptr : ErrorCodes::lookupByCode(Now[i].Code.c_str());
+        DiagnosticEngine::restoreState(std::move(Saved));
+        break;
+      }
     }
     Collector.setCurrentParent(SavedParent);
     g_recoverActive = SavedRecoverActive;
