@@ -8,8 +8,8 @@ ones in a lock file, and compiles everything, every module of every package,
 in one go.
 
 You do not need a project to compile a program. `turf hello.tr` and
-`turf compile hello.tr` work on a single file with no manifest, exactly as
-before; see [CLI & Diagnostics](cli_and_diagnostics.md). A project is what you
+`turf compile hello.tr` work on a single file with no manifest; see
+[CLI & Diagnostics](cli_and_diagnostics.md). A project is what you
 want once a program has more than one file, or uses someone else's code.
 
 Two multi-package projects you can build and run are in
@@ -17,11 +17,9 @@ Two multi-package projects you can build and run are in
 `plotter`, that depends on it.
 
 > [!NOTE]
-> Every command, manifest and message on this page was run against the real
-> `turf` and copied. In the messages, the absolute paths `turf` prints are
-> shortened to `…/`, and a few long hashes to `…`. Diagnostics from the compiler
-> say `turf --explain E0NN`, which is what `turfc` prints today; `turf explain
-> E0NN` is the same command, and prints the full write-up from any directory.
+> In the messages on this page, the absolute paths `turf` prints are shortened
+> to `…/`, and a few long hashes to `…`. Diagnostics from the compiler say
+> `turf --explain E0NN`; `turf explain E0NN` is the same command.
 
 ## 1. A project
 
@@ -212,11 +210,30 @@ like `turf build`), and hands the rest to the compiler's runner:
 | `-O0`..`-Os`, `-g`, `--link <lib>` | passed to every test's compile |
 
 `-o` and `--package-graph` are refused, as for `turf build`. The exit status is 0
-when every test passed and 1 when one failed or nothing could run.
+when every test passed and 1 when one failed or nothing could run. A failing
+test is listed with its exit status and what it printed:
+
+```
+$ turf test
+Running Turf Test Suites...
+
+[tests] bad.tr ... RUNTIME FAILED (Exit code 134)
+[tests] good.tr ... PASS
+
+=== Test Summary ===
+Total Tests: 2
+Passed:      1
+Failed:      1
+
+Failed Tests Details:
+
+--- tests/bad.tr (Runtime Error exit 134):
+bad.tr:3: math
+ ---
+```
 
 The same runner is `turfc --test [<dir>] [--package-graph <file>] ...`, for a
-directory of tests that is not a project (it needs no manifest): it is also what
-runs the compiler's own suite. `turfc --test` needs a Unix-like system for now.
+directory of tests that is not a project (it needs no manifest).
 
 ## 2. `turf.toml`
 
@@ -278,11 +295,13 @@ hint: upgrade turfc, or lower `turf` in that manifest
 ```
 $ turf version
 turf 1.0.0-dev  (needs turfc interface 1.1+)
-turfc 2.0.0-dev  (interface 1.1, …/build/turfc)
+turfc 2.0.0-dev  (interface 1.6, …/bin/turfc)
+  …
 ```
 
 The `turf` key in the manifest is about the *compiler's* version (`turfc`, the
-number after `turfc` above).
+number after `turfc` above). The remaining lines of `turf version` are
+described in [CLI & Diagnostics](cli_and_diagnostics.md#versions).
 
 ## 3. Dependencies
 
@@ -329,7 +348,7 @@ A registry-style entry is refused, with a pointer to what works:
 
 ```
 turf: …/turf.toml:6: dependency 'math' is a version string, not a table
-hint: registry versions are not part of TurfLang 2.0 (FUTURE F-7c); use `{ path = "..." }` or `{ git = "...", tag = "..." }`
+hint: registry versions are not part of TurfLang 2.0 (…); use `{ path = "..." }` or `{ git = "...", tag = "..." }`
 ```
 
 **A dependency may not be named like a standard-library module**, because
@@ -383,6 +402,8 @@ turf: dependency cycle between packages: pa -> pb -> pa
 $ turf add geometry --path ../geometry
 Added dependency 'geometry' (../geometry) to …/turf.toml
 $ turf add jsonx --git https://github.com/someone/jsonx --tag v1.2.0
+turf: fetching jsonx (https://github.com/someone/jsonx)
+Added dependency 'jsonx' (git https://github.com/someone/jsonx, tag=v1.2.0, commit 0858be2466c2) to …/turf.toml
 ```
 
 `--path` is relative to where you type the command (it is written relative to
@@ -490,14 +511,12 @@ The other collisions read the same way:
 ```
 
 The E090 is the real error. Each later use of the module (`list::n()`) also
-reports an `E031` ("isn't a known enum, struct, or module") or an `E026` ("has no
-function named"); read the first diagnostic, not the ones after it.
+reports an `E145` ("Module 'list' is not imported in this file"); read the first
+diagnostic, not the ones after it.
 
 Two **different packages** can each have an internal module named `util`, each
 declaring a `Node`, without any collision: a module's identity is its package
-plus its path, so they are two modules with two distinct types. (A build of
-exactly this, `app` with its own `util::Node` and a dependency `shapes` with
-its own, prints exit status 21 from `main` as expected.)
+plus its path, so they are two modules with two distinct types.
 
 ### E091: the module exists but is out of reach
 
@@ -671,8 +690,8 @@ Both apply to `build`, `run`, `check` and `fetch`.
 **`--locked` is not `--offline`.** With a manifest the lock does not cover,
 `--locked` alone may still clone or fetch (it fetched `extra` above) before it
 reports the difference. A CI check that must not use the network passes both:
-`turf build --locked --offline`. That is what `scripts/smoke/examples_smoke.sh` runs
-against the committed lock files in `examples/`.
+`turf build --locked --offline`. The projects in [`examples/`](../../examples/README.md)
+build that way against their committed lock files.
 
 ## 6. The cache
 
@@ -685,13 +704,11 @@ A git dependency is fetched once into a cache and extracted from there:
 ```
 
 - The cache is `$TURF_CACHE_DIR` if set. Otherwise it is the `turf` directory
-  of your user cache directory: on Linux `$XDG_CACHE_HOME/turf`, or
-  `~/.cache/turf` if that is unset. (Checked on Linux with `XDG_CACHE_HOME`; the
-  other platforms use their own user cache directory and are not verified.)
+  of your platform's user cache directory: on Linux `$XDG_CACHE_HOME/turf`, or
+  `~/.cache/turf` if that is unset.
 - It is **disposable**: deleting it only costs a re-fetch. Deleting one
-  `src/<name>-<commit>/` directory re-extracts it from the mirror, offline
-  (`turf build --offline` did exactly that after the tampered tree above was
-  deleted).
+  `src/<name>-<commit>/` directory re-extracts it from the mirror, offline: after
+  the tampered tree above is deleted, `turf build --offline` rebuilds it.
 - `git` must be on `PATH` for every git dependency, cached and locked or not,
   so that a build does not work on one machine and fail on another because of
   what happens to be cached:
@@ -714,15 +731,16 @@ A git dependency is fetched once into a cache and extracted from there:
   wrote it in the manifest.
 - **The tree is `git archive` output, not a checkout.** A path marked
   `export-ignore` in `.gitattributes` is absent, and a submodule is an empty
-  directory (submodules are not fetched). This was checked with a repository
-  holding both:
+  directory (submodules are not fetched). For a repository with both, the
+  extracted tree is:
 
   ```
+  TREE/.gitattributes
   TREE/.gitmodules
   TREE/src/lib.tr
-  TREE/turf.toml
   TREE/vendored          (an empty directory: vendored/data.txt is not there)
   ```
+  (`src/skip.tr`, marked `export-ignore`, is missing.)
 
   A package that marks a file it needs `export-ignore`, or depends on a
   submodule, is fine as a checkout and broken as a dependency.
@@ -749,16 +767,17 @@ is 1.
 | `turf new <name> [--lib]` | Create `<name>/` with a manifest, a starter source file and a `.gitignore`. |
 | `turf init [--lib] [name]` | The same in the current directory. |
 | `turf build [--offline] [--locked] [flags]` | Resolve dependencies, write `build/package-graph.json`, compile. A program becomes `build/<name>`; a library is checked. |
-| `turf run [--offline] [--locked] [flags] [-- args]` | `turf build`, then run `build/<name>`, passing the arguments after `--`, in the directory you typed the command in. The exit status is the program's. A library says `turf: 'lb' is a library; there is nothing to run` (exit 1). |
+| `turf run [--offline] [--locked] [flags] [-- args]` | `turf build`, then run `build/<name>`, passing the arguments after `--`, in the directory you typed the command in. The exit status is the program's. A library without `src/main.tr` says there is nothing to run and how to add one (section 1; exit 1). |
 | `turf check [--offline] [--locked] [flags]` | Every diagnostic, no executable. |
 | `turf clean` | Delete `build/`. Nothing to delete is not an error. |
-| `turf graph [--project <dir>] [--offline] [--locked]` | Print the package graph (the JSON `turf build` writes to `build/package-graph.json`, format in `src/tooling/PackageGraph.h`) on stdout, including the root's `tests/` when the project has one. Writes nothing (no `turf.lock`, no `build/`) and needs no compiler. This is what the language server asks for, so that `import` in the editor resolves as in `turf build`. |
+| `turf graph [--project <dir>] [--offline] [--locked]` | Print the package graph (the JSON `turf build` writes to `build/package-graph.json`) on stdout, including the root's `tests/` when the project has one. Writes nothing (no `turf.lock`, no `build/`) and needs no compiler. This is what an editor asks for, so that `import` there resolves as in `turf build`. |
 | `turf fetch [--offline] [--locked]` | Do everything `build` does up to `turf.lock`, without compiling. Prints one line per git dependency: `jsonx de7262e335ed (tag=v1.0.0)`. Needs no compiler. |
 | `turf update [name…]` | Move git dependencies to what their refs point at now (section 5). |
 | `turf add <name> --path <dir>` / `--git <url> (--tag\|--branch\|--rev) <ref>` | Add a dependency (section 3). |
 | `turf remove <name>` | Remove one. |
 | `turf publish` | Reserved. There is no registry in 2.0. |
 | `turf test [--offline] [--locked] [--jobs n] [--timeout s] [--exclude path]` | Compile and run every test under `tests/`; an error if there is no `tests/` (section 1, *Tests*). |
+| `turf fmt`, `turf explain`, `turf migrate`, `turf dump`, `turf compile` | Work on files, in or out of a project ([CLI & Diagnostics](cli_and_diagnostics.md)). `turf fmt --write` with no path formats the project's `src/` and `tests/`. |
 
 **Compiler flags are forwarded.** `turf build -O2`, `turf build -g` and
 `turf run -O0` reach the compiler unchanged. **`-o` and `--package-graph` are
@@ -782,7 +801,7 @@ re-rendered by `turf`.
 
 ```
 $ turf publish
-turf: the package registry is not part of TurfLang 2.0; publish a library by pushing a git tag (FUTURE F-7c)
+turf: the package registry is not part of TurfLang 2.0; publish a library by pushing a git tag (…)
 $ turf biuld
 turf: unknown command 'biuld'
   did you mean 'build'?
@@ -845,33 +864,29 @@ The standard library is always trusted.
   `{ git = "…", tag = "v0.1.0" }`. There is nothing to upload or register, and
   a consumer's `turf.lock` pins the exact commit and tree.
 - **A program is one executable**: copy `build/<name>` somewhere. The Turf
-  runtime is linked into it statically, and `ldd` on an example lists only
-  `libm`, `libc` and the loader. Today `turfc` still links with the system C
-  toolchain; a fully static program and a compiler that needs no C toolchain
-  are REL-008.
+  runtime is linked into it statically, and `ldd` on one lists only `libm`,
+  `libc` and the loader. How the program was linked depends on your install:
+  `turf version` prints a `linker` line. With `embedded-lld` and a
+  `bundled-runtime`, a program that uses no C library beyond the C runtime is
+  linked without any C toolchain on the machine; with `system-cc`, `turfc` runs
+  the machine's `cc` (a build from source).
 
 ## 10. Not in 2.0
 
-- A **registry**, semver ranges, `turf publish` (FUTURE F-7c). The pre-2.0
-  `turf-cli` registry prototype was deleted and is in history at `350acd8`.
+- A **registry**, semver ranges, `turf publish`. Publish a library by pushing a
+  git tag.
 - **Workspaces** (several packages in one manifest), **build scripts**, and
   **`subdir`** (a package that lives in a subdirectory of a git repository:
   the repository's root must be the package).
 - **Multiple versions of one package** in one build.
-- **Separate compilation** and a binary package format (FUTURE F-7a/F-7b): a
-  build compiles every module of every package from source. This is what lets a
-  generic function of `geometry` be called with a type only `plotter` declares.
+- **Separate compilation** and a binary package format: a build compiles every
+  module of every package from source. This is what lets a generic function of
+  `geometry` be called with a type only `plotter` declares.
 - **Renaming a dependency**, per-package compiler flags, and `pub(package)`.
 - **`std::`-qualified imports** to spell which candidate an ambiguous import
-  means (tracked as GitHub issue #264): today the E090 tells you to rename.
-- A download-and-run installer (REL-008). `turf test` has no name filter yet
-  (`--exclude` is the only selector), and `turfc --test` does not run on Windows.
+  means: today the E090 tells you to rename.
+- Cross-linking for another machine ([CLI & Diagnostics](cli_and_diagnostics.md#other-targets-and-object-files))
+  and a name filter for `turf test` (`--exclude` is the only selector).
 
-## Design record
-
-The rules here are frozen in [`docs/development/FREEZE.md`](../development/FREEZE.md)
-§6.16 (F-PKG-1 to F-PKG-4); how they were built, stage by stage, and what was
-found on the way, is in
-[`docs/development/changes/LEC-001.md`](../development/changes/LEC-001.md).
 The internals of module resolution are in
 [`docs/architecture/modules_and_scope_resolution.md`](../architecture/modules_and_scope_resolution.md).
