@@ -20,3 +20,5 @@ Put the code that needs it inside `unsafe`:
 Or avoid raw pointers altogether. A safe reference, `&T`, covers almost everything a beginner needs a pointer for, and `&?T` is the version that may be `null`.
 
 A raw pointer also can't appear in an ordinary function's signature -- not even inside `unsafe`. Use `&T` for parameters and return values; only `extern fn` declarations (bindings to C) may use raw pointers there.
+
+A `to` cast between a reference and something that is not a reference to the same type needs `unsafe` too: making a reference (`0 to &N`, `s to &N`, `r to &M`) may point it at nothing, and `r to string` reads the referenced bytes as text instead of formatting the value. Convert a field instead: `r.x to string`.

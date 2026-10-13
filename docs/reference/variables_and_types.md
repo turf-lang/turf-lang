@@ -662,8 +662,8 @@ A struct or array cannot be cast to a string (E065); build the text with `+`
 and `to string` on its fields.
 
 Casts that involve raw pointers or reference types (`int to int*`, `T* to
-ptr`, `string to &T`) are only allowed inside `unsafe { }` (E130 outside). See
-[FFI and unsafe](ffi_and_unsafe.md). A `&T` converts to `&?T` implicitly.
+ptr`, `string to &T`, `&T to string`) are only allowed inside `unsafe { }`
+(E130 outside). See [FFI and unsafe](ffi_and_unsafe.md). A `&T` converts to `&?T` implicitly.
 
 ## `sizeof` and `typeof`
 

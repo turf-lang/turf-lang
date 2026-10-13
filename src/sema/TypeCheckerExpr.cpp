@@ -1307,6 +1307,19 @@ void TypeChecker::visitCast(CastExprAST &Node) {
                   "Unsafe reference conversion!");
   }
 
+  // `r to string` with `r: &T` reinterprets the reference's address as a
+  // string, so the bytes of T would be read as text (`&int` printed garbage).
+  // It is the mirror of `string to &T` above and needs `unsafe` the same way.
+  if (OperandTy && DestTy && (OperandTy->isReference() || OperandTy->isNullableReference()) &&
+      DestTy->getName() == "string" && !isUnsafeGateExempt(Node.getLoc(), &Node))
+    reportError(Node.getLoc(), ErrCode::RawPointerOutsideUnsafe,
+                "Converting the reference '" + OperandTy->getName() +
+                    "' to 'string' cannot be done outside an 'unsafe' block.",
+                {},
+                "This reads the referenced bytes as text; it does not format the "
+                "value. Convert a field or element instead (`r.x to string`).",
+                "Unsafe reference conversion!");
+
   // SEM-002 (docs/archive/ARCHITECTURE_OVERHAUL.md §8): 'to'-cast
   // legality, Rule B1 -- moved here from Codegen (CastExprAST::codegen(),
   // CodegenExpr.cpp) so an illegal cast is caught at the TypeChecker
