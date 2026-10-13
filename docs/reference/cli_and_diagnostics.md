@@ -108,7 +108,7 @@ run `turf help` for the list of commands
 | `-O0` `-O1` `-O2` `-O3` `-Os` | Optimization level; `-O2` is the default. Any other spelling is an error. See [Optimization levels](#optimization-levels). |
 | `-g` | Emits DWARF debug information for `gdb` and `lldb`. Off by default. See [Debugging with `-g`](#debugging-with--g). |
 | `--target=<triple>` | Compiles for that target triple (default: this machine). For another machine it writes the object file and stops with an error. See [Other targets](#other-targets-and-object-files). |
-| `-mcpu=<cpu>` | Target CPU (default: `generic`). |
+| `-mcpu=<cpu>` | Target CPU (default: `generic`). A name the target does not know is an error, exit status 2. |
 | `--emit-obj` | Writes the object file `<output>.o` and does not link. |
 | `--emit-llvm` | Writes human-readable LLVM IR to `<output>.ll` instead of compiling and linking. Not combinable with `--emit-obj`. |
 | `-o <name>` | Sets the output name. |

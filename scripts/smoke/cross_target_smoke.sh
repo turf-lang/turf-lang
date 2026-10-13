@@ -141,6 +141,23 @@ else
   fail "plain build failed: $(cat plain.err)"
 fi
 
+echo "== -mcpu"
+"$TURFC" hello.tr -mcpu=bogus -o badcpu > badcpu.out 2> badcpu.err
+rc=$?
+if [ "$rc" = 2 ] && [ "$(grep -c . badcpu.err)" = 1 ] && grep -q "'bogus' is not a CPU name" badcpu.err \
+    && ! grep -q "LLVM ERROR" badcpu.err; then
+  pass "an unknown -mcpu is one usage error (exit 2)"
+else
+  fail "-mcpu=bogus: rc $rc, stderr: $(cat badcpu.err)"
+fi
+rm -f armcpu.o
+if "$TURFC" hello.tr --emit-obj --target=aarch64-unknown-linux-gnu -mcpu=cortex-a72 -o armcpu > armcpu.out 2> armcpu.err \
+    && [ "$(elf_machine armcpu.o)" = 183 ]; then
+  pass "-mcpu=cortex-a72 is checked against the --target, not the host"
+else
+  fail "--target=aarch64 -mcpu=cortex-a72: $(cat armcpu.err)"
+fi
+
 echo "== --emit-obj writes the object and never links"
 # Driver interface 1.6: turf-fuzz compiles thousands of programs it never
 # runs, and the system linker was about half of each compile.

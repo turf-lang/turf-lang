@@ -37,6 +37,7 @@
 #include "resolve/SymbolTable.h"
 #include "sema/Types.h"
 #include "frontend/ASTPrinter.h"
+#include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/Config/llvm-config.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Verifier.h"
@@ -911,6 +912,19 @@ static TargetMachine *createTurfTargetMachine(const CompilerOptions &opts,
   }
 
   std::string CPU = opts.MCPU.empty() ? "generic" : opts.MCPU;
+  // LLVM only warns about an unknown CPU (once per subtarget it builds) and
+  // then may abort on the features it guessed, so the name is checked here.
+  if (!opts.MCPU.empty()) {
+    std::unique_ptr<MCSubtargetInfo> STI(
+        Target->createMCSubtargetInfo(TargetTriple, "generic", ""));
+    if (!STI || !STI->isCPUStringValid(CPU)) {
+      std::cerr << "Error: '" << CPU << "' is not a CPU name LLVM knows for '"
+                << TargetTriple.str()
+                << "'. Check the spelling, or leave out -mcpu for a generic "
+                   "build.\n";
+      std::exit(ExitUsage);
+    }
+  }
   auto Features = "";
   TargetOptions TO;
   CodeGenOptLevel CGOptLevel = toCodeGenOptLevel(opts.OptLevel);
