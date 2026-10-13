@@ -548,7 +548,7 @@ Value *CompoundAssignmentExprAST::codegen() {
 
     Builder->SetInsertPoint(DivZeroBB);
     CodegenPanic(Builder->CreateGlobalString("Division by zero in compound assignment"), Loc);
-    if (!Builder->GetInsertBlock()->getTerminator())
+    if (!blockHasTerminator(Builder->GetInsertBlock()))
       Builder->CreateUnreachable();
 
     Builder->SetInsertPoint(DivContBB);
@@ -573,7 +573,7 @@ Value *CompoundAssignmentExprAST::codegen() {
 
     Builder->SetInsertPoint(DivZeroBB);
     CodegenPanic(Builder->CreateGlobalString("Modulo by zero in compound assignment"), Loc);
-    if (!Builder->GetInsertBlock()->getTerminator())
+    if (!blockHasTerminator(Builder->GetInsertBlock()))
       Builder->CreateUnreachable();
 
     Builder->SetInsertPoint(DivContBB);

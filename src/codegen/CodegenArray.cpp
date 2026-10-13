@@ -157,7 +157,7 @@ Value *SliceExprAST::codegen() {
                    "Slice range out of bounds for '" +
                    (BaseVar ? BaseVar->getName() : std::string("array")) + "'"),
                Loc);
-  if (!Builder->GetInsertBlock()->getTerminator())
+  if (!blockHasTerminator(Builder->GetInsertBlock()))
     Builder->CreateUnreachable();
   TheFunction->insert(TheFunction->end(), OkBB);
   Builder->SetInsertPoint(OkBB);
@@ -387,7 +387,7 @@ static Value *EmitRuntimeBoundsCheck(Value *IndexVal, Value *SizeVal,
   CodegenPanic(Builder->CreateGlobalString(
       "Array index out of bounds for '" + ArrayName + "'"), Loc);
 
-  if (!Builder->GetInsertBlock()->getTerminator())
+  if (!blockHasTerminator(Builder->GetInsertBlock()))
     Builder->CreateUnreachable();
 
   // Continue block
@@ -503,7 +503,7 @@ static Value *EmitStringBoundsCheck(Value *StrVal, Value *IndexVal,
   CodegenPanic(Builder->CreateGlobalString(
       "String index out of bounds"), Loc);
 
-  if (!Builder->GetInsertBlock()->getTerminator())
+  if (!blockHasTerminator(Builder->GetInsertBlock()))
     Builder->CreateUnreachable();
 
   TheFunction->insert(TheFunction->end(), ContBB);

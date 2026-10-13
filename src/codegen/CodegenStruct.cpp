@@ -138,7 +138,7 @@ Value *MethodCallExprAST::codegen() {
             ") -- no such transition from the current state.",
         "panicmsg");
     CodegenPanic(MsgVal, Loc);
-    if (!Builder->GetInsertBlock()->getTerminator())
+    if (!blockHasTerminator(Builder->GetInsertBlock()))
       Builder->CreateUnreachable();
 
     TheFunction->insert(TheFunction->end(), MergeBB);

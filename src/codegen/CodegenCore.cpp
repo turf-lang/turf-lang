@@ -1853,7 +1853,7 @@ Value *EmitCheckedIntArith(char Op, Value *L, Value *R, SourceLocation Loc) {
 
   Builder->SetInsertPoint(OverflowBB);
   CodegenPanic(Builder->CreateGlobalString("Integer overflow"), Loc);
-  if (!Builder->GetInsertBlock()->getTerminator())
+  if (!blockHasTerminator(Builder->GetInsertBlock()))
     Builder->CreateUnreachable();
 
   Builder->SetInsertPoint(ContBB);
@@ -1877,7 +1877,7 @@ Value *EmitCheckedIntNegate(Value *V, SourceLocation Loc) {
 
   Builder->SetInsertPoint(OverflowBB);
   CodegenPanic(Builder->CreateGlobalString("Integer overflow"), Loc);
-  if (!Builder->GetInsertBlock()->getTerminator())
+  if (!blockHasTerminator(Builder->GetInsertBlock()))
     Builder->CreateUnreachable();
 
   Builder->SetInsertPoint(ContBB);
@@ -1915,7 +1915,7 @@ Value *EmitCheckedShl(Value *L, Value *R, SourceLocation Loc) {
 
   Builder->SetInsertPoint(OverflowBB);
   CodegenPanic(Builder->CreateGlobalString("Integer overflow"), Loc);
-  if (!Builder->GetInsertBlock()->getTerminator())
+  if (!blockHasTerminator(Builder->GetInsertBlock()))
     Builder->CreateUnreachable();
 
   // ShlResult dominates ContBB: the only edge into ContBB is from ShiftOkBB,
@@ -1942,7 +1942,7 @@ Value *EmitCheckedShr(Value *L, Value *R, SourceLocation Loc) {
 
   Builder->SetInsertPoint(OverflowBB);
   CodegenPanic(Builder->CreateGlobalString("Integer overflow"), Loc);
-  if (!Builder->GetInsertBlock()->getTerminator())
+  if (!blockHasTerminator(Builder->GetInsertBlock()))
     Builder->CreateUnreachable();
 
   Builder->SetInsertPoint(ContBB);
@@ -1975,7 +1975,7 @@ Value *EmitCheckedIntPow(Value *Base, Value *Exp, SourceLocation Loc) {
 
   Builder->SetInsertPoint(NegBB);
   CodegenPanic(Builder->CreateGlobalString("Negative exponent in integer '**'"), Loc);
-  if (!Builder->GetInsertBlock()->getTerminator())
+  if (!blockHasTerminator(Builder->GetInsertBlock()))
     Builder->CreateUnreachable();
 
   Builder->SetInsertPoint(LoopBB);
@@ -2044,7 +2044,7 @@ Value *EmitCheckedFPToSI(Value *Val, Type *DestTy, SourceLocation Loc,
 
   Builder->SetInsertPoint(BadBB);
   CodegenPanic(Builder->CreateGlobalString("Integer overflow"), Loc);
-  if (!Builder->GetInsertBlock()->getTerminator())
+  if (!blockHasTerminator(Builder->GetInsertBlock()))
     Builder->CreateUnreachable();
 
   Builder->SetInsertPoint(ContBB);
@@ -2077,7 +2077,7 @@ void EmitSignedDivOverflowGuard(Value *L, Value *R, SourceLocation Loc) {
 
   Builder->SetInsertPoint(OverflowBB);
   CodegenPanic(Builder->CreateGlobalString("Integer overflow"), Loc);
-  if (!Builder->GetInsertBlock()->getTerminator())
+  if (!blockHasTerminator(Builder->GetInsertBlock()))
     Builder->CreateUnreachable();
 
   Builder->SetInsertPoint(ContBB);

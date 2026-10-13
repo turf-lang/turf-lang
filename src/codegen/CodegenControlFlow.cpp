@@ -130,7 +130,7 @@ Value *IfExprAST::codegen() {
       // Emit then body
       Builder->SetInsertPoint(ThenBB);
       Branches[i].Body->codegen();
-      if (!Builder->GetInsertBlock()->getTerminator())
+      if (!blockHasTerminator(Builder->GetInsertBlock()))
         Builder->CreateBr(MergeBB);
 
       // NextBB becomes the insert point for the next condition or the
@@ -142,7 +142,7 @@ Value *IfExprAST::codegen() {
     // We're now in the final "else" block
     if (HasElse) {
       ElseBody->codegen();
-      if (!Builder->GetInsertBlock()->getTerminator())
+      if (!blockHasTerminator(Builder->GetInsertBlock()))
         Builder->CreateBr(MergeBB);
     } else {
       // No else: just branch to merge
@@ -171,7 +171,7 @@ Value *IfExprAST::codegen() {
   Value *ThenV = Branches[0].Body->codegen();
   if (!ThenV)
     return nullptr;
-  if (!Builder->GetInsertBlock()->getTerminator())
+  if (!blockHasTerminator(Builder->GetInsertBlock()))
     Builder->CreateBr(MergeBB);
   ThenBB = Builder->GetInsertBlock();
 
@@ -180,7 +180,7 @@ Value *IfExprAST::codegen() {
   Value *ElseV = ElseBody->codegen();
   if (!ElseV)
     return nullptr;
-  if (!Builder->GetInsertBlock()->getTerminator())
+  if (!blockHasTerminator(Builder->GetInsertBlock()))
     Builder->CreateBr(MergeBB);
   ElseBB = Builder->GetInsertBlock();
 
@@ -270,7 +270,7 @@ Value *BlockExprAST::codegen() {
   // function still runs the push/pop bookkeeping unconditionally, so the
   // flush decision has to tolerate it instead of dereferencing a null
   // BasicBlock*.
-  if (Builder->GetInsertBlock() && !Builder->GetInsertBlock()->getTerminator())
+  if (Builder->GetInsertBlock() && !blockHasTerminator(Builder->GetInsertBlock()))
     FlushPendingDefers(PendingDeferFrames.size() - 1);
   PendingDeferFrames.pop_back();
 
@@ -358,7 +358,7 @@ Value *WhileExprAST::codegen() {
   LoopDeferDepth.pop_back();
 
   // Jump back to the condition to loop again
-  if (!Builder->GetInsertBlock()->getTerminator()) {
+  if (!blockHasTerminator(Builder->GetInsertBlock())) {
     Builder->CreateBr(LoopCondBB);
   }
 
@@ -397,7 +397,7 @@ Value *DoWhileExprAST::codegen() {
   LoopDeferDepth.pop_back();
 
   // Fall through to the condition check if the body didn't already terminate.
-  if (!Builder->GetInsertBlock()->getTerminator()) {
+  if (!blockHasTerminator(Builder->GetInsertBlock())) {
     Builder->CreateBr(LoopCondBB);
   }
 
@@ -546,7 +546,7 @@ Value *ForExprAST::codegen() {
   LoopDeferDepth.pop_back();
 
   // Fall through to step block
-  if (!Builder->GetInsertBlock()->getTerminator()) {
+  if (!blockHasTerminator(Builder->GetInsertBlock())) {
     Builder->CreateBr(LoopStepBB);
   }
 
@@ -560,7 +560,7 @@ Value *ForExprAST::codegen() {
   }
 
   // Branch back to condition
-  if (!Builder->GetInsertBlock()->getTerminator()) {
+  if (!blockHasTerminator(Builder->GetInsertBlock())) {
     Builder->CreateBr(LoopCondBB);
   }
 
@@ -734,7 +734,7 @@ Value *ForEachExprAST::codegen() {
   LoopDeferDepth.pop_back();
 
   // Fall through to step block.
-  if (!Builder->GetInsertBlock()->getTerminator()) {
+  if (!blockHasTerminator(Builder->GetInsertBlock())) {
     Builder->CreateBr(StepBB);
   }
 
@@ -748,7 +748,7 @@ Value *ForEachExprAST::codegen() {
       "foreach.next");
   Builder->CreateStore(NextCounter, CounterAlloca);
 
-  if (!Builder->GetInsertBlock()->getTerminator()) {
+  if (!blockHasTerminator(Builder->GetInsertBlock())) {
     Builder->CreateBr(CondBB);
   }
 
@@ -824,7 +824,7 @@ Value *CompareExprAST::codegen() {
     Builder->SetInsertPoint(OtherBB);
     if (!OtherBody->codegen())
       return nullptr;
-    if (!Builder->GetInsertBlock()->getTerminator())
+    if (!blockHasTerminator(Builder->GetInsertBlock()))
       Builder->CreateBr(MergeBB);
     TheFunction->insert(TheFunction->end(), MergeBB);
     Builder->SetInsertPoint(MergeBB);
@@ -885,7 +885,7 @@ Value *CompareExprAST::codegen() {
       Builder->SetInsertPoint(ArmBodyBB);
       if (!Arm.Body->codegen())
         return nullptr;
-      if (!Builder->GetInsertBlock()->getTerminator())
+      if (!blockHasTerminator(Builder->GetInsertBlock()))
         Builder->CreateBr(MergeBB);
 
       // Next arm or default
@@ -896,18 +896,18 @@ Value *CompareExprAST::codegen() {
     // Fall through to otherwise or merge
     if (OtherBody) {
       // The last NoMatchBB needs to branch to DefaultBB
-      if (!Builder->GetInsertBlock()->getTerminator())
+      if (!blockHasTerminator(Builder->GetInsertBlock()))
         Builder->CreateBr(DefaultBB);
 
       TheFunction->insert(TheFunction->end(), DefaultBB);
       Builder->SetInsertPoint(DefaultBB);
       if (!OtherBody->codegen())
         return nullptr;
-      if (!Builder->GetInsertBlock()->getTerminator())
+      if (!blockHasTerminator(Builder->GetInsertBlock()))
         Builder->CreateBr(MergeBB);
     } else {
       // No otherwise: current block (NoMatchBB or original) branches to merge
-      if (!Builder->GetInsertBlock()->getTerminator())
+      if (!blockHasTerminator(Builder->GetInsertBlock()))
         Builder->CreateBr(MergeBB);
     }
 
@@ -978,7 +978,7 @@ Value *CompareExprAST::codegen() {
     if (!Arm.Body->codegen())
       return nullptr;
     // Guarantee no fall-through: always branch to merge
-    if (!Builder->GetInsertBlock()->getTerminator())
+    if (!blockHasTerminator(Builder->GetInsertBlock()))
       Builder->CreateBr(MergeBB);
   }
 
@@ -988,7 +988,7 @@ Value *CompareExprAST::codegen() {
     Builder->SetInsertPoint(DefaultBB);
     if (!OtherBody->codegen())
       return nullptr;
-    if (!Builder->GetInsertBlock()->getTerminator())
+    if (!blockHasTerminator(Builder->GetInsertBlock()))
       Builder->CreateBr(MergeBB);
   }
 

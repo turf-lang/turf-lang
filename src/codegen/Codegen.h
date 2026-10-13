@@ -13,6 +13,14 @@
 
 class ExprAST;
 
+// Whether BB already ends in a terminator. Not `!BB->getTerminator()`: LLVM 23
+// made getTerminator() assume a well-formed block (it returns the last
+// instruction, null check gone), so that test is never true there and no
+// block gets its closing branch. LLVM 23's hasTerminator() is this; 22 lacks it.
+inline bool blockHasTerminator(const llvm::BasicBlock *BB) {
+  return !BB->empty() && BB->back().isTerminator();
+}
+
 // Common LLVM tools to be used everywhere.
 extern std::unique_ptr<llvm::LLVMContext> TheContext;
 extern std::unique_ptr<llvm::IRBuilder<>> Builder;

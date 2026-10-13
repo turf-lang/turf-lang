@@ -623,7 +623,7 @@ Value *FuncDefExprAST::codegen() {
   // fresh dead "after_ret" block (no predecessors, no terminator). We must
   // erase those dead blocks instead of treating them as missing-return paths.
   BasicBlock *CurBB = Builder->GetInsertBlock();
-  if (!CurBB->getTerminator()) {
+  if (!blockHasTerminator(CurBB)) {
     bool IsDead = (CurBB != BB) && llvm::pred_empty(CurBB);
     if (IsDead) {
       // Dead block left behind by a return statement — erase it cleanly.
@@ -1520,7 +1520,7 @@ Value *RecoverExprAST::codegen() {
     // See this function's doc comment for why branching unconditionally
     // here (rather than only for the "legitimately falls through" case) is
     // correct even when the block actually diverged.
-    if (!Builder->GetInsertBlock()->getTerminator()) {
+    if (!blockHasTerminator(Builder->GetInsertBlock())) {
       FailEndBB = Builder->GetInsertBlock();
       Builder->CreateBr(MergeBB);
     }

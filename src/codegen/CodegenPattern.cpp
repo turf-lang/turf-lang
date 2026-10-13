@@ -310,7 +310,7 @@ Value *CompareExprAST::codegenPatterns() {
         GlobalSymbolTable->ExitScope();
       return nullptr;
     }
-    if (!Builder->GetInsertBlock()->getTerminator())
+    if (!blockHasTerminator(Builder->GetInsertBlock()))
       Builder->CreateBr(MergeBB);
     Builder->SetInsertPoint(Resume);
 
@@ -325,7 +325,7 @@ Value *CompareExprAST::codegenPatterns() {
   }
 
   // Nothing matched: `otherwise`, or fall out of the compare.
-  if (!Builder->GetInsertBlock()->getTerminator())
+  if (!blockHasTerminator(Builder->GetInsertBlock()))
     Builder->CreateBr(OtherBB ? OtherBB : MergeBB);
 
   if (OtherBB) {
@@ -333,7 +333,7 @@ Value *CompareExprAST::codegenPatterns() {
     Builder->SetInsertPoint(OtherBB);
     if (!OtherBody->codegen())
       return nullptr;
-    if (!Builder->GetInsertBlock()->getTerminator())
+    if (!blockHasTerminator(Builder->GetInsertBlock()))
       Builder->CreateBr(MergeBB);
   }
 

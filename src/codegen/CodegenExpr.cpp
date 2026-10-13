@@ -330,7 +330,7 @@ Value *BinaryExprAST::codegen() {
 
     Builder->SetInsertPoint(DivZeroBB);
     CodegenPanic(Builder->CreateGlobalString("Division by zero"), Loc);
-    if (!Builder->GetInsertBlock()->getTerminator())
+    if (!blockHasTerminator(Builder->GetInsertBlock()))
       Builder->CreateUnreachable();
 
     Builder->SetInsertPoint(DivContBB);
@@ -367,7 +367,7 @@ Value *BinaryExprAST::codegen() {
 
     Builder->SetInsertPoint(DivZeroBB);
     CodegenPanic(Builder->CreateGlobalString("Modulo by zero"), Loc);
-    if (!Builder->GetInsertBlock()->getTerminator())
+    if (!blockHasTerminator(Builder->GetInsertBlock()))
       Builder->CreateUnreachable();
 
     Builder->SetInsertPoint(DivContBB);
@@ -786,7 +786,7 @@ Value *CastExprAST::codegen() {
       Builder->SetInsertPoint(BadBB);
       CodegenPanic(Builder->CreateGlobalString(
           "Runtime Error: Invalid int to enum conversion."), Loc);
-      if (!Builder->GetInsertBlock()->getTerminator())
+      if (!blockHasTerminator(Builder->GetInsertBlock()))
         Builder->CreateUnreachable();
       Builder->SetInsertPoint(OkBB);
       llvm::Type *LLVMTy = getLLVMType(ET->getUnderlyingType());
@@ -830,7 +830,7 @@ Value *CastExprAST::codegen() {
 
     CodegenPanic(Builder->CreateGlobalString(
         "Runtime Error: Invalid string to int conversion."), Loc);
-    if (!Builder->GetInsertBlock()->getTerminator())
+    if (!blockHasTerminator(Builder->GetInsertBlock()))
       Builder->CreateUnreachable();
 
     TheFunction->insert(TheFunction->end(), ContBB);
@@ -1022,7 +1022,7 @@ Value *CastExprAST::codegen() {
     Builder->SetInsertPoint(FailBB);
     CodegenPanic(Builder->CreateGlobalString(
         "Runtime Error: Invalid string to enum conversion."), Loc);
-    if (!Builder->GetInsertBlock()->getTerminator())
+    if (!blockHasTerminator(Builder->GetInsertBlock()))
       Builder->CreateUnreachable();
 
     // Build the strcmp chain directly from EntryBB (saved before any SetInsertPoint calls)
