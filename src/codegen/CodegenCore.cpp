@@ -1860,15 +1860,15 @@ Value *EmitCheckedIntArith(char Op, Value *L, Value *R, SourceLocation Loc) {
   return Result;
 }
 
-// Negation overflows for exactly one input: negating INT64_MIN, whose
-// magnitude (2^63) has no positive int64 representation -- the same
-// "one remaining case" shape as EmitSignedDivOverflowGuard() below, just
-// for unary '-' instead of '/'.
+// Negation overflows for exactly one input: the operand's signed minimum
+// (INT64_MIN for int, INT32_MIN for int32), whose magnitude has no positive
+// representation at that width -- the same "one remaining case" shape as
+// EmitSignedDivOverflowGuard() below, for unary '-' instead of '/'.
 Value *EmitCheckedIntNegate(Value *V, SourceLocation Loc) {
   Function *TheFunction = Builder->GetInsertBlock()->getParent();
+  auto *IntTy = cast<IntegerType>(V->getType());
   Value *IsIntMin = Builder->CreateICmpEQ(
-      V, ConstantInt::get(Type::getInt64Ty(*TheContext),
-                          static_cast<uint64_t>(INT64_MIN), true),
+      V, ConstantInt::get(IntTy, APInt::getSignedMinValue(IntTy->getBitWidth())),
       "isintmin");
 
   BasicBlock *OverflowBB = BasicBlock::Create(*TheContext, "neg.overflow", TheFunction);
@@ -2061,14 +2061,12 @@ Value *EmitCheckedFPToSI(Value *Val, Type *DestTy, SourceLocation Loc,
 // emitting the actual CreateSDiv. ('%' needs no trap: see EmitSafeSRem.)
 void EmitSignedDivOverflowGuard(Value *L, Value *R, SourceLocation Loc) {
   Function *TheFunction = Builder->GetInsertBlock()->getParent();
+  auto *IntTy = cast<IntegerType>(L->getType());
   Value *IsIntMin = Builder->CreateICmpEQ(
-      L, ConstantInt::get(Type::getInt64Ty(*TheContext),
-                          static_cast<uint64_t>(INT64_MIN), true),
+      L, ConstantInt::get(IntTy, APInt::getSignedMinValue(IntTy->getBitWidth())),
       "isintmin");
   Value *IsNegOne = Builder->CreateICmpEQ(
-      R, ConstantInt::get(Type::getInt64Ty(*TheContext),
-                          static_cast<uint64_t>(-1), true),
-      "isnegone");
+      R, ConstantInt::getSigned(IntTy, -1), "isnegone");
   Value *WillOverflow = Builder->CreateAnd(IsIntMin, IsNegOne, "sdiv.overflow.check");
 
   BasicBlock *OverflowBB = BasicBlock::Create(*TheContext, "sdiv.overflow", TheFunction);

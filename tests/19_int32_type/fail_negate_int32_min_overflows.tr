@@ -1,0 +1,12 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: Integer overflow
+// -2147483648 has no positive int32 counterpart.
+fn neg(a: int32): int32 {
+    return -a;
+}
+
+fn main(): int {
+    mut m: int32 = -2147483648;
+    mut r: int32 = neg(m);
+    return 0;
+}
