@@ -209,6 +209,11 @@ fn main(): int {
 }
 ```
 
+The arguments must then have exactly those types: with `Box<string>` declared,
+`Box::new(42)` is E056, and with `Box<double>` or `Box<int32>` declared,
+`Box::new(1)` is E056 too, because an argument is not converted to fit. Write
+the conversion (`Box::new(1 to double)`).
+
 When nothing supplies the type, there is nothing to infer from. `mut l =
 List::default();` is rejected with E129 (Nothing to infer! Cannot infer the
 type arguments of a generic type):

@@ -724,6 +724,17 @@ private:
   /// (VarDecl init, assignment, argument, return) checks this explicitly
   /// alongside typesCompatible() before treating a mismatch as real, since
   /// typesCompatible() itself has no ExprAST access to tell the two apart.
+  /// noteConstructedType(), then E056 for a generic constructor argument
+  /// that does not fit the declared instantiation: `mut b: Box<string> =
+  /// Box::new(42);` takes T from `Box<string>`, so 42 must be a string. The
+  /// call itself only saw its arguments, from which it bound T = int.
+  void noteConstructed(const ExprAST *E, const TurfTypePtr &Expected);
+  void noteConstructedArgs(const std::vector<std::unique_ptr<ExprAST>> &Args,
+                           const std::vector<FunctionParam> &Params,
+                           size_t ParamOffset,
+                           const std::unordered_map<std::string, TurfTypePtr>
+                               *Subst = nullptr);
+
   bool untypedLiteralAcquiresInt32(const ExprAST *Val, const TurfType *Dest);
 
   /// LEC-006: if writing into @p Place would write into the by-value result

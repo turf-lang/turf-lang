@@ -770,7 +770,7 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
   // codegen was skipped (S14a, this session) -- the construction fell back
   // to the now-permanently-opaque bare "List" struct instead of the real,
   // per-instantiation one.
-  noteConstructedType(Node.getRHS(), LhsTy);
+  noteConstructed(Node.getRHS(), LhsTy);
 
   // The assignment expression type is the RHS type
   setType(&Node, RhsTy);

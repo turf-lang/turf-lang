@@ -220,15 +220,52 @@ void noteConstructedType(const ExprAST *E, const TurfTypePtr &Expected) {
 // `item: T` is `Box<int>`). Without it `bs.push(Box::default())` built the
 // bare template `Box` and died in Codegen with "struct method call argument
 // type mismatch".
-static void noteConstructedArgs(
+void TypeChecker::noteConstructedArgs(
     const std::vector<std::unique_ptr<ExprAST>> &Args,
     const std::vector<FunctionParam> &Params, size_t ParamOffset,
-    const std::unordered_map<std::string, TurfTypePtr> *Subst = nullptr) {
+    const std::unordered_map<std::string, TurfTypePtr> *Subst) {
   for (size_t i = 0; i < Args.size() && i + ParamOffset < Params.size(); ++i) {
     TurfTypePtr ParamTy = Params[i + ParamOffset].Type;
     if (Subst && !Subst->empty())
       ParamTy = substituteReturnType(ParamTy, *Subst);
-    noteConstructedType(Args[i].get(), ParamTy);
+    noteConstructed(Args[i].get(), ParamTy);
+  }
+}
+
+void TypeChecker::noteConstructed(const ExprAST *E, const TurfTypePtr &Expected) {
+  noteConstructedType(E, Expected);
+  const auto *FC = dynamic_cast<const FuncCallExprAST *>(E);
+  if (!FC || !FC->ConstructedType)
+    return;
+  const auto *Target = FC->getResolvedCallTarget();
+  const auto *GT = dynamic_cast<const GenericType *>(FC->ConstructedType.get());
+  if (!Target || !GT || Target->TypeParams.size() != GT->getTypeArgs().size())
+    return;
+  std::unordered_map<std::string, TurfTypePtr> Subst;
+  for (size_t i = 0; i < Target->TypeParams.size(); ++i)
+    Subst.emplace(Target->TypeParams[i], GT->getTypeArgs()[i]);
+  const auto &Args = FC->getArgs();
+  const size_t Offset =
+      Target->Params.size() == Args.size() + 1 ? 1 : 0;
+  for (size_t i = 0; i < Args.size() && i + Offset < Target->Params.size(); ++i) {
+    TurfTypePtr ParamTy = substituteReturnType(Target->Params[i + Offset].Type, Subst);
+    TurfTypePtr ArgTy = getType(Args[i].get());
+    // Exact, as for any type argument, and with no literal exception: the
+    // clone the call builds takes its types from the arguments, so an int
+    // (even an untyped literal) passed for a double or int32 T is not
+    // converted on the way in.
+    if (!ParamTy || !ArgTy || sameTypeExact(ArgTy.get(), ParamTy.get()))
+      continue;
+    reportError(FC->getLoc(), ErrCode::ArgumentType,
+                "Argument " + std::to_string(i + 1) + " is '" + ArgTy->getName() +
+                    "', but building a '" + GT->getName() + "' needs '" +
+                    ParamTy->getName() + "' there.",
+                {},
+                "A generic constructor's type arguments come from the type "
+                "being built, and an argument is not widened to fit; pass a '" +
+                    ParamTy->getName() + "' (e.g. `x to " + ParamTy->getName() +
+                    "`), or declare the type the argument has.");
+    return;
   }
 }
 
@@ -419,7 +456,7 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
         // the bare template `List` reached Codegen ("Cannot allocate unsized
         // type", an internal compiler error), as it once did for a call
         // argument and a `return` (noteConstructedArgs()).
-        noteConstructedType(Arg, Field.Type);
+        noteConstructed(Arg, Field.Type);
       }
     }
     if (NArgs == FieldCount + 1 && ArgTypes[FieldCount] &&

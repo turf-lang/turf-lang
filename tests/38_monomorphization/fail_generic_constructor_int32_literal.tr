@@ -1,0 +1,16 @@
+// EXPECT-DIAG: E056
+// EXPECT-DIAG: Argument 1 is 'int', but building a 'Box<int32>' needs 'int32'
+// A generic constructor's T comes from the declared type; the argument must
+// already have that type, since it is not converted on the way in.
+struct Box<T> {
+    v: T
+}
+
+fn<T> Box.new(v: T): void {
+    self.v = v;
+}
+
+fn main(): int {
+    mut b: Box<int32> = Box::new(5);
+    return 0;
+}

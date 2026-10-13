@@ -448,7 +448,7 @@ void TypeChecker::visitReturn(ReturnExprAST &Node) {
     TurfTypePtr Want = ReturnTypeStack_.back();
     if (Want->isErrorUnion())
       Want = static_cast<const TurfErrorUnionType *>(Want.get())->getSuccessTypePtr();
-    noteConstructedType(Node.getVal(), Want);
+    noteConstructed(Node.getVal(), Want);
   }
 
   // Check against the enclosing function's declared return type
