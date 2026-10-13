@@ -15,4 +15,4 @@ Add the marker:
 
 Or remove the use if you didn't mean to ask for the caller's position.
 
-`@caller_location` is the only decorator Turf has, and it has to sit directly before a function declaration.
+`@caller_location` goes on the line before `fn` (or before an `operator` declaration). It can share that position with the `@ownership(...)` and `@ffi(...)` annotations on a function.
