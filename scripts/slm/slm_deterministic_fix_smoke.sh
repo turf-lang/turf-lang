@@ -4,7 +4,7 @@
 # §16.3 item 1 (the deterministic-fix layer): "Where a diagnostic already
 # carries a unique, high-confidence suggestion ... synthesize the patch
 # directly, sandbox-verify it, and never invoke the model."
-# (docs/planning/ARCHITECTURE_OVERHAUL.md §16.3, §8's SLM-001 section.)
+# (docs/archive/ARCHITECTURE_OVERHAUL.md §16.3, §8's SLM-001 section.)
 #
 # Why this can't be a `tests/*.tr` file: `test_runner.sh` never passes
 # `--smart` to any compile it runs (per DIAG-001's own testing-scope note,
@@ -12,8 +12,8 @@
 # behaviour needs its own harness -- same reasoning `opt_levels_smoke.sh`
 # already documents for `-O` levels.
 #
-# Why this ISN'T the same as `scripts/slm/test_ai.sh` (the existing, slower,
-# genuinely model-backed harness under tests/custom/aggressive/): the whole
+# Why this ISN'T the same as `scripts/slm/slm_benchmark/` (the slower,
+# genuinely model-backed harness): the whole
 # point of the deterministic-fix layer is that it resolves these diagnostics
 # WITHOUT ever loading the SLM -- so this script also proves that by timing
 # every run against a generous ceiling no real model load could ever clear

@@ -873,20 +873,20 @@ A `--no-smart` build is the same compiler: every diagnostic, deterministic fix a
 ### Compile and run a file directly
 
 ```bash
-./scripts/dev/compile_and_run.sh path/to/file.tr
+build/turf run path/to/file.tr
 ```
 
-Compiles, runs, and cleans up the produced binary.
+Compiles to a temporary executable, runs it, and deletes it.
 
 ## Documentation
 
 - **[`docs/reference/`](docs/reference/)** — the full language reference, one topic per page (variables & types, control flow, error handling, functions & modules, FFI & `unsafe`, structs & enums, state machines, generics & operators, arrays, the standard library, projects & packages, CLI & diagnostics). Start at [`docs/reference/README.md`](docs/reference/README.md).
 - **[`docs/architecture/`](docs/architecture/)** — deep internals references for contributors: the module/`::` system, pointers/`unsafe`/`&T`, error handling/`recover`, the compiler's memory model (what's heap vs. stack, in plain CS terms, not LLVM internals), and the full Lexer→Parser→Resolver→TypeChecker→Codegen pipeline plus its CFG static-analysis passes.
-- **[`docs/planning/`](docs/planning/)** — `archive/ROADMAP_v1.0.0_COMPLETE.md` (the completed v1.0.0 tracker) and `FUTURE.md` (what's next, see below).
+- **[`docs/planning/`](docs/planning/)** — `docs/archive/ROADMAP_v1.0.0_COMPLETE.md` (the completed v1.0.0 tracker) and `FUTURE.md` (what's next, see below).
 
 ## Roadmap
 
-**Turf is `v1.0.0`.** Every phase in `docs/planning/archive/ROADMAP_v1.0.0_COMPLETE.md` is done: the full language backbone (FFI, `do`/`while`, `compare`, enums, bitwise/string ops, first-class functions, error handling, for-each loops, state machines, operator overloading), `unsafe { }`/`&T` safe references, the standard library rewrite via FFI, the `--smart` diagnostics retry loop, and diagnostics polish (source spans, error codes + `turf --explain`, broader "did you mean?").
+**Turf is `v1.0.0`.** Every phase in `docs/archive/ROADMAP_v1.0.0_COMPLETE.md` is done: the full language backbone (FFI, `do`/`while`, `compare`, enums, bitwise/string ops, first-class functions, error handling, for-each loops, state machines, operator overloading), `unsafe { }`/`&T` safe references, the standard library rewrite via FFI, the `--smart` diagnostics retry loop, and diagnostics polish (source spans, error codes + `turf --explain`, broader "did you mean?").
 
 What's next is tracked in **[`docs/planning/FUTURE.md`](docs/planning/FUTURE.md)**, roughly in priority order:
 

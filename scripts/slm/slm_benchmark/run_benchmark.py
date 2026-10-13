@@ -40,8 +40,7 @@ Usage:
 
 Expect this to take a while: every non-deterministic-fix case loads the
 ~1GB GGUF model and runs real inference (confirmed live: tens of seconds per
-case on the machine this was built on), same cost `scripts/slm/test_ai.sh`
-already has for the same reason. Deterministic-fix cases are fast (no model
+case on the machine this was built on). Deterministic-fix cases are fast (no model
 load at all -- see slm_deterministic_fix_smoke.sh's own timing-ceiling
 assertion for that same property, checked mechanically there).
 """
