@@ -930,6 +930,7 @@ The rules:
 
 - `caller_location` is legal only inside a function marked `@caller_location` (E084 otherwise); `@caller_location` must be followed by `fn` or `operator` (E110).
 - It works on free functions, methods (including a call in method form, `c.take(2)`), generic functions and operators; an operator reports the line of the expression that used it.
+- A marked function can only be called directly; it can't be used as a function value (`mut f: fn(): string = where;` is E137), because an indirect call has no caller location to pass. To hand one around, write an unmarked function that calls it and use that.
 - **A call from an unmarked function stamps the call's own line.** A call from one `@caller_location` function to another **forwards** the location it was itself given, so a chain of marked helpers reports the original call site, not an intermediate one. Nothing needs to be written to forward.
 
 ```turflang

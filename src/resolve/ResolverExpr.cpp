@@ -122,6 +122,20 @@ void Resolver::visitVariable(VariableExprAST &Node) {
           Candidates.push_back(Match.Symbol);
     }
     if (Candidates.size() == 1) {
+      // A `@caller_location` function takes a hidden location argument that
+      // its `fn(...)` type does not show, so an indirect call through the
+      // value would have nothing to pass for it.
+      if (Candidates[0]->HasCallerLocation) {
+        TypeError(Node.getLoc(), ErrCode::NotAValue,
+                  "'" + Node.getName() +
+                      "' is marked @caller_location, so it can't be used as a "
+                      "function value; only direct calls can supply the "
+                      "caller's location.",
+                  "Write an unmarked function with the same parameters that "
+                  "calls '" + Node.getName() + "', and use that as the value.")
+            .raise();
+        return;
+      }
       Node.ResolvedFunctionRef =
           std::make_shared<ResolverFunctionSymbol>(*Candidates[0]);
       return;

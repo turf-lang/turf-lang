@@ -143,8 +143,11 @@ the Turf-level, arity- and type-checked signature means overload resolution,
 name mangling and generic substitution stay unaware this feature exists.
 `ResolverFunctionSymbol` (`src/resolve/ResolverSymbolBase.h`) has a matching
 `HasCallerLocation`, set by `Resolver::buildFunctionSymbol()`
-(`src/resolve/ResolverCore.cpp`) from the AST flag. That is the Resolver's only
-trace of the feature; it does no validation of `caller_location` usage (§3.4).
+(`src/resolve/ResolverCore.cpp`) from the AST flag. The Resolver reads it in one
+place: a marked function named as a value (`Resolver::visitVariable`'s
+first-class reference path, `src/resolve/ResolverExpr.cpp`) is E137, because a
+`fn(...)` type has no slot for the hidden argument and an indirect call could
+not pass one. It does no validation of `caller_location` usage (§3.4).
 A monomorphized clone of a generic marked function keeps the flag (the clone
 copies it), so `List<T>.pop` and friends work for every instantiation.
 
