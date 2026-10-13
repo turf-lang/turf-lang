@@ -11,7 +11,7 @@
 // methods (TYPE-002, S12b onward) give `Set<string>.indexOf()` its own
 // real, separately-codegenned clone, closing this for good -- see
 // set.tr's own `Set.indexOf()` doc comment (now updated to say "FIXED",
-// not "KNOWN LIMITATION") and `docs/planning/LIMITATIONS.md`.
+// not "KNOWN LIMITATION") and `docs/archive/LIMITATIONS.md`.
 //
 // INV-TEST-1 (INVARIANTS.md): the duplicate below is built at RUNTIME via
 // strings::trim(), never a second occurrence of the same string literal.

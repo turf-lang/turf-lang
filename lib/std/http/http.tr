@@ -141,7 +141,7 @@ pub struct Request {
 // `self.headers.keys[i]`/`.values[i]` instead -- monomorphization
 // (TYPE-002) fixed that gap for `Map<K, V>` generally, so the hand-rolled
 // scan is no longer needed here; see docs/development/changes/STD-003.md
-// and docs/planning/LIMITATIONS.md's (now closed) item 1 for the full
+// and docs/archive/LIMITATIONS.md's (now closed) item 1 for the full
 // history.
 @caller_location
 pub fn Request.get_header(name: string): string {
@@ -320,7 +320,7 @@ pub fn Server.get(path: string, handler: fn(Request, Response): void): void {
 // linear scan over `self.routes.keys[i]` instead -- monomorphization
 // (TYPE-002) fixed that gap for `Map<K, V>` generally, so the hand-rolled
 // scan is no longer needed here; see docs/development/changes/STD-003.md
-// and docs/planning/LIMITATIONS.md's (now closed) item 1 for the full
+// and docs/archive/LIMITATIONS.md's (now closed) item 1 for the full
 // history.
 fn Server.route_index(path: string): int {
     return self.routes.index_of(path);

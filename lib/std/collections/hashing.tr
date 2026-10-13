@@ -6,7 +6,7 @@ unsafe module;
 // old O(n) linear scan -- previously impossible ("there is no generic
 // hash(T) in the language yet", map.tr's own former header comment) for
 // the identical reason the Map<string, V> equality gap
-// (docs/planning/LIMITATIONS.md item 1) used to exist: a generic method
+// (docs/archive/LIMITATIONS.md item 1) used to exist: a generic method
 // body was type-checked and codegenned exactly ONCE, shared across every
 // instantiation, so a call like `hash(key)` inside it would have seen
 // `key` as the STATIC, erased `TurfGenericParamType("K")` -- no concrete

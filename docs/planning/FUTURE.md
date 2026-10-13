@@ -355,7 +355,7 @@ IDs, freeze entries and change records:
   (`strings::split` exists now; the rest: richer `os`, `time` formatting,
   regex, CSV, compression, crypto hashes, a process API, …). Everything added
   after 2.0 is additive and goes through LEC-007's API conventions (fallibility
-  rule, `pub` review, API-lock test). `docs/planning/LIMITATIONS.md` is closed
+  rule, `pub` review, API-lock test). `docs/archive/LIMITATIONS.md` is closed
   (all items fixed by TYPE-002/LANG-001/STD-003); new gaps get change records,
   not new LIMITATIONS rows.
 

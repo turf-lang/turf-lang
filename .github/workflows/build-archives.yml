@@ -464,7 +464,7 @@ jobs:
       # has been read: nothing of this has ever executed on macOS, and its job is to list
       # everything that fails in one run (the log artifact), not one failure per round
       # trip. Make it enforcing, as Windows's is, once it has been green once. The exact
-      # by-hand version of this is docs/planning/REL-008_MACOS_VERIFICATION.md.
+      # by-hand version of this was REL-008 stage 6 (docs/development/changes/REL-008.md).
       - name: Test suite on macOS (REL-008 stage 6, informational)
         continue-on-error: true
         env:

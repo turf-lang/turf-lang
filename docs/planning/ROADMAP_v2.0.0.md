@@ -147,7 +147,7 @@ PHASE 3  Stabilization & release      REL-001  version, CLI, runtime ABI stamp  
                                       REL-003  platforms & distribution (D20)  DONE (REL-003.md, 2026-10-07)
                                       REL-008  self-contained Linux/Windows/macOS (DEC-2/14/15)  DONE (REL-008.md, 2026-10-11; the CI runs and hand-offs are separate issues)
                                       REL-004  conformance suite, CI, fuzzing, sanitizers  DONE (REL-004.md, 2026-10-12; first CI runs are separate issues)
-                                      REL-005  performance baseline (starts in Phase 1)
+                                      REL-005  performance baseline  DONE (REL-005.md, 2026-10-13)
                                       REL-006  documentation (reference rewrite, migration guide)
                                       REL-007  release candidates → 2.0.0
                                       FDN-005  GC hardening completes (RC blocker)
@@ -1533,7 +1533,7 @@ expensive axes).
 
 ---
 
-### REL-005 — Performance baseline
+### REL-005 — Performance baseline — **DONE** (2026-10-13)
 
 **Kind** Release engineering · **Rule** R5 · **Size** S · **Prereqs** none (start early)
 
@@ -1544,6 +1544,11 @@ compile time of the stdlib + showcase) with numbers recorded per milestone in
 **a gate on unexplained regressions** (> 20% on any benchmark between the
 freeze tag and the release needs a recorded explanation). §24's "there is no
 benchmark suite at all" risk is retired by this item.
+
+Landed 2026-10-13: five benchmark programs plus compile time, `scripts/dev/bench.py`,
+the first baseline in `bench/results/`, and five performance bugs plus one
+compiler crash fixed on the way. The gate runs at each RC (REL-007).
+Record: `docs/development/changes/REL-005.md`.
 
 ---
 

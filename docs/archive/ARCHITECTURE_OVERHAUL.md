@@ -93,7 +93,7 @@ them are the same root cause wearing different clothes.
    (verified live: a 24-byte struct pushed into a `List<T>`.)
 
    The same erasure is why `Map<string, V>` compares keys by pointer
-   identity instead of content (`docs/planning/LIMITATIONS.md` §1), why a
+   identity instead of content (`docs/archive/LIMITATIONS.md` §1), why a
    generic `sort`/`comparator` is impossible (§2), and why `sizeof(T)` does
    not exist inside a generic body.
 
@@ -199,7 +199,7 @@ outside it is in scope.
 ### 0.6 What should explicitly stay small
 
 - **No traits, no typeclasses, no interfaces, no inheritance, no dynamic
-  dispatch.** `docs/planning/LIMITATIONS.md` proposes a trait system as the
+  dispatch.** `docs/archive/LIMITATIONS.md` proposes a trait system as the
   fix for the generic-equality gap. Monomorphization fixes that gap without
   adding any language surface at all. Do not add both.
 - **No exceptions.** `error` types + `!T` + `recover` already cover it.
@@ -1318,7 +1318,7 @@ block nothing:** `HYG-001` (compiler hygiene + CFG warning rendering),
 function-local `extern fn`), and `SLM-001`. Schedule them wherever they fit.
 `STD-003` (post-monomorphization stdlib modernization) sits at the far end,
 after `TYPE-002` + `LANG-001` + `LANG-002`, and is the group that closes out
-`docs/planning/LIMITATIONS.md`.
+`docs/archive/LIMITATIONS.md`.
 
 **Hard dependencies (a violation produces incorrect code, not just rework):**
 
@@ -2292,7 +2292,7 @@ session split) · **Prerequisites** TYPE-001, SEM-001; strongly benefits from
 OPT-001
 
 **Why it must happen here.** It is the precondition for the memory model
-(§0.3), it removes an ICE, and it fixes `docs/planning/LIMITATIONS.md` items
+(§0.3), it removes an ICE, and it fixes `docs/archive/LIMITATIONS.md` items
 1 and 2 as a by-product without adding any language surface.
 
 **Relevant subsystems** Resolver, TypeChecker, a **new** monomorphizer pass,
@@ -2438,7 +2438,7 @@ would have manufactured fake pointers in the heap is **gone**.
 **Handbook impact.** The largest in the roadbook after OPT-001.
 `docs/architecture/compiler_pipeline.md` §7 ("Generic type erasure") is
 **entirely** about the old model and must be rewritten.
-`docs/architecture/memory_model.md` §2.7 likewise. `docs/planning/LIMITATIONS.md`
+`docs/architecture/memory_model.md` §2.7 likewise. `docs/archive/LIMITATIONS.md`
 items 1–3 are resolved. `docs/reference/generics_and_operators.md` and
 `docs/reference/stdlib/collections.md` change. Handbook chapters 05, 06, 07
 all discuss erasure. Record every one.
@@ -3079,7 +3079,7 @@ pass** (INV-TEST-1, §19 pitfall 14).
 
 **Handbook impact.** `docs/reference/stdlib/collections.md` (the `List<T*>`
 workaround section is deleted), `docs/reference/stdlib/http.md`,
-`docs/reference/stdlib/mem.md`. **`docs/planning/LIMITATIONS.md` should be
+`docs/reference/stdlib/mem.md`. **`docs/archive/LIMITATIONS.md` should be
 closed out entirely and archived** — every item in it is resolved by
 TYPE-002 + LANG-001 + this group.
 
@@ -4977,7 +4977,7 @@ the assert-reports-caller-line test.
 **S24b — STD-003** · after S14, S15, S17 · post-monomorphization stdlib
 modernization: `sizeof(T)` sizing, retire the `List<T*>` workaround, generic
 `sort`/`find`, `http.tr` simplification, `Map`/`Set` hashing, and **close out
-`docs/planning/LIMITATIONS.md` entirely**.
+`docs/archive/LIMITATIONS.md` entirely**.
 
 **S25 — OPT-002** · after S4, S7, S14 · check elimination from
 `ValueRangePass`; resolve `CallGraphPass::runGlobal()` (use it or delete it).
