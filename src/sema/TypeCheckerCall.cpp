@@ -515,6 +515,10 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
 
       // ── typeof(x) → string ───────────────────────────────────────────────
       if (Node.isIntrinsic(BareIntrinsic::TypeOf)) {
+        if (!ArgTypes.empty() && ArgTypes[0] && !ArgTypes[0]->isGuess() &&
+            !TypeWalk::containsOpenParam(ArgTypes[0].get(),
+                                         TypeWalk::ParamScope::ThroughGenericArgs))
+          Node.TypeOfOperand = ArgTypes[0];
         setType(&Node, TurfString());
         return;
       }

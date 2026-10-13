@@ -86,13 +86,19 @@ public:
   /// clone-semantics contract as ResolvedCallTarget.
   TurfTypePtr ConstructedType;
 
+  /// `typeof(x)`: the TypeChecker's type for `x`, which Codegen names. Its own
+  /// getExprType() is a separate inference that can disagree (`'a'`, and
+  /// `int32 + int32`, which is an `int`). Null when the type is still open
+  /// (a generic body) or the node is a clone; Codegen then infers it itself.
+  TurfTypePtr TypeOfOperand;
+
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitFuncCall(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<FuncCallExprAST>(Loc, CloneExprAST(Callee.get()),
                                              CloneExprList(Args));
-    // Note: ResolvedCandidates, ResolvedCallTarget, GenericSubstitution, and
-    // ConstructedType are intentionally NOT copied — cloned ASTs are stale
+    // Note: ResolvedCandidates, ResolvedCallTarget, GenericSubstitution,
+    // ConstructedType and TypeOfOperand are intentionally NOT copied — cloned ASTs are stale
     // until re-resolved. ✓
   }
 };

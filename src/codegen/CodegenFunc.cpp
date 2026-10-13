@@ -1117,7 +1117,9 @@ Value *FuncCallExprAST::codegen() {
     // Phase 4 Note 14: typeof should return the compile-time type of the expression,
     // avoiding the loss of generic type information in LLVM IR.
     std::string TypeNameStr = "unknown";
-    if (const TurfType *ExprTy = getExprType(Args[0].get())) {
+    if (TypeOfOperand) {
+      TypeNameStr = turfTypeName(TypeOfOperand.get());
+    } else if (const TurfType *ExprTy = getExprType(Args[0].get())) {
       TypeNameStr = turfTypeName(ExprTy);
     } else {
       // Fallback to LLVM type if AST type resolution failed
