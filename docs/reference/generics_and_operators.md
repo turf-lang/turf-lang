@@ -1099,8 +1099,9 @@ is a struct or enum declared in **the same module** as the operator (E080, the
 operator "does not own any of its operand types"). Only operands made entirely of
 built-in types and `string` are exempt, since those have no owner module; they
 are the standard library's own `string` operators. You can overload `Vec2 + int`
-in the module that declares `Vec2`, but not `List<T> + List<T>` anywhere
-else: the meaning of `a + b` never depends on which modules happen to be imported.
+in the module that declares `Vec2`, but not `List<T> + List<T>`, or
+`List<int> + List<int>`, anywhere else (an instance belongs to the module that
+declares its struct, and `&`/`*` around an operand do not change its owner): the meaning of `a + b` never depends on which modules happen to be imported.
 
 <!-- doc-example: fails E080 -->
 ```turflang

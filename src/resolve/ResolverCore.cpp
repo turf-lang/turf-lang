@@ -839,24 +839,41 @@ void Resolver::validateOperatorDecl(const ResolverFunctionSymbol &Sym) const {
   // therefore already has both this file's own structs/enums AND every
   // directly-imported module's (imports are hoisted before this file's own
   // body, per the existing hoisting order) by the time this runs.
-  std::vector<const TurfType *> NamedOperands;
-  for (const auto *T : Operands)
-    if (T && (T->isStruct() || T->isEnum() ||
-              SymTable_.isKnownStruct(T->getName()) ||
-              SymTable_.isEnumName(T->getName())))
-      NamedOperands.push_back(T);
+  // An instance such as `List<int>` (or `&List<int>`) is owned by whoever
+  // declares `List`, so the operand is looked up by its base name, through
+  // `&`/`*`, exactly as the generic branch above does.
+  auto DeclaredName = [](const TurfType *T) -> std::string {
+    while (T && T->isPointer()) {
+      const auto *P = dynamic_cast<const TurfPointerType *>(T);
+      T = P ? P->getPointee().get() : nullptr;
+    }
+    if (!T)
+      return "";
+    if (const auto *G = dynamic_cast<const GenericType *>(T))
+      return G->getBaseName();
+    return T->getName();
+  };
+  std::vector<std::string> NamedOperands;
+  for (const auto *T : Operands) {
+    if (!T)
+      continue;
+    const std::string Name = DeclaredName(T);
+    if (T->isStruct() || T->isEnum() || SymTable_.isKnownStruct(Name) ||
+        SymTable_.isEnumName(Name))
+      NamedOperands.push_back(Name);
+  }
 
   if (NamedOperands.empty())
     return;
 
-  for (const auto *T : NamedOperands)
-    if (SymTable_.getTypeOwningModule(T->getName()) == Sym.SourceModule)
+  for (const auto &Name : NamedOperands)
+    if (SymTable_.getTypeOwningModule(Name) == Sym.SourceModule)
       return; // at least one operand IS owned by this module -- satisfied
 
-  const TurfType *Culprit = NamedOperands[0];
+  const std::string &Culprit = NamedOperands[0];
   OperatorOrphanRuleError(toSourceLocation(Sym.DeclLoc), OpSpelling,
-                          Sym.SourceModule, Culprit->getName(),
-                          SymTable_.getTypeOwningModule(Culprit->getName()))
+                          Sym.SourceModule, Culprit,
+                          SymTable_.getTypeOwningModule(Culprit))
       .raise();
 }
 
