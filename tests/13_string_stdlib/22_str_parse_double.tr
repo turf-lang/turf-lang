@@ -1,10 +1,10 @@
 // tests/13_string_stdlib/22_str_parse_double.tr
 // Tests strings::parse_double -- success paths (integer-looking and real
-// decimals, positive and negative) and every documented failure path.
+// decimals, positive and negative, exponents) and every documented failure
+// path.
 
 import io;
 import strings;
-import math;
 
 import test;
 // See tests/13_string_stdlib/21_str_parse_int.tr's comment: a diverging
@@ -20,23 +20,34 @@ fn parseFailsWithInvalidDouble(s: string): bool {
     return false;
 }
 
-// parse_double accumulates its fractional part digit-by-digit through
-// floating-point division, which is not guaranteed to land on the exact
-// same bit pattern as the compiler's own decimal-literal parser (e.g.
-// "3.14") -- both are correct, just via different rounding paths. So
-// success-path checks below compare within a small epsilon instead of
-// exact `==`, same as any other cross-implementation float comparison.
-fn assertClose(actual: double, expected: double, msg: string): void {
-    test::assert(math::abs(actual - expected) < 0.0000001, msg);
+// parse_double validates the text, then converts it with `s to double`, so
+// the result is the correctly rounded double: exactly the compiler's own
+// value for that literal, compared with `==` below. (It used to sum digits
+// in double arithmetic and could be off in the last bit, so this test once
+// compared within an epsilon.)
+fn assertExact(actual: double, expected: double, msg: string): void {
+    test::assert(actual == expected, msg);
 }
 
 fn main(): int {
     // Success paths
-    assertClose(strings::parse_double("3.14") recover produce -1.0, 3.14, "parse_double: '3.14' -> 3.14");
-    assertClose(strings::parse_double("0.5") recover produce -1.0, 0.5, "parse_double: '0.5' -> 0.5");
-    assertClose(strings::parse_double("42") recover produce -1.0, 42.0, "parse_double: integer-looking string");
-    assertClose(strings::parse_double("-2.5") recover produce 999.0, -2.5, "parse_double: negative decimal");
-    assertClose(strings::parse_double("0") recover produce -1.0, 0.0, "parse_double: '0' -> 0.0");
+    assertExact(strings::parse_double("3.14") recover produce -1.0, 3.14, "parse_double: '3.14' -> 3.14");
+    assertExact(strings::parse_double("0.5") recover produce -1.0, 0.5, "parse_double: '0.5' -> 0.5");
+    assertExact(strings::parse_double("42") recover produce -1.0, 42.0, "parse_double: integer-looking string");
+    assertExact(strings::parse_double("-2.5") recover produce 999.0, -2.5, "parse_double: negative decimal");
+    assertExact(strings::parse_double("0") recover produce -1.0, 0.0, "parse_double: '0' -> 0.0");
+    assertExact(strings::parse_double("123.456") recover produce -1.0, 123.456, "parse_double: correctly rounded");
+    assertExact(strings::parse_double(".5") recover produce -1.0, 0.5, "parse_double: no digit before '.'");
+    assertExact(strings::parse_double("5.") recover produce -1.0, 5.0, "parse_double: no digit after '.'");
+
+    // Exponents: e or E, an optional sign, digits (the forms JSON writes)
+    assertExact(strings::parse_double("1e10") recover produce -1.0, 1e10, "parse_double: '1e10'");
+    assertExact(strings::parse_double("2.5E-3") recover produce -1.0, 0.0025, "parse_double: 'E' and a negative exponent");
+    assertExact(strings::parse_double("-1.5e+2") recover produce -1.0, -150.0, "parse_double: '+' exponent sign");
+    test::assert((strings::parse_double("1e400") recover produce 0.0) > 1e308, "parse_double: past the double range is inf");
+    test::assert_eq(strings::parse_double("1e") recover produce -1.0, -1.0, "parse_double: 'e' with no digits fails");
+    test::assert_eq(strings::parse_double("1e+") recover produce -1.0, -1.0, "parse_double: a sign with no digits fails");
+    test::assert_eq(strings::parse_double("e5") recover produce -1.0, -1.0, "parse_double: an exponent alone fails");
 
     // Failure paths
     test::assert_eq(strings::parse_double("") recover produce -1.0, -1.0, "parse_double: empty string fails");
@@ -45,6 +56,11 @@ fn main(): int {
     test::assert_eq(strings::parse_double("1.2.3") recover produce -1.0, -1.0, "parse_double: two decimal points fails");
     test::assert_eq(strings::parse_double("abc") recover produce -1.0, -1.0, "parse_double: all non-digit fails");
     test::assert_eq(strings::parse_double("1.5x") recover produce -1.0, -1.0, "parse_double: trailing garbage fails");
+    // What strtod would take but parse_double does not.
+    test::assert_eq(strings::parse_double("+1") recover produce -1.0, -1.0, "parse_double: a leading '+' fails");
+    test::assert_eq(strings::parse_double(" 1") recover produce -1.0, -1.0, "parse_double: a leading space fails");
+    test::assert_eq(strings::parse_double("inf") recover produce -1.0, -1.0, "parse_double: 'inf' fails");
+    test::assert_eq(strings::parse_double("0x10") recover produce -1.0, -1.0, "parse_double: hex fails");
 
     // recover as err: distinguish the error variant
     test::assert(parseFailsWithInvalidDouble("nope"), "parse_double: recover as err sees InvalidDouble variant");

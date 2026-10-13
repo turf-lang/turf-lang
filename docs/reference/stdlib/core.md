@@ -515,12 +515,19 @@ test::assert(strings::pad_right("hi", 5, '.') == "hi...", "pad_right: dot-fill")
 
 ### `parse_int(s: string): !int` / `parse_double(s: string): !double`
 
-Parses `s` as a number, hand-rolled (no `atoi`/`atof` binding). Returns the
-recoverable `error StringParseError { InvalidInt, InvalidDouble }` on
-malformed input — an empty string, a bare `-`, a non-digit byte, or (for
-`parse_double`) a malformed decimal point — rather than panicking, since a
-bad parse is an ordinary, expected outcome (e.g. user input, a config
-file), not a programming bug.
+Parses `s` as a number. Returns the recoverable
+`error StringParseError { InvalidInt, InvalidDouble }` on malformed input —
+an empty string, a bare `-`, a non-digit byte, or (for `parse_double`) a
+malformed decimal point or exponent — rather than panicking, since a bad
+parse is an ordinary, expected outcome (e.g. user input, a config file), not
+a programming bug.
+
+`parse_double` accepts an optional `-`, digits with at most one `.` (at
+least one digit), and an optional exponent: `e` or `E`, an optional sign,
+digits (`1e10`, `2.5E-3`). Nothing else: no leading `+` or space, no `inf`,
+`nan` or hex. The value is the correctly rounded `double`, the same one
+`s to double` and the compiler's literal give; past the `double` range it is
+`inf` or `-inf`.
 
 ```turflang
 immut n: int = strings::parse_int("42") recover produce -1;

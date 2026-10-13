@@ -48,18 +48,15 @@
 //   - `obj_keys`/`obj_vals` lookup is a LINEAR SCAN, matching map.tr's own
 //     "small collections, correctness over cleverness" tradeoff (no
 //     generic `hash(T)` in the language yet either way).
-//   - Documented, deliberate parsing gaps (not attempted -- real, honest
-//     limitations, not silently wrong output): `\uXXXX` unicode escapes in
+//   - One documented, deliberate parsing gap: `\uXXXX` unicode escapes in
 //     strings (an unrecognized escape is appended literally instead, e.g.
 //     `\u` becomes the two characters `u`... note the backslash itself is
-//     simply dropped for an unrecognized escape); a number's exponent part
-//     (`1e10`) is consumed/accepted syntactically so it doesn't break
-//     parsing of the REST of the document, but `strings::parse_double`
-//     doesn't understand exponents, so its numeric VALUE comes out wrong
-//     (parsed as if the exponent text weren't there). Both are single,
-//     narrow, documented gaps -- objects, arrays, strings, ints, decimals,
-//     true/false/null, and arbitrary nesting are all fully, correctly
-//     handled.
+//     simply dropped for an unrecognized escape). Objects, arrays, strings,
+//     numbers -- exponents included (`1e10`, `2.5E-3`, since
+//     `strings::parse_double` reads them; before it did, any number with an
+//     exponent failed the whole parse) -- true/false/null, and arbitrary
+//     nesting are all handled. So is everything `stringify` writes: a large
+//     or small number prints with an exponent (`1e+21`).
 //
 // Usage:
 //   import json;
@@ -549,10 +546,8 @@ fn Parser.parse_number(): !JsonValue {
             sawDigit = true;
         }
     }
-    // Exponent: consumed so it doesn't break parsing of the rest of the
-    // document, but see this file's header comment -- the resulting
-    // NUMERIC VALUE is wrong (strings::parse_double doesn't understand
-    // exponents), a documented gap.
+    // Exponent: `e`/`E`, an optional sign, digits; strings::parse_double
+    // below reads it.
     if self.pos < self.len && (self.at() == 101 || self.at() == 69) { // 'e'/'E'
         self.pos = self.pos + 1;
         if self.pos < self.len && (self.at() == 43 || self.at() == 45) {
