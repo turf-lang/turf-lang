@@ -1,76 +1,96 @@
 # Arrays
 
-## Fixed-size syntax and literals
+An array is a fixed number of elements of one type, stored in a row. Its size is
+part of its type: `int[5]` and `int[6]` are different types. An array is a
+value: assigning it, or passing it to a function, copies it. For a collection
+that grows, use [`List<T>`](stdlib/collections.md); [the last section](#arrays-and-listt)
+compares the two.
 
-A declared array type is written `T[N]`, where `N` is a compile-time
-constant size:
+## Declaring arrays and writing literals
 
-```turflang
-mut numbers: int[5] = [0, 0, 0, 0, 0];
-numbers[0] = 10;
-numbers[1] = 20;
-
-mut arr: int[2] = [1, 2];
-```
-
-A declaration with no initializer is legal and zero-initializes every
-element:
+An array type is written `T[N]`, where `N` is a positive integer literal. A
+literal is a comma-separated list in square brackets:
 
 ```turflang
-mut arr: int[5];   // all elements start at 0
-arr[0] = 10;
-arr[1] = 20;
-arr[4] = 50;
-// arr[2] and arr[3] are still 0
+import io;
+
+fn main(): int {
+    mut numbers: int[5] = [0, 0, 0, 0, 0];
+    numbers[0] = 10;
+    numbers[1] = 20;
+
+    immut words: string[2] = ["alpha", "beta"];
+    mut ratios: double[3] = [0.5, 1.5, 2.5];
+    io::printline(numbers[1] + 1);   // 21
+    io::printline(words[1]);         // beta
+    io::printline(ratios[2]);        // 2.5
+    return 0;
+}
 ```
 
-This works for any element type, including `double`:
+The size is checked against the literal. Too few or too many elements is
+`E003` ("Array size mismatch!"), an element of the wrong type is `E004`
+("Array element type mismatch!"), and an array of one size cannot be assigned to
+a variable of another (`E066`, "Type mismatch!"):
+
+<!-- doc-example: fails E003 -->
+```turflang
+fn main(): int {
+    mut a: int[3] = [1, 2];
+    return a[0];
+}
+```
+
+<!-- doc-example: fails E004 -->
+```turflang
+fn main(): int {
+    mut a: int[3] = [1, 2, "three"];
+    return a[0];
+}
+```
+
+<!-- doc-example: fails E066 -->
+```turflang
+fn main(): int {
+    mut a: int[3] = [1, 2, 3];
+    mut b: int[4] = [1, 2, 3, 4];
+    a = b;
+    return 0;
+}
+```
+
+An array size of zero is `E123`. Arrays cannot be compared with `==` (`E124`);
+compare their elements in a loop.
+
+### Letting the literal pick the size
+
+The size can be left out when a literal initializes the declaration. `T[]` with
+a literal takes the literal's length, and the variable is then exactly `T[N]`:
+an owned array with value semantics and a fixed length. `immut x = [1, 2]`
+infers the same way.
 
 ```turflang
-mut darr: double[3];   // all elements start at 0.0
-darr[1] = 3.5;
+fn main(): int {
+    mut nums: int[] = [10, 20, 30];     // exactly int[3]
+    immut guessed = [1, 2];             // int[2]
+    mut g: int[][2] = [[1, 2], [3, 4]]; // only the outermost size is inferred: int[2][2]
+    nums = [7, 8, 9];                   // fine: same length
+    return nums[0] + guessed[0] + g[1][1];
+}
 ```
 
-#### Letting the literal pick the size
-
-The size can be left out when a literal initializes the declaration. `T[]`
-with a literal takes the literal's length, and the variable is then exactly
-`T[N]`: an owned array with value semantics (assigning copies it) and a fixed
-length. `guess` infers the same way.
-
-```turflang
-mut nums: int[] = [10, 20, 30];     // exactly int[3]
-immut guessed = [1, 2];             // int[2]
-mut g: int[][2] = [[1, 2], [3, 4]]; // only the outermost size is inferred: int[2][2]
-nums = [7, 8, 9];                   // fine: same length
-// nums = [1, 2];                   // E066: 'int[2]' to 'int[3]'
-```
-
-An explicit `T[N]` is still worth writing when the size is a promise: the
-compiler then rejects a literal of any other length (`E003`). An empty
-literal has no size to give (`mut a: int[] = [];` is `E123`), and an inner
-dimension can't be left out (`int[2][] = ...` is `E140`). Initialized from an
-existing *array or slice* instead (`mut v: int[] = arr;`, `= arr[1..]`), a
-`T[]` is not sized by anything: it is a [view](#a-slice-shares-the-array-it-views).
+Assigning a literal of another length to `nums` is `E066`. An explicit `T[N]`
+is worth writing when the size is a promise: the compiler then rejects a
+literal of any other length (`E003`). An empty literal has no size to give
+(`mut a: int[] = [];` is `E123`), and an inner dimension cannot be left out
+(`int[2][] = ...` is `E140`). Initialized from an existing *array or slice*
+instead (`mut v: int[] = arr;`, `= arr[1..]`), a `T[]` is not sized by anything:
+it is a [view](#a-slice-shares-the-array-it-views).
 
 ### Multidimensional arrays
 
-Nest the size suffix for multiple dimensions: `int[2][3]` is 2 rows of 3
-columns. Array literals nest to match:
-
-```turflang
-mut arr: int[2][3] = [[1, 2, 3], [4, 5, 6]];
-arr[1][2]; // 6
-
-arr = [[10, 20, 30], [40, 50, 60]];
-arr[1][1]; // 50
-
-// A single row can be reassigned on its own:
-arr[0] = [100, 200, 300];
-arr[0][2]; // 300
-```
-
-Three dimensions work the same way:
+Nest the size suffix for more dimensions: `int[2][3]` is 2 rows of 3 columns.
+Literals nest to match, and a row can be assigned on its own:
 
 ```turflang
 fn get_3d_array(): int[2][2][2] {
@@ -80,28 +100,187 @@ fn get_3d_array(): int[2][2][2] {
     ];
 }
 
-get_3d_array()[1][0][1]; // 6
+fn main(): int {
+    mut arr: int[2][3] = [[1, 2, 3], [4, 5, 6]];
+    arr = [[10, 20, 30], [40, 50, 60]];
+    arr[0] = [100, 200, 300];           // one row
+    return arr[0][2] + arr[1][1] + get_3d_array()[1][0][1];   // 300 + 50 + 6
+}
 ```
 
-### Arrays are value types
+## Initialization
 
-Assigning one array variable to another copies it. Mutating the copy never
-affects the original:
+An array declared without an initializer holds no value yet. The same
+[definite assignment](variables_and_types.md#definite-assignment) rule as for
+every other type applies: a read that some path reaches before the array has
+been assigned is `E008` ("You're using 'a' before it has a value"). Nothing is
+implicitly zero.
 
+<!-- doc-example: fails E008 -->
 ```turflang
-mut arr: int[2][3] = [[1, 2, 3], [4, 5, 6]];
-mut copy_arr: int[2][3] = arr;
-copy_arr[1][0] = 999;
-
-// arr is unchanged -- arr[1][0] is still 4, and copy_arr[1][0] is 999.
+fn main(): int {
+    mut a: int[5];
+    return a[3];
+}
 ```
 
-### Arrays as arguments and struct elements
-
-Array literals can be passed directly as function arguments, and structs
-can appear as array elements:
+Assigning an element, or the whole array, makes it assigned. Tracking is for
+the array as a whole, not per element: after `a[0] = 1;` the array counts as
+assigned, and the elements nothing wrote read as the zero value of the element
+type (`0`, `0.0`, `false`, `""` for a `string`, and so on).
 
 ```turflang
+import io;
+
+fn main(): int {
+    mut a: int[5];
+    a[0] = 10;                // assigns the whole array
+    a[4] = 50;
+    io::printline(a[2]);      // 0: nothing wrote it
+    mut s: string[2];
+    s[0] = "x";
+    io::printline(s[1]);      // an empty line
+    return 0;
+}
+```
+
+Only an assignment of a whole element counts. `a[1][2] = 4;` on an
+`int[2][3]`, or `ps[0].x = 1;` on an array of structs, reads the array on the
+way to the field and is itself `E008`; assign the row or the struct first
+(`a[1] = [0, 0, 0];`, `ps[0] = P::default();`). The assignment must reach
+the read on every path: `if c { a[0] = 1; }` followed by a read is `E008`.
+An `immut` array needs an initializer, since it cannot be assigned afterwards.
+
+An element type that holds a non-null reference has no zero value. An array
+of such elements must be initialized, or every element is `E128`; see
+[arrays of references](#arrays-of-references-tn).
+
+## Indexing
+
+`a[i]` reads or writes one element; `i` is an `int` and the first element is
+`a[0]`. A negative index counts back from the end, as in Python: `a[-1]` is the
+last element and `a[-N]` the first of an `N`-element array. Compound assignment
+works on an element.
+
+```turflang
+import io;
+
+fn main(): int {
+    mut a: int[4] = [10, 20, 30, 40];
+    io::printline(a[-1]);   // 40, the same element as a[3]
+    io::printline(a[-4]);   // 10, the same element as a[0]
+    a[-1] = 41;             // writes a[3]
+    a[-2] += 5;             // compound assignment works too
+    io::printline(a[2]);    // 35
+    return 0;
+}
+```
+
+The valid range is `-N <= i < N`. It does not wrap: `a[4]` and `a[-5]` are both
+out of bounds on four elements. Strings follow the same rule
+([indexing a string](variables_and_types.md#indexing-a-string)) as do
+`List<T>` elements ([`List` indexing](stdlib/collections.md#operatort-l-listt-i-int-t--operatort-l-listt-i-int-value-t-void)).
+A raw pointer (`T*`) carries no length, so `p[-1]` there is plain pointer
+arithmetic and is not checked.
+
+## Bounds checking
+
+Every array index is checked, at compile time when the compiler can prove the
+index is wrong and otherwise at run time. See also
+[Checks that panic](memory_and_safety.md#array-string-and-collection-indexing).
+
+### Caught at compile time
+
+A constant index out of range does not compile (`E001`, "Array index out of
+bounds!"). The compiler follows constants through locals, so an index held in a
+variable whose value is known is caught too, and so is one declared in a nested
+block. This also holds for a sized `T[N]` parameter, and for each dimension of a
+multidimensional array.
+
+<!-- doc-example: fails E001 -->
+```turflang
+fn main(): int {
+    mut arr: int[3] = [1, 2, 3];
+    return arr[3];       // E001: 'arr' has 3 elements (indices 0 to 2, or -1 to -3)
+}
+```
+
+<!-- doc-example: fails E001 -->
+```turflang
+fn main(): int {
+    mut arr: int[3] = [10, 20, 30];
+    mut i: int = 5;      // provably 5 at the use below
+    return arr[i];       // E001
+}
+```
+
+### Panics at run time
+
+When the index is not a known constant (a loop counter, a function argument, a
+call result), the compiler emits a check. A negative index first has the length
+added to it; the result must satisfy `0 <= index < length`, so `idx < -N` fails
+as well as `idx >= N`. On failure the program prints a panic and aborts:
+
+```text
+panic: runtime check: Array index out of bounds for 'arr' (prog.tr:7)
+```
+
+The name is the array being indexed, and the location is the index expression;
+the process exits abnormally (signal `SIGABRT`).
+
+```turflang
+fn at(arr: int[3], i: int): int {
+    return arr[i];
+}
+
+fn main(): int {
+    mut a: int[3] = [1, 2, 3];
+    return at(a, 3);     // panics: Array index out of bounds for 'arr'
+}
+```
+
+Writes are checked the same way as reads. An index into an unsized `T[]`
+parameter is always a run-time check, even for a constant, because the length
+is the caller's.
+
+## Arrays as parameters and return values
+
+A parameter of type `T[N]` receives a **copy** of the caller's array: writing
+to it inside the function does not change the caller's. A function can return
+an array of any declared size, and the result can be indexed directly. A literal
+may be passed where an array is expected.
+
+```turflang
+import io;
+
+fn sum_array(arr: int[4]): int {
+    arr[0] = 999;                // changes the function's own copy
+    return arr[0] + arr[1] + arr[2] + arr[3];
+}
+
+fn make(): int[3] {
+    mut r: int[3] = [7, 8, 9];
+    return r;
+}
+
+fn main(): int {
+    mut a: int[4] = [1, 2, 3, 4];
+    io::printline(sum_array(a));         // 1008
+    io::printline(a[0]);                 // 1: the caller's array is unchanged
+    io::printline(sum_array([1, 2, 3, 4]));
+    io::printline(make()[2]);            // 9
+    mut copy = a;                        // assignment copies too
+    copy[0] = 50;
+    io::printline(a[0]);                 // 1
+    return 0;
+}
+```
+
+An array of structs works the same way, and a function can return one:
+
+```turflang
+import io;
+
 struct Point {
     x: int,
     y: int
@@ -112,34 +291,34 @@ fn Point.new(x: int, y: int): void {
     self.y = y;
 }
 
-fn sum_array(arr: int[4]): int {
-    return arr[0] + arr[1] + arr[2] + arr[3];
-}
-
 fn get_points(): Point[2] {
     return [Point::new(10, 20), Point::new(30, 40)];
 }
 
 fn main(): int {
-    sum_array([1, 2, 3, 4]);           // literal passed directly, == 10
-
     mut points: Point[2] = [Point::new(1, 2), Point::new(3, 4)];
-    points[0].x; // 1
-    points[1].y; // 4
-
-    get_points()[1].x; // 30 -- inline indexing on a call result
+    points[1].y = 40;
+    io::printline(points[0].x);          // 1
+    io::printline(points[1].y);          // 40
+    io::printline(get_points()[1].x);    // 30: indexing a call result
     return 0;
 }
 ```
 
+A struct may also have an array field (`struct S { a: int[3] }`); it is copied
+along with the struct. The struct may not contain itself by value through its
+array fields ([self-referential structs](structs_and_enums.md#self-referential-structs)).
+
 ### Unsized parameters: `T[]`
 
 A parameter written `T[]` (nothing inside the brackets) accepts an array of
-**any** length. Inside the function it knows that length: for-each visits
-every element, `arr.length()` is the caller's element count, and `arr[i]` is
+**any** length. Inside the function it knows that length: for-each visits every
+element, `arr.length()` is the caller's element count, and `arr[i]` is
 bounds-checked against it (negative indices included).
 
 ```turflang
+import io;
+
 fn sum(arr: int[]): int {
     mut total: int = 0;
     for value in arr {
@@ -150,25 +329,27 @@ fn sum(arr: int[]): int {
 
 fn<T> display(arr: T[]): void {   // T is the element type
     for item in arr {
-        printline(item);
+        io::printline(item);
     }
 }
 
 fn main(): int {
     mut a: int[3] = [1, 2, 3];
     mut b: int[10] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-    sum(a);              // 6
-    sum(b);              // 55 -- any length
-    sum([4, 5]);         // 9  -- a literal works too
+    io::printline(sum(a));        // 6
+    io::printline(sum(b));        // 55: any length
+    io::printline(sum([4, 5]));   // 9: a literal works too
+    io::printline(a.sum());       // 6: UFCS, with your own function
     display(["x", "y"]);
     return 0;
 }
 ```
 
-Any array expression can be passed: a variable, a literal, a call that
-returns an array, a struct field, one row of a 2D array, or another `T[]`
-parameter. Every call form takes one the same way: ordinary calls, UFCS
-(`a.sum()`), methods, constructors and module functions.
+Any array expression can be passed: a variable, a literal, a call that returns
+an array, a struct field, one row of a 2D array, or another `T[]` parameter.
+Every call form takes one the same way: ordinary calls, UFCS, methods,
+constructors and module functions. A function may have both a `T[N]` and a
+`T[]` overload.
 
 Only the **outermost** dimension may be unsized. `int[][3]` is "any number of
 rows of three", like C's `int arr[][3]`:
@@ -183,13 +364,17 @@ fn sum_grid(rows: int[][3]): int {
     }
     return total;
 }
+
+fn main(): int {
+    mut g: int[2][3] = [[1, 2, 3], [4, 5, 6]];
+    return sum_grid(g);
+}
 ```
 
 #### A `T[]` parameter shares the caller's array
 
-Unlike a sized parameter (`arr: int[4]`, which receives a copy), a `T[]`
-parameter works on the caller's array directly, so writing an element changes
-the caller's array:
+Unlike a sized parameter, a `T[]` parameter works on the caller's array
+directly, so writing an element changes the caller's array:
 
 ```turflang
 fn fill(arr: int[], value: int): void {
@@ -198,28 +383,57 @@ fn fill(arr: int[], value: int): void {
     }
 }
 
-mut a: int[3] = [1, 2, 3];
-fill(a, 0);          // a is now [0, 0, 0]
+fn main(): int {
+    mut a: int[3] = [1, 2, 3];
+    fill(a, 0);          // a is now [0, 0, 0]
+    return a[1];
+}
 ```
 
-An `immut` array cannot be passed to a function that writes through its
-`T[]` parameter, whether it writes directly, by calling a mutating method on
-an element, or by handing the array on to a function that does. That is
-`E141`. A function that only reads the array can be called with an `immut`
-one.
+An `immut` array cannot be passed to a function that writes through its `T[]`
+parameter, whether it writes directly, by calling a mutating method on an
+element, or by handing the array on to a function that does. That is `E141`.
+A function that only reads the array can be called with an `immut` one.
+
+<!-- doc-example: fails E141 -->
+```turflang
+fn fill(arr: int[]): void {
+    arr[0] = 1;
+}
+
+fn main(): int {
+    immut a: int[2] = [1, 2];
+    fill(a);
+    return 0;
+}
+```
 
 #### Where `T[]` may appear
 
-A `T[]` is only safe for as long as the array it points into exists. That
-holds inside one function, so a `T[]` may be a function parameter's type or
-a **local variable's** type (a view, see [Range slicing](#range-slicing-arrab)).
+A `T[]` is only safe for as long as the array it points into exists. That holds
+inside one function, so a `T[]` may be a function parameter's type or a
+**local variable's** type (a view, see [Range slicing](#range-slicing-arrab)).
 A slice can never leave its function. Everywhere that could keep it longer
-is `E140`: a struct field or error payload, a return type, an inner
-dimension (`int[3][]`, also for a local `int[2][]`), behind `&`/`*`, a
-generic type argument (`List<int[]>`), a function type (`fn(int[]): int`), a
-cast target, an `extern fn` signature (C has no matching type; take a `T*`
-and a length), and a generic call that would bind a type parameter `T` to
-`int[]`. Declare the generic parameter as `T[]` instead.
+is `E140`: a struct field or error payload, a return type, an inner dimension
+(`int[3][]`, also for a local `int[2][]`), behind `&` or `*`, a generic type
+argument (`List<int[]>`), a function type (`fn(int[]): int`), a cast target, an
+`extern fn` signature (C has no matching type; take a `T*` and a length), and a
+generic call that would bind a type parameter `T` to `int[]`. Declare the
+generic parameter as `T[]` instead, as `display` does above.
+
+<!-- doc-example: fails E140 -->
+```turflang
+fn make(): int[] {
+    mut a: int[2] = [1, 2];
+    return a;
+}
+
+fn main(): int {
+    return 0;
+}
+```
+
+Return a sized array (`int[2]`) or a `List<int>` instead.
 
 ### Range slicing: `arr[a..b]`
 
@@ -246,8 +460,8 @@ fn main(): int {
     io::printline(head[1]);          // 20
     io::printline(tail.length());    // 3
     io::printline(sum(nums[1..4]));  // 90
-    io::printline(nums[1..3][0]);    // 20 again, a slice expression can be indexed
-    io::printline(nums[2..].sum());  // 120, and used with UFCS
+    io::printline(nums[1..3][0]);    // 20: a slice expression can be indexed
+    io::printline(nums[2..].sum());  // 120: and used with UFCS
     for v in nums[3..] {             // 40, 50
         io::printline(v);
     }
@@ -255,24 +469,33 @@ fn main(): int {
 }
 ```
 
-Any array can be sliced: a `T[N]` variable, field or row, a `T[]` parameter,
-or another slice. A slice can be indexed, passed to a `T[]` parameter, used
-in a for-each, and asked for its `.length()`. Slicing a 2D array slices its
-rows: `grid[1..]` of an `int[3][3]` is an `int[][3]`.
+Any array can be sliced: a `T[N]` variable, field or row, a `T[]` parameter, or
+another slice. A slice can be indexed, passed to a `T[]` parameter, used in a
+for-each, and asked for its `.length()`. Slicing a 2D array slices its rows:
+`grid[1..]` of an `int[3][3]` is an `int[][3]`.
 
 #### Bounds
 
-A negative bound counts from the end: `nums[-2..]` is the last two elements
-and `nums[1..-1]` drops the first and the last. The length is added to each
-negative bound, and the result must satisfy `0 <= start <= end <= length`.
-`nums[5..]` on five elements and `nums[i..i]` are valid, **empty** slices;
-`nums[4..2]` is an error, not an empty slice.
+A negative bound counts from the end: `nums[-2..]` is the last two elements and
+`nums[1..-1]` drops the first and the last. The length is added to each negative
+bound, and the result must satisfy `0 <= start <= end <= length`. `nums[5..]` on
+five elements and `nums[i..i]` are valid, **empty** slices; `nums[4..2]` is an
+error, not an empty slice.
 
-A range that is provably wrong is `E143` at compile time (constant bounds on
-a `T[N]`; for a `T[]`, a constant start after a constant end of the same
-sign). Any other bad range panics at run time with
+A range that is provably wrong is `E143` ("Slice range out of bounds!") at
+compile time: constant bounds on a `T[N]`, or for a `T[]` a constant start after
+a constant end of the same sign. Any other bad range panics at run time with
 `Slice range out of bounds for 'nums'` and the program aborts. Bounds must be
 ints (`a[1.5..]` is `E002`).
+
+<!-- doc-example: fails E143 -->
+```turflang
+fn main(): int {
+    mut a: int[3] = [1, 2, 3];
+    immut v = a[2..5];
+    return v.length();
+}
+```
 
 #### A slice shares the array it views
 
@@ -281,47 +504,58 @@ be pointed at another array later. An `immut` view is read-only (writing
 through it is `E060`).
 
 ```turflang
-mut arr: int[5] = [1, 2, 3, 4, 5];
-mut view: int[] = arr[1..3];
-view[0] = 20;                 // arr is [1, 20, 3, 4, 5]
-view = arr[3..];              // rebound: the view now looks at arr[3] and arr[4]
-view[1] = 50;                 // arr[4] is now 50
+fn main(): int {
+    mut arr: int[5] = [1, 2, 3, 4, 5];
+    mut view: int[] = arr[1..3];
+    view[0] = 20;                 // arr is [1, 20, 3, 4, 5]
+    view = arr[3..];              // rebound: the view now looks at arr[3] and arr[4]
+    view[1] = 50;                 // arr[4] is now 50
 
-immut lits: int[] = [10, 20, 30];   // a literal sizes it: this is an int[3], not a view
-immut whole: int[] = arr;            // an array initializer gives a view
-immut again = whole[1..];            // and so does a slice of a view
+    immut lits: int[] = [10, 20, 30];   // a literal sizes it: this is an int[3], not a view
+    immut whole: int[] = arr;           // an array initializer gives a view
+    immut again = whole[1..];           // and so does a slice of a view
+    return arr[4] + lits[0] + again.length();
+}
 ```
 
-A local `T[]` needs an initializer (`E128`). A slice is a view and not a
-place, so `a[0..2] = b` is `E061`. A `mut` view of an `immut` array would let
-you change the immutable array, so it is `E144`, both at declaration
+A local `T[]` needs an initializer (`E128`). A slice is a view and not a place,
+so `a[0..2] = b` is `E061`. A `mut` view of an `immut` array would let you
+change the immutable array, so it is `E144`, both at declaration
 (`mut t: int[] = a[1..];`) and when rebinding (`view = fixed[1..];`); declare
-the view `immut` or make the array `mut`. Writing through a slice expression
-of an immutable array (`a[1..][0] = 5`) is `E060`. Passing a slice of an
-`immut` array to a function that writes through its `T[]` is `E141`, as
-is writing through a local view of a parameter (`mut rest: int[] = arr[1..];
-rest[0] = 0;`).
+the view `immut` or make the array `mut`. Writing through a slice expression of
+an immutable array (`a[1..][0] = 5`) is `E060`. Passing a slice of an `immut`
+array to a function that writes through its `T[]` is `E141`, as is writing
+through a local view of a parameter (`mut rest: int[] = arr[1..]; rest[0] = 0;`).
+
+<!-- doc-example: fails E144 -->
+```turflang
+fn main(): int {
+    immut a: int[3] = [1, 2, 3];
+    mut v: int[] = a[1..];
+    return v.length();
+}
+```
 
 #### What can't be sliced, and what a slice can't become
 
-Only arrays can be sliced. A `string` (use `strings::substring(s, start,
-end)`), a `List<T>`, a number or a struct is `E142`.
+Only arrays can be sliced. A `string` (use `strings::substring(s, start, end)`),
+a `List<T>`, a number or a struct is `E142`.
 
-A `T[]` can't become a `T[N]`, because its length is only known at run time:
-`mut b: int[3] = view;` is `E003`, and passing a slice to an `int[3]`
-parameter matches no overload (`E056`). Copy the elements in a loop instead.
+A `T[]` cannot become a `T[N]`, because its length is only known at run time:
+`mut b: int[3] = view;` is `E003`, and passing a slice to an `int[3]` parameter
+matches no overload (`E056`). Copy the elements in a loop instead.
 
 ### Copying: `arr.copy()`
 
-A slice shares storage; `arr.copy()` is how you get your own. It returns a
-new, independent `T[]` whose elements live in a fresh block on the GC heap
-(see [the memory model](../architecture/memory_model.md)), so editing the
-copy never changes the original, and the original's later edits don't reach
-the copy. It works on any array or slice: a `T[N]`, a `T[]` parameter or
-view, a range slice, a 2D array and an array of structs. Each element is
-copied by value, exactly as assigning it would: a 2D array's rows are copied
-along with it, but an element that *refers* to something (a `List`, a `&T`)
-still refers to the same thing in the copy.
+A slice shares storage; `arr.copy()` is how you get your own. It returns a new,
+independent `T[]` whose elements live in a fresh block on the GC heap (see
+[Memory and Safety](memory_and_safety.md)), so editing the copy never changes
+the original, and the original's later edits do not reach the copy. It works on
+any array or slice: a `T[N]`, a `T[]` parameter or view, a range slice, a 2D
+array and an array of structs. Each element is copied by value, exactly as
+assigning it would: a 2D array's rows are copied along with it, but an element
+that *refers* to something (a `List`, a `&T`) still refers to the same thing in
+the copy.
 
 ```turflang
 import io;
@@ -338,27 +572,70 @@ fn main(): int {
     mut e = fixed.copy();        // fine: a copy is not a view of 'fixed'
     e[2] = 0;
     io::printline(fixed[2]);     // 6
-    io::printline(a.copy()[1..].length());   // 2, the result can be sliced
+    io::printline(a.copy()[1..].length());   // 2: the result can be sliced
     return 0;
 }
 ```
 
-Because the copy is not a view, an `immut` source is fine: `mut c =
-fixed.copy();` is not `E144`, and `fill(fixed.copy(), 0)` is not `E141`
-(the writes land in the copy). The result can be indexed, sliced, used in a
-for-each, asked for `.length()`, copied again, and passed to a `T[]`
-parameter. An empty slice copies to an empty array (`a[i..i].copy()`).
-Like any `T[]` it is a local-only value: it can't be returned or stored in a
-struct (`E140`), and it can't initialize a `T[N]` (`E003`).
+Because the copy is not a view, an `immut` source is fine: `mut c = fixed.copy();`
+is not `E144`, and `fill(fixed.copy(), 0)` is not `E141` (the writes land in the
+copy). The result can be indexed, sliced, used in a for-each, asked for
+`.length()`, copied again, and passed to a `T[]` parameter. An empty slice copies
+to an empty array (`a[i..i].copy()`). Like any `T[]` it is a local-only value: it
+cannot be returned or stored in a struct (`E140`), and it cannot initialize a
+`T[N]` (`E003`).
 
-`copy()` takes no arguments (`a.copy(1)` is `E131`), and `length()` and
-`copy()` are the only methods an array has (`a.reverse()` is `E131`). Strings
-and `List<T>` have no `copy()`.
+`copy()` takes no arguments (`a.copy(1)` is `E131`), and `length()` and `copy()`
+are the only methods an array has (`a.reverse()` is `E131`). Strings and
+`List<T>` have no `copy()` in this sense; a `List` has its own
+[`List.copy()`](stdlib/collections.md#listcopy-listt).
 
-### Arrays of references: `(&T)[N]`
+## Iterating with `for`
 
-`&` takes the whole type after it, so `&Node[2]` is a *reference to* an array
-of two nodes. An array *of* references puts the reference type in parentheses:
+A for-each loop visits the elements in order; the `(index, value)` form also
+binds the position. It works on any array expression: a `T[N]`, a `T[]`
+parameter, a slice, a literal, a call result, and on a multidimensional array
+each row is itself an array. See
+[`for`: for-each form](control_flow.md#for-for-each-form) for the full rules.
+
+```turflang
+import io;
+
+fn main(): int {
+    mut a: int[4] = [10, 20, 30, 40];
+    for v in a {
+        io::printline(v);
+    }
+    for (i, v) in a {
+        io::printline(i * 100 + v);      // 10, 120, 230, 340
+    }
+
+    mut m: int[2][3] = [[1, 2, 3], [4, 5, 6]];
+    mut total: int = 0;
+    for row in m {                        // row: int[3]
+        for cell in row {
+            total += cell;
+        }
+    }
+    io::printline(total);                 // 21
+
+    for i in 0..a.length() step i++ {     // the range form, when you need a custom stride
+        a[i] = a[i] + 1;
+    }
+    return 0;
+}
+```
+
+The loop variable is a copy of the element: assigning to it, or to a field of a
+struct element, does not change the array. Write through the index instead
+(`a[i] = ...`). A `List<T>`, a map, a struct or a scalar cannot be iterated with
+for-each (`E005`, "for-each requires an array!"); iterate a list by index with a
+range `for` and `l[i]`.
+
+## Arrays of references: `(&T)[N]`
+
+`&` takes the whole type after it, so `&Node[2]` is a *reference to* an array of
+two nodes. An array *of* references puts the reference type in parentheses:
 
 ```turflang
 import io;
@@ -394,109 +671,153 @@ fn main(): int {
 }
 ```
 
-- A `(&T)[N]` must be initialized (`E128`): a reference can't be null, and an
-  element nothing wrote would be. A `(&?T)[N]` needs no initializer; its
+- A `(&T)[N]` must be initialized (`E128`): a reference cannot be null, and an
+  element nothing wrote would be. The same holds for an array whose element
+  type holds a `&U` anywhere inside it. A `(&?T)[N]` needs no initializer; its
   elements start as `null`, and an element is checked like any `&?T` that is
   not a variable (store it in one, then check it).
 - Copying the array copies the references, not the nodes they point to.
-- `(&T)[]` is a slice parameter like any `T[]`. A reference to the function's
-  own local can't be stored into one of its elements (`E086`): the caller's
-  array would be left pointing at a dead frame.
-- Parentheses are only for this: `(int)[2]` and `(&T)` with no `[` after them
+- `(&T)[]` is a slice parameter like any `T[]`.
+- Parentheses are only for this: `(int)[2]`, and `(&T)` with no `[` after them,
   are `E109`.
 
-## Type-checking constraints
+## Escape rules
 
-- An initializer list's length must match the declared array size exactly.
-  A mismatched length is a compile error.
-- Every element in an initializer list must match the declared element
-  type. A mismatched element type is a compile error.
-- Assigning an array of one declared size into a variable of a
-  **different** concrete size is a type error — sizes are part of an
-  array type's identity, not just its element type.
+A local array lives in its function's frame, like any local. Its elements can be
+returned, copied or passed down freely, because an array is a value. What cannot
+leave the function is a *reference into* the array's storage. The same
+[escape rules](memory_and_safety.md#4-escape-rules) as for any local apply, and
+a violation is `E086`:
 
-## Negative indices
+- `&a[0]` of a local array points into the frame and cannot be returned, stored
+  into a struct that outlives the call, or pushed into a collection.
+- An array of references that holds a reference to a local (`(&N)[2]` with an
+  element `&n`) cannot be returned, for the same reason; nor can a reference
+  to a local be stored into an element of a `(&N)[]` parameter, since the
+  caller's array would be left pointing at a dead frame.
 
-A negative index counts back from the end, as in Python: `a[-1]` is the last
-element, `a[-2]` the one before it, and `a[-N]` the first element of an
-`N`-element array.
+<!-- doc-example: fails E086 -->
+```turflang
+struct N { val: int }
+
+fn make(): &N {
+    mut a: N[2] = [N::default(), N::default()];
+    a[0].val = 42;
+    return &a[0];            // E086: points into this frame
+}
+
+fn main(): int {
+    return make().val;
+}
+```
+
+Copy the value onto the GC heap to hand it back (`return heap(a[0]);`, see
+[`heap`](memory_and_safety.md#heapexpr-a-value-on-the-gc-heap)), or return the
+element itself (`return a[0];`). A reference you *received* as a parameter,
+including one into a `T[]` parameter's element, is fine to return:
 
 ```turflang
-mut a: int[4] = [10, 20, 30, 40];
-a[-1];        // 40, the same element as a[3]
-a[-4];        // 10, the same element as a[0]
-a[-1] = 41;   // writes a[3]
-a[-2] += 5;   // compound assignment works too
+struct N { val: int }
+
+fn first(a: N[]): &N {
+    return &a[0];            // points into the caller's array
+}
+
+fn main(): int {
+    mut a: N[2] = [N::default(), N::default()];
+    mut r: &N = first(a);
+    r.val = 3;
+    return a[0].val;         // 3
+}
 ```
 
-The valid range is therefore `-N <= i < N`. It does **not** wrap around:
-`a[-5]` and `a[4]` are both out of bounds on a 4-element array, caught at
-compile time when the index is a constant and by the runtime check otherwise.
+A `T[]` slice cannot itself escape: it is only a parameter or local type
+(`E140` anywhere else, see [Where `T[]` may appear](#where-t-may-appear)).
 
-The same rule applies to `string` indexing (`s[-1]` is the last byte; see
-[String indexing](operators.md#string-indexing-si)) and to `List<T>`'s `l[i]`
-/ `l[i] = v` ([stdlib](stdlib/collections.md)), and to an unsized `T[]`
-parameter, whose length is the caller's array's (checked at run time, even
-for a constant index). It does **not** apply to a raw pointer (`T*`), which
-carries no length to count back from — there `p[-1]` stays plain pointer
-arithmetic and is unchecked.
+## The `array` module
 
-Range-slice bounds follow the same rule: `a[-2..]` is the last two elements
-(see [Range slicing](#range-slicing-arrab)).
+The `array` module is part of the prelude: always in scope, with no import. It
+provides helpers for arrays of `int`, `double` and `string`, called as UFCS
+methods (`arr.sum(n)`) or qualified (`array::sum(arr, n)`). There is one
+overload per element type, not a generic version; for another element type
+write your own `fn<T>` over `T[]`, or use a [`List<T>`](stdlib/collections.md).
 
-## Bounds checking
+Every function takes the number of elements to look at, `len`, after the array,
+and works on `arr[0..len)`. Pass `arr.length()` to cover the whole array. A
+`len` past the end of the array panics with `Array index out of bounds for
+'arr'`. The full reference is in [Core: `array`](stdlib/core.md#array).
 
-Turflang catches array out-of-bounds accesses at **compile time** whenever
-it can prove the index is out of range, and falls back to a **runtime
-panic** only when the index genuinely can't be resolved to a constant.
+| Function | Element types | Result |
+|---|---|---|
+| `sum(arr, len)` | `int[]`, `double[]` | the sum of the first `len` elements |
+| `max(arr, len)` | `int[]`, `double[]` | the largest of the first `len` elements |
+| `min(arr, len)` | `int[]`, `double[]` | the smallest of the first `len` elements |
+| `contains(arr, len, val)` | `int[]`, `double[]`, `string[]` | `bool`: is `val` among the first `len` |
+| `index_of(arr, len, val)` | `int[]`, `double[]`, `string[]` | the index of the first match, or `-1` |
 
-### Caught at compile time
-
-The compiler performs constant propagation and rejects a provably
-out-of-bounds access before the program ever runs, in each of these
-shapes:
-
-**A literal index directly out of range:**
+`max` and `min` start from `arr[0]` without checking `len`, so an empty range
+panics with the same index message.
 
 ```turflang
-mut arr: int[3] = [1, 2, 3];
-mut x: int = arr[3];   // COMPILE ERROR: index 3 is out of bounds for int[3]
+import io;
+
+fn main(): int {
+    mut a: int[5] = [3, 1, 4, 1, 5];
+    mut d: double[3] = [1.5, 0.5, 2.5];
+    mut s: string[2] = ["x", "y"];
+
+    io::printline(a.sum(5));                  // 14
+    io::printline(array::sum(a, a.length())); // 14
+    io::printline(a.max(5));                  // 5
+    io::printline(a.min(5));                  // 1
+    io::printline(a[1..].sum(4));             // 11: works on a slice
+    io::printline(d.max(3));                  // 2.5
+    if s.contains(2, "y") {
+        io::printline(s.index_of(2, "y"));    // 1
+    }
+    io::printline(a.index_of(5, 7));          // -1
+    return 0;
+}
 ```
 
-**A local variable holding a provably-constant out-of-bounds value:**
+## Arrays and `List<T>`
+
+| | `T[N]` | `List<T>` |
+|---|---|---|
+| Length | fixed, part of the type | grows with `push` |
+| Assignment | copies the elements | shares the same list (`l.copy()` for a copy) |
+| Storage | in place, in the frame or the struct | a handle to GC-heap storage |
+| Index | `a[i]`, negative from the end, checked | `l[i]`, negative from the end, checked |
+| Must be initialized | yes, by assignment | `List::default()` |
+| Iteration | `for v in a` | by index: `for i in 0..l.length() step i++` |
+| Element types | any | any |
+
+Use an array when the size is known and small, or when you want value
+semantics; use a `List` when the size changes or the collection is shared.
+They convert by copying the elements:
 
 ```turflang
-mut arr: int[3] = [10, 20, 30];
-mut i: int = 5;
-arr[i];   // COMPILE ERROR: i is provably 5, out of bounds for int[3]
+import io;
+import list::List;
+
+fn main(): int {
+    immut src: int[3] = [4, 5, 6];
+    mut l: List<int> = List::default();
+    for v in src {                         // array into list
+        l.push(v);
+    }
+    l.push(7);
+
+    mut out: int[3] = [0, 0, 0];
+    for i in 0..3 step i++ {               // list into array
+        out[i] = l[i];
+    }
+    io::printline(out[2]);                 // 6
+    io::printline(l.length());             // 4
+    return 0;
+}
 ```
 
-This holds even when the offending variable is declared inside a nested
-block rather than directly alongside the array.
-
-### Falls back to a runtime panic
-
-When the index genuinely cannot be proven constant at compile time (for
-example, it depends on a loop counter, a function argument, or other
-runtime-computed value), the compiler instead emits a runtime bounds
-check. A negative index first has `size` added to it (see
-[Negative indices](#negative-indices)); the result must then satisfy
-`0 <= idx < size`, so the check fires for `idx < -size` as well as
-`idx >= size`. On violation, the program panics with a message like:
-
-```
-Array index out of bounds for '<name>'
-```
-
-and aborts. This is the same general panic-and-abort convention used
-elsewhere in the compiler (for example, an unnarrowed
-[state machine](state_machines.md#runtime-checked-transitions) transition
-that turns out to be invalid at runtime uses the identical pattern).
-
-> [!NOTE]
-> In practice, most out-of-bounds accesses that show up in straightforward
-> code are caught by the compile-time constant-propagation pass described
-> above. The runtime guard exists as a safety net for indices the analysis
-> genuinely cannot resolve to a constant — it is a real, reachable code
-> path, not dead code, but you should expect most bugs of this shape to
-> surface as compile errors rather than runtime aborts.
+A `List<int[2]>` (a list of fixed-size arrays) is fine; a `List<int[]>` is not
+(`E140`). The collections documentation covers the rest:
+[Collections](stdlib/collections.md).
