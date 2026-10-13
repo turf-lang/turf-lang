@@ -1,0 +1,95 @@
+// FREEZE §6.1: an operation on a bare `T` is checked per instantiation. The
+// template was rejected where it was written for ordering (E124), arithmetic,
+// unary and bitwise operators, `++` and compound assignment (E057) and method
+// calls (E131), so no generic could use them even for types that have them.
+
+import test;
+
+struct V {
+    x: int
+}
+
+operator +(a: V, b: V): V {
+    mut r: V = V::default();
+    r.x = a.x + b.x;
+    return r;
+}
+
+operator <(a: V, b: V): bool {
+    return a.x < b.x;
+}
+
+fn V.get(): int {
+    return self.x;
+}
+
+fn v(x: int): V {
+    mut r: V = V::default();
+    r.x = x;
+    return r;
+}
+
+fn<T> max_of(a: T, b: T): T {
+    if a < b {
+        return b;
+    }
+    return a;
+}
+
+fn<T> sum3(a: T, b: T, c: T): T {
+    mut t: T = a;
+    t += b;
+    return t + c;
+}
+
+fn<T> negate(a: T): T {
+    return -a;
+}
+
+fn<T> inc(a: T): T {
+    mut c: T = a;
+    c++;
+    return c;
+}
+
+fn<T> get_x(a: T): int {
+    return a.x;
+}
+
+fn<T> call_get(a: T): int {
+    return a.get();
+}
+
+fn<T> mix_bits(a: T, b: T): T {
+    return (a & b) | ((a ^ b) << 1) | ~~a;
+}
+
+fn<T> not(a: T): bool {
+    return !a;
+}
+
+fn<T> square(a: T): T {
+    return a ** 2;
+}
+
+fn<T> below_three(a: T): bool {
+    return a < 3;
+}
+
+fn main(): int {
+    test::assert(max_of(3, 9) == 9, "int <");
+    test::assert(max_of(2.5, 1.5) == 2.5, "double <");
+    test::assert(max_of("a", "b") == "b", "string <");
+    test::assert(max_of(v(4), v(6)).x == 6, "a struct's operator <");
+    test::assert(sum3(1, 2, 3) == 6, "int + and +=");
+    test::assert(sum3(v(1), v(2), v(3)).x == 6, "a struct's operator +, and +=");
+    test::assert(negate(5) == -5 && negate(2.5) == -2.5, "unary -");
+    test::assert(inc(41) == 42, "++");
+    test::assert(get_x(v(7)) == 7, "field");
+    test::assert(call_get(v(8)) == 8, "method");
+    test::assert(mix_bits(6, 3) == 14, "bitwise");
+    test::assert(not(false), "!");
+    test::assert(square(7) == 49 && square(1.5) == 2.25, "**");
+    test::assert(below_three(2) && below_three(2.5) && !below_three(3), "T against an int");
+    return 0;
+}

@@ -2045,6 +2045,18 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
       std::vector<const ResolverFunctionSymbol *> NamedCandidates;
       if (tryUFCSOnReceiver(Node, ReceiverTy.get(), BaseTy.get(), ArgTypes, &NamedCandidates))
         return;
+      // FREEZE §6.1: whether `T` has this method is known only per
+      // instantiation; the clone's re-check resolves it. Its result is
+      // left open here.
+      if (isOpenTypeParam(BaseTy.get()) ||
+          (BaseTy->isReference() &&
+           isOpenTypeParam(static_cast<const TurfPointerType *>(BaseTy.get())
+                               ->getPointee().get()))) {
+        setType(&Node, isOpenTypeParam(BaseTy.get())
+                           ? BaseTy
+                           : static_cast<const TurfPointerType *>(BaseTy.get())->getPointee());
+        return;
+      }
       if (NamedCandidates.empty() && BaseTy->isArray()) {
         // An array is not a struct, but it does have two built-ins (handled
         // above, only with no arguments) -- say so instead of "only struct

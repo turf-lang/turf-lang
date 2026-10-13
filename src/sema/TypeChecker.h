@@ -71,6 +71,7 @@
 #include "frontend/Lexer.h" // for SourceLocation, RelatedLocation
 #include "resolve/ResolverSymbolTable.h"
 #include "sema/Types.h"
+#include "sema/TypeWalk.h"
 
 #include "llvm/ADT/APSInt.h"
 
@@ -425,6 +426,13 @@ private:
   /// `&?T`'s own safety is enforced by a SEPARATE mechanism entirely
   /// (NullabilityPass, Analysis.h) -- it is not "safe like &T", it is
   /// "checked instead of gated".
+  /// A template's own type parameter, unsubstituted (`T` itself, not
+  /// `List<T>` or `&T`). An operation on one is checked per instantiation
+  /// (FREEZE §6.1), never against the template.
+  static bool isOpenTypeParam(const TurfType *T) {
+    return T && TypeWalk::containsOpenParam(T, TypeWalk::ParamScope::Bare);
+  }
+
   static bool isRawPointer(const TurfType *T) {
     return T && T->isPointer() && !T->isReference() && !T->isNullableReference();
   }

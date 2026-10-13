@@ -249,6 +249,14 @@ void TypeChecker::visitBinary(BinaryExprAST &Node) {
     }
   }
 
+  // FREEZE §6.1: an operation on a template's own `T` is judged per
+  // instantiation, when the clone is re-checked with `T` substituted
+  // (Monomorphize.cpp), and reported at the call that asked for it.
+  if (Node.IsDesugaredNot && isOpenTypeParam(LhsTy)) {
+    setType(&Node, TurfBool());
+    return;
+  }
+
   // Without a user `operator!`, `!x` is logical not and needs a bool, though
   // its desugared `x != true` shape would otherwise compare any numeric `x`.
   if (Node.IsDesugaredNot && !Node.ResolvedNotOperatorTarget && LhsTy &&
@@ -297,6 +305,20 @@ void TypeChecker::visitBinary(BinaryExprAST &Node) {
       setType(&Node, OpResultTy);
       return;
     }
+  }
+
+  // FREEZE §6.1: no constraint syntax, so whether `T` supports `<`, `+` or
+  // `&` is known only per instantiation; the clone's re-check decides. In
+  // the template a comparison is a `bool` and anything else has the type of
+  // its open operand, which is compatible with everything there.
+  if (isOpenTypeParam(LhsTy) || isOpenTypeParam(RhsTy)) {
+    const bool IsComparison = Op == '<' || Op == '>' || Op == TOK_EQ || Op == TOK_NEQ ||
+                              Op == TOK_LEQ || Op == TOK_GEQ || Op == TOK_AND ||
+                              Op == TOK_OR;
+    setType(&Node, IsComparison ? TurfBool()
+                                : getType(isOpenTypeParam(LhsTy) ? Node.getLHS()
+                                                                 : Node.getRHS()));
+    return;
   }
 
   // Determine operator category
@@ -417,6 +439,12 @@ void TypeChecker::visitUnary(UnaryExprAST &Node) {
       setType(&Node, OpResultTy);
       return;
     }
+  }
+
+  // FREEZE §6.1: judged per instantiation (see visitBinary()).
+  if (isOpenTypeParam(OperandTy.get())) {
+    setType(&Node, Op == '!' ? TurfBool() : OperandTy);
+    return;
   }
 
   if (Op == '-' || Op == '+') {
@@ -897,6 +925,12 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
     }
   }
 
+  // FREEZE §6.1: judged per instantiation (see visitBinary()).
+  if (isOpenTypeParam(LhsTy.get()) || isOpenTypeParam(RhsTy.get())) {
+    setType(&Node, LhsTy);
+    return;
+  }
+
   // LANG-001 scope boundary: compound assignment THROUGH `operator[]`
   // (`myMap[k] += 1`) is deliberately not supported by this pass -- it would
   // need a read-modify-write through both `operator[]` and `operator[]=`
@@ -1148,6 +1182,12 @@ void TypeChecker::visitPostfixExpr(PostfixExprAST &Node) {
   // and a genuinely i32-typed OldVal there produced invalid LLVM IR -- a
   // real internal compiler error, not a diagnosable one -- before this
   // check existed.
+  // FREEZE §6.1: judged per instantiation (see visitBinary()).
+  if (!HandledViaOperator && isOpenTypeParam(OpTy.get())) {
+    setType(&Node, OpTy);
+    return;
+  }
+
   if (!HandledViaOperator && OpTy && OpTy->isInt32()) {
     const VariableExprAST *OperandVar = findRootVariable(Node.getOperand());
     std::string VarSpelling = OperandVar ? OperandVar->getName() : "x";

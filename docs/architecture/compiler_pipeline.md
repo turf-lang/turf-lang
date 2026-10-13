@@ -411,7 +411,14 @@ once, generically, and match `identity(42)` against `fn<T> identity(x: T): T`
 without generics-specific overload code. That rule is reachable only for
 templates: a monomorphized clone has every parameter substituted before it is
 re-checked, so no open `TurfGenericParamType` reaches `typesCompatible()` for
-a clone, and none reaches Codegen (section 7). At each call, `TypeWalk::unify()`
+a clone, and none reaches Codegen (section 7). An operator, field access or
+method call whose operand is an open parameter itself (`a < b`, `a.x`,
+`a.get()` with `a: T`; `TypeChecker::isOpenTypeParam()`) is not judged in the
+template at all: there are no constraints (`FREEZE.md` section 6.1), so it is
+accepted with a permissive type (`bool` for a comparison, otherwise the open
+parameter), and the clone's re-check decides it for the concrete type. An error
+there is reported at the instantiating call with that error's own code. At each
+call, `TypeWalk::unify()`
 binds the declared parameter types against the argument types to recover the
 type arguments, and the checker records an `InstantiationRequest` for the
 Monomorphizer.

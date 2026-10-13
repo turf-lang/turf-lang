@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E131
+// EXPECT-DIAG: In this instantiation: Cannot call method 'get' on type 'int'
+// EXPECT-DIAG: return call_get(3);
+// A method call on `T` is resolved per instantiation; an `int` has none.
+
+fn<T> call_get(a: T): int {
+    return a.get();
+}
+
+fn main(): int {
+    return call_get(3);
+}

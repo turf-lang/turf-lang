@@ -94,8 +94,8 @@ fn main(): int {
 ```
 
 A generic function may take a function-typed parameter that mentions its own
-type parameters. This is how a generic body gets an operation that `T` itself
-does not provide (see the next sections), and how the standard library's
+type parameters. This is how a generic body uses an operation the caller
+chooses rather than one `T` must provide, and how the standard library's
 `List.sort(cmp: fn(T, T): int)` is written:
 
 ```turflang
@@ -335,23 +335,41 @@ Structs are values: assigning a `Box<int>` to another variable copies it.
 ### What a generic body can do with `T`
 
 There are no traits or constraints. A generic body is checked against whatever
-`T` actually is, so it can use any operation that type supports:
+`T` actually is, once per instantiation, so it can use any operation that type
+supports:
 
-- **`==` and `!=`**, which work for every type that has them: numbers, `bool`,
-  `char`, `string` (by content), enums, pointers, and any struct that declares
-  `operator ==`.
+- **Operators**: `==` and `!=`, ordering (`< <= > >=`), arithmetic
+  (`+ - * / % **`), bitwise (`& | ^ << >> ~`), unary `-` and `!`, `++`/`--` and
+  compound assignment. Each works when `T` has it, built in (numbers, `bool`,
+  `char`, `string` by content, enums, pointers) or declared (`operator <` on a
+  struct).
+- **Fields and methods**: `x.name` and `x.method()` when `T` is a struct that
+  has them.
 - **`sizeof(T)`** and **`to` casts** involving `T`.
-- **Calls** to functions and methods with `T` values as arguments. Overload
-  resolution runs per instantiation, so `hash(x)` inside a generic body picks the
-  `string` overload when `T` is `string` and the general one otherwise.
+- **Calls** to functions with `T` values as arguments. Overload resolution runs
+  per instantiation, so `hash(x)` inside a generic body picks the `string`
+  overload when `T` is `string` and the general one otherwise.
 - **Generic structs and functions built from `T`** (`Box<T>`, `List<T>`,
   `helper<T>(...)`).
 
 ```turflang
 import test;
 
-fn<T> same(a: T, b: T): bool {
-    return a == b;
+struct Money {
+    cents: int
+}
+
+operator <(a: Money, b: Money): bool { return a.cents < b.cents; }
+
+fn<T> largest(a: T, b: T): T {
+    if (a < b) {
+        return b;
+    }
+    return a;
+}
+
+fn<T> sum(a: T, b: T): T {
+    return a + b;
 }
 
 fn<T> describe(x: T): string {
@@ -367,33 +385,45 @@ fn<T> viaGeneric(x: T): string {
 }
 
 fn main(): int {
-    test::assert(same(1, 1) && !same(1, 2), "int ==");
-    test::assert(same("a", "a") && !same("a", "b"), "string == compares content");
+    test::assert(largest(3, 9) == 9, "T = int");
+    test::assert(largest("pear", "apple") == "pear", "T = string");
+    mut a: Money = Money::default();
+    a.cents = 250;
+    mut b: Money = Money::default();
+    b.cents = 199;
+    test::assert(largest(a, b).cents == 250, "T = Money, through its operator <");
+    test::assert(sum(1.5, 2.0) == 3.5, "T = double");
     test::assert(viaGeneric(1) == "value", "T = int uses the generic fallback");
     test::assert(viaGeneric("s") == "string", "T = string picks the string overload");
     return 0;
 }
 ```
 
-The ordering and arithmetic operators (`< <= > >=`, `+ - * / %`, unary `-`, `!`, `~`,
-`++`/`--`), field access and `.method()` calls on a bare `T` are not available:
-the compiler cannot know that `T` has them, and rejects the generic body where
-it is written (E124 for a comparison, E057 for arithmetic, E068 for a field,
-E056 for a method). Take the operation as a function parameter, as `largest`
-does above, or write a [generic operator](#generic-operators) over a type your
-module owns.
+The template itself is never rejected for what `T` might lack: whether `a < b`
+works depends on what `T` is, so it is decided for each instantiation, and an
+instantiation whose `T` lacks the operation is an error at the call that asked
+for it, with the code the same mistake has anywhere else (E124 for a
+comparison, E057 for arithmetic, E068 for a field, E131 for a method). The
+next section shows how it reads. To accept types that lack an operation, take
+it as a function parameter, as the `greater` version of `largest` does above.
 
 <!-- doc-example: fails E124 -->
 ```turflang
+struct Point {
+    x: int
+}
+
 fn<T> largest(a: T, b: T): T {
-    if (a > b) {
-        return a;
+    if (a < b) {
+        return b;
     }
-    return b;
+    return a;
 }
 
 fn main(): int {
-    return largest(1, 2);
+    mut p: Point = Point::default();
+    mut q: Point = Point::default();
+    return largest(p, q).x;     // E124: Point has no `<`
 }
 ```
 
