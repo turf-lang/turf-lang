@@ -294,7 +294,7 @@ func (p *parser) readPackage(m *Manifest, t map[string]any) error {
 	return nil
 }
 
-const registryHint = "registry versions are not part of TurfLang 2.0 (FUTURE F-7c); use `{ path = \"...\" }` or `{ git = \"...\", tag = \"...\" }`"
+const registryHint = "registry versions are not part of TurfLang 2.0; use `{ path = \"...\" }` or `{ git = \"...\", tag = \"...\" }`"
 
 func (p *parser) readDeps(m *Manifest, t map[string]any, order []string) error {
 	// A key decode saw but md.Keys() did not list (it lists every key, so this

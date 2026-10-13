@@ -78,7 +78,7 @@ func TestParseErrors(t *testing.T) {
 		{"reserved word name", "[package]\nname = \"fn\"\nversion = \"1\"\n", "'fn' is a reserved word", nil},
 		{"empty version", "[package]\nname = \"a\"\nversion = \"\"\n", "`version` in [package] must not be empty", nil},
 		{"turf requirement shape", "[package]\nname = \"a\"\nversion = \"1\"\nturf = \"2\"\n", "'2' is not \"<major>.<minor>\"", nil},
-		{"registry string dependency", header + "[dependencies]\nmath = \"^1.2.0\"\n", "dependency 'math' is a version string", []string{"hint: registry versions are not part of TurfLang 2.0", "F-7c", "{ path = \"...\" }"}},
+		{"registry string dependency", header + "[dependencies]\nmath = \"^1.2.0\"\n", "dependency 'math' is a version string", []string{"hint: registry versions are not part of TurfLang 2.0; use", "{ path = \"...\" }"}},
 		{"non-table dependency", header + "[dependencies]\nmath = 3\n", "must be an inline table", nil},
 		{"path with git", header + "[dependencies]\nm = { path = \"x\", git = \"y\", tag = \"t\" }\n", "has both `path` and `git`", nil},
 		{"path with a tag", header + "[dependencies]\nm = { path = \"x\", tag = \"t\" }\n", "`tag`, `rev` and `branch` do not apply", nil},

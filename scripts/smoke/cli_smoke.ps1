@@ -295,7 +295,7 @@ if ($linked) {
 # --- the command surface -------------------------------------------------------------------
 $r = Cap $T $work $null @('biuld'); Assert-Rc 'unknown command' $r 2; Assert-Err 'unknown command' $r "did you mean 'build'"
 $r = Cap $T $work $null @('install'); Assert-Rc 'turf install' $r 2; Assert-Err 'turf install' $r 'turf fetch'
-$r = Cap $T $work $null @('publish'); Assert-Rc 'turf publish' $r 1; Assert-Err 'turf publish' $r 'F-7c'
+$r = Cap $T $work $null @('publish'); Assert-Rc 'turf publish' $r 1; Assert-Err 'turf publish' $r 'publish a library by pushing a git tag'
 $r = Cap $T $work $null @('build'); Assert-Rc 'turf build' $r 2; Assert-Err 'turf build' $r 'not inside a TurfLang project'
 Assert-Rc 'no arguments' (Cap $T $work $null @()) 2
 $h = Cap $T $work $null @('compile', '--help')

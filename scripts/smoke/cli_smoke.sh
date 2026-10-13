@@ -401,7 +401,7 @@ expect_rc "turf install" ui.turf 2
 expect_err "turf install" ui.turf "turf fetch"
 capture up.turf "$TURF" publish
 expect_rc "turf publish" up.turf 1
-expect_err "turf publish" up.turf "F-7c"
+expect_err "turf publish" up.turf "publish a library by pushing a git tag"
 capture ubd.turf "$TURF" build
 expect_rc "turf build" ubd.turf 2
 expect_err "turf build" ubd.turf "not inside a TurfLang project"
