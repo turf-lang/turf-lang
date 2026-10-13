@@ -16,12 +16,9 @@ docs/planning/OVERHAUL_REMAINING_WORK.md :: docs/development/changes/*.md :: the
 docs/planning/OVERHAUL_REMAINING_WORK.md :: docs/archive/OVERHAUL_CLOSURE_AUDIT.md :: the 2026-09-26 audit that wrote the handoff names its own deliverable; frozen historical record, not edited retroactively.
 docs/planning/OVERHAUL_REMAINING_WORK.md :: docs/archive/ARCHITECTURE_OVERHAUL.md :: the status header narrates the handoff's existence and deletion on closure (OVH-CLOSE, 2026-09-27).
 docs/planning/OVERHAUL_REMAINING_WORK.md :: docs/planning/ROADMAP_v2.0.0.md :: Phase 0's own section and the companion-documents header narrate the handoff's existence and deletion on closure (OVH-CLOSE, 2026-09-27).
-docs/planning/Errors.md :: docs/architecture/errors_and_recover.md :: names the design brief it superseded (removed 2026-08-04); the 43 source citations were re-pointed here by ARCH-001.
 docs/planning/Errors.md :: docs/archive/ARCHITECTURE_OVERHAUL.md :: §5 C-8 uses this exact path as the worked example of a dangling reference -- the citation is the point.
-docs/planning/COMPILER_MODULE_BREAKDOWN.md :: docs/architecture/compiler_pipeline.md :: records that the 2026-08 module-split plan was retired once the split landed, and that this document replaced it.
 docs/planning/FINAL_SPRINT.md :: docs/archive/ROADMAP_v1.0.0_COMPLETE.md :: §3's note explaining that the final-sprint checklist was removed once everything it tracked landed.
 docs/planning/ROADMAP_v1.0.0_COMPLETE.md :: docs/archive/ARCHITECTURE_OVERHAUL.md :: historical record, frozen as written; it cites the v1.0.0 roadmap at its old path, which moved to docs/archive/ when the retired documents were archived (2026-10-13).
-docs/detailed/modules_and_stdlib.md :: docs/architecture/modules_and_scope_resolution.md :: §0 records that this stale doc was removed rather than corrected, and that this document replaced it.
 
 # --- Change records the overhaul plans but has not written yet. Each line dies
 # --- when its session lands, which is the point: the blueprint's forward
@@ -30,9 +27,6 @@ docs/detailed/modules_and_stdlib.md :: docs/architecture/modules_and_scope_resol
 # --- Documents the overhaul-closure handoff and the 2.0 roadmap plan but have
 # --- not been written yet (2026-09-26 closure audit). Same rule as above: each
 # --- line dies, and must be deleted, when the milestone that writes it lands.
-docs/reference/memory_and_safety.md :: docs/planning/ROADMAP_v2.0.0.md :: written by REL-006 (the 2.0 memory-safety statement).
-docs/MIGRATING_TO_2.md :: docs/planning/ROADMAP_v2.0.0.md :: written by REL-006 from Part V's compatibility table.
-docs/MIGRATING_TO_2.md :: docs/development/handbook-sync/PENDING.md :: FDN-002's breaking-change row is owed to this file once REL-006 writes it.
 
 # --- Retired paths named by the change record that re-pointed them. A record's
 # --- job is to say exactly which citation moved where, so it necessarily spells

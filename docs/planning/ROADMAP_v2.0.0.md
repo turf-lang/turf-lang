@@ -148,7 +148,7 @@ PHASE 3  Stabilization & release      REL-001  version, CLI, runtime ABI stamp  
                                       REL-008  self-contained Linux/Windows/macOS (DEC-2/14/15)  DONE (REL-008.md, 2026-10-11; the CI runs and hand-offs are separate issues)
                                       REL-004  conformance suite, CI, fuzzing, sanitizers  DONE (REL-004.md, 2026-10-12; first CI runs are separate issues)
                                       REL-005  performance baseline  DONE (REL-005.md, 2026-10-13)
-                                      REL-006  documentation (reference rewrite, migration guide)
+                                      REL-006  documentation (reference rewrite, migration guide)  DONE (REL-006.md, 2026-10-13; the handbook is paused, not a gate)
                                       REL-007  release candidates → 2.0.0
                                       FDN-005  GC hardening completes (RC blocker)
 ```
@@ -1552,7 +1552,7 @@ Record: `docs/development/changes/REL-005.md`.
 
 ---
 
-### REL-006 — Documentation for 2.0
+### REL-006 — Documentation for 2.0 — **DONE** (2026-10-13; handbook paused)
 
 **Kind** Release engineering · **Rule** R5 · **Size** L · **Prereqs** LANGUAGE FREEZE
 
