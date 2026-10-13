@@ -63,22 +63,44 @@ pub fn reseed(): void {
 }
 
 // random_int: a pseudo-random integer in [min, max], inclusive of both
-// ends. Built on `draw % range`, which is simple but has a well-known
-// slight bias toward the low end of the range whenever `range` doesn't
-// evenly divide RAND_MAX + 1 -- fine for games/tests/sampling, not for
-// anything that needs a provably uniform distribution.
+// ends, for any two ints. A span below 2^62 is served from a 62-bit draw
+// (two 31-bit ones) as `draw % (span + 1)`, whose bias toward the low end is
+// below 2^-30 even for the widest such span. A wider span, up to all of
+// `int`, draws whole 64-bit values and keeps the first that falls inside, at
+// least one in four. One 31-bit draw capped every result at
+// min + 2147483647, and `max - min + 1` overflowed for the widest spans.
 @caller_location
 pub fn random_int(min: int, max: int): int {
-    // `max < min` leaves `range` <= 0, and `r % 0` is a divide trap with a
-    // message that says nothing about random_int; a negative range silently
-    // returns a value outside [min, max]. Neither is input a caller can
-    // recover from, so it is a precondition panic that names the call.
+    // `max < min` is an empty range. Not input a caller can recover from, so
+    // it is a precondition panic that names the call.
     if max < min {
         sys::panic(caller_location + ": random_int: max (" + (max to string) + ") is less than min (" + (min to string) + ")");
     }
-    immut range: int = max - min + 1;
-    immut r: int = turfrt_random_u31();
-    return min + (r % range);
+    // `max - min` overflows exactly when min < 0 and max > INT_MAX + min.
+    immut span_overflows: bool = min < 0 && max > 9223372036854775807 + min;
+    if !span_overflows && max - min < 4611686018427387904 {
+        immut r: int = (turfrt_random_u31() << 31) | turfrt_random_u31();
+        return min + (r % (max - min + 1));
+    }
+    while true {
+        immut v: int = random_u64();
+        if v >= min && v <= max {
+            return v;
+        }
+    }
+    return min;
+}
+
+// A uniformly random 64-bit pattern as an int: 63 low bits from three draws,
+// and the sign from a fourth. Built so no shift drops a set bit, which `<<`
+// checks.
+fn random_u64(): int {
+    immut low: int = (turfrt_random_u31() << 32) | (turfrt_random_u31() << 1) |
+    (turfrt_random_u31() & 1);
+    if (turfrt_random_u31() & 1) == 1 {
+        return low + (-9223372036854775807 - 1);
+    }
+    return low;
 }
 
 // random_double: a pseudo-random value in [0.0, 1.0) -- never exactly

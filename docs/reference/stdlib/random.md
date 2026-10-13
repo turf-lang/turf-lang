@@ -37,15 +37,13 @@ A pseudo-random integer from `min` to `max`, **both included**.
   dice.tr:10: random_int: max (3) is less than min (7)
   ```
 
-- The width `max - min + 1` must fit in an `int`. `random_int` over almost the
-  whole range of `int` overflows and panics with `Integer overflow`.
-- The generator produces 31 bits (see `RAND_MAX`). A range wider than
-  `RAND_MAX + 1`, about 2.1 billion values, therefore does not cover all of it:
-  only the lowest 2147483648 values above `min` can occur. For a range that
-  large, combine two draws yourself.
-- The result is `draw % width`, which favours the low end very slightly unless
-  the width divides 2^31. That is not noticeable for dice, shuffles or sampling,
-  and is not suitable for a statistical test of uniformity.
+- Any two `int`s work, up to the whole range of `int`, and every value in the
+  range can occur.
+- A range of fewer than 2^62 values is served by `draw % width` from a 62-bit
+  draw, which favours the low end by less than one part in 2^30: not noticeable
+  for dice, shuffles or sampling, but not suitable for a statistical test of
+  uniformity. A wider range draws whole 64-bit values and keeps the first one
+  inside it, which is exact.
 
 ### `random_double(): double`
 
@@ -64,8 +62,8 @@ purpose.
 
 ### `RAND_MAX: int`
 
-`2147483647` (2^31 - 1), the largest value the underlying generator produces. It
-is the same on every platform.
+`2147483647` (2^31 - 1), the largest value one draw of the underlying generator
+produces (`random_int` combines several). It is the same on every platform.
 
 ## Example: dealing and rolling
 
