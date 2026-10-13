@@ -36,6 +36,7 @@ cd "$(dirname "$0")/../.." || exit 1
 ROOT=$(pwd)
 
 ARCHIVE=""
+PACKAGE_SMART=""
 KEEP=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -76,7 +77,11 @@ if [ -n "$ARCHIVE" ]; then
   cp "$ARCHIVE" "$ARCHIVE.sha256" "$REL/" || { echo "FAIL: cannot read $ARCHIVE and its .sha256"; exit 1; }
 else
   [ -x build/turf ] && [ -x build/turfc ] || { echo "FAIL: build/turf and build/turfc are needed (./scripts/cmake_build.sh)"; exit 1; }
-  ./scripts/release/package_release.sh --platform "$PLATFORM" --out "$REL" > "$WORK/package.out" 2> "$WORK/package.err" \
+  # package_release.sh refuses to name a --smart build a plain archive, and a
+  # default build (submodules checked out, as in test.yml) has the runtime, so
+  # package what build/ is: the smart archive when turfc says it is one.
+  build/turfc --version 2>/dev/null | tr -d '\r' | grep -qx "smart built-in" && PACKAGE_SMART=--smart
+  ./scripts/release/package_release.sh --platform "$PLATFORM" --out "$REL" $PACKAGE_SMART > "$WORK/package.out" 2> "$WORK/package.err" \
     || { echo "FAIL: packaging: $(cat "$WORK/package.err")"; exit 1; }
 fi
 ARCHIVE_FILE=$(cd "$REL" && ls turf-v*.tar.gz)
@@ -107,7 +112,7 @@ printf '%s\n' "$LISTING" | grep -q "libturfrt_asan" && fail "the sanitizer runti
 printf '%s\n' "$LISTING" | grep -qE "^$TOP/(turf|turfc)$" && fail "a binary sits at the archive top level (the pre-REL-003 layout)" || pass "binaries only in bin/"
 
 # A tag that is not the VERSION must not be packaged.
-if ./scripts/release/package_release.sh --platform "$PLATFORM" --out "$WORK/neg" --expect-tag v0.0.0-wrong >/dev/null 2> "$WORK/tag.err"; then
+if ./scripts/release/package_release.sh --platform "$PLATFORM" --out "$WORK/neg" $PACKAGE_SMART --expect-tag v0.0.0-wrong >/dev/null 2> "$WORK/tag.err"; then
   fail "packaging accepted a tag that is not v<VERSION>"
 elif grep -qE "development version|VERSION says" "$WORK/tag.err"; then
   pass "a tag that disagrees with VERSION is refused"
