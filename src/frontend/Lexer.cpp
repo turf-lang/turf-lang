@@ -506,6 +506,15 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
   // every file has already finished parsing (Resolver/TypeChecker/Codegen).
   std::string Filename = Loc.Filename.empty() ? SourceFilename : Loc.Filename;
 
+  // The same warning at the same place, twice, says nothing new. A warning
+  // raised while parsing comes twice for the main file, which is parsed
+  // twice (an unreachable machine state, an empty `compare`).
+  if (IsWarning)
+    for (const Diag &D : Diagnostics)
+      if (D.IsWarning && D.Loc.Line == Loc.Line && D.Loc.Col == Loc.Col &&
+          D.Filename == Filename && D.Msg == finalMessage)
+        return;
+
   Diagnostics.push_back({Loc, finalMessage, Hint, IsWarning, Related, Category,
                          Filename, Code, Hints});
 
