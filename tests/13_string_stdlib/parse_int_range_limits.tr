@@ -1,0 +1,21 @@
+// `strings::parse_int` accepts exactly `int`'s range and fails with
+// InvalidInt outside it. It panicked with "Integer overflow" past the range,
+// and on "-9223372036854775808" too, since the digits were accumulated as a
+// positive number.
+
+import test;
+
+fn parsed(s: string): int {
+    return strings::parse_int(s) recover produce -1;
+}
+
+fn main(): int {
+    test::assert(parsed("9223372036854775807") == 9223372036854775807, "INT64_MAX");
+    test::assert((strings::parse_int("-9223372036854775808") recover produce 0) < -9223372036854775807,
+        "INT64_MIN");
+    test::assert(parsed("9223372036854775808") == -1, "one past INT64_MAX");
+    test::assert(parsed("-9223372036854775809") == -1, "one past INT64_MIN");
+    test::assert(parsed("123456789012345678901234567890") == -1, "far out of range");
+    test::assert(parsed("-0") == 0 && parsed("007") == 7 && parsed("-42") == -42, "ordinary values");
+    return 0;
+}

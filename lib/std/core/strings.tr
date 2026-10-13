@@ -665,7 +665,11 @@ pub error StringParseError {
 }
 
 // parse_int: parses `s` as a base-10 integer, with an optional leading `-`.
-// Fails on an empty string, a bare "-", or any non-digit byte.
+// Fails on an empty string, a bare "-", any non-digit byte, or a value
+// outside `int`'s range. The digits are accumulated as a negative number,
+// since `int`'s range reaches one further below zero than above it, so
+// "-9223372036854775808" parses; each step is checked before it could
+// overflow.
 pub fn parse_int(s: string): !int {
     mut n: int = strlen(s);
     if n == 0 {
@@ -682,19 +686,28 @@ pub fn parse_int(s: string): !int {
     if i >= n {
         return StringParseError::InvalidInt;
     }
+    // -9223372036854775808 / 10 and the last digit it allows.
+    immut min_div10: int = -922337203685477580;
     mut result: int = 0;
     while i < n {
         mut c: int = s[i] to int;
         if c < 48 || c > 57 {
             return StringParseError::InvalidInt;
         }
-        result = result * 10 + (c - 48);
+        immut d: int = c - 48;
+        if result < min_div10 || (result == min_div10 && d > 8) {
+            return StringParseError::InvalidInt;
+        }
+        result = result * 10 - d;
         i = i + 1;
     }
     if neg {
-        result = 0 - result;
+        return result;
     }
-    return result;
+    if result == min_div10 * 10 - 8 {
+        return StringParseError::InvalidInt;
+    }
+    return 0 - result;
 }
 
 // Whether byte i of s (i < its length) is an ASCII digit.

@@ -368,8 +368,8 @@ digit in all), and an optional exponent: `e` or `E`, an optional sign, digits
 The result is the correctly rounded `double`, the same value the compiler gives
 the matching literal; past the `double` range it is `inf` or `-inf`.
 
-`parse_int` panics with `Integer overflow`, rather than failing, for a number
-outside `int`'s range.
+`parse_int` also fails with `InvalidInt` for a number outside `int`'s range;
+`"-9223372036854775808"` and `"9223372036854775807"` parse.
 
 ```turflang
 fn describe(text: string): void {
