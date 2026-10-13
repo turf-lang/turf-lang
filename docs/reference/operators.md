@@ -170,7 +170,8 @@ cannot be compared with `==` either; compare elements.
 
 ## Logical: `&& || !`
 
-`&&` and `||` take `bool` operands and **short-circuit**: the right operand is
+`&&` and `||` take `bool` operands (an `int` or `double` is E057; write
+`n != 0`) and **short-circuit**: the right operand is
 evaluated only when the left does not already decide the result. That makes
 guard conditions safe:
 
@@ -187,9 +188,9 @@ fn main(): int {
 
 `&&` binds tighter than `||`: `true || false && false` is true.
 
-`!x` is `x != true` for a `bool`, so `!!f == f`. It is `!` on a **struct** only
-if that type declares its own `operator !`; then the call replaces the
-rewriting, for that type.
+`!x` is `x != true` for a `bool`, so `!!f == f`. Its operand must be a `bool`
+(`!5` is E057), unless it is a **struct** that declares its own `operator !`;
+then the call replaces the rewriting, for that type.
 
 `&&` and `||` cannot be overloaded, because a function call cannot
 short-circuit. `operator &&` is a syntax error (E110). A struct operand is

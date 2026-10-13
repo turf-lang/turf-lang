@@ -633,29 +633,16 @@ TurfTypePtr TypeChecker::inferRelationalType(SourceLocation Loc, int Op,
   if (!LhsTy || !RhsTy)
     return TurfBool();
 
-  // Logical operators (&& / ||): both operands must be numeric (bool counts
-  // as numeric, which is what lets ordinary `cond1 && cond2` type-check).
-  //
-  // This used to check `Op == '&' || Op == '|'` -- the single-character
-  // BITWISE operator tokens (ASCII 38/124) -- instead of TOK_AND/TOK_OR (the
-  // actual && / || tokens, -20/-21). That check could never match: visitBinary()
-  // already routes bitwise '&'/'|' to a separate isBitwise() branch and
-  // returns before this function is ever called, so Op is never literally
-  // '&' or '|' here. The dead check meant a genuine && / || silently fell
-  // through everything below to the final "Cannot compare ... using ..."
-  // error path, which happened to still produce the right answer for the
-  // common bool && bool case (bool satisfies isNumeric()) but, for any
-  // actually-invalid use, formatted the operator into the message via
-  // `std::string(1, static_cast<char>(Op))` -- and -20/-21 cast to char are
-  // not printable ASCII, so the message showed a garbage character instead
-  // of "&&"/"||".
+  // Logical operators (&& / ||) take two bools; there is no truthiness, and
+  // Codegen lowers them on `i1` values.
   if (Op == -20 /*TOK_AND*/ || Op == -21 /*TOK_OR*/) {
-    if (LhsTy->isNumeric() && RhsTy->isNumeric())
+    if (LhsTy->isBool() && RhsTy->isBool())
       return TurfBool();
     reportError(Loc, ErrCode::ArithmeticOperand,
                 "Cannot use '" + std::string(Op == -20 ? "&&" : "||") +
-                         "' with '" + LhsTy->getName() + "' and '" +
-                         RhsTy->getName() + "'.");
+                    "' with '" + LhsTy->getName() + "' and '" +
+                    RhsTy->getName() + "': both operands must be 'bool'.",
+                {}, "Write a comparison, e.g. `n != 0 && m != 0`.");
     return TurfBool();
   }
 

@@ -1,6 +1,6 @@
 You used an operator on a kind of value it doesn't work for
 
-Operators have a job: `+ - * / %` do arithmetic on numbers, `& | ^ << >>` work on whole numbers, `&&` and `||` combine true/false conditions, `!` and `~` flip a bool or an int. If a value isn't the kind the operator works on -- a `string`, a struct, a `bool` where a number belongs -- Turf can't tell what the operation is supposed to mean, so it stops and names the operator and the two types.
+Operators have a job: `+ - * / %` do arithmetic on numbers, `& | ^ << >>` work on whole numbers, `&&` and `||` combine two `bool`s, `!` flips a `bool`, `~` flips the bits of an int. If a value isn't the kind the operator works on -- a `string`, a struct, a `bool` where a number belongs -- Turf can't tell what the operation is supposed to mean, so it stops and names the operator and the two types.
 
 This works:
 
@@ -11,7 +11,7 @@ This doesn't, because `"4"` is text, not a number:
 
     mut bad: int = 3 + "4";            // cannot apply '+' to 'int' and 'string'
 
-The same goes for the shorthand forms (`x += "4"`), `x++` on a string, `a && b` on structs, and `**` or `&` on a type that isn't a number.
+The same goes for the shorthand forms (`x += "4"`), `x++` on a string, `n && m` or `!n` on ints (write `n != 0`), and `**` or `&` on a type that isn't a number.
 
 To fix it, make both sides genuinely the kind the operator wants. If you have a number stored as text you need an actual numeric value first -- Turf doesn't parse text into numbers on its own.
 

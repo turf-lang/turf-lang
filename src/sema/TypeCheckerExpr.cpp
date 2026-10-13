@@ -249,6 +249,18 @@ void TypeChecker::visitBinary(BinaryExprAST &Node) {
     }
   }
 
+  // Without a user `operator!`, `!x` is logical not and needs a bool, though
+  // its desugared `x != true` shape would otherwise compare any numeric `x`.
+  if (Node.IsDesugaredNot && !Node.ResolvedNotOperatorTarget && LhsTy &&
+      !LhsTy->isBool()) {
+    reportError(Node.getLoc(), ErrCode::ArithmeticOperand,
+                "Cannot apply '!' to '" + LhsTy->getName() +
+                    "': its operand must be a 'bool'.",
+                {}, "Write a comparison, e.g. `n == 0` instead of `!n`.");
+    setType(&Node, TurfBool());
+    return;
+  }
+
   // ── Operator overload resolution ─────────────────────────────────────────
   // Checked BEFORE the builtin bitwise/relational/exponent/arithmetic
   // dispatch below, for every whitelisted operator token. Safe to check
