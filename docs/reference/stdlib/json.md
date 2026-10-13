@@ -228,11 +228,11 @@ object with 1 keys
 Writes `v` as compact JSON text, with no whitespace between tokens. Object keys
 come out in insertion order. Strings are escaped with `escape_string`.
 
-A **number is written the way `to string` writes a `double`**: six significant
-digits, in the shortest form. `1700000000` comes out as `1.7e+09` and `1234567`
-as `1.23457e+06`; `0.1 + 0.2` as `0.3`. That is valid JSON, but it is not the
-number you put in. A value that must survive exactly (an id, a timestamp, a
-count over 999999) should be sent as a **string** and converted by the reader.
+A **number is written so that it reads back as exactly the same `double`**.
+An integral value within ±2^53 is written as an integer (`1700000000`,
+`-3`); any other value with the fewest significant digits that round-trip,
+at most 17 (`0.5`, `0.30000000000000004` for `0.1 + 0.2`, `1e+21`). Ids,
+timestamps and counts therefore survive `stringify` and `parse` unchanged.
 A number that is infinite or NaN is written as `inf` or `nan`, which is not valid
 JSON; the parser itself produces infinity for an out-of-range number such as
 `1e400`.

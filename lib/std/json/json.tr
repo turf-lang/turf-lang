@@ -77,6 +77,8 @@ import sys;
 import strings;
 import list::List;
 
+extern fn snprintf(buf: string, size: int, fmt: string, ...): int;
+
 // ─── JsonValue ───────────────────────────────────────────────────────────
 
 pub enum JsonType {
@@ -253,7 +255,7 @@ pub fn stringify(v: JsonValue): string {
         return "false";
         done
         matches JsonValue { kind: JsonType::Number, num_val, .. }:
-        return num_val to string;
+        return number_text(num_val);
         done
         matches JsonValue { kind: JsonType::String, str_val, .. }:
         return "\"" + escape_string(str_val) + "\"";
@@ -264,6 +266,32 @@ pub fn stringify(v: JsonValue): string {
         otherwise:
         return stringify_object(v);
     }
+}
+
+// The text `stringify` writes for a number: one that reads back as exactly
+// `n`. An integral value within +-2^53 (every id, count and timestamp) is
+// written as an integer; any other finite value with the fewest significant
+// digits that round-trip, at most 17, which every double needs. `to string`
+// keeps only six, so 1700000000 came out as `1.7e+09`. An infinity or NaN
+// has no JSON form and is written as `to string` writes it.
+fn number_text(n: double): string {
+    if n != n || n - n != 0.0 {
+        return n to string;
+    }
+    if n == math::floor(n) && n < 9007199254740992.0 && n > -9007199254740992.0 {
+        return (n to int) to string;
+    }
+    mut buf: string = strings::repeat(" ", 31);
+    mut digits: int = 1;
+    while digits < 17 {
+        snprintf(buf, 32, "%.*g", digits to int32, n);
+        if (buf to double) == n {
+            return buf;
+        }
+        digits = digits + 1;
+    }
+    snprintf(buf, 32, "%.17g", n);
+    return buf;
 }
 
 // Built through a StringBuilder: `result = result + piece` copied everything
