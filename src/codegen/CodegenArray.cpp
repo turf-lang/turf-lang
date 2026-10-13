@@ -433,17 +433,10 @@ FoldConstantArrayIndex(long long Idx, int ArraySize, ExprAST *Base,
 // this way -- substring/replace/to_upper/to_lower/pad_left/pad_right --
 // does exactly this), so `strlen(buf)` there reads however many
 // (zero-initialized, from gc_alloc) leading zero bytes happen to precede
-// the write cursor -- typically 0, which made EVERY first write into a
-// fresh buffer panic immediately (confirmed live: this is not a
-// hypothetical, the whole stdlib test suite failed this way the first time
-// this check applied to writes). There is no way to recover a buffer's
-// real allocated capacity from a bare `string` value to check against
-// instead -- F-STD-3 is frozen. The negative-index half of the check is
-// still meaningful and free of that problem, so it stays on both paths;
-// only the `strlen`-based upper bound is read-only. This is a documented,
-// intentional residual gap (see FDN-004's change record's *Known
-// pitfalls*), not an oversight: `s[huge_positive_i] = c;` on an
-// already-complete string is still unchecked, exactly as it always was.
+// the write cursor -- typically 0, which would make every first write into
+// a fresh buffer panic. A write is bounded by the string's allocation
+// instead (turf_rt_string_capacity(), FREEZE.md §6.14's 2026-10-13
+// amendment), which a buffer being filled already has in full.
 //
 // #256: a negative index counts from the end, Python-style (`s[-1]` is the
 // last byte, `s[-strlen(s)]` the first), so the check is `-len <= i < len`.
@@ -508,6 +501,52 @@ static Value *EmitStringBoundsCheck(Value *StrVal, Value *IndexVal,
 
   TheFunction->insert(TheFunction->end(), ContBB);
   Builder->SetInsertPoint(ContBB);
+
+  // A write has no NUL to bound it (the buffer may still be being filled),
+  // so it is bounded by the allocation instead (turf_rt_string_capacity()):
+  // past it is out of bounds, and a string in no GC block -- a literal, in
+  // read-only memory -- cannot be written at all. Writing past the end used
+  // to corrupt the heap silently, and writing a literal was lost or crashed
+  // depending on the -O level.
+  if (!CheckUpperBound) {
+    FunctionType *CapTy = FunctionType::get(
+        Type::getInt64Ty(*TheContext), {PointerType::get(*TheContext, 0)},
+        /*isVarArg=*/false);
+    FunctionCallee CapFn = TheModule->getOrInsertFunction("turf_rt_string_capacity", CapTy);
+    // It only reads the collector's own tables, which no Turf code can reach,
+    // so a loop that writes a string without allocating makes the same call
+    // with the same answer every time: saying so lets LLVM hoist it out. An
+    // allocation (which may change those tables) is an ordinary call and
+    // keeps it in place.
+    if (auto *CapF = dyn_cast<Function>(CapFn.getCallee())) {
+      CapF->setMemoryEffects(llvm::MemoryEffects::inaccessibleMemOnly(llvm::ModRefInfo::Ref));
+      CapF->setDoesNotThrow();
+      CapF->setWillReturn();
+    }
+    Value *Cap = Builder->CreateCall(CapFn, {StrVal}, "str_cap");
+
+    BasicBlock *NotHeapBB = BasicBlock::Create(*TheContext, "str_not_heap", TheFunction);
+    BasicBlock *HeapBB = BasicBlock::Create(*TheContext, "str_heap");
+    Builder->CreateCondBr(Builder->CreateICmpSLT(Cap, Zero, "str_noheap"), NotHeapBB, HeapBB);
+    Builder->SetInsertPoint(NotHeapBB);
+    CodegenPanic(Builder->CreateGlobalString(
+        "Cannot write into this string: it is not a heap string (a string "
+        "literal, or memory the program does not own)"), Loc);
+    if (!blockHasTerminator(Builder->GetInsertBlock()))
+      Builder->CreateUnreachable();
+    TheFunction->insert(TheFunction->end(), HeapBB);
+    Builder->SetInsertPoint(HeapBB);
+
+    BasicBlock *PastBB = BasicBlock::Create(*TheContext, "str_past_cap", TheFunction);
+    BasicBlock *FitsBB = BasicBlock::Create(*TheContext, "str_fits");
+    Builder->CreateCondBr(Builder->CreateICmpSGE(IndexVal, Cap, "str_pastcap"), PastBB, FitsBB);
+    Builder->SetInsertPoint(PastBB);
+    CodegenPanic(Builder->CreateGlobalString("String index out of bounds"), Loc);
+    if (!blockHasTerminator(Builder->GetInsertBlock()))
+      Builder->CreateUnreachable();
+    TheFunction->insert(TheFunction->end(), FitsBB);
+    Builder->SetInsertPoint(FitsBB);
+  }
   return IndexVal;
 }
 
@@ -545,9 +584,9 @@ Value *ArrayAccessExprAST::codegenLValue() {
       return nullptr;
     IndexVal = CastToType(IndexVal, TurfInt(), "stridx", Loc);
 
-    // FDN-004: write-side -- no `strlen()` upper bound. See
-    // EmitStringBoundsCheck()'s own doc comment for why it can't apply to a
-    // write, and for how a negative (from-the-end) index is still handled.
+    // The write side: bounded by the string's allocation, not its strlen().
+    // See EmitStringBoundsCheck()'s own doc comment for why, and for how a
+    // negative (from-the-end) index is handled.
     IndexVal =
         EmitStringBoundsCheck(StrVal, IndexVal, Loc, /*CheckUpperBound=*/false);
 

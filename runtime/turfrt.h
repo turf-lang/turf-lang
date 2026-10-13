@@ -333,6 +333,15 @@ typedef struct TurfRtStats {
 TurfRtStats turf_rt_stats(void);
 
 /*
+ * turf_rt_string_capacity -- the bytes from `p` to the end of the GC block
+ * holding it, or -1 when `p` is in no GC block (a string literal, memory
+ * from C). A string write `s[i] = c` is bounds-checked against it: a
+ * string has no length but its NUL, which a buffer being filled has not
+ * written yet, so its allocation is the only bound there is.
+ */
+int64_t turf_rt_string_capacity(const void *p);
+
+/*
  * turf_rt_panic -- replaces every inline fprintf+abort CodegenPanic() used
  * to emit directly (src/sema/Builtins.cpp). `kind` is a short, fixed
  * classification ("division by zero", "array bounds", "integer overflow",

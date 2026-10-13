@@ -413,6 +413,15 @@ account: `docs/development/changes/FDN-004.md`.
   call, on the negative path only) and panics only if the wrapped index is
   still below zero; its missing upper bound is unchanged. The two bullets
   above that say `i < 0` panics are superseded by this one.
+- **Amended 2026-10-13 (owner decision, REL-006 #30/#31: the frozen text
+  yields to "safe code cannot write outside an object").** A **write** is
+  bounded by the string's allocation: `turf_rt_string_capacity(s)`, the
+  bytes from `s` to the end of the GC block holding it. An index at or past
+  it panics with `String index out of bounds`, and a string in no GC block
+  (a literal, which is read-only data, or memory from C) panics with
+  `Cannot write into this string`. The write bullet above that says there is
+  no upper bound, and that a string's capacity cannot be recovered, is
+  superseded by this one; the read side is unchanged.
 
 ### 6.15 Per-declaration visibility — FROZEN (LEC-002, 2026-09-29)
 

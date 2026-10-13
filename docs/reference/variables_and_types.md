@@ -388,11 +388,12 @@ bounds`. A negative index `i` means `n + i`, the same as for arrays and
 `List`. Reading position 0 of `""` panics.
 
 A **write** (`s[i] = c;`) wraps a negative index the same way and panics if the
-result is still below zero, but has **no upper bound**. A string carries no
-capacity, and one being filled byte by byte has no terminator yet to measure,
-so writing past the end is not caught. Write only into a buffer you have
-allocated at the size you need, and only into strings you own. The
-value being stored must be a `char` (`s[0] = 65;` is E066).
+result is still below zero. Its upper bound is the string's heap allocation,
+not its length, since a string being filled byte by byte has no terminator yet
+to measure: a write past the allocation panics with `String index out of
+bounds`, and a write into a string that is not on the heap (a string literal,
+or memory from C) panics with `Cannot write into this string`. The value being
+stored must be a `char` (`s[0] = 65;` is E066).
 
 `strings::byte_at_unchecked(s, i)` reads a byte with no check at all, for a
 loop that has already established the index is in range. Everything else about

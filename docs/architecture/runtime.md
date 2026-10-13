@@ -75,6 +75,7 @@ The entry points in `runtime/turfrt.h`:
 | `turf_rt_is_gc_pointer(p)` | Exact block-start test. Reached from the `gc_is_managed` intrinsic. |
 | `turf_rt_checked_free(p)` | libc `free()` for the manual heap, after panicking if `p` is a live GC block (`cross-heap free`). Reached from `mem::free()` through the `gc_checked_free` intrinsic. |
 | `turf_rt_stats()` | Allocation counters plus the collector's point-in-time numbers; read from C by the smoke scripts. |
+| `turf_rt_string_capacity(p)` | The bytes from `p` to the end of the GC block holding it, or -1 outside the GC heap. Bounds every string byte write `s[i] = c` (`EmitStringBoundsCheck()`, `src/codegen/CodegenArray.cpp`); declared to the optimizer as reading only runtime-private memory, so a loop that writes without allocating calls it once. |
 | `turf_rt_panic(kind, msg, file, line)` | Flushes stdout, formats one line to stderr and calls `abort()`. |
 | `turf_rt_typedesc_is_pointer_word(desc, i)` | Bit accessor for a descriptor's pointer bitmap. |
 | `turf_rt_abi_2_0()` | The ABI stamp. |

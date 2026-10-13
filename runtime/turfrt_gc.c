@@ -704,6 +704,30 @@ int turf_gc_is_registered(const void *p) {
 
 int turf_rt_is_gc_pointer(const void *p) { return turf_gc_is_registered(p); }
 
+static GcBlock *gc_find_containing_any(uintptr_t addr); /* below */
+
+/* The bytes a string write may touch from `p` on: the rest of the GC block
+ * holding it, or -1 when `p` is in no GC block (a string literal, memory
+ * from C). A string is normally its block's start, so that is looked up
+ * exactly first (a hash probe, then a binary search); only an interior
+ * pointer pays for the containment search, which scans blocks registered
+ * since the last collection. */
+int64_t turf_rt_string_capacity(const void *p) {
+  if (!p)
+    return -1;
+  uintptr_t addr = (uintptr_t)p;
+  long i = find_exact_in_pending(addr);
+  if (i >= 0)
+    return (int64_t)g_pending[i].size;
+  i = find_exact_in_blocks(addr);
+  if (i >= 0)
+    return (int64_t)g_blocks[i].size;
+  GcBlock *b = gc_find_containing_any(addr);
+  if (b)
+    return (int64_t)(b->start + b->size - addr);
+  return -1;
+}
+
 /* ─── Global roots ───────────────────────────────────────────────────── */
 
 void turf_rt_add_global_root(void **slot) {

@@ -386,11 +386,12 @@ standard collections check too: `l[i]` on a `List` panics with
 
 Reading a string byte, `s[i]`, is checked (`String index out of bounds`), with
 negative indices counting from the end. **Writing** a string byte, `s[i] = c`,
-is checked against a negative index only: there is no upper bound, because a
-string's length is not known to the program except by scanning for the
-terminator, and string-building code writes bytes before the terminator exists.
-So a write past the end of a string is not caught, and it is not a safe
-operation in the sense of [section 7](#7-what-is-guaranteed-and-what-is-not):
+is checked against the string's allocation rather than its length: string-building
+code writes bytes before the terminator exists, so the terminator cannot bound
+a write, but the heap block the string lives in can. A write past the block's
+end panics with `String index out of bounds`, and a write into a string that
+is not on the heap at all (a string literal, which is read-only data, or memory
+from C) panics with `Cannot write into this string`:
 
 ```turflang
 import strings;
@@ -400,17 +401,20 @@ fn poke(s: string, i: int): void {
 }
 
 fn main(): int {
-    mut s: string = strings::repeat("ab", 2);
+    mut s: string = strings::repeat("ab", 2);   // 4 bytes and the terminator
     poke(s, 3);             // fine
-    poke(s, 103);           // not checked: writes 100 bytes past the end
+    poke(s, 4);             // fine: the terminator's byte, which this overwrites
+    poke(s, 103);           // panics: String index out of bounds
     return 0;
 }
 ```
 
-Build strings with the string operations and `+`; do not write bytes by index
-unless you know the bound. Do not write into a string literal at all: it is
-read-only data. `strings::byte_at_unchecked(s, i)` is the read that skips the
-check, for a caller that has already established the bound.
+The bound is the whole allocation, so a write can still overwrite a string's
+terminator, after which reading it runs into whatever follows, up to the end
+of its block. Build strings with the string operations and `+`, and write
+bytes by index only into a buffer you allocated for it.
+`strings::byte_at_unchecked(s, i)` is the read that skips the check, for a
+caller that has already established the bound.
 
 ### Integer overflow, division, conversions
 
@@ -520,12 +524,12 @@ In code that has **no `unsafe { }` block** and lives in a **module without
 `unsafe module;`**, TurfLang guarantees the six statements below. Each is stated
 exactly, with the program that shows it.
 
-**1. A program cannot read or write outside an object, with the exceptions
-named here.** Array, slice, `List`, collection and string-read indexing are
+**1. A program cannot read or write outside an object, except as named
+here.** Array, slice, `List`, collection and string-read indexing are
 checked (section 5), and raw-pointer operations, which are not, cannot be written
-in such code. The exception: **a string byte write `s[i] = c` is not checked
-against the end of the string.** Standard-library functions that are documented
-as unchecked (`strings::byte_at_unchecked`) skip the check on request.
+in such code. A string byte write `s[i] = c` is checked against the string's
+heap allocation. Standard-library functions that are documented as unchecked
+(`strings::byte_at_unchecked`) skip the check on request.
 
 **2. A reference cannot outlive its stack frame, in the cases section 4
 classifies.** Returning, storing, pushing and boxing a reference to a local are
@@ -569,7 +573,9 @@ being undefined (section 5). So does stack overflow (section 6).
   and write anywhere, hold a pointer to freed memory, free twice, and hide GC
   pointers from the collector. A bug there can corrupt the rest of the program,
   including its safe parts. See [FFI and unsafe](ffi_and_unsafe.md).
-- **Writes past the end of a string** (statement 1's exception).
+- **That a string keeps its terminator.** A byte write is bounded by the
+  string's allocation, not by its length, so it can overwrite the terminator
+  (statement 1).
 - **Dangling references the compiler does not classify** (statement 2's
   limit).
 - **That the manual heap is freed.** Safe code can call `mem::alloc` and never
