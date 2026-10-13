@@ -1326,7 +1326,10 @@ const TurfType *getExprType(const ExprAST *E) {
       if (isArrayType(BaseTy)) {
         ElemTy = getArrayElementType(BaseTy);
       } else if (auto *PtrTy = dynamic_cast<const TurfPointerType *>(BaseTy)) {
+        // A `&T[N]` indexes the array it refers to (visitArrayAccess()).
         ElemTy = PtrTy->getPointee().get();
+        if (PtrTy->isReference() && isArrayType(ElemTy))
+          ElemTy = getArrayElementType(ElemTy);
       }
       
       if (ElemTy) {

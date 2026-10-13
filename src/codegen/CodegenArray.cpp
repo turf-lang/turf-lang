@@ -555,6 +555,17 @@ Value *ArrayAccessExprAST::codegenLValue() {
                               "charptr");
   }
 
+  // A `&T[N]` is indexed as the array it refers to: the reference's value is
+  // the array's address, and the bounds check below applies unchanged.
+  Value *ReferencedArray = nullptr;
+  if (auto *RefTy = dynamic_cast<const TurfPointerType *>(BaseTy);
+      RefTy && RefTy->isReference() && isArrayType(RefTy->getPointee().get())) {
+    ReferencedArray = Base->codegen();
+    if (!ReferencedArray)
+      return nullptr;
+    BaseTy = RefTy->getPointee().get();
+  }
+
   if (auto *PtrTyTurf = dynamic_cast<const TurfPointerType *>(BaseTy)) {
     Value *PtrVal = Base->codegen();
     if (!PtrVal)
@@ -564,6 +575,22 @@ Value *ArrayAccessExprAST::codegenLValue() {
     if (!IndexVal)
       return nullptr;
     IndexVal = CastToType(IndexVal, TurfInt(), "ptridx", Loc);
+
+    // Any other safe reference is one element: `r[0]` and `r[-1]` are the
+    // value it refers to, and every other index is out of bounds. Only a raw
+    // `T*` is unchecked pointer arithmetic.
+    if (PtrTyTurf->isReference()) {
+      if (auto *CI = dyn_cast<ConstantInt>(IndexVal)) {
+        auto Folded = FoldConstantArrayIndex(CI->getSExtValue(), 1, Base.get(), Loc);
+        if (!Folded)
+          return nullptr;
+        IndexVal = ConstantInt::get(Type::getInt64Ty(*TheContext), *Folded);
+      } else {
+        IndexVal = EmitRuntimeBoundsCheck(
+            IndexVal, ConstantInt::get(Type::getInt64Ty(*TheContext), 1),
+            ArrayDisplayName(Base.get()), Loc);
+      }
+    }
 
     Type *ElemTy = getLLVMType(PtrTyTurf->getPointee().get());
     return Builder->CreateGEP(ElemTy, PtrVal, IndexVal, "ptrelemptr");
@@ -582,7 +609,7 @@ Value *ArrayAccessExprAST::codegenLValue() {
   Value *BaseLVal = nullptr;
   Value *Slice = nullptr;
   if (ArraySize >= 0) {
-    BaseLVal = Base->codegenLValue();
+    BaseLVal = ReferencedArray ? ReferencedArray : Base->codegenLValue();
     if (!BaseLVal)
       return nullptr;
   } else {
@@ -709,10 +736,13 @@ Value *ArrayAccessExprAST::codegen() {
   if (Ptr) {
     BaseTy = getExprType(Base.get());
     const TurfType *ElemTyT = nullptr;
-    if (auto *PtrTy = dynamic_cast<const TurfPointerType *>(BaseTy))
+    if (auto *PtrTy = dynamic_cast<const TurfPointerType *>(BaseTy)) {
       ElemTyT = PtrTy->getPointee().get();
-    else
+      if (PtrTy->isReference() && isArrayType(ElemTyT))
+        ElemTyT = getArrayElementType(ElemTyT);
+    } else {
       ElemTyT = getArrayElementType(BaseTy);
+    }
     return Builder->CreateLoad(getLLVMType(ElemTyT), Ptr, "arrelem");
   }
 

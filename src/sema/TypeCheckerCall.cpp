@@ -2702,6 +2702,31 @@ void TypeChecker::visitArrayAccess(ArrayAccessExprAST &Node) {
       // never consults Codegen's results, same relationship as every
       // other getExprType()/TypeChecker parity gap this session found).
       TurfTypePtr ElemTy = PtrTy->getPointee();
+      // Only a raw `T*` is pointer arithmetic. A safe reference is indexed
+      // like the array it refers to: a `&T[N]` by its N elements, and any
+      // other `&T` as one element, so `r[0]` reads or writes through it (there
+      // is no `*r`) and Codegen bounds-checks every other index. `r[i]` on a
+      // `&int` once read and wrote past the int in safe code. A `&?T` has to
+      // be narrowed first: the nullability pass checks member access, not
+      // indexing.
+      if (BaseTy->isReference() || BaseTy->isNullableReference()) {
+        const auto *Arr = ElemTy ? dynamic_cast<const ArrayType *>(ElemTy.get()) : nullptr;
+        if (BaseTy->isNullableReference() || (Arr && Arr->getSize() < 0)) {
+          const std::string Pointee = ElemTy ? ElemTy->getName() : "T";
+          reportError(Node.getLoc(), ErrCode::UnsupportedOperation,
+                      "Cannot index a value of type '" + BaseTy->getName() + "'.",
+                      {},
+                      BaseTy->isNullableReference()
+                          ? "It may be null. Check it first and index a '&" + Pointee +
+                                "' made from it (`r to &" + Pointee + "` after `r != null`)."
+                          : "Only a reference to a fixed-size array (`&int[3]`) is "
+                            "indexed by element.");
+          setType(&Node, nullptr);
+          return;
+        }
+        if (Arr)
+          ElemTy = Arr->getElementTypePtr();
+      }
       if (ElemTy) {
         if (const auto *NT = dynamic_cast<const NamedType *>(ElemTy.get())) {
           if (GlobalSymbolTable) {

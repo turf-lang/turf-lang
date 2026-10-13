@@ -6,9 +6,8 @@ extern fn free(p: int*): void;
 
 // (issue #238) `counter: &int` -- a plain function may never have a raw
 // ptr/T* parameter, even inside `unsafe { }`; used to be `counter: int*`.
-// Array-index assignment through `counter[0]` still works exactly the
-// same as through a raw pointer -- `&T` only restricts null-ness and
-// implicit raw<->safe conversions, not indexed access to the pointee.
+// `counter[0]` reads and writes the int it refers to: a `&T` indexes as one
+// element (any other index is out of bounds).
 fn get_index(counter: &int): int {
     counter[0] = counter[0] + 1;
     return 0;

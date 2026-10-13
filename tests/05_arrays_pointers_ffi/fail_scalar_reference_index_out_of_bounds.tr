@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E001
+// EXPECT-DIAG: You tried to access 'r[100000]'
+// A `&int` is indexed as one element: `r[0]` is the int it refers to. Only a
+// raw `T*` is pointer arithmetic; `r[100000] = 3` wrote past the int in safe
+// code.
+
+fn main(): int {
+    mut x: int = 5;
+    mut r: &int = &x;
+    r[100000] = 3;
+    return 0;
+}

@@ -635,7 +635,12 @@ range `for` and `l[i]`.
 ## Arrays of references: `(&T)[N]`
 
 `&` takes the whole type after it, so `&Node[2]` is a *reference to* an array of
-two nodes. An array *of* references puts the reference type in parentheses:
+two nodes. Indexing one, `r[i]` with `r: &int[3]`, indexes the array it refers
+to, with the array's bounds check. Any other `&T` indexes as one element, so
+`r[0]` is the value it refers to and any other index is out of bounds (`E001`,
+or a panic at run time). A `&?T` is checked for null and converted to a `&T`
+before it is indexed (`E126`). An array *of* references puts the reference
+type in parentheses:
 
 ```turflang
 import io;
