@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/turf-lang/turf-lang/cli/internal/version"
+	"github.com/turf-lang/turf-cli/internal/version"
 )
 
 // CompilerInfo is what `turfc --version` reports: line 1 is

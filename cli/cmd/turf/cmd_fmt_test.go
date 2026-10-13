@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/turf-lang/turf-lang/cli/internal/driver"
-	"github.com/turf-lang/turf-lang/cli/internal/version"
+	"github.com/turf-lang/turf-cli/internal/driver"
+	"github.com/turf-lang/turf-cli/internal/version"
 )
 
 func touch(t *testing.T, root string, rels ...string) {

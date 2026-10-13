@@ -476,13 +476,22 @@ expect_rc "turf init in a directory whose name is not a package name" init_bad 1
 expect_out "turf init in a directory whose name is not a package name" init_bad "not a valid package name"
 
 # --- drift: the reserved words the CLI carries vs the lexer's --------------------
-sed -n '/^std::map<std::string, int> Keywords/,/;$/p' src/frontend/Lexer.cpp |
-  grep -o '{"[a-z_0-9]*", TOK' | sed 's/{"\(.*\)", TOK/\1/' | sort > "$WORK/kw_lexer"
-sed -n '/^var reserved = /,/^}/p' cli/internal/manifest/manifest.go |
-  grep -o '"[a-z_0-9]*"' | tr -d '"' | sort > "$WORK/kw_cli"
-[ "$(wc -l < "$WORK/kw_lexer")" -gt 40 ] || fail "drift: could not extract the lexer's keyword table"
-if ! diff "$WORK/kw_lexer" "$WORK/kw_cli" > "$WORK/kw_diff"; then
-  fail "drift: cli/internal/manifest/manifest.go's reserved list differs from src/frontend/Lexer.cpp's Keywords ($(tr '\n' ' ' < "$WORK/kw_diff"))"
+# turf's source is cli/, or a turf-cli checkout once cli/ is retired.
+CLI_DIR=${TURF_CLI_DIR:-cli}
+[ -f "$CLI_DIR/go.mod" ] || CLI_DIR=../turf-cli
+if [ -f "$CLI_DIR/internal/manifest/manifest.go" ]; then
+  sed -n '/^std::map<std::string, int> Keywords/,/;$/p' src/frontend/Lexer.cpp |
+    grep -o '{"[a-z_0-9]*", TOK' | sed 's/{"\(.*\)", TOK/\1/' | sort > "$WORK/kw_lexer"
+  sed -n '/^var reserved = /,/^}/p' "$CLI_DIR/internal/manifest/manifest.go" |
+    grep -o '"[a-z_0-9]*"' | tr -d '"' | sort > "$WORK/kw_cli"
+  [ "$(wc -l < "$WORK/kw_lexer")" -gt 40 ] || fail "drift: could not extract the lexer's keyword table"
+  if ! diff "$WORK/kw_lexer" "$WORK/kw_cli" > "$WORK/kw_diff"; then
+    fail "drift: $CLI_DIR/internal/manifest/manifest.go's reserved list differs from src/frontend/Lexer.cpp's Keywords ($(tr '\n' ' ' < "$WORK/kw_diff"))"
+  fi
+elif [ -n "${CI:-}" ]; then
+  fail "drift: turf's source not found (cli/ or ../turf-cli; set TURF_CLI_DIR)"
+else
+  echo "SKIP drift check: turf's source not found (cli/ or ../turf-cli; set TURF_CLI_DIR)"
 fi
 
 if [ "$FAILED" -ne 0 ]; then

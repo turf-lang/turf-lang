@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/turf-lang/turf-lang/cli/internal/manifest"
+	"github.com/turf-lang/turf-cli/internal/manifest"
 )
 
 func TestParseScaffoldArgs(t *testing.T) {
@@ -63,6 +63,38 @@ func TestEnsureGitignore(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(p); string(b) != "*.o\ntmp\n/build/\n" {
 		t.Fatalf("append: %q", b)
+	}
+}
+
+// A new project recommends the VS Code extension; `turf init` keeps an
+// extensions.json the directory already has.
+func TestScaffoldRecommendsExtension(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := scaffold(dir, "app", false); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(dir, ".vscode", "extensions.json")
+	if b, err := os.ReadFile(p); err != nil || !strings.Contains(string(b), `"turflang.turf"`) {
+		t.Fatalf("extensions.json: %q %v", b, err)
+	}
+
+	dir = t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".vscode"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p = filepath.Join(dir, ".vscode", "extensions.json")
+	if err := os.WriteFile(p, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := scaffold(dir, "app", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(p); string(b) != "{}\n" {
+		t.Fatalf("an existing extensions.json was overwritten: %q", b)
+	}
+	if !strings.Contains(strings.Join(out, "\n"), ".vscode/extensions.json (already there") {
+		t.Errorf("scaffold should say it left extensions.json alone: %v", out)
 	}
 }
 

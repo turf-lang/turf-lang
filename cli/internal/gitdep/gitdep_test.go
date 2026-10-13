@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/turf-lang/turf-lang/cli/internal/lockfile"
-	"github.com/turf-lang/turf-lang/cli/internal/treehash"
+	"github.com/turf-lang/turf-cli/internal/lockfile"
+	"github.com/turf-lang/turf-cli/internal/treehash"
 )
 
 // These tests run the real git against bare repositories made in a temp dir:

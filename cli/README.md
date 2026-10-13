@@ -1,16 +1,16 @@
 # turf, the TurfLang front end
 
 `turf` is the TurfLang command-line tool, the one users type. It drives
-`turfc`, the compiler in this repository's `src/`, which is the interface for
+`turfc`, the compiler ([turf-lang](https://github.com/turf-lang/turf-lang)'s `src/`), which is the interface for
 tools rather than for people. The two are versioned independently: turf's
 version is the constant in `internal/version/version.go`, the compiler's is the
 root `VERSION` file, and `turf version` prints both. What they must agree on is
 the **driver interface**, `major.minor`, which `turfc --version` prints on line
 2 and `version.Required` names.
 
-The design is frozen in [`docs/development/FREEZE.md`](../docs/development/FREEZE.md)
+The design is frozen in [`docs/development/FREEZE.md`](https://github.com/turf-lang/turf-lang/blob/master/docs/development/FREEZE.md)
 §6.16 (F-PKG-1); the record of how it was built is
-[`docs/development/changes/LEC-001.md`](../docs/development/changes/LEC-001.md).
+[`docs/development/changes/LEC-001.md`](https://github.com/turf-lang/turf-lang/blob/master/docs/development/changes/LEC-001.md).
 The rule that shapes everything here: the compiler owns whatever depends on
 TurfLang source, and `turf` owns files, network and reproducibility. `turf`
 never parses TurfLang and never rewrites a compiler diagnostic.
@@ -116,7 +116,26 @@ driver interface does not fit: a different major, or an older minor than
 `version.Required`. However it was found, a differing *release* version is
 fine.
 
+## Two copies
+
+This tree lives in two places, byte for byte the same: `cli/` in
+[turf-lang](https://github.com/turf-lang/turf-lang) and the root of
+[turf-cli](https://github.com/turf-lang/turf-cli). Change it in turf-lang's
+`cli/`, where the smoke tests run it against the real compiler, then mirror it
+from the turf-lang checkout with
+
+```bash
+git -C ../turf-cli rm -rqf . && cp -a cli/. ../turf-cli/ && git -C ../turf-cli add -A
+```
+
+To retire the in-repo copy, delete `cli/`. Nothing else in turf-lang has to
+change: CMake builds `turf` from `TURF_CLI_DIR` (default: a `turf-cli` checkout
+next to turf-lang) and skips it if there is none, and the smoke tests read
+turf's source from the same place.
+
 ## Building and testing
+
+From a turf-lang checkout:
 
 ```bash
 cmake --build build            # builds build/turfc and, if Go is installed, build/turf
@@ -124,6 +143,9 @@ cd cli && go vet ./... && go test ./...
 ./scripts/smoke/cli_smoke.sh   # the front end against the real compiler
 ./scripts/smoke/project_smoke.sh  # projects: new/add/build/run/check, manifests, graph errors
 ```
+
+From turf-cli alone, `go vet ./... && go test ./...`; the smoke tests need a
+turf-lang checkout with this repository next to it.
 
 A plain `go build ./cmd/turf` works too, since nothing is stamped at build time.
 CMake just puts the result at `build/turf`, beside `build/turfc`, where it finds

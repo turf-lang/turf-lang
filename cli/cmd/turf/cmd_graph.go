@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/turf-lang/turf-lang/cli/internal/manifest"
+	"github.com/turf-lang/turf-cli/internal/manifest"
 )
 
 const graphUsage = "usage: turf graph [--project <dir>] [--offline] [--locked]"

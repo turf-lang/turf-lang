@@ -8,10 +8,10 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/turf-lang/turf-lang/cli/internal/driver"
-	"github.com/turf-lang/turf-lang/cli/internal/manifest"
-	"github.com/turf-lang/turf-lang/cli/internal/project"
-	"github.com/turf-lang/turf-lang/cli/internal/stdlib"
+	"github.com/turf-lang/turf-cli/internal/driver"
+	"github.com/turf-lang/turf-cli/internal/manifest"
+	"github.com/turf-lang/turf-cli/internal/project"
+	"github.com/turf-lang/turf-cli/internal/stdlib"
 )
 
 const noProjectMsg = "not inside a TurfLang project (no turf.toml here or in any parent directory); " +

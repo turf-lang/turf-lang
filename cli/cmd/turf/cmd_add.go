@@ -8,8 +8,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/turf-lang/turf-lang/cli/internal/manifest"
-	"github.com/turf-lang/turf-lang/cli/internal/project"
+	"github.com/turf-lang/turf-cli/internal/manifest"
+	"github.com/turf-lang/turf-cli/internal/project"
 )
 
 // openManifest finds the project from the cwd and reads its turf.toml as text

@@ -6,9 +6,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/turf-lang/turf-lang/cli/internal/driver"
-	"github.com/turf-lang/turf-lang/cli/internal/project"
-	"github.com/turf-lang/turf-lang/cli/internal/version"
+	"github.com/turf-lang/turf-cli/internal/driver"
+	"github.com/turf-lang/turf-cli/internal/project"
+	"github.com/turf-lang/turf-cli/internal/version"
 )
 
 // testsDirName is the one place a project's tests live (FREEZE.md 6.16's

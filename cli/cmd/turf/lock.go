@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/turf-lang/turf-lang/cli/internal/gitdep"
-	"github.com/turf-lang/turf-lang/cli/internal/lockfile"
-	"github.com/turf-lang/turf-lang/cli/internal/manifest"
-	"github.com/turf-lang/turf-lang/cli/internal/project"
+	"github.com/turf-lang/turf-cli/internal/gitdep"
+	"github.com/turf-lang/turf-cli/internal/lockfile"
+	"github.com/turf-lang/turf-cli/internal/manifest"
+	"github.com/turf-lang/turf-cli/internal/project"
 )
 
 // netFlags are turf's own flags for the commands that resolve dependencies

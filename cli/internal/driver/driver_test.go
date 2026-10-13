@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/turf-lang/turf-lang/cli/internal/version"
+	"github.com/turf-lang/turf-cli/internal/version"
 )
 
 // fakeTurfc writes an executable shell script that prints out for any

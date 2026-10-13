@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/turf-lang/turf-lang/cli/internal/driver"
-	"github.com/turf-lang/turf-lang/cli/internal/manifest"
-	"github.com/turf-lang/turf-lang/cli/internal/project"
-	"github.com/turf-lang/turf-lang/cli/internal/stdlib"
+	"github.com/turf-lang/turf-cli/internal/driver"
+	"github.com/turf-lang/turf-cli/internal/manifest"
+	"github.com/turf-lang/turf-cli/internal/project"
+	"github.com/turf-lang/turf-cli/internal/stdlib"
 )
 
 // fallbackTurfRequirement is written into a new manifest's `turf` key when the
@@ -261,11 +261,17 @@ func scaffold(dir, name string, lib bool) ([]string, error) {
 		files = append(files, struct{ rel, content string }{"src/" + name + ".tr", libTemplate(name)})
 	}
 	files = append(files, struct{ rel, content string }{"README.md", readmeTemplate(name, lib)})
+	// Opening the project in VS Code (or a fork) then offers to install the
+	// Turf extension.
+	files = append(files, struct{ rel, content string }{".vscode/extensions.json", vscodeExtensions})
 	for _, f := range files {
 		path := filepath.Join(dir, filepath.FromSlash(f.rel))
 		if _, err := os.Lstat(path); err == nil {
 			out = append(out, pre+f.rel+" (already there, left as it is)")
 			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return nil, err
 		}
 		if err := os.WriteFile(path, []byte(f.content), 0o644); err != nil {
 			return nil, err
@@ -280,6 +286,13 @@ func scaffold(dir, name string, lib bool) ([]string, error) {
 	out = append(out, pre+".gitignore"+note)
 	return out, nil
 }
+
+// vscodeExtensions recommends the Turf extension (publisher.name in turf-lsp's
+// editors/vscode/package.json) to anyone who opens the project in VS Code.
+const vscodeExtensions = `{
+  "recommendations": ["turflang.turf"]
+}
+`
 
 // ensureGitignore makes sure /build/ is ignored without disturbing what a
 // user already ignores: an existing file is appended to, only if the line is
@@ -318,6 +331,8 @@ Creates <name>/ (which must not exist) holding:
   src/main.tr     the entry point, a hello-world program: 'turf run' works at once
   README.md       the everyday turf commands and the project's layout
   .gitignore      /build/
+  .vscode/extensions.json
+                  recommends the Turf extension, so VS Code offers to install it
 
 With --lib it also creates src/<name>.tr, the package's root module: the
 only module another package can import. src/main.tr then imports it, so the
@@ -337,7 +352,7 @@ Usage:
 
 Like 'turf new', in the current directory. The name defaults to the
 directory's name and must be a valid package name. A turf.toml already there
-is refused. An existing src/main.tr, src/<name>.tr (with --lib) or README.md
-is never overwritten, and /build/ is appended to an existing .gitignore only
+is refused. An existing src/main.tr, src/<name>.tr (with --lib), README.md or
+.vscode/extensions.json is never overwritten, and /build/ is appended to an existing .gitignore only
 if it is not already ignored.
 `

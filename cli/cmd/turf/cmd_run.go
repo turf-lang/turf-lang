@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/turf-lang/turf-lang/cli/internal/driver"
+	"github.com/turf-lang/turf-cli/internal/driver"
 )
 
 // cmdRun compiles one file to a temporary executable, runs it, and cleans up.

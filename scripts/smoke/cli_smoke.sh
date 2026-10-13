@@ -41,9 +41,13 @@ unset TURF_COMPILER TURF_HOME
 
 # The two release versions are independent (FREEZE.md 6.16, F-PKG-1): the
 # compiler's is the root VERSION file, turf's is a constant in its own source.
+# turf's source is cli/, or a turf-cli checkout once cli/ is retired (CMake's
+# TURF_CLI_DIR).
 V=$(head -1 VERSION)
-CLI_V=$(sed -n 's/^const Version = "\(.*\)"$/\1/p' cli/internal/version/version.go)
-[ -n "$CLI_V" ] || { echo "FAIL: cannot read turf's version from cli/internal/version/version.go"; exit 1; }
+CLI_DIR=${TURF_CLI_DIR:-cli}
+[ -f "$CLI_DIR/go.mod" ] || CLI_DIR=../turf-cli
+CLI_V=$(sed -n 's/^const Version = "\(.*\)"$/\1/p' "$CLI_DIR/internal/version/version.go" 2>/dev/null)
+[ -n "$CLI_V" ] || { echo "FAIL: cannot read turf's version from $CLI_DIR/internal/version/version.go (set TURF_CLI_DIR to turf's source)"; exit 1; }
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/tmp"

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/turf-lang/turf-lang/cli/internal/driver"
-	"github.com/turf-lang/turf-lang/cli/internal/version"
+	"github.com/turf-lang/turf-cli/internal/driver"
+	"github.com/turf-lang/turf-cli/internal/version"
 )
 
 // cmdVersion prints turf's own version first, unconditionally, so it is

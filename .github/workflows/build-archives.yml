@@ -86,10 +86,22 @@ jobs:
 
       # Go, before the CMake build, so it builds build/turf (the front end under
       # cli/, LEC-001) beside build/turfc; the archive ships both.
+      # cli/ mirrors the turf-cli repository (cli/README.md, "Two copies"); once
+      # cli/ is retired, the front end is built from a turf-cli checkout.
+      - name: turf front end source (turf-cli, if cli/ is retired)
+        if: hashFiles('cli/go.mod') == ''
+        uses: actions/checkout@v4
+        with:
+          repository: turf-lang/turf-cli
+          path: turf-cli
+      - name: Point CMake and the smoke tests at turf-cli
+        if: hashFiles('cli/go.mod') == ''
+        shell: bash
+        run: echo "TURF_CLI_DIR=${{ github.workspace }}/turf-cli" >> "$GITHUB_ENV"
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: cli/go.mod
+          go-version-file: ${{ hashFiles('cli/go.mod') != '' && 'cli/go.mod' || 'turf-cli/go.mod' }}
 
       # --release-static: static LLVM and C++ runtime, no --smart model runtime
       # (so no llama.cpp submodule, no OpenMP).
@@ -254,10 +266,22 @@ jobs:
 
       # Go, before the CMake build, so it builds build/turf (the front end under
       # cli/, LEC-001) beside build/turfc; the archive ships both.
+      # cli/ mirrors the turf-cli repository (cli/README.md, "Two copies"); once
+      # cli/ is retired, the front end is built from a turf-cli checkout.
+      - name: turf front end source (turf-cli, if cli/ is retired)
+        if: hashFiles('cli/go.mod') == ''
+        uses: actions/checkout@v4
+        with:
+          repository: turf-lang/turf-cli
+          path: turf-cli
+      - name: Point CMake and the smoke tests at turf-cli
+        if: hashFiles('cli/go.mod') == ''
+        shell: bash
+        run: echo "TURF_CLI_DIR=${{ github.workspace }}/turf-cli" >> "$GITHUB_ENV"
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: cli/go.mod
+          go-version-file: ${{ hashFiles('cli/go.mod') != '' && 'cli/go.mod' || 'turf-cli/go.mod' }}
 
       # --release-static: static LLVM and C++ runtime, no --smart model runtime
       # (so no llama.cpp submodule, no OpenMP).
@@ -405,10 +429,22 @@ jobs:
       - name: Point CMake at the static lld
         run: echo "CMAKE_PREFIX_PATH=$LLVM_PREFIX:${{ runner.temp }}/lld" >> $GITHUB_ENV
 
+      # cli/ mirrors the turf-cli repository (cli/README.md, "Two copies"); once
+      # cli/ is retired, the front end is built from a turf-cli checkout.
+      - name: turf front end source (turf-cli, if cli/ is retired)
+        if: hashFiles('cli/go.mod') == ''
+        uses: actions/checkout@v4
+        with:
+          repository: turf-lang/turf-cli
+          path: turf-cli
+      - name: Point CMake and the smoke tests at turf-cli
+        if: hashFiles('cli/go.mod') == ''
+        shell: bash
+        run: echo "TURF_CLI_DIR=${{ github.workspace }}/turf-cli" >> "$GITHUB_ENV"
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: cli/go.mod
+          go-version-file: ${{ hashFiles('cli/go.mod') != '' && 'cli/go.mod' || 'turf-cli/go.mod' }}
 
       - name: Build Turf
         run: |
@@ -593,10 +629,22 @@ jobs:
           # lld: the static lld archives and headers the embedded linker is built from.
           install: mingw-w64-ucrt-x86_64-llvm mingw-w64-ucrt-x86_64-clang mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-zlib mingw-w64-ucrt-x86_64-zstd mingw-w64-ucrt-x86_64-lld
 
+      # cli/ mirrors the turf-cli repository (cli/README.md, "Two copies"); once
+      # cli/ is retired, the front end is built from a turf-cli checkout.
+      - name: turf front end source (turf-cli, if cli/ is retired)
+        if: hashFiles('cli/go.mod') == ''
+        uses: actions/checkout@v4
+        with:
+          repository: turf-lang/turf-cli
+          path: turf-cli
+      - name: Point CMake and the smoke tests at turf-cli
+        if: hashFiles('cli/go.mod') == ''
+        shell: bash
+        run: echo "TURF_CLI_DIR=${{ github.workspace }}/turf-cli" >> "$GITHUB_ENV"
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: cli/go.mod
+          go-version-file: ${{ hashFiles('cli/go.mod') != '' && 'cli/go.mod' || 'turf-cli/go.mod' }}
 
       - name: Build Turf
         shell: msys2 {0}

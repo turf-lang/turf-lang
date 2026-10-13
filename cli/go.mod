@@ -1,4 +1,4 @@
-module github.com/turf-lang/turf-lang/cli
+module github.com/turf-lang/turf-cli
 
 go 1.26.4
 

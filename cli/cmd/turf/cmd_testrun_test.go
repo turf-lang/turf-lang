@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/turf-lang/turf-lang/cli/internal/driver"
-	"github.com/turf-lang/turf-lang/cli/internal/version"
+	"github.com/turf-lang/turf-cli/internal/driver"
+	"github.com/turf-lang/turf-cli/internal/version"
 )
 
 func TestTestInterfaceError(t *testing.T) {

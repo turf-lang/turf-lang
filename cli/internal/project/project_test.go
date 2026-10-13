@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/turf-lang/turf-lang/cli/internal/manifest"
+	"github.com/turf-lang/turf-cli/internal/manifest"
 )
 
 // pkgSpec describes one package to lay out under the temp root.

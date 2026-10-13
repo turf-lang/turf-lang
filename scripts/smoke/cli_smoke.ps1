@@ -23,9 +23,10 @@ if (-not (Test-Path -LiteralPath $script:Turf)) { Write-Host 'build\turf.exe mis
 Start-Smoke 'cli_smoke'
 
 $V = (Get-Content -LiteralPath (Join-Path $script:Root 'VERSION') -TotalCount 1).Trim()
-$versionGo = Get-Content -Raw -LiteralPath (Join-Path $script:Root 'cli\internal\version\version.go')
+$versionPath = Join-Path $script:CliDir 'internal\version\version.go'
+$versionGo = if (Test-Path -LiteralPath $versionPath) { Get-Content -Raw -LiteralPath $versionPath } else { '' }
 if ($versionGo -match '(?m)^const Version = "([^"]*)"') { $CLI_V = $Matches[1] }
-else { Write-Host "cannot read turf's version from cli\internal\version\version.go" -ForegroundColor Red; exit 1 }
+else { Write-Host "cannot read turf's version from $versionPath (set TURF_CLI_DIR to turf's source)" -ForegroundColor Red; exit 1 }
 
 $work = New-WorkDir
 $caseN = 0

@@ -10,9 +10,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/turf-lang/turf-lang/cli/internal/driver"
-	"github.com/turf-lang/turf-lang/cli/internal/project"
-	"github.com/turf-lang/turf-lang/cli/internal/version"
+	"github.com/turf-lang/turf-cli/internal/driver"
+	"github.com/turf-lang/turf-cli/internal/project"
+	"github.com/turf-lang/turf-cli/internal/version"
 )
 
 // cmdFmt drives `turfc --format`.

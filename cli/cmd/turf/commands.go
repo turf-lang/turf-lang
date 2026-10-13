@@ -5,7 +5,7 @@ import (
 	"os"
 	"sort"
 
-	"github.com/turf-lang/turf-lang/cli/internal/driver"
+	"github.com/turf-lang/turf-cli/internal/driver"
 )
 
 // Exit codes for the CLI's own failures: 2 for usage, 1 for everything else.

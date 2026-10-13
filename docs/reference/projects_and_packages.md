@@ -92,6 +92,7 @@ Created program package 'hello' in hello/
   hello/turf.toml
   hello/src/main.tr
   hello/README.md
+  hello/.vscode/extensions.json
   hello/.gitignore
 $ cd hello
 $ turf run
@@ -103,6 +104,8 @@ Hello, TurfLang! This is hello.
 Every new package runs straight away. The generated `README.md` lists the
 everyday commands (`turf run`, `build`, `check`, `add`, `remove`, `update`,
 `clean`, `fmt`, `explain`, `help`) and the project's layout.
+`.vscode/extensions.json` recommends the Turf extension, so VS Code (and its
+forks) offers to install it when the project is opened.
 
 `turf new geometry --lib` also creates the root module `src/geometry.tr`. Its
 `src/main.tr` imports it, so the library can be tried with `turf run`:
@@ -114,12 +117,14 @@ Created library package 'geometry' in geometry/
   geometry/src/main.tr
   geometry/src/geometry.tr
   geometry/README.md
+  geometry/.vscode/extensions.json
   geometry/.gitignore
 ```
 
 `turf init` does the same in the current directory. Its name defaults to the
-directory's; an existing `src/main.tr`, root module or `README.md` is never
-overwritten; and `/build/` is added to an existing `.gitignore`:
+directory's; an existing `src/main.tr`, root module, `README.md` or
+`.vscode/extensions.json` is never overwritten; and `/build/` is added to an
+existing `.gitignore`:
 
 ```
 $ turf init
@@ -127,6 +132,7 @@ Initialized package 'existing' in …/existing
   turf.toml
   src/main.tr (already there, left as it is)
   README.md
+  .vscode/extensions.json
   .gitignore
 ```
 

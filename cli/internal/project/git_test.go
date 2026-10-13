@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/turf-lang/turf-lang/cli/internal/gitdep"
-	"github.com/turf-lang/turf-lang/cli/internal/lockfile"
-	"github.com/turf-lang/turf-lang/cli/internal/manifest"
+	"github.com/turf-lang/turf-cli/internal/gitdep"
+	"github.com/turf-lang/turf-cli/internal/lockfile"
+	"github.com/turf-lang/turf-cli/internal/manifest"
 )
 
 // fakeGit stands in for the fetcher: it maps "url|ref" to a directory already

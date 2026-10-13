@@ -31,8 +31,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/turf-lang/turf-lang/cli/internal/lockfile"
-	"github.com/turf-lang/turf-lang/cli/internal/treehash"
+	"github.com/turf-lang/turf-cli/internal/lockfile"
+	"github.com/turf-lang/turf-cli/internal/treehash"
 )
 
 // Request names one git dependency as one requirer wrote it.

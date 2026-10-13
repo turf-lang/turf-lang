@@ -346,16 +346,23 @@ Expect-Rc 'turf init in a directory whose name is not a package name' $r 1
 Expect-Out 'turf init in a directory whose name is not a package name' $r 'not a valid package name'
 
 # --- drift: the reserved words the CLI carries vs the lexer's -----------------------------------------------------
-$lexer = Get-Content -Raw (Join-Path $script:Root 'src\frontend\Lexer.cpp')
-$lexBlock = [regex]::Match($lexer, '(?s)std::map<std::string, int> Keywords.*?;')
-$kwLexer = @([regex]::Matches($lexBlock.Value, '\{"([a-z_0-9]*)", TOK') | ForEach-Object { $_.Groups[1].Value } | Sort-Object)
-$manifest = Get-Content -Raw (Join-Path $script:Root 'cli\internal\manifest\manifest.go')
-$cliBlock = [regex]::Match($manifest, '(?ms)^var reserved = .*?^\}')
-$kwCli = @([regex]::Matches($cliBlock.Value, '"([a-z_0-9]*)"') | ForEach-Object { $_.Groups[1].Value } | Sort-Object)
-if ($kwLexer.Count -le 40) { Write-Fail "drift: could not extract the lexer's keyword table" }
-$diff = Compare-Object $kwLexer $kwCli
-if ($diff) {
-  Write-Fail "drift: cli/internal/manifest/manifest.go's reserved list differs from src/frontend/Lexer.cpp's Keywords ($(($diff | ForEach-Object { $_.SideIndicator + $_.InputObject }) -join ' '))"
+$manifestPath = Join-Path $script:CliDir 'internal\manifest\manifest.go'
+if (Test-Path -LiteralPath $manifestPath) {
+  $lexer = Get-Content -Raw (Join-Path $script:Root 'src\frontend\Lexer.cpp')
+  $lexBlock = [regex]::Match($lexer, '(?s)std::map<std::string, int> Keywords.*?;')
+  $kwLexer = @([regex]::Matches($lexBlock.Value, '\{"([a-z_0-9]*)", TOK') | ForEach-Object { $_.Groups[1].Value } | Sort-Object)
+  $manifest = Get-Content -Raw $manifestPath
+  $cliBlock = [regex]::Match($manifest, '(?ms)^var reserved = .*?^\}')
+  $kwCli = @([regex]::Matches($cliBlock.Value, '"([a-z_0-9]*)"') | ForEach-Object { $_.Groups[1].Value } | Sort-Object)
+  if ($kwLexer.Count -le 40) { Write-Fail "drift: could not extract the lexer's keyword table" }
+  $diff = Compare-Object $kwLexer $kwCli
+  if ($diff) {
+    Write-Fail "drift: $manifestPath's reserved list differs from src/frontend/Lexer.cpp's Keywords ($(($diff | ForEach-Object { $_.SideIndicator + $_.InputObject }) -join ' '))"
+  }
+} elseif ($env:CI) {
+  Write-Fail "drift: turf's source not found (cli\ or ..\turf-cli; set TURF_CLI_DIR)"
+} else {
+  Write-Skip "drift: turf's source not found (cli\ or ..\turf-cli; set TURF_CLI_DIR)"
 }
 
 Complete-Smoke

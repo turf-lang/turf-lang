@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/turf-lang/turf-lang/cli/internal/manifest"
+	"github.com/turf-lang/turf-cli/internal/manifest"
 )
 
 func TestSplitNetFlags(t *testing.T) {
