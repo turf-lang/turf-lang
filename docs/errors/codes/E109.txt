@@ -11,3 +11,5 @@ Write the type:
     fn add(a: int, b: int): int { ... }
 
 A function that returns nothing says so with `void`: `fn log(msg: string): void { ... }`. A type name is case sensitive -- `Int` is not `int` -- and a struct or enum you declared works as a type too.
+
+`sizeof` takes a type too, not a value: `sizeof(a)` with a variable `a` is this error. Write the variable's type, `sizeof(int)`.

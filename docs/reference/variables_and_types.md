@@ -670,6 +670,7 @@ ptr`, `string to &T`, `&T to string`) are only allowed inside `unsafe { }`
 ### `sizeof(T)`
 
 `sizeof` takes a **type** and is an `int` constant: the type's size in bytes.
+A variable is not a type: `sizeof(a)` is `E109`.
 
 ```turflang
 struct Pair {

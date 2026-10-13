@@ -4,6 +4,7 @@ CAUSE:
   The parser was waiting for a type (`int`, `string`, `bool`, `double`, `char`, a
   struct/enum name, `List<int>`, ...) and found something that is not one. Type names
   are case sensitive (`Int` is not `int`).
+  `sizeof` takes a type as well: `sizeof(a)` with a variable `a` is E109.
 
 INCORRECT:
     fn add(a: int, b:): int { ... }      // parameter `b` has no type

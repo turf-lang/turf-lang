@@ -61,6 +61,37 @@ public:
 };
 } // namespace
 
+void Resolver::visitSizeOf(SizeOfExprAST &Node) {
+  // `sizeof(a)` with a variable `a` is a type expected and a value given
+  // (E109). Checked before the type lookup, which would call `a` an unknown
+  // type and suggest declaring a struct of that name.
+  if (const auto *NT = dynamic_cast<const NamedType *>(Node.getTypeArg().get())) {
+    const std::string &Name = NT->getName();
+    const bool IsTypeParam =
+        std::find(CurrentFuncTypeParams_.begin(), CurrentFuncTypeParams_.end(), Name) !=
+        CurrentFuncTypeParams_.end();
+    if (!IsTypeParam && visibleTypeKind(Name).empty())
+      if (auto Var = SymTable_.lookupVariable(Name)) {
+        // An inferred variable's type is not known until the TypeChecker runs.
+        const std::string VarType =
+            Var->Type && !Var->Type->isGuess() ? Var->Type->getName() : "";
+        TypeError(Node.getLoc(), ErrCode::ExpectedType,
+                  "'sizeof' takes a type, and '" + Name + "' is a variable.",
+                  VarType.empty() ? "Write the variable's type: 'sizeof(int)', 'sizeof(Point)'."
+                                  : "Write its type instead: 'sizeof(" + VarType + ")'.")
+            .raise();
+        return;
+      }
+  }
+  // FDN-003: `sizeof(Node)` names a type -- same silent resolution as a
+  // cast's destination (visitCast).
+  resolveTypeSpellingsSilently(Node.getTypeArg(), currentModuleName(),
+                               CurrentFuncTypeParams_);
+  // An unknown name is E042 here, as for a variable's type: unchecked, it
+  // reached Codegen as an unsized type, an internal error (turf-fuzz).
+  validateNamedType(Node.getTypeArg(), Node.getLoc(), CurrentFuncTypeParams_);
+}
+
 void Resolver::visitVariable(VariableExprAST &Node) {
   auto Sym = SymTable_.lookupVariable(Node.getName());
   if (Sym) {

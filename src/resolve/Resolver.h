@@ -339,15 +339,7 @@ public:
   void visitArrayAccess(ArrayAccessExprAST &Node) override;
   void visitSlice(SliceExprAST &Node) override;
   void visitModuleImport(ModuleImportExprAST &Node) override;
-  void visitSizeOf(SizeOfExprAST &Node) override {
-    // FDN-003: `sizeof(Node)` names a type -- same silent resolution as a
-    // cast's destination (visitCast).
-    resolveTypeSpellingsSilently(Node.getTypeArg(), currentModuleName(),
-                                 CurrentFuncTypeParams_);
-    // An unknown name is E042 here, as for a variable's type: unchecked, it
-    // reached Codegen as an unsized type, an internal error (turf-fuzz).
-    validateNamedType(Node.getTypeArg(), Node.getLoc(), CurrentFuncTypeParams_);
-  }
+  void visitSizeOf(SizeOfExprAST &Node) override;
 
   // ── FFI ────────────────────────────────────────────────────────────────────
   void visitExternFuncDecl(ExternFuncDeclExprAST &Node) override;
