@@ -314,8 +314,8 @@ struct Node {
 ```
 
 The fourth is reading or writing a field through a raw pointer
-(`n.next.val` where `n.next` is a `Node*`), which needs the `unsafe` block
-around the access.
+(`n.next.val` where `n.next` is a `Node*`), or calling a method on one
+(`n.next.total()`), which needs the `unsafe` block around the access.
 
 A struct with a raw-pointer field is written inside `unsafe { }`, wrapping the
 whole declaration, whether or not the field is ever dereferenced:

@@ -1149,10 +1149,17 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
   // dereferenced: a bound method reads it as `self`; a UFCS callee declared
   // `fn f(p: &?Node)` just receives it (rejectNullableNonVariableUse()).
   if (Node.getResolvedCallTarget() &&
-      (!Node.ResolvedViaUFCS || Node.UFCSLoadsReceiver) && Node.getBase())
+      (!Node.ResolvedViaUFCS || Node.UFCSLoadsReceiver) && Node.getBase()) {
     rejectNullableNonVariableUse(Node.getBase(), getType(Node.getBase()).get(),
                                  Node.getLoc(), Node.getMethod(),
                                  /*IsMethod=*/true);
+    // A raw-pointer receiver is dereferenced as `self`, like `p.field`
+    // (visitFieldAccess()), so it needs `unsafe` the same way. `self` itself
+    // is never null and is exempt there too.
+    const auto *BaseVar = dynamic_cast<const VariableExprAST *>(Node.getBase());
+    if (!(BaseVar && BaseVar->getName() == "self"))
+      checkUnsafeGate(getType(Node.getBase()).get(), Node.getLoc(), &Node);
+  }
 }
 
 void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {

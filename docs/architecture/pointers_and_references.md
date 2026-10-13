@@ -55,7 +55,7 @@ which are exempt from all of this) need an `unsafe { }`:
 |---|---|
 | **Declaration** | `mutable p: ptr = ...;` |
 | **Cast**, either direction | `raw to int*`, `ref to int*` |
-| **Dereference**: field access or indexing through a raw base | `p.field` with `p: Node*`; `w.data[i]` with `data: int*` |
+| **Dereference**: field access, indexing or a method call through a raw base | `p.field` with `p: Node*`; `w.data[i]` with `data: int*`; `p.method()` |
 | **Struct field** (and error-payload field) | `struct Node { next: Node* }`: the *entire* declaration must be inside `unsafe { }` |
 
 A fifth rule is checked **unconditionally** and `unsafe { }` does not fix it:
@@ -721,6 +721,7 @@ value.
 | Cast | `visitCast` (`TypeCheckerExpr.cpp`) | destination type first, then operand type |
 | Dereference (field access) | `visitFieldAccess` (`TypeCheckerCall.cpp`) | the base expression's type; skipped for a base named `self` |
 | Dereference (indexing) | `visitArrayAccess` (`TypeCheckerCall.cpp`) | the base expression's type; same `self` skip |
+| Dereference (method call) | `visitMethodCall` (`TypeCheckerCall.cpp`) | the receiver's type, once the call resolves to a method (or a UFCS callee that loads the receiver); same `self` skip |
 | Struct field | `visitStructDecl` (`TypeCheckerDecl.cpp`) | the first raw field; the struct's own `Loc` is checked for exemption |
 | Error payload field | `visitErrorDecl` (`TypeCheckerDecl.cpp`) | the first raw field, as for a struct |
 
@@ -827,9 +828,6 @@ missing return.
 
 ### 2.7 Known gaps
 
-- **A method call through a raw-pointer receiver is not gated**; only reading or
-  writing a field, or indexing, through one is. `visitMethodCall()` has no
-  equivalent check.
 - **`self` stays a raw pointer internally** (2.5.3).
 - **Codegen's own `getExprType()`** (`CodegenCore.cpp`), a second, parallel type
   inference used for Codegen bookkeeping, rebuilds a plain `TurfPointerType` in
