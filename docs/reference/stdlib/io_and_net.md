@@ -69,15 +69,12 @@ string with `+` and `to string`.
 
 ### Buffering: `flush(): void`
 
-Standard output is buffered. `flush()` pushes out everything printed so far.
-Call it before a prompt that waits for input, and before anything that can end
-the program abruptly:
+Standard output is buffered. `flush()` pushes out everything printed so far;
+call it before a prompt that waits for input.
 
-- The buffer is written out when `main` returns and when the program calls
-  `sys::exit`.
-- It is **not** written out when the program panics or calls `sys::abort`:
-  text printed with `print` or `printline` that is still in the buffer can be
-  lost. A panic message itself goes to standard error, which is not buffered.
+- The buffer is written out when `main` returns, when the program calls
+  `sys::exit` or `sys::abort`, and when it panics, before the panic message.
+  A panic message itself goes to standard error, which is not buffered.
 
 ### Standard error: `eprint(val: string): void`, `eprintline(val: string): void`
 
@@ -206,7 +203,7 @@ run pending `defer` statements. Standard output is flushed first.
 
 Ends the program at once as an abnormal termination. On Linux and macOS the
 process dies with `SIGABRT`, which a shell reports as status 134; on Windows the
-status is `0xE0545254`. Standard output is not flushed.
+status is `0xE0545254`. Standard output is flushed first.
 
 ### `panic(msg: string): void`
 

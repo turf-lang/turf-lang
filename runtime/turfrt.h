@@ -338,8 +338,8 @@ TurfRtStats turf_rt_stats(void);
  * classification ("division by zero", "array bounds", "integer overflow",
  * ...) baked in at the call site as a string literal; `msg` is the
  * pre-existing human-readable message; `file`/`line` are the Turf source
- * location, not a C source location. Formats a single consistent line to
- * stderr, then abort()s -- same terminal signal (SIGABRT, matching
+ * location, not a C source location. Flushes stdout, formats a single
+ * consistent line to stderr, then abort()s -- same terminal signal (SIGABRT, matching
  * `scripts/test_runner.sh`'s RUNTIME_ABORT_EXPECTED contract, which checks
  * only "non-zero, and not a timeout/OOM-kill status") every one of these
  * checks has always produced; the destination is C's own runtime safety
@@ -350,6 +350,17 @@ TurfRtStats turf_rt_stats(void);
  */
 void turf_rt_panic(const char *kind, const char *msg, const char *file,
                     int line);
+
+/*
+ * turfrt_abort -- flushes stdout, then abort()s. lib/std/core/sys.tr's
+ * abort() and panic() end through it, so the output a program printed before
+ * ending abnormally is not lost in stdio's buffer (abort() flushes nothing).
+ */
+void turfrt_abort(void);
+
+/* turfrt_flush_stdout -- fflush(stdout). sys.tr's panic() calls it before it
+ * writes its message, so a terminal shows the program's output first. */
+void turfrt_flush_stdout(void);
 
 /*
  * turf_rt_typedesc_is_pointer_word -- reads one bit back out of a

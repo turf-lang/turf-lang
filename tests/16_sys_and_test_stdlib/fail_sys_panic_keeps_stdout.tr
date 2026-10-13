@@ -1,0 +1,10 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: printed before sys::panic
+// EXPECT-RUNTIME: the panic message
+// sys::panic flushes stdout before writing its message and aborting.
+
+fn main(): int {
+    printline("printed before sys::panic");
+    sys::panic("the panic message");
+    return 0;
+}

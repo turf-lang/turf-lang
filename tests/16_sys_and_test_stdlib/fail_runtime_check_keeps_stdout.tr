@@ -1,0 +1,12 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: printed before the panic
+// EXPECT-RUNTIME: Division by zero
+// stdout is flushed before a runtime check's panic. The test runner reads the
+// program through a pipe, where stdout is fully buffered and abort() dropped
+// the line.
+
+fn main(): int {
+    printline("printed before the panic");
+    mut zero: int = 0;
+    return 5 / zero;
+}

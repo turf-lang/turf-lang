@@ -49,7 +49,7 @@ into every compiled Turf program, the same relationship `-lm` has.
 | `runtime/turfrt_internal.h` | Glue between the runtime's own `.c` files. Not part of the ABI. |
 | `runtime/turfrt_alloc.c` | `turf_rt_init()`/`turf_rt_shutdown()`, the three allocation entry points, `turf_rt_checked_free()`, `turf_rt_stats()`. |
 | `runtime/turfrt_gc.c` | The collector: block table, root discovery, mark, sweep, pins, the testing aids. |
-| `runtime/turfrt_panic.c` | `turf_rt_panic()`. |
+| `runtime/turfrt_panic.c` | `turf_rt_panic()`, and `turfrt_abort()` / `turfrt_flush_stdout()`, bound by `lib/std/core/sys.tr`. |
 | `runtime/turfrt_types.c` | `turf_rt_typedesc_is_pointer_word()`, the one reader of a descriptor's bitmap. |
 | `runtime/turfrt_abi.c` | The ABI stamp (§7.3). |
 | `runtime/turfrt_signal.c` | The fault handlers (§7.1). |
@@ -75,7 +75,7 @@ The entry points in `runtime/turfrt.h`:
 | `turf_rt_is_gc_pointer(p)` | Exact block-start test. Reached from the `gc_is_managed` intrinsic. |
 | `turf_rt_checked_free(p)` | libc `free()` for the manual heap, after panicking if `p` is a live GC block (`cross-heap free`). Reached from `mem::free()` through the `gc_checked_free` intrinsic. |
 | `turf_rt_stats()` | Allocation counters plus the collector's point-in-time numbers; read from C by the smoke scripts. |
-| `turf_rt_panic(kind, msg, file, line)` | Formats one line to stderr and calls `abort()`. |
+| `turf_rt_panic(kind, msg, file, line)` | Flushes stdout, formats one line to stderr and calls `abort()`. |
 | `turf_rt_typedesc_is_pointer_word(desc, i)` | Bit accessor for a descriptor's pointer bitmap. |
 | `turf_rt_abi_2_0()` | The ABI stamp. |
 
@@ -93,8 +93,11 @@ It declares `turf_rt_panic` once per module and calls it with the fixed kind
 not distinct per call site; the message carries the distinction (INV-RT-2).
 
 This is not the path `lib/std/core/sys.tr`'s `panic()` uses. That is an
-ordinary Turf function that writes to stderr with `write(2)` and calls
-`abort()`. `CodegenPanic()` is reachable only from the compiler's own inline
+ordinary Turf function that flushes stdout (`turfrt_flush_stdout()`), writes to
+stderr with `write(2)` and ends through `turfrt_abort()`, which flushes again
+and calls `abort()`; `sys::abort()` is `turfrt_abort()` too. `abort()` itself
+flushes no stdio buffer, so without the flush, output a program printed before
+a panic was lost whenever stdout was a pipe. `CodegenPanic()` is reachable only from the compiler's own inline
 checks, never from Turf source.
 
 ### 3.2 The `main` wrapper: `WrapMainWithRuntimeBootstrap()`, `src/codegen/CodegenFunc.cpp`
@@ -295,8 +298,8 @@ ends exactly like every other panic. Any other fault prints
 `panic: segmentation fault (this is a bug in unsafe code or in TurfLang) at address <addr>`
 (`bus error` for `SIGBUS`) and calls `abort()`.
 
-The handler calls `fprintf`, which is not async-signal-safe (only `abort()`
-is). That is accepted deliberately, since the process is terminating either way.
+The handler calls `fprintf` and `fflush`, which are not async-signal-safe
+(only `abort()` is). That is accepted deliberately, since the process is terminating either way.
 The one hazard is a fault that arrives while the crashing thread holds stdio's
 lock: the message can be lost, and the process still terminates.
 

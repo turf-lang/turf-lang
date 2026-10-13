@@ -453,18 +453,16 @@ panic: runtime check: Integer overflow (example.tr:3)
 
 The exit status is 134 on Linux. There is no unwinding and no recovery by the
 program itself: **deferred statements do not run**, and nothing after the failing
-operation executes. Output the program wrote to standard output may still be
-in a buffer and is lost when the process aborts; write it with `io::flush()`
-first, or report progress on standard error (`io::eprintline`), which is not
-buffered.
+operation executes. Output the program already wrote to standard output is
+flushed before the panic message, so it is not lost even when standard output
+is a pipe.
 
 ```turflang
 import io;
 
 fn main(): int {
     defer io::eprintline("never printed");
-    io::printline("flushed");
-    io::flush();
+    io::printline("printed before the panic message");
     mut zero: int = 0;
     return 5 / zero;        // panic: runtime check: Division by zero
 }

@@ -4,13 +4,12 @@
 // on (`panic`).
 //
 // Design:
-//   - `abort`/`exit` need no wrapping logic, so they're used directly as
-//     their raw `extern fn` bindings -- `sys::abort()`/`sys::exit(code)` --
+//   - `exit` needs no wrapping logic (libc's exit() flushes stdio), so it is
+//     used directly as its raw `extern fn` binding, `sys::exit(code)`,
 //     exactly like net.tr exposes `close(fd)` with no Turf-level wrapper.
-//     (A same-named, same-signature Turf `fn abort(): void { abort(); }`
-//     wrapper is NOT an overload of the extern declaration -- it's a
-//     duplicate declaration, which is a compile error, and would recurse
-//     into itself even if it weren't.)
+//     `abort` is a Turf function over the runtime's turfrt_abort(), which
+//     flushes stdout first: libc's abort() flushes nothing, and output a
+//     program printed before it would be lost when stdout is a pipe.
 //   - `panic` is the shared "print a message to stderr, then terminate"
 //     primitive. It exists here, in sys.tr, rather than in test.tr, because
 //     it's used by other stdlib modules' internal correctness guards (e.g.
@@ -30,8 +29,9 @@
 
 // ─── libc bindings ────────────────────────────────────────────────────────
 
-pub extern fn abort(): void;
 pub extern fn exit(code: int): void;
+extern fn turfrt_abort(): void;
+extern fn turfrt_flush_stdout(): void;
 extern fn write(fd: int, buf: string, count: int): int;
 // A local strlen extern, not `import strings;` -- strings.tr itself needs
 // sys.tr for panics (see panic()'s own doc comment below on the circular-
@@ -57,7 +57,14 @@ export immut STDERR_FD: int = 2;
 // be a circular import. Avoiding string arithmetic here entirely breaks
 // that cycle without sys.tr needing any operator overload at all.
 pub fn panic(msg: string): void {
+    turfrt_flush_stdout();
     write(STDERR_FD, msg, strlen(msg));
     write(STDERR_FD, "\n", 1);
-    abort();
+    turfrt_abort();
+}
+
+// abort: ends the program abnormally (SIGABRT), after flushing stdout so
+// what it printed is not lost.
+pub fn abort(): void {
+    turfrt_abort();
 }
