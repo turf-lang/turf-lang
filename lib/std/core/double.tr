@@ -39,32 +39,26 @@ pub fn is_zero(x: double): bool {
     return x == 0.0;
 }
 
-// is_integer: true if x has no fractional part. Truncate-and-compare, not
-// self-comparison, so it's Lint-clean the same way sign() is above.
+// is_integer: true if x is a whole number. `floor(x) - x` is exactly 0 for a
+// finite whole number and NaN for a NaN or an infinity (inf - inf), so both
+// are false; a fractional x is nonzero. Never converts to `int`, so a value
+// beyond int's range (1e300) answers instead of panicking.
 pub fn is_integer(x: double): bool {
-    return ((x to int) to double) == x;
+    return math::floor(x) - x == 0.0;
 }
 
-// round: nearest integer, half-away-from-zero.
+// round, floor, ceil: libm's, so they are exact for every double and pass a
+// NaN or an infinity through, where converting to `int` and back panicked
+// for those and for anything beyond int's range. round is half away from
+// zero.
 pub fn round(x: double): double {
-    if x >= 0.0 {
-        return ((x + 0.5) to int) to double;
-    }
-    return ((x - 0.5) to int) to double;
+    return math::round(x);
 }
 
 pub fn floor(x: double): double {
-    mut truncated: double = (x to int) to double;
-    if x < 0.0 && truncated != x {
-        return truncated - 1.0;
-    }
-    return truncated;
+    return math::floor(x);
 }
 
 pub fn ceil(x: double): double {
-    mut truncated: double = (x to int) to double;
-    if x > 0.0 && truncated != x {
-        return truncated + 1.0;
-    }
-    return truncated;
+    return math::ceil(x);
 }

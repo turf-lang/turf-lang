@@ -69,7 +69,7 @@ fn main(): int {
 | `is_positive(x: double): bool` | `x > 0.0` |
 | `is_negative(x: double): bool` | `x < 0.0` |
 | `is_zero(x: double): bool` | `x == 0.0` (true for `-0.0`) |
-| `is_integer(x: double): bool` | `true` if `x` has no fractional part |
+| `is_integer(x: double): bool` | `true` if `x` is a finite whole number |
 | `round(x: double): double` | nearest whole number, halves away from zero |
 | `floor(x: double): double` | largest whole number not above `x` |
 | `ceil(x: double): double` | smallest whole number not below `x` |
@@ -77,13 +77,11 @@ fn main(): int {
 `round` is half-away-from-zero, not banker's rounding: `2.5.round()` is `3.0`
 and `(-2.5).round()` is `-3.0`.
 
-`is_integer`, `round`, `floor` and `ceil` work by converting through `int`, so
-they panic with `Integer overflow` for a NaN, an infinity, or a magnitude
-beyond `int`'s range (about 9.2e18). For such values use the `math` versions,
-`math::floor`, `math::ceil` and `math::round`, which are libm functions that
-return the value unchanged; they are separate functions from the methods on
-this page and live in [`math`](math_and_os.md). There is no `is_nan`; test for
-NaN with `x != x`.
+`round`, `floor` and `ceil` are exact for every `double`, including one beyond
+`int`'s range, and return a NaN or an infinity unchanged; they are the same
+as `math::round`, `math::floor` and `math::ceil`. `is_integer` is `false` for
+a NaN or an infinity, and `true` for a whole number of any size (`1e300`).
+There is no `is_nan`; test for NaN with `x != x`.
 
 ```turflang
 fn main(): int {

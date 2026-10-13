@@ -1,0 +1,19 @@
+// `double`'s round/floor/ceil/is_integer work for every double. They went
+// through `to int`, so a NaN, an infinity or anything past 2^63 panicked
+// with "Integer overflow" (math::floor, from libm, did not).
+
+import test;
+
+fn main(): int {
+    immut big: double = 1e300;
+    immut inf: double = big * big;
+    immut nan: double = inf - inf;
+    test::assert(big.floor() == big && big.ceil() == big && big.round() == big, "beyond int's range");
+    test::assert(inf.floor() == inf && (0.0 - inf).ceil() == 0.0 - inf, "infinities pass through");
+    test::assert(nan.round() != nan.round(), "NaN passes through");
+    test::assert((-2.5).round() == -3.0 && (2.5).round() == 3.0, "half away from zero");
+    test::assert((2.7).floor() == 2.0 && (-2.5).ceil() == -2.0, "ordinary values");
+    test::assert(big.is_integer() && (3.0).is_integer(), "whole numbers");
+    test::assert(!inf.is_integer() && !nan.is_integer() && !(3.5).is_integer(), "not whole numbers");
+    return 0;
+}
