@@ -9,8 +9,8 @@
 Two scripts make this mechanical rather than aspirational:
 
 ```bash
-scripts/session_preflight.sh  <FEATURE-ID>   # before touching anything
-scripts/session_postflight.sh <FEATURE-ID>   # before declaring done
+scripts/dev/session_preflight.sh  <FEATURE-ID>   # before touching anything
+scripts/dev/session_postflight.sh <FEATURE-ID>   # before declaring done
 ```
 
 Neither replaces reading. `session_preflight.sh` prints the reading list and
@@ -68,7 +68,7 @@ non-trivial changes to that subsystem — don't re-derive from scratch."*
 | `unsafe`, `&T`, raw pointers | `docs/architecture/pointers_and_references.md` |
 | `error`, `!T`, `recover` | `docs/architecture/errors_and_recover.md` |
 
-## Step 5 — Run `scripts/session_preflight.sh <FEATURE-ID>`
+## Step 5 — Run `scripts/dev/session_preflight.sh <FEATURE-ID>`
 
 Confirms a clean tree, a successful build, and a green suite **before** you
 change anything. A session must never mistake a pre-existing failure for one
@@ -93,7 +93,7 @@ compile the specific input that would prove it wrong.
 
 ## Before declaring done — the completion checklist
 
-`scripts/session_postflight.sh <FEATURE-ID>` checks all of these:
+`scripts/dev/session_postflight.sh <FEATURE-ID>` checks all of these:
 
 1. `./scripts/test_runner.sh` green.
 2. `lib/std/**` and `showcase/**` compiled **directly** (the runner covers
@@ -105,7 +105,7 @@ compile the specific input that would prove it wrong.
    those are what a future reader cannot reconstruct from a diff.
 5. `INDEX.md` row added; `handbook-sync/PENDING.md` entry per affected chapter
    or reference file; `INVARIANTS.md` updated with any new INV-*.
-6. `scripts/check_doc_links.sh` passes.
+6. `scripts/check/check_doc_links.sh` passes.
 7. The group's own **Completion criteria** from §8 are each individually
    demonstrated, not asserted.
 

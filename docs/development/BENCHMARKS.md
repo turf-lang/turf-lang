@@ -24,10 +24,10 @@ twin's must equal the Turf program's. Each is sized to take about 0.5–1 s.
 
     cmake -S . -B build_release -DCMAKE_BUILD_TYPE=Release -DTURF_SMART=OFF -DTURF_BUILD_CLI=OFF
     cmake --build build_release -j$(( $(nproc) / 2 ))
-    python3 scripts/bench.py --out bench/results/<date>-<what>.json
-    python3 scripts/bench.py --compare bench/results/2026-10-13-baseline.json
+    python3 scripts/dev/bench.py --out bench/results/<date>-<what>.json
+    python3 scripts/dev/bench.py --compare bench/results/2026-10-13-baseline.json
 
-`scripts/bench.py` measures `build_release/turfc` (compile-time numbers from a
+`scripts/dev/bench.py` measures `build_release/turfc` (compile-time numbers from a
 Debug build are not comparable), runs 9 rounds, and prints the table below.
 `--compare` exits 1 if any benchmark's **minimum** time is more than 20%
 (`--threshold`) slower than the baseline's. Compare only numbers from the same

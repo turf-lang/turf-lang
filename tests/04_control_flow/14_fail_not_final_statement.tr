@@ -2,7 +2,7 @@
 // block must compile and run cleanly (as long as the test::fail() branch is
 // never actually taken at runtime), not crash the compiler.
 //
-// CodegenIntrinsic's "fail" branch (src/Builtins.cpp) emits
+// CodegenIntrinsic's "fail" branch (src/sema/Builtins.cpp) emits
 // Builder->CreateUnreachable(), an LLVM terminator instruction. Previously
 // nothing repositioned the IR builder afterward, so codegen-ing the NEXT
 // statement in the same block tried to insert into an already-terminated

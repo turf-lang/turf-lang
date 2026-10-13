@@ -4,7 +4,7 @@
 // bug class -- not the lib/std-specific reproducer (compiling
 // lib/std/collections/list.tr directly, which the always-injected `strings`
 // prelude module's own `import list::List;` transitively re-imports; that
-// case is covered by scripts/session_postflight.sh's stdlib sweep, since
+// case is covered by scripts/dev/session_postflight.sh's stdlib sweep, since
 // list.tr has no main() and can't be an ordinary runnable test here), but
 // the general case any multi-file user program could hit: this file
 // imports its own companion module

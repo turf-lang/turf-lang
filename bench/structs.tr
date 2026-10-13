@@ -4,7 +4,7 @@
 // checked in): integer arithmetic on struct fields in a hot loop, including the
 // `(i % 5) - 2` shape OPT-002 proves in range. Every other `+` is checked
 // (F-NUM-3), which is what kept LLVM from vectorizing it; structs.c is the same
-// program in C, and scripts/bench.py reports Turf's time over C's.
+// program in C, and scripts/dev/bench.py reports Turf's time over C's.
 //
 // Prints a checksum so no level can delete the work, and a wrong answer shows.
 

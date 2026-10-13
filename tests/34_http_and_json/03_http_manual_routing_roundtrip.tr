@@ -20,7 +20,7 @@
 // (Map<string, V>'s generic accessors compare K by raw pointer identity,
 // not content; see http.tr's Request.get_header() doc comment). This test
 // also used to crash with a `malloc.c:2199` heap-corruption assertion
-// before src/CodegenVar.cpp's string-index-assignment fix (see http.tr's
+// before src/codegen/CodegenVar.cpp's string-index-assignment fix (see http.tr's
 // header comment) -- parse_request's own string building
 // (substring/trim_end) was corrupting the heap on every request parsed.
 import io;

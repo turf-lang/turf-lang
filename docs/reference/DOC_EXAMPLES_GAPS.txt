@@ -1,4 +1,4 @@
-# Reference-doc examples that do not compile (scripts/doc_examples.py). A to-do list for
+# Reference-doc examples that do not compile (scripts/check/doc_examples.py). A to-do list for
 # REL-006's rewrite of docs/reference/: it can only shrink. Key = file#ordinal hash, then
 # the first error code the example produces. A changed block gets a new hash, so its line
 # goes stale and must be re-triaged: fix the doc or mark the block.

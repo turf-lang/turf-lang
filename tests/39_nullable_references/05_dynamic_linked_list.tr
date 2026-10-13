@@ -14,7 +14,7 @@
 // either (an optimizer is free to keep a checked address alive in a
 // register, making that direction non-deterministic to assert here; see
 // tests/08_e2e_stress/07_heap_bounded_allocation.tr +
-// scripts/gc_rss_smoke.sh for how the reclaim direction is actually
+// scripts/smoke/gc_rss_smoke.sh for how the reclaim direction is actually
 // verified, the same split 41_gc/11's own comment documents).
 import test;
 import io;

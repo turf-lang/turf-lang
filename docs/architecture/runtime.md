@@ -15,7 +15,7 @@ Related docs:
   *today*; `libturfrt` is the beginning of changing that (§4 below), not a
   change to it yet. `runtime/turfrt.h`'s `TurfTypeDesc` doc comment is the
   authoritative reference for what MEM-002 will eventually consume.
-- `include/Intrinsics.h` — the closed, enumerated list this library's own
+- `src/sema/Intrinsics.h` — the closed, enumerated list this library's own
   public symbols are part of (F-STD-2).
 
 ---
@@ -76,7 +76,7 @@ output is pointed at `<repo-root>/lib/` — see §5 below — rather than a
 
 ## 3. The two compiler-side hooks
 
-### 3.1 Panic lowering — `CodegenPanic()`, `src/Builtins.cpp`
+### 3.1 Panic lowering — `CodegenPanic()`, `src/sema/Builtins.cpp`
 
 Every one of the compiler's own runtime safety guards — division/modulo by
 zero, integer overflow (SEM-002's checked arithmetic), array bounds, a bad
@@ -101,7 +101,7 @@ Both paths still terminate the same way: `abort()` (SIGABRT, exit 134),
 which is why `scripts/test_runner.sh`'s `RUNTIME_ABORT_EXPECTED` convention
 (any non-zero, non-timeout exit) needed no change at all.
 
-### 3.2 The `main` wrapper — `WrapMainWithRuntimeBootstrap()`, `src/CodegenFunc.cpp`
+### 3.2 The `main` wrapper — `WrapMainWithRuntimeBootstrap()`, `src/codegen/CodegenFunc.cpp`
 
 Turf's `main` has always been compiled *as* the literal C-ABI `main` (no
 wrapper) — `CodegenFunc.cpp`'s own long-standing comment on the
@@ -136,11 +136,11 @@ Running the wrapper before optimization means the symbol actually named
 `"main"` at Internalize time is the wrapper, and `__turf_user_main` keeps
 its own liveness for free through the wrapper's ordinary in-module call —
 no second preserve-set entry needed. At `-O0` the two functions stay
-distinct (verified live, `scripts/runtime_smoke.sh` checks exactly this in
+distinct (verified live, `scripts/smoke/runtime_smoke.sh` checks exactly this in
 the emitted IR); at higher levels the trivial wrapper is routinely inlined
 away entirely by LLVM's own inliner, which is correct and expected — the
 *call sequence*, not the function boundary, is the actual contract, and
-`scripts/opt_levels_smoke.sh` (exact-output-match across every optimization
+`scripts/smoke/opt_levels_smoke.sh` (exact-output-match across every optimization
 level) is what proves inlining never changes observable behaviour here.
 
 ## 4. Type descriptors
@@ -196,8 +196,8 @@ failed), a genuine compiler crash, confirmed live against
 `tests/38_monomorphization/04_method_on_generic_struct.tr` and four sibling
 tests in that folder (every one embeds a generic instantiation by value).
 
-The fix is `EmitAllTurfTypeDescs()` (`src/CodegenStruct.cpp`, declared in
-`include/Codegen.h`): a single pass over `TheModule->getIdentifiedStructTypes()`,
+The fix is `EmitAllTurfTypeDescs()` (`src/codegen/CodegenStruct.cpp`, declared in
+`src/codegen/Codegen.h`): a single pass over `TheModule->getIdentifiedStructTypes()`,
 run exactly once, from `main.cpp`, **immediately before `verifyModule()`** —
 after the struct pre-pass, after every import-triggered struct build
 (sub-passes 3a/3b), after the main pass, after the existing
@@ -216,13 +216,13 @@ every one of them as dead. `EmitAllTurfTypeDescs()` appends each descriptor
 to `@llvm.compiler.used` (`llvm::appendToCompilerUsed()`,
 `llvm/Transforms/Utils/ModuleUtils.h`) — the standard LLVM idiom for "keep
 this alive through the optimizer without giving it real external linkage."
-Verified live (`scripts/opt_levels_smoke.sh` and a direct `--emit-llvm`
+Verified live (`scripts/smoke/opt_levels_smoke.sh` and a direct `--emit-llvm`
 diff): every descriptor is present, byte-identical, at every optimization
 level.
 
 ### 4.3 OVH-001: the bitmap widened past 64 words
 
-`buildTurfTypeDescInit()` (`src/CodegenStruct.cpp`, shared by
+`buildTurfTypeDescInit()` (`src/codegen/CodegenStruct.cpp`, shared by
 `emitTurfTypeDesc()` and `getOrCreateElementTurfTypeDesc()` — the old
 per-copy inline-bitmap logic was duplicated across both, which is why the
 original 64-word cap needed two independent fixes instead of one) computes
@@ -256,7 +256,7 @@ vector's own length matching `N`) makes a future re-introduction of any
 fixed cap fail loudly in a debug build rather than silently truncate
 again — see `runtime/turfrt_gc.c`'s `gc_scan_block_precise()` and
 `runtime/turfrt_types.c`'s `turf_rt_typedesc_is_pointer_word()` for the
-runtime side of the same fix, and `scripts/runtime_smoke.sh` §4 for the
+runtime side of the same fix, and `scripts/smoke/runtime_smoke.sh` §4 for the
 `--emit-llvm` check this shape is verified against (including a >64-word
 type, which RT-001's original version of this check could not exercise at
 all).
@@ -264,7 +264,7 @@ all).
 ### 4.4 FDN-003: descriptor names carry the owning module
 
 A descriptor is named after its LLVM struct, and a module-owned type's LLVM
-struct is named `module.Name` (`TypeIdentity::llvmName()`, `include/Types.h`)
+struct is named `module.Name` (`TypeIdentity::llvmName()`, `src/sema/Types.h`)
 — so `list`'s `List<int>` clone is `@__turf_typedesc_list.List_gen1_int`, and
 the `name` string the runtime can print is `"list.List_gen1_int"`. A type
 declared in the main program file keeps its bare name
@@ -279,8 +279,8 @@ is for diagnostics only.
 `CMakeLists.txt`'s `turfrt` target output is pointed at `<repo-root>/lib/`
 (`ARCHIVE_OUTPUT_DIRECTORY`) — the same directory `lib/std/` already lives
 under. This is deliberate, not incidental: `TurfInstallRoot()`
-(`src/ParserModule.cpp`, exported for this purpose — previously file-local)
-is the one function both `import` and `linkObject()` (`src/main.cpp`) use to
+(`src/frontend/ParserModule.cpp`, exported for this purpose — previously file-local)
+is the one function both `import` and `linkObject()` (`src/driver/main.cpp`) use to
 find "this install's root" — `TURF_HOME` if set, else
 `<compiler-binary-dir>/..`. A plain dev build (`build/turfc`, no `TURF_HOME`
 set) resolves that to the repo root, so `lib/libturfrt.a` is found with the
@@ -376,7 +376,7 @@ silent `NULL` from these three. What FDN-006 stage 2 adds is the first real
 test of that path: the Overhaul closure audit's own attempt to reach it
 spun forever inside `strings::repeat()`'s quadratic loop instead of ever
 triggering a real allocation failure. `tests/41_gc/fail_oom_huge_direct_allocation.tr`
-and `scripts/runtime_smoke.sh` §6 both go straight at a single `gc_alloc()`
+and `scripts/smoke/runtime_smoke.sh` §6 both go straight at a single `gc_alloc()`
 call sized at `i64` max — no allocator on any real machine can satisfy it,
 so the fail-fast path is exercised directly and quickly, not approached by
 attrition. `mem::alloc`'s own OOM path (`lib/std/mem/mem.tr`, `sys::panic()`)
@@ -386,7 +386,7 @@ policies happen to fail the same way, loudly, but are not the same code).
 ### 7.3 The compiler/runtime ABI stamp
 
 `runtime/turfrt_abi.c` defines one function, `turf_rt_abi_2_0(void)`, that
-does nothing. `WrapMainWithRuntimeBootstrap()` (`src/CodegenFunc.cpp`) calls
+does nothing. `WrapMainWithRuntimeBootstrap()` (`src/codegen/CodegenFunc.cpp`) calls
 it from every compiled binary's `main` wrapper, alongside `turf_rt_init()`.
 The point is entirely at LINK time: if a compiled object (built against
 this compiler version) is linked against a `libturfrt.a` that predates this
@@ -401,7 +401,7 @@ reference, together — the next time a change to this ABI would otherwise
 let an old runtime and a new compiler (or vice versa) silently
 miscommunicate.
 
-Separately, `src/main.cpp`'s `linkObject()` checks that
+Separately, `src/driver/main.cpp`'s `linkObject()` checks that
 `<TurfInstallRoot()>/lib/libturfrt.a` exists **before** invoking `cc`/`gcc`
 at all. A missing archive used to surface only as `cc`'s own generic
 `-lturfrt: No such file` error, with no mention of TurfLang or `TURF_HOME`;

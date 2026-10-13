@@ -3,7 +3,7 @@
 // `find(predicate: fn(T): bool): int` (lib/std/collections/list.tr) --
 // only possible once the compiler's generic substitution machinery
 // (collectGenericSubstitution()/typesCompatible() in
-// src/TypeCheckerCall.cpp/src/Types.cpp, Monomorphize::substituteConcreteTypes(),
+// src/sema/TypeCheckerCall.cpp/src/sema/Types.cpp, Monomorphize::substituteConcreteTypes(),
 // Resolver::substituteTypeParams()) learned to recurse into a FuncType
 // parameter's own parameter/return types -- a real, separate compiler fix
 // (docs/development/changes/STD-003.md), not a stdlib-only change.

@@ -2,9 +2,9 @@
  * runtime/turfrt_types.c -- small TurfTypeDesc accessors.
  *
  * The descriptors themselves are emitted as LLVM constant globals by the
- * compiler (src/CodegenStruct.cpp), never constructed at runtime -- this
+ * compiler (src/codegen/CodegenStruct.cpp), never constructed at runtime -- this
  * file exists only to give the runtime (and its own smoke test,
- * scripts/runtime_smoke.sh) a single, shared place to read one back out,
+ * scripts/smoke/runtime_smoke.sh) a single, shared place to read one back out,
  * rather than every reader re-deriving the bit-shift arithmetic.
  * turfrt_gc.c's mark phase is this function's real, load-bearing caller
  * (OVH-001) -- runtime_smoke.sh also exercises it directly.

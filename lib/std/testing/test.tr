@@ -65,7 +65,7 @@ pub fn fail(msg: string): void {
 // Both overloads are `@caller_location` -- the 1-arg form's own internal
 // call to the 2-arg form (below) is itself a call FROM a `@caller_location`
 // function, so it forwards the ORIGINAL caller's location rather than
-// stamping its own line inside this file (see include/Intrinsics.h §1's
+// stamping its own line inside this file (see src/sema/Intrinsics.h §1's
 // caller_location entry, and docs/architecture/boundary.md, for the
 // forward-vs-stamp mechanism this relies on).
 @caller_location

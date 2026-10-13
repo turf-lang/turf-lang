@@ -6,7 +6,7 @@
 // while building STD-003's Map<K,V>/Set<T> hash index (a bucket-table
 // growth helper needs a plain `int` capacity argument, unrelated to K/V).
 //
-// Root cause (src/TypeCheckerCall.cpp, TypeChecker::visitMethodCall): the
+// Root cause (src/sema/TypeCheckerCall.cpp, TypeChecker::visitMethodCall): the
 // "recover the struct's own generic-parameter substitution" scan (`Subst`)
 // re-derived the receiver's type via a fresh `getType(Node.getBase())`
 // instead of reusing the ALREADY POINTER-UNWRAPPED `BaseTy` computed a

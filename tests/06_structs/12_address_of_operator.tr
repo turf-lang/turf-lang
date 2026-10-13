@@ -32,7 +32,7 @@ fn main(): int {
 
     // Chain: n1 → n2 → n3. &n3/&n2 are &Node (safe); assigning into a
     // Node* field is the safe-to-raw widening typesCompatible() always
-    // allows (see src/Types.cpp's Rule 2.5), so no unsafe/cast is needed
+    // allows (see src/sema/Types.cpp's Rule 2.5), so no unsafe/cast is needed
     // for the WRITE side, only for declaring the field itself (above).
     n2.next = &n3;
     n1.next = &n2;

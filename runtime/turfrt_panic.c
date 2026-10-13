@@ -1,6 +1,6 @@
 /*
  * runtime/turfrt_panic.c -- turf_rt_panic(), replacing CodegenPanic()'s old
- * inline fprintf(stderr, ...) + abort() (src/Builtins.cpp). See turfrt.h's
+ * inline fprintf(stderr, ...) + abort() (src/sema/Builtins.cpp). See turfrt.h's
  * doc comment on turf_rt_panic() for the full contract.
  */
 

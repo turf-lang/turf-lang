@@ -1,7 +1,7 @@
 // Regression test: an explicit `to`-cast involving a generic type
 // parameter used to be rejected UNCONDITIONALLY at the TEMPLATE's own
 // definition site, regardless of whether any real instantiation would
-// have made the cast legal -- src/TypeCheckerExpr.cpp's `visitCast()` cast-
+// have made the cast legal -- src/sema/TypeCheckerExpr.cpp's `visitCast()` cast-
 // legality whitelist had no bypass for `TurfGenericParamType`, unlike
 // every other type-checking path in this compiler (equality, argument
 // matching), which all defer the real check to a per-instantiation

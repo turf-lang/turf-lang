@@ -2,7 +2,7 @@
 // a module declared was visible to every importer. Under 2.0 this file, as
 // written, exports nothing -- `turf --migrate=pub geometry.tr` puts `pub` back
 // on every top-level declaration and struct field (see
-// scripts/migrate_pub_smoke.sh). A `fn`/`struct` inside a comment or a string
+// scripts/smoke/migrate_pub_smoke.sh). A `fn`/`struct` inside a comment or a string
 // must never be touched: "fn struct enum".
 unsafe module;
 

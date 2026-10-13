@@ -1,6 +1,6 @@
 // tests/41_gc/08_error_message_survives_collection.tr
 // OVH-002 (docs/planning/OVERHAUL_REMAINING_WORK.md): `CodegenErrorVariantConstructWithMessage()`
-// (src/CodegenCore.cpp) heap-allocates the `TurfErrorValue{tag, message}`
+// (src/codegen/CodegenCore.cpp) heap-allocates the `TurfErrorValue{tag, message}`
 // struct a message-carrying error construction (`ErrorType::Variant(msg)`)
 // produces, since the message is in general a runtime value. Before this
 // fix that allocation was a bare `malloc()` -- never registered with the

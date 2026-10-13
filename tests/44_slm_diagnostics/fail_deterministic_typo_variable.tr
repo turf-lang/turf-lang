@@ -7,7 +7,7 @@
 // compile exactly like any other undeclared-variable error -- proven here,
 // under the normal test runner, with no --smart involved at all.
 //
-// scripts/slm_deterministic_fix_smoke.sh separately compiles this SAME file
+// scripts/slm/slm_deterministic_fix_smoke.sh separately compiles this SAME file
 // with --smart and asserts the deterministic-fix layer resolves it without
 // ever calling the model -- see that script for why this half can't live in
 // test_runner.sh (which never passes --smart, and --smart's own model-backed

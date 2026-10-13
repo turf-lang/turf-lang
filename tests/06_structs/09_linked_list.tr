@@ -43,7 +43,7 @@ unsafe {
 // construction (see main() below) -- itself not gated, since writing a
 // `&T` value into an already-unsafely-declared raw pointer field is the
 // same always-sound safe-to-raw widening 12_address_of_operator.tr's own
-// comment explains (src/Types.cpp's Rule 2.5).
+// comment explains (src/sema/Types.cpp's Rule 2.5).
 fn Node.new(val: int): void {
     self.val = val;
     unsafe {
@@ -97,7 +97,7 @@ fn main(): int {
     // Three stack-allocated nodes.  Constructed tail-first so each node's
     // `next` can point at an already-initialized later node via `&`. `&n3`/
     // `&n2` are `&Node` (safe references); assigning one into a `Node*`
-    // field is the always-sound safe-to-raw widening (src/Types.cpp's Rule
+    // field is the always-sound safe-to-raw widening (src/sema/Types.cpp's Rule
     // 2.5), so this needs no `unsafe { }` -- only the struct/constructor
     // declarations above did.
     mut n3: Node = Node::new(30);

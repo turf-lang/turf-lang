@@ -160,10 +160,10 @@ because fixing it happened to fall slightly outside one session's original
 ticket was judged the wrong tradeoff. Five call sites needed the identical
 missing case (a `FuncType` branch, exactly like the existing pointer/
 array/`GenericType` branches each already had):
-`Resolver::substituteTypeParams()` (`src/ResolverCore.cpp`),
-`typesCompatible()` (`src/Types.cpp`), `collectGenericSubstitution()`/
-`collectGenericParamNameOrder()` (`src/TypeCheckerCall.cpp`), and
-`Monomorphize::substituteConcreteTypes()` (`src/Monomorphize.cpp`). See
+`Resolver::substituteTypeParams()` (`src/resolve/ResolverCore.cpp`),
+`typesCompatible()` (`src/sema/Types.cpp`), `collectGenericSubstitution()`/
+`collectGenericParamNameOrder()` (`src/sema/TypeCheckerCall.cpp`), and
+`Monomorphize::substituteConcreteTypes()` (`src/sema/Monomorphize.cpp`). See
 `docs/development/changes/STD-003.md` for the full root-cause writeup,
 live repro, and the fix itself.
 
@@ -187,7 +187,7 @@ wrappers over the concrete `List<int>` case for one cycle (STD-003's own
 ## 3. A function generic in only *some* of a multi-param generic struct's type arguments
 
 **Status: FIXED during the same pass that documented items 1–2** (see
-`src/Types.cpp`'s `typesCompatible()` — the `GenericType`-vs-`GenericType`
+`src/sema/Types.cpp`'s `typesCompatible()` — the `GenericType`-vs-`GenericType`
 per-argument recursion). Listed here for completeness/history, since it's
 the mechanism that makes item 1's free-function workaround viable for a
 `Map<string, V>` with `V` still generic, not just a fully concrete

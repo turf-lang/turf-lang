@@ -8,9 +8,9 @@
 // codegens the same AST anyway (sub-pass 3b) -- reaching
 // CodegenIntrinsic("fail", {}, ...)'s unchecked Args[0] and crashing the
 // compiler (SIGABRT) before the mandatory pass ever got a chance to report
-// the error cleanly. See src/Builtins.cpp's defensive Args.size() check on
+// the error cleanly. See src/sema/Builtins.cpp's defensive Args.size() check on
 // the "fail" branch (added as defense in depth for exactly this class of
-// gap) and src/TypeChecker.cpp's visitFuncCall doc comment for the full
+// gap) and src/sema/TypeCheckerCall.cpp's visitFuncCall doc comment for the full
 // story.
 
 import test;

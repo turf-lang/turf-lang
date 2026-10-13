@@ -223,7 +223,7 @@ otherwise each answer differently, producing an incoherent language.
   > **B3 — everything else belongs in `lib/std` as ordinary TurfLang, and the
   > standard library gets no capability a user cannot request explicitly.**
 - The intrinsic list is **closed and enumerated in one header**
-  (`include/Intrinsics.h`). Adding an intrinsic is an explicit,
+  (`src/sema/Intrinsics.h`). Adding an intrinsic is an explicit,
   change-recorded act.
   - **Added 2026-10-13 (owner decision, REL-005): `hash_of(expr): int`**, a
     hash that agrees with field-by-field `==` (a string by its text, `-0.0`
@@ -295,7 +295,7 @@ FDN-001's DEC-5 (`heap(expr): &T` intrinsic, over a `new T`-style keyword) —
 §6.0 rule 3's explicit request, not a session's own initiative. Full
 account: `docs/development/changes/FDN-001.md`.
 
-- `heap(expr)` is a closed-list bare intrinsic (`include/Intrinsics.h`
+- `heap(expr)` is a closed-list bare intrinsic (`src/sema/Intrinsics.h`
   category 1), not new grammar: `heap(e: T): &T` for any sized `T` (struct,
   fixed array, primitive) whose static type is known at the call site.
   `void` is rejected (nothing to copy).
@@ -926,7 +926,7 @@ statement: `docs/reference/stdlib/README.md`.
   function, method, type, error, constant or field is not removed, renamed, or
   given a different signature or failure shape before 3.0; additions are
   allowed in a minor release. Enforced by `tests/46_stdlib_surface/` (a use of
-  every public item, compiled and run) and `scripts/stdlib_surface_check.sh`
+  every public item, compiled and run) and `scripts/check/stdlib_surface_check.sh`
   (fails on a public item no test mentions).
 - **Naming (F-API-2).** Public functions, methods and fields are `snake_case`;
   types `PascalCase`; constants `UPPER_CASE`. The twelve camelCase names that
@@ -994,8 +994,8 @@ error.**
   these three may be followed by more `<key> <value>` lines. `turf version` /
   `turf --version` prints `turf` and `turfc` lines and shows the compiler's
   extra lines indented under its own. The runtime ABI symbol is the one
-  constant `RuntimeAbiSymbol` (`include/Codegen.h`) used for both the emitted
-  call and this line; `scripts/cli_smoke.sh` checks `lib/libturfrt.a` defines
+  constant `RuntimeAbiSymbol` (`src/codegen/Codegen.h`) used for both the emitted
+  call and this line; `scripts/smoke/cli_smoke.sh` checks `lib/libturfrt.a` defines
   it. Driver interface **1.2** is this decision; `turf` still needs only 1.1.
 
 ### 6.22 Tests — `turf test` and `turfc --test` — FROZEN (REL-002 stage 1, 2026-10-06)
@@ -1030,7 +1030,7 @@ over the same code, so how a test is judged exists once.
   `scripts/test_runner.sh` does.
 - **A test is the root package's code (F-TEST-3).** In a project, `turf test`
   gives the compiler a package graph whose root package names its `"tests"`
-  directory (driver interface **1.3**; `include/PackageGraph.h`). A test file
+  directory (driver interface **1.3**; `src/tooling/PackageGraph.h`). A test file
   may then be the program entry point (any file there, not only `src/main.tr`)
   and imports what `src/**` of the package can: the package's own modules, its
   direct dependencies' root modules, the standard library, and the helper
@@ -1056,7 +1056,7 @@ Designed with stage 1 (the roadmap's REL-002 text) and **confirmed by the owner,
 2026-10-06**: F-FMT-1 ("yes, absolutely"), F-FMT-2 and F-FMT-3, each as written
 below, with one refinement to F-FMT-2 that the owner decided at the same time
 (files found under a directory are skipped when they do not lex). The formatter
-itself is unchanged by this section: indentation only (`include/Formatter.h`).
+itself is unchanged by this section: indentation only (`src/tooling/Formatter.h`).
 
 - **Verified, not argued (F-FMT-1).** `turfc --format` checks every result
   before it writes or reports it (`turf::format::verifyFormatting`): (1) no
@@ -1156,7 +1156,7 @@ a named, closed, last-resort list.
   `strings`, `array`, `io`, `math`, `sys`. Every one is loaded in every compile,
   spellable as `m::` in every file with no import (§6.24), and visible to UFCS
   and operators. The spec "the prelude is exactly `lib/std/core/*.tr`"
-  (`boundary.md` §4, `scripts/check_boundary.sh` check 2) is kept: `io.tr`,
+  (`boundary.md` §4, `scripts/check/check_boundary.sh` check 2) is kept: `io.tr`,
   `math.tr` and `sys.tr` moved into `lib/std/core/`. A module's subfolder is
   invisible to `import`, so no import changed.
 - **Three of them are bare-callable (F-PRE-2):** every `pub` free function of
@@ -1164,7 +1164,7 @@ a named, closed, last-resort list.
   `max(a, b)`, `sqrt(2.0)`, `exit(1)`, `panic("m")`. The other six are not
   flattened (their functions read as methods: `c.is_digit()`). Constants stay
   qualified (`math::PI`); methods (`Type.name`) are never bare. The list is
-  closed and named (`PreludeBareModuleNames`, `src/ParserModule.cpp`); adding a
+  closed and named (`PreludeBareModuleNames`, `src/frontend/ParserModule.cpp`); adding a
   module to either list is a change-recorded act (F-STD-2's standard).
 - **It is the last resort of a bare call (F-PRE-3).** In order, `f(...)` looks at:
   the file's own functions; for code inside a module, that module's own;
@@ -1227,7 +1227,7 @@ embedded lld, bundled C runtime) is REL-008, not this section.
   REL-008).
 - **One version (F-REL-4).** The archive name comes from the root `VERSION` file.
   A tag that is not `v<VERSION>`, or a `-dev` `VERSION`, stops packaging
-  (`scripts/package_release.sh --expect-tag`). This closes REL-001's deferred
+  (`scripts/release/package_release.sh --expect-tag`). This closes REL-001's deferred
   single-sourcing item for the archive name; the README's version line and
   `turf`'s own constant (independent by F-PKG-1) are still checked by hand.
 
@@ -1362,7 +1362,7 @@ Overhaul (F-TYPE-1), whose third column points at their section above.
 | **F-PKG-4** | A dependency's `unsafe module;` is honored only if the root manifest's `[unsafe] allow` names it (not transitive); the root package's own modules need no listing; the compiler enforces, the CLI only passes the bit. | §6.16 above (`ROADMAP_v2.0.0.md` LEC-001 entry 6) |
 | **F-PAT-1** | A top-level `matches <expr>:` keeps its meaning (equality; a bare identifier is a variable); destructuring forms (`_`, `Name { field: pattern, .. }`, guards `if`) are new syntax where a bare identifier BINDS. Arms are tried in source order, first matching header wins, the subject is evaluated once. `_` alone is reserved; `_name` is an identifier. A struct pattern lists every field or ends in `..`, and reads fields as `.field` does (visibility included). Bindings are immutable and arm-scoped. A guarded arm never counts toward exhaustiveness; enum/machine/`bool` subjects and open error unions are checked. | §6.17 above (`ROADMAP_v2.0.0.md` LEC-003, DEC-10) |
 | **F-ERR-1** | An error variant may declare typed fields (`NotFound(path: string)`), constructed positionally with N arguments (or N+1 with a trailing `string` message) and read back only by patterns (`matches E::V(path, ..):`), never as a field. A bare `E::V` with fields is not a value, only an `==`/`!=` operand or a pattern head. A variant pattern never makes an arm a catch-all; an open error union still needs `otherwise`/`_`. `try <expr>` (prefix keyword, reserved) returns the error unchanged from the enclosing `!V` function, running pending `defer`s, and is an error in `main`, a non-fallible function, a `defer` or on a non-fallible operand. `return f();` of a `!T` from a `!T` function passes the value through. An error value is `{ tag, message, payload }`, the payload a GC-allocated per-variant struct with its own descriptor. | §6.18 above (`ROADMAP_v2.0.0.md` LEC-004, DEC-11, DEC-12) |
-| **F-API-1** | The public items of `lib/std/**` are the 2.x compatibility surface: not removed, renamed, or re-signatured before 3.0; additions allowed in a minor. Locked by `tests/46_stdlib_surface/` + `scripts/stdlib_surface_check.sh`. | §6.20 above (`ROADMAP_v2.0.0.md` LEC-007) |
+| **F-API-1** | The public items of `lib/std/**` are the 2.x compatibility surface: not removed, renamed, or re-signatured before 3.0; additions allowed in a minor. Locked by `tests/46_stdlib_surface/` + `scripts/check/stdlib_surface_check.sh`. | §6.20 above (`ROADMAP_v2.0.0.md` LEC-007) |
 | **F-API-2** | Public stdlib functions, methods and fields are `snake_case`; no aliases are kept for a renamed name. | §6.20 above |
 | **F-API-3** | Stdlib failure shapes: input/environment failure → `!T` carrying what failed; violated precondition → panic naming the caller's `file:line:`; a question → `bool` or sentinel. A panicking lookup has a predicate to ask first and, where useful, a `try_` twin. | §6.20 above |
 | **F-API-4** | A function that does a job a real program might want is public whether or not the repository uses it; a struct's internals are public only if a real program does something with them; raw C bindings stay private behind checked Turf wrappers. | §6.20 above (owner's rule, 2026-10-01) |

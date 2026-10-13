@@ -9,7 +9,7 @@ areas. Each section below was re-verified against the live codebase at merge
 time — items already shipped were cut rather than carried forward as stale
 checkboxes; only genuinely open work and durable design rationale survive.
 
-`docs/planning/ROADMAP_v1.0.0_COMPLETE.md` and `docs/planning/FUTURE.md` (the latter
+`docs/planning/archive/ROADMAP_v1.0.0_COMPLETE.md` and `docs/planning/FUTURE.md` (the latter
 added 2026-08-21, once 1.0.0 shipped and `FINAL_SPRINT.md` was retired) are
 **not** part of this merge and remain the authoritative, separately-tracked
 planning docs — some items below (e.g. `unsafe {}`, source spans, error
@@ -24,11 +24,11 @@ re-verified past that point yet — see that section's own header for why.
 
 ## 1. Static Analysis / CFG Roadmap
 
-Real CFG infrastructure exists (`include/CFG.h`/`src/CFG.cpp`,
-`include/Analysis.h`'s `DefiniteAssignmentPass` and `LivenessAnalysisPass`,
-`include/ValueRange.h`/`src/ValueRange.cpp`'s `ValueRangePass`,
-`src/AliasAnalysis.cpp`'s `AliasAnalysisPass`, `include/CallGraph.h`/
-`src/CallGraph.cpp`), wired into `CodegenFunc.cpp` per function. Already
+Real CFG infrastructure exists (`src/analysis/CFG.h`/`src/analysis/CFG.cpp`,
+`src/analysis/Analysis.h`'s `DefiniteAssignmentPass` and `LivenessAnalysisPass`,
+`src/analysis/ValueRange.h`/`src/analysis/ValueRange.cpp`'s `ValueRangePass`,
+`src/analysis/AliasAnalysis.cpp`'s `AliasAnalysisPass`), wired into
+`CodegenFunc.cpp` per function. Already
 shipped: cyclomatic-complexity warnings, unreachable-code/dead-branch
 warnings, missing-return errors, statement-after-terminator errors,
 use-before-initialization errors (`DefiniteAssignmentPass`), dead-store/
@@ -67,10 +67,11 @@ comment) — the actual elimination optimization isn't built on top of it.
   emitting the check entirely.
 
 ### `CallGraphPass::runGlobal()`
-Still a literal empty stub (`src/CallGraph.cpp:13`, "Function is currently
-just a stub."). Whatever whole-program call-graph analysis this was meant
-to enable (the original roadmap tied it to infinite-recursion detection,
-which now ships via a different, CFG-local mechanism) is still unbuilt.
+Deleted (OPT-002): it was a literal empty stub, and its `CallGraph.cpp` /
+`CallGraph.h` no longer exist. Whatever whole-program call-graph analysis it
+was meant to enable (the original roadmap tied it to infinite-recursion
+detection, which now ships via a different, CFG-local mechanism) is still
+unbuilt.
 
 ---
 
@@ -101,7 +102,7 @@ below only as the original pre-implementation design record; see
 shipped, which differs in scope from a couple of these (e.g. source spans
 now cover every token kind, not just identifiers/keywords).**
 - **Source spans instead of single-point locations — partially done.**
-  `SourceLocation` (`include/Lexer.h`) gained `EndLine`/`EndCol` fields
+  `SourceLocation` (`src/frontend/Lexer.h`) gained `EndLine`/`EndCol` fields
   (default `-1`, meaning "not computed") while building `turf-lsp`
   support (turf-lang/turf-lang#243) — `gettok()` now populates them for
   every identifier/keyword token, which flows for free into every AST

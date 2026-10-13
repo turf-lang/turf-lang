@@ -1,5 +1,5 @@
 // LANG-002: NullabilityPass's narrowing sources, one shape per function --
-// see include/Analysis.h's NullabilityPass class doc comment for the exact
+// see src/analysis/Analysis.h's NullabilityPass class doc comment for the exact
 // dataflow this exercises (edge-sensitive meet at `if`/`while` condition
 // blocks, short-circuit-aware `&&` chaining).
 import test;

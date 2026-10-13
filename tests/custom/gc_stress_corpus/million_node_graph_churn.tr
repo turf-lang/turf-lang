@@ -13,7 +13,7 @@
 //
 // Lives under tests/custom/ (excluded from test_runner.sh, AGENTS.md),
 // NOT tests/08_e2e_stress/ alongside 06/07: this file is run ONLY by
-// scripts/gc_stress_corpus_smoke.sh, deliberately never swept into
+// scripts/smoke/gc_stress_corpus_smoke.sh, deliberately never swept into
 // test_runner.sh's own opt-level runs or FDN-005 stage 2's
 // TURF_GC_STRESS=1 runs. Measured live: under TURF_GC_STRESS=1 (forces a
 // full mark-sweep on every allocation, runtime/turfrt_gc.c),
@@ -35,7 +35,7 @@
 // exercises that cost at anything near the scale the roadmap's own
 // completion criterion names.
 //
-// scripts/gc_stress_corpus_smoke.sh's own bound-derivation comment
+// scripts/smoke/gc_stress_corpus_smoke.sh's own bound-derivation comment
 // explains the RSS bound this file is checked against and its reasoning.
 import list::List;
 import test;

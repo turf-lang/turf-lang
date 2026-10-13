@@ -5,7 +5,7 @@
 // target is very often a `gc_alloc`'d buffer being filled one byte at a time
 // BEFORE its NUL terminator is written (every strings.tr function that builds
 // a string this way would panic on its own very first write otherwise -- see
-// EmitStringBoundsCheck()'s doc comment, src/CodegenArray.cpp, for the
+// EmitStringBoundsCheck()'s doc comment, src/codegen/CodegenArray.cpp, for the
 // confirmed-live failure this test's positive counterpart would be).
 //
 // #256: a negative index is now counted from the end, so the write is bad only

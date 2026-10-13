@@ -12,7 +12,7 @@
 // process -- the one stress-corpus shape a short-lived CLI test program
 // (every other file in this directory) cannot exercise at all.
 //
-// Run only by scripts/gc_stress_corpus_smoke.sh, paired with
+// Run only by scripts/smoke/gc_stress_corpus_smoke.sh, paired with
 // http_load_client.tr.
 import io;
 import net;

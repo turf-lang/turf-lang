@@ -291,7 +291,7 @@ The interface covers exactly what `turf` relies on: the flags it passes (`--chec
 **Modes a tool uses:**
 
 - `turfc --check <file.tr>` runs every diagnostic and writes nothing; the output and status match a normal compile of the same file. It checks a **program**, so it wants a `main`; `turfc --check --module <file.tr>` checks a file that is only ever imported (`--module` alone is an error). This is what `turf check`, `turf dump` and a library's `turf build` run.
-- `turfc --package-graph <file.json> <file.tr>` compiles as a package build, and is the only way the compiler learns about packages. The graph lists each package's source root, its **direct** dependencies and whether its `unsafe module;` declarations are honored; its exact format is documented in `include/PackageGraph.h`. `turf` writes it for you as `build/package-graph.json`:
+- `turfc --package-graph <file.json> <file.tr>` compiles as a package build, and is the only way the compiler learns about packages. The graph lists each package's source root, its **direct** dependencies and whether its `unsafe module;` declarations are honored; its exact format is documented in `src/tooling/PackageGraph.h`. `turf` writes it for you as `build/package-graph.json`:
 
   ```json
   {
@@ -342,7 +342,7 @@ Diagnostics can carry:
 
 Every registered error class has a stable `E0NN` code, assigned once and never reassigned. As of this writing there are **91 codes, E001–E091** (`turf explain E091` works and `turf explain E092` is `Unknown error code: E092`).
 
-> **Note:** the comment at the top of `include/ErrorCodes.h` still says "currently 67" registered call sites. It is stale; the table has 91 rows.
+> **Note:** the comment at the top of `src/diagnostics/ErrorCodes.h` still says "currently 67" registered call sites. It is stale; the table has 91 rows.
 
 Assignment order is alphabetical by (source file, class name) at the time each code was first added, and later codes are appended — it's an opaque identifier, not a severity or category ranking.
 
@@ -637,4 +637,4 @@ If the index isn't statically known (e.g. it depends on a function parameter or 
 
 ## A note on what doesn't run
 
-`CallGraphPass::runGlobal()` is wired into the compilation pipeline (invoked once per compile, after codegen, before diagnostics are flushed) but is currently a **confirmed no-op**: it takes a lock and returns, performing no analysis and printing no summary. A separate mechanism, `AddCallEdge()`, *is* actively called during codegen and does populate an internal caller→callee map — but nothing in the compiler ever reads that map back out. In short: per-function call edges are collected, but no whole-program call-graph analysis is actually performed today, despite the pass existing in the pipeline.
+There is no whole-program call-graph analysis. A `CallGraphPass` used to sit in the pipeline as a no-op stub (with an `AddCallEdge()` that collected edges nothing ever read); OPT-002 deleted it. Analysis is per function.

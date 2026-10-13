@@ -1,4 +1,4 @@
-/* REL-005: structs.tr in C, built with `clang -O3` by scripts/bench.py so the
+/* REL-005: structs.tr in C, built with `clang -O3` by scripts/dev/bench.py so the
  * Turf/C ratio tracks F-24 (checked arithmetic vs auto-vectorization). Keep the
  * two programs computing the same thing: the checksums must match. */
 #include <stdint.h>

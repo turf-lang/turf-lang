@@ -6,7 +6,7 @@ reference for how a project is laid out. The full manual is
 [`docs/reference/projects_and_packages.md`](../docs/reference/projects_and_packages.md).
 
 You need `turf` and `turfc` built (`./scripts/cmake_build.sh --release`, then
-`./scripts/dev_install.sh`, or run `build/turf` directly). Each project builds
+`./scripts/install/dev_install.sh`, or run `build/turf` directly). Each project builds
 into its own `build/` directory, which is git-ignored.
 
 | Project | Kind | What it shows |
@@ -55,11 +55,11 @@ with exactly one of `tag`, `rev` or `branch`, and `turf build` then fetches it
 into the cache and pins the commit and a hash of the tree in `turf.lock`. This
 directory does not carry that form because building it needs a repository to
 fetch from. It is exercised end to end, against local bare repositories and no
-network, by [`scripts/git_deps_smoke.sh`](../scripts/git_deps_smoke.sh).
+network, by [`scripts/smoke/git_deps_smoke.sh`](../scripts/smoke/git_deps_smoke.sh).
 
 ## Testing these examples
 
-`scripts/test_runner.sh` only runs `tests/`. `scripts/examples_smoke.sh`
+`scripts/test_runner.sh` only runs `tests/`. `scripts/smoke/examples_smoke.sh`
 builds and runs everything here in a temporary copy, so no `build/` appears in
 the checkout, and checks that each `turf.lock` is current with
 `turf build --locked --offline`. If you change an example, run it.

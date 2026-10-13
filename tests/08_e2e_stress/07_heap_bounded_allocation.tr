@@ -5,7 +5,7 @@
 // `heap()`-allocated linked-list nodes instead of a List<int>'s backing
 // buffer, since heap() reaches turf_rt_alloc through an entirely different
 // Codegen path (HeapAllocateValue(), a real per-type TurfTypeDesc) that
-// 06's own workload never exercises at all. scripts/gc_rss_smoke.sh is
+// 06's own workload never exercises at all. scripts/smoke/gc_rss_smoke.sh is
 // what actually measures peak RSS around this file -- see that script.
 //
 // Each build_list() call builds its own 1000-node singly-linked list

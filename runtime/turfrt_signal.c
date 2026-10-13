@@ -255,7 +255,7 @@ static LONG WINAPI turf_rt_veh(EXCEPTION_POINTERS *ep) {
  * own abort() exits with 3, which is also what `fn main(): int { return 3; }` exits
  * with, so a test runner could not tell a panic from an ordinary exit code. This is
  * in the NTSTATUS "customer" range (bit 29 set), which no program returns on purpose.
- * src/TestRunner.cpp (WindowsExitStatus) and src/main.cpp (turfc's own abort handler)
+ * src/tooling/TestRunner.cpp (WindowsExitStatus) and src/driver/main.cpp (turfc's own abort handler)
  * spell the same number; change all three together. */
 #define TURF_WIN_ABORT_STATUS 0xE0545254u
 

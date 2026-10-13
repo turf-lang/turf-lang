@@ -1,5 +1,5 @@
 // Regression guard for AliasAnalysisPass's identity-vs-name tracking fix
-// (see src/AliasAnalysis.cpp's doc comment): freeing a variable that merely
+// (see src/analysis/AliasAnalysis.cpp's doc comment): freeing a variable that merely
 // SHARES A NAME with an already-freed variable in an outer scope -- but is
 // actually a distinct, never-allocated shadowing declaration -- must NOT be
 // flagged as a double free. Before the fix, name-based (rather than

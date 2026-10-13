@@ -2,7 +2,7 @@
 
 Complete internal + external reference for Turflang's pointer system as it
 exists after issue #238 ("Track A" of the now-removed `FINAL_SPRINT.md`,
-folded into `docs/planning/ROADMAP_v1.0.0_COMPLETE.md` §6 once complete — the
+folded into `docs/planning/archive/ROADMAP_v1.0.0_COMPLETE.md` §6 once complete — the
 original design sketch, the 2026-08-17 resolved decisions, and the
 2026-08-18 implementation summary are retrievable from git history) **and**
 after LANG-002 (`docs/development/changes/LANG-002.md`): the `unsafe { }`
@@ -16,7 +16,7 @@ actually implements it, pass by pass** (Part 2), with file:line references
 throughout.
 
 Related docs:
-- `docs/planning/ROADMAP_v1.0.0_COMPLETE.md` §6 — the shipped-feature summary this
+- `docs/planning/archive/ROADMAP_v1.0.0_COMPLETE.md` §6 — the shipped-feature summary this
   doc expands on.
 - `docs/development/changes/LANG-002.md` — the `&?T`/capability change record.
 - `README.md`'s "FFI" and "`unsafe { }` and safe references (`&T`)"
@@ -397,7 +397,7 @@ mutable raw: Node* = p;         // &?Node -> Node*: always allowed (widening to 
 ```
 
 **Field-accessing a `&?T` requires a null check first.** `p.val`/`p.next`
-compile only where `NullabilityPass` (2.5, `include/Analysis.h`) has proven
+compile only where `NullabilityPass` (2.5, `src/analysis/Analysis.h`) has proven
 `p` non-null on every path reaching that access — a direct `p != null` /
 `p == null` comparison, narrowed through `if`/`else`, an early return,
 a `while` condition, or a `&&` chain:
@@ -502,7 +502,7 @@ fn make(): &Node {
 }
 ```
 
-`EscapePass` (`include/Analysis.h`, `src/Analysis.cpp`) tracks, for every
+`EscapePass` (`src/analysis/Analysis.h`, `src/analysis/Analysis.cpp`) tracks, for every
 reference-typed/raw-pointer/unsized-array (`T[]`) parameter or local, one of
 three provenances — **Stack** (this frame's own storage), **Param** (came
 in from the caller, including `self`), **Heap** (from `heap()`, FDN-001) —
@@ -558,7 +558,7 @@ Codegen barely know `unsafe { }` exists.
 
 ### 2.1 The type hierarchy
 
-`include/Types.h`:
+`src/sema/Types.h`:
 
 ```
 TurfType
@@ -601,7 +601,7 @@ virtual bool isReference() const { return false; }   // new
 existing identifier-token branch in `gettok()` handles keyword lookup
 generically for any new keyword.
 
-**`&T` as a type annotation.** `ParseType()` (`src/ParserCore.cpp`) gets a
+**`&T` as a type annotation.** `ParseType()` (`src/frontend/ParserCore.cpp`) gets a
 leading-`&` branch, symmetric to the existing leading-`!` (error-union)
 branch: consume `&`, recurse into `ParseType()` for the pointee, wrap in
 `TurfReferenceType`. This is unambiguous with the *expression*-level `&`
@@ -625,7 +625,7 @@ node.** Several parts of the compiler treat a file's top level as a
 **flat list** of decl-shaped nodes, found by `dynamic_cast`, not by a
 recursive AST walk:
 
-- `Resolver::hoistTopLevel()` (`src/ResolverCore.cpp`) — Pass 1 of the
+- `Resolver::hoistTopLevel()` (`src/resolve/ResolverCore.cpp`) — Pass 1 of the
   Resolver, registers every struct/enum/machine/error name before Pass 2
   resolves bodies.
 - `main.cpp`'s multi-pass codegen driver — separate passes over the
@@ -640,10 +640,10 @@ If `unsafe { struct Node { ... } }` produced a real, nested
 into an arbitrary wrapper node looking for structs inside it.
 
 The fix: **flatten at parse time, only at the top level.**
-`ParseFile()` (`src/ParserModule.cpp`) and `main.cpp`'s two mirrored
+`ParseFile()` (`src/frontend/ParserModule.cpp`) and `main.cpp`'s two mirrored
 top-level parse loops each get a dedicated `TOK_UNSAFE` branch that calls
 `ParseUnsafeExpr()` directly, then passes the result to
-`AppendFlattenedTopLevelDecl()` (new, declared in `include/Parser.h`,
+`AppendFlattenedTopLevelDecl()` (new, declared in `src/frontend/Parser.h`,
 defined in `ParserModule.cpp`):
 
 ```cpp
@@ -679,7 +679,7 @@ kept LLVM-free at the header level) can call it without linking against
 
 ### 2.3 AST
 
-**`UnsafeBlockExprAST`** (`include/ASTStmt.h`), shaped like `IfExprAST`
+**`UnsafeBlockExprAST`** (`src/frontend/ASTStmt.h`), shaped like `IfExprAST`
 rather than plain `BlockExprAST`: it carries the `unsafe` keyword's own
 `SourceLocation` (`getLoc()`), plus a single `Body` child (always a
 `BlockExprAST`, from `ParseUnsafeExpr()`). `accept()` dispatches to a new
@@ -704,7 +704,7 @@ this issue only changed what static type the operator's result carries.
 
 ### 2.4 Resolver
 
-`Resolver::visitUnsafeBlock()` (`src/ResolverStmt.cpp`) is a one-line
+`Resolver::visitUnsafeBlock()` (`src/resolve/ResolverStmt.cpp`) is a one-line
 delegation:
 
 ```cpp
@@ -722,7 +722,7 @@ because of the parse-time flattening in 2.2 — it never sees an
 `UnsafeBlockExprAST` at the top level to begin with.
 
 **A real bug found and fixed here:** `substituteTypeParams()`
-(`src/ResolverCore.cpp`) rewrites a generic function/struct's parsed
+(`src/resolve/ResolverCore.cpp`) rewrites a generic function/struct's parsed
 `NamedType("T")` placeholders into real `TurfGenericParamType`s,
 recursing through pointer/array/generic wrappers. Its pointer-recursion
 branch used to be:
@@ -749,7 +749,7 @@ reason.
 
 ### 2.5 TypeChecker — the actual gate
 
-All new state and helpers live in `include/TypeChecker.h`.
+All new state and helpers live in `src/sema/TypeChecker.h`.
 
 #### 2.5.1 State and helpers
 
@@ -876,7 +876,7 @@ the `return` — converting `self`'s raw type into the declared `&Counter`
 return type is exactly the raw-to-safe cast direction that always needs
 one, `self`'s exemption from the *dereference* gate notwithstanding.
 
-#### 2.5.4 `typesCompatible()` rules (`src/Types.cpp`)
+#### 2.5.4 `typesCompatible()` rules (`src/sema/Types.cpp`)
 
 Three changes, all inside the existing null/opaque-pointer-coercion rule
 block:
@@ -1004,7 +1004,7 @@ exactly like the `BlockExprAST` case right next to it:
 
 Summary only — `docs/development/changes/LANG-002.md` has the full detail.
 
-- **Types (`include/Types.h`, `src/Types.cpp`).** `TurfNullableReferenceType`
+- **Types (`src/sema/Types.h`, `src/sema/Types.cpp`).** `TurfNullableReferenceType`
   is a SIBLING of `TurfReferenceType` (both direct `TurfPointerType`
   subclasses), not a further subclass — `isReference()` stays `false` for
   it (only `&T` is the "always non-null" contract), and a new
@@ -1013,7 +1013,7 @@ Summary only — `docs/development/changes/LANG-002.md` has the full detail.
   pointer-widening `typesCompatible()` rule apply to `&?T` unchanged; only
   one new rule (`&?T -> T2*`, mirroring the existing `&T -> T2*` rule) was
   needed.
-- **Parser (`src/ParserCore.cpp`, `src/ParserModule.cpp`).** `ParseType()`
+- **Parser (`src/frontend/ParserCore.cpp`, `src/frontend/ParserModule.cpp`).** `ParseType()`
   gets a one-token `?` lookahead right after `&`. The `unsafe module;`
   capability pragma is parsed by `ParseLeadingUnsafeModuleDecl()`
   (`ParserModule.cpp`) at the three places a file's first token is seen
@@ -1021,24 +1021,24 @@ Summary only — `docs/development/changes/LANG-002.md` has the full detail.
   loops) — see that function's own doc comment for why one token of
   lookahead forces it to consume `unsafe` before it can tell a pragma apart
   from a genuine top-level `unsafe { }` block.
-- **TypeChecker (`include/TypeChecker.h`, `src/TypeCheckerCore.cpp`).**
+- **TypeChecker (`src/sema/TypeChecker.h`, `src/sema/TypeCheckerCore.cpp`).**
   `isRawPointer()` additionally excludes `isNullableReference()` — `&?T` is
   exempt from the raw-pointer gate the same way `&T` is (its own safety is
   a SEPARATE mechanism, NullabilityPass, not this gate).
   `HasRawPointerCapability()` (`ParserModule.cpp`, exported via `Parser.h`)
   replaces `IsPathUnderLibStd()` at both call sites
   (`isUnsafeGateExempt()`, `checkNoRawPointersInSignature()`).
-- **CFG-based analysis (`include/Analysis.h`, `src/Analysis.cpp`).**
+- **CFG-based analysis (`src/analysis/Analysis.h`, `src/analysis/Analysis.cpp`).**
   `NullabilityPass` — a forward dataflow pass over the CFG, structurally
   copied from `DefiniteAssignmentPass` just above it in the same file
   (a `std::unordered_set<const VariableSymbol*>` per block, meet =
   intersection), but two-state rather than three (see its own doc comment
   for why "proven non-null, or not" is enough). Run from
-  `FuncDefExprAST::codegen()` (`src/CodegenFunc.cpp`), the same pipeline
+  `FuncDefExprAST::codegen()` (`src/codegen/CodegenFunc.cpp`), the same pipeline
   position as every other CFG pass — after the TypeChecker, before real
   LLVM codegen.
-- **Generics (`src/ResolverCore.cpp`'s `substituteTypeParams()`,
-  `src/Monomorphize.cpp`'s `substituteConcreteTypes()`).** Both needed the
+- **Generics (`src/resolve/ResolverCore.cpp`'s `substituteTypeParams()`,
+  `src/sema/Monomorphize.cpp`'s `substituteConcreteTypes()`).** Both needed the
   identical fix `&T` already required (2.4's own doc comment): a
   `dynamic_cast<TurfNullableReferenceType*>` branch, checked BEFORE the
   generic `TurfPointerType` fallback, so a substituted generic `&?T` field/
@@ -1051,7 +1051,7 @@ Summary only — `docs/development/changes/LANG-002.md` has the full detail.
 
 Summary only — `docs/development/changes/FDN-002.md` has the full detail.
 
-- **CFG-based analysis (`include/Analysis.h`, `src/Analysis.cpp`).**
+- **CFG-based analysis (`src/analysis/Analysis.h`, `src/analysis/Analysis.cpp`).**
   `EscapePass` — a forward dataflow pass over the CFG, beside
   `NullabilityPass` in the same file: one `std::unordered_map<const
   VariableSymbol*, RefProvenance>` per block, meet = "keep an entry only
@@ -1060,8 +1060,8 @@ Summary only — `docs/development/changes/FDN-002.md` has the full detail.
   a boolean to a 3-value enum), transfer = process a block's statements in
   order via a recursive `ASTVisitor` (`EscapeCheckVisitor`), same idiom as
   `NarrowingVisitor` just above it. Run from `FuncDefExprAST::codegen()`
-  (`src/CodegenFunc.cpp`) immediately after `NullabilityPass`.
-- **Diagnostics (`include/ErrorsMemory.h`, `include/ErrorCodes.h`).** One
+  (`src/codegen/CodegenFunc.cpp`) immediately after `NullabilityPass`.
+- **Diagnostics (`src/diagnostics/ErrorsMemory.h`, `src/diagnostics/ErrorCodes.h`).** One
   new class, `DanglingReferenceEscapeError` (E086, `MEMORY_ERROR` category
   — no new SLM category, per F-DIAG-3), parameterized by a short sink
   description string so one class covers all five sinks.

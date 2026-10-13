@@ -92,7 +92,7 @@ fn main(): int {
 
 ### File-level pointer
 
-`src/ParserDecl.cpp` (`ParseFuncDef`) — declaration parsing, `self`
+`src/frontend/ParserDecl.cpp` (`ParseFuncDef`) — declaration parsing, `self`
 injection, `static` handling.
 
 ---

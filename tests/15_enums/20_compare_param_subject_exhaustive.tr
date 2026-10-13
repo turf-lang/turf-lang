@@ -4,7 +4,7 @@
 // error when followed by a trailing "belt and suspenders" return -- the
 // idiom used throughout this test suite (see e.g. 13_dsa_state_machine.tr).
 // See fail_enum_non_exhaustive_param.tr for the companion non-exhaustive
-// case, and src/CFG.cpp's visitCompare() doc comment for why `compare` is
+// case, and src/analysis/CFG.cpp's visitCompare() doc comment for why `compare` is
 // deliberately never treated as a hard CFG terminator on its own, even
 // when provably exhaustive.
 

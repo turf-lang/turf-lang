@@ -6,7 +6,7 @@
 // and 04_http_callback_routing.tr, both passing):
 //   - The heap-corruption crash during a real request/response round trip
 //     was NOT specific to this file at all -- it was a compiler bug in
-//     AssignmentExprAST::codegen() (src/CodegenVar.cpp): `buf[i] = charExpr;`
+//     AssignmentExprAST::codegen() (src/codegen/CodegenVar.cpp): `buf[i] = charExpr;`
 //     on a `string` stored a full 8-byte i64 at a 1-byte-wide `i8` GEP
 //     slot (the LOGICAL type of a string-index access is `int`, but its
 //     physical storage is one byte), silently overwriting 7 bytes past
@@ -63,7 +63,7 @@
 //     bug: a generic struct's field type never got registered under its
 //     OWN base name when first seen as a nested field, so a later,
 //     genuine build of that struct never filled in the stub -- see
-//     src/CodegenCore.cpp's `getLLVMType()` GenericType branch, fixed
+//     src/codegen/CodegenCore.cpp's `getLLVMType()` GenericType branch, fixed
 //     alongside this file). Confirmed fixed and covered by
 //     tests/34_http_and_json/.
 //   - A per-status-code text table only covers the handful of codes this

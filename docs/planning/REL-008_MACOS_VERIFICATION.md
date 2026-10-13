@@ -36,11 +36,11 @@ export PATH="$LLVM_PREFIX/bin:$PATH"
 llvm-config --version                      # must print 22.x. 23 does not build.
 
 # lld as STATIC archives (Homebrew ships only dylibs); ~10 minutes
-./scripts/build_static_lld.sh --llvm-dir "$LLVM_PREFIX/lib/cmake/llvm" --prefix "$HOME/turf-lld"
+./scripts/release/build_static_lld.sh --llvm-dir "$LLVM_PREFIX/lib/cmake/llvm" --prefix "$HOME/turf-lld"
 export CMAKE_PREFIX_PATH="$LLVM_PREFIX:$HOME/turf-lld"
 
 ./scripts/cmake_build.sh --release-static --embed-lld
-./scripts/build_bundled_runtime.sh --platform macos-arm64
+./scripts/release/build_bundled_runtime.sh --platform macos-arm64
 ```
 
 Pass: both scripts exit 0; `build/turfc` and `build/turf` exist;
@@ -120,13 +120,13 @@ for s in cli_smoke project_smoke test_cmd_smoke fmt_smoke package_graph_smoke \
          git_deps_smoke examples_smoke pattern_warnings_smoke migrate_pub_smoke \
          opt_levels_smoke runtime_smoke mem_smoke gc_smoke debuginfo_smoke \
          std002_caller_location_smoke bundled_link_smoke; do
-  echo "=== $s"; CI=1 ./scripts/$s.sh > "/tmp/smoke_$s.log" 2>&1; echo "rc=$?"
+  echo "=== $s"; CI=1 ./scripts/smoke/$s.sh > "/tmp/smoke_$s.log" 2>&1; echo "rc=$?"
 done
 ```
 
 Pass: every `rc=0`. (`runtime_smoke` now includes check 6d, the "a library Turf does not
 bundle" diagnostics; on macOS its empty-`PATH` half should print `linking needs a C
-compiler`. The PowerShell twins `scripts/*.ps1` are Windows-only: nothing to run here.)
+compiler`. The PowerShell twins `scripts/smoke/*.ps1` are Windows-only: nothing to run here.)
 Known not applicable on macOS, record as "N/A, reason", do not fix:
 `gc_no_procfs_smoke.sh` (Linux `/proc`), and `gc_rss_smoke.sh` / `gc_stress_corpus_smoke.sh`
 need GNU `time -v` (`brew install gnu-time` and a `/usr/bin/time` that is not BSD's,
@@ -153,17 +153,17 @@ cc 2>&1 | head -1                             # same
 Package and install the archive exactly as a user gets it:
 
 ```sh
-./scripts/package_release.sh --platform macos-arm64 --out /tmp/dist   # needs no compiler
+./scripts/release/package_release.sh --platform macos-arm64 --out /tmp/dist   # needs no compiler
 ls /tmp/dist                                  # turf-v<VERSION>-macos-arm64.tar.gz + .sha256
-./scripts/release_deps_check.sh --archive /tmp/dist/turf-v*-macos-arm64.tar.gz
+./scripts/release/release_deps_check.sh --archive /tmp/dist/turf-v*-macos-arm64.tar.gz
 ```
 
 Pass: the dependency check exits 0. Expected: `turfc` needs `libSystem`, `libc++`,
 `libz`, `libncurses`; `turf` needs `libSystem`, `libresolv`; nothing under `/opt/homebrew`.
 
 ```sh
-./scripts/bundled_link_smoke.sh --archive /tmp/dist/turf-v*-macos-arm64.tar.gz
-./scripts/release_smoke.sh --archive /tmp/dist/turf-v*-macos-arm64.tar.gz
+./scripts/smoke/bundled_link_smoke.sh --archive /tmp/dist/turf-v*-macos-arm64.tar.gz
+./scripts/smoke/release_smoke.sh --archive /tmp/dist/turf-v*-macos-arm64.tar.gz
 ```
 
 Pass: both exit 0 (the second runs `install.sh` into a throwaway HOME, checks the
@@ -176,7 +176,7 @@ Now the walkthrough by hand, in a **new** terminal with a stripped environment:
 export TURF_INSTALL_BASE_URL="file:///tmp/dist-site"       # a dir laid out as download/<tag>/<archive>(.sha256)
 mkdir -p /tmp/dist-site/download/v$(head -1 VERSION) && cp /tmp/dist/turf-* /tmp/dist-site/download/v$(head -1 VERSION)/
 cat /tmp/dist/*.sha256 > /tmp/dist-site/download/v$(head -1 VERSION)/checksums.txt   # install.sh reads checksums.txt, not the .sha256
-TURF_INSTALL_PLATFORM=macos-arm64 sh ./install.sh --version v$(head -1 VERSION) --prefix "$HOME/turf-clean"
+TURF_INSTALL_PLATFORM=macos-arm64 sh ./scripts/install/install.sh --version v$(head -1 VERSION) --prefix "$HOME/turf-clean"
 env -i HOME="$HOME" PATH="$HOME/turf-clean/bin:/usr/bin:/bin:/usr/sbin:/sbin" TERM=xterm bash -c '
   set -e
   command -v turf
@@ -190,7 +190,7 @@ Pass: prints `Hello, TurfLang! This is hello.`, exit 0, with the toolchain moved
 Then, in that same stripped environment: a project with a **path dependency** (copy
 `examples/geometry` and `examples/plotter`; `cd examples/plotter && turf build --locked --offline && ./build/plotter`),
 a project with a **git dependency** (the manifest form is `jsonx = { git = "<url>", tag = "v1" }`;
-the quickest source is a local bare repo, as in `scripts/git_deps_smoke.sh`), and a
+the quickest source is a local bare repo, as in `scripts/smoke/git_deps_smoke.sh`), and a
 program that imports `net` and talks to itself over loopback (copy
 `tests/34_http_and_json/03_http_manual_routing_roundtrip.tr`: it binds, connects and
 answers within one process).
@@ -238,7 +238,7 @@ Restore the toolchain (command above) and confirm `clang --version` works again.
 ## 8. What else keeps REL-008 open after macOS is green
 
 Be explicit in the record, so "closed" is not claimed early:
-- **Stage 7:** `install.ps1` exists and passes `scripts/release_smoke.ps1` on a real
+- **Stage 7:** `install.ps1` exists and passes `scripts/smoke/release_smoke.ps1` on a real
   Windows machine (35 checks); its CI step has not run on a runner. Archive signing
   (minisign/cosign) is not done for any platform.
 - **Stage 8:** the Windows clean-machine proof is `release_smoke.ps1` (a `PATH` of

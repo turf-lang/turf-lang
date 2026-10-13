@@ -3,7 +3,7 @@
 // "a Map<string, List<string>> churned for 10^7 operations" item. Lives
 // under tests/custom/ (excluded from test_runner.sh, AGENTS.md) for the
 // same reason million_node_graph_churn.tr does -- run only by
-// scripts/gc_stress_corpus_smoke.sh, never under FDN-005 stage 2's
+// scripts/smoke/gc_stress_corpus_smoke.sh, never under FDN-005 stage 2's
 // TURF_GC_STRESS=1 (a per-allocation-collection cost applied to this
 // file's own operation count would not finish in any CI-reasonable time,
 // for the identical reason documented in that file's own header).

@@ -1,7 +1,7 @@
 // LEC-007 API lock, part 1: the prelude modules (int, double, bool, char,
 // array, strings), hashing, and the collections. Every `pub` item in these
 // modules is used once, by its real spelling, so removing or renaming one in
-// 2.x breaks this file at compile time. scripts/stdlib_surface_check.sh
+// 2.x breaks this file at compile time. scripts/check/stdlib_surface_check.sh
 // fails if a `pub` item exists that no file in this folder mentions, so a NEW
 // public item cannot slip in unlocked either.
 //

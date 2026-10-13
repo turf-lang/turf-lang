@@ -53,7 +53,7 @@ fn main(): int {
     test::assert(light == TrafficLight::Green, "Red -> Green again");
 
     // Verify int values throughout -- identical ordinals to the enum
-    // version, since TurfMachineType IS-A TurfEnumType (see include/Types.h).
+    // version, since TurfMachineType IS-A TurfEnumType (see src/sema/Types.h).
     test::assert((TrafficLight::Red    to int) == 0, "Red == 0");
     test::assert((TrafficLight::Green  to int) == 1, "Green == 1");
     test::assert((TrafficLight::Yellow to int) == 2, "Yellow == 2");

@@ -4,7 +4,7 @@
  *
  * `turf_rt_abi_2_0` is a versioned symbol with no behaviour of its own --
  * every compiled Turf binary's `main` wrapper references it
- * (WrapMainWithRuntimeBootstrap(), src/CodegenFunc.cpp), purely so that
+ * (WrapMainWithRuntimeBootstrap(), src/codegen/CodegenFunc.cpp), purely so that
  * linking a freshly compiled object against a STALE `libturfrt.a` (one
  * built before this symbol existed, or a hypothetical future ABI-breaking
  * runtime that renames it) fails at LINK TIME with "undefined reference to

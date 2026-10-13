@@ -107,11 +107,11 @@ disappear under a list of syntax features:
 
 ### 0.4 How a milestone is executed
 
-Identical to an overhaul feature group: `scripts/session_preflight.sh <ID>`
+Identical to an overhaul feature group: `scripts/dev/session_preflight.sh <ID>`
 (it finds `### <ID> — ` headings in this file), `SESSION_PROTOCOL.md`, a
 change record `docs/development/changes/<ID>.md`, `INDEX.md` row,
 `INVARIANTS.md` for any new invariant, `handbook-sync/PENDING.md` for doc
-debt (until REL-006 drains it), `scripts/session_postflight.sh <ID>`. A
+debt (until REL-006 drains it), `scripts/dev/session_postflight.sh <ID>`. A
 milestone sized **L** or **XL** writes its own session sub-plan into its
 change record in its first session, as TYPE-002 did.
 
@@ -309,7 +309,7 @@ walker if this is not done first.
 
 **Subsystems** Types, Resolver, TypeChecker, Monomorphizer. **Runtime/stdlib/tooling** none.
 
-**Stages.** (1) Introduce `include/TypeWalk.h`: a visitor over every
+**Stages.** (1) Introduce `src/sema/TypeWalk.h`: a visitor over every
 `TurfType` subclass with `containsOpenParam()`, `substitute(map)`,
 `unify(pattern, concrete, map&)`; exhaustive over the type hierarchy (a
 `switch` on a kind enum or a visitor base whose default case asserts — the
@@ -435,7 +435,7 @@ fn cons(v: int, next: &?Node): &Node {
   `&T` is already an opaque pointer, and the GC already scans `&T` fields
   (`INV-NREF`'s tracing note, LANG-002).
 - Why an intrinsic rather than syntax (`new T`): it is one entry in
-  `include/Intrinsics.h` (F-STD-2's closed list), no grammar change, and it
+  `src/sema/Intrinsics.h` (F-STD-2's closed list), no grammar change, and it
   composes with `T::default()`/`T::new()`, which already exist. Alternatives
   considered: `T::heap(...)` (conflicts with user methods named `heap`),
   `box T` keyword (grammar change, no benefit).
@@ -580,7 +580,7 @@ runtime.
 4. **Panic format and exit codes** documented once (`runtime.md`, reference
    docs): panic → 134 (SIGABRT), stack overflow → 134, `sys::exit(n)` → n.
 
-**Tests** `scripts/runtime_smoke.sh` gains: deep recursion prints
+**Tests** `scripts/smoke/runtime_smoke.sh` gains: deep recursion prints
 `panic: stack overflow`; huge allocation prints `panic: out of memory`;
 linking with `TURF_HOME` pointing at a runtime-less tree gives the TurfLang
 diagnostic. **Risks** Signal handling interacts with the GC's conservative
@@ -846,7 +846,7 @@ identity (with FDN-003), diagnostics.
 (5) `[unsafe] allow`. (6) Example multi-package project in
 `examples/` (new top-level folder, built by CI).
 
-**Tests.** Script-level (the test runner is single-file): `scripts/project_smoke.sh`
+**Tests.** Script-level (the test runner is single-file): `scripts/smoke/project_smoke.sh`
 builds `examples/` projects: path dependency, git dependency served from a
 local bare repository (no network in CI), diamond agreement and conflict,
 lockfile tamper detection, `--offline`, `--locked`, module-name collision
@@ -1110,7 +1110,7 @@ arguments (`List<int>::default()`, FUTURE F-6c).
 1. **D25** — instantiation-site errors anchor at the innermost requester
    (inside `lib/std`), one hop short of the user's call; E079's "chain" is a
    dump of the whole instantiation cache. Add a parent pointer to
-   `InstantiationRequest` (`include/Monomorphize.h`), thread the current
+   `InstantiationRequest` (`src/sema/Monomorphize.h`), thread the current
    parent through the nested TypeChecker the monomorphizer constructs, anchor
    the primary diagnostic at the **outermost user-code** request, and print
    the real chain (user call → `Set<Big>.add` → `Set<Big>.contains` → …).
@@ -1154,7 +1154,7 @@ test added after this milestone and back-filled for `tests/36_numeric_semantics/
 > x.close();`" is `showcase/` plus `http::Server.listen` (there is no `fs` file
 > handle type to give a `close()`). Fallibility turned out to be the larger
 > change than the removals: four bool-returning functions became `!void`. The
-> API lock is `tests/46_stdlib_surface/` **plus** `scripts/stdlib_surface_check.sh`
+> API lock is `tests/46_stdlib_surface/` **plus** `scripts/check/stdlib_surface_check.sh`
 > (a test cannot notice a new, unlocked public item). The owner's rule for what
 > is public is F-API-4. Open items for the owner are in the record's
 > *Unresolved questions* (JSON field exposure, panics on remote input, and the
@@ -1211,7 +1211,7 @@ Since LEC-001's freeze (§6.16) the dispatch lives in the Go CLI `turf`;
 `turfc --version` line 1 is the compiler's release version and line 2 its
 driver-interface version, which is what `turf` checks (§6.16). The two
 programs' release versions are independent, and `turf version` prints both.
-**Tests** a `scripts/cli_smoke.sh`. **Completion** the smoke passes; README
+**Tests** a `scripts/smoke/cli_smoke.sh`. **Completion** the smoke passes; README
 shows `turf --version` output.
 
 **Status 2026-10-06: CLOSED by the owner.** Done: `--version`
@@ -1273,7 +1273,7 @@ leaves a file it cannot vouch for alone; a source with a lexical error is
 declined instead of ending the process, and `turf fmt` skips such a file when it
 only found it under a directory (owner decision; driver interface 1.5, `turfc
 --format --skip-unlexable`); `turf fmt` takes files and directories, `--exclude`,
-and formats `src/` and `tests/` of a project; `scripts/fmt_smoke.sh` and a
+and formats `src/` and `tests/` of a project; `scripts/smoke/fmt_smoke.sh` and a
 formatter unit test are in CI. The repository was reformatted in one
 whitespace-only commit (142 files; the suite passes on it) and CI runs
 `turf fmt --check lib/std tests`, so the "`turf fmt --check` clean on the repo"
@@ -1310,8 +1310,8 @@ Record: `docs/development/changes/REL-002.md`.
 | Install layout | `turf-<ver>-<platform>/{bin/turf, bin/turfc, lib/libturfrt.a, lib/std/**, share/turf/examples/**, LICENSE, README.md}`; `TURF_HOME` optional (binary-relative discovery already works); `lib/usr` is retired in favour of LEC-001's cache. |
 | Channels | GitHub release archives + SHA-256 (exists); an `install.sh` that verifies the checksum; Homebrew/Scoop/AUR recipes updated only for shipped platforms (their repos are at v0.6.0 today). |
 | **Compiler self-containment** (found 2026-09-30, LEC-001) | **`turfc` is not self-contained today, and the clean-VM smoke in stage 1 would fail on it.** It links LLVM *dynamically* (target `LLVM` = `libLLVM.so.22.1`) and drags in that library's own dependencies. `ldd build/turfc` shows `libLLVM.so.22.1`, `libgomp.so.1`, `libstdc++`, `libffi.so.8`, `libedit`, `libz`, `libzstd`, `libxml2.so.16`, `libncursesw`, `libicuuc.so.78`/`libicudata`. So a user of a release archive would need exactly LLVM 22's shared library and matching versions of the rest — no better than building from source. What is already fine: the Go `turf` is fully static, and a *compiled program* needs only libc/libm (`libturfrt` is linked in statically). **Recommendation:** release builds link LLVM's static component libraries (`llvm_map_components_to_libnames(...)` over the components Codegen uses, instead of the `LLVM` dylib; `llvm-22-dev` ships the `.a` archives) plus `-static-libstdc++ -static-libgcc`, and are built with `-DTURF_SMART=OFF` or a static OpenMP, so that `ldd bin/turfc` lists only libc, libm, libz and the dynamic loader. Keep dev builds on the dylib (link time). Gate it with a CI check that runs `ldd` on the release binary against an allowlist. |
-| **Linker and C runtime: what "only `cc`" really requires** (2026-09-30) | `turfc` links every program by running the system `cc` (`gcc` on Windows; `linkObject()`, `src/main.cpp`). A self-contained `turfc` (row above) still leaves the user needing a C toolchain. That is `build-essential` on Ubuntu, which does not ship `cc` or libc's start-up files (`crt1.o`, from `libc6-dev`) by default, and on Windows a MinGW `gcc` that almost no Windows machine has. This is the gap between TurfLang and "installs and runs like Java or Python". **Two parts, fixable separately:** (1) *the linker*: embed **lld** (LLVM's linker, usable as a library, shipped as `liblld*` static archives next to LLVM's) in the release `turfc`, so no external linker runs; (2) *the C runtime*: ship one in the archive (for example musl's `libc.a` and start-up objects on Linux, the MinGW-w64 CRT import libraries on Windows), which also makes every compiled Turf program fully static. That is Zig's model: its archive needs nothing installed. **Decided 2026-09-30 (owner, DEC-14): pulled into 2.0** as REL-008. The earlier recommendation (keep the system `cc` for 2.0) is withdrawn. |
-| **`--smart` in a release** (found 2026-09-30) | The archive has never contained the GGUF model (~1 GB, `models/` is git-ignored), so `--smart` in any release so far silently falls back to plain diagnostics. It is optional at build time since LEC-001 (`-DTURF_SMART=OFF`, `scripts/cmake_build.sh --no-smart`; `src/SLMEngineDisabled.cpp` prints why). **Decide** one of: (a) release builds without it (`TURF_SMART=OFF`, smallest and self-contained, `--smart` says it is not built in); (b) ship the runtime and fetch the model on demand (a future `turf smart install` into the cache, with a checksum); (c) a separate "with model" archive. Recommendation: (a) for 2.0, and (b) as FUTURE. A release must never ship a runtime that silently does nothing. **Decided 2026-10-11 (owner): neither (a) nor (b) as written. Every platform ships two archives, the plain one and a `-smart` one with the runtime; no model is shipped or fetched, the user puts exactly one `.gguf` in `<root>/models` (none or several: one note, and the compiler's own diagnostics). `REL-008.md`, "`--smart` as an installable build".** |
+| **Linker and C runtime: what "only `cc`" really requires** (2026-09-30) | `turfc` links every program by running the system `cc` (`gcc` on Windows; `linkObject()`, `src/driver/main.cpp`). A self-contained `turfc` (row above) still leaves the user needing a C toolchain. That is `build-essential` on Ubuntu, which does not ship `cc` or libc's start-up files (`crt1.o`, from `libc6-dev`) by default, and on Windows a MinGW `gcc` that almost no Windows machine has. This is the gap between TurfLang and "installs and runs like Java or Python". **Two parts, fixable separately:** (1) *the linker*: embed **lld** (LLVM's linker, usable as a library, shipped as `liblld*` static archives next to LLVM's) in the release `turfc`, so no external linker runs; (2) *the C runtime*: ship one in the archive (for example musl's `libc.a` and start-up objects on Linux, the MinGW-w64 CRT import libraries on Windows), which also makes every compiled Turf program fully static. That is Zig's model: its archive needs nothing installed. **Decided 2026-09-30 (owner, DEC-14): pulled into 2.0** as REL-008. The earlier recommendation (keep the system `cc` for 2.0) is withdrawn. |
+| **`--smart` in a release** (found 2026-09-30) | The archive has never contained the GGUF model (~1 GB, `models/` is git-ignored), so `--smart` in any release so far silently falls back to plain diagnostics. It is optional at build time since LEC-001 (`-DTURF_SMART=OFF`, `scripts/cmake_build.sh --no-smart`; `src/slm/SLMEngineDisabled.cpp` prints why). **Decide** one of: (a) release builds without it (`TURF_SMART=OFF`, smallest and self-contained, `--smart` says it is not built in); (b) ship the runtime and fetch the model on demand (a future `turf smart install` into the cache, with a checksum); (c) a separate "with model" archive. Recommendation: (a) for 2.0, and (b) as FUTURE. A release must never ship a runtime that silently does nothing. **Decided 2026-10-11 (owner): neither (a) nor (b) as written. Every platform ships two archives, the plain one and a `-smart` one with the runtime; no model is shipped or fetched, the user puts exactly one `.gguf` in `<root>/models` (none or several: one note, and the compiler's own diagnostics). `REL-008.md`, "`--smart` as an installable build".** |
 
 **Stages** (1) Tier-1 archive in the new layout, with a **self-contained
 `turfc`** (row above) + `install.sh` + a clean-VM smoke (`docker run
@@ -1319,11 +1319,11 @@ ubuntu:24.04` / `debian:stable` with only `cc` installed: download, install,
 `turf new`, `turf build`, run — this is the test that catches a dynamic
 `libLLVM`); (2) the D20 diagnostic; (3) optional macOS port; (4) packaging
 recipes.
-**Tests** `scripts/release_smoke.sh` in CI on a tag build. **Risks** the
+**Tests** `scripts/smoke/release_smoke.sh` in CI on a tag build. **Risks** the
 runtime's Linux-specific stack discovery (`/proc/self/maps`) inside minimal
 containers (it has a fallback; FDN-005 must test the fallback path too —
 **done 2026-09-29**: the fallback was freeing live objects and is fixed,
-`scripts/gc_no_procfs_smoke.sh`). The known stdlib/driver blockers for
+`scripts/smoke/gc_no_procfs_smoke.sh`). The known stdlib/driver blockers for
 macOS and Windows (a glibc-only `malloc_usable_size` that breaks `-O0`
 links, the Linux-only `sockaddr_in` layout and socket constants, no
 Winsock, 32-bit `long` returns) are tabled in `FDN-005.md` *Portability
@@ -1467,13 +1467,13 @@ Record: `docs/development/changes/REL-003.md`.
      - **Verify:** the clean-machine smoke (stage 8) checks that a fresh
        shell resolves `turf`, not only that the files exist.
    - **Replace the "for now" hints when this lands.** What exists today only
-     *prints* the right command and edits nothing: `scripts/dev_install.sh`
+     *prints* the right command and edits nothing: `scripts/install/dev_install.sh`
      and `turf version` / `turf help` (`cli/cmd/turf/pathhint.go`, shown
      when the running `turf` is not the one `PATH` resolves to). Both carry
      comments pointing here. Keep the `turf version` hint, since a user may
      still run an unpacked archive by its full path, but point it at the
      installer.
-8. **Clean-machine proof, release-blocking** (`scripts/release_smoke.sh`,
+8. **Clean-machine proof, release-blocking** (`scripts/smoke/release_smoke.sh`,
    and a `.ps1` twin):
    - **Linux:** `docker run ubuntu:24.04` / `debian:stable` with **no**
      `cc`.
@@ -1523,7 +1523,7 @@ spec section → test files) and gap filling; (2) runner covers `lib/std`
 direct compiles, `showcase/`, `examples/` (today it covers none of them —
 `AGENTS.md`'s standing trap); (3) sanitizer CI jobs (compiler under ASan/UBSan
 running the full suite; runtime under ASan — FDN-005); (4) crash fuzzing:
-reuse SLM-001's mutator (`scripts/slm_benchmark/mutate.py`) plus a
+reuse SLM-001's mutator (`scripts/slm/slm_benchmark/mutate.py`) plus a
 token-level mutator over `tests/**` as seeds, run nightly with a time budget;
 any ICE, assertion, segfault or hang is filed as a release blocker with the
 minimized input added to `tests/`; (5) every `-O` level, `-g`, and
@@ -1556,7 +1556,7 @@ benchmark suite at all" risk is retired by this item.
   (~25 today, more after Phase 1–2) by **rewriting** `docs/reference/**`
   against the frozen 2.0 compiler, as the 2026-08-21 rewrite did against
   1.0. Every code block in the reference is extracted and compiled by CI
-  (`scripts/doc_examples.sh`), so the docs cannot drift again silently.
+  (`scripts/check/doc_examples.py`), so the docs cannot drift again silently.
 - `docs/reference/projects_and_packages.md` (LEC-001),
   `docs/reference/memory_and_safety.md`: the two heaps, what is and is not
   guaranteed (Part VIII's guarantees table), `unsafe`/capabilities/FFI
@@ -1585,7 +1585,7 @@ becomes `v2.0.0`. The `refactor/architecture` branch is merged to `master`
 before the first RC (it is the development branch for all of this).
 
 Each RC also runs REL-005's regression gate (owner decision 2026-10-13): on
-the machine that took the recorded baseline, `python3 scripts/bench.py
+the machine that took the recorded baseline, `python3 scripts/dev/bench.py
 --compare bench/results/<baseline>.json`. A benchmark more than 20% slower
 needs a recorded explanation in `docs/development/BENCHMARKS.md` before the
 RC can become 2.0.0. Not a per-push CI check: shared runners vary more than
@@ -1709,7 +1709,7 @@ question has a written, tested answer (FDN-006, REL-001, REL-003 own them):
 | Panic? | `panic: <kind>: <msg> (<file>:<line>)` to stderr, exit 134, no unwinding, no `defer` | existing + FDN-006 |
 | Stack overflow? | `panic: stack overflow`, exit 134 | FDN-006 |
 | GC descriptors? | Emitted by the compiler once per type in `EmitAllTurfTypeDescs()`, variable-length bitmap (OVH-001), referenced from every allocation site, consumed by the mark phase | `runtime_smoke.sh`, `41_gc` |
-| Compiler/runtime ABI? | The `turfrt.h` entry points listed in `include/Intrinsics.h` + `TurfTypeDesc`/`TurfErrorValue` layouts; internal, lock-step, never a user promise | `check_boundary.sh` |
+| Compiler/runtime ABI? | The `turfrt.h` entry points listed in `src/sema/Intrinsics.h` + `TurfTypeDesc`/`TurfErrorValue` layouts; internal, lock-step, never a user promise | `check_boundary.sh` |
 | Cross-compilation? | Objects yes, linking no, with a diagnostic (D20) | REL-003 test |
 | Runtime compatibility enforcement? | Link-time via the ABI symbol | `runtime_smoke.sh` |
 
@@ -1775,7 +1775,7 @@ target and is unchanged):
 | `turf --version` | Real. Prints two lines, `turf 1.0.0-dev …` and `turfc 2.0.0-dev  (interface 1.1, …)`, since the two are versioned separately. |
 | `turf new geometry --lib` / `turf new plotter` | Real. `src/geometry.tr` and `src/main.tr`. |
 | `[dependencies]` with `geometry = { path = "../geometry" }` | Real (`turf add geometry --path ../geometry` writes it). |
-| `jsonx = { git = "…", tag = "v1.2.0" }` | The **form** is real and tested (`scripts/git_deps_smoke.sh`, against local bare repositories); `jsonx` is illustrative, there is no such repository. |
+| `jsonx = { git = "…", tag = "v1.2.0" }` | The **form** is real and tested (`scripts/smoke/git_deps_smoke.sh`, against local bare repositories); `jsonx` is illustrative, there is no such repository. |
 | `import geometry;` `import jsonx;` `import io;` | Real. |
 | `turf build` "fetches, writes `turf.lock`, compiles everything from source" | Real. It also prints `turf: fetching <name> (<url>)` per repository, and `turf.lock` pins the commit and a SHA-256 of the tree. |
 | `turf run` | Real. |

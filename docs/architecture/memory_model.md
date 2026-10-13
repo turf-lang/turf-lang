@@ -142,7 +142,7 @@ behavior/likely to crash at runtime, not a supported operation.)
 string function** (`to_upper`, `to_lower`, `substring`, `trim`, `replace`,
 `repeat`, ...) is a **fresh GC-heap allocation**, sized exactly for its
 contents. Every buffer-returning function in `lib/std/core/strings.tr`
-calls the bare `gc_alloc(n)` intrinsic (`include/Intrinsics.h` category 1),
+calls the bare `gc_alloc(n)` intrinsic (`src/sema/Intrinsics.h` category 1),
 which lowers to `libturfrt`'s `turf_rt_alloc()` (`runtime/turfrt.h`) —
 never `malloc` directly. `io::input()`/`io::read_to_string()` and
 `net::TcpConnection.read()` use the zero-filling sibling,
@@ -160,7 +160,7 @@ iteration's now-unreachable buffer is collected, not leaked, the next time
 allocation pressure (or an explicit `gc_collect()`) triggers a cycle.
 `tests/13_string_stdlib/17_stress_10k_concat.tr` (10,000 concatenations in
 a loop) and `tests/08_e2e_stress/06_gc_bounded_allocation.tr` (peak RSS
-measured under `scripts/gc_rss_smoke.sh`) are this claim's own regression
+measured under `scripts/smoke/gc_rss_smoke.sh`) are this claim's own regression
 coverage.
 
 A `string`'s representation is still pointer-identical to `ptr`/`void*`
@@ -242,7 +242,7 @@ stands on its own:
   `INV-MEM-6`), a `&T` provably pointing into the CURRENT function's own
   stack frame can no longer be returned, stored into a field of a
   longer-lived object, pushed into a collection, or boxed with `heap()` —
-  `EscapePass` (`include/Analysis.h`) catches the syntactic shapes above
+  `EscapePass` (`src/analysis/Analysis.h`) catches the syntactic shapes above
   intraprocedurally, conservatively (never a false positive on code that
   was actually safe), at compile time. It is **not** a general lifetime
   system: a reference smuggled out inside a by-value struct copy, through
@@ -289,7 +289,7 @@ answers to "who reclaims this":
   manually-managed memory at all).
 - **The GC heap.** `List<T>`, `Stack<T>`, `Queue<T>`, `Set<T>`, and
   `Map<K,V>` each grow a backing buffer internally via the
-  `gc_alloc(n)`/`gc_realloc(p, n)` bare intrinsics (`include/Intrinsics.h`
+  `gc_alloc(n)`/`gc_realloc(p, n)` bare intrinsics (`src/sema/Intrinsics.h`
   category 1, `lib/std/collections/*.tr`, and the shared growth policy
   documented in `docs/reference/stdlib/collections.md`); string
   concatenation and most `strings::*` functions allocate here too (§1.4).
@@ -349,13 +349,13 @@ Everything in this document is a **Codegen**-layer story — the Resolver and
 TypeChecker decide what's legal (is this assignment type-compatible, is this
 pointer used inside `unsafe { }`, ...), but the actual "where does this
 value's bits live, and are they copied or aliased" decisions are made
-entirely in `src/Codegen*.cpp`, by which LLVM construct each AST node
-lowers to. The type hierarchy that drives all of it is `include/Types.h`
+entirely in `src/codegen/Codegen*.cpp`, by which LLVM construct each AST node
+lowers to. The type hierarchy that drives all of it is `src/sema/Types.h`
 (overview at its own header comment, `Types.h:10-28`).
 
 ### 2.2 Primitives
 
-`getLLVMType()` (`src/CodegenCore.cpp:297-479`) maps each primitive
+`getLLVMType()` (`src/codegen/CodegenCore.cpp:297-479`) maps each primitive
 `TurfType` to a fixed-width machine type with no indirection at all:
 
 ```cpp
@@ -371,7 +371,7 @@ A local variable of any of these types gets an ordinary stack slot
 block regardless of where in the source the declaration textually appears —
 this is what makes recursion/loops safe: each call gets its own fresh
 frame, not a shared slot). `NumberExprAST::codegen()`/`BoolExprAST::codegen()`/
-`CharExprAST::codegen()` (`src/CodegenExpr.cpp:45-62`) each produce a plain
+`CharExprAST::codegen()` (`src/codegen/CodegenExpr.cpp:45-62`) each produce a plain
 immediate constant with no allocation of any kind — reading a numeric
 literal never touches memory until it's stored into a variable's slot.
 
@@ -387,7 +387,7 @@ what keeps `char` out of every implicit-widening/arithmetic rule in
 
 #### 2.3.1 Declaration: a real stack allocation, memset to zero
 
-`ArrayDeclExprAST::codegen()` (`src/CodegenArray.cpp:50-111`) allocates a
+`ArrayDeclExprAST::codegen()` (`src/codegen/CodegenArray.cpp:50-111`) allocates a
 genuine LLVM array type sized to the declared element count directly on the
 stack:
 
@@ -409,7 +409,7 @@ and the element count. For-each, `arr.length()` and the bounds check on
 `arr[i]` all read the count from the second field. A **local** `T[]` variable
 is a `{ ptr, i64 }` slot too: `ArrayDeclExprAST::codegen()` stores the slice
 built from its initializer into it. An array literal initializer does not
-take this path: the Parser (`src/ParserStmt.cpp`) gives an unsized declaration
+take this path: the Parser (`src/frontend/ParserStmt.cpp`) gives an unsized declaration
 with a literal initializer `ArraySize` = the literal's length, so
 `mut nums: int[] = [10, 20, 30];` is simply `int[3]`, an ordinary owned stack
 array (only the outermost dimension is inferred; `int[][2]` becomes
@@ -417,7 +417,7 @@ array (only the outermost dimension is inferred; `int[][2]` becomes
 slice initializer still yields a `{ ptr, i64 }` view.
 
 **`arr.copy()`** is the way to get an independent `T[]`. In
-`MethodCallExprAST::codegen()` (`src/CodegenStruct.cpp`) the receiver is
+`MethodCallExprAST::codegen()` (`src/codegen/CodegenStruct.cpp`) the receiver is
 turned into `{ data, len }` with the same `CodegenSliceArgument()`, then
 `len * elemSize` bytes are allocated with `turf_rt_alloc`, passing the
 descriptor from `getOrCreateElementTurfTypeDesc(elem)` so the collector traces
@@ -433,13 +433,13 @@ never an E144/E141 concern and an `immut` receiver is fine.
 For a `T[N]` parameter, the argument is whatever the argument expression's
 ordinary `codegen()` produces — for a plain array variable, that's
 `VariableExprAST::codegen()`'s `CreateLoad` of the *entire* aggregate
-(`src/CodegenVar.cpp`, the same load path every scalar variable read goes
+(`src/codegen/CodegenVar.cpp`, the same load path every scalar variable read goes
 through) — i.e. a genuine bit-for-bit copy of every element gets passed by
 value.
 
 For a `T[]` parameter, every call form (ordinary, UFCS receiver and
 arguments, method, static method, constructor, module function) evaluates
-that argument with `CodegenSliceArgument()` (`src/CodegenArray.cpp`)
+that argument with `CodegenSliceArgument()` (`src/codegen/CodegenArray.cpp`)
 instead, which builds `{ address, N }`:
 
 - an argument with storage of its own (a variable, a struct field, a row of
@@ -451,7 +451,7 @@ instead, which builds `{ address, N }`:
   the slice it is.
 
 A range slice `arr[a..b]` is built by `SliceExprAST::codegen()`
-(`src/CodegenArray.cpp`). It takes the base's `{ data, length }` from the same
+(`src/codegen/CodegenArray.cpp`). It takes the base's `{ data, length }` from the same
 `CodegenSliceArgument()` (so a `T[N]` is viewed in place and a `T[]` passes
 through), evaluates each present bound once and adds the length to a
 negative one, then checks `0 <= start <= end <= length`. A failing check
@@ -476,7 +476,7 @@ initializer is (`VarDeclExprAST::codegen()`, §2.5.3's general path applies
 identically to arrays, since neither function special-cases arrays there).
 Reading an array-typed variable back out, or `return`ing one, goes through
 the same generic `CreateLoad`/`CreateRet` path every value type uses
-(`ReturnExprAST::codegen()`, `src/CodegenControlFlow.cpp:889` — no
+(`ReturnExprAST::codegen()`, `src/codegen/CodegenControlFlow.cpp:889` — no
 array-specific branch exists there at all) — the entire array's bytes are
 loaded as one aggregate value and handed to the caller, which is what makes
 `fn make3(): int[3] { ... }` (`tests/05_arrays_pointers_ffi/11_array_return_and_assign.tr:16-19`)
@@ -486,7 +486,7 @@ address at all, only a value.
 
 ### 2.4 Strings
 
-`StringExprAST::codegen()` (`src/CodegenExpr.cpp:65-68`) is one line:
+`StringExprAST::codegen()` (`src/codegen/CodegenExpr.cpp:65-68`) is one line:
 
 ```cpp
 Value *StringExprAST::codegen() {
@@ -514,7 +514,7 @@ string buffer's bytes are physically indistinguishable from a manual-heap
 `void*`'s — but as of MEM-001 that no longer means they're safe to treat
 the same way; see §1.4's note on `mem::free` and the GC heap.
 
-**Concatenation moved out of Codegen entirely.** `src/CodegenExpr.cpp:82-94`
+**Concatenation moved out of Codegen entirely.** `src/codegen/CodegenExpr.cpp:82-94`
 documents that `EmitStringConcat`/`EmitStrcmp`/`EmitStrcmpRelational` used to
 be hand-rolled directly in this file; `+`/`==`/`!=`/`<`/`>`/`<=`/`>=` on two
 `string`s are now ordinary `operator` overloads defined in Turf itself
@@ -559,7 +559,7 @@ allocation classification.
 
 #### 2.5.1 Layout: fields embedded inline, not pointer-chased
 
-`StructDeclExprAST::codegen()` (`src/CodegenStruct.cpp:580-...`) builds a
+`StructDeclExprAST::codegen()` (`src/codegen/CodegenStruct.cpp:580-...`) builds a
 real LLVM aggregate struct type and calls `setBody()` with each field's
 *own* type directly — a field whose declared type is itself another struct
 gets that struct's actual LLVM type embedded in place, not a pointer to a
@@ -727,7 +727,7 @@ descriptor names which of its fields are pointer-shaped, and — new in
 MEM-002 — a collection's backing buffer gets a descriptor for ONE ELEMENT
 of its concrete `T` (built by `CastExprAST::codegen()` recognizing a
 `gc_alloc(...) to T*`-shaped call site and `getOrCreateElementTurfTypeDesc()`,
-`src/CodegenStruct.cpp`), which the collector's mark phase repeats across
+`src/codegen/CodegenStruct.cpp`), which the collector's mark phase repeats across
 the block's real length. A `List<int>`'s element descriptor has an
 all-zero pointer bitmap (no tracing needed); a `List<string>`'s has bit 0
 set per element, so the collector follows each element to the string
@@ -781,7 +781,7 @@ exercise, and no independent check on the register-scanning technique:
   `http_server` showcase shape driven by a real scripted client for
   100,000 requests) that this project's own test suite had never exercised
   at anything near this scale before — run by
-  `scripts/gc_stress_corpus_smoke.sh`, deliberately never under
+  `scripts/smoke/gc_stress_corpus_smoke.sh`, deliberately never under
   `TURF_GC_STRESS` (an `O(n)`-allocation workload becomes
   `O(n^2 log n)`-shaped under per-allocation collection; that file's own
   header explains why the two stress dimensions are kept orthogonal).
@@ -790,7 +790,7 @@ exercise, and no independent check on the register-scanning technique:
   binary built with the same option links every COMPILED TURF PROGRAM
   against instead of the ordinary `libturfrt.a` — turning the entire
   existing `tests/` suite into independent validation for freed-block
-  reuse, not just the hand-written C harnesses `scripts/gc_smoke.sh`
+  reuse, not just the hand-written C harnesses `scripts/smoke/gc_smoke.sh`
   already covers. Two real, GC/ASan-specific interactions were found and
   fixed getting this running at all (a conservative stack scan reading
   ASan's own inserted redzones; the "address of a local" idiom for
@@ -829,12 +829,12 @@ exercise, and no independent check on the register-scanning technique:
   freed live objects in 11 of 12 `tests/41_gc` programs under
   `TURF_GC_STRESS`. **`TURF_GC_NO_PROCFS=1`** (testing aid) skips the
   `/proc` read so the fallback runs on an ordinary machine;
-  `scripts/gc_no_procfs_smoke.sh` is its regression coverage.
+  `scripts/smoke/gc_no_procfs_smoke.sh` is its regression coverage.
 
 #### 2.6.1 `heap(expr)`: a user value, GC-heap-allocated with a real descriptor
 
 **FDN-001** (`docs/planning/ROADMAP_v2.0.0.md`, DEC-5) is the bare
-intrinsic `heap(e: T): &T` — no grammar change, `include/Intrinsics.h`
+intrinsic `heap(e: T): &T` — no grammar change, `src/sema/Intrinsics.h`
 category 1, dispatched in `FuncCallExprAST::codegen()` (`CodegenFunc.cpp`)
 alongside `gc_alloc`/`gc_pin`/etc. The actual allocation logic is
 `HeapAllocateValue()` (`CodegenCore.cpp`, declared in the internal
@@ -867,7 +867,7 @@ same value sitting on the stack.
 regression coverage (a dynamically-sized list/tree/cyclic graph, each
 surviving a forced collection while retained);
 `tests/08_e2e_stress/07_heap_bounded_allocation.tr` +
-`scripts/gc_rss_smoke.sh` prove the reclaim side (peak RSS bounded, not
+`scripts/smoke/gc_rss_smoke.sh` prove the reclaim side (peak RSS bounded, not
 proportional to cumulative `heap()` calls).
 
 ### 2.7 Generics and monomorphization
@@ -984,15 +984,15 @@ language.
 
 | File | Role in this document |
 |---|---|
-| `include/Types.h` | The type hierarchy: primitive classes (`IntType`/`Int32Type`/`DoubleType`/`BoolType`/`CharType`), `ArrayType`, `TurfPointerType`/`TurfReferenceType`, `TurfGenericParamType`/`GenericType`, `TurfStructType` |
-| `src/Types.cpp` | `typesCompatible()` — the array-size/element-type compatibility rule (§2.3), the string/void/bool exclusions from numeric coercion |
-| `src/CodegenCore.cpp` | `getLLVMType()` (§2.2, §2.3.1, §2.7.1, §2.8), `CastToType()`'s generic-erasure box/unbox branches (§2.7.2), `GetDefaultValue()` (§2.5.2), `HeapAllocateValue()` — `heap(expr)`'s allocation logic (§2.6.1) |
-| `src/CodegenExpr.cpp` | Literal codegen for every primitive and `string` (§2.2, §2.4); the removed-`EmitStringConcat` comment |
-| `src/CodegenArray.cpp` | `ArrayDeclExprAST`/`ArrayLiteralExprAST`/`ArrayAccessExprAST` codegen (§2.3.1, §2.3.3) |
-| `src/CodegenVar.cpp` | `VarDeclExprAST::codegen()` — the general copy-on-assignment path shared by every type, plus the struct-construction-alloca-reuse optimization (§2.5.2, §2.5.3) |
-| `src/CodegenFunc.cpp` | Parameter passing (§2.3.2, §2.5.3), `::new`/`::default` construction (§2.5.2), `heap(expr)` dispatch (§2.6.1) |
-| `src/CodegenControlFlow.cpp` | `ReturnExprAST::codegen()` — the generic return-value path (§2.3.3, §2.5.3) |
-| `src/CodegenStruct.cpp` | `StructDeclExprAST::codegen()` — inline field layout (§2.5.1); `EmitAllTurfTypeDescs()`/`getOrCreateElementTurfTypeDesc()` — struct-instance and per-element `TurfTypeDesc` emission (§2.6) |
+| `src/sema/Types.h` | The type hierarchy: primitive classes (`IntType`/`Int32Type`/`DoubleType`/`BoolType`/`CharType`), `ArrayType`, `TurfPointerType`/`TurfReferenceType`, `TurfGenericParamType`/`GenericType`, `TurfStructType` |
+| `src/sema/Types.cpp` | `typesCompatible()` — the array-size/element-type compatibility rule (§2.3), the string/void/bool exclusions from numeric coercion |
+| `src/codegen/CodegenCore.cpp` | `getLLVMType()` (§2.2, §2.3.1, §2.7.1, §2.8), `CastToType()`'s generic-erasure box/unbox branches (§2.7.2), `GetDefaultValue()` (§2.5.2), `HeapAllocateValue()` — `heap(expr)`'s allocation logic (§2.6.1) |
+| `src/codegen/CodegenExpr.cpp` | Literal codegen for every primitive and `string` (§2.2, §2.4); the removed-`EmitStringConcat` comment |
+| `src/codegen/CodegenArray.cpp` | `ArrayDeclExprAST`/`ArrayLiteralExprAST`/`ArrayAccessExprAST` codegen (§2.3.1, §2.3.3) |
+| `src/codegen/CodegenVar.cpp` | `VarDeclExprAST::codegen()` — the general copy-on-assignment path shared by every type, plus the struct-construction-alloca-reuse optimization (§2.5.2, §2.5.3) |
+| `src/codegen/CodegenFunc.cpp` | Parameter passing (§2.3.2, §2.5.3), `::new`/`::default` construction (§2.5.2), `heap(expr)` dispatch (§2.6.1) |
+| `src/codegen/CodegenControlFlow.cpp` | `ReturnExprAST::codegen()` — the generic return-value path (§2.3.3, §2.5.3) |
+| `src/codegen/CodegenStruct.cpp` | `StructDeclExprAST::codegen()` — inline field layout (§2.5.1); `EmitAllTurfTypeDescs()`/`getOrCreateElementTurfTypeDesc()` — struct-instance and per-element `TurfTypeDesc` emission (§2.6) |
 | `runtime/turfrt_gc.c` | The collector itself — block table, mark, sweep, root discovery (§2.6). Full design in `docs/development/changes/MEM-002.md` |
 | `runtime/turfrt.h` | The public `libturfrt` C ABI: `turf_rt_alloc`/`turf_rt_collect`/`turf_rt_add_global_root`/`turf_rt_is_gc_pointer`/`turf_rt_checked_free`/`turf_rt_pin`/`turf_rt_unpin`, `TurfTypeDesc` (§2.6, §1.7) |
 | `lib/std/mem/mem.tr` | The C allocator FFI bindings and their checked Turf wrappers; `Pool<T>`; `free()`'s cross-heap `gc_checked_free` check; `root()`/`unroot()`'s `gc_pin`/`gc_unpin` pinning (§2.6, §1.7) |

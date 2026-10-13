@@ -1,5 +1,5 @@
 // Regression test: MEM-001's bare `gc_alloc`/`gc_alloc_zeroed`/`gc_realloc`
-// intrinsics (docs/planning/ARCHITECTURE_OVERHAUL.md §8, include/Intrinsics.h
+// intrinsics (docs/planning/ARCHITECTURE_OVERHAUL.md §8, src/sema/Intrinsics.h
 // category 1) -- the Turf-visible surface for libturfrt's
 // turf_rt_alloc/turf_rt_alloc_zeroed/turf_rt_realloc, exercised directly
 // here rather than only indirectly through the stdlib call sites (strings.tr,
@@ -39,7 +39,7 @@ fn main(): int {
         // has NO valid C-string length at all (`strlen()` would read 0)
         // until every byte before the poison is nonzero. `s[i]`'s new
         // bounds check is checked against `strlen(s)` (see
-        // EmitStringBoundsCheck()'s doc comment, src/CodegenArray.cpp) --
+        // EmitStringBoundsCheck()'s doc comment, src/codegen/CodegenArray.cpp) --
         // exactly right for a real NUL-terminated string, but wrong for
         // inspecting a raw allocator block that isn't one. `char*` indexing
         // has no such check (same as any other raw pointer), which is what

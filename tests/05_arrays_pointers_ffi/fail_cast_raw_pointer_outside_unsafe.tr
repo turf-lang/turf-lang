@@ -6,7 +6,7 @@
 // cast, dereference) FINAL_SPRINT.md's Track A specifies. `r` is a `&int`
 // safe reference (no raw pointer declared anywhere) explicitly cast `to
 // int*`: `typesCompatible()` already allows `&T -> T*` implicitly (see
-// its Rule 2.5, src/Types.cpp), but an EXPLICIT cast still goes through
+// its Rule 2.5, src/sema/Types.cpp), but an EXPLICIT cast still goes through
 // the same gate check as any other cast involving a raw pointer type,
 // regardless of whether the conversion itself would have been implicitly
 // allowed -- the cast is checked (and fails) before `p`'s own

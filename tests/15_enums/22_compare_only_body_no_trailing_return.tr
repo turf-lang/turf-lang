@@ -10,7 +10,7 @@
 // only counts a predecessor of the virtual exit block against a function
 // if that predecessor is actually reachable (`Pred->isReachable()`), and
 // when every arm of an exhaustive compare returns, the compare's merge
-// block ends up with zero incoming edges (see src/CFG.cpp's visitCompare()
+// block ends up with zero incoming edges (see src/analysis/CFG.cpp's visitCompare()
 // doc comment) -- genuinely unreachable, and therefore correctly excluded
 // from the check. Re-verified live while auditing 99_known_bugs/ and found
 // to already compile and run correctly; moved here as a real passing test

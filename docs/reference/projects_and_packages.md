@@ -665,7 +665,7 @@ Both apply to `build`, `run`, `check` and `fetch`.
 **`--locked` is not `--offline`.** With a manifest the lock does not cover,
 `--locked` alone may still clone or fetch (it fetched `extra` above) before it
 reports the difference. A CI check that must not use the network passes both:
-`turf build --locked --offline`. That is what `scripts/examples_smoke.sh` runs
+`turf build --locked --offline`. That is what `scripts/smoke/examples_smoke.sh` runs
 against the committed lock files in `examples/`.
 
 ## 6. The cache
@@ -746,7 +746,7 @@ is 1.
 | `turf run [--offline] [--locked] [flags] [-- args]` | `turf build`, then run `build/<name>`, passing the arguments after `--`, in the directory you typed the command in. The exit status is the program's. A library says `turf: 'lb' is a library; there is nothing to run` (exit 1). |
 | `turf check [--offline] [--locked] [flags]` | Every diagnostic, no executable. |
 | `turf clean` | Delete `build/`. Nothing to delete is not an error. |
-| `turf graph [--project <dir>] [--offline] [--locked]` | Print the package graph (the JSON `turf build` writes to `build/package-graph.json`, format in `include/PackageGraph.h`) on stdout, including the root's `tests/` when the project has one. Writes nothing (no `turf.lock`, no `build/`) and needs no compiler. This is what the language server asks for, so that `import` in the editor resolves as in `turf build`. |
+| `turf graph [--project <dir>] [--offline] [--locked]` | Print the package graph (the JSON `turf build` writes to `build/package-graph.json`, format in `src/tooling/PackageGraph.h`) on stdout, including the root's `tests/` when the project has one. Writes nothing (no `turf.lock`, no `build/`) and needs no compiler. This is what the language server asks for, so that `import` in the editor resolves as in `turf build`. |
 | `turf fetch [--offline] [--locked]` | Do everything `build` does up to `turf.lock`, without compiling. Prints one line per git dependency: `jsonx de7262e335ed (tag=v1.0.0)`. Needs no compiler. |
 | `turf update [name…]` | Move git dependencies to what their refs point at now (section 5). |
 | `turf add <name> --path <dir>` / `--git <url> (--tag\|--branch\|--rev) <ref>` | Add a dependency (section 3). |

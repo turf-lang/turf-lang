@@ -62,7 +62,7 @@
 // parameter or return type, even inside `unsafe { }` (see
 // checkNoRawPointersInSignature()), so they now use `&T` instead --
 // reference-to-generic-param compatibility already works the identical
-// way pointer-to-generic-param compatibility always has (src/Types.cpp),
+// way pointer-to-generic-param compatibility always has (src/sema/Types.cpp),
 // via the same inheritance that makes `&T` a `TurfPointerType` underneath.
 import test;
 

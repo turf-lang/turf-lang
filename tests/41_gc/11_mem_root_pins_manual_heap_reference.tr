@@ -26,7 +26,7 @@
 // file proves survival and none of them prove "was reclaimed" at the
 // Turf-source level. The complementary "unroot() actually lets the
 // collector reclaim it" direction is proved instead by
-// scripts/gc_smoke.sh's own check 3, compiled with no optimization flags
+// scripts/smoke/gc_smoke.sh's own check 3, compiled with no optimization flags
 // at all -- unlike this file (which the runner also compiles at every
 // `-O` level), asserting "this exact byte count/live_count dropped to
 // zero" is only deterministic without an optimizer free to keep the one

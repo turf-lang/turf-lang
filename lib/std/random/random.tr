@@ -12,7 +12,7 @@
 //     deliberately separate, future module -- out of scope here.
 //   - Seeding: this language has NO mutable global/module-level state at
 //     all (only `export immut` constants exist; `export mut` is rejected at
-//     parse time, see src/ParserDecl.cpp's ExportMutNotSupportedError), so a
+//     parse time, see src/frontend/ParserDecl.cpp's ExportMutNotSupportedError), so a
 //     Turf module cannot hold "already seeded" or a generator's state. The
 //     RUNTIME can (it owns what must be true across the whole process,
 //     FREEZE.md 6.8 B2): libturfrt keeps one generator (runtime/turfrt_sys.c),

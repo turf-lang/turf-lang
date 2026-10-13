@@ -1,5 +1,5 @@
 // tests/13_string_stdlib/24_str_builder_no_heap_corruption.tr
-// Regression test: a compiler bug (src/CodegenVar.cpp's
+// Regression test: a compiler bug (src/codegen/CodegenVar.cpp's
 // AssignmentExprAST::codegen()) made every string-index assignment
 // (`buf[i] = someIntExpr;`) store a full 8-byte i64 at what is actually a
 // 1-byte `i8` slot -- silently overwriting 7 bytes past every character

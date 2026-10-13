@@ -197,7 +197,7 @@ operator<T> []=(l: List<T>, i: int, value: T): void {
 // typed `fn(T, T): int` never type-checked correctly at the call site:
 // nothing in the substitution machinery recursed into a `FuncType`'s own
 // parameter/return types (`collectGenericSubstitution()`/
-// `typesCompatible()` in `src/TypeCheckerCall.cpp`/`src/Types.cpp`,
+// `typesCompatible()` in `src/sema/TypeCheckerCall.cpp`/`src/sema/Types.cpp`,
 // `Monomorphize::substituteConcreteTypes()`, and
 // `Resolver::substituteTypeParams()` all special-cased pointers/arrays/
 // `GenericType`, but none had a `FuncType` case). Fixed directly in the

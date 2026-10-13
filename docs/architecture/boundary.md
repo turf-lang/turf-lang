@@ -13,10 +13,10 @@ Related docs:
   is the "boundary is now real, not just diagrammed" follow-up to).
 - `docs/architecture/pointers_and_references.md` §1.7/§2.5 — the
   raw-pointer capability mechanism this doc's §3 summarizes.
-- `include/Intrinsics.h` — the closed intrinsic list and the prelude
+- `src/sema/Intrinsics.h` — the closed intrinsic list and the prelude
   module list, both authoritative in that header; this doc explains the
   *why*, the header is the *what*.
-- `scripts/check_boundary.sh` — the mechanical enforcement for every claim
+- `scripts/check/check_boundary.sh` — the mechanical enforcement for every claim
   this document makes. Run it; do not take this document's word for it.
 
 ---
@@ -41,7 +41,7 @@ now actually true, not merely stated.
 
 ## 2. The closed intrinsic list
 
-`include/Intrinsics.h` is the single, enumerated answer to "what does the
+`src/sema/Intrinsics.h` is the single, enumerated answer to "what does the
 compiler know about by name?" — four categories, each recognized through a
 genuinely different mechanism (real lexer keywords, LLVM intrinsic IDs,
 `libturfrt` C entrypoints reached by name from Codegen-emitted IR, and the
@@ -49,8 +49,8 @@ prelude module list, §4 below). F-STD-2 (FREEZE.md §6.8): adding to it is
 an explicit, change-recorded act, never a silent side effect of unrelated
 work.
 
-**Enforcement.** `scripts/check_boundary.sh` check 3 cross-checks every
-name registered via `RegisterBuiltin(...)` in `src/Builtins.cpp`, plus the
+**Enforcement.** `scripts/check/check_boundary.sh` check 3 cross-checks every
+name registered via `RegisterBuiltin(...)` in `src/sema/Builtins.cpp`, plus the
 two lexer-level intrinsics (`sizeof`, `typeof`), against `Intrinsics.h`'s
 own text — a future addition to `g_builtins` that forgets to also document
 itself in `Intrinsics.h` fails this check.
@@ -66,7 +66,7 @@ explicitly rather than leaving for a future session to "discover":
 ### One documented exception
 
 `Codegen`'s own, independent type-inference helper — `getExprType()`
-(`src/CodegenCore.cpp`), the duplicate of the TypeChecker's `NodeTypes_`
+(`src/codegen/CodegenCore.cpp`), the duplicate of the TypeChecker's `NodeTypes_`
 that `ARCHITECTURE_OVERHAUL.md` §25 item 4 names and explicitly forbids
 unifying as a drive-by fix — has a last-resort fallback for a
 `FuncCallExprAST` it cannot otherwise type:
@@ -98,7 +98,7 @@ from unrelated refactors ("a large refactor with no user-visible benefit
 ... §9.7 gives a cheaper answer"). STD-001's own scope is boundary
 *enforcement*, not a rewrite of a neighboring, already-documented wart —
 doing so would be exactly the kind of "looks tempting from inside this
-feature group" mistake §25 exists to name. `scripts/check_boundary.sh`
+feature group" mistake §25 exists to name. `scripts/check/check_boundary.sh`
 therefore does not attempt to catch this class of fallback; it is recorded
 here instead, so it cannot be "discovered" again as if new.
 
@@ -113,12 +113,12 @@ from where the file lives on disk. The mechanism this replaced,
 entire `lib/std` tree raw-pointer privileges by location alone, invisible
 in the file that used it), no longer exists anywhere in the compiler.
 
-**Enforcement.** `scripts/check_boundary.sh` check 1 greps `src/` and
+**Enforcement.** `scripts/check/check_boundary.sh` check 1 greps `src/` and
 `include/` for a *live* reference to `IsPathUnderLibStd` (a definition or
 call site — doc-comment mentions explaining the history are excluded on
 purpose, see the script's own comment) and fails if one exists; it also
 confirms `HasRawPointerCapability()` — the declared-capability replacement,
-`src/ParserModule.cpp` — is still exported. This is what makes AGENTS.md's
+`src/frontend/ParserModule.cpp` — is still exported. This is what makes AGENTS.md's
 "No compiler special-casing; ordinary `.tr` files" claim about `lib/std`
 true for the raw-pointer capability specifically, and *tested* rather than
 merely asserted.
@@ -135,7 +135,7 @@ answers "is opting in ambient or does it need an explicit flag." See
 
 `int`, `double`, `bool`, `char`, `strings`, `array`, `io`, `math`, `sys` are
 auto-imported into every top-level compile with no `import` statement
-(`ParsePreludeImports()`, `src/ParserModule.cpp`), and `io`, `math` and `sys`
+(`ParsePreludeImports()`, `src/frontend/ParserModule.cpp`), and `io`, `math` and `sys`
 also have their public free functions callable by bare name
 (`PreludeBareModuleNames`; `FREEZE.md` §6.25) — see
 `docs/architecture/modules_and_scope_resolution.md` Part 1.3/2.4 for the
@@ -167,7 +167,7 @@ explicit, named list — checked *against* `core/`'s contents rather than
 matching F-STD-2's "explicit, change-recorded act" standard for the
 intrinsic list above.
 
-**Enforcement.** `scripts/check_boundary.sh` check 2 diffs
+**Enforcement.** `scripts/check/check_boundary.sh` check 2 diffs
 `PreludeModuleNames`'s declared contents against a live directory listing
 of `lib/std/core/*.tr` and fails on any drift in either direction — a
 module added to `core/` without updating the array, or vice versa, is
@@ -189,17 +189,17 @@ points at can be freed out from under it the moment nothing else roots it.
 This was found live at four sites (`lib/std/json/json.tr`'s per-element
 boxing, `showcase/kv_store_server.tr`'s per-entry boxing, and two
 compiler-emitted allocations — a message-carrying error value, an
-oversized `!T` success box — in `src/CodegenCore.cpp`), all four now fixed:
+oversized `!T` success box — in `src/codegen/CodegenCore.cpp`), all four now fixed:
 the two stdlib/showcase sites moved the boxed value into its containing
 `List<T>` by value instead (a `List<T>`'s own backing buffer is precisely
 traced, `docs/architecture/memory_model.md` §2.6), and the two
 compiler-emitted sites moved from a bare `malloc` to `turf_rt_alloc` with a
 real descriptor.
 
-**Enforcement.** `scripts/check_boundary.sh`:
+**Enforcement.** `scripts/check/check_boundary.sh`:
 - Check 4: `getOrCreateMallocFn()` (the bare-`malloc` helper both
   compiler-emitted sites used before this fix) has no remaining definition
-  or caller anywhere in `src/Codegen*.cpp` — deleted outright once its last
+  or caller anywhere in `src/codegen/Codegen*.cpp` — deleted outright once its last
   caller was migrated, so a reintroduction under any name calling `malloc`
   directly for a GC-heap-bound value is the thing to watch for if this
   check ever needs updating.

@@ -1,7 +1,7 @@
 // RUNTIME_ABORT_EXPECTED
 // EXPECT-RUNTIME: String index out of bounds
 // FDN-004 (D17, ROADMAP_v2.0.0.md): an index below the start must panic -- the
-// "normalized index < 0" half of EmitStringBoundsCheck() (src/CodegenArray.cpp),
+// "normalized index < 0" half of EmitStringBoundsCheck() (src/codegen/CodegenArray.cpp),
 // distinct from the "index >= strlen(s)" half fail_string_index_oob_read_
 // runtime.tr (this folder) already covers.
 //

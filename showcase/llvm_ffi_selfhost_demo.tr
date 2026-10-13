@@ -1,5 +1,5 @@
 // Proves a Turf program can drive LLVM's C API (llvm-c -- NOT the C++ API
-// this compiler's own src/Codegen.cpp uses internally, which isn't
+// this compiler's own src/codegen/ uses internally, which isn't
 // FFI-reachable at all) directly via `extern fn`: creating a real LLVM
 // context and module, building a real function's IR body
 // instruction-by-instruction through the C API's builder functions, and

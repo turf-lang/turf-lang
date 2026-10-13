@@ -26,7 +26,7 @@ Every public function, method and field is `snake_case` (`index_of`,
 `CLOCKS_PER_SEC`). Until 2.0 the library mixed in a dozen camelCase names
 (`isDigit`, `indexOf`, `tryGet`); they were renamed once, without aliases, so
 the surface does not carry two spellings forever. A script checks this on every
-CI run (`scripts/stdlib_surface_check.sh`).
+CI run (`scripts/check/stdlib_surface_check.sh`).
 
 ## 2. Failure: three kinds, three shapes
 
@@ -94,9 +94,9 @@ checked promise, not an intention:
 
 - `tests/46_stdlib_surface/` compiles and runs a use of every public item, so a
   removal or rename breaks a test.
-- `scripts/stdlib_surface_check.sh` fails if a public item exists that no file
+- `scripts/check/stdlib_surface_check.sh` fails if a public item exists that no file
   there mentions (a new name added without being locked) or is not
-  `snake_case`. It runs in CI and in `scripts/session_postflight.sh`.
+  `snake_case`. It runs in CI and in `scripts/dev/session_postflight.sh`.
 - Every module has its own behaviour tests under `tests/`.
 
 Exceptions, stated plainly: `mem::malloc_usable_size` and `mem::usable_size`

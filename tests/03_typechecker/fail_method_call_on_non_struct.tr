@@ -5,7 +5,7 @@
 //
 // Before this fix, TypeChecker::visitMethodCall()'s fallback ("be
 // permissive") left the call unresolved with zero diagnostic, and the pre-
-// pass's body codegen (src/main.cpp, sub-pass 3b) ran anyway regardless of
+// pass's body codegen (src/driver/main.cpp, sub-pass 3b) ran anyway regardless of
 // whether the pre-pass TypeChecker had found any errors -- reaching
 // Codegen's `llvm::report_fatal_error("Internal error: method call on
 // unsupported type. This is a compiler bug.")` and ABORTING THE WHOLE

@@ -13,7 +13,7 @@ test.tr."
 Related docs:
 - `docs/architecture/errors_and_recover.md` — the OTHER half of STD-002
   (§15.6(c), error payloads); unrelated mechanism, same feature group.
-- `include/Intrinsics.h` §1 — the `caller_location` bare-intrinsic entry.
+- `src/sema/Intrinsics.h` §1 — the `caller_location` bare-intrinsic entry.
 - `lib/std/testing/test.tr` — the real, shipped application: `assert`/`fail`
   are both `@caller_location`.
 
@@ -94,7 +94,7 @@ never appears anywhere in the output. See
 
 ### 3.1 Lexer
 
-One new keyword, `TOK_CALLER_LOCATION` (`include/Lexer.h`), mapped from the
+One new keyword, `TOK_CALLER_LOCATION` (`src/frontend/Lexer.h`), mapped from the
 literal `caller_location` — reserved exactly like `self` (`TOK_SELF`) is,
 so a user can never declare a variable or parameter with this name (no
 collision risk to worry about anywhere downstream).
@@ -102,17 +102,17 @@ collision risk to worry about anywhere downstream).
 ### 3.2 Parser
 
 **The `@caller_location` marker** — `ParsePrimaryBase()`'s `TOK_AT` case
-(`src/ParserCore.cpp`) is the ONLY legal use of `@` in this language (every
+(`src/frontend/ParserCore.cpp`) is the ONLY legal use of `@` in this language (every
 other `@word` still gets the pre-existing "no decorator syntax" rejection,
 unchanged): consumes `@`, then `caller_location`, then requires `fn` to
 follow, then delegates to `ParseFuncDef(/*HasCallerLocation=*/true)`.
 `ParseFuncDef()` threads this bool straight into `FuncDefExprAST`'s
-`HasCallerLocation` field (`include/ASTDecl.h`) — a plain constructor
+`HasCallerLocation` field (`src/frontend/ASTDecl.h`) — a plain constructor
 parameter, not a global/thread-local flag, keeping the parser reentrant-safe
 the same way every other parameter here already is (matters for
 `Sandbox.cpp`'s incremental reparse passes).
 
-`include/Parser.h`'s `IsTopLevelBoundaryToken()` doc comment (governing
+`src/frontend/Parser.h`'s `IsTopLevelBoundaryToken()` doc comment (governing
 `SkipToNextTopLevelBoundary()`'s panic-mode recovery) was updated to match:
 `@` is still excluded from the boundary-token set, but the REASON changed —
 every failure path through the new `TOK_AT` case still consumes at least
@@ -121,7 +121,7 @@ guaranteed even though "zero tokens consumed on failure" (the pre-STD-002
 invariant) no longer holds for the ONE now-legal spelling.
 
 **Reading the value** — `caller_location` gets its OWN tiny AST node,
-`CallerLocationExprAST` (`include/ASTExpr.h`), rather than falling through
+`CallerLocationExprAST` (`src/frontend/ASTExpr.h`), rather than falling through
 to the ordinary `VariableExprAST`/`self` path: the value it reads is never a
 real Turf-level declared parameter (see §3.3 for why), so it has no
 `ResolvedSymbol`, is never assignable, and must not be reachable through any
@@ -135,9 +135,9 @@ is **never** added to `Params`. This is the single design decision
 everything else follows from: keeping it out of the Turf-level, arity- and
 type-checked signature means ordinary overload resolution, mangling, and
 generic substitution all stay completely unaware this feature exists.
-`ResolverFunctionSymbol` (`include/ResolverSymbolBase.h`) gains a matching
+`ResolverFunctionSymbol` (`src/resolve/ResolverSymbolBase.h`) gains a matching
 `HasCallerLocation` bool, populated by `buildFunctionSymbol()`
-(`src/ResolverCore.cpp`) straight from the AST flag — this is the ONLY
+(`src/resolve/ResolverCore.cpp`) straight from the AST flag — this is the ONLY
 Resolver-visible trace of the feature; Resolver does no validation of
 `caller_location`'s own usage at all (see §3.4 for where that lives).
 
@@ -146,20 +146,20 @@ Resolver-visible trace of the feature; Resolver does no validation of
 Mirrors the `unsafe { }` gate's own shape exactly (`checkUnsafeGate()`,
 `docs/architecture/pointers_and_references.md` §2.5): TypeChecker alone
 decides whether `caller_location` is legal here, via one bool member,
-`InCallerLocationFunc_` (`include/TypeChecker.h`), save/restored around
+`InCallerLocationFunc_` (`src/sema/TypeChecker.h`), save/restored around
 `visitFuncDef()`'s body traversal (a `fn` CAN be declared lexically inside
 another function's body block in this language — `ParseBlock()` accepts a
 nested `fn` as an ordinary statement — so this must be save/restore, not a
 blind push/pop, to avoid an inner non-marked function inheriting the outer
 one's flag). `visitCallerLocation()` sets the node's type to `string` when
 `InCallerLocationFunc_`, else raises `CallerLocationOutsideMarkedFunctionError`
-(**E084**, `include/ErrorsFlow.h`).
+(**E084**, `src/diagnostics/ErrorsFlow.h`).
 
 ### 3.5 Codegen — the whole mechanism, in one paragraph
 
 A `@caller_location` function's REAL LLVM signature gets one extra trailing
 `i8*`/`ptr` parameter named `"caller_location"`
-(`FuncDefExprAST::codegen()`, `src/CodegenFunc.cpp`) — never reflected in
+(`FuncDefExprAST::codegen()`, `src/codegen/CodegenFunc.cpp`) — never reflected in
 `Params`, so the Turf-level signature Resolver/TypeChecker/mangling see is
 completely unaffected. The existing per-parameter alloca-binding loop
 already iterates `TheFunc->args()` (not `Params`), so it picks up this
@@ -171,7 +171,7 @@ same generic code every ordinary parameter already goes through.
 **Reading** (`CallerLocationExprAST::codegen()`) and **forwarding/stamping**
 (`FuncCallExprAST::codegen()`'s auto-supplied trailing argument, for a call
 to any `HasCallerLocation` callee) both funnel through one shared helper,
-`BuildCallerLocationValue(StampLoc)` (`src/CodegenCore.cpp`): if
+`BuildCallerLocationValue(StampLoc)` (`src/codegen/CodegenCore.cpp`): if
 `NamedValues` currently has a `"caller_location"` entry (i.e. Codegen is
 inside the body of a function ALSO declared `@caller_location`), forwards
 that function's own inherited value, loaded straight out of its alloca — no

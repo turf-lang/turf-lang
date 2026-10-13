@@ -22,7 +22,7 @@ unsafe module;
 // function '...'"). Discovered because that parse failure, when it happens
 // inside an imported module specifically, used to crash the whole compiler
 // with an unhandled C++ iostream exception instead of a clean diagnostic --
-// see ParseFile()'s error-recovery fix in src/Parser.cpp for the compiler-
+// see ParseFile()'s error-recovery fix in src/frontend/ParserModule.cpp for the compiler-
 // side half of this fix; this file is the "don't actually trigger it"
 // stdlib-side half.
 
@@ -45,7 +45,7 @@ pub extern fn realloc(p: void*, new_size: int): void*;
 // MEM-002: there used to be a plain `extern fn free(p: void*): void;` here,
 // bound straight to libc. It's gone -- Turf's `extern fn` has no alias
 // syntax (the declared Turf-level name IS the linked C symbol name,
-// verified live: `src/ParserDecl.cpp`'s ExternFuncDeclExprAST has exactly
+// verified live: `src/frontend/ParserDecl.cpp`'s ExternFuncDeclExprAST has exactly
 // one `Name_` field, used for both), so a checked wrapper could not also be
 // named `free` in this same file without colliding with it (the same
 // redeclaration conflict tests/21_extern_conflict/ exists to catch).

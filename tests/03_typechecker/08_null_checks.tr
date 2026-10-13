@@ -4,7 +4,7 @@
 // function" sub-cases below are no longer expressible through an ordinary
 // function boundary (getNullNode()/processNode() used to do exactly
 // that). Struct-field null-assignment covers the same underlying
-// null-compatibility rule (typesCompatible()'s Rule 1, src/Types.cpp)
+// null-compatibility rule (typesCompatible()'s Rule 1, src/sema/Types.cpp)
 // without needing a banned function signature.
 
 import test;
