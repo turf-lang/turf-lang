@@ -12,7 +12,7 @@ endif()
 # ─── Version ─────────────────────────────────────────────────────────────────
 # The compiler's release version, printed by `turfc --version` (line 1). The
 # `turf` front end has its own, independent version (FREEZE.md 6.16, F-PKG-1);
-# what the two must agree on is the driver interface in src/main.cpp, not
+# what the two must agree on is the driver interface in src/driver/main.cpp, not
 # this. CMAKE_CURRENT_SOURCE_DIR, not
 # CMAKE_SOURCE_DIR: turf-lsp consumes this file through add_subdirectory(),
 # where CMAKE_SOURCE_DIR is turf-lsp's own root and has no VERSION file.
@@ -43,7 +43,7 @@ option(TURF_STATIC_LLVM "Link LLVM statically (component libraries) instead of t
 # than TURF_STATIC_LLVM, which it implies:
 #   * every LLVM target is linked, because main.cpp calls InitializeAll*() and
 #     `--target=aarch64-...` must keep producing a real object file (REL-003,
-#     scripts/cross_target_smoke.sh);
+#     scripts/smoke/cross_target_smoke.sh);
 #   * LLVM's archives are named by path and its own system-library list is NOT
 #     used. LLVMExports.cmake hands the linker whatever the machine that built
 #     LLVM linked it with (on Ubuntu, `libz3.so`, a *shared* zlib and zstd), so
@@ -57,7 +57,7 @@ option(TURF_STATIC_LLVM "Link LLVM statically (component libraries) instead of t
 #     for this machine (see LLAMA_RELEASE_ARGS): no OpenMP (ggml then uses its
 #     own threads, so no libgomp/libomp is needed at run time) and no
 #     -march=native. On macOS it links Metal/Accelerate/Foundation, which are
-#     the operating system's own frameworks (scripts/release_deps_check.sh
+#     the operating system's own frameworks (scripts/release/release_deps_check.sh
 #     allows them for a smart archive only). No model is built in or shipped:
 #     --smart runs the one .gguf the user puts in <root>/models.
 # What this does NOT do: remove the dependency on the C library and the system
@@ -69,7 +69,7 @@ if(TURF_RELEASE_STATIC)
 endif()
 
 # REL-008 stages 3-4: lld inside turfc, so a program that names no system C
-# library beyond the C runtime is linked in-process (src/BundledLink.cpp) against
+# library beyond the C runtime is linked in-process (src/codegen/BundledLink.cpp) against
 # the runtime the archive carries (lib/rt/<platform>/) instead of by `cc`. Only
 # the linker driver for the host's object format is linked: ELF on Linux, MinGW
 # (COFF) on Windows, Mach-O on macOS. It needs the static lld archives (Ubuntu's
@@ -163,7 +163,7 @@ if(TURF_RELEASE_STATIC)
     endif()
     # LLVMWindowsManifest (lld's COFF driver merges manifests with it) is
     # exported as linking libxml2, a DLL on MSYS2 that would end up beside
-    # turfc.exe. turfc never merges a manifest; src/BundledLinkWindowsShims.cpp
+    # turfc.exe. turfc never merges a manifest; src/codegen/BundledLinkWindowsShims.cpp
     # provides the few symbols the object file references.
     if(TARGET LLVMWindowsManifest)
       set_property(TARGET LLVMWindowsManifest PROPERTY INTERFACE_LINK_LIBRARIES LLVMSupport)
@@ -218,8 +218,8 @@ endif()
 # llama.cpp is only what `--smart` runs its model on, yet it used to be a hard
 # build dependency: a source build that only wanted to print hello world had to
 # clone the submodule and build an ML runtime first (and link OpenMP, and on
-# macOS Metal/Accelerate). OFF compiles src/SLMEngineDisabled.cpp instead of
-# src/SLMEngine.cpp -- the only file that includes llama.h -- and `--smart`
+# macOS Metal/Accelerate). OFF compiles src/slm/SLMEngineDisabled.cpp instead of
+# src/slm/SLMEngine.cpp -- the only file that includes llama.h -- and `--smart`
 # then says it is not built in and shows the compiler's own diagnostics, which
 # is what it already does when the model file is missing. Deterministic fixes
 # and every other compiler feature are unaffected.
@@ -398,11 +398,11 @@ endif()
 endif() # TURF_SMART
 
 # The one translation unit that differs: the real engine needs llama.h, the
-# stub needs nothing (include/SLMEngine.h only forward-declares llama types).
+# stub needs nothing (src/slm/SLMEngine.h only forward-declares llama types).
 if(TURF_SMART)
-  set(TURF_SLM_ENGINE_SOURCE src/SLMEngine.cpp)
+  set(TURF_SLM_ENGINE_SOURCE src/slm/SLMEngine.cpp)
 else()
-  set(TURF_SLM_ENGINE_SOURCE src/SLMEngineDisabled.cpp)
+  set(TURF_SLM_ENGINE_SOURCE src/slm/SLMEngineDisabled.cpp)
 endif()
 
 # ─── Core library (everything but main.cpp) ─────────────────────────────────
@@ -415,61 +415,64 @@ endif()
 # instead of duplicating it. `turfc` itself now links this instead of
 # recompiling the same sources a second time.
 add_library(turfcore STATIC
-  src/Algorithms.cpp
-  src/AliasAnalysis.cpp
-  src/Analysis.cpp
-  src/AnalysisFacade.cpp
-  src/Builtins.cpp
-  src/CFG.cpp
-  src/CodegenCore.cpp
-  src/CodegenExpr.cpp
-  src/CodegenVar.cpp
-  src/CodegenControlFlow.cpp
-  src/CodegenPattern.cpp
-  src/CodegenFunc.cpp
-  src/CodegenArray.cpp
-  src/CodegenStruct.cpp
-  src/Formatter.cpp
-  src/MigratePub.cpp
-  src/Lexer.cpp
-  src/Lint.cpp
-  src/Monomorphize.cpp
-  src/ParserCore.cpp
-  src/ParserLiteral.cpp
-  src/ParserStmt.cpp
-  src/ParserDecl.cpp
-  src/ParserModule.cpp
-  src/PackageGraph.cpp
-  src/Sandbox.cpp
+  src/analysis/Algorithms.cpp
+  src/analysis/AliasAnalysis.cpp
+  src/analysis/Analysis.cpp
+  src/tooling/AnalysisFacade.cpp
+  src/sema/Builtins.cpp
+  src/analysis/CFG.cpp
+  src/codegen/CodegenCore.cpp
+  src/codegen/CodegenExpr.cpp
+  src/codegen/CodegenVar.cpp
+  src/codegen/CodegenControlFlow.cpp
+  src/codegen/CodegenPattern.cpp
+  src/codegen/CodegenFunc.cpp
+  src/codegen/CodegenArray.cpp
+  src/codegen/CodegenStruct.cpp
+  src/tooling/Formatter.cpp
+  src/tooling/MigratePub.cpp
+  src/frontend/Lexer.cpp
+  src/analysis/Lint.cpp
+  src/sema/Monomorphize.cpp
+  src/frontend/ParserCore.cpp
+  src/frontend/ParserLiteral.cpp
+  src/frontend/ParserStmt.cpp
+  src/frontend/ParserDecl.cpp
+  src/frontend/ParserModule.cpp
+  src/tooling/PackageGraph.cpp
+  src/slm/Sandbox.cpp
   ${TURF_SLM_ENGINE_SOURCE}
-  src/SLMIntegration.cpp
-  src/ResolverSymbolTable.cpp
-  src/ResolverScopeTable.cpp
-  src/ResolverModuleTable.cpp
-  src/ResolverTypeRegistry.cpp
-  src/ResolverCore.cpp
-  src/ResolverExpr.cpp
-  src/ResolverStmt.cpp
-  src/ResolverDecl.cpp
-  src/ResolverCall.cpp
-  src/ResolverTypeIdentity.cpp
-  src/ResolverVisibility.cpp
-  src/SymbolTable.cpp
-  src/TypeCheckerCore.cpp
-  src/TypeCheckerExpr.cpp
-  src/TypeCheckerStmt.cpp
-  src/TypeCheckerDecl.cpp
-  src/TypeCheckerCall.cpp
-  src/TypeCheckerVisibility.cpp
-  src/TypeCheckerPattern.cpp
-  src/TypeCheckerSlice.cpp
-  src/Types.cpp
-  src/TypeWalk.cpp
-  src/ValueRange.cpp
+  src/slm/SLMIntegration.cpp
+  src/resolve/ResolverSymbolTable.cpp
+  src/resolve/ResolverScopeTable.cpp
+  src/resolve/ResolverModuleTable.cpp
+  src/resolve/ResolverTypeRegistry.cpp
+  src/resolve/ResolverCore.cpp
+  src/resolve/ResolverExpr.cpp
+  src/resolve/ResolverStmt.cpp
+  src/resolve/ResolverDecl.cpp
+  src/resolve/ResolverCall.cpp
+  src/resolve/ResolverTypeIdentity.cpp
+  src/resolve/ResolverVisibility.cpp
+  src/resolve/SymbolTable.cpp
+  src/sema/TypeCheckerCore.cpp
+  src/sema/TypeCheckerExpr.cpp
+  src/sema/TypeCheckerStmt.cpp
+  src/sema/TypeCheckerDecl.cpp
+  src/sema/TypeCheckerCall.cpp
+  src/sema/TypeCheckerVisibility.cpp
+  src/sema/TypeCheckerPattern.cpp
+  src/sema/TypeCheckerSlice.cpp
+  src/sema/Types.cpp
+  src/sema/TypeWalk.cpp
+  src/analysis/ValueRange.cpp
 )
 
+# `include` carries the public API (turf/Analysis.h); `src` lets every
+# subsystem header be included as "frontend/Parser.h", "sema/Types.h", ...
 target_include_directories(turfcore PUBLIC
   include
+  src
   ${LLVM_INCLUDE_DIRS}
 )
 if(TURF_SMART)
@@ -554,9 +557,9 @@ target_link_libraries(turfcore PUBLIC
 # A small, standalone C static library -- NOT linked into the `turfc`
 # compiler binary itself (turfcore/turfc never call into it). It is linked
 # into every COMPILED TURF PROGRAM instead, via `-lturfrt` at
-# src/main.cpp's linkObject() -- see that function's own comment for why the
+# src/driver/main.cpp's linkObject() -- see that function's own comment for why the
 # library must land where TurfInstallRoot() (exported from
-# src/ParserModule.cpp, the same anchor `import` uses for lib/std) can find
+# src/frontend/ParserModule.cpp, the same anchor `import` uses for lib/std) can find
 # it with zero setup in a plain dev build: TurfInstallRoot()'s fallback
 # (no TURF_HOME set) resolves to `<binary-dir>/..`, i.e. this repo's own
 # root for a `build/turfc` dev build -- so the archive's own output directory
@@ -599,7 +602,7 @@ target_compile_options(turfrt PRIVATE -Wall -Wextra)
 # same sources, existing ONLY to answer MEM-002's own disclosed open
 # question: "the register-scanning technique has not been cross-validated
 # ... before this collector is exercised under load." A hand-written C
-# harness compiled directly against `turfrt`'s own .a (scripts/gc_smoke.sh)
+# harness compiled directly against `turfrt`'s own .a (scripts/smoke/gc_smoke.sh)
 # already gets ASan coverage informally (MEM-002's own change record
 # describes exactly this, ad hoc, during that group's development) -- this
 # target makes it a real, always-available, CI-exercised build product
@@ -649,15 +652,15 @@ endif()
 # The test runner (REL-002, `turfc --test`) belongs to the executable, not to
 # turfcore: it starts processes and is of no use to a tool linking the
 # front-end library.
-add_executable(turfc src/main.cpp src/TestRunner.cpp src/TestExpectations.cpp
-  src/BundledLink.cpp)
+add_executable(turfc src/driver/main.cpp src/tooling/TestRunner.cpp
+  src/tooling/TestExpectations.cpp src/codegen/BundledLink.cpp)
 
 if(TURF_EMBED_LLD)
   target_compile_definitions(turfc PRIVATE TURF_EMBED_LLD)
   if(WIN32)
     # MSYS2's lld archives call libxml2 and llvm::demangle through import-table
     # slots a static link does not have; see the file's own comment.
-    target_sources(turfc PRIVATE src/BundledLinkWindowsShims.cpp)
+    target_sources(turfc PRIVATE src/codegen/BundledLinkWindowsShims.cpp)
   endif()
   # Before turfcore: a static archive only resolves symbols from archives that
   # come after it, and lld needs LLVM's.

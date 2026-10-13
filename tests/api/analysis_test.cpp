@@ -1,7 +1,7 @@
 // SMP-001: unit tests for the compiler query facade (include/turf/Analysis.h).
 //
 // Built as `turf-api-tests` next to `turf` (so the facade finds lib/std the
-// same way the compiler does) and run by CI and scripts/session_postflight.sh.
+// same way the compiler does) and run by CI and scripts/dev/session_postflight.sh.
 // Not a `.tr` test: what is under test is a C++ API and the global state it
 // must leave untouched, neither of which a Turf program can observe.
 //
@@ -13,12 +13,12 @@
 
 #include "turf/Analysis.h"
 
-#include "Formatter.h"
-#include "Lexer.h"
-#include "MigratePub.h"
-#include "Parser.h"
-#include "SymbolTable.h"
-#include "Types.h"
+#include "frontend/Lexer.h"
+#include "frontend/Parser.h"
+#include "resolve/SymbolTable.h"
+#include "sema/Types.h"
+#include "tooling/Formatter.h"
+#include "tooling/MigratePub.h"
 
 #include <filesystem>
 #include <fstream>

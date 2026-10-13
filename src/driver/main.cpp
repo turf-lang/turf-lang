@@ -1,0 +1,2638 @@
+/**
+ * @file main.cpp
+ * @brief TurfLang Compiler entry point.
+ * @details Parses command-line arguments, orchestrates the lexing, parsing,
+ *          and code generation passes, and writes the compiled binary or IR
+ * output.
+ *
+ * @author a2ys
+ * @author AaravTandon24
+ * @author Karan
+ *
+ * @copyright Copyright (c) 2026 TurfLang contributors. Licensed under the
+ * Apache License.
+ * @version 1.0.0
+ * @date 2026-05-25
+ */
+
+#include "analysis/Algorithms.h"
+#include "sema/Builtins.h"
+#include "codegen/BundledLink.h"
+#include "codegen/Codegen.h"
+#include "diagnostics/Colors.h"
+#include "diagnostics/ErrorCategory.h"
+#include "diagnostics/ErrorCodes.h"
+#include "tooling/Formatter.h"
+#include "frontend/Lexer.h"
+#include "analysis/Lint.h"
+#include "tooling/MigratePub.h"
+#include "frontend/Parser.h"
+#include "tooling/PackageGraph.h"
+#include "analysis/CFG.h"
+#include "sema/Monomorphize.h" // TYPE-002 (S11b): --dump-instantiations
+#include "resolve/Resolver.h"
+#include "sema/TypeChecker.h"
+#include "tooling/TestRunner.h"
+#include "slm/SLMEngine.h"
+#include "resolve/SymbolTable.h"
+#include "sema/Types.h"
+#include "frontend/ASTPrinter.h"
+#include "llvm/Config/llvm-config.h"
+#include "llvm/IR/LegacyPassManager.h"
+#include "llvm/IR/Verifier.h"
+#include "llvm/MC/TargetRegistry.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Signals.h"
+#include "llvm/Support/TargetSelect.h"
+#include "llvm/Support/raw_ostream.h"
+#include "llvm/Target/TargetMachine.h"
+#include "llvm/Target/TargetOptions.h"
+#include "llvm/TargetParser/Host.h"
+#include "llvm/TargetParser/Triple.h"
+#include "llvm/Transforms/IPO/GlobalDCE.h"
+#include "llvm/Transforms/IPO/Internalize.h"
+#include "llvm/Analysis/CGSCCPassManager.h"
+#include "llvm/Analysis/LoopAnalysisManager.h"
+#include "llvm/IR/PassManager.h"
+#include "llvm/Passes/PassBuilder.h"
+#include <cctype>
+#include <cerrno>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include "llvm/ADT/SmallString.h"
+#include "llvm/Support/Path.h"
+#include <set>
+#include <sstream>
+#include <vector>
+#ifdef _WIN32
+#include <csignal>   // signal, SIGABRT
+#include <fcntl.h>   // _O_BINARY
+#include <io.h>      // _setmode, _fileno
+#include <process.h> // _spawnvp, _P_WAIT
+#else
+#include <sys/wait.h> // waitpid, WIFEXITED, WEXITSTATUS
+#include <unistd.h>   // fork, execvp
+
+// REL-004: a TURF_COVERAGE build (gcov) writes its counters from an atexit
+// handler, and this file leaves through std::_Exit() on purpose (see main()),
+// which skips every atexit handler -- so such a build reported 0% for the whole
+// compiler. Flush by hand at each _Exit. Compiles to nothing otherwise.
+#ifdef TURF_COVERAGE
+extern "C" void __gcov_dump(void);
+#define TURF_FLUSH_COVERAGE() __gcov_dump()
+#else
+#define TURF_FLUSH_COVERAGE() ((void)0)
+#endif
+#endif
+
+using namespace llvm;
+
+// Single-sourced from the repo-root VERSION file by CMakeLists.txt so the
+// compiler and the `turf` front end cannot be built at different versions;
+// a missing definition must stop the build, not print a made-up version that
+// the front end's handshake would then either trust or reject at random.
+#ifndef TURF_VERSION
+#error "TURF_VERSION must be defined by the build (CMakeLists.txt reads it from VERSION)"
+#endif
+
+// The driver interface (FREEZE.md 6.16, F-PKG-1): what the `turf` front end,
+// or any tool driving this binary, may rely on. turfc and turf are released
+// independently, so the RELEASE version above says nothing about whether they
+// work together. This does, and `turf` refuses a compiler whose interface it
+// does not speak.
+//
+// Covered: the flags a driver passes (--check, --module, --dump-*, --format,
+// --write, --migrate=, --explain, -o; the package-graph input from LEC-001
+// stage 4), the first two lines of `--version`, exit statuses (ExitOk,
+// ExitError, ExitUsage below), and every other argument being accepted
+// exactly as a direct invocation accepts it.
+//
+// Bump MINOR for anything additive (a new flag, a new input); a driver that
+// needs it asks for the new minor, and older drivers keep working. Bump MAJOR,
+// and reset MINOR, when anything covered is removed or changes meaning --
+// that is what makes every existing driver refuse this compiler instead of
+// misbehaving with it.
+//
+// History: 1.0 (LEC-001 stage 2) the first interface; 1.1 (stage 4) adds
+// `--package-graph <file>`; 1.2 (REL-001) adds the `help` command, the
+// llvm/runtime/root lines of `--version`, and freezes exit status 2 for a
+// usage error (it was 1, indistinguishable from a compile error). A driver
+// that does not look at the status of a malformed command line is unaffected,
+// which is why this is a minor bump and `turf` still needs only 1.1. 1.3
+// (REL-002) adds `turfc --test` and the `"tests"` key of the package graph;
+// only `turf test` asks for it, so every other command still needs only 1.1.
+// 1.4 (REL-002 stage 2) makes `--format` take several files, adds `--format
+// --check`, and verifies every result before it is written; only `turf fmt`
+// asks for it. 1.5 adds `--format --skip-unlexable`, which `turf fmt` passes
+// for the files it found by walking a directory.
+static constexpr int TurfcInterfaceMajor = 1;
+// 1.6 adds `--emit-obj` (write the object, never link); a driver that wants
+// it asks for 1.6, everything else still needs 1.1.
+static constexpr int TurfcInterfaceMinor = 6;
+
+// The exit statuses (FREEZE.md 6.21, F-CLI-1, REL-001). The split exists so a script
+// or an editor can tell "your program has a mistake" (1: the compiler ran and
+// reported it, or could not read/write a file it was asked to) from "you
+// called the tool wrongly" (2: nothing was compiled). Anything else a shell
+// reports (126/127, 128+signal) is the shell's or the OS's, not ours.
+static constexpr int ExitOk = 0;
+static constexpr int ExitError = 1;
+static constexpr int ExitUsage = 2;
+
+// OPT-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §17.2): the five levels
+// the CLI's `-O` flag selects. Os is not "O1 through O3 plus one more" --
+// it is `PassBuilder::buildPerModuleDefaultPipeline(OptimizationLevel::Os)`,
+// a genuinely different pipeline tuned for size over throughput -- so this
+// is its own enum, not an int a caller could accidentally compare/clamp as
+// if the levels were totally ordered by "more optimization."
+enum class OptLevelKind { O0, O1, O2, O3, Os };
+
+// CLI helpers
+struct CompilerOptions {
+  std::string InputFile;
+  std::string OutputName;             // default derived from input later
+  bool EmitLLVM = false;              // --emit-llvm: write .ll instead
+  bool EmitObj = false;               // --emit-obj: write the .o, never link
+  bool AIEnabled = false;             // --smart: enable SLM AI suggestions
+  std::string SmartFixOutPath;        // --smart-write-fix=<path>: write the first validated --smart fix's full patched source here (SLM-001 follow-up)
+  bool AllowUnsafeModules = false;    // --allow-unsafe-modules: LANG-002, honor `unsafe module;` outside the install root
+  bool ShowStdlibWarnings = false;    // --stdlib-warnings: OVH-012, print warnings anchored inside lib/std instead of hiding them
+  bool DumpAST = false;               // --dump-ast: print AST via ASTPrinter
+  bool RunResolver = false;           // --resolve: run Resolver pass (shadow mode, Issue #4)
+  bool DumpResolverSymbols = false;   // --dump-resolver-symbols: print symbol table after resolution
+  bool DumpResolved = false;          // --dump-resolved: run Resolver then print annotated AST (Issue #5)
+  bool Check = false;                 // --check: LEC-001 -- run every diagnostic, write no output file
+  bool CheckAsModule = false;         // --module (with --check): the file is an imported module, so no `main` is required
+  std::string PackageGraphFile;       // --package-graph <file>: LEC-001 stage 4, a package build (PackageGraph.h)
+  bool RunTypeChecker = false;        // --typecheck: run TypeChecker pass (shadow mode, Issue #7)
+  bool DumpTypechecked = false;       // --dump-typechecked: run TypeChecker then print type-annotated AST
+  bool DumpModules = false;           // --dump-modules: print full module-system introspection
+  bool DumpInstantiations = false;    // --dump-instantiations: TYPE-002 (S11b) report-only census
+  bool Format = false;                // --format: print the formatted source to stdout and exit
+  bool FormatWrite = false;           // --write (with --format or --migrate=pub): rewrite the file(s) in place instead
+  bool FormatSkipUnlexable = false;   // --skip-unlexable (with --format --write|--check): a file the lexer rejects is reported as skipped, not as a failure
+  bool MigratePub = false;            // --migrate=pub: LEC-002 -- add `pub` to every top-level declaration and struct field of the given files
+  std::vector<std::string> PositionalFiles; // every non-option argument, in order (--migrate=pub takes several)
+  std::vector<std::string> LinkLibs;  // --link <name>: extra libraries to pass to the linker as -l<name>
+  // OPT-001: `-O2` is the FROZEN default (FREEZE.md §6.10/§17.2) so a user
+  // who never passes `-O` at all sees the exact optimization behavior this
+  // milestone shipped as its baseline, not the weakest level.
+  OptLevelKind OptLevel = OptLevelKind::O2;      // -O0/-O1/-O2/-O3/-Os
+  std::string TargetTriple;           // --target=<triple>; empty = host
+  std::string MCPU;                   // -mcpu=<cpu>; empty = "generic" (unchanged default)
+  bool DebugInfo = false;             // -g: emit DWARF debug info (TOOL-001)
+};
+
+// `turfc --explain E0NN` is the HUMAN-facing side of error-code
+// documentation -- read straight in a terminal, so it's rendered with
+// actual colors/structure instead of a flat file dump (see
+// printHumanExplainDoc() below). It is NOT what a future
+// `--explain-to-slm` would use: that flag (not implemented yet) would read
+// the parallel docs/slm/codes/ tree instead -- plain, uncolored grounding
+// text meant for the model, not a person. Keeping the two trees (and this
+// comment) separate is deliberate -- see ErrorCodes::getHumanCodeDocPath()/
+// getSlmCodeDocPath()'s own doc comment in ErrorCodes.h for why.
+//
+// This mode takes no input .tr file, so it's handled before parseArgs()
+// (which requires and validates one) rather than folded into
+// CompilerOptions. Doc resolution is a three-tier fallback, most-specific
+// first:
+//   1. A per-code human doc, "docs/errors/codes/E0NN.txt" (ErrorCodes::
+//      getHumanCodeDocPath()) -- opt-in, only written for codes where the
+//      coarser tiers below conflate genuinely distinct mistakes (e.g. E068
+//      "unknown struct field" vs E054 "unknown struct method").
+//   2. A construct-specific doc derived from the code's own short
+//      Description run through the SAME keyword classifier
+//      (extractContextKeyword()) the live --smart pipeline already uses on
+//      real error messages -- e.g. "Struct method not found" contains
+//      "struct" and routes to docs/slm/structs.txt, matching what a live
+//      compile of that same error class would show.
+//   3. The plain per-category doc (SLM::getCategoryDocPath() with no
+//      keyword) -- the original, coarsest fallback.
+// Tiers 2 and 3 both read from docs/slm/ (there's no per-category human
+// tree -- only per-code docs are split by audience so far) but are still
+// rendered through the same human colorizer either way.
+// See issue #241 Track D.
+
+// Prints one line of body prose, highlighting `backtick`-quoted spans --
+// the docs already write inline identifiers/snippets this way ("the
+// `password` field") -- in bold green and stripping the backticks
+// themselves, rather than printing them literally. Bold (vs. a code
+// block's plain green) so a reader can tell "this is a snippet worth
+// noticing inline" from "this is a full sample to read" at a glance.
+// Deliberately minimal -- balanced backtick pairs only, no nesting, no
+// other markdown -- so doc authors don't need to learn real markdown.
+static void printBodyLine(const std::string &Line) {
+  size_t Pos = 0;
+  while (Pos < Line.size()) {
+    size_t Open = Line.find('`', Pos);
+    if (Open == std::string::npos) {
+      std::cout << Line.substr(Pos);
+      return;
+    }
+    size_t Close = Line.find('`', Open + 1);
+    if (Close == std::string::npos) {
+      // Unmatched backtick -- print the remainder literally rather than
+      // silently eating it while searching for a partner that isn't there.
+      std::cout << Line.substr(Pos);
+      return;
+    }
+    std::cout << Line.substr(Pos, Open - Pos) << Colors::BOLD
+              << Colors::BRIGHT_GREEN
+              << Line.substr(Open + 1, Close - Open - 1) << Colors::RESET;
+    Pos = Close + 1;
+  }
+}
+
+// Renders a doc file (docs/errors/codes/*.txt, or a docs/slm/*.txt
+// category/construct fallback -- both already follow the same loose shape)
+// with real terminal color instead of a flat rdbuf() dump: the first
+// non-blank line is treated as a title, any line indented 4+ spaces is
+// treated as a code sample (the exact convention every docs/slm/*.txt file
+// already uses for its own examples), and everything else is body prose
+// (which additionally gets `backtick` spans highlighted -- see
+// printBodyLine() above). Deliberately simple -- no markdown beyond that
+// one convention, no nested spans -- so doc authors don't need to learn a
+// new syntax; it works with the shape these files already have.
+static void printHumanExplainDoc(std::istream &Doc) {
+  std::string Line;
+  bool PrintedTitle = false;
+
+  while (std::getline(Doc, Line)) {
+    if (!PrintedTitle) {
+      if (Line.empty())
+        continue; // skip leading blank lines before the title
+      std::cout << Colors::BOLD << Colors::BRIGHT_CYAN << Line
+                << Colors::RESET << "\n";
+      PrintedTitle = true;
+      continue;
+    }
+
+    size_t FirstNonSpace = Line.find_first_not_of(' ');
+    bool IsCode = FirstNonSpace != std::string::npos && FirstNonSpace >= 4;
+    if (IsCode) {
+      std::cout << Colors::BRIGHT_GREEN << Line << Colors::RESET << "\n";
+    } else {
+      printBodyLine(Line);
+      std::cout << "\n";
+    }
+  }
+}
+
+/// `turfc --migrate=pub [--write] <module.tr>...` (LEC-002 stage 6): put `pub`
+/// on every top-level declaration and struct field of each file, so a module
+/// written for 1.x -- where everything was visible to importers -- keeps
+/// exactly that surface under 2.0's private-by-default rule. Without
+/// `--write` it only REPORTS what it would change (a line-by-line before/after
+/// per touched line) and modifies nothing; with `--write` it rewrites the
+/// files in place. Files with nothing to add are not mentioned, so running it
+/// twice is quiet. Exit status is 1 only if a file could not be read or
+/// written; "there was something to migrate" is not a failure.
+static int runMigratePub(const std::vector<std::string> &Files, bool Write) {
+  if (Files.empty()) {
+    std::cerr << "Usage: turfc --migrate=pub [--write] <module.tr>...\n"
+                 "  Adds `pub` to every top-level fn/struct/enum/error/machine/extern fn and\n"
+                 "  every struct field, i.e. the exact 1.x behaviour, as a starting point.\n"
+                 "  Without --write it only reports what it would change.\n";
+    return ExitUsage;
+  }
+
+  auto splitLines = [](const std::string &Text) {
+    std::vector<std::string> Lines;
+    size_t Start = 0;
+    while (true) {
+      size_t Nl = Text.find('\n', Start);
+      if (Nl == std::string::npos) {
+        Lines.push_back(Text.substr(Start));
+        break;
+      }
+      Lines.push_back(Text.substr(Start, Nl - Start));
+      Start = Nl + 1;
+    }
+    return Lines;
+  };
+
+  int Status = 0;
+  size_t FilesTouched = 0, Marks = 0;
+  for (const auto &Path : Files) {
+    std::ifstream In(Path, std::ios::binary);
+    if (!In) {
+      std::cerr << "Error: Could not open file " << Path << "\n";
+      Status = 1;
+      continue;
+    }
+    std::stringstream Buf;
+    Buf << In.rdbuf();
+    const std::string Original = Buf.str();
+
+    auto Result = turf::migrate::migratePub(Original);
+    if (Result.Insertions.empty())
+      continue;
+    ++FilesTouched;
+    Marks += Result.Insertions.size();
+
+    if (Write) {
+      std::ofstream Out(Path, std::ios::trunc | std::ios::binary);
+      Out << Result.Text;
+      if (!Out) {
+        std::cerr << "Error: Could not write file " << Path << "\n";
+        Status = 1;
+        continue;
+      }
+    }
+
+    std::cout << (Write ? "migrated " : "would migrate ") << Path << " ("
+              << Result.Insertions.size() << " `pub`)\n";
+    if (!Write) {
+      const auto Old = splitLines(Original);
+      const auto New = splitLines(Result.Text);
+      int LastLine = -1;
+      for (const auto &I : Result.Insertions) {
+        if (I.Line == LastLine || I.Line < 1 || I.Line > static_cast<int>(Old.size()) ||
+            I.Line > static_cast<int>(New.size()))
+          continue;
+        LastLine = I.Line;
+        std::cout << "  " << Path << ":" << I.Line << ":\n"
+                  << "    - " << Old[I.Line - 1] << "\n"
+                  << "    + " << New[I.Line - 1] << "\n";
+      }
+    }
+  }
+
+  std::cout << (Write ? "Migrated " : "Would migrate ") << Marks << " declaration"
+            << (Marks == 1 ? "" : "s") << "/field" << (Marks == 1 ? "" : "s")
+            << " in " << FilesTouched << " file" << (FilesTouched == 1 ? "" : "s") << ".";
+  if (!Write && FilesTouched)
+    std::cout << " Re-run with --write to apply.";
+  std::cout << "\n";
+  return Status;
+}
+
+static void handleExplainFlagIfPresent(int argc, char **argv) {
+  for (int i = 1; i < argc; ++i) {
+    if (std::string(argv[i]) != "--explain")
+      continue;
+
+    if (i + 1 >= argc) {
+      std::cerr << "Usage: turfc --explain E0NN\n";
+      std::exit(ExitUsage);
+    }
+
+    std::string Code = argv[i + 1];
+    const ErrorCodeEntry *Entry = ErrorCodes::lookupByCode(Code);
+    if (!Entry) {
+      std::cerr << "Unknown error code: " << Code
+                << "\nRun `turf --explain E0NN` with a code shown in an "
+                   "error's \"[E0NN]\" header, e.g. `turf --explain E001`.\n";
+      std::exit(ExitUsage);
+    }
+
+    std::cout << Colors::BOLD << Colors::BRIGHT_CYAN << Entry->Code
+              << Colors::RESET << "  " << Entry->ClassName << " ("
+              << SLM::getCategoryName(Entry->Category) << ")\n\n";
+
+    std::string DocPath = ErrorCodes::getHumanCodeDocPath(Entry->Code);
+    if (DocPath.empty()) {
+      std::string Keyword = SLM::extractContextKeyword(Entry->Description);
+      // Category docs come back relative; resolve them against the install
+      // root like the per-code ones (InstalledDocPath(), ErrorCodes.h), not
+      // against whatever directory `turf explain` was run from.
+      DocPath = InstalledDocPath(SLM::getCategoryDocPath(Entry->Category, Keyword));
+    }
+    std::ifstream Doc(DocPath);
+    if (Doc.is_open()) {
+      printHumanExplainDoc(Doc);
+    } else {
+      // Doc file missing from the installation (a partial install) --
+      // fall back to the short auto-generated description rather than
+      // printing nothing.
+      std::cout << Entry->Description << ".\n";
+    }
+
+    std::exit(0);
+  }
+}
+
+/// The text of `turfc help`, and the same block after "Usage:" when no input
+/// file was given. `turfc --help` is deliberately NOT accepted: the owner's
+/// REL-001 decision is `turfc help` and `turf help` (a flag-free spelling, so
+/// no source file can be mistaken for it), and the unknown-option message
+/// below points there.
+static const char *turfcUsage() {
+  return "Usage: turfc <filename.tr> [-o output] [--emit-llvm | --emit-obj] [--smart]\n"
+         "         [--smart-write-fix=<path>] [--link <libname>]\n"
+         "         [--allow-unsafe-modules] [--stdlib-warnings]\n"
+         "         [-O0|-O1|-O2|-O3|-Os] [-g] [--target=<triple>] [-mcpu=<cpu>]\n"
+         "         [--check [--module]] [--package-graph <file>]\n"
+         "         [--resolve] [--typecheck] [--dump-ast] [--dump-resolver-symbols]\n"
+         "         [--dump-resolved] [--dump-typechecked] [--dump-modules]\n"
+         "         [--dump-instantiations]\n"
+         "       turfc --format [--write | --check [--skip-unlexable]] <filename.tr>...\n"
+         "       turfc --migrate=pub [--write] <module.tr>...\n"
+         "       turfc --test [<tests-dir>] [--package-graph <file>] [--exclude <path>]\n"
+         "         [-O0|-O1|-O2|-O3|-Os] [-g] [--link <libname>] [--jobs <n>]\n"
+         "         [--timeout <seconds>] [--diag-register <file>]\n"
+         "         [--allow-unsafe-modules] [--stdlib-warnings]\n"
+         "       turfc --explain E0NN\n"
+         "       turfc --version\n"
+         "       turfc help\n"
+         "\n"
+         "Exit status: 0 success, 1 the program has an error (or a file could not\n"
+         "be read or written), 2 the command line is wrong (nothing was compiled).\n"
+         "The `turf` command is the friendly front end for all of this.\n";
+}
+
+/// Every spelling parseArgs() accepts, for "did you mean". A trailing `=`
+/// marks a flag that takes its value after it, so `--targt=x86` is compared
+/// as `--targt=` against `--target=`.
+static const char *const KnownOptions[] = {
+    "--emit-llvm",        "--emit-obj",     "--smart",        "--smart-write-fix=",
+    "--allow-unsafe-modules", "--stdlib-warnings", "--check",
+    "--module",           "--version",      "--dump-ast",
+    "--dump-instantiations", "--resolve",   "--dump-resolver-symbols",
+    "--dump-resolved",    "--typecheck",    "--dump-typechecked",
+    "--dump-modules",     "--format",       "--write",
+    "--migrate=",         "--package-graph", "--link",
+    "--target=",          "--explain",      "-mcpu=",
+    "--test",             "--jobs",         "--timeout",
+    "--diag-register",    "--exclude",
+    "--skip-unlexable",
+};
+
+/// An unknown option is a usage error, never something to ignore: a typo'd
+/// `--chek` that was silently dropped would compile and link a program the
+/// user only meant to check. The nearest known spelling (edit distance <= 2,
+/// the same bar `turf`'s command suggestions use) is offered, because a
+/// beginner sees "Unknown option" and cannot tell a typo from a missing
+/// feature.
+[[noreturn]] static void unknownOption(const std::string &Arg) {
+  std::cerr << "Unknown option: " << Arg << "\n";
+  if (Arg == "--help" || Arg == "-h") {
+    std::cerr << "  turfc has no --help; run `turfc help` (or `turf help`).\n";
+    std::exit(ExitUsage);
+  }
+  const size_t Eq = Arg.find('=');
+  const std::string Key = Eq == std::string::npos ? Arg : Arg.substr(0, Eq + 1);
+  // Single-dash spellings are too short for a distance of 2 to mean anything
+  // (`-x` is within 2 of `-g`), so only longer arguments get a guess.
+  if (Key.size() > 3) {
+    const char *Best = nullptr;
+    int BestD = 3;
+    for (const char *Known : KnownOptions) {
+      int D = getDamerauLevenshteinDistance(Key, Known);
+      if (D < BestD) {
+        Best = Known;
+        BestD = D;
+      }
+    }
+    if (Best)
+      std::cerr << "  did you mean '" << Best << "'?\n";
+  }
+  std::cerr << "Run `turfc help` for the options.\n";
+  std::exit(ExitUsage);
+}
+
+static CompilerOptions parseArgs(int argc, char **argv) {
+  CompilerOptions opts;
+
+  for (int i = 1; i < argc; ++i) {
+    std::string arg = argv[i];
+
+    if (arg == "--emit-llvm") {
+      opts.EmitLLVM = true;
+    } else if (arg == "--emit-obj") {
+      opts.EmitObj = true;
+    } else if (arg == "--smart") {
+      opts.AIEnabled = true;
+    } else if (arg.rfind("--smart-write-fix=", 0) == 0) {
+      opts.SmartFixOutPath = arg.substr(std::string("--smart-write-fix=").size());
+    } else if (arg == "--allow-unsafe-modules") {
+      opts.AllowUnsafeModules = true;
+    } else if (arg == "--stdlib-warnings") {
+      opts.ShowStdlibWarnings = true;
+    } else if (arg == "--check") {
+      opts.Check = true;
+    } else if (arg == "--module") {
+      opts.CheckAsModule = true;
+    } else if (arg == "--version") {
+      // Already answered at the top of runCompilerMain(), before any state
+      // exists; accepted here only so it is not reported as an unknown option
+      // if parseArgs() is ever reached by another route.
+    } else if (arg == "--dump-ast") {
+      opts.DumpAST = true;
+    } else if (arg == "--dump-instantiations") {
+      opts.DumpInstantiations = true;
+    } else if (arg == "--resolve") {
+      opts.RunResolver = true;
+    } else if (arg == "--dump-resolver-symbols") {
+      opts.RunResolver = true;
+      opts.DumpResolverSymbols = true;
+    } else if (arg == "--dump-resolved") {
+      // Implies --resolve: run the Resolver, then print the annotated AST
+      // showing which nodes have a green ResolvedSymbol badge (Issue #5 demo).
+      opts.RunResolver = true;
+      opts.DumpResolved = true;
+    } else if (arg == "--typecheck") {
+      // Implies --resolve: TypeChecker requires a resolved symbol table.
+      opts.RunResolver = true;
+      opts.RunTypeChecker = true;
+    } else if (arg == "--dump-typechecked") {
+      // Implies --resolve + --typecheck: run both passes, then print the
+      // type-annotated AST showing each node's inferred TurfType (Issue #7).
+      opts.RunResolver = true;
+      opts.RunTypeChecker = true;
+      opts.DumpTypechecked = true;
+    } else if (arg == "--dump-modules") {
+      // Implies --resolve: the module system's state (Modules_,
+      // TypeOwningModule_, FlatImportedFunctions_) only exists once Pass 1
+      // hoisting has run, same as every other --dump-* flag.
+      opts.RunResolver = true;
+      opts.DumpModules = true;
+    } else if (arg == "--test") {
+      // It is a mode, not a flag: its own options (--jobs, --exclude, ...)
+      // mean nothing to a compile, so runCompilerMain() hands over everything
+      // after it. Anywhere but first it would be a compile that silently
+      // did not test.
+      std::cerr << "Error: --test must be the first argument (`turfc --test [<tests-dir>] ...`).\n";
+      std::exit(ExitUsage);
+    } else if (arg == "--format") {
+      opts.Format = true;
+    } else if (arg == "--write") {
+      opts.FormatWrite = true;
+    } else if (arg == "--skip-unlexable") {
+      opts.FormatSkipUnlexable = true;
+    } else if (arg.rfind("--migrate=", 0) == 0) {
+      // Only one migration exists (LEC-002). An unknown name is a hard error,
+      // like an unknown -O level: a typo must not silently do nothing to a
+      // whole project.
+      const std::string Kind = arg.substr(std::string("--migrate=").size());
+      if (Kind != "pub") {
+        std::cerr << "Error: unknown migration '" << Kind
+                  << "' (the only one is --migrate=pub).\n";
+        std::exit(ExitUsage);
+      }
+      opts.MigratePub = true;
+    } else if (arg == "-o" && i + 1 < argc) {
+      opts.OutputName = argv[++i];
+    } else if (arg == "--package-graph" && i + 1 < argc) {
+      opts.PackageGraphFile = argv[++i];
+    } else if (arg == "--link" && i + 1 < argc) {
+      opts.LinkLibs.push_back(argv[++i]);
+    } else if (arg.rfind("--target=", 0) == 0) {
+      opts.TargetTriple = arg.substr(std::string("--target=").size());
+    } else if (arg.rfind("-mcpu=", 0) == 0) {
+      opts.MCPU = arg.substr(std::string("-mcpu=").size());
+    } else if (arg == "-g") {
+      opts.DebugInfo = true;
+    } else if (arg.size() >= 2 && arg[0] == '-' && arg[1] == 'O') {
+      // F-OPT semantics (FREEZE.md §6.10): an unrecognized level is a hard
+      // error, never a silent fallback to some default -- a typo like
+      // `-O4`/`-Ox` must not quietly compile at `-O2` and let a user believe
+      // they got the level they asked for.
+      std::string Level = arg.substr(2);
+      if (Level == "0") opts.OptLevel = OptLevelKind::O0;
+      else if (Level == "1") opts.OptLevel = OptLevelKind::O1;
+      else if (Level == "2") opts.OptLevel = OptLevelKind::O2;
+      else if (Level == "3") opts.OptLevel = OptLevelKind::O3;
+      else if (Level == "s") opts.OptLevel = OptLevelKind::Os;
+      else {
+        std::cerr << "Error: unknown optimization level '" << arg
+                  << "' (expected one of -O0, -O1, -O2, -O3, -Os).\n";
+        std::exit(ExitUsage);
+      }
+    } else if (arg == "-o" || arg == "--package-graph" || arg == "--link") {
+      // Reaching here means the value-taking branches above did not match, i.e.
+      // the option is the last argument. "Unknown option: -o" would be a lie.
+      std::cerr << "Error: option '" << arg << "' needs a value.\n"
+                << "Run `turfc help` for the options.\n";
+      std::exit(ExitUsage);
+    } else if (arg[0] == '-') {
+      unknownOption(arg);
+    } else {
+      opts.InputFile = arg;
+      opts.PositionalFiles.push_back(arg);
+    }
+  }
+
+  // --migrate=pub takes any number of files and never compiles anything, so
+  // it skips the single-input-file checks below (runMigratePub() reports its
+  // own usage error).
+  if (opts.MigratePub)
+    return opts;
+
+  // A module has no `main`, so it can be checked but never linked. Silently
+  // ignoring `--module` on a real compile would let a typo'd `--check` build
+  // (or fail to build) something the user meant only to check.
+  if (opts.CheckAsModule && !opts.Check) {
+    std::cerr << "Error: --module only applies with --check (a module has no "
+                 "entry point, so it cannot be linked).\n";
+    std::exit(ExitUsage);
+  }
+
+  if (opts.EmitLLVM && opts.EmitObj) {
+    std::cerr << "Error: --emit-llvm and --emit-obj each name the one output; "
+                 "pass one of them.\n";
+    std::exit(ExitUsage);
+  }
+
+  if (opts.InputFile.empty()) {
+    std::cerr << "Error: no input file.\n" << turfcUsage();
+    std::exit(ExitUsage);
+  }
+
+  if (opts.InputFile.size() < 3 || opts.InputFile.substr(opts.InputFile.size() - 3) != ".tr") {
+    std::cerr << "Error: Input file must have a '.tr' extension (got: " << opts.InputFile << ").\n";
+    std::exit(ExitUsage);
+  }
+
+  if (opts.OutputName.empty()) {
+    size_t lastSlash = opts.InputFile.find_last_of("/\\");
+    std::string base = (lastSlash == std::string::npos) ? opts.InputFile : opts.InputFile.substr(lastSlash + 1);
+    opts.OutputName = base.substr(0, base.size() - 3);
+    if (opts.OutputName.empty()) {
+      opts.OutputName = "program"; // fallback
+    }
+  }
+
+  return opts;
+}
+
+/// `turfc --format [--write | --check] <file.tr>...` (REL-002 stage 2). Needs
+/// only the files' text, so it runs before any compiler state exists.
+///
+///   (neither)  one file; the formatted text goes to stdout. Several would
+///              concatenate into output nobody could tell apart, so that is a
+///              usage error rather than a guess.
+///   --write    each file whose formatted text differs is rewritten in place;
+///              one that already matches is not touched (its mtime stays, so a
+///              build system does not see a change).
+///   --check    nothing is written; each file that would change is named, and
+///              the status is 1 if there is any: what CI wants.
+///   --skip-unlexable (with --write or --check)
+///              a file the lexer rejects is named as skipped and does not
+///              change the status. `turf fmt` passes it for the files it found
+///              by walking a directory (a tree may hold sources that are
+///              invalid on purpose); a file named on the command line is not
+///              skipped, since the user asked for it. Only a lexical error is
+///              skipped: a result that fails verification is a formatter bug
+///              and still fails.
+///
+/// Every result is verified before it is written or reported
+/// (turf::format::formatChecked): a formatter that rewrites people's files
+/// must not be trusted on a design argument alone. A file that fails
+/// verification is left unchanged and reported as a formatter bug, and the
+/// remaining files are still attempted, so one bad file does not leave the
+/// rest unformatted.
+static int runFormat(const std::vector<std::string> &Files, bool Write, bool CheckOnly, bool SkipUnlexable) {
+  if (Write && CheckOnly) {
+    std::cerr << "Error: --format takes --write or --check, not both (one rewrites the "
+                 "files, the other promises not to).\n";
+    return ExitUsage;
+  }
+  if (SkipUnlexable && !Write && !CheckOnly) {
+    std::cerr << "Error: --skip-unlexable goes with --write or --check; without either, the one file "
+                 "is printed and a file that cannot be formatted has nothing to print.\n";
+    return ExitUsage;
+  }
+  if (!Write && !CheckOnly && Files.size() > 1) {
+    std::cerr << "Error: without --write or --check the formatted text goes to stdout, so "
+                 "--format takes exactly one file (got "
+              << Files.size() << ").\n";
+    return ExitUsage;
+  }
+  for (const auto &F : Files)
+    if (F.size() < 3 || F.compare(F.size() - 3, 3, ".tr") != 0) {
+      std::cerr << "Error: Input file must have a '.tr' extension (got: " << F << ").\n";
+      return ExitUsage;
+    }
+
+  int Status = ExitOk;
+  size_t Changed = 0, Unchanged = 0, Skipped = 0;
+  for (const auto &File : Files) {
+    std::ifstream In(File, std::ios::binary);
+    if (!In) {
+      std::cerr << "Error: Could not open file " << File << "\n";
+      Status = ExitError;
+      continue;
+    }
+    std::stringstream Buf;
+    Buf << In.rdbuf();
+    const std::string Original = Buf.str();
+
+    turf::format::FormatResult R = turf::format::formatChecked(Original);
+    if (!R.Ok && R.Unlexable && SkipUnlexable) {
+      ++Skipped;
+      std::cout << "skipped " << File << ": " << R.Error << "\n";
+      continue;
+    }
+    if (!R.Ok) {
+      std::cerr << "Error: Could not format " << File
+                << (R.Error.empty() ? "" : ": " + R.Error + "; the file was left unchanged") << "\n";
+      Status = ExitError;
+      continue;
+    }
+
+    if (!Write && !CheckOnly) {
+      std::cout << R.Text;
+      continue;
+    }
+    if (R.Text == Original) {
+      ++Unchanged;
+      continue;
+    }
+    ++Changed;
+    if (CheckOnly) {
+      std::cout << "would reformat " << File << "\n";
+      Status = ExitError;
+      continue;
+    }
+    std::ofstream Out(File, std::ios::trunc | std::ios::binary);
+    Out << R.Text;
+    Out.flush();
+    if (!Out) {
+      std::cerr << "Error: Could not write file " << File << "\n";
+      Status = ExitError;
+    }
+  }
+
+  if (Write || CheckOnly)
+    std::cout << (CheckOnly ? "Would reformat " : "Reformatted ") << Changed << " file"
+              << (Changed == 1 ? "" : "s") << "; " << Unchanged << " already formatted"
+              << (Skipped ? "; " + std::to_string(Skipped) + " skipped (lexical error)" : std::string())
+              << ".\n";
+  return Status;
+}
+
+/// `turfc --test [<tests-dir>] [options]` (REL-002): runs every test under the
+/// directory (default `tests`, which must exist) and returns the process exit
+/// status. Parsed apart from parseArgs() because none of a compile's options
+/// apply and a runner's (--jobs, --exclude, ...) mean nothing to a compile.
+/// Like every other usage error, a bad option stops with status 2 before
+/// anything runs.
+static int runTestMode(int argc, char **argv) {
+  TestRunOptions T;
+  T.Compiler = CompilerExecutablePath;
+  bool DirGiven = false;
+
+  auto NeedValue = [&](int &I, const std::string &Arg) -> std::string {
+    if (I + 1 >= argc) {
+      std::cerr << "Error: option '" << Arg << "' needs a value.\nRun `turfc help` for the options.\n";
+      std::exit(ExitUsage);
+    }
+    return argv[++I];
+  };
+  auto PositiveInt = [&](const std::string &Arg, const std::string &Text) {
+    char *End = nullptr;
+    long V = std::strtol(Text.c_str(), &End, 10);
+    if (Text.empty() || *End != '\0' || V <= 0 || V > 100000) {
+      std::cerr << "Error: option '" << Arg << "' needs a positive whole number (got '" << Text << "').\n";
+      std::exit(ExitUsage);
+    }
+    return static_cast<int>(V);
+  };
+
+  for (int I = 2; I < argc; ++I) {
+    const std::string Arg = argv[I];
+    if (Arg == "--package-graph") {
+      std::string P = NeedValue(I, Arg);
+      // The compiles run in each test's own directory, so a relative path
+      // would point somewhere else for every one of them.
+      T.PackageGraph = std::filesystem::absolute(P).string();
+    } else if (Arg == "--exclude") {
+      std::string X = NeedValue(I, Arg);
+      while (X.size() > 1 && X.back() == '/')
+        X.pop_back();
+      T.Excludes.push_back(X);
+    } else if (Arg == "--diag-register") {
+      T.DiagRegister = NeedValue(I, Arg);
+    } else if (Arg == "--jobs") {
+      T.Jobs = PositiveInt(Arg, NeedValue(I, Arg));
+    } else if (Arg == "--timeout") {
+      T.TimeoutSec = PositiveInt(Arg, NeedValue(I, Arg));
+    } else if (Arg == "--link") {
+      T.CompileFlags.push_back(Arg);
+      T.CompileFlags.push_back(NeedValue(I, Arg));
+    } else if (Arg == "-g" || Arg == "--allow-unsafe-modules" || Arg == "--stdlib-warnings") {
+      T.CompileFlags.push_back(Arg);
+    } else if (Arg == "-O0" || Arg == "-O1" || Arg == "-O2" || Arg == "-O3" || Arg == "-Os") {
+      T.CompileFlags.push_back(Arg);
+    } else if (Arg.size() >= 2 && Arg[0] == '-' && Arg[1] == 'O') {
+      std::cerr << "Error: unknown optimization level '" << Arg
+                << "' (expected one of -O0, -O1, -O2, -O3, -Os).\n";
+      std::exit(ExitUsage);
+    } else if (!Arg.empty() && Arg[0] == '-') {
+      unknownOption(Arg);
+    } else {
+      if (DirGiven) {
+        std::cerr << "Error: --test takes one tests directory (got '" << T.Dir << "' and '" << Arg << "').\n";
+        std::exit(ExitUsage);
+      }
+      if (Arg.size() >= 3 && Arg.compare(Arg.size() - 3, 3, ".tr") == 0) {
+        std::cerr << "Error: --test takes a directory of tests, not a file ('" << Arg
+                  << "'); to run one file, compile it and run the result.\n";
+        std::exit(ExitUsage);
+      }
+      T.Dir = Arg;
+      DirGiven = true;
+    }
+  }
+  return RunTests(T);
+}
+
+// OPT-001: `-O0`/`-O1`/`-O2`/`-O3` map onto LLVM's own `CodeGenOptLevel`
+// (backend instruction selection/scheduling), while `-Os` shares `-O2`'s
+// backend level -- LLVM has no "smaller code" CodeGenOptLevel; the size
+// tuning for `-Os` happens entirely in the IR-level pipeline
+// (`OptimizationLevel::Os`, see runOptimizationPipeline() below), matching
+// how every other `PassBuilder`-based frontend (e.g. clang) maps it.
+static CodeGenOptLevel toCodeGenOptLevel(OptLevelKind Level) {
+  switch (Level) {
+  case OptLevelKind::O0: return CodeGenOptLevel::None;
+  case OptLevelKind::O1: return CodeGenOptLevel::Less;
+  case OptLevelKind::O2: return CodeGenOptLevel::Default;
+  case OptLevelKind::O3: return CodeGenOptLevel::Aggressive;
+  case OptLevelKind::Os: return CodeGenOptLevel::Default;
+  }
+  llvm_unreachable("unhandled OptLevelKind");
+}
+
+// Builds the ONE TargetMachine shared by both the optimization pipeline
+// (runOptimizationPipeline(), which needs it to enable target-aware
+// transforms) and native object emission (emitObjectFile()). Before
+// OPT-001 these were two independent, unsynchronized constructions:
+// Phase 5's FunctionPassManager ran with no TargetMachine at all (a
+// PassBuilder-based pipeline needs one to run any target-aware pass), and
+// emitObjectFile() built its own from a hardcoded host triple and
+// CPU="generic", invisible to `--target`/`-mcpu` (§8 OPT-001's own CLI
+// additions) if those had been threaded through separately. Constructing it
+// once here is what makes `--target`/`-mcpu`/`-O` agree between the two
+// phases by construction rather than by two call sites happening to be
+// kept in sync by hand.
+//
+// Returned pointer is intentionally leaked (never `delete`d) -- this
+// mirrors the pre-OPT-001 code's own lifetime (a `TargetMachine` built by
+// `createTargetMachine` was never freed either), and the process is a
+// short-lived CLI invocation that exits immediately after linking. Fixing
+// that leak is out of scope for this change (§25's scope discipline).
+static TargetMachine *createTurfTargetMachine(const CompilerOptions &opts,
+                                              Module &M) {
+  // Initialise all targets so we can produce code for the host machine (or,
+  // with --target, a different one -- see D20 in §27: a `--target` binary
+  // still links the HOST's libturfrt/libc, so cross-compilation is not a
+  // supported end-to-end path yet. This flag exists so OPT-001's own IR
+  // pipeline and object emission are target-correct; RT-001 is where
+  // "produces a binary you can actually run elsewhere" gets decided.).
+  InitializeAllTargetInfos();
+  InitializeAllTargets();
+  InitializeAllTargetMCs();
+  InitializeAllAsmParsers();
+  InitializeAllAsmPrinters();
+
+  Triple TargetTriple(opts.TargetTriple.empty() ? sys::getDefaultTargetTriple()
+                                                 : opts.TargetTriple);
+
+  // LLVM 20+ changed setTargetTriple to accept Triple; older versions take
+  // StringRef. arch is so much better :((
+#if LLVM_VERSION_MAJOR >= 20
+  M.setTargetTriple(TargetTriple);
+#else
+  M.setTargetTriple(TargetTriple.str());
+#endif
+
+  std::string Error;
+  auto Target = TargetRegistry::lookupTarget(TargetTriple, Error);
+  if (!Target) {
+    std::cerr << "Error: " << Error << "\n";
+    return nullptr;
+  }
+
+  std::string CPU = opts.MCPU.empty() ? "generic" : opts.MCPU;
+  auto Features = "";
+  TargetOptions TO;
+  CodeGenOptLevel CGOptLevel = toCodeGenOptLevel(opts.OptLevel);
+
+  // LLVM 20+ also changed createTargetMachine to accept Triple.
+#if LLVM_VERSION_MAJOR >= 20
+  auto TM = Target->createTargetMachine(TargetTriple, CPU, Features, TO,
+                                        Reloc::PIC_, std::nullopt, CGOptLevel);
+#else
+  auto TM = Target->createTargetMachine(TargetTriple.str(), CPU, Features, TO,
+                                        Reloc::PIC_, std::nullopt, CGOptLevel);
+#endif
+  if (TM)
+    M.setDataLayout(TM->createDataLayout());
+  return TM;
+}
+
+// OPT-001 (§17.1/§17.2): the module-level optimization pipeline, replacing
+// the pre-existing `legacy::FunctionPassManager` running a fixed 5-pass
+// sequence with no module-level view (could not see across functions, so
+// nothing could ever be deleted -- an empty `main` shipped 84 unused
+// `turf_*` functions, §1.9's measured baseline). `TM` may be null (target
+// lookup failed) -- the pipeline still runs target-INDEPENDENT passes in
+// that case rather than skipping optimization entirely; emitObjectFile()
+// is what actually fails the compile when `TM` is null.
+static void runOptimizationPipeline(Module &M, OptLevelKind Level,
+                                    TargetMachine *TM) {
+  LoopAnalysisManager LAM;
+  FunctionAnalysisManager FAM;
+  CGSCCAnalysisManager CGAM;
+  ModuleAnalysisManager MAM;
+
+  PassBuilder PB(TM);
+  PB.registerModuleAnalyses(MAM);
+  PB.registerCGSCCAnalyses(CGAM);
+  PB.registerFunctionAnalyses(FAM);
+  PB.registerLoopAnalyses(LAM);
+  PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
+
+  // F-OPT-1/F-OPT-2 (FREEZE.md §6.10): internalizing anything the linker
+  // still needs breaks the link. TurfLang never separately compiles (every
+  // import is re-parsed and re-codegenned into THIS module, §27 D7), so the
+  // only symbol anything outside this translation unit can still reach by
+  // name is `main` (the C runtime's own entry point, invoked by name, not
+  // by an in-module reference GlobalDCE could see) -- every `extern fn` is a
+  // DECLARATION with no body to internalize, and every genuinely
+  // Turf-defined function this module calls is already a normal in-module
+  // use that keeps it live without needing external linkage at all. This is
+  // why the "must-preserve" set is exactly {main}, not something derived
+  // from `g_RequiredLibs` (§8 OPT-001's own text names that set as the
+  // starting point, but g_RequiredLibs is a list of *external C libraries
+  // to link against*, e.g. "m", not a list of Turf symbol names -- there is
+  // nothing in it to preserve BY). Verified live against
+  // showcase/llvm_ffi_selfhost_demo.tr (the most FFI-dense program in the
+  // tree, per §8's own risk note) at every level below.
+  auto MustPreserveGV = [](const GlobalValue &GV) {
+    return GV.getName() == "main";
+  };
+
+  switch (Level) {
+  case OptLevelKind::O0: {
+    // "verify only; AlwaysInliner; nothing else" (§17.2). LLVM's own
+    // buildO0DefaultPipeline() IS that pipeline for a coroutine-free,
+    // non-instrumented, non-LTO module (which every TurfLang module is) --
+    // using the real API here instead of hand-assembling the equivalent
+    // means it stays correct if a future LLVM upgrade changes what O0
+    // requires, rather than silently drifting from what "O0" means upstream.
+    ModulePassManager MPM = PB.buildO0DefaultPipeline(OptimizationLevel::O0);
+    MPM.run(M, MAM);
+    break;
+  }
+  case OptLevelKind::O1:
+  case OptLevelKind::O2:
+  case OptLevelKind::O3:
+  case OptLevelKind::Os: {
+    // `-O1` used to run a small hand-picked 6-pass subset (the pre-OPT-001
+    // 5-pass sequence ported to the new PM, plus EarlyCSE) rather than
+    // LLVM's own `default<O1>` pipeline -- a deliberate reading of §17.2's
+    // table at the time, but a real gap once measured: LLVM's actual O1
+    // pipeline runs ~109 pass invocations (confirmed live via `opt
+    // -passes="default<O1>" -print-pipeline-passes`), not ~6. Folded into
+    // this same branch on request so `-O1` gets LLVM's real, full O1
+    // pipeline like every other non-O0 level, rather than a curated
+    // subset nobody was asking for specifically.
+    //
+    // Internalize FIRST, in its own pass-manager run, strictly before
+    // handing off to LLVM's own default pipeline: buildPerModuleDefaultPipeline()
+    // runs its own GlobalDCE internally, but GlobalDCE only deletes a
+    // definition that is BOTH unreferenced AND not externally visible --
+    // without Internalize running first, every `turf_*` function still has
+    // external linkage (nothing in Codegen ever marks one internal), so the
+    // default pipeline's own DCE would see all 84 dead functions in the
+    // empty-main baseline as "externally visible, therefore keep" and
+    // delete none of them -- confirmed live while implementing this: the
+    // -O2 binary was NOT smaller than -O0's until this ordering was fixed.
+    ModulePassManager InternalizeMPM;
+    InternalizeMPM.addPass(InternalizePass(MustPreserveGV));
+    InternalizeMPM.run(M, MAM);
+
+    OptimizationLevel LLVMLevel = Level == OptLevelKind::O1 ? OptimizationLevel::O1
+                                 : Level == OptLevelKind::O2 ? OptimizationLevel::O2
+                                 : Level == OptLevelKind::O3 ? OptimizationLevel::O3
+                                                              : OptimizationLevel::Os;
+    ModulePassManager MPM = PB.buildPerModuleDefaultPipeline(LLVMLevel);
+    MPM.run(M, MAM);
+    break;
+  }
+  }
+}
+
+// Emit native object file via the shared TargetMachine (createTurfTargetMachine()).
+static int emitObjectFile(Module &M, TargetMachine &TM,
+                          const std::string &ObjFilename) {
+  std::error_code EC;
+  raw_fd_ostream dest(ObjFilename, EC, sys::fs::OF_None);
+  if (EC) {
+    // The object file (and then the executable) is written next to where the
+    // compiler was run, or where -o points. The common failure is running it
+    // from a directory the user cannot write to -- `/` on Linux, and on macOS
+    // always, since `/` is a read-only system volume there. This used to
+    // print only "Could not open file: Permission denied", which names
+    // neither the file nor the directory, so it read like the SOURCE file
+    // could not be opened.
+    SmallString<256> Dir(ObjFilename);
+    sys::path::remove_filename(Dir);
+    // Best effort, for the message only: if either query fails, the path is
+    // shown as written, which still beats naming no directory at all.
+    if (Dir.empty())
+      (void)sys::fs::current_path(Dir);
+    else
+      (void)sys::fs::make_absolute(Dir);
+    std::cerr << "Error: cannot write the object file '"
+              << sys::path::filename(ObjFilename).str() << "' in " << Dir.str().str()
+              << ": " << EC.message() << ".\n"
+              << "  Hint: the compiler writes its output in the directory you run it "
+                 "from, or where -o points. Run it from a directory you can write to, "
+                 "pass -o <path> (for example -o ~/"
+              << sys::path::stem(ObjFilename).str()
+              << "), or use `turf run <file.tr>`, which builds in a temporary "
+                 "directory.\n";
+    return 1;
+  }
+
+  legacy::PassManager pass;
+  auto FileType = CodeGenFileType::ObjectFile;
+  if (TM.addPassesToEmitFile(pass, dest, nullptr, FileType)) {
+    std::cerr << "Target machine can't emit a file of this type\n";
+    return 1;
+  }
+
+  pass.run(M);
+  dest.flush();
+  return 0;
+}
+
+// D20 (ROADMAP_v2.0.0.md, REL-003): true when `--target` names a machine this
+// compiler's own `libturfrt` and system linker cannot build a program for.
+// Architecture, OS and ABI environment are compared and the vendor field is
+// not: `x86_64-linux-gnu` and the host's `x86_64-pc-linux-gnu` are the same
+// machine, and a strict string/Triple compare would call them foreign and
+// refuse a perfectly good native link. An empty target is the host.
+//
+// The environment is compared on purpose: libturfrt is compiled against the
+// host's libc, so `x86_64-linux-musl` cannot link against it even though the
+// CPU and OS match. REL-008 changes this when it bundles a musl runtime; this
+// is the one place that then has to learn which triples the archive carries.
+static bool isForeignTarget(const std::string &Requested) {
+  if (Requested.empty())
+    return false;
+  Triple Want(Triple::normalize(Requested));
+  Triple Host(Triple::normalize(sys::getDefaultTargetTriple()));
+  return Want.getArch() != Host.getArch() || Want.getOS() != Host.getOS() ||
+         Want.getEnvironment() != Host.getEnvironment();
+}
+
+// g_RequiredLibs is populated by ExternFuncDeclExprAST::codegen() for every
+// 'extern from "libname" fn' declaration encountered during code generation.
+extern std::set<std::string> g_RequiredLibs;
+
+// The `@ffi` platform key code generation reads (src/codegen/CodegenFunc.cpp). Any
+// OS other than macOS and Windows reads `linux`, as on such a host.
+extern std::string g_FfiPlatform;
+static std::string ffiPlatformKey(const Triple &T) {
+  if (T.isOSDarwin())
+    return "macos";
+  if (T.isOSWindows())
+    return "windows";
+  return "linux";
+}
+
+#ifdef _WIN32
+// The file a Windows link writes for `-o Name`: Name with ".exe" appended,
+// unless it already ends in ".exe" (any case). Appending unconditionally
+// turned `-o app.exe`, which a driver on Windows naturally passes (the `turf`
+// front end does, for `turf run` and project builds), into `app.exe.exe`, and
+// the driver then found no executable where it had asked for one.
+static std::string WindowsExecutableName(const std::string &Name) {
+  if (Name.size() >= 4) {
+    std::string Ext = Name.substr(Name.size() - 4);
+    for (char &C : Ext)
+      C = static_cast<char>(std::tolower(static_cast<unsigned char>(C)));
+    if (Ext == ".exe")
+      return Name;
+  }
+  return Name + ".exe";
+}
+#endif
+
+// The libraries a program names that the C runtime Turf links against does not
+// provide ("c" and "m" are system libraries on every platform, so they are never
+// the reason a link needs more than the C runtime). These are the ones that make
+// the link go to the system toolchain and need their own development files.
+static std::vector<std::string>
+externalLibraries(const std::set<std::string> &AllLibs) {
+  std::vector<std::string> Out;
+  for (const auto &L : AllLibs)
+    if (L != "c" && L != "m" && !turf::BundledRuntimeProvides(L))
+      Out.push_back(L);
+  return Out;
+}
+
+static std::string joinLibraries(const std::vector<std::string> &Libs) {
+  std::string S;
+  for (size_t I = 0; I < Libs.size(); ++I)
+    S += (I ? ", \"" : "\"") + Libs[I] + "\"";
+  return S;
+}
+
+// The system toolchain could not be started at all: nothing is installed under
+// that name. Say why the toolchain is needed (the program names a library the
+// C runtime does not provide), and the two ways out.
+static void explainMissingCompiler(const std::string &Compiler,
+                                   const std::vector<std::string> &Ext) {
+  std::cerr << "Error: linking needs a C compiler, and '" << Compiler
+            << "' was not found on PATH.\n";
+  if (!Ext.empty())
+    std::cerr << "  This program links against " << joinLibraries(Ext)
+              << ", which Turf's own C runtime does not provide, so turfc hands "
+                 "the link to the system toolchain.\n"
+              << "  Either install a C compiler and that library's development "
+                 "files, or remove the 'extern from' declarations (and any "
+                 "--link flags) that name it.\n";
+  else
+    std::cerr << "  This Turf install has no complete bundled C runtime "
+                 "(see 'turfc --version'), so turfc links with the system "
+                 "toolchain.\n  Install a C compiler, or use a release "
+                 "archive, which links without one.\n";
+  std::cerr << "  See docs/reference/ffi_and_unsafe.md, \"Linking external "
+               "libraries\".\n";
+}
+
+// The system toolchain ran and the link failed. When the program names a
+// library the C runtime does not provide, that library is the usual reason, and
+// the linker's own message ("cannot find -lLLVM") does not say what to do.
+static void explainExternalLinkFailure(const std::vector<std::string> &Ext) {
+  if (Ext.empty())
+    return;
+  std::cerr << "  This program links against " << joinLibraries(Ext)
+            << ", which Turf does not bundle. If the linker could not find it, "
+               "install that library's development files (the import library "
+               "or .so/.dylib/.a, not only the runtime DLL) and, if they are "
+               "not in a default location, add the directory to LIBRARY_PATH.\n"
+            << "  See docs/reference/ffi_and_unsafe.md, \"Linking external "
+               "libraries\".\n";
+}
+
+// Invoke system linker
+//
+// Runs the linker directly via fork+exec (POSIX) / _spawnvp (Windows) with
+// an explicit argument array, NOT std::system() on a concatenated shell
+// command string. ObjFile and OutputName both ultimately derive from `-o`
+// and the input filename on the command line -- arbitrary, unescaped user
+// input. The previous std::system("cc \"" + ObjFile + "\" -o \"" +
+// OutputName + "\" ...") only quoted against spaces; a filename containing
+// a `"`, `` ` ``, `$(...)`, or `;` would break out of the quoting and run as
+// shell syntax (e.g. `turfc prog.tr -o 'x"; rm -rf ~; echo "'`). Passing
+// argv entries directly to exec*/_spawnvp means the OS never re-parses them
+// through a shell, so no argument can ever be interpreted as shell syntax
+// regardless of its contents.
+static int linkObject(const std::string &ObjFile,
+                      const std::string &OutputName,
+                      const std::vector<std::string> &ExtraLibs) {
+  // Build -l flags from both sources:
+  //   1. Libraries declared via 'extern from "libname" fn' in source code
+  //   2. Libraries passed via --link on the command line
+  std::set<std::string> AllLibs(g_RequiredLibs);
+  for (const auto &L : ExtraLibs) AllLibs.insert(L);
+
+  // RT-001: every compiled Turf binary links libturfrt (F-MEM-4). The
+  // search path is anchored at TurfInstallRoot() -- the exact same root
+  // `import` already resolves lib/std against (Parser.h/ParserModule.cpp)
+  // -- so a plain dev build (`build/turfc`, no TURF_HOME set) finds
+  // `<repo-root>/lib/libturfrt.a` with zero setup, the same "no setup
+  // needed" property lib/std already has. `-L` before `-l` on the linker
+  // line is what makes cc/gcc search this exact directory FIRST, ahead of
+  // any system default; the flag order below is deliberate.
+  std::string TurfLibDir = TurfInstallRoot() + "/lib";
+
+  // FDN-005 stage 3 (docs/planning/ROADMAP_v2.0.0.md): TURF_RT_ASAN_BUILD is
+  // a COMPILE-TIME macro (CMakeLists.txt's `TURF_RT_SANITIZE` option), never
+  // an environment variable checked here -- a `turfc` binary built with it
+  // always links every compiled Turf program against the separately-built,
+  // ASan+UBSan-instrumented `libturfrt_asan.a` (CMakeLists.txt) instead of
+  // the ordinary `libturfrt.a`, permanently. This is what turns the
+  // existing `tests/` regression suite into independent validation for
+  // MEM-002's own disclosed open question about the register-scanning
+  // technique (docs/development/changes/MEM-002.md, *Unresolved
+  // questions*): every real compiled Turf program's allocations, not just
+  // scripts/smoke/gc_smoke.sh's hand-written C harnesses, run through ASan's
+  // freed-block-reuse detection. An ordinary `build/turfc` and a
+  // `-DTURF_RT_SANITIZE=ON` build never share a runtime archive (distinct
+  // names, same lib/ directory -- CMakeLists.txt's own comment on the
+  // `turfrt_asan` target explains why), so this branch is the only place
+  // that needs to know which one this specific binary was built for.
+#ifdef TURF_RT_ASAN_BUILD
+  const std::string RtLibName = "turfrt_asan";
+#else
+  const std::string RtLibName = "turfrt";
+#endif
+
+  // FDN-006 stage 3 (docs/planning/ROADMAP_v2.0.0.md): a missing
+  // `libturfrt.a` used to surface only as `cc`'s own generic
+  // "-lturfrt: No such file" linker error, with no mention of TurfLang, a
+  // TURF_HOME misconfiguration, or what to do about it. Checked here,
+  // BEFORE `cc`/`gcc` is even invoked, so the failure is a TurfLang
+  // diagnostic that names the exact path it looked for -- not a linker
+  // error the user has to already know libturfrt exists to make sense of.
+  std::string TurfLibArchive = TurfLibDir + "/lib" + RtLibName + ".a";
+  if (!llvm::sys::fs::exists(TurfLibArchive)) {
+    std::cerr << "Error: TurfLang runtime library not found at '"
+              << TurfLibArchive << "'.\n";
+    std::cerr << "Check that TURF_HOME (or this compiler's install root, "
+                 "if TURF_HOME is unset) points at a complete TurfLang "
+                 "installation.\n";
+    return 1;
+  }
+
+  // REL-008 stage 3 (DEC-14's hybrid rule): a program that names no system C
+  // library beyond the C runtime itself (the stdlib's `math` names "m") is
+  // linked by the linker built into turfc, statically, against the C runtime
+  // the release archive ships under lib/rt/<platform>/. Anything else named
+  // (`extern from "lib"`, --link) needs that library's own development files
+  // and goes to the system toolchain below, as does every
+  // build without a bundled runtime (a checkout, a dev build, an archive from
+  // before REL-008 stage 4), a sanitizer build, and a run with
+  // TURF_LINKER=system (the escape hatch if the embedded linker misbehaves).
+#ifndef TURF_RT_ASAN_BUILD
+  {
+    const char *Forced = std::getenv("TURF_LINKER");
+    const bool ForceSystem = Forced && std::string(Forced) == "system";
+    const std::string Platform = turf::BundledRuntimePlatform();
+    bool NamesOtherLib = false;
+    for (const auto &L : AllLibs)
+      if (!turf::BundledRuntimeProvides(L))
+        NamesOtherLib = true;
+    if (!ForceSystem && !NamesOtherLib && !Platform.empty()) {
+      const std::string RuntimeDir = TurfLibDir + "/rt/" + Platform;
+      if (turf::BundledLinkAvailable(RuntimeDir)) {
+        turf::BundledLinkRequest Req;
+        Req.ObjectFile = ObjFile;
+#ifdef _WIN32
+        Req.Output = WindowsExecutableName(OutputName);
+#else
+        Req.Output = OutputName;
+#endif
+        Req.RuntimeDir = RuntimeDir;
+        Req.TurfLibDir = TurfLibDir;
+        Req.TurfRtName = RtLibName;
+        std::string Diagnostics;
+        if (turf::BundledLink(Req, Diagnostics) != 0) {
+          std::cerr << "Linking failed (the linker built into turfc, against "
+                    << RuntimeDir << ")\n"
+                    << Diagnostics
+                    << "Setting TURF_LINKER=system links with the system "
+                       "toolchain instead.\n";
+          return 1;
+        }
+        return 0;
+      }
+    }
+  }
+#endif
+
+#ifdef _WIN32
+  std::string FinalOutput = WindowsExecutableName(OutputName);
+  // -Wl,--stack: an 8 MB main-thread stack, as on Linux (GNU ld's default is
+  // 2 MB), so deep recursion behaves the same here and under the embedded
+  // linker. -lws2_32: libturfrt's socket layer (runtime/turfrt_net.c) calls
+  // Winsock, and an archive member's own library needs are not recorded in it.
+  std::vector<std::string> Args = {"gcc",       ObjFile, "-o", FinalOutput,
+                                    "-L" + TurfLibDir, "-l" + RtLibName, "-lm",
+                                    "-Wl,--stack,8388608", "-lws2_32"};
+#else
+  std::string FinalOutput = OutputName;
+  std::vector<std::string> Args = {"cc",        ObjFile, "-o", FinalOutput,
+                                    "-L" + TurfLibDir, "-l" + RtLibName, "-lm"};
+#endif
+#ifdef TURF_RT_ASAN_BUILD
+  Args.push_back("-fsanitize=address");
+  Args.push_back("-fsanitize=undefined");
+#endif
+  for (const auto &L : AllLibs) Args.push_back("-l" + L);
+
+  // Human-readable form for error reporting only -- never passed to a shell.
+  std::string CmdForDisplay;
+  for (const auto &A : Args) CmdForDisplay += A + " ";
+
+#ifdef _WIN32
+  std::vector<const char *> Argv;
+  for (const auto &A : Args) Argv.push_back(A.c_str());
+  Argv.push_back(nullptr);
+  intptr_t Ret = _spawnvp(_P_WAIT, Argv[0], Argv.data());
+  if (Ret == -1 && errno == ENOENT) {
+    explainMissingCompiler(Argv[0], externalLibraries(AllLibs));
+    return 1;
+  }
+  if (Ret != 0) {
+    std::cerr << "Linking failed (exit code " << Ret << ")\n";
+    std::cerr << "Command was: " << CmdForDisplay << "\n";
+    explainExternalLinkFailure(externalLibraries(AllLibs));
+    return 1;
+  }
+#else
+  std::vector<char *> Argv;
+  for (auto &A : Args) Argv.push_back(const_cast<char *>(A.c_str()));
+  Argv.push_back(nullptr);
+
+  pid_t Pid = fork();
+  if (Pid < 0) {
+    std::cerr << "Linking failed: fork() error\n";
+    return 1;
+  }
+  if (Pid == 0) {
+    execvp(Argv[0], Argv.data());
+    // execvp only returns on failure. 127 is the shell convention for "command
+    // not found"; the parent reads it below and explains.
+    _exit(errno == ENOENT ? 127 : 126);
+  }
+  int Status = 0;
+  if (waitpid(Pid, &Status, 0) < 0) {
+    std::cerr << "Linking failed: waitpid() error\n";
+    return 1;
+  }
+  if (WIFEXITED(Status) && WEXITSTATUS(Status) == 127) {
+    // Our own child could not find the compiler (a real cc that fails to link
+    // exits 1).
+    explainMissingCompiler(Argv[0], externalLibraries(AllLibs));
+    return 1;
+  }
+  if (!WIFEXITED(Status) || WEXITSTATUS(Status) != 0) {
+    std::cerr << "Linking failed (exit code "
+              << (WIFEXITED(Status) ? WEXITSTATUS(Status) : -1) << ")\n";
+    std::cerr << "Command was: " << CmdForDisplay << "\n";
+    explainExternalLinkFailure(externalLibraries(AllLibs));
+    return 1;
+  }
+#endif
+  return 0;
+}
+
+/**
+ * @brief Skip forward past a malformed top-level construct (a `fn`/`struct`/
+ *        `enum`/`extern`/`import` whose own parse just failed) until reaching
+ *        the next safe top-level boundary -- i.e. until g_braceDepth (see
+ *        Lexer.h/.cpp, maintained globally by getNextToken() as it consumes
+ *        each token) returns to 0.
+ *
+ * All eight recovery loops in the parsing loops below (pre-pass and main
+ * pass, `fn`/`struct`/... branch and `import` branch, longjmp path and
+ * plain-nullptr-return path) used to do a flat, depth-blind scan: skip
+ * tokens one at a time until hitting ANY of a fixed set of boundary tokens
+ * (`fn`, `struct`, ..., `;`). That works fine when the failure happens
+ * genuinely at the top level, but a failure partway through a function
+ * BODY (e.g. a typo'd keyword like `iff` for `if`) leaves the token stream
+ * mid-way through that body, with its own already-open, not-yet-closed `{`
+ * that the naive scan has no way to know about -- it stops at the FIRST
+ * `;` or `fn`/`struct`/... it happens to see, which is very often still
+ * inside the malformed body, not a real top-level boundary. The leftover
+ * garbage after that point (the rest of the body, its closing `}`, etc.)
+ * then gets misread as new top-level content, producing a second,
+ * completely unrelated, confusing error stacked on top of the real one.
+ *
+ * This function itself went through exactly that bug once already: the
+ * first version assumed the failure was always exactly ONE brace level
+ * deep (hardcoding "Depth = 1", i.e. only the failed construct's own `{`
+ * is open) -- true for a failure directly inside a function body, but not
+ * for one nested further, e.g. inside a `compare` block's `otherwise` arm
+ * within that body (two levels: the function's `{` AND the compare's `{`).
+ * A second stray `otherwise:` there produced a "duplicate/must be last"
+ * error from a totally different, unrelated code path than expected --
+ * the arm's own statement-parsing loop tried to parse the second
+ * `otherwise:` as the START OF A NEW STATEMENT (it has no way to know
+ * "otherwise" means "the compare block's next arm header, stop here"), hit
+ * ParsePrimaryBase()'s generic "unexpected token" fallback, and returned a
+ * soft (non-longjmp) nullptr failure -- which the OLD Depth=1 recovery then
+ * mis-resynchronized one brace level too shallow (stopping at the
+ * COMPARE block's closing `}`, not the function's), leaving `return 0; }`
+ * dangling as apparent new top-level content and producing a second,
+ * unrelated "Statements are not allowed outside of a function" error
+ * stacked on top of the real one -- the exact class of bug this function
+ * exists to prevent, just at a nesting depth the original fix didn't
+ * anticipate. g_braceDepth's global, always-accurate tracking (rather than
+ * a fixed assumption re-derived locally at each call site) fixes this for
+ * ANY nesting depth, not just one level.
+ */
+// IsTopLevelBoundaryToken()/SkipToNextTopLevelBoundary() used to live here as
+// file-local `static` functions. Moved to ParserCore.cpp (declared in
+// Parser.h) so Sandbox.cpp's own recovery-mode parse passes can resync on a
+// per-statement basis using the exact same logic, instead of duplicating it
+// -- see issue #228/#233. Behavior is unchanged; only the definitions' home
+// and linkage moved.
+
+// main
+/**
+ * @brief The compiler entry point.
+ *
+ * @param argc The number of command-line arguments.
+ * @param argv An array of command-line argument strings.
+ * @return int Exit code (0 on success, non-zero on compilation failure).
+ */
+static int runCompilerMain(int argc, char **argv) {
+  // The `turf` front end runs `turfc --version` before EVERY compile to check
+  // it speaks this compiler's driver interface (FREEZE.md 6.16, F-PKG-1), so
+  // this answers before anything else that costs time or touches global
+  // state (the SLM engine, source files, the install-root lookup).
+  // Lines 1 and 2 are a contract: `turfc <release version>`, then
+  // `interface <major>.<minor>`. Later lines are `<key> <value>` and may be
+  // added, but never by changing these two.
+  CompilerExecutablePath = llvm::sys::fs::getMainExecutable(argv[0], (void *)(intptr_t)runCompilerMain);
+
+  for (int i = 1; i < argc; ++i) {
+    if (std::string(argv[i]) == "--version") {
+      // REL-001: what someone pastes into a bug report. `llvm` is the LLVM
+      // this binary was built against (a mismatch with the machine's own LLVM
+      // is a classic source of "works for me"), `runtime` is the ABI stamp
+      // every program it compiles will demand of libturfrt.a, and `root` is
+      // where it looks for lib/std and the runtime -- the three facts that
+      // decide "why does my install behave differently". TurfInstallRoot()
+      // only reads the environment and CompilerExecutablePath, so this still
+      // touches no compiler state.
+      // The default root is `<bin dir>/..`; print it resolved, not as
+      // `.../build/..`, when the directory exists.
+      std::string Root = TurfInstallRoot();
+      llvm::SmallString<256> RealRoot;
+      if (!llvm::sys::fs::real_path(Root, RealRoot))
+        Root = RealRoot.str().str();
+      std::cout << "turfc " << TURF_VERSION << "\n"
+                << "interface " << TurfcInterfaceMajor << "."
+                << TurfcInterfaceMinor << "\n"
+                << "llvm " << LLVM_VERSION_STRING << "\n"
+                << "runtime " << RuntimeAbiSymbol << "\n"
+                << "root " << Root << "\n";
+      // REL-008 stage 3: which linker links a program, and whether this install
+      // has the C runtime that linker needs (so "why did it run cc?" is
+      // answerable from a bug report). `bundled-runtime` appears only when it is
+      // usable: an embedded linker and a complete lib/rt/<platform>/.
+      const std::string RtPlatform = turf::BundledRuntimePlatform();
+      if (RtPlatform.empty()) {
+        std::cout << "linker system-cc\n";
+      } else {
+        std::cout << "linker embedded-lld\n";
+        const std::string RtDir = Root + "/lib/rt/" + RtPlatform;
+        if (turf::BundledLinkAvailable(RtDir))
+          std::cout << "bundled-runtime " << RtDir << "\n";
+      }
+      // Whether --smart's model runtime is in this turfc (the "smart" archive,
+      // or a source build without --no-smart). It runs the one .gguf file in
+      // <root>/models; package_release.sh and the installers read this line.
+      std::cout << "smart "
+                << (SLM::SLMEngine::builtIn() ? "built-in" : "not-built")
+                << "\n";
+      return ExitOk;
+    }
+  }
+
+  // `turfc help`: the spelling REL-001 chose over `--help` (see turfcUsage()).
+  // Only as the first argument, so it can never shadow a file operand.
+  if (argc >= 2 && std::string(argv[1]) == "help") {
+    std::cout << turfcUsage();
+    return ExitOk;
+  }
+
+  // REL-002: a mode, recognised only as the first argument for the same reason
+  // as `help`, and before parseArgs() because a runner's options are not a
+  // compile's.
+  if (argc >= 2 && std::string(argv[1]) == "--test")
+    return runTestMode(argc, argv);
+
+  handleExplainFlagIfPresent(argc, argv);
+
+  struct SLMCleanup {
+    ~SLMCleanup() { SLM::SLMEngine::getInstance().release(); }
+  } cleanup;
+
+  auto opts = parseArgs(argc, argv);
+  if (!opts.TargetTriple.empty())
+    g_FfiPlatform = ffiPlatformKey(Triple(Triple::normalize(opts.TargetTriple)));
+
+  // LEC-002 stage 6: needs only the files' text, like --format below, so it
+  // runs before any compiler state is initialized.
+  if (opts.MigratePub)
+    return runMigratePub(opts.PositionalFiles, opts.FormatWrite);
+
+  // Set the global AI flag so DiagnosticEngine knows whether to invoke the SLM.
+  g_AIEnabled = opts.AIEnabled;
+  g_SmartFixOutPath = opts.SmartFixOutPath;
+  // LANG-002: must be set before any parsing happens -- HasRawPointerCapability()
+  // (ParserModule.cpp) consults it for every `unsafe module;` pragma outside
+  // the install root.
+  g_AllowUnsafeModules = opts.AllowUnsafeModules;
+
+  // LEC-001 stage 4: a package build. Loaded and validated before anything is
+  // parsed, since every import resolves against it; a malformed graph stops
+  // here with the reason rather than as a "module not found" deep inside a
+  // dependency.
+  if (!opts.PackageGraphFile.empty()) {
+    std::string GraphError;
+    auto Graph = LoadPackageGraph(opts.PackageGraphFile, opts.InputFile,
+                                  /*EntryIsModule=*/opts.Check && opts.CheckAsModule, GraphError);
+    if (!Graph) {
+      std::cerr << "Error: " << GraphError << "\n";
+      return 1;
+    }
+    g_PackageGraph = std::move(*Graph);
+  }
+
+  // OVH-012: consulted only by DiagnosticEngine::flushAll() at print time,
+  // so it's fine to set this any time before that runs -- unlike
+  // g_AllowUnsafeModules just above, nothing during parsing/resolving reads it.
+  g_ShowStdlibWarnings = opts.ShowStdlibWarnings;
+
+  // TOOL-001: must be set before InitializeModule() runs (below) -- that's
+  // the one call site that decides whether DBuilder/DebugCU get built at
+  // all for this compile.
+  g_EmitDebugInfo = opts.DebugInfo;
+
+  // --format needs none of the lex/parse/resolve/typecheck/codegen
+  // pipeline below -- just the raw source text -- so it short-circuits
+  // before any of that global state (GlobalSymbolTable, LLVM
+  // module, ...) gets initialized at all.
+  if (opts.Format)
+    return runFormat(opts.PositionalFiles, opts.FormatWrite, opts.Check, opts.FormatSkipUnlexable);
+
+  if (!OpenSourceFile(opts.InputFile)) {
+    std::cerr << "Error: Could not open file " << opts.InputFile << "\n";
+    return 1;
+  }
+  SourceFilename = opts.InputFile;
+  MainSourceFilename = opts.InputFile;
+
+  // Read file into memory for error printing
+  std::ifstream File(opts.InputFile);
+  std::string Line;
+  while (std::getline(File, Line)) {
+    SourceLines.push_back(Line);
+  }
+  // Also seed the persistent cross-pass cache -- see AllSourceLines' doc
+  // comment in Lexer.h for why this can't just be SourceLines alone.
+  AllSourceLines[SourceFilename] = SourceLines;
+
+  // Builtin registry removed
+  InitializeModule(); // Initialize LLVM Context, Module, Builder
+
+  // The target's triple and data layout go on the module BEFORE any codegen:
+  // codegen computes byte sizes with getDataLayout() (`.copy()`, sizeof,
+  // element type descriptors), and LLVM's default layout aligns i64 to 4
+  // bytes, so `{bool, int, bool[4]}` came out 16 bytes instead of the
+  // target's 24 -- `.copy()` of such an array overflowed its heap block
+  // (found by turf-fuzz). Reused for object emission below.
+  TargetMachine *EarlyTM = createTurfTargetMachine(opts, *TheModule);
+  if (!EarlyTM) {
+    std::cerr << "Error: could not create a target machine for '"
+              << (opts.TargetTriple.empty() ? sys::getDefaultTargetTriple()
+                                             : opts.TargetTriple)
+              << "'.\n";
+    return 1;
+  }
+  ClearGlobalCFGs();
+  InitializeCompilerGlobals(); // GlobalSymbolTable + BinopPrecedence -- see Parser.h
+
+  // Pre-pass: hoist 'fn' function prototypes so that forward calls work.
+  // We perform a second full parse of the file, i.e. only processing
+  // FuncDefExprAST nodes, which registers the LLVM prototype on first
+  // codegen call (before the body exists).
+  //
+  // There is deliberately no prelude auto-import here. lib/std/prelude.tr
+  // used to always `import io;` for every compile, which meant bare
+  // `printline(...)` (etc.) silently compiled with zero import statements
+  // anywhere in user code -- io's functions leaked into every program's
+  // module registry regardless of whether that program actually asked for
+  // them. Every module a program uses must now be imported explicitly by
+  // that program itself.
+
+  // Swap the global SourceFile for the pre-pass stream
+  CloseSourceFile();
+      OpenSourceFile(opts.InputFile);
+      CurLoc = {1, 0};
+
+      // Reset the lexer token stream
+      CurTok = 0;
+      getNextToken();
+
+      // ── Pre-pass sub-pass 1: Parse ALL top-level declarations ─────────────
+      // We collect every fn/struct/import node BEFORE codegenning any body.
+      // This is required so the Resolver can pre-declare all functions before
+      // we attempt to codegen any call sites (Issue #9: Codegen reads
+      // ResolvedCallTarget blindly, so Resolver must run first).
+      std::vector<std::unique_ptr<ExprAST>> PrePassASTs;
+
+      // LANG-002: the entry file's own leading `unsafe module;` capability
+      // pragma, if any -- must be checked here, immediately after the token
+      // stream reset above, the only point that sees this file's first real
+      // token (see ParseLeadingUnsafeModuleDecl()'s own doc comment).
+      {
+        std::unique_ptr<ExprAST> LeadingUnsafeBlock;
+        if (!ParseLeadingUnsafeModuleDecl(LeadingUnsafeBlock) && LeadingUnsafeBlock)
+          AppendFlattenedTopLevelDecl(std::move(LeadingUnsafeBlock), PrePassASTs, true);
+      }
+
+      // Prelude auto-import (STRING_UFCS_OPERATOR_CHAR_RFC.md §7 step 6):
+      // inject `import int; import double; ...` as if they were the literal
+      // first lines of the TOP-LEVEL file only (not library modules
+      // importing each other -- see ParsePreludeImports()'s doc comment).
+      // These go through the exact same ParseModuleImportByName() path a
+      // real import does -- not a separate always-on registry, which is
+      // what caused the original prelude.tr's two bugs (see this file's
+      // other prelude comment, a few dozen lines below, for that history).
+      // Deliberately NOT passed to RecordParsedTopLevelAST() -- that tracks
+      // the USER's own top-level declarations for sandbox/SLM diffing, and
+      // these aren't part of the user's source.
+      for (auto &PreludeAST : ParsePreludeImports(CurLoc))
+        PrePassASTs.push_back(std::move(PreludeAST));
+
+      // OVH-011: if a transitive import inside the prelude just injected
+      // above (e.g. `strings`'s own `import list::List;`) already resolved
+      // to this exact entry file's own path -- true whenever the file being
+      // compiled directly IS the lib/std module some prelude module
+      // transitively imports -- skip re-parsing this file's own top-level
+      // declarations entirely: they are already fully present, correctly
+      // registered under whatever module name reached them. See
+      // ClaimEntryFileImportSlot()'s own doc comment (ParserModule.cpp) for
+      // the full rationale and why this call must sit exactly here (after
+      // prelude injection, before this loop).
+      if (!ClaimEntryFileImportSlot(SourceFilename)) {
+      while (CurTok != TOK_EOF) {
+        if (CurTok == ';') { getNextToken(); continue; }
+        if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
+            CurTok == TOK_MACHINE ||
+            CurTok == TOK_AT || CurTok == TOK_EXTERN || CurTok == TOK_EXPORT ||
+            CurTok == TOK_OPERATOR || CurTok == TOK_ERROR || CurTok == TOK_UNSAFE ||
+            CurTok == TOK_PUB) {
+          g_recoverActive = true;
+          try {
+            auto AST = ParseExpression();
+            if (AST) {
+              if (CurTok == ';') {
+                LogErrorAt(CurLoc, ErrCode::UnexpectedToken, "Unexpected ';'", SLM::ErrorCategory::SYNTAX_ERROR);
+              }
+              // NOTE: no LintExpression() call here (deliberately -- see the
+              // "Phase Separation: Lint All" comment near FnASTs' declaration
+              // for the full story). This AST is about to flow through
+              // Resolver -> TypeChecker -> full codegen (sub-pass 3b) in this
+              // same pre-pass, and FuncDefExprAST::codegen() already lints
+              // its own body once that's done. Linting here too used to
+              // triple-warn on every function: once here (before the AST was
+              // even resolved), once via that embedded codegen-time lint,
+              // and a third time later when the main pass re-parses the same
+              // source into a fresh (but structurally identical) AST and
+              // lints THAT via the FnASTs loop -- three near-identical
+              // warnings for one line of source. Found while adding a
+              // regression test for Lint.cpp's self-comparison wording fix.
+              //
+              // AppendFlattenedTopLevelDecl() also transparently splices a
+              // top-level `unsafe { }` block's children in here instead of
+              // the wrapper node itself -- see its doc comment (Parser.h).
+              AppendFlattenedTopLevelDecl(std::move(AST), PrePassASTs, true);
+            } else {
+              // ParseExpression() already reported a real error and
+              // returned nullptr NORMALLY (no raise) -- see
+              // SkipToNextTopLevelBoundary()'s doc comment for why a
+              // depth-aware skip is needed here instead of a flat scan.
+              SkipToNextTopLevelBoundary();
+            }
+          } catch (const RecoverUnwind &) {
+            SkipToNextTopLevelBoundary();
+          }
+          g_recoverActive = false;
+        } else if (CurTok == TOK_IMPORT) {
+          g_recoverActive = true;
+          try {
+            auto AST = ParseImport();
+            if (AST) {
+              if (CurTok != ';') {
+                LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
+              } else {
+                getNextToken(); // eat ';'
+              }
+              RecordParsedTopLevelAST(AST.get());
+              // See the matching NOTE above (fn/struct/enum/@/extern branch):
+              // no LintExpression() call here either, for the same reason.
+              PrePassASTs.push_back(std::move(AST));
+            } else {
+              SkipToNextTopLevelBoundary();
+            }
+          } catch (const RecoverUnwind &) {
+            SkipToNextTopLevelBoundary();
+          }
+          g_recoverActive = false;
+        } else {
+          getNextToken();
+        }
+      }
+      } // OVH-011: end of "if (!ClaimEntryFileImportSlot(...))"
+
+      // ── Pre-pass sub-pass 2a: Resolve ─────────────────────────────────────
+      // Run the Resolver over everything parsed so far (user fns only -- no
+      // prelude to resolve first any more).
+      // This populates ResolvedCandidates on every FuncCallExprAST and sets
+      // ResolvedCallTarget for unambiguous single-overload calls.
+      Resolver PreR;
+      {
+        bool PreResolverClean = true;
+        g_recoverActive = true;
+        try {
+          PreR.resolveAll(PrePassASTs);
+        } catch (const RecoverUnwind &) {
+          PreResolverClean = false;
+        }
+        g_recoverActive = false;
+        if (!PreResolverClean) {
+          DiagnosticEngine::flushAll();
+          return 1;
+        }
+      }
+
+      // ── Pre-pass sub-pass 2b: TypeCheck ───────────────────────────────────
+      // Run the TypeChecker over the pre-pass ASTs to narrow overloaded calls
+      // (e.g. io.printline has 4 overloads; TypeChecker picks the right one
+      // and sets ResolvedCallTarget so sub-pass 3b codegen reads it blindly).
+      bool PreTCClean = true;
+      {
+        TypeChecker PreTC(PreR.symbolTable());
+        // TYPE-002 (docs/development/changes/TYPE-002.md, S11b): this is
+        // U-4's answer (U-4') in practice -- the real monomorphizer will
+        // hook in here too, as sub-pass 2b.5, immediately after this
+        // TypeChecker run and before sub-pass 2c's struct codegen just
+        // below. For now, report-only: --dump-instantiations feeds a
+        // collector during this SAME checkAll() call (TypeChecker's
+        // visitFuncCall/visitMethodCall/visitVarDecl record into it when
+        // set) and prints the census once it finishes. Zero behaviour
+        // change whenever the flag is absent -- MonoCollector is never
+        // attached, so every record() call site stays a no-op.
+        Monomorphize::InstantiationCollector MonoCollector;
+        // TYPE-002 (S12a): always attached now, not just under
+        // --dump-instantiations -- the collector's record() calls are what
+        // SEED sub-pass 2b.5's drain below; S11b's opt-in gate only made
+        // sense while nothing consumed the worklist.
+        PreTC.setMonomorphizationCollector(&MonoCollector);
+        g_recoverActive = true;
+        try {
+          PreTC.checkAll(PrePassASTs);
+        } catch (const RecoverUnwind &) {
+          PreTCClean = false;
+        }
+        // ── Pre-pass sub-pass 2b.5: Monomorphize ──────────────────────────
+        // U-4's answer (U-4', docs/development/changes/TYPE-002.md), acted
+        // on here: drains every FreeFunction- and Method-kind instantiation
+        // request sub-pass 2b's TypeChecker run seeded, to a fixed point
+        // (clone/substitute/re-resolve/re-typecheck/register each one,
+        // appending it to PrePassASTs so 2c/3a/3b below codegen it like any
+        // other declaration -- see drainFreeFunctionRequests()'s and
+        // drainMethodRequests()'s own doc comments, Monomorphize.h). Gated
+        // on PreTCClean for the identical reason 2c/3a/3b already are just
+        // below: a program the ordinary TypeChecker already rejected has no
+        // business being monomorphized either. Struct-kind requests are
+        // left recorded, undrained -- S13a.
+        //
+        // TYPE-002 (S12b): the two drain functions are called in an
+        // ALTERNATING loop, not once each in sequence, because they are
+        // NOT independent -- re-typechecking a method's clone can discover
+        // a nested call to a generic FREE function (or vice versa: a free
+        // function constructing/calling into a generic struct's method),
+        // and that nested request needs the OTHER drain function to act on
+        // it. Each function reports (via its bool return) whether it did
+        // any work THIS call; looping while EITHER one still is guarantees
+        // the true cross-kind fixed point, not just each function's own
+        // internal one. Terminates because every successful drain either
+        // marks an entry Drained (never revisited) or exits via
+        // GenericInstantiationDepthError (E079) if a truly unbounded chain
+        // keeps discovering brand-new work forever.
+        if (PreTCClean) {
+          g_recoverActive = true;
+          try {
+            bool Progress = true;
+            while (Progress) {
+              Progress = false;
+              Progress |= Monomorphize::drainFreeFunctionRequests(PrePassASTs, MonoCollector, PreR);
+              Progress |= Monomorphize::drainMethodRequests(PrePassASTs, MonoCollector, PreR);
+              // TYPE-002 (S14a): drains the struct-bound FreeFunction-kind
+              // entries drainFreeFunctionRequests() deliberately skips
+              // (`StructName::new(...)` constructors) -- see its own doc
+              // comment (Monomorphize.h/.cpp) for why this needed S13a's
+              // per-instantiation struct layout to exist first.
+              Progress |= Monomorphize::drainConstructorRequests(PrePassASTs, MonoCollector, PreR);
+              // TYPE-002 (S13a): a fourth, independent consumer of the SAME
+              // non-destructive collector -- a struct instantiation request
+              // can be discovered mid-sweep by any of the other three (a
+              // method/constructor clone's own `self` type, or a nested
+              // generic call's VarDeclExprAST), and this one, in turn, never
+              // discovers a NEW FreeFunction/Method request itself (a struct
+              // decl has no body/call sites of its own) -- but it still
+              // participates in the SAME fixed-point loop rather than
+              // running once after, since ordering between all four is not
+              // guaranteed by discovery order alone.
+              Progress |= Monomorphize::drainStructRequests(PrePassASTs, MonoCollector, PreR);
+            }
+          } catch (const RecoverUnwind &) {
+            PreTCClean = false;
+          }
+        }
+        if (opts.DumpInstantiations)
+          MonoCollector.report(std::cerr);
+        // Errors in the pre-pass TC are informational only in the sense that
+        // the main-pass TC (below, after the whole pre-pass finishes) is what
+        // actually PRINTS them with full diagnostics and is authoritative for
+        // whether compilation ultimately fails -- but PreTCClean still gates
+        // sub-pass 3b's body codegen just below. Without that gate, a type
+        // error the pre-pass TC correctly caught (e.g. `x.foo()` where
+        // x: int -- "cannot call methods on a non-struct type") used to be
+        // silently discarded here, and sub-pass 3b would codegen the same
+        // broken body anyway, reaching a Codegen-side
+        // `llvm::report_fatal_error()` ("this is a compiler bug") and
+        // aborting the whole process -- BEFORE the main-pass TC ever got a
+        // chance to run and print the real, correct diagnostic. The prior
+        // codegen (structs, sub-pass 2c) and prototypes (sub-pass 3a) stay
+        // ungated: they're structural/signature-level and don't execute
+        // arbitrary expression codegen, so they carry effectively none of
+        // this crash risk, and skipping them too would serve no purpose
+        // since the main-pass TC exits before anything downstream of them
+        // runs anyway once PreTCClean is false.
+        g_recoverActive = false;
+      }
+
+      // ── Pre-pass sub-pass 2c: Fully codegen all structs FIRST ──────────────
+      // Unlike functions, StructDeclExprAST::codegen() has no g_protoOnlyPass
+      // split -- one call does the whole job: create-or-reuse an opaque
+      // llvm::StructType stub, then immediately populate its body (field
+      // types) in place. That "immediately" is the problem this pass exists
+      // to fix. Structs used to only be codegen'd in sub-pass 3b below,
+      // interleaved with everything else in TEXTUAL file order -- so a
+      // struct field access GEP built while compiling a method that's
+      // declared BEFORE its owning struct (`fn User.grow()` above `struct
+      // User {...}`, a supported forward-reference -- see
+      // tests/06_structs/19_method_before_struct.tr) got built against the
+      // struct type while it was still opaque (zero fields). The opaque
+      // llvm::StructType* object identity is correctly preserved and later
+      // filled in via setBody() -- so by the time the module finishes,
+      // GlobalSymbolTable and LLVMTypeCache both point at a fully-populated
+      // struct -- but the GEP instruction itself was already permanently
+      // constructed while that type had no known fields, and its embedded
+      // "indexed type" information doesn't get retroactively fixed up by a
+      // later setBody() call on the same object. The result was IR that
+      // `verifyModule()` (see below) correctly rejects: "GEP is not of right
+      // type for indices!". This was completely invisible before that
+      // verification call was wired up correctly (see its own doc comment).
+      //
+      // Fix: give structs the same treatment functions already get for
+      // exactly this reason (forward calls) -- process ALL of them, fully,
+      // before ANY function prototype or body touches a struct type. Structs
+      // are excluded from both loops below since they're entirely done here.
+      for (auto &AST : PrePassASTs) {
+        if (dynamic_cast<StructDeclExprAST *>(AST.get())) {
+          g_recoverActive = true;
+          try {
+            AST->codegen();
+          } catch (const RecoverUnwind &) {
+          }
+          g_recoverActive = false;
+        }
+      }
+
+      // ── Pre-pass sub-pass 3a: Emit all LLVM function prototypes ────────────
+      // Before compiling any body, declare every function in LLVM so that
+      // forward calls (main calling helper() defined later) work correctly.
+      // FuncDefExprAST::codegen() creates the prototype on the first call when
+      // TheModule->getFunction(mangledName) returns null.
+      // We set a global flag to stop after prototype creation.
+      g_protoOnlyPass = true;
+      for (auto &AST : PrePassASTs) {
+        // TYPE-002 (S12a-S14a): a FuncDefExprAST that STILL has a non-empty
+        // TypeParams list is an uninstantiated GENERIC TEMPLATE -- the
+        // monomorphizer (sub-pass 2b.5, above) only ever appends a fully-
+        // concrete CLONE to PrePassASTs (TypeParams cleared) and rewrites
+        // every call site to it; the template itself is never meant to
+        // reach Codegen with an open TurfGenericParamType anywhere in it
+        // (F-GEN-2, INV-GEN-1). Originally (S12a) this only covered NON-
+        // struct-bound (free-function) templates -- a struct-bound generic
+        // (method or constructor) was deliberately left un-skipped, because
+        // S12a's drain left it un-monomorphized on purpose (no
+        // per-instantiation struct layout existed yet to substitute
+        // `self.<field>` against). S13a built that layout and S14a's own
+        // drainConstructorRequests()/visitMethodCall fix now monomorphize
+        // EVERY struct-bound generic too, so the exemption is gone: ANY
+        // FuncDefExprAST with non-empty TypeParams is now always a
+        // template with a real clone elsewhere in PrePassASTs, regardless
+        // of self-binding -- skipping all of them uniformly is what makes
+        // erasure's deletion (below, this session) safe: a template's body
+        // can still literally contain a TurfGenericParamType occurrence
+        // with no monomorphized equivalent operation to fall back on if it
+        // ever reached Codegen. Getting this too NARROW (the old,
+        // self-bound-exempting condition) reintroduces exactly the
+        // "Invalid bitcast"/erasure-branch-missing crash class this session
+        // deletes erasure specifically to get away from -- for a template
+        // whose body Codegen would now hit with no erasure branch left to
+        // catch it.
+        if (auto *FD = dynamic_cast<FuncDefExprAST *>(AST.get()))
+          if (!FD->getTypeParams().empty())
+            continue;
+        if (dynamic_cast<FuncDefExprAST *>(AST.get()) ||
+            dynamic_cast<EnumDeclExprAST *>(AST.get()) ||
+            dynamic_cast<ExternFuncDeclExprAST *>(AST.get()) ||
+            dynamic_cast<ModuleImportExprAST *>(AST.get())) {
+          g_recoverActive = true;
+          try {
+            AST->codegen();
+          } catch (const RecoverUnwind &) {
+          }
+          g_recoverActive = false;
+        }
+      }
+      g_protoOnlyPass = false;
+
+      // ── Pre-pass sub-pass 3b: Full codegen (bodies) ───────────────────────
+      // All prototypes exist now — codegen each function body safely.
+      // Structs are skipped: sub-pass 2c above already fully codegen'd them,
+      // and StructDeclExprAST::codegen() is NOT safe to call a second time
+      // (its opaque-stub reuse check keys on `isOpaque()`, which is false
+      // once setBody() has run -- a second call would create a second,
+      // distinct llvm::StructType and silently corrupt LLVMTypeCache).
+      //
+      // Gated on PreTCClean: if the pre-pass TypeChecker (sub-pass 2b) found
+      // ANY error anywhere in the file, don't run body codegen at all here --
+      // see PreTCClean's doc comment above for why. The main-pass TC (after
+      // this whole pre-pass block) will re-find the same error and exit
+      // cleanly before its own codegen ever runs, so skipping this is always
+      // safe when !PreTCClean, never a missed compile.
+      if (PreTCClean) {
+        for (auto &AST : PrePassASTs) {
+          if (dynamic_cast<StructDeclExprAST *>(AST.get()))
+            continue;
+          // TYPE-002 (S12a-S14a): same template-skip as sub-pass 3a above --
+          // see that comment for the full history of why this now covers
+          // EVERY generic template uniformly, struct-bound or not.
+          if (auto *FD = dynamic_cast<FuncDefExprAST *>(AST.get()))
+            if (!FD->getTypeParams().empty())
+              continue;
+          // `export immut` constants have no real LLVM storage at all --
+          // Resolver Pass 1 (hoistExportedConstant) already extracted their
+          // literal value into the symbol table, and every reference site
+          // emits that literal directly (see VariableExprAST/
+          // ScopeAccessExprAST's ResolvedConstant field). Calling
+          // VarDeclExprAST::codegen() here would run it with no enclosing
+          // function/basic-block context (true top level), corrupting
+          // whatever LLVM function is being codegenned adjacent to it in
+          // iteration order -- confirmed live via a real crash ("Basic
+          // Block ... does not have terminator") in an unrelated function.
+          if (dynamic_cast<VarDeclExprAST *>(AST.get()))
+            continue;
+          size_t SavedDepth = GlobalSymbolTable ? GlobalSymbolTable->GetDepth() : 0;
+          g_recoverActive = true;
+          try {
+            AST->codegen();
+          } catch (const RecoverUnwind &) {
+            if (GlobalSymbolTable) {
+              GlobalSymbolTable->ResetToDepth(SavedDepth);
+              GlobalSymbolTable->ResetEarlyExitForCurrentScope();
+            }
+          }
+          g_recoverActive = false;
+        }
+      }
+
+  // Re-open for the main pass
+  CloseSourceFile();
+  OpenSourceFile(opts.InputFile);
+  CurLoc = {1, 0};
+  CurTok = 0;
+
+
+  // Main pass: re-enter the entry block and codegen everything.
+  // Builder->SetInsertPoint(Entry);
+
+  // pre-pass 1 ends
+  // Reset the lexer's internal state so that it starts from the beginning of
+  // the file
+  ClearParsedTopLevelASTs();
+  resetLexer();
+
+  // Bootstrap the lexer for the main pass
+  getNextToken();
+
+  // Phase Separation: Parse All
+  // Fully parse every top-level statement into an in-memory AST list BEFORE
+  // calling codegen on any of them. This prevents orphaned LLVM BasicBlocks
+  // and corrupted module state that previously occurred when a semantic error
+  // (e.g. type mismatch) triggered a longjmp mid-codegen.
+  //
+  // fn definitions are kept in a SEPARATE list (FnASTs) because they were
+  // already fully codegenned -- and linted (see FuncDefExprAST::codegen()'s
+  // own LintExpression(Body.get()) call) -- in the pre-pass. We parse them
+  // here purely to sync the token stream, NOT to codegen or lint them again:
+  // this is a fresh re-parse producing structurally-identical-but-distinct
+  // AST nodes from the pre-pass's copy, so re-linting here would just repeat
+  // every warning a second time for the same source line.
+  std::vector<std::unique_ptr<ExprAST>> TopLevelASTs; // non-fn: lint + codegen
+  std::vector<std::unique_ptr<ExprAST>> FnASTs;       // fn:     kept for Resolver/TypeChecker re-validation only
+
+  // LANG-002: re-consume the entry file's own leading `unsafe module;`
+  // pragma (if any) here too -- this is a FRESH token stream (resetLexer()
+  // above), so it sees the file's first token again just like the pre-pass
+  // did. Idempotent re-registration (see UnsafeModuleFiles' own doc
+  // comment, ParserModule.cpp); a genuine top-level unsafe BLOCK, if that's
+  // what this turns out to be instead, is pushed into FnASTs to mirror how
+  // the ordinary per-statement loop below categorizes one for this pass
+  // (already codegenned in the pre-pass; re-parsed here purely for
+  // Resolver/TypeChecker re-validation).
+  {
+    std::unique_ptr<ExprAST> LeadingUnsafeBlock;
+    if (!ParseLeadingUnsafeModuleDecl(LeadingUnsafeBlock) && LeadingUnsafeBlock)
+      AppendFlattenedTopLevelDecl(std::move(LeadingUnsafeBlock), FnASTs, true);
+  }
+
+  // Prelude auto-import, main-pass side -- mirrors the pre-pass injection
+  // above exactly (same ParsePreludeImports() call, same rationale). Pushed
+  // into FnASTs, matching how a real `import X;` is categorized in this
+  // pass (already codegenned in the pre-pass; re-parsed here purely for
+  // Resolver/TypeChecker re-validation, not re-codegen).
+  for (auto &PreludeAST : ParsePreludeImports(CurLoc))
+    FnASTs.push_back(std::move(PreludeAST));
+
+  // OVH-011: mandatory-pass side of the same skip the pre-pass applies
+  // above -- ImportedFiles was cleared by ClearParsedTopLevelASTs() between
+  // passes, so this pass's own prelude injection just above re-populates it
+  // from scratch, and this call must re-check/re-claim against THIS pass's
+  // fresh cache. See ClaimEntryFileImportSlot()'s own doc comment
+  // (ParserModule.cpp).
+  if (!ClaimEntryFileImportSlot(SourceFilename)) {
+  while (true) {
+    if (CurTok == TOK_EOF)
+      break;
+
+    if (CurTok == ';') {
+      getNextToken();
+      continue;
+    }
+
+    // the pre-pass.  Parse them here to keep the token stream in sync and to
+    // lint/resolve them, but do NOT push them into TopLevelASTs (that would
+    // re-codegen them).  TOK_IMPORT is included here because `import` nodes
+    // are top-level declarations handled by the pre-pass, exactly like `fn`.
+    // TOK_EXTERN is included because extern fn declarations are also emitted
+    // in the pre-pass. TOK_EXPORT (export immut NAME: TYPE = LITERAL;) is
+    // included for the same reason -- it's a genuine top-level declaration,
+    // not a statement, and needs the exact same hoist-then-lint treatment.
+    if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
+        CurTok == TOK_MACHINE ||
+        CurTok == TOK_AT || CurTok == TOK_EXTERN || CurTok == TOK_EXPORT ||
+        CurTok == TOK_OPERATOR || CurTok == TOK_ERROR || CurTok == TOK_UNSAFE ||
+            CurTok == TOK_PUB) {
+      g_recoverActive = true;
+      try {
+        auto AST = ParseExpression();
+        if (AST) {
+          if (CurTok == ';') {
+            LogErrorAt(CurLoc, ErrCode::UnexpectedToken, "Unexpected ';'", SLM::ErrorCategory::SYNTAX_ERROR);
+          }
+          // lint only — not re-codegenned. Also transparently flattens a
+          // top-level `unsafe { }` block -- see AppendFlattenedTopLevelDecl()'s
+          // doc comment (Parser.h).
+          AppendFlattenedTopLevelDecl(std::move(AST), FnASTs, true);
+        } else {
+          // ParseExpression() already reported a real error (e.g. a typo'd
+          // keyword deep inside the function body, like `iff` for `if`) and
+          // returned nullptr NORMALLY -- see SkipToNextTopLevelBoundary()'s
+          // doc comment for why a depth-aware skip is needed here instead
+          // of a flat token scan.
+          SkipToNextTopLevelBoundary();
+        }
+      } catch (const RecoverUnwind &) {
+        SkipToNextTopLevelBoundary();
+      }
+      g_recoverActive = false;
+      continue;
+    }
+
+    if (CurTok == TOK_IMPORT) {
+      g_recoverActive = true;
+      try {
+        auto AST = ParseImport();
+        if (AST) {
+          if (CurTok != ';') {
+            LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
+          } else {
+            getNextToken(); // eat ';'
+          }
+          RecordParsedTopLevelAST(AST.get());
+          FnASTs.push_back(std::move(AST)); // lint only — not re-codegenned
+        } else {
+          SkipToNextTopLevelBoundary();
+        }
+      } catch (const RecoverUnwind &) {
+        SkipToNextTopLevelBoundary();
+      }
+      g_recoverActive = false;
+      continue;
+    }
+
+    g_recoverActive = true;
+    try {
+      // Where the statement STARTS, for the "not allowed outside a function"
+      // diagnostic below -- CurLoc will be past it once ParseExpression()
+      // returns.
+      const SourceLocation StmtLoc = CurLoc;
+      auto AST = ParseExpression();
+      if (AST) {
+        if (CurTok != ';') {
+          LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
+        } else {
+          getNextToken(); // eat ';'
+        }
+        if (!dynamic_cast<FuncDefExprAST *>(AST.get()) &&
+            !dynamic_cast<StructDeclExprAST *>(AST.get()) &&
+            !dynamic_cast<EnumDeclExprAST *>(AST.get()) &&
+            !dynamic_cast<ModuleImportExprAST *>(AST.get()) &&
+            !dynamic_cast<ExternFuncDeclExprAST *>(AST.get())) {
+          // LEC-005: when a parse error was already reported, this "statement"
+          // is almost certainly what recovery left of the broken construct,
+          // not something the user wrote outside a function -- and it would
+          // print BEFORE the real error (this raw write bypasses the
+          // diagnostic engine's own ordering). The compile is already
+          // doomed by the earlier error; drop the node and keep parsing so
+          // any independent later error is still found.
+          if (DiagnosticEngine::hasErrors()) {
+            g_recoverActive = false; // `continue` skips the reset below
+            continue;
+          }
+          // Through the engine, not a raw std::cerr: this used to print
+          // "Error: ..." with no `[E0NN]`, no source line, no caret and no
+          // `--explain` page -- the one message every first-time beginner who
+          // pastes code at the top level meets. (issue #263)
+          LogErrorAt(StmtLoc, ErrCode::StatementOutsideFunction,
+                     "Statements are not allowed outside of a function. "
+                     "Please define 'fn main(): int' and move this code "
+                     "inside.",
+                     SLM::ErrorCategory::SYNTAX_ERROR);
+          DiagnosticEngine::flushAll();
+          // _Exit (not exit): this raw exit point bypasses the rest of the
+          // call stack, so the SLMCleanup guard in runCompilerMain() never
+          // runs. That's fine for our own state, but it means llama.cpp's
+          // ggml Metal backend never gets its explicit teardown either --
+          // skip the whole static-destructor phase (ggml's own internal,
+          // TU-static device registry included) rather than let it run
+          // uncleanly. See runCompilerMain -> main's own _Exit for the full
+          // explanation.
+          std::cout.flush();
+          std::cerr.flush();
+          TURF_FLUSH_COVERAGE();
+          std::_Exit(1);
+        }
+        RecordParsedTopLevelAST(AST.get());
+        TopLevelASTs.push_back(std::move(AST));
+      } else {
+        getNextToken();
+      }
+    } catch (const RecoverUnwind &) {
+      // An error was raised: skip to next statement boundary. A lexer error
+      // in the skipped text is skipped too (see SkipToNextTopLevelBoundary()).
+      while (CurTok != ';' && CurTok != TOK_EOF && CurTok != TOK_FN &&
+             CurTok != TOK_STRUCT && CurTok != TOK_MUTABLE &&
+             CurTok != TOK_IMMUTABLE && CurTok != TOK_IF &&
+             CurTok != TOK_WHILE && CurTok != TOK_FOR && CurTok != TOK_RETURN) {
+        try {
+          getNextToken();
+        } catch (const RecoverUnwind &) {
+        }
+      }
+    }
+    g_recoverActive = false;
+  }
+  } // OVH-011: end of "if (!ClaimEntryFileImportSlot(...))"
+
+  // Phase Separation: Lint All
+  // Only TopLevelASTs (non-fn statements) are linted here. FnASTs are
+  // deliberately skipped: they're a fresh re-parse of the same fn bodies
+  // the pre-pass already codegenned (and, via FuncDefExprAST::codegen()'s
+  // own embedded LintExpression(Body.get()) call, already linted) --
+  // linting them again here would just repeat every warning for the exact
+  // same source line a second time. See the FnASTs declaration's comment
+  // above for the full story.
+  for (auto &AST : TopLevelASTs)
+    LintExpression(AST.get());
+
+  // --dump-ast: run the ASTPrinter visitor over every top-level node.
+  // This is the Issue #1 acceptance-criteria demo: a concrete ASTVisitor
+  // subclass successfully traverses and prints the entire parsed AST tree.
+  if (opts.DumpAST) {
+    ASTPrinter Printer;
+    std::cout << "\n=== AST Dump (via ASTPrinter visitor) ===\n\n";
+    std::cout << "--- Functions & Structs ---\n";
+    for (auto &AST : FnASTs)
+      Printer.print(AST.get());
+    std::cout << "--- Top-Level Statements ---\n";
+    for (auto &AST : TopLevelASTs)
+      Printer.print(AST.get());
+    std::cout << "\n=== End AST Dump ===\n\n";
+  }
+
+  // ── Resolver pass (mandatory, Issue #9) ─────────────────────────────────
+  // The Resolver runs unconditionally on every compilation.  It annotates the
+  // AST with resolved symbols, candidate overloads, and arity-checked call
+  // targets so that Codegen can read them blindly without re-doing any name
+  // lookup or arity checking.
+  //
+  // If resolution fails the process aborts here — Codegen must never run on
+  // an unresolved AST.
+  Resolver R;
+  {
+    bool ResolverClean = true;
+    g_recoverActive = true;
+    try {
+      R.resolveAll(FnASTs);
+      R.resolveAll(TopLevelASTs);
+    } catch (const RecoverUnwind &) {
+      ResolverClean = false;
+    }
+    g_recoverActive = false;
+
+    if (!ResolverClean) {
+      DiagnosticEngine::flushAll();
+      return 1;
+    }
+  }
+
+  // --resolve: verbose output for presentation / debugging.
+  // The Resolver already ran above; this block just prints its results.
+  if (opts.RunResolver) {
+    std::cerr << "\n[Resolver] Running name-resolution pass (Issue #4)...\n";
+    std::cerr << "[Resolver] \u2713  All names resolved successfully. "
+                 "Scope depth on exit: "
+              << R.symbolTable().currentDepth() << "\n";
+
+    if (opts.DumpResolverSymbols)
+      R.symbolTable().dump(std::cerr);
+
+    if (opts.DumpModules)
+      R.symbolTable().dumpModules(std::cerr);
+
+    if (opts.DumpResolved) {
+      ASTPrinter Printer;
+      std::cout << "\n";
+      std::cout << "\033[1m=== Resolved AST Dump (Issue #5) ===\033[0m\n";
+      std::cout << "  \033[32m[resolved \u2713]\033[0m = Resolver attached a VariableSymbol pointer\n";
+      std::cout << "  \033[31m[NOT resolved \u2717]\033[0m = pointer is null (structural node or leaf)\n";
+      std::cout << "\n";
+      std::cout << "\033[1m--- Functions ---\033[0m\n";
+      for (auto &AST : FnASTs)
+        Printer.print(AST.get());
+      std::cout << "\n\033[1m--- Top-Level Statements ---\033[0m\n";
+      for (auto &AST : TopLevelASTs)
+        Printer.print(AST.get());
+      std::cout << "\n\033[1m=== End Resolved AST Dump ===\033[0m\n\n";
+    }
+  }
+
+
+
+  // ── TypeChecker pass (mandatory, Issue #11) ──────────────────────────────
+  // The TypeChecker runs unconditionally on every compilation, immediately
+  // after the Resolver.  It infers and validates types on every AST node,
+  // populating type annotations that Codegen reads blindly.
+  //
+  // If the TypeChecker finds any errors, compilation aborts here — Codegen
+  // must never run on a type-incorrect AST.
+  //
+  // Pipeline: Parser → Resolver → TypeChecker → Codegen
+  //
+  // --typecheck and --dump-typechecked still control the debug banner and the
+  // annotated-AST dump, but the TC pass itself is not optional.
+  TypeChecker TC(R.symbolTable());
+  {
+    bool TCClean = true;
+    g_recoverActive = true;
+    try {
+      TC.checkAll(FnASTs);
+      TC.checkAll(TopLevelASTs);
+    } catch (const RecoverUnwind &) {
+      TCClean = false;
+    }
+    g_recoverActive = false;
+
+    if (opts.RunTypeChecker) {
+      if (TCClean)
+        std::cerr << "\n[TypeChecker] Running type-inference pass (Issue #7)...\n"
+                  << "[TypeChecker] \u2713  Type inference completed without errors.\n";
+      else
+        std::cerr << "\n[TypeChecker] Running type-inference pass (Issue #7)...\n"
+                  << "[TypeChecker] \u2717  Type checking failed (see error above).\n";
+    }
+
+    if (opts.DumpTypechecked && TCClean) {
+      ASTPrinter Printer;
+      Printer.setTypeChecker(&TC);
+      std::cout << "\n";
+      std::cout << "\033[1m=== Type-Checked AST Dump (Issue #7) ===\033[0m\n";
+      std::cout << "  \033[32m[resolved \u2713]\033[0m = symbol resolved\n";
+      std::cout << "  \033[36m[module: X \u2713]\033[0m = module qualifier\n";
+      std::cout << "  \033[35m[: type]\033[0m = TypeChecker inferred type\n";
+      std::cout << "\n";
+      std::cout << "\033[1m--- Functions ---\033[0m\n";
+      for (auto &AST : FnASTs)
+        Printer.print(AST.get());
+      std::cout << "\n\033[1m--- Top-Level Statements ---\033[0m\n";
+      for (auto &AST : TopLevelASTs)
+        Printer.print(AST.get());
+      std::cout << "\n\033[1m=== End Type-Checked AST Dump ===\033[0m\n\n";
+    }
+
+    if (!TCClean) {
+      DiagnosticEngine::flushAll();
+      return 1;
+    }
+  }
+
+  // Phase Separation: Codegen All
+  // Only non-fn top-level statements need codegen here. fn bodies were already
+  // compiled in the pre-pass; codegenning them again would duplicate them.
+  size_t SavedDepth = GlobalSymbolTable ? GlobalSymbolTable->GetDepth() : 0;
+  for (auto &AST : TopLevelASTs) {
+    g_recoverActive = true;
+    try {
+      AST->codegen();
+    } catch (const RecoverUnwind &) {
+      if (GlobalSymbolTable) {
+        GlobalSymbolTable->ResetToDepth(SavedDepth);
+        GlobalSymbolTable->ResetEarlyExitForCurrentScope();
+      }
+    }
+    g_recoverActive = false;
+  }
+
+  // Flush all collected diagnostics (sorted by line).  If any errors were
+  // recorded, stop here: do not attempt further IR generation or linking.
+  DiagnosticEngine::flushAll();
+  if (DiagnosticEngine::hasErrors())
+    return 1;
+
+  // --check (LEC-001): `--typecheck`/`--resolve`/the `--dump-*` flags are named
+  // like check modes but all fall through to here and link an executable, so
+  // a check-only mode did not exist -- and the `turf` front end's `check`
+  // needs one that provably writes no file. This is the right return point,
+  // not "right after the TypeChecker": the CFG, definite-assignment, escape
+  // and lint diagnostics are raised inside FuncDefExprAST::codegen() during the
+  // pre-pass above (CodegenFunc.cpp), so every diagnostic a real compile can
+  // print has already been flushed by now. What is left below the entry-point
+  // check is only what needs a runnable program (runtime bootstrap,
+  // optimization, object emission, link) and is deliberately skipped. All
+  // --dump-* output prints before this line, so they combine with --check
+  // unchanged.
+  //
+  // The entry-point check itself stays IN --check: a checked program must fail
+  // exactly where its compile would, or `turf check` passes a file `turf
+  // compile` rejects. Nothing in a file says whether it is a program or a
+  // module (a module is only "a file someone imports"), so the caller says so:
+  // `--module` checks a file as an importable module and skips the `main`
+  // requirement. In a package build (LEC-001 stage 4) the package graph
+  // answers this instead: only src/main.tr is an entry point.
+  if (!(opts.Check && opts.CheckAsModule)) {
+    // Verify that an explicit 'main' function was defined in the primary module
+    Function *MainFunc = TheModule->getFunction("main");
+    if (!MainFunc || MainFunc->empty()) {
+      // Through the diagnostic engine (issue #263), not a raw std::cerr: a
+      // beginner who forgets `main` -- or runs `turf` on an importable module
+      // -- used to get one uncoded "Error:" line and no `--explain`. Raised at
+      // Line 0: it is about the whole file, not a place in it (printDiag()
+      // then prints no "at line").
+      std::string NoMain =
+          "No entry point found. Please define 'fn main(): int' in your file.";
+      if (opts.Check)
+        NoMain += "\n  Hint: checking a module that is only ever imported? add "
+                  "--module: `turf check --module <file.tr>`";
+      LogErrorAt(SourceLocation{0, 0, ""}, ErrCode::MissingEntryPoint, NoMain,
+                 SLM::ErrorCategory::DECLARATION);
+      DiagnosticEngine::flushAll();
+      return 1;
+    }
+  }
+
+  if (opts.Check)
+    return 0;
+
+  // RT-001: wrap the user's compiled main with the turf_rt_init/
+  // turf_rt_shutdown process bootstrap (see src/codegen/Codegen.h's doc comment
+  // on WrapMainWithRuntimeBootstrap() for the full contract). Must run
+  // AFTER every function is codegenned (true here -- this is already past
+  // both the pre-pass and the mandatory main pass) and BEFORE
+  // runOptimizationPipeline() below, whose Internalize must-preserve set is
+  // exactly {"main"} (that function's own comment) -- this call is what
+  // makes that symbol the wrapper rather than the user's own body.
+  WrapMainWithRuntimeBootstrap();
+
+  // TOOL-001: resolve any still-outstanding forward-declared debug-info
+  // metadata (getDebugType()'s struct branch, CodegenCore.cpp) before
+  // verifyModule() below -- a temporary MDNode left unresolved is invalid
+  // IR, and this is the one point every function's codegen (pre-pass AND
+  // main pass) is guaranteed to have already run. A no-op when `-g` wasn't
+  // passed (DBuilder is null).
+  if (DBuilder)
+    DBuilder->finalize();
+
+  // TYPE-002 (S15/D2, secondary): a monomorphized struct instantiation whose
+  // request was never recorded/drained leaves getLLVMType()'s GenericType
+  // branch's forward-declared opaque stub (CodegenCore.cpp) permanently
+  // unfilled -- nothing ever calls setBody() on it, because that only
+  // happens when drainStructRequests() (Monomorphize.cpp) appends the real
+  // clone to PrePassASTs and main.cpp's sub-pass 2c codegens it. D2 closed
+  // the one known gap that produced this (a GenericType used only as a
+  // struct FIELD, never a variable/method-call/field-access site), but if
+  // erasure's old silent-stub tolerance were ever reintroduced or a future
+  // recording site is missed the same way, the previous behaviour was a
+  // raw, low-level "Cannot allocate unsized type"/"GEP into unsized type"
+  // dump from verifyModule() below -- technically correct, but it names an
+  // LLVM struct, not a TurfLang instantiation, and gives no hint that a
+  // monomorphization request went missing. Scanned BEFORE verifyModule()
+  // so this diagnostic (naming the actual instantiation) fires instead of
+  // -- not in addition to -- the generic LLVM-verifier dump. A struct type
+  // is a monomorphized instantiation's if its name contains the "_gen<N>_"
+  // marker Monomorphize::instantiatedDeclName() always inserts right after
+  // the base name -- no ordinary, hand-written Turf struct name can contain
+  // that (identifiers can't start a segment with a digit after "_gen").
+  for (llvm::StructType *ST : TheModule->getIdentifiedStructTypes()) {
+    if (!ST->isOpaque())
+      continue;
+    const std::string Name = ST->getName().str();
+    size_t GenPos = Name.find("_gen");
+    if (GenPos == std::string::npos ||
+        GenPos + 4 >= Name.size() || !isdigit((unsigned char)Name[GenPos + 4]))
+      continue; // Not a monomorphized-instantiation name -- an ordinary
+                // forward-declared struct not yet codegenned is expected
+                // and harmless here (ordinary main.cpp iteration order).
+    std::cerr << "Internal error: monomorphized struct instantiation '"
+              << Name
+              << "' was never given a real layout (its instantiation "
+                 "request was recorded but never drained/codegenned). "
+                 "This is a compiler bug, not a mistake in your Turf "
+                 "code -- please report it.\n";
+    return 1;
+  }
+
+  // RT-001: TurfTypeDesc emission (see EmitAllTurfTypeDescs()'s own doc
+  // comment, CodegenStruct.cpp, for why this must run here -- after every
+  // struct in the module is guaranteed fully built, INCLUDING the
+  // just-finished lingering-opaque-stub scan above -- rather than inline,
+  // per struct, during StructDeclExprAST::codegen()). Still before
+  // verifyModule(): a descriptor is an ordinary constant global like any
+  // other, so there's no reason to build it after IR verification, and
+  // every reason (this exact call site already exists as "the point every
+  // struct is done") to build it before.
+  EmitAllTurfTypeDescs();
+
+  // Verify the generated IR for the WHOLE module (not just main -- a bug in
+  // any function's codegen can produce broken IR that crashes or misbehaves
+  // deep inside the optimizer/backend below with no indication of where the
+  // real problem is).
+  //
+  // This used to be `verifyFunction(*MainFunc);` with the return value
+  // discarded and no output stream passed -- verifyFunction() only prints a
+  // diagnostic if given a non-null raw_ostream*, and only actually means
+  // anything if the caller checks its bool return ("true" = broken). With
+  // neither done, this call was a complete no-op: it could never abort
+  // compilation and never printed anything, regardless of whether the
+  // generated IR was valid. A broken-IR bug in Codegen.cpp -- for any
+  // function, not just main -- would silently sail through this checkpoint
+  // and only surface later as a confusing LLVM optimizer/backend crash with
+  // no TurfLang-level context, rather than a clear internal-compiler-error
+  // message right here, before any of that runs.
+  {
+    std::string VerifyErrors;
+    raw_string_ostream VerifyOS(VerifyErrors);
+    if (verifyModule(*TheModule, &VerifyOS)) {
+      std::cerr << "Internal compiler error: generated LLVM IR is invalid.\n"
+                   "This is a compiler bug, not a mistake in your Turf code "
+                   "-- please report it.\n\n"
+                << VerifyErrors;
+      return 1;
+    }
+  }
+
+  // Phase 5: OPT-001 optimization pipeline (runOptimizationPipeline() above).
+  //
+  // The TargetMachine was built right after InitializeModule(), before
+  // codegen, so the module carries the real target's triple and data layout
+  // through codegen, optimization and object emission alike. `--emit-llvm`
+  // runs the pipeline with no TargetMachine: PassBuilder(nullptr) runs no
+  // target-aware transform, which is what "just show me the IR" has always
+  // meant here (its IR now states the target's layout, though).
+  TargetMachine *TM = opts.EmitLLVM ? nullptr : EarlyTM;
+  runOptimizationPipeline(*TheModule, opts.OptLevel, TM);
+
+  // Output stage: either emit LLVM IR text or compile to native binary
+  if (opts.EmitLLVM) {
+    // Legacy mode: write human-readable .ll file
+    std::string LLFile = opts.OutputName + ".ll";
+    std::error_code EC;
+    raw_fd_ostream OutFile(LLFile, EC);
+    if (!EC) {
+      TheModule->print(OutFile, nullptr);
+      std::cout << "Successfully compiled to " << LLFile << "\n";
+    } else {
+      std::cerr << "Error writing file: " << EC.message() << "\n";
+      return 1;
+    }
+  } else {
+    // New default: emit native object code and link
+    std::string ObjFile = opts.OutputName + ".o";
+
+    if (emitObjectFile(*TheModule, *TM, ObjFile) != 0)
+      return 1;
+
+    std::cout << "Compiled to " << ObjFile << "\n";
+
+    // --emit-obj: the object is the whole product. Everything that can reject
+    // or crash in this compiler has run (codegen and LLVM's backend
+    // included); only the system linker is left, which a tool compiling
+    // thousands of programs to look for compiler faults (turf-fuzz's process
+    // tier) does not need and pays for on every one. Also the way to get an
+    // object to link by hand, for any target.
+    if (opts.EmitObj)
+      return 0;
+
+    // D20: the object above is real code for the requested machine, which is
+    // what `--target` is for. Linking it needs a libturfrt built for that
+    // machine and a linker that knows its format, and neither exists, so the
+    // host `cc` used to answer with its own "file in wrong format" and a
+    // `-lturfrt` command line that says nothing about the real cause. Stop
+    // here with the reason, and keep the object: deleting it would throw away
+    // the only thing the user asked for that did work.
+    if (isForeignTarget(opts.TargetTriple)) {
+      std::cerr << "Error: cannot link a program for '" << opts.TargetTriple
+                << "': cross-linking is not supported in 2.0; the runtime "
+                   "(libturfrt) is built for "
+                << sys::getDefaultTargetTriple() << ".\n"
+                << "  The object file for '" << opts.TargetTriple
+                << "' was kept as " << ObjFile
+                << ". Link it with a toolchain and a runtime built for that "
+                   "target, or compile for this machine by leaving "
+                   "--target out.\n";
+      return 1;
+    }
+
+    if (linkObject(ObjFile, opts.OutputName, opts.LinkLibs) != 0)
+      return 1;
+
+    // Clean up intermediate object file
+    std::remove(ObjFile.c_str());
+
+#ifdef _WIN32
+    std::cout << "Successfully compiled to " << WindowsExecutableName(opts.OutputName) << "\n";
+#else
+    std::cout << "Successfully compiled to " << opts.OutputName << "\n";
+#endif
+  }
+
+  return 0;
+}
+
+/**
+ * @brief Real process entry point.
+ *
+ * Delegates to runCompilerMain() for all compiler work, then terminates via
+ * _Exit() instead of a normal return. This deliberately skips the C++
+ * static-destructor phase of exit() -- by this point every real output
+ * (object/IR files, the linked binary, stdout/stderr) has already been
+ * flushed by ordinary automatic-storage unwinding inside runCompilerMain(),
+ * so nothing is lost. The only things being skipped are process-wide
+ * static/global destructors, which is required here because llama.cpp's
+ * ggml Metal backend keeps its own internal, TU-static device registry
+ * (ggml-metal-device.m) that is torn down independently of -- and after --
+ * SLM::SLMEngine's own explicit, already-correct cleanup (see the
+ * SLMCleanup guard above). That independent teardown can hit
+ * `GGML_ASSERT([rsets->data count] == 0)` during normal exit() on macOS,
+ * a vendored-library issue outside this compiler's control.
+ */
+int main(int argc, char **argv) {
+#ifdef _WIN32
+  // The C runtime opens stdin/stdout/stderr in text mode on Windows, which writes
+  // every "\n" as "\r\n". Everything turfc prints is a stream other tools read
+  // (`--format` output redirected to a file, `--version` parsed by turf, diagnostics
+  // compared byte for byte), and it must be the same bytes on every platform.
+  _setmode(_fileno(stdin), _O_BINARY);
+  _setmode(_fileno(stdout), _O_BINARY);
+  _setmode(_fileno(stderr), _O_BINARY);
+  // abort() exits with status 3 on Windows, which is also an ordinary exit code
+  // (the test runner could not tell a compiler crash from `return 3`). Same status
+  // as a Turf program's abort: runtime/turfrt_signal.c defines it, and
+  // WindowsExitStatus() in src/tooling/TestRunner.cpp reads it.
+  std::signal(SIGABRT, [](int) { std::_Exit(static_cast<int>(0xE0545254u)); });
+#endif
+  // A crash in the compiler itself (SIGSEGV etc.) otherwise dies silently:
+  // nothing reaches stderr, and stdout's pipe buffer is lost with the
+  // process. Seen once in CI as a "Compile Error" with empty output that
+  // never reproduced; this at least leaves a stack trace next time.
+  llvm::sys::PrintStackTraceOnErrorSignal(argv[0]);
+  int ExitCode;
+  try {
+    ExitCode = runCompilerMain(argc, argv);
+  } catch (const RecoverUnwind &) {
+    // An error raised while recovery was armed but outside every recovery
+    // point (RecoverUnwind, Lexer.h): its diagnostic is recorded, so end the
+    // way an error with recovery off does, not with std::terminate.
+    DiagnosticEngine::flushAll();
+    ExitCode = 1;
+  }
+  std::cout.flush();
+  std::cerr.flush();
+  TURF_FLUSH_COVERAGE();
+  std::_Exit(ExitCode);
+}

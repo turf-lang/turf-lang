@@ -17,7 +17,7 @@
  *          were never reset by anyone (see docs/development/changes/
  *          SMP-001.md, "Removed assumptions"). That save/restore now lives
  *          in exactly one place -- this facade's implementation
- *          (src/AnalysisFacade.cpp) -- so a refactor of the pipeline either
+ *          (src/tooling/AnalysisFacade.cpp) -- so a refactor of the pipeline either
  *          updates it or fails tests/api/, instead of silently breaking an
  *          out-of-tree tool.
  *
@@ -101,7 +101,7 @@ struct AnalysisOptions {
   // executable.
   std::string InstallRoot;
   // A package's graph, the JSON `turf graph` prints (format 1, see
-  // include/PackageGraph.h): which packages exist, where each one's src/ is
+  // src/tooling/PackageGraph.h): which packages exist, where each one's src/ is
   // and who depends on whom. With it `import` resolves exactly as it does in
   // `turf build` -- the package's own modules anywhere under src/, its direct
   // dependencies, the standard library -- instead of only the standard
