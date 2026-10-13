@@ -582,8 +582,9 @@ std::shared_ptr<ResolverFunctionSymbol> finishInstantiation(
   bool CheckFailed = false;
   SourceLocation InnerLoc;
   std::string InnerMsg, InnerHint;
+  const ErrorCodeEntry *InnerCode = nullptr;
   TypeChecker CloneTC(PreR.symbolTable(),
-                      [&](SourceLocation Loc, const char *,
+                      [&](SourceLocation Loc, const char *Code,
                           const std::string &Msg,
                           const std::vector<RelatedLocation> &,
                           const std::string &Hint, const std::string &,
@@ -593,6 +594,7 @@ std::shared_ptr<ResolverFunctionSymbol> finishInstantiation(
                           InnerLoc = Loc;
                           InnerMsg = Msg;
                           InnerHint = Hint;
+                          InnerCode = Code ? ErrorCodes::lookupByCode(Code) : nullptr;
                         }
                         throw RecoverUnwind{};
                       });
@@ -635,6 +637,12 @@ std::shared_ptr<ResolverFunctionSymbol> finishInstantiation(
     if (!InnerHint.empty())
       FullMsg += " (" + InnerHint + ")";
     SemanticError Err(Chain[Anchor]->Request.Site, FullMsg);
+    // The mistake is the inner error's (`<` on a struct is E124), not a
+    // generic E011; `--explain` should name that one.
+    if (InnerCode) {
+      Err.withCode(InnerCode->Code);
+      Err.setCategory(InnerCode->Category);
+    }
     for (size_t i = Anchor + 1; i < Chain.size(); ++i)
       Err.withRelated(Chain[i]->Request.Site,
                       "'" + describeRequest(Chain[i - 1]->Request) +

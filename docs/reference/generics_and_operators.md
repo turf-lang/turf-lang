@@ -403,11 +403,11 @@ An operation that exists for some type arguments and not others is reported
 when the offending instantiation is requested. The error is anchored at the line
 in **your** code that asked for the instantiation. Notes under it give the chain
 of instantiations that led to the failing one and the generic declaration it came
-from.
+from. The error's code is the one the same mistake has outside a generic.
 
 Here `Set<T>` needs `==` on its elements, and a plain struct has none:
 
-<!-- doc-example: fails E011 -->
+<!-- doc-example: fails E124 -->
 ```turflang
 import set::Set;
 
@@ -428,7 +428,7 @@ fn main(): int {
 ```text
 main.tr (1 error)
 
-── error at line 12, col 6 [E011 · general]
+── error at line 12, col 6 [E124 · type mismatch]
 
   Oops! Something doesn't add up:
   In this instantiation: Cannot compare struct values with '=='. (Structs have

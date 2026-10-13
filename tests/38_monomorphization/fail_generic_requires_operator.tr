@@ -1,4 +1,4 @@
-// EXPECT-DIAG: E011
+// EXPECT-DIAG: E124
 // EXPECT-DIAG: Cannot compare struct values with '=='
 // EXPECT-DIAG: 'Set<Big>.add' requires 'Set<Big>.contains'
 // EXPECT-DIAG: the error itself, inside 'Set<Big>.bucketFind'
