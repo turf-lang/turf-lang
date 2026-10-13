@@ -1,0 +1,12 @@
+// EXPECT-DIAG: warning_unused_module.tr (1 warning)
+// EXPECT-DIAG: mut u: int = 1;
+// EXPECT-NO-DIAG: module_warning_names_module_file.tr (1 warning)
+// A warning raised in an imported module is reported under that module's own
+// header and quotes its line. The unused-variable warning built its location
+// from the symbol's bare line and column, so it was reported against the
+// main file's line of the same number.
+import warning_unused_module;
+
+fn main(): int {
+    return warning_unused_module::f() - 2;
+}

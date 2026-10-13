@@ -188,16 +188,24 @@ public:
   /// the same name already gets -- LivenessAnalysisPass skips dead-store
   /// reports for these.
   AssignSet PatternBindings;
+  /// The file each local is declared in. A symbol's DeclLoc is a bare line
+  /// and column, and a location with no file is read as a line of the file
+  /// being compiled; for a function in an imported module it is not.
+  std::unordered_map<const VariableSymbol *, std::string> DeclFiles;
 
   void visitVarDecl(VarDeclExprAST &Node) override {
-    if (Node.ResolvedSymbol)
+    if (Node.ResolvedSymbol) {
       LocalDecls.insert(Node.ResolvedSymbol.get());
+      DeclFiles[Node.ResolvedSymbol.get()] = Node.getLoc().Filename;
+    }
     visitChild(Node.getInitializer());
   }
 
   void visitArrayDecl(ArrayDeclExprAST &Node) override {
-    if (Node.ResolvedSymbol)
+    if (Node.ResolvedSymbol) {
       LocalDecls.insert(Node.ResolvedSymbol.get());
+      DeclFiles[Node.ResolvedSymbol.get()] = Node.getLoc().Filename;
+    }
     ASTChildWalker::visitArrayDecl(Node);
   }
 
@@ -208,6 +216,7 @@ public:
     if (Node.ResolvedVar) {
       LocalDecls.insert(Node.ResolvedVar.get());
       PatternBindings.insert(Node.ResolvedVar.get());
+      DeclFiles[Node.ResolvedVar.get()] = Node.getLoc().Filename;
     }
   }
   // Everything else -- including a `defer` wrapping a loop that declares its
@@ -333,7 +342,7 @@ void DefiniteAssignmentPass::runOnCFG(CFG &Cfg,
             const bool SuggestDefault =
                 Sym->Type && dynamic_cast<const TurfStructType *>(Sym->Type.get());
             DefiniteAssignmentError err(Loc, Sym->Name, TypeName, SuggestDefault);
-            err.withRelated({Sym->DeclLoc.Line, Sym->DeclLoc.Col},
+            err.withRelated({Sym->DeclLoc.Line, Sym->DeclLoc.Col, Loc.Filename},
                             "declared here");
             err.raise();
           }
@@ -386,8 +395,9 @@ void LivenessAnalysisPass::runOnCFG(
       if (Stmt) const_cast<ExprAST *>(Stmt)->accept(Coll);
       for (const VariableSymbol *Sym : Coll.LocalDecls) {
         AllBodyDeclared.insert(Sym);
-        // DeclLoc from ResolverSourceLocation → SourceLocation
-        DeclLocMap[Sym] = {Sym->DeclLoc.Line, Sym->DeclLoc.Col};
+        // With its file: a warning in an imported module was reported
+        // against the main file's line of the same number.
+        DeclLocMap[Sym] = {Sym->DeclLoc.Line, Sym->DeclLoc.Col, Coll.DeclFiles[Sym]};
       }
       for (const VariableSymbol *Sym : Coll.PatternBindings)
         BindingSyms.insert(Sym);
@@ -964,7 +974,8 @@ public:
       if (Sym && Tracked.count(Sym) && !OnTrue.count(Sym) && DoReport) {
         PossibleNullDereferenceError Err(Node.getLoc(), BaseVar->getName(),
                                          Node.getFieldName());
-        Err.withRelated({Sym->DeclLoc.Line, Sym->DeclLoc.Col}, "declared here");
+        Err.withRelated({Sym->DeclLoc.Line, Sym->DeclLoc.Col, Node.getLoc().Filename},
+                        "declared here");
         Err.raise();
       }
     }
@@ -1053,7 +1064,8 @@ public:
           PossibleNullDereferenceError Err(
               Node.getLoc(), BaseVar->getName(), Node.getMethod(),
               PossibleNullDereferenceError::Member::Method);
-          Err.withRelated({Sym->DeclLoc.Line, Sym->DeclLoc.Col}, "declared here");
+          Err.withRelated({Sym->DeclLoc.Line, Sym->DeclLoc.Col, Node.getLoc().Filename},
+                          "declared here");
           Err.raise();
         }
       }
