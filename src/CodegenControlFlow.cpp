@@ -814,6 +814,23 @@ Value *CompareExprAST::codegen() {
   Function *TheFunction = Builder->GetInsertBlock()->getParent();
   BasicBlock *MergeBB = BasicBlock::Create(*TheContext, "compare.end");
 
+  // Only `otherwise`: nothing to compare, so the body runs whatever the
+  // subject's type. A struct subject fell through to the integer switch
+  // below, whose CastToType(struct, int) emitted an FCmp on a struct value
+  // ("generated LLVM IR is invalid"; turf-fuzz, 2026-10-13).
+  if (Arms.empty()) {
+    BasicBlock *OtherBB = BasicBlock::Create(*TheContext, "compare.otherwise", TheFunction);
+    Builder->CreateBr(OtherBB);
+    Builder->SetInsertPoint(OtherBB);
+    if (!OtherBody->codegen())
+      return nullptr;
+    if (!Builder->GetInsertBlock()->getTerminator())
+      Builder->CreateBr(MergeBB);
+    TheFunction->insert(TheFunction->end(), MergeBB);
+    Builder->SetInsertPoint(MergeBB);
+    return Constant::getNullValue(Type::getInt64Ty(*TheContext));
+  }
+
   // ─── String subject: strcmp chain ────────────────────────────────────────
   if (SubjectIsString) {
     // Look up (or declare) strcmp

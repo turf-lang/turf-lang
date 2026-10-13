@@ -1,0 +1,47 @@
+// A `compare` whose only arm is `otherwise` runs that body, whatever the
+// subject's type. On a struct subject it fell through to the integer switch,
+// which cast the struct to `int` and produced invalid LLVM IR ("Both operands
+// to FCmp instruction are not of the same type"; found by turf-fuzz's crash
+// fuzzer 2026-10-13, filed under an older finding's generic signature). The
+// subject is still evaluated, once.
+
+import test;
+
+struct P { x: int, y: int }
+
+fn counted(n: &P): P {
+    n.x = n.x + 1;
+    return P::default();
+}
+
+fn only_otherwise_returns(): int {
+    mut p: P = P::default();
+    compare p {
+        otherwise: return 7;
+    }
+}
+
+fn main(): int {
+    test::assert(only_otherwise_returns() == 7, "struct subject, otherwise returns");
+
+    mut calls: P = P::default();
+    mut seen: int; // assigned by the otherwise body, which always runs
+    compare counted(&calls) {
+        otherwise: seen = 1;
+    }
+    test::assert(seen == 1, "the otherwise body ran and fell through");
+    test::assert(calls.x == 1, "the subject was evaluated once");
+
+    mut n: int = 3;
+    compare n {
+        otherwise: n = n + 1;
+    }
+    test::assert(n == 4, "int subject");
+
+    mut s: string = "a";
+    compare s {
+        otherwise: s = s + "b";
+    }
+    test::assert(s == "ab", "string subject");
+    return 0;
+}
