@@ -95,11 +95,13 @@ casts, are on [Structs and Enums](structs_and_enums.md#enums).
 ## `.transition(State)`
 
 `value.transition(Machine::State)` moves `value` to the named state. It has
-no result. Two rules hold at every call:
+no result. These rules hold at every call:
 
-1. It takes exactly one argument. Any other count is `E044` (`'transition'
+1. The receiver must be mutable: a transition changes it, so on an `immut`
+   variable it is `E060`, like an assignment.
+2. It takes exactly one argument. Any other count is `E044` (`'transition'
    expects exactly 1 argument (the target state)`).
-2. The argument must be written as a state of the **same** machine as the
+3. The argument must be written as a state of the **same** machine as the
    receiver, `Machine::State`. A state of another machine is `E036`
    (`'transition' target must be a state of 'ConnectionState', got
    'TrafficLight'`), and so is any other expression. A variable or call

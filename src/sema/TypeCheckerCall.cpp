@@ -1458,6 +1458,16 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
             return;
           }
 
+          // A transition changes the receiver, like an assignment.
+          if (const auto *BaseVar =
+                  dynamic_cast<const VariableExprAST *>(Node.getBase())) {
+            if (BaseVar->ResolvedSymbol && BaseVar->ResolvedSymbol->IsImmutable) {
+              ImmutableAssignmentError(Node.getLoc(), BaseVar->getName()).raise();
+              setType(&Node, TurfVoid());
+              return;
+            }
+          }
+
           const std::string *NarrowedState = nullptr;
           if (const auto *BaseVar =
                   dynamic_cast<const VariableExprAST *>(Node.getBase())) {
