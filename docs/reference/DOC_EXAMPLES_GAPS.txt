@@ -20,8 +20,6 @@ docs/reference/ffi_and_unsafe.md#16 ed368601  E130 SHOWS-ERROR
 docs/reference/ffi_and_unsafe.md#17 fba34860  E038 SHOWS-ERROR
 docs/reference/ffi_and_unsafe.md#2 3d3a61fe  E009 NOT-SELF-CONTAINED
 docs/reference/ffi_and_unsafe.md#8 b7815478  E040 NOT-SELF-CONTAINED
-docs/reference/state_machines.md#5 06d99f2f  E110 SHOWS-ERROR
-docs/reference/state_machines.md#7 8a77571c  E040 NOT-SELF-CONTAINED
 docs/reference/stdlib/collections.md#10 752d3b7a  E040 NOT-SELF-CONTAINED
 docs/reference/stdlib/collections.md#14 04e1a96d  E042 NOT-SELF-CONTAINED
 docs/reference/stdlib/collections.md#15 511aedb9  E040 NOT-SELF-CONTAINED
@@ -68,11 +66,3 @@ docs/reference/stdlib/mem.md#7 bada1045  E130 NEEDS-REVIEW
 docs/reference/stdlib/mem.md#9 c6bfac64  E040 NOT-SELF-CONTAINED
 docs/reference/stdlib/testing.md#3 85dd81e3  E040 NOT-SELF-CONTAINED
 docs/reference/stdlib/testing.md#5 19b0cd61  E042 NOT-SELF-CONTAINED
-docs/reference/structs_and_enums.md#14 b94ac944  E042 NOT-SELF-CONTAINED
-docs/reference/structs_and_enums.md#15 11ff01e4  E009 NOT-SELF-CONTAINED
-docs/reference/structs_and_enums.md#16 5ca40cee  E009 NOT-SELF-CONTAINED
-docs/reference/structs_and_enums.md#17 bb153deb  E103 NEEDS-REVIEW
-docs/reference/structs_and_enums.md#19 f31d8908  E042 NOT-SELF-CONTAINED
-docs/reference/structs_and_enums.md#3 9c730e79  E130 NEEDS-REVIEW
-docs/reference/structs_and_enums.md#7 f792887e  E009 NOT-SELF-CONTAINED
-docs/reference/structs_and_enums.md#8 e7db285e  E009 NOT-SELF-CONTAINED
