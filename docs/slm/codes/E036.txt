@@ -30,6 +30,10 @@ INCORRECT:
     conn.transition(5);
     // ERROR: 'transition' target must be a state of 'ConnectionState', got 'int'.
 
+    conn.transition(next);   // next: ConnectionState, a variable
+    // ERROR: 'transition' target must be written as a state, like
+    // 'ConnectionState::SomeState', not a value that holds one.
+
 WHAT THIS ERROR IS NOT:
   - Not "the state name doesn't exist on this machine at all" -- that
     (`ConnectionState::Bogus`) is caught earlier, during name resolution,
@@ -38,5 +42,6 @@ WHAT THIS ERROR IS NOT:
     TYPE of the argument, independent of which state you're currently in.
 
 FIX:
-  Pass a state that belongs to the SAME machine type as the receiver, e.g.
-  `MachineName::SomeState`.
+  Pass a state that belongs to the SAME machine type as the receiver, written
+  out: `MachineName::SomeState`. For a target chosen at run time, `compare`
+  the value that chooses it and write one transition per arm.

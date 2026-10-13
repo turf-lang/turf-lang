@@ -1436,6 +1436,19 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
           const TurfType *TargetTy = ArgTypes[0].get();
           const auto *TargetMT =
               TargetTy ? dynamic_cast<const TurfMachineType *>(TargetTy) : nullptr;
+          const auto *TargetAccess =
+              dynamic_cast<const ScopeAccessExprAST *>(Node.getArgs()[0].get());
+          const bool SameMachine =
+              (TargetMT && TargetMT->getName() == MT->getName()) ||
+              (TargetTy && TargetTy->getName() == MT->getName());
+          if (SameMachine && !TargetAccess) {
+            InvalidTransitionTargetError(
+                Node.getLoc(), MT->getName(),
+                InvalidTransitionTargetError::NotWrittenAsState{})
+                .raise();
+            setType(&Node, TurfVoid());
+            return;
+          }
           if (!TargetMT || TargetMT->getName() != MT->getName()) {
             InvalidTransitionTargetError(
                 Node.getLoc(), MT->getName(),
@@ -1459,10 +1472,7 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
           }
 
           if (NarrowedState) {
-            const auto *TargetAccess =
-                dynamic_cast<const ScopeAccessExprAST *>(Node.getArgs()[0].get());
-            std::string TargetState =
-                TargetAccess ? TargetAccess->getVariant() : "";
+            std::string TargetState = TargetAccess->getVariant();
             if (!MT->hasEdge(*NarrowedState, TargetState)) {
               InvalidTransitionError(Node.getLoc(), MT->getName(),
                                      *NarrowedState, TargetState)

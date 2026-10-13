@@ -1,0 +1,25 @@
+// EXPECT-DIAG: E036
+// EXPECT-DIAG: target must be written as a state
+// EXPECT-NO-DIAG: E035
+// In a narrowed arm too: the target is checked before any edge, so there is
+// no "no transition from 'Idle' to ''".
+machine C {
+    Idle -> Connecting,
+    Connecting -> Connected
+}
+
+fn go(c: C, t: C): C {
+    mut x: C = c;
+    compare x {
+        matches C::Idle:
+            x.transition(t);
+        done
+        otherwise:
+            return x;
+    }
+    return x;
+}
+
+fn main(): int {
+    return 0;
+}

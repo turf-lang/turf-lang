@@ -292,6 +292,22 @@ public:
     Hint_ = "Pass a state of '" + MachineName + "' (e.g. '" + MachineName +
            "::SomeState') to transition().";
   }
+
+  /// The target has the receiver's machine type but is a value (a variable,
+  /// a call) rather than a written `Machine::State`, so its edge is unknown.
+  struct NotWrittenAsState {};
+  InvalidTransitionTargetError(SourceLocation Loc, const std::string &MachineName,
+                               NotWrittenAsState)
+      : TurfError(Loc, Colors::BRIGHT_RED + "'" + Colors::CYAN + "transition" +
+                           Colors::BRIGHT_RED + "' target must be written as a "
+                           "state, like '" + Colors::CYAN + MachineName +
+                           "::SomeState" + Colors::BRIGHT_RED +
+                           "', not a value that holds one." + Colors::RESET) {
+    Category_ = SLM::ErrorCategory::TYPE_MISMATCH;
+    Hint_ = "Name the state the value should move to. To move to a state "
+            "chosen at run time, `compare` the value that chooses it and "
+            "write one transition per arm.";
+  }
 };
 
 // `.transition(X)` called inside a `compare`/`matches` arm that has narrowed

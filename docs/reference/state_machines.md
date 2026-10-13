@@ -102,9 +102,13 @@ no result. Two rules hold at every call:
 2. The argument must be written as a state of the **same** machine as the
    receiver, `Machine::State`. A state of another machine is `E036`
    (`'transition' target must be a state of 'ConnectionState', got
-   'TrafficLight'`), and so is any other expression, such as a variable
-   that holds a state. A name that is no state at all is the ordinary
-   `E039` (`Enum 'ConnectionState' has no variant 'Bogus'`).
+   'TrafficLight'`), and so is any other expression. A variable or call
+   that holds a state of the right machine is `E036` too (`'transition'
+   target must be written as a state, like 'ConnectionState::SomeState', not
+   a value that holds one`): to move to a state chosen at run time, `compare`
+   the value that chooses it and write one transition per arm. A name that is
+   no state at all is the ordinary `E039` (`Enum 'ConnectionState' has no
+   variant 'Bogus'`).
 
 <!-- doc-example: fails E036 -->
 ```turflang
