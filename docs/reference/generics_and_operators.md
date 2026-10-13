@@ -426,9 +426,9 @@ main.tr (1 error)
 ── error at line 12, col 6 [E011 · general]
 
   Oops! Something doesn't add up:
-  In this instantiation: Cannot compare struct values with '=='. (Structs don't
-  support direct comparison yet -- compare the fields you care about
-  individually instead (e.g. `a.x == b.x`).)
+  In this instantiation: Cannot compare struct values with '=='. (Structs have
+  no built-in comparison: compare the fields you care about (e.g. `a.x ==
+  b.x`), or declare `operator ==` for the type.)
   Note: 'Set<Big>.add' requires 'Set<Big>.contains' here (lib/std/collections/set.tr, ...)
   Note: 'Set<Big>.contains' requires 'Set<Big>.index_of' here (lib/std/collections/set.tr, ...)
   Note: 'Set<Big>.index_of' requires 'Set<Big>.bucketFind' here (lib/std/collections/set.tr, ...)

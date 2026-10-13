@@ -669,14 +669,22 @@ TurfTypePtr TypeChecker::inferRelationalType(SourceLocation Loc, int Op,
     // operand types for FCmp instruction" -- a confusing ICE for what's
     // actually just an unsupported (for now) language feature, not a
     // compiler bug.
-    if (LhsTy->isStruct() || RhsTy->isStruct()) {
+    // Two values of one generic instance (`List<int>`, `Box<int>`) are
+    // structs too, though their type is a GenericType rather than a
+    // TurfStructType. Two different instances fall through to the "Cannot
+    // compare A with B" message below, which names both.
+    const bool SameGenericInstance =
+        dynamic_cast<const GenericType *>(LhsTy) &&
+        dynamic_cast<const GenericType *>(RhsTy) &&
+        LhsTy->getName() == RhsTy->getName();
+    if (LhsTy->isStruct() || RhsTy->isStruct() || SameGenericInstance) {
       reportError(Loc, ErrCode::InvalidComparison,
                   "Cannot compare struct values with '" +
                       OpToDisplayString(Op) + "'.",
                   {},
-                  "Structs don't support direct comparison yet -- compare "
-                  "the fields you care about individually instead (e.g. "
-                  "`a.x == b.x`).");
+                  "Structs have no built-in comparison: compare the fields "
+                  "you care about (e.g. `a.x == b.x`), or declare "
+                  "`operator ==` for the type.");
       return TurfBool();
     }
     // Arrays, for the same reason: two `int[3]`s share a type name, so the
