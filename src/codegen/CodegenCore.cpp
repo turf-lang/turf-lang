@@ -977,7 +977,23 @@ const TurfType *getExprType(const ExprAST *E) {
   if (auto *NullE = dynamic_cast<const NullExprAST *>(E)) {
     return TurfNull().get();
   }
+  // An overloaded operator is a call: its type is the declared return type,
+  // whatever the symbol. The fixed answers below are for the built-in forms
+  // only; `(a & b).x` with an `operator &` returning a struct was a Codegen
+  // error because `&` "returns int".
+  auto OperatorResultType = [](const ResolverFunctionSymbol *Op) -> const TurfType * {
+    if (!Op || !Op->ReturnType)
+      return nullptr;
+    const TurfType *RetTy = Op->ReturnType.get();
+    if (GlobalSymbolTable)
+      if (const auto *NT = dynamic_cast<const NamedType *>(RetTy))
+        if (auto Resolved = GlobalSymbolTable->LookupType(NT->getName()))
+          return Resolved.get();
+    return RetTy;
+  };
   if (auto *Bin = dynamic_cast<const BinaryExprAST *>(E)) {
+    if (const TurfType *T = OperatorResultType(Bin->getResolvedOperatorTarget()))
+      return T;
     int Op = Bin->getOp();
     if (Op == '<' || Op == '>' || Op == '!' || Op == '=' ||
         Op == TOK_EQ || Op == TOK_NEQ || Op == TOK_LEQ || Op == TOK_GEQ ||
@@ -1003,6 +1019,8 @@ const TurfType *getExprType(const ExprAST *E) {
     return LType;
   }
   if (auto *Unary = dynamic_cast<const UnaryExprAST *>(E)) {
+    if (const TurfType *T = OperatorResultType(Unary->getResolvedOperatorTarget()))
+      return T;
     return getExprType(Unary->getOperand());
   }
   if (auto *FuncCall = dynamic_cast<const FuncCallExprAST *>(E)) {
