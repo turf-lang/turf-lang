@@ -1,236 +1,171 @@
 # The Runtime: `libturfrt`
 
-Internals reference for `libturfrt` — the small C static library every
-compiled Turf binary links, introduced by RT-001
-(`docs/archive/ARCHITECTURE_OVERHAUL.md` §8). Like the other docs in this
-directory, this is grounded directly in the current source, not a planning
-document — `runtime/turfrt.h`'s own doc comments are the closer, line-level
-reference; this document is the "why does this exist and how does it fit
-into the rest of the compiler" companion to it.
+Internals reference for `libturfrt`, the small C static library every compiled
+Turf binary links. It is grounded in the current source: `runtime/turfrt.h`'s
+doc comments are the line-level reference, and this document explains what the
+library is for and how it fits into the compiler.
 
 Related docs:
-- `docs/architecture/compiler_pipeline.md` — the five-pass pipeline this
-  library's two hooks (the `main` wrapper, panic lowering) attach to.
-- `docs/architecture/memory_model.md` — what Turf's memory model looks like
-  *today*; `libturfrt` is the beginning of changing that (§4 below), not a
-  change to it yet. `runtime/turfrt.h`'s `TurfTypeDesc` doc comment is the
-  authoritative reference for what MEM-002 will eventually consume.
-- `src/sema/Intrinsics.h` — the closed, enumerated list this library's own
-  public symbols are part of (F-STD-2).
+- `docs/architecture/compiler_pipeline.md` for the pass order the two
+  compiler-side hooks (the `main` wrapper, panic lowering) attach to.
+- `docs/architecture/memory_model.md` for the storage model, the two heaps and
+  the collector's root discovery (§2.6). This document covers the library
+  around the collector, not the collector's algorithm.
+- `docs/architecture/boundary.md` for the compiler / standard library / runtime
+  boundary rules and the closed list of intrinsics.
+- `src/sema/Intrinsics.h`, the closed list of bare intrinsics; every runtime
+  symbol Turf source can reach is named there (F-STD-2).
 
 ---
 
-## 1. Why a runtime exists at all
+## 1. What the runtime owns
 
-Before RT-001, TurfLang had none (`docs/architecture/memory_model.md` §1.7,
-"no automatic memory management of any kind"; the old §1.10 of this
-directory's sibling doc described it plainly as "no `libturfrt`, no `.c`/
-`.o` runtime sources, no linked support library"). Every panic was an inline
-`fprintf`+`abort()` built directly into whatever function's Codegen needed
-one; every allocation was libc `malloc` reached through an ordinary
-`extern fn`.
+Rule B2 (`docs/development/FREEZE.md` §6.8): the runtime owns anything that
+must be true across the whole process and cannot be re-derived per translation
+unit. Turf never compiles modules separately (every `import` is parsed and
+code-generated into the same LLVM module), so "per translation unit" is not a
+useful place to keep process-wide state. The runtime therefore owns:
 
-Rule B2 (`docs/development/FREEZE.md` §6.8, `ARCHITECTURE_OVERHAUL.md`
-§3.3): **the runtime owns anything that must be true across the whole
-process and cannot be re-derived per translation unit** — the heap, the
-collector, the root set, panic behaviour, the OOM policy. TurfLang never
-separately compiles (every `import` is re-parsed and re-codegenned into the
-same module, §27 D7 in the blueprint), so until MEM-002's collector exists
-this rule has had nothing to attach to. RT-001 is the scaffolding: a real C
-library, versioned lock-step with the compiler, linked into every binary,
-with exactly two things in it today (a fail-fast allocator wrapper, and
-consistent panic formatting) plus the type-descriptor infrastructure
-MEM-002's precise heap tracing will need. Nothing here is a place to move
-standard-library functionality into (F-STD-3, Rule B3) — `lib/std/mem/mem.tr`'s
-`malloc`/`free` bindings are untouched; the manual heap stays manual.
+- the GC heap and its collector,
+- the root set and the stack bounds the collector scans,
+- panic formatting and the process-wide fault handlers (stack overflow,
+  segmentation fault),
+- the out-of-memory policy for the GC heap,
+- a few platform primitives whose C spelling differs per OS (§2).
 
-## 2. What's in it
+It is C, not Turf, and it is not a place to move standard-library functionality
+into (F-STD-3, Rule B3). `lib/std/mem/mem.tr`'s `malloc`/`calloc`/`realloc`
+bindings stay what they are: the manual heap is libc's heap (F-MEM-3).
 
-`runtime/turfrt.h` is the complete public API — four functions and one
-struct:
+## 2. What is in it
 
-| Symbol | What it does today | What it's for later |
-|---|---|---|
-| `turf_rt_init()` | No-op | MEM-002's heap/block-table setup |
-| `turf_rt_shutdown()` | No-op | MEM-002's final-collection/stats hook |
-| `turf_rt_alloc(bytes, desc)` | Fail-fast `malloc` wrapper | MEM-002's real GC-heap allocation entrypoint |
-| `turf_rt_panic(kind, msg, file, line)` | Formats a message to stderr, `abort()`s | Unchanged — this is already its final form |
-| `TurfTypeDesc` (not a function) | Emitted per aggregate type, read by nothing yet | MEM-002's mark-phase input |
+The library is built from plain C11 (`CMakeLists.txt`, target `turfrt`), has no
+dependency on `turfcore` or LLVM, and is not linked into `turfc`. It is linked
+into every compiled Turf program, the same relationship `-lm` has.
 
-Split by concern the same way the compiler's own Codegen split is:
-`runtime/turfrt_alloc.c` (bootstrap + allocation), `runtime/turfrt_gc.c` (the
-collector, MEM-002), `runtime/turfrt_panic.c` (panic formatting),
-`runtime/turfrt_types.c` (the one `TurfTypeDesc` accessor,
-`turf_rt_typedesc_is_pointer_word()`), `runtime/turfrt_abi.c` (the
-compiler/runtime ABI stamp, FDN-006 §7.3 below), `runtime/turfrt_signal.c`
-(the `SIGSEGV` handler, FDN-006 §7.1 below).
+| File | Role |
+|---|---|
+| `runtime/turfrt.h` | The public C ABI: the entry points below and `TurfTypeDesc`. The compiler never includes it; Codegen builds the matching LLVM types by hand (`getOrCreateTurfTypeDescType()` in `src/codegen/CodegenStruct.cpp`). |
+| `runtime/turfrt_internal.h` | Glue between the runtime's own `.c` files. Not part of the ABI. |
+| `runtime/turfrt_alloc.c` | `turf_rt_init()`/`turf_rt_shutdown()`, the three allocation entry points, `turf_rt_checked_free()`, `turf_rt_stats()`. |
+| `runtime/turfrt_gc.c` | The collector: block table, root discovery, mark, sweep, pins, the testing aids. |
+| `runtime/turfrt_panic.c` | `turf_rt_panic()`. |
+| `runtime/turfrt_types.c` | `turf_rt_typedesc_is_pointer_word()`, the one reader of a descriptor's bitmap. |
+| `runtime/turfrt_abi.c` | The ABI stamp (§7.3). |
+| `runtime/turfrt_signal.c` | The fault handlers (§7.1). |
+| `runtime/turfrt_sys.c` | `turfrt_clock_us()` (CPU time in microseconds) and the process-wide random generator (`turfrt_random_u31()`, `turfrt_random_reseed()`), bound by `lib/std/time/time.tr` and `lib/std/random/random.tr`. |
+| `runtime/turfrt_net.c` | Socket helpers whose behaviour differs per platform (`turfrt_net_startup`, `_socket`, `_close`, `_reuseaddr`, `_sockaddr`), bound by `lib/std/io/net.tr`. |
+| `runtime/turfrt_win32.c` | On Windows only: `posix_memalign`, `malloc_usable_size`, `setenv`, defined under their POSIX names so `lib/std/mem/mem.tr` and `lib/std/os/os.tr` link unchanged, plus `turf_win32_free_aligned()`. |
 
-Built as `CMakeLists.txt`'s `turfrt` target: a **static** library, built
-from plain C11, with **no dependency on `turfcore`/LLVM at all** — it is not
-linked into the `turfc` compiler binary itself. It is linked into every
-*compiled Turf program*, the same relationship `-lm` already has to a
-compiled binary. Static rather than shared: every compiled Turf program is
-meant to be a standalone executable (this is also why `libturfrt.a`'s build
-output is pointed at `<repo-root>/lib/` — see §5 below — rather than a
-`lib/` subdirectory the linker would need an rpath to find at runtime).
+Naming rule for a runtime function that Turf source binds with `extern fn`: use
+the prefix `turfrt_`, never `turf_<module>_<name>`. The compiler mangles a
+stdlib function `random::reseed` to `turf_random_reseed`, and an `extern fn`
+keeps its C name verbatim, so the two spellings would collide.
+
+The entry points in `runtime/turfrt.h`:
+
+| Symbol | What it does |
+|---|---|
+| `turf_rt_init()` | Records the stack base (`turf_gc_record_stack_base()`), then installs the fault handlers (`turf_rt_install_segv_handler()`). |
+| `turf_rt_shutdown()` | Prints the allocation statistics when `TURF_RT_STATS_DUMP` is set; otherwise nothing. There is no final collection: process exit reclaims everything. |
+| `turf_rt_alloc(bytes, desc)`, `turf_rt_alloc_zeroed(bytes, desc)`, `turf_rt_realloc(p, bytes, desc)` | Collected GC-heap allocation. Each panics (`out of memory`) when the system allocator fails, so a caller never sees `NULL`. Each registers the block with the collector before the allocation-pressure check can run. |
+| `turf_rt_collect()` | One stop-the-world mark-sweep cycle. |
+| `turf_rt_add_global_root(slot)`, `turf_rt_remove_global_root(slot)` | Register a `void**` storage location as a precise root. Turf has no mutable global storage, so Codegen has no caller for these; they exist as tested runtime API (`scripts/smoke/gc_smoke.sh`). |
+| `turf_rt_pin(p)`, `turf_rt_unpin(p)` | Pin the GC object containing `p`; pins nest. Reached from `mem::root()`/`mem::unroot()`. |
+| `turf_rt_is_gc_pointer(p)` | Exact block-start test. Reached from the `gc_is_managed` intrinsic. |
+| `turf_rt_checked_free(p)` | libc `free()` for the manual heap, after panicking if `p` is a live GC block (`cross-heap free`). Reached from `mem::free()` through the `gc_checked_free` intrinsic. |
+| `turf_rt_stats()` | Allocation counters plus the collector's point-in-time numbers; read from C by the smoke scripts. |
+| `turf_rt_panic(kind, msg, file, line)` | Formats one line to stderr and calls `abort()`. |
+| `turf_rt_typedesc_is_pointer_word(desc, i)` | Bit accessor for a descriptor's pointer bitmap. |
+| `turf_rt_abi_2_0()` | The ABI stamp. |
+
+`TurfTypeDesc` is the one struct shared with the compiler (§4).
 
 ## 3. The two compiler-side hooks
 
-### 3.1 Panic lowering — `CodegenPanic()`, `src/sema/Builtins.cpp`
+### 3.1 Panic lowering: `CodegenPanic()`, `src/sema/Builtins.cpp`
 
-Every one of the compiler's own runtime safety guards — division/modulo by
-zero, integer overflow (SEM-002's checked arithmetic), array bounds, a bad
-string→int/enum cast — funnels through one function, `CodegenPanic(Value
-*MsgVal, SourceLocation Loc)`. Before RT-001 this built the
-`fprintf(stderr, "%s\n", MsgVal); abort();` sequence directly, per call
-site, in raw LLVM IR. It now declares (once per module) and calls
-`turf_rt_panic`, passing a fixed `"runtime check"` kind literal, the
-existing message string unchanged, and the Turf-level `SourceLocation`'s
-file/line. `kind` is not distinct per call site — see `CodegenPanic()`'s own
-doc comment for why widening its signature to carry one wasn't worth doing
-in this group (all 9 call sites would need touching for a diagnostic-text
-change only, no behavioural difference).
+Every one of the compiler's own runtime safety checks (division and modulo by
+zero, checked-arithmetic overflow, array and slice bounds, a bad string to int
+or enum cast) goes through `CodegenPanic(Value *MsgVal, SourceLocation Loc)`.
+It declares `turf_rt_panic` once per module and calls it with the fixed kind
+`"runtime check"`, the message, and the Turf source file and line. The kind is
+not distinct per call site; the message carries the distinction (INV-RT-2).
 
-This is **not** the same path `lib/std/core/sys.tr`'s `panic()`/`assert`/`fail`
-use — those are ordinary Turf functions, built on a separate `write(2)`-based
-mechanism, deliberately untouched by RT-001. `CodegenPanic()` is reachable
-only from the compiler's own inline safety checks, never from Turf source
-under any name.
+This is not the path `lib/std/core/sys.tr`'s `panic()` uses. That is an
+ordinary Turf function that writes to stderr with `write(2)` and calls
+`abort()`. `CodegenPanic()` is reachable only from the compiler's own inline
+checks, never from Turf source.
 
-Both paths still terminate the same way: `abort()` (SIGABRT, exit 134),
-which is why `scripts/test_runner.sh`'s `RUNTIME_ABORT_EXPECTED` convention
-(any non-zero, non-timeout exit) needed no change at all.
+### 3.2 The `main` wrapper: `WrapMainWithRuntimeBootstrap()`, `src/codegen/CodegenFunc.cpp`
 
-### 3.2 The `main` wrapper — `WrapMainWithRuntimeBootstrap()`, `src/codegen/CodegenFunc.cpp`
+The user's `main` is compiled as the C-ABI `main`, including the
+argc/argv-stashing machinery (`ArgcStorageGV`/`ArgvStorageGV` and the
+`TurfRuntimeGetArgc`/`TurfRuntimeGetArgv` accessors `os.tr` binds to).
+`WrapMainWithRuntimeBootstrap()` runs on the finished module, so none of that
+is touched:
 
-Turf's `main` has always been compiled *as* the literal C-ABI `main` (no
-wrapper) — `CodegenFunc.cpp`'s own long-standing comment on the
-argc/argv-stashing machinery this relies on (`ArgcStorageGV`/`ArgvStorageGV`,
-the `TurfRuntimeGetArgc`/`TurfRuntimeGetArgv` synthesized accessors os.tr
-binds to) explains that setup in full; RT-001 does not touch any of it.
+1. Find the function named `main`.
+2. Rename it `__turf_user_main` and give it internal linkage.
+3. Declare (or reuse) `turf_rt_init`, `turf_rt_shutdown` and the ABI stamp
+   symbol (`RuntimeAbiSymbol`, `src/codegen/Codegen.h`).
+4. Create a new `main` with the original function type whose body calls the ABI
+   stamp, `turf_rt_init()`, then `__turf_user_main(argc, argv)`, then
+   `turf_rt_shutdown()`, and returns the user's result. `fn main(): void` is
+   accepted, so for a void `main` the wrapper is `i32 main(...)` returning 0.
 
-`turf_rt_init()`/`turf_rt_shutdown()` need to run before/after the user's
-`main` body on every path, which means something has to sit *around* it.
-Rather than thread two new calls into `FuncDefExprAST::codegen()`'s existing,
-delicate `Name == "main"` branches, `WrapMainWithRuntimeBootstrap()` runs as
-a **pure post-processing step** on the already-fully-built LLVM module:
-
-1. Look up the `Function` literally named `"main"` (guaranteed to exist and
-   have a body — `main.cpp`'s entry-point check already ran).
-2. Rename it to `__turf_user_main` and demote it to internal linkage.
-3. Declare (or reuse) `turf_rt_init`/`turf_rt_shutdown` prototypes.
-4. Build a **new** function, literally named `"main"`, with the identical
-   `FunctionType` the old one had (`(i32, ptr) -> ReturnType` — argc/argv
-   forwarded through unchanged, opaque to this function), whose body is
-   exactly: call `turf_rt_init()`; call `__turf_user_main(argc, argv)`,
-   keeping its result; call `turf_rt_shutdown()`; return that result (or
-   `ret void`, for the — currently untested but not rejected by the
-   Resolver — case of a declared `fn main(): void`).
-
-Called from `main.cpp`'s driver immediately after the entry-point check and
-**before** `runOptimizationPipeline()`. Ordering matters: OPT-001's
-Internalize pass treats `{"main"}` as the *entire* must-preserve set
-(`main.cpp`'s own comment on `MustPreserveGV` — nothing else in the module
-is externally reachable by name, since TurfLang never separately compiles).
-Running the wrapper before optimization means the symbol actually named
-`"main"` at Internalize time is the wrapper, and `__turf_user_main` keeps
-its own liveness for free through the wrapper's ordinary in-module call —
-no second preserve-set entry needed. At `-O0` the two functions stay
-distinct (verified live, `scripts/smoke/runtime_smoke.sh` checks exactly this in
-the emitted IR); at higher levels the trivial wrapper is routinely inlined
-away entirely by LLVM's own inliner, which is correct and expected — the
-*call sequence*, not the function boundary, is the actual contract, and
-`scripts/smoke/opt_levels_smoke.sh` (exact-output-match across every optimization
-level) is what proves inlining never changes observable behaviour here.
+The driver (`src/driver/main.cpp`) calls it after the entry-point check, after
+every function is generated, and before `runOptimizationPipeline()`. Order
+matters: the optimizer's Internalize pass treats `{"main"}` as the whole
+must-preserve set, so the symbol named `main` at that point has to be the
+wrapper; `__turf_user_main` stays alive through the wrapper's ordinary call.
+At `-O0` the two functions stay distinct (`scripts/smoke/runtime_smoke.sh`
+checks the call sequence in the emitted IR); at higher levels the inliner
+usually folds the wrapper away. The call sequence, not the function boundary,
+is the contract, and `scripts/smoke/opt_levels_smoke.sh` shows optimization
+changes no observable behaviour (INV-OPT-1). INV-RT-1 states the contract:
+every binary links `libturfrt` and runs `turf_rt_init()`/`turf_rt_shutdown()`
+around `main`.
 
 ## 4. Type descriptors
 
-For every real, fully-built LLVM aggregate type in the module, the compiler
-emits a constant global mirroring `TurfTypeDesc { size, name, word_count,
-pointer_words }` (`runtime/turfrt.h`'s own doc comment has the exact field
-semantics). This is the infrastructure MEM-002's precise heap tracing reads
-from every collection (F-MEM-1: "precise on the heap" — a per-type pointer
-bitmap the compiler emits is exactly what that requires), landed by RT-001
-while TYPE-002's per-instantiation struct layouts were fresh, rather than
-retrofitted later.
+For every fully built LLVM struct type in the module the compiler emits a
+constant global mirroring the runtime's struct:
 
-`word_count`/`pointer_words` (widened by **OVH-001**,
-`docs/development/changes/OVH-001.md`) replace RT-001's original
-single inline `uint64_t pointer_word_bitmap` field, which could only
-represent the first 64 eight-byte words (512 bytes) of a type's layout — a
-documented limitation at the time (nothing read it yet), which became a
-live use-after-free once MEM-002's collector started depending on it: any
-GC-heap struct or per-element collection descriptor with a pointer field
-past byte 512 was silently untraced, so the object it pointed at could be
-swept while the containing struct was still reachable. §4.3 below covers
-the fix's emitted-IR shape.
+```c
+typedef struct TurfTypeDesc {
+  uint64_t size;                  /* allocation size in bytes */
+  const char *name;               /* for diagnostics only */
+  uint64_t word_count;            /* ceil(size / 8) */
+  const uint64_t *pointer_words;  /* ceil(word_count / 64) words of bitmap */
+} TurfTypeDesc;
+```
 
-### 4.1 Why emission is a separate, late pass — `EmitAllTurfTypeDescs()`
+Bit `i % 64` of `pointer_words[i / 64]` set means "bytes `[8i, 8i+8)` may hold
+a pointer". The bitmap covers the type's entire layout at any size (INV-MEM-2);
+`turf_rt_typedesc_is_pointer_word()` bounds-checks against `word_count`.
+It is a sound over-approximation: every pointer-shaped word is marked, whether
+it points into the GC heap or the manual heap, because the type system does not
+tag a pointer field with its heap.
 
-The obvious place to build a struct's descriptor is inline, in
-`StructDeclExprAST::codegen()`, right after `ST->setBody(...)` gives it a
-final layout. That was the first implementation, and it crashed on a real,
-reproducible case: `struct Holder { items: List<int> }`.
-
-`main.cpp`'s struct pre-pass (sub-pass 2c) codegens every top-level
-`StructDeclExprAST` in `PrePassASTs` order. A monomorphized generic
-instantiation's own clone (`List_gen1_int`, from TYPE-002's monomorphizer)
-is *appended* to that list, so it codegens **after** an ordinary struct
-declared earlier in the source file that embeds it by value. At the moment
-`Holder`'s own `StructDeclExprAST::codegen()` reaches "compute my own
-size," `List<int>`'s LLVM `StructType` is still an **opaque forward stub**
-(registered in `LLVMTypeCache`, no body yet) — this is completely normal
-and by design (`main.cpp`'s own comment on the "lingering opaque
-monomorphized stub" scan describes exactly this state as expected mid-pass).
-
-The problem is what querying a struct's `DataLayout` size does internally:
-`DataLayout::getTypeAllocSize()`/`getStructLayout()` on `Holder` needs the
-size of *every field*, including the still-opaque `List<int>` — LLVM
-computes (and **permanently caches**, keyed by `StructType*`, with **no
-invalidation hook**) a zero-element `StructLayout` for it as a side effect.
-Moments later, when `List_gen1_int`'s own clone is codegenned and given its
-real body, `DataLayout::getStructLayout()` on that *exact* `StructType*`
-returns the same stale, zero-element cached object —
-`StructLayout::getElementOffset(0)` then asserts (`Idx < NumElements`
-failed), a genuine compiler crash, confirmed live against
-`tests/38_monomorphization/04_method_on_generic_struct.tr` and four sibling
-tests in that folder (every one embeds a generic instantiation by value).
-
-The fix is `EmitAllTurfTypeDescs()` (`src/codegen/CodegenStruct.cpp`, declared in
-`src/codegen/Codegen.h`): a single pass over `TheModule->getIdentifiedStructTypes()`,
-run exactly once, from `main.cpp`, **immediately before `verifyModule()`** —
-after the struct pre-pass, after every import-triggered struct build
-(sub-passes 3a/3b), after the main pass, after the existing
-lingering-opaque-stub diagnostic scan. By this point every struct that will
-ever exist in the module does, so `DataLayout::getStructLayout()` is never
-called on any `StructType` before its own `setBody()` has run — the
-ordering hazard doesn't just get worked around for the generics case, it
-stops being reachable at all, for any struct-embeds-struct shape.
-
-### 4.2 Keeping descriptors alive across optimization
-
-A `TurfTypeDesc` global has no in-module reference — nothing calls
-`turf_rt_alloc` with one yet (that's MEM-001), so at any optimization level
-above `-O0`, `Internalize`+`GlobalDCE` (OPT-001) would otherwise delete
-every one of them as dead. `EmitAllTurfTypeDescs()` appends each descriptor
-to `@llvm.compiler.used` (`llvm::appendToCompilerUsed()`,
-`llvm/Transforms/Utils/ModuleUtils.h`) — the standard LLVM idiom for "keep
-this alive through the optimizer without giving it real external linkage."
-Verified live (`scripts/smoke/opt_levels_smoke.sh` and a direct `--emit-llvm`
-diff): every descriptor is present, byte-identical, at every optimization
-level.
-
-### 4.3 OVH-001: the bitmap widened past 64 words
+The collector reuses one descriptor for an array of elements: it walks a block
+in `desc->size`-byte strides and re-applies the bitmap at each stride. A
+single-struct allocation is the case where the block is exactly one stride.
+`desc == NULL` means opaque (no pointers inside), which is correct for a string
+buffer. Collection backing buffers get an element descriptor from
+`getOrCreateElementTurfTypeDesc()` (`src/codegen/CodegenStruct.cpp`), injected
+by `CastExprAST::codegen()` at a `gc_alloc(...) to T*` site.
 
 `buildTurfTypeDescInit()` (`src/codegen/CodegenStruct.cpp`, shared by
-`emitTurfTypeDesc()` and `getOrCreateElementTurfTypeDesc()` — the old
-per-copy inline-bitmap logic was duplicated across both, which is why the
-original 64-word cap needed two independent fixes instead of one) computes
-`word_count = ceil(size / 8)` and emits a second, out-of-line private
-constant global — a `[N x i64]` array, `N = ceil(word_count / 64)` — that
-`pointer_words` points at, alongside the existing `name`-string global.
-For a type whose layout fits in one 64-bit word (`N == 1`), this looks
-almost exactly like the old inline field:
+`emitTurfTypeDesc()` and `getOrCreateElementTurfTypeDesc()`) builds the
+initializer: `word_count`, a private `[N x i64]` bitmap global
+(`N = ceil(word_count / 64)`) and a private name-string global. The name
+globals are `@__turf_typedesc_name.<llvm struct name>` and
+`@__turf_typedesc_bitmap.<llvm struct name>`; an element descriptor is
+`@__turf_elemdesc`, with its own `_name`/`_bitmap` companions. An assertion at
+emission (`word_count * 8 >= size`, bitmap length equals `N`) makes a
+reintroduced fixed cap fail loudly in a debug build. For example, a struct with
+one pointer in its third word:
 
 ```llvm
 @__turf_typedesc_bitmap.WithPointer = private constant [1 x i64] [i64 4]
@@ -239,188 +174,188 @@ almost exactly like the old inline field:
       ptr @__turf_typedesc_bitmap.WithPointer }
 ```
 
-For a type wider than 512 bytes (`N > 1`, the case the old field could not
-represent at all), the array simply grows — the ABI has no size limit:
+A type with 70 `int` fields and then a `string` has `word_count` 71, so its
+bitmap is `[2 x i64] [i64 0, i64 64]`: word 70 lands in the second `i64` at bit
+6. `scripts/smoke/runtime_smoke.sh` checks both shapes with `--emit-llvm`, and
+exercises a hand-built descriptor with `word_count` 130 directly in C.
 
-```llvm
-@__turf_typedesc_bitmap.Big70 = private constant [2 x i64] [i64 0, i64 64]
-@__turf_typedesc_Big70 = internal constant %TurfTypeDesc
-    { i64 568, ptr @__turf_typedesc_name.Big70, i64 71,
-      ptr @__turf_typedesc_bitmap.Big70 }
-```
+### 4.1 Why emission is a late pass: `EmitAllTurfTypeDescs()`
 
-(`Big70` has 70 `int` fields then a `string` — word 70 lands in the
-bitmap's *second* `i64`, at bit `70 % 64 = 6`, hence `64`.) A hard
-assertion at emission (`word_count * 8 >= size`, plus the built bitmap
-vector's own length matching `N`) makes a future re-introduction of any
-fixed cap fail loudly in a debug build rather than silently truncate
-again — see `runtime/turfrt_gc.c`'s `gc_scan_block_precise()` and
-`runtime/turfrt_types.c`'s `turf_rt_typedesc_is_pointer_word()` for the
-runtime side of the same fix, and `scripts/smoke/runtime_smoke.sh` §4 for the
-`--emit-llvm` check this shape is verified against (including a >64-word
-type, which RT-001's original version of this check could not exercise at
-all).
+`EmitAllTurfTypeDescs()` (`src/codegen/CodegenStruct.cpp`, declared in
+`src/codegen/Codegen.h`) iterates `TheModule->getIdentifiedStructTypes()` once,
+from the driver, immediately before `verifyModule()`. It cannot run inline in
+`StructDeclExprAST::codegen()`. A monomorphized clone (`List_gen1_int`) is
+appended to the pre-pass list, so it is generated after an ordinary struct
+declared earlier that embeds it by value (`struct Holder { items: List<int> }`).
+While generating `Holder`, asking LLVM's `DataLayout` for its size also computes
+a `StructLayout` for the still-opaque `List_gen1_int`, and `DataLayout` caches
+that zero-element layout against the `StructType*` with no invalidation hook.
+When the clone later gets its real body, `getStructLayout()` returns the stale
+object and `getElementOffset(0)` asserts. Emitting every descriptor after all
+struct-building sub-passes (the struct pre-pass, the import-triggered struct
+builds, the main pass, and the driver's scan for a lingering opaque
+monomorphized stub) means `getStructLayout()` is never called on a struct
+before its own `setBody()`. INV-RT-3 records the ordering guarantee.
 
-### 4.4 FDN-003: descriptor names carry the owning module
+A function body that needs a named struct's descriptor before that pass (to
+pass to `turf_rt_alloc`) calls `getOrForwardDeclareTurfTypeDescGlobal()`, which
+creates a forward declaration that `emitTurfTypeDesc()` later fills in, so both
+orders produce the same single global.
+
+### 4.2 Surviving optimization
+
+Nothing in the module references a descriptor global unless a call site passes
+it, and at any level above `-O0` Internalize plus GlobalDCE would delete the
+unreferenced ones. `emitTurfTypeDesc()` and `getOrCreateElementTurfTypeDesc()`
+append each descriptor to `@llvm.compiler.used` (`llvm::appendToCompilerUsed()`,
+`llvm/Transforms/Utils/ModuleUtils.h`), the standard way to keep a global alive
+through the optimizer without external linkage.
+
+### 4.3 Descriptor names carry the owning module
 
 A descriptor is named after its LLVM struct, and a module-owned type's LLVM
-struct is named `module.Name` (`TypeIdentity::llvmName()`, `src/sema/Types.h`)
-— so `list`'s `List<int>` clone is `@__turf_typedesc_list.List_gen1_int`, and
-the `name` string the runtime can print is `"list.List_gen1_int"`. A type
-declared in the main program file keeps its bare name
-(`@__turf_typedesc_WithPointer` above is unchanged). The point is not
-cosmetic: two modules may each declare a `Node` since FDN-003, and before
-this change their descriptors would have been two definitions of one
-`@__turf_typedesc_Node` symbol. Nothing in the runtime parses the name; it
-is for diagnostics only.
+struct is named `module.Name` (`TypeIdentity::llvmName()`, `src/sema/Types.h`).
+`list`'s `List<int>` is `@__turf_typedesc_list.List_gen1_int` and its `name`
+string is `"list.List_gen1_int"`. A type declared in the main program keeps its
+bare name. Two modules may each declare a `Node` without their descriptors
+colliding. Nothing in the runtime parses the name.
 
 ## 5. Build and distribution
 
-`CMakeLists.txt`'s `turfrt` target output is pointed at `<repo-root>/lib/`
-(`ARCHIVE_OUTPUT_DIRECTORY`) — the same directory `lib/std/` already lives
-under. This is deliberate, not incidental: `TurfInstallRoot()`
-(`src/frontend/ParserModule.cpp`, exported for this purpose — previously file-local)
-is the one function both `import` and `linkObject()` (`src/driver/main.cpp`) use to
-find "this install's root" — `TURF_HOME` if set, else
-`<compiler-binary-dir>/..`. A plain dev build (`build/turfc`, no `TURF_HOME`
-set) resolves that to the repo root, so `lib/libturfrt.a` is found with the
-same zero-setup property `lib/std/` already has. `linkObject()` passes
-`-L<TurfInstallRoot()>/lib -lturfrt` ahead of every other link flag.
+`CMakeLists.txt` points the `turfrt` archive's output at `<repo-root>/lib/`,
+next to `lib/std/`. `TurfInstallRoot()` (`src/frontend/ParserModule.cpp`,
+declared in `src/frontend/Parser.h`) is the single function both `import` and
+`linkObject()` (`src/driver/main.cpp`) use to find the install root:
+`TURF_HOME` if set, else `<compiler-binary-dir>/..`. A dev build therefore
+finds `lib/libturfrt.a` with no setup. `*.a` is git-ignored, and the release
+packaging copies `lib/` wholesale, which picks the archive up.
 
-`*.a` is already `.gitignore`d, so this build artifact living inside the
-otherwise source-controlled `lib/` tree is never accidentally committed.
-The release packaging action
-(`.github/actions/package-release/action.yml`) needed **no changes**: it
-already does a blanket `cp -r lib` into the release archive, which picks up
-`lib/libturfrt.a` automatically once the build produces it there —
-verified live by inspecting a local build's `lib/` directory post-build.
+`linkObject()` links in one of two ways:
 
-## 6. What this group deliberately does not do
+- With the system toolchain: `cc` (`gcc` on Windows) with
+  `-L<root>/lib -lturfrt -lm`, ahead of any library the program names with
+  `extern from` or `--link`. On Windows it adds `-Wl,--stack,8388608` (an 8 MB
+  main stack, as on Linux) and `-lws2_32`, since an archive member's own
+  library needs are not recorded in it.
+- With the linker built into `turfc`, when the program names no system library
+  beyond the C runtime, the release archive ships `lib/rt/<platform>/`, and
+  `TURF_LINKER=system` is not set. It links statically against that bundled C
+  runtime and `libturfrt.a`.
 
-Per RT-001's own "Must NOT reinterpret" (`ARCHITECTURE_OVERHAUL.md` §8):
-the runtime is C, not TurfLang, and it is not a place to move standard-library
-functionality into. Concretely, still true after this group:
+Either way the archive must exist: if `<root>/lib/libturfrt.a` is missing,
+`linkObject()` reports `TurfLang runtime library not found at '<path>'` and a
+`TURF_HOME` hint before invoking any linker (INV-RT-7). `turfc --version`
+prints the runtime ABI stamp (`runtime turf_rt_abi_2_0`), the install root and
+which linker this install uses.
 
-- `lib/std/mem/mem.tr`'s `malloc`/`free` bindings are unchanged — the manual
-  heap stays manual (F-MEM-3). Nothing in `lib/std` calls `turf_rt_alloc`.
-- No GC heap, no collector, no root set — `turf_rt_init`/`turf_rt_shutdown`
-  are no-ops today. That's MEM-002.
-- `TurfTypeDesc.pointer_word_bitmap` is emitted, but read by nothing except
-  a smoke-test script. It is a **sound over-approximation** (every
-  pointer-shaped word, not proven-GC-only words — nothing before
-  MEM-001/MEM-002 tags a pointer field with which heap it points into); the
-  collector consuming it precisely is future work, not a correctness gap in
-  what's emitted today.
+A `turfc` built with `-DTURF_RT_SANITIZE=ON` links every program it compiles
+against `libturfrt_asan.a`, an ASan+UBSan build of the same sources (target
+`turfrt_asan`), and always uses the system linker. Under ASan the runtime
+installs no fault handler (§7.1) and the conservative scan skips ASan-poisoned
+words (`memory_model.md` §2.6.3).
 
-## 7. FDN-006: the runtime contract
+## 6. What the runtime deliberately does not do
 
-`docs/planning/ROADMAP_v2.0.0.md` FDN-006. Where §§1–6 above describe
-*what exists*, this section is about *what a user sees when something goes
-wrong*, and what stops a binary from silently running against the wrong
-runtime.
+- It does not manage the manual heap. `mem::alloc` and friends are libc, and
+  nothing in `lib/std` calls `turf_rt_alloc` except through the `gc_*`
+  intrinsics (F-MEM-3).
+- It does not trace into manual-heap memory. A GC pointer stored only in a
+  `mem::alloc` block is not a root unless the program pins it with
+  `mem::root()` (`memory_model.md` §1.7).
+- It is single-threaded and stop-the-world, with no finalizers (F-MEM-2) and no
+  final collection at shutdown.
 
-### 7.1 Stack overflow
+## 7. The runtime contract
 
-Before this group, unbounded recursion was a bare `SIGSEGV` — exit 139, no
-message (the Overhaul closure audit's F-20). `turf_rt_install_segv_handler()`
-(`runtime/turfrt_signal.c`), called once from `turf_rt_init()` right after
-`turf_gc_record_stack_base()`, installs a `sigaltstack`-backed `SIGSEGV`
-handler:
+What a user sees when something goes wrong, and what stops a binary from
+running against the wrong runtime.
 
-1. **Why an alternate stack at all** — the handler must run while the
-   thread's own stack has just been exhausted; delivering the signal on
-   that same, already-full stack would fault again just pushing the
-   handler's frame. `sigaltstack()` gives signal delivery a separate,
-   always-available region (a fixed 64 KiB static buffer — no `malloc`
-   this file would need to remember to free) to run on instead.
-2. **Classifying the fault** — `getrlimit(RLIMIT_STACK, ...)` combined with
-   `turf_gc_get_stack_base()` (the stack's high end, already computed for
-   conservative GC scanning — an accessor into `turfrt_gc.c`'s existing
-   `g_stack_base`, not a second, independently-tracked copy) gives a
-   *computed* low limit. A fault address within a generous fixed window of
-   that computed limit is classified a stack overflow; anything else — or
-   an unqueryable/unlimited `RLIMIT_STACK` — is a generic, unattributed
-   `SIGSEGV`. This mirrors how `EscapePass` (FDN-002) treats its own
-   unclassifiable cases: never a false positive (never call a real
-   memory-safety bug "just recursion"), a documented false-negative-leaning
-   window instead.
-3. **The message** — a classified stack overflow reports through
-   `turf_rt_panic()` itself (`"stack overflow"` kind), so it gets the exact
-   same `abort()`/exit-134 termination every other panic already has. Any
-   other `SIGSEGV` prints `panic: segmentation fault (this is a bug in
-   unsafe code or in TurfLang)` with the faulting address, then also
-   `abort()`s.
+### 7.1 Stack overflow and other faults
 
-Not signal-handler-safe in the strict POSIX sense — `turf_rt_panic()`/
-`fprintf` are not on the async-signal-safe list, only `abort()` itself is.
-Accepted deliberately (the process is terminating either way; the
-alternative is a hand-rolled `write(2)`-only formatter with its own
-integer/pointer-to-hex code, duplicated from nothing) — see
-`turfrt_signal.c`'s own top comment and `FDN-006.md`'s *Known pitfalls* for
-the one disclosed hazard this leaves (a fault arriving while the crashing
-thread already held stdio's internal lock).
+`turf_rt_install_segv_handler()` (`runtime/turfrt_signal.c`) is called from
+`turf_rt_init()` right after the stack base is recorded.
 
-Not a Tier-1/2 concern on Windows (`ROADMAP_v2.0.0.md` DEC-2): a Windows
-stack overflow is a Structured Exception, not `SIGSEGV`, a different
-mechanism entirely (a vectored exception handler, not
-`sigaction`/`sigaltstack`) — `turf_rt_install_segv_handler()` is a no-op
-there, leaving a Windows crash exactly as it was before this group.
+**POSIX (Linux, macOS).** It installs a `sigaltstack`-backed handler for
+`SIGSEGV` and `SIGBUS` (macOS reports many protection faults, the stack guard
+among them, as `SIGBUS`). The alternate stack is a fixed 64 KiB static buffer:
+the handler must run after the thread's own stack is exhausted, and delivering
+the signal on it would fault again. If `sigaltstack()` fails, the handler is not
+installed and the process keeps its default disposition.
 
-### 7.2 Out-of-memory
+The handler classifies the fault. `getrlimit(RLIMIT_STACK)` and
+`turf_gc_get_stack_base()` (the stack's high end, shared with the collector, not
+a second copy) give a computed low limit. A fault address within a fixed
+256 KiB window on either side of it is a stack overflow; anything else, and any
+case where `RLIMIT_STACK` is unlimited or unqueryable, is a generic fault. The
+window errs toward "generic": the handler never calls a real memory-safety bug
+"just recursion".
 
-RT-001 already put the OOM policy "in one place": `turf_rt_alloc`/
-`turf_rt_alloc_zeroed`/`turf_rt_realloc` (`runtime/turfrt_alloc.c`) each
-`turf_rt_panic("out of memory", ...)` the moment the underlying
-`malloc`/`calloc`/`realloc` returns `NULL` — no caller anywhere ever sees a
-silent `NULL` from these three. What FDN-006 stage 2 adds is the first real
-test of that path: the Overhaul closure audit's own attempt to reach it
-spun forever inside `strings::repeat()`'s quadratic loop instead of ever
-triggering a real allocation failure. `tests/41_gc/fail_oom_huge_direct_allocation.tr`
-and `scripts/smoke/runtime_smoke.sh` §6 both go straight at a single `gc_alloc()`
-call sized at `i64` max — no allocator on any real machine can satisfy it,
-so the fail-fast path is exercised directly and quickly, not approached by
-attrition. `mem::alloc`'s own OOM path (`lib/std/mem/mem.tr`, `sys::panic()`)
-is untouched and independently implemented (F-MEM-3 — the two heaps'
-policies happen to fail the same way, loudly, but are not the same code).
+A classified overflow goes through `turf_rt_panic("stack overflow", ...)`, so it
+ends exactly like every other panic. Any other fault prints
+`panic: segmentation fault (this is a bug in unsafe code or in TurfLang) at address <addr>`
+(`bus error` for `SIGBUS`) and calls `abort()`.
+
+The handler calls `fprintf`, which is not async-signal-safe (only `abort()`
+is). That is accepted deliberately, since the process is terminating either way.
+The one hazard is a fault that arrives while the crashing thread holds stdio's
+lock: the message can be lost, and the process still terminates.
+
+**Under ASan** `turf_rt_install_segv_handler()` installs nothing. `sigaction`
+replaces rather than chains, and ASan's own handler, installed from its startup
+constructor, reports far more. INV-RT-5 therefore holds for non-ASan builds
+only, which is why the ASan CI job skips
+`tests/41_gc/fail_stack_overflow_deep_recursion.tr`.
+
+**Windows.** A stack overflow is a structured exception, not a signal.
+`turf_rt_install_segv_handler()` reserves 128 KiB of guaranteed stack with
+`SetThreadStackGuarantee()` (the counterpart of `sigaltstack`), installs a
+vectored exception handler (`turf_rt_veh`) that prints the same two messages as
+the POSIX handler, and sets the error mode and abort behaviour so a crash does
+not open the error-reporting dialog. It also hooks `SIGABRT` to
+`TerminateProcess` with status `0xE0545254`, because the C runtime's own
+`abort()` exits with 3, which an ordinary `return 3` also produces. The test
+runner (`src/tooling/TestRunner.cpp`) and `turfc` itself spell the same number;
+the three places change together. The runner reports that status as 134.
+
+### 7.2 Out of memory
+
+`turf_rt_alloc`, `turf_rt_alloc_zeroed` and `turf_rt_realloc`
+(`runtime/turfrt_alloc.c`) call `turf_rt_panic("out of memory", ...)` the moment
+the system allocator returns `NULL`, with the descriptor's name (or `<raw>`) as
+the message. The collector's own bookkeeping arrays do the same. No caller ever
+sees a silent `NULL` from the GC heap. The manual heap has its own, separately
+implemented policy: `mem::alloc` and friends call `sys::panic()` on `NULL`
+(`lib/std/mem/mem.tr`). Both fail loudly, but they are different code (F-MEM-3).
+`tests/41_gc/fail_oom_huge_direct_allocation.tr` and
+`scripts/smoke/runtime_smoke.sh` exercise the path with one `gc_alloc()` call
+sized at the largest `int`, which no allocator can satisfy.
 
 ### 7.3 The compiler/runtime ABI stamp
 
-`runtime/turfrt_abi.c` defines one function, `turf_rt_abi_2_0(void)`, that
-does nothing. `WrapMainWithRuntimeBootstrap()` (`src/codegen/CodegenFunc.cpp`) calls
-it from every compiled binary's `main` wrapper, alongside `turf_rt_init()`.
-The point is entirely at LINK time: if a compiled object (built against
-this compiler version) is linked against a `libturfrt.a` that predates this
-symbol — or a hypothetical future ABI-breaking runtime that renamed it —
-the link fails with `undefined reference to 'turf_rt_abi_2_0'`, a symbol
-name that says exactly what's wrong, instead of linking successfully and
-producing undefined behaviour at run time against a runtime whose struct
-layouts (`TurfTypeDesc`) or calling conventions this compiler no longer
-agrees with. Bump the suffix (`_2_0` → `_2_1`, ...) — in both
-`runtime/turfrt_abi.c`'s definition and `WrapMainWithRuntimeBootstrap()`'s
-reference, together — the next time a change to this ABI would otherwise
-let an old runtime and a new compiler (or vice versa) silently
-miscommunicate.
+`runtime/turfrt_abi.c` defines `turf_rt_abi_2_0(void)`, which does nothing.
+`WrapMainWithRuntimeBootstrap()` calls it from every binary's `main` wrapper
+(the name is held in `RuntimeAbiSymbol`, `src/codegen/Codegen.h`). The effect is
+entirely at link time: an object compiled by this compiler linked against a
+`libturfrt.a` that lacks the symbol fails with
+`undefined reference to 'turf_rt_abi_2_0'`, a name that says what is wrong,
+instead of linking and misbehaving against a runtime whose `TurfTypeDesc`
+layout or entry-point signatures it no longer agrees with. A change to that ABI
+bumps the suffix (`_2_0` to `_2_1`, ...) in both places together (INV-RT-6).
 
-Separately, `src/driver/main.cpp`'s `linkObject()` checks that
-`<TurfInstallRoot()>/lib/libturfrt.a` exists **before** invoking `cc`/`gcc`
-at all. A missing archive used to surface only as `cc`'s own generic
-`-lturfrt: No such file` error, with no mention of TurfLang or `TURF_HOME`;
-it is now a TurfLang diagnostic naming the exact path that was checked.
-
-### 7.4 Panic message shapes and exit codes, documented once
+### 7.4 Panic message shapes and exit codes
 
 | Termination | Message | Exit code |
 |---|---|---|
 | A compiler-inserted runtime check (division by zero, overflow, array bounds, ...) | `panic: runtime check: <msg> (<file>:<line>)` | 134 (`SIGABRT`) |
-| Stack overflow | `panic: stack overflow: <msg> (<runtime>:0)` | 134 (`SIGABRT`) |
-| Any other `SIGSEGV` | `panic: segmentation fault (this is a bug in unsafe code or in TurfLang) at address <addr>` | 134 (`SIGABRT`) |
-| Out of memory (GC heap or manual heap) | `panic: out of memory: <desc> (<site>:0)` (GC heap) or `sys::panic()`'s own format (manual heap) | 134 (`SIGABRT`) |
-| A cross-heap `mem::free()`, an unbalanced `mem::unroot()`, ... | `panic: <kind>: <msg> (<site>:0)` | 134 (`SIGABRT`) |
-| `lib/std/core/sys.tr`'s `panic()`/`assert`/`fail` | that function's own message | 134 (`SIGABRT`) |
-| `sys::exit(n)` | (none) | `n` |
+| Stack overflow | `panic: stack overflow: <msg> (<runtime>:0)` | 134 |
+| Any other `SIGSEGV` (and `SIGBUS` on POSIX) | `panic: segmentation fault (this is a bug in unsafe code or in TurfLang) at address <addr>` | 134 |
+| Out of memory, GC heap | `panic: out of memory: <desc or <raw>> (<site>:0)` | 134 |
+| Out of memory, manual heap | `sys::panic()`'s own format | 134 |
+| A cross-heap `mem::free()`, an unbalanced `mem::unroot()`, an undiscoverable stack | `panic: <kind>: <msg> (<site>:0)` | 134 |
+| `TURF_GC_VALIDATE` finding a missed root | `panic: GC root missed: ...` | 134 |
+| `lib/std/core/sys.tr`'s `panic()`/`assert`/`fail` | that function's own message | 134 |
+| `sys::exit(n)` | none | `n` |
 
-Every panic path — the compiler's own inline checks, the runtime's own
-`turf_rt_panic()` call sites, and `lib/std/core/sys.tr`'s separate
-`write(2)`-based path — terminates via `abort()`, hence the same `SIGABRT`/
-134 across the whole table. Only `sys::exit(n)` is a deliberate,
-non-panic process exit with a caller-chosen code.
+Every panic path ends in `abort()`. On Windows the same termination surfaces as
+status `0xE0545254` (see §7.1), which the test runner reports as 134. Only
+`sys::exit(n)` is a deliberate, non-panic exit with a caller-chosen code.
