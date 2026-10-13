@@ -424,6 +424,15 @@ Value *MethodCallExprAST::codegen() {
       Value *V = ToSlice ? CodegenSliceArgument(Args[I].get()) : Args[I]->codegen();
       if (!V)
         return nullptr;
+      // An argument the TypeChecker accepted by conversion (`s.put(2)` for a
+      // `double` parameter) is converted here, as FuncCallExprAST::codegen()
+      // does for a free function; without it the shape check below raised an
+      // internal error (turf-fuzz: `Map<int, double>.put(1, 1_000)`).
+      if (!ToSlice && ResolvedCallTarget && P < ResolvedCallTarget->Params.size() &&
+          ResolvedCallTarget->Params[P].Type)
+        V = CastToType(V, ResolvedCallTarget->Params[P].Type, "argcast", Loc);
+      if (!V)
+        return nullptr;
       EvaluatedArgs.push_back(V);
     }
 
