@@ -171,32 +171,44 @@ Value *IfExprAST::codegen() {
   Value *ThenV = Branches[0].Body->codegen();
   if (!ThenV)
     return nullptr;
-  if (!blockHasTerminator(Builder->GetInsertBlock()))
-    Builder->CreateBr(MergeBB);
-  ThenBB = Builder->GetInsertBlock();
+  BasicBlock *ThenEnd = Builder->GetInsertBlock();
 
   TheFunction->insert(TheFunction->end(), ElseBB);
   Builder->SetInsertPoint(ElseBB);
   Value *ElseV = ElseBody->codegen();
   if (!ElseV)
     return nullptr;
-  if (!blockHasTerminator(Builder->GetInsertBlock()))
+  BasicBlock *ElseEnd = Builder->GetInsertBlock();
+
+  // Both sides must reach the PHI as the common type, and each conversion
+  // has to be emitted on its own side: a value computed in one branch does
+  // not dominate the merge block, so it cannot be converted there.
+  TurfTypePtr MergeType = getCommonType(getTurfTypeFromLLVM(ThenV->getType()),
+                                        getTurfTypeFromLLVM(ElseV->getType()));
+  auto FinishSide = [&](BasicBlock *End, Value *&V, const char *Name) {
+    if (blockHasTerminator(End))
+      return false;
+    Builder->SetInsertPoint(End);
+    V = CastToType(V, MergeType, Name);
     Builder->CreateBr(MergeBB);
-  ElseBB = Builder->GetInsertBlock();
+    return true;
+  };
+  bool ThenReaches = FinishSide(ThenEnd, ThenV, "thencast");
+  bool ElseReaches = FinishSide(ElseEnd, ElseV, "elsecast");
 
   TheFunction->insert(TheFunction->end(), MergeBB);
   Builder->SetInsertPoint(MergeBB);
+  Type *MergeTy = ThenReaches ? ThenV->getType()
+                  : ElseReaches ? ElseV->getType()
+                                : getLLVMType(MergeType.get());
+  if (!ThenReaches && !ElseReaches)
+    return UndefValue::get(MergeTy);
 
-  TurfTypePtr ThenType = getTurfTypeFromLLVM(ThenV->getType());
-  TurfTypePtr ElseType = getTurfTypeFromLLVM(ElseV->getType());
-  TurfTypePtr MergeType = getCommonType(ThenType, ElseType);
-
-  ThenV = CastToType(ThenV, MergeType, "thencast");
-  ElseV = CastToType(ElseV, MergeType, "elsecast");
-
-  PHINode *PN = Builder->CreatePHI(ThenV->getType(), 2, "iftmp");
-  PN->addIncoming(ThenV, ThenBB);
-  PN->addIncoming(ElseV, ElseBB);
+  PHINode *PN = Builder->CreatePHI(MergeTy, 2, "iftmp");
+  if (ThenReaches)
+    PN->addIncoming(ThenV, ThenEnd);
+  if (ElseReaches)
+    PN->addIncoming(ElseV, ElseEnd);
   return PN;
 }
 
