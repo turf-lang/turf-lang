@@ -136,6 +136,18 @@ void Resolver::visitVariable(VariableExprAST &Node) {
             .raise();
         return;
       }
+      // A generic function is a template; a value needs one concrete clone,
+      // and a value position gives no arguments to infer its types from.
+      if (!Candidates[0]->TypeParams.empty()) {
+        TypeError(Node.getLoc(), ErrCode::NotAValue,
+                  "'" + Node.getName() +
+                      "' is generic, so it can't be used as a function value; "
+                      "its type parameters are only inferred at a call.",
+                  "Write a non-generic function that calls '" + Node.getName() +
+                      "' with the types you need, and use that as the value.")
+            .raise();
+        return;
+      }
       Node.ResolvedFunctionRef =
           std::make_shared<ResolverFunctionSymbol>(*Candidates[0]);
       return;

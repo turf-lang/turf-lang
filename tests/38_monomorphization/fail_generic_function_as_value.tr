@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E137
+// EXPECT-DIAG: 'id' is generic, so it can't be used as a function value
+// A generic function has no single compiled body to point at, and a value
+// position has no arguments to choose one from.
+fn<T> id(x: T): T {
+    return x;
+}
+
+fn main(): int {
+    immut f: fn(int): int = id;
+    return f(0);
+}

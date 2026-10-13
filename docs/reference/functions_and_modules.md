@@ -296,6 +296,11 @@ What can be used as a value:
   }
   ```
 
+- **Not a generic function or a `@caller_location` one.** A generic function
+  has no one compiled body to take until a call picks its type arguments, and
+  a `@caller_location` function needs a location that only a direct call can
+  pass. Both are `E137`; write a plain function that calls it
+  (`fn id_int(x: int): int { return id(x); }`) and use that.
 - **Not a qualified name.** `io::printline` and `MathUtil::square` can be
   called but not used as values (`E137`, "Not a value!"). Wrap the call in a
   function of your own, or import the plain name:
