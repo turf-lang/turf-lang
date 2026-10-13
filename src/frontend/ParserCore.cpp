@@ -330,16 +330,18 @@ TurfTypePtr ParseType() {
   // `(&N)[2]` -- an array (or `(&N)[]` slice) of references. `&N[2]` is a
   // reference to an array, because `&` takes the whole type after it, so an
   // array of references needs the parentheses (owner, 2026-10-12; turf-fuzz
-  // findings/wrong-message/array-of-references-type-name). Only a reference
-  // type may be parenthesised, and only to put array dimensions after it:
-  // every other type already takes `[N]` directly.
+  // findings/wrong-message/array-of-references-type-name). A function type
+  // needs them for the same reason: in `fn(int): int[2]` the `[2]` belongs
+  // to the return type, so an array of function values is
+  // `(fn(int): int)[2]`. Only those two may be parenthesised, and only to
+  // put array dimensions after them: every other type takes `[N]` directly.
   if (CurTok == '(') {
     SourceLocation OpenLoc = CurLoc;
     getNextToken(); // consume '('
-    if (CurTok != '&') {
+    if (CurTok != '&' && CurTok != TOK_FN) {
       SyntaxError(OpenLoc, ErrCode::ExpectedType,
-                  "Parentheses in a type are only for an array of references, "
-                  "e.g. (&Node)[4].",
+                  "Parentheses in a type are only for an array of references "
+                  "or of functions, e.g. (&Node)[4] or (fn(int): int)[2].",
                   "Write the type without the parentheses, e.g. `int[4]`.")
           .raise();
       return nullptr;
@@ -349,17 +351,17 @@ TurfTypePtr ParseType() {
       return nullptr;
     if (CurTok != ')') {
       SyntaxError(CurLoc, ErrCode::UnclosedDelimiter,
-                  "Expected ')' to close the parenthesised reference type, "
-                  "e.g. (&Node)[4].")
+                  "Expected ')' to close the parenthesised type, "
+                  "e.g. (&Node)[4] or (fn(int): int)[2].")
           .raise();
       return nullptr;
     }
     getNextToken(); // consume ')'
     if (CurTok != '[') {
       SyntaxError(OpenLoc, ErrCode::ExpectedType,
-                  "Parentheses in a type are only for an array of references; "
-                  "expected '[' after ')'.",
-                  "A single reference needs no parentheses: write `" +
+                  "Parentheses in a type are only for an array of references "
+                  "or of functions; expected '[' after ')'.",
+                  "A single one needs no parentheses: write `" +
                       Elem->getName() + "`.")
           .raise();
       return nullptr;

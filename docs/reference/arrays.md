@@ -683,8 +683,9 @@ fn main(): int {
   not a variable (store it in one, then check it).
 - Copying the array copies the references, not the nodes they point to.
 - `(&T)[]` is a slice parameter like any `T[]`.
-- Parentheses are only for this: `(int)[2]`, and `(&T)` with no `[` after them,
-  are `E109`.
+- Parentheses are only for this and for an array of function values,
+  `(fn(int): int)[2]`: `(int)[2]`, and `(&T)` with no `[` after them, are
+  `E109`.
 
 ## Escape rules
 

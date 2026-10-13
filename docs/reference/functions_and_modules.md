@@ -254,6 +254,25 @@ type are the same. Assigning a function of another shape is a type error
 (`E066`), as is passing one where a different shape is expected (`E056`), and
 calling a function value with the wrong number of arguments is `E044`.
 
+An array of function values puts the function type in parentheses, since in
+`fn(int): int[2]` the `[2]` belongs to the return type. An element is called
+through a variable (`ops[1](3, 4)` is `E126`):
+
+```turflang
+fn add(a: int, b: int): int { return a + b; }
+fn mul(a: int, b: int): int { return a * b; }
+
+fn main(): int {
+    mut ops: (fn(int, int): int)[2] = [add, mul];
+    for f in ops {
+        printline(f(3, 4));              // 7, then 12
+    }
+    immut second = ops[1];
+    printline(second(2, 5));             // 10
+    return 0;
+}
+```
+
 A `reduce` is the usual example of a higher-order function:
 
 ```turflang

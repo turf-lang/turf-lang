@@ -521,7 +521,9 @@ public:
     }
     // `(&N)[2]`, an array of references, is spelled with parentheses (a bare
     // `&N[2]` is a reference to an array), and prints the way it is written.
-    if (Base->isReference() || Base->isNullableReference())
+    // So is `(fn(int): int)[2]`: in `fn(int): int[2]` the `[2]` belongs to
+    // the return type.
+    if (Base->isReference() || Base->isNullableReference() || Base->isFunc())
       return "(" + Base->getName() + ")" + Dims;
     return Base->getName() + Dims;
   }

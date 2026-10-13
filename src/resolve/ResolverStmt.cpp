@@ -211,15 +211,15 @@ void Resolver::visitForEach(ForEachExprAST &Node) {
 
   ResolverSourceLocation Loc{Node.getLoc().Line, Node.getLoc().Col};
 
-  // Value var gets a placeholder int type here -- the Resolver doesn't do
+  // Value var gets the `guess` placeholder here -- the Resolver doesn't do
   // type inference (that's TypeChecker's job). TypeChecker::visitForEach()
   // overwrites Node.ResolvedValueVar->Type with the array's real element
-  // type once it's known, same "placeholder now, refine later" contract
-  // ForExprAST's induction variable already relies on (see its own comment
-  // above).
+  // type once it's known, as for `mut x = ...;`. A concrete placeholder
+  // (`int`) was taken at its word: `f(x)` on an element of an array of
+  // function values was E135 "variable of type 'int'".
   try {
     Node.ResolvedValueVar =
-        SymTable_.declareVariable(Node.getValueVarName(), TurfInt(), Loc);
+        SymTable_.declareVariable(Node.getValueVarName(), TurfGuess(), Loc);
   } catch (const std::runtime_error &) {
     auto Prev = SymTable_.lookupVariable(Node.getValueVarName());
     SourceLocation ErrLoc = Node.getLoc();
