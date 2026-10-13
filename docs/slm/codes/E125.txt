@@ -32,6 +32,9 @@ FIX (any one):
   - import only the names wanted: `import a::[describe_int];`;
   - call through the module: `a::describe_int(n)`;
   - rename one definition if both are yours.
+  An overloaded name used as a function value (`mut f: fn(int, int): int = combine;`) is
+  E125 whatever the variable's type: wrap the wanted overload in a function with its own
+  name and use that.
 
 RELATED: E085 (ambiguous type name), E090 (ambiguous module name), E025 (no matching
   module overload).

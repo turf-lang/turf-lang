@@ -17,3 +17,5 @@ Any of these removes the ambiguity:
 - Rename one of the definitions, if you wrote both.
 
 Operators have the same rule: if two visible `operator+(Vec, Vec)` definitions exist, `a + b` is ambiguous until one of them goes.
+
+An overloaded name used as a function value (`mut f: fn(int, int): int = combine;` with two `combine`s) is this error too: there is no single signature to take, and the variable's type does not pick one. Write a function with its own name that calls the overload you want, and use that.

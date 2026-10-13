@@ -193,11 +193,11 @@ void Resolver::visitVariable(VariableExprAST &Node) {
     }
     if (Candidates.size() > 1) {
       TypeError(Node.getLoc(), ErrCode::AmbiguousCall, "'" + Node.getName() +
-                                   "' is overloaded -- it can't be used as a "
-                                   "first-class function value without an "
-                                   "unambiguous single signature.",
-                "Give the variable a more specific function type so only "
-                "one overload matches, or rename one of the overloads.",
+                                   "' is overloaded, so it can't be used as a "
+                                   "function value: there is no single "
+                                   "signature to take.",
+                "Write a function with its own name that calls the overload "
+                "you want, and use that as the value.",
                 "Ambiguous reference!")
           .raise();
       return;
