@@ -113,8 +113,8 @@ fn main(): int {
 An array declared without an initializer holds no value yet. The same
 [definite assignment](variables_and_types.md#definite-assignment) rule as for
 every other type applies: a read that some path reaches before the array has
-been assigned is `E008` ("You're using 'a' before it has a value"). Nothing is
-implicitly zero.
+been assigned is `E008` ("You're using 'a' before it has a value"). Its storage
+is zero-filled, but no read can see that before something is written.
 
 <!-- doc-example: fails E008 -->
 ```turflang
@@ -140,15 +140,19 @@ fn main(): int {
     mut s: string[2];
     s[0] = "x";
     io::printline(s[1]);      // an empty line
+    mut g: int[2][3];
+    g[1][2] = 4;              // a write into a row assigns the whole array
+    io::printline(g[0][0]);   // 0
     return 0;
 }
 ```
 
-Only an assignment of a whole element counts. `a[1][2] = 4;` on an
-`int[2][3]`, or `ps[0].x = 1;` on an array of structs, reads the array on the
-way to the field and is itself `E008`; assign the row or the struct first
-(`a[1] = [0, 0, 0];`, `ps[0] = P::default();`). The assignment must reach
-the read on every path: `if c { a[0] = 1; }` followed by a read is `E008`.
+A write into part of an element counts the same way: `g[1][2] = 4;` on an
+`int[2][3]`, or `ps[0].x = 1;` on an array of structs, assigns the array, and
+everything else in it reads as zero. A write through a reference, a slice or
+an `operator[]` on the way reads that value first, so it does not count. The
+assignment must reach the read on every path: `if c { a[0] = 1; }` followed
+by a read is `E008`.
 An `immut` array needs an initializer, since it cannot be assigned afterwards.
 
 An element type that holds a non-null reference has no zero value. An array

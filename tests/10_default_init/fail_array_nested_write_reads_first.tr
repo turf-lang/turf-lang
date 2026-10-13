@@ -1,0 +1,14 @@
+// EXPECT-DIAG: E008
+// EXPECT-DIAG: You're using 'ps' (type 'P[2]') before it has a value
+// A nested write assigns the array, but its right-hand side is evaluated
+// first, and here that reads the still-unassigned array.
+
+struct P {
+    id: int
+}
+
+fn main(): int {
+    mut ps: P[2];
+    ps[0].id = ps[1].id;
+    return 0;
+}

@@ -23,6 +23,58 @@ using AssignSet = std::unordered_set<const VariableSymbol *>;
 
 namespace {
 
+const TurfStructType *escapeStructOf(const TurfType *T); // below
+
+// The fixed-size array local an in-place write lands in: `a[i] = v`, and
+// also `g[1][2] = v` and `ps[0].x = v`. Every step indexes a fixed-size array
+// or names a field of a struct value, so the target address is the local's
+// own storage plus offsets and nothing stored is read on the way. A step
+// through a reference, pointer, slice or `operator[]` reads a stored value,
+// so it is not such a path. @p Indices receives the index expressions, which
+// the write does read. Null when @p E is not such a path.
+const VariableExprAST *inPlaceArrayRoot(const ExprAST *E,
+                                        std::vector<const ExprAST *> &Indices) {
+  std::vector<const ExprAST *> Steps;
+  const ExprAST *Cur = E;
+  while (true) {
+    if (const auto *AA = dynamic_cast<const ArrayAccessExprAST *>(Cur)) {
+      Steps.push_back(AA);
+      Cur = AA->getBase();
+    } else if (const auto *FA = dynamic_cast<const FieldAccessExprAST *>(Cur)) {
+      Steps.push_back(FA);
+      Cur = FA->getBase();
+    } else {
+      break;
+    }
+  }
+  const auto *Root = dynamic_cast<const VariableExprAST *>(Cur);
+  if (!Root || !Root->ResolvedSymbol || Steps.empty())
+    return nullptr;
+  const TurfType *T = Root->ResolvedSymbol->Type.get();
+  const auto *RootArr = dynamic_cast<const ::ArrayType *>(T);
+  if (!RootArr || RootArr->getSize() <= 0)
+    return nullptr;
+  for (auto It = Steps.rbegin(); It != Steps.rend(); ++It) {
+    if (const auto *AA = dynamic_cast<const ArrayAccessExprAST *>(*It)) {
+      const auto *AT = dynamic_cast<const ::ArrayType *>(T);
+      if (!AT || AT->getSize() <= 0)
+        return nullptr;
+      Indices.push_back(AA->getIndex());
+      T = AT->getElementType();
+    } else {
+      const auto *FA = static_cast<const FieldAccessExprAST *>(*It);
+      if (!T || T->isPointer())
+        return nullptr;
+      const TurfStructType *ST = escapeStructOf(T);
+      TurfTypePtr FieldTy = ST ? ST->getFieldType(FA->getFieldName()) : nullptr;
+      if (!FieldTy)
+        return nullptr;
+      T = FieldTy.get();
+    }
+  }
+  return Root;
+}
+
 // ─── AnalysisVisitor ─────────────────────────────────────────────────────────
 // Walks an expression and fires onRead/onDef callbacks with the VariableSymbol*
 // that the Resolver attached to each variable reference / declaration.
@@ -65,30 +117,25 @@ public:
     if (auto *L = dynamic_cast<const VariableExprAST *>(Node.getLHS())) {
       if (L->ResolvedSymbol)
         onDef(Node.getLoc(), L->ResolvedSymbol.get());
-    } else if (auto *AA = dynamic_cast<const ArrayAccessExprAST *>(Node.getLHS())) {
+    } else if (std::vector<const ExprAST *> Indices;
+               const VariableExprAST *Root = inPlaceArrayRoot(Node.getLHS(), Indices)) {
       // SEM-004 (§12.6): an element write (`arr[i] = v`) counts as assigning
       // the WHOLE array -- elements are not tracked individually, the same
       // granularity ConstructorFieldAssignmentPass already uses for
-      // `self.<field>`. This ONLY applies when the base is a genuine
-      // fixed-size T[N] local: its storage IS the alloca (no separate
-      // pointer value gets read to compute the element address), so the
-      // write is purely a definition, same as writing a struct field. A
-      // `string`/`ptr`/`T*`/unsized-`T[]` base is representationally a
-      // pointer -- indexing it genuinely READS the pointer value stored in
-      // the base variable to compute the target address, so those must fall
-      // through to the ordinary read treatment below (required: `mut buf:
-      // string; buf[0] = 'x';` must still be E008, not a silent write
-      // through an unassigned pointer).
-      visitChild(AA->getIndex());
-      const auto *BaseVar = dynamic_cast<const VariableExprAST *>(AA->getBase());
-      const auto *BaseArrTy = (BaseVar && BaseVar->ResolvedSymbol)
-          ? dynamic_cast<const ::ArrayType *>(BaseVar->ResolvedSymbol->Type.get())
-          : nullptr;
-      if (BaseArrTy && BaseArrTy->getSize() > 0) {
-        onDef(Node.getLoc(), BaseVar->ResolvedSymbol.get());
-      } else {
-        visitChild(AA->getBase());
-      }
+      // `self.<field>`; an uninitialized array's storage is zero-filled, so
+      // the elements nothing wrote read as zero. So does a nested write into
+      // one, `g[1][2] = v` or `ps[0].x = v` (owner decision 2026-10-13).
+      // This ONLY applies to a path through a fixed-size T[N] local and the
+      // struct values and fixed-size arrays inside it (inPlaceArrayRoot()): a
+      // `string`/`ptr`/`T*`/unsized-`T[]`/reference step is representationally
+      // a pointer, and indexing it genuinely READS the pointer value stored in
+      // the base to compute the target address, so those fall through to the
+      // ordinary read treatment below (required: `mut buf: string; buf[0] =
+      // 'x';` must still be E008, not a silent write through an unassigned
+      // pointer).
+      for (const ExprAST *I : Indices)
+        visitChild(I);
+      onDef(Node.getLoc(), Root->ResolvedSymbol.get());
     } else {
       visitChild(Node.getLHS());
     }
