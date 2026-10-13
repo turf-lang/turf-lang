@@ -1343,6 +1343,15 @@ const TurfType *getExprType(const ExprAST *E) {
     }
   }
   if (auto *MethodCall = dynamic_cast<const MethodCallExprAST *>(E)) {
+    // A UFCS call (`s.split(",")`) is an ordinary free-function call whose
+    // target the TypeChecker already chose; a non-generic target's declared
+    // return type is the call's type. The struct-method search below would
+    // find nothing for a receiver that is not a struct, such as a string.
+    if (MethodCall->ResolvedViaUFCS) {
+      if (const auto *RCT = MethodCall->getResolvedCallTarget())
+        if (RCT->TypeParams.empty() && RCT->ReturnType)
+          return RCT->ReturnType.get();
+    }
     const TurfType *BaseTy = getExprType(MethodCall->getBase());
 
     if (!BaseTy) {

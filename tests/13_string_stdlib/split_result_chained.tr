@@ -1,0 +1,11 @@
+// A method called directly on the List a UFCS call returns, without first
+// holding it in a variable.
+import test;
+
+fn main(): int {
+    mut s: string = "a,b,c";
+    test::assert(s.split(",").length() == 3, "length on split result");
+    test::assert(s.split(",").get(2) == "c", "get on split result");
+    test::assert("x y".split(" ").get(0).length() == 1, "three-level chain");
+    return 0;
+}

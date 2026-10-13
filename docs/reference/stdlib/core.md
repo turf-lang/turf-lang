@@ -308,8 +308,8 @@ a bug in the caller, not an outcome to recover from (see the
 is `""` or does not occur in `s`, so `s.split(d).length() == 1` means "no
 delimiter found". `"a,,b".split(",")` is `["a", "", "b"]`, and `join` with the
 same separator rebuilds `"a,,b"`. Naming the result type needs `import
-list::List;` ([collections](collections.md)). Hold the list in a variable
-before calling methods on it:
+list::List;` ([collections](collections.md)); a method can also be called on
+the result directly, as in `s.split(d).length()`:
 
 ```turflang
 import list::List;
