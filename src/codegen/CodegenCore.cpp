@@ -2312,7 +2312,7 @@ llvm::Constant *GetDefaultValue(const TurfType *T) {
   if (T->isNamed("char"))
     return llvm::ConstantInt::get(llvm::Type::getInt8Ty(*TheContext), 0);
   if (T->isNamed("string"))
-    return Builder->CreateGlobalStringPtr("");
+    return Builder->CreateGlobalString("");
 
   if (isUnsizedArrayType(T))
     return llvm::Constant::getNullValue(getSliceLLVMType());

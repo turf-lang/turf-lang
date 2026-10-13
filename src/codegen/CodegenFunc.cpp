@@ -191,7 +191,7 @@ static void EnsureArgvHelpers() {
   ArgvBuilder.CreateRet(Elem);
 
   ArgvBuilder.SetInsertPoint(OutRangeBB);
-  ArgvBuilder.CreateRet(ArgvBuilder.CreateGlobalStringPtr(""));
+  ArgvBuilder.CreateRet(ArgvBuilder.CreateGlobalString(""));
 }
 
 // RT-001 (docs/archive/ARCHITECTURE_OVERHAUL.md §8, F-MEM-4): see
