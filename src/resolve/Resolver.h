@@ -344,6 +344,9 @@ public:
     // cast's destination (visitCast).
     resolveTypeSpellingsSilently(Node.getTypeArg(), currentModuleName(),
                                  CurrentFuncTypeParams_);
+    // An unknown name is E042 here, as for a variable's type: unchecked, it
+    // reached Codegen as an unsized type, an internal error (turf-fuzz).
+    validateNamedType(Node.getTypeArg(), Node.getLoc(), CurrentFuncTypeParams_);
   }
 
   // ── FFI ────────────────────────────────────────────────────────────────────

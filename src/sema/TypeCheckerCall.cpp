@@ -504,14 +504,22 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
       // mem::realloc() already have (see e.g. list.tr's
       // `mem::malloc(byteSize) to T*`, the pattern every rerouted call site
       // keeps using with gc_alloc/gc_realloc in its place). No argument-type
-      // validation beyond the arity check above -- same minimal-validation
-      // convention typeof already uses; a non-int byte-count argument would
-      // simply codegen with whatever LLVM width Args[0]->codegen() produces
-      // (both runtime parameters are already-64-bit size_t, matching Turf's
-      // 64-bit `int`).
+      // validation beyond the arity check above and the byte count's type:
+      // it is passed as-is to the runtime's 64-bit size parameter, so anything
+      // but `int` was invalid IR (`gc_alloc(0.0)`, found by turf-fuzz).
       if (Node.isIntrinsic(BareIntrinsic::GcAlloc) ||
           Node.isIntrinsic(BareIntrinsic::GcAllocZeroed) ||
           Node.isIntrinsic(BareIntrinsic::GcRealloc)) {
+        size_t SizeArg = Node.isIntrinsic(BareIntrinsic::GcRealloc) ? 1 : 0;
+        if (SizeArg < ArgTypes.size() && ArgTypes[SizeArg] &&
+            !ArgTypes[SizeArg]->isInt()) {
+          reportError(Node.getLoc(), ErrCode::ArgumentType,
+                      "Argument " + std::to_string(SizeArg + 1) + " to '" +
+                          CalleeName + "' is a byte count and expects 'int', got '" +
+                          ArgTypes[SizeArg]->getName() + "'.");
+          setType(&Node, nullptr);
+          return;
+        }
         setType(&Node, std::make_shared<TurfPointerType>(TurfVoid()));
         return;
       }
