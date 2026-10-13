@@ -6,12 +6,6 @@ docs/reference/arrays.md#11 23fc862a  E103 NEEDS-REVIEW
 docs/reference/arrays.md#17 eee34e42  E001 SHOWS-ERROR
 docs/reference/arrays.md#18 39b9abbb  E001 SHOWS-ERROR
 docs/reference/arrays.md#6 b8180fad  E118 NEEDS-REVIEW
-docs/reference/cli_and_diagnostics.md#10 9ab59e00  E105 SHOWS-ERROR
-docs/reference/cli_and_diagnostics.md#11 ba50e3e4  E001 NEEDS-REVIEW
-docs/reference/cli_and_diagnostics.md#3 d1c376ff  E009 SHOWS-ERROR
-docs/reference/cli_and_diagnostics.md#4 3c4ae04a  E041 NOT-SELF-CONTAINED
-docs/reference/cli_and_diagnostics.md#8 92cbb28b  E010 NEEDS-REVIEW
-docs/reference/cli_and_diagnostics.md#9 86cd7868  E041 NOT-SELF-CONTAINED
 docs/reference/stdlib/http.md#2 c1c2d3d2  E040 NOT-SELF-CONTAINED
 docs/reference/stdlib/http.md#3 2bb67fac  E040 NOT-SELF-CONTAINED
 docs/reference/stdlib/http.md#4 2d4482c6  E040 NOT-SELF-CONTAINED
