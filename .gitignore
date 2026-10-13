@@ -2,6 +2,7 @@
 build/
 build_asan/
 build_san/
+build_release/
 bin/
 out/
 *.o

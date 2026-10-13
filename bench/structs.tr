@@ -1,0 +1,44 @@
+// REL-005 benchmark: a numeric loop over an array of structs.
+//
+// Rebuilt from ROADMAP §27 D24's description (the 2026-09-20 program was never
+// checked in): integer arithmetic on struct fields in a hot loop, including the
+// `(i % 5) - 2` shape OPT-002 proves in range. Every other `+` is checked
+// (F-NUM-3), which is what kept LLVM from vectorizing it; structs.c is the same
+// program in C, and scripts/bench.py reports Turf's time over C's.
+//
+// Prints a checksum so no level can delete the work, and a wrong answer shows.
+
+struct Particle {
+    x: int,
+    y: int,
+    vx: int,
+    vy: int
+}
+
+fn main(): int {
+    immut count: int = 1024;
+    immut steps: int = 500000;
+    mut ps: Particle[1024];
+    ps[0] = Particle::default(); // definitely assigned (F-INIT-1); the loop fills all
+    for i in 0..count {
+        mut p: Particle = Particle::default();
+        p.x = i;
+        p.y = count - i;
+        ps[i] = p;
+    }
+    for t in 0..steps {
+        for i in 0..count {
+            immut d: int = (i % 5) - 2;
+            ps[i].vx = ps[i].vx + d;
+            ps[i].vy = ps[i].vy - d;
+            ps[i].x = ps[i].x + ps[i].vx;
+            ps[i].y = ps[i].y + ps[i].vy;
+        }
+    }
+    mut sum: int = 0;
+    for i in 0..count {
+        sum = sum + ps[i].x - ps[i].y;
+    }
+    io::printline(sum);
+    return 0;
+}

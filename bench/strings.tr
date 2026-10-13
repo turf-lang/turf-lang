@@ -1,0 +1,36 @@
+// REL-005 benchmark: string building and scanning.
+//
+// Builds a long CSV-like text with StringBuilder, then, per round: indexes
+// every byte (`s[i]`, bounds-checked against strlen, F-STR-1), takes
+// substrings, and runs replace/contains over a slice of it. Prints a checksum.
+
+fn main(): int {
+    immut items: int = 20000;
+    immut rounds: int = 6000;
+    mut sb: strings::StringBuilder = strings::StringBuilder::default();
+    for i in 0..items {
+        sb.append("item");
+        sb.append(i to string);
+        sb.append_char(',');
+    }
+    immut text: string = sb.to_string();
+    immut n: int = text.length();
+    mut sum: int = 0;
+    for r in 0..rounds {
+        mut commas: int = 0;
+        for i in 0..n {
+            if (text[i] == ',') {
+                commas += 1;
+            }
+        }
+        immut start: int = (r * 997) % (n - 2000);
+        immut piece: string = text.substring(start, start + 2000);
+        immut swapped: string = piece.replace("item", "it");
+        sum = sum + commas + swapped.length();
+        if (swapped.contains("it1")) {
+            sum += 1;
+        }
+    }
+    io::printline(sum);
+    return 0;
+}
