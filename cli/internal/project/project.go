@@ -1,5 +1,5 @@
 // Package project turns a root turf.toml into the package graph `turfc
-// --package-graph` consumes (include/PackageGraph.h). It is the CLI's half of
+// --package-graph` consumes (src/tooling/PackageGraph.h). It is the CLI's half of
 // the seam in docs/development/FREEZE.md 6.16 (F-PKG-1): it owns files and
 // manifests, and never looks inside a .tr file. Which module an `import` names
 // stays the compiler's decision, made from the graph this package writes.
@@ -417,7 +417,7 @@ func (g *Graph) CheckStdlibNames(std map[string]bool) error {
 	return nil
 }
 
-// JSON renders the graph in the format documented in include/PackageGraph.h,
+// JSON renders the graph in the format documented in src/tooling/PackageGraph.h,
 // with absolute src paths. The output is a pure function of the manifests:
 // package keys are sorted (encoding/json sorts map keys) and each dependency
 // list keeps the manifest's declaration order, so rebuilding writes identical

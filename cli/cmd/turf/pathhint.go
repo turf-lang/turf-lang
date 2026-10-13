@@ -49,7 +49,7 @@ func pathHint() string {
 	// A source checkout has a script that links turf into ~/.local/bin (only
 	// turf, not turfc); prefer it over putting the whole build/ directory on
 	// PATH.
-	script := filepath.Join(filepath.Dir(dir), "scripts", "dev_install.sh")
+	script := filepath.Join(filepath.Dir(dir), "scripts", "install", "dev_install.sh")
 	if st, err := os.Stat(script); err == nil && !st.IsDir() && runtime.GOOS != "windows" {
 		fmt.Fprintf(&b, "      To run it from anywhere:  %s   (links it into ~/.local/bin)\n", script)
 		b.WriteString("      and follow the line it prints if ~/.local/bin is not on PATH either.\n")

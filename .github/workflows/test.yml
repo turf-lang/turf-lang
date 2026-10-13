@@ -16,14 +16,14 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check documentation cross-references
         run: |
-          chmod +x scripts/check_doc_links.sh
-          ./scripts/check_doc_links.sh
+          chmod +x scripts/check/check_doc_links.sh
+          ./scripts/check/check_doc_links.sh
       # REL-004 stage 1: tests/CONFORMANCE.md maps every Part VII area to the
       # tests that cover it, positive and negative. Also needs no build: it
       # fails when a mapped test was renamed or deleted, or an area is left
       # without a negative test.
       - name: Conformance map is consistent
-        run: python3 scripts/conformance_check.py
+        run: python3 scripts/check/conformance_check.py
 
   build_and_test:
     runs-on: ubuntu-latest
@@ -126,14 +126,14 @@ jobs:
       # `pub` item; this fails if a pub item exists that none of them mentions,
       # i.e. a new public name added without being locked.
       - name: Stdlib public surface is fully locked
-        run: ./scripts/stdlib_surface_check.sh
+        run: ./scripts/check/stdlib_surface_check.sh
 
       # Issue #263: `turf --explain Exxx` is a promise to a beginner. This fails
       # if a registered error code has no docs/errors/codes/Exxx.txt, or is
       # documented but raised by nothing (the state E002/E056/E057/E064/E067
       # sat in until #263 -- pages describing errors that never appeared).
       - name: Error-code registry is consistent
-        run: ./scripts/error_codes_check.sh
+        run: ./scripts/check/error_codes_check.sh
 
       # SLM_IMPROVEMENT_PLAN C1/C2: everything under docs/slm/ is pasted into
       # the --smart model's prompt, and a model copies what it sees. This
@@ -141,7 +141,7 @@ jobs:
       # and the syntax card, and fails a page that has none -- a doc showing
       # `fn<T> Box.get(): T { ... }` taught the model code the compiler rejects.
       - name: SLM docs show only Turf the compiler accepts
-        run: ./scripts/slm_doc_examples_check.sh
+        run: ./scripts/slm/slm_doc_examples_check.sh
 
       # SLM_IMPROVEMENT_PLAN C3: the system prompt (rules + syntax card + the
       # biggest code page + a category doc) must fit n_batch (4096 tokens), or
@@ -149,7 +149,7 @@ jobs:
       # llama.cpp's own tokenizer on the prompt the compiler really builds; it
       # SKIPs (and says so) if llama-tokenize was not built in this job.
       - name: SLM system prompt fits the model's batch
-        run: ./scripts/slm_prompt_budget.sh
+        run: ./scripts/slm/slm_prompt_budget.sh
 
       # LEC-001 stage 2: the `turf` front end (cli/). The Go tests cover argv
       # classification, discovery order and the version handshake in isolation;
@@ -159,27 +159,27 @@ jobs:
       - name: turf front end (Go vet and unit tests)
         run: cd cli && go vet ./... && go test ./...
       - name: turf front end smoke test (passthrough, subcommands, handshake)
-        run: CI=1 ./scripts/cli_smoke.sh
+        run: CI=1 ./scripts/smoke/cli_smoke.sh
       # LEC-001 stage 5: `turf` reads projects -- turf.toml, path dependencies,
       # the package graph handed to `turfc --package-graph`. Covers new/init/
       # add/remove/build/run/check/clean against the real compiler, the
       # manifest rules, name conflicts and cycles, [unsafe] allow, and that
       # `add`/`remove` edit one line and keep the user's comments.
       - name: turf project smoke test (new, add, build, run, manifests, graph errors)
-        run: CI=1 ./scripts/project_smoke.sh
+        run: CI=1 ./scripts/smoke/project_smoke.sh
       # REL-002: `turfc --test` and `turf test`. test_runner.sh (above) proves
       # the runner agrees with the conventions on tests that pass; this breaks
       # each convention on purpose and checks the run fails for THAT reason,
       # plus the "tests/ is required" rule, option errors, and a project's
       # tests importing its own modules, a dependency and a helper.
       - name: turf test smoke test (conventions, tests/ required, project tests)
-        run: CI=1 ./scripts/test_cmd_smoke.sh
+        run: CI=1 ./scripts/smoke/test_cmd_smoke.sh
       # REL-002 stage 2: `turf fmt` / `turfc --format`. Checks the three modes
       # and their statuses, that one bad file does not stop the rest, and --
       # on a copy of the repository's own ~1200 files -- that a second pass
       # finds nothing to do and no result is refused as a formatter bug.
       - name: turf fmt smoke test (modes, verification, idempotence on the repo's files)
-        run: CI=1 ./scripts/fmt_smoke.sh
+        run: CI=1 ./scripts/smoke/fmt_smoke.sh
       # REL-002 stage 2: the formatting gate. Every .tr file under lib/std and
       # tests must already be formatted; a file that does not lex (the fail_*
       # tests that are invalid on purpose) is skipped and listed, not a failure.
@@ -191,38 +191,38 @@ jobs:
       # upstream is a local bare repository the script builds, so there is no
       # network; git is present on the runner.
       - name: turf git dependencies smoke test (cache, turf.lock, offline, locked, update)
-        run: CI=1 ./scripts/git_deps_smoke.sh
+        run: CI=1 ./scripts/smoke/git_deps_smoke.sh
       # LEC-001 stage 8: examples/ builds and runs with the real `turf`, and its
       # committed turf.lock files are current (--locked --offline). Nothing else
       # builds examples/; the docs quote its output.
       - name: turf examples smoke test (examples/ build, run, locked and offline)
-        run: CI=1 ./scripts/examples_smoke.sh
+        run: CI=1 ./scripts/smoke/examples_smoke.sh
       # REL-003 stage 2 (D20): `--target` for another machine writes its object
       # and stops with a TurfLang diagnostic instead of the host linker's
       # "file in wrong format"; the host's own triple spellings must still link.
       - name: "Cross-target smoke test (--target link diagnostic, D20)"
-        run: ./scripts/cross_target_smoke.sh
+        run: ./scripts/smoke/cross_target_smoke.sh
       # REL-003 stage 1: the release archive's layout, install.sh (checksum,
       # PATH block, uninstall) and `turf new`/`run`/`build` from an install
       # that has only the archive's files. The release workflow runs the same
       # script on the archive it publishes; this keeps the packaging honest on
       # every push, not only on a tag.
       - name: "Release archive + install.sh smoke test"
-        run: CI=1 ./scripts/release_smoke.sh
+        run: CI=1 ./scripts/smoke/release_smoke.sh
       # REL-004 stage 2: test_runner.sh covers tests/ only. This is the CI run
       # of what only session_postflight.sh checked by hand: every lib/std
       # module type-checks as a library, the prelude modules compile directly
       # (the self-import bug class), and every showcase/ program compiles at
       # -O0/-O2/-g with a clean `llvm-dwarfdump --verify`.
       - name: "lib/std and showcase compile (REL-004 stage 2)"
-        run: CI=1 ./scripts/tree_programs_smoke.sh
+        run: CI=1 ./scripts/smoke/tree_programs_smoke.sh
       # REL-004 / REL-006: every ```turflang block in docs/reference/ is compiled
       # (fragments get the imports and earlier declarations the page supplies).
       # Blocks that do not compile are in docs/reference/DOC_EXAMPLES_GAPS.txt, a
       # register that can only shrink: new drift fails here, a register line for
       # a block that now compiles fails here too.
       - name: "Reference-doc examples compile (REL-004 / REL-006)"
-        run: python3 scripts/doc_examples.py -v
+        run: python3 scripts/check/doc_examples.py -v
 
       # OPT-001 (docs/development/changes/OPT-001.md, INV-OPT-1): optimization
       # levels must never change a program's observable behaviour. The default
@@ -255,7 +255,7 @@ jobs:
         run: ./scripts/test_runner.sh -g
 
       - name: Optimization-level smoke test (cross-level output equality)
-        run: ./scripts/opt_levels_smoke.sh
+        run: ./scripts/smoke/opt_levels_smoke.sh
 
       # FDN-005 stage 2 (docs/planning/ROADMAP_v2.0.0.md): TURF_GC_STRESS=1
       # forces a full mark-sweep collection on every single allocation
@@ -331,7 +331,7 @@ jobs:
       - name: GC stack-base fallback (no /proc) -- full suite under validation
         run: TURF_GC_NO_PROCFS=1 TURF_GC_VALIDATE=1 ./scripts/test_runner.sh -O0
       - name: GC stack-base fallback (no /proc) smoke test
-        run: ./scripts/gc_no_procfs_smoke.sh
+        run: ./scripts/smoke/gc_no_procfs_smoke.sh
 
       # OVH-015: the smoke scripts below already existed as each named
       # feature group's own regression coverage for behaviour test_runner.sh
@@ -342,7 +342,7 @@ jobs:
       # layer never loading the SLM) -- none were wired into CI until now.
       # All run against the same build above; none need anything this job
       # doesn't already have except gdb (installed above for the one that
-      # does). Deliberately NOT included: scripts/test_ai.sh, which drives
+      # does). Deliberately NOT included: scripts/slm/test_ai.sh, which drives
       # the real model against tests/custom/aggressive/ and needs the
       # multi-gigabyte GGUF weights this repo's .gitignore deliberately
       # keeps out of a checkout -- a manual/local sanity script, not a CI gate.
@@ -352,13 +352,13 @@ jobs:
       # idempotent. test_runner.sh cannot express this (it needs to rewrite
       # source and re-run the compiler on the result).
       - name: "Migration tool smoke test (turfc --migrate=pub)"
-        run: ./scripts/migrate_pub_smoke.sh
+        run: ./scripts/smoke/migrate_pub_smoke.sh
       # LEC-003: the warnings a `compare` with patterns produces (an unused
       # binding, `_name` silencing it, an arm behind a catch-all reported once)
       # come from the CFG passes, which neither test_runner.sh nor the
       # turf::analyze() facade can see.
       - name: "Pattern warnings smoke test"
-        run: ./scripts/pattern_warnings_smoke.sh
+        run: ./scripts/smoke/pattern_warnings_smoke.sh
       # LEC-001 stage 4: package builds (`turfc --package-graph`). The test
       # runner is single-file and cannot hand the compiler a graph, so this
       # builds multi-package trees in a temp directory: two packages' `util`
@@ -366,29 +366,29 @@ jobs:
       # internal modules, E090 against a dependency, graph validation, and
       # the per-package unsafe bit.
       - name: "Package-graph smoke test (turfc --package-graph)"
-        run: ./scripts/package_graph_smoke.sh
+        run: ./scripts/smoke/package_graph_smoke.sh
       - name: Runtime smoke test (libturfrt link wiring, descriptors, panics)
-        run: ./scripts/runtime_smoke.sh
+        run: ./scripts/smoke/runtime_smoke.sh
       - name: "Manual-heap allocation smoke test (mem:: accounting)"
-        run: ./scripts/mem_smoke.sh
+        run: ./scripts/smoke/mem_smoke.sh
       - name: GC smoke test (retention, pinning, collection)
-        run: ./scripts/gc_smoke.sh
+        run: ./scripts/smoke/gc_smoke.sh
       - name: GC RSS-bounded smoke test
-        run: ./scripts/gc_rss_smoke.sh
+        run: ./scripts/smoke/gc_rss_smoke.sh
       - name: GC stress-corpus smoke test (FDN-005 stage 1 -- long-running programs)
-        run: ./scripts/gc_stress_corpus_smoke.sh
+        run: ./scripts/smoke/gc_stress_corpus_smoke.sh
       - name: Manual/GC heap boundary checks
-        run: ./scripts/check_boundary.sh
+        run: ./scripts/check/check_boundary.sh
       - name: Debug info smoke test (gdb against -g output)
-        run: ./scripts/debuginfo_smoke.sh
+        run: ./scripts/smoke/debuginfo_smoke.sh
       - name: "@caller_location smoke test"
-        run: ./scripts/std002_caller_location_smoke.sh
+        run: ./scripts/smoke/std002_caller_location_smoke.sh
       - name: SLM deterministic-fix layer smoke test (never loads the model)
-        run: ./scripts/slm_deterministic_fix_smoke.sh
+        run: ./scripts/slm/slm_deterministic_fix_smoke.sh
       - name: SLM replay smoke test (recorded responses, never loads the model)
-        run: ./scripts/slm_replay_smoke.sh
+        run: ./scripts/slm/slm_replay_smoke.sh
       - name: SLM cache smoke test (positive and negative entries, never loads the model)
-        run: ./scripts/slm_cache_smoke.sh
+        run: ./scripts/slm/slm_cache_smoke.sh
 
   # FDN-005 stage 3 (docs/planning/ROADMAP_v2.0.0.md): independent validation
   # of the collector via an ASan+UBSan-instrumented libturfrt
@@ -584,7 +584,7 @@ jobs:
       - name: Crash fuzz smoke (sanitized compiler, 3 minutes)
         run: |
           ulimit -s 65536
-          python3 scripts/fuzz/crash_fuzz.py --seconds 180 --compiler "$(pwd)/build_san/turfc" --out fuzz-findings
+          python3 scripts/dev/fuzz/crash_fuzz.py --seconds 180 --compiler "$(pwd)/build_san/turfc" --out fuzz-findings
       - name: Upload fuzz findings
         if: failure()
         uses: actions/upload-artifact@v4

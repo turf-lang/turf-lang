@@ -11,7 +11,7 @@ on:
     inputs:
       allowlist:
         description: >-
-          What a failed dependency check (scripts/release_deps_check.sh) does.
+          What a failed dependency check (scripts/release/release_deps_check.sh) does.
           'enforce' fails the job; 'report' prints the same report and carries
           on. The check fails today by design (the archive's turfc links LLVM
           dynamically; REL-008 stages 2-4 fix that), so a caller that must
@@ -105,14 +105,14 @@ jobs:
       # what a broken runtime reports. (The archive's own runtime is checked
       # below, after packaging.)
       - name: Embedded linker smoke test (stand-in runtime)
-        run: CI=1 ./scripts/bundled_link_smoke.sh
+        run: CI=1 ./scripts/smoke/bundled_link_smoke.sh
 
       # REL-008 stage 4: the C runtime the archive carries, which the embedded
       # linker links programs against instead of running cc. musl built from a
       # pinned, hash-checked source tarball, libturfrt compiled against it.
       # Built before Package: package_release.sh ships lib/rt/ when it exists.
       - name: Build the bundled C runtime (musl)
-        run: ./scripts/build_bundled_runtime.sh --platform linux-x86_64
+        run: ./scripts/release/build_bundled_runtime.sh --platform linux-x86_64
 
       - name: Package
         id: package
@@ -125,13 +125,13 @@ jobs:
       # programs link in-process (a decoy cc on PATH is never run), the result
       # is static, and a host-name lookup works, which static glibc cannot do.
       - name: Embedded linker smoke test (the archive's runtime)
-        run: CI=1 ./scripts/bundled_link_smoke.sh --archive "${{ steps.package.outputs.archive-path }}"
+        run: CI=1 ./scripts/smoke/bundled_link_smoke.sh --archive "${{ steps.package.outputs.archive-path }}"
 
       # REL-003: install the archive that is about to be published with
       # install.sh and use it (layout, checksum, PATH block, turf new/run/
       # build, uninstall). A release that fails this is not uploaded.
       - name: Release archive smoke test
-        run: CI=1 ./scripts/release_smoke.sh --archive "${{ steps.package.outputs.archive-path }}"
+        run: CI=1 ./scripts/smoke/release_smoke.sh --archive "${{ steps.package.outputs.archive-path }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -144,13 +144,13 @@ jobs:
       # REL-008 stage 1; last, so the smoke test and the upload always happen.
       - name: Archive dependency check (REL-008)
         continue-on-error: ${{ inputs.allowlist != 'enforce' }}
-        run: ./scripts/release_deps_check.sh --archive "${{ steps.package.outputs.archive-path }}"
+        run: ./scripts/release/release_deps_check.sh --archive "${{ steps.package.outputs.archive-path }}"
 
       # ---- the smart archive ---------------------------------------------------
       # The same compiler with --smart's model runtime in it (llama.cpp, built
       # for a release: no OpenMP, no -march=native), packaged as
       # <platform>-smart with grammars/ and an EMPTY models/ folder: no model is
-      # shipped, the user puts one .gguf there (scripts/models_README.txt). A
+      # shipped, the user puts one .gguf there (scripts/slm/models_README.txt). A
       # second build directory, after the plain archive is uploaded, so nothing
       # here can change or delay it.
       - name: Fetch llama.cpp (the smart build only)
@@ -172,7 +172,7 @@ jobs:
       # What the plain archive's smoke checks, plus: the models folder, the notes
       # for no model and for two, and that a model survives reinstall and uninstall.
       - name: Release archive smoke test (smart)
-        run: CI=1 ./scripts/release_smoke.sh --archive "${{ steps.package-smart.outputs.archive-path }}"
+        run: CI=1 ./scripts/smoke/release_smoke.sh --archive "${{ steps.package-smart.outputs.archive-path }}"
 
       - name: Upload artifact (smart)
         uses: actions/upload-artifact@v4
@@ -184,7 +184,7 @@ jobs:
 
       - name: Archive dependency check (smart)
         continue-on-error: ${{ inputs.allowlist != 'enforce' }}
-        run: ./scripts/release_deps_check.sh --archive "${{ steps.package-smart.outputs.archive-path }}"
+        run: ./scripts/release/release_deps_check.sh --archive "${{ steps.package-smart.outputs.archive-path }}"
 
   # Linux (Ubuntu/Debian) - arm64. The x86_64 job on GitHub's arm64 runner: the
   # same packages (apt.llvm.org publishes arm64), the same scripts, and the
@@ -273,14 +273,14 @@ jobs:
       # what a broken runtime reports. (The archive's own runtime is checked
       # below, after packaging.)
       - name: Embedded linker smoke test (stand-in runtime)
-        run: CI=1 ./scripts/bundled_link_smoke.sh
+        run: CI=1 ./scripts/smoke/bundled_link_smoke.sh
 
       # REL-008 stage 4: the C runtime the archive carries, which the embedded
       # linker links programs against instead of running cc. musl built from a
       # pinned, hash-checked source tarball, libturfrt compiled against it.
       # Built before Package: package_release.sh ships lib/rt/ when it exists.
       - name: Build the bundled C runtime (musl)
-        run: ./scripts/build_bundled_runtime.sh --platform linux-arm64
+        run: ./scripts/release/build_bundled_runtime.sh --platform linux-arm64
 
       - name: Package
         id: package
@@ -293,13 +293,13 @@ jobs:
       # programs link in-process (a decoy cc on PATH is never run), the result
       # is static, and a host-name lookup works, which static glibc cannot do.
       - name: Embedded linker smoke test (the archive's runtime)
-        run: CI=1 ./scripts/bundled_link_smoke.sh --archive "${{ steps.package.outputs.archive-path }}"
+        run: CI=1 ./scripts/smoke/bundled_link_smoke.sh --archive "${{ steps.package.outputs.archive-path }}"
 
       # REL-003: install the archive that is about to be published with
       # install.sh and use it (layout, checksum, PATH block, turf new/run/
       # build, uninstall). A release that fails this is not uploaded.
       - name: Release archive smoke test
-        run: CI=1 ./scripts/release_smoke.sh --archive "${{ steps.package.outputs.archive-path }}"
+        run: CI=1 ./scripts/smoke/release_smoke.sh --archive "${{ steps.package.outputs.archive-path }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -312,13 +312,13 @@ jobs:
       # REL-008 stage 1; last, so the smoke test and the upload always happen.
       - name: Archive dependency check (REL-008)
         continue-on-error: ${{ inputs.allowlist != 'enforce' }}
-        run: ./scripts/release_deps_check.sh --archive "${{ steps.package.outputs.archive-path }}"
+        run: ./scripts/release/release_deps_check.sh --archive "${{ steps.package.outputs.archive-path }}"
 
       # ---- the smart archive ---------------------------------------------------
       # The same compiler with --smart's model runtime in it (llama.cpp, built
       # for a release: no OpenMP, no -march=native), packaged as
       # <platform>-smart with grammars/ and an EMPTY models/ folder: no model is
-      # shipped, the user puts one .gguf there (scripts/models_README.txt). A
+      # shipped, the user puts one .gguf there (scripts/slm/models_README.txt). A
       # second build directory, after the plain archive is uploaded, so nothing
       # here can change or delay it.
       - name: Fetch llama.cpp (the smart build only)
@@ -340,7 +340,7 @@ jobs:
       # What the plain archive's smoke checks, plus: the models folder, the notes
       # for no model and for two, and that a model survives reinstall and uninstall.
       - name: Release archive smoke test (smart)
-        run: CI=1 ./scripts/release_smoke.sh --archive "${{ steps.package-smart.outputs.archive-path }}"
+        run: CI=1 ./scripts/smoke/release_smoke.sh --archive "${{ steps.package-smart.outputs.archive-path }}"
 
       - name: Upload artifact (smart)
         uses: actions/upload-artifact@v4
@@ -352,7 +352,7 @@ jobs:
 
       - name: Archive dependency check (smart)
         continue-on-error: ${{ inputs.allowlist != 'enforce' }}
-        run: ./scripts/release_deps_check.sh --archive "${{ steps.package-smart.outputs.archive-path }}"
+        run: ./scripts/release/release_deps_check.sh --archive "${{ steps.package-smart.outputs.archive-path }}"
 
   # Linux (Arch) - REMOVED by REL-008 stage 2. It existed because the Ubuntu
   # archive's turfc linked Ubuntu's *shared* libLLVM, which an Arch machine
@@ -388,7 +388,7 @@ jobs:
       # Homebrew's lld@22 ships only liblld*.dylib (its bottle was unpacked to
       # check): linking those made turfc need /opt/homebrew/opt/lld@22/lib/...
       # at run time, which the dependency check caught on the first macOS run.
-      # So lld is built from LLVM's own pinned source (scripts/build_static_lld.sh,
+      # So lld is built from LLVM's own pinned source (scripts/release/build_static_lld.sh,
       # ~10 minutes), and cached; the key covers the script (its pinned hash and
       # flags) and the LLVM it is built against.
       - name: Cache static lld
@@ -396,11 +396,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/lld
-          key: static-lld-macos-arm64-${{ hashFiles('scripts/build_static_lld.sh') }}-${{ env.LLVM_VERSION }}
+          key: static-lld-macos-arm64-${{ hashFiles('scripts/release/build_static_lld.sh') }}-${{ env.LLVM_VERSION }}
 
       - name: Build static lld
         if: steps.cache-lld.outputs.cache-hit != 'true'
-        run: ./scripts/build_static_lld.sh --llvm-dir "$LLVM_PREFIX/lib/cmake/llvm" --prefix "${{ runner.temp }}/lld"
+        run: ./scripts/release/build_static_lld.sh --llvm-dir "$LLVM_PREFIX/lib/cmake/llvm" --prefix "${{ runner.temp }}/lld"
 
       - name: Point CMake at the static lld
         run: echo "CMAKE_PREFIX_PATH=$LLVM_PREFIX:${{ runner.temp }}/lld" >> $GITHUB_ENV
@@ -420,7 +420,7 @@ jobs:
       # script (no Apple file) and libturfrt for this machine. The embedded
       # linker's Mach-O driver links against it; first real run on a Mac.
       - name: Build the bundled C runtime (libSystem stub)
-        run: ./scripts/build_bundled_runtime.sh --platform macos-arm64
+        run: ./scripts/release/build_bundled_runtime.sh --platform macos-arm64
 
       # REL-008 stage 6: the whole suite, GC stress and the smoke scripts on macOS, with
       # the compiler just built (programs linked by the embedded Mach-O linker against
@@ -459,7 +459,7 @@ jobs:
                    examples_smoke pattern_warnings_smoke migrate_pub_smoke opt_levels_smoke runtime_smoke \
                    mem_smoke gc_smoke debuginfo_smoke std002_caller_location_smoke; do
             echo "=== $s"
-            CI=1 ./scripts/$s.sh 2>&1 | tee -a macos-smokes.log || true
+            CI=1 ./scripts/smoke/$s.sh 2>&1 | tee -a macos-smokes.log || true
             [ "${PIPESTATUS[0]}" = 0 ] || { echo "::warning::$s failed on macOS"; fail=1; }
           done
           exit $fail
@@ -493,13 +493,13 @@ jobs:
       # The archive's own turfc and runtime: a runtime-only program links
       # in-process (a decoy cc first on PATH is never run) and runs.
       - name: Embedded linker smoke test (the archive's runtime)
-        run: CI=1 ./scripts/bundled_link_smoke.sh --archive "${{ steps.package.outputs.archive-path }}"
+        run: CI=1 ./scripts/smoke/bundled_link_smoke.sh --archive "${{ steps.package.outputs.archive-path }}"
 
       # REL-003: as for linux-x86_64. Written without a macOS machine; this
       # runner is where the script's Darwin branches (bash login shell,
       # ~/.bash_profile, BSD tools) get their first real run.
       - name: Release archive smoke test
-        run: CI=1 ./scripts/release_smoke.sh --archive "${{ steps.package.outputs.archive-path }}"
+        run: CI=1 ./scripts/smoke/release_smoke.sh --archive "${{ steps.package.outputs.archive-path }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -513,13 +513,13 @@ jobs:
       # check, written without a Mac like the smoke test's Darwin branches.
       - name: Archive dependency check (REL-008)
         continue-on-error: ${{ inputs.allowlist != 'enforce' }}
-        run: ./scripts/release_deps_check.sh --archive "${{ steps.package.outputs.archive-path }}"
+        run: ./scripts/release/release_deps_check.sh --archive "${{ steps.package.outputs.archive-path }}"
 
       # ---- the smart archive ---------------------------------------------------
       # The same compiler with --smart's model runtime in it (llama.cpp, built
       # for a release: no OpenMP, no -march=native), packaged as
       # <platform>-smart with grammars/ and an EMPTY models/ folder: no model is
-      # shipped, the user puts one .gguf there (scripts/models_README.txt). A
+      # shipped, the user puts one .gguf there (scripts/slm/models_README.txt). A
       # second build directory, after the plain archive is uploaded, so nothing
       # here can change or delay it.
       - name: Fetch llama.cpp (the smart build only)
@@ -542,7 +542,7 @@ jobs:
       # What the plain archive's smoke checks, plus: the models folder, the notes
       # for no model and for two, and that a model survives reinstall and uninstall.
       - name: Release archive smoke test (smart)
-        run: CI=1 ./scripts/release_smoke.sh --archive "${{ steps.package-smart.outputs.archive-path }}"
+        run: CI=1 ./scripts/smoke/release_smoke.sh --archive "${{ steps.package-smart.outputs.archive-path }}"
 
       - name: Upload artifact (smart)
         uses: actions/upload-artifact@v4
@@ -554,7 +554,7 @@ jobs:
 
       - name: Archive dependency check (smart)
         continue-on-error: ${{ inputs.allowlist != 'enforce' }}
-        run: ./scripts/release_deps_check.sh --archive "${{ steps.package-smart.outputs.archive-path }}"
+        run: ./scripts/release/release_deps_check.sh --archive "${{ steps.package-smart.outputs.archive-path }}"
 
   # macOS - x86_64 (Intel) -- DROPPED. `macos-13` (the last Intel-hosted
   # runner label GitHub offers) queued for 9+ hours without ever starting
@@ -624,12 +624,12 @@ jobs:
       # package_release.sh ships lib/rt/ when it exists.
       - name: Build the bundled C runtime (MinGW-w64 UCRT)
         shell: msys2 {0}
-        run: ./scripts/build_bundled_runtime.sh --platform windows-x86_64
+        run: ./scripts/release/build_bundled_runtime.sh --platform windows-x86_64
 
       # REL-008 stage 5: the whole test suite on Windows, with the compiler just
       # built (so, because lib/rt now exists, linked by the embedded lld against
       # the bundled CRT). `turfc --test` runs natively here (its Windows process
-      # runner is src/TestRunner.cpp's); the flags are scripts/test_runner.sh's.
+      # runner is src/tooling/TestRunner.cpp's); the flags are scripts/test_runner.sh's.
       # ENFORCING since 2026-10-11, when the same command passed 1191/1191 on a
       # real Windows 11 machine (also at -O0 and with TURF_GC_STRESS=1): a Windows
       # regression now fails the commit that caused it, like Linux's does. The log
@@ -678,13 +678,13 @@ jobs:
         run: ./build/turfc.exe --test tests/41_gc
 
       # The smoke scripts, on Windows. Each bash script has a PowerShell twin
-      # (scripts/*_smoke.ps1: same checks, the Windows spelling of the host parts, every
+      # (scripts/smoke/*_smoke.ps1: same checks, the Windows spelling of the host parts, every
       # skipped check named); windows_smokes.ps1 runs all eight and prints one table.
       # Run from the MSYS2 shell so gcc is on PATH for runtime_smoke's C API check.
       - name: Smoke scripts on Windows (PowerShell twins)
         if: ${{ !cancelled() }}
         shell: msys2 {0}
-        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows_smokes.ps1
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/smoke/windows_smokes.ps1
 
       # The bash smoke scripts that need nothing POSIX-only run as they are.
       - name: Smoke scripts on Windows (bash)
@@ -695,7 +695,7 @@ jobs:
           for s in package_graph_smoke examples_smoke pattern_warnings_smoke migrate_pub_smoke \
                    debuginfo_smoke mem_smoke gc_smoke test_cmd_smoke fmt_smoke; do
             echo "=== $s"
-            CI=1 ./scripts/$s.sh || { echo "::error::$s failed"; fail=1; }
+            CI=1 ./scripts/smoke/$s.sh || { echo "::error::$s failed"; fail=1; }
           done
           exit $fail
 
@@ -756,7 +756,7 @@ jobs:
         shell: pwsh
         run: |
           $z = (Get-ChildItem -Path . -Filter 'turf-v*-windows-x86_64.zip' | Select-Object -First 1).FullName
-          powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\release_smoke.ps1 -Archive $z
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\smoke\release_smoke.ps1 -Archive $z
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload artifact
@@ -773,13 +773,13 @@ jobs:
       - name: Archive dependency check (REL-008)
         continue-on-error: ${{ inputs.allowlist != 'enforce' }}
         shell: msys2 {0}
-        run: ./scripts/release_deps_check.sh --archive "${{ steps.package.outputs.archive-path }}"
+        run: ./scripts/release/release_deps_check.sh --archive "${{ steps.package.outputs.archive-path }}"
 
       # ---- the smart archive ---------------------------------------------------
       # The same compiler with --smart's model runtime in it (llama.cpp, built
       # for a release: no OpenMP, no -march=native), packaged as
       # <platform>-smart with grammars/ and an EMPTY models/ folder: no model is
-      # shipped, the user puts one .gguf there (scripts/models_README.txt). A
+      # shipped, the user puts one .gguf there (scripts/slm/models_README.txt). A
       # second build directory, after the plain archive is uploaded, so nothing
       # here can change or delay it.
       # NOT yet proven on Windows (no machine, no runner minutes when this was
@@ -817,4 +817,4 @@ jobs:
       - name: Archive dependency check (smart)
         shell: msys2 {0}
         continue-on-error: true
-        run: ./scripts/release_deps_check.sh --archive "${{ steps.package-smart.outputs.archive-path }}"
+        run: ./scripts/release/release_deps_check.sh --archive "${{ steps.package-smart.outputs.archive-path }}"

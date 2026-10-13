@@ -121,8 +121,8 @@ fine.
 ```bash
 cmake --build build            # builds build/turfc and, if Go is installed, build/turf
 cd cli && go vet ./... && go test ./...
-./scripts/cli_smoke.sh         # the front end against the real compiler
-./scripts/project_smoke.sh     # projects: new/add/build/run/check, manifests, graph errors
+./scripts/smoke/cli_smoke.sh   # the front end against the real compiler
+./scripts/smoke/project_smoke.sh  # projects: new/add/build/run/check, manifests, graph errors
 ```
 
 A plain `go build ./cmd/turf` works too, since nothing is stamped at build time.

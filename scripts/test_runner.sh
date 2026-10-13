@@ -6,7 +6,7 @@
 # plain files must run and exit 0, fail_* must be rejected, RUNTIME_ABORT_EXPECTED
 # must compile and then abort, the EXPECT-DIAG / EXPECT-RUNTIME / EXPECT-EXIT
 # markers pin why (LEC-005), the diagnostic register (issue #263) -- is
-# implemented once, in src/TestRunner.cpp and src/TestExpectations.cpp, and is
+# implemented once, in src/tooling/TestRunner.cpp and src/tooling/TestExpectations.cpp, and is
 # the same code `turf test` runs for a project. Only what is particular to this
 # repository lives here:
 #

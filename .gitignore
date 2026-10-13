@@ -65,7 +65,7 @@ docs/patent.zip
 
 # Bundled C runtime a release archive carries (REL-008 stage 4 builds it in CI;
 # a developer may assemble one to try the embedded linker, see
-# scripts/bundled_link_smoke.sh).
+# scripts/smoke/bundled_link_smoke.sh).
 /lib/rt/
 fuzz-findings/
 build_cov/
@@ -79,5 +79,5 @@ __pycache__/
 *.gcov
 # Temporary objects the test runner leaves behind when a run is killed
 .testrun_*
-# Reproducers scripts/fuzz/crash_fuzz.py writes before they are minimized into tests/
+# Reproducers scripts/dev/fuzz/crash_fuzz.py writes before they are minimized into tests/
 fuzz-findings/

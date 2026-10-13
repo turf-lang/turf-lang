@@ -15,7 +15,7 @@ import (
 
 // InstallRoot is the root the compiler finds lib/std under: $TURF_HOME if set,
 // else the directory above the one holding turfc, with symlinks resolved. It
-// mirrors TurfInstallRoot() in src/ParserModule.cpp; if the two disagree,
+// mirrors TurfInstallRoot() in src/frontend/ParserModule.cpp; if the two disagree,
 // `turf` would check names against a different stdlib than the one `turfc`
 // resolves imports against.
 func InstallRoot(compiler string) string {

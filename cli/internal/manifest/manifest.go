@@ -72,10 +72,10 @@ func (e *Error) Error() string {
 	return e.Msg + "\nhint: " + e.Hint
 }
 
-// Drift: this list is copied by hand from the keyword table in src/Lexer.cpp
+// Drift: this list is copied by hand from the keyword table in src/frontend/Lexer.cpp
 // (the `{"word", TOK_...}` entries of `Keywords`). A package name is spelled in
 // `import`, so a reserved word could never be imported; the compiler would say
-// so late, deep inside some other package's build. scripts/project_smoke.sh
+// so late, deep inside some other package's build. scripts/smoke/project_smoke.sh
 // compares this list against the lexer's table so the two cannot drift apart
 // without a failing check.
 var reserved = []string{

@@ -18,7 +18,7 @@ jobs:
   # not built any differently from what CI already proved.
   #
   # 'enforce' (REL-008 stage 4): the dependency check
-  # (scripts/release_deps_check.sh) passes on all three platforms, so a release
+  # (scripts/release/release_deps_check.sh) passes on all three platforms, so a release
   # whose archive needs more than the operating system provides is refused.
   # Until then this was 'report', because the check failed by design (a dynamic
   # LLVM, MinGW DLLs, msvcrt) and enforcing it would have made every tag,
@@ -37,13 +37,15 @@ jobs:
       # can point at the version being installed, and it is the file the
       # smoke tests above ran against. gen_recipes.sh is what the recipe step
       # below runs; v2.0.0-rc3's publish job failed with "No such file" because
-      # only install.sh was checked out.
+      # only install.sh was checked out. The installers live in scripts/install/
+      # but are published as plain install.sh / install.ps1 (the release-asset
+      # name is the file's basename, so the one-liners keep working).
       - uses: actions/checkout@v4
         with:
           sparse-checkout: |
-            install.sh
-            install.ps1
-            scripts/gen_recipes.sh
+            scripts/install/install.sh
+            scripts/install/install.ps1
+            scripts/release/gen_recipes.sh
           sparse-checkout-cone-mode: false
 
       - name: Download all artifacts
@@ -58,7 +60,7 @@ jobs:
       # release actually shipped, attached so whoever bumps those repositories
       # takes them from one place. Publishing to them is not done from here.
       - name: Generate package recipes
-        run: ./scripts/gen_recipes.sh --checksums checksums.txt --version "${GITHUB_REF_NAME}" --out recipes
+        run: ./scripts/release/gen_recipes.sh --checksums checksums.txt --version "${GITHUB_REF_NAME}" --out recipes
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -71,8 +73,8 @@ jobs:
           files: |
             turf-*.tar.gz
             turf-*.zip
-            install.sh
-            install.ps1
+            scripts/install/install.sh
+            scripts/install/install.ps1
             checksums.txt
             recipes/homebrew/turf.rb
             recipes/scoop/turf.json

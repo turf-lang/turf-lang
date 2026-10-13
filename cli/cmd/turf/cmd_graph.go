@@ -11,7 +11,7 @@ import (
 const graphUsage = "usage: turf graph [--project <dir>] [--offline] [--locked]"
 
 // cmdGraph prints the project's package graph (the JSON format of
-// include/PackageGraph.h) on stdout and writes nothing.
+// src/tooling/PackageGraph.h) on stdout and writes nothing.
 //
 // It exists for tools that analyse a project without building it: the language
 // server hands this graph to the compiler so that `import` resolves in the
@@ -86,7 +86,7 @@ Prints, as JSON on stdout, the graph 'turf build' hands the compiler: the root
 package, its dependencies (path and git, resolved as for a build) and where
 each package's src/ is, with the root's tests/ if the project has one. Writes
 nothing (no turf.lock, no build/), and needs no compiler, so editors and other
-tools can ask for it. The format is documented in include/PackageGraph.h.
+tools can ask for it. The format is documented in src/tooling/PackageGraph.h.
 
 --offline runs no network git command (a git dependency missing from the fetch
 cache is then an error); --locked requires turf.lock to be present. Both apply

@@ -8,7 +8,7 @@ func cmdCompile(args []string) int {
 }
 
 // Drift: this flag list is copied by hand from the compiler's parseArgs()
-// (src/main.cpp) and its usage text, and will go stale the day a flag is
+// (src/driver/main.cpp) and its usage text, and will go stale the day a flag is
 // added there. REL-001's `turfc --help` is meant to replace it, with
 // `turf compile --help` then forwarding to the compiler instead of printing
 // this.

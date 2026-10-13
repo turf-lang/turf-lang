@@ -1,5 +1,5 @@
 name: "Package Turf release"
-description: "Build the release archive (scripts/package_release.sh) in the REL-003 layout"
+description: "Build the release archive (scripts/release/package_release.sh) in the REL-003 layout"
 inputs:
   platform-suffix:
     description: "e.g. linux-x86_64, linux-arch-x86_64, macos-arm64, windows-x86_64"
@@ -47,7 +47,7 @@ runs:
         VARIANT=()
         [ "${{ inputs.smart }}" = true ] && VARIANT+=(--smart)
         [ -n "${{ inputs.build-dir }}" ] && VARIANT+=(--build-dir "${{ inputs.build-dir }}")
-        ARCHIVE=$(./scripts/package_release.sh \
+        ARCHIVE=$(./scripts/release/package_release.sh \
           --platform "${{ inputs.platform-suffix }}" \
           --format "${{ inputs.archive-format }}" \
           ${VARIANT[@]+"${VARIANT[@]}"} \
