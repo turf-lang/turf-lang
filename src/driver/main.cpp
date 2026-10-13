@@ -74,17 +74,18 @@
 #else
 #include <sys/wait.h> // waitpid, WIFEXITED, WEXITSTATUS
 #include <unistd.h>   // fork, execvp
+#endif
 
 // REL-004: a TURF_COVERAGE build (gcov) writes its counters from an atexit
 // handler, and this file leaves through std::_Exit() on purpose (see main()),
 // which skips every atexit handler -- so such a build reported 0% for the whole
-// compiler. Flush by hand at each _Exit. Compiles to nothing otherwise.
+// compiler. Flush by hand at each _Exit. Compiles to nothing otherwise. Outside
+// the POSIX block: the _Exit calls are on every platform.
 #ifdef TURF_COVERAGE
 extern "C" void __gcov_dump(void);
 #define TURF_FLUSH_COVERAGE() __gcov_dump()
 #else
 #define TURF_FLUSH_COVERAGE() ((void)0)
-#endif
 #endif
 
 using namespace llvm;
@@ -143,8 +144,9 @@ static constexpr int ExitUsage = 2;
 
 // OPT-001 (docs/archive/ARCHITECTURE_OVERHAUL.md §17.2): the five levels
 // the CLI's `-O` flag selects. Os is not "O1 through O3 plus one more" --
-// it is `PassBuilder::buildPerModuleDefaultPipeline(OptimizationLevel::Os)`,
-// a genuinely different pipeline tuned for size over throughput -- so this
+// it is `PassBuilder::buildPerModuleDefaultPipeline(OptimizationLevel::Os)`
+// (LLVM 23+: O2's pipeline over `optsize` functions, the same tuning moved
+// into an attribute), tuned for size over throughput -- so this
 // is its own enum, not an int a caller could accidentally compare/clamp as
 // if the levels were totally ordered by "more optimization."
 enum class OptLevelKind { O0, O1, O2, O3, Os };
@@ -1008,10 +1010,23 @@ static void runOptimizationPipeline(Module &M, OptLevelKind Level,
     InternalizeMPM.addPass(InternalizePass(MustPreserveGV));
     InternalizeMPM.run(M, MAM);
 
+#if LLVM_VERSION_MAJOR >= 23
+    // LLVM 23 removed OptimizationLevel::Os/Oz: size is asked for per
+    // function (the `optsize` attribute) and the passes read it from there.
+    // -Os is O2's pipeline over functions marked so, as clang does it.
+    if (Level == OptLevelKind::Os)
+      for (Function &F : M)
+        if (!F.isDeclaration() && !F.hasFnAttribute(Attribute::OptimizeNone))
+          F.addFnAttr(Attribute::OptimizeForSize);
+    OptimizationLevel LLVMLevel = Level == OptLevelKind::O1 ? OptimizationLevel::O1
+                                 : Level == OptLevelKind::O3 ? OptimizationLevel::O3
+                                                              : OptimizationLevel::O2;
+#else
     OptimizationLevel LLVMLevel = Level == OptLevelKind::O1 ? OptimizationLevel::O1
                                  : Level == OptLevelKind::O2 ? OptimizationLevel::O2
                                  : Level == OptLevelKind::O3 ? OptimizationLevel::O3
                                                               : OptimizationLevel::Os;
+#endif
     ModulePassManager MPM = PB.buildPerModuleDefaultPipeline(LLVMLevel);
     MPM.run(M, MAM);
     break;
