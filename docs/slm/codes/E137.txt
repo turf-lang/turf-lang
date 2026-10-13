@@ -1,20 +1,21 @@
 TURF E137 -- NOT A VALUE:
 
 CAUSE:
-  A function was named without calling it (`io::printline` on its own). The function itself is
-  not a value that can be stored in a variable or passed around in this form; it must be CALLED,
-  with parentheses and arguments, where its result is needed. (First-class functions are not
-  part of the language yet.)
+  A function was named without calling it in a form that has no value. A function value is
+  written by its BARE name (`twice`, after `import helper::twice;` for a module's function).
+  A qualified name (`io::printline`, `Point::origin`) is only ever called, and so is a generic
+  function (its type parameters are inferred at a call) or an `@caller_location` one.
 
 INCORRECT:
-    import io;
-    mut f: int = io::printline;          // the function itself
+    import helper;
+    mut f: fn(int): int = helper::twice;   // qualified name used as a value
 
 CORRECT:
-    io::printline("hello");              // a call
+    import helper::twice;
+    mut f: fn(int): int = twice;           // the bare name is a value
 
 FIX:
-  Call the function. To hand behaviour elsewhere, wrap the call in your own function and call
-  that: `fn greet(): void { io::printline("hello"); }`.
+  Import the function by name and use the bare name, or call it where its result is needed.
+  A static method has no value form: wrap the call in a plain function and use that name.
 
 RELATED: E135 (calling something that is not a function), E067 (using a void result).

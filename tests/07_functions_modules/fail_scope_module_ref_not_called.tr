@@ -1,12 +1,12 @@
 // EXPECT-DIAG: E137
-// EXPECT-DIAG: 'io::printline' can't be used as a value
-// Regression test: `io::printline` referenced WITHOUT being called (e.g.
-// assigned to a variable) must be a clean TypeError -- this language has
-// no first-class functions, so a bare module-qualified reference has no
-// valid meaning outside call position. Before this fix, ANY use of
-// `Module::name` reached Codegen and crashed with an unrelated internal
-// error ("First-class functions are not supported yet") instead of a
-// clean, on-topic diagnostic explaining why.
+// EXPECT-DIAG: 'io::printline' can't be used as a value: a qualified function name is only called
+// EXPECT-DIAG: import it by name (`import io::printline;`)
+// EXPECT-NO-DIAG: first-class yet
+// `io::printline` referenced WITHOUT being called is a clean E137: a function
+// value is spelled by its bare name, and the hint says how to get one. Any
+// use of `Module::name` once reached Codegen and crashed with an unrelated
+// internal error, and the message later claimed functions were not
+// first-class at all.
 
 import io;
 

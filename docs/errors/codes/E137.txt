@@ -1,13 +1,21 @@
 A function can't be used as a value here
 
-`io::printline` on its own is the function itself, not a result. Turf can't store it in a variable or pass it around in this form -- you have to *call* it, with parentheses and arguments, where you need what it produces:
+A function used as a value is written by its bare name: `mut f: fn(int): int = twice;`. A qualified name such as `io::printline` or `Point::origin` is only ever called, with parentheses and arguments:
 
     import io;
 
-    mut f: int = io::printline;             // the function itself, not a value
+    mut f: fn(string): void = io::printline;   // a qualified name is not a value
 
-    io::printline("hello");                 // a call: this runs it
+    io::printline("hello");                     // a call: this runs it
 
-If you need to hand behaviour to something else, wrap the call in your own function and call that function where it's needed:
+To use a module's function as a value, import it by name and write the bare name:
 
-    fn greet(): void { io::printline("hello"); }
+    import helper::twice;
+
+    mut f: fn(int): int = twice;
+
+A static method (`Point::origin`) has no value form. Wrap the call in a plain function and use that function's name:
+
+    fn origin(): Point { return Point::origin(); }
+
+A generic function is not a value either (its type parameters are only inferred at a call), and neither is an `@caller_location` one (only a direct call passes the location). Wrap the call in a plain function the same way.

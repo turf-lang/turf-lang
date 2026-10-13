@@ -1006,30 +1006,31 @@ void Resolver::visitScopeAccess(ScopeAccessExprAST &Node) {
       Node.ResolvedConstant = Const;
       return;
     }
-    // A module name IS real, but referencing `module::function` without
-    // calling it has no meaning in this language yet.
+    // A module name IS real, but a function value is spelled by its bare
+    // name (`twice` after `import m::twice;`); the qualified form is only
+    // ever called.
     TypeError(Node.getLoc(), ErrCode::NotAValue, "'" + LeftName + "::" + RightName +
-                                 "' can't be used as a value -- functions "
-                                 "aren't first-class yet, only calls like '" +
-                                 LeftName + "::" + RightName + "(...)' work.",
-              "Call it directly at the point you need its result, or wrap "
-              "it in your own function if you need to pass it around.",
+                                 "' can't be used as a value: a qualified "
+                                 "function name is only called, like '" +
+                                 LeftName + "::" + RightName + "(...)'.",
+              "To use the function as a value, import it by name (`import " +
+                  LeftName + "::" + RightName + ";`) and write '" + RightName +
+                  "'. To use its result, call it.",
               "Not a value!")
         .raise();
     return;
   }
 
   if (SymTable_.isKnownStruct(LeftName)) {
-    // A struct name IS real, but referencing `StructName::method` without
-    // calling it has no meaning either -- same "no first-class functions"
-    // rule as the module case just above, worded for the static-method form.
+    // A struct name IS real, but a static method is only ever called; it
+    // has no value form.
     Node.ResolvedKind = ScopeAccessKind::StaticMethodRef;
     TypeError(Node.getLoc(), ErrCode::NotAValue, "'" + LeftName + "::" + RightName +
-                                 "' can't be used as a value -- functions "
-                                 "aren't first-class yet, only calls like '" +
-                                 LeftName + "::" + RightName + "(...)' work.",
-              "Call it directly at the point you need its result, or wrap "
-              "it in your own function if you need to pass it around.",
+                                 "' can't be used as a value: a static "
+                                 "method is only called, like '" +
+                                 LeftName + "::" + RightName + "(...)'.",
+              "To pass it around, wrap the call in a plain function and use "
+              "that function's name as the value.",
               "Not a value!")
         .raise();
     return;
