@@ -127,6 +127,17 @@ CollectChangedNodeIDsInternal(const ExprAST *OriginalAST,
     return ChangedIDs;
   }
 
+  // ScopeAccessExprAST: `Left::Right`, the callee of `io::printline(...)`.
+  if (auto *OrigScope = dynamic_cast<const ScopeAccessExprAST *>(OriginalAST)) {
+    auto *ModScope = dynamic_cast<const ScopeAccessExprAST *>(ModifiedAST);
+    if (OrigScope->getLeftName() != ModScope->getLeftName() ||
+        OrigScope->getRightName() != ModScope->getRightName()) {
+      ChangedIDs.insert(OriginalAST->getNodeID());
+      ChangedIDs.insert(ModifiedAST->getNodeID());
+    }
+    return ChangedIDs;
+  }
+
   // VariableExprAST: Compare variable names
   if (auto *OrigVar = dynamic_cast<const VariableExprAST *>(OriginalAST)) {
     auto *ModVar = dynamic_cast<const VariableExprAST *>(ModifiedAST);

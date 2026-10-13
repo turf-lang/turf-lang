@@ -568,15 +568,17 @@ static void LintIf(const IfExprAST *If) {
     EmptyBranchWarning(If->getElseLoc(), "else").warn();
   }
 
-  // Identical branches (only for simple if/else, not chains)
+  // Identical branches (only for simple if/else, not chains). Compared with
+  // the AST diff, which knows every statement kind (calls, assignments,
+  // returns, declarations, ...) and counts a kind it does not know as
+  // different, so it never calls two different bodies identical. Fingerprint()
+  // above knows only expression shapes, so a body of any other statement was
+  // never found identical (owner decision 2026-10-13).
   if (Branches.size() == 1 && Else &&
       !IsEffectivelyEmpty(Branches[0].Body.get()) &&
-      !IsEffectivelyEmpty(Else)) {
-    std::string ThenFP = Fingerprint(Branches[0].Body.get());
-    std::string ElseFP = Fingerprint(Else);
-    if (ThenFP == ElseFP && ThenFP != "")
-      IdenticalBranchesWarning(If->getLoc()).warn();
-  }
+      !IsEffectivelyEmpty(Else) &&
+      CollectChangedNodeIDs(Branches[0].Body.get(), Else).empty())
+    IdenticalBranchesWarning(If->getLoc()).warn();
 
   LintExpression(Else);
 }
