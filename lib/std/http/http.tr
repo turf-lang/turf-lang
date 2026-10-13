@@ -35,7 +35,7 @@
 // Design:
 //   - Mechanical extraction of the request/response handling
 //     `showcase/http_server.tr` and `showcase/http_client.tr` already
-//     hand-write inline, following docs/planning/DESIGN_NOTES.md §4's
+//     hand-write inline, following docs/archive/DESIGN_NOTES.md §4's
 //     staged plan -- this is stage 1 (Request/Response structs + parsing +
 //     response building) plus a genuine stage-2 callback router, which
 //     turned out to be buildable now: DESIGN_NOTES.md marked callback

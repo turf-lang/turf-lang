@@ -1283,7 +1283,7 @@ void TypeChecker::visitCast(CastExprAST &Node) {
                   "Unsafe reference conversion!");
   }
 
-  // SEM-002 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): 'to'-cast
+  // SEM-002 (docs/archive/ARCHITECTURE_OVERHAUL.md §8): 'to'-cast
   // legality, Rule B1 -- moved here from Codegen (CastExprAST::codegen(),
   // CodegenExpr.cpp) so an illegal cast is caught at the TypeChecker
   // layer, like every other type rule, instead of Codegen being the only
@@ -1531,7 +1531,7 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
           // Exact accessor, not getIntVal() -- this key is what makes two
           // `compare` arms with the same literal a real
           // DuplicateOtherwiseArmError-style diagnostic (SEM-001,
-          // docs/planning/ARCHITECTURE_OVERHAUL.md §8's own Risks note).
+          // docs/archive/ARCHITECTURE_OVERHAUL.md §8's own Risks note).
           // getIntVal()'s 64-bit truncation could make two DIFFERENT wide
           // literals collide into a false "duplicate arm".
           llvm::SmallString<32> Digits;

@@ -5,7 +5,7 @@ Each row is a property the compiler is supposed to keep true, the thing that
 alone is not enforcement), and whether it holds today.
 
 Why named invariants rather than a list of fixed bugs: a bug fix protects one
-input, an invariant protects a class. `docs/planning/ARCHITECTURE_OVERHAUL.md`
+input, an invariant protects a class. `docs/archive/ARCHITECTURE_OVERHAUL.md`
 §19 derives this list from the handbook's `pitfall` blocks plus the audit —
 each pitfall was asked "what property, structurally enforced, would have made
 this impossible?"

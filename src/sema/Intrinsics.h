@@ -4,7 +4,7 @@
  *        specially -- F-STD-2 (FREEZE.md §6.8): "the intrinsic/builtin list
  *        is closed and enumerated in one place. Adding an intrinsic is an
  *        explicit, change-recorded act." Introduced by RT-001
- *        (docs/planning/ARCHITECTURE_OVERHAUL.md §8), which needed a single
+ *        (docs/archive/ARCHITECTURE_OVERHAUL.md §8), which needed a single
  *        place to name the new `turf_rt_*` runtime entrypoints alongside
  *        the compiler-level intrinsics that already existed with no such
  *        registry.

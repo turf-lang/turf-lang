@@ -90,7 +90,7 @@ void CloseSourceFile();
 // buffer conceptually represents (its unsaved editor path, say), same as a
 // real file would.
 void SetSourceBuffer(std::istream &Buffer);
-// SEM-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): the lexer used to
+// SEM-001 (docs/archive/ARCHITECTURE_OVERHAUL.md §8): the lexer used to
 // collapse every integer literal into a `long long` (via strtoll, silently
 // saturating on overflow) and every float literal into a `double` (via
 // strtod, silently rounding to `inf` on overflow) -- destroying the

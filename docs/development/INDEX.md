@@ -93,7 +93,8 @@ Scripts are grouped as `scripts/{install,smoke,release,check,slm,dev}/`;
 | [`TEMPLATE.md`](TEMPLATE.md) | The change-record template. Copy it at the *start* of a session. |
 | [`changes/`](changes/) | One record per feature group. |
 | [`handbook-sync/`](handbook-sync/) | The queue of handbook/reference edits owed, and the archive of completed ones. |
-| [`OVERHAUL_CLOSURE_AUDIT.md`](OVERHAUL_CLOSURE_AUDIT.md) | The 2026-09-26 final audit of the Overhaul: what passed, what failed (with reproducers), and what it specified as the closure handoff (OVH-001…OVH-015, landed — see [`changes/OVH-CLOSE.md`](changes/OVH-CLOSE.md)). |
+| [`OVERHAUL_CLOSURE_AUDIT.md`](../archive/OVERHAUL_CLOSURE_AUDIT.md) | The 2026-09-26 final audit of the Overhaul: what passed, what failed (with reproducers), and what it specified as the closure handoff (OVH-001…OVH-015, landed — see [`changes/OVH-CLOSE.md`](changes/OVH-CLOSE.md)). |
+| [`../archive/`](../archive/README.md) | Retired documents kept as history (the Overhaul blueprint and its closure audit, the design notes, the v1.0.0 roadmap). Not maintained; not authority. |
 
 `docs/planning/` (roadmap, design notes, limitations) and `docs/architecture/`
 (subsystem internals) keep their existing roles unchanged. This directory is
@@ -102,7 +103,7 @@ the others tracks.
 
 ## Feature IDs not yet started
 
-The full set is `docs/planning/ARCHITECTURE_OVERHAUL.md` Appendix B. An ID
+The full set is `docs/archive/ARCHITECTURE_OVERHAUL.md` Appendix B. An ID
 with no row above has no record yet — and, deliberately, no stub file either:
 `scripts/check/doc_links_allowlist.txt` carries the blueprint's forward references
 until each session writes its own record, so nothing here pretends to be

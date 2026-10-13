@@ -60,7 +60,7 @@ built and producing a new one:
 | TypeChecker | resolved AST | the *same* AST again, plus a side table (`NodeTypes_`) mapping every node to an inferred `TurfTypePtr` |
 | Codegen | type-annotated AST | LLVM IR → a native object file → a linked binary (or, with `--emit-llvm`, human-readable IR text) |
 
-This is the project's own stated design rule (`docs/planning/archive/
+This is the project's own stated design rule (`docs/archive/
 ROADMAP_v1.0.0_COMPLETE.md` §1, "Multi-Pass Pipeline": *"Parser → Resolver
 → TypeChecker → Codegen. Name resolution and semantics are separated from
 LLVM IR generation."*) and it is a genuine architectural constraint, not

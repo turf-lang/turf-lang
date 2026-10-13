@@ -7,7 +7,7 @@
 // file's name) are five classes raised directly from inside the LEXER's own
 // number-scanning branch (gettokScan(), Lexer.cpp) -- SEM-001 (the fifth,
 // MalformedNumberError, E139, was added with issue #263)
-// (docs/planning/ARCHITECTURE_OVERHAUL.md §8). Lexer.cpp does not normally
+// (docs/archive/ARCHITECTURE_OVERHAUL.md §8). Lexer.cpp does not normally
 // construct a coded TurfError (its own diagnostics go through the raw
 // LogErrorAt(), which names its code by ErrCode::, e.g. the malformed-char-
 // literal check) precisely

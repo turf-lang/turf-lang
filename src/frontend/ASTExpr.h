@@ -7,7 +7,7 @@
 #include "llvm/ADT/APSInt.h"
 
 /**
- * @brief A numeric literal. SEM-001 (docs/planning/ARCHITECTURE_OVERHAUL.md
+ * @brief A numeric literal. SEM-001 (docs/archive/ARCHITECTURE_OVERHAUL.md
  * §8, FREEZE.md §6.2 row 2): before this shape existed, an integer literal
  * was collapsed into a `long long` at LEX time (`strtoll`, `errno`
  * unchecked -- a 48-digit literal silently became `9223372036854775807`)

@@ -59,7 +59,7 @@ public:
   void visitNumber(NumberExprAST &N) override {
     printIndent(Depth_);
     // Exact accessors, not getIntVal()/getDoubleVal() -- this is SEM-001's
-    // own completion-criteria proof (docs/planning/ARCHITECTURE_OVERHAUL.md
+    // own completion-criteria proof (docs/archive/ARCHITECTURE_OVERHAUL.md
     // §8: "a 48-digit literal still compiles ... now carries its exact
     // value, provable via --dump-ast"). getIntVal() truncates to 64 bits,
     // which would silently defeat that proof for exactly the literals it

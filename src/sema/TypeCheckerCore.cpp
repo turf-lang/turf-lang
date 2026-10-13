@@ -347,7 +347,7 @@ bool TypeChecker::areArithCompatible(const TurfType *A, const TurfType *B) {
 
 
 // ─── SEM-002: literal-representability checking ──────────────────────────────
-// (docs/planning/ARCHITECTURE_OVERHAUL.md §8, FREEZE.md §6.2 rows 3/6/9) --
+// (docs/archive/ARCHITECTURE_OVERHAUL.md §8, FREEZE.md §6.2 rows 3/6/9) --
 // see each method's own doc comment (TypeChecker.h) for the full contract.
 
 std::optional<llvm::APSInt>

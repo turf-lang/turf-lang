@@ -490,7 +490,7 @@ three times instead of once.
 - `docs/architecture/compiler_pipeline.md` §6 — the existing CFG
   static-analysis subsystem this document proposes promoting into a real
   lowering stage (§4.3, §7 phase 4).
-- `docs/planning/ARCHITECTURE_OVERHAUL.md` §27 (Deferred Work Register) —
+- `docs/archive/ARCHITECTURE_OVERHAUL.md` §27 (Deferred Work Register) —
   D11 is the adjacent, currently-tracked "build more tooling" item; this
   document is the missing "why the compiler's shape makes that hard" half.
 - `docs/development/changes/STD-003.md` — the 2026-09-26 session §1/§7

@@ -1,6 +1,6 @@
 // EXPECT-DIAG: E040
 // EXPECT-DIAG: I can't find anything named 'cuont'
-// SLM-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §16.3 item 1): fixture for
+// SLM-001 (docs/archive/ARCHITECTURE_OVERHAUL.md §16.3 item 1): fixture for
 // the deterministic-fix layer's search/replace path. `cuont` never resolves
 // (only `count` is declared, and it is the single Damerau-Levenshtein match
 // SuggestionIndex::suggestVisible() returns), so this must fail an ORDINARY

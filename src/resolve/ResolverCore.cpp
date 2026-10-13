@@ -1015,7 +1015,7 @@ enum class DFSColor { Grey, Black };
  * concrete instantiation, where a real substituted field type CAN turn a
  * template-safe generic struct into a genuinely cyclic concrete one -- see
  * TYPE-001's "Generic interactions" note in
- * docs/planning/ARCHITECTURE_OVERHAUL.md §8.
+ * docs/archive/ARCHITECTURE_OVERHAUL.md §8.
  *
  * A pointer-shaped field (isPointer() -- covers TurfPointerType, its
  * TurfReferenceType subclass, and OpaquePointerType, see

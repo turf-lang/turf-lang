@@ -42,8 +42,8 @@ done
 # First file with a matching "### <ID> — " heading wins; the overhaul
 # blueprint stays the fallback so an unknown ID still fails against the
 # familiar file.
-BLUEPRINT="docs/planning/ARCHITECTURE_OVERHAUL.md"
-for CANDIDATE in docs/planning/ARCHITECTURE_OVERHAUL.md \
+BLUEPRINT="docs/archive/ARCHITECTURE_OVERHAUL.md"
+for CANDIDATE in docs/archive/ARCHITECTURE_OVERHAUL.md \
                  docs/planning/ROADMAP_v2.0.0.md; do
   if [ -f "$CANDIDATE" ] && grep -q "^### $FEATURE — " "$CANDIDATE"; then
     BLUEPRINT="$CANDIDATE"
@@ -82,7 +82,7 @@ else
   FAILED=$((FAILED + 1))
 fi
 echo
-echo -e "   Also ${CYAN}docs/planning/ARCHITECTURE_OVERHAUL.md${RESET} §25 — the changes that look"
+echo -e "   Also ${CYAN}docs/archive/ARCHITECTURE_OVERHAUL.md${RESET} §25 — the changes that look"
 echo -e "   tempting from inside a feature group and are wrong."
 echo
 

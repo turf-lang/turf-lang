@@ -591,7 +591,7 @@ struct ResolverConstantSymbol {
   // primitive literal kinds today (see ParseExportDecl()'s validation).
   //
   // IntVal is the literal's EXACT value as a decimal string (SEM-001,
-  // docs/planning/ARCHITECTURE_OVERHAUL.md §8), not a `long long` -- this
+  // docs/archive/ARCHITECTURE_OVERHAUL.md §8), not a `long long` -- this
   // header is explicitly, deliberately LLVM/AST-free (see the struct's own
   // doc comment just above), so it cannot hold an llvm::APSInt directly the
   // way NumberExprAST now does. A plain decimal string preserves the same

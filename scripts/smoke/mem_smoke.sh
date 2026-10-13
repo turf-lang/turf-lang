@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # mem_smoke.sh -- MEM-001's own regression coverage
-# (docs/planning/ARCHITECTURE_OVERHAUL.md §8 MEM-001, stage 3:
+# (docs/archive/ARCHITECTURE_OVERHAUL.md §8 MEM-001, stage 3:
 # "turf_rt_stats()" -- the allocation-accounting hook this group added
 # specifically to become MEM-002's own regression harness). Mirrors
 # runtime_smoke.sh's shape (RT-001): `test_runner.sh` cannot exercise any of

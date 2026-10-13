@@ -9,7 +9,7 @@ areas. Each section below was re-verified against the live codebase at merge
 time — items already shipped were cut rather than carried forward as stale
 checkboxes; only genuinely open work and durable design rationale survive.
 
-`docs/planning/archive/ROADMAP_v1.0.0_COMPLETE.md` and `docs/planning/FUTURE.md` (the latter
+`docs/archive/ROADMAP_v1.0.0_COMPLETE.md` and `docs/planning/FUTURE.md` (the latter
 added 2026-08-21, once 1.0.0 shipped and `FINAL_SPRINT.md` was retired) are
 **not** part of this merge and remain the authoritative, separately-tracked
 planning docs — some items below (e.g. `unsafe {}`, source spans, error

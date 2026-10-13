@@ -1,7 +1,7 @@
 unsafe module;
 
 // hashing.tr — a general-purpose hash(T), STD-003 item 6
-// (docs/planning/ARCHITECTURE_OVERHAUL.md §8). Exists to give Map<K, V>/
+// (docs/archive/ARCHITECTURE_OVERHAUL.md §8). Exists to give Map<K, V>/
 // Set<T> (map.tr/set.tr) a real O(1)-average hash index instead of their
 // old O(n) linear scan -- previously impossible ("there is no generic
 // hash(T) in the language yet", map.tr's own former header comment) for

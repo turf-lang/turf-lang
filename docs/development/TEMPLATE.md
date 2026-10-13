@@ -9,7 +9,7 @@ A section with nothing to say gets the word `None`, not deletion: an empty
 stub record — headings with nothing under them — fails
 `scripts/dev/session_postflight.sh`, deliberately: a stub is what produced the
 `Errors.md` problem this whole system exists to prevent
-(`docs/planning/ARCHITECTURE_OVERHAUL.md` §5 C-8).
+(`docs/archive/ARCHITECTURE_OVERHAUL.md` §5 C-8).
 
 Why a git log is not enough: a log answers *"what changed in this file"*. A
 handbook writer, or the next session, needs *"what does the language mean

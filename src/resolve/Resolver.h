@@ -720,7 +720,7 @@ private:
   /**
    * @brief Reject a struct that contains itself by value, directly or
    *        through a chain of other structs (TYPE-001,
-   *        docs/planning/ARCHITECTURE_OVERHAUL.md §8, INV-LAYOUT-1).
+   *        docs/archive/ARCHITECTURE_OVERHAUL.md §8, INV-LAYOUT-1).
    *
    * Runs a grey/black-coloured DFS over the by-value containment graph
    * built from HoistedStructDecls_ (every struct hoisted so far, from the

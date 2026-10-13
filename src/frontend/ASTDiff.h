@@ -89,7 +89,7 @@ CollectChangedNodeIDsInternal(const ExprAST *OriginalAST,
   // getIntVal() could make two genuinely DIFFERENT wide literals (e.g. two
   // distinct 48-digit numbers that happen to share the same low 64 bits)
   // compare as unchanged, silently skipping the re-check a real edit needs
-  // (SEM-001, docs/planning/ARCHITECTURE_OVERHAUL.md §8 -- see this
+  // (SEM-001, docs/archive/ARCHITECTURE_OVERHAUL.md §8 -- see this
   // group's own Risks note calling out ASTDiff/clone() as a ripple point).
   // llvm::APSInt::operator== compares by VALUE across differing bit
   // widths, so this is correct even when Orig/Mod happen to have been

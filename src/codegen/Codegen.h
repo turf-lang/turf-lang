@@ -18,7 +18,7 @@ extern std::unique_ptr<llvm::LLVMContext> TheContext;
 extern std::unique_ptr<llvm::IRBuilder<>> Builder;
 extern std::unique_ptr<llvm::Module> TheModule;
 
-// TOOL-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): `-g` DWARF debug
+// TOOL-001 (docs/archive/ARCHITECTURE_OVERHAUL.md §8): `-g` DWARF debug
 // info. `g_EmitDebugInfo` is set once from the CLI, before InitializeModule()
 // runs (main.cpp) -- everything else here is null/no-op when it's false, so
 // a non-`-g` build never touches any of this. `DBuilder`/`DebugCU` are
@@ -82,7 +82,7 @@ extern llvm::Function *CurrentFunction;
 // break: rename all three together.
 inline constexpr const char *RuntimeAbiSymbol = "turf_rt_abi_2_0";
 
-// RT-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §8, F-MEM-4): wraps the
+// RT-001 (docs/archive/ARCHITECTURE_OVERHAUL.md §8, F-MEM-4): wraps the
 // already-fully-codegenned LLVM function literally named "main" (built by
 // FuncDefExprAST::codegen()'s existing `Name == "main"` special-casing,
 // untouched by this) with a process bootstrap: renames it out of the way,

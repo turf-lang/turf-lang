@@ -194,7 +194,7 @@ static void EnsureArgvHelpers() {
   ArgvBuilder.CreateRet(ArgvBuilder.CreateGlobalStringPtr(""));
 }
 
-// RT-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §8, F-MEM-4): see
+// RT-001 (docs/archive/ARCHITECTURE_OVERHAUL.md §8, F-MEM-4): see
 // src/codegen/Codegen.h's doc comment on WrapMainWithRuntimeBootstrap() for the
 // full contract and call-ordering requirement (must run after every
 // function is codegenned, before runOptimizationPipeline()). Implemented

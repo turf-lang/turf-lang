@@ -1,5 +1,5 @@
 // Regression test: MEM-001's bare `gc_alloc`/`gc_alloc_zeroed`/`gc_realloc`
-// intrinsics (docs/planning/ARCHITECTURE_OVERHAUL.md §8, src/sema/Intrinsics.h
+// intrinsics (docs/archive/ARCHITECTURE_OVERHAUL.md §8, src/sema/Intrinsics.h
 // category 1) -- the Turf-visible surface for libturfrt's
 // turf_rt_alloc/turf_rt_alloc_zeroed/turf_rt_realloc, exercised directly
 // here rather than only indirectly through the stdlib call sites (strings.tr,

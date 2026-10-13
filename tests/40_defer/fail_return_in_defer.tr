@@ -1,6 +1,6 @@
 // EXPECT-DIAG: E083
 // EXPECT-DIAG: A deferred statement can't 'return'
-// LANG-003 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): "a deferred
+// LANG-003 (docs/archive/ARCHITECTURE_OVERHAUL.md §8): "a deferred
 // statement may not return, break, or continue out of itself" -- a
 // `return` inside `defer` always escapes to the enclosing function, never
 // "just" the defer, which is never what a reader expects from something

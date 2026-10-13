@@ -2,7 +2,7 @@
 
 Internals reference for `libturfrt` — the small C static library every
 compiled Turf binary links, introduced by RT-001
-(`docs/planning/ARCHITECTURE_OVERHAUL.md` §8). Like the other docs in this
+(`docs/archive/ARCHITECTURE_OVERHAUL.md` §8). Like the other docs in this
 directory, this is grounded directly in the current source, not a planning
 document — `runtime/turfrt.h`'s own doc comments are the closer, line-level
 reference; this document is the "why does this exist and how does it fit

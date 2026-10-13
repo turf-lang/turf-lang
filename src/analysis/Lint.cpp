@@ -33,7 +33,7 @@ static std::string Fingerprint(const ExprAST *E) {
     if (N->isInteger()) {
       // Exact accessor, not getIntVal() -- this fingerprint feeds
       // identical-BRANCH/duplicate-arm detection (SEM-001,
-      // docs/planning/ARCHITECTURE_OVERHAUL.md §8's own Risks note calls
+      // docs/archive/ARCHITECTURE_OVERHAUL.md §8's own Risks note calls
       // this file out by name), so two DIFFERENT wide literals that
       // happen to share the same low 64 bits must not collide into one
       // fingerprint.

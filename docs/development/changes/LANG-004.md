@@ -226,7 +226,7 @@ scoping mechanism rather than adding a new one).
 |---|---|---|
 | `docs/reference/control_flow.md` §"`for` — range form" | States `step` is currently mandatory. | See `handbook-sync/PENDING.md`'s LANG-004 row — full replacement text queued there, not edited directly (`docs/reference/` is paused per that file's own header). |
 | `docs/reference/ffi_and_unsafe.md` §1 | Documents `string`→`ptr` as unsupported and function-local `extern fn` as a parse-time gotcha with a specific (now stale) error-message walkthrough. | Same — queued in `handbook-sync/PENDING.md`, not edited directly. |
-| `docs/planning/DESIGN_NOTES.md` §4 | Listed all three gaps as open. | **Done in this session** — edited directly (this file is not part of the paused handbook/reference set), replaced with a pointer to this record. |
+| `docs/archive/DESIGN_NOTES.md` §4 | Listed all three gaps as open. | **Done in this session** — edited directly (this file is not part of the paused handbook/reference set), replaced with a pointer to this record. |
 
 ### Examples that became invalid
 None in already-published material — `docs/reference/` was never edited to

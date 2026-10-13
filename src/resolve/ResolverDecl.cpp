@@ -974,7 +974,7 @@ void Resolver::visitModuleImport(ModuleImportExprAST &Node) {
 // therefore becomes callable from anywhere later in the file's sequential
 // Pass-2 walk, not just from within its own enclosing function -- genuine
 // lexical scoping would need a real scoped-function-symbol mechanism, which
-// is out of scope for this item (see docs/planning/ARCHITECTURE_OVERHAUL.md
+// is out of scope for this item (see docs/archive/ARCHITECTURE_OVERHAUL.md
 // §8 LANG-004: "Low value, but it is one switch case").
 void Resolver::visitExternFuncDecl(ExternFuncDeclExprAST &Node) {
   rejectLocalVisibility(Node, FunctionNestingDepth_);

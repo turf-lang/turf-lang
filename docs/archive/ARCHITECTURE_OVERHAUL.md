@@ -2,7 +2,7 @@
 
 > **Status (2026-09-27): closed.** All 23 feature groups landed
 > (`docs/development/INDEX.md`), the final closure audit
-> (`docs/development/OVERHAUL_CLOSURE_AUDIT.md`) found 15 remaining defects
+> (`docs/archive/OVERHAUL_CLOSURE_AUDIT.md`) found 15 remaining defects
 > (OVH-001 … OVH-015), and all 15 are now landed too — see
 > `docs/development/changes/OVH-CLOSE.md` for the closure gate evidence and
 > the DoD-8 reclassification (into `docs/planning/ROADMAP_v2.0.0.md`'s
@@ -1364,7 +1364,7 @@ cite a design document that no longer exists.
 `AGENTS.md` (one added pointer, nothing else).
 
 **Current behavior.** Planning knowledge is spread across
-`docs/planning/{ROADMAP_v1.0.0_COMPLETE,DESIGN_NOTES,FUTURE,LIMITATIONS}.md`,
+`docs/archive/{ROADMAP_v1.0.0_COMPLETE,DESIGN_NOTES}.md`, `docs/planning/{FUTURE,LIMITATIONS}.md`,
 `docs/architecture/*.md`, source doc comments, and git history. Seven
 documentation cross-references are dangling.
 

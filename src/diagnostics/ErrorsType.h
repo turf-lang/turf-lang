@@ -181,7 +181,7 @@ public:
     Category_ = SLM::ErrorCategory::CONTROL_FLOW;
   }
 };
-// SEM-002 (docs/planning/ARCHITECTURE_OVERHAUL.md §8, FREEZE.md §6.2 row 3):
+// SEM-002 (docs/archive/ARCHITECTURE_OVERHAUL.md §8, FREEZE.md §6.2 row 3):
 // an untyped integer literal (or a compile-time constant expression built
 // only from untyped literals via unary '-' and binary + - *, FREEZE.md
 // §6.2 row 6) whose EXACT value doesn't fit the type it's acquiring --

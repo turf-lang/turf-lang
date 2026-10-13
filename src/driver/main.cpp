@@ -141,7 +141,7 @@ static constexpr int ExitOk = 0;
 static constexpr int ExitError = 1;
 static constexpr int ExitUsage = 2;
 
-// OPT-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §17.2): the five levels
+// OPT-001 (docs/archive/ARCHITECTURE_OVERHAUL.md §17.2): the five levels
 // the CLI's `-O` flag selects. Os is not "O1 through O3 plus one more" --
 // it is `PassBuilder::buildPerModuleDefaultPipeline(OptimizationLevel::Os)`,
 // a genuinely different pipeline tuned for size over throughput -- so this

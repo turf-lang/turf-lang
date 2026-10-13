@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # debuginfo_smoke.sh -- TOOL-001's own regression coverage for `-g`.
-# (docs/planning/ARCHITECTURE_OVERHAUL.md §8 TOOL-001.) Not a `.tr` test:
+# (docs/archive/ARCHITECTURE_OVERHAUL.md §8 TOOL-001.) Not a `.tr` test:
 # `test_runner.sh` has no way to assert "gdb can set a breakpoint by
 # TurfLang line, show a backtrace with TurfLang function names, and print a
 # local" -- that needs an actual debugger driving an actual binary, which is

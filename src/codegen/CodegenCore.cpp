@@ -1807,7 +1807,7 @@ const TurfType *getExprType(const ExprAST *E) {
 }
 
 
-// SEM-002 (docs/planning/ARCHITECTURE_OVERHAUL.md §8, FREEZE.md §6.2 row 7):
+// SEM-002 (docs/archive/ARCHITECTURE_OVERHAUL.md §8, FREEZE.md §6.2 row 7):
 // "Runtime, signed integer: trap (panic)" -- LLVM's llvm.s{add,sub,mul}.
 // with.overflow intrinsics already compute both the wrapped result and an
 // i1 overflow flag in one instruction, so this is the same
@@ -2622,7 +2622,7 @@ Value *CodegenConstantValue(const ResolverConstantSymbol &C) {
 
 
 // ─── TOOL-001: `-g` debug info helpers ───────────────────────────────────────
-// (docs/planning/ARCHITECTURE_OVERHAUL.md §8 TOOL-001, docs/architecture/
+// (docs/archive/ARCHITECTURE_OVERHAUL.md §8 TOOL-001, docs/architecture/
 // compiler_pipeline.md). See CodegenInternal.h for each function's own doc
 // comment -- kept there (not here) since that's the header every other
 // Codegen*.cpp file actually reads to learn these exist.

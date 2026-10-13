@@ -3,7 +3,7 @@
 // Regression test: a GENERIC struct whose own field re-uses its own base
 // name by value is a cycle regardless of what the type parameter is ever
 // instantiated with -- TYPE-001's "Generic interactions" note
-// (docs/planning/ARCHITECTURE_OVERHAUL.md §8): `struct Box<T> { inner:
+// (docs/archive/ARCHITECTURE_OVERHAUL.md §8): `struct Box<T> { inner:
 // Box<T> }` is checked at the TEMPLATE level (byValueEdgeTarget() looks
 // only at GenericType::getBaseName(), never recurses into the type
 // arguments -- see checkStructLayoutAcyclicity()'s doc comment in

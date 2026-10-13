@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # gc_smoke.sh -- MEM-002's own regression coverage
-# (docs/planning/ARCHITECTURE_OVERHAUL.md §8 MEM-002). Mirrors
+# (docs/archive/ARCHITECTURE_OVERHAUL.md §8 MEM-002). Mirrors
 # runtime_smoke.sh/mem_smoke.sh's shape (RT-001/MEM-001): covers exactly the
 # two things this group's own Testing scope names that CANNOT be expressed
 # as an ordinary `.tr` test (tests/41_gc/ holds the rest -- retention,

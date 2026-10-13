@@ -22,7 +22,7 @@ struct FixIt {
   std::string Replacement;
 };
 
-// SLM-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §16.3 items 1 and 3):
+// SLM-001 (docs/archive/ARCHITECTURE_OVERHAUL.md §16.3 items 1 and 3):
 // structured facts a diagnostic's own raising site already knows, attached
 // via TurfError::withKnownType()/withFixIt()/withDeterministicFix()/
 // trySetDeterministicRename() (Errors.h) and threaded through

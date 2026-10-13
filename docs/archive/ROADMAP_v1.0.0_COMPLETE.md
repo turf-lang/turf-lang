@@ -247,5 +247,5 @@ left beyond that — the rest of Phase 5/6's checklists, remaining stdlib
 modules, the memory-architecture RFC, and further-out SLM/language-paradigm
 sketches — is real, tracked future work, not a 1.0.0 gap: see
 `docs/planning/FUTURE.md` for the post-1.0.0 sequencing and
-`docs/planning/DESIGN_NOTES.md` for the longer-tail design rationale behind
+`docs/archive/DESIGN_NOTES.md` for the longer-tail design rationale behind
 each item.

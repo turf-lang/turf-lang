@@ -1,7 +1,7 @@
 # Known Limitations (post-v1.0.0 fix list)
 
 **CLOSED as of STD-003** (`docs/development/changes/STD-003.md`,
-`docs/planning/ARCHITECTURE_OVERHAUL.md` §8) — every item below is now
+`docs/archive/ARCHITECTURE_OVERHAUL.md` §8) — every item below is now
 FIXED. Item 2 is the interesting case: this document's own working
 assumption (that TYPE-002/monomorphization had already unblocked it) was
 WRONG, discovered only by attempting the conversion live during STD-003 --

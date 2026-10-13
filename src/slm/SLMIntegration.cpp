@@ -2250,7 +2250,7 @@ static AISuggestion tryDeterministicFix(int errorLine,
 
 // Retry cap for the loop below -- matches the roadmap wording exactly
 // ("Retry up to 3x on TypeChecker failure, feeding the error back into the
-// prompt"): docs/planning/archive/ROADMAP_v1.0.0_COMPLETE.md §7's `--smart` Retry
+// prompt"): docs/archive/ROADMAP_v1.0.0_COMPLETE.md §7's `--smart` Retry
 // Loop item, which absorbed the retired final-sprint checklist's Track C.
 static constexpr int kMaxSlmAttempts = 3;
 

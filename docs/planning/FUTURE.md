@@ -2,7 +2,7 @@
 
 > **Status:** the post-2.0 backlog. Rewritten 2026-09-26 by the Architecture
 > Overhaul closure audit. It absorbs (a) every row of
-> `docs/planning/ARCHITECTURE_OVERHAUL.md` §27 (the Deferred Work Register)
+> `docs/archive/ARCHITECTURE_OVERHAUL.md` §27 (the Deferred Work Register)
 > that is **not** scheduled for 2.0, with its original rationale, and (b)
 > every item of the previous version of this file, which was written after
 > v1.0.0 and before the Overhaul.

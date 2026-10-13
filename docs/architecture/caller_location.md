@@ -1,6 +1,6 @@
 # `@caller_location` / `caller_location`
 
-STD-002 (`docs/planning/ARCHITECTURE_OVERHAUL.md` §8/§15.6(a)): a compiler
+STD-002 (`docs/archive/ARCHITECTURE_OVERHAUL.md` §8/§15.6(a)): a compiler
 mechanism letting a function report *its caller's* file and line, the way
 Rust's `#[track_caller]`/`Location::caller()` does, without unwinding or
 inlining-frame complications (this language has neither). Fixes the

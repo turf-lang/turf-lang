@@ -5,7 +5,7 @@
 // instruction-by-instruction through the C API's builder functions, and
 // printing the resulting IR text back out.
 //
-// Why this matters: docs/planning/ROADMAP_v1.0.0.md's Phase 7 describes
+// Why this matters: docs/archive/ROADMAP_v1.0.0_COMPLETE.md's Phase 7 describes
 // eventually rewriting the Turflang compiler itself in Turflang
 // (self-hosting). This file is architectural validation for the natural
 // follow-on question -- once self-hosted, how would NEW compiler features

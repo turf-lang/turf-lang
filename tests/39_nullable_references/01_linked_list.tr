@@ -1,4 +1,4 @@
-// LANG-002 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): the proof this
+// LANG-002 (docs/archive/ARCHITECTURE_OVERHAUL.md §8): the proof this
 // group's whole reason for existing is closed -- a linked list written
 // ENTIRELY in safe TurfLang, no `unsafe { }` anywhere. Before &?T existed,
 // `struct Node { next: Node* }` required a top-level `unsafe { }` around the

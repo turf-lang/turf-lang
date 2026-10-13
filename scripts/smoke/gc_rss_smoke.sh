@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # gc_rss_smoke.sh -- MEM-002's own completion criterion, made observable
-# (docs/planning/ARCHITECTURE_OVERHAUL.md §8: "The stress test's RSS is
+# (docs/archive/ARCHITECTURE_OVERHAUL.md §8: "The stress test's RSS is
 # bounded ... the observable proof that leaks are gone").
 #
 # tests/08_e2e_stress/06_gc_bounded_allocation.tr is only ever checked by

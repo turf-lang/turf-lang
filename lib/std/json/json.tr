@@ -3,7 +3,7 @@
 //
 // Design:
 //   - Deliberately NOT a binding over an external C JSON library (cjson/
-//     json-c/jansson/...) via `extern fn` -- docs/planning/DESIGN_NOTES.md
+//     json-c/jansson/...) via `extern fn` -- docs/archive/DESIGN_NOTES.md
 //     §4 originally sketched exactly that ("wrap cJSON via FFI"), but that
 //     would make any Turf program that does `import json;` fail to LINK on
 //     a machine that doesn't happen to have that specific shared library

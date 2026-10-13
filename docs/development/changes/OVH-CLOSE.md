@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | landed |
 | **Dates** | started 2026-09-27 · landed 2026-09-27 |
-| **Commits** | (see `git log --oneline -- 'docs/development/changes/OVH-CLOSE.md' 'docs/development/changes/OVH-015.md' 'docs/planning/ARCHITECTURE_OVERHAUL.md' 'docs/planning/OVERHAUL_REMAINING_WORK.md' 'scripts/session_preflight.sh'` on this branch) |
+| **Commits** | (see `git log --oneline -- 'docs/development/changes/OVH-CLOSE.md' 'docs/development/changes/OVH-015.md' 'docs/archive/ARCHITECTURE_OVERHAUL.md' 'docs/planning/OVERHAUL_REMAINING_WORK.md' 'scripts/session_preflight.sh'` on this branch) |
 | **Sessions** | 1 of 1 |
 | **Depends on** | OVH-001 … OVH-014 (all landed prior to this session), OVH-015 (this session) |
 | **Frozen decisions relied on** | none new — this record only certifies conformance to decisions already frozen |
@@ -51,7 +51,7 @@ claim (see *Closure gate evidence*, item 7 below).
   commit as this file, per its own header instruction ("delete this file...
   in the commit that lands the last item"). A future reader looking for
   Overhaul-closure context should start at this record and
-  `docs/development/OVERHAUL_CLOSURE_AUDIT.md` (evidence) instead; the item
+  `docs/archive/OVERHAUL_CLOSURE_AUDIT.md` (evidence) instead; the item
   index and per-item strategy text that used to live in the deleted file
   now exists only in git history (`git log -- docs/planning/OVERHAUL_REMAINING_WORK.md`)
   and in each `OVH-NNN.md` change record's own *Why*/*Strategy* content.
@@ -249,7 +249,7 @@ was deferred to this closing record.
     new language surface: a typed GC-allocation intrinsic and escape-analysis
     rules, per F-STD-2's "a new intrinsic is an explicit act"). Per the
     closure audit's own proposed resolution
-    (`docs/development/OVERHAUL_CLOSURE_AUDIT.md` §5, decision 1, accepted):
+    (`docs/archive/OVERHAUL_CLOSURE_AUDIT.md` §5, decision 1, accepted):
     the safe heap-allocation half becomes **FDN-001**, the escape-rule half
     becomes **FDN-002**, both already written up in full
     (`docs/planning/ROADMAP_v2.0.0.md`, rows N1/N2 and their own §-numbered
@@ -263,14 +263,14 @@ was deferred to this closing record.
 the detailed diff-by-diff account of the documentation/bookkeeping fixes;
 this record is the aggregate gate evidence and the formal closure
 statement). [OVH-001](OVH-001.md) through [OVH-014](OVH-014.md) (every item
-this closure certifies). `docs/development/OVERHAUL_CLOSURE_AUDIT.md` (the
+this closure certifies). `docs/archive/OVERHAUL_CLOSURE_AUDIT.md` (the
 evidence base `OVERHAUL_REMAINING_WORK.md` — now deleted — was built from;
 still the authoritative historical record of what the audit found).
 `docs/planning/ROADMAP_v2.0.0.md` (what comes next, including FDN-001/002).
 
 ---
 
-**The Architecture Overhaul (`docs/planning/ARCHITECTURE_OVERHAUL.md`) is
+**The Architecture Overhaul (`docs/archive/ARCHITECTURE_OVERHAUL.md`) is
 closed as of this record.** All 23 original feature groups plus all 15
 OVH-NNN closure items are landed; the gate above is demonstrated clean.
 Further work on this codebase is tracked in `docs/planning/ROADMAP_v2.0.0.md`

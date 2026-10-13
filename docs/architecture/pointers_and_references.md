@@ -2,7 +2,7 @@
 
 Complete internal + external reference for Turflang's pointer system as it
 exists after issue #238 ("Track A" of the now-removed `FINAL_SPRINT.md`,
-folded into `docs/planning/archive/ROADMAP_v1.0.0_COMPLETE.md` §6 once complete — the
+folded into `docs/archive/ROADMAP_v1.0.0_COMPLETE.md` §6 once complete — the
 original design sketch, the 2026-08-17 resolved decisions, and the
 2026-08-18 implementation summary are retrievable from git history) **and**
 after LANG-002 (`docs/development/changes/LANG-002.md`): the `unsafe { }`
@@ -16,7 +16,7 @@ actually implements it, pass by pass** (Part 2), with file:line references
 throughout.
 
 Related docs:
-- `docs/planning/archive/ROADMAP_v1.0.0_COMPLETE.md` §6 — the shipped-feature summary this
+- `docs/archive/ROADMAP_v1.0.0_COMPLETE.md` §6 — the shipped-feature summary this
   doc expands on.
 - `docs/development/changes/LANG-002.md` — the `&?T`/capability change record.
 - `README.md`'s "FFI" and "`unsafe { }` and safe references (`&T`)"

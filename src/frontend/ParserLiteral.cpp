@@ -44,7 +44,7 @@
 /**
  * @brief Builds the literal's EXACT value from the lexer's own scan
  * (NumLitSpelling/NumLitClean/NumLitRadix, Lexer.h) -- SEM-001
- * (docs/planning/ARCHITECTURE_OVERHAUL.md §8). The lexer deliberately stays
+ * (docs/archive/ARCHITECTURE_OVERHAUL.md §8). The lexer deliberately stays
  * LLVM-free (plain strings, no llvm::APSInt/APFloat -- see those globals'
  * own doc comment in Lexer.h), so this is the one place that actually
  * constructs the bignum value; lexical well-formedness (radix, separators,

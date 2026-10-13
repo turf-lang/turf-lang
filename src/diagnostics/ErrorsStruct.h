@@ -297,7 +297,7 @@ public:
  *        A }`) or through a chain of other structs/arrays/generic
  *        instantiations (`struct A { b: B } struct B { a: A }`) -- an
  *        infinitely-sized type. TYPE-001
- *        (docs/planning/ARCHITECTURE_OVERHAUL.md §8, INV-LAYOUT-1).
+ *        (docs/archive/ARCHITECTURE_OVERHAUL.md §8, INV-LAYOUT-1).
  *
  * Before this check existed, BOTH of the examples above compiled with zero
  * diagnostics. The declaration alone never crashed anything (no layout is

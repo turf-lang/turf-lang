@@ -3,7 +3,7 @@
 # opt_levels_smoke.sh -- OPT-001's own regression coverage for F-OPT-1:
 # "Optimization levels change compile time, run time, binary size and
 # debuggability. They never change observable behaviour."
-# (docs/development/FREEZE.md §6.10, docs/planning/ARCHITECTURE_OVERHAUL.md
+# (docs/development/FREEZE.md §6.10, docs/archive/ARCHITECTURE_OVERHAUL.md
 # §17.3.) `test_runner.sh` cannot exercise this at all -- it only ever
 # compiles at the compiler's default level, so a level-specific regression
 # (e.g. an `-O3` transform racing ahead of a runtime check) would be

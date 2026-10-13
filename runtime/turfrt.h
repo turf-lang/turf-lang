@@ -1,7 +1,7 @@
 /*
  * runtime/turfrt.h -- libturfrt's public C ABI.
  *
- * RT-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §8, F-MEM-4, F-STD-2). This
+ * RT-001 (docs/archive/ARCHITECTURE_OVERHAUL.md §8, F-MEM-4, F-STD-2). This
  * is the ONE header both the compiler (which emits calls to these symbols
  * and TurfTypeDesc constants, never includes this file directly -- Codegen
  * builds the matching LLVM types by hand, see src/codegen/CodegenStruct.cpp's
@@ -127,7 +127,7 @@ void turf_rt_shutdown(void);
  * longer than one `size`-sized stride. `desc` is also still used for a
  * panic message on OOM.
  *
- * As of MEM-001/MEM-002 (docs/planning/ARCHITECTURE_OVERHAUL.md §8), this is
+ * As of MEM-001/MEM-002 (docs/archive/ARCHITECTURE_OVERHAUL.md §8), this is
  * called from Codegen for the Turf-level `gc_alloc(n)` bare intrinsic
  * (FuncCallExprAST::codegen(), src/codegen/CodegenFunc.cpp). Every GC-heap-bound
  * allocation classified in `docs/development/changes/MEM-001.md` (string

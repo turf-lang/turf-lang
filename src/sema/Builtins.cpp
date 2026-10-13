@@ -140,7 +140,7 @@ static void ensure_builtins_registered() {
  *        write(2,...)-based sys::panic()), this is purely an internal C++
  *        helper with no user-facing name at all.
  *
- * @details RT-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): this used to
+ * @details RT-001 (docs/archive/ARCHITECTURE_OVERHAUL.md §8): this used to
  *          build the fprintf(stderr, "%s\n", MsgVal) + abort() sequence
  *          directly, inline, per call site. Every one of the 9 call sites
  *          (grep CodegenPanic() across src/codegen/Codegen*.cpp) still passes just

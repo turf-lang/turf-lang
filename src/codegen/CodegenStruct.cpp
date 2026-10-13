@@ -923,7 +923,7 @@ llvm::GlobalVariable *getOrCreateElementTurfTypeDesc(llvm::Type *ElemTy) {
   return DescGV;
 }
 
-// RT-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §8, point 3): emits a
+// RT-001 (docs/archive/ARCHITECTURE_OVERHAUL.md §8, point 3): emits a
 // TurfTypeDesc for every real (fully-built) aggregate type in the module.
 // Declared in src/codegen/Codegen.h; called exactly once from main.cpp,
 // deliberately LATE -- immediately before verifyModule(), well after both

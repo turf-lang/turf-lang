@@ -5,7 +5,7 @@
 # completion checklist and exits non-zero on any miss.
 #
 # The check that matters most is #4: that the change record is not a stub.
-# `docs/planning/ARCHITECTURE_OVERHAUL.md` §5 C-8 is what a stub record costs
+# `docs/archive/ARCHITECTURE_OVERHAUL.md` §5 C-8 is what a stub record costs
 # -- 43 source comments citing a design document nobody ever wrote down the
 # replacement for. *Removed assumptions* and *Known pitfalls* are singled out
 # because they are precisely the two things a future reader cannot

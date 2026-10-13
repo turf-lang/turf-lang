@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # std002_caller_location_smoke.sh -- STD-002's own regression coverage
-# (docs/planning/ARCHITECTURE_OVERHAUL.md §8 STD-002), for exactly the
+# (docs/archive/ARCHITECTURE_OVERHAUL.md §8 STD-002), for exactly the
 # concrete testing criterion that section names: "a test asserting that
 # test::assert's failure message names the caller's file and line, not
 # lib/std/testing/test.tr's". `test_runner.sh`'s RUNTIME_ABORT_EXPECTED

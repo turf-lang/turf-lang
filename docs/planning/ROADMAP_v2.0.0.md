@@ -49,12 +49,12 @@
 > are implementing in Part IV → Parts V–IX as referenced.
 >
 > **Companion documents:**
-> `docs/development/OVERHAUL_CLOSURE_AUDIT.md` (evidence) ·
+> `docs/archive/OVERHAUL_CLOSURE_AUDIT.md` (evidence) ·
 > `docs/development/changes/OVH-CLOSE.md` (Phase 0's closure record — the
 > temporary `docs/planning/OVERHAUL_REMAINING_WORK.md` handoff it closed out
 > is deleted as of that record) ·
 > `docs/planning/FUTURE.md` (everything deliberately after 2.0) ·
-> `docs/planning/ARCHITECTURE_OVERHAUL.md` (historical specification) ·
+> `docs/archive/ARCHITECTURE_OVERHAUL.md` (historical specification) ·
 > `docs/planning/ARCHITECTURE_SIMPLIFICATION.md` (discussion document; its
 > assessment is Part III here) · `docs/development/FREEZE.md` (still binding).
 

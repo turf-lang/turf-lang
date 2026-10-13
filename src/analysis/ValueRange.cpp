@@ -49,7 +49,7 @@ static std::optional<long long> evalConstExpr(const ExprAST *E, const ConstMap &
     auto L = evalConstExpr(B->getLHS(), M);
     auto R = evalConstExpr(B->getRHS(), M);
     if (!L.has_value() || !R.has_value()) return std::nullopt;
-    // SEM-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): this used to be
+    // SEM-001 (docs/archive/ARCHITECTURE_OVERHAUL.md §8): this used to be
     // plain `long long lv + rv` -- signed-overflow UB in the compiler's
     // OWN C++, confirmed by reading this exact line before the fix (not
     // hypothetical: e.g. two folded constants near INT64_MAX/INT64_MIN

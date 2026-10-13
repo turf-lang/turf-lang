@@ -2,7 +2,7 @@
 // EXPECT-DIAG: cycle: A -> A
 // Regression test: a struct that contains itself by value must be a
 // compile error, not a compiler segfault (TYPE-001,
-// docs/planning/ARCHITECTURE_OVERHAUL.md §8, INV-LAYOUT-1).
+// docs/archive/ARCHITECTURE_OVERHAUL.md §8, INV-LAYOUT-1).
 //
 // Before checkStructLayoutAcyclicity() existed, this DECLARATION alone
 // compiled with zero diagnostics (registering a struct's name never

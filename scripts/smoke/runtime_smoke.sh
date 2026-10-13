@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # runtime_smoke.sh -- RT-001's own regression coverage
-# (docs/planning/ARCHITECTURE_OVERHAUL.md §8 RT-001, "Testing scope").
+# (docs/archive/ARCHITECTURE_OVERHAUL.md §8 RT-001, "Testing scope").
 # `test_runner.sh` cannot exercise any of this: libturfrt is a separate C
 # static library, not a `.tr` file, and none of what's checked here (link
 # wiring, a descriptor's exact bitmap, a panic's exact message/exit code)

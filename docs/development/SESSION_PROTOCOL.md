@@ -1,6 +1,6 @@
 # SESSION_PROTOCOL.md — how an overhaul implementation session runs
 
-> **Authoritative.** `docs/planning/ARCHITECTURE_OVERHAUL.md` §22.0–§22.2 is
+> **Authoritative.** `docs/archive/ARCHITECTURE_OVERHAUL.md` §22.0–§22.2 is
 > the snapshot this was lifted from; this file wins where they disagree.
 > It applies to any session implementing one of the feature groups in that
 > document's §8 (`ARCH-001`, `TYPE-001`, `SEM-001`, …). Ordinary bug-fix and

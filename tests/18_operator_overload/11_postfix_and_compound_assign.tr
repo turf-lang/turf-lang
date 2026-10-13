@@ -1,7 +1,7 @@
 // LANG-001/F-OP-2/D21: compound assignment desugars through `operator+`/
 // `operator-`, and postfix `++`/`--` picks up the SAME overloads (prefix
 // already did, for free, via its own existing `x = x + 1` desugaring --
-// see D21 in docs/planning/ARCHITECTURE_OVERHAUL.md §27.3 for the decision
+// see D21 in docs/archive/ARCHITECTURE_OVERHAUL.md §27.3 for the decision
 // this test proves was made: postfix DOES pick up an overload).
 import test;
 

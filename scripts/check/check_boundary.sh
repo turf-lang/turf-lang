@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # check_boundary.sh -- STD-001's own regression coverage
-# (docs/planning/ARCHITECTURE_OVERHAUL.md §8 STD-001, "boundary
+# (docs/archive/ARCHITECTURE_OVERHAUL.md §8 STD-001, "boundary
 # formalization"). Mechanically checks the three claims that section makes
 # rather than leaving them as prose someone has to re-verify by hand:
 #

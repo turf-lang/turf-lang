@@ -45,7 +45,7 @@ using namespace llvm;
 // (While/DoWhile/For/ForEach), all in this same file.
 std::vector<std::pair<llvm::BasicBlock *, llvm::BasicBlock *>> LoopBlocks;
 
-// LANG-003 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): `defer`'s entire
+// LANG-003 (docs/archive/ARCHITECTURE_OVERHAUL.md §8): `defer`'s entire
 // lowering lives in this file, as three pieces of shared state plus one
 // helper, rather than in the separate CFG.cpp static-analysis subsystem --
 // CFGBuilder (CFG.cpp) never needs to know about `defer` at all, since a

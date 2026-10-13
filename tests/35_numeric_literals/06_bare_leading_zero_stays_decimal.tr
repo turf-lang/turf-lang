@@ -1,4 +1,4 @@
-// SEM-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §8's own explicit
+// SEM-001 (docs/archive/ARCHITECTURE_OVERHAUL.md §8's own explicit
 // Testing scope item): `0755` must equal `755` -- FREEZE.md §6.2's
 // deliberate "no bare-leading-zero octal" rule. A leading zero followed by
 // an ORDINARY digit (not x/X/b/B/o/O) is NOT a radix prefix; it falls

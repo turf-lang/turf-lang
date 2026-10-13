@@ -2,13 +2,13 @@
 
 What "owns" a given piece of TurfLang's behavior, and how that ownership is
 enforced rather than merely claimed. Written by **STD-001**
-(`docs/planning/ARCHITECTURE_OVERHAUL.md` §8), which exists specifically to
+(`docs/archive/ARCHITECTURE_OVERHAUL.md` §8), which exists specifically to
 close the gap between what `AGENTS.md` and `ARCHITECTURE_OVERHAUL.md` §3
 *say* about this boundary and what the compiler actually does — see
 §5.2/§15 of that document for the audit this doc finishes closing out.
 
 Related docs:
-- `docs/planning/ARCHITECTURE_OVERHAUL.md` §3 (target boundary diagram, the
+- `docs/archive/ARCHITECTURE_OVERHAUL.md` §3 (target boundary diagram, the
   three rules) and §15 (the standard-library architecture chapter this doc
   is the "boundary is now real, not just diagrammed" follow-up to).
 - `docs/architecture/pointers_and_references.md` §1.7/§2.5 — the

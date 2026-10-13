@@ -41,7 +41,7 @@ using namespace llvm;
 
 
 // Turns a number to LLVM Number constant. SEM-001
-// (docs/planning/ARCHITECTURE_OVERHAUL.md §8): builds the LLVM constant
+// (docs/archive/ARCHITECTURE_OVERHAUL.md §8): builds the LLVM constant
 // directly from the node's own exact APSInt/APFloat rather than round-
 // tripping through the narrow getIntVal()/getDoubleVal() convenience
 // accessors -- see NumberExprAST's own doc comment (ASTExpr.h).

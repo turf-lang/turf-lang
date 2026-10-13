@@ -1,5 +1,5 @@
 // tests/41_gc/01_retention_across_collection.tr
-// MEM-002 (docs/planning/ARCHITECTURE_OVERHAUL.md §8/§14) -- the collector's
+// MEM-002 (docs/archive/ARCHITECTURE_OVERHAUL.md §8/§14) -- the collector's
 // most basic completion criterion, stated verbatim in the roadmap's own
 // Testing scope: "keep a reference only in a local; force collection; use
 // the object afterwards and assert its contents." (U-3, §11.)

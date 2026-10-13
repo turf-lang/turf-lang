@@ -45,7 +45,7 @@ Related docs:
 | `mem::Pool<T>`'s backing buffer | Manual heap | Aliased, grown via `realloc` | **You**, via `mem::free_pool()` — deliberately NOT collected, see §1.7 |
 
 The one-sentence version of Turflang's safety story, as of **MEM-002**
-(`docs/planning/ARCHITECTURE_OVERHAUL.md` §8/§14): **there are two
+(`docs/archive/ARCHITECTURE_OVERHAUL.md` §8/§14): **there are two
 disjoint heaps, and only one of them is automatically managed.** The
 **manual heap** (`mem::alloc`/`malloc` and everything built on them,
 including `mem::Pool<T>`) still has no automatic memory management of any
@@ -149,7 +149,7 @@ never `malloc` directly. `io::input()`/`io::read_to_string()` and
 `gc_alloc_zeroed(n)`, for the same reason `calloc` used to be chosen over
 `malloc` there (see §2.4/§2.6).
 
-As of **MEM-002** (`docs/planning/ARCHITECTURE_OVERHAUL.md` §8/§14), none of
+As of **MEM-002** (`docs/archive/ARCHITECTURE_OVERHAUL.md` §8/§14), none of
 these functions need to free the buffer they return, or the operand(s) they
 were given — a real collector (`libturfrt`'s `turf_rt_collect()`) reclaims
 each one once nothing reachable still points to it, the same as any other
@@ -254,7 +254,7 @@ stands on its own:
 
 ### 1.7 What manages any of this? Two heaps, one of them automatic.
 
-As of **MEM-002** (`docs/planning/ARCHITECTURE_OVERHAUL.md` §8/§14), the
+As of **MEM-002** (`docs/archive/ARCHITECTURE_OVERHAUL.md` §8/§14), the
 heap is split into two genuinely disjoint categories with two different
 answers to "who reclaims this":
 

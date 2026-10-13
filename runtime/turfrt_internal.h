@@ -1,6 +1,6 @@
 /*
  * runtime/turfrt_internal.h -- private glue between turfrt_alloc.c and
- * turfrt_gc.c (MEM-002, docs/planning/ARCHITECTURE_OVERHAUL.md §8/§14).
+ * turfrt_gc.c (MEM-002, docs/archive/ARCHITECTURE_OVERHAUL.md §8/§14).
  *
  * NOT part of turfrt.h's public C ABI: nothing here is ever referenced by
  * Codegen (F-STD-2's closed intrinsic list is about what a COMPILED TURF

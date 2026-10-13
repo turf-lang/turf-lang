@@ -63,7 +63,7 @@ extern fn tolower(c: int32): int32;
 // be Codegen's hardcoded EmitStringConcat -- the gc_alloc'd buffer is never
 // explicitly freed by this function, but that is no longer the
 // TURF-MEMLEAK tradeoff it once was: as of MEM-002
-// (docs/planning/ARCHITECTURE_OVERHAUL.md §8), this is a real GC-heap
+// (docs/archive/ARCHITECTURE_OVERHAUL.md §8), this is a real GC-heap
 // allocation (`turf_rt_alloc`, not `malloc`) that the collector reclaims
 // once nothing reachable still points to it, the same as any other
 // GC-heap value -- there is nothing left for this function itself to free.

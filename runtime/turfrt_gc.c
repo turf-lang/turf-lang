@@ -1,6 +1,6 @@
 /*
  * runtime/turfrt_gc.c -- MEM-002: the collector
- * (docs/planning/ARCHITECTURE_OVERHAUL.md §8/§14, FREEZE.md §6.5).
+ * (docs/archive/ARCHITECTURE_OVERHAUL.md §8/§14, FREEZE.md §6.5).
  *
  * Non-moving, mark-sweep, precise on the heap (per-type/per-element pointer
  * bitmaps -- TurfTypeDesc, turfrt.h), conservative on the stack and

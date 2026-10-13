@@ -625,7 +625,7 @@ private:
   static bool areArithCompatible(const TurfType *A, const TurfType *B);
 
   // ── SEM-002: literal-representability checking ─────────────────────────
-  // (docs/planning/ARCHITECTURE_OVERHAUL.md §8, FREEZE.md §6.2 rows 3/6/9)
+  // (docs/archive/ARCHITECTURE_OVERHAUL.md §8, FREEZE.md §6.2 rows 3/6/9)
 
   /// Recursive fold of a compile-time integer constant built ONLY from
   /// untyped literals via unary '-' and binary '+'/'-'/'*' (row 6).

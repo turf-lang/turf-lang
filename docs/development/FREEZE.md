@@ -1,7 +1,7 @@
 # FREEZE.md — the Semantic Freeze
 
 > **Read this before writing any code for an overhaul feature group.**
-> This file is authoritative. `docs/planning/ARCHITECTURE_OVERHAUL.md` §6 is
+> This file is authoritative. `docs/archive/ARCHITECTURE_OVERHAUL.md` §6 is
 > the historical copy it was lifted from; where the two ever disagree, this
 > file wins.
 
@@ -93,7 +93,7 @@ otherwise each answer differently, producing an incoherent language.
     account: `docs/development/changes/SEM-002.md`, *Known pitfalls*,
     second bullet).
   - An untyped integer literal assigned directly to `double`
-    (`docs/planning/ARCHITECTURE_OVERHAUL.md` §10.5's "must be exactly
+    (`docs/archive/ARCHITECTURE_OVERHAUL.md` §10.5's "must be exactly
     representable" as a `double`) is checked against `int64` representability
     FIRST, not double-exactness directly — so a literal wider than `int64`
     but exactly representable as a `double` (one significant bit, e.g. 2^100

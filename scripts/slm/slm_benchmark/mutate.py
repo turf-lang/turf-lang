@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """mutate.py -- SLM-001's benchmark-corpus generator (§16.3 item 5).
 
-docs/planning/ARCHITECTURE_OVERHAUL.md §16.3 item 5 names the shape this
+docs/archive/ARCHITECTURE_OVERHAUL.md §16.3 item 5 names the shape this
 tool has to take, quoting DESIGN_NOTES.md §6's dataset plan almost verbatim:
 "a code mutator takes passing test files, intentionally breaks them
 mechanically (delete a semicolon, swap `int` -> `string`, drop a closing

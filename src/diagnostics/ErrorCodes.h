@@ -241,7 +241,7 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // doc comment on why new entries go at the end, not resorted in).
     {"E068", "UnknownStructFieldError", "Unknown struct field", SLM::ErrorCategory::UNDECLARED_VAR},
     {"E069", "StructLayoutCycleError", "Struct layout cycle", SLM::ErrorCategory::DECLARATION, true},
-    // SEM-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): four new lexical
+    // SEM-001 (docs/archive/ARCHITECTURE_OVERHAUL.md §8): four new lexical
     // errors raised directly from the Lexer's own number-scanning branch
     // (see ErrorsLex.h's own top comment for why that's safe). Routed to
     // the existing SYNTAX_ERROR category, per §8's explicit instruction not
@@ -250,7 +250,7 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     {"E071", "InvalidRadixDigitError", "Invalid radix digit", SLM::ErrorCategory::SYNTAX_ERROR},
     {"E072", "MisplacedSeparatorError", "Misplaced separator", SLM::ErrorCategory::SYNTAX_ERROR},
     {"E073", "MalformedExponentError", "Malformed exponent", SLM::ErrorCategory::SYNTAX_ERROR},
-    // HYG-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): these two classes
+    // HYG-001 (docs/archive/ARCHITECTURE_OVERHAUL.md §8): these two classes
     // already existed, fully written, but were never constructed --
     // CFG::reportFlowDiagnostics() wrote directly to std::cerr instead,
     // bypassing DiagnosticEngine entirely (no code, no color, no caret, no
@@ -259,14 +259,14 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // SLM::ErrorCategory for these.
     {"E074", "UnreachableBlockWarning", "Unreachable block", SLM::ErrorCategory::CONTROL_FLOW},
     {"E075", "DeadBranchWarning", "Dead branch", SLM::ErrorCategory::CONTROL_FLOW},
-    // SEM-002 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): destination/
+    // SEM-002 (docs/archive/ARCHITECTURE_OVERHAUL.md §8): destination/
     // literal-representability diagnostics (FREEZE.md §6.2 rows 3/6/8/9).
     // Routed to the existing ARITHMETIC category, per §8's explicit
     // instruction not to add a new SLM::ErrorCategory for these.
     {"E076", "IntegerLiteralOutOfRangeError", "Integer literal out of range", SLM::ErrorCategory::ARITHMETIC},
     {"E077", "IntegerLiteralNotExactAsDoubleError", "Integer literal not exact as double", SLM::ErrorCategory::ARITHMETIC},
     {"E078", "FloatLiteralOverflowError", "Float literal overflow", SLM::ErrorCategory::ARITHMETIC},
-    // TYPE-002 (docs/planning/ARCHITECTURE_OVERHAUL.md §9.5 step 4): the
+    // TYPE-002 (docs/archive/ARCHITECTURE_OVERHAUL.md §9.5 step 4): the
     // monomorphizer's instantiation worklist is depth-capped, not run to
     // real exhaustion. Registered in S11b alongside the class and the
     // depth constant it guards (Monomorphize::kMaxInstantiationDepth) even

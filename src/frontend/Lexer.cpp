@@ -965,7 +965,7 @@ static int gettokScan() {
     return TOK_RANGE;
   }
 
-  // Numbers (SEM-001, docs/planning/ARCHITECTURE_OVERHAUL.md §8;
+  // Numbers (SEM-001, docs/archive/ARCHITECTURE_OVERHAUL.md §8;
   // FREEZE.md §6.2 row 1). Four integer forms -- plain decimal (`[0-9_]+`),
   // hex (`0x…`/`0X…`), binary (`0b…`/`0B…`), octal (`0o…`/`0O…`) -- and two
   // float forms -- dotted (an optional integer part, a mandatory `.`, a

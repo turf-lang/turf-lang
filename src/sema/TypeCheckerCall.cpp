@@ -132,7 +132,7 @@ static bool ufcsReceiverTypeMatches(const TurfType *ParamTy,
  * Widening typesCompatible() itself would let `string` silently bind to any
  * raw-pointer parameter everywhere, undermining §6.2's frozen conversion
  * matrix for the sake of one FFI convenience. See
- * docs/planning/ARCHITECTURE_OVERHAUL.md §8 LANG-004, item 2 ("Must NOT
+ * docs/archive/ARCHITECTURE_OVERHAUL.md §8 LANG-004, item 2 ("Must NOT
  * reinterpret").
  */
 static bool isExternStringToPtrCoercion(const TurfType *ArgTy,
