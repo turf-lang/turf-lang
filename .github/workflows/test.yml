@@ -65,13 +65,17 @@ jobs:
         uses: actions/cache@v4
         with:
           path: external/llama.cpp/build
-          key: llama-build-${{ runner.os }}-${{ steps.llama-sha.outputs.sha }}
+          # "-portable": the build is GGML_NATIVE=OFF (below). The key it
+          # replaces held a -march=native build, which a runner with an older
+          # CPU than the one that built it cannot run.
+          key: llama-build-${{ runner.os }}-${{ steps.llama-sha.outputs.sha }}-portable
 
       - name: Build llama.cpp
         if: steps.cache-llama.outputs.cache-hit != 'true'
         run: |
           cd external/llama.cpp
-          cmake -B build -DBUILD_SHARED_LIBS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_SERVER=OFF -DGGML_OPENMP=OFF
+          cmake -B build -DBUILD_SHARED_LIBS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_SERVER=OFF -DGGML_OPENMP=OFF \
+            -DGGML_NATIVE=OFF
           cmake --build build --config Release -j $(nproc)
 
       - name: Configure OpenMP
