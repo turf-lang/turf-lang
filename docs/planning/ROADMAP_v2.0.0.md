@@ -1584,6 +1584,13 @@ Part VI's classification; an RC with zero open release blockers for 7 days
 becomes `v2.0.0`. The `refactor/architecture` branch is merged to `master`
 before the first RC (it is the development branch for all of this).
 
+Each RC also runs REL-005's regression gate (owner decision 2026-10-13): on
+the machine that took the recorded baseline, `python3 scripts/bench.py
+--compare bench/results/<baseline>.json`. A benchmark more than 20% slower
+needs a recorded explanation in `docs/development/BENCHMARKS.md` before the
+RC can become 2.0.0. Not a per-push CI check: shared runners vary more than
+20%.
+
 ---
 
 ## Part V — 2.0 compatibility: every intentional breaking change since v1.0.0

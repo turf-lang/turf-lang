@@ -1,0 +1,139 @@
+{
+  "meta": {
+    "date": "2026-10-13",
+    "commit": "293c535",
+    "turfc": "build_release/turfc",
+    "build_type": "Release",
+    "turfc_version": "turfc 2.0.0-dev / interface 1.6 / llvm 22.1.8 / runtime turf_rt_abi_2_0 / root /home/a2ys/turflang/turflang / linker system-cc / smart not-built",
+    "pinned_cpu": 2,
+    "machine": {
+      "cpu": "13th Gen Intel(R) Core(TM) i5-13500H",
+      "cores": 16,
+      "os": "Linux-6.18.54.1-microsoft-standard-WSL2-x86_64-with-glibc2.44"
+    }
+  },
+  "runs": 9,
+  "results": {
+    "gc_alloc": {
+      "median_s": 0.9821,
+      "min_s": 0.9547,
+      "runs_s": [
+        0.9821,
+        0.97,
+        0.9847,
+        0.9547,
+        0.9631,
+        1.0036,
+        1.0064,
+        1.0138,
+        0.9639
+      ],
+      "rss_kb": 14528,
+      "checksum": "9190220"
+    },
+    "json_roundtrip": {
+      "median_s": 0.906,
+      "min_s": 0.8662,
+      "runs_s": [
+        0.8798,
+        0.91,
+        0.8923,
+        0.906,
+        0.894,
+        0.9398,
+        0.908,
+        0.9436,
+        0.8662
+      ],
+      "rss_kb": 149836,
+      "checksum": "842570"
+    },
+    "map_churn": {
+      "median_s": 0.8957,
+      "min_s": 0.8477,
+      "runs_s": [
+        0.8666,
+        0.9146,
+        0.8477,
+        0.8945,
+        0.9038,
+        0.8644,
+        0.9884,
+        0.8968,
+        0.8957
+      ],
+      "rss_kb": 14432,
+      "checksum": "397107500"
+    },
+    "strings": {
+      "median_s": 0.8781,
+      "min_s": 0.8547,
+      "runs_s": [
+        0.8713,
+        0.8825,
+        0.8692,
+        0.8894,
+        0.8781,
+        0.8646,
+        0.8845,
+        0.8867,
+        0.8547
+      ],
+      "rss_kb": 5860,
+      "checksum": "129469317"
+    },
+    "structs": {
+      "median_s": 0.5373,
+      "min_s": 0.5288,
+      "runs_s": [
+        0.5412,
+        0.5373,
+        0.5461,
+        0.5288,
+        0.5392,
+        0.5377,
+        0.5357,
+        0.5373,
+        0.5368
+      ],
+      "rss_kb": 2368,
+      "checksum": "-500001001024",
+      "c_median_s": 0.5073,
+      "ratio_vs_c": 1.059
+    },
+    "compile_stdlib_check": {
+      "median_s": 1.1602,
+      "min_s": 1.1368,
+      "runs_s": [
+        1.1796,
+        1.1491,
+        1.1368,
+        1.1876,
+        1.1578,
+        1.1456,
+        1.1893,
+        1.1602,
+        1.1611
+      ],
+      "rss_kb": null,
+      "files": 24
+    },
+    "compile_showcase": {
+      "median_s": 2.8844,
+      "min_s": 2.6996,
+      "runs_s": [
+        2.9858,
+        2.7886,
+        2.9256,
+        2.7938,
+        2.8844,
+        2.8324,
+        2.9325,
+        2.972,
+        2.6996
+      ],
+      "rss_kb": null,
+      "files": 7
+    }
+  }
+}

@@ -1,0 +1,100 @@
+# Benchmarks
+
+The performance baseline (`ROADMAP_v2.0.0.md` REL-005). Not a gate on absolute
+numbers; a gate on **unexplained regressions**: between the freeze tag and the
+release, a benchmark more than 20% slower than its recorded baseline needs an
+explanation recorded here (REL-007 runs the check on every release candidate).
+
+## What is measured
+
+| Benchmark | Source | What it exercises |
+|---|---|---|
+| `structs` | `bench/structs.tr` + `bench/structs.c` | a numeric loop over an array of structs, every `+` overflow-checked; the C twin (`clang -O3`) gives the "vs C" ratio, which tracks FUTURE F-24 (checked arithmetic vs auto-vectorization) |
+| `strings` | `bench/strings.tr` | `StringBuilder`, `s[i]` over a 200 KB string, `substring`, `replace`, `contains` |
+| `map_churn` | `bench/map_churn.tr` | `Map<string, int>` put / get / remove over a sliding window of 5000 keys |
+| `gc_alloc` | `bench/gc_alloc.tr` | 3 million allocations with 1000 kept alive: the allocator and collector |
+| `json_roundtrip` | `bench/json_roundtrip.tr` | build, stringify, parse and read back 2000-object arrays |
+| `compile_stdlib_check` | `lib/std/**/*.tr` | `turfc --check --module` over every stdlib file |
+| `compile_showcase` | `showcase/*.tr` | `turfc -O2` of every showcase program, link included |
+
+Each program prints a checksum: it must not change between runs, and the C
+twin's must equal the Turf program's. Each is sized to take about 0.5–1 s.
+
+## How to measure
+
+    cmake -S . -B build_release -DCMAKE_BUILD_TYPE=Release -DTURF_SMART=OFF -DTURF_BUILD_CLI=OFF
+    cmake --build build_release -j$(( $(nproc) / 2 ))
+    python3 scripts/bench.py --out bench/results/<date>-<what>.json
+    python3 scripts/bench.py --compare bench/results/2026-10-13-baseline.json
+
+`scripts/bench.py` measures `build_release/turfc` (compile-time numbers from a
+Debug build are not comparable), runs 9 rounds, and prints the table below.
+`--compare` exits 1 if any benchmark's **minimum** time is more than 20%
+(`--threshold`) slower than the baseline's. Compare only numbers from the same
+machine with the same kind of build; the script warns when either differs.
+
+**Noise.** On the baseline machine (a laptop i5-13500H under WSL), the same
+commit measured back to back, unpinned and one benchmark after another, moved
+up to 30%: more than the gate, so it would have flagged a change that wasn't
+there. Three things bring it under 10%, and `bench.py` does all three:
+
+- Every timed command is pinned to one CPU (`taskset -c 2`; `--cpu -1` turns
+  it off). Unpinned, the scheduler moved the process between cores and the
+  same program took 0.81 s one run and 1.14 s another.
+- Runs are interleaved: round r runs every benchmark once. Turbo and thermal
+  drift over a session then lands on every benchmark alike.
+- The gate compares minimum times. The median of `compile_showcase` moved 27%
+  between two runs; its minimum moved under 8%.
+
+Measured noise after these, two comparisons of 293c535 against its own
+baseline: −11.1% to +8.2%. Close the other programs (a fuzz job, a build)
+before measuring: those move numbers more than any of this.
+
+## Baselines
+
+### 2026-10-13 — REL-005 baseline (`bench/results/2026-10-13-baseline.json`)
+
+Commit `293c535`, `build_release` (Release), 9 rounds pinned to CPU 2,
+13th Gen Intel Core i5-13500H (16 threads), Linux 6.18 under WSL2.
+
+| Benchmark | Median (s) | Min (s) | Peak RSS (KB) | vs C | Checksum |
+|---|---|---|---|---|---|
+| gc_alloc | 0.982 | 0.955 | 14528 |  | 9190220 |
+| json_roundtrip | 0.906 | 0.866 | 149836 |  | 842570 |
+| map_churn | 0.896 | 0.848 | 14432 |  | 397107500 |
+| strings | 0.878 | 0.855 | 5860 |  | 129469317 |
+| structs | 0.537 | 0.529 | 2368 | 1.06x | -500001001024 |
+| compile_stdlib_check | 1.160 | 1.137 |  |  | 24 files |
+| compile_showcase | 2.884 | 2.700 |  |  | 7 files |
+
+Notes:
+
+- `structs` runs at 1.06x C's time. ROADMAP §27 D24 measured a different
+  program, never checked in and rebuilt here from its description, at 53%
+  slower than `clang -O3`, because the overflow check on every `+` kept LLVM
+  from vectorizing the loop. This one is not that program, so 1.06x does not
+  show F-24 closed; it is what this program measures, from here on.
+- `json_roundtrip` peaks at 146 MB though each round's tree is garbage by the
+  next round: the collector lets the heap grow to twice the live data before
+  collecting (`turfrt_gc.c`, the 1 MiB-floor doubling rule), and the live data
+  at a collection includes the round in progress.
+
+## Fixed before the baseline
+
+Writing these benchmarks found five performance bugs (and one compiler crash,
+`s.substring(1, 3)` in method form, f602b94). They were fixed before the
+baseline was taken, so that the first numbers recorded do not contain them.
+Measured on the same machine; "before" is the commit before each fix.
+
+| Commit | What was slow | Before | After |
+|---|---|---|---|
+| c7f231c | `Map`/`Set` under churn: removed keys left tombstones the growth check never counted, until every empty slot was one and each lookup of a missing key scanned the whole table | 20 000 churn steps over 5 000 keys: 0.37 s (cost grew with the table) | 0.00 s at 500, 5 000 and 50 000 keys |
+| 7003042 | `json::parse`: each byte read through `self.s[self.pos]` ran `strlen()` over the whole document, and each value's `strings::substring()` did again | 100 KB: 0.33 s; 1 MB: about 30 s | 100 KB: 0.02 s; 1 MB: 0.27 s |
+| 7003042 | `json::stringify`: `result = result + piece` copied the output so far on every element | 8 000 items: 1.22 s | 80 000 items: 0.10 s |
+| 91c6a1d | every `gc_realloc` (a `List` or `StringBuilder` growing) scanned all blocks allocated since the last collection and shifted the sorted block table | stringify of 10 000 two-field objects: 0.66 s | 0.012 s |
+| 321dc58 | not a speed fix: `Map`/`Set` keys were hashed by raw bytes, so equal padded-struct keys, `-0.0`/`0.0` and string fields hashed apart (FREEZE §6.8 `hash_of`) | not measured separately | `map_churn` at 40 000 steps after all five fixes: 0.04–0.05 s |
+
+## Recorded regressions
+
+None yet. A regression over 20% against the baseline above is recorded here:
+the benchmark, both numbers, the commit, and why it is accepted (or the fix).
