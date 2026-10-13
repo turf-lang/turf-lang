@@ -1,0 +1,7 @@
+// EXPECT-DIAG: E124
+// EXPECT-DIAG: Cannot compare 'bool' with 'int' using '<'
+// `1 < 2 < 3` is `(1 < 2) < 3`, a bool compared with an int.
+fn main(): int {
+    mut ok: bool = 1 < 2 < 3;
+    return 0;
+}

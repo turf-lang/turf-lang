@@ -158,8 +158,8 @@ public:
   /// pass, "Codegen must never run on" an errored compile).
   virtual bool isGuess()  const { return false; }
 
-  /// True for any numeric type (int, double, bool).
-  virtual bool isNumeric() const { return isInt() || isDouble() || isBool(); }
+  /// True for any numeric type (int, int32, double).
+  virtual bool isNumeric() const { return isInt() || isDouble(); }
 
   // ── Structural predicates ────────────────────────────────────────────────
 
@@ -300,13 +300,13 @@ public:
 /**
  * @brief The `bool` primitive type.
  *
- * Represented as i1 in LLVM IR.  Treated as numeric for coercion purposes.
+ * Represented as i1 in LLVM IR. Not numeric: no arithmetic, ordering or
+ * implicit conversion to a number; `b to int` converts explicitly.
  */
 class BoolType : public TurfType {
 public:
   std::string getName() const override { return "bool"; }
   bool isBool()    const override { return true; }
-  bool isNumeric() const override { return true; }
 };
 
 /**

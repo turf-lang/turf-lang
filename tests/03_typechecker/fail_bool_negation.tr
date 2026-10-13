@@ -1,0 +1,7 @@
+// EXPECT-DIAG: E057
+// EXPECT-DIAG: Unary '-' requires a numeric operand, got 'bool'
+fn main(): int {
+    mut ok: bool = true;
+    printline(-ok);
+    return 0;
+}

@@ -302,7 +302,10 @@ and converts to `string`, as `nan`.
 implicit or explicit: `mut x: int = true;` is E066, and `true to int` is E134
 ("That conversion isn't allowed"). To get a number from a condition, say what
 you want: `cond give 1 otherwise 0`. The one cast out of `bool` is `bool to
-string`, which gives `"true"` or `"false"`.
+string`, which gives `"true"` or `"false"`. Nor is a `bool` an operand of
+arithmetic or ordering: `true + 1` is E057, and `true < false` and `1 < 2 < 3`
+(which compares the `bool` `1 < 2` with `3`) are E124. `==` and `!=` compare
+two `bool`s.
 
 ```turflang
 fn main(): int {
