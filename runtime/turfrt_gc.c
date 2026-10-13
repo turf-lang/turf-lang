@@ -17,10 +17,18 @@
  *     must not pay a sort/shift cost per allocation.
  *   - `g_blocks` -- sorted by `start`, rebuilt (pending merged in, whole
  *     array re-sorted) exactly once at the top of every collection. Kept
- *     sorted between collections too (`turf_gc_reregister_block`'s removal
- *     path uses memmove, not swap-with-last) so realloc's exact-match
- *     lookup and turf_rt_is_gc_pointer's exact-match lookup can binary
- *     search it without triggering a full rebuild.
+ *     sorted between collections too, so realloc's exact-match lookup and
+ *     turf_rt_is_gc_pointer's exact-match lookup can binary search it
+ *     without triggering a full rebuild. A realloc that moves a block out of
+ *     it marks the entry `dead` instead of removing it; the rebuild drops
+ *     dead entries.
+ *   - `g_pidx` -- a hash index from a pending block's start to its position
+ *     in `g_pending`, so realloc finds the block it moves in O(1).
+ * Both used to cost O(heap) per realloc -- a linear scan of `g_pending`
+ * (every block allocated since the last collection) and a memmove of
+ * `g_blocks`' tail -- so growing a StringBuilder or List got slower as the
+ * heap grew: 10,000 reallocs with 235,000 live blocks took 0.66 s (found by
+ * REL-005's benchmarks, a JSON round trip).
  * A block-CONTAINING-address query (`gc_find_containing`, what the mark
  * phase needs for both conservative roots and interior pointers --
  * `List<T>.data + k` is the documented, common case, LIMITATIONS.md §4)
@@ -313,6 +321,11 @@ typedef struct GcBlock {
   size_t size;
   const TurfTypeDesc *desc; /* NULL = opaque, no traced pointer words */
   unsigned char marked;
+  /* Set on a g_blocks entry a realloc moved away from: the memory is gone,
+   * the entry stays (removing it would shift the sorted array) until the
+   * next gc_rebuild_index() drops it. Never set in g_pending, and never seen
+   * by a collection's mark or sweep. */
+  unsigned char dead;
 } GcBlock;
 
 static GcBlock *g_blocks = NULL;
@@ -516,23 +529,115 @@ static long find_pin(uintptr_t block_start) {
   return -1;
 }
 
-static long find_exact_in_pending(uintptr_t addr) {
+/* ─── g_pidx: pending block start -> index in g_pending ──────────────────
+ * Open addressing, linear probing, power-of-two capacity. A key of 0 is an
+ * empty slot and 1 a deleted one (no block starts at either). Rebuilt from
+ * g_pending when live keys plus deleted ones would pass 70%, and emptied by
+ * gc_rebuild_index() when pending is merged into g_blocks. */
+#define PIDX_EMPTY ((uintptr_t)0)
+#define PIDX_DELETED ((uintptr_t)1)
+static uintptr_t *g_pidx_keys = NULL;
+static size_t *g_pidx_vals = NULL;
+static size_t g_pidx_cap = 0, g_pidx_used = 0; /* used = live + deleted */
+
+static size_t pidx_home(uintptr_t addr) {
+  /* Fibonacci hashing of the address; its low bits are alignment zeros. */
+  return (size_t)(((uint64_t)addr * UINT64_C(0x9E3779B97F4A7C15)) >> 32) &
+         (g_pidx_cap - 1);
+}
+
+static void pidx_place(uintptr_t addr, size_t pending_idx) {
+  size_t s = pidx_home(addr);
+  while (g_pidx_keys[s] != PIDX_EMPTY && g_pidx_keys[s] != PIDX_DELETED)
+    s = (s + 1) & (g_pidx_cap - 1);
+  if (g_pidx_keys[s] == PIDX_EMPTY)
+    g_pidx_used++;
+  g_pidx_keys[s] = addr;
+  g_pidx_vals[s] = pending_idx;
+}
+
+/* Reallocates the index at a size fitting `g_pending_count` with room to
+ * grow, and re-enters every pending block. */
+static void pidx_rebuild(void) {
+  size_t cap = 1024;
+  while (cap < (g_pending_count + 1) * 4)
+    cap *= 2;
+  free(g_pidx_keys);
+  free(g_pidx_vals);
+  g_pidx_keys = calloc(cap, sizeof(uintptr_t)); /* all PIDX_EMPTY */
+  g_pidx_vals = malloc(cap * sizeof(size_t));
+  if (!g_pidx_keys || !g_pidx_vals)
+    turf_rt_panic("out of memory", "<gc block table>", "<turfrt_gc.c>", 0);
+  g_pidx_cap = cap;
+  g_pidx_used = 0;
   for (size_t i = 0; i < g_pending_count; i++)
-    if (g_pending[i].start == addr)
-      return (long)i;
+    pidx_place(g_pending[i].start, i);
+}
+
+/* Indexes the block just appended to g_pending. A rebuild re-enters every
+ * pending block, that one included. */
+static void pidx_insert_last(void) {
+  if (g_pidx_cap == 0 || (g_pidx_used + 1) * 10 > g_pidx_cap * 7) {
+    pidx_rebuild();
+    return;
+  }
+  pidx_place(g_pending[g_pending_count - 1].start, g_pending_count - 1);
+}
+
+/* The slot holding `addr`, or -1. */
+static long pidx_slot(uintptr_t addr) {
+  if (g_pidx_cap == 0)
+    return -1;
+  size_t s = pidx_home(addr);
+  while (g_pidx_keys[s] != PIDX_EMPTY) {
+    if (g_pidx_keys[s] == addr)
+      return (long)s;
+    s = (s + 1) & (g_pidx_cap - 1);
+  }
   return -1;
 }
 
+static void pidx_clear(void) {
+  if (g_pidx_cap)
+    memset(g_pidx_keys, 0, g_pidx_cap * sizeof(uintptr_t));
+  g_pidx_used = 0;
+}
+
+static long find_exact_in_pending(uintptr_t addr) {
+  long s = pidx_slot(addr);
+  return s < 0 ? -1 : (long)g_pidx_vals[s];
+}
+
+/* Removes g_pending[idx] (swap-with-last; g_pending is unsorted), keeping
+ * the index in step. */
+static void pending_remove(size_t idx) {
+  long s = pidx_slot(g_pending[idx].start);
+  if (s >= 0)
+    g_pidx_keys[s] = PIDX_DELETED;
+  size_t last = --g_pending_count;
+  if (idx != last) {
+    g_pending[idx] = g_pending[last];
+    long m = pidx_slot(g_pending[idx].start);
+    if (m >= 0)
+      g_pidx_vals[m] = idx;
+  }
+}
+
+static size_t g_dead_count = 0; /* dead entries in g_blocks */
+
 /* g_blocks is kept sorted by `start` at all times between rebuilds (the
  * only mutators -- gc_rebuild_index's qsort, gc_sweep's order-preserving
- * compaction, and this file's own memmove-based removal below -- all
- * preserve that invariant), so an exact match can binary search. */
+ * compaction, and turf_gc_reregister_block's in-place `dead` marking --
+ * all preserve that invariant), so an exact match can binary search. A dead
+ * entry is not a block: its memory was handed back by realloc. At most one
+ * entry has a given start (a new block at a dead entry's address is in
+ * g_pending until the rebuild, which drops the dead one first). */
 static long find_exact_in_blocks(uintptr_t addr) {
   size_t lo = 0, hi = g_block_count;
   while (lo < hi) {
     size_t mid = lo + (hi - lo) / 2;
     if (g_blocks[mid].start == addr)
-      return (long)mid;
+      return g_blocks[mid].dead ? -1 : (long)mid;
     if (g_blocks[mid].start < addr)
       lo = mid + 1;
     else
@@ -550,7 +655,9 @@ void turf_gc_register_block(void *p, size_t size, const TurfTypeDesc *desc) {
   g_pending[g_pending_count].size = size;
   g_pending[g_pending_count].desc = desc;
   g_pending[g_pending_count].marked = 0;
+  g_pending[g_pending_count].dead = 0;
   g_pending_count++;
+  pidx_insert_last();
 }
 
 void turf_gc_reregister_block(uintptr_t old_addr, void *new_p,
@@ -567,13 +674,13 @@ void turf_gc_reregister_block(uintptr_t old_addr, void *new_p,
      * pin the wrong object under the old key). */
     pin_idx = find_pin(old_addr);
     if ((idx = find_exact_in_pending(old_addr)) >= 0) {
-      /* Unsorted array -- swap-with-last removal is fine. */
-      g_pending[idx] = g_pending[--g_pending_count];
+      /* Unsorted array -- swap-with-last removal, index kept in step. */
+      pending_remove((size_t)idx);
     } else if ((idx = find_exact_in_blocks(old_addr)) >= 0) {
-      /* Sorted array -- must shift, not swap, to preserve order. */
-      memmove(&g_blocks[idx], &g_blocks[idx + 1],
-              (g_block_count - (size_t)idx - 1) * sizeof(GcBlock));
-      g_block_count--;
+      /* Sorted array -- marked, not removed: a shift would cost O(heap)
+       * per realloc. gc_rebuild_index() drops it. */
+      g_blocks[idx].dead = 1;
+      g_dead_count++;
     }
     /* Not found: see this function's own doc comment in
      * turfrt_internal.h -- degrade to a fresh registration. */
@@ -629,6 +736,17 @@ static int gcblock_cmp(const void *a, const void *b) {
 }
 
 static void gc_rebuild_index(void) {
+  /* Drop dead entries first (order-preserving), so a block now living at a
+   * dead entry's old address never shares its start in the sorted array,
+   * and no collection ever sees a dead entry. */
+  if (g_dead_count) {
+    size_t w = 0;
+    for (size_t i = 0; i < g_block_count; i++)
+      if (!g_blocks[i].dead)
+        g_blocks[w++] = g_blocks[i];
+    g_block_count = w;
+    g_dead_count = 0;
+  }
   if (g_pending_count == 0)
     return;
   gc_arr_grow((void **)&g_blocks, &g_block_cap, sizeof(GcBlock),
@@ -637,12 +755,16 @@ static void gc_rebuild_index(void) {
          g_pending_count * sizeof(GcBlock));
   g_block_count += g_pending_count;
   g_pending_count = 0;
+  pidx_clear();
   qsort(g_blocks, g_block_count, sizeof(GcBlock), gcblock_cmp);
 }
 
 /* Containment query -- last block whose start <= addr, then a bounds
- * check. Only ever called during a collection, against the just-rebuilt,
- * fully-sorted g_blocks. */
+ * check. Called during a collection, against the just-rebuilt, fully-sorted
+ * g_blocks, and outside one by gc_find_containing_any() (pin/unpin), when
+ * the candidate can be a dead entry: no block, so NULL (blocks never
+ * overlap, so no live entry before it can contain `addr` either; a block
+ * reallocated into that memory is in g_pending). */
 static GcBlock *gc_find_containing(uintptr_t addr) {
   size_t lo = 0, hi = g_block_count;
   while (lo < hi) {
@@ -655,7 +777,7 @@ static GcBlock *gc_find_containing(uintptr_t addr) {
   if (lo == 0)
     return NULL;
   GcBlock *cand = &g_blocks[lo - 1];
-  if (addr >= cand->start && addr < cand->start + cand->size)
+  if (!cand->dead && addr >= cand->start && addr < cand->start + cand->size)
     return cand;
   return NULL;
 }
