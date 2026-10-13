@@ -222,6 +222,29 @@ public:
     Category_ = SLM::ErrorCategory::CONTROL_FLOW;
   }
 };
+// A `for` range whose constant bounds and step say the loop variable moves
+// away from the end, so the loop runs until something in the body leaves it
+// (`for i in 5..1 { }`: the default step counts up). A warning: the body may
+// well `break` or `return`.
+class RangeNeverEndsWarning : public TurfWarning {
+public:
+  RangeNeverEndsWarning(SourceLocation Loc, long long Start, long long End,
+                        bool StepCountsUp, const std::string &Var)
+      : TurfWarning(
+            Loc,
+            TurfWarning::WarningLabel() + "This loop never reaches its end: " +
+                std::to_string(Start) + ".." + std::to_string(End) + " counts " +
+                (Start > End ? "down" : "up") + ", but the step counts " +
+                (StepCountsUp ? "up" : "down") + "." + Colors::RESET,
+            Start > End
+                ? "A descending range needs a decreasing step: `for " + Var + " in " +
+                      std::to_string(Start) + ".." + std::to_string(End) +
+                      " step " + Var + "-- { ... }`."
+                : "An ascending range needs an increasing step, such as the "
+                  "default.") {
+    Category_ = SLM::ErrorCategory::CONTROL_FLOW;
+  }
+};
 // CFG Phase 2 (Issue #186): A local variable is declared but its value is
 // never read on any path through the function. Non-fatal.
 class UnusedVariableWarning : public TurfWarning {

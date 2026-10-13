@@ -426,6 +426,11 @@ private:
   /// `&?T`'s own safety is enforced by a SEPARATE mechanism entirely
   /// (NullabilityPass, Analysis.h) -- it is not "safe like &T", it is
   /// "checked instead of gated".
+  /// RangeNeverEndsWarning for a `for` whose constant bounds and step move
+  /// the loop variable away from its end (TypeCheckerStmt.cpp).
+  void warnIfRangeNeverEnds(const ForExprAST &Node, const TurfType *StartTy,
+                            const TurfType *EndTy);
+
   /// A template's own type parameter, unsubstituted (`T` itself, not
   /// `List<T>` or `&T`). An operation on one is checked per instantiation
   /// (FREEZE §6.1), never against the template.

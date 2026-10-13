@@ -253,7 +253,7 @@ fn main(): int {
 10 7 4 1 
 ```
 
-The default step counts up, so `for i in 5..1 { ... }` never reaches its end and runs forever, as does any `step` that moves away from the end. The compiler does not catch this in general.
+The default step counts up, so `for i in 5..1 { ... }` never reaches its end and runs forever, as does any `step` that moves away from the end. When both bounds are constants and the step is the default or a literal `i++`, `i--`, `i += k` or `i -= k`, the compiler warns ("This loop never reaches its end"); otherwise it cannot tell.
 
 ### The loop variable and the bounds
 

@@ -244,6 +244,48 @@ void TypeChecker::visitDoWhile(DoWhileExprAST &Node) {
 }
 
 
+// `for i in 5..1 { }` counts up (the default step) from above its end, so it
+// never ends unless the body leaves it. Judged only when both bounds are
+// integer constants and the step is the default or a literal `i++`, `i--`,
+// `i += k` or `i -= k` on the loop variable; anything else is not knowable
+// here and is left alone.
+void TypeChecker::warnIfRangeNeverEnds(const ForExprAST &Node, const TurfType *StartTy,
+                                       const TurfType *EndTy) {
+  if (!StartTy || !EndTy || StartTy->isDouble() || EndTy->isDouble())
+    return;
+  auto Start = tryFoldUntypedIntConstant(Node.getStart(), /*IsTopLevel=*/true);
+  auto End = tryFoldUntypedIntConstant(Node.getEnd(), /*IsTopLevel=*/true);
+  if (!Start || !End || !Start->isSignedIntN(64) || !End->isSignedIntN(64))
+    return;
+  const long long S = Start->getSExtValue();
+  const long long E = End->getSExtValue();
+  if (S == E)
+    return;
+  auto IsLoopVar = [&](const ExprAST *X) {
+    const auto *V = dynamic_cast<const VariableExprAST *>(X);
+    return V && V->getName() == Node.getVarName();
+  };
+  bool Up = true;
+  if (const ExprAST *Step = Node.getStep()) {
+    if (const auto *P = dynamic_cast<const PostfixExprAST *>(Step)) {
+      if (!IsLoopVar(P->getOperand()))
+        return;
+      Up = P->getOpcode() == '+';
+    } else if (const auto *C = dynamic_cast<const CompoundAssignmentExprAST *>(Step)) {
+      auto K = tryFoldUntypedIntConstant(C->getRHS(), /*IsTopLevel=*/true);
+      if (!IsLoopVar(C->getLHS()) || !K || K->isZero() ||
+          (C->getOpcode() != '+' && C->getOpcode() != '-'))
+        return;
+      Up = (C->getOpcode() == '+') != K->isNegative();
+    } else {
+      return;
+    }
+  }
+  if ((S > E && Up) || (S < E && !Up))
+    RangeNeverEndsWarning(Node.getLoc(), S, E, Up, Node.getVarName()).emit();
+}
+
+
 void TypeChecker::visitFor(ForExprAST &Node) {
   // Visit start / end first so we know their types -- this determines the
   // loop variable's inferred type below.
@@ -318,6 +360,8 @@ void TypeChecker::visitFor(ForExprAST &Node) {
 
   if (Node.getStep())
     const_cast<ExprAST *>(Node.getStep())->accept(*this);
+
+  warnIfRangeNeverEnds(Node, StartTy.get(), EndTy.get());
 
   // Visit body
   if (Node.getBody()) {
