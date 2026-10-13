@@ -37,7 +37,7 @@ jobs:
         run: |
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y sudo wget curl gnupg lsb-release ca-certificates \
-            build-essential cmake git file binutils python3 time
+            build-essential cmake git file binutils python3 time software-properties-common
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git config --global user.email ci@turf-lang.invalid
           git config --global user.name CI
@@ -217,7 +217,7 @@ jobs:
         run: |
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y sudo wget curl gnupg lsb-release ca-certificates \
-            build-essential cmake git file binutils python3 time
+            build-essential cmake git file binutils python3 time software-properties-common
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git config --global user.email ci@turf-lang.invalid
           git config --global user.name CI
