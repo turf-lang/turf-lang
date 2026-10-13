@@ -16,6 +16,7 @@
 #include <algorithm> // std::find
 
 #include "frontend/AST.h"
+#include "frontend/Parser.h"        // IsPreludeBareModule -- the prelude tier of a function value
 #include "sema/Builtins.h"        // LookupBuiltin — for skipping bare intrinsics in visitFuncCall
 #include "frontend/ASTChildWalker.h"  // LaterLocalFinder (E043)
 #include "diagnostics/Errors.h"          // ReferenceError, DuplicateDeclarationError
@@ -150,6 +151,13 @@ void Resolver::visitVariable(VariableExprAST &Node) {
     if (const auto *Flat = SymTable_.lookupFlatFunctionImport(SelfModule, Node.getName())) {
       for (const auto &Match : SymTable_.findInModules(Node.getName()))
         if (Match.ModuleName == Flat->SourceModule)
+          Candidates.push_back(Match.Symbol);
+    }
+    // The prelude tier, as for a bare call (Resolver::visitFuncCall): a name
+    // `sqrt(x)` can call with no import is also a value, as the last resort.
+    if (Candidates.empty()) {
+      for (const auto &Match : SymTable_.findInModules(Node.getName()))
+        if (IsPreludeBareModule(Match.ModuleName) && Match.Symbol->IsPublic)
           Candidates.push_back(Match.Symbol);
     }
     if (Candidates.size() == 1) {

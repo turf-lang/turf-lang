@@ -279,7 +279,8 @@ fn main(): int {
 What can be used as a value:
 
 - **A function by its plain name**, when that name is visible to a bare call
-  (declared in this file, or brought in by `import m::name;`). The variable's
+  (declared in this file, brought in by `import m::name;`, or a prelude
+  function such as `sqrt`, which comes last as it does for a call). The variable's
   function type can be written or inferred: `mut g = double_it;` gives `g` the
   type `fn(int): int`.
 - **Not an overloaded name.** If more than one overload has the name, there is
@@ -325,10 +326,6 @@ What can be used as a value:
       return 0;
   }
   ```
-
-- **A prelude function by its bare name** (`sqrt`) is not found as a value
-  (`E040`) unless it is imported by name as above: the prelude is only the
-  last resort of a *call* (section 7.4).
 
 ---
 
@@ -790,7 +787,8 @@ A bare call `f(...)` looks, in order, at: (1) the functions this file declares;
 you imported (`import m::f;`); and only if none of those has any function
 called `f`, (4) the prelude. So the prelude can never make a program
 ambiguous: declaring your own `max(a: int, b: int)` hides math's `max`, and
-`math::max` still reaches it.
+`math::max` still reaches it. A bare function name used as a value
+(`mut f = sqrt;`) is looked up in the same order.
 
 The price is that once a file declares *any* function named `max`, a bare
 `max(1.5, 0.5)` is checked against yours alone and reports `E056` naming your
