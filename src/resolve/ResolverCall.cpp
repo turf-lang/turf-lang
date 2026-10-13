@@ -99,7 +99,9 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
     // an inner scope and so never collided with the global `fn`.) Reject it,
     // as every language where a local shadows a function does.
     if (auto VarSym = SymTable_.lookupVariable(CalleeName)) {
-      if (VarSym->Type && VarSym->Type->isFunc()) {
+      // An inferred local (`mut g = sq;`) is still `guess` here: the
+      // TypeChecker infers it, and judges the call once it knows the type.
+      if (VarSym->Type && (VarSym->Type->isFunc() || VarSym->Type->isGuess())) {
         const_cast<VariableExprAST *>(VarCallee)->ResolvedSymbol = VarSym;
         return;
       }

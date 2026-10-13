@@ -897,6 +897,16 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
         setType(&Node, FT->getReturnType());
         return;
       }
+      // An inferred local reaches here unchecked (the Resolver cannot know
+      // its type yet), so a `mut n = 3; n(1);` is rejected here instead.
+      if (CalleeTy)
+        reportError(Node.getLoc(), ErrCode::NotCallable,
+                    "'" + CalleeName + "' is a variable of type '" +
+                        CalleeTy->getName() + "', not a function -- it can't be called.",
+                    {}, "Drop the '(...)' if you meant to use its value.",
+                    "Not callable!");
+      setType(&Node, nullptr);
+      return;
     }
   }
 

@@ -279,9 +279,9 @@ fn main(): int {
 What can be used as a value:
 
 - **A function by its plain name**, when that name is visible to a bare call
-  (declared in this file, or brought in by `import m::name;`). The variable
-  must be given its function type explicitly; `mut g = double_it;` leaves `g`
-  with no usable type, and calling it is `E135`.
+  (declared in this file, or brought in by `import m::name;`). The variable's
+  function type can be written or inferred: `mut g = double_it;` gives `g` the
+  type `fn(int): int`.
 - **Not an overloaded name.** If more than one overload has the name, there is
   no single signature to take, and it is `E125` ("'combine' is overloaded"):
 
