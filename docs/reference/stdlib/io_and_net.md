@@ -1,126 +1,267 @@
-# I/O: `io`, `net`, `sys`
+# I/O and networking: `io`, `sys`, `net`
 
-Console I/O, TCP networking, and low-level process control. None of these
-are prelude — each requires an explicit `import`.
+Three modules for talking to the outside world:
 
-```turflang
-import io;
-import net;
-import sys;
-```
+| Module | For | Import |
+|---|---|---|
+| `io` | printing, reading a line of input, reading and writing whole files | none (prelude) |
+| `sys` | ending the program: `exit`, `abort`, `panic` | none (prelude) |
+| `net` | TCP client and server sockets | `import net;` |
 
-Like the rest of the standard library, these modules are a thin
-Turf-level wrapper layer over raw C/POSIX bindings declared with
-`extern fn` — there's no compiler-intrinsic magic involved (the old
-`@intrinsic("print"/"printline"/"input")` mechanism has been fully removed).
-`io.tr` delegates to libc `printf`/`scanf`/`getchar`/`calloc`; `net.tr`
-wraps raw POSIX `socket`/`bind`/`listen`/`accept`/`connect`/`recv`/`send`/
-`close`/`setsockopt`; `sys.tr` wraps `write`/`abort`/`exit` syscalls.
+`io` and `sys` are part of the [prelude](README.md#the-prelude): their functions
+are callable bare (`printline("hi")`, `exit(1)`) or qualified (`io::printline`,
+`sys::exit`), with no `import`. `net` needs `import net;`. The conventions that
+every function below follows (which failures return `!T`, which panic, how
+`defer` closes a resource) are on the [standard library overview](README.md).
 
 ---
 
 ## `io`
 
-### `print(val: int|double|bool|char|string): void`
+### Printing
 
-Writes `val` with no trailing newline. Format per type: `%lld` for `int`,
-`%g` for `double` (a NaN is always `nan`, never `-nan`: its sign bit varies
-with the optimization level), `%d` for `bool` (prints `0`/`1`, not `"true"`/`"false"`),
-`%c` for `char`, `%s` for `string`. Dispatch to the right format happens via
-ordinary function overload resolution, not runtime type inspection.
+```text
+print(val: int): void          printline(val: int): void
+print(val: double): void       printline(val: double): void
+print(val: bool): void         printline(val: bool): void
+print(val: char): void         printline(val: char): void
+print(val: string): void       printline(val: string): void
+```
 
-### `printline(val: int|double|bool|char|string): void`
+`print` writes `val` to standard output; `printline` writes it and a newline.
+The overload is chosen by the argument's type:
 
-Same as `print`, plus a trailing `\n`. Used pervasively throughout the test
-suite and every showcase program.
+| Type | Output |
+|---|---|
+| `int` | the decimal digits: `-7` |
+| `double` | the shortest `%g`-style form: `3.5`, `0.333333`, `1e+08`. A NaN is always `nan` |
+| `bool` | `1` or `0`, not `true` and `false`. To print the words, convert first: `printline(flag to string)` |
+| `char` | the character |
+| `string` | the text |
 
 ```turflang
-io::printline("hello world");
+fn main(): int {
+    print(42);
+    print(" ");
+    print(3.5);
+    print(" ");
+    print(true);
+    print(" ");
+    print('x');
+    printline("!");
+    printline(1.0 / 3.0);
+    printline(false);
+    printline(true to string);
+    return 0;
+}
+```
+
+```text
+42 3.5 1 x!
+0.333333
+0
+true
+```
+
+Any other type has no overload: `printline(some_struct)` is E025 ("No matching
+overload!"). Convert it to a `string` first. To print several values, build one
+string with `+` and `to string`.
+
+### Buffering: `flush(): void`
+
+Standard output is buffered. `flush()` pushes out everything printed so far.
+Call it before a prompt that waits for input, and before anything that can end
+the program abruptly:
+
+- The buffer is written out when `main` returns and when the program calls
+  `sys::exit`.
+- It is **not** written out when the program panics or calls `sys::abort`:
+  text printed with `print` or `printline` that is still in the buffer can be
+  lost. A panic message itself goes to standard error, which is not buffered.
+
+### Standard error: `eprint(val: string): void`, `eprintline(val: string): void`
+
+Like `print` and `printline` for a `string`, but to standard error, and
+unbuffered: the text appears at once, in order with any panic message. Only
+`string` is accepted; convert other values with `to string`.
+
+```turflang
+fn main(): int {
+    eprint("warning: ");
+    eprintline("using the default configuration");
+    return 0;
+}
 ```
 
 ### `input(): string`
 
-Reads one line from stdin (up to 4095 characters). Internally: `calloc`s a
-zeroed 4096-byte buffer, reads with `scanf("%4095[^\n]", buf)` (stops at
-`\n`, leaving the newline itself unconsumed in the stream), then calls
-`getchar()` once to consume that leftover `\n` so it doesn't leak into the
-*next* `input()` call.
+Reads one line from standard input and returns it **without** its newline.
+
+- At end of input (no more lines, or no input at all) it returns `""`, so an
+  empty result means either an empty line or no input; it cannot tell you
+  which.
+- It reads at most 4095 characters. A longer line is returned in pieces: the
+  first 4095 characters, then (after one character is dropped between them) the
+  rest on the next call.
+- It does not trim anything: a line from a file with Windows line endings keeps
+  its `\r`.
 
 ```turflang
-io::print("Enter your name: ");
-immut name: string = io::input();
-io::printline("Hello, " + name + "!");
+fn main(): int {
+    print("Your name: ");
+    flush();
+    immut name: string = input();
+    if name == "" {
+        printline("no name given");
+        return 1;
+    }
+    printline("Hello, " + name + "!");
+    return 0;
+}
 ```
 
-### File I/O: `error FileError`, `read_to_string`, `read_lines`, `write_string`, `exists`
+### Files: `FileError`, `read_to_string`, `read_lines`, `write_string`, `exists`
+
+`io` reads and writes **whole files**. There is no file handle: each call opens
+the file, does its work and closes it before returning, so there is nothing to
+`close()` and no `defer` is needed. For a file you read or write piece by piece,
+use `extern fn` ([FFI and unsafe](../ffi_and_unsafe.md)).
 
 ```turflang
-error FileError { NotFound(path: string), ReadFailed(path: string), WriteFailed(path: string) }
+error FileError {
+    NotFound(path: string),
+    ReadFailed(path: string),
+    WriteFailed(path: string),
+}
 ```
 
-Each variant carries the path it failed on: `matches io::FileError::NotFound(path):`
-in a `compare` over `err`. `err == io::FileError::NotFound` still works and
-compares the variant only.
+Each variant carries the path it failed on. Read it with a pattern inside a
+`compare` (`matches io::FileError::NotFound(path):`); `err == io::FileError::NotFound`
+compares the variant alone; `err.message` is the message text, empty here
+([Error handling](../error_handling.md)).
 
-- **`read_to_string(path: string): !string`** — reads an entire file into
-  one string (`fopen`/`fseek`/`ftell`/`fread`). `FileError::NotFound` if
-  the file can't be opened, `FileError::ReadFailed` on a short read.
-- **`read_lines(path: string): !List<string>`** — `read_to_string` + a
-  newline split, with exactly one spurious trailing empty element (caused
-  by the file's own final `\n`) dropped; a genuine blank line before EOF is
-  preserved.
-- **`write_string(path: string, content: string): !void`** — opens `"wb"`,
-  writes, closes. `FileError::WriteFailed(path)` if the path can't be opened
-  for writing (missing directory, no permission) or the write is short.
-  **Changed in 2.0 (LEC-007):** this returned `bool`; use
-  `io::write_string(p, s) recover run { ... };` to handle failure.
-- **`exists(path: string): bool`** — `true` if the path can be opened for
-  reading.
+| Function | Returns | Behaviour |
+|---|---|---|
+| `read_to_string(path: string): !string` | the whole file as one `string` | `FileError::NotFound(path)` if the file cannot be opened for reading, whatever the reason (missing, no permission); `FileError::ReadFailed(path)` if fewer bytes were read than the file's size. |
+| `read_lines(path: string): !List<string>` | the file split at `\n` | The same error cases as `read_to_string`, except that every failure is reported as `NotFound(path)`. A final newline does not produce a final empty element: `"a\nb\n"` is `["a", "b"]`. A blank line before the end is kept: `"a\n\n"` is `["a", ""]`. An empty file is an empty list. `\r` is kept: `"a\r\nb"` is `["a\r", "b"]`. |
+| `write_string(path: string, content: string): !void` | nothing | Creates the file or **overwrites** it. `FileError::WriteFailed(path)` if it cannot be opened for writing (missing directory, no permission) or the write is short. |
+| `exists(path: string): bool` | whether the path can be opened for reading | A question, so a `bool`. It is also `true` for a directory on Linux; use [`fs::is_dir`](fs.md) to tell the two apart. |
+
+Files are read and written as bytes, with no newline translation on any
+platform. A `string` ends at its first NUL byte, so a binary file that contains
+NULs reads in full but its `length()` stops at the first one; `write_string`
+likewise writes up to the first NUL.
 
 ```turflang
-io::write_string("notes.txt", "hello\nworld\n") recover run {
-    io::eprintline("could not write notes.txt");
-    sys::exit(1);
-};
-immut content: string = io::read_to_string("notes.txt") recover produce "";
-test::assert(io::exists("notes.txt"), "...");
+import list::List;
+
+fn main(): int {
+    io::write_string("notes.txt", "first\nsecond\n") recover as err run {
+        compare err {
+            matches io::FileError::WriteFailed(path):
+            eprintline("cannot write " + path);
+            done
+            otherwise:
+            eprintline("write failed");
+        }
+        return 1;
+    };
+
+    immut lines: List<string> = io::read_lines("notes.txt") recover run {
+        eprintline("cannot read notes.txt");
+        return 1;
+    };
+    mut i: int = 0;
+    while i < lines.length() {
+        printline((i + 1 to string) + ": " + lines.get(i));
+        i = i + 1;
+    }
+
+    immut text: string = io::read_to_string("missing.txt") recover produce "(none)";
+    printline(text);
+    printline(io::exists("notes.txt"));
+    return 0;
+}
 ```
 
-### `eprint(val: string): void` / `eprintline(val: string): void` / `flush(): void`
+```text
+1: first
+2: second
+(none)
+1
+```
 
-`eprint`/`eprintline` write to stderr via a raw `write(2, ...)` syscall
-(not a buffered `FILE*`), mirroring `sys::panic`'s own approach rather than
-risking a leaked or double-closed stream handle. `flush()` calls
-`fflush(NULL)`, which glibc documents as flushing every open output stream.
+---
+
+## `sys`
+
+Ending the program, and the primitive every library panic is built on.
+
+### `exit(code: int): void`
+
+Ends the program at once with status `code`. It never returns, and it does not
+run pending `defer` statements. Standard output is flushed first.
+
+### `abort(): void`
+
+Ends the program at once as an abnormal termination. On Linux and macOS the
+process dies with `SIGABRT`, which a shell reports as status 134; on Windows the
+status is `0xE0545254`. Standard output is not flushed.
+
+### `panic(msg: string): void`
+
+Writes `msg` and a newline to standard error, then calls `abort`. It never
+returns. Unlike a library panic, it adds no `file:line:` prefix: include your
+own context in `msg`. Use it for a condition that no caller can recover from;
+for one a caller might want to handle, return a `!T` instead.
+
+### `STDERR_FD: int`
+
+The constant `2`, the standard error descriptor, for code that calls a C
+function such as `write` through `extern fn`.
 
 ```turflang
-io::eprintline("this goes to stderr, not stdout");
-io::flush();
+fn parse_port(text: string): int {
+    return strings::parse_int(text) recover as err run {
+        eprintline("bad port: " + text);
+        exit(2);
+        return 0;
+    };
+}
+
+fn main(): int {
+    immut port: int = parse_port("8080");
+    if port < 1024 {
+        panic("refusing to use a privileged port");
+    }
+    printline("port " + (port to string));
+    return 0;
+}
 ```
 
 ---
 
 ## `net`
 
-TCP networking over two structs: `TcpListener` (server-side, listening) and
-`TcpConnection` (either an accepted inbound connection or a dialed outbound
-one — the same struct either way, since a connected socket is symmetric).
+TCP over IPv4, in two types: `TcpListener` (a server's listening socket) and
+`TcpConnection` (one connected socket, whether the program dialed it or
+accepted it; both ends read and write the same way). All calls block, and there
+is no timeout.
 
-Addresses are four separate `int` octets — `connect(127, 0, 0, 1, 8080)` —
-not a `"127.0.0.1"` string. `struct sockaddr_in` needs a raw 32-bit address
-in a specific byte layout, and `strings.tr` has no dotted-decimal parser
-(yet). Internally, `buildSockAddr` packs family/port/address into one
-integer written through a `void* to int*` indexed store.
+An address is four `int` octets, not a `"127.0.0.1"` string:
+`connect(127, 0, 0, 1, 8080)`. To dial a host name, resolve it first with
+`resolve_hostname` and split the dotted text, or dial an address you already
+know. A listener always binds every local interface.
 
-Exported constants, useful if you're building further raw-socket code
-against the same primitives (e.g. a hypothetical future `UdpSocket`):
+```turflang
+import net;
 
-| Constant | Value |
-|---|---|
-| `AF_INET` | `2` |
-| `SOCK_STREAM` | `1` |
-| `SOL_SOCKET` | `1` |
-| `SO_REUSEADDR` | `2` |
+fn main(): int {
+    immut ip: string = net::resolve_hostname("localhost") recover produce "127.0.0.1";
+    printline(ip);
+    return 0;
+}
+```
 
 ### `error NetworkError`
 
@@ -135,264 +276,169 @@ error NetworkError {
 }
 ```
 
-One variant per distinct syscall failure point, kept separate rather than a
-single generic `Failed`, so a `recover as err run { ... }` block can
-distinguish e.g. `ConnectionRefused` from a local `socket()` failure.
+The variants carry no fields. Which call produces which:
+
+| Call | Failure variants |
+|---|---|
+| `TcpConnection::connect` | `SocketCreationFailed`, `ConnectionRefused` (the connection could not be made for any reason: nothing listening, no route, unreachable) |
+| `TcpListener::bind` | `SocketCreationFailed`, `BindFailed` (the port is in use, or needs privileges), `ListenFailed` |
+| `TcpListener.accept` | `AcceptFailed` |
+| `resolve_hostname` | `ResolutionFailed` |
+
+`read`, `write` and `close` do not report failure: `read` returns `""` when the
+peer has closed the connection or the read failed, and a `write` that fails is
+silent.
 
 ### `resolve_hostname(host: string): !string`
 
-Resolves a hostname to a dotted-decimal IPv4 string, so a caller can dial
-by name instead of by raw octets — `net::resolve_hostname("localhost")`
-returns `"127.0.0.1"`. `NetworkError::ResolutionFailed` if the name doesn't
-resolve.
+Looks `host` up and returns its first IPv4 address as dotted text:
+`resolve_hostname("localhost")` is `"127.0.0.1"`. A name that is already a
+dotted address resolves to itself. `NetworkError::ResolutionFailed` if the name
+does not resolve (a typo, no DNS record, no network) or is empty. IPv6 addresses
+are not returned.
 
-Implemented via the classic (deprecated but ABI-stable) glibc
-`gethostbyname`, read back through manual byte-offset pointer arithmetic
-rather than a Turf struct mirroring `struct hostent`'s C layout (this
-compiler can't bind an arbitrary C struct's field layout — see
-[`docs/architecture/pointers_and_references.md`](../../architecture/pointers_and_references.md)
-for why). Verified end-to-end: resolving `"localhost"` and dialing the
-result with `TcpConnection::connect` reaches a real listening socket.
+### `TcpConnection::connect(a: int, b: int, c: int, d: int, port: int) static: !TcpConnection`
 
-```turflang
-immut ip: string = net::resolve_hostname("localhost") recover produce "127.0.0.1";
-mut conn: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 8080) recover run {
-    io::printline("could not connect");
-    return 1;
-};
-```
+Dials `a.b.c.d:port`. See the table above for the errors. Each octet is taken
+modulo 256.
 
-### `struct TcpConnection { fd: int }`
+### `TcpConnection.read(max_bytes: int): string`
 
-#### `TcpConnection::connect(a: int, b: int, c: int, d: int, port: int) static: !TcpConnection`
+Waits until the peer sends something, then returns what arrived from **one**
+receive: at most `max_bytes` characters, and often fewer, because a TCP message
+can arrive in several pieces. It returns `""` if the peer closed the connection.
+To read until a known end, call it in a loop. The text ends at the first NUL
+byte, so `read` is for text protocols.
 
-Dials `a.b.c.d:port`. Produces `NetworkError::SocketCreationFailed` if the
-local `socket()` call fails, or `NetworkError::ConnectionRefused` if
-`connect()` fails (e.g. nothing listening on the other end).
+### `TcpConnection.write(data: string): void`
 
-```turflang
-mut conn: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 8080) recover as err run {
-    if err == net::NetworkError::ConnectionRefused {
-        io::printline("Connection refused -- is showcase/http_server.tr running on port 8080?");
-    } else {
-        io::printline("Failed to connect (socket() error).");
-    }
-    return 1;
-};
-```
+Sends `data` in one call. Like `read`, it moves bytes, not messages: the peer
+may receive them in several reads.
 
-#### `TcpConnection.read(maxBytes: int): string`
+### `TcpConnection.close(): void`
 
-Allocates a `maxBytes + 1`-byte zeroed buffer and issues **one** `recv()`
-call into it (blocks until *some* data arrives, or the peer closes), then
-returns whatever arrived as a `string`. Possibly shorter than `maxBytes`,
-possibly `""` on a closed connection.
+Closes the socket. It is **idempotent**: a second call does nothing, so
+`defer conn.close();` and an explicit early close together are safe. (Closing
+the same descriptor number twice is dangerous in general, because the system may
+have given that number to a different file in between.)
 
-> **Note: does not loop to fill `maxBytes`.** One `recv()` call only — it's
-> up to the caller to loop if they need to guarantee reading a specific
-> amount. Also note the returned buffer is deliberately never freed before
-> return: `string` and `void*` are the same opaque pointer at the LLVM
-> level, so `buf to string` doesn't copy — the returned string *is* the
-> buffer, and there's no GC yet to reclaim it (a documented, small,
-> intentional leak per call).
+### `TcpConnection.raw_fd(): int`
 
-```turflang
-immut request: string = conn.read(4096);
-```
+The underlying descriptor, for passing to FFI; `-1` once the connection is
+closed.
 
-#### `TcpConnection.write(data: string): void`
+### `TcpConnection::new(fd: int)`
 
-Sends the entirety of `data` (`strlen(data)` bytes) in one `send()` call.
+Wraps a descriptor you already own, so that `read`, `write` and `close` work on
+it. The connection takes responsibility for closing it.
 
-```turflang
-conn.write("hello back");
-```
+### `TcpListener::bind(port: int) static: !TcpListener`
 
-#### `TcpConnection.close(): void`
+Listens on every local interface at `port`, with a backlog of 128. It sets
+`SO_REUSEADDR` first, so restarting a server does not fail with "address in use"
+while the previous socket lingers. Errors: see the table above.
 
-Closes the file descriptor and marks the connection closed. **Idempotent**
-(2.0): a second `close()` does nothing. That matters with
-`defer conn.close();` plus an explicit early close — closing the same number
-twice can shut a *different* descriptor the kernel reused in between.
+### `TcpListener.accept(): !TcpConnection`
 
-#### `TcpConnection.raw_fd(): int`
+Waits for a client and returns the new connection. `AcceptFailed` is usually
+transient, so a serve loop recovers with `continue`, as below.
 
-The underlying descriptor, for FFI; `-1` after `close()`. The counterpart of
-`TcpConnection::new(fd)`, which wraps one.
+### `TcpListener.close(): void`, `TcpListener.raw_fd(): int`, `TcpListener::new(fd: int)`
 
-### `struct TcpListener { fd: int }`
+As for `TcpConnection`: `close` is idempotent, `raw_fd` is `-1` once closed, and
+`new` wraps a descriptor you own.
 
-#### `TcpListener::bind(port: int) static: !TcpListener`
+### Constants
 
-Binds all interfaces (`INADDR_ANY`) on `port`. Sets `SO_REUSEADDR` first, so
-a server restart doesn't fail with "address already in use" from a
-lingering `TIME_WAIT` socket, then calls `listen(fd, 128)` (backlog 128).
-Produces `NetworkError::SocketCreationFailed`, `BindFailed`, or
-`ListenFailed` on the respective failure.
+`AF_INET` (`2`), `SOCK_STREAM` (`1`), `SOL_SOCKET` (`1`) and `SO_REUSEADDR`
+(`2`) are the Linux values of the C constants, for a program that makes its own
+socket calls with `extern fn`. The first two are the same on every platform;
+`SOL_SOCKET` and `SO_REUSEADDR` differ on Windows and macOS, where a program
+calling `setsockopt` itself must use its platform's numbers. `net` itself does
+not use these constants.
 
-```turflang
-mut server: net::TcpListener = net::TcpListener::bind(8080) recover run {
-    io::printline("Could not start the server -- is port 8080 already in use?");
-    return 1;
-};
-```
+### Platform notes
 
-#### `TcpListener.accept(): !TcpConnection`
+The same Turf source works on Linux, macOS and Windows. The runtime handles the
+differences:
 
-Blocks until a client connects; produces `NetworkError::AcceptFailed` on
-error. The idiomatic recovery inside a serve loop is `recover run {
-continue; }`, so one bad `accept()` doesn't take down the whole server.
+- **Windows:** Winsock is started automatically on the first socket call and
+  shut down when the program exits. A socket is closed with `closesocket`, which
+  `close()` does for you. `raw_fd()` returns the Winsock `SOCKET` handle, which is
+  **not** a C runtime file descriptor: pass it to Winsock calls, never to
+  `read`, `write` or `close`.
+- **macOS and BSD:** the address structure has a length byte that Linux's does
+  not; the runtime builds it for the platform.
+- **Everywhere:** only IPv4 and TCP. `resolve_hostname` returns the first IPv4
+  address.
+
+### Example: an echo server and its client
+
+The server answers each connection with its message prefixed by `echo: `, and
+stops when it receives `quit`. `defer conn.close();` closes each connection on
+every path out of `serve`, and `defer listener.close();` closes the listener when
+`main` returns.
 
 ```turflang
-mut conn: net::TcpConnection = server.accept() recover run {
-    io::printline("accept() failed, skipping.");
-    continue;
-};
-```
-
-#### `TcpListener.close(): void`
-
-Stops listening and closes the socket. Idempotent, like `TcpConnection.close()`.
-
-#### `TcpListener.raw_fd(): int`
-
-The listening descriptor; `-1` after `close()`.
-
-### Full example: an HTTP server and client, entirely in Turf
-
-`showcase/http_server.tr` and `showcase/http_client.tr` are a real
-HTTP/1.1 server and client pair, both written in Turf against the `net`
-module directly (no raw sockets, no `extern fn`, no manual memory
-management in either file). The server:
-
-```turflang
-import io;
 import net;
-import strings;
 
-fn handle(conn: net::TcpConnection): void {
+fn serve(conn: net::TcpConnection): bool {
     defer conn.close();
-    immut request: string = conn.read(4096);
-
-    mut body: string = "";
-    mut status: string = "200 OK";
-
-    if strings::starts_with(request, "GET / ") {
-        body = "Hello from Turf!";
-    } elseif strings::starts_with(request, "GET /time") {
-        body = "the Turf web server is alive";
-    } else {
-        status = "404 Not Found";
-        body = "not found";
+    immut request: string = conn.read(1024);
+    if request == "quit" {
+        conn.write("bye");
+        return false;
     }
-
-    immut bodyLen: int = strings::length(body);
-    immut response: string =
-        "HTTP/1.1 " + status + "\nContent-Type: text/plain\nContent-Length: "
-        + (bodyLen to string) + "\nConnection: close\n\n" + body;
-    conn.write(response);
+    if request.length() > 0 {
+        conn.write("echo: " + request);
+    }
+    return true;
 }
 
 fn main(): int {
-    mut server: net::TcpListener = net::TcpListener::bind(8080) recover run {
-        io::printline("Could not start the server -- is port 8080 already in use?");
+    mut listener: net::TcpListener = net::TcpListener::bind(9091) recover run {
+        eprintline("cannot listen on port 9091");
         return 1;
     };
-    defer server.close();
+    defer listener.close();
+    printline("listening on port 9091");
+    flush();
 
-    mut requestCount: int = 0;
-    while requestCount < 1000 {
-        mut conn: net::TcpConnection = server.accept() recover run {
-            io::printline("accept() failed, skipping.");
+    mut running: bool = true;
+    while running {
+        mut conn: net::TcpConnection = listener.accept() recover run {
             continue;
         };
-        handle(conn);
-        requestCount = requestCount + 1;
+        running = serve(conn);
     }
-
     return 0;
 }
 ```
 
-And the matching client:
+The client tells apart a server that is not running from a local failure:
 
 ```turflang
-import io;
 import net;
-import strings;
 
 fn main(): int {
-    immut path: string = "/";
-    immut request: string = "GET " + path + " HTTP/1.1\nHost: 127.0.0.1:8080\nConnection: close\n\n";
-
-    mut conn: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 8080) recover as err run {
+    mut conn: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 9091) recover as err run {
         if err == net::NetworkError::ConnectionRefused {
-            io::printline("Connection refused -- is showcase/http_server.tr running on port 8080?");
+            eprintline("nothing is listening on 127.0.0.1:9091");
         } else {
-            io::printline("Failed to connect (socket() error).");
+            eprintline("could not create a socket");
         }
         return 1;
     };
-    conn.write(request);
+    defer conn.close();
 
-    immut response: string = conn.read(4096);
-    conn.close();
-    io::printline(response);
+    conn.write("hello");
+    printline(conn.read(1024));
     return 0;
 }
 ```
 
-`showcase/kv_store_server.tr` / `showcase/kv_store_client.tr` are a second,
-larger real-world consumer of `net` — a key-value store protocol over the
-same API, combined with `mem::alloc`/pointer manipulation.
+With the server running, the client prints `echo: hello`. Without it, the
+client prints `nothing is listening on 127.0.0.1:9091` to standard error and
+exits with status 1.
 
----
-
-## `sys`
-
-Low-level process control, and the shared `panic` primitive that every
-other stdlib module's internal guard rails build on.
-
-### `abort(): void`
-
-Raw `extern fn`, called directly as `sys::abort()`. There's deliberately no
-Turf-level wrapper of the same name — a same-signature `fn abort(): void {
-abort(); }` wouldn't be an overload of the extern declaration, it would be a
-duplicate declaration (a compile error), and would recurse into itself even
-if it weren't.
-
-### `exit(code: int): void`
-
-Raw `extern fn`. `sys::exit(code)` terminates the process immediately with
-the given exit code and never returns.
-
-```turflang
-test::assert(true, "reached before exiting");
-sys::exit(0);
-// unreachable: sys::exit never returns
-```
-
-### `STDERR_FD: int = 2`
-
-Exported constant for the stderr file descriptor.
-
-### `panic(msg: string): void`
-
-Writes `msg` plus a trailing `\n` to stderr via two separate raw `write(2,
-...)` syscalls, then calls `abort()`. **Never returns.**
-
-Every stdlib module's internal "this should be impossible" guard ultimately
-calls this — OOM checks in `mem.tr`, socket failures in `net.tr`,
-`List.pop()`/`Map.get()` on empty/missing, `strings::substring` bounds
-checks.
-
-> **Design note.** The two `write()` calls are deliberately not merged into
-> one `msg + "\n"` write. String `+` is an `operator` overload defined in
-> `strings.tr`, and `strings.tr` itself needs `sys.tr` for its own panics
-> (`substring`'s bounds check) — `sys.tr` importing `strings.tr` back would
-> be a circular import, which the language doesn't support. Avoiding string
-> arithmetic entirely inside `sys.tr` breaks that cycle.
-
-```turflang
-sys::panic("something went wrong");
-```
+For an HTTP layer over `net`, see [http.md](http.md).

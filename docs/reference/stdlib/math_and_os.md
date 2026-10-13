@@ -1,13 +1,13 @@
-# `math` and `os`
+# Math and the operating system: `math`, `os`
 
-Math functions (constants, libm bindings, and checked wrappers) and process
-environment access (env vars, argv/argc). Neither module is prelude —
-both require an explicit `import`.
+| Module | For | Import |
+|---|---|---|
+| `math` | constants, `abs`, `min`, `max`, `clamp`, `power`, the libm functions, `divide` | none (prelude) |
+| `os` | environment variables and command-line arguments | `import os;` |
 
-```turflang
-import math;
-import os;
-```
+`math` is part of the [prelude](README.md#the-prelude): `abs(-3)`, `max(a, b)` and
+`sqrt(2.0)` work with no import, and so do `math::abs` and `math::sqrt`. Its
+constants stay qualified (`math::PI`). `os` needs `import os;`.
 
 ---
 
@@ -20,140 +20,282 @@ import os;
 | `PI: double` | `3.14159265358979323846` |
 | `E: double` | `2.71828182845904523536` |
 
-```turflang
-test::assert(math::PI > 3.14159 && math::PI < 3.14160, "...");
-immut circumference: double = 2.0 * math::PI * 10.0;
-```
+### Functions from the C math library
 
-### Raw libm bindings
+These take a `double` and return a `double` (`pow` takes two). They are the C
+library's own functions, so they follow its rules for the cases that have no
+real answer: a result that is not a number is `nan`, one that is too large is
+`inf` or `-inf`. None of them panics or returns an error.
 
-Declared `extern from "m"` (auto-links `-lm`), all `(val: double): double`
-except `pow(base, exp)`:
+| Function | Result |
+|---|---|
+| `pow(base: double, exp: double): double` | `base` raised to `exp` |
+| `sqrt(val: double): double` | the square root; `sqrt(-1.0)` is `nan` |
+| `sin(val)`, `cos(val)`, `tan(val)` | trigonometry, with the angle in radians |
+| `floor(val)`, `ceil(val)` | round down, round up: `floor(-2.5)` is `-3`, `ceil(-2.5)` is `-2` |
+| `round(val)` | round to the nearest whole number, halves away from zero: `round(2.5)` is `3`, `round(-2.5)` is `-3` |
+| `fabs(val)` | the absolute value of a `double` |
+| `log(val)`, `log2(val)`, `log10(val)` | natural, base-2 and base-10 logarithm; `log(0.0)` is `-inf`, `log(-1.0)` is `nan` |
+| `exp(val)` | e raised to `val` |
 
-`pow`, `sqrt`, `sin`, `cos`, `tan`, `floor`, `ceil`, `round`, `fabs`, `log`,
-`log2`, `log10`, `exp`.
-
-Directly callable, e.g. `math::sqrt(2.0)`.
-
-> **Note: two independent `floor`/`ceil`/`round` implementations.**
-> `math::floor`, `math::ceil`, `math::round` here are the *raw libm*
-> versions — a completely separate namespace and code path from
-> `double.tr`'s pure-Turf, prelude, UFCS-callable `x.floor()` /
-> `x.ceil()` / `x.round()` (see [`core.md`](./core.md)). They should behave
-> identically (libm's `round()` is also half-away-from-zero) but are two
-> deliberately separate implementations, not the same function reached two
-> ways.
-
-### `abs(val: double): double` / `abs(val: int): int`
-
-`double` overload is `fabs(val)`; `int` overload is a manual
-`if val < 0 { 0 - val }` (avoids a double round-trip for integers).
+`math::floor`, `math::ceil` and `math::round` are separate from the methods
+`x.floor()`, `x.ceil()` and `x.round()` that [`double`](core.md) provides. Both
+round the same way, but the methods panic for a NaN, an infinity or a value
+beyond the range of an `int`, where the `math` functions return the value
+unchanged.
 
 ```turflang
-mut abs1: int = math::abs(-10);
-mut abs2: double = math::abs(-3.2);
+fn main(): int {
+    immut radius: double = 2.5;
+    printline("area " + (math::PI * math::power(radius, 2) to string));
+    printline(math::sqrt(2.0));
+    printline(math::floor(-2.5));
+    printline(math::round(2.5));
+    printline(math::log2(8.0));
+    printline(math::sqrt(-1.0));
+    return 0;
+}
 ```
 
-### `power(base, exp): int`
+```text
+area 19.635
+1.41421
+-3
+3
+3
+nan
+```
 
-Four overloads: `(int, int) -> int`, `(double, double) -> double`,
-`(int, double) -> double`, `(double, int) -> double`. All route through
-`pow()`, casting to/from `double` as needed; the `(int, int)` overload casts
-the final result back to `int`.
+### `abs`
 
-> **Gotcha: not exact integer exponentiation.** Because the `(int, int)`
-> overload truncates a floating-point `pow()` result back to `int`, results
-> are libm's floating-point `pow`, truncated — not computed via exact
-> integer multiplication. This is fine for the small values typically
-> exercised (`2^8`) but could silently lose precision for larger bases or
-> exponents due to floating-point rounding inside `pow()`.
+```text
+abs(val: int): int
+abs(val: double): double
+```
+
+The absolute value. `abs` of the smallest `int` (`-9223372036854775807 - 1`) has
+no positive counterpart in an `int`, so it **panics** with `Integer overflow`.
+
+### `min`, `max`
+
+```text
+min(a: int, b: int): int         max(a: int, b: int): int
+min(a: double, b: double): double   max(a: double, b: double): double
+```
+
+The smaller and the larger of two values of the same type.
+
+### `clamp`
+
+```text
+clamp(val: int, min_val: int, max_val: int): int
+clamp(val: double, min_val: double, max_val: double): double
+```
+
+`val` limited to the range from `min_val` to `max_val`: `min_val` if `val` is
+below it, `max_val` if above, else `val`. Pass `min_val <= max_val`; with the
+bounds reversed the result is not meaningful.
+
+### `power`
+
+```text
+power(base: int, exp: int): int
+power(base: double, exp: double): double
+power(base: int, exp: double): double
+power(base: double, exp: int): double
+```
+
+`base` to the power `exp`. The overload follows the argument types.
+
+All four are computed with floating-point `pow`. The `int, int` form converts the
+result back to an `int`, which has consequences:
+
+- It **truncates toward zero**. `power(2, -1)` is `0`, not `0.5`; use a `double`
+  argument for fractional results.
+- It is exact only while the result fits in a `double`'s 53 bits of precision.
+  `power(10, 18)` is exact, but `power(7, 22)` is `3909821048582988288` where the
+  true value is `3909821048582988049`. For exact large powers, multiply in a loop.
+- A result that does not fit in an `int` **panics** with `Integer overflow`:
+  `power(2, 63)` and `power(3, 40)` both do.
 
 ```turflang
-mut p: int = math::power(2, 8);
-test::assert(p == 256, "...");
+fn main(): int {
+    printline(math::power(2, 10));       // 1024
+    printline(math::power(2.0, 0.5));    // 1.41421
+    printline(math::power(2, -1));       // 0
+    printline(math::power(2.0, -1));     // 0.5
+    printline(math::min(3, 2));          // 2
+    printline(math::max(1.5, 2.5));      // 2.5
+    printline(math::clamp(15, 0, 10));   // 10
+    printline(math::abs(-4));            // 4
+    return 0;
+}
 ```
 
-### `min(a, b)` / `max(a, b)`
+### `error MathError` and `divide`
 
-Overloaded for `(int, int) -> int` and `(double, double) -> double`.
-Ordinary `a < b ? a : b` / `a > b ? a : b`.
+```text
+error MathError { DivisionByZero }
 
-### `clamp(val, min_val, max_val)`
+divide(a: int, b: int): !int
+divide(a: double, b: double): !double
+```
 
-Overloaded for `(int, int, int) -> int` and
-`(double, double, double) -> double`. Clamps `val` into `[min_val, max_val]`.
-
-### `error MathError { DivisionByZero }`
-
-### `divide(a: int, b: int): !int` / `divide(a: double, b: double): !double`
-
-Recoverable alternative to the raw `/` operator, which hard-panics (aborts
-the whole process) on division by zero. Produces `MathError::DivisionByZero`
-when `b` is `0`/`0.0`, else returns `a / b`.
+The `/` operator on integers **panics** when the divisor is zero, which is right
+when a zero divisor is a bug. `divide` is the form for a divisor that comes from
+input: it returns `MathError::DivisionByZero` when `b` is `0` (or `0.0`) and `a / b`
+otherwise. Integer division truncates toward zero, as `/` does:
+`divide(-7, 2)` is `-3`.
 
 ```turflang
-mut a: int = math::divide(10, 2) recover produce -1;   // 5
-mut b: int = math::divide(10, 0) recover produce -1;   // -1, recovered
-mut d: double = math::divide(1.0, 0.0) recover produce -1.0;
+fn average(total: int, count: int): int {
+    return math::divide(total, count) recover produce 0;
+}
+
+fn main(): int {
+    printline(average(10, 4));   // 2
+    printline(average(10, 0));   // 0
+    immut ratio: double = math::divide(1.0, 3.0) recover as err run {
+        eprintline("division by zero");
+        return 1;
+    };
+    printline(ratio);            // 0.333333
+    return 0;
+}
 ```
 
-Also usable directly as a function-call argument:
+### Failure summary
 
-```turflang
-test::assert_eq(math::divide(20, 4) recover produce -1, 5, "...");
-```
+| Call | On a problem |
+|---|---|
+| `divide` | returns `MathError::DivisionByZero` |
+| `abs(int)`, `power(int, int)` | **panic** (`Integer overflow`) when the result does not fit |
+| the C math functions | return `nan` or `inf`; never fail |
+| `min`, `max`, `clamp`, `abs(double)`, the other `power` forms | never fail |
 
 ---
 
 ## `os`
 
-Environment variables and argv/argc, following the same
-raw-binding-plus-wrapper split as the rest of the stdlib.
+The program's environment and its command line. Not prelude.
+
+```turflang
+import os;
+```
 
 ### `env(name: string): string`
 
-Wraps `getenv`. **Normalizes libc's `NULL`-on-unset return to `""`**, so
-callers never have to null-check — matching the convention `strings::
-contains`/`index_of` use for `strstr`'s result.
+The value of the environment variable `name`, or `""` if it is not set. A
+variable that is set to the empty string also reads as `""`, so `env` cannot tell
+"unset" from "empty". It never fails: reading the environment is a question
+whose answer can be "nothing".
 
-```turflang
-test::assert(os::env("TURF_TEST_DEFINITELY_UNSET_VAR_239") == "",
-             "reading an unset environment variable returns \"\", not a null crash");
+### `error OsError` and `set_env`
+
+```text
+error OsError { SetEnvFailed(name: string) }
+
+set_env(name: string, value: string, overwrite: int): !void
 ```
 
-### `error OsError { SetEnvFailed(name: string) }` / `set_env(name: string, value: string, overwrite: int): !void`
+Sets an environment variable for the current process and for any program it
+starts afterwards. It does not change the shell that launched your program.
 
-Wraps `setenv`. `overwrite` is a C-style int flag: `0` means do not clobber
-an existing value (and still succeeds), nonzero means overwrite it. Fails
-with `OsError::SetEnvFailed(name)` for a name `setenv` rejects (empty, or
-containing `=`). **Changed in 2.0 (LEC-007):** this returned `bool`.
+`overwrite` is a flag: nonzero replaces an existing value; `0` leaves an existing
+value alone and **still succeeds**. It fails with `OsError::SetEnvFailed(name)`
+when the system rejects the name: an empty name, or one that contains `=`.
 
 ```turflang
-os::set_env("TURF_TEST_VAR_239", "hello", 1) recover run { test::fail("set_env"); };
-os::set_env("TURF_TEST_VAR_239", "should_not_overwrite", 0); // no-op, value stays "hello"
-os::set_env("TURF_TEST_VAR_239", "updated", 1);              // clobbers -> "updated"
+import os;
+
+fn main(): int {
+    os::set_env("GREETING", "hello", 1) recover run {
+        eprintline("could not set GREETING");
+        return 1;
+    };
+    os::set_env("GREETING", "ignored", 0) recover run {
+        return 1;
+    };
+    printline(os::env("GREETING"));          // hello
+
+    os::set_env("GREETING", "updated", 1) recover run {
+        return 1;
+    };
+    printline(os::env("GREETING"));          // updated
+    printline(os::env("NOT_SET_ANYWHERE"));  // (an empty line)
+
+    os::set_env("BAD=NAME", "x", 1) recover as err run {
+        compare err {
+            matches os::OsError::SetEnvFailed(name):
+            printline("rejected: " + name);
+            done
+            otherwise:
+            printline("failed");
+        }
+    };
+    return 0;
+}
+```
+
+```text
+hello
+updated
+
+rejected: BAD=NAME
 ```
 
 ### `argc(): int`
 
-Counts like C's `argc` — includes `argv(0)` (the program's own invocation
-path). Backed by `TurfRuntimeGetArgc()`, a C-ABI helper the compiler
-synthesizes directly in LLVM IR at codegen time for `main`'s real
-argc/argv (there's no Turf syntax to declare `main(argc, argv)` parameters
-directly). Only valid inside a `main()` the compiler itself compiled as the
-entry point.
-
-```turflang
-test::assert(os::argc() >= 1, "argc() includes at least argv(0)");
-```
+The number of command-line arguments **including** the program itself, like C's
+`argc`. A program run with no arguments has `argc() == 1`.
 
 ### `argv(index: int): string`
 
-Backed by `TurfRuntimeGetArgv(index)`. Already bounds-checked by the
-synthesized helper — **returns `""` for an out-of-range index, never
-crashes.**
+The argument at `index`. `argv(0)` is the program's own invocation path, and
+`argv(1)` is the first argument the user typed. Arguments are not parsed: a
+quoted argument with spaces arrives as one string, and a flag such as `--name=x`
+arrives as that text. An index that is negative or not less than `argc()` returns
+`""`; it never panics.
+
+`argc` and `argv` work in a program whose `main` is the entry point, which is
+every program the compiler builds.
 
 ```turflang
-test::assert(os::argv(0) != "", "argv(0) is the program's own invocation path, never empty");
-test::assert(os::argv(999999) == "", "an out-of-range argv index returns \"\", not a crash");
+import os;
+
+fn main(): int {
+    if os::argc() < 2 {
+        eprintline("usage: " + os::argv(0) + " NUMBER...");
+        return 2;
+    }
+
+    mut total: int = 0;
+    mut i: int = 1;
+    while i < os::argc() {
+        immut n: int = strings::parse_int(os::argv(i)) recover run {
+            eprintline("not a number: " + os::argv(i));
+            return 1;
+        };
+        total = total + n;
+        i = i + 1;
+    }
+    printline(total);
+    return 0;
+}
 ```
+
+```text
+$ ./sum 10 20 12
+42
+$ ./sum 10 x
+not a number: x
+$ ./sum
+usage: ./sum NUMBER...
+```
+
+### Failure summary
+
+| Call | On a problem |
+|---|---|
+| `set_env` | returns `OsError::SetEnvFailed(name)` |
+| `env`, `argc`, `argv` | never fail |

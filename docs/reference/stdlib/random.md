@@ -1,41 +1,132 @@
-# `random`
+# Random numbers: `random`
 
-Pseudo-random numbers, built on libc `rand()`. Not prelude — requires an
-explicit `import random;`.
+Pseudo-random integers, doubles and booleans. Not prelude: it needs
+`import random;`.
 
 ```turflang
 import random;
 ```
 
-> **Not cryptographically secure.** This is an ordinary `rand()`-based PRNG
-> — fine for games, sampling, jitter, test data. Do not use it for anything
-> security-sensitive (tokens, keys, nonces). A dedicated CSPRNG binding is
-> a possible future addition, not this module.
+> **Not for security.** The generator is fast and evenly spread, but it is
+> predictable: someone who sees a few outputs can work out the rest. Do not use
+> it for passwords, tokens, keys, nonces or anything an attacker must not guess.
+> There is no cryptographic generator in the standard library.
 
-> **Reseeds on every call, not once.** This language has no mutable
-> module-level state at all (`export mut` is a hard compile error — there's
-> no way to hide a "have I seeded yet?" flag), so instead of the usual
-> "seed once at startup" pattern, every function here reseeds from a mix of
-> `time::now_seconds()` and `time::clock_ticks()` (the latter advances at
-> sub-second granularity even within the same wall-clock second, which is
-> what keeps rapid repeated calls from collapsing onto one repeated value).
-> This is simple and has no setup step, but it's neither "seed once, draw a
-> long unbroken sequence" nor suitable for anything needing reproducible
-> seeding.
+## How it is seeded
+
+The runtime keeps one generator for the whole program. It seeds itself from the
+operating system's entropy the first time you draw a number, and every draw
+advances it. There is nothing to call first, and two runs of the same program
+give different numbers.
+
+The corollary is that **you cannot choose the seed**, so a sequence cannot be
+reproduced. A test or simulation that needs repeatable "random" data must supply
+its own generator (a few lines of arithmetic on an `int` it keeps).
+
+## Functions
 
 ### `random_int(min: int, max: int): int`
 
-A pseudo-random integer in `[min, max]`, inclusive on both ends.
+A pseudo-random integer from `min` to `max`, **both included**.
+`random_int(1, 6)` is a die roll, and `random_int(5, 5)` is always `5`.
 
-```turflang
-immut roll: int = random::random_int(1, 6);
-test::assert(roll >= 1 && roll <= 6, "");
-```
+- **`max < min` panics**, because no value fits. The message starts with your
+  call's `file:line:`:
+
+  ```text
+  dice.tr:10: random_int: max (3) is less than min (7)
+  ```
+
+- The width `max - min + 1` must fit in an `int`. `random_int` over almost the
+  whole range of `int` overflows and panics with `Integer overflow`.
+- The generator produces 31 bits (see `RAND_MAX`). A range wider than
+  `RAND_MAX + 1`, about 2.1 billion values, therefore does not cover all of it:
+  only the lowest 2147483648 values above `min` can occur. For a range that
+  large, combine two draws yourself.
+- The result is `draw % width`, which favours the low end very slightly unless
+  the width divides 2^31. That is not noticeable for dice, shuffles or sampling,
+  and is not suitable for a statistical test of uniformity.
 
 ### `random_double(): double`
 
-A pseudo-random value in `[0.0, 1.0)`.
+A pseudo-random double from `0.0` up to, but **not including**, `1.0`.
+Multiply and add to scale it: `lo + random_double() * (hi - lo)`.
 
 ### `random_bool(): bool`
 
-A coin flip, built on `random_int(0, 1)`.
+`true` or `false`, each about half the time.
+
+### `reseed(): void`
+
+Discards the current state and draws a fresh seed from the operating system.
+You never need it for correct output; it exists to start a new sequence on
+purpose.
+
+### `RAND_MAX: int`
+
+`2147483647` (2^31 - 1), the largest value the underlying generator produces. It
+is the same on every platform.
+
+## Example: dealing and rolling
+
+```turflang
+import random;
+
+fn main(): int {
+    immut die: int = random::random_int(1, 6);
+    printline("you rolled " + (die to string));
+
+    immut chance: double = random::random_double();
+    if chance < 0.25 {
+        printline("a lucky roll");
+    }
+
+    if random::random_bool() {
+        printline("heads");
+    } else {
+        printline("tails");
+    }
+
+    // A temperature between 15.0 and 25.0.
+    immut celsius: double = 15.0 + random::random_double() * 10.0;
+    printline(celsius >= 15.0 && celsius < 25.0);   // 1
+    return 0;
+}
+```
+
+## Example: a shuffle
+
+Shuffling a list is the standard use of `random_int` with a shrinking range:
+walk from the end and swap each element with a random one at or before it.
+
+```turflang
+import random;
+import list::List;
+
+fn main(): int {
+    mut deck: List<int> = List::default();
+    mut n: int = 1;
+    while n <= 5 {
+        deck.push(n);
+        n = n + 1;
+    }
+
+    mut i: int = deck.length() - 1;
+    while i > 0 {
+        immut j: int = random::random_int(0, i);
+        immut held: int = deck.get(i);
+        deck.set(i, deck.get(j));
+        deck.set(j, held);
+        i = i - 1;
+    }
+
+    mut line: string = "";
+    mut k: int = 0;
+    while k < deck.length() {
+        line = line + (deck.get(k) to string) + " ";
+        k = k + 1;
+    }
+    printline(line);   // for example: 3 5 1 4 2
+    return 0;
+}
+```
