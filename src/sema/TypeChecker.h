@@ -483,6 +483,16 @@ private:
   bool checkMutableViewSource(const ExprAST *Source, SourceLocation Loc,
                               const std::string &ViewName);
 
+  /// A generic call whose arguments bind one type parameter to two different
+  /// types (`fn<T> pair(a: T, b: T)` called as `pair(1, "a")`) is E056.
+  /// unify() keeps the first binding and skips the rest, so without this the
+  /// clone takes the first type and the other argument is passed unconverted.
+  /// @p Patterns are the declared parameter types, parallel to @p ArgTypes.
+  bool checkConsistentTypeArguments(const std::vector<TurfTypePtr> &Patterns,
+                                    const std::vector<TurfTypePtr> &ArgTypes,
+                                    const std::string &CalleeName,
+                                    SourceLocation Loc);
+
   void checkSliceTypeArguments(
       const std::unordered_map<std::string, TurfTypePtr> &Subst,
       const std::string &CalleeName, SourceLocation Loc);

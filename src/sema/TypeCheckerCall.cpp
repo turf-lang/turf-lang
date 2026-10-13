@@ -750,8 +750,16 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
     // overwhelming majority of calls, which aren't generic at all.
     std::unordered_map<std::string, TurfTypePtr> Subst;
     int SubstCheckCount = std::min(ArgCount, Best->arity());
-    for (int i = 0; i < SubstCheckCount; ++i)
-      TypeWalk::unify(Best->Params[i].Type, ArgTypes[i], Subst);
+    std::vector<TurfTypePtr> Patterns;
+    for (int i = 0; i < SubstCheckCount; ++i) {
+      Patterns.push_back(Best->Params[i].Type);
+      TypeWalk::unify(Patterns.back(), ArgTypes[i], Subst);
+    }
+    if (!checkConsistentTypeArguments(Patterns, ArgTypes, CalleeName,
+                                      Node.getLoc())) {
+      setType(&Node, nullptr);
+      return;
+    }
     checkSliceTypeArguments(Subst, CalleeName, Node.getLoc()); // E140
 
     // TYPE-002 (S11b): persist onto the node instead of letting Subst go
@@ -1692,9 +1700,16 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
           std::unordered_map<std::string, TurfTypePtr> MethodOwnSubst;
           {
             int ParamOffset = IsStaticMethod ? 0 : 1;
-            for (int i = 0; i < ArgCount; ++i)
-              TypeWalk::unify(Best->Params[i + ParamOffset].Type,
-                              ArgTypes[i], MethodOwnSubst);
+            std::vector<TurfTypePtr> Patterns;
+            for (int i = 0; i < ArgCount; ++i) {
+              Patterns.push_back(Best->Params[i + ParamOffset].Type);
+              TypeWalk::unify(Patterns.back(), ArgTypes[i], MethodOwnSubst);
+            }
+            if (!checkConsistentTypeArguments(Patterns, ArgTypes, MethodName,
+                                              Node.getLoc())) {
+              setType(&Node, nullptr);
+              return;
+            }
           }
           checkSliceTypeArguments(MethodOwnSubst, MethodName, Node.getLoc()); // E140
 
@@ -2680,4 +2695,38 @@ void TypeChecker::visitArrayAccess(ArrayAccessExprAST &Node) {
   } else {
     setType(&Node, nullptr);
   }
+}
+
+
+bool TypeChecker::checkConsistentTypeArguments(
+    const std::vector<TurfTypePtr> &Patterns,
+    const std::vector<TurfTypePtr> &ArgTypes, const std::string &CalleeName,
+    SourceLocation Loc) {
+  struct Binding {
+    TurfTypePtr Ty;
+    size_t Arg;
+  };
+  std::unordered_map<std::string, Binding> First;
+  for (size_t i = 0; i < Patterns.size() && i < ArgTypes.size(); ++i) {
+    std::unordered_map<std::string, TurfTypePtr> One;
+    TypeWalk::unify(Patterns[i], ArgTypes[i], One);
+    for (const auto &[Name, Ty] : One) {
+      auto [It, Inserted] = First.emplace(Name, Binding{Ty, i});
+      if (Inserted || !Ty || !It->second.Ty ||
+          sameTypeExact(It->second.Ty.get(), Ty.get()))
+        continue;
+      reportError(Loc, ErrCode::ArgumentType,
+                  "'" + Name + "' in '" + CalleeName + "' is '" +
+                      It->second.Ty->getName() + "' from argument " +
+                      std::to_string(It->second.Arg + 1) + " but '" +
+                      Ty->getName() + "' from argument " + std::to_string(i + 1) +
+                      "; one type parameter stands for one type.",
+                  {},
+                  "Convert one argument so both have the same type, e.g. `x to " +
+                      It->second.Ty->getName() + "`.",
+                  "Conflicting type arguments!");
+      return false;
+    }
+  }
+  return true;
 }

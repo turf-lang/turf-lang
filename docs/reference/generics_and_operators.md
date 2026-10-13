@@ -142,6 +142,11 @@ exactly like ordinary overloads.
 binds `T` to `int` because `arr` is `int[3]`. Every type parameter must appear
 in the parameter list, since that is the only place it can be inferred from.
 
+**Every argument that mentions a type parameter must agree on it.** Inference
+never widens: with `fn<T> pair(a: T, b: T): T`, `pair(1, 2.5)` and
+`pair(1, "a")` are E056, because `T` would be `int` from the first argument and
+something else from the second. Convert one argument (`pair(1 to double, 2.5)`).
+
 **There is no syntax for writing type arguments at a use.** `<` after a name in
 an expression is always the less-than operator, so `identity<int>(3)` and
 `Box<int>::default()` do not parse (E110). Where a type argument cannot be

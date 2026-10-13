@@ -1,0 +1,14 @@
+// EXPECT-DIAG: E056
+// EXPECT-DIAG: 'U' in 'echo' is 'int' from argument 1 but 'bool' from argument 2
+struct Plain {
+    n: int
+}
+
+fn<U> Plain.echo(x: U, y: U): int {
+    return 1;
+}
+
+fn main(): int {
+    mut p: Plain = Plain::default();
+    return p.echo(1, true);
+}

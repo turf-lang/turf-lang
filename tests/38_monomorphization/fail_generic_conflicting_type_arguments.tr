@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E056
+// EXPECT-DIAG: 'T' in 'pair' is 'int' from argument 1 but 'string' from argument 2
+// One type parameter stands for one type; the first argument does not
+// silently decide it for the second.
+fn<T> pair(a: T, b: T): T {
+    return b;
+}
+
+fn main(): int {
+    printline(pair(1, "a"));
+    return 0;
+}
