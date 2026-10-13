@@ -49,6 +49,10 @@ trap 'rm -rf "$WORKDIR"' EXIT
 # real call (so a backtrace has two real TurfLang frames to show), a local
 # with a known value at the breakpoint line, and a parameter (gdb prints
 # both automatically the moment it stops).
+# On Windows `-o NAME` writes NAME.exe (main.cpp), and llvm-dwarfdump and gdb
+# are handed that file, so name it as it will be written.
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) EXE=.exe ;; *) EXE="" ;; esac
+
 FIXTURE="$WORKDIR/fixture.tr"
 cat > "$FIXTURE" << 'EOF'
 fn add(a: int, b: int): int {
@@ -64,7 +68,7 @@ fn main(): int {
 EOF
 
 echo -e "${BOLD}1. Compile at -O0 -g${RESET}"
-BIN="$WORKDIR/fixture"
+BIN="$WORKDIR/fixture$EXE"
 if ! "$TURF" "$FIXTURE" -O0 -g -o "$BIN" > "$WORKDIR/compile.log" 2>&1; then
   fail "fixture does not compile at -O0 -g:"; sed 's/^/       /' "$WORKDIR/compile.log"
   echo -e "\n${RED}${BOLD}debuginfo_smoke found $FAILED problem(s).${RESET}"
@@ -156,7 +160,7 @@ fn main(): int {
     return result - 1;
 }
 EOF2
-  NAMES_BIN="$WORKDIR/names"
+  NAMES_BIN="$WORKDIR/names$EXE"
   if ! "$TURF" "$WORKDIR/names.tr" -O0 -g -o "$NAMES_BIN" > "$WORKDIR/names.log" 2>&1; then
     fail "FDN-003 fixture does not compile at -O0 -g:"; sed 's/^/       /' "$WORKDIR/names.log"
   else

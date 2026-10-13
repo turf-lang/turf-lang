@@ -627,7 +627,10 @@ jobs:
           # here for their static archives (libz.a, libzstd.a), which the
           # self-contained turfc.exe links instead of their DLLs.
           # lld: the static lld archives and headers the embedded linker is built from.
-          install: mingw-w64-ucrt-x86_64-llvm mingw-w64-ucrt-x86_64-clang mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-zlib mingw-w64-ucrt-x86_64-zstd mingw-w64-ucrt-x86_64-lld
+          # diffutils (cmp) and gdb: the bash smokes use both, and without MSYS2's
+          # own the inherited Windows PATH supplies ones that cannot open MSYS2's
+          # /tmp paths (cmp -s then reports every pair of files as different).
+          install: mingw-w64-ucrt-x86_64-llvm mingw-w64-ucrt-x86_64-clang mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-zlib mingw-w64-ucrt-x86_64-zstd mingw-w64-ucrt-x86_64-lld diffutils mingw-w64-ucrt-x86_64-gdb
 
       # cli/ mirrors the turf-cli repository (cli/README.md, "Two copies"); once
       # cli/ is retired, the front end is built from a turf-cli checkout.
@@ -739,6 +742,7 @@ jobs:
         if: ${{ !cancelled() }}
         shell: msys2 {0}
         run: |
+          type -a cmp gdb llvm-dwarfdump || true
           fail=0
           for s in package_graph_smoke examples_smoke pattern_warnings_smoke migrate_pub_smoke \
                    debuginfo_smoke mem_smoke gc_smoke test_cmd_smoke fmt_smoke; do
