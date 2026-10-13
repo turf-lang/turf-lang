@@ -1,29 +1,99 @@
 # Collections: `List`, `Stack`, `Queue`, `Map`, `Set`
 
-Generic collection types. None of these are prelude — each requires an
-explicit import naming the type, e.g. `import list::List;`, or a plain
-`import list;` combined with the fully-qualified spelling `list::List<T>`.
+Five generic collection types, and `hashing`, the hash function behind `Map` and
+`Set`. None of them is in the prelude: import the type, or the module and spell
+the type with its module name.
+
+| Type | Module | What it is |
+|---|---|---|
+| `List<T>` | `list` | growable array: index, push, pop, sort, search |
+| `Stack<T>` | `stack` | last in, first out |
+| `Queue<T>` | `queue` | first in, first out |
+| `Map<K, V>` | `map` | keys to values, hashed |
+| `Set<T>` | `set` | unique values, hashed |
+| `hash(x)` | `hashing` | the hash `Map` and `Set` use |
+
+```turflang
+import list;
+import list::List;
+import map::Map;
+
+fn main(): int {
+    mut a: List<int> = List::default();   // after `import list::List;`
+    a.push(1);
+
+    mut b: list::List<int> = list::List::default();   // or after `import list;`
+    b.push(2);
+
+    mut m: Map<string, int> = Map::default();
+    m.put("one", 1);
+    return a.length() + b.length() + m.length() - 3;
+}
+```
+
+The conventions for names, failure and the 2.x guarantee are in
+[the standard library overview](README.md). How the collections relate to the
+two heaps is in [Memory and Safety](../memory_and_safety.md).
+
+## Creating a collection
+
+`T::default()` of any collection is an empty, ready collection. A declaration
+with no initializer is not: the variable has no value yet, and using it is
+**E008** ("You're using 'l' before it has a value").
+
+<!-- doc-example: fails E008 -->
+```turflang
+import list::List;
+
+fn main(): int {
+    mut l: List<int>;
+    l.push(1);
+    return 0;
+}
+```
+
+Element types can be anything the language can store: `int`, `double`, `bool`,
+`char`, `string`, an enum, a struct of any size, another collection, a reference.
+Keys of a `Map` and elements of a `Set` have a further requirement, described in
+[Keys: equality and hashing](#keys-equality-and-hashing).
 
 ```turflang
 import list::List;
-import stack::Stack;
-import queue::Queue;
-import map::Map;
-import set::Set;
-```
 
-All five are default-constructible via `T::default()` — `mut l: List<int> =
-List::default();` gives you an empty, valid collection. (A bare `mut l:
-List<int>;` with no initializer no longer works, since SEM-004 removed the
-old eager-zero-init mechanism that used to make it equivalent — see
-`docs/reference/variables_and_types.md`'s initialization chapter.)
+struct Reading {
+    id: int,
+    value: double,
+    label: string,
+    flag: bool
+}
+
+fn Reading.new(id: int, label: string): void {
+    self.id = id;
+    self.value = (id to double) * 1.5;
+    self.label = label;
+    self.flag = id % 2 == 0;
+}
+
+fn main(): int {
+    mut readings: List<Reading> = List::default();
+    mut i: int = 0;
+    while i < 20 {
+        readings.push(Reading::new(i, "r"));
+        i = i + 1;
+    }
+    mut grid: List<List<int>> = List::default();
+    grid.push(List::default());
+    grid[0].push(7);
+    return readings[19].id + grid[0][0] - 26;
+}
+```
 
 ## Shared by default, copied on demand
 
-A collection value is a **handle** to one collection (FREEZE F-COLL-1). `=`,
-passing it to a function, returning it, and storing it in a field or in another
-collection all share that one collection, its length included. `.copy()` gives
-you an independent one.
+A collection value is a **handle** to one collection. `=`, passing it to a
+function, returning it, and storing it in a field or in another collection all
+share that one collection, its length included. `.copy()` makes an independent
+one.
 
 ```turflang
 import list::List;
@@ -47,507 +117,732 @@ fn main(): int {
 }
 ```
 
-The same holds for `Stack`, `Queue`, `Set` and `Map`, and for every collection
-added later. A struct holding a collection is still copied field by field, so
-both copies of the struct name the same collection; copy the field with
-`.copy()` when you want them apart. `copy()` copies the elements as values: a
-`List<&Node>` copy holds the same nodes.
+The same holds for `Stack`, `Queue`, `Set` and `Map`. A struct that holds a
+collection is copied field by field, so both copies of the struct name the same
+collection; copy the field with `.copy()` when you want them apart. `copy()`
+copies the elements as values: a copy of a `List<&Node>` holds the same nodes.
 
-How it works: each type is one private field, `h`, a `&` reference to a header
-on the GC heap that holds the storage and the counts. `List::default()` gives
-that field a fresh header (a `&U` field's default is a new `U::default()`,
-F-COLL-2), so even an empty list is shared from the start. Before this rule
-(LEC-009, 2.0) a collection was the header itself, copied by value: copies
-shared the element buffer but not the length, so a callee's `push` was lost
-and a copy's `push` could overwrite an element the original still counted.
+Binding a collection with `immut` forbids the calls that change it
+(`l.push(1)` on an `immut` list is **E060**, "You can't change the value of 'l'
+because it's immutable"); reading calls such as `length()` and `get()` are fine.
 
-## Shared design: real per-instantiation storage, real growth
-
-Every collection in this module — `List<T>`, `Stack<T>`, `Queue<T>`, `Map<K,
-V>`, `Set<T>`, and [`mem::Pool<T>`](./mem.md) — shares the same underlying
-growth scheme, so it's worth understanding once instead of per-type:
-
-- **Real per-instantiation element sizes.** Generic storage is a raw
-  pointer (`T*`) sized in bytes as `cap * sizeof(T)` — `sizeof(T)` is a
-  genuine, monomorphized per-instantiation byte count (TYPE-002), not a
-  hardcoded assumption. **`T` can be any type, including a struct larger
-  than one machine word** — `List<Big>` (a real, multi-field struct, by
-  value) works directly; see `tests/38_monomorphization/
-  06_generic_struct_over_8_bytes.tr`. Before TYPE-002 landed, every `T` was
-  assumed to fit in one 8-byte slot and a struct over 8 bytes had to be
-  worked around by instantiating with a pointer instead (`List<MyStruct*>`)
-  — that workaround is no longer *necessary*, though it's still legal if
-  you want it (a pointer element is always exactly one word regardless of
-  what it points at).
-- **Doubling-from-8 growth.** Every push-like operation follows the same
-  rule: if the backing array is at capacity, grow it — `cap == 0` becomes
-  `cap = 8`, otherwise `cap *= 2` — via `gc_alloc`/`gc_realloc`. This is the
-  same growth logic in `List.push`, `Stack.push`, `Queue.enqueue` (when it
-  can't compact instead — see below), `Map.put`, and `Set.add`.
-
-Bugs to know about: none reported for `List`/`Stack`; `Queue` has one
-documented behavioral quirk below (compaction order); `Map`/`Set` no longer
-preserve insertion order once a `remove()` happens (see below — true since
-before this group too, just for a different underlying reason now).
-
----
-
-## `List<T>` (`collections/list.tr`)
-
-<!-- doc-example: skip private layout, not a program -->
+<!-- doc-example: fails E060 -->
 ```turflang
-struct ListHeader<T> { data: T*, len: int, cap: int }   // private
-pub struct List<T> { h: &ListHeader<T> }                // h is private
+import list::List;
+
+fn main(): int {
+    immut l: List<int> = List::default();
+    l.push(1);
+    return 0;
+}
 ```
 
-A dynamically-growing array — the general-purpose sequence type. Internally
-`import sys;`.
+## Memory
 
-### `List.copy(): List<T>`
+A collection and its storage live on the **garbage-collected heap**. You never
+free one: when nothing reachable refers to it any more, the collector reclaims
+it, exactly like a `string`. There is no `free()`, `drop()` or `close()`. A loop
+that builds and discards a thousand-element list a hundred thousand times runs
+in a few megabytes.
 
-A new, independent list with the same elements in the same order (see
-[Shared by default](#shared-by-default-copied-on-demand)).
+- **Growth.** Storage starts empty. The first `push`, `enqueue`, `put` or `add`
+  allocates room for 8 elements; whenever it is full, the next one doubles it.
+  Element size is the real size of the element type, so a struct of several
+  fields costs what it contains. Storage never shrinks: `pop`, `dequeue` and
+  `remove` give the slot back for reuse, not to the collector.
+- **What the collector sees.** The elements of a collection are traced: a
+  `List<string>` keeps its strings alive, a `Map<string, List<int>>` keeps the
+  inner lists alive, and a `List<&Node>` keeps the nodes alive.
+- **Manual memory is not covered.** Only the collection's own storage is on the
+  GC heap. A `List<void*>` of `mem::alloc` blocks does not make the collector
+  responsible for those blocks: you still free them
+  ([`mem`](mem.md), [the manual heap](../memory_and_safety.md#8-the-manual-heap)).
+- **The fields are private.** `list.h` and the rest of a collection's layout
+  are not part of the language: reading one is **E088**
+  ("Field 'List.h' is private to module 'list'"). Use the methods and operators
+  below. Raw pointer indexing into a collection's buffer is not possible; if you
+  want a growable buffer of your own, declare your own struct.
 
-### `List.push(item: T): void`
+## Failure: which calls panic, which return `!T`
 
-Appends `item` to the end, growing per the shared policy above.
+A call that cannot be given a sensible answer is a bug in the caller, and
+panics. Each panic message starts with the **caller's** `file:line:`, so it
+names the call that was wrong, not a line inside the library. There is exactly
+one recoverable lookup, `Map.try_get`.
 
-```turflang
-mut l: List<int> = List::default();
-l.push(10);
-l.push(20);
-l.push(30);
-test::assert(l.length() == 3, "");
-```
+| Call | Fails when | Message (after `file:line: `) |
+|---|---|---|
+| `List.pop()` | the list is empty | `List.pop: pop on empty list` |
+| `List.get(i)`, `List.set(i, v)` | `i < 0` or `i >= length()` | `List.get: index out of bounds`, `List.set: index out of bounds` |
+| `l[i]`, `l[i] = v` | `i` outside `-length() <= i < length()` | `List[]: index out of bounds`, `List[]=: index out of bounds` |
+| `Stack.pop()` | the stack is empty | `Stack.pop: pop on empty stack` |
+| `Stack.peek()` | the stack is empty | `Stack.peek: peek on empty stack` |
+| `Queue.dequeue()` | the queue is empty | `Queue.dequeue: dequeue on empty queue` |
+| `Queue.peek()` | the queue is empty | `Queue.peek: peek on empty queue` |
+| `Map.get(k)`, `m[k]` | `k` is not in the map | `Map.get: no such key` |
+| `s[i]` on a `Set` | `i` outside `0 <= i < length()` | `Set[]: index out of bounds` |
+| `Map.try_get(k)` | `k` is not in the map | returns `!V` holding `MapError::KeyNotFound` |
 
-### `List.pop(): T`
-
-Removes and returns the last element.
-
-> **Panics, doesn't return `!T`.** Calls `sys::panic("List.pop: pop on empty
-> list")` and aborts the process if `len == 0`. There's no recoverable
-> variant — check `.length() > 0` first if the list might be empty.
-
-```turflang
-test::assert(l.pop() == 30, "");
-```
-
-### `List.length(): int`
-
-Returns the current element count (`self.len`) — not the backing capacity.
-
-### `operator<T> [](l: List<T>, i: int): T` / `operator<T> []=(l: List<T>, i: int, value: T): void`
-
-`l[i]` / `l[i] = v` for **every** element type (LEC-006) — bounds-checked
-(`sys::panic` out of range). A negative index counts from the end, as for an
-array: `l[-1]` is the last element, and the valid range is `-len <= i < len`
-(`l[-len - 1]` panics; it does not wrap twice). `l.get(i)` / `l.set(i, v)` are
-the same operations as named methods, **except** that they take only
-`0 <= i < len`: a negative index to `get`/`set` panics. Indexing a `List<T>`
-is never `unsafe`, and the raw storage is private to `list.tr`.
-
-```turflang
-mut l: List<int> = List::default();
-l.push(1);
-test::assert(l[0] == 1, "");
-l[0] = 99;
-test::assert(l[0] == 99, "");
-
-mut names: List<string> = List::default();
-names.push("ada");
-names[0] = "grace";
-test::assert(names[0] == "grace", "");
-```
-
-`l[i]` yields the element **by value**, so `l[i].field` and `l[i].method()`
-read through it (for a struct element of any size), but you cannot assign
-into a field of a struct element (`l[i].f = v`), or call a method that
-assigns to one (`l[i].bump()`) — those are E098. A collection element is a
-handle, so `grid[i][j] = v` and `outer[i].push(v)` change the inner
-collection itself and are fine. See
-[Generics and Operators](../generics_and_operators.md#gotcha-xi-is-a-value-not-a-place-e098).
-
-### `List.sort(cmp: fn(T, T): int): void` / `List.binary_search(target: T, cmp: fn(T, T): int): int` / `List.find(predicate: fn(T): bool): int`
-
-Genuinely generic `List<T>` methods (STD-003) — sort, search, and find,
-over any element type, not just `int`.
-
-> **This used to be `List<int>`-only.** A comparator parameter typed
-> `fn(T, T): int` used to fail to type-check correctly at the call site,
-> because the compiler's generic substitution machinery didn't recurse
-> into a `FuncType`'s own parameter/return types. Fixed directly in the
-> compiler (STD-003, `docs/development/changes/STD-003.md`) — not a
-> stdlib workaround, a real fix across five call sites in the type
-> checker/resolver/monomorphizer, since a comparator callback is ordinary
-> code any Turf program might write, not something specific to this file.
-
-- **`sort`** — in-place insertion sort. `cmp(a, b)` should return
-  negative/zero/positive, matching C's `qsort` convention.
-- **`binary_search`** — only meaningful on an already-sorted list
-  (not checked/enforced); returns the index if found, `-1` otherwise.
-- **`find`** — linear search with an arbitrary predicate, for
-  unsorted lists or non-equality lookups; returns the first matching
-  index or `-1`.
+Everything else succeeds: `Map.remove` of an absent key does nothing, `Set.add`
+of a present value does nothing, `Set.remove` and the `contains`/`index_of`
+family report absence through their result (`false`, `-1`).
 
 ```turflang
 import list::List;
 
-fn byValue(a: int, b: int): int { return a - b; }
-fn isEven(n: int): bool { return n % 2 == 0; }
-
-mut nums: List<int> = List::default();
-nums.push(3);
-nums.push(1);
-nums.push(2);
-
-nums.sort(byValue);
-test::assert(nums.find(isEven) >= 0, "found an even number");
+fn main(): int {
+    mut l: List<int> = List::default();
+    l.push(1);
+    l.pop();
+    l.pop();   // panics: List.pop: pop on empty list
+    return 0;
+}
 ```
 
-> **Removed in 2.0 (LEC-007).** The concrete `list::list_sort`, `list::list_binary_search` and `list::list_find` free functions (deprecated wrappers over the `List<int>` case since STD-003) no longer exist. Call the methods above: `l.sort(cmp)`, `l.binary_search(target, cmp)`, `l.find(predicate)` — they work for every element type, not just `int`.
+Ask first with `length()` or `contains()`, or use `try_get` for a map lookup
+that may miss. [Error handling](../error_handling.md) covers `recover`.
+
+## Indexing with `[]` and `[]=`
+
+`List` and `Map` support `x[i]` and `x[i] = v`; `Set` supports `s[i]` to read
+only. The operators are ordinary generic `operator` declarations, so they work
+for every element type. The rules for writing your own are in
+[Generics and operators](../generics_and_operators.md#indexing-operator--and-operator-).
+
+| Expression | Meaning |
+|---|---|
+| `l[i]` | the element at `i`; bounds-checked |
+| `l[i] = v` | overwrite the element at `i`; bounds-checked |
+| `l[-1]` | a negative index counts from the end: `-length() <= i < length()` is valid, and `l[-length() - 1]` panics |
+| `m[k]` | `m.get(k)`: panics if `k` is missing |
+| `m[k] = v` | `m.put(k, v)`: inserts or overwrites |
+| `s[i]` | the `i`-th element of a set in its stored order (see [Set](#set)) |
+
+`l.get(i)` and `l.set(i, v)` are the same operations as methods, with one
+difference: they accept only `0 <= i < length()`, so a negative index to `get`
+or `set` panics.
+
+```turflang
+import list::List;
+import map::Map;
+import test;
+
+fn main(): int {
+    mut l: List<int> = List::default();
+    l.push(1);
+    l.push(2);
+    l.push(3);
+    test::assert(l[0] == 1 && l[-1] == 3, "from the front and from the back");
+    l[1] = 20;
+    l.set(2, 30);
+    test::assert(l.get(1) == 20 && l[-1] == 30, "writes through [] and set");
+
+    mut names: List<string> = List::default();
+    names.push("ada");
+    names[0] = "grace";
+    test::assert(names[0] == "grace", "any element type");
+
+    mut ages: Map<string, int> = Map::default();
+    ages["ada"] = 36;
+    ages["ada"] = 37;
+    test::assert(ages["ada"] == 37 && ages.length() == 1, "m[k] = v inserts or overwrites");
+    return 0;
+}
+```
+
+Two limits follow from `x[i]` returning the element **by value**:
+
+- `l[i].field` and `l[i].method()` read through the element, but a write into
+  a field of that copy (`l[i].f = v`, `l[i].f += 1`) or a call to a method that
+  assigns to `self` is **E098** ("Cannot assign to part of the value an
+  'operator[]' read returned"). Read the element into a variable, change it, and
+  store it back: `mut e: T = l[i]; e.f = v; l[i] = e;`.
+  A collection element is a handle, so `grid[i][j] = v` and `outer[i].push(v)`
+  change the inner collection itself and are fine.
+- `m[k] += 1` is **E126** ("Compound assignment through 'operator[]' is not
+  supported"). Write `m[k] = m[k] + 1`.
+
+<!-- doc-example: fails E098 -->
+```turflang
+import list::List;
+
+struct Counter { n: int }
+
+fn main(): int {
+    mut l: List<Counter> = List::default();
+    l.push(Counter::default());
+    l[0].n = 5;
+    return 0;
+}
+```
+
+<!-- doc-example: fails E126 -->
+```turflang
+import map::Map;
+
+fn main(): int {
+    mut m: Map<string, int> = Map::default();
+    m["a"] = 1;
+    m["a"] += 1;
+    return 0;
+}
+```
+
+`Set` has no `[]=`: a set's elements are unique, and overwriting a position
+could break that (`s[0] = 1` is **E056**, "No `operator[]=` overload matches").
+
+## Iteration
+
+A collection is not a built-in array, so `for x in l` does not work on it
+(**E005**, "for-each requires an array"). Walk a `List` by index, a `Stack` or
+`Queue` by emptying it, and a `Map` through `keys()` or `values()`.
+
+<!-- doc-example: fails E005 -->
+```turflang
+import list::List;
+
+fn main(): int {
+    mut l: List<int> = List::default();
+    l.push(1);
+    for x in l {
+        printline(x);
+    }
+    return 0;
+}
+```
+
+```turflang
+import list::List;
+import map::Map;
+import io;
+
+fn main(): int {
+    mut l: List<string> = List::default();
+    l.push("a");
+    l.push("b");
+    mut i: int = 0;
+    while i < l.length() {
+        io::printline(l[i]);
+        i = i + 1;
+    }
+
+    mut m: Map<string, int> = Map::default();
+    m.put("x", 1);
+    m.put("y", 2);
+    immut ks: List<string> = m.keys();
+    mut j: int = 0;
+    while j < ks.length() {
+        io::printline(ks[j] + " = " + (m.get(ks[j]) to string));   // x = 1, then y = 2
+        j = j + 1;
+    }
+    return 0;
+}
+```
+
+`Map.keys()` and `Map.values()` return **copies**, so changing the map while you
+walk a result cannot invalidate it. The `i`-th key and the `i`-th value belong to
+one entry as long as the map is not changed between the two calls. The order is
+insertion order until the first `remove`; see [Map](#map).
+
+## Sorting and searching
+
+`List<T>` has three methods that take a function. The comparator has the shape
+`fn(T, T): int` and returns a negative number, zero or a positive number as the
+first argument is less than, equal to or greater than the second. A named
+function is passed by name.
+
+| Method | Does |
+|---|---|
+| `sort(cmp)` | sorts in place, ascending by `cmp`. Insertion sort: O(n^2), and **stable** (elements that compare equal keep their order) |
+| `binary_search(target, cmp)` | the index of an element equal to `target` under `cmp`, or `-1`. O(log n). The list **must already be sorted** by the same `cmp`; it is not checked |
+| `find(predicate)` | the index of the first element for which `predicate` (`fn(T): bool`) is true, or `-1`. O(n), any order |
+
+```turflang
+import list::List;
+import io;
+
+struct Person {
+    name: string,
+    age: int
+}
+
+fn Person.new(name: string, age: int): void {
+    self.name = name;
+    self.age = age;
+}
+
+fn by_age(a: Person, b: Person): int {
+    return a.age - b.age;
+}
+
+fn by_name(a: string, b: string): int {
+    if a < b {
+        return -1;
+    }
+    if a > b {
+        return 1;
+    }
+    return 0;
+}
+
+fn is_adult(p: Person): bool {
+    return p.age >= 18;
+}
+
+fn main(): int {
+    mut people: List<Person> = List::default();
+    people.push(Person::new("ann", 30));
+    people.push(Person::new("bob", 10));
+    people.push(Person::new("cy", 30));
+    people.push(Person::new("di", 5));
+
+    people.sort(by_age);                 // di, bob, ann, cy: ann stays before cy
+    io::printline(people[0].name + " " + people[2].name + " " + people[3].name);
+
+    immut first_adult: int = people.find(is_adult);   // 2
+    io::printline(first_adult to string);
+
+    mut words: List<string> = List::default();
+    words.push("pear");
+    words.push("apple");
+    words.push("fig");
+    words.sort(by_name);                           // apple, fig, pear
+    io::printline(words.binary_search("fig", by_name) to string);    // 1
+    io::printline(words.binary_search("plum", by_name) to string);   // -1
+    return 0;
+}
+```
+
+Passing something that is not a function of that shape is **E056** ("No
+matching overload"). There is no sort for `Stack`, `Queue`, `Map` or `Set`;
+sort a `List` copy of the data.
+
+## Keys: equality and hashing
+
+A `Map` finds a key, and a `Set` finds an element, with two operations: a hash
+to pick where to look, and `==` to confirm the match. Both come from the key's
+type, field by field:
+
+- **`int`, `char`, `bool`, enums, `double`**: by value. `-0.0` and `0.0` are one
+  key. `NaN` is never equal to anything, itself included, so a `NaN` key is
+  never found: each `put` of one adds a new entry.
+- **`string`**: by **content**. Two different string values with the same text
+  are one key, wherever they came from.
+- **A struct**: you declare `operator ==` for it (comparing its fields), and the
+  hash is computed from the fields, never from padding. A struct without an
+  `operator ==` cannot be a key: the compiler reports **E011** ("Cannot compare struct values
+  with '=='") at the `put` or `add`. A struct with `string`
+  fields compares and hashes those by content.
+- **A fixed array** cannot be a key: arrays do not support `==` (**E011**,
+  "Cannot compare arrays with '=='"). Wrap it in a struct with its own
+  `operator ==`.
+
+The one rule you must keep: `a == b` has to imply the same hash. That holds
+automatically as long as your `operator ==` compares field by field. An
+`operator ==` that equates values whose fields differ (case-insensitive text,
+say) breaks it, and keys that "should" match are missed. Normalize such a key
+(lower-case it) before using it.
+
+```turflang
+import map::Map;
+import set::Set;
+import strings;
+import test;
+
+struct Point {
+    x: int,
+    y: int
+}
+
+fn Point.new(x: int, y: int): void {
+    self.x = x;
+    self.y = y;
+}
+
+operator ==(a: Point, b: Point): bool {
+    return a.x == b.x && a.y == b.y;
+}
+
+struct Tag {
+    name: string,
+    id: int
+}
+
+fn Tag.new(name: string, id: int): void {
+    self.name = name;
+    self.id = id;
+}
+
+operator ==(a: Tag, b: Tag): bool {
+    return a.name == b.name && a.id == b.id;
+}
+
+fn main(): int {
+    mut by_name: Map<string, int> = Map::default();
+    by_name.put(strings::repeat("ab", 2), 1);                 // built at run time
+    test::assert(by_name.get("abab") == 1, "string keys compare by content");
+
+    mut by_point: Map<Point, string> = Map::default();
+    by_point.put(Point::new(1, 2), "here");
+    test::assert(by_point.get(Point::new(1, 2)) == "here", "struct key");
+
+    mut tags: Set<Tag> = Set::default();
+    tags.add(Tag::new(strings::repeat("z", 3), 1));
+    test::assert(tags.contains(Tag::new("zzz", 1)), "string field by content");
+
+    mut by_double: Map<double, int> = Map::default();
+    by_double.put(0.0, 1);
+    by_double.put(-0.0, 2);
+    test::assert(by_double.length() == 1, "-0.0 and 0.0 are one key");
+    return 0;
+}
+```
+
+### `hashing::hash(x: T): int`
+
+The hash `Map` and `Set` use, public so your own tables can use it. There is a
+`string` form and a generic form for every other type; both return the value of
+the built-in `hash_of` ([Variables and types](../variables_and_types.md#hash_ofexpr)):
+equal values give equal hashes, and the result is an `int` of no particular
+range. Do not store it; it can change between compiler versions.
+
+```turflang
+import hashing;
+import strings;
+import test;
+
+fn main(): int {
+    test::assert(hashing::hash(strings::repeat("ab", 2)) == hashing::hash("abab"), "same text, same hash");
+    test::assert(hashing::hash(7) == hashing::hash(7), "same value, same hash");
+    return 0;
+}
+```
+
+## Complexity
+
+`n` is the length of the collection.
+
+| Operation | Cost |
+|---|---|
+| `List.push`, `Stack.push`, `Queue.enqueue` | amortised O(1); the occasional doubling copies the storage. A `Queue.enqueue` into a full buffer that has dequeued elements instead moves the live elements to the front, O(n) |
+| `pop`, `peek`, `dequeue`, `length`, `get`, `set`, `l[i]`, `s[i]` | O(1) |
+| `List.find` | O(n) |
+| `List.sort` | O(n^2), stable |
+| `List.binary_search` | O(log n) |
+| `Map.put`, `get`, `try_get`, `contains`, `index_of`, `remove`, `m[k]` | O(1) average |
+| `Set.add`, `contains`, `index_of`, `remove` | O(1) average |
+| `copy`, `Map.keys`, `Map.values` | O(n) |
 
 ---
 
-## `Stack<T>` (`collections/stack.tr`)
+## `List<T>`
 
-<!-- doc-example: skip private layout, not a program -->
+A growable array, the general-purpose sequence. Elements are stored in order; an
+index is a position from 0.
+
+### `List.push(item: T): void`
+
+Appends `item` at the end. Amortised O(1).
+
+### `List.pop(): T`
+
+Removes and returns the last element. Panics on an empty list (see
+[Failure](#failure-which-calls-panic-which-return-t)).
+
+### `List.length(): int`
+
+The number of elements (not the capacity).
+
+### `List.get(i: int): T` / `List.set(i: int, value: T): void`
+
+Read and write position `i`, `0 <= i < length()`; any other `i` panics. Same as
+`l[i]` and `l[i] = v` for a non-negative index; use them where a named call
+reads better or when the index may not be negative.
+
 ```turflang
-struct StackHeader<T> { data: T*, len: int, cap: int }   // private
-pub struct Stack<T> { h: &StackHeader<T> }               // h is private
+import list::List;
+import test;
+
+fn main(): int {
+    mut l: List<string> = List::default();
+    l.push("a");
+    l.push("b");
+    l.set(0, "c");
+    test::assert(l.get(0) == "c" && l.length() == 2, "get and set");
+    test::assert(l.pop() == "b" && l.length() == 1, "pop");
+    return 0;
+}
 ```
 
-LIFO. Structurally identical growth logic to `List<T>` — same
-doubling-from-8 scheme, same real per-instantiation element sizes.
+### `operator<T> [](l: List<T>, i: int): T` / `operator<T> []=(l: List<T>, i: int, value: T): void`
+
+`l[i]` and `l[i] = v`, with negative indices from the end. See
+[Indexing](#indexing-with--and-).
+
+### `List.copy(): List<T>`
+
+A new, independent list with the same elements in the same order.
+
+### `List.sort(cmp: fn(T, T): int): void`
+
+### `List.binary_search(target: T, cmp: fn(T, T): int): int`
+
+### `List.find(predicate: fn(T): bool): int`
+
+See [Sorting and searching](#sorting-and-searching).
+
+---
+
+## `Stack<T>`
+
+Last in, first out. Push and pop at the same end.
+
+### `Stack.push(item: T): void`
+
+Puts `item` on top.
+
+### `Stack.pop(): T`
+
+Removes and returns the top element. Panics if empty.
+
+### `Stack.peek(): T`
+
+Returns the top element without removing it. Panics if empty.
+
+### `Stack.length(): int`
+
+The number of elements.
 
 ### `Stack.copy(): Stack<T>`
 
 A new, independent stack with the same elements in the same order.
 
-### `Stack.push(item: T): void`
-
-Same growth/append logic as `List.push`.
-
 ```turflang
-mut s: Stack<int> = Stack::default();
-s.push(1);
-s.push(2);
-s.push(3);
+import stack::Stack;
+import test;
+
+fn main(): int {
+    mut s: Stack<int> = Stack::default();
+    s.push(1);
+    s.push(2);
+    s.push(3);
+    test::assert(s.peek() == 3 && s.length() == 3, "top is the last pushed");
+    test::assert(s.pop() == 3 && s.pop() == 2, "last in, first out");
+    return 0;
+}
 ```
-
-### `Stack.pop(): T`
-
-Removes and returns the top element. **Panics**
-(`"Stack.pop: pop on empty stack"`) if the stack is empty.
-
-```turflang
-test::assert(s.pop() == 3, "");
-```
-
-### `Stack.peek(): T`
-
-Returns the top element without removing it. **Panics**
-(`"Stack.peek: peek on empty stack"`) if empty.
-
-### `Stack.length(): int`
-
-Current element count.
 
 ---
 
-## `Queue<T>` (`collections/queue.tr`)
+## `Queue<T>`
 
-<!-- doc-example: skip private layout, not a program -->
-```turflang
-struct QueueHeader<T> { data: T*, len: int, cap: int, head: int }   // private
-pub struct Queue<T> { h: &QueueHeader<T> }                          // h is private
-```
-
-FIFO, implemented as a dynamic array plus a `head` offset — **not** a ring
-buffer.
-
-### `Queue.copy(): Queue<T>`
-
-A new, independent queue holding the waiting elements in the same order (the
-copy starts at its own `head` 0).
-
-`enqueue` appends at `data[head + len]`. When the buffer is exhausted
-(`head + len == cap`):
-
-- If `head > 0`, the queue **compacts**: it shifts all live elements to the
-  front of the buffer (an `O(len)` loop-based shift) and resets `head` to
-  `0`, reusing existing capacity instead of allocating more.
-- Only if `head == 0` (truly full — nothing to reclaim) does it actually
-  double `cap`, per the shared growth policy.
+First in, first out. `enqueue` at the back, `dequeue` from the front. The queue
+reuses the space of elements already dequeued before it asks for more, so a
+queue that is filled and drained at a steady length does not grow.
 
 ### `Queue.enqueue(item: T): void`
 
-As described above.
-
-```turflang
-mut q: Queue<int> = Queue::default();
-q.enqueue(1);
-q.enqueue(2);
-q.enqueue(3);
-q.dequeue();
-q.dequeue(); // head is now 2, len is 1
-
-// enqueue 4..10 past capacity to exercise "compact to front" then "grow"
-q.enqueue(4);
-// ...
-q.enqueue(10);
-
-test::assert(q.length() == 8, "");
-test::assert(q.dequeue() == 3, ""); // FIFO order preserved across compaction/growth
-```
+Adds `item` at the back.
 
 ### `Queue.dequeue(): T`
 
-Reads `data[head]`, advances `head`, decrements `len`. **Panics**
-(`"Queue.dequeue: dequeue on empty queue"`) if `len == 0`.
+Removes and returns the front element. Panics if empty.
 
 ### `Queue.peek(): T`
 
-Returns `data[head]` without dequeuing. **Panics**
-(`"Queue.peek: peek on empty queue"`) if empty.
+Returns the front element without removing it. Panics if empty.
 
 ### `Queue.length(): int`
 
-Current element count (`self.len` — not `cap`, and not `head + len`).
+The number of waiting elements.
+
+### `Queue.copy(): Queue<T>`
+
+A new, independent queue holding the waiting elements in the same order.
+
+```turflang
+import queue::Queue;
+import test;
+
+fn main(): int {
+    mut q: Queue<int> = Queue::default();
+    mut i: int = 0;
+    while i < 100 {
+        q.enqueue(i);
+        i = i + 1;
+    }
+    i = 0;
+    while i < 90 {
+        test::assert(q.dequeue() == i, "first in, first out");
+        i = i + 1;
+    }
+    i = 100;
+    while i < 300 {
+        q.enqueue(i);
+        i = i + 1;
+    }
+    test::assert(q.length() == 210 && q.peek() == 90, "order survives reuse and growth");
+    return 0;
+}
+```
 
 ---
 
-## `Map<K, V>` (`collections/map.tr`)
+## `Map<K, V>`
 
-<!-- doc-example: skip private layout, not a program -->
-```turflang
-struct MapHeader<K, V> { keys: K*, values: V*, len: int, cap: int, buckets: int*, bcap: int }   // private
-pub struct Map<K, V> { h: &MapHeader<K, V> }                                                     // h is private
-```
-
-Every field above is **private** (LEC-002) — the layout is described here for
-how the methods behave, not as something to read; use `keys()`/`values()` to
-iterate. A **real hash table, O(1) average lookup** — not the linear scan this
-type used to be. Two parts:
-
-- `keys`/`values`/`len`/`cap` are a dense, insertion-ordered pair of arrays
-  (exactly as before) — grown the same way `List<T>.push()` is.
-- `buckets`/`bcap` are a separate open-addressing hash INDEX layered on top
-  — `hash(key)` picks a bucket, which stores the DENSE ARRAY INDEX of that
-  key (or an empty/tombstone sentinel). `index_of()`/`get()`/`contains()`/
-  `put()`/`remove()` all probe this index instead of scanning `keys`
-  linearly.
-
-This split (rather than storing entries directly in hash-bucket order) is
-deliberate: `Set<int>`'s own `operator[]` (below) needs INSERTION-ORDER
-positional access, which a pure open-addressing table can't provide at all
-— see `docs/development/changes/STD-003.md` for the full investigation.
-`hash(K)` is `hashing::hash()` (`collections/hashing.tr`) — a real, general
-`hash(T)` only became possible with monomorphization (TYPE-002); see that
-file's own header for its design (one concrete `string` overload, one
-generic byte-hash fallback covering everything else).
-
-Because lookups need both `==` (to disambiguate a hash collision) and
-`hash()` (to pick a bucket) on `K`, your key type must support both. `int`
-and `string` are covered directly by `hashing.tr`'s own overloads; any other
-struct key needs its own `operator==` (as before) and gets `hash()` for free
-via the generic byte-hash fallback — see that file's header for the one
-caveat (a struct whose `operator==` compares a pointer-shaped field, e.g.
-another string, by content rather than identity, isn't guaranteed to hash
-consistently with it; not a concern for any plain-data key).
-
-### `Map.index_of(key: K): int`
-
-O(1) average; returns the dense-array index of `key`, or `-1` if not
-present.
-
-### `Map.contains(key: K): bool`
-
-`index_of(key) >= 0`.
-
-```turflang
-mut m: Map<string, int>;
-m.put("a", 1);
-test::assert(m.contains("a") == true, "");
-test::assert(m.contains("z") == false, "");
-```
+Keys to values. Each key appears once; `put` of an existing key overwrites its
+value. Keys are found by hash and `==` (see
+[Keys: equality and hashing](#keys-equality-and-hashing)).
 
 ### `Map.put(key: K, value: V): void`
 
-If `key` already exists, **overwrites the value in place** and does *not*
-grow the map (`len` unchanged). Otherwise appends a new key/value pair,
-growing both the dense arrays and (independently, on its own load factor)
-the bucket index as needed.
-
-```turflang
-m.put("a", 1);
-m.put("a", 100); // overwrite, doesn't grow
-test::assert(m.length() == 3, ""); // still 3 after the overwrite
-test::assert(m.get("a") == 100, "");
-```
+Inserts `key` with `value`, or replaces the value if `key` is already present
+(the length does not change).
 
 ### `Map.get(key: K): V`
 
-Returns the value for `key`.
-
-> **Panics, doesn't return `!V`.** Calls `sys::panic("Map.get: no such
-> key")` if `key` is missing. Check `.contains()` first, or use `try_get`
-> below if a missing key is an expected, recoverable case.
-
-```turflang
-test::assert(m.get("a") == 1, "");
-```
-
-### `error MapError { KeyNotFound }`
-
-The error type `try_get` produces on a miss.
+The value for `key`. Panics (`Map.get: no such key`) if absent.
 
 ### `Map.try_get(key: K): !V`
 
-Recoverable alternative to `get()` — produces `MapError::KeyNotFound`
-instead of panicking on a missing key.
+The recoverable lookup: a miss is the error `MapError::KeyNotFound`, not a
+panic.
+
+### `error MapError { KeyNotFound }`
+
+The error `try_get` returns.
 
 ```turflang
-import test;
 import map::Map;
+import io;
 
-fn tryGetExisting(): int {
-    mut m: Map<string, int> = buildMap();
-    return m.try_get("b") recover as err run {
-        return -1;
-    };
-}
-
-fn tryGetMissing(): int {
-    mut m: Map<string, int> = buildMap();
-    return m.try_get("missing") recover as err run {
+fn lookup(m: Map<string, int>, key: string): int {
+    return m.try_get(key) recover as err run {
         if err == map::MapError::KeyNotFound {
-            return -3;
+            return -1;
         }
-        return -4;
+        return -2;
     };
 }
 
-// Or, with a plain default value instead of distinguishing the error:
-mut x: int = m.try_get("a") recover produce -1;      // succeeds -> 1
-mut y: int = m.try_get("nope") recover produce -1;   // recovers -> -1
+fn main(): int {
+    mut m: Map<string, int> = Map::default();
+    m.put("a", 1);
+    m.put("a", 100);                                    // overwrite: still one entry
+    immut x: int = m.try_get("a") recover produce -1;   // 100
+    immut y: int = m.try_get("zz") recover produce -1;  // -1
+    io::printline((x to string) + " " + (y to string) + " " + (lookup(m, "zz") to string));
+    return m.length() - 1;
+}
 ```
+
+### `Map.contains(key: K): bool`
+
+True if `key` is present.
+
+### `Map.index_of(key: K): int`
+
+The position of `key` among `keys()`, or `-1` if absent. Positions change when
+an entry is removed.
 
 ### `Map.remove(key: K): void`
 
-Removes `key` in O(1) average by **swapping the removed entry with the
-last one** in the dense arrays, then shrinking `len`, and retargeting the
-hash index for whichever key just moved. No-op if `key` is not present.
-
-> **Gotcha: does not preserve insertion order.** `Map<K, V>` stops being
-> insertion-ordered the moment any `remove()` call happens — the entry that
-> used to be last silently moves into the removed slot. Don't rely on
-> iteration order after a removal.
+Removes `key` and its value; does nothing if `key` is absent. Removal fills the
+hole with the entry that was last, so **the order of `keys()` and `values()` is
+insertion order only until the first `remove`**. Do not rely on order after a
+removal.
 
 ```turflang
-m.remove("b");
-test::assert(m.contains("b") == false, "");
+import list::List;
+import map::Map;
+import strings;
+import io;
+
+fn main(): int {
+    mut m: Map<string, int> = Map::default();
+    m.put("a", 1);
+    m.put("b", 2);
+    m.put("c", 3);
+    m.put("d", 4);
+    m.remove("a");
+    m.remove("zz");                                  // absent: nothing happens
+    immut ks: List<string> = m.keys();
+    io::printline(strings::join(ks, ","));           // d,b,c
+    return m.length() - 3;
+}
 ```
 
 ### `Map.length(): int`
 
-Current key/value pair count.
-
-### `Map.copy(): Map<K, V>`
-
-A new, independent map with the same entries in the same dense order, so
-`m.copy().keys()` lists what `m.keys()` lists until either map changes.
+The number of entries.
 
 ### `Map.keys(): List<K>` / `Map.values(): List<V>`
 
-How to iterate a map (2.0). The storage (`keys`, `values`, the hash index) is
-private, so these return **copies** in the dense array's order: insertion order
-until the first `remove()`, then whatever swap-with-last compaction left (see
-the gotcha on `remove`). `keys()[i]` and `values()[i]` belong to the same entry
-as long as the map is not modified between the two calls. A copy means changing
-the map while you walk a result can neither invalidate it nor reach the raw
-storage.
+Copies of the keys and of the values, in the same order. See
+[Iteration](#iteration).
 
-```turflang
-immut ks: List<string> = m.keys();
-mut i: int = 0;
-while i < ks.length() {
-    io::printline(ks.get(i) + " = " + (m.get(ks.get(i)) to string));
-    i = i + 1;
-}
-```
+### `Map.copy(): Map<K, V>`
+
+A new, independent map with the same entries in the same order.
 
 ### `operator<K, V> [](m: Map<K, V>, key: K): V` / `operator<K, V> []=(m: &Map<K, V>, key: K, value: V): void`
 
-`m[key]` / `m[key] = v`, wrapping `get()`/`put()`, for **every** `Map<K, V>`
-(LEC-006). `m[key]` on a missing key panics, like `get()`; use `contains()`
-first, or the recoverable lookup above.
-
-```turflang
-mut m: Map<string, List<int>> = Map::default();
-mut inner: List<int> = List::default();
-inner.push(10);
-m["k"] = inner;
-test::assert(m["k"][0] == 10, "");
-```
+`m[key]` is `get`, and `m[key] = v` is `put`. See
+[Indexing](#indexing-with--and-).
 
 ---
 
-## `Set<T>` (`collections/set.tr`)
+## `Set<T>`
 
-<!-- doc-example: skip private layout, not a program -->
-```turflang
-struct SetHeader<T> { items: T*, len: int, cap: int, buckets: int*, bcap: int }   // private
-pub struct Set<T> { h: &SetHeader<T> }                                            // h is private
-```
-
-Same underlying design as `Map<K, V>` — a real hash-index lookup layered
-over a dense, insertion-ordered `items` array — but with a single array
-instead of two, since a set only stores presence, not an associated value.
+A collection of unique values. Membership is decided by hash and `==`, like a
+`Map` key.
 
 ### `Set.add(item: T): void`
 
-Adds `item` if it isn't already present (checked via the hash index, O(1)
-average); a no-op if it is — no duplicate entries.
+Adds `item`; does nothing if it is already present.
 
 ### `Set.contains(item: T): bool`
 
+True if `item` is present.
+
+### `Set.index_of(item: T): int`
+
+The position of `item` in the set's stored order (what `s[i]` indexes), or `-1`.
+
 ### `Set.remove(item: T): bool`
 
-Removes `item` if present (swap-with-last on the dense array, same O(1)-
-average-removal/insertion-order-breaking tradeoff as `Map.remove` above).
-Returns whether it was actually present and removed.
+Removes `item`. Returns `true` if it was present, `false` if not. As with
+`Map.remove`, the stored order changes after a removal: the last element takes
+the freed position.
 
 ### `Set.length(): int`
 
+The number of elements.
+
 ### `Set.copy(): Set<T>`
 
-A new, independent set with the same members in the same order.
-
-```turflang
-import set::Set;
-
-mut seen: Set<int> = Set::default();
-seen.add(1);
-seen.add(2);
-seen.add(1); // no-op, already present
-test::assert(seen.length() == 2, "");
-test::assert(seen.contains(2), "");
-```
+A new, independent set with the same elements in the same order.
 
 ### `operator<T> [](s: Set<T>, i: int): T`
 
-`s[i]` — positional read of the i-th element **in insertion order** (the
-dense `items` array is unaffected by hash-bucket order; only a `remove()`
-breaks strict insertion order, exactly like `Map`'s own gotcha above).
-Bounds-checked (`sys::panic` out of range). Works for every `Set<T>`
-(LEC-006). Deliberately no `operator[]=` — a set's invariant is
-uniqueness, and positional overwrite could silently violate it; `add()`/
-`remove()` stay the only way to mutate a `Set`'s contents.
+`s[i]` reads the element at position `i`, `0 <= i < length()` (no negative
+indices). Positions are insertion order until the first `remove`. Panics out of
+range.
 
 ```turflang
-mut s: Set<int> = Set::default();
-s.add(10);
-s.add(20);
-test::assert(s[0] == 10, "");
-test::assert(s[1] == 20, "");
+import set::Set;
+import test;
+
+fn main(): int {
+    mut seen: Set<string> = Set::default();
+    seen.add("x");
+    seen.add("y");
+    seen.add("z");
+    seen.add("x");                                   // already present
+    test::assert(seen.length() == 3, "no duplicates");
+    test::assert(seen.remove("x") && !seen.remove("x"), "remove reports presence");
+    test::assert(seen[0] == "z" && seen[1] == "y", "z moved into x's place");
+    test::assert(seen.contains("y") && seen.index_of("y") == 1, "lookup");
+    return 0;
+}
 ```
