@@ -762,6 +762,8 @@ void rewriteNewFuncCallSites(InstantiationEntry &Entry) {
   for (size_t i = Entry.SitesRewritten; i < Entry.Sites.size(); ++i) {
     if (auto *FC = dynamic_cast<FuncCallExprAST *>(Entry.Sites[i]))
       FC->ResolvedCallTarget = Entry.ClonedSymbol;
+    else if (auto *VE = dynamic_cast<VariableExprAST *>(Entry.Sites[i]))
+      VE->ResolvedFunctionRef = Entry.ClonedSymbol; // a generic fn as a value
     else
       retargetOperatorSite(Entry.Sites[i], Entry.Request.DeclKey,
                            Entry.ClonedSymbol);

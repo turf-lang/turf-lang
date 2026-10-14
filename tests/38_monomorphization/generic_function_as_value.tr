@@ -1,0 +1,59 @@
+// A generic function used as a value takes its type arguments from the
+// function type its position expects: a declared variable, an assignment, a
+// return type, a parameter, or a call through a function value. Each
+// instantiation is its own clone, the same one a direct call would use.
+import test;
+
+fn<T> id(x: T): T {
+    return x;
+}
+
+fn<T> twice(x: T, f: fn(T): T): T {
+    return f(f(x));
+}
+
+fn<A, B> second(a: A, b: B): B {
+    return b;
+}
+
+fn apply(f: fn(int): int, x: int): int {
+    return f(x);
+}
+
+fn pick(): fn(string): string {
+    return id;
+}
+
+fn<T> through_value(x: T): T {
+    immut f: fn(T): T = id;
+    return f(x);
+}
+
+fn inc(n: int): int {
+    return n + 1;
+}
+
+fn main(): int {
+    immut fi: fn(int): int = id;
+    immut fs: fn(string): string = id;
+    test::assert_eq(fi(7), 7, "declared variable, int");
+    test::assert_eq(fs("hi"), "hi", "the same function at string");
+
+    mut g: fn(double): double = id;
+    g = id;
+    test::assert_eq(g(2.5), 2.5, "assignment");
+
+    test::assert_eq(apply(id, 9), 9, "argument to a non-generic parameter");
+    immut picked: fn(string): string = pick();
+    test::assert_eq(picked("x"), "x", "return value");
+    test::assert_eq(twice(3, inc), 5, "a generic callee takes a plain function");
+    test::assert_eq(through_value(4), 4, "a value inside a generic body");
+
+    immut h: fn(int, string): string = second;
+    test::assert_eq(h(1, "b"), "b", "two type parameters");
+
+    immut call: fn(fn(int): int, int): int = apply;
+    test::assert_eq(call(id, 11), 11, "argument through a function value");
+    test::assert_eq(id(5), 5, "a direct call still works beside the value");
+    return 0;
+}

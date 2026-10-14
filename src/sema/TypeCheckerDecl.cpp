@@ -279,10 +279,10 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
                 "Missing initializer!");
   }
 
-  // Visit the initializer first (bottom-up)
-  if (Node.getInitializer()) {
-    const_cast<ExprAST *>(Node.getInitializer())->accept(*this);
-  }
+  // Visit the initializer first (bottom-up). A declared function type is what
+  // a generic function named there is instantiated at.
+  if (Node.getInitializer())
+    visitWithExpectedType(Node.getInitializer(), Node.getTypePtr());
 
   TurfTypePtr DeclTy = Node.getTypePtr();
 

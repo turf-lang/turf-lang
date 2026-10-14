@@ -316,11 +316,28 @@ What can be used as a value:
   }
   ```
 
-- **Not a generic function or a `@caller_location` one.** A generic function
-  has no one compiled body to take until a call picks its type arguments, and
-  a `@caller_location` function needs a location that only a direct call can
-  pass. Both are `E137`; write a plain function that calls it
-  (`fn id_int(x: int): int { return id(x); }`) and use that.
+- **A generic function where a function type is expected.** Its type
+  arguments come from that type: a declared variable, an assignment, a return
+  type, or a parameter of function type. Each type gets its own copy, the same
+  one a call at that type uses:
+
+  ```turflang
+  fn<T> id(x: T): T { return x; }
+  fn apply(f: fn(int): int, x: int): int { return f(x); }
+
+  fn main(): int {
+      immut fi: fn(int): int = id;
+      immut fs: fn(string): string = id;
+      printline(fs("hi"));
+      return apply(id, fi(0));
+  }
+  ```
+
+  With nothing to take them from (`mut g = id;`) it is `E137`, and a type no
+  instantiation fits (`fn(int): string = id`) is `E066`.
+- **Not a `@caller_location` function.** It needs a location that only a
+  direct call can pass (`E137`); write a plain function that calls it and use
+  that.
 - **Not a qualified name.** `io::printline` and `MathUtil::square` can be
   called but not used as values (`E137`, "Not a value!"). Wrap the call in a
   function of your own, or import the plain name:

@@ -783,6 +783,23 @@ private:
   /// of its own (E056, "no operator[]= matches"), so it stays quiet there.
   const ArrayAccessExprAST *IndexWriteTarget_ = nullptr;
 
+  /// The function type expected of ExpectedFnSite_, the one expression being
+  /// visited where a value of that type is needed (a declared variable, an
+  /// assignment target, a return type, a parameter). A generic function named
+  /// there as a value takes its type arguments from it
+  /// (typeGenericFunctionValue()); anywhere else it has none to take.
+  const ExprAST *ExpectedFnSite_ = nullptr;
+  TurfTypePtr ExpectedFnType_;
+
+  /// Visits @p E with @p Expected as its expected function type, when it is
+  /// one and @p E is a bare name.
+  void visitWithExpectedType(const ExprAST *E, const TurfTypePtr &Expected);
+
+  /// Types a generic function used as a value (`immut f: fn(int): int = id;`)
+  /// from the expected function type, and records that instantiation so the
+  /// reference names the concrete clone.
+  void typeGenericFunctionValue(VariableExprAST &Node);
+
   /// One frame per enclosing `compare` arm that narrows a TurfMachineType-
   /// typed, plain-variable subject to exactly one specific state -- pushed
   /// by visitCompare() right before checking that arm's body, popped right

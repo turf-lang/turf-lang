@@ -148,6 +148,13 @@ never widens: with `fn<T> pair(a: T, b: T): T`, `pair(1, 2.5)` and
 `pair(1, "a")` are E056, because `T` would be `int` from the first argument and
 something else from the second. Convert one argument (`pair(1 to double, 2.5)`).
 
+**A generic function used as a value takes them from the function type it is
+stored into.** `immut f: fn(int): int = identity;` instantiates `identity` at
+`int`; so does passing `identity` to a parameter of type `fn(int): int`, or
+returning it from a function that returns one. With no function type to read
+(`mut g = identity;`) it is E137. See [First-class
+functions](functions_and_modules.md#2-first-class-functions).
+
 **There is no syntax for writing type arguments at a use.** `<` after a name in
 an expression is always the less-than operator, so `identity<int>(3)` and
 `Box<int>::default()` do not parse (E110). Where a type argument cannot be

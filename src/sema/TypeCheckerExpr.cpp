@@ -243,6 +243,10 @@ void TypeChecker::visitVariable(VariableExprAST &Node) {
   //     doc comment in AST.h). Its type is the FuncType matching that
   //     function's own signature.
   if (Node.ResolvedFunctionRef) {
+    if (!Node.ResolvedFunctionRef->TypeParams.empty()) {
+      typeGenericFunctionValue(Node);
+      return;
+    }
     setType(&Node, std::make_shared<FuncType>(Node.ResolvedFunctionRef->ReturnType,
                                               Node.ResolvedFunctionRef->paramTypes()));
     return;
@@ -649,7 +653,7 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
     forgetMachineNarrowing(Node.getLHS());
   }
   if (Node.getRHS())
-    const_cast<ExprAST *>(Node.getRHS())->accept(*this);
+    visitWithExpectedType(Node.getRHS(), getType(Node.getLHS()));
 
   if (Node.getLHS() && !isAssignableLValue(Node.getLHS())) {
 #ifndef TYPECHECKER_NO_ERRORS

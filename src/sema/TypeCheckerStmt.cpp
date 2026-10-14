@@ -491,8 +491,12 @@ static bool isDeclaredErrorTypeValue(const TurfType *T) {
 
 
 void TypeChecker::visitReturn(ReturnExprAST &Node) {
-  if (Node.getVal())
-    const_cast<ExprAST *>(Node.getVal())->accept(*this);
+  if (Node.getVal()) {
+    TurfTypePtr Want = ReturnTypeStack_.empty() ? nullptr : ReturnTypeStack_.back();
+    if (Want && Want->isErrorUnion())
+      Want = static_cast<const TurfErrorUnionType *>(Want.get())->getSuccessTypePtr();
+    visitWithExpectedType(Node.getVal(), Want);
+  }
 
   TurfTypePtr RetTy = getType(Node.getVal());
 

@@ -202,6 +202,105 @@ static TurfTypePtr substituteReturnType(
 }
 
 
+void TypeChecker::visitWithExpectedType(const ExprAST *E,
+                                        const TurfTypePtr &Expected) {
+  if (!E)
+    return;
+  const ExprAST *SavedSite = ExpectedFnSite_;
+  TurfTypePtr SavedType = ExpectedFnType_;
+  if (Expected && Expected->isFunc() && dynamic_cast<const VariableExprAST *>(E)) {
+    ExpectedFnSite_ = E;
+    ExpectedFnType_ = Expected;
+  } else {
+    ExpectedFnSite_ = nullptr;
+    ExpectedFnType_ = nullptr;
+  }
+  const_cast<ExprAST *>(E)->accept(*this);
+  ExpectedFnSite_ = SavedSite;
+  ExpectedFnType_ = SavedType;
+}
+
+void TypeChecker::typeGenericFunctionValue(VariableExprAST &Node) {
+  const ResolverFunctionSymbol &Ref = *Node.ResolvedFunctionRef;
+  const std::string &Name = Node.getName();
+  std::string Generic = "fn<";
+  for (size_t I = 0; I < Ref.TypeParams.size(); ++I)
+    Generic += (I ? ", " : "") + Ref.TypeParams[I];
+  Generic += ">(";
+  for (size_t I = 0; I < Ref.Params.size(); ++I)
+    Generic += (I ? ", " : "") + Ref.Params[I].Type->getName();
+  Generic += "): " + (Ref.ReturnType ? Ref.ReturnType->getName() : std::string("void"));
+
+  const FuncType *Want =
+      (ExpectedFnSite_ == &Node && ExpectedFnType_ && ExpectedFnType_->isFunc())
+          ? static_cast<const FuncType *>(ExpectedFnType_.get())
+          : nullptr;
+  if (!Want) {
+    reportError(Node.getLoc(), ErrCode::NotAValue,
+                "'" + Name + "' is generic (" + Generic + "), so as a value it "
+                "needs a function type to take its type arguments from, and "
+                "nothing here gives one.",
+                {},
+                "Use it where a function type is declared, e.g. 'immut f: "
+                "fn(int): int = " + Name + ";', or pass it to a parameter of "
+                "function type.");
+    setType(&Node, nullptr);
+    return;
+  }
+
+  TypeWalk::SubstMap Subst;
+  bool Fits = Want->getParamTypes().size() == Ref.Params.size();
+  if (Fits) {
+    for (size_t I = 0; I < Ref.Params.size(); ++I)
+      TypeWalk::unify(Ref.Params[I].Type, Want->getParamTypes()[I], Subst);
+    if (Ref.ReturnType && Want->getReturnType())
+      TypeWalk::unify(Ref.ReturnType, Want->getReturnType(), Subst);
+    for (const auto &TP : Ref.TypeParams)
+      if (!Subst.count(TP))
+        Fits = false;
+  }
+  TurfTypePtr Got;
+  if (Fits) {
+    std::vector<TurfTypePtr> Params;
+    for (const auto &P : Ref.Params)
+      Params.push_back(substituteReturnType(P.Type, Subst));
+    Got = std::make_shared<FuncType>(
+        Ref.ReturnType ? substituteReturnType(Ref.ReturnType, Subst) : nullptr,
+        std::move(Params));
+    Fits = Got->isEquivalent(Want);
+  }
+  if (!Fits) {
+    reportError(Node.getLoc(), ErrCode::TypeMismatch,
+                "'" + Name + "' is " + Generic + ", and no choice of " +
+                    (Ref.TypeParams.size() == 1 ? "'" + Ref.TypeParams[0] + "'"
+                                                : std::string("its type arguments")) +
+                    " makes it '" + Want->getName() + "'.",
+                {},
+                "Check the expected function type against '" + Name +
+                    "''s parameters and return type.",
+                "Type mismatch!");
+    setType(&Node, nullptr);
+    return;
+  }
+  setType(&Node, Got);
+
+  if (!MonoCollector_)
+    return;
+  std::vector<std::string> Order;
+  for (const auto &P : Ref.Params)
+    TypeWalk::collectParamOrder(P.Type, Order);
+  if (Ref.ReturnType)
+    TypeWalk::collectParamOrder(Ref.ReturnType, Order);
+  std::vector<TurfTypePtr> TypeArgs = orderedTypeArgs(Order, Subst);
+  for (const auto &A : TypeArgs)
+    if (!isFullyConcreteType(A.get()))
+      return; // inside a generic template: its own clone records the real one
+  MonoCollector_->record({Monomorphize::InstantiationKind::FreeFunction,
+                          Ref.BaseName, Ref.SourceModule, std::move(TypeArgs),
+                          Node.getLoc(), Ref.Decl},
+                         &Node);
+}
+
 void noteConstructedType(const ExprAST *E, const TurfTypePtr &Expected) {
   if (!Expected || !dynamic_cast<const GenericType *>(Expected.get()) ||
       !isFullyConcreteType(Expected.get()))
@@ -365,10 +464,25 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
     const_cast<ExprAST *>(Node.getCallee())->accept(*this);
 
   // 2. Visit all argument expressions bottom-up; collect inferred types.
+  // Where the parameter types are already known -- one non-generic candidate,
+  // or a call through a function value -- a function-typed parameter is the
+  // expected type of its argument, so a generic function can be passed.
+  std::vector<TurfTypePtr> ExpectedParams;
+  if (Node.ResolvedCandidates.size() == 1 &&
+      Node.ResolvedCandidates[0]->TypeParams.empty() &&
+      Node.ResolvedCandidates[0]->Params.size() == Node.getArgs().size()) {
+    for (const auto &P : Node.ResolvedCandidates[0]->Params)
+      ExpectedParams.push_back(P.Type);
+  } else if (Node.ResolvedCandidates.empty() && Node.getCallee()) {
+    TurfTypePtr CalleeTy = getType(Node.getCallee());
+    if (CalleeTy && CalleeTy->isFunc())
+      ExpectedParams = static_cast<const FuncType *>(CalleeTy.get())->getParamTypes();
+  }
   std::vector<TurfTypePtr> ArgTypes;
-  for (const auto &Arg : Node.getArgs()) {
-    Arg->accept(*this);
-    ArgTypes.push_back(getType(Arg.get()));
+  for (size_t I = 0; I < Node.getArgs().size(); ++I) {
+    const ExprAST *Arg = Node.getArgs()[I].get();
+    visitWithExpectedType(Arg, I < ExpectedParams.size() ? ExpectedParams[I] : nullptr);
+    ArgTypes.push_back(getType(Arg));
   }
   const int ArgCount = static_cast<int>(Node.getArgs().size());
 
