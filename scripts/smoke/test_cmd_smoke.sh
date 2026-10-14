@@ -336,6 +336,17 @@ fn main(): int {
     return 0;
 }
 EOF
+  # A test named like the module it tests: `import util;` is src/util.tr, and
+  # the test file itself is not a second candidate (no E090).
+  fixture "$PRJ/app" tests/util.tr <<'EOF'
+import test;
+import util;
+
+fn main(): int {
+    test::assert(util::square(3) == 9, "a test shares its module's name");
+    return 0;
+}
+EOF
   fixture "$PRJ/app" tests/dependency.tr <<'EOF'
 import test;
 import geometry;
@@ -367,8 +378,9 @@ fn main(): int { return 0; }
 EOF
   t pass "$PRJ/app" test
   expect_rc "turf test over a project" pass 0
-  expect_out "turf test over a project" pass "Total Tests: 4"
+  expect_out "turf test over a project" pass "Total Tests: 5"
   expect_out "a test imports the package's own module" pass "own_src.tr ... PASS"
+  expect_out "a test shares its module's name" pass "util.tr ... PASS"
   expect_out "a test imports a dependency" pass "dependency.tr ... PASS"
   expect_out "a test imports a helper beside it" pass "with_helper.tr ... PASS"
   expect_out "a dependency's internal module stays private to tests too" pass "fail_dependency_internals.tr ... PASS (Rejected properly)"

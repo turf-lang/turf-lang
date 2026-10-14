@@ -967,6 +967,13 @@ static std::string DependencyModuleKey(const PackageInfo &Pkg, const std::string
 // names that directory) also sees the helper modules beside it in tests/. The
 // reverse is not true -- a src/ module never imports a test helper -- and a
 // helper whose name matches a src/ module is ambiguous like any other pair.
+// A helper is a `*_module.tr` file (the runner never runs one); every other
+// file in tests/ is a test, never imported, so tests/route.tr does not compete
+// with src/route.tr for `import route;`.
+static bool IsTestHelperName(llvm::StringRef ModuleName) {
+  return ModuleName.ends_with("_module");
+}
+
 static std::vector<ModuleCandidate>
 CollectPackageModuleCandidates(const std::string &ModuleName, const PackageInfo &P,
                                const std::string &ImportingFile) {
@@ -983,7 +990,7 @@ CollectPackageModuleCandidates(const std::string &ModuleName, const PackageInfo 
       Found.push_back({ModuleRootKind::OwnModule, Path,
                        IsRoot ? "" : DependencyModuleKey(P, Path), P.Name});
 
-  if (IsRoot && g_PackageGraph.inTests(ImportingFile)) {
+  if (IsRoot && g_PackageGraph.inTests(ImportingFile) && IsTestHelperName(ModuleName)) {
     const auto &Helpers = IndexPackageSources(P.TestsRoot);
     if (auto It = Helpers.find(ModuleName); It != Helpers.end())
       for (const auto &Path : It->second)
@@ -1203,8 +1210,10 @@ std::vector<std::string> ListAvailableModules(const std::string &ImportingFile) 
   if (g_PackageGraph.Active && !ImportingFile.empty() &&
       !ImportsResolveInStdlibOnly(ImportingFile)) {
     if (const PackageInfo *P = g_PackageGraph.packageOf(ImportingFile)) {
-      auto AddSources = [&](const std::string &Dir) {
+      auto AddSources = [&](const std::string &Dir, bool HelpersOnly) {
         for (const auto &Entry : IndexPackageSources(Dir)) {
+          if (HelpersOnly && !IsTestHelperName(Entry.first))
+            continue;
           for (const auto &Path : Entry.second) {
             // The importing file cannot import itself.
             if (!llvm::sys::fs::equivalent(Path, ImportingFile)) {
@@ -1216,9 +1225,9 @@ std::vector<std::string> ListAvailableModules(const std::string &ImportingFile) 
       };
       for (const auto &Entry : IndexModuleDir(Root, "std"))
         Names.emplace(Entry.first, true);
-      AddSources(P->SrcRoot);
+      AddSources(P->SrcRoot, false);
       if (P->Name == g_PackageGraph.Root && g_PackageGraph.inTests(ImportingFile))
-        AddSources(P->TestsRoot);
+        AddSources(P->TestsRoot, true);
       for (const auto &Dep : P->Deps)
         Names.emplace(Dep, true);
 

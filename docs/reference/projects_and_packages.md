@@ -195,7 +195,9 @@ because it broke in some other way:
 Each test runs in its own directory (so it can open a data file beside it) with
 no standard input, and is stopped after 5 seconds. A test imports what the
 package itself can: its own modules under `src/`, its direct dependencies and
-the standard library, plus the `*_module.tr` helpers in `tests/`. The
+the standard library, plus the `*_module.tr` helpers in `tests/`. A test may
+share its file's name with the module it tests: in `tests/route.tr`,
+`import route;` is `src/route.tr`. The
 internal-module rules of section 4 apply to a test exactly as to `src/`: it
 cannot import another package's internal module (E091).
 
