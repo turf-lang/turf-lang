@@ -201,6 +201,11 @@ share its file's name with the module it tests: in `tests/route.tr`,
 internal-module rules of section 4 apply to a test exactly as to `src/`: it
 cannot import another package's internal module (E091).
 
+`turf test <path>...` runs only the tests it names: each path is a test file or
+a directory of tests under `tests/`, written from the current directory
+(`turf test tests/route.tr` from the project root). A path that does not exist,
+is outside `tests/` or holds no test is an error. With no path, every test runs.
+
 `turf test` takes `--offline` and `--locked` (it resolves the project first,
 like `turf build`), and hands the rest to the compiler's runner:
 
@@ -297,7 +302,7 @@ hint: upgrade turfc, or lower `turf` in that manifest
 ```
 $ turf version
 turf 1.0.0-dev  (needs turfc interface 1.1+)
-turfc 2.0.0-dev  (interface 1.6, …/bin/turfc)
+turfc 2.0.0-dev  (interface 1.7, …/bin/turfc)
   …
 ```
 
@@ -783,7 +788,7 @@ is 1.
 | `turf add <name> --path <dir>` / `--git <url> (--tag\|--branch\|--rev) <ref>` | Add a dependency (section 3). |
 | `turf remove <name>` | Remove one. |
 | `turf publish` | Reserved. There is no registry in 2.0. |
-| `turf test [--offline] [--locked] [--jobs n] [--timeout s] [--exclude path]` | Compile and run every test under `tests/`; an error if there is no `tests/` (section 1, *Tests*). |
+| `turf test [path...] [--offline] [--locked] [--jobs n] [--timeout s] [--exclude path]` | Compile and run every test under `tests/`, or only the files and directories named; an error if there is no `tests/` (section 1, *Tests*). |
 | `turf fmt`, `turf explain`, `turf migrate`, `turf dump`, `turf compile` | Work on files, in or out of a project ([CLI & Diagnostics](cli_and_diagnostics.md)). `turf fmt --write` with no path formats the project's `src/` and `tests/`. |
 
 **Compiler flags are forwarded.** `turf build -O2`, `turf build -g` and
@@ -893,7 +898,7 @@ The standard library is always trusted.
 - **`std::`-qualified imports** to spell which candidate an ambiguous import
   means: today the E090 tells you to rename.
 - Cross-linking for another machine ([CLI & Diagnostics](cli_and_diagnostics.md#other-targets-and-object-files))
-  and a name filter for `turf test` (`--exclude` is the only selector).
+  and a filter for `turf test` that selects tests by name rather than by path.
 
 The internals of module resolution are in
 [`docs/architecture/modules_and_scope_resolution.md`](../architecture/modules_and_scope_resolution.md).

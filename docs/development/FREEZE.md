@@ -1049,11 +1049,15 @@ over the same code, so how a test is judged exists once.
   `turf test` refuses it with a message about the interface.
 - **Command line.** `turfc --test [<dir>]` (default `tests`; must be the first
   argument, takes a directory, never a file) with `--package-graph <file>`,
-  `--exclude <path>` (repeatable), `--jobs <n>` (`TURF_TEST_JOBS`), `--timeout
+  `--exclude <path>` (repeatable), `--only <path>` (repeatable, driver
+  interface 1.7: run only the tests at or under these paths, relative to the
+  directory; one that names no test is an error), `--jobs <n>` (`TURF_TEST_JOBS`), `--timeout
   <seconds>`, `--diag-register <file>`, and the compile flags `-O0..-Os`, `-g`,
   `--link <lib>`, `--allow-unsafe-modules`, `--stdlib-warnings`, applied to
   every test's compile. `turf test` runs it from the project root and passes
-  unknown flags through. Exit status: 0 every test passed; 1 a test failed or
+  unknown flags through; each path argument (a test file or a directory under
+  `tests/`, written from the current directory) becomes an `--only`, and only
+  then does `turf test` ask for interface 1.7. Exit status: 0 every test passed; 1 a test failed or
   the run could not start; 2 a usage error (§6.21).
 - **Not frozen:** the wording of the per-test report lines, the order tests
   finish in, and `turfc --test`'s behaviour on Windows (not supported yet; it

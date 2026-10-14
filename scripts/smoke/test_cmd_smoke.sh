@@ -264,6 +264,21 @@ expect_rc "a failing test in a subdirectory fails the run" exclude_off 1
 c exclude_on "$X" --test --exclude known/
 expect_rc "--exclude skips a directory" exclude_on 0
 expect_out "--exclude skips a directory" exclude_on "Total Tests: 1"
+# --only is the other way round: only what it names runs, and a name that
+# matches no test is an error, never "nothing to run, all green".
+c only_dir "$X" --test --only known/
+expect_rc "--only runs a directory" only_dir 1
+expect_out "--only runs a directory" only_dir "Total Tests: 1"
+expect_out "--only runs a directory" only_dir "plain_bad.tr"
+c only_file "$X" --test --only ./plain.tr
+expect_rc "--only runs one file" only_file 0
+expect_out "--only runs one file" only_file "Total Tests: 1"
+c only_missing "$X" --test --only nope.tr
+expect_rc "--only naming no test" only_missing 1
+expect_out "--only naming no test" only_missing "no test matches 'tests/nope.tr'"
+c only_file_as_dir "$X" --test tests/plain.tr
+expect_rc "a file in place of the directory" only_file_as_dir 2
+expect_out "a file in place of the directory" only_file_as_dir "--only"
 
 R="$WORK/register"
 fixture "$R" tests/fail_unpinned.tr <<'EOF'
@@ -413,6 +428,25 @@ EOF
   expect_out "the failing test's own message is shown" fails "this test fails on purpose"
   t fails_excluded "$PRJ/app" test --exclude fails.tr
   expect_rc "--exclude is handed through" fails_excluded 0
+  # Paths select tests, written from where turf runs.
+  t one_path "$PRJ/app" test tests/fails.tr
+  expect_rc "turf test <file> runs that test" one_path 1
+  expect_out "turf test <file> runs that test" one_path "Total Tests: 1"
+  t one_path_inside "$PRJ/app/tests" test util.tr --jobs 1
+  expect_rc "a path from inside tests/, next to a flag's value" one_path_inside 0
+  expect_out "a path from inside tests/, next to a flag's value" one_path_inside "util.tr ... PASS"
+  expect_out "a path from inside tests/, next to a flag's value" one_path_inside "Total Tests: 1"
+  t dir_path "$PRJ/app" test tests/nested
+  expect_rc "turf test <dir>" dir_path 0
+  expect_out "turf test <dir>" dir_path "with_helper.tr ... PASS"
+  t outside_path "$PRJ/app" test src/util.tr
+  expect_rc "a path outside tests/" outside_path 2
+  expect_out "a path outside tests/" outside_path "is not under the project's tests/ directory"
+  t missing_path "$PRJ/app" test tests/nope.tr
+  expect_rc "a path that does not exist" missing_path 2
+  t helper_path "$PRJ/app" test tests/nested/support_module.tr
+  expect_rc "a companion is not a test" helper_path 1
+  expect_out "a companion is not a test" helper_path "no test matches"
 fi
 
 if [ "$FAILED" -ne 0 ]; then

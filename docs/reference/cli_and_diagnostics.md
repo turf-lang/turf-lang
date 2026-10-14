@@ -382,7 +382,7 @@ A model has to load and run on the CPU, so a suggestion can take from several se
 ```text
 $ turf version
 turf 1.0.0-dev  (needs turfc interface 1.1+)
-turfc 2.0.0-dev  (interface 1.6, /opt/turf/bin/turfc)
+turfc 2.0.0-dev  (interface 1.7, /opt/turf/bin/turfc)
   llvm 22.1.8
   runtime turf_rt_abi_2_0
   root /opt/turf
@@ -443,6 +443,7 @@ Usage: turfc <filename.tr> [-o output] [--emit-llvm | --emit-obj] [--smart]
        turfc --format [--write | --check [--skip-unlexable]] <filename.tr>...
        turfc --migrate=pub [--write] <module.tr>...
        turfc --test [<tests-dir>] [--package-graph <file>] [--exclude <path>]
+         [--only <path>]
          [-O0|-O1|-O2|-O3|-Os] [-g] [--link <libname>] [--jobs <n>]
          [--timeout <seconds>] [--diag-register <file>]
          [--allow-unsafe-modules] [--stdlib-warnings]
@@ -456,7 +457,7 @@ Usage: turfc <filename.tr> [-o output] [--emit-llvm | --emit-obj] [--smart]
 ```text
 $ turfc --version
 turfc 2.0.0-dev
-interface 1.6
+interface 1.7
 llvm 22.1.8
 runtime turf_rt_abi_2_0
 root /opt/turf

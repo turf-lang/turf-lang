@@ -36,6 +36,10 @@ struct TestRunOptions {
   /// Paths relative to Dir that are skipped (a directory skips everything
   /// under it).
   std::vector<std::string> Excludes;
+  /// Paths relative to Dir to run, each a test file or a directory of tests;
+  /// empty runs every test. One that names no test is an error, so a
+  /// misspelled path never passes as "nothing to run".
+  std::vector<std::string> Only;
   /// The diagnostic register to enforce (tests/DIAGNOSTIC_GAPS.txt), or empty.
   /// Register keys spell a test `<Dir>/<path under Dir>`.
   std::string DiagRegister;

@@ -131,8 +131,9 @@ using namespace llvm;
 // for the files it found by walking a directory.
 static constexpr int TurfcInterfaceMajor = 1;
 // 1.6 adds `--emit-obj` (write the object, never link); a driver that wants
-// it asks for 1.6, everything else still needs 1.1.
-static constexpr int TurfcInterfaceMinor = 6;
+// it asks for 1.6, everything else still needs 1.1. 1.7 adds `--test
+// --only <path>` (run some of the tests); `turf test <path>` asks for it.
+static constexpr int TurfcInterfaceMinor = 7;
 
 // The exit statuses (FREEZE.md 6.21, F-CLI-1, REL-001). The split exists so a script
 // or an editor can tell "your program has a mistake" (1: the compiler ran and
@@ -435,6 +436,7 @@ static const char *turfcUsage() {
          "       turfc --format [--write | --check [--skip-unlexable]] <filename.tr>...\n"
          "       turfc --migrate=pub [--write] <module.tr>...\n"
          "       turfc --test [<tests-dir>] [--package-graph <file>] [--exclude <path>]\n"
+         "         [--only <path>]\n"
          "         [-O0|-O1|-O2|-O3|-Os] [-g] [--link <libname>] [--jobs <n>]\n"
          "         [--timeout <seconds>] [--diag-register <file>]\n"
          "         [--allow-unsafe-modules] [--stdlib-warnings]\n"
@@ -460,7 +462,7 @@ static const char *const KnownOptions[] = {
     "--migrate=",         "--package-graph", "--link",
     "--target=",          "--explain",      "-mcpu=",
     "--test",             "--jobs",         "--timeout",
-    "--diag-register",    "--exclude",
+    "--diag-register",    "--exclude",      "--only",
     "--skip-unlexable",
 };
 
@@ -803,11 +805,13 @@ static int runTestMode(int argc, char **argv) {
       // The compiles run in each test's own directory, so a relative path
       // would point somewhere else for every one of them.
       T.PackageGraph = std::filesystem::absolute(P).string();
-    } else if (Arg == "--exclude") {
+    } else if (Arg == "--exclude" || Arg == "--only") {
       std::string X = NeedValue(I, Arg);
       while (X.size() > 1 && X.back() == '/')
         X.pop_back();
-      T.Excludes.push_back(X);
+      while (X.size() > 2 && X.compare(0, 2, "./") == 0)
+        X.erase(0, 2);
+      (Arg == "--only" ? T.Only : T.Excludes).push_back(X);
     } else if (Arg == "--diag-register") {
       T.DiagRegister = NeedValue(I, Arg);
     } else if (Arg == "--jobs") {
@@ -834,7 +838,8 @@ static int runTestMode(int argc, char **argv) {
       }
       if (Arg.size() >= 3 && Arg.compare(Arg.size() - 3, 3, ".tr") == 0) {
         std::cerr << "Error: --test takes a directory of tests, not a file ('" << Arg
-                  << "'); to run one file, compile it and run the result.\n";
+                  << "'); to run one test, name its directory and add `--only <its path "
+                     "under that directory>`.\n";
         std::exit(ExitUsage);
       }
       T.Dir = Arg;

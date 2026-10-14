@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/turf-lang/turf-cli/internal/driver"
 	"github.com/turf-lang/turf-cli/internal/project"
@@ -52,26 +53,83 @@ func cmdTest(args []string) int {
 			"hint: create it and put test files in it, for example %s/basic.tr:\n\n%s",
 			testsDirName, dir, testsDirName, indent(testTemplate, "        "))
 	}
+	only, flags, err := testPaths(flags, cwd, dir)
+	if err != nil {
+		return usagef("%v", err)
+	}
 
 	return withProjectGraph(nf, true, func(p *projectBuild) int {
 		info, err := driver.Probe(p.compiler)
 		if err != nil {
 			return failf("%v", err)
 		}
-		if err := testInterfaceError(info, p.compiler); err != nil {
+		need := version.RequiredForTest
+		if len(only) > 0 {
+			need = version.RequiredForTestPaths
+		}
+		if err := testInterfaceError(info, p.compiler, need); err != nil {
 			return failf("%v", err)
 		}
 		defer catchInterrupt()()
-		runArgs := append([]string{"--test", testsDirName, "--package-graph", p.graphArg()}, flags...)
+		runArgs := []string{"--test", testsDirName, "--package-graph", p.graphArg()}
+		for _, o := range only {
+			runArgs = append(runArgs, "--only", o)
+		}
+		runArgs = append(runArgs, flags...)
 		return driver.RunIn(p.dir, p.compiler, runArgs)
 	})
+}
+
+// testValueFlags are the flags `turf test` passes through that take a value,
+// so their value is not mistaken for a test path.
+var testValueFlags = map[string]bool{
+	"--jobs": true, "--timeout": true, "--exclude": true, "--only": true, "--link": true,
+}
+
+// testPaths takes the test paths out of args: every argument that is not a
+// flag or a flag's value. Each is resolved from cwd, must exist and must lie
+// in testsDir, and comes back relative to it, with '/' separators, the way
+// `turfc --test --only` spells it. Naming testsDir itself selects everything.
+func testPaths(args []string, cwd, testsDir string) (only, rest []string, err error) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if strings.HasPrefix(a, "-") {
+			rest = append(rest, a)
+			if testValueFlags[a] && i+1 < len(args) {
+				i++
+				rest = append(rest, args[i])
+			}
+			continue
+		}
+		p := a
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(cwd, p)
+		}
+		if _, statErr := os.Stat(p); statErr != nil {
+			return nil, nil, fmt.Errorf("no such test file or directory: %s", a)
+		}
+		real, rerr := filepath.EvalSymlinks(p)
+		base, berr := filepath.EvalSymlinks(testsDir)
+		if rerr != nil || berr != nil {
+			return nil, nil, fmt.Errorf("cannot resolve %s", a)
+		}
+		rel, rerr := filepath.Rel(base, real)
+		if rerr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return nil, nil, fmt.Errorf("%s is not under the project's %s/ directory (%s); "+
+				"turf test runs the tests there", a, testsDirName, testsDir)
+		}
+		if rel == "." {
+			continue
+		}
+		only = append(only, filepath.ToSlash(rel))
+	}
+	return only, rest, nil
 }
 
 // testInterfaceError is nil when the compiler has `--test`. A compiler that
 // predates it would answer `turfc --test` with "Unknown option", which says
 // nothing about the real problem (an old turfc), so it is asked up front.
-func testInterfaceError(info driver.CompilerInfo, compiler string) error {
-	need := version.RequiredForTest
+func testInterfaceError(info driver.CompilerInfo, compiler string, need version.Interface) error {
 	if info.Interface.Major == need.Major && info.Interface.Minor >= need.Minor {
 		return nil
 	}
@@ -95,12 +153,17 @@ fn main(): int {
 const helpTest = `turf test - run the project's tests
 
 Usage:
-  turf test [--offline] [--locked] [test flags...] [compiler flags...]
+  turf test [<path>...] [--offline] [--locked] [test flags...] [compiler flags...]
 
 Run anywhere inside a project. Every .tr file under the project's tests/
 directory (at any depth) is compiled and run by 'turfc --test', in parallel,
 with its own directory as the working directory. A project with no tests/
 directory, or with no tests in it, is an error.
+
+Given paths, it runs only those tests: each <path> is a test file or a
+directory of tests under tests/, written from the current directory
+(turf test tests/parse.tr, or turf test parse.tr from inside tests/). A path
+that is not there, or that holds no test, is an error.
 
 How a test is judged is by its file name:
 

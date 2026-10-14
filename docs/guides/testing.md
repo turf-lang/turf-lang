@@ -752,9 +752,31 @@ The label in front of each line of the report is the directory name.
 
 ### Running part of the suite
 
-There is no filter that selects tests by name. `--exclude <path>` skips a file or
-a directory, relative to `tests/`, and can be repeated. To run only
-`determinism/`, exclude the rest. To skip one slow test, exclude it:
+Name a test file or a directory of tests, and `turf test` runs only those. A
+path is written from where you are, so from the project root it starts with
+`tests/`, and from inside `tests/` it does not:
+
+```text
+$ turf test tests/convert_test.tr
+Running Turf Test Suites...
+
+[tests] convert_test.tr ... PASS
+
+=== Test Summary ===
+Total Tests: 1
+Passed:      1
+Failed:      0
+
+All tests passed successfully!
+```
+
+`turf test tests/determinism` runs that directory, and several paths can be
+given at once. A path that does not exist, or that is outside `tests/`, is an
+error (exit status 2), and so is one that holds no test, such as a
+`_module.tr` companion.
+
+`--exclude <path>` does the opposite: it skips a file or a directory, relative
+to `tests/`, and can be repeated. To skip one slow test, exclude it:
 
 ```text
 $ turf test --exclude compile --exclude runtime/fail_silent_abort.tr
@@ -771,8 +793,8 @@ Running Turf Test Suites...
 ...
 ```
 
-`turf test tests/convert_test.tr` is an error (exit status 2): the runner takes
-one tests directory, and `turf` supplies it.
+There is no filter that selects tests by name inside a file: the unit is the
+file.
 
 Running one test file with `turf run` works only for a test that imports
 nothing but the standard library:

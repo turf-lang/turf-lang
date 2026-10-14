@@ -28,6 +28,11 @@ var Required = Interface{Major: 1, Minor: 1}
 // that predates it still serves build, run and check.
 var RequiredForTest = Interface{Major: 1, Minor: 3}
 
+// RequiredForTestPaths is what `turf test <path>...` needs: `turfc --test
+// --only <path>`, interface 1.7. Plain `turf test` still needs only
+// RequiredForTest.
+var RequiredForTestPaths = Interface{Major: 1, Minor: 7}
+
 // RequiredForFmt is what `turf fmt` needs: the batch form of `turfc --format`
 // (several files, `--check`, a verified result), interface 1.4 (REL-002 stage
 // 2) and `--skip-unlexable`, which it passes for the files it found under a

@@ -641,6 +641,11 @@ private:
   }
 };
 
+/// True when test path @p Rel is @p X or lies under directory @p X.
+bool Covers(const std::string &X, const std::string &Rel) {
+  return Rel == X || StartsWith(Rel, X + "/");
+}
+
 /// Finds every test under @p Dir, sorted by path.
 std::vector<TestFile> Discover(const fs::path &Dir, const std::string &DirSpelling,
                                const std::vector<std::string> &Excludes) {
@@ -661,7 +666,7 @@ std::vector<TestFile> Discover(const fs::path &Dir, const std::string &DirSpelli
     std::string Rel = fs::relative(P, Dir, EC).generic_string();
     bool Skipped = false;
     for (const auto &X : Excludes)
-      if (Rel == X || StartsWith(Rel, X + "/"))
+      if (Covers(X, Rel))
         Skipped = true;
     if (Skipped)
       continue;
@@ -693,6 +698,25 @@ int RunTests(const TestRunOptions &O) {
     Spelling.pop_back();
 
   std::vector<TestFile> Tests = Discover(Dir, Spelling, O.Excludes);
+  if (!O.Only.empty()) {
+    for (const auto &X : O.Only) {
+      if (std::none_of(Tests.begin(), Tests.end(),
+                       [&](const TestFile &T) { return Covers(X, T.Rel); })) {
+        std::cerr << "Error: no test matches '" << Spelling << "/" << X << "'.\n"
+                  << "  hint: name a test file (`.tr`, not a `_module.tr` companion) or a "
+                     "directory of tests, relative to '" << O.Dir << "'.\n";
+        return 1;
+      }
+    }
+    Tests.erase(std::remove_if(Tests.begin(), Tests.end(),
+                               [&](const TestFile &T) {
+                                 return std::none_of(O.Only.begin(), O.Only.end(),
+                                                     [&](const std::string &X) {
+                                                       return Covers(X, T.Rel);
+                                                     });
+                               }),
+                Tests.end());
+  }
   if (Tests.empty()) {
     std::cerr << "Error: no tests found in '" << O.Dir << "'.\n"
               << "  hint: a test is a `.tr` file (not one ending in `_module.tr`, which is a companion "
