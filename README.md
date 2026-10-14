@@ -2,9 +2,7 @@
 
 Turf (TurfLang) is a statically typed language that compiles ahead of time to native executables through LLVM. It has structs, enums, real generics, state machines, pattern matching, error unions, a garbage-collected heap with checked references, a standard library (strings, collections, files, JSON, HTTP, sockets), a project and package tool, and an optional diagnostics assistant that runs a language model on your own machine.
 
-**Version 2.0.0**, tagged `v2.0.0`. The exact number of a checkout is in the [`VERSION`](VERSION) file.
-
-Coming from 1.x? Read [`docs/MIGRATING_TO_2.md`](docs/MIGRATING_TO_2.md) first.
+The current release is **Turf 2.0.0**. Upgrading a 1.x program? The [migration guide](docs/MIGRATING_TO_2.md) lists every change that affects existing code, with the fix for each.
 
 ## Contents
 
@@ -22,10 +20,11 @@ Coming from 1.x? Read [`docs/MIGRATING_TO_2.md`](docs/MIGRATING_TO_2.md) first.
 | Platform | Tier | Notes |
 |---|---|---|
 | Linux x86-64 | 1 | needs glibc 2.34 or newer (Ubuntu 22.04, Debian 12, RHEL 9, Amazon Linux 2023 and later) |
+| Linux arm64 | 1 | 64-bit ARM; needs glibc 2.34 or newer, like x86-64 |
 | Windows x86-64 | 1 | native; no MSYS2 or other toolchain to install |
 | macOS arm64 (Apple Silicon) | 1 | Intel Macs are not supported |
 
-Tier 1 means the platform is tested on every change and a release is blocked on it. Each release is self-contained on all three: the archive carries the compiler, its LLVM, the linker and the runtime, so nothing else needs installing to compile and run programs. The programs it builds need no Turf files at run time.
+Tier 1 means the platform is tested on every change and a release is blocked on it. Each release is self-contained on every platform: the archive carries the compiler, its LLVM, the linker and the runtime, so nothing else needs installing to compile and run programs. The programs it builds need no Turf files at run time.
 
 Every release has two archives per platform: the plain one, and a `-smart` one, which is the same compiler with the runtime for [`--smart`](#--smart-diagnostics-with-a-local-model) added. Choose plain unless you want `--smart`.
 
