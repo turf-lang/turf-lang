@@ -370,6 +370,18 @@ public:
   static State saveState();
   static void restoreState(State S);
 
+  // A point to take back everything recorded after it, and nothing before:
+  // the monomorphizer re-reports an error raised inside a generic clone at
+  // the user's call (Monomorphize.cpp), so the original must not also be
+  // printed. Unlike State, this copies no diagnostics.
+  struct Mark {
+    size_t Count = 0;
+    std::set<int> ErrorLines;
+    bool SLMFiredThisPass = false;
+  };
+  static Mark mark();
+  static void rollbackTo(Mark M);
+
 private:
   static std::vector<Diag> Diagnostics;
   static std::set<int> ErrorLines; // lines that already have an error

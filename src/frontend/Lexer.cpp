@@ -629,6 +629,17 @@ void DiagnosticEngine::restoreState(State S) {
   g_slmFiredThisPass = S.SLMFiredThisPass;
 }
 
+DiagnosticEngine::Mark DiagnosticEngine::mark() {
+  return {Diagnostics.size(), ErrorLines, g_slmFiredThisPass};
+}
+
+void DiagnosticEngine::rollbackTo(Mark M) {
+  if (Diagnostics.size() > M.Count)
+    Diagnostics.resize(M.Count);
+  ErrorLines = std::move(M.ErrorLines);
+  g_slmFiredThisPass = M.SLMFiredThisPass;
+}
+
 void DiagnosticEngine::restoreDiagnostics(const std::vector<Diag> &Saved) {
   Diagnostics = Saved;
   ErrorLines.clear();

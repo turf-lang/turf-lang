@@ -620,8 +620,8 @@ std::shared_ptr<ResolverFunctionSymbol> finishInstantiation(
     // to the DiagnosticEngine instead of through the handler above, so it
     // would be reported at the template's own line and the clone counted as
     // checked. Take it back out and treat it as the handler's inner error.
-    const size_t DiagsBefore = DiagnosticEngine::getDiagnostics().size();
-    DiagnosticEngine::State Saved = DiagnosticEngine::saveState();
+    DiagnosticEngine::Mark Before = DiagnosticEngine::mark();
+    const size_t DiagsBefore = Before.Count;
     try {
       CloneTC.check(Clone);
     } catch (const RecoverUnwind &) {
@@ -638,7 +638,7 @@ std::shared_ptr<ResolverFunctionSymbol> finishInstantiation(
         InnerMsg = Now[i].Msg;
         InnerHint = Now[i].Hint;
         InnerCode = Now[i].Code.empty() ? nullptr : ErrorCodes::lookupByCode(Now[i].Code.c_str());
-        DiagnosticEngine::restoreState(std::move(Saved));
+        DiagnosticEngine::rollbackTo(std::move(Before));
         break;
       }
     }
