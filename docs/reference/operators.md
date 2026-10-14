@@ -19,11 +19,11 @@ From the tightest binding to the loosest:
 | 7 | `&` | left |
 | 8 | `^` | left |
 | 9 | `\|` | left |
-| 10 | `<` `>` `<=` `>=` | left |
-| 11 | `==` `!=` | left |
-| 12 | `&&` | left |
-| 13 | `\|\|` | left |
-| 14 | `to` | left |
+| 10 | `to` | left |
+| 11 | `<` `>` `<=` `>=` | left |
+| 12 | `==` `!=` | left |
+| 13 | `&&` | left |
+| 14 | `\|\|` | left |
 | 15 | `=` `+=` `-=` `*=` `/=` `%=` `&=` `\|=` `^=` `<<=` `>>=` `**=` | right |
 | 16 | `cond give a otherwise b` | right |
 
@@ -37,10 +37,13 @@ Things that differ from C:
 - **Unary operators bind tighter than `**`**, with no exception for `-`. So
   `-2 ** 2` is `(-2) ** 2`, which is `4`; write `-(2 ** 2)` for `-4`. `**`
   itself groups to the right: `2 ** 3 ** 2` is `2 ** (3 ** 2)`, which is `512`.
-- **`to` is looser than every arithmetic, bitwise, comparison and logical
-  operator.** `1 + 2 to double` casts the sum, and `1 < 2 to string` is
-  `"true"`. It is tighter than assignment, so `y = x to int;` is
-  `y = (x to int)`. To cast one operand, parenthesise: `(x to double) * 2`.
+- **`to` sits between the bitwise operators and comparison.** It is looser
+  than every arithmetic and bitwise operator, so `1 + 2 to double` casts the
+  sum, and tighter than comparison and the logical operators, so
+  `a < 3 && s to int > 5` is `(a < 3) && ((s to int) > 5)`. It is tighter than
+  assignment too, so `y = x to int;` is `y = (x to int)`. To cast one operand
+  of an arithmetic operator, parenthesise: `(x to double) * 2`; to cast a
+  comparison's result, parenthesise the comparison: `(a < b) to string`.
 - **Assignment is an expression** whose value is the assigned value, and it
   groups to the right: `a = b = 3;` assigns both.
 - **`give`/`otherwise` is the loosest of all**, looser than assignment. In

@@ -604,8 +604,9 @@ fn main(): int {
 }
 ```
 
-`to` binds looser than every arithmetic and comparison operator and tighter
-than assignment. `1 + 2 to double` is `(1 + 2) to double`, and `y = x to int;`
+`to` binds looser than every arithmetic and bitwise operator and tighter
+than comparison, the logical operators and assignment. `1 + 2 to double` is
+`(1 + 2) to double`, `s to int > 5` is `(s to int) > 5`, and `y = x to int;`
 is `y = (x to int)`. Parenthesise to cast one operand: `(x to double) * 2`.
 Writing `x to double * 2` without parentheses does not work: the `*` after a
 type name is read as a pointer type.

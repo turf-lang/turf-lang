@@ -14,10 +14,10 @@
 // typesCompatible()'s Rule 2 in Types.cpp) -- the cast was silently dead
 // weight, not the thing making those lines type-check.
 //
-// Fixed by raising `to`'s precedence above assignment (12 vs. 10) so cast
-// binds INTO the RHS of an assignment, while staying looser than every
-// other real binary operator (so `1 + 2 to double` still means
-// `(1 + 2) to double`, unchanged).
+// `to` binds tighter than assignment, so the cast binds INTO the RHS of an
+// assignment, and looser than the arithmetic operators (so `1 + 2 to double`
+// means `(1 + 2) to double`). Its place against comparison and the logical
+// operators is 15_pratt_cast_binds_tighter_than_comparison.tr's.
 
 import test;
 

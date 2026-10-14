@@ -108,12 +108,12 @@ void InitializePrecedence() {
   BinopPrecedence[TOK_RSHIFT_ASSIGN] = 10;
   BinopPrecedence[TOK_POWER_ASSIGN] = 10;
 
-  // Cast. Must bind TIGHTER than assignment (12 > 10) so `y = x to int;`
-  // parses as `y = (x to int)`: parsed as `(y = x) to int`, the cast would
-  // apply to the assignment's already-stored value and be silently
-  // discarded. It stays looser than every other real binary operator (15+) so
-  // `1 + 2 to double` means `(1 + 2) to double`.
-  BinopPrecedence[TOK_TO] = 12;
+  // Cast: just tighter than comparison (31 > 30), so a cast is an operand of
+  // a comparison and of `&&`/`||` -- `a < 3 && s to int > 5` is
+  // `(a < 3) && ((s to int) > 5)` -- and still of assignment (`y = x to int;`
+  // stores the cast value). It stays looser than the bitwise, shift and
+  // arithmetic operators, so `1 + 2 to double` is `(1 + 2) to double`.
+  BinopPrecedence[TOK_TO] = 31;
 
   // Logical
   BinopPrecedence[TOK_OR] = 15;  // ||
