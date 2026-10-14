@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E010
+// EXPECT-DIAG: Infinite recursion detected in 'loop_forever'
 // Regression test (#186): void function with unconditional self-call.
 // No base case → RecursionWithoutBaseError.
 fn loop_forever(): void {

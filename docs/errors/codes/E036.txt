@@ -24,4 +24,14 @@ If you pass a state from a totally different machine, or something that isn't a 
 
 To fix it, double-check which machine's state you meant to use, and make sure it's a state defined on the exact machine type your variable was declared with. If the state name has a typo or doesn't exist on any machine at all, you'll actually see a different error first (an "unknown variant" error) -- this one specifically means the state exists, just on the wrong machine.
 
+The same error is reported when the target has the right machine type but is a value rather than a written state, such as a parameter or variable that holds one:
+
+    fn go(c: ConnectionState, next: ConnectionState): ConnectionState {
+        mut conn: ConnectionState = c;
+        conn.transition(next);             // which edge is this? It can't be known here
+        return conn;
+    }
+
+A transition names its target, so the edge it takes is known where it is written. To move to a state chosen at run time, `compare` the value that chooses it and write one `.transition(ConnectionState::X)` per arm.
+
 This kind of mix-up is easy to make once you have a couple of machines in the same file -- Turf catching it here means you find out immediately, not while debugging a confusing runtime issue later.

@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E057
+// EXPECT-DIAG: cannot apply '+' to 'Vec2' and 'int'
 // Negative test: only operator +(Vec2, double) is declared. Calling it with
 // (Vec2, int) must FAIL -- no numeric coercion in operator resolution
 // (RFC §4.2), unlike ordinary `fn` overload resolution which does permit

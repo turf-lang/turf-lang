@@ -1,0 +1,76 @@
+TURF E096 -- INVALID ERROR PAYLOAD:
+
+CAUSE:
+  An error variant's payload is declared or used wrongly. A variant may declare typed
+  fields, `Name(field: Type, ...)`. A variant with N fields is built with N arguments,
+  or N+1 when the extra trailing argument is the `string` message (`err.message`
+  reads it). A variant with no fields is written without parentheses and takes no
+  arguments, or exactly one: its message. A payload is READ only by destructuring in
+  a `compare`.
+
+REPORTED FOR:
+  - Empty parentheses in a declaration (`NotFound()`), a field with no type
+    (`NotFound(path)`), or a field name used twice in one variant.
+  - A field whose type is an error type, a `!T` or `void` (an error carries data about
+    what went wrong, not another failure).
+  - A constructor call with the wrong number of arguments, or an argument whose type
+    is not its field's (past the fields: not a `string` message).
+  - A bare `IOError::NotFound` used as a VALUE when the variant has fields (still fine
+    as an `==`/`!=` operand, which compares the variant only, and as a pattern head).
+
+EXAMPLE:
+    error IOError {
+        NotFound(path: string),
+        Denied(path: string, mode: int),
+        Timeout
+    }
+    IOError::NotFound("a.txt")             // ok
+    IOError::NotFound("a.txt", "message")  // ok: fields, then a string message
+    IOError::Denied("a.txt")               // ERROR: declares 2 fields, given 1
+    IOError::Denied("a.txt", "rw")         // ERROR: 'mode' is an int
+    IOError::NotFound                      // ERROR: has fields, not a value
+
+CORRECT:
+    error IOError {
+        NotFound(path: string),
+        Denied(path: string, mode: int),
+        Timeout
+    }
+
+    fn open(which: int): !int {
+        if which == 0 {
+            return IOError::NotFound("a.txt");                 // one argument per field
+        }
+        if which == 1 {
+            return IOError::NotFound("a.txt", "no such file"); // fields, then a string message
+        }
+        if which == 2 {
+            return IOError::Denied("a.txt", 7);
+        }
+        return IOError::Timeout;                               // no fields: no parentheses
+    }
+
+    fn main(): int {
+        immut n: int = open(2) recover as err run {
+            compare err {                                      // a payload is read in a pattern
+                matches IOError::NotFound(path):
+                    return 1;
+                done
+                matches IOError::Denied(path, _):
+                    return 2;
+                done
+                otherwise:
+                    return 3;
+            }
+        };
+        return n;
+    }
+
+FIX:
+  Pass one argument per field, in order (plus an optional trailing string message).
+  Read a payload through a `compare` pattern.
+
+NOTE: an unknown field TYPE is the ordinary unknown-type error; a pattern that does
+  not fit its variant is E092.
+
+RELATED: E092 (patterns), E095 (try), E132 (invalid recover).

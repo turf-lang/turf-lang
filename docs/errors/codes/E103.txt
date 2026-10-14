@@ -1,0 +1,24 @@
+Turf found something it didn't expect here
+
+This is the "that doesn't belong there" error: Turf was in the middle of reading something and ran into a token that can't legally appear at this spot. It names the token, so start by looking at it.
+
+The usual causes:
+
+- A value or operand that was left out:
+
+      mut x: int = ;
+      mut y: int = 5 + ;
+
+- An extra `;` right after something that has already ended, such as a loop:
+
+      do { x = x - 1; } while (x > 0);;       // the second ; has nothing to end
+
+- A keyword where a value was expected -- `if`, `while` and friends are statements, not values:
+
+      mut x: int = while;
+
+- A stray character that isn't part of Turf, or an `@` that isn't `@caller_location` (the only decorator Turf has).
+
+- A declaration keyword in the wrong place. A top-level `mut x: int = 5;` outside any function is not a declaration Turf accepts: variables live inside functions (a constant you want to share across files is `export immut`).
+
+Delete the stray token, or add what was supposed to be there, and the error goes away. If the highlighted spot looks fine, check the line just above it: an unclosed bracket earlier on is often what makes a later, perfectly good token look wrong.

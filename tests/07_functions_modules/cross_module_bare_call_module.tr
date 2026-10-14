@@ -2,6 +2,6 @@
 // function meant to be called via qualification (`cross_module_bare_call_module.helperFn()`),
 // never bare. Named `..._module.tr` so scripts/test_runner.sh's
 // `grep -v "_module.tr"` skips it as a standalone test entry point.
-fn helperFn(): int {
+pub fn helperFn(): int {
     return 7;
 }

@@ -1,0 +1,35 @@
+// tests/custom/gc_stress_corpus/http_load_client.tr
+// The scripted client half of the http_server load stress (see
+// http_load_server.tr's own header) -- a real, in-process Turf HTTP
+// client (same net::TcpConnection::connect() shape as
+// showcase/http_client.tr) that fires REQUEST_COUNT sequential requests
+// at the paired server and verifies every single response body, alerting
+// with a specific failing request index rather than the client's own
+// eventual read-timeout/connection-refused error if the server falls
+// behind or crashes partway through.
+import io;
+import net;
+import strings;
+import test;
+
+fn main(): int {
+    immut REQUEST_COUNT: int = 100000;
+    immut request: string = "GET / HTTP/1.1\nHost: 127.0.0.1:8099\nConnection: close\n\n";
+
+    mut i: int = 0;
+    while i < REQUEST_COUNT {
+        mut conn: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 8099) recover run {
+            io::printline("gc_stress_corpus http load client: connect() failed at request " + (i to string));
+            return 1;
+        };
+        conn.write(request);
+        immut response: string = conn.read(4096);
+        conn.close();
+
+        test::assert(strings::contains(response, "Hello from Turf!"), "response body correct at request " + (i to string));
+        i = i + 1;
+    }
+
+    io::printline("gc_stress_corpus/http_load_client PASS: " + (REQUEST_COUNT to string) + " sequential requests, all correct");
+    return 0;
+}

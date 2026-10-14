@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E030
+// EXPECT-DIAG: Module 'mem' has nothing named 'Shade'
 // Regression test: `Module::EnumName::Variant` where Module is real but
 // doesn't own EnumName must be rejected -- same wrong-module validation
 // as a qualified type/struct-literal, applied to the newly-added 3-part

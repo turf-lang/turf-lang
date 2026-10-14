@@ -14,9 +14,10 @@ fn main(): int {
     mut name: string = "world";
     test::assert(name == "world", "AC2 failed: equality");
 
-    // AC3: Character access
-    mut char_e: int = "hello"[1];
-    test::assert(char_e == 101, "AC3 failed: character access");
+    // AC3: Character access -- FDN-004/D17: "hello"[1] is now `char`, not
+    // `int` (widened here for the comparison).
+    mut char_e: char = "hello"[1];
+    test::assert((char_e to int) == 101, "AC3 failed: character access");
 
     io::printline("All Issue #183 acceptance criteria passed!");
     return 0;

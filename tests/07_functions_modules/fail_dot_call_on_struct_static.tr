@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E048
+// EXPECT-DIAG: 'MathUtil' is a struct type, not an instance
 // Regression test: `.` is instance-member-access only -- calling a static
 // method (declared `fn StructName.method(...) static: RetType`, no `self`
 // at all) via `.` on the BARE STRUCT TYPE NAME (no instance) must be

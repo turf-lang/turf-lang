@@ -1,4 +1,5 @@
 // RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: List.get: index out of bounds
 // Regression test (OVH-003, docs/planning/OVERHAUL_REMAINING_WORK.md):
 // `List<T>.get()` is bounds-checked -- an out-of-range index compiles
 // clean (the index comes from a variable, not a literal ValueRangePass

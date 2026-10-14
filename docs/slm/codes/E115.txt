@@ -1,0 +1,45 @@
+TURF E115 -- INVALID OPERATOR DECLARATION:
+
+CAUSE:
+  An `operator` declaration has the wrong number of parameters for the symbol.
+    - binary operators (`+ - * / % ** & | ^ << >> == != < > <= >=`): exactly two
+    - `!` and `~`: unary, one parameter; `-` may be either unary or binary
+    - `[]`: (self, index);  `[]=`: (self, index, value)
+  The message states what the operator needs and how many were given.
+
+INCORRECT:
+    operator +(a: Vec, b: Vec, c: Vec): Vec { ... }     // `+` takes two
+    operator [](g: Grid): int { ... }                   // `[]` takes (self, index)
+    operator []=(g: Grid, i: int): void { ... }         // `[]=` takes three
+
+CORRECT:
+    struct Vec { x: int, y: int }
+    struct Grid { n: int }
+
+    operator +(a: Vec, b: Vec): Vec {         // binary: two parameters
+        mut r: Vec = Vec::default();
+        r.x = a.x + b.x;
+        r.y = a.y + b.y;
+        return r;
+    }
+
+    operator -(a: Vec): Vec {                 // `-` may also be unary: one parameter
+        mut r: Vec = Vec::default();
+        r.x = 0 - a.x;
+        r.y = 0 - a.y;
+        return r;
+    }
+
+    operator [](g: Grid, i: int): int {       // (self, index)
+        return g.n + i;
+    }
+
+    operator []=(g: Grid, i: int, v: int): void {   // (self, index, value)
+        g.n = v;
+    }
+
+FIX:
+  Make the parameter list match the operator's arity.
+
+RELATED: E080 (orphan rule), E028 (builtin-only operands), E097 (generic operators),
+  E098 (write to a temporary).

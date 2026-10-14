@@ -1,0 +1,41 @@
+TURF E131 -- METHOD ON A NON-STRUCT:
+
+CAUSE:
+  `thing.method(...)` was written on a value whose type declares no methods (`int`,
+  `bool`, `double`, ...). Likely causes: a misspelled name, a function that lives in a
+  module (`math::abs(x)`, not `x.abs()`), the wrong variable, or a variable whose type is
+  not the struct the author thinks.
+
+INCORRECT:
+    mut x: int = 5;
+    x.foo();                          // an int has no `foo`
+
+ARRAYS:
+  An array has two built-in methods, `length()` and `copy()`, both with no arguments. Messages:
+    a.copy(1)       -> "'copy()' on an array takes no arguments, but was given 1."
+    a.reverse()     -> "Arrays have no method 'reverse'."
+    s.copy()        -> "Cannot call method 'copy' on type 'string' -- only struct instances
+                       have methods."  (copy() is arrays only)
+  Fix: drop the argument, use `length()`/`copy()`, or slice first (`a[1..3].copy()`).
+
+CORRECT:
+    import math;
+
+    mut x: int = -5;
+    mut a: int = math::abs(x);       // a function in a module is called through the module
+    mut nums: int[3] = [1, 2, 3];
+    mut n: int = nums.length();      // arrays have length() and copy()
+    mut c: int[] = nums.copy();      // copy() gives a fresh unsized `T[]`
+    mut text: string = "hello";
+    mut m: int = text.length();      // UFCS: the free function strings::length(text)
+
+NOTE:
+  `x.f()` DOES work on a non-struct when a free function `f` taking that type is imported
+  (UFCS; this is how `text.length()` works on a `string`). So check the spelling and that
+  the module is imported.
+
+FIX:
+  Call the function through its module (`module::function(x)`), fix the spelling/import,
+  or correct the variable's type.
+
+RELATED: E041 (unknown function), E054 (unknown struct method).

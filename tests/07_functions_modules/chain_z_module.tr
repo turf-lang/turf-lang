@@ -3,6 +3,6 @@
 // comment.
 import chain_x_module;
 
-fn chainZ(): int {
+pub fn chainZ(): int {
     return 3;
 }

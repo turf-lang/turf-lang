@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E108
+// EXPECT-DIAG: Expected a parameter name in extern function 'broken'
 // Regression test: a syntax error inside an IMPORTED module must produce a
 // clean compile error, not crash the compiler.
 //

@@ -1,0 +1,21 @@
+// `return self to P;` from a method declared to return the struct by value
+// copies it out: the copy is spelled with `to`, like every conversion.
+import test;
+
+struct P {
+    x: int
+}
+
+fn P.snapshot(): P {
+    return self to P;
+}
+
+fn main(): int {
+    mut v: P = P::default();
+    v.x = 4;
+    mut w: P = v.snapshot();
+    w.x = 9;
+    test::assert(v.x == 4, "original unchanged");
+    test::assert(w.x == 9, "copy changed");
+    return 0;
+}

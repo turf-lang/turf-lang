@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E140
+// EXPECT-DIAG: Parameter 'f' of 'apply' can't use the unsized array type 'int[]' (inside 'fn(int[]): int')
+// Issue #260: a call through a function value has no declaration to check
+// for E141, so a `T[]` parameter is not allowed in a function type (yet).
+fn apply(f: fn(int[]): int): int {
+    return 0;
+}
+
+fn main(): int {
+    return 0;
+}

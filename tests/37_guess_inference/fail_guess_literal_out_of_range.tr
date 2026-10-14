@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E076
+// EXPECT-DIAG: Integer literal is not representable in type 'int'
 // SEM-003 (§11.6, the §20 worked example): proves SEM-001 -> SEM-002 ->
 // SEM-003 compose correctly. §11.6 is explicit that the DEFAULT type is
 // chosen first (int, for an untyped integer literal) and representability

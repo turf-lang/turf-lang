@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E066
+// EXPECT-DIAG: makes it 'fn(int, int): int'
+// An instantiation never changes how many parameters a function has.
+fn<T> id(x: T): T {
+    return x;
+}
+
+fn main(): int {
+    immut f: fn(int, int): int = id;
+    return f(1, 2);
+}

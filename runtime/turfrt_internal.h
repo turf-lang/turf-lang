@@ -1,6 +1,6 @@
 /*
  * runtime/turfrt_internal.h -- private glue between turfrt_alloc.c and
- * turfrt_gc.c (MEM-002, docs/planning/ARCHITECTURE_OVERHAUL.md §8/§14).
+ * turfrt_gc.c (MEM-002, docs/archive/ARCHITECTURE_OVERHAUL.md §8/§14).
  *
  * NOT part of turfrt.h's public C ABI: nothing here is ever referenced by
  * Codegen (F-STD-2's closed intrinsic list is about what a COMPILED TURF
@@ -68,15 +68,35 @@ void turf_gc_note_alloc(size_t bytes);
  */
 int turf_gc_is_registered(const void *p);
 
+#ifdef _WIN32
 /*
- * Captures the process's approximate stack base -- the high-address end of
- * the range conservative scanning walks down from. Called exactly once,
- * from turf_rt_init(), before a single line of Turf-level code has run.
- * See turfrt_gc.c's own top comment for why "the address of a local
- * variable inside turf_rt_init()'s own frame" is a correct (if slightly
- * loose) choice.
+ * REL-008 stage 5 (runtime/turfrt_win32.c): on Windows a block from the aligned
+ * allocator must be released with _aligned_free, not free(). Called first by
+ * turf_rt_checked_free(); returns 1 if `p` was such a block and has been
+ * released, 0 if the caller should free() it as usual.
+ */
+int turf_win32_free_aligned(void *p);
+#endif
+
+/*
+ * Captures the process's stack base -- the high-address end of the range
+ * conservative scanning walks down from. Called exactly once, from
+ * turf_rt_init(), before a single line of Turf-level code has run. Queries
+ * the OS/libc for the real stack bounds; never "the address of a local in
+ * turf_rt_init()", whose frame is a sibling of the user's main(), not an
+ * ancestor (turfrt_gc.c's doc comment on the definition). Panics if no
+ * source is available rather than under-scan.
  */
 void turf_gc_record_stack_base(void);
+
+/*
+ * Returns the current thread's recorded stack base (the high address end --
+ * see turf_gc_record_stack_base()'s own doc comment) -- FDN-006's SIGSEGV
+ * handler (turfrt_signal.c) uses this together with RLIMIT_STACK to bound
+ * the guard-page region a stack-overflow fault should land in. 0 if
+ * turf_gc_record_stack_base() has not run yet.
+ */
+uintptr_t turf_gc_get_stack_base(void);
 
 /*
  * Reads the collector's own counters back out for turf_rt_stats() (turfrt.h)
@@ -86,5 +106,15 @@ void turf_gc_record_stack_base(void);
  */
 void turf_gc_snapshot_stats(uint64_t *collect_count, uint64_t *live_count,
                              uint64_t *live_bytes, uint64_t *freed_count);
+
+/*
+ * Installs the SIGSEGV/sigaltstack handler (FDN-006 stage 1,
+ * runtime/turfrt_signal.c) that classifies a stack overflow and reports it
+ * through turf_rt_panic() instead of a bare crash. Called once from
+ * turf_rt_init(), AFTER turf_gc_record_stack_base() (the handler reads
+ * g_stack_base via turf_gc_get_stack_base() above). A no-op on a platform
+ * with no implementation (see turfrt_signal.c's own `_WIN32` branch).
+ */
+void turf_rt_install_segv_handler(void);
 
 #endif /* TURFRT_INTERNAL_H */

@@ -65,7 +65,7 @@ fn main(): int {
 
     // 2. Link them up using the address-of operator. &n2/&n3/... are
     // &Node (safe); assigning one into a Node* field is the always-sound
-    // safe-to-raw widening (src/Types.cpp's Rule 2.5), so this needs no
+    // safe-to-raw widening (src/sema/Types.cpp's Rule 2.5), so this needs no
     // `unsafe { }`.
     n1.next = &n2;
     n2.next = &n3;

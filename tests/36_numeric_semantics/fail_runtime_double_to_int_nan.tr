@@ -1,0 +1,16 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: runtime check: Integer overflow
+// A NaN has no integer value, so `x to int` panics (F-NUM-3; owner decision
+// 2026-10-12). It was a bare fptosi, poison for a NaN: INT_MIN at -O0 and
+// garbage at -O2, found by turf-fuzz. The NaN comes from inf - inf: division
+// by zero traps (FREEZE §6.2), so overflow to inf is the only way to one.
+fn id(x: double): double {
+    return x;
+}
+
+fn main(): int {
+    immut big: double = id(1e300) * id(1e300);
+    immut n: double = big - big;
+    io::printline(n to int);
+    return 0;
+}

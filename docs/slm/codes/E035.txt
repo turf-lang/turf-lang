@@ -18,6 +18,14 @@ CAUSE:
     }
 
 CORRECT USAGE:
+    machine ConnectionState {
+        Idle -> Connecting,
+        Connecting -> Connected,
+        Connecting -> Failed,
+        Connected -> Closing,
+        Closing -> Idle,
+    }
+
     mut conn: ConnectionState = ConnectionState::Idle;
     compare conn {
         matches ConnectionState::Idle:

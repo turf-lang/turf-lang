@@ -1,9 +1,11 @@
+// EXPECT-DIAG: E104
+// EXPECT-DIAG: Missing closing '}'
 fn main(): int {
     mut x: int = 10;
-    
+
     // Testing parser's ability to identify a missing closing brace gracefully
     if (x > 5) {
         x = 0;
-    
-    return 0;
-}
+
+        return 0;
+    }

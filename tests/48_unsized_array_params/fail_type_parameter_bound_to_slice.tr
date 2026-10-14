@@ -1,0 +1,18 @@
+// EXPECT-DIAG: E140
+// EXPECT-DIAG: The type parameter 'T' of 'keep' can't use the unsized array type 'int[]'
+// Issue #260: a `T` value may be returned or stored, so T can never stand for
+// a slice. (Passing a slice to `fn<T> f(arr: T[])` binds T to the ELEMENT
+// type instead, which is fine -- see 01_foreach_over_slice.tr.)
+fn<T> keep(x: T): T {
+    return x;
+}
+
+fn pass_on(arr: int[]): int {
+    keep(arr);
+    return 0;
+}
+
+fn main(): int {
+    mut a: int[2] = [1, 2];
+    return pass_on(a);
+}

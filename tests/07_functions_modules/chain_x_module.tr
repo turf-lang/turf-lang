@@ -4,6 +4,6 @@
 // cycle_a_module.tr/cycle_b_module.tr for that simpler case).
 import chain_y_module;
 
-fn chainX(): int {
+pub fn chainX(): int {
     return 1;
 }

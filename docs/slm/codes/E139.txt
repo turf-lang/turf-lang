@@ -1,0 +1,36 @@
+TURF E139 -- MALFORMED NUMBER:
+
+CAUSE:
+  A `.` appears at the end of a numeric literal where it cannot belong. Raised by the LEXER
+  (Lexer.cpp number scanning); one code, three messages:
+    SecondPoint    `3.14.15`, `1e5.5`, `3.14.;`  -- a number has only one decimal point, and
+                   it comes before any exponent. (Before E139 the lexer stopped at `3.14`
+                   and the parser said "Expected ';'" at the second dot.)
+    TrailingPoint  `5.`  -- a '.' with no digit after it; a decimal needs a fractional digit.
+                   (Before E139 the parser said "Expected a method name after '.'".)
+    RadixPoint     `0xFF.5`  -- hexadecimal, binary and octal literals are whole numbers.
+
+  NOT this error (the '.' is legitimate and the lexer leaves it alone):
+    - `1..5` and `1...5` (the range / ellipsis operators);
+    - a letter or `_` right after the '.', e.g. `5.abs()` -- member access on the literal;
+    - a leading-dot float `.5`.
+
+INCORRECT:
+    mut x: double = 3.14.15;     // second '.'
+    mut y: double = 1e5.5;       // '.' after the exponent
+    mut z: double = 5.;          // nothing after the '.'
+    mut w: double = 0xFF.5;      // a fraction on a hex literal
+
+CORRECT:
+    mut x: double = 3.14;
+    mut z: double = 5.0;         // or `5` for the whole number
+    mut sum: double = 3.14 + 0.15;   // two values need an operator or comma between them
+    mut w: double = 255.5;
+
+FIX:
+  Keep one '.' with a digit after it for a decimal; write 5.0 or 5 instead of `5.`; use a
+  decimal literal instead of a radix literal when a fraction is needed; put an operator or
+  comma between two numbers that were run together.
+
+RELATED: E070 (radix prefix with no digit), E071 (wrong digit for the radix), E072
+  (misplaced `_` separator), E073 (exponent marker with no exponent).

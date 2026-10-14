@@ -1,42 +1,25 @@
 # The Compiler Pipeline: Lexer to Codegen
 
-Deep internals reference for how `turf` actually turns a `.tr` file into a
-native binary — aimed at contributors and technically curious readers, not
-at people looking for Turf language syntax. Like
-`docs/architecture/modules_and_scope_resolution.md` (read that first if
-you haven't — this doc follows its style and doesn't repeat its module/
-import material) and `docs/architecture/pointers_and_references.md`, this
-is grounded directly in the current source with file:line citations
-throughout, verified against the compiler as it stands, not against any
-planning document.
+How `turfc` turns a `.tr` file into a native binary, for contributors. This
+is not a language reference. It is written to be read next to the source:
+every function, file and class named here exists, and the text says which
+pass owns which decision.
 
-**Deliberate framing constraint**: everything below is described in
-ordinary computer-science terms — recursive-descent parsing, dataflow
-analysis, control-flow graphs, visitor-pattern traversal — rather than in
-terms of LLVM's own IR or API surface. LLVM is the backend Turf happens to
-target today; the compiler's own algorithms don't know or care about that
-choice until the very last step, and neither does this document, beyond
-saying in passing that the type-checked AST "eventually lowers to LLVM IR
-and native code."
+Related documents:
 
-Related docs:
-- `docs/architecture/modules_and_scope_resolution.md` — the module/import
-  system and `::` operator, pass by pass. Cross-referenced below rather
-  than repeated.
-- `docs/architecture/pointers_and_references.md` — `unsafe { }`, `&T`,
-  raw pointers.
-- `docs/architecture/memory_model.md` — heap/stack layout and the runtime
-  representation generics compile down to (companion doc, written
-  alongside this one — see §7 below for where the two meet).
-- The 2026-08 split of the original monolithic
-  `Parser.cpp`/`Resolver.cpp`/`TypeChecker.cpp` into the per-category files
-  (`ParserCore.cpp`, `ResolverDecl.cpp`, `TypeCheckerCall.cpp`, ...) cited
-  throughout this document. The split changed file organization only — every
-  pass's actual algorithm is unchanged from before it. Its plan doc,
-  `docs/planning/COMPILER_MODULE_BREAKDOWN.md`, was retired once the split
-  landed (same convention as `PHASE_2_ISSUES.md`/`FINAL_SPRINT.md`; the text
-  is in git history) — **this document is where the per-pass file layout is
-  now described**, and every split file's own header doc comment points here.
+- `docs/architecture/modules_and_scope_resolution.md`: the module/import
+  system and the `::` operator, pass by pass. This document does not repeat
+  it.
+- `docs/architecture/pointers_and_references.md`: `unsafe { }`, `&T`, raw
+  pointers.
+- `docs/architecture/memory_model.md`: heap and stack layout, and the layout
+  consequences of monomorphized generics (its section 2.7).
+- `docs/architecture/errors_and_recover.md`: the `!T` error-union design that
+  sections 4 and 6 refer to.
+
+Each source file under `src/` opens with a header comment that points back to
+this document for the per-pass file layout. That layout is summarized in the
+file map at the end.
 
 ---
 
@@ -44,139 +27,124 @@ Related docs:
 
 ```
 source.tr
-   │
-   ▼
- Lexer   ──tokens──▶  Parser  ──AST──▶  Resolver (2 passes)  ──annotated AST──▶  TypeChecker  ──type-annotated AST──▶  Codegen  ──▶  native code
+   |
+   v
+ Lexer --tokens--> Parser --AST--> Resolver (2 passes) --annotated AST--> TypeChecker
+                                                                              |
+                                  Codegen <--(clones appended)-- Monomorphizer <--+
 ```
-
-Five passes, each consuming the *concrete data structure* the previous one
-built and producing a new one:
 
 | Pass | Input | Output |
 |---|---|---|
-| Lexer | raw source bytes | a stream of `Token` values, each carrying a `SourceLocation` |
-| Parser | token stream | an AST — a tree of `ExprAST` subclass instances (~42 concrete node kinds) |
-| Resolver | AST | the *same* AST, mutated in place: every name reference gets a resolved symbol/candidate-list annotation written directly onto its node |
-| TypeChecker | resolved AST | the *same* AST again, plus a side table (`NodeTypes_`) mapping every node to an inferred `TurfTypePtr` |
-| Codegen | type-annotated AST | LLVM IR → a native object file → a linked binary (or, with `--emit-llvm`, human-readable IR text) |
+| Lexer | source bytes | a stream of tokens, each carrying a `SourceLocation` |
+| Parser | token stream | an AST: a tree of `ExprAST` subclasses (every node kind listed in `TURF_AST_NODE_LIST`, `src/frontend/ASTVisitor.h`) |
+| Resolver | AST | the same AST, mutated in place: every name reference gets its resolved identity (symbol, overload candidates, owning module) written onto the node |
+| TypeChecker | resolved AST | a side table (`NodeTypes_`) mapping each node to its inferred `TurfTypePtr`, plus a few values written onto nodes |
+| Monomorphizer | type-checked AST + the instantiation requests the TypeChecker recorded | fully concrete clones of every generic declaration actually used (section 7) |
+| Codegen | type-annotated AST | LLVM IR, then a native object file, then a linked binary (`--emit-llvm` stops at IR text) |
 
-This is the project's own stated design rule (`docs/planning/
-ROADMAP_v1.0.0_COMPLETE.md` §1, "Multi-Pass Pipeline": *"Parser → Resolver
-→ TypeChecker → Codegen. Name resolution and semantics are separated from
-LLVM IR generation."*) and it is a genuine architectural constraint, not
-just a description after the fact: **Codegen is only ever allowed to run
-on an AST that has already passed both the Resolver and the TypeChecker
-cleanly.** `src/main.cpp`'s driver (`runCompilerMain()`, `src/main.cpp:
-498-1226`) enforces this literally — if `Resolver::resolveAll()` fails,
-the process returns before `TypeChecker` is even constructed
-(`src/main.cpp:1009-1012`); if `TypeChecker::checkAll()` fails, the
-process returns before a single `AST->codegen()` call runs
-(`src/main.cpp:1099-1103`). Codegen itself is written to *trust* this:
-it reads fields like `ResolvedCallTarget` and inferred types with no
-re-validation, on the assumption that if it's running at all, those
-fields are already correct.
+The rule the structure enforces: **Codegen only runs on an AST that the
+Resolver and the TypeChecker accepted.** `runCompilerMain()`
+(`src/driver/main.cpp`) returns before the next stage when a stage reports an
+error. Codegen reads `ResolvedCallTarget` and the inferred types without
+re-validating them.
 
-**Why five separate passes instead of one combined walk?** The concrete
-reason is forward references. A name can be *used* in the source before
-it's *declared* — two top-level functions calling each other, a struct
-field referencing a type declared later in the file, a call to a function
-defined further down. A single combined parse-and-check walk has no way
-to answer "does `bar` exist" while still checking `foo`'s body, if `bar`
-is textually declared after `foo`. Splitting name registration
-(hoisting, done once up front) from name *use* (checked afterward, with
-every name already registered) is the general solution — see §3 for
-exactly how the Resolver does this in two passes of its own, nested
-inside the larger five-pass pipeline. The same logic extends to the
-later passes: TypeChecker needs every name already resolved before it can
-ask "what type does this resolve to," and Codegen needs every type
-already checked before it can safely choose which LLVM operation to
-emit for e.g. `a + b` (integer add vs. float add vs. string concat).
+**Why separate passes.** The reason is forward references. A function may
+call one declared further down, a struct field may name a type declared
+later, two functions may call each other. Registering every declaration
+first (hoisting, section 3) and checking every use afterwards is the general
+solution, and each later pass relies on the one before it the same way: the
+TypeChecker asks "what type does this resolve to" and needs every name
+resolved, Codegen picks `a + b` as integer add, float add or string
+concatenation and needs every type known.
 
-### The double-parse wrinkle
+### The driver: a pre-pass and a main pass
 
-`main.cpp` doesn't literally run five passes once each — it runs a
-**pre-pass** (its own throwaway `Resolver`/`TypeChecker` instances,
-`src/main.cpp:652-802`) before the mandatory pipeline described above.
-The pre-pass exists purely so that LLVM function *prototypes* (and fully
-built struct types) exist before any function *body* is compiled — this
-is what makes `main()` calling a `helper()` defined later in the file
-work at the Codegen layer, independent of and in addition to whatever the
-Resolver's own two-pass hoisting already does at the name-resolution
-layer (§3). Concretely, the pre-pass:
+`runCompilerMain()` runs the front end twice over the entry file, because
+Codegen needs every function prototype and every struct layout to exist
+before any function body is compiled.
 
-1. Parses every top-level declaration in the file into `PrePassASTs`
-   (`src/main.cpp:563-645`).
-2. Runs a throwaway `Resolver`/`TypeChecker` pass over it
-   (`src/main.cpp:652-700`) — informational only; this pass's own
-   diagnostics never reach the user directly (see the note below).
-3. Fully codegens every struct declaration first (`src/main.cpp:
-   729-737`) — struct layouts must be complete before any GEP
-   (struct-field-address computation) referencing them is built, even
-   from a method declared textually *above* its own struct (see the
-   long comment at `src/main.cpp:702-728` for the exact LLVM-verifier
-   failure this used to produce).
-4. Emits every function prototype with no body (`g_protoOnlyPass = true`,
-   `src/main.cpp:745-758`).
-5. Fully codegens every function body (`src/main.cpp:774-802`).
+**Pre-pass** (its own `Resolver` and `TypeChecker` instances):
 
-The file is then **closed, reset, and re-parsed from scratch**
-(`src/main.cpp:804-821`) for the real, authoritative pass: a fresh AST is
-built, the *mandatory* `Resolver`/`TypeChecker` run over it
-(`src/main.cpp:997-1103`), and only non-function top-level statements are
-codegenned again (function bodies were already emitted in the pre-pass;
-re-emitting them here would duplicate them, `src/main.cpp:1105-1120`).
-The pre-pass's own Resolver/TypeChecker errors are silently discarded if
-the pre-pass TypeChecker fails (`PreTCClean`, `src/main.cpp:672-700`) —
-skipping straight to the real, user-facing diagnostics the *mandatory*
-main-pass TypeChecker produces once it re-encounters the identical error
-a few hundred lines later. This two-parse structure is a real
-implementation detail worth knowing if you're reading `main.cpp` for the
-first time, but it's orthogonal to the five-pass pipeline itself: from
-the Resolver/TypeChecker/Codegen's own point of view, each still only
-ever sees "an AST," built the normal way, once per real invocation.
+1. *Parse.* Every top-level declaration of the entry file is parsed into
+   `PrePassASTs`. The entry file's leading `unsafe module;` pragma goes
+   through `ParseLeadingUnsafeModuleDecl()`, the prelude imports are injected
+   by `ParsePreludeImports()` (as if they were the first lines of the entry
+   file only), and `ClaimEntryFileImportSlot()` makes sure the entry file is
+   not parsed a second time when a prelude module transitively imports it
+   (see the modules document). A top-level `unsafe { }` block is spliced into
+   its children by `AppendFlattenedTopLevelDecl()`. A parse error is recovered
+   per declaration with `SkipToNextTopLevelBoundary()`.
+2. *Resolve* (sub-pass 2a). `Resolver::resolveAll()` over `PrePassASTs`. If it
+   fails, the driver flushes the diagnostics and returns.
+3. *Type-check* (2b). `TypeChecker::checkAll()` with an
+   `Monomorphize::InstantiationCollector` attached. The result is kept in a
+   flag (`PreTCClean`); the diagnostics themselves are already in
+   `DiagnosticEngine`.
+4. *Monomorphize* (2b.5), only when `PreTCClean`. The four `drain...Requests`
+   functions run in a loop until none reports progress (section 7). Each clone
+   is appended to `PrePassASTs`.
+5. *Structs first* (2c). Every `StructDeclExprAST` is codegenned before any
+   function, so that a field-address computation built inside a method that is
+   textually above its struct sees the complete layout.
+6. *Prototypes* (3a). With `g_protoOnlyPass` set, every function, enum, extern
+   declaration and module import is codegenned prototype-only, so forward
+   calls resolve. An uninstantiated generic template is skipped: only its
+   clones reach Codegen.
+7. *Bodies* (3b), only when `PreTCClean`. Every function body is codegenned,
+   which is where the per-function CFG analyses of section 6 run. Structs
+   (already done in 2c), `export immut` constants (no storage) and generic
+   templates are skipped.
+
+**Main pass.** The file is reset and parsed again from scratch into a fresh
+AST (`FnASTs` for declarations and imports, `TopLevelASTs` for anything
+else). The mandatory `Resolver` and `TypeChecker` run over that AST; failure
+of either returns before any `codegen()` call of this pass. Only
+`TopLevelASTs` is codegenned here, because function bodies were already
+emitted by the pre-pass. A statement that is not a declaration is rejected
+as "Statements are not allowed outside of a function".
+
+What follows is shared by both: after the diagnostics are flushed, `--check`
+returns (after the entry-point check), and otherwise the driver wraps `main`
+with the runtime bootstrap (`WrapMainWithRuntimeBootstrap()`), emits type
+descriptors (`EmitAllTurfTypeDescs()`), runs `verifyModule()` on the whole
+module, runs the optimization pipeline, and emits an object file or IR text
+and links.
+
+Two consequences worth knowing. The pre-pass type-check failure does not lose
+a diagnostic: errors are recorded in `DiagnosticEngine` when raised, and the
+main-pass checker raising the same error on the same line is suppressed by
+the engine's one-primary-error-per-line cap. And the pass structure is
+invisible to each pass: the Resolver, TypeChecker and Codegen only ever see
+an AST built in the normal way.
 
 ---
 
 ## 1. The Lexer
 
-`include/Lexer.h`, `src/Lexer.cpp`. Converts the raw source byte stream
-into a sequence of `Token` values (`enum Token`, `include/Lexer.h:
-266-351` — a flat set of negative-int constants for multi-character
-tokens/keywords, plus raw ASCII values for single-character operators).
+`src/frontend/Lexer.h`, `src/frontend/Lexer.cpp`. Converts source bytes into
+`Token` values (`enum Token`: negative constants for multi-character tokens
+and keywords, raw ASCII values for single-character operators).
 
-### `gettok()` / `gettokScan()`
+### `gettok()` and `gettokScan()`
 
-The actual scanning is done by `gettokScan()` (`src/Lexer.cpp:469-1026`),
-a straightforward hand-written switch over `LastChar`/`SourceFile->peek()`
-— maximal-munch tokenization with no separate tokenizer-generator or
-regex table: each branch greedily consumes the longest token it can (e.g.
-the `:` branch peeks for a second `:` to decide between `TOK_COLON` and
-`TOK_SCOPE`, `src/Lexer.cpp:787-798`; the `.` branch peeks up to two
-characters ahead to disambiguate `.` / `..` (range) / `...` (variadic),
-`src/Lexer.cpp:735-749`). Identifiers are checked against a keyword table
-(`Keywords`, `src/Lexer.cpp:113-163`) *after* being scanned as an ordinary
-identifier run — note that builtin/stdlib function names (`print`,
-`malloc`, `abs`, ...) are deliberately **not** in this table
-(`include/Lexer.h:116-122`): they're ordinary identifiers, resolved later
-by the Resolver against `lib/std/*.tr`, not lexer-level keywords. This
-matters architecturally — it means the lexer has zero knowledge of the
-standard library at all; every "builtin-looking" name is exactly as
-unprivileged as a user's own function name until the Resolver decides
-otherwise.
+`gettokScan()` is a hand-written maximal-munch scanner over `LastChar` and
+`SourceFile->peek()`: each branch consumes the longest token it can. The `:`
+branch peeks for a second `:` to choose between `TOK_COLON` and `TOK_SCOPE`;
+the `.` branch looks ahead to separate `.`, `..` (`TOK_RANGE`) and `...`
+(`TOK_ELLIPSIS`). Identifiers are scanned as an ordinary run and then looked
+up in the `Keywords` table. A lone `_` is `TOK_WILDCARD`; `_name` is an
+ordinary identifier.
 
-`gettok()` itself (`src/Lexer.cpp:1047-1052`) is a thin wrapper around
-`gettokScan()` that stamps the token's *end* position uniformly:
+Standard-library names (`print`, `malloc`, `abs`, ...) are deliberately not
+in `Keywords`. The lexer knows nothing about the library; such a name is as
+unprivileged as a user's function until the Resolver looks it up.
 
-```cpp
-int gettok() {
-  int Tok = gettokScan();
-  CurLoc.EndLine = CurLine;
-  CurLoc.EndCol = CurCol;
-  return Tok;
-}
-```
+`gettok()` wraps `gettokScan()` and stamps the token's end position (and the
+previous token's end, `PrevTokEndLine`/`PrevTokEndCol`, which the
+missing-semicolon hint needs).
 
-### `SourceLocation` and span tracking
+### `SourceLocation`
 
 ```cpp
 struct SourceLocation {
@@ -187,60 +155,51 @@ struct SourceLocation {
   int EndCol = -1;
 };
 ```
-(`include/Lexer.h:44-50`.) `Line`/`Col` mark where the token *starts*;
-`EndLine`/`EndCol` (added later than the other three fields, hence
-appended rather than inserted — see the field's own doc comment for why
-field order matters for the hundreds of pre-existing 2-/3-argument
-aggregate-init call sites across the codebase) mark one column past where
-it *ends*, populated for every token kind uniformly by the `gettok()`
-wrapper above. `-1` means "no end position recorded" (distinct from "same
-column as the start") — still true for genuine multi-token spans (a whole
-declaration, a qualified `A::B::C` path, a failing sub-expression), which
-would need each AST node to track its own end location from its last
-consumed token, not just a lexer-level change (open scope, issue #241
-Track D). This single/multi-token distinction is what lets
-`DiagnosticEngine`'s terminal renderer (`printDiag()`, `src/Lexer.cpp:
-180-293`) underline a token's *full width* (`"^" + string(SpanWidth - 1,
-'~')`, `src/Lexer.cpp:252-256`) instead of a single caret, whenever an end
-position is available, and fall back to a bare `^` when it isn't.
 
-`Filename` is stamped at token-scan time from the global `SourceFilename`
-(`src/Lexer.cpp:491`), which is repointed at each imported module's own
-path while that module is being parsed and restored afterward — this is
-what lets a diagnostic raised by a *later* pass (Resolver/TypeChecker/
-Codegen, all of which run after every file involved has already finished
-parsing) still recover the correct source file and line for a location
-that originated inside an imported module, via the persistent
-`AllSourceLines` cache (`include/Lexer.h:100-112`) rather than the
-transient, single-file `SourceLines`.
+`Line`/`Col` mark where the token starts; `EndLine`/`EndCol` are one column
+past its end, filled for every single token by `gettok()`. `-1` means "no end
+recorded", which is different from "one column wide". A span covering several
+tokens (a whole declaration, a qualified `A::B::C` path) has no end position:
+that would need each AST node to record its own last token. The terminal
+renderer (`printDiag()`) underlines the full width of a token when an end is
+known and prints a single caret otherwise. The new fields are appended after
+`Filename` so the many `{Line, Col}` and `{Line, Col, Filename}`
+aggregate-initializers keep compiling.
 
-### Recovery machinery (brief — see `docs/architecture/errors_and_recover.md`-adjacent detail in code)
+`Filename` is stamped at scan time from `SourceFilename`, which the import
+code repoints at each module while it is parsed. A diagnostic raised by a
+later pass therefore still finds the right file, through the persistent
+`AllSourceLines` cache (the single-file `SourceLines` is transient).
 
-Diagnostics are collected, not thrown as C++ exceptions (LLVM is commonly
-built with exceptions disabled) — `TurfError::raise()` records the
-diagnostic then `longjmp()`s back to the nearest active `setjmp()`
-recovery point (`g_recoverJmp`/`g_recoverActive`, `include/Lexer.h:
-125-129`), used pervasively by the parser/pre-pass/main-pass loops in
-`main.cpp` for per-statement recovery. `DiagnosticEngine` (`include/
-Lexer.h:184-264`) is the single choke point every diagnostic — errors and
-warnings alike — funnels through, and caps at one primary error per
-source line (`ErrorLines`, `src/Lexer.cpp:342-343`) to avoid cascading
-noise from one bad statement.
+### Diagnostics and recovery
+
+Diagnostics are collected, and recovery uses a C++ exception. While
+`g_recoverActive` is set, `TurfError::raise()` records the diagnostic and
+throws `RecoverUnwind`; each recovery point (the driver's per-declaration
+loops, the Resolver's and TypeChecker's per-declaration loops, `ParseFile()`,
+the query facade) catches it, abandons that declaration, and continues.
+Without an armed recovery point `raise()` exits the process. `RecoverUnwind`
+deliberately does not derive from `std::exception`, so the Resolver's
+`catch (const std::runtime_error &)` blocks cannot swallow it. An exception
+(rather than `longjmp`) is used because unwinding runs destructors: a
+`longjmp` leaked the temporaries of every raising expression.
+
+`DiagnosticEngine` (`src/frontend/Lexer.h`) is the one choke point every
+diagnostic passes through. It caps output at one primary error per source
+line (`ErrorLines`) to avoid cascades, unless an embedder sets
+`CollectAllDiagnostics`.
 
 ---
 
 ## 2. The Parser
 
-`src/ParserCore.cpp`, `src/ParserDecl.cpp`, `src/ParserStmt.cpp`,
-`src/ParserLiteral.cpp`, `src/ParserModule.cpp` (split by category from a
-single monolithic `Parser.cpp` in the 2026-08 module split — every file's top
-doc comment says so explicitly). Classic **recursive-descent** parsing: each grammar
-production is one C++ function (`ParseIfStmt()`, `ParseStructDecl()`,
-`ParseType()`, ...) that consumes tokens via the shared `CurTok`/
-`getNextToken()` cursor and recursively calls the functions for whatever
-sub-productions it contains, building an AST bottom-up as it returns.
+`src/frontend/ParserCore.cpp`, `ParserDecl.cpp`, `ParserStmt.cpp`,
+`ParserLiteral.cpp`, `ParserModule.cpp` (with the cross-file declarations in
+`Parser.h` and `ParserInternal.h`). Recursive descent: each production is one
+function (`ParseIfExpr()`, `ParseStructDecl()`, `ParseType()`, ...) that
+consumes tokens through the shared `CurTok`/`getNextToken()` cursor.
 
-### `getNextToken()` — the single token-advance choke point
+### `getNextToken()`: the one advance point
 
 ```cpp
 int getNextToken() {
@@ -248,741 +207,717 @@ int getNextToken() {
     g_braceDepth++;
   else if ((CurTok == '}' || CurTok == ')' || CurTok == ']') && g_braceDepth > 0)
     g_braceDepth--;
+  /* ... the same for g_curlyDepth, '{' and '}' only ... */
   return CurTok = gettok();
 }
 ```
-(`src/ParserCore.cpp:59-65`.) Every single token advance anywhere in the
-parser goes through this one function, which is why it's the natural
-place to track `g_braceDepth` — the current `{`/`(`/`[` nesting depth
-relative to the top level — with zero per-call-site bookkeeping. This
-depth is what lets `SkipToNextTopLevelBoundary()` (`src/ParserCore.cpp:
-150-208`) resynchronize correctly after a parse error at *any* nesting
-depth (not just one level deep) when scanning forward for the next safe
-top-level declaration to resume at.
 
-### Expression parsing: precedence-climbing (operator-precedence parsing)
+Every token advance goes through it, which is why bracket depth is tracked
+here with no per-call-site bookkeeping. `SkipToNextTopLevelBoundary()` uses
+`g_braceDepth` and `g_curlyDepth` to resynchronize after an error at any
+nesting depth.
 
-Confirmed technique: **precedence climbing** (a form of operator-precedence
-parsing, in the same family as a Pratt parser), not a hand-written
-grammar of separately-named productions per precedence level (no
-`ParseAdditiveExpr()`/`ParseMultiplicativeExpr()` chain exists). A single
-integer-keyed precedence table drives it:
+### Expressions: precedence climbing
 
-```cpp
-static std::map<int, int> BinopPrecedence; // Precedence table: '*' > '+'
-```
-(`src/ParserCore.cpp:41`, populated by `InitializePrecedence()`,
-`src/ParserCore.cpp:67-133`.) Selected bindings, low to high:
-assignment/compound-assignment = 10, cast (`to`) = 12, `||` = 15,
-`&&` = 20, `==`/`!=` = 25, relational (`<`/`>`/`<=`/`>=`) = 30, `|` = 33,
-`^` = 35, `&` = 37, `<<`/`>>` = 38, `+`/`-` = 40, `*`/`/`/`%` = 50,
-`**` (exponentiation) = 60 — the tightest-binding operator in the
-language.
+A single table (`BinopPrecedence`, filled by `InitializePrecedence()`) drives
+`ParseBinOpRHS()`; there is no per-level function chain. Low to high:
+assignment and compound assignment 10, cast (`to`) 12, `||` 15, `&&` 20,
+`==` `!=` 25, relational 30, `|` 33, `^` 35, `&` 37, shifts 38, `+` `-` 40,
+`*` `/` `%` 50, `**` 60. The loop parses one operand, then while the next
+operator binds at least as tightly as the current floor it consumes the
+operator and recurses for the right-hand side. All assignment forms and `**`
+are right-associative (`a = b = c` is `a = (b = c)`; `2 ** 3 ** 2` is 512):
+`isRightAssociative` recurses with the same floor instead of floor + 1. The
+cast operator is handled inline: its right side is a type, parsed with
+`ParseType()`. Cast binds tighter than assignment so `y = x to int` casts `x`.
 
-The driving loop, `ParseBinOpRHS()` (`src/ParserCore.cpp:860-958`), is
-the textbook algorithm: parse one primary/unary operand, then repeatedly
-look at the next operator's precedence — if it binds *at least* as
-tightly as the precedence floor this call was invoked with, consume it
-and recursively parse its right-hand side (bumping the floor to
-one-higher, so a same-or-lower-precedence operator that follows correctly
-stops the recursion and returns control to the outer call instead of
-being swallowed); otherwise return what's been built so far. Right
-associativity (assignment: `a = b = c` groups as `a = (b = c)`; `**`:
-`2 ** 3 ** 2` groups as `2 ** (3 ** 2)` = 512) is handled by *not*
-bumping the floor for those specific operators when recursing
-(`isRightAssociative`, `src/ParserCore.cpp:898-909`) — every other binary
-operator is left-associative by the ordinary "bump the floor" rule.
+### `ParseType()`
 
-### `ParseType()` — types are parsed by their own recursive grammar
+Types have their own recursive grammar, in `ParserCore.cpp`:
 
-`src/ParserCore.cpp:229-...` parses a type expression (primitives, `void`,
-pointers `T*`, arrays `T[N]`, generics `list<T>`, the `!T` error-union
-form, module-qualified `Module::Type`) via its own direct self-recursion
-— a nested generic (`list<list<list<...>>>`) or a stacked error-union
-(`!!T`) recurses `ParseType()` straight into itself with no detour back
-through `ParseExpression()`. This is exactly why `ParseType()` carries its
-*own* `ParseRecursionGuard` (`src/ParserCore.cpp:237-243`) rather than
-relying on `ParseExpression()`'s: a deeply-nested generic type was found
-via code review to be completely unbounded even after
-`ParseExpression()`/`ParseBlock()` were already guarded, since neither of
-those functions is ever re-entered by this kind of type-only
-self-recursion (`include/Lexer.h:138-170`, `MaxParseRecursionDepth =
-2000`).
+- primitives, `void`, `ptr`, and `guess` (only where a local variable
+  declaration permits it, via `g_AllowGuessType`);
+- `!T`, the error-union type; `&T` and `&?T`, non-null and nullable safe
+  references; `(&T)[N]`, an array of references (the parentheses are the only
+  place a parenthesized type is accepted);
+- `fn(T1, T2): R`, a function-value type;
+- `Name`, `Module::Name`, and `Name<Args>` generics; trailing `*` for
+  pointers and `[N]` / `[]` for arrays.
 
-### AST node types
+When it sees `Module::Name` it records the qualifier in the `NamedType` or
+`GenericType` (`Module` field) and defers validation: module registration is
+a Resolver pass-1 job, and the parser has no table of modules.
 
-Roughly 42 concrete node kinds, all deriving from one abstract base,
-`class ExprAST` (`include/AST.h:18`) — every statement, declaration, and
-expression in the language is (despite the historical `...ExprAST` naming
-convention) an `ExprAST`, split by category across four headers mirroring
-the parser's own file split:
+Because lexing is maximal munch, `List<List<int>>` ends with a `>>` token and
+`List<T>=` with `>=`. `ParseType()` splits one `>` off such a token by
+rewriting `CurTok` to the remainder without advancing, so the enclosing level
+or the following `=` gets it.
 
-| Header | Node count | Examples |
-|---|---|---|
-| `include/ASTExpr.h` | 16 | `NumberExprAST`, `BinaryExprAST`, `AssignmentExprAST`, `CastExprAST`, `VariableExprAST` |
-| `include/ASTStmt.h` | 11 | `IfExprAST`, `WhileExprAST`, `DoWhileExprAST`, `ForEachExprAST`, `ReturnExprAST`, `RecoverExprAST`, `UnsafeBlockExprAST` |
-| `include/ASTDecl.h` | 9 | `FuncDefExprAST`, `StructDeclExprAST`, `EnumDeclExprAST`, `ModuleImportExprAST`, `VarDeclExprAST` |
-| `include/ASTAccess.h` | 6 | `FuncCallExprAST`, `MethodCallExprAST`, `ScopeAccessExprAST`, `FieldAccessExprAST` |
+`ParseType()` recurses into itself directly (nested generics, stacked `!`), so
+it carries its own `ParseRecursionGuard`. The four guarded entry points are
+`ParseExpression()`, `ParseBlock()`, `ParseUnary()` and `ParseType()`; past
+`MaxParseRecursionDepth` (2000) they report `NestingTooDeep` instead of
+overflowing the C++ stack.
 
-A recurring design pattern worth calling out: the parser sometimes builds
-a node that's deliberately **underspecified**, leaving a later pass to
-fill in what it can't yet know. `ScopeAccessExprAST` (`Left::Right`,
-`include/ASTAccess.h:86-...`) is the clearest example — the parser has no
-way to know at parse time whether `Left` names an enum, a module, or a
-struct (that requires knowing what's been declared program-wide, which
-isn't settled until hoisting, §3), so it only ever fills in `LeftName`/
-`RightName`/locations and leaves `ResolvedKind = Unresolved`; the
-Resolver sets the real kind once `Left`'s identity is known. See
-`docs/architecture/modules_and_scope_resolution.md` §2.3 for the full
-story of this one node.
+### AST nodes
+
+All nodes derive from `class ExprAST` (`src/frontend/AST.h`), which declares
+`codegen()`, `codegenLValue()`, `clone()` and `accept(ASTVisitor &)`. The
+concrete classes are split across `ASTExpr.h` (literals, operators, patterns,
+`compare`), `ASTStmt.h` (control flow, `unsafe`, `recover`, `try`, `defer`),
+`ASTDecl.h` (functions, structs, enums, machines, errors, variables, module
+imports) and `ASTAccess.h` (calls, scope access, field/array access, slices).
+`TURF_AST_NODE_LIST` in `ASTVisitor.h` is the authoritative list; adding a
+node there breaks every exhaustive visitor until it is handled (section 4).
+
+Some nodes are deliberately underspecified, leaving a later pass to complete
+them. `ScopeAccessExprAST` (`Left::Right`) is the clearest case. At parse time
+`Left` could be an enum, an error type, a struct, or a module; that depends on
+program-wide declarations the parser has not seen. The node therefore carries
+names and locations with `ResolvedKind = Unresolved`, and the Resolver fills
+in the kind. The modules document describes this node in full.
 
 ---
 
 ## 3. The Resolver: two-pass name resolution
 
-`src/ResolverCore.cpp`, `src/ResolverDecl.cpp`, `src/ResolverExpr.cpp`,
-`src/ResolverStmt.cpp`, `src/ResolverCall.cpp`, plus the symbol-table
-headers (`include/ResolverSymbolTable.h`, `include/ResolverScopeTable.h`,
-`include/ResolverModuleTable.h`). The Resolver's job is to attach a
-resolved identity — a symbol, an overload candidate list, a module/struct
-owner — to every name reference in the AST, mutating the AST nodes
-**in place** (writing fields like `ResolvedCallTarget`/`ResolvedKind`/
-`ResolvedSymbol` directly onto the node objects) so that every later pass
-can read that identity back without redoing any lookup.
+`src/resolve/`: `ResolverCore.cpp` (entry points and hoisting),
+`ResolverTypeIdentity.cpp` (type identity), `ResolverDecl.cpp`,
+`ResolverExpr.cpp`, `ResolverStmt.cpp`, `ResolverCall.cpp`,
+`ResolverVisibility.cpp` (the `pub` checks); the class is declared in
+`Resolver.h` and the symbol tables in `ResolverSymbolTable.h` (a composite over
+`ResolverScopeTable.h`, `ResolverModuleTable.h`, `ResolverTypeRegistry.h`). The
+Resolver attaches a resolved identity to every name reference, mutating the
+nodes in place (`ResolvedCallTarget`, `ResolvedKind`, `ResolvedSymbol`, ...)
+so later passes read it back without a second lookup.
 
-### Why two passes: hoisting
+### Pass 1 hoists, pass 2 resolves
 
-`Resolver::resolveAll()` (`src/ResolverCore.cpp:47-102`) runs in exactly
-two passes over the same node list:
+`Resolver::resolveAll()` takes the node list through two passes:
 
 ```cpp
-void Resolver::resolveAll(
-    const std::vector<std::unique_ptr<ExprAST>> &Nodes,
-    bool RecoverPerDeclaration) {
-  // Pass 1 — Hoisting
-  hoistTopLevel(Nodes);
+hoistTypes(Nodes);                  // 1a: every type declaration
+resolveDeclarationSpellings(Nodes); // 1b: declaration-level type spellings
+hoistTopLevel(Nodes);               // 1c: function and constant signatures
+checkStructLayoutAcyclicity();      // by-value containment cycles
+// Pass 2: resolve(Node) for every node, bodies included
+```
 
-  // Pass 2 — Full Resolution
-  for (const auto &Node : Nodes)
-    resolve(Node.get());
-  ...
+Pass 1 looks only at top-level declarations, never inside a function body.
+It registers each type under its identity (the modules document, section 2.6),
+resolves the type spellings written in struct fields and signatures, and
+registers every function signature (`registerFunctionSignature()`), every
+`export immut` constant, and every import. Pass 2 then visits everything
+through the `ASTVisitor` interface. With `RecoverPerDeclaration` set (the
+analysis facade does this) each top-level node gets its own recovery point.
+
+This is hoisting in the usual sense, and it is what makes forward references
+work:
+
+```turflang
+fn is_even(n: int): bool {
+    if (n == 0) { return true; }
+    return is_odd(n - 1);   // declared below
+}
+
+fn is_odd(n: int): bool {
+    if (n == 0) { return false; }
+    return is_even(n - 1);
 }
 ```
 
-**Pass 1, hoisting** (`hoistTopLevel()`/`hoistModuleBody()`,
-`src/ResolverCore.cpp:417-...`, `535-...`) walks only *top-level*
-declarations — no function bodies, no nested expressions — and registers
-every function signature, struct, and enum name it sees into the symbol
-table (`registerFunctionSignature()`, `RegisteredStructs_`/
-`RegisteredEnums_`). It never looks inside a function body at all.
+Pass 1 recurses through imports: `hoistModuleBody()` is called for each
+`ModuleImportExprAST`, followed by `registerOnDemandImports()`. That
+machinery (visibility gating, flat imports, type ownership) is in the modules
+document; it is layered on this same two-pass split.
 
-**Pass 2, full resolution** (`resolve()`, `src/ResolverCore.cpp:33-44`,
-dispatching via `Node->accept(*this)` into the visitor methods described
-in §4's ASTVisitor discussion) walks *everything*, bodies included, and
-resolves every name reference it finds — variable reads, function calls,
-type annotations — against the symbol table Pass 1 already fully
-populated.
+A struct that contains itself by value has no size. `checkStructLayoutAcyclicity()`
+finds such a cycle with a three-colour depth-first search over by-value field
+edges (`StructLayoutCycleError`). It runs at the end of pass 1, before anything
+computes a layout, a default value or a GC descriptor.
+`checkStructLayoutAcyclicityForClone()` repeats the check for one freshly
+substituted generic clone, where a cycle can exist that the template does not
+show (`struct A<T> { val: T }` instantiated as `A<B>` where `B` holds an `A<B>`).
 
-This is **hoisting** in the general programming-language sense: lifting
-every top-level *declaration* to the front of processing, before any
-*use* is checked, so that use-before-declaration in source-text order is
-never actually a problem for the resolver. Concretely, this is what makes
-the following compile:
+### Generic parameters are marked during hoisting
 
-```turf
-fn isEven(n: int): bool {
-    if (n == 0) return true;
-    return isOdd(n - 1);   // forward reference: isOdd is declared BELOW
-}
+`ParseType()` cannot tell that a bare `T` in `fn<T> identity(x: T): T` names
+the function's own type parameter and not a struct; it emits `NamedType("T")`.
+When a generic signature is captured into its symbol-table entry
+(`buildFunctionSymbol()`, called from `registerFunctionSignature()`),
+`substituteTypeParams()` rewrites those names into `TurfGenericParamType`,
+recursing through pointers, references, arrays, `!T` and generic arguments.
+It is a thin wrapper over the shared walker `TypeWalk::substitute()`
+(section 7). From then on overload resolution, the TypeChecker and the
+Monomorphizer all see a real parameter type and never re-derive "is this name
+a type parameter".
 
-fn isOdd(n: int): bool {
-    if (n == 0) return false;
-    return isEven(n - 1);
-}
-```
-
-A single combined walk (parse-and-resolve-together, or resolve-bodies-as-
-you-go) would have no entry for `isOdd` in the symbol table at the moment
-it's checking `isEven`'s body, because `isOdd`'s own declaration hasn't
-been reached yet in a single top-to-bottom traversal. Splitting "register
-every signature" (Pass 1, bodies untouched) from "check every use" (Pass
-2, full walk) means that by the time Pass 2 ever looks inside *either*
-function's body, *both* signatures are already registered, regardless of
-which one appears first in the source file. The same mechanism is what
-lets a struct field's type annotation reference a struct declared later
-in the file, and what lets a module's own function call another function
-in that same module regardless of declaration order (self-reference,
-`docs/architecture/modules_and_scope_resolution.md` §1.3).
-
-Note Pass 1 itself is recursive with respect to imports:
-`hoistModuleBody()` is called once per `ModuleImportExprAST` found while
-hoisting, and hoists that module's own top level the same way — see the
-module-resolution doc's §2.7 for the full on-demand-import story
-(`registerOnDemandImports()`, module visibility gating, `TypeOwningModule_`)
-rather than repeating it here; that machinery is layered on top of the
-same Pass-1/Pass-2 split described above, not a separate mechanism.
-
-### Generic substitution happens during hoisting, too
-
-A subtlety worth flagging: `ParseType()` (§2) has no way to know at parse
-time that a bare identifier like `T` in `fn<T> identity(x: T): T` names
-the function's own generic type parameter rather than an ordinary struct
-— it always emits a plain `NamedType("T")`. `substituteTypeParams()`
-(`src/ResolverCore.cpp:131-182`) rewrites that into a real
-`TurfGenericParamType` the moment a generic function's signature is
-captured into its symbol-table entry (`buildFunctionSymbol()`,
-`src/ResolverCore.cpp:296-...`, itself called from
-`registerFunctionSignature()` during Pass-1 hoisting) — recursing through
-pointer/reference/array/generic-argument wrapping so `Box<T>`,
-`&T`, and `T[]` parameters all get their embedded `T` correctly
-substituted too. Every downstream consumer (overload resolution here in
-the Resolver, later the TypeChecker, later still Codegen) then sees a
-real `TurfGenericParamType` rather than re-deriving "is this name
-actually a generic parameter" itself. See §7 for what a
-`TurfGenericParamType` means at the type-system level.
+`buildFunctionSymbol()` also computes the summaries later passes consult:
+`MutatesSelf` (whether an instance method writes into `self`'s own storage),
+`ReturnsParam`, `PossibleErrorTypeNames`, and `Decl` (the exact declaration,
+which generic-operator instantiation uses to tell overloads apart).
 
 ---
 
-## 4. The TypeChecker: a visitor-pattern type-inference pass
+## 4. The TypeChecker: a visitor-based inference pass
 
-`class TypeChecker : public ASTVisitor` (`include/TypeChecker.h:100`).
-`ASTVisitor` (`include/ASTVisitor.h`) is the textbook **visitor pattern**:
-an abstract base with one virtual `visitX(XExprAST &)` method per
-concrete AST node kind, every one defaulting to a no-op —
+`class TypeChecker : public ASTVisitor` (`src/sema/TypeChecker.h`), split over
+`TypeCheckerCore.cpp`, `TypeCheckerCall.cpp`, `TypeCheckerDecl.cpp`,
+`TypeCheckerExpr.cpp`, `TypeCheckerStmt.cpp`, `TypeCheckerPattern.cpp`,
+`TypeCheckerSlice.cpp` and `TypeCheckerVisibility.cpp`.
 
-```cpp
-class ASTVisitor {
-public:
-  virtual void visitNumber(NumberExprAST &Node) {}
-  virtual void visitBinary(BinaryExprAST &Node) {}
-  virtual void visitIf(IfExprAST &Node) {}
-  ...
-};
-```
-— so a concrete pass only has to override the node kinds it actually
-cares about. Every AST node class implements `accept(ASTVisitor &)`,
-which calls back into the visitor's matching `visitX()` method (classic
-double dispatch: which `visitX()` runs depends on both the concrete node
-type *and* the concrete visitor type). `Resolver` and `TypeChecker` are
-both `ASTVisitor` subclasses; so is the debug-dump tool `ASTPrinter`
-(`include/ASTPrinter.h`) — the same traversal interface backs a real
-compiler pass and a pure diagnostic tool with zero shared logic beyond
-"know how to walk the tree."
+`ASTVisitor` (`src/frontend/ASTVisitor.h`) is the visitor pattern. The
+`TURF_AST_NODE_LIST` macro declares one virtual `visit<Name>(<Class> &)` per
+node kind, defaulting to a no-op, so a pass overrides only the nodes it cares
+about. Every node's `accept()` calls the matching `visit` method (double
+dispatch). `Resolver`, `TypeChecker` and the `NarrowingVisitor` of the
+nullability pass derive from it directly. A pass whose correctness needs every
+node (a lint, a printer, a child walker) derives from `ExhaustiveASTVisitor`
+instead, where each `visit` is pure virtual: a new node kind is a compile
+error until the pass decides what to do with it. `ASTChildWalker`
+(`ASTChildWalker.h`) is the exhaustive visitor that simply recurses into
+children, for passes that only intercept a few node kinds. Codegen is not a
+visitor: each node implements its own `codegen()`.
 
 ### Where inferred types live
 
-`TypeChecker` walks the *resolved* AST bottom-up and infers a
-`TurfTypePtr` for every expression node — but, unlike the Resolver (which
-writes its results directly onto AST node fields), the TypeChecker keeps
-its results in a **side table**:
+The TypeChecker walks the resolved AST bottom-up and records a type for every
+expression in a side table, keyed by node pointer:
 
 ```cpp
 std::unordered_map<const ExprAST *, TurfTypePtr> NodeTypes_;
 ```
-(`include/TypeChecker.h:434`), read/written via `getType()`/`setType()`
-(`src/TypeCheckerCore.cpp:111-124`) keyed by the node's own pointer
-identity. This is a deliberate, if partial, separation of concerns —
-per the header's own framing comment (`include/TypeChecker.h:15-20`):
-*"The TypeChecker does NOT replace Codegen yet; it runs in parallel and
-its output (inferred types stored in `NodeTypes_`) will gradually replace
-the equivalent monolithic type logic in Codegen."* A small number of
-values Codegen genuinely cannot re-derive on its own are still written
-directly onto the AST node instead, alongside the Resolver's own
-annotations — e.g. `RecoverExprAST::ResolvedSuccessType`
-(`src/TypeCheckerCall.cpp:1410`, see §4.2 below), stashed there because
-every `!T` value lowers to the *same* runtime shape regardless of what
-`T` actually is, so Codegen has no other way to recover it.
 
-**A genuine architectural wrinkle worth knowing, not glossing over**:
-Codegen still has its *own*, separate, structurally independent
-type-inference function, `getExprType()` (`src/CodegenCore.cpp:499-...`)
-— a second implementation of "what type does this expression have,"
-re-deriving the answer by walking the AST directly rather than consulting
-`TypeChecker::NodeTypes_` at all. The module-resolution doc documents a
-real, live wrong-answer bug this duality caused (`docs/architecture/
-modules_and_scope_resolution.md` §2.10: a module-qualified call's mangled
-name reconstruction, needed by `getExprType()`'s own `FuncCallExprAST`
-branch, silently produced an inaccurate type for a string-returning
-function, causing `==` to pick pointer comparison instead of `strcmp`).
-Both systems are used, for different purposes, and they can drift out of
-sync — this is confirmed current behavior, not a hypothetical, and worth
-keeping in mind when reading Codegen source: a "what type is this" answer
-inside `Codegen*.cpp` almost never comes from the TypeChecker's own
-`NodeTypes_` table.
+read with `getType()` and written with `setType()`. A few results that Codegen
+cannot re-derive are written onto the node instead, next to the Resolver's own
+annotations: for example `RecoverExprAST::ResolvedSuccessType`, because every
+`!T` lowers to the same runtime shape whatever `T` is.
 
-### Generic type substitution at check time
+**Codegen has its own type inference.** `getExprType()` (`CodegenCore.cpp`)
+re-derives "what type is this expression" by walking the AST and does not
+consult `NodeTypes_`. The two systems can disagree, and the disagreement has
+produced real wrong-answer bugs: a module-qualified call whose mangled name
+was reconstructed without its module prefix gave a wrong type for a
+string-returning function, and `==` then compared pointers instead of calling
+`strcmp`. When you read Codegen, assume a "what type is this" answer does not
+come from the TypeChecker, and when you change one inference, check the other.
 
-By the time the TypeChecker sees a generic function's signature, its
-`TurfGenericParamType`s are already in place (§3) — overload resolution
-(`visitFuncCall()`, `src/TypeCheckerCall.cpp`) matches call-site argument
-types against candidate signatures using the ordinary `typesCompatible()`
-type-compatibility check (`src/Types.cpp`), which has a dedicated fast
-path recognizing `TurfGenericParamType` as "matches anything" — this is
-what makes `identity(42)` resolve cleanly against `fn<T> identity(x: T):
-T` without the TypeChecker needing any generics-specific overload-
-resolution code of its own; an open type parameter is just a type that's
-compatible with everything, from the type-compatibility check's point of
-view. See §7 for the runtime-representation side of this (what actually
-gets emitted for a generic parameter's storage).
+### Generic signatures in the checker
+
+A generic function's signature carries `TurfGenericParamType`s (section 3).
+`typesCompatible()` (`src/sema/Types.cpp`) treats an open parameter as
+compatible with anything, which lets the checker type-check a template body
+once, generically, and match `identity(42)` against `fn<T> identity(x: T): T`
+without generics-specific overload code. That rule is reachable only for
+templates: a monomorphized clone has every parameter substituted before it is
+re-checked, so no open `TurfGenericParamType` reaches `typesCompatible()` for
+a clone, and none reaches Codegen (section 7). An operator, field access or
+method call whose operand is an open parameter itself (`a < b`, `a.x`,
+`a.get()` with `a: T`; `TypeChecker::isOpenTypeParam()`) is not judged in the
+template at all: there are no constraints (`FREEZE.md` section 6.1), so it is
+accepted with a permissive type (`bool` for a comparison, otherwise the open
+parameter), and the clone's re-check decides it for the concrete type. An error
+there is reported at the instantiating call with that error's own code. At each
+call, `TypeWalk::unify()`
+binds the declared parameter types against the argument types to recover the
+type arguments, and the checker records an `InstantiationRequest` for the
+Monomorphizer.
 
 ### `!T`: the error-union type
 
-`TurfErrorUnionType` (`include/Types.h:682-695`) is the frontend
-representation of Turf's fallible-return convention, `!T` — a function
-declared `fn risky(): !int` returns either something compatible with
-`int`, or a value of *any* declared `error` type (an open/unenumerated
-union, unlike e.g. Rust's `Result<T, E>` — there is no specific error
-type named in the signature, only "any error is possible").
+`TurfErrorUnionType` (`src/sema/Types.h`) is the type of a fallible return,
+`!T`: either a value of `T` or a value of any declared `error` type (an open
+set; the signature names no specific error). Two checks understand it:
 
-Two places the TypeChecker specifically understands this shape:
-
-- **`visitReturn()`** (`src/TypeCheckerStmt.cpp:284-...`): when the
-  enclosing function's declared return type is an error union, a
-  `return` statement is checked as compatible if the returned value is
-  *either* compatible with the success type `T`, *or* is a value of some
-  declared error type (`isDeclaredErrorTypeValue()`,
-  `src/TypeCheckerStmt.cpp:301-307`) — there's no specific error type to
-  check against, so only "is this some declared error value at all"
-  matters.
-- **`visitRecoverExpr()`** (`src/TypeCheckerCall.cpp:1389-1457`) type-
-  checks Turf's three `recover` forms (`recover produce <value>`,
-  `recover run { }`, `recover as x run { }` — see
-  `docs/architecture/errors_and_recover.md` for the full language-level
-  design). It first
-  rejects `recover` on anything whose type isn't actually an error union
-  (`!WrappedTy->isErrorUnion()`, `src/TypeCheckerCall.cpp:1394-1404`);
-  for `recover produce`, checks the produced value against the success
-  type; for `recover run`/`recover as x run`, requires the block to
-  diverge on every path (`AllPathsDiverge()`, a small AST-level
-  structural check, `src/TypeCheckerCall.cpp:1360-1386` — not the CFG
-  itself, since the CFG for this function hasn't been built yet at
-  TypeChecker time; see §6) *unless* the success type is `void`, in which
-  case simply running the block and falling through is valid (there's no
-  value the expression needs to produce). Every form's overall type is
-  the success type `T`, never `!T` — `recover` is specifically the
-  operation that unwraps the union.
+- `visitReturn()` (`TypeCheckerStmt.cpp`): when the enclosing function returns
+  an error union, a `return` is accepted if its value fits `T` or is a value of
+  a declared error type (`isDeclaredErrorTypeValue()`).
+- `visitRecoverExpr()` (`TypeCheckerCall.cpp`) checks the three `recover`
+  forms (`recover produce <value>`, `recover run { }`, `recover as x run { }`;
+  see `errors_and_recover.md`). It rejects `recover` on an expression that is
+  not an error union, checks a produced value against `T`, and for the block
+  forms requires every path to diverge (`AllPathsDiverge()`, an AST-level
+  structural test, because the CFG does not exist yet at this stage) unless
+  `T` is `void`. The expression's type is `T`, never `!T`.
 
 ---
 
-## 5. Codegen: walking the type-checked AST, function by function
+## 5. Codegen: walking the checked AST
 
-`src/CodegenCore.cpp`, `src/CodegenFunc.cpp`, `src/CodegenExpr.cpp`,
-`src/CodegenStruct.cpp`, `src/CodegenVar.cpp`, `src/CodegenArray.cpp`,
-`src/CodegenControlFlow.cpp`. Every `ExprAST` subclass implements its own
-`codegen()` virtual method (not a separate visitor this time — Codegen
-predates the `ASTVisitor` infrastructure the Resolver/TypeChecker use, and
-still uses old-fashioned virtual dispatch directly on the node), so the
-overall walk is: for every top-level declaration, call `->codegen()`,
-which recursively calls `->codegen()` on its children, bottom-up, exactly
-mirroring the AST's own recursive shape.
+`src/codegen/`: `CodegenCore.cpp`, `CodegenFunc.cpp`, `CodegenExpr.cpp`,
+`CodegenStruct.cpp`, `CodegenVar.cpp`, `CodegenArray.cpp`,
+`CodegenControlFlow.cpp`, `CodegenPattern.cpp`; `Codegen.h` and
+`CodegenInternal.h` hold the shared declarations. For each top-level
+declaration the driver calls `codegen()`, which recurses into children
+bottom-up.
 
-`FuncDefExprAST::codegen()` (`src/CodegenFunc.cpp:197-...`) is itself
-split into a prototype half and a body half (`g_protoOnlyPass`,
-`src/CodegenFunc.cpp:191-196, 270-274`) — see §0's double-parse-wrinkle
-discussion for why main.cpp calls it twice. Function identity is a
-mangled name encoding the module and parameter types
-(`"turf_" + module_prefix + name + "_" + paramType + "_" + paramType...`,
-`src/CodegenFunc.cpp:198-216`) — this is what lets two same-named
-overloads (or two same-named functions in different modules) coexist as
-distinct compiled functions without colliding.
+`FuncDefExprAST::codegen()` (`CodegenFunc.cpp`) has two halves selected by
+`g_protoOnlyPass`: the first call creates the LLVM prototype, the second fills
+the body. A function with non-empty `TypeParams` is a generic template and
+returns immediately; only its clones are emitted. A function's symbol name is
+a mangled string:
 
-Once a function's body exists as an AST, and immediately before finishing
-that function's codegen, Codegen builds a **control-flow graph** for it
-and runs a battery of static-analysis passes over that graph — this is
-substantial enough to be its own subsystem, covered in full in §6.
+```
+"turf_" + <module>_ + sanitizeSymbolName(name) + "_" + <param type> ...
+```
+
+so same-named overloads, and same-named functions in different modules, are
+distinct symbols (`main` is exempt). A parameter type's mangled form and a
+method's name carry the type's identity verbatim, e.g.
+`turf_json_json::Parser.at_json::Parser_ptr`: `::` is legal in an LLVM
+symbol and cannot occur in a source spelling, so it cannot collide.
+
+`ModuleImportExprAST::codegen()` enters the module and codegens its body. The
+pre-pass invokes it twice (prototype pass, body pass), so
+`StructDeclExprAST::codegen()` returns immediately when the cached
+`llvm::StructType` is already non-opaque; without that guard a second call
+created a renamed duplicate type and corrupted `LLVMTypeCache`.
+
+Just before finishing a function, Codegen builds its control-flow graph and
+runs the analyses of the next section.
 
 ---
 
 ## 6. The CFG static-analysis subsystem
 
-Layered into Codegen (there is no separate top-level driver stage for
-this — it happens once per function, inline, inside
-`FuncDefExprAST::codegen()`), but conceptually its own thing: a
-**control-flow graph** is built for every function body, and roughly ten
-independent static-analysis checks run over it, several of them genuine
-textbook dataflow analyses. All of it runs **unconditionally on every
-compile** — none of it is gated behind `--smart`/SLM or any other flag.
+It runs once per function, inline in `FuncDefExprAST::codegen()`, on every
+compile. None of it depends on `--smart` or any flag. It is also reachable
+without Codegen: the query facade calls the same `runFunctionFlowPasses()`
+(section 8).
 
-### The CFG itself
+### The CFG
 
-`include/CFG.h`. A `CFG` is the ordinary compiler-construction data
-structure: a set of `TurfBasicBlock`s (`include/CFG.h:32-79` — a name, a
-list of `ExprAST*` statements, predecessor/successor pointers, and a
-`TerminatorKind` — `None`/`Return`/`Break`/`Continue`/`Branch`/
-`Unconditional`), one designated entry block, and one **virtual exit
-block** that every `return` path (and ordinary fallthrough) is connected
-to. `CFGBuilder::buildCFG()` (`src/CFG.cpp:469-499`) constructs this by
-walking the function body's AST once (`visitExpr()`/`visitIf()`/
-`visitWhile()`/... , `src/CFG.cpp:511-...`), splitting into a new block
-at every branch point exactly as a standard AST-to-CFG lowering does, and
-finishes with a reachability pass (`computeReachability()`,
-`src/CFG.cpp:52-77` — a plain BFS from the entry block, `include/CFG.h:
-141`).
+`src/analysis/CFG.h`, `CFG.cpp`. A `CFG` is a set of `TurfBasicBlock`s (a
+name, a list of `ExprAST *` statements, predecessors, successors, and a
+`TerminatorKind` of `None`, `Return`, `Break`, `Continue`, `Branch` or
+`Unconditional`), an entry block, and a virtual exit block that every return
+path and fallthrough reaches. `CFGBuilder::buildCFG()` walks the body once,
+starting a new block at every branch point, and finishes with
+`computeReachability()` (a breadth-first search from the entry).
 
-Two AST-shaped, non-dataflow diagnostics fall directly out of building
-the CFG itself, both worth knowing as *two distinct* checks rather than
-one, because they're raised through completely different code paths:
+Two diagnostics come out of construction itself:
 
-- **Statement after a terminator** — `CFGBuilder::visitExpr()`
-  (`src/CFG.cpp:511-522`) raises `StatementAfterTerminatorError` (**E012**,
-  fatal) the moment it's asked to visit a statement while the current
-  block already has an explicit terminator, anchored at the terminator's
-  own location (not the unreachable statement's). A **variable
-  declaration** specifically after a terminator takes an entirely
-  separate path: `VarDeclExprAST::codegen()` has its own, earlier check
-  against a `SymbolTable`-tracked early-exit flag
-  (`CurrentScopeHasEarlyExit()`) and raises `UnreachableCodeError`
-  (**E013**) instead, with different wording — this CFG-block-terminator
-  check never even runs for that case, since Codegen's own check fires
-  first, before the CFG pass gets a chance to see the declaration at all.
-- **Missing return** — `reportFlowDiagnostics()` (`src/CFG.cpp:375-400`)
-  raises `MissingReturnError` (**E009**, fatal) when the function's
-  declared return type is non-`void` and `allPathsReturn()`
-  (`src/CFG.cpp:92-108` — every predecessor of the virtual exit block
-  that's reachable must have a `Return` terminator) is false. Void
-  functions are never checked for this.
+- *Statement after a terminator*: `CFGBuilder::visitExpr()` raises
+  `StatementAfterTerminatorError` (E012, fatal), anchored at the terminator.
+  Variable declarations go through the same check. A backstop in
+  `VarDeclExprAST::codegen()` (`CurrentScopeHasEarlyExit()`) raises E012 as
+  well; E013 is retired.
+- *Missing return*: `reportFlowDiagnostics()` raises `MissingReturnError`
+  (E009, fatal) when the return type is not `void` and `allPathsReturn()` is
+  false.
 
-### Order of passes (as wired in Codegen)
+`reportFlowDiagnostics()` also reports unreachable blocks and dead branches
+as warnings through the normal diagnostic engine: `UnreachableBlockWarning`
+(E074) for a reachable-by-text block the entry search never reaches, and
+`DeadBranchWarning` (E075) when that block ends in a conditional branch. Both
+are anchored at the block's terminator, because `ExprAST` has no virtual
+`getLoc()` and a block's first statement cannot be asked where it is.
 
-`FuncDefExprAST::codegen()` (`src/CodegenFunc.cpp:390-477`) runs, per
-function, in this exact order:
+### Order of passes
+
+`runFunctionFlowPasses()` (`src/analysis/Analysis.cpp`) is the single sequence:
 
 ```
-buildCFG()
-  → reportFlowDiagnostics()          (unreachable/dead-branch/missing-return)
-  → calculateCyclomaticComplexity()
-  → hasUnbreakableLoop()
-  → DefiniteAssignmentPass
-  → ValueRangePass
-  → AliasAnalysisPass
-  → LivenessAnalysisPass
-  → allPathsRecurse()                (infinite-recursion check)
-  → ConstructorFieldAssignmentPass   (only for a StructName.new constructor)
+reportFlowDiagnostics()            unreachable, dead branch, missing return
+calculateCyclomaticComplexity()    warns above 15
+hasUnbreakableLoop()               InfiniteLoopWarning
+DefiniteAssignmentPass
+ValueRangePass
+AliasAnalysisPass
+NullabilityPass                    &?T dereference and narrowing
+EscapePass                         references that outlive their frame
+LivenessAnalysisPass
+allPathsRecurse()                  RecursionWithoutBaseError
+ConstructorFieldAssignmentPass     only for `fn S.new`
 ```
+
+A fatal error raises and ends the sequence for that function. Before the body
+is generated, `FuncDefExprAST::codegen()` also lints it (`LintExpression()`)
+and builds a throwaway early CFG for `ValueRangePass::markElidableChecks()`,
+so Codegen can leave out bounds and overflow checks the analysis proves
+redundant. That early pass never raises a diagnostic.
 
 ### Cyclomatic complexity
 
-`CFG::calculateCyclomaticComplexity()` (`src/CFG.cpp:135-140`) — the
-standard formula `M = E - N + 2P` (edges minus nodes plus 2, for a
-single connected component), counted over *every* block including the
-virtual exit block and its incoming edges. `src/CodegenFunc.cpp:405-407`
-warns (`CyclomaticComplexityWarning`, non-fatal) when `M > 15`.
+`calculateCyclomaticComplexity()` is `M = E - N + 2P` over every block,
+including the virtual exit. `CyclomaticComplexityWarning` (non-fatal) fires
+above 15.
 
-### Unreachable code / dead branches — was a real inconsistency, fixed by HYG-001
+### Use before initialization: `DefiniteAssignmentPass`
 
-`reportFlowDiagnostics()` (`src/CFG.cpp:375-...`) calls
-`getUnreachableBlocks()` (any non-exit, non-empty block the entry-block
-BFS never reached) and `getDeadBranches()` (unreachable blocks whose
-terminator is `Branch`). **This used to print both as plain, uncolored
-`std::cerr <<` strings**, *not* routed through `DiagnosticEngine`/
-`TurfWarning` like every other diagnostic in this document — confirmed
-live at the time (compiling a `while true { return 1; } return 2;`
-function printed exactly `Warning: Unreachable code in block 'while.end'
-of function 'main'` with no `[E0NN]` code, no color, no hint, no source
-snippet, and compilation still succeeded), even though the dedicated
-`UnreachableBlockWarning`/`DeadBranchWarning` classes already existed in
-`include/ErrorsFlow.h` and were simply never constructed by anything.
-
-Fixed by HYG-001 (`docs/development/changes/HYG-001.md`,
-2026-09-18): `reportFlowDiagnostics()` now constructs
-`UnreachableBlockWarning(BB->getTerminatorLoc(), FunctionName,
-BB->getName())`/`DeadBranchWarning(BB->getTerminatorLoc(), FunctionName)`
-and calls `.warn()`, same as every other warning in this pass. Both
-render with a real `[E0NN]` code (`E074`/`E075`), color, caret, source
-snippet, and hint, and both participate in `DiagnosticEngine`'s
-one-primary-error-per-line cap like everything else. Anchored at the
-unreachable block's own *terminator* location, not its first statement's
-— `ExprAST` has no virtual `getLoc()` (every concrete node type defines
-its own, non-polymorphically), so there is no generic way to read a
-location off an arbitrary statement here; this mirrors
-`StatementAfterTerminatorError`'s identical precedent earlier in this
-document rather than inventing new AST-wide dispatch. *When* the warnings
-fire did not change — only how they render.
-
-### Use-before-initialization — `DefiniteAssignmentPass`
-
-A textbook **forward dataflow analysis** (`src/Analysis.cpp:252-353`).
-Only symbols introduced by a `VarDeclExprAST`/`ArrayDeclExprAST` *inside*
-the function body are tracked (`AllBodyDeclared`) — parameters are always
-considered pre-assigned and excluded entirely. Equations:
+A forward dataflow analysis (`Analysis.cpp`) over the symbols declared by
+`VarDeclExprAST`/`ArrayDeclExprAST` inside the body. Parameters are always
+assigned and not tracked.
 
 ```
-OUT[b] = IN[b] ∪ Defs(b)
-IN[b]  = ∩ OUT[pred]   over every predecessor of b (meet = set intersection)
+OUT[b] = IN[b] union Defs(b)
+IN[b]  = intersection of OUT[pred] over all predecessors
 ```
 
-Intersection at merge points is the semantically load-bearing choice
-here: a variable is only "definitely assigned" at a program point if it
-was assigned on **every** incoming control-flow path, not just some of
-them. The analysis runs to a fixed point (`src/Analysis.cpp:301-330`,
-worklist-style: recompute `IN`/`OUT` for every non-entry block until
-nothing changes), then makes a second pass purely to report: any read of
-a body-declared symbol not yet present in that block's fixed-point `IN`
-set raises `DefiniteAssignmentError` (**E008**, fatal), with a
-`withRelated()` note pointing back at the declaration
-(`src/Analysis.cpp:336-352`). Because `CFGBuilder` deliberately adds
-condition/subject expressions as statements on their own dedicated
-condition blocks (`if`/`while`/`do-while`/`for`/`for-each`/`compare`
-subject, `src/CFG.cpp:600` onward), a variable used only inside a loop's
-own guard expression is checked by this pass too, not just inside loop
-bodies.
+Intersection is the load-bearing choice: a variable is definitely assigned
+only if it is assigned on every incoming path. The pass iterates to a fixed
+point and then reports each read of a body-declared symbol that is not in the
+block's `IN` set as `DefiniteAssignmentError` (E008, fatal), with a note at
+the declaration. `CFGBuilder` places condition and subject expressions as
+statements in their own blocks, so a variable used only in a loop guard is
+checked too.
 
-### Dead stores and unused variables — `LivenessAnalysisPass`
+### Dead stores and unused variables: `LivenessAnalysisPass`
 
-The other half of the classic pair: a **backward dataflow analysis**
-(`src/Analysis.cpp:373-535`), computing per-block `Gen` (upward-exposed
-reads — a read not preceded by a write to the same variable earlier in
-the same block) and `Kill` (writes), then the standard liveness
-equations:
+A backward dataflow analysis. Per block it computes `Gen` (upward-exposed
+reads) and `Kill` (writes), then iterates
 
 ```
-LiveOut[B] = ∪ LiveIn[S]           over every successor S of B
-LiveIn[B]  = Gen[B] ∪ (LiveOut[B] − Kill[B])
+LiveOut[B] = union of LiveIn[S] over successors S
+LiveIn[B]  = Gen[B] union (LiveOut[B] - Kill[B])
 ```
 
-iterated to a worklist fixed point (`src/Analysis.cpp:454-478`). A
-variable declared in the body but never read *anywhere* (tracked via a
-separate `EverRead` set, deliberately independent of `Gen[]`'s
-upward-exposed-only semantics — see the code's own comment,
-`src/Analysis.cpp:410-421`, on the bug this fixed: a plain
-declare-then-use-in-the-same-block pattern is never upward-exposed, so a
-naive "was it ever in some `Gen[b]`" check misflagged the single most
-common local-variable pattern in the language as unused) produces
-`UnusedVariableWarning`. A write whose target isn't in the live-after set
-at that program point — overwritten before being read, or the function
-exits before it's read — produces `DeadStoreWarning`
-(`src/Analysis.cpp:480-534`). Both are non-fatal, and both exclude
-parameters unconditionally. **Confirmed by direct compilation** (not just
-reading the test's own comments — `tests/14_cfg_analysis/
-12_dead_store_simple.tr`'s header comment claims `x = 10` is "not a dead
-store because `x` is subsequently returned"; it is a dead store, because
-the function actually returns the literal `0`, never `x`): compiling that
-file produces three warnings — one `UnusedVariableWarning` plus **two**
-separate `DeadStoreWarning`s, one for the initializer and one for the
-later reassignment.
+to a fixed point. A body-declared variable that is never read anywhere is
+`UnusedVariableWarning`. That test uses a separate `EverRead` set, because
+`Gen` records only upward-exposed reads and a declare-then-use inside one block
+is never upward-exposed. A write whose target is not live afterwards is
+`DeadStoreWarning`. Both are warnings, and both exclude parameters and
+variables whose name begins with `_`.
 
-### Unbreakable-loop detection — Tarjan's SCC algorithm
+### Unbreakable loops
 
-`CFG::hasUnbreakableLoop()` (`src/CFG.cpp:167-243`) runs **Tarjan's
-strongly-connected-components algorithm** over the reachable subgraph,
-deliberately chosen over simpler path-based back-edge detection (see the
-function's own doc comment for two concrete false-negative cases —
-`break` nested inside another loop, and branching inside `while true` —
-that a naive back-edge check gets wrong and the SCC view gets right). A
-closed SCC — two or more blocks, or one block with a self-edge — that has
-**no** outgoing edge to any block outside itself is an unbreakable loop:
-control can enter it but can never leave. A `while true`/`do { } while
-(true)` with a *literal* `true` condition deliberately omits the
-condition-block-to-loop-exit edge at CFG-build time (`src/CFG.cpp:
-790-809, 883-895`) — that's precisely what makes the resulting SCC
-"closed" and triggers the warning; an ordinary `while(cond)` always keeps
-that exit edge, so its SCC is never closed and this never fires.
-Non-fatal (`InfiniteLoopWarning`). A related but genuinely separate
-check, `SuspiciousInfiniteLoopWarning` (`src/Lint.cpp:476,497`), is a
-plain AST pattern-match (not CFG-based, no SCC computation) with similar
-wording and intent — worth not conflating the two; they're independently
-implemented and could theoretically diverge.
+`hasUnbreakableLoop()` runs Tarjan's strongly-connected-components algorithm
+over the reachable subgraph. A closed SCC (two or more blocks, or one block
+with a self edge) with no edge leaving it can be entered but not left. A
+`while true` or `do { } while (true)` with a literal `true` condition omits
+the condition-to-exit edge when the CFG is built, which is what closes the
+SCC. An ordinary `while (cond)` keeps that edge. `InfiniteLoopWarning` is
+non-fatal. `SuspiciousInfiniteLoopWarning` (`Lint.cpp`) is a separate,
+AST-pattern check with similar wording; the two are independent.
 
-### Infinite-recursion detection — DFS with overload-aware self-call identity
+### Infinite recursion
 
-`CFG::allPathsRecurse()` (`src/CFG.cpp:321-373`) is a **depth-first
-search** from entry to the virtual exit block, answering: does *every*
-path pass through at least one call back to the enclosing function
-itself? A back-edge (an ordinary loop cycle encountered mid-DFS) is
-conservatively treated as "this path recurses," since a cycle can't prove
-a base case exists. The interesting engineering detail is
-`blockContainsSelfCall()` (`src/CFG.cpp:257-308`): it prefers comparing
-the call's *mangled* target name (which encodes parameter types) over its
-bare base name, specifically so that one overload calling a
-*differently-aritied sibling overload* of the same base name — e.g.
-`assert(cond)` delegating to `assert(cond, msg)` — is never
-misidentified as self-recursion. Produces `RecursionWithoutBaseError`
-(**E010**, fatal — flagged `Important` in `include/ErrorCodes.h`, since
-it's a guaranteed stack overflow, not a style nit).
+`allPathsRecurse()` is a depth-first search from entry to exit asking whether
+every path passes through a call to the enclosing function. A back edge counts
+as "recurses", since a cycle proves no base case. `blockContainsSelfCall()`
+compares the call's mangled target name (which encodes parameter types) rather
+than the bare name, so `assert(cond)` calling `assert(cond, msg)` is not
+mistaken for self-recursion. The result is `RecursionWithoutBaseError` (E010,
+fatal).
 
-### Use-after-free / double-free — `AliasAnalysisPass`
+### Use after free and double free: `AliasAnalysisPass`
 
-`src/AliasAnalysis.cpp`. A forward, per-block **worklist dataflow**
-tracking two things per program point: a points-to map (`VariableSymbol*
-→ optional<AllocSiteID>`) and a set of already-freed `AllocSiteID`s. This
-is a lightweight points-to analysis, not a full alias analysis: it
-recognizes exactly three patterns — `x = malloc(n)`/`realloc(n)` as
-minting a fresh allocation-site identity, a plain variable-to-variable
-assignment (`p = q`) as points-to propagation (aliasing), and `free(x)`
-as marking that allocation site freed — then flags any later array access
-(`x[i]`) through a variable still pointing at an already-freed site.
-Merging at a control-flow join is deliberately conservative ("prefer
-existing mapping, do not try to join alloc sites" per the code's own
-comment, `src/AliasAnalysis.cpp:70`). Tracking is keyed by
-`VariableSymbol*` identity, not variable name — the code comment at
-`src/AliasAnalysis.cpp:24-41` documents a real bug this fixed: name-keying
-conflated a shadowed inner variable with an unrelated outer one of the
-same name, producing a false double-free. Produces `DoubleFreeError`
-(**E017**) / `UseAfterFreeError` (**E018**), both fatal and both flagged
-`Important`, each carrying a `withRelated()` note pointing at the earlier
-free.
+`src/analysis/AliasAnalysis.cpp`. A forward worklist dataflow over a
+points-to map (`VariableSymbol *` to an optional allocation-site id) and a set
+of freed sites. It is deliberately small: `x = malloc(n)`/`realloc` mints a
+site, `p = q` copies the points-to fact, `free(x)` marks the site freed, and a
+later access through a variable that still points at a freed site is an error.
+At a join it keeps an existing mapping and does not try to merge sites.
+Tracking is keyed by `VariableSymbol *`, not by name, so a shadowing inner
+variable is not confused with an outer one. The errors are `DoubleFreeError`
+(E017) and `UseAfterFreeError` (E018), both fatal, each with a note at the
+earlier free.
 
-### Constant propagation and compile-time array-bounds checking — `ValueRangePass`
+### Reference escape: `EscapePass`
 
-`src/ValueRange.cpp`. Another forward worklist dataflow, tracking a
-per-symbol `optional<long long>` known-constant value
-(`evalConstExpr()`, `src/ValueRange.cpp:30-61`, folding literal integers
-and simple `+`/`-`/`*`/`/` combinations of already-known constants), with
-meet-at-merge-points requiring all predecessors to agree on the exact
-same value (else the symbol becomes unknown again — the same
-conservative "any disagreement collapses to unknown" shape
-`AliasAnalysisPass`'s value-merge uses). Whenever an array access's index
-expression evaluates to a statically-known constant against a
-fixed-size array whose declared size is also known, `ArrayBoundsError`
-(**E001**) fires immediately at *compile time* (`src/ValueRange.cpp:
-120-142`) if the constant is out of range — this is genuinely distinct
-from (and in addition to) any separate runtime bounds check the same
-access would also get: `mut i: int = 5; arr[i]` against a smaller
-fixed-size `arr` fails to compile outright, rather than merely crashing
-at runtime.
+`src/analysis/Analysis.h`, `Analysis.cpp`. A forward dataflow pass shaped like
+`NullabilityPass`. Per block it keeps a map `VariableSymbol *` to
+`RefProvenance`; absence from the map means `Unknown`, the permissive default.
+`meetProv()` keeps an entry only where every predecessor agrees. The
+transfer function is a recursive `EscapeCheckVisitor`, and, after the
+dataflow reaches its fixed point, a second phase checks every sink.
+`classifyProvenance()` and `classifyAddressOfProvenance()` recognize a closed
+set of expression shapes (`&x`, a variable read, a `heap()` call, a cast);
+anything else is `Unknown` and never produces an error.
 
-### Definite field assignment for constructors — `ConstructorFieldAssignmentPass`
+A value classified `Stack` raises `DanglingReferenceEscapeError` (E086, fatal)
+at one of five sinks: a `return`; an assignment into a field of a base that is
+a parameter or heap value; a call to a collection mutator (`push`, `set`,
+`put`, `add`, `enqueue`, matched by the receiver's struct name); an
+`operator[]=` dispatch; and the operand of `heap()`. Casting an unsized `T[]`
+parameter to a raw pointer turns its `Param` provenance into `Stack`, because
+that cast erases the aliasing information. Every other cast into a raw
+pointer type leaves tracking: `unsafe` is the user opting out of this net.
 
-`include/Analysis.h:54-64`, run only when the function's internal mangled
-name ends in `.new` (i.e. only for a struct's own `new()` constructor,
-`src/CodegenFunc.cpp:462-476`). Structurally this is the *exact same*
-forward-dataflow shape as `DefiniteAssignmentPass` above — meet as
-intersection at merge points, fixed-point iteration — just tracking
-`self.<field>` assignment names instead of local-variable identities, and
-checking the accumulated set at the CFG's **exit** block rather than at
-each individual use site (there's no "use" of a field to check here, only
-whether it was written on every path that reaches the function's end).
-Raises `IncompleteConstructorError`, naming every field that was missed
-on at least one path — a genuine control-flow-sensitive check, not merely
-"is it assigned *somewhere* in the body": a field assigned only inside
-one branch of an `if` with no covering `else` is still correctly flagged.
+### Constant propagation and array bounds: `ValueRangePass`
 
-### `CallGraphPass` — confirmed, currently, a stub
+`src/analysis/ValueRange.cpp`. A forward worklist dataflow of known-constant
+values (`evalConstExpr()` folds integer literals and `+ - * /` of known
+constants). At a join, all predecessors must agree on the value or the symbol
+becomes unknown. When an array index evaluates to a constant against an array
+of known fixed size, an out-of-range index is `ArrayBoundsError` (E001) at
+compile time, in addition to any runtime check.
 
-Worth stating plainly rather than implying more than exists:
+### Constructor fields: `ConstructorFieldAssignmentPass`
 
-```cpp
-void CallGraphPass::runGlobal() {
-  std::lock_guard<std::mutex> lock(g_cg_mutex);
-  // Function is currently just a stub.
-}
-```
-(`src/CallGraph.cpp:13-16`, called once per compilation from
-`src/main.cpp:1123-1124`.) It takes a lock and returns — no summary is
-printed, no cross-function analysis runs. Separately, `AddCallEdge()`
-(`src/CallGraph.cpp:18-21`) *is* actively called during Codegen
-(`src/CodegenFunc.cpp:377`, once per call site) and does populate a
-module-level `caller → set<callee>` map — but nothing anywhere in the
-codebase ever reads that map back out. The data is collected; nothing
-consumes it. Any future whole-program call-graph analysis (recursive-cost
-estimation, cross-function dead-function detection, inlining heuristics)
-would have its raw edge data ready to go, but as of this writing, no such
-analysis exists.
+Run only for a function whose name ends in `.new`. It has the shape of
+`DefiniteAssignmentPass` but tracks `self.<field>` assignments, and checks the
+set at the exit block instead of at uses. A field written on only some paths
+is reported: `IncompleteConstructorError` names every field missed on at least
+one path.
+
+There is no whole-program call-graph pass.
+
+### Pattern matching through the passes
+
+`compare` with patterns (language rules in `docs/development/FREEZE.md`,
+section 6.17) touches every pass. A `matches` header is an `ExprAST` in
+`MatchesArm::Values` (with parallel `Guards` and the arm's `Bindings`): an
+ordinary expression is the original equality pattern, and
+`WildcardPatternExprAST`, `BindingPatternExprAST`, `StructPatternExprAST` and
+`ErrorVariantPatternExprAST` (`ASTExpr.h`) are the destructuring forms.
+Patterns are never evaluated as expressions (`codegen()` on one is fatal);
+each pass handles them explicitly.
+
+| Pass | What it does with a pattern |
+|---|---|
+| Lexer | `_` alone is `TOK_WILDCARD`; `_name` is an identifier. |
+| Parser | `ParsePattern()` (`ParserStmt.cpp`) reads a header with the ordinary expression parser and reinterprets it: an expression followed by `{` was a struct name; in a nested position a bare identifier becomes a binding. `ParsingPatternHeader` switches off the "struct brace-literal is removed" hint for exactly that call. |
+| Resolver | `resolveArmPattern()` (`ResolverExpr.cpp`): one arm scope, each binding declared once (immutable, placeholder type), a struct pattern's name validated by `validateNamedType()` like any annotation, stacked headers' binding sets compared. `normalizeHeaderPattern()` turns a bare `E::V` over an error type into a pattern. |
+| TypeChecker | `visitCompare()` owns arm order, guards, unreachable arms and exhaustiveness. `checkPattern()` (`TypeCheckerPattern.cpp`) types one pattern against the subject, using `instantiatedFieldType()` (shared with `p.field`) so a generic instance's field type is the same either way, and records `FieldPattern::FieldType` and `StructPatternExprAST::MatchedType` for Codegen. For error patterns the subject must be an error, the field list complete or `..`, and sub-patterns are typed against the variant's declared fields. |
+| CFG | `CFGBuilder::visitCompare()` builds a chain, not a fan-out: one test block per header holding the pattern and then the guard as its last statement, the match edge going to the arm body first and the fail edge to the next header. A pattern is a block statement, so `AnalysisVisitor::visitBindingPattern()` makes each binding a definition on the edge into the arm, and `NullabilityPass` narrows through a guard as through an `if`. The last header's fail edge is omitted when `CompareExprAST::Exhaustive` proves nothing falls through. |
+| Monomorphizer | A guard is substituted like any body expression (`substituteTypesInBody()`); a pattern over a generic struct records the instantiation as a field access would. `StructPatternExprAST::clone()` shares its type spelling, so a clone keeps the template's resolution. |
+| Codegen | `needsPatternCodegen()` (any struct pattern, `_` or guard) selects `CompareExprAST::codegenPatterns()` (`CodegenPattern.cpp`); otherwise the original `switch`/`strcmp` lowering runs. The pattern lowering snapshots the subject once into an entry-block slot, emits the ordered test chain, and registers bindings as entry-block allocas for the guard and body only. An error pattern compares the tag with `strcmp` and reads each field out of the payload struct. It is never a catch-all. |
 
 ---
 
 ## 7. Generic monomorphization
 
-Turf's generics are implemented as **monomorphization**: one fully
-specialized, independently-compiled clone of a generic function, method,
-or struct per distinct tuple of concrete type arguments actually used in
-the program (`docs/development/FREEZE.md` §6.1, frozen). This is the
-result of the Architecture Overhaul's `TYPE-002` feature group
-(`docs/development/changes/TYPE-002.md`), which replaced an earlier type-erasure
-implementation outright — the two headline doc comments in
-`include/Types.h` (`TurfGenericParamType`: *"replaced with concrete types
-during monomorphization"*; `GenericType`: *"the core of monomorphization"*)
-now describe the actual implementation, not an aspiration.
+Generics are monomorphized: one fully specialized, independently compiled
+clone of a generic function, method, constructor or struct per distinct tuple
+of concrete type arguments the program uses (`docs/development/FREEZE.md`,
+section 6.1). There is no type erasure: a type parameter is never represented
+as an opaque pointer-sized slot. The invariant (INV-GEN-1) is that no
+`TurfGenericParamType` reaches Codegen; it is asserted in Codegen and in the
+Monomorphizer, and `FuncDefExprAST::codegen()` refuses to emit a node that still
+has type parameters. The doc comments in `src/sema/Types.h` say the same
+(`TurfGenericParamType`: replaced with concrete types during monomorphization;
+`GenericType`: the core of monomorphization).
 
-**What actually happens**: a new pass, the **Monomorphizer**
-(`include/Monomorphize.h`/`src/Monomorphize.cpp`), sits between the
-TypeChecker and Codegen as pre-pass sub-pass 2b.5:
+### The pass
+
+`src/sema/Monomorphize.h`, `Monomorphize.cpp`. The driver runs it in the
+pre-pass, after the TypeChecker and before struct codegen (sub-pass 2b.5, section
+0). The facade does not run it.
+
+While the pre-pass `TypeChecker` runs, every generic call site
+(`visitFuncCall()`, `visitMethodCall()`, `TypeCheckerCall.cpp`) and every
+generic-typed variable or field (`visitVarDecl()`, `visitStructDecl()`,
+`TypeCheckerDecl.cpp`) records an `InstantiationRequest`: the generic
+declaration plus the concrete type arguments. They go into an
+`InstantiationCollector` that the driver attached with
+`setMonomorphizationCollector()`.
+
+The driver then loops over four drain functions until none reports progress:
 
 ```
-Lexer → Parser → Resolver(2) → TypeChecker → Monomorphizer → Codegen
+drainFreeFunctionRequests   generic free functions and operators
+drainMethodRequests         generic methods
+drainConstructorRequests    generic StructName::new
+drainStructRequests         generic struct layouts
 ```
 
-While the pre-pass TypeChecker runs, every generic call site
-(`visitFuncCall`/`visitMethodCall`, `TypeCheckerCall.cpp`) and every
-generic-typed variable declaration or field
-(`visitVarDecl`/`visitStructDecl`, `TypeCheckerDecl.cpp`) records an
-`InstantiationRequest` — the generic declaration plus the concrete type
-arguments the call site or declaration actually needs — into an
-`InstantiationCollector`. The Monomorphizer then drains this worklist to a
-fixed point: for each still-undrained request it clones the generic
-declaration's AST, substitutes every occurrence of its `TurfGenericParamType`
-type parameters with the concrete types the request names, renames the
-clone via `Monomorphize::instantiatedDeclName()` (a pure function of base
-name and type arguments — e.g. `identity` + `[int]` → `identity_gen1_int`,
-`List` + `[int]` → `List_gen1_int`), clears its type parameters so it is no
-longer generic, and re-resolves/re-typechecks it exactly like an ordinary,
-already-concrete declaration. Draining is a fixed point rather than a
-single sweep because re-typechecking one clone's body can discover *new*
-generic call sites (a nested generic call, a generic struct field) that
-themselves need draining — the collector's cache is scanned non-destructively
-each iteration so growth mid-sweep is picked up automatically. A generic
-declaration's own **template** AST node is left untouched in the tree —
-`FuncDefExprAST::codegen()`/`StructDeclExprAST::codegen()` both refuse to
-emit code for a node that still has type parameters — so only clones ever
-reach Codegen.
+Each one, for every undrained request, clones the generic declaration's AST,
+substitutes every `TurfGenericParamType` with the request's concrete type
+(`cloneAndSubstituteSelfBound()` for struct-bound declarations), renames the
+clone with `Monomorphize::instantiatedDeclName()`, clears its type
+parameters, and re-resolves and re-type-checks it as an ordinary concrete
+declaration (`finishInstantiation()`; the Resolver side is
+`resolveMonomorphizedClone()`, which resolves the clone as if it were
+written inside its template's module). The clone is appended to `PrePassASTs`
+and registered, so sub-passes 2c, 3a and 3b codegen it like any other
+declaration.
 
-The result is genuine, independent compiled code and layout per
-instantiation: `List<int>` and `List<string>` are two distinct
-`llvm::StructType`s with two distinct sets of compiled methods
-(`turf_List.push_gen1_int_...`, `turf_List.push_gen1_string_...`), not one
-shared implementation reached through a cast. `GlobalSymbolTable` holds a
-separate registration for each concrete instantiation actually used,
-keyed by its mangled name — never a single shared `"List"` entry standing
-in for all of them. See `docs/architecture/memory_model.md` §2.7 for the
-storage-layout consequences (in particular: there is no pointer-sized
-"erased slot" any more, so a struct-typed `T` larger than one machine word
-is not a special case).
+A loop rather than one sweep is needed because re-checking one clone can
+discover new requests (a nested generic call, a generic field), and because
+the four kinds feed each other: a method clone can call a generic free
+function, and a free function can construct a generic struct. The template's
+own AST node stays in the tree and is skipped by sub-passes 3a and 3b.
 
-**Instantiation depth is capped.** A genuinely unbounded recursive generic
-instantiation (a generic function whose body calls itself through its own
-still-open type parameter in a way that would keep generating new,
-distinct concrete instantiations forever) is rejected with a dedicated
-diagnostic (`E079`, `GenericInstantiationDepthError`) once the worklist's
-drain depth exceeds `Monomorphize::kMaxInstantiationDepth` (64, FREEZE.md
-§6.1) — a compile-time error naming the instantiation chain, not an
-unbounded compile or a stack overflow in the compiler itself. `TYPE-002`'s
-own `Known pitfalls`/`OVH-014` document the diagnostic's one remaining
-rough edge (it currently names the whole instantiation cache rather than
-just the offending chain — tracked as roadmap `LEC-005`, not a soundness gap).
+`instantiatedDeclName()` is a pure function of base name and type arguments,
+inserting a `_gen<N>_` marker right after the base: `identity` with `[int]` is
+`identity_gen1_int`; the struct `list::List` with `[int]` is
+`list::List_gen1_int` (its LLVM name `list.List_gen1_int`); a method clone is
+`list::List.push_gen1_int`. The driver uses the `_gen<N>_` marker to find a
+struct instantiation whose request was recorded but never drained.
 
-**Why monomorphization over type erasure**: the project's earlier
-erasure-based implementation traded away real correctness, not just
-optimization opportunity — every type parameter erased to one opaque
-64-bit slot, so a struct-typed `T` larger than one machine word could not
-be losslessly represented at all (an ICE on any attempt), no per-`T`
-operator dispatch was possible (an equality check on a generic `K`
-silently compared raw pointer bits instead of calling `operator==` for the
-concrete type), and `sizeof(T)` inside a generic body had no correct
-answer to give. Most importantly, a precise garbage collector (F-MEM-1)
-cannot trace a heap where a `T`-typed field is sometimes a real pointer
-and sometimes a scalar value stored in a pointer-shaped slot purely by
-convention — monomorphization, which gives every field a real, distinct,
-statically-known type, is F-MEM-1's own explicit prerequisite
-(`docs/development/FREEZE.md` §6.5). The real cost monomorphization pays
-instead is compile-time and code-size growth proportional to the number of
-*distinct concrete instantiations* a program actually uses, not just the
-number of generic declarations written — bounded in practice by the depth
-cap above and, per `TYPE-002`'s own measurements, offset in this compiler's
-case by `OPT-001`'s dead-code stripping of now-genuinely-unreachable
-generic template bodies (which erasure, by design, always kept
-reachable).
+The result is independent code and layout per instantiation. `List<int>` and
+`List<string>` are two `llvm::StructType`s with two sets of methods;
+`GlobalSymbolTable` has one registered `TurfStructType` per instantiation,
+keyed by the clone's identity, never one shared `List` entry. See
+`docs/architecture/memory_model.md` section 2.7 for the layout consequences.
+
+### Instantiation chains and the depth cap
+
+Every `InstantiationRequest` records its `Parent`: the cache index of the
+instantiation whose body was being re-checked when this one was found, or `-1`
+for ordinary code. `finishInstantiation()` sets it around the nested
+`TypeChecker` with `InstantiationCollector::setCurrentParent()`, as a
+set/restore pair rather than an RAII guard because the nested checker reports
+by exception and the restore must be explicit. Following `Parent` to `-1`
+(`InstantiationCollector::chainTo()`) gives the real chain, for instance user
+call, `Set<Big>.add`, `Set<Big>.contains`.
+
+- *Where an instantiation error points.* An error found while re-checking a
+  clone is anchored at the outermost user-code request in its chain
+  (`anchorIndex()`: the first hop whose site is not under `lib/std`). It
+  carries one note per hop (`'Set<Big>.add' requires 'Set<Big>.contains'
+  here`) and one for the error itself, so an unsupported type argument is
+  reported on the user's call and not inside `set.tr`.
+- *The cap.* A generic that requests ever-larger instances of itself is
+  rejected with E079 (`GenericInstantiationDepthError`) once a chain is longer
+  than `Monomorphize::kMaxInstantiationDepth` (64), printing the chain with long
+  names clipped. A generic that fans out (`f<T>` requesting both `f<Box<T>>`
+  and `f<Pair<T>>`) reaches depth 64 only after enumerating exponentially many
+  instances, so `kMaxTotalInstantiations` (4096) backstops it through the same
+  error. Calling one generic function with any number of different types is
+  fine: the limit is chain length, not the count.
+
+### Why not type erasure
+
+Erasing every parameter to one opaque 64-bit slot cannot represent a
+struct-typed `T` wider than a machine word, cannot dispatch `operator==` per
+`T` (an equality check on a generic key would compare raw bits), and gives
+`sizeof(T)` no answer. A precise garbage collector (F-MEM-1) also needs every
+field to have a distinct, statically known type, which erasure cannot give;
+monomorphization is its prerequisite (`FREEZE.md`, section 6.5). The cost is
+compile time and code size proportional to the number of distinct
+instantiations used (templates themselves are never emitted).
+
+### One type walker
+
+Substituting a type parameter and detecting an open one are needed by every
+pass in this section. `src/sema/TypeWalk.h` and `TypeWalk.cpp` hold the one
+implementation:
+
+- `containsOpenParam()`, parameterized by how far to look (a bare check;
+  through pointer, array and reference wrapping; or also through a
+  `GenericType`'s arguments);
+- `substitute()`, a name-to-type map walk that serves both the declaration
+  direction and the instantiation direction;
+- `unify()`, the call-site binder that recovers type arguments from argument
+  types;
+- `collectParamOrder()` and `collectOrderedFieldSubstitution()` for the two
+  shapes `unify()` does not fit.
+
+The Resolver, TypeChecker and Monomorphizer call these and keep no private
+walker. `scripts/check/check_boundary.sh` enforces that a `dynamic_cast` to
+`TurfGenericParamType` appears only in `TypeWalk`, in an INV-GEN-1 assertion,
+or in the one documented exception in `CodegenCore.cpp`. Codegen's
+`getExprType()` is a separate engine and reimplements the same pattern in a few
+places; it is not unified with `TypeWalk`.
+
+### Generic operators
+
+An `operator<T> ...` declaration is a `FuncDefExprAST` with non-empty
+`TypeParams`, so it is a template like any `fn<T>` (`FREEZE.md`, section
+6.19). The difference is the requester: an operator node
+(`BinaryExprAST`, `UnaryExprAST`, `CompoundAssignmentExprAST`,
+`PostfixExprAST`, `ArrayAccessExprAST`), not a `FuncCallExprAST`.
+
+- *Matching.* `TypeChecker::matchOperatorOverload()` (`TypeCheckerCall.cpp`) is
+  the one place a candidate meets concrete operands, for every operator
+  resolution site. For a generic candidate it `unify()`s each declared operand
+  with its operand, requires every type parameter bound, substitutes, then
+  requires `sameTypeExact()` per operand. The last step matters: `unify()`
+  skips a structural mismatch silently, so without it `Cell<int> == Cell<string>`
+  would match `operator<T> ==(a: Cell<T>, b: Cell<T>)` with `T = int`.
+- *Request identity.* A request carries `Decl`, the exact template
+  (`ResolverFunctionSymbol::Decl`, set in `buildFunctionSymbol()`).
+  `(SourceModule, DeclKey)` alone cannot separate overloads, and every operator
+  spelling is overloaded. `drainFreeFunctionRequests()` instantiates `Decl`
+  directly and falls back to the name registry only without one; the method and
+  constructor drains do the same, so overloaded generic methods
+  (`Box.put(x)` and `Box.put(x, y)`) are separate templates.
+- *Rewriting sites.* `retargetOperatorSite()` writes the clone into the node's
+  own target field. `DeclKey` separates the two things one node can need: `a[i]`
+  is the site of both an `operator[]` and an `operator[]=` request, and a
+  user-written `!x` keeps its `operator!` target apart from its `!=` one.
+- *Open parameters are not requested.* Checking the template body itself sees
+  `List<T>`; only a fully concrete tuple is recorded, the same gate
+  `visitFuncCall()` uses. The clone's own re-check, at a concrete type, finds
+  the nested operator use.
+- *Codegen.* An `operator[]` read returns its element by value, so
+  `ArrayAccessExprAST::codegenLValue()` answers "no address", and
+  `FieldAccessExprAST`/`MethodCallExprAST` spill the r-value, which is what
+  `list[i].field` needs. That spill is sound for a read only: writing into the
+  copy would lose the write. The TypeChecker therefore rejects every write into
+  it (E098, `operatorIndexTemporaryRoot()` and `rejectOperatorTemporaryWrite()`
+  in `TypeCheckerExpr.cpp`), from assignment, compound assignment, `++`/`--`, a
+  call to a method that mutates `self` (directly or through `self.m()` calls,
+  `ResolverSymbolTable::mutatesSelfTransitively()`, whose call graph the
+  Resolver records during pass 2), and a by-reference `[]=`; the check stops at a
+  pointer or reference base. The Codegen diagnostic in
+  `AssignmentExprAST::codegen()` for the nested `[]=` shape is an unreachable
+  backstop. A new write path that calls `codegenLValue()` on an index result
+  must go through that check.
 
 ---
 
-## Summary: file map
+## 8. Running the front end from a tool: the query facade
+
+Everything above runs inside the driver, once per process, on state held in
+process-wide globals: the lexer cursor, `GlobalSymbolTable`, the diagnostic
+list, the import caches, the recovery flag. Anything that runs the front end a
+second time in one process (an editor re-checking a buffer on every keystroke,
+the SLM Sandbox validating a fix while the compile that raised the diagnostic
+is still in flight) must set that state up fresh and put the originals back.
+
+`include/turf/Analysis.h` is the one way to do that.
+`turf::analyze(buffers, options)` parses the first buffer as the entry file
+(the other buffers stand in for the on-disk text of any module an import
+loads), runs the Resolver and TypeChecker with per-declaration recovery, never
+runs Codegen or the Monomorphizer, and returns an `AnalysisResult`. The result
+owns the AST, the Resolver, the TypeChecker's inferred types and the
+diagnostics, and answers `typeAt`, `definitionOf` and `symbolsInScope` from a
+position index built while the Resolver walked the program (through its
+scope-snapshot callback). `turf::resolveModuleFile()` answers which file an
+`import` would load. `AnalysisOptions` selects the optional extras:
+`RunLint`, `RunFlowAnalysis` (the section 6 passes, per non-generic function
+without errors, via `runFunctionFlowPasses()`), `SkipPrelude`, `InstallRoot`,
+`PackageGraphFile`, `ShouldCancel`, `AllowUnsafeModules`,
+`IncludeStdlibWarnings`. The declarations in the header are the semver-stable
+2.x tool API, except the members grouped under "Internal representation".
+Analyses are serialized by a mutex, and an `AnalysisResult` needs no global
+state after `analyze()` returns.
+
+The save and restore is `GlobalStateScope` in `src/tooling/AnalysisFacade.cpp`,
+composed from one hook per subsystem that keeps state across calls:
+`PushParserCompileState()`/`PopParserCompileState()` (`Parser.h`),
+`PushResolverCompileState()`/`PopResolverCompileState()` (`Resolver.h`) and
+`DiagnosticEngine::saveState()`/`restoreState()` (`Lexer.h`). Those hooks have
+no other caller (`scripts/check/check_boundary.sh`, check 7, INV-API-1). A
+second hand-written save/restore is what kept breaking before. Code that has
+to drive the lexer on text outside a compile, such as the formatter, uses
+`turf::detail::runIsolated()` (`include/turf/FrontEndIsolation.h`), which sits
+on the same scope.
+
+Two consequences when you add anything to the front end:
+
+- **New per-compile state needs a home in one of those hooks.** A global, or a
+  function-local `static`, that one compile fills and a later compile reads
+  leaks between analyses. `tests/api/analysis_test.cpp` (built as
+  `build/turf-api-tests`) runs different programs back to back and compares
+  against clean runs.
+- **Diagnostics from Codegen and the Monomorphizer are not in an analysis.**
+  The CFG passes of section 6 run only if `RunFlowAnalysis` is set, and the
+  instantiation-time errors of section 7 never. A tool therefore sees fewer
+  diagnostics than `turfc` prints for the same file. `RunLint` adds the linter,
+  the one Codegen-time check that does not need Codegen.
+
+---
+
+## File map
+
+Headers sit beside their sources, one directory per subsystem; only the query
+facade is public (`include/turf/`), and an include is written with its
+directory (`#include "frontend/Parser.h"`).
 
 | Stage | Primary files |
 |---|---|
-| Lexer | `include/Lexer.h`, `src/Lexer.cpp` |
-| Parser | `src/ParserCore.cpp`, `ParserDecl.cpp`, `ParserStmt.cpp`, `ParserLiteral.cpp`, `ParserModule.cpp`; AST node definitions in `include/AST.h`, `ASTExpr.h`, `ASTStmt.h`, `ASTDecl.h`, `ASTAccess.h` |
-| Resolver | `src/ResolverCore.cpp`, `ResolverDecl.cpp`, `ResolverExpr.cpp`, `ResolverStmt.cpp`, `ResolverCall.cpp`; symbol tables in `include/ResolverSymbolTable.h`, `ResolverScopeTable.h`, `ResolverModuleTable.h` |
-| TypeChecker | `include/TypeChecker.h`; `src/TypeCheckerCore.cpp`, `TypeCheckerCall.cpp`, `TypeCheckerDecl.cpp`, `TypeCheckerExpr.cpp`, `TypeCheckerStmt.cpp`; the visitor interface itself in `include/ASTVisitor.h` |
-| Codegen | `src/CodegenCore.cpp`, `CodegenFunc.cpp`, `CodegenExpr.cpp`, `CodegenStruct.cpp`, `CodegenVar.cpp`, `CodegenArray.cpp`, `CodegenControlFlow.cpp` |
-| CFG subsystem | `include/CFG.h`, `src/CFG.cpp`; `include/Analysis.h`, `src/Analysis.cpp`; `src/AliasAnalysis.cpp`; `include/ValueRange.h`, `src/ValueRange.cpp`; `include/CallGraph.h`, `src/CallGraph.cpp` |
-| Type system | `include/Types.h`, `src/Types.cpp` |
-| Driver | `src/main.cpp` |
+| Lexer | `src/frontend/Lexer.h`, `src/frontend/Lexer.cpp` |
+| Parser | `src/frontend/Parser.h`, `ParserInternal.h`, `ParserCore.cpp`, `ParserDecl.cpp`, `ParserStmt.cpp`, `ParserLiteral.cpp`, `ParserModule.cpp`; AST in `AST.h`, `ASTExpr.h`, `ASTStmt.h`, `ASTDecl.h`, `ASTAccess.h`; visitors in `ASTVisitor.h`, `ASTChildWalker.h`, `ASTPrinter.h` (all under `src/frontend/`) |
+| Resolver | `src/resolve/Resolver.h`; `ResolverCore.cpp`, `ResolverTypeIdentity.cpp`, `ResolverDecl.cpp`, `ResolverExpr.cpp`, `ResolverStmt.cpp`, `ResolverCall.cpp`, `ResolverVisibility.cpp`; tables in `ResolverSymbolTable.h`, `ResolverScopeTable.h`, `ResolverModuleTable.h`, `ResolverTypeRegistry.h`, `ResolverSymbolBase.h` |
+| TypeChecker | `src/sema/TypeChecker.h`; `TypeCheckerCore.cpp`, `TypeCheckerCall.cpp`, `TypeCheckerDecl.cpp`, `TypeCheckerExpr.cpp`, `TypeCheckerStmt.cpp`, `TypeCheckerPattern.cpp`, `TypeCheckerSlice.cpp`, `TypeCheckerVisibility.cpp` |
+| Type system | `src/sema/Types.h`, `Types.cpp` |
+| Monomorphizer, type walker | `src/sema/Monomorphize.h`, `Monomorphize.cpp`; `src/sema/TypeWalk.h`, `TypeWalk.cpp` |
+| Codegen | `src/codegen/Codegen.h`, `CodegenInternal.h`, `CodegenCore.cpp`, `CodegenFunc.cpp`, `CodegenExpr.cpp`, `CodegenStruct.cpp`, `CodegenVar.cpp`, `CodegenArray.cpp`, `CodegenControlFlow.cpp`, `CodegenPattern.cpp` |
+| CFG subsystem | `src/analysis/CFG.h`, `CFG.cpp`; `Analysis.h`, `Analysis.cpp`; `AliasAnalysis.cpp`; `ValueRange.h`, `ValueRange.cpp`; `Lint.h`, `Lint.cpp`; `Algorithms.h` |
+| Diagnostics | `src/diagnostics/Errors.h` and the `Errors*.h` family, `ErrorCodes.h`, `ErrorCategory.h` |
+| Driver | `src/driver/main.cpp` |
+| Query facade | `include/turf/Analysis.h`, `include/turf/FrontEndIsolation.h`, `src/tooling/AnalysisFacade.cpp`; tests in `tests/api/analysis_test.cpp` |

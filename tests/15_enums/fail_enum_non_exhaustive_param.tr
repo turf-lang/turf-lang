@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E093
+// EXPECT-DIAG: Non-exhaustive enum comparison on 'Direction'
 // Regression test: enum exhaustiveness must be enforced when the `compare`
 // subject is a FUNCTION PARAMETER, not just a local variable (see the
 // existing fail_enum_non_exhaustive.tr, which only covers the local-
@@ -25,10 +27,10 @@ enum Direction { North, East, South, West }
 fn describe(d: Direction): int {
     compare d {
         matches Direction::North:
-            return 1;
+        return 1;
         done
         matches Direction::South:
-            return 2;
+        return 2;
         done
     }
     return 99;

@@ -1,0 +1,16 @@
+// EXPECT-DIAG: E130
+// EXPECT-DIAG: Converting 'int' to the reference '&N' cannot be done outside an 'unsafe' block
+// `0 to &N` made a reference to address 0 in safe code, which faulted on
+// first use (found by turf-fuzz). Forging a reference from something that
+// is not already one needs `unsafe { }`, like `p to &N` from a raw pointer
+// (owner decision 2026-10-12). See cast_to_reference_rules.tr for what
+// stays safe.
+
+struct N {
+    v: int
+}
+
+fn main(): int {
+    mut a: &N = 0 to &N;
+    return a.v;
+}

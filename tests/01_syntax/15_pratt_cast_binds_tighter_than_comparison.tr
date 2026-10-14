@@ -1,0 +1,25 @@
+// `to` binds tighter than comparison and the logical operators, and looser
+// than the arithmetic and bitwise ones: a cast is an operand of `<`, `==`,
+// `&&` and `||`, and `+`/`|` are operands of a cast.
+
+import test;
+
+fn main(): int {
+    immut a: int = 1;
+    immut s: double = 9.7;
+    immut mask: int = 6;
+
+    // `(a < 3) && ((s to int) > 5)`
+    test::assert(a < 3 && s to int > 5, "a cast is an operand of `>` and `&&`");
+    test::assert(s to int == 9, "a cast is an operand of `==`");
+    test::assert(a > 3 || s to int != 10, "a cast is an operand of `!=` and `||`");
+    test::assert(9 <= s to int, "a cast on the right of a comparison");
+
+    // `(1 + 2) to double` and `(mask | 1) to double`
+    test::assert(1 + 2 to double == 3.0, "`+` is an operand of a cast");
+    test::assert(mask | 1 to double == 7.0, "`|` is an operand of a cast");
+
+    // A comparison's result is cast by parenthesising the comparison.
+    test::assert((a < 3) to string == "true", "a parenthesised comparison");
+    return 0;
+}

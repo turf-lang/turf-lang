@@ -1,0 +1,35 @@
+// A program package that depends on `geometry` (see turf.toml). Run it with
+//     cd examples/plotter && turf run
+
+import geometry;
+import io;
+
+// Declared here, in `plotter`, and unknown to `geometry`. Passing it to a
+// generic function of `geometry` makes the compiler build a `Sprite` version
+// of that function while compiling this package.
+struct Sprite {
+    x: int,
+    y: int,
+    glyph: char,
+    weight: double
+}
+
+fn main(): int {
+    mut a: geometry::Point = geometry::Point::new(0, 0);
+    mut b: geometry::Point = geometry::Point::new(3, 4);
+    io::printline("distance squared: " + (geometry::distance_squared(a, b) to string));
+    io::printline("manhattan: " + (geometry::manhattan(a, b) to string));
+
+    mut s1: Sprite = Sprite::default();
+    s1.glyph = '#';
+    s1.x = 1;
+    mut s2: Sprite = Sprite::default();
+    s2.glyph = '*';
+    s2.x = 2;
+    mut chosen: Sprite = geometry::pick(false, s1, s2);
+    io::print("picked the sprite drawn as ");
+    io::printline(chosen.glyph);
+    io::printline("a Sprite is " + (geometry::size_of_type(chosen) to string) + " bytes");
+    io::printline("an int is " + (geometry::size_of_type(1) to string) + " bytes");
+    return 0;
+}

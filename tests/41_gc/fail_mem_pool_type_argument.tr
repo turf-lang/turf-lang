@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E148
+// EXPECT-DIAG: 'Pool' is not generic -- it takes no type arguments
+// `mem::Pool` is not generic: there is no `Pool<string>` whose storage would
+// hide GC pointers from the collector.
+import mem;
+
+fn main(): int {
+    unsafe {
+        mut pool: mem::Pool<string> = mem::Pool::default();
+        mem::free_pool(pool);
+    }
+    return 0;
+}

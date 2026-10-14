@@ -1,0 +1,1 @@
+{"explanation": "math::abs takes one argument.", "fix_mode": "MODIFY", "original_code": "    return math::abs(0, 0);", "new_code": "    return math::abs(0);", "suggested_comment": "Pass a single argument.", "warning": "", "category": "FUNCTION_SIGNATURE"}

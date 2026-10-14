@@ -7,11 +7,16 @@ CAUSE:
   suggestion engine as every other unknown-name diagnostic.
 
 CORRECT:
+    import io;
+
     fn greet(name: string): void {
-        printline("Hello, " + name);
+        io::printline("Hello, " + name);
     }
 
-    greet("world");   // 'greet' is declared above
+    fn main(): int {
+        greet("world");   // 'greet' is declared above
+        return 0;
+    }
 
 INCORRECT:
     grete("world");
@@ -32,5 +37,5 @@ WHAT THIS ERROR IS NOT:
 FIX:
   Check the spelling against the suggested name if one is given. If the
   function genuinely doesn't exist yet, either declare it, or import
-  the module that defines it (`import moduleName;`) if it's meant to
+  the module that defines it (`import module_name;`) if it's meant to
   come from the standard library or another file.

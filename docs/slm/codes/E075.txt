@@ -1,0 +1,39 @@
+TURF E075 -- DEAD BRANCH (WARNING):
+
+CAUSE:
+  A branch point (`if` or similar) sits inside code that is already
+  unreachable, so the branch and every path it could lead to can never run.
+  Almost always reported next to E074 on the same dead code. A WARNING:
+  compilation still succeeds.
+
+INCORRECT:
+    fn pick(x: int): int {
+        while true {
+            return 1;
+        }
+        if x > 0 {      // dead branch: nothing after the loop is reached
+            return 2;
+        }
+        return 3;
+    }
+
+CORRECT:
+    fn pick(x: int): int {
+        while true {
+            if x > 5 {
+                break;          // the loop can exit, so what follows is reachable
+            }
+            return 1;
+        }
+        if x > 0 {
+            return 2;
+        }
+        return 3;
+    }
+
+FIX:
+  Same as E074: make the loop exit somewhere (a `break`, or a condition that
+  is not a literal `true`), or delete the code after it if it was never meant
+  to run.
+
+RELATED: E074 (the unreachable block itself), E094 (a dead `compare` arm).

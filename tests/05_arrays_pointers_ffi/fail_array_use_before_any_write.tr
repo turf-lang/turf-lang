@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E008
+// EXPECT-DIAG: before it has a value
 // SEM-004 (§12.6, FREEZE.md §6.4): a fixed-size array declared without an
 // initializer is statically unassigned at WHOLE-array granularity. Unlike
 // 12_array_decl_no_initializer.tr (which writes an element first, and that

@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E068
+// EXPECT-DIAG: A value of type 'string' has no fields
+// Sixty `.a` links on a string. Codegen retried each link of an invalid
+// chain two ways (as a place, then as a value), so the time doubled with
+// every `.a`: 22 links took 10 s, and turf-fuzz's crash fuzzer found an input
+// that ran past 60 s. The type checker now rejects the first link, so this
+// finishes at once; the runner's timeout is what this test pins.
+fn main(): int {
+    mut s: string = "x".a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a;
+    return 0;
+}

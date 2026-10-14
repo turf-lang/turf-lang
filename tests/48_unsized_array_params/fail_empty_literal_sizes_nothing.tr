@@ -1,0 +1,8 @@
+// EXPECT-DIAG: E123
+// EXPECT-DIAG: An empty literal can't give 'a' a size
+// A literal gives an unsized declaration its size, so an empty one has no
+// size to give: an array needs at least one element.
+fn main(): int {
+    mut a: int[] = [];
+    return 0;
+}

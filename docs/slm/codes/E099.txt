@@ -1,0 +1,25 @@
+TURF E099 -- UNTERMINATED STRING OR CHARACTER LITERAL:
+
+CAUSE:
+  A string (`"..."`) or char (`'a'`) literal was opened but the closing quote was not
+  found before the end of the line or file. A string cannot continue onto the next
+  line.
+
+INCORRECT:
+    mut greeting: string = "hello;     // closing " missing
+    mut letter: char = 'a;              // closing ' missing
+
+CORRECT:
+    mut greeting: string = "hello";
+    mut letter: char = 'a';
+    mut two_lines: string = "first line\nsecond line";   // use \n, not a real newline
+    mut quoted: string = "she said \"hi\"";              // escape inner quotes
+
+FIX:
+  Add the missing closing quote (look at the reported line first; it is usually one
+  character short). Use `\n` for a line break and `\"` for a quote inside text.
+
+NOTE: this error can be followed by a cascading second error on the next line; the
+  first one is the real mistake.
+
+RELATED: E100 (bad escape), E101 (bad char literal).

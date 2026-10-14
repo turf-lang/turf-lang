@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E045
+// EXPECT-DIAG: 'default' can't be called on an instance
 // Regression test: `instance.default()` must be rejected with the same
 // specific ConstructorCalledOnInstanceError as fail_dot_call_new.tr, not a
 // generic "unknown method" error -- even though `default` is never a real

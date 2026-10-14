@@ -1,0 +1,26 @@
+TURF E135 -- NOT CALLABLE:
+
+CAUSE:
+  `(...)` was written after a name that is a plain VALUE, not a function. An enum variant is
+  already a complete value and takes no arguments. An `error` variant with no payload fields
+  is written without parentheses (`IOError::NotFound`) unless it takes a message, in which
+  case it gets exactly one string (`IOError::NotFound("a.txt")`).
+
+INCORRECT:
+    enum Color { Red, Green }
+    mut c: Color = Color::Red();        // Red is a value, not a function
+
+CORRECT:
+    enum Color { Red, Green }
+
+    struct Point { x: int, y: int }
+
+    mut c: Color = Color::Red;
+    mut p: Point = Point::default();    // building a struct is a constructor call:
+                                        // Point::default(), or Point::new(1, 2) if a `new` is declared
+
+FIX:
+  Remove the parentheses.
+
+RELATED: E137 (a function named but not called), E096 (error payloads), E041 (unknown
+  function).

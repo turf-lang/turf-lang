@@ -1,0 +1,19 @@
+// EXPECT-DIAG: '/' with zero
+// LEC-005 / INV-LINT-1: LintExpression() was a chain of independent
+// dynamic_casts with no branch for a call's arguments, so `f(a / 0)` warned
+// about nothing -- the lint ran over a declaration's initializer (DIAG-001's
+// point fix) but not over what is passed to a function. The lint walk is now
+// an ExhaustiveASTVisitor: every node kind is reached by construction.
+//
+// `dead()` is never called, so the division never executes.
+fn f(a: int): int {
+    return a;
+}
+
+fn dead(a: int): int {
+    return f(a / 0);
+}
+
+fn main(): int {
+    return 0;
+}

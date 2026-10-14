@@ -18,8 +18,8 @@ If you try it on something that isn't an array:
 
 If what you actually have is a `List<T>` (or another collection type) rather than a fixed-size array, for-each doesn't support it directly yet -- drive a regular counting loop off the list's own `.length()` instead, and access elements through the list's own methods:
 
-    for i in 0..myList.length() step i += 1 {
-        // work with myList here using its own methods
+    for i in 0..my_list.length() step i += 1 {
+        // work with my_list here using its own methods
     }
 
 Once the thing after `in` is a genuine array, the for-each loop works exactly as expected. This is a quick fix once you know the rule: for-each is specifically for Turf's fixed-size arrays.

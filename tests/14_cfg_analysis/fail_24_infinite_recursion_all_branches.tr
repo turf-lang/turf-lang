@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E010
+// EXPECT-DIAG: Infinite recursion detected in 'bad_recurse'
 // Regression test (#186): every branch of the if-else recurses.
 // There is no path to a return that doesn't go through a self-call.
 // Must emit RecursionWithoutBaseError.

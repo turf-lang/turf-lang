@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E069
+// EXPECT-DIAG: cycle: A -> B -> A
 // Regression test: two structs that hold each other by value, closing a
 // cycle across BOTH declarations rather than within a single one, must be
 // rejected the same as a direct self-cycle (TYPE-001, see

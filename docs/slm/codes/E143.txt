@@ -1,0 +1,33 @@
+TURF E143 -- SLICE RANGE OUT OF BOUNDS:
+
+CAUSE:
+  The bounds of a range slice `arr[start..end]` are provably invalid. The end is exclusive, a
+  negative bound has the length added to it, and the result must satisfy
+  `0 <= start <= end <= length`.
+
+CORRECT USAGE:
+    immut a: int[3] = [1, 2, 3];
+    mut i: int = 1;
+    immut whole = a[0..3];     // whole array
+    immut tail = a[1..];       // [2, 3]
+    immut last2 = a[-2..];     // last two
+    immut mid = a[1..-1];      // [2]
+    immut none = a[3..];       // valid EMPTY slice
+    immut empty = a[i..i];     // valid empty slice
+
+INCORRECT:
+    a[1..4]    // end past the length
+    a[-4..]    // negative start past the first element
+    a[2..1]    // start after end (an error, NOT an empty slice)
+    // ERROR [E143]: The slice [1..4] of 'int[3]' is out of range: the end is outside 0..3.
+
+WHEN IT IS COMPILE TIME VS RUN TIME:
+  Compile time (E143): constant bounds on a `T[N]`; or, on a `T[]` parameter or slice (length
+  unknown), start > end with both bounds constants of the same sign.
+  Run time: any other bounds. A bad range aborts the program with
+  `Slice range out of bounds for 'NAME'`.
+
+FIX:
+  Correct the bounds, or leave one out (`arr[2..]`, `arr[..3]`).
+
+SEE: E142 (slicing a non-array), E002 (slice bound not an int).

@@ -7,16 +7,16 @@ enum Priority { Low, Medium, High, Critical }
 fn priority_weight(p: Priority): int {
     compare p {
         matches Priority::Low:
-            return 1;
+        return 1;
         done
         matches Priority::Medium:
-            return 2;
+        return 2;
         done
         matches Priority::High:
-            return 4;
+        return 4;
         done
         matches Priority::Critical:
-            return 8;
+        return 8;
         done
     }
     return 0;

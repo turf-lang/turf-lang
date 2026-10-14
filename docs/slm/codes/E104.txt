@@ -1,0 +1,39 @@
+TURF E104 -- UNCLOSED BRACKET, BRACE OR PARENTHESIS:
+
+CAUSE:
+  An opening `(`, `[`, `{` or `<` has no matching `)`, `]`, `}`, `>` where one had to
+  be. For a missing `}` the error points at the `{` that was never closed (not the end
+  of the file), so you can see which block is unfinished.
+
+INCORRECT:
+    fn main(): int {
+        mut total: int = add(1, 2;       // ) missing
+        return total;
+    }
+    fn main(): int {
+        if true {
+            return 1;
+        // } for the `if` is missing here
+        return 0;
+    }
+
+CORRECT:
+    fn add(a: int, b: int): int {
+        return a + b;
+    }
+
+    fn main(): int {
+        mut total: int = add(1, 2);
+        return total;
+    }
+
+NOTE:
+  Inside a list (array items, struct fields, call arguments) the message may instead
+  say "expected `,` or `]`" -- that is E105: the parser cannot tell a missing comma
+  from a missing closing bracket, so it names both. If another item follows, add the
+  comma; if the list should end, add the bracket.
+
+FIX:
+  Add the missing closing character where the message points.
+
+RELATED: E105 (missing comma), E107 (missing opening brace), E111 (nesting too deep).

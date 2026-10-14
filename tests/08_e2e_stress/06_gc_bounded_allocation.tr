@@ -1,8 +1,8 @@
 // tests/08_e2e_stress/06_gc_bounded_allocation.tr
-// MEM-002's own completion criterion (docs/planning/ARCHITECTURE_OVERHAUL.md
+// MEM-002's own completion criterion (docs/archive/ARCHITECTURE_OVERHAUL.md
 // §8): "The stress test's RSS is bounded ... the observable proof that
 // leaks are gone." This file is the allocation workload;
-// scripts/gc_rss_smoke.sh is what actually measures peak RSS around it (an
+// scripts/smoke/gc_rss_smoke.sh is what actually measures peak RSS around it (an
 // ordinary `test_runner.sh` run only checks this compiles and exits 0 --
 // see that script for the real assertion).
 //

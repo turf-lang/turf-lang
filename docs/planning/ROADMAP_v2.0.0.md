@@ -3,8 +3,44 @@
 > **Status:** plan of record, written 2026-09-26 by the Architecture Overhaul
 > closure audit, against `refactor/architecture` @ `cde1d30`. **Phase 0
 > (Overhaul closure) is now done** — see
-> `docs/development/changes/OVH-CLOSE.md` (landed 2026-09-27); Phases 1+
-> (2.0 Foundation milestones onward) remain unimplemented. Items marked
+> `docs/development/changes/OVH-CLOSE.md` (landed 2026-09-27). **Phase 1's
+> `SMP-002` (one generic type walker) is also done** — see
+> `docs/development/changes/SMP-002.md` (landed 2026-09-27). **`FDN-003`
+> (module-scoped type identity) is done** — see
+> `docs/development/changes/FDN-003.md` (landed 2026-09-27; its stage-1
+> decision is frozen as `FREEZE.md` §6.11, DEC-13 answered `main`).
+> **`FDN-001` (safe heap allocation of user types) is also done** — see
+> `docs/development/changes/FDN-001.md` (landed 2026-09-27; DEC-5 answered
+> `heap(expr): &T` intrinsic, frozen as `FREEZE.md` §6.12). **`FDN-002`
+> (reference and array escape rules) is also done** — see
+> `docs/development/changes/FDN-002.md` (landed 2026-09-27; its design was
+> stated directly in this roadmap rather than needing a DEC- decision,
+> frozen as `FREEZE.md` §6.13). **`SMP-001` (compiler query facade) is
+> done** — the facade and the Sandbox port landed 2026-09-28, the `turf-lsp`
+> port (its own repository) and the VS Code extension 2026-10-06 — see
+> `docs/development/changes/SMP-001.md`. **`FDN-004` and `FDN-006` are
+> done** (both landed 2026-09-28). **`FDN-005` (GC hardening) is done** —
+> see `docs/development/changes/FDN-005.md` (landed 2026-09-28, follow-up
+> 2026-09-29: the full-stack mark-set comparison and the no-`/proc`
+> fallback, which was freeing live objects and is now fixed). Every
+> completion criterion is observed: the last one, `TURF_GC_STRESS` + ASan
+> at `-O2`, completed in CI on 2026-10-13 (1343/1343). Its CI jobs stay on
+> through RC as a gate. **Phase 2's `LEC-002` (visibility, `pub`/`public`,
+> D13) is done** — see `docs/development/changes/LEC-002.md` (landed
+> 2026-09-29; DEC-7 answered "private by default", with `pub` and `public` as
+> synonyms, frozen as `FREEZE.md` §6.15; `turf --migrate=pub` is the
+> migration). **`LEC-001` (projects, dependencies, builds, D7 scoped) is
+> done** — see `docs/development/changes/LEC-001.md` (landed 2026-09-30):
+> `FREEZE.md` §6.16 (DEC-8 decided *against* the recommendation, so the Go CLI
+> is `turf` and the compiler `turfc`, independently versioned; DEC-9 as
+> recommended), path and git dependencies with a verified `turf.lock`,
+> collision-free module resolution (E090/E091), `[unsafe] allow`, `examples/`,
+> and `docs/reference/projects_and_packages.md`. One completion criterion is
+> handed on rather than met: the Part IX walkthrough "verbatim on a clean
+> machine" needs REL-008's installer (`turf test`, once REL-002's, landed in
+> stage 1 on 2026-10-06; Part IX now says line by line what works today). Part I's sequence has the
+> current state of every Phase 1 item; the rest of Phase 1 and the other
+> Phase 2+ items remain unimplemented. Items marked
 > **DECISION** need an explicit answer from the project owner before their
 > session starts; each carries a recommendation so the default is never
 > ambiguous.
@@ -13,12 +49,12 @@
 > are implementing in Part IV → Parts V–IX as referenced.
 >
 > **Companion documents:**
-> `docs/development/OVERHAUL_CLOSURE_AUDIT.md` (evidence) ·
+> `docs/archive/OVERHAUL_CLOSURE_AUDIT.md` (evidence) ·
 > `docs/development/changes/OVH-CLOSE.md` (Phase 0's closure record — the
 > temporary `docs/planning/OVERHAUL_REMAINING_WORK.md` handoff it closed out
 > is deleted as of that record) ·
 > `docs/planning/FUTURE.md` (everything deliberately after 2.0) ·
-> `docs/planning/ARCHITECTURE_OVERHAUL.md` (historical specification) ·
+> `docs/archive/ARCHITECTURE_OVERHAUL.md` (historical specification) ·
 > `docs/planning/ARCHITECTURE_SIMPLIFICATION.md` (discussion document; its
 > assessment is Part III here) · `docs/development/FREEZE.md` (still binding).
 
@@ -71,11 +107,11 @@ disappear under a list of syntax features:
 
 ### 0.4 How a milestone is executed
 
-Identical to an overhaul feature group: `scripts/session_preflight.sh <ID>`
+Identical to an overhaul feature group: `scripts/dev/session_preflight.sh <ID>`
 (it finds `### <ID> — ` headings in this file), `SESSION_PROTOCOL.md`, a
 change record `docs/development/changes/<ID>.md`, `INDEX.md` row,
 `INVARIANTS.md` for any new invariant, `handbook-sync/PENDING.md` for doc
-debt (until REL-006 drains it), `scripts/session_postflight.sh <ID>`. A
+debt (until REL-006 drains it), `scripts/dev/session_postflight.sh <ID>`. A
 milestone sized **L** or **XL** writes its own session sub-plan into its
 change record in its first session, as TYPE-002 did.
 
@@ -87,33 +123,34 @@ change record in its first session, as TYPE-002 did.
 PHASE 0  Overhaul closure            OVH-001 … OVH-015   DONE (OVH-CLOSE.md, 2026-09-27)
    │                                  gate: closure gate demonstrated clean
    ▼
-PHASE 1  Foundation                   SMP-002  one generic type walker
-   │                                  FDN-003  module-scoped type identity
-   │                                  FDN-001  safe heap allocation of user types
-   │                                  FDN-002  reference & array escape rules
-   │                                  FDN-004  string indexing: bounds + `char` (D17)
-   │                                  FDN-006  runtime contract (stack overflow, OOM, ABI stamp)
-   │                                  SMP-001  compiler query facade (parallel, any time in 1–2)
-   │                                  FDN-005  GC hardening (starts here, runs to RC)
+PHASE 1  Foundation                   SMP-002  one generic type walker      DONE (SMP-002.md, 2026-09-27)
+   │                                  FDN-003  module-scoped type identity  DONE (FDN-003.md, 2026-09-27)
+   │                                  FDN-001  safe heap allocation         DONE (FDN-001.md, 2026-09-27)
+   │                                  FDN-002  reference & array escape rules  DONE (FDN-002.md, 2026-09-27)
+   │                                  FDN-004  string indexing: bounds + `char` (D17)  DONE (FDN-004.md, 2026-09-28)
+   │                                  FDN-006  runtime contract (stack overflow, OOM, ABI stamp)  DONE (FDN-006.md, 2026-09-28)
+   │                                  SMP-001  compiler query facade (parallel, any time in 1–2)  DONE incl. the turf-lsp port (SMP-001.md, 2026-10-06)
+   │                                  FDN-005  GC hardening  DONE (FDN-005.md, 2026-09-28/29; CI-confirmed 2026-10-13); runs on to RC as a CI gate
    ▼
-PHASE 2  Language & ecosystem         LEC-002  visibility — `pub` (D13)
-   │                                  LEC-001  projects, dependencies, build (D7)
-   │                                  LEC-003  pattern matching (D14)
-   │                                  LEC-004  error payloads + `try` (D15)
-   │                                  LEC-006  collection indexing coherence (generic operators)
-   │                                  LEC-005  diagnostics reliability (incl. D25)
-   │                                  LEC-007  standard library 2.0 surface
+PHASE 2  Language & ecosystem         LEC-002  visibility — `pub`/`public` (D13)  DONE (LEC-002.md, 2026-09-29)
+   │                                  LEC-001  projects, dependencies, build (D7)  DONE (LEC-001.md, 2026-09-30; Part IX clean-machine walkthrough handed to REL-008)
+   │                                  LEC-003  pattern matching (D14)  DONE (LEC-003.md, 2026-10-01)
+   │                                  LEC-004  error payloads + `try` (D15)  DONE (LEC-004.md, 2026-10-01)
+   │                                  LEC-006  collection indexing coherence (generic operators)  DONE (LEC-006.md, 2026-10-01)
+   │                                  LEC-005  diagnostics reliability (incl. D25)  DONE (LEC-005.md, 2026-10-01)
+   │                                  LEC-007  standard library 2.0 surface  DONE (LEC-007.md, 2026-10-01; not tagged)
    ▼
 ═══════  LANGUAGE FREEZE  (Part VI)   tag v2.0.0-freeze
    ▼
-PHASE 3  Stabilization & release      REL-001  version, CLI, runtime ABI stamp
-                                      REL-002  tooling: `turf test`, `turf fmt`, LSP, VS Code
-                                      REL-003  platforms & distribution (D20)
-                                      REL-004  conformance suite, CI, fuzzing, sanitizers
-                                      REL-005  performance baseline (starts in Phase 1)
-                                      REL-006  documentation (reference rewrite, migration guide)
-                                      REL-007  release candidates → 2.0.0
-                                      FDN-005  GC hardening completes (RC blocker)
+PHASE 3  Stabilization & release      REL-001  version, CLI, runtime ABI stamp  DONE (REL-001.md, 2026-10-06)
+                                      REL-002  tooling: `turf test`, `turf fmt`, LSP, VS Code  DONE (REL-002.md, 2026-10-06; CI-only proofs are separate issues)
+                                      REL-003  platforms & distribution (D20)  DONE (REL-003.md, 2026-10-07)
+                                      REL-008  self-contained Linux/Windows/macOS (DEC-2/14/15)  DONE (REL-008.md, 2026-10-11; the CI runs and hand-offs are separate issues)
+                                      REL-004  conformance suite, CI, fuzzing, sanitizers  DONE (REL-004.md, 2026-10-12; first CI runs are separate issues)
+                                      REL-005  performance baseline  DONE (REL-005.md, 2026-10-13)
+                                      REL-006  documentation (reference rewrite, migration guide)  DONE (REL-006.md, 2026-10-13; the handbook is paused, not a gate)
+                                      REL-007  release candidates → 2.0.0  IN PROGRESS (REL-007.md, started 2026-10-14)
+                                      FDN-005  GC hardening CI gate (each RC; criterion met 2026-10-13)
 ```
 
 ### I.1 Dependency edges (hard — a violation produces wrong code or rework)
@@ -159,7 +196,7 @@ backlog.
 |---|---|---|---|
 | D1 | Closures / lambdas | **FUTURE** (F-1) | Additive; first-class non-capturing functions already exist. Its prerequisites *are* in 2.0 (FDN-001 typed GC allocation for environments, OVH-010 roots for environments held by C). Detailed design sketch in FUTURE F-1. |
 | D2 | Iteration over collections | **FUTURE** (F-2) | Additive. OVH-003's bounds-checked `get(i)` makes index loops safe; `for x in list` adds no new capability. Protocol sketch in FUTURE F-2. |
-| D3 | `Slice<T>` | **FUTURE** (F-3) | Additive. Its *soundness* half — `T[]` parameters escaping the caller's frame (D23) — is **2.0** in FDN-002. |
+| D3 | `Slice<T>` | **FUTURE** (F-3) | Additive. Its *soundness* half — `T[]` parameters escaping the caller's frame (D23) — is **2.0** in FDN-002. (2026-10-05: the non-owning view and its soundness half are closed by #260 + range slicing — see FUTURE.md F-3; a storable view remains.) |
 | D4 | `Map`/`Set` hashing | **Superseded** | Done by STD-003 item 6 (`hashing.tr`, O(1) average lookup). |
 | D5 | Full nullability analysis (interprocedural, field narrowing, narrowed args/returns) | **FUTURE** (F-5) | Additive precision; the current intraprocedural pass is sound (INV-NREF-1/2). |
 | D6 | Manual-heap leak detection | **FUTURE** (F-6) | Additive diagnostics; scope shrank with GC exactly as §27 predicted. |
@@ -172,7 +209,7 @@ backlog.
 | D13 | Per-declaration visibility | **2.0** (LEC-002) | R1 + R4 (default-private is breaking). |
 | D14 | Richer pattern matching | **2.0** (LEC-003) | R4. |
 | D15 | Error payloads + propagation shorthand | **2.0** (LEC-004) | R4. |
-| D16 | Circular imports | **FUTURE** (F-16) | Additive; only cost today is `mem::Pool<T>`'s documented duplication. |
+| D16 | Circular imports | **FUTURE** (F-16) | Additive; only cost today is `mem::Pool`'s documented duplication. |
 | D17 | `s[i]` yields `int`, not `char` | **2.0 — DECISION** (FDN-004) | R1: breaking, so now or never (until 3.0). Bundled with the soundness fix R2 (string indexing is unchecked, audit F-17). Recommendation: change it. |
 | D18 | Two type-inference engines | **FUTURE** (Simplification, F-S3) | Internal; INV-TYPE-2 makes them agree for monomorphized nodes. Not user-visible. Revisit trigger stands. |
 | D19 | Double-parse pre-pass | **FUTURE** (Simplification, F-S4) | Internal, load-bearing, risky. Not user-visible. |
@@ -272,7 +309,7 @@ walker if this is not done first.
 
 **Subsystems** Types, Resolver, TypeChecker, Monomorphizer. **Runtime/stdlib/tooling** none.
 
-**Stages.** (1) Introduce `include/TypeWalk.h`: a visitor over every
+**Stages.** (1) Introduce `src/sema/TypeWalk.h`: a visitor over every
 `TurfType` subclass with `containsOpenParam()`, `substitute(map)`,
 `unify(pattern, concrete, map&)`; exhaustive over the type hierarchy (a
 `switch` on a kind enum or a visitor base whose default case asserts — the
@@ -398,7 +435,7 @@ fn cons(v: int, next: &?Node): &Node {
   `&T` is already an opaque pointer, and the GC already scans `&T` fields
   (`INV-NREF`'s tracing note, LANG-002).
 - Why an intrinsic rather than syntax (`new T`): it is one entry in
-  `include/Intrinsics.h` (F-STD-2's closed list), no grammar change, and it
+  `src/sema/Intrinsics.h` (F-STD-2's closed list), no grammar change, and it
   composes with `T::default()`/`T::new()`, which already exist. Alternatives
   considered: `T::heap(...)` (conflicts with user methods named `heap`),
   `box T` keyword (grammar change, no benefit).
@@ -543,7 +580,7 @@ runtime.
 4. **Panic format and exit codes** documented once (`runtime.md`, reference
    docs): panic → 134 (SIGABRT), stack overflow → 134, `sys::exit(n)` → n.
 
-**Tests** `scripts/runtime_smoke.sh` gains: deep recursion prints
+**Tests** `scripts/smoke/runtime_smoke.sh` gains: deep recursion prints
 `panic: stack overflow`; huge allocation prints `panic: out of memory`;
 linking with `TURF_HOME` pointing at a runtime-less tree gives the TurfLang
 diagnostic. **Risks** Signal handling interacts with the GC's conservative
@@ -632,6 +669,14 @@ globals, no concurrency, no incremental re-analysis (all FUTURE F-S*).
 **Completion** `Sandbox` and `turf-lsp` use only the facade; the API header is
 documented as the 2.0 tool API (semver-stable for 2.x).
 
+**Status 2026-10-06: DONE.** All three stages landed; `turf-lsp` touches none of
+the pipeline's globals. Stage 3 grew with the owner's requirement that the VS
+Code extension work after one install: the facade gained cancellation, a package
+graph, `importableModules()`, `resolveModuleFile()` and `keywords()`, and the
+server finds its standard library from where it is installed. Verified on Linux;
+the Windows/macOS and static-link proofs are CI-only. Record:
+`docs/development/changes/SMP-001.md` (*Stage 3 — outcome*).
+
 ---
 
 ### LEC-002 — Per-declaration visibility: `pub` (D13)
@@ -650,7 +695,7 @@ STD-003 item 5).
 | Question | Recommendation | Why |
 |---|---|---|
 | Default | **private to the module**; `pub` opts in | A package's API must be explicit to be versionable (LEC-001); "public by default" makes every helper a semver commitment. 2.0 is the only cheap moment to flip it (R1). |
-| Keyword | `pub` (prefix) | Short, precedent (Rust), no conflict found in `tests/`/`lib/std`/`showcase` — **grep before freezing**. |
+| Keyword | `pub` or `public` (prefix; synonyms, like `mut`/`mutable`) | Short, precedent (Rust), no conflict found in `tests/`/`lib/std`/`showcase` — grep done 2026-09-29, no identifier uses either word. The `public` spelling is an owner amendment (2026-09-29). |
 | What can be `pub` | `fn`, methods (`pub fn Point.len()`), `struct`, `enum`, `error`, `machine`, struct **fields**, `export immut` | Uniform rule: every named declaration. |
 | Fields | private unless `pub`, even in a `pub struct` | Needed to hide `List.data`; consistent with the uniform rule. `T::default()` stays legal from other modules (it zero-fills and cannot break an invariant zero cannot); `T::new()` is an ordinary method with its own visibility. |
 | Enum/error variants, machine states | public iff the type is | A variant is part of the type's meaning; per-variant privacy has no use case. |
@@ -730,6 +775,15 @@ tool, last touched 2026-06) writes `turf.toml`/`turf.lock` and installs into
    the reference for the FUTURE registry. *Why:* one version to ship,
    lock-step with the stdlib and runtime it must match, no second toolchain
    (Go) in the release pipeline, no two programs both called `turf`.
+
+   > **Overturned by the owner, 2026-09-30** (`FREEZE.md` §6.16, F-PKG-1):
+   > the Go CLI moves into this repository as `cli/` and becomes `turf`; the
+   > compiler is renamed `turfc`. "No two programs called `turf`" survives.
+   > "One version" does not: a second owner decision the same day made the
+   > two independently versioned, agreeing on a `major.minor` driver
+   > interface that `turfc --version` reports, with `turf` as the user's
+   > tool and `turfc` as the tooling interface. Entries 2–6 below are frozen
+   > as written, with the details §6.16 adds.
 2. **Package layout.**
    ```
    myapp/
@@ -792,7 +846,7 @@ identity (with FDN-003), diagnostics.
 (5) `[unsafe] allow`. (6) Example multi-package project in
 `examples/` (new top-level folder, built by CI).
 
-**Tests.** Script-level (the test runner is single-file): `scripts/project_smoke.sh`
+**Tests.** Script-level (the test runner is single-file): `scripts/smoke/project_smoke.sh`
 builds `examples/` projects: path dependency, git dependency served from a
 local bare repository (no network in CI), diamond agreement and conflict,
 lockfile tamper detection, `--offline`, `--locked`, module-name collision
@@ -810,6 +864,15 @@ verbatim on a clean machine.
 ---
 
 ### LEC-003 — Richer pattern matching (D14)
+
+> **Landed 2026-10-01** — `docs/development/changes/LEC-003.md`; frozen as
+> `FREEZE.md` §6.17. Where the implementation differs from the design below:
+> a struct pattern must list every field or end in `..` (a judgement call); the
+> existing hard error for a duplicate value pattern is kept rather than
+> downgraded to a warning (only an arm behind a catch-all is the new warning,
+> E094); `bool` exhaustiveness is new, not "existing" as the text says (and the
+> original `switch` lowering never matched `matches true:` — fixed); stacked
+> headers each carry their own guard.
 
 **Kind** Language/ecosystem · **Rule** R4 · **Size** L · **Prereqs** SMP-002, FDN-004
 
@@ -890,6 +953,19 @@ exist; confirm with the parser. **Non-goals** as excluded above.
 
 ### LEC-004 — Error payloads and propagation (D15)
 
+> **Landed 2026-10-01** — `docs/development/changes/LEC-004.md`; frozen as
+> `FREEZE.md` §6.18. Where the implementation differs from the design below: a
+> variant pattern cannot bind the message (`err.message` reads it); a bare
+> `E::V` for a variant with fields is also legal as an `==`/`!=` operand, since
+> equality reads only the variant; a variant pattern lists every field or ends in
+> `..`, like a struct pattern (§6.17); a subject of a *declared* error type is
+> exhaustive when every variant is covered (the open `AnyErrorType` still always
+> needs `otherwise`); only `io::FileError` and `json::JsonError` gained payloads
+> (`fs`/`http` declare no errors, `net`/`math`/`map`/`strings` had no data a caller
+> wants); and three pre-existing bugs were found and fixed on the way (`err ==
+> E::V("msg")` was a type error, a `return` in a `recover` in a `defer` crashed the
+> compiler, `AllPathsDiverge` ignored `compare`).
+
 **Kind** Language/ecosystem · **Rule** R4 · **Size** L · **Prereqs** LEC-003, FDN-001, OVH-002
 
 **Current limitation.** Error variants are bare names; STD-002 added exactly
@@ -962,6 +1038,21 @@ resolved.
 
 ### LEC-006 — Collection indexing coherence: generic operator declarations
 
+> **Landed 2026-10-01** — `docs/development/changes/LEC-006.md`; frozen as
+> `FREEZE.md` §6.19 (F-OP-5). Where the implementation differs from the design
+> below: resolution unifies the operands and then re-checks the *substituted*
+> signature with `sameTypeExact` (unify alone skips a mismatch silently); the
+> orphan rule is made non-vacuous for a generic operator, and a type parameter no
+> operand mentions is rejected (both new **E097**); the concrete `List<int>`,
+> `Map<string,int>` and `Set<int>` operators were deleted outright rather than
+> kept alongside (both would match every `List<int>` use). Three things the design
+> did not anticipate had to be fixed for it to work: overloaded generic functions
+> shared one clone, as did overloaded generic methods and constructors (a request now
+> names its template declaration), `l[i].field` crashed Codegen for any operator returning a
+> struct, and every write into that by-value result (`bs[0].a = v`,
+> `outer[0].push(v)`, a by-reference nested `[]=`) needed a clean error (new
+> **E098**) instead of a silently lost write.
+
 **Kind** Language/ecosystem · **Rule** R5 · **Size** M · **Prereqs** SMP-002, OVH-003
 
 **Objective.** `l[i]` / `l[i] = v` work for every `List<T>`, `Map<K,V>`,
@@ -996,13 +1087,30 @@ arguments (`List<int>::default()`, FUTURE F-6c).
 
 ### LEC-005 — Diagnostics reliability (includes D25)
 
+> **Landed 2026-10-01** — `docs/development/changes/LEC-005.md`; no new freeze
+> (`FREEZE.md` §6.0 rule 3: none was asked for). Where the implementation differs
+> from the design below: (1) item 1's depth cap was worse than described — it
+> capped the *total* instantiations, so 65 independent `ident<S>` calls failed
+> with a bogus E079; it now measures the chain, with a 4096 total backstop for a
+> generic that fans out; (2) item 6 is a compile-time guarantee, not a runtime
+> check — `ExhaustiveASTVisitor` has every `visit*` pure virtual, generated from
+> one node list, and a shared `ASTChildWalker` supplies the children; (3) the
+> same hand-written-chain defect was **a soundness bug** in two safety passes,
+> fixed on the way (an `&x` inside `recover` hid the address from check
+> elision — an out-of-bounds read at exit 0 — and `return &local` inside
+> `recover` was never E086) and a third, null-narrowing inside `recover`, is
+> documented and **not** fixed (`tests/99_known_bugs/`, record *Unresolved
+> questions* 2); (4) `EXPECT-DIAG` also has `EXPECT-NO-DIAG` and
+> `EXPECT-RUNTIME`, and `tests/36_numeric_semantics/` is back-filled; (5) item 7
+> was already done by OVH-012 and was re-verified, not re-implemented.
+
 **Kind** Language/ecosystem · **Rule** R5 · **Size** M · **Prereqs** LEC-003, LEC-004 (so their new diagnostics are covered)
 
 **Scope — each item verified live by the audit:**
 1. **D25** — instantiation-site errors anchor at the innermost requester
    (inside `lib/std`), one hop short of the user's call; E079's "chain" is a
    dump of the whole instantiation cache. Add a parent pointer to
-   `InstantiationRequest` (`include/Monomorphize.h`), thread the current
+   `InstantiationRequest` (`src/sema/Monomorphize.h`), thread the current
    parent through the nested TypeChecker the monomorphizer constructs, anchor
    the primary diagnostic at the **outermost user-code** request, and print
    the real chain (user call → `Set<Big>.add` → `Set<Big>.contains` → …).
@@ -1038,6 +1146,19 @@ test added after this milestone and back-filled for `tests/36_numeric_semantics/
 ---
 
 ### LEC-007 — Standard library 2.0 surface
+
+> **Landed 2026-10-01** — `docs/development/changes/LEC-007.md`; frozen as
+> `FREEZE.md` §6.20 (F-API-1..4). Where the implementation differs from the
+> design below: the item list is done as written except that **no new module
+> API was added beyond `StringBuilder`** and "every example uses `defer
+> x.close();`" is `showcase/` plus `http::Server.listen` (there is no `fs` file
+> handle type to give a `close()`). Fallibility turned out to be the larger
+> change than the removals: four bool-returning functions became `!void`. The
+> API lock is `tests/46_stdlib_surface/` **plus** `scripts/check/stdlib_surface_check.sh`
+> (a test cannot notice a new, unlocked public item). The owner's rule for what
+> is public is F-API-4. Open items for the owner are in the record's
+> *Unresolved questions* (JSON field exposure, panics on remote input, and the
+> capability gaps: seeding, append/file handles, directory listing).
 
 **Kind** Language/ecosystem · **Rules** R5, R1 (API removals) · **Size** M · **Prereqs** LEC-002, LEC-004, LEC-006, FDN-004
 
@@ -1086,8 +1207,20 @@ option"); the version single-sourced from CMake into the binary, the runtime
 driver documented (0 ok, 1 compile error, 2 usage error — decide and
 freeze); unknown flags fail with a suggestion; subcommand dispatch
 (`new/build/run/test/fmt/clean`, LEC-001/REL-002) with `turf <cmd> --help`.
-**Tests** a `scripts/cli_smoke.sh`. **Completion** the smoke passes; README
+Since LEC-001's freeze (§6.16) the dispatch lives in the Go CLI `turf`;
+`turfc --version` line 1 is the compiler's release version and line 2 its
+driver-interface version, which is what `turf` checks (§6.16). The two
+programs' release versions are independent, and `turf version` prints both.
+**Tests** a `scripts/smoke/cli_smoke.sh`. **Completion** the smoke passes; README
 shows `turf --version` output.
+
+**Status 2026-10-06: CLOSED by the owner.** Done: `--version`
+(llvm/runtime/root), `turf help` and `turfc help` (owner: no `turfc --help`),
+unknown-flag suggestions, exit statuses frozen at 0/1/2 (`FREEZE.md` §6.21),
+`cli_smoke.sh` coverage, README. Deferred to REL-003/REL-008: single-sourcing
+the version into the archive name and README (tag = `VERSION` = README line;
+until then checked by hand before tagging). Record:
+`docs/development/changes/REL-001.md`.
 
 ---
 
@@ -1122,6 +1255,44 @@ suite in its repo green against the release candidate.
 **Non-goals** debugger adapter (gdb works via `-g`), doc generator (FUTURE
 F-11c), REPL.
 
+**Status 2026-10-06: IN PROGRESS.** *Stage 1, `turf test`: done (`dfd0068`, `96f3379`, `8ddab67`).*
+Owner rules: a project without `tests/` is an error, and the command exists on
+both `turfc` and `turf`. `turfc --test [<dir>]` (`TestRunner.cpp`,
+`TestExpectations.cpp`) is the one implementation of the conventions; `turf test`
+runs it over the project's package graph (new `"tests"` key, driver interface
+1.3), so a test imports the package's own modules, its dependencies and `tests/`
+helpers; `scripts/test_runner.sh` is a wrapper over it and its 1138 tests give
+identical per-test results. The diagnostic policy it ported had a check that never
+fired (an unpinned `fail_*` test passed); it is now enforced and no existing test
+trips it. Open from the stage: the owner's confirmation of F-TEST-2/3
+(`FREEZE.md` §6.22), a name filter, `turfc --test` on Windows (REL-008).
+*Stage 2, `turf fmt`: done, F-FMT-1..3 confirmed by the owner (2026-10-06).*
+`turfc --format [--write | --check] <files>...` verifies every result (only
+whitespace changed, same token stream from the real lexer, idempotent) and
+leaves a file it cannot vouch for alone; a source with a lexical error is
+declined instead of ending the process, and `turf fmt` skips such a file when it
+only found it under a directory (owner decision; driver interface 1.5, `turfc
+--format --skip-unlexable`); `turf fmt` takes files and directories, `--exclude`,
+and formats `src/` and `tests/` of a project; `scripts/smoke/fmt_smoke.sh` and a
+formatter unit test are in CI. The repository was reformatted in one
+whitespace-only commit (142 files; the suite passes on it) and CI runs
+`turf fmt --check lib/std tests`, so the "`turf fmt --check` clean on the repo"
+gate holds.
+*Stage 3, the language server and the VS Code extension: done and verified on
+Linux (2026-10-06); Windows, macOS and the self-contained release link are
+written but unproven until CI runs.* `turf-lsp` (its own repository) runs on the
+SMP-001 facade and ships inside a per-platform extension together with the
+standard library and the `turf graph` helper, so installing the extension is all
+a user does: diagnostics, scope-aware completion with auto-import, signature
+help, inlay hints, hover, definitions, references, rename, formatting, folding,
+workspace symbols, quick fixes, project-aware imports. Run, Build and Test use the
+toolchain when installed and say so when not. 14 integration checks drive the
+packaged `.vsix` in a real VS Code. The roadmap's non-goals stay (debugger, doc
+generator, REPL); beyond what the roadmap listed, the server also does
+completion, rename, references and format-on-save, which the roadmap had left to
+FUTURE F-11.
+Record: `docs/development/changes/REL-002.md`.
+
 ---
 
 ### REL-003 — Platforms, distribution, installation (includes D20)
@@ -1132,22 +1303,214 @@ F-11c), REPL.
 
 | Question | Recommendation |
 |---|---|
-| Tier 1 (tested every commit, release-blocking) | **Linux x86-64, glibc** |
-| Tier 2 (built and smoke-tested per release, best effort) | **macOS arm64** — only if the runtime port (AAPCS64 callee-saved `x19–x28`, `fp`, `d8–d15`; stack bounds via `pthread_get_stackaddr_np`; no `/proc`) lands and passes `gc_smoke.sh` + FDN-005's stress mode; otherwise not shipped. |
-| Windows | **Not in 2.0** (FUTURE F-20b): Win64 callee-saved set (`rbx rbp rdi rsi r12–r15 xmm6–15`), stack limits via `GetCurrentThreadStackLimits`, MinGW vs MSVC toolchain, `libm`/`-l` differences. |
+| Tier 1 (tested every commit, release-blocking) | **Decided 2026-09-30 (owner, DEC-2): Linux x86-64, Windows x86-64 and macOS arm64, all three self-contained** (REL-008). Was: Linux x86-64 only. |
+| ~~Tier 2~~ | ~~macOS arm64 only if ported~~. **Superseded by DEC-2:** macOS arm64 is Tier 1 (REL-008 stage 6 does the runtime port: AAPCS64 callee-saved `x19–x28`, `fp`, `d8–d15`; stack bounds via `pthread_get_stackaddr_np`; no `/proc`). |
+| Windows | ~~Not in 2.0~~. **Superseded by DEC-2:** Windows x86-64 is Tier 1, self-contained, and the user never installs MSYS2 (CI may use it to build). REL-008 stage 5 does the runtime and stdlib port: Win64 callee-saved set `rbx rbp rdi rsi r12–r15 xmm6–15`, `GetCurrentThreadStackLimits`, and `net` on Winsock (DEC-15). |
 | Cross-compilation (D20) | `--target` produces an **object file** for any LLVM triple; linking for a non-host triple fails with a TurfLang diagnostic ("cross-linking is not supported in 2.0; the runtime is built for <host>") instead of a host-linker error. Full cross-linking needs per-target runtime archives — FUTURE F-20. |
-| Install layout | `turf-<ver>-<platform>/{bin/turf, lib/libturfrt.a, lib/std/**, share/turf/examples/**, LICENSE, README.md}`; `TURF_HOME` optional (binary-relative discovery already works); `lib/usr` is retired in favour of LEC-001's cache. |
+| Install layout | `turf-<ver>-<platform>/{bin/turf, bin/turfc, lib/libturfrt.a, lib/std/**, share/turf/examples/**, LICENSE, README.md}`; `TURF_HOME` optional (binary-relative discovery already works); `lib/usr` is retired in favour of LEC-001's cache. |
 | Channels | GitHub release archives + SHA-256 (exists); an `install.sh` that verifies the checksum; Homebrew/Scoop/AUR recipes updated only for shipped platforms (their repos are at v0.6.0 today). |
+| **Compiler self-containment** (found 2026-09-30, LEC-001) | **`turfc` is not self-contained today, and the clean-VM smoke in stage 1 would fail on it.** It links LLVM *dynamically* (target `LLVM` = `libLLVM.so.22.1`) and drags in that library's own dependencies. `ldd build/turfc` shows `libLLVM.so.22.1`, `libgomp.so.1`, `libstdc++`, `libffi.so.8`, `libedit`, `libz`, `libzstd`, `libxml2.so.16`, `libncursesw`, `libicuuc.so.78`/`libicudata`. So a user of a release archive would need exactly LLVM 22's shared library and matching versions of the rest — no better than building from source. What is already fine: the Go `turf` is fully static, and a *compiled program* needs only libc/libm (`libturfrt` is linked in statically). **Recommendation:** release builds link LLVM's static component libraries (`llvm_map_components_to_libnames(...)` over the components Codegen uses, instead of the `LLVM` dylib; `llvm-22-dev` ships the `.a` archives) plus `-static-libstdc++ -static-libgcc`, and are built with `-DTURF_SMART=OFF` or a static OpenMP, so that `ldd bin/turfc` lists only libc, libm, libz and the dynamic loader. Keep dev builds on the dylib (link time). Gate it with a CI check that runs `ldd` on the release binary against an allowlist. |
+| **Linker and C runtime: what "only `cc`" really requires** (2026-09-30) | `turfc` links every program by running the system `cc` (`gcc` on Windows; `linkObject()`, `src/driver/main.cpp`). A self-contained `turfc` (row above) still leaves the user needing a C toolchain. That is `build-essential` on Ubuntu, which does not ship `cc` or libc's start-up files (`crt1.o`, from `libc6-dev`) by default, and on Windows a MinGW `gcc` that almost no Windows machine has. This is the gap between TurfLang and "installs and runs like Java or Python". **Two parts, fixable separately:** (1) *the linker*: embed **lld** (LLVM's linker, usable as a library, shipped as `liblld*` static archives next to LLVM's) in the release `turfc`, so no external linker runs; (2) *the C runtime*: ship one in the archive (for example musl's `libc.a` and start-up objects on Linux, the MinGW-w64 CRT import libraries on Windows), which also makes every compiled Turf program fully static. That is Zig's model: its archive needs nothing installed. **Decided 2026-09-30 (owner, DEC-14): pulled into 2.0** as REL-008. The earlier recommendation (keep the system `cc` for 2.0) is withdrawn. |
+| **`--smart` in a release** (found 2026-09-30) | The archive has never contained the GGUF model (~1 GB, `models/` is git-ignored), so `--smart` in any release so far silently falls back to plain diagnostics. It is optional at build time since LEC-001 (`-DTURF_SMART=OFF`, `scripts/cmake_build.sh --no-smart`; `src/slm/SLMEngineDisabled.cpp` prints why). **Decide** one of: (a) release builds without it (`TURF_SMART=OFF`, smallest and self-contained, `--smart` says it is not built in); (b) ship the runtime and fetch the model on demand (a future `turf smart install` into the cache, with a checksum); (c) a separate "with model" archive. Recommendation: (a) for 2.0, and (b) as FUTURE. A release must never ship a runtime that silently does nothing. **Decided 2026-10-11 (owner): neither (a) nor (b) as written. Every platform ships two archives, the plain one and a `-smart` one with the runtime; no model is shipped or fetched, the user puts exactly one `.gguf` in `<root>/models` (none or several: one note, and the compiler's own diagnostics). `REL-008.md`, "`--smart` as an installable build".** |
 
-**Stages** (1) Tier-1 archive in the new layout + `install.sh` + a clean-VM
-smoke (`docker run ubuntu:24.04` / `debian:stable` with only `cc` installed:
-download, install, `turf new`, `turf build`, run); (2) the D20 diagnostic;
-(3) optional macOS port; (4) packaging recipes.
-**Tests** `scripts/release_smoke.sh` in CI on a tag build. **Risks** the
+**Stages** (1) Tier-1 archive in the new layout, with a **self-contained
+`turfc`** (row above) + `install.sh` + a clean-VM smoke (`docker run
+ubuntu:24.04` / `debian:stable` with only `cc` installed: download, install,
+`turf new`, `turf build`, run — this is the test that catches a dynamic
+`libLLVM`); (2) the D20 diagnostic; (3) optional macOS port; (4) packaging
+recipes.
+**Tests** `scripts/smoke/release_smoke.sh` in CI on a tag build. **Risks** the
 runtime's Linux-specific stack discovery (`/proc/self/maps`) inside minimal
-containers (it has a fallback; FDN-005 must test the fallback path too).
+containers (it has a fallback; FDN-005 must test the fallback path too —
+**done 2026-09-29**: the fallback was freeing live objects and is fixed,
+`scripts/smoke/gc_no_procfs_smoke.sh`). The known stdlib/driver blockers for
+macOS and Windows (a glibc-only `malloc_usable_size` that breaks `-O0`
+links, the Linux-only `sockaddr_in` layout and socket constants, no
+Winsock, 32-bit `long` returns) are tabled in `FDN-005.md` *Portability
+review*.
 **Completion** the clean-machine walkthrough of Part IX passes on every
-shipped platform.
+shipped platform. Since DEC-14 that means with *nothing* installed but the
+archive (REL-008), not "only `cc`".
+
+**Status (2026-10-07).** Stages 1 (layout, `install.sh`, `release_smoke.sh`,
+without self-containment and without a container run), 2 (the D20 diagnostic)
+and 4 (recipes, generated, not published) are built and verified on Linux
+x86-64; uncommitted. Stage 3 (macOS port) and self-containment moved to
+REL-008 (DEC-2, DEC-14). The D20 row above is implemented as recommended and
+owner-confirmed 2026-10-07 (`FREEZE.md` §6.26, F-REL-2); a later `-c` flag is
+the follow-up.
+**Closed 2026-10-07 (owner).** Stages 1, 2 and 4 landed as above and were proven by
+release dry runs; stage 3 (macOS) and the self-containment/clean-machine criterion
+are REL-008 (stages 6 and 8). The remaining open items (first-release version bump,
+the package-manager repositories' credentials, the private repository's download
+URLs, `-c`) are listed in the record's *Hand-offs*.
+Record: `docs/development/changes/REL-003.md`.
+
+---
+
+### REL-008 — Self-contained distribution: Linux, Windows, macOS
+
+**Kind** Release engineering · **Rules** R3 · **Size** XL (several sessions; most proof only possible on CI runners) · **Prereqs** REL-003's layout decisions, FDN-005, LEC-001 (`turf`) · **Decided** 2026-09-30 by the owner: DEC-2, DEC-14, DEC-15
+
+**The promise.** TurfLang 2.0.0 installs and runs like Java or Python.
+- On Linux x86-64, Windows x86-64 and macOS arm64, a user downloads one
+  archive (or runs `install.sh` / `install.ps1`) and then:
+  ```
+  turf new hello
+  cd hello
+  turf run
+  ```
+  prints hello **with nothing else installed**: no LLVM, no C compiler, no
+  libc development files, no MSYS2, no Xcode.
+- Release-blocking on all three platforms.
+- CI may use any toolchain to *build* the archives (apt LLVM, MSYS2, Homebrew);
+  the user never sees it.
+
+**Owner decisions (2026-09-30).**
+- **DEC-2, platforms:** Linux x86-64, Windows x86-64 and macOS arm64 are all
+  Tier 1. This supersedes REL-003's "Linux Tier 1, macOS Tier 2, Windows not
+  in 2.0".
+- **DEC-14, linking:** self-contained, and **hybrid**.
+  - A program that links no system C library (no `extern from "lib"`, no
+    `--link`) is linked by the embedded lld against the **bundled** C
+    runtime, and is fully static.
+  - A program that does name one links against the system's C library with
+    the system toolchain, and needs that library's development files, as in
+    any language. The diagnostic when they are missing says exactly that.
+  - Pure-Turf programs (the stdlib only) never need the system toolchain.
+- **DEC-15:** `net` is ported to **Winsock** for Windows, not left
+  unsupported.
+- **CI-only MSYS2:** allowed as Windows build machinery.
+
+**Current state (verified 2026-09-30).**
+- `turfc` links `libLLVM.so.22.1` dynamically, with a dozen transitive
+  shared libraries (REL-003's *Compiler self-containment* row).
+- It links programs by running `cc`/`gcc` (`linkObject()`).
+- The Win64 and macOS GC paths exist (`runtime/turfrt_gc.c`) but have never
+  run.
+- The Windows stack-overflow handler is a stub (`runtime/turfrt_signal.c`).
+- The stdlib's `mem`/`net` breakages on macOS and Windows are tabled in
+  `FDN-005.md` *Portability review*.
+- The development machine this was written on (Arch, no Docker daemon, no
+  Windows or Mac) cannot run any of the proofs below. They run on GitHub
+  Actions runners (ubuntu, windows, macos arm64), so this milestone needs
+  the branch pushed.
+
+**Stages** (dependency order; each ends green on all three runners):
+1. **Release-shaped CI on every push, not only on tags.**
+   - Build the release configuration on each runner.
+   - Inspect the artifacts against an allowlist: `ldd` / `objdump -p` /
+     `otool -L`. The allowlist is libc, libm and the loader on Linux; system
+     DLLs only (`KERNEL32`, `UCRT`/`api-ms-win-*`) on Windows; `libSystem`
+     on macOS.
+   - The check fails today, by design, until stages 2–4 land.
+2. **Self-contained `turfc`.**
+   - `-DTURF_RELEASE_STATIC=ON` links LLVM's static component libraries
+     (`llvm_map_components_to_libnames`) plus the static C++ runtime
+     (`-static-libstdc++ -static-libgcc`, and `libwinpthread` statically on
+     MinGW).
+   - `-DTURF_SMART=OFF`, pending REL-003's `--smart` row.
+   - Dev builds stay on the dylib.
+3. **Embedded lld.** `linkObject()` calls lld in-process: `lld::elf::link`,
+   `lld::mingw::link` (COFF), `lld::macho::link`. The system `cc` is still
+   spawned, but only on the hybrid path, for programs that name a system C
+   library.
+4. **Bundled C runtime**, shipped under `lib/rt/<platform>/`:
+   - **Linux:** musl `libc.a` + `crt1.o`/`crti.o`/`crtn.o`, built from
+     source in CI. **`libturfrt` is compiled against musl** (clang
+     `--target=x86_64-linux-musl` with the musl sysroot), since a
+     glibc-compiled runtime cannot be linked into a musl-static program.
+   - **Windows:** the MinGW-w64 CRT objects and import libraries
+     (`crt2.o`, `libmingw32.a`, `libucrt*.a`, `libkernel32.a`, …) taken from
+     the build's MinGW, targeting UCRT (present on Windows 10+).
+   - **macOS:** `libSystem` `.tbd` link stubs, which is how Zig links
+     without Xcode. **Risk:** confirm the stubs are redistributable before
+     shipping (they are symbol lists generated from the SDK; record the
+     finding in the change record).
+   - The hybrid rule is decided by `turfc` per program: bundled if
+     `g_RequiredLibs` and `--link` are empty, otherwise system.
+5. **The Windows port**, running on the windows runner:
+   - the test suite under Git Bash on the runner, fixing what fails;
+   - the GC's Win64 register capture and stack base, validated, including
+     `TURF_GC_STRESS`;
+   - stack-overflow handling via a vectored exception handler, replacing
+     the stub;
+   - `mem` uses `_msize`;
+   - **`net` on Winsock:** `WSAStartup`/`WSACleanup`, `SOCKET` is pointer
+     sized (not `int32`), `closesocket`, `WSAGetLastError`, Windows socket
+     constants;
+   - `fs`, `sys`, `time` and `random` checked;
+   - `turf` project commands and git dependencies exercised.
+6. **The macOS port**, running on the macos arm64 runner:
+   - the suite and GC stress;
+   - `mem` uses `malloc_size`;
+   - BSD `sockaddr_in` with `sin_len`;
+   - `SOL_SOCKET`/`SO_REUSEADDR` values;
+   - `SIGBUS` stack overflow (handled since FDN-005).
+7. **Installers:** `install.sh` (Linux, macOS) and `install.ps1` (Windows).
+   Each detects the platform, downloads, verifies the SHA-256 and unpacks
+   (`~/.turf` / `%LOCALAPPDATA%\turf`). Archive signing (minisign or cosign)
+   is recommended.
+   - **PATH management on every OS** (owner requirement, 2026-09-30). After
+     installing, `turf` must work from any directory in a *new* terminal,
+     without the user editing anything by hand:
+     - **Linux and macOS:** detect the login shell and add one clearly
+       marked, idempotent block to the right start-up file: zsh
+       `~/.zshrc`, macOS's default shell and login-shell semantics; bash
+       `~/.bashrc`, or `~/.bash_profile` on macOS; fish via
+       `fish_add_path`; anything else via `~/.profile`, and say so. Offer
+       `--no-modify-path`.
+     - **Windows:** add `bin` to the **user** PATH (no admin rights), and
+       broadcast the environment change so new terminals see it.
+     - **Uninstall:** each installer's uninstall removes exactly what it
+       added.
+     - **Verify:** the clean-machine smoke (stage 8) checks that a fresh
+       shell resolves `turf`, not only that the files exist.
+   - **Replace the "for now" hints when this lands.** What exists today only
+     *prints* the right command and edits nothing: `scripts/install/dev_install.sh`
+     and `turf version` / `turf help` (turf-cli's `cmd/turf/pathhint.go`, shown
+     when the running `turf` is not the one `PATH` resolves to). Both carry
+     comments pointing here. Keep the `turf version` hint, since a user may
+     still run an unpacked archive by its full path, but point it at the
+     installer.
+8. **Clean-machine proof, release-blocking** (`scripts/smoke/release_smoke.sh`,
+   and a `.ps1` twin):
+   - **Linux:** `docker run ubuntu:24.04` / `debian:stable` with **no**
+     `cc`.
+   - **Windows:** a `PATH` holding only `System32` and the unpacked
+     archive, with no MSYS2, MinGW or Git.
+   - **macOS:** a `PATH` without Xcode's toolchain, with a check that no
+     `clang`/`ld` was executed.
+   - Each runs install → `turf new hello` → `turf run` → `turf build` with a
+     path dependency and with a git dependency → a program using `net`
+     (loopback).
+9. **Recipes:** Homebrew, Scoop and AUR generated from the archives, and
+   bumped by CI after a release.
+
+**Tests.**
+- Every stage adds its CI job.
+- The artifact allowlist (stage 1) and the clean-machine smokes (stage 8)
+  are what *prove* the promise. Neither may be skipped or softened to get a
+  release out (R3).
+
+**Risks.**
+- Archive size: tens of MB per platform (static LLVM plus lld plus a C
+  runtime).
+- musl's performance differences (`malloc`) against glibc.
+- macOS stub redistribution (stage 4).
+- A second supported libc to keep patched.
+- Windows antivirus heuristics on unsigned executables (signing helps).
+- The GC ports are the most likely source of real bugs. That is why stages
+  5–6 run the stress modes, not just the suite.
+
+**Non-goals.**
+- Linux arm64, Windows arm64, the BSDs;
+- cross-linking between platforms (F-20);
+- an MSVC-built compiler;
+- bundling a model for `--smart`.
+
+**Completion.** Stage 8 passes on all three platforms from the published
+release archives, with the artifact allowlist green.
 
 ---
 
@@ -1160,7 +1523,7 @@ spec section → test files) and gap filling; (2) runner covers `lib/std`
 direct compiles, `showcase/`, `examples/` (today it covers none of them —
 `AGENTS.md`'s standing trap); (3) sanitizer CI jobs (compiler under ASan/UBSan
 running the full suite; runtime under ASan — FDN-005); (4) crash fuzzing:
-reuse SLM-001's mutator (`scripts/slm_benchmark/mutate.py`) plus a
+reuse SLM-001's mutator (`scripts/slm/slm_benchmark/mutate.py`) plus a
 token-level mutator over `tests/**` as seeds, run nightly with a time budget;
 any ICE, assertion, segfault or hang is filed as a release blocker with the
 minimized input added to `tests/`; (5) every `-O` level, `-g`, and
@@ -1170,7 +1533,7 @@ expensive axes).
 
 ---
 
-### REL-005 — Performance baseline
+### REL-005 — Performance baseline — **DONE** (2026-10-13)
 
 **Kind** Release engineering · **Rule** R5 · **Size** S · **Prereqs** none (start early)
 
@@ -1182,9 +1545,14 @@ compile time of the stdlib + showcase) with numbers recorded per milestone in
 freeze tag and the release needs a recorded explanation). §24's "there is no
 benchmark suite at all" risk is retired by this item.
 
+Landed 2026-10-13: five benchmark programs plus compile time, `scripts/dev/bench.py`,
+the first baseline in `bench/results/`, and five performance bugs plus one
+compiler crash fixed on the way. The gate runs at each RC (REL-007).
+Record: `docs/development/changes/REL-005.md`.
+
 ---
 
-### REL-006 — Documentation for 2.0
+### REL-006 — Documentation for 2.0 — **DONE** (2026-10-13; handbook paused)
 
 **Kind** Release engineering · **Rule** R5 · **Size** L · **Prereqs** LANGUAGE FREEZE
 
@@ -1193,7 +1561,7 @@ benchmark suite at all" risk is retired by this item.
   (~25 today, more after Phase 1–2) by **rewriting** `docs/reference/**`
   against the frozen 2.0 compiler, as the 2026-08-21 rewrite did against
   1.0. Every code block in the reference is extracted and compiled by CI
-  (`scripts/doc_examples.sh`), so the docs cannot drift again silently.
+  (`scripts/check/doc_examples.py`), so the docs cannot drift again silently.
 - `docs/reference/projects_and_packages.md` (LEC-001),
   `docs/reference/memory_and_safety.md`: the two heaps, what is and is not
   guaranteed (Part VIII's guarantees table), `unsafe`/capabilities/FFI
@@ -1220,6 +1588,13 @@ Part VII–VIII gates and the clean-machine walkthrough; bugs are triaged with
 Part VI's classification; an RC with zero open release blockers for 7 days
 becomes `v2.0.0`. The `refactor/architecture` branch is merged to `master`
 before the first RC (it is the development branch for all of this).
+
+Each RC also runs REL-005's regression gate (owner decision 2026-10-13): on
+the machine that took the recorded baseline, `python3 scripts/dev/bench.py
+--compare bench/results/<baseline>.json`. A benchmark more than 20% slower
+needs a recorded explanation in `docs/development/BENCHMARKS.md` before the
+RC can become 2.0.0. Not a per-push CI check: shared runners vary more than
+20%.
 
 ---
 
@@ -1339,7 +1714,7 @@ question has a written, tested answer (FDN-006, REL-001, REL-003 own them):
 | Panic? | `panic: <kind>: <msg> (<file>:<line>)` to stderr, exit 134, no unwinding, no `defer` | existing + FDN-006 |
 | Stack overflow? | `panic: stack overflow`, exit 134 | FDN-006 |
 | GC descriptors? | Emitted by the compiler once per type in `EmitAllTurfTypeDescs()`, variable-length bitmap (OVH-001), referenced from every allocation site, consumed by the mark phase | `runtime_smoke.sh`, `41_gc` |
-| Compiler/runtime ABI? | The `turfrt.h` entry points listed in `include/Intrinsics.h` + `TurfTypeDesc`/`TurfErrorValue` layouts; internal, lock-step, never a user promise | `check_boundary.sh` |
+| Compiler/runtime ABI? | The `turfrt.h` entry points listed in `src/sema/Intrinsics.h` + `TurfTypeDesc`/`TurfErrorValue` layouts; internal, lock-step, never a user promise | `check_boundary.sh` |
 | Cross-compilation? | Objects yes, linking no, with a diagnostic (D20) | REL-003 test |
 | Runtime compatibility enforcement? | Link-time via the ABI symbol | `runtime_smoke.sh` |
 
@@ -1394,6 +1769,31 @@ and compiles the whole program — every module of every package — in one
 invocation, monomorphizing generics across package boundaries exactly as it
 does within one file today. No binary artifacts, registry, or ABI
 compatibility are involved, by design (Part IV LEC-001).
+
+**What is real today** (annotated 2026-09-30 at the close of LEC-001; each line
+below was run with the built `turf`/`turfc`; the walkthrough above is the
+target and is unchanged):
+
+| Walkthrough line | Today |
+|---|---|
+| `curl -fsSL … install.sh \| sh` | **Not real.** There is no installer and no release archive that runs with nothing else installed. REL-008 builds them. Today `turf` is built from source (`./scripts/cmake_build.sh --release --no-smart`, then `./scripts/dev_install.sh`), and README's Quick Start says so. |
+| `turf --version` | Real. Prints two lines, `turf 1.0.0-dev …` and `turfc 2.0.0-dev  (interface 1.1, …)`, since the two are versioned separately. |
+| `turf new geometry --lib` / `turf new plotter` | Real. `src/geometry.tr` and `src/main.tr`. |
+| `[dependencies]` with `geometry = { path = "../geometry" }` | Real (`turf add geometry --path ../geometry` writes it). |
+| `jsonx = { git = "…", tag = "v1.2.0" }` | The **form** is real and tested (`scripts/smoke/git_deps_smoke.sh`, against local bare repositories); `jsonx` is illustrative, there is no such repository. |
+| `import geometry;` `import jsonx;` `import io;` | Real. |
+| `turf build` "fetches, writes `turf.lock`, compiles everything from source" | Real. It also prints `turf: fetching <name> (<url>)` per repository, and `turf.lock` pins the commit and a SHA-256 of the tree. |
+| `turf run` | Real. |
+| `turf test` | Real (REL-002 stage 1, 2026-10-06). Runs `tests/**/*.tr`; a project with no `tests/` is an error. |
+| `git tag v0.1.0 && git push --tags` | Plain git; consumers then write `{ git = "…", tag = "v0.1.0" }`, which is real. |
+| `cp build/plotter /somewhere` | Real: the copy runs from any directory. "Static-runtime" is accurate (`libturfrt` is linked in), but the program is not fully static: `ldd` shows `libm`, `libc` and the loader, and `turfc` still links with the system `cc`. Fully static programs and a `turfc` that needs no C toolchain are REL-008. |
+
+In "What happens underneath", "the driver" is `turf`, the Go front end (the
+compiler `turfc` never fetches or reads a manifest); it fetches into
+`<user cache dir>/turf/src/` (`~/.cache/turf/src/` on Linux, or
+`$TURF_CACHE_DIR`). Everything else in that paragraph is real, including the
+generics claim: `examples/plotter` calls a generic function of `examples/geometry`
+with a struct declared only in `plotter`.
 
 ---
 
@@ -1450,15 +1850,21 @@ TurfLang 2.0.0 ships only when every line is demonstrated:
 | DEC-2 | Platforms for the next release (OVH-013) and for 2.0 (REL-003) | Linux x86-64 Tier 1; macOS arm64 Tier 2 only if ported; Windows FUTURE | OVH-013, REL-003 |
 | DEC-3 | FREEZE narrowings (OVH-014) | Record rows 2–3; implement row 1; row 4 → LEC-005 | OVH-014 |
 | DEC-4 | Suppress `lib/std`-origin warnings by default | Yes, with `--stdlib-warnings` | OVH-012 / LEC-005 |
-| DEC-5 | Heap allocation surface (FDN-001) | `heap(expr): &T` intrinsic | FDN-001 |
+| DEC-5 | Heap allocation surface (FDN-001) | `heap(expr): &T` intrinsic — **decided 2026-09-27** (`FREEZE.md` §6.12) | FDN-001 |
 | DEC-6 | `s[i]` becomes `char` (D17) | Yes, with bounds checks | FDN-004 |
-| DEC-7 | Visibility default and keyword (LEC-002) | Private by default, `pub` | LEC-002 |
-| DEC-8 | Project tool ownership (LEC-001) | Compiler driver subcommands; `turf-cli` not shipped | LEC-001 |
-| DEC-9 | Package/module identity and collision rule (LEC-001) | Package root module = package name; collisions are errors | LEC-001 |
+| DEC-7 | Visibility default and keyword (LEC-002) | Private by default, `pub`/`public` — **decided 2026-09-29** (`FREEZE.md` §6.15) | LEC-002 |
+| DEC-8 | Project tool ownership (LEC-001) | ~~Compiler driver subcommands; `turf-cli` not shipped~~ — **decided otherwise 2026-09-30**: the Go CLI (`cli/`) is `turf`, the compiler is `turfc`, independently versioned, agreeing on a driver interface (`FREEZE.md` §6.16, F-PKG-1) | LEC-001 |
+| DEC-9 | Package/module identity and collision rule (LEC-001) | Package root module = package name; collisions are errors — **decided 2026-09-30** (`FREEZE.md` §6.16, F-PKG-2) | LEC-001 |
 | DEC-10 | Pattern syntax (LEC-003) | Top-level `matches expr` unchanged; destructuring forms bind | LEC-003 |
 | DEC-11 | Propagation keyword (LEC-004) | Prefix `try` | LEC-004 |
 | DEC-12 | Payload + message coexistence (LEC-004) | N fields or N+1 with trailing message | LEC-004 |
-| DEC-13 | Main-file module name for qualified type identity (FDN-003) | `main` | FDN-003 |
+| DEC-13 | Main-file module name for qualified type identity (FDN-003) | `main` — **decided 2026-09-27** (`FREEZE.md` §6.11; never spelled: a main-file type's identity is its bare name) | FDN-003 |
+| DEC-14 | Self-contained release, and how programs link | **Decided 2026-09-30 (owner):** the 2.0.0 archive needs nothing installed. `turfc` has static LLVM and an embedded lld and ships a C runtime (musl / MinGW-w64 CRT on UCRT / macOS `.tbd` stubs). Hybrid linking: pure-Turf programs are fully static against the bundled runtime; a program naming a system C library uses the system toolchain | REL-008 |
+| DEC-15 | `net` on Windows | **Decided 2026-09-30 (owner):** ported to Winsock, full parity | REL-008 |
+
+**DEC-2 amended 2026-09-30 (owner):** Linux x86-64, Windows x86-64 and macOS
+arm64 are all Tier 1 and self-contained for 2.0 (REL-008). The row above
+records the original recommendation; REL-003's table records the decision.
 
 ---
 
@@ -1469,8 +1875,9 @@ public, stable language project. From the day it ships:
 
 - `docs/planning/FUTURE.md` is the backlog. Its first section is the
   deliberately excluded 2.0 candidates (closures, collection iteration,
-  slices, expression-position type arguments, enum payloads, Windows,
-  cross-linking, registry, separate compilation), each with the rationale
+  slices, expression-position type arguments, enum payloads, cross-linking,
+  registry, separate compilation; Windows moved into 2.0 by DEC-2's
+  amendment, REL-008), each with the rationale
   recorded when it was excluded.
 - The post-2.0 Simplification phases (F-S0 … F-S5) become a tracked
   initiative with their own freeze entries and change records.

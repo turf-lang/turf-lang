@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E134
+// EXPECT-DIAG: Cannot explicitly cast 'bool' to 'int'
 // SEM-002 Rule B1: cast legality is now enforced in the TypeChecker
 // (TypeChecker::visitCast(), TypeCheckerExpr.cpp), not only in Codegen --
 // this is a regression check that an illegal pairing (bool -> int was

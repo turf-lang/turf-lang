@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E054
+// EXPECT-DIAG: 'Vec2' has no method named 'nonexistent_method'
 // Negative test: a method call matching neither tier (no bound method, no
 // UFCS candidate) must be a clean type error, not an ICE.
 struct Vec2 {

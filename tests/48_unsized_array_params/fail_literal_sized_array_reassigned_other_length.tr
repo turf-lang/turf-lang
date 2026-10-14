@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E066
+// EXPECT-DIAG: Type mismatch!
+// EXPECT-DIAG: Cannot assign value of type 'int[2]' to variable of type 'int[3]'.
+// The literal gave 'a' the size 3 (it is exactly int[3]), so a literal of
+// another length can't be assigned to it later.
+fn main(): int {
+    mut a: int[] = [1, 2, 3];
+    a = [1, 2];
+    return a[0];
+}

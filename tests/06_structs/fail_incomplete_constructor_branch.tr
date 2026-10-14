@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E049
+// EXPECT-DIAG: Not definitely assigned on every path: y
 // Regression test for ConstructorFieldAssignmentPass: a field assigned in
 // only ONE branch of an if/else is NOT definitely assigned on every path --
 // this is exactly the case a naive "is it assigned anywhere in the body"

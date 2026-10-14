@@ -1,4 +1,5 @@
 // RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: Integer overflow
 // OPT-002 must never elide a check that ISN'T provably safe. `bigVal()`'s
 // return is a FuncCallExprAST -- markElidableChecks()'s evalConstExpr() has
 // no case for it at all (it only folds literals, plain-variable reads, and

@@ -1,189 +1,273 @@
 # HTTP: `http`
 
-A minimal HTTP/1.1 layer built directly on `net`'s raw TCP transport — no
-raw sockets, `ptr`, or manual memory management is ever visible to a
-caller of this module. Not prelude — needs an explicit `import`.
+A small HTTP/1.1 layer over [`net`](io_and_net.md#net): parse a request,
+write a response, and an optional `Server` that dispatches requests to handler
+functions by path. Not prelude: it needs `import http;`, and a program that
+accepts connections itself also needs `import net;`.
 
 ```turflang
 import http;
-import net;
 ```
 
-Two ways to use it: **manual routing** (parse a request yourself, branch on
-`req.path`, build a response by hand — the same shape
-`showcase/http_server.tr` hand-writes directly against `net`) or
-**callback routing** (register `fn(Request, Response): void` handlers per
-path on a `Server`, then call `.listen(port)`). Both are fully supported;
-pick whichever fits your program.
+It is meant for small services, tools and tests, not for the open internet:
+
+- **One request per connection.** Every response carries `Connection: close`;
+  there is no keep-alive.
+- **One read per request.** `parse_request` reads up to 8192 bytes in a single
+  receive. A request line and headers beyond that, or a body that arrives in a
+  later packet, are not seen. The body is whatever arrived with the headers;
+  `Content-Length` is not consulted.
+- **One request at a time.** `Server.listen` serves a connection to the end
+  before it accepts the next.
+- **No TLS**, no chunked encoding, no query-string or form parsing.
+
+There are two ways to use it, and both use the same `Request` and `Response`:
+
+- **Manual routing**: you run the accept loop, call `parse_request`, and
+  branch on `req.path` yourself.
+- **A `Server`**: register a handler per path with `get`, then call `listen`.
 
 ---
 
-## `struct Request { method: string, path: string, headers: Map<string, string>, body: string }`
+## `Request`
+
+```text
+struct Request {
+    pub method: string,
+    pub path: string,
+    pub headers: Map<string, string>,
+    pub body: string,
+}
+```
+
+What the handler reads. `method` is the request line's first word (`"GET"`),
+and `path` is its second, **exactly as sent**, query string included:
+`/search?q=a` is the path `"/search?q=a"`. `headers` maps each header name to its
+value, with surrounding spaces trimmed; names are case-sensitive, so
+`Content-Type` and `content-type` are different keys. A header sent twice keeps
+its last value. `body` is whatever followed the blank line.
+
+A `Request` you create yourself starts with empty strings and no headers:
+`http::Request::default()`.
 
 ### `parse_request(conn: net::TcpConnection): Request`
 
-Reads one request off `conn` (a single `conn.read(8192)` call) and parses
-the request line + headers into a `Request`. Accepts both `\r\n\r\n`
-(spec-correct) and a looser `\n\n` as the header/body separator, and trims
-a trailing `\r` off every header line either way — both real-world line-
-ending styles just work without the caller choosing one. A malformed or
-empty request line yields a `Request` with an empty `method`/`path` rather
-than failing outright (there's no natural way for a request-per-connection
-accept loop to act on a `!Request` differently than just falling through
-to a 404 anyway).
+Reads one request from `conn` with a single `conn.read(8192)` and parses it. The
+header block ends at the first blank line, either `\r\n\r\n` (what clients send)
+or `\n\n`; a trailing `\r` is removed from every line either way. It never
+fails: an empty or malformed request line gives a `Request` whose `method` and
+`path` are `""`, which falls through to your not-found branch.
 
-```turflang
-mut req: http::Request = http::parse_request(conn);
-```
+### `Request.has_header(name: string): bool`
 
-### `Request.get_header(name: string): string` / `Request.has_header(name: string): bool`
+Whether the request has a header called exactly `name`.
 
-Look up a header by name (byte-exact match). `get_header` panics
-(`sys::panic`) if `name` isn't present — check `has_header` first, or use
-it when you know the header is guaranteed present (like a required
-`Content-Type`).
+### `Request.get_header(name: string): string`
 
-```turflang
-if req.has_header("Content-Type") {
-    io::printline(req.get_header("Content-Type"));
-}
-```
+The header's value. It **panics** if the header is not there, with a message that
+starts with your call's `file:line:` and names the header. Ask with `has_header`
+first unless you know the header is required.
 
-> **Why these exist as their own methods, not just `req.headers.get(name)`/
-> `.contains(name)` inline at the call site.** `headers` is a real,
-> directly-accessible `Map<string, string>` field, and since STD-003
-> (`docs/development/changes/STD-003.md`) `Map<K, V>`'s own generic
-> `.get()`/`.contains()` are content-correct for `K = string` too — see
-> [`collections.md`](collections.md)'s `Map<K, V>` section. `get_header`/
-> `has_header` are kept as thin, named wrappers over `self.headers.tryGet(name)`/
-> `.contains(name)` purely for readability (`req.get_header(name)` reads
-> better than `req.headers.get(name)`) and for `get_header`'s own more
-> specific panic message (naming the missing header).
+To walk all the headers, use the map: `req.headers.keys()` returns a
+`List<string>` of the names ([collections.md](collections.md#mapk-v)).
 
 ---
 
-## `struct Response { conn: net::TcpConnection }`
+## `Response`
+
+```text
+struct Response {
+    pub conn: net::TcpConnection,
+}
+```
+
+A response writes to its connection. Create one with
+`http::Response::default()` and set `conn`; a `Server` does this for you and
+hands the handler a ready `Response`. Each `send_*` call writes a complete
+response and nothing else, so call exactly one per request. The connection is
+not closed by `send_*`; that is the caller's `defer conn.close();`.
 
 ### `Response.send_text(status: int, body: string): void`
 
-Sends a complete `Content-Type: text/plain` HTTP/1.1 response over
-`self.conn` in one `write()` call — status line, `Content-Type`,
-`Content-Length`, `Connection: close`, blank line, body.
-
-```turflang
-mut res: http::Response;
-res.conn = conn;
-res.send_text(200, "hello from turf");
-```
+Sends `status` with `Content-Type: text/plain`.
 
 ### `Response.send_json(status: int, body: string): void`
 
-Identical to `send_text`, except `Content-Type: application/json`. `body`
-is the raw JSON text — build it yourself (e.g. via `json::stringify`) or
-hand-write it for a small, fixed shape.
+Sends `status` with `Content-Type: application/json`. `body` is JSON text you
+have already made, for example with [`json::stringify`](json.md#stringifyv-jsonvalue-string).
 
-```turflang
-res.send_json(404, "{\"error\":\"not found\"}");
+### `Response.send_raw(status: int, content_type: string, body: string): void`
+
+The function the other two call: any content type. The response is, with `\r\n`
+line endings:
+
+```text
+HTTP/1.1 200 OK
+Content-Type: text/plain
+Content-Length: 15
+Connection: close
+
+Welcome to Turf
 ```
 
-### `Response.send_raw(status: int, contentType: string, body: string): void`
+`Content-Length` is the length of `body` in bytes.
 
-The shared building block `send_text`/`send_json` are both one-line
-wrappers over, for any other content type.
+### `status_text(status: int): string`
 
-### Status text
-
-A small, deliberately incomplete table (200/201/400/404/500 only — every
-other code becomes `"<code> Unknown"`) covers exactly what this module's
-own callers need. Not part of the public API surface (no separate
-function exported for it); it's applied automatically inside `send_raw`.
+The status line text for a code: `"200 OK"`, `"201 Created"`,
+`"400 Bad Request"`, `"404 Not Found"`, `"500 Internal Server Error"`. Any other
+code gives its number and the word `Unknown` (`status_text(418)` is
+`"418 Unknown"`), so a response with any other status is still well formed, just
+without a reason phrase.
 
 ---
 
-## `struct Server { listener: net::TcpListener, routes: Map<string, fn(Request, Response): void> }`
+## `Server`
 
-A route table keyed by exact request path, storing a first-class function
-handler per route. Route matching is **exact-path only** — no `:id`-style
-parameter segments, no wildcards.
+```text
+struct Server { /* private fields */ }
+```
+
+A table from exact path to handler, and the loop that serves it. Create one with
+`http::Server::default()`; a declaration without a value
+(`mut app: http::Server;`) is E008. The fields are private; `get`, `has_route`,
+`get_route` and `listen` are the interface.
+
+A handler is any function of type `fn(http::Request, http::Response): void`.
+Matching is **exact on the path** and ignores the method: `/users` does not match
+`/users/7` or `/users?page=2`, and a `POST /` goes to the same handler as
+`GET /`. A handler that needs the method reads `req.method`.
 
 ### `Server.get(path: string, handler: fn(Request, Response): void): void`
 
-Registers `handler` to run for an exact-match request to `path`.
-Re-registering the same path replaces the previous handler.
+Registers `handler` for `path`. Registering the same path again replaces the
+handler.
 
-```turflang
-fn home(req: http::Request, res: http::Response): void {
-    res.send_text(200, "Welcome to Turflang!");
-}
+### `Server.has_route(path: string): bool`
 
-mut app: http::Server;
-app.get("/", home);
-```
+Whether a handler is registered for exactly `path`.
 
-### `Server.has_route(path: string): bool` / `Server.get_route(path: string): fn(Request, Response): void`
+### `Server.get_route(path: string): fn(Request, Response): void`
 
-Look up the handler registered for `path`. `get_route` panics if `path`
-isn't registered — check `has_route` first. Both are thin wrappers around
-`self.routes.indexOf(path)` (see `Request.get_header`'s identical note,
-above, for why these exist as named methods at all rather than inlining
-`Map<K, V>`'s own accessors at every call site).
+The handler registered for `path`. It **panics** if there is none, with a message
+that starts with your call's `file:line:` and names the path. Use `has_route`
+first.
 
 ### `Server.listen(port: int): void`
 
-Binds `port` and serves forever: accepts a connection, parses the
-request, dispatches to the registered handler for `req.path` (or sends a
-built-in 404 and moves on if no route matches), closes the connection,
-repeats. A bind failure is fatal (prints an error and `sys::exit(1)`); a
-single bad `accept()` is logged and skipped, not fatal.
+Binds `port` on every interface and serves forever. For each connection it
+parses the request and calls the handler for `req.path`; if no handler matches
+it answers `404` with the text `Not Found`. It closes the connection when the
+handler returns.
+
+- If the port cannot be bound, it prints
+  `http::Server.listen: could not bind port 8080.` to standard output and ends the
+  program with status 1.
+- A failed `accept` is skipped and the server keeps serving.
+- It does not return. There is no way to stop it except a handler calling
+  `exit`, or ending the process from outside. For a server with its own
+  shutdown, use manual routing.
+
+---
+
+## Example: a `Server` with a JSON handler
 
 ```turflang
 import http;
+import json;
 
 fn home(req: http::Request, res: http::Response): void {
-    res.send_text(200, "Welcome to Turflang!");
+    res.send_text(200, "Welcome to Turf");
+}
+
+fn greet(req: http::Request, res: http::Response): void {
+    mut reply: json::JsonValue = json::JsonValue::new_object();
+    reply.set("greeting", json::JsonValue::from_string("hello"));
+    reply.set("method", json::JsonValue::from_string(req.method));
+    if req.has_header("User-Agent") {
+        reply.set("agent", json::JsonValue::from_string(req.get_header("User-Agent")));
+    }
+    res.send_json(200, json::stringify(reply));
 }
 
 fn main(): int {
-    mut app: http::Server;
+    mut app: http::Server = http::Server::default();
     app.get("/", home);
+    app.get("/greet", greet);
     app.listen(8080);
     return 0;
 }
 ```
 
----
+A request `GET /greet` with a `User-Agent: curl/8` header is answered with
+status 200, `Content-Type: application/json` and the body
+`{"greeting":"hello","method":"GET","agent":"curl/8"}`. `GET /missing` gets
+`404` and `Not Found`.
 
-## Full example: manual routing
+## Example: manual routing with your own accept loop
+
+Manual routing is the choice when the server needs its own rules: a shutdown
+request, per-method handling, or a different not-found response. This one
+answers three requests and stops. `defer conn.close();` runs at the end of
+each pass of the loop, on every path.
 
 ```turflang
-import io;
-import net;
 import http;
-import sys;
+import net;
 
 fn main(): int {
     mut listener: net::TcpListener = net::TcpListener::bind(8080) recover run {
-        sys::exit(1);
+        eprintline("cannot listen on port 8080");
         return 1;
     };
-    while true {
-        mut conn: net::TcpConnection = listener.accept() recover run { continue; };
+    defer listener.close();
+
+    mut served: int = 0;
+    while served < 3 {
+        mut conn: net::TcpConnection = listener.accept() recover run {
+            continue;
+        };
+        defer conn.close();
+        served = served + 1;
+
         mut req: http::Request = http::parse_request(conn);
-        mut res: http::Response;
+        mut res: http::Response = http::Response::default();
         res.conn = conn;
-        if req.path == "/" {
+
+        if req.method == "GET" && req.path == "/" {
             res.send_text(200, "hello");
+        } elseif req.method == "POST" && req.path == "/echo" {
+            res.send_text(200, req.body);
+        } elseif req.path == "/teapot" {
+            res.send_raw(418, "text/plain", "short and stout");
         } else {
             res.send_text(404, "not found");
         }
-        conn.close();
     }
     return 0;
 }
 ```
 
-See `tests/34_http_and_json/03_http_manual_routing_roundtrip.tr` for a
-full, real two-request round trip (status line, headers, and body all
-asserted) over an actual `net::TcpConnection` pair, and
-`04_http_callback_routing.tr` for the equivalent proof on the
-callback-routing (`Server`) path.
+The `/teapot` response starts `HTTP/1.1 418 Unknown`, because 418 is not in the
+status table.
+
+## Escaping text you put in a response
+
+A handler that builds JSON by hand must escape any text it did not write itself,
+or a quote in a user's name breaks the document. `json::escape_string` does it
+([json.md](json.md#escape_strings-string-string)):
+
+```turflang
+import http;
+import json;
+
+fn hello(req: http::Request, res: http::Response): void {
+    res.send_json(200, "{\"path\":\"" + json::escape_string(req.path) + "\"}");
+}
+
+fn main(): int {
+    mut app: http::Server = http::Server::default();
+    app.get("/hello", hello);
+    return 0;
+}
+```

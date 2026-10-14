@@ -1,10 +1,17 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: Unknown annotation '@intrinsic'
+// EXPECT-NO-DIAG: Expected '{'
 // Regression test: the @intrinsic("name") decorator has been removed from
 // the compiler entirely (its only consumer, lib/std/io.tr's print/printline/
 // input, was rewritten to ordinary Turf functions delegating to extern fn
-// FFI bindings). Parser.cpp's TOK_AT case now unconditionally rejects '@'
-// with a clean syntax error instead of accepting "intrinsic" as a
-// hardcoded decorator name -- this must stay a clean parse error, not a
-// crash or a silent no-op.
+// FFI bindings). `@intrinsic` now parses like any annotation and the Resolver
+// rejects it because no pass claims that name -- this must stay a clean
+// error, not a crash or a silent no-op.
 
 @intrinsic("print")
-fn foo(): void
+fn foo(): void {
+}
+
+fn main(): int {
+    return 0;
+}

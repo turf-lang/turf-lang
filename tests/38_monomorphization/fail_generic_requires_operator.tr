@@ -1,3 +1,13 @@
+// EXPECT-DIAG: E124
+// EXPECT-DIAG: Cannot compare struct values with '=='
+// EXPECT-DIAG: 'Set<Big>.add' requires 'Set<Big>.contains'
+// EXPECT-DIAG: the error itself, inside 'Set<Big>.bucket_find'
+// The diagnostic prints the source line of its PRIMARY location as the
+// snippet, so these two lines pin the anchor: it is this file's own call (the
+// outermost user-code request), and no longer the line inside set.tr -- the
+// innermost requester -- that it used to point at.
+// EXPECT-DIAG: s.add(Big::new(1, 2, 3));
+// EXPECT-NO-DIAG: self.bucket_find(item)
 // Regression test: D7 (docs/development/changes/TYPE-002.md, S15) -- the
 // plan's own testing scope (ARCHITECTURE_OVERHAUL.md §8's TYPE-002 entry)
 // named `fail_generic_requires_operator.tr`, deferred twice (S12a -> S13a/
@@ -6,28 +16,21 @@
 // lacking an operation its generic body needs is now a real, reachable
 // instantiation-site error.
 //
-// `Set<T>` requires `T` to support `==` (`Set.indexOf()`'s own
+// `Set<T>` requires `T` to support `==` (`Set.index_of()`'s own
 // `self.items[i] == item`) -- a plain struct doesn't, by design (no
 // trait/constraint system, F-GEN-3 frozen; struct `==` requires an
 // explicit `operator ==` overload, tests/18_operator_overload/
 // 02_struct_operator_eq.tr). `s.add(...)` on a `Set<Big>` (no operator==
 // overload for Big) must be rejected, not silently miscompiled.
 //
-// KNOWN, DISCLOSED GAP (not asserted here -- see
-// ARCHITECTURE_OVERHAUL.md §27.2 item D25 and TYPE-002.md's own D7 entry):
-// the plan's stated requirement is that this error "points at the
-// instantiation site" -- today it does not. The primary diagnostic anchors
-// at `lib/std/collections/set.tr`'s own `Set.contains()` (the innermost
-// REQUESTER of `Set.indexOf<Big>`, itself called by `Set.add()`), one hop
-// short of naming this file's own `s.add(...)` call that actually started
-// the chain. `InstantiationRequest` tracks no parent pointer to walk
-// backward through, so there is no chain to anchor at the true outermost
-// site with. Fixing this is a real feature addition (also fixes the E079
-// chain-noise issue TYPE-002.md's own *Known pitfalls* already discloses),
-// deliberately not bundled into this defect-fix session -- this test
-// asserts only that the mechanism correctly REJECTS the program, which the
-// runner's `fail_*.tr` convention already covers (a reported diagnostic,
-// not a hang or an internal-compiler-error).
+// The D25 gap this file used to disclose is closed (LEC-005): the primary
+// diagnostic anchors at THIS file's `s.add(...)` call -- the outermost
+// user-code request -- not inside `lib/std/collections/set.tr`, and it prints
+// the real chain from there (`Set<Big>.add` -> `Set<Big>.contains` -> ...).
+// The runner can only match text, so the chain hops and the error code are
+// asserted below, and the primary location is pinned through the source
+// snippet the diagnostic prints for it (the analysis facade does not run the
+// monomorphizer, so tests/api/analysis_test.cpp cannot see this error).
 import set::Set;
 
 struct Big { a: int, b: int, c: int }

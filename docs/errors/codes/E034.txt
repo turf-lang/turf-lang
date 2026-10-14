@@ -1,17 +1,13 @@
 You declared two structs (or enums) with the same name
 
-Struct, enum, and error-type names work a bit differently from function names in Turf. Functions are namespaced per-module, so two different modules can each have their own function with the same name with no conflict. But struct/enum/error names are shared across your WHOLE file and every module you import -- so this name can only be used for one type at a time.
-
-Here's the straightforward version of the mistake -- the same struct name declared twice in one file:
+A struct, enum, or error type belongs to the file (or module) that declares it -- so inside one file, each type name can only be used once. Here's the mistake:
 
     struct Point { x: int, y: int }
     struct Point { x: double, y: double }
     // ERROR: A struct named 'Point' is already declared.
 
-But there's a sneakier version worth knowing about: if you declare your own `struct Config { ... }`, and a module you imported ALSO happens to declare a top-level `struct Config { ... }`, you'll get this same error -- even though you only wrote the name `Config` once yourself. That's because the name has to be unique across everything visible to your file, not just within it.
+Different files are a different story: if a module you import also declares a `struct Config`, that's fine -- it's a separate type, `thatmodule::Config`, and your own `Config` stays yours. (If you import it by name, `import thatmodule::Config;`, a bare `Config` could mean either one -- that's a different error, E085, and Turf will name both.)
 
 Turf will also point you to exactly where the first declaration of that name lives, so you can compare the two and decide what to do.
 
-To fix it: rename one of the two conflicting declarations to something more specific. If the conflict is with a type from an imported module rather than your own code, rename YOUR struct or enum instead -- there's no way yet to rename an imported name on the way in.
-
-Running into this is actually a good sign you're starting to build programs that pull in real modules -- naming collisions like this are just part of working with a bigger codebase.
+To fix it: rename one of the two declarations to something more specific.

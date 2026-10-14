@@ -36,17 +36,17 @@ concrete reason `turf-lsp` is fragile and now broken.
 
 **Evidence, gathered live during a 2026-09-20 session:**
 
-- The Lexer alone exposes 18 `extern` globals (`include/Lexer.h`): `CurLine`,
+- The Lexer alone exposes 18 `extern` globals (`src/frontend/Lexer.h`): `CurLine`,
   `CurCol`, `IdentifierStr`, `SourceLines`, `g_recoverJmp`, `g_braceDepth`,
   `g_AIEnabled`, `SourceFilename`, and more.
 - Codegen adds `TheContext`, `Builder`, `TheModule`, `NamedValues`,
   `CurrentFunction`, `CurrentFuncReturnType` as more `extern` globals
-  (`include/Codegen.h`).
+  (`src/codegen/Codegen.h`).
 - The Parser's precedence table (`static std::map<int,int> BinopPrecedence`,
-  `src/ParserCore.cpp`) is a file-local static — not even `extern`, so
+  `src/frontend/ParserCore.cpp`) is a file-local static — not even `extern`, so
   nothing outside that translation unit can see or reset it except by
   re-calling `InitializePrecedence()`.
-- `GlobalSymbolTable` (`include/SymbolTable.h`) is a single process-wide
+- `GlobalSymbolTable` (`src/resolve/SymbolTable.h`) is a single process-wide
   `std::unique_ptr<SymbolTable>`.
 - **Proof this already causes real pain, not hypothetical pain:**
   `turf-lsp/src/CompileBuffer.cpp`'s first ~40 lines exist *only* to manually
@@ -81,7 +81,7 @@ of the "split-brain" issue §6 already names, not a new problem:**
 
 - **`GlobalSymbolTable`'s registered `TurfStructType` for a generic struct
   is a permanently-stale snapshot, and it silently breaks real code, not
-  just tooling.** `src/TypeCheckerDecl.cpp`'s own `isOrWrapsGenericParam()`
+  just tooling.** `src/sema/TypeCheckerDecl.cpp`'s own `isOrWrapsGenericParam()`
   doc comment already diagnoses the mechanism in full: `Resolver::
   visitStructDecl()` rewrites a generic struct's own AST node's field
   types from `NamedType("T")` to `TurfGenericParamType("T")` in place, but
@@ -152,7 +152,7 @@ of the "split-brain" issue §6 already names, not a new problem:**
 already names, this time from INSIDE the compiler's own codebase, not an
 external consumer of it:**
 
-- **`Sandbox::validate()` (`src/Sandbox.cpp`) is a hand-written save/restore
+- **`Sandbox::validate()` (`src/slm/Sandbox.cpp`) is a hand-written save/restore
   dance around `SourceLines`/`DiagnosticEngine`'s global diagnostics list —
   structurally the same workaround `CompileBuffer.cpp`'s first ~40 lines
   already do for `turf-lsp`**, just inside the main compiler binary instead
@@ -176,7 +176,7 @@ external consumer of it:**
   (`ARCHITECTURE_OVERHAUL.md` §16.4's semantic-correctness rate) needed a NEW
   CLI flag (`--smart-write-fix=<path>`) that writes the Sandbox's validated
   in-memory text out to a real file, plus a benchmark tool
-  (`scripts/slm_benchmark/run_benchmark.py`) that then shells out to `turf`
+  (`scripts/slm/slm_benchmark/run_benchmark.py`) that then shells out to `turf`
   **two more times** as a subprocess — once to actually compile the written
   file through real Codegen and linking (`Sandbox::validate()` never reaches
   Codegen at all; it only re-runs Lex/Parse/Resolve/TypeCheck/Lint), once
@@ -490,7 +490,7 @@ three times instead of once.
 - `docs/architecture/compiler_pipeline.md` §6 — the existing CFG
   static-analysis subsystem this document proposes promoting into a real
   lowering stage (§4.3, §7 phase 4).
-- `docs/planning/ARCHITECTURE_OVERHAUL.md` §27 (Deferred Work Register) —
+- `docs/archive/ARCHITECTURE_OVERHAUL.md` §27 (Deferred Work Register) —
   D11 is the adjacent, currently-tracked "build more tooling" item; this
   document is the missing "why the compiler's shape makes that hard" half.
 - `docs/development/changes/STD-003.md` — the 2026-09-26 session §1/§7

@@ -22,12 +22,12 @@
 
 export immut BASE: int = 100;
 
-fn addBase(x: int): int {
+pub fn addBase(x: int): int {
     return x + BASE;
 }
 
 // The function that would have been silently dropped: it's neither first
 // in the file nor the one immediately after the export constant.
-fn addBaseTwice(x: int): int {
+pub fn addBaseTwice(x: int): int {
     return addBase(addBase(x));
 }

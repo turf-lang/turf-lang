@@ -15,3 +15,11 @@ If the real value genuinely needs to be computed (not just a simple literal you 
     immut total: int = base * 2;   // fine -- not exported, so any expression works
 
 This is a small tradeoff for how `export immut` works, but it's a fair one: it means every file that imports a constant gets a value with zero runtime cost, right there at compile time.
+
+The same rule explains the other way to trip this error: leaving the value out altogether.
+
+    export immut MAX_RETRIES: int;      // nothing to export
+
+An exported constant *is* its value, so it has to be given one on the spot:
+
+    export immut MAX_RETRIES: int = 3;

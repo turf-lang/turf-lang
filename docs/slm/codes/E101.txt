@@ -1,0 +1,20 @@
+TURF E101 -- INVALID CHARACTER LITERAL:
+
+CAUSE:
+  A `char` literal (single quotes) must hold exactly one character. The quotes held
+  nothing or more than one.
+
+INCORRECT:
+    mut empty: char = '';      // nothing between the quotes
+    mut two: char = 'ab';      // two characters
+
+CORRECT:
+    mut letter: char = 'a';
+    mut nl: char = '\n';       // an escape is still ONE character
+    mut quote: char = '\'';    // a single quote itself
+    mut word: string = "ab";   // several characters -> a string, double quotes
+
+FIX:
+  Keep one character in single quotes, or switch to a string with double quotes.
+
+RELATED: E099 (unterminated literal), E100 (bad escape).

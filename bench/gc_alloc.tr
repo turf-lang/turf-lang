@@ -1,0 +1,36 @@
+// REL-005 benchmark: allocation and collection.
+//
+// A ring of `live` nodes is overwritten slot by slot, so the live set stays at
+// `live` nodes (and their labels) while millions die. The nodes deliberately
+// do not point at each other: a chain would keep every node ever made alive.
+// Dominated by the collector's allocation path and its collections. Prints a
+// checksum.
+
+struct Node {
+    val: int,
+    label: string
+}
+
+fn main(): int {
+    immut live: int = 1000;
+    immut steps: int = 3000000;
+    // Starts all null; the write makes it definitely assigned (F-INIT-1).
+    mut ring: (&?Node)[1000];
+    ring[0] = null;
+    mut sum: int = 0;
+    for i in 0..steps {
+        mut n: &Node = heap(Node::default());
+        n.val = i;
+        n.label = "n" + ((i % 97) to string);
+        ring[i % live] = n;
+        sum = sum + n.label.length();
+    }
+    for i in 0..live {
+        immut r: &?Node = ring[i];
+        if (r != null) {
+            sum = sum + r.val % 1000;
+        }
+    }
+    io::printline(sum);
+    return 0;
+}

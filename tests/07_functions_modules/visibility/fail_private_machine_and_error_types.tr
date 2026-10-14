@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E088
+// EXPECT-DIAG: Type 'HiddenMachine' is private to module
+// LEC-002 E088: machine and error types follow the same rule as structs and
+// enums. `PubMachine` is fine; the private `HiddenMachine` is the error.
+import visibility_lib_module;
+
+fn main(): int {
+    immut ok: visibility_lib_module::PubMachine = visibility_lib_module::PubMachine::Off;
+    immut bad: visibility_lib_module::HiddenMachine = visibility_lib_module::HiddenMachine::Off;
+    return 0;
+}

@@ -1,6 +1,6 @@
 You tried to use a field that doesn't exist on this struct
 
-Every struct in Turf only has the fields you declared for it -- nothing more. If you write `something.someField` and `someField` was never listed in that struct's `{ }` block, the compiler stops you right here, before your program can run with a value that was never really there.
+Every struct in Turf only has the fields you declared for it -- nothing more. If you write `something.some_field` and `some_field` was never listed in that struct's `{ }` block, the compiler stops you right here, before your program can run with a value that was never really there.
 
 The most common reason this happens is a simple typo. Here's a struct with a `password` field:
 
@@ -29,3 +29,10 @@ A couple of other things worth checking if it's NOT a typo:
     }
 
 Once the field name matches exactly what the struct declares, this error goes away and your code compiles like normal. This is a very normal thing to run into while you're still learning your way around a struct's shape -- nothing to worry about.
+
+The same code covers a field on something that is not a struct at all: a `string`, an `int`, an enum, an array. Those have no fields, so no name is right:
+
+    mut s: string = "abc";
+    mut n: int = s.size;          // a string has no fields
+
+If you meant a method, call it with parentheses (`s.length()`), or use the functions in `strings::`.

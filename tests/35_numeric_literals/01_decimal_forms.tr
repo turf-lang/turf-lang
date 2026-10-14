@@ -1,4 +1,4 @@
-// SEM-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): plain decimal
+// SEM-001 (docs/archive/ARCHITECTURE_OVERHAUL.md §8): plain decimal
 // integer literals, with and without '_' digit separators (FREEZE.md
 // §6.2 row 1). A '_' is legal anywhere BETWEEN two digits.
 

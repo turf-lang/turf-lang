@@ -1,0 +1,27 @@
+// EXPECT-DIAG: E141
+// EXPECT-DIAG: 'cs' is immutable, but 'bump_all' writes to the array it is given as 'arr'.
+// Issue #260: calling a method that changes its receiver on a slice element
+// (`arr[i].bump()`) writes the caller's element too.
+struct Counter {
+    n: int
+}
+
+fn Counter.new(): void {
+    self.n = 0;
+}
+
+fn Counter.bump(): void {
+    self.n += 1;
+}
+
+fn bump_all(arr: Counter[]): void {
+    for (i, _c) in arr {
+        arr[i].bump();
+    }
+}
+
+fn main(): int {
+    immut cs: Counter[1] = [Counter::new()];
+    bump_all(cs);
+    return 0;
+}

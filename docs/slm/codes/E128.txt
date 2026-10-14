@@ -1,0 +1,30 @@
+TURF E128 -- MISSING INITIALIZER:
+
+CAUSE:
+  A declaration that cannot exist without a value was written without one.
+    - an `immutable` variable can never be assigned later, so it must get its one value
+      where it is declared;
+    - `guess` infers the type from the value, so it needs one;
+    - because of that `guess` is only for a local variable: a parameter, a return type or a
+      struct field has no value to infer from and must be written out.
+
+INCORRECT:
+    immutable PI: double;             // never gets a value, and can't later
+    mut x: guess;                     // guess from what?
+    fn scale(k: guess): int { return 1; }   // a parameter has no value
+
+CORRECT:
+    immutable PI: double = 3.14159;
+    mut x: guess = 5;                 // an int
+    mut y: int;                       // value comes later: state the type instead
+    y = 5;
+
+    fn scale(k: int): int {
+        return k * 2;
+    }
+
+FIX:
+  Give the variable a value, or for a `mut` whose value comes later write its type
+  instead of `guess`.
+
+RELATED: E129 (nothing to infer a type from), E008 (use before initialization).

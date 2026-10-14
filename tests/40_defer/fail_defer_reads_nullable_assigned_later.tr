@@ -1,0 +1,21 @@
+// EXPECT-DIAG: E081
+// EXPECT-DIAG: the deferred statement runs when the block exits, after 'w' is assigned here
+// A deferred statement runs when its block exits, after the walk's last
+// statement has moved `w` on, possibly to null. NullabilityPass checked
+// `w.val` where the `defer` is written (inside the null check), so this
+// compiled and dereferenced null at address 0x8. Found by turf-fuzz, whose
+// generator emitted it inside a list walk.
+import io;
+
+struct Node { val: int, next: &?Node }
+
+fn main(): int {
+    mut w: &?Node = heap(Node::default());
+    mut c: int = 0;
+    while (w != null && c < 3) {
+        c++;
+        defer io::printline(w.val);
+        w = w.next;
+    }
+    return 0;
+}

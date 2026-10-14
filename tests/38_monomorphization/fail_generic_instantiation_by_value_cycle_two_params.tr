@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E069
+// EXPECT-DIAG: cycle: P_gen2_int_Q -> Q -> P_gen2_int_Q
 // Regression test: OVH-004, two-parameter variant. The same by-value cycle
 // as fail_generic_instantiation_by_value_cycle.tr, but through the SECOND
 // type parameter of a two-parameter generic struct, to prove the fix

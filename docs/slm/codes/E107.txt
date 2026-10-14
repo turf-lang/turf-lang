@@ -1,0 +1,27 @@
+TURF E107 -- MISSING OPENING BRACE OR PARENTHESIS:
+
+CAUSE:
+  A `{` (block) or `(` (parameter list) was expected and something else was found.
+  Bodies of functions, `if`, `elseif`, `while`, `for`, `do`, `unsafe`, `compare`,
+  `struct`, `enum` and `machine` are ALWAYS wrapped in braces; there is no
+  single-statement shortcut.
+
+INCORRECT:
+    if x > 0 return 1;           // no braces
+    fn main: int { ... }         // missing ()
+
+CORRECT:
+    fn main(): int {
+        mut x: int = 5;
+        if x > 0 {
+            return 1;
+        }
+        mut y: int = x > 3 give 10 otherwise 20;   // one-line choice between two values
+        return y;
+    }
+
+FIX:
+  Add the `{` / `(`. For a one-line choice between two values use the ternary form
+  `give a otherwise b` instead of a braceless `if`.
+
+RELATED: E104 (unclosed delimiter), E106 (missing colon), E110 (specific word expected).

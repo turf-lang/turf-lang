@@ -1,3 +1,4 @@
+// EXPECT-DIAG: E044
 // Regression test: `test::assert()` with zero arguments must be a clean compile
 // error, not a compiler crash.
 //

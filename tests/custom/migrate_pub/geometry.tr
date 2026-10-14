@@ -1,0 +1,50 @@
+// A 1.x-style module: nothing here says `pub`, because before 2.0 everything
+// a module declared was visible to every importer. Under 2.0 this file, as
+// written, exports nothing -- `turf --migrate=pub geometry.tr` puts `pub` back
+// on every top-level declaration and struct field (see
+// scripts/smoke/migrate_pub_smoke.sh). A `fn`/`struct` inside a comment or a string
+// must never be touched: "fn struct enum".
+unsafe module;
+
+export immut ORIGIN_NAME: string = "origin";
+
+extern fn strlen(s: string): int;
+
+struct Point<T> {
+    x: T,
+    y: T,
+    pick: fn(int, int): int
+}
+
+enum Kind { Flat, Round }
+
+error GeometryError { Degenerate }
+
+machine Pen { Up -> Down, Down -> Up }
+
+fn add(a: int, b: int): int {
+    struct Scratch { n: int }   // local: never made `pub`
+    mut s: Scratch = Scratch::default();
+    s.n = a + b;
+    return s.n;
+}
+
+fn<T> Point.first(): T {
+    return self.x;
+}
+
+fn name_length(s: string): int {
+    return strlen(s);
+}
+
+@caller_location
+fn where_(): string {
+    return caller_location;
+}
+
+fn make(x: int, y: int): Point<int> {
+    mut p: Point<int> = Point::default();
+    p.x = x;
+    p.y = y;
+    return p;
+}

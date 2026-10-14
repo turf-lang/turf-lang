@@ -1,0 +1,19 @@
+TURF E112 -- VOID TYPE NOT ALLOWED:
+
+CAUSE:
+  `void` means "nothing" and is valid ONLY as a function's return type. A variable,
+  struct field or parameter must hold a value, so it cannot be `void`.
+
+INCORRECT:
+    mut x: void;                     // what would x contain?
+    struct Box { item: void }
+    fn show(thing: void): void { ... }
+
+CORRECT:
+    fn log(msg: string): void { }        // return type: fine
+
+FIX:
+  Give the variable/field/parameter a real type (`int`, `string`, a struct, ...). For
+  a pointer to something of unknown type in `extern` code use `ptr` or `void*`.
+
+RELATED: E109 (type expected), E067 (using the result of a void call as a value).

@@ -1,0 +1,33 @@
+TURF E086 -- DANGLING REFERENCE ESCAPE:
+
+CAUSE:
+  A reference (`&T`) to a LOCAL variable was allowed to outlive the function.
+  Locals live only until the function returns, then the memory is reused, so
+  the reference would dangle. It is rejected as a return value, stored into a
+  list, stored into a struct that outlives the call, or put in an error
+  payload (`return E1::P(&n);`).
+
+INCORRECT:
+    struct Node { val: int }
+
+    fn make(): &Node {
+        mut n: Node = Node::default();
+        n.val = 42;
+        return &n;                 // n is gone when make() returns
+    }
+
+CORRECT (copy onto the managed heap):
+    struct Node { val: int }
+
+    fn make(): &Node {
+        mut n: Node = Node::default();
+        n.val = 42;
+        return heap(n);
+    }
+
+FIX:
+  Return/store `heap(value)` instead of `&local`. A reference RECEIVED as a
+  parameter is fine to return or store: it already outlives this function.
+  Only references into this function's own locals are the problem.
+
+RELATED: E081/E082 (nullable references), E130 (raw pointers outside unsafe).

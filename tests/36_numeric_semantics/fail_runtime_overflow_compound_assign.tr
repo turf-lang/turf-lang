@@ -1,4 +1,5 @@
 // RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: runtime check: Integer overflow
 // SEM-002: CompoundAssignmentExprAST has its own separate codegen path
 // (does not desugar through BinaryExprAST::codegen() -- CodegenVar.cpp's
 // own top comment) and so needed the same overflow-trap wiring

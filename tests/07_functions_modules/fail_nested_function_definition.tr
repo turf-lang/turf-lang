@@ -1,0 +1,14 @@
+// EXPECT-DIAG: E038
+// EXPECT-DIAG: Nested function definitions are not allowed
+// A `fn` lives at the top level of a file (or on a struct as a method), never
+// inside another function's body.
+fn outer(): int {
+    fn inner(): int {
+        return 1;
+    }
+    return inner();
+}
+
+fn main(): int {
+    return outer();
+}

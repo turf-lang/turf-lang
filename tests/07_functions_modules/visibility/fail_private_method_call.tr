@@ -1,0 +1,9 @@
+// EXPECT-DIAG: E088
+// EXPECT-DIAG: Method 'Shown.hidden' is private to module
+// LEC-002 E088: an instance method its module did not mark `pub`.
+import visibility_lib_module::Shown;
+
+fn main(): int {
+    mut s: Shown = Shown::default();
+    return s.hidden();
+}

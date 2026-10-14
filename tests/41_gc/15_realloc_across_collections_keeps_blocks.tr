@@ -1,0 +1,74 @@
+// tests/41_gc/15_realloc_across_collections_keeps_blocks.tr
+// A realloc (a List or StringBuilder growing) used to cost O(heap): it
+// scanned every block allocated since the last collection one by one, and
+// shifted the sorted block table to remove the old block. Now a hash index
+// finds a pending block, and a sorted-table entry is marked dead and dropped
+// at the next collection (found by REL-005's benchmarks). This exercises
+// every path that touches: many lists growing in interleaved order before
+// any collection (each removal moves another pending block into the gap,
+// whose index must follow it), the same lists growing after a collection
+// (their buffers are then in the sorted table, so the old entry is marked
+// dead), and collections in between, after which every element must still
+// read back. Run under TURF_GC_STRESS=1, TURF_GC_VALIDATE=1, at -O0 and with
+// the ASan runtime too.
+import list::List;
+import test;
+
+fn grow(lists: List<List<string>>, round: int): void {
+    for i in 0..lists.length() {
+        mut l: List<string> = lists[i];
+        for k in 0..(i % 7 + 1) {
+            l.push((round * 1000 + i * 10 + k) to string);
+        }
+    }
+}
+
+fn check(lists: List<List<string>>, rounds: int): void {
+    for i in 0..lists.length() {
+        immut l: List<string> = lists[i];
+        immut per: int = i % 7 + 1;
+        test::assert(l.length() == per * rounds, "every push is still there");
+        for r in 0..rounds {
+            for k in 0..per {
+                immut want: string = (r * 1000 + i * 10 + k) to string;
+                if (l[r * per + k] != want) {
+                    test::fail("list " + (i to string) + " lost element " + want);
+                }
+            }
+        }
+    }
+}
+
+fn main(): int {
+    mut lists: List<List<string>> = List::default();
+    for i in 0..200 {
+        lists.push(List::default());
+    }
+    // Rounds 0-3 before any collection: realloc of pending blocks.
+    for round in 0..4 {
+        grow(lists, round);
+    }
+    check(lists, 4);
+    gc_collect();
+    check(lists, 4);
+    // Rounds 4-11 with a collection every other round: realloc of blocks
+    // already in the sorted table, and dead entries dropped in between.
+    for round in 4..12 {
+        grow(lists, round);
+        if (round % 2 == 1) {
+            gc_collect();
+        }
+    }
+    check(lists, 12);
+    mut sb: strings::StringBuilder = strings::StringBuilder::default();
+    for i in 0..5000 {
+        sb.append(i to string);
+        if (i % 1000 == 0) {
+            gc_collect();
+        }
+    }
+    immut text: string = sb.to_string();
+    test::assert(text.ends_with("4999"), "a builder grown across collections keeps its bytes");
+    test::assert(text.starts_with("0123"), "and its start");
+    return 0;
+}

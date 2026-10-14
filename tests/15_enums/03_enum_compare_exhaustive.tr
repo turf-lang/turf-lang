@@ -7,16 +7,16 @@ fn season_name(s: Season): string {
     mut name: string = "";
     compare s {
         matches Season::Spring:
-            name = "spring";
+        name = "spring";
         done
         matches Season::Summer:
-            name = "summer";
+        name = "summer";
         done
         matches Season::Autumn:
-            name = "cold";
+        name = "cold";
         done
         matches Season::Winter:
-            name = "cold";
+        name = "cold";
         done
     }
     return name;
@@ -26,13 +26,13 @@ fn season_name_with_otherwise(s: Season): string {
     mut name: string = "";
     compare s {
         matches Season::Spring:
-            name = "spring";
+        name = "spring";
         done
         matches Season::Summer:
-            name = "summer";
+        name = "summer";
         done
         otherwise:
-            name = "cold";
+        name = "cold";
     }
     return name;
 }

@@ -1,3 +1,4 @@
+// EXPECT-DIAG: E008
 // SEM-004 (F-INIT-1, FREEZE.md §6.4): a struct declared without an
 // initializer is statically unassigned, exactly like a primitive local --
 // the eager zero-init Mechanism B used to give every struct (see

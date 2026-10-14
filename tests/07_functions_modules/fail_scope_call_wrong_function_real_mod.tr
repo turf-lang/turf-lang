@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E026
+// EXPECT-DIAG: Module 'io' has no function named 'nosuchfunction'
 // Regression test: `Module::func(...)` where Module IS real but doesn't
 // declare `func` must raise a specific, on-topic ModuleMethodNotFoundError
 // ("Module 'io' has no function named 'nosuchfunction'"), not fall through

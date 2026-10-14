@@ -1,0 +1,22 @@
+// An annotation may sit on an `extern fn` declared inside a function body, as
+// it may at file scope. The parser used to send `@` inside a block down the
+// expression path, which then demanded a second ';' after the extern's own and
+// failed on the next line ("Expected ';' after statement").
+
+import test;
+
+fn main(): int {
+    @ownership(acquires)
+    extern fn malloc(size: int): int*;
+
+    @ownership(releases: p)
+    extern fn free(p: int*): void;
+
+    unsafe {
+        mut p: int* = malloc(sizeof(int) * 4);
+        p[0] = 7;
+        test::assert(p[0] == 7, "the locally declared allocator works");
+        free(p);
+    }
+    return 0;
+}

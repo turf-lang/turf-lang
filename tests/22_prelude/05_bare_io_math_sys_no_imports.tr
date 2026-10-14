@@ -1,0 +1,29 @@
+// The prelude (owner decision 2026-10-07, FREEZE.md 6.25): the console, math and
+// process modules are loaded in every program, and their functions are callable
+// BARE -- no `import io;`, no `io::`. Everything in this file compiles with no
+// import except `test`, which is not a prelude module.
+import test;
+
+fn main(): int {
+    // io: bare, and qualified without an import (the prelude is spellable everywhere).
+    print("a");
+    print(1);
+    printline(" b");
+    io::printline("c");
+    eprintline("to stderr");
+
+    // math: bare functions with their type overloads, and qualified.
+    test::assert(abs(-5) == 5, "abs(int)");
+    test::assert(abs(-2.5) == 2.5, "abs(double)");
+    test::assert(max(3, 9) == 9 && min(3, 9) == 3, "max/min(int)");
+    test::assert(max(1.5, 0.5) == 1.5, "max(double)");
+    test::assert(clamp(15, 0, 10) == 10, "clamp(int)");
+    test::assert(power(2, 10) == 1024, "power(int, int)");
+    test::assert(math::PI > 3.14 && math::PI < 3.15, "math::PI with no import");
+    test::assert(sqrt(9.0) == 3.0, "libm sqrt, bare");
+
+    // sys: a bare `exit` ends the program with that status. Reaching `return 1`
+    // would make the test fail, so this line is the assertion.
+    exit(0);
+    return 1;
+}

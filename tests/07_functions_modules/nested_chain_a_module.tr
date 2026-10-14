@@ -2,6 +2,6 @@
 // B's function on-demand from WITHIN its own file.
 import nested_chain_b_module::bFunc;
 
-fn aFunc(): int {
+pub fn aFunc(): int {
     return bFunc() + 1;
 }

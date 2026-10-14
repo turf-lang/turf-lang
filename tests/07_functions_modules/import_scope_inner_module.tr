@@ -1,0 +1,33 @@
+// Companion for the import_scope_* tests (LEC-008, FREEZE.md 6.24): the module
+// that is imported only by someone ELSE, so a test that spells
+// `import_scope_inner_module::` without importing it must be rejected (E145),
+// while values and methods of its types still flow through freely.
+pub struct InnerBox {
+    pub value: int
+}
+
+pub fn InnerBox.get(): int {
+    return self.value;
+}
+
+pub fn inner_value(): int {
+    return 10;
+}
+
+pub fn make_inner(v: int): InnerBox {
+    mut b: InnerBox = InnerBox::default();
+    b.value = v;
+    return b;
+}
+
+// A free function reached through UFCS (`b.inner_twice()`), which follows the
+// receiver's type and is deliberately not gated by imports (F-IMP-4).
+pub fn inner_twice(b: InnerBox): int {
+    return b.value * 2;
+}
+
+operator +(a: InnerBox, b: InnerBox): InnerBox {
+    return make_inner(a.value + b.value);
+}
+
+export immut INNER_LIMIT: int = 41;

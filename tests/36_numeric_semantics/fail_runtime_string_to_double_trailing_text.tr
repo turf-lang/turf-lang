@@ -1,0 +1,10 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: Invalid string to double conversion
+// Text after the number is not ignored.
+
+fn main(): int {
+    mut s: string = "1.5" + "x";
+    mut d: double = s to double;
+    printline(d);
+    return 0;
+}

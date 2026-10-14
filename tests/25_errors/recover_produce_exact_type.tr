@@ -1,0 +1,30 @@
+// A `recover produce` fallback of the success type itself compiles, and an
+// integer literal is an `int32` for a `!int32` call.
+
+import test;
+
+error E {
+    Bad
+}
+
+fn half(x: double): !double {
+    if x < 0.0 {
+        return E::Bad;
+    }
+    return x / 2.0;
+}
+
+fn small(n: int32): !int32 {
+    if n < 0 {
+        return E::Bad;
+    }
+    return n;
+}
+
+fn main(): int {
+    mut n: int = 3;
+    test::assert((half(-1.0) recover produce (n to double)) == 3.0, "converted fallback");
+    test::assert((half(-1.0) recover produce 0.5) == 0.5, "double literal");
+    test::assert((small(-1 to int32) recover produce 7) == 7, "a literal acquires int32");
+    return 0;
+}

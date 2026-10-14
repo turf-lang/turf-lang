@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E005
+// EXPECT-DIAG: value of type 'list::List<int>'
 import list::List;
 
 fn main(): int {

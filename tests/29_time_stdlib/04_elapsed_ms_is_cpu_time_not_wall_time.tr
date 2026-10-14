@@ -27,7 +27,7 @@ fn main(): int {
     // Meanwhile real wall-clock time did pass (allow 0 or 1 -- 300ms may or
     // may not cross a now_seconds() 1-second boundary depending on timing).
     test::assert(wallDeltaSeconds >= 0 && wallDeltaSeconds <= 1,
-                 "wall-clock now_seconds() sanity bound across a 300ms sleep");
+        "wall-clock now_seconds() sanity bound across a 300ms sleep");
 
     io::printline("04 PASS: elapsed_ms()/clock_ticks() correctly measure CPU time, not wall-clock time, across a sleep");
     return 0;

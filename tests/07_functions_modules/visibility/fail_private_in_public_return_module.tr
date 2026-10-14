@@ -1,0 +1,9 @@
+// Companion for fail_private_in_public_return.tr: a `pub` function whose RETURN
+// type is a private struct of this module.
+struct Hidden {
+    pub n: int
+}
+
+pub fn make(): Hidden {
+    return Hidden::default();
+}

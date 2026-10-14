@@ -1,16 +1,15 @@
 # State Machines (`machine`)
 
-`machine` declares an enum-like set of named states together with a
-directed transition graph between them. Calling `.transition(TargetState)`
-on a machine-typed value moves it to a new state — and depending on where
-that call appears in your code, the compiler either **proves the transition
-is valid at compile time** (a zero-cost, plain store, no branch) or falls
-back to a **runtime-checked switch that panics on an invalid transition**.
+A `machine` is an enum whose variants are **states**, together with the list
+of moves that are allowed between them. A value of a machine type changes
+state only by calling `.transition(State)`. Where the compiler can tell
+which state the value is in, it checks the move against the declared graph
+while compiling and rejects an illegal one. Where it cannot, the move is
+checked when the program runs, and an illegal one aborts.
 
-If you've ever modeled a state machine with a plain `enum` and a function
-that mutates it by convention, `machine` is the same idea with the
-transition table promoted into the type system, so illegal transitions can
-be caught before the program ever runs.
+If you have modelled a state machine as a plain [`enum`](structs_and_enums.md#enums)
+that functions change "by convention", a `machine` is the same thing with
+the rulebook in the type.
 
 ## Declaring a machine
 
@@ -22,33 +21,50 @@ machine ConnectionState {
     Connected -> Closing,
     Closing -> Idle,
 }
+
+fn main(): int {
+    mut s: ConnectionState = ConnectionState::Idle;
+    s.transition(ConnectionState::Connecting);
+    return s to int;   // 1
+}
 ```
 
-- The keyword `machine`, followed by a name, followed by `{ }`.
-- The body is a comma-separated list of `From -> To` edges.
-- **States are never declared in a separate list.** A state comes into
-  existence the first time its name appears on either side of an edge.
-  Just like enum variants, a state's ordinal is its first-appearance order
-  (0-based) — in the example above, `Idle` = 0, `Connecting` = 1,
-  `Connected` = 2, `Failed` = 3, `Closing` = 4.
-- Declaring the exact same edge twice in one `machine` block is a
-  parse-time error.
+The body is a comma-separated list of `From -> To` edges; a trailing comma is
+allowed.
 
-> [!NOTE]
-> A state with no incoming edges anywhere in its machine's own declaration
-> (nothing ever transitions *into* it) triggers `UnreachableStateWarning` —
-> a warning, not an error. This is expected for a machine's legitimate
-> start state: in the example above, nothing transitions into `Idle`, which
-> is exactly what you want for a start state. There is currently no
-> dedicated syntax to mark a state as "the" entry point; the warning is
-> just a heads-up, not a rejection.
+- **States are not declared separately.** A state exists because its name
+  appears on either side of an edge. Its ordinal is its order of first
+  appearance, counting from 0: here `Idle` is 0, `Connecting` 1, `Connected`
+  2, `Failed` 3 and `Closing` 4.
+- The same edge twice is `E114` (`Machine 'M' already declares a transition
+  from 'A' to 'B'`).
+- A missing `->` is `E110`.
+- A state with no incoming edge anywhere in the machine produces a warning
+  (`Machine 'ConnectionState' declares state 'Idle' with no incoming
+  transitions`). That is the normal situation for a start state, so the
+  warning is safe to ignore for it; for any other state it usually means a
+  missing edge. There is no syntax to mark a start state.
+- A state that has to exist must appear in at least one edge.
+- `pub machine Name { ... }` makes the machine and all its states visible to
+  other modules. `pub` on a single state or edge is `E087` (`'pub' can't be
+  applied to a machine state or transition`).
+- A machine has no `::default()` (`ConnectionState::default()` is `E135`).
+  Initialise a variable with the state you want; a **struct field** of
+  machine type that you leave alone starts as the machine's first state.
 
-## Using a machine like an enum
+## A machine is an enum
 
-A `machine` type behaves exactly like an `enum` type for everything except
-transitions: `::`-qualified access, `==`/`!=` comparison, `(v to int)`
-ordinal casting, `COUNT`, and `compare`/`matches` exhaustiveness checking
-all work identically, with no special-casing needed on your part.
+Everything that works for an enum works for a machine, with no extra syntax:
+
+| Form | Meaning |
+|---|---|
+| `Machine::State` | A state value. |
+| `a == b`, `a != b` | Same state or not. |
+| `(s to int)` | The ordinal. |
+| `(s to string)` | The state's name. |
+| `("Name" to Machine)` | The state with that name (aborts at run time if none). |
+| `Machine::COUNT` | Number of states. |
+| `compare s { ... }` | Matching, with the same exhaustiveness rules. |
 
 ```turflang
 machine ConnectionState {
@@ -61,282 +77,345 @@ machine ConnectionState {
 
 fn main(): int {
     immut idle: ConnectionState = ConnectionState::Idle;
-    test::assert((idle to int) == 0, "Idle should have ordinal 0");
+    test::assert((idle to int) == 0, "Idle has ordinal 0");
 
     immut connecting: ConnectionState = ConnectionState::Connecting;
-    test::assert(idle != connecting, "Idle should not equal Connecting");
+    test::assert(idle != connecting, "Idle is not Connecting");
+    test::assert((connecting to string) == "Connecting", "state name");
 
-    test::assert(ConnectionState::COUNT == 5, "ConnectionState should have 5 states");
+    test::assert(ConnectionState::COUNT == 5, "five states");
     return 0;
 }
 ```
 
-This isn't a coincidence — under the hood, a `machine` type *is* an enum
-type with one extra piece of data attached (its edge set). Because of that,
-every part of the compiler that already knows how to handle enums (`::`
-access, equality, ordinal casting, exhaustiveness checking) handles a
-`machine` for free, with zero machine-specific logic required in any of
-those code paths.
+Ordering operators are not defined for machines, as for enums. The
+other rules for enums, including `compare` exhaustiveness (`E093`) and
+casts, are on [Structs and Enums](structs_and_enums.md#enums).
 
-## `.transition(TargetState)`
+## `.transition(State)`
 
-To move a machine-typed value to a new state, call `.transition(...)` on
-it with the target state:
+`value.transition(Machine::State)` moves `value` to the named state. It has
+no result. These rules hold at every call:
 
+1. The receiver must be mutable: a transition changes it, so on an `immut`
+   variable it is `E060`, like an assignment.
+2. It takes exactly one argument. Any other count is `E044` (`'transition'
+   expects exactly 1 argument (the target state)`).
+3. The argument must be written as a state of the **same** machine as the
+   receiver, `Machine::State`. A state of another machine is `E036`
+   (`'transition' target must be a state of 'ConnectionState', got
+   'TrafficLight'`), and so is any other expression. A variable or call
+   that holds a state of the right machine is `E036` too (`'transition'
+   target must be written as a state, like 'ConnectionState::SomeState', not
+   a value that holds one`): to move to a state chosen at run time, `compare`
+   the value that chooses it and write one transition per arm. A name that is
+   no state at all is the ordinary `E039` (`Enum 'ConnectionState' has no
+   variant 'Bogus'`).
+
+<!-- doc-example: fails E036 -->
 ```turflang
-mut conn: ConnectionState = ConnectionState::Idle;
-conn.transition(ConnectionState::Connecting);
+machine ConnectionState { Idle -> Connecting, Connecting -> Connected }
+machine TrafficLight { Red -> Green, Green -> Yellow, Yellow -> Red }
+
+fn main(): int {
+    mut conn: ConnectionState = ConnectionState::Idle;
+    conn.transition(TrafficLight::Red);   // E036: not a ConnectionState
+    return 0;
+}
 ```
 
-A few rules apply to every `.transition()` call, regardless of where it
-appears:
-
-1. It must take exactly one argument (the target state) — any other arity
-   is a compile error.
-2. The argument must be a state belonging to the **same** `machine`
-   declaration as the receiver. Passing a state from a different `machine`
-   type is rejected:
-
-   ```turflang
-   machine ConnectionState { Idle -> Connecting, Connecting -> Connected }
-   machine TrafficLight { Red -> Green, Green -> Yellow, Yellow -> Red }
-
-   mut conn: ConnectionState = ConnectionState::Idle;
-   conn.transition(TrafficLight::Red); // ERROR: TrafficLight::Red is not a ConnectionState
-   ```
-
-   (Referencing a genuinely nonexistent variant name, like
-   `ConnectionState::Bogus`, is caught even earlier, by the ordinary
-   `::`-access resolution that every enum-like type shares.)
-
-> [!NOTE]
-> `transition` is **not** a reserved word. The compiler only intercepts a
-> `.transition(...)` call when the *receiver's type* is a `machine` type.
-> Calling `.transition(...)` on anything else (an `int`, for example) just
-> resolves as an ordinary function call via UFCS, if you happen to have
-> declared a function with that name:
->
-> ```turflang
-> fn transition(x: int, y: int): int { return x + y; }
->
-> fn main(): int {
->     mut n: int = 3;
->     test::assert(n.transition(4) == 7, ""); // ordinary UFCS call, unrelated to any machine
-> }
-> ```
-
-## Compile-time-proven transitions
-
-This is the feature's central payoff: when the compiler can determine
-**exactly** which state a machine value is in at a given `.transition()`
-call site, it checks that transition against the declared edge graph right
-then, at compile time — and if it's valid, the compiled code is just a
-plain store with no runtime check at all.
-
-This compile-time narrowing kicks in when **all** of the following hold:
-
-- The `.transition()` call is inside the body of a `compare` arm.
-- That arm has exactly **one** pattern (`matches SomeState:` — not a
-  stacked `matches A: matches B:` arm sharing one body).
-- The `compare` subject is a plain variable (not a field access or other
-  expression).
-- The arm's pattern is a `MachineName::State`-shaped scope access.
-
-When those conditions hold, the compiler knows precisely which state the
-receiver is in inside that arm's body, and can check the transition against
-the declared graph immediately:
+`transition` is not a reserved word. It means "change state" only when the
+receiver's type is a machine; on anything else, `.transition(...)` is an
+ordinary call to a function you declared (see
+[UFCS](functions_and_modules.md#3-ufcs-calling-a-function-as-a-method)):
 
 ```turflang
-fn advance(conn_ref: ConnectionState): ConnectionState {
-    mut conn: ConnectionState = conn_ref;
+fn transition(x: int, y: int): int { return x + y; }
+
+fn main(): int {
+    mut n: int = 3;
+    return n.transition(4);   // an ordinary call: 7
+}
+```
+
+`transition` is the only operation a machine adds. There are no entry or
+exit hooks and no data attached to a state; keep that data in the struct
+that holds the machine value (see the [example below](#a-complete-example)).
+
+## Checked while compiling
+
+When the compiler knows exactly which state a value is in at a `.transition`
+call, it checks the move against the declared edges. A legal move compiles
+to a single store of the new state, with no test and no possible abort. An
+illegal move is a compile error, not a run-time failure.
+
+The compiler knows the state in the body of a `compare` arm when:
+
+- the arm has exactly one pattern (`matches M::State:`; not several stacked
+  `matches` lines sharing a body);
+- the `compare` subject is a plain variable (not `obj.field` or another
+  expression);
+- the pattern is written `Machine::State`; and
+- the `.transition` receiver is that same variable.
+
+```turflang
+machine ConnectionState {
+    Idle -> Connecting,
+    Connecting -> Connected,
+    Connecting -> Failed,
+    Connected -> Closing,
+    Closing -> Idle,
+}
+
+fn advance(start: ConnectionState): ConnectionState {
+    mut conn: ConnectionState = start;
     compare conn {
         matches ConnectionState::Idle:
-            conn.transition(ConnectionState::Connecting); // PROVEN: Idle -> Connecting is declared
+            conn.transition(ConnectionState::Connecting);   // checked: Idle -> Connecting exists
         done
         matches ConnectionState::Connecting:
-            conn.transition(ConnectionState::Connected);  // PROVEN
+            conn.transition(ConnectionState::Connected);    // checked
         done
         matches ConnectionState::Connected:
-            conn.transition(ConnectionState::Closing);    // PROVEN
+            conn.transition(ConnectionState::Closing);      // checked
         done
         matches ConnectionState::Closing:
-            conn.transition(ConnectionState::Idle);       // PROVEN
+            conn.transition(ConnectionState::Idle);         // checked
         done
         otherwise:
-            mut noop: int = 0;
+            mut nothing: int = 0;
     }
     return conn;
 }
-```
 
-If the narrowed state has **no** declared edge to the requested target,
-this is a genuine **compile-time error** — not deferred to runtime:
-
-```turflang
-compare conn {
-    matches ConnectionState::Idle:
-        conn.transition(ConnectionState::Closing); // COMPILE ERROR: Idle has no edge to Closing
-    done
-    ...
+fn main(): int {
+    return advance(ConnectionState::Idle) to int;   // 1
 }
 ```
 
-When a transition is proven this way, the generated code is a single store
-of the target state's ordinal — no switch, no branch, no possibility of a
-runtime panic for that call site.
+If the matched state has no edge to the target, the program does not
+compile. The error is `E035`, at the `.transition` call:
 
-## Runtime-checked transitions
-
-Any `.transition()` call that does **not** meet all of the narrowing
-conditions above compiles cleanly, but the compiler cannot statically prove
-which state the receiver will actually be in when the code runs. For these
-calls, the compiler emits a **runtime switch with a panic guard**:
-
-- The generated code switches on the receiver's actual runtime value.
-- There is one case for every source state that has a declared edge to the
-  requested target.
-- A matching case stores the target state and continues normally.
-- No match falls through to a panic that aborts the program, with a
-  message like:
-
-  ```
-  ConnectionState::transition(Closing) -- no such transition from the current state.
-  ```
-
-This happens in three situations:
-
-**1. Outside any `compare`, but still valid at runtime.** This compiles and
-runs successfully — the runtime check simply confirms what's true and
-proceeds:
-
+<!-- doc-example: fails E035 -->
 ```turflang
-mut conn: ConnectionState = ConnectionState::Idle;
-conn.transition(ConnectionState::Connecting); // runtime-guarded; Idle really does have this edge
-```
-
-**2. Inside a stacked-pattern `matches` arm.** Narrowing only applies to
-single-pattern arms — a `matches A: matches B:` arm sharing one body is
-*outside* the compile-time-narrowing scope (this is a deliberate v1
-limitation, not a bug), so any `.transition()` inside such an arm is
-runtime-guarded even though the compiler could, in principle, reason about
-the union of the two states:
-
-```turflang
-compare conn {
-    matches ConnectionState::Idle:
-    matches ConnectionState::Closing:
-        // Both states have SOME edge to Connecting, but only from Idle --
-        // the compiler doesn't statically know which of the two `conn`
-        // actually is here, so this is runtime-guarded, not proven.
-        conn.transition(ConnectionState::Connecting);
-    done
-    otherwise: mut noop: int = 0;
-}
-```
-
-**3. A genuinely invalid runtime transition.** An unnarrowed call whose
-actual runtime state has no edge to the requested target compiles cleanly
-(the compiler has no static proof either way outside a narrowed context)
-and aborts the program at runtime via the panic guard:
-
-```turflang
-mut conn: ConnectionState = ConnectionState::Idle;
-conn.transition(ConnectionState::Closing); // Idle has no edge to Closing -- aborts at runtime
-```
-
-## Worked example: a traffic light
-
-This is the canonical demonstration of the feature, rewritten from a
-plain-`enum` version of the same state machine to show what `machine`
-buys you. With a plain enum, nothing stops a bug from producing an invalid
-transition — it would only surface (if ever) as a wrong value at runtime.
-With `machine`, the identical transition table is checked for free at
-compile time, because every `compare` arm below narrows the receiver to
-one specific light color before calling `.transition()`.
-
-```turflang
-import test;
-
-machine TrafficLight {
-    Red -> Green,
-    Green -> Yellow,
-    Yellow -> Red,
-}
-
-fn next_state(light_ref: TrafficLight): TrafficLight {
-    mut light: TrafficLight = light_ref;
-    compare light {
-        matches TrafficLight::Red:
-            // Compile-time-proven: TrafficLight declares Red -> Green.
-            light.transition(TrafficLight::Green);
-        done
-        matches TrafficLight::Green:
-            // Compile-time-proven: TrafficLight declares Green -> Yellow.
-            light.transition(TrafficLight::Yellow);
-        done
-        matches TrafficLight::Yellow:
-            // Compile-time-proven: TrafficLight declares Yellow -> Red.
-            light.transition(TrafficLight::Red);
-        done
-    }
-    return light;
+machine ConnectionState {
+    Idle -> Connecting,
+    Connecting -> Connected,
+    Connecting -> Failed,
+    Connected -> Closing,
+    Closing -> Idle,
 }
 
 fn main(): int {
-    mut light: TrafficLight = TrafficLight::Red;
-
-    // Cycle through: Red -> Green -> Yellow -> Red -> Green
-    light = next_state(light);
-    test::assert(light == TrafficLight::Green, "Red -> Green");
-
-    light = next_state(light);
-    test::assert(light == TrafficLight::Yellow, "Green -> Yellow");
-
-    light = next_state(light);
-    test::assert(light == TrafficLight::Red, "Yellow -> Red");
-
-    light = next_state(light);
-    test::assert(light == TrafficLight::Green, "Red -> Green again");
-
-    // Ordinals follow first-appearance order, identical to a plain enum:
-    // Red = 0, Green = 1, Yellow = 2.
-    test::assert((TrafficLight::Red    to int) == 0, "Red == 0");
-    test::assert((TrafficLight::Green  to int) == 1, "Green == 1");
-    test::assert((TrafficLight::Yellow to int) == 2, "Yellow == 2");
+    mut conn: ConnectionState = ConnectionState::Idle;
+    compare conn {
+        matches ConnectionState::Idle:
+            conn.transition(ConnectionState::Closing);   // E035: no edge Idle -> Closing
+        done
+        otherwise:
+            mut nothing: int = 0;
+    }
     return 0;
 }
 ```
 
-Notice that `next_state()`'s `compare` is exhaustive over all three states
-of `TrafficLight` (no `otherwise` needed), and every arm narrows `light` to
-exactly one state before transitioning — so every `.transition()` call
-here is compile-time-proven, and this function compiles down to code with
-no runtime transition-validity check anywhere at all.
+```text
+error [E035]: 'ConnectionState' has no transition from 'Idle' to 'Closing'.
+  Hint: This arm has already narrowed the receiver to 'Idle', which has no
+  declared edge to 'Closing' -- add `Idle -> Closing,` to the machine's
+  declaration, or transition to a state 'Idle' actually has an edge to.
+```
 
-## Errors and warnings reference
+The check compares the target with the state the value is in at that point
+of the arm. A transition written directly in the arm body moves that state
+along, so `matches Idle:` followed by `.transition(Connecting)` and then
+`.transition(Connected)` checks the second move from `Connecting`. A
+transition inside an `if`, a nested `compare` or a `recover` block is still
+checked from the current state, but after it the state is no longer known.
+One inside a loop or a `defer` body, which can run more than once or later,
+is checked when it runs. Once the state is unknown (also after the value is
+assigned or `&` is taken of it), the arm's later transitions are checked when
+they run, as described next.
 
-| Error/Warning | Trigger |
-|---|---|
-| `InvalidTransitionTargetError` | `.transition(X)` where `X` isn't a state belonging to the same `machine` type as the receiver. |
-| `InvalidTransitionError` | `.transition(X)` inside a narrowed `matches` arm where the narrowed state has no declared edge to `X` — a genuine compile-time error with a caret at the call site. |
-| `UnreachableStateWarning` | A declared state with zero incoming edges. Warning only — expected for a legitimate start state. |
-| (parse error, unnamed) | The same `From -> To` edge declared twice in one `machine` block. |
-| Runtime panic | An unnarrowed `.transition(X)` call whose actual runtime state has no edge to `X` — compiles cleanly, aborts at runtime. |
+## Checked when it runs
 
-## Gotchas
+Every `.transition` call that does not meet the conditions above compiles
+without complaint and is checked at run time instead. The generated code
+looks at the receiver's current state: if it has an edge to the target, the
+state is replaced; if not, the program aborts with a message such as
 
-- Narrowing only fires for a **single-pattern** `matches` arm on a **plain
-  variable** subject matched against a **scope-access pattern**
-  (`MachineName::State`). Field accesses, expressions, and stacked patterns
-  all fall back to the runtime-checked path — this is a scope limitation of
-  the current implementation, not a rejection; your code still compiles and
-  behaves correctly, it just loses the zero-cost guarantee for that call
-  site.
-- There is no dedicated syntax to mark a particular state as the machine's
-  entry point — `UnreachableStateWarning` is your signal that a state has
-  no incoming edges, which is usually (but not verified to be) intentional.
-- A `machine`'s states are not declared in a separate list; they are
-  inferred entirely from what appears in the edges. If you need a state
-  with no outgoing *or* incoming edges to exist for some reason, `machine`
-  as it stands today cannot express that — every state must appear in at
-  least one edge.
+```text
+panic: runtime check: ConnectionState::transition(Closing) -- no such transition from the current state. (prog.tr:12)
+```
+
+The message names the target state and the source line. This is how the
+calls below are handled:
+
+- **Outside any `compare`**, or in a function that received the value as
+  a parameter. The check cannot fail if the program's logic is right:
+
+  ```turflang
+  machine ConnectionState {
+      Idle -> Connecting,
+      Connecting -> Connected,
+      Connecting -> Failed,
+      Connected -> Closing,
+      Closing -> Idle,
+  }
+
+  fn main(): int {
+      mut conn: ConnectionState = ConnectionState::Idle;
+      conn.transition(ConnectionState::Connecting);   // checked at run time; legal
+      return conn to int;
+  }
+  ```
+
+- **In an arm with stacked patterns.** The arm is entered from either state,
+  so the compiler does not pick one; the call is checked at run time:
+
+  ```turflang
+  machine ConnectionState {
+      Idle -> Connecting,
+      Connecting -> Connected,
+      Connecting -> Failed,
+      Connected -> Closing,
+      Closing -> Idle,
+  }
+
+  fn main(): int {
+      mut conn: ConnectionState = ConnectionState::Idle;
+      compare conn {
+          matches ConnectionState::Idle:
+          matches ConnectionState::Closing:
+              // Both states are possible here, so this is not decided at
+              // compile time. Idle -> Connecting exists; Closing -> Connecting does not.
+              conn.transition(ConnectionState::Connecting);
+          done
+          otherwise:
+              mut nothing: int = 0;
+      }
+      return conn to int;
+  }
+  ```
+
+- **On a field or other expression**, such as `self.state.transition(...)`
+  or a `compare` over `obj.state`.
+- **A move the machine does not allow, where nothing narrows the state.**
+  This compiles and aborts when the call runs:
+
+  ```turflang
+  machine ConnectionState {
+      Idle -> Connecting,
+      Connecting -> Connected,
+      Connecting -> Failed,
+      Connected -> Closing,
+      Closing -> Idle,
+  }
+
+  fn main(): int {
+      mut conn: ConnectionState = ConnectionState::Idle;
+      conn.transition(ConnectionState::Closing);   // aborts: Idle has no edge to Closing
+      return 0;
+  }
+  ```
+
+When the transition is guarded by a test the compiler does not follow
+(`if (state == M::Placed)`), the run-time check still protects you. A
+program that must never abort should match on the state in a `compare` over a
+plain variable, so that every move is proved while compiling.
+
+## A complete example
+
+An order moves through a fixed lifecycle. The machine holds the rules; the
+struct holds the order's data and the current state.
+
+```turflang
+import io;
+
+machine Order {
+    Placed -> Paid,
+    Placed -> Cancelled,
+    Paid -> Shipped,
+    Paid -> Cancelled,
+    Shipped -> Delivered,
+}
+
+struct Ticket {
+    id: int,
+    state: Order,
+}
+
+fn Ticket.new(id: int): void {
+    self.id = id;
+    self.state = Order::Placed;
+}
+
+// Copy the state into a variable and match on it. Each arm names the state
+// it handles, so each transition is checked against the declared edges while
+// compiling: changing `Order::Shipped` below to `Order::Paid` would not build.
+fn Ticket.advance(): void {
+    mut s: Order = self.state;
+    compare s {
+        matches Order::Placed:
+            s.transition(Order::Paid);
+        done
+        matches Order::Paid:
+            s.transition(Order::Shipped);
+        done
+        matches Order::Shipped:
+            s.transition(Order::Delivered);
+        done
+        otherwise:
+            io::printline("nothing to do");
+    }
+    self.state = s;
+}
+
+// `self.state` is a field, so this transition is checked when it runs; the
+// `if` keeps a Shipped or Delivered order from reaching it.
+fn Ticket.cancel(): bool {
+    if (self.state == Order::Placed || self.state == Order::Paid) {
+        self.state.transition(Order::Cancelled);
+        return true;
+    }
+    return false;
+}
+
+fn main(): int {
+    mut t: Ticket = Ticket::new(7);
+    t.advance();                              // Placed -> Paid
+    io::printline(t.state to string);         // Paid
+    t.advance();                              // Paid -> Shipped
+    io::printline(t.state to string);         // Shipped
+
+    if (t.cancel()) {
+        io::printline("cancelled");
+    } else {
+        io::printline("too late to cancel");  // printed: it already shipped
+    }
+
+    t.advance();                              // Shipped -> Delivered
+    t.advance();                              // nothing to do
+    io::printline(t.state to string);         // Delivered
+    return 0;
+}
+```
+
+This prints `Paid`, `Shipped`, `too late to cancel`, `nothing to do`,
+`Delivered`. The compiler warns that `Placed` has no incoming transition;
+it is the start state, so that is expected.
+
+## Errors and warnings
+
+| Code | Message | Cause |
+|---|---|---|
+| `E035` | `'M' has no transition from 'A' to 'B'` | A `.transition` in a single-pattern `compare` arm whose matched state has no edge to the target. |
+| `E036` | `'transition' target must be a state of 'M', got 'X'` | The target is not written as a state of the receiver's machine. |
+| `E039` | `Enum 'M' has no variant 'X'` | The state name does not exist. |
+| `E044` | `'transition' expects exactly 1 argument` | Wrong number of arguments. |
+| `E087` | `'pub' can't be applied to a machine state or transition` | `pub` on a state; write `pub machine`. |
+| `E110` | expected `->` | A malformed edge. |
+| `E114` | `Machine 'M' already declares a transition from 'A' to 'B'` | The same edge twice. |
+| `E135` | `'M::default' is an enum variant, not a function` | `M::default()`; name a state instead. |
+| warning | `Machine 'M' declares state 'S' with no incoming transitions` | Nothing leads to `S`; expected for a start state. |
+| abort | `M::transition(X) -- no such transition from the current state` | A run-time-checked move with no edge. |

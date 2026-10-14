@@ -1,0 +1,56 @@
+TURF E140 -- UNSIZED ARRAY WHERE A SIZE IS NEEDED:
+
+CAUSE:
+  An unsized array type `T[]` was written somewhere it could outlive the array it points into.
+  A `T[]` is a slice: a pointer to existing elements plus their count. It may be a function
+  parameter's type or a LOCAL variable's type (a view), because neither outlives its function.
+  Anywhere longer-lived is refused.
+
+CORRECT USAGE:
+    fn sum(arr: int[]): int {                // parameter: any length
+        mut total: int = 0;
+        for value in arr {
+            total = total + value;
+        }
+        return total;
+    }
+
+    fn rows_sum(rows: int[][3]): int {       // any number of rows of three
+        mut total: int = 0;
+        for i in 0..2 {
+            total = total + sum(rows[i]);
+        }
+        return total;
+    }
+
+    fn<T> show(arr: T[]): void { }           // T is bound to the ELEMENT type
+
+    fn main(): int {
+        mut a: int[3] = [1, 2, 3];           // a variable usually has a size
+        immut nums: int[] = [10, 20, 30];    // a local view (literal stored in the frame)
+        immut tail = a[1..];                 // a local view from a range slice
+        show(a);
+        return sum(nums) + sum(tail) + rows_sum([[1, 2, 3], [4, 5, 6]]);
+    }
+
+INCORRECT (each is E140):
+    struct Bag { values: int[] }             // struct field (also error payload fields)
+    fn make(): int[] { ... }                 // return type
+    fn f(rows: int[3][]): int { ... }        // inner dimension unsized (parameter)
+    mut rows: int[2][] = [[1], [2]];         // inner dimension unsized (local)
+    fn g(r: &int[]): int { ... }             // behind a reference or pointer
+    extern fn c(buf: int[]): int;            // extern fn, parameter or return
+    mut l: List<int[]>;                      // generic type argument
+    fn h(f: fn(int[]): int): int { ... }     // inside a function type
+    sum(a to int[]);                         // cast target
+    keep(arr);                               // fn<T> keep(x: T): T -- T would be int[]
+
+FIX:
+  Give the array a size (`int[5]`), use `List<T>` for a growing collection, or make it a
+  function parameter or local view. For an extern fn, take `T*` plus a separate length and
+  pass `arr to T*` inside `unsafe { }`. For a generic, declare the parameter as `T[]`.
+  A local `T[]` needs an initializer (E128).
+
+SEE: E141 (an `immut` array passed to a `T[]` parameter that is written), E144 (a `mut` view
+  of an immutable array), E142/E143 (range slicing), E003 (array initializer length mismatch),
+  E006 (retired).

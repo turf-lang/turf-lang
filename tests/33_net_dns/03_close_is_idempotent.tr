@@ -1,0 +1,62 @@
+// LEC-007: TcpConnection.close() / TcpListener.close() are idempotent and
+// raw_fd() reports -1 afterwards. The hazard: `defer conn.close();` plus an
+// explicit close on an early path closes the SAME number twice, and by the
+// second call the kernel may have reused it for a different, newly opened
+// descriptor -- which the stale close() would silently shut. Here that is made
+// observable: after conn is closed, a fresh socket takes the freed number, and
+// a second conn.close() must NOT close it.
+import net;
+import test;
+
+fn main(): int {
+    mut listener: net::TcpListener = net::TcpListener::bind(18733) recover run {
+        test::fail("bind should succeed on a free port");
+        return 1;
+    };
+    defer listener.close();
+
+    mut client: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 18733) recover run {
+        test::fail("connect should succeed");
+        return 1;
+    };
+    mut server_side: net::TcpConnection = listener.accept() recover run {
+        test::fail("accept should succeed");
+        return 1;
+    };
+    defer server_side.close();
+
+    test::assert(client.raw_fd() >= 0, "an open connection has a descriptor");
+    immut old_fd: int = client.raw_fd();
+    client.close();
+    test::assert(client.raw_fd() == -1, "close() marks the connection closed");
+
+    // The kernel hands out the lowest free number, so this takes old_fd (or at
+    // least a number the stale close below would hit if it were still held).
+    mut other: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 18733) recover run {
+        test::fail("second connect should succeed");
+        return 1;
+    };
+    defer other.close();
+    mut other_server: net::TcpConnection = listener.accept() recover run {
+        test::fail("second accept should succeed");
+        return 1;
+    };
+    defer other_server.close();
+    test::assert(other.raw_fd() == old_fd, "the freed descriptor number was reused");
+
+    client.close(); // second close: must be a no-op, NOT close(old_fd)
+
+    // `other` still works only if the stale close did not shut its descriptor.
+    other.write("ping");
+    test::assert(other_server.read(16) == "ping", "a repeated close() left the reused descriptor alone");
+
+    // The same for the listener.
+    mut l2: net::TcpListener = net::TcpListener::bind(18734) recover run {
+        test::fail("bind l2");
+        return 1;
+    };
+    l2.close();
+    l2.close();
+    test::assert(l2.raw_fd() == -1, "listener close() is idempotent too");
+    return 0;
+}

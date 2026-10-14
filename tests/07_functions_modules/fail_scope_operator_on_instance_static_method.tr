@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E029
+// EXPECT-DIAG: 'p' is a variable, not a type or module
 // Regression test: same ScopeOperatorOnInstanceError, but the method being
 // reached for is a TRUE static method (fn StructName.method(...) static:
 // RetType, no self) rather than an instance method -- confirms the "you

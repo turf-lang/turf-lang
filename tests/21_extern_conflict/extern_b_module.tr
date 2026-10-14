@@ -1,6 +1,6 @@
 // Companion module B (no main()) -- see extern_a_module.tr's comment.
 extern fn strlen(s: string): int;
 
-fn wraps_b(s: string): int {
+pub fn wraps_b(s: string): int {
     return strlen(s);
 }

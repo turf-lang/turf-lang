@@ -1,0 +1,7 @@
+// EXPECT-DIAG: E128
+// EXPECT-DIAG: The slice 'v' needs an initializer.
+// A `T[]` variable is a view and needs an array to look at.
+fn main(): int {
+    mut v: int[];
+    return 0;
+}

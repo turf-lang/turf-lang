@@ -1,0 +1,36 @@
+# Deliberate exceptions for scripts/check/check_doc_links.sh.
+#
+# Format, one per line:   <cited path> :: <citing-file glob> :: <why>
+#
+# The referrer glob is not optional and not decorative: a prose paragraph that
+# explains why a document was retired legitimately names it, but a fresh source
+# comment citing the same dead path is exactly the bug this check exists to
+# catch (ARCHITECTURE_OVERHAUL.md §5 C-8). Scoping each exception to the file
+# that earns it keeps the second case failing.
+#
+# An entry whose file now exists, or that nothing cites any more, FAILS the
+# check. Delete the line -- that is the intended maintenance.
+
+# --- Retired planning docs, named by the documents that record their removal.
+docs/planning/OVERHAUL_REMAINING_WORK.md :: docs/development/changes/*.md :: the temporary Overhaul-closure handoff (deleted by OVH-015/OVH-CLOSE, 2026-09-27); every OVH-NNN record legitimately cites the spec it implemented at landing time.
+docs/planning/OVERHAUL_REMAINING_WORK.md :: docs/archive/OVERHAUL_CLOSURE_AUDIT.md :: the 2026-09-26 audit that wrote the handoff names its own deliverable; frozen historical record, not edited retroactively.
+docs/planning/OVERHAUL_REMAINING_WORK.md :: docs/archive/ARCHITECTURE_OVERHAUL.md :: the status header narrates the handoff's existence and deletion on closure (OVH-CLOSE, 2026-09-27).
+docs/planning/OVERHAUL_REMAINING_WORK.md :: docs/planning/ROADMAP_v2.0.0.md :: Phase 0's own section and the companion-documents header narrate the handoff's existence and deletion on closure (OVH-CLOSE, 2026-09-27).
+docs/planning/Errors.md :: docs/archive/ARCHITECTURE_OVERHAUL.md :: §5 C-8 uses this exact path as the worked example of a dangling reference -- the citation is the point.
+docs/planning/FINAL_SPRINT.md :: docs/archive/ROADMAP_v1.0.0_COMPLETE.md :: §3's note explaining that the final-sprint checklist was removed once everything it tracked landed.
+docs/planning/ROADMAP_v1.0.0_COMPLETE.md :: docs/archive/ARCHITECTURE_OVERHAUL.md :: historical record, frozen as written; it cites the v1.0.0 roadmap at its old path, which moved to docs/archive/ when the retired documents were archived (2026-10-13).
+
+# --- Change records the overhaul plans but has not written yet. Each line dies
+# --- when its session lands, which is the point: the blueprint's forward
+# --- references stay honest without stub files pretending to be records.
+
+# --- Documents the overhaul-closure handoff and the 2.0 roadmap plan but have
+# --- not been written yet (2026-09-26 closure audit). Same rule as above: each
+# --- line dies, and must be deleted, when the milestone that writes it lands.
+
+# --- Retired paths named by the change record that re-pointed them. A record's
+# --- job is to say exactly which citation moved where, so it necessarily spells
+# --- the dead path out; scoping this to changes/ keeps source comments failing.
+docs/planning/Errors.md :: docs/development/changes/*.md :: the record that re-pointed its 43 citations names the path it re-pointed.
+docs/planning/COMPILER_MODULE_BREAKDOWN.md :: docs/development/changes/*.md :: same, for the retired 2026-08 module-split plan.
+docs/patent/PATENT_BENCHMARK_DATA.md :: docs/development/changes/*.md :: same, for a path that never existed in this repository at all.

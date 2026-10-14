@@ -1,0 +1,37 @@
+// A reference that is `&n` on one path and the heap on another is fine as
+// long as it never reaches a sink: only an escape on some path is E086
+// (fail_escape_return_mixed_paths.tr). Reassigned on every path before the
+// return, it is fine too.
+
+import test;
+
+struct N { val: int, next: &?N }
+
+fn read_either(c: bool): int {
+    mut n: N = N::default();
+    n.val = 1;
+    mut p: &N = heap(n);
+    if (c) {
+        p = &n;
+    }
+    return p.val;
+}
+
+fn reassigned(c: bool): &N {
+    mut n: N = N::default();
+    n.val = 7;
+    mut p: &N = heap(n);
+    if (c) {
+        p = &n;
+        p.val = 8;
+    }
+    p = heap(n);
+    return p;
+}
+
+fn main(): int {
+    test::assert(read_either(true) == 1, "stack path read locally");
+    test::assert(read_either(false) == 1, "heap path read locally");
+    test::assert(reassigned(true).val == 8, "reassigned before the return");
+    return 0;
+}

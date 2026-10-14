@@ -1,8 +1,10 @@
+// EXPECT-DIAG: E001
+// EXPECT-DIAG: You tried to access 'arr[5]'
 // Companion to fail_array_oob_via_constant_propagation.tr: same constant-
 // propagation bounds bug, but with the offending variable declared inside a
 // NESTED block rather than at the function's top level -- the shape that
 // originally motivated the "scope already unwound" hypothesis (see
-// src/ValueRange.cpp's ValueRangePass::runOnCFG() doc comment for the full
+// src/analysis/ValueRange.cpp's ValueRangePass::runOnCFG() doc comment for the full
 // root-cause writeup, which turned out to apply to top-level locals too).
 
 import io;

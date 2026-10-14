@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E008
+// EXPECT-DIAG: You're using 'cfg' (type 'Config') before it has a value
 // SEM-004 (F-INIT-1): the bad direction 02_struct_flat_default.tr's own
 // comment points at -- a struct declared with no initializer at all is
 // statically unassigned; reading a field is DefiniteAssignmentError (E008).

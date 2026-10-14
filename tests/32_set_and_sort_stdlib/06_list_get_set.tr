@@ -26,7 +26,7 @@ fn main(): int {
     li.push(20);
     li.push(30);
     test::assert(li.get(0) == 10 && li.get(1) == 20 && li.get(2) == 30,
-                "List<int>.get reads pushed values");
+        "List<int>.get reads pushed values");
     li.set(1, 99);
     test::assert(li.get(1) == 99, "List<int>.set overwrites in place");
 
@@ -35,7 +35,7 @@ fn main(): int {
     ls.push("alpha");
     ls.push("beta");
     test::assert(ls.get(0) == "alpha" && ls.get(1) == "beta",
-                "List<string>.get reads pushed values");
+        "List<string>.get reads pushed values");
     ls.set(0, "gamma");
     test::assert(ls.get(0) == "gamma", "List<string>.set overwrites in place");
 
@@ -45,12 +45,12 @@ fn main(): int {
     t1.a = 1; t1.b = 2; t1.c = 3;
     lt.push(t1);
     test::assert(lt.get(0).a == 1 && lt.get(0).b == 2 && lt.get(0).c == 3,
-                "List<Triple>.get reads all three fields correctly");
+        "List<Triple>.get reads all three fields correctly");
     mut t2: Triple = Triple::default();
     t2.a = 7; t2.b = 8; t2.c = 9;
     lt.set(0, t2);
     test::assert(lt.get(0).a == 7 && lt.get(0).b == 8 && lt.get(0).c == 9,
-                "List<Triple>.set overwrites the whole struct in place");
+        "List<Triple>.set overwrites the whole struct in place");
 
     return 0;
 }

@@ -1,0 +1,54 @@
+// LEC-009 (F-COLL-1): a List is a handle to one header. `=` and passing share
+// the elements AND the length; `.copy()` is independent. Before, a List was
+// `{data, len, cap}` copied by value: `m = l; m.push(7)` left `l.length()`
+// unchanged (and could overwrite an element `l` still counted), and a callee's
+// `push` was lost.
+import list::List;
+import test;
+
+fn fill(l: List<int>): void {
+    l.push(10);
+    l.push(20);
+}
+
+fn make(): List<int> {
+    mut l: List<int> = List::default();
+    l.push(1);
+    return l;
+}
+
+fn main(): int {
+    // A callee's push reaches the caller, even into a list created empty.
+    mut l: List<int> = List::default();
+    fill(l);
+    test::assert(l.length() == 2 && l[1] == 20, "callee push is visible");
+
+    // `=` shares: every change is visible through both names.
+    mut m: List<int> = l;
+    m.push(7);
+    m[0] = 11;
+    test::assert(l.length() == 3 && l[2] == 7 && l[0] == 11, "alias push / write");
+    test::assert(l.pop() == 7 && m.length() == 2, "alias pop");
+
+    // Growth past the first buffer keeps both names on the same elements.
+    mut i: int = 0;
+    while i < 100 {
+        m.push(i);
+        i = i + 1;
+    }
+    test::assert(l.length() == 102 && l[101] == 99, "growth through the alias");
+
+    // `.copy()` is independent in both directions.
+    mut c: List<int> = l.copy();
+    test::assert(c.length() == 102 && c[0] == 11, "copy has the same elements");
+    c.push(5);
+    c[0] = -1;
+    l[1] = -2;
+    test::assert(l.length() == 102 && l[0] == 11, "copy's changes stay in the copy");
+    test::assert(c[1] == 20, "original's changes stay in the original");
+
+    // A returned list is the callee's list, not a copy of it.
+    mut r: List<int> = make();
+    test::assert(r.length() == 1 && r[0] == 1, "returned list");
+    return 0;
+}

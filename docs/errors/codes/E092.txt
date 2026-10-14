@@ -1,0 +1,63 @@
+A `compare` header is not a legal pattern
+
+    struct Point { x: int, y: int }
+
+    compare p {
+        matches Point { x }:          // ERROR: doesn't mention the field 'y'
+        matches Point { x: 1 + 2, .. }: // ERROR: a field pattern can't be an expression
+        matches Q { x, .. }:          // ERROR: the value is a Point, not a Q
+    }
+    //   Hint: List every field, or end the pattern with `..` to ignore the
+    //   ones you don't need: `Point { x, .. }`.
+
+A `matches` header can be a plain value (`matches 3:`), `_`, a struct
+pattern (`Point { x: 0, y }`), and any of those followed by a guard
+(`... if x == y:`). One error code covers every way such a header can be
+wrong; the message says which, and the hint says what to write instead:
+
+- A struct pattern over a value that is not a struct, a struct of a different
+  name, a field the struct does not have (that one is E068, with spelling
+  suggestions), or a `&?T` / raw pointer subject.
+- A field left out without `..`. Every field is listed, or the pattern ends in
+  `..`, so adding a field to the struct later can't silently change what the
+  pattern means.
+- A field pattern that is not a literal (int, char, string, bool), an enum
+  variant, `_`, a name to bind or a nested struct pattern. To compare a field
+  with a variable or any other expression, bind it and use a guard:
+
+      matches Point { x, .. } if x == limit:
+
+  A `double` literal is never a pattern; test it in a guard too.
+- A name bound twice in one pattern (`Point { x, y: x }`), or a field listed
+  twice.
+- Stacked `matches` headers that bind different names or different types.
+  Stacked headers share one body, so the body reads one variable per name:
+
+      matches Point { x: 0, y }:
+      matches Point { x: 1, y }:     // ok: both bind y
+          ...
+
+- A guard that is not a `bool`.
+- A lone `_` used as a variable, parameter or function name. `_` is the
+  wildcard; `_name` (an underscore followed by anything) is an ordinary name,
+  and is never reported as unused.
+
+Inside a destructuring pattern a bare identifier always binds. At the top of a
+header it is still a variable compared by equality, exactly as before patterns
+existed.
+
+An error value can be matched too: `IOError::Denied(path, mode)` destructures
+a variant's payload positionally, inside a `compare` over an error (the `err`
+of `recover as err run`, or a value of a declared error type). Its
+sub-patterns are a struct pattern's -- a name that binds, `_`, a literal, an
+enum variant, a nested struct pattern -- and, like a struct pattern, it lists
+every field or ends in `..`:
+
+    matches IOError::Denied(path, ..):     // ok
+    matches IOError::Denied(path):         // ERROR: doesn't mention 'mode'
+    matches IOError::NotFound:             // ERROR: it has a field; write (..)
+    matches IOError::Timeout:              // ok: no fields, matched by tag
+
+More ways such a header can be wrong: matching an error-variant pattern against
+a value that is not an error, naming the variant of a different error type than
+a declared-error subject holds, or empty parentheses (`IOError::NotFound()`).

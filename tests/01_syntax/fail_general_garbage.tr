@@ -1,6 +1,8 @@
+// EXPECT-DIAG: E103
+// EXPECT-DIAG: '@' is not valid here
 fn main(): int {
     // Testing the parser's resilience against complete garbage tokens
     @#$$%^^^&*()_
-    
+
     return 0;
 }

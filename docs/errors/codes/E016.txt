@@ -6,8 +6,8 @@ Here's a bare error and a call that fails with it:
 
     error GeneralError;
 
-    fn maybeFail(shouldFail: bool): !int {
-        if shouldFail {
+    fn maybe_fail(should_fail: bool): !int {
+        if should_fail {
             return GeneralError::DEFAULT;
         }
         return 99;
@@ -16,13 +16,13 @@ Here's a bare error and a call that fails with it:
 Since `GeneralError` is bare, you don't need (and can't use) `recover as err`:
 
     fn main(): int {
-        return maybeFail(true) recover produce -1;
+        return maybe_fail(true) recover produce -1;
     }
 
 And here's the version that trips this error:
 
     fn main(): int {
-        return maybeFail(true) recover as err run {
+        return maybe_fail(true) recover as err run {
             return -1;
         };
     }

@@ -23,7 +23,7 @@ fn main(): int {
     test::assert(a.logical_xor(b), "explicit 'import bool;' works");
 
     mut c: char = '3';
-    test::assert(c.isDigit(), "explicit 'import char;' works");
+    test::assert(c.is_digit(), "explicit 'import char;' works");
 
     return 0;
 }

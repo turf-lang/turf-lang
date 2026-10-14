@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E115
+// EXPECT-DIAG: 'operator ~' has no binary form
 // Negative test: '~' has no binary form (it is unary-only per §13.1's
 // matrix) -- declaring it with 2 parameters must be a clean arity error,
 // not silently accepted as if '~' had a binary meaning.

@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E062
+// EXPECT-DIAG: Cannot assign 'null' to variable 'r' of type '&Box'
 // LANG-002's own "Must NOT reinterpret" list: "&T stays non-null -- do not
 // merge the two types." `null` must never be assignable to a plain `&T`,
 // even in a codebase that now also has `&?T` -- the two stay maximally

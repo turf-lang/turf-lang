@@ -1,0 +1,24 @@
+TURF E142 -- SLICE OF A NON-ARRAY:
+
+CAUSE:
+  A range slice `x[a..b]` (also `x[a..]`, `x[..b]`, `x[..]`) was applied to a value that is not
+  a built-in array: a `string`, a `List<T>`, a number, a struct, or anything else.
+
+CORRECT USAGE:
+    mut arr: int[5] = [1, 2, 3, 4, 5];
+    immut part = arr[1..3];              // a view: [2, 3]
+    immut s: string = "hello";
+    immut t = strings::substring(s, 1, 3);   // a NEW string, for text
+
+INCORRECT:
+    immut t = s[1..3];                   // string
+    immut u = l[0..1];                   // List<int>
+    immut v = n[0..1];                   // int
+    // ERROR [E142]: Cannot slice a value of type 'string' with [a..b].
+
+FIX:
+  For a string use `strings::substring(s, start, end)`. For a List, copy the wanted elements
+  into an array or loop over the index range. Only `T[N]` arrays (variables, fields, rows),
+  `T[]` parameters and other slices can be sliced.
+
+SEE: E143 (slice bounds out of range), E140 (where `T[]` may be written).

@@ -1,4 +1,5 @@
 // RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: no such transition from the current state
 // Test: an unnarrowed .transition() call whose actual runtime state has no
 // declared edge to the target must compile cleanly (this is outside any
 // compare arm, so TypeChecker has no static proof either way) and then

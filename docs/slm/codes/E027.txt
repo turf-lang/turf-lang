@@ -1,13 +1,17 @@
 TURF E027 -- MODULE NOT FOUND:
 
 CAUSE:
-  `import moduleName;` (or a module-qualified reference to it) names a
+  `import module_name;` (or a module-qualified reference to it) names a
   module that can't be located anywhere Turf searches: the standard
   library (`lib/std/**`, searched recursively regardless of subfolder) or
-  the current project. There is no `moduleName.tr` file findable.
+  the current project. There is no `module_name.tr` file findable.
 
 EXAMPLE:
     import strnigs;   // ERROR: no such module -- typo for 'strings'
+
+CORRECT:
+    import strings;
+    mut n: int = strings::length("abc");   // the module exists under that exact name
 
 FIX:
   Check the spelling of the module name (it should exactly match the

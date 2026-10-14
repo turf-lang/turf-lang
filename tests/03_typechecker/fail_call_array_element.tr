@@ -1,0 +1,8 @@
+// EXPECT-DIAG: E135
+// EXPECT-DIAG: This expression has type 'int', not a function
+// Regression test: same crash as fail_call_literal.tr, via an indexed value.
+fn main(): int {
+    mut a: int[3] = [1, 2, 3];
+    a[0]();
+    return 0;
+}

@@ -1,784 +1,528 @@
 # Turf
 
-Turf is a statically-typed, LLVM-backed programming language. It compiles directly to native binaries, supports structs, enums, generics, state machines, modules, pointers, and native FFI, ships with a real standard library (strings, collections, file I/O, JSON, time, randomness, filesystem paths, networking), and includes an integrated compiler-diagnostics system built around a locally-run language model.
+Turf (TurfLang) is a statically typed language that compiles ahead of time to native executables through LLVM. It has structs, enums, real generics, state machines, pattern matching, error unions, a garbage-collected heap with checked references, a standard library (strings, collections, files, JSON, HTTP, sockets), a project and package tool, and an optional diagnostics assistant that runs a language model on your own machine.
 
-Current version: **v1.0.0** is the last tagged release. This branch
-(`refactor/architecture`) is unreleased, in-development work on the
-Architecture Overhaul — real generics (monomorphization), a tracing garbage
-collector for the heap, `&?T` nullable safe references, and a numeric/memory
-semantic freeze — targeting the first public release, **v2.0.0**. See
-`docs/planning/ROADMAP_v2.0.0.md` for what's left before that tag.
+**Version 2.0.** The exact number is in the [`VERSION`](VERSION) file (`2.0.0-dev` on an untagged checkout); a release is tagged `v2.0.0`.
 
-## Table of Contents
+Coming from 1.x? Read [`docs/MIGRATING_TO_2.md`](docs/MIGRATING_TO_2.md) first.
 
-1. [Why Turf](#why-turf)
-2. [Installation](#installation)
-3. [Quick Start](#quick-start)
-4. [Language Tour](#language-tour)
-5. [Standard Library](#standard-library)
-6. [Examples](#examples)
-7. [Building from Source](#building-from-source)
-8. [Documentation](#documentation)
-9. [Roadmap](#roadmap)
+## Contents
 
-## Why Turf
+1. [Platforms](#platforms)
+2. [Install](#install)
+3. [Quick start](#quick-start)
+4. [Language tour](#language-tour)
+5. [The standard library](#the-standard-library)
+6. [`--smart`: diagnostics with a local model](#--smart-diagnostics-with-a-local-model)
+7. [Building from source](#building-from-source)
+8. [Where to go next](#where-to-go-next)
 
-Turf's compiler pipeline is a standard deterministic front-to-back: lexer → parser → resolver → type checker → codegen, LLVM backend. Nothing about the compilation itself is probabilistic. What Turf adds on top is a diagnostics layer that treats the compiler's own internal state as the
-source of truth for AI-assisted suggestions, rather than pattern-matching against formatted error strings — and every part of that pipeline exists specifically to close off the ways this class of feature usually goes wrong.
+## Platforms
 
-### The diagnostic pipeline, precisely
+| Platform | Tier | Notes |
+|---|---|---|
+| Linux x86-64 | 1 | needs glibc 2.34 or newer (Ubuntu 22.04, Debian 12, RHEL 9, Amazon Linux 2023 and later) |
+| Windows x86-64 | 1 | native; no MSYS2 or other toolchain to install |
+| macOS arm64 (Apple Silicon) | 1 | Intel Macs are not supported |
 
-When a diagnostic fires with `--smart` enabled, this is what actually happens, in order:
+Tier 1 means the platform is tested on every change and a release is blocked on it. Each release is self-contained on all three: the archive carries the compiler, its LLVM, the linker and the runtime, so nothing else needs installing to compile and run programs. The programs it builds need no Turf files at run time.
 
-1. **The error itself carries structural context, not just a message.**
-  Every diagnostic class that has something meaningful to point to (a variable's declaration site on a type mismatch, every candidate overload on an arity mismatch, the array's declaration on an out-of-bounds access, the prior declaration on a duplicate) attaches a `RelatedLocation` — `{SourceLocation, Description}` — at the exact point in the Resolver/TypeChecker/Codegen where that information is already known, because real symbol-table resolution already happened there. This is threaded through `TurfError`/`TurfWarning` via a chainable `.withRelated(loc, "declared here")`, into `DiagnosticEngine::add()`, and stored on the diagnostic itself. Nothing is recovered later by regex over an error string or by re-scanning source text for a keyword — the data is real from the moment the compiler pass produces it.
+Every release has two archives per platform: the plain one, and a `-smart` one, which is the same compiler with the runtime for [`--smart`](#--smart-diagnostics-with-a-local-model) added. Choose plain unless you want `--smart`.
 
-2. **Context is built from that data, not from guessing.**
-  The old approach (used by an earlier iteration of this feature) scanned raw source lines for patterns like `fn name(` or a declaration keyword to guess where something relevant might be. That approach is gone. Context assembly now just reads the `RelatedLocation` list off the diagnostic and pins those exact lines into the model's prompt, labeled with why each one matters. The size of the surrounding sliding window (how many lines before/after the error line itself) is sized per error category — tighter for self-contained errors like a syntax mistake, wider for errors like a type mismatch where the relevant declaration may be far away in the file.
+`turf` can compile for another machine's architecture (`--target`), but it writes the object file and stops: linking for another platform is not supported in 2.0.
 
-3. **Category classification is resolved deterministically first.**
-  A rule-based classifier (not the model) assigns each error to a category before any model call happens. Only when that fails to produce a specific category does the category get folded into the same model call that produces the fix — via a `category` field in the same JSON response, rather than spending a second, separate model invocation on classification alone.
+## Install
 
-4. **The model's output is grammar-constrained at the token level.**
-  A GBNF grammar is loaded into the sampler chain via `llama.cpp`'s grammar-masking sampler, fixing the JSON schema exactly: six required fields in a fixed order, `fix_mode` restricted to the literal tokens `MODIFY` or `NONE`, the `category` field restricted to the exact set of category names the compiler understands. This isn't a validation step run after the fact — it's enforced during sampling, so it is not merely unlikely for the model to emit a malformed response, it is not sampleable in the first place.
-  The sampler chain also applies a repetition penalty ahead of greedy decoding, specifically to counter the tendency of small models to loop under purely deterministic sampling.
+**Linux and macOS:**
 
-5. **Confidence is computed, never asked for.**
-  The model is never prompted to self-report a probability — small models anchor to whatever example values appear nearby in the prompt and echo them back regardless of actual certainty, making a self-reported number meaningless. Instead, confidence is computed after parsing from measurable properties of the actual response: whether the category was resolved deterministically, whether `fix_mode` is `MODIFY`, whether a concrete single-line replacement was actually produced, whether that replacement is clean single-line syntax rather than something structurally suspicious, and whether it's actually on-topic for the symbol involved.
-
-6. **The suggested fix is never trusted — it's tested.**
-  Before anything is shown to you, the fix is applied to an isolated snapshot of the compiler state — a real sandboxed copy of the source, symbol table, and AST, not the live one — and speculatively re-parsed and re-validated. Only a fix that demonstrably resolves the original error, without introducing new ones, is surfaced. Anything else is silently discarded and you see the compiler's own original diagnostic, unmodified.
-
-### `--smart`
-
-Runs the pipeline above on error only — no cost, no model inference, nothing happens on a clean compile — entirely locally via a small quantized model loaded through `llama.cpp`. No network call, no external dependency.
-
-```bash
-turf my_program.tr --smart -o my_program
+```sh
+curl -fsSL https://raw.githubusercontent.com/turf-lang/turf-lang/master/scripts/install/install.sh | sh
 ```
 
-Useful compiler introspection flags, beyond ordinary compilation: `--dump-ast`, `--dump-resolved`, `--dump-typechecked`, `--dump-modules` (everything the compiler knows about the current program's modules — every imported module's functions, struct/enum type ownership, and every on-demand import), `--emit-llvm`.
-
-## Installation
-
-No package-manager distribution yet. Build from source (see [Building from Source](#building-from-source)), or use a pre-built binary from the [Releases page](../../releases) if one exists for your platform — CI currently builds for Linux (x86_64, Arch x86_64), macOS (Apple Silicon only — Intel Mac releases were dropped, see `release.yml`'s own comment), and Windows (x86_64). Release archives bundle `lib/` alongside the binary, so extracting one and running the binary from inside the extracted folder works with no further setup.
-
-### Setting up `TURF_HOME`
-
-The compiler resolves every `import` (its own standard library under `lib/std/`, and — once a package format exists — third-party packages under `lib/usr/`) against the `TURF_HOME` environment variable: it should point at the Turf installation root, i.e. the folder that directly contains `lib/`. Running the binary from right inside an extracted release archive, or a source checkout you've just built, needs no setup at all — with `TURF_HOME` unset, the compiler falls back to looking for `lib/` next to its own binary. You only need to set `TURF_HOME` once you move the binary somewhere else: a system-wide install, a symlink on `PATH`, a shortcut, etc.
-
-**Linux / macOS** (bash or zsh) — add one line to your shell profile (`~/.bashrc`, `~/.zshrc`, or `~/.profile`, whichever your shell reads) so it's set in every new terminal:
-
-```bash
-export TURF_HOME="/path/to/turf-installation"   # e.g. the extracted release folder, or this repo's root
-```
-
-Then either open a new terminal, or run `source ~/.zshrc` (or your equivalent file) to pick it up in the current one.
-
-**Windows — PowerShell** — set it once, persistently, for your user account (a new PowerShell/cmd window is required for it to take effect):
+**Windows (PowerShell):**
 
 ```powershell
-setx TURF_HOME "C:\path\to\turf-installation"
+irm https://raw.githubusercontent.com/turf-lang/turf-lang/master/scripts/install/install.ps1 | iex
 ```
 
-Or, for the current session only (lost when the window closes):
+The installer finds the archive for your machine, checks its SHA-256 (and installs nothing if the check fails or cannot run), unpacks it into `~/.turf` (Windows: `%LOCALAPPDATA%\turf`) and adds the `bin` folder to your `PATH` with one marked block, so `turf` works in any **new** terminal. Both scripts are also attached to every release.
 
-```powershell
-$env:TURF_HOME = "C:\path\to\turf-installation"
+Options, `install.sh` / `install.ps1`: `--version v2.0.0` / `-Version` (a release other than the latest), `--prefix DIR` / `-Prefix` (another folder), `--smart` / `-Smart` (the `-smart` build), `--no-modify-path` / `-NoModifyPath` (leave start-up files alone), `--uninstall` / `-Uninstall`.
+
+A piped `irm | iex` cannot take options; use the environment variables `TURF_INSTALL_VERSION`, `TURF_INSTALL_DIR` and `TURF_INSTALL_SMART=1`, or save the script and run it with the options above. Uninstalling removes exactly what the installer added and never your projects, the package cache or a model you put in `models/`.
+
+**By hand:** download the archive from the [Releases page](../../releases), unpack it anywhere, and run `bin/turf` or put `bin/` on your `PATH`. It is one folder: `bin/` (`turf`, `turfc`), `lib/` (runtime and standard library), `docs/`, `share/turf/examples/`. No `TURF_HOME` is needed: the compiler finds `lib/` relative to its own location, through symlinks too. (`TURF_HOME` is only for binaries copied out of that folder.)
+
+**From source:** see [Building from source](#building-from-source).
+
+Check the install with `turf version`, which prints the versions of `turf` and of the compiler `turfc` behind it. Paste it into a bug report.
+
+## Quick start
+
+`turf new` creates a project, `turf run` builds and runs it:
+
+```text
+$ turf new hello
+Created program package 'hello' in hello/
+  hello/turf.toml
+  hello/src/main.tr
+  hello/README.md
+  hello/.vscode/extensions.json
+  hello/.gitignore
+$ cd hello
+$ turf build
+Compiled to build/hello.o
+Successfully compiled to build/hello
+$ turf run
+Hello, TurfLang! This is hello.
 ```
 
-**Windows — Command Prompt (cmd.exe)** — same idea:
+The project is a `turf.toml` manifest and `src/main.tr`:
 
-```bat
-setx TURF_HOME "C:\path\to\turf-installation"
-:: or, current session only:
-set TURF_HOME=C:\path\to\turf-installation
+```toml
+[package]
+name = "hello"
+version = "0.1.0"
+turf = "2.0"
+
+[dependencies]
 ```
 
-**Windows — GUI, if you'd rather not use a terminal**: Start Menu → search "Environment Variables" → *Edit environment variables for your account* → *New...* under "User variables" → Variable name `TURF_HOME`, Variable value the path to your Turf installation → OK. Log out/in (or just open a fresh terminal) for it to apply.
-
-Once set, verify it from a fresh terminal: `cd` somewhere completely unrelated to your Turf installation (e.g. your home directory) and compile the `hello.tr` from [Quick Start](#quick-start) below. If `TURF_HOME` is wired up correctly, `import io;` resolves regardless of your current directory or where the `turf` binary itself lives.
-
-## Quick Start
-
-```
-// hello.tr
+```turflang
+// src/main.tr
 import io;
 
 fn main(): int {
-    io::printline("Hello, Turf!");
+    io::printline("Hello, TurfLang! This is hello.");
     return 0;
 }
 ```
 
-```bash
-turf hello.tr -o hello
-./hello
-```
+`turf test` runs every file in the project's `tests/` folder as a program; a test passes when it exits 0. Put this in `tests/basic.tr`:
 
-I/O lives in the standard library's `io` module. `::` is Turf's namespace-resolution operator — `io::printline`, not a bare global and not `io.printline` (`.` is reserved for instance-member access; see [Modules & Imports](#modules--imports)).
+```turflang
+import test;
 
-## Language Tour
-
-### Variable declarations
-
-Every declaration is explicitly typed and explicitly `mut` or `immut`:
-
-```
-mut x: int = 10;
-immut pi: double = 3.14159;
-mut flag: bool = true;
-mut name: string = "Turf";
-```
-
-### Type inference (`guess`)
-
-An initializer's type can be inferred instead of written out — either by omitting the `: Type` annotation entirely, or by spelling it explicitly as `guess`:
-
-```
-mut a = 5;              // infers int
-mut b: guess = 5.5;     // infers double (explicit spelling is equivalent)
-immut name = "Turf";    // infers string
-```
-
-The inferred type is fixed permanently at the declaration — a `mut` variable can be reassigned, but only with a value of that same inferred type. `typeof(x)` returns the inferred type's name as a string.
-
-### Casting
-
-Explicit conversions use the `to` operator:
-
-```
-mut a: double = 42 to double;
-mut b: int = 3.75 to int;      // truncates: 3
-mut c: int = "100" to int;     // parses the string
-mut s: string = 42 to string;
-```
-
-### Control flow
-
-Block form:
-
-```
-if x > 0 {
-    io::printline("positive");
-} elseif x < 0 {
-    io::printline("negative");
-} else {
-    io::printline("zero");
+fn main(): int {
+    test::assert(1 + 1 == 2, "arithmetic still works");
+    return 0;
 }
 ```
 
-`compare` is Turf's switch statement — each `matches` arm ends with `done`, and an optional `otherwise` arm must come last:
+```text
+$ turf test
+Running Turf Test Suites...
 
+[tests] basic.tr ... PASS
+
+=== Test Summary ===
+Total Tests: 1
+Passed:      1
+Failed:      0
+
+All tests passed successfully!
 ```
-compare x {
-    matches 1:
-        io::printline("one");
-    done
-    matches 2:
-        io::printline("two");
-    done
-    otherwise:
-        io::printline("something else");
+
+Other commands you will use: `turf check` (report every diagnostic, write nothing), `turf fmt`, `turf explain E081` (what an error code means, with an example), `turf add` / `turf remove` / `turf update` (dependencies, by `path` or `git` tag), `turf clean`, and `turf help <command>`. `turf` exits 0 on success, 1 when it reports a problem, and 2 when the command line itself is wrong.
+
+A single file needs no project: `turf run hello.tr`, or `turf hello.tr -o hello` and then `./hello`.
+
+[`examples/`](examples/README.md) holds a library and a program that depends on it, ready to run. [`showcase/`](showcase/) has larger programs: an HTTP server and client talking over a real socket, a key-value store, a text-analysis tool. The project layout, the manifest, dependencies and the lock file are in [`docs/reference/projects_and_packages.md`](docs/reference/projects_and_packages.md). For walkthroughs of working on a project, writing a library and testing it, see the [guides](docs/guides/README.md).
+
+## Language tour
+
+Every snippet below is a complete program, compiled and run before it went into this page. They use the prelude (`printline`, `math`, `strings` and the primitive-type helpers need no `import`); see [The standard library](#the-standard-library).
+
+### Variables, `guess` and expressions
+
+A declaration is `mut` (can be reassigned) or `immut`. The type is written, or left out and inferred from the initializer; `: guess` is the explicit spelling of the same thing. An inferred type is fixed at the declaration. Conversions are explicit, with `to`; `give ... otherwise` is the conditional expression.
+
+```turflang
+fn main(): int {
+    mut count = 0;                       // inferred int; same as `count: guess = 0`
+    immut ratio: double = 7 to double / 2.0;
+    immut label = "turf";                // inferred string
+
+    for i in 1..6 step i += 1 {
+        if i % 2 == 0 { continue; }
+        count = count + i;
+    }
+
+    mut size: string = count > 5 give "big" otherwise "small";
+    printline(label + ": " + size + " " + (count to string));
+    printline(ratio to string);
+    return 0;
 }
 ```
 
-Ternary (expression) form uses `give` / `otherwise`:
-
-```
-mut max: int = a > b give a otherwise b;
-```
-
-Loops:
-
-```
-while i < 10 {
-    i = i + 1;
-    if i % 2 == 0 { continue; }
-}
-
-for j in 1..10 step j += 1 {
-    if j % 2 == 0 { continue; }
-    sum = sum + j;
-}
-
-do {
-    i = i - 1;
-} while (i > 0);   // body always runs at least once
+```text
+turf: big 9
+3.5
 ```
 
-Bitwise operators: `&`, `|`, `~`, `^` (XOR), `<<`, `>>`.
+Integer arithmetic is checked: signed overflow and division by zero panic at run time rather than wrapping, and a literal that does not fit its type is a compile error. Loops are `while`, `do { } while (cond);` and the range `for`. Details: [Variables and types](docs/reference/variables_and_types.md), [Operators](docs/reference/operators.md), [Control flow](docs/reference/control_flow.md).
 
-```
-mut flags: int = 0b1010 & 0b1100;
-mut shifted: int = 1 << 4;
-```
+### Patterns with `compare`
 
-### Structs
+`compare` takes a value, an enum, or a struct taken apart by a pattern. Arms are tried in order and the first match wins. A name inside a destructuring pattern binds the field, `..` ignores the rest, `if` adds a guard, and `_` matches anything. Each arm ends in `done`; `otherwise` is the arm of last resort. For an enum, leaving a variant out is a compile error (E093) unless `otherwise` is there.
 
-Fields are `name: Type`, comma-separated. There is no brace-literal construction syntax — every struct is built via exactly one of two reserved, compiler-recognized calls:
+```turflang
+struct Point { x: int, y: int }
 
-```
-struct User {
-    age: int,
-    name: string
-}
-
-fn User.new(age: int, name: string): void {
-    self.age = age;
-    self.name = name;
-}
-
-mut u: User = User::new(10, "Alice");
-u.age = 25;
-
-mut u2: User = User::default();   // every field recursively zero-initialized
-```
-
-`new` and `default` are reserved struct-method names, not ordinary functions:
-
-- **`StructName::new(args...)`** calls a user-defined constructor — declared exactly like any other instance method (`.`, `self` implicit), just named `new`. It must assign every field of the struct on every path before returning (checked with a real control-flow-sensitive analysis, not just "assigned somewhere in the body") — a field missed on even one branch is a compile error. A struct with no `.new` declared can't be constructed with `::new(...)` at all.
-- **`StructName::default()`** is always compiler-synthesized — it recursively zero-initializes every field (including nested structs) and takes no arguments. It can never be declared by hand (`fn StructName.default(...)` is a compile error), and it's always available, even for a struct with no methods at all.
-- Neither can be called via `.` on an instance (`x.new(...)`/`x.default()`) — only `StructName::new(...)`/`StructName::default()`.
-
-Other instance methods are declared the same way as `new`, called via `.`, with `self` implicit — not a declared parameter, but available inside the method body:
-
-```
-fn User.grow(): void {
-    self.age = self.age + 1;
-}
-
-fn User.rename(new_name: string): void {
-    self.name = new_name;
-}
-
-u.grow();
-u.rename("Bob");
-```
-
-Static methods use the exact same `.` declaration form, distinguished only by a trailing `static` keyword (no implicit `self` at all) — but are *called* on the type itself via `::`, never through an instance:
-
-```
-fn User.describe(prefix: string) static: string {
-    return prefix + " user";
-}
-
-io::printline(User::describe("a"));
-```
-
-`::` never appears in a `fn` declaration — it's reserved for calling/referencing through a namespace (enum variants, module-qualified functions, static methods, and `new`/`default`), while `.` is used for every method *declaration*, static or not.
-
-A struct with no fields at all (`struct Empty {}`) is fully supported — the natural shape for a "namespace" struct that only ever holds static methods. `Empty::default()` works even with zero fields to initialize.
-
-### Arrays
-
-Fixed-size, typed, and index directly — including arrays of structs, with field access chaining through the index:
-
-```
-mut users: User[5] = [
-    User::default(),
-    User::default(),
-    User::default(),
-    User::default(),
-    User::default()
-];
-
-users[0] = User::new(25, "Alice");
-assert(users[0].age == 25, "");
-```
-
-### Enums
-
-`::` addresses a variant, the same operator used for every other namespace-qualified reference in the language:
-
-```
 enum Color { Red, Green, Blue }
 
-mut c: Color = Color::Green;
-if c == Color::Green {
-    io::printline("green");
-}
-```
-
-`Color::COUNT`, `Color::VALUES`, and `Color::NAMES` are built in for every enum — variant count, the array of underlying values, and the array of variant name strings, respectively.
-
-### Error handling
-
-Recoverable errors are named `error` types — bare-name variants only, no payload fields:
-
-```
-error MathError {
-    DivisionByZero
-}
-
-fn divide(a: int, b: int): !int {
-    if b == 0 {
-        return MathError::DivisionByZero;
+fn describe(p: Point): string {
+    compare p {
+        matches Point { x: 0, y: 0 }:
+            return "origin";
+        done
+        matches Point { x, y } if x == y:
+            return "diagonal at " + (x to string);
+        done
+        matches Point { x: 0, .. }:
+            return "on the y axis";
+        done
+        otherwise:
+            return "somewhere else";
     }
-    return a / b;
+}
+
+fn name(c: Color): string {
+    compare c {
+        matches Color::Red: return "red"; done
+        matches Color::Green: return "green"; done
+        matches Color::Blue: return "blue"; done
+    }
+}
+
+fn main(): int {
+    mut p: Point = Point::default();
+    printline(describe(p));
+    p.x = 3;
+    p.y = 3;
+    printline(describe(p));
+    p.y = 4;
+    printline(describe(p));
+    printline(name(Color::Green));
+    return 0;
 }
 ```
 
-A function returning `!T` can't be used as a plain `T` at the call site — it must be handled with `recover`, in one of three forms:
-
+```text
+origin
+diagonal at 3
+somewhere else
+green
 ```
-mut x: int = divide(10, 0) recover produce 0;   // fallback value on failure
 
-fn tryDivide(a: int, b: int): int {
-    return divide(a, b) recover as err run {     // bind the specific error variant
-        if err == MathError::DivisionByZero {
-            io::printline("division by zero");
+A struct is built by a constructor you write (`fn Point.new(...)`, called as `Point::new(...)`) or zeroed by `Point::default()`; methods are declared `fn Type.method(...)` with an implicit `self`. See [Structs and enums](docs/reference/structs_and_enums.md).
+
+### Errors, `recover` and `try`
+
+A function that can fail returns `!T`. The result cannot be used as a plain `T` until you deal with it: `recover produce v` supplies a fallback, `recover run { ... }` runs a block, and `recover as err run { ... }` binds the error. An `error` variant can carry data, which a `compare` reads back with a pattern. `try` hands a failure to your own caller unchanged.
+
+```turflang
+error ParseError {
+    Empty,
+    BadDigit(text: string)
+}
+
+fn parse(text: string): !int {
+    if text == "" {
+        return ParseError::Empty;
+    }
+    for i in 0..text.length() step i += 1 {
+        if !text[i].is_digit() {
+            return ParseError::BadDigit(text);
         }
-        return -1;
+    }
+    return text to int;
+}
+
+fn total(a: string, b: string): !int {
+    immut x: int = try parse(a);     // on failure, returns parse's error unchanged
+    immut y: int = try parse(b);
+    return x + y;
+}
+
+fn totalOrZero(a: string, b: string): int {
+    return total(a, b) recover as err run {
+        compare err {
+            matches ParseError::BadDigit(t):
+                printline("not a number: " + t);
+            done
+            otherwise:
+                printline("empty input");
+        }
+        return 0;
     };
 }
+
+fn main(): int {
+    printline(totalOrZero("20", "22") to string);
+    printline(totalOrZero("20", "4x") to string);
+    printline(totalOrZero("", "1") to string);
+    return 0;
+}
 ```
 
-`recover run`/`recover as err run` blocks must produce the success type on every path (usually via `return`) — the one exception is a `!void` success type, where the block can just run side effects and fall through:
-
-```
-extern fn writeFile(path: string, contents: string): !void;
-
-writeFile("a.txt", "hi") recover run {
-    io::printline("write failed");
-};
+```text
+42
+not a number: 4x
+0
+empty input
+0
 ```
 
-`recover as err run { ... }` requires the callee to declare a real `error` type — a bare `error GeneralError;` type (no variants beyond the implicit `GeneralError::DEFAULT`) can still use `recover produce`/`recover run`, just not `recover as`. See `docs/architecture/errors_and_recover.md` for the full spec.
+`try` is not allowed in `main` (it returns `int`, not `!V`); handle the error there with `recover`. [Error handling](docs/reference/error_handling.md) has the rest.
 
 ### `defer`
 
-A `defer`'d statement runs when the enclosing function returns, regardless of which `return` triggered it — the deterministic-cleanup answer for OS resources (file handles, sockets, manual-heap buffers) that a tracing garbage collector's mark-sweep pass can't help with, since it has no destructor concept. Multiple `defer`s in the same block run in reverse (LIFO) order:
+A `defer`red statement runs when the enclosing block is left, on every path out of it, last deferred first. It is how you release a file or a socket, which the garbage collector does not do for you. A panic does not run deferred statements.
 
-```
-fn appendThree(t: &Trail): void {
-    defer t.log = t.log + "1";
-    defer t.log = t.log + "2";
-    defer t.log = t.log + "3";
-    // on return, these run in order 3, 2, 1 -- t.log ends up "321"
+```turflang
+struct Log { text: string }
+
+fn work(log: &Log): void {
+    defer log.text = log.text + " cleanup";   // runs when work returns
+    log.text = log.text + " working";
+}
+
+fn main(): int {
+    mut log: Log = Log::default();
+    work(&log);
+    printline(log.text);
+    return 0;
 }
 ```
 
-### First-class functions
-
-An unqualified `fn` name is a value — it can be passed as an argument, stored in a variable, and called indirectly:
-
+```text
+ working cleanup
 ```
-fn apply(f: fn(int): int, x: int): int {
-    return f(x);
+
+### References, `&T` and `&?T`, and `heap`
+
+`&T` is a reference that is never null. `&?T` is a reference that may be `null`, and the compiler only lets you read through it where it has proved it is not: an unchecked access is error E081. That makes a linked list or a tree possible in safe code. `heap(value)` copies a value onto the garbage-collected heap and gives you a `&T` to it, so the list can grow while the program runs and is freed when nothing refers to it. The compiler also rejects a reference that would outlive the stack variable it points to.
+
+```turflang
+struct Node {
+    val: int,
+    next: &?Node       // a node, or nothing
 }
 
-fn double_it(n: int): int { return n * 2; }
+fn push(head: &?Node, v: int): &Node {
+    mut n: Node = Node::default();
+    n.val = v;
+    n.next = head;
+    return heap(n);    // copy to the GC heap, get a &Node
+}
 
-mut result: int = apply(double_it, 5); // 10
+fn sum(head: &?Node): int {
+    mut total = 0;
+    mut cur: &?Node = head;
+    while cur != null {
+        total = total + cur.val;   // legal: the check proves cur is not null
+        cur = cur.next;
+    }
+    return total;
+}
+
+fn main(): int {
+    mut list: &?Node = null;
+    for i in 1..5 step i += 1 {
+        list = push(list, i);
+    }
+    printline(sum(list) to string);
+    return 0;
+}
 ```
 
-Only bare, unqualified function names are first-class today — `Module::func` and `StructName::method` referenced as a value (not called) still raise a compile error.
+```text
+10
+```
+
+[Memory and safety](docs/reference/memory_and_safety.md) explains the two heaps and exactly what the language guarantees outside `unsafe`.
 
 ### Generics
 
-Turf uses real generics (`Name<T1, T2>`) rather than a single hardcoded collection type baked into the language — both user-defined generic structs and the standard library's own collections work the same way:
+Structs, functions and methods take type parameters, written `<T>` after `fn` for functions and methods. Each instantiation is compiled to code specialised for its types, so the standard collections are ordinary generic types.
 
-```
-import io;
+```turflang
 import list::List;
+import map::Map;
 
 struct Box<T> {
     val: T
 }
 
-fn Box.new(v: T): void {
+fn<T> Box.new(v: T): void {
     self.val = v;
 }
 
-fn Box.get(): T {
+fn<T> Box.get(): T {
     return self.val;
 }
 
+fn<T> largest(items: List<T>, less: fn(T, T): bool): T {
+    mut best: T = items.get(0);
+    for i in 1..items.length() step i += 1 {
+        if less(best, items.get(i)) {
+            best = items.get(i);
+        }
+    }
+    return best;
+}
+
+fn lessInt(a: int, b: int): bool { return a < b; }
+
 fn main(): int {
-    mut b: Box<int> = Box::new(42);
-    assert(b.get() == 42, "");
+    mut b: Box<string> = Box::new("generic");
+    printline(b.get());
 
     mut nums: List<int> = List::default();
-    nums.push(10);
-    nums.push(20);
-    assert(nums.length() == 2, "");
+    nums.push(3);
+    nums.push(9);
+    nums.push(4);
+    printline(largest(nums, lessInt) to string);
 
+    mut ages: Map<string, int> = Map::default();
+    ages.put("ada", 36);
+    printline(ages.get("ada") to string);
     return 0;
 }
 ```
 
-### Modules & Imports
-
-`::` is the general namespace-resolution operator — enum variants, module-qualified functions, module-qualified types, and static methods all use it. `.` stays reserved for instance-member access only. Writing `io.printline(...)` or calling a static method as `StructName.method(...)` is a compile error, with a message pointing at the correct `::` form.
-
-Every source file — the standard library's own modules included — is an ordinary `.tr` file with no compiler special-casing. `import` has four forms:
-
-```
-import io;                       // qualified access only: io::printline(...)
-import io::printline;            // + bare access to just that one symbol
-import io::[printline, print];   // + bare access to exactly these symbols
-import io::[*];                  // + bare access to everything the module exports
+```text
+generic
+9
+36
 ```
 
-A plain `import Module;` always grants qualified access (`Module::thing`), regardless of form — the on-demand forms only add *bare*, unqualified access to specific symbols on top of that. This applies uniformly to functions, structs, and enums: a struct or enum declared in another module is not usable unqualified unless it (or `*`) was explicitly on-demand imported, exactly like a bare function call. Circular imports are detected and reported with the full import chain, not a silent truncation or a hang. See `docs/architecture/modules_and_scope_resolution.md` for the complete internal and external reference.
+Functions are values (`fn(int): int`), and `operator` overloads work on your own types. See [Generics and operators](docs/reference/generics_and_operators.md).
 
-Functions, structs, and enums are exportable automatically — anything declared at a file's top level is visible to importers with no keyword needed. A top-level *constant* needs `export`, since bare `mut`/`immut` only makes sense inside a function otherwise:
+### State machines
 
+`machine` declares states and the transitions allowed between them. A state is a value (`Door::Open`), and `.transition(State)` moves a variable along an edge. Where the compiler can prove the edge exists it costs nothing; otherwise it is checked when the program runs, and an edge the graph does not declare panics.
+
+```turflang
+machine Door {
+    Closed -> Open,
+    Open -> Closed,
+    Closed -> Locked,
+    Locked -> Closed
+}
+
+fn main(): int {
+    mut door: Door = Door::Closed;
+    door.transition(Door::Open);
+    door.transition(Door::Closed);
+    door.transition(Door::Locked);
+    printline(door == Door::Locked give "locked" otherwise "not locked");
+    return 0;
+}
 ```
-export immut PI: double = 3.14159;
-export immut MAX_USERS: int = 100;
+
+```text
+locked
 ```
 
-`export` only works on `immut` declarations at the true top level (a compile error either inside a function or on `export mut`), and the initializer must be a literal — an exported constant has no real storage; every reference to it is replaced by its value directly at compile time. Everything else (typos, duplicate names, immutability) behaves exactly like any other variable.
+Writing `door.transition(Door::Open)` next, from `Locked`, panics: `Door::transition(Open) -- no such transition from the current state.` See [State machines](docs/reference/state_machines.md).
 
-### FFI
+### Modules and `pub`
 
+Every file is a module. A declaration is private to its module unless it is marked `pub` (`public` is a synonym); that applies to functions, methods, types, `error`s, `machine`s, `extern fn`s and struct fields, and a field is private even in a `pub struct` unless it is marked too. Another module reaches a name with `::` after `import`. Packages (a `turf.toml` plus `src/`) work the same way: a library's root module is the only thing another package can import, and what it makes `pub` is its API.
+
+```turflang
+// src/geometry.tr: the root module of a library package
+pub struct Point {
+    pub x: int,
+    pub y: int
+}
+
+pub fn Point.new(x: int, y: int): void {
+    self.x = x;
+    self.y = y;
+}
+
+pub fn manhattan(a: Point, b: Point): int {
+    return (a.x - b.x).abs() + (a.y - b.y).abs();
+}
 ```
+
+A program package then writes `import geometry;` and `geometry::manhattan(...)`. Upgrading a 1.x module is mostly this keyword; `turf migrate pub` adds it for you (see the [migration guide](docs/MIGRATING_TO_2.md)). More in [Functions and modules](docs/reference/functions_and_modules.md).
+
+### Calling C: `extern`, `unsafe` and raw pointers
+
+`extern fn` declares a C function, and `extern from "m" fn` links the library it lives in. Raw pointers (`ptr`, `T*`) exist for this boundary and are allowed only inside an `unsafe { }` block. Everything outside it keeps the guarantees in [Memory and safety](docs/reference/memory_and_safety.md).
+
+```turflang
+extern fn strlen(s: string): int;
+extern from "m" fn sqrt(x: double): double;
 extern fn malloc(size: int): ptr;
 extern fn free(p: ptr): void;
-extern fn strlen(s: string): int;
-extern from "m" fn sqrt(x: double): double;   // links -lm automatically
 
 fn main(): int {
     unsafe {
         mut buf: ptr = malloc(64);
         free(buf);
     }
+    printline(strlen("verify") to string);
+    printline(sqrt(2.0) to string);
     return 0;
 }
 ```
 
-A file with several `extern fn`s that all need to pass raw pointers around (a C callback signature, a struct of raw fields) can declare itself exempt from `unsafe { }` once, file-wide, instead of wrapping each use — see the capability declaration below.
-
-### `unsafe { }` and safe references (`&T`, `&?T`)
-
-Raw pointer types (`ptr`, `T*`) are gated behind `unsafe { }` by default — declaring a raw-pointer-typed variable, casting to/from one, or accessing a field through one (there's no explicit dereference operator; field access through a raw pointer base is the closest thing) all require lexically being inside `unsafe { }`. A struct with a raw pointer field needs its *entire declaration* wrapped, not just the code that dereferences it later. An ordinary (non-`extern`) function's parameters and return type may never be raw pointers at all, even inside `unsafe { }` — `extern fn` bindings (the FFI surface itself) are exempt from all of this, and so is any file that declares itself exempt (see the capability declaration below).
-
-A file can grant itself blanket use of raw pointers — the same privilege `lib/std` itself uses — with a declaration as its own first top-level statement:
-
-```
-unsafe module;
-
-fn cmpints(a: ptr, b: ptr): int32 {   // legal here, and not gated per-use
-    return 0;
-}
+```text
+6
+1.41421
 ```
 
-Honored unconditionally for a file under the Turf install root (`lib/std`/`lib/usr`); anywhere else it needs the `--allow-unsafe-modules` CLI flag, so a plain `turf myfile.tr` never silently grants it. See `docs/architecture/pointers_and_references.md` §1.7 for the full mechanism.
+An ordinary function may not take or return a raw pointer, even inside `unsafe { }` (error E130): use `&T`, or `&?T` when it may be absent. A file that needs raw pointers throughout, such as a wrapper around a C API, can begin with `unsafe module;`, which lifts the per-use gate for that file. Outside the install folder the compiler honours it only when you pass `--allow-unsafe-modules`, so a plain `turf file.tr` never grants it silently. See [FFI and `unsafe`](docs/reference/ffi_and_unsafe.md).
 
-`&T` is a compiler-guaranteed non-null reference — `&expr` (address-of) always produces one:
+## The standard library
 
-```
-mutable val: int = 42;
-mutable ref: &int = &val;   // compiler-guaranteed non-null
-```
+The standard library is ordinary Turf source under `lib/std/`. The prelude (nine modules, no `import` needed) is `int`, `double`, `bool`, `char`, `strings`, `array`, `io`, `math` and `sys`; the rest are imported by name.
 
-A `&T` auto-derefs on field/member access exactly like a raw pointer does, and always safely widens into a raw `T*`/`ptr` (assigning or passing it needs no cast or `unsafe { }`). The reverse — turning a raw pointer into a `&T` — always needs an explicit `to` cast inside `unsafe { }`, since the raw pointer might be null:
-
-```
-unsafe {
-    mutable p: Node* = ...;
-    mutable safe: &Node = p to &Node;   // asserts p isn't null
-}
-```
-
-`&?T` is `&T`'s **nullable** counterpart — a safe reference that can be `null`, checked by a real compile-time nullability analysis instead of trusting the programmer. It's the type that makes a safe self-referential struct (a linked list, a tree) possible without `unsafe { }` anywhere in the declaration:
-
-```
-struct Node {
-    val: int,
-    next: &?Node   // no unsafe { } needed anywhere in this struct decl
-}
-
-fn sum(head: &?Node): int {
-    mutable total: int = 0;
-    mutable current: &?Node = head;
-    while (current != null) {          // narrows `current` to non-null...
-        total = total + current.val;   // ...so this field access is legal
-        current = current.next;
-    }
-    return total;
-}
-```
-
-Field access on a `&?T` compiles only where the compiler has proven it non-null on every path reaching that access; an unguarded access is a compile error (`E081`). `&?T -> &T` needs an explicit, narrowing-checked `to` cast — never implicit. See `docs/architecture/pointers_and_references.md` §1.8 for the full narrowing rules.
-
-### State machines
-
-`machine` declares a set of states plus a transition graph in one construct — a `TurfMachineType` is a real `enum` underneath (`::`-access, `==`, `COUNT` all just work), with a `.transition(State)` call the compiler tries to prove safe at compile time:
-
-```
-machine TrafficLight {
-    Red -> Green,
-    Green -> Yellow,
-    Yellow -> Red
-}
-
-fn main(): int {
-    mut light: TrafficLight = TrafficLight::Red;
-
-    compare light {
-        matches TrafficLight::Red:
-            light.transition(TrafficLight::Green);   // compile-time-proven safe: zero runtime cost
-        done
-        otherwise:
-            io::printline("not red");
-    }
-
-    assert(light == TrafficLight::Green, "");
-    return 0;
-}
-```
-
-Inside a single-pattern `matches` arm that's narrowed the receiver to one exact state, `.transition(...)` compiles to a plain store — no runtime check at all. Everywhere else it falls back to a runtime switch that panics on an edge the graph doesn't declare. See `docs/reference/state_machines.md` for the full reference, including exactly which shapes qualify for the compile-time-proven path.
-
-### Assertions
-
-```
-assert(condition, "message shown on failure");
-```
-
-## Standard Library
-
-Every module is an ordinary `.tr` file under `lib/std/` — no compiler special-casing, `import <module>;` doesn't care which subfolder it lives in. `int`/`double`/`bool`/`char`/`strings`/`array` are auto-imported into every file (the "prelude"); everything else needs an explicit `import`.
-
-| Module | What it gives you |
+| Module | For |
 |---|---|
-| `strings` | length/contains/index_of/starts_with/ends_with/repeat/substring/replace/to_upper/to_lower/trim(_start/_end), `split`/`join`, `pad_left`/`pad_right`, `parse_int`/`parse_double` |
-| `io` | `print`/`printline`/`input`, plus file I/O: `read_to_string`, `read_lines`, `write_string`, `exists`, `eprint`/`eprintline`, `flush` |
-| `list` / `stack` / `queue` / `map` / `set` | `List<T>`/`Stack<T>`/`Queue<T>`/`Map<K,V>`/`Set<T>`, plus `list_sort`/`list_binary_search`/`list_find` free functions over `List<int>` |
-| `mem` | checked `alloc`/`alloc_zeroed`/`grow`/`dup`/`zero` wrappers over `malloc`/`calloc`/`realloc`/`free`, plus `Pool<T>` |
-| `math` | `abs`/`power`/`min`/`max`/`clamp`, libm bindings (`sqrt`, `sin`, `pow`, ...), `PI`/`E` |
-| `time` | `now_seconds()` (wall clock), `clock_ticks()`/`elapsed_ms()` (CPU time — not wall time, see the module's own doc comment), `sleep_seconds`/`sleep_ms` |
-| `random` | `random_int`/`random_double`/`random_bool` — not cryptographically secure |
-| `fs` | path manipulation (`join`/`dirname`/`basename`/`extension`/`is_absolute`) and directory ops (`mkdir`/`remove_file`/`remove_dir`/`is_dir`) |
-| `net` | `TcpListener`/`TcpConnection`, plus `resolve_hostname` for DNS |
-| `http` | `Request`/`Response` HTTP/1.1 parsing/building over `net`, plus a callback-based `Server` router |
-| `json` | a hand-rolled, dependency-free `JsonValue` parser/serializer (`json::parse`/`json::stringify`) |
-| `os` | `env`/`set_env`, `argc`/`argv` |
-| `sys` / `test` | `panic`/`exit`/`abort`; `assert`/`fail`/`assert_eq` |
+| `strings`, `array`, `math` | string search, slicing, splitting and parsing; `int[]` helpers; `abs`, `min`, `clamp`, libm functions |
+| `io`, `fs`, `os` | printing and input, reading and writing files; paths and directories; environment and arguments |
+| `list`, `stack`, `queue`, `map`, `set` | `List<T>`, `Stack<T>`, `Queue<T>`, `Map<K, V>`, `Set<T>` |
+| `json`, `http`, `net` | a JSON parser and writer; an HTTP/1.1 server and request/response types; TCP sockets and DNS |
+| `time`, `random`, `mem` | clocks and sleeping; pseudo-random numbers (not cryptographic); manual memory and `Pool` |
+| `sys`, `test` | `panic`, `exit`; `assert`, `assert_eq`, `fail` |
 
-Full per-function reference for every module: [`docs/reference/stdlib/`](docs/reference/stdlib/).
+Names are `snake_case`; an operation that can fail returns `!T` and never a sentinel. The conventions, the full list and every function are in [`docs/reference/stdlib/`](docs/reference/stdlib/README.md).
 
-## Examples
+## `--smart`: diagnostics with a local model
 
-**Structs, constructors, instance methods, and static methods:**
+Turf's diagnostics are the compiler's own and need nothing else. With `--smart`, an error that the compiler cannot fix by itself is passed to a small language model running locally through `llama.cpp`; no network is involved, and nothing runs on a clean compile. A suggestion is never trusted: it is applied to an isolated copy of your program and shown only if it removes the error without introducing another. Otherwise you see the compiler's diagnostic, unchanged. An error with a single unambiguous fix, such as a misspelled variable, is fixed without the model at all.
 
-```
-extern fn strlen(s: string): int;
-
-struct User { age: int, name: string }
-
-fn User.new(age: int, name: string): void { self.age = age; self.name = name; }
-fn User.grow(): void { self.age = self.age + 1; }
-fn User.rename(new_name: string): void { self.name = new_name; }
-fn User.describe() static: string { return "a user"; }
-
-fn main(): int {
-    mut u: User = User::new(0, "unnamed");
-    u.grow();
-    assert(u.age == 1, "");
-
-    u.rename("Bob");
-    assert(User::describe() == "a user", "");
-    return 0;
-}
+```sh
+turf my_program.tr --smart -o my_program
 ```
 
-**Enums and modules:**
+`--smart` needs two things: the **smart build** (the `-smart` archive, `install.sh --smart` / `install.ps1 -Smart`, or a source build without `--no-smart`), and **one model** that you choose: put exactly one `.gguf` file in the `models/` folder of your install (`~/.turf/models`, `%LOCALAPPDATA%\turf\models`, or `models/` in a checkout). No model is shipped or downloaded. [`qwen2.5-coder-1.5b-instruct-q4_k_m.gguf`](https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF) (about 1 GB on disk, about 1.5 GB of RAM while it works) is what Turf is developed with. With the plain build, no model, or more than one, `--smart` says so in one line and shows the compiler's diagnostics. The details are in [CLI and diagnostics](docs/reference/cli_and_diagnostics.md#--smart).
 
-```
-import io;
+## Building from source
 
-enum Status { Pending, Active, Closed }
+You need LLVM 22, CMake 3.20 or newer and a C++20 compiler (Clang recommended); Go 1.26 or newer builds the `turf` front end (without it you get `build/turfc` alone). `--smart`'s runtime is built from the vendored `llama.cpp` submodule.
 
-fn describe(s: Status): string {
-    compare s {
-        matches Status::Pending:
-            return "pending";
-        done
-        matches Status::Active:
-            return "active";
-        done
-        otherwise:
-            return "closed";
-    }
-}
-
-fn main(): int {
-    immut s: Status = Status::Active;
-    io::printline(describe(s));
-    assert(Status::COUNT == 3, "");
-    return 0;
-}
+```sh
+git clone --recursive https://github.com/turf-lang/turf-lang
+cd turf-lang
+./scripts/cmake_build.sh --release              # compiler, turf, and the --smart runtime
+./scripts/cmake_build.sh --release --no-smart   # same, without llama.cpp and its slow first build
+./scripts/install/dev_install.sh                # link turf into ~/.local/bin (--prefix DIR for elsewhere)
 ```
 
-**Arrays of structs:**
+The binaries are `build/turf` and `build/turfc`. A `--no-smart` build is the same compiler; only `--smart` is missing. Running from a checkout needs no `TURF_HOME`. A source build links your programs with the system `cc`, which the self-contained releases do not need. Contributor setup, the test suites and conventions are in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-```
-extern fn strlen(s: string): int;
+## Where to go next
 
-struct User {
-    age: int,
-    name: string
-}
-
-fn User.new(age: int, name: string): void {
-    self.age = age;
-    self.name = name;
-}
-
-fn main(): int {
-    mut users: User[5] = [
-        User::default(),
-        User::default(),
-        User::default(),
-        User::default(),
-        User::default()
-    ];
-
-    users[0] = User::new(25, "Alice");
-    users[1] = User::new(30, "Bob");
-    users[2] = User::new(35, "Charlie");
-
-    assert(users[0].age == 25, "");
-    assert(strlen(users[0].name) == 5, "");
-
-    assert(users[1].age == 30, "");
-    assert(strlen(users[1].name) == 3, "");
-
-    assert(users[2].age == 35, "");
-    assert(strlen(users[2].name) == 7, "");
-
-    return 0;
-}
-```
-
-**Casting and type conversion:**
-
-```
-fn main(): int {
-    mut a: double = 42 to double;
-    assert(a > 41.9 && a < 42.1, "");
-
-    mut b: int = 3.75 to int;
-    assert(b == 3, ""); // truncates the decimal part
-
-    mut c: int = "100" to int;
-    assert(c == 100, "");
-
-    mut x: int = 10;
-    mut s9: string = x to string;
-
-    return 0;
-}
-```
-
-**Loops, `break`, `continue`, range-`for`:**
-
-```
-fn main(): int {
-    mut i: int = 0;
-    mut sum: int = 0;
-
-    while i < 10 {
-        i = i + 1;
-        if i % 2 == 0 {
-            continue;
-        }
-        sum = sum + i;
-    }
-    assert(sum == 25, "");
-
-    mut for_sum: int = 0;
-    for j in 1..10 step j += 1 {
-        if j % 2 == 0 {
-            continue;
-        }
-        for_sum = for_sum + j;
-    }
-    assert(for_sum == 25, "");
-
-    return 0;
-}
-```
-
-**FFI — pointers and memory:**
-
-```
-extern fn malloc(size: int): ptr;
-extern fn free(p: ptr): void;
-extern fn memset(p: ptr, c: int, n: int): ptr;
-extern fn memcpy(dst: ptr, src: ptr, n: int): ptr;
-extern fn strlen(s: string): int;
-
-// An ordinary function may never take or return a raw `ptr`/`T*` (even
-// inside `unsafe { }`) -- only `extern fn` bindings and lib/std can, so
-// buffer allocation stays inlined in main() below instead of its own helper.
-
-fn main(): int {
-    unsafe {
-        mut b: ptr = malloc(32);
-        memset(b, 0, 32);
-        free(b);
-    }
-
-    mut len: int = strlen("verify");
-    assert(len == 6, "");
-
-    return 0;
-}
-```
-
-A larger FFI showcase (file I/O, `libm`, environment variables, sockets, variadic `printf` via `extern fn printf(fmt: string, ...): int;`, and linking against arbitrary system libraries via `extern from "libname" fn`) lives in the test suite alongside the rest of the examples above.
-
-**`showcase/`** has larger, real-world-shaped programs — an HTTP server and a companion Turf HTTP client that talks to it over a real TCP socket (a full request/response round trip, both ends written in Turf, using nothing but standard-library modules — no `extern fn`/`ptr` in the showcase files themselves), a key-value store client/server pair, a self-hosting-adjacent LLVM-C FFI demo, a text-analysis tool exercising `strings`/`fs`/`Set`/sort-and-search/`time`, and a JSON-config-driven dice roller exercising `json`/`random`/`net::resolve_hostname`. See that directory's own files for details on running each one.
-
-## Building from Source
-
-### Requirements
-
-- **LLVM 22** (via `LLVMConfig.cmake`)
-- **CMake 3.20+**
-- **C++20** compiler (Clang recommended)
-- `llama.cpp` (vendored as a submodule under `external/llama.cpp`; built   automatically as a static library on first configure if not already built)
-
-### Build
-
-```bash
-git clone --recursive <this-repo>
-cd turf
-chmod +x scripts/cmake_build.sh
-./scripts/cmake_build.sh --release
-```
-
-`cmake_build.sh` detects available CPU cores and builds in parallel; the resulting binary is placed at `build/turf`. On first run, if `llama.cpp`'s static libraries aren't already built, CMake builds them automatically before building Turf itself — this can take a while the first time.
-
-### Compile and run a file directly
-
-```bash
-./scripts/compile_and_run.sh path/to/file.tr
-```
-
-Compiles, runs, and cleans up the produced binary.
-
-## Documentation
-
-- **[`docs/reference/`](docs/reference/)** — the full language reference, one topic per page (variables & types, control flow, error handling, functions & modules, FFI & `unsafe`, structs & enums, state machines, generics & operators, arrays, the standard library, CLI & diagnostics). Start at [`docs/reference/README.md`](docs/reference/README.md).
-- **[`docs/architecture/`](docs/architecture/)** — deep internals references for contributors: the module/`::` system, pointers/`unsafe`/`&T`, error handling/`recover`, the compiler's memory model (what's heap vs. stack, in plain CS terms, not LLVM internals), and the full Lexer→Parser→Resolver→TypeChecker→Codegen pipeline plus its CFG static-analysis passes.
-- **[`docs/planning/`](docs/planning/)** — `ROADMAP_v1.0.0_COMPLETE.md` (the completed v1.0.0 tracker) and `FUTURE.md` (what's next, see below).
-
-## Roadmap
-
-**Turf is `v1.0.0`.** Every phase in `docs/planning/ROADMAP_v1.0.0_COMPLETE.md` is done: the full language backbone (FFI, `do`/`while`, `compare`, enums, bitwise/string ops, first-class functions, error handling, for-each loops, state machines, operator overloading), `unsafe { }`/`&T` safe references, the standard library rewrite via FFI, the `--smart` diagnostics retry loop, and diagnostics polish (source spans, error codes + `turf --explain`, broader "did you mean?").
-
-What's next is tracked in **[`docs/planning/FUTURE.md`](docs/planning/FUTURE.md)**, roughly in priority order:
-
-- Developer tooling: an LSP server, `turf fmt`, `turf test`, a package manager.
-- `@slm { }` in-source syntax (Prompt-Oriented Programming) — the `--smart` error-healing pipeline is live today; writing natural-language blocks that generate real code is not.
-- LoRA fine-tuning for the local SLM.
-- A hashed `HashMap<K, V>` (today's `map`/`set` are linear-scan association lists — see the Standard Library section above; a struct key can supply its own `hash()` now that generics are monomorphized, see `docs/reference/stdlib/collections.md`).
-- Two disjoint heaps: `mem::alloc`/`mem::alloc_zeroed`/`mem::grow`/`mem::Pool<T>` (`lib/std/mem/`) are entirely manual, C-style — no automatic reclamation of that memory. Every collection (`List<T>`, `Map<K,V>`, `string` concatenation, ...) allocates on a separate, garbage-collected heap instead: a real non-moving mark-sweep collector (`libturfrt`) traces reachability precisely through declared pointer fields and conservatively through the stack/registers, running automatically on allocation pressure or on demand via `gc_collect()`. `mem::root(p)`/`mem::unroot(p)` pin a GC object reachable only through manual memory. An automatic-reference-counting design was considered and explicitly rejected in favor of this tracing collector (cycles, FFI-boundary pinning, and per-assignment retain/release cost were the deciding factors) — see `docs/architecture/memory_model.md` §1.7 for the full model.
-
-**Turflang 2.0.0** is reserved for self-hosting — writing the compiler in Turf itself, once the above has landed.
+- [`docs/reference/`](docs/reference/README.md): the language reference, one topic per page, with the standard library in [`docs/reference/stdlib/`](docs/reference/stdlib/README.md).
+- [`docs/MIGRATING_TO_2.md`](docs/MIGRATING_TO_2.md): what changed from 1.x and what to do about it.
+- [`docs/architecture/`](docs/architecture/): how the compiler and runtime work, for contributors.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md): building, testing and sending changes.
+- `turf explain <code>`: every error code has a written explanation.
+- [`LICENSE`](LICENSE): Apache License 2.0.

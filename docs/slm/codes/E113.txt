@@ -1,0 +1,33 @@
+TURF E113 -- REMOVED SYNTAX:
+
+CAUSE:
+  The form written was valid in an earlier version of Turf and no longer exists. The
+  message names what replaced it. Usual source: an old tutorial or example.
+
+REMOVED -> REPLACEMENT:
+    Struct brace literal:    Point { x: 1, y: 2 }
+      ->  Point::new(1, 2)        // a struct with a constructor
+      ->  Point::default()        // every field zeroed
+    Static method via `::` in the declaration:  fn Point::origin(): Point { ... }
+      ->  fn Point.origin() static: Point { ... }
+
+CORRECT (the replacements, written out):
+    struct Point { x: int, y: int }
+
+    fn Point.new(x: int, y: int): void {
+        self.x = x;
+        self.y = y;
+    }
+
+    fn Point.origin() static: Point {
+        return Point::default();
+    }
+
+    mut a: Point = Point::new(1, 2);
+    mut b: Point = Point::default();
+    mut c: Point = Point::origin();
+
+FIX:
+  Rewrite using the replacement the message names.
+
+RELATED: E110 (specific word expected), E103 (unexpected token).

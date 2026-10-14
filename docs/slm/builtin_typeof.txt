@@ -23,8 +23,8 @@ CORRECT USAGE:
   io::printline(typeof(3.14));       // prints "double"
   io::printline(typeof("hello"));    // prints "string"
   io::printline(typeof(true));       // prints "bool"
-  io::printline(typeof(myPoint));    // prints "Point" (the struct's name)
-  immut t: string = typeof(myVar);   // stores the type name
+  io::printline(typeof(my_point));    // prints "Point" (the struct's name)
+  immut t: string = typeof(my_var);   // stores the type name
 
 COMMON MISTAKES:
   typeof()          // ERROR: no argument provided (needs exactly 1)

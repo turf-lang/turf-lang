@@ -1,0 +1,14 @@
+// EXPECT-DIAG: E137
+// EXPECT-DIAG: 'where' is marked @caller_location, so it can't be used as a function value
+// The hidden location argument is not part of `fn(): string`, so an indirect
+// call through `f` would have no location to pass.
+@caller_location
+fn where(): string {
+    return caller_location;
+}
+
+fn main(): int {
+    mut f: fn(): string = where;
+    printline(f());
+    return 0;
+}

@@ -1,6 +1,6 @@
 // tests/41_gc/09_boxed_fallible_success_survives_collection.tr
 // OVH-002 (docs/planning/OVERHAUL_REMAINING_WORK.md): `BoxToI64Slot()`
-// (src/CodegenCore.cpp) heap-boxes a `!T` success value wider than 64 bits
+// (src/codegen/CodegenCore.cpp) heap-boxes a `!T` success value wider than 64 bits
 // (a struct, here `Rec`) so it can outlive the function that returns it --
 // the box's ADDRESS is stashed in the `FallibleValue`'s `successBits`
 // slot, which sits on the stack as an ordinary `!Rec`-typed local

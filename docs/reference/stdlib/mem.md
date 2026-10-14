@@ -1,177 +1,321 @@
 # Memory: `mem`
 
-Low-level memory management, wrapping the C allocator ABI directly. Not
-prelude — requires `import mem;`.
+The manual heap: raw allocation, the checked wrappers around it, pinning, and
+`Pool`. This page is the API. What the two heaps are, which one you want and
+how they interact is in [Memory and Safety](../memory_and_safety.md).
 
 ```turflang
 import mem;
 ```
 
-Like the rest of the standard library, this module is two layers: raw
-`extern fn` bindings onto real libc allocator symbols (`malloc`, `calloc`,
-`realloc`, `free`, `posix_memalign`, ...), and Turf-level checked wrappers
-built on top of them that fail fast via `sys::panic()` on out-of-memory
-rather than returning a null pointer for the caller to forget to check.
+Not prelude: it needs `import mem;`. Most `mem` code deals in `void*`, so it
+runs inside `unsafe { }` ([FFI and unsafe](../ffi_and_unsafe.md)). Using a raw
+pointer type outside `unsafe` is **E130** ("Unsafe pointer use").
 
-> **Naming note.** Helpers name their pointer parameter `p`, not `ptr` —
-> `ptr` is Turf's own reserved opaque-pointer *type* keyword, so using it as
-> a parameter name fails to parse.
+## Which storage do I want
 
-Most `mem` code runs inside an `unsafe { }` block, since it deals directly
-in `void*`.
+| You need | Use |
+|---|---|
+| a local value, a small struct, a fixed array | an ordinary variable |
+| a value that outlives its function, or a linked structure | [`heap(expr)`](../memory_and_safety.md#heapexpr-a-value-on-the-gc-heap), on the GC heap |
+| a growable sequence, set or map | [`List`, `Map`, ...](collections.md), on the GC heap |
+| memory for a C library, or a buffer whose lifetime you manage | `mem::alloc`, on the manual heap |
 
----
+The two heaps never merge. Memory from `mem::alloc` is never traced or freed by
+the collector: you free it, exactly once. A `string`, a `heap(...)` object or a
+collection's storage belongs to the collector and must never be passed to
+`mem::free`.
 
-## Raw C bindings
+```turflang
+import mem;
+import io;
 
-These map 1:1 onto real libc symbols and are directly callable as
-`mem::malloc(...)`, etc., though most code should prefer the checked
-wrappers below.
+fn main(): int {
+    unsafe {
+        mut buf: int* = mem::alloc(sizeof(int) * 4) to int*;
+        buf[0] = 12;
+        buf[3] = 30;
+        io::printline((buf[0] + buf[3]) to string);   // 42
+        mem::free(buf to void*);
+    }
+    return 0;
+}
+```
 
-### Allocator bindings
+The compiler checks a pointer from `mem::alloc` (and every function declared
+`@ownership(acquires)`) for a second `mem::free` of it, **E017** ("Double free
+detected"), and for a use after the free, **E018** ("You're using memory from
+'buf' after it was freed"), when it can see both on the same path.
 
-- `malloc(size: int): void*`
-- `calloc(count: int, size: int): void*`
-- `realloc(p: void*, new_size: int): void*`
-- `free(p: void*): void`
-- `posix_memalign(memptr: void*, alignment: int, size: int): int` — the
-  first parameter is genuinely a `void**` out-param in C; Turf's `void*` is
-  opaque regardless of pointer depth, so it round-trips through a scratch
-  slot and an `int*`-cast read-back internally.
-- `malloc_usable_size(p: void*): int` — glibc-specific; reports the actual
-  usable byte count at `p`, which is often larger than what was requested
-  since `malloc` rounds up internally.
+<!-- doc-example: fails E017 -->
+```turflang
+import mem;
 
-### Memory primitive bindings
+fn main(): int {
+    unsafe {
+        mut p: void* = mem::alloc(8);
+        mem::free(p);
+        mem::free(p);
+    }
+    return 0;
+}
+```
 
-- `memcpy`, `memmove`, `memset`, `memcmp` — standard C ABI signatures.
+<!-- doc-example: fails E018 -->
+```turflang
+import mem;
 
----
+fn main(): int {
+    unsafe {
+        mut buf: int* = mem::malloc(40);
+        mem::free(buf);
+        buf[0] = 5;
+    }
+    return 0;
+}
+```
 
-## Checked wrappers
+## Checked allocation
+
+The wrappers below call the C allocator and **panic** if it returns null, so a
+returned pointer is never null. None of them returns `!T`: running out of memory
+is not a condition a program recovers from. Parameters are named `p`, not
+`ptr`, because `ptr` is a type keyword.
 
 ### `alloc(size: int): void*`
 
-`malloc(size)`. **Aborts** via `sys::panic("mem.alloc: out of memory")` on
-OOM (a null result) — not a recoverable `!void*`.
-
-```turflang
-unsafe {
-    mut buf: void* = mem::alloc(32);
-    test::assert(buf != null, "");
-}
-```
+`size` bytes of uninitialised manual memory. Panics `mem.alloc: out of memory`.
 
 ### `alloc_zeroed(count: int, elem_size: int): void*`
 
-`calloc(count, elem_size)`. Aborts (`"mem.alloc_zeroed: out of memory"`) on
-OOM.
-
-```turflang
-mut zbuf: void* = mem::alloc_zeroed(4, 8);
-```
+`count * elem_size` bytes, all zero. Panics `mem.alloc_zeroed: out of memory`.
 
 ### `grow(p: void*, new_size: int): void*`
 
-`realloc(p, new_size)`. Aborts (`"mem.grow: out of memory"`) on OOM.
-
-```turflang
-mut grown: void* = mem::grow(buf, 64);
-```
+Resizes the block at `p` to `new_size` bytes, keeping the contents that fit, and
+returns the new address: use that, not `p`, afterwards. Panics
+`mem.grow: out of memory`.
 
 ### `dup(src: void*, n: int): void*`
 
-Allocates `n` bytes (via `alloc`, so also abort-on-OOM) and `memcpy`s `n`
-bytes from `src` into it, returning a genuinely distinct buffer.
-
-```turflang
-mut src: int* = mem::alloc(8) to int*;
-src[0] = 12345;
-
-mut copy: int* = mem::dup(src, 8) to int*;
-test::assert(copy[0] == 12345, "");
-test::assert(copy != src, "");
-```
+A new block of `n` bytes holding a copy of the `n` bytes at `src`. Panics
+`mem.alloc: out of memory`.
 
 ### `zero(p: void*, n: int): void`
 
-`memset(p, 0, n)`.
+Sets `n` bytes starting at `p` to zero.
 
 ### `alloc_aligned(alignment: int, size: int): void*`
 
-Wraps `posix_memalign`. `alignment` must be a power of two and a multiple of
-`sizeof(void*)`, matching the underlying libc call's requirements. Aborts
-(`"mem.alloc_aligned: allocation failed (bad alignment or out of memory)"`)
-on any failure, including bad alignment.
-
-```turflang
-mut aligned: void* = mem::alloc_aligned(64, 128);
-test::assert(mem::usable_size(aligned) >= 128, "...");
-```
+`size` bytes whose address is a multiple of `alignment`. `alignment` must be a
+power of two and a multiple of the pointer size (8). Any failure, including a
+bad `alignment`, panics with
+`mem.alloc_aligned: allocation failed (bad alignment or out of memory)`.
 
 ### `usable_size(p: void*): int`
 
-`malloc_usable_size(p)` — the actual usable byte count at `p` (subject to
-the glibc-specific caveat noted above).
-
----
-
-## `Pool<T>` — bulk-free allocation tracking
+How many bytes are really usable at `p`: at least what was asked for, often
+more. Not available on every platform (it wraps `malloc_usable_size`, a glibc
+function, spelled `malloc_size` on macOS).
 
 ```turflang
-struct Pool<T> { items: T*, len: int, cap: int }
-```
+import mem;
+import test;
 
-Tracks a set of allocations so they can all be freed with one call.
+fn main(): int {
+    unsafe {
+        mut a: int* = mem::alloc(8) to int*;
+        a[0] = 12345;
+        mut copy: int* = mem::dup(a to void*, 8) to int*;
+        test::assert(copy[0] == 12345 && copy != a, "dup is a distinct block");
 
-> **Design note: not a true bump-pointer arena.** Turf has neither
-> address-of (`&local`) nor an allowed `ptr`/`void*` → `int` cast (only
-> `int` → `ptr` is permitted), so there's no way to hand out sub-pointers
-> into one big buffer the way a real arena would. `Pool<T>` instead just
-> remembers every allocation made through it. It's deliberately
-> self-contained — it does not `import list;`/reuse `List<T>`, which would
-> create a circular import since `list.tr` itself imports `mem.tr`. Its
-> `track()` is a direct copy of `List.push()`'s growth logic, and shares
-> the same real-per-instantiation-`sizeof(T)` / doubling-from-8 policy
-> described in [`collections.md`](./collections.md). This duplication is
-> deliberate and explicitly out of scope to "fix" — see
-> `docs/development/changes/STD-003.md`, item 7.
+        mut z: void* = mem::alloc_zeroed(4, 8);
+        mut zi: int* = z to int*;
+        test::assert(zi[3] == 0, "zeroed");
+        zi[3] = 9;
+        mem::zero(z, 32);
+        test::assert(zi[3] == 0, "zero clears");
+        z = mem::grow(z, 64);
 
-### `Pool.track(item: T): void`
+        mut aligned: void* = mem::alloc_aligned(64, 128);
+        test::assert(mem::usable_size(aligned) >= 128, "usable_size");
 
-Registers an already-obtained pointer (e.g. from `mem::alloc()`) with the
-pool. Does **not** allocate anything itself.
-
-```turflang
-mut pool: mem::Pool<void*> = mem::Pool::default();
-mut i: int = 0;
-while i < 20 {
-    pool.track(mem::alloc(16));
-    i = i + 1;
+        mem::free(a to void*);
+        mem::free(copy to void*);
+        mem::free(z);
+        mem::free(aligned);
+    }
+    return 0;
 }
-test::assert(pool.length() == 20, "...");
 ```
+
+### `free(p: void*): void`
+
+Releases a block that came from `alloc`, `alloc_zeroed`, `alloc_aligned`,
+`grow`, `dup`, or any other pointer you own. Rules:
+
+- Free each block once, and do not use it afterwards. `free` of `null` does
+  nothing.
+- **Never pass it a pointer from the GC heap**: a `string`, a `heap(...)`
+  object, or a collection's storage. The runtime checks every pointer against
+  the collector's records, and panics instead of corrupting memory:
+
+  ```text
+  panic: cross-heap free: mem::free() was called on a pointer that belongs to the GC heap (a string, a collection buffer, a heap(...) value, anything the collector owns), not the manual heap -- the two heaps do not merge
+  ```
+
+  The compiler cannot see this, since `s to void*` is a legal cast; the check
+  is at run time.
+- The check lives in `mem::free`. If you declare your own `extern fn free` and
+  call the C function directly, there is no check.
+
+```turflang
+import mem;
+import strings;
+
+fn main(): int {
+    mut s: string = strings::repeat("z", 10);   // a GC-heap string
+    unsafe {
+        mem::free(s to void*);                  // panics: cross-heap free
+    }
+    return 0;
+}
+```
+
+See [the cross-heap free panic](../memory_and_safety.md#the-cross-heap-free-panic).
+
+## Pinning: `root` and `unroot`
+
+### `root(p: void*): void`
+
+### `unroot(p: void*): void`
+
+The collector finds objects by following pointers from the stack, registers and
+other GC objects. A GC pointer stored **only** in manual memory, or inside a C
+library's data, is invisible to it, and the object can be collected while you
+still hold it there. `root(p)` pins the GC object that contains `p` so that no
+collection reclaims it, until a matching `unroot(p)`.
+
+- `p` may point into the middle of the object.
+- Pins nest: two `root(p)` calls need two `unroot(p)` calls.
+- `root` of a pointer that is not a GC pointer (a `mem::alloc` block, a C buffer)
+  does nothing, and so does a later `unroot` of it.
+- `unroot(p)` of a GC object with no outstanding pin panics:
+  `unpin of unpinned object: mem::unroot() was called on an object with no matching mem::root() pin outstanding`.
+
+```turflang
+import mem;
+import strings;
+import io;
+
+fn main(): int {
+    unsafe {
+        mut holder: string* = mem::alloc(sizeof(string)) to string*;
+        holder[0] = strings::repeat("kept", 3);   // the only reference is in manual memory
+        mem::root(holder[0] to void*);
+        gc_collect();
+        io::printline(holder[0]);                 // keptkeptkept
+        mem::unroot(holder[0] to void*);
+        mem::free(holder to void*);
+    }
+    return 0;
+}
+```
+
+When you need it, and when you do not, is in
+[`mem::root`](../memory_and_safety.md#memroot-pinning-an-object-the-collector-cannot-see).
+
+## `Pool`: free a batch together
+
+```text
+pub struct Pool         // the fields are private
+```
+
+A `Pool` remembers a set of allocations so that one call frees them all, for
+example everything allocated while serving one request. It stores the pointers
+you hand it; it does not allocate for you.
+
+`Pool` is not generic and holds `void*` only. Its storage is manual memory that
+the collector never scans, so a GC value kept only there would be freed under
+it; the signature keeps one out. `mem::Pool<string>` is **E148** ("Wrong number
+of type arguments"), and `pool.track(s)` with a `string`, a collection or a
+struct is **E056** ("No matching overload"). Any `T*` converts to `void*` on its
+own.
+
+### `Pool.track(item: void*): void`
+
+Registers `item`, normally a pointer you already got from `alloc`. It allocates
+nothing for the item itself. The pool's own storage is manual memory and grows
+by doubling, starting at 8.
 
 ### `Pool.length(): int`
 
-Number of tracked allocations.
+The number of tracked items.
 
-### `free_pool(pool: Pool<void*>): void`
+### `free_pool(pool: Pool): void`
 
-Frees every tracked allocation, then the pool's own backing array.
+Calls `mem::free` on every tracked pointer, then releases the pool's own storage.
+Every tracked pointer must therefore follow `free`'s rules: a GC pointer cast to
+`void*` and tracked anyway panics with the cross-heap free message. The pool is
+left empty, so freeing it again does nothing and it can track a new batch.
 
-> **Gotcha: only works for `Pool<void*>`, not a generic `Pool<T>`
-> operation.** This is a plain function taking a *concrete* `Pool<void*>`
-> parameter, not a generic `fn<T> Pool.free_all()` method. A generic
-> method's body is type-checked exactly once against the abstract `T`, so
-> `self.items[i] to void*` inside a generic method is rejected ("Cannot
-> explicitly cast 'T' to 'void*'"). A plain function taking a concrete
-> `Pool<void*>` sidesteps this because the type is fully known at the call
-> site. In practice this means `Pool<T>` can only be meaningfully
-> bulk-freed when instantiated as `Pool<void*>` (or another single concrete
-> pointer type, via an equivalent hand-written free function) — there's no
-> way to bulk-free an arbitrary `Pool<T>` generically.
+A `Pool` is a **shared handle**, like a `List`: assigning it, or passing it to a
+function, shares the one set of tracked items, so a callee's `track` is seen by
+its caller. There is no `copy()`, since two pools freeing the same pointers
+would free them twice.
 
 ```turflang
-mem::free_pool(pool);
+import mem;
+import io;
+
+fn track_two(pool: mem::Pool): void {
+    unsafe {
+        pool.track(mem::alloc(16));
+        pool.track(mem::alloc(16));
+    }
+}
+
+fn main(): int {
+    unsafe {
+        mut pool: mem::Pool = mem::Pool::default();
+        pool.track(mem::alloc(16));
+        track_two(pool);
+        io::printline(pool.length() to string);   // 3
+        mem::free_pool(pool);
+    }
+    return 0;
+}
+```
+
+## C bindings
+
+The C functions underneath are public as well, for code that wants the exact C
+behaviour with no null check. Prefer the wrappers above.
+
+| Binding | Notes |
+|---|---|
+| `malloc(size: int): void*`, `calloc(count: int, size: int): void*`, `realloc(p: void*, new_size: int): void*` | return null on failure; declared as allocators for the double-free check |
+| `posix_memalign(memptr: void*, alignment: int, size: int): int` | `memptr` is the address of a pointer-sized slot the C function writes into; returns 0 on success |
+| `malloc_usable_size(p: void*): int` | glibc; `malloc_size` on macOS |
+| `memcpy(dst, src, n)`, `memmove(dst, src, n): void*`, `memset(p, val, n): void*`, `memcmp(a, b, n): int` | the C functions of those names |
+
+Memory from `malloc`, `calloc` and `realloc` is released with `mem::free`.
+
+```turflang
+import mem;
+import test;
+
+fn main(): int {
+    unsafe {
+        mut r: void* = mem::malloc(8);
+        mut z: void* = mem::calloc(1, 8);
+        r = mem::realloc(r, 16);
+        mem::memset(r, 7, 16);
+        mem::memcpy(z, r, 8);
+        test::assert(mem::memcmp(z, r, 8) == 0, "copied bytes compare equal");
+        mem::free(r);
+        mem::free(z);
+    }
+    return 0;
+}
 ```

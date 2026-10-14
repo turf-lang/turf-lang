@@ -5,7 +5,7 @@ import strings;
 import test;
 
 fn main(): int {
-    test::assert('9'.isDigit(), "explicit re-import of a prelude module still works");
+    test::assert('9'.is_digit(),"explicit re-import of a prelude module still works");
     test::assert("a" + "b" == "ab", "explicit re-import of strings still works");
 
     return 0;

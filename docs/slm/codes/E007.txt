@@ -10,7 +10,7 @@ CAUSE:
   3. `return` used outside any function body.
 
 CORRECT USAGE:
-    fn sumPositive(nums: int[5]): int {
+    fn sum_positive(nums: int[5]): int {
         mut total: int = 0;
         for i in 0..5 {
             if nums[i] < 0 {
@@ -35,8 +35,7 @@ WHAT THIS ERROR IS NOT:
   - Not about a MISSING return -- a function that's missing a return on
     some path is MissingReturnError (E009), a different code.
   - Not about unreachable code -- code that can never execute because it
-    comes after a terminator is UnreachableCodeError (E013) or
-    StatementAfterTerminatorError (E012).
+    comes after a terminator is StatementAfterTerminatorError (E012).
 
 FIX:
   Move the `break`/`continue` inside an enclosing loop, or remove it if it

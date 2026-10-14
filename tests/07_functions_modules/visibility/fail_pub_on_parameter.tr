@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E087
+// EXPECT-DIAG: 'pub' can't appear in a parameter list
+// LEC-002: E087 -- `pub` in a parameter list means nothing (hint: put it before
+// `fn` to export the function).
+fn add(pub a: int, b: int): int {
+    return a + b;
+}
+
+fn main(): int {
+    return 0;
+}

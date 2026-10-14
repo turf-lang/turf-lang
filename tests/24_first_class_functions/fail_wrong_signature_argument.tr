@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E056
+// EXPECT-DIAG: No overload of 'apply' matches argument types (fn(double): string, int)
 // Issue #187 acceptance criterion: "Passing a function with the wrong
 // signature emits a TypeChecker error."
 fn apply(f: fn(int): int, x: int): int {

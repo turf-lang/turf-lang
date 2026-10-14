@@ -1,17 +1,15 @@
-// Companion module for fail_duplicate_struct_across_modules.tr -- declares a
-// DIFFERENTLY-SHAPED 'Point' struct than dup_struct_a_module.tr, so importing
-// both together must be rejected with a clean DuplicateTypeNameError instead
-// of silently reaching Codegen (where it used to crash with a confusing
-// "Internal compiler error" -- see that error class's doc comment in
-// Errors.h). Named `..._module.tr` so scripts/test_runner.sh's
-// `grep -v "_module.tr"` skips it as a standalone test entry point; it only
-// exists to be imported.
-struct Point {
-    x: int,
-    y: int,
-    z: int
+// Companion module for same_struct_name_across_modules.tr -- declares a
+// DIFFERENTLY-SHAPED 'Point' struct than dup_struct_a_module.tr. Before
+// FDN-003 importing both was rejected (DuplicateTypeNameError), and before
+// THAT it silently reached Codegen and crashed ("Internal compiler error").
+// Named `..._module.tr` so scripts/test_runner.sh's `grep -v "_module.tr"`
+// skips it as a standalone test entry point; it only exists to be imported.
+pub struct Point {
+    pub x: int,
+    pub y: int,
+    pub z: int
 }
 
-fn makeB(): Point {
+pub fn makeB(): Point {
     return Point::default();
 }

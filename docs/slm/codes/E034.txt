@@ -1,13 +1,13 @@
 TURF E034 -- DUPLICATE STRUCT/ENUM/ERROR-TYPE NAME:
 
 CAUSE:
-  Two `struct`, `enum`, or `error` type declarations used the SAME name.
-  Unlike functions (which are namespaced per-module), struct/enum/error
-  type names are shared across your ENTIRE file and every module you
-  import -- so this can fire even if you never wrote the name twice
-  yourself, if an imported module happens to declare a type with the same
-  name as one of your own. Distinct from DuplicateDeclarationError (E033),
-  which is about a VARIABLE name reused in the same scope, not a type name.
+  Two `struct`, `enum`, or `error` type declarations in the SAME file (or
+  the same module) used the same name. A type belongs to its declaring
+  module, so an imported module declaring a type with the same name as one
+  of yours is NOT this error -- they are two separate types (if a bare use
+  of the name becomes ambiguous, that is E085 instead). Distinct from
+  DuplicateDeclarationError (E033), which is about a VARIABLE name reused
+  in the same scope, not a type name.
 
 CORRECT:
     struct Point { x: int, y: int }
@@ -19,11 +19,5 @@ INCORRECT:
     // ERROR: A struct named 'Point' is already declared.
     //   Note: first declared here (line 1, ...)
 
-  Also incorrect: declaring your own `struct Config { ... }` while an
-  imported module ALSO declares a top-level `struct Config { ... }` --
-  same error, even though you only wrote the name once in your own file.
-
 FIX:
-  Rename one of the two conflicting declarations. If the collision is with
-  an imported module's type rather than your own code, rename YOUR type --
-  renaming an import's exported name isn't supported yet.
+  Rename one of the two conflicting declarations in that file.

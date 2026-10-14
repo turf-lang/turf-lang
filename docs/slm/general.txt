@@ -1,359 +1,102 @@
-TURF-LANG GENERAL REFERENCE
-============================
-
-NOTE ON SEMICOLONS:
-  Semicolons are REQUIRED after every statement. `mut x: int = 5` (no
-  semicolon) is a syntax error: "Expected ';' after statement."
-
----
+TURF-LANG GENERAL REFERENCE (the syntax card above shows the basic forms)
 
 TYPES:
-  int      64-bit signed integer
-  double   64-bit floating point
-  bool     boolean: true or false
-  string   string
-  void     ONLY allowed as a function return type, never as a variable type
-  ptr      opaque pointer (FFI); any T* is a typed pointer to T
+  int (64-bit)   double   bool   char ('a')   string   void (return type only)
+  int32 (storage type: arithmetic on it gives int, convert back with `to int32`)
+  T[N] fixed array, T[] array parameter, T* raw pointer and ptr (only inside
+  `unsafe { }`), &T reference, &?T reference that may be null, List<T>, Map<K, V>.
+  Literals: 42  3.14  true  false  'a'  "text\n" (\n \t \r \\ \")  null (pointers
+  and references only).
 
----
+DECLARATIONS AND ASSIGNMENT:
+  `mut name: Type = value;` can be reassigned, `immut name: Type = value;` cannot
+  (an immut needs its value where it is declared). `mut x: int;` with the value
+  assigned later is allowed, as long as every path assigns before the read.
+  `mut x: guess = 5;` infers the type from the value.
+  Reassign with the name only: `x = 10;  x += 5;  x++;`. Never repeat `mut`/`immut`
+  or the type: that is "already created a variable".
+  Operators: + - * / %  ** (always a double)  == != < > <= >=  && || !  & | ^ ~ << >>
 
-LITERALS:
-  42          integer
-  3.14        double
-  true        bool
-  false       bool
-  "hello\n"   string (escape sequences: \n \t \\ \")
-  null        the null pointer literal
+CASTS: postfix `expr to Type`, never `Type(expr)`.
+  `3.9 to int` (drops the fraction)  `7 to double`  `42 to string`  `65 to char`
+  `'a' to int`  `"99" to int` (parsed at run time)  `1 to Color` (a valid variant
+  number)  Not allowed: to bool. Test a number with `n != 0`.
+  string + string joins; any other type needs `x to string` first, and `to`
+  binds looser than `+`, so parenthesize it: `"n=" + (n to string)`.
 
----
+CORRECT:
+    import io;
 
-VARIABLES:
-  Every declaration starts with `mut` (reassignable) or `immut`
-  (write-once), then `name: Type = value`. The type annotation comes AFTER
-  the name, separated by a colon. A value is required at declaration time.
-
-    mut x: int = 5;
-    immut pi: double = 3.14;
-    mut flag: bool = false;
-    mut msg: string = "hi";
-
-  REASSIGNMENT (name only, no `mut`/`immut`, no type):
-    x = 10;
-    x += 5;
-    x -= 2;
-    x *= 3;
-    x /= 2;
-    x %= 4;
-    x++;
-    x--;
-    ++x;
-    --x;
-
-  Reassigning an `immut` variable is a compile error ("Oops! You can't
-  change the value of 'x' because it's immutable."), including indirectly
-  through a struct method that mutates one of its own fields.
-
----
-
-ARRAYS:
-  mut name: Type[SIZE] = [v1, v2, v3];
-
-    mut nums: int[5] = [1, 2, 3, 4, 5];
-    immut primes: int[3] = [2, 3, 5];
-
-  ACCESS:
-    primes[0]                // read element (zero-indexed)
-    primes[0] = 7;            // write element
-    primes[0] += 1;           // compound assignment on an element IS supported
-
-  LENGTH: a method call, not a property.
-    mut n: int = primes.length();
-
-  RULES:
-  - SIZE must be a positive integer literal.
-  - The initializer list's length must exactly match the declared SIZE.
-  - Every element's type must match the declared element type (or be a
-    compatible numeric promotion) -- e.g. `int[3] = [1, "two", 3]` is
-    rejected at compile time.
-
----
-
-OPERATORS:
-  Arithmetic:  +  -  *  /  %  ** (exponentiation -- result is ALWAYS
-                                 double, even for two int operands, e.g.
-                                 `2 ** 3` is 8.0, not 8)
-  Relational:  ==  !=  <  >  <=  >=
-  Logical:     &&  ||  !  (prefix ! desugars to `expr != true`)
-  Bitwise:     ~ (not)  &  |  ^ (XOR)  <<  >>
-  Unary:       - (negate)  ~ (bitwise not)
-  Assignment:  =  +=  -=  *=  /=  %=
-  Increment:   x++  x--  ++x  --x
-  Scope:       :: (enum variant access, e.g. Color::Red)
-
-  TYPE PROMOTION IN EXPRESSIONS:
-    bool -> int -> double (promoted automatically in expressions)
-    string cannot be combined with any other type in arithmetic --
-    concatenate with `<expr> to string` first.
-
----
-
-TYPE CASTING (explicit, POSTFIX -- `expr to Type`, not `Type(expr)`):
-    3.14 to int        // 3 (truncates)
-    10 to double        // 10.0
-    42 to string        // "42"
-    true to string       // "true"
-    "99" to int          // 99 (runtime parse of string)
-    99 to Color          // cast an int to an enum type -- the value must be
-                         // a valid variant index, or it's rejected at
-                         // compile time when it's a literal
-
----
-
-CONTROL FLOW:
-
-  IF: block form only. There is no single-line `then`/`else` form -- use
-  the `give ... otherwise ...` ternary (below) for a single-expression
-  conditional instead.
-
-    if <cond> {
-        ...
-    } elseif <cond> {
-        ...
-    } else {
-        ...
-    }
-    // Parentheses around <cond> are optional.
-    // `elseif` is ONE word -- `else if` (two words) is a parse error.
-
-  TERNARY (single expression, no blocks):
-    <condition> give <then_value> otherwise <else_value>
-
-    mut y: int = x > 0 give 1 otherwise 0;
-
-  WHILE LOOP:
-    while <cond> {
-        ...
-    }
-
-  FOR LOOP:
-    for <var> in <start>..<end> step <step_expr> {
-        ...
-    }
-    // <step_expr> is an ASSIGNMENT EXPRESSION executed after each
-    // iteration (e.g. `i += 1`, not a bare number). The loop variable is
-    // automatically declared as int or double based on <start>/<end>.
-    // IMPORTANT: nothing forces <step_expr> to touch the loop variable --
-    // if it never does (typo, or it updates a different variable by
-    // mistake), the loop runs forever or not at all. The compiler warns
-    // about this ("the loop variable is never changed by this loop's
-    // 'step' or its body") but it does not stop compilation.
-    EXAMPLE:
-      for i in 0..10 step i += 1 { }
-      for i in 10..0 step i -= 2 { }
-
-  BREAK / CONTINUE:
-    break     // exits innermost loop
-    continue  // skips to the step expression of innermost loop
-
----
-
-FUNCTIONS:
-  fn name(param: Type, param2: Type, ...): ReturnType {
-      return value;
-  }
-
-  The return type comes AFTER the parameter list, separated by a colon --
-  the opposite order from the parameters themselves.
-
-    fn add(a: int, b: int): int {
-        return a + b;
-    }
-
-    fn greet(name: string): void {
-        io::printline(name);
-    }
-
-  RULES:
-  - Return type is required: int, double, bool, string, void, a struct/enum
-    name, a pointer type, or an array type.
-  - Non-void functions must return a value on every code path.
-  - void functions may use a bare `return;` or omit it.
-  - void is not a valid parameter type.
-  - Functions can be called before they are defined (pre-pass hoisting).
-  - `fn<T> name(x: T): T { ... }` declares a generic function; T is erased
-    to a 64-bit slot at codegen time (works uniformly for int/double/bool/
-    pointers).
-
----
-
-STRUCTS:
-    struct Point {
-        x: int,
-        y: int
-    }
-
-  Construct with a struct literal (field names required, any order):
-    mut p: Point = Point { x: 1, y: 2 };
-    p.x = 5;                 // field access/assignment via '.'
-
-  Methods are declared OUTSIDE the struct body, qualified by struct name:
-    fn Point.sum(): int {
-        return self.x + self.y;   // 'self' is the implicit receiver
-    }
-    p.sum();                  // call via '.', same as a field access
-
-  A method can mutate and return `self` (as a pointer) to support chaining:
-    fn Counter.increment(): Counter* {
-        self.val = self.val + 1;
-        return self;
-    }
-    c.increment().increment();   // chained calls
-
-  Struct (and enum) names live in ONE flat namespace shared by the current
-  file and every imported module -- unlike functions, they are NOT
-  namespaced per-module, so `List<int>` works without a `list::` prefix
-  (though `list::List<int>` also works, identically -- see modules.txt).
-  Two different modules declaring a same-named struct is a compile error.
-
-  Generic structs: `struct Box<T> { val: T }`, instantiated as `Box<int>`.
-
-  Struct instances do NOT support `==`/`!=` comparison -- compare the
-  fields you care about individually instead (`a.x == b.x`).
-
----
-
-ENUMS:
     enum Color { Red, Green, Blue }
 
-  Access a variant with `::` (also the general namespace-resolution
-  operator for module-qualified function/type access -- see MODULES /
-  IMPORTS below; `::` is never used for instance access, only `.` is):
-    immut c: Color = Color::Red;
-
-  Compare with a `compare` block, not `if`/`==`:
-    compare c {
-        matches Color::Red:
-            ...
-        done
-        matches Color::Green:
-            ...
-        done
-        otherwise:
-            ...
+    fn main(): int {
+        mut n: int = 7;
+        mut d: double = n to double;
+        mut flag: bool = n != 0;
+        mut label: string = "n=" + (n to string);
+        mut total: int = 0;
+        for i in 0..3 {                      // `step i += 1` is optional
+            total = total + i;
+        }
+        mut nums: int[3] = [1, 2, 3];
+        for v in nums {                      // also: for (index, v) in nums
+            total = total + v;
+        }
+        while total > 100 {
+            total = total - 1;
+        }
+        mut c: Color = Color::Green;
+        compare c {                          // an enum needs every variant, or otherwise:
+            matches Color::Red:
+                total = 1;
+            done                             // every matches ends with done
+            otherwise:                       // otherwise is last and has no done
+                total = 2;
+        }
+        io::printline(label);
+        return total - 4;
     }
-  Every `matches` arm's body ends with `done`. `otherwise:` (optional) must
-  be the LAST arm and has no `done`. Omitting a variant without an
-  `otherwise:` arm is a compile error ("Non-exhaustive enum comparison").
-  Casting an out-of-range integer LITERAL to an enum type is rejected at
-  compile time (e.g. `99 to Color` when Color only has 3 variants).
 
----
+CONTROL FLOW:
+  `if c { } elseif c { } else { }` braces always; `else if` also works. A one-line
+  choice is `cond give a otherwise b`. `do { } while cond;`. `break`, `continue`.
+  A `for` with a range uses ONE variable; `step` takes an assignment (`i += 2`).
 
-MODULES / IMPORTS (full reference: modules.txt):
-  import io;                        // bare -- qualified access only
-  import io::printline;             // on-demand -- one name, usable bare too
-  import io::[print, printline];    // on-demand -- a list of names
-  import math::[*];                 // on-demand -- every name, wildcard
+FUNCTIONS: `fn name(a: int, b: int): int { return a + b; }` -- the return type
+  follows `:` and is required (`: void` for none). A function returning a value
+  returns on every path. `fn<T> first(a: T, b: T): T` is generic; the type is
+  inferred at the call, never written (`first<int>(1, 2)` is a parse error).
 
-  Call a module's function qualified by module name, using `::` (never
-  `.` -- `.` is instance-only):
-    io::printline("hi");
-    mem::malloc(64);
+STRUCTS AND ENUMS:
+  `struct Point { x: int, y: int }`. There is no brace literal: build with
+  `Point::default()` (all fields zero) or `Point::new(1, 2)` when `fn Point.new`
+  is declared (it assigns every field through `self`). Methods are declared
+  outside the struct, `fn Point.sum(): int { return self.x + self.y; }`, and
+  called `p.sum()`. A struct cannot be compared with `==`: compare its fields.
+  `enum Color { Red, Green }`; a variant is `Color::Red`.
 
-  There is no auto-imported module -- every module, including `io`, must
-  be imported explicitly by every file that uses it. A BARE import
-  (`import io;`) makes the module's functions reachable ONLY via `io::`
-  qualification; nothing is pasted unqualified into your file. To call a
-  function bare (no qualifier), either declare it yourself or on-demand-
-  import it (`import io::printline;` or a list/wildcard form) -- see
-  modules.txt for the full collision/circular-import rules.
+MODULES: `printline("hi");` -- `::` for modules, enum variants and static
+  methods, `.` only on a value. `int`, `double`, `bool`, `char`, `strings`,
+  `array`, `io`, `math` and `sys` are imported for you (`s.length()`,
+  `a.length()`), and the functions of `io`, `math` and `sys` are callable bare
+  (`printline("hi")`, `abs(-3)`, `exit(1)`); every other module (`mem`, `test`,
+  `list`, `map`, ...) needs its own `import` in every file that uses it. See
+  modules.txt.
 
----
+BUILT IN: `typeof(x)` (the type's name) and `sizeof(Type)` need no import.
 
-TRUE INTRINSICS vs. STANDARD LIBRARY -- this distinction matters and is
-easy to get backwards:
+MEMORY: `mem::malloc(n)`, `mem::realloc(p, n)`, `mem::free(p)`, only inside
+  `unsafe { }`. Using a pointer after `free`, or freeing it twice, is rejected
+  at compile time.
 
-  A handful of names really ARE wired directly into the compiler and never
-  require ANY import, because they aren't declared anywhere in Turf source
-  at all: typeof and sizeof (sizeof is actually its own piece of syntax,
-  not even a function call -- see below).
+TESTS AND EXIT: `test::assert(cond, "message")`, `test::assert_eq(a, b)` after
+  `import test;`. `sys::exit(code)` and `sys::panic("message")` after `import sys;`.
 
-  Everything else that might look "built-in" -- print, printline, input,
-  assert, fail, assert_eq/assert_neq, and every function in
-  mem/math/list/strings/stack/queue/sys/test -- is ordinary Turf standard
-  library code living in lib/std/*.tr, exactly as importable/inspectable as
-  anything a user could write themselves, requiring the same `import` +
-  `::` qualification as any module. There is no decorator or compiler-
-  native-codegen mechanism backing any of them -- print/printline/input are
-  plain Turf functions delegating to `extern fn printf`/`scanf`/`getchar`
-  FFI bindings, same pattern math.tr/mem.tr use for libm/libc, and
-  test::assert/test::fail are plain Turf functions delegating to
-  sys::panic (itself a thin `extern fn abort`/`write` wrapper). Do NOT
-  describe io/mem/math/sys/test functions as "intrinsics" or "builtins" --
-  they are standard library.
-
-TRUE INTRINSICS (never need an import; not declared in any .tr file):
-
-  typeof(expr): string
-    Compile-time type name, e.g. "int", "double", "Point".
-
-  sizeof(Type): int
-    NOT a function call -- its own dedicated syntax (`sizeof(int)`,
-    `sizeof(SomeStruct)`), parsed directly, with no module or import
-    involved at all. Returns a type's size in bytes. Every type in this
-    language happens to be 8 bytes today (type erasure to a 64-bit slot).
-
----
-
-MEMORY (via `import mem;`, manual, no garbage collector):
-  mem::malloc(size)              -- allocate size bytes, returns a raw pointer
-  mem::realloc(ptr, newSize)     -- resize a previous allocation
-  mem::free(ptr)                 -- release memory
-  Using a pointer after free(), or calling free() twice on the same pointer,
-  is a compile-time-detected bug where the compiler can prove it (dataflow
-  analysis, not a runtime check).
-
----
-
-SYSTEM (via `import sys;`): process termination, no test-writing intent.
-  sys::abort()                   -- terminate immediately (SIGABRT), no message
-  sys::exit(code)                -- terminate immediately with the given exit code
-  sys::panic(msg)                -- write `msg` to stderr, then abort. Never
-                                     returns. Every other stdlib module's
-                                     internal "this should be impossible"
-                                     guard rails (OOM, a failed syscall) call
-                                     this -- it's the shared low-level
-                                     primitive test::fail() is itself built on.
-
-TESTING (via `import test;`):
-  test::assert(cond)             -- aborts (via test::fail) if cond is false,
-                                     using a default message
-  test::assert(cond, msg)        -- same, with a custom failure message
-  test::assert_eq(a, b[, msg])   -- aborts if a != b; overloaded for
-                                     int/double/bool/string
-  test::assert_neq(a, b[, msg])  -- aborts if a == b; overloaded for
-                                     int/double/bool/string
-  test::fail(msg)                -- unconditionally aborts, printing `msg` to
-                                     stderr (thin wrapper over sys::panic)
-  Every existing test file in tests/ uses these -- `import test;` then
-  qualified `test::assert(...)` calls, matching this codebase's own
-  convention of always qualifying stdlib calls (io::printline, mem::alloc,
-  etc.) rather than relying on bare on-demand imports.
-
----
-
-COMMON PITFALLS:
-- Forgetting `mut`/`immut` before a variable name, or putting the type
-  before the name instead of after the colon.
-- Using `else if` (space) instead of `elseif` (one keyword).
-- Using C-style for loops: `for (int i = 0; ...)` does not exist in Turf.
-- Forgetting `step <expr>` in a for loop (step is required), or writing a
-  step that never actually updates the loop variable (infinite loop).
-- Using function-call-style casts (`int(x)`) instead of postfix `x to int`.
-- Calling `strings::length()` on an array instead of using `.length()` --
-  strings::length only works on `string`.
-- Mixing string and numeric types in arithmetic without an explicit
-  `to string` cast.
-- Comparing two struct instances with `==` (not supported -- compare fields).
-- Comparing an enum value with `==` instead of a `compare`/`matches` block.
-- Reassigning an `immut` variable, directly or through a mutating method.
+COMMON MISTAKES:
+- A declaration without `mut`/`immut`, or the type before the name.
+- Function-style casts (`int(x)`), or `x.to_string()`: write `x to string`.
+- A C-style `for (int i = 0; ...)`.
+- Comparing structs with `==`, or an enum with `==` where a `compare` fits.
+- Mixing string and numbers in `+` without `to string`.
+- Assigning to an `immut`, directly or through a method that changes `self`.
+- Calling a module function without `import`, or with `.` instead of `::`.

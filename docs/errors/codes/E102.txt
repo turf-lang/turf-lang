@@ -1,0 +1,15 @@
+A semicolon is missing
+
+Every statement in Turf ends with a semicolon `;`. This error means Turf finished reading one statement and found the start of the next one without a `;` in between.
+
+    mut x: int = 5            // no semicolon
+    return x;
+
+Turf tells you the position where the *next* thing started, which is just after where the semicolon belongs. So look at the end of the line *above* the one it points to:
+
+    mut x: int = 5;
+    return x;
+
+Where it applies: a variable declaration, an assignment, a function call on its own, `return`, `break`, `continue`, and the `;` after a `do { ... } while condition;` loop.
+
+Where it doesn't: after a block's closing `}` for `if`, `while`, `for`, a function, a struct, an enum -- those end with the brace.

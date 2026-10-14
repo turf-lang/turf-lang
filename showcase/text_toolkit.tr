@@ -2,9 +2,8 @@
 // reports line/word counts and the distribution of word lengths, and
 // times the analysis. Exercises, in one realistic program: strings::split/
 // pad_right, fs's pure path-string helpers, collections::Set<int>,
-// list_sort/list_find (the List<int>-only free functions -- see
-// lib/std/collections/list.tr's own comment on why they're not generic
-// List<T> methods), and time's CPU-time measurement.
+// List.sort/List.find (generic List<T> methods taking a comparator /
+// predicate function), and time's CPU-time measurement.
 //
 // Deliberately does NOT use io::read_to_string/read_lines/write_string --
 // a real, unresolved heap-corruption bug was found in that combination
@@ -29,36 +28,36 @@ import list::List;
 import set::Set;
 import time;
 
-fn compareLengths(a: int, b: int): int {
+fn compare_lengths(a: int, b: int): int {
     return a - b;
 }
 
-fn isLongWord(len: int): bool {
+fn is_long_word(len: int): bool {
     return len >= 7;
 }
 
 fn main(): int {
-    immut sampleName: string = "notes.txt";
+    immut sample_name: string = "notes.txt";
     io::print("Analyzing ");
-    io::print(fs::basename(sampleName));
+    io::print(fs::basename(sample_name));
     io::print(" (a ");
-    io::print(fs::extension(sampleName));
+    io::print(fs::extension(sample_name));
     io::printline(" file):");
 
-    immut clockStart: int = time::clock_ticks();
+    immut clock_start: int = time::clock_ticks();
 
     mut lines: List<string> = List::default();
     lines.push("Turf compiles directly to native code");
     lines.push("Turf has structs enums generics and pointers");
     lines.push("The standard library now has JSON time and random");
 
-    immut lineCount: int = lines.length();
+    immut line_count: int = lines.length();
     io::print("  lines: ");
-    io::printline(lineCount to string);
+    io::printline(line_count to string);
 
-    mut distinctLengths: Set<int> = Set::default();
-    mut wordLengths: List<int> = List::default();
-    mut wordCount: int = 0;
+    mut distinct_lengths: Set<int> = Set::default();
+    mut word_lengths: List<int> = List::default();
+    mut word_count: int = 0;
 
     while lines.length() > 0 {
         immut line: string = lines.pop();
@@ -66,31 +65,31 @@ fn main(): int {
         while words.length() > 0 {
             immut word: string = words.pop();
             immut len: int = strings::length(word);
-            distinctLengths.add(len);
-            wordLengths.push(len);
-            wordCount = wordCount + 1;
+            distinct_lengths.add(len);
+            word_lengths.push(len);
+            word_count = word_count + 1;
         }
     }
 
     io::print("  words: ");
-    io::printline(wordCount to string);
+    io::printline(word_count to string);
     io::print("  distinct word lengths: ");
-    io::printline(distinctLengths.length() to string);
+    io::printline(distinct_lengths.length() to string);
 
-    immut foundLongWord: bool = list::list_find(wordLengths, isLongWord) >= 0;
-    if foundLongWord {
+    immut found_long_word: bool = word_lengths.find(is_long_word) >= 0;
+    if found_long_word {
         io::printline("  found a word at least 7 characters long.");
     }
 
     // Sort word lengths ascending, then drain (pop takes the last/largest
     // element first, so this naturally prints longest-to-shortest).
-    list::list_sort(wordLengths, compareLengths);
+    word_lengths.sort(compare_lengths);
     io::print("  longest word length: ");
-    io::printline(wordLengths.pop() to string);
+    io::printline(word_lengths.pop() to string);
 
     mut shortest: int = 0;
-    while wordLengths.length() > 0 {
-        shortest = wordLengths.pop();
+    while word_lengths.length() > 0 {
+        shortest = word_lengths.pop();
     }
     io::print("  shortest word length: ");
     io::printline(shortest to string);
@@ -98,13 +97,13 @@ fn main(): int {
     // A small aligned report, using pad_right for column alignment.
     io::printline("");
     io::printline(strings::pad_right("metric", 24, ' ') + "value");
-    io::printline(strings::pad_right("lines", 24, ' ') + (lineCount to string));
-    io::printline(strings::pad_right("words", 24, ' ') + (wordCount to string));
-    io::printline(strings::pad_right("distinct word lengths", 24, ' ') + (distinctLengths.length() to string));
+    io::printline(strings::pad_right("lines", 24, ' ') + (line_count to string));
+    io::printline(strings::pad_right("words", 24, ' ') + (word_count to string));
+    io::printline(strings::pad_right("distinct word lengths", 24, ' ') + (distinct_lengths.length() to string));
 
-    immut elapsedMs: int = time::elapsed_ms(clockStart);
+    immut elapsed_ms: int = time::elapsed_ms(clock_start);
     io::print("Analysis took ");
-    io::print(elapsedMs to string);
+    io::print(elapsed_ms to string);
     io::printline("ms of CPU time.");
 
     return 0;

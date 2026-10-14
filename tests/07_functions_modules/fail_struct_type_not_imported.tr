@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E042
+// EXPECT-DIAG: Unknown type 'Counter'
 // Regression test: a struct declared in a module but never imported at all
 // (not bare-imported, not symbol-imported, not qualified) must be an
 // "Unknown type" error, not silently visible -- companion negative case to

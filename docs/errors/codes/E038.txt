@@ -14,4 +14,4 @@ Here's the fix -- just pull the inner function out to the top level:
 
 This is different from what a lot of other languages allow (Python and JavaScript both let you define a function inside another one), so it's a really common thing to trip over early on if you're coming from one of those. In Turf, every function name lives in one flat, top-level list, so there's no real downside to moving it out -- it won't clash with anything just because it's no longer "hidden" inside another function.
 
-If the function only makes sense in the context of a particular struct (like a helper that only operates on that struct's data), consider making it a method on the struct instead, declared with `fn StructName.methodName(...): ReturnType { ... }` and called as `instance.methodName(...)`.
+If the function only makes sense in the context of a particular struct (like a helper that only operates on that struct's data), consider making it a method on the struct instead, declared with `fn StructName.method_name(...): ReturnType { ... }` and called as `instance.method_name(...)`.

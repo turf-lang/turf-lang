@@ -10,11 +10,12 @@
 // implied.
 
 import io;
+import empty_struct_helper_module;
 import empty_struct_helper_module::Empty;
 
 fn main(): int {
     immut e: Empty =
-        empty_struct_helper_module::identity(empty_struct_helper_module::Empty::make());
+    empty_struct_helper_module::identity(empty_struct_helper_module::Empty::make());
     io::printline("empty struct by-value across a module boundary works");
     return 0;
 }

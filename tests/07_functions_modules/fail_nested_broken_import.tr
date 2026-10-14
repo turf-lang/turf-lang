@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E108
+// EXPECT-DIAG: Expected a parameter name in extern function 'broken'
 // Regression test for issue #242: a syntax error TWO import-levels deep
 // (this file imports nested_broken_import_level_b_module.tr, which itself
 // imports the already-broken broken_extern_param_module.tr -- see

@@ -1,3 +1,4 @@
+// EXPECT-DIAG: E060
 fn main(): int {
     // 'const' isn't a Turf keyword -- the real one is 'immutable'/'immut'.
     immutable x: int = 5;

@@ -1,0 +1,15 @@
+A name was expected here
+
+Turf was waiting for a name -- of a variable, function, parameter, struct, field, enum variant, module -- and found something that isn't one. The message says which name it was looking for and after what.
+
+    mut : int = 5;               // a variable needs a name
+    fn (a: int): int { ... }     // a function needs a name
+    struct { x: int }            // so does a struct
+    import ;                     // so does an import
+
+Give it one:
+
+    mut count: int = 5;
+    fn add(a: int): int { ... }
+
+A name must start with a letter or an underscore, and it can't be one of Turf's reserved words (`if`, `fn`, `run`, `step`, `ptr`, ...). If you used a reserved word as a name, Turf reads it as the keyword and complains that the name is missing: rename it.

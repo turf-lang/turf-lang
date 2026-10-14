@@ -21,16 +21,16 @@ fn next_state(light_ref: TrafficLight): TrafficLight {
     mut light: TrafficLight = light_ref;
     compare light {
         matches TrafficLight::Red:
-            // Compile-time-proven: TrafficLight declares Red -> Green.
-            light.transition(TrafficLight::Green);
+        // Compile-time-proven: TrafficLight declares Red -> Green.
+        light.transition(TrafficLight::Green);
         done
         matches TrafficLight::Green:
-            // Compile-time-proven: TrafficLight declares Green -> Yellow.
-            light.transition(TrafficLight::Yellow);
+        // Compile-time-proven: TrafficLight declares Green -> Yellow.
+        light.transition(TrafficLight::Yellow);
         done
         matches TrafficLight::Yellow:
-            // Compile-time-proven: TrafficLight declares Yellow -> Red.
-            light.transition(TrafficLight::Red);
+        // Compile-time-proven: TrafficLight declares Yellow -> Red.
+        light.transition(TrafficLight::Red);
         done
     }
     return light;
@@ -53,7 +53,7 @@ fn main(): int {
     test::assert(light == TrafficLight::Green, "Red -> Green again");
 
     // Verify int values throughout -- identical ordinals to the enum
-    // version, since TurfMachineType IS-A TurfEnumType (see include/Types.h).
+    // version, since TurfMachineType IS-A TurfEnumType (see src/sema/Types.h).
     test::assert((TrafficLight::Red    to int) == 0, "Red == 0");
     test::assert((TrafficLight::Green  to int) == 1, "Green == 1");
     test::assert((TrafficLight::Yellow to int) == 2, "Yellow == 2");

@@ -1,0 +1,14 @@
+A range slice's bounds are out of range
+
+A slice `arr[start..end]` is a view of the elements from `start` up to, but not including, `end`. For the slice to make sense, both bounds must lie inside the array and `start` can't come after `end`: `0 <= start <= end <= length`. A negative bound counts back from the end, so `arr[-2..]` is the last two elements; the length is added to it before the check.
+
+    immut a: int[3] = [1, 2, 3];
+    immut t = a[1..4];                 // E143 -- the end (4) is past the length (3)
+    immut u = a[-4..];                 // E143 -- -4 counts back past the first element
+    immut w = a[2..1];                 // E143 -- start comes after end
+
+`[2..1]` is not "empty", it's a mistake. An empty slice is `[i..i]`, and `a[3..]` on a 3-element array is also a valid empty slice, because `start == length` is allowed.
+
+Turf reports this when it can prove it: constant bounds on an array of known size, or, for an `int[]` parameter whose length isn't known yet, a start that is after the end when both are constants of the same sign (`arr[3..1]`). When a bound is only known as the program runs, the check happens then instead, and a bad range stops the program with `Slice range out of bounds for 'arr'`.
+
+To fix it, correct the bounds. If you want everything from a point on, leave the end out: `arr[2..]`.

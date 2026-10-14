@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E129
+// EXPECT-DIAG: Cannot infer a type from 'null'
 // SEM-003 (§11.6): `guess` from a bare `null` literal has no reference type
 // to infer -- `null` alone names no target type, so this must be a hard
 // error asking for an explicit annotation instead of guessing at, say,

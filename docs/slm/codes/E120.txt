@@ -1,0 +1,28 @@
+TURF E120 -- UNSUPPORTED LOOP FORM:
+
+CAUSE:
+  `for` has a fixed set of shapes. The `(index, value)` pair form is valid only when
+  walking an ARRAY; a range like `0..10` IS the index, so there is no second thing to
+  bind.
+
+CORRECT (the supported forms):
+    mut numbers: int[3] = [1, 2, 3];
+    mut total: int = 0;
+    for i in 0..10 step i += 1 {                // counting loop: ONE variable, a range
+        total = total + i;
+    }
+    for value in numbers {                      // for-each over an array
+        total = total + value;
+    }
+    for (index, value) in numbers {             // for-each with the position
+        total = total + index + value;
+    }
+
+INCORRECT:
+    for (i, x) in 0..10 { ... }                 // pair form over a range
+
+FIX:
+  Match the form to what is iterated: a range takes one variable; an array takes one
+  or two.
+
+RELATED: E108 (loop variable name expected), E110 (`in` expected).

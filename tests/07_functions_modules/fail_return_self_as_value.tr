@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E064
+// EXPECT-DIAG: Copy the value out with `to`: `x to P`
+// `self` is the receiver's address: a method returning the struct by value
+// copies it out with `return self to P;`.
+struct P { x: int }
+
+fn P.snapshot(): P {
+    return self;
+}
+
+fn main(): int { return 0; }

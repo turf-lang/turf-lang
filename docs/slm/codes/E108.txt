@@ -1,0 +1,29 @@
+TURF E108 -- NAME EXPECTED:
+
+CAUSE:
+  The parser was waiting for a name (variable, function, parameter, struct, field,
+  enum variant, module, loop variable) and found something that is not one. The
+  message says which name and after what. A name starts with a letter or underscore
+  and cannot be a reserved word (`if`, `fn`, `run`, `step`, `ptr`, `try`, `pub`,
+  `public`, ...); a reserved word used as a name is read as the keyword, so the
+  complaint is that the name is missing.
+
+INCORRECT:
+    mut : int = 5;               // variable with no name
+    fn (a: int): int { ... }     // function with no name
+    struct { x: int }
+    import ;
+    for { ... }                  // expected a loop variable name after 'for'
+
+CORRECT:
+    fn add(a: int): int { return a + 1; }
+
+    fn main(): int {
+        mut count: int = 5;
+        return add(count) - 6;
+    }
+
+FIX:
+  Give it a name, or rename an identifier that collides with a reserved word.
+
+RELATED: E109 (type expected), E103 (unexpected token).

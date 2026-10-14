@@ -21,47 +21,47 @@ import hashing;
 import test;
 
 struct Point {
-  x: int,
-  y: int
+    x: int,
+    y: int
 }
 
 // Mirrors the internal shape hashing::hash() is actually called from
-// (Map<K,V>.bucketFind(key: K), Set<T>.bucketFind(item: T)) -- a generic
+// (Map<K,V>.bucket_find(key: K), Set<T>.bucket_find(item: T)) -- a generic
 // function whose own body calls hash() on its still-open type parameter.
 fn<T> hashViaGeneric(x: T): int {
-  return hashing::hash(x);
+    return hashing::hash(x);
 }
 
 fn main(): int {
-  immutable a: string = strings::substring("xxhelloxx", 2, 7); // "hello", a fresh allocation
-  immutable b: string = strings::substring("yyhelloyy", 2, 7); // "hello", a DIFFERENT fresh allocation
-  immutable c: string = strings::substring("xxworldxx", 2, 7); // "world"
-  test::assert(hashing::hash(a) == hashing::hash(b),
-              "equal-content, differently-allocated strings must hash equal");
-  test::assert(hashing::hash(a) != hashing::hash(c),
-              "different-content strings should (almost certainly) hash differently");
+    immutable a: string = strings::substring("xxhelloxx", 2, 7); // "hello", a fresh allocation
+    immutable b: string = strings::substring("yyhelloyy", 2, 7); // "hello", a DIFFERENT fresh allocation
+    immutable c: string = strings::substring("xxworldxx", 2, 7); // "world"
+    test::assert(hashing::hash(a) == hashing::hash(b),
+        "equal-content, differently-allocated strings must hash equal");
+    test::assert(hashing::hash(a) != hashing::hash(c),
+        "different-content strings should (almost certainly) hash differently");
 
-  test::assert(hashViaGeneric(a) == hashing::hash(a),
-              "generic-dispatched hash(string) must match the direct concrete call");
-  test::assert(hashViaGeneric(b) == hashViaGeneric(a),
-              "generic dispatch must still find content-equality for string");
+    test::assert(hashViaGeneric(a) == hashing::hash(a),
+        "generic-dispatched hash(string) must match the direct concrete call");
+    test::assert(hashViaGeneric(b) == hashViaGeneric(a),
+        "generic dispatch must still find content-equality for string");
 
-  immutable i1: int = hashViaGeneric(42);
-  immutable i2: int = hashViaGeneric(42);
-  immutable i3: int = hashViaGeneric(43);
-  test::assert(i1 == i2, "same int hashes equal via the generic fallback");
-  test::assert(i1 != i3, "different ints should (almost certainly) hash differently");
+    immutable i1: int = hashViaGeneric(42);
+    immutable i2: int = hashViaGeneric(42);
+    immutable i3: int = hashViaGeneric(43);
+    test::assert(i1 == i2, "same int hashes equal via the generic fallback");
+    test::assert(i1 != i3, "different ints should (almost certainly) hash differently");
 
-  mut p1: Point = Point::default();
-  p1.x = 3; p1.y = 4;
-  mut p2: Point = Point::default();
-  p2.x = 3; p2.y = 4;
-  mut p3: Point = Point::default();
-  p3.x = 9; p3.y = 1;
-  test::assert(hashViaGeneric(p1) == hashViaGeneric(p2),
-              "equal-content structs hash equal via the generic byte-hash fallback");
-  test::assert(hashViaGeneric(p1) != hashViaGeneric(p3),
-              "different-content structs should (almost certainly) hash differently");
+    mut p1: Point = Point::default();
+    p1.x = 3; p1.y = 4;
+    mut p2: Point = Point::default();
+    p2.x = 3; p2.y = 4;
+    mut p3: Point = Point::default();
+    p3.x = 9; p3.y = 1;
+    test::assert(hashViaGeneric(p1) == hashViaGeneric(p2),
+        "equal-content structs hash equal via the generic byte-hash fallback");
+    test::assert(hashViaGeneric(p1) != hashViaGeneric(p3),
+        "different-content structs should (almost certainly) hash differently");
 
-  return 0;
+    return 0;
 }

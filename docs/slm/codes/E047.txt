@@ -7,6 +7,11 @@ CAUSE:
   nothing for a passed-in argument to even do.
 
 CORRECT SYNTAX:
+    struct Point {
+        x: int,
+        y: int
+    }
+
     mut p: Point = Point::default();     // no arguments, ever
 
 INCORRECT:

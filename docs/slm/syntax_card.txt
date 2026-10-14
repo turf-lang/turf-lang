@@ -1,0 +1,24 @@
+TURF SYNTAX (only this; not C, Python or Rust):
+    import list; // io, math, sys need no import: printline("hi"); list, map, test do
+    struct Point { x: int, y: int } // no `Point { x: 1 }` literals
+    struct Box<T> { v: T }
+    fn Point.sum(): int { return self.x + self.y; } // p.sum()
+    fn Point.origin() static: Point { return Point::default(); } // Point::origin()
+    fn<T> Box.get(): T { return self.v; } // methods of Box<T> repeat <T>
+    fn main(): int {
+        mut n: int = 5; // mut/immut name: Type = value
+        n = n + 1; // reassign: no mut, no type
+        mut d: double = n to double; // casts: x to int, x to string
+        mut p: Point = Point::default(); // or Point::new(1, 2)
+        mut s: int = n > 3 give 1 otherwise 0;
+        if n > 3 && p.x == 0 { n = 0; } elseif n < 0 { n = 1; } else { n = 2; }
+        for i in 0..3 { n = n + i; }
+        compare n {
+            matches 1:
+                n = 2;
+            done
+            otherwise:
+                n = 3;
+        }
+        return 0;
+    }

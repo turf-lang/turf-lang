@@ -1,17 +1,10 @@
-You declared a variable right after a return, so it can never run
+E013 is retired -- code after a return is now always E012
 
-Just like any other code, a variable declaration placed right after a `return` can never actually execute -- the function already handed back its answer and left before your program ever gets to that line.
-
-    fn compute(): int {
-        return 10;
-        mut result: int = 5;   // never happens -- return already left
-    }
-
-If you meant for `result` to be used to compute the return value, move the declaration up before the `return`:
+Older versions of Turf had two codes for the same mistake: E012 for a statement that comes after a `return`, `break` or `continue`, and E013 for a *declaration* in that position. In practice E012 always fired first, so E013 was documented and nobody ever saw it. The number is kept so an old log that mentions it still has somewhere to land, and is never reused.
 
     fn compute(): int {
-        mut result: int = 10;
-        return result;
+        return 1;
+        mut x: int = 5;        // can never run -- E012
     }
 
-This is basically the same idea as "code after return can't run" (you may see this described elsewhere as a statement-after-terminator mistake) -- Turf just happens to catch this particular case (a declaration specifically) at a slightly different point while compiling. The fix is the same either way: move the code before the `return`, or delete it if it isn't needed.
+Run `turf --explain E012` for the explanation and the fix: delete the code, or move it before the `return`.

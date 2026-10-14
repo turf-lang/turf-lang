@@ -1,0 +1,37 @@
+TURF E106 -- MISSING COLON:
+
+CAUSE:
+  A `:` was expected and not found. In Turf a colon joins a name to its type
+  (`name: type`) and a parameter list to the return type. Also required before the
+  body of `matches` and `otherwise` arms in a `compare`.
+
+INCORRECT:
+    fn add(a: int, b: int) int { return a + b; }   // needs `:` before the return type
+    fn greet(name string): void { }                // should be `name: string`
+    struct User { age int }                        // should be `age: int`
+
+CORRECT:
+    fn add(a: int, b: int): int { return a + b; }
+    fn greet(name: string): void { }
+    struct User { age: int }
+
+    fn main(): int {
+        mut x: int = 1;
+        compare x {
+            matches 1:
+                x = 2;
+            done
+            otherwise:
+                x = 3;
+        }
+        return 0;
+    }
+
+FIX:
+  Add the `:` the message points at. The commonest case is the colon before a
+  function's return type.
+
+NOTE: a missing colon before a return type can additionally trigger a bogus
+  unknown-function error afterwards (a registered cascade); fix the colon first.
+
+RELATED: E109 (type expected), E107 (opening brace missing).

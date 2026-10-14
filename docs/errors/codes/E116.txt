@@ -1,0 +1,15 @@
+An `extern` function can't have a body
+
+`extern fn` doesn't define a function, it *announces* one that already exists somewhere else (usually in C). The code is not in your file, so there is nothing to write in `{ ... }`:
+
+    extern fn malloc(size: int): ptr {       // no body allowed
+        return null;
+    }
+
+Declare it with a semicolon instead:
+
+    extern fn malloc(size: int): ptr;
+
+If you wanted to write the function yourself in Turf, drop the `extern`:
+
+    fn my_alloc(size: int): ptr { ... }

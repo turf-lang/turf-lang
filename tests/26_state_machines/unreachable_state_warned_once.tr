@@ -1,0 +1,17 @@
+// EXPECT-DIAG: unreachable_state_warned_once.tr (1 warning)
+// EXPECT-DIAG: Machine 'Door' declares state 'Open' with no incoming transitions
+// A parse-time warning is reported once. The main file is parsed twice, and
+// each parse raised it again, so every unreachable state was listed twice.
+
+machine Door {
+    Open -> Shut
+}
+
+fn main(): int {
+    mut d: Door = Door::Open;
+    d.transition(Door::Shut);
+    if d == Door::Shut {
+        return 0;
+    }
+    return 1;
+}

@@ -6,10 +6,16 @@
 // declared compiled to "Internal compiler error: generated LLVM IR is
 // invalid ... Cannot allocate unsized type" -- List<Big>'s own layout never
 // existed because nothing ever asked for it. Also asserts the SILENT half
-// of the bug directly: sizeof(Holder) must be 32 (8 (List's data ptr) + 8
-// (len) + 8 (cap) + 8 (n)), not 8 -- the opaque-stub fallback used to make
-// this silently wrong with no diagnostic at all whenever nothing else in
-// the program happened to force List<Big> into existence.
+// of the bug directly: sizeof(Holder) must be 16 (8 (List's header handle,
+// LEC-009) + 8 (n)), not 8 -- the opaque-stub fallback used to make this
+// silently wrong with no diagnostic at all whenever nothing else in the
+// program happened to force List<Big> into existence.
+//
+// LEC-009 added a second hop: List<Big>'s own field is `h: &ListHeader<Big>`,
+// and `Holder::default()` allocates that header, so ListHeader<Big> needs a
+// real layout too. A struct clone is never type-checked, so it was never
+// requested ("monomorphized struct instantiation 'list.ListHeader_gen1_Big'
+// was never given a real layout"); drainStructRequests() requests it now.
 import list::List;
 import test;
 
@@ -17,11 +23,12 @@ struct Big { a: int, b: int, c: int }
 struct Holder { items: List<Big>, n: int }
 
 fn main(): int {
-    test::assert(sizeof(Holder) == 32, "Holder's List<Big> field must get its own real 24-byte layout, not the opaque stub");
+    test::assert(sizeof(Holder) == 16, "Holder's List<Big> field must get its own real layout, not the opaque stub");
 
     mut h: Holder = Holder::default();
     h.n = 7;
     test::assert(h.n == 7, "Holder must still construct and behave correctly");
+    test::assert(h.items.length() == 0, "the defaulted field has a real, empty header");
 
     return 0;
 }

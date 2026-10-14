@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E089
+// EXPECT-DIAG: Public function 'make' exposes the private type 'Hidden'
+// LEC-002 E089: `make()` is `pub` but returns `Hidden`, which its module did not
+// mark `pub` -- an importer would receive a value of a type it cannot name.
+// The error is reported while the module is loaded, at the public item, with
+// a note at the private type.
+import fail_private_in_public_return_module;
+
+fn main(): int {
+    return 0;
+}

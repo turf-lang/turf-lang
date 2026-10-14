@@ -3,7 +3,7 @@
 // stored in a `Map<string, fn(Request, Response): void>` STRUCT FIELD, and
 // invoked with a real Request/Response built from a real TCP connection.
 //
-// This is the part docs/planning/DESIGN_NOTES.md §4 expected to still be
+// This is the part docs/archive/DESIGN_NOTES.md §4 expected to still be
 // blocked ("blocked on first-class functions", issue #187) -- it isn't
 // anymore, and this test is the proof: registration, storage in a struct
 // field, lookup, and a real call all happen below.

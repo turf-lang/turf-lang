@@ -7,13 +7,13 @@ enum TrafficLight { Red, Green, Yellow }
 fn next_state(state: TrafficLight): TrafficLight {
     compare state {
         matches TrafficLight::Red:
-            return TrafficLight::Green;
+        return TrafficLight::Green;
         done
         matches TrafficLight::Green:
-            return TrafficLight::Yellow;
+        return TrafficLight::Yellow;
         done
         matches TrafficLight::Yellow:
-            return TrafficLight::Red;
+        return TrafficLight::Red;
         done
     }
     return TrafficLight::Red;

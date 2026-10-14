@@ -1,0 +1,16 @@
+That syntax used to exist, but doesn't any more
+
+Turf changed. The form you wrote was valid in an earlier version, and now it is an error with a pointer to what replaced it. The message says which.
+
+Struct creation moved from a brace literal to a call:
+
+    mut p: Point = Point { x: 1, y: 2 };      // removed
+    mut p: Point = Point::new(1, 2);          // a struct with a constructor
+    mut p: Point = Point::default();          // every field zeroed
+
+Static methods moved from `::` in the declaration to a `static` marker on the method:
+
+    fn Point::origin(): Point { ... }         // removed
+    fn Point.origin() static: Point { ... }
+
+If you are following an old tutorial or an example you found online, this is the usual cause: the example predates the change.

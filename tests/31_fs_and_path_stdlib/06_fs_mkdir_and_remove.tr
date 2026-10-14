@@ -14,27 +14,28 @@ fn main(): int {
     immut file_path: string = fs::join(dir_path, "hello.txt");
 
     // Start from a clean slate in case a previous run left something behind
-    // (remove_file/remove_dir on a path that doesn't exist just fail
-    // harmlessly -- their return value is deliberately ignored here).
+    // (remove_file/remove_dir on a path that doesn't exist fail with a
+    // FsError -- deliberately left unhandled here, which discards it).
     fs::remove_file(file_path);
     fs::remove_dir(dir_path);
     test::assert(!fs::is_dir(dir_path), "setup: directory does not exist yet");
 
-    immut created: bool = fs::mkdir(dir_path);
-    test::assert(created, "mkdir: reports success");
+    // Each operation is `!void` (LEC-007; they returned bool before): a
+    // `recover run` block runs only on failure, so reaching the next line IS
+    // the success assertion. 07_fs_errors_carry_path.tr covers the failures.
+    // (Not a `mut failed = false; ... recover run { failed = true; }` flag:
+    // the dead-store lint wrongly reports that idiom -- see LEC-007.md.)
+    fs::mkdir(dir_path) recover run { test::fail("mkdir: should succeed"); };
     test::assert(fs::is_dir(dir_path), "is_dir: sees the freshly created directory");
 
-    immut wrote: bool = io::write_string(file_path, "hello from fs test");
-    test::assert(wrote, "write_string: writes a file inside the new directory");
+    io::write_string(file_path, "hello from fs test") recover run { test::fail("write_string: should succeed"); };
     test::assert(io::exists(file_path), "io::exists: sees the file just written");
     test::assert(!fs::is_dir(file_path), "is_dir: a plain file is not a directory");
 
-    immut removed_file: bool = fs::remove_file(file_path);
-    test::assert(removed_file, "remove_file: reports success");
+    fs::remove_file(file_path) recover run { test::fail("remove_file: should succeed"); };
     test::assert(!io::exists(file_path), "io::exists: file is gone after remove_file");
 
-    immut removed_dir: bool = fs::remove_dir(dir_path);
-    test::assert(removed_dir, "remove_dir: reports success");
+    fs::remove_dir(dir_path) recover run { test::fail("remove_dir: should succeed"); };
     test::assert(!fs::is_dir(dir_path), "is_dir: directory is gone after remove_dir");
 
     return 0;

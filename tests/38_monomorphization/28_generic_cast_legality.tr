@@ -1,7 +1,7 @@
 // Regression test: an explicit `to`-cast involving a generic type
 // parameter used to be rejected UNCONDITIONALLY at the TEMPLATE's own
 // definition site, regardless of whether any real instantiation would
-// have made the cast legal -- src/TypeCheckerExpr.cpp's `visitCast()` cast-
+// have made the cast legal -- src/sema/TypeCheckerExpr.cpp's `visitCast()` cast-
 // legality whitelist had no bypass for `TurfGenericParamType`, unlike
 // every other type-checking path in this compiler (equality, argument
 // matching), which all defer the real check to a per-instantiation
@@ -17,32 +17,39 @@ import test;
 // matters) to a concrete type, inside a generic function -- used to fail
 // at THIS declaration regardless of whether castToInt() is ever called.
 fn<T> castToInt(x: T): int {
-  return x to int;
+    return x to int;
+}
+
+// SMP-002 (2026-09-27): the field-access case this file used to document
+// as a known, deferred gap (see the removed trailing note this comment
+// replaces) is verified fixed -- `self.v`'s type resolves through
+// GlobalSymbolTable's own registered TurfStructType for the struct, which
+// OVH-006 (landed 2026-09-26, before this test was re-checked) made carry
+// the real TurfGenericParamType("T") instead of a permanently-stale
+// NamedType("T"). `visitCast()`'s own generic-parameter bypass (now
+// TypeWalk::containsOpenParam(..., ParamScope::Bare), TypeWalk.h) never
+// needed a NamedType fallback of its own once that representation was
+// fixed at the source.
+struct Box<T> {
+    v: T
+}
+
+fn<T> Box.castToInt(): int {
+    return self.v to int;
 }
 
 fn main(): int {
-  test::assert(castToInt(42) == 42, "cast from a genuinely-int-instantiated T works");
+    test::assert(castToInt(42) == 42, "cast from a genuinely-int-instantiated T works");
 
-  // A DIFFERENT instantiation, to prove the fix isn't int-specific -- int32
-  // is the only OTHER primitive type this same cast (`to int`) is legal
-  // for, per the existing whitelist (`int32 -> int`).
-  immutable thirtyTwo: int32 = 7 to int32;
-  test::assert(castToInt(thirtyTwo) == 7, "cast from a genuinely-int32-instantiated T works too");
+    // A DIFFERENT instantiation, to prove the fix isn't int-specific -- int32
+    // is the only OTHER primitive type this same cast (`to int`) is legal
+    // for, per the existing whitelist (`int32 -> int`).
+    immutable thirtyTwo: int32 = 7 to int32;
+    test::assert(castToInt(thirtyTwo) == 7, "cast from a genuinely-int32-instantiated T works too");
 
-  return 0;
+    mut b: Box<int> = Box::default();
+    b.v = 99;
+    test::assert(b.castToInt() == 99, "self.v to int (field access, not a bare parameter) also works");
+
+    return 0;
 }
-
-// NOTE (kept for a future session, not a live regression): the identical
-// cast, written as `self.v to int` inside a generic METHOD reading its own
-// struct's `v: T` FIELD (as opposed to a plain parameter, above), still
-// fails -- `self.v`'s type resolves through GlobalSymbolTable's own
-// registered TurfStructType for the struct, whose fields are permanently
-// stuck as NamedType("T") rather than TurfGenericParamType("T") (a
-// separate, deeper gap; see TypeCheckerCall.cpp's own "NamedType, not
-// TurfGenericParamType" doc comment on visitMethodCall's Subst recovery
-// for the mechanism this shares). This fix's own dynamic_cast only
-// recognizes TurfGenericParamType, so it does not reach that case. Not
-// pursued as part of STD-003 -- lower value (mem::Pool<T> is the only
-// place it would matter, and it is always instantiated at a pointer type
-// in practice) and higher risk (touching field-type resolution is a
-// larger, less-contained change than this fix).

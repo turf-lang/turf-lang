@@ -1,0 +1,1 @@
+{"explanation": "x", "fix_mode": "MODIFY", "original_code": "    return slef.n;", "new_code": "    return self.n to string;", "suggested_comment": "", "warning": "", "category": "TYPE_MISMATCH"}

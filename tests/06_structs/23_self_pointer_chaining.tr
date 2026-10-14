@@ -14,13 +14,10 @@
 // non-null by construction, so this is exactly the sound, narrow use the
 // escape hatch exists for.
 //
-// By-value self-return (`fn Node.get_self(): Node { return self; }`) is
-// still rejected ("function declares 'Node' but returns 'Node*'") since
-// there is no dereference operator to satisfy that signature -- that half
-// of the original issue remains a real, tracked gap (see
-// docs/planning/CODE_REVIEW_GAPS_2026-07.md gap #6). This file only covers
-// the by-reference half, which already works and is the idiomatic way to
-// do method chaining in this language today.
+// By-value self-return is `return self to Node;`
+// (24_self_value_return_and_chaining.tr): a bare `return self;` is E064.
+// This file covers the by-reference half, the idiomatic way to chain method
+// calls.
 
 import test;
 

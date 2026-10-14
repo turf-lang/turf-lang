@@ -1,0 +1,38 @@
+// A Map and a Set under steady churn: a sliding window of keys, each step one
+// insert and one remove, so the size stays put while tens of thousands of
+// entries come and go. Tombstones now count toward the rebuild check, and a
+// rebuild at the same size clears them. Before, they filled every empty slot
+// and every lookup of a missing key probed the whole table (found by REL-005's
+// benchmarks; the cost grew with the table). This checks the answers stay
+// right through those rebuilds; bench/map_churn.tr tracks the speed.
+
+import test;
+import map::Map;
+import set::Set;
+
+fn main(): int {
+    immut window: int = 300;
+    immut steps: int = 30000;
+    mut m: Map<int, int> = Map::default();
+    mut s: Set<int> = Set::default();
+    for i in 0..steps {
+        m.put(i, i * 2);
+        s.add(i);
+        if (i >= window) {
+            m.remove(i - window);
+            test::assert(s.remove(i - window), "the set held the key leaving the window");
+            test::assert(!m.contains(i - window), "a removed key is gone");
+            test::assert(m.get(i - window + 1) == (i - window + 1) * 2, "the oldest live key is found");
+            test::assert(s.contains(i), "the newest set key is found");
+        }
+        test::assert(m.length() == s.length(), "map and set agree on size");
+    }
+    test::assert(m.length() == window, "the map holds exactly the window");
+    mut sum: int = 0;
+    for k in (steps - window)..steps {
+        sum = sum + m.get(k);
+    }
+    test::assert(sum == window * (2 * steps - window - 1), "every live key maps to its value");
+    test::assert(!s.contains(steps - window - 1), "nothing older survived");
+    return 0;
+}

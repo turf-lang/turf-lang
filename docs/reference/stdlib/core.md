@@ -1,506 +1,471 @@
 # Core: `int`, `double`, `bool`, `char`, `array`, `strings`
 
-These six modules make up **the entire Turflang prelude** — the compiler
-synthesizes `import int; import double; import bool; import char; import
-strings; import array;` as the first lines of whatever top-level file you
-compile, so every symbol documented on this page is available with **zero
-explicit imports**. This is the complete list; nothing else is prelude.
+These six modules are part of the **prelude**: they are loaded into every
+program, and nothing needs importing to use them. Together with `io`, `math`
+and `sys` they make up the nine prelude modules listed in the
+[standard library overview](README.md#the-prelude). `io` and `sys` are
+documented in [I/O, networking and `sys`](io_and_net.md); `math` is in
+[`math` and `os`](math_and_os.md).
 
-> **Note.** `strings` is prelude even though its own header comment doesn't
-> say so and its usage example shows `import strings;`. Every other prelude
-> module (`int`, `double`, `bool`, `char`, `array`) explicitly documents
-> itself as "part of the prelude" in a header comment; `strings.tr` doesn't,
-> but it's synthesized into scope exactly the same way, confirmed directly
-> in the compiler's `PreludeModuleNames` list. Writing `import strings;`
-> anyway is harmless and arguably clearer — it's just never required.
+How you reach a function depends on the module:
 
-All functions on this page are **UFCS-callable**: `n.is_even()` and
-`int::is_even(n)` call the same function. Examples below mix both styles to
-match how the standard library itself and the test suite use them.
+- Every function of `int`, `double`, `bool`, `char`, `array` and `strings` is
+  called as a **method** on its first argument (this is
+  [UFCS](../functions_and_modules.md#3-ufcs-calling-a-function-as-a-method)):
+  `n.is_even()`, `c.is_digit()`, `s.trim()`, `a.sum(3)`.
+- `strings::name(...)` and `array::name(...)` also work, with no import,
+  because the prelude modules are always in scope for the `::` qualifier. `int`,
+  `double`, `bool` and `char` are type keywords, so their functions are reached
+  as methods only (`n.gcd(m)`, never `int::gcd(n, m)`).
+- They are not callable by a bare name: `is_digit(c)` is E041 (unknown
+  function). Only `io`, `math` and `sys` are bare-callable.
+
+A method call on a literal works the same way: `4.gcd(6)`, `'a'.is_upper()`,
+`"hi".length()`. A negative literal needs parentheses: `(-12).gcd(18)`.
 
 ---
 
 ## `int`
 
-Small helpers that Turf's built-in arithmetic and comparison operators don't
-cover directly. Deliberately does **not** duplicate `abs`/`min`/`max`/`clamp`/
-`power` — those live in [`math`](./math_and_os.md), which requires an
-explicit `import math;`.
+Small helpers that the arithmetic and comparison operators do not cover.
+`abs`, `min`, `max`, `clamp` and `power` are in [`math`](math_and_os.md).
 
-### `is_even(n: int): bool`
+| Function | Result |
+|---|---|
+| `is_even(n: int): bool` | `n % 2 == 0` |
+| `is_odd(n: int): bool` | `n % 2 != 0` (so `true` for negative odd numbers too) |
+| `is_positive(n: int): bool` | `n > 0` |
+| `is_negative(n: int): bool` | `n < 0` |
+| `is_zero(n: int): bool` | `n == 0` |
+| `gcd(a: int, b: int): int` | greatest common divisor of `abs(a)` and `abs(b)`; `gcd(0, 0)` is `0` |
+| `lcm(a: int, b: int): int` | least common multiple, never negative; `0` if either argument is `0` |
 
-`n % 2 == 0`.
-
-```turflang
-mut four: int = 4;
-test::assert(four.is_even(), "4 is even");
-```
-
-### `is_odd(n: int): bool`
-
-`n % 2 != 0`.
-
-```turflang
-test::assert(three.is_odd(), "3 is odd");
-```
-
-### `is_positive(n: int): bool`
-
-`n > 0`. Zero is not positive.
-
-### `is_negative(n: int): bool`
-
-`n < 0`. Zero is not negative.
-
-### `is_zero(n: int): bool`
-
-`n == 0`.
-
-### `gcd(a: int, b: int): int`
-
-Greatest common divisor via the Euclidean algorithm, computed on `abs(a)`/
-`abs(b)`. `gcd(0, 0)` returns `0`.
+`gcd` and `lcm` panic with `Integer overflow` when the result does not fit in
+an `int` (for example `lcm` of two large coprime numbers, or `gcd` of the
+smallest `int`).
 
 ```turflang
-test::assert_eq(twelve.gcd(18), 6, "gcd(12, 18) == 6");
+fn main(): int {
+    mut n: int = 12;
+    printline(n.is_even());      // true
+    printline(n.gcd(18));        // 6
+    printline(4.lcm(-6));        // 12
+    printline((-12).gcd(18));    // 6
+    printline(0.gcd(0));         // 0
+    printline(0.lcm(6));         // 0
+    return 0;
+}
 ```
 
-### `lcm(a: int, b: int): int`
-
-Least common multiple: `0` if either argument is `0`, else
-`abs(a / gcd(a, b) * b)`.
-
-```turflang
-test::assert_eq(four.lcm(6), 12, "lcm(4, 6) == 12");
-```
+(`printline` prints a `bool` as `true` or `false`.)
 
 ---
 
 ## `double`
 
-Also deliberately minimal — `abs`/`min`/`max`/`clamp`/`power` live in
-`math`. This module has no `is_nan` helper: `Lint.cpp`'s self-comparison
-check (`x != x`) has no type information, so it would flag the standard
-`x != x` NaN idiom as a copy-paste bug, and `double.tr` is compiled into
-*every* program via the prelude — the false positive would show up
-universally. There is currently no way to test for NaN through this module.
+| Function | Result |
+|---|---|
+| `sign(x: double): double` | `1.0`, `-1.0` or `0.0` by the sign of `x`; `0.0` for zero and for NaN |
+| `is_positive(x: double): bool` | `x > 0.0` |
+| `is_negative(x: double): bool` | `x < 0.0` |
+| `is_zero(x: double): bool` | `x == 0.0` (true for `-0.0`) |
+| `is_integer(x: double): bool` | `true` if `x` is a finite whole number |
+| `round(x: double): double` | nearest whole number, halves away from zero |
+| `floor(x: double): double` | largest whole number not above `x` |
+| `ceil(x: double): double` | smallest whole number not below `x` |
 
-### `sign(x: double): double`
+`round` is half-away-from-zero, not banker's rounding: `2.5.round()` is `3.0`
+and `(-2.5).round()` is `-3.0`.
 
-`1.0` if `x > 0.0`, `-1.0` if `x < 0.0`, else `0.0` (covers `x == 0.0`, and
-incidentally NaN too, since neither comparison holds for NaN).
-
-```turflang
-test::assert_eq(five.sign(), 1.0, "sign(5.0) == 1.0");
-test::assert_eq(negFive.sign(), 0.0 - 1.0, "sign(-5.0) == -1.0");
-```
-
-### `is_positive(x: double): bool` / `is_negative(x: double): bool` / `is_zero(x: double): bool`
-
-Straightforward `> 0.0` / `< 0.0` / `== 0.0` comparisons, mirroring `int`'s helpers.
-
-### `is_integer(x: double): bool`
-
-`true` only if `x` has no fractional part, checked by truncating to `int`
-and back: `((x to int) to double) == x`.
+`round`, `floor` and `ceil` are exact for every `double`, including one beyond
+`int`'s range, and return a NaN or an infinity unchanged; they are the same
+as `math::round`, `math::floor` and `math::ceil`. `is_integer` is `false` for
+a NaN or an infinity, and `true` for a whole number of any size (`1e300`).
+There is no `is_nan`; test for NaN with `x != x`.
 
 ```turflang
-test::assert(four.is_integer(), "4.0 is an integer");
-test::assert(!fourFive.is_integer(), "4.5 is not an integer");
+fn main(): int {
+    mut x: double = -2.5;
+    printline(x.sign());         // -1
+    printline(x.round());        // -3
+    printline(x.floor());        // -3
+    printline(x.ceil());         // -2
+    printline(4.0.is_integer()); // true
+    printline(4.5.is_integer()); // false
+    printline(2.7.floor());      // 2
+    return 0;
+}
 ```
-
-### `round(x: double): double`
-
-Nearest integer, **half-away-from-zero** (not banker's rounding):
-`x >= 0.0` rounds via `((x + 0.5) to int) to double`, negative `x` via
-`((x - 0.5) to int) to double`.
-
-```turflang
-test::assert_eq(twoFive.round(), 3.0, "round(2.5) == 3.0");
-test::assert_eq(negTwoFive.round(), 0.0 - 3.0, "round(-2.5) == -3.0");
-```
-
-### `floor(x: double): double`
-
-Truncates toward zero (`to int` / `to double`), then subtracts `1.0` if `x`
-was negative and truncation changed the value — this corrects for `int`
-truncation rounding toward zero rather than down.
-
-```turflang
-test::assert_eq(negTwoSeven.floor(), 0.0 - 3.0, "floor(-2.7) == -3.0");
-```
-
-### `ceil(x: double): double`
-
-Mirror image of `floor`: adds `1.0` if `x` was positive and truncation
-changed the value.
-
-```turflang
-test::assert_eq(twoTwo.ceil(), 3.0, "ceil(2.2) == 3.0");
-```
-
-> **Note: two independent `floor`/`ceil`/`round` implementations exist.**
-> `math.tr` also exports `floor`/`ceil`/`round` as raw `extern from "m"`
-> libm bindings, under `math::floor`, `math::ceil`, `math::round` — a
-> completely separate namespace from these UFCS methods (`x.floor()`, bare
-> `floor(x)`). Both exist simultaneously without conflicting. They should
-> behave identically (libm's `round()` is also half-away-from-zero) but
-> they are genuinely separate code paths, not the same function reached two
-> ways — don't assume a fix to one applies to the other. See
-> [`math_and_os.md`](./math_and_os.md) for the libm versions.
 
 ---
 
 ## `bool`
 
-Fills gaps Turf's built-in `&&`/`||`/`!` don't cover: there's no built-in
-XOR (`^` is bitwise, `int`-only) and no implication operator.
+Turf has no `xor` or implication operator (`^` is bitwise and takes `int`).
 
-### `logical_xor(a: bool, b: bool): bool`
+| Function | Result |
+|---|---|
+| `logical_xor(a: bool, b: bool): bool` | `a != b` |
+| `logical_nand(a: bool, b: bool): bool` | `!(a && b)` |
+| `logical_nor(a: bool, b: bool): bool` | `!(a \|\| b)` |
+| `implies(a: bool, b: bool): bool` | `!a \|\| b`: "if `a` then `b`", true whenever `a` is false |
 
-`a != b`.
-
-```turflang
-test::assert(t.logical_xor(f), "true xor false == true");
-```
-
-### `logical_nand(a: bool, b: bool): bool`
-
-`!(a && b)`.
-
-### `logical_nor(a: bool, b: bool): bool`
-
-`!(a || b)`.
-
-### `implies(a: bool, b: bool): bool`
-
-Material implication, `!a || b` ("if `a` then `b`"; vacuously `true` when
-`a` is `false`).
+Like `&&` and `||`'s operands, all four evaluate both arguments (they are
+ordinary functions).
 
 ```turflang
-test::assert(f.implies(t), "false implies true == true");
-test::assert(!t.implies(f), "true implies false == false");
+fn main(): int {
+    mut t: bool = true;
+    mut f: bool = false;
+    printline(t.logical_xor(f)); // true
+    printline(t.logical_xor(t)); // false
+    printline(f.implies(t));     // true
+    printline(t.implies(f));     // false
+    printline(f.logical_nor(f)); // true
+    return 0;
+}
 ```
 
 ---
 
 ## `char`
 
-ASCII-only helpers, matching `char`'s 1-byte, no-Unicode design. Turf has no
-built-in arithmetic on `char` — every helper below internally casts to `int`
-(`c to int`) before comparing.
+ASCII-only helpers for the one-byte `char`. A `char` has no arithmetic of its
+own; convert with `c to int` and `n to char` (see
+[casting](../variables_and_types.md#casting-with-to)).
 
-### `isDigit(c: char): bool`
+| Function | Result |
+|---|---|
+| `is_digit(c: char): bool` | `'0'` to `'9'` |
+| `is_upper(c: char): bool` | `'A'` to `'Z'` |
+| `is_lower(c: char): bool` | `'a'` to `'z'` |
+| `is_alpha(c: char): bool` | `is_upper` or `is_lower` |
+| `is_alphanumeric(c: char): bool` | `is_alpha` or `is_digit` |
+| `is_punctuation(c: char): bool` | printable ASCII (33 to 126) that is neither a letter nor a digit: `.`, `,`, `!`, `(` |
+| `is_whitespace(c: char): bool` | space, tab, `\n` or `\r` |
+| `to_upper(c: char): char` | the uppercase letter for a lowercase one; any other `char` unchanged |
+| `to_lower(c: char): char` | the lowercase letter for an uppercase one; any other `char` unchanged |
 
-`'0'..'9'` (ASCII 48–57).
-
-### `isUpper(c: char): bool`
-
-`'A'..'Z'` (ASCII 65–90).
-
-### `isLower(c: char): bool`
-
-`'a'..'z'` (ASCII 97–122).
-
-### `isAlpha(c: char): bool`
-
-`isUpper() || isLower()`.
-
-### `isAlphaNumeric(c: char): bool`
-
-`isAlpha() || isDigit()`.
+`char.to_upper` and `strings.to_upper` have the same name; the receiver picks
+one: `'a'.to_upper()` is a `char`, `"abc".to_upper()` a `string`.
 
 ```turflang
-mut a: char = 'a';
-mut nine: char = '9';
-mut space: char = ' ';
-test::assert(a.isAlphaNumeric(), "'a' is alphanumeric");
-test::assert(nine.isAlphaNumeric(), "'9' is alphanumeric");
-test::assert(!space.isAlphaNumeric(), "' ' is not alphanumeric");
+fn main(): int {
+    mut c: char = 'q';
+    printline(c.to_upper());              // Q
+    printline('9'.is_alphanumeric());     // true
+    printline(' '.is_alphanumeric());     // false
+    printline('!'.is_punctuation());      // true
+    printline('\t'.is_whitespace());      // true
+
+    // Counting digits in a string with s[i], which is a char.
+    mut s: string = "a1b22c333";
+    mut digits: int = 0;
+    mut i: int = 0;
+    while i < s.length() {
+        if s[i].is_digit() {
+            digits++;
+        }
+        i++;
+    }
+    printline(digits);                    // 6
+    return 0;
+}
 ```
-
-### `isPunctuation(c: char): bool`
-
-Printable ASCII (33–126) that is neither alpha nor digit — e.g. `.`, `,`,
-`!`, `(`.
-
-```turflang
-mut bang: char = '!';
-test::assert(bang.isPunctuation(), "'!' is punctuation");
-```
-
-### `isWhitespace(c: char): bool`
-
-Space (32), tab (9), `\n` (10), or `\r` (13).
-
-### `toUpper(c: char): char`
-
-Subtracts 32 if `c` is lowercase; otherwise returns `c` unchanged
-(non-letters pass through).
-
-### `toLower(c: char): char`
-
-Adds 32 if `c` is uppercase; otherwise returns `c` unchanged.
 
 ---
 
 ## `array`
 
-UFCS helpers over unsized array parameters. Two hard constraints shape every
-function here:
+Helpers over `int[]`, `double[]` and `string[]` parameters (an unsized array
+parameter accepts an array of any length; see [Arrays](../arrays.md)). There
+is one overload per element type rather than one generic function. For any
+other element type, use [`List<T>`](collections.md), which is generic.
 
-1. **UFCS is not generic.** `TypeChecker::tryUFCSFallback()`'s receiver
-   matching is a plain, non-generic exact-element-type match, so there's one
-   concrete overload per element type (`int[]`, `double[]`, `string[]`), not
-   a single `fn<T>` version. Need another element type? Reach for
-   [`List<T>`](./collections.md) instead — a real generic.
-2. **An unsized array parameter erases its length.** `arr: int[]` (accepting
-   an argument of any concrete length) loses its size entirely — calling
-   `arr.length()` *inside* such a function returns `-1`, not the caller's
-   real length, because `Size == -1` is baked into the parameter's static
-   type and there's no runtime way to recover it. Every function below
-   therefore takes an explicit `len: int` alongside the array. Call as
-   `arr.sum(len)` or `array::sum(arr, len)`.
+Every function takes a `len: int` after the array and looks only at the first
+`len` elements: `a.sum(3)` or `array::sum(a, 3)`. Pass `a.length()` to cover the
+whole array. A `len` larger than the array panics with `Array index out of
+bounds`. (Functions you write yourself need no `len` parameter: `a.length()` and
+`for v in a` work on any `T[]`.)
 
-### `sum(arr: int[], len: int): int` / `sum(arr: double[], len: int): double`
+| Function | Result |
+|---|---|
+| `sum(arr: int[], len: int): int` | sum of `arr[0..len)` |
+| `sum(arr: double[], len: int): double` | sum of `arr[0..len)` |
+| `max(arr: int[], len: int): int` | the largest of `arr[0..len)` |
+| `max(arr: double[], len: int): double` | the largest of `arr[0..len)` |
+| `min(arr: int[], len: int): int` | the smallest of `arr[0..len)` |
+| `min(arr: double[], len: int): double` | the smallest of `arr[0..len)` |
+| `contains(arr: int[], len: int, val: int): bool` | whether `val` is in `arr[0..len)` |
+| `contains(arr: double[], len: int, val: double): bool` | same, for `double` |
+| `contains(arr: string[], len: int, val: string): bool` | same, comparing string contents |
+| `index_of(arr: int[], len: int, val: int): int` | index of the first match, or `-1` |
+| `index_of(arr: double[], len: int, val: double): int` | same, for `double` |
+| `index_of(arr: string[], len: int, val: string): int` | same, comparing string contents |
 
-Linear-scan sum over `arr[0..len)`.
-
-```turflang
-mut ints: int[5] = [3, 1, 4, 1, 5];
-mut ilen: int = 5;
-test::assert_eq(ints.sum(ilen), 14, "sum([3,1,4,1,5]) == 14");
-```
-
-### `max(arr: int[], len: int): int` / `max(arr: double[], len: int): double`
-
-Starts `best = arr[0]`, then scans `i = 1..len` keeping the running maximum.
-
-> **Gotcha: no zero-length guard.** Unlike `sum`/`contains`/`index_of`
-> below, `max` and `min` seed their result by reading `arr[0]` before any
-> length check. Calling `.max(0)` on an empty slice reads out of bounds
-> instead of failing cleanly — always ensure `len >= 1` before calling.
+`sum` of `len <= 0` is `0`, `contains` is `false` and `index_of` is `-1`.
+`max` and `min` start from `arr[0]`, so they have no meaning for `len < 1`:
+`len == 0` returns `arr[0]`, and an array with no elements (such as an empty
+slice, `a[0..0]`) panics with `Array index out of bounds`.
 
 ```turflang
-test::assert_eq(ints.max(ilen), 5, "max([3,1,4,1,5]) == 5");
-```
+fn main(): int {
+    mut ints: int[5] = [3, 1, 4, 1, 5];
+    printline(ints.sum(5));            // 14
+    printline(ints.max(5));            // 5
+    printline(ints.min(ints.length())); // 1
+    printline(ints.contains(5, 4));    // true
+    printline(ints.index_of(5, 1));    // 1
+    printline(ints.index_of(5, 9));    // -1
+    printline(array::sum(ints, 3));    // 8: only the first three
 
-### `min(arr: int[], len: int): int` / `min(arr: double[], len: int): double`
+    mut names: string[3] = ["ann", "bob", "cy"];
+    printline(names.contains(3, "bob")); // true
+    printline(names.index_of(3, "cy"));  // 2
 
-Mirror of `max`; same `len >= 1` assumption applies.
-
-### `contains(arr, len: int, val): bool`
-
-Overloaded for `int[]`, `double[]`, `string[]`. Linear scan for equality;
-returns `false` when `len == 0` (the loop simply never runs — no special
-case needed).
-
-```turflang
-test::assert(ints.contains(ilen, four), "[3,1,4,1,5] contains 4");
-```
-
-### `index_of(arr, len: int, val): int`
-
-Overloaded for `int[]`, `double[]`, `string[]`. Linear scan, returns the
-first matching index or `-1` if not found.
-
-```turflang
-test::assert_eq(ints.index_of(ilen, four), 2, "index_of(4) == 2");
-test::assert_eq(ints.index_of(ilen, 0 - 1), 0 - 1, "index_of(missing) == -1");
+    printline(ints[1..4].sum(3));      // 6: a slice is an array too
+    return 0;
+}
 ```
 
 ---
 
 ## `strings`
 
-`string` is an ordinary compiler-recognized type with **zero hardcoded
-operator behavior** — `+`, `==`, `!=`, `<`, `>`, `<=`, `>=` on strings are
-all just `operator` overloads defined in this file, resolved through the
-same mechanism a user's own `operator` overload would use. Because they're
-defined *in* `strings.tr`, every other function in this file is careful
-never to use string `+`/`==` internally (that would recurse into itself) —
-hence the manual byte-indexed loops you'll see if you read the source.
+A `string` is a pointer to NUL-terminated bytes; every function here counts
+and indexes **bytes**, not Unicode characters. `"héllo".length()` is `6`.
+Ordering is byte order, with no locale or Unicode collation.
 
-String ordering is byte-by-byte `strcmp` — there's no Unicode-aware sorting
-(explicitly deferred to a hypothetical future `unicode` module).
+Every function that returns a new string returns a fresh string on the
+garbage-collected heap (see [Memory and safety](../memory_and_safety.md)); the
+argument is never modified.
 
-### Operators: `+`, `==`, `!=`, `<`, `>`, `<=`, `>=`
+### Operators
 
-- `+` concatenates: mallocs `strlen(a) + strlen(b) + 1` bytes and
-  `strcpy`+`strcat`s into it. **The result is never freed** — there's no
-  GC yet, so long-running programs that concatenate strings in a loop leak
-  memory a bit at a time. This is a documented, deliberate tradeoff, not an
-  oversight.
-- `==`, `!=`, `<`, `>`, `<=`, `>=` are thin wrappers over `strcmp(a, b)`
-  compared against `0`.
+`+` concatenates; `==`, `!=`, `<`, `>`, `<=` and `>=` compare contents, byte by
+byte. They are ordinary `operator` overloads defined in this module and work in
+every file. `"id " + 5` is E057: write `"id " + (5 to string)`. See
+[Operators: string operators](../operators.md#string-operators).
+
+### Indexing: `s[i]`
+
+`s[i]` is the byte at `i` as a `char`, bounds-checked: valid indices are `-n` to
+`n - 1`, a negative index counts from the end, and anything else panics with
+`String index out of bounds`. Convert with `s[i] to int` for the number. A
+write `s[i] = c;` is checked only below zero. The rules, with examples, are in
+[Variables and types: indexing a string](../variables_and_types.md#indexing-a-string).
+
+Each `s[i]` read measures the string, so a loop over every byte of a long
+string spends time proportional to the length on every pass. When the loop
+has already established the index is in range, use `byte_at_unchecked`.
+
+### Length and raw access
+
+| Function | Result |
+|---|---|
+| `length(s: string): int` | the number of bytes in `s`; `s.length()` |
+| `strlen(s: string): int` | the C `strlen` binding that `length` wraps; prefer `length` |
+| `byte_at_unchecked(s: string, i: int): char` | the byte at `i` with **no bounds check**; an out-of-range `i` is undefined behaviour |
+
+### Searching
+
+| Function | Result |
+|---|---|
+| `contains(s: string, needle: string): bool` | whether `needle` occurs in `s`; an empty `needle` always matches |
+| `index_of(s: string, needle: string): int` | byte offset of the first occurrence, or `-1`; `index_of(s, "")` is `0` |
+| `last_index_of(s: string, needle: string): int` | byte offset of the last occurrence, or `-1`; an empty `needle` matches at `s.length()`; overlapping matches count (`"aaaa".last_index_of("aa")` is `2`) |
+| `starts_with(s: string, prefix: string): bool` | whether `s` begins with `prefix` (`false` if `prefix` is longer than `s`) |
+| `ends_with(s: string, suffix: string): bool` | whether `s` ends with `suffix` |
+| `count_char(s: string, ch: int): int` | how many bytes of `s` equal the byte code `ch` (an `int`: `s.count_char('l' to int)`) |
+
+### Building new strings
+
+| Function | Result |
+|---|---|
+| `substring(s: string, start: int, end: int): string` | the bytes `[start, end)`; `start` is included, `end` is not |
+| `repeat(s: string, n: int): string` | `n` copies of `s` joined; `""` when `n <= 0` |
+| `replace(s: string, old: string, new_str: string): string` | `s` with every non-overlapping `old` replaced, scanning left to right; `s` unchanged if `old` is `""` |
+| `to_upper(s: string): string` | ASCII letters uppercased; every other byte unchanged |
+| `to_lower(s: string): string` | ASCII letters lowercased |
+| `trim(s: string): string` | without leading and trailing whitespace (space, tab, `\n`, `\r`); `""` if all whitespace |
+| `trim_start(s: string): string` | without leading whitespace only |
+| `trim_end(s: string): string` | without trailing whitespace only |
+| `pad_left(s: string, target_len: int, pad_char: char): string` | `s` preceded by `pad_char` until it is `target_len` bytes; never truncates |
+| `pad_right(s: string, target_len: int, pad_char: char): string` | the same, padding after `s` |
+| `split(s: string, delimiter: string): List<string>` | the pieces of `s` between occurrences of `delimiter`, empty pieces included; see below |
+| `join(items: List<string>, sep: string): string` | the elements of `items` with `sep` between them; `""` for an empty list |
+
+**`substring` panics on a bad range.** If `start < 0`, `end < start` or `end >
+s.length()`, the program aborts with `<file>:<line>: strings.substring: index
+out of bounds`, naming the call in *your* code. A range you computed wrongly is
+a bug in the caller, not an outcome to recover from (see the
+[failure rule](README.md#2-failure-three-kinds-three-shapes)). Unlike `s[i]`,
+`substring` does not accept negative indices.
+
+**`split`** returns a single-element list holding all of `s` when `delimiter`
+is `""` or does not occur in `s`, so `s.split(d).length() == 1` means "no
+delimiter found". `"a,,b".split(",")` is `["a", "", "b"]`, and `join` with the
+same separator rebuilds `"a,,b"`. Naming the result type needs `import
+list::List;` ([collections](collections.md)); a method can also be called on
+the result directly, as in `s.split(d).length()`:
 
 ```turflang
-immut greeting: string = "Hello, " + "world!";
-if greeting == "Hello, world!" {
-    io::printline("matched");
+import list::List;
+
+fn main(): int {
+    mut parts: List<string> = "a,,b".split(",");
+    printline(parts.length());              // 3
+    printline(parts.get(1) == "");          // true
+    printline(strings::join(parts, ";"));   // a;;b
+
+    mut none: List<string> = "abc".split("x");
+    printline(none.length());               // 1
+    return 0;
 }
 ```
 
-### `length(s: string): int`
-
-Returns `strlen(s)`. This is now the **only** way to get a string's length
-— the old bare `lengthof(s)` intrinsic has been removed entirely.
-
 ```turflang
-test::assert(strings::length(r50) == 100, "repeat ab x50: length must be 100");
+fn main(): int {
+    printline("hello world".contains("world"));      // true
+    printline("hello".index_of("l"));                // 2
+    printline("a/b/c".last_index_of("/"));           // 3
+    printline("abc".starts_with("abcd"));            // false
+    printline("abc".ends_with("bc"));                // true
+    printline("hello".count_char('l' to int));       // 2
+
+    printline("hello".substring(1, 3));              // el
+    printline("ab".repeat(3));                       // ababab
+    printline("aababaa".replace("a", "x"));          // xxbxbxx
+    printline("Hello, World".to_upper());            // HELLO, WORLD
+    printline("[" + "  hi \t\n".trim() + "]");       // [hi]
+    printline("[" + "  hi  ".trim_start() + "]");    // [hi  ]
+    printline("[" + "  hi  ".trim_end() + "]");      // [  hi]
+    printline("7".pad_left(3, '0'));                 // 007
+    printline("hi".pad_right(5, '.'));               // hi...
+    printline("toolong".pad_left(3, '0'));           // toolong
+    return 0;
+}
 ```
 
-### `contains(s: string, needle: string): bool`
+### Parsing: `parse_int` and `parse_double`
 
-`strstr(s, needle) != null`. An empty `needle` always matches.
+| Function | Result |
+|---|---|
+| `parse_int(s: string): !int` | `s` as a base-10 integer with an optional leading `-` |
+| `parse_double(s: string): !double` | `s` as a decimal number, with an optional exponent |
 
-```turflang
-test::assert(strings::contains("hello world", "world"), "...");
-test::assert(strings::contains("hello world", "xyz") == false, "...");
-test::assert(strings::contains("", "x") == false, "...");
-test::assert(strings::contains("abc", "") == true, "contains: empty needle always true");
-```
+Both fail with `error StringParseError { InvalidInt, InvalidDouble }`
+(`InvalidInt` from `parse_int`, `InvalidDouble` from `parse_double`) because
+text that is not a number is ordinary input, not a bug in the caller. They
+reject an empty string, a bare `-`, a leading `+` or space, and any other
+trailing or embedded byte. `"007"` parses as `7`.
 
-### `index_of(s: string, needle: string): int`
+`parse_double` takes an optional `-`, digits with at most one `.` (at least one
+digit in all), and an optional exponent: `e` or `E`, an optional sign, digits
+(`"1e10"`, `"2.5E-3"`, `".5"`, `"5."`). There is no `inf`, `nan` or hex form.
+The result is the correctly rounded `double`, the same value the compiler gives
+the matching literal; past the `double` range it is `inf` or `-inf`.
 
-Byte offset of the first occurrence of `needle`, or `-1` if not found.
-
-```turflang
-test::assert(strings::index_of("hello world", "world") == 6, "index_of: world at 6");
-test::assert(strings::index_of("", "a") == 0 - 1, "index_of: empty string");
-```
-
-### `starts_with(s: string, prefix: string): bool`
-
-Byte-compares the first `strlen(prefix)` bytes of `s`; `false` if `prefix`
-is longer than `s`. Equal strings count as a match.
+`parse_int` also fails with `InvalidInt` for a number outside `int`'s range;
+`"-9223372036854775808"` and `"9223372036854775807"` parse.
 
 ```turflang
-test::assert(strings::starts_with("abc", "abc"), "starts_with: full string");
-test::assert(strings::starts_with("abc", "abcd") == false, "starts_with: longer prefix");
+fn describe(text: string): void {
+    immut n: int = strings::parse_int(text) recover as err run {
+        if err == strings::StringParseError::InvalidInt {
+            printline("not an integer: [" + text + "]");
+        }
+        return;
+    };
+    printline(n * 2);
+}
+
+fn main(): int {
+    describe("21");        // 42
+    describe("-7");        // -14
+    describe("12a");       // not an integer: [12a]
+    describe("");          // not an integer: []
+
+    immut x: double = strings::parse_double("2.5E-3") recover produce 0.0;
+    printline(x);          // 0.0025
+    immut bad: int = strings::parse_int("nope") recover produce -1;
+    printline(bad);        // -1
+    return 0;
+}
 ```
 
-### `ends_with(s: string, suffix: string): bool`
+`recover` is described in [Error handling](../error_handling.md#recover-resolving-a-fallible-value).
 
-Mirror of `starts_with`; compares the tail of `s`.
+### Converting to and from other types
 
-### `repeat(s: string, n: int): string`
+The `to` operator converts between strings and the numeric types
+([casting](../variables_and_types.md#casting-with-to) has the full table).
 
-Concatenates `n` copies of `s`. `n <= 0` returns `""`.
+| Expression | Result |
+|---|---|
+| `n to string`, `x to string`, `b to string` | the text of an `int`, `double` (shortest `%g`-style form: `3.5`, `1e+20`, `0.333333`) or `bool` (`true` / `false`) |
+| `s to int` | parses the whole of `s` as an integer, by `parse_int`'s rules; **panics** (`Invalid string to int conversion`) if it is not one |
+| `s to double` | parses the whole of `s` as a number, by `parse_double`'s rules; **panics** (`Invalid string to double conversion`) if it is not one |
+| `c to int`, `n to char` | the byte code of a `char`, and back |
+
+Use `parse_int` / `parse_double` when the text is input you do not control,
+since they report failure as a value; `s to int` is for text you know is a
+number.
 
 ```turflang
-mut r0: string = strings::repeat("hello", 0);
-test::assert(r0 == "", "repeat hello x0 = empty");
-
-mut r50: string = strings::repeat("ab", 50); // 100-char stress case
+fn main(): int {
+    printline(65 to string);       // 65
+    printline(3.5 to string);      // 3.5
+    printline(true to string);     // true
+    printline("42" to int);        // 42
+    printline("3.25" to double);   // 3.25
+    printline(65 to char);         // A
+    printline('A' to int);         // 65
+    return 0;
+}
 ```
 
-### `count_char(s: string, ch: int): int`
+### `StringBuilder`
 
-Counts occurrences of the byte `ch` (an `int` byte code, not a `char`) in
-`s`.
-
-### `substring(s: string, start: int, end: int): string`
-
-Slices `[start, end)` — `start` inclusive, `end` exclusive.
-
-> **Gotcha: hard-panics instead of returning `!string`.** If
-> `start < 0 || end < start || end > strlen(s)`, `substring` calls
-> `sys::panic("strings.substring: index out of bounds")` and aborts the
-> process. This is inconsistent with the rest of the standard library's
-> error-handling story — `math::divide`, `Map.tryGet`, and every `net`
-> connection function return a recoverable `!T` for "ordinary expected
-> failure," but a bad substring range is instead treated as a programming
-> bug. Validate your indices before calling, or use `trim`, which never
-> passes an out-of-range slice.
-
-### `replace(s: string, old: string, new_str: string): string`
-
-Replaces every non-overlapping occurrence of `old` with `new_str`. If `old`
-is `""`, returns `s` unchanged (guards against matching everywhere and
-looping forever).
+`s = s + piece` in a loop copies the whole accumulated string every pass, so
+building a long string that way takes time proportional to the square of its
+length. A `StringBuilder` appends in amortised constant time per byte. `repeat`,
+`replace` and `join` use one, and so should any loop of yours that builds a
+string.
 
 ```turflang
-test::assert(strings::replace("aababaa", "a", "x") == "xxbxbxx", "replace: all a -> x");
-test::assert(strings::replace("hello world", "o", "") == "hell wrld", "replace: delete all 'o'");
+fn main(): int {
+    mut sb: strings::StringBuilder = strings::StringBuilder::default();
+    sb.append("hello");
+    sb.append_char(' ');
+    sb.append("world");
+    immut s: string = sb.to_string();
+    sb.append("!");                     // s is unchanged
+    printline(s);                       // hello world
+    printline(sb.to_string());          // hello world!
+    printline(sb.length());             // 12
+
+    sb.clear();
+    mut i: int = 0;
+    while i < 5 {
+        sb.append(i to string);
+        sb.append_char(',');
+        i++;
+    }
+    printline(sb.to_string());          // 0,1,2,3,4,
+    return 0;
+}
 ```
 
-### `to_upper(s: string): string` / `to_lower(s: string): string`
+| Method | Behaviour |
+|---|---|
+| `append(s: string): void` | adds every byte of `s` |
+| `append_char(c: char): void` | adds one byte |
+| `reserve(extra: int): void` | makes room for `extra` more bytes in one allocation, an optimisation only; panics (`StringBuilder.reserve: negative size`, at the calling line) for a negative `extra` |
+| `length(): int` | bytes appended so far |
+| `clear(): void` | empties the builder but keeps its storage, for reuse in a loop |
+| `to_string(): string` | a **copy** of the contents, `""` when empty; appending afterwards never changes a string already returned |
 
-Byte-by-byte case conversion via libc `toupper`/`tolower`. Non-alphabetic
-bytes pass through unchanged.
-
-```turflang
-test::assert(strings::to_upper("hello123!") == "HELLO123!", "digits and punct unchanged");
-```
-
-### `trim(s: string): string` / `trim_start(s: string): string` / `trim_end(s: string): string`
-
-Strips leading/trailing ASCII whitespace (space, tab, `\n`, `\r`) by
-locating the trimmed range and delegating to `substring`. `trim` strips both
-ends; `trim_start`/`trim_end` strip only one. An all-whitespace input
-returns `""`.
-
-```turflang
-mut all_space: string = strings::trim("     ");
-test::assert(all_space == "", "trim: all-whitespace string -> empty");
-test::assert(strings::trim("  hello world  ") == "hello world", "trim: interior space preserved");
-```
-
-### `split(s: string, delimiter: string): List<string>`
-
-Splits `s` on every occurrence of `delimiter`. An empty `delimiter`, or a
-`delimiter` that never occurs in `s`, both return a single-element list
-containing all of `s` unchanged (treated as "no real delimiter given," not
-an error). Requires `import list::List;` (or `list::List<string>` written
-out fully) since it returns a generic collection.
-
-```turflang
-import list::List;
-
-mut octets: List<string> = strings::split("127.0.0.1", ".");
-test::assert(octets.length() == 4, "split: 4 octets");
-```
-
-### `join(items: List<string>, sep: string): string`
-
-The inverse of `split` — concatenates every element of `items` with `sep`
-between them (no leading/trailing separator). An empty list returns `""`.
-
-```turflang
-import list::List;
-
-mut parts: List<string> = List::default();
-parts.push("a");
-parts.push("b");
-parts.push("c");
-test::assert(strings::join(parts, "-") == "a-b-c", "join: dash-separated");
-```
-
-### `pad_left(s: string, target_len: int, pad_char: char): string` / `pad_right(s: string, target_len: int, pad_char: char): string`
-
-Pads `s` with `pad_char` until it reaches `target_len` bytes — on the left
-or right respectively. If `s` is already `target_len` bytes or longer, it's
-returned unchanged (never truncated).
-
-```turflang
-test::assert(strings::pad_left("7", 3, '0') == "007", "pad_left: zero-pad");
-test::assert(strings::pad_right("hi", 5, '.') == "hi...", "pad_right: dot-fill");
-```
-
-### `parse_int(s: string): !int` / `parse_double(s: string): !double`
-
-Parses `s` as a number, hand-rolled (no `atoi`/`atof` binding). Returns the
-recoverable `error StringParseError { InvalidInt, InvalidDouble }` on
-malformed input — an empty string, a bare `-`, a non-digit byte, or (for
-`parse_double`) a malformed decimal point — rather than panicking, since a
-bad parse is an ordinary, expected outcome (e.g. user input, a config
-file), not a programming bug.
-
-```turflang
-immut n: int = strings::parse_int("42") recover produce -1;
-test::assert(n == 42, "parse_int: ordinary case");
-
-immut bad: int = strings::parse_int("not a number") recover produce -1;
-test::assert(bad == -1, "parse_int: malformed input recovers to -1");
-```
+A `StringBuilder` is a struct and is passed by value like any struct: a
+function that should append to the caller's builder takes `&strings::StringBuilder`
+and is called with `&sb`. Its fields are private.

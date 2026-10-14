@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: Unknown '@ownership' argument 'note:'
+// The only keyed argument is `releases: <parameter>`.
+
+@ownership(note: hello)
+extern fn make(): int*;
+
+fn main(): int {
+    return 0;
+}

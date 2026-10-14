@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E084
+// EXPECT-DIAG: 'caller_location' can only be used inside a function declared '@caller_location'
 // STD-002: `caller_location` is legal ONLY inside a function declared
 // `@caller_location` -- CallerLocationOutsideMarkedFunctionError (E084).
 fn notMarked(): string {

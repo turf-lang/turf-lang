@@ -1,0 +1,120 @@
+// tests/custom/gc_stress_corpus/million_node_graph_churn.tr
+// FDN-005 stage 1 (docs/planning/ROADMAP_v2.0.0.md): MEM-002's own landing
+// record (docs/development/changes/MEM-002.md, *Unresolved questions* #1)
+// names this exact shape as untested -- "a program with a genuinely
+// large/complex object graph (deep linked structures, many interacting
+// collections)" was never exercised. tests/39_nullable_references/
+// 07_graph_adjacency.tr already proves the MECHANISM (a cyclic graph of
+// heap()-allocated nodes, held in a List<&Node>, survives collection) at
+// n=40; this file is the same shape at n=1,000,000, PLUS repeated rewiring
+// (mutating every node's outgoing edge across several passes, each
+// followed by a forced collection) rather than a single static wiring --
+// the roadmap's own "built and rewired repeatedly" wording.
+//
+// Lives under tests/custom/ (excluded from test_runner.sh, AGENTS.md),
+// NOT tests/08_e2e_stress/ alongside 06/07: this file is run ONLY by
+// scripts/smoke/gc_stress_corpus_smoke.sh, deliberately never swept into
+// test_runner.sh's own opt-level runs or FDN-005 stage 2's
+// TURF_GC_STRESS=1 runs. Measured live: under TURF_GC_STRESS=1 (forces a
+// full mark-sweep on every allocation, runtime/turfrt_gc.c),
+// `gc_rebuild_index()`'s own `O(n log n)`-per-collection cost applied to
+// EVERY one of this file's 1,000,000 build-phase allocations individually
+// does not finish in 5 minutes -- expected (an O(n^2 log n)-shaped
+// workload at n=10^6 by construction, not a bug), and orthogonal to what
+// this file is actually testing (scale/duration, not allocation
+// frequency -- stage 2's own TURF_GC_STRESS coverage already runs the
+// FULL ordinary test_runner.sh suite at both stack depths that matters).
+//
+// Unlike 07_heap_bounded_allocation.tr (which builds-and-drops a small
+// list many times, proving GARBAGE is reclaimed), this file keeps ONE
+// large graph alive across many collections while mutating it, proving
+// the block table and precise per-element tracing hold up at 10^6 LIVE
+// entries -- a different stress shape, deliberately: `gc_rebuild_index()`
+// is `O(n log n)` per collection in the live-block count (MEM-002's own
+// documented pitfall), and this is the first test in the suite that
+// exercises that cost at anything near the scale the roadmap's own
+// completion criterion names.
+//
+// scripts/smoke/gc_stress_corpus_smoke.sh's own bound-derivation comment
+// explains the RSS bound this file is checked against and its reasoning.
+import list::List;
+import test;
+import io;
+
+struct GraphNode {
+    id: int
+}
+
+fn makeNode(id: int): &GraphNode {
+    mut n: GraphNode = GraphNode::default();
+    n.id = id;
+    return heap(n);
+}
+
+fn main(): int {
+    immut n: int = 1000000;
+    mut nodes: List<&GraphNode> = List::default();
+    mut nextIdx: List<int> = List::default();
+
+    mut i: int = 0;
+    while i < n {
+        nodes.push(makeNode(i));
+        nextIdx.push((i + 1) % n);
+        i = i + 1;
+    }
+
+    gc_collect();
+
+    // Rewire every node's outgoing edge across several passes -- each pass
+    // reassigns the WHOLE adjacency array to a different permutation
+    // (still a single n-cycle, so the traversal check below stays exact),
+    // then forces a collection. Nothing about rewiring itself creates
+    // garbage (nextIdx is a List<int>, not a linked structure), but every
+    // pass re-touches all n List<&GraphNode> slots and all n List<int>
+    // slots via ordinary writes -- exactly the kind of sustained mutation
+    // against a large live block table this test exists to exercise.
+    mut pass: int = 1;
+    while pass <= 4 {
+        i = 0;
+        while i < n {
+            nextIdx[i] = (i + pass) % n;
+            i = i + 1;
+        }
+        gc_collect();
+        pass = pass + 1;
+    }
+
+    // Every node's own content must be intact after 10^6 nodes' worth of
+    // live data rode along through 5 forced collections.
+    i = 0;
+    while i < n {
+        mut nd: &GraphNode = nodes.get(i);
+        test::assert(nd.id == i, "node id intact after repeated rewiring + collection");
+        i = i + 1;
+    }
+
+    // The final pass (pass=4) wires node i -> (i+4) % n, still a single
+    // n-cycle since gcd(4, 1000000) == 4... which is NOT 1, so (i+4)%n is
+    // actually 4 separate n/4-cycles, not one n-cycle. Walk all 4 and
+    // confirm together they cover every node exactly once.
+    mut totalVisited: int = 0;
+    mut start: int = 0;
+    while start < 4 {
+        mut visited: int = 0;
+        mut cur: int = start;
+        while true {
+            visited = visited + 1;
+            cur = nextIdx[cur];
+            if cur == start {
+                break;
+            }
+        }
+        test::assert(visited == n / 4, "each of the 4 rewired sub-cycles has exactly n/4 nodes");
+        totalVisited = totalVisited + visited;
+        start = start + 1;
+    }
+    test::assert(totalVisited == n, "the 4 rewired sub-cycles together cover every node exactly once");
+
+    io::printline("gc_stress_corpus/million_node_graph_churn PASS: a 1,000,000-node heap()-allocated graph survives repeated rewiring and forced collection");
+    return 0;
+}

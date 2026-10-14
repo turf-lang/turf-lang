@@ -1,0 +1,22 @@
+// EXPECT-DIAG: E081
+// A `&?T` dereference inside a `recover run { }` block is checked like one
+// anywhere else. It used to compile clean (LEC-005's audit; it lived in
+// tests/99_known_bugs): the CFG holds the whole statement as one node, so
+// NarrowingVisitor never saw inside the block. The block now gets its own CFG
+// and the same dataflow, entered with the facts that hold before it, so a
+// guard inside the block still narrows (39_nullable_references/
+// 11_narrowing_inside_recover_block.tr).
+struct Node { val: int }
+
+fn g(): !int {
+    return 1;
+}
+
+fn f(p: &?Node): int {
+    mut v: int = g() recover run { return p.val; };
+    return v;
+}
+
+fn main(): int {
+    return 0;
+}

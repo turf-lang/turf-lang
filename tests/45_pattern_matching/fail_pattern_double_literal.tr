@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E092
+// EXPECT-DIAG: a 'double' literal can't be a pattern
+// LEC-003: no double literal patterns in 2.0. Expected: E092.
+struct P { x: double }
+fn main(): int {
+    mut p: P = P::default();
+    compare p {
+        matches P { x: 1.5 }: return 1; done
+        otherwise: return 0;
+    }
+}

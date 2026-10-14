@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E042
+// EXPECT-DIAG: Unknown type 'NoSuchStruct'
 // Regression test: an unknown/misspelled struct type name used as an
 // extern fn parameter's type must be rejected. Before the fix,
 // Resolver::visitExternFuncDecl() was a complete no-op in Pass 2 -- extern

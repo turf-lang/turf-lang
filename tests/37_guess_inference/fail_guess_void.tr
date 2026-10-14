@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E129
+// EXPECT-DIAG: Cannot infer a type from a 'void' expression
 // SEM-003 (§11.6): `guess` from a `void`-returning call has nothing to
 // infer -- `void` is never a real variable type (see isDisallowedVoidType's
 // own rationale), so this must be a hard error, not a silently-void variable.

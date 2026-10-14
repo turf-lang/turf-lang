@@ -1,0 +1,21 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-EXIT: 134
+// EXPECT-RUNTIME: [nan]
+// io::printline/print of a NaN print "nan" whatever its sign bit (owner
+// decision 2026-10-12). glibc's `%g` prints "-nan" for the NaN x86 arithmetic
+// produces and "nan" for a folded one, so the output changed between -O0
+// and -O2 (found by turf-fuzz). The program aborts on purpose: that is the
+// one way the runner checks a program's own output (EXPECT-RUNTIME).
+fn id(x: double): double {
+    return x;
+}
+
+fn main(): int {
+    immut big: double = id(1e300) * id(1e300);
+    print("[");
+    print(big - big);
+    printline("]");
+    io::flush();
+    sys::abort();
+    return 0;
+}

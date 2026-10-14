@@ -1,0 +1,29 @@
+// LEC-003: a failing guard falls through to the next header, in order.
+import test;
+
+struct Box { n: int }
+
+fn pick(v: int): int {
+    mut b: Box = Box::default();
+    b.n = v;
+    mut r: int;
+    compare b {
+        matches Box { n } if n > 100:
+        r = 1;
+        done
+        matches Box { n } if n > 10:
+        r = 2;
+        done
+        matches Box { .. }:
+        r = 3;
+        done
+    }
+    return r;
+}
+
+fn main(): int {
+    test::assert(pick(500) == 1, "first guard");
+    test::assert(pick(50) == 2, "second guard after the first fails");
+    test::assert(pick(5) == 3, "unguarded catch-all");
+    return 0;
+}

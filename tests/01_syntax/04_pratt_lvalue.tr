@@ -14,7 +14,7 @@ fn main(): int {
 
     // Assigning deeply nested dynamically evaluated L-Value
     o.inner.val = 100;
-    
+
     test::assert(o.inner.val == 100, "L-value chained struct assignment failed");
 
     return 0;

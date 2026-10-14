@@ -6,7 +6,7 @@ fn main(): int {
     mut b: int = 0;
     mut c: int = 0;
     a = b = c = 100;
-    
+
     test::assert(a == 100, "");
     test::assert(b == 100, "");
     test::assert(c == 100, "");

@@ -2,19 +2,19 @@
 // declares a struct with a constructor and an empty struct with a static
 // method, both using the '.'-declaration syntax (static or not).
 
-struct Shape {
-    sides: int,
-    label: string
+pub struct Shape {
+    pub sides: int,
+    pub label: string
 }
 
-fn Shape.new(sides: int, name: string): void {
+pub fn Shape.new(sides: int, name: string): void {
     self.sides = sides;
     self.label = name;
 }
 
-struct ShapeUtil {}
+pub struct ShapeUtil {}
 
-fn ShapeUtil.describe(sides: int) static: string {
+pub fn ShapeUtil.describe(sides: int) static: string {
     if (sides == 3) {
         return "triangle";
     }

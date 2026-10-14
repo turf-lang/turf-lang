@@ -1,0 +1,25 @@
+TURF E084 -- CALLER_LOCATION OUTSIDE A MARKED FUNCTION:
+
+CAUSE:
+  `caller_location` (the file and line of whoever CALLED this function) was
+  used in a function that did not opt in. It costs a hidden extra argument on
+  every call, so the function must be marked with `@caller_location` on the
+  line directly before `fn` (or before an `operator` declaration).
+
+INCORRECT:
+    fn not_marked(): string {
+        return caller_location;       // this function never asked for it
+    }
+
+CORRECT:
+    @caller_location
+    fn marked(): string {
+        return caller_location;
+    }
+
+FIX:
+  Add `@caller_location` before the function, or remove the use of
+  `caller_location` if the caller's position was not intended.
+
+RELATED: E087 (when combined with `pub`, the decorator comes first:
+  `@caller_location` then `pub fn`).

@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E093
+// EXPECT-DIAG: Non-exhaustive enum comparison on 'Direction'
 // Test (fail): Non-exhaustive enum compare without otherwise clause
 // Missing East and West -> should be a compile error
 enum Direction { North, East, South, West }
@@ -6,10 +8,10 @@ fn main(): int {
     immut d: Direction = Direction::North;
     compare d {
         matches Direction::North:
-            return 1;
+        return 1;
         done
         matches Direction::South:
-            return 2;
+        return 2;
         done
     }
     return 0;

@@ -3,4 +3,4 @@
 // a generic free function with the SAME name as
 // dup_generic_fn_bmod_module.tr's own `tag`, to prove two different
 // modules' same-named generics no longer collide once monomorphized.
-fn<T> tag(x: T): int { return 1; }
+pub fn<T> tag(x: T): int { return 1; }

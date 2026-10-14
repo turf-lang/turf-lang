@@ -25,6 +25,7 @@
 // as bare function calls already needed. Hence `Shade` specifically below.
 
 import io;
+import functionless_module_enum_module;
 import functionless_module_enum_module::Shade;
 
 import test;
@@ -38,10 +39,10 @@ fn main(): int {
 
     // The actual regression: qualified type AND qualified value access.
     immut qualified: functionless_module_enum_module::Shade =
-        functionless_module_enum_module::Shade::Dark;
+    functionless_module_enum_module::Shade::Dark;
     test::assert(qualified == Shade::Dark, "qualified enum access from a function-less module");
     test::assert(functionless_module_enum_module::Shade::COUNT == 3,
-           "qualified pseudo-variant access from a function-less module");
+        "qualified pseudo-variant access from a function-less module");
 
     io::printline("function-less module :: qualification works");
     return 0;

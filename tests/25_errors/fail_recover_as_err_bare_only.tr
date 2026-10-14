@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E016
+// EXPECT-DIAG: 'recover as err run' can't be used here
 // Test (fail): 'recover as err run { ... }' is rejected when every error the
 // call can fail with is a bare 'error Name;' declaration -- a bare error
 // carries nothing to discriminate on, so binding 'err' is pointless.

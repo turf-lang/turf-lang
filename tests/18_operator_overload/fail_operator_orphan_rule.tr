@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E080
+// EXPECT-DIAG: 'operator +' does not own any of its operand types
 // Negative test: LANG-001's orphan rule (§13.4) -- a module (here, the main
 // file, which owns neither type) may not declare an operator between two
 // struct types it doesn't own. Without this rule, operator meaning would

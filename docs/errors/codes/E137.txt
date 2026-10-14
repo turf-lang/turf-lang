@@ -1,0 +1,28 @@
+A function can't be used as a value here
+
+A function used as a value is written by its bare name: `mut f: fn(int): int = twice;`. A qualified name such as `io::printline` or `Point::origin` is only ever called, with parentheses and arguments:
+
+    import io;
+
+    mut f: fn(string): void = io::printline;   // a qualified name is not a value
+
+    io::printline("hello");                     // a call: this runs it
+
+To use a module's function as a value, import it by name and write the bare name:
+
+    import helper::twice;
+
+    mut f: fn(int): int = twice;
+
+A static method (`Point::origin`) has no value form. Wrap the call in a plain function and use that function's name:
+
+    fn origin(): Point { return Point::origin(); }
+
+An `@caller_location` function is not a value either (only a direct call passes the location). Wrap the call in a plain function the same way.
+
+A generic function is a value only where a function type says what its type parameters are:
+
+    fn<T> id(x: T): T { return x; }
+
+    mut g = id;                       // E137: nothing says what T is
+    immut f: fn(int): int = id;       // fine: T is int

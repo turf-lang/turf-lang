@@ -1,0 +1,63 @@
+A public function or field mentions a type that is not public
+
+    // shapes.tr
+    struct Hidden { pub n: int }          // private: no `pub`
+    pub fn make(): Hidden { ... }
+    // ERROR: Public function 'make' exposes the private type 'Hidden'.
+    //   Note: 'Hidden' is declared in module 'shapes' without `pub`
+    //   Hint: Anything `pub` is visible to other modules, but 'Hidden' is
+    //   not, so they would receive values of a type they cannot name. Either
+    //   make the type public -- `pub struct Hidden` in shapes.tr -- or keep
+    //   the function internal by removing its `pub`.
+
+A `pub` function, method, extern function or field is a promise to every
+module that imports this one. If its signature or type names a private type
+of the same module, an importer can still receive such a value -- from
+`make()` above, or by reading the field -- while being unable to write the
+type's name. That defeats the privacy the type asked for, so it is rejected
+where the leak is written, not where it is used.
+
+The type does not have to be the outermost one. All of these leak `Hidden`:
+
+    pub fn a(x: Hidden): int { ... }            // a parameter
+    pub fn b(): Hidden { ... }                  // the return type
+    pub fn c(): !Hidden { ... }                 // inside `!T`
+    pub fn d(x: &Hidden): int { ... }           // behind a reference
+    pub fn e(): List<Hidden> { ... }            // as a generic argument
+    pub struct Outer { pub inner: Hidden }      // a `pub` field
+    pub fn Outer.f(h: Hidden): int { ... }      // a `pub` method
+
+Two ways to fix it, and which is right depends on what you meant:
+
+ 1. Importers should be able to hold and name the type -- make it `pub`:
+
+        pub struct Hidden { pub n: int }
+
+ 2. It is an implementation detail -- remove `pub` from the item that leaks
+    it. A private function or a private field may use a private type freely:
+
+        fn make(): Hidden { ... }
+
+The same holds one level up, for a package. Other packages import only a
+library's root module (src/<name>.tr), so a `pub` type of one of its internal
+modules is a type they cannot name either. The root module may not put one in
+a `pub` signature:
+
+    // src/geometry.tr, the root module of package 'geometry'
+    import vecmath;                       // an internal module
+    pub fn origin(): vecmath::Vec { ... }
+    // ERROR: Public function 'origin' of package 'geometry' exposes 'Vec', a
+    //   type of its internal module 'vecmath'.
+    //   Hint: Other packages import only 'geometry', its root module, so they
+    //   would receive values of a type they cannot name. Either move
+    //   `pub struct Vec` into the root module, geometry.tr, or keep the
+    //   function internal by removing its `pub`.
+
+Declare the types of a library's API in its root module. An internal module's
+own `pub` items may use its types freely: only the package imports them.
+
+Not errors: a private type used inside a `pub` function's BODY; a `pub` method
+of a private type (an importer cannot name the type, so it cannot call the
+method); generic signatures over a type parameter (`pub fn<T> f(x: T): T`); a
+private field of a private type in a `pub` struct; and, in a single-file
+program, anything at all -- with no importer there is nobody to leak to.

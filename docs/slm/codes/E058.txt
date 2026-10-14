@@ -9,6 +9,8 @@ CAUSE:
   3. `otherwise:` is not the LAST arm (something follows it).
 
 CORRECT USAGE:
+    mut x: int = 3;
+    mut result: int = 0;
     compare x {
         matches 1:
             result = 1;
@@ -18,7 +20,6 @@ CORRECT USAGE:
         done
         otherwise:
             result = 0;
-        done
     }
 
 INCORRECT:
@@ -35,7 +36,6 @@ INCORRECT:
     compare x {
         otherwise:
             result = 0;
-        done
         matches 1:            // ERROR: 'otherwise' must be the last arm
             result = 1;
         done

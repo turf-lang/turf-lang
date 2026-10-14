@@ -1,47 +1,36 @@
 // ─── random.tr ───────────────────────────────────────────────────────────
-// Pseudo-random number generation for TurfLang, built directly on libc's
-// rand()/srand().
+// Pseudo-random number generation for TurfLang, built on a generator that
+// libturfrt keeps (runtime/turfrt_sys.c).
 //
 // Design:
-//   - THIS IS NOT CRYPTOGRAPHICALLY SECURE. rand()/srand() are the plain
-//     C PRNG -- predictable, low-quality, and trivially distinguishable
+//   - THIS IS NOT CRYPTOGRAPHICALLY SECURE. The generator is a plain PRNG
+//     (xorshift64*) -- predictable, and trivially distinguishable
 //     from true randomness by anyone who observes a few outputs or guesses
 //     the seed. Never use anything in this module for tokens, keys,
 //     passwords, nonces, or any other security-sensitive purpose. A real
 //     CSPRNG binding (e.g. wrapping /dev/urandom or getrandom(2)) is a
 //     deliberately separate, future module -- out of scope here.
 //   - Seeding: this language has NO mutable global/module-level state at
-//     all, not even a module-private one -- only `export immut` constants
-//     exist; `export mut` (and a plain top-level `mut`) is rejected at
-//     parse time (see src/ParserDecl.cpp's ExportMutNotSupportedError:
-//     "true mutable shared global state...is not implemented at all
-//     yet"). That rules out the usual "seed exactly once, on first use,
-//     behind a hidden already-seeded flag" pattern outright -- there is no
-//     flag to hide.
+//     all (only `export immut` constants exist; `export mut` is rejected at
+//     parse time, see src/frontend/ParserDecl.cpp's ExportMutNotSupportedError), so a
+//     Turf module cannot hold "already seeded" or a generator's state. The
+//     RUNTIME can (it owns what must be true across the whole process,
+//     FREEZE.md 6.8 B2): libturfrt keeps one generator (runtime/turfrt_sys.c),
+//     seeded once, on first use, from the operating system's entropy, and
+//     advanced by every draw. There is no seed()-before-use step to forget.
 //
-//     Instead, every function below reseeds on EVERY call, from a mix of
-//     time::now_seconds() (whole-second wall clock) and time::clock_ticks()
-//     (sub-second CPU time -- see time.tr). The two calls in the same
-//     process are identical within a given wall-clock second if you look
-//     at now_seconds() alone, but clock_ticks() (glibc measures this via
-//     clock_gettime(CLOCK_PROCESS_CPUTIME_ID), not a coarse jiffy counter)
-//     empirically advances between calls only microseconds apart -- so the
-//     combined seed still changes call-to-call even within the same
-//     second. Confirmed directly, not just assumed: tests/30_random_stdlib
-//     calls random_int()/random_double() 1000+ times in a tight loop and
-//     asserts more than one distinct value comes out.
+//     This replaced a design that reseeded libc's srand() on EVERY call from
+//     the wall clock plus CPU ticks. That worked only where two calls a few
+//     microseconds apart saw different clock values (glibc's clock() is CPU
+//     time in microseconds): on Windows, where clock() is a millisecond wall
+//     clock, 1000 calls in a tight loop shared one seed and returned one value
+//     1000 times. It also took rand()'s range to be glibc's RAND_MAX (2^31-1),
+//     which on Windows is 32767. The runtime generator returns 31 bits on every
+//     platform, so RAND_MAX below is true everywhere.
 //
-//     Be clear about what this IS and ISN'T. It is NOT "seeded once,
-//     drawn many times" like a normal PRNG session -- reseeding this often
-//     is itself something a careful C programmer would usually avoid, since
-//     it throws away rand()'s own internal state advancement on every
-//     single call instead of letting the sequence walk forward naturally.
-//     It is NOT suitable for anything that assumes one unbroken sequence
-//     across a run (e.g. a reproducible-by-seed simulation). What it IS:
-//     simple, requires zero ceremony from callers (no seed()-before-use
-//     step to forget, which was the actual goal), and -- confirmed
-//     empirically, not hoped -- still produces varied, non-constant output
-//     across many calls in a tight loop.
+//     Still NOT suitable for a reproducible-by-seed simulation (there is no way
+//     to set the seed), and NOT secure: the generator is xorshift64*, which is
+//     fast and well distributed but predictable from a few outputs.
 //
 // Usage:
 //   import random;
@@ -50,63 +39,79 @@
 //   immut chance: double = random::random_double();  // [0.0, 1.0)
 //   if random::random_bool() { ... }                 // coin flip
 
-import time;
+import sys;
 
 // ─── libc bindings ────────────────────────────────────────────────────────
 
-// rand()/srand() are declared with their real (32-bit) C ABI signatures --
-// the same reasoning as strings.tr's strcmp/toupper/tolower binding
-// comment: declaring rand() as Turf's 64-bit `int` would read a full
-// 64-bit return register through a prototype whose upper 32 bits a 32-bit
-// C return value never defines. srand()'s parameter is `unsigned int` in
-// C; int32 round-trips it exactly the same way (bit pattern only, no sign
-// meaning is ever relied on below).
-extern fn rand(): int32;
-extern fn srand(seed: int32): void;
+extern fn turfrt_random_u31(): int;
+extern fn turfrt_random_reseed(): void;
 
 // ─── constants ──────────────────────────────────────────────────────────────
 
-// The largest value rand() can return. POSIX only guarantees RAND_MAX is
-// at least 32767, but glibc -- this codebase's exclusive target, see
-// mem.tr's malloc_usable_size()/net.tr's socket constants for other
-// glibc-specific precedent already in this stdlib -- defines it as exactly
-// 2^31 - 1. Confirmed directly against this system's own header
-// (`grep RAND_MAX /usr/include/stdlib.h` -> `#define RAND_MAX 2147483647`),
-// not just assumed from the POSIX minimum.
+// The largest value the generator returns: 2^31 - 1 (31 bits), on every
+// platform. (It used to be glibc's rand() limit, which is only true of glibc.)
 export immut RAND_MAX: int = 2147483647;
 
 // ─── Turf-level helpers ────────────────────────────────────────────────────
 
-// reseed: mix wall-clock seconds and CPU-time ticks into a fresh srand()
-// seed. Not exported -- every public function below calls this itself, so
-// there is no separate seeding step for callers to remember. See this
-// file's own design note above for exactly what tradeoff that implies.
-fn reseed(): void {
-    srand((time::now_seconds() + time::clock_ticks()) to int32);
+// reseed: draw a fresh seed for the generator from the operating system. The
+// functions below do not need it called (the generator seeds itself on first
+// use and then keeps advancing); it is kept for callers that want to
+// deliberately discard the current sequence.
+pub fn reseed(): void {
+    turfrt_random_reseed();
 }
 
 // random_int: a pseudo-random integer in [min, max], inclusive of both
-// ends. Built on rand() % range, which is simple but has a well-known
-// slight bias toward the low end of the range whenever `range` doesn't
-// evenly divide RAND_MAX + 1 -- fine for games/tests/sampling, not for
-// anything that needs a provably uniform distribution.
-fn random_int(min: int, max: int): int {
-    reseed();
-    immut range: int = max - min + 1;
-    immut r: int = rand();
-    return min + (r % range);
+// ends, for any two ints. A span below 2^62 is served from a 62-bit draw
+// (two 31-bit ones) as `draw % (span + 1)`, whose bias toward the low end is
+// below 2^-30 even for the widest such span. A wider span, up to all of
+// `int`, draws whole 64-bit values and keeps the first that falls inside, at
+// least one in four. One 31-bit draw capped every result at
+// min + 2147483647, and `max - min + 1` overflowed for the widest spans.
+@caller_location
+pub fn random_int(min: int, max: int): int {
+    // `max < min` is an empty range. Not input a caller can recover from, so
+    // it is a precondition panic that names the call.
+    if max < min {
+        sys::panic(caller_location + ": random_int: max (" + (max to string) + ") is less than min (" + (min to string) + ")");
+    }
+    // `max - min` overflows exactly when min < 0 and max > INT_MAX + min.
+    immut span_overflows: bool = min < 0 && max > 9223372036854775807 + min;
+    if !span_overflows && max - min < 4611686018427387904 {
+        immut r: int = (turfrt_random_u31() << 31) | turfrt_random_u31();
+        return min + (r % (max - min + 1));
+    }
+    while true {
+        immut v: int = random_u64();
+        if v >= min && v <= max {
+            return v;
+        }
+    }
+    return min;
+}
+
+// A uniformly random 64-bit pattern as an int: 63 low bits from three draws,
+// and the sign from a fourth. Built so no shift drops a set bit, which `<<`
+// checks.
+fn random_u64(): int {
+    immut low: int = (turfrt_random_u31() << 32) | (turfrt_random_u31() << 1) |
+    (turfrt_random_u31() & 1);
+    if (turfrt_random_u31() & 1) == 1 {
+        return low + (-9223372036854775807 - 1);
+    }
+    return low;
 }
 
 // random_double: a pseudo-random value in [0.0, 1.0) -- never exactly
 // 1.0, since rand()'s maximum possible output (RAND_MAX) is divided by
 // RAND_MAX + 1, not RAND_MAX itself.
-fn random_double(): double {
-    reseed();
-    immut r: int = rand();
+pub fn random_double(): double {
+    immut r: int = turfrt_random_u31();
     return (r to double) / ((RAND_MAX to double) + 1.0);
 }
 
 // random_bool: a coin flip -- true or false, each roughly 50% of the time.
-fn random_bool(): bool {
+pub fn random_bool(): bool {
     return random_int(0, 1) == 1;
 }

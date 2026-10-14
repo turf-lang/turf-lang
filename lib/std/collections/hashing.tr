@@ -1,12 +1,12 @@
 unsafe module;
 
 // hashing.tr — a general-purpose hash(T), STD-003 item 6
-// (docs/planning/ARCHITECTURE_OVERHAUL.md §8). Exists to give Map<K, V>/
+// (docs/archive/ARCHITECTURE_OVERHAUL.md §8). Exists to give Map<K, V>/
 // Set<T> (map.tr/set.tr) a real O(1)-average hash index instead of their
 // old O(n) linear scan -- previously impossible ("there is no generic
 // hash(T) in the language yet", map.tr's own former header comment) for
 // the identical reason the Map<string, V> equality gap
-// (docs/planning/LIMITATIONS.md item 1) used to exist: a generic method
+// (docs/archive/LIMITATIONS.md item 1) used to exist: a generic method
 // body was type-checked and codegenned exactly ONCE, shared across every
 // instantiation, so a call like `hash(key)` inside it would have seen
 // `key` as the STATIC, erased `TurfGenericParamType("K")` -- no concrete
@@ -14,7 +14,7 @@ unsafe module;
 // instantiation's method body its own re-typecheck with K/T concrete,
 // which is what makes `hash(key)` dispatch correctly now, verified live
 // the same way `self.keys[i] == key` already does (map.tr's own
-// Map.indexOf() doc comment).
+// Map.index_of() doc comment).
 //
 // `unsafe module;` stays (STD-003 item 8 considered and rejected here too
 // -- see list.tr's own note for the full reasoning): `fn<T> hash(x: T):
@@ -22,67 +22,27 @@ unsafe module;
 // legally reach this with `T` substituted to a raw pointer type (e.g. a
 // `Map<SomeStruct*, V>`'s own internal `hashing::hash(key)` call), and the
 // SUBSTITUTED parameter (`x: SomeStruct*`) then needs this file's raw-
-// pointer capability regardless of the scoped `unsafe { }` already wrapped
-// around this function's body -- confirmed live via `Map<Point*, int>`.
+// pointer capability -- confirmed live via `Map<Point*, int>`.
 //
-// Design: exactly two overloads.
-//   - `hash(x: string): int` -- a real content hash (djb2), since string's
-//     runtime representation is a POINTER to bytes: hashing the pointer
-//     itself would hash by identity, not content, which is wrong the same
-//     way a raw `==` on two unrelated string allocations used to be.
-//   - `fn<T> hash(x: T): int` -- a generic fallback: a byte-wise hash
-//     (also djb2) over the `sizeof(T)` bytes at `x`'s own address. This
-//     covers every OTHER type with no per-type code at all: int, int32,
-//     double, bool, char, any pointer type, and any plain-data struct.
-// Ordinary (non-operator) overload resolution prefers an exact concrete
-// candidate over a generic one -- verified live -- so `hash("a")` reaches
-// the string overload and `hash(42)`/`hash(someStruct)` fall through to
-// the generic byte-hash. No trait/constraint system needed or added
-// (ARCHITECTURE_OVERHAUL.md §25 item 1 forbids one) -- overload
-// resolution alone is enough because every concrete K/T actually used
-// anywhere in this codebase today is exactly `int` or `string`.
+// The one requirement on a hash: `a == b` implies `hash(a) == hash(b)`.
+// Both overloads are the compiler's `hash_of` (FREEZE.md §6.8, owner
+// decision 2026-10-13), built from the key's static type: a string by its
+// text, a double with -0.0 taken as 0.0, a struct field by field, an array
+// element by element, a reference or pointer by address. These used to be a
+// djb2 over the key's raw bytes, which broke the requirement three ways:
+// a struct's padding holds leftover bytes (equal struct keys missed, 1999 of
+// 2000 at -O0 and none at -O2), -0.0 and 0.0 differ in their sign bit, and a
+// struct comparing string fields by content was hashed by the pointers.
+// A key whose `operator ==` is not field by field (say, case-insensitive)
+// still breaks it; normalize such a key before using it.
 //
-// Correctness requirement any hash(T) must satisfy: `a == b` implies
-// `hash(a) == hash(b)`. The byte-hash meets this for every plain-data
-// type, since it is a pure function of the same bytes `==` itself would
-// compare structurally field-by-field for such a type. It does NOT, in
-// general, meet this for a struct whose own `operator==` compares two
-// POINTER-shaped fields (e.g. two strings) by content while their raw
-// bytes (the pointers themselves) differ -- see this group's own change
-// record, *Known pitfalls*, for the full explanation and why it's an
-// accepted, documented limitation rather than something fixed here.
-//
-// Overflow note: every step below is masked to 32 bits with `& 0xFFFFFFFF`
-// specifically because FREEZE.md §6.2 traps runtime signed-integer
-// overflow -- a classic unmasked djb2 (`h = h * 33 + byte`) panics after
-// only a handful of iterations under this compiler's checked arithmetic,
-// confirmed live while developing this file. Masking keeps `h` bounded
-// below 2^32 before every multiply, so `h * 33` never exceeds ~2^37 --
-// nowhere near int's 2^63 range.
+// The `string` overload stays so `hashing::hash("a")` keeps resolving to a
+// concrete function (a 2.x public item, tests/46_stdlib_surface).
 
-import strings;
-
-fn hash(x: string): int {
-  mut h: int = 5381;
-  immutable n: int = strings::strlen(x);
-  mut i: int = 0;
-  while i < n {
-    h = (h * 33 + x[i]) & 0xFFFFFFFF;
-    i = i + 1;
-  }
-  return h;
+pub fn hash(x: string): int {
+    return hash_of(x);
 }
 
-fn<T> hash(x: T): int {
-  mut h: int = 5381;
-  unsafe {
-    immutable p: char* = &x to char*;
-    immutable n: int = sizeof(T);
-    mut i: int = 0;
-    while i < n {
-      h = (h * 33 + (p[i] to int)) & 0xFFFFFFFF;
-      i = i + 1;
-    }
-  }
-  return h;
+pub fn<T> hash(x: T): int {
+    return hash_of(x);
 }

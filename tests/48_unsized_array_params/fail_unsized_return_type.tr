@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E140
+// EXPECT-DIAG: The return type of 'make' can't use the unsized array type 'int[]'
+// Issue #260: the caller would get a slice of an array that died with the
+// callee's frame. This used to be an internal compiler error (invalid IR).
+fn make(): int[] {
+    mut a: int[2] = [1, 2];
+    return a;
+}
+
+fn main(): int {
+    return 0;
+}

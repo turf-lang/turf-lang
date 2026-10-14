@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E057
+// EXPECT-DIAG: Bitwise operator requires integer operands, but left operand is 'double'
 // FAIL TEST: Bitwise XOR with double type
 // 1.5 ^ 2 should emit a TypeError (^ is XOR, requires integer operands)
 

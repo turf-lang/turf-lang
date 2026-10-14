@@ -1,0 +1,13 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: segmentation fault (this is a bug in unsafe code or in TurfLang) at address 0x0
+// A read through a null raw pointer faults at address 0 at every -O level.
+// At -O2 it returned garbage instead, the load having been optimized away as
+// undefined behaviour.
+
+fn main(): int {
+    unsafe {
+        mut p: int* = null;
+        printline(p[0]);
+    }
+    return 0;
+}

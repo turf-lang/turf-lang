@@ -21,18 +21,18 @@ fn main(): int {
     compare conn {
         matches ConnectionState::Idle:
         matches ConnectionState::Closing:
-            // Both Idle and Closing have a declared edge to Connecting only
-            // from Idle -- but since this arm is stacked (unnarrowed), the
-            // compiler can't statically know which state conn is actually
-            // in here, so this must be runtime-guarded, not compile-time-proven.
-            conn.transition(ConnectionState::Connecting);
+        // Both Idle and Closing have a declared edge to Connecting only
+        // from Idle -- but since this arm is stacked (unnarrowed), the
+        // compiler can't statically know which state conn is actually
+        // in here, so this must be runtime-guarded, not compile-time-proven.
+        conn.transition(ConnectionState::Connecting);
         done
         otherwise:
-            mut noop: int = 0;
+        mut noop: int = 0;
     }
 
     test::assert(conn == ConnectionState::Connecting,
-                "conn should now be Connecting (runtime guard's happy path)");
+        "conn should now be Connecting (runtime guard's happy path)");
 
     return 0;
 }

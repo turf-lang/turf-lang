@@ -1,0 +1,62 @@
+// A program's own function wins over a built-in of the same name. `heap`,
+// `typeof` and the `gc_*` names are the compiler's bare intrinsics, but they
+// are only consulted when NO declared function has the name; each of these used
+// to be taken over by the built-in and crashed the compiler with "generated
+// LLVM IR is invalid". `heap` in particular is a natural name for a user's
+// priority queue.
+
+import test;
+
+fn heap(n: int): int {
+    return n + 1;
+}
+
+fn typeof(n: int): int {
+    return n + 2;
+}
+
+fn gc_alloc(n: int): int {
+    return n + 3;
+}
+
+fn gc_alloc_zeroed(n: int): int {
+    return n + 4;
+}
+
+fn gc_realloc(a: int, b: int): int {
+    return a + b;
+}
+
+fn gc_collect(): int {
+    return 5;
+}
+
+fn gc_is_managed(n: int): bool {
+    return n > 0;
+}
+
+fn gc_checked_free(n: int): int {
+    return n + 6;
+}
+
+fn gc_pin(n: int): int {
+    return n + 7;
+}
+
+fn gc_unpin(n: int): int {
+    return n + 8;
+}
+
+fn main(): int {
+    test::assert(heap(1) == 2, "own heap()");
+    test::assert(typeof(1) == 3, "own typeof()");
+    test::assert(gc_alloc(1) == 4, "own gc_alloc()");
+    test::assert(gc_alloc_zeroed(1) == 5, "own gc_alloc_zeroed()");
+    test::assert(gc_realloc(1, 2) == 3, "own gc_realloc()");
+    test::assert(gc_collect() == 5, "own gc_collect()");
+    test::assert(gc_is_managed(1), "own gc_is_managed()");
+    test::assert(gc_checked_free(1) == 7, "own gc_checked_free()");
+    test::assert(gc_pin(1) == 8, "own gc_pin()");
+    test::assert(gc_unpin(1) == 9, "own gc_unpin()");
+    return 0;
+}

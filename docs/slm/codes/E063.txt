@@ -1,29 +1,20 @@
-TURF E063 -- POWER ARGUMENT TYPE:
+TURF E063 -- RETIRED (a bad argument to power() is now E056 or E025):
 
-CAUSE:
-  `power(base, exponent)` was called with one or both arguments not being
-  an `int` or `double`. `power` raises the first number to the power of the
-  second, so both sides have to be numeric.
+STATUS:
+  No longer raised. `power` used to be a compiler built-in with its own error; it is now an
+  ordinary standard-library function (`math::power`), so a bad argument is reported like any
+  other call with wrong argument types. The number is kept so an old log that mentions it still
+  resolves, and is never reused.
 
-VALID OVERLOADS:
-    power(int, int)       → int
-    power(int, double)    → double
-    power(double, int)    → double
-    power(double, double) → double
+INCORRECT (reports E056 or E025):
+    mut bad: int = math::power(true, 2);
 
-CORRECT USAGE:
-    mut a: int = power(2, 10);          // 1024
-    mut b: double = power(2.0, 0.5);    // square root of 2
+VALID:
+    import math;
 
-INCORRECT:
-    mut bad: int = power("2", 10);
-    // ERROR: 'power' only works with int or double, but you gave it 'string' and 'int'.
+    mut a: int = math::power(2, 3);          // int, int -> int
+    mut b: double = math::power(2, 0.5);     // int, double -> double
+    mut c: double = math::power(2.0, 3);     // double, int -> double
+    mut d: double = math::power(2.0, 0.5);   // double, double -> double
 
-    mut bad2: int = power(2, true);
-    // ERROR: 'power' only works with int or double, but you gave it 'int' and 'bool'.
-
-FIX:
-  Make sure BOTH arguments are `int` or `double` -- mixing the two is fine
-  (the overload table above covers every int/double combination and picks
-  `double` as the result whenever either side is a `double`), but neither
-  side may be a `string`, `bool`, `char`, or anything else non-numeric.
+SEE: E056 (wrong argument type to a function), E025 (no matching module overload).

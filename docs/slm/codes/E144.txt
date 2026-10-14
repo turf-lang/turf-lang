@@ -1,0 +1,26 @@
+TURF E144 -- MUTABLE VIEW OF AN IMMUTABLE ARRAY:
+
+CAUSE:
+  A `mut` slice variable (a `T[]` local, or a `guess` from a slice) was declared from, or
+  rebound to, a slice or array that is `immut`. A view shares the array it looks at, so a
+  `mut` view would allow writes (`t[0] = 9`) into an immutable array.
+
+CORRECT USAGE:
+    immut a: int[3] = [1, 2, 3];
+    immut t = a[1..];                    // read-only view of an immutable array
+    mut b: int[3] = [1, 2, 3];
+    mut v: int[] = b[1..];               // mutable view of a mutable array
+    v = b[..2];                          // rebinding to another mutable array is fine
+
+INCORRECT:
+    mut t: int[] = a[1..];               // declaration
+    mut t = a[..];                       // inferred
+    mut t: int[] = a;                    // whole array
+    view = fixed[1..];                   // rebinding a mut view to an immutable array
+    // ERROR [E144]: 't' is a 'mut' view of 'a', which is immutable.
+
+FIX:
+  Declare the view `immut`, make the array `mut`, or, if an editable copy is wanted, use
+  `mut c = a.copy();` (a fresh independent `T[]`, not a view, so never E144).
+
+SEE: E060 (writing through an `immut` view), E141 (immutable array passed to a writer).

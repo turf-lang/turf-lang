@@ -1,0 +1,64 @@
+// tests/custom/gc_stress_corpus/http_load_server.tr
+// FDN-005 stage 1 (docs/planning/ROADMAP_v2.0.0.md): "the http_server
+// showcase under a scripted client for 10^5 requests." A near-identical
+// copy of showcase/http_server.tr's own handler (deliberately NOT editing
+// that file -- it is its own regression target elsewhere, per MEM-002/
+// FDN-006's "showcase/** swept directly" convention, and its own demo is
+// documented as "1000 requests, then shut down"), with the loop bound
+// raised from 1000 to REQUEST_COUNT below. Every accepted connection is a
+// real GC-heap allocation (the request/response strings, `net.tr`'s own
+// internal buffers) that must be reclaimed as the collector's ordinary
+// heap-doubling schedule runs across a genuinely long-lived server
+// process -- the one stress-corpus shape a short-lived CLI test program
+// (every other file in this directory) cannot exercise at all.
+//
+// Run only by scripts/smoke/gc_stress_corpus_smoke.sh, paired with
+// http_load_client.tr.
+import io;
+import net;
+import strings;
+
+fn handle(conn: net::TcpConnection): void {
+    immut request: string = conn.read(4096);
+
+    mut body: string;
+    mut status: string = "200 OK";
+
+    if strings::starts_with(request, "GET / ") {
+        body = "Hello from Turf!";
+    } elseif strings::starts_with(request, "GET /time") {
+        body = "the Turf web server is alive";
+    } else {
+        status = "404 Not Found";
+        body = "not found";
+    }
+
+    immut bodyLen: int = strings::length(body);
+    immut response: string = "HTTP/1.1 " + status + "\nContent-Type: text/plain\nContent-Length: " + (bodyLen to string) + "\nConnection: close\n\n" + body;
+    conn.write(response);
+    conn.close();
+}
+
+fn main(): int {
+    immut REQUEST_COUNT: int = 100000;
+
+    mut server: net::TcpListener = net::TcpListener::bind(8099) recover run {
+        io::printline("Could not start the stress server -- is port 8099 already in use?");
+        return 1;
+    };
+    io::printline("gc_stress_corpus http load server listening on port 8099...");
+
+    mut requestCount: int = 0;
+    while requestCount < REQUEST_COUNT {
+        mut conn: net::TcpConnection = server.accept() recover run {
+            io::printline("accept() failed, skipping.");
+            continue;
+        };
+        handle(conn);
+        requestCount = requestCount + 1;
+    }
+
+    server.close();
+    io::printline("gc_stress_corpus http load server: handled " + (requestCount to string) + " requests, shutting down.");
+    return 0;
+}

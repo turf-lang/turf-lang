@@ -1,0 +1,24 @@
+// REL-005 benchmark: `Map<string, int>` churn.
+//
+// A sliding window of keys: each step puts one key, reads one that is
+// present, and removes the one that fell out of the window, so the map stays
+// at `window` entries while every slot sees insert, lookup and delete.
+// Prints a checksum.
+import map::Map;
+
+fn main(): int {
+    immut window: int = 5000;
+    immut steps: int = 800000;
+    mut m: Map<string, int> = Map::default();
+    mut sum: int = 0;
+    for i in 0..steps {
+        m.put("k" + (i to string), i);
+        if (i >= window) {
+            immut old: string = "k" + ((i - window) to string);
+            m.remove(old);
+            sum = sum + m.get("k" + ((i - window / 2) to string)) % 1000;
+        }
+    }
+    io::printline(sum + m.length());
+    return 0;
+}

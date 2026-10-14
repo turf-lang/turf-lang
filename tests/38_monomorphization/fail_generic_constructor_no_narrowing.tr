@@ -1,0 +1,16 @@
+// EXPECT-DIAG: E056
+// EXPECT-DIAG: Argument 1 is 'double', but building a 'Box<int>' needs 'int'
+// The arguments of a generic constructor widen to the declared type but never
+// narrow: a double does not become an int on the way in.
+struct Box<T> {
+    v: T
+}
+
+fn<T> Box.new(v: T): void {
+    self.v = v;
+}
+
+fn main(): int {
+    mut b: Box<int> = Box::new(2.5);
+    return b.v;
+}

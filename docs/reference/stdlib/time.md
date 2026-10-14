@@ -1,54 +1,143 @@
-# `time`
+# Time: `time`
 
-Wall-clock time, CPU-time measurement, and sleeping. Not prelude — requires
-an explicit `import time;`.
+The wall clock, a CPU stopwatch, and sleeping. Not prelude: it needs
+`import time;`.
 
 ```turflang
 import time;
 ```
 
+There are two different clocks, and the module's functions are not
+interchangeable between them:
+
+| Clock | Functions | Resolution | Advances while the program sleeps or waits |
+|---|---|---|---|
+| **Wall clock**: the calendar time of day | `now_seconds` | one second | yes |
+| **CPU time**: how long this process has been computing | `clock_ticks`, `elapsed_ms`, `elapsed_seconds` | microseconds | **no** |
+
+So `elapsed_ms` measures how much processor time your code used, not how long a
+user waited. After `time::sleep_ms(300)` it has advanced by about 0, because a
+sleeping program uses no CPU. There is no high-resolution wall-clock stopwatch;
+for a duration of seconds, subtract two `now_seconds()` readings.
+
+## Wall clock
+
 ### `now_seconds(): int`
 
-Seconds since the Unix epoch (wraps libc `time(NULL)`) — real wall-clock
-time.
+The current time as whole seconds since the Unix epoch (1970-01-01 00:00:00
+UTC). The value is the same on every platform. It is the only wall-clock
+reading, so two calls less than a second apart can return the same number.
+
+## CPU time
+
+### `clock_ticks(): int`
+
+The CPU time this process has consumed so far, in **microseconds**, on every
+platform. It is a reading to subtract from a later one, not a timestamp: its
+zero point means nothing.
+
+### `elapsed_ms(start_clock_ticks: int): int`
+
+The CPU milliseconds used since `start_clock_ticks`, a value that
+`clock_ticks()` returned earlier. It rounds down.
+
+### `elapsed_seconds(start_clock_ticks: int): int`
+
+The same in whole CPU seconds, rounded down.
 
 ```turflang
-test::assert(time::now_seconds() > 1735689600, "after 2025-01-01");
+import time;
+
+fn sum_of_squares(n: int): int {
+    mut total: int = 0;
+    mut i: int = 0;
+    while i < n {
+        total = total + (i % 1000) * (i % 1000);
+        i = i + 1;
+    }
+    return total;
+}
+
+fn main(): int {
+    immut started_at: int = time::now_seconds();
+    immut start: int = time::clock_ticks();
+
+    immut result: int = sum_of_squares(200000000);
+
+    printline("result: " + (result to string));
+    printline("cpu: " + (time::elapsed_ms(start) to string) + " ms");
+    printline("wall: " + ((time::now_seconds() - started_at) to string) + " s");
+    return 0;
+}
 ```
 
-### `clock_ticks(): int` / `CLOCKS_PER_SEC: int = 1000000`
+The program prints the result, then two durations whose values depend on the
+machine.
 
-Wraps libc `clock()` — **CPU time consumed by this process, not wall-clock
-time.** Divide a difference in ticks by `CLOCKS_PER_SEC` to get seconds of
-CPU time. `elapsed_ms`/`elapsed_seconds` below do this division for you.
+## Sleeping
 
-> **Gotcha: this is not what you want for timing a `sleep`.** Sleeping
-> consumes essentially no CPU time, so `elapsed_ms` measured across a sleep
-> stays near zero — this is correct behavior for a CPU-time clock, not a
-> bug, but it surprises people expecting wall-clock elapsed time. Use
-> `now_seconds()` (before/after, both in seconds) if you need to measure
-> real elapsed time across a sleep or I/O wait; use `clock_ticks()` if you
-> need to measure how much CPU work something actually did.
+### `sleep_seconds(n: int): void`
 
-### `elapsed_ms(start_clock_ticks: int): int` / `elapsed_seconds(start_clock_ticks: int): int`
+Suspends the program for `n` wall-clock seconds. `n` of zero or less returns at
+once.
 
-Takes a `clock_ticks()` value captured earlier and returns CPU-time elapsed
-since then, in milliseconds or seconds.
+### `sleep_ms(n: int): void`
+
+Suspends the program for `n` wall-clock milliseconds, with the same behaviour for
+zero or less. Waits longer than a second are done in one-second steps, so a large
+`n` is safe.
 
 ```turflang
-immut start: int = time::clock_ticks();
-// ... CPU-bound work ...
-io::printline((time::elapsed_ms(start) to string) + "ms of CPU time");
+import time;
+
+fn main(): int {
+    immut before: int = time::now_seconds();
+    immut cpu: int = time::clock_ticks();
+
+    time::sleep_ms(1500);
+
+    printline("slept about " + ((time::now_seconds() - before) to string) + " s of wall time");
+    printline("used " + (time::elapsed_ms(cpu) to string) + " ms of CPU");
+    return 0;
+}
 ```
 
-### `sleep_seconds(n: int): void` / `sleep_ms(n: int): void`
-
-Wall-clock sleeps, built on `usleep`. Both loop internally in ≤1-second
-chunks (`MAX_USLEEP_USEC: int = 1000000`) rather than one large
-multiplied call, to stay under `usleep`'s practical per-call ceiling and
-avoid `int32` overflow on a large request.
-
-```turflang
-time::sleep_ms(50);
-time::sleep_seconds(1);
+```text
+slept about 1 s of wall time
+used 0 ms of CPU
 ```
+
+The wall figure is 1 or 2, depending on where in the second the sleep began,
+because `now_seconds` counts whole seconds.
+
+## Constants
+
+### `CLOCKS_PER_SEC: int`
+
+`1000000`, the number of `clock_ticks` in one second.
+
+### `MAX_USLEEP_USEC: int`
+
+`1000000`, the longest single `usleep` call the module makes (one second); the
+sleep functions split longer waits into steps of this size.
+
+## The C bindings
+
+Three raw C functions are public as they are, with the C library's own
+behaviour:
+
+| Binding | Signature |
+|---|---|
+| `time::time` | `time(t: ptr): int`: the epoch seconds, as `now_seconds` does; pass `null` for `t` |
+| `time::clock` | `clock(): int`: the C library's CPU clock |
+| `time::usleep` | `usleep(usec: int32): int32`: sleep for `usec` microseconds; the C library leaves a value of a second or more undefined |
+
+Prefer `now_seconds`, `clock_ticks` and the `sleep_*` functions. In particular
+`clock()` counts ticks of a platform-specific size (and on Windows it is a
+wall-clock reading), so only `clock_ticks` and `CLOCKS_PER_SEC` agree with each
+other everywhere.
+
+## Failure
+
+None of these functions fail or panic. Sleeping and reading a clock have no
+error case, and a negative duration is treated as zero.

@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E031
+// EXPECT-DIAG: 'totallyBogusModuleNameThatDoesNotExist' isn't a known enum, struct, or module
 // Regression test: this is the literal bug report. A type annotation
 // qualified with a module name that doesn't exist at all must be
 // rejected -- before the fix, ParseType() accepted ANY qualifier

@@ -10,11 +10,31 @@ CAUSE:
   construction alike.
 
 CORRECT SYNTAX:
-    io::printline("hi");     // module access -- always '::'
-    Point::origin();         // static method / construction -- always '::'
+    import io;
+
+    struct Point {
+        x: int,
+        y: int
+    }
+
+    fn Point.new(x: int, y: int): void {
+        self.x = x;
+        self.y = y;
+    }
+
+    fn Point.origin() static: Point {
+        return Point::default();
+    }
+
+    fn Point.sum(): int {
+        return self.x + self.y;
+    }
+
+    io::printline("hi");              // module access -- always '::'
+    mut o: Point = Point::origin();   // static method / construction -- always '::'
     mut p: Point = Point::new(1, 2);
-    p.sum();                 // instance access -- '.', because 'p' is a
-                              // real Point VALUE, not the type itself
+    mut total: int = p.sum();         // instance access -- '.', because 'p' is a
+                                      // real Point VALUE, not the type itself
 
 INCORRECT:
     io.printline("hi");

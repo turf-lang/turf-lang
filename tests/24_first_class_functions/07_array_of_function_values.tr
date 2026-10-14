@@ -1,0 +1,34 @@
+// An array of function values is written `(fn(int, int): int)[2]`: without
+// the parentheses the `[2]` belongs to the return type. There was no way to
+// write one, and a for-each over one could not call its element (the loop
+// variable's placeholder type was `int`).
+
+import test;
+
+fn add(a: int, b: int): int {
+    return a + b;
+}
+
+fn mul(a: int, b: int): int {
+    return a * b;
+}
+
+fn run_all(fs: (fn(int, int): int)[], x: int): int {
+    mut t: int = 0;
+    for f in fs {
+        t += f(x, x);
+    }
+    return t;
+}
+
+fn main(): int {
+    mut ops: (fn(int, int): int)[2] = [add, mul];
+    immut second = ops[1];
+    test::assert(second(3, 4) == 12, "an element through a variable");
+    ops[0] = mul;
+    mut g: fn(int, int): int = ops[0];
+    test::assert(g(2, 5) == 10, "an assigned element");
+    test::assert(run_all(ops, 3) == 18, "a slice parameter and for-each");
+    test::assert(typeof(ops) == "(fn(int, int): int)[2]", "the type's name");
+    return 0;
+}

@@ -1,4 +1,5 @@
 // RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: malformed JSON correctly rejected by json::parse
 //
 // Malformed JSON (a truncated object -- opens a key but never supplies a
 // value or the closing brace) must hit json::parse's `!JsonValue` error

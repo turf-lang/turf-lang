@@ -1,0 +1,20 @@
+TURF E100 -- INVALID ESCAPE SEQUENCE:
+
+CAUSE:
+  A backslash inside a string or char literal was followed by a character that is not
+  a known escape. Valid escapes, exactly:
+    \n newline   \t tab   \r carriage return   \0 null   \\ backslash
+    \" double quote   \' single quote   \a \b \f \v control characters
+  Anything else is an error; the compiler does not guess.
+
+INCORRECT:
+    mut path: string = "C:\temp\q";      // \q is not an escape
+
+CORRECT:
+    mut path: string = "C:\\temp\\q";    // double each literal backslash
+
+FIX:
+  To get a real backslash write `\\`. Typical sources: Windows paths and regular
+  expressions with single backslashes.
+
+RELATED: E099 (unterminated literal), E101 (bad char literal).

@@ -1,0 +1,216 @@
+[
+  {
+    "id": "semicolon_var_decl",
+    "source_test": "tests/01_syntax/02_semicolon.tr",
+    "kind": "delete_semicolon",
+    "mutated_source": "import test;\n\nfn main(): int {\n    mut a: int = 10\n    mut b: int = 20;\n    mut max_val: int = 0;\n\n    if (a > b) {\n        max_val = a;\n    } else {\n        max_val = b;\n    }\n\n    test::assert(max_val == 20, \"max_val should be 20, ensuring if-else parses without trailing semicolons\");\n\n    mut i: int = 0;\n    while i < 5 {\n        i = i + 1;\n    }\n\n    test::assert(i == 5, \"while loop should run 5 times and not require a semicolon after the block\");\n\n    return 0;\n}\n",
+    "baseline_exit_code": 1,
+    "baseline_error_code": "",
+    "baseline_output": "/tmp/turf_slm_benchmark_scratch.tr (1 error)\n\n\u2500\u2500 error at line 5, col 5\n\n  Expected ';' after statement.\n\n  5 \u2502     mut b: int = 20;\n    \u2502     ^~~ Here!\n\n"
+  },
+  {
+    "id": "type_mismatch_int_to_string",
+    "source_test": "tests/01_syntax/02_semicolon.tr",
+    "kind": "swap_type",
+    "mutated_source": "import test;\n\nfn main(): int {\n    mut a: string = 10;\n    mut b: int = 20;\n    mut max_val: int = 0;\n\n    if (a > b) {\n        max_val = a;\n    } else {\n        max_val = b;\n    }\n\n    test::assert(max_val == 20, \"max_val should be 20, ensuring if-else parses without trailing semicolons\");\n\n    mut i: int = 0;\n    while i < 5 {\n        i = i + 1;\n    }\n\n    test::assert(i == 5, \"while loop should run 5 times and not require a semicolon after the block\");\n\n    return 0;\n}\n",
+    "baseline_exit_code": 1,
+    "baseline_error_code": "E066",
+    "baseline_output": "/tmp/turf_slm_benchmark_scratch.tr (1 error)\n\n\u2500\u2500 error at line 4, col 5 [E066]\n\n  Type mismatch!\n  Cannot initialise 'string' variable 'a' with value of type 'int'.\n\n  Hint: Check that both sides have compatible types.\n\n  4 \u2502     mut a: string = 10;\n    \u2502     ^~~ Here!\n\n  Run `turf --explain E066` for more details.\n\n"
+  },
+  {
+    "id": "unbalanced_brace_struct",
+    "source_test": "tests/01_syntax/04_pratt_lvalue.tr",
+    "kind": "drop_closing_brace",
+    "mutated_source": "import test;\n\nstruct Inner {\n    val: int\n\nstruct Outer {\n    inner: Inner\n}\n\nfn main(): int {\n    mut o: Outer = Outer::default();\n    o.inner.val = 42;\n\n    // Assigning deeply nested dynamically evaluated L-Value\n    o.inner.val = 100;\n    \n    test::assert(o.inner.val == 100, \"L-value chained struct assignment failed\");\n\n    return 0;\n}\n",
+    "baseline_exit_code": 1,
+    "baseline_error_code": "",
+    "baseline_output": "/tmp/turf_slm_benchmark_scratch.tr (1 error)\n\n\u2500\u2500 error at line 6, col 1\n\n  Expected ',' or '}' after field definition\n\n  6 \u2502 struct Outer {\n    \u2502 ^~~~~~ Here!\n\n"
+  },
+  {
+    "id": "typo_field_access",
+    "source_test": "tests/01_syntax/04_pratt_lvalue.tr",
+    "kind": "typo_identifier",
+    "mutated_source": "import test;\n\nstruct Inner {\n    val: int\n}\n\nstruct Outer {\n    inner: Inner\n}\n\nfn main(): int {\n    mut o: Outer = Outer::default();\n    o.inner.avl = 42;\n\n    // Assigning deeply nested dynamically evaluated L-Value\n    o.inner.val = 100;\n    \n    test::assert(o.inner.val == 100, \"L-value chained struct assignment failed\");\n\n    return 0;\n}\n",
+    "baseline_exit_code": 1,
+    "baseline_error_code": "E068",
+    "baseline_output": "/tmp/turf_slm_benchmark_scratch.tr (1 error)\n\n\u2500\u2500 error at line 13, col 13 [E068]\n\n  Struct 'Inner' has no field named 'avl'.\n\n  Hint: It may be from the current file: 'val'\n\n  13 \u2502     o.inner.avl = 42;\n     \u2502             ^~~ Here!\n\n  Run `turf --explain E068` for more details.\n\n"
+  },
+  {
+    "id": "type_mismatch_double_to_int",
+    "source_test": "tests/03_typechecker/01_arithmetic_basic.tr",
+    "kind": "swap_type",
+    "mutated_source": "import math;\n\nimport test;\nfn main(): int {\n    // Basic Arithmetic\n    mut a: int = 5 + 3;\n    test::assert(a == 8, \"\");\n\n    mut b: int = 10 - 7;\n    test::assert(b == 3, \"\");\n\n    mut c: int = 6 * 7;\n    test::assert(c == 42, \"\");\n\n    mut d: int = 100 / 4;\n    test::assert(d == 25, \"\");\n\n    mut e: int = 17 % 5;\n    test::assert(e == 2, \"\");\n\n    mut f: int = 2.0 ** 3.0;\n    test::assert(f == 8.0, \"\");\n\n    // Unary negation\n    mut g: int = -10;\n    test::assert(g == -10, \"\");\n\n    // Precedence\n    mut h: int = 2 + 3 * 4;\n    test::assert(h == 14, \"\");\n\n    mut i: int = (2 + 3) * 4;\n    test::assert(i == 20, \"\");\n\n    // Mixed/Double arithmetic\n    mut j: double = 5.0 + 2.5; // Note: strict typing might require 5.0\n    test::assert(j == 7.5, \"\");\n\n    // Math module integration\n    mut p1: int = math::power(2, 3);\n    test::assert(p1 == 8, \"\");\n\n    mut p2: double = math::power(2.0, 3.0);\n    test::assert(p2 == 8.0, \"\");\n\n    mut abs1: int = math::abs(-10);\n    test::assert(abs1 == 10, \"\");\n\n    mut abs2: double = math::abs(-3.2);\n    // double comparison warning workaround\n    test::assert(abs2 > 3.1, \"\");\n    test::assert(abs2 < 3.3, \"\");\n\n    return 0;\n}\n",
+    "baseline_exit_code": 1,
+    "baseline_error_code": "E066",
+    "baseline_output": "/tmp/turf_slm_benchmark_scratch.tr (1 error)\n\n\u2500\u2500 error at line 21, col 5 [E066]\n\n  Type mismatch!\n  Cannot initialise 'int' variable 'f' with value of type 'double'.\n\n  Hint: Check that both sides have compatible types.\n\n  21 \u2502     mut f: int = 2.0 ** 3.0;\n     \u2502     ^~~ Here!\n\n  Run `turf --explain E066` for more details.\n\n"
+  },
+  {
+    "id": "typo_undeclared_variable",
+    "source_test": "tests/03_typechecker/01_arithmetic_basic.tr",
+    "kind": "typo_identifier",
+    "mutated_source": "import math;\n\nimport test;\nfn main(): int {\n    // Basic Arithmetic\n    mut a: int = 5 + 3;\n    test::assert(a == 8, \"\");\n\n    mut b: int = 10 - 7;\n    test::assert(b == 3, \"\");\n\n    mut c: int = 6 * 7;\n    test::assert(c == 42, \"\");\n\n    mut d: int = 100 / 4;\n    test::assert(d == 25, \"\");\n\n    mut e: int = 17 % 5;\n    test::assert(e == 2, \"\");\n\n    mut f: double = 2.0 ** 3.0;\n    test::assert(f == 8.0, \"\");\n\n    // Unary negation\n    mut g: int = -10;\n    test::assert(g == -10, \"\");\n\n    // Precedence\n    mut h: int = 2 + 3 * 4;\n    test::assert(h == 14, \"\");\n\n    mut i: int = (2 + 3) * 4;\n    test::assert(i == 20, \"\");\n\n    // Mixed/Double arithmetic\n    mut j: double = 5.0 + 2.5; // Note: strict typing might require 5.0\n    test::assert(j == 7.5, \"\");\n\n    // Math module integration\n    mut p1: int = math::power(2, 3);\n    test::assert(p1 == 8, \"\");\n\n    mut p2: double = math::power(2.0, 3.0);\n    test::assert(p2 == 8.0, \"\");\n\n    mut abs1: int = math::abs(-10);\n    test::assert(bas1 == 10, \"\");\n\n    mut abs2: double = math::abs(-3.2);\n    // double comparison warning workaround\n    test::assert(abs2 > 3.1, \"\");\n    test::assert(abs2 < 3.3, \"\");\n\n    return 0;\n}\n",
+    "baseline_exit_code": 1,
+    "baseline_error_code": "E040",
+    "baseline_output": "/tmp/turf_slm_benchmark_scratch.tr (1 error)\n\n\u2500\u2500 error at line 47, col 18 [E040]\n\n  I can't find anything named 'bas1'.\n\n  Hint: It may be from the current file: 'abs1'\n\n  47 \u2502     test::assert(bas1 == 10, \"\");\n     \u2502                  ^~~~ Here!\n\n  Run `turf --explain E040` for more details.\n\n"
+  },
+  {
+    "id": "math_abs_too_many_args",
+    "source_test": "tests/03_typechecker/fail_math_abs_too_many.tr",
+    "kind": "fix_call_arity",
+    "mutated_source": "import io;\nimport math;\n\nfn main(): int {\n    io::printline(math::abs(1, 2));\n\n    return 0;\n}\n",
+    "fixed_source": "import io;\nimport math;\n\nfn main(): int {\n    io::printline(math::abs(1));\n\n    return 0;\n}\n",
+    "baseline_exit_code": 1,
+    "baseline_error_code": "E044",
+    "baseline_output": "/tmp/turf_slm_benchmark_scratch.tr (1 error)\n\n── error at line 5, col 28 [E044 · function signature]\n\n  'abs' was called with 2 arguments, but no overload accepts that many.\n  Known overloads:\n    abs(double val) -> double\n    abs(int val) -> int\n  Note: candidate (lib/std/math/math.tr, line 40, col 8)\n  Note: candidate (lib/std/math/math.tr, line 44, col 8)\n\n  Hint: Check the number of arguments.\n\n  5 │     io::printline(math::abs(1, 2));\n    │                            ^ Here!\n\n  Run `turf --explain E044` for more details.\n\n"
+  },
+  {
+    "id": "immutable_without_initializer",
+    "source_test": "tests/03_typechecker/fail_immutable_no_init.tr",
+    "kind": "add_initializer",
+    "mutated_source": "fn main(): int {\n    immutable PI: double;\n    return 0;\n}\n",
+    "fixed_source": "fn main(): int {\n    immutable PI: double = 3.14159;\n    return 0;\n}\n",
+    "baseline_exit_code": 1,
+    "baseline_error_code": "E128",
+    "baseline_output": "/tmp/turf_slm_benchmark_scratch.tr (1 error)\n\n── error at line 2, col 5 [E128 · declaration]\n\n  Missing initializer!\n  Immutable variable 'PI' requires an explicit initializer.\n\n  Hint: 'immutable'/'immut' variables can never be assigned to later, so they must get their only value right here.\n\n  2 │     immutable PI: double;\n    │     ^~~~~~~~~ Here!\n\n  Run `turf --explain E128` for more details.\n\n"
+  },
+  {
+    "id": "read_uninitialized_var",
+    "source_test": "tests/02_resolver/fail_uninitialized_var.tr",
+    "kind": "add_initializer",
+    "mutated_source": "fn main(): int {\n    mut x: int;\n    mut y: int = x;\n    return 0;\n}\n",
+    "fixed_source": "fn main(): int {\n    mut x: int = 0;\n    mut y: int = x;\n    return 0;\n}\n",
+    "baseline_exit_code": 1,
+    "baseline_error_code": "E008",
+    "baseline_output": "/tmp/turf_slm_benchmark_scratch.tr (1 error)\n\n── error at line 3, col 18 [E008 · undeclared variable]\n\n  Oops! You're using 'x' (type 'int') before it has a value.\n  Note: declared here (line 2, col 5)\n\n  Hint: Make sure every path assigns to 'x' before you use it.\n\n  3 │     mut y: int = x;\n    │                  ^ Here!\n\n  Run `turf --explain E008` for more details.\n\n"
+  },
+  {
+    "id": "break_outside_loop",
+    "source_test": "tests/04_control_flow/fail_break_outside_loop.tr",
+    "kind": "wrap_in_loop",
+    "mutated_source": "fn main(): int {\n    if true {\n        break;\n    } else {}\n    return 0;\n}\n",
+    "fixed_source": "fn main(): int {\n    while true {\n        if true {\n            break;\n        } else {}\n    }\n    return 0;\n}\n",
+    "baseline_exit_code": 1,
+    "baseline_error_code": "E007",
+    "baseline_output": "/tmp/turf_slm_benchmark_scratch.tr (1 error, 1 warning)\n\n── error at line 3, col 9 [E007 · control flow]\n\n  Control flow error!\n  'break' used outside of a loop.\n\n  Hint: Make sure 'break' and 'continue' are inside a loop, and 'return' is inside a function.\n\n  3 │         break;\n    │         ^~~~~ Here!\n\n  Run `turf --explain E007` for more details.\n\n── warning at line 4, col 7\n\n  Warning: The 'else' branch is empty — it doesn't do anything!\n\n  Hint: If you haven't written the code yet, add a comment like '// TODO'. Otherwise, you may be able to simplify this 'if' statement.\n\n  4 │     } else {}\n    │       ^~~~ Here!\n\n"
+  },
+  {
+    "id": "assign_to_immutable",
+    "source_test": "tests/03_typechecker/fail_immutable_compound_assignment.tr",
+    "kind": "make_mutable",
+    "mutated_source": "fn main(): int {\n    immutable x: int = 5;\n    x += 10;\n    return 0;\n}\n",
+    "fixed_source": "fn main(): int {\n    mut x: int = 5;\n    x += 10;\n    return 0;\n}\n",
+    "baseline_exit_code": 1,
+    "baseline_error_code": "E060",
+    "baseline_output": "/tmp/turf_slm_benchmark_scratch.tr (1 error)\n\n── error at line 3, col 7 [E060 · declaration]\n\n  Oops! You can't change the value of 'x' because it's immutable.\n  Note: declared immutable here (line 2, col 5)\n\n  Hint: If you need to change its value later, declare it with 'mutable' instead of 'immutable'.\n\n  3 │     x += 10;\n    │       ^~ Here!\n\n  Run `turf --explain E060` for more details.\n\n"
+  },
+  {
+    "id": "builtin_function_typo",
+    "source_test": "tests/02_resolver/fail_builtin_typo.tr",
+    "kind": "fix_typo",
+    "mutated_source": "import io;\n\nfn main(): int {\n    io::pritn(\"Testing builtin typo\");\n\n    return 0;\n}\n",
+    "fixed_source": "import io;\n\nfn main(): int {\n    io::printline(\"Testing builtin typo\");\n\n    return 0;\n}\n",
+    "baseline_exit_code": 1,
+    "baseline_error_code": "E026",
+    "baseline_output": "/tmp/turf_slm_benchmark_scratch.tr (1 error)\n\n── error at line 4, col 14 [E026 · general]\n\n  Oops! Module 'io' has no function named 'pritn'.\n\n  Hint: It may be from the current file: 'print', 'eprint', 'printf'\n\n  4 │     io::pritn(\"Testing builtin typo\");\n    │              ^ Here!\n\n  Run `turf --explain E026` for more details.\n\n"
+  },
+  {
+    "id": "double_into_int",
+    "source_test": "tests/03_typechecker/fail_numeric_narrowing.tr",
+    "kind": "swap_type",
+    "mutated_source": "fn main(): int {\n    mut x: int = 3.14;\n    return 0;\n}\n",
+    "fixed_source": "fn main(): int {\n    mut x: double = 3.14;\n    return 0;\n}\n",
+    "baseline_exit_code": 1,
+    "baseline_error_code": "E066",
+    "baseline_output": "/tmp/turf_slm_benchmark_scratch.tr (1 error)\n\n── error at line 2, col 5 [E066 · type mismatch]\n\n  Type mismatch!\n  Cannot initialise 'int' variable 'x' with value of type 'double'.\n\n  Hint: Check that both sides have compatible types.\n\n  2 │     mut x: int = 3.14;\n    │     ^~~ Here!\n\n  Run `turf --explain E066` for more details.\n\n"
+  },
+  {
+    "id": "redeclared_variable",
+    "source_test": "tests/02_resolver/fail_redeclared_var.tr",
+    "kind": "drop_redeclaration",
+    "mutated_source": "import test;\n\nfn main(): int {\n    mut my_val: int = 100;\n    test::assert(my_val == 100, \"\");\n\n    mut my_val: int = 200;\n    test::assert(my_val == 200, \"\");\n\n    return 0;\n}\n",
+    "fixed_source": "import test;\n\nfn main(): int {\n    mut my_val: int = 100;\n    test::assert(my_val == 100, \"\");\n\n    my_val = 200;\n    test::assert(my_val == 200, \"\");\n\n    return 0;\n}\n",
+    "baseline_exit_code": 1,
+    "baseline_error_code": "E033",
+    "baseline_output": "/tmp/turf_slm_benchmark_scratch.tr (1 error)\n\n── error at line 7, col 5 [E033 · declaration]\n\n  Wait a minute! You already created a variable named 'my_val'.\n  Note: first declared here (line 4, col 5)\n\n  Hint: If you want to change its value, just do `my_val = new_value;` without the type (like 'int' or 'string'). If you want a new variable, give it a different name!\n\n  7 │     mut my_val: int = 200;\n    │     ^~~ Here!\n\n  Run `turf --explain E033` for more details.\n\n"
+  },
+  {
+    "id": "bool_into_int",
+    "source_test": "tests/03_typechecker/fail_bool_coercion.tr",
+    "kind": "swap_type",
+    "mutated_source": "fn main(): int {\n    mut x: int = true;\n    return 0;\n}\n",
+    "fixed_source": "fn main(): int {\n    mut x: bool = true;\n    return 0;\n}\n",
+    "baseline_exit_code": 1,
+    "baseline_error_code": "E066",
+    "baseline_output": "/tmp/turf_slm_benchmark_scratch.tr (1 error)\n\n── error at line 2, col 5 [E066 · type mismatch]\n\n  Type mismatch!\n  Cannot initialise 'int' variable 'x' with value of type 'bool'.\n\n  Hint: Check that both sides have compatible types.\n\n  2 │     mut x: int = true;\n    │     ^~~ Here!\n\n  Run `turf --explain E066` for more details.\n\n"
+  },
+  {
+    "id": "struct_cast_to_string",
+    "source_test": "tests/03_typechecker/fail_string_conversion.tr",
+    "kind": "use_field",
+    "mutated_source": "import io;\n\nstruct Point { x: int }\n\nfn main(): int {\n    mut p: Point = Point::default();\n    mut s: string = p to string;\n    io::printline(s);\n\n    return 0;\n}\n",
+    "fixed_source": "import io;\n\nstruct Point { x: int }\n\nfn main(): int {\n    mut p: Point = Point::default();\n    mut s: string = p.x to string;\n    io::printline(s);\n\n    return 0;\n}\n",
+    "baseline_exit_code": 1,
+    "baseline_error_code": "E065",
+    "baseline_output": "/tmp/turf_slm_benchmark_scratch.tr (1 error)\n\n── error at line 7, col 23 [E065 · string conversion]\n\n  String conversion!\n  Cannot explicitly cast 'Point' to 'string'\n\n  Hint: Only these convert to text: `intExpr to string`, `doubleExpr to string`, `boolExpr to string` (and enum values).\n\n  7 │     mut s: string = p to string;\n    │                       ^~ Here!\n\n  Run `turf --explain E065` for more details.\n\n"
+  },
+  {
+    "id": "variable_name_typo",
+    "source_test": "tests/02_resolver/fail_variable_typo.tr",
+    "kind": "fix_typo",
+    "mutated_source": "import test;\n\nfn main(): int {\n    mut myvar: int = 5;\n    \n    test::assert(myvvar == 5, \"Testing variable typo\");\n    \n    return 0;\n}\n",
+    "fixed_source": "import test;\n\nfn main(): int {\n    mut myvar: int = 5;\n    \n    test::assert(myvar == 5, \"Testing variable typo\");\n    \n    return 0;\n}\n",
+    "baseline_exit_code": 1,
+    "baseline_error_code": "E040",
+    "baseline_output": "/tmp/turf_slm_benchmark_scratch.tr (1 error)\n\n── error at line 6, col 18 [E040 · undeclared variable]\n\n  I can't find anything named 'myvvar'.\n\n  Hint: It may be from the current file: 'myvar'\n\n  6 │     test::assert(myvvar == 5, \"Testing variable typo\");\n    │                  ^~~~~~ Here!\n\n  Run `turf --explain E040` for more details.\n\n"
+  },
+  {
+    "id": "int_plus_struct",
+    "source_test": "tests/03_typechecker/fail_arithmetic_mismatch.tr",
+    "kind": "use_field",
+    "mutated_source": "import io;\n\nstruct Point { x: int }\n\nfn main(): int {\n    mut a: int = 5;\n    mut p: Point = Point::default();\n    mut c: int = a + p;\n\n    return 0;\n}\n",
+    "fixed_source": "import io;\n\nstruct Point { x: int }\n\nfn main(): int {\n    mut a: int = 5;\n    mut p: Point = Point::default();\n    mut c: int = a + p.x;\n\n    return 0;\n}\n",
+    "baseline_exit_code": 1,
+    "baseline_error_code": "E057",
+    "baseline_output": "/tmp/turf_slm_benchmark_scratch.tr (1 error)\n\n── error at line 8, col 20 [E057 · arithmetic]\n\n  Operator applied to the wrong kind of value!\n  Type mismatch: cannot apply '+' to 'int' and 'Point'.\n\n  Hint: '+' isn't a builtin operation on a struct -- declare 'operator +(int, Point): ReturnType { ... }', or check that an existing overload's parameter types match EXACTLY (operator resolution never widens int to double the way an ordinary function call does).\n\n  8 │     mut c: int = a + p;\n    │                    ^ Here!\n\n  Run `turf --explain E057` for more details.\n\n"
+  },
+  {
+    "id": "missing_closing_brace",
+    "source_test": "tests/01_syntax/fail_missing_brace.tr",
+    "kind": "add_brace",
+    "mutated_source": "fn main(): int {\n    mut x: int = 10;\n    \n    if (x > 5) {\n        x = 0;\n    \n    return 0;\n}\n",
+    "fixed_source": "fn main(): int {\n    mut x: int = 10;\n    \n    if (x > 5) {\n        x = 0;\n    }\n    \n    return 0;\n}\n",
+    "baseline_exit_code": 1,
+    "baseline_error_code": "E104",
+    "baseline_output": "/tmp/turf_slm_benchmark_scratch.tr (1 error)\n\n── error at line 1, col 16 [E104 · syntax error]\n\n  Missing closing '}' — every '{' must have a matching '}'.\n  Hint: Check that all your blocks are properly closed.\n\n  1 │ fn main(): int {\n    │                ^ Here!\n\n  Run `turf --explain E104` for more details.\n\n"
+  },
+  {
+    "id": "long_function_return_type",
+    "source_test": "scripts/slm/slm_replay/long_function.tr",
+    "kind": "convert_type",
+    "mutated_source": "fn describe(n: int): string {\n    mut total: int = 0;\n    mut stride: int = 1;\n    mut i: int = 0;\n    while i < 10 {\n        total = total + stride;\n        i = i + 1;\n    }\n    mut doubled: int = total * 2;\n    mut tripled: int = total * 3;\n    mut sum: int = doubled + tripled;\n    mut diff: int = doubled - tripled;\n    return sum;\n}\n\nfn main(): int {\n    mut s: string = describe(1);\n    return 0;\n}\n",
+    "fixed_source": "fn describe(n: int): string {\n    mut total: int = 0;\n    mut stride: int = 1;\n    mut i: int = 0;\n    while i < 10 {\n        total = total + stride;\n        i = i + 1;\n    }\n    mut doubled: int = total * 2;\n    mut tripled: int = total * 3;\n    mut sum: int = doubled + tripled;\n    mut diff: int = doubled - tripled;\n    return sum to string;\n}\n\nfn main(): int {\n    mut s: string = describe(1);\n    return 0;\n}\n",
+    "baseline_exit_code": 1,
+    "baseline_error_code": "E064",
+    "baseline_output": "/tmp/turf_slm_benchmark_scratch.tr (1 error)\n\n── error at line 13, col 5 [E064 · type mismatch]\n\n  Wrong return type!\n  Return type mismatch: function declares 'string' but returns 'int'.\n\n  Hint: Return a value of the declared type, or change the function's declared return type.\n\n  13 │     return sum;\n     │     ^~~~~~ Here!\n\n  Run `turf --explain E064` for more details.\n\n"
+  },
+  {
+    "id": "unknown_struct_field",
+    "source_test": "scripts/slm/slm_replay/unknown_field.tr",
+    "kind": "fix_field",
+    "mutated_source": "struct Box {\n    v: int,\n    n: int\n}\n\nfn main(): int {\n    mut b: Box = Box::default();\n    b.zzz = 3;\n    return b.n;\n}\n",
+    "fixed_source": "struct Box {\n    v: int,\n    n: int\n}\n\nfn main(): int {\n    mut b: Box = Box::default();\n    b.v = 3;\n    return b.n;\n}\n",
+    "baseline_exit_code": 1,
+    "baseline_error_code": "E068",
+    "baseline_output": "/tmp/turf_slm_benchmark_scratch.tr (1 error)\n\n── error at line 8, col 7 [E068 · undeclared variable]\n\n  Struct 'Box' has no field named 'zzz'.\n\n  Hint: Double-check the spelling, or make sure 'zzz' is declared as a field on 'Box'.\n\n  8 │     b.zzz = 3;\n    │       ^~~ Here!\n\n  Run `turf --explain E068` for more details.\n\n"
+  },
+  {
+    "id": "imported_callee_arity",
+    "source_test": "scripts/slm/slm_replay/imported_callee.tr",
+    "kind": "fix_call_arity",
+    "mutated_source": "import math;\n\nfn main(): int {\n    return math::abs(0, 0);\n}\n",
+    "fixed_source": "import math;\n\nfn main(): int {\n    return math::abs(0);\n}\n",
+    "baseline_exit_code": 1,
+    "baseline_error_code": "E044",
+    "baseline_output": "/tmp/turf_slm_benchmark_scratch.tr (1 error)\n\n── error at line 4, col 21 [E044 · function signature]\n\n  'abs' was called with 2 arguments, but no overload accepts that many.\n  Known overloads:\n    abs(double val) -> double\n    abs(int val) -> int\n  Note: candidate (lib/std/math/math.tr, line 40, col 8)\n  Note: candidate (lib/std/math/math.tr, line 44, col 8)\n\n  Hint: Check the number of arguments.\n\n  4 │     return math::abs(0, 0);\n    │                     ^ Here!\n\n  Run `turf --explain E044` for more details.\n\n"
+  }
+]

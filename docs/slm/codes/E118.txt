@@ -1,0 +1,24 @@
+TURF E118 -- STATEMENT OUTSIDE A FUNCTION:
+
+CAUSE:
+  A file's top level may DECLARE things (functions, structs, enums, errors, machines,
+  imports, `extern` bindings, `export immut` constants) but not DO anything. Statements
+  (a call, an assignment, a variable, `return`, `if`, ...) must be inside a function.
+
+INCORRECT:
+    import io;
+    io::printline("hello");          // a call, outside any function
+    fn main(): int { return 0; }
+
+CORRECT:
+    import io;
+    fn main(): int {
+        io::printline("hello");
+        return 0;
+    }
+
+FIX:
+  Move the statement into a function; a program starts at `main`. A script-style file
+  needs its statements wrapped in `fn main(): int { ... return 0; }`.
+
+RELATED: E119 (no main), E103 (unexpected token -- e.g. a top-level `mut x`).

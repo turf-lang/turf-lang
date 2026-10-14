@@ -1,0 +1,13 @@
+// The runner gives a test /dev/null as stdin, so every read is at the end of
+// input: input() and input(msg) return "" and do not wait or loop. getchar()'s
+// EOF is a 32-bit -1; read as a 64-bit int it never ends the read loop.
+import test;
+
+fn main(): int {
+    immut first: string = input();
+    test::assert(first == "", "input() at the end of input is \"\"");
+    immut second: string = input("name: ");
+    test::assert(second == "", "input(msg) at the end of input is \"\"");
+    test::assert(input() == "", "and it stays \"\"");
+    return 0;
+}

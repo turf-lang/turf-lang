@@ -1,7 +1,7 @@
 // Regression test: D3's set.tr counterpart of
 // 17_stack_growth_over_8_bytes.tr -- same `self.cap * 8` under-allocation
 // bug, in Set<T>.add()'s grow branch. `Set<T>` requires `T` to support
-// `==` (Set.indexOf() does `self.items[i] == item`), which a plain struct
+// `==` (Set.index_of() does `self.items[i] == item`), which a plain struct
 // doesn't by default (see D7/fail_generic_requires_operator.tr) -- so this
 // test uses a >8-byte struct with an explicit `operator ==` overload,
 // rather than leaving Set's own allocation fix untested.
@@ -30,7 +30,7 @@ fn main(): int {
     test::assert(s.length() == 20, "Set<Big> should hold 20 distinct elements after growth");
 
     // Re-adding an already-present element must stay a no-op (proves
-    // Set.contains()/indexOf() is still reading real, uncorrupted data
+    // Set.contains()/index_of() is still reading real, uncorrupted data
     // after growth, not just that the buffer didn't crash).
     s.add(Big::new(5, 10, 15));
     test::assert(s.length() == 20, "re-adding an existing Big must not grow the set");

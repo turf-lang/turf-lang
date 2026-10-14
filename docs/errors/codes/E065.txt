@@ -8,7 +8,7 @@ Turf's `expr to string` conversion only understands a small, specific set of typ
 
 If you try it on something else, like a whole struct:
 
-    mut bad: string = myStruct to string;
+    mut bad: string = my_struct to string;
 
 ...Turf tells you which type it couldn't convert, because there's no automatic, one-size-fits-all way to turn an arbitrary struct into readable text -- it doesn't know which fields you'd want shown, or in what order.
 

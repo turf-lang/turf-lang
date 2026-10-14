@@ -1,0 +1,43 @@
+A module name matches more than one file
+
+    // app/list.tr exists, and so does the standard library's list
+    import list;
+    // ERROR: Module 'list' is ambiguous: 2 different files answer to that name.
+    //     standard library  <install>/lib/std/collections/list.tr
+    //     next to main.tr   ./list.tr
+    //   Hint: A module may not share its name with a standard-library
+    //   module. Rename ./list.tr (for example to 'my_list.tr') and import
+    //   it by the new name.
+
+`import m;` names a module, not a file, and the compiler looks for `m.tr` in
+four places: the standard library, installed packages (lib/usr), the
+directory of the file that contains the import, and the current directory.
+Exactly one of them must hold it.
+
+Every place is checked, and none takes precedence over another: if two of
+them have a `json.tr`, there is no rule that quietly picks one, because a
+program could then run code its author did not write without anyone noticing.
+A name that more than one file answers to is this error, listing each file.
+
+In a project (`turf build`, `turf test`), the places are different: the
+package's own modules anywhere under its src/, its direct dependencies, and
+the standard library; a test also sees the `*_module.tr` helpers in tests/.
+Two files called `report.tr` anywhere under src/ are this error too.
+
+The fix depends on what collided:
+
+- Your file and a standard-library module: rename your file. The standard
+  library's name is not yours to change, and a program that imports the
+  standard library's module must be able to say so.
+- Two of your own files (for example one next to the importing file and one
+  in the directory you ran the compiler from): rename one, or delete the one
+  you did not mean.
+
+The same file reached twice (when you compile from the file's own directory,
+"next to the file" and "the current directory" are the same place) is one
+match, not two.
+
+An import written inside the standard library always means the standard
+library's module. So a local list.tr never breaks a program that does not
+import `list` itself, even though the standard library uses its own `list`
+internally.

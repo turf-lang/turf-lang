@@ -1,0 +1,23 @@
+`recover` is being used in a way that can't work
+
+`recover` handles a call that can fail. It has two rules, and Turf found one broken.
+
+**It needs something that can fail.** Only a call whose declared return type starts with `!` -- `fn read(): !string` -- can be followed by `recover`. An ordinary call has nothing to recover from:
+
+    fn f(): int { return 1; }
+    mut v: int = f() recover produce 0;       // f() can't fail
+
+Drop the `recover`, or make the function fallible if it really can fail: `fn f(): !int`.
+
+**A `recover run { ... }` block has to leave.** When it doesn't `produce` a value, the expression it is attached to has no value to become, so every path through the block must end in `return`:
+
+    mut text: string = read("a.txt") recover run {
+        io::printline("couldn't read it");
+    };                                         // falls out the bottom: no value
+
+    mut text: string = read("a.txt") recover run {
+        io::printline("couldn't read it");
+        return 1;
+    };
+
+Or supply the value directly: `recover produce ""`.

@@ -1,0 +1,45 @@
+TURF E141 -- IMMUTABLE ARRAY PASSED TO A FUNCTION THAT CHANGES IT:
+
+CAUSE:
+  An `immut` array (or an array field of an `immut` variable) was passed to an unsized `T[]`
+  parameter, and the called function writes through that parameter. A `T[]` parameter shares
+  the caller's array rather than copying it, so the write would change the immutable array.
+
+WHAT COUNTS AS A WRITE (in the callee):
+  `arr[i] = v`, `arr[i] += v`, `arr[i]++`/`--`, `arr[i].field = v`, a self-mutating method on
+  an element (`arr[i].bump()`), or passing `arr` on to another function whose `T[]`
+  parameter is written (followed through any number of calls). Writes through a LOCAL view of
+  the parameter count too (`mut rest: int[] = arr[1..]; rest[0] = 0;`).
+
+SLICES FOLLOW:
+  Passing a slice of an `immut` array (`fill(a[1..], 0)`) or an `immut` slice variable
+  (`immut v = m[..]; fill(v, 0);`) is E141 as well.
+
+CORRECT USAGE:
+    fn sum(arr: int[]): int {            // only reads
+        mut total: int = 0;
+        for value in arr {
+            total = total + value;
+        }
+        return total;
+    }
+
+    fn main(): int {
+        immut a: int[3] = [1, 2, 3];
+        return sum(a);                   // fine
+    }
+
+INCORRECT:
+    fn fill(arr: int[], v: int): void {
+        for (i, _x) in arr { arr[i] = v; }
+    }
+    immut a: int[3] = [1, 2, 3];
+    fill(a, 0);
+    // ERROR [E141]: 'a' is immutable, but 'fill' writes to the array it is given as 'arr'.
+
+FIX:
+  Declare the array `mut`, or copy it into a `mut` array (`mut c: int[3] = a;`) and pass the
+  copy; or pass `a.copy()` (a fresh independent array: `fill(a.copy(), 0);`).
+  A sized parameter (`arr: int[3]`) always receives a copy and is never refused.
+
+SEE: E140 (where `T[]` may be written), E060 (assigning to an immutable variable).

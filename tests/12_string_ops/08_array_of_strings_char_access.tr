@@ -15,19 +15,20 @@ fn main(): int {
     test::assert(words[2] == "cherry", "words[2] should be cherry");
     test::assert(words[3] == "date", "words[3] should be date");
 
-    // Check character access on returned array elements (words[i][j])
-    mut c0_0: int = words[0][0]; // 'a' in "apple" -> 97
-    mut c1_1: int = words[1][1]; // 'a' in "banana" -> 97
-    mut c2_0: int = words[2][0]; // 'c' in "cherry" -> 99
-    mut c3_3: int = words[3][3]; // 'e' in "date" -> 101
+    // Check character access on returned array elements (words[i][j]) --
+    // FDN-004/D17: `words[i][j]` is now `char`, widened here for comparison.
+    mut c0_0: char = words[0][0]; // 'a' in "apple" -> 97
+    mut c1_1: char = words[1][1]; // 'a' in "banana" -> 97
+    mut c2_0: char = words[2][0]; // 'c' in "cherry" -> 99
+    mut c3_3: char = words[3][3]; // 'e' in "date" -> 101
 
-    test::assert(c0_0 == 97, "words[0][0] should be 97 ('a')");
-    test::assert(c1_1 == 97, "words[1][1] should be 97 ('a')");
-    test::assert(c2_0 == 99, "words[2][0] should be 99 ('c')");
-    test::assert(c3_3 == 101, "words[3][3] should be 101 ('e')");
+    test::assert((c0_0 to int) == 97, "words[0][0] should be 97 ('a')");
+    test::assert((c1_1 to int) == 97, "words[1][1] should be 97 ('a')");
+    test::assert((c2_0 to int) == 99, "words[2][0] should be 99 ('c')");
+    test::assert((c3_3 to int) == 101, "words[3][3] should be 101 ('e')");
 
     // Also check direct inline indexing on function call return
-    test::assert(get_words()[2][0] == 99, "get_words()[2][0] should be 99 ('c')");
+    test::assert((get_words()[2][0] to int) == 99, "get_words()[2][0] should be 99 ('c')");
 
     io::printline("08_array_of_strings_char_access passed!");
     return 0;

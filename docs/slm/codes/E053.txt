@@ -8,6 +8,11 @@ CAUSE:
   omit in the first place, so `static` on one is meaningless.
 
 CORRECT SYNTAX:
+    struct Point {
+        x: int,
+        y: int
+    }
+
     fn Point.origin() static: Point {   // correct -- struct-bound,
         return Point::default();        // 'static' means "no self"
     }
@@ -26,4 +31,4 @@ FIX:
   Either remove `static` (if this was meant to be an ordinary free
   function all along), or, if it was actually meant to be a struct's
   method, declare it with the `StructName.` prefix: `fn StructName.
-  methodName(...) static: ReturnType { ... }`.
+  method_name(...) static: ReturnType { ... }`.

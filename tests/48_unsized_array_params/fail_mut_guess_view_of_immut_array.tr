@@ -1,0 +1,8 @@
+// EXPECT-DIAG: E144
+// EXPECT-DIAG: 't' is a 'mut' view of 'a', which is immutable.
+// The same rule when the view's type is inferred.
+fn main(): int {
+    immut a: int[3] = [1, 2, 3];
+    mut t = a[..];
+    return t[0];
+}

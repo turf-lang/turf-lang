@@ -8,8 +8,22 @@ CAUSE:
   variable's fields and methods are accessed with `.`, not `::`.
 
 CORRECT SYNTAX:
+    struct Point {
+        x: int,
+        y: int
+    }
+
+    fn Point.new(x: int, y: int): void {
+        self.x = x;
+        self.y = y;
+    }
+
+    fn Point.sum(): int {
+        return self.x + self.y;
+    }
+
     mut p: Point = Point::new(1, 2);   // '::' -- constructing via the TYPE name
-    p.sum();                            // '.'  -- calling a method on the INSTANCE
+    mut total: int = p.sum();           // '.'  -- calling a method on the INSTANCE
 
 INCORRECT:
     mut p: Point = Point::new(1, 2);

@@ -1,7 +1,7 @@
 # FREEZE.md — the Semantic Freeze
 
 > **Read this before writing any code for an overhaul feature group.**
-> This file is authoritative. `docs/planning/ARCHITECTURE_OVERHAUL.md` §6 is
+> This file is authoritative. `docs/archive/ARCHITECTURE_OVERHAUL.md` §6 is
 > the historical copy it was lifted from; where the two ever disagree, this
 > file wins.
 
@@ -49,16 +49,29 @@ otherwise each answer differently, producing an incoherent language.
 | 2 | Literal representability | An integer literal is held exactly (arbitrary precision) until typed. A float literal is held as the exactly-rounded `double` **plus a flag for whether rounding overflowed to `inf`**. |
 | 3 | Destination representability | Checked when the literal's type is fixed. Out of range → **hard error**, never a clamp. A float literal that overflowed to `inf` → hard error. |
 | 4 | Implicit conversion | `int32 → int`, `int32 → double`, `int → double`. Nothing else. No narrowing, no `bool` ↔ numeric, no `char` ↔ numeric. |
-| 5 | Explicit conversion (`to`) | Per the table in `docs/reference/variables_and_types.md`, **enforced in the TypeChecker**, not Codegen. `double → int` truncates toward zero. `int → int32` truncates. |
+| 5 | Explicit conversion (`to`) | Per the table in `docs/reference/variables_and_types.md`, **enforced in the TypeChecker**, not Codegen. `double → int` truncates toward zero. `int → int32` truncates. A `double` with no such integer (NaN, ±inf, outside the destination's range) **traps** `Integer overflow` for `int` and `int32` alike (owner decision 2026-10-12; it was LLVM poison, so the value varied with `-O`). |
 | 6 | Arithmetic overflow | Compile-time on untyped literals: exact, arbitrary precision, error only if the *result* is not representable in the destination. Compile-time on typed constants: **error**. Runtime, signed integer: **trap** (panic). Runtime, floating point: IEEE (`inf`/`NaN`), **no trap**. |
 
 - `-9223372036854775808` is writable: unary `-` applied directly to an
   untyped integer literal folds into the literal *before* representability is
-  checked.
+  checked. The negated value is what must be representable, so the literal
+  is accepted in every operand position (`-9223372036854775808 + c`,
+  `c + -9223372036854775808`, `1 + -9223372036854775808`), and a literal one
+  step past either end (`9223372036854775808`, `-9223372036854775809`) is an
+  E076 on either side of a runtime operand.
+- `int ** int` (either side `int` or `int32`) is an exact `int`, computed by
+  squaring with each multiply checked as row 6's runtime trap; a negative
+  exponent panics. A `double` on either side gives a `double` via `pow()`.
+  (Owner decision 2026-10-12; it was always `double` via `pow()`, so an
+  integer power above 2^53 was rounded. Found by turf-fuzz.)
 - Division and modulo by zero continue to trap at runtime for both `int` and
   `double` (existing behaviour, deliberately preserved — it is why IEEE
   `inf`/`NaN` are largely unreachable in TurfLang, and that asymmetry is now
   a documented decision rather than an accident).
+- A NaN prints and converts to `string` as `nan`, whatever its sign bit
+  (owner decision 2026-10-12): the sign of a NaN differs between run-time
+  arithmetic and constant folding, so printing it would make output depend
+  on `-O` (F-OPT-1). Every other `double` is formatted with `%g`.
 - `int` is 64-bit signed; `int32` is 32-bit signed and exists solely for
   honest `extern fn` ABI declarations. **No further integer widths, and no
   unsigned types, are to be added.**
@@ -80,7 +93,7 @@ otherwise each answer differently, producing an incoherent language.
     account: `docs/development/changes/SEM-002.md`, *Known pitfalls*,
     second bullet).
   - An untyped integer literal assigned directly to `double`
-    (`docs/planning/ARCHITECTURE_OVERHAUL.md` §10.5's "must be exactly
+    (`docs/archive/ARCHITECTURE_OVERHAUL.md` §10.5's "must be exactly
     representable" as a `double`) is checked against `int64` representability
     FIRST, not double-exactness directly — so a literal wider than `int64`
     but exactly representable as a `double` (one significant bit, e.g. 2^100
@@ -132,6 +145,8 @@ otherwise each answer differently, producing an incoherent language.
 - Struct *fields* are not subject to definite assignment; a struct value is
   either fully constructed (`::new` — already checked by
   `ConstructorFieldAssignmentPass`) or fully defaulted (`::default`).
+  Fully defaulted means a non-null `&U` field points at a fresh `U::default()`
+  (§6.27, F-COLL-2, 2026-10-12), not at null.
 
 ### 6.5 Memory model — FROZEN
 
@@ -208,8 +223,16 @@ otherwise each answer differently, producing an incoherent language.
   > **B3 — everything else belongs in `lib/std` as ordinary TurfLang, and the
   > standard library gets no capability a user cannot request explicitly.**
 - The intrinsic list is **closed and enumerated in one header**
-  (`include/Intrinsics.h`). Adding an intrinsic is an explicit,
+  (`src/sema/Intrinsics.h`). Adding an intrinsic is an explicit,
   change-recorded act.
+  - **Added 2026-10-13 (owner decision, REL-005): `hash_of(expr): int`**, a
+    hash that agrees with field-by-field `==` (a string by its text, `-0.0`
+    as `0.0`, a struct field by field and never its padding, an array element
+    by element, a reference by address). A hash depends on the type system
+    (B1), so the compiler generates it. `hashing::hash` (and so every
+    `Map`/`Set` key) uses it in place of the old raw-byte hash. That hash
+    broke `a == b ⇒ hash(a) == hash(b)` for padded structs, signed zeros, and
+    string fields. Record: `docs/development/changes/REL-005.md`.
 - Standard-library privileges are declared in source (a module-level
   capability declaration), never inferred from a file path.
 - `libturfrt` is written in C, versioned lock-step with the compiler, and
@@ -236,6 +259,1056 @@ otherwise each answer differently, producing an incoherent language.
   loop optimization, object emission, and DWARF encoding. TurfLang owns
   anything requiring TurfLang semantics.
 
+### 6.11 Type identity — FROZEN (FDN-003, 2026-09-27)
+
+Recorded on the project owner's explicit approval of `ROADMAP_v2.0.0.md`
+FDN-003 stage 1 ("Roadmap design, stable typeof") — §6.0 rule 3's explicit
+request, not a session's own initiative. Full account:
+`docs/development/changes/FDN-003.md`.
+
+- A struct/enum/machine/`error` type is identified by **(owning module,
+  name)**, never by its bare name. Two modules may each declare `Node`; a
+  program may declare `struct List` without importing `list`.
+- The main program file's module is named **`main`** (DEC-13). That
+  qualifier is never spelled: a main-file type's identity, `typeof()` output,
+  LLVM name and diagnostics are its bare name, exactly as before FDN-003.
+- **Spelling rules are unchanged.** Bare `Name` means the current file's or
+  module's own type, or one it on-demand-imported (`import m::Name;`,
+  `m::[...]`, `m::[*]`); `m::Name` is always allowed. The Resolver is the
+  single place a spelling becomes an identity.
+- A bare spelling that could mean **two** visible types is an error at the
+  use (E085), naming both. No "local wins" rule: a too-strict rule can be
+  relaxed after 2.0 without breaking anyone; the reverse cannot. Two
+  on-demand imports bringing in the same bare type name remain an error at
+  the import (E024), as for functions.
+- A duplicate declaration is an error only within **one** module (E034).
+- `typeof()` and diagnostics print the identity — `m::Name` for a
+  module-owned type, bare for a main-file type — the **same string wherever
+  `typeof` is called** (not "qualified only outside the declaring file").
+- LLVM struct names, GC type-descriptor names and DWARF type names spell a
+  module-owned type **`m.Name`**.
+
+### 6.12 Safe heap allocation — FROZEN (FDN-001, 2026-09-27)
+
+Recorded on the project owner's explicit approval of `ROADMAP_v2.0.0.md`
+FDN-001's DEC-5 (`heap(expr): &T` intrinsic, over a `new T`-style keyword) —
+§6.0 rule 3's explicit request, not a session's own initiative. Full
+account: `docs/development/changes/FDN-001.md`.
+
+- `heap(expr)` is a closed-list bare intrinsic (`src/sema/Intrinsics.h`
+  category 1), not new grammar: `heap(e: T): &T` for any sized `T` (struct,
+  fixed array, primitive) whose static type is known at the call site.
+  `void` is rejected (nothing to copy).
+- Copies `e`'s evaluated value into a fresh GC-heap block sized
+  `sizeof(T)`, allocated with `T`'s own real `TurfTypeDesc` (a named
+  struct's whole-instance descriptor, or the general per-LLVM-type
+  descriptor for anything else) — never `NULL`/opaque — so the collector
+  traces a `heap()`ed value's own pointer fields exactly as it would a
+  stack-resident `T`.
+- No `unsafe { }` gate: `&T` is legal anywhere (FREEZE.md §6.6), and
+  `heap()` produces exactly that — a compiler-checked non-null reference,
+  never a raw `T*`.
+- Does **not** by itself close the general "a `&U` field inside `T` may
+  point at a stack frame that has since popped" hazard — that is FDN-002's
+  escape-analysis rule, applied to `heap()`'s own operand like any other
+  expression; FDN-001 does not gate on it.
+
+### 6.13 Reference and array escape rules — FROZEN (FDN-002, 2026-09-27)
+
+Recorded on the project owner's explicit approval of `ROADMAP_v2.0.0.md`
+FDN-002's own design (no numbered DEC- item — the roadmap states the design
+directly rather than a table of alternatives) — §6.0 rule 3's explicit
+request, not a session's own initiative. Full account:
+`docs/development/changes/FDN-002.md`.
+
+- Every reference-typed value (`&T`, `&?T`, a raw pointer including `self`)
+  and every unsized-array (`T[]`) parameter carries one of three tracked
+  provenances at each program point, computed by an intraprocedural,
+  conservative forward dataflow pass (`EscapePass`, beside `NullabilityPass`
+  in the same CFG-pass pipeline stage): **Stack** (points into the current
+  function's own frame), **Param** (came in from the caller, including
+  `self`), **Heap** (from `heap()`, or reached through a `Heap`-provenance
+  base). Anything the pass cannot classify is **Unknown** — never flagged.
+- It is an error for a `Stack`-provenance value to flow into: a `return`; the
+  RHS of an assignment into a field reached through a `Param`- or
+  `Heap`-provenance base; an argument to a `List`/`Map`/`Set`/`Stack`/`Queue`
+  mutator (`push`/`set`/`put`/`add`/`enqueue`) or a real `operator[]=`
+  dispatch; the operand of `heap()`.
+- An unsized `T[]` parameter is `Param` provenance, but converting it to
+  `ptr` (or any raw, non-reference pointer type) and returning that cast's
+  result is still an error — the cast itself discards the type system's only
+  memory of where the pointer aliases (§27 D23).
+- No lifetime annotations, no borrow checker, no interprocedural summaries.
+  `Param`- and `Heap`-provenance values are always allowed to flow anywhere
+  (including a `return`) — this pass trusts a reference the caller already
+  handed in for exactly as long as ordinary reference semantics already did,
+  and does not attempt to verify further up the call chain.
+- **Amended 2026-10-12 (owner decision: reopen FDN-002's per-field Non-goal,
+  keeping "never a false positive").** Provenance is also tracked for a
+  reference stored at a fixed path inside a value variable (a struct local's
+  `&` field, a constant-index array element), so a struct or array value
+  holding a `Stack` reference is an error at every sink above (returned,
+  boxed, pushed, stored); an element of a `(&N)[]` parameter is a sink (§6.28);
+  a reference read through a `Param`/`Heap` base, or a by-value parameter's
+  `&` field, is long-lived (`p.next.f = &local` is an error); `&a[i]` of a
+  local `T[N]` is `Stack`. One interprocedural fact is used: a function whose
+  every `return` is one reference parameter, unchanged, passes that argument's
+  provenance to its call (`return id(&local)` is an error). Unknown stays
+  never-flagged.
+- **Amended 2026-10-13 (owner decisions 2026-10-12 on the turf-fuzz
+  escape-boundary questions).** An error value's payload (`E1::P(&local)`)
+  is a sink, unconditionally, like `heap()`'s operand: the payload is copied
+  to the heap so the error can be returned. A call's result is long-lived
+  (`Heap`) when no argument can reach this frame (each is `Param`/`Heap`, or
+  of a type that holds no address), since a callee cannot return its own
+  locals; so is an element of a stdlib collection (`l[0]`, `l.get(0)`), whose
+  every way in is a sink. `mut h: &N = mk(); h.next = &local;` is an error.
+  At a merge (a CFG join, a `give`), `Stack` on any path makes the place
+  **MayStack**, flagged like `Stack` at every sink: the path that carries the
+  local is a real escape (`p = heap(n); if c { p = &n; } return p;`, or a
+  loop that may run zero times). Paths that disagree without a `Stack` stay
+  Unknown, never flagged. A `defer`'s statement counts where it runs: at
+  every exit of its block (falling off the end, `break`/`continue` for the
+  loop body's blocks, and after a `return`'s value is computed), LIFO, so
+  `p = heap(n); defer p = &n; return p;` is accepted and `p = &n; defer
+  p = heap(n); return p;` is an error. A `defer` nested inside one CFG
+  statement (a `recover run { }` block's) counts as maybe-run from its
+  position on.
+
+### 6.14 String indexing — FROZEN (FDN-004, 2026-09-28)
+
+Recorded on the project owner's explicit approval of `ROADMAP_v2.0.0.md`
+FDN-004's own design (D17's own "— DECISION —" marker in that document) —
+§6.0 rule 3's explicit request, not a session's own initiative. Full
+account: `docs/development/changes/FDN-004.md`.
+
+- `s[i]` on a `string` has static type `char`, not `int`. `char` already
+  exists and is one byte (F-STD-3); returning `int` was the pre-existing
+  inconsistency this closes. Breaking (R1): after 2.0 this can only change
+  again in 3.0.
+- A **read** (`s[i]` used as a value) is bounds-checked at runtime against
+  `strlen(s)`: `i < 0` or `i >= strlen(s)` panics. There is no compile-time
+  elision for a string index (unlike a fixed-size array's `ValueRangePass`
+  constant folding) — every read pays a fresh `strlen()` call, which LLVM's
+  own loop-invariant code motion hoists out of a loop whose string base does
+  not change per iteration at `-O2`, but not at `-O0`.
+- A **write** (`s[i] = c;`) is checked for `i < 0` only. There is
+  deliberately **no** upper-bound check on a write — a `string`'s only
+  length signal is `strlen()`, which reads as 0 (or however many bytes
+  happen to precede the write cursor) for a buffer still being filled
+  before its NUL terminator is written, exactly how every `strings.tr`
+  string-building function works. This is a documented, permanent asymmetry
+  between the read and write sides, not a gap to close later — there is no
+  way to recover a `string` value's real allocated capacity to check
+  against instead (F-STD-3).
+- `strings::byte_at_unchecked(s, i): char` is the stdlib escape hatch for a
+  caller that has already established `i` is in range some other way and
+  cannot afford the repeated `strlen()` — unchecked, like any other raw
+  pointer read.
+- **Amended 2026-10-12 (owner decision: the frozen text yields to #256,
+  turflang 2853007).** A negative index counts back from the end, as it does
+  for arrays and `List`: `s[i]` with `i < 0` means `s[strlen(s) + i]`, so
+  `s[-1]` is the last byte. A **read** panics outside `-strlen(s) <= i <
+  strlen(s)`. A **write** wraps a negative index the same way (one `strlen()`
+  call, on the negative path only) and panics only if the wrapped index is
+  still below zero; its missing upper bound is unchanged. The two bullets
+  above that say `i < 0` panics are superseded by this one.
+- **Amended 2026-10-13 (owner decision, REL-006 #30/#31: the frozen text
+  yields to "safe code cannot write outside an object").** A **write** is
+  bounded by the string's allocation: `turf_rt_string_capacity(s)`, the
+  bytes from `s` to the end of the GC block holding it. An index at or past
+  it panics with `String index out of bounds`, and a string in no GC block
+  (a literal, which is read-only data, or memory from C) panics with
+  `Cannot write into this string`. The write bullet above that says there is
+  no upper bound, and that a string's capacity cannot be recovered, is
+  superseded by this one; the read side is unchanged.
+
+### 6.15 Per-declaration visibility — FROZEN (LEC-002, 2026-09-29)
+
+Recorded on the project owner's explicit instruction to start LEC-002 at
+stage 1 with `ROADMAP_v2.0.0.md` as the authority (DEC-7's recommendation,
+"private by default, `pub`"), plus one owner amendment to the roadmap's
+table: the keyword has **two spellings**, exactly as `mut`/`mutable` and
+`immut`/`immutable` do. §6.0 rule 3's explicit request, not a session's own
+initiative. Full account: `docs/development/changes/LEC-002.md`.
+
+- **Default: private to the declaring module.** A top-level declaration is
+  visible to another module only if marked `pub`. Breaking (R1): after 2.0
+  this can only change again in 3.0.
+- **Keyword: `pub` or `public`, synonyms.** Both lex to one token
+  (`TOK_PUB`), the way `mut`/`mutable` share `TOK_MUTABLE`. There is no
+  semantic, stylistic or diagnostic difference between them; a diagnostic's
+  hint spells it `pub`. Both become reserved words (checked 2026-09-29: no
+  identifier named `pub` or `public` exists in `tests/`, `lib/std/` or
+  `showcase/`; the word occurs only in prose comments).
+- **Position: a prefix modifier** on the declaration it applies to
+  (`pub fn f()`, `pub fn Point.len()`, `pub struct S`, `pub x: int` inside a
+  struct body).
+- **What can be `pub`:** `fn`, methods (instance and `static`), `struct`,
+  `enum`, `error`, `machine`, struct **fields**, and `extern fn`
+  (engineering judgement, recorded in the change record: `extern fn` is a
+  named top-level function, so the uniform rule applies to it).
+- **Fields are private unless `pub`, even in a `pub struct`.** This is what
+  lets `List<T>.data` (a raw pointer) be hidden. `T::default()` stays legal
+  from any module — it zero-fills and cannot break an invariant that zero
+  cannot. `T::new()` is an ordinary method with its own visibility.
+- **Enum/error variants and machine states are public iff their type is.**
+  No per-variant privacy.
+- **Operators are visible wherever their operand types are.** `pub` on an
+  `operator` declaration is rejected (with a hint saying why): dispatch is
+  type-directed (F-OP-3) and the orphan rule already ties an operator to a
+  type's module; a private operator would make `a + b` depend on import
+  visibility.
+- **`export immut` keeps its meaning** — `export` *is* its `pub`. `pub`
+  combined with `export` is rejected, with a hint to drop one. A plain
+  top-level `immut`/`mut` remains illegal; private top-level constants are
+  additive later.
+- **Private-in-public is an error:** a `pub` function signature (parameters
+  and return type) or `pub` field may not mention a private type, or an
+  importer could hold a value of a type it cannot spell.
+- **UFCS respects visibility:** a private function is not a UFCS candidate
+  outside its module. Call syntax never bypasses visibility.
+- **Generics:** a `pub` generic's body may call private helpers; the
+  monomorphized clone is resolved in the **template's** module context,
+  never the instantiation site's.
+- **Packages (LEC-001):** exactly two levels, module-private and `pub`. A
+  package's internal modules are not importable from outside the package, so
+  their `pub` items are package-visible. `pub(package)` is FUTURE.
+- **Where `pub` is meaningless it is an error, not ignored:** on a local
+  variable or a statement, on `import`, on `operator`, on a `machine`
+  transition line, on a parameter — always with a hint saying what to do
+  instead. A silently-ignored modifier is how a typo becomes a policy.
+- **Single-file programs are unaffected.** Visibility is only ever checked
+  across a module boundary; a main program's own declarations never need
+  `pub`, and a stray `pub` on them is accepted.
+- **Diagnostic contract (owner-directed emphasis on hints).** Every
+  visibility diagnostic is a typed `TurfError` with its own code, carries a
+  **hint that names the concrete fix** (which file to edit and which keyword
+  to add, or which public function/constructor to call instead), and names
+  the declaration site with a related-location note. Diagnostics for the
+  same rule differ by *what* is private (function, type, field, method,
+  constant) in their wording and hint, not by adding an error class per
+  kind. No new `SLM::ErrorCategory` and no `docs/slm/` files (§6.9).
+- **Non-goals:** `pub(package)`/`protected`, friend modules, per-variant
+  visibility, private top-level constants.
+
+### 6.16 Projects, packages and the toolchain — FROZEN (LEC-001, 2026-09-30)
+
+Recorded on the project owner's explicit instruction to start LEC-001 with
+the freeze entry (§6.0 rule 3's explicit request, not a session's own
+initiative). `ROADMAP_v2.0.0.md` LEC-001 entries 2–6 are frozen as
+recommended. Entry 1 (DEC-8, "one binary: project commands in the compiler
+driver, `turf-cli` not shipped") is **overturned by the owner**: the Go CLI
+becomes the `turf` front end and the compiler is renamed `turfc`, both in
+this repository. The roadmap's "no two programs called `turf`" is kept.
+**Amended by the owner the same day**: its "one version, lock-step" was
+first kept as "same tree, same version, same archive", and is replaced by
+independent versions plus an interface check (the next bullet and *Driver
+interface* below). Full account: `docs/development/changes/LEC-001.md`.
+
+**The toolchain (F-PKG-1)**
+
+- **Two programs, independently versioned.** `turf` is the Go program from
+  the turf-cli repository; `turfc` is the compiler (`src/`, today's `build/turf`).
+  - Each has its own release version and may grow on its own schedule, for
+    example TurfLang 2.0.0 with CLI 1.0.0. `turf version` shows both.
+  - What must agree is the **driver interface** (below), not the versions.
+  - They live in one repository today. The owner plans to move the CLI out
+    before the public release, which this rule already allows.
+  - A release archive may still bundle both, as a distribution convenience
+    (REL-003).
+- **`turf` is the user's tool; `turfc` is the tooling interface.**
+  - User-facing documentation, help text and diagnostic hints name `turf`
+    (`turf explain E090`, `turf check`).
+  - `turfc` is documented for tool authors (the LSP, editor plugins, build
+    systems) and for the compiler's own test scripts.
+  - Users are never asked to type `turfc`.
+- **The boundary** — the same kind of rule as §6.8's B1/B2/B3:
+  - **The compiler owns everything whose answer depends on TurfLang
+    source:** parsing, which file an `import` names (every ambiguity and
+    collision error), visibility, the internal-module rule, and the
+    `unsafe module;` capability check. `turfc` never touches the network,
+    never reads `turf.toml` or `turf.lock`, and never searches for them.
+  - **The CLI owns everything about files, network and reproducibility:**
+    the manifest, dependency fetching, the cache, the lockfile, hashing,
+    `--offline`/`--locked`, and running the built executable. `turf` never
+    parses TurfLang source, never decides which module an import names, and
+    never re-renders or rewrites a compiler diagnostic.
+  - **They meet at an explicit package graph** that `turf` passes to
+    `turfc`. For each package it gives the name, the source root, the names
+    and roots of its **direct** dependencies, and whether its `unsafe
+    module;` declarations are honored. The concrete form (repeated flags or
+    a plan file) is an engineering judgement for the stage that implements
+    it. `turfc` given no graph is in single-file mode.
+- **`turfc` stays a complete compiler on its own.** Every `turf` command is
+  one or more `turfc` invocations plus file and network work. The CLI adds
+  convenience, never a compiler capability. Test scripts, the SLM Sandbox
+  and the LSP keep using the compiler (or the SMP-001 facade) directly.
+- **The one exception to "turfc never looks for a manifest":** when an
+  `import` fails to resolve in single-file mode and a `turf.toml` exists in
+  the source file's directory or an ancestor, the not-found diagnostic adds
+  a hint naming `turf build`. The file is only checked for existence, never
+  read.
+- **Finding the compiler**, first match wins:
+  1. `$TURF_COMPILER` (the variable `scripts/test_runner.sh` and CI already
+     use for exactly this).
+  2. `turfc` in the directory of the running `turf` executable, with
+     symlinks resolved. This is the installed layout and the dev layout
+     (`build/turf` beside `build/turfc`).
+  3. `$TURF_HOME/bin/turfc`.
+  4. `turfc` on `PATH`.
+
+  No match is an error with a hint naming `TURF_COMPILER`.
+  Step 3 is how an independently installed `turf` and `turfc` find each
+  other.
+- **Driver interface.** The contract between the two is a versioned
+  interface, `major.minor`, that `turfc` reports on line 2 of
+  `turfc --version` as `interface <major>.<minor>`. Line 1 stays
+  `turfc <release version>`.
+  - It covers exactly what `turf` relies on:
+    - the flags it passes (`--check`, `--module`, `--dump-*`, `--format`,
+      `--write`, `--migrate=`, `--explain`, `-o`, and from stage 4 the
+      package-graph input);
+    - the `--version` format;
+    - the exit statuses (0 success, 1 a reported error);
+    - passthrough of every other argument unchanged.
+  - An additive change (a new flag or input) bumps the minor. Removing or
+    changing the meaning of anything covered bumps the major.
+  - `turf` declares the interface it needs. It drives a `turfc` whose major
+    is equal and whose minor is at least the one it needs.
+  - Before driving the compiler, `turf` checks this and refuses an
+    incompatible compiler. The error names both release versions, both
+    interface versions, both paths, and which side to upgrade.
+    `TURF_COMPILER` does not bypass the check.
+  - A differing *release* version is never an error on its own.
+- **Passthrough.** When the first argument is not a subcommand name,
+  `turf <args…>` runs `turfc <args…>` with the arguments, stdout, stderr
+  and exit status all unchanged. So `turf file.tr -o x` keeps working
+  exactly as it does today. Exceptions: `--version` and `--help`/`-h` are
+  the CLI's own; a bare word that neither starts with `-` nor ends in `.tr`
+  is an unknown command, reported with a spelling suggestion rather than
+  passed to the compiler as a missing file.
+- **Command surface for 2.0** (names frozen; each command's options are
+  engineering judgement, recorded in the change record):
+  - **Any file, no manifest needed:** `compile`, `run <file>`, `check`,
+    `fmt`, `explain`, `migrate`, `dump`, `version`, `help`. Flags `compile`
+    does not recognise are forwarded to `turfc` unchanged, so a new compiler
+    flag works through `turf` the day it lands.
+  - **Project:** `new`, `init`, `build`, `run`, `test` (REL-002), `clean`,
+    `fetch`, `add`, `remove`, `update`. `run` without a file argument means
+    the project.
+  - **`publish`** is reserved. In 2.0 it exits non-zero with a message
+    saying the registry is FUTURE F-7c.
+  - The pre-2.0 `turf-cli` command `install` is **not** a 2.0 command: what
+    it did is `fetch`, and `install` is left free for installing a built
+    program later (FUTURE).
+- **Exit status.** `turf compile`/`check`/passthrough return `turfc`'s
+  status unchanged; `turf run` returns the program's. The codes for the CLI's
+  own failures were frozen by REL-001 in §6.21: 0 success, 1 an error was
+  reported, 2 a usage error.
+
+**Layout, manifest and module resolution (F-PKG-2)**
+
+- **Package layout** (roadmap entry 2):
+  ```
+  myapp/
+    turf.toml          # manifest
+    turf.lock          # generated by turf; committed
+    src/main.tr        # present => the package builds an executable
+    src/<name>.tr      # present => the package is a library; its root module
+    src/**.tr          # internal modules
+    tests/*.tr         # `turf test` (REL-002)
+  ```
+  A package may have both entry files. Only a package with a root module
+  can be a dependency; depending on one without it is a build-time error.
+- **Manifest** (roadmap entry 3): `turf.toml`, read by `turf` with a real
+  TOML parser; the accepted keys are documented in
+  `docs/reference/projects_and_packages.md`.
+  - `[package]` requires `name` and `version`. `turf` is optional and gives
+    a minimum compiler version whose major must match.
+  - `name` must be a valid TurfLang identifier and not a reserved word,
+    because it is spelled in `import`.
+  - `[dependencies]` entries are inline tables: `{ path = "…" }`, or
+    `{ git = "…", tag = "…" }` with exactly one of `tag`, `rev` or `branch`.
+    A registry-style string entry (`math = "^1.2.0"`) is an error whose hint
+    points to `path`/`git` (registries are F-7c).
+  - `[unsafe] allow` is covered under F-PKG-4 below.
+  - An **unknown key or table is an error**, not ignored, for the same
+    reason a stray `pub` is (§6.15): a silently-ignored setting is how a
+    typo becomes a policy. Pre-2.0 `turf-cli` manifests (flat `name =`,
+    string versions) are not accepted; that tool never shipped, so there is
+    nothing to migrate.
+- **Module identity** (roadmap entry 4, DEC-9) is **(package, path under
+  `src/`)**. Two packages' internal `util.tr` are two modules, and their
+  types are distinct under F-TYPE-1 (§6.11), whose module component becomes
+  package-qualified where needed. In single-file mode the package is
+  implicit and identities are exactly as today.
+- **Import resolution in a package-graph build.** From a module of package
+  P, `import foo;` looks for:
+  - (a) P's own module named `foo`: `src/**/foo.tr`. More than one match is
+    itself an ambiguity.
+  - (b) A **direct** dependency of P named `foo`, meaning its root module.
+    Transitive dependencies are not importable; to use one, P lists it
+    itself.
+  - (c) The stdlib module `foo`.
+
+  Exactly one of (a)/(b)/(c) must exist. **More than one is a hard error
+  naming every candidate by path and kind** (own module / dependency /
+  stdlib), with a hint naming the fix. There is never silent shadowing and
+  never "own wins". `import foo::bar` resolves `foo` by the same rule.
+  `lib/usr/**`, the source file's directory and the cwd are **not**
+  searched.
+- **Internal modules are package-private.** From outside its package, only a
+  package's root module is reachable, so an internal module's `pub` items
+  are visible within the package only (§6.15's two levels).
+- **Names that could never be imported are rejected early:**
+  - When the manifest is read, a dependency whose name equals a stdlib
+    module name is an error.
+  - So is a library package whose own name equals one (`turf new`/`init`
+    refuse it, and so does `turf build`).
+- **Single-file mode** keeps today's search order (install stdlib →
+  `lib/usr` → source directory → cwd) but examines **every** root, and more
+  than one distinct file (by canonical path) is the same ambiguity error.
+  The silent stdlib shadow (audit F-19) becomes an error (R1, safe). The
+  same file reached twice, for example when the source directory is the
+  cwd, is one candidate, not two. `lib/usr` stays in single-file mode until
+  REL-003 retires it.
+
+**Fetching and reproducibility (F-PKG-3)** (roadmap entry 5)
+
+- **Sources in 2.0 are `path` and `git` only.** Git is invoked through the
+  system `git` binary. Fetched trees live under
+  `<os.UserCacheDir()>/turf/src/<name>-<commit>/` (Linux:
+  `$XDG_CACHE_HOME/turf/…`, default `~/.cache/turf/…`). The cache is
+  disposable: deleting it only costs a re-fetch.
+- **`turf.lock` belongs to the root package only**; a dependency's own
+  `turf.lock` is ignored.
+  - A git entry records the package name, the source URL, the requested
+    ref, the resolved commit, and the SHA-256 of the fetched tree (VCS
+    metadata excluded, paths sorted, independent of mtimes and
+    permissions).
+  - A path entry records the name and path, with no hash: a path dependency
+    is live source.
+- **The hash is verified on every build**; a mismatch is a hard error (tamper
+  or cache corruption) that names the package and the cache path.
+- **`turf build` fetches as needed.** `turf fetch` resolves, fetches and
+  locks without compiling.
+  - `--offline` never touches the network, and a missing cache entry is an
+    error.
+  - `--locked` fails if the lockfile would change.
+  - `turf update [name]` is the only command that moves a `branch`
+    dependency, or re-resolves a `tag` that has moved, to a new commit.
+- **One version per package name.** Two routes to the same name with
+  different sources or commits (a diamond that disagrees) is a hard error
+  naming both requirers. There is no multi-version support.
+
+**Capabilities across packages (F-PKG-4)** (roadmap entry 6)
+
+- A dependency's `unsafe module;` declaration is honored only if the **root**
+  manifest's `[unsafe] allow` lists that dependency by name. Listing is not
+  transitive: the root names every package, direct or indirect, that needs
+  it. A name in `allow` that is not in the graph is an error.
+- **The root package's own modules are honored without listing.** The
+  manifest's author is the author of that code;
+  `--allow-unsafe-modules` exists for the case with no manifest to express
+  consent. `lib/std` stays unconditional (install root, INV-CAP-1).
+- The CLI never inspects source for `unsafe module;`: it passes each
+  package's allow bit in the graph, and the compiler enforces it with its
+  existing capability check (`HasRawPointerCapability`), made per-package.
+
+**Non-goals:** registry, `publish`, semver ranges (F-7c); workspaces; build
+scripts; separate compilation (F-7a); binary packages and a Turf ABI
+(F-7b); per-package compiler flags; dependency renaming; multiple versions
+of one package; `pub(package)`; path-qualified imports of internal modules
+(`import a::b` keeps its existing meaning, a symbol import).
+
+### 6.17 Pattern matching — FROZEN (LEC-003, 2026-10-01)
+
+Recorded on the project owner's explicit instruction to implement LEC-003 with
+`ROADMAP_v2.0.0.md` as the authority (DEC-10's recommendation: a top-level
+`matches expr` is unchanged, destructuring forms bind) — §6.0 rule 3's explicit
+request, not a session's own initiative. Full account:
+`docs/development/changes/LEC-003.md`. The roadmap marks four points for
+confirmation; each is settled below.
+
+- **Backward compatibility first.** `matches <expr>:` at the top of a header
+  keeps its exact meaning: equality against a value expression (which may be a
+  variable, e.g. a string). A bare identifier at the top of a header is still
+  that variable, never a binding. Every `compare` that uses only value patterns
+  keeps its original `switch`/`strcmp` code generation.
+- **Arms are tried in source order; the first header that matches wins.**
+  Confirmed against the current lowering (a duplicate value pattern is already
+  rejected, so order never mattered for plain values) and frozen: a guard that
+  fails falls through to the next header, not out of the `compare`.
+- **Reserved word:** `_` alone is the wildcard and is reserved everywhere a name
+  is expected (its own token). `_name` — an underscore followed by anything — is
+  an ordinary identifier, and by convention silences the unused-variable
+  warning (the hint always promised this; it was untrue while `_x` did not lex).
+- **Pattern forms.** Wildcard `_`; struct destructuring `Name { field: pattern,
+  field, .. }` (also `module::Name`); a value sub-pattern inside a struct
+  pattern: an integer (`5`, `-5`), `char`, `string` or `bool` literal, or an
+  enum/machine variant. **Inside a destructuring pattern a bare identifier
+  binds** (Rust's rule); to compare a field with a variable or any expression,
+  bind it and use a guard. A `double` literal is not a pattern.
+- **A struct pattern lists every field or ends in `..`.** A field left
+  unmentioned without `..` is an error (E092), so a pattern cannot keep
+  compiling, meaning something different, after the struct gains a field.
+  Fields are read exactly as `p.field` reads them: another module's private
+  field is E088 (and must be waved off with `..`).
+- **Subjects a struct pattern accepts:** a struct value, a safe `&T`, and
+  `self`. A `&?T` (may be null) and a raw `T*` are refused with a hint.
+- **Guards:** `matches <pattern> if <bool expression>:`. A guard belongs to its
+  header; bindings of that header are visible in it.
+- **Alternatives:** existing header stacking only (no nested `|` in 2.0). Every
+  stacked header of an arm must bind exactly the same names at the same types
+  (the shared body reads one symbol per name), else E092. Each header keeps its
+  own guard.
+- **Bindings** are immutable copies of the matched value, scoped to the arm's
+  guards and body, shadow any outer name for that arm only, and are definitely
+  assigned on entry to the arm (the CFG models them as definitions on the edge
+  into the arm; each guard is a real two-way branch).
+- **The subject is evaluated once** and snapshotted; every header and guard
+  tests that one value.
+- **Exhaustiveness.** With no `otherwise` and no unguarded catch-all, an enum,
+  machine or `bool` subject must have every value covered by an **unguarded**
+  header (E093); a guarded arm never counts. An error value (`AnyErrorType`, an
+  open union) always needs `otherwise` or an unguarded `_` (E093). An `int`,
+  `string` or `char` subject, or a struct with a refutable pattern, may still
+  fall through to "no arm ran" (existing behaviour; changing it would be R1
+  breakage with no soundness gain). A struct pattern is irrefutable when every
+  field pattern is a binding, `_` or an irrefutable struct pattern; an
+  unguarded irrefutable header is a **catch-all**.
+- **Unreachable arms** (an arm, or `otherwise`, after an unguarded catch-all)
+  are warnings (E094), once per site. The pre-existing hard error for a
+  duplicate unguarded value pattern is kept (not relaxed to a warning: every
+  existing test depends on it, and relaxing it would buy nothing).
+- **`compare` stays a statement.** An expression form is FUTURE (F-14).
+- **Excluded from 2.0:** range patterns, `double` literal patterns, nested
+  or-patterns, enum payloads (plain enums stay ordinal-only), and error-variant
+  destructuring, which arrives with LEC-004 on top of the same machinery.
+- **Diagnostic contract (owner emphasis on hints, as §6.15).** Typed errors
+  with codes (E092 invalid pattern, E093 non-exhaustive compare, E094
+  unreachable arm) and a hint that names the concrete fix. No new
+  `SLM::ErrorCategory` and no `docs/slm/` files (§6.9).
+
+### 6.18 Error payloads and propagation — FROZEN (LEC-004, 2026-10-01)
+
+Recorded on the project owner's explicit instruction to implement LEC-004 with
+`ROADMAP_v2.0.0.md` as the authority (DEC-11: prefix `try`; DEC-12: N fields
+or N+1 with a trailing message) — §6.0 rule 3's explicit request, the same
+footing §6.17 was frozen on. Full account:
+`docs/development/changes/LEC-004.md`.
+
+- **Declaration.** `error IOError { NotFound(path: string), Denied(path: string,
+  mode: int), Timeout }`. A variant's fields are named and typed, separated by
+  commas; a variant with none is written bare, exactly as before (and
+  `error Name;` is unchanged). Field names are unique within a variant. A field
+  may have any sized type — a primitive, a struct, a generic instance, a
+  pointer, an array — except an error type, a `!T`, or `void` (an error value
+  does not contain another error). A raw-pointer field needs `unsafe` exactly
+  as a struct field does. A type spelled in a field resolves under FDN-003's
+  identity rules, like a struct field's.
+- **Construction is positional:** `IOError::NotFound(p)`. A variant with *N ≥ 1*
+  fields takes *N* arguments (the fields), or *N+1* where the extra trailing
+  argument is the STD-002 `string` message; a variant with no fields takes
+  exactly one (the message), unchanged. Any other count is an error naming the
+  declared fields. The message stays universal: `err.message` still reads it,
+  `""` when absent, on an open-union `err` with no destructuring.
+- **A bare `E::V` for a variant that has fields is not a value.** It can be
+  neither returned nor stored (there is no payload to fill in). It is still
+  legal as an operand of `==`/`!=` (tag identity, as it always was — equality
+  never looks at a payload or a message) and as the head of a pattern.
+- **Payloads are read by patterns, and only by patterns** — no `err.path`. In a
+  `compare`, `matches E::V(p1, p2):` matches an error value whose tag is `E::V`
+  and whose fields match `p1`, `p2` **positionally**. A sub-pattern is what
+  §6.17 allows inside a struct pattern (`_`, a name that binds, a literal, an
+  enum/machine variant, a nested struct pattern). Like a struct pattern, it
+  lists every field or ends in `..` (`E::V(path, ..)`, `E::V(..)`). A bare
+  `E::V:` header matches a variant that has no fields; for one that has, the
+  header is `E::V(..)` (error E092 with that hint), so a pattern cannot keep
+  compiling, meaning something different, after a field is added. The message
+  is not bindable in a pattern. A variant pattern's subject is an error value
+  (`AnyErrorType`, or a declared error type); anything else is E092. Bindings,
+  guards, stacking, source order and single evaluation are §6.17's, unchanged.
+- **Exhaustiveness.** A variant pattern never makes an arm a catch-all. An
+  open error union (`AnyErrorType`) still always needs `otherwise` or an
+  unguarded `_` (E093). A subject of a *declared* error type must have every
+  one of its variants covered by an unguarded variant pattern whose fields are
+  all irrefutable, or end in `otherwise`/`_` (E093).
+- **Propagation is the prefix keyword `try`** (DEC-11; `?` was rejected — this
+  language spells control flow with words). `try <expr>` has the precedence of
+  a prefix operator, so `try a() + try b()` is `(try a()) + (try b())`. The
+  operand must be a `!U`; the result is `U`. On failure `try` returns the error
+  value **unchanged** from the enclosing function — it *is* a `return`: pending
+  `defer`s run exactly as for one. The enclosing function must return `!V` (any
+  `V`: the error union is open, so no conversion exists or is needed). `try` is
+  an error (E095) outside a function, in a function whose return type is not
+  `!V` (`main` returns `int`, so `main` included — the hint says how to handle
+  the error there), inside a `defer` (INV-DEFER-2: a deferred statement may not
+  return), and on an operand that is not fallible. `try` is a reserved word.
+- **Pass-through return.** `return f();` where `f(): !T` and the enclosing
+  function returns exactly `!T` is legal and returns the fallible value
+  unchanged. It never unwraps, and nothing converts a `!T` into a plain `T`
+  (§5.2's rule stays).
+- **Runtime representation.** An error value is `%TurfErrorValue = { i8* tag,
+  i8* message, i8* payload }`. `payload` is null for a variant with no fields;
+  otherwise it points to a GC-allocated per-variant struct with its own
+  `TurfTypeDesc`, so the collector traces a `string` or a `List<T>` held in a
+  payload exactly as it traces the message. `%FallibleValue` is unchanged, and
+  tag equality stays `strcmp` on tag strings.
+- **Excluded from 2.0:** closed error sets in signatures (`!IOError int`),
+  error-type conversion, stack traces (FUTURE F-15), payloads on plain `enum`s
+  (F-14b), binding the message in a pattern, and `try` as a statement-position
+  shorthand with a custom handler.
+- **Diagnostic contract (owner emphasis on hints, as §6.15).** Typed, coded
+  errors with a hint naming the concrete fix: E095 misplaced or ill-typed
+  `try`, E096 an error-variant payload declared or constructed wrongly; variant
+  patterns reuse E092/E093. No new `SLM::ErrorCategory` and no `docs/slm/`
+  files (§6.9).
+
+### 6.19 Generic operators — FROZEN (LEC-006, 2026-10-01)
+
+Recorded on the project owner's instruction to implement LEC-006 as
+`ROADMAP_v2.0.0.md` specifies it. Extends §6.7 (operators); nothing there
+changes. Full account: `docs/development/changes/LEC-006.md`.
+
+- **Declaration.** `operator<T> [](l: List<T>, i: int): T`, `operator<K, V>
+  []=(m: &Map<K, V>, key: K, value: V): void` — a `<...>` type-parameter list
+  immediately after the keyword, where `fn<T>` puts it, valid on every
+  overloadable operator. After the keyword `<` followed by an identifier opens
+  a parameter list; `<` followed by `(` is the less-than operator
+  (`operator<T> <(a: C<T>, b: C<T>)` declares `<` generically).
+- **Resolution is still exact-match (F-OP-1).** Candidate matching infers the
+  parameters by unifying each declared operand type against the concrete
+  operand (`TypeWalk::unify`), then **substitutes and requires the same
+  `sameTypeExact`** a concrete candidate gets, per operand. Inference never
+  widens an operand: unify skips a structural mismatch silently, so the
+  substituted re-check is what rejects `Cell<int> == Cell<string>`. Every type
+  parameter must be bound by an operand. The one §6.7 relaxation — the
+  `operator[]`/`operator[]=` self operand may be declared `&T` — applies to a
+  generic candidate too.
+- **Instantiation.** A generic operator is a template like `fn<T>`: one clone
+  per distinct type-argument tuple, requested at the operator's node and
+  pointed at it by the monomorphizer. Request identity includes the exact
+  declaration, so overloads sharing a name (`operator-` unary and binary, two
+  `operator+`s, and ordinary `fn<T> f(x)` / `fn<T> f(x, y)`, `Box.put(x)` /
+  `Box.put(x, y)`, `Box::new(v)` / `Box::new(v, w)`) are separate
+  instantiations. Never instantiated for a still-open type parameter.
+- **Declaration rules (E097).** (1) Every type parameter appears in some
+  operand — they cannot be written at a use. (2) The orphan rule (INV-OP-2) is
+  **not vacuous** for a generic operator: at least one operand, looked for
+  through `&`/`*` and a generic type's base, must be a struct/enum declared in
+  the operator's own module, because a bare `T` operand matches every type.
+  An operand owned by another module is the existing E080.
+- **An index result is a value, not a place (E098).** An `operator[]` read is a
+  call returning the element by value, so it has no address: `l[i].field` and
+  `l[i].method()` read it as an r-value. A write whose destination is a field of
+  that copy, or `self` of a method that assigns to it, would be silently lost,
+  so it is rejected: `bs[0].a = v`, `bs[0].a += v`, `bs[0].a++`,
+  `bs[0].bump()` (a method that assigns to `self`, directly or through a chain
+  of `self.m()` calls), and a `[]=`
+  whose container is declared `&T` applied to another `[]`'s result
+  (`mm["a"]["b"] = v`). It stops at a pointer or reference: an element that is
+  `&T`/`T*` is written through. `grid[i][j] = v` and `outer[0].push(v)` for a
+  `List` are allowed: a collection is a handle (§6.27, F-COLL-1, 2026-10-12;
+  `outer[0].push(v)` was rejected here until then), so its methods and `[]=`
+  write the shared header, not a field of the copy. The same rule C# calls CS1612 and Go applies to a
+  struct in a map. Index operators that yield a place (Rust's `IndexMut`) are out
+  of scope: they conflict with F-MEM-5 and need their own design.
+- **Excluded:** explicit type arguments at a use, generic arithmetic on types
+  with no owned operand, and compound assignment through an indexing operator
+  (§6.7, unchanged).
+- **Diagnostic contract.** E097 `GenericOperatorError` (a declaration) and E098
+  `OperatorTemporaryWriteError` (a use), typed and coded, each with a hint naming
+  the fix. No new `SLM::ErrorCategory`, no
+  `docs/slm/` file (§6.9).
+
+### 6.20 The standard library's 2.x surface — FROZEN (LEC-007, 2026-10-01)
+
+Recorded on the project owner's instruction to implement LEC-007 as
+`ROADMAP_v2.0.0.md` specifies it ("frozen as the 2.x compatibility surface"),
+with the owner's direction on what counts as public (below). Full account and
+the per-module review: `docs/development/changes/LEC-007.md`. User-facing
+statement: `docs/reference/stdlib/README.md`.
+
+- **The public items of `lib/std/**` are the 2.x surface (F-API-1).** A `pub`
+  function, method, type, error, constant or field is not removed, renamed, or
+  given a different signature or failure shape before 3.0; additions are
+  allowed in a minor release. Enforced by `tests/46_stdlib_surface/` (a use of
+  every public item, compiled and run) and `scripts/check/stdlib_surface_check.sh`
+  (fails on a public item no test mentions).
+- **Naming (F-API-2).** Public functions, methods and fields are `snake_case`;
+  types `PascalCase`; constants `UPPER_CASE`. The twelve camelCase names that
+  existed were renamed without aliases (a kept alias would freeze two
+  spellings). Checked by the same script.
+- **Failure shape (F-API-3).** A function that can fail because of its input or
+  environment returns `!T` with a variant carrying what failed; one that fails
+  only because the caller broke a precondition panics, and the message starts
+  with the caller's `file:line:` (`@caller_location`); a question
+  (`exists`, `contains`, `index_of`) returns `bool` or a sentinel. Where a call
+  has both a panicking and a recoverable form they are a pair (`Map.get` /
+  `Map.try_get`) with a predicate to ask first (`contains`).
+- **What is public (F-API-4), the owner's rule.** A function that does a job a
+  real program might want is public whether or not the repository itself calls
+  it; hiding it because "we" do not use it is not a reason. A struct's
+  internals are public only if a real program does something with them
+  (`Request.method`: yes; `List`'s buffer, `Map`'s hash index, `Server`'s route
+  table: no). Raw C bindings (`fopen`, `getenv`, `socket`, `strstr`, ...) stay
+  private: the library wraps them in checked Turf functions, and those are the
+  interface. A pre-existing `pub extern` (`mem::malloc`, `time::usleep`,
+  `sys::exit`) is part of the surface as it stands; no new one is added by
+  this record.
+- **Resource handles (F-MEM-2 applied).** Every handle type has an explicit
+  `close()`, idempotent, and the documented idiom is `defer x.close();`.
+  `raw_fd()` exposes the descriptor; there is no public `fd` field.
+- **`string` stays a C pointer (F-STR-1, F-STD-3).** `strings::StringBuilder`
+  is the incremental-construction answer that decision relied on; its buffer is
+  private and `to_string()` returns a copy.
+- **Not part of the surface:** the behaviour of `json::parse` for `\uXXXX`
+  escapes (a documented gap), the iteration order of `Map.keys()` after a
+  `remove()`, and `mem::malloc_usable_size`/`usable_size`, which are glibc-only
+  and may be unavailable on a platform the release adds.
+
+### 6.21 Exit statuses and the version surface — FROZEN (REL-001, 2026-10-06)
+
+Decided by the owner on 2026-10-06: **0 success, 1 compile error, 2 usage
+error.**
+
+- **Exit statuses (F-CLI-1).** Both `turf` and `turfc` exit with
+  - **0** — it did what was asked;
+  - **1** — the tool ran and reported a problem: a compile error in the
+    user's program, a file it could not read or write, a malformed manifest or
+    package graph, a failed fetch, a compiler that does not speak the driver
+    interface;
+  - **2** — the command line is wrong, so nothing was attempted: an unknown
+    command or option, an option missing its value, no input file, an input
+    that is not a `.tr` file, a bad `-O` level, an unknown `--migrate=` name or
+    error code, a project command outside a project.
+
+  Two things are outside the rule: `turf run` exits with the **program's own
+  status** once the program has started (a program that returns 2 is
+  indistinguishable from a usage error there, by design: `turf run` is
+  `exec`), and anything above 2 is the shell's or the OS's (126/127, 128 plus
+  a signal). `turf publish` (reserved in 2.0) exits 1. Before this decision a
+  `turfc` usage error exited 1; `turf`'s own usage errors were already 2.
+- **Unknown options (F-CLI-2).** An unknown option or command is always a
+  usage error, never ignored and never forwarded as a file. The message offers
+  the nearest known spelling when one is within edit distance 2.
+- **`help`, not `--help`, on the compiler (F-CLI-3).** `turf help [<cmd>]`,
+  `turf <cmd> --help` and `turfc help` print usage and exit 0; `turfc --help` is
+  an unknown option whose message says to run `turfc help`.
+- **`--version` (F-CLI-4).** `turfc --version` prints, one fact per line: line 1
+  `turfc <release>`, line 2 `interface <major>.<minor>` (the contract, §6.16),
+  then `llvm <version>`, `runtime <ABI symbol>` and `root <install root>`, and
+  these three may be followed by more `<key> <value>` lines. `turf version` /
+  `turf --version` prints `turf` and `turfc` lines and shows the compiler's
+  extra lines indented under its own. The runtime ABI symbol is the one
+  constant `RuntimeAbiSymbol` (`src/codegen/Codegen.h`) used for both the emitted
+  call and this line; `scripts/smoke/cli_smoke.sh` checks `lib/libturfrt.a` defines
+  it. Driver interface **1.2** is this decision; `turf` still needs only 1.1.
+
+### 6.22 Tests — `turf test` and `turfc --test` — FROZEN (REL-002 stage 1, 2026-10-06)
+
+F-TEST-1 is the owner's rule. F-TEST-2 and F-TEST-3 are the design that landed
+with stage 1 (following the roadmap's REL-002 text and
+`scripts/test_runner.sh`'s existing behaviour); the owner **confirmed both,
+2026-10-06**.
+
+`turf test` runs a project's tests; `turfc --test` is the one implementation
+under it, and `scripts/test_runner.sh` (the compiler's own suite) is a wrapper
+over the same code, so how a test is judged exists once.
+
+- **`tests/` is required (F-TEST-1).** Owner rule, 2026-10-06: a project (or
+  `turfc --test`'s directory) that has no `tests/` directory is an **error**,
+  exit 1, with a hint showing a first test. It is never "0 tests, all passed".
+  The same holds for a directory with no tests in it. The check comes before
+  the compiler is located and before dependencies are resolved or fetched. The
+  directory is `tests/` at the project root; there is no manifest key to move it.
+- **Judged by file name and markers (F-TEST-2).** Under the tests directory, at
+  any depth, every `.tr` file is a test, except a file named `*_module.tr` (a
+  companion to import) and hidden entries. A plain file must compile and exit 0;
+  `fail_*.tr` must fail to compile (a compiler killed by a signal does not count);
+  `fail_*.tr` containing `RUNTIME_ABORT_EXPECTED` must compile, then exit
+  non-zero (not by timeout); `// EXPECT-DIAG`, `// EXPECT-NO-DIAG`,
+  `// EXPECT-RUNTIME` and `// EXPECT-EXIT` markers pin *why* (LEC-005). Each test
+  runs in its own child process with **its own directory as the working
+  directory**, standard input from the null device, and a time limit
+  (default 5 seconds, `--timeout` / `TURF_TEST_TIMEOUT_SEC`). The diagnostic
+  register (`tests/DIAGNOSTIC_GAPS.txt`, issue #263) is the compiler suite's own
+  policy: it is enforced only when `--diag-register <file>` is given, which only
+  `scripts/test_runner.sh` does.
+- **A test is the root package's code (F-TEST-3).** In a project, `turf test`
+  gives the compiler a package graph whose root package names its `"tests"`
+  directory (driver interface **1.3**; `src/tooling/PackageGraph.h`). A test file
+  may then be the program entry point (any file there, not only `src/main.tr`)
+  and imports what `src/**` of the package can: the package's own modules, its
+  direct dependencies' root modules, the standard library, and the helper
+  modules (`*_module.tr`) in `tests/`. The E090/E091 rules apply to it
+  unchanged. A `src/` module never sees a test helper. Only `turf test` writes
+  the key, so a turfc older than 1.3 still serves every other command and
+  `turf test` refuses it with a message about the interface.
+- **Command line.** `turfc --test [<dir>]` (default `tests`; must be the first
+  argument, takes a directory, never a file) with `--package-graph <file>`,
+  `--exclude <path>` (repeatable), `--only <path>` (repeatable, driver
+  interface 1.7: run only the tests at or under these paths, relative to the
+  directory; one that names no test is an error), `--jobs <n>` (`TURF_TEST_JOBS`), `--timeout
+  <seconds>`, `--diag-register <file>`, and the compile flags `-O0..-Os`, `-g`,
+  `--link <lib>`, `--allow-unsafe-modules`, `--stdlib-warnings`, applied to
+  every test's compile. `turf test` runs it from the project root and passes
+  unknown flags through; each path argument (a test file or a directory under
+  `tests/`, written from the current directory) becomes an `--only`, and only
+  then does `turf test` ask for interface 1.7. Exit status: 0 every test passed; 1 a test failed or
+  the run could not start; 2 a usage error (§6.21).
+- **Not frozen:** the wording of the per-test report lines, the order tests
+  finish in, and `turfc --test`'s behaviour on Windows (not supported yet; it
+  needs a process runner for that platform, REL-008).
+
+### 6.23 `turf fmt` — guarantees — FROZEN (REL-002 stage 2, 2026-10-06)
+
+Designed with stage 1 (the roadmap's REL-002 text) and **confirmed by the owner,
+2026-10-06**: F-FMT-1 ("yes, absolutely"), F-FMT-2 and F-FMT-3, each as written
+below, with one refinement to F-FMT-2 that the owner decided at the same time
+(files found under a directory are skipped when they do not lex). The formatter
+itself is unchanged by this section: indentation only (`src/tooling/Formatter.h`).
+
+- **Verified, not argued (F-FMT-1).** `turfc --format` checks every result
+  before it writes or reports it (`turf::format::verifyFormatting`): (1) no
+  non-whitespace byte was added, removed or reordered, comments included; (2) the
+  real lexer reads the same token stream (kind and value, never position) from
+  the original and the result; (3) formatting the result again changes nothing.
+  A file that fails a check is **left unchanged** and reported as a formatter
+  bug, exit 1; the remaining files are still attempted.
+- **A source the lexer rejects is not formatted (F-FMT-2).** A lexical error
+  (unterminated string, malformed number) gives `Could not format <file>: it has a
+  lexical error (line N: …); the file was left unchanged`, exit 1, and never the
+  compiler's diagnostic and never the end of the run. (Before, the lexer's
+  `exit(1)` on a malformed number ended `turfc --format` at the first such file,
+  and an unterminated string was formatted best-effort and followed by the
+  compiler's error output.) **Named versus found (owner, 2026-10-06):** that is
+  the rule for a file the user *named*. A file that `turf fmt` only *found* by
+  walking a directory is **skipped** when it does not lex: listed as
+  `skipped <file>: it has a lexical error (…)`, counted in the summary, and not a
+  failure, because a tree can hold sources that are invalid on purpose (this
+  repository's 13 `fail_*` tests). `turf fmt` passes `turfc --format
+  --skip-unlexable` for those files only (driver interface **1.5**); a file named
+  on the command line is never skipped, even if a directory also reaches it. Only
+  a lexical error is skippable: a result that fails verification (F-FMT-1) is a
+  formatter bug and fails whatever its origin.
+- **Modes (F-FMT-3).** `turfc --format [--write | --check] <file.tr>...`:
+  neither mode takes exactly one file and prints the text; `--write` rewrites only
+  a file whose text differs (an already formatted file keeps its modification
+  time); `--check` writes nothing, prints `would reformat <file>` for each file
+  that would change and exits 1 if any; the two together are a usage error (2).
+  A path that does not exist is an error, never skipped.
+- **`turf fmt` chooses the files.** A path is a file or a directory (every
+  `.tr` under it, not hidden directories, not a `build/`); `--exclude <path>`
+  drops a file or a directory; with no path inside a project it is the root
+  package's `src/` and `tests/`, and one of `--write` / `--check` is then
+  required. Driver interface **1.5** (1.4 added the batch form, 1.5 the skip);
+  `turf fmt` asks for it, no other command does.
+- **Not in 2.0:** a pretty-printer that re-spaces or re-flows code. It needs a
+  trivia-preserving lexer (`FUTURE.md` F-11b).
+
+### 6.24 No transitive imports — FROZEN (LEC-008, 2026-10-07)
+
+Recorded on the project owner's decision of 2026-10-06 ("there are to be NO
+transitive imports", `SMP-001.md` unresolved question 4) and the five
+refinements the owner settled on 2026-10-07 after reading the Resolver's
+current behaviour. §6.0 rule 3's explicit request. Full account:
+`docs/development/changes/LEC-008.md`.
+
+Before this, the Resolver registered every module any import loaded in one
+global table, so `import json;` also made `list::List` compile. That is
+now an error (for any module outside the prelude, §6.25).
+
+- **A file may spell `m::` only for a module it imports itself (F-IMP-1).**
+  "Spell" means every use of the qualifier: `m::f()`, `m::CONST`, `m::T` in a
+  type, `m::T::new()` / `m::T::default()` / `m::T::method()`. The module must
+  be named by a plain `import m;` **in that same file**; a module's own body
+  always sees itself; the prelude's modules count as imported. An import in
+  another file never counts, whichever way that file was reached.
+- **A symbol import does not import the qualifier (F-IMP-2).**
+  `import m::name;`, `import m::[a, b];` and `import m::[*];` bring in those
+  names, bare, and nothing else: `m::other` still needs `import m;`. Written
+  out, `import list::List;` lets a file say `List` but not `list::List`; a
+  file that wants both writes both imports. This is the strictest reading,
+  chosen because it is the easiest to state and to check.
+- **Only the spelling is gated, never the use of a value (F-IMP-3).** A
+  function may return, and a caller may hold and use, a value whose type
+  belongs to a module the caller did not import (`json::parse` handing back a
+  type from `io`); the caller just cannot *write* `io::T` without importing
+  `io`. Type identity (`M::Name`, §6.11) is unchanged and global.
+- **Methods, UFCS and operators are not gated (F-IMP-4).** They follow the
+  receiver's or operands' *type*, not an import: `x.f()` finds a free function
+  `f` of any loaded module whose receiver matches (subject to `pub`, §6.15),
+  and an operator is visible wherever its operand types are (§6.7, F-OP-3), or
+  `a + b` would change meaning with the file's import list. This is the one
+  place the old global visibility is kept on purpose.
+- **A new diagnostic with a fix (F-IMP-5).** A module that exists in the
+  program but is not imported by the file is its own error, distinct from an
+  unknown qualifier, and its hint names the exact `import m;` to add (and, when
+  the file has `import m::name;` for it, says that a symbol import is not
+  enough). Suggestion and "did you mean" lists keep searching **every** loaded
+  module, so the fix can be offered; only legality is gated. The editor's
+  auto-import offer for such a module is therefore correct as it stands.
+
+### 6.25 The prelude: nine modules, three of them bare-callable — FROZEN (owner decision, 2026-10-07)
+
+Recorded on the project owner's instruction ("everything from io, math and
+anything extra that should be there … they can just write `printline()` and
+`print()` and it will work"), made right after the owner confirmed that prelude
+modules are spellable in every file (§6.24, F-IMP-1). §6.0 rule 3's explicit
+request. Account: `docs/development/changes/LEC-008.md`. It **reverses** the
+older documented rule "there is no always-auto-imported module — `io` must be
+imported like anything else" (`modules_and_scope_resolution.md` §1.3); what that
+rule guarded against was a *hidden, unscoped* global lookup (a `prelude.tr` that
+`import io;`-ed for everyone while the bare-call search ignored who asked), not
+a named, closed, last-resort list.
+
+- **The prelude is nine modules (F-PRE-1):** `int`, `double`, `bool`, `char`,
+  `strings`, `array`, `io`, `math`, `sys`. Every one is loaded in every compile,
+  spellable as `m::` in every file with no import (§6.24), and visible to UFCS
+  and operators. The spec "the prelude is exactly `lib/std/core/*.tr`"
+  (`boundary.md` §4, `scripts/check/check_boundary.sh` check 2) is kept: `io.tr`,
+  `math.tr` and `sys.tr` moved into `lib/std/core/`. A module's subfolder is
+  invisible to `import`, so no import changed.
+- **Three of them are bare-callable (F-PRE-2):** every `pub` free function of
+  `io`, `math` and `sys` can be called unqualified — `printline("x")`, `abs(-3)`,
+  `max(a, b)`, `sqrt(2.0)`, `exit(1)`, `panic("m")`. The other six are not
+  flattened (their functions read as methods: `c.is_digit()`). Constants stay
+  qualified (`math::PI`); methods (`Type.name`) are never bare. The list is
+  closed and named (`PreludeBareModuleNames`, `src/frontend/ParserModule.cpp`); adding a
+  module to either list is a change-recorded act (F-STD-2's standard).
+- **It is the last resort of a bare call (F-PRE-3).** In order, `f(...)` looks at:
+  the file's own functions; for code inside a module, that module's own;
+  explicit on-demand imports; and only when none of those has *any* function
+  named `f`, the prelude. So the prelude never makes a program ambiguous: a
+  declaration or explicit import of your own hides it (Rust's rule for a local
+  item over a prelude name). Knowingly accepted cost: once a file declares any
+  `f`, a call shaped for the prelude's `f` is checked against the file's alone
+  and reports a mismatch naming the file's function; `m::f` reaches the
+  prelude's. Not reversible after 2.0 without a break.
+- **UFCS tie-break (F-PRE-4).** Making `math` always-loaded put its public libm
+  `floor`/`ceil`/`round` beside `double.tr`'s own in every `double`'s UFCS
+  candidate set, an exact tie that read as an ambiguity. When the exact matches
+  of a UFCS call tie, the one declared in the **receiver type's own prelude
+  module** (`double` for a `double`, `strings` for a `string`) wins, provided it
+  is exactly one. Two identical definitions anywhere else are still a conflict.
+  No public name was removed or renamed.
+
+### 6.26 Release archives, installation and `--target` — FROZEN (REL-003, 2026-10-07)
+
+Confirmed by the owner on 2026-10-07 ("yes") when asked whether the D20
+behaviour is right and whether a `-c` object-only flag should come later: F-REL-1..4
+stand as built, and `-c` (object only, exit 0, no diagnostic) is a planned
+later, separate flag, not part of this decision. D20 was left to REL-003 with a
+recommendation; these rows record it as built, plus the layout and installer the
+roadmap's REL-003/REL-008 text describes. Self-containment (static LLVM,
+embedded lld, bundled C runtime) is REL-008, not this section.
+
+- **The archive layout (F-REL-1).** `turf-v<VERSION>-<platform>.tar.gz` (`.zip`
+  on Windows) unpacks to one directory holding `bin/turf`, `bin/turfc` (plus the
+  DLLs `turfc.exe` needs, in `bin/`), `lib/libturfrt.a`, `lib/std/**`,
+  `docs/errors/**`, `docs/slm/**` (both read from the install root by `turf
+  explain` and `--smart`), `share/turf/examples/**`, `LICENSE`, `README.md`.
+  `libturfrt_asan.a` is never shipped. The shape is not cosmetic: `turfc` derives
+  its install root from its own real path, `<bin>/..`, and `turf` finds `turfc`
+  beside itself, so this layout works unpacked, symlinked or relocated with no
+  `TURF_HOME`. The pre-REL-003 archives put the binary at the top level, one
+  directory too high for that rule. `lib/usr` is not shipped.
+- **`--target` and linking (F-REL-2, D20).** `--target=<triple>` always emits a
+  real object file for that machine. When the machine is not the host
+  (architecture, OS or ABI environment differs; the vendor field is ignored, so
+  `x86_64-linux-gnu` is the host on an `x86_64-pc-linux-gnu` machine), `turfc`
+  keeps the object, exits **1** and says: *cannot link a program for '<triple>':
+  cross-linking is not supported in 2.0; the runtime (libturfrt) is built for
+  <host>* — never the host linker's own error. `x86_64-linux-musl` on a glibc
+  host is foreign (`libturfrt` is built against the host libc). Cross-linking
+  stays FUTURE F-20. No new flag now: the object is a by-product of the failure;
+  an object-only `-c` is a later addition (owner, 2026-10-07).
+- **`install.sh` (F-REL-3).** Linux x86-64 and macOS arm64. It reads the
+  release's `checksums.txt`, downloads the one archive for the platform,
+  **verifies its SHA-256 and installs nothing if the check fails or cannot run**,
+  and unpacks into `~/.turf` (`--prefix`, `TURF_INSTALL_DIR`). It adds `bin` to
+  the user's PATH with **one marked block** (`# >>> turf >>>` … `# <<< turf
+  <<<`) in the login shell's start-up file (zsh `.zshrc`; bash `.bashrc`, macOS
+  `.bash_profile`; fish `conf.d/turf.fish`; anything else `.profile`, said
+  aloud), idempotently, `--no-modify-path` to skip. `--uninstall` removes exactly
+  the names in `<prefix>/.turf-install` and the marked blocks, and never the
+  package cache or a project. The checksum is from the same release as the
+  archive: it catches a damaged download, not a compromised release (signing is
+  REL-008).
+- **One version (F-REL-4).** The archive name comes from the root `VERSION` file.
+  A tag that is not `v<VERSION>`, or a `-dev` `VERSION`, stops packaging
+  (`scripts/release/package_release.sh --expect-tag`). This closes REL-001's deferred
+  single-sourcing item for the archive name; the README's version line and
+  `turf`'s own constant (independent by F-PKG-1) are still checked by hand.
+
+### 6.27 Collections are shared, copied on demand — FROZEN (owner decision, 2026-10-12)
+
+Recorded on the project owner's explicit decision (2026-10-12: "every collection
+type, present and future, is shared by default, copied on demand"), and their
+choice, the same day, of how a fresh collection gets its one header (F-COLL-2,
+over rejecting `::default()` for such types or allocating the header lazily).
+§6.0 rule 3's explicit request. Account: `docs/development/changes/LEC-009.md`.
+Found by turf-fuzz's typed generator: a `List` was `{data, len, cap}` copied by
+value, so a copy shared the buffer but not the length.
+
+- **A collection value is a handle (F-COLL-1).** A `List`, `Stack`, `Queue`,
+  `Set` or `Map` value names one collection. `=`, passing as an argument,
+  returning, storing in a field or in another collection all share it, length
+  included: after `m = l; m.push(7)`, `l.length()` has grown too, and a
+  callee's `push` is visible to its caller. `.copy()` gives an independent
+  collection with the same elements (copied as values) in the same order.
+  Every collection type added to `lib/std` later follows the same rule and has
+  a `copy()`. A struct that holds a collection is still copied by value, and the
+  copy names the same collection.
+- **`T::default()` gives a `&U` field a fresh `U::default()` (F-COLL-2).** A
+  non-null `&U` field reachable by value from `T` (directly, through by-value
+  struct fields, or in a fixed array's elements) is set to a new GC-heap
+  `heap(U::default())`, one per field and element; its own fields follow the
+  same rule. This is what gives a collection its header at creation, so even an
+  empty collection is shared, with no compiler knowledge of collections (B3).
+  It also closes a hole: the zero-filled `&U` used to be null, and reading
+  through it segfaulted in safe code. A type that reaches itself again through
+  `&` fields has no finite default: `T::default()` is E147
+  `DefaultThroughReferenceCycleError`, whose hint offers `&?U` (defaults to
+  null) or `::new`. Declarations without an initializer are unchanged: their
+  storage is zero-filled and definite assignment (F-INIT-1/2) forbids reading it.
+
+### 6.28 Arrays of references — FROZEN (owner decision, 2026-10-12)
+
+Recorded on the project owner's explicit choice (2026-10-12) of the spelling
+(over flipping `&N[2]` to mean an array, or leaving arrays of references out)
+and of the empty-declaration rule (over zero-filling with a run-time check, or
+deciding every zero-filled element type at once). Found by turf-fuzz: there was
+no way to write an array of references, and the error for trying printed both
+types as `&N[2]`.
+
+- **`(&N)[k]` is an array of references (F-REFARR-1).** `&` takes the whole
+  type after it, so `&N[2]` stays a reference to an array. Parentheses around a
+  reference type, followed by array dimensions, make an array of references:
+  `(&N)[2]`, `(&?N)[2]`, `(&N)[2][3]`, and the slice parameter `(&N)[]`.
+  Parentheses around any other type, or with no `[` after them, are E109. The
+  two types print the way they are written: `(&N)[2]` and `&(N[2])`. An array
+  of references is an ordinary array (a value; copying it copies the references,
+  not what they point to), and a store of a reference to this frame's storage
+  into an element of an array that is not this frame's own (a `(&N)[]`
+  parameter) is an F-MEM-5 escape (E086). Element types match exactly, with
+  one exception: an array *literal* is a fresh value, so `[r, null]` is a
+  `(&?N)[2]` and a literal of `&N` may initialize or be assigned to a
+  `(&?N)[k]`; a variable or a `(&N)[]` view never widens (a view would let
+  `null` be stored into a `&N` array).
+- **`(&N)[k]` needs an initializer (F-REFARR-2).** A non-null reference has no
+  zero value, so a declaration without one is E128; `(&?N)[k]` starts with
+  every element null. `T::default()` gives each element of a `(&N)[k]` field
+  its own node (F-COLL-2). **Amended 2026-10-13 (owner decision
+  2026-10-12):** the same holds for an element type that carries a `&U`
+  anywhere inside it (`H[2]` with `H { own: &U }`, E128 naming `H.own`); and
+  an unwritten element of a type holding a `string` reads as its default
+  (`""` for each string), not a null pointer, as the zero-value table in
+  `variables_and_types.md` always said.
+
 ---
 
 ## Appendix — frozen-decision IDs
@@ -244,7 +1317,8 @@ A change record's *Frozen decisions relied on* row cites these IDs
 (`docs/development/TEMPLATE.md`). They name the decisions above; the
 rationale for each lives in the `ARCHITECTURE_OVERHAUL.md` section named in
 the third column. This table is a copy of that document's §4 and adds
-nothing to the freeze.
+nothing to the freeze -- except rows for decisions frozen after the
+Overhaul (F-TYPE-1), whose third column points at their section above.
 
 |---|---|---|
 | **F-GEN-1** | Generics are **monomorphized**. Type erasure is removed entirely. | §9 |
@@ -271,15 +1345,58 @@ nothing to the freeze.
 | **F-OP-2** | Compound assignment desugars; there is no `operator+=`. | §13 |
 | **F-OP-3** | Operator overloads live in the ordinary name-keyed overload map under synthesized names. No separate table. | §13 |
 | **F-OP-4** | `&&`, `\|\|`, `=`, `()`, `.`, and conversion operators are **not** overloadable. | §13, §25 |
+| **F-OP-5** | `operator` declarations may be generic (`operator<T> [](l: List<T>, i: int): T`). Parameters are inferred from the operands, then every substituted operand must match **exactly** (F-OP-1 holds); each type parameter must appear in an operand, and at least one operand must be a type the declaring module owns (E097). Instantiated like `fn<T>`, one clone per type-argument tuple and per declaration. | §6.19 above (`ROADMAP_v2.0.0.md` LEC-006) |
 | **F-STD-1** | Standard-library privileges are **declared in source**, never inferred from a file path. | §15 |
 | **F-STD-2** | The intrinsic/builtin list is **closed and enumerated** in one place. | §15 |
 | **F-STD-3** | `string` remains a NUL-terminated byte pointer. | §15, §25 |
+| **F-PRE-1** | The prelude is nine modules (`int`, `double`, `bool`, `char`, `strings`, `array`, `io`, `math`, `sys`), all in `lib/std/core/`, loaded in every compile and spellable as `m::` in every file with no import. | §6.25 above (owner decision 2026-10-07) |
+| **F-PRE-2** | Every `pub` free function of `io`, `math` and `sys` is callable by its bare name; the other six prelude modules are not flattened; constants stay qualified. | §6.25 above |
+| **F-PRE-3** | A bare call reaches the prelude only if the file's own functions, the module's own and explicit imports have no function of that name; so the prelude never creates an ambiguity and your declaration hides it. | §6.25 above |
+| **F-PRE-4** | In a UFCS exact tie, the candidate declared in the receiver type's own prelude module wins when it is exactly one. | §6.25 above |
 | **F-DIAG-1** | Sandbox verification of SLM suggestions is **never removed**. | §16 |
 | **F-DIAG-2** | An unvalidated suggestion can never clear the display gate. | §16 |
 | **F-DIAG-3** | No new `SLM::ErrorCategory` values without an explicit request. | §16 |
 | **F-OPT-1** | Optimization levels change speed/size/debuggability only — never observable behaviour. | §17 |
 | **F-OPT-2** | Bounds/overflow/div-by-zero checks may be *removed by proof*, never by flag. | §17 |
 | **F-TRACK-1** | Every implementation session updates a change record under `docs/development/`. | §18 |
+| **F-TYPE-1** | A named type's identity is (owning module, name); the main file's module is `main`, never spelled. Bare-spelling ambiguity is an error, not "local wins". | §6.11 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-003, not `ARCHITECTURE_OVERHAUL.md` §4) |
+| **F-HEAP-1** | `heap(expr): &T` is the closed-list intrinsic for safe heap allocation — no `new T` keyword, no grammar change. Always allocates with `T`'s real `TurfTypeDesc`, never `NULL`. | §6.12 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-001) |
+| **F-MEM-5** | A `Stack`-provenance reference (points into the current frame, on any path) can never flow into a `return`, a field of a `Param`/`Heap`-owned object, a collection mutator/`operator[]=`, `heap()`'s own operand, or an error payload, nor be carried there inside a struct or array value — enforced by `EscapePass`, with per-field tracking and one call summary (a function returning a reference parameter unchanged), no lifetime syntax. | §6.13 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-002; amended 2026-10-12) |
+| **F-STR-1** | `s[i]` on a `string` is `char`; a negative `i` counts from the end (`s[-1]` is the last byte). A read panics outside `-strlen(s) <= i < strlen(s)`; a write wraps a negative index the same way and panics only if it is still below zero, by design — no upper bound, since a `string` under construction has no recoverable capacity to check against. | §6.14 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-004; amended 2026-10-12 for #256) |
+| **F-VIS-1** | A top-level declaration and a struct field are private to their module unless prefixed `pub`/`public` (synonyms, one token); enum/error variants and machine states follow their type; operators are visible wherever their operand types are; `export immut` is its own `pub`; a `pub` signature may not mention a private type; UFCS and monomorphized clones never bypass or leak visibility; every visibility diagnostic carries a fix-naming hint. | §6.15 above (post-Overhaul: `ROADMAP_v2.0.0.md` LEC-002) |
+| **F-PKG-1** | Two independently versioned programs: `turf` (Go, the turf-cli repository) is the user's tool and drives; `turfc` compiles and is the tooling interface (users are never asked to type it). They agree on a `major.minor` driver interface reported by `turfc --version` (same major, minor at least what `turf` needs), not on release versions. The compiler owns everything that depends on TurfLang source (import resolution, visibility, capabilities) and never touches the network or the manifest; the CLI owns files, network and reproducibility, never parses TurfLang, and never rewrites a diagnostic; they meet at an explicit package graph. `turf <non-subcommand args>` is `turfc <args>` unchanged. | §6.16 above (owner decisions 2026-09-30: overturning `ROADMAP_v2.0.0.md` LEC-001 entry 1 / DEC-8, then replacing "same version" with the driver interface) |
+| **F-IMP-1** | A file may spell `m::` (call, constant, type, construction, static method) only for a module it imports itself with a plain `import m;`; its own module and the prelude's modules count; another file's import never does. | §6.24 above |
+| **F-IMP-2** | `import m::name;`, `m::[..]` and `m::[*]` bring in those names only, not the `m::` qualifier. | §6.24 above |
+| **F-IMP-3** | Only the spelling of `m::T` is gated; holding and using a value of a type from an unimported module is allowed. Type identity stays global. | §6.24 above |
+| **F-IMP-4** | Methods, UFCS and operators are deliberately not gated by imports (they follow the type; operator coherence). | §6.24 above |
+| **F-IMP-5** | "Module exists but is not imported" is its own diagnostic, with the `import m;` fix in its hint; suggestions still search all loaded modules. | §6.24 above |
+| **F-PKG-2** | A module is (package, path under `src/`). `import foo;` resolves to exactly one of {own module, **direct** dependency's root module, stdlib module}; more than one is a hard error naming every candidate, never silent shadowing, also in single-file mode. Internal modules are package-private. The manifest rejects unknown keys. | §6.16 above (`ROADMAP_v2.0.0.md` LEC-001 entries 2–4, DEC-9) |
+| **F-PKG-3** | Dependencies are `path` or `git` (`tag`/`rev`/`branch`) only; the root's `turf.lock` pins commit + SHA-256, verified on every build; one version per package name; `--offline`, `--locked`. | §6.16 above (`ROADMAP_v2.0.0.md` LEC-001 entry 5) |
+| **F-PKG-4** | A dependency's `unsafe module;` is honored only if the root manifest's `[unsafe] allow` names it (not transitive); the root package's own modules need no listing; the compiler enforces, the CLI only passes the bit. | §6.16 above (`ROADMAP_v2.0.0.md` LEC-001 entry 6) |
+| **F-PAT-1** | A top-level `matches <expr>:` keeps its meaning (equality; a bare identifier is a variable); destructuring forms (`_`, `Name { field: pattern, .. }`, guards `if`) are new syntax where a bare identifier BINDS. Arms are tried in source order, first matching header wins, the subject is evaluated once. `_` alone is reserved; `_name` is an identifier. A struct pattern lists every field or ends in `..`, and reads fields as `.field` does (visibility included). Bindings are immutable and arm-scoped. A guarded arm never counts toward exhaustiveness; enum/machine/`bool` subjects and open error unions are checked. | §6.17 above (`ROADMAP_v2.0.0.md` LEC-003, DEC-10) |
+| **F-ERR-1** | An error variant may declare typed fields (`NotFound(path: string)`), constructed positionally with N arguments (or N+1 with a trailing `string` message) and read back only by patterns (`matches E::V(path, ..):`), never as a field. A bare `E::V` with fields is not a value, only an `==`/`!=` operand or a pattern head. A variant pattern never makes an arm a catch-all; an open error union still needs `otherwise`/`_`. `try <expr>` (prefix keyword, reserved) returns the error unchanged from the enclosing `!V` function, running pending `defer`s, and is an error in `main`, a non-fallible function, a `defer` or on a non-fallible operand. `return f();` of a `!T` from a `!T` function passes the value through. An error value is `{ tag, message, payload }`, the payload a GC-allocated per-variant struct with its own descriptor. | §6.18 above (`ROADMAP_v2.0.0.md` LEC-004, DEC-11, DEC-12) |
+| **F-API-1** | The public items of `lib/std/**` are the 2.x compatibility surface: not removed, renamed, or re-signatured before 3.0; additions allowed in a minor. Locked by `tests/46_stdlib_surface/` + `scripts/check/stdlib_surface_check.sh`. | §6.20 above (`ROADMAP_v2.0.0.md` LEC-007) |
+| **F-API-2** | Public stdlib functions, methods and fields are `snake_case`; no aliases are kept for a renamed name. | §6.20 above |
+| **F-API-3** | Stdlib failure shapes: input/environment failure → `!T` carrying what failed; violated precondition → panic naming the caller's `file:line:`; a question → `bool` or sentinel. A panicking lookup has a predicate to ask first and, where useful, a `try_` twin. | §6.20 above |
+| **F-API-4** | A function that does a job a real program might want is public whether or not the repository uses it; a struct's internals are public only if a real program does something with them; raw C bindings stay private behind checked Turf wrappers. | §6.20 above (owner's rule, 2026-10-01) |
+| **F-CLI-1** | Exit statuses of `turf` and `turfc`: 0 success, 1 an error was reported (compile error, unreadable file, bad manifest, failed fetch), 2 the command line is wrong. `turf run` returns the program's own status. | §6.21 above (owner decision 2026-10-06) |
+| **F-CLI-2** | An unknown option or command is a usage error (2) with a nearest-spelling suggestion; never ignored, never forwarded as a file. | §6.21 above |
+| **F-CLI-3** | Help is `turf help`/`turf <cmd> --help`/`turfc help`; `turfc --help` is deliberately an unknown option pointing at `turfc help`. | §6.21 above (owner decision 2026-10-06) |
+| **F-CLI-4** | `turfc --version` lines 1-2 are the driver-interface contract; later `<key> <value>` lines (`llvm`, `runtime`, `root`) are informational and extendable. | §6.21 above |
+| **F-REL-1** | Release archive layout: `bin/` (turf, turfc, DLLs), `lib/` (libturfrt.a, std), `docs/`, `share/turf/examples`, `LICENSE`, `README.md`; install root = `<bin>/..`; no `libturfrt_asan.a`, no `lib/usr`. | §6.26 above (owner-confirmed 2026-10-07) |
+| **F-REL-2** | `--target` for a non-host machine emits its object, then exits 1 with a TurfLang "cross-linking is not supported in 2.0" diagnostic naming the target and the host; vendor-only differences are the host; cross-linking is F-20. | §6.26 above (D20, owner-confirmed 2026-10-07) |
+| **F-REL-3** | `install.sh` verifies the SHA-256 or installs nothing; one marked, idempotent PATH block; `--no-modify-path`; `--uninstall` removes exactly what it added and never the cache. | §6.26 above (owner-confirmed 2026-10-07) |
+| **F-REL-4** | The archive version is `VERSION`; a tag other than `v<VERSION>`, or a `-dev` VERSION, refuses to package. | §6.26 above (owner-confirmed 2026-10-07) |
+| **F-TEST-1** | A project without a `tests/` directory (or with no tests in it) is an error for `turf test` and `turfc --test`, never a silent pass. | §6.22 above (owner rule, 2026-10-06) |
+| **F-TEST-2** | A test is judged by its file name (plain / `fail_*` / `RUNTIME_ABORT_EXPECTED`, `*_module.tr` skipped) and its `EXPECT-*` markers, by one implementation (`turfc --test`) that `turf test` and `scripts/test_runner.sh` both drive; each test runs in its own directory. | §6.22 above |
+| **F-TEST-3** | In a project a test file is the root package's code: it may be the entry point and imports the package's modules, direct dependencies, stdlib and `tests/` helpers (package-graph `"tests"` key, driver interface 1.3). | §6.22 above |
+| **F-FMT-1** | `turfc --format` verifies every result before writing or reporting it: only whitespace changed, the lexer reads the same tokens, formatting again changes nothing; a result that fails is not written. | §6.23 above |
+| **F-FMT-2** | A source with a lexical error is not formatted: reported with the lexer's reason, left unchanged, exit 1 if the user named it, the rest of the batch still done. A file only found under a directory is skipped (listed, counted, not a failure). | §6.23 above (owner decision 2026-10-06) |
+| **F-FMT-3** | `turfc --format` modes: stdout (one file), `--write` (only files that differ), `--check` (names what would change, exit 1 if any); `--write` with `--check` is a usage error. | §6.23 above |
+| **F-COLL-1** | A collection value (`List`, `Stack`, `Queue`, `Set`, `Map`, and any later one) is a handle to one collection: `=`, passing, returning and storing share it, length included; `.copy()` gives an independent one. | §6.27 above (owner decision 2026-10-12) |
+| **F-COLL-2** | `T::default()` sets every non-null `&U` field reachable by value to a fresh `heap(U::default())`; a type that reaches itself through `&` fields has no default (E147). | §6.27 above (owner decision 2026-10-12) |
+| **F-REFARR-1** | An array of references is spelled `(&N)[k]` (also `(&?N)[k]`, `(&N)[]`); `&N[k]` is a reference to an array. The two print as written. A Stack reference stored into an element of a non-local array is E086. | §6.28 above (owner decision 2026-10-12) |
+| **F-REFARR-2** | A `(&N)[k]` declaration, or one whose element type carries a `&U` inside it, needs an initializer (E128); `(&?N)[k]` starts all-null; an unwritten `string` inside an element reads `""`. | §6.28 above (owner decisions 2026-10-12; amended 2026-10-13) |
 
 ---
 

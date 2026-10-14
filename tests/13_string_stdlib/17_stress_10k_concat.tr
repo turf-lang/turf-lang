@@ -27,7 +27,9 @@ fn main(): int {
     // All characters must be 'a' — spot-check first 10
     mut j: int = 0;
     while j < 10 {
-        test::assert(s[j] == 97, "10k concat: char at position is 'a'");
+        // FDN-004/D17: `s[j]` is `char`; compare against the char literal
+        // directly, no cast needed.
+        test::assert(s[j] == 'a', "10k concat: char at position is 'a'");
         j = j + 1;
     }
 

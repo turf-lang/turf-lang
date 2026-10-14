@@ -1,0 +1,39 @@
+TURF E090 -- AMBIGUOUS MODULE IMPORT:
+
+CAUSE:
+  `import m;` names a module, not a file. The compiler looks for `m.tr` in four
+  places -- the standard library, installed packages (lib/usr), the directory of
+  the file containing the import, and the current directory -- and exactly ONE
+  must hold it. When more than one file answers to the name, this error lists
+  each; no place takes precedence. The same file reached twice (compiling from
+  its own directory) counts as one match. In a project the places are the
+  package's src/ (any depth), its direct dependencies and the standard library
+  (a test also sees `*_module.tr` helpers in tests/).
+
+INCORRECT:
+    // a local list.tr exists next to main.tr, and the standard library has list
+    import list;        // ERROR: Module 'list' is ambiguous: 2 files answer
+
+CORRECT (the local file has a name no other module has):
+    // my_list.tr
+    pub fn size(): int { return 3; }
+
+    // main.tr
+    import my_list;
+    fn main(): int {
+        return my_list::size() - 3;
+    }
+
+FIX:
+  A local file that collides with a standard-library module: rename the local
+  file (e.g. `my_list.tr`) and import it by the new name -- the standard
+  library's name is not changeable. Two of the user's own files colliding:
+  rename or delete one.
+
+NOTE:
+  An import written INSIDE the standard library always means the standard
+  library's module, so a local `list.tr` never breaks a program that does not
+  itself import `list`.
+
+RELATED: E027 (module not found), E091 (module exists but is not importable
+  from this package), E085 (an ambiguous TYPE name).

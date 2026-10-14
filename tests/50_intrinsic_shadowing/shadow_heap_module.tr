@@ -1,0 +1,9 @@
+// Companion for 02_module_function_named_heap.tr: a module that declares its
+// own `heap`.
+pub fn heap(n: int): int {
+    return n * 10;
+}
+
+pub fn typeof(n: int): int {
+    return n * 100;
+}

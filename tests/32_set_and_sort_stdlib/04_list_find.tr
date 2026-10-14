@@ -1,12 +1,8 @@
-// Regression test: list_find() (lib/std/collections/list.tr) -- linear
+// Regression test: List.find() (lib/std/collections/list.tr) -- linear
 // search over an unsorted List<int> for the first element matching an
-// arbitrary predicate.
-//
-// Since STD-003, a thin DEPRECATED wrapper over the real generic
-// `fn<T> List.find(predicate: fn(T): bool): int` method -- see list.tr's
-// own doc comment. New code should prefer `l.find(predicate)` directly.
+// arbitrary predicate. (Was the `list_find` free function until LEC-007
+// removed that wrapper.)
 import list::List;
-import list::list_find;
 import test;
 
 fn is_even(x: int): bool {
@@ -26,8 +22,8 @@ fn main(): int {
     l.push(11);
     l.push(6);
 
-    test::assert(list_find(l, is_even) == 3, "first even number is at index 3 (value 4)");
-    test::assert(list_find(l, is_negative) == -1, "no negative numbers present, must return -1");
+    test::assert(l.find(is_even) == 3, "first even number is at index 3 (value 4)");
+    test::assert(l.find(is_negative) == -1, "no negative numbers present, must return -1");
 
     return 0;
 }

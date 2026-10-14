@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E069
+// EXPECT-DIAG: cycle: A -> B -> A
 // Regression test: an ARRAY of a struct still contains that struct by
 // value -- `B[2]` holds two full copies of `B` directly inside `A`, the
 // same as a plain `b: B` field would, just twice over. An array field must

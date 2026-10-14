@@ -33,6 +33,7 @@
 // error blaming the wrong thing.
 
 import io;
+import list;
 import list::List;
 
 import test;

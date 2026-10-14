@@ -1,0 +1,17 @@
+There is no `main` function
+
+A program has to say where it starts. In Turf that is a function called `main` that returns an `int`:
+
+    fn main(): int {
+        return 0;
+    }
+
+Turf found no such function in the file you compiled, so it has nothing to run.
+
+Usual causes:
+
+- The function is missing, or misspelled (`Main`, `mian`). The name is case sensitive.
+- It isn't the file you meant to compile. A project's entry point is `src/main.tr`.
+- The file is a module -- a library of functions that other files `import` -- and was never meant to run on its own. A module doesn't need a `main`. To check one without running it: `turf check --module file.tr`.
+
+The number `main` returns is the program's exit status; `0` means success.

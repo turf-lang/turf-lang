@@ -1,0 +1,54 @@
+TURF E110 -- SPECIFIC WORD OR SYMBOL EXPECTED:
+
+CAUSE:
+  The parser was inside a construct with a fixed shape and found something other than
+  the next fixed piece; the message names the exact word/symbol wanted. Fixed shapes:
+    for i in 0..10 { ... }               // `in` after the loop variable
+    do { ... } while keep_going;          // `while` after a do-block
+    give a otherwise b                   // `otherwise` after `give`
+    compare x { matches 1: ... }         // `matches` or `otherwise` inside compare
+    value recover run { ... };           // `run`, `produce` or `as` after `recover`
+    extern fn malloc(n: int): ptr;       // `fn` after `extern`
+    export immut MAX: int = 3;           // `immut` after `export`
+    machine Door { Open -> Closed }      // `->` between two states
+
+CORRECT (each fixed shape, written out):
+    error Oops;
+    machine Door {
+        Open -> Closed,
+        Closed -> Open,
+    }
+    export immut MAX: int = 3;
+    extern fn malloc(n: int): ptr;
+
+    fn risky(): !int {
+        return Oops::DEFAULT;
+    }
+
+    fn main(): int {
+        mut keep_going: bool = true;
+        mut x: int = 0;
+        for i in 0..10 {
+            x = x + i;
+        }
+        do {
+            keep_going = false;
+        } while keep_going;
+        mut y: int = x > 3 give 1 otherwise 2;
+        compare y {
+            matches 1:
+                y = 2;
+            done
+            otherwise:
+                y = 3;
+        }
+        mut z: int = risky() recover produce 0;
+        return y - 3 + z;
+    }
+
+FIX:
+  Compare what was written with the shape above and add or fix the piece the message
+  asks for. A lookalike (`then` instead of `{`, `:=` instead of `=`) is the thing to
+  change: Turf has no aliases for them.
+
+RELATED: E103 (unexpected token), E107 (missing brace), E113 (removed syntax).

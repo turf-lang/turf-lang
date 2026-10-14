@@ -70,7 +70,7 @@ fn main(): int {
     // Initialize root, left, right nodes, then wire up their pointer
     // fields via direct assignment. &d1/&l_node/etc. are safe references;
     // assigning one into a raw pointer field is the always-sound
-    // safe-to-raw widening (src/Types.cpp's Rule 2.5), so this needs no
+    // safe-to-raw widening (src/sema/Types.cpp's Rule 2.5), so this needs no
     // `unsafe { }` -- only the struct/constructor declarations above did.
     mut l_node: Node = createNode(5);
     l_node.data = &d1;

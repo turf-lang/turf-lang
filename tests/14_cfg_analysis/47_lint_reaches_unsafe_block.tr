@@ -1,0 +1,15 @@
+// EXPECT-DIAG: This comparison is redundant
+// LEC-005 / INV-LINT-1: nothing in the old lint chain looked inside an
+// `unsafe { }` block, so every check was silently off there.
+fn dead(b: bool): int {
+    unsafe {
+        if (b == true) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+fn main(): int {
+    return 0;
+}

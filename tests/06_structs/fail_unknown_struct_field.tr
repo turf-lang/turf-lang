@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E068
+// EXPECT-DIAG: has no field named
 // Regression test: reading a field that doesn't exist on a struct must be
 // a compile error. Before UnknownStructFieldError existed,
 // TypeChecker::visitFieldAccess() silently left the node's type null for an

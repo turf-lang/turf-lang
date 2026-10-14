@@ -1,0 +1,49 @@
+TURF E095 -- MISPLACED TRY:
+
+CAUSE:
+  `try e` passes the error of `e` (a `!T`) on: if `e` failed, `try` returns that same
+  error value (same variant, payload and message) from the enclosing function after
+  running its pending `defer`s, exactly like `return`; on success it is just the
+  value. It needs:
+    - an enclosing function that returns `!V` (any V) -- `main` returns `int`, so
+      nothing can fail out of it;
+    - a place where `return` is allowed -- NOT inside a `defer`;
+    - a fallible operand -- `try plain()` where `plain` returns `int` has no error
+      to pass on;
+    - a function at all -- not top level.
+  `try` is a reserved word and binds like a prefix operator:
+  `try a() + try b()` is `(try a()) + (try b())`.
+
+INCORRECT:
+    error IOError { NotFound(path: string) }
+    fn open(p: string): !int { ... }
+    fn main(): int {
+        immut n: int = try open("x");   // 'main' returns 'int'
+        return n;
+    }
+
+CORRECT:
+    error IOError { NotFound(path: string) }
+
+    fn open(p: string): !int {
+        return IOError::NotFound(p);
+    }
+
+    fn load(): !int {
+        immut n: int = try open("x");
+        return n;
+    }
+
+    // or handle it where it happens, in a function that is not `!T`:
+    fn main(): int {
+        immut n: int = open("x") recover produce -1;
+        return n + 1;
+    }
+
+FIX:
+  Declare the function `!T` so errors can leave it, handle the error in place with
+  `f() recover as err run { ... }`, or drop the `try` if the operand cannot fail.
+  Inside a `defer`, handle it in the deferred statement:
+  `defer f() recover run { ... };`.
+
+RELATED: E083 (defer control flow), E096 (error payloads), E132 (invalid recover).

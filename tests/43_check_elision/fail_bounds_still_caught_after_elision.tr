@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E001
+// EXPECT-DIAG: You tried to access 'arr[9]'
 // OPT-002 must not disturb ValueRangePass::runOnCFG()'s existing
 // compile-time ArrayBoundsError (E001) diagnostic. markElidableChecks()
 // runs on a completely SEPARATE, earlier throwaway CFG and never raises a

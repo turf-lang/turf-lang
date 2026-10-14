@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E030
+// EXPECT-DIAG: Module 'io' has nothing named 'nosuchfunction'
 // Regression test: `import module::symbol;` naming a symbol that doesn't
 // actually exist in that module must be a clean UnknownModuleSymbolError,
 // not a silent no-op or an error deferred to first use.

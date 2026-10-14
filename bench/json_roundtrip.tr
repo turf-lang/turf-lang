@@ -1,0 +1,40 @@
+// REL-005 benchmark: a JSON round trip.
+//
+// Per round: build an array of objects with JsonValue, stringify it, parse the
+// text back, and read every field. Exercises string building, escaping, the
+// parser and GC-heap trees. Prints a checksum.
+import json;
+
+fn round(items: int, seed: int): int {
+    mut arr: json::JsonValue = json::JsonValue::new_array();
+    for i in 0..items {
+        mut o: json::JsonValue = json::JsonValue::new_object();
+        o.set("id", json::JsonValue::from_number((i + seed) to double));
+        o.set("name", json::JsonValue::from_string("item \"" + (i to string) + "\""));
+        o.set("ok", json::JsonValue::from_bool(i % 2 == 0));
+        arr.push(o);
+    }
+    immut text: string = json::stringify(arr);
+    immut back: json::JsonValue = json::parse(text) recover run {
+        return -1;
+    };
+    mut sum: int = text.length();
+    for i in 0..back.length() {
+        immut o: json::JsonValue = back.at(i);
+        sum = sum + o.get_int("id") + o.get_string("name").length();
+        if (o.get_bool("ok")) {
+            sum += 1;
+        }
+    }
+    return sum;
+}
+
+fn main(): int {
+    immut rounds: int = 25;
+    mut sum: int = 0;
+    for r in 0..rounds {
+        sum = sum + round(2000, r) % 100000;
+    }
+    io::printline(sum);
+    return 0;
+}

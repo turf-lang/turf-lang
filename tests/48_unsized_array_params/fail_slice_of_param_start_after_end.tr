@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E143
+// EXPECT-DIAG: The slice [3..1] of 'int[]' is out of range: the start comes after the end.
+// With no length known (a `T[]`), start > end is still provable when both
+// bounds are constants of the same sign.
+fn f(arr: int[]): int {
+    immut t = arr[3..1];
+    return t.length();
+}
+
+fn main(): int {
+    mut a: int[5] = [1, 2, 3, 4, 5];
+    return f(a);
+}

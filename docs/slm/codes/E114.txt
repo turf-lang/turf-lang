@@ -1,0 +1,22 @@
+TURF E114 -- DUPLICATE MEMBER:
+
+CAUSE:
+  Inside ONE struct, enum, `error` type or `machine`, two members share a name (two
+  fields, two variants, two states, or the same machine transition twice).
+
+INCORRECT:
+    struct User { name: string, name: int }          // `name` twice
+    enum Color { Red, Green, Red }
+    machine Door { Open -> Closed, Open -> Closed }  // same transition twice
+
+CORRECT:
+    struct User { name: string, age: int }
+
+FIX:
+  Rename one member or delete the extra one.
+
+NOT THIS ERROR:
+  Two variables with the same name in one scope, or two top-level declarations of one
+  name, is E033 (duplicate declaration). E114 is only about MEMBERS of one declaration.
+
+RELATED: E033, E068 (unknown struct field).

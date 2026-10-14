@@ -1,0 +1,117 @@
+// FDN-001 (docs/planning/ROADMAP_v2.0.0.md, DEC-5): the other canonical
+// "genuinely needs a nullable pointer" data structure, dynamically sized
+// via `heap()` -- same proof as 05_dynamic_linked_list.tr, different shape
+// (two nullable children, `random::random_int`-keyed instead of a fixed
+// sequence). `random::random_int` is genuinely non-deterministic (it
+// reseeds every call, lib/std/random/random.tr's own doc comment) but that
+// is fine here: the property under test -- an in-order traversal of a BST
+// is non-decreasing, and every inserted node is reachable -- holds for ANY
+// key sequence, sorted or not, so the test needs no fixed expected values.
+import random;
+import test;
+import io;
+
+struct TreeNode {
+    val: int,
+    left: &?TreeNode,
+    right: &?TreeNode
+}
+
+// Accumulates an in-order traversal's running verdict. Passed by `&T`
+// (not by value) so recursive calls all mutate the SAME state -- there is
+// no output-parameter/multi-return syntax in this language, so a struct
+// reference is the idiomatic way one recursive walk reports back a result
+// (the same shape `self`-mutating methods already rely on, LANG-002).
+struct TraverseState {
+    lastVal: int,
+    hasLast: bool,
+    isSorted: bool,
+    count: int
+}
+
+fn makeNode(v: int): &TreeNode {
+    mut n: TreeNode = TreeNode::default();
+    n.val = v;
+    return heap(n);
+}
+
+fn insert(root: &?TreeNode, n: &TreeNode): &?TreeNode {
+    if (root == null) {
+        return n;
+    }
+    if (n.val < root.val) {
+        root.left = insert(root.left, n);
+    } else {
+        root.right = insert(root.right, n);
+    }
+    return root;
+}
+
+fn countNodes(root: &?TreeNode): int {
+    if (root == null) {
+        return 0;
+    }
+    return 1 + countNodes(root.left) + countNodes(root.right);
+}
+
+fn inorder(root: &?TreeNode, state: &TraverseState): void {
+    if (root == null) {
+        return;
+    }
+    inorder(root.left, state);
+    if (state.hasLast && root.val < state.lastVal) {
+        state.isSorted = false;
+    }
+    state.lastVal = root.val;
+    state.hasLast = true;
+    state.count = state.count + 1;
+    inorder(root.right, state);
+}
+
+fn churn(depth: int): void {
+    mut buf: int[64];
+    buf[0] = 0;
+    mut i: int = 0;
+    while i < 64 {
+        buf[i] = i * 3;
+        i = i + 1;
+    }
+    mut total: int = 0;
+    i = 0;
+    while i < 64 {
+        total = total + buf[i];
+        i = i + 1;
+    }
+    test::assert(total == 6048, "churn: stack buffer round-trips correctly");
+    if depth > 0 {
+        churn(depth - 1);
+    }
+}
+
+fn main(): int {
+    immut n: int = 300;
+    mut root: &?TreeNode = null;
+    mut i: int = 0;
+    while i < n {
+        immut key: int = random::random_int(0, 1000000);
+        root = insert(root, makeNode(key));
+        i = i + 1;
+    }
+
+    test::assert(countNodes(root) == n, "all n randomly-keyed nodes are reachable");
+
+    churn(24);
+    gc_collect();
+    churn(24);
+
+    test::assert(countNodes(root) == n, "the whole tree survives a forced collection while retained");
+
+    mut state: TraverseState = TraverseState::default();
+    state.isSorted = true;
+    inorder(root, &state);
+    test::assert(state.count == n, "in-order traversal visits every node exactly once");
+    test::assert(state.isSorted, "in-order traversal of a BST over random keys is non-decreasing");
+
+    io::printline("39/06 PASS: heap()-allocated dynamic binary tree survives collection, in-order sorted");
+    return 0;
+}

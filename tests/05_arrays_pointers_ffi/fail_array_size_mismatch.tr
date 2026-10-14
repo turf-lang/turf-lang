@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E066
+// EXPECT-DIAG: Cannot assign value of type 'int[10]' to variable of type 'int[5]'
 // Regression test: assigning an array of one declared size into a variable
 // declared with a DIFFERENT concrete size must be a type error.
 //

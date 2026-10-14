@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E126
+// EXPECT-DIAG: postfix '++' through 'operator[]' is not supported
 // Negative test: LANG-001 scope boundary -- postfix '++'/'--' THROUGH
 // operator[] (`box[i]++`) is deliberately not supported, same reasoning as
 // fail_operator_compound_assign_via_index.tr. Must be a clean diagnostic,

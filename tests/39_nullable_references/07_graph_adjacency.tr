@@ -1,0 +1,106 @@
+// FDN-001 (docs/planning/ROADMAP_v2.0.0.md, DEC-5): heap()-allocated nodes
+// held in a List<&Node> collection, wired into a cycle (every node has an
+// outgoing edge, and the edges loop back on themselves) -- the shape a
+// tracing collector has to get right that a naive reference-counting
+// scheme could not (a cycle with no external reference is unreachable as a
+// WHOLE, never freed one node at a time by a refcount hitting zero).
+//
+// Adjacency is two parallel List<int> arrays of NODE INDICES (`nextIdx`/
+// `skipIdx`) rather than each GraphNode holding its own `List<&GraphNode>`
+// field -- LEC-006 (this same roadmap, "collection indexing coherence") is
+// the tracked, separate gap that shape would exercise instead of this
+// milestone's own: `operator[]`/`operator[]=` are declared concretely for
+// `List<int>` only (LIMITATIONS.md item 4), so indexing any OTHER `List<T>`
+// falls through to `l.data[i]` direct field access, which needs its own
+// `unsafe { }` (the collection's backing buffer stays a raw `T*` per
+// OVERHAUL_CLOSURE_AUDIT.md's own note) -- confirmed live while drafting
+// this test: `List<&GraphNode>`'s own `[i]` reaches a Codegen assertion
+// ("Base is not an array or pointer"), the identical failure a bare
+// `List<int*>` (no heap() involved at all) also hits, so this is a
+// pre-existing, general, already-roadmapped gap, not something FDN-001
+// introduced or is scoped to fix. `nodes` below (the List<&GraphNode> that
+// actually holds every heap()-allocated node) is read through
+// `nodes.data[i]` inside one `unsafe { }` block for exactly this reason;
+// `nextIdx`/`skipIdx` are `List<int>`, so they use ordinary `[]` freely.
+import list::List;
+import test;
+import io;
+
+struct GraphNode {
+    id: int
+}
+
+fn makeNode(id: int): &GraphNode {
+    mut n: GraphNode = GraphNode::default();
+    n.id = id;
+    return heap(n);
+}
+
+fn churn(depth: int): void {
+    mut buf: int[64];
+    buf[0] = 0;
+    mut i: int = 0;
+    while i < 64 {
+        buf[i] = i * 3;
+        i = i + 1;
+    }
+    mut total: int = 0;
+    i = 0;
+    while i < 64 {
+        total = total + buf[i];
+        i = i + 1;
+    }
+    test::assert(total == 6048, "churn: stack buffer round-trips correctly");
+    if depth > 0 {
+        churn(depth - 1);
+    }
+}
+
+fn main(): int {
+    immut n: int = 40;
+    mut nodes: List<&GraphNode> = List::default();
+    mut nextIdx: List<int> = List::default();
+    mut skipIdx: List<int> = List::default();
+
+    mut i: int = 0;
+    while i < n {
+        nodes.push(makeNode(i));
+        nextIdx.push((i + 1) % n);
+        skipIdx.push((i + 2) % n);
+        i = i + 1;
+    }
+
+    churn(24);
+    gc_collect();
+    churn(24);
+
+    // Reads go through the bounds-checked `List.get()`: `List.data` is private
+    // to list.tr (LEC-002), and this test is about the GC keeping every
+    // `&GraphNode` alive, not about raw-pointer indexing.
+    i = 0;
+    while i < n {
+        mut nd: &GraphNode = nodes.get(i);
+        test::assert(nd.id == i, "each node's id survives collection intact");
+        mut nextNode: &GraphNode = nodes.get(nextIdx[i]);
+        test::assert(nextNode.id == (i + 1) % n, "next-edge neighbor has the expected id");
+        mut skipNode: &GraphNode = nodes.get(skipIdx[i]);
+        test::assert(skipNode.id == (i + 2) % n, "skip-edge neighbor has the expected id");
+        i = i + 1;
+    }
+
+    // Walk the whole cycle starting from node 0 -- n hops on the next-edge
+    // graph must visit every node exactly once and return to node 0.
+    mut visited: int = 0;
+    mut cur: int = 0;
+    i = 0;
+    while i < n {
+        visited = visited + 1;
+        cur = nextIdx[cur];
+        i = i + 1;
+    }
+    test::assert(visited == n, "walked all n nodes around the next-edge cycle");
+    test::assert(cur == 0, "the cycle returns to node 0 after n hops");
+
+    io::printline("39/07 PASS: heap()-allocated cyclic graph survives collection");
+    return 0;
+}

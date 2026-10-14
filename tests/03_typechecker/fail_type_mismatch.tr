@@ -1,7 +1,9 @@
+// EXPECT-DIAG: E057
+// EXPECT-DIAG: cannot apply '+' to 'string' and 'int'
 fn main(): int {
     mut a: string = "hello";
     mut b: int = 5;
-    
+
     mut c: int = a + b;
     return 0;
 }

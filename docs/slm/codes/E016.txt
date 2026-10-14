@@ -14,8 +14,8 @@ CAUSE:
 CORRECT USAGE:
     error GeneralError;
 
-    fn maybeFail(shouldFail: bool): !int {
-        if shouldFail {
+    fn maybe_fail(should_fail: bool): !int {
+        if should_fail {
             return GeneralError::DEFAULT;
         }
         return 99;
@@ -23,12 +23,12 @@ CORRECT USAGE:
 
     fn main(): int {
         // Correct: no binding needed since GeneralError is bare.
-        return maybeFail(true) recover produce -1;
+        return maybe_fail(true) recover produce -1;
     }
 
 INCORRECT:
     fn main(): int {
-        return maybeFail(true) recover as err run {
+        return maybe_fail(true) recover as err run {
             // ERROR: 'recover as err run' can't be used here -- every
             // error this call can fail with is a bare 'error Name;'
             // declaration.

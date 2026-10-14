@@ -1,0 +1,21 @@
+That write would only change a copy
+
+When you write `bs[0]`, the `[]` operator hands back the element *by value*: a copy. Assigning into a field of that copy would change the copy and throw it away, leaving the list untouched. Turf rejects it so the mistake can't silently do nothing:
+
+    import list::List;
+
+    struct Big { a: int }
+
+    fn main(): int {
+        mut bs: List<Big> = List::default();
+        bs[0].a = 50;               // changes a copy of bs[0]
+        return 0;
+    }
+
+Read the element into a variable, change that, and store it back:
+
+    mut e: Big = bs[0];
+    e.a = 50;
+    bs[0] = e;
+
+Writing *through* a pointer or reference element is fine, and so is writing into a nested list (`grid[i][j] = v`), because there the write lands on the real thing.

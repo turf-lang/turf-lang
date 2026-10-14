@@ -1,4 +1,5 @@
 // RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: checkPositive: x must not be negative
 // Companion to 14_fail_not_final_statement.tr: when the test::fail() branch IS
 // actually taken, it must still compile cleanly (see that test's doc
 // comment for the full crash history) AND actually abort at runtime --

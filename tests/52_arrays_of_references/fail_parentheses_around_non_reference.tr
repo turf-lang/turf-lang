@@ -1,0 +1,8 @@
+// EXPECT-DIAG: E109
+// EXPECT-DIAG: Parentheses in a type are only for an array of references
+// Every type but a reference takes `[N]` directly, so parentheses are only
+// for `(&N)[2]`.
+fn main(): int {
+    mut a: (int)[2] = [1, 2];
+    return a[0];
+}

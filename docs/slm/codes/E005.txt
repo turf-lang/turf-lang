@@ -22,12 +22,13 @@ INCORRECT:
 
 WHAT THIS ERROR IS NOT:
   Not about array SIZE -- a for-each over an unsized array parameter
-  (`arr: int[]`) is a different, more specific error (see E006). This
-  one fires when the target isn't an array at all, of any size.
+  (`arr: int[]`) is legal (E006, which used to refuse it, is retired).
+  This one fires when the target isn't an array at all, of any size.
 
 FIX:
-  Only use `for x in y` when `y` is a real `T[N]` array. To iterate a
+  Only use `for x in y` when `y` is an array (`T[N]`, or a `T[]`
+  parameter). To iterate a
   `List<T>`, drive a range-based for-loop off its own `.length()`
-  instead (`for i in 0..myList.length() step i += 1 { ... }`), popping
+  instead (`for i in 0..my_list.length() step i += 1 { ... }`), popping
   or otherwise accessing elements through the list's own methods -- a
   bare for-each does not work on `List<T>`.

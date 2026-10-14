@@ -1,0 +1,912 @@
+name: Build release archives
+
+# REL-008 stage 1. The four release builds, packaged and inspected, as one
+# reusable workflow so that the tag release (release.yml) and the every-push CI
+# (release-shaped-ci.yml) run the same steps: CI that built something else would
+# prove nothing about the release. A tagged run checks the pushed tag against
+# VERSION; any other run packages whatever VERSION says (a -dev version) and
+# publishes nothing.
+on:
+  workflow_call:
+    inputs:
+      allowlist:
+        description: >-
+          What a failed dependency check (scripts/release/release_deps_check.sh) does.
+          'enforce' fails the job; 'report' prints the same report and carries
+          on. The check fails today by design (the archive's turfc links LLVM
+          dynamically; REL-008 stages 2-4 fix that), so a caller that must
+          still be able to ship passes 'report' until stage 4 lands.
+        type: string
+        default: enforce
+
+jobs:
+  # Linux (Ubuntu/Debian) - x86_64
+  linux-x86_64:
+    runs-on: ubuntu-latest
+    # The archive runs on the glibc of the system it is built on and anything
+    # newer, so it is built in the OLDEST image the release supports, not on the
+    # runner itself (ubuntu-latest's glibc 2.39 gave a turfc that needed
+    # GLIBC_2.38 and did not start on Debian 12 or Ubuntu 22.04). install.sh and
+    # release_deps_check.sh name the resulting floor (GLIBC_FLOOR): change them
+    # together.
+    container: ubuntu:22.04
+    steps:
+      # A bare image: no sudo (the job is root), no compiler, no git. sudo is
+      # installed so the steps below read the same as on a runner.
+      - name: Prepare the container
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y sudo wget curl gnupg lsb-release ca-certificates \
+            build-essential cmake git file binutils python3 time software-properties-common
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global user.email ci@turf-lang.invalid
+          git config --global user.name CI
+          git config --global init.defaultBranch main
+
+      # No submodules: the release build has no --smart runtime (llama.cpp).
+      - uses: actions/checkout@v4
+
+      - name: Cache LLVM
+        id: cache-llvm
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/lib/llvm-22
+            /usr/include/llvm-22
+            /usr/include/llvm-c-22
+          # "jammy": the cache is the container's LLVM, not the runner's.
+          key: llvm-22-jammy-${{ runner.os }}-${{ runner.arch }}-v1
+
+      - name: Install LLVM
+        if: steps.cache-llvm.outputs.cache-hit != 'true'
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 22
+          sudo apt-get install -y llvm-22-dev cmake libomp-dev
+      - run: echo "/usr/lib/llvm-22/bin" >> $GITHUB_PATH
+
+      # REL-008 stage 2: the static archives the self-contained link takes
+      # zlib, zstd and terminfo from (libz.a, libzstd.a, libtinfo.a). Not in the
+      # LLVM cache above, so installed on every run.
+      #
+      # REL-008 stage 3: lld's static libraries and headers (liblld-22 /
+      # liblld-22-dev). The cache restores files but not the apt.llvm.org
+      # repository, so it is registered here, and llvm-22-dev is installed again
+      # in the same command so lld and the LLVM headers are always one version
+      # (LLDConfig.cmake asks for exactly the LLVM it was built with; a cached
+      # llvm-22-dev older than the repository's lld would fail that).
+      - name: Install lld, and static system libraries
+        run: |
+          CODENAME=$(lsb_release -cs)
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
+          echo "deb http://apt.llvm.org/${CODENAME}/ llvm-toolchain-${CODENAME}-22 main" | sudo tee /etc/apt/sources.list.d/llvm-22.list
+          sudo apt-get update
+          sudo apt-get install -y llvm-22-dev liblld-22-dev zlib1g-dev libzstd-dev libncurses-dev
+
+      # Go, before the CMake build, so it builds build/turf (the turf front end,
+      # LEC-001) beside build/turfc; the archive ships both.
+      # The front end's source is the turf-cli repository at the commit
+      # TURF_CLI_REVISION pins, checked out beside this one; CMake and the
+      # smoke tests find it through TURF_CLI_DIR.
+      - name: Pinned turf-cli revision
+        id: turf-cli-rev
+        shell: bash
+        run: echo "rev=$(tr -d '[:space:]' < TURF_CLI_REVISION)" >> "$GITHUB_OUTPUT"
+      - name: turf front end source (turf-cli)
+        uses: actions/checkout@v4
+        with:
+          repository: turf-lang/turf-cli
+          ref: ${{ steps.turf-cli-rev.outputs.rev }}
+          path: turf-cli
+      - name: Point CMake and the smoke tests at turf-cli
+        shell: bash
+        run: echo "TURF_CLI_DIR=${{ github.workspace }}/turf-cli" >> "$GITHUB_ENV"
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: turf-cli/go.mod
+
+      # --release-static: static LLVM and C++ runtime, no --smart model runtime
+      # (so no llama.cpp submodule, no OpenMP).
+      # --embed-lld (REL-008 stage 3): Linux only for now; the Windows and macOS
+      # drivers arrive with their C runtimes (stages 5 and 6).
+      - name: Build Turf
+        run: |
+          chmod +x scripts/cmake_build.sh
+          ./scripts/cmake_build.sh --release-static --embed-lld
+
+      # The embedded linker against a stand-in C runtime from this runner's
+      # static glibc: which programs are linked in-process and which go to cc,
+      # what a broken runtime reports. (The archive's own runtime is checked
+      # below, after packaging.)
+      - name: Embedded linker smoke test (stand-in runtime)
+        run: CI=1 ./scripts/smoke/bundled_link_smoke.sh
+
+      # REL-008 stage 4: the C runtime the archive carries, which the embedded
+      # linker links programs against instead of running cc. musl built from a
+      # pinned, hash-checked source tarball, libturfrt compiled against it.
+      # Built before Package: package_release.sh ships lib/rt/ when it exists.
+      - name: Build the bundled C runtime (musl)
+        run: ./scripts/release/build_bundled_runtime.sh --platform linux-x86_64
+
+      # The archive ships turf from turf-cli at the pinned TURF_CLI_REVISION.
+      - name: turf front end comes from turf-cli
+        run: CI=1 ./scripts/smoke/cli_source_smoke.sh
+
+      - name: Package
+        id: package
+        uses: ./.github/actions/package-release
+        with:
+          platform-suffix: linux-x86_64
+          archive-format: tar.gz
+
+      # The archive's own turfc and runtime, not a stand-in: runtime-only
+      # programs link in-process (a decoy cc on PATH is never run), the result
+      # is static, and a host-name lookup works, which static glibc cannot do.
+      - name: Embedded linker smoke test (the archive's runtime)
+        run: CI=1 ./scripts/smoke/bundled_link_smoke.sh --archive "${{ steps.package.outputs.archive-path }}"
+
+      # REL-003: install the archive that is about to be published with
+      # install.sh and use it (layout, checksum, PATH block, turf new/run/
+      # build, uninstall). A release that fails this is not uploaded.
+      - name: Release archive smoke test
+        run: CI=1 ./scripts/smoke/release_smoke.sh --archive "${{ steps.package.outputs.archive-path }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64
+          path: |
+            turf-*-linux-x86_64.tar.gz
+            turf-*-linux-x86_64.tar.gz.sha256
+
+      # REL-008 stage 1; last, so the smoke test and the upload always happen.
+      - name: Archive dependency check (REL-008)
+        continue-on-error: ${{ inputs.allowlist != 'enforce' }}
+        run: ./scripts/release/release_deps_check.sh --archive "${{ steps.package.outputs.archive-path }}"
+
+      # ---- the smart archive ---------------------------------------------------
+      # The same compiler with --smart's model runtime in it (llama.cpp, built
+      # for a release: no OpenMP, no -march=native), packaged as
+      # <platform>-smart with grammars/ and an EMPTY models/ folder: no model is
+      # shipped, the user puts one .gguf there (scripts/slm/models_README.txt). A
+      # second build directory, after the plain archive is uploaded, so nothing
+      # here can change or delay it.
+      - name: Fetch llama.cpp (the smart build only)
+        run: git submodule update --init --depth 1 external/llama.cpp
+
+      - name: Build Turf with --smart's runtime
+        run: |
+          ./scripts/cmake_build.sh --release-static --embed-lld --smart --build-dir=build-smart
+
+      # The archive ships turf from turf-cli at the pinned TURF_CLI_REVISION.
+      - name: turf front end comes from turf-cli (smart)
+        run: CI=1 ./scripts/smoke/cli_source_smoke.sh --build-dir=build-smart
+
+      - name: Package (smart)
+        id: package-smart
+        uses: ./.github/actions/package-release
+        with:
+          platform-suffix: linux-x86_64
+          archive-format: tar.gz
+          smart: "true"
+          build-dir: build-smart
+
+      # What the plain archive's smoke checks, plus: the models folder, the notes
+      # for no model and for two, and that a model survives reinstall and uninstall.
+      - name: Release archive smoke test (smart)
+        run: CI=1 ./scripts/smoke/release_smoke.sh --archive "${{ steps.package-smart.outputs.archive-path }}"
+
+      - name: Upload artifact (smart)
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64-smart
+          path: |
+            turf-*-linux-x86_64-smart.tar.gz
+            turf-*-linux-x86_64-smart.tar.gz.sha256
+
+      - name: Archive dependency check (smart)
+        continue-on-error: ${{ inputs.allowlist != 'enforce' }}
+        run: ./scripts/release/release_deps_check.sh --archive "${{ steps.package-smart.outputs.archive-path }}"
+
+  # Linux (Ubuntu/Debian) - arm64. The x86_64 job on GitHub's arm64 runner: the
+  # same packages (apt.llvm.org publishes arm64), the same scripts, and the
+  # bundled runtime is musl built natively for aarch64. First verified by hand
+  # in an arm64 Ubuntu 24.04 container (REL-008.md, "Linux arm64").
+  linux-arm64:
+    runs-on: ubuntu-24.04-arm
+    # The archive runs on the glibc of the system it is built on and anything
+    # newer, so it is built in the OLDEST image the release supports, not on the
+    # runner itself (ubuntu-latest's glibc 2.39 gave a turfc that needed
+    # GLIBC_2.38 and did not start on Debian 12 or Ubuntu 22.04). install.sh's
+    # GLIBC_FLOOR names the same floor: change them together.
+    container: ubuntu:22.04
+    steps:
+      # A bare image: no sudo (the job is root), no compiler, no git. sudo is
+      # installed so the steps below read the same as on a runner.
+      - name: Prepare the container
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y sudo wget curl gnupg lsb-release ca-certificates \
+            build-essential cmake git file binutils python3 time software-properties-common
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global user.email ci@turf-lang.invalid
+          git config --global user.name CI
+          git config --global init.defaultBranch main
+
+      # No submodules: the release build has no --smart runtime (llama.cpp).
+      - uses: actions/checkout@v4
+
+      - name: Cache LLVM
+        id: cache-llvm
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/lib/llvm-22
+            /usr/include/llvm-22
+            /usr/include/llvm-c-22
+          # runner.arch in the key: runner.os is "Linux" for the x86_64 job too.
+          key: llvm-22-jammy-${{ runner.os }}-${{ runner.arch }}-v1
+
+      - name: Install LLVM
+        if: steps.cache-llvm.outputs.cache-hit != 'true'
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 22
+          sudo apt-get install -y llvm-22-dev cmake libomp-dev
+      - run: echo "/usr/lib/llvm-22/bin" >> $GITHUB_PATH
+
+      # REL-008 stage 2: the static archives the self-contained link takes
+      # zlib, zstd and terminfo from (libz.a, libzstd.a, libtinfo.a). Not in the
+      # LLVM cache above, so installed on every run.
+      #
+      # REL-008 stage 3: lld's static libraries and headers (liblld-22 /
+      # liblld-22-dev). The cache restores files but not the apt.llvm.org
+      # repository, so it is registered here, and llvm-22-dev is installed again
+      # in the same command so lld and the LLVM headers are always one version
+      # (LLDConfig.cmake asks for exactly the LLVM it was built with; a cached
+      # llvm-22-dev older than the repository's lld would fail that).
+      - name: Install lld, and static system libraries
+        run: |
+          CODENAME=$(lsb_release -cs)
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
+          echo "deb http://apt.llvm.org/${CODENAME}/ llvm-toolchain-${CODENAME}-22 main" | sudo tee /etc/apt/sources.list.d/llvm-22.list
+          sudo apt-get update
+          sudo apt-get install -y llvm-22-dev liblld-22-dev zlib1g-dev libzstd-dev libncurses-dev
+
+      # Go, before the CMake build, so it builds build/turf (the turf front end,
+      # LEC-001) beside build/turfc; the archive ships both.
+      # The front end's source is the turf-cli repository at the commit
+      # TURF_CLI_REVISION pins, checked out beside this one; CMake and the
+      # smoke tests find it through TURF_CLI_DIR.
+      - name: Pinned turf-cli revision
+        id: turf-cli-rev
+        shell: bash
+        run: echo "rev=$(tr -d '[:space:]' < TURF_CLI_REVISION)" >> "$GITHUB_OUTPUT"
+      - name: turf front end source (turf-cli)
+        uses: actions/checkout@v4
+        with:
+          repository: turf-lang/turf-cli
+          ref: ${{ steps.turf-cli-rev.outputs.rev }}
+          path: turf-cli
+      - name: Point CMake and the smoke tests at turf-cli
+        shell: bash
+        run: echo "TURF_CLI_DIR=${{ github.workspace }}/turf-cli" >> "$GITHUB_ENV"
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: turf-cli/go.mod
+
+      # --release-static: static LLVM and C++ runtime, no --smart model runtime
+      # (so no llama.cpp submodule, no OpenMP).
+      # --embed-lld (REL-008 stage 3): Linux only for now; the Windows and macOS
+      # drivers arrive with their C runtimes (stages 5 and 6).
+      - name: Build Turf
+        run: |
+          chmod +x scripts/cmake_build.sh
+          ./scripts/cmake_build.sh --release-static --embed-lld
+
+      # The embedded linker against a stand-in C runtime from this runner's
+      # static glibc: which programs are linked in-process and which go to cc,
+      # what a broken runtime reports. (The archive's own runtime is checked
+      # below, after packaging.)
+      - name: Embedded linker smoke test (stand-in runtime)
+        run: CI=1 ./scripts/smoke/bundled_link_smoke.sh
+
+      # REL-008 stage 4: the C runtime the archive carries, which the embedded
+      # linker links programs against instead of running cc. musl built from a
+      # pinned, hash-checked source tarball, libturfrt compiled against it.
+      # Built before Package: package_release.sh ships lib/rt/ when it exists.
+      - name: Build the bundled C runtime (musl)
+        run: ./scripts/release/build_bundled_runtime.sh --platform linux-arm64
+
+      # The archive ships turf from turf-cli at the pinned TURF_CLI_REVISION.
+      - name: turf front end comes from turf-cli
+        run: CI=1 ./scripts/smoke/cli_source_smoke.sh
+
+      - name: Package
+        id: package
+        uses: ./.github/actions/package-release
+        with:
+          platform-suffix: linux-arm64
+          archive-format: tar.gz
+
+      # The archive's own turfc and runtime, not a stand-in: runtime-only
+      # programs link in-process (a decoy cc on PATH is never run), the result
+      # is static, and a host-name lookup works, which static glibc cannot do.
+      - name: Embedded linker smoke test (the archive's runtime)
+        run: CI=1 ./scripts/smoke/bundled_link_smoke.sh --archive "${{ steps.package.outputs.archive-path }}"
+
+      # REL-003: install the archive that is about to be published with
+      # install.sh and use it (layout, checksum, PATH block, turf new/run/
+      # build, uninstall). A release that fails this is not uploaded.
+      - name: Release archive smoke test
+        run: CI=1 ./scripts/smoke/release_smoke.sh --archive "${{ steps.package.outputs.archive-path }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm64
+          path: |
+            turf-*-linux-arm64.tar.gz
+            turf-*-linux-arm64.tar.gz.sha256
+
+      # REL-008 stage 1; last, so the smoke test and the upload always happen.
+      - name: Archive dependency check (REL-008)
+        continue-on-error: ${{ inputs.allowlist != 'enforce' }}
+        run: ./scripts/release/release_deps_check.sh --archive "${{ steps.package.outputs.archive-path }}"
+
+      # ---- the smart archive ---------------------------------------------------
+      # The same compiler with --smart's model runtime in it (llama.cpp, built
+      # for a release: no OpenMP, no -march=native), packaged as
+      # <platform>-smart with grammars/ and an EMPTY models/ folder: no model is
+      # shipped, the user puts one .gguf there (scripts/slm/models_README.txt). A
+      # second build directory, after the plain archive is uploaded, so nothing
+      # here can change or delay it.
+      - name: Fetch llama.cpp (the smart build only)
+        run: git submodule update --init --depth 1 external/llama.cpp
+
+      - name: Build Turf with --smart's runtime
+        run: |
+          ./scripts/cmake_build.sh --release-static --embed-lld --smart --build-dir=build-smart
+
+      # The archive ships turf from turf-cli at the pinned TURF_CLI_REVISION.
+      - name: turf front end comes from turf-cli (smart)
+        run: CI=1 ./scripts/smoke/cli_source_smoke.sh --build-dir=build-smart
+
+      - name: Package (smart)
+        id: package-smart
+        uses: ./.github/actions/package-release
+        with:
+          platform-suffix: linux-arm64
+          archive-format: tar.gz
+          smart: "true"
+          build-dir: build-smart
+
+      # What the plain archive's smoke checks, plus: the models folder, the notes
+      # for no model and for two, and that a model survives reinstall and uninstall.
+      - name: Release archive smoke test (smart)
+        run: CI=1 ./scripts/smoke/release_smoke.sh --archive "${{ steps.package-smart.outputs.archive-path }}"
+
+      - name: Upload artifact (smart)
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm64-smart
+          path: |
+            turf-*-linux-arm64-smart.tar.gz
+            turf-*-linux-arm64-smart.tar.gz.sha256
+
+      - name: Archive dependency check (smart)
+        continue-on-error: ${{ inputs.allowlist != 'enforce' }}
+        run: ./scripts/release/release_deps_check.sh --archive "${{ steps.package-smart.outputs.archive-path }}"
+
+  # Linux (Arch) - REMOVED by REL-008 stage 2. It existed because the Ubuntu
+  # archive's turfc linked Ubuntu's *shared* libLLVM, which an Arch machine
+  # (built without every target) could not load, so a second archive was built
+  # inside an archlinux container against Arch's own LLVM. The linux-x86_64
+  # archive's turfc now carries its LLVM (static), so one archive runs on both
+  # and install.sh never picked this one anyway. Arch's LLVM ships no static
+  # libraries, so it could not be made self-contained here. The last revision
+  # that had the job is in git history (build-archives.yml before this change).
+
+  # macOS - ARM64 (Apple Silicon)
+  macos-arm64:
+    runs-on: macos-latest
+    steps:
+      # No submodules: the release build has no --smart runtime (llama.cpp).
+      - uses: actions/checkout@v4
+
+      # LLVM 22, not the latest: `brew install llvm` is 23, which the compiler
+      # does not build against (v2.0.0-rc1's macOS build failed on it).
+      # llvm@22 is keg-only, so CMake is pointed at it explicitly; PATH alone
+      # could still find another LLVM first. zstd is for its static libzstd.a
+      # (REL-008 stage 2: LLVM's zstd must not be Homebrew's dylib).
+      - name: Install LLVM
+        run: |
+          brew install llvm@22 cmake zstd
+          LLVM_PREFIX="$(brew --prefix llvm@22)"
+          echo "$LLVM_PREFIX/bin" >> $GITHUB_PATH
+          echo "LLVM_PREFIX=$LLVM_PREFIX" >> $GITHUB_ENV
+          "$LLVM_PREFIX/bin/llvm-config" --version | grep -q '^22\.' || { echo "::error::LLVM is not 22"; exit 1; }
+          echo "LLVM_VERSION=$("$LLVM_PREFIX/bin/llvm-config" --version)" >> $GITHUB_ENV
+
+      # lld, as STATIC archives, for the embedded linker (REL-008 stages 3/4).
+      # Homebrew's lld@22 ships only liblld*.dylib (its bottle was unpacked to
+      # check): linking those made turfc need /opt/homebrew/opt/lld@22/lib/...
+      # at run time, which the dependency check caught on the first macOS run.
+      # So lld is built from LLVM's own pinned source (scripts/release/build_static_lld.sh,
+      # ~10 minutes), and cached; the key covers the script (its pinned hash and
+      # flags) and the LLVM it is built against.
+      - name: Cache static lld
+        id: cache-lld
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/lld
+          key: static-lld-macos-arm64-${{ hashFiles('scripts/release/build_static_lld.sh') }}-${{ env.LLVM_VERSION }}
+
+      - name: Build static lld
+        if: steps.cache-lld.outputs.cache-hit != 'true'
+        run: ./scripts/release/build_static_lld.sh --llvm-dir "$LLVM_PREFIX/lib/cmake/llvm" --prefix "${{ runner.temp }}/lld"
+
+      - name: Point CMake at the static lld
+        run: echo "CMAKE_PREFIX_PATH=$LLVM_PREFIX:${{ runner.temp }}/lld" >> $GITHUB_ENV
+
+      # The front end's source is the turf-cli repository at the commit
+      # TURF_CLI_REVISION pins, checked out beside this one; CMake and the
+      # smoke tests find it through TURF_CLI_DIR.
+      - name: Pinned turf-cli revision
+        id: turf-cli-rev
+        shell: bash
+        run: echo "rev=$(tr -d '[:space:]' < TURF_CLI_REVISION)" >> "$GITHUB_OUTPUT"
+      - name: turf front end source (turf-cli)
+        uses: actions/checkout@v4
+        with:
+          repository: turf-lang/turf-cli
+          ref: ${{ steps.turf-cli-rev.outputs.rev }}
+          path: turf-cli
+      - name: Point CMake and the smoke tests at turf-cli
+        shell: bash
+        run: echo "TURF_CLI_DIR=${{ github.workspace }}/turf-cli" >> "$GITHUB_ENV"
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: turf-cli/go.mod
+
+      - name: Build Turf
+        run: |
+          export PATH="$(brew --prefix llvm@22)/bin:$PATH"
+          chmod +x scripts/cmake_build.sh
+          ./scripts/cmake_build.sh --release-static --embed-lld
+
+      # REL-008 stage 4: the bundled runtime: a stub libSystem.tbd written by the
+      # script (no Apple file) and libturfrt for this machine. The embedded
+      # linker's Mach-O driver links against it; first real run on a Mac.
+      - name: Build the bundled C runtime (libSystem stub)
+        run: ./scripts/release/build_bundled_runtime.sh --platform macos-arm64
+
+      # REL-008 stage 6: the whole suite, GC stress and the smoke scripts on macOS, with
+      # the compiler just built (programs linked by the embedded Mach-O linker against
+      # the bundled stub). Enforcing, as Windows's is. The later two steps run even when
+      # an earlier one fails (`!cancelled()`), so one run lists every macOS failure (the
+      # log artifact). The exact by-hand version of this was REL-008 stage 6
+      # (docs/development/changes/REL-008.md).
+      - name: Test suite on macOS (REL-008 stage 6)
+        env:
+          TURF_TEST_TIMEOUT_SEC: "60"
+        run: |
+          set -o pipefail
+          ./build/turfc --test tests --jobs 3 \
+            --diag-register tests/DIAGNOSTIC_GAPS.txt \
+            --exclude custom --exclude 99_known_bugs 2>&1 | tee macos-suite.log
+
+      - name: GC stress and validate on macOS
+        if: ${{ !cancelled() }}
+        env:
+          TURF_TEST_TIMEOUT_SEC: "120"
+        run: |
+          set -o pipefail
+          { TURF_GC_STRESS=1 ./build/turfc --test tests/41_gc
+            TURF_GC_VALIDATE=1 ./build/turfc --test tests/41_gc
+            TURF_GC_STRESS=1 TURF_GC_VALIDATE=1 ./build/turfc --test tests/41_gc; } 2>&1 | tee macos-gc.log
+
+      - name: Smoke scripts on macOS
+        if: ${{ !cancelled() }}
+        run: |
+          fail=0
+          for s in cli_smoke project_smoke test_cmd_smoke fmt_smoke package_graph_smoke git_deps_smoke \
+                   examples_smoke pattern_warnings_smoke migrate_pub_smoke opt_levels_smoke runtime_smoke \
+                   mem_smoke gc_smoke debuginfo_smoke std002_caller_location_smoke; do
+            echo "=== $s"
+            CI=1 ./scripts/smoke/$s.sh 2>&1 | tee -a macos-smokes.log || true
+            [ "${PIPESTATUS[0]}" = 0 ] || { echo "::error::$s failed on macOS"; fail=1; }
+          done
+          exit $fail
+
+      - name: Summarise the macOS runs
+        if: always()
+        run: |
+          for f in macos-suite.log macos-gc.log; do
+            [ -f "$f" ] && { echo "--- $f"; grep -E "^(Total Tests|Passed|Failed):" "$f" || true; grep -E "\.\.\. " "$f" | grep -v PASS | head -80 || true; }
+          done
+          true
+
+      - name: Upload the macOS suite logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-suite-logs
+          path: |
+            macos-suite.log
+            macos-gc.log
+            macos-smokes.log
+          if-no-files-found: ignore
+
+      # The archive ships turf from turf-cli at the pinned TURF_CLI_REVISION.
+      - name: turf front end comes from turf-cli
+        run: CI=1 ./scripts/smoke/cli_source_smoke.sh
+
+      - name: Package
+        id: package
+        uses: ./.github/actions/package-release
+        with:
+          platform-suffix: macos-arm64
+          archive-format: tar.gz
+
+      # The archive's own turfc and runtime: a runtime-only program links
+      # in-process (a decoy cc first on PATH is never run) and runs.
+      - name: Embedded linker smoke test (the archive's runtime)
+        run: CI=1 ./scripts/smoke/bundled_link_smoke.sh --archive "${{ steps.package.outputs.archive-path }}"
+
+      # REL-003: as for linux-x86_64. Written without a macOS machine; this
+      # runner is where the script's Darwin branches (bash login shell,
+      # ~/.bash_profile, BSD tools) get their first real run.
+      - name: Release archive smoke test
+        run: CI=1 ./scripts/smoke/release_smoke.sh --archive "${{ steps.package.outputs.archive-path }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64
+          path: |
+            turf-*-macos-arm64.tar.gz
+            turf-*-macos-arm64.tar.gz.sha256
+
+      # otool -L on the runner: the first real run of the macOS branch of the
+      # check, written without a Mac like the smoke test's Darwin branches.
+      - name: Archive dependency check (REL-008)
+        continue-on-error: ${{ inputs.allowlist != 'enforce' }}
+        run: ./scripts/release/release_deps_check.sh --archive "${{ steps.package.outputs.archive-path }}"
+
+      # ---- the smart archive ---------------------------------------------------
+      # The same compiler with --smart's model runtime in it (llama.cpp, built
+      # for a release: no OpenMP, no -march=native), packaged as
+      # <platform>-smart with grammars/ and an EMPTY models/ folder: no model is
+      # shipped, the user puts one .gguf there (scripts/slm/models_README.txt). A
+      # second build directory, after the plain archive is uploaded, so nothing
+      # here can change or delay it.
+      - name: Fetch llama.cpp (the smart build only)
+        run: git submodule update --init --depth 1 external/llama.cpp
+
+      - name: Build Turf with --smart's runtime
+        run: |
+          export PATH="$(brew --prefix llvm@22)/bin:$PATH"
+          ./scripts/cmake_build.sh --release-static --embed-lld --smart --build-dir=build-smart
+
+      # The archive ships turf from turf-cli at the pinned TURF_CLI_REVISION.
+      - name: turf front end comes from turf-cli (smart)
+        run: CI=1 ./scripts/smoke/cli_source_smoke.sh --build-dir=build-smart
+
+      - name: Package (smart)
+        id: package-smart
+        uses: ./.github/actions/package-release
+        with:
+          platform-suffix: macos-arm64
+          archive-format: tar.gz
+          smart: "true"
+          build-dir: build-smart
+
+      # What the plain archive's smoke checks, plus: the models folder, the notes
+      # for no model and for two, and that a model survives reinstall and uninstall.
+      - name: Release archive smoke test (smart)
+        run: CI=1 ./scripts/smoke/release_smoke.sh --archive "${{ steps.package-smart.outputs.archive-path }}"
+
+      - name: Upload artifact (smart)
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64-smart
+          path: |
+            turf-*-macos-arm64-smart.tar.gz
+            turf-*-macos-arm64-smart.tar.gz.sha256
+
+      - name: Archive dependency check (smart)
+        continue-on-error: ${{ inputs.allowlist != 'enforce' }}
+        run: ./scripts/release/release_deps_check.sh --archive "${{ steps.package-smart.outputs.archive-path }}"
+
+  # macOS - x86_64 (Intel) -- DROPPED. `macos-13` (the last Intel-hosted
+  # runner label GitHub offers) queued for 9+ hours without ever starting
+  # during the v1.0.0-rc1 dry run while every other platform completed in
+  # minutes -- GitHub has been winding down Intel macOS runner capacity,
+  # and this job is no longer reliably schedulable at all, not just slow.
+  # macOS - x86_64 (via Rosetta 2 on an ARM runner) is a possible future
+  # replacement if Intel Mac support is ever needed again, but that's a
+  # deliberate follow-up, not a like-for-like swap done here.
+
+  # Windows - x86_64 (via MSYS2 MinGW)
+  windows-x86_64:
+    runs-on: windows-latest
+    steps:
+      # No submodules: the release build has no --smart runtime (llama.cpp).
+      - uses: actions/checkout@v4
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          # UCRT64, not MINGW64 (REL-008 stage 4): turfc.exe and the runtime it
+          # ships are built against the Universal C Runtime (Windows 10+), not
+          # the old msvcrt.dll, which the dependency check rejects.
+          msystem: UCRT64
+          update: true
+          # setup-go puts Go on the WINDOWS path, which a default
+          # (`path-type: minimal`) MSYS2 shell does not see, so CMake printed
+          # "Go not found: build/turf ... will not be built" in v2.0.0-rc1's
+          # Windows job. `inherit` appends the Windows PATH after MSYS2's own,
+          # so the MINGW64 toolchain still wins and `go` is found.
+          path-type: inherit
+          # No OpenMP any more: it was only for --smart's model runtime, which
+          # the release build leaves out (REL-008 stage 2). zlib and zstd are
+          # here for their static archives (libz.a, libzstd.a), which the
+          # self-contained turfc.exe links instead of their DLLs.
+          # lld: the static lld archives and headers the embedded linker is built from.
+          # diffutils (cmp) and gdb: the bash smokes use both, and without MSYS2's
+          # own the inherited Windows PATH supplies ones that cannot open MSYS2's
+          # /tmp paths (cmp -s then reports every pair of files as different).
+          install: mingw-w64-ucrt-x86_64-llvm mingw-w64-ucrt-x86_64-clang mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-zlib mingw-w64-ucrt-x86_64-zstd mingw-w64-ucrt-x86_64-lld diffutils mingw-w64-ucrt-x86_64-gdb
+
+      # The front end's source is the turf-cli repository at the commit
+      # TURF_CLI_REVISION pins, checked out beside this one; CMake and the
+      # smoke tests find it through TURF_CLI_DIR.
+      - name: Pinned turf-cli revision
+        id: turf-cli-rev
+        shell: bash
+        run: echo "rev=$(tr -d '[:space:]' < TURF_CLI_REVISION)" >> "$GITHUB_OUTPUT"
+      - name: turf front end source (turf-cli)
+        uses: actions/checkout@v4
+        with:
+          repository: turf-lang/turf-cli
+          ref: ${{ steps.turf-cli-rev.outputs.rev }}
+          path: turf-cli
+      - name: Point CMake and the smoke tests at turf-cli
+        shell: bash
+        run: echo "TURF_CLI_DIR=${{ github.workspace }}/turf-cli" >> "$GITHUB_ENV"
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: turf-cli/go.mod
+
+      - name: Build Turf
+        shell: msys2 {0}
+        run: |
+          chmod +x scripts/cmake_build.sh
+          ./scripts/cmake_build.sh --release-static --embed-lld
+
+      # CMake only builds build/turf.exe if it can find `go` from inside the
+      # MSYS2 shell (`path-type: inherit` above is what lets it). Never ship an
+      # archive without the front end: if this fires, fix the Go lookup, do not
+      # drop the check.
+      - name: Check the turf front end was built
+        shell: msys2 {0}
+        run: |
+          test -f build/turf.exe || { echo "::error::build/turf.exe was not built: CMake did not find Go inside the MSYS2 shell"; exit 1; }
+
+      # No "collect the MinGW DLLs" step any more (REL-008 stage 2): turfc.exe is
+      # linked statically, so bin/ holds turf.exe and turfc.exe and nothing
+      # else. Bundling whatever `ldd` listed would hide a regression; if a DLL
+      # comes back, the dependency check below names it and fails.
+      #
+      # REL-008 stage 4: the bundled C runtime, taken from this UCRT64
+      # toolchain's MinGW-w64 CRT (crt2.o, libmingw32.a, libucrt.a, the Win32
+      # import libraries) with libturfrt compiled by it. Built before Package:
+      # package_release.sh ships lib/rt/ when it exists.
+      - name: Build the bundled C runtime (MinGW-w64 UCRT)
+        shell: msys2 {0}
+        run: ./scripts/release/build_bundled_runtime.sh --platform windows-x86_64
+
+      # REL-008 stage 5: the whole test suite on Windows, with the compiler just
+      # built (so, because lib/rt now exists, linked by the embedded lld against
+      # the bundled CRT). `turfc --test` runs natively here (its Windows process
+      # runner is src/tooling/TestRunner.cpp's); the flags are scripts/test_runner.sh's.
+      # ENFORCING since 2026-10-11, when the same command passed 1191/1191 on a
+      # real Windows 11 machine (also at -O0 and with TURF_GC_STRESS=1): a Windows
+      # regression now fails the commit that caused it, like Linux's does. The log
+      # artifact below still lists every failure of a run at once. The generous
+      # per-test timeout is for process start-up on a runner with a virus scanner,
+      # not for hangs. (Not yet seen green ON THIS RUNNER: Actions minutes ran out
+      # before the first run; a failure here that does not reproduce locally is
+      # about the runner, and the log says which test.)
+      - name: Test suite on Windows (REL-008 stage 5)
+        shell: msys2 {0}
+        env:
+          TURF_TEST_TIMEOUT_SEC: "60"
+        run: |
+          set -o pipefail
+          ./build/turfc.exe --test tests \
+            --diag-register tests/DIAGNOSTIC_GAPS.txt \
+            --exclude custom --exclude 99_known_bugs 2>&1 | tee windows-suite.log
+          # (set -o pipefail: the step fails when the suite does)
+
+      - name: Summarise the Windows suite run
+        if: always()
+        shell: msys2 {0}
+        run: |
+          [ -f windows-suite.log ] || { echo "no windows-suite.log"; exit 0; }
+          grep -E "^(Total Tests|Passed|Failed):" windows-suite.log || true
+          echo "--- failures by headline ---"
+          grep -E "\.\.\. " windows-suite.log | grep -vE "PASS" | sed -E 's/^\[[^]]*\] //' | head -150 || true
+
+      - name: Upload the Windows suite log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-suite-log
+          path: windows-suite.log
+          if-no-files-found: ignore
+
+      # The GC on Windows: Win64 register capture and stack bounds, under a collection
+      # on every allocation and with the heap validated after each one.
+      - name: GC stress and validate on Windows (tests/41_gc)
+        if: ${{ !cancelled() }}
+        shell: msys2 {0}
+        env:
+          TURF_TEST_TIMEOUT_SEC: "120"
+          TURF_GC_STRESS: "1"
+          TURF_GC_VALIDATE: "1"
+        run: ./build/turfc.exe --test tests/41_gc
+
+      # The smoke scripts, on Windows. Each bash script has a PowerShell twin
+      # (scripts/smoke/*_smoke.ps1: same checks, the Windows spelling of the host parts, every
+      # skipped check named); windows_smokes.ps1 runs all eight and prints one table.
+      # Run from the MSYS2 shell so gcc is on PATH for runtime_smoke's C API check.
+      - name: Smoke scripts on Windows (PowerShell twins)
+        if: ${{ !cancelled() }}
+        shell: msys2 {0}
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/smoke/windows_smokes.ps1
+
+      # The bash smoke scripts that need nothing POSIX-only run as they are.
+      - name: Smoke scripts on Windows (bash)
+        if: ${{ !cancelled() }}
+        shell: msys2 {0}
+        run: |
+          type -a cmp gdb llvm-dwarfdump || true
+          fail=0
+          for s in package_graph_smoke examples_smoke pattern_warnings_smoke migrate_pub_smoke \
+                   debuginfo_smoke mem_smoke gc_smoke test_cmd_smoke fmt_smoke; do
+            echo "=== $s"
+            CI=1 ./scripts/smoke/$s.sh || { echo "::error::$s failed"; fail=1; }
+          done
+          exit $fail
+
+      # The archive ships turf from turf-cli at the pinned TURF_CLI_REVISION.
+      - name: turf front end comes from turf-cli
+        shell: msys2 {0}
+        run: CI=1 ./scripts/smoke/cli_source_smoke.sh
+
+      - name: Package
+        id: package
+        uses: ./.github/actions/package-release
+        with:
+          platform-suffix: windows-x86_64
+          archive-format: zip
+
+      # The Windows archive has no install smoke yet (the Windows port is
+      # REL-008 stage 5), so unpack it and use turfc.exe directly. --version is
+      # the stage 2 requirement (the self-contained binary loads and answers) and
+      # must show the embedded linker and a usable bundled runtime.
+      - name: Run the archived turfc.exe
+        shell: msys2 {0}
+        run: |
+          # The archive is in the workspace root (cwd). Not the action's
+          # archive-path output: that is an absolute /d/a/... path, which the
+          # Windows 7z cannot read (v2.0.0-dev's first run of this step failed
+          # on exactly that), so use the file name and give 7z a Windows path.
+          z=$(echo turf-v*-windows-x86_64.zip)
+          rm -rf win_smoke && mkdir win_smoke && cd win_smoke
+          7z x -y "$(cygpath -w "$PWD/../$z")" > /dev/null || unzip -q "../$z"
+          d=$(echo turf-v*-windows-x86_64)
+          "$d/bin/turfc.exe" --version | tee version.out
+          grep -q '^linker embedded-lld' version.out
+          grep -q '^bundled-runtime ' version.out
+          "$d/bin/turf.exe" version || true
+
+      # Stage 4's Windows deliverable: a program that names no C library beyond
+      # the runtime is linked by the embedded lld against the archive's own CRT,
+      # with NO gcc reachable. A decoy gcc.cmd first on PATH records that it
+      # was run (the CRT's spawn finds .cmd) and fails, so the check observes
+      # that gcc was not used. Compiling and *running* it is also the first
+      # time a Turf program has been linked and run on Windows by anything here.
+      - name: Compile and run hello with the archived turfc.exe, no gcc (REL-008 stage 4)
+        shell: msys2 {0}
+        run: |
+          cd win_smoke
+          d=$(echo turf-v*-windows-x86_64)
+          mkdir decoy
+          printf '@echo off\r\necho %%* >> "%s"\r\nexit /b 99\r\n' "$(cygpath -w "$PWD/decoy.log")" > decoy/gcc.cmd
+          printf 'import math;\n\nfn main(): int {\n    printline("hello windows");\n    printline(math::sqrt(16.0));\n    return 0;\n}\n' > hello.tr
+          PATH="$PWD/decoy:$PATH" "$d/bin/turfc.exe" hello.tr -o hello.exe
+          test ! -s decoy.log || { echo "::error::the system gcc was run:"; cat decoy.log; exit 1; }
+          ./hello.exe | tee hello.out
+          grep -q "hello windows" hello.out
+          grep -q "^4" hello.out
+
+      # REL-008 stage 7+8, Windows: install.ps1 installs the archive just built into a
+      # throwaway prefix (its PATH edit goes to a throwaway registry key, never the
+      # runner's real user PATH), then the installed turf is used on a PATH of the
+      # Windows system directories plus the install - no gcc, git or MSYS2 on it. It is
+      # run by Windows PowerShell directly, not from the msys2 shell, so that shell's
+      # tools cannot be on the PATH under test. Never run on a runner before this step.
+      - name: Install the archive with install.ps1 and use it on a clean PATH
+        shell: pwsh
+        run: |
+          $z = (Get-ChildItem -Path . -Filter 'turf-v*-windows-x86_64.zip' | Select-Object -First 1).FullName
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\smoke\release_smoke.ps1 -Archive $z
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: |
+            turf-*-windows-x86_64.zip
+            turf-*-windows-x86_64.zip.sha256
+
+      # The self-containment check (REL-008 stage 1) runs last so that the
+      # smoke test and the upload above always happen: what it reports is a
+      # property of the archive, not a reason to hide the archive.
+      - name: Archive dependency check (REL-008)
+        continue-on-error: ${{ inputs.allowlist != 'enforce' }}
+        shell: msys2 {0}
+        run: ./scripts/release/release_deps_check.sh --archive "${{ steps.package.outputs.archive-path }}"
+
+      # ---- the smart archive ---------------------------------------------------
+      # The same compiler with --smart's model runtime in it (llama.cpp, built
+      # for a release: no OpenMP, no -march=native), packaged as
+      # <platform>-smart with grammars/ and an EMPTY models/ folder: no model is
+      # shipped, the user puts one .gguf there (scripts/slm/models_README.txt). A
+      # second build directory, after the plain archive is uploaded, so nothing
+      # here can change or delay it. Required, as on the other platforms: 2.0.0
+      # ships both archives on every platform.
+      - name: Fetch llama.cpp (the smart build only)
+        run: git submodule update --init --depth 1 external/llama.cpp
+
+      - name: Build Turf with --smart's runtime
+        shell: msys2 {0}
+        run: |
+          ./scripts/cmake_build.sh --release-static --embed-lld --smart --build-dir=build-smart
+
+      # The archive ships turf from turf-cli at the pinned TURF_CLI_REVISION.
+      - name: turf front end comes from turf-cli (smart)
+        shell: msys2 {0}
+        run: CI=1 ./scripts/smoke/cli_source_smoke.sh --build-dir=build-smart
+
+      - name: Package (smart)
+        id: package-smart
+        uses: ./.github/actions/package-release
+        with:
+          platform-suffix: windows-x86_64
+          archive-format: zip
+          smart: "true"
+          build-dir: build-smart
+
+      - name: Upload artifact (smart)
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64-smart
+          path: |
+            turf-*-windows-x86_64-smart.zip
+            turf-*-windows-x86_64-smart.zip.sha256
+
+      - name: Archive dependency check (smart)
+        shell: msys2 {0}
+        continue-on-error: ${{ inputs.allowlist != 'enforce' }}
+        run: ./scripts/release/release_deps_check.sh --archive "${{ steps.package-smart.outputs.archive-path }}"

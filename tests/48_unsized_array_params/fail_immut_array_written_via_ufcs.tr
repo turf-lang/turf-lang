@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E141
+// EXPECT-DIAG: 'a' is immutable, but 'zero' writes to the array it is given as 'arr'.
+// Issue #260: the same rule for a UFCS receiver (`a.zero()` is `zero(a)`).
+fn zero(arr: int[]): void {
+    arr[0] = 0;
+}
+
+fn main(): int {
+    immut a: int[2] = [1, 2];
+    a.zero();
+    return 0;
+}

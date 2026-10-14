@@ -59,7 +59,7 @@ import strings;
 // Linux-numbered socket constants) -- declared `int32`, not Turf's 64-bit
 // `int`, for the same real-ABI-width reason strings.tr's strcmp/toupper/
 // tolower bindings are (see strings.tr's own comment on that).
-extern fn mkdir(path: string, mode: int32): int32;
+pub extern fn mkdir(path: string, mode: int32): int32;
 // remove()/rmdir() both return a real (32-bit) C `int`, same reasoning.
 extern fn remove(path: string): int32;
 extern fn rmdir(path: string): int32;
@@ -72,24 +72,13 @@ extern fn closedir(d: ptr): int32;
 
 // ─── Turf-level helpers (path strings) ──────────────────────────────────────
 
-// last_index_of_char: the byte offset of the last occurrence of the byte
-// `ch` in `s`, or -1 if it doesn't appear. Internal helper -- strings.tr
-// only has a forward `index_of`, and dirname/basename/extension below all
-// need to search from the end.
-fn last_index_of_char(s: string, ch: int): int {
-    mut i: int = strings::length(s) - 1;
-    while i >= 0 {
-        if s[i] == ch {
-            return i;
-        }
-        i = i - 1;
-    }
-    return 0 - 1;
-}
+// dirname/basename/extension below all search from the end of the path, via
+// strings::last_index_of (this module used to carry a private
+// `last_index_of_char` for that; LEC-007 made the general version public).
 
 // join: joins path segments `a` and `b` with exactly one `/` between them --
 // no `//` if `a` already ends in `/`, no missing separator if it doesn't.
-fn join(a: string, b: string): string {
+pub fn join(a: string, b: string): string {
     if strings::ends_with(a, "/") {
         return a + b;
     }
@@ -99,8 +88,8 @@ fn join(a: string, b: string): string {
 // dirname: everything before the last `/` in `path`. Returns "." if `path`
 // contains no `/` at all, or "/" if the last `/` is the very first byte
 // (e.g. "/file.txt" -> "/", matching POSIX dirname's own root-path case).
-fn dirname(path: string): string {
-    immut idx: int = last_index_of_char(path, 47); // '/'
+pub fn dirname(path: string): string {
+    immut idx: int = strings::last_index_of(path, "/");
     if idx == (0 - 1) {
         return ".";
     }
@@ -112,8 +101,8 @@ fn dirname(path: string): string {
 
 // basename: everything after the last `/` in `path`. Returns `path`
 // unchanged if it contains no `/` at all.
-fn basename(path: string): string {
-    immut idx: int = last_index_of_char(path, 47); // '/'
+pub fn basename(path: string): string {
+    immut idx: int = strings::last_index_of(path, "/");
     if idx == (0 - 1) {
         return path;
     }
@@ -124,9 +113,9 @@ fn basename(path: string): string {
 // there is none. A leading dot with no other dot (a "hidden file" name like
 // ".gitignore") is NOT treated as an extension -- only a `.` that isn't the
 // very first byte of the basename counts.
-fn extension(path: string): string {
+pub fn extension(path: string): string {
     immut b: string = basename(path);
-    immut idx: int = last_index_of_char(b, 46); // '.'
+    immut idx: int = strings::last_index_of(b, ".");
     if idx == (0 - 1) || idx == 0 {
         return "";
     }
@@ -134,35 +123,55 @@ fn extension(path: string): string {
 }
 
 // is_absolute: true if `path` starts with `/`.
-fn is_absolute(path: string): bool {
+pub fn is_absolute(path: string): bool {
     return strings::starts_with(path, "/");
 }
 
 // ─── Turf-level helpers (directories) ───────────────────────────────────────
 
+// One variant per operation, each carrying the path it failed on -- the same
+// shape as io::FileError, so `matches fs::FsError::MkdirFailed(p):` reads the
+// path and `err == fs::FsError::MkdirFailed` still compares the variant.
+// These three returned a bare `bool` until LEC-007; the reasoning is on
+// io::write_string, which had the same defect.
+pub error FsError {
+    MkdirFailed(path: string),
+    RemoveFileFailed(path: string),
+    RemoveDirFailed(path: string),
+}
+
 // mkdir: creates the directory at `path` with permissions 0755
-// (rwxr-xr-x). Returns true on success, false on failure (e.g. the parent
-// doesn't exist, or `path` already exists).
-fn mkdir(path: string): bool {
-    return mkdir(path, 493 to int32) == (0 to int32); // 493 == 0755 octal
+// (rwxr-xr-x). Fails with FsError::MkdirFailed(path) if the parent doesn't
+// exist, `path` already exists, or the process lacks permission.
+pub fn mkdir(path: string): !void {
+    if mkdir(path, 493 to int32) != (0 to int32) { // 493 == 0755 octal
+        return FsError::MkdirFailed(path, "could not create directory '" + path + "'");
+    }
+    return;
 }
 
-// remove_file: deletes the file at `path`. Returns true on success. Does
-// NOT remove directories -- use remove_dir for those.
-fn remove_file(path: string): bool {
-    return remove(path) == (0 to int32);
+// remove_file: deletes the file at `path`. Does NOT remove directories --
+// use remove_dir for those. Fails with FsError::RemoveFileFailed(path).
+pub fn remove_file(path: string): !void {
+    if remove(path) != (0 to int32) {
+        return FsError::RemoveFileFailed(path, "could not remove file '" + path + "'");
+    }
+    return;
 }
 
-// remove_dir: removes the EMPTY directory at `path`. Returns true on
-// success, false on failure -- including when the directory is not empty.
-fn remove_dir(path: string): bool {
-    return rmdir(path) == (0 to int32);
+// remove_dir: removes the EMPTY directory at `path`. Fails with
+// FsError::RemoveDirFailed(path) -- including when the directory is not empty.
+pub fn remove_dir(path: string): !void {
+    if rmdir(path) != (0 to int32) {
+        return FsError::RemoveDirFailed(path, "could not remove directory '" + path + "'");
+    }
+    return;
 }
 
 // is_dir: true if `path` names a directory that can be opened. Uses the
 // opendir()/closedir() trick (see this file's own doc comment above) --
 // never needs to know `DIR*`'s real layout.
-fn is_dir(path: string): bool {
+pub fn is_dir(path: string): bool {
     mut d: ptr = opendir(path);
     if d == null {
         return false;

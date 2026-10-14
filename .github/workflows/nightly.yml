@@ -1,0 +1,74 @@
+name: Nightly (the expensive test axes)
+# REL-004 stage 5 (docs/planning/ROADMAP_v2.0.0.md Part VII). test.yml runs on
+# every push and holds to a time budget; the test-suite axes that cost minutes
+# each (GC stress and root validation at the optimization levels test.yml
+# skips) run here once a day, 00:00 IST (owner decision 2026-10-14). The long
+# crash fuzz runs in turf-fuzz's weekly workflow, against the sanitized
+# compiler built from master; test.yml's job `compiler_sanitizers` keeps a
+# short pass per push.
+on:
+  schedule:
+    - cron: "30 18 * * *"  # 18:30 UTC = 00:00 IST
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  # GC stress forces a collection on every allocation: the strongest test of
+  # root finding, and ~4 minutes a run, so test.yml keeps it to -O0 and -O2.
+  # Here are the rest of the axes: the other optimization levels, and -g.
+  axes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Cache LLVM
+        id: cache-llvm
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/lib/llvm-22
+            /usr/include/llvm-22
+            /usr/include/llvm-c-22
+          key: llvm-22-${{ runner.os }}-v1
+      - name: Install LLVM
+        if: steps.cache-llvm.outputs.cache-hit != 'true'
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 22
+          sudo apt-get install -y llvm-22-dev cmake
+      - run: echo "/usr/lib/llvm-22/bin" >> $GITHUB_PATH
+      - name: Install ccache
+        run: sudo apt-get install -y ccache
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-axes-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            ccache-axes-${{ runner.os }}-
+      - name: Build Turf Compiler
+        run: |
+          export CC="ccache gcc"
+          export CXX="ccache g++"
+          ./scripts/cmake_build.sh --release --no-smart
+      - name: GC stress -- collect on every allocation (-O1)
+        run: TURF_GC_STRESS=1 TURF_TEST_TIMEOUT_SEC=900 ./scripts/test_runner.sh -O1
+      - name: GC stress -- collect on every allocation (-O3)
+        run: TURF_GC_STRESS=1 TURF_TEST_TIMEOUT_SEC=900 ./scripts/test_runner.sh -O3
+      - name: GC stress -- collect on every allocation (-Os)
+        run: TURF_GC_STRESS=1 TURF_TEST_TIMEOUT_SEC=900 ./scripts/test_runner.sh -Os
+      - name: GC stress -- collect on every allocation (-O0 -g)
+        run: TURF_GC_STRESS=1 TURF_TEST_TIMEOUT_SEC=900 ./scripts/test_runner.sh -O0 -g
+      - name: Root-finding cross-validation at -O1 and -O3
+        run: |
+          for O in -O1 -O3; do
+            TURF_GC_VALIDATE=1 ./scripts/test_runner.sh $O 2>&1 | tee /tmp/gc_validate.log
+            test "${PIPESTATUS[0]}" -eq 0 || exit 1
+            if grep -q "TURF_GC_VALIDATE:" /tmp/gc_validate.log; then
+              echo "::error::TURF_GC_VALIDATE reported a finding at $O -- see the log above."
+              exit 1
+            fi
+          done

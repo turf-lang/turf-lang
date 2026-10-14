@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E076
+// EXPECT-DIAG: not representable in type 'int'
 // SEM-002 (FREEZE.md §6.2 row 3): the negative-direction mirror of
 // fail_int_literal_too_large.tr -- unary '-' folds into the literal first
 // (so this is genuinely checking a value one past INT64_MIN, not a

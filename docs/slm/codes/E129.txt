@@ -1,0 +1,32 @@
+TURF E129 -- NOTHING TO INFER A TYPE FROM:
+
+CAUSE:
+  `guess` means "use the type of the value on the right". The value given has no usable
+  type: `null` (could be a reference to anything), the result of a `void` call (no
+  value), or a generic constructor with no type argument (`List::default()`). Also raised at
+  a generic function declaration whose type parameter appears in no parameter
+  (`fn<T> make(): T`): type arguments are only inferred from arguments.
+
+INCORRECT:
+    mut a: guess = null;
+    mut b: guess = print_it();        // print_it() returns void
+    mut c: guess = List::default();   // which kind of List?
+
+CORRECT:
+    import list::List;
+
+    struct Point { x: int, y: int }
+
+    fn print_it(): void { }
+
+    mut a: &?Point = null;
+    mut c: List<int> = List::default();
+    print_it();                       // call a void function as a statement
+
+FIX:
+  For a generic function, use the type parameter in a parameter type or remove it.
+  Otherwise state the type explicitly. For the `void` case the function may have been meant to
+  return something; otherwise just call it as a statement.
+
+RELATED: E128 (missing initializer), E067 (void value used), E138 (missing type
+  arguments).

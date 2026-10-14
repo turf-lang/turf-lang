@@ -1,0 +1,17 @@
+An `error` declaration mixes two forms
+
+An `error` type can be written in two ways, and a declaration has to pick one.
+
+A bare error, with no variants -- it ends with a semicolon:
+
+    error NotFound;
+
+An error with named variants -- it uses braces and no semicolon in front of them:
+
+    error IOError { NotFound, PermissionDenied, Closed }
+
+Writing the bare `;` form and then also a `{ ... }` variant list right after it is ambiguous -- is the type finished, or isn't it? -- so Turf rejects it:
+
+    error NotFound; { Missing }
+
+Keep whichever you meant and delete the other.

@@ -1,0 +1,37 @@
+TURF E149 -- CONVERSION CAN NEVER SUCCEED:
+
+CAUSE:
+  A string LITERAL is converted with `to int`, `to double` or `to SomeEnum`, and the text
+  is not a valid value, so the conversion would always panic at runtime. The whole string
+  must be the value: int is an optional '-' and digits in range; double adds one '.' and an
+  optional exponent (1e3); an enum needs a variant name with the exact case.
+
+INCORRECT:
+    mut n: int = "abc" to int;
+    mut m: int = "12abc" to int;           // trailing text
+    mut d: double = "1.2.3" to double;
+    mut c: Color = "Purple" to Color;      // no such variant
+
+CORRECT:
+    enum Color {
+        Red,
+        Green
+    }
+
+    fn main(): int {
+        mut n: int = 42;
+        mut m: int = "12" to int;
+        mut d: double = 1.5;
+        mut c: Color = Color::Green;
+        printline(n + m);
+        printline(d);
+        printline(c to string);
+        return 0;
+    }
+
+FIX:
+  Write the value itself (`42`, `1.5`, `Color::Green`), or fix the text so all of it is
+  the value. For input text use strings::parse_int / strings::parse_double and recover.
+
+RELATED: E127 (int literal that is no enum variant), E134 (a conversion that does not
+  exist between two types).

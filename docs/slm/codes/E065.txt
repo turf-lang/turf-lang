@@ -5,9 +5,9 @@ CAUSE:
   `string`. Only a fixed, small set of types can be converted this way.
 
 SUPPORTED CONVERSIONS:
-    intExpr to string    - turns a whole number into text
-    doubleExpr to string - turns a decimal number into text
-    boolExpr to string   - gives you "true" or "false"
+    int_expr to string    - turns a whole number into text
+    double_expr to string - turns a decimal number into text
+    bool_expr to string   - gives you "true" or "false"
 
 CORRECT USAGE:
     mut s1: string = 42 to string;         // "42"
@@ -15,7 +15,7 @@ CORRECT USAGE:
     mut s3: string = true to string;       // "true"
 
 INCORRECT:
-    mut bad: string = myStruct to string;
+    mut bad: string = my_struct to string;
     // ERROR: I can't convert 'MyStruct' to a string!
 
 FIX:

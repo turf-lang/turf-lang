@@ -1,12 +1,14 @@
+// EXPECT-DIAG: E058
+// EXPECT-DIAG: 'otherwise' must be the last arm
 import io;
 
 fn main(): int {
     mut x: int = 1;
     compare x {
         otherwise:
-            x = 0;
+        x = 0;
         matches 1:
-            x = 1;
+        x = 1;
         done
     }
     return 0;

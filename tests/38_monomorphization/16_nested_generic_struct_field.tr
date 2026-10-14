@@ -11,7 +11,15 @@ struct Big { a: int, b: int, c: int }
 struct Holder { items: List<List<Big> >, n: int }
 
 fn main(): int {
-    // Holder = { items: List<List<Big>> (24 bytes: data ptr + len + cap), n: int (8 bytes) } = 32
-    test::assert(sizeof(Holder) == 32, "nested List<List<Big>> field must get a real layout too");
+    // Holder = { items: List<List<Big>> (8 bytes: the header handle, LEC-009), n: int (8 bytes) } = 16
+    test::assert(sizeof(Holder) == 16, "nested List<List<Big>> field must get a real layout too");
+
+    // Each level's header (ListHeader<List<Big>>, ListHeader<Big>) needs a
+    // real layout of its own once a value is built.
+    mut h: Holder = Holder::default();
+    mut inner: List<Big> = List::default();
+    inner.push(Big::default());
+    h.items.push(inner);
+    test::assert(h.items[0].length() == 1, "both header levels work");
     return 0;
 }

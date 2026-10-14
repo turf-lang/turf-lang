@@ -15,7 +15,7 @@ CORRECT:
 
 FIX:
   Check the argument types and count against the module's real declared
-  overloads (grep the module's own `.tr` file, e.g. `lib/std/math/`, for
+  overloads (grep the module's own `.tr` file, e.g. `lib/std/core/`, for
   every `fn` named `abs` to see the exact set of overloads that exist).
   Pass an argument of one of those exact types, or convert your value
   first (e.g. `to double`) if the type you have isn't directly supported.

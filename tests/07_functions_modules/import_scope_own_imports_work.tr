@@ -1,0 +1,17 @@
+// LEC-008 (F-IMP-1, F-IMP-2): what a file imports itself works, in every form
+// and in combination -- a plain import for the qualifier, a symbol import for
+// the bare name, both for both. The prelude's modules need no import at all.
+import import_scope_inner_module;
+import import_scope_inner_module::InnerBox;
+import import_scope_outer_module;
+
+import test;
+fn main(): int {
+    immut a: InnerBox = import_scope_inner_module::make_inner(2);
+    immut b: import_scope_inner_module::InnerBox = import_scope_outer_module::outer_make(3);
+    test::assert(a.get() + b.get() == 5, "bare and qualified spellings name the same type");
+    test::assert(import_scope_inner_module::INNER_LIMIT == 41, "a constant through its own import");
+    test::assert(import_scope_outer_module::outer_value() == 11, "a module that imports others works");
+    test::assert(strings::length("abc") == 3, "a prelude module needs no import");
+    return 0;
+}

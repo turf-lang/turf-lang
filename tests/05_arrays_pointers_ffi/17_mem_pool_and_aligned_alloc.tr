@@ -1,5 +1,5 @@
 // Regression test: lib/std/mem.tr's newer additions -- alloc_aligned,
-// usable_size, and Pool<T>/free_pool (bulk-free allocation tracking) --
+// usable_size, and Pool/free_pool (bulk-free allocation tracking) --
 // exercised end to end. See 14_mem_stdlib.tr for the original module's
 // core allocator wrappers.
 
@@ -24,12 +24,9 @@ fn main(): int {
         mem::free(aligned);
     }
 
-    // Pool<T>: track a batch of allocations, then bulk-free them all in
-    // one call via the non-generic free_pool() (see mem.tr's own doc
-    // comment on Pool.free_all()'s absence -- a generic method can't cast
-    // its own erased T to void*, so bulk-freeing is a plain function
-    // taking a concrete Pool<void*> instead).
-    mut pool: mem::Pool<void*> = mem::Pool::default();
+    // Pool: track a batch of allocations, then bulk-free them all in one
+    // call with free_pool().
+    mut pool: mem::Pool = mem::Pool::default();
     test::assert(pool.length() == 0, "a fresh pool tracks nothing");
 
     mut i: int = 0;
@@ -41,6 +38,6 @@ fn main(): int {
 
     mem::free_pool(pool);
 
-    io::printline("mem.tr Pool<T> and aligned-allocation additions work");
+    io::printline("mem.tr Pool and aligned-allocation additions work");
     return 0;
 }

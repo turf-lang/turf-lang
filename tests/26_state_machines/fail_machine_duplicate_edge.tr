@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E114
+// EXPECT-DIAG: Machine 'ConnectionState' already declares a transition from 'Idle' to 'Connecting'
 // Test: the same transition edge declared twice in one machine block is a
 // parse-time error, mirroring ParseEnumDecl()'s duplicate-variant check.
 

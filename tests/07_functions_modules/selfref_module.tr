@@ -8,10 +8,10 @@
 // Named `..._module.tr` so scripts/test_runner.sh's `grep -v "_module.tr"`
 // skips it as a standalone test entry point; it only exists to be imported.
 
-fn innerDouble(x: int): int {
+pub fn innerDouble(x: int): int {
     return x * 2;
 }
 
-fn outerQuadruple(x: int): int {
+pub fn outerQuadruple(x: int): int {
     return innerDouble(innerDouble(x));
 }

@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E056
+// EXPECT-DIAG: Argument 1 to 'gc_alloc' is a byte count and expects 'int', got 'double'
+// Regression test (turf-fuzz): gc_alloc's byte count was not type-checked, so a
+// double reached the runtime's 64-bit size parameter and the IR was invalid
+// (an internal compiler error) instead of a diagnostic.
+fn main(): int {
+    unsafe {
+        mut _p: void* = gc_alloc(0.0);
+    }
+    return 0;
+}

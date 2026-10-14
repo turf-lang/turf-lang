@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E082
+// EXPECT-DIAG: Cannot copy the value out of this '&?Node' value
+// Only a variable can be null-checked, so a `&?T` field is copied out by way
+// of one.
+struct Node { v: int, next: &?Node }
+
+fn f(n: &Node): int {
+    immut c: Node = n.next to Node;
+    return c.v;
+}
+
+fn main(): int { return 0; }

@@ -33,7 +33,7 @@ import list::List;
 
 // ─── C bindings ───────────────────────────────────────────────────────────────
 
-extern fn strlen(s: string): int;
+pub extern fn strlen(s: string): int;
 extern fn strstr(haystack: string, needle: string): string;
 extern fn strncpy(dst: string, src: string, n: int): string;
 extern fn strcpy(dst: string, src: string): string;
@@ -63,7 +63,7 @@ extern fn tolower(c: int32): int32;
 // be Codegen's hardcoded EmitStringConcat -- the gc_alloc'd buffer is never
 // explicitly freed by this function, but that is no longer the
 // TURF-MEMLEAK tradeoff it once was: as of MEM-002
-// (docs/planning/ARCHITECTURE_OVERHAUL.md §8), this is a real GC-heap
+// (docs/archive/ARCHITECTURE_OVERHAUL.md §8), this is a real GC-heap
 // allocation (`turf_rt_alloc`, not `malloc`) that the collector reclaims
 // once nothing reachable still points to it, the same as any other
 // GC-heap value -- there is nothing left for this function itself to free.
@@ -104,14 +104,142 @@ operator >=(a: string, b: string): bool {
 
 // length: returns the byte-length of string `s`.
 // The `lengthof(s)` intrinsic this replaced has been removed entirely.
-fn length(s: string): int {
+pub fn length(s: string): int {
     return strlen(s);
+}
+
+// ─── byte_at_unchecked ──────────────────────────────────────────────────────
+
+// byte_at_unchecked: like `s[i]`, but skips the bounds check FDN-004 added to
+// plain string indexing (`s[i]` now calls `strlen(s)` on every access --
+// ROADMAP_v2.0.0.md FDN-004's own design notes: correct, but O(n) per access,
+// so a loop touching every byte is O(n^2)). An escape hatch for a caller that
+// has already established `i` is in range some other way (e.g. `i < n` from
+// its own prior `strings::length(s)` call) and cannot afford the repeated
+// `strlen`. Out-of-bounds `i` is undefined behaviour, same as any other raw
+// pointer read -- this file already declares the raw-pointer capability
+// (`unsafe module;`, line 1), so no `unsafe { }` block is needed here.
+pub fn byte_at_unchecked(s: string, i: int): char {
+    immut p: char* = s to char*;
+    return p[i];
+}
+
+// ─── StringBuilder ──────────────────────────────────────────────────────────
+//
+// Incremental string construction in amortised O(1) per appended byte
+// (LEC-007, FREEZE.md §6.14 / F-STD-3). A `string` is an immutable
+// NUL-terminated pointer, so `s = s + piece` allocates and copies the whole
+// accumulated string every time: building n bytes a piece at a time is
+// O(n^2). The frozen decision to keep `string` a C pointer rests on there
+// being a builder for exactly that job, so this is the thing that makes the
+// decision honest. `repeat`, `replace` and `join` below are built on it; use
+// it directly whenever a loop appends to a string.
+//
+//   mut sb: strings::StringBuilder = strings::StringBuilder::default();
+//   sb.append("a");
+//   sb.append_char('b');
+//   immut s: string = sb.to_string();   // "ab"
+//
+// The buffer always holds a NUL terminator one past `len`, so a failed
+// `to_string()` can never hand back an unterminated string. Every field is
+// private: `buf` is a raw buffer whose NUL invariant only these methods
+// maintain, and `cap` would let a caller claim room that is not there.
+// `to_string()` returns a COPY, so appending afterwards never changes a
+// string already handed out -- a `string` stays immutable to its holders.
+//
+// Reads of the appended `s` go through byte_at_unchecked: `append` has
+// already taken `strlen(s)` once, so the per-byte `strlen` that FDN-004's
+// bounds-checked `s[i]` would add is pure waste (and would make the loop
+// quadratic again at -O0).
+pub struct StringBuilder {
+    buf: string,
+    len: int,
+    cap: int
+}
+
+// reserve: guarantees room for `extra` more bytes (plus the terminator)
+// without another allocation. Growth doubles from 16, so a caller that knows
+// the final size (repeat() does) can pay for one allocation, and one that
+// does not still gets amortised O(1) appends. A negative `extra` is a
+// programming error, not a request to shrink.
+@caller_location
+pub fn StringBuilder.reserve(extra: int): void {
+    if extra < 0 {
+        sys::panic(caller_location + ": StringBuilder.reserve: negative size");
+    }
+    immut need: int = self.len + extra + 1;
+    if need <= self.cap {
+        return;
+    }
+    mut new_cap: int = self.cap;
+    if new_cap < 16 {
+        new_cap = 16;
+    }
+    while new_cap < need {
+        new_cap = new_cap * 2;
+    }
+    if self.cap == 0 {
+        self.buf = gc_alloc(new_cap) to string;
+        self.buf[0] = 0 to char;
+    } else {
+        self.buf = gc_realloc(self.buf, new_cap) to string;
+    }
+    self.cap = new_cap;
+}
+
+// append: adds every byte of `s`. O(strlen(s)) amortised.
+pub fn StringBuilder.append(s: string): void {
+    immut n: int = strlen(s);
+    self.reserve(n);
+    mut i: int = 0;
+    while i < n {
+        self.buf[self.len + i] = byte_at_unchecked(s, i);
+        i = i + 1;
+    }
+    self.len = self.len + n;
+    self.buf[self.len] = 0 to char;
+}
+
+// append_char: adds one byte. A NUL `c` is stored but ends the string for
+// every reader that stops at NUL, exactly as it would in any `string`.
+pub fn StringBuilder.append_char(c: char): void {
+    self.reserve(1);
+    self.buf[self.len] = c;
+    self.len = self.len + 1;
+    self.buf[self.len] = 0 to char;
+}
+
+// length: bytes appended so far.
+pub fn StringBuilder.length(): int {
+    return self.len;
+}
+
+// clear: forgets the contents but keeps the buffer, so a builder reused in a
+// loop (one line per iteration) stops allocating after the first few.
+pub fn StringBuilder.clear(): void {
+    self.len = 0;
+    if self.cap > 0 {
+        self.buf[0] = 0 to char;
+    }
+}
+
+// to_string: a fresh, independent copy of the contents ("" when nothing was
+// appended). O(length). Safe to call repeatedly and to keep appending after.
+pub fn StringBuilder.to_string(): string {
+    mut out: string = gc_alloc(self.len + 1) to string;
+    mut i: int = 0;
+    while i < self.len {
+        out[i] = byte_at_unchecked(self.buf, i);
+        i = i + 1;
+    }
+    out[self.len] = 0 to char;
+    return out;
 }
 
 // ─── contains ─────────────────────────────────────────────────────────────────
 
 // contains: returns true if `needle` occurs anywhere in `s`.
-fn contains(s: string, needle: string): bool {
+pub fn contains(s: string, needle: string): bool {
     mut result: string = strstr(s, needle);
     return result != null;
 }
@@ -120,7 +248,7 @@ fn contains(s: string, needle: string): bool {
 
 // index_of: returns the byte offset of the first occurrence of `needle` in `s`,
 // or -1 if not found. Returns -1 if needle is not found.
-fn index_of(s: string, needle: string): int {
+pub fn index_of(s: string, needle: string): int {
     mut found: string = strstr(s, needle);
     if found == null {
         return 0 - 1;
@@ -146,10 +274,38 @@ fn index_of(s: string, needle: string): int {
     return 0 - 1;
 }
 
+// ─── last_index_of ────────────────────────────────────────────────────────────
+
+// last_index_of: the byte offset of the LAST occurrence of `needle` in `s`, or
+// -1 if there is none. An empty `needle` matches at `strlen(s)`, the mirror of
+// index_of("") == 0. Was `fs.last_index_of_char`, a private helper written
+// because path splitting needs to search from the end and nothing public did
+// (LEC-007: a helper the standard library needs itself is one users need).
+pub fn last_index_of(s: string, needle: string): int {
+    immut slen: int = strlen(s);
+    immut nlen: int = strlen(needle);
+    mut i: int = slen - nlen;
+    while i >= 0 {
+        mut is_match: bool = true;
+        mut j: int = 0;
+        while is_match && j < nlen {
+            if byte_at_unchecked(s, i + j) != byte_at_unchecked(needle, j) {
+                is_match = false;
+            }
+            j = j + 1;
+        }
+        if is_match {
+            return i;
+        }
+        i = i - 1;
+    }
+    return 0 - 1;
+}
+
 // ─── starts_with ──────────────────────────────────────────────────────────────
 
 // starts_with: returns true if `s` begins with `prefix`.
-fn starts_with(s: string, prefix: string): bool {
+pub fn starts_with(s: string, prefix: string): bool {
     mut plen: int = strlen(prefix);
     mut slen: int = strlen(s);
     if plen > slen {
@@ -168,7 +324,7 @@ fn starts_with(s: string, prefix: string): bool {
 // ─── ends_with ────────────────────────────────────────────────────────────────
 
 // ends_with: returns true if `s` ends with `suffix`.
-fn ends_with(s: string, suffix: string): bool {
+pub fn ends_with(s: string, suffix: string): bool {
     mut slen: int = strlen(s);
     mut suflen: int = strlen(suffix);
     if suflen > slen {
@@ -187,26 +343,38 @@ fn ends_with(s: string, suffix: string): bool {
 
 // ─── repeat ───────────────────────────────────────────────────────────────────
 
-// repeat: returns a string consisting of `n` copies of `s` concatenated.
-fn repeat(s: string, n: int): string {
-    mut result: string = "";
+// repeat: returns a string consisting of `n` copies of `s` concatenated
+// ("" for `n <= 0`). Linear in the result: it used to be `result = result + s`
+// in a loop, which re-copies the whole accumulated string on every pass
+// (O(n^2): measured 1.9 s for 200,000 copies of "ab" and 23 s for 600,000).
+// One reserve() sizes the buffer for the final length, so there is exactly
+// one allocation to grow it.
+pub fn repeat(s: string, n: int): string {
+    if n <= 0 {
+        return "";
+    }
+    mut sb: StringBuilder = StringBuilder::default();
+    sb.reserve(strlen(s) * n);
     mut i: int = 0;
     while i < n {
-        result = result + s;
+        sb.append(s);
         i = i + 1;
     }
-    return result;
+    return sb.to_string();
 }
 
 // ─── count_char ───────────────────────────────────────────────────────────────
 
 // count_char: returns the number of times the character with code `ch` appears in `s`.
-fn count_char(s: string, ch: int): int {
+pub fn count_char(s: string, ch: int): int {
     mut count: int = 0;
     mut i: int = 0;
     mut n: int = strlen(s);
     while i < n {
-        if s[i] == ch {
+        // FDN-004: `s[i]` is `char`; compare against the `int` parameter by
+        // widening the byte, not narrowing `ch` (no implicit char<->numeric
+        // conversion, FREEZE.md §6.2 row 4).
+        if (s[i] to int) == ch {
             count = count + 1;
         }
         i = i + 1;
@@ -218,91 +386,96 @@ fn count_char(s: string, ch: int): int {
 
 // substring: returns the slice of `s` from byte index `start` (inclusive) to
 // `end` (exclusive). Aborts if the range is out of bounds.
-fn substring(s: string, start: int, end: int): string {
+@caller_location
+pub fn substring(s: string, start: int, end: int): string {
     mut n: int = strlen(s);
     if start < 0 || end < start || end > n {
-        sys::panic("strings.substring: index out of bounds");
+        sys::panic(caller_location + ": strings.substring: index out of bounds");
     }
     mut len: int = end - start;
     // Allocate len+1 bytes (for null terminator)
     mut buf: string = gc_alloc(len + 1) to string;
     mut i: int = 0;
+    // The range was validated against `n` above, so the unchecked read is
+    // safe -- and necessary: `s[start + i]` re-runs strlen(s) on every byte
+    // (FDN-004), which made substring (and so trim/split, built on it) cost
+    // O(len * strlen(s)) at -O0.
     while i < len {
-        buf[i] = s[start + i];
+        buf[i] = byte_at_unchecked(s, start + i);
         i = i + 1;
     }
-    buf[len] = 0;
+    buf[len] = 0 to char;
     return buf;
 }
 
 // ─── replace ──────────────────────────────────────────────────────────────────
 
 // replace: returns a copy of `s` with every non-overlapping occurrence of `old`
-// replaced by `new_str`.
-fn replace(s: string, old: string, new_str: string): string {
-    mut result: string = "";
-    mut oldlen: int = strlen(old);
+// replaced by `new_str`, scanning left to right. An empty `old` returns `s`
+// itself (there is no sensible place to insert). Linear in |s| plus the
+// replacements: the old version allocated a 2-byte string per unmatched byte
+// and concatenated it onto the result, i.e. O(|s|^2) allocations of
+// ever-growing strings.
+pub fn replace(s: string, old: string, new_str: string): string {
+    immut oldlen: int = strlen(old);
     if oldlen == 0 {
         return s;
     }
-    mut slen: int = strlen(s);
+    immut slen: int = strlen(s);
+    mut sb: StringBuilder = StringBuilder::default();
+    sb.reserve(slen);
     mut i: int = 0;
     while i < slen {
-        mut is_match: bool = true;
-        if i + oldlen > slen {
-            is_match = false;
-        }
-        if is_match {
-            mut j: int = 0;
-            while j < oldlen {
-                if s[i + j] != old[j] {
-                    is_match = false;
-                }
-                j = j + 1;
+        mut is_match: bool = i + oldlen <= slen;
+        mut j: int = 0;
+        while is_match && j < oldlen {
+            if byte_at_unchecked(s, i + j) != byte_at_unchecked(old, j) {
+                is_match = false;
             }
+            j = j + 1;
         }
         if is_match {
-            result = result + new_str;
+            sb.append(new_str);
             i = i + oldlen;
         } else {
-            // Append single character as a 2-byte heap buffer
-            mut chbuf: string = gc_alloc(2) to string;
-            chbuf[0] = s[i];
-            chbuf[1] = 0;
-            result = result + chbuf;
+            sb.append_char(byte_at_unchecked(s, i));
             i = i + 1;
         }
     }
-    return result;
+    return sb.to_string();
 }
 
 // ─── to_upper ─────────────────────────────────────────────────────────────────
 
 // to_upper: returns a copy of `s` with all ASCII lowercase letters uppercased.
-fn to_upper(s: string): string {
+pub fn to_upper(s: string): string {
     mut n: int = strlen(s);
     mut buf: string = gc_alloc(n + 1) to string;
     mut i: int = 0;
     while i < n {
-        buf[i] = toupper(s[i] to int32);
+        // FDN-004: `char` has no `int32` cast (only `char <-> int`,
+        // docs/reference/variables_and_types.md §"char") -- go through
+        // `int` on both sides of the C `toupper(int32): int32` call.
+        buf[i] = (toupper((s[i] to int) to int32) to int) to char;
         i = i + 1;
     }
-    buf[n] = 0;
+    buf[n] = 0 to char;
     return buf;
 }
 
 // ─── to_lower ─────────────────────────────────────────────────────────────────
 
 // to_lower: returns a copy of `s` with all ASCII uppercase letters lowercased.
-fn to_lower(s: string): string {
+pub fn to_lower(s: string): string {
     mut n: int = strlen(s);
     mut buf: string = gc_alloc(n + 1) to string;
     mut i: int = 0;
     while i < n {
-        buf[i] = tolower(s[i] to int32);
+        // FDN-004: see the identical cast chain's comment in to_upper() above.
+        buf[i] = (tolower((s[i] to int) to int32) to int) to char;
         i = i + 1;
     }
-    buf[n] = 0;
+    buf[n] = 0 to char;
     return buf;
 }
 
@@ -310,14 +483,17 @@ fn to_lower(s: string): string {
 
 // trim: returns `s` with leading and trailing ASCII whitespace removed.
 // Whitespace: space (32), tab (9), newline (10), carriage return (13).
-fn trim(s: string): string {
+pub fn trim(s: string): string {
     mut n: int = strlen(s);
     mut start_idx: int = 0;
     mut end_idx: int = n;
-    while start_idx < n && (s[start_idx] == 32 || s[start_idx] == 9 || s[start_idx] == 10 || s[start_idx] == 13) {
+    // FDN-004: `s[i]` is `char` now; cast to `int` before comparing with
+    // the whitespace byte-code literals (no implicit char<->numeric
+    // conversion, FREEZE.md §6.2 row 4).
+    while start_idx < n && ((s[start_idx] to int) == 32 || (s[start_idx] to int) == 9 || (s[start_idx] to int) == 10 || (s[start_idx] to int) == 13) {
         start_idx = start_idx + 1;
     }
-    while end_idx > start_idx && (s[end_idx - 1] == 32 || s[end_idx - 1] == 9 || s[end_idx - 1] == 10 || s[end_idx - 1] == 13) {
+    while end_idx > start_idx && ((s[end_idx - 1] to int) == 32 || (s[end_idx - 1] to int) == 9 || (s[end_idx - 1] to int) == 10 || (s[end_idx - 1] to int) == 13) {
         end_idx = end_idx - 1;
     }
     return substring(s, start_idx, end_idx);
@@ -327,10 +503,11 @@ fn trim(s: string): string {
 
 // trim_start: returns `s` with leading ASCII whitespace removed (trailing
 // whitespace, if any, is left alone). Same whitespace set as `trim`.
-fn trim_start(s: string): string {
+pub fn trim_start(s: string): string {
     mut n: int = strlen(s);
     mut start_idx: int = 0;
-    while start_idx < n && (s[start_idx] == 32 || s[start_idx] == 9 || s[start_idx] == 10 || s[start_idx] == 13) {
+    // FDN-004: see trim()'s identical cast's comment above.
+    while start_idx < n && ((s[start_idx] to int) == 32 || (s[start_idx] to int) == 9 || (s[start_idx] to int) == 10 || (s[start_idx] to int) == 13) {
         start_idx = start_idx + 1;
     }
     return substring(s, start_idx, n);
@@ -338,10 +515,11 @@ fn trim_start(s: string): string {
 
 // trim_end: returns `s` with trailing ASCII whitespace removed (leading
 // whitespace, if any, is left alone). Same whitespace set as `trim`.
-fn trim_end(s: string): string {
+pub fn trim_end(s: string): string {
     mut n: int = strlen(s);
     mut end_idx: int = n;
-    while end_idx > 0 && (s[end_idx - 1] == 32 || s[end_idx - 1] == 9 || s[end_idx - 1] == 10 || s[end_idx - 1] == 13) {
+    // FDN-004: see trim()'s identical cast's comment above.
+    while end_idx > 0 && ((s[end_idx - 1] to int) == 32 || (s[end_idx - 1] to int) == 9 || (s[end_idx - 1] to int) == 10 || (s[end_idx - 1] to int) == 13) {
         end_idx = end_idx - 1;
     }
     return substring(s, 0, end_idx);
@@ -369,7 +547,7 @@ fn trim_end(s: string): string {
 // returning the pieces (in order, including empty pieces between adjacent
 // delimiters) as a `List<string>`. See the block comment above for the
 // empty-delimiter and no-match behavior.
-fn split(s: string, delimiter: string): List<string> {
+pub fn split(s: string, delimiter: string): List<string> {
     mut result: List<string> = List::default();
     mut dlen: int = strlen(delimiter);
     mut slen: int = strlen(s);
@@ -403,18 +581,18 @@ fn split(s: string, delimiter: string): List<string> {
 // join: concatenates every element of `items` in order, separated by `sep`
 // (no leading/trailing `sep`). Returns "" for an empty list. The exact
 // inverse of `split` -- see the block comment above.
-fn join(items: List<string>, sep: string): string {
-    mut result: string = "";
+pub fn join(items: List<string>, sep: string): string {
+    mut sb: StringBuilder = StringBuilder::default();
     mut n: int = items.length();
     mut i: int = 0;
     while i < n {
         if i > 0 {
-            result = result + sep;
+            sb.append(sep);
         }
-        result = result + items.data[i];
+        sb.append(items.get(i));
         i = i + 1;
     }
-    return result;
+    return sb.to_string();
 }
 
 // ─── pad_left / pad_right ───────────────────────────────────────────────────────
@@ -422,7 +600,7 @@ fn join(items: List<string>, sep: string): string {
 // pad_left: pads `s` on the left with `pad_char` until it is `target_len`
 // bytes long. Returns `s` unchanged if it is already `target_len` bytes or
 // longer.
-fn pad_left(s: string, target_len: int, pad_char: char): string {
+pub fn pad_left(s: string, target_len: int, pad_char: char): string {
     mut n: int = strlen(s);
     if n >= target_len {
         return s;
@@ -431,7 +609,10 @@ fn pad_left(s: string, target_len: int, pad_char: char): string {
     mut buf: string = gc_alloc(target_len + 1) to string;
     mut i: int = 0;
     while i < pad_count {
-        buf[i] = pad_char to int;
+        // FDN-004: `pad_char` is already `char` -- `buf[i]` is too now, so
+        // no cast is needed at all (the old `to int` here was only ever
+        // working around `buf[i]`'s previous, wrong `int` type).
+        buf[i] = pad_char;
         i = i + 1;
     }
     mut j: int = 0;
@@ -439,14 +620,14 @@ fn pad_left(s: string, target_len: int, pad_char: char): string {
         buf[pad_count + j] = s[j];
         j = j + 1;
     }
-    buf[target_len] = 0;
+    buf[target_len] = 0 to char;
     return buf;
 }
 
 // pad_right: pads `s` on the right with `pad_char` until it is `target_len`
 // bytes long. Returns `s` unchanged if it is already `target_len` bytes or
 // longer.
-fn pad_right(s: string, target_len: int, pad_char: char): string {
+pub fn pad_right(s: string, target_len: int, pad_char: char): string {
     mut n: int = strlen(s);
     if n >= target_len {
         return s;
@@ -458,10 +639,11 @@ fn pad_right(s: string, target_len: int, pad_char: char): string {
         i = i + 1;
     }
     while i < target_len {
-        buf[i] = pad_char to int;
+        // FDN-004: see pad_left()'s identical comment above.
+        buf[i] = pad_char;
         i = i + 1;
     }
-    buf[target_len] = 0;
+    buf[target_len] = 0 to char;
     return buf;
 }
 
@@ -477,92 +659,112 @@ fn pad_right(s: string, target_len: int, pad_char: char): string {
 // a non-digit byte, more than one "." -- are all real, checked error
 // returns instead of C's atoi/atof silently returning 0 on garbage input.
 
-error StringParseError {
+pub error StringParseError {
     InvalidInt,
     InvalidDouble,
 }
 
 // parse_int: parses `s` as a base-10 integer, with an optional leading `-`.
-// Fails on an empty string, a bare "-", or any non-digit byte.
-fn parse_int(s: string): !int {
+// Fails on an empty string, a bare "-", any non-digit byte, or a value
+// outside `int`'s range. The digits are accumulated as a negative number,
+// since `int`'s range reaches one further below zero than above it, so
+// "-9223372036854775808" parses; each step is checked before it could
+// overflow.
+pub fn parse_int(s: string): !int {
     mut n: int = strlen(s);
     if n == 0 {
-        return StringParseError::InvalidInt;
+        return StringParseError::InvalidInt("not an int: '" + s + "'");
     }
     mut i: int = 0;
     mut neg: bool = false;
-    if s[0] == 45 { // '-'
+    // FDN-004: `s[0]` is `char`; cast to `int` before comparing with the
+    // byte-code literal (no implicit char<->numeric conversion).
+    if (s[0] to int) == 45 { // '-'
         neg = true;
         i = 1;
     }
     if i >= n {
-        return StringParseError::InvalidInt;
+        return StringParseError::InvalidInt("not an int: '" + s + "'");
     }
+    // -9223372036854775808 / 10 and the last digit it allows.
+    immut min_div10: int = -922337203685477580;
     mut result: int = 0;
     while i < n {
-        mut c: int = s[i];
+        mut c: int = s[i] to int;
         if c < 48 || c > 57 {
-            return StringParseError::InvalidInt;
+            return StringParseError::InvalidInt("not an int: '" + s + "'");
         }
-        result = result * 10 + (c - 48);
+        immut d: int = c - 48;
+        if result < min_div10 || (result == min_div10 && d > 8) {
+            return StringParseError::InvalidInt("not an int: '" + s + "'");
+        }
+        result = result * 10 - d;
         i = i + 1;
     }
     if neg {
-        result = 0 - result;
+        return result;
     }
-    return result;
+    if result == min_div10 * 10 - 8 {
+        return StringParseError::InvalidInt("not an int: '" + s + "'");
+    }
+    return 0 - result;
 }
 
-// parse_double: parses `s` as a base-10 decimal number, with an optional
-// leading `-` and at most one `.`. Fails on an empty string, a bare "-",
-// any non-digit byte outside the single decimal point, or a string with
-// no digits at all (e.g. "-" or ".").
-fn parse_double(s: string): !double {
-    mut n: int = strlen(s);
-    if n == 0 {
-        return StringParseError::InvalidDouble;
-    }
+// Whether byte i of s (i < its length) is an ASCII digit.
+fn is_digit_at(s: string, i: int): bool {
+    immut c: int = byte_at_unchecked(s, i) to int;
+    return c >= 48 && c <= 57;
+}
+
+// parse_double: parses `s` as a base-10 number: an optional leading `-`,
+// digits with at most one `.` (at least one digit, on either side of it),
+// and an optional exponent -- `e` or `E`, an optional sign, at least one
+// digit -- so `1e10` and `2.5E-3`, the forms JSON writes, parse. Fails on
+// anything else: an empty string, a bare "-" or ".", a second `.`, an `e`
+// with no digits, a leading `+`, a space, `inf`, `nan`, trailing text.
+// A string that passes is converted by `s to double` (C's strtod), so the
+// value is the correctly rounded double -- the same one the compiler gives
+// that literal -- and a magnitude beyond the double range is +-inf, as IEEE
+// says. (Before, the digits were summed in double arithmetic, which could be
+// off in the last bit, and an exponent was rejected: json::parse failed on
+// any number with one.)
+pub fn parse_double(s: string): !double {
+    immut n: int = strlen(s);
     mut i: int = 0;
-    mut neg: bool = false;
-    if s[0] == 45 { // '-'
-        neg = true;
-        i = 1;
+    if i < n && (byte_at_unchecked(s, i) to int) == 45 { // '-'
+        i = i + 1;
     }
-    if i >= n {
-        return StringParseError::InvalidDouble;
+    mut digits: int = 0;
+    while i < n && is_digit_at(s, i) {
+        i = i + 1;
+        digits = digits + 1;
     }
-    mut saw_digit: bool = false;
-    mut int_part: double = 0.0;
-    while i < n && s[i] != 46 { // '.'
-        mut c: int = s[i];
-        if c < 48 || c > 57 {
-            return StringParseError::InvalidDouble;
+    if i < n && (byte_at_unchecked(s, i) to int) == 46 { // '.'
+        i = i + 1;
+        while i < n && is_digit_at(s, i) {
+            i = i + 1;
+            digits = digits + 1;
         }
-        int_part = int_part * 10.0 + ((c - 48) to double);
-        saw_digit = true;
-        i = i + 1;
     }
-    mut frac_part: double = 0.0;
-    if i < n && s[i] == 46 { // '.'
+    if digits == 0 {
+        return StringParseError::InvalidDouble("not a double: '" + s + "'");
+    }
+    if i < n && ((byte_at_unchecked(s, i) to int) == 101 || (byte_at_unchecked(s, i) to int) == 69) { // e E
         i = i + 1;
-        mut frac_div: double = 1.0;
-        while i < n {
-            mut c: int = s[i];
-            if c < 48 || c > 57 {
-                return StringParseError::InvalidDouble;
-            }
-            frac_div = frac_div * 10.0;
-            frac_part = frac_part + ((c - 48) to double) / frac_div;
-            saw_digit = true;
+        if i < n && ((byte_at_unchecked(s, i) to int) == 43 || (byte_at_unchecked(s, i) to int) == 45) { // + -
             i = i + 1;
         }
+        mut exp_digits: int = 0;
+        while i < n && is_digit_at(s, i) {
+            i = i + 1;
+            exp_digits = exp_digits + 1;
+        }
+        if exp_digits == 0 {
+            return StringParseError::InvalidDouble("not a double: '" + s + "'");
+        }
     }
-    if !saw_digit {
-        return StringParseError::InvalidDouble;
+    if i != n {
+        return StringParseError::InvalidDouble("not a double: '" + s + "'");
     }
-    mut result: double = int_part + frac_part;
-    if neg {
-        result = 0.0 - result;
-    }
-    return result;
+    return s to double;
 }

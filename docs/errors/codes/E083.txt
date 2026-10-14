@@ -1,0 +1,19 @@
+A deferred statement can't `return`, `break` or `continue`
+
+`defer` schedules one statement to run when the function ends, however it ends. That statement runs *while the function is already leaving*, so it can't also choose to leave in a different way:
+
+    fn main(): int {
+        defer return 5;          // return from where, exactly?
+        return 0;
+    }
+
+`break` and `continue` have the same problem: they would jump out of the enclosing loop from the middle of the function's cleanup.
+
+Keep the deferred statement to the cleanup itself -- close the file, free the buffer, print the message -- and put any decision about leaving in the normal flow of the function:
+
+    fn main(): int {
+        defer cleanup();
+        return 5;
+    }
+
+If the cleanup itself can fail, handle that failure inside the deferred statement: `defer f() recover run { ... };`.

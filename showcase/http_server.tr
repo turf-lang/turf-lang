@@ -29,6 +29,7 @@ import net;
 import strings;
 
 fn handle(conn: net::TcpConnection): void {
+    defer conn.close();
     immut request: string = conn.read(4096);
     io::printline("--- request ---");
     io::printline(request);
@@ -45,10 +46,9 @@ fn handle(conn: net::TcpConnection): void {
         body = "not found";
     }
 
-    immut bodyLen: int = strings::length(body);
-    immut response: string = "HTTP/1.1 " + status + "\nContent-Type: text/plain\nContent-Length: " + (bodyLen to string) + "\nConnection: close\n\n" + body;
+    immut body_len: int = strings::length(body);
+    immut response: string = "HTTP/1.1 " + status + "\nContent-Type: text/plain\nContent-Length: " + (body_len to string) + "\nConnection: close\n\n" + body;
     conn.write(response);
-    conn.close();
 }
 
 fn main(): int {
@@ -56,10 +56,11 @@ fn main(): int {
         io::printline("Could not start the server -- is port 8080 already in use?");
         return 1;
     };
+    defer server.close();
     io::printline("Turf HTTP server listening on port 8080...");
 
-    mut requestCount: int = 0;
-    while requestCount < 1000 {
+    mut request_count: int = 0;
+    while request_count < 1000 {
         // A single bad accept() shouldn't bring the whole server down --
         // log it and keep serving instead of aborting.
         mut conn: net::TcpConnection = server.accept() recover run {
@@ -67,10 +68,9 @@ fn main(): int {
             continue;
         };
         handle(conn);
-        requestCount = requestCount + 1;
+        request_count = request_count + 1;
     }
 
-    server.close();
     io::printline("Handled 1000 requests, shutting down.");
     return 0;
 }

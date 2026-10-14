@@ -1,0 +1,1 @@
+{"explanation": "x", "fix_mode": "MODIFY", "original_code": "   11 | fn Box.count(): string {\n>> 12 |     return self.n;\n   13 | }", "new_code": "   11 | fn Box.count(): int {\n>> 12 |     return self.n;\n   13 | }", "suggested_comment": "", "warning": "", "category": "TYPE_MISMATCH"}

@@ -1,0 +1,15 @@
+// The importer of geometry.tr. Written for 1.x, so it uses the module's
+// functions, types, fields, methods and constants freely; this file is NOT
+// migrated (a main program needs no `pub`).
+import geometry;
+
+fn main(): int {
+    mut p: geometry::Point<int> = geometry::make(3, 4);
+    if (p.x + p.y != 7) { return 1; }
+    if (p.first() != 3) { return 2; }
+    if (geometry::add(p.x, p.y) != 7) { return 3; }
+    if (geometry::name_length(geometry::ORIGIN_NAME) != 6) { return 4; }
+    immut k: geometry::Kind = geometry::Kind::Round;
+    if (k to int != 1) { return 5; }
+    return 0;
+}

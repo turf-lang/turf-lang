@@ -7,7 +7,10 @@
  * before ANY Turf-level code does: recording the stack base conservative
  * scanning needs (turf_gc_record_stack_base(), turfrt_gc.c -- see that
  * file's own top comment for why "a local variable's address inside this
- * function" is the right thing to capture here). turf_rt_shutdown() is
+ * function" is the right thing to capture here), and then (FDN-006 stage 1)
+ * installing the SIGSEGV/sigaltstack handler (turf_rt_install_segv_handler(),
+ * turfrt_signal.c) -- AFTER the stack base is recorded, since the handler
+ * reads it to classify a fault as a stack overflow. turf_rt_shutdown() is
  * unchanged from RT-001/MEM-001 -- still just the opt-in TURF_RT_STATS_DUMP
  * dump; MEM-002 deliberately does NOT run a final collection at shutdown
  * (nothing in §14/§22.2 asks for one, and process exit reclaims everything
@@ -40,6 +43,7 @@ static TurfRtStats g_stats = {0, 0, 0, 0, 0, 0, 0};
 
 void turf_rt_init(void) {
   turf_gc_record_stack_base();
+  turf_rt_install_segv_handler();
 }
 
 void turf_rt_shutdown(void) {
@@ -61,11 +65,23 @@ void turf_rt_shutdown(void) {
   }
 }
 
+/* The out-of-memory panic, naming the size asked for and the type when the
+ * allocation has a descriptor. */
+static void out_of_memory(size_t bytes, const TurfTypeDesc *desc) {
+  char msg[160];
+  if (desc && desc->name)
+    snprintf(msg, sizeof msg, "could not allocate %llu bytes for '%s'",
+             (unsigned long long)bytes, desc->name);
+  else
+    snprintf(msg, sizeof msg, "could not allocate %llu bytes",
+             (unsigned long long)bytes);
+  turf_rt_panic("out of memory", msg, NULL, 0);
+}
+
 void *turf_rt_alloc(size_t bytes, const TurfTypeDesc *desc) {
   void *p = malloc(bytes);
   if (!p) {
-    turf_rt_panic("out of memory", desc && desc->name ? desc->name : "<raw>",
-                  "<turf_rt_alloc>", 0);
+    out_of_memory(bytes, desc);
   }
   turf_gc_register_block(p, bytes, desc);
   g_stats.alloc_count++;
@@ -77,8 +93,7 @@ void *turf_rt_alloc(size_t bytes, const TurfTypeDesc *desc) {
 void *turf_rt_alloc_zeroed(size_t bytes, const TurfTypeDesc *desc) {
   void *p = calloc(1, bytes);
   if (!p) {
-    turf_rt_panic("out of memory", desc && desc->name ? desc->name : "<raw>",
-                  "<turf_rt_alloc_zeroed>", 0);
+    out_of_memory(bytes, desc);
   }
   turf_gc_register_block(p, bytes, desc);
   g_stats.alloc_count++;
@@ -91,8 +106,7 @@ void *turf_rt_realloc(void *p, size_t new_size, const TurfTypeDesc *desc) {
   uintptr_t old_addr = (uintptr_t)p;
   void *result = realloc(p, new_size);
   if (!result) {
-    turf_rt_panic("out of memory", desc && desc->name ? desc->name : "<raw>",
-                  "<turf_rt_realloc>", 0);
+    out_of_memory(new_size, desc);
   }
   turf_gc_reregister_block(old_addr, result, new_size, desc);
   g_stats.realloc_count++;
@@ -111,9 +125,14 @@ void turf_rt_checked_free(void *p) {
   if (p != NULL && turf_gc_is_registered(p)) {
     turf_rt_panic("cross-heap free",
                   "mem::free() was called on a pointer that belongs to the "
-                  "GC heap (a string or collection buffer), not the manual "
+                  "GC heap (a string, a collection buffer, a heap(...) "
+                  "value, anything the collector owns), not the manual "
                   "heap -- the two heaps do not merge",
-                  "<mem::free>", 0);
+                  NULL, 0);
   }
+#ifdef _WIN32
+  if (turf_win32_free_aligned(p))
+    return; /* an _aligned_malloc block, already released */
+#endif
   free(p);
 }

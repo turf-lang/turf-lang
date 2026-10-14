@@ -1,0 +1,30 @@
+That isn't a valid number
+
+A decimal number has exactly one `.`, with at least one digit after it:
+
+    mut pi: double = 3.14;
+    mut half: double = .5;           // the digit before the point is optional
+    mut big: double = 6.022e23;      // the point comes before any exponent
+
+Turf found a `.` in a place a number can't have one. The message says which of three it is.
+
+**A second decimal point.** `3.14.15` looks like two numbers run together -- `3.14` and `.15` -- and Turf won't guess which one you meant:
+
+    mut x: double = 3.14.15;         // ERROR: a number can have only one '.'
+    mut y: double = 1e5.5;           // ERROR: the point goes BEFORE the exponent
+
+If you meant one decimal, remove a point. If you meant two values, put a comma or an operator between them: `3.14 + 0.15`.
+
+**A point with nothing after it.** `5.` is not a number, because a decimal needs a digit after the point:
+
+    mut x: double = 5.;              // ERROR: '5.' ends in a '.'
+
+Write `5.0` for the decimal or `5` for the whole number.
+
+**A point on a hexadecimal, binary or octal number.** Those are whole numbers, so they have no fractional part:
+
+    mut x: double = 0xFF.5;          // ERROR: hexadecimal numbers are whole numbers
+
+Write the value as an ordinary decimal instead (`255.5`).
+
+What is *not* an error: `1..5` is a range, not `1.` and `.5`, and a letter right after the point is a method call on the value (`5.abs()` is `abs` called on `5`), so neither is touched by this check.

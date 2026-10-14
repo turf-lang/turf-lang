@@ -1,21 +1,10 @@
-// Regression test (was tests/09_boss_fights/fail_struct_method_chain.tr,
-// and DISCOVERED_ISSUES.md #22 / CODE_REVIEW_GAPS_2026-07.md gap #6): a
-// struct method can now return `self` BY VALUE (`fn Node.get_self(): Node`,
-// not just `: Node*`), not just by pointer.
-//
-// `self` inside a struct method is always typed as `Node*` (see
-// ParseFuncDef's implicit self-parameter construction), and this language
-// has no explicit dereference operator -- so `return self;` from a method
-// declared to return the bare struct type used to be flatly rejected with
-// "function declares 'Node' but returns 'Node*'", no matter what. Fixed by:
-//   - TypeChecker::visitReturn() now accepts a pointer-to-struct return
-//     value whose pointee matches the declared (bare) struct return type.
-//   - Codegen's CastToType() performs the actual dereference (a load
-//     through the pointer) when casting a pointer-to-struct value to the
-//     bare struct type.
-// Method-return-by-pointer for chaining already worked before this fix and
-// still does (see tests/06_structs/23_self_pointer_chaining.tr for that
-// case specifically) -- this file is about the BY-VALUE half.
+// A struct method returns `self` BY VALUE (`fn Node.get_self(): Node`, not
+// just `: Node*`) by copying it out: `return self to Node;`. `self` is the
+// receiver's address (typed `Node*`), and a value leaves a reference only
+// through an explicit `to`, so the copy is visible where it happens. The
+// returned value is a copy, not an alias, and it chains like any value.
+// Method-return-by-pointer for chaining is
+// tests/06_structs/23_self_pointer_chaining.tr.
 
 import test;
 
@@ -28,7 +17,7 @@ fn Node.new(val: int): void {
 }
 
 fn Node.get_self(): Node {
-    return self;
+    return self to Node;
 }
 
 fn main(): int {

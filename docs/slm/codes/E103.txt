@@ -1,0 +1,31 @@
+TURF E103 -- UNEXPECTED TOKEN:
+
+CAUSE:
+  The parser was in the middle of a construct and met a token that cannot legally
+  appear there. The message names the token. Usual causes:
+    - a value/operand left out:               mut x: int = ;      mut y: int = 5 + ;
+    - an extra `;` after something already ended:  do { ... } while (x > 0);;
+    - a keyword where a value was expected:   mut x: int = while;
+    - a stray character that is not Turf, or an `@` that is not `@caller_location`
+      (the only decorator Turf has);
+    - a declaration keyword in the wrong place: a top-level `mut x: int = 5;` outside
+      any function is not accepted (share a constant across files with `export immut`).
+
+CORRECT:
+    export immut LIMIT: int = 5;       // a constant shared across files: `export immut`
+
+    fn main(): int {
+        mut x: int = 5 + 1;            // every operand present
+        do {
+            x = x - 1;
+        } while (x > 0);               // one `;` after the loop
+        return x;
+    }
+
+FIX:
+  Delete the stray token or add what was supposed to be there. If the highlighted
+  spot looks fine, check the line above: an unclosed bracket earlier is often what
+  makes a later, valid token look wrong.
+
+RELATED: E102 (missing ;), E104 (unclosed delimiter), E108 (name expected), E109
+  (type expected), E110 (specific word expected), E118 (statement outside function).

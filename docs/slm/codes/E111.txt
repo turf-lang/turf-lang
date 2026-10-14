@@ -1,0 +1,29 @@
+TURF E111 -- NESTED TOO DEEPLY:
+
+CAUSE:
+  The parser follows brackets inside brackets, and stops at a fixed depth because
+  unbounded nesting can crash a compiler. Reached by hundreds of nested parentheses,
+  repeated `!` or `-` prefixes, or deeply nested generic types. Real programs never
+  get near the limit, so this almost always means a character was typed over and over
+  by accident, or a closing bracket is missing so the depth keeps growing.
+
+INCORRECT:
+    mut x: int = ((((((((((((... hundreds ...))))))))))));
+    mut y: bool = !!!!!!!!!!!!!!!!!...;
+    mut z: List<List<List<List<...>>>> ...;
+
+CORRECT (name the inner pieces and build the result step by step):
+    fn main(): int {
+        mut inner: int = (1 + 2) * 3;
+        mut outer: int = (inner + 1) * 2;
+        mut y: bool = !(outer > 5);
+        return outer - 20;
+    }
+
+FIX:
+  Look at the reported line for a repeated character and delete the extras. For truly
+  deep data, name the inner pieces with `mut` and build the result step by step.
+
+NOTE: a registered cascade -- the one nesting mistake may also print a follow-up error.
+
+RELATED: E104 (unclosed delimiter).

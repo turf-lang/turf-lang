@@ -1,0 +1,158 @@
+// LEC-007 API lock, part 1: the prelude modules (int, double, bool, char,
+// array, strings), hashing, and the collections. Every `pub` item in these
+// modules is used once, by its real spelling, so removing or renaming one in
+// 2.x breaks this file at compile time. scripts/check/stdlib_surface_check.sh
+// fails if a `pub` item exists that no file in this folder mentions, so a NEW
+// public item cannot slip in unlocked either.
+//
+// Not a behaviour suite (each module has its own tests): the assertions are
+// light, the compile is the point.
+import hashing;
+import list::List;
+import map::Map;
+import queue::Queue;
+import set::Set;
+import stack::Stack;
+import test;
+
+fn cmp_int(a: int, b: int): int {
+    return a - b;
+}
+
+fn is_three(x: int): bool {
+    return x == 3;
+}
+
+// `return` inside `recover as err run` returns from the ENCLOSING function, so
+// each error-type reference lives in its own helper.
+fn parse_int_error_is_invalid_int(text: string): bool {
+    immut _v: int = strings::parse_int(text) recover as err run {
+        return err == strings::StringParseError::InvalidInt;
+    };
+    return false;
+}
+
+fn map_miss_is_key_not_found(m: Map<string, int>): bool {
+    immut _v: int = m.try_get("missing") recover as err run {
+        return err == map::MapError::KeyNotFound;
+    };
+    return false;
+}
+
+fn main(): int {
+    // ── int ────────────────────────────────────────────────────────────────
+    mut n: int = 12;
+    test::assert(n.is_even() && !n.is_odd(), "int.is_even / is_odd");
+    test::assert(n.is_positive() && !n.is_negative() && !n.is_zero(), "int.is_positive / is_negative / is_zero");
+    test::assert(n.gcd(18) == 6 && n.lcm(18) == 36, "int.gcd / lcm");
+
+    // ── double ─────────────────────────────────────────────────────────────
+    mut d: double = 2.5;
+    test::assert(d.sign() == 1.0, "double.sign");
+    test::assert(d.is_positive() && !d.is_negative() && !d.is_zero(), "double.is_positive / is_negative / is_zero");
+    test::assert(!d.is_integer() && d.floor() == 2.0 && d.ceil() == 3.0 && d.round() == 3.0, "double.is_integer / floor / ceil / round");
+
+    // ── bool ───────────────────────────────────────────────────────────────
+    mut t: bool = true;
+    mut f: bool = false;
+    test::assert(t.logical_xor(f) && f.logical_nand(t) && f.logical_nor(f) && f.implies(t), "bool.logical_xor / nand / nor / implies");
+
+    // ── char ───────────────────────────────────────────────────────────────
+    mut c: char = 'a';
+    test::assert(c.is_lower() && !c.is_upper() && c.is_alpha() && c.is_alphanumeric(), "char.is_lower / is_upper / is_alpha / is_alphanumeric");
+    test::assert(!c.is_digit() && !c.is_punctuation() && !c.is_whitespace(), "char.is_digit / is_punctuation / is_whitespace");
+    test::assert(c.to_upper() == 'A' && 'Q'.to_lower() == 'q', "char.to_upper / to_lower");
+
+    // ── array ──────────────────────────────────────────────────────────────
+    mut ints: int[3] = [3, 1, 2];
+    mut dbls: double[2] = [1.5, 0.5];
+    mut strs: string[2] = ["x", "y"];
+    test::assert(ints.sum(3) == 6 && ints.max(3) == 3 && ints.min(3) == 1, "array sum / max / min (int)");
+    test::assert(dbls.sum(2) == 2.0 && dbls.max(2) == 1.5 && dbls.min(2) == 0.5, "array sum / max / min (double)");
+    test::assert(ints.contains(3, 2) && dbls.contains(2, 0.5) && strs.contains(2, "y"), "array.contains (int / double / string)");
+    test::assert(ints.index_of(3, 2) == 2 && dbls.index_of(2, 1.5) == 0 && strs.index_of(2, "y") == 1, "array.index_of (int / double / string)");
+
+    // ── strings ────────────────────────────────────────────────────────────
+    test::assert(strings::length("abc") == 3 && strings::strlen("abc") == 3, "strings::length / strlen");
+    test::assert(strings::byte_at_unchecked("abc", 1) == 'b', "strings::byte_at_unchecked");
+    test::assert(strings::contains("hello", "ell") && strings::count_char("banana", 97) == 3, "strings::contains / count_char");
+    test::assert(strings::index_of("hello", "l") == 2 && strings::last_index_of("hello", "l") == 3, "strings::index_of / last_index_of");
+    test::assert(strings::starts_with("hello", "he") && strings::ends_with("hello", "lo"), "strings::starts_with / ends_with");
+    test::assert(strings::repeat("ab", 2) == "abab" && strings::substring("hello", 1, 3) == "el", "strings::repeat / substring");
+    test::assert(strings::replace("a-b", "-", "+") == "a+b", "strings::replace");
+    test::assert(strings::to_upper("ab") == "AB" && strings::to_lower("AB") == "ab", "strings::to_upper / to_lower");
+    test::assert(strings::trim("  x ") == "x" && strings::trim_start("  x ") == "x " && strings::trim_end("  x ") == "  x", "strings::trim / trim_start / trim_end");
+    immut parts: List<string> = strings::split("a,b", ",");
+    test::assert(parts.length() == 2 && strings::join(parts, "+") == "a+b", "strings::split / join");
+    test::assert(strings::pad_left("7", 3, '0') == "007" && strings::pad_right("7", 3, '.') == "7..", "strings::pad_left / pad_right");
+    immut pi: int = strings::parse_int("42") recover produce 0;
+    immut pd: double = strings::parse_double("1.5") recover produce 0.0;
+    test::assert(pi == 42 && pd == 1.5, "strings::parse_int / parse_double");
+    test::assert(parse_int_error_is_invalid_int("x"), "strings::StringParseError");
+    mut sb: strings::StringBuilder = strings::StringBuilder::default();
+    sb.reserve(8);
+    sb.append("ab");
+    sb.append_char('c');
+    test::assert(sb.length() == 3 && sb.to_string() == "abc", "StringBuilder.reserve / append / append_char / length / to_string");
+    sb.clear();
+    test::assert(sb.length() == 0, "StringBuilder.clear");
+
+    // ── hashing ────────────────────────────────────────────────────────────
+    test::assert(hashing::hash("k") == hashing::hash("k") && hashing::hash(7) == hashing::hash(7), "hashing::hash (string and generic)");
+
+    // ── list ───────────────────────────────────────────────────────────────
+    mut l: List<int> = List::default();
+    l.push(3);
+    l.push(1);
+    l.push(2);
+    l.set(0, 3);
+    test::assert(l.length() == 3 && l.get(0) == 3, "List.push / length / get / set");
+    l.sort(cmp_int);
+    test::assert(l.get(0) == 1 && l.binary_search(2, cmp_int) == 1 && l.find(is_three) == 2, "List.sort / binary_search / find");
+    test::assert(l.pop() == 3, "List.pop");
+    mut lc: List<int> = l.copy();
+    lc.push(9);
+    test::assert(lc.length() == 3 && l.length() == 2, "List.copy");
+
+    // ── stack ──────────────────────────────────────────────────────────────
+    mut s: Stack<int> = Stack::default();
+    s.push(1);
+    s.push(2);
+    test::assert(s.peek() == 2 && s.length() == 2 && s.pop() == 2, "Stack.push / peek / length / pop");
+    mut sc: Stack<int> = s.copy();
+    test::assert(sc.pop() == 1 && s.length() == 1, "Stack.copy");
+
+    // ── queue ──────────────────────────────────────────────────────────────
+    mut q: Queue<int> = Queue::default();
+    q.enqueue(1);
+    q.enqueue(2);
+    test::assert(q.peek() == 1 && q.length() == 2 && q.dequeue() == 1, "Queue.enqueue / peek / length / dequeue");
+    mut qc: Queue<int> = q.copy();
+    test::assert(qc.dequeue() == 2 && q.length() == 1, "Queue.copy");
+
+    // ── set ────────────────────────────────────────────────────────────────
+    mut st: Set<int> = Set::default();
+    st.add(5);
+    st.add(6);
+    test::assert(st.contains(5) && st.index_of(6) == 1 && st.length() == 2 && st.remove(5), "Set.add / contains / index_of / length / remove");
+    mut stc: Set<int> = st.copy();
+    stc.add(7);
+    test::assert(stc.length() == 2 && st.length() == 1, "Set.copy");
+
+    // ── map ────────────────────────────────────────────────────────────────
+    mut m: Map<string, int> = Map::default();
+    m.put("a", 1);
+    m.put("b", 2);
+    test::assert(m.get("a") == 1 && m.contains("b") && m.index_of("b") == 1 && m.length() == 2, "Map.put / get / contains / index_of / length");
+    immut got: int = m.try_get("a") recover produce -1;
+    test::assert(got == 1, "Map.try_get");
+    test::assert(map_miss_is_key_not_found(m), "map::MapError");
+    test::assert(m.keys().length() == 2 && m.values().length() == 2, "Map.keys / values");
+    m.remove("a");
+    test::assert(m.length() == 1, "Map.remove");
+    mut mc: Map<string, int> = m.copy();
+    mc.put("c", 3);
+    test::assert(mc.length() == 2 && m.length() == 1 && mc.get("b") == 2, "Map.copy");
+
+    return 0;
+}

@@ -1,0 +1,36 @@
+TURF E098 -- WRITE TO A TEMPORARY:
+
+CAUSE:
+  `bs[0]` calls the `[]` operator, which returns the element BY VALUE -- a copy.
+  Assigning into a field of that copy changes the copy and discards it, leaving the
+  container untouched, so the compiler rejects it rather than silently doing nothing.
+
+INCORRECT:
+    import list::List;
+    struct Big { a: int }
+    fn main(): int {
+        mut bs: List<Big> = List::default();
+        bs[0].a = 50;               // changes a copy of bs[0]
+        return 0;
+    }
+
+CORRECT (read, modify, store back):
+    import list::List;
+    struct Big { a: int }
+    fn main(): int {
+        mut bs: List<Big> = List::default();
+        bs.push(Big::default());
+        mut e: Big = bs[0];
+        e.a = 50;
+        bs[0] = e;
+        return 0;
+    }
+
+NOT AN ERROR:
+  Writing THROUGH a pointer or reference element, and writing into a nested list
+  (`grid[i][j] = v`): the write lands on the real thing.
+
+FIX:
+  Copy the element into a variable, change that, and assign it back with `bs[i] = e`.
+
+RELATED: E097 (generic operators), E080 (operator ownership).

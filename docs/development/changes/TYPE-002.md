@@ -684,7 +684,7 @@ levels; `lib/std`/`showcase`/prelude sweep clean.
 - `lib/std/collections/set.tr`'s `Set.indexOf()` and
   `lib/std/collections/map.tr`'s `Map.indexOf()` doc comments rewritten
   from "KNOWN LIMITATION" to "FIXED" (see *Standard-library changes*).
-- `docs/planning/LIMITATIONS.md` items 1 and 2 updated directly (not
+- `docs/archive/LIMITATIONS.md` items 1 and 2 updated directly (not
   queued via the handbook-sync process, since this file is an
   actively-maintained bug tracker, not part of the paused handbook/
   reference) — item 1 (`Map`/`Set` generic string equality) marked
@@ -926,7 +926,7 @@ a separate pass**: `docs/development/handbook-sync/PENDING.md`'s
 `collections.md` row corrected to say the ">8 bytes is no longer a hard
 limit" claim was false for five of six collections until D3 landed, not
 true since S14b as the row previously implied. `INVARIANTS.md`'s INV-GEN-1
-row corrected under D6, above. `docs/planning/LIMITATIONS.md` item 1's
+row corrected under D6, above. `docs/archive/LIMITATIONS.md` item 1's
 `Status: FIXED` banner re-verified correct and left untouched, per the
 plan's own instruction.
 
@@ -1400,7 +1400,7 @@ literal chain-depth measurement §9.5 describes; see *Known pitfalls*.
   hand-off to cover argument/return-position construction too, following
   the exact same pattern established here for `VarDeclExprAST`/
   `AssignmentExprAST`.
-- **S14b confirmed, by direct testing, that BOTH bugs `docs/planning/LIMITATIONS.md`
+- **S14b confirmed, by direct testing, that BOTH bugs `docs/archive/LIMITATIONS.md`
   items 1–2 describe are the SAME root cause §9.2 (this record's own *Why*
   section) named as measured consequence #2, and that fixing it needed
   NOTHING beyond what S12b–S14a already built.** Not assumed from the
@@ -1525,7 +1525,7 @@ S14b adds three more tests, all passing (689/689 full suite, default and
 `-O2`) — **`INV-TEST-1` (INVARIANTS.md) moves to `holds`**:
 - `10_set_string_dedup.tr` — **completion criterion 3**. Moved and
   rewritten from `tests/99_known_bugs/set_string_dedup_broken.tr`, which
-  this record's own `docs/planning/LIMITATIONS.md` cross-references
+  this record's own `docs/archive/LIMITATIONS.md` cross-references
   described as confirmed-broken since before TYPE-002 existed. Same
   runtime-built (`strings::trim()`) duplicate the original file used —
   INV-TEST-1's own worked example, now asserting the CORRECT outcome
@@ -1691,7 +1691,7 @@ rewrite and probably a section rename); `docs/architecture/memory_model.md`
 code quotes at now-wrong line numbers); `docs/reference/generics_and_operators.md`'s
 "Type-erasure model" and "`List<T*>` workaround" sections;
 `docs/reference/stdlib/collections.md`'s shared-design section — plus a
-fifth row explicitly recording that `docs/planning/LIMITATIONS.md` items
+fifth row explicitly recording that `docs/archive/LIMITATIONS.md` items
 1-3 were NOT queued there, since S14b updated them directly this session
 (see *Standard-library changes*/*Removed assumptions* for why that file is
 treated differently from the paused handbook/`docs/reference/`).

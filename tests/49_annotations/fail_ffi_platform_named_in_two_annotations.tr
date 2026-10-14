@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: names the platform 'macos' twice
+// The same platform named in two separate `@ffi` annotations on one declaration
+// is the same mistake as naming it twice in one (fail_ffi_platform_named_twice.tr):
+// only the first would be used, so the second used to be silently ignored.
+
+@ffi(macos: strlen)
+@ffi(macos: strnlen)
+extern fn text_length(s: string): int;
+
+fn main(): int {
+    return 0;
+}

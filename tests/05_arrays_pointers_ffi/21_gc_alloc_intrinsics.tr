@@ -1,5 +1,5 @@
 // Regression test: MEM-001's bare `gc_alloc`/`gc_alloc_zeroed`/`gc_realloc`
-// intrinsics (docs/planning/ARCHITECTURE_OVERHAUL.md §8, include/Intrinsics.h
+// intrinsics (docs/archive/ARCHITECTURE_OVERHAUL.md §8, src/sema/Intrinsics.h
 // category 1) -- the Turf-visible surface for libturfrt's
 // turf_rt_alloc/turf_rt_alloc_zeroed/turf_rt_realloc, exercised directly
 // here rather than only indirectly through the stdlib call sites (strings.tr,
@@ -27,25 +27,35 @@ fn main(): int {
         test::assert(ip[0] == 111 && ip[1] == 222, "gc_alloc's block must be writable for its full requested size");
 
         // gc_alloc_zeroed: every byte starts at 0, unlike gc_alloc (which
-        // makes no such promise). Checked via `string` indexing (a byte
-        // view), matching how io::read_to_string()/net::TcpConnection.read()
-        // actually consume this guarantee -- one already-nonzero byte
-        // written into the LAST slot proves this isn't accidentally passing
-        // because the allocator happened to hand back fresh, already-zero
-        // pages (glibc frequently does for a first-ever large calloc, which
-        // would make this assertion pass even from a non-zeroing gc_alloc).
-        mut z: string = gc_alloc_zeroed(8) to string;
-        z[7] = 9; // poison the last byte so an all-zero pass can't be coincidental
+        // makes no such promise). Checked via `char*` indexing (a raw byte
+        // view) -- one already-nonzero byte written into the LAST slot
+        // proves this isn't accidentally passing because the allocator
+        // happened to hand back fresh, already-zero pages (glibc frequently
+        // does for a first-ever large calloc, which would make this
+        // assertion pass even from a non-zeroing gc_alloc).
+        //
+        // FDN-004: deliberately `char*`, not `string` -- this buffer is
+        // all-zero bytes with one poisoned byte at the very end, i.e. it
+        // has NO valid C-string length at all (`strlen()` would read 0)
+        // until every byte before the poison is nonzero. `s[i]`'s new
+        // bounds check is checked against `strlen(s)` (see
+        // EmitStringBoundsCheck()'s doc comment, src/codegen/CodegenArray.cpp) --
+        // exactly right for a real NUL-terminated string, but wrong for
+        // inspecting a raw allocator block that isn't one. `char*` indexing
+        // has no such check (same as any other raw pointer), which is what
+        // this test actually wants.
+        mut z: char* = gc_alloc_zeroed(8) to char*;
+        z[7] = 9 to char; // poison the last byte so an all-zero pass can't be coincidental
         mut allZeroExceptLast: bool = true;
         mut i: int = 0;
         while i < 7 {
-            if z[i] != 0 {
+            if (z[i] to int) != 0 {
                 allZeroExceptLast = false;
             }
             i = i + 1;
         }
         test::assert(allZeroExceptLast, "gc_alloc_zeroed must zero-fill every byte it returns");
-        test::assert(z[7] == 9, "writing into a gc_alloc_zeroed block must actually persist");
+        test::assert((z[7] to int) == 9, "writing into a gc_alloc_zeroed block must actually persist");
 
         // gc_realloc: preserves existing contents up to the smaller of the
         // two sizes, and the grown tail is genuinely usable (not just

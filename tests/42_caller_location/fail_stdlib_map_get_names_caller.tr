@@ -1,0 +1,10 @@
+// LEC-007: a stdlib precondition panic names the CALLER's line, not a line in map.tr.
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: fail_stdlib_map_get_names_caller.tr:8: Map.get: no such key
+import map::Map;
+
+fn main(): int {
+    mut m: Map<string, int> = Map::default();
+    m.get("missing");
+    return 0;
+}

@@ -1,0 +1,28 @@
+`try` used where it cannot work
+
+    error IOError { NotFound(path: string) }
+    fn open(p: string): !int { ... }
+
+    fn main(): int {
+        immut n: int = try open("x");   // ERROR: 'main' returns 'int'
+        return n;
+    }
+    //   Hint: Handle the error here instead: `f() recover as err run { ... }`.
+
+`try e` passes the error of `e` on: if `e` (a `!T`) failed, `try` returns that
+same error value -- same variant, same payload, same message -- from the
+function it is written in, after running that function's pending `defer`s
+exactly as a `return` would. On success it is just the value. So it needs:
+
+- **A function that returns `!V`** (any `V`). `main` returns `int`, so nothing can
+  fail out of it: handle the error there with `recover`. A function returning a
+  plain type can be declared `!T` to let errors leave it.
+- **A place a `return` is allowed.** A `defer` runs while the function is
+  already returning, so a `try` anywhere inside one is an error. Handle the
+  error inside the deferred statement: `defer f() recover run { ... };`.
+- **A fallible operand.** `try plain()` where `plain` returns an `int` has no
+  error to pass on; drop the `try`.
+- **A function.** There is no function to return from at the top level.
+
+`try` is a reserved word, and binds like a prefix operator: `try a() + try b()`
+is `(try a()) + (try b())`.

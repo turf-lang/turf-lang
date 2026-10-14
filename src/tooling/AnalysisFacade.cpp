@@ -1,0 +1,963 @@
+/**
+ * @file AnalysisFacade.cpp
+ * @brief Implements the compiler query facade -- see include/turf/Analysis.h.
+ * @details Two halves. GlobalStateScope is the only code in the compiler
+ *          that saves and restores the front end's global state around an
+ *          isolated compile; analyze() runs the passes inside one. The rest
+ *          is the position index the queries answer from, built while the
+ *          Resolver walks the program.
+ *
+ * @author a2ys
+ * @copyright Copyright (c) 2026 TurfLang contributors. Licensed under the
+ * Apache License.
+ */
+
+#include "turf/Analysis.h"
+#include "turf/FrontEndIsolation.h"
+
+#include "frontend/AST.h"
+#include "analysis/Analysis.h"
+#include "analysis/CFG.h"
+#include "frontend/Lexer.h"
+#include "analysis/Lint.h"
+#include "tooling/PackageGraph.h"
+#include "frontend/Parser.h"
+#include "resolve/Resolver.h"
+#include "resolve/SymbolTable.h"
+#include "sema/TypeChecker.h"
+
+#include "llvm/ADT/SmallString.h"
+#include "llvm/Support/FileSystem.h"
+
+#include <algorithm>
+#include <cstring>
+#include <limits>
+#include <mutex>
+#include <sstream>
+#include <unordered_map>
+
+namespace turf {
+
+namespace {
+
+// ── Global state ────────────────────────────────────────────────────────────
+//
+// Every global the Lexer -> TypeChecker pipeline reads or writes, saved on
+// construction and put back on destruction, with the compile in between
+// starting from a fresh-process state. Anything added to the front end that
+// one compile accumulates and a second compile must not see belongs here
+// (or behind one of the Push/Pop pairs this calls); tests/api/ runs two
+// different programs back to back and against fresh runs to catch a
+// missing one.
+//
+// Deliberately NOT here:
+//   - GlobalSourceFile, the ifstream a CLI compile reads its input through.
+//     This scope never opens, closes, or seeks it -- analyze() points
+//     SourceFile at its own in-memory stream instead -- so a host compile
+//     that is mid-parse when an analysis runs inside it (the SLM Sandbox)
+//     resumes at the same byte.
+//   - BinopPrecedence and the builtin registry: filled once, identically,
+//     and never modified after.
+//   - IndexModuleDir()'s directory index (ParserModule.cpp): a cache of
+//     what exists under lib/std, not per-compile state.
+//   - ExprAST::NextNodeID: only ever compared for equality within one tree.
+//   - Codegen's globals and GlobalCFGs: no pass analyze() runs touches them
+//     (RunFlowAnalysis builds its CFGs locally).
+class GlobalStateScope {
+public:
+  GlobalStateScope() {
+    // Lexer cursor (the same set ParseFile()'s LexerStateGuard keeps, plus
+    // what that guard can leave alone because it never outlives a compile).
+    SavedSourceFile_ = SourceFile;
+    SavedLastChar_ = GetLastChar();
+    SavedCurTok_ = CurTok;
+    SavedCurLoc_ = CurLoc;
+    SavedCurLine_ = CurLine;
+    SavedCurCol_ = CurCol;
+    SavedNumLitSpelling_ = NumLitSpelling;
+    SavedNumLitClean_ = NumLitClean;
+    SavedNumLitRadix_ = NumLitRadix;
+    SavedBoolVal_ = BoolVal;
+    SavedCharVal_ = CharVal;
+    SavedIdentifierStr_ = IdentifierStr;
+    SavedStringVal_ = StringVal;
+    SavedBraceDepth_ = g_braceDepth;
+    SavedCurlyDepth_ = g_curlyDepth;
+    SavedParseRecursionDepth_ = g_parseRecursionDepth;
+    SavedProtoOnlyPass_ = g_protoOnlyPass;
+
+    SavedSourceFilename_ = SourceFilename;
+    SavedMainSourceFilename_ = MainSourceFilename;
+    SavedSourceLines_ = std::move(SourceLines);
+    SourceLines.clear();
+    // Swapped rather than copied: it holds every line of every file the
+    // host compile has read, lib/std included.
+    SavedAllSourceLines_.swap(AllSourceLines);
+
+    SavedRecoverActive_ = g_recoverActive;
+    SavedAIEnabled_ = g_AIEnabled;
+    SavedAllowUnsafeModules_ = g_AllowUnsafeModules;
+    SavedCompilerExecutablePath_ = CompilerExecutablePath;
+
+    SavedDiagnostics_ = DiagnosticEngine::saveState();
+    DiagnosticEngine::restoreState({});
+
+    // The package graph decides what `import` can reach (LEC-001); an
+    // analysis starts with none, as a plain single-file compile does, and
+    // gets one only from AnalysisOptions::PackageGraphFile.
+    SavedPackageGraph_ = std::move(g_PackageGraph);
+    g_PackageGraph = PackageGraph();
+
+    // InitializeCompilerGlobals() replaces GlobalSymbolTable outright; the
+    // host's must survive it.
+    SavedGlobalSymbolTable_ = std::move(GlobalSymbolTable);
+    InitializeCompilerGlobals();
+
+    PushParserCompileState();
+    PushResolverCompileState();
+
+    g_braceDepth = 0;
+    g_curlyDepth = 0;
+    g_parseRecursionDepth = 0;
+    g_protoOnlyPass = false;
+    g_recoverActive = false;
+  }
+
+  ~GlobalStateScope() {
+    g_PackageGraph = std::move(SavedPackageGraph_);
+    PopResolverCompileState();
+    PopParserCompileState();
+
+    GlobalSymbolTable = std::move(SavedGlobalSymbolTable_);
+    DiagnosticEngine::restoreState(std::move(SavedDiagnostics_));
+
+    CompilerExecutablePath = SavedCompilerExecutablePath_;
+    g_AllowUnsafeModules = SavedAllowUnsafeModules_;
+    g_AIEnabled = SavedAIEnabled_;
+    g_recoverActive = SavedRecoverActive_;
+
+    AllSourceLines.swap(SavedAllSourceLines_);
+    SourceLines = std::move(SavedSourceLines_);
+    MainSourceFilename = SavedMainSourceFilename_;
+    SourceFilename = SavedSourceFilename_;
+
+    g_protoOnlyPass = SavedProtoOnlyPass_;
+    g_parseRecursionDepth = SavedParseRecursionDepth_;
+    g_braceDepth = SavedBraceDepth_;
+    g_curlyDepth = SavedCurlyDepth_;
+    StringVal = SavedStringVal_;
+    IdentifierStr = SavedIdentifierStr_;
+    CharVal = SavedCharVal_;
+    BoolVal = SavedBoolVal_;
+    NumLitRadix = SavedNumLitRadix_;
+    NumLitClean = SavedNumLitClean_;
+    NumLitSpelling = SavedNumLitSpelling_;
+    CurCol = SavedCurCol_;
+    CurLine = SavedCurLine_;
+    CurLoc = SavedCurLoc_;
+    CurTok = SavedCurTok_;
+    SetLastChar(SavedLastChar_);
+    SourceFile = SavedSourceFile_;
+  }
+
+  GlobalStateScope(const GlobalStateScope &) = delete;
+  GlobalStateScope &operator=(const GlobalStateScope &) = delete;
+
+private:
+  std::istream *SavedSourceFile_;
+  int SavedLastChar_, SavedCurTok_, SavedCurLine_, SavedCurCol_;
+  SourceLocation SavedCurLoc_;
+  std::string SavedNumLitSpelling_, SavedNumLitClean_;
+  int SavedNumLitRadix_;
+  bool SavedBoolVal_;
+  char SavedCharVal_;
+  std::string SavedIdentifierStr_, SavedStringVal_;
+  int SavedBraceDepth_, SavedCurlyDepth_, SavedParseRecursionDepth_;
+  bool SavedProtoOnlyPass_;
+  std::string SavedSourceFilename_, SavedMainSourceFilename_;
+  std::vector<std::string> SavedSourceLines_;
+  std::map<std::string, std::vector<std::string>> SavedAllSourceLines_;
+  bool SavedRecoverActive_, SavedAIEnabled_, SavedAllowUnsafeModules_;
+  std::string SavedCompilerExecutablePath_;
+  DiagnosticEngine::State SavedDiagnostics_;
+  PackageGraph SavedPackageGraph_;
+  std::unique_ptr<SymbolTable> SavedGlobalSymbolTable_;
+};
+
+// One analysis at a time per process: everything GlobalStateScope saves is
+// shared by every thread. Recursive because an analysis may legitimately
+// start inside another on the same thread.
+std::recursive_mutex AnalysisMutex;
+
+// ── Node spans ──────────────────────────────────────────────────────────────
+
+// Where a node starts and, for a node that names something, how long that
+// name is. ExprAST has no virtual getLoc() -- each node class defines its
+// own -- hence a visitor. Kinds not overridden (BoolExprAST, CharExprAST,
+// StringExprAST, BlockExprAST, ...) carry no location and are skipped.
+class NodeSpanVisitor : public ASTVisitor {
+public:
+  SourceLocation Loc;
+  unsigned NameLen = 0;
+  bool Found = false;
+
+#define TURF_SPAN_LOC(Method, Type)                                          \
+  void Method(Type &Node) override { set(Node.getLoc(), 0); }
+  TURF_SPAN_LOC(visitNumber, NumberExprAST)
+  TURF_SPAN_LOC(visitNull, NullExprAST)
+  TURF_SPAN_LOC(visitBinary, BinaryExprAST)
+  TURF_SPAN_LOC(visitUnary, UnaryExprAST)
+  TURF_SPAN_LOC(visitAddressOf, AddressOfExprAST)
+  TURF_SPAN_LOC(visitAssignment, AssignmentExprAST)
+  TURF_SPAN_LOC(visitCompoundAssignment, CompoundAssignmentExprAST)
+  TURF_SPAN_LOC(visitPostfixExpr, PostfixExprAST)
+  TURF_SPAN_LOC(visitCast, CastExprAST)
+  TURF_SPAN_LOC(visitIf, IfExprAST)
+  TURF_SPAN_LOC(visitWhile, WhileExprAST)
+  TURF_SPAN_LOC(visitDoWhile, DoWhileExprAST)
+  TURF_SPAN_LOC(visitFor, ForExprAST)
+  TURF_SPAN_LOC(visitForEach, ForEachExprAST)
+  TURF_SPAN_LOC(visitBreak, BreakExprAST)
+  TURF_SPAN_LOC(visitContinue, ContinueExprAST)
+  TURF_SPAN_LOC(visitReturn, ReturnExprAST)
+  TURF_SPAN_LOC(visitCompare, CompareExprAST)
+  TURF_SPAN_LOC(visitWildcardPattern, WildcardPatternExprAST)
+  TURF_SPAN_LOC(visitStructPattern, StructPatternExprAST)
+  TURF_SPAN_LOC(visitErrorVariantPattern, ErrorVariantPatternExprAST) // LEC-004
+  TURF_SPAN_LOC(visitFuncCall, FuncCallExprAST)
+  TURF_SPAN_LOC(visitEnumDecl, EnumDeclExprAST)
+  TURF_SPAN_LOC(visitMachineDecl, MachineDeclExprAST)
+  TURF_SPAN_LOC(visitErrorDecl, ErrorDeclExprAST)
+  TURF_SPAN_LOC(visitRecoverExpr, RecoverExprAST)
+  TURF_SPAN_LOC(visitTry, TryExprAST) // LEC-004
+  TURF_SPAN_LOC(visitArrayDecl, ArrayDeclExprAST)
+  TURF_SPAN_LOC(visitArrayLiteral, ArrayLiteralExprAST)
+  TURF_SPAN_LOC(visitArrayAccess, ArrayAccessExprAST)
+  TURF_SPAN_LOC(visitSlice, SliceExprAST)
+  TURF_SPAN_LOC(visitSizeOf, SizeOfExprAST)
+#undef TURF_SPAN_LOC
+
+#define TURF_SPAN_NAME(Method, Type, LocGetter, NameGetter)                  \
+  void Method(Type &Node) override {                                         \
+    set(Node.LocGetter(), Node.NameGetter().size());                         \
+  }
+  TURF_SPAN_NAME(visitVariable, VariableExprAST, getLoc, getName)
+  TURF_SPAN_NAME(visitBindingPattern, BindingPatternExprAST, getLoc, getName)
+  TURF_SPAN_NAME(visitVarDecl, VarDeclExprAST, getNameLoc, getName)
+  TURF_SPAN_NAME(visitFuncDef, FuncDefExprAST, getNameLoc, getName)
+  TURF_SPAN_NAME(visitExternFuncDecl, ExternFuncDeclExprAST, getNameLoc,
+                 getName)
+  TURF_SPAN_NAME(visitMethodCall, MethodCallExprAST, getNameLoc, getMethod)
+  TURF_SPAN_NAME(visitFieldAccess, FieldAccessExprAST, getNameLoc,
+                 getFieldName)
+  TURF_SPAN_NAME(visitScopeAccess, ScopeAccessExprAST, getRightLoc,
+                 getRightName)
+  TURF_SPAN_NAME(visitStructDecl, StructDeclExprAST, getNameLoc, getName)
+  TURF_SPAN_NAME(visitModuleImport, ModuleImportExprAST, getNameLoc,
+                 getModuleName)
+#undef TURF_SPAN_NAME
+
+private:
+  void set(const SourceLocation &L, size_t Len) {
+    Loc = L;
+    NameLen = static_cast<unsigned>(Len);
+    Found = true;
+  }
+};
+
+NodeSpanVisitor spanOf(const ExprAST &Node) {
+  NodeSpanVisitor V;
+  const_cast<ExprAST &>(Node).accept(V);
+  return V;
+}
+
+// The key a file is indexed and queried under: its real path when it has
+// one on disk, else the path as given -- so "./a.tr", "a.tr" and a symlink
+// to it all meet, and an unsaved buffer that exists nowhere still works.
+std::string fileKey(const std::string &Path) {
+  llvm::SmallString<256> Real;
+  if (llvm::sys::fs::real_path(Path, Real))
+    return Path;
+  return Real.str().str();
+}
+
+std::string stripAnsi(const std::string &S) {
+  std::string Out;
+  Out.reserve(S.size());
+  for (size_t I = 0; I < S.size();) {
+    if (S[I] == '\x1b' && I + 1 < S.size() && S[I + 1] == '[') {
+      size_t J = I + 2;
+      while (J < S.size() && S[J] != 'm')
+        ++J;
+      I = J < S.size() ? J + 1 : J;
+    } else {
+      Out += S[I++];
+    }
+  }
+  return Out;
+}
+
+Location toLocation(const SourceLocation &L, const std::string &Fallback) {
+  return {L.Filename.empty() ? Fallback : L.Filename,
+          static_cast<unsigned>(L.Line < 0 ? 0 : L.Line),
+          static_cast<unsigned>(L.Col < 0 ? 0 : L.Col)};
+}
+
+Diagnostic toDiagnostic(const DiagnosticEngine::Diag &D,
+                        const std::string &EntryPath) {
+  Diagnostic Out;
+  Out.Level = D.IsWarning ? Severity::Warning : Severity::Error;
+  Out.Code = D.Code;
+  Out.Message = stripAnsi(D.Msg);
+  Out.Hint = stripAnsi(D.Hint);
+  Out.Where = toLocation(D.Loc, D.Filename.empty() ? EntryPath : D.Filename);
+  for (const auto &R : D.RelatedLocations)
+    Out.Related.push_back(
+        {toLocation(R.Loc, Out.Where.Path), stripAnsi(R.Description)});
+  return Out;
+}
+
+bool isDeclarationStart(int Tok) {
+  return Tok == TOK_FN || Tok == TOK_STRUCT || Tok == TOK_ENUM ||
+         Tok == TOK_MACHINE || Tok == TOK_AT || Tok == TOK_EXTERN ||
+         Tok == TOK_EXPORT || Tok == TOK_OPERATOR || Tok == TOK_ERROR ||
+         Tok == TOK_UNSAFE || Tok == TOK_PUB;
+}
+
+// The kinds main.cpp accepts from its "anything else" branch. Any other
+// statement at the top level is a hard error there -- printed and exited
+// on, never recorded -- so it is reported here as a diagnostic instead.
+bool isAllowedTopLevelStatement(const ExprAST *AST) {
+  return dynamic_cast<const FuncDefExprAST *>(AST) ||
+         dynamic_cast<const StructDeclExprAST *>(AST) ||
+         dynamic_cast<const EnumDeclExprAST *>(AST) ||
+         dynamic_cast<const ModuleImportExprAST *>(AST) ||
+         dynamic_cast<const ExternFuncDeclExprAST *>(AST);
+}
+
+// The entry file's top-level declarations, parsed exactly as main.cpp's
+// mandatory pass parses them (leading `unsafe module;`, prelude, the
+// OVH-011 self-import check, then one declaration or statement at a time),
+// except that every failure is recovered from at the next top-level
+// boundary instead of ending the compile.
+std::vector<std::unique_ptr<ExprAST>> parseEntryFile(std::size_t &PreludeCount,
+                                                     bool SkipPrelude) {
+  // The first token is lexed under a recovery guard too: a lexer error there
+  // (a file that starts with `0E`) used to raise with no guard armed, which
+  // calls exit() -- ending turf-lsp, or any host, instead of reporting a
+  // diagnostic (found by turf-fuzz's libFuzzer engine).
+  g_recoverActive = true;
+  try {
+    getNextToken();
+  } catch (const RecoverUnwind &) {
+    SkipToNextTopLevelBoundary();
+  }
+  g_recoverActive = false;
+
+  // Parsed before the prelude -- only here is the file's first token still
+  // current -- but placed after it: preludeImportCount() promises a prefix.
+  std::vector<std::unique_ptr<ExprAST>> Leading;
+  std::unique_ptr<ExprAST> LeadingUnsafeBlock;
+  g_recoverActive = true;
+  try {
+    if (!ParseLeadingUnsafeModuleDecl(LeadingUnsafeBlock) && LeadingUnsafeBlock)
+      AppendFlattenedTopLevelDecl(std::move(LeadingUnsafeBlock), Leading,
+                                  true);
+  } catch (const RecoverUnwind &) {
+    SkipToNextTopLevelBoundary();
+  }
+  g_recoverActive = false;
+
+  // The prelude imports load lib/std/core, so they fail when the standard
+  // library cannot be found at all. That has to be a diagnostic (E027 "Could
+  // not find module 'int'", at the top of the file) and not the end of the
+  // process: an editor whose server cannot find its stdlib is far more useful
+  // showing that message than disappearing. The program is then parsed
+  // without the prelude, and each of its own imports reports the same thing.
+  std::vector<std::unique_ptr<ExprAST>> Program;
+  g_recoverActive = true;
+  try {
+    if (!SkipPrelude)
+      Program = ParsePreludeImports(CurLoc);
+  } catch (const RecoverUnwind &) {
+  }
+  g_recoverActive = false;
+  PreludeCount = Program.size();
+  for (auto &AST : Leading)
+    Program.push_back(std::move(AST));
+
+  if (ClaimEntryFileImportSlot(SourceFilename))
+    return Program;
+
+  while (CurTok != TOK_EOF) {
+    if (CurTok == ';') {
+      getNextToken();
+      continue;
+    }
+    const int StartTok = CurTok;
+    g_recoverActive = true;
+    try {
+      auto AST = ParseExpression();
+      if (!AST) {
+        SkipToNextTopLevelBoundary();
+      } else if (isDeclarationStart(StartTok)) {
+        if (CurTok == ';')
+          LogErrorAt(CurLoc, ErrCode::UnexpectedToken, "Unexpected ';'",
+                     SLM::ErrorCategory::SYNTAX_ERROR);
+        AppendFlattenedTopLevelDecl(std::move(AST), Program, true);
+      } else {
+        if (CurTok != ';')
+          LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement",
+                     SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
+        else
+          getNextToken();
+        if (StartTok == TOK_IMPORT || isAllowedTopLevelStatement(AST.get())) {
+          RecordParsedTopLevelAST(AST.get());
+          Program.push_back(std::move(AST));
+        } else {
+          LogErrorAt(spanOf(*AST).Loc, ErrCode::StatementOutsideFunction,
+                     "Statements are not allowed outside of a function. "
+                     "Please define 'fn main(): int' and move this code "
+                     "inside.",
+                     SLM::ErrorCategory::SYNTAX_ERROR);
+        }
+      }
+    } catch (const RecoverUnwind &) {
+      SkipToNextTopLevelBoundary();
+    }
+    g_recoverActive = false;
+  }
+  return Program;
+}
+
+} // namespace
+
+// ── Result ──────────────────────────────────────────────────────────────────
+
+struct AnalysisResult::Impl {
+  std::string EntryPath;
+  std::string EntryKey;
+  // AnalysisOptions::ShouldCancel stopped the analysis. The Impl is then a
+  // fresh, empty one (see analyze()), so every query already answers
+  // nothing; this only lets a caller ask.
+  bool Cancelled = false;
+
+  std::vector<std::unique_ptr<ExprAST>> Program;
+  std::size_t PreludeCount = 0;
+  std::unique_ptr<Resolver> R;
+  std::unique_ptr<TypeChecker> TC;
+  // The analysis's own GlobalSymbolTable. Nothing queries it after
+  // analyze() returns, but types the TypeChecker inferred may point into
+  // what it registered, so it lives as long as they do.
+  std::unique_ptr<SymbolTable> Types;
+  std::vector<Diagnostic> Diagnostics;
+  // Module name -> the file an import of it loaded, resolved while the
+  // analysis's install root was in force (see definitionOf()).
+  std::unordered_map<std::string, std::string> ModuleFiles;
+  // ListAvailableModules(entry), taken while the install root and package
+  // graph of this analysis were in force (see importableModules()).
+  std::vector<std::string> ImportableModules;
+
+  // One entry per located node the Resolver reached in a buffer file.
+  struct IndexedNode {
+    const ExprAST *Node;
+    std::string File; // fileKey()
+    std::string Path; // as the lexer stamped it -- what queries report
+    unsigned Line, Col, NameLen;
+    std::size_t Scope; // index into Scopes
+  };
+  std::vector<IndexedNode> Index;
+  // Variables visible at a node, as the Resolver saw them there.
+  // Consecutive nodes usually share one, so each distinct run is stored
+  // once.
+  std::vector<std::vector<std::shared_ptr<VariableSymbol>>> Scopes;
+  // A call's callee node (a bare VariableExprAST, or the ScopeAccessExprAST
+  // of `m::f(...)`) -> the call. The callee is where the function's name is
+  // written, but the resolved target lives on the call.
+  std::unordered_map<const ExprAST *, const FuncCallExprAST *> CalleeOwner;
+
+  const IndexedNode *nodeAt(const std::string &Path, unsigned Line,
+                            unsigned Col) const {
+    const std::string Key = fileKey(Path);
+    const IndexedNode *Best = nullptr;
+    for (const auto &N : Index) {
+      if (N.NameLen == 0 || N.Line != Line || N.File != Key)
+        continue;
+      if (Col < N.Col || Col >= N.Col + N.NameLen)
+        continue;
+      if (!Best || N.Col >= Best->Col)
+        Best = &N;
+    }
+    return Best;
+  }
+
+  std::optional<Location> functionDecl(const ResolverFunctionSymbol *F,
+                                       const std::string &UseFile) const {
+    if (!F || F->DeclLoc.Line <= 0)
+      return std::nullopt;
+    std::string File = UseFile;
+    if (F->SourceModule.empty()) {
+      File = EntryPath;
+    } else if (auto It = ModuleFiles.find(F->SourceModule);
+               It != ModuleFiles.end()) {
+      File = It->second;
+    }
+    return Location{File, static_cast<unsigned>(F->DeclLoc.Line),
+                    static_cast<unsigned>(F->DeclLoc.Col)};
+  }
+};
+
+AnalysisResult::AnalysisResult(std::unique_ptr<Impl> I) : I_(std::move(I)) {}
+AnalysisResult::AnalysisResult(AnalysisResult &&) noexcept = default;
+AnalysisResult &AnalysisResult::operator=(AnalysisResult &&) noexcept = default;
+AnalysisResult::~AnalysisResult() = default;
+
+const std::vector<Diagnostic> &AnalysisResult::diagnostics() const {
+  return I_->Diagnostics;
+}
+
+bool AnalysisResult::succeeded() const {
+  for (const auto &D : I_->Diagnostics)
+    if (D.Level == Severity::Error)
+      return false;
+  return true;
+}
+
+bool AnalysisResult::cancelled() const { return I_->Cancelled; }
+
+const std::vector<std::string> &AnalysisResult::importableModules() const {
+  return I_->ImportableModules;
+}
+
+const TurfType *AnalysisResult::typeOf(const ExprAST *Node) const {
+  if (!I_->TC || !Node)
+    return nullptr;
+  return I_->TC->getType(Node).get();
+}
+
+const TurfType *AnalysisResult::typeAt(const std::string &Path, unsigned Line,
+                                       unsigned Col) const {
+  const auto *N = I_->nodeAt(Path, Line, Col);
+  if (!N)
+    return nullptr;
+  // A declaration's own node is typed `void` (it is a statement); the
+  // declared variable's type is what a tool means by "the type here".
+  if (auto *Decl = dynamic_cast<const VarDeclExprAST *>(N->Node))
+    return Decl->getResolvedSymbol() ? Decl->getResolvedSymbol()->Type.get()
+                                     : nullptr;
+  if (const TurfType *T = typeOf(N->Node))
+    return T;
+  if (auto *Var = dynamic_cast<const VariableExprAST *>(N->Node))
+    if (Var->getResolvedSymbol())
+      return Var->getResolvedSymbol()->Type.get();
+  // The name of a function being called: the call's result.
+  if (auto It = I_->CalleeOwner.find(N->Node); It != I_->CalleeOwner.end())
+    return typeOf(It->second);
+  return nullptr;
+}
+
+std::optional<Location> AnalysisResult::definitionOf(const std::string &Path,
+                                                     unsigned Line,
+                                                     unsigned Col) const {
+  const auto *N = I_->nodeAt(Path, Line, Col);
+  if (!N)
+    return std::nullopt;
+  const ExprAST *Node = N->Node;
+
+  // A declaration's definition is itself.
+  if (dynamic_cast<const VarDeclExprAST *>(Node) ||
+      dynamic_cast<const FuncDefExprAST *>(Node) ||
+      dynamic_cast<const ExternFuncDeclExprAST *>(Node) ||
+      dynamic_cast<const StructDeclExprAST *>(Node))
+    return Location{N->Path, N->Line, N->Col};
+
+  if (auto *Var = dynamic_cast<const VariableExprAST *>(Node)) {
+    // A local or parameter is always declared in the file that uses it.
+    if (const VariableSymbol *Sym = Var->getResolvedSymbol())
+      return Location{N->Path, static_cast<unsigned>(Sym->DeclLoc.Line),
+                      static_cast<unsigned>(Sym->DeclLoc.Col)};
+  }
+  if (auto It = I_->CalleeOwner.find(Node); It != I_->CalleeOwner.end())
+    return I_->functionDecl(It->second->getResolvedCallTarget(), N->Path);
+  if (auto *Call = dynamic_cast<const MethodCallExprAST *>(Node))
+    return I_->functionDecl(Call->getResolvedCallTarget(), N->Path);
+  return std::nullopt;
+}
+
+std::vector<SymbolInfo> AnalysisResult::symbolsInScope(const std::string &Path,
+                                                       unsigned Line,
+                                                       unsigned Col) const {
+  const std::string Key = fileKey(Path);
+  const Impl::IndexedNode *Latest = nullptr;
+  for (const auto &N : I_->Index) {
+    if (N.File != Key)
+      continue;
+    if (N.Line > Line || (N.Line == Line && N.Col > Col))
+      continue;
+    if (!Latest || N.Line > Latest->Line ||
+        (N.Line == Latest->Line && N.Col >= Latest->Col))
+      Latest = &N;
+  }
+
+  std::vector<SymbolInfo> Out;
+  if (Latest) {
+    for (const auto &Sym : I_->Scopes[Latest->Scope]) {
+      Out.push_back({Sym->Name,
+                     Sym->IsParameter ? SymbolKind::Parameter
+                                      : SymbolKind::Variable,
+                     Sym->Type.get(),
+                     Location{Latest->Path,
+                              static_cast<unsigned>(Sym->DeclLoc.Line),
+                              static_cast<unsigned>(Sym->DeclLoc.Col)}});
+    }
+  }
+
+  // Functions and modules are only known relative to the entry file: the
+  // Resolver's "current file" IS the entry file, and an imported module's
+  // own functions are reached through its name, not unqualified.
+  if (Key != I_->EntryKey || !I_->R)
+    return Out;
+  const ResolverSymbolTable &ST = I_->R->symbolTable();
+  for (const auto &Name : ST.getAllCurrentFileFunctionNames()) {
+    auto Overloads = ST.lookupCurrentFileFunctions(Name);
+    std::optional<Location> Decl =
+        Overloads.empty() ? std::nullopt
+                          : I_->functionDecl(Overloads.front(), I_->EntryPath);
+    Out.push_back({Name, SymbolKind::Function, nullptr, Decl});
+  }
+  for (const auto &Name : ST.getAllModuleNames())
+    Out.push_back({Name, SymbolKind::Module, nullptr, std::nullopt});
+  return Out;
+}
+
+const std::vector<std::unique_ptr<ExprAST>> &AnalysisResult::program() const {
+  return I_->Program;
+}
+
+std::size_t AnalysisResult::preludeImportCount() const {
+  return I_->PreludeCount;
+}
+
+const ResolverSymbolTable &AnalysisResult::symbols() const {
+  return I_->R->symbolTable();
+}
+
+// ── keywords() ──────────────────────────────────────────────────────────────
+
+const std::vector<Keyword> &keywords() {
+  // The lexer's table is filled once, statically, and never changes.
+  static const std::vector<Keyword> All = [] {
+    std::vector<Keyword> Out;
+    for (const auto &[Name, Tok] : ::Keywords) {
+      KeywordKind Kind = KeywordKind::Keyword;
+      switch (Tok) {
+      case TOK_TYPE_INT:
+      case TOK_TYPE_INT32:
+      case TOK_TYPE_DOUBLE:
+      case TOK_TYPE_BOOL:
+      case TOK_TYPE_CHAR:
+      case TOK_TYPE_STRING:
+      case TOK_TYPE_VOID:
+      case TOK_PTR:
+        Kind = KeywordKind::Type;
+        break;
+      case TOK_BOOL_LITERAL:
+      case TOK_NULL:
+        Kind = KeywordKind::Literal;
+        break;
+      default:
+        break;
+      }
+      Out.push_back({Name, Kind});
+    }
+    return Out; // std::map iteration is already sorted by name
+  }();
+  return All;
+}
+
+const std::vector<std::string> &preludeBareModules() {
+  return PreludeBareModuleList();
+}
+
+// ── runIsolated() ───────────────────────────────────────────────────────────
+
+namespace detail {
+
+void runIsolated(const std::function<void()> &Work) {
+  std::lock_guard<std::recursive_mutex> Lock(AnalysisMutex);
+  GlobalStateScope Scope;
+  Work();
+}
+
+} // namespace detail
+
+// What decides how an `import` resolves, from AnalysisOptions: where the
+// installation (lib/std) is and which package graph is in force. Shared by
+// analyze() and resolveModuleFile() so the two can never disagree about where
+// a module is. Called inside a GlobalStateScope, which puts it all back.
+// Returns why the graph could not be used (the caller reports it), if so.
+static std::optional<std::string>
+applyResolutionOptions(const AnalysisOptions &Options, const std::string &EntryPath) {
+  // TurfInstallRoot() falls back to the running executable's location; an
+  // embedder that is not the `turf` binary never set this.
+  if (CompilerExecutablePath.empty())
+    CompilerExecutablePath =
+        llvm::sys::fs::getMainExecutable(nullptr, (void *)&fileKey);
+  if (!Options.InstallRoot.empty())
+    SetInstallRootOverride(Options.InstallRoot);
+
+  // A package build's graph, as `turfc --check --module --package-graph`
+  // loads it: the entry file may be any file of the root package (an editor
+  // analyses whichever file is open, not only src/main.tr).
+  if (Options.PackageGraphFile.empty())
+    return std::nullopt;
+  std::string GraphError;
+  if (auto Graph = LoadPackageGraph(Options.PackageGraphFile, EntryPath,
+                                    /*EntryIsModule=*/true, GraphError)) {
+    g_PackageGraph = std::move(*Graph);
+    return std::nullopt;
+  }
+  return GraphError;
+}
+
+// ── analyze() ───────────────────────────────────────────────────────────────
+
+AnalysisResult analyze(const std::vector<SourceBuffer> &Buffers,
+                       const AnalysisOptions &Options) {
+  auto I = std::make_unique<AnalysisResult::Impl>();
+  I->R = std::make_unique<Resolver>(); // symbols() is never dangling
+  if (Buffers.empty())
+    return AnalysisResult(std::move(I));
+
+  std::lock_guard<std::recursive_mutex> Lock(AnalysisMutex);
+  GlobalStateScope Scope;
+
+  const SourceBuffer &Entry = Buffers.front();
+  I->EntryPath = Entry.Path;
+  I->EntryKey = fileKey(Entry.Path);
+
+  g_AIEnabled = false; // a query, not a --smart compile
+  g_AllowUnsafeModules = Options.AllowUnsafeModules;
+  DiagnosticEngine::setCollectAllDiagnostics(true);
+  // The install root and the package graph (see applyResolutionOptions()). A
+  // graph that cannot be used is the first diagnostic of the analysis, and the
+  // file is analysed on its own, so a broken manifest costs the project's
+  // imports, not every feature.
+  std::optional<Diagnostic> GraphProblem;
+  if (auto GraphError = applyResolutionOptions(Options, Entry.Path)) {
+    Diagnostic D;
+    D.Level = Severity::Error;
+    D.Message = std::move(*GraphError);
+    D.Where = Location{Entry.Path, 1, 1};
+    GraphProblem = std::move(D);
+  }
+
+  std::unordered_map<std::string, bool> BufferFiles; // fileKey -> true
+  for (const auto &B : Buffers) {
+    SetSourceOverlay(B.Path, B.Text);
+    BufferFiles[fileKey(B.Path)] = true;
+  }
+
+  std::istringstream EntryStream(Entry.Text);
+  SetSourceBuffer(EntryStream);
+  SourceFilename = Entry.Path;
+  MainSourceFilename = Entry.Path;
+  {
+    std::istringstream Lines(Entry.Text);
+    std::string Line;
+    while (std::getline(Lines, Line))
+      SourceLines.push_back(Line);
+  }
+  AllSourceLines[Entry.Path] = SourceLines;
+  resetLexer();
+  CurTok = 0;
+
+  I->Program = parseEntryFile(I->PreludeCount, Options.SkipPrelude);
+
+  // A cancelled analysis hands back an empty result rather than a partial
+  // one: a half-resolved program answers some queries wrongly and others not
+  // at all, and a caller that asked to cancel wants neither. The old state is
+  // destroyed here, while this analysis's globals are still the ones in
+  // force, and what is returned is built the way an empty analysis is.
+  auto Abandon = [&]() {
+    I.reset();
+    auto Empty = std::make_unique<AnalysisResult::Impl>();
+    Empty->R = std::make_unique<Resolver>();
+    Empty->Cancelled = true;
+    return AnalysisResult(std::move(Empty));
+  };
+  if (Options.ShouldCancel && Options.ShouldCancel())
+    return Abandon();
+
+  // The position index, filled as the Resolver reaches each node. Only
+  // nodes in files the caller supplied are indexed: those are the files a
+  // tool asks about, and lib/std alone is thousands of nodes.
+  std::unordered_map<std::string, std::string> KeyOfFilename;
+  std::vector<std::string> LastNames;
+  bool HaveScope = false;
+  auto IndexNode = [&](const ExprAST &Node,
+                       const std::vector<std::string> &Names) {
+    NodeSpanVisitor Span = spanOf(Node);
+    if (!Span.Found || Span.Loc.Line <= 0)
+      return;
+    auto KeyIt = KeyOfFilename.find(Span.Loc.Filename);
+    if (KeyIt == KeyOfFilename.end())
+      KeyIt = KeyOfFilename
+                  .emplace(Span.Loc.Filename, fileKey(Span.Loc.Filename))
+                  .first;
+    if (!BufferFiles.count(KeyIt->second))
+      return;
+
+    if (!HaveScope || Names != LastNames) {
+      std::vector<std::shared_ptr<VariableSymbol>> Visible;
+      for (const auto &Name : Names)
+        if (auto Sym = I->R->symbolTable().lookupVariable(Name))
+          Visible.push_back(std::move(Sym));
+      I->Scopes.push_back(std::move(Visible));
+      LastNames = Names;
+      HaveScope = true;
+    }
+    I->Index.push_back({&Node, KeyIt->second, Span.Loc.Filename,
+                        static_cast<unsigned>(Span.Loc.Line),
+                        static_cast<unsigned>(Span.Loc.Col < 0 ? 0
+                                                               : Span.Loc.Col),
+                        Span.NameLen, I->Scopes.size() - 1});
+  };
+  I->R->setScopeSnapshotCallback([&](const ExprAST &Node,
+                                     const std::vector<std::string> &Names) {
+    IndexNode(Node, Names);
+    // The Resolver looks a callee's name up without dispatching the callee
+    // node as a child, so it is indexed here, from its call.
+    if (auto *Call = dynamic_cast<const FuncCallExprAST *>(&Node)) {
+      if (const ExprAST *Callee = Call->getCallee()) {
+        I->CalleeOwner[Callee] = Call;
+        IndexNode(*Callee, Names);
+      }
+    }
+  });
+
+  // Each pass recovers per top-level declaration, so one bad function
+  // still leaves every other one resolved, typed, and queryable. A Pass-1
+  // (hoisting) failure is the one thing that still aborts resolveAll()
+  // whole; the TypeChecker is then skipped, as main.cpp skips it, rather
+  // than run against a half-registered program.
+  bool HoistingClean = true;
+  g_recoverActive = true;
+  try {
+    I->R->resolveAll(I->Program, /*RecoverPerDeclaration=*/true);
+  } catch (const RecoverUnwind &) {
+    HoistingClean = false;
+  }
+  g_recoverActive = false;
+  I->R->setScopeSnapshotCallback(nullptr);
+
+  if (Options.ShouldCancel && Options.ShouldCancel())
+    return Abandon();
+
+  if (HoistingClean) {
+    I->TC = std::make_unique<TypeChecker>(I->R->symbolTable());
+    g_recoverActive = true;
+    try {
+      I->TC->checkAll(I->Program, /*RecoverPerDeclaration=*/true);
+    } catch (const RecoverUnwind &) {
+    }
+    g_recoverActive = false;
+  }
+
+  if (Options.RunLint) {
+    for (auto &AST : I->Program) {
+      g_recoverActive = true;
+      try {
+        LintExpression(AST.get());
+      } catch (const RecoverUnwind &) {
+      }
+      g_recoverActive = false;
+    }
+  }
+
+  // The flow passes read what the Resolver and TypeChecker attached, so they
+  // need a program that got that far. Each function gets a CFG of its own,
+  // built and analysed as FuncDefExprAST::codegen() does, and thrown away
+  // here (never GlobalCFGs, which belongs to Codegen).
+  if (Options.RunFlowAnalysis && HoistingClean) {
+    // A function has no end location; its lines run up to the next
+    // top-level item's. One with an error in them is skipped
+    // (AnalysisOptions::RunFlowAnalysis).
+    std::vector<int> ErrorLines;
+    for (const auto &D : DiagnosticEngine::getDiagnostics())
+      if (!D.IsWarning &&
+          (D.Filename.empty() || fileKey(D.Filename) == I->EntryKey))
+        ErrorLines.push_back(D.Loc.Line);
+    for (size_t K = 0; K < I->Program.size(); ++K) {
+      auto *F = dynamic_cast<FuncDefExprAST *>(I->Program[K].get());
+      if (!F || !F->getBody() || !F->getTypeParams().empty())
+        continue;
+      const int First = F->getLoc().Line;
+      int End = std::numeric_limits<int>::max();
+      for (size_t J = K + 1; J < I->Program.size(); ++J) {
+        NodeSpanVisitor Next = spanOf(*I->Program[J]);
+        if (Next.Found && Next.Loc.Line > First) {
+          End = Next.Loc.Line;
+          break;
+        }
+      }
+      if (std::any_of(ErrorLines.begin(), ErrorLines.end(),
+                      [&](int L) { return L >= First && L < End; }))
+        continue;
+
+      // The name codegen gives it (FuncDefExprAST::codegen(); the analysed
+      // file is never a module), so allPathsRecurse() can tell a call to
+      // itself from a call to a same-named overload.
+      std::string Mangled = F->getName();
+      if (Mangled != "main") {
+        Mangled = "turf_" + sanitizeSymbolName(F->getName());
+        for (const auto &P : F->getParams())
+          if (P.Type)
+            Mangled += "_" + P.Type->getMangledName();
+      }
+
+      g_recoverActive = true;
+      try {
+        auto Cfg = CFGBuilder().buildCFG(F->getName(), F->getReturnTypePtr(),
+                                         F->getBodyMut(), F->getLoc(), Mangled);
+        runFunctionFlowPasses(*Cfg, F->getName(), F->getLoc(), {});
+      } catch (const RecoverUnwind &) {
+      }
+      g_recoverActive = false;
+    }
+  }
+
+  // Resolved now, while this analysis's install root and package graph are
+  // the ones in force.
+  I->ImportableModules = ListAvailableModules(Entry.Path);
+  for (const auto &Name : I->R->symbolTable().getAllModuleNames()) {
+    std::string File = ResolveModuleFile(Name, Entry.Path);
+    if (!File.empty())
+      I->ModuleFiles.emplace(Name, std::move(File));
+  }
+
+  if (GraphProblem)
+    I->Diagnostics.push_back(std::move(*GraphProblem));
+  for (const auto &D : DiagnosticEngine::getDiagnostics()) {
+    if (D.IsWarning && !Options.IncludeStdlibWarnings &&
+        IsLibStdWarningLocation(D.Filename))
+      continue;
+    I->Diagnostics.push_back(toDiagnostic(D, Entry.Path));
+  }
+
+  I->Types = std::move(GlobalSymbolTable);
+  return AnalysisResult(std::move(I));
+}
+
+std::string resolveModuleFile(const std::string &ModuleName,
+                              const std::string &ImportingFile,
+                              const AnalysisOptions &Options) {
+  std::lock_guard<std::recursive_mutex> Lock(AnalysisMutex);
+  GlobalStateScope Scope;
+  // A graph that cannot be loaded is analyze()'s to report; here it just
+  // means the single-file answer.
+  applyResolutionOptions(Options, ImportingFile);
+  return ResolveModuleFile(ModuleName, ImportingFile);
+}
+
+} // namespace turf

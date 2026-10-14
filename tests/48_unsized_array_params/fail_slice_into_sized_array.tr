@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E003
+// EXPECT-DIAG: Cannot initialize 'b' ('int[3]') from a value of type 'int[]'.
+// A slice's length is only known at run time, so it can't become a T[N].
+// Before this was checked, Codegen stored the slice into b's storage.
+fn main(): int {
+    mut a: int[3] = [1, 2, 3];
+    immut v = a[..];
+    mut b: int[3] = v;
+    return b[0];
+}

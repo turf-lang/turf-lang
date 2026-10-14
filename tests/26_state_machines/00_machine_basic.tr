@@ -1,7 +1,7 @@
 // Test: machine declarations reuse the enum machinery for free -- ::-access,
 // equality, ordinals, and COUNT should all "just work" with zero machine-
 // specific code anywhere in the Resolver/TypeChecker/Codegen ::/compare
-// paths (TurfMachineType IS-A TurfEnumType, see include/Types.h).
+// paths (TurfMachineType IS-A TurfEnumType, see src/sema/Types.h).
 
 import test;
 

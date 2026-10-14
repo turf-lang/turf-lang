@@ -1,0 +1,18 @@
+Turf doesn't know that escape sequence
+
+Inside a string or a character, a backslash `\` starts an "escape sequence": a short code for something you can't easily type, like a line break. Turf knows exactly these:
+
+    \n   a new line          \t   a tab
+    \r   carriage return     \0   the null character
+    \\   a backslash         \"   a double quote
+    \'   a single quote      \a \b \f \v   the rarer control characters
+
+Anything else after a backslash is an error, because Turf would otherwise have to guess what you meant:
+
+    mut path: string = "C:\temp\q";     // \q is not an escape sequence
+
+If you wanted a real backslash character, write it twice:
+
+    mut path: string = "C:\\temp\\q";
+
+Most often this error is a Windows-style path or a regular expression with single backslashes in it. Double each backslash and it goes away.

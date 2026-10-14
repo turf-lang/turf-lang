@@ -1,0 +1,1 @@
+{"explanation": "describe() says it returns a string, but sum is an int.", "fix_mode": "MODIFY", "original_code": "    return sum;", "new_code": "    return sum to string;", "suggested_comment": "Convert the sum to a string.", "warning": "", "category": "TYPE_MISMATCH"}

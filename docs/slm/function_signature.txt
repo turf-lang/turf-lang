@@ -58,10 +58,10 @@ VOID VALUE MISUSE:
   or used inside a larger expression.
 
   INCORRECT:
-    mut x: int = voidFunc();     // ERROR: Cannot initialise 'int' variable
+    mut x: int = void_func();     // ERROR: Cannot initialise 'int' variable
                                  // 'x' with value of type 'void'.
   CORRECT:
-    voidFunc();                  // call it as a standalone statement
+    void_func();                  // call it as a standalone statement
 
 FORWARD CALLS:
   Turf performs a pre-pass that hoists function prototypes, so you CAN call

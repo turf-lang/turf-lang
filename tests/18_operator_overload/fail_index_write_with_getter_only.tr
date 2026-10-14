@@ -1,0 +1,17 @@
+// EXPECT-DIAG: E056
+// EXPECT-DIAG: No 'operator[]=' overload matches 'IntBox[int] = int'
+// Mirror of fail_index_read_with_setter_only.tr: a type with only
+// `operator []` can be read but not assigned through.
+struct IntBox {
+    a: int
+}
+
+operator [](box: IntBox, index: int): int {
+    return box.a;
+}
+
+fn main(): int {
+    mut box: IntBox = IntBox::default();
+    box[0] = 1;
+    return 0;
+}

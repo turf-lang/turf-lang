@@ -1,0 +1,50 @@
+TURF E093 -- NON-EXHAUSTIVE COMPARE:
+
+CAUSE:
+  A `compare` has no `otherwise` and no unguarded `_` arm, yet its arms do not cover
+  every value of the subject, so nothing says what to do with an uncovered value.
+  Subjects that must be covered completely:
+    - enum or machine: every variant;
+    - `bool`: both `true` and `false`;
+    - an open error value (`err` in `recover as err run`): the set cannot be listed,
+      so it ALWAYS needs `otherwise` or `_`;
+    - a value of a DECLARED error type: all its variants, each by an unguarded
+      variant pattern whose fields all match anything (`IOError::Denied(_, mode)`);
+      a variant whose pattern can fail (`IOError::Denied(_, 0)`) is not covered.
+  A GUARDED arm never counts toward coverage, however complete it looks.
+  An `int`, `string` or `char` subject is different: a compare over one may match
+  nothing, in which case it does nothing.
+
+INCORRECT:
+    enum Color { Red, Green, Blue }
+    compare c {
+        matches Color::Red:  ...  done
+        matches Color::Green ...  done
+    }                                // missing Color::Blue
+    compare c {
+        matches Color::Green if ready: ...   // guarded: Green still uncovered
+    }
+
+CORRECT:
+    enum Color { Red, Green, Blue }
+
+    mut c: Color = Color::Red;
+    mut n: int = 0;
+    compare c {
+        matches Color::Red:
+            n = 1;
+        done
+        matches Color::Green:
+            n = 2;
+        done
+        matches Color::Blue:
+            n = 3;
+        done
+    }
+    // or end with `otherwise:` / `matches _:` instead of listing every variant
+
+FIX:
+  Add an arm for each missing variant (the message lists them), or add
+  `otherwise:` / `matches _:`.
+
+RELATED: E094 (a dead arm), E092 (illegal pattern), E133 (duplicate pattern).

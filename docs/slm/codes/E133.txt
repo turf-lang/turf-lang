@@ -1,0 +1,35 @@
+TURF E133 -- DUPLICATE MATCHES ARM:
+
+CAUSE:
+  A `compare` runs the first `matches` arm that fits. A later arm matching a value an
+  earlier arm already handles can never run, which is a hard error here because it almost
+  always means one arm was meant to match something else.
+
+INCORRECT:
+    compare day {
+        matches 1: ... done
+        matches 2: ... done
+        matches 1: ... done          // 1 is already handled
+    }
+
+CORRECT (stack headers to share one body):
+    mut day: int = 3;
+    mut n: int = 0;
+    compare day {
+        matches 1:
+        matches 7:                   // 1 or 7
+            n = 1;
+        done
+        matches 2:
+            n = 2;
+        done
+    }
+
+FIX:
+  Change the repeated value to the intended one, delete the extra arm, or stack the
+  headers over one body.
+
+NOT THIS ERROR:
+  An arm made dead by an earlier CATCH-ALL (`matches _:`) is only the warning E094.
+
+RELATED: E094 (unreachable arm), E092 (invalid pattern), E093 (non-exhaustive compare).

@@ -1,0 +1,21 @@
+TURF E117 -- INVALID ERROR DECLARATION:
+
+CAUSE:
+  An `error` type can be written in exactly one of two forms, and the declaration
+  mixed them.
+    bare (no variants), ends with `;`:    error NotFound;
+    with variants, braces, no `;`:        error IOError { NotFound, PermissionDenied, Closed }
+  Writing the bare `;` and then also a `{ ... }` variant list is ambiguous (is the type
+  finished?), so it is rejected.
+
+INCORRECT:
+    error NotFound; { Missing }
+
+CORRECT:
+    error NotFound;
+    error IOError { NotFound, PermissionDenied, Closed }
+
+FIX:
+  Keep whichever form was meant and delete the other.
+
+RELATED: E096 (error variant payloads), E114 (duplicate variant), E132 (invalid recover).

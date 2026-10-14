@@ -10,6 +10,6 @@ import test;
 fn main(): int {
     mut arr = [10, 20, 30];
     test::assert(arr[0] == 10 && arr[1] == 20 && arr[2] == 30,
-                 "array literal initializer infers T[N] under guess");
+        "array literal initializer infers T[N] under guess");
     return 0;
 }

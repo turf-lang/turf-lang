@@ -27,16 +27,16 @@ fn main(): int {
     // Spans: additive < bitwise-AND < bitwise-XOR < bitwise-OR < relational
     // < equality < logical-AND < logical-OR (loosest to tightest, reading
     // the parenthesization inside-out).
-    mut natural: bool = 1 + 2 * 3 & 15 << 1 ^ 6 | 1 < 10 == 1 && 1 || 0;
-    mut expected: bool = ((((((((1 + (2 * 3)) & (15 << 1)) ^ 6) | 1) < 10) == 1) && 1) || 0);
+    mut natural: bool = 1 + 2 * 3 & 15 << 1 ^ 6 | 1 < 10 == true && true || false;
+    mut expected: bool = ((((((((1 + (2 * 3)) & (15 << 1)) ^ 6) | 1) < 10) == true) && true) || false);
     test::assert(natural == expected, "full operator chain must match its fully-parenthesized equivalent");
     test::assert(natural == true, "full operator chain's computed value should be true");
 
     // A second, independent chain spanning logical OR/AND and relational
     // comparisons (no bitwise operators this time, so no int-purity
     // constraint to work around).
-    mut natural2: bool = 5 > 3 && 2 < 4 || 0 && 1;
-    mut expected2: bool = ((5 > 3) && (2 < 4)) || (0 && 1);
+    mut natural2: bool = 5 > 3 && 2 < 4 || false && true;
+    mut expected2: bool = ((5 > 3) && (2 < 4)) || (false && true);
     test::assert(natural2 == expected2, "OR/AND/relational chain must match its fully-parenthesized equivalent");
     test::assert(natural2 == true, "OR/AND/relational chain's computed value should be true");
 

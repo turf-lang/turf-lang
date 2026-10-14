@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E057
+// EXPECT-DIAG: Bitwise operator requires integer operands, but left operand is 'double'
 // FAIL TEST: Bitwise right shift with double type
 // 1.5 >> 2 should emit a TypeError
 

@@ -1,0 +1,27 @@
+// Inside a narrowed arm, each straight-line transition is checked against
+// the state the previous one moved to.
+import test;
+
+machine C {
+    Idle -> Connecting,
+    Connecting -> Connected,
+    Connected -> Idle
+}
+
+fn go(c: C): C {
+    mut x: C = c;
+    compare x {
+        matches C::Idle:
+        x.transition(C::Connecting);
+        x.transition(C::Connected);
+        done
+        otherwise:
+        return x;
+    }
+    return x;
+}
+
+fn main(): int {
+    test::assert(go(C::Idle) to int == 2, "Idle -> Connecting -> Connected");
+    return 0;
+}

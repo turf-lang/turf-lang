@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E008
+// EXPECT-DIAG: You're using 'd' (type 'Direction') before it has a value
 // SEM-004 (F-INIT-1): an enum-typed local declared without an initializer
 // is statically unassigned -- reading it before any assignment is
 // DefiniteAssignmentError (E008). Before SEM-004, an enum was a

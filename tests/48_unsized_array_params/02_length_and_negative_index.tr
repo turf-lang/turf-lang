@@ -1,0 +1,38 @@
+// Issue #260: inside a function taking `arr: T[]`, `arr.length()` is the
+// caller's real element count (it used to be -1, the static "unsized"
+// marker), and a negative index counts back from the end exactly as it does
+// on a `T[N]` (it used to be raw pointer arithmetic, `arr[-1]` reading the
+// memory BEFORE the array).
+import test;
+
+fn len_of(arr: int[]): int {
+    return arr.length();
+}
+
+fn last(arr: int[]): int {
+    return arr[-1];
+}
+
+fn first_via_negative(arr: int[]): int {
+    return arr[-arr.length()];
+}
+
+fn bump_last(arr: int[]): void {
+    arr[-1] += 100;
+}
+
+fn main(): int {
+    mut a: int[4] = [10, 20, 30, 40];
+    mut b: int[1] = [5];
+
+    test::assert(len_of(a) == 4, "length of an int[4]");
+    test::assert(len_of(b) == 1, "length of an int[1]");
+    test::assert(len_of([1, 2, 3, 4, 5, 6, 7]) == 7, "length of a literal");
+
+    test::assert(last(a) == 40, "arr[-1] is the last element");
+    test::assert(first_via_negative(a) == 10, "arr[-length] is the first element");
+
+    bump_last(a);
+    test::assert(a[3] == 140, "a negative-index compound write lands on the last element");
+    return 0;
+}

@@ -6,20 +6,20 @@
 // the ones below fill gaps Turf has no operator for at all.
 
 // Turf has no built-in XOR for bool (`^` is bitwise, int-only).
-fn logical_xor(a: bool, b: bool): bool {
+pub fn logical_xor(a: bool, b: bool): bool {
     return a != b;
 }
 
-fn logical_nand(a: bool, b: bool): bool {
+pub fn logical_nand(a: bool, b: bool): bool {
     return !(a && b);
 }
 
-fn logical_nor(a: bool, b: bool): bool {
+pub fn logical_nor(a: bool, b: bool): bool {
     return !(a || b);
 }
 
 // implies: material implication (`a -> b`), i.e. "if a then b". Turf has no
 // operator spelling for this at all.
-fn implies(a: bool, b: bool): bool {
+pub fn implies(a: bool, b: bool): bool {
     return !a || b;
 }

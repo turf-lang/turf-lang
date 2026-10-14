@@ -1,0 +1,14 @@
+// EXPECT-DIAG: E107
+// EXPECT-DIAG: has no body
+// REL-004 (fuzzer): `operator [](...): T ;` shared the null-body "forward
+// declaration" path of `fn` and crashed Codegen. Found as a one-token
+// mutation of 18_operator_overload/fail_operator_postfix_via_index.tr.
+struct IntBox {
+    v: int,
+}
+
+operator [](box: IntBox, index: int): int ;
+
+fn main(): int {
+    return 0;
+}

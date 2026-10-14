@@ -2,53 +2,58 @@
 // UFCS-callable helpers for `char` (STRING_UFCS_OPERATOR_CHAR_RFC.md §3/§5.3).
 // Part of the prelude -- always in scope, no explicit `import char;` needed.
 // This is the RFC's own named example of what a prelude module should look
-// like (`c.isDigit()`, etc.).
+// like (`c.is_digit()`, etc.).
 //
 // ASCII-only, matching char's own "1 byte, no Unicode" design (RFC §3).
 // Arithmetic on char values requires an explicit `to int` cast first (char
 // has no built-in arithmetic) -- every helper below does that internally.
+//
+// Names are snake_case like every other public function in the standard
+// library (LEC-007, FREEZE.md §6.20 F-API-2). They were camelCase
+// (`isDigit`, `toUpper`) until that milestone, the one place the stdlib
+// disagreed with itself.
 
-fn isDigit(c: char): bool {
+pub fn is_digit(c: char): bool {
     return (c to int) >= 48 && (c to int) <= 57; // '0'..'9'
 }
 
-fn isUpper(c: char): bool {
+pub fn is_upper(c: char): bool {
     return (c to int) >= 65 && (c to int) <= 90; // 'A'..'Z'
 }
 
-fn isLower(c: char): bool {
+pub fn is_lower(c: char): bool {
     return (c to int) >= 97 && (c to int) <= 122; // 'a'..'z'
 }
 
-fn isAlpha(c: char): bool {
-    return c.isUpper() || c.isLower();
+pub fn is_alpha(c: char): bool {
+    return c.is_upper() || c.is_lower();
 }
 
-fn isAlphaNumeric(c: char): bool {
-    return c.isAlpha() || c.isDigit();
+pub fn is_alphanumeric(c: char): bool {
+    return c.is_alpha() || c.is_digit();
 }
 
-// isPunctuation: printable ASCII (33..126) that's neither a letter nor a
+// is_punctuation: printable ASCII (33..126) that's neither a letter nor a
 // digit -- e.g. '.', ',', '!', '('.
-fn isPunctuation(c: char): bool {
+pub fn is_punctuation(c: char): bool {
     mut n: int = c to int;
-    return n >= 33 && n <= 126 && !c.isAlphaNumeric();
+    return n >= 33 && n <= 126 && !c.is_alphanumeric();
 }
 
-fn isWhitespace(c: char): bool {
+pub fn is_whitespace(c: char): bool {
     mut n: int = c to int;
     return n == 32 || n == 9 || n == 10 || n == 13; // space, tab, \n, \r
 }
 
-fn toUpper(c: char): char {
-    if c.isLower() {
+pub fn to_upper(c: char): char {
+    if c.is_lower() {
         return ((c to int) - 32) to char;
     }
     return c;
 }
 
-fn toLower(c: char): char {
-    if c.isUpper() {
+pub fn to_lower(c: char): char {
+    if c.is_upper() {
         return ((c to int) + 32) to char;
     }
     return c;

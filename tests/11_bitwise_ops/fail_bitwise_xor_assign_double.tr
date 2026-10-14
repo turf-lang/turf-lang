@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E057
+// EXPECT-DIAG: Bitwise compound assignment requires an integer operand, but the left operand is 'double'
 // FAIL TEST: Compound bitwise-XOR assignment with a non-integer LHS.
 // d ^= 3 should emit a TypeError (double is not an integer type), same
 // restriction as the plain `d ^ 3` form (see fail_bitwise_xor_double.tr).

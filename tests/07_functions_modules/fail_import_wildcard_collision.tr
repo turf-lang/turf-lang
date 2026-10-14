@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E024
+// EXPECT-DIAG: 'shared' is imported from two different modules
 // Regression test: same collision-detection path as
 // fail_import_symbol_collision.tr, but triggered via two wildcard imports
 // instead of two explicit single-symbol imports -- proves

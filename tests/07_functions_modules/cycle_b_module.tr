@@ -3,6 +3,6 @@
 // doc comment for the full picture.
 import cycle_a_module;
 
-fn cycleB(): int {
+pub fn cycleB(): int {
     return 2;
 }

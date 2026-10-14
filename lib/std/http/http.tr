@@ -6,7 +6,7 @@
 // and 04_http_callback_routing.tr, both passing):
 //   - The heap-corruption crash during a real request/response round trip
 //     was NOT specific to this file at all -- it was a compiler bug in
-//     AssignmentExprAST::codegen() (src/CodegenVar.cpp): `buf[i] = charExpr;`
+//     AssignmentExprAST::codegen() (src/codegen/CodegenVar.cpp): `buf[i] = charExpr;`
 //     on a `string` stored a full 8-byte i64 at a 1-byte-wide `i8` GEP
 //     slot (the LOGICAL type of a string-index access is `int`, but its
 //     physical storage is one byte), silently overwriting 7 bytes past
@@ -24,7 +24,7 @@
 //     own doc comment below explains in full (a generic method's body used
 //     to be type-checked/codegenned once, shared across every
 //     instantiation, so `self.routes.keys[i] == path` inside `Map`'s own
-//     `.tryGet()`/`.contains()` could never see the concrete `string` type
+//     `.try_get()`/`.contains()` could never see the concrete `string` type
 //     needed to dispatch `strings.tr`'s real `operator==`). `Request.get_header()`/
 //     `has_header()` and `Server.route_index()`/`has_route()`/`get_route()`
 //     used to hand-roll their own linear scan to sidestep this; STD-003
@@ -35,7 +35,7 @@
 // Design:
 //   - Mechanical extraction of the request/response handling
 //     `showcase/http_server.tr` and `showcase/http_client.tr` already
-//     hand-write inline, following docs/planning/DESIGN_NOTES.md §4's
+//     hand-write inline, following docs/archive/DESIGN_NOTES.md §4's
 //     staged plan -- this is stage 1 (Request/Response structs + parsing +
 //     response building) plus a genuine stage-2 callback router, which
 //     turned out to be buildable now: DESIGN_NOTES.md marked callback
@@ -63,7 +63,7 @@
 //     bug: a generic struct's field type never got registered under its
 //     OWN base name when first seen as a nested field, so a later,
 //     genuine build of that struct never filled in the stub -- see
-//     src/CodegenCore.cpp's `getLLVMType()` GenericType branch, fixed
+//     src/codegen/CodegenCore.cpp's `getLLVMType()` GenericType branch, fixed
 //     alongside this file). Confirmed fixed and covered by
 //     tests/34_http_and_json/.
 //   - A per-status-code text table only covers the handful of codes this
@@ -83,6 +83,7 @@
 //       };
 //       while true {
 //           mut conn: net::TcpConnection = listener.accept() recover run { continue; };
+//           defer conn.close();   // runs at the end of this iteration
 //           mut req: http::Request = http::parse_request(conn);
 //           mut res: http::Response;
 //           res.conn = conn;
@@ -91,7 +92,6 @@
 //           } else {
 //               res.send_text(404, "not found");
 //           }
-//           conn.close();
 //       }
 //       return 0;
 //   }
@@ -119,40 +119,41 @@ import map::Map;
 
 // ─── Request ─────────────────────────────────────────────────────────────
 
-struct Request {
-    method: string,
-    path: string,
-    headers: Map<string, string>,
-    body: string
+pub struct Request {
+    pub method: string,
+    pub path: string,
+    pub headers: Map<string, string>,
+    pub body: string
 }
 
 // get_header/has_header exist as thin, named wrappers over
-// `self.headers.tryGet(name)`/`.contains(name)` (STD-003, item 4,
+// `self.headers.try_get(name)`/`.contains(name)` (STD-003, item 4,
 // ARCHITECTURE_OVERHAUL.md §8) -- kept as their own methods rather than
 // inlined at every call site both for the more specific panic message
 // below (`Map.get`'s own is generic, "no such key", with no header name in
-// it -- `tryGet` + `recover run` is what lets this method supply its own)
+// it -- `try_get` + `recover run` is what lets this method supply its own)
 // and because `req.get_header(name)`/`req.has_header(name)` reads better
 // than `req.headers.get(name)` at a call site that has no reason to know
 // `headers` is a `Map` at all. Until this group, `Map<K, V>`'s own generic
-// `.get()`/`.tryGet()`/`.contains()` were content-INCORRECT for `K =
+// `.get()`/`.try_get()`/`.contains()` were content-INCORRECT for `K =
 // string` (compared by raw pointer identity, not bytes, under Type
 // Erasure) and this file hand-rolled a linear scan over
 // `self.headers.keys[i]`/`.values[i]` instead -- monomorphization
 // (TYPE-002) fixed that gap for `Map<K, V>` generally, so the hand-rolled
 // scan is no longer needed here; see docs/development/changes/STD-003.md
-// and docs/planning/LIMITATIONS.md's (now closed) item 1 for the full
+// and docs/archive/LIMITATIONS.md's (now closed) item 1 for the full
 // history.
-fn Request.get_header(name: string): string {
-    return self.headers.tryGet(name) recover run {
-        sys::panic("Request.get_header: no such header '" + name + "'");
+@caller_location
+pub fn Request.get_header(name: string): string {
+    return self.headers.try_get(name) recover run {
+        sys::panic(caller_location + ": Request.get_header: no such header '" + name + "'");
         return ""; // unreachable (sys::panic never returns) -- see
-                    // Server.listen()'s identical 'recover run'
-                    // non-diverging-block rule, below.
+        // Server.listen()'s identical 'recover run'
+        // non-diverging-block rule, below.
     };
 }
 
-fn Request.has_header(name: string): bool {
+pub fn Request.has_header(name: string): bool {
     return self.headers.contains(name);
 }
 
@@ -166,25 +167,25 @@ fn Request.has_header(name: string): bool {
 // chain to the 404 branch) instead of introducing a `!Request` error path
 // this module's only real caller (a request-per-connection accept loop)
 // has no natural way to act on differently anyway.
-fn parse_request(conn: net::TcpConnection): Request {
+pub fn parse_request(conn: net::TcpConnection): Request {
     immut raw: string = conn.read(8192);
     mut req: Request = Request::default();
 
-    mut sepIdx: int = strings::index_of(raw, "\r\n\r\n");
-    mut sepLen: int = 4;
-    if sepIdx < 0 {
-        sepIdx = strings::index_of(raw, "\n\n");
-        sepLen = 2;
+    mut sep_idx: int = strings::index_of(raw, "\r\n\r\n");
+    mut sep_len: int = 4;
+    if sep_idx < 0 {
+        sep_idx = strings::index_of(raw, "\n\n");
+        sep_len = 2;
     }
 
-    mut headerBlock: string = raw;
+    mut header_block: string = raw;
     mut body: string = "";
-    if sepIdx >= 0 {
-        headerBlock = strings::substring(raw, 0, sepIdx);
-        body = strings::substring(raw, sepIdx + sepLen, strings::length(raw));
+    if sep_idx >= 0 {
+        header_block = strings::substring(raw, 0, sep_idx);
+        body = strings::substring(raw, sep_idx + sep_len, strings::length(raw));
     }
 
-    mut lines: List<string> = strings::split(headerBlock, "\n");
+    mut lines: List<string> = strings::split(header_block, "\n");
 
     if lines.length() == 0 {
         req.method = "";
@@ -193,8 +194,8 @@ fn parse_request(conn: net::TcpConnection): Request {
         return req;
     }
 
-    immut requestLine: string = strings::trim_end(lines.get(0));
-    mut parts: List<string> = strings::split(requestLine, " ");
+    immut request_line: string = strings::trim_end(lines.get(0));
+    mut parts: List<string> = strings::split(request_line, " ");
     if parts.length() >= 2 {
         req.method = parts.get(0);
         req.path = parts.get(1);
@@ -206,10 +207,10 @@ fn parse_request(conn: net::TcpConnection): Request {
     mut i: int = 1;
     while i < lines.length() {
         immut line: string = strings::trim_end(lines.get(i));
-        immut colonIdx: int = strings::index_of(line, ":");
-        if colonIdx >= 0 {
-            immut key: string = strings::trim(strings::substring(line, 0, colonIdx));
-            immut value: string = strings::trim(strings::substring(line, colonIdx + 1, strings::length(line)));
+        immut colon_idx: int = strings::index_of(line, ":");
+        if colon_idx >= 0 {
+            immut key: string = strings::trim(strings::substring(line, 0, colon_idx));
+            immut value: string = strings::trim(strings::substring(line, colon_idx + 1, strings::length(line)));
             req.headers.put(key, value);
         }
         i = i + 1;
@@ -221,13 +222,13 @@ fn parse_request(conn: net::TcpConnection): Request {
 
 // ─── Response ────────────────────────────────────────────────────────────
 
-struct Response {
-    conn: net::TcpConnection
+pub struct Response {
+    pub conn: net::TcpConnection
 }
 
 // A small, deliberately incomplete status-text table -- see this file's
 // header comment for why only these five codes are covered.
-fn status_text(status: int): string {
+pub fn status_text(status: int): string {
     if status == 200 {
         return "200 OK";
     }
@@ -249,22 +250,22 @@ fn status_text(status: int): string {
 // Shared response-building/writing logic for send_text/send_json below --
 // the two only differ in Content-Type, exactly like DESIGN_NOTES.md's
 // original sketch says they should.
-fn Response.send_raw(status: int, contentType: string, body: string): void {
-    immut bodyLen: int = strings::length(body);
+pub fn Response.send_raw(status: int, content_type: string, body: string): void {
+    immut body_len: int = strings::length(body);
     immut response: string = "HTTP/1.1 " + status_text(status) + "\r\n" +
-        "Content-Type: " + contentType + "\r\n" +
-        "Content-Length: " + (bodyLen to string) + "\r\n" +
-        "Connection: close\r\n" +
-        "\r\n" +
-        body;
+    "Content-Type: " + content_type + "\r\n" +
+    "Content-Length: " + (body_len to string) + "\r\n" +
+    "Connection: close\r\n" +
+    "\r\n" +
+    body;
     self.conn.write(response);
 }
 
-fn Response.send_text(status: int, body: string): void {
+pub fn Response.send_text(status: int, body: string): void {
     self.send_raw(status, "text/plain", body);
 }
 
-fn Response.send_json(status: int, body: string): void {
+pub fn Response.send_json(status: int, body: string): void {
     self.send_raw(status, "application/json", body);
 }
 
@@ -280,14 +281,21 @@ fn Response.send_json(status: int, body: string): void {
 // still be blocked, and neither is. Route DISPATCH (finding the right
 // handler by path) needed its own additional fix on top of that, though --
 // see route_index()/has_route()/get_route() below and this file's header
-// comment for why `self.routes.tryGet(path)` doesn't work.
+// comment for why `self.routes.try_get(path)` doesn't work.
 //
 // Route matching is EXACT-PATH ONLY (no `:id`-style parameter segments,
 // no wildcards) -- Map<K,V>'s own linear-scan lookup is already the
 // documented, accepted tradeoff for a small stdlib collection (see
 // map.tr's own design note), and a real path-pattern matcher is a
 // separate, bigger feature this module doesn't attempt.
-struct Server {
+// Both fields are private (LEC-007 API review): they are implementation, not
+// something a program does anything with. `routes` is the storage behind
+// get()/has_route()/get_route(); writing `listener` from outside would swap
+// the socket listen() is serving on. (They were `pub` only because the
+// LEC-002 sweep marked everything public.) The rule used across the stdlib:
+// a function that does a job is public whether or not the repo itself calls
+// it; a struct's internals are public only if a real program needs them.
+pub struct Server {
     listener: net::TcpListener,
     routes: Map<string, fn(Request, Response): void>
 }
@@ -295,14 +303,14 @@ struct Server {
 // Registers `handler` to run for an exact-match request to `path`.
 // Re-registering the same path replaces the previous handler (Map.put's
 // own "update in place" behavior for an existing key).
-fn Server.get(path: string, handler: fn(Request, Response): void): void {
+pub fn Server.get(path: string, handler: fn(Request, Response): void): void {
     self.routes.put(path, handler);
 }
 
-// route_index is a thin, named wrapper over `self.routes.indexOf(path)`
+// route_index is a thin, named wrapper over `self.routes.index_of(path)`
 // (STD-003, item 4) -- kept as its own method since has_route()/
 // get_route() below both already call it by name. Until this group,
-// `Map<string, V>`'s own generic `.indexOf()`/`.tryGet()`/`.contains()`
+// `Map<string, V>`'s own generic `.index_of()`/`.try_get()`/`.contains()`
 // were content-INCORRECT for `K = string` (compared a freshly-PARSED
 // request path against a route registered with a string literal by raw
 // pointer identity, not content -- confirmed live: this is what made
@@ -312,31 +320,27 @@ fn Server.get(path: string, handler: fn(Request, Response): void): void {
 // linear scan over `self.routes.keys[i]` instead -- monomorphization
 // (TYPE-002) fixed that gap for `Map<K, V>` generally, so the hand-rolled
 // scan is no longer needed here; see docs/development/changes/STD-003.md
-// and docs/planning/LIMITATIONS.md's (now closed) item 1 for the full
+// and docs/archive/LIMITATIONS.md's (now closed) item 1 for the full
 // history.
 fn Server.route_index(path: string): int {
-    return self.routes.indexOf(path);
+    return self.routes.index_of(path);
 }
 
-fn Server.has_route(path: string): bool {
+pub fn Server.has_route(path: string): bool {
     return self.route_index(path) >= 0;
 }
 
-fn Server.get_route(path: string): fn(Request, Response): void {
+@caller_location
+pub fn Server.get_route(path: string): fn(Request, Response): void {
     immut idx: int = self.route_index(path);
     if idx < 0 {
-        sys::panic("Server.get_route: no such route '" + path + "'");
+        sys::panic(caller_location + ": Server.get_route: no such route '" + path + "'");
     }
-    // `Map<K, V>.values` is a raw `V*` (map.tr), not a `List<V>` -- OVH-003
-    // gated raw-pointer indexing outside `unsafe { }`/a capability module,
-    // and this file holds neither (deliberately -- see this file's header
-    // comment, "No raw sockets, `ptr`, or manual memory management is ever
-    // visible to a caller of this module"). `idx` is already bounds-proven
-    // by `route_index()` (a `Map.indexOf()` result checked above), so this
-    // is exactly the single-expression inline gate the raw-pointer docs
-    // recommend (docs/architecture/pointers_and_references.md §1.4) rather
-    // than granting the whole file raw-pointer capability for one read.
-    return unsafe { self.routes.values[idx]; };
+    // This used to read `Map<K, V>.values[idx]` -- a raw `V*` -- through an
+    // inline `unsafe { }` (OVH-003). `values` is private to map.tr now
+    // (LEC-002), and the key is known to be present (`route_index()` found
+    // it above), so the safe `get()` does the same job with no raw pointer.
+    return self.routes.get(path);
 }
 
 // Binds `port` and serves forever, dispatching each accepted connection to
@@ -346,12 +350,12 @@ fn Server.get_route(path: string): fn(Request, Response): void {
 // doc comment describes for TcpListener::bind's `!TcpListener` -- and a
 // single bad accept() is logged and skipped rather than killing the whole
 // server, matching showcase/http_server.tr's own accept-loop.
-fn Server.listen(port: int): void {
+pub fn Server.listen(port: int): void {
     mut listener: net::TcpListener = net::TcpListener::bind(port) recover run {
         io::printline("http::Server.listen: could not bind port " + (port to string) + ".");
         sys::exit(1);
         return; // unreachable (sys::exit never returns) -- see the
-                 // 'recover run' non-diverging-block rule this satisfies.
+        // 'recover run' non-diverging-block rule this satisfies.
     };
     self.listener = listener;
 
@@ -359,17 +363,18 @@ fn Server.listen(port: int): void {
         mut conn: net::TcpConnection = self.listener.accept() recover run {
             continue;
         };
+        // Per-iteration (F-MEM-2: no finalizers, so closing is explicit): runs
+        // on the 404 `continue` and on normal fall-through alike.
+        defer conn.close();
         mut req: Request = parse_request(conn);
         mut res: Response = Response::default();
         res.conn = conn;
 
         if !self.has_route(req.path) {
             res.send_text(404, "Not Found");
-            conn.close();
             continue;
         }
         mut handler: fn(Request, Response): void = self.get_route(req.path);
         handler(req, res);
-        conn.close();
     }
 }

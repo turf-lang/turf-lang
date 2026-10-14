@@ -1,0 +1,42 @@
+// Companion module for type_identity_operators_errors_machines.tr
+// (FDN-003): an operator, an error type, a machine and a local struct,
+// each sharing its name with type_identity_ops_b_module.tr's.
+pub struct Vec {
+    pub x: int
+}
+
+pub fn vec(x: int): Vec {
+    mut v: Vec = Vec::default();
+    v.x = x;
+    return v;
+}
+
+operator +(a: Vec, b: Vec): Vec {
+    return vec(a.x + b.x);
+}
+
+pub error Bad { Oops, Worse }
+
+pub fn check(n: int): !int {
+    if (n < 0) {
+        return Bad::Oops;
+    }
+    return n;
+}
+
+pub machine Light { Red -> Green, Green -> Red }
+
+pub fn light(): Light {
+    return Light::Red;
+}
+
+pub fn vecSize(): int {
+    return sizeof(Vec);
+}
+
+pub fn local(): int {
+    struct Tmp { a: int, b: int }
+    mut t: Tmp = Tmp::default();
+    t.b = 4;
+    return t.b;
+}

@@ -1,10 +1,12 @@
+// EXPECT-DIAG: E059
+// EXPECT-DIAG: Subject has type 'int' but a matches arm has type 'string'
 import io;
 
 fn main(): int {
     mut x: int = 1;
     compare x {
         matches "hello":
-            x = 99;
+        x = 99;
         done
     }
     return 0;

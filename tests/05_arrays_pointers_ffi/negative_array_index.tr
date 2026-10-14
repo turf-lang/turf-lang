@@ -1,0 +1,53 @@
+// #256: a fixed-size array accepts Python-style negative indices -- `a[-1]` is
+// the last element, `a[-N]` the first. Covers every path ArrayAccessExprAST
+// can take: a literal index (folded at compile time), a variable the
+// compiler can prove constant, a runtime-computed index (the select-based
+// wrap in EmitRuntimeBoundsCheck()), an assignment target, and an R-value
+// array (a call result).
+import test;
+
+fn neg(n: int): int {
+    return 0 - n;
+}
+
+fn make(): int[3] {
+    return [7, 8, 9];
+}
+
+fn main(): int {
+    mut a: int[4] = [10, 20, 30, 40];
+
+    // Literal index.
+    test::assert(a[-1] == 40, "a[-1] is the last element");
+    test::assert(a[-4] == 10, "a[-N] is the first element");
+    test::assert(a[-2] == 30, "a[-2]");
+
+    // A local the compiler can prove constant.
+    mut k: int = -3;
+    test::assert(a[k] == 20, "constant-propagated negative index");
+
+    // Computed at run time (a call result cannot be folded).
+    test::assert(a[neg(1)] == 40, "runtime -1");
+    test::assert(a[neg(4)] == 10, "runtime -N");
+
+    // Writes, plain and compound.
+    a[-1] = 41;
+    a[neg(4)] = 11;
+    test::assert(a[3] == 41, "a[-1] = v wrote the last element");
+    test::assert(a[0] == 11, "a[-N] = v wrote the first element");
+    a[-2] += 5;
+    test::assert(a[2] == 35, "a[-2] += 5");
+
+    // The same position through either spelling.
+    mut i: int = 0;
+    while (i < 4) {
+        test::assert(a[i] == a[i - 4], "a[i] == a[i - N]");
+        i++;
+    }
+
+    // An R-value array.
+    test::assert(make()[-1] == 9, "negative index on a call result (literal)");
+    test::assert(make()[neg(3)] == 7, "negative index on a call result (runtime)");
+
+    return 0;
+}

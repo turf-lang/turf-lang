@@ -1,0 +1,24 @@
+That type has no methods
+
+A "method call" is `thing.method(...)`. A struct can declare methods, so `p.length()` works on a `Point` that defines `length`. An `int`, a `bool` or a `double` has no methods of its own, so there is nothing for the dot to find:
+
+    mut x: int = 5;
+    x.foo();                          // an int has no `foo`
+
+Usually one of three things is going on:
+
+- The name is misspelled, or it is a function in a module you meant to import. Many things are written `module::function(x)`, not `x.function()`: `math::abs(x)`.
+- You called a method on the wrong variable.
+- You meant a struct, and the variable's type isn't the struct you think it is.
+
+An array has exactly two built-in methods, `length()` and `copy()`, and neither takes an argument. Anything else is this error too:
+
+    mut a: int[3] = [1, 2, 3];
+    a.copy(1);                        // 'copy()' on an array takes no arguments, but was given 1.
+    a.reverse();                      // Arrays have no method 'reverse'.
+    mut s: string = "abc";
+    s.copy();                         // Cannot call method 'copy' on type 'string' -- only struct instances have methods.
+
+(`copy()` is for arrays only. To take part of an array, slice it first: `a[1..3].copy()`.)
+
+(`x.f()` does work on a non-struct when a function `f` taking that type is imported -- that is how `text.length()` works on a `string`. So check the spelling, and that the module is imported.)

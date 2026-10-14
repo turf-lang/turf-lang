@@ -1,0 +1,9 @@
+// EXPECT-DIAG: E056
+// EXPECT-DIAG: Argument 1 to the called function value expects 'int', got 'string'
+// A call through an expression checks each argument's type.
+fn inc(x: int): int { return x + 1; }
+
+fn main(): int {
+    mut ops: (fn(int): int)[1] = [inc];
+    return ops[0]("one");
+}

@@ -1,0 +1,11 @@
+// EXPECT-DIAG: empty_compare_warned_once.tr (1 warning)
+// EXPECT-DIAG: Empty compare statement has no arms
+// A parse-time warning is reported once; the main file is parsed twice and
+// each parse raised it.
+
+fn main(): int {
+    mut x: int = 0;
+    compare x {
+    }
+    return x;
+}

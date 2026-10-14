@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E056
+// EXPECT-DIAG: 'T' in 'pair' is 'int' from argument 1 but 'double' from argument 2
+// Inference does not widen: 2.5 is not passed to an int clone.
+fn<T> pair(a: T, b: T): T {
+    return b;
+}
+
+fn main(): int {
+    printline(pair(1, 2.5));
+    return 0;
+}

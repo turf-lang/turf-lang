@@ -2,7 +2,7 @@
 
 > **Status:** the post-2.0 backlog. Rewritten 2026-09-26 by the Architecture
 > Overhaul closure audit. It absorbs (a) every row of
-> `docs/planning/ARCHITECTURE_OVERHAUL.md` §27 (the Deferred Work Register)
+> `docs/archive/ARCHITECTURE_OVERHAUL.md` §27 (the Deferred Work Register)
 > that is **not** scheduled for 2.0, with its original rationale, and (b)
 > every item of the previous version of this file, which was written after
 > v1.0.0 and before the Overhaul.
@@ -23,6 +23,39 @@
 >
 > Complexity scale (the Overhaul's): **XS** < 1 session · **S** 1 · **M** 2–3
 > · **L** 4–6 · **XL** 7+ with its own sub-plan.
+
+---
+
+## Known gaps
+
+Behaviour found while testing that is neither a deliberate exclusion (§A) nor
+a rejected idea (§E): the language does not say what should happen, or the
+compiler cannot express it yet.
+
+### G-1 — No syntax for an array of function values
+
+- **Found** 2026-10-05, while probing first-class functions after the
+  call-through-a-non-function fix. First-class functions themselves are
+  supported (`fn(T): R` types; named functions passed, stored in variables and
+  returned; see `docs/reference/functions_and_modules.md` §2). Only the
+  array-of-function-values spelling is missing.
+- **What happens.** `mut fs: fn(int): int[2] = [inc, inc];` does not declare an
+  array of two functions: `fn(int): int[2]` parses as *one* function type whose
+  return type is `int[2]`, so the initializer is rejected with a generic `E066`
+  ("Cannot initialise 'fn(int): int[2]' variable 'fs' with value of type
+  'fn(int): int[2]'") — a message that reads as a self-contradiction. Wrapping
+  the element type, `(fn(int): int)[2]`, is rejected too, with `E109`
+  ("Expected a type name"): the type grammar has no parenthesised type.
+- **Why it is a gap, not a bug.** Neither the reference nor this file says an
+  array of function values is allowed or forbidden, and the grammar offers no
+  way to write one. It is an unspecified corner of the type grammar.
+- **To decide.** (1) A spelling for a parenthesised/grouped type (or a type
+  alias) so the element type can be written; (2) whether `fn(T): R[N]` keeps
+  its current meaning (it must, in 2.x: changing it is a breaking change, see
+  ROADMAP_v2.0.0.md Part VI); (3) a clearer diagnostic for the E066 above
+  whichever way (1) goes, since the current text names two identical types.
+  Related to F-1 (closures): a `{code, env}` representation changes the element
+  size, so decide the two together.
 
 ---
 
@@ -110,6 +143,14 @@ what 2.0 does that this item builds on.
 
 ### F-3 — `Slice<T>`: a non-owning view (§27 D3)
 
+- **Status (2026-10-05).** Partly done. `T[]` parameters (#260), range slicing
+  `arr[a..b]` and local `T[]` views now provide the non-owning `{ptr, len}`
+  view with bounds-checked indexing and sub-slicing (`sub(from, to)` is
+  `arr[from..to]`). Its soundness half (D23) is closed by construction: a view
+  can't be returned or stored (E140), and no write reaches an immutable array
+  through one (E141, E144). **What remains of F-3:** a *storable* view (struct
+  fields, return values, collections of views) and views into `List<T>`
+  buffers, which would need escape analysis.
 - **Complexity** M · **Excluded from 2.0:** yes (additive). Its soundness
   half — `T[]` parameters escaping the caller's frame (D23) — **is** 2.0
   (ROADMAP FDN-002).
@@ -141,10 +182,15 @@ what 2.0 does that this item builds on.
 - **F-7b A stable Turf-to-Turf binary ABI** (XL). Only needed for binary
   packages; source distribution makes it unnecessary. The stable interop ABI
   is the C ABI.
-- **F-7c Registry, semver ranges, publishing, workspaces** (L). `turf-cli`
-  (separate repository: manifest, lockfile, semver resolver, registry
-  server, checksums) is the starting point; its `turf_modules/` layout must
-  be reconciled with 2.0's cache layout first.
+- **F-7c Registry, semver ranges, publishing, workspaces** (L). The 2.0
+  CLI (the turf-cli repository, `FREEZE.md` §6.16) reserves
+  `turf publish`. The pre-2.0 semver resolver, checksum, archive and registry
+  client code was deleted in LEC-001 stage 6; it is in git history (the
+  subtree import `350acd8`, and the parent of the stage 6 deletion commit)
+  for whoever builds F-7c. The registry server stays in the old `turf-cli`
+  repository. Its
+  `turf_modules/` install layout is gone: 2.0 fetches into the
+  `~/.cache/turf/src/` cache.
 
 ### F-11 / F-11b / F-11c — Tooling beyond 2.0's (§27 D11, old item 1)
 
@@ -175,15 +221,46 @@ coherence; the open union (`!T`) is the frozen design.
 
 ### F-20 / F-20b — Cross-linking and more platforms (§27 D20)
 
-2.0: Linux x86-64 Tier 1, macOS arm64 Tier 2 only if ported, object-only
-cross-compilation with a diagnostic at link time (ROADMAP REL-003).
+2.0 (owner decision 2026-09-30, ROADMAP DEC-2 amended, DEC-14, REL-008):
+Linux x86-64, Windows x86-64 and macOS arm64, all Tier 1 and
+self-contained. Object-only cross-compilation keeps its link-time diagnostic
+(REL-003). **F-20b and F-20c below were pulled into 2.0 as REL-008.** Their
+text stays here as the design notes REL-008 was written from; F-20 itself
+(cross-linking) and other platforms stay FUTURE.
 - **F-20** Per-target `libturfrt` archives and a cross-linker story (LLD or
   a target `cc`).
-- **F-20b** Windows x86-64: the GC's register capture for the Win64
+- **F-20b** (now REL-008 stage 5) Windows x86-64: the GC's register capture for the Win64
   callee-saved set (`rbx rbp rdi rsi r12–r15 xmm6–15`), stack bounds via
   `GetCurrentThreadStackLimits`, toolchain choice (MinGW was used for v1.0.0
   archives). Other architectures need their own register-capture code
   (MEM-002 *Known pitfalls*).
+  - **Install:** an `install.ps1` for `irm https://…/install.ps1 | iex`,
+    which is how rustup, deno and bun install on Windows. It mirrors
+    REL-003's `install.sh`: detect the architecture, download the zip,
+    verify its SHA-256, unpack under `%LOCALAPPDATA%\turf`, add `bin` to the
+    user `PATH`.
+  - **"Unzip and run" needs F-20c:** today `turfc.exe` links through MinGW
+    `gcc`, which a normal Windows machine does not have.
+  - **Shell:** nothing in `turf.exe`/`turfc.exe` needs a Unix shell. They
+    run from PowerShell or cmd once their DLLs are beside them (the release
+    zip bundles them) and a linker is available. MSYS2 is only the
+    *from-source* build environment (LLVM 22, MinGW, CMake packages; bash
+    build scripts).
+- **F-20c** (now REL-008 stages 2–4) **A bundled linker and C runtime** (M–L). Release `turfc` links with
+  an embedded **lld** instead of running the system `cc`, and the archive
+  carries a C runtime to link against: musl's `libc.a` and start-up objects
+  on Linux, the MinGW-w64 CRT import libraries on Windows, the macOS SDK
+  stubs (which is its own licensing question).
+  - Result: installing TurfLang needs nothing else installed, and every
+    compiled program is fully static. That is how Zig ships.
+  - It is also F-20's cross-linking story: per-target runtimes plus one
+    linker.
+  - Trade-offs: archive size (tens of MB), and a libc to keep patched.
+    Programs `extern from` a system C library still need that library at
+    link time.
+  - Pulled forward on 2026-09-30 (ROADMAP DEC-14), with **hybrid**
+    linking: only programs that name a system C library use the system
+    toolchain.
 
 ---
 
@@ -269,8 +346,8 @@ IDs, freeze entries and change records:
 
 ### F-16 — Circular imports (§27 D16)
 - **Complexity** M. A real module-system change. Today's only cost:
-  `mem::Pool<T>` is a deliberate duplicate of `List<T>`'s growth logic
-  because `list.tr` imports `mem.tr` (`mem.tr:155-214`; STD-003 item 7 says do
+  `mem::Pool` is a deliberate duplicate of `List<T>`'s growth logic
+  because `list.tr` imports `mem.tr` (`PoolHeader.grow()` in `mem.tr`; STD-003 item 7 says do
   not work around it).
 
 ### F-19 — Standard library expansion (old item 4)
@@ -278,7 +355,7 @@ IDs, freeze entries and change records:
   (`strings::split` exists now; the rest: richer `os`, `time` formatting,
   regex, CSV, compression, crypto hashes, a process API, …). Everything added
   after 2.0 is additive and goes through LEC-007's API conventions (fallibility
-  rule, `pub` review, API-lock test). `docs/planning/LIMITATIONS.md` is closed
+  rule, `pub` review, API-lock test). `docs/archive/LIMITATIONS.md` is closed
   (all items fixed by TYPE-002/LANG-001/STD-003); new gaps get change records,
   not new LIMITATIONS rows.
 

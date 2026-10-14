@@ -1,0 +1,40 @@
+TURF E125 -- AMBIGUOUS CALL:
+
+CAUSE:
+  Two visible definitions of the called function or operator match the call EXACTLY
+  equally well. The compiler refuses to guess, because the result would depend on import
+  order and silently change if two lines were reordered. Typical: two modules each
+  define the same helper and both are imported. Operators follow the same rule (two
+  visible `operator+(Vec, Vec)` make `a + b` ambiguous).
+
+INCORRECT:
+    import a_module;     // defines describe_int(n: int)
+    import b_module;     // defines describe_int(n: int) too
+    mut r: string = n.describe_int();     // which one?
+
+CORRECT (call through the module):
+    // a_module.tr
+    pub fn describe_int(n: int): string { return "a"; }
+
+    // b_module.tr
+    pub fn describe_int(n: int): string { return "b"; }
+
+    // main.tr
+    import a_module;
+    import b_module;
+    fn main(): int {
+        mut r: string = a_module::describe_int(5);
+        return 0;
+    }
+
+FIX (any one):
+  - remove one of the two imports;
+  - import only the names wanted: `import a::[describe_int];`;
+  - call through the module: `a::describe_int(n)`;
+  - rename one definition if both are yours.
+  An overloaded name used as a function value (`mut f: fn(int, int): int = combine;`) is
+  E125 whatever the variable's type: wrap the wanted overload in a function with its own
+  name and use that.
+
+RELATED: E085 (ambiguous type name), E090 (ambiguous module name), E025 (no matching
+  module overload).

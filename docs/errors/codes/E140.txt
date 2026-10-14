@@ -1,0 +1,33 @@
+An unsized array type (`int[]`) was used somewhere it can't safely live
+
+`int[]` -- an array type with nothing inside the brackets -- means "an array of any length". It exists for one job: a function parameter that should accept arrays of different sizes.
+
+    fn sum(arr: int[]): int {          // takes an int[3], an int[10], a literal...
+        mut total: int = 0;
+        for value in arr {
+            total = total + value;
+        }
+        return total;
+    }
+
+Such a parameter doesn't get its own copy of the array. It gets a view of the caller's array: where the elements are, and how many there are. That's what makes it work for any length. A local variable can be a view too (`immut tail: int[] = arr[1..];`, or a literal, `immut nums: int[] = [10, 20, 30];`), because a local never outlives its function. A view is only safe while the array it looks at still exists, which is guaranteed inside one function and nothing longer. So everywhere that would keep it longer, Turf asks for a real size instead:
+
+    struct Bag {
+        values: int[]                  // E140 -- a field needs a size (or use List<int>)
+    }
+
+    fn make(): int[] { ... }           // E140 -- return int[3], or a List<int>
+
+    fn f(rows: int[3][]): int { ... }  // E140 -- only the FIRST dimension may be empty:
+                                       //   int[][3] (any number of rows of three) is fine
+
+    mut rows: int[2][] = [[1], [2]];   // E140 -- the same rule for a local variable
+
+    fn g(r: &int[]): int { ... }       // E140 -- just write r: int[]; it already shares
+
+    extern fn c_sum(buf: int[], n: int): int;   // E140 -- C has no such type;
+                                                //   take a T* and a length instead
+
+The same goes for a type that would hold one: `List<int[]>`, a function type like `fn(int[]): int`, a cast `x to int[]`, and a generic call that would make a type parameter `T` stand for `int[]` (for example `keep(arr)` with `fn<T> keep(x: T): T`).
+
+To fix it, give the array a size (`int[5]`), use a `List<T>` when the number of elements changes, or, if you want a function to accept any length, make it a parameter. A local view needs an initializer (E128 otherwise). For a generic function, write the parameter as `T[]` rather than `T`: `fn<T> show(arr: T[])` called with an `int[4]` makes `T` the element type, `int`.

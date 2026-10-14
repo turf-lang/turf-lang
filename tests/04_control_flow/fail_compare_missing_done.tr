@@ -1,13 +1,15 @@
+// EXPECT-DIAG: E058
+// EXPECT-DIAG: Expected 'done' after matches arm body
 import io;
 
 fn main(): int {
     mut x: int = 1;
     compare x {
         matches 1:
-            x = 2;
+        x = 2;
         // Missing 'done' — should error
         matches 2:
-            x = 3;
+        x = 3;
         done
     }
     return 0;

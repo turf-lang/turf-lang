@@ -1,0 +1,48 @@
+// `G::default()` takes its type arguments from where its value goes, not
+// only from a declaration or an assignment: a method or function argument,
+// a `return`, and the success type of a `!T` return. Its own type is the bare
+// template `Box`, so before, `bs.push(Box::default())` died in Codegen with
+// "struct method call argument type mismatch" and `return Box::default();`
+// with an unsized-type verifier error. Found while testing LEC-009
+// (`grid.push(List::default())`).
+import list::List;
+import test;
+
+struct Box<T> {
+    v: T,
+    w: int
+}
+
+fn make(): Box<int> {
+    return Box::default();
+}
+
+error E {
+    Bad,
+}
+
+fn try_make(ok: bool): !Box<int> {
+    if (!ok) {
+        return E::Bad;
+    }
+    return Box::default();
+}
+
+fn take(b: Box<int>, n: int): int {
+    return b.w + n;
+}
+
+fn main(): int {
+    mut bs: List<Box<int>> = List::default();
+    bs.push(Box::default());
+    test::assert(bs.length() == 1 && bs[0].w == 0, "push a default");
+    test::assert(take(Box::default(), 3) == 3, "default as a call argument");
+    test::assert(make().w == 0, "returned default");
+    mut b: Box<int> = try_make(true) recover produce make();
+    test::assert(b.v == 0, "!T success default");
+    mut ls: List<List<int>> = List::default();
+    ls.push(List::default());
+    ls[0].push(4);
+    test::assert(ls[0][0] == 4, "a default inner list is shared");
+    return 0;
+}

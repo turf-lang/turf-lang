@@ -1,0 +1,9 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: Invalid string to int conversion
+// "3.5" is a double, not an int; `to int` does not truncate text.
+
+fn main(): int {
+    mut s: string = "3" + ".5";
+    mut n: int = s to int;
+    return n;
+}

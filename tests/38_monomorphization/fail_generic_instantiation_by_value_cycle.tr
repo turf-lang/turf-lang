@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E069
+// EXPECT-DIAG: cycle: A_gen1_B -> B -> A_gen1_B
 // Regression test: OVH-004 -- a by-value cycle that only exists through a
 // CONCRETE generic instantiation must be rejected with StructLayoutCycleError
 // (E069), not left to reach Codegen (where it previously segfaulted the

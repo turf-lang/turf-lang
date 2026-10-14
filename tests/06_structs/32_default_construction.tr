@@ -4,7 +4,7 @@
 // zero-initializes every field -- including a struct-typed field nested
 // inside another struct, reusing the exact same GetDefaultValue() machinery
 // the old brace-literal's "missing fields default-initialize" behavior
-// already relied on (src/Codegen.cpp).
+// already relied on (src/codegen/CodegenCore.cpp).
 
 import io;
 import test;

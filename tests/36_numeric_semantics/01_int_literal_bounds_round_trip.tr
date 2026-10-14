@@ -1,4 +1,4 @@
-// SEM-002 (docs/planning/ARCHITECTURE_OVERHAUL.md §8, FREEZE.md §6.2 rows
+// SEM-002 (docs/archive/ARCHITECTURE_OVERHAUL.md §8, FREEZE.md §6.2 rows
 // 2/3): both ends of 'int's range must be exactly writable as literals.
 // INT64_MAX needed no special handling; INT64_MIN specifically exercises
 // the "unary '-' applied directly to an untyped literal folds into the

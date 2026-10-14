@@ -1,0 +1,9 @@
+// EXPECT-DIAG: E076
+// EXPECT-DIAG: not representable in type 'int'
+// Left-hand twin: -9223372036854775809 is one below INT_MIN. The INT_MIN fix
+// judges the NEGATED literal, so one below must stay rejected.
+fn main(): int {
+    mut c: int = 1;
+    mut r: int = -9223372036854775809 + c;
+    return 0;
+}

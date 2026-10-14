@@ -1,0 +1,20 @@
+Statements have to live inside a function
+
+A Turf file can declare things at its top level -- functions, structs, enums, imports, `extern` bindings, `export immut` constants -- but it can't *do* anything there. Statements (a call, an assignment, a variable, a `return`, an `if`) must be inside a function.
+
+    import io;
+
+    io::printline("hello");          // a call, outside any function
+
+    fn main(): int { return 0; }
+
+Move it into `main`, which is where a program starts:
+
+    import io;
+
+    fn main(): int {
+        io::printline("hello");
+        return 0;
+    }
+
+If a file has statements at the top level because it was meant to be a script, wrap them in `fn main(): int { ... return 0; }`.

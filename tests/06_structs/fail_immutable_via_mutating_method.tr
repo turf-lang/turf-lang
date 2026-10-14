@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E060
+// EXPECT-DIAG: You can't change the value of 'c' because it's immutable
 // Regression test: calling a struct method that mutates `self` through an
 // immutable variable must be rejected, exactly like direct field assignment
 // already is (`c.val = 5;` on an `immut c` correctly raises

@@ -1,0 +1,13 @@
+The compiler hit a problem of its own
+
+This one isn't about your code. Turf reached a state that its earlier checks should have made impossible -- a type that was never resolved, a field lookup on something that isn't a struct -- and stopped, rather than guess and risk producing a program that does the wrong thing.
+
+It is a bug in the compiler, not a mistake you made, and it is worth reporting.
+
+What helps most when you report it:
+
+- the smallest piece of code that still prints this message (cut lines until it stops, then put the last one back),
+- the full text of the error, including the line and column,
+- the output of `turf --version`.
+
+In the meantime a small change to the code around the line it points to -- naming an intermediate value with `mut`, adding a type annotation -- often steps around it.

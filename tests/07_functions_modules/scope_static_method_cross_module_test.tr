@@ -11,6 +11,7 @@
 // static method call, together in one path.
 
 import io;
+import static_shape_module;
 import static_shape_module::Vec2;
 
 import test;

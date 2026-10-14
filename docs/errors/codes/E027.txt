@@ -1,6 +1,6 @@
 Turf couldn't find a module by this name anywhere
 
-When you write `import moduleName;`, Turf looks for a file called `moduleName.tr`, both in the standard library and in your own project. This error means it searched and simply couldn't find one anywhere.
+When you write `import module_name;`, Turf looks for a file called `module_name.tr`, both in the standard library and in your own project. This error means it searched and simply couldn't find one anywhere.
 
     import strnigs;
 

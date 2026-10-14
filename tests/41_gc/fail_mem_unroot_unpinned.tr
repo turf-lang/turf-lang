@@ -1,4 +1,5 @@
 // RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: unpin of unpinned object
 // tests/41_gc/fail_mem_unroot_unpinned.tr
 // OVH-010 (docs/planning/OVERHAUL_REMAINING_WORK.md): mem::unroot()'s own
 // required behaviour -- "unroot of an unpinned object panics with a named

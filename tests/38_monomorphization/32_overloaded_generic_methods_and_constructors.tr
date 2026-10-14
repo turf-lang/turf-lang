@@ -1,0 +1,77 @@
+// Regression test (follow-up to LEC-006's 31_overloaded_generic_free_functions):
+// the same bug in the METHOD and CONSTRUCTOR drains. Generic templates were
+// found by (module, name) alone, so `Box.put(x)` and `Box.put(x, y)` were one
+// instantiation whose clone served both calls ("Incorrect number of arguments
+// passed to called function" at codegen). A request now names its exact
+// declaration for every kind, not just free functions.
+import test;
+
+// Methods on a generic struct, overloaded by arity.
+struct Box<T> {
+    v: T,
+    n: int
+}
+
+fn<T> Box.new(v: T): void {
+    self.v = v;
+    self.n = 1;
+}
+
+// A second constructor, overloaded by arity.
+fn<T> Box.new(v: T, n: int): void {
+    self.v = v;
+    self.n = n;
+}
+
+fn<T> Box.put(x: T): int {
+    return 1;
+}
+
+fn<T> Box.put(x: T, y: T): int {
+    return 2;
+}
+
+// Same arity, different parameter types.
+fn<T> Box.tag(x: T): int {
+    return 10;
+}
+
+fn<T> Box.tag(k: int): int {
+    return 20;
+}
+
+// A NON-generic struct whose methods carry their own type parameters.
+struct Plain {
+    n: int
+}
+
+fn<U> Plain.echo(x: U): int {
+    return 100;
+}
+
+fn<U> Plain.echo(x: U, y: U): int {
+    return 200;
+}
+
+fn main(): int {
+    mut bi: Box<int> = Box::new(5);
+    mut bs: Box<string> = Box::new("s", 7);
+    test::assert(bi.n == 1, "Box::new(v) at int");
+    test::assert(bs.n == 7, "Box::new(v, n) at string");
+    test::assert(bs.v == "s", "Box::new(v, n) keeps the value");
+
+    test::assert(bi.put(1) == 1, "put(x) at Box<int>");
+    test::assert(bi.put(1, 2) == 2, "put(x, y) at Box<int>");
+    test::assert(bs.put("a") == 1, "put(x) at Box<string>");
+    test::assert(bs.put("a", "b") == 2, "put(x, y) at Box<string>");
+
+    test::assert(bi.tag(1) == 10, "tag(x: T) at Box<int>");
+    test::assert(bs.tag("a") == 10, "tag(x: T) at Box<string>");
+
+    mut p: Plain = Plain::default();
+    test::assert(p.echo(1) == 100, "Plain.echo(x) at int");
+    test::assert(p.echo(1, 2) == 200, "Plain.echo(x, y) at int");
+    test::assert(p.echo("a") == 100, "Plain.echo(x) at string");
+    test::assert(p.echo("a", "b") == 200, "Plain.echo(x, y) at string");
+    return 0;
+}

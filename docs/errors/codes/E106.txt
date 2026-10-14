@@ -1,0 +1,22 @@
+A colon is missing
+
+In Turf a colon `:` joins a name to its type, and a function's parameter list to its return type. Turf expected one and found something else.
+
+The commonest case is forgetting the colon before a function's return type:
+
+    fn add(a: int, b: int) int {     // needs `:` before `int`
+        return a + b;
+    }
+
+    fn add(a: int, b: int): int {
+        return a + b;
+    }
+
+The same shape shows up for a parameter or a struct field, which is `name: type`:
+
+    fn greet(name string) { }        // should be `name: string`
+    struct User { age int }          // should be `age: int`
+
+And in `compare`, the `matches` and `otherwise` arms need a colon before their body:
+
+    otherwise: { ... }

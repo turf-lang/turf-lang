@@ -1,0 +1,30 @@
+// EXPECT-DIAG: E060
+// EXPECT-DIAG: You can't change the value of 'c' because it's immutable
+// Regression test (LEC-006 follow-up): the immutable-variable check on a
+// mutating method call used to look only at the method's OWN body. `c.wrapper()`
+// assigns nothing itself -- it calls `self.bump()`, which does -- so it slipped
+// past and silently mutated an `immut` variable at runtime. The check now
+// follows `self.m()` calls (ResolverSymbolTable::mutatesSelfTransitively), two
+// levels deep here to prove it is a closure and not a one-hop special case.
+// Expected: ImmutableAssignmentError on `c`.
+struct Counter {
+    val: int
+}
+
+fn Counter.bump(): void {
+    self.val = self.val + 1;
+}
+
+fn Counter.wrapper(): void {
+    self.bump();
+}
+
+fn Counter.outer(): void {
+    self.wrapper();
+}
+
+fn main(): int {
+    immut c: Counter = Counter::default();
+    c.outer();
+    return 0;
+}

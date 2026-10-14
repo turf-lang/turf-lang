@@ -1,0 +1,32 @@
+TURF E138 -- MISSING TYPE ARGUMENTS:
+
+CAUSE:
+  A generic type (`Box<T>`, `List<T>`) is a template that becomes a real type only when `T` is
+  given. It was named bare, so the compiler does not know what it holds. The same applies to
+  methods of a generic struct: they repeat the struct's type parameters.
+
+INCORRECT:
+    struct Box<T> { v: T }
+    mut b: Box = Box::default();            // a Box of what?
+    fn Box.get(): T { ... }                 // method of a generic struct without <T>
+
+CORRECT:
+    import list::List;
+
+    struct Box<T> { v: T }
+
+    fn<T> Box.get(): T {                    // the method repeats the struct's <T>
+        return self.v;
+    }
+
+    fn main(): int {
+        mut b: Box<int> = Box::default();
+        mut names: List<string> = List::default();
+        return b.get();
+    }
+
+FIX:
+  Write the type arguments: `Box<int>`, `List<string>`; declare generic methods as
+  `fn<T> Box.get(): T`.
+
+RELATED: E129 (nothing to infer a type from), E109 (type expected).

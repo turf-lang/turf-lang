@@ -1,0 +1,11 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: Slice range out of bounds for 'arr'
+// start > end with run-time bounds, on a `T[]` parameter.
+fn part(arr: int[], s: int, e: int): int {
+    return arr[s..e].length();
+}
+
+fn main(): int {
+    mut a: int[3] = [1, 2, 3];
+    return part(a, 2, 1);
+}

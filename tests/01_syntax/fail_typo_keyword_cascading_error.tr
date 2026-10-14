@@ -1,3 +1,6 @@
+// EXPECT-DIAG: E102
+// EXPECT-DIAG: Expected ';' after statement
+// EXPECT-NO-DIAG: Statements are not allowed outside of a function
 // Regression test: a typo'd keyword whose condition is parenthesized (so it
 // parses as an expression-statement call, e.g. `iff(5 > 3)`, rather than
 // hitting the "I don't know the word 'iff'" keyword-typo path some other

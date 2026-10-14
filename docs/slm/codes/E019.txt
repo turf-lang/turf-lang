@@ -14,13 +14,32 @@ CAUSE:
 EXAMPLE CYCLE:
     // a.tr
     import b;
-    fn useB(): void { b::doSomething(); }
+    fn use_b(): void { b::do_something(); }
 
     // b.tr
     import a;                 // ERROR: a imports b imports a
-    fn doSomething(): void { a::useB(); }
+    fn do_something(): void { a::use_b(); }
 
   The compiler prints the full chain: `a --imports--> b --imports--> a`.
+
+CORRECT (the shared function moved to a third module):
+    // shared.tr
+    pub fn helper(): int { return 1; }
+
+    // a.tr
+    import shared;
+    pub fn use_a(): int { return shared::helper(); }
+
+    // b.tr
+    import shared;
+    pub fn use_b(): int { return shared::helper() + 1; }
+
+    // main.tr
+    import a;
+    import b;
+    fn main(): int {
+        return a::use_a() + b::use_b() - 3;
+    }
 
 FIX:
   Break the cycle. Two common approaches:

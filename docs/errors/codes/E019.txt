@@ -4,11 +4,11 @@ Imagine module A saying "I need to import B before I can start," and module B sa
 
     // a.tr
     import b;
-    fn useB(): void { b::doSomething(); }
+    fn use_b(): void { b::do_something(); }
 
     // b.tr
     import a;
-    fn doSomething(): void { a::useB(); }
+    fn do_something(): void { a::use_b(); }
 
 Here, a.tr imports b.tr, and b.tr imports a.tr right back. Turf will print out the whole chain so you can see exactly which files are involved, even if the cycle is longer than two files.
 
@@ -18,7 +18,7 @@ This usually means two files each ended up needing something small from the othe
   - If both files really do need to share something, move that shared piece into a third file that both of them import -- so neither one has to import the other.
 
     // shared.tr
-    fn doSomething(): void { /* the shared logic */ }
+    fn do_something(): void { /* the shared logic */ }
 
     // a.tr
     import shared;

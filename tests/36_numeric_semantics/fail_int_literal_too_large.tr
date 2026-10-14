@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E076
+// EXPECT-DIAG: not representable in type 'int'
 // SEM-002 (FREEZE.md §6.2 row 3): an integer literal whose exact value
 // doesn't fit 'int' is a hard error -- ARCHITECTURE_OVERHAUL.md §10.2's
 // own worked example. Before this group: silently became

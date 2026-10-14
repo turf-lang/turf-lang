@@ -11,11 +11,16 @@ CAUSE:
   invisible implicit `self` argument responsible for the miscount.
 
 CORRECT SYNTAX:
+    struct Point {
+        x: int,
+        y: int
+    }
+
     fn Point.origin() static: Point {
         return Point::default();
     }
 
-    Point::origin();      // correct -- '::' on the TYPE, no instance
+    mut o: Point = Point::origin();   // correct -- '::' on the TYPE, no instance
 
 INCORRECT:
     mut p: Point = Point::new(1, 2);

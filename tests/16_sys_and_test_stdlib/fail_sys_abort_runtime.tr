@@ -1,4 +1,5 @@
 // RUNTIME_ABORT_EXPECTED
+// EXPECT-EXIT: 134
 // sys::abort() terminates the process immediately (SIGABRT), no message,
 // no cleanup -- must compile successfully, then abort at runtime.
 import sys;

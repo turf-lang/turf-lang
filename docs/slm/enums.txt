@@ -55,7 +55,7 @@ CASTING TO/FROM int:
     mut bad: Color = 99 to Color;
       // ERROR: "Value 99 is out of range for enum 'Color' (valid range:
       //         0 to 2)."
-  (A variable-valued cast, `someInt to Color` where someInt isn't a
+  (A variable-valued cast, `some_int to Color` where some_int isn't a
   literal, can't be checked this way and is allowed through -- an
   out-of-range value there is only caught if something else notices.)
 

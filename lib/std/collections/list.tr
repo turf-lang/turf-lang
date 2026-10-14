@@ -3,11 +3,22 @@ unsafe module;
 // list.tr — List<T>: a dynamically-growing array.
 // Usage:
 //   import list::List;   // (or `import list;` + spell it `list::List<int>` below)
-//   mut l: List<int>;   // default-initialized -- no need to write out the fields
+//   mut l: List<int> = List::default();
 //   l.push(1);
 //   l.push(2);
 //   mut x: int = l.pop();   // 2
 //   mut n: int = l.length(); // 1
+//
+// Shared by default, copied on demand (LEC-009, FREEZE.md §6.27): a
+// `List<T>` value is a handle to ONE `ListHeader<T>` on the GC heap, so
+// `m = l` and passing `l` to a function share the elements AND the length:
+// `m.push(7)` is visible through `l`, and so is a callee's `push`.
+// `l.copy()` is an independent list. `List::default()` allocates the header
+// (a `&U` field's default is a fresh `heap(U::default())`, F-COLL-2), which
+// is why even an empty list is shared. Before LEC-009 a List was this
+// header itself, copied by value: the buffer was shared but `len`/`cap`
+// were not, so a copy's `push` could overwrite elements the original still
+// counted, and a callee's `push` was lost.
 //
 // STD-003 item 8 considered (ARCHITECTURE_OVERHAUL.md §8) and DELIBERATELY
 // NOT DONE: making `data` a safe `&T` instead of a raw `T*` looked
@@ -33,52 +44,71 @@ unsafe module;
 
 import sys;
 
-struct List<T> {
-  data: T*,
-  len: int,
-  cap: int
+struct ListHeader<T> {
+    data: T*,
+    len: int,
+    cap: int
 }
 
-fn<T> List.push(item: T): void {
-  if (self.len == self.cap) {
-    if (self.cap == 0) {
-      self.cap = 8;
-    } else {
-      self.cap = self.cap * 2;
+pub struct List<T> {
+    h: &ListHeader<T>
+}
+
+pub fn<T> List.push(item: T): void {
+    if (self.h.len == self.h.cap) {
+        if (self.h.cap == 0) {
+            self.h.cap = 8;
+        } else {
+            self.h.cap = self.h.cap * 2;
+        }
+
+        // TYPE-002 (S14b): was `self.cap * 8` under Type Erasure, where every T
+        // was assumed to fit in one uniform 8-byte slot -- wrong for a T over
+        // 8 bytes (a real by-value struct element, S13b/S14a's own completion
+        // criterion 2), which would under-allocate this buffer and silently
+        // overflow it a few pushes later. sizeof(T) is now correct per
+        // instantiation (monomorphized, S12a's own completion criterion 4) --
+        // this is the ONE stdlib change this whole group permits itself
+        // (ARCHITECTURE_OVERHAUL.md §8's TYPE-002 entry).
+        immutable byte_size: int = self.h.cap * sizeof(T);
+
+        if (self.h.data == null) {
+            self.h.data = gc_alloc(byte_size) to T*;
+        } else {
+            self.h.data = gc_realloc(self.h.data, byte_size) to T*;
+        }
     }
 
-    // TYPE-002 (S14b): was `self.cap * 8` under Type Erasure, where every T
-    // was assumed to fit in one uniform 8-byte slot -- wrong for a T over
-    // 8 bytes (a real by-value struct element, S13b/S14a's own completion
-    // criterion 2), which would under-allocate this buffer and silently
-    // overflow it a few pushes later. sizeof(T) is now correct per
-    // instantiation (monomorphized, S12a's own completion criterion 4) --
-    // this is the ONE stdlib change this whole group permits itself
-    // (ARCHITECTURE_OVERHAUL.md §8's TYPE-002 entry).
-    immutable byteSize: int = self.cap * sizeof(T);
+    self.h.data[self.h.len] = item;
+    self.h.len = self.h.len + 1;
+}
 
-    if (self.data == null) {
-      self.data = gc_alloc(byteSize) to T*;
-    } else {
-      self.data = gc_realloc(self.data, byteSize) to T*;
+@caller_location
+pub fn<T> List.pop(): T {
+    if (self.h.len == 0) {
+        sys::panic(caller_location + ": List.pop: pop on empty list");
     }
-  }
 
-  self.data[self.len] = item;
-  self.len = self.len + 1;
+    self.h.len = self.h.len - 1;
+    return self.h.data[self.h.len];
 }
 
-fn<T> List.pop(): T {
-  if (self.len == 0) {
-    sys::panic("List.pop: pop on empty list");
-  }
-
-  self.len = self.len - 1;
-  return self.data[self.len];
+pub fn<T> List.length(): int {
+    return self.h.len;
 }
 
-fn<T> List.length(): int {
-  return self.len;
+// An independent list holding the same elements: pushing to, popping from or
+// writing into either one never touches the other (F-COLL-1). Elements are
+// copied as values, so a `List<SomeStruct*>` copy still points at the same
+// structs.
+pub fn<T> List.copy(): List<T> {
+    mut out: List<T> = List::default();
+    mut i: int = 0;
+    while i < self.h.len {
+        out.push(self.h.data[i]);
+        i = i + 1;
+    }
+    return out;
 }
 
 // ─── get / set (OVH-003) ─────────────────────────────────────────────────────
@@ -96,56 +126,64 @@ fn<T> List.length(): int {
 // operator[]'s own message text, just with a location a caller-heavy stdlib
 // consumer (json.tr, http.tr, ...) actually benefits from.
 @caller_location
-fn<T> List.get(i: int): T {
-  if (i < 0 || i >= self.len) {
-    sys::panic(caller_location + ": List.get: index out of bounds");
-  }
-  return self.data[i];
+pub fn<T> List.get(i: int): T {
+    if (i < 0 || i >= self.h.len) {
+        sys::panic(caller_location + ": List.get: index out of bounds");
+    }
+    return self.h.data[i];
 }
 
 @caller_location
-fn<T> List.set(i: int, value: T): void {
-  if (i < 0 || i >= self.len) {
-    sys::panic(caller_location + ": List.set: index out of bounds");
-  }
-  self.data[i] = value;
+pub fn<T> List.set(i: int, value: T): void {
+    if (i < 0 || i >= self.h.len) {
+        sys::panic(caller_location + ": List.set: index out of bounds");
+    }
+    self.h.data[i] = value;
 }
 
 // ─── operator[] / operator[]= (LANG-001) ────────────────────────────────────
 //
 // The better form of the `get`/`set` this file's own LIMITATIONS.md §4 entry
-// asked for -- `l[i]` and `l[i] = v` instead of named methods. Declared for
-// the CONCRETE `List<int>` only, not genuinely generic over `T`, for the
-// identical reason list_sort()/list_binary_search()/list_find() above are
-// concrete rather than `fn<T> List....`: `operator` declarations are
-// deliberately non-generic (ParseOperatorDecl() parses no `<T>` block at
-// all -- see its own doc comment, src/ParserDecl.cpp) -- lifting that
-// restriction is a genuinely separate parser/Resolver/Monomorphizer feature,
-// not something LANG-001 asked for, and specializing on one concrete element
-// type (matching this file's own established precedent) is what keeps this
-// addition small and self-contained instead. Bounds-checked, matching
+// asked for -- `l[i]` and `l[i] = v` instead of named methods. Generic over
+// `T` (LEC-006): these were `List<int>`-only until `operator` declarations
+// could take a `<T>` list, which left `l[i]` working for `List<int>` and
+// failing to compile for every other element type. Bounds-checked, matching
 // index_of()'s absence of a bounds guard being the ODD one out here, not the
 // norm -- every other List accessor (push/pop/the raw `self.data[i]` reads
 // above) already trusts the caller; operator[] deliberately does not,
 // since `l[i]` reads exactly like array indexing to a caller and array
 // indexing IS bounds-checked everywhere else in the language.
-operator [](l: List<int>, i: int): int {
-  if (i < 0 || i >= l.len) {
-    sys::panic("List[]: index out of bounds");
-  }
-  return l.data[i];
+//
+// #256: a negative index counts from the end, as it does for a fixed-size
+// array -- `l[-1]` is the last element. Valid range is `-len <= i < len`; the
+// wrap happens once, so `l[-len - 1]` still panics instead of landing back in
+// range. `get`/`set` above keep their strict `0 <= i < len` contract: they are
+// named calls, not array-shaped syntax. `@caller_location` so the panic names
+// the line that indexed, like every precondition panic (FREEZE F-API-3).
+@caller_location
+operator<T> [](l: List<T>, i: int): T {
+    mut idx: int = i;
+    if (idx < 0) {
+        idx = idx + l.h.len;
+    }
+    if (idx < 0 || idx >= l.h.len) {
+        sys::panic(caller_location + ": List[]: index out of bounds");
+    }
+    return l.h.data[idx];
 }
 
-// Self taken BY VALUE, not `&List<int>` -- unlike a plain value struct,
-// that's sufficient for this write to persist: `data` is a heap pointer
-// (list_sort()'s own doc comment above makes the identical point about
-// List<int> more generally), so copying the List<int> header still shares
-// the same backing buffer, and `l.data[i] = value` writes through it.
-operator []=(l: List<int>, i: int, value: int): void {
-  if (i < 0 || i >= l.len) {
-    sys::panic("List[]=: index out of bounds");
-  }
-  l.data[i] = value;
+// Taking `l` by value is enough for the write to land in the caller's list:
+// a List is a handle, so the copy names the same header (F-COLL-1).
+@caller_location
+operator<T> []=(l: List<T>, i: int, value: T): void {
+    mut idx: int = i;
+    if (idx < 0) {
+        idx = idx + l.h.len;
+    }
+    if (idx < 0 || idx >= l.h.len) {
+        sys::panic(caller_location + ": List[]=: index out of bounds");
+    }
+    l.h.data[idx] = value;
 }
 
 // ─── sort / search ──────────────────────────────────────────────────────────
@@ -153,13 +191,13 @@ operator []=(l: List<int>, i: int, value: int): void {
 // Genuinely generic `List<T>` methods (STD-003, ARCHITECTURE_OVERHAUL.md
 // §8, item 3) -- NOT possible until this group. `sort`/`binary_search`/
 // `find` used to be concrete, `List<int>`-only FREE functions
-// (`list_sort`/`list_binary_search`/`list_find`, kept below as thin
-// deprecated wrappers over these methods, for one cycle, per this group's
-// own "prefer keeping wrappers" guidance) because a comparator parameter
+// (`list_sort`/`list_binary_search`/`list_find`; STD-003 kept them as thin
+// wrappers over these methods for one cycle and LEC-007 removed them)
+// because a comparator parameter
 // typed `fn(T, T): int` never type-checked correctly at the call site:
 // nothing in the substitution machinery recursed into a `FuncType`'s own
 // parameter/return types (`collectGenericSubstitution()`/
-// `typesCompatible()` in `src/TypeCheckerCall.cpp`/`src/Types.cpp`,
+// `typesCompatible()` in `src/sema/TypeCheckerCall.cpp`/`src/sema/Types.cpp`,
 // `Monomorphize::substituteConcreteTypes()`, and
 // `Resolver::substituteTypeParams()` all special-cased pointers/arrays/
 // `GenericType`, but none had a `FuncType` case). Fixed directly in the
@@ -177,18 +215,18 @@ operator []=(l: List<int>, i: int, value: int): void {
 // for the small lists this stdlib deals with (see map.tr's identical
 // "small collections, correctness over cleverness" reasoning for its own
 // hash-collision handling).
-fn<T> List.sort(cmp: fn(T, T): int): void {
-  mut i: int = 1;
-  while i < self.length() {
-    immutable key: T = self.data[i];
-    mut j: int = i - 1;
-    while j >= 0 && cmp(self.data[j], key) > 0 {
-      self.data[j + 1] = self.data[j];
-      j = j - 1;
+pub fn<T> List.sort(cmp: fn(T, T): int): void {
+    mut i: int = 1;
+    while i < self.length() {
+        immutable key: T = self.h.data[i];
+        mut j: int = i - 1;
+        while j >= 0 && cmp(self.h.data[j], key) > 0 {
+            self.h.data[j + 1] = self.h.data[j];
+            j = j - 1;
+        }
+        self.h.data[j + 1] = key;
+        i = i + 1;
     }
-    self.data[j + 1] = key;
-    i = i + 1;
-  }
 }
 
 // Binary search for `target` using the same `fn(T, T): int` comparator
@@ -197,57 +235,34 @@ fn<T> List.sort(cmp: fn(T, T): int): void {
 // enforce that, it only assumes it, exactly like a `qsort`-then-`bsearch`
 // pairing in C. Returns the index of a matching element if found, -1
 // otherwise.
-fn<T> List.binary_search(target: T, cmp: fn(T, T): int): int {
-  mut lo: int = 0;
-  mut hi: int = self.length() - 1;
-  while lo <= hi {
-    immutable mid: int = lo + (hi - lo) / 2;
-    immutable c: int = cmp(self.data[mid], target);
-    if (c == 0) {
-      return mid;
-    } else if (c < 0) {
-      lo = mid + 1;
-    } else {
-      hi = mid - 1;
+pub fn<T> List.binary_search(target: T, cmp: fn(T, T): int): int {
+    mut lo: int = 0;
+    mut hi: int = self.length() - 1;
+    while lo <= hi {
+        immutable mid: int = lo + (hi - lo) / 2;
+        immutable c: int = cmp(self.h.data[mid], target);
+        if (c == 0) {
+            return mid;
+        } else if (c < 0) {
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
     }
-  }
-  return -1;
+    return -1;
 }
 
 // Linear search over an unsorted (or sorted, doesn't matter) List<T> for
 // the first element matching an arbitrary predicate -- for lookups that
 // aren't simple equality/ordering (sort()/binary_search() above cover
 // that case).
-fn<T> List.find(predicate: fn(T): bool): int {
-  mut i: int = 0;
-  while i < self.length() {
-    if (predicate(self.data[i])) {
-      return i;
+pub fn<T> List.find(predicate: fn(T): bool): int {
+    mut i: int = 0;
+    while i < self.length() {
+        if (predicate(self.h.data[i])) {
+            return i;
+        }
+        i = i + 1;
     }
-    i = i + 1;
-  }
-  return -1;
-}
-
-// ─── deprecated free-function wrappers ───────────────────────────────────
-//
-// `list_sort`/`list_binary_search`/`list_find` are the pre-STD-003 concrete
-// `List<int>`-only free functions this file used to have no alternative
-// to. Kept as thin wrappers over the real generic methods above, for one
-// cycle, per this group's own "Breaking changes" guidance (prefer keeping
-// wrappers over removing outright) -- existing callers
-// (`tests/32_set_and_sort_stdlib/02_list_sort.tr` and siblings) keep
-// working unchanged. Prefer `l.sort(cmp)`/`l.binary_search(target, cmp)`/
-// `l.find(predicate)` directly in new code; these three may be removed in
-// a future cycle.
-fn list_sort(l: List<int>, cmp: fn(int, int): int): void {
-  l.sort(cmp);
-}
-
-fn list_binary_search(l: List<int>, target: int, cmp: fn(int, int): int): int {
-  return l.binary_search(target, cmp);
-}
-
-fn list_find(l: List<int>, predicate: fn(int): bool): int {
-  return l.find(predicate);
+    return -1;
 }

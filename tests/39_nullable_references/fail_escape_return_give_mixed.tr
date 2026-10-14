@@ -1,0 +1,15 @@
+// EXPECT-DIAG: E086
+// EXPECT-DIAG: can't be returned
+// One branch of the `give` is `&n`: when `c` holds, a reference into this
+// frame is returned (owner decision 2026-10-12, found by turf-fuzz).
+struct N { val: int, next: &?N }
+
+fn f(c: bool): &N {
+    mut n: N = N::default();
+    n.val = 42;
+    return (c give &n otherwise heap(n));
+}
+
+fn main(): int {
+    return f(false).val;
+}

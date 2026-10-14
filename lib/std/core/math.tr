@@ -1,0 +1,147 @@
+// ─── math.tr ─────────────────────────────────────────────────────────────────
+// Mathematical functions for TurfLang.
+//
+// Design:
+//   - All C math functions are declared via `extern fn` (FFI), not @intrinsic.
+//   - Functions that require libm are declared with `extern from "m"` so the
+//     compiler automatically appends -lm to the linker flags.
+//   - Turf-level wrappers implement overloaded variants and add new functions
+//     (min, max, clamp, tan, log, etc.) that were previously unavailable.
+//
+// Usage:
+//   import math;
+//   mut x: double = math::sqrt(2.0);
+//   mut n: int    = math::abs(-5);
+//   mut q: int    = math::divide(10, 0) recover produce -1;
+
+// ─── constants ─────────────────────────────────────────────────────────────
+
+export immut PI: double = 3.14159265358979323846;
+export immut E: double = 2.71828182845904523536;
+
+// ─── libm bindings ────────────────────────────────────────────────────────────
+
+pub extern from "m" fn pow(base: double, exp: double): double;
+pub extern from "m" fn sqrt(val: double): double;
+pub extern from "m" fn sin(val: double): double;
+pub extern from "m" fn cos(val: double): double;
+pub extern from "m" fn tan(val: double): double;
+pub extern from "m" fn floor(val: double): double;
+pub extern from "m" fn ceil(val: double): double;
+pub extern from "m" fn round(val: double): double;
+pub extern from "m" fn fabs(val: double): double;
+pub extern from "m" fn log(val: double): double;
+pub extern from "m" fn log2(val: double): double;
+pub extern from "m" fn log10(val: double): double;
+pub extern from "m" fn exp(val: double): double;
+
+// ─── abs ─────────────────────────────────────────────────────────────────────
+
+pub fn abs(val: double): double {
+    return fabs(val);
+}
+
+pub fn abs(val: int): int {
+    if val < 0 {
+        return 0 - val;
+    }
+    return val;
+}
+
+// ─── power (four overloads, mirrors previous @intrinsic behaviour) ────────────
+
+pub fn power(base: double, exp: double): double {
+    return pow(base, exp);
+}
+
+pub fn power(base: int, exp: int): int {
+    return pow(base to double, exp to double) to int;
+}
+
+pub fn power(base: int, exp: double): double {
+    return pow(base to double, exp);
+}
+
+pub fn power(base: double, exp: int): double {
+    return pow(base, exp to double);
+}
+
+// ─── min / max ────────────────────────────────────────────────────────────────
+
+pub fn min(a: int, b: int): int {
+    if a < b {
+        return a;
+    }
+    return b;
+}
+
+pub fn min(a: double, b: double): double {
+    if a < b {
+        return a;
+    }
+    return b;
+}
+
+pub fn max(a: int, b: int): int {
+    if a > b {
+        return a;
+    }
+    return b;
+}
+
+pub fn max(a: double, b: double): double {
+    if a > b {
+        return a;
+    }
+    return b;
+}
+
+// ─── clamp ────────────────────────────────────────────────────────────────────
+
+pub fn clamp(val: int, min_val: int, max_val: int): int {
+    if val < min_val {
+        return min_val;
+    }
+    if val > max_val {
+        return max_val;
+    }
+    return val;
+}
+
+pub fn clamp(val: double, min_val: double, max_val: double): double {
+    if val < min_val {
+        return min_val;
+    }
+    if val > max_val {
+        return max_val;
+    }
+    return val;
+}
+
+// ─── divide ───────────────────────────────────────────────────────────────────
+//
+// The raw `/` operator hard-panics (aborts the whole process) on division by
+// zero -- appropriate when it really is a programming bug, but not when the
+// divisor is genuinely untrusted input the caller should get a chance to
+// react to. `divide` is the recoverable alternative (docs/planning/
+// Errors.md's own worked example): `math::divide(a, b) recover produce 0;`
+// or a full `recover as err run { ... }` if the caller wants to react to the
+// failure specifically, instead of a program-ending abort.
+
+pub error MathError {
+    DivisionByZero,
+}
+
+pub fn divide(a: int, b: int): !int {
+    if b == 0 {
+        return MathError::DivisionByZero("division by zero");
+    }
+    return a / b;
+}
+
+pub fn divide(a: double, b: double): !double {
+    if b == 0.0 {
+        return MathError::DivisionByZero("division by zero");
+    }
+    return a / b;
+}

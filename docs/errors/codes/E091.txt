@@ -1,0 +1,37 @@
+A module exists in this build, but this package may not import it
+
+    // turf.toml of myapp:  [dependencies] plotter = { path = "../plotter" }
+    // plotter depends on geometry
+    import geometry;
+    // ERROR: Package 'geometry' is not a dependency of 'myapp'.
+    //     It is in this build because 'plotter' depends on it.
+    //   Hint: A package can import only its own modules, its direct
+    //   dependencies and the standard library. Add 'geometry' to
+    //   [dependencies] in myapp's turf.toml to import it here.
+
+In a project, `import m;` can name exactly three kinds of module:
+
+- one of your own package's modules (a `m.tr` anywhere under src/),
+- a package you list under [dependencies], by its package name, or
+- a standard-library module.
+
+This error means `m` is in the build but is none of those three for the
+package doing the import. It comes in two forms.
+
+A transitive dependency. The package is built because something you depend
+on depends on it, but you do not depend on it yourself. Using it anyway
+would make your code break the day that dependency stops needing it, so add
+it to your own [dependencies].
+
+Another package's internal module. Every module of a package except its root
+module (src/<package name>.tr) is internal to it:
+
+    import shapes;
+    // ERROR: Module 'shapes' is internal to package 'geometry'.
+
+Import the package itself (`import geometry;`) and use what its root module
+makes `pub`. If the package's author meant `shapes` to be part of its
+interface, the root module is where they expose it.
+
+This is a different error from "Could not find module" (E027): here the file
+exists, and a rule decides it is out of reach.

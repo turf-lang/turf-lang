@@ -11,17 +11,15 @@
 //    element type can still reach for the equivalent `list<T>` (list.tr),
 //    which IS a real generic type.
 //
-// 2. An "unsized" array parameter (`arr: int[]`, the spelling that accepts
-//    an argument of ANY concrete length) has its size erased entirely --
-//    `arr.length()` inside such a function returns -1, not the caller's
-//    real length, because Size == -1 is baked into the parameter's static
-//    type. There is no way to recover it at runtime. Every function here
-//    therefore takes an explicit `len: int` alongside the array, exactly
-//    like the existing `sumFive`-style pattern already used elsewhere in
-//    the codebase (tests/05_arrays_pointers_ffi/10_array_unsized_param.tr).
-//    Call as `arr.sum(len)`, `array::sum(arr, len)`, etc.
+// 2. Every function here takes an explicit `len: int` alongside the array.
+//    They were written when an unsized parameter (`arr: int[]`) could not
+//    know its own length; since issue #260 it can (`arr.length()`, for-each,
+//    bounds-checked `arr[i]`), so `len` is no longer needed to stay in
+//    bounds -- a `len` past the end now panics instead of reading past it.
+//    The signatures are part of the 2.x stdlib surface (FREEZE.md §6.20),
+//    so they stay. Call as `arr.sum(len)`, `array::sum(arr, len)`, etc.
 
-fn sum(arr: int[], len: int): int {
+pub fn sum(arr: int[], len: int): int {
     mut total: int = 0;
     mut i: int = 0;
     while i < len {
@@ -31,7 +29,7 @@ fn sum(arr: int[], len: int): int {
     return total;
 }
 
-fn sum(arr: double[], len: int): double {
+pub fn sum(arr: double[], len: int): double {
     mut total: double = 0.0;
     mut i: int = 0;
     while i < len {
@@ -41,7 +39,7 @@ fn sum(arr: double[], len: int): double {
     return total;
 }
 
-fn max(arr: int[], len: int): int {
+pub fn max(arr: int[], len: int): int {
     mut best: int = arr[0];
     mut i: int = 1;
     while i < len {
@@ -53,7 +51,7 @@ fn max(arr: int[], len: int): int {
     return best;
 }
 
-fn max(arr: double[], len: int): double {
+pub fn max(arr: double[], len: int): double {
     mut best: double = arr[0];
     mut i: int = 1;
     while i < len {
@@ -65,7 +63,7 @@ fn max(arr: double[], len: int): double {
     return best;
 }
 
-fn min(arr: int[], len: int): int {
+pub fn min(arr: int[], len: int): int {
     mut best: int = arr[0];
     mut i: int = 1;
     while i < len {
@@ -77,7 +75,7 @@ fn min(arr: int[], len: int): int {
     return best;
 }
 
-fn min(arr: double[], len: int): double {
+pub fn min(arr: double[], len: int): double {
     mut best: double = arr[0];
     mut i: int = 1;
     while i < len {
@@ -89,7 +87,7 @@ fn min(arr: double[], len: int): double {
     return best;
 }
 
-fn contains(arr: int[], len: int, val: int): bool {
+pub fn contains(arr: int[], len: int, val: int): bool {
     mut i: int = 0;
     while i < len {
         if arr[i] == val {
@@ -100,7 +98,7 @@ fn contains(arr: int[], len: int, val: int): bool {
     return false;
 }
 
-fn contains(arr: double[], len: int, val: double): bool {
+pub fn contains(arr: double[], len: int, val: double): bool {
     mut i: int = 0;
     while i < len {
         if arr[i] == val {
@@ -111,7 +109,7 @@ fn contains(arr: double[], len: int, val: double): bool {
     return false;
 }
 
-fn contains(arr: string[], len: int, val: string): bool {
+pub fn contains(arr: string[], len: int, val: string): bool {
     mut i: int = 0;
     while i < len {
         if arr[i] == val {
@@ -122,7 +120,7 @@ fn contains(arr: string[], len: int, val: string): bool {
     return false;
 }
 
-fn index_of(arr: int[], len: int, val: int): int {
+pub fn index_of(arr: int[], len: int, val: int): int {
     mut i: int = 0;
     while i < len {
         if arr[i] == val {
@@ -133,7 +131,7 @@ fn index_of(arr: int[], len: int, val: int): int {
     return 0 - 1;
 }
 
-fn index_of(arr: double[], len: int, val: double): int {
+pub fn index_of(arr: double[], len: int, val: double): int {
     mut i: int = 0;
     while i < len {
         if arr[i] == val {
@@ -144,7 +142,7 @@ fn index_of(arr: double[], len: int, val: double): int {
     return 0 - 1;
 }
 
-fn index_of(arr: string[], len: int, val: string): int {
+pub fn index_of(arr: string[], len: int, val: string): int {
     mut i: int = 0;
     while i < len {
         if arr[i] == val {

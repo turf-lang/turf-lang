@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E056
+// EXPECT-DIAG: Argument 1 is a '&P', which refers to the 'P' the parameter takes
+struct P { x: int }
+
+fn take(q: P): int { return q.x; }
+
+fn f(p: &P): int {
+    return take(p);
+}
+
+fn main(): int { return 0; }

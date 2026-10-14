@@ -1,0 +1,28 @@
+// Every in-range run-time int converts to its variant, including both ends;
+// out of range panics (see fail_runtime_int_to_enum_out_of_range.tr and
+// fail_runtime_negative_int_to_enum.tr). Operands come through a function
+// so no level can fold them away.
+
+import test;
+
+enum Color {
+    Red,
+    Green,
+    Blue
+}
+
+fn id(x: int): int {
+    return x;
+}
+
+fn main(): int {
+    test::assert((id(0) to Color) == Color::Red, "0 is the first variant");
+    test::assert((id(1) to Color) == Color::Green, "1 is the second");
+    test::assert((id(2) to Color) == Color::Blue, "2, the last variant, is in range");
+    mut i: int = 0;
+    while (i < 3) {
+        test::assert(((i to Color) to int) == i, "round trip");
+        i = i + 1;
+    }
+    return 0;
+}

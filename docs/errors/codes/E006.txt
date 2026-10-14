@@ -1,37 +1,23 @@
-This array's size isn't known here, so for-each can't safely loop over it
+E006 is retired -- for-each over an unsized array parameter works now
 
-A function parameter written as `arr: int[]` (no number inside the brackets) accepts an array of any length, but it doesn't carry that length around with it at runtime. For-each (`for value in arr { ... }`) needs to know exactly how many elements to visit, so when it can't figure that out, Turf stops you before it guesses wrong.
+Older versions of Turf refused `for value in arr { ... }` when `arr` was a parameter written `arr: int[]` (no size in the brackets), because such a parameter didn't carry its length with it. It does now: a `T[]` parameter knows how many elements the caller's array has, so this compiles and loops over every one of them.
 
-    fn sumAll(arr: int[5]): int {      // a concrete size -- for-each works fine
+    fn sum(arr: int[]): int {
         mut total: int = 0;
-        for value in arr {
+        for value in arr {          // fine -- visits every element
             total = total + value;
         }
         return total;
     }
 
-If the parameter is unsized instead:
-
-    fn sumAll(arr: int[]): int {       // no size -- for-each can't know when to stop
-        mut total: int = 0;
-        for value in arr {
-            total = total + value;
-        }
-        return total;
+    fn main(): int {
+        mut a: int[3] = [1, 2, 3];
+        mut b: int[5] = [1, 2, 3, 4, 5];
+        sum(a);                     // 6
+        sum(b);                     // 15
+        return 0;
     }
 
-There are two clean ways to fix this, depending on what you actually need. If every caller always passes the same fixed-size array, just give the parameter a concrete size instead of leaving it unsized:
+`arr.length()` gives the same count, and `arr[i]` is checked against it. The number E006 is kept so an old log that mentions it still has somewhere to land, and is never reused.
 
-    fn sumAll(arr: int[5]): int { ... }
-
-If you genuinely need to accept arrays of different sizes, pass the length in separately and use a regular counting loop instead of for-each:
-
-    fn sumAll(arr: int[], len: int): int {
-        mut total: int = 0;
-        for i in 0..len step i += 1 {
-            total = total + arr[i];
-        }
-        return total;
-    }
-
-Either way, once the loop knows exactly how far to go, this error goes away. It's a good reminder that "the array itself" and "how many elements it has" are two separate pieces of information in Turf -- worth keeping straight as you write more functions that take arrays.
+If you see an error about an unsized array today, it's E140: `T[]` written somewhere other than a function parameter. Run `turf --explain E140`.

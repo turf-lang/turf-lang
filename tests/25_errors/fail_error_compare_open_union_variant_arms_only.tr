@@ -1,0 +1,31 @@
+// EXPECT-DIAG: E093
+// EXPECT-DIAG: Non-exhaustive comparison on '<error>'
+// LEC-004: an error caught by `recover as err` is an open union, so naming some
+// of its variants never covers it: a compare needs `otherwise` (or `_`) even
+// when the arms are variant patterns (E093).
+error IOError {
+    NotFound(path: string),
+    Timeout
+}
+
+fn open(p: string): !int {
+    return IOError::NotFound(p);
+}
+
+fn code(): int {
+    immut v: int = open("x") recover as err run {
+        compare err {
+            matches IOError::NotFound(path):
+            return 1;
+            done
+            matches IOError::Timeout:
+            return 2;
+            done
+        }
+    };
+    return v;
+}
+
+fn main(): int {
+    return 0;
+}

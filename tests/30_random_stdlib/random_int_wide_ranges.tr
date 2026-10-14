@@ -1,0 +1,30 @@
+// `random::random_int` covers any range of ints. One 31-bit draw capped every
+// result at min + 2147483647, and `max - min + 1` overflowed (a panic) for a
+// range over almost all of `int`.
+
+import test;
+import random;
+
+fn main(): int {
+    mut big: int = 0;
+    mut negatives: int = 0;
+    for i in 0..2000 {
+        immut v: int = random::random_int(0, 10000000000);
+        test::assert(v >= 0 && v <= 10000000000, "within [0, 1e10]");
+        if v > big {
+            big = v;
+        }
+        immut w: int = random::random_int(-9223372036854775807 - 1, 9223372036854775807);
+        if w < 0 {
+            negatives += 1;
+        }
+        immut y: int = random::random_int(9223372036854775800, 9223372036854775807);
+        test::assert(y >= 9223372036854775800, "at the top of the range");
+        immut z: int = random::random_int(-4611686018427387904, 4611686018427387904);
+        test::assert(z >= -4611686018427387904 && z <= 4611686018427387904, "just over 2^62 values");
+    }
+    test::assert(big > 2147483647, "past 2^31");
+    test::assert(negatives > 800 && negatives < 1200, "the whole int range, both halves");
+    test::assert(random::random_int(7, 7) == 7, "a range of one");
+    return 0;
+}

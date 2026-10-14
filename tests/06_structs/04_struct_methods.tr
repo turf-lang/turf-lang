@@ -8,9 +8,9 @@ fn User.rename(new_name: string): void { self.name = new_name; }
 fn main(): int {
     mut u: User = User::new(10, "Alice");
     u.grow();
-    
+
     test::assert(u.age == 11, "");
-    
+
     u.rename("Bob");
     return 0;
 }

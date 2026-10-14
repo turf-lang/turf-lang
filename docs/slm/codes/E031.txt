@@ -24,7 +24,17 @@ CORRECT SYNTAX:
     enum Color { Red, Green, Blue }
     immut c: Color = Color::Red;   // enum variant
 
-    mut p: Point = Point::new(1, 2);  // struct static constructor
+    struct Point {
+        x: int,
+        y: int
+    }
+
+    fn Point.new(x: int, y: int): void {
+        self.x = x;
+        self.y = y;
+    }
+
+    mut p: Point = Point::new(1, 2);  // struct constructor
 
 INCORRECT:
     io::printline("hello");   // 'io' was never imported

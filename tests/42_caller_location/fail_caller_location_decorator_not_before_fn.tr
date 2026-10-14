@@ -1,4 +1,6 @@
-// STD-002: `@caller_location` only decorates a function declaration --
+// EXPECT-DIAG: E110
+// EXPECT-DIAG: Expected 'fn' or 'operator' after '@caller_location'
+// STD-002: `@caller_location` only decorates a function or operator declaration --
 // anything else after it is a syntax error, not silently ignored.
 @caller_location
 struct Foo {

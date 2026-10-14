@@ -10,17 +10,18 @@
 // bare-visible (via the on-demand `Shape`/`ShapeUtil` imports below).
 
 import io;
+import construction_shape_module;
 import construction_shape_module::[Shape, ShapeUtil];
 
 import test;
 fn main(): int {
     // Fully module-qualified.
     mut s1: construction_shape_module::Shape =
-        construction_shape_module::Shape::new(3, "triangle");
+    construction_shape_module::Shape::new(3, "triangle");
     test::assert(s1.sides == 3, "qualified new() sets sides");
 
     mut s2: construction_shape_module::Shape =
-        construction_shape_module::Shape::default();
+    construction_shape_module::Shape::default();
     test::assert(s2.sides == 0, "qualified default() zero-inits");
 
     // Bare form, now that Shape/ShapeUtil are on-demand imported above.

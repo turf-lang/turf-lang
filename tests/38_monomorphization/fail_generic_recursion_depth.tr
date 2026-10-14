@@ -1,3 +1,7 @@
+// EXPECT-DIAG: E079
+// EXPECT-DIAG: generic instantiation depth exceeded (65 deep)
+// EXPECT-DIAG: chain: wrap<int> -> wrap<&int> -> wrap<&&int>
+// EXPECT-NO-DIAG: too many generic instantiations
 // Regression test: TYPE-002 S12a -- a generic free function that requests
 // a new, ever-growing instantiation of itself must be rejected with
 // GenericInstantiationDepthError (E079), not left to exhaust memory or

@@ -10,6 +10,7 @@ CAUSE:
   OTHER branch reaches the read with no value ever set.
 
 CORRECT:
+    mut some_condition: bool = true;
     mut x: int;
     if some_condition {
         x = 1;

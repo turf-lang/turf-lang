@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: names the symbol as a plain word, not a string
+// The symbol is a plain word, like every other annotation argument that names
+// something.
+
+@ffi(linux: "strlen")
+extern fn text_length(s: string): int;
+
+fn main(): int {
+    return 0;
+}

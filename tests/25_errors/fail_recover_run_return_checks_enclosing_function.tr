@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E064
+// EXPECT-DIAG: Return type mismatch: function declares 'int' but returns 'string'
 // Test (fail): a `return` inside `recover run { ... }` diverges out of the
 // ENCLOSING function -- it is checked against THAT function's own declared
 // return type, never against the wrapped call's success type (there is no

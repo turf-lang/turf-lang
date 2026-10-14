@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E060
+// EXPECT-DIAG: You can't change the value of 'LIMIT'
 // `export immut` constants are always immutable -- assigning to one must
 // raise the same ImmutableAssignmentError an ordinary `immut` variable does.
 export immut LIMIT: int = 5;

@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E039
+// EXPECT-DIAG: has no variant 'NoSuchVariant'
 // Regression test: `Module::EnumName::Variant` where Module and EnumName
 // are both correct but Variant doesn't actually exist on that enum must
 // still be rejected with the ordinary "no variant" diagnostic -- proves
@@ -9,6 +11,6 @@ import functionless_module_enum_module;
 
 fn main(): int {
     immut s: functionless_module_enum_module::Shade =
-        functionless_module_enum_module::Shade::NoSuchVariant;
+    functionless_module_enum_module::Shade::NoSuchVariant;
     return 0;
 }

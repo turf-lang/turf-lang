@@ -1,436 +1,783 @@
 # Variables and Types
 
-This page covers variable declarations, default initialization, the primitive
-type system, literals, explicit casting with `to`, and the `sizeof`/`typeof`
-operators.
+This page covers variable declarations and type inference, definite
+assignment, the primitive types, literals and their range rules, integer
+overflow, explicit conversion with `to`, string and `char` indexing, and the
+`sizeof`, `typeof` and `hash_of` built-ins. The operators that act on these
+types are in [Operators](operators.md).
 
 ## Variable declarations
 
-Turf has four declaration keywords, but really only two distinct forms:
+A declaration is one of four keywords, in two pairs:
 
 ```turflang
-mut a: int = 10;
-mutable b: int = 20;
-immut x: int = 3;
-immutable y: int = 4;
-```
-
-`mut` and `mutable` are **exact synonyms** — they lex to the identical token
-and are handled by identical code. The same is true of `immut` and
-`immutable`. There is no semantic difference between the short and long
-spellings; use whichever you prefer, even inconsistently within a file.
-
-### Syntax
-
-```
-(mut | mutable | immut | immutable) <name> : <Type> [= <expr>] ;
-```
-
-> **Note — no type inference.** The `: Type` annotation is mandatory. Turf has
-> no `mut x = 5;` form that infers the type from the initializer. Omitting the
-> colon is a parse error ("Expected ':' after variable name"). The
-> initializer expression's type must still be *compatible* with the declared
-> type, but the type itself is always written out explicitly.
-
-`void` cannot be used as a variable's type — `mut x: void;` is a dedicated
-compile error.
-
-### `immut`/`immutable` require an initializer
-
-An immutable binding can never be assigned to after its declaration, so it
-must receive its one and only value at the declaration site:
-
-```turflang
-immut x: int;   // ERROR
-```
-
-```
-Immutable variable 'x' requires an explicit initializer.
-Hint: 'immutable'/'immut' variables can never be assigned to later, so they
-must get their only value right here.
-```
-
-This applies to *every* type, including ones that would otherwise get an
-automatic default value (see below) — `immut c: char;` fails with the exact
-same error as `immut x: int;`, even though `mut c: char;` compiles fine.
-
-## Default initialization
-
-> **Note — this is the single most important gotcha in the type system.**
-> Declaring a `mut` variable without an initializer does **not** behave
-> uniformly across types. Depending on the declared type, you get one of two
-> completely different behaviors.
-
-### Mechanism A: definite assignment required (`int`, `double`, `bool`, `string`, pointers)
-
-For `int`, `double`, `bool`, `string`, and any pointer type (`ptr`, `void*`,
-`T*`), declaring without an initializer leaves the variable **undefined**.
-The compiler statically tracks whether a variable has been assigned, and
-rejects any *read* that occurs before an explicit assignment:
-
-```turflang
-mut x: int;
-mut y: int = x;   // ERROR: definite-assignment violation, x read before assignment
-```
-
-Declare-then-assign-then-use is fine:
-
-```turflang
-mut x: int;
-x = 5;
-mut y: int = x;   // OK
-```
-
-This is a purely static, compile-time check — it does not mean the variable
-holds garbage memory underneath (see the note at the end of this section).
-
-### Mechanism B: eager auto-default (`char`, `int32`, structs, arrays)
-
-For every other type — notably `char`, `int32`, struct types, and arrays —
-the compiler synthesizes a real default value *at the declaration itself*.
-The variable is immediately readable, with no assignment required:
-
-```turflang
-mut c: char;
-test::assert((c to int) == 0, "default-initialized char should be byte 0");  // PASSES
-```
-
-The same holds for structs — every field gets its own recursively-computed
-default, and the whole struct is immediately readable:
-
-```turflang
-struct AllTypes { i: int, d: double, b: bool, s: string }
-
 fn main(): int {
-    mut a: AllTypes;
-    test::assert(a.i == 0, "int field default 0");
-    test::assert(a.d == 0.0, "double field default 0.0");
-    test::assert(a.b == false, "bool field default false");
-    test::assert(a.s == "", "string field default empty");
+    mut a: int = 10;
+    mutable b: int = 20;
+    immut x: int = 3;
+    immutable y: int = 4;
+    a = a + b + x + y;
+    return a;
+}
+```
+
+`mut` and `mutable` are exact synonyms, and so are `immut` and `immutable`.
+Use whichever spelling you like, even both in one file.
+
+```text
+(mut | mutable | immut | immutable) <name> [: <Type>] [= <expr>] ;
+```
+
+A `mut` variable can be assigned again after its declaration. An `immut`
+variable cannot, and assigning to one is an error (E060, "You can't change the
+value of ... because it's immutable").
+
+<!-- doc-example: fails E060 -->
+```turflang
+immut limit: int = 10;
+limit = 20;
+```
+
+An `immut` variable must be given its value in the declaration, for every
+type. `immut x: int;` is E128 ("Missing initializer"): the variable could never
+get a value later. A `mut` variable may be declared without one, as described
+under [Definite assignment](#definite-assignment).
+
+<!-- doc-example: fails E128 -->
+```turflang
+immut x: int;
+```
+
+`void` is not a type for a variable. `mut x: void;` is E112.
+
+## Type inference with `guess`
+
+Leave the type out, or write `guess` in its place, and the compiler takes the
+type from the initializer. The two spellings are identical:
+
+```turflang
+fn main(): int {
+    mut count = 5;               // int
+    mut ratio: guess = 2.5;      // double
+    mut name = "turf";           // string
+    mut initial = 'x';           // char
+    mut ready = true;            // bool
+    mut primes = [2, 3, 5, 7];   // int[4]
+    immut limit = 100;           // int
+
+    printline(typeof(count));
+    printline(typeof(primes));
+    count = count + limit;
     return 0;
 }
 ```
 
-Note the asymmetry here: `AllTypes.i` is an `int` *field*, and it gets a
-usable zero default immediately — because the definite-assignment gate
-(Mechanism A) only applies to top-level local variables inside a function
-body, not to struct fields. A local `int` declared bare is unusable until
-assigned; an `int` field inside an auto-defaulted struct is usable right
-away.
+An untyped literal takes its default type:
 
-Arrays are always treated as defined the moment they're declared, regardless
-of their contents.
-
-### Default value table
-
-| Type | Default value |
+| Initializer | Inferred type |
 |---|---|
-| `int` | `0` (not readable until assigned — Mechanism A) |
-| `int32` | `0` (readable immediately — Mechanism B) |
-| `double` | `0.0` (not readable until assigned — Mechanism A) |
-| `bool` | `false` (not readable until assigned — Mechanism A) |
-| `char` | byte `0` / `'\0'` (readable immediately — Mechanism B) |
-| `string` | `""` (not readable until assigned — Mechanism A) |
-| array / pointer / generic-param / function type | null pointer |
-| struct | struct literal of each field's own default, recursively (readable immediately — Mechanism B) |
+| integer literal | `int` |
+| float literal | `double` |
+| `true`, `false` | `bool` |
+| `'c'` | `char` |
+| `"s"` | `string` |
+| `[a, b, c]` | `T[N]` for the element type `T` and `N` elements |
+| any other expression | the expression's own type (a call to `fn f(): int32` gives `int32`; it is not widened) |
 
-> **Note.** Underneath both mechanisms, the actual memory Turf allocates for
-> a bare declaration is always zero-initialized. The difference between
-> Mechanism A and Mechanism B is entirely about whether the *compiler* lets
-> you read the variable before an explicit assignment — not about what value
-> would be there if you could. In other words: the definite-assignment check
-> is a static safety net that exists for `int`/`double`/`bool`/`string`/
-> pointers, but is not applied to `char`, `int32`, structs, or arrays. If
-> you're coming from a language with one uniform rule for "declared but not
-> initialized," don't assume Turf has one — check which bucket your type
-> falls into.
+The default type is chosen first and the value is checked against it, so
+`mut big = 999999999999999999999;` is an out-of-range error for `int`
+(E076), not a promotion to something wider. There is nothing wider.
+
+The inferred type is fixed at the declaration. A later assignment of another
+type is an ordinary type mismatch (E066), and the message says where the type
+came from:
+
+<!-- doc-example: fails E066 -->
+```turflang
+mut x = 5;
+x = 5.5;
+```
+
+```text
+Type mismatch!
+Cannot assign value of type 'double' to variable of type 'int'.
+Note: 'x' was inferred as 'int' here (line 1, col 18)
+```
+
+Inference is local and takes its type from one initializer. It does not apply
+to:
+
+- a declaration without an initializer: `mut x: guess;` and `mut x;` are E128
+  ("`guess` needs an initializer to infer from");
+- a function parameter, a return type or a struct field: `guess` there is E128
+  ("can only declare a local variable");
+- an initializer with no usable type: `mut x = null;`, or the result of a
+  `void` call, is E129 ("Cannot infer a type from ...");
+- a generic type given without its type arguments (E129).
+
+## Definite assignment
+
+A `mut` variable declared without an initializer holds no value yet. The
+compiler tracks, for every path through the function, whether it has been
+assigned, and a read that some path reaches before any assignment is E008
+("You're using 'x' before it has a value"). The rule is the same for every type:
+no read sees a value nothing assigned. An array is tracked as a whole (see
+[Arrays](arrays.md#initialization)).
+
+<!-- doc-example: fails E008 -->
+```turflang
+mut x: int;
+mut y: int = x;
+```
+
+Assigning on every path makes the read legal:
+
+```turflang
+fn pick(flag: bool): int {
+    mut x: int;
+    if flag {
+        x = 1;
+    } else {
+        x = 2;
+    }
+    return x;
+}
+
+fn main(): int {
+    return pick(true);
+}
+```
+
+Assigning on only some paths does not. A loop body might run zero times, so
+this is E008 as well:
+
+<!-- doc-example: fails E008 -->
+```turflang
+mut last: int;
+mut i: int = 0;
+while i < 3 {
+    last = i;
+    i++;
+}
+mut copy: int = last;
+```
+
+`char`, `int32`, `bool`, `string`, enums, structs and arrays follow the same
+rule: declare-then-read is E008. To get a zero-valued struct immediately, use
+[`T::default()`](structs_and_enums.md#construction-new-and-default). Writing a
+field of an unassigned struct (`mut p: Point; p.x = 4;`) is also E008, because
+struct fields are not tracked individually: a struct is either fully assigned
+or not.
+
+An array is tracked as a whole. It counts as assigned once it is assigned whole
+or **any one element** is written. After that every element can be read, and the
+ones never written read as zero:
+
+```turflang
+struct Point {
+    x: int,
+    y: int
+}
+
+fn main(): int {
+    mut p: Point = Point::default();   // every field zero, readable at once
+
+    mut arr: int[3];
+    // mut first: int = arr[1];        // E008: no element written yet
+    arr[0] = 10;
+    mut second: int = arr[1];          // 0
+    return p.x + second;
+}
+```
+
+### Zero values
+
+The zero value is what `T::default()` gives a field, and what an array element
+that was never written reads as:
+
+| Type | Zero value |
+|---|---|
+| `int`, `int32` | `0` |
+| `double` | `0.0` |
+| `bool` | `false` |
+| `char` | byte `0`, `'\0'` |
+| `string` | `""` |
+| enum | the first variant |
+| pointer, function type | null |
+| array | every element its own zero value |
+| struct | every field its own zero value, recursively |
+| `&?T` | null |
+| `&T` | a fresh `T::default()` of its own (a reference is never null) |
+
+A struct that holds a `&T` field can only be defaulted when that gives a finite
+structure: a cycle through `&T` fields is a compile error. See
+[Structs and enums](structs_and_enums.md#construction-new-and-default).
+
+The storage behind a bare declaration is zero-filled anyway. Definite
+assignment is a check on your program's logic, not protection against garbage.
 
 ## Primitive types
 
-Turf has six true primitive types plus `void`:
+| Type | Size | Notes |
+|---|---|---|
+| `int` | 64-bit | Signed. The general-purpose integer. |
+| `int32` | 32-bit | Signed. For describing C `int` in `extern fn` signatures. |
+| `double` | 64-bit | IEEE 754 floating point. |
+| `bool` | 1 byte | `true` or `false`. |
+| `char` | 1 byte | One raw byte, 0 to 255. Not a Unicode code point. |
+| `string` | pointer | A NUL-terminated byte string. |
+| `void` | none | Only a function's return type. |
 
-| Type | Size | Numeric for coercion purposes? | Notes |
-|---|---|---|---|
-| `int` | 64-bit | yes | Signed. |
-| `int32` | 32-bit | yes | Exists mainly to describe real C ABI types in `extern fn` declarations. |
-| `double` | 64-bit float | yes | |
-| `bool` | 1 bit | yes (by classification) but see below — no real numeric coercion | |
-| `char` | 1 byte | **no** | A raw byte (0–255), not a Unicode codepoint. |
-| `string` | pointer to bytes | no | C-style string pointer. |
-| `void` | — | no | Only legal as a function return type. |
+There are no other integer widths and no unsigned types. `uint` or `unsigned`
+is E042 (unknown type).
 
 ### `int`
 
-A 64-bit signed integer. Widens implicitly to `double`. Arithmetic (`+ - * /
-%`) between two `int`s (or `int`/`bool`) produces `int`; if either operand is
-`double`, the whole expression promotes to `double`.
+A 64-bit signed integer. It widens implicitly to `double`. `+ - * / %` on two
+integers give an `int`; if either operand is a `double` the result is a
+`double`.
 
 ### `int32`
 
-`int32` is **not** a second parallel arithmetic type — it exists so that
-`extern fn` declarations can honestly describe a real C ABI 32-bit `int`
-parameter or return value (the motivating bug: a C `strcmp` declared with a
-Turf `int` return type silently misread the return register, because a real C
-`int` is 32 bits, not 64).
+`int32` exists to describe a C `int` honestly in an `extern fn` declaration. A
+function that really returns a 32-bit value must not be declared to return a
+64-bit one.
 
 ```turflang
-extern fn strcmp(a: string, b: string): int32;
+extern fn abs(n: int32): int32;
+
+fn main(): int {
+    immut r: int32 = abs(-5 to int32);
+    return r to int;
+}
 ```
 
-- **Widens implicitly** to `int` and to `double` — `mut w: int = an_int32_value;`
-  just works.
-- **Narrowing `int → int32` requires an explicit cast.** `mut n: int32 = 5;`
-  is a compile error; write `5 to int32` instead.
-- Any arithmetic or comparison involving `int32` — with another `int32` or
-  with a plain `int` — **promotes straight to `int`**. `int32` is never
-  itself an arithmetic result type.
-- A declared-but-uninitialized `int32` local is auto-defaulted and
-  immediately readable (Mechanism B above), unlike a plain `int`.
+- **Widening is implicit.** An `int32` converts to `int` and to `double`
+  wherever one is expected.
+- **Narrowing needs a cast, for a value that is already typed `int`.** The cast
+  truncates to the low 32 bits:
+
+  ```turflang
+  fn main(): int {
+      mut existing: int = 5;
+      mut n: int32 = existing to int32;
+      return n to int;
+  }
+  ```
+
+  `mut n: int32 = existing;` is E066.
+- **An untyped literal becomes an `int32` directly** when that is the
+  destination: `mut n: int32 = 5;` is fine, and `mut n: int32 = 99999999999;` is
+  E076 because the value does not fit in 32 bits.
+- **Arithmetic and comparison involving an `int32` produce an `int`.** An
+  `int32` is a storage type, not a second arithmetic type. Assigning the sum
+  of two `int32` values to an `int32` variable is E066; cast it back with `to
+  int32`.
+- **`++`, `--` and every compound assignment on an `int32` variable are E126**
+  ("not supported on 'int32'"). Write the operation out:
+
+  ```turflang
+  fn main(): int {
+      mut n: int32 = 5;
+      n = (n + 1) to int32;
+      return n to int;
+  }
+  ```
+- The bitwise operators and `~` do not accept an `int32` (E057). Convert to
+  `int` first.
 
 ### `double`
 
-IEEE double precision. `int → double` widens implicitly; `double → int`
-requires an explicit `to int` cast, which truncates toward zero.
+An IEEE 754 double. `int` and `int32` widen to it implicitly. `double` to `int`
+is never implicit: use `to int`, which truncates toward zero (see [Casting with
+`to`](#casting-with-to)).
+
+Arithmetic on `double` follows IEEE rules, with one exception: division and
+remainder by zero panic rather than producing `inf` or `NaN`. Overflow in
+`double` arithmetic gives `inf` or `-inf` and does not panic. A `NaN` prints,
+and converts to `string`, as `nan`.
 
 ### `bool`
 
-> **Note — `bool` has almost no cast surface at all.** `bool` is classified
-> as "numeric" internally (this is what lets `&&`/`||` share the same
-> operand-checking path as other numeric comparisons), but it is deliberately
-> isolated from real numeric coercion:
->
-> - There is **no implicit** `bool ↔ int`/`double` coercion. `mut x: int =
->   true;` is rejected.
-> - There is **no explicit** cast either. `b to int` where `b: bool` fails
->   at compile time with "Cannot explicitly cast 'bool' to 'int'" — the
->   explicit `to` cast does not bridge this gap, unlike most type pairs where
->   `to` can force a conversion implicit coercion won't do.
-> - The **only** supported cast is `bool → string`, producing `"true"` or
->   `"false"`. There is no `string → bool` cast in the other direction.
+`true` or `false`. A `bool` has no conversion to or from a number, either
+implicit or explicit: `mut x: int = true;` is E066, and `true to int` is E134
+("That conversion isn't allowed"). To get a number from a condition, say what
+you want: `cond give 1 otherwise 0`. The one cast out of `bool` is `bool to
+string`, which gives `"true"` or `"false"`. Nor is a `bool` an operand of
+arithmetic or ordering: `true + 1` is E057, and `true < false` and `1 < 2 < 3`
+(which compares the `bool` `1 < 2` with `3`) are E124. `==` and `!=` compare
+two `bool`s.
 
 ```turflang
-mut flag: bool = true;
-mut s: string = flag to string;   // "true" — OK, the one supported cast
-mut n: int = flag to int;          // ERROR — no such cast exists
+fn main(): int {
+    mut flag: bool = true;
+    printline(flag to string);                 // true
+    mut n: int = flag give 1 otherwise 0;
+    return n;
+}
 ```
 
 ### `char`
 
-A 1-byte primitive — not sugar over `int` or `string`. `char` deliberately
-does not participate in numeric coercion at all, which is what keeps it out
-of every arithmetic/comparison path that other numeric types share.
+A `char` is one byte. It is its own type, not an integer and not a one-letter
+string.
 
 ```turflang
-mut c: char = 'a';
+fn main(): int {
+    mut c: char = 'a';
+    mut next: char = (c to int + 1) to char;
+    printline(next);                  // b
+    return 0;
+}
 ```
 
-- Supports `== != < > <= >=` as raw byte-value comparison (no locale or
-  Unicode awareness).
-- **No arithmetic whatsoever.** `'a' + 'b'` and `'a' + 1` are both compile
-  errors — you must cast to `int` first.
-- **No implicit coercion to/from `int`.** Even `'a' == 1` is rejected.
-- **Explicit casts exist only between `char` and `int`, in both directions:**
-
-  ```turflang
-  mut n: int = 'a' to int;   // zero-extend, unsigned byte 0-255
-  mut c2: char = 97 to char; // truncate
-  ```
-
-  `char → int` zero-extends (so it always yields an unsigned value 0–255,
-  never a signed C `char`). `int → char` truncates.
-
-> **Note.** There is **no cast between `char` and `string`, `double`, or
-> `bool`** — none of the six combinations exist. `c to string` fails with a
-> "cannot convert to string" error rather than silently doing something
-> unexpected.
-
-A declared-but-uninitialized `char` gets an immediate default of byte `0`
-(Mechanism B above) and is readable right away, unlike `int`/`double`/`bool`/
-`string`.
+- `== != < > <= >=` compare byte values as unsigned numbers, so `200 to char`
+  is greater than `'a'`.
+- There is **no arithmetic** on a `char`. `'a' + 1` is E057. Convert to `int`
+  first.
+- There is **no implicit conversion** either way. `mut c: char = 97;` is E066 and
+  `c == 97` is E124 ("Values can't be compared"). Write `'a'`, or `c to int ==
+  97`.
+- The explicit casts are between `char` and `int` only: `char to int`
+  zero-extends (always 0 to 255), and `int to char` keeps the low byte
+  (`321 to char` is `'A'`). There is no cast from `char` to `string`, `double`,
+  `bool` or `int32`.
 
 ### `string`
 
-A `string` is a pointer to a C-style byte buffer. Unlike most languages'
-string operators, `+ == != < > <= >=` on `string` are **not hardcoded in the
-compiler** — they are ordinary `operator` overloads defined in the standard
-library and brought into scope automatically because the module that defines
-them is one of the auto-imported prelude modules. See
-[Operators § String operators](operators.md#string-operators) for details.
+A `string` is a pointer to NUL-terminated bytes. A string literal is static
+data. Every string an operation produces lives on the garbage-collected heap.
 
-Indexing a string with `s[i]` *is* a compiler-level construct — see the same
-section.
+`+` and the six comparison operators on strings are ordinary operator
+overloads defined in the standard library, available without an import (see
+[Operators: String operators](operators.md#string-operators)). `s[i]` is built
+into the language and is described next.
+
+#### Indexing a string
+
+`s[i]` is the byte at position `i`, and its type is `char`. Compare it with a
+`char` literal directly, and convert with `to int` when you want the number:
+
+```turflang
+fn main(): int {
+    mut s: string = "hello";
+    mut first: char = s[0];
+
+    printline(first == 'h');            // true
+    printline(s[1] to int);             // 101
+    printline(s[-1]);                   // o: negative counts from the end
+    printline("hello"[4]);              // o
+
+    mut vowels: int = 0;
+    mut i: int = 0;
+    while i < s.length() {
+        if s[i] == 'e' || s[i] == 'o' {
+            vowels++;
+        }
+        i++;
+    }
+    return vowels;
+}
+```
+
+`mut n: int = s[0];` is E066: a `char` is not an `int`.
+
+A **read** is bounds-checked at run time. The valid indices are `-n` to `n - 1`
+for a string of `n` bytes, and anything else panics with `String index out of
+bounds`. A negative index `i` means `n + i`, the same as for arrays and
+`List`. Reading position 0 of `""` panics.
+
+A **write** (`s[i] = c;`) wraps a negative index the same way and panics if the
+result is still below zero. Its upper bound is the string's heap allocation,
+not its length, since a string being filled byte by byte has no terminator yet
+to measure: a write past the allocation panics with `String index out of
+bounds`, and a write into a string that is not on the heap (a string literal,
+or memory from C) panics with `Cannot write into this string`. The value being
+stored must be a `char` (`s[0] = 65;` is E066).
+
+`strings::byte_at_unchecked(s, i)` reads a byte with no check at all, for a
+loop that has already established the index is in range. Everything else about
+strings is in [the `strings` module](stdlib/core.md).
 
 ### `void`
 
-Legal only as a function's return type. `mut x: void;` is a dedicated
-compile-time error.
+Only a function's return type.
 
 ## Literals
 
 ### Integer literals
 
-A run of decimal digits with no decimal point: `42`, `0`, `1000`. There is no
-hex/octal/binary literal syntax, no digit-group separators (`_`), and no
-integer literal type suffixes.
+| Form | Example | Value |
+|---|---|---|
+| decimal | `42`, `1_000_000` | as written |
+| hexadecimal | `0xFF`, `0x1_000` | 255, 4096 |
+| binary | `0b1010` | 10 |
+| octal | `0o17` | 15 |
 
-### Double literals
+The prefix letter may be upper or lower case (`0XFF`, `0B1010`, `0O17`). An
+underscore `_` is a digit separator: it may sit anywhere **between** two digits
+and nowhere else.
 
-A run of digits containing exactly one `.`, e.g. `3.14`, `0.5`. A leading
-bare `.` only starts a number if immediately followed by a digit — `.5`
-parses as the double `0.5`, but a lone `.` elsewhere is the field-access/
-method-call operator. `..` and `...` (range/ellipsis) are recognized before
-the number scanner runs, so `1..5` doesn't get misparsed as a double.
-
-### Bool literals
-
-`true` and `false` are keywords.
-
-### Char literals
-
-Exactly one character, or one escape sequence, between single quotes:
+A leading `0` is **not** an octal marker. `0755` is the decimal number 755. Use
+`0o755` for octal.
 
 ```turflang
-mut c: char = 'a';
-mut newline: char = '\n';
+fn main(): int {
+    immut million: int = 1_000_000;
+    immut mask: int = 0xFF;
+    immut flags: int = 0b1010;
+    immut perms: int = 0o755;
+    immut decimal: int = 0755;      // 755, not 493
+
+    printline(perms);               // 493
+    printline(decimal);             // 755
+    return million + mask + flags;
+}
 ```
 
-- `''` — "Empty char literal."
-- `'ab'` — "Char literal must contain exactly one character."
-- `'a` (no closing quote before end of line/EOF) — "Unterminated char literal"
+There are no integer-literal suffixes, and no way to write a negative number
+other than the unary `-` operator.
 
-### String literals
+### Floating-point literals
 
-Double-quoted, and **cannot span multiple physical lines** — the scanner
-stops at a closing `"`, EOF, or a raw newline, so a forgotten closing quote
-is caught immediately instead of silently swallowing the rest of the file:
+A float literal is either **dotted**, with at least one digit on **each** side
+of the point (`1.5`, `0.25`, `3.14_159`), or **dotless with an exponent**
+(`1e6`). Either form may take an exponent: `e` or `E`, an optional sign and
+digits (`1.5e-3`, `1E+10`, `2e8`). `.5` is accepted and means `0.5`.
 
+```turflang
+fn main(): int {
+    immut a: double = 1.5;
+    immut b: double = 1e6;
+    immut c: double = 1.5e-3;
+    immut d: double = 1E+10;
+    immut e: double = 3.14_159;
+    return (a + b + c + d + e) to int;
+}
 ```
-Unterminated string literal
-Hint: Add a closing '"' before the end of the line -- Turf string literals
-can't span multiple lines. Need an actual line break inside the string? Use
-the \n escape instead.
+
+A number that ends in a bare point is rejected: `5.` is E139 ("ends in a '.'
+with no digit after it"), so write `5.0` or `5`. Hex, binary and octal
+literals are whole numbers only: `0x1.8` is E139. A digit sequence cannot hold
+two points (`1.5.5`, E139).
+
+The malformed-literal errors:
+
+| Code | Cause | Example |
+|---|---|---|
+| E070 | radix prefix with no digit | `0x` |
+| E071 | digit not valid in the radix | `0b012`, `0o8` |
+| E072 | separator at the start or end of a digit run | `5_`, `0x_FF` |
+| E073 | exponent marker with no exponent | `1.5e`, `1.5e+` |
+| E139 | malformed decimal point | `5.`, `0x1.8`, `1.5.5` |
+
+(A leading underscore, `_5`, is not a number at all: it is the identifier `_5`,
+E040.)
+
+### Range rules for literals
+
+An integer literal is held exactly, however large, until its type is known.
+Once the destination is fixed (`int`, `int32` or `double`), the value must fit.
+**An out-of-range literal is a compile error. It is never truncated or wrapped.**
+
+<!-- doc-example: fails E076 -->
+```turflang
+mut x: int = 9223372036854775808;
 ```
 
-#### Escape sequences
+```text
+Integer literal is not representable in type 'int'.
+The literal's value is 9223372036854775808.
+'int' holds -9223372036854775808 .. 9223372036854775807.
+```
 
-The following escapes are recognized in both string and char literals:
+| Destination | Range | Error when outside |
+|---|---|---|
+| `int` | -9223372036854775808 to 9223372036854775807 | E076 |
+| `int32` | -2147483648 to 2147483647 | E076 |
+| `double` (from an integer literal) | must convert **exactly** | E077 |
+| `double` (from a float literal) | must not round to infinity | E078 |
+
+- A literal written with a leading `-` is checked **with** its sign, so
+  `-9223372036854775808` is legal, and `-9223372036854775809` is not.
+- `0xFFFFFFFFFFFFFFFF` is not `-1`. There is no wrapping, and it is E076.
+- An integer literal assigned straight to a `double` must be exactly
+  representable in a `double`. `mut d: double = 5;` is fine, but
+  `9223372036854775807` has no exact `double` and is E077. Write
+  `9223372036854775807.0` if the rounded value is what you want. Values above
+  `int`'s own range are rejected as E076 before this check.
+- A float literal too large for a `double` (`1e400`) is E078. A tiny one that
+  underflows (`1e-400`) is `0.0`.
+
+The same check applies to a constant expression. When every operand is a
+literal, or an `immut` variable whose value is known, the result is computed
+exactly and must fit its destination:
+
+<!-- doc-example: fails E076 -->
+```turflang
+immut top: int = 9223372036854775807;
+immut past = top + 1;
+```
+
+This is a compile-time error. The same arithmetic on `mut` variables is a
+[run-time trap](#integer-overflow).
+
+### `bool`, `char` and `string` literals
+
+`true` and `false` are keywords. A char literal is exactly one character or one
+escape between single quotes: `'a'`, `'\n'`, `'\''`.
+
+- `''` is E101 ("Empty char literal").
+- `'ab'` is E101 ("Char literal must contain exactly one character").
+
+A string literal is in double quotes and cannot continue onto the next line. A
+missing closing quote is E099 ("Unterminated string literal"), reported at the
+line where the string began. Use `\n` for a line break inside the text.
+
+Escapes, in both char and string literals:
 
 | Escape | Byte | Escape | Byte |
 |---|---|---|---|
 | `\n` | newline (10) | `\a` | bell (7) |
 | `\t` | tab (9) | `\b` | backspace (8) |
-| `\r` | CR (13) | `\f` | form feed (12) |
+| `\r` | carriage return (13) | `\f` | form feed (12) |
 | `\0` | NUL (0) | `\v` | vertical tab (11) |
 | `\\` | backslash (92) | `\'` | single quote (39) |
 | `\"` | double quote (34) | | |
 
-Any other escape sequence (e.g. `\q`) is a compile-time error naming the
-recognized set. This is a real, single-byte substitution — `\r` produces one
-CR byte, not the two characters `\` and `r`:
-
-```turflang
-immut withCR: string = "a\rb";
-test::assert(strings::length(withCR) == 3, "\\r must be exactly one byte");
-test::assert(withCR != "arb", "\\r must not silently become a literal 'r'");
-```
+Any other escape (`\q`, `\x41`) is E100 ("Unknown escape sequence"). Each
+escape is one byte: `"a\rb"` is three bytes long.
 
 ### `null`
 
-`null` is only compatible with pointer-like types (`ptr`, `void*`, `T*`).
-It's never compatible with plain numeric types, `bool`, or `string`, and it
-is explicitly excluded from safe reference types (`&T`), since a `&T`'s
-entire purpose is a non-null guarantee.
+`null` is the null pointer. It is compatible with raw pointer types and `&?T`
+only. `mut x: int = null;` and `mut s: string = null;` are E062, and a `&T`
+reference can never be null.
 
-## Casting with `to`
+## Integer overflow
 
-`to` is the sole explicit-cast mechanism in Turf:
+`int` is 64-bit signed and **overflow is a run-time panic, never a silent wrap.**
+`+ - *`, unary `-`, `++`, `--`, `<<` and `**` all check the result, and so does
+the quotient `INT_MIN / -1`:
 
-```turflang
-mut i: int = 65;
-mut d: double = i to double;
-mut s: string = i to string;
+```text
+panic: runtime check: Integer overflow
 ```
 
-> **Note.** There is no `int(x)`/`double(x)` function-call cast syntax —
-> `to` is the only way to convert between types explicitly.
-
-`to` binds tighter than assignment but looser than every other real binary
-operator (see the [precedence table](operators.md#precedence) in the
-operators reference), so `y = x to int;` parses as `y = (x to int)`.
-
-### Legal conversions
-
-| From → To | Behavior |
-|---|---|
-| `int ↔ double` | Standard int/float conversion (also implicit `int → double`) |
-| `int32 ↔ int` | Sign-extend / truncate (`int32 → int` also implicit) |
-| `int32 ↔ double` | Standard conversion (`int32 → double` also implicit) |
-| `char ↔ int` | Zero-extend / truncate |
-| `enum ↔ int` | Zero-extend / reinterpret |
-| `string ↔ int` | Parses/formats the number; **runtime panic on an unparseable `string → int`** |
-| `string ↔ double` | Parses/formats the number; no runtime validation on `string → double` |
-| `int → string` | Formats the number as text |
-| `double → string` | Formats the number as text |
-| `bool → string` | `"true"` / `"false"` |
-| `enum ↔ string` | Matches by variant name; **runtime panic on an unrecognized `string → enum`** |
-| `int ↔ pointer` | Reinterprets the integer as an address and vice versa |
-| pointer ↔ pointer (incl. `ptr`/`string`) | Reinterpret cast |
-| pointer-to-struct → struct (by value) | Implicit dereference |
-
-### Not supported at all
-
-`bool ↔ int`, `bool ↔ double`, `char ↔ string`, `char ↔ double`,
-`char ↔ bool`, `string → bool`, and any other pair not listed above. These
-fail at compile time — `to` does not bypass type-system restrictions beyond
-the conversions the compiler explicitly implements.
-
-> **Note.** The type checker itself does essentially no legality checking on
-> `to` — a cast expression always type-checks. All real enforcement of which
-> conversions are legal happens later, during code generation, which is why
-> an illegal cast still produces a clear compile-time error rather than
-> succeeding silently or crashing.
-
-Raw-pointer casts performed via `to` inside `unsafe { }` blocks, and
-`sizeof`/enum-literal-range checks, are enforced as part of the same cast
-machinery — see [Pointers and references](../architecture/pointers_and_references.md)
-for the `unsafe` rules.
-
-## `sizeof` and `typeof`
-
-These look like a matched pair but have fundamentally different signatures.
-
-### `sizeof(T)` — takes a type, returns its size in bytes
-
-`sizeof` takes a **type**, not a value expression, and evaluates to a
-compile-time `int` constant giving that type's size in bytes:
-
 ```turflang
-unsafe {
-    mut p: Node* = malloc(sizeof(Node)) to Node*;
-    mut q: int* = malloc(sizeof(int) * 5);
+fn main(): int {
+    mut a: int = 9223372036854775807;
+    a = a + 1;           // panics: Integer overflow
+    return 0;
 }
 ```
 
-### `typeof(expr)` — takes an expression, returns its static type name
+The program aborts. There is no unwinding, and deferred statements do not run.
 
-`typeof` takes a **value expression** and returns a `string` naming its
-*compile-time* type — `"int"`, `"double"`, `"string"`, `"bool"`, or e.g.
-`"int[2]"` for a sized array. Turf has no runtime type information, so this
-is always the type the compiler inferred for the expression at compile time,
-not anything computed dynamically:
+Other checked operations:
+
+| Operation | Panic message |
+|---|---|
+| `x / 0`, for `int` and `double` | `Division by zero` |
+| `x % 0` | `Modulo by zero` |
+| shift by a count outside 0 to 63, or `<<` that loses a set bit | `Integer overflow` |
+| `int ** negative int` | `Negative exponent in integer '**'` |
+| `double to int` of a NaN, an infinity, or a value outside `int` | `Integer overflow` |
+
+`double` arithmetic is the exception: `1.7e308 * 10.0` is `inf`, not a panic.
+A cast to a narrower type (`to int32`, `to char`) truncates and does not panic.
+
+These behaviours do not depend on the optimisation level.
+
+## Casting with `to`
+
+`to` is the only explicit conversion. There is no `int(x)` call form.
 
 ```turflang
-test::assert(typeof(10) == "int", "");
-test::assert(typeof("hello") == "string", "");
-test::assert(typeof(3.14) == "double", "");
-test::assert(typeof(true) == "bool", "");
-test::assert(typeof([1, 2]) == "int[2]", "");
+fn main(): int {
+    mut i: int = 65;
+    mut d: double = i to double;
+    mut s: string = i to string;
+    printline(d);                   // 65
+    printline(s + "!");             // 65!
+    return 0;
+}
 ```
 
-`typeof` is not a keyword — it's a built-in function callable without a
-module prefix, evaluated directly against the argument's static AST type.
+`to` binds looser than every arithmetic and bitwise operator and tighter
+than comparison, the logical operators and assignment. `1 + 2 to double` is
+`(1 + 2) to double`, `s to int > 5` is `(s to int) > 5`, and `y = x to int;`
+is `y = (x to int)`. Parenthesise to cast one operand: `(x to double) * 2`.
+Writing `x to double * 2` without parentheses does not work: the `*` after a
+type name is read as a pointer type.
+
+An illegal cast is rejected at compile time (E134, "That conversion isn't
+allowed", or E065 for the text conversions).
+
+### Conversion table
+
+The row is the source type, the column the target. `ok` is a legal cast,
+`-` is rejected. Implicit conversions (no `to` needed) are marked in the notes
+below the table.
+
+| from \ to | `int` | `int32` | `double` | `bool` | `char` | `string` | enum |
+|---|---|---|---|---|---|---|---|
+| `int` | | ok | ok | - | ok | ok | ok |
+| `int32` | ok | | ok | - | - | - | - |
+| `double` | ok | ok | | - | - | ok | - |
+| `bool` | - | - | - | | - | ok | - |
+| `char` | ok | - | - | - | | - | - |
+| `string` | ok | - | ok | - | - | | ok |
+| enum | ok | - | - | - | - | ok | |
+
+A reference converts to the value it refers to: `r to T` with `r: &T` (or a
+`&?T` after its null test, or a method's `self`) copies the value out
+([Memory and safety](memory_and_safety.md#3-references-t-and-t)).
+
+What each legal cast does:
+
+- **`int to int32`** keeps the low 32 bits. `4294967297 to int32` is `1`.
+- **`int to char`** keeps the low 8 bits. **`char to int`** gives 0 to 255.
+- **`int32 to int`** sign-extends. **`int` and `int32 to double`** convert the
+  number.
+- **`double to int`** truncates toward zero (`-3.9 to int` is `-3`). A NaN, an
+  infinity, or a value outside the range of `int` panics with `Integer
+  overflow`. **`double to int32`** does the same against `int32`'s range.
+- **`int to string`** and **`double to string`** format the number. A `double`
+  is written in the shortest `%g`-style form (`0.1`, `1e+20`, `1.23457e+06`),
+  and a NaN is `nan`. **`bool to string`** gives `"true"` or `"false"`.
+- **`string to int`** accepts the whole string or nothing: an optional `-`
+  and decimal digits, in the range of `int`. Anything else panics with
+  `Invalid string to int conversion`: `"12abc"`, `"1.5"`, `" 12"`, `"+5"`,
+  `""`, or `"9223372036854775808"`.
+- **`string to double`** accepts an optional `-`, digits with at most one `.`
+  (at least one digit), and an optional exponent (`1e3`, `2.5E-3`). Anything
+  else panics with `Invalid string to double conversion`: `"abc"`, `"12abc"`,
+  `" 1.5"`, `"inf"`, `"nan"`. A magnitude beyond the `double` range is an
+  infinity.
+- Both accept exactly what `strings::parse_int` and `strings::parse_double`
+  accept. When the text comes from outside your program (`input()`, a file),
+  prefer those: they report bad text as an error value you can `recover`
+  from instead of panicking (see [the `strings` module](stdlib/core.md)).
+- **`enum to int`** gives the variant's position, and **`int to enum`** panics
+  with `Invalid int to enum conversion` when no variant has that position.
+  **`enum to string`** gives the variant name, and **`string to enum`** panics
+  with `Invalid string to enum conversion` for an unknown name.
+- A string **literal** that can never convert (`"abc" to int`, `"1.2.3" to
+  double`, `"Purple" to Color`) is E149 at compile time, and an integer
+  literal that is no variant (`7 to Color`) is E127.
+
+Implicit conversions are exactly `int32` to `int`, `int32` to `double` and
+`int` to `double`. Nothing narrows implicitly, and there is no implicit
+conversion between `bool`, `char` and the numbers. `mut i: int = 3.7;` is
+E066.
+
+A struct or array cannot be cast to a string (E065); build the text with `+`
+and `to string` on its fields.
+
+Casts that involve raw pointers or reference types (`int to int*`, `T* to
+ptr`, `string to &T`, `&T to string`) are only allowed inside `unsafe { }`
+(E130 outside). See [FFI and unsafe](ffi_and_unsafe.md). A `&T` converts to `&?T` implicitly.
+
+## `sizeof` and `typeof`
+
+### `sizeof(T)`
+
+`sizeof` takes a **type** and is an `int` constant: the type's size in bytes.
+A variable is not a type: `sizeof(a)` is `E109`.
+
+```turflang
+struct Pair {
+    a: int,
+    b: double,
+    c: char
+}
+
+fn main(): int {
+    printline(sizeof(int));        // 8
+    printline(sizeof(int32));      // 4
+    printline(sizeof(bool));       // 1
+    printline(sizeof(char));       // 1
+    printline(sizeof(string));     // 8
+    printline(sizeof(int[4]));     // 32
+    printline(sizeof(Pair));       // 24, includes padding
+    return 0;
+}
+```
+
+The size of a struct is the one the target platform's layout gives, padding
+included. `sizeof(void)` is E126, and `sizeof(void*)` is a pointer's size. A name
+that is not a type (`sizeof(x)` for a variable `x`, or a misspelling) is E042.
+
+### `typeof(expr)`
+
+`typeof` takes an **expression** and returns a `string` naming its static,
+compile-time type. There is no run-time type information: the string is the
+type the compiler gave the expression, wherever the call happens.
+
+```turflang
+import list::List;
+
+struct Node {
+    v: int
+}
+
+fn main(): int {
+    mut n: Node = Node::default();
+    mut names: List<string> = List::default();
+
+    printline(typeof(10));          // int
+    printline(typeof(3.14));        // double
+    printline(typeof("hi"));        // string
+    printline(typeof(true));        // bool
+    printline(typeof([1, 2]));      // int[2]
+    printline(typeof(n));           // Node
+    printline(typeof(names));       // list::List<string>
+    return 0;
+}
+```
+
+A struct, enum or `error` type declared in the main program file is named by
+its bare name (`Node`). One declared in an imported module is named by its
+**qualified** name: `list::List<string>`, `json::JsonValue`. The string is the
+same wherever `typeof` is called, so compare against the qualified spelling:
+`typeof(v) == "json::JsonValue"`, never `"JsonValue"`.
+
+`typeof` needs no import: it is a built-in.
+
+### `hash_of(expr)`
+
+`hash_of` takes any value and returns an `int` such that values that compare
+`==` hash equally. It is built from the value's static type: a `string` by its
+text, a `double` with `-0.0` taken as `0.0`, a struct field by field (never the
+padding between fields), a fixed array or `T[]` element by element, and a
+reference or pointer by its address. `Map` and `Set` hash their keys with it,
+so a struct key works as long as its `operator ==` compares field by field. A
+key compared some other way (case-insensitively, say) needs its fields
+normalised before it goes in. A NaN never equals anything, itself included, so
+a NaN key is never found.
+
+```turflang
+struct P {
+    c: char,
+    n: int
+}
+
+fn mk(n: int): P {
+    mut p: P = P::default();
+    p.c = 'a';
+    p.n = n;
+    return p;
+}
+
+fn main(): int {
+    test::assert(hash_of(mk(5)) == hash_of(mk(5)), "equal structs");
+    test::assert(hash_of("ab" + "c") == hash_of("abc"), "strings by text");
+    return 0;
+}
+```
 
 ---
 
-See also: [Operators](operators.md) for the full operator reference,
-including `+`/`==`/etc. on `string` and the complete precedence table.
+See also: [Operators](operators.md) for the operator set and its precedence
+table, and [Structs and enums](structs_and_enums.md) for `::default()`.

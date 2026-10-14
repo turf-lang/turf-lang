@@ -2,6 +2,6 @@
 // doc comment.
 import diamond_shared_module;
 
-fn rightValue(): int {
+pub fn rightValue(): int {
     return 2;
 }

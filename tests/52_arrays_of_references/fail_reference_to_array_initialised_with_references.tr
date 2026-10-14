@@ -1,0 +1,18 @@
+// EXPECT-DIAG: E066
+// EXPECT-DIAG: Cannot initialise '&(N[2])' variable 'a' with value of type '(&N)[2]'
+// EXPECT-DIAG: An array of references is written with parentheses
+// turf-fuzz findings/wrong-message/array-of-references-type-name: `&N[2]` is a
+// reference to an array, and both types used to print as `&N[2]`, so the
+// message read "Cannot initialise '&N[2]' ... with value of type '&N[2]'".
+struct N { val: int }
+
+fn mk(v: int): &N {
+    mut n: N = N::default();
+    n.val = v;
+    return heap(n);
+}
+
+fn main(): int {
+    mut a: &N[2] = [mk(1), mk(2)];
+    return 0;
+}

@@ -1,0 +1,49 @@
+TURF E085 -- AMBIGUOUS TYPE REFERENCE:
+
+CAUSE:
+  A bare type name (struct, enum or error type) could mean more than one
+  type. Types belong to the module that declares them, so two modules can each
+  have their own `Point`; neither declaration is wrong. The ambiguity is the
+  bare name: an import such as `import shapes::[*];` made shapes' `Point`
+  usable without a prefix while this file also declares its own `Point`. The
+  compiler never guesses, because a silent "local wins" rule would change
+  meaning when someone adds an import.
+
+INCORRECT:
+    import shapes::[*];          // shapes declares a `struct Point`
+
+    struct Point { x: int }      // ...and so does this file
+
+    fn main(): int {
+        mut p: Point = Point::default();   // ERROR: ambiguous
+        return 0;
+    }
+
+CORRECT (list the names actually used, qualify the other type):
+    // shapes.tr
+    pub struct Point { pub x: int }
+    pub struct Circle { pub r: int }
+    pub fn area(c: Circle): int { return c.r * c.r; }
+    pub fn origin(): Point { return Point::default(); }
+
+    // main.tr
+    import shapes;
+    import shapes::[Circle, area];
+
+    struct Point { x: int }
+
+    fn main(): int {
+        mut mine: Point = Point::default();
+        mut theirs: shapes::Point = shapes::origin();
+        mut c: Circle = Circle::default();
+        return area(c);
+    }
+
+FIX:
+  Keep the bare name for one type (usually your own). Replace `[*]` with the
+  explicit list of names you need, and write the other type qualified
+  (`shapes::Point`, which needs its own `import shapes;`). Or rename one of the
+  two types.
+
+RELATED: E033 (duplicate declaration within one module), E090 (a module NAME
+  that more than one file answers to).

@@ -1,0 +1,35 @@
+name: Release-shaped CI
+
+# REL-008 stage 1: the release is built, packaged and inspected on every push,
+# not only when a tag is pushed, so a release-only breakage (an LLVM that moved
+# to 23, a Windows-only compile error, an archive that links something the
+# user lacks) shows up on the commit that caused it instead of on the day of
+# the release. The jobs are the release's own (build-archives.yml); nothing is
+# published from here.
+#
+# Expected state until REL-008 stages 2-4 land: the "Archive dependency check"
+# step is RED on all four platforms, by design. It reports what each archive
+# needs that the operating system does not provide (today: LLVM, libstdc++,
+# libgomp, libgcc_s, and on Windows a bundled LLVM DLL and others). The report
+# in each job's log is the work list; the check goes green when the archive is
+# self-contained. Do not silence it. Every other step is expected to be green,
+# and a red build, package or smoke step is a real failure.
+on:
+  push:
+    branches: ["master", "dev", "refactor/architecture"]
+  pull_request:
+    branches: ["master", "dev", "refactor/architecture"]
+  workflow_dispatch:
+
+concurrency:
+  group: release-shaped-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  archives:
+    uses: ./.github/workflows/build-archives.yml
+    with:
+      allowlist: enforce

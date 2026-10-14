@@ -1,0 +1,15 @@
+// EXPECT-DIAG: E141
+// EXPECT-DIAG: 'v' is immutable, but 'fill' writes to the array it is given as 'arr'.
+// An `immut` view handed to a function that writes through its `T[]`.
+fn fill(arr: int[], x: int): void {
+    for (i, _y) in arr {
+        arr[i] = x;
+    }
+}
+
+fn main(): int {
+    mut a: int[3] = [1, 2, 3];
+    immut v = a[..];
+    fill(v, 0);
+    return 0;
+}

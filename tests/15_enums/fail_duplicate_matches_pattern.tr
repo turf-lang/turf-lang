@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E133
+// EXPECT-DIAG: Duplicate 'matches' pattern
 // Regression test (was CODE_REVIEW_GAPS_2026-07.md gap #4): a duplicate
 // 'matches' pattern across two arms of the same compare block must be
 // rejected at compile time, not silently accepted.
@@ -17,16 +19,16 @@ fn main(): int {
     mut result: int = 0;
     compare c {
         matches Color::Red:
-            result = 1;
+        result = 1;
         done
         matches Color::Red:
-            result = 2;
+        result = 2;
         done
         matches Color::Green:
-            result = 3;
+        result = 3;
         done
         matches Color::Blue:
-            result = 4;
+        result = 4;
         done
     }
     return 0;

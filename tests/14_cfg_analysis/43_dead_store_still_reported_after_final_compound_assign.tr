@@ -1,0 +1,12 @@
+// EXPECT-DIAG: assigned but the value is never read (dead store)
+// EXPECT-NO-DIAG: declared but never used
+// LEC-005 guard against over-correction of 42_...: a read-modify-write is a
+// READ of the old value, but its RESULT can still be dead. Here `x`'s only
+// uses are the `+=` itself, so the store `+=` makes is never read -- that one
+// dead store is real and must still be reported (and the variable is not
+// "never used": the `+=` reads it, so only one warning applies, not two).
+fn main(): int {
+    mut x: int = 1;
+    x += 1;
+    return 0;
+}

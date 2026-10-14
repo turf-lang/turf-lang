@@ -9,15 +9,21 @@ jobs:
   # Documentation cross-references. Deliberately its own job: it needs neither
   # LLVM nor a build, so a dangling `docs/....md` citation is reported in
   # seconds rather than after a full compiler build. See
-  # docs/planning/ARCHITECTURE_OVERHAUL.md §5 C-8 for the failure this catches.
+  # docs/archive/ARCHITECTURE_OVERHAUL.md §5 C-8 for the failure this catches.
   doc_links:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Check documentation cross-references
         run: |
-          chmod +x scripts/check_doc_links.sh
-          ./scripts/check_doc_links.sh
+          chmod +x scripts/check/check_doc_links.sh
+          ./scripts/check/check_doc_links.sh
+      # REL-004 stage 1: tests/CONFORMANCE.md maps every Part VII area to the
+      # tests that cover it, positive and negative. Also needs no build: it
+      # fails when a mapped test was renamed or deleted, or an area is left
+      # without a negative test.
+      - name: Conformance map is consistent
+        run: python3 scripts/check/conformance_check.py
 
   build_and_test:
     runs-on: ubuntu-latest
@@ -59,13 +65,17 @@ jobs:
         uses: actions/cache@v4
         with:
           path: external/llama.cpp/build
-          key: llama-build-${{ runner.os }}-${{ steps.llama-sha.outputs.sha }}
+          # "-portable": the build is GGML_NATIVE=OFF (below). The key it
+          # replaces held a -march=native build, which a runner with an older
+          # CPU than the one that built it cannot run.
+          key: llama-build-${{ runner.os }}-${{ steps.llama-sha.outputs.sha }}-portable
 
       - name: Build llama.cpp
         if: steps.cache-llama.outputs.cache-hit != 'true'
         run: |
           cd external/llama.cpp
-          cmake -B build -DBUILD_SHARED_LIBS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_SERVER=OFF -DGGML_OPENMP=OFF
+          cmake -B build -DBUILD_SHARED_LIBS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_SERVER=OFF -DGGML_OPENMP=OFF \
+            -DGGML_NATIVE=OFF
           cmake --build build --config Release -j $(nproc)
 
       - name: Configure OpenMP
@@ -91,6 +101,30 @@ jobs:
             ccache-${{ runner.os }}-${{ github.ref }}-
             ccache-${{ runner.os }}-
 
+      # Go, before the CMake build, so it finds `go` and builds build/turf (the
+      # turf front end, LEC-001). The ASan job below deliberately does NOT
+      # install Go: its CMake configure prints "Go not found" and carries on,
+      # which doubles as the standing proof that the compiler builds without Go.
+      # The front end's source is the turf-cli repository at the commit
+      # TURF_CLI_REVISION pins, checked out beside this one; CMake and the
+      # smoke tests find it through TURF_CLI_DIR.
+      - name: Pinned turf-cli revision
+        id: turf-cli-rev
+        shell: bash
+        run: echo "rev=$(tr -d '[:space:]' < TURF_CLI_REVISION)" >> "$GITHUB_OUTPUT"
+      - name: turf front end source (turf-cli)
+        uses: actions/checkout@v4
+        with:
+          repository: turf-lang/turf-cli
+          ref: ${{ steps.turf-cli-rev.outputs.rev }}
+          path: turf-cli
+      - name: Point CMake and the smoke tests at turf-cli
+        run: echo "TURF_CLI_DIR=${{ github.workspace }}/turf-cli" >> "$GITHUB_ENV"
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: turf-cli/go.mod
+
       - name: Build Turf Compiler
         run: |
           export CC="ccache gcc"
@@ -100,6 +134,120 @@ jobs:
       - name: Run Test Suites (default level)
         run: ./scripts/test_runner.sh
 
+      # SMP-001: unit tests for the compiler query facade
+      # (include/turf/Analysis.h) -- a C++ binary built alongside `turfc`,
+      # which test_runner.sh (.tr files only) never runs.
+      - name: Tool API tests (compiler query facade)
+        run: ./build/turf-api-tests
+
+      # LEC-007: the stdlib's public surface is the 2.x compatibility surface.
+      # The tests in tests/46_stdlib_surface/ lock it by compiling a use of every
+      # `pub` item; this fails if a pub item exists that none of them mentions,
+      # i.e. a new public name added without being locked.
+      - name: Stdlib public surface is fully locked
+        run: ./scripts/check/stdlib_surface_check.sh
+
+      # Issue #263: `turf --explain Exxx` is a promise to a beginner. This fails
+      # if a registered error code has no docs/errors/codes/Exxx.txt, or is
+      # documented but raised by nothing (the state E002/E056/E057/E064/E067
+      # sat in until #263 -- pages describing errors that never appeared).
+      - name: Error-code registry is consistent
+        run: ./scripts/check/error_codes_check.sh
+
+      # SLM_IMPROVEMENT_PLAN C1/C2: everything under docs/slm/ is pasted into
+      # the --smart model's prompt, and a model copies what it sees. This
+      # compiles every CORRECT example in the per-code pages, the category docs
+      # and the syntax card, and fails a page that has none -- a doc showing
+      # `fn<T> Box.get(): T { ... }` taught the model code the compiler rejects.
+      - name: SLM docs show only Turf the compiler accepts
+        run: ./scripts/slm/slm_doc_examples_check.sh
+
+      # SLM_IMPROVEMENT_PLAN C3: the system prompt (rules + syntax card + the
+      # biggest code page + a category doc) must fit n_batch (4096 tokens), or
+      # the model silently loses the middle of its docs. Measured with
+      # llama.cpp's own tokenizer on the prompt the compiler really builds; it
+      # SKIPs (and says so) if llama-tokenize was not built in this job.
+      - name: SLM system prompt fits the model's batch
+        run: ./scripts/slm/slm_prompt_budget.sh
+
+      # LEC-001 stage 2: the `turf` front end (turf-cli). The Go tests cover argv
+      # classification, discovery order and the version handshake in isolation;
+      # cli_smoke.sh covers what only a real build shows -- byte-identical
+      # passthrough, every subcommand, the mismatch refusal. CI=1 makes a
+      # missing build/turf a failure instead of a SKIP.
+      - name: turf front end (Go vet and unit tests)
+        run: cd "$TURF_CLI_DIR" && go vet ./... && go test ./...
+      - name: turf front end smoke test (passthrough, subcommands, handshake)
+        run: CI=1 ./scripts/smoke/cli_smoke.sh
+      # build/turf comes from the turf-cli checkout (TURF_CLI_DIR) at the
+      # pinned TURF_CLI_REVISION, read from the module path and revision Go
+      # stamps into the binary.
+      - name: turf front end comes from turf-cli
+        run: CI=1 ./scripts/smoke/cli_source_smoke.sh
+      # LEC-001 stage 5: `turf` reads projects -- turf.toml, path dependencies,
+      # the package graph handed to `turfc --package-graph`. Covers new/init/
+      # add/remove/build/run/check/clean against the real compiler, the
+      # manifest rules, name conflicts and cycles, [unsafe] allow, and that
+      # `add`/`remove` edit one line and keep the user's comments.
+      - name: turf project smoke test (new, add, build, run, manifests, graph errors)
+        run: CI=1 ./scripts/smoke/project_smoke.sh
+      # REL-002: `turfc --test` and `turf test`. test_runner.sh (above) proves
+      # the runner agrees with the conventions on tests that pass; this breaks
+      # each convention on purpose and checks the run fails for THAT reason,
+      # plus the "tests/ is required" rule, option errors, and a project's
+      # tests importing its own modules, a dependency and a helper.
+      - name: turf test smoke test (conventions, tests/ required, project tests)
+        run: CI=1 ./scripts/smoke/test_cmd_smoke.sh
+      # REL-002 stage 2: `turf fmt` / `turfc --format`. Checks the three modes
+      # and their statuses, that one bad file does not stop the rest, and --
+      # on a copy of the repository's own ~1200 files -- that a second pass
+      # finds nothing to do and no result is refused as a formatter bug.
+      - name: turf fmt smoke test (modes, verification, idempotence on the repo's files)
+        run: CI=1 ./scripts/smoke/fmt_smoke.sh
+      # REL-002 stage 2: the formatting gate. Every .tr file under lib/std and
+      # tests must already be formatted; a file that does not lex (the fail_*
+      # tests that are invalid on purpose) is skipped and listed, not a failure.
+      # To fix a failure: ./build/turf fmt --write lib/std tests
+      - name: turf fmt --check (lib/std and tests are formatted)
+        run: ./build/turf fmt --check lib/std tests
+      # LEC-001 stage 6: git dependencies -- the fetch cache, turf.lock pinning
+      # commit and tree hash, --offline/--locked, fetch/update/add --git. Every
+      # upstream is a local bare repository the script builds, so there is no
+      # network; git is present on the runner.
+      - name: turf git dependencies smoke test (cache, turf.lock, offline, locked, update)
+        run: CI=1 ./scripts/smoke/git_deps_smoke.sh
+      # LEC-001 stage 8: examples/ builds and runs with the real `turf`, and its
+      # committed turf.lock files are current (--locked --offline). Nothing else
+      # builds examples/; the docs quote its output.
+      - name: turf examples smoke test (examples/ build, run, locked and offline)
+        run: CI=1 ./scripts/smoke/examples_smoke.sh
+      # REL-003 stage 2 (D20): `--target` for another machine writes its object
+      # and stops with a TurfLang diagnostic instead of the host linker's
+      # "file in wrong format"; the host's own triple spellings must still link.
+      - name: "Cross-target smoke test (--target link diagnostic, D20)"
+        run: ./scripts/smoke/cross_target_smoke.sh
+      # REL-003 stage 1: the release archive's layout, install.sh (checksum,
+      # PATH block, uninstall) and `turf new`/`run`/`build` from an install
+      # that has only the archive's files. The release workflow runs the same
+      # script on the archive it publishes; this keeps the packaging honest on
+      # every push, not only on a tag.
+      - name: "Release archive + install.sh smoke test"
+        run: CI=1 ./scripts/smoke/release_smoke.sh
+      # REL-004 stage 2: test_runner.sh covers tests/ only. This is the CI run
+      # of what only session_postflight.sh checked by hand: every lib/std
+      # module type-checks as a library, the prelude modules compile directly
+      # (the self-import bug class), and every showcase/ program compiles at
+      # -O0/-O2/-g with a clean `llvm-dwarfdump --verify`.
+      - name: "lib/std and showcase compile (REL-004 stage 2)"
+        run: CI=1 ./scripts/smoke/tree_programs_smoke.sh
+      # REL-004 / REL-006: every ```turflang block in docs/reference/ is compiled
+      # (fragments get the imports and earlier declarations the page supplies).
+      # Blocks that do not compile are in docs/reference/DOC_EXAMPLES_GAPS.txt, a
+      # register that can only shrink: new drift fails here, a register line for
+      # a block that now compiles fails here too.
+      - name: "Reference-doc examples compile (REL-004 / REL-006)"
+        run: python3 scripts/check/doc_examples.py -v
+
       # OPT-001 (docs/development/changes/OPT-001.md, INV-OPT-1): optimization
       # levels must never change a program's observable behaviour. The default
       # run above already exercises the compiler's default level (-O2); these
@@ -108,7 +256,7 @@ jobs:
       # INV-OPT-1 across the whole suite, not just opt_levels_smoke.sh's
       # smaller representative program set (which deliberately can't byte-diff
       # every showcase/server program -- see that script's own comment).
-      # Sequential, not a matrix: the build above (LLVM + llama.cpp + turf) is
+      # Sequential, not a matrix: the build above (LLVM + llama.cpp + turfc) is
       # the expensive, cached part, and a matrix job would each pay for its
       # own fresh checkout/build instead of reusing this one.
       - name: Run Test Suites (-O0)
@@ -121,9 +269,93 @@ jobs:
         run: ./scripts/test_runner.sh -O3
       - name: Run Test Suites (-Os)
         run: ./scripts/test_runner.sh -Os
+      # REL-004 stage 5: debug info is a code-generation mode of its own
+      # (metadata on every instruction, a different path through lowering), so
+      # the suite runs with it too. -O0 -g is what a debugger user compiles; the
+      # default level with -g is the one a release-with-symbols build uses.
+      - name: Run Test Suites (-O0 -g)
+        run: ./scripts/test_runner.sh -O0 -g
+      - name: Run Test Suites (-g)
+        run: ./scripts/test_runner.sh -g
 
       - name: Optimization-level smoke test (cross-level output equality)
-        run: ./scripts/opt_levels_smoke.sh
+        run: ./scripts/smoke/opt_levels_smoke.sh
+
+      # FDN-005 stage 2 (docs/planning/ROADMAP_v2.0.0.md): TURF_GC_STRESS=1
+      # forces a full mark-sweep collection on every single allocation
+      # (runtime/turfrt_gc.c) instead of the ordinary heap-doubling schedule
+      # -- the single most effective way to surface a root the primary
+      # conservative scan barely misses, since under normal allocation
+      # pressure a real program only collects a handful of times over its
+      # whole run. TURF_TEST_TIMEOUT_SEC is raised from the default 5s:
+      # tests/08_e2e_stress/07_heap_bounded_allocation.tr alone (5,000,000
+      # heap() allocations) takes ~3.5 minutes under this mode at -O0
+      # (measured live) purely from paying a full stop-the-world collection
+      # per allocation instead of per heap-doubling -- expected under stress
+      # mode, not a regression; every other test in the suite still finishes
+      # in seconds.
+      #
+      # The bound is 900s, not 300s. 300 left under 1.5x of headroom over the
+      # ~200s a developer machine takes (re-measured 2026-10-01 at HEAD:
+      # 193s at -O0, 205s at -O2, matching the original 3.5-minute figure --
+      # so nothing had regressed), and a loaded shared CI runner exceeded it:
+      # the suite's one failure was "07_heap_bounded_allocation.tr (Timed out
+      # after 300s)" with 993 of 994 passing. The cost is the mark phase over
+      # the ~1000-node live list on every one of 5M collections -- inherent to
+      # collecting on every allocation, not a hang -- so the fix is the bound,
+      # sized like the ASan job's own 700s (which measured 637s). Re-sorting the
+      # block table in gc_rebuild_index() was tried and is only ~15% of it.
+      # -O0 and -O2 only (not the full -O1/-O3/-Os sweep above):
+      # this is validating the collector's root-finding, which AGENTS.md's
+      # own GC-testing note already identifies -O0/-O2 as the two levels
+      # that matter (conservative scanning can mask a real bug at -O2 purely
+      # by register-allocation luck; -O0 is the level least likely to hide
+      # one by accident).
+      - name: GC stress test -- collect on every allocation (-O0)
+        run: TURF_GC_STRESS=1 TURF_TEST_TIMEOUT_SEC=900 ./scripts/test_runner.sh -O0
+      - name: GC stress test -- collect on every allocation (-O2)
+        run: TURF_GC_STRESS=1 TURF_TEST_TIMEOUT_SEC=900 ./scripts/test_runner.sh -O2
+
+      # FDN-005 stage 3 (docs/planning/ROADMAP_v2.0.0.md): TURF_GC_VALIDATE=1
+      # cross-checks the primary register-capture technique (runtime/
+      # turfrt_gc.c's gc_capture_callee_saved(), hand-written inline asm)
+      # against an independently-obtained register snapshot (glibc's own
+      # getcontext()) at the same instant, every single collection. It never
+      # aborts the program on its own (a caller-saved register's content is
+      # not guaranteed meaningful by the C ABI, so a finding is evidence, not
+      # proof, of a missed root -- gc_cross_check_extra_registers()'s own
+      # comment explains why this stays a report, not a panic); this step is
+      # what turns that report into a CI-visible gate, by failing if the
+      # phrase it always prints on a finding ever appears in the log. Zero
+      # findings across the entire suite (measured live, both opt levels
+      # below) is itself real evidence for MEM-002's own disclosed open
+      # question #2 (docs/development/changes/MEM-002.md).
+      #
+      # The same variable also runs the full-stack mark-set comparison
+      # (gc_independent_mark()/gc_compare_mark_sets()), which DOES panic: its
+      # range is a subset of the production scan's, so a mismatch is a real
+      # missed root, and the test fails on its own. The grep still catches
+      # the report-only register finding.
+      - name: GC root-finding cross-validation (register capture + full-stack mark sets)
+        run: |
+          for O in "" -O0; do
+            TURF_GC_VALIDATE=1 ./scripts/test_runner.sh $O 2>&1 | tee /tmp/gc_validate.log
+            test "${PIPESTATUS[0]}" -eq 0 || exit 1
+            if grep -q "TURF_GC_VALIDATE:" /tmp/gc_validate.log; then
+              echo "::error::TURF_GC_VALIDATE reported a finding -- see the log above."
+              exit 1
+            fi
+          done
+
+      # FDN-005 follow-up: the stack-base fallback for a machine without
+      # /proc (ROADMAP_v2.0.0.md REL-003 -- minimal containers). Until this
+      # existed it had never run, and was freeing live objects.
+      # TURF_GC_NO_PROCFS=1 forces it; TURF_GC_VALIDATE=1 makes any root it
+      # misses a deterministic panic at the first collection.
+      - name: GC stack-base fallback (no /proc) -- full suite under validation
+        run: TURF_GC_NO_PROCFS=1 TURF_GC_VALIDATE=1 ./scripts/test_runner.sh -O0
+      - name: GC stack-base fallback (no /proc) smoke test
+        run: ./scripts/smoke/gc_no_procfs_smoke.sh
 
       # OVH-015: the smoke scripts below already existed as each named
       # feature group's own regression coverage for behaviour test_runner.sh
@@ -134,23 +366,254 @@ jobs:
       # layer never loading the SLM) -- none were wired into CI until now.
       # All run against the same build above; none need anything this job
       # doesn't already have except gdb (installed above for the one that
-      # does). Deliberately NOT included: scripts/test_ai.sh, which drives
-      # the real model against tests/custom/aggressive/ and needs the
-      # multi-gigabyte GGUF weights this repo's .gitignore deliberately
-      # keeps out of a checkout -- a manual/local sanity script, not a CI gate.
+      # does). Deliberately NOT included: scripts/slm/slm_benchmark/, which
+      # drives the real model and needs the multi-gigabyte GGUF weights this
+      # repo's .gitignore deliberately keeps out of a checkout -- a manual/local
+      # measurement, not a CI gate.
+      # LEC-002 stage 6: `turfc --migrate=pub` turns a 1.x-style project (no
+      # `pub` anywhere) into one that compiles and runs under 2.0's
+      # private-by-default rule, reports-only without --write, and is
+      # idempotent. test_runner.sh cannot express this (it needs to rewrite
+      # source and re-run the compiler on the result).
+      - name: "Migration tool smoke test (turfc --migrate=pub)"
+        run: ./scripts/smoke/migrate_pub_smoke.sh
+      # LEC-003: the warnings a `compare` with patterns produces (an unused
+      # binding, `_name` silencing it, an arm behind a catch-all reported once)
+      # come from the CFG passes, which neither test_runner.sh nor the
+      # turf::analyze() facade can see.
+      - name: "Pattern warnings smoke test"
+        run: ./scripts/smoke/pattern_warnings_smoke.sh
+      # LEC-001 stage 4: package builds (`turfc --package-graph`). The test
+      # runner is single-file and cannot hand the compiler a graph, so this
+      # builds multi-package trees in a temp directory: two packages' `util`
+      # modules and their types coexisting, direct-dependencies-only (E091),
+      # internal modules, E090 against a dependency, graph validation, and
+      # the per-package unsafe bit.
+      - name: "Package-graph smoke test (turfc --package-graph)"
+        run: ./scripts/smoke/package_graph_smoke.sh
       - name: Runtime smoke test (libturfrt link wiring, descriptors, panics)
-        run: ./scripts/runtime_smoke.sh
+        run: ./scripts/smoke/runtime_smoke.sh
       - name: "Manual-heap allocation smoke test (mem:: accounting)"
-        run: ./scripts/mem_smoke.sh
+        run: ./scripts/smoke/mem_smoke.sh
       - name: GC smoke test (retention, pinning, collection)
-        run: ./scripts/gc_smoke.sh
+        run: ./scripts/smoke/gc_smoke.sh
       - name: GC RSS-bounded smoke test
-        run: ./scripts/gc_rss_smoke.sh
+        run: ./scripts/smoke/gc_rss_smoke.sh
+      - name: GC stress-corpus smoke test (FDN-005 stage 1 -- long-running programs)
+        run: ./scripts/smoke/gc_stress_corpus_smoke.sh
       - name: Manual/GC heap boundary checks
-        run: ./scripts/check_boundary.sh
+        run: ./scripts/check/check_boundary.sh
       - name: Debug info smoke test (gdb against -g output)
-        run: ./scripts/debuginfo_smoke.sh
+        run: ./scripts/smoke/debuginfo_smoke.sh
       - name: "@caller_location smoke test"
-        run: ./scripts/std002_caller_location_smoke.sh
+        run: ./scripts/smoke/std002_caller_location_smoke.sh
       - name: SLM deterministic-fix layer smoke test (never loads the model)
-        run: ./scripts/slm_deterministic_fix_smoke.sh
+        run: ./scripts/slm/slm_deterministic_fix_smoke.sh
+      - name: SLM replay smoke test (recorded responses, never loads the model)
+        run: ./scripts/slm/slm_replay_smoke.sh
+      - name: SLM cache smoke test (positive and negative entries, never loads the model)
+        run: ./scripts/slm/slm_cache_smoke.sh
+
+  # FDN-005 stage 3 (docs/planning/ROADMAP_v2.0.0.md): independent validation
+  # of the collector via an ASan+UBSan-instrumented libturfrt
+  # (CMakeLists.txt's TURF_RT_SANITIZE option) -- a SEPARATE `turfc` build in
+  # its own directory/CMake cache (never build/), so an ordinary dev build and
+  # this one never share or clobber each other's runtime archive (`main.cpp`'s
+  # linkObject() comment explains why). Every compiled Turf program this
+  # binary produces links against libturfrt_asan.a with -fsanitize=address,
+  # undefined instead of the ordinary libturfrt.a -- turning the ENTIRE
+  # existing tests/ regression suite into independent validation for MEM-002's
+  # own disclosed open question (docs/development/changes/MEM-002.md,
+  # *Unresolved questions* #2: "the register-scanning technique has not been
+  # cross-validated ... before this collector is exercised under load"),
+  # without needing a second, hand-written test corpus of its own.
+  #
+  # A separate job, not more steps in build_and_test above: a second full
+  # CMake configure+build (LLVM/turfcore; TURF_RT_SANITIZE only affects the
+  # runtime half) is expensive enough to want its own parallel job rather
+  # than serializing after the first build's own five -O-level sweeps.
+  #
+  # Built with -DTURF_SMART=OFF: nothing here uses --smart's model, so there
+  # is no llama.cpp submodule to fetch or build. It also makes this job CI's
+  # standing proof that the compiler builds and passes the whole suite
+  # without llama.cpp (CMakeLists.txt, TURF_SMART).
+  gc_hardening_asan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Cache LLVM
+        id: cache-llvm
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/lib/llvm-22
+            /usr/include/llvm-22
+            /usr/include/llvm-c-22
+          key: llvm-22-${{ runner.os }}-v1
+
+      - name: Install LLVM
+        if: steps.cache-llvm.outputs.cache-hit != 'true'
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 22
+          sudo apt-get install -y llvm-22-dev cmake
+      - run: echo "/usr/lib/llvm-22/bin" >> $GITHUB_PATH
+
+      - name: Install ccache
+        run: sudo apt-get install -y ccache
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-asan-${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
+          restore-keys: |
+            ccache-asan-${{ runner.os }}-${{ github.ref }}-
+            ccache-asan-${{ runner.os }}-
+
+      # Not scripts/cmake_build.sh: that script has no passthrough for extra
+      # -D flags, and this is the one build in the whole repo that needs one
+      # (TURF_RT_SANITIZE=ON, CMakeLists.txt). build_asan/, not build/, is the
+      # whole point -- see this job's own top comment.
+      - name: Configure and build the ASan Turf compiler
+        run: |
+          export CC="ccache gcc"
+          export CXX="ccache g++"
+          cmake -S . -B build_asan -DCMAKE_BUILD_TYPE=Release -DTURF_RT_SANITIZE=ON -DTURF_SMART=OFF
+          cmake --build build_asan -j $(nproc)
+
+      # detect_leaks=0: MEM-002's own documented, deliberate design decision
+      # (docs/development/changes/MEM-002.md) is that turf_rt_shutdown() does
+      # NOT run a final collection -- process exit reclaims everything, and
+      # nothing in FDN-005/§14/§22.2 asks for one. LeakSanitizer has no way to
+      # know that's intentional, so it would otherwise flag every single
+      # compiled program's still-live-at-exit GC heap as a "leak" -- a false
+      # positive against this project's own frozen design, not a real bug.
+      # AddressSanitizer's actual bug-finding (freed-block reuse, wild
+      # pointers, buffer overflows) is unaffected by this flag.
+      # Two tests assert a runtime message that an ASan runtime pre-empts, and
+      # both used to "pass" on exit status alone until #263 made EXPECT-RUNTIME
+      # binding (which is when this job started failing on every run):
+      #   * allocator_may_return_null=1: tests/41_gc/fail_oom_huge_direct_allocation.tr
+      #     asks for 2^63-1 bytes. ASan's malloc aborts with its own
+      #     "allocation-size-too-big" report; with this flag it returns NULL and
+      #     turf_rt_alloc()'s "out of memory" panic, the path under test, runs.
+      #   * TURF_TEST_EXTRA_EXCLUDE: tests/41_gc/fail_stack_overflow_deep_recursion.tr
+      #     expects "panic: stack overflow" from the runtime's SIGSEGV handler,
+      #     and an ASan build installs none (runtime/turfrt_signal.c: INV-RT-5's
+      #     documented FDN-005 exception; handle_segv=0 just gives a bare 139).
+      #     ASan reports the overflow itself, and the plain jobs cover the
+      #     handler at every -O level. The two 05_arrays_pointers_ffi
+      #     fail_null_raw_pointer_*_faults_at_zero.tr tests expect the same
+      #     handler's "segmentation fault ... at address 0x0" for the same reason.
+      - name: Run Test Suites under ASan -- (default level)
+        run: TURF_COMPILER="$(pwd)/build_asan/turfc" ASAN_OPTIONS=detect_leaks=0:allocator_may_return_null=1 TURF_TEST_EXTRA_EXCLUDE='41_gc/fail_stack_overflow_deep_recursion.tr 05_arrays_pointers_ffi/fail_null_raw_pointer_write_faults_at_zero.tr 05_arrays_pointers_ffi/fail_null_raw_pointer_read_faults_at_zero.tr' ./scripts/test_runner.sh
+      - name: Run Test Suites under ASan -- (-O0)
+        run: TURF_COMPILER="$(pwd)/build_asan/turfc" ASAN_OPTIONS=detect_leaks=0:allocator_may_return_null=1 TURF_TEST_EXTRA_EXCLUDE='41_gc/fail_stack_overflow_deep_recursion.tr 05_arrays_pointers_ffi/fail_null_raw_pointer_write_faults_at_zero.tr 05_arrays_pointers_ffi/fail_null_raw_pointer_read_faults_at_zero.tr' ./scripts/test_runner.sh -O0
+
+      # FDN-005's own roadmap completion criterion names this exact
+      # combination explicitly: "the whole suite green under
+      # TURF_GC_STRESS=1 at -O0 ... with ASan". TURF_TEST_TIMEOUT_SEC=700:
+      # tests/08_e2e_stress/07_heap_bounded_allocation.tr alone (5,000,000
+      # heap() allocations, already the slowest test under TURF_GC_STRESS
+      # ALONE -- see the plain "GC stress test" step above) took 10:37
+      # under this combination, measured live -- ASan's own instrumentation
+      # overhead compounding with stress mode's per-allocation collection,
+      # not a new correctness issue (that same run's own test::assert()s
+      # all passed, exit 0). Every other test in the suite finishes in
+      # seconds either way, so this one step's wall time is dominated
+      # entirely by that single file, not a general slowdown.
+      - name: GC stress test under ASan -- collect on every allocation (-O0)
+        run: TURF_COMPILER="$(pwd)/build_asan/turfc" ASAN_OPTIONS=detect_leaks=0:allocator_may_return_null=1 TURF_TEST_EXTRA_EXCLUDE='41_gc/fail_stack_overflow_deep_recursion.tr 05_arrays_pointers_ffi/fail_null_raw_pointer_write_faults_at_zero.tr 05_arrays_pointers_ffi/fail_null_raw_pointer_read_faults_at_zero.tr' TURF_GC_STRESS=1 TURF_TEST_TIMEOUT_SEC=700 ./scripts/test_runner.sh -O0
+      # The roadmap's criterion names -O2 as well; the FDN-005 landing ran
+      # only -O0 under this combination.
+      - name: GC stress test under ASan -- collect on every allocation (-O2)
+        run: TURF_COMPILER="$(pwd)/build_asan/turfc" ASAN_OPTIONS=detect_leaks=0:allocator_may_return_null=1 TURF_TEST_EXTRA_EXCLUDE='41_gc/fail_stack_overflow_deep_recursion.tr 05_arrays_pointers_ffi/fail_null_raw_pointer_write_faults_at_zero.tr 05_arrays_pointers_ffi/fail_null_raw_pointer_read_faults_at_zero.tr' TURF_GC_STRESS=1 TURF_TEST_TIMEOUT_SEC=700 ./scripts/test_runner.sh -O2
+
+      - name: Tool API tests (compiler query facade) under ASan
+        run: ./build_asan/turf-api-tests
+
+  # REL-004 stage 3 (docs/planning/ROADMAP_v2.0.0.md): the COMPILER under
+  # AddressSanitizer + UndefinedBehaviorSanitizer (CMakeLists.txt's
+  # TURF_SANITIZE_COMPILER). gc_hardening_asan above instruments the runtime
+  # that compiled programs link; nothing instrumented `turfc` itself, whose
+  # passes walk pointer-linked trees. Part VII makes "any sanitizer report in
+  # the compiler or runtime" an automatic release blocker, so the whole suite
+  # runs against this build: a report aborts the compile (-fno-sanitize-recover)
+  # and the runner counts that as a crash.
+  #
+  # ulimit -s 65536: the parser caps nesting at 2000 levels (E111), sized for
+  # an uninstrumented 8 MB stack. ASan's redzoned frames are several times
+  # larger, so tests/01_syntax/fail_deeply_nested_* overflow the stack before
+  # reaching the cap -- an artefact of the instrumentation, measured, not a
+  # compiler bug (the plain build needs under 4 MB for the same input).
+  # detect_leaks=0: a compiler that exits owns nothing worth freeing.
+  compiler_sanitizers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Cache LLVM
+        id: cache-llvm
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/lib/llvm-22
+            /usr/include/llvm-22
+            /usr/include/llvm-c-22
+          key: llvm-22-${{ runner.os }}-v1
+      - name: Install LLVM
+        if: steps.cache-llvm.outputs.cache-hit != 'true'
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 22
+          sudo apt-get install -y llvm-22-dev cmake
+      - run: echo "/usr/lib/llvm-22/bin" >> $GITHUB_PATH
+      - name: Install ccache
+        run: sudo apt-get install -y ccache
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-compsan-${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
+          restore-keys: |
+            ccache-compsan-${{ runner.os }}-${{ github.ref }}-
+            ccache-compsan-${{ runner.os }}-
+      - name: Configure and build the sanitized Turf compiler
+        run: |
+          export CC="ccache gcc"
+          export CXX="ccache g++"
+          cmake -S . -B build_san -DCMAKE_BUILD_TYPE=Release -DTURF_SANITIZE_COMPILER=ON -DTURF_SMART=OFF -DTURF_BUILD_CLI=OFF
+          cmake --build build_san -j $(nproc)
+      - name: Run Test Suites with a sanitized compiler (default level)
+        run: |
+          ulimit -s 65536
+          TURF_COMPILER="$(pwd)/build_san/turfc" ASAN_OPTIONS=detect_leaks=0:allocator_may_return_null=1 ./scripts/test_runner.sh
+      - name: Run Test Suites with a sanitized compiler (-O0)
+        run: |
+          ulimit -s 65536
+          TURF_COMPILER="$(pwd)/build_san/turfc" ASAN_OPTIONS=detect_leaks=0:allocator_may_return_null=1 ./scripts/test_runner.sh -O0
+      - name: Tool API tests (compiler query facade) with a sanitized compiler
+        run: |
+          ulimit -s 65536
+          ASAN_OPTIONS=detect_leaks=0 ./build_san/turf-api-tests
+      # A short crash-fuzz pass over the same sanitized binary: invalid input
+      # must produce diagnostics, not memory errors (REL-004 stage 4). The long
+      # run is turf-fuzz's weekly `sanitized` job (it ran nightly here until
+      # 2026-10-12).
+      - name: Crash fuzz smoke (sanitized compiler, 3 minutes)
+        run: |
+          ulimit -s 65536
+          python3 scripts/dev/fuzz/crash_fuzz.py --seconds 180 --compiler "$(pwd)/build_san/turfc" --out fuzz-findings
+      - name: Upload fuzz findings
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-findings-sanitized
+          path: fuzz-findings/

@@ -1,3 +1,6 @@
+// EXPECT-DIAG: E130
+// EXPECT-DIAG: Raw pointer in function signature
+// EXPECT-DIAG: files that begin with 'unsafe module;' may use raw pointers
 // Regression test (issue #238): a plain (non-extern, non-lib/std)
 // function may never have a raw ptr/T* parameter or return type -- unlike
 // the declaration/cast/struct-field gates, this is NOT fixable by

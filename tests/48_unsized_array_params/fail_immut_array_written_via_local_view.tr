@@ -1,0 +1,15 @@
+// EXPECT-DIAG: E141
+// EXPECT-DIAG: 'a' is immutable, but 'tail_zero' writes to the array it is given as 'arr'.
+// The write is through local views of the parameter (`rest`, then `again`),
+// not the parameter itself -- E141 follows them.
+fn tail_zero(arr: int[]): void {
+    mut rest: int[] = arr[1..];
+    mut again = rest;
+    again[0] = 0;
+}
+
+fn main(): int {
+    immut a: int[3] = [1, 2, 3];
+    tail_zero(a);
+    return 0;
+}

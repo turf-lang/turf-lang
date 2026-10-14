@@ -15,8 +15,9 @@ SYNTAX:
     `Type name = value` form, no `var`/`let`/`const`/`auto`.
   - The type comes AFTER the name, separated by a colon (`name: Type`), not
     before it.
-  - An initializer value is required at declaration time. `mut x: int;`
-    alone (no value) is a syntax error.
+  - An `immut` needs its value where it is declared (`immut x: int;` is
+    E128). A `mut` may leave it out (`mut x: int;`) if every path assigns it
+    before it is read (E008).
   - Valid type keywords: int, double (or float), bool, string, ptr, or a
     declared struct/enum name.
   - void may NOT be used as a variable's type.
@@ -65,7 +66,7 @@ KEYWORD NAMES:
 COMMON MISTAKES:
 - Omitting `mut`/`immut` entirely, or putting the type before the name
   instead of after the colon.
-- Forgetting the initial value: `mut x: int;` alone will not compile.
+- Forgetting the initial value of an `immut` (`immut x: int;` will not compile).
 - Using `var`, `let`, `const`, or `auto` -- these do not exist in Turf.
 - Redeclaring the same name with `mut`/`immut` again in the SAME scope when
   you only meant to reassign it.

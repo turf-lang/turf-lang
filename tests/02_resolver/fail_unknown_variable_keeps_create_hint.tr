@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E040
+// EXPECT-DIAG: I can't find anything named 'counter'
+// EXPECT-DIAG: Did you forget to create this variable
+// EXPECT-NO-DIAG: is a struct
+// EXPECT-NO-DIAG: is an enum
+// LEC-005 guard against over-correction: the type-name hint branch must only
+// fire for a name that really is a visible type. A plain unknown variable
+// keeps the original "create it first" advice.
+fn main(): int {
+    return counter;
+}

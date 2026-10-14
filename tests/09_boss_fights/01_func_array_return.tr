@@ -13,7 +13,6 @@ fn main(): int {
     test::assert(local_arr[1] == 20, "");
     test::assert(local_arr[2] == 30, "");
 
-
     // 2. Direct inline indexing
     // This tests if postfix parsing allows function calls followed by array indices
     test::assert(get_array()[1] * get_array()[2] == 600, "");

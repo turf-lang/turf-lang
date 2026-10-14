@@ -58,7 +58,7 @@ extern fn TurfRuntimeGetArgv(index: int): string;
 // ─── Turf-level helpers ────────────────────────────────────────────────────
 
 // env: read an environment variable, or "" if it isn't set.
-fn env(name: string): string {
+pub fn env(name: string): string {
     immut result: string = getenv(name);
     if result == null {
         return "";
@@ -66,20 +66,32 @@ fn env(name: string): string {
     return result;
 }
 
+// set_env can only fail on input: an empty `name`, a `name` containing '=',
+// or (rarely) out of memory. Carries the offending name.
+pub error OsError {
+    SetEnvFailed(name: string),
+}
+
 // set_env: set (or, if `overwrite` is nonzero, overwrite) an environment
-// variable for the current process. Returns true on success.
-fn set_env(name: string, value: string, overwrite: int): bool {
-    return setenv(name, value, overwrite) == 0;
+// variable for the current process. Fails with OsError::SetEnvFailed(name).
+// Was a bare `bool` until LEC-007 (see io::write_string for why that went).
+// With `overwrite == 0` and the variable already set this SUCCEEDS without
+// changing it, as setenv(3) does.
+pub fn set_env(name: string, value: string, overwrite: int): !void {
+    if setenv(name, value, overwrite) != 0 {
+        return OsError::SetEnvFailed(name, "could not set environment variable '" + name + "'");
+    }
+    return;
 }
 
 // argc: the number of command-line arguments, including argv(0) (the
 // program's own invocation path) -- matches C's argc convention exactly.
-fn argc(): int {
+pub fn argc(): int {
     return TurfRuntimeGetArgc();
 }
 
 // argv: the command-line argument at `index` (0 is the program's own
 // invocation path), or "" if `index` is out of range.
-fn argv(index: int): string {
+pub fn argv(index: int): string {
     return TurfRuntimeGetArgv(index);
 }

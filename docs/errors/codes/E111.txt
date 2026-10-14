@@ -1,0 +1,11 @@
+Nested too deeply
+
+Turf reads your code by following its structure: a bracket inside a bracket inside a bracket. To stay safe, it stops at a fixed depth instead of following forever, because input that nests without end can crash a compiler.
+
+    mut x: int = ((((((((((((... hundreds of parentheses ...))))))))))));
+    mut y: bool = !!!!!!!!!!!!!!!!!...;
+    mut z: list<list<list<list<...>>>> ...;
+
+Real programs never get close to the limit, so when you see this it almost always means a bracket (or `<`, or `!`) was typed over and over by accident, or a closing one is missing and the count keeps growing. Check the line it points to for a repeated character and delete the extras.
+
+If you genuinely have deeply nested data, give the inner pieces names with `mut` and build the result step by step.

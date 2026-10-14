@@ -1,7 +1,7 @@
 // tests/41_gc/10_int_double_to_string_survives_collection.tr
 // Adjacent to OVH-002 (docs/planning/OVERHAUL_REMAINING_WORK.md), found
 // live while implementing it: `int to string`/`double to string` casts
-// (`CastToType()`, src/CodegenExpr.cpp) built their result buffer with a
+// (`CastToType()`, src/codegen/CodegenExpr.cpp) built their result buffer with a
 // bare `malloc(32)`, never registered with the collector's block table at
 // all. This is a different shape than OVH-002's own four named sites (no
 // GC pointer was hidden INSIDE the malloc'd block -- the malloc'd block

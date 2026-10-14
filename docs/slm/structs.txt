@@ -69,6 +69,14 @@ The implicit receiver is `self` (a pointer to the instance):
     }
     c.increment().increment();   // chained calls both mutate the same c
 
+  To return a COPY of the receiver instead, copy it out with `to`: `self` is
+  the receiver's address, and a value leaves a reference only through `to`
+  (a bare `return self;` here is E064):
+    fn Counter.snapshot(): Counter {
+        return self to Counter;
+    }
+  The same goes for any `r: &T`: `r to T` copies the value out.
+
 GENERICS: `struct Box<T> { val: T }`, instantiated as `Box<int>`,
 `Box<string>`, etc. A generic FUNCTION works the same way:
     fn<T> identity(x: T): T {
@@ -79,19 +87,20 @@ GENERICS: `struct Box<T> { val: T }`, instantiated as `Box<int>`,
   parse error: Turf-Lang has no `<...>` after a function name at a call
   site, only in a type ANNOTATION like `List<int>`).
 
-NAMESPACE: struct and enum names live in ONE flat namespace shared by the
-current file and every imported module -- unlike functions, they are NOT
-namespaced per module. This is why `List<int>` works without a `list.`
-prefix. The tradeoff: two different modules (or a file and an imported
-module) declaring a same-named struct is a compile-time error:
+NAMESPACE: a struct/enum belongs to the module that declares it. Two
+different modules (or a module and your own file) may each declare a
+`Point` -- they are two separate types, `a::Point` and `b::Point`. Bare
+`Point` means your own file's type, or one you imported by name
+(`import m::Point;` / `import m::[*];`); if it could mean both, qualify the
+imported one. Declaring the same name twice in ONE file is an error:
   "A struct named 'Point' is already declared." -- rename one of them.
 Field names must also be unique WITHIN one struct:
   "Struct 'Point' already has a field named 'x'."
 
 STRUCT METHOD CALLS ARE FULLY CHECKED (name, argument count, AND argument
 types -- not just count):
-  p.nonexistentMethod();
-    // ERROR: "'Point' has no method named 'nonexistentMethod'."
+  p.nonexistent_method();
+    // ERROR: "'Point' has no method named 'nonexistent_method'."
   l.push(1, 2, 3);   // push takes exactly 1 argument besides self
     // ERROR: "'List.push' was called with 3 arguments, but no overload
     //         accepts that many."
@@ -114,26 +123,13 @@ IMMUTABILITY APPLIES THROUGH METHODS TOO:
     //         immutable variable.
 
 COMMON MISTAKES:
-- Trying `Point { x: 1, y: 2 }` brace-literal construction -- it doesn't
-  exist; use `Point::new(1, 2)` (if a `.new` is declared) or
-  `Point::default()`.
-- Calling `StructName::new(...)` on a struct with no `.new` declared --
-  there's no fallback; define one or use `::default()`.
-- Declaring `fn StructName.default(...)` by hand -- `default` is reserved
-  and always compiler-generated.
-- Writing `fn StructName.new(...) static: ...` -- `new` always constructs
-  via `self` and can never be `static`.
-- Calling `x.new(...)` or `x.default()` through an instance -- both only
-  work as `StructName::new(...)` / `StructName::default()`.
-- A `new()` that doesn't assign every field on every path (e.g. only
-  inside one branch of an if/else) -- "doesn't assign every field on all
-  paths" names exactly which field(s) were missed.
-- Declaring a method INSIDE the struct body (methods always go outside,
-  qualified as `fn StructName.methodName(...)`).
-- Trying `identity<int>(5)`-style explicit generic instantiation -- type
-  arguments are always inferred, never written at a call site.
-- Comparing two struct instances with == instead of comparing fields.
-- Assuming a same-named struct from a different module is a distinct type
-  -- struct names are global, so this is always a compile error, never a
-  silent shadow.
-- Calling a mutating method on an `immut` struct variable.
+- `Point { x: 1, y: 2 }` brace literals do not exist: `Point::new(1, 2)` (when a
+  `.new` is declared) or `Point::default()`.
+- `StructName::new(...)` with no `.new` declared; `fn StructName.default(...)`
+  by hand (`default` is reserved); `static` on `.new`; `x.new(...)` or
+  `x.default()` through an instance.
+- A `new()` that does not assign every field on every path.
+- A method declared INSIDE the struct body: methods go outside, as
+  `fn StructName.method(...)`.
+- Explicit `identity<int>(5)`: type arguments are always inferred.
+- `==` on two structs: compare fields. A mutating method on an `immut` variable.

@@ -9,6 +9,11 @@ CAUSE:
   every field that was missed on at least one path.
 
 CORRECT SYNTAX:
+    struct Point {
+        x: int,
+        y: int
+    }
+
     fn Point.new(x: int, y: int): void {
         self.x = x;
         self.y = y;     // BOTH fields assigned, unconditionally

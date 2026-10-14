@@ -1,0 +1,33 @@
+TURF E083 -- DEFER CONTROL FLOW:
+
+CAUSE:
+  A `defer` statement (or something inside it) contains `return`, `break` or
+  `continue`. A deferred statement runs while the function is already leaving,
+  so it cannot also choose to leave a different way or jump out of an
+  enclosing loop in the middle of cleanup.
+
+INCORRECT:
+    fn main(): int {
+        defer return 5;          // return from where, exactly?
+        return 0;
+    }
+
+CORRECT:
+    import io;
+
+    fn cleanup(): void {
+        io::printline("done");
+    }
+
+    fn main(): int {
+        defer cleanup();
+        return 5;
+    }
+
+FIX:
+  Keep the deferred statement to the cleanup itself (close the file, free the
+  buffer, print the message) and put any decision about leaving in the normal
+  flow. If the cleanup can fail, handle that inside it:
+  `defer f() recover run { ... };`.
+
+RELATED: E095 (`try` inside a `defer` is rejected for the same reason).

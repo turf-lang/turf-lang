@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E052
+// EXPECT-DIAG: 'square' is a static method
 // Regression test: a TRUE static method (declared with the `::` form, no
 // `self` parameter at all) can't be called through an instance with '.' --
 // arity naturally mismatches (the implicit self the '.' call form always

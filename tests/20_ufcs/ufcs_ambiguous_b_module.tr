@@ -1,4 +1,4 @@
 // Companion module B (no main()) -- see ufcs_ambiguous_a_module.tr's comment.
-fn describe_int(x: int): string {
+pub fn describe_int(x: int): string {
     return "from B";
 }

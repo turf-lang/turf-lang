@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E111
+// EXPECT-DIAG: Expression nested too deeply to parse
 // Regression test: ParseUnary() recurses into itself directly for
 // chained prefix operators (!!!!x) without ever going back through
 // ParseExpression() in between -- found via code review to be completely

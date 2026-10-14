@@ -1,0 +1,14 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: _out_of_bounds.tr:12: List[]: index out of bounds
+// LEC-006: the generic `operator[]` keeps the bounds check the concrete
+// List<int> one had -- `l[i]` reads like array indexing, and array indexing is
+// checked everywhere else in the language. List<string> has one element, so
+// index 5 must abort instead of reading past the buffer.
+import list::List;
+
+fn main(): int {
+    mut ss: List<string> = List::default();
+    ss.push("only");
+    mut s: string = ss[5];
+    return 0;
+}

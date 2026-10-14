@@ -9,7 +9,8 @@ fn main(): int {
 
     // Loop through 8 characters of "TURFLANG"
     while i < 8 {
-        mut ch: int = s[i];
+        // FDN-004/D17: `s[i]` is `char`; widen to `int` before summing.
+        mut ch: int = s[i] to int;
         sum = sum + ch;
         i = i + 1;
     }

@@ -1,13 +1,17 @@
-TURF E006 -- FOR-EACH UNSIZED ARRAY:
+TURF E006 -- RETIRED (for-each over an unsized array parameter is legal now):
 
-CAUSE:
-  A `for x in y { ... }` loop was used where `y` is an unsized array
-  function parameter (`arr: T[]`, no size in the brackets). An unsized
-  array parameter carries no length at runtime, so for-each has no safe
-  way to know where to stop.
+STATUS:
+  No longer raised. The number is kept so an old log that mentions it still resolves, and is
+  never reused.
 
-CORRECT USAGE:
-    fn sumAll(arr: int[5]): int {   // concrete size -- length is known
+HISTORY:
+  E006 was reported for `for x in arr { ... }` when `arr` was an unsized array parameter
+  (`arr: T[]`), because that parameter was a bare pointer with no length. Since issue #260 a
+  `T[]` parameter is a slice -- a pointer to the caller's elements plus their count -- so
+  for-each, `arr.length()` and bounds-checked `arr[i]` all work on it.
+
+CORRECT USAGE (compiles):
+    fn sum(arr: int[]): int {
         mut total: int = 0;
         for value in arr {
             total = total + value;
@@ -15,24 +19,5 @@ CORRECT USAGE:
         return total;
     }
 
-INCORRECT:
-    fn sumAll(arr: int[]): int {    // unsized -- no known length
-        mut total: int = 0;
-        for value in arr {
-            total = total + value;
-        }
-        return total;
-    }
-    // ERROR: for-each requires a known array size! 'arr' is an unsized
-    //   array parameter, which carries no length at runtime.
-
-WHAT THIS ERROR IS NOT:
-  Not the same as E005 (for-each on a non-array). This fires specifically
-  when the target IS an array, just one whose size isn't known at the
-  point of the loop.
-
-FIX:
-  Either declare the parameter with a concrete size (`arr: int[5]`) if
-  the caller always passes a fixed-size array, or add a separate
-  `len: int` parameter and use an ordinary counting for-loop
-  (`for i in 0..len step i += 1 { arr[i] }`) instead of for-each.
+SEE: E140 (a `T[]` written anywhere but a function parameter), E141 (an `immut` array passed
+  to a `T[]` parameter that the function writes through), E005 (for-each over a non-array).

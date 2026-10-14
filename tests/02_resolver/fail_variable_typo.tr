@@ -1,10 +1,12 @@
+// EXPECT-DIAG: E040
+// EXPECT-DIAG: It may be from the current file: 'myvar'
 import test;
 
 fn main(): int {
     mut myvar: int = 5;
-    
+
     // In-scope variable typo should suggest 'myvar'
     test::assert(myvvar == 5, "Testing variable typo");
-    
+
     return 0;
 }

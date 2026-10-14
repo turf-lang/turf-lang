@@ -1,0 +1,23 @@
+Those two values can't be compared
+
+`==`, `!=`, `<`, `>`, `<=` and `>=` ask a question about two values, and Turf can only answer it when the two are the same kind of thing and that kind knows how to be compared. This error means one of those conditions failed. The message names the two types.
+
+Comparing different kinds of value:
+
+    mut x: int = 5;
+    if x == null { ... }          // an int is never null, so this can never be true
+    if x == "5" { ... }           // a number and a string
+
+Compare like with like -- `x == 5`, `name == "Ada"`. Only pointers and references can be compared to `null`; a plain `int`, `double`, `bool` or `string` can never be null.
+
+Comparing structs directly isn't supported yet:
+
+    if a == b { ... }             // a and b are both Point
+
+Compare the fields you care about instead:
+
+    if a.x == b.x && a.y == b.y { ... }
+
+Putting enum values in order isn't supported either, because the order of variants isn't something a program should rely on. Convert to numbers first if you really mean it:
+
+    if (a to int) < (b to int) { ... }

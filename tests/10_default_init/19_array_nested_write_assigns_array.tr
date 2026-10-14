@@ -1,0 +1,36 @@
+// A write into part of an element of an uninitialized fixed-size array (a
+// row of a 2-D array, a field of a struct element, deeper) assigns the whole
+// array, like a whole-element write; the rest of its zero-filled storage
+// reads as zero. These were E008 (owner decision 2026-10-13).
+
+import test;
+
+struct Pos {
+    x: int,
+    y: int
+}
+
+struct P {
+    id: int,
+    pos: Pos
+}
+
+fn main(): int {
+    mut g: int[2][3];
+    g[1][2] = 4;
+    test::assert(g[1][2] == 4 && g[0][0] == 0, "a row of a 2-D array");
+
+    mut ps: P[2];
+    ps[0].id = 5;
+    test::assert(ps[0].id == 5 && ps[1].id == 0, "a field of a struct element");
+
+    mut qs: P[2];
+    qs[1].pos.y = 9;
+    test::assert(qs[1].pos.y == 9 && qs[0].pos.x == 0, "a nested field");
+
+    mut cube: int[2][2][2];
+    mut i: int = 1;
+    cube[i][0][i] = 3;
+    test::assert(cube[1][0][1] == 3 && cube[0][1][0] == 0, "three dimensions");
+    return 0;
+}

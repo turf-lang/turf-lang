@@ -1,0 +1,12 @@
+// The supported way to count characters: convert the char explicitly.
+// Companion to fail_array_index_char.tr.
+fn main(): int {
+    mut freq: int[4] = [0, 0, 0, 0];
+    mut c: char = (2 to char);
+    mut i: int = (c to int);
+    freq[i] = freq[i] + 1;
+    if freq[2] != 1 {
+        return 1;
+    }
+    return 0;
+}

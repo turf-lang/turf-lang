@@ -1,4 +1,5 @@
 // RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: Division by zero
 // Regression test (DIAG-001): LintExpression() used to have no VarDeclExprAST
 // branch, so every lint check was silently skipped for the entire
 // right-hand side of a variable declaration's initializer -- confirmed live

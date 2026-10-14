@@ -1,4 +1,4 @@
-// LANG-003 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): `defer` runs in
+// LANG-003 (docs/archive/ARCHITECTURE_OVERHAUL.md §8): `defer` runs in
 // reverse (LIFO) order relative to other `defer`s registered earlier in the
 // SAME block. Observed through a struct passed by reference -- a deferred
 // statement mutates the caller's own state, visible once the callee

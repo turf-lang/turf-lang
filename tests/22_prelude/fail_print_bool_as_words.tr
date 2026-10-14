@@ -1,0 +1,23 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: [true|false]
+// EXPECT-RUNTIME: printline true
+// EXPECT-RUNTIME: printline false
+// EXPECT-RUNTIME: done
+// print/printline write a bool as `true`/`false`, the same text as
+// `(b to string)`. The panic at the end is only there so the runner checks
+// the program's output.
+
+fn main(): int {
+    immut t: bool = 3 > 2;
+    print("[");
+    print(t);
+    print("|");
+    print(!t);
+    printline("]");
+    print("printline ");
+    printline(t);
+    print("printline ");
+    printline(!t);
+    sys::panic("done");
+    return 0;
+}

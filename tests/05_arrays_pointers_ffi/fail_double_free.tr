@@ -1,3 +1,6 @@
+// EXPECT-DIAG: E017
+// EXPECT-DIAG: Double free detected for 'p'
+// EXPECT-NO-DIAG: Unsafe pointer use
 // Regression test: AliasAnalysisPass must reject a genuine double free of
 // the SAME variable/allocation. There was no existing test coverage for
 // this pass at all before this session's review -- see also
@@ -7,12 +10,22 @@
 
 import io;
 
+// The alias analysis knows these two only because they say so (Article V):
+// there is no built-in list of allocator names.
+@ownership(acquires)
 extern fn malloc(size: int): int*;
+
+@ownership(releases: p)
 extern fn free(p: int*): void;
 
 fn main(): int {
-    mut p: int* = malloc(sizeof(int) * 4);
-    free(p);
-    free(p);
+    // Raw pointers need `unsafe { }` (issue #238). Without it this test was
+    // rejected on its very first line ("Unsafe pointer use!", E130) and the
+    // alias analysis it is named for never ran -- a wrong-reason pass.
+    unsafe {
+        mut p: int* = malloc(sizeof(int) * 4);
+        free(p);
+        free(p);
+    }
     return 0;
 }

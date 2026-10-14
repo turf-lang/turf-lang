@@ -56,7 +56,7 @@ import strings;
 // those is explicitly out of this group's scope (see
 // docs/development/changes/STD-002.md's own *Removed assumptions*).
 @caller_location
-fn fail(msg: string): void {
+pub fn fail(msg: string): void {
     sys::panic(caller_location + ": " + msg);
 }
 
@@ -65,16 +65,16 @@ fn fail(msg: string): void {
 // Both overloads are `@caller_location` -- the 1-arg form's own internal
 // call to the 2-arg form (below) is itself a call FROM a `@caller_location`
 // function, so it forwards the ORIGINAL caller's location rather than
-// stamping its own line inside this file (see include/Intrinsics.h §1's
+// stamping its own line inside this file (see src/sema/Intrinsics.h §1's
 // caller_location entry, and docs/architecture/boundary.md, for the
 // forward-vs-stamp mechanism this relies on).
 @caller_location
-fn assert(cond: bool): void {
+pub fn assert(cond: bool): void {
     assert(cond, "Oops! An assertion failed here.\nHint: Assertions are checks that make sure your code is running exactly as you expect. This one didn't pass.");
 }
 
 @caller_location
-fn assert(cond: bool, msg: string): void {
+pub fn assert(cond: bool, msg: string): void {
     if !cond {
         fail(msg);
     }
@@ -82,21 +82,21 @@ fn assert(cond: bool, msg: string): void {
 
 // ─── assert_eq / assert_neq: int ──────────────────────────────────────────
 
-fn assert_eq(left: int, right: int): void {
+pub fn assert_eq(left: int, right: int): void {
     assert_eq(left, right, "");
 }
 
-fn assert_eq(left: int, right: int, msg: string): void {
+pub fn assert_eq(left: int, right: int, msg: string): void {
     if left != right {
         assert_fail_eq(left to string, right to string, msg);
     }
 }
 
-fn assert_neq(left: int, right: int): void {
+pub fn assert_neq(left: int, right: int): void {
     assert_neq(left, right, "");
 }
 
-fn assert_neq(left: int, right: int, msg: string): void {
+pub fn assert_neq(left: int, right: int, msg: string): void {
     if left == right {
         assert_fail_neq(left to string, right to string, msg);
     }
@@ -104,21 +104,21 @@ fn assert_neq(left: int, right: int, msg: string): void {
 
 // ─── assert_eq / assert_neq: double ───────────────────────────────────────
 
-fn assert_eq(left: double, right: double): void {
+pub fn assert_eq(left: double, right: double): void {
     assert_eq(left, right, "");
 }
 
-fn assert_eq(left: double, right: double, msg: string): void {
+pub fn assert_eq(left: double, right: double, msg: string): void {
     if left != right {
         assert_fail_eq(left to string, right to string, msg);
     }
 }
 
-fn assert_neq(left: double, right: double): void {
+pub fn assert_neq(left: double, right: double): void {
     assert_neq(left, right, "");
 }
 
-fn assert_neq(left: double, right: double, msg: string): void {
+pub fn assert_neq(left: double, right: double, msg: string): void {
     if left == right {
         assert_fail_neq(left to string, right to string, msg);
     }
@@ -126,21 +126,21 @@ fn assert_neq(left: double, right: double, msg: string): void {
 
 // ─── assert_eq / assert_neq: bool ─────────────────────────────────────────
 
-fn assert_eq(left: bool, right: bool): void {
+pub fn assert_eq(left: bool, right: bool): void {
     assert_eq(left, right, "");
 }
 
-fn assert_eq(left: bool, right: bool, msg: string): void {
+pub fn assert_eq(left: bool, right: bool, msg: string): void {
     if left != right {
         assert_fail_eq(left to string, right to string, msg);
     }
 }
 
-fn assert_neq(left: bool, right: bool): void {
+pub fn assert_neq(left: bool, right: bool): void {
     assert_neq(left, right, "");
 }
 
-fn assert_neq(left: bool, right: bool, msg: string): void {
+pub fn assert_neq(left: bool, right: bool, msg: string): void {
     if left == right {
         assert_fail_neq(left to string, right to string, msg);
     }
@@ -148,21 +148,21 @@ fn assert_neq(left: bool, right: bool, msg: string): void {
 
 // ─── assert_eq / assert_neq: string ────────────────────────────────────────
 
-fn assert_eq(left: string, right: string): void {
+pub fn assert_eq(left: string, right: string): void {
     assert_eq(left, right, "");
 }
 
-fn assert_eq(left: string, right: string, msg: string): void {
+pub fn assert_eq(left: string, right: string, msg: string): void {
     if left != right {
         assert_fail_eq(left, right, msg);
     }
 }
 
-fn assert_neq(left: string, right: string): void {
+pub fn assert_neq(left: string, right: string): void {
     assert_neq(left, right, "");
 }
 
-fn assert_neq(left: string, right: string, msg: string): void {
+pub fn assert_neq(left: string, right: string, msg: string): void {
     if left == right {
         assert_fail_neq(left, right, msg);
     }
@@ -170,7 +170,7 @@ fn assert_neq(left: string, right: string, msg: string): void {
 
 // ─── Shared failure-message formatting (private to this module) ──────────
 
-fn assert_fail_eq(left: string, right: string, msg: string): void {
+pub fn assert_fail_eq(left: string, right: string, msg: string): void {
     mut detail: string = "assert_eq failed: " + left + " != " + right;
     if strings::length(msg) > 0 {
         fail(detail + " (" + msg + ")");
@@ -179,7 +179,7 @@ fn assert_fail_eq(left: string, right: string, msg: string): void {
     }
 }
 
-fn assert_fail_neq(left: string, right: string, msg: string): void {
+pub fn assert_fail_neq(left: string, right: string, msg: string): void {
     mut detail: string = "assert_neq failed: both sides equal " + left;
     if strings::length(msg) > 0 {
         fail(detail + " (" + msg + ")");

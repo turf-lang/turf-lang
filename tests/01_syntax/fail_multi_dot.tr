@@ -1,4 +1,9 @@
+// EXPECT-DIAG: E139
+// EXPECT-DIAG: '3.14' is followed by a second '.', but a number can have only one decimal point
+// Issue #263: `3.14.15` lexed as `3.14` then `.15`, so the beginner was told
+// "Expected ';'" at the second dot -- the wrong mistake. It is a malformed
+// number.
 fn main(): int {
-    float x = 3.14.15;
+    mut x: double = 3.14.15;
     return 0;
 }

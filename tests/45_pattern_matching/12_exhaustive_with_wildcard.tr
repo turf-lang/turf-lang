@@ -1,0 +1,31 @@
+// LEC-003: a wildcard arm makes an enum or bool compare exhaustive without
+// `otherwise`, and a fully-listed bool compare is exhaustive on its own.
+import test;
+
+enum Color { Red, Green, Blue }
+
+fn f(c: Color): int {
+    mut r: int;
+    compare c {
+        matches Color::Red: r = 1; done
+        matches _: r = 2; done
+    }
+    return r;
+}
+
+fn g(b: bool): int {
+    mut r: int;
+    compare b {
+        matches true: r = 1; done
+        matches false: r = 0; done
+    }
+    return r;
+}
+
+fn main(): int {
+    test::assert(f(Color::Red) == 1, "named variant");
+    test::assert(f(Color::Blue) == 2, "wildcard covers the rest");
+    test::assert(g(true) == 1, "bool true");
+    test::assert(g(false) == 0, "bool false");
+    return 0;
+}
