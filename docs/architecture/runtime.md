@@ -50,6 +50,7 @@ into every compiled Turf program, the same relationship `-lm` has.
 | `runtime/turfrt_alloc.c` | `turf_rt_init()`/`turf_rt_shutdown()`, the three allocation entry points, `turf_rt_checked_free()`, `turf_rt_stats()`. |
 | `runtime/turfrt_gc.c` | The collector: block table, root discovery, mark, sweep, pins, the testing aids. |
 | `runtime/turfrt_panic.c` | `turf_rt_panic()`, and `turfrt_abort()` / `turfrt_flush_stdout()`, bound by `lib/std/core/sys.tr`. |
+| `runtime/turfrt_convert.c` | `turf_rt_str_to_int()` and `turf_rt_str_to_double()`, the string-to-number casts. |
 | `runtime/turfrt_types.c` | `turf_rt_typedesc_is_pointer_word()`, the one reader of a descriptor's bitmap. |
 | `runtime/turfrt_abi.c` | The ABI stamp (§7.3). |
 | `runtime/turfrt_signal.c` | The fault handlers (§7.1). |
@@ -76,6 +77,7 @@ The entry points in `runtime/turfrt.h`:
 | `turf_rt_checked_free(p)` | libc `free()` for the manual heap, after panicking if `p` is a live GC block (`cross-heap free`). Reached from `mem::free()` through the `gc_checked_free` intrinsic. |
 | `turf_rt_stats()` | Allocation counters plus the collector's point-in-time numbers; read from C by the smoke scripts. |
 | `turf_rt_string_capacity(p)` | The bytes from `p` to the end of the GC block holding it, or -1 outside the GC heap. Bounds every string byte write `s[i] = c` (`EmitStringBoundsCheck()`, `src/codegen/CodegenArray.cpp`); declared to the optimizer as reading only runtime-private memory, so a loop that writes without allocating calls it once. |
+| `turf_rt_str_to_int(s, out)`, `turf_rt_str_to_double(s, out)` | `s to int` / `s to double`: 1 and the value when the whole of `s` is a number by the rules of `strings::parse_int`/`parse_double`, else 0, on which Codegen panics at the cast. |
 | `turf_rt_panic(kind, msg, file, line)` | Flushes stdout, formats one line to stderr and calls `abort()`. |
 | `turf_rt_typedesc_is_pointer_word(desc, i)` | Bit accessor for a descriptor's pointer bitmap. |
 | `turf_rt_abi_2_0()` | The ABI stamp. |
@@ -87,8 +89,8 @@ The entry points in `runtime/turfrt.h`:
 ### 3.1 Panic lowering: `CodegenPanic()`, `src/sema/Builtins.cpp`
 
 Every one of the compiler's own runtime safety checks (division and modulo by
-zero, checked-arithmetic overflow, array and slice bounds, a bad string to int
-or enum cast) goes through `CodegenPanic(Value *MsgVal, SourceLocation Loc)`.
+zero, checked-arithmetic overflow, array and slice bounds, a bad string to int,
+double or enum cast) goes through `CodegenPanic(Value *MsgVal, SourceLocation Loc)`.
 It declares `turf_rt_panic` once per module and calls it with the fixed kind
 `"runtime check"`, the message, and the Turf source file and line. The kind is
 not distinct per call site; the message carries the distinction (INV-RT-2).

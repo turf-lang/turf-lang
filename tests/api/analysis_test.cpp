@@ -2044,6 +2044,37 @@ static void testTypeArgumentCount() {
   }
 }
 
+// A string literal converted to int/double/enum that the run-time
+// conversion would always reject.
+static void testLiteralNeverConverts() {
+  CurrentTest = "literal conversion that can never succeed";
+  const char *Bad[] = {
+      "fn main(): int { mut n: int = \"12abc\" to int; return n; }",
+      "fn main(): int { mut n: int = \"9223372036854775808\" to int; return n; }",
+      "fn main(): int { mut d: double = \"inf\" to double; return 0; }",
+      "enum C { Red, Green }\nfn main(): int { mut c: C = \"red\" to C; return 0; }",
+  };
+  for (const char *Body : Bad) {
+    auto R = turf::analyze({{"conv.tr", std::string(Body) + "\n"}});
+    bool Found = false;
+    for (const auto &D : R.diagnostics())
+      if (D.Code == "E149" && D.Message.find("would always panic") != std::string::npos)
+        Found = true;
+    CHECK(Found);
+    if (!Found)
+      std::cerr << "    '" << Body << "' produced:\n" << render(R);
+  }
+  auto Ok = turf::analyze(
+      {{"convok.tr",
+        "enum C { Red, Green }\n"
+        "fn main(): int { mut n: int = \"-9223372036854775808\" to int; "
+        "mut d: double = \"-2.5E+3\" to double; mut c: C = \"Green\" to C; "
+        "return 0; }\n"}});
+  CHECK(Ok.succeeded());
+  if (!Ok.succeeded())
+    std::cerr << render(Ok);
+}
+
 // LEC-005. The facade recovers from a parse error with the same
 // SkipToNextTopLevelBoundary() the compiler driver uses, so an editor shows the
 // same cascade -- or the lack of one -- as the command line.
@@ -2231,6 +2262,7 @@ int main() {
   testGenericOperatorDiagnostics();
   testUnsizedArrayDiagnostics();
   testTypeArgumentCount();
+  testLiteralNeverConverts();
   testImportedCandidateLocation();
   testBuiltinDocRouting();
 

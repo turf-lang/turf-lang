@@ -641,19 +641,26 @@ What each legal cast does:
 - **`int to string`** and **`double to string`** format the number. A `double`
   is written in the shortest `%g`-style form (`0.1`, `1e+20`, `1.23457e+06`),
   and a NaN is `nan`. **`bool to string`** gives `"true"` or `"false"`.
-- **`string to int`** reads an optional sign and the leading decimal digits and
-  ignores the rest (`"12abc"` is 12, `"1.5"` is 1). A value above the `int`
-  range saturates. A string with no number at all (`"abc"`, `""`) panics with
-  `Invalid string to int conversion`.
-  When the text comes from outside your program, prefer
-  `strings::parse_int`, which reports failure as an error value instead of
-  panicking (see [the `strings` module](stdlib/core.md)).
-- **`string to double`** reads the leading number, and gives `0.0` when there
-  is none. `strings::parse_double` is the checked form.
+- **`string to int`** accepts the whole string or nothing: an optional `-`
+  and decimal digits, in the range of `int`. Anything else panics with
+  `Invalid string to int conversion`: `"12abc"`, `"1.5"`, `" 12"`, `"+5"`,
+  `""`, or `"9223372036854775808"`.
+- **`string to double`** accepts an optional `-`, digits with at most one `.`
+  (at least one digit), and an optional exponent (`1e3`, `2.5E-3`). Anything
+  else panics with `Invalid string to double conversion`: `"abc"`, `"12abc"`,
+  `" 1.5"`, `"inf"`, `"nan"`. A magnitude beyond the `double` range is an
+  infinity.
+- Both accept exactly what `strings::parse_int` and `strings::parse_double`
+  accept. When the text comes from outside your program (`input()`, a file),
+  prefer those: they report bad text as an error value you can `recover`
+  from instead of panicking (see [the `strings` module](stdlib/core.md)).
 - **`enum to int`** gives the variant's position, and **`int to enum`** panics
   with `Invalid int to enum conversion` when no variant has that position.
   **`enum to string`** gives the variant name, and **`string to enum`** panics
   with `Invalid string to enum conversion` for an unknown name.
+- A string **literal** that can never convert (`"abc" to int`, `"1.2.3" to
+  double`, `"Purple" to Color`) is E149 at compile time, and an integer
+  literal that is no variant (`7 to Color`) is E127.
 
 Implicit conversions are exactly `int32` to `int`, `int32` to `double` and
 `int` to `double`. Nothing narrows implicitly, and there is no implicit

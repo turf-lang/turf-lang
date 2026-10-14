@@ -581,6 +581,7 @@ target_link_libraries(turfcore PUBLIC
 add_library(turfrt STATIC
   runtime/turfrt_abi.c
   runtime/turfrt_alloc.c
+  runtime/turfrt_convert.c
   runtime/turfrt_gc.c
   runtime/turfrt_net.c
   runtime/turfrt_panic.c
@@ -626,6 +627,7 @@ if(TURF_RT_SANITIZE)
   add_library(turfrt_asan STATIC
     runtime/turfrt_abi.c
     runtime/turfrt_alloc.c
+    runtime/turfrt_convert.c
     runtime/turfrt_gc.c
     runtime/turfrt_net.c
     runtime/turfrt_panic.c

@@ -579,7 +579,7 @@ A match is a small edit distance away, and swapping two adjacent letters counts 
 
 ### Error codes
 
-Every error has a stable code, `E001` to `E148`: **148 codes** with no gaps. A code is assigned once and never reused or renumbered, and it is an identifier, not a ranking of severity. Every one has a page, `turf explain E0NN`, that says what the error means, shows a wrong program and the fix. The same pages are in the repository as `docs/errors/codes/E0NN.txt`, and the release archives carry them.
+Every error has a stable code, `E001` to `E149`: **149 codes** with no gaps. A code is assigned once and never reused or renumbered, and it is an identifier, not a ranking of severity. Every one has a page, `turf explain E0NN`, that says what the error means, shows a wrong program and the fix. The same pages are in the repository as `docs/errors/codes/E0NN.txt`, and the release archives carry them.
 
 Six codes are **retired**: the mistakes they described are now reported under another code, and the number stays so old references still resolve. `turf explain` on them says which code replaced them. They are E006 (an unsized array in a `for` loop; arrays carry their length now), E013 (merged into E012), E015 (syntax errors, now E099–E123), E037 (unknown functions are E041), and E055 and E063 (now E056).
 
@@ -593,7 +593,7 @@ The codes by category (the category is the word in the diagnostic header):
 | syntax error | E014–E015, E070–E073, E099–E111, E118, E139 |
 | declaration | E019–E024, E027–E034, E039, E042, E045–E046, E048–E053, E060–E061, E069, E079–E080, E084–E085, E087–E091, E096–E097, E112–E117, E119, E128–E129, E136, E138, E145–E148 |
 | function signature | E025, E038, E044, E047, E067, E125, E135, E137 |
-| type mismatch | E035–E036, E056, E059, E062, E064, E066, E082, E098, E124, E126, E134 |
+| type mismatch | E035–E036, E056, E059, E062, E064, E066, E082, E098, E124, E126, E134, E149 |
 | arithmetic | E057, E076–E078, E127 |
 | string conversion | E065 |
 | builtin function | E055, E063 |

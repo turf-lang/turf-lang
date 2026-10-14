@@ -794,66 +794,43 @@ Value *CastExprAST::codegen() {
     }
   }
 
-  // string → int  : call strtoll(str, &endptr, 10)
-  if (SrcName == "string" && DstName == "int") {
-    Function *StrtollF = TheModule->getFunction("strtoll");
-    Type *I8Ptr = PointerType::get(*TheContext, 0);
-    if (!StrtollF) {
-      Type *I8PtrPtr = PointerType::get(I8Ptr->getContext(), 0);
-      FunctionType *FT =
-          FunctionType::get(Type::getInt64Ty(*TheContext),
-                            {I8Ptr, I8PtrPtr, Type::getInt32Ty(*TheContext)},
-                            /*isVarArg=*/false);
-      StrtollF = Function::Create(FT, Function::ExternalLinkage, "strtoll",
-                                  TheModule.get());
-    }
+  // string → int, string → double: turf_rt_str_to_int/_double
+  // (runtime/turfrt_convert.c) check the whole text by the rules of
+  // strings::parse_int/parse_double and return 0 when it is not a number, so
+  // "12abc", "3.5" to int, an out-of-range int and "abc" to double all panic
+  // here instead of producing a partial or saturated value.
+  if (SrcName == "string" && (DstName == "int" || DstName == "double")) {
+    const bool ToInt = DstName == "int";
+    Type *ValTy = ToInt ? Type::getInt64Ty(*TheContext) : Type::getDoubleTy(*TheContext);
+    Type *PtrTy = PointerType::get(*TheContext, 0);
+    FunctionCallee ConvFn = TheModule->getOrInsertFunction(
+        ToInt ? "turf_rt_str_to_int" : "turf_rt_str_to_double",
+        FunctionType::get(Type::getInt32Ty(*TheContext), {PtrTy, PtrTy},
+                          /*isVarArg=*/false));
 
     Function *TheFunction = Builder->GetInsertBlock()->getParent();
     IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
                      TheFunction->getEntryBlock().begin());
-    AllocaInst *EndPtrAlloca = TmpB.CreateAlloca(I8Ptr, 0, "endptr");
+    AllocaInst *OutAlloca = TmpB.CreateAlloca(ValTy, nullptr, "conv_out");
 
-    Value *Base = ConstantInt::get(Type::getInt32Ty(*TheContext), 10);
-    Value *Res =
-        Builder->CreateCall(StrtollF, {Val, EndPtrAlloca, Base}, "strtoll_res");
-
-    Value *EndPtrVal = Builder->CreateLoad(I8Ptr, EndPtrAlloca, "endptr_val");
-    Value *IsSame = Builder->CreateICmpEQ(EndPtrVal, Val, "is_same_ptr");
-
-    BasicBlock *ErrorBB =
-        BasicBlock::Create(*TheContext, "cast_error", TheFunction);
+    Value *Ok = Builder->CreateCall(ConvFn, {Val, OutAlloca}, "conv_ok");
+    BasicBlock *ErrorBB = BasicBlock::Create(*TheContext, "cast_error", TheFunction);
     BasicBlock *ContBB = BasicBlock::Create(*TheContext, "cast_cont");
-
-    Builder->CreateCondBr(IsSame, ErrorBB, ContBB);
+    Builder->CreateCondBr(
+        Builder->CreateICmpEQ(Ok, ConstantInt::get(Ok->getType(), 0), "conv_bad"),
+        ErrorBB, ContBB);
 
     Builder->SetInsertPoint(ErrorBB);
-
     CodegenPanic(Builder->CreateGlobalString(
-        "Runtime Error: Invalid string to int conversion."), Loc);
+                     ToInt ? "Runtime Error: Invalid string to int conversion."
+                           : "Runtime Error: Invalid string to double conversion."),
+                 Loc);
     if (!blockHasTerminator(Builder->GetInsertBlock()))
       Builder->CreateUnreachable();
 
     TheFunction->insert(TheFunction->end(), ContBB);
     Builder->SetInsertPoint(ContBB);
-
-    return Res;
-  }
-
-  // string → double : call strtod(str, nullptr)
-  if (SrcName == "string" && DstName == "double") {
-    Function *StrtodF = TheModule->getFunction("strtod");
-    if (!StrtodF) {
-      Type *I8Ptr = PointerType::get(*TheContext, 0);
-      Type *I8PtrPtr = PointerType::get(I8Ptr->getContext(), 0);
-      FunctionType *FT =
-          FunctionType::get(Type::getDoubleTy(*TheContext), {I8Ptr, I8PtrPtr},
-                            /*isVarArg=*/false);
-      StrtodF = Function::Create(FT, Function::ExternalLinkage, "strtod",
-                                 TheModule.get());
-    }
-    Value *NullPtr = ConstantPointerNull::get(
-        PointerType::get(PointerType::get(*TheContext, 0)->getContext(), 0));
-    return Builder->CreateCall(StrtodF, {Val, NullPtr}, "strtod_res");
+    return Builder->CreateLoad(ValTy, OutAlloca, "conv_val");
   }
 
   // int → string : snprintf into a GC-heap-allocated buffer.

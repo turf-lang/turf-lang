@@ -142,6 +142,7 @@ inline constexpr const char *SliceRangeOutOfBounds = "E143";
 inline constexpr const char *MutableViewOfImmutableArray = "E144";
 inline constexpr const char *DefaultThroughReferenceCycle = "E147";
 inline constexpr const char *WrongTypeArgumentCount = "E148";
+inline constexpr const char *LiteralNeverConverts = "E149";
 inline constexpr const char *ErrorPayload = "E096";
 // Pre-existing codes a raw site reuses (see above).
 inline constexpr const char *ExportMutNotSupported = "E021";
@@ -438,6 +439,10 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // `S<int>` on a struct that declares no type parameters, or `Box<int,
     // int>` on one that declares one (ResolverDecl.cpp's validateNamedType()).
     {ErrCode::WrongTypeArgumentCount, "WrongTypeArgumentCountError", "Wrong number of type arguments", SLM::ErrorCategory::DECLARATION},
+    // `"abc" to int`, `"x" to double`, `"Purple" to Color`: a string literal
+    // that the run-time conversion would always reject
+    // (TypeCheckerExpr.cpp's visitCast()).
+    {ErrCode::LiteralNeverConverts, "LiteralNeverConvertsError", "Conversion that can never succeed", SLM::ErrorCategory::TYPE_MISMATCH},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

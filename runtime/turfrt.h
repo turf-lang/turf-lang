@@ -342,6 +342,15 @@ TurfRtStats turf_rt_stats(void);
 int64_t turf_rt_string_capacity(const void *p);
 
 /*
+ * turf_rt_str_to_int / turf_rt_str_to_double -- `s to int` / `s to double`.
+ * Return 1 and store the value when `s` is a number by the rules of
+ * strings::parse_int / strings::parse_double, and 0 otherwise; Codegen
+ * panics at the cast on 0 (runtime/turfrt_convert.c).
+ */
+int turf_rt_str_to_int(const char *s, int64_t *out);
+int turf_rt_str_to_double(const char *s, double *out);
+
+/*
  * turf_rt_panic -- replaces every inline fprintf+abort CodegenPanic() used
  * to emit directly (src/sema/Builtins.cpp). `kind` is a short, fixed
  * classification ("division by zero", "array bounds", "integer overflow",

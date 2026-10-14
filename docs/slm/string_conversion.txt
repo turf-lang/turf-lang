@@ -14,7 +14,10 @@ SUPPORTED CONVERSIONS TO STRING:
 SUPPORTED CONVERSIONS FROM STRING:
   "42" to int       // string to int    -- parsed at runtime
   "3.14" to double  // string to double -- parsed at runtime
-  // If the string is not a valid number, the program aborts at runtime.
+  // The WHOLE string must be the number: "12abc", " 12", "+5", "1.5" to int
+  // all panic at runtime. A literal that can never convert ("abc" to int) is
+  // E149 at compile time. For user input, prefer strings::parse_int /
+  // strings::parse_double, which return an error to recover from.
 
 WHAT IS NOT SUPPORTED:
   someString + 5

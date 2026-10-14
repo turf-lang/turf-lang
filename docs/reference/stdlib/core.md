@@ -404,8 +404,8 @@ The `to` operator converts between strings and the numeric types
 | Expression | Result |
 |---|---|
 | `n to string`, `x to string`, `b to string` | the text of an `int`, `double` (shortest `%g`-style form: `3.5`, `1e+20`, `0.333333`) or `bool` (`true` / `false`) |
-| `s to int` | parses an integer; **panics** (`Invalid string to int conversion`) if `s` is not one |
-| `s to double` | parses a number like C `strtod`; text that is not a number gives `0.0`, and trailing text is ignored (`"12abc"` is `12.0`), so it never fails |
+| `s to int` | parses the whole of `s` as an integer, by `parse_int`'s rules; **panics** (`Invalid string to int conversion`) if it is not one |
+| `s to double` | parses the whole of `s` as a number, by `parse_double`'s rules; **panics** (`Invalid string to double conversion`) if it is not one |
 | `c to int`, `n to char` | the byte code of a `char`, and back |
 
 Use `parse_int` / `parse_double` when the text is input you do not control,

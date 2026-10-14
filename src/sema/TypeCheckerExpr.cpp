@@ -28,7 +28,9 @@
 
 #include "llvm/ADT/SmallString.h" // `compare` pattern-key exact-value fingerprinting
 
+#include <algorithm>
 #include <cassert>
+#include <cstdint>
 #include <functional>
 #include <iostream>
 #include <optional>
@@ -37,6 +39,68 @@
 #include <unordered_map>
 
 namespace {
+
+// What `s to int` / `s to double` accept at run time
+// (runtime/turfrt_convert.c, the same rules as strings::parse_int and
+// parse_double), so a string literal that would always panic there is
+// rejected here instead (E149).
+bool isDigitChar(char C) { return C >= '0' && C <= '9'; }
+
+bool literalConvertsToInt(const std::string &S) {
+  size_t I = 0;
+  bool Neg = false;
+  if (I < S.size() && S[I] == '-') {
+    Neg = true;
+    ++I;
+  }
+  if (I == S.size())
+    return false;
+  // Accumulated as a negative number: INT64_MIN has no positive twin.
+  const long long MinDiv10 = INT64_MIN / 10;
+  const int MinLastDigit = -(INT64_MIN % 10);
+  long long R = 0;
+  for (; I < S.size(); ++I) {
+    if (!isDigitChar(S[I]))
+      return false;
+    int D = S[I] - '0';
+    if (R < MinDiv10 || (R == MinDiv10 && D > MinLastDigit))
+      return false;
+    R = R * 10 - D;
+  }
+  return Neg || R != INT64_MIN;
+}
+
+bool literalConvertsToDouble(const std::string &S) {
+  size_t I = 0, Digits = 0;
+  if (I < S.size() && S[I] == '-')
+    ++I;
+  while (I < S.size() && isDigitChar(S[I])) {
+    ++I;
+    ++Digits;
+  }
+  if (I < S.size() && S[I] == '.') {
+    ++I;
+    while (I < S.size() && isDigitChar(S[I])) {
+      ++I;
+      ++Digits;
+    }
+  }
+  if (Digits == 0)
+    return false;
+  if (I < S.size() && (S[I] == 'e' || S[I] == 'E')) {
+    ++I;
+    if (I < S.size() && (S[I] == '+' || S[I] == '-'))
+      ++I;
+    size_t ExpDigits = 0;
+    while (I < S.size() && isDigitChar(S[I])) {
+      ++I;
+      ++ExpDigits;
+    }
+    if (ExpDigits == 0)
+      return false;
+  }
+  return I == S.size();
+}
 
 const VariableExprAST *findRootVariable(const ExprAST *Base) {
   while (Base) {
@@ -1274,6 +1338,34 @@ void TypeChecker::visitCast(CastExprAST &Node) {
       if (auto Resolved = GlobalSymbolTable->LookupType(NT->getName()))
         DestTy = Resolved;
     }
+  }
+  // A string literal whose conversion can only panic at run time.
+  if (auto *Str = dynamic_cast<const StringExprAST *>(Node.getOperand())) {
+    const std::string &Text = Str->getValue();
+    const std::string Dest = DestTy->getName();
+    std::string Kind, Hint;
+    if (Dest == "int" && !literalConvertsToInt(Text)) {
+      Kind = "an int";
+      Hint = "'to int' takes an optional '-' and decimal digits, in int's "
+             "range. Write the number itself, e.g. 42, not \"42\" to int.";
+    } else if (Dest == "double" && !literalConvertsToDouble(Text)) {
+      Kind = "a double";
+      Hint = "'to double' takes an optional '-', digits with at most one "
+             "'.', and an optional exponent (1e3). Write the number itself, "
+             "e.g. 2.5, not \"2.5\" to double.";
+    } else if (auto *ET = dynamic_cast<const TurfEnumType *>(DestTy.get())) {
+      const auto &Vs = ET->getVariants();
+      if (std::find(Vs.begin(), Vs.end(), Text) == Vs.end()) {
+        Kind = "a variant of '" + ET->getName() + "'";
+        Hint = "Name the variant directly, e.g. '" + ET->getName() +
+               "::" + (Vs.empty() ? std::string("X") : Vs.front()) + "'.";
+      }
+    }
+    if (!Kind.empty())
+      reportError(Node.getLoc(), ErrCode::LiteralNeverConverts,
+                  "\"" + Text + "\" is not " + Kind +
+                      ", so this conversion would always panic when it runs.",
+                  {}, Hint, "Conversion can never succeed!");
   }
   if (auto *ET = dynamic_cast<const TurfEnumType *>(DestTy.get())) {
     if (auto *Lit = dynamic_cast<const NumberExprAST *>(Node.getOperand())) {

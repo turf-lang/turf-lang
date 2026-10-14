@@ -1,0 +1,19 @@
+That text can never be converted
+
+`to int`, `to double` and `to Enum` convert a string while the program runs, and they panic when the text is not a number (or not a variant name). When the string is written right there in the code, Turf can tell in advance that the conversion would always panic, so it stops you now:
+
+    enum Color { Red, Green }
+
+    mut n: int = "abc" to int;          // "abc" is not an int
+    mut d: double = "1.2.3" to double;  // two decimal points
+    mut c: Color = "Purple" to Color;   // Color has no Purple
+
+The whole string must be the value. `to int` takes an optional `-` and digits, in int's range, so `"12abc"`, `" 12"`, `"+5"` and `"1.5"` are all rejected too. `to double` also takes one `.` and an exponent (`"2.5"`, `"1e3"`), but not `"inf"` or `"nan"`. A variant name must match exactly, including its case.
+
+Usually the fix is to write the value itself instead of text:
+
+    mut n: int = 42;
+    mut d: double = 1.5;
+    mut c: Color = Color::Green;
+
+For text that comes from outside the program, such as `input()` or a file, use `strings::parse_int` or `strings::parse_double`, which return an error you can `recover` from instead of panicking.
