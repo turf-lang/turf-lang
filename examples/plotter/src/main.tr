@@ -17,7 +17,7 @@ struct Sprite {
 fn main(): int {
     mut a: geometry::Point = geometry::Point::new(0, 0);
     mut b: geometry::Point = geometry::Point::new(3, 4);
-    io::printline("distance squared: " + (geometry::distanceSquared(a, b) to string));
+    io::printline("distance squared: " + (geometry::distance_squared(a, b) to string));
     io::printline("manhattan: " + (geometry::manhattan(a, b) to string));
 
     mut s1: Sprite = Sprite::default();
@@ -29,7 +29,7 @@ fn main(): int {
     mut chosen: Sprite = geometry::pick(false, s1, s2);
     io::print("picked the sprite drawn as ");
     io::printline(chosen.glyph);
-    io::printline("a Sprite is " + (geometry::sizeOfType(chosen) to string) + " bytes");
-    io::printline("an int is " + (geometry::sizeOfType(1) to string) + " bytes");
+    io::printline("a Sprite is " + (geometry::size_of_type(chosen) to string) + " bytes");
+    io::printline("an int is " + (geometry::size_of_type(1) to string) + " bytes");
     return 0;
 }

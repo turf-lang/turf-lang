@@ -466,7 +466,7 @@ In a project, `import foo;` inside package `P` names exactly one of:
 If more than one exists, that is an error listing every candidate: there is no
 shadowing and "your own file wins" is not a rule. If none does, it is the usual
 "module not found". `import foo::bar;` finds `foo` the same way (a flat
-`import geometry::distanceSquared;` of a dependency's `pub` function works).
+`import geometry::distance_squared;` of a dependency's `pub` function works).
 The directory of the importing file, the current directory and `lib/usr` are
 **not** searched in a project: a `helper.tr` next to `turf.toml`, or a module in
 `lib/usr`, is not found by `import helper;`:
@@ -564,7 +564,7 @@ which applies across packages too:
   Function 'hidden' is private to module 'geometry'.
   Note: 'hidden' is declared in module 'geometry' without `pub` (line 44, col 4)
 
-  Hint: If 'hidden' is meant to be used from other modules, mark it `pub` in geometry.tr: `pub fn hidden(...)`. Otherwise, 'geometry' offers these public functions: distanceSquared, manhattan, pick, sizeOfType.
+  Hint: If 'hidden' is meant to be used from other modules, mark it `pub` in geometry.tr: `pub fn hidden(...)`. Otherwise, 'geometry' offers these public functions: distance_squared, manhattan, pick, size_of_type.
 ```
 
 So a package has two levels: private to a module, and `pub`; and `pub` in an

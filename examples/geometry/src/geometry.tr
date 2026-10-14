@@ -16,7 +16,7 @@ pub fn Point.new(x: int, y: int): void {
 
 // The squared distance keeps everything in `int`; a square root would need
 // the `math` module and buys nothing for comparing two distances.
-pub fn distanceSquared(a: Point, b: Point): int {
+pub fn distance_squared(a: Point, b: Point): int {
     return vecmath::square(a.x - b.x) + vecmath::square(a.y - b.y);
 }
 
@@ -29,8 +29,8 @@ pub fn manhattan(a: Point, b: Point): int {
 // with the caller's type: `pick` below can be called with a struct that only
 // the calling package knows about, which no separately compiled library
 // could support.
-pub fn<T> pick(useFirst: bool, first: T, second: T): T {
-    if useFirst {
+pub fn<T> pick(use_first: bool, first: T, second: T): T {
+    if use_first {
         return first;
     }
     return second;
@@ -38,6 +38,6 @@ pub fn<T> pick(useFirst: bool, first: T, second: T): T {
 
 // The size in bytes of whatever type the caller passes. It is different for
 // each caller's type because each call gets its own monomorphized copy.
-pub fn<T> sizeOfType(sample: T): int {
+pub fn<T> size_of_type(sample: T): int {
     return sizeof(T);
 }
