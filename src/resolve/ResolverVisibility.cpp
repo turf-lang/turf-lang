@@ -128,9 +128,15 @@ void collectMentionedTypes(const TurfType *T, std::vector<std::string> &Out) {
 void Resolver::checkNoPrivateInPublic(
     SourceLocation Loc, const std::string &ItemKind, const std::string &ItemName,
     const std::vector<const TurfType *> &Types) const {
+  // The entry file has no module name: it is checked only when it is itself a
+  // module (setEntryModuleFile()), and its own types' identities are bare, so
+  // "declared in this module" below still compares equal.
   const std::string Module = currentModuleName();
-  if (Module.empty() || FunctionNestingDepth_ > 0 || SuppressUnqualifiedVisibilityCheck_)
+  if ((Module.empty() && EntryModuleFile_.empty()) || FunctionNestingDepth_ > 0 ||
+      SuppressUnqualifiedVisibilityCheck_)
     return;
+  const std::string Shown =
+      Module.empty() ? llvm::sys::path::stem(EntryModuleFile_).str() : Module;
   std::vector<std::string> Mentioned;
   for (const auto *T : Types)
     collectMentionedTypes(T, Mentioned);
@@ -140,6 +146,8 @@ void Resolver::checkNoPrivateInPublic(
   // another module of the same package is from an internal module.
   const PackageInfo *RootOf = nullptr;
   auto FileOf = [&](const std::string &M) -> const std::string * {
+    if (M.empty())
+      return &EntryModuleFile_;
     auto It = ModuleFiles_.find(M);
     return It == ModuleFiles_.end() ? nullptr : &It->second;
   };
@@ -186,7 +194,7 @@ void Resolver::checkNoPrivateInPublic(
       Keyword = Info->Keyword;
     }
     PrivateInPublicError(Loc, ItemKind, ItemName, TypeIdentity::bareName(Id), Keyword,
-                         Module, DeclLoc)
+                         Shown, DeclLoc)
         .raise();
     return; // one diagnostic per item is enough
   }

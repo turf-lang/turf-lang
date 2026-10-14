@@ -332,6 +332,10 @@ run leak_lib --check --package-graph gll.json leak/src/main.tr
 expect_rc "a root module's pub fn returning an internal type" leak_lib 1
 expect_out "a root module's pub fn returning an internal type" leak_lib "[E089"
 expect_out "a root module's pub fn returning an internal type" leak_lib "Public function 'get' of package 'leak' exposes 'Thing', a type of its internal module 'inner'."
+# The root module checked on its own, as `turf check` and editors do.
+run leak_module --check --module --package-graph gll.json leak/src/leak.tr
+expect_rc "the same, checking the root module with --module" leak_module 1
+expect_out "the same, checking the root module with --module" leak_module "exposes 'Thing', a type of its internal module 'inner'"
 run leak_dep --check --package-graph gla.json leakapp/src/main.tr
 expect_rc "the same, with the library as a dependency" leak_dep 1
 expect_out "the same, with the library as a dependency" leak_dep "[E089"

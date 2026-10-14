@@ -2269,6 +2269,10 @@ static int runCompilerMain(int argc, char **argv) {
   // If resolution fails the process aborts here — Codegen must never run on
   // an unresolved AST.
   Resolver R;
+  // `--check --module`: the entry file is a module some other file imports, so
+  // its `pub` signatures are a public surface (E089) like any imported module's.
+  if (opts.Check && opts.CheckAsModule)
+    R.setEntryModuleFile(opts.InputFile);
   {
     bool ResolverClean = true;
     g_recoverActive = true;

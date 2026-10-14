@@ -222,6 +222,11 @@ public:
    * declaration, not just the one that caused it, unlike a Pass 2 failure,
    * which genuinely doesn't affect other declarations' correctness.
    */
+  /// The entry file is checked as a module (`turfc --check --module`), not as
+  /// a program: its `pub` signatures get checkNoPrivateInPublic() like an
+  /// imported module's. @p Path is the entry file.
+  void setEntryModuleFile(const std::string &Path) { EntryModuleFile_ = Path; }
+
   void resolveAll(const std::vector<std::unique_ptr<ExprAST>> &Nodes,
                   bool RecoverPerDeclaration = false);
 
@@ -448,6 +453,8 @@ private:
   // ResolvedPath), recorded by Pass 1a. checkNoPrivateInPublic() reads it to
   // tell a package's root module from its internal modules.
   std::unordered_map<std::string, std::string> ModuleFiles_;
+  // Set by setEntryModuleFile(); empty when the entry file is a program.
+  std::string EntryModuleFile_;
 
   // ── Internal helpers ───────────────────────────────────────────────────────
 
@@ -609,7 +616,8 @@ private:
   /// module is a package's root module, the only one importable from outside
   /// it -- a type declared in one of that package's internal modules, which
   /// no other package can name (E091). Called for each `pub`
-  /// function signature and `pub` field. A no-op in the main file (a
+  /// function signature and `pub` field. A no-op in the main file unless it is
+  /// checked as a module (setEntryModuleFile(); otherwise a
   /// single-file program has no importer), inside a function body, and while
   /// re-resolving a monomorphized clone (its substituted types are the call
   /// site's, not something the declaration wrote).
