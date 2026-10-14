@@ -127,7 +127,7 @@ Other commands you will use: `turf check` (report every diagnostic, write nothin
 
 A single file needs no project: `turf run hello.tr`, or `turf hello.tr -o hello` and then `./hello`.
 
-[`examples/`](examples/README.md) holds a library and a program that depends on it, ready to run. [`showcase/`](showcase/) has larger programs: an HTTP server and client talking over a real socket, a key-value store, a text-analysis tool. The project layout, the manifest, dependencies and the lock file are in [`docs/reference/projects_and_packages.md`](docs/reference/projects_and_packages.md).
+[`examples/`](examples/README.md) holds a library and a program that depends on it, ready to run. [`showcase/`](showcase/) has larger programs: an HTTP server and client talking over a real socket, a key-value store, a text-analysis tool. The project layout, the manifest, dependencies and the lock file are in [`docs/reference/projects_and_packages.md`](docs/reference/projects_and_packages.md). For walkthroughs of working on a project, writing a library and testing it, see the [guides](docs/guides/README.md).
 
 ## Language tour
 

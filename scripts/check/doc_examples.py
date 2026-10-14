@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """doc_examples.py -- REL-004 / REL-006: the reference docs as conformance tests.
 
-Every ```turflang block in docs/reference/**/*.md is compiled with the real
-compiler. The reference is the user-facing statement of the language, so an
+Every ```turflang block in docs/reference/**/*.md and docs/guides/**/*.md is
+compiled with the real compiler. The reference is the user-facing statement of the language, so an
 example that no longer compiles is a doc that has drifted from it (the
 2026-08-21 rewrite was done against 1.0 and has not kept up: for one, it still
 says there is no type inference).
@@ -52,6 +52,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 DOCS = REPO / "docs" / "reference"
+GUIDES = REPO / "docs" / "guides"
 REGISTER = DOCS / "DOC_EXAMPLES_GAPS.txt"
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 FENCE = re.compile(r"^(?P<marker><!--\s*doc-example:\s*(?P<kind>fails|skip)\s*(?P<arg>[^>]*?)\s*-->\s*\n)?```turflang[ \t]*\n(?P<body>.*?)^```[ \t]*$",
@@ -93,7 +94,8 @@ class Block:
 
 def extract() -> list[Block]:
     blocks = []
-    for md in sorted(DOCS.rglob("*.md")):
+    pages = sorted(DOCS.rglob("*.md")) + (sorted(GUIDES.rglob("*.md")) if GUIDES.is_dir() else [])
+    for md in pages:
         text = md.read_text()
         for n, m in enumerate(FENCE.finditer(text), 1):
             blocks.append(Block(md, n, m["body"], m["kind"], (m["arg"] or "").strip()))

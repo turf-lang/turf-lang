@@ -2,7 +2,7 @@
 
 The reference for TurfLang 2.0: what you can write and what it means. Every TurfLang example in these pages is compiled by CI (`scripts/check/doc_examples.py`): an example either compiles, or is marked with the error code it must be rejected with.
 
-Coming from 1.x? Start with the [migration guide](../MIGRATING_TO_2.md). For how the compiler implements the language, see [`docs/architecture/`](../architecture/); each page here links to its counterpart where one exists.
+Coming from 1.x? Start with the [migration guide](../MIGRATING_TO_2.md). For step-by-step walkthroughs (a project, a library, a test suite) see the [guides](../guides/README.md). For how the compiler implements the language, see [`docs/architecture/`](../architecture/); each page here links to its counterpart where one exists.
 
 ## Suggested reading order
 
