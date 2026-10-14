@@ -1185,7 +1185,7 @@ static void explainMissingCompiler(const std::string &Compiler,
                  "(see 'turfc --version'), so turfc links with the system "
                  "toolchain.\n  Install a C compiler, or use a release "
                  "archive, which links without one.\n";
-  std::cerr << "  See docs/reference/ffi_and_unsafe.md, \"Linking external "
+  std::cerr << "  See docs/reference/ffi_and_unsafe.md, section 2, \"Linking C "
                "libraries\".\n";
 }
 
@@ -1200,7 +1200,7 @@ static void explainExternalLinkFailure(const std::vector<std::string> &Ext) {
                "install that library's development files (the import library "
                "or .so/.dylib/.a, not only the runtime DLL) and, if they are "
                "not in a default location, add the directory to LIBRARY_PATH.\n"
-            << "  See docs/reference/ffi_and_unsafe.md, \"Linking external "
+            << "  See docs/reference/ffi_and_unsafe.md, section 2, \"Linking C "
                "libraries\".\n";
 }
 
