@@ -36,7 +36,8 @@ Related docs:
 returns); cast it to a concrete `T*` with `to` before using it as anything
 struct-shaped. `T*`, `&T` and `&?T` all know their pointee and all support field
 and method access with no explicit dereference: the language has no `*p`
-operator at all. What separates them is a compile-time promise (or its absence):
+operator at all. The value itself is copied out of a `&T` (or a narrowed `&?T`,
+or `self`) with `to`: `r to T`. What separates them is a compile-time promise (or its absence):
 a `&T` is never null; a `&?T` may be null and the compiler checks every use; a
 `T*` may be null and nothing checks it. All four lower to the same LLVM pointer
 value (2.6), so the distinction costs nothing at run time.

@@ -1,5 +1,5 @@
-// `return self;` from a method declared to return the struct by value
-// copies it out; narrowing the pointer-return rule to structs keeps this.
+// `return self to P;` from a method declared to return the struct by value
+// copies it out: the copy is spelled with `to`, like every conversion.
 import test;
 
 struct P {
@@ -7,7 +7,7 @@ struct P {
 }
 
 fn P.snapshot(): P {
-    return self;
+    return self to P;
 }
 
 fn main(): int {

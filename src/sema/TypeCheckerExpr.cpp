@@ -859,7 +859,7 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
                   codeForMismatch(RhsTy.get(), nullptr, ErrCode::TypeMismatch),
                   "Cannot assign value of type '" + RhsTy->getName() +
                       "' to variable of type '" + LhsTy->getName() + "'.",
-                  Related, hintForMismatch(RhsTy.get(), nullptr, ""), "", Hints);
+                  Related, hintForMismatch(RhsTy.get(), nullptr, "", LhsTy.get()), "", Hints);
     } else {
       // SEM-002 -- see visitVarDecl()'s identical comment (TypeCheckerDecl.cpp).
       checkLiteralRepresentable(Node.getRHS(), LhsTy.get(), Node.getLoc());
@@ -1400,19 +1400,27 @@ void TypeChecker::visitCast(CastExprAST &Node) {
   // cast target is never pointer-shaped either way, so this doesn't matter
   // for correctness, only for using the accurate as-written type.
   TurfTypePtr OperandTy = Node.getOperand() ? getType(Node.getOperand()) : nullptr;
-  if (!checkUnsafeGate(Node.getDestTypePtr().get(), Node.getLoc(), &Node))
+  // `r to T` with `r: &T` copies the value out of the reference: explicit,
+  // like every conversion, and the one way a value leaves a reference.
+  const bool CopyOut = OperandTy && isCopyOut(OperandTy.get(), DestTy.get());
+  // The method receiver is typed `S*` but is never null and never a forged
+  // address, so `self to S` needs no `unsafe` (a program cannot declare a
+  // variable named self; see visitMethodCall()).
+  const auto *OperandVar = dynamic_cast<const VariableExprAST *>(Node.getOperand());
+  const bool SelfCopy = CopyOut && OperandVar && OperandVar->getName() == "self";
+  if (!checkUnsafeGate(Node.getDestTypePtr().get(), Node.getLoc(), &Node) && !SelfCopy)
     checkUnsafeGate(OperandTy.get(), Node.getLoc(), &Node);
 
   // `(h.next to &Node)`: NullabilityPass proves `&?T -> &T` only for a
   // variable operand, and used to let every other operand through unchecked
   // (a null became a `&T`). Nothing narrows a non-variable, so it is E082.
   if (OperandTy && OperandTy->isNullableReference() && DestTy &&
-      DestTy->isReference() && !DestTy->isNullableReference() &&
+      ((DestTy->isReference() && !DestTy->isNullableReference()) || CopyOut) &&
       !dynamic_cast<const VariableExprAST *>(Node.getOperand())) {
 #ifndef TYPECHECKER_NO_ERRORS
     UnnarrowedNullableCastError(Node.getLoc(),
                                 UnnarrowedNullableCastError::NotAVariable{},
-                                OperandTy->getName())
+                                OperandTy->getName(), CopyOut)
         .raise();
 #else
     throw std::runtime_error("UnnarrowedNullableCastError");
@@ -1500,7 +1508,7 @@ void TypeChecker::visitCast(CastExprAST &Node) {
                           DstName == "ptr" || DstName == "string";
 
       bool Legal =
-          SrcName == DstName ||
+          CopyOut || SrcName == DstName ||
           (SrcName == "int" && DstName == "double") ||
           (SrcName == "double" && DstName == "int") ||
           (SrcName == "int32" && DstName == "int") ||

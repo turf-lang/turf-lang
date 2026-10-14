@@ -2180,16 +2180,9 @@ Value *CastToType(Value *Val, const TurfType *DestType,
       return Val; // already pointer
     }
 
-    // Implicit dereference: a pointer-to-struct value cast to the bare
-    // struct type BY VALUE -- e.g. `return self;` from a struct method
-    // declared to return the struct type itself rather than a pointer.
-    // `self` is always typed as `StructName*` (see ParseFuncDef's implicit
-    // self-parameter construction), and there is no explicit dereference
-    // operator in this language, so this is the only way
-    // `fn Node.get(): Node { return self; }` can ever be satisfied.
-    // TypeChecker::visitReturn() allows this exact pattern through its
-    // return-type check (a pointer whose pointee resolves to the declared
-    // return struct type); this is where the actual load happens.
+    // Copying a struct out of a reference: `r to S` with `r: &S` (or
+    // `self to S`), the conversion TypeChecker::visitCast() admits and
+    // CastExprAST::codegen() hands here. A load through the pointer.
     {
       const TurfType *ResolvedDest = DestType;
       if (const auto *NT = dynamic_cast<const NamedType *>(DestType)) {

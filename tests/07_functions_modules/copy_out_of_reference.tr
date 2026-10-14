@@ -1,0 +1,54 @@
+// `r to T` copies the value out of a reference `r: &T`. It is the one way a
+// value leaves a reference, in every position: an initializer, an
+// assignment, an argument, a return. The copy is independent of the
+// original. A `&?T` is copied out only where it is known not to be null.
+
+import test;
+
+struct P { x: int }
+struct Node { v: int, next: &?Node }
+
+fn P.get(): P { return self to P; }
+fn ret(p: &P): P { return p to P; }
+fn take(q: P): int { return q.x; }
+fn deref_int(r: &int): int { return r to int; }
+
+fn first_val(n: &?Node): int {
+    if n != null {
+        immut c: Node = n to Node;
+        return c.v;
+    }
+    return -1;
+}
+
+fn main(): int {
+    mut a: P = P::default();
+    a.x = 1;
+    immut r: &P = &a;
+
+    mut b: P = r to P;
+    b.x = 2;
+    test::assert(a.x == 1 && b.x == 2, "an initializer copies");
+
+    mut c: P = P::default();
+    test::assert(c.x == 0, "default");
+    c = r to P;
+    test::assert(c.x == 1, "an assignment copies");
+
+    test::assert(take(r to P) == 1, "an argument copies");
+
+    mut d: P = ret(r);
+    d.x = 9;
+    test::assert(a.x == 1 && d.x == 9, "a return copies");
+
+    test::assert(a.get().x == 1, "self to P");
+
+    mut n: int = 5;
+    test::assert(deref_int(&n) == 5, "&int to int");
+
+    mut h: Node = Node::default();
+    h.v = 7;
+    test::assert(first_val(heap(h)) == 7, "a narrowed &?Node");
+    test::assert(first_val(null) == -1, "a null &?Node is never read");
+    return 0;
+}

@@ -198,7 +198,41 @@ fn force(n: &?Node): &Node {
 }
 ```
 
-A `&T` converts to a `&?T` by itself. The list example in
+A `&T` converts to a `&?T` by itself. A reference never turns into the value
+it refers to by itself: `r to T` copies the value out, and the copy is
+independent of the original. That holds wherever the value goes, an
+initializer, an assignment, an argument or a `return`, and for a method's
+`self` too (`return self to Point;`). A `&?T` is copied out only where the
+null test has been seen, like `to &T`:
+
+```turflang
+struct Point { x: int, y: int }
+
+fn Point.snapshot(): Point {
+    return self to Point;         // a copy of the receiver
+}
+
+fn moved(r: &Point): Point {
+    mut p: Point = r to Point;    // the caller's Point is untouched
+    p.x += 1;
+    return p;
+}
+
+fn main(): int {
+    mut a: Point = Point::default();
+    immut b: Point = moved(&a);
+    printline(a.x);               // 0
+    printline(b.x);               // 1
+    printline(a.snapshot().y);    // 0
+    return 0;
+}
+```
+
+Writing the reference where the value belongs (`return r;`, `mut p: Point =
+r;`, or passing `r` to a `Point` parameter) is a type error whose hint names
+the copy.
+
+The list example in
 [section 2](#heapexpr-a-value-on-the-gc-heap) is the usual pattern: `&?Node`
 for the link that may be absent, a loop that tests it.
 

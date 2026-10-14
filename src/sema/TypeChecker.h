@@ -392,8 +392,13 @@ private:
   /// line the model is shown. Call it at a raise site with the expression the
   /// message is about, before reportError(). Bounded (6 facts per diagnostic).
   void addIdentifierTypes(const ExprAST *E, SLM::DiagnosticHints &Hints);
+  /// The hint for a value of type @p A where another type is needed. @p Dest,
+  /// when given, is that type: a reference to a @p Dest (`&P` where a `P`
+  /// belongs) gets the explicit copy, `x to P`.
   static std::string hintForMismatch(const TurfType *A, const TurfType *B,
-                                     const std::string &Default);
+                                     const std::string &Default,
+                                     const TurfType *Dest = nullptr);
+
 
   // ── `unsafe { }` gate ───────────────────────────────────────────────────
 
@@ -516,6 +521,9 @@ public:
   bool targetWritesThroughSlice(const ResolverFunctionSymbol &Target,
                                 size_t ParamIdx);
   bool mutatesSelfTransitively(const FuncDefExprAST *Decl) const;
+  /// True when a value of type @p Src is a reference (or `self`'s pointer) to
+  /// a @p Dest, so `x to Dest` copies the value out of it.
+  static bool isCopyOut(const TurfType *Src, const TurfType *Dest);
 
 private:
   struct PendingSliceWrite {

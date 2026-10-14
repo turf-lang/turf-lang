@@ -496,7 +496,7 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
         // the code window (or by `guess`) has its type on no line the model sees.
         SLM::DiagnosticHints Hints;
         addIdentifierTypes(Node.getInitializer(), Hints);
-        std::string Hint = hintForMismatch(InitTy.get(), nullptr, "");
+        std::string Hint = hintForMismatch(InitTy.get(), nullptr, "", DeclTy.get());
         // `mut a: &N[2] = [r1, r2];`: `&` takes the whole type after it, so
         // the declaration is a reference to an array, and the literal is an
         // array of references (turf-fuzz findings/wrong-message/

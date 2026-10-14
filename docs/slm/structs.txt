@@ -69,6 +69,14 @@ The implicit receiver is `self` (a pointer to the instance):
     }
     c.increment().increment();   // chained calls both mutate the same c
 
+  To return a COPY of the receiver instead, copy it out with `to`: `self` is
+  the receiver's address, and a value leaves a reference only through `to`
+  (a bare `return self;` here is E064):
+    fn Counter.snapshot(): Counter {
+        return self to Counter;
+    }
+  The same goes for any `r: &T`: `r to T` copies the value out.
+
 GENERICS: `struct Box<T> { val: T }`, instantiated as `Box<int>`,
 `Box<string>`, etc. A generic FUNCTION works the same way:
     fn<T> identity(x: T): T {

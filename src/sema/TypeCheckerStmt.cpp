@@ -546,42 +546,6 @@ void TypeChecker::visitReturn(ReturnExprAST &Node) {
                      untypedLiteralAcquiresInt32(Node.getVal(), Declared);
       }
 
-      // Special-case: a pointer-to-struct value whose pointee is exactly
-      // the declared (bare, by-value) struct return type -- most commonly
-      // `return self;` inside a struct method declared to return the
-      // struct type itself rather than a pointer. `self` is always typed
-      // as `StructName*` (see ParseFuncDef's implicit self-parameter
-      // construction), and this language has no explicit dereference
-      // operator, so without this, `fn Node.get(): Node { return self; }`
-      // could never be satisfied at all -- only `fn Node.get(): Node* {...}`
-      // worked, which is fine for method chaining but not for a method that
-      // genuinely wants to hand back a copy. Compared by name (rather than
-      // requiring both sides to already be resolved TurfStructType
-      // instances) since ParseType() always produces a bare NamedType for a
-      // struct name, never a TurfStructType, and Declared/the pointee here
-      // commonly still are NamedType at this point. Codegen's CastToType()
-      // performs the actual load (see its "Implicit dereference" comment).
-      //
-      // Only a struct is copied out this way: Codegen's load handles a struct
-      // pointee, and `return p;` with `p: &int` from an `int` function is a
-      // reference where a value belongs. A bare type parameter is checked
-      // again in each clone, where it is concrete.
-      if (!Compatible) {
-        if (const auto *PT = dynamic_cast<const TurfPointerType *>(RetTy.get())) {
-          const TurfType *DeclaredBase = Declared;
-          TurfTypePtr Resolved;
-          if (const auto *NT = dynamic_cast<const NamedType *>(Declared)) {
-            if (GlobalSymbolTable)
-              Resolved = GlobalSymbolTable->LookupType(NT->getName());
-            if (Resolved)
-              DeclaredBase = Resolved.get();
-          }
-          if (PT->getPointee() && PT->getPointee()->getName() == Declared->getName() &&
-              (DeclaredBase->isStruct() || DeclaredBase->isGenericParam()))
-            Compatible = true;
-        }
-      }
-
       if (!Compatible) {
         // A fallible value returned where it cannot be passed through is the
         // commonest way to reach this, and the plain message gives no way out
@@ -619,7 +583,7 @@ void TypeChecker::visitReturn(ReturnExprAST &Node) {
                       "Return type mismatch: function declares '" +
                           Declared->getName() + "' but returns '" +
                           RetTy->getName() + "'.",
-                      {}, hintForMismatch(RetTy.get(), nullptr, ""), "", Hints);
+                      {}, hintForMismatch(RetTy.get(), nullptr, "", Declared), "", Hints);
         }
       } else {
         // SEM-002 -- see visitVarDecl()'s identical comment

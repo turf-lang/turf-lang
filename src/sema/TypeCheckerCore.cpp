@@ -220,12 +220,27 @@ void TypeChecker::addIdentifierTypes(const ExprAST *E,
 }
 
 std::string TypeChecker::hintForMismatch(const TurfType *A, const TurfType *B,
-                                         const std::string &Default) {
+                                         const std::string &Default,
+                                         const TurfType *Dest) {
   if ((A && A->isVoid()) || (B && B->isVoid()))
     return "A function declared ': void' produces no value, so there is "
            "nothing to use here. Call it as a statement on its own, or give "
            "the function a return type and a `return` that gives the value.";
+  if (isCopyOut(A, Dest))
+    return "'" + A->getName() + "' refers to a '" + Dest->getName() +
+           "'; it is not one. Copy the value out with `to`: `x to " +
+           Dest->getName() + "` makes an independent copy.";
   return Default;
+}
+
+bool TypeChecker::isCopyOut(const TurfType *Src, const TurfType *Dest) {
+  const auto *PT = dynamic_cast<const TurfPointerType *>(Src);
+  if (!PT || !Dest || !PT->getPointee() || dynamic_cast<const TurfPointerType *>(Dest))
+    return false;
+  // Compared by name: a struct is still a bare NamedType on one side or the
+  // other at this point (see visitCast()).
+  return PT->getPointee()->getName() == Dest->getName() && !Dest->isVoid() &&
+         Dest->getName() != "string";
 }
 
 void TypeChecker::reportError(SourceLocation Loc, const char *Code,

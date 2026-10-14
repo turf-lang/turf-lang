@@ -481,6 +481,31 @@ bool TypeChecker::matchOperatorOverload(
 }
 
 
+namespace {
+/// The hint for "no overload matches" when an argument is a reference to the
+/// value a candidate's parameter takes (`&P` passed for a `P`): name the
+/// explicit copy. Parameters are matched from the end, so a method's leading
+/// `self` does not shift them. "" when no argument is such a reference.
+template <typename CandPtr>
+std::string copyOutArgHint(const std::vector<CandPtr> &Cands,
+                           const std::vector<TurfTypePtr> &ArgTypes) {
+  for (const auto &C : Cands) {
+    if (!C || C->Params.size() < ArgTypes.size())
+      continue;
+    const size_t Off = C->Params.size() - ArgTypes.size();
+    for (size_t I = 0; I < ArgTypes.size(); ++I) {
+      const TurfType *Param = C->Params[I + Off].Type.get();
+      if (ArgTypes[I] && TypeChecker::isCopyOut(ArgTypes[I].get(), Param))
+        return "Argument " + std::to_string(I + 1) + " is a '" + ArgTypes[I]->getName() +
+               "', which refers to the '" + Param->getName() +
+               "' the parameter takes. Copy the value out with `to`: `x to " +
+               Param->getName() + "` passes an independent copy.";
+    }
+  }
+  return "";
+}
+} // namespace
+
 void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
   // 1. Visit callee expression so it gets a type annotation too.
   if (Node.getCallee())
@@ -886,7 +911,7 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
                   AnyNullArg
                       ? "'null' is only valid for pointer-typed parameters -- "
                         "none of the overloads above take a pointer here."
-                      : "",
+                      : copyOutArgHint(ArityMatches, ArgTypes),
                   "No matching overload!", Hints);
       setType(&Node, nullptr);
       return;
@@ -1421,7 +1446,7 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
       reportError(Node.getLoc(), ErrCode::ModuleArityOrType,
                   "No overload of '" + ModuleName + "::" + MethodName +
                       "' matches argument types (" + ArgTypeStr + ").",
-                  Related, "", "No matching overload!");
+                  Related, copyOutArgHint(ArityMatches, ArgTypes), "No matching overload!");
       setType(&Node, nullptr);
       return;
     }
@@ -1798,7 +1823,7 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
           reportError(Node.getLoc(), ErrCode::ArgumentType,
                       "No overload of '" + StructName + "." + MethodName +
                           "' matches argument types (" + ArgTypeStr + ").",
-                      Related, "", "No matching overload!");
+                      Related, copyOutArgHint(ArityMatches, ArgTypes), "No matching overload!");
           setType(&Node, nullptr);
           return;
         }

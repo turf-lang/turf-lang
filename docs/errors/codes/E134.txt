@@ -9,6 +9,7 @@ These are fine:
     mut s: string = 42 to string;       // a number to text
     mut c: char = 65 to char;           // a character code to a character
     mut code: int = 'a' to int;         // and back
+    mut p: Point = r to Point;          // copies the Point a `&Point` refers to
 
 These are not:
 

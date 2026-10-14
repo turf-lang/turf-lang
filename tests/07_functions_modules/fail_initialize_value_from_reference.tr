@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E066
+// EXPECT-DIAG: Copy the value out with `to`: `x to P`
+struct P { x: int }
+
+fn f(p: &P): int {
+    immut q: P = p;
+    return q.x;
+}
+
+fn main(): int { return 0; }

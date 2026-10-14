@@ -1031,12 +1031,17 @@ public:
   void visitCast(CastExprAST &Node) override {
     checkOnly(Node.getOperand(), OnTrue, Tracked, DoReport);
     const TurfType *Dest = Node.getDestType();
-    if (Dest && Dest->isReference() && !Dest->isNullableReference()) {
+    // `r to &T` makes a non-null reference; `r to T` (any other destination
+    // of a tracked `&?T`) copies the value out. Both read through r.
+    const bool ToValue = Dest && !dynamic_cast<const TurfPointerType *>(Dest) &&
+                         Dest->getName() != "ptr" && Dest->getName() != "string";
+    if (Dest && ((Dest->isReference() && !Dest->isNullableReference()) || ToValue)) {
       if (const auto *BaseVar =
               dynamic_cast<const VariableExprAST *>(Node.getOperand())) {
         const VariableSymbol *Sym = BaseVar->getResolvedSymbol();
         if (Sym && Tracked.count(Sym) && !OnTrue.count(Sym) && DoReport)
-          UnnarrowedNullableCastError(Node.getLoc(), BaseVar->getName()).raise();
+          UnnarrowedNullableCastError(Node.getLoc(), BaseVar->getName(), ToValue)
+              .raise();
       }
     }
   }

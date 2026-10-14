@@ -139,15 +139,21 @@ public:
   /// Selects the constructor for an operand that is not a variable.
   struct NotAVariable {};
 
-  UnnarrowedNullableCastError(SourceLocation Loc, const std::string &Name)
+  /// @p CopyOut: the cast copies the value out (`r to T`) rather than making
+  /// a `&T`; the message says which.
+  UnnarrowedNullableCastError(SourceLocation Loc, const std::string &Name,
+                              bool CopyOut = false)
       : TurfError(Loc,
-                  Colors::BRIGHT_RED + "Cannot cast '" + Colors::CYAN + Name +
-                      Colors::BRIGHT_RED +
-                      "' to a non-null reference here -- it might be 'null'."
-                      + Colors::RESET,
+                  Colors::BRIGHT_RED +
+                      (CopyOut ? "Cannot copy the value out of '" + Colors::CYAN + Name +
+                                     Colors::BRIGHT_RED + "' here"
+                               : "Cannot cast '" + Colors::CYAN + Name +
+                                     Colors::BRIGHT_RED + "' to a non-null reference here") +
+                      " -- it might be 'null'." + Colors::RESET,
                   "Narrow it first with a direct null check, e.g. 'if (" +
                       Name + " != null) { ... " + Name +
-                      " to &T ... }', so the cast only runs where it's "
+                      (CopyOut ? " to T" : " to &T") +
+                      " ... }', so the cast only runs where it's "
                       "known to be safe.") {
     Category_ = SLM::ErrorCategory::TYPE_MISMATCH;
   }
@@ -155,15 +161,18 @@ public:
   /// `(h.next to &Node)`: the operand is not a variable, so nothing can have
   /// narrowed it (see PossibleNullDereferenceError's second constructor).
   UnnarrowedNullableCastError(SourceLocation Loc, NotAVariable,
-                              const std::string &TypeName)
+                              const std::string &TypeName, bool CopyOut = false)
       : TurfError(Loc,
-                  Colors::BRIGHT_RED + "Cannot cast this '" + Colors::CYAN +
-                      TypeName + Colors::BRIGHT_RED +
-                      "' value to a non-null reference -- it might be 'null'."
-                      + Colors::RESET,
+                  Colors::BRIGHT_RED +
+                      (CopyOut ? "Cannot copy the value out of this '" + Colors::CYAN +
+                                     TypeName + Colors::BRIGHT_RED + "' value"
+                               : "Cannot cast this '" + Colors::CYAN + TypeName +
+                                     Colors::BRIGHT_RED + "' value to a non-null reference") +
+                      " -- it might be 'null'." + Colors::RESET,
                   "A null check only works on a variable. Store the value in "
                   "one, check it, and cast inside the check: 'mut r: " +
-                      TypeName + " = ...; if (r != null) { ... r to &T ... }'.") {
+                      TypeName + " = ...; if (r != null) { ... r " +
+                      (CopyOut ? "to T" : "to &T") + " ... }'.") {
     Category_ = SLM::ErrorCategory::TYPE_MISMATCH;
   }
 };

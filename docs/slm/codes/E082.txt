@@ -3,7 +3,8 @@ TURF E082 -- UNNARROWED NULLABLE CAST:
 CAUSE:
   `x to &T` converts a maybe-null `&?T` into a definitely-non-null `&T`. That
   is a promise the value is not null, and the compiler accepts it only where
-  it can see the promise kept (inside a `!= null` check).
+  it can see the promise kept (inside a `!= null` check). `x to T` (copying
+  the value out of the `&?T`) reads through it and needs the same check.
 
 INCORRECT:
     struct Box { val: int }

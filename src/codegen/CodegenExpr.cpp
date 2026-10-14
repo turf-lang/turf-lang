@@ -712,6 +712,18 @@ Value *CastExprAST::codegen() {
   }
   const std::string DstName = ResolvedDest->getName();
 
+  // `r to T` with `r: &T` (or `self to S`): copy the value out of the
+  // reference. TypeChecker::visitCast() admitted exactly this shape.
+  if (const auto *RefTy = dynamic_cast<const TurfPointerType *>(ExprTy)) {
+    if (RefTy->getPointee() && !dynamic_cast<const TurfPointerType *>(ResolvedDest.get()) &&
+        DstName != "ptr" && DstName != "string" &&
+        RefTy->getPointee()->getName() == DestType->getName()) {
+      if (ResolvedDest->isStruct() || dynamic_cast<const GenericType *>(DestType.get()))
+        return CastToType(Val, DestType.get(), "copyout", Loc);
+      return Builder->CreateLoad(getLLVMType(ResolvedDest.get()), Val, "copyout");
+    }
+  }
+
   // Identity - no-op
   if (SrcName == DstName)
     return Val;

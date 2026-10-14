@@ -1,6 +1,6 @@
 You can't turn a maybe-`null` reference into a plain one without checking
 
-`&?Box` is "a Box or nothing"; `&Box` is "definitely a Box". Converting the first into the second with `to &Box` is a promise that it isn't `null`, and Turf only accepts that promise where it can see it kept.
+`&?Box` is "a Box or nothing"; `&Box` is "definitely a Box". Converting the first into the second with `to &Box` is a promise that it isn't `null`, and Turf only accepts that promise where it can see it kept. Copying the value out with `to Box` reads through the reference, so it needs the same check.
 
     struct Box { val: int }
 

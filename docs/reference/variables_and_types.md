@@ -630,6 +630,10 @@ below the table.
 | `string` | ok | - | ok | - | - | | ok |
 | enum | ok | - | - | - | - | ok | |
 
+A reference converts to the value it refers to: `r to T` with `r: &T` (or a
+`&?T` after its null test, or a method's `self`) copies the value out
+([Memory and safety](memory_and_safety.md#3-references-t-and-t)).
+
 What each legal cast does:
 
 - **`int to int32`** keeps the low 32 bits. `4294967297 to int32` is `1`.
