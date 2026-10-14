@@ -53,6 +53,13 @@ public:
   BareIntrinsic ResolvedIntrinsic = BareIntrinsic::None;
   bool isIntrinsic(BareIntrinsic I) const { return ResolvedIntrinsic == I; }
 
+  /// The function type of a callee that is neither a name nor `Left::Right`
+  /// (`pick()("x")`, `ops[0](1)`): TypeChecker::visitFuncCall() sets it when
+  /// the call checks, and Codegen calls through the callee's value with it.
+  /// Null for every other call. clone() returns a fresh node, so this is null
+  /// in cloned trees; the TypeChecker sets it again when it checks the clone.
+  TurfTypePtr IndirectCalleeType;
+
   /// TYPE-002 (docs/development/changes/TYPE-002.md, S11b): the concrete
   /// type-parameter-name -> concrete-type map TypeChecker::visitFuncCall()
   /// builds via collectGenericSubstitution() to resolve this call's return

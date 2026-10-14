@@ -256,7 +256,8 @@ calling a function value with the wrong number of arguments is `E044`.
 
 An array of function values puts the function type in parentheses, since in
 `fn(int): int[2]` the `[2]` belongs to the return type. An element is called
-through a variable (`ops[1](3, 4)` is `E126`):
+directly, and so is any other expression of function type, such as a call
+that returns a function (`choose(true)(3, 4)`):
 
 ```turflang
 fn add(a: int, b: int): int { return a + b; }
@@ -267,8 +268,7 @@ fn main(): int {
     for f in ops {
         printline(f(3, 4));              // 7, then 12
     }
-    immut second = ops[1];
-    printline(second(2, 5));             // 10
+    printline(ops[1](2, 5));             // 10
     return 0;
 }
 ```

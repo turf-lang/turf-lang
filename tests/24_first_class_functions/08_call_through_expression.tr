@@ -1,0 +1,41 @@
+// A function value is called wherever it comes from, not only through a
+// variable: a call's result, an array element, a method's result, an
+// argument to another call.
+
+import test;
+
+fn inc(x: int): int { return x + 1; }
+fn dbl(x: int): int { return x * 2; }
+fn shout(s: string): string { return s + "!"; }
+
+fn pick(first: bool): fn(int): int {
+    if first { return inc; }
+    return dbl;
+}
+
+fn speaker(): fn(string): string { return shout; }
+
+fn nothing(): void {}
+fn nothing_maker(): fn(): void { return nothing; }
+
+struct Box { f: fn(int): int }
+
+fn Box.new(f: fn(int): int): void { self.f = f; }
+fn Box.get(): fn(int): int { return self.f; }
+
+fn main(): int {
+    test::assert(pick(true)(3) == 4, "a call's result");
+    test::assert(pick(false)(3) == 6, "a call's result, the other branch");
+    test::assert(speaker()("hi") == "hi!", "a string-typed function value");
+
+    mut ops: (fn(int): int)[2] = [inc, dbl];
+    test::assert(ops[1](5) == 10, "an array element");
+
+    mut b: Box = Box::new(dbl);
+    test::assert(b.get()(7) == 14, "a method's result");
+
+    test::assert(pick(true)(pick(false)(4)) == 9, "nested in an argument");
+
+    nothing_maker()();
+    return 0;
+}

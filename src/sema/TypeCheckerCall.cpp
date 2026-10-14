@@ -1003,16 +1003,26 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
   // other variable read -- so step 1 above (visiting the callee) already
   // gave it the right type via the ordinary visitVariable path, and that IS
   // the FuncType to check this call's arguments against.
+  //
+  // A callee that is neither a name nor `Left::Right` -- `pick()("x")`,
+  // `ops[0](1)` -- is the same call through a value: step 1 typed it, and a
+  // function type is checked here exactly as a variable's is.
+  // Node.IndirectCalleeType tells Codegen to call through the callee's value.
   {
     const auto *VE = dynamic_cast<const VariableExprAST *>(Node.getCallee());
-    if (VE && VE->getResolvedSymbol()) {
+    const bool ExprCallee = !VE && !ScopeCallee;
+    if ((VE && VE->getResolvedSymbol()) || ExprCallee) {
       TurfTypePtr CalleeTy = getType(Node.getCallee());
       if (CalleeTy && CalleeTy->isFunc()) {
+        const std::string Shown =
+            ExprCallee ? "The called function value" : "'" + CalleeName + "'";
+        const std::string ShownIn =
+            ExprCallee ? "the called function value" : "'" + CalleeName + "'";
         const auto *FT = static_cast<const FuncType *>(CalleeTy.get());
         const auto &ParamTypes = FT->getParamTypes();
         if (static_cast<int>(ParamTypes.size()) != ArgCount) {
           reportError(Node.getLoc(), ErrCode::WrongArity,
-                      "'" + CalleeName + "' expects " +
+                      Shown + " expects " +
                           std::to_string(ParamTypes.size()) + " argument" +
                           (ParamTypes.size() == 1 ? "" : "s") + ", got " +
                           std::to_string(ArgCount) + ".",
@@ -1025,46 +1035,41 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
           if (ParamTypes[i] && ArgTypes[i] &&
               !typesCompatible(ArgTypes[i].get(), ParamTypes[i].get())) {
             reportError(Node.getLoc(), ErrCode::ArgumentType,
-                        "Argument " + std::to_string(i + 1) + " to '" +
-                            CalleeName + "' expects '" +
+                        "Argument " + std::to_string(i + 1) + " to " +
+                            ShownIn + " expects '" +
                             ParamTypes[i]->getName() + "', got '" +
                             ArgTypes[i]->getName() + "'.");
             setType(&Node, nullptr);
             return;
           }
         }
+        if (ExprCallee)
+          Node.IndirectCalleeType = CalleeTy;
         setType(&Node, FT->getReturnType());
         return;
       }
       // An inferred local reaches here unchecked (the Resolver cannot know
-      // its type yet), so a `mut n = 3; n(1);` is rejected here instead.
-      if (CalleeTy)
-        reportError(Node.getLoc(), ErrCode::NotCallable,
-                    "'" + CalleeName + "' is a variable of type '" +
-                        CalleeTy->getName() + "', not a function -- it can't be called.",
-                    {}, "Drop the '(...)' if you meant to use its value.",
-                    "Not callable!");
-      setType(&Node, nullptr);
-      return;
+      // its type yet), so a `mut n = 3; n(1);` is rejected here instead. An
+      // expression that is not a function is the next block's.
+      if (!ExprCallee) {
+        if (CalleeTy)
+          reportError(Node.getLoc(), ErrCode::NotCallable,
+                      "'" + CalleeName + "' is a variable of type '" +
+                          CalleeTy->getName() + "', not a function -- it can't be called.",
+                      {}, "Drop the '(...)' if you meant to use its value.",
+                      "Not callable!");
+        setType(&Node, nullptr);
+        return;
+      }
     }
   }
 
-  // ── Call through an arbitrary expression: `5()`, `a[0]()`, `f()()` ────────
-  // Neither a name nor `Left::Right`, so Resolver::visitFuncCall() only walked
-  // the callee and nothing validated it; Codegen then hit "First-class
-  // functions are not supported yet" and the COMPILER died with an LLVM
-  // internal error. A function VALUE can only be called through a variable
-  // (the indirect-call block above), so reject both shapes here: a callee that
-  // is not a function at all, and one that is a function but is not a name.
+  // ── Call through an expression that is not a function: `5()` ───────────
+  // Neither a name nor `Left::Right`, and its type is not a function type (a
+  // function type is the indirect-call block's), so nothing can be called.
   if (!ScopeCallee && !dynamic_cast<const VariableExprAST *>(Node.getCallee())) {
     TurfTypePtr CalleeTy = getType(Node.getCallee());
-    if (CalleeTy && CalleeTy->isFunc()) {
-      reportError(Node.getLoc(), ErrCode::UnsupportedOperation,
-                  "A function value can only be called through a variable, not "
-                  "straight from an expression.",
-                  {}, "Store the value in a variable first (`mut f: " +
-                          CalleeTy->getName() + " = ...;`), then call `f(...)`.");
-    } else if (CalleeTy) {
+    if (CalleeTy) {
       reportError(Node.getLoc(), ErrCode::NotCallable,
                   "This expression has type '" + CalleeTy->getName() +
                       "', not a function -- it can't be called.",

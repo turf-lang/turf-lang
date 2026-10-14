@@ -872,8 +872,8 @@ Value *ExternFuncDeclExprAST::codegen() {
 Value *FuncCallExprAST::codegen() {
   auto *Var = dynamic_cast<VariableExprAST *>(Callee.get());
   auto *ScopeCallee = dynamic_cast<ScopeAccessExprAST *>(Callee.get());
-  if (!Var && !ScopeCallee) {
-    llvm::report_fatal_error("Internal error: First-class functions are not supported yet.");
+  if (!Var && !ScopeCallee && !IndirectCalleeType) {
+    llvm::report_fatal_error("Internal error: a call through an unchecked expression.");
     return nullptr;
   }
   // `Module::func(...)`: the Resolver already validated this and set
@@ -882,7 +882,9 @@ Value *FuncCallExprAST::codegen() {
   // matters for the malloc/realloc/free/typeof/... bare-intrinsic checks
   // below (which a qualified call can never match, since those are always
   // spelled bare) and as ResolvedCallTarget's fallback if it's ever null.
-  std::string CalleeName = Var ? Var->getName() : ScopeCallee->getRightName();
+  std::string CalleeName = Var ? Var->getName()
+                           : ScopeCallee ? ScopeCallee->getRightName()
+                                         : std::string();
 
   // Indirect call through a function-typed local variable/parameter, e.g.
   // `fn apply(f: fn(int): int, x: int): int { return f(x); }` -- Resolver
@@ -892,12 +894,16 @@ Value *FuncCallExprAST::codegen() {
   // variable read), so it's detected here purely from the callee's own
   // resolved symbol type, before the mangled-name lookup path below (which
   // has nothing to look up -- there is no single LLVM function this call
-  // resolves to statically).
-  if (Var && Var->getResolvedSymbol() && Var->getResolvedSymbol()->Type &&
-      Var->getResolvedSymbol()->Type->isFunc()) {
-    const auto *FT =
-        static_cast<const FuncType *>(Var->getResolvedSymbol()->Type.get());
-    Value *CalleeVal = Var->codegen();
+  // resolves to statically). A callee expression of function type
+  // (`pick()("x")`) is the same call; the TypeChecker recorded its type in
+  // IndirectCalleeType.
+  const TurfType *IndirectTy = IndirectCalleeType.get();
+  if (!IndirectTy && Var && Var->getResolvedSymbol() && Var->getResolvedSymbol()->Type &&
+      Var->getResolvedSymbol()->Type->isFunc())
+    IndirectTy = Var->getResolvedSymbol()->Type.get();
+  if (IndirectTy) {
+    const auto *FT = static_cast<const FuncType *>(IndirectTy);
+    Value *CalleeVal = Callee->codegen();
     if (!CalleeVal)
       return nullptr;
 
