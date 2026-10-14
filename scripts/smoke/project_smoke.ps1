@@ -360,9 +360,9 @@ if (Test-Path -LiteralPath $manifestPath) {
     Write-Fail "drift: $manifestPath's reserved list differs from src/frontend/Lexer.cpp's Keywords ($(($diff | ForEach-Object { $_.SideIndicator + $_.InputObject }) -join ' '))"
   }
 } elseif ($env:CI) {
-  Write-Fail "drift: turf's source not found (cli\ or ..\turf-cli; set TURF_CLI_DIR)"
+  Write-Fail "drift: turf's source not found (..\turf-cli; set TURF_CLI_DIR)"
 } else {
-  Write-Skip "drift: turf's source not found (cli\ or ..\turf-cli; set TURF_CLI_DIR)"
+  Write-Skip "drift: turf's source not found (..\turf-cli; set TURF_CLI_DIR)"
 }
 
 Complete-Smoke

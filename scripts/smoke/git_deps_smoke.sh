@@ -5,7 +5,7 @@
 # pins commit + SHA-256, verified on every build; one version per name;
 # --offline, --locked; `turf update` is the only thing that moves a ref).
 #
-# The Go tests (cd cli && go test ./...) cover the tree hash, the lock format,
+# The Go tests (go test ./... in turf-cli) cover the tree hash, the lock format,
 # the fetcher against real bare repositories and the graph rules in isolation.
 # What only a real build shows is the whole path: `turf` -> system git -> the
 # cache -> the lock -> the package graph -> `turfc`, on a program whose answer

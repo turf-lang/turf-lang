@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # fmt_smoke.sh -- REL-002 stage 2: `turf fmt` / `turfc --format`
-# (src/tooling/Formatter.cpp, src/driver/main.cpp runFormat(), cli/cmd/turf/cmd_fmt.go;
+# (src/tooling/Formatter.cpp, src/driver/main.cpp runFormat(), turf-cli's cmd/turf/cmd_fmt.go;
 # docs/development/FREEZE.md 6.23).
 #
 # What is promised: the formatter moves whitespace and nothing else, the lexer

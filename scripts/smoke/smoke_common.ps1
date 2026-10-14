@@ -16,9 +16,8 @@ $ErrorActionPreference = 'Stop'
 
 $script:Root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 Set-Location $script:Root
-# turf's source: cli\, or a turf-cli checkout once cli\ is retired (CMake's TURF_CLI_DIR).
-$script:CliDir = if ($env:TURF_CLI_DIR) { $env:TURF_CLI_DIR } else { Join-Path $script:Root 'cli' }
-if (-not (Test-Path -LiteralPath (Join-Path $script:CliDir 'go.mod'))) { $script:CliDir = Join-Path $script:Root '..\turf-cli' }
+# turf's source: a turf-cli checkout, TURF_CLI_DIR or by default ..\turf-cli (CMake's TURF_CLI_DIR).
+$script:CliDir = if ($env:TURF_CLI_DIR) { $env:TURF_CLI_DIR } else { Join-Path $script:Root '..\turf-cli' }
 $script:Turfc = Join-Path $script:Root 'build\turfc.exe'
 $script:Turf = Join-Path $script:Root 'build\turf.exe'
 $script:Failed = 0

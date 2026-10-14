@@ -1468,7 +1468,7 @@ Record: `docs/development/changes/REL-003.md`.
        shell resolves `turf`, not only that the files exist.
    - **Replace the "for now" hints when this lands.** What exists today only
      *prints* the right command and edits nothing: `scripts/install/dev_install.sh`
-     and `turf version` / `turf help` (`cli/cmd/turf/pathhint.go`, shown
+     and `turf version` / `turf help` (turf-cli's `cmd/turf/pathhint.go`, shown
      when the running `turf` is not the one `PATH` resolves to). Both carry
      comments pointing here. Keep the `turf version` hint, since a user may
      still run an unpacked archive by its full path, but point it at the

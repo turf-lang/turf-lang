@@ -1,9 +1,9 @@
 #!/bin/bash
 #
-# cli_smoke.sh -- LEC-001 stage 2: the `turf` front end (cli/) drives `turfc`
+# cli_smoke.sh -- LEC-001 stage 2: the `turf` front end (turf-cli) drives `turfc`
 # without changing anything about it.
 #
-# The Go unit tests (cd cli && go test ./...) cover argv classification,
+# The Go unit tests (go test ./... in turf-cli) cover argv classification,
 # discovery order and the handshake's parsing in isolation. What only a real
 # build can show is the end-to-end contract of docs/development/FREEZE.md 6.16
 # (F-PKG-1): `turf <args>` is `turfc <args>` byte for byte (stdout, stderr and
@@ -41,11 +41,10 @@ unset TURF_COMPILER TURF_HOME
 
 # The two release versions are independent (FREEZE.md 6.16, F-PKG-1): the
 # compiler's is the root VERSION file, turf's is a constant in its own source.
-# turf's source is cli/, or a turf-cli checkout once cli/ is retired (CMake's
-# TURF_CLI_DIR).
+# turf's source is a turf-cli checkout: TURF_CLI_DIR, by default ../turf-cli
+# (CMake's TURF_CLI_DIR).
 V=$(head -1 VERSION)
-CLI_DIR=${TURF_CLI_DIR:-cli}
-[ -f "$CLI_DIR/go.mod" ] || CLI_DIR=../turf-cli
+CLI_DIR=${TURF_CLI_DIR:-../turf-cli}
 CLI_V=$(sed -n 's/^const Version = "\(.*\)"$/\1/p' "$CLI_DIR/internal/version/version.go" 2>/dev/null)
 [ -n "$CLI_V" ] || { echo "FAIL: cannot read turf's version from $CLI_DIR/internal/version/version.go (set TURF_CLI_DIR to turf's source)"; exit 1; }
 WORK=$(mktemp -d)

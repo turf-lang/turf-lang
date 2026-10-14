@@ -84,24 +84,22 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y llvm-22-dev liblld-22-dev zlib1g-dev libzstd-dev libncurses-dev
 
-      # Go, before the CMake build, so it builds build/turf (the front end under
-      # cli/, LEC-001) beside build/turfc; the archive ships both.
-      # cli/ mirrors the turf-cli repository (cli/README.md, "Two copies"); once
-      # cli/ is retired, the front end is built from a turf-cli checkout.
-      - name: turf front end source (turf-cli, if cli/ is retired)
-        if: hashFiles('cli/go.mod') == ''
+      # Go, before the CMake build, so it builds build/turf (the turf front end,
+      # LEC-001) beside build/turfc; the archive ships both.
+      # The front end's source is the turf-cli repository, checked out beside
+      # this one; CMake and the smoke tests find it through TURF_CLI_DIR.
+      - name: turf front end source (turf-cli)
         uses: actions/checkout@v4
         with:
           repository: turf-lang/turf-cli
           path: turf-cli
       - name: Point CMake and the smoke tests at turf-cli
-        if: hashFiles('cli/go.mod') == ''
         shell: bash
         run: echo "TURF_CLI_DIR=${{ github.workspace }}/turf-cli" >> "$GITHUB_ENV"
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: ${{ hashFiles('cli/go.mod') != '' && 'cli/go.mod' || 'turf-cli/go.mod' }}
+          go-version-file: turf-cli/go.mod
 
       # --release-static: static LLVM and C++ runtime, no --smart model runtime
       # (so no llama.cpp submodule, no OpenMP).
@@ -125,6 +123,10 @@ jobs:
       # Built before Package: package_release.sh ships lib/rt/ when it exists.
       - name: Build the bundled C runtime (musl)
         run: ./scripts/release/build_bundled_runtime.sh --platform linux-x86_64
+
+      # The archive ships turf from the turf-cli checkout, at its HEAD.
+      - name: turf front end comes from turf-cli
+        run: CI=1 ./scripts/smoke/cli_source_smoke.sh
 
       - name: Package
         id: package
@@ -171,6 +173,10 @@ jobs:
       - name: Build Turf with --smart's runtime
         run: |
           ./scripts/cmake_build.sh --release-static --embed-lld --smart --build-dir=build-smart
+
+      # The archive ships turf from the turf-cli checkout, at its HEAD.
+      - name: turf front end comes from turf-cli (smart)
+        run: CI=1 ./scripts/smoke/cli_source_smoke.sh --build-dir=build-smart
 
       - name: Package (smart)
         id: package-smart
@@ -264,24 +270,22 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y llvm-22-dev liblld-22-dev zlib1g-dev libzstd-dev libncurses-dev
 
-      # Go, before the CMake build, so it builds build/turf (the front end under
-      # cli/, LEC-001) beside build/turfc; the archive ships both.
-      # cli/ mirrors the turf-cli repository (cli/README.md, "Two copies"); once
-      # cli/ is retired, the front end is built from a turf-cli checkout.
-      - name: turf front end source (turf-cli, if cli/ is retired)
-        if: hashFiles('cli/go.mod') == ''
+      # Go, before the CMake build, so it builds build/turf (the turf front end,
+      # LEC-001) beside build/turfc; the archive ships both.
+      # The front end's source is the turf-cli repository, checked out beside
+      # this one; CMake and the smoke tests find it through TURF_CLI_DIR.
+      - name: turf front end source (turf-cli)
         uses: actions/checkout@v4
         with:
           repository: turf-lang/turf-cli
           path: turf-cli
       - name: Point CMake and the smoke tests at turf-cli
-        if: hashFiles('cli/go.mod') == ''
         shell: bash
         run: echo "TURF_CLI_DIR=${{ github.workspace }}/turf-cli" >> "$GITHUB_ENV"
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: ${{ hashFiles('cli/go.mod') != '' && 'cli/go.mod' || 'turf-cli/go.mod' }}
+          go-version-file: turf-cli/go.mod
 
       # --release-static: static LLVM and C++ runtime, no --smart model runtime
       # (so no llama.cpp submodule, no OpenMP).
@@ -305,6 +309,10 @@ jobs:
       # Built before Package: package_release.sh ships lib/rt/ when it exists.
       - name: Build the bundled C runtime (musl)
         run: ./scripts/release/build_bundled_runtime.sh --platform linux-arm64
+
+      # The archive ships turf from the turf-cli checkout, at its HEAD.
+      - name: turf front end comes from turf-cli
+        run: CI=1 ./scripts/smoke/cli_source_smoke.sh
 
       - name: Package
         id: package
@@ -351,6 +359,10 @@ jobs:
       - name: Build Turf with --smart's runtime
         run: |
           ./scripts/cmake_build.sh --release-static --embed-lld --smart --build-dir=build-smart
+
+      # The archive ships turf from the turf-cli checkout, at its HEAD.
+      - name: turf front end comes from turf-cli (smart)
+        run: CI=1 ./scripts/smoke/cli_source_smoke.sh --build-dir=build-smart
 
       - name: Package (smart)
         id: package-smart
@@ -429,22 +441,20 @@ jobs:
       - name: Point CMake at the static lld
         run: echo "CMAKE_PREFIX_PATH=$LLVM_PREFIX:${{ runner.temp }}/lld" >> $GITHUB_ENV
 
-      # cli/ mirrors the turf-cli repository (cli/README.md, "Two copies"); once
-      # cli/ is retired, the front end is built from a turf-cli checkout.
-      - name: turf front end source (turf-cli, if cli/ is retired)
-        if: hashFiles('cli/go.mod') == ''
+      # The front end's source is the turf-cli repository, checked out beside
+      # this one; CMake and the smoke tests find it through TURF_CLI_DIR.
+      - name: turf front end source (turf-cli)
         uses: actions/checkout@v4
         with:
           repository: turf-lang/turf-cli
           path: turf-cli
       - name: Point CMake and the smoke tests at turf-cli
-        if: hashFiles('cli/go.mod') == ''
         shell: bash
         run: echo "TURF_CLI_DIR=${{ github.workspace }}/turf-cli" >> "$GITHUB_ENV"
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: ${{ hashFiles('cli/go.mod') != '' && 'cli/go.mod' || 'turf-cli/go.mod' }}
+          go-version-file: turf-cli/go.mod
 
       - name: Build Turf
         run: |
@@ -519,6 +529,10 @@ jobs:
             macos-smokes.log
           if-no-files-found: ignore
 
+      # The archive ships turf from the turf-cli checkout, at its HEAD.
+      - name: turf front end comes from turf-cli
+        run: CI=1 ./scripts/smoke/cli_source_smoke.sh
+
       - name: Package
         id: package
         uses: ./.github/actions/package-release
@@ -565,6 +579,10 @@ jobs:
         run: |
           export PATH="$(brew --prefix llvm@22)/bin:$PATH"
           ./scripts/cmake_build.sh --release-static --embed-lld --smart --build-dir=build-smart
+
+      # The archive ships turf from the turf-cli checkout, at its HEAD.
+      - name: turf front end comes from turf-cli (smart)
+        run: CI=1 ./scripts/smoke/cli_source_smoke.sh --build-dir=build-smart
 
       - name: Package (smart)
         id: package-smart
@@ -632,22 +650,20 @@ jobs:
           # /tmp paths (cmp -s then reports every pair of files as different).
           install: mingw-w64-ucrt-x86_64-llvm mingw-w64-ucrt-x86_64-clang mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-zlib mingw-w64-ucrt-x86_64-zstd mingw-w64-ucrt-x86_64-lld diffutils mingw-w64-ucrt-x86_64-gdb
 
-      # cli/ mirrors the turf-cli repository (cli/README.md, "Two copies"); once
-      # cli/ is retired, the front end is built from a turf-cli checkout.
-      - name: turf front end source (turf-cli, if cli/ is retired)
-        if: hashFiles('cli/go.mod') == ''
+      # The front end's source is the turf-cli repository, checked out beside
+      # this one; CMake and the smoke tests find it through TURF_CLI_DIR.
+      - name: turf front end source (turf-cli)
         uses: actions/checkout@v4
         with:
           repository: turf-lang/turf-cli
           path: turf-cli
       - name: Point CMake and the smoke tests at turf-cli
-        if: hashFiles('cli/go.mod') == ''
         shell: bash
         run: echo "TURF_CLI_DIR=${{ github.workspace }}/turf-cli" >> "$GITHUB_ENV"
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: ${{ hashFiles('cli/go.mod') != '' && 'cli/go.mod' || 'turf-cli/go.mod' }}
+          go-version-file: turf-cli/go.mod
 
       - name: Build Turf
         shell: msys2 {0}
@@ -751,6 +767,11 @@ jobs:
           done
           exit $fail
 
+      # The archive ships turf from the turf-cli checkout, at its HEAD.
+      - name: turf front end comes from turf-cli
+        shell: msys2 {0}
+        run: CI=1 ./scripts/smoke/cli_source_smoke.sh
+
       - name: Package
         id: package
         uses: ./.github/actions/package-release
@@ -846,6 +867,12 @@ jobs:
         continue-on-error: true
         run: |
           ./scripts/cmake_build.sh --release-static --embed-lld --smart --build-dir=build-smart
+
+      # The archive ships turf from the turf-cli checkout, at its HEAD.
+      - name: turf front end comes from turf-cli (smart)
+        shell: msys2 {0}
+        continue-on-error: true
+        run: CI=1 ./scripts/smoke/cli_source_smoke.sh --build-dir=build-smart
 
       - name: Package (smart)
         id: package-smart

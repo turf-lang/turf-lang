@@ -5,7 +5,7 @@
 # `turfc --package-graph` (docs/development/FREEZE.md 6.16, F-PKG-1..4; the
 # graph format is src/tooling/PackageGraph.h).
 #
-# The Go unit tests (cd cli && go test ./...) cover the manifest rules, graph
+# The Go unit tests (go test ./... in turf-cli) cover the manifest rules, graph
 # resolution and the text edits in isolation. What only a real build shows is
 # the whole path: `turf new` -> `turf add` -> `turf build`/`run`/`check` against
 # the real compiler, with the diagnostics passed through unchanged, and the
@@ -476,9 +476,8 @@ expect_rc "turf init in a directory whose name is not a package name" init_bad 1
 expect_out "turf init in a directory whose name is not a package name" init_bad "not a valid package name"
 
 # --- drift: the reserved words the CLI carries vs the lexer's --------------------
-# turf's source is cli/, or a turf-cli checkout once cli/ is retired.
-CLI_DIR=${TURF_CLI_DIR:-cli}
-[ -f "$CLI_DIR/go.mod" ] || CLI_DIR=../turf-cli
+# turf's source is a turf-cli checkout: TURF_CLI_DIR, by default ../turf-cli.
+CLI_DIR=${TURF_CLI_DIR:-../turf-cli}
 if [ -f "$CLI_DIR/internal/manifest/manifest.go" ]; then
   sed -n '/^std::map<std::string, int> Keywords/,/;$/p' src/frontend/Lexer.cpp |
     grep -o '{"[a-z_0-9]*", TOK' | sed 's/{"\(.*\)", TOK/\1/' | sort > "$WORK/kw_lexer"
@@ -489,9 +488,9 @@ if [ -f "$CLI_DIR/internal/manifest/manifest.go" ]; then
     fail "drift: $CLI_DIR/internal/manifest/manifest.go's reserved list differs from src/frontend/Lexer.cpp's Keywords ($(tr '\n' ' ' < "$WORK/kw_diff"))"
   fi
 elif [ -n "${CI:-}" ]; then
-  fail "drift: turf's source not found (cli/ or ../turf-cli; set TURF_CLI_DIR)"
+  fail "drift: turf's source not found (../turf-cli; set TURF_CLI_DIR)"
 else
-  echo "SKIP drift check: turf's source not found (cli/ or ../turf-cli; set TURF_CLI_DIR)"
+  echo "SKIP drift check: turf's source not found (../turf-cli; set TURF_CLI_DIR)"
 fi
 
 if [ "$FAILED" -ne 0 ]; then

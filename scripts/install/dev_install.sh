@@ -90,7 +90,7 @@ done
 # Proper PATH management for every OS belongs to the release installers
 # (ROADMAP_v2.0.0.md REL-008 stage 7: install.sh / install.ps1, covering
 # bash/zsh/fish, macOS's login shells, and the Windows user PATH). Revisit
-# this, and the matching note in `turf version` (cli/cmd/turf/pathhint.go),
+# this, and the matching note in `turf version` (turf-cli's cmd/turf/pathhint.go),
 # when those land.
 case ":$PATH:" in
   *":$BIN:"*) ;;

@@ -183,7 +183,7 @@ what 2.0 does that this item builds on.
   packages; source distribution makes it unnecessary. The stable interop ABI
   is the C ABI.
 - **F-7c Registry, semver ranges, publishing, workspaces** (L). The 2.0
-  CLI (`cli/`, the former `turf-cli` repository, `FREEZE.md` §6.16) reserves
+  CLI (the turf-cli repository, `FREEZE.md` §6.16) reserves
   `turf publish`. The pre-2.0 semver resolver, checksum, archive and registry
   client code was deleted in LEC-001 stage 6; it is in git history (the
   subtree import `350acd8`, and the parent of the stage 6 deletion commit)

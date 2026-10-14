@@ -67,7 +67,6 @@ suite build as usual.
 | `include/turf/` | the public query facade for tools |
 | `runtime/` | the C runtime linked into every program, including the collector |
 | `lib/std/` | the standard library, written in TurfLang |
-| `cli/` | the `turf` front end (Go) |
 | `tests/` | the regression suite |
 | `docs/reference/` | the language reference |
 | `docs/guides/` | task-oriented guides for TurfLang users |

@@ -648,9 +648,9 @@ if(TURF_RT_SANITIZE)
 endif()
 
 # ─── Executable ──────────────────────────────────────────────────────────────
-# `turfc` is the compiler. The name `turf` belongs to the Go front end under
-# cli/ (LEC-001, FREEZE.md 6.16 F-PKG-1); the two are built into the same
-# directory, so they cannot share a name.
+# `turfc` is the compiler. The name `turf` belongs to the Go front end from
+# the turf-cli repository (LEC-001, FREEZE.md 6.16 F-PKG-1); the two are built
+# into the same directory, so they cannot share a name.
 # The test runner (REL-002, `turfc --test`) belongs to the executable, not to
 # turfcore: it starts processes and is of no use to a tool linking the
 # front-end library.
@@ -702,9 +702,10 @@ if(TURF_RT_SANITIZE)
 endif()
 
 # ─── The `turf` front end (LEC-001, FREEZE.md 6.16 F-PKG-1) ──────────────────
-# The Go program under cli/, built into build/turf beside build/turfc (which is
-# how it finds the compiler with no setup). It is versioned independently of
-# TURF_VERSION -- its own version is a constant in cli/internal/version -- and
+# The Go program from the turf-cli repository, built into build/turf beside
+# build/turfc (which is how it finds the compiler with no setup). It is
+# versioned independently of TURF_VERSION -- its own version is a constant in
+# turf-cli's internal/version -- and
 # checks the compiler's driver interface, not its release version, so nothing
 # is stamped in here. Optional on purpose: the compiler and the whole test
 # suite must build with no Go toolchain, so a missing `go` only skips this.
@@ -715,20 +716,22 @@ endif()
 # file exists, and silently never rebuilds. `ALL` is fine: Go's build cache
 # makes a no-op rebuild take milliseconds.
 #
-# cli/ is a mirror of the turf-cli repository (cli/README.md, "Two copies"). To
-# retire it, delete cli/: the build then takes the front end from TURF_CLI_DIR
-# (the cache variable or the environment variable, which the smoke scripts read
-# too), by default a turf-cli checkout next to this one, and skips it if there
-# is none.
-option(TURF_BUILD_CLI "Build the Go front end (cli/) as build/turf" ON)
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/cli/go.mod")
-  set(_turf_cli_default "${CMAKE_CURRENT_SOURCE_DIR}/cli")
-elseif(DEFINED ENV{TURF_CLI_DIR})
+# The source is TURF_CLI_DIR (the cache variable or the environment variable,
+# which the smoke scripts read too), by default a turf-cli checkout next to
+# this one; with none there, build/turf is skipped.
+# scripts/smoke/cli_source_smoke.sh checks a built turf came from that checkout.
+option(TURF_BUILD_CLI "Build the Go front end (turf-cli) as build/turf" ON)
+if(DEFINED ENV{TURF_CLI_DIR})
   file(TO_CMAKE_PATH "$ENV{TURF_CLI_DIR}" _turf_cli_default)
 else()
-  set(_turf_cli_default "${CMAKE_CURRENT_SOURCE_DIR}/../turf-cli")
+  get_filename_component(_turf_cli_default "${CMAKE_CURRENT_SOURCE_DIR}/../turf-cli" ABSOLUTE)
 endif()
-set(TURF_CLI_DIR "${_turf_cli_default}" CACHE PATH "The turf front end's source (cli/ or a turf-cli checkout)")
+# A cached path with no go.mod (a build directory configured against a source
+# that has since moved) is re-resolved, not kept.
+if(DEFINED CACHE{TURF_CLI_DIR} AND NOT EXISTS "${TURF_CLI_DIR}/go.mod")
+  unset(TURF_CLI_DIR CACHE)
+endif()
+set(TURF_CLI_DIR "${_turf_cli_default}" CACHE PATH "The turf front end's source (a turf-cli checkout)")
 if(TURF_BUILD_CLI AND PROJECT_IS_TOP_LEVEL)
   find_program(TURF_GO go)
   if(NOT EXISTS "${TURF_CLI_DIR}/go.mod")
