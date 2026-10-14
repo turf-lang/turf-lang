@@ -19,12 +19,12 @@
 > done** — the facade and the Sandbox port landed 2026-09-28, the `turf-lsp`
 > port (its own repository) and the VS Code extension 2026-10-06 — see
 > `docs/development/changes/SMP-001.md`. **`FDN-004` and `FDN-006` are
-> done** (both landed 2026-09-28). **`FDN-005` (GC hardening) is done
-> pending one CI confirmation** — see `docs/development/changes/FDN-005.md`
-> (landed 2026-09-28, follow-up 2026-09-29: the full-stack mark-set
-> comparison and the no-`/proc` fallback, which was freeing live objects
-> and is now fixed). The one criterion item not yet observed complete is
-> `TURF_GC_STRESS` + ASan at `-O2`, now a CI step. Its CI jobs stay on
+> done** (both landed 2026-09-28). **`FDN-005` (GC hardening) is done** —
+> see `docs/development/changes/FDN-005.md` (landed 2026-09-28, follow-up
+> 2026-09-29: the full-stack mark-set comparison and the no-`/proc`
+> fallback, which was freeing live objects and is now fixed). Every
+> completion criterion is observed: the last one, `TURF_GC_STRESS` + ASan
+> at `-O2`, completed in CI on 2026-10-13 (1343/1343). Its CI jobs stay on
 > through RC as a gate. **Phase 2's `LEC-002` (visibility, `pub`/`public`,
 > D13) is done** — see `docs/development/changes/LEC-002.md` (landed
 > 2026-09-29; DEC-7 answered "private by default", with `pub` and `public` as
@@ -130,7 +130,7 @@ PHASE 1  Foundation                   SMP-002  one generic type walker      DONE
    │                                  FDN-004  string indexing: bounds + `char` (D17)  DONE (FDN-004.md, 2026-09-28)
    │                                  FDN-006  runtime contract (stack overflow, OOM, ABI stamp)  DONE (FDN-006.md, 2026-09-28)
    │                                  SMP-001  compiler query facade (parallel, any time in 1–2)  DONE incl. the turf-lsp port (SMP-001.md, 2026-10-06)
-   │                                  FDN-005  GC hardening  stages 1–4 DONE (FDN-005.md, 2026-09-28/29); runs on to RC as a CI gate
+   │                                  FDN-005  GC hardening  DONE (FDN-005.md, 2026-09-28/29; CI-confirmed 2026-10-13); runs on to RC as a CI gate
    ▼
 PHASE 2  Language & ecosystem         LEC-002  visibility — `pub`/`public` (D13)  DONE (LEC-002.md, 2026-09-29)
    │                                  LEC-001  projects, dependencies, build (D7)  DONE (LEC-001.md, 2026-09-30; Part IX clean-machine walkthrough handed to REL-008)
@@ -150,7 +150,7 @@ PHASE 3  Stabilization & release      REL-001  version, CLI, runtime ABI stamp  
                                       REL-005  performance baseline  DONE (REL-005.md, 2026-10-13)
                                       REL-006  documentation (reference rewrite, migration guide)  DONE (REL-006.md, 2026-10-13; the handbook is paused, not a gate)
                                       REL-007  release candidates → 2.0.0
-                                      FDN-005  GC hardening completes (RC blocker)
+                                      FDN-005  GC hardening CI gate (each RC; criterion met 2026-10-13)
 ```
 
 ### I.1 Dependency edges (hard — a violation produces wrong code or rework)
