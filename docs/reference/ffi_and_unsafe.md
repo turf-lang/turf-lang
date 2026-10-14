@@ -366,7 +366,7 @@ fn main(): int { return 0; }
 Function 'takes' cannot use raw pointer type 'ptr' for parameter 'p'.
 Hint: Raw pointer types are never allowed in an ordinary function's signature,
 even inside 'unsafe { }' -- use '&T' instead. Only 'extern fn' bindings and
-lib/std may use raw pointers here.
+files that begin with 'unsafe module;' may use raw pointers here.
 ```
 
 ### `self`

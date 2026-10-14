@@ -276,6 +276,15 @@ bool TypeChecker::checkUnsafeGate(const TurfType *T, SourceLocation Loc,
 }
 
 
+// The capability is HasRawPointerCapability()'s (ParserModule.cpp): a file
+// that begins `unsafe module;`, honoured in lib/std and wherever the build
+// allows it.
+static const char *const RawPointerSignatureHint =
+    "Raw pointer types are never allowed in an ordinary function's "
+    "signature, even inside 'unsafe { }' -- use '&T' instead. Only "
+    "'extern fn' bindings and files that begin with 'unsafe module;' may use "
+    "raw pointers here.";
+
 void TypeChecker::checkNoRawPointersInSignature(const FuncDefExprAST &Node) {
   if (HasRawPointerCapability(Node.getLoc().Filename))
     return;
@@ -295,9 +304,7 @@ void TypeChecker::checkNoRawPointersInSignature(const FuncDefExprAST &Node) {
           "Function '" + Node.getName() + "' cannot use raw pointer type '" +
               Param.Type->getName() + "' for parameter '" + Param.Name + "'.",
           {},
-          "Raw pointer types are never allowed in an ordinary function's "
-          "signature, even inside 'unsafe { }' -- use '&T' instead. Only "
-          "'extern fn' bindings and lib/std may use raw pointers here.",
+          RawPointerSignatureHint,
           "Raw pointer in function signature!");
     }
   }
@@ -307,9 +314,7 @@ void TypeChecker::checkNoRawPointersInSignature(const FuncDefExprAST &Node) {
         "Function '" + Node.getName() + "' cannot return raw pointer type '" +
             Node.getReturnType()->getName() + "'.",
         {},
-        "Raw pointer types are never allowed in an ordinary function's "
-        "signature, even inside 'unsafe { }' -- use '&T' instead. Only "
-        "'extern fn' bindings and lib/std may use raw pointers here.",
+        RawPointerSignatureHint,
         "Raw pointer in function signature!");
   }
 }
