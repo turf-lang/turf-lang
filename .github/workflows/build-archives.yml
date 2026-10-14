@@ -488,13 +488,11 @@ jobs:
 
       # REL-008 stage 6: the whole suite, GC stress and the smoke scripts on macOS, with
       # the compiler just built (programs linked by the embedded Mach-O linker against
-      # the bundled stub). INFORMATIONAL (continue-on-error) until the first run on a Mac
-      # has been read: nothing of this has ever executed on macOS, and its job is to list
-      # everything that fails in one run (the log artifact), not one failure per round
-      # trip. Make it enforcing, as Windows's is, once it has been green once. The exact
-      # by-hand version of this was REL-008 stage 6 (docs/development/changes/REL-008.md).
-      - name: Test suite on macOS (REL-008 stage 6, informational)
-        continue-on-error: true
+      # the bundled stub). Enforcing, as Windows's is. The later two steps run even when
+      # an earlier one fails (`!cancelled()`), so one run lists every macOS failure (the
+      # log artifact). The exact by-hand version of this was REL-008 stage 6
+      # (docs/development/changes/REL-008.md).
+      - name: Test suite on macOS (REL-008 stage 6)
         env:
           TURF_TEST_TIMEOUT_SEC: "60"
         run: |
@@ -503,9 +501,8 @@ jobs:
             --diag-register tests/DIAGNOSTIC_GAPS.txt \
             --exclude custom --exclude 99_known_bugs 2>&1 | tee macos-suite.log
 
-      - name: GC stress and validate on macOS (informational)
+      - name: GC stress and validate on macOS
         if: ${{ !cancelled() }}
-        continue-on-error: true
         env:
           TURF_TEST_TIMEOUT_SEC: "120"
         run: |
@@ -514,9 +511,8 @@ jobs:
             TURF_GC_VALIDATE=1 ./build/turfc --test tests/41_gc
             TURF_GC_STRESS=1 TURF_GC_VALIDATE=1 ./build/turfc --test tests/41_gc; } 2>&1 | tee macos-gc.log
 
-      - name: Smoke scripts on macOS (informational)
+      - name: Smoke scripts on macOS
         if: ${{ !cancelled() }}
-        continue-on-error: true
         run: |
           fail=0
           for s in cli_smoke project_smoke test_cmd_smoke fmt_smoke package_graph_smoke git_deps_smoke \
@@ -524,7 +520,7 @@ jobs:
                    mem_smoke gc_smoke debuginfo_smoke std002_caller_location_smoke; do
             echo "=== $s"
             CI=1 ./scripts/smoke/$s.sh 2>&1 | tee -a macos-smokes.log || true
-            [ "${PIPESTATUS[0]}" = 0 ] || { echo "::warning::$s failed on macOS"; fail=1; }
+            [ "${PIPESTATUS[0]}" = 0 ] || { echo "::error::$s failed on macOS"; fail=1; }
           done
           exit $fail
 
