@@ -251,16 +251,17 @@ expect_out "entry file outside the root package" outside "is not inside the root
 # A graph that names the root package's tests/ lets any file there be the entry
 # (each test is its own program), and makes it the root package's own code: it
 # imports the package's src/ modules, its direct dependencies and the helper
-# modules beside it -- and is held to the same E091 as src/ is.
+# modules (`*_module.tr`) beside it -- and is held to the same E091 as src/ is.
+# Another file in tests/ is a test, never a helper.
 mkdir -p myapp/tests
 printf 'pub fn twice(x: int): int {\n    return x * 2;\n}\n' > myapp/src/doubling.tr
-printf 'pub fn three(): int {\n    return 3;\n}\n' > myapp/tests/support.tr
+printf 'pub fn three(): int {\n    return 3;\n}\n' > myapp/tests/support_module.tr
 cat > myapp/tests/t.tr <<'EOF'
 import geometry;
 import doubling;
-import support;
+import support_module;
 fn main(): int {
-    return doubling::twice(support::three()) - geometry::area() + 14;
+    return doubling::twice(support_module::three()) - geometry::area() + 14;
 }
 EOF
 printf 'import shapes;\nfn main(): int {\n    return 0;\n}\n' > myapp/tests/internals.tr
