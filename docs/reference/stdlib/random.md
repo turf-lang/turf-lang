@@ -87,7 +87,7 @@ fn main(): int {
 
     // A temperature between 15.0 and 25.0.
     immut celsius: double = 15.0 + random::random_double() * 10.0;
-    printline(celsius >= 15.0 && celsius < 25.0);   // 1
+    printline(celsius >= 15.0 && celsius < 25.0);   // true
     return 0;
 }
 ```

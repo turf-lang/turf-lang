@@ -47,7 +47,7 @@ smallest `int`).
 ```turflang
 fn main(): int {
     mut n: int = 12;
-    printline(n.is_even());      // 1
+    printline(n.is_even());      // true
     printline(n.gcd(18));        // 6
     printline(4.lcm(-6));        // 12
     printline((-12).gcd(18));    // 6
@@ -57,7 +57,7 @@ fn main(): int {
 }
 ```
 
-(`printline` prints a `bool` as `1` or `0`.)
+(`printline` prints a `bool` as `true` or `false`.)
 
 ---
 
@@ -90,8 +90,8 @@ fn main(): int {
     printline(x.round());        // -3
     printline(x.floor());        // -3
     printline(x.ceil());         // -2
-    printline(4.0.is_integer()); // 1
-    printline(4.5.is_integer()); // 0
+    printline(4.0.is_integer()); // true
+    printline(4.5.is_integer()); // false
     printline(2.7.floor());      // 2
     return 0;
 }
@@ -117,11 +117,11 @@ ordinary functions).
 fn main(): int {
     mut t: bool = true;
     mut f: bool = false;
-    printline(t.logical_xor(f)); // 1
-    printline(t.logical_xor(t)); // 0
-    printline(f.implies(t));     // 1
-    printline(t.implies(f));     // 0
-    printline(f.logical_nor(f)); // 1
+    printline(t.logical_xor(f)); // true
+    printline(t.logical_xor(t)); // false
+    printline(f.implies(t));     // true
+    printline(t.implies(f));     // false
+    printline(f.logical_nor(f)); // true
     return 0;
 }
 ```
@@ -153,10 +153,10 @@ one: `'a'.to_upper()` is a `char`, `"abc".to_upper()` a `string`.
 fn main(): int {
     mut c: char = 'q';
     printline(c.to_upper());              // Q
-    printline('9'.is_alphanumeric());     // 1
-    printline(' '.is_alphanumeric());     // 0
-    printline('!'.is_punctuation());      // 1
-    printline('\t'.is_whitespace());      // 1
+    printline('9'.is_alphanumeric());     // true
+    printline(' '.is_alphanumeric());     // false
+    printline('!'.is_punctuation());      // true
+    printline('\t'.is_whitespace());      // true
 
     // Counting digits in a string with s[i], which is a char.
     mut s: string = "a1b22c333";
@@ -214,13 +214,13 @@ fn main(): int {
     printline(ints.sum(5));            // 14
     printline(ints.max(5));            // 5
     printline(ints.min(ints.length())); // 1
-    printline(ints.contains(5, 4));    // 1
+    printline(ints.contains(5, 4));    // true
     printline(ints.index_of(5, 1));    // 1
     printline(ints.index_of(5, 9));    // -1
     printline(array::sum(ints, 3));    // 8: only the first three
 
     mut names: string[3] = ["ann", "bob", "cy"];
-    printline(names.contains(3, "bob")); // 1
+    printline(names.contains(3, "bob")); // true
     printline(names.index_of(3, "cy"));  // 2
 
     printline(ints[1..4].sum(3));      // 6: a slice is an array too
@@ -315,7 +315,7 @@ import list::List;
 fn main(): int {
     mut parts: List<string> = "a,,b".split(",");
     printline(parts.length());              // 3
-    printline(parts.get(1) == "");          // 1
+    printline(parts.get(1) == "");          // true
     printline(strings::join(parts, ";"));   // a;;b
 
     mut none: List<string> = "abc".split("x");
@@ -326,11 +326,11 @@ fn main(): int {
 
 ```turflang
 fn main(): int {
-    printline("hello world".contains("world"));      // 1
+    printline("hello world".contains("world"));      // true
     printline("hello".index_of("l"));                // 2
     printline("a/b/c".last_index_of("/"));           // 3
-    printline("abc".starts_with("abcd"));            // 0
-    printline("abc".ends_with("bc"));                // 1
+    printline("abc".starts_with("abcd"));            // false
+    printline("abc".ends_with("bc"));                // true
     printline("hello".count_char('l' to int));       // 2
 
     printline("hello".substring(1, 3));              // el

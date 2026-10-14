@@ -51,8 +51,8 @@ fn main(): int {
     printline(fs::dirname(path));        // reports/2026
     printline(fs::basename(path));       // summary.txt
     printline(fs::extension(path));      // txt
-    printline(fs::is_absolute(path));    // 0
-    printline(fs::is_absolute("/tmp"));  // 1
+    printline(fs::is_absolute(path));    // false
+    printline(fs::is_absolute("/tmp"));  // true
     return 0;
 }
 ```

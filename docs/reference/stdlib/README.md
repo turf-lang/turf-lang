@@ -105,7 +105,7 @@ fn main(): int {
         return 1;
     };
     fs::remove_dir(dir) recover run { printline("could not remove it"); };
-    printline(fs::is_dir(dir));       // 0: a question, so a bool
+    printline(fs::is_dir(dir));       // false: a question, so a bool
     return 0;
 }
 ```

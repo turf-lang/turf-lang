@@ -378,7 +378,7 @@ fn main(): int {
     mut n: int = 21;
     printline(n.double_it());        // 42
     printline(21.double_it().double_it());   // 84: calls chain
-    printline("hello".is_long());    // 1 (a bool prints as 1 or 0)
+    printline("hello".is_long());    // true
     printline(n.scale(2));           // 42: the 2 widens to double
 
     mut a: int[4] = [1, 2, 3, 4];
@@ -792,7 +792,7 @@ fn main(): int {
     printline(math::PI);            // 3.14159
 
     mut c: char = '7';
-    printline(c.is_digit());        // 1: UFCS on a char, from the char module
+    printline(c.is_digit());        // true: UFCS on a char, from the char module
     printline("abc".length());      // 3
     printline(strings::length("abc"));
     return 0;

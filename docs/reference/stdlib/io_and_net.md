@@ -35,7 +35,7 @@ The overload is chosen by the argument's type:
 |---|---|
 | `int` | the decimal digits: `-7` |
 | `double` | the shortest `%g`-style form: `3.5`, `0.333333`, `1e+08`. A NaN is always `nan` |
-| `bool` | `1` or `0`, not `true` and `false`. To print the words, convert first: `printline(flag to string)` |
+| `bool` | `true` or `false`, the same text as `flag to string` |
 | `char` | the character |
 | `string` | the text |
 
@@ -57,9 +57,9 @@ fn main(): int {
 ```
 
 ```text
-42 3.5 1 x!
+42 3.5 true x!
 0.333333
-0
+false
 true
 ```
 
@@ -185,7 +185,7 @@ fn main(): int {
 1: first
 2: second
 (none)
-1
+true
 ```
 
 ---

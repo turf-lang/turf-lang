@@ -180,8 +180,8 @@ fn main(): int {
     mut e: int = 0;
     mut ok: bool = (e != 0) && (100 / e > 5);   // the division never runs
     mut any: bool = true || (1 / e > 0);        // neither does this one
-    printline(ok);
-    printline(any);
+    printline(ok);                              // false
+    printline(any);                             // true
     return 0;
 }
 ```

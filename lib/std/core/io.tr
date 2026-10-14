@@ -84,8 +84,13 @@ pub fn print(val: double): void {
     printf("%g", val);
 }
 
+// `true`/`false`, the same text as `(val to string)`.
 pub fn print(val: bool): void {
-    printf("%d", val);
+    if val {
+        printf("true");
+    } else {
+        printf("false");
+    }
 }
 
 pub fn print(val: char): void {
@@ -110,8 +115,13 @@ pub fn printline(val: double): void {
     printf("%g\n", val);
 }
 
+// `true`/`false`, the same text as `(val to string)`.
 pub fn printline(val: bool): void {
-    printf("%d\n", val);
+    if val {
+        printf("true\n");
+    } else {
+        printf("false\n");
+    }
 }
 
 pub fn printline(val: char): void {
