@@ -1,0 +1,9 @@
+// EXPECT-DIAG: E027
+// EXPECT-DIAG: Could not find module 'fail_import_self'
+// A file never imports itself: `import x;` in x.tr names some other module
+// called x, and there is none here.
+import fail_import_self;
+
+fn main(): int {
+    return 0;
+}

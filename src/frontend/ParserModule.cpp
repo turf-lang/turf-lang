@@ -1076,6 +1076,10 @@ CollectModuleCandidates(const std::string &ModuleName,
   std::vector<ModuleCandidate> Found;
   std::vector<std::string> SeenCanonical;
   auto Add = [&](ModuleRootKind Kind, const std::string &Path) {
+    // A file never imports itself: tests/route.tr's `import route;` means a
+    // module called route, not the file doing the importing.
+    if (!ImportingFile.empty() && llvm::sys::fs::equivalent(Path, ImportingFile))
+      return;
     llvm::SmallString<256> Canonical;
     std::string Key =
         llvm::sys::fs::real_path(Path, Canonical) ? Path : Canonical.str().str();
@@ -1291,10 +1295,21 @@ static std::string ProjectManifestHint(const std::string &ImportingFile) {
     llvm::sys::path::append(Manifest, "turf.toml");
     llvm::sys::fs::file_status Status;
     if (!llvm::sys::fs::status(Manifest, Status) &&
-        Status.type() != llvm::sys::fs::file_type::directory_file)
+        Status.type() != llvm::sys::fs::file_type::directory_file) {
+      // A test is run by `turf test`, which gives it the project's modules.
+      llvm::SmallString<256> Tests(Dir);
+      llvm::sys::path::append(Tests, "tests");
+      llvm::SmallString<256> File;
+      llvm::sys::fs::real_path(ImportingFile, File);
+      llvm::StringRef Rel(File);
+      if (Rel.consume_front(Tests.str()) && llvm::sys::path::is_separator(Rel.front()))
+        return "This file is a test of the TurfLang project at " + Manifest.str().str() +
+               ". Run it with `turf test tests" + Rel.str() +
+               "`, which gives it the project's modules and dependencies.";
       return "This file is inside a TurfLang project (" + Manifest.str().str() +
              "). Its dependencies are only visible to `turf build`, which "
              "compiles the project with its package graph.";
+    }
     llvm::StringRef Parent = llvm::sys::path::parent_path(Dir);
     if (Parent.empty() || Parent == Dir.str())
       return "";

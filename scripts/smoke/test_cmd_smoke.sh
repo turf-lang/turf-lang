@@ -439,6 +439,12 @@ EOF
   t dir_path "$PRJ/app" test tests/nested
   expect_rc "turf test <dir>" dir_path 0
   expect_out "turf test <dir>" dir_path "with_helper.tr ... PASS"
+  # `turf run` compiles a test on its own, without the project: the test's
+  # `import util;` is not the test file itself, and the hint names `turf test`.
+  t run_test_file "$PRJ/app" run tests/util.tr
+  expect_rc "turf run on a test file" run_test_file 1
+  expect_out "turf run on a test file" run_test_file "[E027"
+  expect_out "turf run on a test file" run_test_file "Run it with \`turf test tests/util.tr\`"
   t outside_path "$PRJ/app" test src/util.tr
   expect_rc "a path outside tests/" outside_path 2
   expect_out "a path outside tests/" outside_path "is not under the project's tests/ directory"
