@@ -91,8 +91,8 @@ Field names must also be unique WITHIN one struct:
 
 STRUCT METHOD CALLS ARE FULLY CHECKED (name, argument count, AND argument
 types -- not just count):
-  p.nonexistentMethod();
-    // ERROR: "'Point' has no method named 'nonexistentMethod'."
+  p.nonexistent_method();
+    // ERROR: "'Point' has no method named 'nonexistent_method'."
   l.push(1, 2, 3);   // push takes exactly 1 argument besides self
     // ERROR: "'List.push' was called with 3 arguments, but no overload
     //         accepts that many."

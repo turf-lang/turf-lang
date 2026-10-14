@@ -14,11 +14,11 @@ CAUSE:
 EXAMPLE CYCLE:
     // a.tr
     import b;
-    fn useB(): void { b::doSomething(); }
+    fn use_b(): void { b::do_something(); }
 
     // b.tr
     import a;                 // ERROR: a imports b imports a
-    fn doSomething(): void { a::useB(); }
+    fn do_something(): void { a::use_b(); }
 
   The compiler prints the full chain: `a --imports--> b --imports--> a`.
 

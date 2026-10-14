@@ -22,14 +22,14 @@ IMPLICIT PROMOTION RULES:
 - bool -> int -> double promotion happens ONLY inside expressions
   (e.g. `x + y` where one is int and one is double).
 - Declarations and assignments require an EXACT type match or an explicit
-  `to` cast -- promotion does NOT apply to `mut x: int = someDouble;`.
-- You CANNOT assign a double to an int variable without `someDouble to int`.
-- You CANNOT assign an int to a string variable without `someInt to string`.
+  `to` cast -- promotion does NOT apply to `mut x: int = some_double;`.
+- You CANNOT assign a double to an int variable without `some_double to int`.
+- You CANNOT assign an int to a string variable without `some_int to string`.
 
 FUNCTION PARAMETER/RETURN TYPES:
 - Parameters must match exactly: `fn add(a: int, b: int): int`.
 - Return value must match the declared return type.
-- Use an explicit cast if types differ: `return someDouble to int;`
+- Use an explicit cast if types differ: `return some_double to int;`
 
 CORRECT EXAMPLES:
   mut x: int = 5;

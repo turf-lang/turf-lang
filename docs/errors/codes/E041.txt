@@ -1,6 +1,6 @@
 I don't know a function by that name
 
-You called a function -- something with parentheses after it, like `doSomething()` -- and Turf couldn't find any function with that exact name anywhere it looked: not in this file, not among the built-ins, not through anything you've imported.
+You called a function -- something with parentheses after it, like `do_something()` -- and Turf couldn't find any function with that exact name anywhere it looked: not in this file, not among the built-ins, not through anything you've imported.
 
     fn greet(name: string): void {
         printline("Hello, " + name);

@@ -20,10 +20,10 @@ SUPPORTED CONVERSIONS FROM STRING:
   // strings::parse_double, which return an error to recover from.
 
 WHAT IS NOT SUPPORTED:
-  someString + 5
+  some_string + 5
     // ERROR: "Cannot apply operator '+' to types 'string' and 'int'."
-    //        Fix: someString + (5 to string)
-  someArray to string
+    //        Fix: some_string + (5 to string)
+  some_array to string
     // ERROR: arrays cannot be converted to strings this way.
 
 STRING CONCATENATION:

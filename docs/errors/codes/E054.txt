@@ -1,6 +1,6 @@
 You tried to call a method that doesn't exist on this struct
 
-This is the method-call sibling of the "unknown struct field" error -- same idea, just for something you're trying to call instead of something you're trying to read. Every struct only has the methods you actually declared for it (with `fn StructName.methodName(...)`), and if you call a name that isn't one of them, Turf stops you before your program runs with a call that goes nowhere.
+This is the method-call sibling of the "unknown struct field" error -- same idea, just for something you're trying to call instead of something you're trying to read. Every struct only has the methods you actually declared for it (with `fn StructName.method_name(...)`), and if you call a name that isn't one of them, Turf stops you before your program runs with a call that goes nowhere.
 
 The most common reason is a simple typo. Here's a struct with an `increment` method:
 

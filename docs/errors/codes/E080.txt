@@ -25,7 +25,7 @@ To fix it, do one of:
   - Move the operator declaration into the module that actually declares
     one of the two types.
   - If you don't own either type and still need this behavior, write it as
-    an ordinary named function instead (`fn addVecs(a: Vec2, b: Vec2):
+    an ordinary named function instead (`fn add_vecs(a: Vec2, b: Vec2):
     Vec2`) -- there's no rule against that, only against redefining an
     OPERATOR on types you don't own.
 

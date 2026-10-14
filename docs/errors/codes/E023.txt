@@ -19,7 +19,7 @@ If you really do want other files to be able to use this value, move it out to t
 If it was only ever meant to be used inside that one function, it doesn't need `export` at all -- just declare it normally:
 
     fn setup(): void {
-        immut localFlag: bool = true;
+        immut local_flag: bool = true;
     }
 
 Either way, the fix is quick once you decide which of those two things you actually meant.

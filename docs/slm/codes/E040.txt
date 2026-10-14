@@ -12,8 +12,8 @@ CORRECT:
     count = count + 1;   // 'count' was declared above -- visible here
 
 INCORRECT:
-    mut n: int = undeclaredVariable;
-    // ERROR: I can't find anything named 'undeclaredVariable'.
+    mut n: int = undeclared_variable;
+    // ERROR: I can't find anything named 'undeclared_variable'.
 
   A close-but-not-exact match nearby (e.g. an existing 'count' when you
   typed 'coutn') triggers a "did you mean?" suggestion instead of the

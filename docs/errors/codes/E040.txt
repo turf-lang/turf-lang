@@ -11,12 +11,12 @@ If there's something similar already declared nearby, Turf will usually notice a
 
 The second is forgetting to declare the variable at all before using it:
 
-    mut n: int = undeclaredVariable;   // this was never created anywhere
+    mut n: int = undeclared_variable;   // this was never created anywhere
 
 In Turf, you always create a variable with `mut` or `immut` before you can use it -- there's no way to just start using a name and have it exist automatically:
 
-    mut undeclaredVariable: int = 5;
-    mut n: int = undeclaredVariable;   // now this works
+    mut undeclared_variable: int = 5;
+    mut n: int = undeclared_variable;   // now this works
 
 There is a third case, and the error's hint says so when it applies: the name IS declared, but as a type. A struct, enum or error type is not a value, so it can't stand alone in an expression:
 

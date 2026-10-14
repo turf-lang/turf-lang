@@ -5,7 +5,7 @@ Turf was in the middle of a construct that has a fixed shape and found something
 A few of the fixed shapes:
 
     for i in 0..10 { ... }               // `in` after the loop variable
-    do { ... } while keepGoing;          // `while` after a do-block
+    do { ... } while keep_going;          // `while` after a do-block
     give a otherwise b                   // `otherwise` after `give`
     compare x { matches 1: ... }         // `matches` or `otherwise` in a compare
     value recover run { ... };           // `run`, `produce` or `as` after `recover`

@@ -10,7 +10,7 @@ CAUSE:
   3. `return` used outside any function body.
 
 CORRECT USAGE:
-    fn sumPositive(nums: int[5]): int {
+    fn sum_positive(nums: int[5]): int {
         mut total: int = 0;
         for i in 0..5 {
             if nums[i] < 0 {

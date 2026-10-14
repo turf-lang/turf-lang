@@ -45,8 +45,8 @@ WHAT THIS ERROR IS NOT:
     instead.
 
 FIX:
-  Check the struct's method declarations (`fn StructName.methodName(...)`)
+  Check the struct's method declarations (`fn StructName.method_name(...)`)
   for the exact name and spelling (method names are case-sensitive). If
   the method genuinely doesn't exist yet, declare it: `fn StructName.
-  methodName(...): ReturnType { ... }` for an instance method, or add
+  method_name(...): ReturnType { ... }` for an instance method, or add
   `static` before the return type for one called via `::` instead of `.`.

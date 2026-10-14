@@ -4,7 +4,7 @@ CAUSE:
   The parser was inside a construct with a fixed shape and found something other than
   the next fixed piece; the message names the exact word/symbol wanted. Fixed shapes:
     for i in 0..10 { ... }               // `in` after the loop variable
-    do { ... } while keepGoing;          // `while` after a do-block
+    do { ... } while keep_going;          // `while` after a do-block
     give a otherwise b                   // `otherwise` after `give`
     compare x { matches 1: ... }         // `matches` or `otherwise` inside compare
     value recover run { ... };           // `run`, `produce` or `as` after `recover`
@@ -26,14 +26,14 @@ CORRECT (each fixed shape, written out):
     }
 
     fn main(): int {
-        mut keepGoing: bool = true;
+        mut keep_going: bool = true;
         mut x: int = 0;
         for i in 0..10 {
             x = x + i;
         }
         do {
-            keepGoing = false;
-        } while keepGoing;
+            keep_going = false;
+        } while keep_going;
         mut y: int = x > 3 give 1 otherwise 2;
         compare y {
             matches 1:

@@ -64,7 +64,7 @@ FOR LOOP:
   IMPORTANT: the `step` clause is an arbitrary EXPRESSION executed after
   each iteration, most commonly an assignment (i += 1). It does NOT have
   to modify the loop variable -- the compiler will happily accept
-  `step 1` or `step someOtherVar += 1` syntactically. If `step` (and
+  `step 1` or `step some_other_var += 1` syntactically. If `step` (and
   nothing in the body either) ever actually changes the loop variable, the
   compiler emits a WARNING ("the loop variable is never changed by this
   loop's 'step' or its body, so it will loop forever" / "...the body will

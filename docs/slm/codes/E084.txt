@@ -7,7 +7,7 @@ CAUSE:
   line directly before `fn` (or before an `operator` declaration).
 
 INCORRECT:
-    fn notMarked(): string {
+    fn not_marked(): string {
         return caller_location;       // this function never asked for it
     }
 

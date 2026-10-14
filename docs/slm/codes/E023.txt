@@ -15,7 +15,7 @@ CORRECT:
     export immut ready: bool = true;   // top level of the file
 
     fn setup(): void {
-        immut localFlag: bool = true;   // fine -- no 'export', local is OK
+        immut local_flag: bool = true;   // fine -- no 'export', local is OK
     }
 
 FIX:

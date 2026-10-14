@@ -2,7 +2,7 @@
 
 `caller_location` is the file and line of whoever *called* this function. It is how a library function can say "you called me wrongly, here" instead of pointing inside the library. Because it costs a hidden extra argument on every call, a function has to opt in, by writing `@caller_location` on the line before `fn`:
 
-    fn notMarked(): string {
+    fn not_marked(): string {
         return caller_location;       // this function never asked for it
     }
 

@@ -7,14 +7,14 @@ CAUSE:
   nothing to use.
 
 CORRECT USAGE:
-    fn logMessage(msg: string): void {
+    fn log_message(msg: string): void {
         io::printline(msg);
     }
 
-    logMessage("hello");    // fine -- called as a plain statement
+    log_message("hello");    // fine -- called as a plain statement
 
 INCORRECT:
-    mut result: string = logMessage("hello");
+    mut result: string = log_message("hello");
     // ERROR: You can't use a void value here!
     //   <context describing where the void result was used>
 

@@ -4,7 +4,7 @@ You used break, continue, or return somewhere it doesn't belong
 
 Here's `break` and `continue` used the right way, inside a `for` loop:
 
-    fn sumPositive(nums: int[5]): int {
+    fn sum_positive(nums: int[5]): int {
         mut total: int = 0;
         for i in 0..5 {
             if nums[i] < 0 {

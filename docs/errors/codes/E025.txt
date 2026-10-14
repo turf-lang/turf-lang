@@ -12,7 +12,7 @@ Turf found the function you're calling -- the name is right -- but none of its d
 If this happens to you, the fix is almost always to double check what type you're actually passing, and either pass a value of a type the function really supports, or convert your value first:
 
     mut flag: bool = true;
-    mut asNumber: int = 1;   // convert however makes sense for your case
-    math::abs(asNumber);
+    mut as_number: int = 1;   // convert however makes sense for your case
+    math::abs(as_number);
 
 One small syntax reminder while you're here: module functions are always called with `::`, like `math::abs(...)`, never with a dot like `math.abs(...)` -- a dot is only for accessing fields and methods on a struct instance you're holding, not for module functions.
