@@ -8,6 +8,11 @@ CAUSE:
   type, inside `!T`, behind `&`, as a generic argument (`List<Hidden>`), or as a
   `pub` field's type.
 
+  In a package, a library's ROOT module (src/<name>.tr, the only module other
+  packages import) also may not put a `pub` type of one of the package's
+  INTERNAL modules in a `pub` signature: other packages cannot import that
+  module, so they cannot name the type.
+
 INCORRECT:
     // shapes.tr
     struct Hidden { pub n: int }          // no `pub`
@@ -16,6 +21,13 @@ INCORRECT:
     pub fn c(): !Hidden { ... }
     pub fn e(): List<Hidden> { ... }
     pub struct Outer { pub inner: Hidden }
+
+INCORRECT (package 'geometry'):
+    // src/geometry.tr, the root module
+    import vecmath;                       // internal module
+    pub fn origin(): vecmath::Vec { ... } // other packages cannot name Vec
+
+CORRECT (package 'geometry'): declare `pub struct Vec` in src/geometry.tr.
 
 CORRECT (way 1, make the type public):
     // shapes.tr
@@ -34,7 +46,8 @@ NOT ERRORS:
   program (no importer to leak to).
 
 FIX:
-  If importers should hold and name the type, make it `pub`. If it is an
+  If importers should hold and name the type, make it `pub` (in a package: and
+  declare it in the root module). If it is an
   implementation detail, remove `pub` from the item that leaks it.
 
 RELATED: E087, E088 (the other visibility rules).

@@ -444,6 +444,11 @@ private:
   // its own (see there).
   std::unordered_map<std::string, std::vector<std::string>> GenericStructIdentities_;
 
+  // Module identity -> the file it was loaded from (ModuleImportExprAST's
+  // ResolvedPath), recorded by Pass 1a. checkNoPrivateInPublic() reads it to
+  // tell a package's root module from its internal modules.
+  std::unordered_map<std::string, std::string> ModuleFiles_;
+
   // ── Internal helpers ───────────────────────────────────────────────────────
 
   std::string currentModuleName() const {
@@ -600,7 +605,10 @@ private:
   /// Private-in-public (LEC-002 stage 5): raises E089 if any of @p Types
   /// mentions -- at any depth: pointer/reference target, array element,
   /// generic argument, `!T` success type, function-type parameter -- a type
-  /// declared in the CURRENT module without `pub`. Called for each `pub`
+  /// declared in the CURRENT module without `pub`, or -- when the current
+  /// module is a package's root module, the only one importable from outside
+  /// it -- a type declared in one of that package's internal modules, which
+  /// no other package can name (E091). Called for each `pub`
   /// function signature and `pub` field. A no-op in the main file (a
   /// single-file program has no importer), inside a function body, and while
   /// re-resolving a monomorphized clone (its substituted types are the call

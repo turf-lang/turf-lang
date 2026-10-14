@@ -570,7 +570,10 @@ which applies across packages too:
 ```
 
 So a package has two levels: private to a module, and `pub`; and `pub` in an
-internal module means "visible inside this package".
+internal module means "visible inside this package". For the same reason the
+root module may not put a type of an internal module in a `pub` signature
+(E089): other packages could receive its values but never write its name.
+Declare the types of a package's API in its root module.
 
 ### Single-file mode
 

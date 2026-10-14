@@ -131,6 +131,8 @@ void Resolver::hoistTypesIn(const ExprAST *Node, const std::string &ModuleName) 
     // qualified spellings (`list::List`) before hoistModuleBody() runs, and
     // a qualifier is only valid if its module is known.
     SymTable_.registerModule(Inner);
+    if (!Import->getResolvedPath().empty())
+      ModuleFiles_.emplace(Inner, Import->getResolvedPath());
     if (Import->getMode() == ImportMode::Bare)
       SymTable_.noteBareImport(ModuleName, Inner);
     else

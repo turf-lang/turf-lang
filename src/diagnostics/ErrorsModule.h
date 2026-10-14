@@ -948,6 +948,41 @@ public:
             (IsField ? "the field" : "the " + ItemKind) +
             " internal by removing its `pub`.";
   }
+
+  /// The same leak one level up: a `pub` item of package @p Package's root
+  /// module names a `pub` type of one of the package's INTERNAL modules
+  /// (@p TypeModule). The type is public, but no other package can import
+  /// the module that declares it (E091), so it cannot name the type either.
+  static PrivateInPublicError fromInternalModule(
+      SourceLocation Loc, const std::string &ItemKind, const std::string &ItemName,
+      const std::string &TypeName, const std::string &TypeKeyword,
+      const std::string &TypeModule, const std::string &Package,
+      SourceLocation TypeDeclLoc) {
+    PrivateInPublicError E(Loc);
+    const bool IsField = ItemKind == "field";
+    E.Message = Colors::BRIGHT_RED + "Public " + ItemKind + " '" + Colors::CYAN +
+                ItemName + Colors::BRIGHT_RED + "' of package '" + Colors::CYAN +
+                Package + Colors::BRIGHT_RED + "' exposes '" + Colors::CYAN +
+                TypeName + Colors::BRIGHT_RED + "', a type of its internal module '" +
+                Colors::CYAN + DisplayModuleName(TypeModule) + Colors::BRIGHT_RED +
+                "'." + Colors::RESET;
+    E.withRelated(TypeDeclLoc, "'" + TypeName + "' is declared in module '" +
+                                   DisplayModuleName(TypeModule) +
+                                   "', which only package '" + Package +
+                                   "' can import");
+    E.Hint_ = "Other packages import only '" + Package + "', its root module, so "
+              "they would receive values of a type they cannot name. Either "
+              "move `pub " + TypeKeyword + " " + TypeName + "` into the root "
+              "module, " + Package + ".tr, or keep " +
+              (IsField ? "the field" : "the " + ItemKind) +
+              " internal by removing its `pub`.";
+    return E;
+  }
+
+private:
+  explicit PrivateInPublicError(SourceLocation Loc) : TurfError(Loc, "") {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+  }
 };
 
 // An `@name(args)` annotation the declaration under it cannot carry: a name no

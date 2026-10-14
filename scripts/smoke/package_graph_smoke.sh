@@ -292,6 +292,55 @@ bad "tests on a dependency" '{"format":1,"root":"myapp","packages":{"myapp":{"sr
 bad "tests directory that does not exist" '{"format":1,"root":"myapp","packages":{"myapp":{"src":"myapp/src","tests":"nosuch"}}}' "tests directory"
 bad "tests that is not a path" '{"format":1,"root":"myapp","packages":{"myapp":{"src":"myapp/src","tests":3}}}' '"tests" must be a directory path'
 
+# --- a root module exposing an internal module's type is E089 -------------------
+# Other packages import only a library's root module, so a `pub` type of an
+# internal module is one they cannot name. Its root module may not put it in a
+# `pub` signature; a private function may use it, and so may the internal
+# module's own `pub` items (only the package itself imports those).
+mkdir -p leak/src leakapp/src
+cat > leak/src/inner.tr <<'EOF'
+pub struct Thing {
+    pub v: int
+}
+pub fn make(): Thing {
+    return Thing::default();
+}
+EOF
+cat > leak/src/leak.tr <<'EOF'
+import inner;
+fn private_use(): inner::Thing {
+    return inner::make();
+}
+pub fn value(): int {
+    return private_use().v;
+}
+EOF
+printf 'import leak;\nfn main(): int {\n    return leak::value();\n}\n' > leak/src/main.tr
+printf 'import leak;\nfn main(): int {\n    return leak::value();\n}\n' > leakapp/src/main.tr
+GLL='{"format":1,"root":"leak","packages":{"leak":{"src":"leak/src","deps":[]}}}'
+GLA='{"format":1,"root":"leakapp","packages":{
+  "leakapp": {"src": "leakapp/src", "deps": ["leak"]},
+  "leak":    {"src": "leak/src",    "deps": []}}}'
+graph gll.json "$GLL"
+graph gla.json "$GLA"
+run leak_ok --check --package-graph gll.json leak/src/main.tr
+expect_rc "an internal type in a private function of the root module" leak_ok 0
+printf 'import inner;\npub fn get(): inner::Thing {\n    return inner::make();\n}\n' > leak/src/leak.tr
+printf 'import leak;\nfn main(): int {\n    return leak::get().v;\n}\n' > leak/src/main.tr
+cp leak/src/main.tr leakapp/src/main.tr
+run leak_lib --check --package-graph gll.json leak/src/main.tr
+expect_rc "a root module's pub fn returning an internal type" leak_lib 1
+expect_out "a root module's pub fn returning an internal type" leak_lib "[E089"
+expect_out "a root module's pub fn returning an internal type" leak_lib "Public function 'get' of package 'leak' exposes 'Thing', a type of its internal module 'inner'."
+run leak_dep --check --package-graph gla.json leakapp/src/main.tr
+expect_rc "the same, with the library as a dependency" leak_dep 1
+expect_out "the same, with the library as a dependency" leak_dep "[E089"
+printf 'import inner;\npub struct Box {\n    pub t: inner::Thing\n}\npub fn one(): int {\n    return 1;\n}\n' > leak/src/leak.tr
+printf 'import leak;\nfn main(): int {\n    return leak::one();\n}\n' > leak/src/main.tr
+run leak_field --check --package-graph gll.json leak/src/main.tr
+expect_rc "a root module's pub field of an internal type" leak_field 1
+expect_out "a root module's pub field of an internal type" leak_field "Public field 'Box.t' of package 'leak'"
+
 if [ "$FAILED" -ne 0 ]; then
   echo "package_graph_smoke: $FAILED check(s) failed"
   exit 1

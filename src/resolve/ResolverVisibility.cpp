@@ -16,6 +16,11 @@
 
 #include "diagnostics/Errors.h"
 #include "frontend/Parser.h"
+#include "tooling/PackageGraph.h"
+
+#include "llvm/ADT/SmallString.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Path.h"
 
 bool Resolver::mayQualifyWith(const std::string &Module, const std::string &Context) const {
   // The prelude is "always there" (docs/slm/modules.txt): ParsePreludeImports()
@@ -129,7 +134,45 @@ void Resolver::checkNoPrivateInPublic(
   std::vector<std::string> Mentioned;
   for (const auto *T : Types)
     collectMentionedTypes(T, Mentioned);
+
+  // In a package build, the package whose ROOT module this is (the module
+  // other packages import), or null. A type that root module mentions from
+  // another module of the same package is from an internal module.
+  const PackageInfo *RootOf = nullptr;
+  auto FileOf = [&](const std::string &M) -> const std::string * {
+    auto It = ModuleFiles_.find(M);
+    return It == ModuleFiles_.end() ? nullptr : &It->second;
+  };
+  if (g_PackageGraph.Active) {
+    if (const std::string *File = FileOf(Module)) {
+      if (const PackageInfo *P = g_PackageGraph.packageOf(*File)) {
+        llvm::SmallString<256> RootFile(P->SrcRoot);
+        llvm::sys::path::append(RootFile, P->Name + ".tr");
+        if (llvm::sys::fs::equivalent(RootFile, *File))
+          RootOf = P;
+      }
+    }
+  }
+
   for (const auto &Id : Mentioned) {
+    if (RootOf && SymTable_.isKnownTypeIdentity(Id) && SymTable_.isTypePublic(Id)) {
+      const std::string Owner = TypeIdentity::owningModule(Id);
+      const std::string *OwnerFile = Owner == Module ? nullptr : FileOf(Owner);
+      if (OwnerFile && g_PackageGraph.packageOf(*OwnerFile) == RootOf) {
+        SourceLocation DeclLoc = Loc;
+        std::string Keyword = "struct";
+        if (const auto *Info = SymTable_.typeVisibility(Id)) {
+          DeclLoc = toSourceLocation(Info->DeclLoc);
+          DeclLoc.Filename = *OwnerFile;
+          Keyword = Info->Keyword;
+        }
+        PrivateInPublicError::fromInternalModule(Loc, ItemKind, ItemName,
+                                                 TypeIdentity::bareName(Id), Keyword,
+                                                 Owner, RootOf->Name, DeclLoc)
+            .raise();
+        return;
+      }
+    }
     // Only this module's own private types can leak through its own
     // signatures: a type of another module that is not `pub` could not have
     // been written here at all (E088).

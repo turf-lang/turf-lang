@@ -184,24 +184,35 @@ pub fn warm(): Cache {
      │        ^~~~ Here!
 ```
 
-**Declare the types of your API in the root module.** The rule above is checked
-module by module, so a root module's `pub fn` can return a `pub` type from an
-internal module without an error. A user can then call the function but cannot
-write the type's name, because they cannot import the module it lives in:
+**Declare the types of your API in the root module.** A `pub` type of an
+internal module is visible to the rest of the package only, so the root module
+may not put it in a `pub` signature either. Users would receive a value whose
+type they cannot write, since they cannot import the module it lives in:
 
-```text
-── error at line 4, col 5 [E030 · declaration]
+<!-- doc-example: skip imports the package's internal module numbers -->
+```turflang
+import numbers;
 
-  Module 'interval/interval' has nothing named 'Stats'.
-
-  Hint: Or, could be one of these from the imported files:
-    - In module 'interval/numbers': 'Stats'
-
-  4 │     mut s: interval::Stats = interval::stats();
-    │     ^~~ Here!
+pub fn stats(values: int[]): numbers::Stats {
+    return numbers::summarize(values);
+}
 ```
 
-Define `Stats` in `src/interval.tr` and the error goes away.
+```text
+── error at line 3, col 8 [E089 · declaration]
+
+  Public function 'stats' of package 'interval' exposes 'Stats', a type of its internal module 'numbers'.
+  Note: 'Stats' is declared in module 'numbers', which only package 'interval' can import (src/numbers.tr, line 3, col 5)
+
+  Hint: Other packages import only 'interval', its root module, so they would receive values of a type they cannot name. Either move `pub struct Stats` into the root module, interval.tr, or keep the function internal by removing its `pub`.
+
+  3 │ pub fn stats(values: int[]): numbers::Stats {
+    │        ^~~~~ Here!
+```
+
+Define `Stats` in `src/interval.tr` and the error goes away. An internal
+module's own `pub` items may use its types freely: only the package imports
+them.
 
 ## Follow the standard library's conventions
 
