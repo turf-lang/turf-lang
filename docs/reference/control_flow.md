@@ -365,7 +365,7 @@ fn main(): int {
 ```turflang
 import io;
 
-fn sumAll(arr: int[]): int {
+fn sum_all(arr: int[]): int {
     mut total: int = 0;
     for value in arr {
         total += value;
@@ -375,8 +375,8 @@ fn sumAll(arr: int[]): int {
 
 fn main(): int {
     immut a: int[5] = [1, 2, 3, 4, 5];
-    io::printline(sumAll(a));
-    io::printline(sumAll(a[1..3]));
+    io::printline(sum_all(a));
+    io::printline(sum_all(a[1..3]));
     return 0;
 }
 ```

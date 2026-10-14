@@ -129,7 +129,7 @@ are covered in [Arrays](arrays.md); references in
 [FFI, `unsafe` and pointers](ffi_and_unsafe.md).
 
 Numeric widening applies to arguments and return values: an `int` is accepted
-where a `double` is expected (`toDouble(42)`), but never the other way round.
+where a `double` is expected (`to_double(42)`), but never the other way round.
 
 ### Methods
 
@@ -224,8 +224,8 @@ fn triple_it(n: int): int { return n * 3; }
 fn add(a: int, b: int): int { return a + b; }
 fn sub(a: int, b: int): int { return a - b; }
 
-fn choose(useAdd: bool): fn(int, int): int {
-    if useAdd { return add; }
+fn choose(use_add: bool): fn(int, int): int {
+    if use_add { return add; }
     return sub;
 }
 
@@ -509,12 +509,12 @@ fn main(): int {
 
   <!-- doc-example: fails E084 -->
   ```turflang
-  fn notMarked(): string {
+  fn not_marked(): string {
       return caller_location;
   }
 
   fn main(): int {
-      printline(notMarked());
+      printline(not_marked());
       return 0;
   }
   ```

@@ -66,15 +66,15 @@ fn<T> first(items: T[]): T {
     return items[0];
 }
 
-fn<T> sizeOfValue(x: T): int {
+fn<T> size_of_value(x: T): int {
     return sizeof(T);
 }
 
-fn<T> countDown(x: T, n: int): int {
+fn<T> count_down(x: T, n: int): int {
     if (n == 0) {
         return 0;
     }
-    return 1 + countDown(x, n - 1);
+    return 1 + count_down(x, n - 1);
 }
 
 fn main(): int {
@@ -85,10 +85,10 @@ fn main(): int {
     mut arr: int[3] = [5, 6, 7];
     test::assert(first(arr) == 5, "T[] binds T to the element type");
 
-    test::assert(sizeOfValue(1) == 8, "sizeof(T) is the real size");
-    test::assert(sizeOfValue(true) == 1, "...for every instantiation");
+    test::assert(size_of_value(1) == 8, "sizeof(T) is the real size");
+    test::assert(size_of_value(true) == 1, "...for every instantiation");
 
-    test::assert(countDown("s", 3) == 3, "a generic may call itself");
+    test::assert(count_down("s", 3) == 3, "a generic may call itself");
     return 0;
 }
 ```
@@ -108,15 +108,15 @@ fn<T> largest(a: T, b: T, greater: fn(T, T): bool): T {
     return b;
 }
 
-fn greaterInt(a: int, b: int): bool {
+fn greater_int(a: int, b: int): bool {
     return a > b;
 }
 
-fn greaterString(a: string, b: string): bool {
+fn greater_string(a: string, b: string): bool {
     return a > b;
 }
 
-fn<T> applyTwice(x: T, f: fn(T): T): T {
+fn<T> apply_twice(x: T, f: fn(T): T): T {
     return f(f(x));
 }
 
@@ -125,9 +125,9 @@ fn increment(n: int): int {
 }
 
 fn main(): int {
-    test::assert(largest(3, 9, greaterInt) == 9, "T = int");
-    test::assert(largest("pear", "apple", greaterString) == "pear", "T = string");
-    test::assert(applyTwice(1, increment) == 3, "fn(T): T");
+    test::assert(largest(3, 9, greater_int) == 9, "T = int");
+    test::assert(largest("pear", "apple", greater_string) == "pear", "T = string");
+    test::assert(apply_twice(1, increment) == 3, "fn(T): T");
     return 0;
 }
 ```
@@ -193,7 +193,7 @@ fn<T> Box.get(): T {
     return self.val;
 }
 
-fn makeBox(): Box<string> {
+fn make_box(): Box<string> {
     return Box::new("made");
 }
 
@@ -209,7 +209,7 @@ fn main(): int {
 
     test::assert(a.get() == 42, "annotated variable");
     test::assert(b.get() == 0, "default() zero-fills");
-    test::assert(makeBox().get() == "made", "return type");
+    test::assert(make_box().get() == "made", "return type");
     test::assert(take(Box::new(1), 2) == 3, "argument");
     test::assert(boxes[0].get() == 7, "collection element");
     return 0;
@@ -300,7 +300,7 @@ struct Pair<A, B> {
     second: B
 }
 
-fn<A, B> Pair.setFirst(a: A): void {
+fn<A, B> Pair.set_first(a: A): void {
     self.first = a;
 }
 
@@ -325,7 +325,7 @@ fn<T> Printer.echo(x: T): T {
 
 fn main(): int {
     mut p: Pair<int, string> = Pair::default();
-    p.setFirst(7);
+    p.set_first(7);
     p.second = "x";
 
     mut q: Pair<string, int> = p.swapped();
@@ -389,7 +389,7 @@ fn describe(x: string): string {
     return "string";
 }
 
-fn<T> viaGeneric(x: T): string {
+fn<T> via_generic(x: T): string {
     return describe(x);
 }
 
@@ -402,8 +402,8 @@ fn main(): int {
     b.cents = 199;
     test::assert(largest(a, b).cents == 250, "T = Money, through its operator <");
     test::assert(sum(1.5, 2.0) == 3.5, "T = double");
-    test::assert(viaGeneric(1) == "value", "T = int uses the generic fallback");
-    test::assert(viaGeneric("s") == "string", "T = string picks the string overload");
+    test::assert(via_generic(1) == "value", "T = int uses the generic fallback");
+    test::assert(via_generic("s") == "string", "T = string picks the string overload");
     return 0;
 }
 ```
@@ -475,16 +475,16 @@ main.tr (1 error)
   b.x`), or declare `operator ==` for the type.)
   Note: 'Set<Big>.add' requires 'Set<Big>.contains' here (lib/std/collections/set.tr, ...)
   Note: 'Set<Big>.contains' requires 'Set<Big>.index_of' here (lib/std/collections/set.tr, ...)
-  Note: 'Set<Big>.index_of' requires 'Set<Big>.bucketFind' here (lib/std/collections/set.tr, ...)
-  Note: the error itself, inside 'Set<Big>.bucketFind' (lib/std/collections/set.tr, ...)
-  Note: in generic declaration 'set::Set.bucketFind' (lib/std/collections/set.tr, ...)
+  Note: 'Set<Big>.index_of' requires 'Set<Big>.bucket_find' here (lib/std/collections/set.tr, ...)
+  Note: the error itself, inside 'Set<Big>.bucket_find' (lib/std/collections/set.tr, ...)
+  Note: in generic declaration 'set::Set.bucket_find' (lib/std/collections/set.tr, ...)
 
   12 │     s.add(b);
      │      ^ Here!
 ```
 
 Read the notes from top to bottom: `add` needed `contains`, which needed
-`index_of`, which needed `bucketFind`, and `bucketFind` is where `==` was applied
+`index_of`, which needed `bucket_find`, and `bucket_find` is where `==` was applied
 to two `Big`s. The fix here is to declare `operator ==(a: Big, b: Big): bool`
 (see [Operator overloading](#operator-overloading)).
 
