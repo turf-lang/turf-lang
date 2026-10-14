@@ -216,10 +216,12 @@ fn main(): int {
 }
 ```
 
-The arguments must then have exactly those types: with `Box<string>` declared,
-`Box::new(42)` is E056, and with `Box<double>` or `Box<int32>` declared,
-`Box::new(1)` is E056 too, because an argument is not converted to fit. Write
-the conversion (`Box::new(1 to double)`).
+The arguments then convert to those types the way any call's arguments do,
+and only by an implicit widening: with `Box<double>` declared, `Box::new(1)`
+stores `1.0`, and with `Box<int32>` declared an untyped literal such as
+`Box::new(5)` fits. Nothing narrows or changes kind: with `Box<int>` declared,
+`Box::new(2.5)` is E056, and so is `Box::new(42)` for a `Box<string>`. Write
+the conversion (`Box::new(2.5 to int)`).
 
 When nothing supplies the type, there is nothing to infer from. `mut l =
 List::default();` is rejected with E129 (Nothing to infer! Cannot infer the

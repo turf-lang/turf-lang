@@ -346,26 +346,49 @@ void TypeChecker::noteConstructed(const ExprAST *E, const TurfTypePtr &Expected)
   const auto &Args = FC->getArgs();
   const size_t Offset =
       Target->Params.size() == Args.size() + 1 ? 1 : 0;
+  // The call was instantiated from its argument types while it was visited,
+  // before the type being built was known. Where the arguments only differ
+  // from the declared type by an implicit widening (an int for a double T,
+  // an untyped literal for an int32 T), the call is re-pointed at the
+  // declared type's instantiation, whose parameters convert the arguments
+  // as any call's do. Anything else is an error.
+  bool Widened = false;
   for (size_t i = 0; i < Args.size() && i + Offset < Target->Params.size(); ++i) {
     TurfTypePtr ParamTy = substituteReturnType(Target->Params[i + Offset].Type, Subst);
     TurfTypePtr ArgTy = getType(Args[i].get());
-    // Exact, as for any type argument, and with no literal exception: the
-    // clone the call builds takes its types from the arguments, so an int
-    // (even an untyped literal) passed for a double or int32 T is not
-    // converted on the way in.
     if (!ParamTy || !ArgTy || sameTypeExact(ArgTy.get(), ParamTy.get()))
       continue;
+    const std::string From = ArgTy->getName(), To = ParamTy->getName();
+    if ((From == "int32" && (To == "int" || To == "double")) ||
+        (From == "int" && To == "double") ||
+        untypedLiteralAcquiresInt32(Args[i].get(), ParamTy.get())) {
+      Widened = true;
+      continue;
+    }
     reportError(FC->getLoc(), ErrCode::ArgumentType,
-                "Argument " + std::to_string(i + 1) + " is '" + ArgTy->getName() +
-                    "', but building a '" + GT->getName() + "' needs '" +
-                    ParamTy->getName() + "' there.",
+                "Argument " + std::to_string(i + 1) + " is '" + From +
+                    "', but building a '" + GT->getName() + "' needs '" + To +
+                    "' there.",
                 {},
                 "A generic constructor's type arguments come from the type "
-                "being built, and an argument is not widened to fit; pass a '" +
-                    ParamTy->getName() + "' (e.g. `x to " + ParamTy->getName() +
-                    "`), or declare the type the argument has.");
+                "being built; an argument converts to it only by an implicit "
+                "widening (int32 to int or double, int to double). Pass a '" +
+                    To + "' (e.g. `x to " + To + "`), or build the type the "
+                    "argument has.");
     return;
   }
+  if (!Widened || !MonoCollector_ || !isFullyConcreteType(GT))
+    return;
+  std::vector<std::string> Order;
+  for (size_t i = Offset; i < Target->Params.size(); ++i)
+    TypeWalk::collectParamOrder(Target->Params[i].Type, Order);
+  std::vector<TurfTypePtr> TypeArgs = orderedTypeArgs(Order, Subst);
+  auto *Site = const_cast<FuncCallExprAST *>(FC);
+  MonoCollector_->forgetSite(Site);
+  MonoCollector_->record({Monomorphize::InstantiationKind::FreeFunction,
+                          Target->BaseName, Target->SourceModule,
+                          std::move(TypeArgs), FC->getLoc(), Target->Decl},
+                         Site);
 }
 
 

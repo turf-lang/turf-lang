@@ -1068,6 +1068,10 @@ Value *FuncCallExprAST::codegen() {
       Value *V = ToSlice ? CodegenSliceArgument(Args[I].get()) : Args[I]->codegen();
       if (!V)
         return nullptr;
+      // An implicit widening, as for any call: a generic constructor built
+      // at its declared type (`Box<double> = Box::new(1)`) takes an int.
+      if (!ToSlice && P < Target->Params.size())
+        V = CastToType(V, Target->Params[P].Type, "argcast", Loc);
       EvaluatedArgs.push_back(V);
     }
 

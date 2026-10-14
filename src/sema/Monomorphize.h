@@ -340,6 +340,23 @@ public:
   /// though that can itself call record() and grow Cache_.
   InstantiationEntry &entryAt(size_t Idx) { return Cache_.at(Idx); }
 
+  /// Takes @p Site off every entry that has not pointed it at a clone yet, so
+  /// a call the type checker re-records under another instantiation (a
+  /// generic constructor taking its type arguments from the declared type,
+  /// TypeChecker::noteConstructed()) ends up at that one only. An entry left
+  /// with no sites still gets its clone, which nothing calls.
+  void forgetSite(const ExprAST *Site) {
+    for (size_t I = 0; I < Cache_.size(); ++I) {
+      InstantiationEntry &E = Cache_.at(I);
+      for (size_t J = E.SitesRewritten; J < E.Sites.size();) {
+        if (E.Sites[J] == Site)
+          E.Sites.erase(E.Sites.begin() + static_cast<std::ptrdiff_t>(J));
+        else
+          ++J;
+      }
+    }
+  }
+
   const InstantiationCache &cache() const { return Cache_; }
 
   /// Human-readable dump for `--dump-instantiations`.
