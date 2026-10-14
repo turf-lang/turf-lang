@@ -47,12 +47,12 @@ pub fn<T> Stack.push(item: T): void {
         // corrupted). sizeof(T) is correct per instantiation (monomorphized,
         // TYPE-002) -- see list.tr's identical fix, S14b, for the first
         // instance of this.
-        immutable byteSize: int = self.h.cap * sizeof(T);
+        immutable byte_size: int = self.h.cap * sizeof(T);
 
         if (self.h.data == null) {
-            self.h.data = gc_alloc(byteSize) to T*;
+            self.h.data = gc_alloc(byte_size) to T*;
         } else {
-            self.h.data = gc_realloc(self.h.data, byteSize) to T*;
+            self.h.data = gc_realloc(self.h.data, byte_size) to T*;
         }
     }
 

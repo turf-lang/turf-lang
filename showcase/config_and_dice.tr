@@ -22,21 +22,21 @@ fn main(): int {
     config.set("rolls", json::JsonValue::from_number(5.0));
     config.set("game_name", json::JsonValue::from_string("Turf Dice"));
 
-    immut configText: string = json::stringify(config);
+    immut config_text: string = json::stringify(config);
     io::print("Config as JSON: ");
-    io::printline(configText);
+    io::printline(config_text);
 
-    mut parsed: json::JsonValue = json::parse(configText) recover run {
+    mut parsed: json::JsonValue = json::parse(config_text) recover run {
         io::printline("Could not parse the config we just wrote -- this should never happen.");
         return 1;
     };
 
     immut sides: int = parsed.get_int("dice_sides");
     immut rolls: int = parsed.get_int("rolls");
-    immut gameName: string = parsed.get_string("game_name");
+    immut game_name: string = parsed.get_string("game_name");
 
     io::print("Playing ");
-    io::print(gameName);
+    io::print(game_name);
     io::print(": rolling a ");
     io::print(sides to string);
     io::print("-sided die ");
@@ -59,9 +59,9 @@ fn main(): int {
     io::printline(total to string);
 
     // Report where we'd send the score, if this were a real client/server game.
-    immut scoreServer: string = net::resolve_hostname("localhost") recover produce "127.0.0.1";
+    immut score_server: string = net::resolve_hostname("localhost") recover produce "127.0.0.1";
     io::print("Would report this score to ");
-    io::print(scoreServer);
+    io::print(score_server);
     io::printline(" if a score server were running.");
 
     return 0;

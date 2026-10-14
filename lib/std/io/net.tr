@@ -148,7 +148,7 @@ pub error NetworkError {
 //                             // order
 //   };
 //
-// This is the READING counterpart to buildSockAddr()'s WRITING technique
+// This is the READING counterpart to build_sock_addr()'s WRITING technique
 // above: no Turf struct can express this mixed 8-byte/4-byte-field layout,
 // so this reads the raw bytes through pointer-indexed loads instead --
 // `void* to int*` indexed loads, the same idiom list.tr/stack.tr use for
@@ -169,7 +169,7 @@ pub error NetworkError {
 // bytes in network order), `char*` indexing reads those bytes one at a
 // time -- byte 0 of that 4-byte address is the first octet ("a" in
 // "a.b.c.d"), since network byte order for a dotted-decimal address is
-// just left-to-right, same as buildSockAddr()'s own addrPart comment notes.
+// just left-to-right, same as build_sock_addr()'s own addrPart comment notes.
 pub fn resolve_hostname(host: string): !string {
     turfrt_net_startup();
     mut h: ptr = gethostbyname(host);
@@ -180,28 +180,28 @@ pub fn resolve_hostname(host: string): !string {
     // Byte offset 24 == int* element index 3 (24 / 8 == 3) -- see doc
     // comment above for why every field up to here is 8-byte aligned.
     mut ih: int* = h to int*;
-    immut hAddrListRaw: int = ih[3];
-    if hAddrListRaw == 0 {
+    immut h_addr_list_raw: int = ih[3];
+    if h_addr_list_raw == 0 {
         return NetworkError::ResolutionFailed("could not resolve host '" + host + "'");
     }
 
     // h_addr_list[0]: the first entry of the NULL-terminated
     // address-pointer array -- itself another pointer, to the actual
     // 4-byte address.
-    mut hAddrList: int* = hAddrListRaw to int*;
-    immut firstAddrRaw: int = hAddrList[0];
-    if firstAddrRaw == 0 {
+    mut h_addr_list: int* = h_addr_list_raw to int*;
+    immut first_addr_raw: int = h_addr_list[0];
+    if first_addr_raw == 0 {
         return NetworkError::ResolutionFailed("could not resolve host '" + host + "'");
     }
 
     // Now read the 4 individual address bytes at BYTE granularity --
     // this is the one place `int*`'s 8-byte stride is too coarse, so
     // `char*` (1-byte elements) is used instead.
-    mut addrBytes: char* = firstAddrRaw to char*;
-    immut a: int = addrBytes[0] to int;
-    immut b: int = addrBytes[1] to int;
-    immut c: int = addrBytes[2] to int;
-    immut d: int = addrBytes[3] to int;
+    mut addr_bytes: char* = first_addr_raw to char*;
+    immut a: int = addr_bytes[0] to int;
+    immut b: int = addr_bytes[1] to int;
+    immut c: int = addr_bytes[2] to int;
+    immut d: int = addr_bytes[3] to int;
 
     return (a to string) + "." + (b to string) + "." + (c to string) + "." + (d to string);
 }
@@ -213,7 +213,7 @@ pub fn resolve_hostname(host: string): !string {
 // first two bytes, port and address in network order) is wrong on BSD/macOS,
 // where the first byte is a length. Allocated with calloc: release it with
 // mem::free(), as before.
-fn buildSockAddr(a: int, b: int, c: int, d: int, port: int): void* {
+fn build_sock_addr(a: int, b: int, c: int, d: int, port: int): void* {
     return turfrt_net_sockaddr(a, b, c, d, port);
 }
 
@@ -240,7 +240,7 @@ pub fn TcpConnection.connect(a: int, b: int, c: int, d: int, port: int) static: 
         return NetworkError::SocketCreationFailed("could not create a socket");
     }
 
-    mut addr: void* = buildSockAddr(a, b, c, d, port);
+    mut addr: void* = build_sock_addr(a, b, c, d, port);
     immut result: int = connect(fd, addr, 16);
     mem::free(addr);
     if !(result == 0) {
@@ -250,8 +250,8 @@ pub fn TcpConnection.connect(a: int, b: int, c: int, d: int, port: int) static: 
     return TcpConnection::new(fd);
 }
 
-// Reads up to maxBytes from the connection. Returns whatever arrived
-// (possibly less than maxBytes, possibly "" on a closed connection) as a
+// Reads up to max_bytes from the connection. Returns whatever arrived
+// (possibly less than max_bytes, possibly "" on a closed connection) as a
 // string. Blocks until at least some data arrives or the peer closes.
 //
 // Deliberately does NOT free the buffer before returning: `string` and
@@ -267,11 +267,11 @@ pub fn TcpConnection.connect(a: int, b: int, c: int, d: int, port: int) static: 
 // yet, so it still leaks exactly as before; see EmitStringConcat's own
 // TURF-MEMLEAK comment history in strings.tr). Zero-filled, not just
 // malloc'd, for the same reason io::read_to_string() is: recv() may write
-// fewer than maxBytes bytes, and the untouched tail needs to already be 0
+// fewer than max_bytes bytes, and the untouched tail needs to already be 0
 // to serve as the string's NUL terminator.
-pub fn TcpConnection.read(maxBytes: int): string {
-    mut buf: void* = gc_alloc_zeroed(maxBytes + 1);
-    recv(self.fd, buf, maxBytes, 0);
+pub fn TcpConnection.read(max_bytes: int): string {
+    mut buf: void* = gc_alloc_zeroed(max_bytes + 1);
+    recv(self.fd, buf, max_bytes, 0);
     return buf to string;
 }
 
@@ -329,15 +329,15 @@ pub fn TcpListener.bind(port: int) static: !TcpListener {
 
     turfrt_net_reuseaddr(fd);
 
-    mut addr: void* = buildSockAddr(0, 0, 0, 0, port);
-    immut bindResult: int = bind(fd, addr, 16);
+    mut addr: void* = build_sock_addr(0, 0, 0, 0, port);
+    immut bind_result: int = bind(fd, addr, 16);
     mem::free(addr);
-    if !(bindResult == 0) {
+    if !(bind_result == 0) {
         return NetworkError::BindFailed("could not bind port " + (port to string));
     }
 
-    immut listenResult: int = listen(fd, 128);
-    if !(listenResult == 0) {
+    immut listen_result: int = listen(fd, 128);
+    if !(listen_result == 0) {
         return NetworkError::ListenFailed("could not listen on port " + (port to string));
     }
 
@@ -349,11 +349,11 @@ pub fn TcpListener.bind(port: int) static: !TcpListener {
 // bring down a whole server -- the caller decides (commonly
 // `recover run { continue; }` to just keep serving).
 pub fn TcpListener.accept(): !TcpConnection {
-    mut clientFd: int = accept(self.fd, null, null);
-    if !(clientFd >= 0) {
+    mut client_fd: int = accept(self.fd, null, null);
+    if !(client_fd >= 0) {
         return NetworkError::AcceptFailed("could not accept a connection");
     }
-    return TcpConnection::new(clientFd);
+    return TcpConnection::new(client_fd);
 }
 
 // The underlying file descriptor; -1 after close(). See TcpConnection.raw_fd.

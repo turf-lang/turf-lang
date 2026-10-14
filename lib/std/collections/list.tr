@@ -70,12 +70,12 @@ pub fn<T> List.push(item: T): void {
         // instantiation (monomorphized, S12a's own completion criterion 4) --
         // this is the ONE stdlib change this whole group permits itself
         // (ARCHITECTURE_OVERHAUL.md §8's TYPE-002 entry).
-        immutable byteSize: int = self.h.cap * sizeof(T);
+        immutable byte_size: int = self.h.cap * sizeof(T);
 
         if (self.h.data == null) {
-            self.h.data = gc_alloc(byteSize) to T*;
+            self.h.data = gc_alloc(byte_size) to T*;
         } else {
-            self.h.data = gc_realloc(self.h.data, byteSize) to T*;
+            self.h.data = gc_realloc(self.h.data, byte_size) to T*;
         }
     }
 

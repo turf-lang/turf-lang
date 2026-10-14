@@ -1,13 +1,13 @@
 // EXPECT-DIAG: E124
 // EXPECT-DIAG: Cannot compare struct values with '=='
 // EXPECT-DIAG: 'Set<Big>.add' requires 'Set<Big>.contains'
-// EXPECT-DIAG: the error itself, inside 'Set<Big>.bucketFind'
+// EXPECT-DIAG: the error itself, inside 'Set<Big>.bucket_find'
 // The diagnostic prints the source line of its PRIMARY location as the
 // snippet, so these two lines pin the anchor: it is this file's own call (the
 // outermost user-code request), and no longer the line inside set.tr -- the
 // innermost requester -- that it used to point at.
 // EXPECT-DIAG: s.add(Big::new(1, 2, 3));
-// EXPECT-NO-DIAG: self.bucketFind(item)
+// EXPECT-NO-DIAG: self.bucket_find(item)
 // Regression test: D7 (docs/development/changes/TYPE-002.md, S15) -- the
 // plan's own testing scope (ARCHITECTURE_OVERHAUL.md §8's TYPE-002 entry)
 // named `fail_generic_requires_operator.tr`, deferred twice (S12a -> S13a/

@@ -171,21 +171,21 @@ pub fn parse_request(conn: net::TcpConnection): Request {
     immut raw: string = conn.read(8192);
     mut req: Request = Request::default();
 
-    mut sepIdx: int = strings::index_of(raw, "\r\n\r\n");
-    mut sepLen: int = 4;
-    if sepIdx < 0 {
-        sepIdx = strings::index_of(raw, "\n\n");
-        sepLen = 2;
+    mut sep_idx: int = strings::index_of(raw, "\r\n\r\n");
+    mut sep_len: int = 4;
+    if sep_idx < 0 {
+        sep_idx = strings::index_of(raw, "\n\n");
+        sep_len = 2;
     }
 
-    mut headerBlock: string = raw;
+    mut header_block: string = raw;
     mut body: string = "";
-    if sepIdx >= 0 {
-        headerBlock = strings::substring(raw, 0, sepIdx);
-        body = strings::substring(raw, sepIdx + sepLen, strings::length(raw));
+    if sep_idx >= 0 {
+        header_block = strings::substring(raw, 0, sep_idx);
+        body = strings::substring(raw, sep_idx + sep_len, strings::length(raw));
     }
 
-    mut lines: List<string> = strings::split(headerBlock, "\n");
+    mut lines: List<string> = strings::split(header_block, "\n");
 
     if lines.length() == 0 {
         req.method = "";
@@ -194,8 +194,8 @@ pub fn parse_request(conn: net::TcpConnection): Request {
         return req;
     }
 
-    immut requestLine: string = strings::trim_end(lines.get(0));
-    mut parts: List<string> = strings::split(requestLine, " ");
+    immut request_line: string = strings::trim_end(lines.get(0));
+    mut parts: List<string> = strings::split(request_line, " ");
     if parts.length() >= 2 {
         req.method = parts.get(0);
         req.path = parts.get(1);
@@ -207,10 +207,10 @@ pub fn parse_request(conn: net::TcpConnection): Request {
     mut i: int = 1;
     while i < lines.length() {
         immut line: string = strings::trim_end(lines.get(i));
-        immut colonIdx: int = strings::index_of(line, ":");
-        if colonIdx >= 0 {
-            immut key: string = strings::trim(strings::substring(line, 0, colonIdx));
-            immut value: string = strings::trim(strings::substring(line, colonIdx + 1, strings::length(line)));
+        immut colon_idx: int = strings::index_of(line, ":");
+        if colon_idx >= 0 {
+            immut key: string = strings::trim(strings::substring(line, 0, colon_idx));
+            immut value: string = strings::trim(strings::substring(line, colon_idx + 1, strings::length(line)));
             req.headers.put(key, value);
         }
         i = i + 1;
@@ -250,11 +250,11 @@ pub fn status_text(status: int): string {
 // Shared response-building/writing logic for send_text/send_json below --
 // the two only differ in Content-Type, exactly like DESIGN_NOTES.md's
 // original sketch says they should.
-pub fn Response.send_raw(status: int, contentType: string, body: string): void {
-    immut bodyLen: int = strings::length(body);
+pub fn Response.send_raw(status: int, content_type: string, body: string): void {
+    immut body_len: int = strings::length(body);
     immut response: string = "HTTP/1.1 " + status_text(status) + "\r\n" +
-    "Content-Type: " + contentType + "\r\n" +
-    "Content-Length: " + (bodyLen to string) + "\r\n" +
+    "Content-Type: " + content_type + "\r\n" +
+    "Content-Length: " + (body_len to string) + "\r\n" +
     "Connection: close\r\n" +
     "\r\n" +
     body;

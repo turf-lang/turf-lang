@@ -36,7 +36,7 @@ struct Box<T> {
 
 // Deliberately takes a CONCRETE `int`, not `T` -- the exact shape that used
 // to break. `Box.grow` exists purely to be called from `Box.fill` below,
-// mirroring map.tr/set.tr's real `bucketRehash(newCap: int)` shape.
+// mirroring map.tr/set.tr's real `bucket_rehash(new_bcap: int)` shape.
 fn<T> Box.grow(extra: int): int {
     return extra * 2;
 }

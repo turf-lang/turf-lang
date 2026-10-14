@@ -14,7 +14,7 @@ import net;
 import strings; // string '+' is an operator overload now, not a builtin
 
 fn main(): int {
-    mut setConn: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 8181) recover as err run {
+    mut set_conn: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 8181) recover as err run {
         if err == net::NetworkError::ConnectionRefused {
             io::printline("Connection refused -- is showcase/kv_store_server.tr running on port 8181?");
         } else {
@@ -22,25 +22,25 @@ fn main(): int {
         }
         return 1;
     };
-    defer setConn.close();
-    setConn.write("SET language Turf\n");
-    io::printline("SET response: " + setConn.read(1024));
+    defer set_conn.close();
+    set_conn.write("SET language Turf\n");
+    io::printline("SET response: " + set_conn.read(1024));
 
-    mut getConn: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 8181) recover run {
+    mut get_conn: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 8181) recover run {
         io::printline("Failed to connect for GET.");
         return 1;
     };
-    defer getConn.close();
-    getConn.write("GET language\n");
-    io::printline("GET response: " + getConn.read(1024));
+    defer get_conn.close();
+    get_conn.write("GET language\n");
+    io::printline("GET response: " + get_conn.read(1024));
 
-    mut missConn: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 8181) recover run {
+    mut miss_conn: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 8181) recover run {
         io::printline("Failed to connect for GET (miss).");
         return 1;
     };
-    defer missConn.close();
-    missConn.write("GET nonexistent\n");
-    io::printline("GET (miss) response: " + missConn.read(1024));
+    defer miss_conn.close();
+    miss_conn.write("GET nonexistent\n");
+    io::printline("GET (miss) response: " + miss_conn.read(1024));
 
     return 0;
 }

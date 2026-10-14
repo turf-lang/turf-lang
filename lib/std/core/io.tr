@@ -212,10 +212,10 @@ pub fn read_to_string(path: string): !string {
     fseek(stream, 0, 0); // SEEK_SET
 
     mut buf: void* = gc_alloc_zeroed(size + 1);
-    immut readCount: int = fread(buf, 1, size, stream);
+    immut read_count: int = fread(buf, 1, size, stream);
     fclose(stream);
 
-    if readCount != size {
+    if read_count != size {
         return FileError::ReadFailed(path, "could not read '" + path + "'");
     }
 

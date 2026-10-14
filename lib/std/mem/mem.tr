@@ -138,14 +138,14 @@ pub fn zero(p: void*, n: int): void {
 // bad alignment argument, matching every other checked helper in this file.
 @ownership(acquires)
 pub fn alloc_aligned(alignment: int, size: int): void* {
-    mut outSlot: void* = malloc(8);
-    immut result: int = posix_memalign(outSlot, alignment, size);
+    mut out_slot: void* = malloc(8);
+    immut result: int = posix_memalign(out_slot, alignment, size);
     if result != 0 {
         sys::panic("mem.alloc_aligned: allocation failed (bad alignment or out of memory)");
     }
-    mut iSlot: int* = outSlot to int*;
-    mut allocated: void* = iSlot[0] to void*;
-    gc_checked_free(outSlot);
+    mut i_slot: int* = out_slot to int*;
+    mut allocated: void* = i_slot[0] to void*;
+    gc_checked_free(out_slot);
     return allocated;
 }
 
@@ -259,11 +259,11 @@ fn<T> PoolHeader.grow(): void {
     } else {
         self.cap = self.cap * 2;
     }
-    immut byteSize: int = self.cap * sizeof(T);
+    immut byte_size: int = self.cap * sizeof(T);
     if self.items == null {
-        self.items = malloc(byteSize) to T*;
+        self.items = malloc(byte_size) to T*;
     } else {
-        self.items = realloc(self.items, byteSize) to T*;
+        self.items = realloc(self.items, byte_size) to T*;
     }
 }
 

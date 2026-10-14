@@ -26,7 +26,7 @@ struct Point {
 }
 
 // Mirrors the internal shape hashing::hash() is actually called from
-// (Map<K,V>.bucketFind(key: K), Set<T>.bucketFind(item: T)) -- a generic
+// (Map<K,V>.bucket_find(key: K), Set<T>.bucket_find(item: T)) -- a generic
 // function whose own body calls hash() on its still-open type parameter.
 fn<T> hashViaGeneric(x: T): int {
     return hashing::hash(x);

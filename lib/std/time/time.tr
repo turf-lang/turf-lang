@@ -132,12 +132,12 @@ pub fn sleep_seconds(n: int): void {
 // the same reason -- large `n` does not overflow a single unsafe usleep()
 // call.
 pub fn sleep_ms(n: int): void {
-    mut remainingUsec: int = n * 1000;
-    while remainingUsec >= MAX_USLEEP_USEC {
+    mut remaining_usec: int = n * 1000;
+    while remaining_usec >= MAX_USLEEP_USEC {
         usleep(MAX_USLEEP_USEC to int32);
-        remainingUsec = remainingUsec - MAX_USLEEP_USEC;
+        remaining_usec = remaining_usec - MAX_USLEEP_USEC;
     }
-    if remainingUsec > 0 {
-        usleep(remainingUsec to int32);
+    if remaining_usec > 0 {
+        usleep(remaining_usec to int32);
     }
 }

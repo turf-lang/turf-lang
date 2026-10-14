@@ -49,7 +49,7 @@ unsafe module;
 //     so would break the probe chain for any OTHER key that collided at
 //     this slot and had to probe past it; the classic fix is a distinct
 //     "deleted but don't stop probing here" marker, reused by a later
-//     insert if the probe walks over it again (`bucketInsertSlot()`
+//     insert if the probe walks over it again (`bucket_insert_slot()`
 //     below).
 //   - `hash(K)` is `hashing::hash()` (`hashing.tr`, this same directory) --
 //     see that file's own header for why a generic `hash(T)` is even
@@ -118,7 +118,7 @@ pub struct Map<K, V> {
 // the first EMPTY slot (which can only mean "never inserted here," since
 // every occupied-then-removed slot leaves a TOMBSTONE, not an EMPTY, so a
 // real probe chain is never broken by a deletion elsewhere on it).
-fn<K, V> Map.bucketFind(key: K): int {
+fn<K, V> Map.bucket_find(key: K): int {
     if (self.h.bcap == 0) {
         return -1;
     }
@@ -142,9 +142,9 @@ fn<K, V> Map.bucketFind(key: K): int {
 // TOMBSTONE slot along the probe chain, preferring the FIRST tombstone
 // seen (keeps probe chains from growing unboundedly long as churn
 // accumulates tombstones). Caller must already know `key` isn't present
-// (a fresh `bucketFind()` returned -1) and that `self.h.bcap > 0`
-// (`bucketMaybeGrow()` runs first in every caller below).
-fn<K, V> Map.bucketInsertSlot(key: K): int {
+// (a fresh `bucket_find()` returned -1) and that `self.h.bcap > 0`
+// (`bucket_maybe_grow()` runs first in every caller below).
+fn<K, V> Map.bucket_insert_slot(key: K): int {
     mut slot: int = hashing::hash(key) & (self.h.bcap - 1);
     mut tomb: int = -1;
     mut probes: int = 0;
@@ -170,19 +170,19 @@ fn<K, V> Map.bucketInsertSlot(key: K): int {
 // realloc -- every entry's bucket slot is a function of
 // `hash(key) & (bcap - 1)`, which changes the moment `bcap` does, so every
 // entry must be re-probed into its new home slot, not merely copied.
-fn<K, V> Map.bucketRehash(newBcap: int): void {
-    self.h.buckets = gc_alloc(newBcap * sizeof(int)) to int*;
+fn<K, V> Map.bucket_rehash(new_bcap: int): void {
+    self.h.buckets = gc_alloc(new_bcap * sizeof(int)) to int*;
     mut z: int = 0;
-    while z < newBcap {
+    while z < new_bcap {
         self.h.buckets[z] = -1;
         z = z + 1;
     }
-    self.h.bcap = newBcap;
+    self.h.bcap = new_bcap;
     self.h.tombs = 0;
 
     mut i: int = 0;
     while i < self.h.len {
-        immutable slot: int = self.bucketInsertSlot(self.h.keys[i]);
+        immutable slot: int = self.bucket_insert_slot(self.h.keys[i]);
         self.h.buckets[slot] = i;
         i = i + 1;
     }
@@ -191,16 +191,16 @@ fn<K, V> Map.bucketRehash(newBcap: int): void {
 // Rebuilds the bucket index once live entries plus tombstones would exceed a
 // 70% load factor (or on first use): twice the size if the live entries
 // alone fill more than 35%, else the same size, to clear the tombstones.
-fn<K, V> Map.bucketMaybeGrow(): void {
+fn<K, V> Map.bucket_maybe_grow(): void {
     if (self.h.bcap == 0) {
-        self.bucketRehash(8);
+        self.bucket_rehash(8);
         return;
     }
     if ((self.h.len + self.h.tombs + 1) * 10 >= self.h.bcap * 7) {
         if ((self.h.len + 1) * 20 >= self.h.bcap * 7) {
-            self.bucketRehash(self.h.bcap * 2);
+            self.bucket_rehash(self.h.bcap * 2);
         } else {
-            self.bucketRehash(self.h.bcap);
+            self.bucket_rehash(self.h.bcap);
         }
     }
 }
@@ -210,7 +210,7 @@ fn<K, V> Map.bucketMaybeGrow(): void {
 // Returns the DENSE-array index of `key`, or -1 if absent. O(1) average
 // (was O(n) before this group, see this file's header).
 pub fn<K, V> Map.index_of(key: K): int {
-    immutable slot: int = self.bucketFind(key);
+    immutable slot: int = self.bucket_find(key);
     if (slot < 0) {
         return -1;
     }
@@ -222,9 +222,9 @@ pub fn<K, V> Map.contains(key: K): bool {
 }
 
 pub fn<K, V> Map.put(key: K, value: V): void {
-    immutable existingSlot: int = self.bucketFind(key);
-    if (existingSlot >= 0) {
-        self.h.values[self.h.buckets[existingSlot]] = value;
+    immutable existing_slot: int = self.bucket_find(key);
+    if (existing_slot >= 0) {
+        self.h.values[self.h.buckets[existing_slot]] = value;
         return;
     }
 
@@ -237,24 +237,24 @@ pub fn<K, V> Map.put(key: K, value: V): void {
 
         // TYPE-002 (S15/D3): real per-instantiation byte sizes -- see
         // list.tr's identical fix for the first instance of this class of fix.
-        immutable keyByteSize: int = self.h.cap * sizeof(K);
-        immutable valueByteSize: int = self.h.cap * sizeof(V);
+        immutable key_byte_size: int = self.h.cap * sizeof(K);
+        immutable value_byte_size: int = self.h.cap * sizeof(V);
 
         if (self.h.keys == null) {
-            self.h.keys = gc_alloc(keyByteSize) to K*;
-            self.h.values = gc_alloc(valueByteSize) to V*;
+            self.h.keys = gc_alloc(key_byte_size) to K*;
+            self.h.values = gc_alloc(value_byte_size) to V*;
         } else {
-            self.h.keys = gc_realloc(self.h.keys, keyByteSize) to K*;
-            self.h.values = gc_realloc(self.h.values, valueByteSize) to V*;
+            self.h.keys = gc_realloc(self.h.keys, key_byte_size) to K*;
+            self.h.values = gc_realloc(self.h.values, value_byte_size) to V*;
         }
     }
-    self.bucketMaybeGrow();
+    self.bucket_maybe_grow();
 
-    immutable insertSlot: int = self.bucketInsertSlot(key);
-    if (self.h.buckets[insertSlot] == -2) {
+    immutable insert_slot: int = self.bucket_insert_slot(key);
+    if (self.h.buckets[insert_slot] == -2) {
         self.h.tombs = self.h.tombs - 1;
     }
-    self.h.buckets[insertSlot] = self.h.len;
+    self.h.buckets[insert_slot] = self.h.len;
     self.h.keys[self.h.len] = key;
     self.h.values[self.h.len] = value;
     self.h.len = self.h.len + 1;
@@ -296,7 +296,7 @@ pub fn<K, V> Map.try_get(key: K): !V {
 // worse, the bucket for the just-removed key could be found first and
 // mistakenly matched against the moved-in key at the same dense index).
 pub fn<K, V> Map.remove(key: K): void {
-    immutable bslot: int = self.bucketFind(key);
+    immutable bslot: int = self.bucket_find(key);
     if (bslot < 0) {
         return;
     }
@@ -306,9 +306,9 @@ pub fn<K, V> Map.remove(key: K): void {
 
     self.h.len = self.h.len - 1;
     if (idx != self.h.len) {
-        immutable movedSlot: int = self.bucketFind(self.h.keys[self.h.len]);
-        if (movedSlot >= 0) {
-            self.h.buckets[movedSlot] = idx;
+        immutable moved_slot: int = self.bucket_find(self.h.keys[self.h.len]);
+        if (moved_slot >= 0) {
+            self.h.buckets[moved_slot] = idx;
         }
         self.h.keys[idx] = self.h.keys[self.h.len];
         self.h.values[idx] = self.h.values[self.h.len];

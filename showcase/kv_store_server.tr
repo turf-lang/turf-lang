@@ -70,7 +70,7 @@ struct Entry {
 // Map<K,V> in the standard library yet (see
 // docs/planning/STDLIB_ROADMAP.md) -- this linear scan is the honest
 // current alternative for a small store like this one.
-fn findIndex(store: List<Entry>, key: string): int {
+fn find_index(store: List<Entry>, key: string): int {
     mut i: int = 0;
     while i < store.length() {
         if store.get(i).key == key {
@@ -90,8 +90,8 @@ fn main(): int {
     defer server.close();
     io::printline("Turf key-value store listening on port 8181...");
 
-    mut requestCount: int = 0;
-    while requestCount < 1000 {
+    mut request_count: int = 0;
+    while request_count < 1000 {
         // A single bad accept() shouldn't bring the whole store down --
         // log it and keep serving instead of aborting.
         mut conn: net::TcpConnection = server.accept() recover run {
@@ -102,28 +102,28 @@ fn main(): int {
         defer conn.close();
         immut line: string = strings::trim(conn.read(4096));
 
-        immut firstSpace: int = strings::index_of(line, " ");
-        if firstSpace < 0 {
+        immut first_space: int = strings::index_of(line, " ");
+        if first_space < 0 {
             conn.write("ERROR malformed command\n");
         } else {
-            immut cmd: string = strings::substring(line, 0, firstSpace);
-            immut rest: string = strings::substring(line, firstSpace + 1, strings::length(line));
+            immut cmd: string = strings::substring(line, 0, first_space);
+            immut rest: string = strings::substring(line, first_space + 1, strings::length(line));
 
             if cmd == "GET" {
-                immut idx: int = findIndex(store, rest);
+                immut idx: int = find_index(store, rest);
                 if idx >= 0 {
                     conn.write(store.get(idx).value + "\n");
                 } else {
                     conn.write("NOT_FOUND\n");
                 }
             } elseif cmd == "SET" {
-                immut secondSpace: int = strings::index_of(rest, " ");
-                if secondSpace < 0 {
+                immut second_space: int = strings::index_of(rest, " ");
+                if second_space < 0 {
                     conn.write("ERROR: SET needs a key and a value\n");
                 } else {
-                    immut key: string = strings::substring(rest, 0, secondSpace);
-                    immut value: string = strings::substring(rest, secondSpace + 1, strings::length(rest));
-                    immut idx: int = findIndex(store, key);
+                    immut key: string = strings::substring(rest, 0, second_space);
+                    immut value: string = strings::substring(rest, second_space + 1, strings::length(rest));
+                    immut idx: int = find_index(store, key);
                     if idx >= 0 {
                         // A read-modify-write, not a through-pointer field
                         // write: List.get() returns Entry BY VALUE (OVH-003
@@ -146,7 +146,7 @@ fn main(): int {
             }
         }
 
-        requestCount = requestCount + 1;
+        request_count = request_count + 1;
     }
 
     io::printline("Handled 1000 requests, shutting down.");

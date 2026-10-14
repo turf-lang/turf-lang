@@ -66,16 +66,16 @@ fn main(): int {
         mut mod: ptr = LLVMModuleCreateWithNameInContext("turf_selfhost_demo", ctx);
 
         // Build: define i64 @answer() { entry: %sum = add i64 19, 23  ret i64 %sum }
-        mut i64Ty: ptr = LLVMInt64TypeInContext(ctx);
-        mut fnType: ptr = LLVMFunctionType(i64Ty, null, 0, 0);
-        mut answerFn: ptr = LLVMAddFunction(mod, "answer", fnType);
+        mut i64_ty: ptr = LLVMInt64TypeInContext(ctx);
+        mut fn_type: ptr = LLVMFunctionType(i64_ty, null, 0, 0);
+        mut answer_fn: ptr = LLVMAddFunction(mod, "answer", fn_type);
 
-        mut entry: ptr = LLVMAppendBasicBlockInContext(ctx, answerFn, "entry");
+        mut entry: ptr = LLVMAppendBasicBlockInContext(ctx, answer_fn, "entry");
         mut builder: ptr = LLVMCreateBuilderInContext(ctx);
         LLVMPositionBuilderAtEnd(builder, entry);
 
-        mut lhs: ptr = LLVMConstInt(i64Ty, 19, 0);
-        mut rhs: ptr = LLVMConstInt(i64Ty, 23, 0);
+        mut lhs: ptr = LLVMConstInt(i64_ty, 19, 0);
+        mut rhs: ptr = LLVMConstInt(i64_ty, 23, 0);
         mut sum: ptr = LLVMBuildAdd(builder, lhs, rhs, "sum");
         LLVMBuildRet(builder, sum);
 

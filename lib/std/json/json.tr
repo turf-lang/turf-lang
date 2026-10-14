@@ -562,16 +562,16 @@ fn Parser.parse_number(): !JsonValue {
     if self.pos < self.len && self.at() == 45 { // '-'
         self.pos = self.pos + 1;
     }
-    mut sawDigit: bool = false;
+    mut saw_digit: bool = false;
     while self.pos < self.len && self.at() >= 48 && self.at() <= 57 {
         self.pos = self.pos + 1;
-        sawDigit = true;
+        saw_digit = true;
     }
     if self.pos < self.len && self.at() == 46 { // '.'
         self.pos = self.pos + 1;
         while self.pos < self.len && self.at() >= 48 && self.at() <= 57 {
             self.pos = self.pos + 1;
-            sawDigit = true;
+            saw_digit = true;
         }
     }
     // Exponent: `e`/`E`, an optional sign, digits; strings::parse_double
@@ -585,13 +585,13 @@ fn Parser.parse_number(): !JsonValue {
             self.pos = self.pos + 1;
         }
     }
-    if !sawDigit {
+    if !saw_digit {
         return JsonError::InvalidNumber(start, "invalid number at offset " + (start to string));
     }
     mut digits: strings::StringBuilder = strings::StringBuilder::default();
     self.copy_into(&digits, start, self.pos);
-    immut numStr: string = digits.to_string();
-    immut n: double = strings::parse_double(numStr) recover run {
+    immut num_str: string = digits.to_string();
+    immut n: double = strings::parse_double(num_str) recover run {
         return JsonError::InvalidNumber(start, "invalid number at offset " + (start to string));
     };
     return JsonValue::from_number(n);
