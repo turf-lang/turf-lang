@@ -381,8 +381,8 @@ A model has to load and run on the CPU, so a suggestion can take from several se
 
 ```text
 $ turf version
-turf 1.0.0-dev  (needs turfc interface 1.1+)
-turfc 2.0.0-dev  (interface 1.7, /opt/turf/bin/turfc)
+turf 1.0.0  (needs turfc interface 1.1+)
+turfc 2.0.0  (interface 1.7, /opt/turf/bin/turfc)
   llvm 22.1.8
   runtime turf_rt_abi_2_0
   root /opt/turf
@@ -396,7 +396,7 @@ The two programs need not have the same version. What must fit is the **driver i
 
 ```text
 turf: this compiler does not speak the interface this turf needs
-  turf  1.0.0-dev  needs interface 1.1 or a later 1.x  (/opt/turf/bin/turf)
+  turf  1.0.0  needs interface 1.1 or a later 1.x  (/opt/turf/bin/turf)
   turfc 9.0.0  speaks interface 2.0  (/opt/fake/turfc)
 hint: upgrade turf: this compiler's interface is newer than this turf understands
 ```
@@ -456,7 +456,7 @@ Usage: turfc <filename.tr> [-o output] [--emit-llvm | --emit-obj] [--smart]
 
 ```text
 $ turfc --version
-turfc 2.0.0-dev
+turfc 2.0.0
 interface 1.7
 llvm 22.1.8
 runtime turf_rt_abi_2_0
