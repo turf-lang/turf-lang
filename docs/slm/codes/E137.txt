@@ -11,8 +11,14 @@ INCORRECT:
     mut f: fn(int): int = helper::twice;   // qualified name used as a value
 
 CORRECT:
-    import helper::twice;
-    mut f: fn(int): int = twice;           // the bare name is a value
+    fn twice(x: int): int {
+        return x * 2;
+    }
+
+    fn main(): int {
+        mut f: fn(int): int = twice;       // the bare name is a value
+        return f(2) - 4;
+    }
 
 FIX:
   Import the function by name and use the bare name, or call it where its result is needed.
