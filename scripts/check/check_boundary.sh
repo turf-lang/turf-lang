@@ -1,66 +1,42 @@
 #!/bin/bash
 #
-# check_boundary.sh -- STD-001's own regression coverage
-# (docs/archive/ARCHITECTURE_OVERHAUL.md §8 STD-001, "boundary
-# formalization"). Mechanically checks the three claims that section makes
-# rather than leaving them as prose someone has to re-verify by hand:
+# check_boundary.sh -- mechanical checks of the line between the compiler,
+# the runtime and the standard library (docs/architecture/boundary.md), so
+# those rules do not rest on prose someone has to re-verify by hand:
 #
-#   1. No path-based privilege remains -- AGENTS.md's "No compiler
-#      special-casing; ordinary .tr files" claim, and F-STD-1 (FREEZE.md
-#      §6.8): a raw-pointer capability is DECLARED IN SOURCE
-#      (`unsafe module;`, LANG-002), never granted by a file's location on
-#      disk. `IsPathUnderLibStd()` was the mechanism this replaced; its
-#      name is checked for directly, since its reappearance under any name
-#      is exactly the regression this exists to catch.
-#   2. The prelude's membership is specified, not just a hardcoded list --
-#      `PreludeModuleNames` (src/frontend/ParserModule.cpp) must name exactly the
-#      `.tr` files under `lib/std/core/`, no more, no fewer. See
-#      docs/architecture/boundary.md's "Prelude module specification"
-#      section for why core/ is the specification rather than an
-#      incidental coincidence.
-#   3. The closed intrinsic list (src/sema/Intrinsics.h, F-STD-2) actually
-#      covers every bare compiler-known name reachable from Turf source --
-#      every `RegisterBuiltin(...)` name in src/sema/Builtins.cpp, and the
-#      `sizeof`/`typeof` lexer-level ones, must appear in Intrinsics.h's
-#      text. This catches a FUTURE addition to g_builtins that forgets to
-#      also document itself -- it does not, and cannot, catch every
-#      possible name-based special case in the compiler (see
-#      docs/architecture/boundary.md's "One documented exception" section
-#      for the one known, pre-existing, out-of-scope exception this script
-#      deliberately does not flag).
-#   4. OVH-002 (docs/development/changes/OVH-002.md): no Codegen call
-#      site reaches a bare `malloc` under the name `getOrCreateMallocFn()`
-#      any more -- both of its former callers now GC-heap-allocate via
-#      `turf_rt_alloc` with a real descriptor instead (F-MEM-1's precise
-#      tracing depends on every GC-heap-bound allocation going through it).
-#   5. OVH-002, `docs/architecture/boundary.md` §5: a best-effort scan for
-#      `mem::alloc(sizeof(SomeType))` in `lib/std`/`showcase` where
-#      `SomeType` has a `string`/collection field -- exactly the "hide a
-#      GC pointer inside untraced manual memory" shape this group fixed at
-#      its two known stdlib/showcase sites (json.tr, kv_store_server.tr).
-#      Best-effort, not exhaustive: it only recognizes the textual
-#      `mem::alloc(sizeof(...))` shape and a same-repo `struct Name { ... }`
-#      declaration to check fields against -- see boundary.md for why a
-#      fully general check isn't attempted.
-#   6. SMP-002 / INV-GEN-2 (docs/development/changes/SMP-002.md,
-#      docs/development/INVARIANTS.md): every generic-parameter query --
-#      does a type contain/wrap an open `TurfGenericParamType`, substitute
-#      it, unify it against a concrete type -- goes through the one shared
-#      walker, src/sema/TypeWalk.h. A bare `dynamic_cast<const
-#      TurfGenericParamType` anywhere else in src/ or include/ is a hand-
-#      rolled re-derivation of exactly the pattern SMP-002 unified (three of
-#      the eight original instances were independently, silently
-#      incomplete -- see the change record). Two kinds of exception are
-#      excluded deliberately, not silently: the INV-GEN-1 assertion sites
-#      (`assert(!dynamic_cast<...>)` -- a different invariant, checking that
-#      NONE reaches Codegen, not deriving anything from one) and
-#      `CodegenCore.cpp`, whose own separate `getExprType()` type-inference
-#      engine independently reimplements this same pattern at several more
-#      sites using raw, non-owning `const TurfType*` throughout (not
-#      `TurfTypePtr`) -- deliberately left unmigrated this session,
-#      `ARCHITECTURE_OVERHAUL.md` §25 item 4's caution against casually
-#      touching that second engine. See INVARIANTS.md's INV-GEN-2 row for
-#      the full account of what this does and does not cover.
+#   1. No privilege comes from a file's location. The raw-pointer capability
+#      is declared in source (`unsafe module;`, HasRawPointerCapability()),
+#      never granted for being under lib/std (F-STD-1, FREEZE.md §6.8). A
+#      live IsPathUnderLibStd(), the path-based check that rule rules out, is
+#      looked for by name.
+#   2. The prelude is specified by lib/std/core/: `PreludeModuleNames`
+#      (src/frontend/ParserModule.cpp) names exactly the `.tr` files there
+#      (boundary.md, "Prelude module specification").
+#   3. The closed intrinsic list (src/sema/Intrinsics.h, F-STD-2) mentions
+#      every name registered in src/sema/Builtins.cpp, plus the lexer-level
+#      `sizeof`/`typeof`. It catches a builtin added without documenting
+#      itself; it cannot catch every name-based special case in the compiler
+#      (boundary.md, "One documented exception").
+#   4. Codegen allocates GC-heap values through `turf_rt_alloc` with a type
+#      descriptor, which precise tracing depends on (F-MEM-1): the old bare
+#      `malloc` helper, getOrCreateMallocFn(), has no definition or caller in
+#      src/codegen/.
+#   5. A best-effort scan of lib/std and showcase for
+#      `mem::alloc(sizeof(SomeType))` where `SomeType` has a string or
+#      collection field: a GC pointer hidden in manual memory the collector
+#      never scans (boundary.md §5). It knows only that textual shape and
+#      same-repo `struct` declarations; boundary.md says why a general check
+#      is not attempted.
+#   6. Every generic-parameter query (does a type contain an open
+#      TurfGenericParamType, substitute it, unify it) goes through the shared
+#      walker in src/sema/TypeWalk.h (INV-GEN-2). A bare
+#      `dynamic_cast<const TurfGenericParamType` elsewhere in src/ or include/
+#      is a hand-rolled copy of it. Excluded: the INV-GEN-1 assertions
+#      (`assert(!dynamic_cast<...>)`, which check that none reaches Codegen)
+#      and CodegenCore.cpp, whose getExprType() has its own type inference
+#      over raw `const TurfType*` (INVARIANTS.md, INV-GEN-2).
+#   7. The front end's state save/restore hooks are called only by the query
+#      facade, src/tooling/AnalysisFacade.cpp (INV-API-1).
 #
 # Usage: scripts/check/check_boundary.sh
 # Exit:  0 = every check passed; 1 = at least one failed.
@@ -78,11 +54,8 @@ fail() { echo -e "   ${RED}✗${RESET} $1"; FAILED=$((FAILED + 1)); }
 echo -e "${BOLD}check_boundary.sh — STD-001${RESET}\n"
 
 # ── 1. No path-based privilege remains ──────────────────────────────────────
-# A handful of doc comments still NAME IsPathUnderLibStd() -- deliberately:
-# they explain what LANG-002 replaced it with and why (this project's own
-# "doc comments explain WHY" convention, AGENTS.md). Only a LIVE definition
-# or call site is the regression this check exists to catch, so comment-only
-# lines (anything after `//` on its own line) are excluded.
+# Comments may name IsPathUnderLibStd() to explain the rule; only a live
+# definition or call is the regression, so comment lines are excluded.
 echo -e "${BOLD}1. No path-based privilege${RESET}"
 HITS=$(grep -rn "IsPathUnderLibStd" src/ include/ 2>/dev/null | grep -vE ':\s*(//|\*)')
 if [ -n "$HITS" ]; then
@@ -174,9 +147,9 @@ fi
 
 # ── 7. INV-API-1: only the query facade isolates a compile ─────────────────
 # The per-subsystem save/restore hooks exist for GlobalStateScope
-# (src/tooling/AnalysisFacade.cpp) alone. A second caller is a second hand-written
-# save/restore dance -- the thing SMP-001 removed, which broke whenever the
-# pipeline gained a global the dance did not know about.
+# (src/tooling/AnalysisFacade.cpp) alone. Any other caller would have to list
+# every piece of front-end global state itself, and would break silently the
+# first time the pipeline gained one it did not know about.
 echo -e "\n${BOLD}7. Front-end state save/restore only in the query facade (INV-API-1)${RESET}"
 API_HITS=$(grep -rnE "\b(Push|Pop)(Parser|Resolver)CompileState\(|DiagnosticEngine::(saveState|restoreState)\(|\bSetSourceOverlay\(|\bSetInstallRootOverride\(" src/ 2>/dev/null \
            | grep -vE ':\s*(//|\*)' \
