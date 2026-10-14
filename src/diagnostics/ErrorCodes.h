@@ -141,6 +141,7 @@ inline constexpr const char *SliceOfNonArray = "E142";
 inline constexpr const char *SliceRangeOutOfBounds = "E143";
 inline constexpr const char *MutableViewOfImmutableArray = "E144";
 inline constexpr const char *DefaultThroughReferenceCycle = "E147";
+inline constexpr const char *WrongTypeArgumentCount = "E148";
 inline constexpr const char *ErrorPayload = "E096";
 // Pre-existing codes a raw site reuses (see above).
 inline constexpr const char *ExportMutNotSupported = "E021";
@@ -434,6 +435,9 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // fields, which would allocate a fresh default forever (CodegenCore.cpp's
     // EmitDefaultValue()).
     {ErrCode::DefaultThroughReferenceCycle, "DefaultThroughReferenceCycleError", "No default through a reference cycle", SLM::ErrorCategory::DECLARATION},
+    // `S<int>` on a struct that declares no type parameters, or `Box<int,
+    // int>` on one that declares one (ResolverDecl.cpp's validateNamedType()).
+    {ErrCode::WrongTypeArgumentCount, "WrongTypeArgumentCountError", "Wrong number of type arguments", SLM::ErrorCategory::DECLARATION},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

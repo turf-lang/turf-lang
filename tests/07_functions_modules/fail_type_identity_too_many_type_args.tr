@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E148
+// EXPECT-DIAG: 'Box' takes 1 type argument (T), but 2 were given
+// Every type parameter takes exactly one argument; an extra one would have
+// been dropped without a word.
+
+struct Box<T> {
+    v: T
+}
+
+fn main(): int {
+    mut b: Box<int, string> = Box::default();
+    return b.v;
+}

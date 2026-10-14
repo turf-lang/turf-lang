@@ -1,0 +1,34 @@
+TURF E148 -- WRONG NUMBER OF TYPE ARGUMENTS:
+
+CAUSE:
+  A type was written with a different number of type arguments than its declaration
+  has type parameters. `struct Box<T>` takes exactly one; a struct with no type
+  parameters, or an enum, takes none.
+
+INCORRECT:
+    struct Point { x: int, y: int }
+    struct Box<T> { v: T }
+    mut p: Point<int> = Point::default();     // Point is not generic
+    mut b: Box<int, int> = Box::default();    // Box takes one type
+
+CORRECT:
+    struct Point {
+        x: int,
+        y: int
+    }
+
+    struct Box<T> {
+        v: T
+    }
+
+    fn main(): int {
+        mut p: Point = Point::default();
+        mut b: Box<int> = Box::default();
+        return p.x + b.v;
+    }
+
+FIX:
+  Match the declaration: drop the `<...>` from a non-generic type, or give one type per
+  type parameter (`Box<int>`, `Pair<int, string>`).
+
+RELATED: E138 (a generic type written with no type arguments).

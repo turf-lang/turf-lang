@@ -1,0 +1,16 @@
+A type was given the wrong number of type arguments
+
+A generic struct declares its type parameters, and every use of it gives exactly one type for each: `struct Box<T>` takes one, `struct Pair<A, B>` takes two. A struct with no type parameters, or an enum, takes none.
+
+    struct Point { x: int, y: int }
+    struct Box<T> { v: T }
+
+    mut p: Point<int> = Point::default();     // Point is not generic
+    mut b: Box<int, int> = Box::default();    // Box takes one type
+
+Write each type the way it was declared:
+
+    mut p: Point = Point::default();
+    mut b: Box<int> = Box::default();
+
+Giving a generic struct no type arguments at all, `mut b: Box = ...`, is E138.

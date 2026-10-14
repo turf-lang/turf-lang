@@ -626,6 +626,36 @@ void Resolver::validateNamedType(
       if (auto Id = ResolveOrReport(GT->getModule(), BaseName, Candidates))
         GT->resolveBaseTo(*Id);
     }
+    // The arguments must match the declaration's parameters one for one: a
+    // struct with none, or an enum, has no template for the monomorphizer to
+    // instantiate, and an extra argument would be silently dropped.
+    if (!BaseIsOwnTypeParam && GT->isBaseResolved()) {
+      auto Generic = GenericStructIdentities_.find(GT->getBaseName());
+      size_t Expected =
+          Generic == GenericStructIdentities_.end() ? 0 : Generic->second.size();
+      size_t Given = GT->getTypeArgs().size();
+      if (Given != Expected) {
+        const std::string Bare = TypeIdentity::bareName(GT->getBaseName());
+        std::string Message, Hint;
+        if (Expected == 0) {
+          Message = "'" + Bare + "' is not generic -- it takes no type arguments.";
+          Hint = "Write it as plain '" + Bare + "'.";
+        } else {
+          std::string Params;
+          for (size_t I = 0; I < Expected; ++I)
+            Params += (I ? ", " : "") + Generic->second[I];
+          Message = "'" + Bare + "' takes " + std::to_string(Expected) +
+                    " type argument" + (Expected == 1 ? "" : "s") + " (" +
+                    Params + "), but " + std::to_string(Given) +
+                    (Given == 1 ? " was" : " were") + " given.";
+          Hint = "Give one type for each of '" + Bare + "<" + Params + ">'.";
+        }
+        TypeError(Loc, ErrCode::WrongTypeArgumentCount, Message, Hint,
+                  "Wrong number of type arguments!")
+            .raise();
+        return;
+      }
+    }
     for (const auto &Arg : GT->getTypeArgs())
       validateNamedType(Arg, Loc, TypeParams);
     return;

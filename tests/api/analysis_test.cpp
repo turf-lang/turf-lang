@@ -2012,6 +2012,38 @@ static void testUnsizedArrayDiagnostics() {
     std::cerr << render(SliceOk);
 }
 
+// A written type's arguments must match its declaration's parameters one for
+// one; a struct with none, or an enum, takes none.
+static void testTypeArgumentCount() {
+  CurrentTest = "type argument count";
+  struct Case {
+    const char *Label;
+    const char *Body;
+    const char *MessageFragment;
+  };
+  const Case Cases[] = {
+      {"non-generic struct", "struct P { x: int }\n"
+                             "fn main(): int { mut p: P<int> = P::default(); return p.x; }",
+       "'P' is not generic"},
+      {"enum", "enum E { A, B }\nfn main(): int { mut e: E<int> = E::A; return 0; }",
+       "'E' is not generic"},
+      {"too many", "struct B<T> { v: T }\n"
+                   "fn main(): int { mut b: B<int, int> = B::default(); return b.v; }",
+       "'B' takes 1 type argument (T), but 2 were given"},
+  };
+  for (const auto &C : Cases) {
+    auto R = turf::analyze({{"targs.tr", std::string(C.Body) + "\n"}});
+    CHECK(!R.succeeded());
+    bool Found = false;
+    for (const auto &D : R.diagnostics())
+      if (D.Code == "E148" && D.Message.find(C.MessageFragment) != std::string::npos)
+        Found = true;
+    CHECK(Found);
+    if (!Found)
+      std::cerr << "    case '" << C.Label << "' produced:\n" << render(R);
+  }
+}
+
 // LEC-005. The facade recovers from a parse error with the same
 // SkipToNextTopLevelBoundary() the compiler driver uses, so an editor shows the
 // same cascade -- or the lack of one -- as the command line.
@@ -2198,6 +2230,7 @@ int main() {
   testErrorPayloadDiagnostics();
   testGenericOperatorDiagnostics();
   testUnsizedArrayDiagnostics();
+  testTypeArgumentCount();
   testImportedCandidateLocation();
   testBuiltinDocRouting();
 

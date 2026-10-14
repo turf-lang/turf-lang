@@ -339,7 +339,9 @@ The same rule holds for a method you declare on a generic struct imported
 from a module (`fn<T> List.last_or(...)`). The type arguments come from the
 declared type of the variable: write `mut b: Box<int> = Box::default();`.
 Naming a generic struct with no arguments, `mut b: Box = ...`, is `E138`
-(`Missing type arguments!`). Generics are covered in full in [Generics and
+(`Missing type arguments!`); giving a type the wrong number of them,
+`Box<int, int>`, or any at all to a struct that declares none, is `E148`
+(`Wrong number of type arguments!`). Generics are covered in full in [Generics and
 operator overloading](generics_and_operators.md#generic-structs-and-their-methods).
 
 ### Local type declarations
