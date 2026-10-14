@@ -640,7 +640,7 @@ A build has one package per name. If your library is used by two packages that
 need it at different tags, the build stops and names both:
 
 ```text
-turf: cannot add 'rates' (nothing was written): package 'interval' is required from two different directories, and a build has one package per name:
+turf: cannot add 'rates' (nothing was written): package 'interval' is required at two different versions of git /home/me/code/interval, and a build has one package per name:
   package 'fares' (/home/me/code/fares/turf.toml) needs it at git /home/me/code/interval (tag=v0.2.0, commit ae406e9d7964)
   package 'rates' (/home/me/code/rates/turf.toml) needs it at git /home/me/code/interval (tag=v0.1.0, commit 534ea21001c3)
 ```

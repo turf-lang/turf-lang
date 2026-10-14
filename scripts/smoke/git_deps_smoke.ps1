@@ -328,7 +328,7 @@ Mk-PathLib "$D10\beta" 'beta' (Dep-Git 'shared' 'shared' 'tag = "v2"') @('shared
 Mk-Diamond-App "$D10\app"
 $r = Tr "$D10\app" @('build')
 Expect-Rc 'a diamond conflict on two tags' $r 1
-Expect-Out 'a diamond conflict' $r "package 'shared' is required from two different directories"
+Expect-Out 'a diamond conflict' $r "package 'shared' is required at two different versions of git"
 Expect-Out 'a diamond conflict names the first requirer' $r "package 'alpha'"
 Expect-Out 'a diamond conflict names the second requirer' $r "package 'beta'"
 Expect-Out 'a diamond conflict names the first ref' $r 'tag=v1'
@@ -354,7 +354,7 @@ Set-Text "$D11\shared\src\shared.tr" "pub fn answer(): int {`n    return 99;`n}`
 Mk-Diamond-App "$D11\app"
 $r = Tr "$D11\app" @('build')
 Expect-Rc 'one name as a git and a path dependency' $r 1
-Expect-Out 'one name as a git and a path dependency' $r "package 'shared' is required from two different directories"
+Expect-Out 'one name as a git and a path dependency' $r "package 'shared' is required as both a git dependency and a path dependency"
 Expect-Out 'one name as a git and a path dependency names the git source' $r "git $(Url 'shared') (tag=v1"
 Expect-Out 'one name as a git and a path dependency names the directory' $r "$D11\shared"
 

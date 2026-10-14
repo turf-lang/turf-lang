@@ -347,7 +347,7 @@ printf '[package]\nname = "app"\nversion = "0.1.0"\n\n[dependencies]\nalpha = { 
 printf 'import alpha;\nimport beta;\n\nfn main(): int {\n    return alpha::v() + beta::v();\n}\n' > "$D10/app/src/main.tr"
 t build_d10 "$D10/app" build
 expect_rc "a diamond conflict on two tags" build_d10 1
-expect_out "a diamond conflict" build_d10 "package 'shared' is required from two different directories"
+expect_out "a diamond conflict" build_d10 "package 'shared' is required at two different versions of git"
 expect_out "a diamond conflict names the first requirer" build_d10 "package 'alpha'"
 expect_out "a diamond conflict names the second requirer" build_d10 "package 'beta'"
 expect_out "a diamond conflict names the first ref" build_d10 "tag=v1"
@@ -378,7 +378,7 @@ printf '[package]\nname = "app"\nversion = "0.1.0"\n\n[dependencies]\nalpha = { 
 printf 'import alpha;\nimport beta;\n\nfn main(): int {\n    return alpha::v() + beta::v();\n}\n' > "$D11/app/src/main.tr"
 t build_d11 "$D11/app" build
 expect_rc "one name as a git and a path dependency" build_d11 1
-expect_out "one name as a git and a path dependency" build_d11 "package 'shared' is required from two different directories"
+expect_out "one name as a git and a path dependency" build_d11 "package 'shared' is required as both a git dependency and a path dependency"
 expect_out "one name as a git and a path dependency names the git source" build_d11 "git $(url shared) (tag=v1"
 expect_out "one name as a git and a path dependency names the directory" build_d11 "$D11/shared"
 

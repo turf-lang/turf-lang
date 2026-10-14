@@ -158,6 +158,7 @@ func ResolveWith(root *manifest.Manifest, git gitdep.Source) (*Graph, error) {
 type requirer struct {
 	who   string // "package 'a' (/p/a/turf.toml)"
 	where string // a directory, or "git <url> (<ref>, commit <12 hex>)"
+	repo  string // the git URL when where is a git source, "" for a directory
 }
 
 type walker struct {
@@ -173,13 +174,29 @@ type found struct {
 	pkg   *Package
 	seen  bool   // already in the graph
 	where string // for the conflict message
+	repo  string // the git URL of a git source, "" for a path dependency
 	spec  string // how the requirer spelled it, for the key/name message
 }
 
-func (w *walker) conflict(name string, who, where string) error {
+// conflict reports a second request for a name that is already in the graph
+// from somewhere else. The headline says what differs: two directories, two
+// versions of one repository, two repositories, or a repository against a
+// directory.
+func (w *walker) conflict(name string, who, where, repo string) error {
 	other := w.requirer[name]
-	return fmt.Errorf("package '%s' is required from two different directories, and a build has one package per name:\n  %s needs it at %s\n  %s needs it at %s",
-		name, other.who, other.where, who, where)
+	var what string
+	switch {
+	case other.repo == "" && repo == "":
+		what = "from two different directories"
+	case other.repo == repo:
+		what = fmt.Sprintf("at two different versions of git %s", repo)
+	case other.repo != "" && repo != "":
+		what = "from two different git repositories"
+	default:
+		what = "as both a git dependency and a path dependency"
+	}
+	return fmt.Errorf("package '%s' is required %s, and a build has one package per name:\n  %s needs it at %s\n  %s needs it at %s",
+		name, what, other.who, other.where, who, where)
 }
 
 // pathDep resolves a `path` dependency of p. A path dependency of a package
@@ -251,19 +268,19 @@ func (w *walker) gitDep(p *Package, name string, d manifest.Dep, who string) (fo
 	if existing, ok := w.g.Packages[name]; ok {
 		pin := existing.Git
 		if pin == nil || pin.URL != d.Git {
-			return found{}, w.conflict(name, who, fmt.Sprintf("git %s (%s)", d.Git, req.Ref))
+			return found{}, w.conflict(name, who, fmt.Sprintf("git %s (%s)", d.Git, req.Ref), d.Git)
 		}
 		if pin.Ref == req.Ref {
-			return found{pkg: existing, seen: true, where: pinWhere(pin.URL, pin.Ref, pin.Commit), spec: spec}, nil
+			return found{pkg: existing, seen: true, where: pinWhere(pin.URL, pin.Ref, pin.Commit), repo: d.Git, spec: spec}, nil
 		}
 		commit, err := w.git.ResolveCommit(req)
 		if err != nil {
 			return found{}, err
 		}
 		if commit != pin.Commit {
-			return found{}, w.conflict(name, who, pinWhere(d.Git, req.Ref, commit))
+			return found{}, w.conflict(name, who, pinWhere(d.Git, req.Ref, commit), d.Git)
 		}
-		return found{pkg: existing, seen: true, where: pinWhere(d.Git, req.Ref, commit), spec: spec}, nil
+		return found{pkg: existing, seen: true, where: pinWhere(d.Git, req.Ref, commit), repo: d.Git, spec: spec}, nil
 	}
 	tree, err := w.git.Materialize(req)
 	if err != nil {
@@ -282,7 +299,7 @@ func (w *walker) gitDep(p *Package, name string, d manifest.Dep, who string) (fo
 	}
 	dep := &Package{Name: dm.Package.Name, Dir: dir, Manifest: dm, TreeRoot: dir,
 		Git: &GitPin{URL: d.Git, Ref: req.Ref, Commit: tree.Commit, Hash: tree.Hash}}
-	return found{pkg: dep, where: pinWhere(d.Git, req.Ref, tree.Commit), spec: spec}, nil
+	return found{pkg: dep, where: pinWhere(d.Git, req.Ref, tree.Commit), repo: d.Git, spec: spec}, nil
 }
 
 func (w *walker) visit(p *Package) error {
@@ -325,7 +342,7 @@ func (w *walker) visit(p *Package) error {
 			}
 		}
 		if other, ok := w.g.Packages[dep.Name]; ok && other.Dir != dep.Dir {
-			return w.conflict(dep.Name, who, f.where)
+			return w.conflict(dep.Name, who, f.where, f.repo)
 		}
 		p.Deps = append(p.Deps, name)
 		if seen {
@@ -333,7 +350,7 @@ func (w *walker) visit(p *Package) error {
 		}
 		w.g.Packages[dep.Name] = dep
 		w.byDir[dep.Dir] = dep
-		w.requirer[dep.Name] = requirer{who: who, where: f.where}
+		w.requirer[dep.Name] = requirer{who: who, where: f.where, repo: f.repo}
 		if err := w.visit(dep); err != nil {
 			return err
 		}

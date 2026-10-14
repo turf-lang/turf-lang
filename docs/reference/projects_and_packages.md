@@ -371,10 +371,12 @@ dependencies are fetched and built, but they are not in `plotter`'s namespace.
 
 A build has one package per name. If two packages need the same name at
 different places or commits (a diamond that disagrees), it is an error naming
-both requirers; there is no multi-version support:
+both requirers; there is no multi-version support. The first line says what
+differs: two versions (tag, rev or commit) of one git repository, two
+directories, two git repositories, or a git repository against a directory:
 
 ```
-turf: package 'libA' is required from two different directories, and a build has one package per name:
+turf: package 'libA' is required at two different versions of git …/up/libA.git, and a build has one package per name:
   package 'left' (…/dia/left/turf.toml) needs it at git …/up/libA.git (tag=v1, commit 11343e6dbefb)
   package 'right' (…/dia/right/turf.toml) needs it at git …/up/libA.git (tag=v2, commit 483d19a6a2f2)
 ```
@@ -382,7 +384,7 @@ turf: package 'libA' is required from two different directories, and a build has
 A diamond that agrees, meaning the same source and the same commit reached by
 two routes (two spellings of one commit, `tag = "v1"` and its `rev`, agree), is
 one package and builds. Two directories both holding a package called `pc`
-is the same error:
+is the same error, worded for directories:
 
 ```
 turf: package 'pc' is required from two different directories, and a build has one package per name:

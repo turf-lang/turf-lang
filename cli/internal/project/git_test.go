@@ -150,7 +150,7 @@ func TestDiamondOnTwoCommitsIsAConflictNamingBothRefs(t *testing.T) {
 		commits: map[string]string{"u/c|tag=v1": commit("a"), "u/c|tag=v2": commit("b")},
 	}
 	g, err := buildGit(t, root, "app", git)
-	mustFail(t, g, err, "package 'c' is required from two different directories",
+	mustFail(t, g, err, "package 'c' is required at two different versions of git u/c, and a build has one package per name",
 		"package 'a'", "package 'b'", "tag=v1", "tag=v2", commit("a")[:12], commit("b")[:12])
 }
 
@@ -168,7 +168,7 @@ func TestGitAndPathWithOneNameConflict(t *testing.T) {
 	}
 	// Git first, path second, and the other way round: both orders name both.
 	g, err := buildGit(t, root, "app", git)
-	mustFail(t, g, err, "package 'c' is required from two different directories", "git u/c (tag=v1, commit "+commit("a")[:12], filepath.Join(root, "c"))
+	mustFail(t, g, err, "package 'c' is required as both a git dependency and a path dependency", "git u/c (tag=v1, commit "+commit("a")[:12], filepath.Join(root, "c"))
 
 	root2 := layout(t,
 		pkgSpec{dir: "app", name: "app", main: true, deps: "b = " + dep("../b") + "\na = " + dep("../a")},
@@ -177,7 +177,7 @@ func TestGitAndPathWithOneNameConflict(t *testing.T) {
 		pkgSpec{dir: "c", name: "c", lib: true},
 	)
 	g, err = buildGit(t, root2, "app", &fakeGit{})
-	mustFail(t, g, err, "package 'c' is required from two different directories", "git u/c (tag=v1)", filepath.Join(root2, "c"))
+	mustFail(t, g, err, "package 'c' is required as both a git dependency and a path dependency", "git u/c (tag=v1)", filepath.Join(root2, "c"))
 }
 
 func TestSameNameFromTwoURLsConflicts(t *testing.T) {
@@ -192,7 +192,7 @@ func TestSameNameFromTwoURLsConflicts(t *testing.T) {
 		commits: map[string]string{"u/one|tag=v1": commit("a"), "u/two|tag=v1": commit("a")},
 	}
 	g, err := buildGit(t, root, "app", git)
-	mustFail(t, g, err, "package 'c' is required from two different directories", "git u/one", "git u/two")
+	mustFail(t, g, err, "package 'c' is required from two different git repositories", "git u/one", "git u/two")
 }
 
 func TestGitPackageWithoutAManifest(t *testing.T) {
