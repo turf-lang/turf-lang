@@ -51,6 +51,8 @@ fn never_called(): void {
     test::fail("unreachable");
     immut line: string = io::input();
     io::printline(line);
+    immut answer: string = io::input("prompt: ");
+    io::printline(answer);
     unsafe {
         mut p: void* = mem::alloc(8);
         mem::root(p);

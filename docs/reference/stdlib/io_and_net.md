@@ -90,24 +90,24 @@ fn main(): int {
 }
 ```
 
-### `input(): string`
+### `input(): string`, `input(msg: string): string`
 
 Reads one line from standard input and returns it **without** its newline.
+`input(msg)` first prints `msg` and flushes standard output, so the prompt is
+on screen before the program waits.
 
+- A line can be any length; the string grows to fit it.
 - At end of input (no more lines, or no input at all) it returns `""`, so an
   empty result means either an empty line or no input; it cannot tell you
-  which.
-- It reads at most 4095 characters. A longer line is returned in pieces: the
-  first 4095 characters, then (after one character is dropped between them) the
-  rest on the next call.
+  which. A last line with no newline is returned as it is.
 - It does not trim anything: a line from a file with Windows line endings keeps
   its `\r`.
+- The result is always a `string`. To get a number, convert it yourself, for
+  example with `strings::parse_int`; assigning it to an `int` is E066.
 
 ```turflang
 fn main(): int {
-    print("Your name: ");
-    flush();
-    immut name: string = input();
+    immut name: string = input("Your name: ");
     if name == "" {
         printline("no name given");
         return 1;

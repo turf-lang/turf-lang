@@ -32,8 +32,7 @@ import strings;
 // ─── libc bindings ────────────────────────────────────────────────────────
 
 extern fn printf(fmt: string, ...): int;
-extern fn scanf(fmt: string, ...): int;
-extern fn getchar(): int;
+extern fn getchar(): int32;
 
 // Buffered file I/O (fopen/fclose/fseek/ftell/fread/fwrite/fflush) --
 // `string` and `void*` are the same opaque pointer at the LLVM level in
@@ -134,17 +133,29 @@ pub fn printline(val: string): void {
 
 // ─── input ────────────────────────────────────────────────────────────────
 
-// Reads one line (up to 4095 chars) from stdin. Mirrors the old @intrinsic
-// implementation exactly: allocate a zeroed buffer (MEM-001: gc_alloc_zeroed,
-// not calloc -- a `string` result is GC-heap, F-MEM-3), scanf a bracket-
-// expression that stops at '\n' (so the delimiter itself is left in the
-// stream), then getchar() to consume that leftover '\n' so it doesn't leak
-// into the next input() call.
+// Reads one line from stdin, of any length, without its '\n'. Bytes are taken
+// one getchar() at a time into a growing StringBuilder, so there is no fixed
+// buffer to split a long line. At the end of input it returns what it has,
+// which is "" when nothing is left: an empty line and the end of input read
+// the same.
 pub fn input(): string {
-    mut buf: void* = gc_alloc_zeroed(4096);
-    scanf("%4095[^\n]", buf);
-    getchar();
-    return buf to string;
+    mut line: strings::StringBuilder = strings::StringBuilder::default();
+    // C's getchar() returns an `int`, 32 bits: EOF is -1 only when read as
+    // int32 (as a 64-bit int it would be 4294967295 and never end the loop).
+    mut c: int32 = getchar();
+    while c != -1 && c != 10 {
+        line.append_char((c to int) to char);
+        c = getchar();
+    }
+    return line.to_string();
+}
+
+// Prints `msg` and flushes stdout, so the prompt is on screen before the
+// program waits, then reads a line like input().
+pub fn input(msg: string): string {
+    print(msg);
+    flush();
+    return input();
 }
 
 // ─── file errors ──────────────────────────────────────────────────────────
