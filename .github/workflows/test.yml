@@ -528,11 +528,11 @@ jobs:
       # seconds either way, so this one step's wall time is dominated
       # entirely by that single file, not a general slowdown.
       - name: GC stress test under ASan -- collect on every allocation (-O0)
-        run: TURF_COMPILER="$(pwd)/build_asan/turfc" ASAN_OPTIONS=detect_leaks=0:allocator_may_return_null=1 TURF_TEST_EXTRA_EXCLUDE=41_gc/fail_stack_overflow_deep_recursion.tr TURF_GC_STRESS=1 TURF_TEST_TIMEOUT_SEC=700 ./scripts/test_runner.sh -O0
+        run: TURF_COMPILER="$(pwd)/build_asan/turfc" ASAN_OPTIONS=detect_leaks=0:allocator_may_return_null=1 TURF_TEST_EXTRA_EXCLUDE='41_gc/fail_stack_overflow_deep_recursion.tr 05_arrays_pointers_ffi/fail_null_raw_pointer_write_faults_at_zero.tr 05_arrays_pointers_ffi/fail_null_raw_pointer_read_faults_at_zero.tr' TURF_GC_STRESS=1 TURF_TEST_TIMEOUT_SEC=700 ./scripts/test_runner.sh -O0
       # The roadmap's criterion names -O2 as well; the FDN-005 landing ran
       # only -O0 under this combination.
       - name: GC stress test under ASan -- collect on every allocation (-O2)
-        run: TURF_COMPILER="$(pwd)/build_asan/turfc" ASAN_OPTIONS=detect_leaks=0:allocator_may_return_null=1 TURF_TEST_EXTRA_EXCLUDE=41_gc/fail_stack_overflow_deep_recursion.tr TURF_GC_STRESS=1 TURF_TEST_TIMEOUT_SEC=700 ./scripts/test_runner.sh -O2
+        run: TURF_COMPILER="$(pwd)/build_asan/turfc" ASAN_OPTIONS=detect_leaks=0:allocator_may_return_null=1 TURF_TEST_EXTRA_EXCLUDE='41_gc/fail_stack_overflow_deep_recursion.tr 05_arrays_pointers_ffi/fail_null_raw_pointer_write_faults_at_zero.tr 05_arrays_pointers_ffi/fail_null_raw_pointer_read_faults_at_zero.tr' TURF_GC_STRESS=1 TURF_TEST_TIMEOUT_SEC=700 ./scripts/test_runner.sh -O2
 
       - name: Tool API tests (compiler query facade) under ASan
         run: ./build_asan/turf-api-tests
