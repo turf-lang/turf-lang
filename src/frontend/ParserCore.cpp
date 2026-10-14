@@ -402,6 +402,10 @@ TurfTypePtr ParseType() {
     return nullptr;
   }
 
+  // A built-in type is never generic, so a '<' after one is the less-than
+  // operator: `(s to int) < n` needs no parentheses, `s to int < n` parses
+  // the same way.
+  const bool IsBuiltinType = CurTok != TOK_IDENTIFIER;
   std::string BaseName;
   if (CurTok == TOK_TYPE_INT)
     BaseName = "int";
@@ -474,7 +478,7 @@ TurfTypePtr ParseType() {
   }
 
   // Check for generic parameter: BaseName<T1, T2, ...>
-  if (CurTok == '<') {
+  if (CurTok == '<' && !IsBuiltinType) {
     getNextToken(); // consume '<'
     std::vector<TurfTypePtr> TypeArgs;
     while (true) {
