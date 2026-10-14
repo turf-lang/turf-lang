@@ -209,7 +209,7 @@ backlog.
 | D13 | Per-declaration visibility | **2.0** (LEC-002) | R1 + R4 (default-private is breaking). |
 | D14 | Richer pattern matching | **2.0** (LEC-003) | R4. |
 | D15 | Error payloads + propagation shorthand | **2.0** (LEC-004) | R4. |
-| D16 | Circular imports | **FUTURE** (F-16) | Additive; only cost today is `mem::Pool<T>`'s documented duplication. |
+| D16 | Circular imports | **FUTURE** (F-16) | Additive; only cost today is `mem::Pool`'s documented duplication. |
 | D17 | `s[i]` yields `int`, not `char` | **2.0 — DECISION** (FDN-004) | R1: breaking, so now or never (until 3.0). Bundled with the soundness fix R2 (string indexing is unchecked, audit F-17). Recommendation: change it. |
 | D18 | Two type-inference engines | **FUTURE** (Simplification, F-S3) | Internal; INV-TYPE-2 makes them agree for monomorphized nodes. Not user-visible. Revisit trigger stands. |
 | D19 | Double-parse pre-pass | **FUTURE** (Simplification, F-S4) | Internal, load-bearing, risky. Not user-visible. |

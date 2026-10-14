@@ -27,7 +27,7 @@ Coming from 1.x? Start with the [migration guide](../MIGRATING_TO_2.md). For how
 12. [Core](stdlib/core.md): `int`, `double`, `bool`, `char`, `array`, `strings` (the prelude)
 13. [Collections](stdlib/collections.md): `List`, `Stack`, `Queue`, `Map`, `Set`
 14. [I/O & Networking](stdlib/io_and_net.md): `io` (including files), `sys`, `net`
-15. [Memory](stdlib/mem.md): `mem`, `Pool<T>`
+15. [Memory](stdlib/mem.md): `mem`, `Pool`
 16. [Math & OS](stdlib/math_and_os.md): `math`, `os`
 17. [Time](stdlib/time.md): wall clock, CPU time, sleeping
 18. [Random](stdlib/random.md): pseudo-random numbers (not cryptographic)

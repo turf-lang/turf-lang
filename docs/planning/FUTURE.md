@@ -346,8 +346,8 @@ IDs, freeze entries and change records:
 
 ### F-16 — Circular imports (§27 D16)
 - **Complexity** M. A real module-system change. Today's only cost:
-  `mem::Pool<T>` is a deliberate duplicate of `List<T>`'s growth logic
-  because `list.tr` imports `mem.tr` (`mem.tr:155-214`; STD-003 item 7 says do
+  `mem::Pool` is a deliberate duplicate of `List<T>`'s growth logic
+  because `list.tr` imports `mem.tr` (`PoolHeader.grow()` in `mem.tr`; STD-003 item 7 says do
   not work around it).
 
 ### F-19 — Standard library expansion (old item 4)

@@ -1,7 +1,7 @@
 # Memory: `mem`
 
 The manual heap: raw allocation, the checked wrappers around it, pinning, and
-`Pool<T>`. This page is the API. What the two heaps are, which one you want and
+`Pool`. This page is the API. What the two heaps are, which one you want and
 how they interact is in [Memory and Safety](../memory_and_safety.md).
 
 ```turflang
@@ -225,17 +225,24 @@ fn main(): int {
 When you need it, and when you do not, is in
 [`mem::root`](../memory_and_safety.md#memroot-pinning-an-object-the-collector-cannot-see).
 
-## `Pool<T>`: free a batch together
+## `Pool`: free a batch together
 
 ```text
-pub struct Pool<T>      // the fields are private
+pub struct Pool         // the fields are private
 ```
 
 A `Pool` remembers a set of allocations so that one call frees them all, for
-example everything allocated while serving one request. It stores whatever
-values you hand it; it does not allocate for you.
+example everything allocated while serving one request. It stores the pointers
+you hand it; it does not allocate for you.
 
-### `Pool.track(item: T): void`
+`Pool` is not generic and holds `void*` only. Its storage is manual memory that
+the collector never scans, so a GC value kept only there would be freed under
+it; the signature keeps one out. `mem::Pool<string>` is **E148** ("Wrong number
+of type arguments"), and `pool.track(s)` with a `string`, a collection or a
+struct is **E056** ("No matching overload"). Any `T*` converts to `void*` on its
+own.
+
+### `Pool.track(item: void*): void`
 
 Registers `item`, normally a pointer you already got from `alloc`. It allocates
 nothing for the item itself. The pool's own storage is manual memory and grows
@@ -245,12 +252,11 @@ by doubling, starting at 8.
 
 The number of tracked items.
 
-### `free_pool(pool: Pool<void*>): void`
+### `free_pool(pool: Pool): void`
 
 Calls `mem::free` on every tracked pointer, then releases the pool's own storage.
-It takes a `Pool<void*>` exactly; another element type is **E025** ("No matching
-overload"). Every tracked pointer must therefore follow `free`'s rules: a pool
-that tracks a GC pointer panics with the cross-heap free message. The pool is
+Every tracked pointer must therefore follow `free`'s rules: a GC pointer cast to
+`void*` and tracked anyway panics with the cross-heap free message. The pool is
 left empty, so freeing it again does nothing and it can track a new batch.
 
 A `Pool` is a **shared handle**, like a `List`: assigning it, or passing it to a
@@ -262,7 +268,7 @@ would free them twice.
 import mem;
 import io;
 
-fn track_two(pool: mem::Pool<void*>): void {
+fn track_two(pool: mem::Pool): void {
     unsafe {
         pool.track(mem::alloc(16));
         pool.track(mem::alloc(16));
@@ -271,7 +277,7 @@ fn track_two(pool: mem::Pool<void*>): void {
 
 fn main(): int {
     unsafe {
-        mut pool: mem::Pool<void*> = mem::Pool::default();
+        mut pool: mem::Pool = mem::Pool::default();
         pool.track(mem::alloc(16));
         track_two(pool);
         io::printline(pool.length() to string);   // 3

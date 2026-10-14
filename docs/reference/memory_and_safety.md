@@ -21,7 +21,7 @@ A TurfLang program has three places to keep data.
 |---|---|---|
 | **The stack** | `int`, `int32`, `double`, `bool`, `char`; struct values; fixed arrays `T[N]`; the handle of a collection | The function's return, automatically |
 | **The garbage-collected (GC) heap** | every `string` an operation produces; the storage of `List`, `Stack`, `Queue`, `Set` and `Map`; everything you put there with `heap(expr)` | The collector, once nothing reachable refers to it |
-| **The manual heap** | what `mem::alloc` (and `malloc`) return, and the bookkeeping of `mem::Pool<T>` | You, with `mem::free` |
+| **The manual heap** | what `mem::alloc` (and `malloc`) return, and the bookkeeping of `mem::Pool` | You, with `mem::free` |
 
 A string literal (`"hello"`) is a fourth thing: static read-only data in the
 program, never allocated and never freed.
@@ -600,7 +600,7 @@ at higher optimisation levels, any value at all.
 
 `mem::alloc(n)` returns `n` bytes of manual memory as a `void*`, and
 `mem::free(p)` returns them. `mem::alloc_zeroed`, `grow`, `dup`, `alloc_aligned`
-and `mem::Pool<T>` are in [Memory](stdlib/mem.md). A raw pointer needs
+and `mem::Pool` are in [Memory](stdlib/mem.md). A raw pointer needs
 `unsafe` to declare ([FFI and unsafe](ffi_and_unsafe.md)):
 
 ```turflang

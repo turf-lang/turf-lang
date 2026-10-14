@@ -21,7 +21,7 @@ Related docs:
   descriptors, build, the fault and OOM contract). This document covers the
   collector's design and root discovery.
 - `docs/architecture/boundary.md`: which heap a standard-library allocation may
-  use, and the one disclosed gap (`mem::Pool<T>`).
+  use, and how `mem::Pool` keeps GC pointers out of its manual storage.
 - `docs/architecture/compiler_pipeline.md` §7: the monomorphizer.
 - `docs/reference/arrays.md`: the user-facing array reference.
 - `docs/planning/FUTURE.md` §5: a proposed automatic-reference-counting design.
@@ -44,13 +44,13 @@ Related docs:
 | `ptr` / `T*` (raw pointer) | Wherever it was given, usually the manual heap via `mem::alloc` | Aliased | **You**: `mem::free`, or nothing |
 | `&T` (safe reference) | Same representation as `T*` | Aliased | Same as `T*`; the difference is a compile-time non-null guarantee, not a lifetime guarantee (§1.6) |
 | `List<T>`/`Stack<T>`/`Queue<T>`/`Set<T>`/`Map<K,V>`: the value is a one-pointer handle; its header and backing buffer(s) | Handle: wherever the variable is. Header and buffers: **GC heap** | Aliased: `=`/pass/return share one collection, `.copy()` is independent (F-COLL-1) | **The collector** |
-| `mem::Pool<T>`'s backing buffer | Manual heap | Aliased, grown via `realloc` | **You**, via `mem::free_pool()`; deliberately not collected (§1.7) |
+| `mem::Pool`'s backing buffer | Manual heap | Aliased, grown via `realloc` | **You**, via `mem::free_pool()`; deliberately not collected (§1.7) |
 
 The one-sentence version of the safety story: **there are two disjoint heaps,
 and only one of them is automatically managed** (F-MEM-3).
 
 - The **manual heap** (`mem::alloc`/`malloc` and everything built on them,
-  including `mem::Pool<T>`) has no automatic management of any kind: no
+  including `mem::Pool`'s array) has no automatic management of any kind: no
   collector, no reference counting, no borrow checker.
 - The **GC heap** (every `string` result, every `List`/`Stack`/`Queue`/`Set`/
   `Map` header and buffer, every `heap(expr)` value) is reclaimed by a
@@ -222,7 +222,7 @@ memory-model-relevant facts:
   `mem::alloc_aligned` (`lib/std/mem/mem.tr`) are fail-fast wrappers around
   `malloc`/`calloc`/`realloc`/`posix_memalign`. You own what they return, as in
   C: no collector, no reference counting, no ownership checker, no destructor on
-  scope exit. `mem::Pool<T>` grows its own `malloc`/`realloc`-backed array the
+  scope exit. `mem::Pool` grows its own `malloc`/`realloc`-backed array the
   same way; it exists to make *manual* bulk-freeing less tedious (track every
   allocation, `mem::free_pool()` them all), so its bookkeeping stays on the
   manual heap beside what it tracks.
@@ -231,7 +231,8 @@ memory-model-relevant facts:
   only inside manually managed memory is not a root, even if it points at a
   GC-heap object. This is a deliberate, disclosed unsoundness
   (`boundary.md` §5 states the rule that standard-library code must not do it,
-  and §6 the one known gap, `mem::Pool<T>`). The escape hatch is explicit:
+  and §6 how `mem::Pool`'s `void*`-only signature keeps GC pointers out of its
+  array). The escape hatch is explicit:
   `mem::root(p)` / `mem::unroot(p)` (`gc_pin`/`gc_unpin`, `turf_rt_pin`/
   `turf_rt_unpin`) mark the GC object *containing* `p` (an interior pointer is
   fine) as an always-retained root until a matching `unroot`. Pins nest (a
@@ -448,7 +449,7 @@ infinitely sized. A monomorphized generic instantiation (§2.7) is a
 after a struct that embeds it by value; this is the ordering that makes type
 descriptor emission a separate late pass (`runtime.md` §4.1).
 
-`List<T>`/`Pool<T>`-shaped structs hold a raw `T*` so element storage lives on
+`List<T>`-shaped structs hold a raw `T*` so element storage lives on
 the heap and grows independently of the struct's small fixed header (§2.6.2).
 
 #### 2.5.2 Construction: always a stack allocation
@@ -502,9 +503,9 @@ The **manual heap** is `mem::alloc` and friends over `extern fn`-declared
 `malloc`/`calloc`/`realloc`/`posix_memalign` (`lib/std/mem/mem.tr`; the
 declarations are `pub extern fn` carrying an `@ownership(acquires)` annotation
 the double-free analysis reads). `mem::alloc`, `alloc_zeroed`, `grow`, `dup` and
-`alloc_aligned` `sys::panic` on a null result and add no bookkeeping. `mem::Pool<T>`
-stays entirely on this heap, including its `items: T*` array, so it can be freed
-the ordinary way and is never traced. `mem::free()` is an ordinary Turf function
+`alloc_aligned` `sys::panic` on a null result and add no bookkeeping. `mem::Pool`'s
+`items` array stays on this heap, so it can be freed the ordinary way and is
+never traced; the pool holds `void*` only, so nothing in it is a GC pointer. `mem::free()` is an ordinary Turf function
 that calls the `gc_checked_free(p)` bare intrinsic: Turf's `extern fn` has no
 alias syntax, so a checked wrapper cannot share the name `free` with a raw
 extern in the same file. `turf_rt_checked_free()` frees `p` on the manual heap
@@ -791,7 +792,7 @@ infinite is rejected the same way a non-generic struct's would be.
 `sizeof(T)` inside a generic body reports the true size per instantiation, for
 free functions and for struct methods alike. Every standard-library collection's
 growth computes its buffer size as `cap * sizeof(T)` (`List`, `Stack`, `Queue`,
-`Set`, `Map` in `lib/std/collections/`, and `Pool<T>` in `lib/std/mem/mem.tr`),
+`Set`, `Map` in `lib/std/collections/`, and `PoolHeader` in `lib/std/mem/mem.tr`),
 so a struct element of any size works directly: `List<Big>` with a multi-word
 `Big` compiles `push`/`pop` clones that take and return a genuine `%Big`
 aggregate by value and grows its buffer correctly
@@ -840,7 +841,7 @@ another copies the *address*, and both then alias the same memory.
 | `runtime/turfrt_gc.c` | The collector: block table, root discovery per platform, mark, sweep, pins, testing aids (§2.6.2-§2.6.4) |
 | `runtime/turfrt_alloc.c` | `turf_rt_alloc`/`_zeroed`/`turf_rt_realloc`, `turf_rt_checked_free`, `turf_rt_stats` |
 | `runtime/turfrt.h` | The public `libturfrt` ABI and `TurfTypeDesc` (§2.6, §1.7) |
-| `lib/std/mem/mem.tr` | Manual-heap wrappers, `Pool<T>`, `free()`'s `gc_checked_free` check, `root()`/`unroot()` (§1.7, §2.6) |
+| `lib/std/mem/mem.tr` | Manual-heap wrappers, `Pool`, `free()`'s `gc_checked_free` check, `root()`/`unroot()` (§1.7, §2.6) |
 | `lib/std/collections/list.tr` (and `stack`, `queue`, `set`, `map`) | The header-plus-buffer collection shape (§2.6.2, §2.7.3) |
 | `lib/std/core/strings.tr` | String operator overloads, `StringBuilder`, and their GC-heap allocations (§2.4) |
 | `docs/reference/arrays.md` | User-facing array semantics (§2.3) |

@@ -139,7 +139,7 @@ fn main(): int {
         mem::free(slot_i[0] to void*);
         mem::free(slot);
 
-        mut pool: mem::Pool<void*> = mem::Pool::default();
+        mut pool: mem::Pool = mem::Pool::default();
         pool.track(mem::alloc(8));
         pool.track(mem::alloc(8));
         test::assert(pool.length() == 2, "mem::Pool.track / length");

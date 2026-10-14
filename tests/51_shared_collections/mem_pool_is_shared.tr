@@ -6,7 +6,7 @@
 import test;
 import mem;
 
-fn track_two(pool: mem::Pool<void*>): void {
+fn track_two(pool: mem::Pool): void {
     unsafe {
         pool.track(mem::alloc(16));
         pool.track(mem::alloc(16));
@@ -15,11 +15,11 @@ fn track_two(pool: mem::Pool<void*>): void {
 
 fn main(): int {
     unsafe {
-        mut pool: mem::Pool<void*> = mem::Pool::default();
+        mut pool: mem::Pool = mem::Pool::default();
         pool.track(mem::alloc(16));
         track_two(pool);
         test::assert(pool.length() == 3, "a by-value parameter tracks into the caller's pool");
-        mut alias: mem::Pool<void*> = pool;
+        mut alias: mem::Pool = pool;
         alias.track(mem::alloc(8));
         test::assert(pool.length() == 4, "an assigned copy shares the items");
         mem::free_pool(pool);

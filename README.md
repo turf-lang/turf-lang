@@ -489,7 +489,7 @@ The standard library is ordinary Turf source under `lib/std/`. The prelude (nine
 | `io`, `fs`, `os` | printing and input, reading and writing files; paths and directories; environment and arguments |
 | `list`, `stack`, `queue`, `map`, `set` | `List<T>`, `Stack<T>`, `Queue<T>`, `Map<K, V>`, `Set<T>` |
 | `json`, `http`, `net` | a JSON parser and writer; an HTTP/1.1 server and request/response types; TCP sockets and DNS |
-| `time`, `random`, `mem` | clocks and sleeping; pseudo-random numbers (not cryptographic); manual memory and `Pool<T>` |
+| `time`, `random`, `mem` | clocks and sleeping; pseudo-random numbers (not cryptographic); manual memory and `Pool` |
 | `sys`, `test` | `panic`, `exit`; `assert`, `assert_eq`, `fail` |
 
 Names are `snake_case`; an operation that can fail returns `!T` and never a sentinel. The conventions, the full list and every function are in [`docs/reference/stdlib/`](docs/reference/stdlib/README.md).

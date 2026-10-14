@@ -203,32 +203,26 @@ pub fn unroot(p: void*): void {
     gc_unpin(p);
 }
 
-// ─── Pool<T>: bulk-free allocation tracking ─────────────────────────────────
+// ─── Pool: bulk-free allocation tracking ────────────────────────────────────
 //
-// Not a true bump-pointer arena: Turf has neither an address-of operator
-// (`&local`) nor an allowed `ptr`/`void*` -> `int` cast (only the reverse
-// direction, `int` -> `ptr`, is permitted -- confirmed live while building
-// this), so there's no way to hand out sub-pointers into one big buffer via
-// address arithmetic the way a real arena would. What Pool<T> gives you
-// instead: track every allocation made through it, then free all of them
-// (and only them) in one call -- the same practical benefit (stop manually
-// bookkeeping individual frees for a batch of short-lived allocations, e.g.
-// once per request/connection in a server) without needing pointer
-// arithmetic at all.
+// A Pool records manual allocations so one call frees them all, e.g. once per
+// request in a server. It is not a bump-pointer arena: it hands out nothing
+// itself, it only remembers pointers it is given.
 //
-// Deliberately self-contained (does NOT `import list;` and use List<T> for
-// its own backing storage) -- list.tr itself `import`s this file, and nothing
-// in this language supports circular imports (by design; see
-// docs/architecture/modules_and_scope_resolution.md). Pool<T>'s own
-// growth logic below is therefore a direct, minimal copy of List<T>.push()'s
-// approach using only malloc/realloc, which mem.tr already owns.
+// It is not generic, and holds `void*` only, so a GC-heap value (a `string`, a
+// collection, a struct holding one) cannot be tracked: the pool's storage is
+// manual memory the collector never scans, so a GC pointer kept only there
+// would be freed under it (docs/architecture/boundary.md §6). Any `T*`
+// converts to `void*` implicitly; a GC value needs an explicit `to void*`.
+//
+// It does not `import list;`, because list.tr imports this file and imports
+// cannot be circular; its growth below is List.push()'s, on malloc/realloc.
 //
 // Usage:
 //   import mem;
-//   mut pool: mem::Pool<void*> = mem::Pool::default();
+//   mut pool: mem::Pool = mem::Pool::default();
 //   mut buf: void* = mem::alloc(256);
 //   pool.track(buf);              // pool now owns `buf`'s lifetime
-//   // ... use buf, and any number of other pool.track()'d allocations ...
 //   mem::free_pool(pool);         // frees every tracked allocation
 
 // A Pool is a handle to one shared header, like every collection (FREEZE.md
@@ -242,66 +236,46 @@ struct PoolHeader<T> {
     cap: int
 }
 
-pub struct Pool<T> {
-    h: &PoolHeader<T>
+pub struct Pool {
+    h: &PoolHeader<void*>
 }
 
-// Registers `item` with this pool -- does NOT allocate anything itself;
-// call mem::alloc()/alloc_zeroed()/alloc_aligned() (or any pointer-typed
-// value you already own) and pass the result here to hand its lifetime to
-// the pool.
-pub fn<T> Pool.track(item: T): void {
+// Registers `item` with this pool. It allocates nothing for the item: pass a
+// pointer from alloc()/alloc_zeroed()/alloc_aligned()/grow()/dup() (or any
+// manual-heap pointer you own) to hand its lifetime to the pool.
+pub fn Pool.track(item: void*): void {
     if self.h.len == self.h.cap {
-        if self.h.cap == 0 {
-            self.h.cap = 8;
-        } else {
-            self.h.cap = self.h.cap * 2;
-        }
-        // TYPE-002 (S15/D3): was `self.h.cap * 8` under Type Erasure. In
-        // practice `Pool<T>` is always instantiated at a pointer type (see
-        // free_pool()'s own comment below -- a pool tracks allocations, so
-        // T is always some *T/void*), and every pointer is 8 bytes anyway,
-        // so this was latent rather than live -- fixed for correctness and
-        // consistency with every other collection's identical fix
-        // (list.tr/stack.tr/queue.tr/set.tr/map.tr) rather than because a
-        // live corruption was reproduced here.
-        immut byteSize: int = self.h.cap * sizeof(T);
-        if self.h.items == null {
-            self.h.items = malloc(byteSize) to T*;
-        } else {
-            self.h.items = realloc(self.h.items, byteSize) to T*;
-        }
+        self.h.grow();
     }
     self.h.items[self.h.len] = item;
     self.h.len = self.h.len + 1;
 }
 
+// Doubles the capacity (starting at 8). Generic only so the new buffer can be
+// cast to `T*`: there is no spelling for a pointer to `void*`.
+fn<T> PoolHeader.grow(): void {
+    if self.cap == 0 {
+        self.cap = 8;
+    } else {
+        self.cap = self.cap * 2;
+    }
+    immut byteSize: int = self.cap * sizeof(T);
+    if self.items == null {
+        self.items = malloc(byteSize) to T*;
+    } else {
+        self.items = realloc(self.items, byteSize) to T*;
+    }
+}
+
 // How many allocations this pool is currently tracking.
-pub fn<T> Pool.length(): int {
+pub fn Pool.length(): int {
     return self.h.len;
 }
 
-// Frees every tracked allocation and this pool's own backing array.
-//
-// Deliberately a plain (non-generic) FREE FUNCTION taking a concrete
-// `Pool<void*>`, not a `fn<T> Pool.free_all()` method -- a generic
-// method's body is type-checked exactly ONCE, generically, against the
-// abstract `T`, never re-checked per instantiation; from inside such a
-// method, `self.h.items[i]`'s type is genuinely just the opaque, erased `T`
-// with no way to treat it as anything more specific (confirmed live: even
-// an explicit `self.h.items[i] to void*` cast is rejected from inside a
-// generic method body, with "Cannot explicitly cast 'T' to 'void*'").
-// A plain function taking a CONCRETE `Pool<void*>` parameter doesn't have
-// that problem -- the type is fully known at the call site, so
-// `pool.h.items[i]` correctly resolves to a real `void*`. This is also why
-// `Pool<T>` can only meaningfully be bulk-freed when instantiated as
-// `Pool<void*>` specifically (or any other single concrete pointer type,
-// via your own equivalent free function) -- not a general `Pool<T>`
-// operation.
-//
-// The pool is left empty, and every copy of it with it, so freeing it again,
-// or tracking into it afterwards, is safe.
-pub fn free_pool(pool: Pool<void*>): void {
+// Frees every tracked allocation and this pool's own backing array. The pool
+// is left empty, and every copy of it with it, so freeing it again, or
+// tracking into it afterwards, is safe.
+pub fn free_pool(pool: Pool): void {
     mut i: int = 0;
     while i < pool.h.len {
         free(pool.h.items[i]);

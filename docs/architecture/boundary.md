@@ -182,28 +182,24 @@ The rule is kept at both kinds of allocation site:
   `mem::alloc(sizeof(SomeType))` where `SomeType` has a `string` or
   collection-typed field. It is best-effort, not exhaustive: it does not catch a
   numeric-literal-sized `mem::alloc(N) to T*` box, a box built through an
-  intermediate helper, or `mem::Pool<T>` (§6); those remain a human-reviewed
-  judgment, the same "best-effort, not total" posture as §2's check.
+  intermediate helper; those remain a human-reviewed judgment, the same "best-effort, not total" posture as §2's check.
 
-## 6. `mem::Pool<T>` — a known, disclosed gap
+## 6. `mem::Pool` holds manual pointers only
 
-`mem::Pool<T>` (`lib/std/mem/mem.tr`) batches a set of *manual* allocations for
-one-call bulk freeing; its documentation describes `T` as "always some `*T` /
-`void*`" (a pointer the pool takes ownership of). Used as intended, its backing
-array holds manual-heap pointers: manual memory holding manual memory, with no
-cross-heap issue.
+`mem::Pool` (`lib/std/mem/mem.tr`) batches a set of *manual* allocations for
+one-call bulk freeing. Its backing array is manual memory the collector never
+scans, so the type keeps GC pointers out of it at compile time:
 
-**`Pool<T>` is not actually restricted to a pointer-shaped `T`.** `T` is an
-ordinary unconstrained generic parameter, and TurfLang has no trait or constraint
-system to say "T must be a raw pointer" (F-GEN-3). `mut pool: mem::Pool<string> =
-mem::Pool::default(); pool.track(someString);` compiles and runs, storing a
-GC-heap `string` pointer in the pool's manual-heap array where the collector
-cannot see it, which is exactly §5's forbidden shape, reachable through the public
-standard library. It is left unfixed: closing it needs either a constraint system
-(rejected) or a run-time check with no precedent elsewhere in the library, and
-nothing in `tests/`, `lib/std` or `showcase` instantiates `Pool<T>` at a
-GC-backed `T`. It is recorded here as a disclosed gap, the same posture as the
-documented rule that a GC pointer stored only in manual memory is not a root.
+- `Pool` is not generic. `mem::Pool<string>`, or any type argument, is E148
+  ("Wrong number of type arguments").
+- `Pool.track(item: void*)` takes `void*`. Any `T*` converts to `void*`
+  implicitly; a `string`, a collection or a struct does not, so
+  `pool.track(someString)` is E056 ("No matching overload").
+
+The only way to put a GC pointer in a pool is an explicit `to void*` cast inside
+`unsafe`, the same explicit step that stores one in any other manual memory
+(§5); `mem::root` is the tool for keeping such an object alive. No compiler
+rule names `mem` or `Pool`: the restriction is the type's own signature.
 
 ## 7. Other mechanical checks
 
@@ -227,7 +223,8 @@ boundary from the inside:
 ## 8. What this document does not claim
 
 - It does not claim every possible cross-heap mistake is caught: §5's check is
-  best-effort and §6 is an open gap.
+  best-effort, and an explicit `to void*` cast in `unsafe` can still put a GC
+  pointer in manual memory (§6).
 - It does not claim the intrinsic list is mechanically total (§2).
 - It does not describe a redesign of the boundary: the document and the script
   record and enforce what the compiler, runtime and library already do. Codegen's
