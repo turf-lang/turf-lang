@@ -13,6 +13,9 @@
 #   - turf's main package and module are turf-cli's;
 #   - turf's vcs.revision is the turf-cli checkout's HEAD, so the binary
 #     is current with the checkout and was not built inside turf-lang.
+#   - the checkout is at the commit TURF_CLI_REVISION pins: required in CI
+#     (every build of one turf-lang commit ships the same turf), a NOTE
+#     locally, where ../turf-cli may be ahead while turf is being changed.
 #
 # Usage: scripts/smoke/cli_source_smoke.sh [--build-dir=DIR]
 #            (after building DIR/turf; DIR defaults to build)
@@ -110,6 +113,20 @@ elif git cat-file -e "$REV^{commit}" 2>/dev/null && ! git -C "$CLI_DIR" cat-file
   fail "$TURF was built inside turf-lang (revision ${REV:0:12} is a turf-lang commit; re-run cmake and rebuild)"
 else
   fail "$TURF was built from revision ${REV:0:12}, but $CLI_DIR is at ${CLI_HEAD:0:12} (rebuild)"
+fi
+
+# --- the pinned revision ------------------------------------------------------------
+PINNED=$(tr -d '[:space:]' < TURF_CLI_REVISION 2>/dev/null)
+if [ -z "$PINNED" ]; then
+  fail "TURF_CLI_REVISION is missing or empty"
+elif [ -z "$CLI_HEAD" ]; then
+  : # reported above
+elif [ "$CLI_HEAD" = "$PINNED" ]; then
+  pass "turf-cli is at the pinned revision ${PINNED:0:12}"
+elif [ -n "${CI:-}" ]; then
+  fail "turf-cli is at ${CLI_HEAD:0:12}, but TURF_CLI_REVISION pins ${PINNED:0:12}"
+else
+  echo "NOTE: turf-cli is at ${CLI_HEAD:0:12}, but TURF_CLI_REVISION pins ${PINNED:0:12} (update the pin before turf-lang commits that need it)"
 fi
 
 if [ "$FAILS" -ne 0 ]; then

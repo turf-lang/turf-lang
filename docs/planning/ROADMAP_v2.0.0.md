@@ -149,7 +149,7 @@ PHASE 3  Stabilization & release      REL-001  version, CLI, runtime ABI stamp  
                                       REL-004  conformance suite, CI, fuzzing, sanitizers  DONE (REL-004.md, 2026-10-12; first CI runs are separate issues)
                                       REL-005  performance baseline  DONE (REL-005.md, 2026-10-13)
                                       REL-006  documentation (reference rewrite, migration guide)  DONE (REL-006.md, 2026-10-13; the handbook is paused, not a gate)
-                                      REL-007  release candidates → 2.0.0
+                                      REL-007  release candidates → 2.0.0  IN PROGRESS (REL-007.md, started 2026-10-14)
                                       FDN-005  GC hardening CI gate (each RC; criterion met 2026-10-13)
 ```
 

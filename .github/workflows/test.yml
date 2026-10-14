@@ -105,12 +105,18 @@ jobs:
       # turf front end, LEC-001). The ASan job below deliberately does NOT
       # install Go: its CMake configure prints "Go not found" and carries on,
       # which doubles as the standing proof that the compiler builds without Go.
-      # The front end's source is the turf-cli repository, checked out beside
-      # this one; CMake and the smoke tests find it through TURF_CLI_DIR.
+      # The front end's source is the turf-cli repository at the commit
+      # TURF_CLI_REVISION pins, checked out beside this one; CMake and the
+      # smoke tests find it through TURF_CLI_DIR.
+      - name: Pinned turf-cli revision
+        id: turf-cli-rev
+        shell: bash
+        run: echo "rev=$(tr -d '[:space:]' < TURF_CLI_REVISION)" >> "$GITHUB_OUTPUT"
       - name: turf front end source (turf-cli)
         uses: actions/checkout@v4
         with:
           repository: turf-lang/turf-cli
+          ref: ${{ steps.turf-cli-rev.outputs.rev }}
           path: turf-cli
       - name: Point CMake and the smoke tests at turf-cli
         run: echo "TURF_CLI_DIR=${{ github.workspace }}/turf-cli" >> "$GITHUB_ENV"
@@ -173,8 +179,9 @@ jobs:
         run: cd "$TURF_CLI_DIR" && go vet ./... && go test ./...
       - name: turf front end smoke test (passthrough, subcommands, handshake)
         run: CI=1 ./scripts/smoke/cli_smoke.sh
-      # build/turf comes from the turf-cli checkout (TURF_CLI_DIR) at its HEAD,
-      # read from the module path and revision Go stamps into the binary.
+      # build/turf comes from the turf-cli checkout (TURF_CLI_DIR) at the
+      # pinned TURF_CLI_REVISION, read from the module path and revision Go
+      # stamps into the binary.
       - name: turf front end comes from turf-cli
         run: CI=1 ./scripts/smoke/cli_source_smoke.sh
       # LEC-001 stage 5: `turf` reads projects -- turf.toml, path dependencies,

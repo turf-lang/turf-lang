@@ -86,12 +86,18 @@ jobs:
 
       # Go, before the CMake build, so it builds build/turf (the turf front end,
       # LEC-001) beside build/turfc; the archive ships both.
-      # The front end's source is the turf-cli repository, checked out beside
-      # this one; CMake and the smoke tests find it through TURF_CLI_DIR.
+      # The front end's source is the turf-cli repository at the commit
+      # TURF_CLI_REVISION pins, checked out beside this one; CMake and the
+      # smoke tests find it through TURF_CLI_DIR.
+      - name: Pinned turf-cli revision
+        id: turf-cli-rev
+        shell: bash
+        run: echo "rev=$(tr -d '[:space:]' < TURF_CLI_REVISION)" >> "$GITHUB_OUTPUT"
       - name: turf front end source (turf-cli)
         uses: actions/checkout@v4
         with:
           repository: turf-lang/turf-cli
+          ref: ${{ steps.turf-cli-rev.outputs.rev }}
           path: turf-cli
       - name: Point CMake and the smoke tests at turf-cli
         shell: bash
@@ -124,7 +130,7 @@ jobs:
       - name: Build the bundled C runtime (musl)
         run: ./scripts/release/build_bundled_runtime.sh --platform linux-x86_64
 
-      # The archive ships turf from the turf-cli checkout, at its HEAD.
+      # The archive ships turf from turf-cli at the pinned TURF_CLI_REVISION.
       - name: turf front end comes from turf-cli
         run: CI=1 ./scripts/smoke/cli_source_smoke.sh
 
@@ -174,7 +180,7 @@ jobs:
         run: |
           ./scripts/cmake_build.sh --release-static --embed-lld --smart --build-dir=build-smart
 
-      # The archive ships turf from the turf-cli checkout, at its HEAD.
+      # The archive ships turf from turf-cli at the pinned TURF_CLI_REVISION.
       - name: turf front end comes from turf-cli (smart)
         run: CI=1 ./scripts/smoke/cli_source_smoke.sh --build-dir=build-smart
 
@@ -272,12 +278,18 @@ jobs:
 
       # Go, before the CMake build, so it builds build/turf (the turf front end,
       # LEC-001) beside build/turfc; the archive ships both.
-      # The front end's source is the turf-cli repository, checked out beside
-      # this one; CMake and the smoke tests find it through TURF_CLI_DIR.
+      # The front end's source is the turf-cli repository at the commit
+      # TURF_CLI_REVISION pins, checked out beside this one; CMake and the
+      # smoke tests find it through TURF_CLI_DIR.
+      - name: Pinned turf-cli revision
+        id: turf-cli-rev
+        shell: bash
+        run: echo "rev=$(tr -d '[:space:]' < TURF_CLI_REVISION)" >> "$GITHUB_OUTPUT"
       - name: turf front end source (turf-cli)
         uses: actions/checkout@v4
         with:
           repository: turf-lang/turf-cli
+          ref: ${{ steps.turf-cli-rev.outputs.rev }}
           path: turf-cli
       - name: Point CMake and the smoke tests at turf-cli
         shell: bash
@@ -310,7 +322,7 @@ jobs:
       - name: Build the bundled C runtime (musl)
         run: ./scripts/release/build_bundled_runtime.sh --platform linux-arm64
 
-      # The archive ships turf from the turf-cli checkout, at its HEAD.
+      # The archive ships turf from turf-cli at the pinned TURF_CLI_REVISION.
       - name: turf front end comes from turf-cli
         run: CI=1 ./scripts/smoke/cli_source_smoke.sh
 
@@ -360,7 +372,7 @@ jobs:
         run: |
           ./scripts/cmake_build.sh --release-static --embed-lld --smart --build-dir=build-smart
 
-      # The archive ships turf from the turf-cli checkout, at its HEAD.
+      # The archive ships turf from turf-cli at the pinned TURF_CLI_REVISION.
       - name: turf front end comes from turf-cli (smart)
         run: CI=1 ./scripts/smoke/cli_source_smoke.sh --build-dir=build-smart
 
@@ -441,12 +453,18 @@ jobs:
       - name: Point CMake at the static lld
         run: echo "CMAKE_PREFIX_PATH=$LLVM_PREFIX:${{ runner.temp }}/lld" >> $GITHUB_ENV
 
-      # The front end's source is the turf-cli repository, checked out beside
-      # this one; CMake and the smoke tests find it through TURF_CLI_DIR.
+      # The front end's source is the turf-cli repository at the commit
+      # TURF_CLI_REVISION pins, checked out beside this one; CMake and the
+      # smoke tests find it through TURF_CLI_DIR.
+      - name: Pinned turf-cli revision
+        id: turf-cli-rev
+        shell: bash
+        run: echo "rev=$(tr -d '[:space:]' < TURF_CLI_REVISION)" >> "$GITHUB_OUTPUT"
       - name: turf front end source (turf-cli)
         uses: actions/checkout@v4
         with:
           repository: turf-lang/turf-cli
+          ref: ${{ steps.turf-cli-rev.outputs.rev }}
           path: turf-cli
       - name: Point CMake and the smoke tests at turf-cli
         shell: bash
@@ -529,7 +547,7 @@ jobs:
             macos-smokes.log
           if-no-files-found: ignore
 
-      # The archive ships turf from the turf-cli checkout, at its HEAD.
+      # The archive ships turf from turf-cli at the pinned TURF_CLI_REVISION.
       - name: turf front end comes from turf-cli
         run: CI=1 ./scripts/smoke/cli_source_smoke.sh
 
@@ -580,7 +598,7 @@ jobs:
           export PATH="$(brew --prefix llvm@22)/bin:$PATH"
           ./scripts/cmake_build.sh --release-static --embed-lld --smart --build-dir=build-smart
 
-      # The archive ships turf from the turf-cli checkout, at its HEAD.
+      # The archive ships turf from turf-cli at the pinned TURF_CLI_REVISION.
       - name: turf front end comes from turf-cli (smart)
         run: CI=1 ./scripts/smoke/cli_source_smoke.sh --build-dir=build-smart
 
@@ -650,12 +668,18 @@ jobs:
           # /tmp paths (cmp -s then reports every pair of files as different).
           install: mingw-w64-ucrt-x86_64-llvm mingw-w64-ucrt-x86_64-clang mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-zlib mingw-w64-ucrt-x86_64-zstd mingw-w64-ucrt-x86_64-lld diffutils mingw-w64-ucrt-x86_64-gdb
 
-      # The front end's source is the turf-cli repository, checked out beside
-      # this one; CMake and the smoke tests find it through TURF_CLI_DIR.
+      # The front end's source is the turf-cli repository at the commit
+      # TURF_CLI_REVISION pins, checked out beside this one; CMake and the
+      # smoke tests find it through TURF_CLI_DIR.
+      - name: Pinned turf-cli revision
+        id: turf-cli-rev
+        shell: bash
+        run: echo "rev=$(tr -d '[:space:]' < TURF_CLI_REVISION)" >> "$GITHUB_OUTPUT"
       - name: turf front end source (turf-cli)
         uses: actions/checkout@v4
         with:
           repository: turf-lang/turf-cli
+          ref: ${{ steps.turf-cli-rev.outputs.rev }}
           path: turf-cli
       - name: Point CMake and the smoke tests at turf-cli
         shell: bash
@@ -767,7 +791,7 @@ jobs:
           done
           exit $fail
 
-      # The archive ships turf from the turf-cli checkout, at its HEAD.
+      # The archive ships turf from turf-cli at the pinned TURF_CLI_REVISION.
       - name: turf front end comes from turf-cli
         shell: msys2 {0}
         run: CI=1 ./scripts/smoke/cli_source_smoke.sh
@@ -854,29 +878,23 @@ jobs:
       # <platform>-smart with grammars/ and an EMPTY models/ folder: no model is
       # shipped, the user puts one .gguf there (scripts/slm/models_README.txt). A
       # second build directory, after the plain archive is uploaded, so nothing
-      # here can change or delay it.
-      # NOT yet proven on Windows (no machine, no runner minutes when this was
-      # written): continue-on-error keeps a failure here from costing the plain
-      # archive. Remove it from these steps after the first green run.
+      # here can change or delay it. Required, as on the other platforms: 2.0.0
+      # ships both archives on every platform.
       - name: Fetch llama.cpp (the smart build only)
-        continue-on-error: true
         run: git submodule update --init --depth 1 external/llama.cpp
 
       - name: Build Turf with --smart's runtime
         shell: msys2 {0}
-        continue-on-error: true
         run: |
           ./scripts/cmake_build.sh --release-static --embed-lld --smart --build-dir=build-smart
 
-      # The archive ships turf from the turf-cli checkout, at its HEAD.
+      # The archive ships turf from turf-cli at the pinned TURF_CLI_REVISION.
       - name: turf front end comes from turf-cli (smart)
         shell: msys2 {0}
-        continue-on-error: true
         run: CI=1 ./scripts/smoke/cli_source_smoke.sh --build-dir=build-smart
 
       - name: Package (smart)
         id: package-smart
-        continue-on-error: true
         uses: ./.github/actions/package-release
         with:
           platform-suffix: windows-x86_64
@@ -885,7 +903,6 @@ jobs:
           build-dir: build-smart
 
       - name: Upload artifact (smart)
-        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: windows-x86_64-smart
@@ -895,5 +912,5 @@ jobs:
 
       - name: Archive dependency check (smart)
         shell: msys2 {0}
-        continue-on-error: true
+        continue-on-error: ${{ inputs.allowlist != 'enforce' }}
         run: ./scripts/release/release_deps_check.sh --archive "${{ steps.package-smart.outputs.archive-path }}"
