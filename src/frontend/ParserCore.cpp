@@ -1,10 +1,9 @@
 /**
  * @file ParserCore.cpp
  * @brief Token stream engine: precedence climbing, ParseType, and the primary-expression dispatcher.
- * @details Part of the recursive-descent parser for TurfLang, split from the
- *          original monolithic Parser.cpp by category (mirrors AST.h's
- *          ASTExpr/ASTStmt/ASTDecl/ASTAccess split -- see
- *          docs/architecture/compiler_pipeline.md).
+ * @details Part of the recursive-descent parser for TurfLang. The parser is
+ *          split by category, mirroring AST.h's ASTExpr/ASTStmt/ASTDecl/
+ *          ASTAccess split (see docs/architecture/compiler_pipeline.md).
  *
  * @author a2ys
  * @author AaravTandon24
@@ -40,11 +39,9 @@
 int CurTok; // The current token the parser is looking at
 static std::map<int, int> BinopPrecedence; // Precedence table: '*' > '+'
 
-// Forward declaration: ParseBinOpRHS() (below) calls ParseUnary(), but
-// ParseUnary() itself isn't defined until later in this same file -- this
-// mirrors the forward-declaration block that used to sit at the top of the
-// single monolithic Parser.cpp before the split (see ParserInternal.h for
-// the cross-file equivalents; this one is Core-internal only).
+// Forward declaration: ParseBinOpRHS() (below) calls ParseUnary(), which is
+// defined later in this file (ParserInternal.h holds the cross-file
+// declarations; this one is Core-internal only).
 std::unique_ptr<ExprAST> ParseUnary();
 
 // Reads the next token from the Lexer and updates CurTok.
@@ -112,15 +109,10 @@ void InitializePrecedence() {
   BinopPrecedence[TOK_POWER_ASSIGN] = 10;
 
   // Cast. Must bind TIGHTER than assignment (12 > 10) so `y = x to int;`
-  // parses as `y = (x to int)`, not `(y = x) to int` -- the latter used to
-  // silently discard the cast entirely (the assignment's own value, already
-  // computed and stored, just got cast-and-thrown-away), which was live in
-  // lib/std (`self.data = mem::malloc(n) to T*;` in list.tr/stack.tr/queue.tr/
-  // map.tr/mem.tr) and only "worked" by accident because raw `ptr` already
-  // implicitly coerces to any `T*` (see typesCompatible()'s Rule 2) -- the
-  // explicit cast was dead weight, not the thing actually making it compile.
-  // Still looser than every other real binary operator (15+) so
-  // `1 + 2 to double` keeps meaning `(1 + 2) to double`, unchanged.
+  // parses as `y = (x to int)`: parsed as `(y = x) to int`, the cast would
+  // apply to the assignment's already-stored value and be silently
+  // discarded. It stays looser than every other real binary operator (15+) so
+  // `1 + 2 to double` means `(1 + 2) to double`.
   BinopPrecedence[TOK_TO] = 12;
 
   // Logical
@@ -159,7 +151,7 @@ void InitializePrecedence() {
   BinopPrecedence['/'] = 50;
   BinopPrecedence['%'] = 50;
 
-  // Exponentiation (formerly ^, now **)
+  // Exponentiation (`**`)
   BinopPrecedence[TOK_POWER] = 60;
 }
 
@@ -168,8 +160,7 @@ void InitializeCompilerGlobals() {
   InitializePrecedence();
 }
 
-// See Parser.h for the doc comment -- moved here (non-static) from main.cpp
-// so Sandbox.cpp's own recovery passes can share this logic; see #228/#233.
+// See Parser.h for the doc comment.
 bool IsTopLevelBoundaryToken(int Tok) {
   return Tok == TOK_EOF || Tok == ';' || Tok == TOK_FN || Tok == TOK_STRUCT ||
          Tok == TOK_ENUM || Tok == TOK_MACHINE || Tok == TOK_EXTERN ||
@@ -179,74 +170,53 @@ bool IsTopLevelBoundaryToken(int Tok) {
 }
 
 void SkipToNextTopLevelBoundary() {
-  // Every call site of this function is a TOP-LEVEL per-statement recovery
-  // loop (main.cpp's pre-pass/main-pass, the query facade's entry-file
-  // loop in AnalysisFacade.cpp) -- i.e. this is only ever
-  // invoked at a point that logically SHOULD be top-level depth 0, even
-  // when the ACTUAL g_braceDepth reading is wrong. It reads wrong whenever
-  // the just-failed statement opened a '{'/'('/'[' it never got to close
-  // before the parse bailed out (e.g. `fn broken(: int {` -- the '(' is
-  // incremented, then the parse fails immediately on the next token,
-  // before any ')' is ever seen) -- confirmed live: without this reset,
-  // that permanent +1 offset makes the do-while below never see depth
-  // return to 0 again until EOF, silently swallowing every remaining
-  // top-level declaration in the file as "still skipping," not just the
-  // one broken statement (issue #245).
+  // Every call site is a top-level per-statement recovery loop (main.cpp's
+  // pre-pass/main-pass, the query facade's entry-file loop in
+  // AnalysisFacade.cpp), so this runs where nesting should be top level.
+  // g_braceDepth can still read wrong there: a failed statement may have
+  // opened a '{'/'('/'[' it never closed (e.g. `fn broken(: int {`: the '(' is
+  // counted, then the parse fails before any ')'). Left as is, that permanent
+  // +1 keeps the do-while below from ever seeing depth 0 again, so it would
+  // swallow every remaining top-level declaration up to EOF.
   //
-  // Resetting to 0 here is safe for the OTHER, already-correct case too
-  // (a genuinely nested, not-yet-parsed tail that WILL close naturally,
-  // e.g. 'operator -(a: Vec2): Vec2 { ... }' rejected for being unary,
-  // with its ': Vec2 { return a; }' tail never parsed): by the time that
-  // kind of failure reaches this function, the failed construct's own
-  // brackets are already balanced (the arity check happens right after
-  // the already-fully-matched parameter list), so g_braceDepth is already
-  // 0 -- this reset is a no-op there, and the do-while below still
-  // correctly walks forward through the real, still-untouched '{'...'}'
-  // body by tracking depth incrementally from this point on, exactly as
-  // before.
+  // The reset is not to 0 but to the CURLY depth, which drops only the stray
+  // `(`/`[` imbalance. For an error in a function's own header the two agree
+  // (no `{` is open yet). For an error in the BODY (a lambda attempt,
+  // `List<int>::default()`, `fn(` where an expression belongs) the body's `{`
+  // is still open, and resetting to 0 would stop the skip at the next `;`
+  // inside that body: the rest of the body would parse as top-level
+  // statements and draw a false "Statements are not allowed outside of a
+  // function" ahead of the real error. Keeping the `{` count resynchronises
+  // on the function's own closing brace.
   //
-  // LEC-005: reset to the CURLY depth, not to 0. For an error in a function's
-  // own header (the `fn broken(: int {` above) the two agree -- no `{` is open
-  // yet -- but an error in the BODY (a lambda attempt, `List<int>::default()`,
-  // `fn(` where an expression belongs) leaves the body's `{` open, and a 0
-  // here made the skip stop at the next `;` inside that body: the rest of the
-  // body then parsed as top-level statements and drew a false "Statements are
-  // not allowed outside of a function" that was usually printed before the
-  // real error. Dropping only the stray `(`/`[` imbalance and keeping the
-  // `{` count resynchronises on the function's own closing brace.
+  // When the failed construct's brackets are already balanced (e.g.
+  // 'operator -(a: Vec2): Vec2 { ... }' rejected for being unary, right after
+  // its parameter list), the reset is a no-op and the loop below walks
+  // through the untouched '{'...'}' body.
   g_braceDepth = g_curlyDepth;
 
   if (CurTok == TOK_EOF) return;
 
-  // If the construct that just failed already consumed everything through
-  // its own natural boundary before rejecting the result (e.g.
-  // ParseLetStatement() eats a declaration's trailing ';' as part of
-  // building the node; ParseExportDecl() then rejects the shape of that
-  // already-complete node), CurTok is already sitting on the START of the
-  // next legitimate declaration. Forcing an extra token here -- the old,
-  // unconditional behavior below -- would eat that next declaration's own
-  // leading keyword, corrupting the parse of a statement that was never
-  // broken in the first place (confirmed: this desynced 'fn main(): int'
-  // into a bogus bare call 'main()' after fail_export_array_no_initializer's
-  // rejection, producing a second, unrelated "Expected ';'" error on top of
-  // the real one).
+  // If the failed construct already consumed everything through its own
+  // natural boundary before rejecting the result (e.g. ParseLetStatement()
+  // eats a declaration's trailing ';' as part of building the node, and
+  // ParseExportDecl() then rejects the shape of that complete node), CurTok
+  // is already on the START of the next legitimate declaration. Forcing a
+  // token here would eat that declaration's leading keyword and desync a
+  // statement that was never broken (`fn main(): int` would become a bare
+  // call `main()` and draw a second, unrelated "Expected ';'").
   if (g_braceDepth == 0 && IsTopLevelBoundaryToken(CurTok)) return;
 
-  // Otherwise there's genuine leftover garbage from the failed construct --
-  // anywhere from a single bad token (e.g. an unsupported operator symbol,
-  // rejected before any '(' was even reached) to an entire un-consumed
-  // signature-and-body (e.g. 'operator -(a: Vec2): Vec2 { ... }' rejected
-  // for being unary, with its ': Vec2 { return a; }' tail never parsed).
-  // Skip forward, tracking nesting via g_braceDepth (maintained globally by
-  // getNextToken(), see its own doc comment), until back at depth 0 AND
-  // sitting on a real boundary -- always making at least one token of
-  // forward progress, since we already know from the guard above that we
-  // are NOT currently sitting on one.
+  // Otherwise the failed construct left unconsumed text: anywhere from a
+  // single bad token (e.g. an unsupported operator symbol, rejected before
+  // any '(') to a whole signature and body (e.g. the unary 'operator -'
+  // above, with its ': Vec2 { return a; }' tail never parsed). Skip forward,
+  // tracking nesting via g_braceDepth (kept by getNextToken()), until back at
+  // depth 0 AND on a real boundary. At least one token is always consumed.
   //
-  // A lexer error in the skipped text is reported and skipped too. This runs
-  // inside a recovery point's catch block, where a raise would escape the
-  // recovery point (under the old longjmp it jumped back into the same
-  // recovery branch, which called this function again).
+  // A lexer error in the skipped text is reported and skipped too: this runs
+  // inside a recovery point's catch block, and letting the error propagate
+  // would escape that recovery point.
   do {
     try {
       getNextToken();
@@ -287,12 +257,9 @@ static TurfTypePtr ParseTrailingArrayDims(TurfTypePtr Base);
 
 TurfTypePtr ParseType() {
   // Recurses into itself directly (generic type args, `!T` error unions,
-  // pointer types) without ever going back through ParseExpression() --
-  // needs its OWN recursion guard rather than relying on ParseExpression's
-  // (found via code review: a deeply nested generic type,
-  // `list<list<list<...>>>`, recurses this function directly and was
-  // completely unbounded even after the ParseExpression()/ParseBlock()
-  // guards existed). See ParseRecursionGuard's doc comment in Lexer.h.
+  // pointer types) without going back through ParseExpression(), so it needs
+  // its OWN recursion guard: a deeply nested `list<list<list<...>>>` would
+  // otherwise be unbounded. See ParseRecursionGuard's doc comment in Lexer.h.
   ParseRecursionGuard RecursionGuard;
   if (RecursionGuard.tooDeep()) {
     LogErrorAt(CurLoc, ErrCode::NestingTooDeep,
@@ -305,10 +272,9 @@ TurfTypePtr ParseType() {
   // (docs/architecture/errors_and_recover.md): T on success, or any declared
   // `error` type value on failure. Unambiguous with the unary logical-not
   // operator ('!' desugars to `x != true` -- see ParseUnary()) since that's
-  // parsed entirely inside EXPRESSION parsing; ParseType() is a wholly
-  // separate function only ever called from type positions (return types,
-  // parameter types, var-decl annotations, struct/error-variant fields),
-  // which previously rejected a leading '!' outright.
+  // parsed entirely inside EXPRESSION parsing; ParseType() is only ever
+  // called from type positions (return types, parameter types, var-decl
+  // annotations, struct/error-variant fields).
   if (CurTok == '!') {
     getNextToken(); // consume '!'
     TurfTypePtr SuccessType = ParseType();
@@ -317,9 +283,8 @@ TurfTypePtr ParseType() {
     return std::make_shared<TurfErrorUnionType>(std::move(SuccessType));
   }
 
-  // `&T` -- a compiler-guaranteed non-null safe reference (issue #238) --
-  // and `&?T` -- a nullable, NullabilityPass-checked safe reference
-  // (LANG-002). Symmetric to the `!T` branch just above: its own
+  // `&T` -- a compiler-guaranteed non-null safe reference -- and `&?T` -- a
+  // nullable, NullabilityPass-checked safe reference. Symmetric to the `!T` branch just above: its own
   // leading-token branch, ahead of the primitive/identifier dispatch below,
   // recursing into ParseType() for the pointee. Unambiguous with the binary
   // bitwise-AND operator ('&') and the unary address-of operator (also '&')
@@ -329,8 +294,7 @@ TurfTypePtr ParseType() {
   // unambiguous: '?' has no other meaning anywhere in this grammar.
   // `(&N)[2]` -- an array (or `(&N)[]` slice) of references. `&N[2]` is a
   // reference to an array, because `&` takes the whole type after it, so an
-  // array of references needs the parentheses (owner, 2026-10-12; turf-fuzz
-  // findings/wrong-message/array-of-references-type-name). A function type
+  // array of references needs the parentheses. A function type
   // needs them for the same reason: in `fn(int): int[2]` the `[2]` belongs
   // to the return type, so an array of function values is
   // `(fn(int): int)[2]`. Only those two may be parenthesised, and only to
@@ -459,20 +423,17 @@ TurfTypePtr ParseType() {
     return TurfPtr();
   }
   else if (CurTok == TOK_GUESS) {
-    // `guess` is a terminal type-position placeholder (SEM-003, §11.2) —
-    // never composed with generics/arrays/pointers, exactly like `ptr`
+    // `guess` is a terminal type-position placeholder (FREEZE.md §6.3)
+    // -- never composed with generics/arrays/pointers, exactly like `ptr`
     // above. TypeChecker::visitVarDecl replaces it with the initializer's
-    // real type; nothing between here and there ever inspects it beyond
-    // the isGuess() checks ParseLetStatement/Resolver/TypeChecker add.
+    // real type.
     //
     // F-GUESS-3 (FREEZE.md §6.3): inference is for a local variable's
     // initializer only -- never a parameter, return type, struct field, error
-    // payload or generic argument, none of which has an initializer. This used
-    // to parse everywhere, and what the user then saw depended on the position:
-    // a struct field `x: guess` compiled, a parameter failed at the CALL with
-    // "No matching overload", a return type with "declares 'guess' but returns
-    // 'int'". Found while anchoring the conformance map to the frozen
-    // decisions (REL-004). Only the local-declaration parse sets the flag.
+    // payload or generic argument, none of which has an initializer. Allowed
+    // there, it would surface later and differently per position (a struct
+    // field would compile, a parameter would fail at the call). Only the
+    // local-declaration parse (ParseLetStatement) sets the flag.
     if (!g_AllowGuessType) {
       LogErrorAt(CurLoc, ErrCode::MissingInitializer,
                  "'guess' needs an initializer to infer from, so it can only "
@@ -494,11 +455,10 @@ TurfTypePtr ParseType() {
   // Module-qualified type: Module::TypeName<Args> (e.g. list::List<int>).
   // BaseName parsed above was actually the module qualifier; re-bind it to
   // the real type name that follows '::', and carry the qualifier forward
-  // into the NamedType/GenericType built below so the Resolver can
-  // actually validate it (Resolver::validateModuleQualifier(), called from
-  // validateNamedType()) once module registrations are known -- that can't
-  // happen here at parse time, since module registration runs at Codegen
-  // time, strictly after the entire program is parsed.
+  // into the NamedType/GenericType built below. The Resolver validates it
+  // (Resolver::validateModuleQualifier(), reached from validateNamedType())
+  // after its first pass has registered every module, which cannot be known
+  // here while the program is still being parsed.
   std::string ModuleQualifier;
   if (CurTok == TOK_SCOPE) {
     getNextToken(); // eat '::'
@@ -506,8 +466,8 @@ TurfTypePtr ParseType() {
       SyntaxError(CurLoc, ErrCode::ExpectedType, "Expected a type name after '::'").raise();
       return nullptr;
     }
-    // LEC-001 stage 4: the qualifier as written may be an alias for a
-    // dependency module's identity (ModuleKeyFor(), ParserModule.cpp).
+    // The qualifier as written may be an alias for a dependency module's
+    // identity (ModuleKeyFor(), ParserModule.cpp).
     ModuleQualifier = ModuleKeyFor(BaseName);
     BaseName = IdentifierStr;
     getNextToken();
@@ -526,7 +486,7 @@ TurfTypePtr ParseType() {
         getNextToken(); // consume '>'
         break;
       }
-      // OVH-009: the lexer's maximal munch (INV-LEX-1 -- never special-
+      // The lexer's maximal munch (INV-LEX-1 -- never special-
       // cased there) fuses adjacent '>'-family characters into one token
       // whenever a nested generic argument list closes with no space
       // (`List<List<int>>` -> TOK_RSHIFT) or the close is immediately
@@ -572,17 +532,12 @@ TurfTypePtr ParseType() {
       getNextToken();
       int Size = -1;
       if (CurTok == TOK_INT_LITERAL) {
-        // A best-effort (saturating) reading of the literal, same as this
-        // whole file did before SEM-001 -- an array size is always a small
-        // positive int in practice, and NumLitClean/NumLitRadix (not the
-        // exact llvm::APSInt NumberExprAST itself carries, since no
-        // NumberExprAST node exists for a type-position literal like this
-        // one at all) is all that's needed here; representability of an
-        // array SIZE is unrelated to SEM-001/002's literal-representability
-        // work, which is about literals used as VALUES, not this compile-
-        // time-only dimension. See ParseNumberExpr's own comment
-        // (ParserLiteral.cpp) for the exact-value path a real
-        // value-position literal takes instead.
+        // A best-effort (saturating) reading of the literal: an array size
+        // is a small positive int in practice, no NumberExprAST node exists
+        // for a type-position literal, and the exact-value representability
+        // checks apply to literals used as VALUES, not to this compile-time
+        // dimension. See ParseNumberExpr (ParserLiteral.cpp) for the
+        // exact-value path a value-position literal takes.
         Size = static_cast<int>(strtoll(NumLitClean.c_str(), nullptr, NumLitRadix));
         if (Size <= 0) {
           SyntaxError(CurLoc, ErrCode::InvalidArraySize, "Array size must be positive",
@@ -678,10 +633,9 @@ static TurfTypePtr ParseTrailingArrayDims(TurfTypePtr Base) {
  * LLVM representation for a void-typed local variable, struct field, array
  * element, or parameter, and code further down the pipeline (definite-
  * assignment analysis, GetDefaultValue(), LLVM struct-body construction, ...)
- * assumes it never sees one there. Concretely, `mut x: void;` and
- * `fn f(x: void): void {}` were both observed to hang the compiler
- * indefinitely rather than fail cleanly -- this predicate exists so callers
- * can catch the mistake at parse time instead, with a normal diagnostic.
+ * assumes it never sees one there (`mut x: void;` and `fn f(x: void): void {}`
+ * would hang the compiler). Callers use this predicate to reject the mistake
+ * at parse time with a normal diagnostic.
  *
  * Deliberately does NOT match 'void*' (a TurfPointerType wrapping VoidType):
  * TurfPointerType::isVoid() is never overridden and always returns false, so
@@ -753,12 +707,10 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
   case TOK_CALLER_LOCATION: {
     // Bare keyword, no arguments -- see CallerLocationExprAST's own doc
     // comment (ASTExpr.h) for why this is a dedicated node rather than
-    // falling through to the ordinary identifier/VariableExprAST path
-    // TOK_SELF shares below. Legality (must be lexically inside a function
-    // declared '@caller_location') is entirely TypeChecker's job
-    // (visitCallerLocation()), not checked here -- mirrors how ParseType()'s
-    // '&'/'!' branches and this file's TOK_UNSAFE case never validate
-    // context either.
+    // falling through to the identifier/VariableExprAST path TOK_SELF shares
+    // below. Legality (must be lexically inside a function declared
+    // '@caller_location') is TypeChecker's job (visitCallerLocation()), not
+    // checked here.
     SourceLocation Loc = CurLoc;
     getNextToken(); // eat 'caller_location'
     return std::make_unique<CallerLocationExprAST>(Loc);
@@ -771,20 +723,17 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     SourceLocation IdLoc = CurLoc;
     getNextToken(); // consume the identifier; CurTok now = next token
 
-    // ── Legacy struct brace-init is gone: `Identifier '{' ... '}'` no longer
-    // constructs anything -- see `StructName::new(...)`/`StructName::default()`
-    // instead. This branch used to build a StructInitExprAST here (removed
-    // entirely, along with the g_AllowStructInit flag it needed to avoid
-    // colliding with every block-taking construct's own '{'). Best-effort,
-    // not authoritative: if `IdName` is a struct type already registered by
-    // this point in the (top-to-bottom, live) parse, give a specific hint
-    // instead of letting this fall through to a generic/confusing parse
-    // error a few tokens later -- a forward-declared struct just won't hit
-    // this check, which is fine, since the ordinary parse failure that
-    // follows is still a real, if less specific, diagnostic.
+    // Struct brace-init (`Identifier '{' ... '}'`) is not valid syntax: a
+    // struct is built with `StructName::new(...)`/`StructName::default()`.
+    // Best-effort, not authoritative: if `IdName` is a struct type already
+    // registered by this point in the (top-to-bottom, live) parse, give a
+    // specific hint instead of letting this fall through to a confusing parse
+    // error a few tokens later. A forward-declared struct misses this check,
+    // which is fine: the ordinary parse failure that follows is still a real,
+    // if less specific, diagnostic.
     if (CurTok == '{' && GlobalSymbolTable && !ParsingPatternHeader) {
-      // FDN-003: a struct declared earlier in THIS module is registered
-      // under its identity (`M::IdName`), not its bare spelling.
+      // A struct declared earlier in THIS module is registered under its
+      // identity (`M::IdName`), not its bare spelling.
       if (auto T = GlobalSymbolTable->LookupType(
               TypeIdentity::make(CurrentParseModule(), IdName))) {
         if (dynamic_cast<TurfStructType *>(T.get())) {
@@ -800,14 +749,11 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     }
 
     // ── Scope access: Left::Right ────────────────────────────────────────────
-    // Purely syntax-directed, exactly like before this was generalized: the
-    // parser doesn't know (and doesn't need to know) whether `IdName` names
+    // Purely syntax-directed: the parser doesn't know whether `IdName` names
     // an enum, a module, or something else -- ScopeAccessKind disambiguation
     // happens entirely in the Resolver (visitScopeAccess / visitFuncCall).
     // Whatever follows this node syntactically (a postfix '(' for a call, a
-    // bare reference, etc.) is handled by the existing, unmodified postfix-
-    // expression machinery -- `Module::func(args)` already round-trips
-    // through it with zero new parsing logic needed here.
+    // bare reference, etc.) is handled by the postfix-expression machinery.
     if (CurTok == TOK_SCOPE) {
       getNextToken(); // eat '::'
       if (CurTok != TOK_IDENTIFIER) {
@@ -818,17 +764,17 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
       SourceLocation RightLoc = CurLoc;
       getNextToken(); // eat right-hand name
 
-      // LEC-001 stage 4: if `IdName` is this file's spelling of a dependency
-      // module, every consumer below (the ScopeAccessExprAST, including the
-      // 3-part `Module::Enum::Variant` chain's qualifier) must see its
-      // identity. Only imported module spellings are ever aliased, so an
-      // enum or struct name passes through unchanged.
+      // If `IdName` is this file's spelling of a dependency module, every
+      // consumer below (the ScopeAccessExprAST, including the 3-part
+      // `Module::Enum::Variant` chain's qualifier) must see its identity.
+      // Only imported module spellings are ever aliased, so an enum or struct
+      // name passes through unchanged.
       IdName = ModuleKeyFor(IdName);
 
-      // Same removed-syntax hint as the bare form above, for the qualified
+      // Same hint as the bare form above, for the qualified
       // `Module::StructName { ... }` spelling -- looked up by the identity
-      // the qualifier names (FDN-003: `IdName::RightName` IS that identity
-      // when IdName is the owning module).
+      // the qualifier names (`IdName::RightName` IS that identity when
+      // IdName is the owning module).
       if (CurTok == '{' && GlobalSymbolTable && !ParsingPatternHeader) {
         if (auto T = GlobalSymbolTable->LookupType(
                 TypeIdentity::make(IdName, RightName))) {
@@ -888,20 +834,16 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
       // usually an identifier, number, or string — things that cannot
       // directly follow a valid variable expression without an operator.
       //
-      // '{' is deliberately NOT one of these triggers (it used to be, until
-      // this false-positive was found: `if x < d2 { ... }` misfired here on
-      // 'd2' -- a perfectly ordinary variable one edit away from the
-      // keyword 'do' -- because it's immediately followed by the if-block's
-      // own opening brace). Unlike an adjacent identifier/number/string,
-      // '{' is NOT unambiguous evidence of a typo: this language has no
-      // parens around if/while/for/compare conditions, so "some expression
+      // '{' is deliberately NOT one of these triggers: `if x < d2 { ... }`
+      // would misfire on 'd2' (an ordinary variable one edit away from the
+      // keyword 'do'). Unlike an adjacent identifier/number/string, '{' is
+      // not unambiguous evidence of a typo: this language has no parens
+      // around if/while/for/compare conditions, so "some expression
       // immediately followed by '{'" is also the ordinary shape of every
-      // condition's last token right before its block -- indistinguishable
-      // from a real keyword typo using only the next token. No test in this
-      // suite exercises a typo'd keyword whose own very next token is '{'
-      // with nothing in between (e.g. a hypothetical 'els { ... }'); such a
-      // case still gets a real diagnostic, just a less specific one, from
-      // whatever this identifier fails to parse as further down.
+      // condition's last token right before its block. A typo'd keyword
+      // directly followed by '{' (e.g. 'els { ... }') still gets a real,
+      // if less specific, diagnostic from whatever this identifier fails to
+      // parse as further down.
       if (CurTok == TOK_IDENTIFIER || CurTok == TOK_NUMBER ||
           CurTok == TOK_INT_LITERAL || CurTok == TOK_STRING_LITERAL) {
         KeywordError(IdLoc, IdName).raise();
@@ -1000,8 +942,8 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     // A primitive type name is only ever valid after `mut x:` / `->`; here it
     // usually means a generic type argument written in EXPRESSION position
     // (`List<int>::default()` parses as `List < int ...`), which Turf does not
-    // have (FUTURE F-6c) -- say where the type goes instead of leaving the
-    // user to guess from "begin a declaration".
+    // have -- say where the type goes instead of leaving the user to guess
+    // from "begin a declaration".
     LogErrorAt(CurLoc, ErrCode::ExpectedKeyword,
                "Expected 'mutable' or 'immutable' to begin a declaration."
                "\n  Hint: if this is a generic type argument in an expression "
@@ -1022,8 +964,8 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     return ParseOperatorDecl();
 
   case TOK_AT:
-    // `@caller_location` (STD-002) and the general `@name(args)` annotations
-    // share one entry point; see ParseAnnotatedDecl() in ParserDecl.cpp.
+    // `@caller_location` and the general `@name(args)` annotations share one
+    // entry point; see ParseAnnotatedDecl() in ParserDecl.cpp.
     return ParseAnnotatedDecl();
 
   case TOK_IMPORT:
@@ -1115,10 +1057,8 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
     int NextPrec = GetTokPrecedence();
     // Right-associative operators: all assignment forms (so `a = b = c`
     // groups as `a = (b = c)`) and exponentiation (so `2 ** 3 ** 2` groups
-    // as `2 ** (3 ** 2)` == 512, matching every other language that has a
-    // `**` operator -- this used to be missing, silently making `**`
-    // left-associative like `+`/`*` instead (`(2**3)**2` == 64), with no
-    // test ever exercising a chained exponent to catch it.
+    // as `2 ** (3 ** 2)` == 512, as in other languages with a `**`
+    // operator, not left-associative like `+`/`*`).
     bool isRightAssociative =
         (BinOp == TOK_ASSIGN || BinOp == TOK_PLUS_ASSIGN ||
          BinOp == TOK_MINUS_ASSIGN || BinOp == TOK_MUL_ASSIGN ||
@@ -1145,11 +1085,10 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
                BinOp == TOK_OR_ASSIGN || BinOp == TOK_XOR_ASSIGN ||
                BinOp == TOK_LSHIFT_ASSIGN || BinOp == TOK_RSHIFT_ASSIGN ||
                BinOp == TOK_POWER_ASSIGN) {
-      // Opcode is the plain operator this desugars to -- reusing the exact
-      // same encoding BinaryExprAST uses (raw ASCII for single-char ops,
-      // the token enum for multi-char ones) so TypeChecker/Codegen's
-      // existing per-operator switches can be shared/mirrored directly
-      // instead of inventing a second parallel encoding.
+      // Opcode is the plain operator this desugars to, in the same encoding
+      // BinaryExprAST uses (raw ASCII for single-char ops, the token enum for
+      // multi-char ones) so TypeChecker/Codegen's per-operator switches can
+      // be shared instead of needing a second encoding.
       int Op = '+';
       if (BinOp == TOK_MINUS_ASSIGN)
         Op = '-';
@@ -1205,10 +1144,10 @@ std::unique_ptr<ExprAST> ParseExpression() {
 
   // A declaration is a whole statement, never the left operand of anything:
   // `fn f(): int { return 0; } % 5` must not read the `%` as an operator and
-  // pull the NEXT declaration in as its right-hand side. That was the cause
-  // of `import test %` hiding `main` and printing an error from inside
-  // lib/std (the import case now has its own entry point, ParseImport(); this
-  // closes the same hole for the declarations ParseExpression() still builds).
+  // pull the NEXT declaration in as its right-hand side (`import test %`
+  // would hide `main` and print an error from inside lib/std). ParseImport()
+  // is the entry point for imports; this covers the declarations
+  // ParseExpression() builds.
   if (dynamic_cast<FuncDefExprAST *>(LHS.get()) ||
       dynamic_cast<StructDeclExprAST *>(LHS.get()) ||
       dynamic_cast<EnumDeclExprAST *>(LHS.get()) ||
@@ -1246,9 +1185,9 @@ std::unique_ptr<ExprAST> ParseExpression() {
   // `<expr> recover ...` -- handles the failure case of a `!T`-typed call
   // expression at the call site (docs/architecture/errors_and_recover.md).
   // Bound to the whole expression parsed so far (same "loosest binding"
-  // position as the give/otherwise ternary just above), since every example in
-  // errors_and_recover.md attaches `recover` directly to a call expression,
-  // not to some inner sub-term of a larger arithmetic expression.
+  // position as the give/otherwise ternary just above), since `recover`
+  // attaches directly to a call expression, not to a sub-term of a larger
+  // arithmetic expression.
   if (CurTok == TOK_RECOVER) {
     SourceLocation RecoverLoc = CurLoc;
     getNextToken(); // consume 'recover'
@@ -1326,13 +1265,10 @@ std::unique_ptr<ExprAST> Parse() {
 
 std::unique_ptr<ExprAST> ParseUnary() {
   // Recurses into itself directly for chained prefix operators (`!!!!x`,
-  // `~~~x`, `---x`) without ever going back through ParseExpression() --
-  // needs its OWN recursion guard rather than relying on ParseExpression's
-  // (found via code review: `!` repeated ~100000 times recurses this
-  // function that many C++ stack frames deep, completely unbounded even
-  // after the ParseExpression()/ParseBlock() guards existed -- exactly the
-  // uncatchable-stack-overflow failure class those guards were meant to
-  // close). See ParseRecursionGuard's doc comment in Lexer.h.
+  // `~~~x`, `---x`) without going back through ParseExpression(), so it
+  // needs its OWN recursion guard: otherwise a long run of `!` is that many
+  // C++ stack frames deep, an uncatchable stack overflow. See
+  // ParseRecursionGuard's doc comment in Lexer.h.
   ParseRecursionGuard RecursionGuard;
   if (RecursionGuard.tooDeep()) {
     LogErrorAt(CurLoc, ErrCode::NestingTooDeep,
@@ -1341,7 +1277,7 @@ std::unique_ptr<ExprAST> ParseUnary() {
     return nullptr;
   }
 
-  // `try <expr>` -- error propagation (LEC-004, FREEZE.md §6.18). A prefix
+  // `try <expr>` -- error propagation (FREEZE.md §6.18). A prefix
   // operator with `!`/`-`'s precedence, so `try a() + try b()` is
   // `(try a()) + (try b())` and `try x.f(1)` propagates the whole call.
   if (CurTok == TOK_TRY) {
@@ -1382,26 +1318,15 @@ std::unique_ptr<ExprAST> ParseUnary() {
       return nullptr;
     return std::make_unique<UnaryExprAST>(Loc, '~', std::move(Operand));
   }
-  // Prefix ++/-- -- LANG-001 follow-up: used to require a BARE
-  // TOK_IDENTIFIER and desugar straight to `x = x + 1`/`x = x - 1`
-  // (AssignmentExprAST(BinaryExprAST)), which made `++arr[0]`/`++obj.field`
-  // a parse error even though the equivalent POSTFIX form (`arr[0]++`)
-  // already worked -- postfix parses its operand through the general
-  // primary+postfix-chain path (ParsePostfixExpression(), ParserLiteral.cpp)
-  // and was never restricted to a bare identifier. Unified onto the exact
-  // same PostfixExprAST node postfix already uses (see its own doc comment,
-  // ASTExpr.h) with IsPrefix=true: the operand is parsed via ParsePrimary()
-  // -- the identical primary+postfix-chain parse a bare `arr[0]` or
-  // `obj.field` standing alone would get -- so `++arr[0]` now parses (and,
-  // for a builtin array, codegens) exactly like `arr[0]++` does, just
+  // Prefix ++/-- build the same PostfixExprAST node the postfix form uses
+  // (see its doc comment, ASTExpr.h) with IsPrefix=true. The operand is
+  // parsed via ParsePrimary() -- the primary+postfix-chain parse
+  // (ParsePostfixExpression(), ParserLiteral.cpp) -- not restricted to a bare
+  // identifier, so `++arr[0]`/`++obj.field` parse exactly like `arr[0]++`,
   // returning the NEW value instead of the old one. A non-lvalue operand
-  // (`++(a + b)`) is no longer a PARSE error the way "expected identifier"
-  // was; it becomes a clean InvalidAssignmentTargetError at TypeCheck time
-  // instead, via the same isAssignableLValue() check assignment/compound
-  // assignment already use (TypeChecker::visitPostfixExpr(),
-  // TypeCheckerExpr.cpp) -- postfix already had this exposure for a
-  // non-lvalue operand with no dedicated check at all before this follow-up;
-  // both directions get the real diagnostic now.
+  // (`++(a + b)`) is not a parse error: TypeChecker::visitPostfixExpr()
+  // (TypeCheckerExpr.cpp) rejects it with InvalidAssignmentTargetError via the
+  // isAssignableLValue() check assignment and compound assignment use.
   if (CurTok == TOK_PLUS_PLUS || CurTok == TOK_MINUS_MINUS) {
     int OpType = CurTok;
     SourceLocation Loc = CurLoc;
