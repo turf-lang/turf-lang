@@ -119,12 +119,12 @@ public:
         onDef(Node.getLoc(), L->ResolvedSymbol.get());
     } else if (std::vector<const ExprAST *> Indices;
                const VariableExprAST *Root = inPlaceArrayRoot(Node.getLHS(), Indices)) {
-      // SEM-004 (§12.6): an element write (`arr[i] = v`) counts as assigning
-      // the WHOLE array -- elements are not tracked individually, the same
-      // granularity ConstructorFieldAssignmentPass already uses for
-      // `self.<field>`; an uninitialized array's storage is zero-filled, so
-      // the elements nothing wrote read as zero. So does a nested write into
-      // one, `g[1][2] = v` or `ps[0].x = v` (owner decision 2026-10-13).
+      // An element write (`arr[i] = v`, and a nested one, `g[1][2] = v` or
+      // `ps[0].x = v`) changes part of the array and keeps the rest, so it
+      // is a read of the array as well as a write: the value stored before
+      // it is still live, since the other elements are read later. A
+      // fixed-size array is assigned from its declaration (visitArrayDecl),
+      // so the read never needs an earlier assignment.
       // This ONLY applies to a path through a fixed-size T[N] local and the
       // struct values and fixed-size arrays inside it (inPlaceArrayRoot()): a
       // `string`/`ptr`/`T*`/unsized-`T[]`/reference step is representationally
@@ -135,6 +135,7 @@ public:
       // pointer).
       for (const ExprAST *I : Indices)
         visitChild(I);
+      onRead(Node.getLoc(), Root->ResolvedSymbol.get());
       onDef(Node.getLoc(), Root->ResolvedSymbol.get());
     } else {
       visitChild(Node.getLHS());
@@ -198,18 +199,30 @@ public:
   // json.tr) was once flagged BOTH never-used and a dead store for lack of
   // exactly this recursion. `try f(x)` reads what its operand reads; its early
   // return is not modelled as a CFG edge, which nothing here needs.
+  //
+  // A run block the CFG holds as blocks of its own (RecoverExprAST::
+  // BlockInCFG) is read there, on its own path: walking it here too would put
+  // its reads and writes on the statement's path, in one flat sequence with
+  // no loop edges, so a loop-carried read inside it looked dead.
+  void visitRecoverExpr(RecoverExprAST &Node) override {
+    visitChild(Node.getWrapped());
+    visitChild(Node.getProduceExpr());
+    if (!Node.BlockInCFG)
+      visitChild(Node.getBlock());
+  }
 
   void visitArrayDecl(ArrayDeclExprAST &Node) override {
     ASTChildWalker::visitArrayDecl(Node);
-    // SEM-004 (§12.6, FREEZE.md §6.4): storage is always zero-filled
-    // (ArrayDeclExprAST::codegen() memsets unconditionally), but that's a
-    // runtime guarantee, not a static one -- an array declared with NEITHER
-    // an init list nor a general initializer is statically unassigned, same
-    // as any other body-declared local. It only becomes "defined" here, at
-    // declaration, when an initializer was actually given; an element write
-    // (`arr[0] = 1`) is the other way to assign it, handled in
-    // visitAssignment below.
-    if ((!Node.getInitList().empty() || Node.getInitExpr()) && Node.ResolvedSymbol)
+    // A fixed-size array is assigned from its declaration: its storage is
+    // zero-filled (ArrayDeclExprAST::codegen() memsets unconditionally), and
+    // every element nothing wrote reads as the zero value of its type. An
+    // element type with no zero value (one holding a `&N`) needs an
+    // initializer instead (E128). Elements are not tracked one by one, so
+    // the only sound whole-array rule for `mut a: int[5];` is this one.
+    // An unsized `T[]` is a view: it is assigned by an initializer or an
+    // assignment, like any other local.
+    if ((!Node.getInitList().empty() || Node.getInitExpr() || Node.getSize() >= 0) &&
+        Node.ResolvedSymbol)
       onDef(Node.getLoc(), Node.ResolvedSymbol.get());
   }
 };
@@ -620,7 +633,28 @@ void LivenessAnalysisPass::runOnCFG(
             EverRead.count(Ev.Sym) &&
             // `_name`: same "deliberately unused" convention as Step 3.
             !(!Ev.Sym->Name.empty() && Ev.Sym->Name[0] == '_')) {
-          DeadStoreWarning(Ev.Loc, Ev.Sym->Name).emit();
+          // The declaration's own initializer: the variable IS read, so
+          // "never read" would misdescribe it. An array declared with no
+          // initializer holds its zero-filled storage, which nothing wrote:
+          // there is no store to report.
+          const VariableSymbol *Declared = nullptr;
+          bool HasInitializer = true;
+          if (const auto *Vd = dynamic_cast<const VarDeclExprAST *>(Stmts[s])) {
+            Declared = Vd->getResolvedSymbol();
+          } else if (const auto *Ad = dynamic_cast<const ArrayDeclExprAST *>(Stmts[s])) {
+            Declared = Ad->getResolvedSymbol();
+            HasInitializer = !Ad->getInitList().empty() || Ad->getInitExpr();
+          }
+          if (Declared != Ev.Sym) {
+            DeadStoreWarning(Ev.Loc, Ev.Sym->Name).emit();
+          } else if (HasInitializer) {
+            // A type holding a reference needs its initializer (E128), so
+            // the hint offers no declaration without one.
+            std::string TypeName = Ev.Sym->Type ? Ev.Sym->Type->getName() : "";
+            if (TypeName.find('&') != std::string::npos)
+              TypeName.clear();
+            DeadInitializerWarning(Ev.Loc, Ev.Sym->Name, TypeName).emit();
+          }
         }
         LiveAfter.erase(Ev.Sym);
       }
@@ -1154,10 +1188,13 @@ public:
   // stay those of the wrapped expression's success path. Run only in the
   // reporting walk, which sees the converged IN sets. LEC-005 left this
   // unchecked (tests/99_known_bugs, now tests/39_nullable_references).
+  //
+  // A block the CFG already holds (RecoverExprAST::BlockInCFG) is analysed
+  // there, on its own edge.
   void visitRecoverExpr(RecoverExprAST &Node) override {
     checkOnly(Node.getWrapped(), OnTrue, Tracked, DoReport);
     checkOnly(Node.getProduceExpr(), OnTrue, Tracked, DoReport);
-    if (!DoReport || !Node.getBlock())
+    if (!DoReport || !Node.getBlock() || Node.BlockInCFG)
       return;
     auto BlockCfg = CFGBuilder().buildRegionCFG("recover", Node.getBlock(),
                                                 Node.getLoc());
@@ -1904,13 +1941,12 @@ bool isCollectionCall(const ResolverFunctionSymbol *Target) {
 //
 // An ASTChildWalker (LEC-005, INV-LINT-1): this enforces F-MEM-5, so a node it
 // skips is a dangling-reference hole, not a missed warning. The CFG hands it
-// one statement at a time, but a `recover run { ... }` block (and any `unsafe`
-// block, `defer`, or loop nested in one) is NOT split into CFG statements, so
-// it arrives as one statement whose inside this visitor must walk itself --
-// the hand-written overrides below covered operators and calls but had no
-// branch for `recover`, so `mut v: int = g() recover run { return &local; };`
-// returned a reference to a dead frame and compiled clean (confirmed live).
-// Nodes without a branch below now take the walker's plain recursion.
+// one statement at a time. A `recover run { ... }` block in an ordinary
+// statement or a `return` is CFG blocks of its own (CFGBuilder::
+// branchToRecoverBlocks()); one anywhere else (a loop condition), and a
+// `defer`'s statement, arrive inside one statement that this visitor walks
+// itself (`mut v: int = g() recover run { return &local; };` must be
+// E086). Nodes without a branch below take the walker's plain recursion.
 ProvMap meetProv(const ProvMap &A, const ProvMap &B);
 
 class EscapeCheckVisitor : public ASTChildWalker {
@@ -2160,6 +2196,18 @@ public:
     ProvMap Before = Map;
     recurse(Node.getStmt());
     Map = meetProv(Before, Map);
+  }
+  // A run block the CFG holds (RecoverExprAST::BlockInCFG) is checked there,
+  // on its own path. One it does not (in a loop condition, say) is walked
+  // here; it diverges, so what it stores never reaches the code after it.
+  void visitRecoverExpr(RecoverExprAST &Node) override {
+    recurse(Node.getWrapped());
+    recurse(Node.getProduceExpr());
+    if (Node.getBlock() && !Node.BlockInCFG) {
+      ProvMap Before = Map;
+      recurse(Node.getBlock());
+      Map = Before;
+    }
   }
   void visitPostfixExpr(PostfixExprAST &Node) override { recurse(Node.getOperand()); }
   void visitUnary(UnaryExprAST &Node) override { recurse(Node.getOperand()); }

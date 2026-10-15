@@ -1,0 +1,84 @@
+// EXPECT-NO-DIAG: dead store
+// EXPECT-NO-DIAG: never used
+// EXPECT-NO-DIAG: is never read
+// EXPECT-NO-DIAG: no exit path
+// EXPECT-NO-DIAG: infinite loop
+// A `recover run { }` block is part of the function's control flow: a loop
+// inside it has its back edge, and its `return`, `break` and `continue` have
+// theirs. A value carried round a loop in the block, or set in the block
+// before a `continue`, is read.
+
+import io;
+import test;
+
+error Bad {
+    Oops,
+}
+
+fn fails_on(n: int, bad: int): !int {
+    if n == bad {
+        return Bad::Oops;
+    }
+    return n * 10;
+}
+
+// A loop in the block: `prev` and `i` are read on the next iteration.
+fn sum_in_block(): int {
+    mut v: int = fails_on(0, 0) recover run {
+        mut prev: int = 0;
+        mut total: int = 0;
+        mut i: int = 0;
+        while i < 4 {
+            total = total + prev;
+            prev = i;
+            i = i + 1;
+        }
+        return total;
+    };
+    return v;
+}
+
+// `continue` in the block goes back to the loop condition, carrying `skipped`.
+fn count_failures(): int {
+    mut skipped: int = 0;
+    mut n: int = 0;
+    while n < 5 {
+        n = n + 1;
+        mut v: int = fails_on(n, 2) recover run {
+            skipped = skipped + 1;
+            continue;
+        };
+        io::printline(v);
+    }
+    return skipped;
+}
+
+// `break` in the block leaves an otherwise endless loop.
+fn first_failure(): int {
+    mut n: int = 0;
+    while true {
+        n = n + 1;
+        mut v: int = fails_on(n, 3) recover run {
+            break;
+        };
+        io::printline(v);
+    }
+    return n;
+}
+
+// The block reads the value the statement would have replaced.
+fn keep_old(): int {
+    mut v: int = 7;
+    v = (fails_on(1, 1) recover run {
+        return v;
+    });
+    return v;
+}
+
+fn main(): int {
+    test::assert(sum_in_block() == 3, "0 + 0 + 1 + 2");
+    test::assert(count_failures() == 1, "one failure skipped");
+    test::assert(first_failure() == 3, "the loop stops at the failure");
+    test::assert(keep_old() == 7, "the old value");
+    return 0;
+}

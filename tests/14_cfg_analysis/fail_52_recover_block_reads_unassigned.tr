@@ -1,0 +1,23 @@
+// EXPECT-DIAG: E008
+// EXPECT-DIAG: You're using 'x' (type 'int') before it has a value
+// A `recover run { }` block runs before the statement holding it completes,
+// so it sees only what was assigned before that statement.
+
+import io;
+
+error Bad {
+    Oops,
+}
+
+fn g(): !int {
+    return Bad::Oops;
+}
+
+fn main(): int {
+    mut x: int;
+    x = (g() recover run {
+        io::printline(x);
+        return 1;
+    });
+    return x;
+}

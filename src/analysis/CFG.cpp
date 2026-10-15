@@ -17,6 +17,7 @@
 
 #include "analysis/CFG.h"
 #include "frontend/AST.h"
+#include "frontend/ASTChildWalker.h"
 #include "diagnostics/Errors.h"
 #include <algorithm>
 #include <functional>
@@ -601,8 +602,61 @@ void CFGBuilder::visitExpr(ExprAST *E) {
     if (auto *D = dynamic_cast<DeferExprAST *>(E))
       if (!DeferScopes.empty() && D->getStmt())
         DeferScopes.back().push_back(D->getStmt());
+    branchToRecoverBlocks(E);
     CurrentBlock->addStatement(E);
   }
+}
+
+namespace {
+
+// The `recover ... run { }` blocks a statement evaluates itself: not one
+// inside another such block (built with that block) and not one under a
+// `defer` (its statement runs at the scope's exits, outside this CFG
+// position).
+class RecoverBlockFinder : public ASTChildWalker {
+public:
+  std::vector<RecoverExprAST *> Found;
+  void visitRecoverExpr(RecoverExprAST &Node) override {
+    visitChild(Node.getWrapped());
+    visitChild(Node.getProduceExpr());
+    if (Node.getBlock())
+      Found.push_back(&Node);
+  }
+  void visitDefer(DeferExprAST &) override {}
+};
+
+} // namespace
+
+// `mut v = g(x) recover run { B };` is a branch: g fails and B runs, or the
+// statement completes. B is built as ordinary blocks, so a loop, `return`,
+// `break` or `continue` inside it has its edges, and every pass sees B's
+// statements once, on the path where they run. The branch is placed before
+// the statement: on B's path nothing the statement defines is assigned yet
+// (`v = g() recover run { use(v); ... }` reads the old v). What the wrapped
+// call reads is read on the statement's path, from the same state.
+void CFGBuilder::branchToRecoverBlocks(ExprAST *Stmt) {
+  if (dynamic_cast<DeferExprAST *>(Stmt))
+    return;
+  RecoverBlockFinder Finder;
+  Stmt->accept(Finder);
+  if (Finder.Found.empty())
+    return;
+  TurfBasicBlock *Pre = CurrentBlock;
+  TurfBasicBlock *Ok = createBlock("recover.ok");
+  CurrentCFG->addEdge(Pre, Ok);
+  for (RecoverExprAST *R : Finder.Found) {
+    R->BlockInCFG = true;
+    TurfBasicBlock *Run = createBlock("recover.run");
+    CurrentCFG->addEdge(Pre, Run);
+    setInsertPoint(Run);
+    visitExpr(R->getBlock());
+    // A run block diverges (E066); an analysis that goes on past that error
+    // lets it fall through to the statement.
+    if (CurrentBlock && !CurrentBlock->hasExplicitTerminator())
+      CurrentCFG->addEdge(CurrentBlock, Ok);
+  }
+  Pre->setTerminator(TerminatorKind::Unconditional, Finder.Found.front()->getLoc());
+  setInsertPoint(Ok);
 }
 
 void CFGBuilder::emitDeferredRuns(size_t Depth) {
@@ -1122,6 +1176,7 @@ void CFGBuilder::visitReturn(ExprAST *E) {
   if (!Ret || !CurrentBlock)
     return;
 
+  branchToRecoverBlocks(Ret);
   CurrentBlock->addStatement(Ret);
   // After the value is computed, every enclosing scope's defers run.
   emitDeferredRuns(0);

@@ -232,6 +232,11 @@ private:
   void visitFor(ExprAST *E);
   void visitForEach(ExprAST *E);
 
+  // Before Stmt is added to the current block: a branch to each `recover ...
+  // run { }` block Stmt evaluates directly, built as CFG blocks, and the
+  // insert point moved to a fresh block for Stmt itself.
+  void branchToRecoverBlocks(ExprAST *Stmt);
+
   // Records, in the current block, the deferred statements of every scope
   // from the innermost down to (not including) depth Depth, LIFO.
   void emitDeferredRuns(size_t Depth);

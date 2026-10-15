@@ -78,57 +78,25 @@ static std::string Fingerprint(const ExprAST *E) {
   return "<unique@" + std::to_string(reinterpret_cast<uintptr_t>(E)) + ">";
 }
 
-// Helper: check if an AST subtree contains break/continue/return
+// Whether an AST subtree contains a break/continue/return anywhere: in a
+// nested block, an `if`, a `compare` arm, an `unsafe` block or a `recover`
+// block (whose `break` leaves the enclosing loop). A `break` of an inner loop
+// counts too: this only decides whether to warn, and a loop with any way out
+// in it is not reported.
+class LoopExitFinder : public ASTChildWalker {
+public:
+  bool Found = false;
+  void visitBreak(BreakExprAST &) override { Found = true; }
+  void visitContinue(ContinueExprAST &) override { Found = true; }
+  void visitReturn(ReturnExprAST &) override { Found = true; }
+};
+
 static bool ContainsLoopExit(const ExprAST *E) {
   if (!E)
     return false;
-
-  if (dynamic_cast<const BreakExprAST *>(E))
-    return true;
-
-  if (dynamic_cast<const ContinueExprAST *>(E))
-
-    return true;
-  if (dynamic_cast<const ReturnExprAST *>(E))
-    return true;
-
-  if (auto *Blk = dynamic_cast<const BlockExprAST *>(E)) {
-    for (const auto &Child : Blk->getExpressions()) {
-      if (ContainsLoopExit(Child.get()))
-        return true;
-    }
-  }
-
-  if (auto *If = dynamic_cast<const IfExprAST *>(E)) {
-    for (const auto &B : If->getBranches()) {
-      if (ContainsLoopExit(B.Body.get()))
-        return true;
-    }
-    if (ContainsLoopExit(If->getElseBody()))
-      return true;
-  }
-
-  if (auto *W = dynamic_cast<const WhileExprAST *>(E)) {
-    if (ContainsLoopExit(W->getBody()))
-      return true;
-  }
-
-  if (auto *DW = dynamic_cast<const DoWhileExprAST *>(E)) {
-    if (ContainsLoopExit(DW->getBody()))
-      return true;
-  }
-
-  if (auto *F = dynamic_cast<const ForExprAST *>(E)) {
-    if (ContainsLoopExit(F->getBody()))
-      return true;
-  }
-
-  if (auto *FE = dynamic_cast<const ForEachExprAST *>(E)) {
-    if (ContainsLoopExit(FE->getBody()))
-      return true;
-  }
-
-  return false;
+  LoopExitFinder Finder;
+  const_cast<ExprAST *>(E)->accept(Finder);
+  return Finder.Found;
 }
 
 // Helper: check if a block is effectively empty

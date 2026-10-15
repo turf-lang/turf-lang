@@ -222,6 +222,29 @@ public:
     Category_ = SLM::ErrorCategory::CONTROL_FLOW;
   }
 };
+// The dead store is a declaration's initializer: the variable is read, but
+// only after a later assignment on every path (`mut x: int = 0;` then
+// `x = i;` before each read in a loop).
+class DeadInitializerWarning : public TurfWarning {
+public:
+  DeadInitializerWarning(SourceLocation Loc, const std::string &VarName,
+                         const std::string &TypeName)
+      : TurfWarning(
+            Loc,
+            TurfWarning::WarningLabel() + "The initial value of '" +
+                Colors::CYAN + VarName + Colors::BRIGHT_YELLOW +
+                "' is never read: every path assigns '" + VarName +
+                "' again before reading it." + Colors::RESET,
+            TypeName.empty()
+                ? "Remove the initial value, or read it before the next "
+                  "assignment."
+                : "Declare it without a value, 'mut " + VarName + ": " +
+                      TypeName + ";' (every read still has to come after an "
+                      "assignment), or read the initial value before the "
+                      "next assignment.") {
+    Category_ = SLM::ErrorCategory::CONTROL_FLOW;
+  }
+};
 // A `for` range whose constant bounds and step say the loop variable moves
 // away from the end, so the loop runs until something in the body leaves it
 // (`for i in 5..1 { }`: the default step counts up). A warning: the body may

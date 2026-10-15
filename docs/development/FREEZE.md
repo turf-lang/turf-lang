@@ -129,9 +129,21 @@ otherwise each answer differently, producing an incoherent language.
 
 ### 6.4 Initialization — FROZEN
 
-- **One** mechanism: **definite assignment**, for every type without
+- **One** mechanism: **definite assignment**, for every type, with one
   exception. Reading a body-declared local before it is definitely assigned
   on every path is `DefiniteAssignmentError` (E008).
+- **The exception: a fixed-size array (`T[N]`) is assigned from its
+  declaration** (amended 2026-10-15 for 2.1.0, owner decision:
+  `changes/ANA-001.md`).
+  Its elements are not tracked one by one, and a whole-array rule cannot be
+  sound: after `a[0] = 1;` a read of `a[3]` sees a value nothing assigned,
+  and a loop that fills every element can't be proven to run. So every
+  element nothing wrote reads as the zero value of its type, from the
+  declaration on. An element type with no zero value (one holding a `&U`)
+  still needs an initializer (E128). An unsized `T[]` is a view and follows
+  the general rule. For liveness an element write is a read and a write
+  (the other elements stay live). This accepts strictly more programs than
+  2.0 did.
 - Storage is still always zero-filled. Definite assignment is a purely static
   safety net over memory that already reads as zero — this property is
   preserved verbatim from today and is what makes the check removable in
