@@ -14,6 +14,8 @@ An `immutable` variable can never be assigned after it is created, so it has to 
 
     mut x: guess = 5;                 // an int
 
+An array of non-null references, such as `(&Node)[3]`, or an unsized local array `int[]`, also needs a value, since there is no zero element to start from. A fixed-size array of numbers, strings or `&?T` needs none: its elements start as zero.
+
 Either give the variable its value, or -- for a `mut` variable whose value comes later -- say its type instead of using `guess`:
 
     mut x: int;

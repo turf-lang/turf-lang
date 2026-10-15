@@ -26,4 +26,6 @@ The fix is usually one of two things. Either give the variable a starting value 
     }
     mut y: int = x;   // now every path sets x before this line
 
+A fixed-size array such as `mut a: int[5];` is different: it has a value from its declaration, with every element zero until you write it, so reading it is never this error.
+
 Either approach works -- pick whichever makes more sense for what your program is actually trying to do. Once every path is guaranteed to set the variable before it's read, this error goes away and you're good to go.

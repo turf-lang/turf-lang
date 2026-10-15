@@ -141,7 +141,9 @@ exactly like ordinary overloads.
 `identity(42)` binds `T` to `int` because the argument is an `int`; `first(arr)`
 binds `T` to `int` because `arr` is `int[3]`. Every type parameter must appear
 in the parameter list, since that is the only place it can be inferred from
-(`fn<T> make(): T` is E129 at the declaration).
+(`fn<T> make(): T` is E129 at the declaration). A [size
+parameter](#size-parameters) is the exception: a call takes it from an array
+argument, or else from the type the result is stored into.
 
 **Every argument that mentions a type parameter must agree on it.** Inference
 never widens: with `fn<T> pair(a: T, b: T): T`, `pair(1, 2.5)` and
@@ -261,6 +263,152 @@ fn main(): int {
     return 0;
 }
 ```
+
+### Size parameters
+
+A generic function can take an array's length as a parameter. It is declared
+in the `<...>` list with `: size`, and used as an array dimension:
+
+```turflang
+import io;
+
+fn<T, N: size> fill(value: T): T[N] {
+    mut r: T[N];
+    for i in 0..N {
+        r[i] = value;
+    }
+    return r;
+}
+
+fn main(): int {
+    immut zeros: int[8] = fill(0);
+    immut names: string[3] = fill("?");
+    io::printline(zeros[7]);     // 0
+    io::printline(names[2]);     // ?
+    return 0;
+}
+```
+
+`N` is a length, not a type. It can be the dimension of any array type in the
+function: a parameter, the return type, a local (`mut r: T[N];`), or one
+dimension of a 2-D type (`T[N][3]`). In the body `N` reads as an `int`
+constant, so `for i in 0..N` and `a[N - 1 - i]` work. Each call fixes `N`, and
+each distinct length is its own instantiation, like each distinct `T`.
+
+**A call gets `N` from an array argument, or else from the type its result is
+stored into.**
+
+| Where `N` comes from | Example |
+|---|---|
+| an array argument | `reversed(a)` with `fn<T, N: size> reversed(a: T[N])` and `a: int[3]` gives `N = 3` |
+| a declaration with a written type | `mut a: int[8] = fill(0);` |
+| an assignment target | `a = fill(1);`, `h.vals = fill(6);` |
+| a parameter of a non-generic function | `take4(fill(2))` with `fn take4(a: int[4])` |
+| a `return` in a function whose return type is written | `return fill(9);` in `fn four(): int[4]` |
+
+```turflang
+import io;
+
+fn<T, N: size> fill(value: T): T[N] {
+    mut r: T[N];
+    for i in 0..N {
+        r[i] = value;
+    }
+    return r;
+}
+
+fn<T, N: size> reversed(a: T[N]): T[N] {
+    mut r: T[N];
+    for i in 0..N {
+        r[i] = a[N - 1 - i];
+    }
+    return r;
+}
+
+fn take4(a: int[4]): int {
+    return a[0] + a[3];
+}
+
+fn four(): int[4] {
+    return fill(9);
+}
+
+fn main(): int {
+    mut a: int[3] = [1, 2, 3];
+    io::printline(reversed(a)[0]);   // 3: N is 3, from the argument
+    a = fill(5);                     // N is 3, from the assignment target
+    io::printline(a[2]);             // 5
+    io::printline(take4(fill(2)));   // 4: N is 4, from the parameter type
+    io::printline(four()[3]);        // 9: N is 4, from the return type
+    return 0;
+}
+```
+
+A wrong length or element type at the target is an ordinary mismatch:
+`mut c: int[3] = fill("x");` is E004 (the call returns a `string[3]`).
+
+A size parameter is not a type parameter, so the rule that every type
+parameter appears in a parameter does not apply to it. It may appear only in
+the return type, since the target supplies it. It must appear in some array
+dimension of the parameters or the return type, or no call could fix it.
+
+**When nothing gives `N`, it is E129.** There is no syntax for writing it at
+the call (`fill<int, 4>(7)` is E110, as for type arguments). Put the length on
+a declaration, an assignment, a parameter or a return type instead:
+
+<!-- doc-example: fails E129 -->
+```turflang
+fn<T, N: size> fill(value: T): T[N] {
+    mut r: T[N];
+    for i in 0..N {
+        r[i] = value;
+    }
+    return r;
+}
+
+fn main(): int {
+    mut d = fill(0);       // E129: `guess` gives no size
+    return 0;
+}
+```
+
+A bare call statement (`fill(0);`) and a call whose target is an unsized
+`int[]` parameter are E129 too. A size parameter that no array in the
+parameters or return type uses is E129 at the declaration.
+
+**The body is checked once per instantiation,** with `N` bound to its value, so
+an error in the body is reported at the call that needs it, with the "In this
+instantiation" notes. `r[N] = v;` writes one past the end of every `T[N]` and
+is E001 for the instantiation. A function with a size parameter that nothing
+calls is not checked.
+
+**Where a size parameter can't be used is E150.**
+
+| What | Example |
+|---|---|
+| on a struct, a method or an operator | `struct S<N: size>`, `fn<N: size> S.m(...)` |
+| anything but `size` after the colon | `fn<N: count> f(a: int[N])` |
+| `N` written as a type | `fn<N: size> f(a: N)` |
+| a value parameter with the same name | `fn<N: size> f(N: int, a: int[N])` |
+| assigning to `N`, `N++`, `N--`, or `&N` in the body | `N = 3;` |
+
+<!-- doc-example: fails E150 -->
+```turflang
+struct Buffer<N: size> {
+    used: int
+}
+
+fn main(): int {
+    return 0;
+}
+```
+
+To change a number derived from `N`, copy it first: `mut n: int = N;`. A name
+inside `[ ]` that is not a declared size parameter is E123 (`'M' is not a
+size`).
+
+The standard library builds on this: the [`arrays` module](stdlib/arrays.md)
+has `fill`, `generate`, `reversed` and `map`.
 
 ### Generic structs and their methods
 

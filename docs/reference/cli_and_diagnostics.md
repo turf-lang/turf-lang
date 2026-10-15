@@ -580,7 +580,7 @@ A match is a small edit distance away, and swapping two adjacent letters counts 
 
 ### Error codes
 
-Every error has a stable code, `E001` to `E149`: **149 codes** with no gaps. A code is assigned once and never reused or renumbered, and it is an identifier, not a ranking of severity. Every one has a page, `turf explain E0NN`, that says what the error means, shows a wrong program and the fix. The same pages are in the repository as `docs/errors/codes/E0NN.txt`, and the release archives carry them.
+Every error has a stable code, `E001` to `E150`: **150 codes** with no gaps. A code is assigned once and never reused or renumbered, and it is an identifier, not a ranking of severity. Every one has a page, `turf explain E0NN`, that says what the error means, shows a wrong program and the fix. The same pages are in the repository as `docs/errors/codes/E0NN.txt`, and the release archives carry them.
 
 Six codes are **retired**: the mistakes they described are now reported under another code, and the number stays so old references still resolve. `turf explain` on them says which code replaced them. They are E006 (an unsized array in a `for` loop; arrays carry their length now), E013 (merged into E012), E015 (syntax errors, now E099–E123), E037 (unknown functions are E041), and E055 and E063 (now E056).
 
@@ -592,7 +592,7 @@ The codes by category (the category is the word in the diagnostic header):
 | control flow | E007, E009–E010, E012–E013, E016, E058, E074–E075, E083, E092–E095, E120, E132–E133 |
 | undeclared variable | E008, E037, E040–E041, E043, E054, E068, E131 |
 | syntax error | E014–E015, E070–E073, E099–E111, E118, E139 |
-| declaration | E019–E024, E027–E034, E039, E042, E045–E046, E048–E053, E060–E061, E069, E079–E080, E084–E085, E087–E091, E096–E097, E112–E117, E119, E128–E129, E136, E138, E145–E148 |
+| declaration | E019–E024, E027–E034, E039, E042, E045–E046, E048–E053, E060–E061, E069, E079–E080, E084–E085, E087–E091, E096–E097, E112–E117, E119, E128–E129, E136, E138, E145–E148, E150 |
 | function signature | E025, E038, E044, E047, E067, E125, E135, E137 |
 | type mismatch | E035–E036, E056, E059, E062, E064, E066, E082, E098, E124, E126, E134, E149 |
 | arithmetic | E057, E076–E078, E127 |
@@ -743,20 +743,30 @@ fn main(): int {
 ```text
 ── warning at line 2, col 5
 
-  Warning: Variable 'x' is assigned but the value is never read (dead store).
+  Warning: The initial value of 'x' is never read: every path assigns 'x' again before reading it.
 
-  Hint: The assigned value is overwritten or the function returns before this variable is ever used. Remove the assignment or use the value.
+  Hint: Declare it without a value, 'mut x: int;' (every read still has to come after an assignment), or read the initial value before the next assignment.
 
 ── warning at line 4, col 5
 
   Warning: Variable 'unused' is declared but never used.
 ```
 
-The first `x` (`5`) is overwritten before it is read; the second (`10`) is read by `x + 1`, so it is not reported.
+The first `x` (`5`) is a declaration's initializer that is overwritten before it is read; the second (`10`) is read by `x + 1`, so it is not reported. A store that is not a declaration's initializer gets the plain dead-store wording:
+
+```text
+── warning at line 3, col 5
+
+  Warning: Variable 'x' is assigned but the value is never read (dead store).
+
+  Hint: The assigned value is overwritten or the function returns before this variable is ever used. Remove the assignment or use the value.
+```
+
+Writing one element of an array, `x[0] = 1;`, keeps the rest of the array, so it does not make an earlier store to the array dead. An array that is written but never read gets one dead-store warning, at the write.
 
 ### Infinite loops (warning)
 
-A loop whose condition is a literal `true` and that has no way out is a warning, because the code after it can never run:
+A loop whose condition is a literal `true` and that has no way out is a warning, because the code after it can never run. A `break`, `continue` or `return` anywhere in the body is a way out, including one inside a `recover` block, a `compare` arm or an `unsafe` block:
 
 ```turflang
 fn spin(): int {

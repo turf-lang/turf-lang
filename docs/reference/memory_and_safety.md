@@ -475,8 +475,11 @@ fn main(): int {
 
 ### Reading a variable before it has a value
 
-A local is zero-filled, but reading one before it is definitely assigned on
-every path is `E008`, so you never observe the zero ([Variables and types](variables_and_types.md#definite-assignment)).
+A local scalar, struct or string is zero-filled, but reading one before it is
+definitely assigned on every path is `E008`, so you never observe the zero
+([Variables and types](variables_and_types.md#definite-assignment)). A
+fixed-size array `T[N]` is assigned from its declaration, and its elements read
+as zero until written ([Arrays](arrays.md#initialization)).
 
 ---
 

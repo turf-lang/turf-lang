@@ -96,10 +96,9 @@ another copies every element, and passing one to a function or returning one
 from a function is a full independent copy.
 
 A declaration with no initializer zero-fills the storage (and gives every
-`string` element `""`, not a null pointer). Reading such an array before
-assigning to it is still a compile-time error (E008, "You're reading a variable
-that might not have a value yet"): the zero fill is a runtime guarantee, not a
-static one.
+`string` element `""`, not a null pointer). The array is assigned from its
+declaration, so reading it is never E008: every element nothing wrote reads as
+the zero value of its element type.
 
 **The unsized spelling `T[]` is a slice, and it is not a value type.** It lets
 one function accept an array of any length (`fn sum(arr: int[]): int` called

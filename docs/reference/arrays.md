@@ -110,50 +110,37 @@ fn main(): int {
 
 ## Initialization
 
-An array declared without an initializer holds no value yet. The same
-[definite assignment](variables_and_types.md#definite-assignment) rule as for
-every other type applies: a read that some path reaches before the array has
-been assigned is `E008` ("You're using 'a' before it has a value"). Its storage
-is zero-filled, but no read can see that before something is written.
-
-<!-- doc-example: fails E008 -->
-```turflang
-fn main(): int {
-    mut a: int[5];
-    return a[3];
-}
-```
-
-Assigning an element, or the whole array, makes it assigned. Tracking is for
-the array as a whole, not per element: after `a[0] = 1;` the array counts as
-assigned, and the elements nothing wrote read as the zero value of the element
-type (`0`, `0.0`, `false`, `""` for a `string`, and so on).
+A fixed-size array `T[N]` is assigned from its declaration. Declared without an
+initializer, every element reads as the zero value of the element type: `0`,
+`0.0`, `false`, `""` for a `string`, `null` for a `&?T`, a zero-filled struct,
+and rows of zeros for a multidimensional array.
 
 ```turflang
 import io;
 
 fn main(): int {
     mut a: int[5];
-    a[0] = 10;                // assigns the whole array
+    io::printline(a[3]);      // 0: nothing wrote it
+    a[0] = 10;
     a[4] = 50;
-    io::printline(a[2]);      // 0: nothing wrote it
+    io::printline(a[2]);      // 0
     mut s: string[2];
     s[0] = "x";
     io::printline(s[1]);      // an empty line
     mut g: int[2][3];
-    g[1][2] = 4;              // a write into a row assigns the whole array
+    g[1][2] = 4;
     io::printline(g[0][0]);   // 0
     return 0;
 }
 ```
 
-A write into part of an element counts the same way: `g[1][2] = 4;` on an
-`int[2][3]`, or `ps[0].x = 1;` on an array of structs, assigns the array, and
-everything else in it reads as zero. A write through a reference, a slice or
-an `operator[]` on the way reads that value first, so it does not count. The
-assignment must reach the read on every path: `if c { a[0] = 1; }` followed
-by a read is `E008`.
+Elements are not tracked one by one, so filling an array in a loop and then
+reading it needs no special form. A scalar, a struct or a string is different:
+reading one before it is definitely assigned is `E008`; see
+[definite assignment](variables_and_types.md#definite-assignment).
+
 An `immut` array needs an initializer, since it cannot be assigned afterwards.
+So does an unsized local `T[]` (`E128`), which has no length to fill.
 
 An element type that holds a non-null reference has no zero value. An array
 of such elements must be initialized, or every element is `E128`; see
@@ -685,6 +672,11 @@ fn main(): int {
   type holds a `&U` anywhere inside it. A `(&?T)[N]` needs no initializer; its
   elements start as `null`, and an element is checked like any `&?T` that is
   not a variable (store it in one, then check it).
+- An array literal whose elements are all `null`, or all `&N` for a node `N`,
+  takes the type `(&?N)[n]` wherever that type is expected: a declaration, an
+  assignment (`slots = [null, null];`), a function argument, a `return` or a
+  struct field assignment. A view or another variable keeps its exact element
+  type.
 - Copying the array copies the references, not the nodes they point to.
 - `(&T)[]` is a slice parameter like any `T[]`.
 - Parentheses are only for this and for an array of function values,
@@ -744,6 +736,11 @@ fn main(): int {
 A `T[]` slice cannot itself escape: it is only a parameter or local type
 (`E140` anywhere else, see [Where `T[]` may appear](#where-t-may-appear)).
 
+A generic function can take or return a `T[N]` of any length by declaring `N`
+as a [size parameter](generics_and_operators.md#size-parameters):
+`fn<T, N: size> reversed(a: T[N]): T[N]`. Each call fixes `N`, from an array
+argument or from the type the result is stored into.
+
 ## The `array` module
 
 The `array` module is part of the prelude: always in scope, with no import. It
@@ -790,6 +787,10 @@ fn main(): int {
 }
 ```
 
+To build a whole array rather than look at one, the [`arrays`
+module](stdlib/arrays.md) (`import arrays;`) has `fill`, `generate`, `reversed`
+and `map`: `mut zeros: int[1000] = arrays::fill(0);`.
+
 ## Arrays and `List<T>`
 
 | | `T[N]` | `List<T>` |
@@ -798,7 +799,7 @@ fn main(): int {
 | Assignment | copies the elements | shares the same list (`l.copy()` for a copy) |
 | Storage | in place, in the frame or the struct | a handle to GC-heap storage |
 | Index | `a[i]`, negative from the end, checked | `l[i]`, negative from the end, checked |
-| Must be initialized | yes, by assignment | `List::default()` |
+| Initial value | zero-filled when declared without a value | `List::default()` |
 | Iteration | `for v in a` | by index: `for i in 0..l.length() step i++` |
 | Element types | any | any |
 
