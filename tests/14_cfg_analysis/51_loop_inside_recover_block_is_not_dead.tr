@@ -70,8 +70,8 @@ fn first_failure(): int {
 fn keep_old(): int {
     mut v: int = 7;
     v = (fails_on(1, 1) recover run {
-        return v;
-    });
+            return v;
+        });
     return v;
 }
 

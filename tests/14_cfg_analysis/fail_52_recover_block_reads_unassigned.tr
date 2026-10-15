@@ -16,8 +16,8 @@ fn g(): !int {
 fn main(): int {
     mut x: int;
     x = (g() recover run {
-        io::printline(x);
-        return 1;
-    });
+            io::printline(x);
+            return 1;
+        });
     return x;
 }

@@ -28,9 +28,9 @@ fn main(): int {
         mut v: int = f0() recover as err run {
             compare (err) {
                 otherwise:
-                    if (false give false && (-9223372036854775808 != 0) otherwise false || (-9 < 99)) {
-                        io::printline("in");
-                    }
+                if (false give false && (-9223372036854775808 != 0) otherwise false || (-9 < 99)) {
+                    io::printline("in");
+                }
             }
             continue;
         };
