@@ -734,6 +734,22 @@ private:
   /// two apart.
   bool untypedLiteralAcquiresInt32(const ExprAST *Val, const TurfType *Dest);
 
+  /// True when @p Val is an array literal whose elements are all `&N` or
+  /// `null` and @p Dest is `(&?N)[n]` of the same length: a fresh array may
+  /// take the wider element type, as a declaration's initializer list does
+  /// (`a = [null, null]`, `f([heap(n), heap(m)])`). Never a view or another
+  /// variable: those keep their exact element type, since writing `null`
+  /// through a widened alias would break a `&N` array. When it widens, the
+  /// literal is retyped to @p Dest.
+  bool arrayLiteralWidensToNullableRefs(const ExprAST *Val, const TurfType *Dest);
+
+  /// untypedLiteralAcquiresInt32() or arrayLiteralWidensToNullableRefs():
+  /// what every type-fixing call site checks alongside typesCompatible().
+  bool literalAcquiresType(const ExprAST *Val, const TurfType *Dest) {
+    return untypedLiteralAcquiresInt32(Val, Dest) ||
+           arrayLiteralWidensToNullableRefs(Val, Dest);
+  }
+
   /// If writing into @p Place would write into the by-value result
   /// of an `operator[]` read (`bs[0].a`, `outer[0]`, `bs[0].inner.x`), the
   /// ArrayAccessExprAST that produced the temporary; null otherwise. Walks
@@ -798,6 +814,11 @@ private:
   /// (typeGenericFunctionValue()); anywhere else it has none to take.
   const ExprAST *ExpectedFnSite_ = nullptr;
   TurfTypePtr ExpectedFnType_;
+  /// The same for a call: the type its result is stored into. A generic
+  /// function's size parameter that no argument binds takes its value from
+  /// it (`mut a: int[8] = fill(0);`).
+  const ExprAST *ExpectedCallSite_ = nullptr;
+  TurfTypePtr ExpectedCallType_;
 
   /// Visits @p E with @p Expected as its expected function type, when it is
   /// one and @p E is a bare name.

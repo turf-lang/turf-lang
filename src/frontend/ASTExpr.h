@@ -427,8 +427,18 @@ public:
   /// variables.  NOT copied by clone() — default std::string is "". ✓
   std::string ResolvedModuleName;
   bool IsStructName = false;
+  /// Set by the Resolver: this reads a size parameter of the enclosing
+  /// generic function (`N` in `fn<T, N: size>`). Copied by clone(), so the
+  /// monomorphizer can find it in an instantiation's body.
+  bool IsSizeParamRef = false;
+  /// The size parameter's value in an instantiation (set by the
+  /// monomorphizer): the read is the constant `int` SizeValue.
+  std::optional<int> SizeValue;
   std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<VariableExprAST>(Loc, Name);
+    auto Cloned = std::make_unique<VariableExprAST>(Loc, Name);
+    Cloned->IsSizeParamRef = IsSizeParamRef;
+    Cloned->SizeValue = SizeValue;
+    return Cloned;
     // Note: ResolvedSymbol is intentionally NOT copied — cloned ASTs are stale
     // until re-resolved. The default-constructed field is nullptr. ✓
   }

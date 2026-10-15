@@ -29,6 +29,7 @@
 #include "analysis/Lint.h"
 #include "resolve/SymbolTable.h"
 #include "sema/Types.h"
+#include "sema/TypeWalk.h"
 #include "codegen/CodegenInternal.h"
 #include "sema/Monomorphize.h" // Monomorphize::instantiatedDeclName() -- getLLVMType()'s GenericType branch, TYPE-002 S13b
 #include "llvm/ADT/SmallString.h"
@@ -1252,6 +1253,14 @@ const TurfType *getExprType(const ExprAST *E) {
           }
         }
       }
+      // A monomorphized clone called through `module::` (`arrays::fill(0)`):
+      // the clone's name is not the one rebuilt above, but the call target
+      // the monomorphizer pointed it at declares the concrete type.
+      if (const auto *Target = FuncCall->getResolvedCallTarget())
+        if (Target->TypeParams.empty() && Target->ReturnType &&
+            !TypeWalk::containsOpenParam(Target->ReturnType.get(),
+                                         TypeWalk::ParamScope::ThroughGenericArgs))
+          return Target->ReturnType.get();
     }
     return nullptr;
   }

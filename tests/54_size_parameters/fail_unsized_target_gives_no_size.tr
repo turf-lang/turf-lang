@@ -1,0 +1,19 @@
+// EXPECT-DIAG: E129
+// EXPECT-DIAG: 'int[]' is not an array of a fixed size
+// An unsized 'int[]' parameter has no length to give.
+
+fn<T, N: size> fill(value: T): T[N] {
+    mut r: T[N];
+    for i in 0..N {
+        r[i] = value;
+    }
+    return r;
+}
+
+fn take(a: int[]): int {
+    return a.length();
+}
+
+fn main(): int {
+    return take(fill(0));
+}

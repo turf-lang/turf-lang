@@ -208,6 +208,8 @@ void TypeChecker::visitWithExpectedType(const ExprAST *E,
     return;
   const ExprAST *SavedSite = ExpectedFnSite_;
   TurfTypePtr SavedType = ExpectedFnType_;
+  const ExprAST *SavedCallSite = ExpectedCallSite_;
+  TurfTypePtr SavedCallType = ExpectedCallType_;
   if (Expected && Expected->isFunc() && dynamic_cast<const VariableExprAST *>(E)) {
     ExpectedFnSite_ = E;
     ExpectedFnType_ = Expected;
@@ -215,9 +217,18 @@ void TypeChecker::visitWithExpectedType(const ExprAST *E,
     ExpectedFnSite_ = nullptr;
     ExpectedFnType_ = nullptr;
   }
+  if (Expected && dynamic_cast<const FuncCallExprAST *>(E)) {
+    ExpectedCallSite_ = E;
+    ExpectedCallType_ = Expected;
+  } else {
+    ExpectedCallSite_ = nullptr;
+    ExpectedCallType_ = nullptr;
+  }
   const_cast<ExprAST *>(E)->accept(*this);
   ExpectedFnSite_ = SavedSite;
   ExpectedFnType_ = SavedType;
+  ExpectedCallSite_ = SavedCallSite;
+  ExpectedCallType_ = SavedCallType;
 }
 
 void TypeChecker::typeGenericFunctionValue(VariableExprAST &Node) {
@@ -507,6 +518,14 @@ std::string copyOutArgHint(const std::vector<CandPtr> &Cands,
 } // namespace
 
 void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
+  // The type this call's result goes into, read before the arguments are
+  // visited (each sets its own).
+  // A `guess` declaration has no type to give.
+  const TurfTypePtr ExpectedResult =
+      ExpectedCallSite_ == &Node && ExpectedCallType_ && !ExpectedCallType_->isGuess()
+          ? ExpectedCallType_
+          : nullptr;
+
   // 1. Visit callee expression so it gets a type annotation too.
   if (Node.getCallee())
     const_cast<ExprAST *>(Node.getCallee())->accept(*this);
@@ -601,7 +620,7 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
       // initialising a struct field or a variable of that type.
       if (ArgTypes[I] && Field.Type &&
           !typesCompatible(ArgTypes[I].get(), Field.Type.get()) &&
-          !untypedLiteralAcquiresInt32(Arg, Field.Type.get())) {
+          !literalAcquiresType(Arg, Field.Type.get())) {
         ErrorPayloadError(
             Node.getLoc(),
             "'" + Full + "' field '" + Field.Name + "' has type '" +
@@ -855,7 +874,7 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
         // parameter is actually declared int32.
         if (ParamTy && ArgTy && !typesCompatible(ArgTy, ParamTy) &&
             !(Cand->IsExtern && isExternStringToPtrCoercion(ArgTy, ParamTy)) &&
-            !untypedLiteralAcquiresInt32(Node.getArgs()[i].get(), ParamTy)) {
+            !literalAcquiresType(Node.getArgs()[i].get(), ParamTy)) {
           AllOk = false;
           break;
         }
@@ -965,6 +984,31 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
       setType(&Node, nullptr);
       return;
     }
+    // A size parameter no argument binds comes from the type the result is
+    // stored into (`mut a: int[8] = fill(0);`).
+    if (!Best->SizeParams.empty()) {
+      bool Unbound = false;
+      for (const auto &SP : Best->SizeParams)
+        Unbound |= !Subst.count(SP);
+      if (Unbound && ExpectedResult)
+        TypeWalk::unify(Best->ReturnType, ExpectedResult, Subst);
+      for (const auto &SP : Best->SizeParams) {
+        if (Subst.count(SP))
+          continue;
+        reportError(Node.getLoc(), ErrCode::NothingToInfer,
+                    "Can't tell the size '" + SP + "' of the array '" + CalleeName +
+                        "' returns: no argument has it" +
+                        (ExpectedResult ? ", and '" + ExpectedResult->getName() +
+                                              "' is not an array of a fixed size."
+                                        : ", and nothing says what type the result is."),
+                    {},
+                    "Store the result where its type is written, e.g. 'mut a: int[8] = " +
+                        CalleeName + "(...);'.",
+                    "Nothing to infer!");
+        setType(&Node, nullptr);
+        return;
+      }
+    }
     checkSliceTypeArguments(Subst, CalleeName, Node.getLoc()); // E140
 
     // TYPE-002 (S11b): persist onto the node instead of letting Subst go
@@ -979,6 +1023,11 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
         std::vector<std::string> Order;
         for (int i = 0; i < SubstCheckCount; ++i)
           TypeWalk::collectParamOrder(Best->Params[i].Type, Order);
+        // With a size parameter the return type may be what binds one, so
+        // the arguments follow the declaration's own order, which is the
+        // order the drain pairs them with.
+        if (!Best->SizeParams.empty())
+          Order = Best->TypeParams;
         std::vector<TurfTypePtr> TypeArgs = orderedTypeArgs(Order, Subst);
         // TYPE-002 (S14a): only a FULLY CONCRETE substitution is a real
         // instantiation request -- found live, not anticipated: a generic
@@ -1206,7 +1255,7 @@ bool TypeChecker::tryUFCSFallback(MethodCallExprAST &Node,
       const TurfType *ArgTy = ArgTypes[i].get();
       // OVH-005: see the identical exception in visitFuncCall() above.
       if (ParamTy && ArgTy && !typesCompatible(ArgTy, ParamTy) &&
-          !untypedLiteralAcquiresInt32(Node.getArgs()[i].get(), ParamTy)) {
+          !literalAcquiresType(Node.getArgs()[i].get(), ParamTy)) {
         AllOk = false;
         break;
       }
@@ -1424,7 +1473,7 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
         // OVH-005: see the identical exception in visitFuncCall() above.
         if (ParamTy && ArgTy && !typesCompatible(ArgTy, ParamTy) &&
             !(Cand->IsExtern && isExternStringToPtrCoercion(ArgTy, ParamTy)) &&
-            !untypedLiteralAcquiresInt32(Node.getArgs()[i].get(), ParamTy)) {
+            !literalAcquiresType(Node.getArgs()[i].get(), ParamTy)) {
           AllOk = false;
           break;
         }
@@ -1788,7 +1837,7 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
               ParamTy = substituteReturnType(ParamTy, Subst);
             // OVH-005: see the identical exception in visitFuncCall() above.
             if (ParamTy && ArgTypes[i] && !typesCompatible(ArgTypes[i].get(), ParamTy.get()) &&
-                !untypedLiteralAcquiresInt32(Node.getArgs()[i].get(), ParamTy.get())) {
+                !literalAcquiresType(Node.getArgs()[i].get(), ParamTy.get())) {
               AllOk = false;
               break;
             }
@@ -2620,7 +2669,7 @@ void TypeChecker::visitRecoverExpr(RecoverExprAST &Node) {
     // example: typesCompatible() already rejects int-vs-void generically,
     // no special-casing needed here.
     if (ProduceTy && SuccessTy && !typesCompatible(ProduceTy.get(), SuccessTy.get()) &&
-        !untypedLiteralAcquiresInt32(Node.getProduceExpr(), SuccessTy.get())) {
+        !literalAcquiresType(Node.getProduceExpr(), SuccessTy.get())) {
       reportError(Node.getLoc(), ErrCode::TypeMismatch,
                   "'recover produce " + ProduceTy->getName() +
                       "' doesn't match this call's success type '" +

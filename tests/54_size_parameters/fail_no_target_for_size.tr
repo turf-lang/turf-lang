@@ -1,0 +1,16 @@
+// EXPECT-DIAG: E129
+// EXPECT-DIAG: Can't tell the size 'N'
+// A call whose result goes nowhere has no type to take N from.
+
+fn<T, N: size> fill(value: T): T[N] {
+    mut r: T[N];
+    for i in 0..N {
+        r[i] = value;
+    }
+    return r;
+}
+
+fn main(): int {
+    fill(0);
+    return 0;
+}

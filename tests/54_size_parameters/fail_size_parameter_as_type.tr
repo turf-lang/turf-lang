@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E150
+// EXPECT-DIAG: 'N' is a size parameter, not a type
+
+fn<N: size> first(a: N, b: int[N]): int {
+    return b[0];
+}
+
+fn main(): int {
+    return 0;
+}

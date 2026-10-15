@@ -1099,7 +1099,10 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
         return nullptr;
       }
       getNextToken(); // eat ';'
-      return std::make_unique<ArrayDeclExprAST>(NameLoc, Name, ElemType, ArraySize, std::vector<std::unique_ptr<ExprAST>>(), nullptr, IsImmutable);
+      auto Decl = std::make_unique<ArrayDeclExprAST>(NameLoc, Name, ElemType, ArraySize, std::vector<std::unique_ptr<ExprAST>>(), nullptr, IsImmutable);
+      if (AT && AT->hasSymbolicSize())
+        Decl->SizeParam = AT->getSizeParam();
+      return Decl;
     }
 
     // SEM-004 (F-INIT-1, FREEZE.md §6.4): no synthesized default for ANY
@@ -1155,7 +1158,7 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
       // existing array (`= a`, `= a[1..]`), which has storage to share; a
       // literal has none until this declaration gives it some. Only the
       // outermost size is inferred -- an inner `[]` is still E140.
-      if (ArraySize < 0) {
+      if (ArraySize == -1) {
         if (InitList.empty()) {
           LogErrorAt(NameLoc, ErrCode::InvalidArraySize,
                      "An empty literal can't give '" + Name +
@@ -1175,7 +1178,10 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
       return nullptr;
     }
     getNextToken(); // eat ';'
-    return std::make_unique<ArrayDeclExprAST>(NameLoc, Name, ElemType, ArraySize, std::move(InitList), std::move(InitExpr), IsImmutable);
+    auto Decl = std::make_unique<ArrayDeclExprAST>(NameLoc, Name, ElemType, ArraySize, std::move(InitList), std::move(InitExpr), IsImmutable);
+    if (AT && AT->hasSymbolicSize())
+      Decl->SizeParam = AT->getSizeParam();
+    return Decl;
   }
 
   auto Init = ParseExpression();

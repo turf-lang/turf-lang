@@ -1,0 +1,73 @@
+// A size parameter (`N: size`) makes a generic function's array length part
+// of its signature. N is bound by an array argument, or else by the type the
+// result is stored into, and reads as an `int` in the body. Each length is
+// its own instantiation.
+
+import test;
+
+fn<T, N: size> fill(value: T): T[N] {
+    mut r: T[N];
+    for i in 0..N {
+        r[i] = value;
+    }
+    return r;
+}
+
+fn<T, N: size> reversed(a: T[N]): T[N] {
+    mut r: T[N];
+    for i in 0..N {
+        r[i] = a[N - 1 - i];
+    }
+    return r;
+}
+
+// One size-generic function calling another with its own N.
+fn<T, N: size> twice_reversed(a: T[N]): T[N] {
+    return reversed(reversed(a));
+}
+
+fn<T, N: size, M: size> sizes(a: T[N], b: T[M]): int {
+    return N * 100 + M;
+}
+
+fn<T, U, N: size> map(a: T[N], f: fn(T): U): U[N] {
+    mut r: U[N];
+    for i in 0..N {
+        r[i] = f(a[i]);
+    }
+    return r;
+}
+
+fn square(x: int): int {
+    return x * x;
+}
+
+fn four(): int[4] {
+    return fill(9);
+}
+
+fn ends(a: int[4]): int {
+    return a[0] + a[3];
+}
+
+fn main(): int {
+    mut five: int[5] = fill(7);
+    mut six: int[6] = fill(7);
+    test::assert(five[4] == 7 && six[5] == 7, "two lengths, two instantiations");
+    test::assert(four()[3] == 9, "from the return type");
+    test::assert(ends(fill(2)) == 4, "from the parameter type");
+    five = fill(1);
+    test::assert(five[0] == 1, "from the assignment target");
+
+    mut b: int[3] = [1, 2, 3];
+    test::assert(reversed(b)[0] == 3, "from the argument");
+    test::assert(twice_reversed(b)[0] == 1, "nested");
+    test::assert(sizes(b, five) == 305, "two size parameters");
+    mut sq: int[3] = map(b, square);
+    test::assert(sq[2] == 9, "a size and two types");
+
+    mut row: int[3] = fill(1);
+    mut grid: int[2][3] = fill(row);
+    test::assert(grid[1][2] == 1, "a 2-D array: T is int[3], N is 2");
+    return 0;
+}

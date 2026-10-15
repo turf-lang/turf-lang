@@ -209,6 +209,9 @@ Value *VarDeclExprAST::codegen() {
 Value *VariableExprAST::codegen() {
   if (ResolvedConstant)
     return CodegenConstantValue(*ResolvedConstant);
+  // A size parameter's read in an instantiation (Monomorphize).
+  if (SizeValue)
+    return ConstantInt::get(Type::getInt64Ty(*TheContext), *SizeValue, /*isSigned=*/true);
 
   // First-class function reference (bare name of a real `fn`, e.g.
   // `double_it` in `mutable f: fn(int): int = double_it;` or

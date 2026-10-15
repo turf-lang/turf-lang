@@ -490,7 +490,7 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
       // directly rather than being rejected as an 'int -> int32' narrowing
       // -- see untypedLiteralAcquiresInt32()'s own doc comment.
       if (!typesCompatible(InitTy.get(), DeclTy.get()) &&
-          !untypedLiteralAcquiresInt32(Node.getInitializer(), DeclTy.get())) {
+          !literalAcquiresType(Node.getInitializer(), DeclTy.get())) {
         // The types of the identifiers in the initializer, for the SLM: the
         // initializer is what the fix usually edits, and a name declared above
         // the code window (or by `guess`) has its type on no line the model sees.
@@ -614,7 +614,10 @@ void TypeChecker::visitFuncDef(FuncDefExprAST &Node) {
     if (!Def->SourceModule.empty())
       CurrentModule_ = Def->SourceModule;
 
-  if (Node.getBody())
+  // A template with a size parameter is checked per instantiation only,
+  // where every `T[N]` has a real length and `N` a value: a body error is
+  // reported at the call that needs it, like any error in a generic body.
+  if (Node.getBody() && Node.SizeParams.empty())
     const_cast<ExprAST *>(Node.getBody())->accept(*this);
 
   CurrentModule_ = SavedModule;
@@ -732,11 +735,10 @@ void TypeChecker::visitStructDecl(StructDeclExprAST &Node) {
 void TypeChecker::visitArrayDecl(ArrayDeclExprAST &Node) {
   for (const auto &Init : Node.getInitList())
     Init->accept(*this);
-  if (Node.getInitExpr())
-    Node.getInitExpr()->accept(*this);
-
   const TurfTypePtr DeclArrTy =
       makeArrayType(Node.getElementTypePtr(), Node.getSize());
+  if (Node.getInitExpr())
+    visitWithExpectedType(Node.getInitExpr().get(), DeclArrTy);
 
   // A local `T[]` is a view (issue #260's range slicing): of an array
   // literal, which gets a slot in this frame (`immut nums: int[] = [1, 2]`),

@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E129
+// EXPECT-DIAG: declares size parameter 'M'
+// A size parameter no array in the signature uses can never be inferred.
+
+fn<T, M: size> same(x: T): T {
+    return x;
+}
+
+fn main(): int {
+    return 0;
+}

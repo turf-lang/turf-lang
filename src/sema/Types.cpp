@@ -230,8 +230,11 @@ bool typesCompatible(const TurfType *From, const TurfType *To) {
     // becomes a `T[N]` -- `mut b: int[5] = someSlice;` or passing a slice to
     // an `int[5]` parameter used to be accepted here, and Codegen then
     // stored a slice (or, before slices, a pointer) into a 5-element array.
+    // A generic declaration's `T[N]` (size parameter N) takes any fixed
+    // size; the call binds N to it (TypeWalk::unify()).
     bool SizeOk = FromArr->getSize() == ToArr->getSize() ||
-                  ToArr->getSize() == -1;
+                  ToArr->getSize() == -1 ||
+                  (ToArr->hasSymbolicSize() && FromArr->getSize() > 0);
     if (!SizeOk)
       return false;
 

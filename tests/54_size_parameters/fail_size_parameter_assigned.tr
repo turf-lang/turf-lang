@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E150
+// EXPECT-DIAG: 'N' is a size parameter: it can't be assigned
+// N is a constant in each instantiation.
+
+fn<N: size> count(a: int[N]): int {
+    N = 3;
+    return 0;
+}
+
+fn main(): int {
+    mut a: int[2] = [1, 2];
+    return count(a);
+}

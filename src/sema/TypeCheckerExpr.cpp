@@ -214,6 +214,12 @@ void TypeChecker::visitNull(NullExprAST &Node) {
 void TypeChecker::visitVariable(VariableExprAST &Node) {
   const std::string &Name = Node.getName();
 
+  // A size parameter's read in an instantiation: the constant length.
+  if (Node.SizeValue) {
+    setType(&Node, TurfInt());
+    return;
+  }
+
   // 1. Check loop variable environment first (for-loop induction variables).
   //    These are not tracked by the Resolver's scope stack but are registered
   //    directly by visitFor() into LoopVarTypes_.
@@ -565,7 +571,25 @@ void TypeChecker::forgetMachineNarrowing(const ExprAST *Place) {
       Frame.Known = false;
 }
 
+// A size parameter is a constant in each instantiation: nothing can write it
+// or take its address. True if it reported.
+static bool rejectSizeParamPlace(const ExprAST *Target, SourceLocation Loc,
+                                 const char *What) {
+  const auto *V = dynamic_cast<const VariableExprAST *>(Target);
+  if (!V || !V->SizeValue)
+    return false;
+  TypeError(Loc, ErrCode::SizeParameter,
+            "'" + V->getName() + "' is a size parameter: it can't be " + What + ".",
+            "Copy it into a local first: 'mut n: int = " + V->getName() + ";'.")
+      .raise();
+  return true;
+}
+
 void TypeChecker::visitAddressOf(AddressOfExprAST &Node) {
+  if (rejectSizeParamPlace(Node.getOperand(), Node.getLoc(), "referenced with '&'")) {
+    setType(&Node, nullptr);
+    return;
+  }
   // Recurse into the operand so its type is inferred first.
   if (Node.getOperand())
     const_cast<ExprAST *>(Node.getOperand())->accept(*this);
@@ -646,6 +670,10 @@ bool TypeChecker::rejectOperatorTemporaryWrite(const ExprAST *Place,
 
 
 void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
+  if (rejectSizeParamPlace(Node.getLHS(), Node.getLoc(), "assigned")) {
+    setType(&Node, nullptr);
+    return;
+  }
   if (Node.getLHS()) {
     IndexWriteTarget_ = dynamic_cast<const ArrayAccessExprAST *>(Node.getLHS());
     const_cast<ExprAST *>(Node.getLHS())->accept(*this);
@@ -797,26 +825,8 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
     }
     // OVH-005: an untyped literal (`n = 5;` for an 'int32' n) acquires
     // 'int32' directly -- see untypedLiteralAcquiresInt32()'s doc comment.
-    // An array literal is a fresh value, so its `&N` elements may widen to the
-    // target's `&?N`, as a declaration's initializer list already allows
-    // (`a = [heap(n), heap(m)]` for `a: (&?N)[2]`). Never a view or another
-    // variable: those keep the exact element type.
-    auto LiteralWidensToNullableRefs = [&]() {
-      if (!dynamic_cast<const ArrayLiteralExprAST *>(Node.getRHS()))
-        return false;
-      const auto *L = dynamic_cast<const ::ArrayType *>(LhsTy.get());
-      const auto *R = dynamic_cast<const ::ArrayType *>(RhsTy.get());
-      if (!L || !R || L->getSize() < 0 || L->getSize() != R->getSize())
-        return false;
-      const auto *LE = dynamic_cast<const TurfPointerType *>(L->getElementType());
-      const auto *RE = dynamic_cast<const TurfPointerType *>(R->getElementType());
-      return LE && RE && L->getElementType()->isNullableReference() &&
-             R->getElementType()->isReference() &&
-             LE->getPointee()->getName() == RE->getPointee()->getName();
-    };
     if (!typesCompatible(RhsTy.get(), LhsTy.get()) &&
-        !untypedLiteralAcquiresInt32(Node.getRHS(), LhsTy.get()) &&
-        !LiteralWidensToNullableRefs()) {
+        !literalAcquiresType(Node.getRHS(), LhsTy.get())) {
       std::vector<RelatedLocation> Related;
       if (LHSIsBareVariable && LHSVar && LHSVar->ResolvedSymbol) {
         // SEM-003 (§11.6's worked example): a `guess`-inferred variable's
@@ -911,6 +921,10 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
 
 
 void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
+  if (rejectSizeParamPlace(Node.getLHS(), Node.getLoc(), "assigned")) {
+    setType(&Node, nullptr);
+    return;
+  }
   if (Node.getLHS())
     const_cast<ExprAST *>(Node.getLHS())->accept(*this);
   if (Node.getRHS())
@@ -1141,6 +1155,10 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
 
 
 void TypeChecker::visitPostfixExpr(PostfixExprAST &Node) {
+  if (rejectSizeParamPlace(Node.getOperand(), Node.getLoc(), "changed with '++' or '--'")) {
+    setType(&Node, nullptr);
+    return;
+  }
   if (Node.getOperand())
     const_cast<ExprAST *>(Node.getOperand())->accept(*this);
 

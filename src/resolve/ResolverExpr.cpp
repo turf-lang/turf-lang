@@ -94,11 +94,16 @@ void Resolver::visitSizeOf(SizeOfExprAST &Node) {
 }
 
 void Resolver::visitVariable(VariableExprAST &Node) {
+  // A size parameter's read in an instantiation is a constant
+  // (Monomorphize): there is no variable to find.
+  if (Node.SizeValue)
+    return;
   auto Sym = SymTable_.lookupVariable(Node.getName());
   if (Sym) {
     // Issue #5: attach the resolved symbol to the AST node so future passes
     // (TypeChecker, Codegen) can read it directly without a second lookup.
     Node.ResolvedSymbol = Sym;
+    Node.IsSizeParamRef = Sym->IsSizeParam;
     return;
   }
 

@@ -1,0 +1,16 @@
+// EXPECT-DIAG: E129
+// EXPECT-DIAG: nothing says what type the result is
+// 'guess' has no type to give: the size must be written.
+
+fn<T, N: size> fill(value: T): T[N] {
+    mut r: T[N];
+    for i in 0..N {
+        r[i] = value;
+    }
+    return r;
+}
+
+fn main(): int {
+    mut d = fill(0);
+    return 0;
+}

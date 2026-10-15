@@ -1,0 +1,14 @@
+// EXPECT-DIAG: E150
+// EXPECT-DIAG: An operator can't declare a size parameter
+
+struct V {
+    a: int
+}
+
+operator<N: size> +(a: V, b: V): int {
+    return 0;
+}
+
+fn main(): int {
+    return 0;
+}

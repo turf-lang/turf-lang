@@ -267,7 +267,8 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
   // exercising a bare generic-typed parameter (confirmed via
   // `fn<T> identity(x: T): T` crashing the LLVM backend with a malformed
   // fptosi during instruction selection).
-  const auto &TypeParams = Node.getTypeParams();
+  const auto TypeParams = Node.getTypeOnlyParams();
+  CurrentSizeParams_ = Node.SizeParams;
   if (!TypeParams.empty()) {
     for (auto &Param : Node.getParamsMut())
       Param.Type = substituteTypeParams(Param.Type, TypeParams);
@@ -290,10 +291,9 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
   // since validateNamedType() is shared with visitStructDecl, where it is
   // not.)
   for (const auto &Param : Node.getParams())
-    validateNamedType(Param.Type, Node.getLoc(), Node.getTypeParams(),
+    validateNamedType(Param.Type, Node.getLoc(), TypeParams,
                       /*AllowBareGeneric=*/Param.Name == "self");
-  validateNamedType(Node.getReturnTypePtr(), Node.getLoc(),
-                    Node.getTypeParams());
+  validateNamedType(Node.getReturnTypePtr(), Node.getLoc(), TypeParams);
 
   ++FunctionNestingDepth_;
 
@@ -326,6 +326,18 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
     }
   }
 
+  // A size parameter reads as an immutable `int` in the template's body
+  // (`for i in 0..N`); each instantiation replaces the read with its value.
+  for (const auto &SP : Node.SizeParams) {
+    if (SymTable_.lookupVariable(SP))
+      continue; // a parameter of the same name: reported as E150 below
+    auto SizeSym = SymTable_.declareVariable(
+        SP, TurfInt(), ResolverSourceLocation{Node.getLoc().Line, Node.getLoc().Col},
+        /*IsImmutable=*/true, /*IsParameter=*/false);
+    if (SizeSym)
+      SizeSym->IsSizeParam = true;
+  }
+
   auto Sym = std::make_shared<ResolverFunctionSymbol>(
       buildFunctionSymbol(Node, currentModuleName()));
   Node.ResolvedDef = Sym;
@@ -346,10 +358,11 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
   EnclosingFuncDef_ = &Node;
 
   // See CurrentFuncTypeParams_'s doc comment in Resolver.h.
-  CurrentFuncTypeParams_ = Node.getTypeParams();
+  CurrentFuncTypeParams_ = TypeParams;
   ReturnPassesFallible_ = false;
   visitChild(Node.getBody());
   CurrentFuncTypeParams_.clear();
+  CurrentSizeParams_.clear();
   CurrentFuncDef_ = SavedFuncDef;
   EnclosingFuncDef_ = SavedEnclosing;
 
@@ -550,6 +563,17 @@ void Resolver::validateNamedType(
                              const std::vector<std::string> &Candidates)
       -> std::optional<std::string> {
     const std::vector<std::string> Everywhere = SymTable_.identitiesWithBareName(Spelling);
+    if (Qualifier.empty() &&
+        std::find(CurrentSizeParams_.begin(), CurrentSizeParams_.end(), Spelling) !=
+            CurrentSizeParams_.end()) {
+      TypeError(Loc, ErrCode::SizeParameter,
+                "'" + Spelling + "' is a size parameter, not a type: it can only "
+                "be an array's size, as in 'T[" + Spelling + "]'.",
+                "For a value of the element type, declare a type parameter too: "
+                "'fn<T, " + Spelling + ": size>' and use 'T'.")
+          .raise();
+      return std::nullopt;
+    }
     if (!Qualifier.empty()) {
       std::string Id = TypeIdentity::make(Qualifier, Spelling);
       if (SymTable_.hasModule(Qualifier) && SymTable_.isKnownTypeIdentity(Id)) {

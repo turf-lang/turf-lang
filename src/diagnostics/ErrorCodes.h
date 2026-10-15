@@ -143,6 +143,7 @@ inline constexpr const char *MutableViewOfImmutableArray = "E144";
 inline constexpr const char *DefaultThroughReferenceCycle = "E147";
 inline constexpr const char *WrongTypeArgumentCount = "E148";
 inline constexpr const char *LiteralNeverConverts = "E149";
+inline constexpr const char *SizeParameter = "E150";
 inline constexpr const char *ErrorPayload = "E096";
 // Pre-existing codes a raw site reuses (see above).
 inline constexpr const char *ExportMutNotSupported = "E021";
@@ -443,6 +444,10 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // that the run-time conversion would always reject
     // (TypeCheckerExpr.cpp's visitCast()).
     {ErrCode::LiteralNeverConverts, "LiteralNeverConvertsError", "Conversion that can never succeed", SLM::ErrorCategory::TYPE_MISMATCH},
+    // A size parameter (`N: size`) where none can be: on a struct, a method
+    // or an operator, an unknown kind after the ':', or `N` used as a type
+    // (ParserDecl.cpp, ResolverDecl.cpp).
+    {ErrCode::SizeParameter, "SizeParameterError", "Size parameter used where it can't be", SLM::ErrorCategory::DECLARATION},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);
