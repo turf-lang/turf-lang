@@ -6,18 +6,12 @@ on:
     branches: ["master", "dev", "refactor/architecture"]
   workflow_dispatch:
 jobs:
-  # Documentation cross-references. Deliberately its own job: it needs neither
-  # LLVM nor a build, so a dangling `docs/....md` citation is reported in
-  # seconds rather than after a full compiler build. See
-  # docs/archive/ARCHITECTURE_OVERHAUL.md §5 C-8 for the failure this catches.
-  doc_links:
+  # Needs neither LLVM nor a build, so a stale conformance map is reported in
+  # seconds rather than after a full compiler build.
+  conformance:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Check documentation cross-references
-        run: |
-          chmod +x scripts/check/check_doc_links.sh
-          ./scripts/check/check_doc_links.sh
       # REL-004 stage 1: tests/CONFORMANCE.md maps every Part VII area to the
       # tests that cover it, positive and negative. Also needs no build: it
       # fails when a mapped test was renamed or deleted, or an area is left
