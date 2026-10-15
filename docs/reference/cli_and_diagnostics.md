@@ -383,7 +383,7 @@ The model's suggestion is labelled `[Model Suggestion]`. `--smart-write-fix=<pat
 ```text
 $ turf version
 turf 1.0.0  (needs turfc interface 1.1+)
-turfc 2.0.0  (interface 1.7, /opt/turf/bin/turfc)
+turfc 2.1.0  (interface 1.7, /opt/turf/bin/turfc)
   llvm 22.1.8
   runtime turf_rt_abi_2_0
   root /opt/turf
@@ -457,7 +457,7 @@ Usage: turfc <filename.tr> [-o output] [--emit-llvm | --emit-obj] [--smart]
 
 ```text
 $ turfc --version
-turfc 2.0.0
+turfc 2.1.0
 interface 1.7
 llvm 22.1.8
 runtime turf_rt_abi_2_0
