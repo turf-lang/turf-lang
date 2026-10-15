@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E004
+// EXPECT-DIAG: from a value of type 'string[3]'
+// fill's element type comes from its argument, its length from the target.
+
+import arrays;
+
+fn main(): int {
+    mut c: int[3] = arrays::fill("x");
+    return 0;
+}
