@@ -86,6 +86,7 @@ Scripts are grouped as `scripts/{install,smoke,release,check,slm,dev}/`;
 | REL-007 | Release candidates and 2.0.0 | landed | 2026-10-14 | 2026-10-14 | **Released 2026-10-14: TurfLang `v2.0.0` (`09118c8`), turf `v1.0.0`.** Owner 2026-10-14: no RCs, `v2.0.0` directly; `VERSION` 2.0.0, turf 1.0.0. Stage 0: `cli/` deleted, `turf` built only from turf-cli at the commit `TURF_CLI_REVISION` pins, `scripts/smoke/cli_source_smoke.sh` (CI and every archive); Windows `-smart` archive required; GC-stress axes nightly (`nightly.yml`) | [REL-007](changes/REL-007.md) |
 | GEN-001 | Size parameters and the `arrays` module | landed | 2026-10-15 | 2026-10-15 | Parser, AST, Types, Resolver, TypeChecker, Monomorphizer, TypeWalk, Codegen, diagnostics (new E150), stdlib (new `arrays.tr`), tests, documentation | [GEN-001](changes/GEN-001.md) |
 | ANA-001 | Analysis fixes for 2.1.0 | landed | 2026-10-15 | 2026-10-15 | CFG/analysis (`CFG.cpp`, `Analysis.cpp`, `Lint.cpp`), TypeChecker (`TypeCheckerCore.cpp`), AST (`ASTDiff.h`), diagnostics (`ErrorsFlow.h`), tests, documentation | [ANA-001](changes/ANA-001.md) |
+| TDP-2-001 | Fixes in diagnostics without `--smart` | landed | 2026-10-15 | 2026-10-16 | diagnostics (new `CompilerFix.{h,cpp}`, `Errors.h`), Lexer, driver, TypeChecker, Resolver, SLM (`--smart` order, labels), test runner (`EXPECT-FIX`), scripts, tests, documentation | [TDP-2-001](changes/TDP-2-001.md) |
 
 ## How to use this directory
 

@@ -140,7 +140,7 @@ any change to default output.
 | Area | Items |
 |---|---|
 | Contract tooling | V-1 lint levels, V-2 `@deprecated`, V-3 prelude-shadow check, V-4 `tests/compat/2.0/`, V-5 diagnostic-code registry |
-| Diagnostics | SL-0 provenance labels, DX-3 hint backfill, DX-2 `--diagnostics=json` |
+| Diagnostics | SL-0 provenance labels (the `[Model Suggestion]` label landed), DX-1 `Fix:` lines (landed), DX-3 hint backfill, DX-2 `--diagnostics=json` (open) |
 | Numeric speed | NM-1 baseline benchmark, NM-3 `math::wrapping_*`, NM-4 trap-block measurement |
 | Generics at use sites | LG-1 `List<int>::default()`, LG-2 `f::<int>(…)`, LG-7 hints that point at them |
 | Small language and runtime | F-11d `@test` functions, RT-6 stack-overflow depth hint |
@@ -153,7 +153,7 @@ any change to default output.
 
 | Area | Items |
 |---|---|
-| Fixes without a model | DX-1 (TDP-2-001), SL-7 rule-engine coverage |
+| Fixes without a model | SL-7 rule-engine coverage beyond the 18 codes DX-1 shipped with in 2.1 |
 | Measured `--smart` | SL-3 corpus, SL-2 scoreboard, SL-1 Fix Score v2, SL-5 suggestion checks, SL-4 model checks, SL-6 prompt context (in that order) |
 | Analysis (warnings only) | AN-1 `unsafe` checks, AN-2 loops, AN-3 (a)(b) recursion, AN-4 nullability, AN-5 manual-heap leaks, AN-6 precision lint, AN-7 dead code, LB-5 raw-receiver method calls |
 | Numeric speed | NM-2 proof-based elision over ranges |
@@ -275,7 +275,7 @@ written in this order; this table is updated if they are not.
 
 | TDP | Title | Items | Line |
 |---|---|---|---|
-| TDP-2-001 | Fixes in diagnostics without `--smart` (draft) | DX-1, SL-0, SL-7 | 2.1 (SL-0), 2.2 |
+| TDP-2-001 | Fixes in diagnostics without `--smart` (landed in 2.1) | DX-1, SL-0, SL-7 | 2.1 (DX-1, SL-0 label), 2.2 (SL-7) |
 | TDP-2-002 | Checked arithmetic and auto-vectorization (draft) | NM-1 … NM-6 | 2.1, 2.2 |
 | TDP-2-003 | Lint levels, deprecation and the 2.x compatibility contract | V-1, V-2, V-4, V-5, B-10 | 2.1 |
 | TDP-2-004 | Machine-readable diagnostics and applying fixes | DX-2, IF-2 (diagnostics schema), DX-4 | 2.1, 2.7 |
@@ -402,7 +402,7 @@ limits of 5.3 (a).
 | New **warning** | See 5.4. |
 | New **error** | **Never** for a program that compiled, except 5.3. |
 | **Runtime** change | It is unobservable by a correct program: same output, same exit statuses (§6.21), same panic text class, stable object addresses (§6.5). The GC algorithm, allocator, thread-safety of internals, and speed are all changeable under this rule. |
-| New **diagnostic output** (a `Fix:` line, a `--diagnostics=json` form, a changed `--smart` label) | It is additive text or a new flag. Tools should read DX-2's JSON, not the text; DX-2 lands before DX-1 changes default output. |
+| New **diagnostic output** (a `Fix:` line, a `--diagnostics=json` form, a changed `--smart` label) | It is additive text or a new flag. Tools should read DX-2's JSON, not the text, once it lands; DX-1's `Fix:` lines shipped first (2.1.0, owner decision 2026-10-16). |
 | **Compiler internals** | Diagnostic **codes** (`E###`, warnings included) and exit statuses are the contract; message text and diagnostic order are not (decision D-6). |
 | **Driver interface** | `TurfcInterfaceMinor` bumps for a new flag or input; `TurfcInterfaceMajor` only in a major . `turf` and `turfc` still version independently. |
 
@@ -664,7 +664,7 @@ cheapest first step and is sequenced in 2.2.
 
 ### 6.8 Diagnostics and the SLM (DX, SL)
 
-**What exists today** (read from `src/slm/`, `scripts/slm/`, and
+**What existed before TDP-2-001 landed** (the rule layer is now `src/diagnostics/CompilerFix.*`; this is the 2026-10-15 snapshot; read from `src/slm/`, `scripts/slm/`, and
 `docs/development/changes/SLM-001.md`; the typo case below was run on
 2026-10-15):
 
@@ -698,8 +698,8 @@ cheapest first step and is sequenced in 2.2.
 
 | ID | Item | Kind | Cx | Notes |
 |---|---|---|---|---|
-| **DX-1** | **Fixes in diagnostics without `--smart`** (draft **TDP-2-001**). A `Fix:` line with the corrected line, printed in every build with no flag and no model, only when the compiler computed exactly one edit **and** a re-check shows the original error gone and no new one. An error class declares its fix beside its hint; nothing matches an error's name or text. `--smart` keeps its place: rule fix first, model only when there is none. | A | M–L | See "Findings on TDP-2-001" below. |
-| **DX-2** | **Machine-readable diagnostics** (`--diagnostics=json`, SARIF-shaped): code, severity, spans, hint, related locations, and the DX-1 fix as a list of `{span, replacement}`. TDP-2-001 lists this as an open question. | A | M | `TurfcInterfaceMinor` bump. Gives `turf-lsp` quick fixes (F-11), the benchmark (SL-2) and tools a contract other than scraping text, which D-6 puts outside the compatibility promise. Land **before** DX-1's text appears in default output. |
+| **DX-1** | **Fixes in diagnostics without `--smart`** (draft **TDP-2-001**). A `Fix:` line with the corrected line, printed in every build with no flag and no model, only when the compiler computed exactly one edit **and** a re-check shows the original error gone and no new one. An error class declares its fix beside its hint; nothing matches an error's name or text. `--smart` keeps its place: rule fix first, model only when there is none. | A | M–L | **Landed in 2.1.0** (planned for 2.2): 18 codes, the checked `Fix:` line in every build including `--no-smart`, `EXPECT-FIX` for tests. See "Findings on TDP-2-001" below. |
+| **DX-2** | **Machine-readable diagnostics** (`--diagnostics=json`, SARIF-shaped): code, severity, spans, hint, related locations, and the DX-1 fix as a list of `{span, replacement}`. TDP-2-001 lists this as an open question. | A | M | `TurfcInterfaceMinor` bump. Gives `turf-lsp` quick fixes (F-11), the benchmark (SL-2) and tools a contract other than scraping text, which D-6 puts outside the compatibility promise. **Owner decision (2026-10-16):** DX-2 lands after DX-1, in a later 2.x minor. 2.1.0 prints `Fix:` lines in default output with no JSON form for tools to read instead; the release notes tell tool authors that diagnostic text is outside the promise. |
 | **DX-3** | **Hint backfill.** TDP-2-001 counts 20 codes whose hint is only general advice and 5 with none (E105, E106, E115, E116, E118). A fix builds on a concrete hint, so these come first. | A | S–M | The count is the TDP's; recompute it with the checked-in script DX-1 requires. |
 | **DX-4** | **`--fix` apply mode** (later proposal). Applies only validated edits, atomically, on explicit request, with the same verified-result guarantee `turf fmt` has (§6.23). | A | M | Not before DX-1 and DX-2. |
 
@@ -713,14 +713,14 @@ item preserves F-DIAG-1 (sandbox verification is never removed) and F-DIAG-2
 
 | ID | Item | Kind | Cx | Notes |
 |---|---|---|---|---|
-| **SL-0** | **Provenance.** Every suggestion carries `rule | model | cache`; output says `Compiler fix` for a rule, `Model suggestion` for a model, never `[AI Suggestion]` for a rule. | A | XS | Prerequisite for SL-1 and DX-1. The label is output text (D-6). |
+| **SL-0** | **Provenance.** Every suggestion carries `rule | model | cache`; output says `Compiler fix` for a rule, `Model suggestion` for a model, never `[AI Suggestion]` for a rule. | A | XS | Prerequisite for SL-1 and DX-1. The label is output text (D-6). **Landed in 2.1.0 in part:** a model suggestion is labelled `[Model Suggestion]` and a rule fix is a `Fix:` line, so `[AI Suggestion]` is no longer printed for a rule. The per-suggestion `rule | model | cache` field is not recorded. |
 | **SL-1** | **Fix Score v2: a decomposed score replaces the binary one.** See below. | A | M | |
 | **SL-2** | **Benchmark scoring: a utility score with a confidence interval**, per-code and per-category tables, and a rules-only baseline. See below. | A | M | |
 | **SL-3** | **Corpus growth and a held-out split.** From 22 to several hundred cases. See below. | A | M | F-9's "corpus growth" item. |
 | **SL-4** | **Checks on the model itself.** Qualification, drift, determinism, resource bounds. See below. | A | M–L | |
 | **SL-5** | **Checks on what a suggestion does** (beyond "it compiles"): capability diff, deletion detection, API-surface stability, warning delta. See below. | A | M | Feeds SL-1. |
 | **SL-6** | **Richer prompt context.** `known_types` covers one call site today (SLM-001 *Known pitfalls*: variable-initializer mismatches and operator mismatches have none). Add: the declaration of each struct a diagnostic names, the signature of a called function, the enclosing function's parameter types. | A | M | Easier after F-S3 (a queryable `SemanticModel`). |
-| **SL-7** | **Coverage of the rule layer.** Today 11 rename classes. Add the classes DX-1 identifies (E060 make `mut`, E102 insert `;`, arity, missing return type …), each re-derived (not assumed) the way SLM-001 excluded `UseBeforeDeclarationError`. | A | M | Shared with DX-1: one rule engine, two surfaces. |
+| **SL-7** | **Coverage of the rule layer.** Today 11 rename classes. Add the classes DX-1 identifies (E060 make `mut`, E102 insert `;`, arity, missing return type …), each re-derived (not assumed) the way SLM-001 excluded `UseBeforeDeclarationError`. | A | M | Shared with DX-1: one rule engine (`src/diagnostics/CompilerFix.*`, outside `src/slm/`). DX-1 shipped E060 and E102 and 16 more codes; arity and missing return type remain. |
 | **SL-8** | ~~`@slm { }` blocks~~ **Dropped** (4.2): model-generated code entering a program at compile time puts a model in the compilation path, which the Constitution's Non-Goals rule out. The assistant may *suggest* source that a person commits. | — | — | |
 
 **SL-1 — Fix Score v2.** Today a sandbox pass is worth 0.9 whatever the edit
@@ -807,36 +807,43 @@ All are computed by the sandbox on the patched source and are conservative
   Codegen today (SLM-001). **Executing** a suggested fix is deliberately not
   proposed in the compiler: only the benchmark runs patched programs.
 
-#### Findings on TDP-2-001 (checked against the repository, 2026-10-15)
+#### Findings on TDP-2-001 (checked against the repository, 2026-10-15; outcome 2026-10-16)
 
-1. **Part of the mechanism exists.** The rule layer, its sandbox validation, the
-   11 wired classes and the model-free speed are already in `--smart`. TDP-2-001's
-   Motivation says corrected code "only appears with `--smart`, which needs the
-   larger build and a model": the model is not needed for renames. What is true is
-   that it needs the flag, and that only renames are covered. DX-1 is therefore
-   "move the rule engine out of `src/slm/`, show it by default, extend the
-   classes, relabel", not a new mechanism.
-2. **No build dependency on the model runtime.** `src/slm/Sandbox.cpp` and
-   `SLMIntegration.cpp` are compiled in every build (`CMakeLists.txt`); only
-   `SLMEngine.cpp` is swapped for `SLMEngineDisabled.cpp` in a `--no-smart`
-   build. A `--no-smart` build running the rule fix was **not** tested here:
-   verify it before relying on it.
-3. **The re-check is the existing sandbox**, which saves and restores global
-   lexer and symbol-table state (the workaround Architecture Simplification
-   §1 documents). That makes "one re-check per fix, capped per compile" (the TDP's
-   own bound) the right design, and makes F-S2 the real fix for the cost.
-4. **Spelling.** The explain command is `turf --explain E040` today (the TDP
-   writes `turf explain`). Decide which spelling DX-1 documents.
-5. **Numbers.** The repository has 771 `fail_*.tr` files, as the TDP says. A
-   count of distinct `EXPECT-DIAG` codes gives 140; the TDP's "136 of 149 codes"
-   uses a different method. The checked-in script the TDP asks for settles it.
-6. **`EXPECT-FIX` does not exist yet;** `EXPECT-DIAG` does. E102 (missing `;`)
-   and E060 (assignment to an immutable) both exist in `ErrorCodes.h`. The
-   benchmark's semicolon case has no code in its baseline output, so a missing
-   `;` may print without one; confirm before listing E102 as the first set.
-7. **Text compatibility.** New `Fix:` lines are output text, outside the
-   compatibility promise (D-6), but doc pages that quote diagnostics and any
-   scraper change. DX-2 should land first.
+1. **Part of the mechanism existed.** The rule layer, its sandbox validation and
+   the model-free speed were already in `--smart`; the model is not needed for
+   renames. DX-1 was therefore "move the rule engine out of `src/slm/`, show it
+   by default, extend the classes, relabel", not a new mechanism. It landed that
+   way in 2.1.0: the engine is `src/diagnostics/CompilerFix.{h,cpp}`, the edits
+   are attached where an error is raised (`withFixIt()` in
+   `src/diagnostics/Errors.h`), `tryDeterministicFix()` and the
+   `[Deterministic Fix]` status line are gone, and `--smart` asks the model
+   only when the compiler has no fix.
+2. **No build dependency on the model runtime.** Checked: a `--no-smart` build
+   (`turfc --version` ends `smart not-built`) prints `Fix:` lines.
+3. **The re-check** re-analyses an edited in-memory copy through the query
+   facade (`include/turf/Analysis.h`, lint and flow analysis included) and
+   runs without touching the original compile. One re-check per fix,
+   capped at `CompilerFixes::MaxChecksPerCompile` (10) per compile. F-S2 is
+   still the real fix for the cost.
+4. **Spelling.** The footer and the docs keep `turf --explain E0NN`.
+5. **Numbers**, from the checked-in `scripts/dev/diagnostic_fix_coverage.py`:
+   791 `fail_*` tests, 150 codes in the registry, 138 exercised by the suite;
+   of those, 120 print a hint every time, 13 sometimes and 5 never (the TDP's
+   "136 of 149" used another method); 722 errors reported by the suite, 43 with
+   a `Fix:`, across 18 codes: E014, E026, E029, E030, E031, E039, E040, E041,
+   E042, E046, E048, E052, E054, E060, E068, E087, E102, E138.
+6. **`EXPECT-FIX` exists.** `turfc --test` requires each marker to match a
+   printed `Fix:` exactly and every printed `Fix:` to be pinned, then applies
+   the fixes via `--smart-write-fix` and analyses the fixed program, requiring
+   fewer errors and none the original lacked. E102 (a missing `;`) prints with
+   its code and has a fix. `tests/55_compiler_fixes/` holds the new fixtures,
+   including one for an ambiguous typo that gets no fix.
+7. **Text compatibility.** `Fix:` lines are output text, outside the
+   compatibility promise (D-6), and the 2.1.0 release notes say so. TDP-2-004
+   planned DX-2 (`--diagnostics=json`) first; the owner decided (2026-10-16)
+   that it lands later, so until it does a tool that reads default output sees
+   the `Fix:` lines and has no JSON to read instead. DX-3 (hint backfill, 5
+   codes with no hint) is still open.
 
 ### 6.9 Numeric speed (NM) — draft **TDP-2-002**, checked arithmetic and vectorization
 
