@@ -252,6 +252,27 @@ static int GetTokPrecedence() {
 // Trailing [N] brackets are consumed here, making array types fully
 // first-class. Returns nullptr on failure.
 bool g_AllowGuessType = false;
+std::vector<std::string> g_SizeParamsInScope;
+
+// `[N]` in a type, with N a size parameter in scope (`fn<T, N: size>`):
+// consumes N and returns its name; otherwise consumes nothing and returns "".
+static std::string TakeSizeParamDim() {
+  if (CurTok != TOK_IDENTIFIER ||
+      std::find(g_SizeParamsInScope.begin(), g_SizeParamsInScope.end(),
+                IdentifierStr) == g_SizeParamsInScope.end())
+    return "";
+  std::string Name = IdentifierStr;
+  getNextToken();
+  return Name;
+}
+
+// Wraps Base in one array dimension: a number, `[]` (-1), or a size
+// parameter's name.
+static TurfTypePtr WrapArrayDim(TurfTypePtr Base, const std::pair<int, std::string> &Dim) {
+  if (!Dim.second.empty())
+    return std::make_shared<ArrayType>(std::move(Base), Dim.second);
+  return makeArrayType(std::move(Base), Dim.first);
+}
 
 static TurfTypePtr ParseTrailingArrayDims(TurfTypePtr Base);
 
@@ -531,11 +552,12 @@ TurfTypePtr ParseType() {
       getNextToken();
       GenBase = std::make_shared<TurfPointerType>(GenBase);
     }
-    std::vector<int> GenArraySizes;
+    std::vector<std::pair<int, std::string>> GenArraySizes;
     while (CurTok == '[') {
       getNextToken();
       int Size = -1;
-      if (CurTok == TOK_INT_LITERAL) {
+      std::string SizeName = TakeSizeParamDim();
+      if (SizeName.empty() && CurTok == TOK_INT_LITERAL) {
         // A best-effort (saturating) reading of the literal: an array size
         // is a small positive int in practice, no NumberExprAST node exists
         // for a type-position literal, and the exact-value representability
@@ -555,10 +577,10 @@ TurfTypePtr ParseType() {
         return nullptr;
       }
       getNextToken();
-      GenArraySizes.push_back(Size);
+      GenArraySizes.push_back({Size, SizeName});
     }
     for (auto it = GenArraySizes.rbegin(); it != GenArraySizes.rend(); ++it) {
-      GenBase = makeArrayType(GenBase, *it);
+      GenBase = WrapArrayDim(GenBase, *it);
     }
     return GenBase;
   }
@@ -595,11 +617,12 @@ TurfTypePtr ParseType() {
 // int[] (an unsized slice parameter, size -1). Returns Base unchanged when
 // none follow.
 static TurfTypePtr ParseTrailingArrayDims(TurfTypePtr Base) {
-  std::vector<int> ArraySizes;
+  std::vector<std::pair<int, std::string>> ArraySizes;
   while (CurTok == '[') {
     getNextToken(); // eat '['
     int Size = -1;
-    if (CurTok == TOK_INT_LITERAL) {
+    std::string SizeName = TakeSizeParamDim();
+    if (SizeName.empty() && CurTok == TOK_INT_LITERAL) {
       // See the identical comment on the other array-size site above (this
       // file, `T[N]` in a generic base type) for why the best-effort
       // NumLitClean/NumLitRadix reading is the right choice here too.
@@ -614,15 +637,24 @@ static TurfTypePtr ParseTrailingArrayDims(TurfTypePtr Base) {
       getNextToken(); // eat the literal
     }
     if (CurTok != ']') {
-      SyntaxError(CurLoc, ErrCode::UnclosedDelimiter, "Expected ']' to close array size — e.g. mut arr: int[5];")
-          .raise();
+      if (CurTok == TOK_IDENTIFIER)
+        SyntaxError(CurLoc, ErrCode::InvalidArraySize,
+                    "'" + IdentifierStr + "' is not a size: an array's size is a "
+                    "positive whole number or a size parameter.",
+                    "Write a number, e.g. int[5]. A generic function can take "
+                    "the size as a parameter: 'fn<T, " + IdentifierStr +
+                        ": size> f(a: T[" + IdentifierStr + "])'.")
+            .raise();
+      else
+        SyntaxError(CurLoc, ErrCode::UnclosedDelimiter, "Expected ']' to close array size — e.g. mut arr: int[5];")
+            .raise();
       return nullptr;
     }
     getNextToken(); // eat ']'
-    ArraySizes.push_back(Size);
+    ArraySizes.push_back({Size, SizeName});
   }
   for (auto it = ArraySizes.rbegin(); it != ArraySizes.rend(); ++it) {
-    Base = makeArrayType(Base, *it);
+    Base = WrapArrayDim(Base, *it);
   }
 
   return Base;

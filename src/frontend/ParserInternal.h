@@ -23,6 +23,11 @@ bool isDisallowedVoidType(const TurfType *T);
 /// annotation: the one place `guess` may appear (F-GUESS-3). See ParseType().
 extern bool g_AllowGuessType;
 
+/// The size parameters (`N` in `fn<T, N: size>`) of the function being
+/// parsed: inside it, `[N]` in a type is an array whose size is N. Set by
+/// ParseFuncDef() for its whole declaration and body. See ParseType().
+extern std::vector<std::string> g_SizeParamsInScope;
+
 // Defined in ParserLiteral.cpp
 std::unique_ptr<ExprAST> ParseNumberExpr(bool IsInteger);
 std::unique_ptr<ExprAST> ParseBoolExpr();

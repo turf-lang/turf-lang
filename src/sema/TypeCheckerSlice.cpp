@@ -58,7 +58,7 @@ static const ArrayType *findMisplacedUnsized(const TurfType *T, bool AllowAtTop)
   if (!T)
     return nullptr;
   if (const auto *AT = dynamic_cast<const ArrayType *>(T)) {
-    if (AT->getSize() < 0 && !AllowAtTop)
+    if (AT->getSize() == -1 && !AllowAtTop)
       return AT;
     return findMisplacedUnsized(AT->getElementType(), false);
   }
@@ -342,7 +342,7 @@ private:
   ViewSet &Views;
   static bool isUnsized(const VariableSymbol *S) {
     const auto *AT = S ? dynamic_cast<const ArrayType *>(S->Type.get()) : nullptr;
-    return AT && AT->getSize() < 0;
+    return AT && AT->getSize() == -1;
   }
   void add(const VariableSymbol *S) {
     if (S && Views.insert(S).second)
@@ -416,7 +416,7 @@ private:
         return;
       if (ParamIdx >= Target.Params.size() ||
           !dynamic_cast<const ArrayType *>(Target.Params[ParamIdx].Type.get()) ||
-          static_cast<const ArrayType *>(Target.Params[ParamIdx].Type.get())->getSize() >= 0)
+          static_cast<const ArrayType *>(Target.Params[ParamIdx].Type.get())->getSize() != -1)
         return;
       if (TC.targetWritesThroughSlice(Target, ParamIdx))
         Found = true;
@@ -514,7 +514,7 @@ void TypeChecker::noteSliceArguments(
     if (ParamIdx >= Target->Params.size())
       return;
     const auto *PT = dynamic_cast<const ArrayType *>(Target->Params[ParamIdx].Type.get());
-    if (!PT || PT->getSize() >= 0)
+    if (!PT || PT->getSize() != -1)
       return;
     const VariableExprAST *Root = rootVariable(Arg);
     if (!Root || !Root->getResolvedSymbol() || !Root->getResolvedSymbol()->IsImmutable)
@@ -545,6 +545,7 @@ void TypeChecker::checkSliceWrites() {
       continue;
     ImmutableAssignmentError(P.Loc, P.ArrayName)
         .withRelated(toSourceLocation(P.Array->DeclLoc), "declared immutable here")
+        .withMutableDeclarationFix(toSourceLocation(P.Array->DeclLoc))
         .withRelated(toSourceLocation(P.Callee->DeclLoc),
                      "'" + P.Callee->BaseName +
                          "' changes it through a slice of one of its arrays")

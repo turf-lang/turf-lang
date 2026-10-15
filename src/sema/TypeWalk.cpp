@@ -54,7 +54,8 @@ bool containsOpenParam(const TurfType *Ty, ParamScope Scope,
     return containsOpenParam(PT->getPointee().get(), Scope, IsKnownNamedType);
 
   if (const auto *AT = dynamic_cast<const ArrayType *>(Ty))
-    return containsOpenParam(AT->getElementType(), Scope, IsKnownNamedType);
+    return AT->hasSymbolicSize() ||
+           containsOpenParam(AT->getElementType(), Scope, IsKnownNamedType);
 
   if (Scope == ParamScope::ThroughGenericArgs) {
     if (const auto *GT = dynamic_cast<const GenericType *>(Ty)) {
@@ -117,6 +118,16 @@ TurfTypePtr substitute(const TurfTypePtr &Ty, const SubstMap &Subst) {
   }
   if (const auto *AT = dynamic_cast<const ArrayType *>(Ty.get())) {
     TurfTypePtr NewElem = substitute(AT->getElementTypePtr(), Subst);
+    // `T[N]` with N bound: the size parameter's value becomes the size.
+    if (AT->hasSymbolicSize()) {
+      auto It = Subst.find(AT->getSizeParam());
+      if (It != Subst.end())
+        if (const auto *SV = dynamic_cast<const TurfSizeValueType *>(It->second.get()))
+          return makeArrayType(NewElem, SV->getValue());
+      return NewElem == AT->getElementTypePtr()
+                 ? Ty
+                 : std::make_shared<ArrayType>(NewElem, AT->getSizeParam());
+    }
     return NewElem == AT->getElementTypePtr()
               ? Ty
               : makeArrayType(NewElem, AT->getSize());
@@ -182,8 +193,14 @@ void unify(const TurfTypePtr &Pattern, const TurfTypePtr &Concrete,
   if (isArrayType(Pattern.get()) && isArrayType(Concrete.get())) {
     const auto *PArr = dynamic_cast<const ArrayType *>(Pattern.get());
     const auto *AArr = dynamic_cast<const ArrayType *>(Concrete.get());
-    if (PArr && AArr)
+    if (PArr && AArr) {
+      // `T[N]` against `int[5]` binds N to 5. An unsized `int[]` binds
+      // nothing: its length is not known until run time.
+      if (PArr->hasSymbolicSize() && AArr->getSize() > 0)
+        Subst.emplace(PArr->getSizeParam(),
+                      std::make_shared<TurfSizeValueType>(AArr->getSize()));
       unify(PArr->getElementTypePtr(), AArr->getElementTypePtr(), Subst);
+    }
     return;
   }
   if (const auto *PGen = dynamic_cast<const GenericType *>(Pattern.get())) {
@@ -223,8 +240,12 @@ void collectParamOrder(const TurfTypePtr &Pattern,
     return;
   }
   if (isArrayType(Pattern.get())) {
-    if (const auto *Arr = dynamic_cast<const ArrayType *>(Pattern.get()))
+    if (const auto *Arr = dynamic_cast<const ArrayType *>(Pattern.get())) {
       collectParamOrder(Arr->getElementTypePtr(), Order);
+      if (Arr->hasSymbolicSize() &&
+          std::find(Order.begin(), Order.end(), Arr->getSizeParam()) == Order.end())
+        Order.push_back(Arr->getSizeParam());
+    }
     return;
   }
   if (const auto *PGen = dynamic_cast<const GenericType *>(Pattern.get())) {

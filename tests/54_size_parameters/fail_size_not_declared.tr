@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E123
+// EXPECT-DIAG: 'M' is not a size
+// A name inside '[ ]' must be a size parameter the function declares.
+
+fn first(a: int[M]): int {
+    return a[0];
+}
+
+fn main(): int {
+    return 0;
+}

@@ -1,4 +1,5 @@
 // EXPECT-DIAG: E042
+// EXPECT-FIX: replace 'Usre' with 'User'
 // EXPECT-DIAG: Unknown type 'Usre'
 // Regression test: a struct method declaration referencing a misspelled
 // struct name must still be rejected, even though ParseFuncDef() now builds

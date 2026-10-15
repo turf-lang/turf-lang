@@ -27,13 +27,11 @@ struct AISuggestion {
   // error line".
   std::string original_code;
   std::string new_code;
-  // Where the validated edit went, set by verifySuggestion() and the
-  // compiler's own fix-it path once the sandbox accepts it, and zero
-  // otherwise: the 1-based inclusive source range that was replaced, and the
+  // Where the validated edit went, set by verifySuggestion() once the sandbox
+  // accepts it, and zero otherwise: the 1-based inclusive source range that was replaced, and the
   // exact text it was replaced with ('\n'-joined). These are what the
   // suggestion's before/after is rendered from (renderPatchDiff()), for the
-  // model path and the fix-it path alike, so the display never depends on
-  // what the model claimed to be editing -- a fuzzy copy shows the lines it
+  // so the display never depends on what the model claimed to be editing -- a fuzzy copy shows the lines it
   // really matched.
   int patchStart = 0;
   int patchEnd = 0;
@@ -94,9 +92,8 @@ std::string renderPatchDiff(const AISuggestion &suggestion);
 // course-correct instead of re-guessing blind. Empty on a first attempt.
 // `hints`: see DiagnosticHints -- the known-type facts and the receiver
 // struct's declaration become their own fields in the prompt's JSON header
-// (buildUserPrompt()); the deterministic-fix fields are NOT consulted here
-// (only validateAndApplySuggestion() tries those, before ever calling this
-// function at all).
+// (buildUserPrompt()); the fix-its are not consulted here (a diagnostic
+// whose fix-its check out never reaches the model: CompilerFix.h).
 // `errorCode`: the diagnostic's stable "E0NN" code (TurfError::getCode()),
 // or "" for the raw LogErrorAt() path/warnings. Part of the on-disk cache
 // key alongside the normalized message, the whole user-prompt body (code
@@ -117,13 +114,8 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
                              const std::string &errorCode = "");
 
 // ── End-to-End Helper ────────────────────────────────────────────────────────
-// 0. If `hints` carries fix-its (item 1: DiagnosticHints::FixIts -- a rename,
-//    a missing `<T>`, a missing ';', ...), apply them together as one sandboxed
-//    patch first. On success, returns it directly -- fetchSuggestion() (and
-//    therefore the model) is never called at all; patchStart/patchEnd/
-//    patchText hold the edit, which renderPatchDiff() shows as a before/after.
-//    On failure (or no fix-its), falls through to the steps below exactly as
-//    before.
+// Asked only for a diagnostic the compiler has no checked fix for of its own
+// (TDP-2-001: DiagnosticEngine::add() tries CompilerFix first).
 // 1. Calls fetchSuggestion() to query the SLM.
 // 2. Extracts the resulting patch, comment, explanation, and fix strategy.
 // 3. Performs basic validation (e.g. ensuring syntax isn't obviously broken).

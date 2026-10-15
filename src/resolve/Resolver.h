@@ -262,6 +262,7 @@ public:
     SymTable_.resetToDepth(0);
     ModuleStack_.clear();
     CurrentFuncTypeParams_.clear();
+    CurrentSizeParams_.clear();
     CurrentFuncDef_ = nullptr; // a failed body never reaches visitFuncDef()'s restore
     EnclosingFuncDef_ = nullptr;
   }
@@ -422,6 +423,9 @@ private:
   // parameter used as a local variable's declared type (`fn<T> f() { mut x:
   // T = ...; }`) isn't wrongly flagged as an unknown type.
   std::vector<std::string> CurrentFuncTypeParams_;
+  /// The size parameters (`fn<T, N: size>`) of the function being resolved:
+  /// one written as a type is E150 (validateNamedType()).
+  std::vector<std::string> CurrentSizeParams_;
 
   // Every struct hoisted so far by hoistTopLevel()/hoistModuleBody() (main
   // file plus every transitively-imported module), in hoist order. Neither

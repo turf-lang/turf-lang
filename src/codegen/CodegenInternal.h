@@ -74,7 +74,7 @@ llvm::Function *getOrCreateStrcmpFn();
 /// value produced by any operation belongs on the GC heap, FREEZE.md §6.5).
 llvm::Function *getOrCreateTurfRtAllocFn();
 
-/// FDN-001 (docs/planning/ROADMAP_v2.0.0.md, DEC-5): the codegen for the
+/// FDN-001 (docs/development/ROADMAP_v2.0.0.md, DEC-5): the codegen for the
 /// `heap(expr): &T` bare intrinsic. Allocates `sizeof(Val's LLVM type)`
 /// bytes on the GC heap with that type's REAL TurfTypeDesc (a named
 /// struct's own whole-instance descriptor via

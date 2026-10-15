@@ -115,7 +115,8 @@ run `turf help` for the list of commands
 | `--link <lib>` | Adds `-l<lib>` to the final link, on top of any library a program's own `extern from "libname" fn` declarations already name. Repeatable. |
 | `--check` | Reports every diagnostic and writes no file. Also `turf check`. |
 | `--module` | With `--check`: the file is a module that is only ever imported, so it needs no `main`. Without `--check` it is an error. |
-| `--smart` | Asks a local language model to suggest fixes for errors. See [`--smart`](#--smart). `--smart-write-fix=<path>` writes the first validated fix to that file. |
+| `--smart` | Asks a local language model to suggest a fix for an error the compiler has no fix of its own for. See [`--smart`](#--smart). |
+| `--smart-write-fix=<path>` | Writes your program to that file with every [`Fix:`](#fixes) the compiler showed applied; with `--smart`, when the compiler had no fix, the model's validated suggestion instead. Your source file is never changed. |
 | `--stdlib-warnings` | Shows warnings that point into the standard library, which are hidden by default. See [Warnings in the standard library](#warnings-in-the-standard-library). |
 | `--allow-unsafe-modules` | Honors `unsafe module;` in a module outside the install root, in a single-file compile. It does not apply in a project, where the manifest's `[unsafe] allow` decides ([Projects & Packages](projects_and_packages.md#8-unsafe-module-in-dependencies)). |
 | `--dump-ast`, `--resolve`, `--typecheck`, `--dump-resolved`, `--dump-typechecked`, `--dump-resolver-symbols`, `--dump-modules`, `--dump-instantiations` | Print what the compiler knows at each stage. `turf dump` is the friendly spelling of these. |
@@ -333,7 +334,7 @@ A module exists in this build, but this package may not import it
 
 ### `--smart`
 
-`--smart` asks a small language model, running locally, to suggest a fix for the first error of a compile. The compiler checks the suggestion in an isolated copy of your program, and shows it only if it removes the error without introducing another; otherwise you see the compiler's own diagnostic, unchanged. Nothing runs on a clean compile, warnings never start it, and no network is involved.
+`--smart` asks a small language model, running locally, to suggest a fix for the first error of a compile that the compiler has no [`Fix:`](#fixes) of its own for. The compiler's own fix always comes first: when an error has one, it is printed and the model is never called. The compiler checks the model's suggestion in an isolated copy of your program, and shows it only if it removes the error without introducing another; otherwise you see the compiler's own diagnostic, unchanged. Nothing runs on a clean compile, warnings never start it, and no network is involved.
 
 ```text
 $ turf prog.tr --smart -o prog
@@ -341,7 +342,7 @@ prog.tr (1 error)
 
 ── error at line 1, col 1 [E009 · control flow]
 
-  [AI Suggestion]
+  [Model Suggestion]
   Explanation: The function never returns a value.
   Suggested fix:
     + 2 |     return 42;
@@ -361,7 +362,7 @@ What it does with the folder:
 | one `.gguf` file | loads it and uses it |
 | more than one | uses none of them, because it cannot know which you meant; prints `note: --smart uses exactly one model and found 2 in <root>/models (a.gguf, b.gguf). Leave one .gguf file there; showing the compiler's own diagnostics.` |
 
-A model has to load and run on the CPU, so a suggestion can take from several seconds to a minute or more per error. A suggestion the model cannot get validated after three attempts is dropped, and you see the compiler's diagnostic. The prompt design and sandbox are internals, described under [`docs/architecture/`](../architecture/).
+The model's suggestion is labelled `[Model Suggestion]`. `--smart-write-fix=<path>` writes the suggestion's program to that file when the compiler had no fix of its own; the compiler's own fixes are written with or without `--smart` (see [Fixes](#fixes)). A model has to load and run on the CPU, so a suggestion can take from several seconds to a minute or more per error. A suggestion the model cannot get validated after three attempts is dropped, and you see the compiler's diagnostic. The prompt design and sandbox are internals, described under [`docs/architecture/`](../architecture/).
 
 ### Exit status
 
@@ -382,7 +383,7 @@ A model has to load and run on the CPU, so a suggestion can take from several se
 ```text
 $ turf version
 turf 1.0.0  (needs turfc interface 1.1+)
-turfc 2.0.0  (interface 1.7, /opt/turf/bin/turfc)
+turfc 2.1.0  (interface 1.7, /opt/turf/bin/turfc)
   llvm 22.1.8
   runtime turf_rt_abi_2_0
   root /opt/turf
@@ -456,7 +457,7 @@ Usage: turfc <filename.tr> [-o output] [--emit-llvm | --emit-obj] [--smart]
 
 ```text
 $ turfc --version
-turfc 2.0.0
+turfc 2.1.0
 interface 1.7
 llvm 22.1.8
 runtime turf_rt_abi_2_0
@@ -529,9 +530,58 @@ Top to bottom:
 4. Zero or more `Note:` lines, one per related location (`Note: declared here (line 2, col 5)`).
 5. An optional **hint**: one line saying how to fix it.
 6. A **source snippet**: the line, with an underline under the offending token and the word `Here!`. A single-token span is underlined `^~~~`; where only a position is known, it is a bare `^`.
-7. A **footer**, when the diagnostic has a code: ``Run `turf --explain E0NN` for more details.`` For the codes that most need reading in full, it is the stronger `Worth reading in full -- run `turf --explain E0NN` before you patch this one.`
+7. An optional **`Fix:`**, the corrected line (see [Fixes](#fixes)).
+8. A **footer**, when the diagnostic has a code: ``Run `turf --explain E0NN` for more details.`` For the codes that most need reading in full, it is the stronger `Worth reading in full -- run `turf --explain E0NN` before you patch this one.`
 
 The same mistake never produces a wall of follow-on errors. Once a line has a diagnostic, every later diagnostic on that same line is dropped, so one typo does not report itself three times.
+
+### Fixes
+
+When the compiler knows the exact edit that removes an error, it prints it under the snippet, with the corrected line:
+
+```text
+$ turf check greet.tr
+greet.tr (1 error)
+
+── error at line 6, col 27 [E040 · undeclared variable]
+
+  I can't find anything named 'nmae'.
+
+  Hint: It may be from the current file: 'name'
+
+  6 │     printline("Hello, " + nmae + "!");
+    │                           ^~~~ Here!
+
+  Fix: replace 'nmae' with 'name'
+  6 │     printline("Hello, " + name + "!");
+    │                           ~~~~
+
+  Run `turf --explain E040` for more details.
+```
+
+The line after `Fix:` says the edit in words: `replace 'a' with 'b'`, `remove 'pub'`, `insert ';' at the end of line 12`, `insert '<T>' after 'fn'`, or, for a few errors, a phrase of its own (`move 'pub' to just before 'fn'`). The `~~~~` marks the text the edit wrote.
+
+A `Fix:` is printed in every build, with no flag and no model. It is **checked** before it is shown: the compiler applies the edit to a copy of your program in memory, analyses that copy as it would any program (type checking, lint and flow analysis), and prints the fix only if the original error is gone from that line and the copy has no error your program did not already have. A fix that does not pass is not printed. Your files are never changed; to get the fixed program, use `--smart-write-fix=<path>`.
+
+A fix is offered only where there is exactly one candidate. A misspelled name with two equally close matches gets the hint that lists both and no `Fix:`. Only errors get fixes, never warnings, never an error inside the standard library, and at most ten fixes are checked in one compile. A clean compile does no fix work.
+
+These errors can carry a `Fix:`:
+
+| Code | Fix |
+|---|---|
+| E014 | a misspelled keyword is replaced by the keyword |
+| E026, E030, E031 | the closest function in a module, symbol in an `import`, or scope qualifier |
+| E029 | `x::m` on an instance becomes `x.m` |
+| E039, E040, E041, E042, E054, E068 | the closest enum or error variant, variable, function, type, method or field |
+| E046 | `static` is removed from a constructor |
+| E048 | `Type.m` becomes `Type::m` |
+| E052 | a static method called through an instance is called through its type |
+| E060 | the variable's `immutable` becomes `mutable` (`immut` becomes `mut`) |
+| E087 | a misplaced `pub` is moved or removed |
+| E102 | the missing `;` is inserted |
+| E138 | the method gets its struct's type parameters (`fn<T>`) |
+
+Output that matches the text of diagnostics (a script, an editor extension) will see `Fix:` lines. Diagnostic wording is not part of the compatibility promise; the error codes are.
 
 ### Errors and warnings
 
@@ -573,14 +623,18 @@ typo.tr (1 error)
   3 │     return contaner;
     │            ^~~~~~~~ Here!
 
+  Fix: replace 'contaner' with 'container'
+  3 │     return container;
+    │            ~~~~~~~~~
+
   Run `turf --explain E040` for more details.
 ```
 
-A match is a small edit distance away, and swapping two adjacent letters counts as one edit. The allowed distance grows with the length of the name: 1 for four characters or fewer, 2 for up to seven, about a third of the length beyond that. When nothing is close, the hint explains how to declare the thing instead.
+When there is exactly one match the compiler also prints it as a checked [`Fix:`](#fixes). A match is a small edit distance away, and swapping two adjacent letters counts as one edit. The allowed distance grows with the length of the name: 1 for four characters or fewer, 2 for up to seven, about a third of the length beyond that. When nothing is close, the hint explains how to declare the thing instead.
 
 ### Error codes
 
-Every error has a stable code, `E001` to `E149`: **149 codes** with no gaps. A code is assigned once and never reused or renumbered, and it is an identifier, not a ranking of severity. Every one has a page, `turf explain E0NN`, that says what the error means, shows a wrong program and the fix. The same pages are in the repository as `docs/errors/codes/E0NN.txt`, and the release archives carry them.
+Every error has a stable code, `E001` to `E150`: **150 codes** with no gaps. A code is assigned once and never reused or renumbered, and it is an identifier, not a ranking of severity. Every one has a page, `turf explain E0NN`, that says what the error means, shows a wrong program and the fix. The same pages are in the repository as `docs/errors/codes/E0NN.txt`, and the release archives carry them.
 
 Six codes are **retired**: the mistakes they described are now reported under another code, and the number stays so old references still resolve. `turf explain` on them says which code replaced them. They are E006 (an unsized array in a `for` loop; arrays carry their length now), E013 (merged into E012), E015 (syntax errors, now E099–E123), E037 (unknown functions are E041), and E055 and E063 (now E056).
 
@@ -592,7 +646,7 @@ The codes by category (the category is the word in the diagnostic header):
 | control flow | E007, E009–E010, E012–E013, E016, E058, E074–E075, E083, E092–E095, E120, E132–E133 |
 | undeclared variable | E008, E037, E040–E041, E043, E054, E068, E131 |
 | syntax error | E014–E015, E070–E073, E099–E111, E118, E139 |
-| declaration | E019–E024, E027–E034, E039, E042, E045–E046, E048–E053, E060–E061, E069, E079–E080, E084–E085, E087–E091, E096–E097, E112–E117, E119, E128–E129, E136, E138, E145–E148 |
+| declaration | E019–E024, E027–E034, E039, E042, E045–E046, E048–E053, E060–E061, E069, E079–E080, E084–E085, E087–E091, E096–E097, E112–E117, E119, E128–E129, E136, E138, E145–E148, E150 |
 | function signature | E025, E038, E044, E047, E067, E125, E135, E137 |
 | type mismatch | E035–E036, E056, E059, E062, E064, E066, E082, E098, E124, E126, E134, E149 |
 | arithmetic | E057, E076–E078, E127 |
@@ -743,20 +797,30 @@ fn main(): int {
 ```text
 ── warning at line 2, col 5
 
-  Warning: Variable 'x' is assigned but the value is never read (dead store).
+  Warning: The initial value of 'x' is never read: every path assigns 'x' again before reading it.
 
-  Hint: The assigned value is overwritten or the function returns before this variable is ever used. Remove the assignment or use the value.
+  Hint: Declare it without a value, 'mut x: int;' (every read still has to come after an assignment), or read the initial value before the next assignment.
 
 ── warning at line 4, col 5
 
   Warning: Variable 'unused' is declared but never used.
 ```
 
-The first `x` (`5`) is overwritten before it is read; the second (`10`) is read by `x + 1`, so it is not reported.
+The first `x` (`5`) is a declaration's initializer that is overwritten before it is read; the second (`10`) is read by `x + 1`, so it is not reported. A store that is not a declaration's initializer gets the plain dead-store wording:
+
+```text
+── warning at line 3, col 5
+
+  Warning: Variable 'x' is assigned but the value is never read (dead store).
+
+  Hint: The assigned value is overwritten or the function returns before this variable is ever used. Remove the assignment or use the value.
+```
+
+Writing one element of an array, `x[0] = 1;`, keeps the rest of the array, so it does not make an earlier store to the array dead. An array that is written but never read gets one dead-store warning, at the write.
 
 ### Infinite loops (warning)
 
-A loop whose condition is a literal `true` and that has no way out is a warning, because the code after it can never run:
+A loop whose condition is a literal `true` and that has no way out is a warning, because the code after it can never run. A `break`, `continue` or `return` anywhere in the body is a way out, including one inside a `recover` block, a `compare` arm or an `unsafe` block:
 
 ```turflang
 fn spin(): int {

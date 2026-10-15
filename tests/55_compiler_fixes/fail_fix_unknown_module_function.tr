@@ -1,0 +1,9 @@
+// EXPECT-DIAG: E026
+// EXPECT-FIX: replace 'trimm' with 'trim'
+// One function of the named module is a close match.
+import strings;
+
+fn main(): int {
+    immut s: string = strings::trimm("  a ");
+    return 0;
+}

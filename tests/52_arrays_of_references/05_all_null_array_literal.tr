@@ -1,0 +1,48 @@
+// An array literal of `null`s, or of `&N`s, takes the target's `(&?N)[n]`
+// wherever a value of that type is expected: an assignment, an argument, a
+// `return`, a field.
+
+import test;
+
+struct N {
+    v: int
+}
+
+struct Holder {
+    refs: (&?N)[2]
+}
+
+fn first_is_null(a: (&?N)[2]): bool {
+    return a[0] == null;
+}
+
+fn none(): (&?N)[2] {
+    return [null, null];
+}
+
+fn both(n: &N): (&?N)[2] {
+    return [n, n];
+}
+
+fn main(): int {
+    mut n: N = N::default();
+    n.v = 7;
+    mut a: (&?N)[2] = [&n, &n];
+    a = [null, null];
+    test::assert(a[0] == null && a[1] == null, "assignment of nulls");
+    a = [&n, null];
+    test::assert(a[0] != null && a[1] == null, "assignment of a mix");
+    test::assert(first_is_null([null, null]), "argument of nulls");
+    test::assert(!first_is_null([&n, &n]), "argument of references");
+    test::assert(none()[1] == null, "return of nulls");
+    mut b: (&?N)[2] = both(&n);
+    test::assert(b[1] != null, "return of references");
+    mut h: Holder = Holder::default();
+    h.refs = [&n, &n];
+    h.refs = [null, null];
+    test::assert(h.refs[0] == null, "field of nulls");
+    mut one: (&?N)[1] = [&n];
+    one = [null];
+    test::assert(one[0] == null, "a one-element literal");
+    return 0;
+}

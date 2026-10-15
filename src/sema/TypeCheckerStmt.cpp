@@ -529,7 +529,7 @@ void TypeChecker::visitReturn(ReturnExprAST &Node) {
         const auto *EU = static_cast<const TurfErrorUnionType *>(Declared);
         Compatible = typesCompatible(RetTy.get(), EU->getSuccessType()) ||
                      isDeclaredErrorTypeValue(RetTy.get()) ||
-                     untypedLiteralAcquiresInt32(Node.getVal(), EU->getSuccessType());
+                     literalAcquiresType(Node.getVal(), EU->getSuccessType());
         // LEC-004 (FREEZE.md §6.18): `return f();` where `f` returns exactly
         // the `!T` this function declares hands the fallible value back as it
         // is -- success or error, never unwrapped. Before, it was rejected
@@ -543,7 +543,7 @@ void TypeChecker::visitReturn(ReturnExprAST &Node) {
         }
       } else {
         Compatible = typesCompatible(RetTy.get(), Declared) ||
-                     untypedLiteralAcquiresInt32(Node.getVal(), Declared);
+                     literalAcquiresType(Node.getVal(), Declared);
       }
 
       if (!Compatible) {

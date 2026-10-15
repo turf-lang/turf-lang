@@ -1,0 +1,9 @@
+// EXPECT-DIAG: E031
+// EXPECT-FIX: replace 'Colr' with 'Color'
+// The candidate is listed as 'Color::Red'; the fix replaces only the qualifier.
+enum Color { Red, Green }
+
+fn main(): int {
+    immut c: Color = Colr::Red;
+    return 0;
+}

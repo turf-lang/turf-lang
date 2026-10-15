@@ -189,8 +189,14 @@ because it broke in some other way:
 | `// EXPECT-DIAG: E011` | the compiler's output has the error code `E011` |
 | `// EXPECT-DIAG: some text` | ... or this text (for a warning, which has no code) |
 | `// EXPECT-NO-DIAG: some text` | the compiler's output does **not** have this text |
+| `// EXPECT-FIX: replace 'nmae' with 'name'` | the compiler printed that `Fix:` line (see [Fixes](cli_and_diagnostics.md#fixes)) |
 | `// EXPECT-RUNTIME: some text` | the aborting program printed this text |
 | `// EXPECT-EXIT: 134` | the aborting program exited with this status |
+
+An `EXPECT-FIX` line matches the text after `Fix: ` exactly. When a test has
+one, the runner also applies the printed fixes to a copy of the program and
+checks that the copy has fewer errors and none the original lacked. A test
+without the marker is not affected by the fixes its errors print.
 
 Each test runs in its own directory (so it can open a data file beside it) with
 no standard input, and is stopped after 5 seconds. A test imports what the
@@ -291,9 +297,9 @@ turf: …/turf.toml: missing [package] table
 A `turf` requirement the compiler does not meet:
 
 ```
-turf: package 'app' (…/turf.toml) requires turf "9.0", but the compiler is turfc 2.0.0 (…/build/turfc): a different major version
+turf: package 'app' (…/turf.toml) requires turf "9.0", but the compiler is turfc 2.1.0 (…/build/turfc): a different major version
 hint: use a turfc 9.x, or change `turf` in that manifest
-turf: package 'app' (…/turf.toml) requires turf "2.99", but the compiler is turfc 2.0.0 (…/build/turfc), which is older
+turf: package 'app' (…/turf.toml) requires turf "2.99", but the compiler is turfc 2.1.0 (…/build/turfc), which is older
 hint: upgrade turfc, or lower `turf` in that manifest
 ```
 
@@ -302,7 +308,7 @@ hint: upgrade turfc, or lower `turf` in that manifest
 ```
 $ turf version
 turf 1.0.0  (needs turfc interface 1.1+)
-turfc 2.0.0  (interface 1.7, …/bin/turfc)
+turfc 2.1.0  (interface 1.7, …/bin/turfc)
   …
 ```
 

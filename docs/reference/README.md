@@ -35,7 +35,8 @@ Coming from 1.x? Start with the [migration guide](../MIGRATING_TO_2.md). For ste
 20. [JSON](stdlib/json.md): parsing and serializing `JsonValue`
 21. [HTTP](stdlib/http.md): `Request`/`Response` and a callback-based `Server`
 22. [Testing](stdlib/testing.md): the `test` module and `turf test`
+23. [Arrays](stdlib/arrays.md): `fill`, `generate`, `reversed` and `map` build whole arrays
 
 **Tooling**
-23. [Projects & Packages](projects_and_packages.md): `turf.toml`, `path` and `git` dependencies, `turf.lock`, how imports resolve across packages
-24. [CLI & Diagnostics](cli_and_diagnostics.md): the `turf` commands and flags, the diagnostic format and every error code, static analysis, runtime failures, `--smart`
+24. [Projects & Packages](projects_and_packages.md): `turf.toml`, `path` and `git` dependencies, `turf.lock`, how imports resolve across packages
+25. [CLI & Diagnostics](cli_and_diagnostics.md): the `turf` commands and flags, the diagnostic format and every error code, static analysis, runtime failures, `--smart`

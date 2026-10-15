@@ -1,4 +1,5 @@
 // EXPECT-DIAG: E087
+// EXPECT-FIX: remove 'pub'
 // EXPECT-DIAG: 'pub' can't be applied to an enum variant
 // LEC-002: E087 -- a variant is public exactly when its enum is; per-variant
 // `pub` is rejected (hint: write `pub enum Name { ... }`).

@@ -88,6 +88,10 @@ struct VariableSymbol {
   /// declareVariable() call site (ordinary locals, loop vars, catch-bound
   /// error names, …) is unaffected.
   bool                   IsParameter = false;
+  /// True for a size parameter (`N` in `fn<T, N: size>`) read in its
+  /// template's body: an immutable `int` whose value each instantiation
+  /// fixes (VariableExprAST::SizeValue).
+  bool                   IsSizeParam = false;
   /// True once TypeChecker::visitVarDecl has replaced this symbol's `guess`
   /// placeholder Type with its inferred concrete type (SEM-003, §11.8).
   /// Declared here rather than derived from Type itself because by the
@@ -455,6 +459,8 @@ struct ResolverFunctionSymbol {
   /// alongside the struct's (`fn<T, U> Wrap.pick(other: U): U` -- T
   /// redeclares Wrap's own, U is pick's own) -- see D6 in the change record.
   std::vector<std::string> TypeParams;
+  /// The TypeParams declared `N: size` (FuncDefExprAST::SizeParams).
+  std::vector<std::string> SizeParams;
 
   /// LEC-006: the declaration this symbol was built from, set by
   /// Resolver::buildFunctionSymbol(). Lets a monomorphizer request name the

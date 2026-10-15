@@ -15,7 +15,7 @@
 docs/planning/OVERHAUL_REMAINING_WORK.md :: docs/development/changes/*.md :: the temporary Overhaul-closure handoff (deleted by OVH-015/OVH-CLOSE, 2026-09-27); every OVH-NNN record legitimately cites the spec it implemented at landing time.
 docs/planning/OVERHAUL_REMAINING_WORK.md :: docs/archive/OVERHAUL_CLOSURE_AUDIT.md :: the 2026-09-26 audit that wrote the handoff names its own deliverable; frozen historical record, not edited retroactively.
 docs/planning/OVERHAUL_REMAINING_WORK.md :: docs/archive/ARCHITECTURE_OVERHAUL.md :: the status header narrates the handoff's existence and deletion on closure (OVH-CLOSE, 2026-09-27).
-docs/planning/OVERHAUL_REMAINING_WORK.md :: docs/planning/ROADMAP_v2.0.0.md :: Phase 0's own section and the companion-documents header narrate the handoff's existence and deletion on closure (OVH-CLOSE, 2026-09-27).
+docs/planning/OVERHAUL_REMAINING_WORK.md :: docs/development/ROADMAP_v2.0.0.md :: Phase 0's own section and the companion-documents header narrate the handoff's existence and deletion on closure (OVH-CLOSE, 2026-09-27).
 docs/planning/Errors.md :: docs/archive/ARCHITECTURE_OVERHAUL.md :: §5 C-8 uses this exact path as the worked example of a dangling reference -- the citation is the point.
 docs/planning/FINAL_SPRINT.md :: docs/archive/ROADMAP_v1.0.0_COMPLETE.md :: §3's note explaining that the final-sprint checklist was removed once everything it tracked landed.
 docs/planning/ROADMAP_v1.0.0_COMPLETE.md :: docs/archive/ARCHITECTURE_OVERHAUL.md :: historical record, frozen as written; it cites the v1.0.0 roadmap at its old path, which moved to docs/archive/ when the retired documents were archived (2026-10-13).
@@ -34,3 +34,6 @@ docs/planning/ROADMAP_v1.0.0_COMPLETE.md :: docs/archive/ARCHITECTURE_OVERHAUL.m
 docs/planning/Errors.md :: docs/development/changes/*.md :: the record that re-pointed its 43 citations names the path it re-pointed.
 docs/planning/COMPILER_MODULE_BREAKDOWN.md :: docs/development/changes/*.md :: same, for the retired 2026-08 module-split plan.
 docs/patent/PATENT_BENCHMARK_DATA.md :: docs/development/changes/*.md :: same, for a path that never existed in this repository at all.
+docs/planning/CONCURRENCY_PLAN.md :: docs/archive/PROPOSED_ROADMAP_3.0.0.md :: the proposal named a plan the final roadmap replaced with TDP-3-001.
+docs/development/proposals/TDP-NNN.md :: docs/archive/PROPOSED_ROADMAP_3.0.0.md :: a path pattern the proposal suggested; TDPs live on the website (D-14).
+docs/development/ROADMAP_v2.N.0.md :: docs/archive/PROPOSED_ROADMAP_3.0.0.md :: a path pattern the proposal suggested; superseded by ROADMAP_v3.0.0.md (D-10).

@@ -562,6 +562,36 @@ bool TypeChecker::untypedLiteralAcquiresInt32(const ExprAST *Val, const TurfType
 }
 
 
+bool TypeChecker::arrayLiteralWidensToNullableRefs(const ExprAST *Val,
+                                                   const TurfType *Dest) {
+  if (!dynamic_cast<const ArrayLiteralExprAST *>(Val))
+    return false;
+  TurfTypePtr From = getType(Val);
+  const auto *L = dynamic_cast<const ::ArrayType *>(Dest);
+  const auto *R = dynamic_cast<const ::ArrayType *>(From.get());
+  if (!L || !R || L->getSize() < 0 || L->getSize() != R->getSize() ||
+      !L->getElementType()->isNullableReference())
+    return false;
+  const auto *LE = dynamic_cast<const TurfPointerType *>(L->getElementType());
+  const auto *RE = dynamic_cast<const TurfPointerType *>(R->getElementType());
+  // Every element `null` (the literal is `null[n]`), or every one `&N`.
+  const bool Widens =
+      LE && (R->getElementType()->isNull() ||
+             (RE && R->getElementType()->isReference() &&
+              LE->getPointee()->getName() == RE->getPointee()->getName()));
+  if (!Widens)
+    return false;
+  // Codegen builds the literal from its CachedType: `null[n]` has no
+  // pointer element type of its own.
+  auto Widened = makeArrayType(L->getElementTypePtr(), L->getSize());
+  auto *Lit = const_cast<ArrayLiteralExprAST *>(
+      static_cast<const ArrayLiteralExprAST *>(Val));
+  Lit->CachedType = Widened;
+  setType(Val, Widened);
+  return true;
+}
+
+
 void TypeChecker::checkCallArgsRepresentable(
     const std::vector<std::unique_ptr<ExprAST>> &Args,
     const std::vector<FunctionParam> &Params, SourceLocation Loc,

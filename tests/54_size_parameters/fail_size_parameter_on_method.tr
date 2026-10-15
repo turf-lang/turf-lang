@@ -1,0 +1,14 @@
+// EXPECT-DIAG: E150
+// EXPECT-DIAG: A method can't declare a size parameter
+
+struct S {
+    a: int
+}
+
+fn<N: size> S.first(a: int[N]): int {
+    return a[0];
+}
+
+fn main(): int {
+    return 0;
+}

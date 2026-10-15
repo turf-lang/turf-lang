@@ -1,0 +1,16 @@
+// EXPECT-DIAG: E128
+// EXPECT-DIAG: needs an initializer
+// An array of non-null references has no zero value to start from; fill a
+// (&?Node)[2] from a &?Node instead.
+
+import arrays;
+
+struct Node {
+    v: int
+}
+
+fn main(): int {
+    mut n: Node = Node::default();
+    mut a: (&Node)[2] = arrays::fill(&n);
+    return 0;
+}

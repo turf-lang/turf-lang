@@ -17,7 +17,8 @@ SYNTAX:
     before it.
   - An `immut` needs its value where it is declared (`immut x: int;` is
     E128). A `mut` may leave it out (`mut x: int;`) if every path assigns it
-    before it is read (E008).
+    before it is read (E008). A fixed-size array `mut a: int[5];` is
+    assigned from its declaration; its elements read as zero.
   - Valid type keywords: int, double (or float), bool, string, ptr, or a
     declared struct/enum name.
   - void may NOT be used as a variable's type.

@@ -2,6 +2,7 @@
 #define LEXER_H
 
 #include "diagnostics/ErrorCategory.h" // SLM::ErrorCategory -- lightweight, no LLVM/AST deps
+#include "diagnostics/CompilerFix.h"   // DiagnosticEngine::Diag::Fix
 #include "diagnostics/ErrorCodes.h"    // ErrCode:: -- LogErrorAt() requires one (issue #263)
 #include <cctype>
 #include <fstream>
@@ -230,17 +231,15 @@ struct ParseRecursionGuard {
 // When true, the SLM is loaded and AI suggestions are generated for errors.
 // Controlled by the --smart CLI flag. Default is off for deterministic output.
 extern bool g_AIEnabled;
-// SLM-001 follow-up: when non-empty, the FULL patched source of the first
-// --smart suggestion that clears the display gate (confidence >= 0.8) this
-// compile is written here verbatim, instead of only ever being shown as a
-// rendered diagnostic. Controlled by --smart-write-fix=<path>; empty (the
-// default) means "don't write anything" -- an ordinary --smart run's
-// behavior is completely unchanged. Exists so a caller (a benchmark tool, a
-// future editor integration) can get the corrected PROGRAM as a real,
-// compilable file, not just a description of the fix -- see
-// scripts/slm/slm_benchmark/run_benchmark.py, which uses this to actually
-// recompile and RUN a fixed program and check whether it still does what
-// the pre-mutation original did (§16.4's "semantic-correctness rate").
+// --smart-write-fix=<path>: when non-empty, the whole program with the fixes
+// this compile showed applied is written here -- every compiler fix for the
+// file being compiled (TDP-2-001, written by DiagnosticEngine::flushAll()), or,
+// when the compiler had none and --smart asked the model, the model's
+// validated suggestion. Empty (the default) writes nothing. Exists so a caller
+// gets the corrected PROGRAM as a real, compilable file, not just a
+// description of the fix: `turfc --test` checks every printed fix with it, and
+// scripts/slm/slm_benchmark/run_benchmark.py recompiles and RUNS a fixed
+// program to check it still does what the original did.
 extern std::string g_SmartFixOutPath;
 // LANG-002: when true, a file OUTSIDE the resolved install root may still
 // declare the raw-pointer capability (`unsafe module;`, HasRawPointerCapability()
@@ -304,6 +303,12 @@ public:
     // is gated on !IsWarning, same as Category) and for the raw LogErrorAt()
     // path (which has no TurfError instance to carry one).
     SLM::DiagnosticHints Hints;
+    // TDP-2-001: the checked fix printed under the snippet, built from
+    // Hints.FixIts (CompilerFix.h). Empty when there is none, or it was not
+    // checked, or the check failed. FixChecked is set once a check ran, so a
+    // diagnostic is never checked twice.
+    CompilerFix Fix;
+    bool FixChecked = false;
   };
 
   // Record a diagnostic. Errors on a line that already has an error are

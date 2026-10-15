@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E150
+// EXPECT-DIAG: A struct's type parameters are types
+
+struct Buffer<N: size> {
+    used: int
+}
+
+fn main(): int {
+    return 0;
+}

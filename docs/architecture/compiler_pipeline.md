@@ -546,8 +546,10 @@ above 15.
 ### Use before initialization: `DefiniteAssignmentPass`
 
 A forward dataflow analysis (`Analysis.cpp`) over the symbols declared by
-`VarDeclExprAST`/`ArrayDeclExprAST` inside the body. Parameters are always
-assigned and not tracked.
+`VarDeclExprAST` inside the body. Parameters are always assigned and not
+tracked. A fixed-size array (`ArrayDeclExprAST`) is assigned from its
+declaration: codegen zero-fills it, so a read of it is never E008 and
+elements are not tracked.
 
 ```
 OUT[b] = IN[b] union Defs(b)
@@ -561,6 +563,19 @@ block's `IN` set as `DefiniteAssignmentError` (E008, fatal), with a note at
 the declaration. `CFGBuilder` places condition and subject expressions as
 statements in their own blocks, so a variable used only in a loop guard is
 checked too.
+
+### `recover run` blocks in the CFG
+
+`CFGBuilder::branchToRecoverBlocks()` builds the `recover run { }` and
+`recover as e run { }` blocks of an ordinary statement or a `return` as CFG
+blocks. It branches from just before the statement: one edge to the run block
+(built like any block, so loops, `return`, `break` and `continue` inside it
+have their edges), one edge to the block that holds the statement. The run
+block therefore sees only what was assigned before the statement. It sets
+`RecoverExprAST::BlockInCFG`, and the statement walkers (`AnalysisVisitor` for
+liveness and definite assignment, `EscapeCheckVisitor`, `NarrowingVisitor`)
+skip a block the CFG holds. A `recover` block in a loop condition, and a
+`defer`'s statement, are not split; they are walked inside their statement.
 
 ### Dead stores and unused variables: `LivenessAnalysisPass`
 
@@ -576,7 +591,9 @@ to a fixed point. A body-declared variable that is never read anywhere is
 `UnusedVariableWarning`. That test uses a separate `EverRead` set, because
 `Gen` records only upward-exposed reads and a declare-then-use inside one block
 is never upward-exposed. A write whose target is not live afterwards is
-`DeadStoreWarning`. Both are warnings, and both exclude parameters and
+`DeadStoreWarning`; when that write is a declaration's initializer the message
+names the initial value instead. A write to one element of an array does not
+kill the array, so it never makes an earlier store to the array dead. Both are warnings, and both exclude parameters and
 variables whose name begins with `_`.
 
 ### Unbreakable loops
@@ -846,6 +863,64 @@ An `operator<T> ...` declaration is a `FuncDefExprAST` with non-empty
   `AssignmentExprAST::codegen()` for the nested `[]=` shape is an unreachable
   backstop. A new write path that calls `codegenLValue()` on an index result
   must go through that check.
+
+### Size parameters
+
+`fn<T, N: size> fill(value: T): T[N]` is a template whose `N` is an array
+length, not a type. It is monomorphized like a type parameter, with a number
+where a type would be. Which array dimensions mention `N` and what value `N`
+takes is decided per pass:
+
+- *Parser.* `ParseFuncDef()` (`ParserDecl.cpp`) reads `N: size` into
+  `FuncDefExprAST::SizeParams`, a subset of `TypeParams` in declaration order
+  (`getTypeOnlyParams()` is the rest). Anything but `size` after the colon, and
+  a size parameter on a method or an operator, is E150 here. While the
+  function's signature and body are parsed, its names are in
+  `g_SizeParamsInScope`, so `TakeSizeParamDim()` (`ParserCore.cpp`) turns an
+  identifier inside `[ ]` that is one of them into a symbolic dimension, and
+  `WrapArrayDim()` builds the `ArrayType` from it. Any other name there is E123.
+- *Types.* A symbolic dimension is an `ArrayType` with
+  `Size == ArrayType::kSymbolicSize` (-2) and the name in `getSizeParam()`;
+  `hasSymbolicSize()` tells it from a real length. A fixed length is positive
+  and an unsized `T[]` is -1, so code that tests `getSize() > 0` or `< 0` never
+  sees a symbolic one as either. `TurfSizeValueType` carries a bound length (its
+  mangled name is `n<value>`). It is never the type of a value; it travels where
+  a type argument does, in a substitution map and in an instantiation's
+  `TypeArgs`.
+- *TypeWalk.* `unify()` binds `N` when it meets a symbolic dimension against an
+  array with a real length, and binds nothing against an unsized `T[]`.
+  `substitute()` replaces a symbolic dimension with the bound value, and
+  `collectParamOrder()` lists `N` after the element type's parameters.
+- *Resolver.* `validateGenericParamsInferable()` (`ResolverCore.cpp`) lets a size
+  parameter be inferred from the return type as well as the parameters, and
+  reports E150 for `N` spelled as a type or sharing a parameter's name, and E129
+  for one no array uses. The function's scope declares each size parameter as an
+  immutable `int` (`VariableSymbol::IsSizeParam`), so the body's reads of `N`
+  resolve, and `visitVariable()` marks them (`VariableExprAST::IsSizeParamRef`).
+- *TypeChecker.* A template with a size parameter has its body skipped
+  (`visitFuncDef()`); each instantiation's clone is checked with real lengths, so
+  a body error is reported at the call that needs it, under the usual "In this
+  instantiation" notes. `visitFuncCall()` unifies the arguments first. A size
+  parameter still unbound is taken from the type the result goes into:
+  `visitWithExpectedType()` records the call being checked and the type
+  expected of it (`ExpectedCallSite_`, `ExpectedCallType_`), and `visitFuncCall()`
+  unifies the return type with it. The callers that supply an expected type are
+  `visitVarDecl()`, `visitArrayDecl()` for its initializer, assignment, a call
+  argument against a non-generic parameter, and `return`. Still unbound is E129.
+  The request's `TypeArgs` follow the declaration's `TypeParams` order for a
+  size-generic function, since the return type can bind one the parameters do not.
+  Writing to `N` (assignment, `++`/`--`, `&`) is E150, found when the clone is
+  checked, where the read carries its value (`rejectSizeParamPlace()`).
+- *Monomorphizer.* `substituteTypesInBody()` sets `VariableExprAST::SizeValue`
+  on each marked read and `ArrayDeclExprAST`'s size from its `SizeParam`, then
+  substitutes types as for any clone. The instantiation's name is mangled with
+  `n<value>`, so `fill` at 3 and at 4 are two functions.
+- *Codegen.* `VariableExprAST::codegen()` emits `SizeValue` as an `i64`
+  constant. Arrays have their real sizes by then, so nothing else changes.
+
+A size-generic function calling another with its own `N`
+(`reversed(reversed(a))`) works because the clone is checked at a real length:
+by the time the inner call is checked, its argument is an `int[3]`.
 
 ---
 

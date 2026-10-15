@@ -1,4 +1,5 @@
 // EXPECT-DIAG: E060
+// EXPECT-FIX: replace 'immut' with 'mut'
 // EXPECT-DIAG: 'Box.clear' changes it through a slice of one of its arrays
 // A method that hands a slice of one of self's array fields to a function
 // that writes it changes self -- so it can't be called on an `immut` value,

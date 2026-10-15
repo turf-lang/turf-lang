@@ -104,7 +104,7 @@ static void ensure_builtins_registered() {
   RegisterBuiltin("gc_pin",   {1, "Pin the GC object containing p against collection"});
   RegisterBuiltin("gc_unpin", {1, "Release one pin gc_pin placed on the GC object containing p"});
 
-  // FDN-001 (docs/planning/ROADMAP_v2.0.0.md, DEC-5): the safe-heap-
+  // FDN-001 (docs/development/ROADMAP_v2.0.0.md, DEC-5): the safe-heap-
   // allocation surface -- the only way for safe Turf code to obtain a &T
   // pointing at a GC-heap block, closing the gap where the only safe &T
   // came from &localVar (making a dynamically-sized linked list/tree/graph

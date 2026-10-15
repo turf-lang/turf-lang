@@ -73,7 +73,7 @@ else
   fail "NONE: second run did not skip the model"
 fi
 # The plain diagnostic is still shown, never a suggestion.
-if has "Suggestion validated" || has "[AI Suggestion]"; then
+if has "Suggestion validated" || has "[Model Suggestion]"; then
   fail "NONE: a negative hit produced a suggestion"
 else
   pass "NONE: a negative hit shows no suggestion"

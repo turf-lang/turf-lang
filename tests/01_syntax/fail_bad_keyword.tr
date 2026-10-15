@@ -1,4 +1,5 @@
 // EXPECT-DIAG: E014
+// EXPECT-FIX: replace 'iff' with 'if'
 fn main(): int {
     mut x: int = 10;
 

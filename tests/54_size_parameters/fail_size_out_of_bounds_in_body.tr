@@ -1,0 +1,15 @@
+// EXPECT-DIAG: E001
+// EXPECT-DIAG: only has 2 elements
+// The body is checked per instantiation, with N's value: 'r[N]' is one past
+// the end of every T[N].
+
+fn<T, N: size> bad(v: T): T[N] {
+    mut r: T[N];
+    r[N] = v;
+    return r;
+}
+
+fn main(): int {
+    mut a: int[2] = bad(1);
+    return 0;
+}

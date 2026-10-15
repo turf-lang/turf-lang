@@ -6,6 +6,7 @@
 #include "tooling/TestRunner.h"
 
 #include "tooling/TestExpectations.h"
+#include "turf/Analysis.h"
 
 #include <algorithm>
 #include <atomic>
@@ -511,6 +512,69 @@ private:
     return RunProcess(Program.string(), {}, T.Path.parent_path().string(), Timeout_);
   }
 
+  /// TDP-2-001: a fix the compiler printed is applied and the program checked
+  /// again. The compiler writes the file with every shown fix applied
+  /// (--smart-write-fix); it is analysed in this process as if it were the
+  /// test file, so its imports resolve as the test's do. It must have at least
+  /// @p Fixes fewer errors than the test file, and no error the test file did
+  /// not have. Returns why not, or "".
+  std::string checkFixesApply(const TestFile &T, size_t Index, const std::string &Source,
+                              size_t Fixes) {
+    const fs::path Fixed = Temp_ / ("f" + std::to_string(Index) + ".tr");
+    struct Cleanup {
+      fs::path P;
+      ~Cleanup() {
+        std::error_code EC;
+        fs::remove(P, EC);
+      }
+    } Clean{Fixed};
+    std::vector<std::string> Args;
+    if (!O_.PackageGraph.empty()) {
+      Args.push_back("--package-graph");
+      Args.push_back(O_.PackageGraph);
+    }
+    Args.push_back(T.Name());
+    Args.push_back("--check");
+    Args.push_back("--smart-write-fix=" + Fixed.string());
+    RunProcess(O_.Compiler, Args, T.Path.parent_path().string(), CompileTimeoutSec);
+    const std::string FixedSource = ReadFile(Fixed);
+    if (FixedSource.empty())
+      return "the compiler printed a fix but wrote no fixed program (--smart-write-fix)";
+
+    using Key = std::pair<unsigned, std::string>;
+    auto Errors = [&](const std::string &Text) {
+      turf::AnalysisOptions Opt;
+      Opt.RunLint = true;
+      Opt.RunFlowAnalysis = true;
+      Opt.PackageGraphFile = O_.PackageGraph;
+      std::vector<Key> Out;
+      const turf::AnalysisResult R = turf::analyze({{T.Path.string(), Text}}, Opt);
+      for (const auto &D : R.diagnostics())
+        if (D.Level == turf::Severity::Error)
+          Out.emplace_back(D.Where.Line, D.Code);
+      return Out;
+    };
+    std::vector<Key> Before, After;
+    {
+      // The analysis runs on the compiler's process-wide state: one at a time.
+      static std::mutex AnalysisMu;
+      std::lock_guard<std::mutex> L(AnalysisMu);
+      Before = Errors(Source);
+      After = Errors(FixedSource);
+    }
+    for (const auto &K : After) {
+      auto It = std::find(Before.begin(), Before.end(), K);
+      if (It == Before.end())
+        return "with its fixes applied the program has an error it did not have: " + K.second +
+               " at line " + std::to_string(K.first) + "\n--- fixed program ---\n" + FixedSource;
+      Before.erase(It);
+    }
+    if (Before.size() < Fixes)
+      return "with its " + std::to_string(Fixes) + " fix(es) applied the program still has " +
+             "the errors they fix\n--- fixed program ---\n" + FixedSource;
+    return "";
+  }
+
   /// The detail block of a failure that quotes the lines of a check followed by
   /// the output it checked.
   static std::string With(const std::vector<std::string> &Lines, const std::string &Output) {
@@ -589,6 +653,17 @@ private:
       if (auto Miss = TestExpect::CheckDiag(Source, C.Output); !Miss.empty())
         return fail(T, "FAILED (Rejected, but EXPECT-DIAG not met)",
                     "(Rejected, but EXPECT-DIAG not met):\n" + With(Miss, C.Output));
+      // The compiler's own suite (run with its register) pins every fix it
+      // prints; a project's tests opt in with the marker.
+      if (auto Miss = TestExpect::CheckFix(Source, C.Output, /*RequireAllPinned=*/Reg_ != nullptr);
+          !Miss.empty())
+        return fail(T, "FAILED (Rejected, but EXPECT-FIX not met)",
+                    "(Rejected, but EXPECT-FIX not met):\n" + With(Miss, C.Output));
+      if (const size_t Fixes = TestExpect::CountFixes(C.Output);
+          Fixes && (Reg_ || TestExpect::HasFixMarker(Source)))
+        if (auto Why = checkFixesApply(T, Index, Source, Fixes); !Why.empty())
+          return fail(T, "FAILED (EXPECT-FIX: the fix does not apply)",
+                      "(EXPECT-FIX: the fix does not apply): " + Why);
       if (Reg_)
         if (auto Miss = Reg_->checkDiagPolicy(Source, T.Key, C.Output); !Miss.empty())
           return fail(T, "FAILED (Rejected, but its reason is not pinned: see DIAGNOSTIC_GAPS.txt)",

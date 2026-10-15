@@ -344,6 +344,10 @@ public:
     /// ResolvedKind/ResolvedCandidates elsewhere in this file. Nulled by
     /// clone() (a cloned tree is stale until re-typechecked).
     TurfTypePtr ResolvedSuccessType;
+    /// Set by CFGBuilder when the run block is part of the function's CFG
+    /// (a branch from just before the statement holding this `recover`).
+    /// A pass walking that statement then leaves the block to the CFG.
+    bool BlockInCFG = false;
 
     llvm::Value* codegen() override;
     void accept(ASTVisitor& V) override { V.visitRecoverExpr(*this); }

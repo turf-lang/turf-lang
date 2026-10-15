@@ -1,4 +1,5 @@
 // EXPECT-DIAG: E042
+// EXPECT-FIX: replace 'uint' with 'int'
 // EXPECT-DIAG: Unknown type 'uint'
 // F-NUM-5: no new integer widths and no unsigned types: `int` (64-bit) and
 // `int32` (for FFI) only.

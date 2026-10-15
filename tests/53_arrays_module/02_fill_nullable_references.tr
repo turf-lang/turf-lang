@@ -1,0 +1,18 @@
+// Filling an array of nullable references: the element type comes from the
+// argument, so it is a `&?Node`.
+
+import arrays;
+import test;
+
+struct Node {
+    v: int
+}
+
+fn main(): int {
+    mut n: Node = Node::default();
+    n.v = 4;
+    mut first: &?Node = &n;
+    mut refs: (&?Node)[3] = arrays::fill(first);
+    test::assert(refs[2] != null, "every element is the reference");
+    return 0;
+}

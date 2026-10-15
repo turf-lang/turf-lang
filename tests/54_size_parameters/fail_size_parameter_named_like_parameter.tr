@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E150
+// EXPECT-DIAG: has a size parameter and a parameter both named 'N'
+
+fn<N: size> first(N: int, a: int[N]): int {
+    return a[0];
+}
+
+fn main(): int {
+    return 0;
+}

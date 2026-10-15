@@ -219,7 +219,24 @@ void substituteTypesInBody(const ExprAST *Node,
     SO->setTypeArg(substituteConcreteTypes(SO->getTypeArg(), Subst));
     return;
   }
+  // A size parameter (`N` in `fn<T, N: size>`): its reads become the
+  // instantiation's constant, and `mut r: T[N];` gets that length.
+  if (auto *V = const_cast<VariableExprAST *>(dynamic_cast<const VariableExprAST *>(Node))) {
+    if (V->IsSizeParamRef) {
+      auto It = Subst.find(V->getName());
+      if (It != Subst.end())
+        if (const auto *SV = dynamic_cast<const TurfSizeValueType *>(It->second.get()))
+          V->SizeValue = SV->getValue();
+    }
+    return;
+  }
   if (auto *AD = const_cast<ArrayDeclExprAST *>(dynamic_cast<const ArrayDeclExprAST *>(Node))) {
+    if (!AD->SizeParam.empty()) {
+      auto It = Subst.find(AD->SizeParam);
+      if (It != Subst.end())
+        if (const auto *SV = dynamic_cast<const TurfSizeValueType *>(It->second.get()))
+          AD->setSize(SV->getValue());
+    }
     AD->setElementTypePtr(substituteConcreteTypes(AD->getElementTypePtr(), Subst));
     for (const auto &Init : AD->getInitList())
       substituteTypesInBody(Init.get(), Subst);

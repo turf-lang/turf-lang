@@ -26,6 +26,10 @@ INCORRECT:
     }
     mut y: int = x;   // ERROR: the `else` path never assigns x
 
+NOT COVERED:
+  A fixed-size array (`mut a: int[5];`) is assigned from its declaration;
+  every element reads as zero until written, so reading one is not E008.
+
 WHAT THIS ERROR IS NOT:
   - Not ReferenceError (E040) -- the name IS declared, just not reliably
     assigned yet on every path.

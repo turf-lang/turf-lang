@@ -1,4 +1,5 @@
 // EXPECT-DIAG: E060
+// EXPECT-FIX: replace 'immutable' with 'mutable'
 fn main(): int {
     // 'const' isn't a Turf keyword -- the real one is 'immutable'/'immut'.
     immutable x: int = 5;

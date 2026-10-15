@@ -1,0 +1,16 @@
+// EXPECT-DIAG: E054
+// EXPECT-FIX: replace 'bmup' with 'bump'
+// One method of the struct is a close match, so the call is renamed to it.
+struct Counter {
+    n: int
+}
+
+fn Counter.bump(): void {
+    self.n = self.n + 1;
+}
+
+fn main(): int {
+    mut c: Counter = Counter::default();
+    c.bmup();
+    return c.n - 1;
+}

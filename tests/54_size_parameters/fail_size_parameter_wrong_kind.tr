@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E150
+// EXPECT-DIAG: Expected 'size' after 'N:'
+
+fn<N: count> first(a: int[N]): int {
+    return a[0];
+}
+
+fn main(): int {
+    return 0;
+}

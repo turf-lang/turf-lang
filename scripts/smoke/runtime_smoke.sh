@@ -30,7 +30,7 @@
 #      turf_rt_typedesc_is_pointer_word), called directly from a small C
 #      program linked straight against lib/libturfrt.a -- no Turf compiler
 #      involved at all, the most direct test this library gets.
-#   6. FDN-006 (docs/planning/ROADMAP_v2.0.0.md): deep, non-tail recursion
+#   6. FDN-006 (docs/development/ROADMAP_v2.0.0.md): deep, non-tail recursion
 #      prints "panic: stack overflow" (not a bare SIGSEGV, exit 139) and
 #      aborts (134); a direct huge allocation prints "panic: out of memory"
 #      (already existed since RT-001 -- this is its first real test, per

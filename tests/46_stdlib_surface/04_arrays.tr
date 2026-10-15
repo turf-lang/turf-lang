@@ -1,0 +1,21 @@
+// API lock, part 4: arrays. See 01_core_and_collections.tr for what this
+// folder is.
+import arrays;
+import test;
+
+fn double_it(x: int): int {
+    return x * 2;
+}
+
+fn index(i: int): int {
+    return i;
+}
+
+fn main(): int {
+    mut a: int[3] = arrays::fill(1);
+    mut b: int[3] = arrays::generate(index);
+    mut c: int[3] = arrays::reversed(b);
+    mut d: int[3] = arrays::map(c, double_it);
+    test::assert(a[0] == 1 && b[2] == 2 && c[0] == 2 && d[0] == 4, "arrays");
+    return 0;
+}

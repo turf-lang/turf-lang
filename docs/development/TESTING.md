@@ -115,6 +115,7 @@ The markers, all matched literally against the output with colour stripped:
 | `// EXPECT-DIAG: E011` | the compile output contains `[E011` |
 | `// EXPECT-DIAG: some text` | ... contains this text (use it for a warning, which has no code) |
 | `// EXPECT-NO-DIAG: some text` | ... does not contain it (the shape of a false-positive or cascade fix) |
+| `// EXPECT-FIX: replace 'nmae' with 'name'` | the output has a `Fix:` line with exactly this description |
 | `// EXPECT-RUNTIME: some text` | the program's own output contains it (abort tests) |
 | `// EXPECT-EXIT: 134` | the program exits with this status (an abort that prints nothing) |
 
@@ -124,6 +125,31 @@ numbers. Where one code covers several mistakes (E066 is the type-mismatch
 catch-all; E056 covers several "no such overload" shapes), pin the message
 title or a phrase of the message too, since the code alone cannot tell them
 apart.
+
+### Pin the fix
+
+An error whose raise site knows the exact edit prints a `Fix:` block in every
+build (`src/diagnostics/CompilerFix.cpp`; `docs/reference/cli_and_diagnostics.md`,
+"Fixes"). The runner treats the fix as part of what a test pins:
+
+- Each `// EXPECT-FIX: <description>` must match a printed `Fix:` line exactly
+  (`replace 'nmae' with 'name'`, `remove 'pub'`, `insert ';' at the end of line 12`).
+- In this repository's suite (run with `--diag-register`, as
+  `scripts/test_runner.sh` does), every printed `Fix:` line must have a marker.
+  A `fail_*` test that starts printing a fix fails until it is pinned, so a new
+  fix cannot appear unreviewed. A project's own `turf test` has no register,
+  so there the marker is opt-in.
+- Then (always here, and in a project only for a test with a marker) the runner reruns the compiler with `--smart-write-fix`, analyses the
+  fixed program in-process, and requires it to have at least as many fewer
+  errors as fixes printed and no error the original lacked.
+- To pin that a fix is *not* offered (an ambiguous typo), use
+  `// EXPECT-NO-DIAG: Fix:`; see `tests/55_compiler_fixes/`.
+
+`TURF_FIX_DEBUG=1` prints a `[fix]` line to stderr for each error with fix-its
+the fix path looks at, and why its fix was not shown (an error without
+fix-its, such as an ambiguous typo, prints none). `python3 scripts/dev/diagnostic_fix_coverage.py`
+counts, per error code, how many `fail_*` tests print a hint and a fix
+(`--fixes` lists each fix, `--list` each code).
 
 A `RUNTIME_ABORT_EXPECTED` test must carry `EXPECT-RUNTIME` (or `EXPECT-EXIT`
 when the abort is silent by design). Because stdout is flushed before a panic,
@@ -247,9 +273,15 @@ The runner only covers `tests/`. These cover the rest:
   tests cannot show a convention still bites.
 - `scripts/smoke/cli_smoke.sh`, `examples_smoke.sh`, `release_smoke.sh`: the
   `turf` front end, the `examples/` projects, and an installed release archive.
-- `scripts/slm/slm_replay_smoke.sh` and `slm_deterministic_fix_smoke.sh`: the
-  `--smart` path without a model (`TURF_SLM_REPLAY`). Run them after changing
-  `src/slm/SLMIntegration.cpp` or `Sandbox.cpp`.
+- `scripts/slm/slm_replay_smoke.sh`: the `--smart` path without a model
+  (`TURF_SLM_REPLAY`). Run it after changing `src/slm/SLMIntegration.cpp` or
+  `Sandbox.cpp`.
+- `scripts/slm/slm_deterministic_fix_smoke.sh`: the compiler's own fixes end to
+  end. Each fixture prints its `EXPECT-FIX` with and without `--smart`; `--smart`
+  never reaches the model; the program `--smart-write-fix` writes compiles and
+  runs; a clean compile never enters the fix path. Run it after changing
+  `src/diagnostics/CompilerFix.cpp`, a `withFixIt()` site, or
+  `src/slm/SLMIntegration.cpp`.
 
 Each POSIX smoke script with a Windows meaning has a PowerShell twin of the
 same name; change both together.

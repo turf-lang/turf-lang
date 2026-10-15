@@ -547,13 +547,14 @@ Resolver::buildFunctionSymbol(const FuncDefExprAST &Node,
   Sym.BaseName = Node.getName();
   Sym.SourceModule = ModuleName;
   Sym.Params.reserve(Node.getParams().size());
-  const auto &TypeParams = Node.getTypeParams();
+  const auto TypeOnly = Node.getTypeOnlyParams();
   for (const auto &Param : Node.getParams()) {
     Sym.Params.push_back(
-        {Param.Name, substituteTypeParams(Param.Type, TypeParams)});
+        {Param.Name, substituteTypeParams(Param.Type, TypeOnly)});
   }
-  Sym.ReturnType = substituteTypeParams(Node.getReturnTypePtr(), TypeParams);
-  Sym.TypeParams = TypeParams;
+  Sym.ReturnType = substituteTypeParams(Node.getReturnTypePtr(), TypeOnly);
+  Sym.TypeParams = Node.getTypeParams();
+  Sym.SizeParams = Node.SizeParams;
   Sym.Decl = &Node; // see ResolverFunctionSymbol::Decl
   Sym.HasCallerLocation = Node.hasCallerLocation();
   Sym.Annotations = Node.getAnnotations();
@@ -642,6 +643,34 @@ void Resolver::registerFunctionSignature(const FuncDefExprAST &Node,
 }
 
 
+// Whether @p Ty spells @p Name as a type anywhere (`N`, `N[3]`, `&N`,
+// `List<N>`, `fn(N): int`, `!N`).
+static bool spellsTypeName(const TurfType *Ty, const std::string &Name) {
+  if (!Ty)
+    return false;
+  if (const auto *NT = dynamic_cast<const NamedType *>(Ty))
+    return NT->getName() == Name && NT->getModule().empty();
+  if (const auto *PT = dynamic_cast<const TurfPointerType *>(Ty))
+    return spellsTypeName(PT->getPointee().get(), Name);
+  if (const auto *AT = dynamic_cast<const ArrayType *>(Ty))
+    return spellsTypeName(AT->getElementType(), Name);
+  if (const auto *EU = dynamic_cast<const TurfErrorUnionType *>(Ty))
+    return spellsTypeName(EU->getSuccessTypePtr().get(), Name);
+  if (const auto *GT = dynamic_cast<const GenericType *>(Ty)) {
+    for (const auto &A : GT->getTypeArgs())
+      if (spellsTypeName(A.get(), Name))
+        return true;
+    return false;
+  }
+  if (const auto *FT = dynamic_cast<const FuncType *>(Ty)) {
+    for (const auto &P : FT->getParamTypes())
+      if (spellsTypeName(P.get(), Name))
+        return true;
+    return spellsTypeName(FT->getReturnType().get(), Name);
+  }
+  return false;
+}
+
 void Resolver::validateGenericParamsInferable(const FuncDefExprAST &Node,
                                               const ResolverFunctionSymbol &Sym,
                                               const std::string &ModuleName) const {
@@ -663,8 +692,48 @@ void Resolver::validateGenericParamsInferable(const FuncDefExprAST &Node,
         for (const auto &TP : D->getTypeParams())
           Bound.push_back(TP);
   }
+  // A size parameter can also come from the type the call's result is
+  // stored into (`mut a: int[8] = fill(0);`), so the return type counts.
+  std::vector<std::string> FromReturn;
+  TypeWalk::collectParamOrder(Sym.ReturnType, FromReturn);
+  for (const auto &SP : Sym.SizeParams) {
+    bool AsType = spellsTypeName(Sym.ReturnType.get(), SP);
+    for (const auto &P : Sym.Params)
+      AsType |= spellsTypeName(P.Type.get(), SP);
+    if (AsType) {
+      TypeError(toSourceLocation(Sym.DeclLoc), ErrCode::SizeParameter,
+                "'" + SP + "' is a size parameter, not a type: in '" + FnName +
+                    "' it can only be an array's size, as in 'T[" + SP + "]'.",
+                "For a value of the element type, declare a type parameter too: "
+                "'fn<T, " + SP + ": size>' and use 'T'.")
+          .raise();
+      return;
+    }
+    for (const auto &P : Sym.Params)
+      if (P.Name == SP) {
+        TypeError(toSourceLocation(Sym.DeclLoc), ErrCode::SizeParameter,
+                  "'" + FnName + "' has a size parameter and a parameter both "
+                  "named '" + SP + "'.",
+                  "Rename one: the size parameter '" + SP +
+                      "' already reads as an int in the body.")
+            .raise();
+        return;
+      }
+    if (std::find(Bound.begin(), Bound.end(), SP) != Bound.end() ||
+        std::find(FromReturn.begin(), FromReturn.end(), SP) != FromReturn.end())
+      continue;
+    TypeError(toSourceLocation(Sym.DeclLoc), ErrCode::NothingToInfer,
+              "'" + FnName + "' declares size parameter '" + SP +
+                  "', but no array in its parameters or return type has the size '" +
+                  SP + "', so no call can infer it.",
+              "Use it as an array size, e.g. 'T[" + SP + "]', or drop it from the "
+              "'<...>' list.")
+        .raise();
+    return;
+  }
   for (const auto &TP : Sym.TypeParams) {
-    if (std::find(Bound.begin(), Bound.end(), TP) != Bound.end())
+    if (std::find(Bound.begin(), Bound.end(), TP) != Bound.end() ||
+        std::find(Sym.SizeParams.begin(), Sym.SizeParams.end(), TP) != Sym.SizeParams.end())
       continue;
     TypeError(toSourceLocation(Sym.DeclLoc), ErrCode::NothingToInfer,
               "'" + FnName + "' declares type parameter '" + TP +

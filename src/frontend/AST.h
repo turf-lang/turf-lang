@@ -8,7 +8,9 @@
 #include "llvm/IR/Value.h"
 
 namespace llvm { class AllocaInst; }
+#include <algorithm>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <typeinfo>

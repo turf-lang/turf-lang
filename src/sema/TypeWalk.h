@@ -5,7 +5,7 @@
  *        this compiler used to answer independently, by hand, in at least
  *        seven separate recursive functions across four files (see
  *        `docs/planning/ARCHITECTURE_SIMPLIFICATION.md` §1 and
- *        `docs/planning/ROADMAP_v2.0.0.md`'s SMP-002 entry for the full
+ *        `docs/development/ROADMAP_v2.0.0.md`'s SMP-002 entry for the full
  *        list and the bugs that incompleteness caused -- three of the seven
  *        were independently, silently incomplete, discovered only by
  *        hitting them in practice).

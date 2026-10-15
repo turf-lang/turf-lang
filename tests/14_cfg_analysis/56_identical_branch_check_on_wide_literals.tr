@@ -1,0 +1,40 @@
+// The identical-branches lint compares integer literals by value at any
+// width: `-9223372036854775808` is stored wider than `-7`.
+
+import io;
+import test;
+
+error Bad {
+    Oops,
+}
+
+fn f0(): !int {
+    return Bad::Oops;
+}
+
+fn main(): int {
+    mut x: int = 0;
+    if x == 0 {
+        x = -9223372036854775808;
+    } else {
+        x = -7;
+    }
+    test::assert(x == -9223372036854775808, "the INT_MIN branch");
+    io::printline(38 <= -9223372036854775808);
+
+    mut c: int = 0;
+    while c < 2 {
+        c = c + 1;
+        mut v: int = f0() recover as err run {
+            compare (err) {
+                otherwise:
+                if (false give false && (-9223372036854775808 != 0) otherwise false || (-9 < 99)) {
+                    io::printline("in");
+                }
+            }
+            continue;
+        };
+        io::printline(v);
+    }
+    return 0;
+}

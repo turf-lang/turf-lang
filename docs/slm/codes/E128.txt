@@ -6,7 +6,10 @@ CAUSE:
       where it is declared;
     - `guess` infers the type from the value, so it needs one;
     - because of that `guess` is only for a local variable: a parameter, a return type or a
-      struct field has no value to infer from and must be written out.
+      struct field has no value to infer from and must be written out;
+    - an unsized local `T[]`, and an array whose element type holds a non-null
+      reference (`(&T)[N]`), have no zero value and need an initializer.
+      (A fixed-size `int[5]` needs none: it is zero-filled.)
 
 INCORRECT:
     immutable PI: double;             // never gets a value, and can't later

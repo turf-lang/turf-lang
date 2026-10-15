@@ -6,7 +6,7 @@
 | **Audited tree** | `refactor/architecture` @ `cde1d30` (clean), LLVM 22, x86-64 Linux (WSL2), `--release` build |
 | **Specification** | `docs/archive/ARCHITECTURE_OVERHAUL.md` (§4, §6–§8, §9–§18, §22, §23, §25, §27) and `docs/development/FREEZE.md` |
 | **Verdict** | **Not closable yet.** 11 Category A and 3 Category B defects, several of them silent memory corruption, plus documentation drift. More than two items and several are not small, so per the audit's implementation threshold **nothing was implemented here**; the work is handed off in `docs/planning/OVERHAUL_REMAINING_WORK.md` (items OVH-001 … OVH-015). |
-| **Next documents** | `docs/planning/OVERHAUL_REMAINING_WORK.md` (temporary handoff) · `docs/planning/ROADMAP_v2.0.0.md` (what follows closure) · `docs/planning/FUTURE.md` (post-2.0 backlog) |
+| **Next documents** | `docs/planning/OVERHAUL_REMAINING_WORK.md` (temporary handoff) · `docs/development/ROADMAP_v2.0.0.md` (what follows closure) · `docs/planning/FUTURE.md` (post-2.0 backlog) |
 
 This record is permanent. It is the evidence base for the handoff and the
 2.0 roadmap: every claim below was checked by running something, and the
@@ -213,7 +213,7 @@ the relevant change record):
 
 §27's reclassification (2.0 / FUTURE / superseded / rejected) and the
 `ARCHITECTURE_SIMPLIFICATION.md` assessment are in
-`docs/planning/ROADMAP_v2.0.0.md` Part II and Part III. Post-2.0 items, with
+`docs/development/ROADMAP_v2.0.0.md` Part II and Part III. Post-2.0 items, with
 their original rationale preserved, are in `docs/planning/FUTURE.md`.
 
 ## 7. Remaining-work decision

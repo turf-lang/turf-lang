@@ -29,6 +29,20 @@ bool IsRuntimeAbortTest(const std::string &Source);
 /// `// EXPECT-NO-DIAG: some text`, matched against the compile output.
 std::vector<std::string> CheckDiag(const std::string &Source, const std::string &CompileOutput);
 
+/// `// EXPECT-FIX: <description>` (TDP-2-001): each marker names a `Fix:` line
+/// of the compile output exactly. With @p RequireAllPinned (the compiler's own
+/// suite, which runs with its register) each `Fix:` line the compiler printed
+/// must also be named by a marker: a fix is a promise, so none goes unpinned.
+/// A project's own tests opt in by writing the marker.
+std::vector<std::string> CheckFix(const std::string &Source, const std::string &CompileOutput,
+                                  bool RequireAllPinned);
+
+/// Whether @p Source has any `// EXPECT-FIX:` marker.
+bool HasFixMarker(const std::string &Source);
+
+/// How many `Fix:` lines the compile output has.
+size_t CountFixes(const std::string &CompileOutput);
+
 /// `// EXPECT-RUNTIME: text`, matched against the program's own output.
 std::vector<std::string> CheckRuntime(const std::string &Source, const std::string &ProgramOutput);
 

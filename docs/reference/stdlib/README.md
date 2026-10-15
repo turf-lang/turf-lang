@@ -15,6 +15,7 @@ each.
 | `io` | printing, reading input, reading and writing files, `exists` | none (prelude) | [io_and_net.md](io_and_net.md) |
 | `math` | `abs`, `min`, `max`, `clamp`, `power`, libm functions, `divide`, constants | none (prelude) | [math_and_os.md](math_and_os.md) |
 | `sys` | `panic`, `exit`, `abort` | none (prelude) | [io_and_net.md](io_and_net.md) |
+| `arrays` | build a whole array: `fill`, `generate`, `reversed`, `map` | `import arrays;` | [arrays.md](arrays.md) |
 | `list` | `List<T>`, a growable array | `import list::List;` | [collections.md](collections.md) |
 | `stack` | `Stack<T>`, last in first out | `import stack::Stack;` | [collections.md](collections.md) |
 | `queue` | `Queue<T>`, first in first out | `import queue::Queue;` | [collections.md](collections.md) |

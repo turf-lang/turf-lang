@@ -284,7 +284,27 @@ public:
   /// 2c/3a/3b's template-skip check (main.cpp) uses to tell a genuine,
   /// still-uninstantiated template apart from a finished clone. Never used
   /// on an ordinary (non-cloned) declaration.
-  void clearTypeParams() { TypeParams.clear(); }
+  void clearTypeParams() {
+    TypeParams.clear();
+    SizeParams.clear();
+  }
+
+  /// The type parameters declared `N: size` (a subset of TypeParams, in
+  /// declaration order): an array length, not a type. `T[N]` in the
+  /// signature or body uses one; in the body `N` also reads as an `int`.
+  std::vector<std::string> SizeParams;
+  bool isSizeParam(const std::string &Name) const {
+    return std::find(SizeParams.begin(), SizeParams.end(), Name) != SizeParams.end();
+  }
+  /// TypeParams without the size parameters: the names that stand for a
+  /// type.
+  std::vector<std::string> getTypeOnlyParams() const {
+    std::vector<std::string> Out;
+    for (const auto &TP : TypeParams)
+      if (!isSizeParam(TP))
+        Out.push_back(TP);
+    return Out;
+  }
 
   /// Populated by the Resolver after registering the function symbol.
   /// clone() returns a fresh node, so this is nullptr in cloned trees.
@@ -302,6 +322,7 @@ public:
     Cloned->setVisibility(getVisibility());
     Cloned->setAnnotations(getAnnotations());
     Cloned->UsesTry = UsesTry;
+    Cloned->SizeParams = SizeParams;
     return Cloned;
     // Note: ResolvedDef is intentionally NOT copied — cloned ASTs are stale
     // until re-resolved. The default-constructed field is nullptr.
@@ -485,6 +506,13 @@ public:
   /// clone -- mirrors VarDeclExprAST::setTypePtr()'s existing contract.
   void setElementTypePtr(TurfTypePtr T) { ElementType = std::move(T); }
   int getSize() const { return Size; }
+  /// `mut r: T[N];` in a `fn<T, N: size>`: the size is the size parameter
+  /// N (Size is ArrayType::kSymbolicSize) until the monomorphizer sets it.
+  std::string SizeParam;
+  void setSize(int S) {
+    Size = S;
+    SizeParam.clear();
+  }
   const std::vector<std::unique_ptr<ExprAST>> &getInitList() const {
     return InitList;
   }
@@ -499,10 +527,12 @@ public:
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitArrayDecl(*this); }
   std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<ArrayDeclExprAST>(Loc, Name, ElementType, Size,
+    auto Cloned = std::make_unique<ArrayDeclExprAST>(Loc, Name, ElementType, Size,
                                               CloneExprList(InitList), 
                                               InitExpr ? InitExpr->clone() : nullptr,
                                               IsImmutable);
+    Cloned->SizeParam = SizeParam;
+    return Cloned;
     // Note: ResolvedSymbol intentionally NOT copied. ✓
   }
 };

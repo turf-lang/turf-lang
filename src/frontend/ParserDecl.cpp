@@ -77,6 +77,15 @@ std::unique_ptr<ExprAST> ParseStructDecl() {
     while (CurTok == TOK_IDENTIFIER) {
       TypeParams.push_back(IdentifierStr);
       getNextToken();
+      if (CurTok == TOK_COLON) {
+        LogErrorAt(CurLoc, ErrCode::SizeParameter,
+                   "A struct's type parameters are types: '" + TypeParams.back() +
+                       ":' declares a size parameter, which only a function can have."
+                       "\n  Hint: give the struct a fixed-size array field "
+                       "(e.g. 'items: T[8]'), or a List<T>.",
+                   SLM::ErrorCategory::DECLARATION);
+        return nullptr;
+      }
       if (CurTok == ',') {
         getNextToken();
       } else {
@@ -886,11 +895,33 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
   getNextToken(); // consume TOK_FN
 
   std::vector<std::string> TypeParams;
+  // `N: size` declares a size parameter: an array length, not a type.
+  std::vector<std::string> SizeParams;
+  SourceLocation SizeParamLoc;
   if (CurTok == '<') {
     getNextToken(); // eat '<'
     while (CurTok == TOK_IDENTIFIER) {
       TypeParams.push_back(IdentifierStr);
+      SourceLocation ParamLoc = CurLoc;
       getNextToken();
+      if (CurTok == TOK_COLON) {
+        getNextToken(); // eat ':'
+        if (CurTok != TOK_IDENTIFIER || IdentifierStr != "size") {
+          LogErrorAt(CurLoc, ErrCode::SizeParameter,
+                     "Expected 'size' after '" + TypeParams.back() +
+                         ":': the only kind of generic parameter written with "
+                         "':' is a size parameter."
+                         "\n  Hint: write 'fn<T, " + TypeParams.back() +
+                         ": size>' for an array length, or just '" +
+                         TypeParams.back() + "' for a type.",
+                     SLM::ErrorCategory::DECLARATION);
+          return nullptr;
+        }
+        getNextToken(); // eat 'size'
+        if (SizeParams.empty())
+          SizeParamLoc = ParamLoc;
+        SizeParams.push_back(TypeParams.back());
+      }
       if (CurTok == ',') {
         getNextToken();
       } else {
@@ -904,13 +935,24 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
     getNextToken(); // eat '>'
   }
 
-  // Push scope to allow ParseType to resolve generic parameters
+  // Push scope to allow ParseType to resolve generic parameters. A size
+  // parameter is not a type: ParseType() reads it only inside `[ ]`.
   SymbolScopeGuard Guard(!TypeParams.empty());
   if (GlobalSymbolTable && !TypeParams.empty()) {
     for (const auto &TP : TypeParams) {
+      if (std::find(SizeParams.begin(), SizeParams.end(), TP) != SizeParams.end())
+        continue;
       GlobalSymbolTable->RegisterType(TP, std::make_shared<TurfGenericParamType>(TP));
     }
   }
+  struct SizeParamScope {
+    std::vector<std::string> Saved;
+    explicit SizeParamScope(const std::vector<std::string> &Mine)
+        : Saved(g_SizeParamsInScope) {
+      g_SizeParamsInScope = Mine;
+    }
+    ~SizeParamScope() { g_SizeParamsInScope = Saved; }
+  } SizeScope(SizeParams);
 
   // Expect TOK_IDENTIFIER → save as FuncName
   if (RejectReservedWordAsName())
@@ -927,6 +969,16 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
 
   if (CurTok == '.') {
     StructName = FuncName;
+    if (!SizeParams.empty()) {
+      LogErrorAt(SizeParamLoc, ErrCode::SizeParameter,
+                 "A method can't declare a size parameter ('" + SizeParams[0] +
+                     ": size'): only a free function can."
+                     "\n  Hint: write a function that takes the value, e.g. "
+                     "'fn<T, " + SizeParams[0] + ": size> f(a: T[" +
+                     SizeParams[0] + "])'.",
+                 SLM::ErrorCategory::DECLARATION);
+      return nullptr;
+    }
     getNextToken(); // eat '.'
     if (CurTok != TOK_IDENTIFIER) {
       LogErrorAt(CurLoc, ErrCode::ExpectedName, "Expected method name after '.'", SLM::ErrorCategory::DECLARATION);
@@ -1131,6 +1183,7 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
                                               std::move(Body), TypeParams,
                                               IsStaticMethodDecl, HasCallerLocation);
   Def->UsesTry = TryScope.used();
+  Def->SizeParams = SizeParams;
   NoteFunctionParsed(FuncName);
   return Def;
 }
@@ -1176,6 +1229,13 @@ std::unique_ptr<ExprAST> ParseOperatorDecl(bool HasCallerLocation) {
       while (CurTok == TOK_IDENTIFIER) {
         TypeParams.push_back(IdentifierStr);
         getNextToken();
+        if (CurTok == TOK_COLON) {
+          LogErrorAt(CurLoc, ErrCode::SizeParameter,
+                     "An operator can't declare a size parameter ('" +
+                         TypeParams.back() + ":'): only a free function can.",
+                     SLM::ErrorCategory::DECLARATION);
+          return nullptr;
+        }
         if (CurTok == ',')
           getNextToken();
         else

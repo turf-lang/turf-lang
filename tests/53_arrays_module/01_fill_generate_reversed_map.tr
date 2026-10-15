@@ -1,0 +1,69 @@
+// The `arrays` module builds fixed-size arrays. The length comes from the
+// type the result is stored into (a declaration, an assignment, a parameter,
+// a `return`) or from an array argument.
+
+import arrays;
+import test;
+
+struct Point {
+    x: int,
+    y: int
+}
+
+struct Holder {
+    vals: int[3]
+}
+
+fn square(i: int): int {
+    return i * i;
+}
+
+fn label(i: int): string {
+    return "n" + (i to string);
+}
+
+fn four_nines(): int[4] {
+    return arrays::fill(9);
+}
+
+fn ends(a: int[4]): int {
+    return a[0] + a[3];
+}
+
+fn main(): int {
+    mut zeros: int[1000] = arrays::fill(0);
+    test::assert(zeros[0] == 0 && zeros[999] == 0, "1000 zeros");
+    mut names: string[3] = arrays::fill("?");
+    test::assert(names[2] == "?", "strings");
+    mut flags: bool[2] = arrays::fill(true);
+    test::assert(flags[0] && flags[1], "bools");
+    mut halves: double[5] = arrays::fill(0.5);
+    test::assert(halves[4] == 0.5, "doubles");
+    mut p: Point = Point::default();
+    p.x = 3;
+    mut pts: Point[2] = arrays::fill(p);
+    test::assert(pts[1].x == 3, "structs");
+
+    mut row: int[3] = arrays::fill(1);
+    mut grid: int[2][3] = arrays::fill(row);
+    test::assert(grid[1][2] == 1, "rows of a 2-D array");
+
+    zeros = arrays::fill(7);
+    test::assert(zeros[500] == 7, "assignment");
+    test::assert(four_nines()[3] == 9, "return");
+    test::assert(ends(arrays::fill(2)) == 4, "argument");
+    mut h: Holder = Holder::default();
+    h.vals = arrays::fill(6);
+    test::assert(h.vals[2] == 6, "field");
+
+    mut squares: int[5] = arrays::generate(square);
+    test::assert(squares[0] == 0 && squares[4] == 16, "generate");
+
+    mut back: int[5] = arrays::reversed(squares);
+    test::assert(back[0] == 16 && back[4] == 0, "reversed");
+    test::assert(arrays::reversed(arrays::reversed(squares))[1] == 1, "reversed twice");
+
+    mut texts: string[5] = arrays::map(squares, label);
+    test::assert(texts[2] == "n4", "map to another type");
+    return 0;
+}

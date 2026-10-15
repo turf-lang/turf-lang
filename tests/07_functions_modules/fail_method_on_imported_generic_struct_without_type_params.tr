@@ -1,4 +1,5 @@
 // EXPECT-DIAG: E138
+// EXPECT-FIX: insert '<T>' after 'fn'
 // EXPECT-DIAG: must declare its type parameters too
 // Same rule as tests/38_monomorphization/fail_method_on_generic_struct_without_type_params.tr,
 // on a struct imported from another module -- the shape first found live

@@ -120,9 +120,10 @@ to:
 A `mut` variable declared without an initializer holds no value yet. The
 compiler tracks, for every path through the function, whether it has been
 assigned, and a read that some path reaches before any assignment is E008
-("You're using 'x' before it has a value"). The rule is the same for every type:
-no read sees a value nothing assigned. An array is tracked as a whole (see
-[Arrays](arrays.md#initialization)).
+("You're using 'x' before it has a value"). The rule is the same for every
+scalar, struct and string: no read sees a value nothing assigned. A fixed-size
+array `T[N]` is the exception; it is assigned from its declaration and its
+elements read as zero until written (see [Arrays](arrays.md#initialization)).
 
 <!-- doc-example: fails E008 -->
 ```turflang

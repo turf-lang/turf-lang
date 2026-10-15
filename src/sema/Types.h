@@ -486,11 +486,23 @@ inline std::shared_ptr<NamedType> makeResolvedNamedType(std::string Identity) {
  */
 class ArrayType : public TurfType {
   TurfTypePtr ElementType;
-  int Size; // -1 = dynamic / unknown, >0 = fixed compile-time size
+  int Size; // -1 = dynamic / unknown, >0 = fixed compile-time size,
+            // kSymbolicSize = a size parameter's (SizeParam)
+  // `T[N]` in a declaration `fn<T, N: size>`: the size is the parameter N,
+  // fixed per instantiation (TypeWalk::substitute()). Never unsized.
+  std::string SizeParam;
 
 public:
+  static constexpr int kSymbolicSize = -2;
+
   ArrayType(TurfTypePtr Elem, int Sz = -1)
       : ElementType(std::move(Elem)), Size(Sz) {}
+  ArrayType(TurfTypePtr Elem, std::string SizeParamName)
+      : ElementType(std::move(Elem)), Size(kSymbolicSize),
+        SizeParam(std::move(SizeParamName)) {}
+
+  bool hasSymbolicSize() const { return !SizeParam.empty(); }
+  const std::string &getSizeParam() const { return SizeParam; }
 
   /**
    * @brief Human-readable name: "T[N]" for a concrete size, "T[]" for the
@@ -516,7 +528,9 @@ public:
     std::string Dims;
     const TurfType *Base = this;
     while (const auto *AT = dynamic_cast<const ArrayType *>(Base)) {
-      Dims += AT->Size < 0 ? "[]" : "[" + std::to_string(AT->Size) + "]";
+      Dims += AT->hasSymbolicSize() ? "[" + AT->SizeParam + "]"
+              : AT->Size < 0        ? "[]"
+                                    : "[" + std::to_string(AT->Size) + "]";
       Base = AT->ElementType.get();
     }
     // `(&N)[2]`, an array of references, is spelled with parentheses (a bare
@@ -528,7 +542,8 @@ public:
     return Base->getName() + Dims;
   }
   std::string getMangledName() const override {
-    return ElementType->getMangledName() + "_arr_" + std::to_string(Size);
+    return ElementType->getMangledName() + "_arr_" +
+           (hasSymbolicSize() ? SizeParam : std::to_string(Size));
   }
 
   bool isArray() const override { return true; }
@@ -536,7 +551,7 @@ public:
   bool isEquivalent(const TurfType *Other) const override {
     auto *OtherArr = dynamic_cast<const ArrayType *>(Other);
     if (!OtherArr) return false;
-    return Size == OtherArr->Size &&
+    return Size == OtherArr->Size && SizeParam == OtherArr->SizeParam &&
            ElementType->isEquivalent(OtherArr->ElementType.get());
   }
 
@@ -687,6 +702,29 @@ public:
   explicit TurfGenericParamType(std::string N) : Name(std::move(N)) {}
   std::string getName()        const override { return Name; }
   bool isGenericParam()        const override { return true; }
+};
+
+/**
+ * @brief The value a size parameter (`N` in `fn<T, N: size>`) is bound to:
+ *        a positive array length.
+ *
+ * It travels where a type argument does (a substitution map, an
+ * instantiation's TypeArgs), so it is a TurfType, but it is never the type of
+ * a value: it only ever replaces the size of an ArrayType (TypeWalk::
+ * substitute()) and the `N` a body reads (Monomorphize).
+ */
+class TurfSizeValueType : public TurfType {
+  int Value;
+
+public:
+  explicit TurfSizeValueType(int V) : Value(V) {}
+  int getValue() const { return Value; }
+  std::string getName() const override { return std::to_string(Value); }
+  std::string getMangledName() const override { return "n" + std::to_string(Value); }
+  bool isEquivalent(const TurfType *Other) const override {
+    const auto *O = dynamic_cast<const TurfSizeValueType *>(Other);
+    return O && O->Value == Value;
+  }
 };
 
 // ─── GenericType ─────────────────────────────────────────────────────────────

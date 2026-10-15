@@ -1,0 +1,53 @@
+// ─── arrays.tr ───────────────────────────────────────────────────────────────
+// Building fixed-size arrays. `import arrays;`, then `arrays::fill(0)`.
+//
+// Every function returns a new `T[N]` and changes nothing it is given. The
+// length N is a size parameter (`fn<T, N: size>`): it comes from an array
+// argument, or else from the type the result is stored into, so the compiler
+// checks every length:
+//
+//   mut zeros: int[1000] = arrays::fill(0);
+//   mut names: string[3] = arrays::fill("?");
+//   mut bad: int[3] = arrays::fill("x");   // E004: a string[3] is not an int[3]
+//   mut what = arrays::fill(0);            // E129: nothing gives the length
+//
+// A length is always positive: `int[0]` does not parse (E123). An element
+// type holding a non-null reference has no zero value, so `fill(&n)` into a
+// `(&N)[2]` is E128; pass a `&?N` (`mut r: &?N = &n; arrays::fill(r)`) to
+// fill a `(&?N)[2]`.
+
+/// N copies of `value`.
+pub fn<T, N: size> fill(value: T): T[N] {
+    mut out: T[N];
+    for i in 0..N {
+        out[i] = value;
+    }
+    return out;
+}
+
+/// `f(0)`, `f(1)`, ..., `f(N - 1)`, in order.
+pub fn<T, N: size> generate(f: fn(int): T): T[N] {
+    mut out: T[N];
+    for i in 0..N {
+        out[i] = f(i);
+    }
+    return out;
+}
+
+/// The elements of `a`, last first.
+pub fn<T, N: size> reversed(a: T[N]): T[N] {
+    mut out: T[N];
+    for i in 0..N {
+        out[i] = a[N - 1 - i];
+    }
+    return out;
+}
+
+/// `f` applied to each element of `a`, in order.
+pub fn<T, U, N: size> map(a: T[N], f: fn(T): U): U[N] {
+    mut out: U[N];
+    for i in 0..N {
+        out[i] = f(a[i]);
+    }
+    return out;
+}

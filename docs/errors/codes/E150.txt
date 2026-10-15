@@ -1,0 +1,26 @@
+A size parameter used where it can't be
+
+A generic function can take an array's length as a parameter, written `N: size`:
+
+    fn<T, N: size> fill(value: T): T[N] {
+        mut r: T[N];
+        for i in 0..N {
+            r[i] = value;
+        }
+        return r;
+    }
+
+    mut zeros: int[8] = fill(0);   // N is 8, from the type the result goes into
+
+N is fixed by each call, so it has a few rules, and E150 is breaking one of them:
+
+    struct Buffer<N: size> { used: int }             // only a free function can have one
+    fn<N: size> S.first(a: int[N]): int { ... }      // not a method or an operator
+    fn<N: count> first(a: int[N]): int { ... }       // the only kind after ':' is size
+    fn<N: size> first(a: N, b: int[N]): int { ... }  // N is a length, not a type
+    fn<N: size> first(N: int, a: int[N]): int { ... } // a parameter can't share its name
+    fn<N: size> count(a: int[N]): int { N = 3; ... } // N can't be changed
+
+Inside the function, N reads as an int, as in `for i in 0..N`. To change the number,
+copy it first: `mut n: int = N;`. For a struct that holds several values, give it a
+fixed-size array field (`items: int[8]`) or a List.

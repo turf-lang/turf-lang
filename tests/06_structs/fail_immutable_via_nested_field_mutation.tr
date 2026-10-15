@@ -1,4 +1,5 @@
 // EXPECT-DIAG: E060
+// EXPECT-FIX: replace 'immut' with 'mut'
 // EXPECT-DIAG: You can't change the value of 'o' because it's immutable
 // Regression test (LEC-006 follow-up): `self.inner.a = ...` assigns into a
 // struct held BY VALUE in a field, so it changes `self`. The old scan looked

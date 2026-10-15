@@ -1,4 +1,5 @@
 // EXPECT-DIAG: E040
+// EXPECT-FIX: replace 'myvvar' with 'myvar'
 // EXPECT-DIAG: It may be from the current file: 'myvar'
 import test;
 

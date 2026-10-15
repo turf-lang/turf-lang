@@ -427,7 +427,39 @@ The compiler warns about a function declared `!T` that never returns an error.
 | run | `expr recover run { ... }` | the success value | the block runs and must leave (see below), unless `T` is `void` | `T` |
 | as-run | `expr recover as err run { ... }` | the success value | the block runs with the error bound to `err` | `T` |
 
-`recover` can only follow a fallible expression (E132 otherwise), and must be followed by `produce`, `run` or `as` (E110). It binds more loosely than any operator: the fallback of `f() recover produce 10 + 1` is `11`, and `1 + f() recover produce 0` is a type error because `1 + f()` is added before `recover` is reached, so parenthesize to combine a recovered value with something else (`1 + (f() recover produce 0)`). It works anywhere an expression does, including as a call argument:
+`recover` can only follow a fallible expression (E132 otherwise), and must be followed by `produce`, `run` or `as` (E110). It binds more loosely than any operator: the fallback of `f() recover produce 10 + 1` is `11`, and `1 + f() recover produce 0` is a type error because `1 + f()` is added before `recover` is reached, so parenthesize to combine a recovered value with something else (`1 + (f() recover produce 0)`). That includes `=` and `+=`: `v = f() recover run { ... };` is `(v = f()) recover ...`, an assignment of a `!int` to an `int` (E066). Write the right side in parentheses. A declaration's initializer needs none.
+
+<!-- doc-example: fails E066 -->
+```turflang
+fn parse(s: string): !int {
+    return 1;
+}
+
+fn main(): int {
+    mut v: int = 0;
+    v = parse("7") recover run { return 1; };   // E066: (v = parse("7")) recover ...
+    return v;
+}
+```
+
+```turflang
+error ParseError { Bad }
+
+fn parse(s: string): !int {
+    if (s == "") {
+        return ParseError::Bad;
+    }
+    return 7;
+}
+
+fn main(): int {
+    mut v: int = parse("x") recover produce 0;          // an initializer: no parentheses
+    v = (parse("") recover run { return 1; });          // an assignment: parenthesize
+    return v;
+}
+```
+
+A `recover` works anywhere an expression does, including as a call argument:
 
 ```turflang
 import test;
@@ -615,6 +647,8 @@ fn main(): int {
 0
 7
 ```
+
+The flow checks follow these statements: a `recover` block is part of the enclosing function's control flow, and loops, `return`, `break` and `continue` inside it count. The block runs before the statement that holds it completes, so it sees only what was assigned before that statement. In `mut x: int; x = (g() recover run { print(x); return 1; });` the read of `x` in the block is `E008`.
 
 So a block recovering a call whose success type is `Point`, inside a function returning `int`, must `return` an `int`. Returning something else is E064:
 

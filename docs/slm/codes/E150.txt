@@ -1,0 +1,44 @@
+TURF E150 -- SIZE PARAMETER USED WHERE IT CAN'T BE:
+
+CAUSE:
+  A size parameter (`N: size` in `fn<T, N: size>`) is an array length that each call
+  fixes. Only a free function can declare one, it can only appear as an array's size
+  (`T[N]`), and in the body it reads as an int constant. E150 is any other use: on a
+  struct, a method or an operator; `N: something` other than `size`; `N` written as a
+  type; a parameter with the same name; or writing `N` (`N = 3`, `N++`, `&N`).
+
+INCORRECT:
+    struct Buffer<N: size> { used: int }
+    fn<N: size> S.first(a: int[N]): int { return a[0]; }
+    fn<N: count> first(a: int[N]): int { return a[0]; }
+    fn<N: size> first(a: N, b: int[N]): int { return b[0]; }
+    fn<N: size> count(a: int[N]): int { N = 3; return N; }
+
+CORRECT:
+    fn<T, N: size> fill(value: T): T[N] {
+        mut r: T[N];
+        for i in 0..N {
+            r[i] = value;
+        }
+        return r;
+    }
+
+    fn<T, N: size> count(a: T[N]): int {
+        mut n: int = N;
+        return n;
+    }
+
+    fn main(): int {
+        mut zeros: int[8] = fill(0);
+        printline(count(zeros));
+        return 0;
+    }
+
+FIX:
+  Move the size parameter to a free function, write it as `N: size`, use it only inside
+  `[ ]`, and copy it into a local before changing it. A struct holds a fixed-size array
+  field (`items: T[8]`) or a List<T>.
+
+RELATED: E129 (a size parameter nothing can infer: no array argument has it and the
+  result is not stored where a fixed-size array type is written), E123 (a name in `[ ]`
+  that is not a size parameter).

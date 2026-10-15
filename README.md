@@ -2,7 +2,7 @@
 
 Turf (TurfLang) is a statically typed language that compiles ahead of time to native executables through LLVM. It has structs, enums, real generics, state machines, pattern matching, error unions, a garbage-collected heap with checked references, a standard library (strings, collections, files, JSON, HTTP, sockets), a project and package tool, and an optional diagnostics assistant that runs a language model on your own machine.
 
-The current release is **Turf 2.0.0**. Upgrading a 1.x program? The [migration guide](docs/MIGRATING_TO_2.md) lists every change that affects existing code, with the fix for each.
+The current release is **Turf 2.1.0**. Upgrading a 1.x program? The [migration guide](docs/MIGRATING_TO_2.md) lists every change that affects existing code, with the fix for each.
 
 ## Contents
 
@@ -495,7 +495,7 @@ Names are `snake_case`; an operation that can fail returns `!T` and never a sent
 
 ## `--smart`: diagnostics with a local model
 
-Turf's diagnostics are the compiler's own and need nothing else. With `--smart`, an error that the compiler cannot fix by itself is passed to a small language model running locally through `llama.cpp`; no network is involved, and nothing runs on a clean compile. A suggestion is never trusted: it is applied to an isolated copy of your program and shown only if it removes the error without introducing another. Otherwise you see the compiler's diagnostic, unchanged. An error with a single unambiguous fix, such as a misspelled variable, is fixed without the model at all.
+Turf's diagnostics are the compiler's own and need nothing else. When the compiler knows the exact edit that removes an error, such as a misspelled variable, it prints it as a checked `Fix:` line in every build, with no flag and no model. With `--smart`, an error that the compiler has no fix for is passed to a small language model running locally through `llama.cpp`; no network is involved, and nothing runs on a clean compile. A suggestion is never trusted: it is applied to an isolated copy of your program and shown only if it removes the error without introducing another. Otherwise you see the compiler's diagnostic, unchanged. An error that has a compiler `Fix:` never reaches the model.
 
 ```sh
 turf my_program.tr --smart -o my_program

@@ -10,7 +10,7 @@
 > **What changed from the previous version, so nothing looks silently
 > dropped:** its "Turflang 2.0.0: Self-Hosting & Bootstrapping" heading is
 > retired — **2.0.0 now means the first public release**
-> (`docs/planning/ROADMAP_v2.0.0.md`); self-hosting is F-10 below. Its item 5
+> (`docs/development/ROADMAP_v2.0.0.md`); self-hosting is F-10 below. Its item 5
 > (ARC memory architecture) is superseded by the Overhaul's tracing-GC
 > decision (§D below). Its item 1 (tooling) is partly in 2.0 (REL-002). Its
 > item 6 (CFG remainder) is partly done (OPT-002). Everything else is here.

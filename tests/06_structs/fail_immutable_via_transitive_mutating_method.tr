@@ -1,4 +1,5 @@
 // EXPECT-DIAG: E060
+// EXPECT-FIX: replace 'immut' with 'mut'
 // EXPECT-DIAG: You can't change the value of 'c' because it's immutable
 // Regression test (LEC-006 follow-up): the immutable-variable check on a
 // mutating method call used to look only at the method's OWN body. `c.wrapper()`

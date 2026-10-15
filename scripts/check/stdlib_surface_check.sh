@@ -72,9 +72,9 @@ while IFS= read -r file; do
       inside_struct=""
     fi
 
-    if [[ "$line" =~ ^pub[[:space:]]+(extern[[:space:]]+)?(from[[:space:]]+\"[a-z]+\"[[:space:]]+)?fn(\<[A-Za-z,\ ]+\>)?[[:space:]]+([A-Za-z_0-9]+)\.([a-z_0-9]+)\( ]]; then
+    if [[ "$line" =~ ^pub[[:space:]]+(extern[[:space:]]+)?(from[[:space:]]+\"[a-z]+\"[[:space:]]+)?fn(\<[A-Za-z,:\ ]+\>)?[[:space:]]+([A-Za-z_0-9]+)\.([a-z_0-9]+)\( ]]; then
       check method "$mod" "${BASH_REMATCH[4]}.${BASH_REMATCH[5]}" "[.:]${BASH_REMATCH[5]}\\("
-    elif [[ "$line" =~ ^pub[[:space:]]+(extern[[:space:]]+)?(from[[:space:]]+\"[a-z]+\"[[:space:]]+)?fn(\<[A-Za-z,\ ]+\>)?[[:space:]]+([a-z_0-9A-Z]+)\( ]]; then
+    elif [[ "$line" =~ ^pub[[:space:]]+(extern[[:space:]]+)?(from[[:space:]]+\"[a-z]+\"[[:space:]]+)?fn(\<[A-Za-z,:\ ]+\>)?[[:space:]]+([a-z_0-9A-Z]+)\( ]]; then
       n=${BASH_REMATCH[4]}
       # A free function is locked by `module::name` or, for UFCS-callable
       # prelude helpers, by `.name(`.

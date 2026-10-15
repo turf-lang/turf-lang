@@ -23,7 +23,7 @@
 # regression that silently stopped collecting would still be caught long
 # before this bound, not just barely.
 #
-# FDN-001's own completion criterion (docs/planning/ROADMAP_v2.0.0.md) adds
+# FDN-001's own completion criterion (docs/development/ROADMAP_v2.0.0.md) adds
 # a second file/check pair, 07_heap_bounded_allocation.tr: the identical
 # "build and drop, 5000 times" shape, but for `heap()`-allocated linked-
 # list nodes -- heap() reaches turf_rt_alloc through HeapAllocateValue(), a
