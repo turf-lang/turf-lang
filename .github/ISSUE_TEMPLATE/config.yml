@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or discussion
+    url: https://github.com/turf-lang/turf-lang/discussions
+    about: Ask how to do something, or talk about an idea before filing it.
+  - name: turf command-line tool issue
+    url: https://github.com/turf-lang/turf-cli/issues/new/choose
+    about: Project, build, test, fmt and dependency commands.
+  - name: Editor and language server issue
+    url: https://github.com/turf-lang/turf-lsp/issues/new/choose
+    about: Completion, hover and diagnostics in the editor.
+  - name: Website issue
+    url: https://github.com/turf-lang/website/issues/new/choose
+    about: The Turf website.

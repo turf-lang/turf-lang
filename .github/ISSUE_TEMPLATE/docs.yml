@@ -1,0 +1,35 @@
+name: "Docs fix"
+description: "A mistake, gap or broken link in the language and compiler documentation"
+title: "[DOCS] "
+type: Bug
+labels: [cleanup]
+body:
+  - type: input
+    id: where
+    attributes:
+      label: Where
+      description: File and line, or page URL.
+      placeholder: docs/reference/control_flow.md:6
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is wrong
+      description: What does the page say, and what is wrong or missing?
+    validations:
+      required: true
+  - type: textarea
+    id: fix
+    attributes:
+      label: Suggested fix
+      description: What should it say?
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched the open and closed issues and found no duplicate.
+          required: true

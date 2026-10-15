@@ -1,0 +1,49 @@
+name: "Performance"
+description: "Compiled code or the compiler itself is slower than it should be"
+title: "[PERF] "
+type: Feature
+labels: [enhancement]
+body:
+  - type: textarea
+    id: program
+    attributes:
+      label: The program
+      description: A program that is slow, or a command that is slow.
+      render: turflang
+    validations:
+      required: true
+  - type: textarea
+    id: numbers
+    attributes:
+      label: Measurements
+      description: Timings, and a comparison with C or another language if you have one.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `turf --version` (or `turfc --version`).
+      placeholder: 2.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: opt
+    attributes:
+      label: Optimization level
+      options:
+        - -O0
+        - -O1
+        - -O2
+        - -O3
+        - -Os
+        - default
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched the open and closed issues and found no duplicate.
+          required: true

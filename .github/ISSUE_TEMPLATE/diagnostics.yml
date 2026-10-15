@@ -1,0 +1,44 @@
+name: "Diagnostics"
+description: "An error, warning, hint or fix message is wrong, missing or unhelpful"
+title: "[DIAGNOSTICS] "
+type: Feature
+labels: [diagnostics, ux]
+body:
+  - type: textarea
+    id: program
+    attributes:
+      label: The program
+      description: The smallest Turf program that triggers it.
+      render: turflang
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: What the compiler printed
+      description: Paste the full message, including the code (for example E066).
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: wanted
+    attributes:
+      label: What it should say or fix
+      description: A better message, a `Fix:` line, or a different code.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `turf --version` (or `turfc --version`).
+      placeholder: 2.1.0
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched the open and closed issues and found no duplicate.
+          required: true

@@ -1,0 +1,43 @@
+name: "SLM / --smart"
+description: "The `--smart` model suggestion is wrong or unsafe"
+title: "[SLM] "
+type: Bug
+labels: [slm]
+body:
+  - type: textarea
+    id: program
+    attributes:
+      label: The program
+      description: The program with the error.
+      render: turflang
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: The suggestion
+      description: What `--smart` printed.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What it should have suggested
+      description: The correct fix.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `turf --version` (or `turfc --version`).
+      placeholder: 2.1.0
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched the open and closed issues and found no duplicate.
+          required: true
