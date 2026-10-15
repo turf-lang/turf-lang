@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# gc_stress_corpus_smoke.sh -- FDN-005 stage 1 (docs/planning/ROADMAP_v2.0.0.md,
+# gc_stress_corpus_smoke.sh -- FDN-005 stage 1 (docs/development/ROADMAP_v2.0.0.md,
 # "Stress corpus"): the three long-running programs the roadmap names,
 # each compiled and run directly (not through test_runner.sh -- these live
 # under tests/custom/, which test_runner.sh excludes by convention,

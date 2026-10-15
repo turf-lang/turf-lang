@@ -177,7 +177,7 @@ inline const char *IntrinsicName(BareIntrinsic I) {
 //                  the same one-bare-intrinsic-one-stdlib-wrapper shape
 //                  `gc_checked_free`/`mem::free` already use. Both Arity 1,
 //                  registered in Builtins.cpp's g_builtins.
-//   heap(expr) -- FDN-001 (docs/planning/ROADMAP_v2.0.0.md, DEC-5). `expr: T`
+//   heap(expr) -- FDN-001 (docs/development/ROADMAP_v2.0.0.md, DEC-5). `expr: T`
 //                  for any sized T (struct, fixed array, primitive), returns
 //                  `&T`. Copies expr's evaluated value into a fresh
 //                  turf_rt_alloc(sizeof(T), desc_T) block and returns its

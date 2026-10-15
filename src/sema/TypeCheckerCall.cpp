@@ -756,7 +756,7 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
       }
 
       // ── heap(expr) → &T ──────────────────────────────────────────────────
-      // FDN-001 (docs/planning/ROADMAP_v2.0.0.md, DEC-5): the only safe way
+      // FDN-001 (docs/development/ROADMAP_v2.0.0.md, DEC-5): the only safe way
       // for ordinary Turf code to obtain a &T pointing at a GC-heap block --
       // previously the only safe &T came from &localVar, so a dynamically-
       // sized linked list/tree/graph was unbuildable without `unsafe`

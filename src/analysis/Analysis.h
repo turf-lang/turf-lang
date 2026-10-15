@@ -108,7 +108,7 @@ public:
   void runOnCFG(CFG &Cfg);
 };
 
-// FDN-002 (docs/planning/ROADMAP_v2.0.0.md; FREEZE.md §6.13, F-MEM-5): an
+// FDN-002 (docs/development/ROADMAP_v2.0.0.md; FREEZE.md §6.13, F-MEM-5): an
 // intraprocedural, conservative FORWARD dataflow pass -- structurally the
 // same shape as NullabilityPass just above (one std::unordered_map per
 // block, meet = "keep an entry only where every predecessor agrees",

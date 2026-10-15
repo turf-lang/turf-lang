@@ -5,10 +5,10 @@
 > (`docs/archive/OVERHAUL_CLOSURE_AUDIT.md`) found 15 remaining defects
 > (OVH-001 … OVH-015), and all 15 are now landed too — see
 > `docs/development/changes/OVH-CLOSE.md` for the closure gate evidence and
-> the DoD-8 reclassification (into `docs/planning/ROADMAP_v2.0.0.md`'s
+> the DoD-8 reclassification (into `docs/development/ROADMAP_v2.0.0.md`'s
 > FDN-001/FDN-002). `docs/planning/OVERHAUL_REMAINING_WORK.md`, the temporary
 > closure handoff, is deleted as of that same record. §27's Deferred Work
-> Register has been reclassified into `docs/planning/ROADMAP_v2.0.0.md`
+> Register has been reclassified into `docs/development/ROADMAP_v2.0.0.md`
 > (Part II) and `docs/planning/FUTURE.md`. This document stays the historical
 > specification; `docs/development/FREEZE.md` stays authoritative for the
 > frozen decisions.
@@ -5282,7 +5282,7 @@ number is the point.
 ## 27. Deferred Work Register
 
 > **Reclassified 2026-09-26.** Every row below now has a decision (2.0 /
-> FUTURE / superseded) in `docs/planning/ROADMAP_v2.0.0.md` Part II; the
+> FUTURE / superseded) in `docs/development/ROADMAP_v2.0.0.md` Part II; the
 > post-2.0 rows, with the rationale below preserved, live in
 > `docs/planning/FUTURE.md`. The table is kept unchanged as the historical
 > record.

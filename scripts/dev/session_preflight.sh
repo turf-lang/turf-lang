@@ -44,7 +44,7 @@ done
 # familiar file.
 BLUEPRINT="docs/archive/ARCHITECTURE_OVERHAUL.md"
 for CANDIDATE in docs/archive/ARCHITECTURE_OVERHAUL.md \
-                 docs/planning/ROADMAP_v2.0.0.md; do
+                 docs/development/ROADMAP_v2.0.0.md; do
   if [ -f "$CANDIDATE" ] && grep -q "^### $FEATURE — " "$CANDIDATE"; then
     BLUEPRINT="$CANDIDATE"
     break

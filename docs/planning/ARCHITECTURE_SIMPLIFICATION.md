@@ -1,6 +1,6 @@
 # Architecture Simplification — killing ambient state, giving the frontend a real product
 
-> **Assessed 2026-09-26** (`docs/planning/ROADMAP_v2.0.0.md` Part III). The
+> **Assessed 2026-09-26** (`docs/development/ROADMAP_v2.0.0.md` Part III). The
 > diagnosis stands and was strengthened: phase 0★'s split brain now has a
 > user-visible reproducer (a user `struct T` breaks `List<int>` —
 > `docs/development/changes/OVH-006.md`, landed). Proposed placement:

@@ -241,7 +241,7 @@ void WrapMainWithRuntimeBootstrap() {
   }
 
   // FDN-006 stage 3: the compiler/runtime ABI stamp
-  // (docs/planning/ROADMAP_v2.0.0.md, runtime/turfrt_abi.c). Every compiled
+  // (docs/development/ROADMAP_v2.0.0.md, runtime/turfrt_abi.c). Every compiled
   // binary's wrapper references this symbol so that linking against a
   // `libturfrt.a` that predates it (or a hypothetical future ABI-breaking
   // runtime that renamed it) fails at LINK TIME ("undefined reference to

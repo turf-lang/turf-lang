@@ -60,13 +60,13 @@ claim (see *Closure gate evidence*, item 7 below).
   landed: it is reclassified as *met in letter, not in full intent* — the
   audit's own three-way split (see *Closure gate evidence* item 12 below) —
   with the intent (safe heap allocation of a user type, escape rules) moved
-  into `docs/planning/ROADMAP_v2.0.0.md` as **FDN-001**/**FDN-002** (rows
+  into `docs/development/ROADMAP_v2.0.0.md` as **FDN-001**/**FDN-002** (rows
   N1/N2), not left as unowned technical debt.
 - **"The Overhaul's closure is blocked on more implementation work."** False
   as of this record — every item OVERHAUL_REMAINING_WORK.md listed (OVH-001
   through OVH-015) is landed, and the gate below has been demonstrated
   clean on `refactor/architecture` @ (see commit list above). The next
-  work in this tree is `docs/planning/ROADMAP_v2.0.0.md`'s Foundation
+  work in this tree is `docs/development/ROADMAP_v2.0.0.md`'s Foundation
   milestones, not further Overhaul closure work.
 
 ## Tests
@@ -252,7 +252,7 @@ was deferred to this closing record.
     (`docs/archive/OVERHAUL_CLOSURE_AUDIT.md` §5, decision 1, accepted):
     the safe heap-allocation half becomes **FDN-001**, the escape-rule half
     becomes **FDN-002**, both already written up in full
-    (`docs/planning/ROADMAP_v2.0.0.md`, rows N1/N2 and their own §-numbered
+    (`docs/development/ROADMAP_v2.0.0.md`, rows N1/N2 and their own §-numbered
     sections) as the first Foundation milestone of the 2.0.0 roadmap — an
     explicit, recorded reclassification from "Overhaul defect" to
     "roadmap design work," not a silent downgrade or an abandoned item.
@@ -266,14 +266,14 @@ statement). [OVH-001](OVH-001.md) through [OVH-014](OVH-014.md) (every item
 this closure certifies). `docs/archive/OVERHAUL_CLOSURE_AUDIT.md` (the
 evidence base `OVERHAUL_REMAINING_WORK.md` — now deleted — was built from;
 still the authoritative historical record of what the audit found).
-`docs/planning/ROADMAP_v2.0.0.md` (what comes next, including FDN-001/002).
+`docs/development/ROADMAP_v2.0.0.md` (what comes next, including FDN-001/002).
 
 ---
 
 **The Architecture Overhaul (`docs/archive/ARCHITECTURE_OVERHAUL.md`) is
 closed as of this record.** All 23 original feature groups plus all 15
 OVH-NNN closure items are landed; the gate above is demonstrated clean.
-Further work on this codebase is tracked in `docs/planning/ROADMAP_v2.0.0.md`
+Further work on this codebase is tracked in `docs/development/ROADMAP_v2.0.0.md`
 (pre-2.0.0) and `docs/planning/FUTURE.md` (post-2.0.0), not in any
 Overhaul-closure document — `docs/planning/OVERHAUL_REMAINING_WORK.md` is
 deleted in the same commit as this record, per its own header instruction.

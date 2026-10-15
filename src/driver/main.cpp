@@ -1241,7 +1241,7 @@ static int linkObject(const std::string &ObjFile,
   // any system default; the flag order below is deliberate.
   std::string TurfLibDir = TurfInstallRoot() + "/lib";
 
-  // FDN-005 stage 3 (docs/planning/ROADMAP_v2.0.0.md): TURF_RT_ASAN_BUILD is
+  // FDN-005 stage 3 (docs/development/ROADMAP_v2.0.0.md): TURF_RT_ASAN_BUILD is
   // a COMPILE-TIME macro (CMakeLists.txt's `TURF_RT_SANITIZE` option), never
   // an environment variable checked here -- a `turfc` binary built with it
   // always links every compiled Turf program against the separately-built,
@@ -1263,7 +1263,7 @@ static int linkObject(const std::string &ObjFile,
   const std::string RtLibName = "turfrt";
 #endif
 
-  // FDN-006 stage 3 (docs/planning/ROADMAP_v2.0.0.md): a missing
+  // FDN-006 stage 3 (docs/development/ROADMAP_v2.0.0.md): a missing
   // `libturfrt.a` used to surface only as `cc`'s own generic
   // "-lturfrt: No such file" linker error, with no mention of TurfLang, a
   // TURF_HOME misconfiguration, or what to do about it. Checked here,

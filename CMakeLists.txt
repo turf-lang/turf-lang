@@ -598,7 +598,7 @@ set_target_properties(turfrt PROPERTIES
 )
 target_compile_options(turfrt PRIVATE -Wall -Wextra)
 
-# ─── libturfrt_asan (FDN-005 stage 3, docs/planning/ROADMAP_v2.0.0.md) ───────
+# ─── libturfrt_asan (FDN-005 stage 3, docs/development/ROADMAP_v2.0.0.md) ───────
 # An independently-built, ASan+UBSan-instrumented twin of `turfrt` above,
 # same sources, existing ONLY to answer MEM-002's own disclosed open
 # question: "the register-scanning technique has not been cross-validated

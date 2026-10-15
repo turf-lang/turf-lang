@@ -183,7 +183,7 @@ public:
 // binding `err` to compare it against anything is pointless. Determined by scanning the
 // callee's own `return` statements for which declared error types it can
 // actually produce (Resolver::CollectReturnedErrorTypeNames).
-// FDN-002 (docs/planning/ROADMAP_v2.0.0.md; FREEZE.md §6.13, F-MEM-5):
+// FDN-002 (docs/development/ROADMAP_v2.0.0.md; FREEZE.md §6.13, F-MEM-5):
 // EscapePass's one diagnostic -- raised at each of the five sinks
 // (EscapePass's own doc comment, Analysis.h) when the value flowing in has
 // been POSITIVELY proven Stack-provenance (points into the current

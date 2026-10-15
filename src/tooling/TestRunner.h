@@ -1,7 +1,7 @@
 #ifndef TURF_TEST_RUNNER_H
 #define TURF_TEST_RUNNER_H
 
-// REL-002 (docs/planning/ROADMAP_v2.0.0.md): `turfc --test`, the one
+// REL-002 (docs/development/ROADMAP_v2.0.0.md): `turfc --test`, the one
 // implementation of how a TurfLang test is judged. `turf test` drives it for a
 // project, and scripts/test_runner.sh drives it for the compiler's own suite,
 // so the conventions below have exactly one home.
