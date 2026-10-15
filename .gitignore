@@ -80,3 +80,6 @@ __pycache__/
 .testrun_*
 # Reproducers scripts/dev/fuzz/crash_fuzz.py writes before they are minimized into tests/
 fuzz-findings/
+
+# Release notes: drafted here as the website's reference, never committed
+docs/releases/
