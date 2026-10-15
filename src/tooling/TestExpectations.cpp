@@ -126,6 +126,49 @@ std::vector<std::string> CheckDiag(const std::string &Source, const std::string 
   return Missed;
 }
 
+namespace {
+/// The text after "Fix: " of every fix line in @p CompileOutput.
+std::vector<std::string> PrintedFixes(const std::string &CompileOutput) {
+  std::vector<std::string> Out;
+  for (const auto &L : SplitLines(StripAnsi(CompileOutput))) {
+    const std::string T = Trim(L);
+    if (T.rfind("Fix: ", 0) == 0)
+      Out.push_back(Trim(T.substr(5)));
+  }
+  return Out;
+}
+} // namespace
+
+size_t CountFixes(const std::string &CompileOutput) {
+  return PrintedFixes(CompileOutput).size();
+}
+
+bool HasFixMarker(const std::string &Source) {
+  return !MarkerLines(Source, "^[ \t]*//[ \t]*EXPECT-FIX:").empty();
+}
+
+std::vector<std::string> CheckFix(const std::string &Source, const std::string &CompileOutput,
+                                  bool RequireAllPinned) {
+  std::vector<std::string> Missed;
+  std::vector<std::string> Pinned;
+  for (const auto &Line : MarkerLines(Source, "^[ \t]*//[ \t]*EXPECT-FIX:"))
+    if (const std::string Arg = Trim(Line.substr(Line.find(':') + 1)); !Arg.empty())
+      Pinned.push_back(Arg);
+  std::vector<std::string> Printed = PrintedFixes(CompileOutput);
+  for (const auto &P : Pinned) {
+    auto It = std::find(Printed.begin(), Printed.end(), P);
+    if (It == Printed.end())
+      Missed.push_back("EXPECT-FIX missed: the compiler output has no 'Fix: " + P + "'");
+    else
+      Printed.erase(It);
+  }
+  if (RequireAllPinned)
+    for (const auto &P : Printed)
+      Missed.push_back("EXPECT-FIX missing: the compiler printed 'Fix: " + P +
+                     "', and every printed fix is pinned with '// EXPECT-FIX: " + P + "'");
+  return Missed;
+}
+
 std::vector<std::string> CheckRuntime(const std::string &Source, const std::string &ProgramOutput) {
   std::vector<std::string> Missed;
   for (const auto &Line : MarkerLines(Source, "^[ \t]*//[ \t]*EXPECT-RUNTIME:")) {

@@ -1,4 +1,5 @@
 // EXPECT-DIAG: E039
+// EXPECT-FIX: replace 'DivisionByZeroTypo' with 'DivisionByZero'
 // EXPECT-DIAG: has no variant 'DivisionByZeroTypo'
 // STD-002: `ErrorType::Variant(messageExpr)`'s one-argument form still
 // validates that the variant actually exists -- a typo'd/unknown variant

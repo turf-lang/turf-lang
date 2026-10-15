@@ -1,0 +1,8 @@
+// EXPECT-DIAG: E030
+// EXPECT-FIX: replace 'trimm' with 'trim'
+// An on-demand import names a symbol the module does not have; its one close match is the fix.
+import strings::[trimm];
+
+fn main(): int {
+    return 0;
+}

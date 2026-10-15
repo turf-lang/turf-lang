@@ -1,4 +1,5 @@
 // EXPECT-DIAG: E087
+// EXPECT-FIX: move 'pub' to just before 'fn'
 // EXPECT-DIAG: 'pub' has to come after a decorator, not before it
 // LEC-002: E087 -- write the decorator first, then `pub`.
 pub @caller_location

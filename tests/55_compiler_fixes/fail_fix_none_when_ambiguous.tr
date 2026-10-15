@@ -1,0 +1,9 @@
+// EXPECT-DIAG: E040
+// EXPECT-NO-DIAG: Fix:
+// Two names are equally close, so the compiler chooses neither: the hint lists
+// them and no fix is printed.
+fn main(): int {
+    immut cat: int = 1;
+    immut car: int = 2;
+    return cax - 1;
+}

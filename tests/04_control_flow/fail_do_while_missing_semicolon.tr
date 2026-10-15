@@ -1,4 +1,5 @@
 // EXPECT-DIAG: E102
+// EXPECT-FIX: insert ';' at the end of line 13
 // EXPECT-DIAG: Expected ';' after do-while loop
 // Regression test (Issue #180 follow-up): unlike while/if/for, a do-while
 // statement REQUIRES a trailing ';' after its condition (it's the only loop

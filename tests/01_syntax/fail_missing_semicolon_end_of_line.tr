@@ -1,9 +1,9 @@
 // EXPECT-DIAG: E102
+// EXPECT-FIX: insert ';' after 'io::printline("hello")'
 // The classic forgotten ';' at the end of a line. The parser only notices at the
 // NEXT statement, but the ';' belongs right after the call before it, so
-// `--smart` inserts it there without asking the model (the fix-it carries its
-// own line; see scripts/slm/slm_deterministic_fix_smoke.sh). The trailing comment
-// must stay after the ';', not swallow it.
+// that is where the Fix: inserts it (the fix-it carries its own line). The
+// trailing comment must stay after the ';', not swallow it.
 import io;
 
 fn main(): int {

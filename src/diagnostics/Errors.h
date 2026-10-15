@@ -10,6 +10,7 @@
 #include "diagnostics/SuggestionIndex.h"
 #include "slm/SLMIntegration.h"
 #include "sema/Types.h" // for RankedSuggestions, used by several diagnostics below
+#include <algorithm>
 #include <cstdlib>
 #include <iostream>
 #include <map>
@@ -169,15 +170,16 @@ public:
 
   // ── Fix-its (SLM-001 item 1, DiagnosticHints::FixIts) ──────────────────────
   //
-  // A fix-it is an exact edit the raise site already knows, applied by --smart
-  // without asking the model (SLM::tryDeterministicFix()). Attach one ONLY
-  // where this site holds the whole edit -- the hint says what to write AND the
-  // site knows where. Never one the writer might not have meant: a hint that
-  // offers two fixes ("remove `pub`, or move the declaration"), or one that
-  // only gives an example ("write the instantiation you mean, e.g. `Box<int>`"),
-  // is advice, and --smart's model answers it. The sandbox re-checks every
-  // fix-it, so a wrong one cannot be applied, but a wrong one that happens to
-  // compile would still be shown to a beginner as "the compiler's own fix".
+  // A fix-it is an exact edit the raise site already knows. The compiler
+  // re-checks it on a copy of the program and prints it as the diagnostic's
+  // `Fix:` in every build (TDP-2-001, CompilerFix.h); with --smart the model
+  // is not asked. Attach one ONLY where this site holds the whole edit -- the
+  // hint says what to write AND the site knows where. Never one the writer
+  // might not have meant: a hint that offers two fixes ("remove `pub`, or move
+  // the declaration"), or one that only gives an example ("write the
+  // instantiation you mean, e.g. `Box<int>`"), is advice. The re-check stops a
+  // wrong fix-it that does not compile, but a wrong one that happens to compile
+  // would still be shown to a beginner as "the compiler's own fix".
   //
   // Every builder below checks the source line before it adds anything, and
   // adds nothing if the text is not what this site expects, so a stale or
@@ -193,6 +195,13 @@ public:
   // Why the fix is right (DiagnosticHints::FixReason), in a sentence.
   TurfError &withFixReason(const std::string &Reason) {
     Hints_.FixReason = Reason;
+    return *this;
+  }
+
+  // What the `Fix:` line says (DiagnosticHints::FixDescription), for a fix
+  // the words built from its edits would not describe well.
+  TurfError &withFixDescription(const std::string &Description) {
+    Hints_.FixDescription = Description;
     return *this;
   }
 
@@ -264,6 +273,31 @@ public:
     return withFixReason(Reason);
   }
 
+  // E060: the variable assigned to is declared `immutable`/`immut` at
+  // `DeclLoc`, which is where that keyword starts; the fix declares it
+  // `mutable`/`mut` instead, in the same spelling. Nothing for a declaration
+  // that does not start with the keyword there (a parameter, a pattern
+  // binding, a loop variable), or one in another file.
+  TurfError &withMutableDeclarationFix(const SourceLocation &DeclLoc) {
+    const size_t Before = Hints_.FixIts.size();
+    withTokenFixIt(DeclLoc, "immutable", "mutable");
+    if (Hints_.FixIts.size() == Before)
+      withTokenFixIt(DeclLoc, "immut", "mut");
+    // `immut` also matches the start of `immutable`, and `immutablex` is a
+    // name: only the keyword followed by a blank counts.
+    if (Hints_.FixIts.size() != Before) {
+      const std::string *Line = FixItSourceLine(DeclLoc);
+      const SLM::FixIt &F = Hints_.FixIts.back();
+      if (!Line || F.EndCol - 1 >= static_cast<int>(Line->size()) ||
+          ((*Line)[F.EndCol - 1] != ' ' && (*Line)[F.EndCol - 1] != '\t'))
+        Hints_.FixIts.resize(Before);
+      else
+        withFixReason("The variable is assigned to after its declaration, so "
+                      "it has to be declared mutable.");
+    }
+    return *this;
+  }
+
   // Rename: replace EVERY whole-word `OldName` on the diagnostic's own line with
   // `NewName` (a name that fails to resolve usually fails at each use on the
   // line, and fixing one use would leave the same error on the next). A match
@@ -303,18 +337,48 @@ public:
   // based error class (UnknownFunctionError, ReferenceError, UnknownStructFieldError,
   // ...) calls this right after computing its Hint_, passing the exact name
   // that failed to resolve. Sets a deterministic-fix candidate only when the
-  // lookup was genuinely UNAMBIGUOUS -- exactly one local candidate and zero
-  // module candidates -- so a genuinely ambiguous typo (multiple equally
-  // plausible corrections) is deliberately left to the model/user instead of
-  // guessing. Never re-derives anything from message text: Suggestions is
-  // the same structured RankedSuggestions object the constructor's own Hint_
-  // was built from moments earlier.
+  // lookup was genuinely UNAMBIGUOUS -- exactly one local name and no module
+  // candidates -- so a genuinely ambiguous typo (multiple equally plausible
+  // corrections) is deliberately left to the reader instead of guessing.
+  // Never re-derives anything from message text: Suggestions is the same
+  // structured RankedSuggestions object the constructor's own Hint_ was built
+  // from moments earlier. A function candidate is listed with its signature
+  // (`square(int x) -> int`), and its overloads once each; the rename is to
+  // the name alone. `Qualifier` true means the unknown name is the left side
+  // of `A::B`, and a candidate spelled `Color::Red` offers `Color`.
   TurfError &trySetDeterministicRename(const std::string &OldName,
-                                       const RankedSuggestions &Suggestions) {
-    if (Suggestions.Local.size() == 1 && Suggestions.Module.empty() &&
-        !OldName.empty() && Suggestions.Local[0] != OldName)
-      withDeterministicFix(OldName, Suggestions.Local[0]);
+                                       const RankedSuggestions &Suggestions,
+                                       bool Qualifier = false) {
+    if (!Suggestions.Module.empty() || OldName.empty())
+      return *this;
+    std::vector<std::string> Names;
+    for (const auto &C : Suggestions.Local) {
+      std::string Name = C.substr(0, C.find('('));
+      if (Qualifier)
+        Name = Name.substr(0, Name.find("::"));
+      while (!Name.empty() && Name.back() == ' ')
+        Name.pop_back();
+      if (std::find(Names.begin(), Names.end(), Name) == Names.end())
+        Names.push_back(Name);
+    }
+    if (Names.size() == 1 && Names[0] != OldName && !Names[0].empty())
+      withDeterministicFix(OldName, Names[0]);
     return *this;
+  }
+
+  // The same for a name looked up in ONE module (`import strings::[trimm]`):
+  // its candidates are that module's, listed under its name.
+  TurfError &trySetDeterministicModuleRename(const std::string &OldName,
+                                             const RankedSuggestions &Suggestions,
+                                             const std::string &ModuleName) {
+    if (!Suggestions.Local.empty() || Suggestions.Module.size() != 1)
+      return *this;
+    const auto &Only = *Suggestions.Module.begin();
+    if (Only.first != ModuleName)
+      return *this;
+    RankedSuggestions AsLocal;
+    AsLocal.Local = Only.second;
+    return trySetDeterministicRename(OldName, AsLocal);
   }
 
   void raise() const {

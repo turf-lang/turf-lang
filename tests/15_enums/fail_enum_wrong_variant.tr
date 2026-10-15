@@ -1,4 +1,5 @@
 // EXPECT-DIAG: E039
+// EXPECT-FIX: replace 'Norht' with 'North'
 // EXPECT-DIAG: Enum 'Direction' has no variant 'Norht'
 // EXPECT-DIAG: It may be from the current file: 'North'
 // Test (fail): Misspelled enum variant should produce resolver error with suggestion

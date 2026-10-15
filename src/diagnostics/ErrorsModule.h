@@ -448,7 +448,7 @@ public:
         "module name (io::printline), or a struct type name for a static "
         "method (StructName::method). Double-check the spelling, or make "
         "sure you've imported the module.");
-    trySetDeterministicRename(LeftName, Suggestions);
+    trySetDeterministicRename(LeftName, Suggestions, /*Qualifier=*/true);
   }
 };
 // Raised when '::' -- reserved for namespace-resolution (enum/module/
@@ -500,6 +500,7 @@ public:
         Suggestions, "Double-check the spelling, or check " + ModuleName +
                          ".tr for its actual exported names.");
     trySetDeterministicRename(SymbolName, Suggestions);
+    trySetDeterministicModuleRename(SymbolName, Suggestions, ModuleName);
   }
 };
 // Raised when two on-demand imports (import module::[...];) in the SAME
@@ -803,6 +804,7 @@ public:
     withFixReason("A decorator comes first, then the visibility: `@caller_location` "
                   "followed by `pub fn ...`. This moves `" + Spelling +
                   "` from before the decorator to just before `fn`.");
+    withFixDescription("move '" + Spelling + "' to just before 'fn'");
     return *this;
   }
 

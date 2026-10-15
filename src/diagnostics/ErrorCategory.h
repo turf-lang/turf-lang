@@ -60,20 +60,22 @@ struct DiagnosticHints {
   // "receiver", never inside the code.
   std::string ReceiverDecl;
 
-  // Item 1 (deterministic-fix layer): the exact edit the raising site already
-  // knows fixes this diagnostic -- an unambiguous "did you mean" rename, a
-  // missing `<T>`, a misplaced `pub`, a missing ';' (see the withFixIt() family
-  // in Errors.h for which sites attach one, and why the rest do not). All of
-  // them together are ONE fix: SLM::tryDeterministicFix() (SLMIntegration.cpp)
-  // applies them to a fresh sandbox BEFORE ever invoking the model, and the
-  // model is never called at all if that sandbox validation succeeds. A fix
-  // that does not validate falls through to the model like any other
-  // diagnostic.
+  // The exact edit the raising site already knows fixes this diagnostic -- an
+  // unambiguous "did you mean" rename, a missing `<T>`, a misplaced `pub`, a
+  // missing ';' (see the withFixIt() family in Errors.h for which sites attach
+  // one, and why the rest do not). All of them together are ONE fix: at print
+  // time the compiler applies them to an in-memory copy of the program, checks
+  // it again, and prints the result as the diagnostic's `Fix:` when the check
+  // passes (TDP-2-001, CompilerFix.h). With --smart, the model is asked only
+  // when there is no such fix.
   std::vector<FixIt> FixIts;
   // Why the edit is right, in a sentence a beginner can read ("'x' isn't
-  // declared anywhere visible, but 'y' is an exact match nearby ..."). Shown
-  // as the suggestion's explanation, so a fix with FixIts should always set it.
+  // declared anywhere visible, but 'y' is an exact match nearby ...").
   std::string FixReason;
+  // What the `Fix:` line says, when the words built from the edits themselves
+  // ("replace 'a' with 'b'", "insert ';'") would not say it well: two edits
+  // that together move a word read "move 'pub' to just before 'fn'".
+  std::string FixDescription;
 
   bool empty() const {
     return KnownTypes.empty() && ReceiverDecl.empty() && FixIts.empty();

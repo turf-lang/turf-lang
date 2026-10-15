@@ -1,4 +1,5 @@
 // EXPECT-DIAG: E060
+// EXPECT-FIX: replace 'immut' with 'mut'
 // EXPECT-DIAG: You can't change the value of 'v' because it's immutable.
 // An `immut` view is read-only, even when the array it views is `mut`.
 fn main(): int {

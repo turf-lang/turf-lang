@@ -1,4 +1,5 @@
 // EXPECT-DIAG: E060
+// EXPECT-FIX: replace 'immut' with 'mut'
 // EXPECT-DIAG: You can't change the value of 'c' because it's immutable
 // Regression test (LEC-006 follow-up): a `defer` runs on the way out of the
 // method, but it still assigns to self. The scan did not look inside `defer`.

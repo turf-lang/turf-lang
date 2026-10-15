@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E041
+// EXPECT-FIX: replace 'sqaure' with 'square'
+// A function candidate is listed with its signature; the fix renames to the name alone.
+fn square(x: int): int {
+    return x * x;
+}
+
+fn main(): int {
+    immut y: int = sqaure(4);
+    return y - 16;
+}

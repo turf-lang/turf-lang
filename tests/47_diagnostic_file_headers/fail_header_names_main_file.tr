@@ -1,4 +1,6 @@
 // EXPECT-DIAG: E102
+// EXPECT-FIX: insert ';' at the end of line 14
+// EXPECT-FIX: insert ';' at the end of line 19
 // EXPECT-DIAG: fail_header_names_main_file.tr (
 // EXPECT-DIAG: errors)
 // EXPECT-NO-DIAG: , in file

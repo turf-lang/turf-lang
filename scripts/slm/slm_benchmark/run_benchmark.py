@@ -79,10 +79,14 @@ def run_one(mutated_source: str) -> tuple[str, float]:
     return proc.stdout + proc.stderr, elapsed
 
 
+def strip_ansi(text: str) -> str:
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
+
 def classify(output: str) -> str:
-    if "[Deterministic Fix]" in output:
+    if re.search(r"^\s*Fix: ", strip_ansi(output), re.M):
         return "deterministic_fix"
-    if "[AI Suggestion]" in output:
+    if "[Model Suggestion]" in output:
         return "model_fix"
     return "no_suggestion"
 

@@ -1,4 +1,5 @@
 // EXPECT-DIAG: E138
+// EXPECT-FIX: insert '<T>' after 'fn'
 // EXPECT-DIAG: 'Box' is generic, so its method 'count' must declare its type parameters too
 // An instance method on a generic struct must declare the struct's type
 // parameters (`fn<T> Box.count()`): `self`'s layout depends on T, so the

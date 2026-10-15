@@ -1,4 +1,5 @@
 // EXPECT-DIAG: E108
+// EXPECT-FIX: insert ';' at the end of line 24
 // EXPECT-DIAG: E102
 // EXPECT-DIAG: Expected a function name after 'fn'
 // EXPECT-DIAG: Expected ';' after statement

@@ -1,4 +1,5 @@
 // EXPECT-DIAG: E029
+// EXPECT-FIX: replace 'p::get' with 'p.get'
 // EXPECT-DIAG: 'p' is a variable, not a type or module
 // Regression test: `instance::method(...)` (using '::' on a real declared
 // variable, not a type/module/enum name) must raise a specific

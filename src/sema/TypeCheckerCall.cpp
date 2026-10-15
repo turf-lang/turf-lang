@@ -1701,7 +1701,12 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
           if (const auto *BaseVar =
                   dynamic_cast<const VariableExprAST *>(Node.getBase())) {
             if (BaseVar->ResolvedSymbol && BaseVar->ResolvedSymbol->IsImmutable) {
-              ImmutableAssignmentError(Node.getLoc(), BaseVar->getName()).raise();
+              ImmutableAssignmentError(Node.getLoc(), BaseVar->getName())
+                  .withRelated(toSourceLocation(BaseVar->ResolvedSymbol->DeclLoc),
+                               "declared immutable here")
+                  .withMutableDeclarationFix(
+                      toSourceLocation(BaseVar->ResolvedSymbol->DeclLoc))
+                  .raise();
               setType(&Node, TurfVoid());
               return;
             }
@@ -1929,6 +1934,8 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
                     .withRelated(
                         toSourceLocation(BaseVarForImmut->ResolvedSymbol->DeclLoc),
                         "declared immutable here")
+                    .withMutableDeclarationFix(toSourceLocation(
+                        BaseVarForImmut->ResolvedSymbol->DeclLoc))
                     .raise();
 #else
                 throw std::runtime_error("ImmutableAssignmentError: " +

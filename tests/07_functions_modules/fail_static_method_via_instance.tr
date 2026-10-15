@@ -1,4 +1,5 @@
 // EXPECT-DIAG: E052
+// EXPECT-FIX: replace 'mu.square' with 'MathUtil::square'
 // EXPECT-DIAG: 'square' is a static method
 // Regression test: a TRUE static method (declared with the `::` form, no
 // `self` parameter at all) can't be called through an instance with '.' --

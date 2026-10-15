@@ -545,6 +545,7 @@ void TypeChecker::checkSliceWrites() {
       continue;
     ImmutableAssignmentError(P.Loc, P.ArrayName)
         .withRelated(toSourceLocation(P.Array->DeclLoc), "declared immutable here")
+        .withMutableDeclarationFix(toSourceLocation(P.Array->DeclLoc))
         .withRelated(toSourceLocation(P.Callee->DeclLoc),
                      "'" + P.Callee->BaseName +
                          "' changes it through a slice of one of its arrays")

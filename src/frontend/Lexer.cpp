@@ -241,6 +241,81 @@ static std::string displayPath(const std::string &Path) {
   return Rel;
 }
 
+// TDP-2-001: builds and checks D's fix, at most once per diagnostic and for at
+// most CompilerFixes::MaxChecksPerCompile diagnostics in one compile. Any
+// error whose raise site attached fix-its, in a file the user wrote (never
+// lib/std), gets one when the re-check passes.
+// `D` must not be an element of DiagnosticEngine's own list (see flushAll()).
+static void checkCompilerFix(DiagnosticEngine::Diag &D) {
+  static int Checks = 0;
+  // TURF_FIX_DEBUG=1 names every diagnostic this looks at and says why a
+  // fix-it was not shown (scripts/slm/slm_deterministic_fix_smoke.sh checks
+  // that a clean compile never gets here).
+  const bool Debug = std::getenv("TURF_FIX_DEBUG") != nullptr;
+  if (Debug)
+    std::cerr << "[fix] " << D.Code << " line " << D.Loc.Line << ": looking\n";
+  if (D.FixChecked || D.IsWarning || D.Hints.FixIts.empty() ||
+      D.Code.empty() || IsLibStdWarningLocation(D.Filename))
+    return;
+  D.FixChecked = true;
+  auto Lines = AllSourceLines.find(D.Filename);
+  if (Lines == AllSourceLines.end() ||
+      Checks >= CompilerFixes::MaxChecksPerCompile)
+    return;
+  CompilerFix Fix;
+  if (!CompilerFixes::build(D.Hints, D.Loc.Line, Lines->second, Fix)) {
+    if (Debug)
+      std::cerr << "[fix] " << D.Code << " line " << D.Loc.Line
+                << ": the fix-its do not apply to the source\n";
+    return;
+  }
+  ++Checks;
+  if (!CompilerFixes::check(Fix, D.Filename, D.Code, D.Loc.Line)) {
+    if (Debug)
+      std::cerr << "[fix] " << D.Code << " line " << D.Loc.Line << ": '"
+                << Fix.Description << "' failed the re-check\n";
+    return;
+  }
+  D.Fix = std::move(Fix);
+}
+
+// Set once --smart has written a model's fix to --smart-write-fix, which the
+// compiler's own fixes then leave alone.
+static bool g_ModelFixWritten = false;
+
+// --smart-write-fix=<path>: the file being compiled with every fix shown for it
+// applied (two fixes that touch the same line: the first). Each fix was
+// checked on its own; `turfc --test` checks them together.
+static void writeCompilerFixes(const std::vector<DiagnosticEngine::Diag> &Diags) {
+  if (g_SmartFixOutPath.empty() || g_ModelFixWritten)
+    return;
+  auto Main = AllSourceLines.find(MainSourceFilename);
+  if (Main == AllSourceLines.end())
+    return;
+  std::vector<std::string> Lines = Main->second;
+  std::set<int> Taken;
+  bool Any = false;
+  for (const auto &D : Diags) {
+    if (D.Fix.empty() || D.Filename != MainSourceFilename)
+      continue;
+    bool Free = true;
+    for (int L = D.Fix.FirstLine; L <= D.Fix.LastLine; ++L)
+      Free = Free && !Taken.count(L);
+    if (!Free)
+      continue;
+    for (int L = D.Fix.FirstLine; L <= D.Fix.LastLine; ++L) {
+      Lines[L - 1] = D.Fix.NewLines[L - D.Fix.FirstLine];
+      Taken.insert(L);
+    }
+    Any = true;
+  }
+  if (!Any)
+    return;
+  std::ofstream Out(g_SmartFixOutPath, std::ios::trunc);
+  for (const auto &L : Lines)
+    Out << L << '\n';
+}
+
 // Internal helper: physically print one diagnostic to stderr.
 static void printDiag(const DiagnosticEngine::Diag &D) {
   bool isWarning = D.IsWarning || isMessageWarning(D.Msg);
@@ -352,6 +427,9 @@ static void printDiag(const DiagnosticEngine::Diag &D) {
               << AccentColor << Underline << " Here!" << Colors::RESET << "\n";
   }
 
+  // TDP-2-001: the checked fix, as the corrected line(s).
+  std::cerr << CompilerFixes::render(D.Fix);
+
   // Point at `turf --explain E0NN` for the longer, beginner-facing
   // writeup -- same Code the header already showed, so no separate
   // lookup on the reader's part. Only for diagnostics that actually have
@@ -432,6 +510,15 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
     return;
 
   std::string finalMessage = Msg;
+  // Which file this diagnostic belongs to: Loc's own Filename if it has one
+  // (the normal case -- captured from CurLoc at parse time, see gettok()),
+  // else fall back to whatever file is currently active. AllSourceLines is a
+  // PERSISTENT cache (never overwritten/restored like SourceLines), so this
+  // resolves correctly even for diagnostics raised by a pass that runs after
+  // every file has already finished parsing (Resolver/TypeChecker/Codegen).
+  std::string Filename = Loc.Filename.empty() ? SourceFilename : Loc.Filename;
+  Diag New{Loc, Msg, Hint, IsWarning, Related, Category, Filename, Code, Hints,
+           CompilerFix{}, false};
 
   // Conditionally invoke SLM analysis based on CLI configuration.
   // Errors only -- see the "IMPORTANT" note in the function doc comment
@@ -446,65 +533,58 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
           "fresh analysis." +
           Colors::RESET;
     } else {
-      // A fix-it's columns describe ITS file's text, but the sandbox patches
-      // SourceLines, the file being compiled right now: for a diagnostic
-      // raised inside an imported module, applying them there would edit an
-      // unrelated line of the importer. Such a fix goes to the model (which has
-      // the same placement limit, but proposes whole lines and is validated).
-      SLM::DiagnosticHints UsableHints = Hints;
-      if (!Loc.Filename.empty() && Loc.Filename != SourceFilename) {
-        UsableHints.FixIts.clear();
-        UsableHints.FixReason.clear();
-      }
-      SLM::AISuggestion ai = SLM::validateAndApplySuggestion(Msg, Loc.Line, Hint, Related, Category, UsableHints, Code);
-
-      if (ai.valid && ai.confidence >= 0.8f && ai.fix_mode != "NONE") {
-        // Replace compiler message with high-confidence AI suggestion.
+      // The compiler's own fix first (TDP-2-001): when it has one, it is
+      // printed as the diagnostic's `Fix:` and the model is never asked.
+      checkCompilerFix(New);
+      if (!New.Fix.empty()) {
         g_slmFiredThisPass = true;
-        finalMessage = Colors::BOLD + Colors::BRIGHT_CYAN + "[AI Suggestion]" +
-                       Colors::RESET + "  " + ai.suggested_comment;
+      } else {
+        SLM::AISuggestion ai = SLM::validateAndApplySuggestion(
+            Msg, Loc.Line, Hint, Related, Category, Hints, Code);
 
-        if (!ai.explanation.empty()) {
-          finalMessage += "\n  " + Colors::CYAN +
-                          "Explanation: " + Colors::RESET + ai.explanation;
-        }
+        if (ai.valid && ai.confidence >= 0.8f && ai.fix_mode != "NONE") {
+          // Replace compiler message with high-confidence model suggestion.
+          g_slmFiredThisPass = true;
+          finalMessage = Colors::BOLD + Colors::BRIGHT_CYAN +
+                         "[Model Suggestion]" + Colors::RESET + "  " +
+                         ai.suggested_comment;
 
-        // The before/after is rendered from the validated patch (the lines
-        // actually replaced and their replacement), not from anything the
-        // model wrote about it -- one renderer for a model suggestion and a
-        // compiler fix-it alike (SLM::renderPatchDiff()).
-        const std::string patchDiff = SLM::renderPatchDiff(ai);
-        if (ai.fix_mode == "MODIFY" && !patchDiff.empty()) {
-          finalMessage += "\n  " + Colors::BRIGHT_GREEN +
-                          "Suggested fix:" + Colors::RESET + "\n    " +
-                          patchDiff;
-        }
+          if (!ai.explanation.empty()) {
+            finalMessage += "\n  " + Colors::CYAN +
+                            "Explanation: " + Colors::RESET + ai.explanation;
+          }
 
-        if (!ai.warning.empty()) {
-          finalMessage +=
-              "\n  " + Colors::YELLOW + "Note: " + Colors::RESET + ai.warning;
-        }
+          // The before/after is rendered from the validated patch (the lines
+          // actually replaced and their replacement), not from anything the
+          // model wrote about it (SLM::renderPatchDiff()).
+          const std::string patchDiff = SLM::renderPatchDiff(ai);
+          if (ai.fix_mode == "MODIFY" && !patchDiff.empty()) {
+            finalMessage += "\n  " + Colors::BRIGHT_GREEN +
+                            "Suggested fix:" + Colors::RESET + "\n    " +
+                            patchDiff;
+          }
 
-        // SLM-001 follow-up: write the full patched source out, if asked.
-        // Deliberately gated on the SAME confidence/fix_mode check as the
-        // display above -- this must never write a fix a user wouldn't
-        // also have been shown as validated.
-        if (!g_SmartFixOutPath.empty() && !ai.appliedSource.empty()) {
-          std::ofstream fixOut(g_SmartFixOutPath, std::ios::trunc);
-          if (fixOut.is_open())
-            fixOut << ai.appliedSource;
+          if (!ai.warning.empty()) {
+            finalMessage +=
+                "\n  " + Colors::YELLOW + "Note: " + Colors::RESET + ai.warning;
+          }
+
+          // SLM-001 follow-up: write the full patched source out, if asked.
+          // Deliberately gated on the SAME confidence/fix_mode check as the
+          // display above -- this must never write a fix a user wouldn't
+          // also have been shown as validated.
+          if (!g_SmartFixOutPath.empty() && !ai.appliedSource.empty()) {
+            std::ofstream fixOut(g_SmartFixOutPath, std::ios::trunc);
+            if (fixOut.is_open()) {
+              fixOut << ai.appliedSource;
+              g_ModelFixWritten = true;
+            }
+          }
         }
       }
     }
   }
-
-  // Which file this diagnostic belongs to: Loc's own Filename if it has one
-  // (the normal case -- captured from CurLoc at parse time, see gettok()),
-  // else fall back to whatever file is currently active. AllSourceLines is a
-  // PERSISTENT cache (never overwritten/restored like SourceLines), so this
-  // resolves correctly even for diagnostics raised by a pass that runs after
-  // every file has already finished parsing (Resolver/TypeChecker/Codegen).
-  std::string Filename = Loc.Filename.empty() ? SourceFilename : Loc.Filename;
+  New.Msg = finalMessage;
 
   // The same warning at the same place, twice, says nothing new. A warning
   // raised while parsing comes twice for the main file, which is parsed
@@ -515,8 +595,7 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
           D.Filename == Filename && D.Msg == finalMessage)
         return;
 
-  Diagnostics.push_back({Loc, finalMessage, Hint, IsWarning, Related, Category,
-                         Filename, Code, Hints});
+  Diagnostics.push_back(std::move(New));
 
   if (!IsWarning)
     ErrorLines.insert(Loc.Line);
@@ -557,6 +636,22 @@ void DiagnosticEngine::flushAll() {
                      return A.Loc.Line < B.Loc.Line ||
                             (A.Loc.Line == B.Loc.Line && A.Loc.Col < B.Loc.Col);
                    });
+
+  // TDP-2-001: every error is known now, so a fix is checked against the
+  // program the reader will edit. In the order printed, so the cap keeps the
+  // first errors' fixes.
+  // The check analyses the program again, which saves and restores this
+  // list: it works on a copy, never on an element of the list itself.
+  if (CompilerFixes::Enabled)
+    for (size_t I = 0; I < Diagnostics.size(); ++I) {
+      if (Diagnostics[I].FixChecked || Diagnostics[I].Hints.FixIts.empty())
+        continue;
+      Diag D = Diagnostics[I];
+      checkCompilerFix(D);
+      Diagnostics[I].FixChecked = true;
+      Diagnostics[I].Fix = std::move(D.Fix);
+    }
+  writeCompilerFixes(Diagnostics);
 
   // OVH-012: a warning anchored inside the standard library itself (e.g.
   // `NeverReturnsErrorWarning`/`InfiniteLoopWarning` on stdlib code a

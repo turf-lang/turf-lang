@@ -1,4 +1,5 @@
 // EXPECT-DIAG: E068
+// EXPECT-FIX: replace 'pasword' with 'password'
 // EXPECT-DIAG: has no field named 'pasword'
 // EXPECT-DIAG: It may be from the current file: 'password'
 // Regression test: a misspelled struct field access is rejected AND the

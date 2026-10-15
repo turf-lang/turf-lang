@@ -160,7 +160,7 @@ struct CompilerOptions {
   bool EmitLLVM = false;              // --emit-llvm: write .ll instead
   bool EmitObj = false;               // --emit-obj: write the .o, never link
   bool AIEnabled = false;             // --smart: enable SLM AI suggestions
-  std::string SmartFixOutPath;        // --smart-write-fix=<path>: write the first validated --smart fix's full patched source here (SLM-001 follow-up)
+  std::string SmartFixOutPath;        // --smart-write-fix=<path>: write the program with its shown fixes applied here: every compiler fix (TDP-2-001), or the --smart model's validated one
   bool AllowUnsafeModules = false;    // --allow-unsafe-modules: LANG-002, honor `unsafe module;` outside the install root
   bool ShowStdlibWarnings = false;    // --stdlib-warnings: OVH-012, print warnings anchored inside lib/std instead of hiding them
   bool DumpAST = false;               // --dump-ast: print AST via ASTPrinter
@@ -1568,6 +1568,11 @@ static int runCompilerMain(int argc, char **argv) {
     }
     g_PackageGraph = std::move(*Graph);
   }
+
+  // TDP-2-001: an error the compiler knows the exact fix for prints it, checked
+  // against the same package graph the compile resolves imports with.
+  CompilerFixes::Enabled = true;
+  CompilerFixes::PackageGraphFile = opts.PackageGraphFile;
 
   // OVH-012: consulted only by DiagnosticEngine::flushAll() at print time,
   // so it's fine to set this any time before that runs -- unlike

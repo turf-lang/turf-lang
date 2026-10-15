@@ -1,0 +1,8 @@
+// EXPECT-DIAG: E040
+// EXPECT-FIX: replace 'nmae' with 'name'
+// TDP-2-001's own example: one close match, so the compiler prints the rename and checks it first.
+fn main(): int {
+    immut name: string = "Turf";
+    printline("Hello, " + nmae + "!");
+    return 0;
+}

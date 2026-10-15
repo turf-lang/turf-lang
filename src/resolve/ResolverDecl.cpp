@@ -220,9 +220,9 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
                       MethodPart + "(...)' -- the same parameters as 'struct " +
                       Bare + "<" + Params + ">'.",
                   "Missing type parameters!")
-            // The hint above already IS the fix, so --smart applies it
-            // without asking the model (issue #267: given this exact hint,
-            // the model still answered `-> int` and `fn<Box<T>>`): insert the
+            // The hint above already IS the fix, so the compiler prints it
+            // as the `Fix:` (issue #267: given this exact hint, a model
+            // still answered `-> int` and `fn<Box<T>>`): insert the
             // parameters right after the declaration's own `fn` keyword, which
             // is where Node.getLoc() points (the builder checks the text).
             .withInsertAfterTokenFixIt(Node.getLoc(), "fn", "<" + Params + ">")

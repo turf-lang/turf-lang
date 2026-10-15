@@ -899,6 +899,8 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
       ImmutableAssignmentError(Node.getLoc(), LHSVar->getName())
           .withRelated(toSourceLocation(LHSVar->ResolvedSymbol->DeclLoc),
                        "declared immutable here")
+          .withMutableDeclarationFix(
+              toSourceLocation(LHSVar->ResolvedSymbol->DeclLoc))
           .raise();
 #else
       throw std::runtime_error("ImmutableAssignmentError: " + LHSVar->getName());
@@ -1136,6 +1138,8 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
       ImmutableAssignmentError(Node.getLoc(), LHSVar->getName())
           .withRelated(toSourceLocation(LHSVar->ResolvedSymbol->DeclLoc),
                        "declared immutable here")
+          .withMutableDeclarationFix(
+              toSourceLocation(LHSVar->ResolvedSymbol->DeclLoc))
           .raise();
 #else
       throw std::runtime_error("ImmutableAssignmentError: " + LHSVar->getName());
@@ -1304,6 +1308,8 @@ void TypeChecker::visitPostfixExpr(PostfixExprAST &Node) {
       ImmutableAssignmentError(Node.getLoc(), LHSVar->getName())
           .withRelated(toSourceLocation(LHSVar->ResolvedSymbol->DeclLoc),
                        "declared immutable here")
+          .withMutableDeclarationFix(
+              toSourceLocation(LHSVar->ResolvedSymbol->DeclLoc))
           .raise();
 #else
       throw std::runtime_error("ImmutableAssignmentError: " + LHSVar->getName());

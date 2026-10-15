@@ -1,4 +1,5 @@
 // EXPECT-DIAG: E060
+// EXPECT-FIX: replace 'immut' with 'mut'
 // EXPECT-DIAG: You can't change the value of 's' because it's immutable
 // Regression test (LEC-006 follow-up): the "this method mutates self" scan used
 // to recognise only `self.<field> = ...`. A method whose only mutation is
