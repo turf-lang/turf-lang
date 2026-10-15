@@ -91,14 +91,16 @@ CollectChangedNodeIDsInternal(const ExprAST *OriginalAST,
   // compare as unchanged, silently skipping the re-check a real edit needs
   // (SEM-001, docs/archive/ARCHITECTURE_OVERHAUL.md §8 -- see this
   // group's own Risks note calling out ASTDiff/clone() as a ripple point).
-  // llvm::APSInt::operator== compares by VALUE across differing bit
-  // widths, so this is correct even when Orig/Mod happen to have been
-  // stored at different widths for the same true value.
+  // llvm::APSInt::isSameValue compares by VALUE across differing bit
+  // widths and signedness. operator== requires equal widths (it reads past
+  // the narrower value's words otherwise): `-9223372036854775808` is stored
+  // wider than `-7`, so == on those two is undefined behaviour.
   if (auto *OrigNum = dynamic_cast<const NumberExprAST *>(OriginalAST)) {
     auto *ModNum = dynamic_cast<const NumberExprAST *>(ModifiedAST);
     if (OrigNum->isInteger() != ModNum->isInteger() ||
         (OrigNum->isInteger() &&
-         OrigNum->getIntValExact() != ModNum->getIntValExact()) ||
+         !llvm::APSInt::isSameValue(OrigNum->getIntValExact(),
+                                    ModNum->getIntValExact())) ||
         (!OrigNum->isInteger() &&
          !OrigNum->getFloatValExact().bitwiseIsEqual(ModNum->getFloatValExact()))) {
       ChangedIDs.insert(OriginalAST->getNodeID());
