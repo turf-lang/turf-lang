@@ -232,10 +232,16 @@ SIGNATURES = [
 ]
 
 
+# A diagnostic quotes the input's own line (`  12 │ <source>`). A mutated input
+# can carry crash text in a comment, so a quoted line is never evidence.
+EXCERPT = re.compile(r"^[ \t]*\d*[ \t]*\u2502.*$", re.M)
+
+
 def classify(rc: int | None, out: str) -> str | None:
     """None = the compiler behaved (diagnostics are exit 1; success is 0)."""
     if rc is None:
         return "hang"
+    out = EXCERPT.sub("", out)
     for name, rx in SIGNATURES:
         if rx.search(out):
             return name
