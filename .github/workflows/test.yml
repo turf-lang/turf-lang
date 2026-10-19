@@ -158,6 +158,11 @@ jobs:
       - name: Error-code registry is consistent
         run: ./scripts/check/error_codes_check.sh
 
+      # V-5 (#289): the reference page's table of every code is generated from
+      # that registry; a code in one and not the other fails here.
+      - name: Diagnostic-code registry matches the reference
+        run: python3 scripts/check/diagnostic_registry.py --check
+
       # SLM_IMPROVEMENT_PLAN C1/C2: everything under docs/slm/ is pasted into
       # the --smart model's prompt, and a model copies what it sees. This
       # compiles every CORRECT example in the per-code pages, the category docs
