@@ -146,6 +146,15 @@ else
     echo "$CODES_OUT" | head -8 | sed 's/^/       /'
   fi
 
+  # V-5 (#289): the reference page's table of every code is generated from the
+  # registry, so a code in one and not the other fails here.
+  if REG_OUT=$(python3 scripts/check/diagnostic_registry.py --check 2>&1); then
+    pass "$(echo "$REG_OUT" | tail -1)"
+  else
+    fail "docs/reference/cli_and_diagnostics.md disagrees with the code registry:"
+    echo "$REG_OUT" | head -8 | sed 's/^/       /'
+  fi
+
   # SLM_IMPROVEMENT_PLAN C1/C2: every CORRECT example in docs/slm/ (and the
   # syntax card) compiles, and every non-retired per-code page has one. The
   # model copies what the docs show it.
