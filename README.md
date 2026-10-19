@@ -2,7 +2,7 @@
 
 Turf (TurfLang) is a statically typed language that compiles ahead of time to native executables through LLVM. It has structs, enums, real generics, state machines, pattern matching, error unions, a garbage-collected heap with checked references, a standard library (strings, collections, files, JSON, HTTP, sockets), a project and package tool, and an optional diagnostics assistant that runs a language model on your own machine.
 
-The current release is **Turf 2.1.0**. Upgrading a 1.x program? The [migration guide](docs/MIGRATING_TO_2.md) lists every change that affects existing code, with the fix for each.
+The current release is **Turf 2.1.1**. Upgrading a 1.x program? The [migration guide](docs/MIGRATING_TO_2.md) lists every change that affects existing code, with the fix for each.
 
 ## Contents
 
