@@ -711,6 +711,11 @@ private:
   /// string. The call itself only saw its arguments, from which it bound
   /// T = int.
   void noteConstructed(const ExprAST *E, const TurfTypePtr &Expected);
+
+  /// E138 for `Box::default().get()` / `Box::default().v` on a generic
+  /// `Box`: a receiver has no declared type for noteConstructed() to take
+  /// the instantiation from, so the call would build the bare template.
+  void rejectUninstantiatedReceiver(const ExprAST *Base);
   void noteConstructedArgs(const std::vector<std::unique_ptr<ExprAST>> &Args,
                            const std::vector<FunctionParam> &Params,
                            size_t ParamOffset,
