@@ -194,6 +194,7 @@ public:
 // fn RetType Name<T>(params...) { body }
 class FuncDefExprAST : public ExprAST, public VisibleDecl, public AnnotatedDecl {
   std::string Name;
+  std::string SourceName; ///< see getSourceName()
   TurfTypePtr ReturnType;
   std::vector<ParamDecl> Params;
   std::unique_ptr<ExprAST> Body;
@@ -242,6 +243,14 @@ public:
   /// comment for why this must happen before Resolver::resolve() runs on
   /// the clone. Never used on an ordinary (non-cloned) declaration.
   void setName(std::string N) { Name = std::move(N); }
+  /// The template's name (`Box.get`), which a message about a monomorphized
+  /// clone shows instead of its internal `Box.get_gen1_int`. Only a message:
+  /// every lookup keys on getName(). Set by the monomorphizer alone, since
+  /// setName() also gives a module's method its type-identity name.
+  void setSourceName(std::string N) { SourceName = std::move(N); }
+  const std::string &getSourceName() const {
+    return SourceName.empty() ? Name : SourceName;
+  }
   bool isStaticDecl() const { return IsStaticDecl; }
   bool hasCallerLocation() const { return HasCallerLocation; }
 
@@ -323,6 +332,7 @@ public:
     Cloned->setAnnotations(getAnnotations());
     Cloned->UsesTry = UsesTry;
     Cloned->SizeParams = SizeParams;
+    Cloned->SourceName = SourceName;
     return Cloned;
     // Note: ResolvedDef is intentionally NOT copied — cloned ASTs are stale
     // until re-resolved. The default-constructed field is nullptr.

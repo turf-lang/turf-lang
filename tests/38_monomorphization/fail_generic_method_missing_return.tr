@@ -1,0 +1,16 @@
+// EXPECT-DIAG: E009
+// EXPECT-DIAG: 'Box.size'
+// A generic method that never returns its value is E009 named as written.
+// On a struct whose fields do not mention T this was an internal compiler
+// error instead (the call was never instantiated), and the message named the
+// clone, 'Box.size_gen1_int'.
+struct Box<T> {
+}
+
+fn<T> Box.size(): int {
+}
+
+fn main(): int {
+    mut b: Box<int> = Box::default();
+    return b.size();
+}
