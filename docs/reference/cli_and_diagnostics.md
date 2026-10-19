@@ -674,7 +674,7 @@ When there is exactly one match the compiler also prints it as a checked [`Fix:`
 
 ### Error codes
 
-Every error and every warning has a stable code, `E001` to `E171`: **171 codes** with no gaps. A code is assigned once and never reused or renumbered, and it is an identifier, not a ranking of severity. Twenty-three of them are warnings (E074, E075, E094 and E152–E171), and only a warning has a [lint level](#lint-levels). Every code has a page, `turf explain E0NN`, that says what it means, shows a wrong program and the fix. The same pages are in the repository as `docs/errors/codes/E0NN.txt`, and the release archives carry them.
+Every error and every warning has a stable code, `E001` to `E172`: **172 codes** with no gaps. A code is assigned once and never reused or renumbered, and it is an identifier, not a ranking of severity. Twenty-four of them are warnings (E074, E075, E094 and E152–E172), and only a warning has a [lint level](#lint-levels). Every code has a page, `turf explain E0NN`, that says what it means, shows a wrong program and the fix. The same pages are in the repository as `docs/errors/codes/E0NN.txt`, and the release archives carry them.
 
 Six codes are **retired**: the mistakes they described are now reported under another code, and the number stays so old references still resolve. `turf explain` on them says which code replaced them. They are E006 (an unsized array in a `for` loop; arrays carry their length now), E013 (merged into E012), E015 (syntax errors, now E099–E123), E037 (unknown functions are E041), and E055 and E063 (now E056).
 
@@ -686,7 +686,7 @@ The codes by category (the category is the word in the diagnostic header):
 | control flow | E007, E009–E010, E012–E013, E016, E058, E074–E075, E083, E092–E095, E120, E132–E133, E154–E155, E157–E165, E168–E169 |
 | undeclared variable | E008, E037, E040–E041, E043, E054, E068, E131 |
 | syntax error | E014–E015, E070–E073, E099–E111, E118, E139 |
-| declaration | E019–E024, E027–E034, E039, E042, E045–E046, E048–E053, E060–E061, E069, E079–E080, E084–E085, E087–E091, E096–E097, E112–E117, E119, E128–E129, E136, E138, E145–E148, E150–E153 |
+| declaration | E019–E024, E027–E034, E039, E042, E045–E046, E048–E053, E060–E061, E069, E079–E080, E084–E085, E087–E091, E096–E097, E112–E117, E119, E128–E129, E136, E138, E145–E148, E150–E153, E172 |
 | function signature | E025, E038, E044, E047, E067, E125, E135, E137 |
 | type mismatch | E035–E036, E056, E059, E062, E064, E066, E082, E098, E124, E126, E134, E149 |
 | arithmetic | E057, E076–E078, E127, E167 |
@@ -1001,6 +1001,7 @@ A few more warnings come from simpler checks that look at one expression or stat
 | E169 | `'f' is declared to return a fallible type ('!T') but never actually returns an error.` | a `!T` function with no error path |
 | E153 | `Machine 'M' declares state 'S' with no incoming transitions.` | a state no edge leads into (expected for the initial state) |
 | E170, E171 | `Possible use after free`, `Possible double free` | a pointer used or freed again after `mem::free` on some path |
+| E172 | `'old_fn' is deprecated: use new_fn() instead` | a call to an item marked `@deprecated("...")` |
 
 Each can be [allowed or denied](#lint-levels) by its code.
 

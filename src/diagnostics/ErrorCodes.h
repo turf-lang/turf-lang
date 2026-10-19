@@ -503,6 +503,10 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     {"E170", "PossibleUseAfterFreeWarning", "Possible use after free", SLM::ErrorCategory::MEMORY_ERROR},
     // A pointer freed twice on some path (AliasAnalysis.cpp).
     {"E171", "PossibleDoubleFreeWarning", "Possible double free", SLM::ErrorCategory::MEMORY_ERROR},
+    // TDP-2-003 V-2 (issue #286): a call to an item marked
+    // `@deprecated("...")` (Lint.cpp). First code added after 2.1, hence the
+    // explicit SinceMinor: `--lint-set 2.1` leaves it at `allow`.
+    {"E172", "DeprecatedUseWarning", "Use of a deprecated item", SLM::ErrorCategory::DECLARATION, false, 2},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);
