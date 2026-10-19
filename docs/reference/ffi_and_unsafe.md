@@ -404,7 +404,8 @@ It can appear:
 - as a statement in a function body, nested freely inside `if`, `while` and
   other blocks (nesting is harmless);
 - around a top-level declaration (`struct`, `fn`, `enum`, `machine`), as in the
-  `Node` example above;
+  `Node` example above. At the top level it holds only declarations: a
+  statement in it is `E118`, as anywhere outside a function;
 - as an expression, whose value is its last statement, like any block:
 
 ```turflang

@@ -19,6 +19,8 @@ CORRECT:
 
 FIX:
   Move the statement into a function; a program starts at `main`. A script-style file
-  needs its statements wrapped in `fn main(): int { ... return 0; }`.
+  needs its statements wrapped in `fn main(): int { ... return 0; }`. A top-level
+  `unsafe { }` holds only declarations; a statement in it goes in a function, inside
+  its own `unsafe { }`.
 
 RELATED: E119 (no main), E103 (unexpected token -- e.g. a top-level `mut x`).

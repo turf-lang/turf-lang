@@ -1,0 +1,16 @@
+// EXPECT-DIAG: E118
+// EXPECT-DIAG: holds only declarations
+// A top-level `unsafe { }` block marks the declarations inside it. A
+// statement inside one was spliced into the file's declarations and run by
+// Codegen with no enclosing function: a segmentation fault in
+// VarDeclExprAST::codegen() (turf-fuzz #15). It is E118, like any other
+// statement at the top level.
+unsafe {
+    unsafe {
+        mut p: int* = null;
+    }
+}
+
+fn main(): int {
+    return 0;
+}

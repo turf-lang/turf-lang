@@ -282,7 +282,36 @@ void AppendFlattenedTopLevelDecl(std::unique_ptr<ExprAST> AST,
     return;
   }
   if (auto *UB = dynamic_cast<UnsafeBlockExprAST *>(AST.get())) {
+    const SourceLocation BlockLoc = UB->getLoc();
     for (auto &Child : UB->takeChildren()) {
+      // A top-level `unsafe { }` only marks the declarations it wraps. A
+      // statement in it was spliced into the file's declarations like one,
+      // and Codegen then ran it with no enclosing function: `unsafe { mut p:
+      // int* = null; }` at the top level was a segmentation fault in
+      // VarDeclExprAST::codegen() (turf-fuzz #15). Every other statement at
+      // the top level is E118 already.
+      if (dynamic_cast<UnsafeBlockExprAST *>(Child.get())) {
+        AppendFlattenedTopLevelDecl(std::move(Child), Target, RecordForSandbox);
+        continue;
+      }
+      auto *Vd = dynamic_cast<VarDeclExprAST *>(Child.get());
+      const bool IsDecl =
+          dynamic_cast<FuncDefExprAST *>(Child.get()) ||
+          dynamic_cast<StructDeclExprAST *>(Child.get()) ||
+          dynamic_cast<EnumDeclExprAST *>(Child.get()) ||
+          dynamic_cast<MachineDeclExprAST *>(Child.get()) ||
+          dynamic_cast<ErrorDeclExprAST *>(Child.get()) ||
+          dynamic_cast<ExternFuncDeclExprAST *>(Child.get()) ||
+          dynamic_cast<ModuleImportExprAST *>(Child.get()) ||
+          (Vd && Vd->isExported());
+      if (!IsDecl) {
+        LogErrorAt(Vd ? Vd->getLoc() : BlockLoc, ErrCode::StatementOutsideFunction,
+                   "Statements are not allowed outside of a function, and a "
+                   "top-level 'unsafe { }' block holds only declarations. Move "
+                   "this code into a function, inside its own 'unsafe { }'.",
+                   SLM::ErrorCategory::SYNTAX_ERROR);
+        continue;
+      }
       if (TooDeep(Child.get())) {
         LogErrorAt(WhereIs(Child.get()), ErrCode::NestingTooDeep,
                    "Expression nested too deeply to parse."
