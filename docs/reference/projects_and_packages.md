@@ -187,7 +187,7 @@ because it broke in some other way:
 | Comment | Holds when |
 |---|---|
 | `// EXPECT-DIAG: E011` | the compiler's output has the error code `E011` |
-| `// EXPECT-DIAG: some text` | ... or this text (for a warning, which has no code) |
+| `// EXPECT-DIAG: some text` | ... or this text (for a warning, whose code also works) |
 | `// EXPECT-NO-DIAG: some text` | the compiler's output does **not** have this text |
 | `// EXPECT-FIX: replace 'nmae' with 'name'` | the compiler printed that `Fix:` line (see [Fixes](cli_and_diagnostics.md#fixes)) |
 | `// EXPECT-RUNTIME: some text` | the aborting program printed this text |
@@ -261,7 +261,7 @@ turf = "2.0"
 [dependencies]
 ```
 
-There are three tables and no others.
+There are four tables and no others.
 
 | Table | Key | Meaning |
 |---|---|---|
@@ -270,13 +270,15 @@ There are three tables and no others.
 | | `turf` | Optional. The oldest compiler this package needs, `"<major>.<minor>"`. The major must equal the compiler's, and the minor must not be newer than it. |
 | `[dependencies]` | `<name> = { … }` | One entry per dependency (section 3). The key must be the dependency's own package name. |
 | `[unsafe]` | `allow = [ "<name>", … ]` | The dependencies whose `unsafe module;` declarations are honored (section 8). |
+| `[lints]` | `E163 = "allow"` | The level of a warning, by code: `allow`, `warn` or `deny` ([the `[lints]` table](#the-lints-table)). |
+| | `lint-set = "2.N"` | Optional. Pins the set of warnings to the ones release 2.N has. |
 
 **An unknown key or table is an error, not ignored.** A silently ignored
 setting is how a typo becomes a policy.
 
 ```
 turf: …/turf.toml:4: unknown key `authors` in [package]: the keys are name, version and turf
-turf: …/turf.toml:5: unknown key `build` at the top level: the tables are [package], [dependencies] and [unsafe]
+turf: …/turf.toml:5: unknown key `build` at the top level: the tables are [package], [dependencies], [unsafe] and [lints]
 turf: …/turf.toml:6: unknown key `deny` in [unsafe]: the only key is allow
 ```
 
@@ -308,13 +310,32 @@ hint: upgrade turfc, or lower `turf` in that manifest
 ```
 $ turf version
 turf 1.0.0  (needs turfc interface 1.1+)
-turfc 2.1.1  (interface 1.7, …/bin/turfc)
+turfc 2.1.1  (interface 1.8, …/bin/turfc)
   …
 ```
 
 The `turf` key in the manifest is about the *compiler's* version (`turfc`, the
 number after `turfc` above). The remaining lines of `turf version` are
 described in [CLI & Diagnostics](cli_and_diagnostics.md#versions).
+
+### The `[lints]` table
+
+A warning has a code and a level (`allow`, `warn`, `deny`; see [Lint levels](cli_and_diagnostics.md#lint-levels)). The table sets them for the whole build of the project, for `turf build`, `run`, `check` and `test` alike:
+
+```toml
+[lints]
+lint-set = "2.1"
+E163 = "allow"   # unused variable: do not report it
+E158 = "deny"    # function too complex: fail the build
+```
+
+Each key is a diagnostic code (`E` and three digits) and each value is `"allow"`, `"warn"` or `"deny"`. `lint-set` is the only other key, and its value is `"2.N"`. `turf` checks the shape of the table and passes it to the compiler as `--lint-set 2.1 --allow E163 --deny E158`, ahead of the flags you type, so `turf build --deny E163` beats `E163 = "allow"`. The compiler checks that each code exists and is a warning; a table naming an unknown code, or an error's code with `allow` or `warn`, fails the build with the compiler's message. A manifest with a `[lints]` table needs a compiler with driver interface 1.8 or later and says so otherwise. The table has no effect in a single-file compile, which has no manifest: pass the flags.
+
+```
+turf: …/turf.toml:5: unknown key `unused` in [lints]: the keys are lint-set and diagnostic codes such as E163
+turf: …/turf.toml:5: invalid level for `E163` in [lints]: 'forbid' is not allow, warn or deny
+turf: …/turf.toml:4: invalid `lint-set` in [lints]: '3.0' is not "2.N"
+```
 
 ## 3. Dependencies
 

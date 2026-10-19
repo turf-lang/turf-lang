@@ -1,0 +1,33 @@
+TURF E153 -- MACHINE STATE WITH NO INCOMING TRANSITION (WARNING):
+
+CAUSE:
+  A `machine` declares a state that no transition `X -> State` points to, so
+  once the machine has left its starting value it can never be entered. This
+  is a WARNING: compilation still succeeds. It is a false positive when the
+  state is only ever a starting state.
+
+INCORRECT:
+    machine Door {
+        Closed -> Open,
+        Open -> Closed,
+        Locked -> Closed,   // WARNING: nothing leads to Locked
+    }
+
+CORRECT (every state has an incoming edge):
+    machine Door {
+        Closed -> Open,
+        Open -> Closed,
+        Locked -> Closed,
+        Closed -> Locked,
+    }
+
+    fn main(): int {
+        mut d: Door = Door::Closed;
+        d.transition(Door::Locked);
+        return 0;
+    }
+
+FIX:
+  Add the missing `Other -> State` edge, or delete the state if it is unused.
+
+RELATED: E035 (a `transition` that the machine does not declare is an error).

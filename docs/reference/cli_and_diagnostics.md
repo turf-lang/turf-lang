@@ -118,6 +118,8 @@ run `turf help` for the list of commands
 | `--smart` | Asks a local language model to suggest a fix for an error the compiler has no fix of its own for. See [`--smart`](#--smart). |
 | `--smart-write-fix=<path>` | Writes your program to that file with every [`Fix:`](#fixes) the compiler showed applied; with `--smart`, when the compiler had no fix, the model's validated suggestion instead. Your source file is never changed. |
 | `--stdlib-warnings` | Shows warnings that point into the standard library, which are hidden by default. See [Warnings in the standard library](#warnings-in-the-standard-library). |
+| `--allow <code>` `--warn <code>` `--deny <code>` | Set the [level](#lint-levels) of one warning, such as `--deny E163`: `allow` does not report it, `warn` (every warning's default) reports it, `deny` reports it as an error and fails the build. Repeatable; a later flag for a code replaces an earlier one. |
+| `--lint-set <2.N>` | Starts every warning added after release 2.N at `allow`, so a newer compiler adds no warning to a build that pinned 2.N. See [Lint levels](#lint-levels). |
 | `--allow-unsafe-modules` | Honors `unsafe module;` in a module outside the install root, in a single-file compile. It does not apply in a project, where the manifest's `[unsafe] allow` decides ([Projects & Packages](projects_and_packages.md#8-unsafe-module-in-dependencies)). |
 | `--dump-ast`, `--resolve`, `--typecheck`, `--dump-resolved`, `--dump-typechecked`, `--dump-resolver-symbols`, `--dump-modules`, `--dump-instantiations` | Print what the compiler knows at each stage. `turf dump` is the friendly spelling of these. |
 
@@ -383,7 +385,7 @@ The model's suggestion is labelled `[Model Suggestion]`. `--smart-write-fix=<pat
 ```text
 $ turf version
 turf 1.0.0  (needs turfc interface 1.1+)
-turfc 2.1.1  (interface 1.7, /opt/turf/bin/turfc)
+turfc 2.1.1  (interface 1.8, /opt/turf/bin/turfc)
   llvm 22.1.8
   runtime turf_rt_abi_2_0
   root /opt/turf
@@ -436,6 +438,7 @@ $ turfc help
 Usage: turfc <filename.tr> [-o output] [--emit-llvm | --emit-obj] [--smart]
          [--smart-write-fix=<path>] [--link <libname>]
          [--allow-unsafe-modules] [--stdlib-warnings]
+         [--allow <code>] [--warn <code>] [--deny <code>] [--lint-set <2.N>]
          [-O0|-O1|-O2|-O3|-Os] [-g] [--target=<triple>] [-mcpu=<cpu>]
          [--check [--module]] [--package-graph <file>]
          [--resolve] [--typecheck] [--dump-ast] [--dump-resolver-symbols]
@@ -448,6 +451,7 @@ Usage: turfc <filename.tr> [-o output] [--emit-llvm | --emit-obj] [--smart]
          [-O0|-O1|-O2|-O3|-Os] [-g] [--link <libname>] [--jobs <n>]
          [--timeout <seconds>] [--diag-register <file>]
          [--allow-unsafe-modules] [--stdlib-warnings]
+         [--allow <code>] [--warn <code>] [--deny <code>] [--lint-set <2.N>]
        turfc --explain E0NN
        turfc --version
        turfc help
@@ -458,7 +462,7 @@ Usage: turfc <filename.tr> [-o output] [--emit-llvm | --emit-obj] [--smart]
 ```text
 $ turfc --version
 turfc 2.1.1
-interface 1.7
+interface 1.8
 llvm 22.1.8
 runtime turf_rt_abi_2_0
 root /opt/turf
@@ -466,7 +470,7 @@ linker system-cc
 smart built-in
 ```
 
-The interface covers what `turf` relies on: the flags it passes, the two-line start of `--version`, the exit statuses, and every other argument being accepted exactly as a direct invocation accepts it. A new flag or input raises the **minor**; removing a flag or changing its meaning raises the **major**. A tool that needs `--package-graph` requires interface 1.1 or later, `turfc --test` 1.3, and `--emit-obj` 1.6.
+The interface covers what `turf` relies on: the flags it passes, the two-line start of `--version`, the exit statuses, and every other argument being accepted exactly as a direct invocation accepts it. A new flag or input raises the **minor**; removing a flag or changing its meaning raises the **major**. A tool that needs `--package-graph` requires interface 1.1 or later, `turfc --test` 1.3, `--emit-obj` 1.6, `turfc --test --only` 1.7, and the lint-level flags 1.8.
 
 **Modes a tool uses:**
 
@@ -586,9 +590,45 @@ Output that matches the text of diagnostics (a script, an editor extension) will
 ### Errors and warnings
 
 - **Errors** stop the compile. The compiler still reports every error it can find (it recovers at the next statement or declaration and goes on), prints them all, and exits with status 1 without producing a program.
-- **Warnings** never stop the compile and never change the exit status. They say a thing is probably a mistake: a variable nobody reads, a loop that never ends, code that cannot run. A program with warnings compiles, links and runs. There is no flag that turns warnings into errors, and none that silences them one by one; the way to silence a warning is to fix what it points at.
+- **Warnings** do not stop the compile and do not change the exit status. They say a thing is probably a mistake: a variable nobody reads, a loop that never ends, code that cannot run. A program with warnings compiles, links and runs. Whoever builds the program can change that for any one warning with a [lint level](#lint-levels): `allow` hides it, `deny` makes it an error.
 
-Warnings are printed in the same format as errors, in yellow, with `warning` in the header.
+Warnings are printed in the same format as errors, in yellow, with `warning` in the header and the warning's code.
+
+### Lint levels
+
+Every warning has a code (`E163` is the unused-variable warning) and a **level**, which is how the build treats it:
+
+| Level | The warning is | The build |
+|---|---|---|
+| `allow` | not reported | succeeds |
+| `warn` | reported; every warning starts here | succeeds |
+| `deny` | reported as an error | fails with status 1 and writes no program |
+
+The level is chosen by whoever builds the program, in three places that mean the same thing. There is no syntax for it in the source: a program reads the same wherever it is built.
+
+- **The command line**, `turf` and `turfc` alike: `--allow E163`, `--warn E163`, `--deny E163`. Each names one code and the flags can be repeated. When a code is named twice, the later flag wins, so `--deny E163 --warn E163` leaves it a warning.
+- **`turf.toml`**, in a `[lints]` table: `E163 = "allow"`. `turf` hands the table to the compiler as these same flags, ahead of the ones you type, so a flag on the command line wins over the same code in the file. See [Projects & Packages](projects_and_packages.md#the-lints-table).
+- **A pin**, `--lint-set 2.N` or `lint-set = "2.N"` in `[lints]`. Every warning records the 2.x release that added it. With a pin, a warning added after 2.N starts at `allow` instead of `warn`, so a newer compiler adds no warning, and no failure under `deny`, to a build that pinned 2.N. A level named for the code itself still wins over the pin, in either direction. Pinning a set newer than the compiler is an error: a manifest written for a newer compiler says so instead of being read as an older one. Only `2.N` sets exist.
+
+```text
+$ turf check w.tr --deny E163
+w.tr (1 error, 2 warnings)
+
+── error at line 2, col 5 [E163 · control flow]
+
+  Warning: Variable 'unused' is declared but never used.
+
+  Hint: If the variable is intentionally unused, prefix its name with '_' by convention. Otherwise, remove the declaration or use its value.
+
+  E163 is a warning by default; its lint level here is deny.
+  ...
+```
+
+A denied warning is an error in every way that matters: it has the `error` header, it is counted as one, it fails `--check`, and the error that is already on a line hides other diagnostics on that line. Its text still says `Warning:` and the diagnostic adds the line saying why, so the reader knows the check is normally advice.
+
+A level that names nothing real is a usage error (status 2, nothing compiled), never silently ignored: a code the compiler does not have, a word that is not a code, a lint set that does not exist or is newer than the compiler, a flag with no code after it. An **error** has no level to choose, since a program with a type error cannot be built whatever the setting: `--allow` and `--warn` of an error's code are usage errors, and `--deny` of one is accepted and changes nothing. A [warning in the standard library](#warnings-in-the-standard-library) is never denied (it is not yours to fix) unless you also pass `--stdlib-warnings`. A level applies to every file of the compile, your dependencies included. `turfc --test` and `turf test` pass the levels to the compile of every test.
+
+The levels are the compiler's: it never reads `turf.toml`, so an editor or script that drives `turfc` sets them with the flags (interface 1.8).
 
 ### Warnings in the standard library
 
@@ -598,7 +638,7 @@ A warning whose position is inside the installed standard library is recorded bu
 $ turf check server.tr --stdlib-warnings
 lib/std/http/http.tr (1 warning)
 
-── warning at line 353, col 5
+── warning at line 353, col 5 [E159 · control flow]
 
   Warning: Function 'http::Server.listen' contains a loop with no exit path. This will run forever.
   ...
@@ -634,7 +674,7 @@ When there is exactly one match the compiler also prints it as a checked [`Fix:`
 
 ### Error codes
 
-Every error has a stable code, `E001` to `E150`: **150 codes** with no gaps. A code is assigned once and never reused or renumbered, and it is an identifier, not a ranking of severity. Every one has a page, `turf explain E0NN`, that says what the error means, shows a wrong program and the fix. The same pages are in the repository as `docs/errors/codes/E0NN.txt`, and the release archives carry them.
+Every error and every warning has a stable code, `E001` to `E171`: **171 codes** with no gaps. A code is assigned once and never reused or renumbered, and it is an identifier, not a ranking of severity. Twenty-three of them are warnings (E074, E075, E094 and E152–E171), and only a warning has a [lint level](#lint-levels). Every code has a page, `turf explain E0NN`, that says what it means, shows a wrong program and the fix. The same pages are in the repository as `docs/errors/codes/E0NN.txt`, and the release archives carry them.
 
 Six codes are **retired**: the mistakes they described are now reported under another code, and the number stays so old references still resolve. `turf explain` on them says which code replaced them. They are E006 (an unsized array in a `for` loop; arrays carry their length now), E013 (merged into E012), E015 (syntax errors, now E099–E123), E037 (unknown functions are E041), and E055 and E063 (now E056).
 
@@ -643,17 +683,17 @@ The codes by category (the category is the word in the diagnostic header):
 | Category | Codes |
 |---|---|
 | array error | E001–E006, E123, E140–E144 |
-| control flow | E007, E009–E010, E012–E013, E016, E058, E074–E075, E083, E092–E095, E120, E132–E133 |
+| control flow | E007, E009–E010, E012–E013, E016, E058, E074–E075, E083, E092–E095, E120, E132–E133, E154–E155, E157–E165, E168–E169 |
 | undeclared variable | E008, E037, E040–E041, E043, E054, E068, E131 |
 | syntax error | E014–E015, E070–E073, E099–E111, E118, E139 |
-| declaration | E019–E024, E027–E034, E039, E042, E045–E046, E048–E053, E060–E061, E069, E079–E080, E084–E085, E087–E091, E096–E097, E112–E117, E119, E128–E129, E136, E138, E145–E148, E150 |
+| declaration | E019–E024, E027–E034, E039, E042, E045–E046, E048–E053, E060–E061, E069, E079–E080, E084–E085, E087–E091, E096–E097, E112–E117, E119, E128–E129, E136, E138, E145–E148, E150–E153 |
 | function signature | E025, E038, E044, E047, E067, E125, E135, E137 |
 | type mismatch | E035–E036, E056, E059, E062, E064, E066, E082, E098, E124, E126, E134, E149 |
-| arithmetic | E057, E076–E078, E127 |
+| arithmetic | E057, E076–E078, E127, E167 |
 | string conversion | E065 |
 | builtin function | E055, E063 |
-| memory error | E017–E018, E081, E086, E130 |
-| general | E011, E026, E121–E122 |
+| memory error | E017–E018, E081, E086, E130, E170–E171 |
+| general | E011, E026, E121–E122, E156, E166 |
 
 Eleven codes are flagged **important**: concepts the one-line message alone does not teach. They get the stronger footer, `Worth reading in full`: **E010** (infinite recursion), **E017** (double free), **E018** (use after free), **E035** and **E036** (invalid state transitions), **E069** (a struct that contains itself), **E086** (a reference that would outlive its target), **E088** (a private item used from another module), **E089** (a private type in a public signature), **E121** (an internal compiler error: report it with the program that triggers it), and **E130** (raw pointer outside `unsafe`).
 
@@ -795,13 +835,13 @@ fn main(): int {
 ```
 
 ```text
-── warning at line 2, col 5
+── warning at line 2, col 5 [E161 · control flow]
 
   Warning: The initial value of 'x' is never read: every path assigns 'x' again before reading it.
 
   Hint: Declare it without a value, 'mut x: int;' (every read still has to come after an assignment), or read the initial value before the next assignment.
 
-── warning at line 4, col 5
+── warning at line 4, col 5 [E163 · control flow]
 
   Warning: Variable 'unused' is declared but never used.
 ```
@@ -809,7 +849,7 @@ fn main(): int {
 The first `x` (`5`) is a declaration's initializer that is overwritten before it is read; the second (`10`) is read by `x + 1`, so it is not reported. A store that is not a declaration's initializer gets the plain dead-store wording:
 
 ```text
-── warning at line 3, col 5
+── warning at line 3, col 5 [E160 · control flow]
 
   Warning: Variable 'x' is assigned but the value is never read (dead store).
 
@@ -946,16 +986,23 @@ fn main(): int {
 
 A few more warnings come from simpler checks that look at one expression or statement:
 
-| Warning | Fires on |
-|---|---|
-| `You're using '/' with zero — this will crash at runtime!` | a literal `0` as the divisor of `/` or `%` |
-| `You're assigning 'k' to itself — this doesn't do anything!` | `k = k;` |
-| `You're comparing 'x' with itself!` | `x == x`, `x < x` and so on |
-| `Just so you know, you're creating a new 'n' that hides an older one!` | a local that shadows another in an enclosing scope |
-| `The loop variable 'i' is never changed by this loop's 'step' or its body, so it will loop forever` | a `for` whose variable nothing advances |
-| `The 'then' branch is empty` | an `if` or `else` with no statements |
-| `'f' is declared to return a fallible type ('!T') but never actually returns an error.` | a `!T` function with no error path |
-| `Machine 'M' declares state 'S' with no incoming transitions.` | a state no edge leads into (expected for the initial state) |
+| Code | Warning | Fires on |
+|---|---|---|
+| E167 | `You're using '/' with zero — this will crash at runtime!` | a literal `0` as the divisor of `/` or `%` |
+| E156 | `You're assigning 'k' to itself — this doesn't do anything!` | `k = k;` |
+| E166 | `You're comparing 'x' with itself!` | `x == x`, `x < x` and so on |
+| E155 | `This comparison is redundant!` | `x == true`, `x != false` |
+| E152 | `Just so you know, you're creating a new 'n' that hides an older one!` | a local that shadows another in an enclosing scope |
+| E164 | `The loop variable 'i' is never changed by this loop's 'step' or its body, so it will loop forever` | a `for` whose variable nothing advances |
+| E162 | `This loop never reaches its end` | a `for` range whose step moves away from its end |
+| E165 | `The 'then' branch is empty` | an `if` or `else` with no statements |
+| E168 | `Both branches of this 'if' do the same thing!` | an `if` and `else` with identical bodies |
+| E154 | `Empty compare statement has no arms and no 'otherwise'` | a `compare` with no arm |
+| E169 | `'f' is declared to return a fallible type ('!T') but never actually returns an error.` | a `!T` function with no error path |
+| E153 | `Machine 'M' declares state 'S' with no incoming transitions.` | a state no edge leads into (expected for the initial state) |
+| E170, E171 | `Possible use after free`, `Possible double free` | a pointer used or freed again after `mem::free` on some path |
+
+Each can be [allowed or denied](#lint-levels) by its code.
 
 ---
 

@@ -1,0 +1,23 @@
+TURF E167 -- DIVISION BY A ZERO LITERAL (WARNING):
+
+CAUSE:
+  The right-hand side of `/` or `%` is the literal `0` (or `0.0`). The
+  operation crashes at run time. This is a WARNING: compilation still
+  succeeds.
+
+INCORRECT:
+    immut n: int = 10;
+    printline((n / 0) to string);   // WARNING: division by zero
+
+CORRECT (a real divisor, checked):
+    immut n: int = 10;
+    immut d: int = 2;
+    if d != 0 {
+        printline((n / d) to string);
+    }
+
+FIX:
+  Replace the literal zero with the intended divisor, and check a variable
+  divisor for zero before dividing.
+
+RELATED: E166 (comparison with itself).

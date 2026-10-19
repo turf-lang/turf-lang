@@ -1,0 +1,29 @@
+TURF E157 -- LOOP THAT LOOKS INFINITE (WARNING):
+
+CAUSE:
+  A `while true` / `do ... while true` loop whose body contains no `break`,
+  `continue` or `return`. Nothing can leave it. This is a WARNING:
+  compilation still succeeds. It can be intentional (a server loop).
+
+INCORRECT:
+    mut n: int = 0;
+    while true {           // WARNING: no way out
+        n += 1;
+    }
+
+CORRECT (the loop has an exit):
+    mut n: int = 0;
+    while true {
+        n += 1;
+        if n >= 10 {
+            break;
+        }
+    }
+    printline(n to string);
+
+FIX:
+  Add a `break` or `return` under a condition, or replace `true` with a real
+  loop condition (`while n < 10`).
+
+RELATED: E159 (the same loop reported for the whole function, reported
+  together), E074 (code after a loop that cannot end is unreachable).

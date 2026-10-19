@@ -377,6 +377,11 @@ jobs:
       # turf::analyze() facade can see.
       - name: "Pattern warnings smoke test"
         run: ./scripts/smoke/pattern_warnings_smoke.sh
+      # V-1: lint levels are a compiler flag (`--allow|--warn|--deny <code>`,
+      # `--lint-set 2.N`, also under `--test`), which the test runner cannot
+      # pass to a single file and so cannot judge.
+      - name: "Lint levels smoke test"
+        run: ./scripts/smoke/lint_levels_smoke.sh
       # LEC-001 stage 4: package builds (`turfc --package-graph`). The test
       # runner is single-file and cannot hand the compiler a graph, so this
       # builds multi-package trees in a temp directory: two packages' `util`

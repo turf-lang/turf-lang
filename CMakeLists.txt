@@ -433,6 +433,7 @@ add_library(turfcore STATIC
   src/tooling/MigratePub.cpp
   src/frontend/Lexer.cpp
   src/diagnostics/CompilerFix.cpp
+  src/diagnostics/LintLevels.cpp
   src/analysis/Lint.cpp
   src/sema/Monomorphize.cpp
   src/frontend/ParserCore.cpp

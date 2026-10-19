@@ -1,0 +1,27 @@
+The loop variable of this `for` never changes
+
+In `for i in 0..10 step ... { }`, the `step` is what moves `i` along. If neither the `step` nor the body ever changes `i`, it stays at its start value, and the loop's fate is sealed before it starts:
+
+    mut count: int = 0;
+    mut j: int = 0;
+    for i in 0..10 step j += 10 {   // WARNING: 'i' is never changed
+        count += 1;
+        if count > 3 {
+            break;
+        }
+    }
+
+`step j += 10` moves `j`, not `i`. `i` is 0 for ever, `0 < 10` stays true for ever, and without the `break` the loop never ends. (If the range is empty from the start, the body never runs at all, and the warning says so.)
+
+The fix is a step that moves the loop variable:
+
+    mut count: int = 0;
+    for i in 0..10 step i += 10 {
+        count += 1;
+    }
+
+If a different variable is really what decides when the loop ends, use `while`, which says so directly.
+
+Turf stays quiet when it cannot be sure: if the address of `i` is taken anywhere in the loop, something could be changing it through a pointer.
+
+This is a warning, not an error -- compilation still succeeds. To silence it for a whole build, set its lint level to allow: `turf build --allow E164` (or `[lints] E164 = "allow"` in turf.toml).

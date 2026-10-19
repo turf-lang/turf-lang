@@ -20,6 +20,8 @@
 #include "tooling/Formatter.h"
 #include "tooling/MigratePub.h"
 #include "diagnostics/ErrorCategory.h"
+#include "diagnostics/ErrorCodes.h"
+#include "diagnostics/LintLevels.h"
 
 #include <filesystem>
 #include <fstream>
@@ -1905,6 +1907,75 @@ static void testBuiltinDocRouting() {
            std::string("docs/slm/builtin_typeof.txt"));
 }
 
+// V-1: lint levels. A level is a process-wide setting the compiler's own driver
+// makes before it analyses anything; the facade honours the same setting, so a
+// tool that sets it sees what the CLI prints.
+static void testLintLevels() {
+  CurrentTest = "lint levels";
+  const char *SelfCompare = "fn main(): int {\n    mut x: int = 1;\n"
+                            "    if x == x {\n        return 1;\n    }\n"
+                            "    return 0;\n}\n";
+  turf::AnalysisOptions Opts;
+  Opts.RunLint = true;
+  auto countCode = [&](const turf::AnalysisResult &R, const char *Code,
+                       turf::Severity Level) {
+    int N = 0;
+    for (const auto &D : R.diagnostics())
+      if (D.Code == Code && D.Level == Level)
+        ++N;
+    return N;
+  };
+
+  LintLevels::reset();
+  auto Plain = turf::analyze({{"lvl.tr", SelfCompare}}, Opts);
+  CHECK_EQ(countCode(Plain, "E166", turf::Severity::Warning), 1);
+  CHECK(Plain.succeeded());
+
+  std::string Err;
+  CHECK(LintLevels::setLevel("e166", LintLevels::Level::Deny, Err));
+  auto Denied = turf::analyze({{"lvl.tr", SelfCompare}}, Opts);
+  CHECK_EQ(countCode(Denied, "E166", turf::Severity::Error), 1);
+  CHECK_EQ(countCode(Denied, "E166", turf::Severity::Warning), 0);
+  CHECK(!Denied.succeeded());
+
+  CHECK(LintLevels::setLevel("E166", LintLevels::Level::Allow, Err));
+  auto Allowed = turf::analyze({{"lvl.tr", SelfCompare}}, Opts);
+  CHECK_EQ(countCode(Allowed, "E166", turf::Severity::Warning), 0);
+  CHECK_EQ(countCode(Allowed, "E166", turf::Severity::Error), 0);
+  CHECK(Allowed.succeeded());
+
+  // An error has no level to choose; naming one is refused, deny is a no-op.
+  CHECK(!LintLevels::setLevel("E102", LintLevels::Level::Allow, Err));
+  CHECK(!LintLevels::setLevel("E102", LintLevels::Level::Warn, Err));
+  CHECK(LintLevels::setLevel("E102", LintLevels::Level::Deny, Err));
+  CHECK(!LintLevels::setLevel("E999", LintLevels::Level::Deny, Err));
+  CHECK(!LintLevels::setLevel("163", LintLevels::Level::Deny, Err));
+
+  // The pin: a warning newer than the pinned set starts at allow, and an
+  // explicit level for its code wins either way.
+  LintLevels::reset();
+  CHECK(LintLevels::levelOfSince("E166", 3) == LintLevels::Level::Warn);
+  CHECK(!LintLevels::setLintSet("2.x", 5, Err));
+  CHECK(!LintLevels::setLintSet("3.0", 5, Err));
+  CHECK(!LintLevels::setLintSet("2.6", 5, Err));
+  CHECK(LintLevels::setLintSet("2.2", 5, Err));
+  CHECK(LintLevels::levelOfSince("E166", 2) == LintLevels::Level::Warn);
+  CHECK(LintLevels::levelOfSince("E166", 3) == LintLevels::Level::Allow);
+  CHECK(LintLevels::setLevel("E166", LintLevels::Level::Deny, Err));
+  CHECK(LintLevels::levelOfSince("E166", 3) == LintLevels::Level::Deny);
+  LintLevels::reset();
+  CHECK(!LintLevels::anySet());
+
+  // Every warning class has a row, so every warning can be named.
+  for (size_t I = 0; I < AllErrorCodesCount; ++I) {
+    const ErrorCodeEntry &E = AllErrorCodes[I];
+    if (ErrorCodes::isWarningCode(E)) {
+      CHECK(LintLevels::setLevel(E.Code, LintLevels::Level::Warn, Err));
+    }
+  }
+  LintLevels::reset();
+}
+
 static void testImportedCandidateLocation() {
   CurrentTest = "imported candidate overloads name their own file";
   struct Case {
@@ -2243,6 +2314,7 @@ int main() {
   testPackageGraph(Dir);
   testWarningDedupeIsPerFile(Dir);
   testLintIsOptIn();
+  testLintLevels();
   testFlowAnalysisIsOptIn();
   testEscapeThroughStructFieldsInFacade();
   testFlowWarningsAreInSourceOrder();

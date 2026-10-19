@@ -1,0 +1,23 @@
+Both sides of this `if` do the same thing
+
+When the `if` body and the `else` body are the same, the condition doesn't matter:
+
+    immut n: int = 3;
+    if n > 2 {
+        printline("big");
+    } else {
+        printline("big");        // WARNING: identical to the 'if' branch
+    }
+
+Either the branches really are the same, in which case the `if` can be dropped and the body kept, or one of them was copied and never edited. Change the one you forgot:
+
+    immut n: int = 3;
+    if n > 2 {
+        printline("big");
+    } else {
+        printline("small");
+    }
+
+Turf compares the two bodies statement by statement, so differences in spacing or comments do not count. Only a plain `if` / `else` is checked, not a longer `elseif` chain.
+
+This is a warning, not an error -- compilation still succeeds. To silence it for a whole build, set its lint level to allow: `turf build --allow E168` (or `[lints] E168 = "allow"` in turf.toml).

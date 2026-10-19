@@ -123,7 +123,7 @@ def compile_text(compiler: str, program: str) -> tuple[bool, str]:
         except subprocess.TimeoutExpired:
             return False, "TIMEOUT"
         out = ANSI.sub("", p.stdout + p.stderr)
-        m = re.search(r"\[(E\d+)", out)
+        m = re.search(r"^── error[^\n]*\[(E\d+)", out, re.M)
         return p.returncode == 0, (m[1] if m else ("CRASH" if p.returncode >= 128 else ""))
 
 

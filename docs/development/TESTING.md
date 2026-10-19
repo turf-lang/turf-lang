@@ -238,7 +238,7 @@ Every error has a code, and every code has two pages and a raiser:
 
 | Script | Fails when |
 |---|---|
-| `scripts/check/error_codes_check.sh` | a registered code has no human or SLM page, or nothing raises it |
+| `scripts/check/error_codes_check.sh` | a registered code has no human or SLM page, or nothing raises it, or a warning class has no registry row |
 | `scripts/check/doc_examples.py` | a ```` ```turflang ```` block in `docs/reference/` or `docs/guides/` does not compile (or compiles when marked `<!-- doc-example: fails Exxx -->`) |
 | `scripts/check/check_doc_links.sh` | a link or anchor between docs is broken |
 | `scripts/check/stdlib_surface_check.sh` | a `pub` item of `lib/std` is used by no file in `tests/46_stdlib_surface/`, or a public name is not `snake_case` |

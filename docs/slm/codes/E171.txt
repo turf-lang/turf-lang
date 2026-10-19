@@ -1,0 +1,42 @@
+TURF E171 -- POSSIBLE DOUBLE FREE (WARNING):
+
+CAUSE:
+  A pointer is released on at least one (not every) path that reaches this
+  second release. Turf cannot evaluate the conditions. This is a WARNING:
+  compilation still succeeds. Freed on EVERY path is error E017.
+
+INCORRECT:
+    import mem;
+
+    fn main(): int {
+        mut flag: int = 1;
+        unsafe {
+            mut p: void* = mem::alloc(8);
+            if flag == 1 {
+                mem::free(p);
+            }
+            mem::free(p);     // WARNING: may already be freed
+        }
+        return 0;
+    }
+
+CORRECT (release it on one path only):
+    import mem;
+
+    fn main(): int {
+        mut flag: int = 1;
+        unsafe {
+            mut p: void* = mem::alloc(8);
+            if flag == 1 {
+                printline("releasing");
+            }
+            mem::free(p);
+        }
+        return 0;
+    }
+
+FIX:
+  Release the pointer exactly once. If two releases are mutually exclusive,
+  make that explicit (an `else`).
+
+RELATED: E017 (double free on every path), E170 (a use after free).

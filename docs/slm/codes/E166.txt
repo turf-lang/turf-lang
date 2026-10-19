@@ -1,0 +1,26 @@
+TURF E166 -- COMPARISON WITH ITSELF (WARNING):
+
+CAUSE:
+  An expression is compared with an identical expression (`a == a`, `a < a`,
+  ...). The result is constant (a double may differ for NaN). Usually a typo
+  for another variable. This is a WARNING: compilation still succeeds.
+
+INCORRECT:
+    immut a: int = 3;
+    if a == a {              // WARNING: always true
+        printline("same");
+    }
+
+CORRECT (compare two different values):
+    immut a: int = 3;
+    immut b: int = 3;
+    if a == b {
+        printline("same");
+    }
+
+FIX:
+  Compare with the variable you meant. Delete the `if` if it was always meant
+  to run.
+
+RELATED: E155 (comparing a bool with true or false), E156 (assignment to
+  itself).

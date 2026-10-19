@@ -1,0 +1,22 @@
+This `compare` has no arms
+
+A `compare` picks an arm by matching a value against its `matches` headers. One with no arms and no `otherwise` has nothing to pick, so it does nothing at all:
+
+    immut n: int = 1;
+    compare n {
+    }                      // WARNING: no `matches` arms and no `otherwise`
+
+It is almost always a stub that was never filled in. Add the arms you meant:
+
+    immut n: int = 1;
+    compare n {
+        matches 1:
+            printline("one");
+        done
+        otherwise:
+            printline("other");
+    }
+
+If you are only sketching and want the program to keep compiling cleanly, delete the empty `compare` until you have the arms.
+
+This is a warning, not an error -- compilation still succeeds. To silence it for a whole build, set its lint level to allow: `turf build --allow E154` (or `[lints] E154 = "allow"` in turf.toml).

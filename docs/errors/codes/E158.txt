@@ -1,0 +1,37 @@
+This function has a lot of branches
+
+Turf counts the independent paths through each function (its cyclomatic complexity: roughly one for the function, plus one for each extra path an `if`, a loop or a `compare` arm opens up). A function above 15 gets this warning:
+
+    fn classify(n: int): int {
+        if n == 1 { return 10; }
+        if n == 2 { return 20; }
+        if n == 3 { return 30; }
+        if n == 4 { return 40; }
+        if n == 5 { return 50; }
+        if n == 6 { return 60; }
+        if n == 7 { return 70; }
+        if n == 8 { return 80; }
+        if n == 9 { return 90; }
+        if n == 10 { return 100; }
+        if n == 11 { return 110; }
+        if n == 12 { return 120; }
+        if n == 13 { return 130; }
+        if n == 14 { return 140; }
+        if n == 15 { return 150; }
+        return 0;           // WARNING: complexity 16, threshold 15
+    }
+
+A function with that many paths is hard to test and hard to read, since every path is a case you have to keep in your head. Usually the fix is to turn a long chain of `if`s into a `compare`, or to split the function into smaller helpers that each do one job:
+
+    fn classify(n: int): int {
+        compare n {
+            matches 1: return 10; done
+            matches 2: return 20; done
+            matches 3: return 30; done
+            otherwise: return 0;
+        }
+    }
+
+The threshold is a style rule, not a correctness rule. Some functions are branchy for good reason (a parser, a big state switch), and splitting them would make them harder to follow. When that is the case, allowing the warning is the right tool.
+
+This is a warning, not an error -- compilation still succeeds. To silence it for a whole build, set its lint level to allow: `turf build --allow E158` (or `[lints] E158 = "allow"` in turf.toml).

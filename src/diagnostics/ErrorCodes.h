@@ -69,6 +69,12 @@ struct ErrorCodeEntry {
   // compiles unchanged -- only the handful of rows that opt in add a
   // 5th `true`.
   bool Important = false;
+  // The 2.x minor release that introduced the code: 2.<SinceMinor>. Only a
+  // warning's value is ever read (LintLevels.h: `lint-set = "2.N"` leaves a
+  // warning newer than 2.N at `allow`). Every code that shipped in 2.0 keeps 0;
+  // a code added in 2.N states it as the fifth value of its row, after
+  // `Important`.
+  int SinceMinor = 0;
 };
 
 // The codes the raw LogErrorAt() path (Lexer.h) uses -- named, so a call site
@@ -452,6 +458,51 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // `struct Box<T> { ... }` written inside a function body
     // (ResolverDecl.cpp's visitStructDecl()).
     {ErrCode::LocalGenericStruct, "LocalGenericStructError", "Generic struct declared inside a function", SLM::ErrorCategory::DECLARATION},
+    // V-1 (TDP-2-003): the warnings that predate lint levels, given codes so a
+    // level can name them. All shipped in 2.0, so SinceMinor stays 0. A level
+    // names a code, never a class, so a warning with no row here could not be
+    // allowed or denied: add its row in the same change as its class
+    // (error_codes_check.sh fails a warning class that has none).
+    // A `let`/`mut` that reuses the name of one still in scope (CodegenVar.cpp).
+    {"E152", "ShadowingWarning", "Shadowed variable", SLM::ErrorCategory::DECLARATION},
+    // A machine state no `->` edge reaches (ParserDecl.cpp).
+    {"E153", "UnreachableStateWarning", "Machine state with no incoming transition", SLM::ErrorCategory::DECLARATION},
+    // A `compare` with no arm and no `otherwise` (ParserStmt.cpp).
+    {"E154", "CompareWarning", "Empty compare", SLM::ErrorCategory::CONTROL_FLOW},
+    // `x == true`, `x != false` (Lint.cpp).
+    {"E155", "RedundantComparisonWarning", "Redundant comparison", SLM::ErrorCategory::CONTROL_FLOW},
+    // `x = x;` (Lint.cpp).
+    {"E156", "SelfAssignmentWarning", "Assignment to itself", SLM::ErrorCategory::GENERAL},
+    // `while true` with no `break`, `continue` or `return` (Lint.cpp).
+    {"E157", "SuspiciousInfiniteLoopWarning", "Loop that looks infinite", SLM::ErrorCategory::CONTROL_FLOW},
+    // Cyclomatic complexity over 15 (Analysis.cpp).
+    {"E158", "CyclomaticComplexityWarning", "Function too complex", SLM::ErrorCategory::CONTROL_FLOW},
+    // A loop whose CFG cycle has no exit (Analysis.cpp).
+    {"E159", "InfiniteLoopWarning", "Loop with no exit path", SLM::ErrorCategory::CONTROL_FLOW},
+    // A value assigned and never read (Analysis.cpp).
+    {"E160", "DeadStoreWarning", "Dead store", SLM::ErrorCategory::CONTROL_FLOW},
+    // Every path assigns again before reading (Analysis.cpp).
+    {"E161", "DeadInitializerWarning", "Initial value never read", SLM::ErrorCategory::CONTROL_FLOW},
+    // A `for` range whose step moves away from its end (TypeCheckerStmt.cpp).
+    {"E162", "RangeNeverEndsWarning", "Range that never ends", SLM::ErrorCategory::CONTROL_FLOW},
+    // A local that is declared and never read (Analysis.cpp).
+    {"E163", "UnusedVariableWarning", "Unused variable", SLM::ErrorCategory::CONTROL_FLOW},
+    // Neither `step` nor the body changes the loop variable (Lint.cpp).
+    {"E164", "StuckForLoopVariableWarning", "Loop variable never changes", SLM::ErrorCategory::CONTROL_FLOW},
+    // An `if`/`else if`/`else` block with no statement (Lint.cpp).
+    {"E165", "EmptyBranchWarning", "Empty branch", SLM::ErrorCategory::CONTROL_FLOW},
+    // `x == x`, `x < x` (Lint.cpp).
+    {"E166", "SelfComparisonWarning", "Comparison with itself", SLM::ErrorCategory::GENERAL},
+    // `x / 0`, `x % 0` (Lint.cpp).
+    {"E167", "DivisionByZeroLiteralWarning", "Division by a zero literal", SLM::ErrorCategory::ARITHMETIC},
+    // An `if` and its `else` that do the same thing (Lint.cpp).
+    {"E168", "IdenticalBranchesWarning", "Identical branches", SLM::ErrorCategory::CONTROL_FLOW},
+    // A `!T` function with no error return (ResolverDecl.cpp).
+    {"E169", "NeverReturnsErrorWarning", "Fallible function that never fails", SLM::ErrorCategory::CONTROL_FLOW},
+    // A pointer used after `mem::free` on some path (AliasAnalysis.cpp).
+    {"E170", "PossibleUseAfterFreeWarning", "Possible use after free", SLM::ErrorCategory::MEMORY_ERROR},
+    // A pointer freed twice on some path (AliasAnalysis.cpp).
+    {"E171", "PossibleDoubleFreeWarning", "Possible double free", SLM::ErrorCategory::MEMORY_ERROR},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);
@@ -478,6 +529,17 @@ inline const ErrorCodeEntry *lookupByCode(const std::string &Code) {
     if (Code == Entry.Code)
       return &Entry;
   return nullptr;
+}
+
+// True for a code whose diagnostic is a warning: its class derives from
+// TurfWarning, and every such class is named `...Warning` (error_codes_check.sh
+// holds the registry to it). Only a warning has a lint level to choose
+// (LintLevels.h); an error is always an error.
+inline bool isWarningCode(const ErrorCodeEntry &Entry) {
+  static constexpr char Suffix[] = "Warning";
+  const size_t Len = std::strlen(Entry.ClassName);
+  return Len >= sizeof(Suffix) - 1 &&
+         std::strcmp(Entry.ClassName + Len - (sizeof(Suffix) - 1), Suffix) == 0;
 }
 
 // Per-code documentation lives in TWO parallel trees, one per audience --

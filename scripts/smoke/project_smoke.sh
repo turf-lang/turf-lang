@@ -430,6 +430,37 @@ t unsafe_self "$P8/app" build
 expect_rc "a dependency cannot allow itself" unsafe_self 1
 expect_out "a dependency cannot allow itself" unsafe_self "[E130"
 
+# --- [lints] (V-1) --------------------------------------------------------------
+# The manifest's levels reach the compiler as flags ahead of the user's own.
+P9=$WORK/p9
+mkdir -p "$P9"
+t new_app9 "$P9" new app
+printf 'fn main(): int {\n    mut unused: int = 5;\n    return 0;\n}\n' > "$P9/app/src/main.tr"
+mkdir -p "$P9/app/tests"
+printf 'fn main(): int {\n    mut unused: int = 5;\n    return 0;\n}\n' > "$P9/app/tests/unused_var.tr"
+cp "$P9/app/turf.toml" "$WORK/toml9"
+lints_case() { # lints_case <label> <rc> <fragment> <[lints] body> [turf args...]
+  local label=$1 rc=$2 frag=$3 body=$4
+  shift 4
+  { cat "$WORK/toml9"; [ -z "$body" ] || printf '\n[lints]\n%b' "$body"; } > "$P9/app/turf.toml"
+  t lints_case "$P9/app" "${@:-build}"
+  expect_rc "lints: $label" lints_case "$rc"
+  [ -z "$frag" ] || expect_out "lints: $label" lints_case "$frag"
+}
+lints_case "no table: the warning is shown and the build succeeds" 0 "[E163" ""
+lints_case "allow" 0 "" 'E163 = "allow"\n'
+expect_no_out "lints: allow" lints_case "E163"
+lints_case "deny" 1 "error at line 2, col 5 [E163" 'E163 = "deny"\n'
+lints_case "a flag on the command line beats the table" 0 "" 'E163 = "deny"\n' build --allow E163
+lints_case "lint-set is accepted" 0 "[E163" 'lint-set = "2.0"\n'
+lints_case "an unknown code is the compiler's usage error" 2 "unknown diagnostic code 'E999'" 'E999 = "deny"\n'
+lints_case "an error's code cannot be allowed" 2 "E102 is an error, not a warning" 'E102 = "allow"\n'
+lints_case "a key that is not a code" 1 "unknown key \`unused\` in [lints]" 'unused = "allow"\n'
+lints_case "a level that is not one" 1 "'forbid' is not allow, warn or deny" 'E163 = "forbid"\n'
+lints_case "a lint set newer than the compiler" 2 "is newer than this compiler" 'lint-set = "2.99"\n'
+lints_case "turf test passes the table on" 1 "COMPILE FAILED" 'E163 = "deny"\n' test
+cp "$WORK/toml9" "$P9/app/turf.toml"
+
 # --- refusals -------------------------------------------------------------------
 LOOSE=$WORK/loose
 mkdir -p "$LOOSE"

@@ -621,8 +621,8 @@ EXPECT-EXIT missed: the program exited with 3, not 134
 
 A warning does not stop a compile, so an ordinary test (a file that is not
 `fail_`) compiles, runs, and passes. `EXPECT-DIAG` with text instead of a code
-pins that the compiler said something. Warnings have no code, so match their
-words. `tests/warnings/unused_variable_warns.tr`:
+pins that the compiler said something. A warning has a code too (`E163` is the
+unused variable), so `EXPECT-DIAG: E163` pins it; text works as well. `tests/warnings/unused_variable_warns.tr`:
 
 ```turflang
 // EXPECT-DIAG: is declared but never used
@@ -662,7 +662,7 @@ shows the warning:
 EXPECT-NO-DIAG violated: the compiler output contains 'warning'
 ~/code/temperature/src/temperature.tr (1 warning)
 
-── warning at line 4, col 5
+── warning at line 4, col 5 [E163 · control flow]
 
   Warning: Variable 'spare' is declared but never used.
   ...

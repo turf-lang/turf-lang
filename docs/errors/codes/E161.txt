@@ -1,0 +1,21 @@
+The starting value of this variable is never used
+
+A variable is declared with an initial value, but every path assigns it again before anything reads it, so the starting value is never seen:
+
+    fn main(): int {
+        mut result: int = 0;    // WARNING: assigned again before it is read
+        result = 5;
+        return result - 5;
+    }
+
+The `= 0` is dead weight, and it can hide a mistake: if you forget the later assignment on one path, the `0` quietly takes over. Declare the variable without a value and let Turf check that every read comes after an assignment:
+
+    fn main(): int {
+        mut result: int;
+        result = 5;
+        return result - 5;
+    }
+
+If a path can reach a read before the assignment, Turf rejects it (see E008), which is the point.
+
+This is a warning, not an error -- compilation still succeeds. To silence it for a whole build, set its lint level to allow: `turf build --allow E161` (or `[lints] E161 = "allow"` in turf.toml).

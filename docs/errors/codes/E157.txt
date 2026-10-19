@@ -1,0 +1,24 @@
+This loop looks like it never ends
+
+A `while true` (or `do { } while true`) whose body has no `break`, no `continue` and no `return` has no way out, so the loop runs for ever:
+
+    mut n: int = 0;
+    while true {           // WARNING: nothing in the body can leave this loop
+        n += 1;
+    }
+
+If you meant the loop to stop, give it an exit:
+
+    mut n: int = 0;
+    while true {
+        n += 1;
+        if n >= 10 {
+            break;
+        }
+    }
+
+Or put the stopping condition into the loop header and drop the `true`: `while n < 10 { ... }`.
+
+This is a check on the shape of the loop, so it can fire on a loop that is meant to run for ever: a server's main loop, or a program that ends some other way, such as by calling `sys::exit`. When the loop is intentional, allowing the warning is the right tool, ideally with a comment saying why.
+
+This is a warning, not an error -- compilation still succeeds. To silence it for a whole build, set its lint level to allow: `turf build --allow E157` (or `[lints] E157 = "allow"` in turf.toml).

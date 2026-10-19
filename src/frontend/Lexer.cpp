@@ -19,6 +19,7 @@
 #include "frontend/Lexer.h"
 #include "diagnostics/Colors.h"
 #include "diagnostics/ErrorCodes.h"
+#include "diagnostics/LintLevels.h"
 #include "diagnostics/ErrorsLex.h" // MalformedRadixPrefixError and friends (SEM-001) -- see
                        // ErrorsLex.h's own top comment for why Lexer.cpp,
                        // alone among the lexer/parser split, includes a
@@ -318,7 +319,8 @@ static void writeCompilerFixes(const std::vector<DiagnosticEngine::Diag> &Diags)
 
 // Internal helper: physically print one diagnostic to stderr.
 static void printDiag(const DiagnosticEngine::Diag &D) {
-  bool isWarning = D.IsWarning || isMessageWarning(D.Msg);
+  // A denied warning is an error even though its text still says "Warning:".
+  bool isWarning = !D.Denied && (D.IsWarning || isMessageWarning(D.Msg));
 
   const std::string &AccentColor =
       isWarning ? Colors::BRIGHT_YELLOW : Colors::BRIGHT_RED;
@@ -392,6 +394,13 @@ static void printDiag(const DiagnosticEngine::Diag &D) {
   if (!D.Hint.empty()) {
     std::cerr << "\n  " << Colors::BRIGHT_GREEN << "Hint: " << D.Hint << Colors::RESET << "\n";
   }
+
+  // V-1: a warning the build turned into an error says so, or the reader would
+  // look for the mistake in a check that is normally only advice.
+  if (D.Denied)
+    std::cerr << "\n  " << Colors::BRIGHT_BLACK << D.Code
+              << " is a warning by default; its lint level here is deny."
+              << Colors::RESET << "\n";
 
   // Code snippet with │ gutter. Looked up from AllSourceLines (a persistent,
   // cross-pass, per-file cache) via D.Filename, NOT the transient global
@@ -517,8 +526,31 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
   // resolves correctly even for diagnostics raised by a pass that runs after
   // every file has already finished parsing (Resolver/TypeChecker/Codegen).
   std::string Filename = Loc.Filename.empty() ? SourceFilename : Loc.Filename;
+
+  // V-1 (LintLevels.h): the level the build chose for this warning's code.
+  // `allow` records nothing; `deny` records an error, and from here on this IS
+  // an error (it blocks the build, takes the error's cascade rule, reaches the
+  // facade as an error). A denied warning inside lib/std stays the hidden
+  // warning it is: the user did not write that code and cannot fix it, so
+  // `--deny` must not fail a build over it (--stdlib-warnings opts back in).
+  bool Denied = false;
+  if (IsWarning && !Code.empty() && LintLevels::anySet()) {
+    switch (LintLevels::levelOf(Code)) {
+    case LintLevels::Level::Allow:
+      return;
+    case LintLevels::Level::Deny:
+      if (g_ShowStdlibWarnings || !IsLibStdWarningLocation(Filename)) {
+        IsWarning = false;
+        Denied = true;
+      }
+      break;
+    case LintLevels::Level::Warn:
+      break;
+    }
+  }
+
   Diag New{Loc, Msg, Hint, IsWarning, Related, Category, Filename, Code, Hints,
-           CompilerFix{}, false};
+           CompilerFix{}, false, Denied};
 
   // Conditionally invoke SLM analysis based on CLI configuration.
   // Errors only -- see the "IMPORTANT" note in the function doc comment
@@ -589,9 +621,10 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
   // The same warning at the same place, twice, says nothing new. A warning
   // raised while parsing comes twice for the main file, which is parsed
   // twice (an unreachable machine state, an empty `compare`).
-  if (IsWarning)
+  if (IsWarning || Denied)
     for (const Diag &D : Diagnostics)
-      if (D.IsWarning && D.Loc.Line == Loc.Line && D.Loc.Col == Loc.Col &&
+      if ((D.IsWarning || D.Denied) && D.Loc.Line == Loc.Line &&
+          D.Loc.Col == Loc.Col &&
           D.Filename == Filename && D.Msg == finalMessage)
         return;
 
@@ -676,7 +709,8 @@ void DiagnosticEngine::flushAll() {
     while (End < Shown.size() && Shown[End]->Filename == Shown[Begin]->Filename) {
       // Same rule as printDiag()'s own label, so the counts agree with what is
       // printed under them (a raw LogErrorAt() "warning:" message counts too).
-      if (Shown[End]->IsWarning || isMessageWarning(Shown[End]->Msg))
+      if (!Shown[End]->Denied &&
+          (Shown[End]->IsWarning || isMessageWarning(Shown[End]->Msg)))
         ++Warnings;
       else
         ++Errors;
