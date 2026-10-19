@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: '@deprecated' takes exactly one argument
+// A bare `@deprecated` says nothing about what to use instead, so it is
+// rejected instead of warning with an empty message.
+
+@deprecated
+fn make(): int {
+    return 1;
+}
+
+fn main(): int {
+    return make();
+}

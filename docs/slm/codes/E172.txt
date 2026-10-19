@@ -1,0 +1,31 @@
+TURF E172 -- USE OF A DEPRECATED ITEM (WARNING):
+
+CAUSE:
+  A call reached a function (or `extern fn`) declared `@deprecated("...")`.
+  This is a WARNING: compilation still succeeds, and the item still works
+  exactly as before.
+
+INCORRECT (not really incorrect -- just discouraged):
+    @deprecated("use new_sort() instead")
+    fn old_sort(l: List<int>): List<int> {
+        return l;
+    }
+
+    fn main(): int {
+        old_sort(List::default());   // WARNING: deprecated
+        return 0;
+    }
+
+CORRECT (call what the message names instead):
+    fn main(): int {
+        new_sort(List::default());
+        return 0;
+    }
+
+FIX:
+  Call the replacement the declaration's own message names. If there is no
+  replacement yet, the warning can be silenced for a whole build with
+  `--allow E172` or `[lints] E172 = "allow"` in turf.toml.
+
+RELATED: none (the `@deprecated` annotation itself is checked as E146,
+  InvalidAnnotationError, if its argument is malformed).

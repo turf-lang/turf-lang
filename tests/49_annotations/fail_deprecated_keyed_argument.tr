@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: argument is positional, not 'key: value'
+// `@deprecated`'s message is positional, not `key: value` like `@ffi`'s
+// platform pairs -- one declaration deprecates in exactly one way.
+
+@deprecated(reason: "use make_checked instead")
+fn make(): int {
+    return 1;
+}
+
+fn main(): int {
+    return make();
+}
