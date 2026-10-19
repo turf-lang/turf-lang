@@ -1,0 +1,24 @@
+// Regression test for a specific expression chaining prefix AND postfix
+// ++/-- on the same variable five times in one statement. In C this exact
+// shape is UNDEFINED BEHAVIOR (x is modified more than once with no
+// sequence point between the modifications) -- Turf has no such UB: every
+// binary node evaluates its LHS fully, then its RHS, recursively and
+// deterministically (left-to-right), so this expression has one single
+// correct answer, not "whatever the compiler happened to do."
+//
+// Traced by hand (x starts at 5):
+//   x++      -> reads 5, stores x=6,  contributes OLD value 5
+//   ++x      -> x=6 -> 7,             contributes NEW value 7      : 5+7=12
+//   ++x      -> x=7 -> 8,             contributes NEW value 8      : 12-8=4
+//   x--      -> reads 8, stores x=7,  contributes OLD value 8      : 4-8=-4
+//   --x      -> x=7 -> 6,             contributes NEW value 6      : -4-6=-10
+// Final value: -10. x ends at 6.
+import test;
+
+fn main(): int {
+    mut x: int = 5;
+    mut r: int = x++ + ++x - ++x - x-- - --x;
+    test::assert(r == -10, "chained prefix/postfix ++/-- should evaluate deterministically to -10");
+    test::assert(x == 6, "x should end at 6 after the chain");
+    return 0;
+}

@@ -1,0 +1,21 @@
+// Regression test (found by LEC-003): in the original `switch` lowering of
+// `compare`, `matches true:` sign-extended its i1 constant to -1 while the
+// subject was zero-extended to 1, so the `true` arm NEVER matched and the
+// compare silently fell through. Nothing exercised it because a bool compare
+// was never exhaustiveness-checked and so rarely written.
+import test;
+
+fn f(b: bool): int {
+    mut r: int = 7;
+    compare b {
+        matches true: r = 1; done
+        matches false: r = 0; done
+    }
+    return r;
+}
+
+fn main(): int {
+    test::assert(f(true) == 1, "the `true` arm must match true");
+    test::assert(f(false) == 0, "the `false` arm must match false");
+    return 0;
+}

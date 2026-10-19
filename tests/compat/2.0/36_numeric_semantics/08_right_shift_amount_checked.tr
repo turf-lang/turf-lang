@@ -1,0 +1,23 @@
+// '>>' is an arithmetic shift with an amount in [0, 63] (found by turf-fuzz's
+// differential oracle: an unchecked ashr is poison for an amount outside that
+// range, so -O0 returned the operand unchanged and -O1+ printed garbage). An
+// out-of-range amount traps like '<<' does; see the fail_ twins. Operands come
+// through a function so no level can fold them away.
+
+import test;
+
+fn id(x: int): int {
+    return x;
+}
+
+fn main(): int {
+    test::assert(id(-8) >> id(1) == -4, "sign is kept");
+    test::assert(id(-1) >> id(63) == -1, "63 is the largest amount");
+    test::assert(id(9223372036854775807) >> id(63) == 0, "a positive value shifts to 0");
+    test::assert(id(12345) >> id(0) == 12345, "0 is the identity");
+
+    mut c: int = id(-9223372036854775807 - 1);
+    c >>= id(62);
+    test::assert(c == -2, ">>= uses the same rule");
+    return 0;
+}

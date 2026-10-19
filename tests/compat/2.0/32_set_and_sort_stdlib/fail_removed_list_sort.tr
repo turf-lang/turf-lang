@@ -1,0 +1,20 @@
+// LEC-007 (R1): the deprecated `list_sort` free function is gone; the only
+// spelling is the generic method `l.sort(cmp)`. This pins the removal so a
+// later "restore the wrapper for compatibility" shows up as a failing test
+// instead of a quiet re-freeze of a name the 2.x surface deliberately lacks.
+// EXPECT-DIAG: E030
+// EXPECT-DIAG: has nothing named 'list_sort'
+import list::List;
+import list::list_sort;
+
+fn cmp_int(a: int, b: int): int {
+    return a - b;
+}
+
+fn main(): int {
+    mut l: List<int> = List::default();
+    l.push(2);
+    l.push(1);
+    list_sort(l, cmp_int);
+    return 0;
+}

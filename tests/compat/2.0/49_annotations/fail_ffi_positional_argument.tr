@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: arguments are written 'platform: symbol'
+// `@ffi` takes `platform: symbol` pairs; a bare word has no platform.
+
+@ffi(strlen)
+extern fn text_length(s: string): int;
+
+fn main(): int {
+    return 0;
+}

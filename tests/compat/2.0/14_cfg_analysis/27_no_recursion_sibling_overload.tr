@@ -1,0 +1,30 @@
+// Regression test: CFG::allPathsRecurse()'s infinite-recursion detector
+// used to identify a "self-call" purely by the callee's base name
+// (ResolvedCallTarget->BaseName == FunctionName). That's correct for a
+// non-overloaded function, but wrong the moment two DIFFERENT overloads
+// share a name: `fn greet(name: string)` calling `greet(name, "hello")` --
+// a real, non-recursive call to a completely different sibling overload --
+// used to be flagged as "Infinite recursion detected in 'greet'", a false
+// positive that made exactly the delegate-to-a-wider-overload idiom a
+// minimal test::assert() library naturally wants to use (`test::assert(cond)` calling
+// `test::assert(cond, defaultMsg)`) impossible to compile.
+//
+// Fixed by comparing mangled names (which encode parameter types, so they
+// uniquely identify one overload) instead of base names -- see
+// CFG::MangledFunctionName and blockContainsSelfCall's doc comments.
+import io;
+
+import test;
+fn greet(name: string): string {
+    return greet(name, "hello");
+}
+
+fn greet(name: string, prefix: string): string {
+    return prefix + ", " + name;
+}
+
+fn main(): int {
+    test::assert(greet("world") == "hello, world", "sibling-overload delegation should not be treated as recursion");
+    io::printline(greet("world"));
+    return 0;
+}

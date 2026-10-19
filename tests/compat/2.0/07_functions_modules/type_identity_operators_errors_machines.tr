@@ -1,0 +1,69 @@
+// FDN-003: the rest of the type-name surface, across two modules that reuse
+// every name -- operator overloads resolved by exact operand identity
+// (F-OP-1), error types through `recover`, state machines, `sizeof`, a
+// struct declared locally inside a module function, and a List of a
+// module-owned struct (GC-traced through its `module.Name` descriptor).
+
+import test;
+import list::List;
+import type_identity_ops_a_module;
+import type_identity_ops_b_module;
+
+// A third `Vec`, this file's own.
+struct Vec {
+    s: string
+}
+
+fn bErrorKind(): int {
+    mut v: int = type_identity_ops_b_module::check(-5) recover as err run {
+        if (err == type_identity_ops_b_module::Bad::Nope) {
+            return 1;
+        }
+        return 2;
+    };
+    return v;
+}
+
+fn main(): int {
+    mut a: type_identity_ops_a_module::Vec =
+    type_identity_ops_a_module::vec(2) + type_identity_ops_a_module::vec(3);
+    mut b: type_identity_ops_b_module::Vec =
+    type_identity_ops_b_module::vec(1.5) + type_identity_ops_b_module::vec(2.0);
+    test::assert(a.x == 5, "a::Vec's operator +");
+    test::assert(b.x == 3.5, "b::Vec's operator +");
+    test::assert(b.y == 1.0, "b::Vec's second field");
+
+    mut ra: int = type_identity_ops_a_module::check(-1) recover produce 100;
+    mut rb: int = type_identity_ops_b_module::check(3) recover produce 100;
+    test::assert(ra == 100, "a::Bad recovered");
+    test::assert(rb == 6, "b::check success");
+    test::assert(bErrorKind() == 1, "b::Bad::Nope compared by identity");
+
+    test::assert(type_identity_ops_a_module::light() == type_identity_ops_a_module::Light::Red, "a::Light");
+    test::assert(type_identity_ops_b_module::light() == type_identity_ops_b_module::Light::Off, "b::Light");
+    test::assert(typeof(type_identity_ops_b_module::light()) == "type_identity_ops_b_module::Light", "typeof a machine");
+
+    test::assert(type_identity_ops_a_module::vecSize() == 8, "sizeof(a::Vec)");
+    test::assert(type_identity_ops_b_module::vecSize() == 16, "sizeof(b::Vec)");
+    test::assert(type_identity_ops_a_module::local() == 4, "a's local struct");
+    test::assert(type_identity_ops_b_module::local() == 5, "b's local struct");
+
+    mut l: List<type_identity_ops_b_module::Vec> = List::default();
+    mut i: int = 0;
+    while (i < 2000) {
+        l.push(type_identity_ops_b_module::vec(i to double));
+        i = i + 1;
+    }
+    mut total: double = 0.0;
+    i = 0;
+    while (i < l.length()) {
+        total = total + l.get(i).x;
+        i = i + 1;
+    }
+    test::assert(total == 1999000.0, "List of a module-owned struct");
+
+    mut mine: Vec = Vec::default();
+    mine.s = "main";
+    test::assert(mine.s == "main", "the file's own Vec");
+    return 0;
+}

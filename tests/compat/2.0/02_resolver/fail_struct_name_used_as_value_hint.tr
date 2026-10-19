@@ -1,0 +1,15 @@
+// EXPECT-DIAG: E040
+// EXPECT-DIAG: 'Node' is a struct, not a value
+// EXPECT-DIAG: Node::default()
+// EXPECT-NO-DIAG: Did you forget to create this variable
+// EXPECT-NO-DIAG: mut Node: int = 5;
+// LEC-005: E040's hint for a name that IS declared -- as a type -- used where
+// a value belongs. The old hint ("Did you forget to create this variable? ...
+// `mut Node: int = 5;`") is advice for a misspelled variable; for a struct it
+// tells the user to declare a variable named after their own type.
+struct Node { v: int }
+
+fn main(): int {
+    mut a: int = Node;
+    return a;
+}

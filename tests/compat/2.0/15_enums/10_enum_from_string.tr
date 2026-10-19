@@ -1,0 +1,29 @@
+// Test: String-to-enum casting (from_string)
+import test;
+
+enum Direction { North, East, South, West }
+
+fn main(): int {
+    immut n: Direction = "North" to Direction;
+    immut e: Direction = "East"  to Direction;
+    immut s: Direction = "South" to Direction;
+    immut w: Direction = "West"  to Direction;
+
+    test::assert(n == Direction::North, "\"North\" to Direction == North");
+    test::assert(e == Direction::East,  "\"East\"  to Direction == East");
+    test::assert(s == Direction::South, "\"South\" to Direction == South");
+    test::assert(w == Direction::West,  "\"West\"  to Direction == West");
+
+    // Round-trip: enum -> string -> enum
+    immut orig: Direction = Direction::East;
+    immut sval: string    = orig to string;
+    immut back: Direction = sval to Direction;
+    test::assert(back == Direction::East, "Round-trip East -> string -> East");
+
+    // Cast ordinal values match
+    test::assert((n to int) == 0, "North ordinal");
+    test::assert((e to int) == 1, "East ordinal");
+    test::assert((s to int) == 2, "South ordinal");
+    test::assert((w to int) == 3, "West ordinal");
+    return 0;
+}

@@ -1,0 +1,15 @@
+// EXPECT-DIAG: E056
+// EXPECT-DIAG: No overload of 'mem::Pool.track' matches argument types (string)
+// A Pool's storage is manual memory the collector never scans, so a GC value
+// tracked there would be freed under it. Pool holds `void*` only, and a
+// `string` does not convert to `void*` without an explicit cast.
+import mem;
+
+fn main(): int {
+    unsafe {
+        mut pool: mem::Pool = mem::Pool::default();
+        pool.track("a" + "b");
+        mem::free_pool(pool);
+    }
+    return 0;
+}

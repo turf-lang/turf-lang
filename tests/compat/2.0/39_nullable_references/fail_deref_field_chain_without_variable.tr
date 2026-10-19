@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E081
+// EXPECT-DIAG: this '&?Node' value might be 'null', but you're accessing its 'val' field
+// EXPECT-DIAG: A null check only works on a variable
+// `p.next` is a `&?Node`; reading `.val` through it was never checked, because
+// NullabilityPass looked at variable bases only. With `next` null this faulted
+// at -O0 and printed garbage at -O2 (FREEZE 6.6: a `&?T` "must be null-tested
+// before use"). Found by turf-fuzz probing.
+struct Node { val: int, next: &?Node }
+
+fn main(): int {
+    mut p: &Node = heap(Node::default());
+    return p.next.val;
+}

@@ -1,0 +1,29 @@
+// tests/13_string_stdlib/03_string_comparison_ordering.tr
+// Verifies that <, >, <=, >= work on strings (byte-by-byte via strcmp).
+// Previously these operators were only wired for numeric types — applying them
+// to strings caused a TypeChecker error or undefined results.
+
+import io;
+
+import test;
+fn main(): int {
+    test::assert("apple" < "banana", "apple < banana");
+    test::assert("a" < "b", "a < b");
+    test::assert("A" < "a", "A < a (uppercase < lowercase in ASCII)");
+
+    test::assert("z" > "a", "z > a");
+    test::assert("banana" > "apple", "banana > apple");
+
+    test::assert("cat" <= "cat", "cat <= cat (equality)");
+    test::assert("apple" <= "banana", "apple <= banana");
+
+    test::assert("dog" >= "cat", "dog >= cat");
+    test::assert("cat" >= "cat", "cat >= cat (equality)");
+
+    // Negatives
+    test::assert(("banana" < "apple") == false, "banana < apple must be false");
+    test::assert(("a" > "z") == false, "a > z must be false");
+
+    io::printline("03 PASS: string ordering operators");
+    return 0;
+}

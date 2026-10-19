@@ -1,0 +1,9 @@
+// EXPECT-DIAG: E135
+// EXPECT-DIAG: This expression has type 'int', not a function
+// Regression test: same crash as fail_call_literal.tr, via a call's result.
+fn helper(): int { return 1; }
+
+fn main(): int {
+    helper()();
+    return 0;
+}

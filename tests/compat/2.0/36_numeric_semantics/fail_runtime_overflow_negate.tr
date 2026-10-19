@@ -1,0 +1,16 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: runtime check: Integer overflow
+// SEM-002 (FREEZE.md §6.2 row 7 names negation explicitly): negating a
+// genuine RUNTIME INT64_MIN value traps -- contrast with
+// 01_int_literal_bounds_round_trip.tr's `-9223372036854775808` LITERAL,
+// which is a different, always-legal case (unary '-' folds into an
+// untyped literal before any check; see UnaryExprAST::codegen()'s own
+// comment, CodegenExpr.cpp). Here the INT64_MIN value is computed at
+// runtime (via subtraction), so it's a genuine value being negated, not a
+// literal being folded.
+fn main(): int {
+    mut a: int = -9223372036854775807;
+    a = a - 1;
+    mut b: int = -a;
+    return 0;
+}

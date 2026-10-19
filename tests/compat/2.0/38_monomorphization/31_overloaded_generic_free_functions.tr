@@ -1,0 +1,36 @@
+// Regression test (found by LEC-006): two generic free functions with the same
+// name and different parameter lists are two templates. The monomorphizer used
+// to key a template by (module, name), so `f(1)` and `f(1, 2)` were ONE
+// instantiation whose clone served both calls -- "Incorrect number of
+// arguments passed to called function" at codegen. Generic operators hit it at
+// once, since every spelling is overloaded (unary/binary `-`, `+` by right
+// operand).
+import test;
+
+fn<T> f(x: T): int {
+    return 1;
+}
+
+fn<T> f(x: T, y: T): int {
+    return 2;
+}
+
+fn<T> g(x: T): int {
+    return 10;
+}
+
+fn<T> g(x: T, k: int): int {
+    return 20;
+}
+
+fn main(): int {
+    test::assert(f(1) == 1, "f(x) at int");
+    test::assert(f(1, 2) == 2, "f(x, y) at int");
+    test::assert(f("a") == 1, "f(x) at string");
+    test::assert(f("a", "b") == 2, "f(x, y) at string");
+
+    // Same arity, different parameter types.
+    test::assert(g(1) == 10, "g(x) at int");
+    test::assert(g(1, 5) == 20, "g(x, k) at int");
+    return 0;
+}

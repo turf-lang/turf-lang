@@ -1,0 +1,25 @@
+// EXPECT-DIAG: E098
+// EXPECT-DIAG: Cannot call 'bump' on the value an 'operator[]' read returned
+// Negative test (LEC-006, E098): `bs[0].bump()` assigns to `self.a`, but the
+// receiver is the copy bs[0] returned, so the list's element never changes.
+// Expected: E098, "Cannot call 'bump' on the value an 'operator[]' read returned".
+import list::List;
+
+struct Big {
+    a: int
+}
+
+fn Big.new(a: int): void {
+    self.a = a;
+}
+
+fn Big.bump(): void {
+    self.a = self.a + 1;
+}
+
+fn main(): int {
+    mut bs: List<Big> = List::default();
+    bs.push(Big::new(1));
+    bs[0].bump();
+    return 0;
+}

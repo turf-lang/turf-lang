@@ -1,0 +1,17 @@
+// tests/31_fs_and_path_stdlib/04_fs_extension.tr
+// Tests fs::extension -- everything after the last '.' in the basename,
+// "" if there's none, and specifically NOT treating a hidden-file-style
+// leading dot (".gitignore") as an extension.
+
+import fs;
+import test;
+
+fn main(): int {
+    test::assert_eq(fs::extension("a/b/c.txt"), "txt", "extension: realistic nested path");
+    test::assert_eq(fs::extension("file"), "", "extension: no '.' at all -> ''");
+    test::assert_eq(fs::extension(".gitignore"), "", "extension: hidden-file leading dot is NOT an extension");
+    test::assert_eq(fs::extension(".gitignore.txt"), "txt", "extension: hidden file WITH a real extension");
+    test::assert_eq(fs::extension("archive.tar.gz"), "gz", "extension: multiple dots -> only the LAST one counts");
+
+    return 0;
+}

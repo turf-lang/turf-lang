@@ -1,0 +1,17 @@
+// Regression coverage for issue #239 (Track B): os::argc()/os::argv(i).
+//
+// scripts/test_runner.sh invokes the compiled binary with no extra CLI
+// arguments, so argc() is exactly 1 (argv(0), the program's own invocation
+// path) under this test -- covers the always-true baseline plus the
+// bounds-checked out-of-range case (CodegenFunc.cpp's synthesized
+// TurfRuntimeGetArgv never crashes on an out-of-range index, it returns "").
+import os;
+import test;
+
+fn main(): int {
+    test::assert(os::argc() >= 1, "argc() includes at least argv(0)");
+    test::assert(os::argv(0) != "", "argv(0) is the program's own invocation path, never empty");
+    test::assert(os::argv(999999) == "", "an out-of-range argv index returns \"\", not a crash");
+
+    return 0;
+}

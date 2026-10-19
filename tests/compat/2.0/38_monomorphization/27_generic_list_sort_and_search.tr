@@ -1,0 +1,84 @@
+// Regression test: STD-003's genuine `fn<T> List.sort(cmp: fn(T, T):
+// int): void` / `binary_search(target: T, cmp: fn(T, T): int): int` /
+// `find(predicate: fn(T): bool): int` (lib/std/collections/list.tr) --
+// only possible once the compiler's generic substitution machinery
+// (collectGenericSubstitution()/typesCompatible() in
+// src/sema/TypeCheckerCall.cpp/src/sema/Types.cpp, Monomorphize::substituteConcreteTypes(),
+// Resolver::substituteTypeParams()) learned to recurse into a FuncType
+// parameter's own parameter/return types -- a real, separate compiler fix
+// (docs/development/changes/STD-003.md), not a stdlib-only change.
+// Exercised here across FOUR distinct instantiations: int, double, string,
+// and a plain-data struct with its own comparator -- proving the fix is
+// genuinely generic, not an int-specific coincidence.
+import list::List;
+import test;
+
+struct Point {
+    x: int,
+    y: int
+}
+
+fn cmpInt(a: int, b: int): int { return a - b; }
+fn isEven(x: int): bool { return x % 2 == 0; }
+
+fn cmpDouble(a: double, b: double): int {
+    if (a < b) { return -1; }
+    if (a > b) { return 1; }
+    return 0;
+}
+
+fn cmpString(a: string, b: string): int {
+    if (a < b) { return -1; }
+    if (a > b) { return 1; }
+    return 0;
+}
+
+// Sort by distance-from-origin-squared -- a comparator that actually reads
+// BOTH fields of a plain-data struct T, not just a single scalar.
+fn cmpPointByDistance(a: Point, b: Point): int {
+    immutable da: int = a.x * a.x + a.y * a.y;
+    immutable db: int = b.x * b.x + b.y * b.y;
+    return da - db;
+}
+
+fn main(): int {
+    // int
+    mut li: List<int> = List::default();
+    li.push(5); li.push(1); li.push(4); li.push(2); li.push(3);
+    li.sort(cmpInt);
+    test::assert(li.get(0) == 1 && li.get(1) == 2 && li.get(2) == 3 &&
+        li.get(3) == 4 && li.get(4) == 5, "List<int>.sort");
+    test::assert(li.binary_search(4, cmpInt) == 3, "List<int>.binary_search found");
+    test::assert(li.binary_search(99, cmpInt) == -1, "List<int>.binary_search absent");
+    test::assert(li.find(isEven) == 1, "List<int>.find (value 2, index 1)");
+
+    // double
+    mut ld: List<double> = List::default();
+    ld.push(3.5); ld.push(1.5); ld.push(2.5);
+    ld.sort(cmpDouble);
+    test::assert(ld.get(0) == 1.5 && ld.get(1) == 2.5 && ld.get(2) == 3.5,
+        "List<double>.sort");
+    test::assert(ld.binary_search(2.5, cmpDouble) == 1, "List<double>.binary_search");
+
+    // string
+    mut ls: List<string> = List::default();
+    ls.push("banana"); ls.push("apple"); ls.push("cherry");
+    ls.sort(cmpString);
+    test::assert(ls.get(0) == "apple" && ls.get(1) == "banana" &&
+        ls.get(2) == "cherry", "List<string>.sort");
+    test::assert(ls.binary_search("banana", cmpString) == 1,
+        "List<string>.binary_search");
+
+    // struct (Point, > 8 bytes not required here, but a genuine multi-field
+    // by-value struct -- proves the comparator sees real field values, not
+    // an erased/reinterpreted bit pattern)
+    mut lp: List<Point> = List::default();
+    mut p1: Point = Point::default(); p1.x = 3; p1.y = 4;   // dist^2 = 25
+    mut p2: Point = Point::default(); p2.x = 1; p2.y = 1;   // dist^2 = 2
+    mut p3: Point = Point::default(); p3.x = 0; p3.y = 5;   // dist^2 = 25
+    lp.push(p1); lp.push(p2); lp.push(p3);
+    lp.sort(cmpPointByDistance);
+    test::assert(lp.get(0).x == 1 && lp.get(0).y == 1, "List<Point>.sort: nearest first");
+
+    return 0;
+}

@@ -1,0 +1,38 @@
+// tests/13_string_stdlib/17_stress_10k_concat.tr
+// Stress test: concatenate 10,000 short strings in a loop, verify final length.
+// This exercises the heap allocator path in EmitStringConcat heavily and would
+// surface any segfault from the old alloca bug if it were still present.
+//
+// Each iteration appends "a" (1 char), so after 10,000 iterations the result
+// must have length 10,000.
+
+import io;
+import strings;
+
+import test;
+fn main(): int {
+    mut s: string = "";
+    mut i: int = 0;
+    while i < 10000 {
+        s = s + "a";
+        i = i + 1;
+    }
+
+    test::assert(strings::length(s) == 10000, "10k concat: final length must be 10000");
+
+    // Spot-check: starts and ends with 'a'
+    test::assert(strings::starts_with(s, "a"), "10k concat: starts with a");
+    test::assert(strings::ends_with(s, "a"),   "10k concat: ends with a");
+
+    // All characters must be 'a' — spot-check first 10
+    mut j: int = 0;
+    while j < 10 {
+        // FDN-004/D17: `s[j]` is `char`; compare against the char literal
+        // directly, no cast needed.
+        test::assert(s[j] == 'a', "10k concat: char at position is 'a'");
+        j = j + 1;
+    }
+
+    io::printline("17 PASS: 10k string concatenation stress test");
+    return 0;
+}

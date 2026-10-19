@@ -1,0 +1,36 @@
+// The accepted forms beside fail_method_call_without_check.tr: a method call
+// on a `&?T` variable inside its null check, and a UFCS call whose callee
+// takes the `&?T` itself (it receives the reference; nothing is read here).
+import test;
+
+struct Node { val: int, next: &?Node }
+
+fn Node.bump(k: int): void {
+    self.val = self.val + k;
+}
+
+fn Node.get(): int {
+    return self.val;
+}
+
+fn count(p: &?Node): int {
+    mut n: int = 0;
+    mut c: &?Node = p;
+    while (c != null) {
+        n += 1;
+        c = c.next;
+    }
+    return n;
+}
+
+fn main(): int {
+    mut q: &?Node = heap(Node::default());
+    if (q != null) {
+        q.bump(4);
+        test::assert(q.get() == 4, "method calls inside the check");
+    }
+    test::assert(q.count() == 1, "UFCS on a function that takes &?Node");
+    mut none: &?Node = null;
+    test::assert(none.count() == 0, "UFCS passes a null through");
+    return 0;
+}

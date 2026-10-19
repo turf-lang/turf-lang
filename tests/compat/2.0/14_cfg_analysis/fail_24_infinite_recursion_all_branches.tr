@@ -1,0 +1,15 @@
+// EXPECT-DIAG: E010
+// EXPECT-DIAG: Infinite recursion detected in 'bad_recurse'
+// Regression test (#186): every branch of the if-else recurses.
+// There is no path to a return that doesn't go through a self-call.
+// Must emit RecursionWithoutBaseError.
+fn bad_recurse(n: int): int {
+    if n > 0 {
+        return bad_recurse(n - 1);
+    } else {
+        return bad_recurse(n + 1);
+    }
+}
+fn main(): int {
+    return bad_recurse(5);
+}

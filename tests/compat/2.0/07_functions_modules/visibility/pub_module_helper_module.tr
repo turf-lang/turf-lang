@@ -1,0 +1,25 @@
+// Companion for pub_across_modules.tr (ends in _module.tr, so the runner
+// treats it as a helper with no main()).
+pub struct Counter {
+    pub count: int,
+    by: int
+}
+
+pub fn Counter.bump(): int {
+    self.count = self.count + self.by;
+    return self.count;
+}
+
+pub fn make_counter(by: int): Counter {
+    mut c: Counter = Counter::default();
+    c.by = by;
+    return c;
+}
+
+fn internal_only(): int {
+    return 99;
+}
+
+pub fn reveal(): int {
+    return internal_only();
+}

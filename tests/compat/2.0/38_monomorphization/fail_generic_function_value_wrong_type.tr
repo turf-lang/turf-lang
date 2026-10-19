@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E066
+// EXPECT-DIAG: no choice of 'T' makes it 'fn(int): string'
+// `id` returns its own argument's type, so no instantiation is fn(int): string.
+fn<T> id(x: T): T {
+    return x;
+}
+
+fn main(): int {
+    immut f: fn(int): string = id;
+    return 0;
+}

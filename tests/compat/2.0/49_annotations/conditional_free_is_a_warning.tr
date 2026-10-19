@@ -1,0 +1,52 @@
+// EXPECT-DIAG: 'p' may already have been freed on some path reaching this call
+// EXPECT-DIAG: 'q' may already have been freed on some path reaching this use
+// EXPECT-NO-DIAG: E017
+// EXPECT-NO-DIAG: E018
+// A pointer released on SOME paths only is a warning, not an error: whether the
+// second release (or the use) is wrong depends on a condition the alias
+// analysis cannot evaluate, and here the `freed` flag makes it correct.
+// Released on EVERY path, it stays an error (fail_stdlib_mem_double_free.tr,
+// ../05_arrays_pointers_ffi/fail_use_after_free.tr).
+//
+// This matters since `mem::alloc`/`mem::free` declare `@ownership`: before
+// that, calls through `mem::` were invisible to the analysis, and this correct
+// program was rejected with E017 once they became visible.
+
+import mem;
+import test;
+
+fn main(): int {
+    mut flag: int = 1;
+    mut freed: bool = false;
+    unsafe {
+        mut p: void* = mem::alloc(8);
+        if flag == 1 {
+            mem::free(p);
+            freed = true;
+        }
+        if !freed {
+            mem::free(p);
+        }
+    }
+
+    @ownership(acquires)
+    extern fn malloc(size: int): int*;
+
+    @ownership(releases: p)
+    extern fn free(p: int*): void;
+
+    mut q_freed: bool = false;
+    unsafe {
+        mut q: int* = malloc(sizeof(int) * 4);
+        if flag == 2 {
+            free(q);
+            q_freed = true;
+        }
+        if !q_freed {
+            q[0] = 1;
+            free(q);
+        }
+    }
+    test::assert(freed && !q_freed, "each pointer was released exactly once");
+    return 0;
+}

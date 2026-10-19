@@ -1,0 +1,173 @@
+// Test: Linked list demonstration using self-referential struct Node.
+//
+// This test exercises Turf's linked-list capabilities:
+//
+//   - Stack-allocated Node instances with val: int, next: Node* fields
+//   - Direct field reads (n.val, n.next)
+//   - Read-only struct methods via self (Node.get, Node.is_tail)
+//   - Mutating struct methods via self (Node.setVal) -- persists to the
+//     caller, since MethodCallExprAST::codegen() passes self by lvalue
+//     pointer, not by value.
+//   - Node* fields initialized to null (structural pointer marker)
+//   - `&expr` (AddressOfExprAST) to actually chain nodes via next: Node*
+//   - fn(p: Node*): int field access (p.val) through a plain function
+//     parameter, not just through self
+//   - Multi-node value computation via helper functions
+//
+// Previously (see git history) this file documented three "known
+// limitations" -- self-mutation not persisting, fn(p: Node*) field access
+// failing with "Cannot access field on non-struct type", and no address-of
+// operator to chain nodes at all -- as unfixed gaps with no corresponding
+// fail_*.tr files ever actually added. Re-verified during a Codegen review
+// pass (FieldAccessExprAST/MethodCallExprAST): all three already work
+// correctly. The docstring was stale; this file now exercises all three
+// directly instead of working around them.
+
+import test;
+
+// (issue #238) struct decl wrapped in `unsafe { }`: `next` is a genuinely
+// nullable raw pointer (a `&T` safe reference can never be null), so this
+// field can't become `&Node`. See 12_address_of_operator.tr's own comment
+// for the fuller rationale -- this file follows the identical pattern.
+unsafe {
+    struct Node {
+        val: int,
+        next: Node*
+    }
+}
+
+// (issue #238) No longer takes `next` as a parameter: a plain function
+// (struct methods included) can never have a raw ptr/T* parameter, even
+// inside `unsafe { }` -- see checkNoRawPointersInSignature(). Every
+// caller now sets `.next` via a separate direct field assignment after
+// construction (see main() below) -- itself not gated, since writing a
+// `&T` value into an already-unsafely-declared raw pointer field is the
+// same always-sound safe-to-raw widening 12_address_of_operator.tr's own
+// comment explains (src/sema/Types.cpp's Rule 2.5).
+fn Node.new(val: int): void {
+    self.val = val;
+    unsafe {
+        self.next = null;
+    }
+}
+
+// Read-only method: return the node's val via self
+fn Node.get(): int {
+    return self.val;
+}
+
+// Mutating method: overwrite self.val. Persists to the caller because self
+// is passed as an lvalue pointer (see MethodCallExprAST::codegen()), not a
+// by-value copy.
+fn Node.setVal(v: int): void {
+    self.val = v;
+}
+
+// Read-only method: true if next pointer is null (structural tail check).
+// self.next reads a raw-pointer-TYPED field off `self` -- not a
+// dereference THROUGH a raw pointer base (self is always non-null and
+// exempt regardless, see visitFieldAccess()'s own comment) -- so this
+// needs no `unsafe { }` at all.
+fn Node.is_tail(): bool {
+    return self.next == null;
+}
+
+// Plain function (not a struct method) taking a SAFE reference parameter
+// (issue #238: used to be `p: Node*`, no longer allowed -- see
+// checkNoRawPointersInSignature()) and reading a field off it -- exercises
+// FieldAccessExprAST's NamedType -> TurfStructType resolution outside of
+// the self/method-call path.
+fn nodeVal(p: &Node): int {
+    return p.val;
+}
+
+// Helper: fold sum over explicit values extracted from nodes
+fn sum2(a: int, b: int): int {
+    return a + b;
+}
+
+// Helper: maximum of two ints (ternary avoids >= + { parser ambiguity)
+fn max2(a: int, b: int): int {
+    mut r: int = a > b give a otherwise b;
+    return r;
+}
+
+fn main(): int {
+    // ── Construction ─────────────────────────────────────────────────────────
+    // Three stack-allocated nodes.  Constructed tail-first so each node's
+    // `next` can point at an already-initialized later node via `&`. `&n3`/
+    // `&n2` are `&Node` (safe references); assigning one into a `Node*`
+    // field is the always-sound safe-to-raw widening (src/sema/Types.cpp's Rule
+    // 2.5), so this needs no `unsafe { }` -- only the struct/constructor
+    // declarations above did.
+    mut n3: Node = Node::new(30);
+    mut n2: Node = Node::new(20);
+    n2.next = &n3;
+    mut n1: Node = Node::new(10);
+    n1.next = &n2;
+
+    // ── Real chaining via address-of ─────────────────────────────────────────
+    // n1 -> n2 -> n3 -> null. Each `.field` access THROUGH a raw `Node*`
+    // base (n1.next, n1.next.next, ...) is a gated "dereference" (issue
+    // #238) -- there's no explicit deref operator, so this is the closest
+    // proxy the gate has -- hence the `unsafe { ...; }` wrapping every
+    // multi-hop chain below (`unsafe { }` used as a value-producing
+    // expression: its type is its last statement's type, see
+    // TypeChecker::visitUnsafeBlock()).
+    test::assert(unsafe { n1.next.val; } == 20, "n1.next should point at n2 (val 20)");
+    test::assert(unsafe { n1.next.next.val; } == 30, "n1.next.next should point at n3 (val 30)");
+    test::assert(unsafe { n1.next.next.next; } == null, "n3.next should still be null");
+
+    // ── fn(p: &Node) field access on a chained pointer ───────────────────────
+    // n1.next/n1.next.next are raw Node* values; converting one to &Node
+    // for nodeVal() is the raw-to-safe direction, which always requires an
+    // explicit cast inside `unsafe { }` (it might have been null).
+    test::assert(unsafe { nodeVal(n1.next to &Node); } == 20, "nodeVal(n1.next) should read n2.val");
+    test::assert(unsafe { nodeVal(n1.next.next to &Node); } == 30, "nodeVal(n1.next.next) should read n3.val");
+
+    // ── Mutating method: self.val = v persists to the caller ────────────────
+    n2.setVal(99);
+    test::assert(n2.val == 99, "n2.val should be 99 after setVal(99)");
+    test::assert(unsafe { n1.next.val; } == 99, "n1.next.val should see the mutation through the chain");
+    n2.setVal(20); // restore for the assertions below
+
+    // ── Field reads ───────────────────────────────────────────────────────────
+    test::assert(n1.val == 10, "n1.val should be 10");
+    test::assert(n2.val == 20, "n2.val should be 20");
+    test::assert(n3.val == 30, "n3.val should be 30");
+
+    // ── is_tail: only n3 (next == null) is a tail; n1/n2 point onward ────────
+    test::assert(n1.is_tail() == false, "n1 should not be a tail (points at n2)");
+    test::assert(n2.is_tail() == false, "n2 should not be a tail (points at n3)");
+    test::assert(n3.is_tail() == true, "n3 should be a tail");
+
+    // ── get(): read-only accessor ─────────────────────────────────────────────
+    test::assert(n1.get() == 10, "n1.get() should be 10");
+    test::assert(n2.get() == 20, "n2.get() should be 20");
+    test::assert(n3.get() == 30, "n3.get() should be 30");
+
+    // ── Direct field mutation ─────────────────────────────────────────────────
+    // Both direct field assignment and method-based mutation (setVal above) work.
+    n1.val = 5;
+    test::assert(n1.val == 5, "n1.val should be 5 after direct assignment");
+    n1.val = 10;   // restore
+
+    // ── Summation (list reduce) ───────────────────────────────────────────────
+    // Equivalent to summing over [n1.val=10, n2.val=20, n3.val=30]
+    mut total: int = sum2(sum2(n1.val, n2.val), n3.val);
+    test::assert(total == 60, "sum of [10, 20, 30] should be 60");
+
+    // ── Max across nodes ──────────────────────────────────────────────────────
+    mut biggest: int = max2(max2(n1.val, n2.val), n3.val);
+    test::assert(biggest == 30, "max of [10, 20, 30] should be 30");
+
+    // ── Conceptual "prepend": replace head value ──────────────────────────────
+    n1.val = 0;
+    mut new_total: int = sum2(sum2(n1.val, n2.val), n3.val);
+    test::assert(new_total == 50, "sum after head mutation should be 50");
+
+    // ── Null sentinel on the tail's next pointer field ────────────────────────
+    test::assert(n3.next == null, "n3.next should be null (n3 is the tail)");
+
+    return 0;
+}

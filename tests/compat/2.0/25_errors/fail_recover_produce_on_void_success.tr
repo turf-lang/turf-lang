@@ -1,0 +1,17 @@
+// EXPECT-DIAG: E066
+// EXPECT-DIAG: 'recover produce int' doesn't match this call's success type 'void'
+// Test (fail): Errors.md's own explicit example -- 'recover produce value'
+// is invalid when the call's success type is 'void' (there's no value to
+// produce a mismatched replacement for).
+error IOError {
+    FileNotFound,
+}
+
+fn writeFile(path: string): !void {
+    return IOError::FileNotFound;
+}
+
+fn main(): int {
+    writeFile("a.txt") recover produce 42;
+    return 0;
+}

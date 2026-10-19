@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E092
+// EXPECT-DIAG: 'x' is bound twice in the same pattern
+// LEC-003: one name can bind one value per pattern. Expected: E092.
+struct P { x: int, y: int }
+fn main(): int {
+    mut p: P = P::default();
+    compare p {
+        matches P { x, y: x }: return x; done
+        otherwise: return 0;
+    }
+}

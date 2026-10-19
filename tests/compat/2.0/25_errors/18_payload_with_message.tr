@@ -1,0 +1,49 @@
+// LEC-004 / STD-002 (DEC-12): a variant with N fields takes N arguments, or N+1
+// where the extra trailing `string` is the message. The message stays universal:
+// `err.message` reads it without destructuring (and `""` when absent), while the
+// pattern reads the payload. A variant with no fields still takes 0 or 1.
+import io;
+import test;
+
+error IOError {
+    NotFound(path: string),
+    Denied(path: string, mode: int),
+    Timeout
+}
+
+fn failWith(which: int): !int {
+    if which == 0 { return IOError::NotFound("a.txt", "no such file"); }
+    if which == 1 { return IOError::NotFound("b.txt"); }
+    if which == 2 { return IOError::Denied("c.txt", 3, "permission"); }
+    if which == 3 { return IOError::Timeout("timed out"); }
+    return IOError::Timeout;
+}
+
+fn report(which: int): string {
+    immut _n: int = failWith(which) recover as err run {
+        compare err {
+            matches IOError::NotFound(path):
+            return path + "|" + err.message;
+            done
+            matches IOError::Denied(path, _):
+            return path + "|" + err.message;
+            done
+            matches IOError::Timeout:
+            return "t|" + err.message;
+            done
+            otherwise:
+            return "?";
+        }
+    };
+    return "ok";
+}
+
+fn main(): int {
+    test::assert(report(0) == "a.txt|no such file", "fields and a message together");
+    test::assert(report(1) == "b.txt|", "fields without a message read back an empty message");
+    test::assert(report(2) == "c.txt|permission", "two fields and a message");
+    test::assert(report(3) == "t|timed out", "a field-less variant with a message, unchanged");
+    test::assert(report(4) == "t|", "a field-less variant without one, unchanged");
+    io::printline("25/18 PASS");
+    return 0;
+}

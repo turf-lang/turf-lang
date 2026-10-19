@@ -1,0 +1,35 @@
+// lib/std/double.tr's UFCS helpers. All prelude, no import needed.
+
+import test;
+
+fn main(): int {
+    mut five: double = 5.0;
+    mut negFive: double = 0.0 - 5.0;
+    mut zero: double = 0.0;
+    mut four: double = 4.0;
+    mut fourFive: double = 4.5;
+    mut twoFive: double = 2.5;
+    mut negTwoFive: double = 0.0 - 2.5;
+    mut twoSeven: double = 2.7;
+    mut negTwoSeven: double = 0.0 - 2.7;
+    mut twoTwo: double = 2.2;
+    mut negTwoTwo: double = 0.0 - 2.2;
+
+    test::assert_eq(five.sign(), 1.0, "sign(5.0) == 1.0");
+    test::assert_eq(negFive.sign(), 0.0 - 1.0, "sign(-5.0) == -1.0");
+    test::assert_eq(zero.sign(), 0.0, "sign(0.0) == 0.0");
+
+    test::assert(four.is_integer(), "4.0 is an integer");
+    test::assert(!fourFive.is_integer(), "4.5 is not an integer");
+
+    test::assert_eq(twoFive.round(), 3.0, "round(2.5) == 3.0");
+    test::assert_eq(negTwoFive.round(), 0.0 - 3.0, "round(-2.5) == -3.0");
+
+    test::assert_eq(twoSeven.floor(), 2.0, "floor(2.7) == 2.0");
+    test::assert_eq(negTwoSeven.floor(), 0.0 - 3.0, "floor(-2.7) == -3.0");
+
+    test::assert_eq(twoTwo.ceil(), 3.0, "ceil(2.2) == 3.0");
+    test::assert_eq(negTwoTwo.ceil(), 0.0 - 2.0, "ceil(-2.2) == -2.0");
+
+    return 0;
+}

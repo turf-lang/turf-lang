@@ -1,0 +1,14 @@
+// EXPECT-NO-DIAG: never used
+// EXPECT-NO-DIAG: dead store
+// LEC-005 / INV-LINT-1: the liveness walk (AnalysisVisitor) had no branch for
+// `&x`, so a variable whose only use is having its address taken was reported
+// "declared but never used". Taking an address is a use. The walk is now an
+// ExhaustiveASTVisitor, so a node kind it forgot to handle cannot compile.
+import test;
+
+fn main(): int {
+    mut x: int = 7;
+    mut r: &int = &x;
+    test::assert(r == &x, "the address of x was taken and compared");
+    return 0;
+}

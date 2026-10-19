@@ -1,0 +1,11 @@
+// LEC-008 (F-IMP-2): `import m::name;` brings in `name` only. The qualifier
+// still needs `import m;`, and the hint says why the symbol import is not it.
+// EXPECT-DIAG: E145
+// EXPECT-DIAG: brings in only that name
+import import_scope_inner_module::inner_value;
+
+fn main(): int {
+    immut a: int = inner_value();
+    immut b: int = import_scope_inner_module::make_inner(3).get();
+    return a + b;
+}

@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E107
+// EXPECT-DIAG: Expected '{' to open the do-block body
+// Regression test (Issue #180 follow-up): a do-while's body must be a
+// braced block, same as while/if/for -- `do` immediately followed by
+// anything other than '{' must be rejected with "Expected '{' to open the
+// do-block body.", not silently reinterpreted (e.g. as `do` followed by a
+// bare `while` statement).
+fn main(): int {
+    do while (true) {
+        return 0;
+    }
+    return 1;
+}

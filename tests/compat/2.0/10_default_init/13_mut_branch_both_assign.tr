@@ -1,0 +1,19 @@
+// Stress test: mut int assigned in a branch — if both branches assign, no error on use
+import io;
+
+import test;
+fn compute(cond: bool): int {
+    mut result: int;
+    if cond {
+        result = 1;
+    } else {
+        result = 2;
+    }
+    return result;
+}
+
+fn main(): int {
+    test::assert(compute(true) == 1, "true branch");
+    test::assert(compute(false) == 2, "false branch");
+    return 0;
+}

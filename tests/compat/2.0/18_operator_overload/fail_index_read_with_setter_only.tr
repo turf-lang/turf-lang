@@ -1,0 +1,19 @@
+// EXPECT-DIAG: E126
+// EXPECT-DIAG: Cannot index a value of type 'IntBox'
+// A type that declares only `operator []=` can be written through but not
+// read: `box[0]` has no `operator []` to call. The checker counted the setter
+// as "this type is indexable", gave the read no type, and Codegen died with
+// "LLVM ERROR: Base is not an array or pointer" (found by turf-fuzz, as a
+// mutation of 10_operator_index_get_set.tr that deleted the getter).
+struct IntBox {
+    a: int
+}
+
+operator []=(box: &IntBox, index: int, value: int): void {
+    box.a = value;
+}
+
+fn main(): int {
+    mut box: IntBox = IntBox::default();
+    return box[0];
+}

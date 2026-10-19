@@ -1,0 +1,8 @@
+// EXPECT-DIAG: E007
+// EXPECT-DIAG: 'continue' used outside of a loop
+fn main(): int {
+    if true {
+        continue;
+    }
+    return 0;
+}

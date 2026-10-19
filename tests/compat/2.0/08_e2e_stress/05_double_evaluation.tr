@@ -1,0 +1,51 @@
+import io;
+
+import test;
+extern fn malloc(size: int): int*;
+extern fn free(p: int*): void;
+
+// (issue #238) `counter: &int` -- a plain function may never have a raw
+// ptr/T* parameter, even inside `unsafe { }`; used to be `counter: int*`.
+// `counter[0]` reads and writes the int it refers to: a `&T` indexes as one
+// element (any other index is out of bounds).
+fn get_index(counter: &int): int {
+    counter[0] = counter[0] + 1;
+    return 0;
+}
+
+fn main(): int {
+    mut arr: int[3] = [10, 20, 30];
+
+    // malloc()'s raw int* result needs `unsafe { }` to bind to a caller-
+    // side local (FINAL_SPRINT.md's Track A "Caller-side locals" example),
+    // and converting it straight to `&int` here (rather than keeping a
+    // separate `int*` local) means every get_index(counter) call below
+    // needs no further cast -- the type already matches exactly.
+    unsafe {
+        mut counter: &int = malloc(sizeof(int)) to &int;
+        counter[0] = 0;
+
+        // Regular assignment should evaluate LHS once
+        arr[get_index(counter)] = 50;
+        test::assert(counter[0] == 1, "Counter should be 1 after normal assignment");
+
+        // Compound assignment should evaluate LHS once
+        arr[get_index(counter)] += 20;
+        test::assert(counter[0] == 2, "Counter should be 2 after compound assignment");
+        test::assert(arr[0] == 70, "arr[0] should be 70");
+
+        // Postfix should evaluate LHS once
+        arr[get_index(counter)]++;
+        test::assert(counter[0] == 3, "Counter should be 3 after postfix increment");
+        test::assert(arr[0] == 71, "arr[0] should be 71");
+
+        // Postfix decrement
+        arr[get_index(counter)]--;
+        test::assert(counter[0] == 4, "Counter should be 4 after postfix decrement");
+        test::assert(arr[0] == 70, "arr[0] should be 70");
+
+        free(counter);
+    }
+
+    return 0;
+}

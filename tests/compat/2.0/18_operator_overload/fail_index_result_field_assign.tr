@@ -1,0 +1,22 @@
+// EXPECT-DIAG: E098
+// EXPECT-DIAG: Cannot assign to part of the value an 'operator[]' read returned
+// Negative test (LEC-006, E098): `bs[0]` is the element returned BY VALUE by
+// operator[], so `bs[0].a = 50` would change a copy and the list would never see
+// it. Before E098 this compiled and silently lost the write.
+// Expected: E098, "Cannot assign to part of the value an 'operator[]' read returned".
+import list::List;
+
+struct Big {
+    a: int
+}
+
+fn Big.new(a: int): void {
+    self.a = a;
+}
+
+fn main(): int {
+    mut bs: List<Big> = List::default();
+    bs.push(Big::new(1));
+    bs[0].a = 50;
+    return 0;
+}

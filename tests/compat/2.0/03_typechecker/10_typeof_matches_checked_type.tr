@@ -1,0 +1,30 @@
+// `typeof` names the type the TypeChecker gave the expression. A char literal
+// was "unknown", and arithmetic on an `int32` (which is an `int`) said
+// "int32", because Codegen named the type from its own separate inference.
+
+import test;
+
+struct Box<T> {
+    v: T
+}
+
+fn<T> name_of(x: T): string {
+    return typeof(x);
+}
+
+fn main(): int {
+    mut a: int32 = 3;
+    mut c: char = 'x';
+    test::assert(typeof('a') == "char", "char literal");
+    test::assert(typeof(c) == "char", "char variable");
+    test::assert(typeof(a) == "int32", "int32 variable");
+    test::assert(typeof(a + a) == "int", "int32 arithmetic is int");
+    test::assert(typeof(a * 2) == "int", "int32 times a literal is int");
+    test::assert(typeof(1 + 2.0) == "double", "mixed arithmetic");
+
+    mut b: Box<int> = Box::default();
+    test::assert(typeof(b) == "Box<int>", "generic instance");
+    test::assert(name_of(b) == "Box<int>", "inside a generic body");
+    test::assert(name_of(2.5) == "double", "a generic parameter bound to double");
+    return 0;
+}

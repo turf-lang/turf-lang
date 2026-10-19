@@ -1,0 +1,45 @@
+// LEC-006: Map<K,V> and Set<T> index for every instantiation, not just
+// Map<string,int> / Set<int>. `Map<string, List<int>>` is the roadmap's own
+// example: the value is itself a generic struct, and `m["k"][1]` indexes the
+// result of the first `[]` with the second.
+import list::List;
+import map::Map;
+import set::Set;
+import test;
+
+fn main(): int {
+    mut m: Map<string, List<int>> = Map::default();
+    mut inner: List<int> = List::default();
+    inner.push(10);
+    inner.push(20);
+    m["k"] = inner;
+    test::assert(m.length() == 1, "Map<string, List<int>>[]= should grow the map");
+    test::assert(m["k"][1] == 20, "Map<string, List<int>>[k][1] -- nested index");
+
+    mut mi: Map<int, string> = Map::default();
+    mi[5] = "five";
+    mi[6] = "six";
+    test::assert(mi[5] == "five", "Map<int, string>[5]");
+    mi[5] = "FIVE";
+    test::assert(mi[5] == "FIVE", "Map<int, string>[]= should overwrite");
+    test::assert(mi.length() == 2, "overwriting a key must not grow the map");
+
+    mut ms: Map<string, string> = Map::default();
+    ms["a"] = "x";
+    test::assert(ms["a"] == "x", "Map<string, string>");
+
+    mut st: Set<string> = Set::default();
+    st.add("p");
+    st.add("q");
+    test::assert(st[0] == "p", "Set<string>[0] is insertion order");
+    test::assert(st[1] == "q", "Set<string>[1] is insertion order");
+
+    // The concrete instantiations that worked before LEC-006 are unchanged.
+    mut mc: Map<string, int> = Map::default();
+    mc["a"] = 1;
+    test::assert(mc["a"] == 1, "Map<string, int> still works");
+    mut sc: Set<int> = Set::default();
+    sc.add(7);
+    test::assert(sc[0] == 7, "Set<int> still works");
+    return 0;
+}

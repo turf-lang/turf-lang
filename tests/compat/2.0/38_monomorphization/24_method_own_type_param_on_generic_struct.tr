@@ -1,0 +1,37 @@
+// Regression test: D6 (docs/development/changes/TYPE-002.md, S15) -- a
+// method's OWN type parameter, declared ALONGSIDE the struct's own generic
+// parameter (`fn<T, U> Wrap.pick(other: U): U` on `struct Wrap<T>`), used
+// to abort the compiler: a debug build tripped `finishInstantiation()`'s
+// own INV-GEN-1 assertion ("a monomorphized clone's own parameter is still
+// a TurfGenericParamType after substitution"); a release build produced
+// "Internal compiler error: generated LLVM IR is invalid."
+//
+// Root cause: the Method-kind InstantiationRequest recorded for `w.pick(7)`
+// only ever carried the RECEIVER's own type arguments (`[int]` for
+// `Wrap<int>`), never the METHOD's own `U` -- silently dropping it, so the
+// clone's own `U` parameter never got substituted at drain time.
+// `fn<T> Wrap.pick(...)` (declaring only its OWN new params, not
+// redeclaring T) already worked before this fix; `fn<T, U>` (redeclaring
+// the struct's own T alongside a new U) is this language's standard idiom
+// for the shape (`fn<T> List.push` does exactly this), so it must work,
+// not just be rejected.
+import test;
+
+struct Wrap<T> { v: T }
+fn<T, U> Wrap.pick(other: U): U { return other; }
+fn<T> Wrap.get(): T { return self.v; }
+
+fn main(): int {
+    mut w: Wrap<int> = Wrap::default();
+    w.v = 100;
+    test::assert(w.pick(7) == 7, "Wrap<int>.pick<int>(7) should return 7");
+    test::assert(w.pick("hello") == "hello", "Wrap<int>.pick<string>(\"hello\") -- U independent of T");
+    test::assert(w.get() == 100, "Wrap<int>.get() should still report T=int correctly");
+
+    mut ws: Wrap<string> = Wrap::default();
+    ws.v = "base";
+    test::assert(ws.pick(9) == 9, "Wrap<string>.pick<int>(9) -- T=string, U=int, both concrete and independent");
+    test::assert(ws.get() == "base", "Wrap<string>.get() must independently coexist with Wrap<int>.get()");
+
+    return 0;
+}

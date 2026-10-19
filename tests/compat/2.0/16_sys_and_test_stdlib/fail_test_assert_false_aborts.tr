@@ -1,0 +1,10 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: 1 should never equal 2
+// A failing test::assert() actually aborts at runtime (via test::fail ->
+// sys::panic -> abort) -- must compile successfully, then abort at runtime.
+import test;
+
+fn main(): int {
+    test::assert(1 == 2, "1 should never equal 2");
+    return 0;
+}

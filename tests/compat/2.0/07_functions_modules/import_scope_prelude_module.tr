@@ -1,0 +1,7 @@
+// Companion for import_scope_prelude_in_module.tr (LEC-008, F-IMP-1): a MODULE
+// that spells a prelude module's qualifier without importing it. The prelude is
+// injected into the main file only, so this is the case that a naive "must be
+// imported by this file" rule would newly break.
+pub fn char_count(s: string): int {
+    return strings::length(s);
+}

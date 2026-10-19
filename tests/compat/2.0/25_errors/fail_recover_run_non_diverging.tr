@@ -1,0 +1,22 @@
+// EXPECT-DIAG: E132
+// EXPECT-DIAG: 'recover run' must end every path with 'return'
+// Test (fail): a 'recover run { ... }' block that doesn't 'produce' a value
+// must diverge (end in 'return') on every path -- otherwise there's nothing
+// for the recovered expression to evaluate to.
+error MathError {
+    DivisionByZero,
+}
+
+fn divide(a: int, b: int): !int {
+    if (b == 0) {
+        return MathError::DivisionByZero;
+    }
+    return a / b;
+}
+
+fn main(): int {
+    mut x: int = divide(10, 2) recover run {
+        mut y: int = 5;
+    };
+    return 0;
+}

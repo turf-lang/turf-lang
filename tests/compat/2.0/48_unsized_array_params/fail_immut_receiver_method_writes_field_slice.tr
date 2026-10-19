@@ -1,0 +1,29 @@
+// EXPECT-DIAG: E060
+// EXPECT-DIAG: 'Box.clear' changes it through a slice of one of its arrays
+// A method that hands a slice of one of self's array fields to a function
+// that writes it changes self -- so it can't be called on an `immut` value,
+// exactly like a method that assigns `self.data[0]` directly. (It used to
+// compile, and `b.data` came back zeroed.)
+fn fill(arr: int[], v: int): void {
+    for (i, _x) in arr {
+        arr[i] = v;
+    }
+}
+
+struct Box {
+    data: int[3]
+}
+
+fn Box.new(): void {
+    self.data = [1, 2, 3];
+}
+
+fn Box.clear(): void {
+    fill(self.data[..], 0);
+}
+
+fn main(): int {
+    immut b: Box = Box::new();
+    b.clear();
+    return 0;
+}

@@ -1,0 +1,15 @@
+// Regression test: calling the SECOND function of an imported module, past
+// both an `export immut` constant and a first function -- see
+// lib_block_null_propagation_module.tr's doc comment for the real bug this
+// covers (formerly tracked in the now-removed
+// docs/planning/CODE_REVIEW_GAPS_2026-07.md; see git history).
+import io;
+import test;
+import lib_block_null_propagation_module;
+
+fn main(): int {
+    immut result: int = lib_block_null_propagation_module::addBaseTwice(5);
+    io::printline(result); // 100 + (100 + 5) = 205
+    test::assert_eq(result, 205);
+    return 0;
+}

@@ -1,0 +1,22 @@
+import test;
+
+struct Flag {
+    val: int
+}
+
+fn Flag.side_effect(): bool {
+    self.val = 1;
+    return true;
+}
+
+fn main(): int {
+    mut f: Flag = Flag::default();
+
+    if false && f.side_effect() {
+        test::assert(false, "Entered if block");
+    }
+
+    test::assert(f.val == 0, "side_effect should NOT have run! Short-circuiting failed!");
+
+    return 0;
+}

@@ -1,0 +1,41 @@
+// tests/13_string_stdlib/11_dsa_palindrome_check.tr
+// DSA: Two-pointer palindrome check using character indexing.
+// Exercises: char access s[i], int comparison, loop, string equality.
+// A string is a palindrome if it reads the same forwards and backwards.
+
+import io;
+import strings;
+
+import test;
+fn is_palindrome(s: string): bool {
+    mut n: int = strings::length(s);
+    mut left: int = 0;
+    mut right: int = n - 1;
+    while left < right {
+        if s[left] != s[right] {
+            return false;
+        }
+        left = left + 1;
+        right = right - 1;
+    }
+    return true;
+}
+
+fn main(): int {
+    test::assert(is_palindrome("racecar"),      "racecar is palindrome");
+    test::assert(is_palindrome("abba"),         "abba is palindrome");
+    test::assert(is_palindrome("a"),            "single char is palindrome");
+    test::assert(is_palindrome(""),             "empty string is palindrome");
+    test::assert(is_palindrome("madam"),        "madam is palindrome");
+    test::assert(is_palindrome("aabbaa"),       "aabbaa is palindrome");
+
+    test::assert(is_palindrome("hello") == false,   "hello is not palindrome");
+    test::assert(is_palindrome("abcd") == false,    "abcd is not palindrome");
+    test::assert(is_palindrome("racecat") == false, "racecat is not palindrome");
+
+    // Longer palindromes
+    test::assert(is_palindrome("amanaplanacanalpanama"), "amanaplanacanalpanama is palindrome");
+
+    io::printline("11 PASS: DSA palindrome check");
+    return 0;
+}

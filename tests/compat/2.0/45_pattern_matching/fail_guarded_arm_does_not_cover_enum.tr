@@ -1,0 +1,14 @@
+// EXPECT-DIAG: E093
+// EXPECT-DIAG: Non-exhaustive enum comparison on 'Color'
+// LEC-003: a guarded arm never counts toward exhaustiveness -- its guard may
+// be false. Expected: E093.
+enum Color { Red, Green }
+fn f(c: Color): int {
+    mut r: int = 0;
+    compare c {
+        matches Color::Red: r = 1; done
+        matches Color::Green if r == 0: r = 2; done
+    }
+    return r;
+}
+fn main(): int { return f(Color::Red) - 1; }

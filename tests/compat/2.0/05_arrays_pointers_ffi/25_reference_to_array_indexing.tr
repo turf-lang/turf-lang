@@ -1,0 +1,58 @@
+// `r[i]` on a `&T[N]` indexes the array the reference points at, with the
+// array's own bounds check. It used to index the reference itself as if it
+// were a raw pointer to whole arrays. Any other `&T` is one element: `r[0]`.
+
+import test;
+
+struct P {
+    x: int
+}
+
+fn make(): &int[3] {
+    mut a: int[3] = [1, 2, 3];
+    return heap(a);
+}
+
+fn point(v: int): P {
+    mut o: P = P::default();
+    o.x = v;
+    return o;
+}
+
+fn make_points(): &P[2] {
+    mut a: P[2] = [point(4), point(7)];
+    return heap(a);
+}
+
+fn sum(r: &int[3]): int {
+    mut t: int = 0;
+    for i in 0..3 {
+        t += r[i];
+    }
+    return t;
+}
+
+fn bump(c: &int): void {
+    c[-1] = c[0] + 1;
+}
+
+fn main(): int {
+    mut n: int = 41;
+    bump(&n);
+    test::assert(n == 42, "a scalar reference is one element");
+
+    mut r: &int[3] = make();
+    test::assert(r[1] == 2, "read through the reference");
+    r[2] = 9;
+    r[0] += 5;
+    test::assert(r[2] == 9 && r[0] == 6, "write through the reference");
+    test::assert(r[-1] == 9, "negative index counts from the end");
+
+    mut q: &P[2] = make_points();
+    q[0].x = 11;
+    test::assert(q[0].x == 11 && q[1].x == 7, "struct elements through the reference");
+
+    mut local: int[3] = [10, 20, 30];
+    test::assert(sum(&local) == 60, "a reference to a local array");
+    return 0;
+}

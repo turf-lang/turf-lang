@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E020
+// EXPECT-DIAG: 'extern fn bar' conflicts with an earlier declaration
+// Negative test: same as fail_extern_conflicting_param_type.tr but the
+// conflict is in the RETURN type instead of a parameter type.
+extern fn bar(x: int): int;
+extern fn bar(x: int): double;
+
+fn main(): int {
+    return 0;
+}

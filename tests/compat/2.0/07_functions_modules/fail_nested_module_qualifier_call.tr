@@ -1,0 +1,18 @@
+// EXPECT-DIAG: E136
+// EXPECT-DIAG: modules can't be qualified by another module
+// Regression test: `Module::Module2::func(...)` (a module name qualified by
+// ANOTHER module name) is meaningless -- modules aren't nested inside other
+// modules via '::' at all -- and must be rejected, not silently ignored.
+// Before this check existed, the leading ModuleQualifier of a 3-part chain
+// was only ever consulted for the enum/static-method cases; a
+// ModuleFunctionRef callee ignored it completely, so `mem::io::printline(
+// ...)` compiled identically to plain `io::printline(...)` regardless of
+// the (nonsensical) leading qualifier.
+
+import io;
+import mem;
+
+fn main(): int {
+    mem::io::printline("should not compile");
+    return 0;
+}

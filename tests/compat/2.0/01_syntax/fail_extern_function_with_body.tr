@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E116
+// EXPECT-DIAG: extern function declarations cannot have a body
+// An `extern fn` announces a function that lives elsewhere (usually in C), so
+// there is nothing to write between braces.
+extern fn malloc(size: int): ptr {
+    return null;
+}
+
+fn main(): int {
+    return 0;
+}

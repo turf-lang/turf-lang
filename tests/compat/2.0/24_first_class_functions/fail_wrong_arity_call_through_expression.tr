@@ -1,0 +1,9 @@
+// EXPECT-DIAG: E044
+// EXPECT-DIAG: The called function value expects 1 argument, got 2
+// A call through an expression is checked like a call through a variable.
+fn inc(x: int): int { return x + 1; }
+fn make(): fn(int): int { return inc; }
+
+fn main(): int {
+    return make()(1, 2);
+}

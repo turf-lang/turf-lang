@@ -1,0 +1,19 @@
+// EXPECT-DIAG: E085
+// EXPECT-DIAG: 'Node' is ambiguous here
+// FDN-003: E085 AmbiguousTypeReferenceError. `import M::[*];` brings M's
+// `Node` into this file's bare namespace, and this file declares its own
+// `Node` -- both declarations are legal on their own (type identity is
+// (module, name)), but a BARE `Node` could now mean either, so its use is
+// rejected, naming both. Not resolved by "the local one wins": a rule that
+// is too strict can be relaxed after 2.0 without breaking anyone.
+
+import type_identity_node_a_module::[*];
+
+struct Node {
+    s: string
+}
+
+fn main(): int {
+    mut n: Node = Node::default();
+    return 0;
+}

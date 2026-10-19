@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E128
+// EXPECT-DIAG: can only declare a local variable
+// F-GUESS-3: inference is local and one-directional, never for a parameter.
+// A parameter has no initializer to infer from. Before, this compiled and the
+// error appeared at the CALL as "No matching overload".
+fn double_it(x: guess): int {
+    return x * 2;
+}
+
+fn main(): int {
+    return 0;
+}

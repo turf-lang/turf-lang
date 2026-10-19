@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E088
+// EXPECT-DIAG: Method 'Guarded.new' is private to module
+// LEC-002 E088: `Guarded::new` is an ordinary method with its own visibility,
+// and it is private here (`Guarded::make` is the public way in).
+import visibility_lib_module::Guarded;
+
+fn main(): int {
+    mut g: Guarded = Guarded::new(1);
+    return g.v;
+}

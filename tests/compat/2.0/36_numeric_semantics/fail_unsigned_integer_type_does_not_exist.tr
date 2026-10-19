@@ -1,0 +1,8 @@
+// EXPECT-DIAG: E042
+// EXPECT-DIAG: Unknown type 'uint'
+// F-NUM-5: no new integer widths and no unsigned types: `int` (64-bit) and
+// `int32` (for FFI) only.
+fn main(): int {
+    mut count: uint = 1;
+    return 0;
+}

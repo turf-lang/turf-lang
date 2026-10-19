@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E064
+// EXPECT-DIAG: In this instantiation: Return type mismatch: function declares 'int' but returns '&int'
+// The template is checked again for T = int, where `&T` is not `T`.
+fn<T> deref(p: &T): T {
+    return p;
+}
+
+fn main(): int {
+    mut v: int = 4;
+    return deref(&v);
+}

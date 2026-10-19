@@ -1,0 +1,1 @@
+panic: runtime check: C::transition(Connecting) -- no such transition from the current state. (fail_machine_narrowing_lost_after_reference.tr:19)

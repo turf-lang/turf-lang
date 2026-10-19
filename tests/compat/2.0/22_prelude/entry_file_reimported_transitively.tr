@@ -1,0 +1,35 @@
+// tests/22_prelude/entry_file_reimported_transitively.tr
+// OVH-011 (docs/planning/OVERHAUL_REMAINING_WORK.md): the GENERAL regression
+// for the "entry file transitively re-imported by one of its own imports"
+// bug class -- not the lib/std-specific reproducer (compiling
+// lib/std/collections/list.tr directly, which the always-injected `strings`
+// prelude module's own `import list::List;` transitively re-imports; that
+// case is covered by scripts/dev/session_postflight.sh's stdlib sweep, since
+// list.tr has no main() and can't be an ordinary runnable test here), but
+// the general case any multi-file user program could hit: this file
+// imports its own companion module
+// (entry_file_reimported_transitively_module.tr, below), and that
+// companion imports THIS file back.
+//
+// Before OVH-011, ParseFile()'s ImportedFiles/ImportStack machinery had no
+// entry for the file currently being compiled as the entry point at all --
+// it's parsed by main.cpp's own top-level token-consuming loop, never
+// through ParseFile() -- so the companion's backward `import` triggered a
+// second, completely independent parse of this file's own source text,
+// registering EntryMarker a second time: E034 "A struct named 'EntryMarker'
+// is already declared", before this file compiled at all.
+struct EntryMarker { value: int }
+
+import entry_file_reimported_transitively_module;
+import test;
+
+fn entryValue(): int {
+    return 42;
+}
+
+fn main(): int {
+    mut m: EntryMarker = EntryMarker::default();
+    m.value = entryValue();
+    test::assert(m.value == 42, "entry file's own declarations are usable exactly once, not duplicated");
+    return 0;
+}

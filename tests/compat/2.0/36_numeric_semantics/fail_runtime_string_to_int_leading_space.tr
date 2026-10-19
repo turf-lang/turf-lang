@@ -1,0 +1,9 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: Invalid string to int conversion
+// No surrounding space and no leading `+`, as in parse_int.
+
+fn main(): int {
+    mut s: string = " " + "12";
+    mut n: int = s to int;
+    return n;
+}

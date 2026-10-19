@@ -1,0 +1,7 @@
+// Companion for fail_import_scope_diamond.tr (LEC-008): one side of a diamond
+// that imports import_scope_inner_module itself.
+import import_scope_inner_module;
+
+pub fn left(): int {
+    return import_scope_inner_module::inner_value();
+}

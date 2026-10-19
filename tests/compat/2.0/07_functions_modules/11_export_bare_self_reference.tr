@@ -1,0 +1,10 @@
+// Regression test: a module's own free function referencing its own
+// `export immut` constant BARE (self-reference, no import needed) -- see
+// lib_export_self_ref_module.tr's doc comment for the real bug this covers.
+import io;
+import lib_export_self_ref_module;
+
+fn main(): int {
+    io::printline(lib_export_self_ref_module::scaleUp(5));
+    return 0;
+}

@@ -1,0 +1,18 @@
+// EXPECT-DIAG: E148
+// EXPECT-DIAG: 'Point' is not generic -- it takes no type arguments
+// A struct with no type parameters has no template to instantiate, so
+// `Point<int>` is rejected where it is written, not inside the monomorphizer.
+
+struct Point {
+    x: int,
+    y: int
+}
+
+fn first(p: Point<int>): int {
+    return p.x;
+}
+
+fn main(): int {
+    mut p: Point = Point::default();
+    return first(p);
+}

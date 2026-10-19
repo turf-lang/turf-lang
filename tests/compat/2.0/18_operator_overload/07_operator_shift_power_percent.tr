@@ -1,0 +1,51 @@
+// LANG-001: <<, >>, **, % newly overloadable on a struct.
+import test;
+
+struct Wrapped {
+    v: int
+}
+
+operator <<(a: Wrapped, b: int): Wrapped {
+    mut r: Wrapped = Wrapped::default();
+    r.v = a.v << b;
+    return r;
+}
+
+operator >>(a: Wrapped, b: int): Wrapped {
+    mut r: Wrapped = Wrapped::default();
+    r.v = a.v >> b;
+    return r;
+}
+
+operator **(a: Wrapped, b: int): int {
+    mut result: int = 1;
+    for i in 0..b step i += 1 {
+        result = result * a.v;
+    }
+    return result;
+}
+
+operator %(a: Wrapped, b: int): int {
+    return a.v % b;
+}
+
+fn main(): int {
+    mut w: Wrapped = Wrapped::default();
+    w.v = 3;
+
+    mut shl: Wrapped = w << 2;
+    mut shr: Wrapped = w >> 1;
+    mut pw: int = w ** 3;
+    mut md: int = w % 2;
+
+    test::assert(shl.v == 12, "Wrapped << int should shift left");
+    test::assert(shr.v == 1, "Wrapped >> int should shift right");
+    test::assert(pw == 27, "Wrapped ** int should call the user overload");
+    test::assert(md == 1, "Wrapped % int should call the user overload");
+
+    // Builtin numeric **/%% still work unaffected.
+    test::assert(2 ** 3 == 8, "builtin ** still works");
+    test::assert(7 % 3 == 1, "builtin % still works");
+
+    return 0;
+}

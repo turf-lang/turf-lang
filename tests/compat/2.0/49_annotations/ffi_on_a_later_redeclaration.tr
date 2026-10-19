@@ -1,0 +1,19 @@
+// `@ffi` is a fact about the C symbol, so it holds whichever declaration of the
+// symbol carries it. Here the FIRST declaration of `text_length` is a plain
+// one; the forwarding used to be decided by that first declaration alone, so
+// the call linked against a `text_length` symbol that does not exist.
+// (lib/std/mem/mem.tr's `@ffi(macos: malloc_size)` on `malloc_usable_size` is
+// the real case: any other module declaring that extern first would have lost
+// it on macOS.)
+
+import test;
+
+extern fn text_length(s: string): int;
+
+@ffi(linux: strlen, macos: strlen, windows: strlen)
+extern fn text_length(s: string): int;
+
+fn main(): int {
+    test::assert(text_length("hello") == 5, "forwarded to strlen");
+    return 0;
+}

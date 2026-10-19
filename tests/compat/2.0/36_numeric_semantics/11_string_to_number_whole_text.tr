@@ -1,0 +1,25 @@
+// `s to int` / `s to double` accept the whole string as a number, by the
+// same rules as strings::parse_int / parse_double, so the two agree on every
+// input. The strings are built at run time, so the run-time path is tested.
+import test;
+
+fn text(s: string): string {
+    return s + "";
+}
+
+fn main(): int {
+    test::assert_eq(text("42") to int, 42);
+    test::assert_eq(text("-7") to int, -7);
+    test::assert_eq(text("00012") to int, 12);
+    test::assert_eq(text("9223372036854775807") to int, 9223372036854775807);
+    test::assert((text("-9223372036854775808") to int) < -9223372036854775807, "INT64_MIN");
+    test::assert_eq(text("2.5") to double, 2.5);
+    test::assert_eq(text("-2.5E+3") to double, -2500.0);
+    test::assert_eq(text(".5") to double, 0.5);
+    test::assert_eq(text("5.") to double, 5.0);
+    test::assert_eq(text("1e-5") to double, 0.00001);
+    test::assert((text("1e999") to double) > 1.0e308, "beyond the range is +inf");
+    test::assert_eq(text("42") to int, strings::parse_int("42") recover produce 0);
+    test::assert_eq(text("1e3") to double, strings::parse_double("1e3") recover produce 0.0);
+    return 0;
+}

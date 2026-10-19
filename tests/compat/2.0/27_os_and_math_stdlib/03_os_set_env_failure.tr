@@ -1,0 +1,29 @@
+// LEC-007: os::set_env returns `!void` and fails with OsError::SetEnvFailed(name)
+// (it returned bool before). setenv(3) rejects an empty name and a name
+// containing '=' -- both are input errors a caller should be able to see.
+import os;
+import test;
+
+fn set_env_failure(name: string): string {
+    os::set_env(name, "v", 1) recover as err run {
+        compare err {
+            matches os::OsError::SetEnvFailed(n):
+            return n;
+            done
+            otherwise:
+            return "wrong variant";
+        }
+    };
+    return "";
+}
+
+fn main(): int {
+    test::assert(set_env_failure("A=B") == "A=B", "a name containing '=' is rejected with the name attached");
+    test::assert(set_env_failure("") == "", "an empty name is rejected (the payload is the empty name)");
+
+    // A valid name still succeeds, and the failed calls did not set anything.
+    os::set_env("TURF_LEC007_OK", "1", 1) recover run { test::fail("a valid name should succeed"); };
+    test::assert(os::env("TURF_LEC007_OK") == "1", "and is visible");
+    test::assert(os::env("A=B") == "", "the rejected name was not set");
+    return 0;
+}

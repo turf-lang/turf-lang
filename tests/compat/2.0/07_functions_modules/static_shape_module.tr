@@ -1,0 +1,19 @@
+pub struct Vec2 {
+    pub x: int,
+    pub y: int
+}
+
+pub fn Vec2.zero() static: Vec2 {
+    return Vec2::default();
+}
+
+pub fn Vec2.make(x: int, y: int) static: Vec2 {
+    mut v: Vec2 = Vec2::default();
+    v.x = x;
+    v.y = y;
+    return v;
+}
+
+pub fn Vec2.length2(): int {
+    return self.x * self.x + self.y * self.y;
+}

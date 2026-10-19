@@ -1,0 +1,39 @@
+// Two overloads of the same operator symbol, differing by RHS operand type
+// -- proves selection is on operand types (exact match), not just arity.
+import test;
+
+struct Vec2 {
+    x: int,
+    y: int
+}
+
+operator +(a: Vec2, b: Vec2): Vec2 {
+    mut r: Vec2 = Vec2::default();
+    r.x = a.x + b.x;
+    r.y = a.y + b.y;
+    return r;
+}
+
+operator +(a: Vec2, b: int): Vec2 {
+    mut r: Vec2 = Vec2::default();
+    r.x = a.x + b;
+    r.y = a.y + b;
+    return r;
+}
+
+fn main(): int {
+    mut a: Vec2 = Vec2::default();
+    a.x = 1;
+    a.y = 2;
+    mut b: Vec2 = Vec2::default();
+    b.x = 10;
+    b.y = 20;
+
+    mut sum1: Vec2 = a + b;
+    test::assert(sum1.x == 11 && sum1.y == 22, "Vec2 + Vec2 overload selected");
+
+    mut sum2: Vec2 = a + 5;
+    test::assert(sum2.x == 6 && sum2.y == 7, "Vec2 + int overload selected");
+
+    return 0;
+}

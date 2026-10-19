@@ -1,0 +1,14 @@
+// EXPECT-DIAG: E008
+// EXPECT-DIAG: before it has a value
+// SEM-004 (§12.6, FREEZE.md §6.4): a fixed-size array declared without an
+// initializer is statically unassigned at WHOLE-array granularity. Unlike
+// 12_array_decl_no_initializer.tr (which writes an element first, and that
+// write counts as assigning the whole array), this reads an element with
+// no prior write or initializer at all -- DefiniteAssignmentError (E008).
+import test;
+
+fn main(): int {
+    mut arr: int[5];
+    test::assert(arr[0] == 0, "unreachable: this read must not compile");
+    return 0;
+}

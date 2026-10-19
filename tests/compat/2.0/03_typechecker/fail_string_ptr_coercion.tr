@@ -1,0 +1,20 @@
+// EXPECT-DIAG: E066
+// EXPECT-DIAG: Cannot assign value of type 'string' to variable of type 'ptr'
+// EXPECT-NO-DIAG: Unsafe pointer use!
+fn main(): int {
+    // string should not implicitly coerce to T*.
+    // (Variable named 'p', not 'ptr' -- 'ptr' is a type keyword and can't
+    // be used as a variable name; using it here used to fail one statement
+    // earlier on a generic parse error instead of ever reaching this check.)
+    //
+    // Raw pointers are gated behind `unsafe { }` (issue #238), so the whole
+    // body lives inside one. Without it this test was rejected on its very
+    // first pointer declaration ("Unsafe pointer use!") and the coercion
+    // below -- the thing it is named for -- was never checked at all.
+    unsafe {
+        mut p: ptr = null;
+        mut s: string = "hello";
+        p = s;
+    }
+    return 0;
+}

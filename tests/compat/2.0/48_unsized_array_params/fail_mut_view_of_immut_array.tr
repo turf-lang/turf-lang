@@ -1,0 +1,9 @@
+// EXPECT-DIAG: E144
+// EXPECT-DIAG: 't' is a 'mut' view of 'a', which is immutable.
+// A slice shares the array it looks at, so a `mut` one would let `t[0] = 9`
+// change the immutable `a`.
+fn main(): int {
+    immut a: int[3] = [1, 2, 3];
+    mut t: int[] = a[1..];
+    return t[0];
+}

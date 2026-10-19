@@ -1,0 +1,61 @@
+// Test: DSA -- Traffic light finite state machine, rewritten with real
+// `machine` syntax as the flagship demo of this feature (see
+// docs/planning/turflang_architectural_review.md SS4.2 and
+// polymorphic-seeking-lark.md's Step 5). The original enum-based version
+// (tests/15_enums/13_dsa_state_machine.tr) is left untouched as a baseline
+// regression -- compare the two side by side: the enum version has NOTHING
+// stopping next_state() from returning an invalid transition (a bug would
+// only surface at runtime, if ever), while THIS version gets the same
+// transition table compile-time-checked for free, since every arm here
+// narrows the receiver to one specific light before calling .transition().
+
+import test;
+
+machine TrafficLight {
+    Red -> Green,
+    Green -> Yellow,
+    Yellow -> Red,
+}
+
+fn next_state(light_ref: TrafficLight): TrafficLight {
+    mut light: TrafficLight = light_ref;
+    compare light {
+        matches TrafficLight::Red:
+        // Compile-time-proven: TrafficLight declares Red -> Green.
+        light.transition(TrafficLight::Green);
+        done
+        matches TrafficLight::Green:
+        // Compile-time-proven: TrafficLight declares Green -> Yellow.
+        light.transition(TrafficLight::Yellow);
+        done
+        matches TrafficLight::Yellow:
+        // Compile-time-proven: TrafficLight declares Yellow -> Red.
+        light.transition(TrafficLight::Red);
+        done
+    }
+    return light;
+}
+
+fn main(): int {
+    mut light: TrafficLight = TrafficLight::Red;
+
+    // Cycle through: Red -> Green -> Yellow -> Red -> Green
+    light = next_state(light);
+    test::assert(light == TrafficLight::Green, "Red -> Green");
+
+    light = next_state(light);
+    test::assert(light == TrafficLight::Yellow, "Green -> Yellow");
+
+    light = next_state(light);
+    test::assert(light == TrafficLight::Red, "Yellow -> Red");
+
+    light = next_state(light);
+    test::assert(light == TrafficLight::Green, "Red -> Green again");
+
+    // Verify int values throughout -- identical ordinals to the enum
+    // version, since TurfMachineType IS-A TurfEnumType (see src/sema/Types.h).
+    test::assert((TrafficLight::Red    to int) == 0, "Red == 0");
+    test::assert((TrafficLight::Green  to int) == 1, "Green == 1");
+    test::assert((TrafficLight::Yellow to int) == 2, "Yellow == 2");
+    return 0;
+}

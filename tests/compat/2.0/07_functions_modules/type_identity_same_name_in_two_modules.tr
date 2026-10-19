@@ -1,0 +1,73 @@
+// FDN-003 (docs/development/changes/FDN-003.md): a struct/enum/error type is
+// identified by (owning module, name), not by its bare name. Two imported
+// modules AND the main file each declare their own `Node`, and two modules
+// each declare their own `Mode` enum and `Oops` error -- all six coexist,
+// and every field read, method call, static call, constructor, enum
+// variant, error variant and `typeof()` reaches the right one.
+//
+// Before FDN-003 this program was rejected outright (DuplicateTypeNameError:
+// "struct/enum names are shared across your file and every module you
+// import"); before THAT error existed, it crashed in Codegen.
+
+import test;
+import type_identity_node_a_module;
+import type_identity_node_b_module;
+
+struct Node {
+    s: string
+}
+
+fn Node.describe(): string {
+    return "main.Node";
+}
+
+fn errorKind(): int {
+    mut v: int = type_identity_node_b_module::check(-1) recover as err run {
+        if (err == type_identity_node_b_module::Oops::Worst) {
+            return 1;
+        }
+        return 2;
+    };
+    return v;
+}
+
+fn main(): int {
+    mut a: type_identity_node_a_module::Node = type_identity_node_a_module::make(7);
+    mut b: type_identity_node_b_module::Node = type_identity_node_b_module::make(1.5);
+    mut m: Node = Node::default();
+    m.s = "mine";
+
+    // Fields: three different layouts behind one spelling.
+    test::assert(a.a == 7, "a::Node field");
+    test::assert(a.tag == "a", "a::Node string field");
+    test::assert(b.x == 1.5, "b::Node field");
+    test::assert(b.z == 3.0, "b::Node third field");
+    test::assert(m.s == "mine", "main Node field");
+
+    // Instance methods, static methods and constructors dispatch per type.
+    test::assert(a.describe() == "a.Node", "a::Node method");
+    test::assert(b.describe() == "b.Node", "b::Node method");
+    test::assert(m.describe() == "main.Node", "main Node method");
+    mut a2: type_identity_node_a_module::Node = type_identity_node_a_module::Node::origin();
+    mut b2: type_identity_node_b_module::Node = type_identity_node_b_module::Node::new(9.0);
+    test::assert(a2.a == 1, "a::Node static method");
+    test::assert(b2.x == 9.0, "b::Node constructor");
+
+    // Same-named enums keep their own variants and counts.
+    test::assert(type_identity_node_a_module::mode() == type_identity_node_a_module::Mode::Slow, "a::Mode");
+    test::assert(type_identity_node_b_module::mode() == type_identity_node_b_module::Mode::Sideways, "b::Mode");
+    test::assert(type_identity_node_a_module::Mode::COUNT == 2, "a::Mode count");
+    test::assert(type_identity_node_b_module::Mode::COUNT == 3, "b::Mode count");
+
+    // Same-named error types keep their own variants.
+    mut ok: int = type_identity_node_a_module::check(4) recover produce -1;
+    test::assert(ok == 4, "a::check succeeds");
+    test::assert(errorKind() == 1, "b::Oops::Worst recovered by identity");
+
+    // typeof(): an imported type is qualified, a main-file type is not.
+    test::assert(typeof(a) == "type_identity_node_a_module::Node", "typeof imported a::Node");
+    test::assert(typeof(b) == "type_identity_node_b_module::Node", "typeof imported b::Node");
+    test::assert(typeof(m) == "Node", "typeof local Node stays bare");
+    test::assert(typeof(type_identity_node_b_module::mode()) == "type_identity_node_b_module::Mode", "typeof imported enum");
+    return 0;
+}

@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E073
+// EXPECT-DIAG: '1.5e' has an exponent marker with no exponent after it
+// SEM-001: an exponent marker with no exponent after it -- E073
+// (MalformedExponentError, docs/errors/codes/E073.txt). Once 'e'/'E'
+// appears right after a digit run, it's always committed to as an
+// exponent marker, never silently reinterpreted as a separate token --
+// see MalformedExponentError's own doc comment (ErrorsLex.h).
+
+fn main(): int {
+    mut x: double = 1.5e;
+    return 0;
+}

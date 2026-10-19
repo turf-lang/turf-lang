@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E142
+// EXPECT-DIAG: Cannot slice a value of type 'list::List<int>' with [a..b].
+// Range slicing works on built-in arrays only (a List's elements live behind
+// its own private buffer).
+import list::List;
+
+fn main(): int {
+    mut l: List<int> = List::default();
+    immut t = l[0..1];
+    return 0;
+}

@@ -1,0 +1,24 @@
+// lib/std/bool.tr's UFCS helpers. All prelude, no import needed.
+
+import test;
+
+fn main(): int {
+    mut t: bool = true;
+    mut f: bool = false;
+
+    test::assert(t.logical_xor(f), "true xor false == true");
+    test::assert(!t.logical_xor(t), "true xor true == false");
+
+    test::assert(!t.logical_nand(t), "true nand true == false");
+    test::assert(f.logical_nand(f), "false nand false == true");
+
+    test::assert(f.logical_nor(f), "false nor false == true");
+    test::assert(!t.logical_nor(f), "true nor false == false");
+
+    test::assert(f.implies(f), "false implies false == true");
+    test::assert(f.implies(t), "false implies true == true");
+    test::assert(!t.implies(f), "true implies false == false");
+    test::assert(t.implies(t), "true implies true == true");
+
+    return 0;
+}

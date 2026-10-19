@@ -1,0 +1,22 @@
+// LEC-003 x FDN-004: `s[i]` is a `char`, so char patterns over a string's
+// elements are ordinary value patterns, mixable with `_` and guards.
+import test;
+
+fn kind(s: string, i: int): int {
+    mut r: int;
+    compare s[i] {
+        matches 'a': r = 1; done
+        matches 'b': r = 2; done
+        matches _ if s[i] >= '0': r = 3; done
+        matches _: r = 0; done
+    }
+    return r;
+}
+
+fn main(): int {
+    test::assert(kind("ab5!", 0) == 1, "char value pattern");
+    test::assert(kind("ab5!", 1) == 2, "second char pattern");
+    test::assert(kind("ab5!", 2) == 3, "guarded wildcard on a char subject");
+    test::assert(kind("ab5!", 3) == 0, "plain wildcard");
+    return 0;
+}

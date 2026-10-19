@@ -1,0 +1,25 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: Array index out of bounds for 'arr'
+// RT-001 (docs/archive/ARCHITECTURE_OVERHAUL.md §8): regression test for
+// "the new panic path still aborts" -- CodegenPanic() (src/sema/Builtins.cpp)
+// now calls libturfrt's turf_rt_panic() instead of an inline
+// fprintf+abort, and this is the one runtime check in this whole folder
+// that exercises it: fail_array_out_of_bounds.tr (same folder) uses a
+// LITERAL constant index, which ValueRangePass rejects at COMPILE time
+// (a completely different diagnostic, ArrayBoundsError/E001) -- it never
+// reaches CodegenPanic/CodegenArray.cpp's EmitRuntimeBoundsCheck() at all.
+// The index here comes back from a function call, which ValueRangePass's
+// evalConstExpr() cannot fold (it only tracks literals and simple
+// arithmetic combinations of already-known constants, never a call
+// result), so this compiles clean and the out-of-bounds access is caught
+// only by the UNCONDITIONAL runtime bounds check every array access gets
+// -- the exact path this test exists to keep covered.
+fn get_index(): int {
+    return 5;
+}
+
+fn main(): int {
+    mut arr: int[3] = [1, 2, 3];
+    mut x: int = arr[get_index()];
+    return x;
+}

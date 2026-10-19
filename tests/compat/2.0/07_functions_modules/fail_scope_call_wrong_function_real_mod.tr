@@ -1,0 +1,21 @@
+// EXPECT-DIAG: E026
+// EXPECT-DIAG: Module 'io' has no function named 'nosuchfunction'
+// Regression test: `Module::func(...)` where Module IS real but doesn't
+// declare `func` must raise a specific, on-topic ModuleMethodNotFoundError
+// ("Module 'io' has no function named 'nosuchfunction'"), not fall through
+// to the generic bare-call UnknownFunctionError path (whose hint --
+// "Double-check the spelling or import the module that defines it" --  is
+// actively confusing once the user has ALREADY written the qualifier).
+//
+// Found during a systematic import bug hunt: ModuleMethodNotFoundError
+// existed in Errors.h (built for the old dot-based module-call syntax)
+// but was never actually wired up anywhere in Resolver::visitFuncCall's
+// new ScopeAccessExprAST-callee branch -- confirmed dead code via grep
+// before this fix.
+
+import io;
+
+fn main(): int {
+    io::nosuchfunction("test");
+    return 0;
+}

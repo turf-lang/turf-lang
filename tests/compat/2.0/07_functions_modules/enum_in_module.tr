@@ -1,0 +1,28 @@
+// Companion module for enum_module_import.tr -- declares an enum so that
+// hoistModuleBody() (in Resolver.cpp) is exercised for the EnumDeclExprAST
+// branch, which used to not exist at all: an enum declared inside an
+// imported module was previously never hoisted, so any reference to it
+// outside that module would fail with a confusing "I can't find anything
+// named 'X'" even though the enum genuinely exists. The filename contains
+// "_module.tr" (scripts/test_runner.sh's exclusion pattern matches it as a
+// substring, not just a suffix), so this is correctly skipped as a
+// standalone test entry point -- see enum_module_import.tr for the real one.
+pub enum Status {
+    Ok,
+    Failed,
+    Pending
+}
+
+pub fn describe(s: Status): int {
+    compare s {
+        matches Status::Ok:
+        return 1;
+        done
+        matches Status::Failed:
+        return 2;
+        done
+        matches Status::Pending:
+        return 3;
+        done
+    }
+}

@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E056
+// EXPECT-DIAG: No overload of 'first' matches argument types (int[]).
+// A `T[]` doesn't match a `T[N]` parameter, for the same reason: no
+// compile-time length to check it against.
+fn first(arr: int[3]): int {
+    return arr[0];
+}
+
+fn main(): int {
+    mut a: int[3] = [1, 2, 3];
+    return first(a[..]);
+}

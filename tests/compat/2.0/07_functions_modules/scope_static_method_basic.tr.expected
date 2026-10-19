@@ -1,0 +1,2 @@
+a MathUtil instance
+static + instance methods coexist on one (empty) struct

@@ -1,0 +1,15 @@
+// EXPECT-DIAG: E056
+// EXPECT-DIAG: No visible 'describe' overload accepts a 'char' receiver via UFCS
+// Negative test: the receiver position is exact-match only, no numeric
+// coercion (RFC §5.4). A UFCS candidate declared for `int` must NOT match
+// a `char` receiver, even though char->int has an explicit widening cast
+// available -- UFCS never applies it implicitly.
+fn describe(x: int): string {
+    return "int";
+}
+
+fn main(): int {
+    mut c: char = 'a';
+    mut r: string = c.describe();
+    return 0;
+}

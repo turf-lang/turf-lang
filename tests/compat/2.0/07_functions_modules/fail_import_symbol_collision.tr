@@ -1,0 +1,15 @@
+// EXPECT-DIAG: E024
+// EXPECT-DIAG: 'shared' is imported from two different modules
+// Regression test: this is the user's explicit ask -- "user will be
+// errored when two symbols with the same name exist in the same
+// namespace". Two separate on-demand imports flattening a same-named
+// function from two DIFFERENT modules must be a clean
+// ImportSymbolCollisionError, not a silent last-one-wins shadow.
+
+import io;
+import import_collision_a_module::shared;
+import import_collision_b_module::shared;
+
+fn main(): int {
+    return 0;
+}

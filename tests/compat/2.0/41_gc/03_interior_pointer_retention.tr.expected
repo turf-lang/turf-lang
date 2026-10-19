@@ -1,0 +1,1 @@
+41/03 PASS: interior pointer into a gc_alloc'd buffer survives a forced collection

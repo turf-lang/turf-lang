@@ -1,0 +1,24 @@
+// EXPECT-DIAG: E086
+// EXPECT-DIAG: can't be stored into a field that outlives this function
+// `mk()` takes nothing from this frame, so whatever it returns outlives it
+// (a callee can't return its own locals); `h.next = &n` leaves the caller a
+// node pointing into a dead frame (owner decision 2026-10-12, found by
+// turf-fuzz). Contrast escape_call_result_from_local_args_ok.tr.
+struct N { val: int, next: &?N }
+
+fn mk(): &N {
+    return heap(N::default());
+}
+
+fn f(): &N {
+    mut n: N = N::default();
+    n.val = 42;
+    mut h: &N = mk();
+    h.next = &n;
+    return h;
+}
+
+fn main(): int {
+    mut p: &N = f();
+    return p.val;
+}

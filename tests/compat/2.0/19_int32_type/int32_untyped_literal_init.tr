@@ -1,0 +1,39 @@
+// OVH-005 (FREEZE.md §6.2 row 3, F-NUM-1): an UNTYPED integer literal
+// reaching an 'int32' destination acquires 'int32' directly and is checked
+// for representability there -- exactly like it already acquires 'int' or
+// 'double' elsewhere -- rather than being rejected as an 'int -> int32'
+// narrowing (that rule still applies to a genuinely `int`-TYPED value, see
+// fail_int32_implicit_narrow.tr and
+// tests/36_numeric_semantics/fail_implicit_narrow_int_to_int32.tr). Covers
+// every type-fixing site untypedLiteralAcquiresInt32() (TypeChecker.h) is
+// consulted from: VarDecl init, plain assignment, a call argument, and a
+// return value.
+import test;
+
+fn takesInt32(x: int32): int32 {
+    return x;
+}
+
+fn returnsInt32Literal(): int32 {
+    return 9;
+}
+
+fn main(): int {
+    // init
+    mut n: int32 = 5;
+    test::assert((n to int) == 5, "untyped literal init acquires int32");
+
+    // assignment
+    n = 7;
+    test::assert((n to int) == 7, "untyped literal assignment acquires int32");
+
+    // argument
+    mut r: int32 = takesInt32(11);
+    test::assert((r to int) == 11, "untyped literal argument acquires int32");
+
+    // return
+    mut r2: int32 = returnsInt32Literal();
+    test::assert((r2 to int) == 9, "untyped literal return value acquires int32");
+
+    return 0;
+}

@@ -1,0 +1,21 @@
+// math::divide (lib/std/math.tr) -- the recoverable alternative to the raw
+// `/` operator, which hard-panics on division by zero. Both overloads
+// (int, double), both success and failure paths.
+import test;
+import math;
+
+fn main(): int {
+    mut a: int = math::divide(10, 2) recover produce -1;
+    test::assert_eq(a, 5, "int divide success should produce the real quotient");
+
+    mut b: int = math::divide(10, 0) recover produce -1;
+    test::assert_eq(b, -1, "int divide by zero should recover instead of aborting");
+
+    mut c: double = math::divide(7.5, 2.5) recover produce -1.0;
+    test::assert_eq(c, 3.0, "double divide success should produce the real quotient");
+
+    mut d: double = math::divide(1.0, 0.0) recover produce -1.0;
+    test::assert_eq(d, -1.0, "double divide by zero should recover instead of aborting");
+
+    return 0;
+}

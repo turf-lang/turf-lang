@@ -1,0 +1,16 @@
+// EXPECT-DIAG: E141
+// EXPECT-DIAG: 'a' is immutable, but 'fill' writes to the array it is given as 'arr'.
+// Issue #260: a `T[]` parameter shares the caller's array, so this call would
+// change `a` even though it is `immut`. It used to compile and run, and `a`
+// came back changed.
+fn fill(arr: int[], v: int): void {
+    for (i, _x) in arr {
+        arr[i] = v;
+    }
+}
+
+fn main(): int {
+    immut a: int[3] = [1, 2, 3];
+    fill(a, 0);
+    return a[0];
+}

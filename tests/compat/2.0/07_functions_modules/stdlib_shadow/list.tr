@@ -1,0 +1,14 @@
+// LEC-001 stage 3 companion: a user module that shares its name with the
+// stdlib's `list`. The two tests beside it need it to be literally `list.tr`,
+// which cannot end in `_module.tr`, so the runner also runs THIS file as a
+// test of its own. The `main` below is what makes that pass. It also proves
+// something: this file compiles although the prelude's `strings` imports
+// `list` internally, because an import written inside lib/std resolves in the
+// stdlib only.
+pub fn local_list_marker(): int {
+    return 42;
+}
+
+fn main(): int {
+    return local_list_marker() - 42;
+}

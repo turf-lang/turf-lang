@@ -1,0 +1,7 @@
+// EXPECT-DIAG: E057
+// EXPECT-DIAG: cannot apply '+' to 'string' and 'int'
+// Negative test: "hi" + 5 should emit TypeChecker error with hint
+fn main(): int {
+    mut s: string = "hi" + 5;
+    return 0;
+}

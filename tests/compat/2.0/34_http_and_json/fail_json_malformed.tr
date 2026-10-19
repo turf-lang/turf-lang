@@ -1,0 +1,26 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: malformed JSON correctly rejected by json::parse
+//
+// Malformed JSON (a truncated object -- opens a key but never supplies a
+// value or the closing brace) must hit json::parse's `!JsonValue` error
+// path, not silently succeed with a garbage/partial JsonValue. The
+// `recover run { ... }` block deliberately aborts (via test::fail) to
+// PROVE the error path actually fired -- this test's whole point is that
+// aborting here is the CORRECT outcome (mirrors
+// tests/13_string_stdlib/fail_string_substr_oob.tr's identical shape: the
+// abort is what a passing run looks like). If json::parse ever regresses
+// to silently accepting malformed input, this test would instead run to
+// completion and exit 0 -- test_runner.sh's RUNTIME_ABORT_EXPECTED
+// contract turns that into a reported test FAILURE, exactly the signal a
+// real regression here should produce.
+import json;
+import test;
+
+fn main(): int {
+    immut badText: string = "{\"a\": ";
+    mut v: json::JsonValue = json::parse(badText) recover run {
+        test::fail("malformed JSON correctly rejected by json::parse (this abort is the expected, passing outcome)");
+        return 1;
+    };
+    return 0;
+}

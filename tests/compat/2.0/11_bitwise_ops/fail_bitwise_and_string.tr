@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E057
+// EXPECT-DIAG: Bitwise operator requires integer operands, but left operand is 'string'
+// FAIL TEST: Bitwise AND with string type
+// "hello" & 2 should emit a TypeError
+
+fn main(): int {
+    mut a: string = "hello";
+    mut b: int = 2;
+    mut c: int = a & b;  // TypeError: bitwise operator requires integer operands
+
+    return 0;
+}

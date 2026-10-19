@@ -1,0 +1,11 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: Cannot write into this string: it is not a heap string
+// A string literal is read-only data, not a heap string, so a byte write into
+// it panics. It was lost silently at -O2 and crashed at -O0.
+
+fn main(): int {
+    mut s: string = "hello";
+    s[0] = 'j';
+    printline(s);
+    return 0;
+}

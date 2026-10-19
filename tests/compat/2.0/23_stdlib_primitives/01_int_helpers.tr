@@ -1,0 +1,24 @@
+// lib/std/int.tr's UFCS helpers. All prelude, no import needed.
+
+import test;
+
+fn main(): int {
+    mut four: int = 4;
+    mut three: int = 3;
+    mut negFive: int = 0 - 5;
+    mut zero: int = 0;
+    mut twelve: int = 12;
+
+    test::assert(four.is_even(), "4 is even");
+    test::assert(three.is_odd(), "3 is odd");
+    test::assert(!four.is_odd(), "4 is not odd");
+    test::assert(three.is_positive(), "3 is positive");
+    test::assert(negFive.is_negative(), "-5 is negative");
+    test::assert(zero.is_zero(), "0 is zero");
+    test::assert(!four.is_zero(), "4 is not zero");
+
+    test::assert_eq(twelve.gcd(18), 6, "gcd(12, 18) == 6");
+    test::assert_eq(four.lcm(6), 12, "lcm(4, 6) == 12");
+
+    return 0;
+}

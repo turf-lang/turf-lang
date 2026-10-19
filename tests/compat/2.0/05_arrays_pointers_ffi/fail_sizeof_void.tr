@@ -1,0 +1,15 @@
+// EXPECT-DIAG: E126
+// EXPECT-DIAG: 'sizeof(void)' is not supported
+// `void` has no size. The type checker used to accept `sizeof(void)` and
+// Codegen then asked LLVM for the allocation size of its unsized `void` type,
+// a call that never returns: the compiler hung forever (found by turf-fuzz).
+// `sizeof(void*)` is a pointer and stays legal -- see
+// sizeof_void_pointer_ok.tr.
+extern fn malloc(size: int): int*;
+
+fn main(): int {
+    unsafe {
+        mut counter: &int = malloc(sizeof(void)) to &int;
+    }
+    return 0;
+}

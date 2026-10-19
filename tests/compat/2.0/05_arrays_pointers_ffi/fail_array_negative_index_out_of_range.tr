@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E001
+// EXPECT-DIAG: counting from the end
+// #256: with Python-style negative indexing the valid range of an `int[3]` is
+// -3..2. `-4` is one past the start, so it is still rejected at compile time
+// (ArrayBoundsError) -- not wrapped around to the last element.
+fn main(): int {
+    mut a: int[3] = [1, 2, 3];
+    mut x: int = a[-4];
+    return x;
+}

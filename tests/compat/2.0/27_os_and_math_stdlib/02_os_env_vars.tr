@@ -1,0 +1,27 @@
+// Regression coverage for issue #239 (Track B): os::env/os::set_env.
+//
+// os::env() must normalize libc getenv()'s NULL-on-unset return into "" --
+// a raw NULL Turf `string` would crash the first time any caller passes it
+// to something like strlen()/io::printline() (see os.tr's own doc comment).
+import os;
+import test;
+
+fn main(): int {
+    test::assert(os::env("TURF_TEST_DEFINITELY_UNSET_VAR_239") == "",
+        "reading an unset environment variable returns \"\", not a null crash");
+
+    // set_env is `!void` (LEC-007; it returned bool): the recover block runs
+    // only on failure, so reaching the next line is the success check.
+    os::set_env("TURF_TEST_VAR_239", "hello", 1) recover run { test::fail("set_env should succeed"); };
+    test::assert(os::env("TURF_TEST_VAR_239") == "hello", "env reads back the value set_env just wrote");
+
+    // overwrite = 0 must NOT clobber an existing value.
+    os::set_env("TURF_TEST_VAR_239", "should_not_overwrite", 0);
+    test::assert(os::env("TURF_TEST_VAR_239") == "hello", "set_env with overwrite=0 leaves the existing value alone");
+
+    // overwrite = 1 must clobber it.
+    os::set_env("TURF_TEST_VAR_239", "updated", 1);
+    test::assert(os::env("TURF_TEST_VAR_239") == "updated", "set_env with overwrite=1 replaces the existing value");
+
+    return 0;
+}

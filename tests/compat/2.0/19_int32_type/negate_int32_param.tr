@@ -1,0 +1,17 @@
+// Unary `-` on a runtime int32 checks for overflow against int32's own
+// minimum, at int32 width.
+import test;
+
+fn neg(a: int32): int32 {
+    mut b: int32 = -a;
+    return b;
+}
+
+fn main(): int {
+    mut x: int32 = 3;
+    test::assert(neg(x) == -3, "-3");
+    test::assert(neg(neg(x)) == 3, "--3");
+    mut big: int32 = 2147483647;
+    test::assert(neg(big) == -2147483647, "-INT32_MAX");
+    return 0;
+}

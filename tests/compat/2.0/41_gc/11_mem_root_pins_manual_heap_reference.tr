@@ -1,0 +1,103 @@
+// tests/41_gc/11_mem_root_pins_manual_heap_reference.tr
+// OVH-010 (docs/planning/OVERHAUL_REMAINING_WORK.md): mem::root()/
+// mem::unroot() are the answer §14.3/§14.6 promised to F-MEM-3's own
+// documented unsoundness -- a GC pointer stored ONLY inside manually-
+// managed memory (here, a `mem::alloc`'d buffer standing in for "a C
+// library's own struct") is invisible to every other root-finding path
+// (not on the stack, not in a register, not behind a global root, not
+// inside another GC-heap block's own declared pointer words), so the
+// collector reclaims it out from under whoever is holding it in manual
+// memory. Before this item, the only root API was the slot-based
+// `turf_rt_add_global_root` (no Turf-level surface at all) -- this test is
+// the first thing in the suite that stores a `string` ONLY behind a raw
+// `mem::alloc` pointer and expects it to survive a real collection.
+//
+// `slot[0] = strings::repeat(...)` deliberately never binds the built
+// string to a named Turf-level local at all -- the ONLY place its address
+// exists, from the moment it is created, is inside the manual-heap buffer
+// `holder` points at. Without mem::root(), this is exactly MEM-002's own
+// disclosed unsoundness (docs/architecture/memory_model.md §1.7): a value
+// reachable only through manual memory that the collector will free.
+//
+// This test proves the "must not under-retain while pinned" direction
+// only -- the direction a conservative collector can never get wrong by
+// accident (over-retention can only make a survival assertion pass more
+// easily, never fail it), which is why every existing tests/41_gc/*.tr
+// file proves survival and none of them prove "was reclaimed" at the
+// Turf-source level. The complementary "unroot() actually lets the
+// collector reclaim it" direction is proved instead by
+// scripts/smoke/gc_smoke.sh's own check 3, compiled with no optimization flags
+// at all -- unlike this file (which the runner also compiles at every
+// `-O` level), asserting "this exact byte count/live_count dropped to
+// zero" is only deterministic without an optimizer free to keep the one
+// local holding the checked address alive in a register for the whole
+// function, the same reasoning gc_smoke.sh's own check 2 (global root
+// removal) already documents for the identical reclaim-side assertion.
+
+import mem;
+import strings;
+import test;
+import io;
+
+fn churn(depth: int): void {
+    mut buf: int[64];
+    buf[0] = 0;
+    mut i: int = 0;
+    while i < 64 {
+        buf[i] = i * 3;
+        i = i + 1;
+    }
+    mut sum: int = 0;
+    i = 0;
+    while i < 64 {
+        sum = sum + buf[i];
+        i = i + 1;
+    }
+    test::assert(sum == 6048, "churn: stack buffer round-trips correctly");
+    if depth > 0 {
+        churn(depth - 1);
+    }
+}
+
+fn allocateJunk(count: int): void {
+    mut i: int = 0;
+    while i < count {
+        strings::repeat("x", 5);
+        i = i + 1;
+    }
+}
+
+fn main(): int {
+    unsafe {
+        mut holder: void* = mem::alloc(8);
+        mut slot: string* = holder to string*;
+
+        // The built string's address is stashed straight into manual
+        // memory -- no Turf-level `string` local ever holds it.
+        slot[0] = strings::repeat("z", 40);
+
+        mem::root(slot[0] to void*);
+
+        churn(24);
+        allocateJunk(3000);
+        gc_collect();
+        churn(24);
+
+        test::assert(gc_is_managed(slot[0] to void*),
+            "a pinned string reachable only from manual memory survives a forced collection");
+        test::assert(
+            slot[0] == "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+            "the pinned string's content is intact after collection, not freed-and-reused memory"
+        );
+
+        // Round-trip the release half of the API -- the reclaim-after-
+        // unroot direction itself is gc_smoke.sh's check 3 (see this
+        // file's own top comment for why).
+        mem::unroot(slot[0] to void*);
+
+        mem::free(holder);
+    }
+
+    io::printline("41/11 PASS: mem::root pins a manual-heap-only reference across a forced collection");
+    return 0;
+}

@@ -1,0 +1,50 @@
+// LEC-004 (FREEZE.md §6.18): an error variant may declare typed fields,
+// constructed positionally and read back ONLY by a destructuring pattern
+// inside a `compare`. Three shapes in one type: two fields, one field, none.
+import io;
+import test;
+
+error IOError {
+    NotFound(path: string),
+    Denied(path: string, mode: int),
+    Timeout
+}
+
+fn open(p: string, m: int): !int {
+    if m == 0 { return IOError::NotFound(p); }
+    if m == 1 { return IOError::Denied(p, 7); }
+    if m == 2 { return IOError::Timeout; }
+    return m;
+}
+
+// `return` inside a recover block returns from THIS function, so each read of a
+// payload lives in a function that turns it into an int.
+fn code(p: string, m: int): int {
+    immut v: int = open(p, m) recover as err run {
+        compare err {
+            matches IOError::NotFound(path):
+            test::assert(path == "a.txt", "NotFound carries its path");
+            return 10;
+            done
+            matches IOError::Denied(path, mode):
+            test::assert(path == "b.txt", "Denied carries its path");
+            return 20 + mode;
+            done
+            matches IOError::Timeout:
+            return 30;
+            done
+            otherwise:
+            return 99;
+        }
+    };
+    return v;
+}
+
+fn main(): int {
+    test::assert(code("a.txt", 0) == 10, "NotFound(path)");
+    test::assert(code("b.txt", 1) == 27, "Denied(path, mode) binds both fields, in order");
+    test::assert(code("c.txt", 2) == 30, "a variant with no fields still matches by tag");
+    test::assert(code("d.txt", 5) == 5, "success is untouched");
+    io::printline("25/17 PASS");
+    return 0;
+}

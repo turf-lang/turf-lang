@@ -1,0 +1,13 @@
+// Companion module for scope_generic_struct_in_module.tr -- a generic
+// struct (Box<T>) declared inside a user module, not the stdlib.
+pub struct Box<T> {
+    pub val: T
+}
+
+pub fn<T> Box.new(v: T): void {
+    self.val = v;
+}
+
+pub fn<T> Box.get(): T {
+    return self.val;
+}

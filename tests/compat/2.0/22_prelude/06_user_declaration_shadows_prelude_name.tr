@@ -1,0 +1,22 @@
+// FREEZE.md 6.25: a prelude name is the LAST resort of a bare call. A function
+// this file declares with the same name hides it -- it never makes the call
+// ambiguous, even with an identical signature -- and the qualified spelling
+// still reaches the prelude's own.
+import test;
+
+fn max(a: int, b: int): int {
+    return 1000 + a + b;
+}
+
+fn printline(label: string, value: int): void {
+    io::print(label);
+    io::printline(value);
+}
+
+fn main(): int {
+    test::assert(max(3, 9) == 1012, "our own max wins over math's");
+    test::assert(math::max(3, 9) == 9, "math::max is still reachable qualified");
+    printline("two arguments: ", 7);
+    io::printline("one argument, qualified");
+    return 0;
+}

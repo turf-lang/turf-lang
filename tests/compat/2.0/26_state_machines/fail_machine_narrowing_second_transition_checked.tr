@@ -1,0 +1,23 @@
+// EXPECT-DIAG: E035
+// EXPECT-DIAG: 'C' has no transition from 'Connecting' to 'Idle'
+machine C {
+    Idle -> Connecting,
+    Connecting -> Connected
+}
+
+fn go(c: C): C {
+    mut x: C = c;
+    compare x {
+        matches C::Idle:
+        x.transition(C::Connecting);
+        x.transition(C::Idle);
+        done
+        otherwise:
+        return x;
+    }
+    return x;
+}
+
+fn main(): int {
+    return 0;
+}

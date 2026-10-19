@@ -1,0 +1,29 @@
+// The accepted side of fail_defer_reads_nullable_assigned_later.tr: a
+// deferred read of a `&?T` variable that nothing later in the block may set
+// to null (not assigned at all, or assigned `&x`).
+import test;
+
+struct Node { val: int, next: &?Node }
+
+fn read_later(q: &?Node): int {
+    mut seen: int = 0;
+    if (q != null) {
+        defer seen = q.val;
+        q.val = 7;
+    }
+    return seen;
+}
+
+fn main(): int {
+    test::assert(read_later(heap(Node::default())) == 7, "the defer runs as the if block exits, before the return");
+    mut x: Node = Node::default();
+    x.val = 5;
+    mut w: &?Node = heap(Node::default());
+    mut got: int = 0;
+    if (w != null) {
+        defer got = w.val;
+        w = &x;
+    }
+    test::assert(got == 5, "w was reassigned to &x, never null, before the defer ran");
+    return 0;
+}

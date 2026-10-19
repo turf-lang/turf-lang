@@ -1,0 +1,30 @@
+// SEM-003 (ARCHITECTURE_OVERHAUL.md §11.6): the untyped-literal defaulting
+// table under `guess` -- integer -> int, float -> double, true/false ->
+// bool, 'c' -> char, "s" -> string -- and that the inferred type is
+// PERMANENTLY FIXED at the declaration (Model A, §11.3): a same-type
+// reassignment is fine, and the variable behaves exactly like an
+// explicitly-annotated one from here on.
+import test;
+
+fn main(): int {
+    mut a = 5;
+    test::assert(a == 5, "integer literal infers int");
+    a = 10;
+    test::assert(a == 10, "int guess variable is reassignable within its inferred type");
+
+    mut b = 5.5;
+    test::assert(b == 5.5, "float literal infers double");
+
+    mut c = "hello";
+    test::assert(c == "hello", "string literal infers string");
+
+    mut d = true;
+    test::assert(d == true, "bool literal infers bool");
+    d = false;
+    test::assert(d == false, "bool guess variable is reassignable");
+
+    mut e = 'x';
+    test::assert(e == 'x', "char literal infers char");
+
+    return 0;
+}

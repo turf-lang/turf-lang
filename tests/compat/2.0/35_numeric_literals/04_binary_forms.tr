@@ -1,0 +1,19 @@
+// SEM-001: binary integer literals (0b/0B), with and without '_'.
+
+import test;
+
+fn main(): int {
+    mut a: int = 0b1010;
+    test::assert(a == 10, "plain binary");
+
+    mut b: int = 0B1111;
+    test::assert(b == 15, "uppercase prefix");
+
+    mut c: int = 0b1010_1010;
+    test::assert(c == 170, "binary byte with a separator");
+
+    mut d: int = 0b0;
+    test::assert(d == 0, "binary zero");
+
+    return 0;
+}

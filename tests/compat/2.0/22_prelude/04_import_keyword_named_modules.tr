@@ -1,0 +1,29 @@
+// Regression test: int/double/bool/char are prelude module names that are
+// ALSO primitive-type keywords, so they lex as TOK_TYPE_INT/TOK_TYPE_DOUBLE/
+// TOK_TYPE_BOOL/TOK_TYPE_CHAR, not TOK_IDENTIFIER. `import char;` used to
+// fail with "Expected module name after 'import'" even though the prelude
+// mechanism itself loads char.tr internally just fine (a completely
+// separate code path) -- a real user writing this explicit import hit the
+// bug. Covers all four keyword-shaped module names in one file.
+import int;
+import double;
+import bool;
+import char;
+import test;
+
+fn main(): int {
+    mut n: int = 4;
+    test::assert(n.is_even(), "explicit 'import int;' works");
+
+    mut x: double = 0.0 - 2.5;
+    test::assert(x.sign() == (0.0 - 1.0), "explicit 'import double;' works");
+
+    mut a: bool = true;
+    mut b: bool = false;
+    test::assert(a.logical_xor(b), "explicit 'import bool;' works");
+
+    mut c: char = '3';
+    test::assert(c.is_digit(), "explicit 'import char;' works");
+
+    return 0;
+}

@@ -1,0 +1,16 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: which the garbage collector owns
+// A `&T` is GC-managed, so no function releases it; `releases:` on a reference
+// parameter is a false claim and is rejected rather than tracked.
+
+struct Node {
+    v: int,
+}
+
+@ownership(releases: n)
+fn drop_node(n: &Node): void {
+}
+
+fn main(): int {
+    return 0;
+}

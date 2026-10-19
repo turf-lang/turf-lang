@@ -1,0 +1,16 @@
+// char ordering (< > <= >=) is built in and compares by raw byte value --
+// no locale, no Unicode (RFC §3). Exercises the full ordering matrix.
+import test;
+
+fn main(): int {
+    test::assert('a' < 'b', "a < b");
+    test::assert('b' > 'a', "b > a");
+    test::assert('a' <= 'a', "a <= a (equal case)");
+    test::assert('a' <= 'b', "a <= b (less case)");
+    test::assert('b' >= 'b', "b >= b (equal case)");
+    test::assert('b' >= 'a', "b >= a (greater case)");
+    test::assert(!('b' < 'a'), "b < a should be false");
+    test::assert(!('a' > 'b'), "a > b should be false");
+
+    return 0;
+}

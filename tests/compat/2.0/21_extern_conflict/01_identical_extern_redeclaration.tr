@@ -1,0 +1,15 @@
+// Positive test: the SAME extern (identical signature) declared via two
+// different imported modules, both used together -- must compile clean.
+// This is the regression test for the real, existing stdlib pattern
+// (strlen in both lib/std/strings.tr and lib/std/net.tr) that the
+// ExternFuncDeclExprAST::codegen() fix must not break.
+import extern_a_module;
+import extern_b_module;
+import test;
+
+fn main(): int {
+    test::assert(extern_a_module::wraps_a("hello") == 5, "extern from module A works");
+    test::assert(extern_b_module::wraps_b("hi") == 2, "extern from module B works");
+
+    return 0;
+}

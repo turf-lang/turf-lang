@@ -1,0 +1,30 @@
+// EXPECT-DIAG: E034
+// EXPECT-DIAG: A struct named 'P' is already declared
+// Two functions in one file each declaring a local `struct P` with a
+// different layout. A type's identity is (module, name) with no
+// function-level scope (FREEZE.md §6.11), so these are two declarations of
+// ONE name -- rejected as DuplicateTypeNameError (E034) at the second.
+//
+// Before: the Resolver silently skipped registering the second `P`, both
+// functions shared one registration and one layout, and whichever
+// declaration the Parser saw last won -- here `a()`'s `p.x` failed as
+// "Struct 'P' has no field named 'x'", and with compatible field names it
+// would have read the wrong offset instead.
+
+fn a(): int {
+    struct P { x: int }
+    mut p: P = P::default();
+    p.x = 1;
+    return p.x;
+}
+
+fn b(): double {
+    struct P { y: double, z: double }
+    mut p: P = P::default();
+    p.z = 2.5;
+    return p.z;
+}
+
+fn main(): int {
+    return a() - 1;
+}

@@ -1,0 +1,46 @@
+// Every public helper in lib/std/core/char.tr, by its snake_case name
+// (LEC-007, F-API-2: these were isDigit/isUpper/... until then). Both
+// directions for each predicate, plus the two case conversions -- including
+// `to_upper`/`to_lower` on a char sharing a name with strings::to_upper on a
+// string, which UFCS must keep apart by receiver type.
+
+import test;
+
+fn main(): int {
+    mut a: char = 'a';
+    mut big: char = 'Q';
+    mut nine: char = '9';
+    mut space: char = ' ';
+    mut bang: char = '!';
+
+    test::assert(nine.is_digit(), "'9' is a digit");
+    test::assert(!a.is_digit(), "'a' is not a digit");
+
+    test::assert(big.is_upper(), "'Q' is upper");
+    test::assert(!a.is_upper(), "'a' is not upper");
+    test::assert(a.is_lower(), "'a' is lower");
+    test::assert(!big.is_lower(), "'Q' is not lower");
+
+    test::assert(a.is_alpha(), "'a' is alpha");
+    test::assert(big.is_alpha(), "'Q' is alpha");
+    test::assert(!nine.is_alpha(), "'9' is not alpha");
+
+    test::assert(a.is_alphanumeric(), "'a' is alphanumeric");
+    test::assert(nine.is_alphanumeric(), "'9' is alphanumeric");
+    test::assert(!space.is_alphanumeric(), "' ' is not alphanumeric");
+
+    test::assert(bang.is_punctuation(), "'!' is punctuation");
+    test::assert(!a.is_punctuation(), "'a' is not punctuation");
+    test::assert(!space.is_punctuation(), "' ' is not punctuation");
+
+    test::assert(space.is_whitespace(), "' ' is whitespace");
+    test::assert(!a.is_whitespace(), "'a' is not whitespace");
+
+    test::assert(a.to_upper() == 'A', "char.to_upper");
+    test::assert(big.to_lower() == 'q', "char.to_lower");
+    test::assert(nine.to_upper() == '9', "to_upper leaves a non-letter alone");
+    test::assert("abc".to_upper() == "ABC", "string.to_upper is not shadowed by the char overload");
+    test::assert("ABC".to_lower() == "abc", "string.to_lower is not shadowed by the char overload");
+
+    return 0;
+}

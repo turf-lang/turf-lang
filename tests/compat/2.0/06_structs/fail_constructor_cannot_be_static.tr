@@ -1,0 +1,20 @@
+// EXPECT-DIAG: E046
+// EXPECT-DIAG: 'new' can't be 'static'
+// Regression test: `new` always constructs via `self` -- `static` (meaning
+// no self at all) directly contradicts that, and must be rejected with
+// ConstructorCannotBeStaticError rather than silently accepted or crashing
+// during codegen when the self-pointer machinery is expected but absent.
+
+struct Point {
+    x: int,
+    y: int
+}
+
+fn Point.new(x: int, y: int) static: void {
+    self.x = x;
+    self.y = y;
+}
+
+fn main(): int {
+    return 0;
+}

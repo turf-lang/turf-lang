@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E041
+// EXPECT-DIAG: Unknown function 'trim'
+// F-PRE-2: only the free functions of io, math and sys are callable by their
+// bare names. `strings` is a prelude module too (spellable as `strings::` with
+// no import, and a receiver's methods through UFCS), but its functions are not
+// flattened into the global namespace: `trim("..")` is not `strings::trim("..")`.
+fn main(): int {
+    mut s: string = trim("  padded  ");
+    return 0;
+}

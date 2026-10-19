@@ -1,0 +1,21 @@
+// EXPECT-DIAG: E130
+// EXPECT-DIAG: Raw pointer type 'Node*' cannot be used outside an 'unsafe' block
+// A method call reads its receiver as `self`, so calling one through a raw
+// pointer is a dereference like `p.field`. It compiled in safe code and read
+// through a null `next`.
+
+unsafe {
+    struct Node {
+        val: int,
+        next: Node*
+    }
+}
+
+fn Node.value(): int {
+    return self.val;
+}
+
+fn main(): int {
+    mut a: Node = Node::default();
+    return a.next.value();
+}

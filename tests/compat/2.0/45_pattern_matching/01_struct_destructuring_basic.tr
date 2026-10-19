@@ -1,0 +1,39 @@
+// LEC-003: struct destructuring -- a literal field test, a bound field, `..`,
+// and a guard, tried in source order (first match wins).
+import test;
+
+struct Point { x: int, y: int }
+
+fn classify(p: Point): int {
+    mut r: int;
+    compare p {
+        matches Point { x: 0, y: 0 }:
+        r = 1;
+        done
+        matches Point { x, y } if x == y:
+        r = 2;
+        done
+        matches Point { x: 0, .. }:
+        r = 3;
+        done
+        matches Point { x, y }:
+        r = x + y;
+        done
+    }
+    return r;
+}
+
+fn main(): int {
+    mut a: Point = Point::default();
+    test::assert(classify(a) == 1, "origin matches the first arm");
+    a.x = 3;
+    a.y = 3;
+    test::assert(classify(a) == 2, "x == y hits the guarded arm");
+    a.x = 0;
+    a.y = 7;
+    test::assert(classify(a) == 3, "x == 0 with y ignored");
+    a.x = 4;
+    a.y = 5;
+    test::assert(classify(a) == 9, "bindings are the field values");
+    return 0;
+}

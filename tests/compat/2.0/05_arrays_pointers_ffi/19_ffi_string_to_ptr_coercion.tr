@@ -1,0 +1,27 @@
+// Regression test (LANG-004 item 2): `string` now coerces to a `ptr`
+// parameter AT AN EXTERN FFI CALL SITE. Previously rejected outright:
+// `extern fn puts(s: ptr): int32; puts("hi");` -> "No overload of 'puts'
+// matches argument types (string)" -- even though `string` and `ptr`
+// already share the identical LLVM representation (isPointerLike(),
+// CodegenCore.cpp), so there was nothing to actually convert; it was
+// purely a missing rule in TypeChecker argument matching
+// (TypeCheckerCall.cpp's isExternStringToPtrCoercion(), gated on
+// Cand->IsExtern so it never applies outside a real `extern fn` call).
+//
+// Covers both a string LITERAL argument and a runtime-BUILT string (via
+// string `+` concatenation, lib/std/core/strings.tr's `operator +`), since
+// a literal's type is trivially `string` at parse time but a concatenation
+// result proves the coercion isn't somehow special-cased to literals only.
+
+import test;
+
+extern fn strlen(s: ptr): int;
+
+fn main(): int {
+    test::assert(strlen("hello") == 5, "string literal should coerce to ptr at an extern call site");
+
+    mut built: string = "hel" + "lo";
+    test::assert(strlen(built) == 5, "a runtime-built string should coerce to ptr too, not just literals");
+
+    return 0;
+}

@@ -1,0 +1,1 @@
+fail_json_malformed.tr:22: malformed JSON correctly rejected by json::parse (this abort is the expected, passing outcome)

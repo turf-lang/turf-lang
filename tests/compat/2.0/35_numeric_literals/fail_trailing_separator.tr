@@ -1,0 +1,9 @@
+// EXPECT-DIAG: E072
+// EXPECT-DIAG: A digit run can't end with '_'
+// SEM-001: a digit run can't END with '_' -- E072 (MisplacedSeparatorError,
+// docs/errors/codes/E072.txt).
+
+fn main(): int {
+    mut x: int = 5_;
+    return 0;
+}

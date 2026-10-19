@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E060
+// EXPECT-DIAG: You can't change the value of 'c' because it's immutable
+// A transition changes its receiver, so an `immut` machine cannot move.
+machine C {
+    Idle -> Connecting
+}
+
+fn main(): int {
+    immut c: C = C::Idle;
+    c.transition(C::Connecting);
+    return 0;
+}

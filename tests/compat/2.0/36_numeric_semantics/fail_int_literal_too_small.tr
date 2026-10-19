@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E076
+// EXPECT-DIAG: not representable in type 'int'
+// SEM-002 (FREEZE.md §6.2 row 3): the negative-direction mirror of
+// fail_int_literal_too_large.tr -- unary '-' folds into the literal first
+// (so this is genuinely checking a value one past INT64_MIN, not a
+// negation-overflow at runtime), and THAT folded value is still out of
+// range.
+fn main(): int {
+    mut x: int = -9999999999999999999999999999999999999999999999999;
+    return 0;
+}

@@ -1,0 +1,24 @@
+// EXPECT-DIAG: E044
+// EXPECT-DIAG: 'multiply' was called with 1 argument
+import io;
+
+fn multiply(x: int, y: int): int {
+    return x * y;
+}
+
+fn main(): int {
+    // ... some padding lines so multiply is out of the +/-5 window
+    io::printline("padding");
+    io::printline("padding");
+    io::printline("padding");
+    io::printline("padding");
+    io::printline("padding");
+    io::printline("padding");
+    io::printline("padding");
+    io::printline("padding");
+
+    mut res: int = multiply(5); // missing argument
+    io::printline(res);
+
+    return 0;
+}

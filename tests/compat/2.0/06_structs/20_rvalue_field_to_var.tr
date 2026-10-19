@@ -1,0 +1,48 @@
+// Regression test: declaring a variable from a field access chained directly
+// off a function-call result (`mut p: int = makeBox().val;`) must actually
+// register the variable and produce the correct value.
+//
+// Before the fix, FieldAccessExprAST::codegenLValue() had no r-value
+// fallback for a non-addressable Base (like a FuncCallExprAST result) --
+// unlike ArrayAccessExprAST::codegen() and MethodCallExprAST::codegen(),
+// which both already handle this via "spill the r-value into a temp alloca,
+// then GEP/pass that". It silently returned nullptr with NO diagnostic
+// anywhere, which meant VarDeclExprAST::codegen() hit its
+// `if (!Init) return nullptr;` early return WITHOUT ever calling
+// GlobalSymbolTable->DeclareSymbol() -- so `p` was resolved fine by the
+// Resolver (it has a VariableSymbol) but was never actually registered in
+// Codegen's own symbol table. The only visible symptom was a confusing,
+// wrong-cause error at the *next* use of `p`: "Hold on! You're trying to
+// use 'p' before telling me what it is." -- nowhere near the real bug.
+//
+// See also tests/06_structs/16_struct_rvalue.tr, which exercises the same
+// underlying codegen path (chained r-value field access) but via `test::assert()`
+// directly on the call result rather than through an intermediate variable.
+
+import io;
+
+import test;
+struct Box {
+    val: int
+}
+
+fn Box.new(val: int): void {
+    self.val = val;
+}
+
+fn makeBox(): Box {
+    return Box::new(42);
+}
+
+fn main(): int {
+    mut p: int = makeBox().val;
+    test::assert(p == 42, "");
+
+    // Chained field access as a call argument (not just a bare statement)
+    // must also actually execute and produce output -- this was the
+    // clearest symptom before the fix: the containing statement compiled
+    // clean but the printline call never ran at all.
+    io::printline(p);
+
+    return 0;
+}

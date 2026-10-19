@@ -1,0 +1,24 @@
+// Regression test (Issue #185, CFG Phase 1): `while true` with a `return`
+// inside a nested `if` must NOT trigger an InfiniteLoopWarning.
+//
+// A `return` inside the loop body places a `Return` terminator on the `if.then`
+// block within the cycle, satisfying condition (1) of hasUnbreakableLoop().
+
+import test;
+
+fn find_threshold(x: int): int {
+    mut count: int = 0;
+    while true {
+        count = count + 1;
+        if count > x {
+            return count;
+        }
+    }
+    return 0;
+}
+
+fn main(): int {
+    mut r: int = find_threshold(5);
+    test::assert(r == 6, "find_threshold(5) should return 6");
+    return 0;
+}

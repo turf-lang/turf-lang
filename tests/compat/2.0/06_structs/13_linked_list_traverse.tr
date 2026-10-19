@@ -1,0 +1,90 @@
+// Test: Linked list traversal and summation
+//
+// This test verifies that we can create a linked list using self-referential
+// pointers, and use standard loops (`while`) to traverse the list and compute
+// values, simulating real-world linked list operations.
+//
+// (issue #238) `next` is a genuinely nullable raw pointer -- a `&T` safe
+// reference can never be null -- so the struct decl stays `unsafe { }`-
+// wrapped, and the two traversal functions take a safe `&Node` (the list
+// can never legitimately be called on a null head) but immediately widen
+// it into a raw, walkable `Node*` local inside their own `unsafe { }`
+// body, since the WALK itself needs a pointer that can become null at the
+// end of the list. See 12_address_of_operator.tr's comment for the fuller
+// rationale behind this pattern.
+
+import test;
+
+unsafe {
+    struct Node {
+        val: int,
+        next: Node*
+    }
+}
+
+fn Node.new(val: int): void {
+    self.val = val;
+    unsafe {
+        self.next = null;
+    }
+}
+
+// Computes the sum of all elements in the linked list
+fn sum_list(head: &Node): int {
+    unsafe {
+        mut current: Node* = head;
+        mut sum: int = 0;
+        while current != null {
+            sum = sum + current.val;
+            current = current.next;
+        }
+        return sum;
+    }
+}
+
+// Returns the length of the list
+fn list_length(head: &Node): int {
+    unsafe {
+        mut current: Node* = head;
+        mut len: int = 0;
+        while current != null {
+            len = len + 1;
+            current = current.next;
+        }
+        return len;
+    }
+}
+
+fn main(): int {
+    // 1. Create a bunch of stack-allocated nodes
+    mut n1: Node = Node::new(10);
+    mut n2: Node = Node::new(20);
+    mut n3: Node = Node::new(30);
+    mut n4: Node = Node::new(40);
+    mut n5: Node = Node::new(50);
+
+    // 2. Link them up using the address-of operator. &n2/&n3/... are
+    // &Node (safe); assigning one into a Node* field is the always-sound
+    // safe-to-raw widening (src/sema/Types.cpp's Rule 2.5), so this needs no
+    // `unsafe { }`.
+    n1.next = &n2;
+    n2.next = &n3;
+    n3.next = &n4;
+    n4.next = &n5;
+
+    // 3. Test traversal sum
+    test::assert(sum_list(&n1) == 150, "FAIL: sum_list should be 150");
+
+    // 4. Test length
+    test::assert(list_length(&n1) == 5, "FAIL: list_length should be 5");
+
+    // 5. Test sub-list traversal
+    test::assert(sum_list(&n3) == 120, "FAIL: sub-list sum should be 120");
+    test::assert(list_length(&n3) == 3, "FAIL: sub-list len should be 3");
+
+    // 6. Mutate list and verify changes
+    n3.val = 100;
+    test::assert(sum_list(&n1) == 220, "FAIL: sum_list after mutation");
+
+    return 0;
+}

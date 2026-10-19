@@ -1,0 +1,125 @@
+// Companion module for the LEC-002 visibility tests (ends in _module.tr, so
+// the runner treats it as a helper with no main()). Every kind of declaration
+// appears once as `pub` and once private, so a test can reach for either.
+
+// ── functions ───────────────────────────────────────────────────────────────
+pub fn api(): int {
+    return helper() + 1;
+}
+
+fn helper(): int {
+    return 41;
+}
+
+// One name, two overloads of different visibility: only the `pub` one may be
+// seen from another module.
+pub fn pick(x: int): int {
+    return x;
+}
+
+fn pick(x: string): int {
+    return 0;
+}
+
+// ── types ───────────────────────────────────────────────────────────────────
+pub struct Shown {
+    pub v: int,
+    secret: int
+}
+
+// ── members of a `pub` struct: methods, static methods, UFCS ───────────────
+pub fn Shown.get(): int {
+    return self.v + self.secret;
+}
+
+fn Shown.hidden(): int {
+    return self.secret;
+}
+
+pub fn Shown.make(v: int) static: Shown {
+    mut s: Shown = Shown::default();
+    s.v = v;
+    s.secret = 7;
+    return s;
+}
+
+fn Shown.make_private() static: Shown {
+    return Shown::default();
+}
+
+// A free function is a UFCS candidate (`s.twice()`) only where it is visible.
+pub fn twice(x: Shown): int {
+    return x.get() * 2;
+}
+
+fn secret_twice(x: Shown): int {
+    return x.secret * 2;
+}
+
+// A constructor is an ordinary method with its own visibility: `Guarded::new`
+// is private, `Guarded::make` is the public way in.
+pub struct Guarded {
+    pub v: int
+}
+
+fn Guarded.new(v: int): void {
+    self.v = v;
+}
+
+pub fn Guarded.make(v: int) static: Guarded {
+    return Guarded::new(v);
+}
+
+// A generic struct: the private field is reached by the module's own
+// methods, including their monomorphized clones instantiated from elsewhere.
+pub struct Cell<T> {
+    value: T,
+    pub count: int
+}
+
+pub fn<T> Cell.put(v: T): void {
+    self.value = v;
+    self.count = self.count + 1;
+}
+
+pub fn<T> Cell.take(): T {
+    return self.value;
+}
+
+struct Hidden {
+    v: int
+}
+
+pub enum PubColor { Red, Green }
+
+enum HiddenColor { A, B }
+
+pub error PubErr { Bad }
+
+error HiddenErr { Worse }
+
+pub machine PubMachine { Off -> On, On -> Off }
+
+machine HiddenMachine { Off -> On, On -> Off }
+
+// ── constants: `export immut` is its own `pub` ──────────────────────────────
+export immut LIMIT: int = 10;
+
+// ── generics: a pub generic may use a private helper; the monomorphized
+// clone is resolved in THIS module, not at the caller ──────────────────────
+fn<T> hidden_generic(x: T): int {
+    return 5;
+}
+
+pub fn<T> wrap_generic(x: T): int {
+    return hidden_generic(x) + helper();
+}
+
+// ── extern fns ──────────────────────────────────────────────────────────────
+extern fn strlen(s: string): int;
+
+pub extern fn abs(x: int32): int32;
+
+pub fn length_of(s: string): int {
+    return strlen(s);
+}

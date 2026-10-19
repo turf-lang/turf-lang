@@ -1,0 +1,31 @@
+import test;
+
+fn main(): int {
+    mut i: int = 0;
+    mut while_hit: int = 0;
+
+    while i < 5 {
+        if i == 2 {
+            while_hit = while_hit + 1;
+        } else {
+            // empty
+        }
+        i = i + 1;
+    }
+
+    test::assert(while_hit == 1, "while loop should hit if block exactly once");
+    test::assert(i == 5, "while loop should finish with i = 5");
+
+    mut for_hit: int = 0;
+    for j in 0..5 step j = j + 1 {
+        if j == 2 {
+            for_hit = for_hit + 1;
+        } else {
+            // empty
+        }
+    }
+
+    test::assert(for_hit == 1, "for loop should hit if block exactly once");
+
+    return 0;
+}

@@ -1,0 +1,12 @@
+// F-API-3: `m[key]` on a missing key names the line that indexed, like `m.get(key)`
+// does. Map's `operator []` is `return m.get(key);` and was not `@caller_location`,
+// so the panic named that line of map.tr instead (found by turf-fuzz).
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: fail_stdlib_map_index_names_caller.tr:10: Map.get: no such key
+import map::Map;
+
+fn main(): int {
+    mut m: Map<int, int> = Map::default();
+    io::printline(m[3]);
+    return 0;
+}

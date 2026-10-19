@@ -1,0 +1,79 @@
+// tests/41_gc/03_interior_pointer_retention.tr
+// MEM-002 §14.6: "Interior pointers must retain. This matters more in
+// TurfLang than in most languages, because List<T>.data[i] arithmetic is
+// the documented way to index a collection." The collector's block table
+// (turfrt_gc.c's gc_find_containing()) must resolve an address that only
+// points MID-BUFFER -- not just a block's own start address -- back to its
+// containing object, or a value reachable ONLY through such a pointer would
+// be swept.
+//
+// `make_interior_ptr()` returns `&l.data[1]`, an address into the MIDDLE of
+// the List<int>'s backing buffer -- crucially, `l` ITSELF (which holds the
+// buffer's START address in `l.data`) is local to that function and goes
+// out of scope the moment it returns. By the time gc_collect() runs in
+// main(), the ONLY reference to this buffer anywhere in the program is the
+// interior pointer `mid` -- there is no surviving `List<int>` value, and no
+// surviving copy of `l.data`'s own start address, for a naive
+// "only block STARTS are roots" implementation to find.
+
+unsafe module;
+
+import test;
+import io;
+
+// LEC-002: this used to build a `List<int>` and take `&l.data[1]`. `data` is
+// private to list.tr now, so the test owns its buffer holder -- a struct with
+// the same `data: int*` field, backed by the same GC allocator List uses
+// (`gc_alloc`), which is all the interior-pointer property needs.
+struct Buf {
+    data: int*,
+    len: int
+}
+
+fn make_interior_ptr(): &int {
+    mut b: Buf = Buf::default();
+    b.data = gc_alloc(4 * 8) to int*;
+    b.data[0] = 10;
+    b.data[1] = 20;
+    b.data[2] = 30;
+    b.data[3] = 40;
+    unsafe {
+        return &b.data[1]; // points at the '20' element, not the buffer's start
+    }
+}
+
+fn churn(depth: int): void {
+    mut buf: int[64];
+    buf[0] = 0;
+    mut i: int = 0;
+    while i < 64 {
+        buf[i] = i * 5;
+        i = i + 1;
+    }
+    mut sum: int = 0;
+    i = 0;
+    while i < 64 {
+        sum = sum + buf[i];
+        i = i + 1;
+    }
+    test::assert(sum == 10080, "churn: stack buffer round-trips correctly");
+    if depth > 0 {
+        churn(depth - 1);
+    }
+}
+
+fn main(): int {
+    mut mid: &int = make_interior_ptr();
+
+    churn(24);
+    gc_collect();
+    churn(24);
+    gc_collect();
+
+    unsafe {
+        test::assert(mid[0] == 20, "interior pointer survives a collection with correct value");
+    }
+
+    io::printline("41/03 PASS: interior pointer into a gc_alloc'd buffer survives a forced collection");
+    return 0;
+}

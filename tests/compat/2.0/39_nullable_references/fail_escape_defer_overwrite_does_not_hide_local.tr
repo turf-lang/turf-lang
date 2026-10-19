@@ -1,0 +1,18 @@
+// EXPECT-DIAG: E086
+// EXPECT-DIAG: can't be returned
+// `return p` returns `&n`: the deferred `p = heap(n)` runs only after the
+// value is computed. While a defer counted where it is written, this looked
+// like a heap return and compiled.
+struct N { val: int, next: &?N }
+
+fn f(): &N {
+    mut n: N = N::default();
+    n.val = 42;
+    mut p: &N = &n;
+    defer p = heap(n);
+    return p;
+}
+
+fn main(): int {
+    return f().val;
+}

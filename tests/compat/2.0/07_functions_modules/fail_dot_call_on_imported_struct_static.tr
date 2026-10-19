@@ -1,0 +1,14 @@
+// EXPECT-DIAG: E048
+// EXPECT-DIAG: 'Vec2' is a struct type, not an instance
+// Regression test: same bug/fix as fail_dot_call_on_struct_static.tr, but
+// for a struct+static-method pair declared inside an IMPORTED MODULE
+// rather than the main file -- confirms the '.' rejection applies
+// regardless of where the struct/method were declared, not just the
+// single-file case.
+
+import static_shape_module::Vec2;
+
+fn main(): int {
+    immut z: Vec2 = Vec2.zero();
+    return 0;
+}

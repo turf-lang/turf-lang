@@ -1,0 +1,23 @@
+// The accepted side of fail_escape_return_give_of_locals.tr: a `give` of two
+// heap() references, and of two references the caller handed in.
+import test;
+
+struct Node { val: int, next: &?Node }
+
+fn pick(c: int, n: Node): &Node {
+    return (c > 0 give heap(n) otherwise heap(Node::default()));
+}
+
+fn either(c: int, a: &Node, b: &Node): &Node {
+    return (c > 0 give a otherwise b);
+}
+
+fn main(): int {
+    mut n: Node = Node::default();
+    n.val = 42;
+    test::assert(pick(1, n).val == 42, "give of heap()");
+    mut a: &Node = heap(n);
+    mut b: &Node = heap(Node::default());
+    test::assert(either(0, a, b).val == 0, "give of parameters");
+    return 0;
+}

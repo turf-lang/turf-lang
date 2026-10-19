@@ -1,0 +1,9 @@
+// EXPECT-DIAG: E061
+// A slice is a view, not a place: `a[0..2] = b` would not copy b's elements
+// into a. (Assign the elements one by one, or fill() a slice.)
+fn main(): int {
+    mut a: int[3] = [1, 2, 3];
+    mut b: int[2] = [9, 9];
+    a[0..2] = b;
+    return 0;
+}

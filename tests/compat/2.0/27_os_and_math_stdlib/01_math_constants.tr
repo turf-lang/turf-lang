@@ -1,0 +1,16 @@
+// Regression coverage for issue #239 (Track B): math::PI/math::E are
+// trivial `export immut` constants -- verify both the value and that they
+// behave like ordinary imported constants (usable directly in expressions,
+// no qualification tricks needed).
+import math;
+import test;
+
+fn main(): int {
+    test::assert(math::PI > 3.14159 && math::PI < 3.14160, "math::PI has the expected value");
+    test::assert(math::E > 2.71828 && math::E < 2.71829, "math::E has the expected value");
+
+    immut circumference: double = 2.0 * math::PI * 10.0;
+    test::assert(circumference > 62.8 && circumference < 62.9, "math::PI usable directly in an expression");
+
+    return 0;
+}

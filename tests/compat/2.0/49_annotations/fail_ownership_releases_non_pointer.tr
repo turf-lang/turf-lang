@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: but that parameter is not a pointer
+// Only a pointer can be freed.
+
+@ownership(releases: n)
+extern fn drop(n: int): void;
+
+fn main(): int {
+    return 0;
+}

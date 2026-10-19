@@ -1,0 +1,85 @@
+// LEC-007: fs::mkdir / remove_file / remove_dir return `!void` and fail with
+// an FsError variant that carries the path (they returned bool before, which
+// could not say what failed). Each failure is provoked for real, and each
+// variant is told apart from the others -- a single catch-all variant would
+// pass a plain "it failed" check.
+
+import fs;
+import io;
+import test;
+
+// Reads the payload by destructuring, in its own function: a `return` inside
+// `recover as err run` returns from the ENCLOSING function.
+fn mkdir_failure(path: string): string {
+    fs::mkdir(path) recover as err run {
+        compare err {
+            matches fs::FsError::MkdirFailed(p):
+            return p;
+            done
+            otherwise:
+            return "wrong variant";
+        }
+    };
+    return "";
+}
+
+fn remove_file_failure(path: string): string {
+    fs::remove_file(path) recover as err run {
+        compare err {
+            matches fs::FsError::RemoveFileFailed(p):
+            return p;
+            done
+            otherwise:
+            return "wrong variant";
+        }
+    };
+    return "";
+}
+
+fn remove_dir_failure(path: string): string {
+    fs::remove_dir(path) recover as err run {
+        compare err {
+            matches fs::FsError::RemoveDirFailed(p):
+            return p;
+            done
+            otherwise:
+            return "wrong variant";
+        }
+    };
+    return "";
+}
+
+fn main(): int {
+    immut dir: string = "tmp_fs_errors_dir";
+    immut file: string = fs::join(dir, "f.txt");
+
+    // Clean slate (failures from a previous aborted run are ignored).
+    fs::remove_file(file);
+    fs::remove_dir(dir);
+
+    // MkdirFailed: the parent does not exist.
+    test::assert(mkdir_failure("tmp_fs_errors_no_parent/child") == "tmp_fs_errors_no_parent/child",
+        "mkdir with a missing parent fails with MkdirFailed(path)");
+
+    fs::mkdir(dir) recover run { test::fail("setup: mkdir should succeed"); };
+
+    // MkdirFailed: it already exists.
+    test::assert(mkdir_failure(dir) == dir, "mkdir on an existing directory fails with MkdirFailed(path)");
+
+    // RemoveFileFailed: nothing there.
+    test::assert(remove_file_failure(file) == file, "remove_file of a missing file fails with RemoveFileFailed(path)");
+
+    io::write_string(file, "x") recover run { test::fail("setup: write_string should succeed"); };
+
+    // RemoveDirFailed: not empty.
+    test::assert(remove_dir_failure(dir) == dir, "remove_dir of a non-empty directory fails with RemoveDirFailed(path)");
+
+    // The failed remove_dir must not have removed anything.
+    test::assert(io::exists(file), "a failed remove_dir leaves the contents alone");
+
+    fs::remove_file(file) recover run { test::fail("cleanup: remove_file"); };
+    fs::remove_dir(dir) recover run { test::fail("cleanup: remove_dir"); };
+    test::assert(!fs::is_dir(dir), "cleaned up");
+
+    return 0;
+}

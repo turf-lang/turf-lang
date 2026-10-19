@@ -1,0 +1,28 @@
+// EXPECT-DIAG: E092
+// EXPECT-DIAG: doesn't mention the field 'mode' of 'IOError::Denied'
+// LEC-004: like a struct pattern, an error-variant pattern lists every field
+// or ends in `..`. `Denied(path)` leaves `mode` unmentioned: E092.
+error IOError {
+    Denied(path: string, mode: int)
+}
+
+fn open(p: string): !int {
+    return IOError::Denied(p, 1);
+}
+
+fn code(): int {
+    immut v: int = open("x") recover as err run {
+        compare err {
+            matches IOError::Denied(path):
+            return 1;
+            done
+            otherwise:
+            return 2;
+        }
+    };
+    return v;
+}
+
+fn main(): int {
+    return 0;
+}

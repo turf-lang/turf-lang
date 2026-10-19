@@ -1,0 +1,28 @@
+// EXPECT-DIAG: E035
+// EXPECT-DIAG: 'ConnectionState' has no transition from 'Idle' to 'Closing'
+// Test: a .transition() call inside a single-pattern 'matches' arm that has
+// narrowed the receiver to one specific state must be REJECTED AT COMPILE
+// TIME (InvalidTransitionError) when the declared machine has no edge from
+// that narrowed state to the target -- not deferred to a runtime panic.
+
+machine ConnectionState {
+    Idle -> Connecting,
+    Connecting -> Connected,
+    Connecting -> Failed,
+    Connected -> Closing,
+    Closing -> Idle,
+}
+
+fn main(): int {
+    mut conn: ConnectionState = ConnectionState::Idle;
+    compare conn {
+        matches ConnectionState::Idle:
+        // Idle has no declared edge straight to Closing -- the arm has
+        // narrowed conn to Idle, so this must be a compile error.
+        conn.transition(ConnectionState::Closing);
+        done
+        otherwise:
+        mut noop: int = 0;
+    }
+    return 0;
+}

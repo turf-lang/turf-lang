@@ -1,0 +1,34 @@
+import test;
+
+extern fn malloc(size: int): ptr;
+extern fn free(p: ptr): void;
+
+// (issue #238) `next` is a genuinely nullable raw pointer, so the struct
+// decl stays `unsafe { }`-wrapped -- see 12_address_of_operator.tr's
+// comment for the fuller rationale. This whole test is inherently a raw
+// heap-pointer exercise (malloc/free/manual struct layout), so main()'s
+// body is wrapped in one `unsafe { }` rather than piecemeal per statement.
+unsafe {
+    struct Node {
+        val: int,
+        next: Node*
+    }
+}
+
+fn main(): int {
+    unsafe {
+        // Allocate exactly enough bytes for a Node using sizeof
+        mut p: Node* = malloc(sizeof(Node)) to Node*;
+
+        // Test writing to heap-allocated memory
+        p.val = 42;
+        p.next = null;
+
+        // Test reading
+        test::assert(p.val == 42, "FAIL: heap struct val read");
+
+        // Cleanup
+        free(p to ptr);
+    }
+    return 0;
+}

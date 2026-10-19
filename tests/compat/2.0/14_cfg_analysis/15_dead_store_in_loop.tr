@@ -1,0 +1,11 @@
+// Regression test (#186): `temp` is written inside the loop but never read
+// within the loop body or after it → dead store warning for each iteration's
+// assignment. `sum` is correctly live-through and not flagged.
+fn main(): int {
+    mutable sum: int = 0;
+    for i in 0..5 step i += 1 {
+        mutable temp: int = i * 2;
+        sum += 1;
+    }
+    return 0;
+}

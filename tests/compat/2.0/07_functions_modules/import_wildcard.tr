@@ -1,0 +1,13 @@
+// Regression test: `import module::[*];` pulls EVERY function that module
+// exports into the current file's flat namespace, matching the old
+// (accidental, pre-fix) blanket-visibility behavior but now opt-in and
+// explicit per the "on demand only" design.
+
+import math::[*];
+
+import test;
+fn main(): int {
+    test::assert(abs(-5) == 5, "abs should be bare-callable via wildcard import");
+    test::assert(max(3, 7) == 7, "max should be bare-callable via wildcard import");
+    return 0;
+}

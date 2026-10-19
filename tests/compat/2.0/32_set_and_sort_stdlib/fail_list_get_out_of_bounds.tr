@@ -1,0 +1,19 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: List.get: index out of bounds
+// Regression test (OVH-003, docs/planning/OVERHAUL_REMAINING_WORK.md):
+// `List<T>.get()` is bounds-checked -- an out-of-range index compiles
+// clean (the index comes from a variable, not a literal ValueRangePass
+// could reject at compile time) and aborts at runtime via the same
+// sys::panic() path operator[] already uses, matching "List[]: index out
+// of bounds"'s own contract. See 06_list_get_set.tr for the in-bounds
+// passing cases.
+
+import list::List;
+
+fn main(): int {
+    mut l: List<int> = List::default();
+    l.push(1);
+    mut idx: int = 5;
+    mut x: int = l.get(idx);
+    return x;
+}

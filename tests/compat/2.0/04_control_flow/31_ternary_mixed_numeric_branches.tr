@@ -1,0 +1,20 @@
+// `give`/`otherwise` with an int on one side and a double (or int32) on the
+// other yields the wider type; each side is converted before the branches
+// join, whichever side runs.
+import test;
+
+fn pick(a: int, d: double, s: int32): int {
+    mut x: double = a > 2 give a otherwise d;
+    mut y: double = a > 2 give d otherwise a;
+    mut z: int = a > 2 give a otherwise s;
+    test::assert(x == (a > 2 give 3.0 otherwise d), "int then side");
+    test::assert(y == (a > 2 give d otherwise 1.0), "int else side");
+    return z;
+}
+
+fn main(): int {
+    mut s: int32 = 7;
+    test::assert(pick(3, 2.5, s) == 3, "then side taken");
+    test::assert(pick(1, 2.5, s) == 7, "else side taken");
+    return 0;
+}

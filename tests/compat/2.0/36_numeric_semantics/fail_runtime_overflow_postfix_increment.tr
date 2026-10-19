@@ -1,0 +1,10 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: runtime check: Integer overflow
+// SEM-002: PostfixExprAST ('x++'/'x--') also has its own separate codegen
+// path and needed the same overflow-trap wiring independently -- 'x++' is
+// arithmetically 'x = x + 1', so it gets the same trap any other '+' does.
+fn main(): int {
+    mut a: int = 9223372036854775807;
+    a++;
+    return 0;
+}

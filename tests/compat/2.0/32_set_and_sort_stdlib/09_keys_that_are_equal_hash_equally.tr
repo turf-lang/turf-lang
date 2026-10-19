@@ -1,0 +1,99 @@
+// Map and Set keys that `==` calls equal are the same key. hashing::hash()
+// used to hash a value's raw bytes, which broke that in three ways (found
+// reviewing Map/Set for REL-005): a struct's padding holds leftover bytes, so
+// equal struct keys hashed apart (at -O0, 1999 of 2000 lookups missed; at -O2
+// none, a level-dependent answer); -0.0 == 0.0 but their bytes differ; and a
+// struct whose fields are strings was hashed by the string pointers, not
+// their text. It now uses hash_of() (owner decision 2026-10-13), which hashes
+// field by field. Run at -O0 too: that is where the padding showed.
+
+import test;
+import map::Map;
+import set::Set;
+
+struct P {
+    c: char,
+    n: int
+}
+
+operator ==(x: P, y: P): bool {
+    return x.c == y.c && x.n == y.n;
+}
+
+struct Person {
+    name: string,
+    age: int
+}
+
+operator ==(x: Person, y: Person): bool {
+    return x.name == y.name && x.age == y.age;
+}
+
+// Leaves non-zero bytes where the next frame's padding will be.
+fn dirty(seed: int): int {
+    mut a: int[64];
+    a[0] = seed;
+    for i in 0..64 {
+        a[i] = -1 - i * seed;
+    }
+    return a[63];
+}
+
+fn mk(n: int): P {
+    mut p: P = P::default();
+    p.c = 'a';
+    p.n = n;
+    return p;
+}
+
+fn person(n: int): Person {
+    mut p: Person = Person::default();
+    p.name = "p" + (n to string);
+    p.age = n;
+    return p;
+}
+
+fn id(x: double): double {
+    return x;
+}
+
+fn main(): int {
+    mut s: Set<P> = Set::default();
+    for i in 0..2000 {
+        s.add(mk(i));
+    }
+    mut missing: int = 0;
+    for i in 0..2000 {
+        if (!s.contains(mk(i)) && dirty(i + 7) != 12345) {
+            missing += 1;
+        }
+    }
+    test::assert(missing == 0, "every padded struct key is found again");
+
+    mut m: Map<double, int> = Map::default();
+    mut d: Set<double> = Set::default();
+    for i in 1..1001 {
+        m.put(i to double, i);
+        d.add(i to double);
+    }
+    immut negz: double = id(0.0) * id(-1.0);
+    m.put(id(0.0), 0);
+    d.add(id(0.0));
+    d.add(negz);
+    test::assert(m.contains(negz), "-0.0 finds the 0.0 key");
+    test::assert(d.length() == 1001, "0.0 and -0.0 are one set member");
+
+    mut people: Map<Person, int> = Map::default();
+    for i in 0..500 {
+        people.put(person(i), i);
+    }
+    mut found: int = 0;
+    for i in 0..500 {
+        if (people.contains(person(i))) {
+            found += 1;
+        }
+    }
+    test::assert(found == 500, "a struct key with a string field matches by text");
+    test::assert(people.get(person(42)) == 42, "and maps to its value");
+    return 0;
+}

@@ -1,0 +1,19 @@
+// EXPECT-DIAG: E017
+// EXPECT-DIAG: Double free detected for 'p'
+// The `@ownership` annotations on externs declared inside a function body
+// reach the alias analysis exactly as file-scope ones do.
+
+fn main(): int {
+    @ownership(acquires)
+    extern fn malloc(size: int): int*;
+
+    @ownership(releases: p)
+    extern fn free(p: int*): void;
+
+    unsafe {
+        mut p: int* = malloc(sizeof(int) * 4);
+        free(p);
+        free(p);
+    }
+    return 0;
+}

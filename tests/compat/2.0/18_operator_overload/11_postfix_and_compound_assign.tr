@@ -1,0 +1,53 @@
+// LANG-001/F-OP-2/D21: compound assignment desugars through `operator+`/
+// `operator-`, and postfix `++`/`--` picks up the SAME overloads (prefix
+// already did, for free, via its own existing `x = x + 1` desugaring --
+// see D21 in docs/archive/ARCHITECTURE_OVERHAUL.md §27.3 for the decision
+// this test proves was made: postfix DOES pick up an overload).
+import test;
+
+struct Counter {
+    n: int
+}
+
+operator +(a: Counter, b: int): Counter {
+    mut r: Counter = Counter::default();
+    r.n = a.n + b;
+    return r;
+}
+
+operator -(a: Counter, b: int): Counter {
+    mut r: Counter = Counter::default();
+    r.n = a.n - b;
+    return r;
+}
+
+fn main(): int {
+    mut c: Counter = Counter::default();
+    c.n = 10;
+
+    c += 5;
+    test::assert(c.n == 15, "Counter += int should call operator+");
+
+    c -= 3;
+    test::assert(c.n == 12, "Counter -= int should call operator-");
+
+    // Prefix: desugars to 'c = c + 1' at parse time, inheriting operator+
+    // with zero extra code.
+    ++c;
+    test::assert(c.n == 13, "prefix ++Counter should call operator+ via desugaring");
+
+    --c;
+    test::assert(c.n == 12, "prefix --Counter should call operator- via desugaring");
+
+    // Postfix: does NOT desugar -- needs its own overload hookup (this is
+    // the D21 decision under test). Returns the OLD value.
+    mut before: Counter = c++;
+    test::assert(before.n == 12, "postfix c++ should return the OLD value");
+    test::assert(c.n == 13, "postfix c++ should still increment c via operator+");
+
+    mut beforeDec: Counter = c--;
+    test::assert(beforeDec.n == 13, "postfix c-- should return the OLD value");
+    test::assert(c.n == 12, "postfix c-- should still decrement c via operator-");
+
+    return 0;
+}

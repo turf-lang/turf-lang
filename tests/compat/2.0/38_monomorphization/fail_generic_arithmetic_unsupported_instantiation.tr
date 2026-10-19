@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E057
+// EXPECT-DIAG: In this instantiation: Type mismatch: cannot apply '+' to 'bool' and 'bool'
+// EXPECT-DIAG: immut s: bool = twice(true);
+// `+` on `T` is checked for `T = bool`, at the call.
+
+fn<T> twice(a: T): T {
+    return a + a;
+}
+
+fn main(): int {
+    immut s: bool = twice(true);
+    return 0;
+}

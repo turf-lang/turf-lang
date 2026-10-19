@@ -1,0 +1,33 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: Array index out of bounds
+// LEC-005 / INV-LINT-1: the recover-block twin of
+// fail_address_taken_index_not_elided.tr. `i`'s address is taken inside a
+// `recover` expression and the callee writes 99 through it. collectAddressTaken()
+// (ValueRange.cpp) was a hand-written chain with no branch for `recover`, so it
+// never saw the `&i`, believed `i == 0` still held at `a[i]`, and ELIDED the
+// bounds check -- a genuine out-of-bounds read with exit status 0 (confirmed
+// live before the fix). LEC-004 had patched the same hole for `try` alone.
+// The walk is now an ExhaustiveASTVisitor: every node kind is reached.
+fn mutate(p: &int): !int {
+    unsafe {
+        mut raw: int* = p to int*;
+        raw[0] = 99;
+    }
+    if (never()) {
+        return Boom::Bad;
+    }
+    return 0;
+}
+
+error Boom { Bad }
+
+fn never(): bool {
+    return false;
+}
+
+fn main(): int {
+    mut i: int = 0;
+    mut a: int[3] = [1, 2, 3];
+    mutate(&i) recover run { return 1; };
+    return a[i];
+}

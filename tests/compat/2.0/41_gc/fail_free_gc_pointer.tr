@@ -1,0 +1,27 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: cross-heap free
+// tests/41_gc/fail_free_gc_pointer.tr
+// MEM-002's own "Breaking changes" entry (docs/archive/ARCHITECTURE_OVERHAUL.md
+// §8): "Programs that mem::free something they got from strings::* or a
+// collection now free GC memory -- that must become a diagnosable runtime
+// error." Compiles fine (mem::free(p: void*) accepts any pointer-shaped
+// value, including a string cast to void* -- there is nothing for the
+// TYPE CHECKER to reject here, the mistake is a HEAP-IDENTITY one, only
+// knowable at runtime against the collector's own block table), then
+// aborts the moment it actually runs, naming the cross-heap mistake
+// instead of silently corrupting mem::free's own manual-heap bookkeeping
+// (or, pre-MEM-002, doing nothing detectable at all -- this exact class of
+// bug was completely undiagnosed before this group, per MEM-001's own
+// "Must NOT reinterpret": "the two heaps do not merge" was a rule with no
+// enforcement until this group's block table existed).
+
+import strings;
+import mem;
+
+fn main(): int {
+    mut s: string = strings::repeat("z", 10);
+    unsafe {
+        mem::free(s to void*);
+    }
+    return 0;
+}

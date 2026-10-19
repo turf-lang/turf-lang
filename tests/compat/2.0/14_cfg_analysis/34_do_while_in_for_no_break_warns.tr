@@ -1,0 +1,25 @@
+// Regression test (Issue #180 follow-up): a `do { } while(true)` with no
+// break/return, nested inside an ordinary (finite, breakable) `for` loop.
+// Cross-type nesting check: the outer `for` is completely unrelated to the
+// do-while's own unbreakable cycle, so CFGBuilder::visitDoWhile() must still
+// correctly close the do-while's own cond->body edge (no cond->exit edge for
+// a literal-true condition) regardless of what kind of loop encloses it --
+// the do-while itself must be flagged unbreakable.
+//
+// Intentionally returns before ever reaching the loop so the test suite
+// doesn't actually hang (same technique as 28_infinite_do_while_true_warns.tr).
+
+fn main(): int {
+    if true {
+        return 0;
+    }
+    mut total: int = 0;
+    for i in 0..3 step i += 1 {
+        mut x: int = 0;
+        do {
+            x = x + 1;
+            total = total + x;
+        } while (true);
+    }
+    return 0;
+}

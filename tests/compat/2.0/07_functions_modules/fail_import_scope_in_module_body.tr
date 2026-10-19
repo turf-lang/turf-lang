@@ -1,0 +1,9 @@
+// LEC-008: a module is held to the rule too, and the error names the module
+// whose file needs the import (not this one).
+// EXPECT-DIAG: E145
+// EXPECT-DIAG: in module 'import_scope_leaky_module'
+import import_scope_leaky_module;
+
+fn main(): int {
+    return import_scope_leaky_module::leaky();
+}

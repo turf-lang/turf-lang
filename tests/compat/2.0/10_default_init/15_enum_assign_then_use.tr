@@ -1,0 +1,22 @@
+// SEM-004 (F-INIT-1, FREEZE.md §6.4): an enum-typed local was one of
+// Mechanism B's eager-zero-init types (silently readable as its ordinal-0
+// variant before SEM-004) -- that mechanism is gone. It now follows the
+// same definite-assignment rule as every other type: a declaration
+// without an initializer leaves it unassigned until an explicit
+// assignment runs. See fail_enum_use_before_init.tr for the
+// read-before-assignment error this same declaration now produces.
+import test;
+
+enum Direction {
+    North,
+    East,
+    South,
+    West
+}
+
+fn main(): int {
+    mut d: Direction;
+    d = Direction::North;
+    test::assert((d to int) == 0, "enum: assign then use");
+    return 0;
+}

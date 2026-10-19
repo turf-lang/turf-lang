@@ -1,0 +1,372 @@
+// LEC-005 (D25): a perfectly ordinary program that calls one generic function on
+// 70 DIFFERENT types must compile and run. Before this milestone the monomorphizer
+// capped the TOTAL number of instantiations it drained at
+// Monomorphize::kMaxInstantiationDepth (64) -- named a depth, measuring a count --
+// so the 65th independent `ident<S65>` was rejected with a bogus E079 whose
+// "chain" was a dump of the whole instantiation cache. The cap now measures the
+// real request chain (InstantiationRequest::Parent): 70 siblings are chains of
+// length 1.
+// EXPECT-NO-DIAG: E079
+// EXPECT-NO-DIAG: instantiation depth exceeded
+// (Generated: 70 one-field structs and one ident<S> call each; edit by hand, not by
+// regenerating, if you change it.)
+import test;
+
+fn<T> ident(x: T): T { return x; }
+
+struct S1 { v: int }
+struct S2 { v: int }
+struct S3 { v: int }
+struct S4 { v: int }
+struct S5 { v: int }
+struct S6 { v: int }
+struct S7 { v: int }
+struct S8 { v: int }
+struct S9 { v: int }
+struct S10 { v: int }
+struct S11 { v: int }
+struct S12 { v: int }
+struct S13 { v: int }
+struct S14 { v: int }
+struct S15 { v: int }
+struct S16 { v: int }
+struct S17 { v: int }
+struct S18 { v: int }
+struct S19 { v: int }
+struct S20 { v: int }
+struct S21 { v: int }
+struct S22 { v: int }
+struct S23 { v: int }
+struct S24 { v: int }
+struct S25 { v: int }
+struct S26 { v: int }
+struct S27 { v: int }
+struct S28 { v: int }
+struct S29 { v: int }
+struct S30 { v: int }
+struct S31 { v: int }
+struct S32 { v: int }
+struct S33 { v: int }
+struct S34 { v: int }
+struct S35 { v: int }
+struct S36 { v: int }
+struct S37 { v: int }
+struct S38 { v: int }
+struct S39 { v: int }
+struct S40 { v: int }
+struct S41 { v: int }
+struct S42 { v: int }
+struct S43 { v: int }
+struct S44 { v: int }
+struct S45 { v: int }
+struct S46 { v: int }
+struct S47 { v: int }
+struct S48 { v: int }
+struct S49 { v: int }
+struct S50 { v: int }
+struct S51 { v: int }
+struct S52 { v: int }
+struct S53 { v: int }
+struct S54 { v: int }
+struct S55 { v: int }
+struct S56 { v: int }
+struct S57 { v: int }
+struct S58 { v: int }
+struct S59 { v: int }
+struct S60 { v: int }
+struct S61 { v: int }
+struct S62 { v: int }
+struct S63 { v: int }
+struct S64 { v: int }
+struct S65 { v: int }
+struct S66 { v: int }
+struct S67 { v: int }
+struct S68 { v: int }
+struct S69 { v: int }
+struct S70 { v: int }
+
+fn main(): int {
+    mut s1: S1 = S1::default();
+    s1.v = 1;
+    s1 = ident(s1);
+    mut s2: S2 = S2::default();
+    s2.v = 2;
+    s2 = ident(s2);
+    mut s3: S3 = S3::default();
+    s3.v = 3;
+    s3 = ident(s3);
+    mut s4: S4 = S4::default();
+    s4.v = 4;
+    s4 = ident(s4);
+    mut s5: S5 = S5::default();
+    s5.v = 5;
+    s5 = ident(s5);
+    mut s6: S6 = S6::default();
+    s6.v = 6;
+    s6 = ident(s6);
+    mut s7: S7 = S7::default();
+    s7.v = 7;
+    s7 = ident(s7);
+    mut s8: S8 = S8::default();
+    s8.v = 8;
+    s8 = ident(s8);
+    mut s9: S9 = S9::default();
+    s9.v = 9;
+    s9 = ident(s9);
+    mut s10: S10 = S10::default();
+    s10.v = 10;
+    s10 = ident(s10);
+    mut s11: S11 = S11::default();
+    s11.v = 11;
+    s11 = ident(s11);
+    mut s12: S12 = S12::default();
+    s12.v = 12;
+    s12 = ident(s12);
+    mut s13: S13 = S13::default();
+    s13.v = 13;
+    s13 = ident(s13);
+    mut s14: S14 = S14::default();
+    s14.v = 14;
+    s14 = ident(s14);
+    mut s15: S15 = S15::default();
+    s15.v = 15;
+    s15 = ident(s15);
+    mut s16: S16 = S16::default();
+    s16.v = 16;
+    s16 = ident(s16);
+    mut s17: S17 = S17::default();
+    s17.v = 17;
+    s17 = ident(s17);
+    mut s18: S18 = S18::default();
+    s18.v = 18;
+    s18 = ident(s18);
+    mut s19: S19 = S19::default();
+    s19.v = 19;
+    s19 = ident(s19);
+    mut s20: S20 = S20::default();
+    s20.v = 20;
+    s20 = ident(s20);
+    mut s21: S21 = S21::default();
+    s21.v = 21;
+    s21 = ident(s21);
+    mut s22: S22 = S22::default();
+    s22.v = 22;
+    s22 = ident(s22);
+    mut s23: S23 = S23::default();
+    s23.v = 23;
+    s23 = ident(s23);
+    mut s24: S24 = S24::default();
+    s24.v = 24;
+    s24 = ident(s24);
+    mut s25: S25 = S25::default();
+    s25.v = 25;
+    s25 = ident(s25);
+    mut s26: S26 = S26::default();
+    s26.v = 26;
+    s26 = ident(s26);
+    mut s27: S27 = S27::default();
+    s27.v = 27;
+    s27 = ident(s27);
+    mut s28: S28 = S28::default();
+    s28.v = 28;
+    s28 = ident(s28);
+    mut s29: S29 = S29::default();
+    s29.v = 29;
+    s29 = ident(s29);
+    mut s30: S30 = S30::default();
+    s30.v = 30;
+    s30 = ident(s30);
+    mut s31: S31 = S31::default();
+    s31.v = 31;
+    s31 = ident(s31);
+    mut s32: S32 = S32::default();
+    s32.v = 32;
+    s32 = ident(s32);
+    mut s33: S33 = S33::default();
+    s33.v = 33;
+    s33 = ident(s33);
+    mut s34: S34 = S34::default();
+    s34.v = 34;
+    s34 = ident(s34);
+    mut s35: S35 = S35::default();
+    s35.v = 35;
+    s35 = ident(s35);
+    mut s36: S36 = S36::default();
+    s36.v = 36;
+    s36 = ident(s36);
+    mut s37: S37 = S37::default();
+    s37.v = 37;
+    s37 = ident(s37);
+    mut s38: S38 = S38::default();
+    s38.v = 38;
+    s38 = ident(s38);
+    mut s39: S39 = S39::default();
+    s39.v = 39;
+    s39 = ident(s39);
+    mut s40: S40 = S40::default();
+    s40.v = 40;
+    s40 = ident(s40);
+    mut s41: S41 = S41::default();
+    s41.v = 41;
+    s41 = ident(s41);
+    mut s42: S42 = S42::default();
+    s42.v = 42;
+    s42 = ident(s42);
+    mut s43: S43 = S43::default();
+    s43.v = 43;
+    s43 = ident(s43);
+    mut s44: S44 = S44::default();
+    s44.v = 44;
+    s44 = ident(s44);
+    mut s45: S45 = S45::default();
+    s45.v = 45;
+    s45 = ident(s45);
+    mut s46: S46 = S46::default();
+    s46.v = 46;
+    s46 = ident(s46);
+    mut s47: S47 = S47::default();
+    s47.v = 47;
+    s47 = ident(s47);
+    mut s48: S48 = S48::default();
+    s48.v = 48;
+    s48 = ident(s48);
+    mut s49: S49 = S49::default();
+    s49.v = 49;
+    s49 = ident(s49);
+    mut s50: S50 = S50::default();
+    s50.v = 50;
+    s50 = ident(s50);
+    mut s51: S51 = S51::default();
+    s51.v = 51;
+    s51 = ident(s51);
+    mut s52: S52 = S52::default();
+    s52.v = 52;
+    s52 = ident(s52);
+    mut s53: S53 = S53::default();
+    s53.v = 53;
+    s53 = ident(s53);
+    mut s54: S54 = S54::default();
+    s54.v = 54;
+    s54 = ident(s54);
+    mut s55: S55 = S55::default();
+    s55.v = 55;
+    s55 = ident(s55);
+    mut s56: S56 = S56::default();
+    s56.v = 56;
+    s56 = ident(s56);
+    mut s57: S57 = S57::default();
+    s57.v = 57;
+    s57 = ident(s57);
+    mut s58: S58 = S58::default();
+    s58.v = 58;
+    s58 = ident(s58);
+    mut s59: S59 = S59::default();
+    s59.v = 59;
+    s59 = ident(s59);
+    mut s60: S60 = S60::default();
+    s60.v = 60;
+    s60 = ident(s60);
+    mut s61: S61 = S61::default();
+    s61.v = 61;
+    s61 = ident(s61);
+    mut s62: S62 = S62::default();
+    s62.v = 62;
+    s62 = ident(s62);
+    mut s63: S63 = S63::default();
+    s63.v = 63;
+    s63 = ident(s63);
+    mut s64: S64 = S64::default();
+    s64.v = 64;
+    s64 = ident(s64);
+    mut s65: S65 = S65::default();
+    s65.v = 65;
+    s65 = ident(s65);
+    mut s66: S66 = S66::default();
+    s66.v = 66;
+    s66 = ident(s66);
+    mut s67: S67 = S67::default();
+    s67.v = 67;
+    s67 = ident(s67);
+    mut s68: S68 = S68::default();
+    s68.v = 68;
+    s68 = ident(s68);
+    mut s69: S69 = S69::default();
+    s69.v = 69;
+    s69 = ident(s69);
+    mut s70: S70 = S70::default();
+    s70.v = 70;
+    s70 = ident(s70);
+    mut sum: int = 0;
+    sum = sum + s1.v;
+    sum = sum + s2.v;
+    sum = sum + s3.v;
+    sum = sum + s4.v;
+    sum = sum + s5.v;
+    sum = sum + s6.v;
+    sum = sum + s7.v;
+    sum = sum + s8.v;
+    sum = sum + s9.v;
+    sum = sum + s10.v;
+    sum = sum + s11.v;
+    sum = sum + s12.v;
+    sum = sum + s13.v;
+    sum = sum + s14.v;
+    sum = sum + s15.v;
+    sum = sum + s16.v;
+    sum = sum + s17.v;
+    sum = sum + s18.v;
+    sum = sum + s19.v;
+    sum = sum + s20.v;
+    sum = sum + s21.v;
+    sum = sum + s22.v;
+    sum = sum + s23.v;
+    sum = sum + s24.v;
+    sum = sum + s25.v;
+    sum = sum + s26.v;
+    sum = sum + s27.v;
+    sum = sum + s28.v;
+    sum = sum + s29.v;
+    sum = sum + s30.v;
+    sum = sum + s31.v;
+    sum = sum + s32.v;
+    sum = sum + s33.v;
+    sum = sum + s34.v;
+    sum = sum + s35.v;
+    sum = sum + s36.v;
+    sum = sum + s37.v;
+    sum = sum + s38.v;
+    sum = sum + s39.v;
+    sum = sum + s40.v;
+    sum = sum + s41.v;
+    sum = sum + s42.v;
+    sum = sum + s43.v;
+    sum = sum + s44.v;
+    sum = sum + s45.v;
+    sum = sum + s46.v;
+    sum = sum + s47.v;
+    sum = sum + s48.v;
+    sum = sum + s49.v;
+    sum = sum + s50.v;
+    sum = sum + s51.v;
+    sum = sum + s52.v;
+    sum = sum + s53.v;
+    sum = sum + s54.v;
+    sum = sum + s55.v;
+    sum = sum + s56.v;
+    sum = sum + s57.v;
+    sum = sum + s58.v;
+    sum = sum + s59.v;
+    sum = sum + s60.v;
+    sum = sum + s61.v;
+    sum = sum + s62.v;
+    sum = sum + s63.v;
+    sum = sum + s64.v;
+    sum = sum + s65.v;
+    sum = sum + s66.v;
+    sum = sum + s67.v;
+    sum = sum + s68.v;
+    sum = sum + s69.v;
+    sum = sum + s70.v;
+    test::assert(sum == 2485, "all 70 instantiations ran and returned their argument");
+    return 0;
+}

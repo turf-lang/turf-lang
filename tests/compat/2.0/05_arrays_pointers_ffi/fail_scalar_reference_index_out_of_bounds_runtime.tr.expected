@@ -1,0 +1,1 @@
+panic: runtime check: Array index out of bounds for 'r' (fail_scalar_reference_index_out_of_bounds_runtime.tr:6)

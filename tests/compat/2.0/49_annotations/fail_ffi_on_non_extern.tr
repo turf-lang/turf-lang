@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: can only sit on an 'extern fn'
+// `@ffi` describes how an `extern fn` binds to its C symbol; on a function with
+// a body it would silently do nothing.
+
+@ffi(linux: strlen)
+fn length(): int {
+    return 0;
+}
+
+fn main(): int {
+    return length();
+}

@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E002
+// EXPECT-DIAG: as an index into 'int[3]'
+// A decimal is not a whole number: `a[1.5]` has no meaning, and Turf will not
+// guess whether `a[1.0]` meant index 1. Convert explicitly with `to int`.
+// (A `char` IS accepted as an index -- tests/13_string_stdlib/
+// 12_dsa_anagram_check.tr counts letters with `freq[word[i]]`.)
+fn main(): int {
+    mut a: int[3] = [1, 2, 3];
+    mut d: double = 1.0;
+    mut x: int = a[d];
+    return x;
+}

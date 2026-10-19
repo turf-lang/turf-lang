@@ -1,0 +1,8 @@
+// EXPECT-DIAG: E131
+// EXPECT-DIAG: Cannot call method 'copy' on type 'string'
+// copy() is an array method; a string has none.
+fn main(): int {
+    mut s: string = "abc";
+    mut t = s.copy();
+    return t.length();
+}

@@ -1,0 +1,27 @@
+// Regression test (turf-fuzz): an int argument to a method's double parameter
+// is converted, as for a free function. It used to raise an internal error
+// ("struct method call argument type mismatch") in Codegen -- for a plain
+// struct's instance and static methods and for Map<int, double>.put alike.
+import map::Map;
+import test;
+
+struct Scale { factor: double }
+
+fn Scale.apply(x: double): double {
+    return x * 2.0 + self.factor;
+}
+
+fn Scale.half(x: double) static: double {
+    return x / 2.0;
+}
+
+fn main(): int {
+    immut s: Scale = Scale::default();
+    test::assert(s.apply(3) == 6.0, "instance method: 3 converts to 3.0");
+    test::assert(Scale::half(5) == 2.5, "static method: 5 converts to 5.0");
+
+    mut m: Map<int, double> = Map::default();
+    m.put(1, 1_000);
+    test::assert(m.get(1) == 1000.0, "generic method: 1_000 converts to 1000.0");
+    return 0;
+}

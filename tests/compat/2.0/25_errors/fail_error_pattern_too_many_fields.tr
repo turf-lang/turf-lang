@@ -1,0 +1,27 @@
+// EXPECT-DIAG: E092
+// EXPECT-DIAG: this pattern lists 2 fields, but 'IOError::NotFound' declares 1
+// LEC-004: a pattern can't list more fields than the variant declares (E092).
+error IOError {
+    NotFound(path: string)
+}
+
+fn open(p: string): !int {
+    return IOError::NotFound(p);
+}
+
+fn code(): int {
+    immut v: int = open("x") recover as err run {
+        compare err {
+            matches IOError::NotFound(path, extra):
+            return 1;
+            done
+            otherwise:
+            return 2;
+        }
+    };
+    return v;
+}
+
+fn main(): int {
+    return 0;
+}

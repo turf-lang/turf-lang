@@ -1,0 +1,23 @@
+// `fn f(a: int[3])` and `fn f(a: int[])` may both exist. An int[3] argument
+// picks the exact `int[3]` overload; any other length, and any slice, picks
+// `int[]`. The UFCS form (`a.f()`) used to report the pair as ambiguous even
+// though the ordinary call `f(a)` already chose `int[3]` -- both forms now
+// choose the same way.
+import test;
+
+fn f(a: int[3]): string {
+    return "sized";
+}
+
+fn f(a: int[]): string {
+    return "slice";
+}
+
+fn main(): int {
+    mut a: int[3] = [1, 2, 3];
+    mut b: int[4] = [1, 2, 3, 4];
+    test::assert(f(a) == "sized" && a.f() == "sized", "an exact size picks int[3]");
+    test::assert(f(b) == "slice" && b.f() == "slice", "another size picks int[]");
+    test::assert(f(a[..]) == "slice" && a[..].f() == "slice", "a slice is never an int[3]");
+    return 0;
+}

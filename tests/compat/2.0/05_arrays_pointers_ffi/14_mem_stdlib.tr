@@ -1,0 +1,50 @@
+// Regression test: lib/std/mem.tr, imported and exercised end-to-end.
+//
+// Before this session, `import mem;` crashed the compiler outright (see
+// tests/07_functions_modules/fail_import_syntax_error.tr and mem.tr's own
+// doc comment for the two-part fix: `ptr` as a parameter name collided with
+// this language's `ptr` type keyword, and a syntax error inside an
+// imported module used to crash the whole compiler instead of failing
+// cleanly). No test anywhere exercised this module at all, which is why
+// the crash was never caught.
+
+import mem;
+import io;
+
+import test;
+// (issue #238) Every raw pointer local below needs `unsafe { }` around its
+// declaration/cast (FINAL_SPRINT.md's Track A "Caller-side locals" rule)
+// -- `mem::alloc`/`mem::zero`/etc. themselves stay ordinary, ungated calls
+// (the entire `lib/std` tree is exempt from the gate).
+fn main(): int {
+    unsafe {
+        // alloc / zero / free
+        mut buf: void* = mem::alloc(32);
+        test::assert(buf != null, "");
+        mem::zero(buf, 32);
+
+        // alloc_zeroed
+        mut zbuf: void* = mem::alloc_zeroed(4, 8);
+        test::assert(zbuf != null, "");
+
+        // grow (realloc wrapper)
+        mut grown: void* = mem::grow(buf, 64);
+        test::assert(grown != null, "");
+
+        // dup: copy bytes out of a fresh buffer and confirm it round-trips via
+        // an int written into the source and read back out of the copy.
+        mut src: int* = mem::alloc(8) to int*;
+        src[0] = 12345;
+        mut copy: int* = mem::dup(src, 8) to int*;
+        test::assert(copy[0] == 12345, "");
+        test::assert(copy != src, ""); // dup must return a genuinely distinct buffer
+
+        mem::free(grown);
+        mem::free(zbuf);
+        mem::free(src);
+        mem::free(copy);
+    }
+
+    io::printline("mem ok");
+    return 0;
+}

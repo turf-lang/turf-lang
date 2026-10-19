@@ -1,0 +1,24 @@
+// EXPECT-DIAG: E048
+// EXPECT-DIAG: 'io' is a module, not an instance
+// Regression test: `.` is instance-member-access only -- a module-qualified
+// function call MUST use `::` (io::printline(...)), never `.`
+// (io.printline(...)).
+//
+// Before this fix, `.` silently worked as an undocumented ALIAS for `::`
+// here: Resolver::visitMethodCall() had its own separate, fully-working
+// resolution path (VariableExprAST::ResolvedModuleName) for a `.`-call
+// whose base named a known module, threaded all the way through
+// TypeChecker and Codegen -- `io.printline("x")` compiled and ran
+// identically to `io::printline("x")`. This directly contradicted this
+// language's stated design ("'.' is instance-member-only, '::' is the
+// general namespace-resolution operator") despite the whole `::`
+// generalization effort earlier this session. Found by direct user
+// request to actually verify (not just assume) that '.' is rejected and
+// '::' is accepted, and not both.
+
+import io;
+
+fn main(): int {
+    io.printline("this should not compile");
+    return 0;
+}

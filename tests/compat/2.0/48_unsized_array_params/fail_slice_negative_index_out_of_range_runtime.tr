@@ -1,0 +1,14 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: Array index out of bounds for 'arr'
+// Issue #260: a negative index counts back from the end of a `T[]` too, and
+// stops at -length: `arr[-4]` on a three-element slice is out of range. A
+// constant index is checked at run time here, since no length is known
+// before the call.
+fn last_but(arr: int[]): int {
+    return arr[-4];
+}
+
+fn main(): int {
+    mut a: int[3] = [1, 2, 3];
+    return last_but(a);
+}

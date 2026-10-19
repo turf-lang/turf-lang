@@ -1,0 +1,45 @@
+// Regression coverage for the new `random` stdlib module:
+// random::random_int(min, max) must (a) always stay within [min, max]
+// inclusive, and (b) not be stuck returning a constant -- a real bug this
+// kind of property test would actually catch (e.g. a seeding mistake that
+// makes every call return the same value).
+import random;
+import test;
+
+fn main(): int {
+    immut trials: int = 1000;
+
+    // A classic 1..6 die: every single one of 1000 rolls must land in
+    // range, and the whole run must not be a single repeated value.
+    mut i: int = 0;
+    mut first: int = random::random_int(1, 6);
+    mut sawDifferent: bool = false;
+    while i < trials {
+        immut roll: int = random::random_int(1, 6);
+        test::assert(roll >= 1 && roll <= 6, "random_int(1, 6) always lands in [1, 6]");
+        if roll != first {
+            sawDifferent = true;
+        }
+        i = i + 1;
+    }
+    test::assert(sawDifferent, "random_int(1, 6) is not stuck returning a single constant value across 1000 calls");
+
+    // A negative-to-positive range, to make sure `min` isn't silently
+    // assumed non-negative anywhere in the implementation.
+    mut j: int = 0;
+    while j < trials {
+        immut v: int = random::random_int(-5, 5);
+        test::assert(v >= -5 && v <= 5, "random_int(-5, 5) always lands in [-5, 5]");
+        j = j + 1;
+    }
+
+    // A single-value range (min == max) must always return that value --
+    // this also exercises the `% range` path with range == 1.
+    mut k: int = 0;
+    while k < 20 {
+        test::assert(random::random_int(7, 7) == 7, "random_int(7, 7) always returns 7");
+        k = k + 1;
+    }
+
+    return 0;
+}

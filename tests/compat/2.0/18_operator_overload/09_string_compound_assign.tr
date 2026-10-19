@@ -1,0 +1,15 @@
+// LANG-001/F-OP-2: compound assignment desugars (`a op= b` = `a = a op b`),
+// so a type with `operator+` automatically supports `+=` -- `string` gains
+// this for free via lib/std/core/strings.tr's existing `operator +`. This
+// used to be a fail_* test ("extending operator resolution to
+// CompoundAssignmentExprAST is tracked as a separate follow-up"); LANG-001
+// is that follow-up.
+import strings;
+import test;
+
+fn main(): int {
+    mut s: string = "hello";
+    s += " world";
+    test::assert(s == "hello world", "string += should call operator+");
+    return 0;
+}

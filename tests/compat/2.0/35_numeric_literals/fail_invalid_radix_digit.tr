@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E071
+// EXPECT-DIAG: '2' isn't a valid digit in '0b01'
+// SEM-001: a digit that isn't valid for the literal's own radix -- E071
+// (InvalidRadixDigitError, docs/errors/codes/E071.txt). '2' is not a
+// binary digit.
+
+fn main(): int {
+    mut x: int = 0b012;
+    return 0;
+}

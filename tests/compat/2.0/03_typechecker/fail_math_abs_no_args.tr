@@ -1,0 +1,9 @@
+// EXPECT-DIAG: E044
+import io;
+import math;
+
+fn main(): int {
+    io::printline(math::abs());
+
+    return 0;
+}

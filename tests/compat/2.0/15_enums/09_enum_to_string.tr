@@ -1,0 +1,24 @@
+// Test: Enum-to-string casting
+import test;
+
+enum Direction { North, East, South, West }
+enum Color { Red, Green, Blue }
+
+fn main(): int {
+    // Direct literal access to string
+    test::assert((Direction::North to string) == "North", "North -> string");
+    test::assert((Direction::East  to string) == "East",  "East -> string");
+    test::assert((Direction::South to string) == "South", "South -> string");
+    test::assert((Direction::West  to string) == "West",  "West -> string");
+
+    // Variable to string
+    immut d: Direction = Direction::South;
+    immut s: string = d to string;
+    test::assert(s == "South", "Variable South -> string");
+
+    // Different enum
+    test::assert((Color::Red   to string) == "Red",   "Red -> string");
+    test::assert((Color::Green to string) == "Green",  "Green -> string");
+    test::assert((Color::Blue  to string) == "Blue",   "Blue -> string");
+    return 0;
+}
