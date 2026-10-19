@@ -1,0 +1,32 @@
+// `struct Pair<A, B>` whose fields mention B before A: the type arguments of
+// a `Pair<int, string>` pair with A and B in declaration order. Pairing them
+// in the order the fields mention them typed `p.a` as `string`, so `p.a = 5`
+// was E066, and the method's return type came out swapped too.
+import test;
+
+struct Pair<A, B> {
+    b: B,
+    a: A,
+}
+
+fn<A, B> Pair.first(): A {
+    return self.a;
+}
+
+fn<A, B> Pair.second(): B {
+    return self.b;
+}
+
+fn main(): int {
+    mut p: Pair<int, string> = Pair::default();
+    p.a = 5;
+    p.b = "x";
+    test::assert(p.first() + 1 == 6, "first() is the int");
+    test::assert(p.second() + "y" == "xy", "second() is the string");
+    compare (p) {
+        matches Pair { a, b }:
+        test::assert(a == 5 && b == "x", "pattern binds a: int, b: string");
+        done
+    }
+    return 0;
+}

@@ -43,6 +43,12 @@
 #include <set>
 #include <unordered_map>
 
+// The struct-substitution fallback reads through a NamedType that is not a
+// registered type (see TypeWalk::structTypeArgSubst()).
+static bool isRegisteredTypeName(const std::string &Name) {
+  return GlobalSymbolTable && GlobalSymbolTable->LookupType(Name) != nullptr;
+}
+
 using namespace llvm;
 
 std::unique_ptr<LLVMContext> TheContext;
@@ -1522,28 +1528,9 @@ const TurfType *getExprType(const ExprAST *E) {
       // completely separate, independent type-inference pass that never
       // consults TypeChecker's results.
       std::unordered_map<std::string, TurfTypePtr> Subst;
-      if (!GenericTypeArgs.empty()) {
-        if (auto *STy2 = dynamic_cast<const TurfStructType *>(BaseTy)) {
-          std::function<void(const TurfTypePtr &)> Scan = [&](const TurfTypePtr &FTy) {
-            if (!FTy || Subst.size() >= GenericTypeArgs.size()) return;
-            if (auto *GP = dynamic_cast<const TurfGenericParamType *>(FTy.get())) {
-              if (!Subst.count(GP->getName()))
-                Subst.emplace(GP->getName(), GenericTypeArgs[Subst.size()]);
-            } else if (auto *NT = dynamic_cast<const NamedType *>(FTy.get())) {
-              bool KnownElsewhere = GlobalSymbolTable &&
-                                   GlobalSymbolTable->LookupType(NT->getName()) != nullptr;
-              if (!KnownElsewhere && !Subst.count(NT->getName()))
-                Subst.emplace(NT->getName(), GenericTypeArgs[Subst.size()]);
-            } else if (auto *PT = dynamic_cast<const TurfPointerType *>(FTy.get())) {
-              Scan(PT->getPointee());
-            } else if (isArrayType(FTy.get())) {
-              Scan(dynamic_cast<const ::ArrayType *>(FTy.get())->getElementTypePtr());
-            }
-          };
-          for (const auto &F : STy2->getFields())
-            Scan(F.Type);
-        }
-      }
+      if (!GenericTypeArgs.empty())
+        if (auto *STy2 = dynamic_cast<const TurfStructType *>(BaseTy))
+          Subst = TypeWalk::structTypeArgSubst(*STy2, GenericTypeArgs, isRegisteredTypeName);
       // Substitute a TurfGenericParamType/NamedType return type through
       // Subst -- a no-op for a non-generic struct (Subst stays empty) or a
       // return type that doesn't mention any of this struct's parameters.
@@ -1678,36 +1665,8 @@ const TurfType *getExprType(const ExprAST *E) {
       // permanently stuck as NamedType/TurfGenericParamType, never
       // rewritten per-instantiation -- see that branch's own doc comment).
       if (!GenericTypeArgs.empty()) {
-        std::unordered_map<std::string, TurfTypePtr> Subst;
-        std::function<void(const TurfTypePtr &)> Scan = [&](const TurfTypePtr &FTy) {
-          if (!FTy || Subst.size() >= GenericTypeArgs.size()) return;
-          if (auto *GP = dynamic_cast<const TurfGenericParamType *>(FTy.get())) {
-            if (!Subst.count(GP->getName()))
-              Subst.emplace(GP->getName(), GenericTypeArgs[Subst.size()]);
-          } else if (auto *NT2 = dynamic_cast<const NamedType *>(FTy.get())) {
-            bool KnownElsewhere = GlobalSymbolTable &&
-                                 GlobalSymbolTable->LookupType(NT2->getName()) != nullptr;
-            if (!KnownElsewhere && !Subst.count(NT2->getName()))
-              Subst.emplace(NT2->getName(), GenericTypeArgs[Subst.size()]);
-          } else if (auto *PT = dynamic_cast<const TurfPointerType *>(FTy.get())) {
-            Scan(PT->getPointee());
-          } else if (isArrayType(FTy.get())) {
-            Scan(dynamic_cast<const ::ArrayType *>(FTy.get())->getElementTypePtr());
-          } else if (auto *NestedGT = dynamic_cast<const GenericType *>(FTy.get())) {
-            // OVH-007: a field whose OWN declared type is ANOTHER generic
-            // instantiation at the same type parameter (`struct Box<T> {
-            // inner: Pair<T, T> }`) was invisible to this scan -- none of
-            // the branches above match a bare GenericType, so `b.inner`'s
-            // own T never got recovered here, even though
-            // TypeCheckerCall.cpp's visitFieldAccess/visitMethodCall
-            // already recurse into this exact shape (their own "NestedGT"
-            // branch, TYPE-002 S15/D4). Mirror it here.
-            for (const auto &NestedArg : NestedGT->getTypeArgs())
-              Scan(NestedArg);
-          }
-        };
-        for (const auto &F : STy->getFields())
-          Scan(F.Type);
+        std::unordered_map<std::string, TurfTypePtr> Subst =
+            TypeWalk::structTypeArgSubst(*STy, GenericTypeArgs, isRegisteredTypeName);
 
         if (!Subst.empty()) {
           // Recursively substitute FieldTy through Subst, rebuilding

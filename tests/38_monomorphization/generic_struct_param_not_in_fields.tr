@@ -1,0 +1,30 @@
+// A generic struct's type arguments pair with its declared parameters, not
+// with the parameters its fields happen to mention. `Tag<T>` names T in no
+// field, and a method call on a `Tag<int>` was never instantiated: "LLVM
+// function 'turf_Tag.size_Tag_ptr' not found", an internal compiler error.
+import test;
+
+struct Tag<T> {
+}
+
+struct Counted<T> {
+    n: int,
+}
+
+fn<T> Tag.size(): int {
+    return sizeof(T);
+}
+
+fn<T> Counted.bump(): int {
+    self.n = self.n + 1;
+    return self.n;
+}
+
+fn main(): int {
+    mut t: Tag<int> = Tag::default();
+    test::assert(t.size() == 8, "sizeof(T) for Tag<int>");
+    mut c: Counted<string> = Counted::default();
+    c.bump();
+    test::assert(c.bump() == 2, "Counted<string>.bump twice");
+    return 0;
+}

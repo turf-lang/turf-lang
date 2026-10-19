@@ -218,6 +218,22 @@ void collectOrderedFieldSubstitution(
     const TurfTypePtr &Pattern, const std::vector<TurfTypePtr> &TypeArgs,
     SubstMap &Subst, const NamedTypeIsKnownFn &IsKnownNamedType = nullptr);
 
+/// What each of @p STy's own type parameters stands for in the instantiation
+/// whose type arguments are @p TypeArgs (`Box<int>`: T -> int). The one
+/// answer the TypeChecker (field access, struct patterns, method calls) and
+/// Codegen's own type queries share, so none of them can pair a parameter
+/// with a different argument.
+///
+/// Pairs STy.getTypeParams() (declaration order) by position. A struct type
+/// registered without them falls back to collectOrderedFieldSubstitution()
+/// over its fields, which pairs names in the order fields first mention
+/// them: wrong for a parameter no field uses (`struct Tag<T> {}`) and for
+/// fields that mention parameters out of order (`struct P<A, B> { b: B,
+/// a: A }`, where `p.a` on a `P<int, string>` was typed `string`).
+SubstMap structTypeArgSubst(const TurfStructType &STy,
+                            const std::vector<TurfTypePtr> &TypeArgs,
+                            const NamedTypeIsKnownFn &IsKnownNamedType = nullptr);
+
 } // namespace TypeWalk
 
 #endif

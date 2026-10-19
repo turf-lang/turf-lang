@@ -905,7 +905,8 @@ void Resolver::visitStructDecl(StructDeclExprAST &Node) {
     if (GlobalSymbolTable)
       GlobalSymbolTable->RegisterType(
           Node.getName(),
-          std::make_shared<TurfStructType>(Node.getName(), Node.getFields()));
+          std::make_shared<TurfStructType>(Node.getName(), Node.getFields(),
+                                           Node.getTypeParams()));
   }
 
   // In Pass 2 (here) we validate every field's type via validateNamedType().

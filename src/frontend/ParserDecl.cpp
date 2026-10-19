@@ -216,7 +216,7 @@ std::unique_ptr<ExprAST> ParseStructDecl() {
   // `Parser` stays `Parser`, and the two no longer overwrite each other
   // here. See TypeIdentity (Types.h).
   std::string Identity = TypeIdentity::make(CurrentParseModule(), Name);
-  auto SType = std::make_shared<TurfStructType>(Identity, Fields);
+  auto SType = std::make_shared<TurfStructType>(Identity, Fields, TypeParams);
   if (GlobalSymbolTable) {
     GlobalSymbolTable->RegisterGlobalType(Identity, SType);
   }

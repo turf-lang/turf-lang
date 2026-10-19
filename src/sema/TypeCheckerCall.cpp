@@ -37,6 +37,12 @@
 #include <string>
 #include <unordered_map>
 
+// The field scan's fallback reads through a NamedType that is not a
+// registered type (see TypeWalk::structTypeArgSubst()).
+static bool isRegisteredTypeName(const std::string &Name) {
+  return GlobalSymbolTable && GlobalSymbolTable->LookupType(Name) != nullptr;
+}
+
 
 // ─── Expression visitors ──────────────────────────────────────────────────────
 
@@ -1792,15 +1798,9 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
         // doc comment below Subst's use for the full story on why this
         // scan-the-fields recovery technique is needed at all.
         std::unordered_map<std::string, TurfTypePtr> Subst;
-        if (auto *GT = dynamic_cast<const GenericType *>(UnwrappedGenericBaseTy.get())) {
-          const auto &TypeArgs = GT->getTypeArgs();
-          for (const auto &F : STy->getFields())
-            TypeWalk::collectOrderedFieldSubstitution(
-                F.Type, TypeArgs, Subst,
-                [](const std::string &Name) {
-                  return GlobalSymbolTable && GlobalSymbolTable->LookupType(Name) != nullptr;
-                });
-        }
+        if (auto *GT = dynamic_cast<const GenericType *>(UnwrappedGenericBaseTy.get()))
+          Subst = TypeWalk::structTypeArgSubst(*STy, GT->getTypeArgs(),
+                                               isRegisteredTypeName);
 
         // Arity: struct methods have `self` as first param, user args = arity - 1 (unless static)
         int ExpectedArity = IsStaticMethod ? ArgCount : (ArgCount + 1);
@@ -2375,13 +2375,8 @@ TurfTypePtr TypeChecker::instantiatedFieldType(
     const TurfStructType &STy, const std::vector<TurfTypePtr> &GenericTypeArgs,
     TurfTypePtr FieldTy) {
   if (FieldTy && !GenericTypeArgs.empty()) {
-    std::unordered_map<std::string, TurfTypePtr> Subst;
-    for (const auto &F : STy.getFields())
-      TypeWalk::collectOrderedFieldSubstitution(
-          F.Type, GenericTypeArgs, Subst,
-          [](const std::string &Name) {
-            return GlobalSymbolTable && GlobalSymbolTable->LookupType(Name) != nullptr;
-          });
+    std::unordered_map<std::string, TurfTypePtr> Subst =
+        TypeWalk::structTypeArgSubst(STy, GenericTypeArgs, isRegisteredTypeName);
     if (!Subst.empty())
       FieldTy = substituteReturnType(FieldTy, Subst);
   }
