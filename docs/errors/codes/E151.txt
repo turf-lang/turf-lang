@@ -1,0 +1,22 @@
+A generic struct declared inside a function
+
+A struct can be declared inside a function body, for a type only that function uses:
+
+    fn area(w: int, h: int): int {
+        struct Rect { w: int, h: int }
+        mut r: Rect = Rect::default();
+        r.w = w;
+        r.h = h;
+        return r.w * r.h;
+    }
+
+Such a local struct can't have type parameters. A local type has no methods, so a
+type parameter would have nothing to use it, and E151 is writing one anyway:
+
+    fn f(): int {
+        struct Box<T> { v: T }   // E151
+        ...
+    }
+
+Declare the generic struct at the top level of the file instead, where its methods
+can be written too, or give the local struct's fields concrete types.

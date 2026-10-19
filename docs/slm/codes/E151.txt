@@ -1,0 +1,30 @@
+TURF E151 -- GENERIC STRUCT DECLARED INSIDE A FUNCTION:
+
+CAUSE:
+  A struct declared inside a function body has type parameters (`struct Box<T>`). A
+  local struct is allowed, but only with concrete field types: it has no methods, so
+  nothing could use a type parameter.
+
+INCORRECT:
+    fn main(): int {
+        struct Box<T> { v: T }
+        mut b: Box<int> = Box::default();
+        return 0;
+    }
+
+CORRECT:
+    struct Box<T> { v: T }
+
+    fn main(): int {
+        mut b: Box<int> = Box::default();
+        b.v = 41;
+        printline(b.v + 1);
+        return 0;
+    }
+
+FIX:
+  Move the generic struct to the top level of the file. If only this function needs
+  it and only for one type, keep it local and replace `T` with that type.
+
+RELATED: E138 (a generic struct named without type arguments), E148 (the wrong number
+  of type arguments).
