@@ -68,10 +68,16 @@ CollectChangedNodeIDsInternal(const ExprAST *OriginalAST,
   if (auto *OrigMeth = dynamic_cast<const MethodCallExprAST *>(OriginalAST)) {
     auto *ModMeth = dynamic_cast<const MethodCallExprAST *>(ModifiedAST);
 
+    // A different argument count is a change of the whole call, and stops
+    // here like every other list below: pairing the arguments would read
+    // past the shorter list (`if c { s.f(1); } else { s.f(1, 2); }` crashed
+    // the identical-branch lint, turf-fuzz #14).
     if (OrigMeth->getMethod() != ModMeth->getMethod() ||
         OrigMeth->getArgs().size() != ModMeth->getArgs().size()) {
       ChangedIDs.insert(OriginalAST->getNodeID());
       ChangedIDs.insert(ModifiedAST->getNodeID());
+      if (OrigMeth->getArgs().size() != ModMeth->getArgs().size())
+        return ChangedIDs;
     }
 
     CollectChangedNodeIDsInternal(OrigMeth->getBase(), ModMeth->getBase(),

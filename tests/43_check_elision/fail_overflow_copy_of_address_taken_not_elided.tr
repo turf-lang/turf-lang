@@ -1,0 +1,18 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: Integer overflow
+// `x` is changed through `&x`. Its own constant was distrusted, but only when
+// `x` was read on its own: copying it (`y = x`) carried the stale 0 into `y`,
+// so `y + 1` lost its overflow check. A variable whose address is taken now
+// never has a constant at all, so nothing can copy one.
+fn set_max(p: &int): void {
+    p[0] = 9223372036854775807;
+}
+
+fn main(): int {
+    mut x: int = 0;
+    set_max(&x);
+    mut y: int = x;
+    mut z: int = y + 1;
+    printline(z);
+    return 0;
+}

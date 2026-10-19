@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E138
+// EXPECT-DIAG: 'Box::default()' needs type arguments here
+// The field-access twin of fail_generic_default_as_method_receiver.tr.
+struct Box<T> {
+    v: T,
+}
+
+fn main(): int {
+    printline(Box::default().v);
+    return 0;
+}

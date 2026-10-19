@@ -306,4 +306,19 @@ void collectOrderedFieldSubstitution(const TurfTypePtr &Pattern,
   }
 }
 
+SubstMap structTypeArgSubst(const TurfStructType &STy,
+                            const std::vector<TurfTypePtr> &TypeArgs,
+                            const NamedTypeIsKnownFn &IsKnownNamedType) {
+  SubstMap Subst;
+  const auto &Params = STy.getTypeParams();
+  if (!Params.empty()) {
+    for (size_t I = 0; I < Params.size() && I < TypeArgs.size(); ++I)
+      Subst.emplace(Params[I], TypeArgs[I]);
+    return Subst;
+  }
+  for (const auto &F : STy.getFields())
+    collectOrderedFieldSubstitution(F.Type, TypeArgs, Subst, IsKnownNamedType);
+  return Subst;
+}
+
 } // namespace TypeWalk

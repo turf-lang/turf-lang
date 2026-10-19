@@ -1,0 +1,15 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: Array index out of bounds
+// The bounds-check twin of fail_overflow_write_in_defer_not_elided.tr: `i`
+// still looked like 0 after the `defer` set it to 1000000, so the bounds
+// check on `a[i]` was removed and the read went past the array (a
+// segmentation fault).
+fn main(): int {
+    mut a: int[3] = [1, 2, 3];
+    mut i: int = 0;
+    if true {
+        defer i = 1000000;
+    }
+    printline(a[i]);
+    return 0;
+}

@@ -375,6 +375,8 @@ file:
 - A local `P` cannot reuse the name of a top-level `P` in the same file: `E034`.
 - A local struct in a generic function cannot use that function's type
   parameter; `T` is `E042` (`Unknown type 'T'`) there.
+- A local struct cannot have type parameters of its own (`struct Box<T>`
+  inside a function is `E151`); declare a generic struct at the top level.
 
 <!-- doc-example: fails E034 -->
 ```turflang

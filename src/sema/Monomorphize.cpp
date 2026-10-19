@@ -516,6 +516,7 @@ std::shared_ptr<ResolverFunctionSymbol> finishInstantiation(
   // mangled each module's own "tag" independently). Struct instantiation
   // naming (drainStructRequests(), below) deliberately does NOT do this --
   // struct names are already globally unique by language rule (E034).
+  Clone->setSourceName(Template->getSourceName());
   Clone->setName(instantiatedDeclName(Entry.Request.DeclKey, Entry.Request.TypeArgs,
                                       Entry.Request.SourceModule));
   // No longer generic: every TurfGenericParamType in Params/ReturnType/

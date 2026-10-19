@@ -849,15 +849,24 @@ struct StructField {
 class TurfStructType : public TurfType {
   std::string              Name;
   std::vector<StructField> Fields;
+  // A generic struct's own type parameters, in declaration order: what a
+  // `Box<int>`'s type arguments pair with. Fields alone cannot say, since a
+  // parameter need not appear in any field (`struct Tag<T> {}`) and fields
+  // need not mention parameters in declaration order (`struct P<A, B> { b: B,
+  // a: A }`). Empty for a non-generic struct and for an instantiation.
+  std::vector<std::string> TypeParams;
 
 public:
-  TurfStructType(std::string Name, std::vector<StructField> Fields)
-      : Name(std::move(Name)), Fields(std::move(Fields)) {}
+  TurfStructType(std::string Name, std::vector<StructField> Fields,
+                 std::vector<std::string> TypeParams = {})
+      : Name(std::move(Name)), Fields(std::move(Fields)),
+        TypeParams(std::move(TypeParams)) {}
 
   std::string getName() const override { return Name; }
   bool isStruct() const override { return true; }
 
   const std::vector<StructField> &getFields() const { return Fields; }
+  const std::vector<std::string> &getTypeParams() const { return TypeParams; }
 
   int getFieldIndex(const std::string &FieldName) const {
     for (size_t i = 0; i < Fields.size(); ++i)

@@ -37,6 +37,12 @@
 #include <string>
 #include <unordered_map>
 
+// The field scan's fallback reads through a NamedType that is not a
+// registered type (see TypeWalk::structTypeArgSubst()).
+static bool isRegisteredTypeName(const std::string &Name) {
+  return GlobalSymbolTable && GlobalSymbolTable->LookupType(Name) != nullptr;
+}
+
 
 // ─── Expression visitors ──────────────────────────────────────────────────────
 
@@ -1394,10 +1400,35 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
   }
 }
 
+void TypeChecker::rejectUninstantiatedReceiver(const ExprAST *Base) {
+  const auto *FC = dynamic_cast<const FuncCallExprAST *>(Base);
+  const auto *SC = FC ? dynamic_cast<const ScopeAccessExprAST *>(FC->getCallee()) : nullptr;
+  if (!SC || SC->ResolvedKind != ScopeAccessKind::DefaultConstruct || FC->ConstructedType ||
+      !GlobalSymbolTable)
+    return;
+  auto T = GlobalSymbolTable->LookupType(SC->getLeftName());
+  const auto *STy = dynamic_cast<const TurfStructType *>(T.get());
+  if (!STy || STy->getTypeParams().empty())
+    return;
+  const std::string Bare = TypeIdentity::bareName(SC->getLeftName());
+  std::string Example;
+  for (size_t I = 0; I < STy->getTypeParams().size(); ++I)
+    Example += I ? ", int" : "int";
+  reportError(FC->getLoc(), ErrCode::MissingTypeArguments,
+              "'" + Bare + "' is generic -- '" + Bare +
+                  "::default()' needs type arguments here, and nothing around it says which.",
+              {},
+              "Declare the value with its instantiation first, e.g. `mut b: " + Bare +
+                  "<" + Example + "> = " + Bare + "::default();`, then use `b`.",
+              "Missing type arguments!");
+}
+
 void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
   // 1. Visit the base expression (e.g. `io` in io.printline(...)).
-  if (Node.getBase())
+  if (Node.getBase()) {
     const_cast<ExprAST *>(Node.getBase())->accept(*this);
+    rejectUninstantiatedReceiver(Node.getBase());
+  }
 
   // 2. Visit all argument expressions bottom-up; collect inferred types.
   std::vector<TurfTypePtr> ArgTypes;
@@ -1792,15 +1823,9 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
         // doc comment below Subst's use for the full story on why this
         // scan-the-fields recovery technique is needed at all.
         std::unordered_map<std::string, TurfTypePtr> Subst;
-        if (auto *GT = dynamic_cast<const GenericType *>(UnwrappedGenericBaseTy.get())) {
-          const auto &TypeArgs = GT->getTypeArgs();
-          for (const auto &F : STy->getFields())
-            TypeWalk::collectOrderedFieldSubstitution(
-                F.Type, TypeArgs, Subst,
-                [](const std::string &Name) {
-                  return GlobalSymbolTable && GlobalSymbolTable->LookupType(Name) != nullptr;
-                });
-        }
+        if (auto *GT = dynamic_cast<const GenericType *>(UnwrappedGenericBaseTy.get()))
+          Subst = TypeWalk::structTypeArgSubst(*STy, GT->getTypeArgs(),
+                                               isRegisteredTypeName);
 
         // Arity: struct methods have `self` as first param, user args = arity - 1 (unless static)
         int ExpectedArity = IsStaticMethod ? ArgCount : (ArgCount + 1);
@@ -2375,13 +2400,8 @@ TurfTypePtr TypeChecker::instantiatedFieldType(
     const TurfStructType &STy, const std::vector<TurfTypePtr> &GenericTypeArgs,
     TurfTypePtr FieldTy) {
   if (FieldTy && !GenericTypeArgs.empty()) {
-    std::unordered_map<std::string, TurfTypePtr> Subst;
-    for (const auto &F : STy.getFields())
-      TypeWalk::collectOrderedFieldSubstitution(
-          F.Type, GenericTypeArgs, Subst,
-          [](const std::string &Name) {
-            return GlobalSymbolTable && GlobalSymbolTable->LookupType(Name) != nullptr;
-          });
+    std::unordered_map<std::string, TurfTypePtr> Subst =
+        TypeWalk::structTypeArgSubst(STy, GenericTypeArgs, isRegisteredTypeName);
     if (!Subst.empty())
       FieldTy = substituteReturnType(FieldTy, Subst);
   }
@@ -2399,8 +2419,10 @@ TurfTypePtr TypeChecker::instantiatedFieldType(
 
 
 void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
-  if (Node.getBase())
+  if (Node.getBase()) {
     const_cast<ExprAST *>(Node.getBase())->accept(*this);
+    rejectUninstantiatedReceiver(Node.getBase());
+  }
 
 #ifndef TYPECHECKER_NO_ERRORS
   // Resolve the base type and look up the field.

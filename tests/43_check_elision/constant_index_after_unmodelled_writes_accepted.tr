@@ -1,0 +1,30 @@
+// The compile-time bounds check (E001) uses the same dataflow as check
+// elision, and rejected these valid programs: it read `i` as 5 after three
+// `i--` statements and after a `defer` that set it to 0, because neither
+// write was modelled. A variable written in a way the dataflow does not
+// follow now has no constant, so neither access is judged at compile time.
+import test;
+
+fn after_postfix(): int {
+    mut a: int[3] = [1, 2, 3];
+    mut i: int = 5;
+    i--;
+    i--;
+    i--;
+    return a[i];
+}
+
+fn after_defer(): int {
+    mut a: int[3] = [1, 2, 3];
+    mut i: int = 5;
+    if true {
+        defer i = 0;
+    }
+    return a[i];
+}
+
+fn main(): int {
+    test::assert(after_postfix() == 3, "a[2] after three i--");
+    test::assert(after_defer() == 1, "a[0] after the defer ran");
+    return 0;
+}

@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E151
+// A struct declared inside a function cannot have type parameters. Written
+// bare (`mut b: Box`) it reached Codegen as an unsized template ("generated
+// LLVM IR is invalid", found by the sanitized CI fuzz); written `Box<int>` it
+// was E148, "'Box' is not generic".
+fn main(): int {
+    struct Box<T> {
+        v: T
+    }
+    mut b: Box<int> = Box::default();
+    b.v = 1;
+    return 0;
+}

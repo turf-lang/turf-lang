@@ -91,23 +91,183 @@ static std::optional<long long> evalConstExpr(const ExprAST *E, const ConstMap &
   return std::nullopt;
 }
 
-void ValueRangePass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> & /*InitialAssigned*/) {
-  // InitialAssigned (parameter SymbolIDs from the codegen-time SymbolTable)
-  // is intentionally unused: parameters never have a statically-known
-  // constant value anyway, so there is nothing useful to seed IN[] with --
-  // an absent entry in ConstMap already means "unknown", same as the old
-  // `= std::nullopt` seeding did. Kept in the signature to match
-  // DefiniteAssignmentPass::runOnCFG's identical (also-unused) parameter,
-  // and so Codegen.cpp's call site needs no changes.
+// ─── Which variables the dataflow may hold a constant for ──────────────────
+// The transfer function (applyTransfer() below) understands exactly four
+// writes, each only as a whole CFG statement: `mut x = e`, `x = e`, `x op= e`
+// and `x++`/`x--`. A variable written any other way -- an `x++` inside a call
+// argument, `x = e` inside a `defer` (whose statement runs at scope exit, not
+// where the CFG lists it), `&x` handed to a function, a global another
+// function assigns -- changes without the dataflow seeing it, and a constant
+// kept for it is stale. For the bounds diagnostic a stale constant rejects a
+// valid program; for OPT-002 it removes a runtime check that was needed, so
+// an overflowing `x + 1` wraps (and, as `nsw`, is poison to LLVM) and an
+// out-of-range `a[i]` reads past the array.
+//
+// The earlier design trusted every variable and listed the writes it knew
+// were unsafe (`&x`, then `&x` inside `try`, then inside `recover`), so each
+// construct nobody had listed reopened the hole. This scan inverts that: a
+// variable is tracked only when it is declared by a whole-statement `mut x`
+// in this function and EVERY occurrence of it anywhere in the function is
+// either one of the four handled writes as a whole statement or a plain read
+// in a position known to be a read. Any other occurrence, including one in a
+// node kind added later, rejects the variable (visitVariable() below is the
+// default for an occurrence no parent claimed). Precision lost this way
+// costs a runtime check that stays in, never a wrong answer.
+namespace {
+struct TrackedVars {
+  // Declared here, every occurrence accounted for: constants may be kept.
+  std::unordered_set<const VariableSymbol *> Trackable;
+  // Seen in a position the scan does not recognise as a read or a handled
+  // write (always contains every variable whose address is taken).
+  std::unordered_set<const VariableSymbol *> Tainted;
+};
+
+class TrackabilityScan : public ASTChildWalker {
+  const ExprAST *Root = nullptr; // the CFG statement being scanned
+  std::unordered_set<const VariableSymbol *> &Declared;
+  std::unordered_set<const VariableSymbol *> &Tainted;
+
+  void taint(const ExprAST *E) {
+    if (auto *V = dynamic_cast<const VariableExprAST *>(E))
+      if (const VariableSymbol *S = V->getResolvedSymbol())
+        Tainted.insert(S);
+  }
+  // A child whose value is only read: a bare variable there is a read, and
+  // anything else is scanned.
+  void read(const ExprAST *C) {
+    if (C && !dynamic_cast<const VariableExprAST *>(C))
+      visitChild(C);
+  }
+  // The target of `=`/`op=`/`++`: fine as a whole statement, which the
+  // transfer function sees; anywhere else it is a write the dataflow misses.
+  void writeTarget(const ExprAST *Stmt, const ExprAST *Target) {
+    if (dynamic_cast<const VariableExprAST *>(Target)) {
+      if (Stmt != Root)
+        taint(Target);
+    } else {
+      visitChild(Target); // `a[i] = v`, `s.f = v`: the base is not rebound
+    }
+  }
+
+public:
+  TrackabilityScan(std::unordered_set<const VariableSymbol *> &Declared,
+                   std::unordered_set<const VariableSymbol *> &Tainted)
+      : Declared(Declared), Tainted(Tainted) {}
+
+  void scanStatement(ExprAST *Stmt) {
+    Root = Stmt;
+    visitChild(Stmt);
+  }
+
+  void visitVariable(VariableExprAST &Node) override { taint(&Node); }
+
+  void visitVarDecl(VarDeclExprAST &Node) override {
+    if (&Node == Root)
+      if (const VariableSymbol *S = Node.getResolvedSymbol())
+        Declared.insert(S);
+    read(Node.getInitializer());
+  }
+  void visitAssignment(AssignmentExprAST &Node) override {
+    writeTarget(&Node, Node.getLHS());
+    read(Node.getRHS());
+  }
+  void visitCompoundAssignment(CompoundAssignmentExprAST &Node) override {
+    writeTarget(&Node, Node.getLHS());
+    read(Node.getRHS());
+  }
+  void visitPostfixExpr(PostfixExprAST &Node) override {
+    writeTarget(&Node, Node.getOperand());
+  }
+
+  void visitBinary(BinaryExprAST &Node) override {
+    read(Node.getLHS());
+    read(Node.getRHS());
+  }
+  void visitUnary(UnaryExprAST &Node) override { read(Node.getOperand()); }
+  void visitCast(CastExprAST &Node) override { read(Node.getOperand()); }
+  void visitReturn(ReturnExprAST &Node) override { read(Node.getVal()); }
+  // Arguments are passed by value: a callee can only change a caller's
+  // variable through `&x`, which reaches visitVariable() via visitAddressOf().
+  void visitFuncCall(FuncCallExprAST &Node) override {
+    visitChild(Node.getCallee());
+    for (const auto &Arg : Node.getArgs())
+      read(Arg.get());
+  }
+  void visitMethodCall(MethodCallExprAST &Node) override {
+    visitChild(Node.getBase()); // a receiver may be passed by reference
+    for (const auto &Arg : Node.getArgs())
+      read(Arg.get());
+  }
+  // An element access never rebinds the array, so its base is a read.
+  void visitArrayAccess(ArrayAccessExprAST &Node) override {
+    read(Node.getBase());
+    read(Node.getIndex());
+  }
+  void visitArrayLiteral(ArrayLiteralExprAST &Node) override {
+    for (const auto &Elem : Node.getElements())
+      read(Elem.get());
+  }
+};
+} // namespace
+
+static TrackedVars computeTrackedVars(const CFG &Cfg) {
+  std::unordered_set<const VariableSymbol *> Declared;
+  TrackedVars TV;
+  TrackabilityScan Scan(Declared, TV.Tainted);
+  // Every statement CFGBuilder placed in a block: between them they hold the
+  // whole function body (CFGBuilder never splits one AST statement across
+  // blocks, and a `defer`'s statement is reached inside its DeferExprAST,
+  // where it is never the root).
+  for (const auto &BB : Cfg.getBlocks())
+    for (ExprAST *Stmt : BB->getStatements())
+      Scan.scanStatement(Stmt);
+  for (const VariableSymbol *S : Declared)
+    if (!TV.Tainted.count(S))
+      TV.Trackable.insert(S);
+  return TV;
+}
+
+// The dataflow transfer for one top-level CFG statement, shared by the
+// diagnostic pass and OPT-002 and by each pass's convergence loop and final
+// walk, so none of them can drift apart. Only a Trackable variable ever gets
+// an entry, so evalConstExpr() can never read a constant for any other.
+// `op=` and `++`/`--` forget the value rather than compute it: losing that
+// precision only keeps a check.
+static void applyTransfer(ExprAST *Stmt, ConstMap &Cur, const TrackedVars &TV) {
+  auto Set = [&](const VariableSymbol *S, std::optional<long long> V) {
+    if (S && TV.Trackable.count(S)) Cur[S] = V;
+  };
+  if (auto *Vd = dynamic_cast<VarDeclExprAST *>(Stmt)) {
+    Set(Vd->getResolvedSymbol(), evalConstExpr(Vd->getInitializer(), Cur));
+    return;
+  }
+  if (auto *A = dynamic_cast<AssignmentExprAST *>(Stmt)) {
+    if (auto *L = dynamic_cast<const VariableExprAST *>(A->getLHS()))
+      Set(L->getResolvedSymbol(), evalConstExpr(A->getRHS(), Cur));
+    return;
+  }
+  if (auto *CA = dynamic_cast<CompoundAssignmentExprAST *>(Stmt)) {
+    if (auto *L = dynamic_cast<const VariableExprAST *>(CA->getLHS()))
+      Set(L->getResolvedSymbol(), std::nullopt);
+    return;
+  }
+  if (auto *P = dynamic_cast<PostfixExprAST *>(Stmt)) {
+    if (auto *V = dynamic_cast<const VariableExprAST *>(P->getOperand()))
+      Set(V->getResolvedSymbol(), std::nullopt);
+    return;
+  }
+}
+
+// Forward constant propagation to a fixed point; returns each block's IN[].
+// A variable keeps a constant at a join only when every predecessor agrees
+// on it, and an entry absent from a map means "unknown".
+static std::vector<ConstMap> solveConstants(const CFG &Cfg, const TrackedVars &TV) {
   const auto &Blocks = Cfg.getBlocks();
   size_t N = Blocks.size();
-  if (N == 0) return;
-
   std::unordered_map<const TurfBasicBlock *, size_t> index;
   for (size_t i = 0; i < N; ++i) index[Blocks[i].get()] = i;
 
   std::vector<ConstMap> IN(N), OUT(N);
-
   std::queue<size_t> work;
   for (size_t i = 0; i < N; ++i) work.push(i);
 
@@ -115,143 +275,132 @@ void ValueRangePass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> & /*InitialA
     size_t b = work.front(); work.pop();
     TurfBasicBlock *BB = Blocks[b].get();
 
-    // IN = meet of preds: for constants, require all preds agree on same const
-    ConstMap newIN;
+    ConstMap NewIN;
     const auto &Preds = BB->getPredecessors();
     if (Preds.empty()) {
-      newIN = IN[b];
+      NewIN = IN[b];
     } else {
-      bool first = true;
+      bool First = true;
       for (auto *P : Preds) {
-        size_t pi = index[P];
-        if (first) { newIN = OUT[pi]; first = false; }
+        size_t Pi = index[P];
+        if (First) { NewIN = OUT[Pi]; First = false; }
         else {
-          // join: keep value only if equal in both maps, else unknown
-          ConstMap tmp;
-          for (const auto &kv : newIN) {
-            const VariableSymbol *sid = kv.first;
-            auto it = OUT[pi].find(sid);
-            if (it != OUT[pi].end() && kv.second.has_value() && it->second.has_value() && kv.second == it->second) {
-              tmp[sid] = kv.second;
-            } else {
-              tmp[sid] = std::nullopt;
-            }
+          ConstMap Tmp;
+          for (const auto &Kv : NewIN) {
+            auto It = OUT[Pi].find(Kv.first);
+            if (It != OUT[Pi].end() && Kv.second.has_value() && It->second.has_value() && Kv.second == It->second)
+              Tmp[Kv.first] = Kv.second;
+            else
+              Tmp[Kv.first] = std::nullopt;
           }
-          newIN.swap(tmp);
+          NewIN.swap(Tmp);
         }
       }
     }
+    if (NewIN != IN[b]) IN[b] = NewIN;
 
-    if (newIN != IN[b]) IN[b] = newIN;
+    ConstMap Cur = IN[b];
+    for (ExprAST *Stmt : BB->getStatements()) applyTransfer(Stmt, Cur, TV);
 
-    // Transfer: propagate constants through statements
-    ConstMap cur = IN[b];
-    for (ExprAST *Stmt : BB->getStatements()) {
-        // Check for array accesses inside this statement and emit OOB diagnostics
-        std::function<void(const ExprAST *)> checkAccesses = [&](const ExprAST *N) {
-          if (!N) return;
-          if (auto AA = dynamic_cast<const ArrayAccessExprAST *>(N)) {
-            auto idxVal = evalConstExpr(AA->getIndex(), cur);
-            if (idxVal.has_value()) {
-              if (auto BaseVar = dynamic_cast<const VariableExprAST *>(AA->getBase())) {
-                const VariableSymbol *S = BaseVar->getResolvedSymbol();
-                if (S && S->Type && S->Type->isArray()) {
-                  const ArrayType *AT = dynamic_cast<const ArrayType *>(S->Type.get());
-                  if (AT) {
-                    int sz = AT->getSize();
-                    if (sz > 0) {
-                      long long iv = *idxVal;
-                      // #256: negative indices count from the end, so the
-                      // valid range is -sz <= iv < sz (CodegenArray.cpp).
-                      if (iv < -static_cast<long long>(sz) || iv >= sz) {
-                        ArrayBoundsError err(AA->getLoc(), BaseVar->getName(), iv, sz);
-                        err.raise();
-                      }
-                    }
-                  }
-                }
+    if (Cur != OUT[b]) {
+      OUT[b] = Cur;
+      for (auto *S : BB->getSuccessors()) work.push(index[S]);
+    }
+  }
+  return IN;
+}
+
+// A compile-time out-of-range constant index (E001), reported once the
+// dataflow has converged, so every report comes from a value proven on every
+// path reaching the access.
+static void reportConstantOutOfBounds(const ExprAST *N, const ConstMap &cur) {
+  if (!N) return;
+  if (auto AA = dynamic_cast<const ArrayAccessExprAST *>(N)) {
+    auto idxVal = evalConstExpr(AA->getIndex(), cur);
+    if (idxVal.has_value()) {
+      if (auto BaseVar = dynamic_cast<const VariableExprAST *>(AA->getBase())) {
+        const VariableSymbol *S = BaseVar->getResolvedSymbol();
+        if (S && S->Type && S->Type->isArray()) {
+          const ArrayType *AT = dynamic_cast<const ArrayType *>(S->Type.get());
+          if (AT) {
+            int sz = AT->getSize();
+            if (sz > 0) {
+              long long iv = *idxVal;
+              // #256: negative indices count from the end, so the
+              // valid range is -sz <= iv < sz (CodegenArray.cpp).
+              if (iv < -static_cast<long long>(sz) || iv >= sz) {
+                ArrayBoundsError err(AA->getLoc(), BaseVar->getName(), iv, sz);
+                err.raise();
               }
             }
           }
-
-          // Recurse into children (basic traversal)
-          if (auto B = dynamic_cast<const BinaryExprAST *>(N)) { checkAccesses(B->getLHS()); checkAccesses(B->getRHS()); }
-          else if (auto U = dynamic_cast<const UnaryExprAST *>(N)) checkAccesses(U->getOperand());
-          else if (auto Tr = dynamic_cast<const TryExprAST *>(N)) checkAccesses(Tr->getOperand()); // LEC-004
-          else if (auto A = dynamic_cast<const AssignmentExprAST *>(N)) { checkAccesses(A->getRHS()); checkAccesses(A->getLHS()); }
-          else if (auto Vd = dynamic_cast<const VarDeclExprAST *>(N)) checkAccesses(Vd->getInitializer());
-          else if (auto If = dynamic_cast<const IfExprAST *>(N)) {
-            for (const auto &Br : If->getBranches()) { checkAccesses(Br.Cond.get()); checkAccesses(Br.Body.get()); }
-            checkAccesses(If->getElse());
-          } else if (auto Bl = dynamic_cast<const BlockExprAST *>(N)) {
-            for (const auto &E2 : Bl->getExpressions()) checkAccesses(E2.get());
-          } else if (auto F = dynamic_cast<const FuncCallExprAST *>(N)) {
-            for (const auto &Arg : F->getArgs()) checkAccesses(Arg.get());
-            checkAccesses(F->getCallee());
-          } else if (auto ArrA = dynamic_cast<const ArrayAccessExprAST *>(N)) {
-            checkAccesses(ArrA->getBase()); checkAccesses(ArrA->getIndex());
-          } else if (auto R = dynamic_cast<const ReturnExprAST *>(N)) {
-            checkAccesses(R->getVal());
-          } else if (auto CA = dynamic_cast<const CompoundAssignmentExprAST *>(N)) {
-            checkAccesses(CA->getLHS()); checkAccesses(CA->getRHS());
-          } else if (auto P = dynamic_cast<const PostfixExprAST *>(N)) {
-            checkAccesses(P->getOperand());
-          } else if (auto M = dynamic_cast<const MethodCallExprAST *>(N)) {
-            checkAccesses(M->getBase()); for (const auto &Arg : M->getArgs()) checkAccesses(Arg.get());
-          } else if (auto FA = dynamic_cast<const FieldAccessExprAST *>(N)) {
-            checkAccesses(FA->getBase());
-          } else if (auto AL = dynamic_cast<const ArrayLiteralExprAST *>(N)) {
-            for (const auto &E2 : AL->getElements()) checkAccesses(E2.get());
-          } else if (auto AD = dynamic_cast<const ArrayDeclExprAST *>(N)) {
-            for (const auto &E2 : AD->getInitList()) checkAccesses(E2.get());
-            if (AD->getInitExpr()) checkAccesses(AD->getInitExpr().get());
-          } else if (auto C = dynamic_cast<const CastExprAST *>(N)) {
-            checkAccesses(C->getOperand());
-          }
-        };
-        checkAccesses(Stmt);
-
-      // Handle var decl
-      if (auto Vd = dynamic_cast<VarDeclExprAST *>(Stmt)) {
-        auto val = evalConstExpr(Vd->getInitializer(), cur);
-        const VariableSymbol *S = Vd->getResolvedSymbol();
-        if (S) cur[S] = val;
-        continue;
-      }
-      if (auto A = dynamic_cast<AssignmentExprAST *>(Stmt)) {
-        // LHS variable assign
-        if (auto L = dynamic_cast<const VariableExprAST *>(A->getLHS())) {
-          auto val = evalConstExpr(A->getRHS(), cur);
-          const VariableSymbol *S = L->getResolvedSymbol();
-          if (S) cur[S] = val;
         }
-        continue;
-      }
-      // For other statements, we attempt to evaluate but don't change state
-      // (could be extended later)
-    }
-
-    if (cur != OUT[b]) {
-      OUT[b] = cur;
-      for (auto *S : BB->getSuccessors()) {
-        size_t si = index[S];
-        work.push(si);
       }
     }
   }
 
+  // Recurse into children (basic traversal)
+  auto checkAccesses = [&](const ExprAST *C) { reportConstantOutOfBounds(C, cur); };
+  if (auto B = dynamic_cast<const BinaryExprAST *>(N)) { checkAccesses(B->getLHS()); checkAccesses(B->getRHS()); }
+  else if (auto U = dynamic_cast<const UnaryExprAST *>(N)) checkAccesses(U->getOperand());
+  else if (auto Tr = dynamic_cast<const TryExprAST *>(N)) checkAccesses(Tr->getOperand()); // LEC-004
+  else if (auto A = dynamic_cast<const AssignmentExprAST *>(N)) { checkAccesses(A->getRHS()); checkAccesses(A->getLHS()); }
+  else if (auto Vd = dynamic_cast<const VarDeclExprAST *>(N)) checkAccesses(Vd->getInitializer());
+  else if (auto If = dynamic_cast<const IfExprAST *>(N)) {
+    for (const auto &Br : If->getBranches()) { checkAccesses(Br.Cond.get()); checkAccesses(Br.Body.get()); }
+    checkAccesses(If->getElse());
+  } else if (auto Bl = dynamic_cast<const BlockExprAST *>(N)) {
+    for (const auto &E2 : Bl->getExpressions()) checkAccesses(E2.get());
+  } else if (auto F = dynamic_cast<const FuncCallExprAST *>(N)) {
+    for (const auto &Arg : F->getArgs()) checkAccesses(Arg.get());
+    checkAccesses(F->getCallee());
+  } else if (auto ArrA = dynamic_cast<const ArrayAccessExprAST *>(N)) {
+    checkAccesses(ArrA->getBase()); checkAccesses(ArrA->getIndex());
+  } else if (auto R = dynamic_cast<const ReturnExprAST *>(N)) {
+    checkAccesses(R->getVal());
+  } else if (auto CA = dynamic_cast<const CompoundAssignmentExprAST *>(N)) {
+    checkAccesses(CA->getLHS()); checkAccesses(CA->getRHS());
+  } else if (auto P = dynamic_cast<const PostfixExprAST *>(N)) {
+    checkAccesses(P->getOperand());
+  } else if (auto M = dynamic_cast<const MethodCallExprAST *>(N)) {
+    checkAccesses(M->getBase()); for (const auto &Arg : M->getArgs()) checkAccesses(Arg.get());
+  } else if (auto FA = dynamic_cast<const FieldAccessExprAST *>(N)) {
+    checkAccesses(FA->getBase());
+  } else if (auto AL = dynamic_cast<const ArrayLiteralExprAST *>(N)) {
+    for (const auto &E2 : AL->getElements()) checkAccesses(E2.get());
+  } else if (auto AD = dynamic_cast<const ArrayDeclExprAST *>(N)) {
+    for (const auto &E2 : AD->getInitList()) checkAccesses(E2.get());
+    if (AD->getInitExpr()) checkAccesses(AD->getInitExpr().get());
+  } else if (auto C = dynamic_cast<const CastExprAST *>(N)) {
+    checkAccesses(C->getOperand());
+  }
+}
+
+void ValueRangePass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> & /*InitialAssigned*/) {
+  // InitialAssigned (parameter SymbolIDs from the codegen-time SymbolTable)
+  // is intentionally unused: parameters are never tracked (see
+  // computeTrackedVars()). Kept in the signature to match
+  // DefiniteAssignmentPass::runOnCFG's identical (also-unused) parameter.
+  const auto &Blocks = Cfg.getBlocks();
+  if (Blocks.empty()) return;
+  TrackedVars TV = computeTrackedVars(Cfg);
+  std::vector<ConstMap> IN = solveConstants(Cfg, TV);
+  for (size_t i = 0; i < Blocks.size(); ++i) {
+    ConstMap Cur = IN[i];
+    for (ExprAST *Stmt : Blocks[i]->getStatements()) {
+      reportConstantOutOfBounds(Stmt, Cur);
+      applyTransfer(Stmt, Cur, TV);
+    }
+  }
 }
 
 // ─── OPT-002: check-elision pre-pass ───────────────────────────────────────
 // (ARCHITECTURE_OVERHAUL.md §8 OPT-002, DESIGN_NOTES.md §1 "Bounds Check
-// Elimination"). Everything below is invoked from a SEPARATE call
-// (markElidableChecks(), at the bottom of this file) on a throwaway CFG
-// built BEFORE Body->codegen() -- see that call site's own comment
-// (CodegenFunc.cpp) for why runOnCFG() above, which only ever runs AFTER
+// Elimination"). markElidableChecks() runs the same dataflow as runOnCFG() on
+// a throwaway CFG built BEFORE Body->codegen() -- see that call site's own
+// comment (CodegenFunc.cpp) for why runOnCFG(), which only ever runs AFTER
 // Body->codegen(), cannot be reused for this: its results would describe
-// checks Codegen has already emitted. runOnCFG() itself is completely
-// unmodified by any of this -- ArrayBoundsError still fires at exactly the
-// point and in exactly the way it always has.
+// checks Codegen has already emitted.
 
 // Whether checked `op` (`+`/`-`/`*`) applied to two EXACT int64 constants
 // can be proven not to overflow -- the same llvm::APInt s{add,sub,mul}_ov
@@ -284,129 +433,28 @@ static bool shlProvablySafe(long long L, long long R) {
 }
 
 // Mirrors EmitCheckedIntNegate()'s one overflow case (CodegenCore.cpp):
-// negating INT64_MIN has no representable int64 result.
-static bool negProvablySafe(long long V) { return V != INT64_MIN; }
+// negating the type's minimum has no representable result. The node's type
+// is not known here and an `int32` negation stays 32 bits wide (unlike
+// int32 arithmetic, which widens to int), so INT32_MIN is never proved safe
+// either: that costs one kept check on an `int`, never a missed one.
+static bool negProvablySafe(long long V) { return V != INT64_MIN && V != INT32_MIN; }
 
-// A value this dataflow believes is a known constant is only trustworthy
-// for ELISION purposes (as opposed to runOnCFG()'s diagnostic use, where a
-// missed detection just forgoes a compile-time error and the RUNTIME check
-// still catches the real bug) if the variable's address is never taken
-// anywhere in the enclosing function. `&x` (AddressOfExprAST) lets that
-// reference be handed to a call that mutates `x` through it -- something
-// this local, non-aliasing-aware dataflow has no way to see. Eliding a
-// runtime check has no fallback: an unsound proof here would be a genuine
-// memory-safety regression, not a missed diagnostic, so this pass insists
-// on the coarser, unconditionally-safe "address never taken" precondition
-// before trusting Cur for a given symbol at all -- see
-// collectAddressTaken() below for how AddressTaken is populated.
-static std::optional<long long> evalConstExprElidable(
-    const ExprAST *E, const ConstMap &Cur,
-    const std::unordered_set<const VariableSymbol *> &AddressTaken) {
-  if (auto *V = dynamic_cast<const VariableExprAST *>(E)) {
-    const VariableSymbol *S = V->getResolvedSymbol();
-    if (S && AddressTaken.count(S)) return std::nullopt;
-  }
-  return evalConstExpr(E, Cur);
-}
-
-// Whole-function walk (over every statement CFGBuilder placed in every
-// block -- it never splits one AST statement across two blocks, so this
-// sees the entire function body) collecting every VariableSymbol whose
-// address is taken anywhere at all, conservatively: this pass never tries
-// to reason about what happens to the reference afterward, only whether
-// one was ever formed.
-//
-// An ASTChildWalker (LEC-005, INV-LINT-1), because here a node the walk does
-// not reach is not a missed warning but a MISCOMPILE: an unseen `&x` leaves
-// `x` looking never-aliased, so a range fact about it survives a call that
-// changes it, and a bounds/overflow check is elided with no fallback.
-// This was a hand-written chain of dynamic_casts with no branch for
-// `recover`, `defer`, `unsafe`, `compare`, do-while or for-each -- confirmed
-// live, `mutate(&i) recover run { ... }; return a[i];` with `i` set to 99
-// through the reference read `a[99]` of a 3-element array with no check and
-// exit 0 -- LEC-004 had already hit the same hole once for `try` and patched
-// that one node. Every node kind is now reached by construction.
-namespace {
-class AddressTakenCollector : public ASTChildWalker {
-  std::unordered_set<const VariableSymbol *> &Out;
-
-public:
-  explicit AddressTakenCollector(std::unordered_set<const VariableSymbol *> &Out)
-      : Out(Out) {}
-
-  void visitAddressOf(AddressOfExprAST &Node) override {
-    if (auto *V = dynamic_cast<const VariableExprAST *>(Node.getOperand()))
-      if (const VariableSymbol *S = V->getResolvedSymbol())
-        Out.insert(S);
-    ASTChildWalker::visitAddressOf(Node); // `&f(&x)`: the inner one counts too
-  }
-};
-} // namespace
-
-static void collectAddressTaken(const ExprAST *N,
-                                std::unordered_set<const VariableSymbol *> &Out) {
-  if (!N) return;
-  AddressTakenCollector Collector(Out);
-  const_cast<ExprAST *>(N)->accept(Collector);
-}
-
-// The dataflow transfer for one top-level CFG statement -- shared by both
-// the fixed-point convergence loop and the final marking pass below so the
-// two can never drift apart. Extends runOnCFG()'s own inline transfer
-// (VarDecl / plain-variable Assignment) with the one thing this pass cannot
-// inherit that gap on: CompoundAssignmentExprAST (`x += ...`) and
-// PostfixExprAST (`x++`/`x--`) also mutate a tracked variable, and
-// runOnCFG() never accounted for that (a pre-existing precision gap in that
-// diagnostic pass, out of OPT-002's scope to fix -- it only costs that pass
-// a missed compile-time diagnostic, and the runtime check remains the real
-// safety net there). Here, invalidating (rather than silently keeping a
-// stale value) is the only sound choice: this pass computing its own new
-// value for the RHS of `+=`/`++` and reusing it as elision "proof" is left
-// to a future session (this one only needs to never be WRONG, not to be
-// maximally precise) -- see this group's change record.
-static void applyTransfer(ExprAST *Stmt, ConstMap &Cur) {
-  if (auto *Vd = dynamic_cast<VarDeclExprAST *>(Stmt)) {
-    auto Val = evalConstExpr(Vd->getInitializer(), Cur);
-    if (const VariableSymbol *S = Vd->getResolvedSymbol()) Cur[S] = Val;
-    return;
-  }
-  if (auto *A = dynamic_cast<AssignmentExprAST *>(Stmt)) {
-    if (auto *L = dynamic_cast<const VariableExprAST *>(A->getLHS())) {
-      auto Val = evalConstExpr(A->getRHS(), Cur);
-      if (const VariableSymbol *S = L->getResolvedSymbol()) Cur[S] = Val;
-    }
-    return;
-  }
-  if (auto *CA = dynamic_cast<CompoundAssignmentExprAST *>(Stmt)) {
-    if (auto *L = dynamic_cast<const VariableExprAST *>(CA->getLHS()))
-      if (const VariableSymbol *S = L->getResolvedSymbol()) Cur[S] = std::nullopt;
-    return;
-  }
-  if (auto *P = dynamic_cast<PostfixExprAST *>(Stmt)) {
-    if (auto *V = dynamic_cast<const VariableExprAST *>(P->getOperand()))
-      if (const VariableSymbol *S = V->getResolvedSymbol()) Cur[S] = std::nullopt;
-    return;
-  }
-}
-
-// Marks every node this dataflow proves safe, recursing with the same node
-// coverage as collectAddressTaken()/checkAccesses() above. Needs a
-// non-const ExprAST* throughout (the entire point is to mutate
-// ProvenInBounds/ProvenNoOverflow), so getters whose declared return type is
-// `const ExprAST *` are const_cast back -- these are still genuinely
-// non-const objects owned by the same Body tree Codegen is about to walk;
-// the const on those particular getters is a read-only-consumer API
-// convention elsewhere, not a true const object.
+// Marks every node this dataflow proves safe. Needs a non-const ExprAST*
+// throughout (the entire point is to mutate ProvenInBounds/ProvenNoOverflow),
+// so getters whose declared return type is `const ExprAST *` are const_cast
+// back -- these are still genuinely non-const objects owned by the same Body
+// tree Codegen is about to walk. A node kind with no case here is simply
+// never marked, which keeps its checks.
 static void markNode(ExprAST *N, const ConstMap &Cur,
-                     const std::unordered_set<const VariableSymbol *> &AddressTaken) {
+                     const TrackedVars &TV) {
   if (!N) return;
 
   if (auto *AA = dynamic_cast<ArrayAccessExprAST *>(N)) {
-    auto IdxVal = evalConstExprElidable(AA->getIndex(), Cur, AddressTaken);
+    auto IdxVal = evalConstExpr(AA->getIndex(), Cur);
     if (IdxVal.has_value()) {
       if (auto *BaseVar = dynamic_cast<const VariableExprAST *>(AA->getBase())) {
         const VariableSymbol *S = BaseVar->getResolvedSymbol();
-        if (S && S->Type && S->Type->isArray() && !AddressTaken.count(S)) {
+        if (S && S->Type && S->Type->isArray() && !TV.Tainted.count(S)) {
           if (const auto *AT = dynamic_cast<const ArrayType *>(S->Type.get())) {
             int Sz = AT->getSize();
             long long Iv = *IdxVal;
@@ -416,14 +464,14 @@ static void markNode(ExprAST *N, const ConstMap &Cur,
         }
       }
     }
-    markNode(const_cast<ExprAST *>(AA->getBase()), Cur, AddressTaken);
-    markNode(const_cast<ExprAST *>(AA->getIndex()), Cur, AddressTaken);
+    markNode(const_cast<ExprAST *>(AA->getBase()), Cur, TV);
+    markNode(const_cast<ExprAST *>(AA->getIndex()), Cur, TV);
     return;
   }
 
   if (auto *B = dynamic_cast<BinaryExprAST *>(N)) {
-    auto Lv = evalConstExprElidable(B->getLHS(), Cur, AddressTaken);
-    auto Rv = evalConstExprElidable(B->getRHS(), Cur, AddressTaken);
+    auto Lv = evalConstExpr(B->getLHS(), Cur);
+    auto Rv = evalConstExpr(B->getRHS(), Cur);
     if (Lv.has_value() && Rv.has_value()) {
       int Op = B->getOp();
       bool Safe = false;
@@ -433,150 +481,99 @@ static void markNode(ExprAST *N, const ConstMap &Cur,
         Safe = shlProvablySafe(*Lv, *Rv);
       if (Safe) B->ProvenNoOverflow = true;
     }
-    markNode(const_cast<ExprAST *>(B->getLHS()), Cur, AddressTaken);
-    markNode(const_cast<ExprAST *>(B->getRHS()), Cur, AddressTaken);
+    markNode(const_cast<ExprAST *>(B->getLHS()), Cur, TV);
+    markNode(const_cast<ExprAST *>(B->getRHS()), Cur, TV);
     return;
   }
 
   if (auto *U = dynamic_cast<UnaryExprAST *>(N)) {
     if (U->getOpcode() == '-') {
-      auto Ov = evalConstExprElidable(U->getOperand(), Cur, AddressTaken);
+      auto Ov = evalConstExpr(U->getOperand(), Cur);
       if (Ov.has_value() && negProvablySafe(*Ov)) U->ProvenNoOverflow = true;
     }
-    markNode(const_cast<ExprAST *>(U->getOperand()), Cur, AddressTaken);
+    markNode(const_cast<ExprAST *>(U->getOperand()), Cur, TV);
     return;
   }
 
   if (auto *Tr = dynamic_cast<TryExprAST *>(N)) { // LEC-004
-    markNode(Tr->getOperand(), Cur, AddressTaken);
+    markNode(Tr->getOperand(), Cur, TV);
     return;
   }
 
   if (auto *CA = dynamic_cast<CompoundAssignmentExprAST *>(N)) {
     int Op = CA->getOpcode();
     if (Op == '+' || Op == '-' || Op == '*' || Op == TOK_LSHIFT) {
-      auto Lv = evalConstExprElidable(CA->getLHS(), Cur, AddressTaken);
-      auto Rv = evalConstExprElidable(CA->getRHS(), Cur, AddressTaken);
+      auto Lv = evalConstExpr(CA->getLHS(), Cur);
+      auto Rv = evalConstExpr(CA->getRHS(), Cur);
       if (Lv.has_value() && Rv.has_value()) {
         bool Safe = (Op == TOK_LSHIFT) ? shlProvablySafe(*Lv, *Rv)
                                        : arithProvablySafe(static_cast<char>(Op), *Lv, *Rv);
         if (Safe) CA->ProvenNoOverflow = true;
       }
     }
-    markNode(const_cast<ExprAST *>(CA->getLHS()), Cur, AddressTaken);
-    markNode(const_cast<ExprAST *>(CA->getRHS()), Cur, AddressTaken);
+    markNode(const_cast<ExprAST *>(CA->getLHS()), Cur, TV);
+    markNode(const_cast<ExprAST *>(CA->getRHS()), Cur, TV);
     return;
   }
 
   if (auto *P = dynamic_cast<PostfixExprAST *>(N)) {
-    auto Ov = evalConstExprElidable(P->getOperand(), Cur, AddressTaken);
+    auto Ov = evalConstExpr(P->getOperand(), Cur);
     if (Ov.has_value()) {
       bool Safe = (P->getOpcode() == '+') ? arithProvablySafe('+', *Ov, 1)
                                           : arithProvablySafe('-', *Ov, 1);
       if (Safe) P->ProvenNoOverflow = true;
     }
-    markNode(const_cast<ExprAST *>(P->getOperand()), Cur, AddressTaken);
+    markNode(const_cast<ExprAST *>(P->getOperand()), Cur, TV);
     return;
   }
 
   if (auto *A = dynamic_cast<AssignmentExprAST *>(N)) {
-    markNode(const_cast<ExprAST *>(A->getRHS()), Cur, AddressTaken);
-    markNode(const_cast<ExprAST *>(A->getLHS()), Cur, AddressTaken);
+    markNode(const_cast<ExprAST *>(A->getRHS()), Cur, TV);
+    markNode(const_cast<ExprAST *>(A->getLHS()), Cur, TV);
   } else if (auto *Vd = dynamic_cast<VarDeclExprAST *>(N)) {
-    markNode(const_cast<ExprAST *>(Vd->getInitializer()), Cur, AddressTaken);
+    markNode(const_cast<ExprAST *>(Vd->getInitializer()), Cur, TV);
   } else if (auto *If = dynamic_cast<IfExprAST *>(N)) {
     for (const auto &Br : If->getBranches()) {
-      markNode(const_cast<ExprAST *>(Br.Cond.get()), Cur, AddressTaken);
-      markNode(const_cast<ExprAST *>(Br.Body.get()), Cur, AddressTaken);
+      markNode(const_cast<ExprAST *>(Br.Cond.get()), Cur, TV);
+      markNode(const_cast<ExprAST *>(Br.Body.get()), Cur, TV);
     }
-    markNode(const_cast<ExprAST *>(If->getElse()), Cur, AddressTaken);
+    markNode(const_cast<ExprAST *>(If->getElse()), Cur, TV);
   } else if (auto *Bl = dynamic_cast<BlockExprAST *>(N)) {
-    for (const auto &E2 : Bl->getExpressions()) markNode(E2.get(), Cur, AddressTaken);
+    for (const auto &E2 : Bl->getExpressions()) markNode(E2.get(), Cur, TV);
   } else if (auto *F = dynamic_cast<FuncCallExprAST *>(N)) {
-    for (const auto &Arg : F->getArgs()) markNode(Arg.get(), Cur, AddressTaken);
-    markNode(const_cast<ExprAST *>(F->getCallee()), Cur, AddressTaken);
+    for (const auto &Arg : F->getArgs()) markNode(Arg.get(), Cur, TV);
+    markNode(const_cast<ExprAST *>(F->getCallee()), Cur, TV);
   } else if (auto *R = dynamic_cast<ReturnExprAST *>(N)) {
-    markNode(const_cast<ExprAST *>(R->getVal()), Cur, AddressTaken);
+    markNode(const_cast<ExprAST *>(R->getVal()), Cur, TV);
   } else if (auto *M = dynamic_cast<MethodCallExprAST *>(N)) {
-    markNode(const_cast<ExprAST *>(M->getBase()), Cur, AddressTaken);
-    for (const auto &Arg : M->getArgs()) markNode(Arg.get(), Cur, AddressTaken);
+    markNode(const_cast<ExprAST *>(M->getBase()), Cur, TV);
+    for (const auto &Arg : M->getArgs()) markNode(Arg.get(), Cur, TV);
   } else if (auto *FA = dynamic_cast<FieldAccessExprAST *>(N)) {
-    markNode(const_cast<ExprAST *>(FA->getBase()), Cur, AddressTaken);
+    markNode(const_cast<ExprAST *>(FA->getBase()), Cur, TV);
   } else if (auto *AL = dynamic_cast<ArrayLiteralExprAST *>(N)) {
-    for (const auto &E2 : AL->getElements()) markNode(E2.get(), Cur, AddressTaken);
+    for (const auto &E2 : AL->getElements()) markNode(E2.get(), Cur, TV);
   } else if (auto *AD = dynamic_cast<ArrayDeclExprAST *>(N)) {
-    for (const auto &E2 : AD->getInitList()) markNode(E2.get(), Cur, AddressTaken);
-    if (AD->getInitExpr()) markNode(const_cast<ExprAST *>(AD->getInitExpr().get()), Cur, AddressTaken);
+    for (const auto &E2 : AD->getInitList()) markNode(E2.get(), Cur, TV);
+    if (AD->getInitExpr()) markNode(const_cast<ExprAST *>(AD->getInitExpr().get()), Cur, TV);
   } else if (auto *C = dynamic_cast<CastExprAST *>(N)) {
-    markNode(const_cast<ExprAST *>(C->getOperand()), Cur, AddressTaken);
+    markNode(const_cast<ExprAST *>(C->getOperand()), Cur, TV);
   }
 }
 
 void ValueRangePass::markElidableChecks(CFG &Cfg,
                                         const std::vector<SymbolID> & /*InitialAssigned*/) {
   const auto &Blocks = Cfg.getBlocks();
-  size_t N = Blocks.size();
-  if (N == 0) return;
-
-  std::unordered_set<const VariableSymbol *> AddressTaken;
-  for (size_t i = 0; i < N; ++i)
-    for (ExprAST *Stmt : Blocks[i]->getStatements())
-      collectAddressTaken(Stmt, AddressTaken);
-
-  std::unordered_map<const TurfBasicBlock *, size_t> index;
-  for (size_t i = 0; i < N; ++i) index[Blocks[i].get()] = i;
-
-  std::vector<ConstMap> IN(N), OUT(N);
-  std::queue<size_t> work;
-  for (size_t i = 0; i < N; ++i) work.push(i);
-
-  // Phase 1: converge IN[]/OUT[] -- transfer only, no marking, so every
-  // mark in Phase 2 comes from dataflow state already proven stable on
-  // EVERY path, never a not-yet-converged intermediate estimate.
-  while (!work.empty()) {
-    size_t b = work.front(); work.pop();
-    TurfBasicBlock *BB = Blocks[b].get();
-
-    ConstMap NewIN;
-    const auto &Preds = BB->getPredecessors();
-    if (Preds.empty()) {
-      NewIN = IN[b];
-    } else {
-      bool First = true;
-      for (auto *P : Preds) {
-        size_t Pi = index[P];
-        if (First) { NewIN = OUT[Pi]; First = false; }
-        else {
-          ConstMap Tmp;
-          for (const auto &Kv : NewIN) {
-            auto It = OUT[Pi].find(Kv.first);
-            if (It != OUT[Pi].end() && Kv.second.has_value() && It->second.has_value() && Kv.second == It->second)
-              Tmp[Kv.first] = Kv.second;
-            else
-              Tmp[Kv.first] = std::nullopt;
-          }
-          NewIN.swap(Tmp);
-        }
-      }
-    }
-    if (NewIN != IN[b]) IN[b] = NewIN;
-
-    ConstMap Cur = IN[b];
-    for (ExprAST *Stmt : BB->getStatements()) applyTransfer(Stmt, Cur);
-
-    if (Cur != OUT[b]) {
-      OUT[b] = Cur;
-      for (auto *S : BB->getSuccessors()) work.push(index[S]);
-    }
-  }
-
-  // Phase 2: one final walk per block from the converged IN[], marking
-  // every node this dataflow proves safe.
-  for (size_t i = 0; i < N; ++i) {
+  if (Blocks.empty()) return;
+  TrackedVars TV = computeTrackedVars(Cfg);
+  // Converge first, then mark in one walk per block from the converged IN[],
+  // so every mark comes from dataflow state proven on EVERY path, never a
+  // not-yet-converged intermediate estimate.
+  std::vector<ConstMap> IN = solveConstants(Cfg, TV);
+  for (size_t i = 0; i < Blocks.size(); ++i) {
     ConstMap Cur = IN[i];
     for (ExprAST *Stmt : Blocks[i]->getStatements()) {
-      markNode(Stmt, Cur, AddressTaken);
-      applyTransfer(Stmt, Cur);
+      markNode(Stmt, Cur, TV);
+      applyTransfer(Stmt, Cur, TV);
     }
   }
 }

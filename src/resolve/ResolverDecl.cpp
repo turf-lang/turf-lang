@@ -819,6 +819,23 @@ bool Resolver::validateModuleQualifier(const std::string &Qualifier,
 
 void Resolver::visitStructDecl(StructDeclExprAST &Node) {
   rejectLocalVisibility(Node, FunctionNestingDepth_);
+  // A local struct is registered here, in Pass 2, after the top-level
+  // generic structs are known (GenericStructIdentities_) and outside the
+  // monomorphizer's registry of templates, so a local generic was neither
+  // instantiable (`Box<int>` was E148, "not generic") nor rejected when
+  // written bare (`mut b: Box` reached Codegen as an unsized template: an
+  // internal compiler error). A local type has no methods, so a type
+  // parameter would have nothing to be used by.
+  if (FunctionNestingDepth_ > 0 && !Node.getTypeParams().empty()) {
+    const std::string Bare = TypeIdentity::bareName(Node.getName());
+    TypeError(Node.getLoc(), ErrCode::LocalGenericStruct,
+              "'" + Bare + "' is declared inside a function, so it can't have type "
+              "parameters.",
+              "Move 'struct " + Bare + "<...>' to the top level of the file, or "
+              "drop its type parameters and give its fields concrete types.",
+              "Generic struct inside a function!")
+        .raise();
+  }
   if (FunctionNestingDepth_ > 0)
     for (const auto &F : Node.getFields())
       if (F.Vis.IsPublic)
@@ -905,7 +922,8 @@ void Resolver::visitStructDecl(StructDeclExprAST &Node) {
     if (GlobalSymbolTable)
       GlobalSymbolTable->RegisterType(
           Node.getName(),
-          std::make_shared<TurfStructType>(Node.getName(), Node.getFields()));
+          std::make_shared<TurfStructType>(Node.getName(), Node.getFields(),
+                                           Node.getTypeParams()));
   }
 
   // In Pass 2 (here) we validate every field's type via validateNamedType().
