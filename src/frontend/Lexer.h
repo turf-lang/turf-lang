@@ -309,6 +309,10 @@ public:
     // diagnostic is never checked twice.
     CompilerFix Fix;
     bool FixChecked = false;
+    // V-1: a warning whose lint level is `deny`. IsWarning is false for it (it
+    // is an error in every respect that matters); this only lets printDiag()
+    // say why a check that is normally advice failed the build.
+    bool Denied = false;
   };
 
   // Record a diagnostic. Errors on a line that already has an error are

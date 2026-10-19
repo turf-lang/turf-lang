@@ -1,0 +1,7 @@
+// EXPECT-DIAG: E057
+// EXPECT-DIAG: Cannot use '||' with 'bool' and 'double': both operands must be 'bool'
+fn main(): int {
+    mut x: double = 2.5;
+    mut ok: bool = false || x;
+    return 0;
+}

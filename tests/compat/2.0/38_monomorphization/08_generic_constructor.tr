@@ -1,0 +1,48 @@
+// Regression test: TYPE-002 S14a -- `StructName::new(...)` (an explicit,
+// hand-written constructor), not just `::default()`, on a GENERIC struct
+// instantiation, including a >8-byte type argument. Through S13b this was
+// a disclosed, still-open gap: `Box.new`'s own body/signature was never
+// monomorphized at all (S12a's own exclusion, standing until this
+// session's drainConstructorRequests()), so `Box<Big>::new(...)` would
+// have round-tripped a real 24-byte struct argument through Type
+// Erasure's one-pointer-sized-slot IntToPtr scheme -- the same "Invalid
+// bitcast" failure mode `06_generic_struct_over_8_bytes.tr` fixes for
+// field access, just at the constructor CALL site instead.
+import test;
+
+struct Big {
+    a: int,
+    b: int,
+    c: int
+}
+
+fn Big.new(a: int, b: int, c: int): void {
+    self.a = a;
+    self.b = b;
+    self.c = c;
+}
+
+struct Box<T> {
+    val: T
+}
+
+fn<T> Box.new(v: T): void {
+    self.val = v;
+}
+
+fn main(): int {
+    // A small (<=8-byte) type argument -- already worked before this
+    // session (int fits in erasure's one pointer-sized slot), kept here as
+    // a same-file coexistence check against the >8-byte case below.
+    mut small: Box<int> = Box::new(42);
+    test::assert(small.val == 42, "Box<int>::new(...) wrong");
+
+    // The actual completion target: a >8-byte struct passed BY VALUE as a
+    // constructor argument -- verified live via --emit-llvm during this
+    // session: `turf_Box.new_gen1_Big...(ptr %self, %Big %v)`, a genuine
+    // struct-by-value parameter, not an erased pointer.
+    mut big: Box<Big> = Box::new(Big::new(1, 2, 3));
+    test::assert(big.val.a == 1 && big.val.b == 2 && big.val.c == 3,
+        "Box<Big>::new(...) wrong");
+    return 0;
+}

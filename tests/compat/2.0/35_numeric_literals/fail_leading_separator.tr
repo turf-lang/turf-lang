@@ -1,0 +1,20 @@
+// EXPECT-DIAG: E072
+// EXPECT-DIAG: A digit run can't start with '_'
+// SEM-001: a digit run can't START with '_' -- E072 (MisplacedSeparatorError,
+// docs/errors/codes/E072.txt). Uses a hex literal (`0x_5`, separator right
+// after the radix prefix) rather than a bare `_5` at the very start of a
+// plain decimal literal: `_5` never even reaches the number-lexing branch
+// at all -- a leading `_` is a SEPARATE, pre-existing, unrelated lexer gap
+// (`isalpha(LastChar)` is the sole identifier-start condition, Lexer.cpp;
+// it does not include '_', so a `_`-led identifier is broken too, e.g.
+// `mut _x: int = 5;` fails to parse on the unmodified baseline -- confirmed
+// live, recorded in this group's own change record's Known pitfalls rather
+// than "fixed" here, since identifier lexing is out of SEM-001's scope
+// entirely). The exponent-marker position (`1e_5`) is equally reachable
+// and exercises the identical MisplacedSeparatorError(Leading=true) path;
+// either would do -- this file picks the radix-prefix one.
+
+fn main(): int {
+    mut x: int = 0x_5;
+    return 0;
+}

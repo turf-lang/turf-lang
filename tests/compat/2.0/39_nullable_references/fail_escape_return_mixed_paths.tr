@@ -1,0 +1,21 @@
+// EXPECT-DIAG: E086
+// EXPECT-DIAG: can't be returned
+// `p` is a heap node on one path and `&n` on the other. The `c` path returns
+// a reference into a dead frame, so the return is E086 even though the other
+// path is fine (owner decision 2026-10-12: any path that carries the local
+// is an escape; found by turf-fuzz).
+struct N { val: int, next: &?N }
+
+fn f(c: bool): &N {
+    mut n: N = N::default();
+    n.val = 42;
+    mut p: &N = heap(n);
+    if (c) {
+        p = &n;
+    }
+    return p;
+}
+
+fn main(): int {
+    return f(false).val;
+}

@@ -1,0 +1,11 @@
+// Companion for 07_explicit_import_shadows_prelude_name.tr and
+// 08_bare_prelude_inside_a_helper_unit.tr: a module with its own `abs`, and one that
+// calls prelude functions bare without importing anything.
+pub fn abs(x: int): int {
+    return 5000 + x;
+}
+
+pub fn shout(msg: string): int {
+    io::printline(msg);
+    return max(abs(2) - 5000, 10) + min(1, 2);
+}

@@ -1,0 +1,33 @@
+// A `mem::Pool` is a shared handle: passing it by value or assigning it
+// shares one set of tracked items. It was a plain value, so a callee's
+// `track` was lost to its caller and those allocations were never freed.
+// `free_pool` leaves it empty, so freeing it again is harmless.
+
+import test;
+import mem;
+
+fn track_two(pool: mem::Pool): void {
+    unsafe {
+        pool.track(mem::alloc(16));
+        pool.track(mem::alloc(16));
+    }
+}
+
+fn main(): int {
+    unsafe {
+        mut pool: mem::Pool = mem::Pool::default();
+        pool.track(mem::alloc(16));
+        track_two(pool);
+        test::assert(pool.length() == 3, "a by-value parameter tracks into the caller's pool");
+        mut alias: mem::Pool = pool;
+        alias.track(mem::alloc(8));
+        test::assert(pool.length() == 4, "an assigned copy shares the items");
+        mem::free_pool(pool);
+        test::assert(alias.length() == 0, "freeing empties every handle");
+        mem::free_pool(alias);
+        alias.track(mem::alloc(8));
+        test::assert(pool.length() == 1, "usable for a new batch");
+        mem::free_pool(pool);
+    }
+    return 0;
+}

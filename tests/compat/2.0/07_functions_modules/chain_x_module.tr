@@ -1,0 +1,9 @@
+// Companion module for fail_circular_import_three_module_chain.tr -- part of
+// a 3-module cycle x -> y -> z -> x, exercising the diagram's multi-hop
+// rendering (not just a direct 2-module A<->B cycle, see
+// cycle_a_module.tr/cycle_b_module.tr for that simpler case).
+import chain_y_module;
+
+pub fn chainX(): int {
+    return 1;
+}

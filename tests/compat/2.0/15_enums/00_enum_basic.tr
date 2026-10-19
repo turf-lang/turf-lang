@@ -1,0 +1,44 @@
+// Test: Enum declarations, access, casting, and pseudo-properties
+
+import test;
+
+enum Direction {
+    North,
+    East,
+    South,
+    West
+}
+
+fn main(): int {
+    // Basic assignment and int value
+    immut d: Direction = Direction::North;
+    test::assert((d to int) == 0, "North should have value 0");
+
+    immut e: Direction = Direction::East;
+    test::assert((e to int) == 1, "East should have value 1");
+
+    immut s: Direction = Direction::South;
+    test::assert((s to int) == 2, "South should have value 2");
+
+    immut w: Direction = Direction::West;
+    test::assert((w to int) == 3, "West should have value 3");
+
+    // Enum to String casting
+    immut dStr: string = d to string;
+    test::assert(dStr == "North", "North to string should be 'North'");
+
+    immut sStr: string = s to string;
+    test::assert(sStr == "South", "South to string should be 'South'");
+
+    // String to Enum casting
+    immut dParsed: Direction = "South" to Direction;
+    test::assert((dParsed to int) == 2, "Parsed 'South' should have value 2");
+
+    immut eParsed: Direction = "East" to Direction;
+    test::assert((eParsed to int) == 1, "Parsed 'East' should have value 1");
+
+    // COUNT pseudo-property
+    test::assert(Direction::COUNT == 4, "Direction should have 4 variants");
+
+    return 0;
+}

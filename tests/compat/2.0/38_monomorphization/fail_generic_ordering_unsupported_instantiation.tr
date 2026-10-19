@@ -1,0 +1,22 @@
+// EXPECT-DIAG: E124
+// EXPECT-DIAG: In this instantiation: Cannot compare 'P' with 'P' using '<'
+// EXPECT-DIAG: return max_of(p, p).x;
+// EXPECT-DIAG: in generic declaration 'max_of'
+// The template is fine; `max_of<P>` is not, since `P` has no `<`. Reported at
+// the call that asked for it, with the code `<` on a struct has anywhere.
+
+struct P {
+    x: int
+}
+
+fn<T> max_of(a: T, b: T): T {
+    if a < b {
+        return b;
+    }
+    return a;
+}
+
+fn main(): int {
+    mut p: P = P::default();
+    return max_of(p, p).x;
+}

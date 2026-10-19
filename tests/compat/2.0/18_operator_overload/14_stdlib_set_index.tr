@@ -1,0 +1,21 @@
+// LANG-001 stdlib: Set<int> gains a READ-ONLY operator[] (lib/std/
+// collections/set.tr) -- positional access into whichever slot currently
+// holds index i. Deliberately no operator[]= for Set (would let a caller
+// silently violate the uniqueness invariant); add()/remove() stay the only
+// mutation path.
+import set::Set;
+import test;
+
+fn main(): int {
+    mut s: Set<int> = Set::default();
+    s.add(10);
+    s.add(20);
+    s.add(30);
+
+    test::assert(s[0] == 10, "Set[] should read index 0");
+    test::assert(s[1] == 20, "Set[] should read index 1");
+    test::assert(s[2] == 30, "Set[] should read index 2");
+    test::assert(s.length() == 3, "Set[] should not change length");
+
+    return 0;
+}

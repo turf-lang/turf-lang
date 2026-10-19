@@ -1,0 +1,87 @@
+// LEC-004 (audit F-21): `return f();` where `f(): !T` and the enclosing function
+// returns exactly `!T` hands the fallible value back as it is -- success or
+// error, never unwrapped. It used to be rejected with "function declares '!Rec'
+// but returns '!Rec'". Covers a scalar, a struct (boxed on the GC heap), `!void`,
+// a generic function, and a method.
+import io;
+import test;
+
+error ParseError {
+    Bad(at: int)
+}
+
+struct Rec {
+    a: int,
+    b: int
+}
+
+fn mkrec(a: int, b: int): Rec {
+    mut r: Rec = Rec::default();
+    r.a = a;
+    r.b = b;
+    return r;
+}
+
+fn parse(n: int): !int {
+    if n < 0 { return ParseError::Bad(n); }
+    return n * 2;
+}
+
+fn parseRec(n: int): !Rec {
+    if n < 0 { return ParseError::Bad(n); }
+    return mkrec(n, n + 1);
+}
+
+fn check(n: int): !void {
+    if n < 0 { return ParseError::Bad(n); }
+    return;
+}
+
+fn<T> wrap(x: T, fail: bool): !T {
+    if fail { return ParseError::Bad(0); }
+    return x;
+}
+
+fn viaParse(n: int): !int { return parse(n); }
+fn viaRec(n: int): !Rec { return parseRec(n); }
+fn viaCheck(n: int): !void { return check(n); }
+fn viaWrap(n: int, fail: bool): !int { return wrap(n, fail); }
+
+// `return` inside a recover block returns from THIS function, so the payload is
+// read out here rather than in main.
+fn badAt(n: int): int {
+    immut v: int = viaParse(n) recover as err run {
+        compare err {
+            matches ParseError::Bad(at):
+            return at;
+            done
+            otherwise:
+            return 99;
+        }
+    };
+    return v;
+}
+
+fn main(): int {
+    immut ok: int = viaParse(4) recover produce -1;
+    test::assert(ok == 8, "success passes through");
+    test::assert(badAt(0 - 3) == 0 - 3, "the error passes through with its payload");
+
+    immut r: Rec = viaRec(5) recover produce mkrec(0, 0);
+    test::assert(r.a == 5 && r.b == 6, "a struct success value passes through (boxed)");
+    immut r2: Rec = viaRec(0 - 1) recover produce mkrec(9, 9);
+    test::assert(r2.a == 9, "and its error");
+
+    viaCheck(1) recover run {
+        test::assert(false, "!void success must not fail");
+    };
+    viaCheck(0 - 1) recover run {
+        io::printline("25/25 void error observed");
+    };
+
+    immut w: int = viaWrap(7, false) recover produce -1;
+    immut w2: int = viaWrap(7, true) recover produce -1;
+    test::assert(w == 7 && w2 == 0 - 1, "a generic !T passes through");
+    io::printline("25/25 PASS");
+    return 0;
+}

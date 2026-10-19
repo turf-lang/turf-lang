@@ -1,0 +1,31 @@
+// EXPECT-DIAG: E066
+// EXPECT-DIAG: 'recover produce int' doesn't match this call's success type 'Point'
+// Test (fail): 'recover produce value' must match the wrapped call's
+// SUCCESS type exactly, including when that success type is a struct, not
+// just a primitive -- producing an int against a !Point call must be
+// rejected the same way producing a string against a !int call already is.
+error MyError {
+    Failed,
+}
+
+struct Point {
+    x: int,
+    y: int
+}
+
+fn Point.new(x: int, y: int): void {
+    self.x = x;
+    self.y = y;
+}
+
+fn makePoint(shouldFail: bool): !Point {
+    if (shouldFail) {
+        return MyError::Failed;
+    }
+    return Point::new(42, 7);
+}
+
+fn main(): int {
+    mut p: Point = makePoint(true) recover produce -1;
+    return 0;
+}

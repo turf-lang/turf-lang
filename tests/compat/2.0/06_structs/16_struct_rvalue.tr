@@ -1,0 +1,22 @@
+import test;
+
+struct Point {
+    x: int,
+    y: int
+}
+
+fn Point.new(x: int, y: int): void {
+    self.x = x;
+    self.y = y;
+}
+
+fn make_point(a: int, b: int): Point {
+    return Point::new(a, b);
+}
+
+fn main(): int {
+    // Chaining field access directly off the r-value returned by a function
+    test::assert(make_point(10, 20).x == 10, "FAIL: chained r-value field access x");
+    test::assert(make_point(10, 20).y == 20, "FAIL: chained r-value field access y");
+    return 0;
+}

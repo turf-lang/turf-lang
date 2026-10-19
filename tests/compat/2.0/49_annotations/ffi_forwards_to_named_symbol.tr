@@ -1,0 +1,18 @@
+// `@ffi(<platform>: <symbol>)` makes the compiler bind an extern declaration to
+// a differently spelt C symbol on that platform, with a one-line forwarding
+// wrapper under the Turf-visible name. Here `text_length` is not a C symbol at
+// all; on every host it forwards to `strlen`. All three platform keys are
+// written so this test behaves the same wherever the suite runs.
+
+import test;
+
+@ffi(linux: strlen)
+@ffi(macos: strlen)
+@ffi(windows: strlen)
+extern fn text_length(s: string): int;
+
+fn main(): int {
+    test::assert(text_length("hello") == 5, "forwarded to strlen");
+    test::assert(text_length("") == 0, "forwarded to strlen for the empty string");
+    return 0;
+}

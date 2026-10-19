@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E128
+// EXPECT-DIAG: 'guess' needs an initializer to infer from
+// SEM-003 (§11.6): `guess` with no initializer has nothing to infer from --
+// this is a hard error, never Model B / a deferred inference (§11.4, F-GUESS-2
+// forbids Model B outright). ParseLetStatement() deliberately never calls
+// SynthesizeDefault() for a `guess`-typed declaration (it isn't a real type
+// yet), so TypeChecker::visitVarDecl is the only place this is ever caught.
+fn main(): int {
+    mut x: guess;
+    return 0;
+}

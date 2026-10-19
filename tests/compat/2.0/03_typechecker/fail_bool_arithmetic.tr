@@ -1,0 +1,7 @@
+// EXPECT-DIAG: E057
+// EXPECT-DIAG: cannot apply '+' to 'bool' and 'int'
+// A bool is not a number.
+fn main(): int {
+    mut n: int = true + 1;
+    return n;
+}

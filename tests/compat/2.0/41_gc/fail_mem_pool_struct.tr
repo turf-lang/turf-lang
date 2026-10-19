@@ -1,0 +1,18 @@
+// EXPECT-DIAG: E056
+// EXPECT-DIAG: No overload of 'mem::Pool.track' matches argument types (Named)
+// A struct holding a GC pointer cannot be tracked either.
+import mem;
+
+struct Named {
+    name: string
+}
+
+fn main(): int {
+    unsafe {
+        mut pool: mem::Pool = mem::Pool::default();
+        mut n: Named = Named::default();
+        pool.track(n);
+        mem::free_pool(pool);
+    }
+    return 0;
+}

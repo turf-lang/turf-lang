@@ -1,0 +1,54 @@
+// tests/41_gc/14_shared_collection_header_survives_collection.tr
+// LEC-009: a collection is a handle to one GC-heap header (allocated by
+// `List::default()`), and the header holds the element buffer. Both must stay
+// alive when the only path to them is another collection's buffer (a list of
+// lists) or a struct field held by value, and the strings in an inner buffer
+// must stay alive through it. Each inner list is built in `make_row`, so no
+// local of main's holds its handle when collecting. Run under
+// TURF_GC_STRESS=1 and at -O0 too.
+import list::List;
+import map::Map;
+import test;
+import io;
+
+struct Holder {
+    names: Map<string, List<string>>
+}
+
+fn churn(depth: int): void {
+    mut s: string = (depth * 7) to string;
+    test::assert(s.length() > 0, "churn: a fresh string");
+    if depth > 0 {
+        churn(depth - 1);
+    }
+}
+
+fn make_row(outer: List<List<string>>, h: Holder, i: int): void {
+    mut row: List<string> = List::default();
+    row.push((2000 + i) to string);
+    outer.push(row);
+    h.names.put(i to string, row);
+}
+
+fn main(): int {
+    mut outer: List<List<string>> = List::default();
+    mut h: Holder = Holder::default();
+    mut i: int = 0;
+    while i < 20 {
+        make_row(outer, h, i);
+        i++;
+    }
+
+    churn(24);
+    gc_collect();
+    churn(24);
+    gc_collect();
+
+    test::assert(outer.length() == 20 && outer[19][0] == "2019", "inner lists survive in a list");
+    outer[3].push("x");
+    test::assert(h.names.get("3").length() == 2, "the map and the list name the same inner header");
+    test::assert(h.names.get("7")[0] == "2007", "inner lists survive in a struct's map");
+
+    io::printline("41/14 PASS: shared collection headers survive collections");
+    return 0;
+}

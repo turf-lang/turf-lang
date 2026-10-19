@@ -1,0 +1,38 @@
+// Regression test: List.sort() (lib/std/collections/list.tr), sorting a
+// List<int> of unsorted values in place using a comparator function.
+//
+// This used to call the concrete `list_sort(l, cmp)` free function, a
+// deprecated wrapper STD-003 kept for one cycle and LEC-007 removed (R1);
+// see fail_removed_list_sort.tr for the "it is really gone" direction.
+// tests/38_monomorphization/27_generic_list_sort_and_search.tr covers the
+// method across other element types.
+import list::List;
+import test;
+
+fn cmp_int(a: int, b: int): int {
+    return a - b;
+}
+
+fn main(): int {
+    mut l: List<int> = List::default();
+    l.push(5);
+    l.push(1);
+    l.push(4);
+    l.push(2);
+    l.push(8);
+    l.push(3);
+    l.push(9);
+
+    l.sort(cmp_int);
+
+    test::assert(l.length() == 7, "sort must not change the length");
+    test::assert(l.pop() == 9, "");
+    test::assert(l.pop() == 8, "");
+    test::assert(l.pop() == 5, "");
+    test::assert(l.pop() == 4, "");
+    test::assert(l.pop() == 3, "");
+    test::assert(l.pop() == 2, "");
+    test::assert(l.pop() == 1, "");
+
+    return 0;
+}

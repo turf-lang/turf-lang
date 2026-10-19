@@ -1,0 +1,14 @@
+// EXPECT-DIAG: E125
+// EXPECT-DIAG: 'combine' is overloaded
+// EXPECT-DIAG: Write a function with its own name that calls the overload you want
+// A bare, overloaded function name has no single unambiguous signature to
+// use as a first-class value -- must be rejected rather than silently
+// picking one overload (see Resolver::visitVariable's ResolvedFunctionRef
+// branch in Resolver.cpp).
+fn combine(a: int, b: int): int { return a + b; }
+fn combine(a: double, b: double): double { return a - b; }
+
+fn main(): int {
+    mutable f: fn(int, int): int = combine;
+    return 0;
+}

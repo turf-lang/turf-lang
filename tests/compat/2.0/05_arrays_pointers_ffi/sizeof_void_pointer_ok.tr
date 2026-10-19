@@ -1,0 +1,10 @@
+// `sizeof(void)` is rejected (fail_sizeof_void.tr) because `void` has no
+// size, but a `void*` is an ordinary pointer and has one. Pins that the
+// rejection did not spread to the pointer spelling.
+import test;
+
+fn main(): int {
+    test::assert(sizeof(void*) == sizeof(int*), "void* is as big as any pointer");
+    test::assert(sizeof(void*) == 8, "pointers are 8 bytes");
+    return 0;
+}

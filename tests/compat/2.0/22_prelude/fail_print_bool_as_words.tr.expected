@@ -1,0 +1,4 @@
+[true|false]
+printline true
+printline false
+done

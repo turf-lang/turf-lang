@@ -1,0 +1,27 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: Array index out of bounds
+// OPT-002 safety guard: `i`'s address is taken and handed to `mutate()`,
+// which writes through it via a raw pointer inside `unsafe { }`.
+// markElidableChecks() must treat ANY address-taken variable as never
+// provably constant (collectAddressTaken()'s own doc comment,
+// ValueRange.cpp) -- a naive dataflow unaware of this aliasing would see
+// "i = 3, never reassigned" in `main`'s own AST and wrongly elide the
+// bounds check below. Without that guard this would be a genuine
+// out-of-bounds memory write with NO check at all, not merely a missed
+// diagnostic -- confirmed live (docs/development/changes/OPT-002.md) that
+// the guard keeps the check in the emitted IR; this is the regression test
+// for it actually firing at runtime.
+fn mutate(p: &int): void {
+    unsafe {
+        mut raw: int* = p to int*;
+        raw[0] = 99;
+    }
+}
+
+fn main(): int {
+    mut arr: int[10];
+    mut i: int = 3;
+    mutate(&i);
+    arr[i] = 42; // i is now 99 -- genuinely out of bounds for a 10-element array
+    return 0;
+}

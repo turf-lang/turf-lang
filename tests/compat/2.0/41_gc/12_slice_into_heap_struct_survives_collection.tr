@@ -1,0 +1,61 @@
+// tests/41_gc/12_slice_into_heap_struct_survives_collection.tr
+// Range slicing (issue #260): `h.data[2..]`, where `h` is a `heap()` block,
+// is a `{ ptr, length }` view whose pointer lands in the MIDDLE of that GC
+// block -- the array field, two elements in. Once `h` is pointed elsewhere,
+// that interior pointer is the block's only reference, so the collector must
+// resolve it to its containing block (MEM-002's interior-pointer retention,
+// see 03_interior_pointer_retention.tr) or the view would read freed memory.
+// Run under TURF_GC_STRESS=1 and at -O0 too (AGENTS.md) -- at -O2 a stale
+// copy of `h` in a register can mask a miss.
+import test;
+import io;
+
+struct Holder {
+    data: int[8],
+    tag: int
+}
+
+fn Holder.new(base: int): void {
+    self.data = [base, base + 1, base + 2, base + 3, base + 4, base + 5, base + 6, base + 7];
+    self.tag = base;
+}
+
+fn make(base: int): &Holder {
+    return heap(Holder::new(base));
+}
+
+fn churn(depth: int): void {
+    // Allocate, so a collection has something to sweep and reuse.
+    mut h: &Holder = make(depth * 1000);
+    test::assert(h.tag == depth * 1000, "churn: fresh block holds its tag");
+    if depth > 0 {
+        churn(depth - 1);
+    }
+}
+
+fn sum(view: int[]): int {
+    mut t: int = 0;
+    for v in view {
+        t += v;
+    }
+    return t;
+}
+
+fn main(): int {
+    mut h: &Holder = make(10);
+    immut view: int[] = h.data[2..];   // 12..17, interior to h's block
+    h = make(500);                     // the first block: only `view` now
+
+    churn(24);
+    gc_collect();
+    churn(24);
+    gc_collect();
+
+    test::assert(view.length() == 6, "the view keeps its length");
+    test::assert(view[0] == 12 && view[-1] == 17, "the view's elements survive");
+    test::assert(sum(view) == 87, "12+13+14+15+16+17 through a T[] parameter");
+    test::assert(h.tag == 500, "the second block is intact too");
+
+    io::printline("41/12 PASS: a slice into a heap() block keeps it alive across collections");
+    return 0;
+}

@@ -1,0 +1,24 @@
+// A generic call's result takes the type of ITS instantiation, not of another
+// one its arguments could also convert to. With `pick<double>` and
+// `pick<int32>` both in the program, Codegen typed `pick(c, x, y)` on int32
+// arguments as double (int32 widens to double, so the double clone was
+// "compatible"), and `(pick(...) to int)` emitted an fptosi on an i32:
+// "Internal compiler error: generated LLVM IR is invalid". Found by turf-fuzz.
+import test;
+
+fn<T> pick(c: int, a: T, b: T): T {
+    if c == 0 {
+        return a;
+    }
+    return b;
+}
+
+fn main(): int {
+    test::assert(pick(0, 1.5, 2.5) == 1.5, "the double instantiation");
+    immut x: int32 = 5;
+    immut y: int32 = 6;
+    test::assert((pick(1, x, y) to int) == 6, "int32 arguments use the int32 instantiation");
+    test::assert((pick(0, (7 to int32), (8 to int32)) to int) == 7, "also from cast expressions");
+    test::assert(pick(1, 3, 4) + 1 == 5, "and int stays int");
+    return 0;
+}

@@ -1,0 +1,21 @@
+import io;
+
+import test;
+fn main(): int {
+    io::printline("T 1");
+    test::assert(typeof(10) == "int", "");
+
+    io::printline("T 2");
+    test::assert(typeof("hello") == "string", "");
+
+    io::printline("T 3");
+    test::assert(typeof(3.14) == "double", "");
+
+    io::printline("T 4");
+    test::assert(typeof(true) == "bool", "");
+
+    io::printline("T 5");
+    test::assert(typeof([1, 2]) == "int[2]", "");
+    io::printline("Done");
+    return 0;
+}

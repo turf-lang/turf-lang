@@ -1,0 +1,21 @@
+TURF E156 -- ASSIGNMENT TO ITSELF (WARNING):
+
+CAUSE:
+  A statement of the form `x = x;` assigns a variable its own value. It has no
+  effect and is usually a typo for a different right-hand side. This is a
+  WARNING: compilation still succeeds.
+
+INCORRECT:
+    mut total: int = 3;
+    total = total;         // WARNING: does nothing
+
+CORRECT (assign the value you meant):
+    mut total: int = 3;
+    total = total + 1;
+    printline(total to string);
+
+FIX:
+  Change the right-hand side to the intended value, or delete the line.
+
+RELATED: E160 (a value stored and never read), E166 (comparing a value with
+  itself).

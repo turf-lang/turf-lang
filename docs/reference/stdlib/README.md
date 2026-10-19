@@ -169,6 +169,10 @@ allowed in a minor release. This is checked, not just intended:
 - `scripts/check/stdlib_surface_check.sh` fails if a public item exists that no
   file there mentions (a new name added without being locked) or that is not
   `snake_case`. It runs in CI.
+- `scripts/check/prelude_shadow_check.sh NAME` is run before a name is added to
+  `io`, `math` or `sys`, whose public functions are callable bare: it lists the
+  programs in `showcase/`, `examples/`, `tests/` and `lib/std` that already
+  declare a function of that name.
 - Every module has its own behaviour tests.
 
 Three things are not part of the surface: the behaviour of `json::parse` for

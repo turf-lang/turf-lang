@@ -1,0 +1,34 @@
+// The INT_MIN literal `-9223372036854775808` is writable (FREEZE.md §6.2) in
+// EVERY operand position, not just the right-hand one. `-9223372036854775808 +
+// c` was rejected with E076 (it folded the unary minus's operand as a nested
+// leaf and judged the magnitude 9223372036854775808), while the mirrored
+// `c + -9223372036854775808` was accepted because the fold gave up at the
+// runtime `c` before it reached the literal (found by turf-fuzz). A runtime
+// operand also means this is not untyped-literal arithmetic, so OVH-014's
+// leaf narrowing does not apply. Operands come through a function so no
+// optimization level can fold the expression away.
+import test;
+
+fn id(x: int): int {
+    return x;
+}
+
+fn main(): int {
+    mut c: int = id(1);
+    mut z: int = id(0);
+    mut neg: int = id(-1);
+
+    test::assert(-9223372036854775808 + c == -9223372036854775807, "literal + c");
+    test::assert(c + -9223372036854775808 == -9223372036854775807, "c + literal");
+    test::assert(1 + -9223372036854775808 + c == -9223372036854775806, "chained, literal in the middle");
+    test::assert(-9223372036854775808 + z == -9223372036854775807 - 1, "literal + 0 is INT_MIN");
+    test::assert(-9223372036854775808 - neg == -9223372036854775807, "literal - (-1)");
+    test::assert(c * -9223372036854775808 == -9223372036854775807 - 1, "c * literal");
+    test::assert(-9223372036854775808 * c == -9223372036854775807 - 1, "literal * c");
+
+    // Pure literal arithmetic whose exact result fits was never the problem
+    // but shares the code path.
+    test::assert(1 + -9223372036854775808 == -9223372036854775807, "literal + literal");
+    test::assert(-9223372036854775808 + 9223372036854775807 == -1, "INT_MIN + INT_MAX");
+    return 0;
+}

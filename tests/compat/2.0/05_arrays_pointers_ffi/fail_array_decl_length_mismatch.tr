@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E003
+// EXPECT-DIAG: Array declared with size 3 but initialized with 5 elements
+// Regression test: an array declaration's initializer list length must
+// match the declared array size. Before this fix, TypeChecker::
+// visitArrayDecl() never checked this at all -- `int[3] arr = [1,2,3,4,5]`
+// (5 elements into a declared size-3 array) compiled with zero diagnostic.
+
+fn main(): int {
+    mut arr: int[3] = [1, 2, 3, 4, 5];
+    return 0;
+}

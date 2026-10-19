@@ -1,0 +1,33 @@
+// An array literal of references to one struct, with `null` among them or a
+// `&?N`, is an array of `&?N`; and a literal of `&N` may be assigned to an
+// array of `&?N`, as a declaration's initializer list already allowed. Both
+// were E004/E066 until turf-fuzz's generator wrote arrays of references
+// (FREEZE §6.28). A literal is a fresh value, so widening it is sound; a view
+// never widens (fail_view_cannot_widen_to_nullable.tr).
+import test;
+
+struct N { val: int }
+
+fn mk(v: int): &N {
+    mut n: N = N::default();
+    n.val = v;
+    return heap(n);
+}
+
+fn val_or(q: &?N, d: int): int {
+    if (q != null) {
+        return q.val;
+    }
+    return d;
+}
+
+fn main(): int {
+    mut b: (&?N)[2] = [mk(1), null];
+    test::assert_eq(val_or(b[0], -1), 1, "declaration with a null element");
+    b = [null, mk(2)];
+    test::assert_eq(val_or(b[0], -1), -1, "assigned literal, null first");
+    test::assert_eq(val_or(b[1], -1), 2, "assigned literal, then a reference");
+    b = [mk(3), mk(4)];
+    test::assert_eq(val_or(b[1], -1), 4, "a literal of &N assigned to (&?N)[2]");
+    return 0;
+}

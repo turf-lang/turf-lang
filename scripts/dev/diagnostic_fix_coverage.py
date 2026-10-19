@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """What the compiler's diagnostics print, by error code (TDP-2-001).
 
-Checks every tests/**/fail_*.tr (not tests/99_known_bugs or tests/custom) with
+Checks every tests/**/fail_*.tr (not tests/99_known_bugs, tests/custom or tests/compat, a frozen copy of the 2.0.0 tests) with
 `turfc <file> --check`, run from the file's own directory, and counts, for
 each error code the suite exercises, whether its diagnostics carry a Hint: and
 a Fix:. This is the table TDP-2-001's Motivation starts from, re-run so the
@@ -71,7 +71,7 @@ def main():
 
     tests = sorted(
         p for p in (ROOT / "tests").rglob("fail_*.tr")
-        if p.relative_to(ROOT / "tests").parts[0] not in ("99_known_bugs", "custom"))
+        if p.relative_to(ROOT / "tests").parts[0] not in ("99_known_bugs", "custom", "compat"))
 
     files = defaultdict(set)
     hinted = defaultdict(int)

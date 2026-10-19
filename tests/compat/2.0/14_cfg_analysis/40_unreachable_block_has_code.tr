@@ -1,0 +1,17 @@
+// Regression test (HYG-001): CFG::reportFlowDiagnostics() used to write
+// unreachable-code and dead-branch warnings straight to std::cerr, bypassing
+// DiagnosticEngine entirely -- no [E0NN] code, no color, no caret, no hint,
+// even though UnreachableBlockWarning/DeadBranchWarning (ErrorsFlow.h)
+// already existed fully written and were simply never constructed.
+// Confirmed live before this fix: this exact function printed a plain
+// "Warning: Unreachable code in block 'while.end' of function 'main'" with
+// none of that. Now routed through the real warning classes, rendered like
+// every other diagnostic, and registered as E074 ([E074] in the header,
+// `turf --explain E074` works). Compilation must still succeed -- a warning
+// never blocks compilation.
+fn main(): int {
+    while true {
+        return 0;
+    }
+    return 2;
+}

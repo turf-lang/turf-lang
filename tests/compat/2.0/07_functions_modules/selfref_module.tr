@@ -1,0 +1,17 @@
+// Companion module for selfref_module_import.tr -- a bare call from one
+// function to ANOTHER function declared in this SAME module must still
+// resolve without any qualifier (self-reference), exactly like math.tr's
+// abs() calling its own fabs() bare, or io.tr's print() calling its own
+// printf() bare. This is the thing the bare-call scoping fix (see
+// Resolver::visitFuncCall's ModuleMatches doc comment) must NOT break while
+// closing the actual bug (bare calls leaking across UNRELATED modules).
+// Named `..._module.tr` so scripts/test_runner.sh's `grep -v "_module.tr"`
+// skips it as a standalone test entry point; it only exists to be imported.
+
+pub fn innerDouble(x: int): int {
+    return x * 2;
+}
+
+pub fn outerQuadruple(x: int): int {
+    return innerDouble(innerDouble(x));
+}

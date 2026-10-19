@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E142
+// EXPECT-DIAG: Cannot slice a value of type 'string' with [a..b].
+// EXPECT-DIAG: strings::substring
+// A string is text ending at a zero byte, not an array: a view into its
+// middle would have no terminator. The hint points at strings::substring.
+fn main(): int {
+    immut s: string = "hello";
+    immut t = s[1..3];
+    return 0;
+}

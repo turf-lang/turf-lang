@@ -1,0 +1,16 @@
+// EXPECT-DIAG: E114
+// EXPECT-DIAG: already has a field named 'name'
+// Regression test: a struct declaring the same field name twice must be
+// rejected at parse time. Before the fix this compiled silently --
+// TurfStructType::getFieldIndex()'s linear search bound every access to the
+// FIRST match, so the second 'name' field's type was permanently
+// unreachable. See ParseStructDecl()'s duplicate-field-name check.
+
+struct User {
+    name: string,
+    name: int
+}
+
+fn main(): int {
+    return 0;
+}

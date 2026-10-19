@@ -1,0 +1,22 @@
+// SEM-004 (F-INIT-1, FREEZE.md §6.4): a generic-typed local (`List<T>`)
+// was one of Mechanism B's eager-zero-init types -- that mechanism is
+// gone, so `mut l: List<int>;` no longer works on its own. The mechanical
+// migration is the bare, unqualified `List::default()` (its own type
+// arguments come from the declared `: List<int>` annotation -- type
+// erasure means every instantiation shares one registered struct, so this
+// resolves the same way `Point::default()` does for an ordinary struct;
+// see TypeCheckerDecl.cpp's containsUninstantiatedGenericParam() comment
+// for why a BARE `mut l = List::default();` under `guess`, with no type
+// argument anywhere for the type to infer from, is still rejected). See
+// fail_generic_list_use_before_init.tr for the read-before-assignment
+// error this same declaration now produces.
+import list::List;
+import test;
+
+fn main(): int {
+    mut l: List<int> = List::default();
+    l.push(5);
+    test::assert(l.length() == 1, "generic list: default() then use");
+    test::assert(l.get(0) == 5, "generic list: pushed value readable");
+    return 0;
+}

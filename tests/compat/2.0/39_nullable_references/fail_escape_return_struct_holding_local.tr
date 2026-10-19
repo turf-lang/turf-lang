@@ -1,0 +1,22 @@
+// EXPECT-DIAG: E086
+// EXPECT-DIAG: can't be returned inside a struct or array value
+// F-MEM-5 through a by-value struct copy: `h.head` holds a reference to this
+// frame's `n`, and the struct is copied and returned, so the caller's copy
+// dangles. FDN-002 listed this as a residual (per-field tracking was a
+// Non-goal) until the owner reopened it, 2026-10-12.
+struct N { val: int, next: &?N }
+struct H { k: int, head: &?N }
+
+fn make(): H {
+    mut n: N = N::default();
+    n.val = 42;
+    mut h: H = H::default();
+    h.head = &n;
+    mut g: H = h;
+    return g;
+}
+
+fn main(): int {
+    mut h: H = make();
+    return h.k;
+}

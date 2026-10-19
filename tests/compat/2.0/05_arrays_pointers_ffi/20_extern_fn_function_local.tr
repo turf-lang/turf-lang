@@ -1,0 +1,25 @@
+// Regression test (LANG-004 item 3): `extern fn` may now be declared
+// INSIDE a function body, not just at file/top level. Previously rejected
+// with a misleading diagnostic: the parser would actually consume the
+// `extern fn ...;` declaration fine (ParseExternDecl() already eats its
+// own trailing ';'), then choke on the FOLLOWING statement with "Expected
+// ';' after statement." -- because ParseBlock()'s generic expression-
+// statement fallback expected to consume its own trailing ';' too, and it
+// had already been eaten. See ParseBlock()'s TOK_EXTERN branch.
+//
+// A function-local extern's symbol isn't hoisted by Pass 1 (hoistTopLevel()
+// never enters a function body -- that's the entire reason hoisting exists
+// as a separate pass, see docs/architecture/compiler_pipeline.md §3), so it
+// must be registered live, the moment Pass 2 walks over it
+// (Resolver::visitExternFuncDecl(), gated on FunctionNestingDepth_ > 0).
+// This test's real job is proving that registration actually happens --
+// merely accepting the syntax without ever being able to CALL the result
+// would be a much less useful fix than the one line count suggests.
+
+import test;
+
+fn main(): int {
+    extern fn abs(x: int): int;
+    test::assert(abs(-42) == 42, "a function-local extern fn must be resolvable and callable");
+    return 0;
+}

@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E027
+// EXPECT-DIAG: Could not find module 'this_module_does_not_exist'
+// Regression test: `import somemod;` where somemod.tr does not exist
+// anywhere in the search path (stdlib or current directory) must be a
+// clean ModuleNotFoundError, not a crash or an obscure downstream failure.
+
+import this_module_does_not_exist;
+
+fn main(): int {
+    return 0;
+}

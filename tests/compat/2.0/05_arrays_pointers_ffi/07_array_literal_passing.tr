@@ -1,0 +1,39 @@
+import test;
+
+struct Point {
+    x: int,
+    y: int
+}
+
+fn Point.new(x: int, y: int): void {
+    self.x = x;
+    self.y = y;
+}
+
+fn sum_array(arr: int[4]): int {
+    return arr[0] + arr[1] + arr[2] + arr[3];
+}
+
+fn get_points(): Point[2] {
+    return [Point::new(10, 20), Point::new(30, 40)];
+}
+
+fn main(): int {
+    // 1. Array literal passed directly as function argument
+    test::assert(sum_array([1, 2, 3, 4]) == 10, "Array literal passing failed");
+
+    // 2. Reassignment with an array literal
+    mut arr: int[4] = [0, 0, 0, 0];
+    arr = [5, 6, 7, 8];
+    test::assert(sum_array(arr) == 26, "Array literal assignment failed");
+
+    // 3. Array of structs using literals
+    mut points: Point[2] = [Point::new(1, 2), Point::new(3, 4)];
+    test::assert(points[0].x == 1, "Struct array 0.x failed");
+    test::assert(points[1].y == 4, "Struct array 1.y failed");
+
+    // 4. Return array of structs and inline indexing
+    test::assert(get_points()[1].x == 30, "R-value array of structs inline indexing failed");
+
+    return 0;
+}

@@ -1,0 +1,9 @@
+// EXPECT-DIAG: E140
+// EXPECT-DIAG: Variable 'l' can't use the unsized array type 'int[]' (inside 'list::List<int[]>')
+// Issue #260: a collection would keep its slices past the call that made them.
+import list::List;
+
+fn main(): int {
+    mut l: List<int[]>;
+    return 0;
+}

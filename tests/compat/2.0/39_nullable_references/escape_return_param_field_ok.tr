@@ -1,0 +1,26 @@
+// FDN-002 (docs/planning/ROADMAP_v2.0.0.md; docs/development/changes/
+// FDN-002.md): positive case -- returning `&param.field` through an
+// already-reference-typed parameter is Param provenance, not Stack.
+// `param` points at whatever the CALLER already owns (here, `main`'s own
+// `o`, which outlives this call), so this must keep compiling and running.
+import test;
+
+struct Inner {
+    val: int
+}
+
+struct Outer {
+    inner: Inner
+}
+
+fn innerAddr(param: &Outer): &Inner {
+    return &param.inner;
+}
+
+fn main(): int {
+    mut o: Outer = Outer::default();
+    o.inner.val = 7;
+    mut p: &Inner = innerAddr(&o);
+    test::assert(p.val == 7, "returning &param.field through a reference parameter still works");
+    return 0;
+}

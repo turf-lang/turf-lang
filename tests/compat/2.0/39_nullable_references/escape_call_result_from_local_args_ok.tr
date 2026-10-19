@@ -1,0 +1,31 @@
+// A call's result may point into this frame when an argument does: `pick`
+// returns one of two locals here, so storing `&c` into it stays inside the
+// frame and is not an escape. Only a call none of whose arguments reach the
+// frame is long-lived (fail_escape_store_into_call_result.tr).
+
+import test;
+
+struct N { val: int, next: &?N }
+
+fn pick(a: &N, b: &N, first: bool): &N {
+    if (first) {
+        return a;
+    }
+    return b;
+}
+
+fn main(): int {
+    mut a: N = N::default();
+    mut b: N = N::default();
+    mut c: N = N::default();
+    c.val = 3;
+    mut x: &N = pick(&a, &b, true);
+    x.next = &c;
+    mut q: &?N = a.next;
+    mut got: int = 0;
+    if (q != null) {
+        got = q.val;
+    }
+    test::assert(got == 3, "stored through the call result into a local");
+    return 0;
+}

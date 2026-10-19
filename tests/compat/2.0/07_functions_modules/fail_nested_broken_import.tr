@@ -1,0 +1,35 @@
+// EXPECT-DIAG: E108
+// EXPECT-DIAG: Expected a parameter name in extern function 'broken'
+// Regression test for issue #242: a syntax error TWO import-levels deep
+// (this file imports nested_broken_import_level_b_module.tr, which itself
+// imports the already-broken broken_extern_param_module.tr -- see
+// fail_import_syntax_error.tr for the single-level version of this repro)
+// must produce a clean compile error, not crash the compiler.
+//
+// Before the fix, ParseFile() forced g_recoverActive false for its entire
+// duration specifically to avoid a DIFFERENT crash: any TurfError raised
+// two or more import-levels deep would longjmp() straight past this
+// function's own LexerStateGuard/ImportStackGuard (longjmp never runs C++
+// destructors for stack objects between the jump and its setjmp() point),
+// permanently leaving the global SourceFile pointer aimed at an already-
+// destroyed local std::ifstream -- confirmed at the time as a heap-
+// corruption crash (`munmap_chunk(): invalid pointer`). The old fix traded
+// that crash for calling std::exit() on ANY error inside an import, at ANY
+// depth -- safe, but meant a broken import always killed the whole
+// process, fatal for a tool embedding this compiler in-process (an LSP)
+// rather than shelling out per compile.
+//
+// Fixed by giving ParseFile() its own LOCAL recovery boundary (its own
+// setjmp(), armed in the same function scope as its guards) instead of
+// relying on a distant caller's -- verified live under AddressSanitizer
+// (zero corruption) with this exact 2-level-deep repro, plus confirming
+// the process survives and can still successfully compile something else
+// afterward. This file is the compile-time regression coverage for that
+// fix; the crash class itself needs sanitizer instrumentation to prove
+// absence of corruption (not something test_runner.sh's pass/fail check
+// alone can assert), so it was verified manually, not here.
+import nested_broken_import_level_b_module;
+
+fn main(): int {
+    return 0;
+}

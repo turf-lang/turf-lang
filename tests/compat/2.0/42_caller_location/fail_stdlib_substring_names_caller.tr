@@ -1,0 +1,10 @@
+// LEC-007: a stdlib precondition panic names the CALLER's line, not a line in strings.tr.
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: fail_stdlib_substring_names_caller.tr:8: strings.substring: index out of bounds
+import strings;
+
+fn main(): int {
+    mut s: string = "abc";
+    strings::substring(s, 2, 9);
+    return 0;
+}

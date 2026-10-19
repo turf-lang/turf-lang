@@ -1,0 +1,28 @@
+// An array element nothing wrote is its type's default, and a `string`'s is
+// "": it was a null pointer, and `a[1].length()` segfaulted (owner decision
+// 2026-10-12, found by turf-fuzz). The same for a string field inside a
+// struct element, and for a large array (filled in a loop).
+
+import test;
+
+struct P {
+    name: string,
+    n: int
+}
+
+fn main(): int {
+    mut a: string[3];
+    a[0] = "x";
+    test::assert(a[1].length() == 0, "an unwritten string element is empty");
+    test::assert(a[2] == "", "and equal to the empty string");
+
+    mut b: P[2];
+    b[0] = P::default();
+    test::assert(b[1].name == "", "a string field inside an element is empty");
+
+    mut big: string[100000];
+    big[5] = "y";
+    test::assert(big[99999] == "", "the last element of a big array");
+    test::assert(big[5] == "y", "a written element keeps its value");
+    return 0;
+}

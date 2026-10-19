@@ -1,0 +1,47 @@
+// Regression test: TYPE-002 S14b -- the one permitted stdlib change,
+// list.tr's `self.cap * 8` -> `self.cap * sizeof(T)`. Before this fix,
+// `List<T>.push()`'s growth allocation always assumed every element was
+// exactly 8 bytes (a leftover Type Erasure assumption that outlived
+// erasure itself, S13a-S14a) -- for a >8-byte T (e.g. `Big`, 24 bytes),
+// this silently under-allocated the backing buffer, a real heap-overflow
+// bug that `06_generic_struct_over_8_bytes.tr` (S13b) deliberately never
+// triggered (it only ever pushes 2 elements, which happens to fit within
+// the old, wrong `cap * 8` allocation by coincidence -- see that test's
+// own history in the change record). This test pushes enough `Big`
+// elements to force MULTIPLE growth reallocations well past that
+// coincidental threshold, and reads every element back to prove none of
+// them were corrupted.
+import list::List;
+import test;
+
+struct Big {
+    a: int,
+    b: int,
+    c: int
+}
+
+fn Big.new(a: int, b: int, c: int): void {
+    self.a = a;
+    self.b = b;
+    self.c = c;
+}
+
+fn main(): int {
+    mut l: List<Big> = List::default();
+    mut i: int = 0;
+    while i < 100 {
+        l.push(Big::new(i, i * 2, i * 3));
+        i = i + 1;
+    }
+    test::assert(l.length() == 100, "List<Big> length wrong after 100 pushes");
+
+    mut j: int = 0;
+    while j < 100 {
+        immut item: Big = l.get(j);
+        test::assert(item.a == j && item.b == j * 2 && item.c == j * 3,
+            "List<Big> element " + (j to string) +
+            " corrupted -- growth under-allocation regression");
+        j = j + 1;
+    }
+    return 0;
+}

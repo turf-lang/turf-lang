@@ -1,0 +1,10 @@
+// Companion for import_scope_clone_uses_template_imports.tr (LEC-008): a
+// generic function that spells a module qualifier. Its clones are resolved in
+// THIS module's context, so they are judged by this file's imports, never by
+// the imports of whichever file instantiates them.
+import import_scope_inner_module;
+
+pub fn<T> pick(x: T): T {
+    immut _n: int = import_scope_inner_module::inner_value();
+    return x;
+}

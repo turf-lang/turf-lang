@@ -1,0 +1,87 @@
+// Regression test: `!T`'s boxed successBits slot (see BoxToI64Slot()/
+// UnboxFromI64Slot() in Codegen.cpp) must round-trip every kind of Turf
+// value correctly, not just the int/void cases the earlier tests happened
+// to cover. Added after a user question about whether the struct case
+// (09_recover_struct_success.tr) was really exercising what it claimed to
+// -- prompted widening coverage across the rest of the primitive/struct
+// matrix rather than trusting that one shape generalizes.
+import test;
+import math;
+
+error MyError {
+    Failed,
+}
+
+fn getString(shouldFail: bool): !string {
+    if (shouldFail) { return MyError::Failed; }
+    return "hello world";
+}
+
+fn getBool(shouldFail: bool): !bool {
+    if (shouldFail) { return MyError::Failed; }
+    return true;
+}
+
+fn getChar(shouldFail: bool): !char {
+    if (shouldFail) { return MyError::Failed; }
+    return 'Z';
+}
+
+fn getInt32(shouldFail: bool): !int32 {
+    if (shouldFail) { return MyError::Failed; }
+    return 99 to int32;
+}
+
+struct Person {
+    name: string,
+    age: int
+}
+fn Person.new(name: string, age: int): void {
+    self.name = name;
+    self.age = age;
+}
+fn getPerson(shouldFail: bool): !Person {
+    if (shouldFail) { return MyError::Failed; }
+    return Person::new("Ada", 36);
+}
+
+fn main(): int {
+    // string
+    mut s: string = getString(false) recover produce "fallback";
+    test::assert(s == "hello world", "string success value should round-trip correctly");
+    mut s2: string = getString(true) recover produce "fallback";
+    test::assert(s2 == "fallback", "string failure should produce the replacement");
+
+    // bool
+    mut b: bool = getBool(false) recover produce false;
+    test::assert_eq(b, true, "bool success value should round-trip correctly");
+    mut b2: bool = getBool(true) recover produce false;
+    test::assert_eq(b2, false, "bool failure should produce the replacement");
+
+    // char
+    mut c: char = getChar(false) recover produce 'x';
+    test::assert(c == 'Z', "char success value should round-trip correctly");
+    mut c2: char = getChar(true) recover produce 'x';
+    test::assert(c2 == 'x', "char failure should produce the replacement");
+
+    // int32
+    mut n: int32 = getInt32(false) recover produce (1 to int32);
+    test::assert_eq(n to int, 99, "int32 success value should round-trip correctly");
+    mut n2: int32 = getInt32(true) recover produce (1 to int32);
+    test::assert_eq(n2 to int, 1, "int32 failure should produce the replacement");
+
+    // struct with a STRING field (not just ints, unlike 09's Point) --
+    // the heap-boxed slot must preserve internal pointer fields correctly.
+    mut p: Person = getPerson(false) recover run {
+        return -1;
+    };
+    test::assert(p.name == "Ada", "struct-with-string-field success value should round-trip: name");
+    test::assert_eq(p.age, 36, "struct-with-string-field success value should round-trip: age");
+
+    // recover used directly as a function-call argument, not just a plain
+    // var-decl initializer -- a different codegen context (nested inside
+    // another expression's arg-evaluation) than every other test here.
+    test::assert_eq(math::divide(20, 4) recover produce -1, 5, "recover works as a direct function-call argument");
+
+    return 0;
+}

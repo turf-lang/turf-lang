@@ -1,0 +1,55 @@
+// Test: `to` (cast) precedence relative to assignment/compound-assignment.
+//
+// `to` used to bind LOOSER than `=` (precedence 5 vs. 10), so
+// `y = x to int;` parsed as `(y = x) to int` -- the plain assignment ran
+// first (requiring y and x's types to already match with no cast applied
+// at all), and the cast was silently applied to the ASSIGNMENT EXPRESSION'S
+// OWN VALUE, which is then just discarded (this is a bare statement, not
+// itself assigned anywhere). The explicit cast the programmer wrote had no
+// effect whatsoever.
+//
+// This was live in the actual standard library: `self.data = mem::malloc(n)
+// to T*;` in lib/std/{list,stack,queue,map,mem}.tr only "worked" by
+// accident, because raw `ptr` already implicitly coerces to any `T*` (see
+// typesCompatible()'s Rule 2 in Types.cpp) -- the cast was silently dead
+// weight, not the thing making those lines type-check.
+//
+// `to` binds tighter than assignment, so the cast binds INTO the RHS of an
+// assignment, and looser than the arithmetic operators (so `1 + 2 to double`
+// means `(1 + 2) to double`). Its place against comparison and the logical
+// operators is 15_pratt_cast_binds_tighter_than_comparison.tr's.
+
+import test;
+
+fn main(): int {
+    // The exact bug: without the fix, this line fails to compile at all
+    // (TypeChecker rejects assigning a 'double' directly to an 'int'
+    // variable, because the cast was never actually applied to x).
+    mut x: double = 3.75;
+    mut y: int = 0;
+    y = x to int;
+    test::assert(y == 3, "y = x to int; should assign the CAST value (3), and must compile at all");
+
+    // Compound assignment goes through the exact same precedence table
+    // entry and must be fixed identically.
+    mut z: int = 10;
+    mut w: double = 2.5;
+    z += w to int;
+    test::assert(z == 12, "z += w to int; should add the cast value (2), giving 12");
+
+    // Cast still binds LOOSER than ordinary arithmetic -- this behavior is
+    // unchanged by the fix (arithmetic must still fully evaluate before the
+    // cast applies to its result, not to one operand).
+    mut sum: double = 1.0 + 2.0 to double;
+    test::assert(sum == 3.0, "1 + 2 to double should mean (1+2) to double == 3.0");
+
+    // Assignment itself is right-associative (a = b = c means a = (b = c)),
+    // and must remain so after `to`'s precedence moved -- this is a
+    // regression guard, not itself part of the bug being fixed.
+    mut p: int = 0;
+    mut q: int = 0;
+    p = q = 5;
+    test::assert(p == 5 && q == 5, "chained assignment p = q = 5 should set both to 5");
+
+    return 0;
+}

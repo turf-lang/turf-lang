@@ -1,0 +1,9 @@
+// EXPECT-DIAG: E131
+// EXPECT-DIAG: 'copy()' on an array takes no arguments, but was given 1.
+// EXPECT-DIAG: No such method!
+// Arrays' copy() takes no arguments.
+fn main(): int {
+    mut a: int[3] = [1, 2, 3];
+    mut b = a.copy(1);
+    return b[0];
+}

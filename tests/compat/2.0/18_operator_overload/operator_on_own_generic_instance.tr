@@ -1,0 +1,20 @@
+// An operator on a concrete instance of a struct this file declares
+// satisfies the orphan rule.
+import test;
+
+struct Box<T> {
+    v: T
+}
+
+operator +(a: Box<int>, b: Box<int>): int {
+    return a.v + b.v;
+}
+
+fn main(): int {
+    mut a: Box<int> = Box::default();
+    mut b: Box<int> = Box::default();
+    a.v = 2;
+    b.v = 3;
+    test::assert(a + b == 5, "own instance");
+    return 0;
+}

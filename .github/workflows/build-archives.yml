@@ -499,7 +499,7 @@ jobs:
           set -o pipefail
           ./build/turfc --test tests --jobs 3 \
             --diag-register tests/DIAGNOSTIC_GAPS.txt \
-            --exclude custom --exclude 99_known_bugs 2>&1 | tee macos-suite.log
+            --exclude custom --exclude 99_known_bugs --exclude compat 2>&1 | tee macos-suite.log
 
       - name: GC stress and validate on macOS
         if: ${{ !cancelled() }}
@@ -516,7 +516,7 @@ jobs:
         run: |
           fail=0
           for s in cli_smoke project_smoke test_cmd_smoke fmt_smoke package_graph_smoke git_deps_smoke \
-                   examples_smoke pattern_warnings_smoke migrate_pub_smoke opt_levels_smoke runtime_smoke \
+                   examples_smoke pattern_warnings_smoke lint_levels_smoke migrate_pub_smoke opt_levels_smoke runtime_smoke \
                    mem_smoke gc_smoke debuginfo_smoke std002_caller_location_smoke; do
             echo "=== $s"
             CI=1 ./scripts/smoke/$s.sh 2>&1 | tee -a macos-smokes.log || true
@@ -733,7 +733,7 @@ jobs:
           set -o pipefail
           ./build/turfc.exe --test tests \
             --diag-register tests/DIAGNOSTIC_GAPS.txt \
-            --exclude custom --exclude 99_known_bugs 2>&1 | tee windows-suite.log
+            --exclude custom --exclude 99_known_bugs --exclude compat 2>&1 | tee windows-suite.log
           # (set -o pipefail: the step fails when the suite does)
 
       - name: Summarise the Windows suite run
@@ -780,7 +780,7 @@ jobs:
         run: |
           type -a cmp gdb llvm-dwarfdump || true
           fail=0
-          for s in package_graph_smoke examples_smoke pattern_warnings_smoke migrate_pub_smoke \
+          for s in package_graph_smoke examples_smoke pattern_warnings_smoke lint_levels_smoke migrate_pub_smoke \
                    debuginfo_smoke mem_smoke gc_smoke test_cmd_smoke fmt_smoke; do
             echo "=== $s"
             CI=1 ./scripts/smoke/$s.sh || { echo "::error::$s failed"; fail=1; }

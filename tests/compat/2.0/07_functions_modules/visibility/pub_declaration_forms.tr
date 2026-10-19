@@ -1,0 +1,56 @@
+// LEC-002 stage 2: `pub` and `public` are synonyms (one token, like
+// mut/mutable) and are accepted on every declaration form the freeze lists
+// (FREEZE.md 6.15): fn, method, struct + fields, enum, error, machine,
+// extern fn, and a decorated fn (`@caller_location` first, then `pub`).
+// Nothing is enforced yet -- this file only proves each form parses, keeps
+// its meaning, and that a private declaration beside a `pub` one is fine.
+import test;
+
+pub struct Box {
+    pub value: int,
+    public label: string,
+    cache: int
+}
+
+public enum Color { Red, Green, Blue }
+
+pub error Oops { Bad, Worse }
+
+public machine Light { Red -> Green, Green -> Yellow, Yellow -> Red }
+
+pub extern fn abs(x: int32): int32;
+
+pub fn Box.get(): int {
+    return self.value;
+}
+
+public fn Box.tag(): string {
+    return self.label;
+}
+
+@caller_location
+pub fn where_am_i(): string {
+    return caller_location;
+}
+
+fn helper(x: int): int {
+    return x + 1;
+}
+
+pub fn<T> identity(x: T): T {
+    return x;
+}
+
+public fn main(): int {
+    mut b: Box = Box::default();
+    b.value = 41;
+    b.label = "ok";
+    b.cache = 7;
+    test::assert(helper(b.get()) == 42, "pub method + private helper");
+    test::assert(b.tag() == "ok", "public-spelled method");
+    test::assert(Color::Green to int == 1, "pub enum");
+    test::assert(identity(5) == 5, "pub generic fn");
+    test::assert(abs(-3 to int32) == 3, "pub extern fn");
+    test::assert(where_am_i().length() > 0, "decorated pub fn");
+    return 0;
+}

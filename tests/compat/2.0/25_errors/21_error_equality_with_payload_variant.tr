@@ -1,0 +1,49 @@
+// LEC-004: `==`/`!=` compare WHICH variant occurred, never a payload or a
+// message (STD-002's rule, unchanged). A variant that has fields has no value
+// as a bare reference, but it is still a legal `==`/`!=` operand -- the one
+// place a bare name is read for its identity alone.
+import io;
+import test;
+
+error IOError {
+    NotFound(path: string),
+    Timeout
+}
+
+fn failWith(which: int): !int {
+    if which == 0 { return IOError::NotFound("one"); }
+    if which == 1 { return IOError::NotFound("two", "with a message"); }
+    return IOError::Timeout;
+}
+
+fn isNotFound(which: int): bool {
+    immut _n: int = failWith(which) recover as err run {
+        return err == IOError::NotFound;
+    };
+    return false;
+}
+
+fn isNotNotFound(which: int): bool {
+    immut _n: int = failWith(which) recover as err run {
+        return err != IOError::NotFound;
+    };
+    return false;
+}
+
+fn sameAsConstructed(which: int): bool {
+    immut _n: int = failWith(which) recover as err run {
+        return err == IOError::NotFound("some other path");
+    };
+    return false;
+}
+
+fn main(): int {
+    test::assert(isNotFound(0), "a bare fielded variant is an == operand");
+    test::assert(isNotFound(1), "the message and payload are not compared");
+    test::assert(!isNotFound(2), "a different variant is not equal");
+    test::assert(isNotNotFound(2), "!= works too");
+    test::assert(!isNotNotFound(0), "!= is false for the same variant");
+    test::assert(sameAsConstructed(0), "== against a construction compares the tag only");
+    io::printline("25/21 PASS");
+    return 0;
+}

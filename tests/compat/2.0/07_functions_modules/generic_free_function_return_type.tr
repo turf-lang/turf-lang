@@ -1,0 +1,31 @@
+// Regression test: Codegen's independent type-inference (getExprType(),
+// used for casts/argument-type resolution -- separate from and never
+// reading TypeChecker's own results) must correctly substitute a generic
+// FREE function's return type at each call site, not report the bare,
+// unsubstituted type parameter.
+//
+// Before this fix, `fn<T> firstElem(arr: T[]): T` compiled fine on its
+// own, but `firstElem(intArray) to string` failed with "I can't convert
+// 'T' to a string!" even though TypeChecker's own (separate) inference
+// already correctly resolved the call's type as int -- Codegen's
+// getExprType() registered the function under its bare declared return
+// type (TurfGenericParamType("T"), since a generic function is type-
+// erased to one compiled version) and returned it completely
+// unsubstituted. Fixed by unifying each declared parameter type against
+// the actual argument type at the call site (recursing through array/
+// pointer wrapping) to recover T, then substituting it into the return
+// type.
+
+import io;
+
+import test;
+fn<T> firstElem(arr: T[]): T {
+    return arr[0];
+}
+
+fn main(): int {
+    mut intArray: int[3] = [10, 20, 30];
+    test::assert(firstElem(intArray) == 10, "firstElem should return the first element");
+    io::printline(firstElem(intArray) to string);
+    return 0;
+}

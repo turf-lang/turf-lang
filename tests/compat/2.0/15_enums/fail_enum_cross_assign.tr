@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E066
+// EXPECT-DIAG: Cannot initialise 'Direction' variable 'd' with value of type 'Color'
+// Test (fail): Assigning a variant from one enum to a variable of another enum type
+// Should fail with type mismatch error
+enum Direction { North, East, South, West }
+enum Color { Red, Green, Blue }
+
+fn main(): int {
+    mut d: Direction = Color::Red;
+    return 0;
+}

@@ -1,0 +1,9 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: printed before sys::abort
+// sys::abort flushes stdout before aborting.
+
+fn main(): int {
+    printline("printed before sys::abort");
+    sys::abort();
+    return 0;
+}

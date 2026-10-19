@@ -1,0 +1,41 @@
+// What the E081/E082 hints for a non-variable `&?T` tell the user to write,
+// and what stays legal on such a value without a check: comparing it with
+// null, storing it, passing it to a `&?T` parameter.
+import list::List;
+import test;
+
+struct Node { val: int, next: &?Node }
+struct Holder { head: &?Node }
+
+fn first(p: &?Node): int {
+    if (p == null) { return -1; }
+    return p.val;
+}
+
+fn main(): int {
+    mut h: Holder = Holder::default();
+    test::assert(h.head == null, "a nullable field compares with null unchecked");
+    test::assert(first(h.head) == -1, "and is passed on unchecked");
+
+    mut n: Node = Node::default();
+    n.val = 7;
+    h.head = heap(n);
+    mut r: &?Node = h.head;
+    if (r != null) {
+        test::assert(r.val == 7, "read through a checked variable");
+        r.val = 8;
+        mut s: &Node = (r to &Node);
+        test::assert(s.val == 8, "cast inside the check");
+    }
+
+    mut l: List<&?Node> = List::default();
+    l.push(h.head);
+    l.push(null);
+    mut e: &?Node = l[0];
+    mut total: int = 0;
+    if (e != null) { total += e.val; }
+    e = l[1];
+    if (e != null) { total += e.val; }
+    test::assert(total == 8, "list elements through a variable");
+    return 0;
+}

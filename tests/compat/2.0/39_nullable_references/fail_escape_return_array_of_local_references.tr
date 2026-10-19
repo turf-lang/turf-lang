@@ -1,0 +1,17 @@
+// EXPECT-DIAG: E086
+// EXPECT-DIAG: can't be returned inside a struct or array value
+// An array of references (`(&N)[k]`, F-REFARR-1) returned with one element
+// pointing at this frame's `n`.
+struct N { val: int }
+
+fn make(): (&N)[2] {
+    mut n: N = N::default();
+    n.val = 42;
+    mut a: (&N)[2] = [heap(N::default()), &n];
+    return a;
+}
+
+fn main(): int {
+    mut a: (&N)[2] = make();
+    return a[1].val;
+}

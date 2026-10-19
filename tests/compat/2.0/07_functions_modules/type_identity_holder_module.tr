@@ -1,0 +1,35 @@
+// Companion module for type_identity_generic_arg_shadows_module_type.tr
+// (FDN-003). Declares its OWN `Node` alongside generic code whose `T` the
+// main test file instantiates with ITS `Node` -- so every clone of this
+// module's generics mentions two different types spelled `Node`.
+pub struct Node {
+    pub big: int,
+    pub pad: int,
+    pub pad2: int
+}
+
+pub struct Holder<T> {
+    pub item: T,
+    pub own: Node
+}
+
+pub fn<T> Holder.new(v: T): void {
+    self.item = v;
+    self.own = Node::default();
+    self.own.big = 42;
+}
+
+pub fn<T> Holder.get(): T {
+    return self.item;
+}
+
+pub fn<T> Holder.ownBig(): int {
+    return self.own.big;
+}
+
+pub fn<T> localMix(v: T): int {
+    mut local: Node = Node::default();
+    local.big = 5;
+    mut copy: T = v;
+    return local.big;
+}

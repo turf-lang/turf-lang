@@ -1,0 +1,8 @@
+// EXPECT-DIAG: E143
+// EXPECT-DIAG: the start comes after the end
+// [2..1] is not "empty", it is a mistake: an empty slice is [i..i].
+fn main(): int {
+    immut a: int[3] = [1, 2, 3];
+    immut t = a[2..1];
+    return t.length();
+}

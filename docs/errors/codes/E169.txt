@@ -1,0 +1,30 @@
+This function returns `!T` but can never fail
+
+A return type of `!int` promises that the function can fail with an error. Turf warns when a function declared that way never returns an error and nothing it calls can fail either:
+
+    fn double_it(n: int): !int {     // WARNING: never actually returns an error
+        return n * 2;
+    }
+
+Every caller has to handle a `!int` with `recover` or `try`, so a function that cannot fail makes all of them do needless work. The fix is to drop the `!`:
+
+    fn double_it(n: int): int {
+        return n * 2;
+    }
+
+If the function does fail somewhere, return an error value on that path:
+
+    error MathError {
+        Negative,
+    }
+
+    fn checked_double(n: int): !int {
+        if n < 0 {
+            return MathError::Negative;
+        }
+        return n * 2;
+    }
+
+Sometimes the `!` is deliberate: a function that will fail later, or one that must match a signature other code expects. In that case allowing the warning is the right tool.
+
+This is a warning, not an error -- compilation still succeeds. To silence it for a whole build, set its lint level to allow: `turf build --allow E169` (or `[lints] E169 = "allow"` in turf.toml).

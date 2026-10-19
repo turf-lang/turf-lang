@@ -1,0 +1,59 @@
+// `E::Variant(List::default())`: a default-constructed generic value as a
+// payload argument takes its type arguments from the field's declared type.
+// It used to reach Codegen as the bare template `List` and die there with an
+// internal compiler error ("Cannot allocate unsized type"); the same hole was
+// closed for call arguments and `return` in generic_default_from_context.tr
+// (tests/38_monomorphization). Found by turf-fuzz probing error payloads.
+import list::List;
+import map::Map;
+import test;
+
+struct Box<T> { v: T, n: int }
+
+error Fail {
+    Items(items: List<int>),
+    Boxed(b: Box<string>, k: int),
+    Table(m: Map<string, int>),
+    Plain
+}
+
+fn f(k: int): !int {
+    if k == 1 { return Fail::Items(List::default()); }
+    if k == 2 { return Fail::Boxed(Box::default(), 4, "with a message"); }
+    if k == 3 { return Fail::Table(Map::default()); }
+    if k == 4 { return Fail::Plain; }
+    return k;
+}
+
+fn show(k: int): int {
+    mut v: int = f(k) recover as err run {
+        compare err {
+            matches Fail::Items(items):
+            mut m: List<int> = items;
+            m.push(3);
+            return items.length();
+            done
+            matches Fail::Boxed(b, n):
+            test::assert(b.v == "", "a defaulted Box<string> holds an empty string");
+            test::assert(err.message == "with a message", "the message follows the fields");
+            return b.n + n;
+            done
+            matches Fail::Table(m):
+            return m.length() + 30;
+            done
+            otherwise:
+            return -1;
+        }
+        return -2;
+    };
+    return v;
+}
+
+fn main(): int {
+    test::assert(show(0) == 0, "success");
+    test::assert(show(1) == 1, "the payload List is a real, usable List<int>");
+    test::assert(show(2) == 4, "Box<string> payload");
+    test::assert(show(3) == 30, "Map<string, int> payload");
+    test::assert(show(4) == -1, "a variant with no fields");
+    return 0;
+}

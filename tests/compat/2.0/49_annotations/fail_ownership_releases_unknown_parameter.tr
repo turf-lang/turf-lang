@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: which is not a parameter of this function
+// `releases:` names the parameter the call frees; naming one that does not
+// exist would leave the call tracked as releasing nothing.
+
+@ownership(releases: q)
+extern fn drop(p: int*): void;
+
+fn main(): int {
+    return 0;
+}

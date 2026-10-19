@@ -1,0 +1,53 @@
+// LEC-007: json::escape_string is public. Every byte class is checked, including
+// the ones the old private version got wrong: control bytes other than
+// \n \r \t were emitted raw (invalid JSON), and a byte >= 0x80 must pass through
+// (char is a SIGNED byte, so a missing `c >= 0` guard would escape UTF-8 as
+// \u00XX garbage).
+import json;
+import strings;
+import test;
+
+fn main(): int {
+    test::assert(json::escape_string("plain") == "plain", "plain text is unchanged");
+    test::assert(json::escape_string("") == "", "empty");
+    test::assert(json::escape_string("a\"b") == "a\\\"b", "quote");
+    test::assert(json::escape_string("a\\b") == "a\\\\b", "backslash");
+    test::assert(json::escape_string("a\nb\rc\td") == "a\\nb\\rc\\td", "newline, carriage return, tab");
+    test::assert(json::escape_string("a/b") == "a/b", "slash is not escaped");
+
+    // Control bytes below 0x20 that have no short form become \u00XX.
+    immut ctl: string = strings::repeat("x", 1);
+    mut raw: strings::StringBuilder = strings::StringBuilder::default();
+    raw.append_char(1 to char);
+    raw.append_char(8 to char);
+    raw.append_char(12 to char);
+    raw.append_char(31 to char);
+    test::assert(json::escape_string(raw.to_string()) == "\\u0001\\b\\f\\u001f", "control bytes: \\u00XX and the \\b \\f short forms");
+    test::assert(json::escape_string(ctl) == "x", "sanity: an ordinary byte next to the control cases");
+
+    // DEL (127) is not a JSON-required escape.
+    mut del: strings::StringBuilder = strings::StringBuilder::default();
+    del.append_char(127 to char);
+    test::assert(strings::length(json::escape_string(del.to_string())) == 1, "DEL is copied through");
+
+    // UTF-8 (bytes >= 0x80) passes through byte for byte.
+    // Built byte by byte (0xC3 0xA9 is "e-acute"): a string literal's handling
+    // of non-ASCII source text is not what is under test.
+    mut hi: strings::StringBuilder = strings::StringBuilder::default();
+    hi.append_char(195 to char);
+    hi.append_char(169 to char);
+    immut utf: string = hi.to_string();
+    immut esc: string = json::escape_string(utf);
+    test::assert(strings::length(esc) == 2, "two high bytes stay two bytes");
+    test::assert(esc == utf, "non-ASCII bytes are not escaped");
+
+    // stringify uses it, so a string value and an object key are both escaped.
+    mut o: json::JsonValue = json::JsonValue::new_object();
+    o.set("k\"ey", json::JsonValue::from_string("v\nal"));
+    test::assert(json::stringify(o) == "{\"k\\\"ey\":\"v\\nal\"}", "stringify escapes keys and values");
+
+    // Linear: 200,000 quotes -> 400,000 bytes.
+    immut big: string = json::escape_string(strings::repeat("\"", 200000));
+    test::assert(strings::length(big) == 400000, "large input");
+    return 0;
+}

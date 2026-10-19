@@ -1,0 +1,23 @@
+// EXPECT-DIAG: E060
+// EXPECT-DIAG: You can't change the value of 'o' because it's immutable
+// Regression test (LEC-006 follow-up): `self.inner.a = ...` assigns into a
+// struct held BY VALUE in a field, so it changes `self`. The old scan looked
+// only at `self.<field>` directly and missed it.
+// Expected: ImmutableAssignmentError on `o`.
+struct Inner {
+    a: int
+}
+
+struct Outer {
+    inner: Inner
+}
+
+fn Outer.touch(): void {
+    self.inner.a = 1;
+}
+
+fn main(): int {
+    immut o: Outer = Outer::default();
+    o.touch();
+    return 0;
+}

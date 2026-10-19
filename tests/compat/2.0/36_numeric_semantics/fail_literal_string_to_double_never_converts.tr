@@ -1,0 +1,9 @@
+// EXPECT-DIAG: E149
+// EXPECT-DIAG: "inf" is not a double
+// `to double` takes decimal text only, as parse_double does.
+
+fn main(): int {
+    mut d: double = "inf" to double;
+    printline(d);
+    return 0;
+}

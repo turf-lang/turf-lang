@@ -1,0 +1,37 @@
+This pointer may already have been freed before this release
+
+The compiler follows each allocation through the function. When a pointer has been released on some paths that reach another `free`, but not on all of them, that second release may be a double free:
+
+    import mem;
+
+    fn main(): int {
+        mut flag: int = 1;
+        unsafe {
+            mut p: void* = mem::alloc(8);
+            if flag == 1 {
+                mem::free(p);
+            }
+            mem::free(p);     // WARNING: 'p' may already have been freed
+        }
+        return 0;
+    }
+
+When `flag == 1` the memory is released twice, which corrupts the allocator. Release the pointer on exactly one path:
+
+    import mem;
+
+    fn main(): int {
+        mut flag: int = 1;
+        unsafe {
+            mut p: void* = mem::alloc(8);
+            if flag == 1 {
+                printline("releasing");
+            }
+            mem::free(p);
+        }
+        return 0;
+    }
+
+Turf cannot evaluate your conditions, so this is a possible bug and not a certain one. If a flag makes the two releases mutually exclusive (a `freed` variable that you test before the second call, for instance), the code is correct and you can allow the warning. A pointer freed on EVERY path before the second release is the error E017 instead.
+
+This is a warning, not an error -- compilation still succeeds. To silence it for a whole build, set its lint level to allow: `turf build --allow E171` (or `[lints] E171 = "allow"` in turf.toml).

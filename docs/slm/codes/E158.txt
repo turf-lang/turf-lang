@@ -1,0 +1,45 @@
+TURF E158 -- FUNCTION TOO COMPLEX (WARNING):
+
+CAUSE:
+  The function's cyclomatic complexity (independent paths through it: 1 + each
+  extra path an `if`, loop or `compare` arm opens) is above 15. A style
+  threshold, not a correctness problem. This is a WARNING: compilation still
+  succeeds.
+
+INCORRECT:
+    fn classify(n: int): int {
+        if n == 1 { return 10; }
+        if n == 2 { return 20; }
+        if n == 3 { return 30; }
+        if n == 4 { return 40; }
+        if n == 5 { return 50; }
+        if n == 6 { return 60; }
+        if n == 7 { return 70; }
+        if n == 8 { return 80; }
+        if n == 9 { return 90; }
+        if n == 10 { return 100; }
+        if n == 11 { return 110; }
+        if n == 12 { return 120; }
+        if n == 13 { return 130; }
+        if n == 14 { return 140; }
+        if n == 15 { return 150; }
+        return 0;           // WARNING: complexity 16, threshold 15
+    }
+
+CORRECT (fewer paths, or smaller functions):
+    fn classify(n: int): int {
+        compare n {
+            matches 1: return 10; done
+            matches 2: return 20; done
+            otherwise: return 0;
+        }
+    }
+
+    fn main(): int {
+        return classify(2) - 20;
+    }
+
+FIX:
+  Split the function into helpers, or fold an `if` chain into one `compare`.
+
+RELATED: E159 (a different whole-function check, on loops).

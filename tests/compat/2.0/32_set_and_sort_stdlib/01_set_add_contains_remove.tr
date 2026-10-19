@@ -1,0 +1,51 @@
+// Regression test: lib/std/collections/set.tr (Set<T>), imported and
+// exercised end-to-end -- add/contains/remove/length, duplicate-add being
+// a no-op, and growth past the initial capacity.
+import set::Set;
+import test;
+
+fn main(): int {
+    mut s: Set<int> = Set::default();
+    test::assert(s.length() == 0, "new set starts empty");
+
+    s.add(1);
+    s.add(2);
+    s.add(3);
+    test::assert(s.length() == 3, "three distinct adds should give length 3");
+    test::assert(s.contains(1) == true, "");
+    test::assert(s.contains(2) == true, "");
+    test::assert(s.contains(3) == true, "");
+    test::assert(s.contains(4) == false, "not-added item should not be contained");
+
+    // Duplicate add must be a no-op (no length change, no growth).
+    s.add(2);
+    test::assert(s.length() == 3, "adding an already-present item must be a no-op");
+
+    // remove() reports whether it actually removed something.
+    immutable removedExisting: bool = s.remove(2);
+    test::assert(removedExisting == true, "removing a present item returns true");
+    test::assert(s.length() == 2, "length drops after a real removal");
+    test::assert(s.contains(2) == false, "removed item is no longer contained");
+
+    immutable removedMissing: bool = s.remove(999);
+    test::assert(removedMissing == false, "removing an absent item returns false");
+    test::assert(s.length() == 2, "removing an absent item must not change length");
+
+    // Force growth past the initial capacity (8).
+    mut big: Set<int> = Set::default();
+    mut i: int = 0;
+    while i < 20 {
+        big.add(i);
+        i = i + 1;
+    }
+    test::assert(big.length() == 20, "20 distinct adds should give length 20");
+    // Re-adding everything again must not grow the set further.
+    i = 0;
+    while i < 20 {
+        big.add(i);
+        i = i + 1;
+    }
+    test::assert(big.length() == 20, "re-adding existing items must not change length");
+
+    return 0;
+}

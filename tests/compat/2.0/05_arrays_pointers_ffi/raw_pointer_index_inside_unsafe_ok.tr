@@ -1,0 +1,37 @@
+// Regression test (OVH-003, docs/planning/OVERHAUL_REMAINING_WORK.md): the
+// passing counterpart to fail_raw_pointer_index_outside_unsafe.tr -- indexing
+// a raw pointer field (`buf.data[i]`, where `data: int*`) compiles when
+// lexically inside `unsafe { }` (this test) or in a module that declares the
+// raw-pointer capability (`unsafe module;` -- the shape
+// `lib/std/collections/list.tr` itself uses for its own internal
+// `self.data[i]`; not repeated here since `tests/` is "under the install
+// root" from the compiler's own point of view --
+// docs/development/changes/LANG-002.md's *Known pitfalls* -- so a second file
+// exercising that path would be redundant with list.tr's own already-passing
+// suite).
+//
+// LEC-002: this used to index `List<int>`'s own `data` field. That field is
+// private to list.tr now, so the test declares its own struct with a raw
+// pointer field instead -- which is all the gate ever needed. A struct with
+// a raw pointer field has to be declared inside `unsafe { }` itself.
+
+import mem;
+
+unsafe {
+    struct Buf {
+        data: int*,
+        len: int
+    }
+}
+
+fn main(): int {
+    mut b: Buf = Buf::default();
+    mut result: int = 0;
+    unsafe {
+        b.data = mem::alloc(16) to int*;
+        b.data[0] = 42;
+        result = b.data[0];
+        mem::free(b.data);
+    }
+    return result - 42;
+}

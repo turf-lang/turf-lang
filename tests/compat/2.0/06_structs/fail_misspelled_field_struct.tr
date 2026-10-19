@@ -1,0 +1,24 @@
+// EXPECT-DIAG: E068
+// EXPECT-DIAG: has no field named 'pasword'
+// EXPECT-DIAG: It may be from the current file: 'password'
+// Regression test: a misspelled struct field access is rejected AND the
+// suggestion engine (SuggestionIndex::suggestVisible) fires for it, same as
+// it already did for misspelled variables/functions/struct methods -- the
+// concrete gap issue #241 Track D's "Broader Did You Mean?" item closed
+// (`user.pasword` -> `user.password`, the issue's own example). Message
+// content isn't asserted here (this suite only checks accept/reject), but
+// see UnknownStructFieldError (ErrorsStruct.h) for the suggestion wiring.
+
+struct User {
+    password: string
+}
+
+fn User.new(pw: string): void {
+    self.password = pw;
+}
+
+fn main(): int {
+    mut u: User = User::new("secret");
+    mut leaked: string = u.pasword;
+    return 0;
+}

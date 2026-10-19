@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E130
+// EXPECT-DIAG: Converting the reference '&int' to 'string' cannot be done outside an 'unsafe' block
+// A `string` is a C pointer, so `r to string` read the int's bytes as text and
+// printed garbage in safe code. It is the mirror of `string to &T` and needs
+// `unsafe { }` the same way.
+
+fn main(): int {
+    mut x: int = 5;
+    mut r: &int = &x;
+    printline(r to string);
+    return 0;
+}

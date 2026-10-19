@@ -1,0 +1,5 @@
+// EXPECT-DIAG: E061
+fn main(): int {
+    true = 5;
+    return 0;
+}

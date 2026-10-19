@@ -1,0 +1,11 @@
+// A bare `import module;` makes an exported constant reachable only
+// module-qualified (`module::CONST`) -- mirrors bare function-call
+// visibility exactly (see fail_bare_cross_module_call.tr).
+import io;
+import lib_export_constants_module;
+
+fn main(): int {
+    io::printline(lib_export_constants_module::VERSION);
+    io::printline(lib_export_constants_module::GREETING);
+    return 0;
+}

@@ -1,0 +1,76 @@
+// tests/41_gc/02_precise_element_tracing.tr
+// MEM-002: `List<int>` (tests/41_gc/01_...) only exercises a collection
+// whose element type has NO pointer words -- CastExprAST::codegen()'s new
+// per-element TurfTypeDesc (CodegenExpr.cpp, consumed by
+// getOrCreateElementTurfTypeDesc(), CodegenStruct.cpp) still gets built and
+// passed for it, but every bit of its pointer_word_bitmap is 0, so
+// gc_scan_block_precise() (turfrt_gc.c) never actually walks INTO one of
+// its elements looking for an outgoing pointer.
+//
+// `List<string>` is the case that matters: each element genuinely IS a
+// pointer into a SEPARATE GC-heap allocation (a string buffer). If the
+// per-element descriptor's bitmap were wrong (e.g. still 0, as it would be
+// under MEM-001's literal-NULL-always behaviour), a string reachable ONLY
+// by being stored inside this list's backing buffer -- never through any
+// other local of its own -- would be swept out from under the list the
+// moment nothing else roots it, corrupting the list's own contents on next
+// read. This is the actual "trace one object's contents to find further
+// objects" half of a real mark-sweep collector, not just "don't free the
+// object I'm holding directly."
+
+import list::List;
+import strings;
+import test;
+import io;
+
+fn churn(depth: int): void {
+    mut buf: int[64];
+    buf[0] = 0; // satisfies definite assignment for the whole array before the loop below
+    mut i: int = 0;
+    while i < 64 {
+        buf[i] = i;
+        i = i + 1;
+    }
+    mut sum: int = 0;
+    i = 0;
+    while i < 64 {
+        sum = sum + buf[i];
+        i = i + 1;
+    }
+    test::assert(sum == 2016, "churn: stack buffer round-trips correctly");
+    if depth > 0 {
+        churn(depth - 1);
+    }
+}
+
+// Builds each string via strings::repeat() so it is a genuinely fresh,
+// separately gc_alloc'd buffer -- reachable, after this function returns,
+// ONLY through `List<string>`'s own backing buffer (read back via
+// `.get(i)`, OVH-003's bounds-checked accessor over the identical `data:
+// T*` field this comment used to name directly), never through any
+// surviving local of its own (the whole point of this test).
+fn build(): List<string> {
+    mut l: List<string> = List::default();
+    l.push(strings::repeat("a", 40));
+    l.push(strings::repeat("b", 40));
+    l.push(strings::repeat("c", 40));
+    return l;
+}
+
+fn main(): int {
+    mut l: List<string> = build();
+
+    churn(24);
+    gc_collect();
+    churn(24);
+    gc_collect();
+
+    test::assert(l.length() == 3, "List<string> keeps its length");
+    test::assert(strings::length(l.get(0)) == 40, "element 0's string survives with correct length");
+    test::assert(strings::starts_with(l.get(0), "a"), "element 0's string content survives");
+    test::assert(strings::starts_with(l.get(1), "b"), "element 1's string content survives");
+    test::assert(strings::starts_with(l.get(2), "c"), "element 2's string content survives");
+
+    io::printline("41/02 PASS: List<string> elements precisely traced through a forced collection");
+    return 0;
+}

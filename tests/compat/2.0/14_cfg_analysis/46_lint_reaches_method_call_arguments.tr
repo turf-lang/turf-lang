@@ -1,0 +1,20 @@
+// EXPECT-DIAG: '/' with zero
+// LEC-005 / INV-LINT-1: the method-call counterpart of
+// 45_lint_reaches_call_arguments.tr -- both the receiver and the arguments of
+// a method call are children the lint walk must reach. `dead()` is never
+// called, so the division never executes.
+struct Counter { n: int }
+
+fn Counter.add(k: int): void {
+    self.n = self.n + k;
+}
+
+fn dead(a: int): int {
+    mut c: Counter = Counter::default();
+    c.add(a / 0);
+    return c.n;
+}
+
+fn main(): int {
+    return 0;
+}

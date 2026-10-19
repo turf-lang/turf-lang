@@ -128,6 +128,16 @@ jobs:
       - name: Run Test Suites (default level)
         run: ./scripts/test_runner.sh
 
+      # V-4 (ROADMAP_v3.0.0.md 5.5.1, TDP-2-003): tests/compat/2.0/ is the
+      # 2.0.0 test tree and what each program printed on 2.0.0. A 2.x minor may
+      # never reject or change a program that compiled on 2.0; this fails when
+      # one stops compiling or its exit status or output changes, and when a
+      # file of the frozen tree is edited, added or removed (a minor that edits
+      # a test to make it pass is a 3.0 change). test_runner.sh skips the tree
+      # (--exclude compat), so it runs here once and not at every level below.
+      - name: 2.0 compatibility corpus (tests/compat/2.0)
+        run: python3 scripts/check/compat_corpus_check.py
+
       # SMP-001: unit tests for the compiler query facade
       # (include/turf/Analysis.h) -- a C++ binary built alongside `turfc`,
       # which test_runner.sh (.tr files only) never runs.
@@ -147,6 +157,11 @@ jobs:
       # sat in until #263 -- pages describing errors that never appeared).
       - name: Error-code registry is consistent
         run: ./scripts/check/error_codes_check.sh
+
+      # V-5 (#289): the reference page's table of every code is generated from
+      # that registry; a code in one and not the other fails here.
+      - name: Diagnostic-code registry matches the reference
+        run: python3 scripts/check/diagnostic_registry.py --check
 
       # SLM_IMPROVEMENT_PLAN C1/C2: everything under docs/slm/ is pasted into
       # the --smart model's prompt, and a model copies what it sees. This
@@ -201,9 +216,11 @@ jobs:
       # REL-002 stage 2: the formatting gate. Every .tr file under lib/std and
       # tests must already be formatted; a file that does not lex (the fail_*
       # tests that are invalid on purpose) is skipped and listed, not a failure.
-      # To fix a failure: ./build/turf fmt --write lib/std tests
+      # To fix a failure: ./build/turf fmt --write lib/std tests --exclude tests/compat
+      # tests/compat is the frozen 2.0 corpus: never reformatted, so a later
+      # change to the formatter cannot fail it.
       - name: turf fmt --check (lib/std and tests are formatted)
-        run: ./build/turf fmt --check lib/std tests
+        run: ./build/turf fmt --check --exclude tests/compat lib/std tests
       # LEC-001 stage 6: git dependencies -- the fetch cache, turf.lock pinning
       # commit and tree hash, --offline/--locked, fetch/update/add --git. Every
       # upstream is a local bare repository the script builds, so there is no
@@ -377,6 +394,11 @@ jobs:
       # turf::analyze() facade can see.
       - name: "Pattern warnings smoke test"
         run: ./scripts/smoke/pattern_warnings_smoke.sh
+      # V-1: lint levels are a compiler flag (`--allow|--warn|--deny <code>`,
+      # `--lint-set 2.N`, also under `--test`), which the test runner cannot
+      # pass to a single file and so cannot judge.
+      - name: "Lint levels smoke test"
+        run: ./scripts/smoke/lint_levels_smoke.sh
       # LEC-001 stage 4: package builds (`turfc --package-graph`). The test
       # runner is single-file and cannot hand the compiler a graph, so this
       # builds multi-package trees in a temp directory: two packages' `util`

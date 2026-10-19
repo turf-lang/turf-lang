@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E028
+// EXPECT-DIAG: 'operator &(int, int)' is not allowed
+// Negative test: operator &(int, int) is a hard error -- both operand
+// types are already builtin, same rule as +/-/*/  (LANG-001 extends the
+// overloadable set to include bitwise operators, but the all-primitive
+// rejection still applies to every one of them, new or old).
+operator &(a: int, b: int): int {
+    return a;
+}
+
+fn main(): int {
+    return 0;
+}

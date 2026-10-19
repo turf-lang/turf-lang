@@ -1,0 +1,23 @@
+// EXPECT-DIAG: E017
+// EXPECT-DIAG: Double free detected for 'buf'
+// EXPECT-NO-DIAG: Unsafe pointer use
+// Article V: the double-free check is not about the names `malloc` and `free`.
+// A user's own allocator pair, under any names, is understood exactly as the
+// standard library's is, because both declare what they do.
+
+import io;
+
+@ownership(acquires)
+extern fn arena_take(size: int): int*;
+
+@ownership(releases: block)
+extern fn arena_give_back(block: int*): void;
+
+fn main(): int {
+    unsafe {
+        mut buf: int* = arena_take(sizeof(int) * 4);
+        arena_give_back(buf);
+        arena_give_back(buf);
+    }
+    return 0;
+}

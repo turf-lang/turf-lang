@@ -1,0 +1,18 @@
+// The way to pass a @caller_location function around: an unmarked wrapper,
+// whose direct call stamps the wrapper's line.
+import test;
+
+@caller_location
+fn where(): string {
+    return caller_location;
+}
+
+fn here(): string {
+    return where();
+}
+
+fn main(): int {
+    mut f: fn(): string = here;
+    test::assert(f().ends_with(":11"), "the wrapper's call line");
+    return 0;
+}

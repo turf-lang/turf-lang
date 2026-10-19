@@ -1,0 +1,26 @@
+// int32 -> int and int32 -> double widen implicitly (no cast needed),
+// mirroring how int -> double already widens implicitly today.
+import test;
+
+fn takes_int(x: int): int {
+    return x;
+}
+
+fn takes_double(x: double): double {
+    return x;
+}
+
+fn main(): int {
+    mut n: int32 = 7 to int32;
+
+    mut w: int = n;
+    test::assert(w == 7, "int32 to int implicit widen (VarDecl)");
+
+    mut d: double = n;
+    test::assert(d == 7.0, "int32 to double implicit widen (VarDecl)");
+
+    test::assert(takes_int(n) == 7, "int32 to int implicit widen (call arg)");
+    test::assert(takes_double(n) == 7.0, "int32 to double implicit widen (call arg)");
+
+    return 0;
+}

@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: Unknown '@ownership' argument 'aquires'
+// EXPECT-DIAG: Did you mean 'acquires'
+// A misspelt argument must be an error. Ignoring it would leave the function
+// looking annotated while the allocation check it was written for stayed off.
+
+@ownership(aquires)
+extern fn my_alloc(size: int): int*;
+
+fn main(): int {
+    return 0;
+}

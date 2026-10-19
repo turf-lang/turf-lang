@@ -1,0 +1,18 @@
+// EXPECT-DIAG: E036
+// EXPECT-DIAG: 'transition' target must be written as a state, like 'C::SomeState', not a value that holds one
+// A target held in a variable has the right type but no known state, so its
+// edge cannot be named; the message says that, not "expected C, got C".
+machine C {
+    Idle -> Connecting,
+    Connecting -> Connected
+}
+
+fn go(c: C, t: C): C {
+    mut x: C = c;
+    x.transition(t);
+    return x;
+}
+
+fn main(): int {
+    return 0;
+}

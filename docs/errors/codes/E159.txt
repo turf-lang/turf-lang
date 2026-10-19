@@ -1,0 +1,33 @@
+This function contains a loop it can never leave
+
+Turf maps out every path through a function and looks for a loop whose paths all lead back into the loop. If nothing inside it can reach the code after it (no `break`, no `return`, no condition that can turn false), the function can never finish:
+
+    fn spin(): int {            // WARNING: contains a loop with no exit path
+        mut n: int = 0;
+        while true {
+            if n > 5 {
+                continue;       // goes round again, never out
+            }
+            n += 1;
+        }
+        return n;
+    }
+
+Here `n` stops growing at 6 and the loop just keeps going round. The fix is to give the loop a real way out:
+
+    fn spin(): int {
+        mut n: int = 0;
+        while true {
+            if n > 5 {
+                break;
+            }
+            n += 1;
+        }
+        return n;
+    }
+
+This warning belongs to the whole function, and it is found by looking at the control flow, so it also catches loops the simpler E157 check misses (a `continue` is enough to hide a loop from E157, not from this one). The two are often reported together, along with E074 for the code after the loop.
+
+A loop that never ends can be exactly what you want, such as the main loop of a server, or a program that ends through `sys::exit`. In that case allowing the warning is the right tool.
+
+This is a warning, not an error -- compilation still succeeds. To silence it for a whole build, set its lint level to allow: `turf build --allow E159` (or `[lints] E159 = "allow"` in turf.toml).

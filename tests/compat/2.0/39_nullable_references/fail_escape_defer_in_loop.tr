@@ -1,0 +1,22 @@
+// EXPECT-DIAG: E086
+// EXPECT-DIAG: can't be returned
+// The defer runs at the end of each loop iteration, so after the loop `p` is
+// `&n` (when the loop ran): a defer counts at its block's exits, not where it
+// is written and not never (owner decision 2026-10-12).
+struct N { val: int, next: &?N }
+
+fn f(k: int): &N {
+    mut n: N = N::default();
+    n.val = 42;
+    mut p: &N = heap(n);
+    mut i: int = 0;
+    while (i < k) {
+        defer p = &n;
+        i += 1;
+    }
+    return p;
+}
+
+fn main(): int {
+    return f(3).val;
+}

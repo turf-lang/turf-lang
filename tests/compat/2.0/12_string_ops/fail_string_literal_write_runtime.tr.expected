@@ -1,0 +1,1 @@
+panic: runtime check: Cannot write into this string: it is not a heap string (a string literal, or memory the program does not own) (fail_string_literal_write_runtime.tr:8)

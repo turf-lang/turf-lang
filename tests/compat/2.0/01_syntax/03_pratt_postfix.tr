@@ -1,0 +1,15 @@
+import test;
+
+fn get_num(): int {
+    mut temp: int = 0;
+    return temp;
+}
+
+fn main(): int {
+    mut arr: int[1] = [99];
+    mut val: int = arr[get_num()];
+
+    test::assert(val == 99, "Postfix parsing with function call inside index failed");
+
+    return 0;
+}

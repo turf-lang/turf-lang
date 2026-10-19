@@ -294,7 +294,7 @@ unused variable is reported like this, and the build goes ahead:
 $ turf check
 src/main.tr (1 warning)
 
-── warning at line 11, col 5
+── warning at line 11, col 5 [E163 · control flow]
 
   Warning: Variable 'unused' is declared but never used.
 

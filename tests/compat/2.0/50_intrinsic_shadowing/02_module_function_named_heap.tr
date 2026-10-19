@@ -1,0 +1,11 @@
+// Same rule for a module-qualified call: `shadow_heap_module::heap(...)` is the
+// module's function, never the built-in `heap`.
+
+import shadow_heap_module;
+import test;
+
+fn main(): int {
+    test::assert(shadow_heap_module::heap(3) == 30, "the module's heap()");
+    test::assert(shadow_heap_module::typeof(3) == 300, "the module's typeof()");
+    return 0;
+}

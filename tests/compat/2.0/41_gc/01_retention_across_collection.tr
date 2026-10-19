@@ -1,0 +1,65 @@
+// tests/41_gc/01_retention_across_collection.tr
+// MEM-002 (docs/archive/ARCHITECTURE_OVERHAUL.md §8/§14) -- the collector's
+// most basic completion criterion, stated verbatim in the roadmap's own
+// Testing scope: "keep a reference only in a local; force collection; use
+// the object afterwards and assert its contents." (U-3, §11.)
+//
+// `l` is the ONLY thing keeping the List<int>'s backing buffer (and, once
+// pushed, each string) reachable -- if the collector's conservative stack
+// scan failed to find it as a root, gc_collect() would free the buffer out
+// from under `l`, and the assertions below would read freed memory (data
+// corruption, not necessarily a crash -- exactly the class of bug
+// tests/13_string_stdlib/17_stress_10k_concat.tr caught live during this
+// group's own development, see docs/development/changes/MEM-002.md).
+//
+// churn() between the collection and the assertions overwrites whatever
+// stack memory a NAIVE implementation might have accidentally left `l`'s
+// address sitting in from an earlier, now-dead call frame -- without it, a
+// bug in root-finding could pass by accident (stale garbage on the stack
+// happening to still contain the right address), which would be a much
+// weaker test than intended.
+
+import list::List;
+import test;
+import io;
+
+fn churn(depth: int): void {
+    mut buf: int[64];
+    buf[0] = 0; // satisfies definite assignment for the whole array before the loop below
+    mut i: int = 0;
+    while i < 64 {
+        buf[i] = i * 3;
+        i = i + 1;
+    }
+    mut sum: int = 0;
+    i = 0;
+    while i < 64 {
+        sum = sum + buf[i];
+        i = i + 1;
+    }
+    test::assert(sum == 6048, "churn: stack buffer round-trips correctly");
+    if depth > 0 {
+        churn(depth - 1);
+    }
+}
+
+fn main(): int {
+    mut l: List<int> = List::default();
+    mut i: int = 0;
+    while i < 500 {
+        l.push(i * 2);
+        i = i + 1;
+    }
+
+    churn(24);
+    gc_collect();
+    churn(24);
+
+    test::assert(l.length() == 500, "retained List<int> keeps its length");
+    test::assert(l[0] == 0, "retained List<int> keeps element 0");
+    test::assert(l[250] == 500, "retained List<int> keeps a middle element");
+    test::assert(l[499] == 998, "retained List<int> keeps the last element");
+
+    io::printline("41/01 PASS: List<int> retained correctly across a forced collection");
+    return 0;
+}

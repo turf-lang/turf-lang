@@ -1,7 +1,7 @@
 # Conformance items: one row per frozen decision
 
 `docs/development/FREEZE.md`'s appendix is the specification of the 2.0 language:
-76 numbered decisions, `F-GEN-1` to `F-REFARR-2`. This file says, for each one,
+81 numbered decisions, `F-GEN-1` to `F-REFARR-2`. This file says, for each one,
 which tests and scripts show it holds. `tests/CONFORMANCE.md` maps *areas* to
 folders; this maps *rules* to evidence, which is the question a conformance
 suite has to answer: "this sentence of the spec: where is it checked?"
@@ -71,6 +71,11 @@ Read the Note, then the test.
 | **F-DIAG-1** | S | `scripts/slm/slm_replay_smoke.sh`, `scripts/slm/slm_deterministic_fix_smoke.sh` | — | Every displayed suggestion was validated in the sandbox this run. |
 | **F-DIAG-2** | S | `scripts/slm/slm_replay_smoke.sh`, `scripts/slm/slm_cache_smoke.sh` | — | A cached or replayed suggestion is re-validated, never trusted. |
 | **F-DIAG-3** | - | — | — | A process rule (no new `SLM::ErrorCategory` without a request); nothing a program can show. `scripts/check/error_codes_check.sh` keeps the code registry consistent, which is the part a script can see. |
+| **F-LINT-1** | S | `scripts/smoke/lint_levels_smoke.sh`, `./build/turf-api-tests` | — | `--allow`/`--deny` change what prints and whether the build fails; an error's code cannot be allowed or warned, an unknown code is a usage error (checks 2, 3, 6; `testLintLevels`). |
+| **F-LINT-2** | S | `scripts/smoke/lint_levels_smoke.sh`, `scripts/smoke/project_smoke.sh` | — | The flags work on `turfc` and under `--test` (check 8); `[lints]` reaches the compiler as flags and the command line wins (`project_smoke`'s `[lints]` cases). |
+| **F-LINT-3** | S | `scripts/smoke/lint_levels_smoke.sh`, `./build/turf-api-tests` | — | A lint set newer than the compiler or not `2.N` is rejected (check 6); the pin's effect on a newer warning is `testLintLevels`, since no warning is newer than 2.0 yet. |
+| **F-LINT-4** | S | `scripts/check/error_codes_check.sh`, `./build/turf-api-tests` | — | Every warning class has a registry row and the `...Warning` naming holds (check 5 of the script; `testLintLevels` names every warning code). |
+| **F-LINT-5** | S | `scripts/smoke/lint_levels_smoke.sh` | — | `--deny E159` does not fail a build over lib/std's own warning, and does with `--stdlib-warnings` (check 7). |
 | **F-OPT-1** | S | `scripts/smoke/opt_levels_smoke.sh` | — | Same evidence as F-NUM-6, which is the same rule seen from the numeric side. |
 | **F-OPT-2** | PN | `tests/43_check_elision/01_bounds_and_overflow_elided_still_correct.tr` | `tests/43_check_elision/fail_overflow_still_traps_when_unprovable.tr`, `tests/43_check_elision/fail_bounds_still_caught_after_elision.tr` | An index proven in range loses its check; one the compiler cannot prove still traps. |
 | **F-TRACK-1** | - | — | — | A process rule: an implementation session updates a change record. `scripts/dev/session_postflight.sh` checks it, by hand per SESSION_PROTOCOL.md; CI cannot know a session happened. |

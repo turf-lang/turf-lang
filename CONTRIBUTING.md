@@ -52,7 +52,9 @@ suite build as usual.
   steps.
 - **Everything is private unless it says `pub`**, in `lib/std` as in any
   module. A new `pub` item in `lib/std` needs a use in
-  `tests/46_stdlib_surface/`.
+  `tests/46_stdlib_surface/`. A new function in `io`, `math` or `sys` is also a
+  new bare-callable name: run `scripts/check/prelude_shadow_check.sh NAME` and
+  review the programs it lists first.
 - **No compiler special cases for the standard library.** `lib/std` is
   ordinary TurfLang; a rule it needs is a rule any module can use.
 - **Comments explain why**: the invariant, the constraint, what would break.

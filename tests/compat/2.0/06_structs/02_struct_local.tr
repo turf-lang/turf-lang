@@ -1,0 +1,24 @@
+import test;
+
+fn test_local(): void {
+    struct Point {
+        x: int,
+        y: int
+    }
+
+    // A locally-declared struct's own methods can't be declared here too
+    // (function declarations can't nest -- NestedFunctionError), so there's
+    // no `.new()` to call for it; `::default()` + direct field assignment is
+    // the only available construction path for a local struct type.
+    mut p: Point = Point::default();
+    p.x = 1;
+    p.y = 2;
+
+    test::assert(p.x == 1, "");
+    test::assert(p.y == 2, "");
+}
+
+fn main(): int {
+    test_local();
+    return 0;
+}

@@ -1,0 +1,16 @@
+// A non-generic wrapper is how a generic function is passed as a value.
+import test;
+
+fn<T> id(x: T): T {
+    return x;
+}
+
+fn id_int(x: int): int {
+    return id(x);
+}
+
+fn main(): int {
+    immut f: fn(int): int = id_int;
+    test::assert(f(7) == 7, "wrapper");
+    return 0;
+}

@@ -1,0 +1,42 @@
+// A payload may carry a reference the function was given, or a heap one:
+// both outlive the frame (contrast fail_escape_error_payload.tr).
+
+import test;
+
+struct N { val: int, next: &?N }
+
+error E1 {
+    P(r: &N),
+    Q
+}
+
+fn fail_with(p: &N): !int {
+    return E1::P(p);
+}
+
+fn fail_with_heap(): !int {
+    mut n: N = N::default();
+    n.val = 9;
+    return E1::P(heap(n));
+}
+
+fn payload_val(fail_heap: bool, p: &N): int {
+    mut v: int = (fail_heap give fail_with_heap() otherwise fail_with(p)) recover as err run {
+        compare err {
+            matches E1::P(r):
+            return r.val;
+            done
+            otherwise:
+            return -1;
+        }
+    };
+    return v;
+}
+
+fn main(): int {
+    mut n: N = N::default();
+    n.val = 42;
+    test::assert(payload_val(false, &n) == 42, "payload reference to the caller's object");
+    test::assert(payload_val(true, &n) == 9, "payload reference to a heap object");
+    return 0;
+}

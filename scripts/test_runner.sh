@@ -12,6 +12,9 @@
 #
 #   - tests/custom and tests/99_known_bugs are not live regressions and are
 #     skipped (AGENTS.md);
+#   - tests/compat is the frozen 2.0 corpus (V-4): immutable, judged against
+#     what 2.0.0 printed, and run once by scripts/check/compat_corpus_check.py
+#     rather than again at every level here;
 #   - tests/DIAGNOSTIC_GAPS.txt is enforced: a project's own tests need no
 #     register, the compiler's must keep theirs honest;
 #   - the compiler is build/turfc, or $TURF_COMPILER (FDN-005 stage 3: an
@@ -69,6 +72,6 @@ for x in ${TURF_TEST_EXTRA_EXCLUDE:-}; do EXTRA_EXCLUDE+=(--exclude "$x"); done
 
 exec "$COMPILER" --test tests \
     --diag-register tests/DIAGNOSTIC_GAPS.txt \
-    --exclude custom --exclude 99_known_bugs \
+    --exclude custom --exclude 99_known_bugs --exclude compat \
     ${EXTRA_EXCLUDE[@]+"${EXTRA_EXCLUDE[@]}"} \
     "${OPT_ARGS[@]}"

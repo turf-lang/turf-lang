@@ -1323,6 +1323,49 @@ types as `&N[2]`.
 
 ---
 
+### 6.29 Lint levels — FROZEN (TDP-2-003 V-1, 2026-10-19)
+
+Recorded under `docs/development/FREEZE.md` §6.0's rule that a decision made in
+the course of work is written down, not left in a commit. Account:
+`docs/development/changes/TDP-2-003.md`. Roadmap: `docs/planning/ROADMAP_v3.0.0.md`
+V-1 and §5.4 (a new check lands as a warning; the warning can be silenced;
+`--deny-warnings` is upgrade-unsafe without a pin).
+
+- **A level belongs to a warning code, and only a warning has one (F-LINT-1).**
+  `allow` records nothing, `warn` (every warning's start) prints it and the
+  build succeeds, `deny` records it as an error. An error's level is always
+  `deny`: `--allow`/`--warn` of an error's code is a usage error (exit 2),
+  `--deny` of one is accepted and does nothing. A level that names no code the
+  compiler has, a malformed code, or a flag with no value is a usage error,
+  never silently ignored.
+- **There is no source syntax (F-LINT-2).** A level is set by whoever builds,
+  in exactly three places: the compiler flags `--allow|--warn|--deny <code>`
+  and `--lint-set 2.N` (repeatable; the later flag for a code wins); `turf.toml`'s
+  `[lints]` table (`E163 = "allow"`, `lint-set = "2.N"`), which `turf` validates
+  for shape and hands to the compiler as those same flags ahead of the user's own
+  (so the command line beats the file); and the pin. The compiler never reads
+  `turf.toml` (F-PKG-1), and `turf` never needs the list of codes. Driver
+  interface 1.8 carries the flags; a manifest with `[lints]` needs it.
+- **The pin is a release (F-LINT-3).** Every code records the 2.x minor that
+  added it (`ErrorCodeEntry::SinceMinor`; 0 for everything in 2.0). `lint-set =
+  "2.N"` starts every warning added after 2.N at `allow`; a level named for the
+  code wins over the pin either way. A set newer than the compiler is an error;
+  only `2.N` sets exist until 3.0 (B-1 adds `"3.0"`, B-10 retires old pins).
+  This is what makes `--deny` upgrade-safe: a new warning in 2.N+1 cannot fail a
+  build that pinned 2.N.
+- **Every warning has a registry code (F-LINT-4).** A level names a code, so a
+  warning class with no row in `ErrorCodes.h` is a defect;
+  `scripts/check/error_codes_check.sh` fails it. A class derived from
+  `TurfWarning` is named `...Warning`, an error's never is (`isWarningCode()`).
+  E152–E171 were assigned to the twenty warnings that had none.
+- **The stdlib is never denied (F-LINT-5).** A warning inside `lib/std` stays
+  the hidden warning OVH-012 makes it, even under `--deny`, unless
+  `--stdlib-warnings` is also given.
+- **A denied warning is an error in every respect (F-LINT-6)**: error header,
+  counted as an error, blocks the build and `--check`, takes the one-error-per-line
+  cascade rule, reaches `turf::analyze` as `Severity::Error`. Its text keeps the
+  `Warning:` label and a line says it is denied.
+
 ## Appendix — frozen-decision IDs
 
 A change record's *Frozen decisions relied on* row cites these IDs
@@ -1368,6 +1411,11 @@ Overhaul (F-TYPE-1), whose third column points at their section above.
 | **F-DIAG-1** | Sandbox verification of SLM suggestions is **never removed**. | §16 |
 | **F-DIAG-2** | An unvalidated suggestion can never clear the display gate. | §16 |
 | **F-DIAG-3** | No new `SLM::ErrorCategory` values without an explicit request. | §16 |
+| **F-LINT-1** | Only a warning has a level (`allow`/`warn`/`deny`, default `warn`); an error is always `deny`, and `--allow`/`--warn` of an error's code is a usage error. A level naming nothing real is a usage error, never a no-op. | §6.29 above (TDP-2-003 V-1) |
+| **F-LINT-2** | Levels have no source syntax: the flags `--allow\|--warn\|--deny <code>`, `--lint-set 2.N`, and `turf.toml` `[lints]` (which `turf` passes as those flags before the user's own; the compiler never reads the manifest). Driver interface 1.8. | §6.29 above |
+| **F-LINT-3** | `lint-set = "2.N"` starts every warning added after 2.N at `allow`; an explicit level wins; a set newer than the compiler is an error. | §6.29 above |
+| **F-LINT-4** | Every warning class has a registry code, and `...Warning` is the name of a warning class only. | §6.29 above |
+| **F-LINT-5** | `deny` never applies to a warning inside `lib/std` unless `--stdlib-warnings` is given. | §6.29 above |
 | **F-OPT-1** | Optimization levels change speed/size/debuggability only — never observable behaviour. | §17 |
 | **F-OPT-2** | Bounds/overflow/div-by-zero checks may be *removed by proof*, never by flag. | §17 |
 | **F-TRACK-1** | Every implementation session updates a change record under `docs/development/`. | §18 |

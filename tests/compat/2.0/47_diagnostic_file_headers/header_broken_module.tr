@@ -1,0 +1,5 @@
+// Companion for fail_header_names_imported_file.tr: a module with a real
+// error inside it. `_module.tr` keeps the runner from treating it as a test.
+pub fn broken(): int {
+    return "not an int";
+}

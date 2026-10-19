@@ -1,0 +1,62 @@
+// A generic constructor takes its type arguments from the type being built,
+// and its arguments widen to them like any call's: an int for a double T, an
+// untyped literal for an int32 T. The value really is converted.
+import list::List;
+import test;
+
+struct Box<T> {
+    v: T
+}
+
+fn<T> Box.new(v: T): void {
+    self.v = v;
+}
+
+struct Pair<A, B> {
+    a: A,
+    b: B
+}
+
+fn<A, B> Pair.new(a: A, b: B): void {
+    self.a = a;
+    self.b = b;
+}
+
+fn take(b: Box<double>): double {
+    return b.v;
+}
+
+fn make(): Box<double> {
+    return Box::new(3);
+}
+
+fn main(): int {
+    mut b: Box<double> = Box::new(1);
+    test::assert_eq(b.v / 4.0, 0.25, "declared variable");
+    b = Box::new(2);
+    test::assert_eq(b.v / 4.0, 0.5, "assignment");
+    test::assert_eq(take(Box::new(5)) / 2.0, 2.5, "argument");
+    test::assert_eq(make().v / 2.0, 1.5, "return value");
+
+    immut n: int = 7;
+    mut c: Box<double> = Box::new(n);
+    test::assert_eq(c.v / 2.0, 3.5, "an int variable");
+
+    mut small: Box<int32> = Box::new(4);
+    test::assert_eq(typeof(small.v), "int32", "an untyped literal for int32");
+
+    immut m: int32 = 3;
+    mut wide: Box<int> = Box::new(m);
+    test::assert_eq(wide.v + 1, 4, "int32 to int");
+
+    mut p: Pair<string, double> = Pair::new("x", 9);
+    test::assert_eq(p.b / 2.0, 4.5, "one of two type arguments widens");
+
+    mut l: List<Box<double>> = List::default();
+    l.push(Box::new(6));
+    test::assert_eq(l.get(0).v / 4.0, 1.5, "collection element");
+
+    mut i: Box<int> = Box::new(8);
+    test::assert_eq(i.v / 3, 2, "an exact int stays int");
+    return 0;
+}

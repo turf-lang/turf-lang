@@ -1,0 +1,37 @@
+// LEC-003: every literal kind a field pattern may test.
+import test;
+
+enum Mode { Fast, Slow }
+struct Rec { n: int, small: int32, c: char, ok: bool, s: string, m: Mode }
+
+fn kind(r: Rec): int {
+    mut k: int;
+    compare r {
+        matches Rec { n: -5, .. }: k = 1; done
+        matches Rec { c: 'z', .. }: k = 2; done
+        matches Rec { ok: true, m: Mode::Slow, .. }: k = 3; done
+        matches Rec { s: "hello", small: 7, .. }: k = 4; done
+        matches _: k = 0; done
+    }
+    return k;
+}
+
+fn main(): int {
+    mut r: Rec = Rec::default();
+    r.n = -5;
+    test::assert(kind(r) == 1, "negative int literal");
+    r.n = 0;
+    r.c = 'z';
+    test::assert(kind(r) == 2, "char literal");
+    r.c = 'a';
+    r.ok = true;
+    r.m = Mode::Slow;
+    test::assert(kind(r) == 3, "bool literal with an enum variant");
+    r.ok = false;
+    r.s = "hello";
+    r.small = 7;
+    test::assert(kind(r) == 4, "string and int32 literals");
+    r.small = 8;
+    test::assert(kind(r) == 0, "falls to the wildcard");
+    return 0;
+}

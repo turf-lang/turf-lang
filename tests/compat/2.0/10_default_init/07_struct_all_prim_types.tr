@@ -1,0 +1,20 @@
+// Test: struct containing all primitive types — all zero-default via
+// explicit AllTypes::default() (SEM-004: no more eager zero-init).
+import io;
+
+import test;
+struct AllTypes {
+    i: int,
+    d: double,
+    b: bool,
+    s: string
+}
+
+fn main(): int {
+    mut a: AllTypes = AllTypes::default();
+    test::assert(a.i == 0, "int field default 0");
+    test::assert(a.d == 0.0, "double field default 0.0");
+    test::assert(a.b == false, "bool field default false");
+    test::assert(a.s == "", "string field default empty");
+    return 0;
+}

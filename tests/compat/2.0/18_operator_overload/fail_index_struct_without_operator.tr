@@ -1,0 +1,14 @@
+// EXPECT-DIAG: E126
+// EXPECT-DIAG: Cannot index a value of type 'IntBox'
+// REL-004 (fuzzer): a struct that declares no `operator []` was indexed anyway;
+// the access had no type and Codegen stopped with "Base is not an array or
+// pointer". Found as a one-token mutation of
+// 10_operator_index_get_set.tr (the declaration was deleted).
+struct IntBox {
+    a: int,
+}
+
+fn main(): int {
+    mut box: IntBox = IntBox::default();
+    return box[0];
+}

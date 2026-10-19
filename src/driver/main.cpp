@@ -23,6 +23,7 @@
 #include "diagnostics/ErrorCategory.h"
 #include "diagnostics/ErrorCodes.h"
 #include "tooling/Formatter.h"
+#include "diagnostics/LintLevels.h"
 #include "frontend/Lexer.h"
 #include "analysis/Lint.h"
 #include "tooling/MigratePub.h"
@@ -132,8 +133,11 @@ using namespace llvm;
 static constexpr int TurfcInterfaceMajor = 1;
 // 1.6 adds `--emit-obj` (write the object, never link); a driver that wants
 // it asks for 1.6, everything else still needs 1.1. 1.7 adds `--test
-// --only <path>` (run some of the tests); `turf test <path>` asks for it.
-static constexpr int TurfcInterfaceMinor = 7;
+// --only <path>` (run some of the tests); `turf test <path>` asks for it. 1.8
+// (V-1) adds the lint levels, `--allow|--warn|--deny <code>` and `--lint-set
+// 2.N`, also accepted by `--test`; `turf` asks for it only when `turf.toml`
+// has a [lints] table.
+static constexpr int TurfcInterfaceMinor = 8;
 
 // The exit statuses (FREEZE.md 6.21, F-CLI-1, REL-001). The split exists so a script
 // or an editor can tell "your program has a mistake" (1: the compiler ran and
@@ -428,6 +432,7 @@ static const char *turfcUsage() {
   return "Usage: turfc <filename.tr> [-o output] [--emit-llvm | --emit-obj] [--smart]\n"
          "         [--smart-write-fix=<path>] [--link <libname>]\n"
          "         [--allow-unsafe-modules] [--stdlib-warnings]\n"
+         "         [--allow <code>] [--warn <code>] [--deny <code>] [--lint-set <2.N>]\n"
          "         [-O0|-O1|-O2|-O3|-Os] [-g] [--target=<triple>] [-mcpu=<cpu>]\n"
          "         [--check [--module]] [--package-graph <file>]\n"
          "         [--resolve] [--typecheck] [--dump-ast] [--dump-resolver-symbols]\n"
@@ -440,6 +445,7 @@ static const char *turfcUsage() {
          "         [-O0|-O1|-O2|-O3|-Os] [-g] [--link <libname>] [--jobs <n>]\n"
          "         [--timeout <seconds>] [--diag-register <file>]\n"
          "         [--allow-unsafe-modules] [--stdlib-warnings]\n"
+         "         [--allow <code>] [--warn <code>] [--deny <code>] [--lint-set <2.N>]\n"
          "       turfc --explain E0NN\n"
          "       turfc --version\n"
          "       turfc help\n"
@@ -463,8 +469,46 @@ static const char *const KnownOptions[] = {
     "--target=",          "--explain",      "-mcpu=",
     "--test",             "--jobs",         "--timeout",
     "--diag-register",    "--exclude",      "--only",
-    "--skip-unlexable",
+    "--skip-unlexable", "--allow",      "--warn",         "--deny",
+    "--lint-set",
 };
+
+/// `--allow|--warn|--deny <code>` and `--lint-set <2.N>` (V-1, LintLevels.h):
+/// the lint levels. Both a compile and `--test` take them (the runner hands
+/// them on to every test's compile), so the check lives here once. A code the
+/// compiler does not have, an error's code given `--allow`/`--warn`, or a lint
+/// set that does not exist is a usage error: a level that silently did nothing
+/// would let a typo'd `--deny E16` pass a build it was meant to fail.
+static bool isLintFlag(const std::string &Arg) {
+  return Arg == "--allow" || Arg == "--warn" || Arg == "--deny" ||
+         Arg == "--lint-set";
+}
+
+/// This compiler's own 2.x minor, from the root VERSION ("2.1.1" is 1).
+static int compilerMinor() {
+  const std::string V = TURF_VERSION;
+  const size_t Dot = V.find('.');
+  return Dot == std::string::npos ? 0 : std::atoi(V.c_str() + Dot + 1);
+}
+
+static void applyLintFlag(const std::string &Flag, const std::string &Value) {
+  std::string Err;
+  bool Ok;
+  if (Flag == "--lint-set")
+    Ok = LintLevels::setLintSet(Value, compilerMinor(), Err);
+  else
+    Ok = LintLevels::setLevel(
+        Value,
+        Flag == "--allow"  ? LintLevels::Level::Allow
+        : Flag == "--warn" ? LintLevels::Level::Warn
+                           : LintLevels::Level::Deny,
+        Err);
+  if (!Ok) {
+    std::cerr << "Error: " << Flag << " " << Value << ": " << Err << ".\n"
+              << "Run `turfc help` for the options.\n";
+    std::exit(ExitUsage);
+  }
+}
 
 /// An unknown option is a usage error, never something to ignore: a typo'd
 /// `--chek` that was silently dropped would compile and link a program the
@@ -585,6 +629,9 @@ static CompilerOptions parseArgs(int argc, char **argv) {
       opts.PackageGraphFile = argv[++i];
     } else if (arg == "--link" && i + 1 < argc) {
       opts.LinkLibs.push_back(argv[++i]);
+    } else if (isLintFlag(arg) && i + 1 < argc) {
+      applyLintFlag(arg, argv[i + 1]);
+      ++i;
     } else if (arg.rfind("--target=", 0) == 0) {
       opts.TargetTriple = arg.substr(std::string("--target=").size());
     } else if (arg.rfind("-mcpu=", 0) == 0) {
@@ -607,7 +654,8 @@ static CompilerOptions parseArgs(int argc, char **argv) {
                   << "' (expected one of -O0, -O1, -O2, -O3, -Os).\n";
         std::exit(ExitUsage);
       }
-    } else if (arg == "-o" || arg == "--package-graph" || arg == "--link") {
+    } else if (arg == "-o" || arg == "--package-graph" || arg == "--link" ||
+               isLintFlag(arg)) {
       // Reaching here means the value-taking branches above did not match, i.e.
       // the option is the last argument. "Unknown option: -o" would be a lie.
       std::cerr << "Error: option '" << arg << "' needs a value.\n"
@@ -821,6 +869,11 @@ static int runTestMode(int argc, char **argv) {
     } else if (Arg == "--link") {
       T.CompileFlags.push_back(Arg);
       T.CompileFlags.push_back(NeedValue(I, Arg));
+    } else if (isLintFlag(Arg)) {
+      const std::string V = NeedValue(I, Arg);
+      applyLintFlag(Arg, V); // a bad one stops here, not in every test's compile
+      T.CompileFlags.push_back(Arg);
+      T.CompileFlags.push_back(V);
     } else if (Arg == "-g" || Arg == "--allow-unsafe-modules" || Arg == "--stdlib-warnings") {
       T.CompileFlags.push_back(Arg);
     } else if (Arg == "-O0" || Arg == "-O1" || Arg == "-O2" || Arg == "-O3" || Arg == "-Os") {

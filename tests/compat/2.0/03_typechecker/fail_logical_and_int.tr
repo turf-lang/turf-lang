@@ -1,0 +1,8 @@
+// EXPECT-DIAG: E057
+// EXPECT-DIAG: Cannot use '&&' with 'int' and 'bool': both operands must be 'bool'
+// `&&` and `||` combine bools; an int is not a condition.
+fn main(): int {
+    mut n: int = 1;
+    mut ok: bool = n && true;
+    return 0;
+}

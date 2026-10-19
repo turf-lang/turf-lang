@@ -1,0 +1,9 @@
+// EXPECT-DIAG: E135
+// EXPECT-DIAG: This expression has type 'int', not a function
+// Regression test: `5();` -- a callee that is neither a name nor `a::b` was
+// never validated, so Codegen died with an LLVM internal error ("First-class
+// functions are not supported yet") instead of the compiler rejecting it.
+fn main(): int {
+    5();
+    return 0;
+}

@@ -1,0 +1,38 @@
+import test;
+extern fn strlen(s: string): int;
+
+struct User {
+    age: int,
+    name: string
+}
+
+fn User.new(age: int, name: string): void {
+    self.age = age;
+    self.name = name;
+}
+
+fn main(): int {
+    mut users: User[3] = [
+        User::default(),
+        User::default(),
+        User::default()
+    ];
+
+    users[0] = User::new(25, "Alice");
+    users[1] = User::new(30, "Bob");
+    users[2] = User::new(35, "Charlie");
+
+    mut ageSum: int = 0;
+    for user in users {
+        ageSum = ageSum + user.age;
+    }
+    test::assert(ageSum == 90, "");
+
+    mut nameLenSum: int = 0;
+    for user in users {
+        nameLenSum = nameLenSum + strlen(user.name);
+    }
+    test::assert(nameLenSum == 15, ""); // 5+3+7
+
+    return 0;
+}

@@ -1,0 +1,1 @@
+41/04 PASS: GC string crosses FFI (strlen, write) correctly around a forced collection

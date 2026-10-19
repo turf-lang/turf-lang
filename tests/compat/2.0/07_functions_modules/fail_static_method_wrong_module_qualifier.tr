@@ -1,0 +1,18 @@
+// EXPECT-DIAG: E030
+// EXPECT-DIAG: Module 'mem' has nothing named 'Vec2'
+// Regression test: `Module::StructName::method(...)` where StructName is
+// real but declared in a DIFFERENT module (not Module) must be rejected --
+// the 3-part chain's leading ModuleQualifier used to be silently ignored
+// entirely for a static-method-call callee (only the struct/method names
+// mattered), so ANY qualifier -- right or completely wrong -- produced the
+// identical result. Confirmed live as a genuine bug before this check
+// existed: `mem::Vec2::zero()` compiled cleanly even though Vec2 actually
+// lives in static_shape_module, not mem.
+
+import mem;
+import static_shape_module::Vec2;
+
+fn main(): int {
+    immut z: Vec2 = mem::Vec2::zero();
+    return 0;
+}

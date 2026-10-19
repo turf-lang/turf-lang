@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E039
+// EXPECT-DIAG: Enum 'Direction' has no variant 'Norht'
+// EXPECT-DIAG: It may be from the current file: 'North'
+// Test (fail): Misspelled enum variant should produce resolver error with suggestion
+enum Direction { North, East, South, West }
+
+fn main(): int {
+    immut d: Direction = Direction::Norht;
+    return 0;
+}

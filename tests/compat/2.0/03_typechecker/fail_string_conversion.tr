@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E065
+// EXPECT-DIAG: Cannot explicitly cast 'Point' to 'string'
+import io;
+
+struct Point { x: int }
+
+fn main(): int {
+    mut p: Point = Point::default();
+    mut s: string = p to string;
+    io::printline(s);
+
+    return 0;
+}

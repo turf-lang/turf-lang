@@ -1,0 +1,20 @@
+// EXPECT-DIAG: E094
+// EXPECT-DIAG: This arm can never run
+// Arms are tried in source order and the first header that matches wins, so an
+// arm after `matches _:` is dead. A warning: the program still compiles.
+struct Point {
+    x: int,
+}
+
+fn main(): int {
+    mut p: Point = Point::default();
+    compare p {
+        matches _:
+        return 0;
+        done
+        matches Point { x: 3 }:
+        return 1;
+        done
+    }
+    return 0;
+}

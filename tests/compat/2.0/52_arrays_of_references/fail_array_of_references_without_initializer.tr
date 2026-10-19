@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E128
+// EXPECT-DIAG: needs an initializer
+// An array of non-null references has no valid zero value: the storage is
+// zero-filled, so an element nothing wrote would be a null `&N` (owner,
+// 2026-10-12). `(&?N)[2]` would be fine: its elements start null.
+struct N { val: int }
+
+fn main(): int {
+    mut a: (&N)[2];
+    return 0;
+}

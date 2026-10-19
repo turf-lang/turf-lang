@@ -1,0 +1,14 @@
+// EXPECT-DIAG: E126
+// EXPECT-DIAG: Compound assignment '+=' is not supported on 'int32'
+// OVH-005: compound assignment (`+=` etc.) on an 'int32' lvalue must be a
+// clean, DEDICATED compile error naming the actual reason (int32 is never
+// itself an arithmetic result type) rather than the generic "Cannot assign
+// value of type 'int' to variable of type 'int32'" message, which reads
+// like an ordinary type mismatch a wider RHS type could fix -- none ever
+// could, since inferArithmeticType() always promotes an int32 operand to
+// plain 'int'.
+fn main(): int {
+    mut c: int32 = 5 to int32;
+    c += 1;
+    return c to int;
+}

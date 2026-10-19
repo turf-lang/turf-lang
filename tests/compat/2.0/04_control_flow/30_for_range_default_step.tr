@@ -1,0 +1,38 @@
+// Regression test (LANG-004 item 1): `step` on a range-based `for` is now
+// optional, defaulting to `step <var>++`, instead of being a mandatory
+// clause whose absence was a parse error ("Expected 'step' after the range
+// end value."). The default must produce IDENTICAL behavior to writing
+// `step <var>++` explicitly -- verified here by running both forms over the
+// same range and comparing their accumulated sums, rather than just
+// asserting a single hardcoded expected total (which could hide an
+// off-by-one that happens to cancel out).
+//
+// Also covers the `double`-ranged case: the synthesized default step is a
+// PostfixExprAST built unconditionally regardless of the loop variable's
+// type, so this confirms it works for the `double` postfix-increment path
+// too (PostfixExprAST::codegen(), CodegenVar.cpp), not just `int`.
+
+import test;
+
+fn main(): int {
+    mut sumDefault: int = 0;
+    for i in 0..5 {
+        sumDefault = sumDefault + i;
+    }
+
+    mut sumExplicit: int = 0;
+    for i in 0..5 step i++ {
+        sumExplicit = sumExplicit + i;
+    }
+
+    test::assert(sumDefault == sumExplicit, "default step must match explicit 'step i++' exactly");
+    test::assert(sumDefault == 10, "0..5 default-step sum should be 0+1+2+3+4 = 10");
+
+    mut dSumDefault: double = 0.0;
+    for x in 0.0..3.0 {
+        dSumDefault = dSumDefault + x;
+    }
+    test::assert(dSumDefault > 2.9 && dSumDefault < 3.1, "double-ranged default step should behave like step x++");
+
+    return 0;
+}

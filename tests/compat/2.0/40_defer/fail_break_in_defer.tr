@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E083
+// EXPECT-DIAG: A deferred statement can't 'break'
+// LANG-003: same rule as fail_return_in_defer.tr, for `break` -- a bare
+// `break` directly inside a deferred statement (not absorbed by a loop
+// that itself begins inside the defer, contrast
+// 06_defer_wraps_loop_break_absorbed.tr) always escapes past the defer.
+fn main(): int {
+    defer break;
+    return 0;
+}

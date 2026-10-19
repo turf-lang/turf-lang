@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E139
+// EXPECT-DIAG: '5.' ends in a '.' with no digit after it
+// A bare trailing dot (`5.`, nothing after it) is not a number: FREEZE.md's
+// dotted-float grammar requires at least one fractional digit after '.'.
+// The lexer used to return `5` and leave the '.' to the parser, which said
+// "Expected a method name after '.'" to someone who was writing a decimal
+// (issue #263). It is now a malformed number (E139). A letter after the dot
+// (`5.name`) is still member access and is NOT rejected here.
+
+fn main(): int {
+    mut x: double = 5.;
+    return 0;
+}

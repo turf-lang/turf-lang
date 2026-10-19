@@ -1,0 +1,26 @@
+import test;
+
+fn main(): int {
+    mut x: int = 10;
+    test::assert(x == 10, "Outer x should be 10");
+
+    if (x > 5) {
+        mut x: int = 20; // Shadow outer x
+        test::assert(x == 20, "x should be shadowed to 20");
+
+        if (x > 15) {
+            mut x: int = 30; // Shadow middle x
+            test::assert(x == 30, "x should be shadowed to 30");
+        } else {
+            test::assert(false, "Unreachable");
+        }
+
+        test::assert(x == 20, "x should revert to 20 after innermost block");
+    } else {
+        test::assert(false, "Unreachable");
+    }
+
+    test::assert(x == 10, "x should revert to 10 after middle block");
+
+    return 0;
+}

@@ -1,0 +1,24 @@
+import test;
+
+fn main(): int {
+    immut numbers: int[4] = [5, 10, 15, 20];
+    mut indexSum: int = 0;
+    mut valueSum: int = 0;
+    for (index, value) in numbers {
+        indexSum = indexSum + index;
+        valueSum = valueSum + value;
+    }
+    test::assert(indexSum == 6, "");  // 0+1+2+3
+    test::assert(valueSum == 50, ""); // 5+10+15+20
+
+    // Spot-check a specific (index, value) pair.
+    mut checked: bool = false;
+    for (i, v) in numbers {
+        if i == 2 {
+            test::assert(v == 15, "");
+            checked = true;
+        }
+    }
+    test::assert(checked, "");
+    return 0;
+}

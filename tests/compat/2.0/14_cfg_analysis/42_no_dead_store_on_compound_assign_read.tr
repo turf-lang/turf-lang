@@ -1,0 +1,26 @@
+// EXPECT-NO-DIAG: dead store
+// EXPECT-NO-DIAG: never used
+// LEC-005: `x += 1` READS x. The dead-store walk used to apply a statement's
+// reads first and then its definitions, so for a read-modify-write the
+// definition erased the very liveness the read had just created -- and the
+// PREVIOUS store looked dead: `mut x: int = 0; x += 1; return x;` warned
+// "assigned but never read" about the `= 0`, which is read by the `+=` on the
+// next line. The same shape through `-=`, `*=`, and postfix `++` is below.
+import test;
+
+fn main(): int {
+    mut a: int = 0;
+    a += 1;
+
+    mut b: int = 10;
+    b -= 2;
+
+    mut c: int = 3;
+    c *= 4;
+
+    mut d: int = 5;
+    d++;
+
+    test::assert(a + b + c + d == 1 + 8 + 12 + 6, "compound assignment and ++ read the old value");
+    return 0;
+}

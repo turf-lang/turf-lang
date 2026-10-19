@@ -1,0 +1,10 @@
+// Companion module for fail_nested_broken_import.tr -- deliberately imports
+// the ALREADY-broken broken_extern_param_module.tr one level further down,
+// so the real syntax error is 2 import-levels deep from the actual test
+// entry point. Named `..._module.tr` so scripts/test_runner.sh's
+// `grep -v "_module.tr"` skips it as a standalone test entry point.
+import broken_extern_param_module;
+
+pub fn helperB(): int {
+    return 1;
+}

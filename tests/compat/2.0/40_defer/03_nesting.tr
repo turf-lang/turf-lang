@@ -1,0 +1,32 @@
+// LANG-003: a `return` from inside several nested blocks runs all of
+// them's pending defers, innermost first -- exactly the ordering
+// `FlushPendingDefers()` (CodegenControlFlow.cpp) walks the open frame
+// stack in.
+import test;
+
+struct Trail {
+    log: string
+}
+
+fn Trail.new(): void {
+    self.log = "";
+}
+
+fn threeLevels(t: &Trail): void {
+    defer t.log = t.log + "1"; // function body's own frame
+    if (true) {
+        defer t.log = t.log + "2"; // if-body's frame
+        if (true) {
+            defer t.log = t.log + "3"; // nested if-body's frame
+            return;
+        }
+    }
+}
+
+fn main(): int {
+    mut t: Trail = Trail::new();
+    threeLevels(&t);
+    test::assert(t.log == "321",
+        "return from 3 nested blocks runs all 3 levels' defers, innermost first");
+    return 0;
+}

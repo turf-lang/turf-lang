@@ -1,0 +1,41 @@
+// Regression test: an exhaustive `compare` over a function PARAMETER of
+// enum type (not a local variable) must both (a) actually be enforced as
+// exhaustive by TypeChecker, and (b) not trigger a false "missing return"
+// error when followed by a trailing "belt and suspenders" return -- the
+// idiom used throughout this test suite (see e.g. 13_dsa_state_machine.tr).
+// See fail_enum_non_exhaustive_param.tr for the companion non-exhaustive
+// case, and src/analysis/CFG.cpp's visitCompare() doc comment for why `compare` is
+// deliberately never treated as a hard CFG terminator on its own, even
+// when provably exhaustive.
+
+import io;
+
+import test;
+enum Direction { North, East, South, West }
+
+fn describe(d: Direction): int {
+    compare d {
+        matches Direction::North:
+        return 1;
+        done
+        matches Direction::East:
+        return 2;
+        done
+        matches Direction::South:
+        return 3;
+        done
+        matches Direction::West:
+        return 4;
+        done
+    }
+    return 0; // unreachable in practice, but must not be a compile error
+}
+
+fn main(): int {
+    test::assert(describe(Direction::North) == 1, "");
+    test::assert(describe(Direction::East) == 2, "");
+    test::assert(describe(Direction::South) == 3, "");
+    test::assert(describe(Direction::West) == 4, "");
+    io::printline("ok");
+    return 0;
+}

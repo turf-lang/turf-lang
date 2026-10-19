@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E144
+// EXPECT-DIAG: 'view' is a 'mut' view of 'fixed', which is immutable.
+// ...and when an existing `mut` view is pointed at an immutable array later.
+fn main(): int {
+    immut fixed: int[3] = [1, 2, 3];
+    mut scratch: int[3] = [4, 5, 6];
+    mut view: int[] = scratch[..];
+    view = fixed[1..];
+    return view[0];
+}

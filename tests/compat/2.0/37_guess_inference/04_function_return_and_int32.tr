@@ -1,0 +1,24 @@
+// SEM-003 (§11.6): a plain function call infers its DECLARED return type,
+// and an int32-typed expression infers int32 -- NOT widened to int. The
+// non-widening case matters because guess reuses whatever type the
+// TypeChecker already assigned the initializer expression (getType()); an
+// implementation that instead re-derived a "default" type from scratch
+// could plausibly widen an int32 the way an untyped literal defaults to
+// int, which would be wrong (§11.6's own table calls this out explicitly).
+import test;
+
+fn makeFive(): int {
+    return 5;
+}
+
+fn main(): int {
+    mut n = makeFive();
+    test::assert(n == 5, "function call initializer infers its declared return type");
+
+    mut small: int32 = -1 to int32;
+    mut copy = small;
+    test::assert(typeof(copy) == "int32", "int32-typed initializer is not widened to int under guess");
+    test::assert(copy == small, "guess-inferred int32 variable holds the right value");
+
+    return 0;
+}

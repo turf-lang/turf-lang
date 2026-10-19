@@ -1,0 +1,18 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: cannot go on an instance method yet
+// The double-free check reads `@ownership` from function calls only, and an
+// instance method is called as `x.method()`, so the annotation would silently
+// check nothing. It is rejected until method calls are understood.
+
+struct Pool {
+    n: int,
+}
+
+@ownership(acquires)
+fn Pool.make(): &Pool {
+    return heap(self);
+}
+
+fn main(): int {
+    return 0;
+}

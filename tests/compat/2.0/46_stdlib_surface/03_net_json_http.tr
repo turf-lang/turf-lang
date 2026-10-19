@@ -1,0 +1,121 @@
+// LEC-007 API lock, part 3: net, json and http. See 01_core_and_collections.tr
+// for what this folder is. Networking runs for real over loopback with the
+// single-process synchronous connect technique 34_http_and_json/03 documents.
+// Server.listen() never returns, so it is only referenced.
+import http;
+import json;
+import list::List;
+import net;
+import strings;
+import test;
+
+fn handler(req: http::Request, res: http::Response): void {
+    res.send_text(200, "x");
+}
+
+// `return` inside `recover as err run` returns from the ENCLOSING function, so
+// each error-type reference lives in its own helper.
+fn json_error_is_unexpected_end(text: string): bool {
+    immut _v: json::JsonValue = json::parse(text) recover as err run {
+        return err == json::JsonError::UnexpectedEnd;
+    };
+    return false;
+}
+
+fn net_error_is_connection_refused(): bool {
+    // Nothing listens on this port.
+    immut _c: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 18749) recover as err run {
+        return err == net::NetworkError::ConnectionRefused;
+    };
+    return false;
+}
+
+fn never_called(): void {
+    mut app: http::Server = http::Server::default();
+    app.listen(18750);
+}
+
+fn main(): int {
+    if strings::length("x") > 1000 {
+        never_called();
+    }
+
+    // ── json ───────────────────────────────────────────────────────────────
+    mut obj: json::JsonValue = json::JsonValue::new_object();
+    obj.set("name", json::JsonValue::from_string("turf"));
+    obj.set("n", json::JsonValue::from_number(2.0));
+    obj.set("ok", json::JsonValue::from_bool(true));
+    obj.set("nothing", json::JsonValue::null_value());
+    mut arr: json::JsonValue = json::JsonValue::new_array();
+    arr.push(json::JsonValue::from_number(1.0));
+    obj.set("list", arr);
+
+    test::assert(obj.has("name") && !obj.has("zzz"), "JsonValue.has");
+    test::assert(obj.get_string("name") == "turf" && obj.get_number("n") == 2.0 && obj.get_int("n") == 2 && obj.get_bool("ok"), "JsonValue.get_string / get_number / get_int / get_bool");
+    test::assert(obj.get("list").length() == 1 && obj.get("list").at(0).num_val == 1.0, "JsonValue.get / length / at / num_val");
+    test::assert(obj.kind == json::JsonType::Object && obj.get("name").str_val == "turf" && obj.get("ok").bool_val, "JsonValue.kind / str_val / bool_val");
+    test::assert(obj.obj_keys.length() == 5 && obj.obj_vals.length() == 5 && obj.get("list").arr_val.length() == 1, "JsonValue.obj_keys / obj_vals / arr_val");
+
+    immut text: string = json::stringify(obj);
+    immut back: json::JsonValue = json::parse(text) recover run { test::fail("parse"); return 1; };
+    test::assert(back.get_string("name") == "turf" && back.get_int("n") == 2, "json::stringify / parse round trip");
+    test::assert(json::escape_string("a\"b") == "a\\\"b", "json::escape_string");
+    test::assert(json_error_is_unexpected_end("[1,"), "json::JsonError");
+
+    // ── net ────────────────────────────────────────────────────────────────
+    test::assert(net::AF_INET == 2 && net::SOCK_STREAM == 1 && net::SOL_SOCKET == 1 && net::SO_REUSEADDR == 2, "net constants");
+    immut ip: string = net::resolve_hostname("localhost") recover produce "127.0.0.1";
+    test::assert(strings::length(ip) > 0, "net::resolve_hostname");
+    test::assert(net_error_is_connection_refused(), "net::NetworkError");
+
+    mut listener: net::TcpListener = net::TcpListener::bind(18741) recover run {
+        test::fail("bind 18741");
+        return 1;
+    };
+    mut client: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 18741) recover run {
+        test::fail("connect");
+        return 1;
+    };
+    mut server_side: net::TcpConnection = listener.accept() recover run {
+        test::fail("accept");
+        return 1;
+    };
+    test::assert(client.raw_fd() >= 0 && listener.raw_fd() >= 0, "raw_fd");
+
+    // ── http, over that connection ─────────────────────────────────────────
+    client.write("GET /hi?x=1 HTTP/1.1\r\nHost: localhost\r\nX-Probe: yes\r\n\r\n");
+    mut req: http::Request = http::parse_request(server_side);
+    test::assert(req.method == "GET" && strings::starts_with(req.path, "/hi"), "Request.method / path");
+    test::assert(req.has_header("X-Probe") && req.get_header("X-Probe") == "yes" && !req.has_header("Nope"), "Request.has_header / get_header");
+    test::assert(req.headers.length() >= 1 && req.body == "", "Request.headers / body");
+
+    mut res: http::Response = http::Response::default();
+    res.conn = server_side;
+    // One read per send: a stream read returns whatever has arrived, so
+    // reading once after three sends could legitimately see only the first.
+    res.send_text(200, "t");
+    test::assert(strings::contains(client.read(8192), "200 OK"), "Response.send_text");
+    res.send_json(200, "{}");
+    test::assert(strings::contains(client.read(8192), "application/json"), "Response.send_json");
+    res.send_raw(204, "text/plain", "");
+    test::assert(strings::contains(client.read(8192), "204"), "Response.send_raw");
+    test::assert(http::status_text(404) == "404 Not Found" && http::status_text(200) == "200 OK", "http::status_text");
+
+    mut app: http::Server = http::Server::default();
+    app.get("/", handler);
+    test::assert(app.has_route("/") && !app.has_route("/x"), "Server.get / has_route");
+    mut h: fn(http::Request, http::Response): void = app.get_route("/");
+    h(req, res);
+    test::assert(strings::contains(client.read(8192), "200 OK"), "Server.get_route returns the registered handler");
+
+    client.close();
+    server_side.close();
+    listener.close();
+    test::assert(client.raw_fd() == -1, "TcpConnection.close / TcpListener.close");
+
+    // TcpConnection::new / TcpListener::new wrap a descriptor (here -1: nothing to close).
+    mut wrapped: net::TcpConnection = net::TcpConnection::new(-1);
+    mut wrapped_l: net::TcpListener = net::TcpListener::new(-1);
+    test::assert(wrapped.raw_fd() == -1 && wrapped_l.raw_fd() == -1, "TcpConnection.new / TcpListener.new");
+    return 0;
+}

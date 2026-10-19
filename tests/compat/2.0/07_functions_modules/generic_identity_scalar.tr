@@ -1,0 +1,55 @@
+// Regression test: a generic function using its own bare type parameter as
+// a parameter AND return type (`fn<T> identity(x: T): T`) must compile and
+// run correctly for concrete scalar arguments.
+//
+// Before the fix this failed in three successive layers, each masking the
+// next until fixed:
+//   1. Resolver::validateNamedType() (added to close a real "unknown struct
+//      name in function signature" gap) rejected `T` outright as an unknown
+//      type, because ParseType() always parses a bare identifier as
+//      NamedType("T") -- never as TurfGenericParamType -- regardless of
+//      whether "T" is actually one of the enclosing function's own type
+//      parameters.
+//   2. Once validateNamedType() was told to exempt a function/struct's own
+//      TypeParams, calling identity(42) failed overload resolution with
+//      "No overload of 'identity' matches argument types (int)", because
+//      typesCompatible()'s type-erasure fast path specifically checks for a
+//      real TurfGenericParamType instance, which the parsed NamedType("T")
+//      still wasn't.
+//   3. Once Resolver::buildFunctionSymbol() substituted NamedType("T") ->
+//      TurfGenericParamType("T") for its own ResolverFunctionSymbol copy
+//      (fixing overload resolution), the call still crashed the LLVM
+//      backend (malformed fptosi during instruction selection), because
+//      Codegen reads parameter/return types directly off the shared AST
+//      node (FuncDefExprAST::Params / ::ReturnType), which the Resolver-
+//      internal Sym substitution never touched -- getLLVMType(NamedType("T"))
+//      built a bogus empty opaque LLVM struct named "T" instead of erasing
+//      to void*.
+//
+// Fixed by mutating the shared AST node's Params/ReturnType (and, for
+// generic structs, Fields) in place during Resolver::visitFuncDef() /
+// visitStructDecl(), so every later pass sees a real TurfGenericParamType
+// uniformly. See Resolver.cpp's substituteTypeParams().
+//
+// `double` specifically still has a separate, deeper bug in the erasure
+// round-trip and is NOT covered here -- see
+// tests/10_known_bugs/fail_generic_double_param.tr.
+
+import test;
+
+fn<T> identity(x: T): T {
+    return x;
+}
+
+fn main(): int {
+    mut a: int = identity(42);
+    test::assert(a == 42, "");
+
+    mut flag: bool = identity(true);
+    test::assert(flag == true, "");
+
+    mut s: string = identity("hello");
+    test::assert(s == "hello", "");
+
+    return 0;
+}

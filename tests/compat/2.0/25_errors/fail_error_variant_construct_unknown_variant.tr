@@ -1,0 +1,15 @@
+// EXPECT-DIAG: E039
+// EXPECT-DIAG: has no variant 'DivisionByZeroTypo'
+// STD-002: `ErrorType::Variant(messageExpr)`'s one-argument form still
+// validates that the variant actually exists -- a typo'd/unknown variant
+// name is rejected exactly like the bare-reference form already is
+// (NoSuchVariantError), not silently accepted just because it now has an
+// argument.
+error MathError {
+    DivisionByZero,
+}
+
+fn main(): int {
+    mut e: MathError = MathError::DivisionByZeroTypo("oops");
+    return 0;
+}

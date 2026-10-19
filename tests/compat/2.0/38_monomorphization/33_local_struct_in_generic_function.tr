@@ -1,0 +1,30 @@
+// A struct declared locally inside a GENERIC function's body, used at two
+// instantiations. Used to crash the compiler: "Internal error: unknown
+// struct type 'Tmp' in construction -- this is a compiler bug."
+// ParseFuncDef() pushes a temporary type scope holding the function's own
+// `<T>` names, and ParseStructDecl() registered the local struct into
+// whatever scope was innermost -- that one -- so it was popped along with
+// `T` when the function's parse ended, and Codegen's later lookup found
+// nothing. A declared type is now always registered in the outermost scope
+// (SymbolTable::RegisterGlobalType()): its identity has no lexical scope
+// (FREEZE.md §6.11). The same fix covers a local enum/machine/error type.
+
+import test;
+
+fn<T> tagged(v: T): int {
+    struct Tmp { n: int, flag: bool }
+    mut t: Tmp = Tmp::default();
+    t.n = 4;
+    t.flag = true;
+    if (t.flag) {
+        return t.n;
+    }
+    return 0;
+}
+
+fn main(): int {
+    test::assert(tagged(1) == 4, "tagged<int>");
+    test::assert(tagged("s") == 4, "tagged<string>");
+    test::assert(tagged(2.5) == 4, "tagged<double>");
+    return 0;
+}

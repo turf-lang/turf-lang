@@ -1,0 +1,19 @@
+// A `char` is an unsigned byte (0-255; `char -> int` zero-extends), so the
+// ordering operators compare bytes as unsigned. They used signed
+// predicates: `(200 to char) > 'a'` was false while `(200 to char) to int`
+// was 200. Found by turf-fuzz (a `(9999999999 to char) >= (1 to char)`
+// condition took the wrong branch).
+import test;
+
+fn id(x: int): int {
+    return x;
+}
+
+fn main(): int {
+    immut hi: char = id(200) to char;
+    test::assert(hi > 'a' && hi >= 'a' && !(hi < 'a') && !(hi <= 'a'), "200 is above 'a'");
+    immut top: char = id(9999999999) to char;
+    test::assert((top to int) == 255 && top >= (id(1) to char), "255 is the largest byte");
+    test::assert('a' < 'b' && 'Z' < 'a', "ASCII order is unchanged");
+    return 0;
+}

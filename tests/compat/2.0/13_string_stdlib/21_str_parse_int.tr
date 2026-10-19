@@ -1,0 +1,48 @@
+// tests/13_string_stdlib/21_str_parse_int.tr
+// Tests strings::parse_int -- success paths and every documented failure
+// path (empty string, bare "-", non-digit byte), all via `recover`.
+
+import io;
+import strings;
+
+import test;
+// `recover as err run { ... return ...; }`'s diverging `return` returns from
+// the ENCLOSING function, not just the recover expression -- see
+// tests/25_errors/07_recover_as_err.tr's own comment -- so this lives in its
+// own helper rather than inline in main() to avoid bailing out of main()
+// early. The recover expression's own static type still has to match
+// parse_int's success type (`int`) for the `mut result: int = ...`
+// assignment -- only the diverging `return true`/`return false` inside the
+// block (which bypass that assignment entirely) actually determine this
+// helper's `bool` result.
+fn parseFailsWithInvalidInt(s: string): bool {
+    mut result: int = strings::parse_int(s) recover as err run {
+        if err == strings::StringParseError::InvalidInt {
+            return true;
+        }
+        return false;
+    };
+    return false;
+}
+
+fn main(): int {
+    // Success paths
+    test::assert_eq(strings::parse_int("42") recover produce -1, 42, "parse_int: '42' -> 42");
+    test::assert_eq(strings::parse_int("0") recover produce -1, 0, "parse_int: '0' -> 0");
+    test::assert_eq(strings::parse_int("-7") recover produce 999, -7, "parse_int: '-7' -> -7");
+    test::assert_eq(strings::parse_int("123456") recover produce -1, 123456, "parse_int: multi-digit");
+
+    // Failure paths, all recovered to a sentinel instead of aborting
+    test::assert_eq(strings::parse_int("") recover produce -1, -1, "parse_int: empty string fails");
+    test::assert_eq(strings::parse_int("-") recover produce -1, -1, "parse_int: bare '-' fails");
+    test::assert_eq(strings::parse_int("12a") recover produce -1, -1, "parse_int: non-digit byte fails");
+    test::assert_eq(strings::parse_int("abc") recover produce -1, -1, "parse_int: all non-digit fails");
+    test::assert_eq(strings::parse_int("1.5") recover produce -1, -1, "parse_int: decimal point fails for parse_int");
+    test::assert_eq(strings::parse_int(" 5") recover produce -1, -1, "parse_int: leading space fails");
+
+    // recover as err: distinguish the error variant
+    test::assert(parseFailsWithInvalidInt("nope"), "parse_int: recover as err sees InvalidInt variant");
+
+    io::printline("21 PASS: strings::parse_int");
+    return 0;
+}

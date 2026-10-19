@@ -1,0 +1,51 @@
+TURF E170 -- POSSIBLE USE AFTER FREE (WARNING):
+
+CAUSE:
+  A pointer is released on at least one (not every) path that reaches this
+  use, so it may be dangling. Turf cannot evaluate the conditions. This is a
+  WARNING: compilation still succeeds. Freed on EVERY path is error E018.
+
+INCORRECT:
+    @ownership(acquires)
+    extern fn malloc(size: int): int*;
+
+    @ownership(releases: p)
+    extern fn free(p: int*): void;
+
+    fn main(): int {
+        mut flag: int = 1;
+        unsafe {
+            mut q: int* = malloc(sizeof(int) * 4);
+            if flag == 1 {
+                free(q);
+            }
+            q[0] = 1;         // WARNING: may already be freed
+        }
+        return 0;
+    }
+
+CORRECT (use it, then free it once at the end):
+    @ownership(acquires)
+    extern fn malloc(size: int): int*;
+
+    @ownership(releases: p)
+    extern fn free(p: int*): void;
+
+    fn main(): int {
+        mut flag: int = 1;
+        unsafe {
+            mut q: int* = malloc(sizeof(int) * 4);
+            q[0] = 1;
+            if flag == 1 {
+                printline("releasing");
+            }
+            free(q);
+        }
+        return 0;
+    }
+
+FIX:
+  Use the pointer before any path can release it, and release it on one path
+  only, after the last use.
+
+RELATED: E018 (use after free on every path), E171 (a second free), E017.

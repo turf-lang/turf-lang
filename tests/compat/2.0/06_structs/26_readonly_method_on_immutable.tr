@@ -1,0 +1,34 @@
+// Companion to fail_immutable_via_mutating_method.tr: a struct method that
+// does NOT mutate self (a plain getter) must still be callable through an
+// immutable variable. Guards against the immutable-mutating-method check
+// (ResolverFunctionSymbol::MutatesSelf) becoming overly broad and rejecting
+// legitimate read-only calls.
+
+import test;
+
+struct Counter {
+    val: int
+}
+
+fn Counter.new(val: int): void {
+    self.val = val;
+}
+
+fn Counter.bump(): void {
+    self.val = self.val + 1;
+}
+
+fn Counter.get(): int {
+    return self.val;
+}
+
+fn main(): int {
+    mut c: Counter = Counter::new(5);
+    c.bump();
+    test::assert(c.val == 6, "mutable bump should work");
+
+    immut d: Counter = Counter::new(10);
+    test::assert(d.get() == 10, "read-only get() must work on an immutable variable");
+
+    return 0;
+}

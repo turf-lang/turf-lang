@@ -1,0 +1,5 @@
+// Companion of module_warning_names_module_file.tr: `u` is never read.
+pub fn f(): int {
+    mut u: int = 1;
+    return 2;
+}

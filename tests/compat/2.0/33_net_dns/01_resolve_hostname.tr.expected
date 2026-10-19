@@ -1,0 +1,1 @@
+33/01 PASS: net::resolve_hostname("localhost") == 127.0.0.1

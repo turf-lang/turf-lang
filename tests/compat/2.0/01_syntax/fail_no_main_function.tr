@@ -1,0 +1,9 @@
+// EXPECT-DIAG: E119
+// EXPECT-DIAG: No entry point found
+// Issue #263: a program with no `main`. This used to be a raw
+// `std::cerr << "Error: No entry point found..."` with no code and no
+// `--explain`. It is about the whole file rather than a line in it, so it
+// prints without "at line N" (printDiag(), Lexer.cpp).
+fn helper(): int {
+    return 1;
+}

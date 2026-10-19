@@ -1,0 +1,42 @@
+TURF E159 -- LOOP WITH NO EXIT PATH (WARNING):
+
+CAUSE:
+  Control-flow analysis found a loop in a function from which no path leads
+  out: no `break`, no `return`, no condition that can become false. Reported
+  once per function. This is a WARNING: compilation still succeeds. It can be
+  intentional (a server loop).
+
+INCORRECT:
+    fn spin(): int {            // WARNING: loop with no exit path
+        mut n: int = 0;
+        while true {
+            if n > 5 {
+                continue;
+            }
+            n += 1;
+        }
+        return n;
+    }
+
+CORRECT (the loop can break out):
+    fn spin(): int {
+        mut n: int = 0;
+        while true {
+            if n > 5 {
+                break;
+            }
+            n += 1;
+        }
+        return n;
+    }
+
+    fn main(): int {
+        return spin() - 6;
+    }
+
+FIX:
+  Add a `break` or `return` under a condition, or use a loop condition that
+  can become false.
+
+RELATED: E157 (the syntactic form of the same mistake, reported on the loop),
+  E074 (the code after such a loop is unreachable).

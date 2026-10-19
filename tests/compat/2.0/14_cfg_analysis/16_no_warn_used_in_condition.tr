@@ -1,0 +1,10 @@
+// Regression test (#186): `flag` is declared and then read as an if-condition.
+// Must not emit an unused-variable warning.
+fn main(): int {
+    mutable flag: bool = true;
+    mutable count: int = 0;
+    if flag {
+        count = count + 1;
+    }
+    return 0;
+}

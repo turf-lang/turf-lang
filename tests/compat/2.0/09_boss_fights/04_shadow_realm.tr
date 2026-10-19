@@ -1,0 +1,21 @@
+import test;
+
+fn main(): int {
+    mut x: int = 1;
+
+    while x == 1 {
+        mut x: int = 2; // Shadows outer x
+
+        if x == 2 {
+            mut x: int = 3; // Shadows middle x
+            test::assert(x == 3, "");
+        }
+
+        test::assert(x == 2, ""); // Ensure middle x wasn't overwritten by inner x popping
+        break;
+    }
+
+    test::assert(x == 1, ""); // Ensure outer x survived the loop
+
+    return 0;
+}

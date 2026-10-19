@@ -1,0 +1,21 @@
+// Documents the new contract: string `+`/`==`/`!=`/`< > <= >=` are ordinary
+// `operator` overloads in lib/std/strings.tr now, not compiler builtins.
+// Explicit `import strings;` here (rather than relying on `test`'s
+// transitive import) to make that dependency visible in this specific test.
+import strings;
+import test;
+
+fn main(): int {
+    mut a: string = "foo";
+    mut b: string = "bar";
+
+    test::assert(a + b == "foobar", "string concatenation via operator+");
+    test::assert(a == "foo", "string equality via operator==");
+    test::assert(a != b, "string inequality via operator!=");
+    test::assert(b < a, "string ordering via operator< (bar < foo)");
+    test::assert(a > b, "string ordering via operator> (foo > bar)");
+    test::assert(a <= a, "string operator<= reflexive");
+    test::assert(a >= a, "string operator>= reflexive");
+
+    return 0;
+}

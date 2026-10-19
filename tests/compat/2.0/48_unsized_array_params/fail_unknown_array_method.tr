@@ -1,0 +1,8 @@
+// EXPECT-DIAG: E131
+// EXPECT-DIAG: Arrays have no method 'reverse'.
+// Arrays only have length() and copy(); anything else is E131.
+fn main(): int {
+    mut a: int[3] = [1, 2, 3];
+    a.reverse();
+    return a[0];
+}

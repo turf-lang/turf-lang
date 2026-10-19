@@ -1,0 +1,44 @@
+import test;
+
+// Regression test (Issue #180 follow-up): break/continue inside a do-while
+// nested in another loop (and vice versa) must always target the innermost
+// loop's own LoopBlocks entry, never leak to the outer loop -- mirrors
+// 05_nested_loops.tr but crossing do-while with for/while.
+fn main(): int {
+    // do-while nested inside a for loop: inner break only stops the inner
+    // do-while, the outer for keeps iterating.
+    mut outerRuns: int = 0;
+    mut innerTotal: int = 0;
+    for i in 0..3 step i += 1 {
+        outerRuns = outerRuns + 1;
+        mut j: int = 0;
+        do {
+            j = j + 1;
+            if j >= 2 {
+                break;
+            }
+            innerTotal = innerTotal + 1;
+        } while j < 100;
+    }
+    test::assert(outerRuns == 3, "");
+    test::assert(innerTotal == 3, ""); // 1 counted per outer iteration before break
+
+    // for loop nested inside a do-while: inner continue only skips the
+    // for-loop's own step, the outer do-while's counter still advances once
+    // per outer iteration.
+    mut k: int = 0;
+    mut sum: int = 0;
+    do {
+        for n in 0..5 step n += 1 {
+            if n % 2 == 0 {
+                continue;
+            }
+            sum = sum + n;
+        }
+        k = k + 1;
+    } while k < 2;
+    test::assert(sum == 8, ""); // (1+3) per outer pass * 2 passes
+    test::assert(k == 2, "");
+
+    return 0;
+}

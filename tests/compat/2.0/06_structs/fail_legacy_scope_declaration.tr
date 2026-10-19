@@ -1,0 +1,19 @@
+// EXPECT-DIAG: E113
+// EXPECT-DIAG: 'fn MathUtil::method(...)' is no longer valid syntax
+// Regression test: the old `fn StructName::method(...)` static-method
+// DECLARATION syntax is gone -- static methods are still fully supported
+// (see 07_functions_modules' scope_static_method*.tr), but are now always
+// declared with '.' plus a trailing 'static' keyword:
+// `fn StructName.method(...) static: RetType { ... }`. '::' is reserved
+// for call/reference syntax only from here on. Must raise a clear,
+// specific parser error pointing at the new syntax.
+
+struct MathUtil {}
+
+fn MathUtil::square(x: int): int {
+    return x * x;
+}
+
+fn main(): int {
+    return 0;
+}

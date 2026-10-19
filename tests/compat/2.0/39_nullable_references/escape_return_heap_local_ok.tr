@@ -1,0 +1,23 @@
+// FDN-002 (docs/planning/ROADMAP_v2.0.0.md; docs/development/changes/
+// FDN-002.md): positive case -- returning `heap(local)` is Heap provenance,
+// never flagged. `heap()` copies `local`'s VALUE onto a fresh GC-heap block
+// (FDN-001); the local's own stack storage is irrelevant once the copy
+// exists, so this must keep compiling and running exactly as FDN-001 left
+// it.
+import test;
+
+struct Node {
+    val: int
+}
+
+fn make(): &Node {
+    mut local: Node = Node::default();
+    local.val = 9;
+    return heap(local);
+}
+
+fn main(): int {
+    mut p: &Node = make();
+    test::assert(p.val == 9, "returning heap(local) still works");
+    return 0;
+}

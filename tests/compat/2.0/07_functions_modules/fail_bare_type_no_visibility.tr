@@ -1,0 +1,19 @@
+// EXPECT-DIAG: E032
+// EXPECT-DIAG: 'Rect' isn't visible here without qualification
+// Regression test: the bare struct/enum type visibility gate. A plain
+// `import module;` (bare form) grants QUALIFIED access to that module's
+// types (module::Type) but NOT bare/unqualified access -- unlike before
+// this gate existed, when isKnownStruct()/isEnumName() alone (a flat,
+// module-blind EXISTENCE check) made any struct/enum from ANY
+// transitively-imported module bare-usable regardless of import mode,
+// unlike bare function calls, which already required self-reference or an
+// explicit on-demand import. See ResolverSymbolTable::isTypeVisibleUnqualified().
+
+import io;
+import geometry_module;
+
+fn main(): int {
+    mut r: Rect = Rect::new(2, 3);
+    io::printline("should not compile");
+    return 0;
+}

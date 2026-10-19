@@ -1,0 +1,9 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: Slice range out of bounds for 'a'
+// A bound the compiler can't fold is checked when the slice is taken.
+fn main(): int {
+    mut a: int[3] = [1, 2, 3];
+    mut k: int = 4;
+    immut v = a[1..k];
+    return v[0];
+}

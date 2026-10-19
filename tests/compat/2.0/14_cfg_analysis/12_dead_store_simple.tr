@@ -1,0 +1,8 @@
+// Regression test (#186): first assignment to x is overwritten before x is
+// read → DeadStoreWarning for the first assignment. x = 10 is not a dead
+// store because x is subsequently returned.
+fn main(): int {
+    mutable x: int = 5;
+    x = 10;
+    return 0;
+}

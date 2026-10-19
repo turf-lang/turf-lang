@@ -1,0 +1,40 @@
+// Regression test: Codegen's independent type-inference (getExprType(),
+// separate from and never reading TypeChecker's own results -- see this
+// project's history of bugs from these two systems drifting apart) had no
+// case at all for a FuncCallExprAST whose callee is a ScopeAccessExprAST
+// (Module::func(...)) -- it only ever checked for a VariableExprAST
+// callee, so getExprType() silently returned nullptr for ANY module-
+// qualified call. This was invisible for int-returning functions (an int
+// compare doesn't care whether the type was accurately inferred), but a
+// real, silent WRONG-ANSWER bug for a string-returning one used directly
+// in a larger expression (not first assigned to a variable): something
+// needing to know "is the left side of == a string" to choose strcmp over
+// a raw pointer comparison got a null type and silently chose the wrong
+// one, making `strings::trim(s) == "hello"` evaluate to false even when
+// trim() genuinely returned "hello".
+//
+// The fix (Codegen.cpp's getExprType(), FuncCallExprAST branch) also had
+// to preserve the EXISTING generic-function type-erasure mechanism (a
+// generic free function's mangled name is built from the CALL SITE's
+// actual argument types, not its own declared/generic ones) while adding
+// the module-name prefix that was missing entirely -- an earlier, more
+// aggressive fix that just used ResolvedCallTarget->mangledName()
+// wholesale broke generic_free_function_return_type.tr by returning the
+// unsubstituted declared signature instead.
+
+import io;
+import strings;
+
+import test;
+fn main(): int {
+    // The exact failure shape: calling a module-qualified, string-
+    // returning function DIRECTLY as an operand of == (not through an
+    // intermediate variable first) -- that intermediate-variable form
+    // masked the bug entirely, since VarDeclExprAST's own type annotation
+    // supplied the correct type independently of getExprType().
+    test::assert(strings::trim("  hello  ") == "hello", "direct :: call in == must infer string type correctly");
+    test::assert(strings::to_upper("hi") == "HI", "same shape, different module function");
+
+    io::printline("scope-qualified string-returning calls type-infer correctly");
+    return 0;
+}

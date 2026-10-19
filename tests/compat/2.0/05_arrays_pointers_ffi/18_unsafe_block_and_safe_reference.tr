@@ -1,0 +1,73 @@
+// Regression test (issue #238): `unsafe { }` + `&T` safe references, end
+// to end. Covers the legal counterparts to the four fail_*.tr tests in
+// this same directory (fail_ptr_outside_unsafe.tr,
+// fail_cast_raw_pointer_outside_unsafe.tr,
+// fail_struct_raw_ptr_field_outside_unsafe.tr,
+// fail_fn_signature_raw_pointer_disallowed.tr): a raw pointer declaration/
+// cast/struct field, each properly `unsafe { }`-wrapped, plus `&T` used
+// exactly as the roadmap's own example shows -- a compiler-guaranteed
+// non-null reference, usable in an ordinary function signature with no
+// `unsafe { }` needed at all.
+
+import test;
+
+// A raw pointer field requires the ENTIRE struct decl to be inside
+// `unsafe { }` (FINAL_SPRINT.md's Track A) -- `next` is genuinely
+// nullable, which `&Node` could never represent.
+unsafe {
+    struct Node {
+        val: int,
+        next: Node*
+    }
+}
+
+fn Node.new(val: int): void {
+    self.val = val;
+    unsafe {
+        self.next = null;
+    }
+}
+
+// A plain function's own signature never needs `unsafe { }` for a `&T`
+// parameter/return -- only a RAW ptr/T* signature is disallowed outright.
+fn readVal(n: &Node): int {
+    return n.val;
+}
+
+fn main(): int {
+    // `&val` (address-of) always produces `&int` now, a compiler-
+    // guaranteed non-null reference -- no `unsafe { }` needed to declare
+    // or use it.
+    mutable val: int = 42;
+    mutable ref: &int = &val;
+    test::assert((ref == &val), "ref should alias val's address");
+
+    // Declaring a raw pointer-typed local needs `unsafe { }` (the
+    // "declaration" gate).
+    unsafe {
+        mutable p: ptr = null;
+        test::assert(p == null, "raw ptr local can be null");
+    }
+
+    // Explicitly converting a safe reference to a raw pointer type (or
+    // back) needs `unsafe { }` around the cast (the "cast" gate), even
+    // though the safe-to-raw direction is otherwise implicitly allowed.
+    unsafe {
+        mutable asRaw: int* = ref to int*;
+        test::assert(asRaw == &val, "explicit &T -> T* cast preserves the address");
+    }
+
+    // Constructing/chaining the unsafe-wrapped struct from above, and
+    // reading a field THROUGH a raw pointer base (the "dereference" gate)
+    // -- both need `unsafe { }`.
+    mutable n1: Node = Node::new(1);
+    mutable n2: Node = Node::new(2);
+    n1.next = &n2; // &Node -> Node* is the always-sound safe-to-raw widening
+    test::assert(unsafe { n1.next.val; } == 2, "field access through a raw pointer base");
+
+    // A `&T`-typed function parameter needs no `unsafe { }` at either the
+    // signature or an ordinary call site.
+    test::assert(readVal(&n1) == 1, "readVal(&n1) should read n1.val");
+
+    return 0;
+}

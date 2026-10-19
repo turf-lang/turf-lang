@@ -87,6 +87,7 @@ Scripts are grouped as `scripts/{install,smoke,release,check,slm,dev}/`;
 | GEN-001 | Size parameters and the `arrays` module | landed | 2026-10-15 | 2026-10-15 | Parser, AST, Types, Resolver, TypeChecker, Monomorphizer, TypeWalk, Codegen, diagnostics (new E150), stdlib (new `arrays.tr`), tests, documentation | [GEN-001](changes/GEN-001.md) |
 | ANA-001 | Analysis fixes for 2.1.0 | landed | 2026-10-15 | 2026-10-15 | CFG/analysis (`CFG.cpp`, `Analysis.cpp`, `Lint.cpp`), TypeChecker (`TypeCheckerCore.cpp`), AST (`ASTDiff.h`), diagnostics (`ErrorsFlow.h`), tests, documentation | [ANA-001](changes/ANA-001.md) |
 | TDP-2-001 | Fixes in diagnostics without `--smart` | landed | 2026-10-15 | 2026-10-16 | diagnostics (new `CompilerFix.{h,cpp}`, `Errors.h`), Lexer, driver, TypeChecker, Resolver, SLM (`--smart` order, labels), test runner (`EXPECT-FIX`), scripts, tests, documentation | [TDP-2-001](changes/TDP-2-001.md) |
+| TDP-2-003 | Lint levels (V-1) | in-progress | 2026-10-19 | V-1 2026-10-19 | diagnostics (new `LintLevels.{h,cpp}`, registry rows E152–E171 and `SinceMinor`), Lexer (`add()`, `printDiag()`, `flushAll()`), driver (`--allow`/`--warn`/`--deny`/`--lint-set`, interface 1.8), turf-cli (`[lints]`), scripts, tests, documentation. Freeze: `FREEZE.md` §6.29 (F-LINT-1 … 5) | [TDP-2-003](changes/TDP-2-003.md) |
 
 ## How to use this directory
 

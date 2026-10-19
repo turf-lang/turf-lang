@@ -1,0 +1,22 @@
+// Test: String character indexing (s[i] -> char, FDN-004/D17)
+import io;
+
+import test;
+fn main(): int {
+    mut s: string = "hello";
+
+    mut c0: char = s[0];
+    mut c1: char = s[1];
+    mut c4: char = s[4];
+
+    test::assert(typeof(s[0]) == "char", "s[i] should have type 'char'");
+    test::assert((c0 to int) == 104, "s[0] should be 104 ('h')");
+    test::assert((c1 to int) == 101, "s[1] should be 101 ('e')");
+    test::assert((c4 to int) == 111, "s[4] should be 111 ('o')");
+    test::assert(c0 == 'h', "s[0] should compare equal to the char literal 'h'");
+
+    // Also test direct literal indexing
+    test::assert(("hello"[1] to int) == 101, "'hello'[1] should be 101");
+
+    return 0;
+}

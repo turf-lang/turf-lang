@@ -1,0 +1,35 @@
+// EXPECT-DIAG: E133
+// EXPECT-DIAG: Duplicate 'matches' pattern
+// Regression test (was CODE_REVIEW_GAPS_2026-07.md gap #4): a duplicate
+// 'matches' pattern across two arms of the same compare block must be
+// rejected at compile time, not silently accepted.
+//
+// Before the fix, this compiled with zero diagnostics. At the LLVM level,
+// CompareExprAST::codegen()'s SwitchInst-based path issued two
+// SwitchInst::addCase() calls with the SAME case value (Color::Red) pointing
+// at two different basic blocks -- which arm actually ran was an artifact of
+// LLVM's case-insertion order, not a specified language semantic. Fixed in
+// TypeChecker::visitCompare() by tracking seen enum-variant/int-literal/
+// string-literal pattern keys across all arms and rejecting a repeat.
+
+enum Color { Red, Green, Blue }
+
+fn main(): int {
+    mut c: Color = Color::Red;
+    mut result: int = 0;
+    compare c {
+        matches Color::Red:
+        result = 1;
+        done
+        matches Color::Red:
+        result = 2;
+        done
+        matches Color::Green:
+        result = 3;
+        done
+        matches Color::Blue:
+        result = 4;
+        done
+    }
+    return 0;
+}

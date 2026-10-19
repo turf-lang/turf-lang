@@ -1,0 +1,25 @@
+A value is stored and then thrown away
+
+A variable is assigned a value that is replaced, or that the function returns without ever reading:
+
+    fn main(): int {
+        mut total: int;
+        total = 10;         // WARNING: overwritten before anything reads it
+        total = 20;
+        return total - 20;
+    }
+
+Turf follows each variable through the function and notices that nothing reads the `10`. The store does no work, and it usually means one of two things: a line that should have been deleted, or a line that was meant to feed into the next one. If the second value was supposed to build on the first, say so:
+
+    fn main(): int {
+        mut total: int;
+        total = 10;
+        total += 10;        // reads the 10
+        return total - 20;
+    }
+
+A store that does nothing today can still be harmless (a value kept for a debugger, or code you are about to use). If that is the case, a name starting with `_` is skipped, and allowing the warning covers the rest.
+
+A variable that is declared but never read at all gets E163 instead, and a declaration's own initial value that is never read gets E161.
+
+This is a warning, not an error -- compilation still succeeds. To silence it for a whole build, set its lint level to allow: `turf build --allow E160` (or `[lints] E160 = "allow"` in turf.toml).

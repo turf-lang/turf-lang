@@ -1,0 +1,15 @@
+// Regression test: sys::exit(code) terminates the process immediately with
+// the given exit code -- a plain-named test (not fail_*) is expected to
+// compile AND exit 0, so calling sys::exit(0) directly (instead of `return
+// 0;`) proves it's a real, working process-termination call, not a no-op.
+import sys;
+import test;
+
+fn main(): int {
+    test::assert(true, "reached before exiting");
+    sys::exit(0);
+    // Unreachable -- sys::exit never returns. If it somehow did, this would
+    // fail the assertion below and prove sys::exit is broken.
+    test::assert(false, "sys::exit should never return");
+    return 1;
+}

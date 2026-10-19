@@ -1,0 +1,16 @@
+# Programs 2.0.0 REJECTED that a later 2.x minor deliberately accepts.
+#
+# Not a break: no program that compiled on 2.0.0 stopped compiling. But the
+# corpus says "rejected", so each line is the owner's call written down (a
+# reviewer reads this file, not the compiler). One line per program:
+#
+#     <path under tests/compat/2.0/>  # <commit>: <why, and where it was decided>
+#
+# scripts/check/compat_corpus_check.py skips the program in the `turfc --test`
+# pass and fails if the compiler still rejects it, so a line cannot outlive
+# the change that justified it. Only a fail_* program can be listed here; a
+# program that compiled on 2.0.0 is never an exception.
+
+05_arrays_pointers_ffi/fail_array_use_before_any_write.tr  # 207cf09c: a fixed-size array T[N] is assigned from its declaration and reads as zero, FREEZE.md 6.4, owner decision 2026-10-15, docs/development/changes/ANA-001.md (2.1.0)
+10_default_init/fail_array_nested_write_reads_first.tr  # 207cf09c: same decision, ANA-001
+10_default_init/fail_array_of_struct_use_before_write.tr  # 207cf09c: same decision, ANA-001

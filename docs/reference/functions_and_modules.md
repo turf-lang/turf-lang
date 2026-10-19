@@ -473,7 +473,7 @@ after an annotation"). A name the compiler does not know, or an argument that
 does not fit the declaration, is `E146`; a misspelling gets a "Did you mean"
 suggestion. An annotation is never silently ignored.
 
-The annotations are `@caller_location`, `@ownership` and `@ffi`.
+The annotations are `@caller_location`, `@ownership`, `@ffi` and `@deprecated`.
 
 ### `@caller_location`
 
@@ -593,6 +593,36 @@ fn main(): int {
 Each platform may be named once for a declaration (twice is `E146`); an
 unknown platform, a positional argument and `@ffi` on a function with a body
 are all `E146`.
+
+### `@deprecated`
+
+`@deprecated("message")` marks a `fn` or `extern fn` obsolete. Every call to
+it then warns (`E172`) with that exact message, naming what to use instead;
+the item itself keeps working exactly as before -- this is advance notice,
+not a removal. Turf never removes anything on its own; a deprecated item is
+only ever removed across a major version.
+
+```turflang
+@deprecated("use add() instead")
+fn add_old(a: int, b: int): int {
+    return a + b;
+}
+
+fn add(a: int, b: int): int {
+    return a + b;
+}
+
+fn main(): int {
+    printline(add_old(1, 2));   // WARNING: 'add_old' is deprecated: use add() instead
+    return 0;
+}
+```
+
+The message is required and must be a non-empty string, written positionally
+(`@deprecated("...")`, not `@deprecated(reason: "...")`) -- anything else is
+`E146`. The warning has a [lint level](cli_and_diagnostics.md#lint-levels)
+like any other, so a build that already knows about a deprecation and isn't
+ready to migrate yet can set `E172` to `allow`.
 
 ---
 

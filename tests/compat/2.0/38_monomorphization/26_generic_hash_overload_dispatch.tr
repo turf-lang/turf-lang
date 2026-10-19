@@ -1,0 +1,67 @@
+// Regression test: lib/std/collections/hashing.tr (STD-003 item 6,
+// docs/development/changes/STD-003.md) -- a real, general-purpose
+// `hash(T)` is only possible because of TYPE-002/monomorphization (see
+// that file's own header). Exercises directly, independent of Map/Set,
+// which already exercise it indirectly:
+//   1. The concrete `hash(x: string): int` overload is a real CONTENT
+//      hash -- two runtime-built (never same-literal, INV-TEST-1), equal-
+//      content strings hash equal; different-content strings very likely
+//      don't.
+//   2. The generic fallback `fn<T> hash(x: T): int` (a byte-wise hash over
+//      `sizeof(T)` bytes at the value's own address) handles `int` and an
+//      arbitrary plain-data struct with no per-type code at all.
+//   3. Ordinary (non-operator) overload resolution prefers the exact
+//      concrete `string` candidate over the generic fallback when BOTH are
+//      visible and the argument is genuinely a `string` -- confirmed by
+//      calling hash() on a string from INSIDE a generic function (the
+//      exact shape Map<string,V>/Set<string> need internally), which only
+//      resolves correctly per-instantiation post-monomorphization.
+import strings;
+import hashing;
+import test;
+
+struct Point {
+    x: int,
+    y: int
+}
+
+// Mirrors the internal shape hashing::hash() is actually called from
+// (Map<K,V>.bucket_find(key: K), Set<T>.bucket_find(item: T)) -- a generic
+// function whose own body calls hash() on its still-open type parameter.
+fn<T> hashViaGeneric(x: T): int {
+    return hashing::hash(x);
+}
+
+fn main(): int {
+    immutable a: string = strings::substring("xxhelloxx", 2, 7); // "hello", a fresh allocation
+    immutable b: string = strings::substring("yyhelloyy", 2, 7); // "hello", a DIFFERENT fresh allocation
+    immutable c: string = strings::substring("xxworldxx", 2, 7); // "world"
+    test::assert(hashing::hash(a) == hashing::hash(b),
+        "equal-content, differently-allocated strings must hash equal");
+    test::assert(hashing::hash(a) != hashing::hash(c),
+        "different-content strings should (almost certainly) hash differently");
+
+    test::assert(hashViaGeneric(a) == hashing::hash(a),
+        "generic-dispatched hash(string) must match the direct concrete call");
+    test::assert(hashViaGeneric(b) == hashViaGeneric(a),
+        "generic dispatch must still find content-equality for string");
+
+    immutable i1: int = hashViaGeneric(42);
+    immutable i2: int = hashViaGeneric(42);
+    immutable i3: int = hashViaGeneric(43);
+    test::assert(i1 == i2, "same int hashes equal via the generic fallback");
+    test::assert(i1 != i3, "different ints should (almost certainly) hash differently");
+
+    mut p1: Point = Point::default();
+    p1.x = 3; p1.y = 4;
+    mut p2: Point = Point::default();
+    p2.x = 3; p2.y = 4;
+    mut p3: Point = Point::default();
+    p3.x = 9; p3.y = 1;
+    test::assert(hashViaGeneric(p1) == hashViaGeneric(p2),
+        "equal-content structs hash equal via the generic byte-hash fallback");
+    test::assert(hashViaGeneric(p1) != hashViaGeneric(p3),
+        "different-content structs should (almost certainly) hash differently");
+
+    return 0;
+}

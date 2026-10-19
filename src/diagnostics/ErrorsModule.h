@@ -1000,4 +1000,21 @@ public:
   }
 };
 
+// TDP-2-003 V-2 (issue #286): a call (or other use) of an item marked
+// `@deprecated("...")` (src/frontend/DeprecatedAnnotation.h). `Message` is the
+// declaration's own, shown verbatim -- whoever deprecated the item already
+// wrote a complete sentence naming what to use instead. Never fatal:
+// compilation still succeeds, since removing a deprecated item is a 3.0 job
+// (B-3), not this warning's concern.
+class DeprecatedUseWarning : public TurfWarning {
+public:
+  DeprecatedUseWarning(SourceLocation Loc, const std::string &Name,
+                       const std::string &Message)
+      : TurfWarning(Loc, TurfWarning::WarningLabel() + "'" + Colors::CYAN +
+                             Name + Colors::BRIGHT_YELLOW +
+                             "' is deprecated: " + Message + Colors::RESET) {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+  }
+};
+
 #endif

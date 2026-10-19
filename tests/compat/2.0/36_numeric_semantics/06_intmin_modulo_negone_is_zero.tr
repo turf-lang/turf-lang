@@ -1,0 +1,27 @@
+// INT_MIN % -1 is 0 at every optimization level (found by turf-fuzz's
+// differential oracle). `srem` is poison for exactly this input: -O0 died on
+// SIGFPE (hardware idiv) and -O1+ printed whatever the optimizer left in the
+// register. Unlike INT_MIN / -1 the result, 0, is representable, so nothing
+// traps (FREEZE.md §6.2: semantics never vary with optimization level).
+// Operands come through a function so no level can fold them away.
+
+import test;
+
+fn id(x: int): int {
+    return x;
+}
+
+fn main(): int {
+    mut a: int = id(-9223372036854775807 - 1);
+    mut n: int = id(-1);
+    test::assert(a % n == 0, "INT_MIN % -1 is 0");
+    test::assert(id(7) % n == 0, "x % -1 is 0");
+    test::assert(id(-7) % n == 0, "negative x % -1 is 0");
+    test::assert(id(-7) % id(2) == -1, "sign of the dividend is kept");
+    test::assert(id(7) % id(-2) == 1, "a negative divisor other than -1 is untouched");
+
+    mut c: int = a;
+    c %= n;
+    test::assert(c == 0, "INT_MIN %= -1 is 0");
+    return 0;
+}

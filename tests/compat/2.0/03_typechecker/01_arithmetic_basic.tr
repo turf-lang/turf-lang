@@ -1,0 +1,55 @@
+import math;
+
+import test;
+fn main(): int {
+    // Basic Arithmetic
+    mut a: int = 5 + 3;
+    test::assert(a == 8, "");
+
+    mut b: int = 10 - 7;
+    test::assert(b == 3, "");
+
+    mut c: int = 6 * 7;
+    test::assert(c == 42, "");
+
+    mut d: int = 100 / 4;
+    test::assert(d == 25, "");
+
+    mut e: int = 17 % 5;
+    test::assert(e == 2, "");
+
+    mut f: double = 2.0 ** 3.0;
+    test::assert(f == 8.0, "");
+
+    // Unary negation
+    mut g: int = -10;
+    test::assert(g == -10, "");
+
+    // Precedence
+    mut h: int = 2 + 3 * 4;
+    test::assert(h == 14, "");
+
+    mut i: int = (2 + 3) * 4;
+    test::assert(i == 20, "");
+
+    // Mixed/Double arithmetic
+    mut j: double = 5.0 + 2.5; // Note: strict typing might require 5.0
+    test::assert(j == 7.5, "");
+
+    // Math module integration
+    mut p1: int = math::power(2, 3);
+    test::assert(p1 == 8, "");
+
+    mut p2: double = math::power(2.0, 3.0);
+    test::assert(p2 == 8.0, "");
+
+    mut abs1: int = math::abs(-10);
+    test::assert(abs1 == 10, "");
+
+    mut abs2: double = math::abs(-3.2);
+    // double comparison warning workaround
+    test::assert(abs2 > 3.1, "");
+    test::assert(abs2 < 3.3, "");
+
+    return 0;
+}

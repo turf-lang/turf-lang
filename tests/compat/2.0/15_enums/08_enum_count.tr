@@ -1,0 +1,13 @@
+// Test: COUNT pseudo-property
+import test;
+
+enum Direction { North, East, South, West }
+enum Singleton { Only }
+enum Large { A, B, C, D, E, F, G, H, I, J }
+
+fn main(): int {
+    test::assert(Direction::COUNT == 4, "Direction has 4 variants");
+    test::assert(Singleton::COUNT == 1, "Singleton has 1 variant");
+    test::assert(Large::COUNT == 10, "Large has 10 variants");
+    return 0;
+}

@@ -1,0 +1,15 @@
+A variable is assigned to itself
+
+Assigning a variable to itself changes nothing:
+
+    mut total: int = 3;
+    total = total;         // WARNING: does nothing
+
+It is nearly always a slip. Either a leftover from an edit, or the right-hand side was meant to be something else, like `total = total + 1;` or `total = other;`. Write the assignment you meant:
+
+    mut total: int = 3;
+    total = total + 1;
+
+If the line is only a leftover, delete it.
+
+This is a warning, not an error -- compilation still succeeds. To silence it for a whole build, set its lint level to allow: `turf build --allow E156` (or `[lints] E156 = "allow"` in turf.toml).

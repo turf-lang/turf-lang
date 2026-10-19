@@ -1,0 +1,24 @@
+import test;
+
+struct Node {
+    val: int
+}
+
+fn Node.new(val: int): void {
+    self.val = val;
+}
+
+fn main(): int {
+    mut n1: Node = Node::new(10);
+    mut n2: Node = Node::new(20);
+
+    // Assign struct by value
+    n1 = n2;
+    test::assert(n1.val == 20, "FAIL: basic struct assignment");
+
+    // Verify it's a deep copy (mutating n2 should not affect n1)
+    n2.val = 30;
+    test::assert(n1.val == 20, "FAIL: struct assignment was a shallow reference, not a deep copy!");
+
+    return 0;
+}

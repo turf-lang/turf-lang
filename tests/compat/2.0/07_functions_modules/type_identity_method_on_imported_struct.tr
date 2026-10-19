@@ -1,0 +1,21 @@
+// FDN-003: a method declared in this file on a struct IMPORTED from a
+// module (`fn Node.doubled()` on `type_identity_node_a_module::Node`). The
+// method's internal name is built from the receiver's type identity in
+// Pass 1 -- by a visibility lookup, not by assuming the receiver is this
+// file's own type -- because a method call looks it up by the identity of
+// the receiver VALUE's type.
+
+import test;
+import type_identity_node_a_module;
+import type_identity_node_a_module::Node;
+
+fn Node.doubled(): int {
+    return self.a * 2;
+}
+
+fn main(): int {
+    mut n: Node = type_identity_node_a_module::make(21);
+    test::assert(n.doubled() == 42, "extension method on an imported struct");
+    test::assert(n.describe() == "a.Node", "the module's own method still resolves");
+    return 0;
+}

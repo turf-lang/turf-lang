@@ -1,0 +1,33 @@
+// STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(a)): `@caller_location` /
+// `caller_location`, direct-call and transitive-forwarding shapes.
+import test;
+import strings;
+
+@caller_location
+fn where(): string {
+    return caller_location;
+}
+
+@caller_location
+fn wrapper(): string {
+    return where();
+}
+
+fn main(): int {
+    mut direct: string = where();  // line 17 -- direct's own call site
+    test::assert(strings::ends_with(direct, ":17"),
+        "a direct call to a @caller_location function reports ITS OWN call site");
+
+    mut forwarded: string = wrapper();  // line 21 -- wrapper's OWN call site
+    // wrapper() is ALSO @caller_location, so its own call to where() (line 13,
+    // inside wrapper's body) forwards wrapper's inherited location instead of
+    // stamping its own -- the whole point of the transitive-propagation design
+    // (docs/architecture/boundary.md, src/sema/Intrinsics.h §1's caller_location
+    // entry).
+    test::assert(strings::ends_with(forwarded, ":21"),
+        "a call THROUGH a @caller_location function forwards the ORIGINAL caller's line");
+    test::assert(!strings::ends_with(forwarded, ":13"),
+        "a forwarded call must NOT report the intermediate function's own internal call site");
+
+    return 0;
+}

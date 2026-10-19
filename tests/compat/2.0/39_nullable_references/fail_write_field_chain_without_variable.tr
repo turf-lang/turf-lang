@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E081
+// EXPECT-DIAG: this '&?Node' value might be 'null', but you're accessing its 'val' field
+// The write form of fail_deref_field_chain_without_variable.tr.
+struct Node { val: int, next: &?Node }
+
+fn main(): int {
+    mut p: &Node = heap(Node::default());
+    p.next.val = 3;
+    return 0;
+}

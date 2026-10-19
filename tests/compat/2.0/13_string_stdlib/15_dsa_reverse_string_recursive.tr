@@ -1,0 +1,34 @@
+// tests/13_string_stdlib/15_dsa_reverse_string_recursive.tr
+// DSA: Recursive string reversal via character concatenation.
+// Stresses the call stack and strings::length + char access together.
+// Also verifies that double reversal returns the original.
+
+import io;
+import strings;
+
+import test;
+fn reverse(s: string): string {
+    mut n: int = strings::length(s);
+    if n <= 1 {
+        return s;
+    }
+    // Head character as a 2-byte string
+    mut tail: string = reverse(strings::substring(s, 1, n));
+    mut head_ch: string = strings::substring(s, 0, 1);
+    return tail + head_ch;
+}
+
+fn main(): int {
+    test::assert(reverse("hello") == "olleh",          "reverse hello");
+    test::assert(reverse("abcd") == "dcba",            "reverse abcd");
+    test::assert(reverse("a") == "a",                  "reverse single char");
+    test::assert(reverse("") == "",                    "reverse empty");
+    test::assert(reverse("racecar") == "racecar",      "reverse palindrome == itself");
+
+    // Double reversal must return original
+    mut original: string = "turf language";
+    test::assert(reverse(reverse(original)) == original, "double reverse == original");
+
+    io::printline("15 PASS: DSA recursive string reverse");
+    return 0;
+}

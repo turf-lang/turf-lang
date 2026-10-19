@@ -1,0 +1,46 @@
+// Regression test: D3 (docs/development/changes/TYPE-002.md, S15) --
+// stack.tr's Stack<T>.push() still computed its growth allocation as
+// `self.cap * 8` (Type Erasure's "every T is one 8-byte slot" assumption),
+// even though monomorphization (TYPE-002) made `data: T*` a REAL T* whose
+// GEP scales by sizeof(T). For a 24-byte T this under-allocated the buffer
+// by 3x -- confirmed live before this fix: pushing 20 `Big` values aborted
+// with glibc's "realloc(): invalid next size" partway through (the buffer
+// corrupted the heap's own allocator metadata once growth ran past the
+// under-sized allocation). Pre-TYPE-002 this was a safe compile-time ICE
+// ("Invalid bitcast"); post-TYPE-002/pre-D3 it was an unsafe RUNTIME abort
+// -- a safe compile error traded for memory corruption.
+//
+// 20 pushes forces multiple growth reallocations (cap: 0 -> 8 -> 16 -> 32),
+// and every value is read back and checked, not just "didn't crash" --
+// proving the fixed allocation size actually holds real data correctly,
+// not merely that it doesn't abort.
+import stack::Stack;
+import test;
+
+struct Big { a: int, b: int, c: int }
+fn Big.new(x: int, y: int, z: int): void { self.a = x; self.b = y; self.c = z; }
+
+fn main(): int {
+    mut s: Stack<Big> = Stack::default();
+    mut i: int = 0;
+    while i < 20 {
+        s.push(Big::new(i, i * 2, i * 3));
+        i = i + 1;
+    }
+    test::assert(s.length() == 20, "Stack<Big> should hold 20 elements after growth");
+
+    // Pop all 20 back (LIFO -- last pushed, i = 19, comes first) and verify
+    // every field of every element survived the growth reallocations
+    // uncorrupted.
+    i = 19;
+    while i >= 0 {
+        mut b: Big = s.pop();
+        test::assert(b.a == i, "Big.a corrupted after Stack<Big> growth");
+        test::assert(b.b == i * 2, "Big.b corrupted after Stack<Big> growth");
+        test::assert(b.c == i * 3, "Big.c corrupted after Stack<Big> growth");
+        i = i - 1;
+    }
+    test::assert(s.length() == 0, "Stack<Big> should be empty after popping everything");
+
+    return 0;
+}

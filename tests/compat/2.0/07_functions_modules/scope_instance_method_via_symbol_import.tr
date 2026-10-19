@@ -1,0 +1,16 @@
+// Regression test: a struct declared in a module and pulled in via the
+// ON-DEMAND SYMBOL import form (`import mod::TypeName;`, not a bare
+// `import mod;`) must be bare-usable for both construction and instance
+// method calls (`.increment()`) -- proves on-demand flat imports work for
+// struct types, not only free functions.
+
+import io;
+import counter_module::Counter;
+
+import test;
+fn main(): int {
+    mut c: Counter = Counter::new(5);
+    test::assert(c.increment() == 6, "instance method works via on-demand symbol import");
+    io::printline("instance method via on-demand symbol import works");
+    return 0;
+}

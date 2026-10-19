@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E056
+// EXPECT-DIAG: No 'operator[]=' overload matches 'set::Set<int>[int] = int'
+// Negative test: Set<int> deliberately has NO operator[]= (see set.tr's own
+// doc comment on this decision, and 14_stdlib_set_index.tr) -- assigning
+// through '[]' on a Set must be a clean type error.
+import set::Set;
+
+fn main(): int {
+    mut s: Set<int> = Set::default();
+    s.add(10);
+    s[0] = 99;
+    return 0;
+}

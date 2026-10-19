@@ -1,0 +1,14 @@
+// Issue #187's canonical example: a function passed by bare name as an
+// argument, then called indirectly through the parameter that received it.
+import test;
+
+fn apply(f: fn(int): int, x: int): int {
+    return f(x);
+}
+
+fn double_it(n: int): int { return n * 2; }
+
+fn main(): int {
+    test::assert(apply(double_it, 5) == 10, "apply(double_it, 5) should be 10");
+    return 0;
+}

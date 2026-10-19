@@ -1,0 +1,11 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: runtime check: Integer overflow
+// `int ** int` checks each multiply like `*`: 2 ** 63 is one past INT_MAX.
+fn id(x: int): int {
+    return x;
+}
+
+fn main(): int {
+    io::printline(id(2) ** id(63));
+    return 0;
+}

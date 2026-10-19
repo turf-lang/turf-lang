@@ -1,0 +1,2 @@
+printed before the panic
+panic: runtime check: Division by zero (fail_runtime_check_keeps_stdout.tr:11)

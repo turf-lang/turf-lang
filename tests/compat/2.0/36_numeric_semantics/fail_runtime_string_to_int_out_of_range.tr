@@ -1,0 +1,9 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: Invalid string to int conversion
+// A value past the int range panics; it does not saturate.
+
+fn main(): int {
+    mut s: string = "9223372036854775807" + "0";
+    mut n: int = s to int;
+    return n;
+}

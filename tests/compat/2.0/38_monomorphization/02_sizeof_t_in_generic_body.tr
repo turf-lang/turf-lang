@@ -1,0 +1,28 @@
+// Regression test: TYPE-002 S12a -- `sizeof(T)` inside a generic FREE
+// function body must report the REAL size of the concrete type this
+// instantiation was called with, not a hardcoded stand-in.
+//
+// Before monomorphization, `sizeof(T)` had no correct answer to give:
+// every T erased to one opaque pointer-sized slot (list.tr's own comment,
+// "In Type Erasure, all T are 64 bits"), so `sizeof(T)` inside a generic
+// body either didn't exist or always reported 8 regardless of the actual
+// instantiation. This is Completion criterion 4 (TYPE-002's
+// ARCHITECTURE_OVERHAUL.md §8 entry) for the free-function case
+// specifically -- the struct-field case (`sizeof` used inside a generic
+// STRUCT's own method) is S13a/S14a's job, not this test's.
+
+import test;
+
+fn<T> sizeOfT(x: T): int {
+    return sizeof(T);
+}
+
+fn main(): int {
+    immut si: int = sizeOfT(1);
+    immut sd: int = sizeOfT(1.5);
+    immut sb: int = sizeOfT(true);
+    test::assert(si == 8, "sizeof(int) inside a generic body should be 8");
+    test::assert(sd == 8, "sizeof(double) inside a generic body should be 8");
+    test::assert(sb == 1, "sizeof(bool) inside a generic body should be 1");
+    return 0;
+}

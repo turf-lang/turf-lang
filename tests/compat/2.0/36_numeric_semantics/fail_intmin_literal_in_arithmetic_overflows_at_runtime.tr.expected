@@ -1,0 +1,1 @@
+panic: runtime check: Integer overflow (fail_intmin_literal_in_arithmetic_overflows_at_runtime.tr:12)

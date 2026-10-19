@@ -1,0 +1,1 @@
+24 PASS: string-builder functions on a runtime-length string, no heap corruption

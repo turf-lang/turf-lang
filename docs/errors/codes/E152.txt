@@ -1,0 +1,29 @@
+This variable hides another one with the same name
+
+Declaring a variable with the same name as one that is already visible creates a brand-new variable that takes over the name for the rest of its scope. The older one is still there, you just can't reach it by name any more:
+
+    fn main(): int {
+        immut count: int = 1;
+        if count > 0 {
+            immut count: int = 2;   // WARNING: hides the 'count' above
+            printline(count to string);
+        }
+        return count;
+    }
+
+Inside the `if`, `count` is `2`; outside it, `count` is `1`. Nothing is wrong with that, but a reader (or you, in a month) has to work out which `count` each line means, and an edit that moves a line across the brace can quietly switch which one it sees.
+
+The usual fix is a different name for the inner variable:
+
+    fn main(): int {
+        immut count: int = 1;
+        if count > 0 {
+            immut inner: int = 2;
+            printline(inner to string);
+        }
+        return count;
+    }
+
+If the inner variable really is a fresh value that deliberately takes over the name, the warning is only a nudge and can be allowed.
+
+This is a warning, not an error -- compilation still succeeds. To silence it for a whole build, set its lint level to allow: `turf build --allow E152` (or `[lints] E152 = "allow"` in turf.toml).

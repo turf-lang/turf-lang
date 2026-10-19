@@ -1,0 +1,81 @@
+// LEC-007: Map.keys() / Map.values(). Map's storage is private (LEC-002), which
+// left no way to enumerate a map. They return copies in dense-array order and
+// keys()[i] pairs with values()[i].
+import map::Map;
+import list::List;
+import test;
+
+struct Big {
+    a: int,
+    b: int,
+    c: int
+}
+
+fn main(): int {
+    // Empty map: empty lists, and no allocation trouble.
+    mut empty: Map<string, int> = Map::default();
+    test::assert(empty.keys().length() == 0, "empty map has no keys");
+    test::assert(empty.values().length() == 0, "empty map has no values");
+
+    mut m: Map<string, int> = Map::default();
+    m.put("one", 1);
+    m.put("two", 2);
+    m.put("three", 3);
+
+    // Insertion order while nothing has been removed.
+    immut ks: List<string> = m.keys();
+    immut vs: List<int> = m.values();
+    test::assert(ks.length() == 3 && vs.length() == 3, "three entries each");
+    test::assert(ks.get(0) == "one" && ks.get(1) == "two" && ks.get(2) == "three", "keys in insertion order");
+    test::assert(vs.get(0) == 1 && vs.get(1) == 2 && vs.get(2) == 3, "values in insertion order");
+
+    // keys()[i] belongs to values()[i].
+    mut i: int = 0;
+    while i < ks.length() {
+        test::assert(m.get(ks.get(i)) == vs.get(i), "keys()[i] pairs with values()[i]");
+        i = i + 1;
+    }
+
+    // A copy: changing the map afterwards does not change an earlier result.
+    m.put("four", 4);
+    m.put("one", 100);
+    test::assert(ks.length() == 3, "an earlier keys() result keeps its length");
+    test::assert(vs.get(0) == 1, "and its values");
+    test::assert(m.keys().length() == 4, "a fresh keys() sees the new entry");
+
+    // After remove() the order is swap-with-last (documented), but the SET of
+    // keys is exact and the pairing still holds.
+    m.remove("two");
+    immut ks2: List<string> = m.keys();
+    immut vs2: List<int> = m.values();
+    test::assert(ks2.length() == 3, "one fewer key after remove");
+    mut j: int = 0;
+    mut saw_two: bool = false;
+    while j < ks2.length() {
+        if ks2.get(j) == "two" {
+            saw_two = true;
+        }
+        test::assert(m.get(ks2.get(j)) == vs2.get(j), "pairing survives remove()");
+        j = j + 1;
+    }
+    test::assert(!saw_two, "the removed key is gone from keys()");
+
+    // A value type over 8 bytes: copied by value, not truncated to a word.
+    mut bigs: Map<int, Big> = Map::default();
+    mut b1: Big = Big::default();
+    b1.a = 1;
+    b1.b = 2;
+    b1.c = 3;
+    mut b2: Big = Big::default();
+    b2.a = 10;
+    b2.b = 20;
+    b2.c = 30;
+    bigs.put(7, b1);
+    bigs.put(8, b2);
+    immut bv: List<Big> = bigs.values();
+    test::assert(bv.get(0).c == 3 && bv.get(1).a == 10 && bv.get(1).c == 30, "struct values over 8 bytes survive values()");
+    immut bk: List<int> = bigs.keys();
+    test::assert(bk.get(0) == 7 && bk.get(1) == 8, "int keys");
+
+    return 0;
+}

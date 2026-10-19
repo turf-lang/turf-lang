@@ -1,0 +1,10 @@
+// Companion module for fail_circular_import_two_module.tr -- imports
+// cycle_b_module, which imports this file right back, forming a direct
+// 2-module cycle. Named `..._module.tr` so scripts/test_runner.sh's
+// `grep -v "_module.tr"` skips it as a standalone test entry point; it only
+// exists to be imported.
+import cycle_b_module;
+
+pub fn cycleA(): int {
+    return 1;
+}

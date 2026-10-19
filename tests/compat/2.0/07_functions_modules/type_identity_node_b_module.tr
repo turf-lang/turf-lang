@@ -1,0 +1,42 @@
+// Companion module for the FDN-003 type-identity tests -- see
+// type_identity_node_a_module.tr. Same names, different layouts (three
+// doubles here, an int and a string there), so a lookup that confused the
+// two would read the wrong field offsets, not just the wrong method.
+pub struct Node {
+    pub x: double,
+    pub y: double,
+    pub z: double
+}
+
+pub fn Node.new(x: double): void {
+    self.x = x;
+    self.y = 2.0;
+    self.z = 3.0;
+}
+
+pub fn Node.describe(): string {
+    return "b.Node";
+}
+
+pub fn Node.origin() static: Node {
+    return Node::new(0.5);
+}
+
+pub enum Mode { Up, Down, Sideways }
+
+pub error Oops { Worse, Worst }
+
+pub fn make(x: double): Node {
+    return Node::new(x);
+}
+
+pub fn mode(): Mode {
+    return Mode::Sideways;
+}
+
+pub fn check(n: int): !int {
+    if (n < 0) {
+        return Oops::Worst;
+    }
+    return n * 2;
+}

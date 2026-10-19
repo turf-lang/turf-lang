@@ -1,0 +1,31 @@
+// EXPECT-DIAG: E108
+// EXPECT-DIAG: Expected a parameter name in extern function 'broken'
+// Regression test: a syntax error inside an IMPORTED module must produce a
+// clean compile error, not crash the compiler.
+//
+// Before the fix, ParseFile()'s "skip one token and keep trying" error-
+// recovery loop (used when parsing an imported module hits a genuine parse
+// error) would limp forward token-by-token through the rest of the already-
+// malformed declaration. This eventually read the underlying ifstream past
+// EOF repeatedly, which crashed the ENTIRE compiler with an unhandled
+// `std::__ios_failure` ("basic_ios::clear: iostream error") instead of
+// reporting the real syntax error and stopping cleanly. Confirmed via
+// `extern fn broken(ptr: void*): void;` inside an imported module -- `ptr`
+// collides with the `ptr` type keyword, which was also a real, separate bug
+// in lib/std/mem.tr itself (its extern declarations used `ptr` as a
+// parameter name; fixed to use `p` instead -- see mem.tr's own doc
+// comment).
+//
+// Also exercises the companion fix in ParseImport(): a module that IS found
+// but fails to parse must not fall through to the OTHER search-path
+// fallbacks (which would only ever produce a confusing, unrelated "module
+// not found" error stacked on top of the real one).
+//
+// See broken_extern_param_module.tr for the deliberately broken module this
+// imports.
+
+import broken_extern_param_module;
+
+fn main(): int {
+    return 0;
+}

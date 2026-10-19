@@ -1,0 +1,35 @@
+// tests/13_string_stdlib/08_str_replace.tr
+// Tests strings::replace — replaces all non-overlapping occurrences of `old` with `new`.
+
+import io;
+import strings;
+
+import test;
+fn main(): int {
+    // Basic replacement
+    mut r1: string = strings::replace("hello world", "world", "turf");
+    test::assert(r1 == "hello turf", "replace: world -> turf");
+
+    // Multiple occurrences
+    mut r2: string = strings::replace("aababaa", "a", "x");
+    test::assert(r2 == "xxbxbxx", "replace: all a -> x");
+
+    // No match — string unchanged
+    mut r3: string = strings::replace("hello", "xyz", "abc");
+    test::assert(r3 == "hello", "replace: no match leaves string unchanged");
+
+    // Replace with empty string (deletion)
+    mut r4: string = strings::replace("hello world", "o", "");
+    test::assert(r4 == "hell wrld", "replace: delete all 'o'");
+
+    // Replace at start
+    mut r5: string = strings::replace("foobar", "foo", "baz");
+    test::assert(r5 == "bazbar", "replace: at start");
+
+    // Replace at end
+    mut r6: string = strings::replace("foobar", "bar", "qux");
+    test::assert(r6 == "fooqux", "replace: at end");
+
+    io::printline("08 PASS: strings::replace");
+    return 0;
+}

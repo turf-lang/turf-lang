@@ -1,0 +1,15 @@
+// SEM-003 (§11.6): `mut arr = [1, 2, 3];` infers T[3] from the array
+// literal, exactly like TypeChecker::visitArrayLiteral already computes for
+// an ArrayLiteralExprAST used anywhere else -- ParseLetStatement() never
+// takes the special ArrayDeclExprAST path here (that requires a DECLARED
+// array type to already be known before the initializer is parsed, which
+// `guess` by definition doesn't have), it just parses the initializer as an
+// ordinary expression.
+import test;
+
+fn main(): int {
+    mut arr = [10, 20, 30];
+    test::assert(arr[0] == 10 && arr[1] == 20 && arr[2] == 30,
+        "array literal initializer infers T[N] under guess");
+    return 0;
+}

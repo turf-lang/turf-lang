@@ -1,0 +1,23 @@
+// EXPECT-DIAG: E086
+// EXPECT-DIAG: A reference into this function's own local storage can't be returned
+// LEC-005 / INV-LINT-1, found while auditing the other hand-written visitors:
+// EscapeCheckVisitor (F-MEM-5) had no branch for `recover`, and a `recover run
+// { ... }` block is NOT split into CFG statements -- the whole block reaches
+// the visitor as one opaque statement. So a `return &x;` written inside it
+// returned a reference to a dead stack frame and compiled without a word,
+// while the identical `return &x;` anywhere else was E086. (A `return` in a
+// recover block returns from the ENCLOSING function.)
+fn g(): !int {
+    return 1;
+}
+
+fn f(): &int {
+    mut x: int = 5;
+    mut v: int = g() recover run { return &x; };
+    return heap(v);
+}
+
+fn main(): int {
+    mut r: &int = f();
+    return 0;
+}

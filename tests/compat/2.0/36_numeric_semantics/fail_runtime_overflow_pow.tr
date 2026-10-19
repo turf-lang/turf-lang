@@ -1,0 +1,15 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: runtime check: Integer overflow
+// `int **= int` is exact int exponentiation, each multiply checked like `*`;
+// 3 ** 50 is past INT_MAX, so it panics (F-NUM-3). It used to go through
+// pow() on doubles and a bare fptosi: INT_MIN at -O0, 4294967295 at -O2.
+fn id(x: int): int {
+    return x;
+}
+
+fn main(): int {
+    mut b: int = id(3);
+    b **= 50;
+    io::printline(b);
+    return 0;
+}

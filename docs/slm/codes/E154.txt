@@ -1,0 +1,27 @@
+TURF E154 -- EMPTY COMPARE (WARNING):
+
+CAUSE:
+  A `compare` has no `matches` arm and no `otherwise` arm, so it is a no-op.
+  Usually an unfinished stub. This is a WARNING: compilation still succeeds.
+
+INCORRECT:
+    immut n: int = 1;
+    compare n {
+    }                      // WARNING: nothing to run
+
+CORRECT (give it arms):
+    immut n: int = 1;
+    compare n {
+        matches 1:
+            printline("one");
+        done
+        otherwise:
+            printline("other");
+    }
+
+FIX:
+  Add at least one `matches` arm or an `otherwise` arm, or remove the
+  `compare`.
+
+RELATED: E093 (arms that do not cover every value), E094 (an arm that can
+  never run).

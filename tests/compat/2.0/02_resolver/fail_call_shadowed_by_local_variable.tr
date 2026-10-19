@@ -1,0 +1,15 @@
+// EXPECT-DIAG: E135
+// EXPECT-DIAG: 'printline' is a variable of type 'int', not a function
+// Regression test: a local variable that is not callable but shares a name with
+// an imported function used to be silently ignored at the call site, so
+// `printline("Hi")` compiled and called io::printline. The local is what the
+// name means in that scope; calling it is an error.
+import io::[*];
+
+fn main(): int {
+    mut printline: int = 0;
+
+    printline("Hi" + (printline to string));
+
+    return 0;
+}

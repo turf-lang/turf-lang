@@ -1,0 +1,52 @@
+// Test: a .transition() call inside a single-pattern 'matches' arm gets
+// compile-time-proven (TypeChecker::MachineNarrowStack_) instead of Codegen's
+// runtime switch+panic guard -- this exercises the proven/plain-store path.
+
+import test;
+
+machine ConnectionState {
+    Idle -> Connecting,
+    Connecting -> Connected,
+    Connecting -> Failed,
+    Connected -> Closing,
+    Closing -> Idle,
+}
+
+fn advance(conn_ref: ConnectionState): ConnectionState {
+    mut conn: ConnectionState = conn_ref;
+    compare conn {
+        matches ConnectionState::Idle:
+        conn.transition(ConnectionState::Connecting);
+        done
+        matches ConnectionState::Connecting:
+        conn.transition(ConnectionState::Connected);
+        done
+        matches ConnectionState::Connected:
+        conn.transition(ConnectionState::Closing);
+        done
+        matches ConnectionState::Closing:
+        conn.transition(ConnectionState::Idle);
+        done
+        otherwise:
+        mut noop: int = 0;
+    }
+    return conn;
+}
+
+fn main(): int {
+    mut conn: ConnectionState = ConnectionState::Idle;
+
+    conn = advance(conn);
+    test::assert(conn == ConnectionState::Connecting, "Idle -> Connecting");
+
+    conn = advance(conn);
+    test::assert(conn == ConnectionState::Connected, "Connecting -> Connected");
+
+    conn = advance(conn);
+    test::assert(conn == ConnectionState::Closing, "Connected -> Closing");
+
+    conn = advance(conn);
+    test::assert(conn == ConnectionState::Idle, "Closing -> Idle");
+
+    return 0;
+}

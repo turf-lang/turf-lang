@@ -1,0 +1,24 @@
+TURF E165 -- EMPTY BRANCH (WARNING):
+
+CAUSE:
+  The `then`, an `elseif`, or the `else` block of an `if` has no statements.
+  It does nothing. This is a WARNING: compilation still succeeds.
+
+INCORRECT:
+    immut n: int = 3;
+    if n > 2 {
+    } else {                    // WARNING: empty 'then' branch
+        printline("small");
+    }
+
+CORRECT (put the work where the condition holds):
+    immut n: int = 3;
+    if n <= 2 {
+        printline("small");
+    }
+
+FIX:
+  Invert the condition so the empty branch disappears, delete an empty
+  `else`, or fill the branch in.
+
+RELATED: E168 (both branches identical), E154 (a `compare` with no arms).

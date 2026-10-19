@@ -1,0 +1,12 @@
+// Test: String concatenation with variables
+import io;
+
+import test;
+fn main(): int {
+    mut name: string = "Turf";
+    mut greeting: string = "Welcome to " + name;
+    test::assert(greeting == "Welcome to Turf", "Variable concatenation failed");
+
+    io::printline(greeting);
+    return 0;
+}

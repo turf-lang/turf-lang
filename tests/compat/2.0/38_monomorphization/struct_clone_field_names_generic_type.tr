@@ -1,0 +1,31 @@
+// LEC-009: a generic struct whose field names ANOTHER generic struct
+// (`Wrap<T> { h: &Inner<T> }`, the shape every collection has since LEC-009)
+// used only as a field of a plain struct. Instantiating `Wrap<int>` must also
+// instantiate `Inner<int>`. A monomorphized clone is never type-checked, so
+// nothing requested it, and `Holder::default()` (which allocates the `Inner<int>`
+// behind `h`) died with "monomorphized struct instantiation 'Inner_gen1_int' was
+// never given a real layout". drainStructRequests() now requests the generic
+// types a clone's own fields name.
+import test;
+
+struct Inner<T> {
+    v: T,
+    n: int
+}
+
+struct Wrap<T> {
+    h: &Inner<T>
+}
+
+struct Holder {
+    w: Wrap<int>,
+    k: int
+}
+
+fn main(): int {
+    mut h: Holder = Holder::default();
+    h.w.h.n = 3;
+    mut other: Holder = h;
+    test::assert(other.w.h.n == 3, "both copies name one Inner<int>");
+    return 0;
+}

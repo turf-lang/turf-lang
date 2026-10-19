@@ -1,0 +1,16 @@
+// Regression test (#186): `result` is assigned in the if-branch but the
+// function always returns 0 without reading it → unused variable warning.
+import test;
+
+fn compute(n: int): int {
+    mutable result: int = 0;
+    if n > 0 {
+        result = n * 2;
+    }
+    return 0;
+}
+fn main(): int {
+    mutable r: int = compute(5);
+    test::assert(r == 0, "compute returns 0");
+    return 0;
+}

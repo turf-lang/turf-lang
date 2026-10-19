@@ -1,0 +1,22 @@
+// EXPECT-DIAG: E086
+// EXPECT-DIAG: can't be pushed into a collection inside a struct or array value
+// The caller's List keeps a copy of `h`, and `h.head` points at this frame's
+// `n`.
+import list::List;
+
+struct N { val: int, next: &?N }
+struct H { k: int, head: &?N }
+
+fn add(l: List<H>): void {
+    mut n: N = N::default();
+    n.val = 42;
+    mut h: H = H::default();
+    h.head = &n;
+    l.push(h);
+}
+
+fn main(): int {
+    mut l: List<H> = List::default();
+    add(l);
+    return l.length();
+}

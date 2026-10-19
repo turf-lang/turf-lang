@@ -1,0 +1,17 @@
+This variable is never used
+
+A variable is declared, but nothing in the function ever reads it:
+
+    fn main(): int {
+        immut unused: int = 42;    // WARNING: declared but never used
+        return 0;
+    }
+
+Unused variables are usually leftovers from an edit, or a sign that you forgot to use the value. Delete the declaration, or use the value. If the variable is unused on purpose (a placeholder, or a value you only want to name), start its name with an underscore. Turf treats `_name` as deliberately unused:
+
+    fn main(): int {
+        immut _unused: int = 42;
+        return 0;
+    }
+
+This is a warning, not an error -- compilation still succeeds. To silence it for a whole build, set its lint level to allow: `turf build --allow E163` (or `[lints] E163 = "allow"` in turf.toml).

@@ -1,0 +1,50 @@
+// Test: compare statement with all variants covered + otherwise — no error
+import test;
+
+enum Season { Spring, Summer, Autumn, Winter }
+
+fn season_name(s: Season): string {
+    mut name: string = "";
+    compare s {
+        matches Season::Spring:
+        name = "spring";
+        done
+        matches Season::Summer:
+        name = "summer";
+        done
+        matches Season::Autumn:
+        name = "cold";
+        done
+        matches Season::Winter:
+        name = "cold";
+        done
+    }
+    return name;
+}
+
+fn season_name_with_otherwise(s: Season): string {
+    mut name: string = "";
+    compare s {
+        matches Season::Spring:
+        name = "spring";
+        done
+        matches Season::Summer:
+        name = "summer";
+        done
+        otherwise:
+        name = "cold";
+    }
+    return name;
+}
+
+fn main(): int {
+    test::assert(season_name(Season::Spring) == "spring", "Spring name");
+    test::assert(season_name(Season::Summer) == "summer", "Summer name");
+    test::assert(season_name(Season::Autumn) == "cold",   "Autumn name");
+    test::assert(season_name(Season::Winter) == "cold",   "Winter name");
+
+    test::assert(season_name_with_otherwise(Season::Spring) == "spring", "Spring otherwise");
+    test::assert(season_name_with_otherwise(Season::Autumn) == "cold",   "Autumn falls to otherwise");
+    test::assert(season_name_with_otherwise(Season::Winter) == "cold",   "Winter falls to otherwise");
+    return 0;
+}

@@ -1,0 +1,33 @@
+// Test: Iterating through characters of a string in a loop and checking ASCII values
+import io;
+
+import test;
+fn main(): int {
+    mut s: string = "TURFLANG";
+    mut sum: int = 0;
+    mut i: int = 0;
+
+    // Loop through 8 characters of "TURFLANG"
+    while i < 8 {
+        // FDN-004/D17: `s[i]` is `char`; widen to `int` before summing.
+        mut ch: int = s[i] to int;
+        sum = sum + ch;
+        i = i + 1;
+    }
+
+    // ASCII sum of T(84)+U(85)+R(82)+F(70)+L(76)+A(65)+N(78)+G(71) = 611
+    test::assert(sum == 611, "ASCII sum of TURFLANG should be 611");
+
+    // Test loop concatenating characters converted to string
+    mut countdown: string = "";
+    mut n: int = 3;
+    while n > 0 {
+        countdown = countdown + (n to string) + "...";
+        n = n - 1;
+    }
+    countdown = countdown + "GO!";
+    test::assert(countdown == "3...2...1...GO!", "countdown string concatenation failed");
+
+    io::printline("10_string_loop_char_sum passed!");
+    return 0;
+}

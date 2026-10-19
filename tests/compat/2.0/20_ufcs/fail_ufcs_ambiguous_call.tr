@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E125
+// EXPECT-DIAG: Ambiguous UFCS call to 'describe_int'
+// Negative test: two visible UFCS candidates with an identical signature
+// (same name, same receiver type, same remaining params) from two
+// different modules -- RFC §5.4's universal conflict rule, a hard error.
+import ufcs_ambiguous_a_module;
+import ufcs_ambiguous_b_module;
+
+fn main(): int {
+    mut n: int = 5;
+    mut r: string = n.describe_int();
+    return 0;
+}

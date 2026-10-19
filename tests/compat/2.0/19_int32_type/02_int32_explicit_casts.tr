@@ -1,0 +1,18 @@
+// Explicit `to int32` / `to int` casts in both directions, plus int32<->double.
+import test;
+
+fn main(): int {
+    mut n: int32 = 5 to int32;
+    test::assert((n to int) == 5, "int to int32 explicit narrow round-trips");
+
+    mut back: int = n to int;
+    test::assert(back == 5, "int32 to int explicit widen");
+
+    mut d: double = n to double;
+    test::assert(d == 5.0, "int32 to double explicit widen");
+
+    mut n2: int32 = 3.9 to int32;
+    test::assert((n2 to int) == 3, "double to int32 explicit narrow truncates");
+
+    return 0;
+}

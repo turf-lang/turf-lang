@@ -1,0 +1,40 @@
+import io;
+
+import test;
+extern fn strlen(s: string): int;
+
+struct User {
+    age: int,
+    name: string
+}
+
+fn User.new(age: int, name: string): void {
+    self.age = age;
+    self.name = name;
+}
+
+fn main(): int {
+    mut users: User[5] = [
+        User::default(),
+        User::default(),
+        User::default(),
+        User::default(),
+        User::default()
+    ];
+
+    users[0] = User::new(25, "Alice");
+    users[1] = User::new(30, "Bob");
+    users[2] = User::new(35, "Charlie");
+
+    // Issue #17 fix: direct field access on array elements now works
+    test::assert(users[0].age == 25, "");
+    test::assert(strlen(users[0].name) == 5, "");
+
+    test::assert(users[1].age == 30, "");
+    test::assert(strlen(users[1].name) == 3, "");
+
+    test::assert(users[2].age == 35, "");
+    test::assert(strlen(users[2].name) == 7, "");
+
+    return 0;
+}

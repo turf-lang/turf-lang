@@ -1,0 +1,59 @@
+// Range slicing: a slice is a VIEW of the array it was taken from. Writing
+// through a `mut` view changes that array, and a `mut` view can be pointed
+// at another array later. An `immut` view is read-only (E060 on a write),
+// and a `mut` view of an `immut` array is refused (E144).
+import test;
+
+fn fill(arr: int[], v: int): void {
+    for (i, _x) in arr {
+        arr[i] = v;
+    }
+}
+
+struct Counter {
+    n: int
+}
+
+fn Counter.new(): void {
+    self.n = 0;
+}
+
+fn Counter.bump(): void {
+    self.n += 1;
+}
+
+fn main(): int {
+    mut arr: int[5] = [1, 2, 3, 4, 5];
+
+    mut view: int[] = arr[1..3];
+    view[0] = 20;
+    view[-1] += 100;
+    test::assert(arr[1] == 20 && arr[2] == 103, "writes through a view reach the array");
+
+    arr[3..][0] = 40;
+    test::assert(arr[3] == 40, "a write through a slice expression");
+
+    fill(arr[..2], 0);
+    test::assert(arr[0] == 0 && arr[1] == 0 && arr[2] == 103, "fill() of a slice changes only that range");
+
+    view = arr[3..];          // point the view somewhere else
+    view[1] = 50;
+    test::assert(arr[4] == 50, "a rebound view writes its new array");
+
+    mut other: int[2] = [7, 8];
+    view = other;             // a whole sized array becomes a view too
+    view[0]++;
+    test::assert(other[0] == 8 && arr[3] == 40, "the view now shares `other` only");
+
+    // A view of a local literal.
+    mut owned: int[] = [1, 2, 3];
+    owned[1] = 9;
+    test::assert(owned[1] == 9 && owned.length() == 3, "a slice variable from a literal");
+
+    // A view's elements are the array's elements, methods included.
+    mut cs: Counter[3] = [Counter::new(), Counter::new(), Counter::new()];
+    mut tail: Counter[] = cs[1..];
+    tail[0].bump();
+    test::assert(cs[1].n == 1 && cs[0].n == 0, "a mutating method through a view");
+    return 0;
+}

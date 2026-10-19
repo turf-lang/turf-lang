@@ -1,0 +1,33 @@
+TURF E169 -- FALLIBLE FUNCTION THAT NEVER FAILS (WARNING):
+
+CAUSE:
+  A function is declared to return `!T` but no path returns an error value
+  and nothing it calls can fail. This is a WARNING: compilation still
+  succeeds.
+
+INCORRECT:
+    fn double_it(n: int): !int {     // WARNING: never returns an error
+        return n * 2;
+    }
+
+CORRECT (drop the `!`, or really return an error):
+    error MathError {
+        Negative,
+    }
+
+    fn checked_double(n: int): !int {
+        if n < 0 {
+            return MathError::Negative;
+        }
+        return n * 2;
+    }
+
+    fn main(): int {
+        return checked_double(4) recover produce 0 - 8;
+    }
+
+FIX:
+  Change `!int` to `int` if the function cannot fail, or add the failing path.
+
+RELATED: E066 (a `!T` result used where a plain `T` is needed: handle it with `recover`
+  or `try`).

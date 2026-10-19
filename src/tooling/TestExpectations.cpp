@@ -236,7 +236,7 @@ std::vector<std::string> Register::checkDiagPolicy(const std::string &Source, co
   const std::string FirstEmitted = Emitted.empty() ? "" : *Emitted.begin();
 
   // NO-CODE: a `── error` header with no `[Exxx]` is a plain error, so the
-  // beginner has no `--explain` page for it. Warnings carry no codes by design.
+  // beginner has no `--explain` page for it. (A warning has a code too, but is never judged here.)
   int Codeless = 0;
   // GENERIC-CODE: E066 is the TypeChecker's one catch-all class; the line under
   // its header is the real banner, and anything but "Type mismatch!" there is

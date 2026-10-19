@@ -1,0 +1,34 @@
+// Test: Recursive string concatenation and equality comparison
+import io;
+
+import test;
+fn repeat_string(s: string, count: int): string {
+    if count <= 0 {
+        return "";
+    }
+    if count == 1 {
+        return s;
+    }
+    return s + repeat_string(s, count - 1);
+}
+
+fn is_palindrome_3(s: string): bool {
+    return (s[0] == s[2]);
+}
+
+fn main(): int {
+    // 1. Test recursive string concatenation
+    mut repeated: string = repeat_string("turf", 3);
+    test::assert(repeated == "turfturfturf", "Recursive string repeat failed");
+
+    // 2. Test recursive/helper string operations and comparisons
+    test::assert(repeat_string("a", 5) == "aaaaa", "Single char repeat failed");
+    test::assert(repeat_string("xy", 0) == "", "Zero repeat should produce empty string");
+
+    // 3. Check character equality across string indices
+    test::assert(is_palindrome_3("aba"), "aba should match ends");
+    test::assert(!is_palindrome_3("abc"), "abc should not match ends");
+
+    io::printline("12_string_recursion_compare passed!");
+    return 0;
+}

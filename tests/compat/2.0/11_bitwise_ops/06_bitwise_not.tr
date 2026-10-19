@@ -1,0 +1,32 @@
+// Test: Bitwise NOT operator (~)
+// ~0 == -1 (all bits set in two's complement)
+
+import test;
+
+fn main(): int {
+    mut a: int = ~0;
+    test::assert(a == -1, "~0 should equal -1 (all bits set)");
+
+    mut b: int = ~(-1);
+    test::assert(b == 0, "~(-1) should equal 0");
+
+    mut c: int = ~1;
+    test::assert(c == -2, "~1 should equal -2");
+
+    mut d: int = ~255;
+    test::assert(d == -256, "~255 should equal -256");
+
+    // Double NOT returns original
+    mut e: int = 42;
+    mut f: int = ~(~e);
+    test::assert(f == 42, "~~42 should equal 42");
+
+    // ~x == -(x+1) (two's complement identity)
+    mut g: int = ~5;
+    test::assert(g == -6, "~5 should equal -6");
+
+    mut h: int = ~(-5);
+    test::assert(h == 4, "~(-5) should equal 4");
+
+    return 0;
+}

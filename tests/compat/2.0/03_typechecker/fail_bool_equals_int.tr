@@ -1,0 +1,6 @@
+// EXPECT-DIAG: E124
+// EXPECT-DIAG: Cannot compare 'bool' with 'int'
+fn main(): int {
+    printline(true == 1);
+    return 0;
+}

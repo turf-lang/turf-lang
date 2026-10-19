@@ -1,0 +1,24 @@
+// LEC-002 stage 3: `import m::[*]` brings in only `pub` names. This file
+// declares its own `helper` and `Hidden` -- names the module also declares
+// PRIVATELY. Were the wildcard to import them, the bare `helper()` below
+// would be ambiguous (and a second `Hidden` would be a collision). They stay
+// this file's own, and the module's `api()` still calls ITS `helper` (41 + 1),
+// not this one (100) -- a module cannot see its importer.
+import test;
+import visibility_lib_module::[*];
+
+fn helper(): int {
+    return 100;
+}
+
+struct Hidden {
+    z: int
+}
+
+fn main(): int {
+    mut h: Hidden = Hidden::default();
+    h.z = helper();
+    test::assert(h.z == 100, "the local helper is the one called here");
+    test::assert(api() == 42, "the module's api() used its own private helper");
+    return 0;
+}

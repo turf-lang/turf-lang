@@ -1,0 +1,74 @@
+// Regression test: indexing a generic collection's own backing-array field,
+// then accessing a field on the result (`store.data[i].field`), must resolve
+// to the REAL, substituted element type end to end -- not the raw struct
+// type. This used to fail two different ways depending on the element type's
+// size:
+//
+// - A generic struct field (`Store<T>`'s `data: T*`) never matched
+//   TypeChecker::visitFieldAccess()'s GenericType-base handling at all for
+//   a POINTER-indexed access (`data[i]`, as opposed to a fixed-size Turf
+//   array `T[N]`) -- TypeChecker::visitArrayAccess() only ever had a case
+//   for `isArray()`, none for a plain `T*`. `store.data[0]`'s type came
+//   back nullptr, so a further `.field` access on it also came back
+//   nullptr, and anything depending on the real type (like which
+//   `printline` overload to pick) silently chose the wrong one instead of
+//   erroring -- confirmed live: printed a raw pointer bit pattern as a
+//   number instead of the actual string.
+// - Separately, Codegen's OWN independent getExprType() had the identical
+//   gap in its FieldAccessExprAST handling (never resolved a GenericType
+//   base at all, only a bare TurfStructType) -- crashing the WHOLE
+//   COMPILER with "Internal error: Could not determine type of array/list
+//   base" the moment anything tried to further index/use the result.
+//
+// Both are now fixed (TypeChecker::visitArrayAccess gained a pointer-type
+// branch; both TypeChecker::visitFieldAccess and Codegen's getExprType()
+// gained the same generic-parameter substitution visitMethodCall() already
+// had for method return types).
+//
+// LEC-002: the collection used to be `List<Entry*>`, reaching into its
+// `data` field. That field is private to list.tr now, so the test declares
+// its own generic `Store<T>` with the same `data: T*` shape -- which is all
+// the regression ever needed. (A struct with a raw pointer field has to be
+// declared inside `unsafe { }`.)
+
+import io;
+import mem;
+
+import test;
+struct Entry {
+    key: string,
+    value: string
+}
+
+unsafe {
+    struct Store<T> {
+        data: T*,
+        len: int
+    }
+}
+
+fn main(): int {
+    // (issue #238) mem::alloc()'s ptr result requires `unsafe { }` to bind
+    // to a caller-side local; the cast to `Entry*` is also gated; and
+    // indexing / writing through the raw `data` pointer is a gated use too.
+    mut store: Store<Entry> = Store::default();
+    unsafe {
+        store.data = mem::alloc(sizeof(Entry)) to Entry*;
+        store.data[0].key = "language";
+        store.data[0].value = "Turf";
+    }
+
+    // The actual regression: chained field access through a generic
+    // collection's indexed backing array, used both as a value passed to
+    // an overloaded function (proves TypeChecker picked the right
+    // `printline` overload) and compared directly (proves the VALUE
+    // itself, not just its reported type, is correct).
+    unsafe {
+        io::printline(store.data[0].value);
+    }
+    test::assert(unsafe { store.data[0].key; } == "language", "key field resolves correctly");
+    test::assert(unsafe { store.data[0].value; } == "Turf", "value field resolves correctly");
+
+    io::printline("generic collection field chain resolves correctly");
+    return 0;
+}

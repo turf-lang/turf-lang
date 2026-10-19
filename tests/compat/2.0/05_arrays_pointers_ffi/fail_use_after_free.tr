@@ -1,0 +1,25 @@
+// EXPECT-DIAG: E018
+// EXPECT-DIAG: after it was freed
+// EXPECT-NO-DIAG: Unsafe pointer use
+// Regression test: AliasAnalysisPass must reject a genuine use-after-free
+// (an array access through a pointer that was already freed). See also
+// fail_double_free.tr and 16_alias_analysis_shadowing.tr.
+
+import io;
+
+@ownership(acquires)
+extern fn malloc(size: int): int*;
+
+@ownership(releases: p)
+extern fn free(p: int*): void;
+
+fn main(): int {
+    // Raw pointers need `unsafe { }` (issue #238); outside it this test died on
+    // its first line (E130) and the alias analysis never ran.
+    unsafe {
+        mut p: int* = malloc(sizeof(int) * 4);
+        free(p);
+        p[0] = 1;
+    }
+    return 0;
+}

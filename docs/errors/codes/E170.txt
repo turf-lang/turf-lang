@@ -1,0 +1,36 @@
+This pointer may already have been freed
+
+The compiler follows each allocation through the function. When a pointer has been released on some paths that reach a use, but not on all of them, it can't tell whether the use is safe:
+
+    @ownership(acquires)
+    extern fn malloc(size: int): int*;
+
+    @ownership(releases: p)
+    extern fn free(p: int*): void;
+
+    fn main(): int {
+        mut flag: int = 1;
+        unsafe {
+            mut q: int* = malloc(sizeof(int) * 4);
+            if flag == 1 {
+                free(q);
+            }
+            q[0] = 1;         // WARNING: 'q' may already have been freed
+        }
+        return 0;
+    }
+
+If `flag == 1`, `q[0] = 1` writes to freed memory. Inside `main`, use the pointer before it can be released, and release it once, at the end:
+
+    unsafe {
+        mut q: int* = malloc(sizeof(int) * 4);
+        q[0] = 1;
+        if flag == 1 {
+            printline("releasing");
+        }
+        free(q);
+    }
+
+Turf cannot evaluate your conditions, so this is a possible bug and not a certain one. If a flag or condition makes the freed path impossible where you use the pointer, the code is correct and you can allow the warning. When the pointer is freed on EVERY path before the use, that is the error E018 instead.
+
+This is a warning, not an error -- compilation still succeeds. To silence it for a whole build, set its lint level to allow: `turf build --allow E170` (or `[lints] E170 = "allow"` in turf.toml).

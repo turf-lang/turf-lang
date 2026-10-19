@@ -1,0 +1,21 @@
+// EXPECT-DIAG: E060
+// EXPECT-DIAG: You can't change the value of 's' because it's immutable
+// Regression test (LEC-006 follow-up): the "this method mutates self" scan used
+// to recognise only `self.<field> = ...`. A method whose only mutation is
+// `self.arr[0] = ...` -- an element of a fixed-array FIELD, which lives inside
+// the struct value -- was not seen, so `c.fill()` on an `immut` variable
+// compiled and silently changed it.
+// Expected: ImmutableAssignmentError on `s`.
+struct Slots {
+    arr: int[3]
+}
+
+fn Slots.fill(): void {
+    self.arr[0] = 1;
+}
+
+fn main(): int {
+    immut s: Slots = Slots::default();
+    s.fill();
+    return 0;
+}

@@ -314,6 +314,37 @@ $r = Tr "$P8\app" @('build')
 Expect-Rc 'a dependency cannot allow itself' $r 1
 Expect-Out 'a dependency cannot allow itself' $r '[E130'
 
+# --- [lints] (V-1) ----------------------------------------------------------------------------------------
+# The manifest's levels reach the compiler as flags ahead of the user's own.
+$P9 = "$work\p9"; New-Dir $P9
+$null = Tr $P9 @('new', 'app')
+Set-Text "$P9\app\src\main.tr" "fn main(): int {`n    mut unused: int = 5;`n    return 0;`n}`n"
+New-Dir "$P9\app\tests"
+Set-Text "$P9\app\tests\unused_var.tr" "fn main(): int {`n    mut unused: int = 5;`n    return 0;`n}`n"
+$toml9 = [System.IO.File]::ReadAllText("$P9\app\turf.toml")
+function Test-Lints([string]$Label, [int]$WantRc, [string]$Fragment, [string]$Body, [string[]]$TurfArgs = @('build')) {
+  $text = $toml9
+  if ($Body) { $text += "`n[lints]`n$Body" }
+  Set-Text "$P9\app\turf.toml" $text
+  $r = Tr "$P9\app" $TurfArgs
+  Expect-Rc "lints: $Label" $r $WantRc
+  if ($Fragment) { Expect-Out "lints: $Label" $r $Fragment }
+  return $r
+}
+$null = Test-Lints 'no table: the warning is shown and the build succeeds' 0 '[E163' ''
+$r = Test-Lints 'allow' 0 '' "E163 = `"allow`"`n"
+Expect-NoOut 'lints: allow' $r 'E163'
+$null = Test-Lints 'deny' 1 'error at line 2, col 5 [E163' "E163 = `"deny`"`n"
+$null = Test-Lints 'a flag on the command line beats the table' 0 '' "E163 = `"deny`"`n" @('build', '--allow', 'E163')
+$null = Test-Lints 'lint-set is accepted' 0 '[E163' "lint-set = `"2.0`"`n"
+$null = Test-Lints "an unknown code is the compiler's usage error" 2 "unknown diagnostic code 'E999'" "E999 = `"deny`"`n"
+$null = Test-Lints "an error's code cannot be allowed" 2 'E102 is an error, not a warning' "E102 = `"allow`"`n"
+$null = Test-Lints 'a key that is not a code' 1 'unknown key `unused` in [lints]' "unused = `"allow`"`n"
+$null = Test-Lints 'a level that is not one' 1 "'forbid' is not allow, warn or deny" "E163 = `"forbid`"`n"
+$null = Test-Lints 'a lint set newer than the compiler' 2 'is newer than this compiler' "lint-set = `"2.99`"`n"
+$null = Test-Lints 'turf test passes the table on' 1 'COMPILE FAILED' "E163 = `"deny`"`n" @('test')
+Set-Text "$P9\app\turf.toml" $toml9
+
 # --- refusals ---------------------------------------------------------------------------------------------
 $Loose = "$work\loose"; New-Dir $Loose
 $r = Tr $Loose @('build'); Expect-Rc 'turf build outside a project' $r 2; Expect-Out 'turf build outside a project' $r 'turf new'

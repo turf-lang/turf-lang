@@ -1,0 +1,34 @@
+// Regression test: TYPE-002 S12a -- a generic FREE function called with
+// several different concrete type arguments must produce genuinely
+// SEPARATE, independently-correct compiled specializations, not one
+// shared, type-erased body.
+//
+// Under the OLD (pre-S12a) type-erasure model this already "worked" in
+// the sense that it compiled and ran -- every T erased to one opaque
+// pointer-sized slot, with a scalar bit-stuffed in via IntToPtr/PtrToInt.
+// What this test actually proves is stronger: `--dump-instantiations`
+// against this exact program shows `identity<int>` and `identity<double>`
+// as two DISTINCT instantiation requests (see the change record), and the
+// emitted LLVM IR (`turf --emit-llvm`) shows two separate, real functions
+// -- `turf_identity_gen1_int_int` and `turf_identity_gen1_double_double`
+// -- with zero `inttoptr`/`ptrtoint` anywhere in either. That is not
+// re-verified here (a .tr test can only observe compiled BEHAVIOUR, not
+// the IR shape) -- this test is the behavioural half; the IR shape was
+// verified live during the S12a session and is recorded in the change
+// record's own git history.
+
+import test;
+
+fn<T> identity(x: T): T {
+    return x;
+}
+
+fn main(): int {
+    immut a: int = identity(42);
+    immut b: double = identity(3.5);
+    immut c: string = identity("hello");
+    test::assert(a == 42, "identity<int> failed");
+    test::assert(b == 3.5, "identity<double> failed");
+    test::assert(c == "hello", "identity<string> failed");
+    return 0;
+}

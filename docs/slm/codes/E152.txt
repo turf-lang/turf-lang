@@ -1,0 +1,27 @@
+TURF E152 -- SHADOWED VARIABLE (WARNING):
+
+CAUSE:
+  A variable is declared with the name of a variable that is already visible
+  (an enclosing block, or a parameter). The new one hides the older one for
+  the rest of its scope. This is a WARNING: compilation still succeeds.
+
+INCORRECT:
+    immut count: int = 1;
+    if count > 0 {
+        immut count: int = 2;   // WARNING: hides the first 'count'
+        printline(count to string);
+    }
+
+CORRECT (give the inner variable its own name):
+    immut count: int = 1;
+    if count > 0 {
+        immut inner: int = 2;
+        printline(inner to string);
+    }
+
+FIX:
+  Rename the new variable. Reuse the old one by assigning to it
+  (`count = 2;`, needs `mut`) when one value is what you meant.
+
+RELATED: E033 (the same name twice in the SAME scope is an error, not a
+  shadowing warning).

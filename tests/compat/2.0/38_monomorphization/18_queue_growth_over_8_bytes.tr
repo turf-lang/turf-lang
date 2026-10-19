@@ -1,0 +1,35 @@
+// Regression test: D3's queue.tr counterpart of
+// 17_stack_growth_over_8_bytes.tr -- same `self.cap * 8` under-allocation
+// bug, in Queue<T>.enqueue()'s grow branch. Confirmed live before this fix:
+// enqueuing 20 `Big` (24-byte) values aborted with glibc's
+// "realloc(): invalid next size".
+import queue::Queue;
+import test;
+
+struct Big { a: int, b: int, c: int }
+fn Big.new(x: int, y: int, z: int): void { self.a = x; self.b = y; self.c = z; }
+
+fn main(): int {
+    mut q: Queue<Big> = Queue::default();
+    mut i: int = 0;
+    while i < 20 {
+        q.enqueue(Big::new(i, i * 2, i * 3));
+        i = i + 1;
+    }
+    test::assert(q.length() == 20, "Queue<Big> should hold 20 elements after growth");
+
+    // Dequeue all 20 back (FIFO -- first enqueued, i = 0, comes first) and
+    // verify every field of every element survived the growth
+    // reallocations uncorrupted.
+    i = 0;
+    while i < 20 {
+        mut b: Big = q.dequeue();
+        test::assert(b.a == i, "Big.a corrupted after Queue<Big> growth");
+        test::assert(b.b == i * 2, "Big.b corrupted after Queue<Big> growth");
+        test::assert(b.c == i * 3, "Big.c corrupted after Queue<Big> growth");
+        i = i + 1;
+    }
+    test::assert(q.length() == 0, "Queue<Big> should be empty after dequeuing everything");
+
+    return 0;
+}
