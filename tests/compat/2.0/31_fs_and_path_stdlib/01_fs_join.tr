@@ -1,0 +1,14 @@
+// tests/31_fs_and_path_stdlib/01_fs_join.tr
+// Tests fs::join -- exactly one '/' between two path segments, regardless
+// of whether the first segment already ends in one.
+
+import fs;
+import test;
+
+fn main(): int {
+    test::assert_eq(fs::join("a/b", "c.txt"), "a/b/c.txt", "join: no trailing slash on 'a' -> exactly one '/' inserted");
+    test::assert_eq(fs::join("a/b/", "c.txt"), "a/b/c.txt", "join: trailing slash on 'a' -> no double '/'");
+    test::assert_eq(fs::join("dir", "file"), "dir/file", "join: two bare names");
+
+    return 0;
+}

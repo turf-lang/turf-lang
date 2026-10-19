@@ -1,0 +1,5 @@
+// EXPECT-DIAG: E062
+fn main(): int {
+    mut s: string = null;
+    return 0;
+}

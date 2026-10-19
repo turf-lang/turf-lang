@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E082
+// EXPECT-DIAG: Cannot cast this '&?Node' value to a non-null reference
+// `(h.head to &Node)`: E082 was only raised for a variable operand, so this
+// turned a null into a `&Node` with no check. Found by turf-fuzz probing.
+struct Node { val: int, next: &?Node }
+struct Holder { head: &?Node }
+
+fn main(): int {
+    mut h: Holder = Holder::default();
+    mut p: &Node = (h.head to &Node);
+    return p.val;
+}

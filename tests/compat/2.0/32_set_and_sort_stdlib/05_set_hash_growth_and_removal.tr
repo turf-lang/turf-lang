@@ -1,0 +1,70 @@
+// Regression test: STD-003's Set<T> hash-index rewrite
+// (lib/std/collections/set.tr, docs/development/changes/STD-003.md) --
+// correctness under real stress 01_set_add_contains_remove.tr doesn't
+// exercise: many entries (several bucket-table rehash rounds, not just the
+// dense array's own growth), a removal that swaps a DIFFERENT item into the
+// removed slot (the bucket-index retarget path -- mirrors
+// tests/07_functions_modules/13_stdlib_map_hash_growth_and_removal.tr's
+// identical Map<K,V> concern), and string items built at RUNTIME
+// (INV-TEST-1, docs/development/INVARIANTS.md).
+import set::Set;
+import test;
+
+fn main(): int {
+    // Enough entries to force multiple bucket-table rehash rounds.
+    mut s: Set<string> = Set::default();
+    mut i: int = 0;
+    while i < 150 {
+        immutable item: string = "item_" + (i to string);
+        s.add(item);
+        i = i + 1;
+    }
+    test::assert(s.length() == 150, "150 distinct runtime-built items");
+
+    i = 0;
+    while i < 150 {
+        immutable item: string = "item_" + (i to string);
+        test::assert(s.contains(item), "every inserted item must be found");
+        i = i + 1;
+    }
+    test::assert(!s.contains("item_9999"), "a never-added item must not be found");
+
+    // Re-adding a runtime-built duplicate (a SEPARATE allocation, never the
+    // same literal) must stay a no-op -- proves dedup uses real content
+    // equality through the hash index, not identity.
+    s.add("item_" + (75 to string));
+    test::assert(s.length() == 150, "re-adding a duplicate item must not grow the set");
+
+    // Remove an item that is NOT the last dense entry -- forces the
+    // swap-with-last compaction to move a DIFFERENT item into the removed
+    // slot, which must retarget that moved item's own bucket entry.
+    immutable lastItem: string = "item_" + (149 to string);
+    immutable removed: bool = s.remove("item_" + (0 to string));
+    test::assert(removed, "removing a present item returns true");
+    test::assert(s.length() == 149, "length drops by one after removal");
+    test::assert(!s.contains("item_" + (0 to string)), "removed item is gone");
+    test::assert(s.contains(lastItem), "the moved-into-place item must still be found");
+
+    immutable removedAgain: bool = s.remove("item_" + (0 to string));
+    test::assert(!removedAgain, "removing an already-absent item returns false");
+    test::assert(s.length() == 149, "removing an absent item must not change length");
+
+    // Remove every remaining item one at a time -- the set must end up
+    // genuinely empty, not just report length() == 0 while still
+    // containing stale entries.
+    i = 1;
+    while i < 150 {
+        s.remove("item_" + (i to string));
+        i = i + 1;
+    }
+    test::assert(s.length() == 0, "set is empty after removing every item");
+    test::assert(!s.contains(lastItem), "no item survives after removing all of them");
+
+    // Re-insert after emptying -- proves tombstones left behind by the
+    // removals above are correctly reused by later inserts.
+    s.add("fresh");
+    test::assert(s.length() == 1, "set usable again after being fully emptied");
+    test::assert(s.contains("fresh"), "");
+
+    return 0;
+}

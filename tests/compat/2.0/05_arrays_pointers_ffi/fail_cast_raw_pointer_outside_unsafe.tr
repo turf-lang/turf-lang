@@ -1,0 +1,26 @@
+// EXPECT-DIAG: E130
+// EXPECT-DIAG: Raw pointer type 'int*' cannot be used outside an 'unsafe' block
+// Regression test (issue #238): a `to`-cast whose destination type is a
+// raw pointer (`ptr`/`T*`) must be rejected outside `unsafe { }` -- this
+// is the "cast" leg of the three explicitly gated uses (declaration,
+// cast, dereference) FINAL_SPRINT.md's Track A specifies. `r` is a `&int`
+// safe reference (no raw pointer declared anywhere) explicitly cast `to
+// int*`: `typesCompatible()` already allows `&T -> T*` implicitly (see
+// its Rule 2.5, src/sema/Types.cpp), but an EXPLICIT cast still goes through
+// the same gate check as any other cast involving a raw pointer type,
+// regardless of whether the conversion itself would have been implicitly
+// allowed -- the cast is checked (and fails) before `p`'s own
+// raw-pointer-typed declaration would separately be gated too, since
+// visitVarDecl() visits the initializer expression first. See also
+// fail_ptr_outside_unsafe.tr,
+// fail_struct_raw_ptr_field_outside_unsafe.tr, and
+// fail_fn_signature_raw_pointer_disallowed.tr for the other three gated
+// shapes, and 18_unsafe_block_and_safe_reference.tr for the corresponding
+// passing cases.
+
+fn main(): int {
+    mutable v: int = 5;
+    mutable r: &int = &v;
+    mutable p: int* = r to int*;
+    return 0;
+}

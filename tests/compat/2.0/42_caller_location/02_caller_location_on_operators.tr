@@ -1,0 +1,47 @@
+// `@caller_location` decorates an `operator` too, so an operator that panics
+// on a broken precondition can name its caller's line (FREEZE F-API-3; List's
+// and Set's `[]` and `[]=` use it). Every operator dispatch path passes the
+// hidden argument: binary, unary, compound assignment, index read and index
+// write. Each operator records the location it was called from.
+
+import test;
+import strings;
+
+struct V { at: string }
+
+@caller_location
+operator +(a: V, b: V): V {
+    mut r: V = V::default();
+    r.at = caller_location;
+    return r;
+}
+
+@caller_location
+operator -(a: V): V {
+    mut r: V = V::default();
+    r.at = caller_location;
+    return r;
+}
+
+@caller_location
+operator [](v: V, i: int): string {
+    return caller_location;
+}
+
+@caller_location
+operator []=(v: &V, i: int, value: int): void {
+    v.at = caller_location;
+}
+
+fn main(): int {
+    mut a: V = V::default();
+    mut b: V = V::default();
+    test::assert(strings::ends_with((a + b).at, ":39"), "binary operator");
+    test::assert(strings::ends_with((-a).at, ":40"), "unary operator");
+    a += b;
+    test::assert(strings::ends_with(a.at, ":41"), "compound assignment through operator +");
+    test::assert(strings::ends_with(b[0], ":43"), "index read");
+    b[0] = 1;
+    test::assert(strings::ends_with(b.at, ":44"), "index write");
+    return 0;
+}

@@ -1,0 +1,53 @@
+// Stage 3: `recover as err run { ... }` end-to-end -- binds the failing
+// error value and discriminates between variants via `==`. Each scenario
+// lives in its own helper function since a diverging `return` inside the
+// recover block returns from the ENCLOSING function, not just the recover
+// expression itself.
+import test;
+
+error NetworkError {
+    Timeout,
+    ConnectionRefused,
+}
+
+fn connect(mode: int): !int {
+    if (mode == 1) {
+        return NetworkError::Timeout;
+    }
+    if (mode == 2) {
+        return NetworkError::ConnectionRefused;
+    }
+    return 200;
+}
+
+fn tryTimeout(): int {
+    return connect(1) recover as err run {
+        if (err == NetworkError::Timeout) {
+            return 1;
+        }
+        return 0;
+    };
+}
+
+fn tryConnectionRefused(): int {
+    return connect(2) recover as err run {
+        if (err == NetworkError::Timeout) {
+            return 0;
+        }
+        return 2;
+    };
+}
+
+fn trySuccessPath(): int {
+    return connect(0) recover as err run {
+        return -1;
+    };
+}
+
+fn main(): int {
+    test::assert_eq(tryTimeout(), 1, "err should be correctly identified as Timeout");
+    test::assert_eq(tryConnectionRefused(), 2, "err should be correctly distinguished from Timeout");
+    test::assert_eq(trySuccessPath(), 200, "success path should never touch the recover block");
+
+    return 0;
+}

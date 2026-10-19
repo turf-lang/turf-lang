@@ -1,0 +1,30 @@
+// LEC-002 stage 3: everything a module marked `pub` is usable from another
+// module -- by qualified name, by single-symbol/list import, and through a
+// wildcard import -- and a `pub` generic whose body calls a PRIVATE helper
+// works when instantiated here (the clone is resolved in the template's own
+// module, not the instantiation site's).
+import test;
+import visibility_lib_module;
+import visibility_lib_module::[api, pick, Shown];
+
+fn main(): int {
+    test::assert(visibility_lib_module::api() == 42, "qualified pub fn -> private helper");
+    test::assert(api() == 42, "bare pub fn via symbol-list import");
+    test::assert(pick(3) == 3, "pub overload via import");
+    test::assert(visibility_lib_module::LIMIT == 10, "export immut is public");
+
+    mut s: Shown = Shown::default();
+    s.v = 2;
+    test::assert(s.v == 2, "pub struct via symbol import");
+
+    immut c: visibility_lib_module::PubColor = visibility_lib_module::PubColor::Green;
+    test::assert(c to int == 1, "pub enum, qualified, including its variants");
+
+    test::assert(visibility_lib_module::wrap_generic("x") == 46,
+        "pub generic calling private generic + private fn");
+    test::assert(visibility_lib_module::wrap_generic(1.5) == 46,
+        "second instantiation of the same pub generic");
+    test::assert(visibility_lib_module::length_of("abcd") == 4,
+        "pub fn wrapping a private extern");
+    return 0;
+}

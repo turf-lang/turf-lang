@@ -1,0 +1,7 @@
+// EXPECT-DIAG: E066
+// EXPECT-DIAG: The condition of 'give' must be a 'bool', but this one has type 'int'
+fn main(): int {
+    mut n: int = 2;
+    immut k: int = n give 1 otherwise 0;
+    return k;
+}

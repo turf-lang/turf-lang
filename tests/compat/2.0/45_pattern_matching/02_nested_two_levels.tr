@@ -1,0 +1,36 @@
+// LEC-003: a struct pattern nested two levels deep, mixing an enum variant,
+// a string literal, `_` and bindings.
+import test;
+
+struct Point { x: int, y: int }
+enum Color { Red, Green, Blue }
+struct Pixel { at: Point, color: Color, label: string }
+
+fn describe(px: Pixel): int {
+    mut r: int;
+    compare px {
+        matches Pixel { at: Point { x: 0, y }, color: Color::Red, .. }:
+        r = 100 + y;
+        done
+        matches Pixel { label: "hi", at: _, .. }:
+        r = 200;
+        done
+        matches _:
+        r = -1;
+        done
+    }
+    return r;
+}
+
+fn main(): int {
+    mut px: Pixel = Pixel::default();
+    px.at.y = 5;
+    px.color = Color::Red;
+    test::assert(describe(px) == 105, "nested literal + variant + binding");
+    px.color = Color::Blue;
+    px.label = "hi";
+    test::assert(describe(px) == 200, "string literal field");
+    px.label = "no";
+    test::assert(describe(px) == -1, "falls to the wildcard");
+    return 0;
+}

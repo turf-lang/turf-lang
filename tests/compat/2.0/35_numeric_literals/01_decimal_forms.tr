@@ -1,0 +1,28 @@
+// SEM-001 (docs/archive/ARCHITECTURE_OVERHAUL.md §8): plain decimal
+// integer literals, with and without '_' digit separators (FREEZE.md
+// §6.2 row 1). A '_' is legal anywhere BETWEEN two digits.
+
+import test;
+
+fn main(): int {
+    mut a: int = 5;
+    test::assert(a == 5, "plain single digit");
+
+    mut b: int = 1000000;
+    test::assert(b == 1000000, "plain multi-digit, no separators");
+
+    mut c: int = 1_000_000;
+    test::assert(c == 1000000, "separators every three digits");
+
+    mut d: int = 1_0_0_0_0_0_0;
+    test::assert(d == 1000000, "separators in unusual (but legal) positions");
+
+    mut e: int = 1__000;
+    // FREEZE.md §6.2 row 1 only forbids a LEADING or TRAILING '_' -- a
+    // doubled interior separator is not rejected (MisplacedSeparatorError's
+    // own doc comment, ErrorsLex.h, is explicit about not being stricter
+    // than the frozen rule).
+    test::assert(e == 1000, "doubled interior separator is legal");
+
+    return 0;
+}

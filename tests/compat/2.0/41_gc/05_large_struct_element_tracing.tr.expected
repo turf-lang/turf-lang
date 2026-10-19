@@ -1,0 +1,1 @@
+41/05 PASS: struct >64 words, both pointer fields (in-range and widened) precisely traced through a forced collection

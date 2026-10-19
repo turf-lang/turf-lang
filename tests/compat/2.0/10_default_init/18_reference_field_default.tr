@@ -1,0 +1,50 @@
+// LEC-009 (F-COLL-2): `T::default()` gives every non-null `&U` field a fresh
+// heap `U::default()`. Before, the field was zero-filled: a "never null" `&U`
+// held null, and `h.c.n` segfaulted in safe code. Each field, each element of
+// a fixed array field and each default call gets its own allocation, and the
+// fields of the new value are defaults too (`string` is "", not null).
+import test;
+
+struct Counter {
+    n: int,
+    name: string
+}
+
+struct Holder {
+    c: &Counter,
+    d: &Counter
+}
+
+struct Outer {
+    one: Holder,
+    many: Holder[2]
+}
+
+fn bump(h: Holder): void {
+    h.c.n = h.c.n + 1;
+}
+
+fn main(): int {
+    mut h: Holder = Holder::default();
+    test::assert(h.c.n == 0 && h.c.name == "", "the referenced value is a default");
+
+    // A copy of the struct shares what its references point at.
+    mut g: Holder = h;
+    bump(g);
+    test::assert(h.c.n == 1, "a callee's write through the copy is visible");
+
+    // Two fields, two allocations.
+    h.d.n = 5;
+    test::assert(h.c.n == 1, "c and d are different values");
+
+    // Two default calls, two allocations.
+    mut k: Holder = Holder::default();
+    test::assert(k.c.n == 0, "a second default starts fresh");
+
+    // Nested by value and inside a fixed array: every element gets its own.
+    mut o: Outer = Outer::default();
+    o.many[0].c.n = 7;
+    test::assert(o.many[1].c.n == 0 && o.one.c.n == 0, "each element has its own Counter");
+    test::assert(o.many[0].c.n == 7, "the write landed");
+    return 0;
+}

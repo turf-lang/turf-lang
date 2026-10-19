@@ -1,0 +1,20 @@
+// EXPECT-DIAG: E086
+// EXPECT-DIAG: can't be stored into a field that outlives this function
+// Same as fail_escape_store_into_list_element.tr through `get()`.
+import list::List;
+
+struct N { val: int, next: &?N }
+
+fn f(l: List<&N>): void {
+    mut n: N = N::default();
+    n.val = 42;
+    mut e: &N = l.get(0);
+    e.next = &n;
+}
+
+fn main(): int {
+    mut l: List<&N> = List::default();
+    l.push(heap(N::default()));
+    f(l);
+    return 0;
+}

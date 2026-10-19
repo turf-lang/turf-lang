@@ -1,0 +1,28 @@
+// EXPECT-DIAG: E092
+// EXPECT-DIAG: the field has type 'int' but this pattern has type 'string'
+// LEC-004: a literal sub-pattern must have its field's type. `mode` is an int,
+// `"rw"` is a string: E092, the same rule a struct pattern's field has.
+error IOError {
+    Denied(path: string, mode: int)
+}
+
+fn open(p: string): !int {
+    return IOError::Denied(p, 1);
+}
+
+fn code(): int {
+    immut v: int = open("x") recover as err run {
+        compare err {
+            matches IOError::Denied(_, "rw"):
+            return 1;
+            done
+            otherwise:
+            return 2;
+        }
+    };
+    return v;
+}
+
+fn main(): int {
+    return 0;
+}

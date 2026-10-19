@@ -1,0 +1,17 @@
+// EXPECT-DIAG: E068
+// EXPECT-DIAG: In this instantiation: A value of type 'int' has no fields
+// EXPECT-DIAG: immut r: int = getx(3);
+// EXPECT-DIAG: the error itself, inside 'getx<int>'
+// A field read on `T` is checked when `getx<int>` is re-checked, and the error
+// is reported at the call that asked for it. A typed error raised during that
+// re-check went straight to the diagnostic list, so it was reported at the
+// template's own line instead, as if the template itself were wrong.
+
+fn<T> getx(a: T): int {
+    return a.x;
+}
+
+fn main(): int {
+    immut r: int = getx(3);
+    return r;
+}

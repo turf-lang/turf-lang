@@ -1,0 +1,26 @@
+// `error` type declarations (docs/planning/Errors.md): variants are bare
+// names only, exactly like `enum` (no payload fields -- deferred, see
+// Errors.md's own note on why).
+import test;
+
+error IOError {
+    FileNotFound,
+    PermissionDenied,
+    InvalidEncoding
+}
+
+error NetworkError {
+    Timeout,
+    ConnectionRefused
+}
+
+error MathError {
+    DivisionByZero,
+    Overflow,
+    InvalidInput,
+}
+
+fn main(): int {
+    test::assert(true, "error type declarations should not break compilation");
+    return 0;
+}

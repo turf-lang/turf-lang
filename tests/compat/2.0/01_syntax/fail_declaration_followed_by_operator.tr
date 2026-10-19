@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E103
+// EXPECT-NO-DIAG: void value
+// REL-004: a declaration is a whole statement, never the left operand of an
+// expression. `} % 5` used to read the `%` as an operator applied to the
+// function, and the user was told "A void value can't be used here" about a
+// stray token.
+fn helper(): int {
+    return 0;
+} % 5
+
+fn main(): int {
+    return helper();
+}

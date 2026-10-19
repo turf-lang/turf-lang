@@ -1,0 +1,19 @@
+// EXPECT-DIAG: E017
+// EXPECT-DIAG: Double free detected for 'p'
+// EXPECT-NO-DIAG: Unsafe pointer use
+// The standard library's own allocator is checked the same way a user's is:
+// `mem::alloc` says `@ownership(acquires)` and `mem::free` says
+// `@ownership(releases: p)`. Because the check follows the call's resolved
+// declaration, a module-qualified `mem::free(p)` is seen -- the old name
+// comparison only ever recognised a bare `free(...)`.
+
+import mem;
+
+fn main(): int {
+    unsafe {
+        mut p: void* = mem::alloc(8);
+        mem::free(p);
+        mem::free(p);
+    }
+    return 0;
+}

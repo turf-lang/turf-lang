@@ -1,0 +1,20 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: cross-heap free
+// EXPECT-RUNTIME: a heap(...) value, anything the collector owns
+// The cross-heap check fires for any GC block, here a `heap(...)` value; its
+// message named only strings and collection buffers.
+
+import mem;
+
+struct N {
+    v: int
+}
+
+fn main(): int {
+    mut n: N = N::default();
+    mut r: &N = heap(n);
+    unsafe {
+        mem::free(r to void*);
+    }
+    return 0;
+}

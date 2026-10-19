@@ -1,0 +1,37 @@
+// Test: Compound exponentiation assignment (**=). Unlike the bitwise
+// compound-assign forms in 12_bitwise_compound_assignment.tr, `**=` is not
+// restricted to int -- it follows the same "numeric operands, double
+// intermediate" rule as the plain `**` operator (see 07_exponentiation.tr),
+// but must narrow the result back down to the LHS's own declared type for
+// the store (an int LHS keeps its declared type after `**=`, it doesn't
+// silently become a double).
+
+import test;
+
+fn main(): int {
+    mut a: double = 2.0;
+    a **= 8.0;
+    test::assert(a == 256.0, "2.0 **= 8.0 should equal 256.0");
+
+    // int LHS: the double llvm.pow() result must be narrowed back to int
+    // for the store, not left as a double (which would be a type/ABI bug --
+    // `a`'s alloca is 8-byte int-typed storage, not double-typed).
+    mut b: int = 3;
+    b **= 4;
+    test::assert(b == 81, "3 **= 4 (narrowed back to int) should equal 81");
+
+    // Fractional exponent on an int base still goes through the double
+    // pow() path internally, then narrows: 9 ** 0.5 == 3.0, truncated to 3.
+    mut c: int = 9;
+    c **= 2;
+    test::assert(c == 81, "9 **= 2 should equal 81");
+
+    // RHS need not match LHS's type -- an int LHS with a double exponent is
+    // valid (same numeric-coercion rule as every other compound assignment).
+    mut d: int = 2;
+    mut exp: double = 3.0;
+    d **= exp;
+    test::assert(d == 8, "2 **= 3.0 (double RHS, int LHS) should equal 8");
+
+    return 0;
+}

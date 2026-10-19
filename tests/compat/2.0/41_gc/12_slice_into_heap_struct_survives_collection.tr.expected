@@ -1,0 +1,1 @@
+41/12 PASS: a slice into a heap() block keeps it alive across collections

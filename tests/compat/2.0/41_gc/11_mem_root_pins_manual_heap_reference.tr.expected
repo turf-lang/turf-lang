@@ -1,0 +1,1 @@
+41/11 PASS: mem::root pins a manual-heap-only reference across a forced collection

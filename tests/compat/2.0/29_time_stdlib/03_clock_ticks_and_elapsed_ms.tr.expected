@@ -1,0 +1,1 @@
+03 PASS: time::clock_ticks / elapsed_ms / elapsed_seconds track real CPU-bound work

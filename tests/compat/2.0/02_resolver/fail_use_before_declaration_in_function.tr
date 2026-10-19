@@ -1,0 +1,9 @@
+// EXPECT-DIAG: E043
+// EXPECT-DIAG: before telling me what it is
+// `x` IS declared in this function -- one line too late. E043, not E040
+// ("undeclared"): the hint tells the user to move the declaration up.
+fn main(): int {
+    mut y: int = x + 1;
+    mut x: int = 5;
+    return y;
+}

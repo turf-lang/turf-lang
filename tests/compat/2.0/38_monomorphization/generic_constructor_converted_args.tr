@@ -1,0 +1,29 @@
+// The argument converted to the declared type argument builds the right
+// instantiation, in each position a constructor's type is known from.
+import test;
+
+struct Box<T> {
+    v: T
+}
+
+fn<T> Box.new(v: T): void {
+    self.v = v;
+}
+
+fn mk(): Box<double> {
+    return Box::new(2 to double);
+}
+
+fn first(b: Box<int32>): int32 {
+    return b.v;
+}
+
+fn main(): int {
+    mut d: Box<double> = Box::new(1 to double);
+    test::assert(d.v == 1.0, "double");
+    d = Box::new(1.5);
+    test::assert(d.v == 1.5, "assignment");
+    test::assert(mk().v == 2.0, "return");
+    test::assert(first(Box::new(7 to int32)) == 7, "argument");
+    return 0;
+}

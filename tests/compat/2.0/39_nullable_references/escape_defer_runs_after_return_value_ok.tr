@@ -1,0 +1,35 @@
+// A `defer` runs when its block exits, after a `return` has computed its
+// value: `return p` here returns the heap node, and the deferred `p = &n`
+// only changes a variable that is about to die. It was a false E086 while
+// the defer counted where it is written (owner decision 2026-10-12, found
+// by turf-fuzz). See fail_escape_defer_* for the paths that do escape.
+
+import test;
+
+struct N { val: int, next: &?N }
+
+fn f(): &N {
+    mut n: N = N::default();
+    n.val = 42;
+    mut p: &N = heap(n);
+    defer p = &n;
+    return p;
+}
+
+fn g(c: bool): &N {
+    mut n: N = N::default();
+    n.val = 7;
+    mut p: &N = heap(n);
+    if (c) {
+        defer p = &n;
+        return p;
+    }
+    return p;
+}
+
+fn main(): int {
+    test::assert(f().val == 42, "returned before the defer ran");
+    test::assert(g(true).val == 7, "defer in a branch that returns");
+    test::assert(g(false).val == 7, "defer in a branch not taken");
+    return 0;
+}

@@ -1,0 +1,11 @@
+// LEC-008 (F-IMP-1, F-IMP-3): the VALUE of a transitively-loaded type may be
+// held (see import_scope_value_held_not_spelled.tr); only SPELLING its module
+// qualifier is gated.
+// EXPECT-DIAG: E145
+// EXPECT-DIAG: is not imported in this file
+import import_scope_outer_module;
+
+fn main(): int {
+    immut b: import_scope_inner_module::InnerBox = import_scope_outer_module::outer_make(1);
+    return b.get();
+}

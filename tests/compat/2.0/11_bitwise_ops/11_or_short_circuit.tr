@@ -1,0 +1,57 @@
+// Test: Short-circuit evaluation for || (or) operator
+// The right-hand side should NOT be evaluated if left is true
+
+import io;
+
+import test;
+fn main(): int {
+    // Test 1: true || anything == true (short-circuit, RHS skipped)
+    mut result1: bool = true || false;
+    test::assert(result1 == true, "true || ... should be true");
+
+    // Test 2: false || true == true (both sides evaluated)
+    mut result2: bool = false || true;
+    test::assert(result2 == true, "false || true should be true");
+
+    // Test 3: false || false == false
+    mut result3: bool = false || false;
+    test::assert(result3 == false, "false || false should be false");
+
+    // Test 4: true || true == true
+    mut result4: bool = true || true;
+    test::assert(result4 == true, "true || true should be true");
+
+    // Test 5: Short-circuit with complex condition
+    mut a: int = 5;
+    mut cond_a: bool = (a < 10) || (a == 100);  // LHS is true -> short-circuit
+    test::assert(cond_a == true, "Short-circuit: (a < 10) || (a == 100) should be true");
+
+    // Test 6: Chained || short-circuit
+    mut b: int = 7;
+    mut cond_b: bool = false || (b == 7) || (b > 100);
+    test::assert(cond_b == true, "false || (b == 7) || (b > 100) should be true");
+
+    // Test 7: || with variables
+    mut c: int = 0;
+    mut d: int = 1;
+    mut cond_c: bool = (c != 0) || (d != 0);  // second is true
+    test::assert(cond_c == true, "(c != 0) || (d != 0) should be true");
+
+    // Test 8: || short-circuits — second operand not evaluated if first is true
+    mut e: int = 0;
+    // If short-circuit didn't work, dividing by e would crash
+    mut cond_e: bool = (e == 0) || (100 / e > 5);
+    test::assert(cond_e == true, "Short-circuit prevents div by zero: (e == 0) || (100/e > 5)");
+
+    // Test 9: Both && and || combined with proper precedence
+    // && binds tighter than ||
+    // false || true && false == false || (true && false) == false || false == false
+    mut cond_f: bool = false || true && false;
+    test::assert(cond_f == false, "false || true && false should be false (AND binds tighter)");
+
+    // true || false && false == true || (false && false) == true || false == true
+    mut cond_g: bool = true || false && false;
+    test::assert(cond_g == true, "true || false && false should be true (short-circuit)");
+
+    return 0;
+}

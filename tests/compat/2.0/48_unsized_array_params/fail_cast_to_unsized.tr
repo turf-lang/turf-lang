@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E140
+// EXPECT-DIAG: A conversion can't use the unsized array type 'int[]'
+// Issue #260: an array becomes a slice only by being passed to a `T[]`
+// parameter; there is no conversion that makes one.
+fn sum(arr: int[]): int {
+    return arr[0];
+}
+
+fn main(): int {
+    mut a: int[2] = [1, 2];
+    return sum(a to int[]);
+}

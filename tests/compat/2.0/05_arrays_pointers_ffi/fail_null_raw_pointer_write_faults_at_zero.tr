@@ -1,0 +1,13 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: segmentation fault (this is a bug in unsafe code or in TurfLang) at address 0x0
+// A write through a null raw pointer faults at address 0 at every -O level.
+// LLVM treated the store as undefined behaviour and dropped it, so at -O2 the
+// program faulted somewhere else, at a nonzero address.
+
+fn main(): int {
+    unsafe {
+        mut p: int* = null;
+        p[0] = 5;
+    }
+    return 0;
+}

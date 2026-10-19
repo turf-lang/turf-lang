@@ -1,0 +1,89 @@
+// Regression test (was DISCOVERED_ISSUES.md #16, "Missing Static
+// Constructors"; migrated for the struct-construction overhaul -- see
+// tests/06_structs/31_constructor_new.tr for the newer, primary coverage of
+// this same mechanism). Originally exercised `fn StructName.init(args...)`,
+// auto-detected by the (now-removed) StructInitExprAST::codegen() whenever a
+// brace-literal's field VALUES happened to arity/type-match its params.
+// That whole "guess whether this brace-literal wants the constructor" bridge
+// is gone: `StructName.new(...)` is exactly the same idea (a '.'-declared
+// method running arbitrary side effects via self) but reached only through
+// the explicit `StructName::new(args...)` call form -- no implicit
+// brace-literal-to-constructor matching left to get right or wrong.
+//
+// Kept as its own file (rather than folded into 31_constructor_new.tr) to
+// preserve the ORIGINAL point being tested: a constructor can transform or
+// validate its inputs instead of just copying them field-by-field, and a
+// struct with NO constructor must still be constructible some other way
+// (via `::default()` now, not an implicit fallback inside failed brace-init
+// resolution).
+
+import test;
+
+struct Point {
+    x: int,
+    y: int
+}
+
+// Constructor that transforms its inputs rather than storing them verbatim.
+fn Point.new(x: int, y: int): void {
+    self.x = x * 10;
+    self.y = y * 10;
+}
+
+struct Fraction {
+    num: int,
+    den: int
+}
+
+// A constructor that validates/normalizes -- rejects a zero denominator by
+// substituting a sentinel, and always stores a positive denominator.
+fn Fraction.new(n: int, d: int): void {
+    if (d == 0) {
+        self.num = 0;
+        self.den = 1;
+    } else if (d < 0) {
+        self.num = 0 - n;
+        self.den = 0 - d;
+    } else {
+        self.num = n;
+        self.den = d;
+    }
+}
+
+// A struct with NO custom constructor at all -- `::new(...)` isn't
+// available for it (see fail_no_constructor_defined.tr); `::default()` is
+// the only construction path.
+struct Plain {
+    a: int,
+    b: int
+}
+
+fn main(): int {
+    // Constructor transforms inputs (x*10, y*10).
+    mut p: Point = Point::new(1, 2);
+    test::assert(p.x == 10, "");
+    test::assert(p.y == 20, "");
+
+    // Constructor normalizes a negative denominator. Unlike the old
+    // brace-literal form, arguments are now positional to the CONSTRUCTOR's
+    // own declared parameter order (n, d) -- there's no struct field name
+    // to match against at the call site at all.
+    mut f: Fraction = Fraction::new(3, -4);
+    test::assert(f.num == -3, "");
+    test::assert(f.den == 4, "");
+
+    // Constructor substitutes a sentinel for a zero denominator.
+    mut bad: Fraction = Fraction::new(5, 0);
+    test::assert(bad.num == 0, "");
+    test::assert(bad.den == 1, "");
+
+    // No constructor defined for Plain -- ::default() zero-inits, then
+    // fields are set directly.
+    mut pl: Plain = Plain::default();
+    pl.a = 7;
+    pl.b = 8;
+    test::assert(pl.a == 7, "");
+    test::assert(pl.b == 8, "");
+
+    return 0;
+}

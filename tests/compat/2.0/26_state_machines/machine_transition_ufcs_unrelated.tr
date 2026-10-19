@@ -1,0 +1,19 @@
+// Test: `transition` is deliberately NOT a reserved word (see
+// TurfMachineType's doc comment, src/sema/Types.h) -- TypeChecker's
+// machine-transition branch in visitMethodCall() only intercepts a
+// `.transition(...)` call when the RECEIVER is TurfMachineType-typed; on any
+// other receiver (here, a plain int), a user's own unrelated `fn
+// transition(...)` still resolves via ordinary UFCS, exactly like any other
+// free function.
+
+import test;
+
+fn transition(x: int, y: int): int {
+    return x + y;
+}
+
+fn main(): int {
+    mut n: int = 3;
+    test::assert(n.transition(4) == 7, "user's own transition() still works via UFCS on int");
+    return 0;
+}

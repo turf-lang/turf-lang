@@ -1,0 +1,113 @@
+// F-MEM-5 per-field tracking (2026-10-12) must never reject these: a struct or
+// array that holds a reference to this frame's storage but never leaves it, a
+// field overwritten before the value escapes, a by-value parameter's
+// reference field repointed at a local first, and calls that return their
+// argument when the argument outlives the frame.
+import list::List;
+import test;
+
+struct N { val: int, next: &?N }
+struct H { k: int, head: &?N }
+struct In { x: int, r: &?N }
+struct Outer { inner: In, k: int }
+struct H2 { k: int, own: &N }
+
+fn id(p: &N): &N {
+    return p;
+}
+
+fn local_struct(): int {
+    mut n: N = N::default();
+    n.val = 3;
+    mut h: H = H::default();
+    h.head = &n;
+    mut g: H = h;
+    mut q: &?N = g.head;
+    if (q != null) {
+        return q.val;
+    }
+    return 0;
+}
+
+fn overwritten(): H {
+    mut n: N = N::default();
+    mut h: H = H::default();
+    h.head = &n;
+    h.head = heap(N::default());
+    return h;
+}
+
+fn overwritten_whole(): H {
+    mut n: N = N::default();
+    mut h: H = H::default();
+    h.head = &n;
+    h = H::default();
+    return h;
+}
+
+fn local_array(): int {
+    mut n: N = N::default();
+    n.val = 4;
+    mut a: (&N)[2] = [&n, &n];
+    mut t: int = 0;
+    for x in a {
+        t = t + x.val;
+    }
+    return t;
+}
+
+fn embedded_by_value(o: Outer): int {
+    mut n: N = N::default();
+    n.val = 5;
+    o.inner.r = &n;
+    mut q: &?N = o.inner.r;
+    if (q != null) {
+        return q.val;
+    }
+    return 0;
+}
+
+fn repointed_first(h: H2): int {
+    mut n: N = N::default();
+    mut m: N = N::default();
+    h.own = &m;
+    h.own.next = &n;
+    return 7;
+}
+
+fn through_call(p: &N): &N {
+    return id(p);
+}
+
+fn heap_through_call(): &N {
+    return id(heap(N::default()));
+}
+
+fn list_of_heap(): int {
+    mut n: N = N::default();
+    n.val = 8;
+    mut h: H = H::default();
+    h.head = heap(n);
+    mut l: List<H> = List::default();
+    l.push(h);
+    return l.length();
+}
+
+fn copy_param(h: H): H {
+    mut g: H = h;
+    return g;
+}
+
+fn main(): int {
+    test::assert_eq(local_struct(), 3, "a struct holding a local, used locally");
+    test::assert_eq(overwritten().k, 0, "field overwritten before return");
+    test::assert_eq(overwritten_whole().k, 0, "struct overwritten before return");
+    test::assert_eq(local_array(), 8, "an array of local references, used locally");
+    test::assert_eq(embedded_by_value(Outer::default()), 5, "an embedded field of a by-value parameter");
+    test::assert_eq(repointed_first(H2::default()), 7, "a by-value parameter's field repointed at a local");
+    test::assert_eq(through_call(heap(N::default())).val, 0, "a parameter through id()");
+    test::assert_eq(heap_through_call().val, 0, "heap() through id()");
+    test::assert_eq(list_of_heap(), 1, "a struct holding a heap reference, pushed");
+    test::assert_eq(copy_param(H::default()).k, 0, "a by-value parameter copied and returned");
+    return 0;
+}

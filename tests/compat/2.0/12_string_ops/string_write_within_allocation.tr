@@ -1,0 +1,27 @@
+// A string byte write anywhere inside its allocation is fine, the
+// terminator's byte included; only past it, or into a literal, panics (see
+// fail_string_write_past_allocation_runtime.tr).
+
+import test;
+
+fn main(): int {
+    mut s: string = strings::repeat("ab", 2);
+    s[0] = 'j';
+    s[-1] = 'z';
+    test::assert(s == "jbaz", "inside the string");
+    s[2] = (0 to char);
+    test::assert(s == "jb", "the terminator can move inward");
+
+    mut b: strings::StringBuilder = strings::StringBuilder::default();
+    b.append("hello");
+    mut built: string = b.to_string();
+    built[4] = '!';
+    test::assert(built == "hell!", "a built string");
+
+    mut t: string = "abc" + "def";
+    for i in 0..6 {
+        t[i] = 'q';
+    }
+    test::assert(t == "qqqqqq", "a concatenation, every byte");
+    return 0;
+}

@@ -1,0 +1,1 @@
+41/09 PASS: a payload's GC-heap string, List<string> and nested struct are traced through a forced collection

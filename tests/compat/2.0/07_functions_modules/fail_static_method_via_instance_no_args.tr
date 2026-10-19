@@ -1,0 +1,18 @@
+// EXPECT-DIAG: E052
+// EXPECT-DIAG: 'square' is a static method
+// The no-argument form of fail_static_method_via_instance.tr. With no
+// argument, the receiver '.' passes as `self` made the count match the
+// static method's one parameter, so the call was accepted with the receiver
+// as `x`, and Codegen failed on its own IR (an internal compiler error).
+// Found by turf-fuzz's sanitized tier 0.
+struct MathUtil {}
+
+fn MathUtil.square(x: int) static: int {
+    return x * x;
+}
+
+fn main(): int {
+    mut mu: MathUtil = MathUtil::default();
+    immut y: int = mu.square();
+    return y;
+}

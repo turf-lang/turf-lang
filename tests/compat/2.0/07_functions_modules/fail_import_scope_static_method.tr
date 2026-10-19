@@ -1,0 +1,12 @@
+// LEC-008: `module::Type::method()` and `module::Type::default()` spell the
+// module too, so they are gated like `module::function()`.
+// EXPECT-DIAG: E145
+// EXPECT-DIAG: is not imported in this file
+import import_scope_outer_module;
+
+fn main(): int {
+    immut b: int = import_scope_outer_module::outer_value();
+    mut made = import_scope_inner_module::InnerBox::default();
+    made.value = b;
+    return made.get();
+}

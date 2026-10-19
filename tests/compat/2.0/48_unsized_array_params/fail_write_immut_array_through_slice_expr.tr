@@ -1,0 +1,9 @@
+// EXPECT-DIAG: E060
+// EXPECT-DIAG: You can't change the value of 'a' because it's immutable.
+// Writing an element of a slice expression writes the array it was taken
+// from.
+fn main(): int {
+    immut a: int[3] = [1, 2, 3];
+    a[1..][0] = 5;
+    return 0;
+}

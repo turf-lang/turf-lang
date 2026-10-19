@@ -1,0 +1,14 @@
+// EXPECT-DIAG: E102
+// The classic forgotten ';' at the end of a line. The parser only notices at the
+// NEXT statement, but the ';' belongs right after the call before it, so
+// `--smart` inserts it there without asking the model (the fix-it carries its
+// own line; see scripts/slm/slm_deterministic_fix_smoke.sh). The trailing comment
+// must stay after the ';', not swallow it.
+import io;
+
+fn main(): int {
+    mut count: int = 3; // a counter
+    io::printline("hello") // no semicolon here
+    io::printline("world");
+    return 0;
+}

@@ -1,0 +1,53 @@
+// LANG-003 x errors_and_recover.md: a `defer` registered before a `!T` call
+// site still runs when that call's failure is handled by `recover run { ...
+// return ...; }` -- the `return` inside the recover block exits the
+// ENCLOSING function (docs/architecture/errors_and_recover.md §1.4.2), so
+// it must flush every frame open at that point, exactly like an ordinary
+// `return` anywhere else. No special-casing was needed in
+// RecoverExprAST::codegen() for this to work: its Run/AsRun block is an
+// ordinary BlockExprAST, so `defer` support (and Return's flush) fall out
+// of the same machinery every other block already gets.
+import test;
+
+error MyError {
+    Bad
+}
+
+struct Trail {
+    log: string
+}
+
+fn Trail.new(): void {
+    self.log = "";
+}
+
+fn risky(fail: bool): !int {
+    if (fail) {
+        return MyError::Bad;
+    }
+    return 42;
+}
+
+fn withRecoverRun(t: &Trail, fail: bool): int {
+    defer t.log = t.log + "cleanup";
+    mut x: int = risky(fail) recover run {
+        return -1;
+    };
+    return x;
+}
+
+fn main(): int {
+    mut t: Trail = Trail::new();
+
+    mut r: int = withRecoverRun(&t, true);
+    test::assert(r == -1, "recover run's return still returns from the enclosing function");
+    test::assert(t.log == "cleanup",
+        "a defer registered before a failing recover still runs on the recover-triggered return");
+
+    t.log = "";
+    r = withRecoverRun(&t, false);
+    test::assert(r == 42, "recover run's success path returns the wrapped value normally");
+    test::assert(t.log == "cleanup", "defer also runs on the ordinary success/fallthrough path");
+
+    return 0;
+}

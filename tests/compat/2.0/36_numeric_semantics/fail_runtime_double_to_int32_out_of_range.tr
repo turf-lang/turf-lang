@@ -1,0 +1,13 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: runtime check: Integer overflow
+// `double -> int32` truncates toward zero; 2^31 has no int32 value, so it
+// panics (see fail_runtime_double_to_int_nan.tr).
+fn id(x: double): double {
+    return x;
+}
+
+fn main(): int {
+    immut n: int32 = id(2147483648.0) to int32;
+    io::printline(n to int);
+    return 0;
+}

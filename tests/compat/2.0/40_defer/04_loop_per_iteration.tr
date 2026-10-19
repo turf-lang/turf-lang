@@ -1,0 +1,27 @@
+// LANG-003: a `defer` inside a loop body runs per iteration -- block-scoped,
+// not function-scoped. Three iterations with no early exit at all, so every
+// run goes through the loop body's own natural-end flush.
+import test;
+
+struct Trail {
+    log: string
+}
+
+fn Trail.new(): void {
+    self.log = "";
+}
+
+fn threeIterations(t: &Trail): void {
+    mut i: int = 0;
+    while (i < 3) {
+        defer t.log = t.log + "x";
+        i = i + 1;
+    }
+}
+
+fn main(): int {
+    mut t: Trail = Trail::new();
+    threeIterations(&t);
+    test::assert(t.log == "xxx", "a defer inside a loop body runs once per iteration");
+    return 0;
+}

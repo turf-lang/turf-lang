@@ -1,0 +1,57 @@
+// json::parse and json::stringify are linear in the document now (both were
+// quadratic: the parser bounds-checked `self.s[self.pos]` and called
+// strings::substring() against the whole document per value, and stringify
+// grew its result with `result = result + piece`; found by REL-005's
+// benchmarks). The rewrite copies string values in segments between escapes,
+// so this checks every place a segment starts or ends: escapes at the start,
+// the end and back to back, an empty string, bytes above 0x7F, and numbers
+// with signs and fractions, then round-trips a 400-object document. Speed is
+// bench/json_roundtrip.tr's job: under TURF_GC_STRESS (a collection per
+// allocation) a 4000-object round trip took over 700 s. Exponents
+// are left out: strings::parse_double() rejects them, so any number with one
+// fails the whole parse (the header says only the value is wrong).
+
+import json;
+import test;
+
+fn main(): int {
+    immut text: string = "[\"\", \"\\\"start\", \"end\\\\\", \"a\\n\\tb\", \"\\/\\r\", \"café\", -12.5, 0]";
+    immut v: json::JsonValue = json::parse(text) recover run {
+        test::fail("the document is well formed");
+        return 1;
+    };
+    test::assert_eq(v.length(), 8, "eight values");
+    test::assert_eq(v.at(0).str_val, "", "empty string");
+    test::assert_eq(v.at(1).str_val, "\"start", "escape at the start");
+    test::assert_eq(v.at(2).str_val, "end\\", "escape at the end");
+    test::assert_eq(v.at(3).str_val, "a\n\tb", "escapes back to back");
+    test::assert_eq(v.at(4).str_val, "/\r", "only escapes");
+    test::assert_eq(v.at(5).str_val, "café", "bytes above 0x7F pass through");
+    test::assert_eq(v.at(6).num_val, -12.5, "negative fraction");
+    test::assert_eq(v.at(7).num_val, 0.0, "zero");
+
+    // 400 objects round-tripped, every field read back.
+    mut arr: json::JsonValue = json::JsonValue::new_array();
+    for i in 0..400 {
+        mut o: json::JsonValue = json::JsonValue::new_object();
+        o.set("id", json::JsonValue::from_number(i to double));
+        o.set("name", json::JsonValue::from_string("item \"" + (i to string) + "\""));
+        arr.push(o);
+    }
+    immut big: string = json::stringify(arr);
+    immut back: json::JsonValue = json::parse(big) recover run {
+        test::fail("a stringified document parses");
+        return 1;
+    };
+    test::assert_eq(back.length(), 400, "every element came back");
+    mut sum: int = 0;
+    for i in 0..back.length() {
+        immut o: json::JsonValue = back.at(i);
+        sum = sum + o.get_int("id");
+        if (o.get_string("name") != "item \"" + (i to string) + "\"") {
+            test::fail("element " + (i to string) + " has the wrong name");
+        }
+    }
+    test::assert_eq(sum, 79800, "every id came back");
+    return 0;
+}

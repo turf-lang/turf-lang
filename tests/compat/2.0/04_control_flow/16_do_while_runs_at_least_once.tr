@@ -1,0 +1,17 @@
+import test;
+
+// Key difference from while: the condition is checked AFTER the body, so the
+// body must run exactly once even though the condition is already false
+// before the loop starts.
+fn main(): int {
+    mut x: int = 0;
+    mut ranCount: int = 0;
+
+    do {
+        ranCount = ranCount + 1;
+    } while (x > 0);
+
+    test::assert(ranCount == 1, "");
+
+    return 0;
+}

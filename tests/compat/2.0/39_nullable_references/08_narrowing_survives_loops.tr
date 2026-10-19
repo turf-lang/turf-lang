@@ -1,0 +1,73 @@
+// A null check on a `&?T` variable holds across a loop that does not assign
+// the variable: inside the loop, and after it. NullabilityPass used to start
+// its fixed point from "nothing proven" at every block, so a loop header (whose
+// back edge had not been processed yet) dropped every fact and never got it
+// back: each function below was E081. Found by turf-fuzz probing for
+// reference-graph generation.
+import test;
+
+struct Node { val: int, next: &?Node }
+
+fn cons(v: int, next: &?Node): &Node {
+    mut n: Node = Node::default();
+    n.val = v;
+    n.next = next;
+    return heap(n);
+}
+
+// Early return, then a loop that never mentions `p`, then a use.
+fn after_loop(p: &?Node): int {
+    if (p == null) { return -1; }
+    mut k: int = 0;
+    while k < 3 { k += 1; }
+    return p.val + k;
+}
+
+// A use inside `while`, `for .. in a..b` and for-each bodies.
+fn inside_loops(p: &?Node): int {
+    if (p != null) {
+        mut k: int = 0;
+        while k < 2 { k += 1; p.val += 1; }
+        for r in 0..3 { p.val += r; }
+        mut a: int[2] = [10, 20];
+        for e in a { p.val += e; }
+        return p.val;
+    }
+    return -1;
+}
+
+// `continue` and `break` are edges into the same header and exit.
+fn with_jumps(p: &?Node): int {
+    if (p == null) { return -1; }
+    mut k: int = 0;
+    while k < 5 {
+        k += 1;
+        if k == 2 { continue; }
+        if k == 4 { break; }
+        p.val += 1;
+    }
+    return p.val;
+}
+
+// A walk: the variable IS assigned in the body, and the loop condition
+// narrows it again on every iteration; an inner loop keeps that.
+fn walk(head: &?Node): int {
+    mut total: int = 0;
+    mut c: &?Node = head;
+    while (c != null) {
+        mut j: int = 0;
+        while j < 2 { j += 1; total += c.val; }
+        c = c.next;
+    }
+    return total;
+}
+
+fn main(): int {
+    test::assert(after_loop(null) == -1, "early return on null");
+    test::assert(after_loop(cons(4, null)) == 7, "use after a loop");
+    test::assert(inside_loops(null) == -1, "not entered on null");
+    test::assert(inside_loops(cons(0, null)) == 35, "uses inside three loops");
+    test::assert(with_jumps(cons(0, null)) == 2, "continue and break keep the fact");
+    test::assert(walk(cons(1, cons(2, cons(3, null)))) == 12, "walk with an inner loop");
+    return 0;
+}

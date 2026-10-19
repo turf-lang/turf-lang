@@ -1,0 +1,16 @@
+// EXPECT-DIAG: E086
+// EXPECT-DIAG: can't be returned
+// Both branches of the `give` are this frame's storage, so its value is too.
+// EscapePass classified a `give` as Unknown (never flagged) and this compiled.
+// Found by turf-fuzz probing the F-MEM-5 boundary.
+struct Node { val: int, next: &?Node }
+
+fn pick(c: int): &Node {
+    mut a: Node = Node::default();
+    mut b: Node = Node::default();
+    return (c > 0 give &a otherwise &b);
+}
+
+fn main(): int {
+    return pick(1).val;
+}

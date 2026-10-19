@@ -1,0 +1,26 @@
+import test;
+
+fn main(): int {
+    mut i: int = 0;
+    mut sum: int = 0;
+
+    while i < 10 {
+        i = i + 1;
+        if i % 2 == 0 {
+            continue;
+        }
+        sum = sum + i;
+    }
+    test::assert(sum == 25, "");
+
+    mut for_sum: int = 0;
+    for j in 1..10 step j += 1 {
+        if j % 2 == 0 {
+            continue;
+        }
+        for_sum = for_sum + j;
+    }
+    test::assert(for_sum == 25, "");
+
+    return 0;
+}

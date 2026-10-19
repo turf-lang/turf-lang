@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E124
+// EXPECT-DIAG: Cannot compare arrays with '=='.
+// Two `int[3]`s share a type name, so `a == b` used to slip through the
+// type check and reach Codegen as a raw comparison of the whole aggregate:
+// an internal compiler error ("Invalid operand types for FCmp instruction").
+fn main(): int {
+    mut a: int[3] = [1, 2, 3];
+    mut b: int[3] = [1, 2, 3];
+    if a == b {
+        return 1;
+    }
+    return 0;
+}

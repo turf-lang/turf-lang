@@ -1,0 +1,26 @@
+// SEM-001: a numeric literal is never negative by itself (the lexer only
+// ever scans a non-negative magnitude) -- `-5` parses as
+// UnaryExprAST('-', NumberExprAST(5)), unchanged by this group (see
+// ParseNumberExpr's own doc comment, ParserLiteral.cpp, for why folding a
+// literal unary minus into the literal itself is explicitly deferred to a
+// later group). This test proves that path still works correctly with
+// separators too.
+
+import test;
+
+fn main(): int {
+    mut a: int = -5;
+    test::assert(a == -5, "plain negative");
+
+    mut b: int = -1_000_000;
+    test::assert(b == -1000000, "negative with separators");
+
+    mut c: int = -9223372036854775807;
+    // Note: -9223372036854775808 (INT64_MIN) is a SEPARATE, harder case
+    // (§10.2's own worked example) -- deliberately not tested here, since
+    // making it correct requires folding the unary minus into the literal
+    // before representability is checked, which this group does not do.
+    test::assert(c == -9223372036854775807, "near-INT64_MIN negative");
+
+    return 0;
+}

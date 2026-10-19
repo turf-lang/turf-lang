@@ -1,0 +1,76 @@
+// An array of references is spelled `(&N)[2]` (owner, 2026-10-12): `&` takes
+// the whole type after it, so `&N[2]` is a reference to an array. Before the
+// parentheses there was no way to write one (turf-fuzz
+// findings/wrong-message/array-of-references-type-name).
+import test;
+
+struct N { val: int, next: &?N }
+
+struct Holder { xs: (&N)[2], k: int }
+
+fn mk(v: int): &N {
+    mut n: N = N::default();
+    n.val = v;
+    return heap(n);
+}
+
+fn sum(xs: (&N)[]): int {
+    mut t: int = 0;
+    for x in xs {
+        t = t + x.val;
+    }
+    return t;
+}
+
+fn replace_first(xs: (&N)[]): void {
+    xs[0] = mk(100);
+}
+
+fn pair(): (&N)[2] {
+    return [mk(1), mk(2)];
+}
+
+fn main(): int {
+    mut a: (&N)[2] = [mk(1), mk(2)];
+    test::assert_eq(a[0].val, 1, "read through an element");
+    a[1] = mk(5);
+    test::assert_eq(a[1].val, 5, "element assignment");
+    a[0].val = 9;
+    test::assert_eq(a[0].val, 9, "field write through an element");
+    test::assert_eq(sum(a), 14, "a (&N)[] slice parameter");
+    replace_first(a);
+    test::assert_eq(a[0].val, 100, "a slice parameter writes through");
+    test::assert_eq(a.length(), 2, "length");
+
+    // Copying the array copies the references, not the nodes.
+    mut c: (&N)[2] = a;
+    c[0].val = 7;
+    test::assert_eq(a[0].val, 7, "a copy shares the nodes");
+    c[0] = mk(3);
+    test::assert_eq(a[0].val, 7, "but not the elements");
+
+    mut p: (&N)[2] = pair();
+    test::assert_eq(p[1].val, 2, "returned from a function");
+
+    // `(&?N)[3]` needs no initializer: every element starts null.
+    mut b: (&?N)[3];
+    b[1] = mk(4);
+    test::assert(b[0] == null, "an unwritten element is null");
+    mut q: &?N = b[1];
+    if (q != null) {
+        test::assert_eq(q.val, 4, "a written element");
+    }
+    mut seen: int = 0;
+    for x in b {
+        if (x != null) {
+            seen = seen + x.val;
+        }
+    }
+    test::assert_eq(seen, 4, "for-each over nullable references");
+
+    // A struct default gives every element of a `(&N)[2]` field its own node.
+    mut h: Holder = Holder::default();
+    h.xs[0].val = 5;
+    test::assert_eq(h.xs[1].val, 0, "each element its own default node");
+    return 0;
+}

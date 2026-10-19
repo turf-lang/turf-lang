@@ -1,0 +1,12 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: runtime check: Integer overflow
+// SEM-002 (FREEZE.md §6.2 row 7): runtime signed integer '+' traps on
+// overflow instead of silently wrapping. Operands are ordinary variables
+// (not literals), so this can't be caught at compile time -- contrast with
+// fail_compile_time_literal_arithmetic_overflow.tr in this same folder.
+fn main(): int {
+    mut a: int = 9223372036854775807;
+    mut b: int = 1;
+    mut c: int = a + b;
+    return 0;
+}

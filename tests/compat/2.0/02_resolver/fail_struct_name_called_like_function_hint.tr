@@ -1,0 +1,15 @@
+// EXPECT-DIAG: E041
+// EXPECT-DIAG: 'Node' is a struct, and Turf has no `Node(...)` constructor-call syntax
+// EXPECT-DIAG: Node::new(...)
+// EXPECT-NO-DIAG: import the module that defines it
+// LEC-005: `Node(5)` is the construction syntax most languages have and Turf
+// does not (structs_and_enums.md: construction is always `T::new(...)` /
+// `T::default()`). E041's fallback hint ("Double-check the spelling or import
+// the module that defines it") sends the user hunting for a module that
+// defines a struct they declared two lines up.
+struct Node { v: int }
+
+fn main(): int {
+    mut a: Node = Node(5);
+    return a.v;
+}

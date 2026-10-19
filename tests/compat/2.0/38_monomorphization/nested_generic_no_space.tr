@@ -1,0 +1,55 @@
+// Regression test: OVH-009 -- `>>` (and `>>=`) closing nested generic type
+// arguments with no space must parse, not hit "Expected '>' or ',' in
+// generic type" (plus the misleading cascade "Statements are not allowed
+// outside of a function"). The lexer's maximal munch (INV-LEX-1, never
+// special-cased there) fuses adjacent '>'-family characters into one token
+// regardless of context -- ParseType()'s generic-argument-list closing
+// check is what splits one logical '>' off such a token, working whether
+// it's a bare `>>`, or a `>>`/`>=` immediately followed by more source
+// (another closing '>', or the '=' of an assignment).
+//
+// The existing spaced workaround (`List<List<Big> >`,
+// 16_nested_generic_struct_field.tr) is left untouched by this fix and
+// must keep passing unchanged -- both spellings are legal now.
+
+import list::List;
+import map::Map;
+import test;
+
+fn main(): int {
+    // `>>` closing two levels with no space.
+    mut ll: List<List<int>> = List::default();
+    mut inner: List<int> = List::default();
+    inner.push(1);
+    inner.push(2);
+    ll.push(inner);
+    test::assert(ll.get(0).get(1) == 2, "List<List<int>> round-trip");
+
+    // `>>` closing a generic argument that is itself the SECOND type
+    // parameter of a different generic struct (`Map<K, List<V>>`).
+    mut m: Map<string, List<int>> = Map::default();
+    mut v: List<int> = List::default();
+    v.push(42);
+    m.put("k", v);
+    test::assert(m.get("k").get(0) == 42, "Map<string, List<int>> round-trip");
+
+    // `>>>` -- three closers with no space, lexed as TOK_RSHIFT ('>>') then
+    // a plain '>', never a dedicated triple-'>' token.
+    mut lll: List<List<List<int>>> = List::default();
+    mut mid: List<List<int>> = List::default();
+    mut leaf: List<int> = List::default();
+    leaf.push(7);
+    mid.push(leaf);
+    lll.push(mid);
+    test::assert(lll.get(0).get(0).get(0) == 7, "List<List<List<int>>> round-trip");
+
+    // `>>=` -- two closers immediately followed by '=' with no space, the
+    // lexer's single TOK_RSHIFT_ASSIGN token, split into '>' + '>' + '='.
+    mut m2: Map<string, List<int>>= Map::default();
+    mut v2: List<int> = List::default();
+    v2.push(9);
+    m2.put("k2", v2);
+    test::assert(m2.get("k2").get(0) == 9, "'>>=' after nested generic close still assigns");
+
+    return 0;
+}

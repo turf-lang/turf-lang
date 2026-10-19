@@ -1,0 +1,24 @@
+// A function VALUE returned from another function -- the third leg of
+// Issue #187 ("passed as arguments, stored in variables, and returned from
+// other functions"), exercising FuncType as a return-type annotation.
+import test;
+
+fn add(a: int, b: int): int { return a + b; }
+fn sub(a: int, b: int): int { return a - b; }
+
+fn chooseOp(useAdd: bool): fn(int, int): int {
+    if useAdd {
+        return add;
+    }
+    return sub;
+}
+
+fn main(): int {
+    mutable op: fn(int, int): int = chooseOp(true);
+    test::assert(op(3, 4) == 7, "chooseOp(true) should return add");
+
+    op = chooseOp(false);
+    test::assert(op(10, 4) == 6, "chooseOp(false) should return sub");
+
+    return 0;
+}

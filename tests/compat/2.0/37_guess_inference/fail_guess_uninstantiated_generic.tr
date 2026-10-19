@@ -1,0 +1,15 @@
+// EXPECT-DIAG: E129
+// EXPECT-DIAG: Cannot infer the type arguments of a generic type
+// SEM-003 (§11.6, §20's cross-feature note): `mut l = List::default();`
+// cannot infer List<T>'s type argument -- there is nothing in the call to
+// infer T from (F-GUESS-3). Must be a clear, dedicated error rather than
+// silently binding `l` to List's type-erased (and un-usable) template
+// shape. containsUninstantiatedGenericParam() (TypeCheckerDecl.cpp) detects
+// this via List's registered field `data: T*`, whose `T` is an unresolved
+// NamedType naming neither a primitive nor any registered struct/enum.
+import list;
+
+fn main(): int {
+    mut l = list::List::default();
+    return 0;
+}

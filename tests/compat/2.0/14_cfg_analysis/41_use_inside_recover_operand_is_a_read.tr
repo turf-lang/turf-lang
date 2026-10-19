@@ -1,0 +1,33 @@
+// OVH-012: a variable read ONLY as the operand of a `recover` expression's
+// WRAPPED call must count as a real read for both UnusedVariableWarning and
+// DeadStoreWarning. AnalysisVisitor (Analysis.cpp) had no visitRecoverExpr
+// override, so ASTVisitor's default no-op silently dropped the read --
+// `immut numStr: string = strings::substring(...); strings::parse_double(
+// numStr) recover run { ... };` in lib/std/json/json.tr hit exactly this
+// shape and was falsely flagged BOTH "declared but never used" AND "dead
+// store", confirmed live.
+//
+// Manually verified: `turf --resolve tests/14_cfg_analysis/
+// 41_use_inside_recover_operand_is_a_read.tr` prints no warning for `input`.
+
+import test;
+
+error ParseError {
+    Invalid,
+}
+
+fn parseIt(s: string): !int {
+    if s == "bad" {
+        return ParseError::Invalid;
+    }
+    return 42;
+}
+
+fn main(): int {
+    immut input: string = "5";
+    immut n: int = parseIt(input) recover run {
+        return 1;
+    };
+    test::assert_eq(n, 42, "parseIt's success value should come through recover run's success path");
+    return 0;
+}

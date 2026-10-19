@@ -1,0 +1,1 @@
+empty struct by-value across a module boundary works

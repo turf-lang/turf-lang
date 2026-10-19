@@ -1,0 +1,15 @@
+// EXPECT-DIAG: E044
+// Companion to fail_assert_no_args.tr: `test::assert()` called with 3+ arguments
+// must also be rejected -- assert takes a condition and an optional
+// message, never more. Back when assert was a compiler intrinsic this
+// silently compiled (extra args beyond the message were just ignored by
+// CodegenIntrinsic); now that it's an ordinary overloaded Turf function in
+// lib/std/test.tr (1-arg and 2-arg overloads only), a 4-arg call is
+// rejected by ordinary overload resolution instead.
+
+import test;
+
+fn main(): int {
+    test::assert(true, "msg", "extra", "more");
+    return 0;
+}

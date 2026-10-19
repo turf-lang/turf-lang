@@ -1,0 +1,24 @@
+// LANG-001 stdlib: List<int> gains operator[]/operator[]= (lib/std/
+// collections/list.tr), the better form of LIMITATIONS.md §4's requested
+// get/set.
+import list::List;
+import test;
+
+fn main(): int {
+    mut l: List<int> = List::default();
+    l.push(10);
+    l.push(20);
+    l.push(30);
+
+    test::assert(l[0] == 10, "List[] should read index 0");
+    test::assert(l[1] == 20, "List[] should read index 1");
+    test::assert(l[2] == 30, "List[] should read index 2");
+
+    l[1] = 99;
+    test::assert(l[1] == 99, "List[]= should write index 1");
+    test::assert(l.length() == 3, "List[]= should not change length");
+
+    test::assert(l.pop() == 30, "pop() should still work after operator[] use");
+
+    return 0;
+}

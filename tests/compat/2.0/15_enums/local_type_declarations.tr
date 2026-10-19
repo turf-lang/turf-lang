@@ -1,0 +1,68 @@
+// Enum, state machine and `error` types declared INSIDE a function body --
+// including an enum inside a generic function, cloned per instantiation.
+// All three parsed fine but were never registered: Pass 1 only hoists
+// top-level declarations, and the Resolver's visitors for these three
+// kinds were no-ops ("Pass 1 already hoisted it"), so a local
+// `enum Sign {...}`'s own `Sign::Neg` failed as "'Sign' isn't a known
+// enum, struct, or module". They are now registered where they are
+// declared, like a local struct.
+
+import test;
+
+fn classify(n: int): int {
+    enum Sign { Neg, Zero, Pos }
+    mut s: Sign = Sign::Zero;
+    if (n < 0) { s = Sign::Neg; }
+    if (n > 0) { s = Sign::Pos; }
+    compare s {
+        matches Sign::Neg:
+        return -1;
+        done
+        matches Sign::Zero:
+        return 0;
+        done
+        matches Sign::Pos:
+        return 1;
+        done
+    }
+    return 99;
+}
+
+fn<T> kindOf(v: T): int {
+    enum Kind { One, Two }
+    return Kind::Two to int;
+}
+
+fn doorState(): int {
+    machine Door { Open -> Shut, Shut -> Open }
+    mut d: Door = Door::Open;
+    return d to int;
+}
+
+fn checked(n: int): !int {
+    error Bad { Negative, Huge }
+    if (n < 0) { return Bad::Negative; }
+    if (n > 100) { return Bad::Huge; }
+    return n;
+}
+
+fn failureCode(n: int): int {
+    mut v: int = checked(n) recover as err run {
+        return 1;
+    };
+    return v;
+}
+
+fn main(): int {
+    test::assert(classify(-5) == -1, "local enum, compare");
+    test::assert(classify(3) == 1, "local enum, other arm");
+    test::assert(kindOf(1) == 1 && kindOf("x") == 1, "local enum in a generic fn, two instantiations");
+    test::assert(doorState() == 0, "local machine");
+
+    mut ok: int = checked(5) recover produce -1;
+    mut bad: int = checked(-5) recover produce -1;
+    test::assert(ok == 5, "local error type, success path");
+    test::assert(bad == -1, "local error type, recovered");
+    test::assert(failureCode(500) == 1, "recover as err with a local error type");
+    return 0;
+}

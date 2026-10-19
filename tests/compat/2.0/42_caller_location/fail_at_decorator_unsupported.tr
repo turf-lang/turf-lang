@@ -1,0 +1,8 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: Unknown annotation '@intrinsic'
+// STD-002 added `@caller_location`; the general annotation mechanism accepts
+// only names some compiler pass consumes, so an unclaimed name is an error.
+@intrinsic("foo")
+fn main(): int {
+    return 0;
+}

@@ -1,0 +1,22 @@
+// tests/22_prelude/entry_file_reimported_transitively_module.tr
+// Companion for entry_file_reimported_transitively.tr's OVH-011 regression
+// -- see that file's own top comment for the full scenario this pair
+// exercises. Imports the entry file BACK, in bare mode (no `::`) --
+// this file never references anything FROM the entry by name, since a
+// qualified or on-demand (`entry::Something`/`import entry::[Something]`)
+// reference into a module whose declarations were captured under the
+// "current file" context (not a real module namespace) is a narrower,
+// separate gap this item's fix does not close; see OVH-011's own change
+// record, *Known pitfalls*. Proving "does not duplicate declarations" only
+// needs the round-trip import itself to compile without a duplicate-name
+// error, which this file's own presence as an import target is enough to
+// exercise.
+//
+// This file has no entry-point function -- it must end in `_module.tr` so
+// scripts/test_runner.sh's own naming convention (AGENTS.md) correctly
+// excludes it as a helper, not a standalone test.
+import entry_file_reimported_transitively;
+
+pub fn companionMarker(): int {
+    return 7;
+}

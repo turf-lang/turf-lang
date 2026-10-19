@@ -1,0 +1,17 @@
+// Regression test (Issue #185, CFG Phase 1): a normal `while (cond)` loop
+// must NOT trigger an InfiniteLoopWarning. The while.cond block has an edge
+// to while.end (the block after the loop), which is outside the cycle, so
+// condition (2) of hasUnbreakableLoop() fails — no warning.
+
+import test;
+
+fn main(): int {
+    mut i: int = 0;
+    mut sum: int = 0;
+    while i < 10 {
+        sum = sum + i;
+        i = i + 1;
+    }
+    test::assert(sum == 45, "Sum of 0..9 is 45");
+    return 0;
+}

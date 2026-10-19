@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E064
+// EXPECT-DIAG: function declares 'int' but returns '&int'
+// A reference is not its value: there is no implicit dereference, so this is
+// a type error, not a struct-style copy.
+fn d(p: &int): int {
+    return p;
+}
+
+fn main(): int {
+    mut v: int = 4;
+    return d(&v);
+}

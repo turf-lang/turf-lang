@@ -1,0 +1,22 @@
+// SEM-003 (§11.2, §11.7): `mut x: guess = 5;` is EXACTLY the same
+// declaration as `mut x = 5;` -- both spellings exist so the explicit one
+// is greppable/visible in review. Also: `immut` works with guess (an
+// explicit initializer is already required by both `immut` itself and by
+// `guess`, so there's no interaction to speak of), and `typeof()` on a
+// guess-inferred variable returns the real inferred type name, exactly as
+// for an explicitly-annotated one.
+import test;
+
+fn main(): int {
+    mut x: guess = 5;
+    test::assert(x == 5, "explicit ': guess' spelling infers the same as an omitted annotation");
+    test::assert(typeof(x) == "int", "typeof() on a guess-inferred variable returns the inferred name");
+
+    immut y = "constant";
+    test::assert(y == "constant", "immut works with an omitted (guess) annotation");
+
+    immut z: guess = 3.5;
+    test::assert(z == 3.5, "immut works with the explicit ': guess' spelling");
+
+    return 0;
+}

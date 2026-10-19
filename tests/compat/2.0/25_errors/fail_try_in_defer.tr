@@ -1,0 +1,24 @@
+// EXPECT-DIAG: E095
+// EXPECT-DIAG: a deferred statement can't use 'try'
+// LEC-004 / INV-DEFER-2: a deferred statement runs while the function is
+// already returning, so it may not return out of it -- and `try` is a return.
+// E095, even though the function itself is `!int`. (A `try` is an expression,
+// so the statement-level check that rejects a deferred `return` can't see it;
+// the Resolver counts enclosing `defer`s.)
+error IOError {
+    NotFound
+}
+
+fn open(): !int {
+    return IOError::NotFound;
+}
+
+fn helper(): !int {
+    mut n: int = 0;
+    defer n = try open();
+    return n;
+}
+
+fn main(): int {
+    return 0;
+}

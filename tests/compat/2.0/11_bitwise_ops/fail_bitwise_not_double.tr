@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E057
+// EXPECT-DIAG: Unary '~' (bitwise NOT) requires an integer operand, got 'double'
+// FAIL TEST: Bitwise NOT (~) with non-integer type
+// ~1.5 should emit a TypeError
+
+fn main(): int {
+    mut a: double = 1.5;
+    mut b: int = ~a;  // TypeError: bitwise NOT requires integer operand
+
+    return 0;
+}

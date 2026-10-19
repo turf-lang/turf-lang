@@ -1,0 +1,22 @@
+// Test: Vec2::default(), mutate fields, re-read — mutation works after
+// default init (SEM-004: the default now requires this explicit call).
+import io;
+
+import test;
+struct Vec2 {
+    x: double,
+    y: double
+}
+
+fn main(): int {
+    mut v: Vec2 = Vec2::default();
+    test::assert(v.x == 0.0, "initial x = 0.0");
+    test::assert(v.y == 0.0, "initial y = 0.0");
+
+    v.x = 3.0;
+    v.y = 4.0;
+    test::assert(v.x == 3.0, "after assign x = 3.0");
+    test::assert(v.y == 4.0, "after assign y = 4.0");
+
+    return 0;
+}

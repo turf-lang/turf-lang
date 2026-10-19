@@ -1,0 +1,12 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: Array index out of bounds for 'r'
+// A `&int` is one element, so an index other than 0 or -1 panics.
+
+fn at(r: &int, i: int): int {
+    return r[i];
+}
+
+fn main(): int {
+    mut x: int = 5;
+    return at(&x, 1);
+}

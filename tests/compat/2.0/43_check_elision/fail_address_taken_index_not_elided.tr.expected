@@ -1,0 +1,1 @@
+panic: runtime check: Array index out of bounds for 'arr' (fail_address_taken_index_not_elided.tr:25)

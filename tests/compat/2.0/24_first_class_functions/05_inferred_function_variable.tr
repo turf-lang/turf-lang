@@ -1,0 +1,23 @@
+// `mut g = sq;` infers `g`'s function type from the function. The Resolver
+// rejected the call `g(3.0)` with E135 "variable of type 'guess'" because it
+// judged the callee before the TypeChecker had inferred it.
+
+import test;
+
+fn sq(x: double): double {
+    return x * x;
+}
+
+fn apply(f: fn(double): double, v: double): double {
+    return f(v);
+}
+
+fn main(): int {
+    mut g = sq;
+    immut h = sq;
+    test::assert(g(3.0) == 9.0, "call through an inferred mut");
+    test::assert(h(2.0) == 4.0, "call through an inferred immut");
+    test::assert(typeof(g) == "fn(double): double", "the inferred type");
+    test::assert(apply(g, 4.0) == 16.0, "passed on as a value");
+    return 0;
+}

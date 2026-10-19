@@ -1,0 +1,15 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: String index out of bounds
+// A string byte write is bounded by the string's allocation. A write 100
+// bytes past the end of `strings::repeat("ab", 2)` was not checked at all and
+// corrupted the heap; a far one segfaulted.
+
+fn poke(s: string, i: int): void {
+    s[i] = 'x';
+}
+
+fn main(): int {
+    mut s: string = strings::repeat("ab", 2);
+    poke(s, 103);
+    return 0;
+}

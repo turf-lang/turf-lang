@@ -1,0 +1,53 @@
+// STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(c)): `ErrorType::Variant(
+// messageExpr)` -- exactly one 'string' argument, attaching a message to
+// this specific error occurrence, readable back via `err.message` inside
+// `recover as err run { ... }`. Exercises a RUNTIME-COMPUTED message (not
+// a literal -- string concatenation), a bare (message-less) variant's
+// `.message` reading back as empty, and equality (`err == Variant`) still
+// correctly identifying the variant regardless of which message it
+// carries.
+import test;
+import strings;
+
+error MathError {
+    DivisionByZero,
+    NegativeSqrt,
+}
+
+fn divide(a: int, b: int): !int {
+    if b == 0 {
+        return MathError::DivisionByZero("division by " + (a to string) + "/0");
+    }
+    return a / b;
+}
+
+fn bareFail(): !int {
+    return MathError::NegativeSqrt;
+}
+
+fn main(): int {
+    mut msg: string = "";
+    divide(10, 0) recover as err run {
+        msg = err.message;
+        return 0;
+    };
+    test::assert_eq(msg, "division by 10/0",
+        "a message built from RUNTIME string concatenation round-trips through construction, !T, and .message");
+
+    mut bareMsg: string = "not empty yet";
+    bareFail() recover as err run {
+        bareMsg = err.message;
+        return 0;
+    };
+    test::assert_eq(bareMsg, "", "a bare (message-less) variant's .message reads back as empty, not garbage");
+
+    divide(10, 0) recover as err run {
+        test::assert(err == MathError::DivisionByZero,
+            "equality still identifies the correct variant regardless of which message it carries");
+        test::assert(!(err == MathError::NegativeSqrt),
+            "equality correctly rejects the WRONG variant even though both are MathError");
+        return 0;
+    };
+
+    return 0;
+}

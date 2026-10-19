@@ -1,0 +1,20 @@
+// EXPECT-DIAG: E141
+// EXPECT-DIAG: 'h' is immutable, but 'clear' writes to the array it is given as 'arr'.
+// Issue #260: an array FIELD of an immutable struct is just as immutable.
+struct Holder {
+    data: int[2]
+}
+
+fn Holder.new(): void {
+    self.data = [1, 2];
+}
+
+fn clear(arr: int[]): void {
+    arr[0] = 0;
+}
+
+fn main(): int {
+    immut h: Holder = Holder::new();
+    clear(h.data);
+    return 0;
+}

@@ -1,0 +1,12 @@
+// LEC-008: two imported modules that BOTH import the inner one do not make it
+// visible here. A file's imports are its own, never pooled from importers.
+// EXPECT-DIAG: E145
+// EXPECT-DIAG: is not imported in this file
+import import_scope_diamond_left_module;
+import import_scope_diamond_right_module;
+
+fn main(): int {
+    return import_scope_diamond_left_module::left()
+    + import_scope_diamond_right_module::right()
+    + import_scope_inner_module::inner_value();
+}

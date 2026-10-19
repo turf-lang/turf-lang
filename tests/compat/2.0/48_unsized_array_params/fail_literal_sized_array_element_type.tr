@@ -1,0 +1,8 @@
+// EXPECT-DIAG: E004
+// EXPECT-DIAG: Cannot initialize an array of 'int' with a value of type 'string'.
+// A literal that sizes an unsized declaration is still checked against the
+// declared element type.
+fn main(): int {
+    mut a: int[] = [1, "x"];
+    return a[0];
+}

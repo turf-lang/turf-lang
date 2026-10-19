@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E135
+// EXPECT-DIAG: 'helper' is a variable of type 'int', not a function
+// Regression test: same as fail_call_shadowed_by_local_variable.tr, but the
+// shadowing name is a parameter and the shadowed function is a top-level `fn`.
+fn helper(): int { return 1; }
+
+fn twice(helper: int): int {
+    return helper() + helper();
+}
+
+fn main(): int {
+    return twice(3);
+}

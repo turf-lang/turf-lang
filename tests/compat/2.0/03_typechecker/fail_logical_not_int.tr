@@ -1,0 +1,8 @@
+// EXPECT-DIAG: E057
+// EXPECT-DIAG: Cannot apply '!' to 'int': its operand must be a 'bool'
+// `!x` is parsed as `x != true`; without a bool check `!5` would compile and
+// compare 5 with true.
+fn main(): int {
+    mut ok: bool = !5;
+    return 0;
+}

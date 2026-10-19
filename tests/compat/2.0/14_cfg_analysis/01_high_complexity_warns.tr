@@ -1,0 +1,35 @@
+// Regression test (Issue #185, CFG Phase 1): a function with 16 independent
+// if-branches must trigger a CyclomaticComplexityWarning (M > 15) but still
+// compile and run successfully. TurfWarning::emit() never interrupts compilation.
+//
+// Each `if` branch adds one extra CFG edge (condition-true vs condition-false),
+// raising M by 1. With 16 branches M ≥ 16, which exceeds the threshold of 15.
+
+import test;
+
+fn complex(x: int): int {
+    mut result: int = 0;
+    if x > 1  { result = result + 1; }
+    if x > 2  { result = result + 1; }
+    if x > 3  { result = result + 1; }
+    if x > 4  { result = result + 1; }
+    if x > 5  { result = result + 1; }
+    if x > 6  { result = result + 1; }
+    if x > 7  { result = result + 1; }
+    if x > 8  { result = result + 1; }
+    if x > 9  { result = result + 1; }
+    if x > 10 { result = result + 1; }
+    if x > 11 { result = result + 1; }
+    if x > 12 { result = result + 1; }
+    if x > 13 { result = result + 1; }
+    if x > 14 { result = result + 1; }
+    if x > 15 { result = result + 1; }
+    if x > 16 { result = result + 1; }
+    return result;
+}
+
+fn main(): int {
+    mut r: int = complex(20);
+    test::assert(r == 16, "All 16 branches taken for x=20");
+    return 0;
+}

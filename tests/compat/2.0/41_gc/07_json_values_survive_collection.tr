@@ -1,0 +1,99 @@
+// tests/41_gc/07_json_values_survive_collection.tr
+// OVH-002 (docs/planning/OVERHAUL_REMAINING_WORK.md): `json.tr`'s `JsonValue`
+// used to individually heap-BOX each array element / object value with
+// `mem::alloc(sizeof(JsonValue))`, storing a `JsonValue*` in `arr_val`/
+// `obj_vals` instead of a `JsonValue` by value. Each box's own `str_val`/
+// `arr_val`/`obj_keys`/`obj_vals` GC-heap pointers lived ONLY inside that
+// untraced manual-heap block (F-MEM-3), so a collection between building a
+// `JsonValue` tree and reading it back could free a string still reachable
+// only through the box, corrupting the read.
+//
+// `build()` parses ONE JSON array of 40 objects (`[{"name":"item0"}, ...]`)
+// from genuinely runtime-built text (string concatenation, not a literal)
+// -- the array's own elements live inside `JsonValue.arr_val`, exercising
+// exactly the collection this fix targets, with no extra generic
+// instantiation of this test's own choosing. The array is built in a
+// deeper frame than the one that later reads it, reachable afterward ONLY
+// through the returned `JsonValue`'s own `arr_val`, never through a
+// surviving local of its own (mirroring 01/02's discipline).
+
+import json;
+import strings;
+import test;
+import io;
+
+fn build(): json::JsonValue {
+    mut text: string = "[";
+    mut i: int = 0;
+    while i < 40 {
+        if i > 0 {
+            text = text + ",";
+        }
+        text = text + "{\"name\": \"item" + (i to string) + "\"}";
+        i = i + 1;
+    }
+    text = text + "]";
+    immut v: json::JsonValue = json::parse(text) recover run {
+        test::fail("json::parse must not fail on well-formed input");
+        return json::JsonValue::null_value();
+    };
+    return v;
+}
+
+fn churn(depth: int): void {
+    mut buf: int[64];
+    buf[0] = 0;
+    mut i: int = 0;
+    while i < 64 {
+        buf[i] = i * 19;
+        i = i + 1;
+    }
+    mut sum: int = 0;
+    i = 0;
+    while i < 64 {
+        sum = sum + buf[i];
+        i = i + 1;
+    }
+    test::assert(sum == 38304, "churn: stack buffer round-trips correctly");
+    if depth > 0 {
+        churn(depth - 1);
+    }
+}
+
+// A few thousand throwaway allocations, sized close to the strings under
+// test ("item0".."item39", 5-6 bytes), so a freed block genuinely gets
+// REUSED with different content rather than merely freed-but-not-yet-
+// overwritten (docs/planning/OVERHAUL_REMAINING_WORK.md §1's own guidance
+// -- confirmed load-bearing live while developing this test's siblings,
+// 08/09: without size-matched junk, a freed block can sit untouched long
+// enough to read back correct-looking stale bytes and falsely pass).
+fn junk(n: int): void {
+    mut i: int = 0;
+    while i < n {
+        strings::repeat("j", 6);
+        i = i + 1;
+    }
+}
+
+fn main(): int {
+    mut v: json::JsonValue = build();
+
+    churn(24);
+    gc_collect();
+    junk(3000);
+    churn(24);
+    gc_collect();
+
+    test::assert(v.length() == 40, "the parsed JSON array keeps its length");
+
+    mut i: int = 0;
+    while i < 40 {
+        immut expected: string = "item" + (i to string);
+        immut got: string = v.at(i).get_string("name");
+        test::assert(got == expected, "an array element's \"name\" string survives a forced collection -- OVH-002's actual reproducer");
+        i = i + 1;
+    }
+
+    io::printline("41/07 PASS: a JsonValue array's own string content is precisely traced through a forced collection");
+    return 0;
+}

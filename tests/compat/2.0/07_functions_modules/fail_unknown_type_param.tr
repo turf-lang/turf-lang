@@ -1,0 +1,17 @@
+// EXPECT-DIAG: E042
+// EXPECT-DIAG: Unknown type 'NoSuchStruct'
+// Regression test: an unknown/misspelled struct type name used as a
+// function parameter's type must be rejected. Before the fix this compiled
+// silently -- Resolver::visitStructDecl() validated struct FIELD types
+// against known struct/enum/primitive names, but nothing validated function
+// parameter or return types, so this produced a bogus empty opaque LLVM
+// struct type for "NoSuchStruct" with zero diagnostics. See Resolver.cpp's
+// validateNamedType(), now shared by visitStructDecl, visitFuncDef, and
+// visitExternFuncDecl.
+
+fn takesThing(x: NoSuchStruct): void {
+}
+
+fn main(): int {
+    return 0;
+}

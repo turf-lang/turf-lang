@@ -1,0 +1,15 @@
+// EXPECT-DIAG: E130
+// EXPECT-DIAG: Converting 'string' to the reference '&N' cannot be done outside an 'unsafe' block
+// A `string` is a C pointer, so `s to &N` reinterpreted its bytes as an `N`
+// in safe code (found by turf-fuzz). Needs `unsafe { }` (owner decision
+// 2026-10-12).
+
+struct N {
+    v: int
+}
+
+fn main(): int {
+    mut s: string = "abcdefgh";
+    mut b: &N = s to &N;
+    return b.v;
+}

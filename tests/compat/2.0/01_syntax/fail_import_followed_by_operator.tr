@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E102
+// EXPECT-NO-DIAG: lib/std
+// REL-004 (fuzzer): `import` was parsed as an expression, so `import test %`
+// took the `%` for a binary operator and swallowed the next declaration as its
+// right-hand side. The import and `main` then vanished from the Resolver's
+// hoisting pass and the user got a second, unrelated error from inside
+// lib/std/testing/test.tr. The one mistake here is the missing `;`.
+import test %
+
+fn main(): int {
+    return 0;
+}

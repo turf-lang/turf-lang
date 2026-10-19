@@ -1,0 +1,1 @@
+41/06 PASS: struct with a pointer field exactly at word 63 and exactly at word 64 both traced correctly

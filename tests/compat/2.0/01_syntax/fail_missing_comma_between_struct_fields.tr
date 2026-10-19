@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E105
+// EXPECT-DIAG: Expected ',' or '}' after field definition
+// Issue #263: the parse errors that used to print with no code. Two struct
+// fields need a comma between them; the missing one is E105, "a comma is
+// missing", not a generic syntax error.
+struct Point {
+    x: int
+    y: int
+}
+
+fn main(): int {
+    return 0;
+}

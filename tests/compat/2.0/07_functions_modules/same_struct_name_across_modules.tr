@@ -1,0 +1,30 @@
+// FDN-003 (docs/development/changes/FDN-003.md): two imported modules that
+// each declare a differently-shaped `Point` coexist -- a struct is
+// identified by (module, name), so these are `dup_struct_a_module::Point`
+// and `dup_struct_b_module::Point`, two unrelated types.
+//
+// History: this file used to be fail_duplicate_struct_across_modules.tr.
+// Struct names were one program-wide namespace, and importing both modules
+// was rejected with DuplicateTypeNameError -- which itself replaced a worse
+// failure: the collision went undetected until Codegen, where LLVM silently
+// renamed the second struct "Point.1" and code emitted against "Point"
+// pointed at the wrong layout ("Internal compiler error: generated LLVM IR
+// is invalid"). Declaring the same name twice in ONE module is still an
+// error -- fail_duplicate_struct_within_one_imported_file.tr.
+
+import test;
+import dup_struct_a_module;
+import dup_struct_b_module;
+
+fn main(): int {
+    mut a: dup_struct_a_module::Point = dup_struct_a_module::makeA();
+    mut b: dup_struct_b_module::Point = dup_struct_b_module::makeB();
+    a.x = 1;
+    b.x = 10;
+    b.z = 30;
+    test::assert(a.x == 1, "a's one-field Point");
+    test::assert(b.x + b.z == 40, "b's three-field Point");
+    test::assert(sizeof(dup_struct_a_module::Point) == 8, "a's Point layout");
+    test::assert(sizeof(dup_struct_b_module::Point) == 24, "b's Point layout");
+    return 0;
+}

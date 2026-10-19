@@ -1,0 +1,8 @@
+// EXPECT-DIAG: E149
+// EXPECT-DIAG: "12abc" is not an int, so this conversion would always panic
+// A string literal that `to int` would always reject is a compile-time error.
+
+fn main(): int {
+    mut n: int = "12abc" to int;
+    return n;
+}

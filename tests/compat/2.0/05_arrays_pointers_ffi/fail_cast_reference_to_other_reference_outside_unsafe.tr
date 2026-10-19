@@ -1,0 +1,21 @@
+// EXPECT-DIAG: E130
+// EXPECT-DIAG: Converting '&N' to the reference '&M' cannot be done outside an 'unsafe' block
+// `r to &M` read an `N` as a bigger `M` in safe code, past the end of `n`
+// (found by turf-fuzz). A reference keeps its pointee type outside
+// `unsafe { }` (owner decision 2026-10-12).
+
+struct N {
+    v: int
+}
+
+struct M {
+    a: int,
+    b: int
+}
+
+fn main(): int {
+    mut n: N = N::default();
+    mut r: &N = &n;
+    mut c: &M = r to &M;
+    return c.b;
+}

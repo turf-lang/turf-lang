@@ -1,0 +1,14 @@
+// SEM-004 (F-INIT-1, FREEZE.md §6.4): `int32` was one of Mechanism B's
+// eager-zero-init types (like char) -- that mechanism is gone. `int32` now
+// follows the same definite-assignment rule as every other primitive: a
+// declaration without an initializer leaves it unassigned until an
+// explicit assignment runs. See fail_int32_use_before_init.tr for the
+// read-before-assignment error this same declaration now produces.
+import test;
+
+fn main(): int {
+    mut n: int32;
+    n = 7 to int32;
+    test::assert(n == (7 to int32), "int32: assign then use");
+    return 0;
+}

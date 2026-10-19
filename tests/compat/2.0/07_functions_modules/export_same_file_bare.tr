@@ -1,0 +1,16 @@
+// `export immut` declared and used bare within its own declaring file --
+// no import needed for self-reference, exactly like functions/structs.
+import io;
+
+export immut PI: double = 3.14159;
+export immut MAX_USERS: int = 100;
+export immut GREETING: string = "hello";
+export immut DEBUG: bool = true;
+
+fn main(): int {
+    io::printline(PI);
+    io::printline(MAX_USERS);
+    io::printline(GREETING);
+    io::printline(DEBUG);
+    return 0;
+}

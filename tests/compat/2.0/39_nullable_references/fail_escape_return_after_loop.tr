@@ -1,0 +1,21 @@
+// EXPECT-DIAG: E086
+// EXPECT-DIAG: can't be returned
+// A reference into this frame, returned after a loop that never touches it.
+// EscapePass met a loop header's not-yet-computed back edge as an empty map,
+// so every provenance became Unknown (never flagged) and this compiled; the
+// caller then read whatever the next call left in the dead frame. Found by
+// turf-fuzz probing the F-MEM-5 boundary.
+struct Node { val: int, next: &?Node }
+
+fn make(): &Node {
+    mut n: Node = Node::default();
+    n.val = 42;
+    mut p: &Node = &n;
+    mut k: int = 0;
+    while k < 3 { k += 1; }
+    return p;
+}
+
+fn main(): int {
+    return make().val;
+}

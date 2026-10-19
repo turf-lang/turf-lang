@@ -1,0 +1,30 @@
+// Regression test: List.binary_search() (lib/std/collections/list.tr) --
+// finding a present value in an already-sorted List<int>, and correctly
+// returning -1 for an absent one. (Was the `list_binary_search` free
+// function until LEC-007 removed that wrapper.)
+import list::List;
+import test;
+
+fn cmp_int(a: int, b: int): int {
+    return a - b;
+}
+
+fn main(): int {
+    mut l: List<int> = List::default();
+    l.push(1);
+    l.push(3);
+    l.push(5);
+    l.push(7);
+    l.push(9);
+    l.push(11);
+    // l is already sorted ascending -- binary_search()'s precondition.
+
+    test::assert(l.binary_search(1, cmp_int) == 0, "find first element");
+    test::assert(l.binary_search(11, cmp_int) == 5, "find last element");
+    test::assert(l.binary_search(7, cmp_int) == 3, "find a middle element");
+    test::assert(l.binary_search(2, cmp_int) == -1, "absent value between elements returns -1");
+    test::assert(l.binary_search(100, cmp_int) == -1, "absent value past the end returns -1");
+    test::assert(l.binary_search(-5, cmp_int) == -1, "absent value before the start returns -1");
+
+    return 0;
+}

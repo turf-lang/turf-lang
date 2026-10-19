@@ -1,0 +1,63 @@
+// Test: DSA — Direction-based navigation on a 5x5 grid
+// Move from (0,0) using a sequence of direction steps, verify end position
+import test;
+
+enum Direction { North, East, South, West }
+
+fn move_x(dir: Direction): int {
+    compare dir {
+        matches Direction::East:
+        return 1;
+        done
+        matches Direction::West:
+        return -1;
+        done
+        otherwise:
+        return 0;
+    }
+    return 0;
+}
+
+fn move_y(dir: Direction): int {
+    compare dir {
+        matches Direction::North:
+        return -1;
+        done
+        matches Direction::South:
+        return 1;
+        done
+        otherwise:
+        return 0;
+    }
+    return 0;
+}
+
+fn main(): int {
+    // Path: E, E, S, S, W -> ends at (1, 2)
+    immut path: Direction[5] = [
+        Direction::East,
+        Direction::East,
+        Direction::South,
+        Direction::South,
+        Direction::West
+    ];
+
+    mut x: int = 0;
+    mut y: int = 0;
+    mut i: int = 0;
+    while i < 5 {
+        x = x + move_x(path[i]);
+        y = y + move_y(path[i]);
+        i = i + 1;
+    }
+
+    test::assert(x == 1, "Final x == 1");
+    test::assert(y == 2, "Final y == 2");
+
+    // Verify deltas
+    test::assert(move_x(Direction::East)  == 1,  "East dx == 1");
+    test::assert(move_x(Direction::West)  == -1, "West dx == -1");
+    test::assert(move_y(Direction::North) == -1, "North dy == -1");
+    test::assert(move_y(Direction::South) == 1,  "South dy == 1");
+    return 0;
+}

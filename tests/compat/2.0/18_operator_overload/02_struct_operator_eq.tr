@@ -1,0 +1,35 @@
+// operator == closes the "structs can't be compared" gap for types that
+// explicitly opt in via an overload -- TypeChecker still rejects bare
+// struct == struct with no operator visible (see fail_operator_not_visible.tr).
+import test;
+
+struct Vec2 {
+    x: int,
+    y: int
+}
+
+operator ==(a: Vec2, b: Vec2): bool {
+    return a.x == b.x && a.y == b.y;
+}
+
+operator !=(a: Vec2, b: Vec2): bool {
+    return !(a == b);
+}
+
+fn main(): int {
+    mut a: Vec2 = Vec2::default();
+    a.x = 1;
+    a.y = 2;
+    mut b: Vec2 = Vec2::default();
+    b.x = 1;
+    b.y = 2;
+    mut c: Vec2 = Vec2::default();
+    c.x = 9;
+    c.y = 9;
+
+    test::assert(a == b, "equal Vec2s should compare equal");
+    test::assert(a != c, "different Vec2s should compare not-equal");
+    test::assert(!(a == c), "different Vec2s should not compare equal");
+
+    return 0;
+}

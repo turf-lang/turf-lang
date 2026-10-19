@@ -1,0 +1,32 @@
+// OPT-002 (ARCHITECTURE_OVERHAUL.md §8): ValueRangePass::markElidableChecks()
+// proves an array index or checked-arithmetic operand is a known-safe
+// constant on every path reaching it, and Codegen skips the corresponding
+// runtime check entirely (confirmed via --emit-llvm in this group's own
+// change record, docs/development/changes/OPT-002.md). This test's whole
+// point is CORRECTNESS under elision, not the elision itself: every value
+// below is chosen to be exactly the shape markElidableChecks() proves
+// safe -- a `mut` local assigned once from a literal, never reassigned
+// before use -- so if elision ever computed the wrong answer, this is what
+// would catch it.
+import test;
+
+fn main(): int {
+    mut arr: int[10];
+    mut i: int = 3;
+    arr[i] = 42;
+
+    mut a: int = 5;
+    mut b: int = 7;
+    mut s: int = a + b;
+    test::assert(s == 12, "elided '+' must still compute the right value");
+
+    mut d: int = a - b;
+    test::assert(d == -2, "elided '-' must still compute the right value");
+
+    mut m: int = a * b;
+    test::assert(m == 35, "elided '*' must still compute the right value");
+
+    test::assert(arr[i] == 42, "elided bounds check must still read the right element");
+
+    return 0;
+}

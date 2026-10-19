@@ -1,0 +1,14 @@
+// EXPECT-DIAG: E102
+// EXPECT-DIAG: Expected ';' after do-while loop
+// Regression test (Issue #180 follow-up): unlike while/if/for, a do-while
+// statement REQUIRES a trailing ';' after its condition (it's the only loop
+// form that isn't self-delimited by a closing '}'). Omitting it must be
+// rejected with "Expected ';' after do-while loop.", not silently accepted
+// or misparsed as swallowing the next statement.
+fn main(): int {
+    mut x: int = 5;
+    do {
+        x = x - 1;
+    } while (x > 0)
+    return 0;
+}

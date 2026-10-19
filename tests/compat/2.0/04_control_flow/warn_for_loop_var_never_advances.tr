@@ -1,0 +1,23 @@
+// Regression test: a for-loop whose 'step' clause touches a variable OTHER
+// than the induction variable must compile (this is legal, if suspicious,
+// code -- 'for' doesn't require step to touch its own variable) and should
+// emit a StuckForLoopVariableWarning rather than silently producing a real
+// infinite loop with no diagnostic at all. See Lint.cpp's LintFor() and
+// MayModifyVariable(), and Errors.h's StuckForLoopVariableWarning doc
+// comment for the full story -- this exact shape (`step j += 10` never
+// touching `i`) was the concrete example that motivated the check.
+//
+// This file intentionally does NOT execute the loop body (the point is to
+// verify the compiler detects and warns about the stuck variable, not to
+// actually hang the test suite) -- 'for' is deliberately never reached at
+// runtime by returning before it.
+
+fn main(): int {
+    mut j: int = 0;
+    if (true) {
+        return 0;
+    }
+    for i in 0..10 step j += 10 {
+    }
+    return 0;
+}

@@ -1,0 +1,16 @@
+// SEM-004 (F-INIT-1, FREEZE.md §6.4): `char` used to be one of Mechanism
+// B's eager-zero-init types (`mut c: char;` was immediately readable as
+// '\0') -- that mechanism is gone. `char` now follows the same definite-
+// assignment rule as int/double/bool/string: a declaration without an
+// initializer leaves it unassigned until an explicit assignment runs.
+// See fail_char_use_before_init.tr for the read-before-assignment error
+// this same declaration now produces if never assigned first.
+import test;
+
+fn main(): int {
+    mut c: char;
+    c = 'x';
+    test::assert(c == 'x', "char: assign then use");
+
+    return 0;
+}

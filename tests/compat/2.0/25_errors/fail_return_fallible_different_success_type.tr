@@ -1,0 +1,20 @@
+// EXPECT-DIAG: E064
+// EXPECT-DIAG: function declares '!int' but returns '!string'
+// LEC-004: `return f();` passes a `!T` through only when the function returns
+// exactly that `!T`. A `!string` from a `!int` function is still a mismatch --
+// the pass-through never converts or unwraps anything.
+error IOError {
+    NotFound
+}
+
+fn name(): !string {
+    return IOError::NotFound;
+}
+
+fn number(): !int {
+    return name();
+}
+
+fn main(): int {
+    return 0;
+}

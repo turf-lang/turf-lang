@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E020
+// EXPECT-DIAG: 'extern fn foo' conflicts with an earlier declaration
+// Negative test: two extern declarations for the same raw C name with
+// different parameter types must be a hard compile error, not a silent
+// first-wins.
+extern fn foo(x: int): void;
+extern fn foo(x: string): void;
+
+fn main(): int {
+    return 0;
+}

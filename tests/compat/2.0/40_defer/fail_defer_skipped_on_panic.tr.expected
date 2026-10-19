@@ -1,0 +1,1 @@
+fail_defer_skipped_on_panic.tr:20: deliberately false, to trigger a panic/abort

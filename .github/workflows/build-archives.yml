@@ -499,7 +499,7 @@ jobs:
           set -o pipefail
           ./build/turfc --test tests --jobs 3 \
             --diag-register tests/DIAGNOSTIC_GAPS.txt \
-            --exclude custom --exclude 99_known_bugs 2>&1 | tee macos-suite.log
+            --exclude custom --exclude 99_known_bugs --exclude compat 2>&1 | tee macos-suite.log
 
       - name: GC stress and validate on macOS
         if: ${{ !cancelled() }}
@@ -733,7 +733,7 @@ jobs:
           set -o pipefail
           ./build/turfc.exe --test tests \
             --diag-register tests/DIAGNOSTIC_GAPS.txt \
-            --exclude custom --exclude 99_known_bugs 2>&1 | tee windows-suite.log
+            --exclude custom --exclude 99_known_bugs --exclude compat 2>&1 | tee windows-suite.log
           # (set -o pipefail: the step fails when the suite does)
 
       - name: Summarise the Windows suite run

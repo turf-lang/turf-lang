@@ -1,0 +1,21 @@
+// Regression test: a zero-field struct declared inside a module, passed
+// AND returned BY VALUE by a free function in that same module (the exact
+// shape that used to crash the compiler for non-empty structs before the
+// struct-codegen idempotency fix -- see
+// scope_struct_by_value_cross_module_test.tr), also works correctly when
+// the struct has NO fields at all. Not obviously guaranteed by that fix
+// alone: an empty struct produces a zero-sized llvm::StructType, a
+// different-enough shape (empty setBody(), zero-element ConstantStruct)
+// that it's worth its own dedicated coverage rather than assuming it's
+// implied.
+
+import io;
+import empty_struct_helper_module;
+import empty_struct_helper_module::Empty;
+
+fn main(): int {
+    immut e: Empty =
+    empty_struct_helper_module::identity(empty_struct_helper_module::Empty::make());
+    io::printline("empty struct by-value across a module boundary works");
+    return 0;
+}

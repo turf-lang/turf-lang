@@ -1,0 +1,16 @@
+// EXPECT-DIAG: E017
+// EXPECT-DIAG: Double free detected for 'p'.
+// `p.free()` is `mem::free(p)` through UFCS, so the alias analysis reads the
+// callee's `@ownership(releases: p)` the same way, with the receiver as the
+// first argument. Before, a method-call form was never looked at.
+
+import mem;
+
+fn main(): int {
+    unsafe {
+        mut p: void* = mem::alloc(16);
+        p.free();
+        p.free();
+    }
+    return 0;
+}

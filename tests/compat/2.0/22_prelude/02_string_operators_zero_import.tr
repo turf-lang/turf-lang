@@ -1,0 +1,24 @@
+// String `+`/`==`/`!=`/`< > <= >=` are `operator` overloads in
+// lib/std/strings.tr, and `strings` is part of the prelude -- this proves
+// they work with no `import strings;` anywhere in this file. No
+// `import test;` either, for the same reason as 01_zero_import_ufcs.tr.
+fn main(): int {
+    mut a: string = "foo";
+    mut b: string = "bar";
+    mut c: string = a + b;
+
+    if c != "foobar" {
+        return 1;
+    }
+    if !(b < a) {
+        return 2;
+    }
+    if !(a > b) {
+        return 3;
+    }
+    if !(a == "foo") {
+        return 4;
+    }
+
+    return 0;
+}

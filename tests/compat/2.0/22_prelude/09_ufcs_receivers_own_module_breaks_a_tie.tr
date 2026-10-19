@@ -1,0 +1,14 @@
+// FREEZE.md 6.25: `math` is now loaded in every program, so its public libm
+// `floor`/`ceil`/`round` are UFCS candidates for every `double` beside
+// `double.tr`'s own. They tie exactly; the receiver type's own prelude module
+// wins the tie, so the dot form stays usable, and both public spellings stay
+// reachable qualified.
+import test;
+
+fn main(): int {
+    immut d: double = 2.5;
+    test::assert(d.round() == 3.0 && d.floor() == 2.0 && d.ceil() == 3.0, "dot form");
+    test::assert(math::floor(d) == 2.0 && math::round(d) == 3.0, "math::floor / math::round");
+    test::assert(floor(d) == 2.0, "bare floor is math's");
+    return 0;
+}

@@ -1,0 +1,9 @@
+// Companion for fail_private_in_public_field.tr: a `pub` FIELD whose type is a
+// private struct of this module (the struct holding it is `pub`).
+struct Inner {
+    pub n: int
+}
+
+pub struct Outer {
+    pub inner: Inner
+}

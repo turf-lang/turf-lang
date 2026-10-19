@@ -1,0 +1,14 @@
+// EXPECT-DIAG: E081
+// EXPECT-DIAG: this '&?Node' value might be 'null', but you're calling its 'bump' method
+// A method call whose receiver is a `&?T` that is not a variable.
+struct Node { val: int, next: &?Node }
+
+fn Node.bump(k: int): void {
+    self.val = self.val + k;
+}
+
+fn main(): int {
+    mut p: &Node = heap(Node::default());
+    p.next.bump(1);
+    return 0;
+}

@@ -1,0 +1,19 @@
+// EXPECT-DIAG: E008
+// EXPECT-DIAG: You're using 'pts' (type 'Point[3]') before it has a value
+// SEM-004 (§12.6): an array of structs declared with no element write or
+// initializer at all is statically unassigned as a whole, same as an
+// array of primitives -- DefiniteAssignmentError (E008). See
+// 16_array_of_struct_element_write_then_read.tr for the still-legal
+// write-then-read shape.
+struct Point {
+    x: int,
+    y: int
+}
+
+fn main(): int {
+    mut pts: Point[3];
+    if pts[0].x == 0 {
+        return 1;
+    }
+    return 0;
+}

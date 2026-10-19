@@ -1,0 +1,24 @@
+// EXPECT-DIAG: E045
+// EXPECT-DIAG: 'new' can't be called on an instance
+// Regression test: `new` is registered internally as an ordinary
+// '.'-declared instance method (self at Params[0]) -- so without an
+// explicit guard, `instance.new(...)` would resolve and codegen completely
+// normally, silently making '.' a working alias for the reserved
+// construction-only syntax. Must raise ConstructorCalledOnInstanceError
+// instead: 'new'/'default' only ever work as `StructName::new/default(...)`.
+
+struct Point {
+    x: int,
+    y: int
+}
+
+fn Point.new(x: int, y: int): void {
+    self.x = x;
+    self.y = y;
+}
+
+fn main(): int {
+    mut p: Point = Point::new(1, 2);
+    p.new(3, 4);
+    return 0;
+}

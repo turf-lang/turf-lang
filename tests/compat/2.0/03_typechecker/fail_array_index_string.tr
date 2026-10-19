@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E002
+// EXPECT-DIAG: Index must be an integer
+// Issue #263: `arr["one"]` compiled with NO diagnostic at all -- E002's
+// `--explain` page promised "the compiler stops you here" and nothing did. A
+// string is not a whole number and cannot index an array.
+fn main(): int {
+    mut a: int[3] = [1, 2, 3];
+    mut x: int = a["one"];
+    return x;
+}

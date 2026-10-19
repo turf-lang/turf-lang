@@ -1,0 +1,27 @@
+// SEM-003 (§11.6): `Point::default()`/`Point::new(...)` infer `Point` under
+// guess for an ORDINARY (non-generic) struct. Distinct from the generic
+// case (`fail_guess_uninstantiated_generic.tr`) -- a non-generic struct's
+// registered TurfStructType has no field typed against an unresolved type
+// parameter, so containsUninstantiatedGenericParam() correctly lets this
+// one through.
+import test;
+
+struct Point {
+    x: int,
+    y: int
+}
+
+fn Point.new(x: int, y: int): void {
+    self.x = x;
+    self.y = y;
+}
+
+fn main(): int {
+    mut p1 = Point::default();
+    test::assert(p1.x == 0 && p1.y == 0, "Point::default() infers Point under guess");
+
+    mut p2 = Point::new(3, 4);
+    test::assert(p2.x == 3 && p2.y == 4, "Point::new(...) infers Point under guess");
+
+    return 0;
+}

@@ -1,0 +1,52 @@
+// Regression test: lib/std/map.tr (Map<K, V>), imported and exercised
+// end-to-end -- put/get/contains/remove/length, key overwrite, growth past
+// the initial capacity, and a non-string (int->double) instantiation.
+
+import map::Map;
+import io;
+
+import test;
+fn main(): int {
+    mut m: Map<string, int> = Map::default();
+    m.put("a", 1);
+    m.put("b", 2);
+    m.put("c", 3);
+    test::assert(m.length() == 3, "");
+    test::assert(m.get("a") == 1, "");
+    test::assert(m.get("b") == 2, "");
+    test::assert(m.get("c") == 3, "");
+    test::assert(m.contains("a") == true, "");
+    test::assert(m.contains("z") == false, "");
+
+    // Overwriting an existing key must not grow the map.
+    m.put("a", 100);
+    test::assert(m.length() == 3, "");
+    test::assert(m.get("a") == 100, "");
+
+    m.remove("b");
+    test::assert(m.length() == 2, "");
+    test::assert(m.contains("b") == false, "");
+
+    // Force growth past the initial capacity (8) -- a separate int-keyed
+    // map, since `m` above is string-keyed.
+    mut ints: Map<int, int> = Map::default();
+    mut i: int = 0;
+    while i < 20 {
+        ints.put(i, i * 2);
+        i = i + 1;
+    }
+    test::assert(ints.length() == 20, "");
+    test::assert(ints.get(19) == 38, "");
+
+    // int -> double instantiation, exercising the double-erasure argument-
+    // passing path (see 10_generic_double_erasure.tr for the dedicated,
+    // narrower regression covering the exact bug this once crashed on).
+    mut prices: Map<int, double> = Map::default();
+    prices.put(1, 1.5);
+    prices.put(2, 2.75);
+    test::assert(prices.get(1) == 1.5, "");
+    test::assert(prices.get(2) == 2.75, "");
+
+    io::printline("map ok");
+    return 0;
+}

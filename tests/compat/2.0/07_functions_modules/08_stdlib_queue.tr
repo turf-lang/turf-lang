@@ -1,0 +1,36 @@
+// Regression test: lib/std/queue.tr (Queue<T>), imported and exercised
+// end-to-end, including the compaction/growth branch. See
+// 06_stdlib_list.tr's doc comment for the cross-module struct-method-
+// resolution bug this (and the whole rewrite) was blocked on.
+
+import queue::Queue;
+import io;
+
+import test;
+fn main(): int {
+    mut q: Queue<int> = Queue::default();
+    q.enqueue(1);
+    q.enqueue(2);
+    q.enqueue(3);
+    test::assert(q.length() == 3, "");
+    test::assert(q.peek() == 1, "");
+    test::assert(q.dequeue() == 1, "");
+    test::assert(q.dequeue() == 2, "");
+    test::assert(q.length() == 1, "");
+
+    // head is now 2, len is 1 -- enqueue past capacity to exercise both the
+    // "compact to front" and "grow" branches of Queue.enqueue().
+    q.enqueue(4);
+    q.enqueue(5);
+    q.enqueue(6);
+    q.enqueue(7);
+    q.enqueue(8);
+    q.enqueue(9);
+    q.enqueue(10);
+    test::assert(q.length() == 8, "");
+    test::assert(q.dequeue() == 3, "");
+    test::assert(q.dequeue() == 4, "");
+
+    io::printline("queue ok");
+    return 0;
+}

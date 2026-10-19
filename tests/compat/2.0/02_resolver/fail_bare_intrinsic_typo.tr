@@ -1,0 +1,18 @@
+// EXPECT-DIAG: E041
+// EXPECT-DIAG: 'assert(bool cond) -> void'
+// Regression test (was DISCOVERED_ISSUES.md #8): a typo'd bare language
+// intrinsic (assert, fail, typeof — callable without a module qualifier)
+// must get a real "did you mean" suggestion, not a bare "Unknown function"
+// with zero candidates.
+//
+// The original gap was that intrinsics don't exist as SymbolTable entries
+// (they're recognized via LookupBuiltin(), not registered as callable
+// symbols), so the typo corrector's SymbolTable-only candidate search never
+// saw them. Re-verified fixed: misspelling 'assert' as 'asert' now gets a
+// direct 'test::assert(...)' suggestion.
+import test;
+
+fn main(): int {
+    asert(1 == 1);
+    return 0;
+}

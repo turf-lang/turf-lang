@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E009
+// EXPECT-DIAG: promises to give back a result
+// A function that declares `: int` must return on EVERY path. The `if` below
+// returns; falling out of its end does not.
+fn sign(x: int): int {
+    if x > 0 {
+        return 1;
+    }
+}
+
+fn main(): int {
+    return sign(1);
+}

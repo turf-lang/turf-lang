@@ -1,0 +1,10 @@
+// Companion for fail_private_in_public_param.tr: a `pub` function with a
+// PARAMETER of a private enum of this module.
+enum Mode { Fast, Slow }
+
+pub fn start(m: Mode): int {
+    if (m == Mode::Fast) {
+        return 1;
+    }
+    return 2;
+}

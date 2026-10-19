@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E061
+// EXPECT-DIAG: Cannot assign to this expression
+// Negative test: prefix ++/-- on a non-lvalue operand is a clean
+// InvalidAssignmentTargetError at TypeCheck time now (LANG-001 follow-up
+// lifted the old "must be a bare identifier" PARSE-time restriction, which
+// used to reject this earlier and more bluntly, as "Expected identifier
+// after prefix ++ or --").
+fn main(): int {
+    mut a: int = 1;
+    mut b: int = 2;
+    ++(a + b);
+    return 0;
+}

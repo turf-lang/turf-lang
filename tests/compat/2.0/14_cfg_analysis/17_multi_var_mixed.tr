@@ -1,0 +1,20 @@
+// Regression test (#186): complex mix of used/unused variables.
+// `a` is used (returned). `b` is written then overwritten → dead store on init.
+// `c` is declared but never read → unused variable warning.
+// `d` is used in computation of `a` → no warning.
+import test;
+
+fn compute(x: int): int {
+    mutable a: int = 0;
+    mutable b: int = 99;
+    mutable c: int = 42;
+    mutable d: int = x + 1;
+    b = x * 2;
+    a = d + b;
+    return a;
+}
+fn main(): int {
+    mutable r: int = compute(3);
+    test::assert(r == 10, "compute(3) = (3+1) + (3*2) = 10");
+    return 0;
+}

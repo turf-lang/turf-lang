@@ -1,0 +1,8 @@
+// EXPECT-DIAG: E064
+// EXPECT-DIAG: gives back no value
+// REL-004 (fuzzer): `return;` in a function that returns `int` passed the type
+// checker and Codegen emitted `ret void` in an i64 function, so the compiler
+// stopped with "Internal compiler error: generated LLVM IR is invalid".
+fn main(): int {
+    return;
+}

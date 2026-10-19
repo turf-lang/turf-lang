@@ -1,0 +1,24 @@
+// EXPECT-DIAG: E086
+// EXPECT-DIAG: can't be stored in an error payload
+// An error value's payload is copied into a heap block so the error can be
+// returned; `&n` in it points into a frame that is gone by the time the
+// caller matches the error (owner decision 2026-10-12, found by turf-fuzz).
+// A payload reference to the caller's own object is fine: see
+// escape_error_payload_param_ok.tr.
+struct N { val: int, next: &?N }
+
+error E1 {
+    P(r: &N),
+    Q
+}
+
+fn f(): !int {
+    mut n: N = N::default();
+    n.val = 42;
+    return E1::P(&n);
+}
+
+fn main(): int {
+    mut v: int = f() recover produce 0;
+    return v;
+}

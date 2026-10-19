@@ -1,0 +1,25 @@
+// The built-ins are unchanged when no declared function takes the name: the
+// tag the Resolver sets is what routes these calls, so this guards that the
+// route still exists.
+
+import test;
+
+struct Pair {
+    a: int,
+    b: int,
+}
+
+fn box_pair(a: int, b: int): &Pair {
+    mut p: Pair = Pair::default();
+    p.a = a;
+    p.b = b;
+    return heap(p);
+}
+
+fn main(): int {
+    immut p: &Pair = box_pair(1, 2);
+    test::assert(p.a == 1 && p.b == 2, "heap() boxes a value");
+    test::assert(typeof(42) == "int", "typeof() names a type");
+    gc_collect();
+    return 0;
+}

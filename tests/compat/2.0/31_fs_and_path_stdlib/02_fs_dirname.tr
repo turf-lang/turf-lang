@@ -1,0 +1,15 @@
+// tests/31_fs_and_path_stdlib/02_fs_dirname.tr
+// Tests fs::dirname -- everything before the last '/', "." when there's no
+// '/' at all, and "/" for a root-level path.
+
+import fs;
+import test;
+
+fn main(): int {
+    test::assert_eq(fs::dirname("a/b/c.txt"), "a/b", "dirname: realistic nested path");
+    test::assert_eq(fs::dirname("file.txt"), ".", "dirname: no '/' at all -> '.'");
+    test::assert_eq(fs::dirname("/file.txt"), "/", "dirname: root-level path -> '/'");
+    test::assert_eq(fs::dirname(".gitignore"), ".", "dirname: hidden-file-style name with no '/' -> '.'");
+
+    return 0;
+}

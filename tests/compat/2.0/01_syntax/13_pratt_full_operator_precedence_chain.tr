@@ -1,0 +1,51 @@
+// Test: one long expression chaining operators from (nearly) every
+// precedence tier in a single statement, cross-checked against an
+// explicitly, fully-parenthesized rewrite of the SAME expression. If the
+// natural (unparenthesized) form and the hand-parenthesized form ever
+// disagree, some operator's precedence has silently shifted relative to
+// its neighbors.
+//
+// The expected values/groupings below were computed independently with a
+// small Python precedence-climbing evaluator built directly from
+// Parser.cpp's InitializePrecedence() table (kept in the PR description /
+// commit message, not in-repo -- this file only records the result), not
+// hand-arithmetic, specifically to avoid baking in a hand-calculation
+// mistake that both the "natural" and "expected" sides of the assertion
+// would share and that would then never be caught.
+//
+// `**` is deliberately left out of this particular chain: `**` always
+// produces a double (even for two int operands -- see visitBinary()'s
+// TOK_POWER branch), and mixing a double into a chain that also needs pure
+// int operands for the bitwise tier below would make the expression
+// impossible to write at all (bitwise operators require exactly `int`, not
+// `double`). `**`'s own precedence/associativity has dedicated coverage in
+// 11_pratt_power_associativity.tr instead.
+
+import test;
+
+fn main(): int {
+    // Spans: additive < bitwise-AND < bitwise-XOR < bitwise-OR < relational
+    // < equality < logical-AND < logical-OR (loosest to tightest, reading
+    // the parenthesization inside-out).
+    mut natural: bool = 1 + 2 * 3 & 15 << 1 ^ 6 | 1 < 10 == true && true || false;
+    mut expected: bool = ((((((((1 + (2 * 3)) & (15 << 1)) ^ 6) | 1) < 10) == true) && true) || false);
+    test::assert(natural == expected, "full operator chain must match its fully-parenthesized equivalent");
+    test::assert(natural == true, "full operator chain's computed value should be true");
+
+    // A second, independent chain spanning logical OR/AND and relational
+    // comparisons (no bitwise operators this time, so no int-purity
+    // constraint to work around).
+    mut natural2: bool = 5 > 3 && 2 < 4 || false && true;
+    mut expected2: bool = ((5 > 3) && (2 < 4)) || (false && true);
+    test::assert(natural2 == expected2, "OR/AND/relational chain must match its fully-parenthesized equivalent");
+    test::assert(natural2 == true, "OR/AND/relational chain's computed value should be true");
+
+    // Multiplicative vs. exponentiation boundary (not covered by
+    // 08_bitwise_precedence.tr, which only checks arithmetic vs. bitwise):
+    // `*` must bind LOOSER than `**`, so `2 * 3 ** 2` means `2 * (3 ** 2)`
+    // == 18, not `(2 * 3) ** 2` == 36.
+    mut mulPow: double = 2.0 * 3.0 ** 2.0;
+    test::assert(mulPow == 18.0, "2 * 3 ** 2 should mean 2 * (3 ** 2) == 18, not (2 * 3) ** 2 == 36");
+
+    return 0;
+}

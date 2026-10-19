@@ -1,0 +1,18 @@
+// Test: Array of enums
+import test;
+
+enum Status { Pending, Active, Done, Cancelled }
+
+fn main(): int {
+    immut statuses: Status[4] = [Status::Pending, Status::Active, Status::Done, Status::Cancelled];
+
+    test::assert((statuses[0] to int) == 0, "statuses[0] == Pending");
+    test::assert((statuses[1] to int) == 1, "statuses[1] == Active");
+    test::assert((statuses[2] to int) == 2, "statuses[2] == Done");
+    test::assert((statuses[3] to int) == 3, "statuses[3] == Cancelled");
+
+    test::assert(statuses[0] == Status::Pending,   "Index 0 is Pending");
+    test::assert(statuses[2] == Status::Done,      "Index 2 is Done");
+    test::assert(statuses[1] != Status::Cancelled, "Index 1 is not Cancelled");
+    return 0;
+}

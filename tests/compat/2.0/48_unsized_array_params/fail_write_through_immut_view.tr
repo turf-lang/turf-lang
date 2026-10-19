@@ -1,0 +1,9 @@
+// EXPECT-DIAG: E060
+// EXPECT-DIAG: You can't change the value of 'v' because it's immutable.
+// An `immut` view is read-only, even when the array it views is `mut`.
+fn main(): int {
+    mut a: int[3] = [1, 2, 3];
+    immut v = a[1..];
+    v[0]++;
+    return a[1];
+}

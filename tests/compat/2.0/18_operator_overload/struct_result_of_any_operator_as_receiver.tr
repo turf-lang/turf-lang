@@ -1,0 +1,43 @@
+// An overloaded operator's result has its declared type whatever the symbol.
+// `(a & b).x` (also `| ^ << >> **`) was an internal error, because Codegen
+// took every `&` to produce an `int`; `+ - %` happened to work.
+
+import test;
+
+struct V {
+    x: int
+}
+
+fn v(x: int): V {
+    mut r: V = V::default();
+    r.x = x;
+    return r;
+}
+
+operator &(a: V, b: V): V { return v(a.x & b.x); }
+operator |(a: V, b: V): V { return v(a.x | b.x); }
+operator ^(a: V, b: V): V { return v(a.x ^ b.x); }
+operator <<(a: V, n: int): V { return v(a.x << n); }
+operator >>(a: V, n: int): V { return v(a.x >> n); }
+operator **(a: V, n: int): V { return v(a.x ** n); }
+operator ~(a: V): V { return v(~a.x); }
+operator -(a: V): V { return v(-a.x); }
+
+fn V.get(): int {
+    return self.x;
+}
+
+fn main(): int {
+    mut a: V = v(6);
+    mut b: V = v(3);
+    test::assert((a & b).x == 2, "&");
+    test::assert((a | b).x == 7, "|");
+    test::assert((a ^ b).x == 5, "^");
+    test::assert((a << 1).x == 12, "<<");
+    test::assert((a >> 1).x == 3, ">>");
+    test::assert((a ** 2).x == 36, "**");
+    test::assert((~a).x == -7, "~");
+    test::assert((-a).get() == -6, "unary - as a method receiver");
+    test::assert((a & b).get() == 2, "& as a method receiver");
+    return 0;
+}

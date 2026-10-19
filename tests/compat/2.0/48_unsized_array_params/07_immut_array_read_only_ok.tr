@@ -1,0 +1,50 @@
+// Issue #260: E141 refuses an `immut` array only when the callee really
+// writes through its slice. Reading -- directly, through a function the slice
+// is handed on to, or in a recursive function -- stays legal, and so does
+// changing a local copy of an element or writing a different, local array.
+// EXPECT-NO-DIAG: E141
+import test;
+
+fn sum(arr: int[]): int {
+    mut t: int = 0;
+    for v in arr {
+        t += v;
+    }
+    return t;
+}
+
+fn sum_via(arr: int[]): int {
+    return sum(arr);
+}
+
+// Recursion: the cycle itself never writes, so it must not count as one.
+fn sum_from(arr: int[], i: int): int {
+    if i >= arr.length() {
+        return 0;
+    }
+    return arr[i] + sum_from(arr, i + 1);
+}
+
+fn copy_then_change(arr: int[]): int {
+    mut first: int = arr[0];
+    first += 98;
+    return first;
+}
+
+// Writing a different, local array is not writing `arr`.
+fn writes_a_local(arr: int[]): int {
+    mut local: int[2];
+    local[0] = arr[0];
+    return local[0] + arr[1];
+}
+
+fn main(): int {
+    immut a: int[3] = [1, 2, 3];
+    test::assert(sum(a) == 6, "read-only call");
+    test::assert(sum_via(a) == 6, "read-only call through another function");
+    test::assert(sum_from(a, 0) == 6, "recursive read-only call");
+    test::assert(copy_then_change(a) == 99, "writing a copy of an element");
+    test::assert(writes_a_local(a) == 3, "writing a different, local array");
+    test::assert(a[0] == 1, "a is unchanged");
+    return 0;
+}

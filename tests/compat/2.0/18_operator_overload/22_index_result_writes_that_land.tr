@@ -1,0 +1,97 @@
+// LEC-006: `x[i]` through an index operator returns the element BY VALUE, so a
+// write into a field of it, or a method that changes its receiver, would only
+// change a copy -- those are E098 (the fail_index_result_*.tr tests). This file
+// pins the other side: every write that DOES reach real storage keeps working,
+// so the rule stays "reject the lost write", not "reject writes near an index".
+import list::List;
+import map::Map;
+import test;
+
+struct Inner {
+    a: int
+}
+
+fn Inner.new(a: int): void {
+    self.a = a;
+}
+
+struct Big {
+    a: int,
+    inner: Inner,
+    arr: int[3]
+}
+
+fn Big.new(a: int): void {
+    self.a = a;
+    self.inner = Inner::new(0);
+    self.arr = [0, 0, 0];
+}
+
+fn Big.bump(): void {
+    self.a = self.a + 1;
+}
+
+struct Node {
+    v: int
+}
+
+fn Node.new(v: int): void {
+    self.v = v;
+}
+
+fn Node.bump(): void {
+    self.v = self.v + 1;
+}
+
+fn main(): int {
+    // The read-modify-write pattern the E098 hint recommends.
+    mut bs: List<Big> = List::default();
+    bs.push(Big::new(1));
+    mut e: Big = bs[0];
+    e.a = 50;
+    bs[0] = e;
+    test::assert(bs[0].a == 50, "read-modify-write through a variable");
+
+    // An ordinary variable, nested fields, a builtin array field, a mutating
+    // method: none of these is an index result.
+    mut b: Big = Big::new(1);
+    b.a = 2;
+    b.inner.a = 3;
+    b.arr[1] = 4;
+    b.bump();
+    b.a += 1;
+    b.a++;
+    test::assert(b.a == 5 && b.inner.a == 3 && b.arr[1] == 4, "plain variable writes");
+
+    // A REFERENCE element is written through, so the element is not a copy.
+    mut nodes: List<&Node> = List::default();
+    nodes.push(heap(Node::new(1)));
+    nodes[0].v = 10;
+    nodes[0].bump();
+    nodes[0].v += 1;
+    test::assert(nodes[0].v == 12, "writes through reference elements land");
+
+    // The grid pattern: List's `[]=` takes the header by value but writes
+    // through the shared buffer, so the inner write reaches the real row.
+    mut grid: List<List<int>> = List::default();
+    mut row: List<int> = List::default();
+    row.push(0);
+    grid.push(row);
+    grid[0][0] = 9;
+    test::assert(grid[0][0] == 9, "grid[i][j] = v");
+    test::assert(row[0] == 9, "the row is the same storage");
+
+    // A collection element is a handle (LEC-009, F-COLL-1), so a method that
+    // changes it changes the shared header, not the copy `[]` returned. This
+    // was E098 while a List was copied by value and the push was lost.
+    grid[0].push(5);
+    test::assert(grid[0].length() == 2 && grid[0][1] == 5, "grid[i].push(v)");
+    test::assert(row.length() == 2, "the push reached the row itself");
+
+    // Same through a Map's value.
+    mut m: Map<string, List<int>> = Map::default();
+    m["k"] = row;
+    m["k"][0] = 7;
+    test::assert(m["k"][0] == 7, "m[k][i] = v");
+    return 0;
+}

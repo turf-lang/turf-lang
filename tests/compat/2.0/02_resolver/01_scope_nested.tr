@@ -1,0 +1,28 @@
+import test;
+
+fn main(): int {
+    mut x: int = 1;
+    test::assert(x == 1, "x scope");
+
+    if (x > 0) {
+        mut y: int = 2;
+        test::assert(x == 1, "outer x accessible in inner");
+        test::assert(y == 2, "y scope");
+
+        if (y > 0) {
+            mut z: int = 3;
+            test::assert(x == 1, "outermost x accessible");
+            test::assert(y == 2, "outer y accessible");
+            test::assert(z == 3, "z scope");
+        } else {
+            test::assert(false, "Unreachable");
+        }
+        test::assert(y == 2, "y still accessible after inner block");
+    } else {
+        test::assert(false, "Unreachable");
+    }
+
+    test::assert(x == 1, "x still accessible at end");
+
+    return 0;
+}

@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E027
+// EXPECT-DIAG: Could not find module 'this_module_does_not_exist'
+// Regression test: `import somemod::something;` (the ON-DEMAND symbol form,
+// not the bare form) where somemod.tr doesn't exist must fail with the same
+// clean ModuleNotFoundError as the bare form -- the module-existence check
+// must happen before any attempt to look up the requested symbol inside it.
+
+import this_module_does_not_exist::something;
+
+fn main(): int {
+    return 0;
+}

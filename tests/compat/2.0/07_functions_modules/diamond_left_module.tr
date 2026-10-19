@@ -1,0 +1,7 @@
+// Companion module for diamond_import_no_false_cycle.tr. See that file's
+// doc comment.
+import diamond_shared_module;
+
+pub fn leftValue(): int {
+    return 1;
+}

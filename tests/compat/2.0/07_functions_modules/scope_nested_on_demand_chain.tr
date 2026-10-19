@@ -1,0 +1,17 @@
+// Regression test: a 3-deep chain of modules, each linking to the next via
+// its OWN on-demand single-symbol import (written inside that module's own
+// file, not the top-level user file) -- exercises
+// Resolver::registerOnDemandImports()'s ContextLabel being correctly the
+// ENCLOSING module at each level of hoistModuleBody()'s recursion, not
+// accidentally the main file or the wrong nesting level. Explicitly called
+// out as untested territory in this project's own history (see
+// hoistModuleBody()'s doc comment on the enum-hoisting gap that was found
+// the same way).
+
+import nested_chain_a_module::aFunc;
+
+import test;
+fn main(): int {
+    test::assert(aFunc() == 102, "3-deep nested on-demand import chain resolves correctly");
+    return 0;
+}

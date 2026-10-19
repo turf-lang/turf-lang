@@ -1,0 +1,1 @@
+panic: runtime check: Runtime Error: Invalid int to enum conversion. (fail_runtime_int_to_enum_out_of_range.tr:18)

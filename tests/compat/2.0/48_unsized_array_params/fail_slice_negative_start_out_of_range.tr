@@ -1,0 +1,8 @@
+// EXPECT-DIAG: E143
+// EXPECT-DIAG: The slice [-4..] of 'int[3]' is out of range: the start is outside 0..3.
+// A negative bound counts from the end and stops at -length, like an index.
+fn main(): int {
+    immut a: int[3] = [1, 2, 3];
+    immut t = a[-4..];
+    return t.length();
+}

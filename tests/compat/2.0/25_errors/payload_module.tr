@@ -1,0 +1,24 @@
+// Companion for 29_payload_across_modules.tr (no main(): the `_module.tr` suffix
+// keeps test_runner.sh from running it on its own).
+pub struct Where {
+    pub file: string,
+    pub line: int
+}
+
+pub error ParseFailure {
+    Syntax(at: Where, expected: string),
+    Eof
+}
+
+pub fn mkwhere(file: string, line: int): Where {
+    mut w: Where = Where::default();
+    w.file = file;
+    w.line = line;
+    return w;
+}
+
+pub fn parse(n: int): !int {
+    if n == 0 { return ParseFailure::Syntax(mkwhere("in.tr", 12), "a number"); }
+    if n == 1 { return ParseFailure::Eof; }
+    return n;
+}

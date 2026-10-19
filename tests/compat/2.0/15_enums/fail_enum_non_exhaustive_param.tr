@@ -1,0 +1,42 @@
+// EXPECT-DIAG: E093
+// EXPECT-DIAG: Non-exhaustive enum comparison on 'Direction'
+// Regression test: enum exhaustiveness must be enforced when the `compare`
+// subject is a FUNCTION PARAMETER, not just a local variable (see the
+// existing fail_enum_non_exhaustive.tr, which only covers the local-
+// variable case).
+//
+// Root cause: TypeChecker::visitCompare()'s `SubjectTy->isEnum()` check
+// used whatever type getType() returned for the subject expression
+// verbatim. For a local `mut`/`immut` variable, Resolver::visitVarDecl()
+// already corrects a NamedType("Direction") in that position to the real
+// TurfEnumType -- but a function PARAMETER's type is declared via a
+// separate path (Resolver::visitFuncDef()'s
+// `SymTable_.declareVariable(Param.Name, Param.Type, ...)`) that never
+// applies the same correction, since ParseType() always parses a bare
+// non-primitive type name as NamedType regardless of position. This meant
+// `SubjectTy->isEnum()` was UNCONDITIONALLY FALSE for any compare whose
+// subject is a function parameter -- an extremely common, idiomatic shape
+// -- which silently disabled the ENTIRE enum-exhaustiveness check for that
+// case: this exact program (missing East and West, no otherwise) compiled
+// with ZERO diagnostics before the fix.
+
+import io;
+
+enum Direction { North, East, South, West }
+
+fn describe(d: Direction): int {
+    compare d {
+        matches Direction::North:
+        return 1;
+        done
+        matches Direction::South:
+        return 2;
+        done
+    }
+    return 99;
+}
+
+fn main(): int {
+    io::printline(describe(Direction::East));
+    return 0;
+}

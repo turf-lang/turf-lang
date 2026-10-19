@@ -1,0 +1,93 @@
+// LEC-006: a user-declared generic operator on a user-declared generic
+// struct, through every operator form that resolves by operand type: binary,
+// the less-than operator written right after the type-parameter list
+// (`operator<T> <` -- the parser must not read that `<` as the start of a
+// second type-parameter list), unary `-` and `!`, compound assignment (which
+// desugars to `operator+`), and `++`/`--`. Each runs at two instantiations
+// (Cell<int>, Cell<string>) so a clone that was shared by mistake would show.
+import test;
+
+struct Cell<T> {
+    v: T,
+    n: int
+}
+
+fn<T> Cell.new(v: T): void {
+    self.v = v;
+    self.n = 1;
+}
+
+operator<T> ==(a: Cell<T>, b: Cell<T>): bool {
+    return a.n == b.n;
+}
+
+operator<T> !=(a: Cell<T>, b: Cell<T>): bool {
+    return a.n != b.n;
+}
+
+operator<T> < (a: Cell<T>, b: Cell<T>): bool {
+    return a.n < b.n;
+}
+
+// Mixed operands: the second is a plain int, not mentioned by T.
+operator<T> +(a: Cell<T>, k: int): Cell<T> {
+    mut r: Cell<T> = a;
+    r.n = a.n + k;
+    return r;
+}
+
+operator<T> -(a: Cell<T>, k: int): Cell<T> {
+    mut r: Cell<T> = a;
+    r.n = a.n - k;
+    return r;
+}
+
+// Unary: same spelling as the binary `-` above, told apart by arity.
+operator<T> -(a: Cell<T>): Cell<T> {
+    mut r: Cell<T> = a;
+    r.n = 0 - a.n;
+    return r;
+}
+
+operator<T> !(a: Cell<T>): bool {
+    return a.n == 0;
+}
+
+fn main(): int {
+    mut ci: Cell<int> = Cell::new(7);
+    mut cs: Cell<string> = Cell::new("s");
+
+    mut ci2: Cell<int> = ci + 4;
+    test::assert(ci2.n == 5, "Cell<int> + int");
+    mut cs2: Cell<string> = cs + 9;
+    test::assert(cs2.n == 10, "Cell<string> + int");
+    test::assert(cs2.v == "s", "the payload must survive the operator");
+
+    test::assert(ci != ci2, "Cell<int> != Cell<int>");
+    test::assert(ci == ci, "Cell<int> == Cell<int>");
+    test::assert(ci < ci2, "Cell<int> < Cell<int>");
+    test::assert(cs < cs2, "Cell<string> < Cell<string>");
+
+    mut neg: Cell<int> = -ci2;
+    test::assert(neg.n == -5, "unary - at Cell<int>");
+
+    mut zero: Cell<string> = cs - 1;
+    test::assert(!zero, "unary ! at Cell<string>, true");
+    test::assert(!(!cs), "unary ! at Cell<string>, false");
+
+    ci2 += 10;
+    test::assert(ci2.n == 15, "+= desugars through the generic operator+");
+    cs2 += 1;
+    test::assert(cs2.n == 11, "+= at Cell<string>");
+
+    mut p: Cell<string> = Cell::new("p");
+    p++;
+    test::assert(p.n == 2, "postfix ++");
+    mut old: Cell<string> = p++;
+    test::assert(old.n == 2 && p.n == 3, "postfix ++ yields the old value");
+    ++p;
+    test::assert(p.n == 4, "prefix ++");
+    p--;
+    test::assert(p.n == 3, "postfix --");
+    return 0;
+}

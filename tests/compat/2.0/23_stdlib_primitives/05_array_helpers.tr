@@ -1,0 +1,34 @@
+// lib/std/array.tr's UFCS helpers: sum/max/min/contains/index_of, each
+// overloaded per element type (int/double/string). Every function takes an
+// explicit length argument -- .length() on an unsized array parameter
+// cannot recover a caller's real length (Size == -1 is baked into the
+// parameter's static type), so there's no way around passing it explicitly.
+
+import test;
+
+fn main(): int {
+    mut ints: int[5] = [3, 1, 4, 1, 5];
+    mut ilen: int = 5;
+    mut four: int = 4;
+
+    test::assert_eq(ints.sum(ilen), 14, "sum([3,1,4,1,5]) == 14");
+    test::assert_eq(ints.max(ilen), 5, "max([3,1,4,1,5]) == 5");
+    test::assert_eq(ints.min(ilen), 1, "min([3,1,4,1,5]) == 1");
+    test::assert(ints.contains(ilen, four), "[3,1,4,1,5] contains 4");
+    test::assert_eq(ints.index_of(ilen, four), 2, "index_of(4) == 2");
+    test::assert_eq(ints.index_of(ilen, 0 - 1), 0 - 1, "index_of(missing) == -1");
+
+    mut doubles: double[3] = [1.5, 2.5, 0.5];
+    mut dlen: int = 3;
+    test::assert_eq(doubles.sum(dlen), 4.5, "sum([1.5,2.5,0.5]) == 4.5");
+    test::assert_eq(doubles.max(dlen), 2.5, "max([1.5,2.5,0.5]) == 2.5");
+    test::assert_eq(doubles.min(dlen), 0.5, "min([1.5,2.5,0.5]) == 0.5");
+
+    mut strs: string[3] = ["foo", "bar", "baz"];
+    mut slen: int = 3;
+    test::assert(strs.contains(slen, "bar"), "[foo,bar,baz] contains bar");
+    test::assert(!strs.contains(slen, "qux"), "[foo,bar,baz] does not contain qux");
+    test::assert_eq(strs.index_of(slen, "baz"), 2, "index_of(baz) == 2");
+
+    return 0;
+}

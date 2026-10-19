@@ -1,0 +1,28 @@
+// LEC-002 stage 5: the legal shapes of the private-in-public rule. A private
+// type may be used freely inside its module -- in private signatures, in
+// `pub` function bodies, as a private field, as the receiver of a `pub`
+// method -- so long as it never appears in a `pub` signature or `pub` field.
+import test;
+import private_in_public_allowed_module;
+
+// A main-file `pub` declaration over a main-file private type is not
+// checked at all: a single-file program has no importer to leak to.
+struct Local {
+    n: int
+}
+
+pub fn from_local(x: Local): int {
+    return x.n;
+}
+
+fn main(): int {
+    test::assert(private_in_public_allowed_module::compute(4) == 8, "pub fn using a private type inside");
+    test::assert(private_in_public_allowed_module::identity(5) == 5, "generic pub fn");
+    mut a: private_in_public_allowed_module::Open = private_in_public_allowed_module::make_open(2);
+    mut b: private_in_public_allowed_module::Open = private_in_public_allowed_module::make_open(3);
+    test::assert(private_in_public_allowed_module::open_sum(a, b) == 5, "pub fn over pub types");
+    mut l: Local = Local::default();
+    l.n = 7;
+    test::assert(from_local(l) == 7, "main-file pub over main-file private type");
+    return 0;
+}

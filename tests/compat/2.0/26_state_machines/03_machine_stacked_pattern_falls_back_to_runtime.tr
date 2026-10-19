@@ -1,0 +1,38 @@
+// Test: a stacked-pattern arm (`matches A: matches B: body done`) is a v1
+// scope limit -- MachineNarrowStack_ is only ever pushed for a SINGLE-pattern
+// arm, so a .transition() inside a stacked arm is left unnarrowed and falls
+// back to Codegen's ordinary runtime switch+panic guard. Must still behave
+// correctly (this is a fallback, not a rejection): valid edges from either
+// stacked state succeed.
+
+import test;
+
+machine ConnectionState {
+    Idle -> Connecting,
+    Connecting -> Connected,
+    Connecting -> Failed,
+    Connected -> Closing,
+    Closing -> Idle,
+}
+
+fn main(): int {
+    mut conn: ConnectionState = ConnectionState::Idle;
+
+    compare conn {
+        matches ConnectionState::Idle:
+        matches ConnectionState::Closing:
+        // Both Idle and Closing have a declared edge to Connecting only
+        // from Idle -- but since this arm is stacked (unnarrowed), the
+        // compiler can't statically know which state conn is actually
+        // in here, so this must be runtime-guarded, not compile-time-proven.
+        conn.transition(ConnectionState::Connecting);
+        done
+        otherwise:
+        mut noop: int = 0;
+    }
+
+    test::assert(conn == ConnectionState::Connecting,
+        "conn should now be Connecting (runtime guard's happy path)");
+
+    return 0;
+}

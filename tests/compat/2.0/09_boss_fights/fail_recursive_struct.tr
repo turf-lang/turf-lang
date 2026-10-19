@@ -1,0 +1,43 @@
+// EXPECT-DIAG: E134
+// EXPECT-DIAG: Cannot explicitly cast 'ptr' to 'Node'
+// EXPECT-NO-DIAG: Unsafe pointer use
+// Raw pointers need `unsafe { }` (issue #238), here around the struct with a
+// `ptr` field and around the body. Without it this test was rejected on its
+// first raw-pointer line (E130, "Unsafe pointer use!") and the cast it is named
+// for -- `ptr` to a struct -- was never checked: a wrong-reason pass.
+import test;
+
+extern fn malloc(size: int): ptr;
+
+unsafe {
+    struct Node {
+        val: int,
+        next: ptr
+    }
+}
+
+fn main(): int {
+    unsafe {
+        // Manually allocate two nodes
+        mut head: ptr = malloc(16); // 8 bytes for val, 8 bytes for next pointer
+        mut tail: ptr = malloc(16);
+
+        // To use struct fields on a pointer, we unfortunately must cast or use workarounds.
+        // Wait, Turf doesn't have a dereference operator for pointers to structs natively unless it's a method!
+        // Since we know issue 17 and pointer limitations, this test will attempt to cast ptr to Node and see if it crashes.
+        mut h: Node = head to Node;
+        mut t: Node = tail to Node;
+
+        h.val = 100;
+        h.next = tail; // Assign ptr to ptr
+
+        t.val = 200;
+        t.next = malloc(0); // Null pointer
+
+        // Traverse
+        mut check: Node = h.next; // Implicit cast from ptr to Node
+        test::assert(check.val == 200, "");
+    }
+
+    return 0;
+}

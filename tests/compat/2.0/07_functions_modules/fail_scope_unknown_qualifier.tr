@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E031
+// EXPECT-DIAG: 'nosuchmodule' isn't a known enum, struct, or module
+// Regression test: `Left::Right` where `Left` names neither a known enum, a
+// known struct, nor a known (imported) module must be a clean
+// UnknownScopeQualifierError, not an internal compiler error or a silent
+// pass-through to Codegen. See fail_scope_operator_on_instance_*.tr for the
+// DIFFERENT, more specific error raised when Left is a real declared
+// variable instead of a genuinely unknown name.
+
+fn main(): int {
+    nosuchmodule::foo();
+    return 0;
+}

@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E040
+// EXPECT-DIAG: I can't find anything named 'x'
+// LEC-003: a binding is scoped to its arm. Expected: E040.
+struct P { x: int }
+fn main(): int {
+    mut p: P = P::default();
+    compare p {
+        matches P { x }: return 1; done
+        otherwise: return x;
+    }
+}

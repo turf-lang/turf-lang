@@ -1,0 +1,28 @@
+// OPT-002: the remaining checked-arithmetic shapes markElidableChecks() can
+// prove safe -- '<<' (EmitCheckedShl), unary '-' (EmitCheckedIntNegate),
+// CompoundAssignmentExprAST ('+='), and PostfixExprAST ('++') -- each has
+// its own independent codegen path (CodegenCore.cpp/CodegenExpr.cpp/
+// CodegenVar.cpp) and so needed its own elision wiring. Same intent as
+// 01_bounds_and_overflow_elided_still_correct.tr: prove elision never
+// changes the computed value.
+import test;
+
+fn main(): int {
+    mut x: int = 4;
+    mut sh: int = x << 2;
+    test::assert(sh == 16, "elided '<<' must still compute the right value");
+
+    mut n: int = 5;
+    mut neg: int = -n;
+    test::assert(neg == -5, "elided unary '-' must still compute the right value");
+
+    mut c: int = 10;
+    c += 5;
+    test::assert(c == 15, "elided '+=' must still compute the right value");
+
+    mut p: int = 20;
+    p++;
+    test::assert(p == 21, "elided postfix '++' must still compute the right value");
+
+    return 0;
+}

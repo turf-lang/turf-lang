@@ -1,0 +1,22 @@
+// LEC-006: a generic operator declared in another module. Operator
+// visibility is by operand type, so importing the struct is enough -- and the
+// instantiated clone (`Wrap<string> + int`) must keep resolving the declaring
+// module's PRIVATE helper `bump()` from its body, which this file could never
+// call directly. Two instantiations, to catch two modules' clones colliding
+// on one symbol name.
+import generic_operator_module::Wrap;
+import test;
+
+fn main(): int {
+    mut a: Wrap<int> = Wrap::new(5);
+    mut b: Wrap<string> = Wrap::new("hi");
+
+    mut a2: Wrap<int> = a + 10;
+    mut b2: Wrap<string> = b + 20;
+    test::assert(a2.n == 11, "Wrap<int> + int, through a private helper");
+    test::assert(b2.n == 21, "Wrap<string> + int, through a private helper");
+
+    test::assert(a2[0] == 5, "Wrap<int>[0]");
+    test::assert(b2[0] == "hi", "Wrap<string>[0]");
+    return 0;
+}

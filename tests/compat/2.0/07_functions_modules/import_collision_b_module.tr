@@ -1,0 +1,5 @@
+// Companion module for fail_import_symbol_collision.tr. See
+// import_collision_a_module.tr's doc comment.
+pub fn shared(): int {
+    return 2;
+}

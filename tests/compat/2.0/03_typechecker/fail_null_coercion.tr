@@ -1,0 +1,6 @@
+// EXPECT-DIAG: E062
+fn main(): int {
+    // null should only be compatible with pointers/strings
+    mut x: int = null;
+    return 0;
+}

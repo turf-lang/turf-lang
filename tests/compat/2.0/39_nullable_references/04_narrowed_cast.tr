@@ -1,0 +1,33 @@
+// LANG-002: the ONLY way a `&?T` ever becomes a `&T` -- an explicit `to`
+// cast, legal without `unsafe` (neither side is a raw pointer), but only
+// where NullabilityPass has proven the operand non-null. See
+// TurfNullableReferenceType's doc comment (Types.h) for why typesCompatible()
+// itself never grants this implicitly.
+import test;
+
+struct Box {
+    val: int
+}
+
+fn takesSafeRef(b: &Box): int {
+    return b.val;
+}
+
+fn narrowThenCast(b: &?Box): int {
+    if (b != null) {
+        mut safe: &Box = b to &Box;
+        return takesSafeRef(safe);
+    }
+    return -1;
+}
+
+fn main(): int {
+    mut box: Box = Box::default();
+    box.val = 99;
+    mut none: &?Box = null;
+
+    test::assert(narrowThenCast(&box) == 99, "a narrowed &?T casts to &T and is usable");
+    test::assert(narrowThenCast(none) == -1, "an unnarrowable null never reaches the cast");
+
+    return 0;
+}

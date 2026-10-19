@@ -1,0 +1,17 @@
+// EXPECT-DIAG: E056
+// EXPECT-DIAG: No overload of 'f' matches argument types ((&N)[1])
+// A `(&?N)[]` parameter views the caller's array. Viewing a `(&N)[1]` that way
+// would let the callee store null into an array whose elements can't be null,
+// so only a literal (a fresh value) widens to `&?N` elements.
+struct N { val: int }
+
+fn f(xs: (&?N)[]): int {
+    xs[0] = null;
+    return 0;
+}
+
+fn main(): int {
+    mut n: N = N::default();
+    mut a: (&N)[1] = [heap(n)];
+    return f(a);
+}

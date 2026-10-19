@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: '@ownership' needs an argument
+// A bare `@ownership` says nothing, so it is rejected instead of being a no-op.
+
+@ownership
+extern fn make(): int*;
+
+fn main(): int {
+    return 0;
+}

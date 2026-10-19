@@ -1,0 +1,21 @@
+import io;
+
+import test;
+fn main(): int {
+    mut x: int = 9;
+    mut result: int = 0;
+
+    if x > 10 {
+        result = 3;
+    } elseif x > 5 {
+        result = 2;
+    } elseif x > 0 {
+        result = 1;
+    } else {
+        result = -1;
+    }
+
+    test::assert(result == 2, "");
+
+    return 0;
+}

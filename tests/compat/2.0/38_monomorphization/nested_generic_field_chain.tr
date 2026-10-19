@@ -1,0 +1,70 @@
+// Regression test: OVH-007 (docs/planning/OVERHAUL_REMAINING_WORK.md) --
+// chained field access through a nested generic struct field.
+//
+// Root cause: Codegen has its OWN, independent type-inference function,
+// getExprType() (CodegenCore.cpp), separate from the TypeChecker's own
+// (already-correct) inference. getExprType()'s FieldAccess case recovers a
+// generic struct's own type-parameter substitution (T -> int, for a
+// `Box<int>`-typed base) by scanning the struct's fields for a
+// TurfGenericParamType/NamedType/pointer/array shape and rebuilding the
+// field's type through that substitution -- but had no case at all for a
+// field whose OWN declared type is ANOTHER generic instantiation
+// (`struct Box<T> { inner: Pair<T, T> }`), so `b.inner`'s type came back as
+// the literal, still-open `Pair<T, T>` instead of `Pair<int, int>`.
+// `b.inner.a`'s own FieldAccessExprAST::codegenLValue() then tried to
+// resolve `Pair<T, T>` to a real registered clone via its mangled
+// instantiation name -- built from the UNSUBSTITUTED `T, T` -- which
+// matches nothing the monomorphizer ever actually registered (it registers
+// `Pair<int, int>`, not `Pair<T, T>`), so the lookup failed and fell
+// through to "Cannot access field on non-struct type".
+//
+// Verified live before this fix:
+// ```turf
+// struct Pair<A, B> { a: A, b: B }
+// struct Box<T> { inner: Pair<T, T> }
+// fn main(): int { mut b: Box<int> = Box::default(); b.inner.a = 3; return b.inner.a - 3; }
+// // error: Cannot access field on non-struct type
+// ```
+// Going through a local (`mut p: Pair<int, int> = b.inner; p.a = 3;`)
+// already worked -- the bug was specifically in resolving the type of
+// `b.inner` when it is itself used as the BASE of a further field access.
+import test;
+
+struct Pair<A, B> { a: A, b: B }
+struct Box<T> { inner: Pair<T, T> }
+struct Wrap<T> { boxed: Box<T> }
+
+fn<T> Box.getA(): T { return self.inner.a; }
+fn<T> Box.setA(v: T): void { self.inner.a = v; }
+
+fn main(): int {
+    mut b: Box<int> = Box::default();
+
+    // Read through a chained field access.
+    b.inner.a = 3;
+    test::assert(b.inner.a == 3, "b.inner.a should read back 3 after a direct write");
+
+    // Write the OTHER field of the same nested struct.
+    b.inner.b = 7;
+    test::assert(b.inner.b == 7, "b.inner.b should read back 7");
+    test::assert(b.inner.a == 3, "b.inner.a should be unaffected by writing b.inner.b");
+
+    // Compound-assign through the chain.
+    b.inner.a += 10;
+    test::assert(b.inner.a == 13, "b.inner.a += 10 should update through the chain");
+
+    // Three levels deep (Wrap<int> -> Box<int> -> Pair<int,int> -> int).
+    mut w: Wrap<int> = Wrap::default();
+    w.boxed.inner.a = 42;
+    test::assert(w.boxed.inner.a == 42, "three-level chained write should read back correctly");
+    w.boxed.inner.a += 1;
+    test::assert(w.boxed.inner.a == 43, "three-level chained compound-assign should update correctly");
+
+    // Through a method's own `self` -- both a read and a write.
+    mut b2: Box<int> = Box::default();
+    b2.setA(5);
+    test::assert(b2.getA() == 5, "Box<int>.setA(5) then .getA() should round-trip through self.inner.a");
+    test::assert(b2.inner.a == 5, "the write through self.inner.a should be externally visible too");
+
+    return 0;
+}

@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E114
+// EXPECT-DIAG: already has a variant named 'DivisionByZero'
+// Test (fail): duplicate variant name within one error type must be rejected
+// at parse time, mirroring ParseEnumDecl's identical duplicate-variant check.
+error MathError {
+    DivisionByZero,
+    Overflow,
+    DivisionByZero,
+}
+
+fn main(): int {
+    return 0;
+}

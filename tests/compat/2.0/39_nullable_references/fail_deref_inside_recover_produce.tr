@@ -1,0 +1,18 @@
+// EXPECT-DIAG: E081
+// The `recover produce` value is checked too: `p.val` here dereferences a
+// `&?T` nothing has narrowed. It used to compile clean, like the `recover run`
+// block form (fail_deref_inside_recover_block.tr).
+struct Node { val: int }
+
+fn g(): !int {
+    return 1;
+}
+
+fn f(p: &?Node): int {
+    mut v: int = g() recover produce p.val;
+    return v;
+}
+
+fn main(): int {
+    return 0;
+}

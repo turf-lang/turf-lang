@@ -1,0 +1,25 @@
+// EXPECT-NO-DIAG: dead store
+// EXPECT-NO-DIAG: never used
+// A `defer`'s statement runs when its block exits, so liveness counts it
+// there, not where it is written. While it counted at its site, `defer
+// r = 0;` looked like a write that kills `r` before `out = r` reads it, and
+// the `= 7` initializer was reported as a dead store, though `out = r` reads
+// exactly that 7. Every store here is read: 7 by `out = r`, the deferred 0
+// by the return after the block.
+
+import test;
+
+fn scoped(): int {
+    mut r: int = 7;
+    mut out: int;
+    unsafe {
+        defer r = 0;
+        out = r;
+    }
+    return out * 10 + r;
+}
+
+fn main(): int {
+    test::assert(scoped() == 70, "out read 7, then the block's defer set r to 0");
+    return 0;
+}

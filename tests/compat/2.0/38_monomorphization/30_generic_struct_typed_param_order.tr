@@ -1,0 +1,47 @@
+// Regression test: SMP-002 (one shared generic-type walker, TypeWalk.h).
+// A generic free function taking a GENERIC-STRUCT-typed parameter
+// (`fn<T> unwrap(b: Box<T>): T`), called at two DIFFERENT type arguments,
+// used to collapse both call sites into ONE bogus monomorphization request
+// -- the order-recovery walk this file's own visitFuncCall() uses to build
+// a canonical, ORDERED type-argument tuple (TypeCheckerCall.cpp's old
+// collectGenericParamNameOrder(), replaced by TypeWalk::collectParamOrder())
+// had no `GenericType` case at all, unlike its sibling (the substitution-
+// COLLECTING walk, old collectGenericSubstitution(), now TypeWalk::unify())
+// which always did. So `unwrap(boxOfInt)` and `unwrap(boxOfDouble)` both
+// recovered an EMPTY ordered-type-argument list for their `Box<T>`
+// parameter (even though `Subst` itself correctly held `T=int`/`T=double`
+// from `unify()`), and both requests collapsed to the identical bogus key
+// `unwrap<>` (no type arguments) -- one instantiation cache entry serving
+// two call sites that need two DIFFERENT clones.
+//
+// Confirmed live against the pre-unification code (temporarily removing
+// TypeWalk::collectParamOrder()'s GenericType case reproduces it exactly):
+// `turf --dump-instantiations` reported a single merged `unwrap<>  (2 call
+// sites)` instead of two separate `unwrap<int>`/`unwrap<double>` entries,
+// and the merged clone's body failed to compile at all ("Cannot access
+// field on non-struct type" on `b.val`, since the wrong/no substitution
+// applied to its own `Box<T>` parameter type). See TypeWalk.h's
+// collectParamOrder() doc comment for the full mechanism.
+import test;
+
+struct Box<T> {
+    val: T
+}
+
+fn<T> unwrap(b: Box<T>): T {
+    return b.val;
+}
+
+fn main(): int {
+    mut bi: Box<int> = Box::default();
+    bi.val = 42;
+    mut bd: Box<double> = Box::default();
+    bd.val = 3.5;
+
+    mut r: int = unwrap(bi);
+    mut d: double = unwrap(bd);
+
+    test::assert(r == 42, "unwrap<int> instantiation gave the wrong value");
+    test::assert(d == 3.5, "unwrap<double> instantiation gave the wrong value");
+    return 0;
+}

@@ -1,0 +1,22 @@
+// EXPECT-DIAG: E036
+// EXPECT-DIAG: 'transition' target must be a state of 'ConnectionState', got 'TrafficLight'
+// Test: .transition()'s target must be a state of the SAME machine as the
+// receiver -- a state belonging to a totally different machine must be a
+// compile error (InvalidTransitionTargetError), not silently accepted.
+
+machine ConnectionState {
+    Idle -> Connecting,
+    Connecting -> Connected,
+}
+
+machine TrafficLight {
+    Red -> Green,
+    Green -> Yellow,
+    Yellow -> Red,
+}
+
+fn main(): int {
+    mut conn: ConnectionState = ConnectionState::Idle;
+    conn.transition(TrafficLight::Red);
+    return 0;
+}

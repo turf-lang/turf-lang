@@ -1,0 +1,43 @@
+// EXPECT-DIAG: identical_branches_any_statement.tr (3 warnings)
+// EXPECT-DIAG: Both branches of this 'if' do the same thing!
+// The identical-branches lint compares bodies of any statement: a call, a
+// return, an assignment. It recognized only expression shapes, so none of
+// these three was reported; the three pairs that differ are not.
+
+fn twice(c: bool, n: int): int {
+    mut t: int = n;
+    if c {
+        io::printline("x");
+    } else {
+        io::printline("x");
+    }
+    if c {
+        t = t * 2;
+    } else {
+        t = t * 2;
+    }
+    if c {
+        io::printline("x");
+    } else {
+        io::printline("y");
+    }
+    if c {
+        t += 1;
+    } else {
+        t -= 1;
+    }
+    if c {
+        printline(t);
+    } else {
+        io::printline(t to string);
+    }
+    if c {
+        return t + 1;
+    } else {
+        return t + 1;
+    }
+}
+
+fn main(): int {
+    return twice(true, 1) - 4;
+}

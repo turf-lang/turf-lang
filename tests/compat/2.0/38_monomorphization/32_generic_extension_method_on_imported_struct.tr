@@ -1,0 +1,43 @@
+// A generic method declared in THIS file on a generic struct imported from
+// the stdlib (`fn<T> List.lastOr(...)` on `list::List<T>`): a template the
+// monomorphizer clones once per instantiation, exactly like list.tr's own
+// methods. Used at two instantiations whose `T` has different sizes and
+// representations, so a shared or mis-substituted clone would read the
+// wrong element.
+//
+// The version WITHOUT `<T>` used to crash at its first call ("Internal
+// error: no generic method declaration found ... during monomorphization")
+// and is now rejected at the declaration --
+// fail_method_on_generic_struct_without_type_params.tr and
+// tests/07_functions_modules/fail_method_on_imported_generic_struct_without_type_params.tr.
+
+import test;
+import list::List;
+
+fn<T> List.lastOr(fallback: T): T {
+    if (self.length() == 0) {
+        return fallback;
+    }
+    return self.get(self.length() - 1);
+}
+
+fn<T> List.doubledLength(): int {
+    return self.length() * 2;
+}
+
+fn main(): int {
+    mut ints: List<int> = List::default();
+    test::assert(ints.lastOr(-1) == -1, "empty List<int> falls back");
+    ints.push(10);
+    ints.push(20);
+    test::assert(ints.lastOr(-1) == 20, "List<int> last element");
+    test::assert(ints.doubledLength() == 4, "List<int> method with no T in its signature");
+
+    mut strs: List<string> = List::default();
+    strs.push("a");
+    strs.push("b");
+    strs.push("c");
+    test::assert(strs.lastOr("none") == "c", "List<string> last element");
+    test::assert(strs.doubledLength() == 6, "List<string> second instantiation");
+    return 0;
+}

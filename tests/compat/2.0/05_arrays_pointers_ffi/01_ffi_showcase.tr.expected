@@ -1,0 +1,20 @@
+test
+Turflang FFI — Real-World Showcase
+
+=== File I/O ===
+
+=== Math (libm via extern from) ===
+
+=== Time ===
+
+=== Environment ===
+PATH is present at ptr: %p
+
+=== Strings + Memory ===
+
+=== Process Spawning ===
+
+=== Variadic printf ===
+%d: 42
+
+=== Socket FD ===

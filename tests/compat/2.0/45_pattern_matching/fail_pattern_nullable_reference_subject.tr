@@ -1,0 +1,15 @@
+// EXPECT-DIAG: E092
+// EXPECT-DIAG: can't destructure '&?P': the reference may be null
+// LEC-003: a `&?T` may be null; it is not destructured until null-tested.
+// Expected: E092.
+struct P { x: int }
+fn f(p: &?P): int {
+    compare p {
+        matches P { x }: return x; done
+        otherwise: return 0;
+    }
+}
+fn main(): int {
+    mut p: P = P::default();
+    return f(&p);
+}

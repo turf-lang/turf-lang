@@ -1,0 +1,15 @@
+// FREEZE.md 6.25: the price of "your declaration hides the prelude name". Once
+// this file declares ANY `max`, a bare `max(...)` looks only at the file's own
+// functions, so a call shaped for math's `max(double, double)` is reported
+// against YOUR `max` rather than quietly falling through. Write `math::max` to
+// reach the prelude's.
+// EXPECT-DIAG: E056
+// EXPECT-DIAG: No overload of 'max' matches argument types (double, double)
+fn max(a: int, b: int): int {
+    return a;
+}
+
+fn main(): int {
+    immut best: double = max(1.5, 0.5);
+    return 0;
+}

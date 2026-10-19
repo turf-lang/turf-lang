@@ -1,0 +1,36 @@
+// EXPECT-DIAG: E064
+// EXPECT-DIAG: Return type mismatch: function declares 'int' but returns 'string'
+// Test (fail): a `return` inside `recover run { ... }` diverges out of the
+// ENCLOSING function -- it is checked against THAT function's own declared
+// return type, never against the wrapped call's success type (there is no
+// rule requiring it to "return the success type"; only `recover produce`
+// has that requirement, since only `produce` actually produces a value for
+// the recover expression itself). Confirms the type check really does fire
+// against main's declared 'int', not against Point.
+error MyError {
+    Failed,
+}
+
+struct Point {
+    x: int,
+    y: int
+}
+
+fn Point.new(x: int, y: int): void {
+    self.x = x;
+    self.y = y;
+}
+
+fn makePoint(shouldFail: bool): !Point {
+    if (shouldFail) {
+        return MyError::Failed;
+    }
+    return Point::new(42, 7);
+}
+
+fn main(): int {
+    mut p: Point = makePoint(true) recover run {
+        return "not an int";
+    };
+    return 0;
+}

@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E128
+// EXPECT-DIAG: can only declare a local variable
+// F-GUESS-3: never for a return type. Before, the error was the misleading
+// "function declares 'guess' but returns 'int'".
+fn five(): guess {
+    return 5;
+}
+
+fn main(): int {
+    return 0;
+}

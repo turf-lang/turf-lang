@@ -1,0 +1,17 @@
+// EXPECT-DIAG: '/' with zero
+// LEC-005 / INV-LINT-1: `defer <stmt>` and an array literal's elements are
+// children the old lint chain never visited (only the division inside the
+// array literal is asserted by the text below; both shapes are linted by the
+// same walk, and tests 45-47 pin the others). `dead()` is never called.
+fn use(a: int): void {
+}
+
+fn dead(a: int): int {
+    defer use(a / 0);
+    mut arr: int[2] = [a, 1];
+    return arr[0];
+}
+
+fn main(): int {
+    return 0;
+}

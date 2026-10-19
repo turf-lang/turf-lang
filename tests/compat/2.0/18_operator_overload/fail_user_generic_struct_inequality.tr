@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E124
+// EXPECT-DIAG: Cannot compare struct values with '!='
+struct Box<T> {
+    v: T
+}
+
+fn main(): int {
+    mut a: Box<int> = Box::default();
+    mut b: Box<int> = Box::default();
+    printline(a != b);
+    return 0;
+}

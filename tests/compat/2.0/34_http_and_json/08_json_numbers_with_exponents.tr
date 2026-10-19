@@ -1,0 +1,48 @@
+// A JSON number may have an exponent (RFC 8259: `1e10`, `2.5E-3`,
+// `-1.5e+2`), and json::stringify writes one for a large or small number
+// (`%g`: 1e+21, 1e-06). json::parse failed on every such number, so a value
+// json::stringify wrote could not be read back: strings::parse_double
+// rejected exponents (the header claimed only the value came out wrong).
+
+import json;
+import test;
+
+// A `return` inside `recover run` returns from the enclosing function, so the
+// failure check lives in its own helper.
+fn rejects(text: string): bool {
+    immut v: json::JsonValue = json::parse(text) recover run {
+        return true;
+    };
+    return v.length() < 0;
+}
+
+fn main(): int {
+    immut v: json::JsonValue = json::parse("[3e2, -1.5E-3, 1e+21, 2, 0.5e1]") recover run {
+        test::fail("numbers with exponents are valid JSON");
+        return 1;
+    };
+    test::assert_eq(v.length(), 5, "five numbers");
+    test::assert_eq(v.at(0).num_val, 300.0, "3e2");
+    test::assert_eq(v.at(1).num_val, -0.0015, "-1.5E-3");
+    test::assert_eq(v.at(2).num_val, 1e21, "1e+21");
+    test::assert_eq(v.at(4).num_val, 5.0, "0.5e1");
+
+    // What stringify writes with an exponent reads back.
+    mut arr: json::JsonValue = json::JsonValue::new_array();
+    arr.push(json::JsonValue::from_number(1e21));
+    arr.push(json::JsonValue::from_number(0.000001));
+    immut text: string = json::stringify(arr);
+    test::assert_eq(text, "[1e+21,1e-06]", "stringify uses an exponent");
+    immut back: json::JsonValue = json::parse(text) recover run {
+        test::fail("a stringified document parses back");
+        return 1;
+    };
+    test::assert_eq(back.at(0).num_val, 1e21, "1e+21 round trip");
+    test::assert_eq(back.at(1).num_val, 0.000001, "1e-06 round trip");
+
+    // An exponent with no digits is still malformed.
+    test::assert(rejects("[1e]"), "'1e' is rejected");
+    test::assert(rejects("[1e+]"), "'1e+' is rejected");
+    test::assert(!rejects("[1E5]"), "'1E5' is accepted");
+    return 0;
+}

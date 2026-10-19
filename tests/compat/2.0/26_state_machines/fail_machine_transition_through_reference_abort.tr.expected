@@ -1,0 +1,1 @@
+panic: runtime check: C::transition(Connected) -- no such transition from the current state. (fail_machine_transition_through_reference_abort.tr:10)

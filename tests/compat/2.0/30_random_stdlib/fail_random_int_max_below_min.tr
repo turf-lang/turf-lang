@@ -1,0 +1,13 @@
+// LEC-007: random_int(min, max) with max < min is a violated precondition. It
+// used to compute a zero or negative range -- a divide trap whose message never
+// mentions random_int, or a value outside [min, max]. It now panics, naming the
+// call and both bounds.
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: fail_random_int_max_below_min.tr:11: random_int: max (3) is less than min (7)
+import random;
+
+fn main(): int {
+    mut lo: int = 7;
+    random::random_int(lo, 3);
+    return 0;
+}

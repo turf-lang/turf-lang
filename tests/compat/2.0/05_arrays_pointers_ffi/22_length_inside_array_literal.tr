@@ -1,0 +1,27 @@
+// `a.length()` as an array literal's element (found by turf-fuzz). Codegen's
+// own getExprType() had no case for the array builtin `length()`, so a
+// literal whose FIRST element was one had no element type and the compiler
+// segfaulted -- as a call argument, on the right of a plain assignment, and
+// on a `.copy()`. A declaration's initializer took a different path and
+// worked, which is why it went unnoticed.
+
+import test;
+
+fn first(p: int[2]): int {
+    return p[0];
+}
+
+fn main(): int {
+    mut a: int[3] = [1, 2, 3];
+    test::assert(first([a.length(), 5]) == 3, "as a call argument");
+
+    mut b: int[2] = [0, 0];
+    b = [a.length(), 7];
+    test::assert(b[0] == 3 && b[1] == 7, "on the right of an assignment");
+
+    test::assert(first([a.copy().length(), 5]) == 3, "on a copy");
+
+    mut w: int[] = a.copy();
+    test::assert(first([w.length() + 1, 5]) == 4, "on a slice");
+    return 0;
+}

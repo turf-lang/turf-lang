@@ -1,0 +1,32 @@
+// LEC-003: the subject is evaluated exactly once, however many headers and
+// guards are tried.
+import test;
+
+struct Counter { hits: int }
+
+fn Counter.bump(): int {
+    self.hits = self.hits + 1;
+    return self.hits;
+}
+
+struct Box { n: int }
+
+fn make(c: &Counter): Box {
+    mut b: Box = Box::default();
+    b.n = c.bump();
+    return b;
+}
+
+fn main(): int {
+    mut c: Counter = Counter::default();
+    mut r: int = 0;
+    compare make(&c) {
+        matches Box { n } if n > 5: r = 1; done
+        matches Box { n } if n > 4: r = 2; done
+        matches Box { n: 1 }: r = 3; done
+        matches _: r = 4; done
+    }
+    test::assert(c.hits == 1, "make() ran once, not once per header");
+    test::assert(r == 3, "the single value was tested against every header");
+    return 0;
+}

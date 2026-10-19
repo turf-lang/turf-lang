@@ -1,0 +1,26 @@
+// An array of structs that hold a `&U` is fine with an initializer, and an
+// `&?U` field needs none: its elements start null (contrast
+// fail_array_of_structs_holding_reference_without_initializer.tr).
+
+import test;
+
+struct U { v: int }
+
+struct H {
+    own: &U,
+    k: int
+}
+
+struct M {
+    maybe: &?U,
+    k: int
+}
+
+fn main(): int {
+    mut a: H[2] = [H::default(), H::default()];
+    test::assert(a[1].own.v == 0, "every element initialised");
+    mut b: M[2];
+    b[0] = M::default();
+    test::assert(b[1].maybe == null, "a nullable field starts null");
+    return 0;
+}
