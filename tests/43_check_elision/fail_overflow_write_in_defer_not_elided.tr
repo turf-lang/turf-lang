@@ -1,0 +1,16 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: Integer overflow
+// The dataflow that proves checks unnecessary (ValueRange.cpp) only models a
+// write that is a whole statement. `defer x = ...` runs at the end of the
+// `if` block, not where it is written, so the write was invisible: `x` still
+// looked like 1 at `x + 1`, the overflow check was removed, and the program
+// printed -9223372036854775808 with exit status 0.
+fn main(): int {
+    mut x: int = 1;
+    if true {
+        defer x = 9223372036854775807;
+    }
+    mut y: int = x + 1;
+    printline(y);
+    return 0;
+}

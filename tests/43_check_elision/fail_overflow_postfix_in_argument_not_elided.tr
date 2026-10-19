@@ -1,0 +1,17 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: Integer overflow
+// `x++` as a call argument is a write inside an expression, which the
+// check-elision dataflow does not model: `x` still looked like
+// 9223372036854775806 at `x + 1`, so the check was removed and the sum
+// wrapped silently.
+fn id(v: int): int {
+    return v;
+}
+
+fn main(): int {
+    mut x: int = 9223372036854775806;
+    mut z: int = id(x++);
+    mut y: int = x + 1;
+    printline(y + z);
+    return 0;
+}

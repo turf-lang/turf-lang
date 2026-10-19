@@ -1,0 +1,16 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: Integer overflow
+// The sub-expression twin of fail_overflow_copy_of_address_taken_not_elided.tr:
+// `(x * 1)` read the stale constant of an address-taken `x` because only a
+// bare `x` operand was checked, so `(x * 1) + 1` lost its overflow check.
+fn set_max(p: &int): void {
+    p[0] = 9223372036854775807;
+}
+
+fn main(): int {
+    mut x: int = 0;
+    set_max(&x);
+    mut w: int = (x * 1) + 1;
+    printline(w);
+    return 0;
+}
