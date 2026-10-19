@@ -1,0 +1,30 @@
+// The identical-branch lint diffs the two branches of an `if`. Two method
+// calls with different argument counts read past the shorter argument list:
+// an out-of-range vector access in ASTDiff.h (turf-fuzz #14, libFuzzer).
+struct Acc {
+    n: int,
+}
+
+fn Acc.add(a: int): void {
+    self.n = self.n + a;
+}
+
+fn Acc.add2(a: int, b: int): void {
+    self.n = self.n + a + b;
+}
+
+fn main(): int {
+    mut acc: Acc = Acc::default();
+    if acc.n == 0 {
+        acc.add2(1, 2);
+    } else {
+        acc.add(1);
+    }
+    if acc.n == 3 {
+        acc.add(1);
+    } else {
+        acc.add2(1, 2);
+    }
+    printline(acc.n);
+    return 0;
+}
