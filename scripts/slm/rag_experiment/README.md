@@ -68,7 +68,9 @@ line out of range is rejected. Per (case, arm) the result row records:
 - `right_line` line equals the corpus line
 - `compiles` `turfc` accepts the patched file
 - `correct` compiles, runs (10 s timeout) with `exit == expected_exit` and `stdout == expected_stdout`
-- `exact` `new_code.strip() == original_line.strip()`
+- `exact` `new_code.strip() == original_line.strip()` (the results file stores this text-only
+  comparison; `analyze.py` reports it as `exact_text` and reports `exact` as the same text on
+  the mutated line, so `exact_text` minus `exact` counts right fixes placed on the wrong line)
 - `prompt_tokens`, `ctx_tokens`, `latency_s`, `raw`, `retrieved` (chunk or example ids)
 
 ## Run
@@ -93,7 +95,7 @@ a different platform, model or server build is refused, so runs from different
 machines are never mixed.
 
 `analyze.py` reports, over the cases with every arm complete: rates of parsed,
-abstained, compiles, correct and exact with Wilson 95% intervals, mean latency
+abstained, right_line, compiles, correct, exact_text and exact with Wilson 95% intervals, mean latency
 and prompt tokens, paired exact McNemar tests of `correct` for each arm against
 `A1p_production`, `A1_category` and `A0_none` (discordant counts b and c, p-value), `correct`
 by subset, and `correct` by `kind`. The subsets are foreign-syntax vs classic

@@ -15,7 +15,10 @@ HERE = Path(__file__).resolve().parent
 ARMS = ["A0_none", "A1_category", "A1p_production", "A2_bm25_docs", "A3_examples",
         "A4_examples_docs",
         "A5_random_examples", "A6_production_examples"]
-RATES = ["parsed", "abstained", "compiles", "correct", "exact"]
+# `exact_text`: new_code is the original line, wherever the model put it.
+# `exact`: the same text on the mutated line. The gap between them is a
+# localisation miss (the right fix on the wrong line).
+RATES = ["parsed", "abstained", "right_line", "compiles", "correct", "exact_text", "exact"]
 FOREIGN_HINT = ("foreign", "c_", "java", "python", "rust", "js", "go_", "cpp")
 
 
@@ -54,6 +57,8 @@ def main() -> int:
     arms = [x for x in ARMS if any(r["arm"] == x for r in rows)]
     by: dict[str, dict[str, dict]] = {}
     for r in rows:
+        r["exact_text"] = r["exact"]
+        r["exact"] = r["exact"] and r["right_line"]
         by.setdefault(r["id"], {})[r["arm"]] = r
     ids = sorted(i for i, d in by.items() if all(x in d for x in arms))
     n = len(ids)
