@@ -32,6 +32,17 @@ error_message, diag_line, expected_stdout, expected_exit`.
 `fixture/` holds a tiny hand-built corpus for smoke tests
 (`python3 make_fixture.py` rebuilds it from `scripts/slm/slm_benchmark/corpus.json`).
 
+## Patch format
+
+`--patch-format line` (default) is the format above: the model names a line number. `--patch-format text` is what
+production `--smart` asks for: the model answers `{"original_code", "new_code"}`, copying the line it changes, and the
+harness finds the copy with a port of `locateOriginal()`/`alignOriginal()` (`rag_lib.locate_original`; whitespace-
+insensitive exact match nearest the diagnostic line, else a fuzzy alignment; empty `original_code` inserts after the
+diagnostic line). Candidate places are tried best first and the first patch that compiles is scored (`correct`);
+`correct_top` scores only the best-ranked place. Extra result fields: `located`, `unchanged` (new_code equals
+original_code, which production rejects), `n_cands`, `loc_how`. A run's format is recorded in its meta file, and a
+run is never resumed under a different one.
+
 ## Arms
 
 The user prompt is identical across arms except for its CONTEXT block. Every

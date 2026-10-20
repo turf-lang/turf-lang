@@ -55,6 +55,14 @@ def main() -> int:
     rdir = Path(a.results_dir)
     rows = [json.loads(x) for x in (rdir / f"{a.run_name}.jsonl").read_text().splitlines() if x.strip()]
     arms = [x for x in ARMS if any(r["arm"] == x for r in rows)]
+    # text-matching runs (--patch-format text) carry extra fields
+    rates = list(RATES)
+    if any("located" in r for r in rows):
+        rates[rates.index("right_line"):rates.index("right_line")] = ["located", "unchanged"]
+        rates.append("correct_top")
+    for r in rows:
+        for k in rates:
+            r.setdefault(k, False)
     by: dict[str, dict[str, dict]] = {}
     for r in rows:
         r["exact_text"] = r["exact"]
@@ -70,11 +78,11 @@ def main() -> int:
                 f"  |  llama-server: {m.get('llama_server_version')}", ""]
     out += [f"Cases with every arm complete: {n} (of {len(by)} started). Wilson 95% intervals in brackets.", ""]
     out += ["## Per arm", "",
-            "| arm | n | " + " | ".join(RATES) + " | mean latency s | mean prompt tokens | mean context tokens |",
-            "|---|---|" + "---|" * (len(RATES) + 3)]
+            "| arm | n | " + " | ".join(rates) + " | mean latency s | mean prompt tokens | mean context tokens |",
+            "|---|---|" + "---|" * (len(rates) + 3)]
     for arm in arms:
         rs = [by[i][arm] for i in ids]
-        cells = [pct(sum(1 for r in rs if r[k]), n) for k in RATES]
+        cells = [pct(sum(1 for r in rs if r[k]), n) for k in rates]
         lat = sum(r["latency_s"] for r in rs) / max(n, 1)
         pt = sum(r["prompt_tokens"] for r in rs) / max(n, 1)
         ct = sum(r.get("ctx_tokens", 0) for r in rs) / max(n, 1)

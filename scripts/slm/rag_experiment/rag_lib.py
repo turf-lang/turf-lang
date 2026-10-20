@@ -527,3 +527,226 @@ def build_user_prompt(server: Server, case: dict, context: str) -> tuple[str, bo
         "Reply with ONLY the JSON object {\"line\": <int>, \"new_code\": <string>} "
         "for the one line to replace, or {\"line\": 0, \"new_code\": \"\"} if you cannot fix it."
     ), trunc
+
+
+# --------------------------------------------------------------------------
+# Text-matching patch format (--patch-format text): what production --smart
+# asks for. The model copies the lines it changes (`original_code`) and gives
+# the replacement (`new_code`); the harness finds the copy in the program. The
+# locator below is a port of locateOriginal()/alignOriginal() in
+# src/slm/SLMIntegration.cpp (no related-line anchors: the corpus has none).
+# --------------------------------------------------------------------------
+
+TEXT_FIX_SCHEMA = {
+    "type": "object",
+    "properties": {"original_code": {"type": "string"}, "new_code": {"type": "string"}},
+    "required": ["original_code", "new_code"],
+    "additionalProperties": False,
+}
+
+TEXT_SYSTEM_PROMPT = (
+    "You are a compiler assistant for Turf-Lang, a statically-typed language you "
+    "have not seen before.\n\n"
+    "GROUNDING: everything you know about Turf-Lang syntax comes ONLY from the "
+    "context given in the message, NOT from C, Python, Java, Rust, or any other "
+    "language. Turf-Lang has unusual choices (postfix casts like `x to int`, "
+    "`mut`/`immut` instead of a bare type keyword, `give ... otherwise ...` for a "
+    "ternary) that do not exist in mainstream languages -- do not silently "
+    "'correct' these into something more familiar. If a construct is not shown, "
+    "do not invent it.\n\n"
+    "TASK: the program does not compile. Fix it by replacing ONE line.\n"
+    "RULES:\n"
+    "1. \"original_code\": COPY, character for character, the existing line of the "
+    "program that your fix changes. You never say where the code is; it is found "
+    "by matching your copy, so copy exactly, spaces at the start of the line "
+    "included, and do not correct anything while copying -- the correction belongs "
+    "in \"new_code\". The line to change may be another line of the program, not "
+    "only the line the error is on.\n"
+    "2. \"new_code\": the Turf-Lang line that replaces original_code -- the same "
+    "line with your fix applied. It must differ from original_code, and it is just "
+    "code: no explanation, no markdown fence.\n"
+    "3. If you cannot produce a valid one-line fix, answer {\"original_code\": \"\", "
+    "\"new_code\": \"\"}. That is the right answer whenever you are not sure; it is "
+    "better than a wrong patch.\n"
+    "4. Respond ONLY with the JSON object."
+)
+
+
+def build_text_user_prompt(server: Server, case: dict, context: str) -> tuple[str, bool]:
+    """Same program window, diagnostic and CONTEXT as build_user_prompt, but the
+    program is shown verbatim (no line numbers, as in production) with the text
+    of the error line beside it."""
+    prog_numbered, trunc = numbered_program(server, case)  # the same window as the line format
+    body = [re.sub(r"^\s*\d+ \| ", "", l, count=1) for l in prog_numbered.split("\n")
+            if not l.startswith("(lines ")]
+    note = (prog_numbered.split("\n")[0] + "\n") if prog_numbered.startswith("(lines ") else ""
+    if note:
+        body_text = note.replace("shown)", "shown, without line numbers)") + "\n".join(body)
+    else:
+        body_text = "\n".join(body)
+    err_line = diag_line_text(case)
+    return (
+        "PROGRAM:\n"
+        f"{body_text}\n\n"
+        "COMPILER OUTPUT:\n"
+        f"{diag_for_prompt(case['diagnostic'])}\n\n"
+        "ERROR LINE (the line the compiler points at):\n"
+        f"{err_line}\n\n"
+        "CONTEXT:\n"
+        f"{context if context else '(none)'}\n\n"
+        "Reply with ONLY the JSON object {\"original_code\": <the existing line, copied exactly>, "
+        "\"new_code\": <the line that replaces it>}, or {\"original_code\": \"\", "
+        "\"new_code\": \"\"} if you cannot fix it."
+    ), trunc
+
+
+def _split_lines(text: str) -> list[str]:
+    return [l[:-1] if l.endswith("\r") else l for l in text.split("\n")]
+
+
+def _is_blank(s: str) -> bool:
+    return not s.strip(" \t\r")
+
+
+def normalize_line(s: str) -> str:
+    return " ".join(s.replace("\t", " ").replace("\r", " ").split())
+
+
+def line_similarity(a: str, b: str) -> float:
+    x, y = normalize_line(a), normalize_line(b)
+    if x == y:
+        return 1.0
+    if not x or not y:
+        return 0.0
+    prev = list(range(len(y) + 1))
+    for i in range(1, len(x) + 1):
+        cur = [i] + [0] * len(y)
+        for j in range(1, len(y) + 1):
+            cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (0 if x[i - 1] == y[j - 1] else 1))
+        prev = cur
+    return 1.0 - prev[len(y)] / max(len(x), len(y))
+
+
+def _range_distance(s: int, e: int, line: int) -> int:
+    if s <= line <= e:
+        return 0
+    return s - line if line < s else line - e
+
+
+def _find_exact(src: list[str], orig: list[str]) -> list[tuple[int, int]]:
+    found, n = [], len(src)
+    if not orig:
+        return found
+    for s in range(1, n + 1):
+        if normalize_line(src[s - 1]) != orig[0]:
+            continue
+        line, matched = s, 1
+        while matched < len(orig) and line < n:
+            line += 1
+            if _is_blank(src[line - 1]):
+                continue
+            if normalize_line(src[line - 1]) != orig[matched]:
+                break
+            matched += 1
+        if matched == len(orig):
+            found.append((s, line))
+    return found
+
+
+def _align_original(src: list[str], repl: list[str], anchor: int):
+    reach = 10
+    n, k = len(src), len(repl)
+    if anchor < 1 or anchor > n or k == 0:
+        return None
+    lo, hi = max(1, anchor - reach - k - 1), min(n, anchor + reach + k + 1)
+    pair = []
+    for i in range(k):
+        ln = len(normalize_line(repl[i]))
+        row = []
+        for line in range(lo, hi + 1):
+            sim = line_similarity(repl[i], src[line - 1])
+            row.append(-1.0 if sim < 0.6 else (sim * 0.3 if ln <= 2 else sim))
+        pair.append(row)
+    best_score, bs, be = 0.0, 0, 0
+    for s in range(lo, hi + 1):
+        for e in range(s, min(hi, s + k + 1) + 1):
+            if _range_distance(s, e, anchor) > reach:
+                continue
+            m = e - s + 1
+            dp = [[0.0] * (m + 1) for _ in range(k + 1)]
+            for j in range(1, m + 1):
+                dp[0][j] = dp[0][j - 1] - (0.25 if _is_blank(src[s + j - 2]) else 0.5)
+            for i in range(1, k + 1):
+                dp[i][0] = dp[i - 1][0]
+                for j in range(1, m + 1):
+                    line = s + j - 1
+                    best = max(dp[i - 1][j], dp[i][j - 1] - (0.25 if _is_blank(src[line - 1]) else 0.5))
+                    ps = pair[i - 1][line - lo]
+                    if ps >= 0:
+                        best = max(best, dp[i - 1][j - 1] + ps)
+                    dp[i][j] = best
+            score = dp[k][m]
+            better = score > best_score + 1e-9 or (
+                bs != 0 and abs(score - best_score) <= 1e-9 and
+                (m < be - bs + 1 or (m == be - bs + 1 and
+                                     _range_distance(s, e, anchor) < _range_distance(bs, be, anchor))))
+            if better and score >= 0.6:
+                best_score, bs, be = score, s, e
+    if bs == 0:
+        return None
+    while bs < be and _is_blank(src[bs - 1]):
+        bs += 1
+    while be > bs and _is_blank(src[be - 1]):
+        be -= 1
+    return bs, be, best_score
+
+
+def locate_original(source: str, original_code: str, error_line: int) -> list[dict]:
+    """Where `original_code` is in `source`, best first: [{how, start, end}]."""
+    src = source.rstrip("\n").split("\n") if source else []
+    n = len(src)
+    if error_line < 1 or error_line > n:
+        return []
+    orig = [normalize_line(l) for l in _split_lines(original_code) if not _is_blank(l)]
+    if not orig:
+        return [{"how": "insertion", "start": error_line, "end": error_line}]
+    exact = _find_exact(src, orig)
+    if exact:
+        exact.sort(key=lambda r: _range_distance(r[0], r[1], error_line))
+        return [{"how": "exact", "start": s, "end": e} for s, e in exact]
+    al = _align_original(src, orig, error_line)
+    if al:
+        return [{"how": "fuzzy", "start": al[0], "end": al[1]}]
+    return []
+
+
+def reindent_new_code(new_code: str, original_code: str, source_first_line: str) -> str:
+    indent = lambda s: s[: len(s) - len(s.lstrip(" \t"))]
+    model_indent = ""
+    for l in _split_lines(original_code):
+        if not _is_blank(l):
+            model_indent = indent(l)
+            break
+    src_indent = indent(source_first_line)
+    if model_indent == src_indent:
+        return new_code
+    lines = _split_lines(new_code)
+    for l in lines:
+        if not _is_blank(l) and not l.startswith(model_indent):
+            return new_code
+    return "\n".join((src_indent + l[len(model_indent):]) if not _is_blank(l) else l for l in lines)
+
+
+def trim_blank_edge_lines(text: str) -> str:
+    lines = _split_lines(text)
+    lo, hi = 0, len(lines)
+    while lo < hi and _is_blank(lines[lo]):
+        lo += 1
+    while hi > lo and _is_blank(lines[hi - 1]):
+        hi -= 1
+    return "\n".join(lines[lo:hi])
+
+
+def same_code(a: str, b: str) -> bool:
+    norm = lambda s: [normalize_line(l) for l in _split_lines(s) if not _is_blank(l)]
+    return norm(a) == norm(b)

@@ -110,6 +110,74 @@ def score(a, case: dict, out: dict, scratch: Path) -> dict:
     return res
 
 
+def score_text(a, case: dict, out: dict, scratch: Path) -> dict:
+    """Text-matching format (production's): find `original_code` in the program,
+    splice `new_code` over it. Candidate places are tried best first and the
+    first patch that compiles is the one scored, as the --smart sandbox accepts
+    the first candidate that clears the error. `correct_top` scores only the
+    best-ranked place."""
+    res = dict(parsed=False, abstained=False, located=False, right_line=False, applied=False,
+               compiles=False, correct=False, correct_top=False, exact=False, unchanged=False, n_cands=0,
+               loc_how=None, original_code=None, new_code=None)
+    try:
+        obj = json.loads(out["raw"])
+        oc, nc = obj["original_code"], obj["new_code"]
+        assert isinstance(oc, str) and isinstance(nc, str)
+    except Exception:
+        return res
+    res.update(parsed=True, original_code=oc, new_code=nc)
+    oc, nc = L.trim_blank_edge_lines(oc), L.trim_blank_edge_lines(nc)
+    if not oc.strip() and not nc.strip():
+        res["abstained"] = True
+        return res
+    res["exact"] = nc.strip() == case["original_line"].strip()
+    if not nc.strip() or (oc.strip() and L.same_code(oc, nc)):
+        res["unchanged"] = True  # production rejects an empty new_code and an unchanged one
+        return res
+    src = case["mutated_source"].rstrip("\n").split("\n")
+    err = case.get("diag_line") or case.get("line")
+    cands = L.locate_original(case["mutated_source"], oc, err)
+    res["n_cands"] = len(cands)
+    if not cands:
+        return res
+    res["located"] = True
+    res["loc_how"] = cands[0]["how"]
+    res["right_line"] = cands[0]["start"] <= case["line"] <= cands[0]["end"]
+    exe_keep = []
+    for ci, c in enumerate(cands):
+        s0, e0 = c["start"], c["end"]
+        if c["how"] == "insertion":
+            patched = src[:s0] + L.reindent_new_code(nc, oc, src[s0 - 1]).split("\n") + src[s0:]
+        else:
+            patched = src[: s0 - 1] + L.reindent_new_code(nc, oc, src[s0 - 1]).split("\n") + src[e0:]
+        res["applied"] = True
+        f = scratch / f"{case['id']}__{out['arm']}__{ci}.tr"
+        exe = f.with_suffix(".bin")
+        f.write_text("\n".join(patched) + "\n")
+        rc, _, _ = run([a.turfc, str(f), "-o", str(exe)], 120, cwd=REPO)
+        ok = rc == 0 and exe.exists()
+        good = False
+        if ok:
+            try:
+                p = subprocess.run([str(exe)], capture_output=True, timeout=10)
+                good = (p.returncode == case["expected_exit"] and
+                        p.stdout.decode("utf-8", "replace") == case["expected_stdout"])
+            except subprocess.TimeoutExpired:
+                pass
+        for x in (f, exe):
+            try:
+                x.unlink()
+            except OSError:
+                pass
+        if ci == 0:
+            res["correct_top"] = good
+        if ok:
+            res["compiles"], res["correct"] = True, good
+            res["right_line"] = c["start"] <= case["line"] <= c["end"]
+            break
+    return res
+
+
 def selftest(server) -> None:
     """The leakage assertion must fire on crafted bad cases."""
     case = {"id": "q", "source_test": "t/a.tr", "split": "test"}
@@ -144,6 +212,9 @@ def main() -> int:
     ap.add_argument("--scratch", default=os.path.join(tempfile.gettempdir(), "rag_runs"))
     ap.add_argument("--cache-prompt", action="store_true",
                     help="reuse the KV cache of the shared prompt prefix (faster, tiny numeric drift)")
+    ap.add_argument("--patch-format", choices=("line", "text"), default="line",
+                    help="line: the model names a line number; text: it copies original_code and "
+                         "the harness finds it (what production --smart does)")
     ap.add_argument("--selftest", action="store_true")
     ap.add_argument("--dump", action="store_true", help="print each prompt's context and exit after --limit cases without scoring")
     a = ap.parse_args()
@@ -180,7 +251,8 @@ def main() -> int:
                 "model": os.path.basename(a.model),
                 "model_sha256": sha256(Path(a.model)) if Path(a.model).exists() else None,
                 "llama_server_version": None, "gpu_layers": a.gpu_layers,
-                "threads": a.threads, "budget": a.budget, "arms": arms}
+                "threads": a.threads, "budget": a.budget, "arms": arms,
+                "patch_format": a.patch_format}
         try:
             v = subprocess.run([a.llama_server, "--version"], capture_output=True, text=True, timeout=30)
             info["llama_server_version"] = (v.stdout + v.stderr).strip().split("\n")[0]
@@ -190,7 +262,8 @@ def main() -> int:
             info["server_url"] = a.server_url
         if meta.exists():
             old = json.loads(meta.read_text())
-            keys = ("platform", "machine", "model_sha256", "llama_server_version")
+            keys = ("platform", "machine", "model_sha256", "llama_server_version", "patch_format")
+            old.setdefault("patch_format", "line")
             diff = [k for k in keys if old.get(k) != info.get(k)]
             if diff:
                 sys.exit(f"run {a.run_name} was started with a different {diff}; use a new --run-name")
@@ -208,12 +281,15 @@ def main() -> int:
                     ctx, rinfo = retr.context(arm, case)
                     ctx_tokens = server.count(ctx) if ctx else 0
                     assert ctx_tokens <= a.budget, (arm, ctx_tokens)
-                    user, trunc = L.build_user_prompt(server, case, ctx)
+                    text_fmt = a.patch_format == "text"
+                    user, trunc = (L.build_text_user_prompt if text_fmt else L.build_user_prompt)(server, case, ctx)
                     if a.dump:
                         print(f"=== {case['id']} / {arm} ({ctx_tokens} ctx tokens) {rinfo}\n{ctx}\n")
                         continue
                     t0 = time.monotonic()
-                    resp = server.chat(L.SYSTEM_PROMPT, user, L.FIX_SCHEMA, cache_prompt=a.cache_prompt)
+                    resp = server.chat(L.TEXT_SYSTEM_PROMPT if text_fmt else L.SYSTEM_PROMPT, user,
+                                       L.TEXT_FIX_SCHEMA if text_fmt else L.FIX_SCHEMA,
+                                       max_tokens=300 if text_fmt else 200, cache_prompt=a.cache_prompt)
                     dt = time.monotonic() - t0
                     raw = resp["choices"][0]["message"]["content"]
                     rec = {"id": case["id"], "arm": arm, "kind": case.get("kind"),
@@ -221,7 +297,7 @@ def main() -> int:
                            "prompt_tokens": resp["usage"]["prompt_tokens"],
                            "ctx_tokens": ctx_tokens, "latency_s": round(dt, 3),
                            "program_truncated": trunc, "retrieved": rinfo, "raw": raw}
-                    rec.update(score(a, case, {"raw": raw, "arm": arm}, scratch))
+                    rec.update((score_text if text_fmt else score)(a, case, {"raw": raw, "arm": arm}, scratch))
                     out.write(json.dumps(rec) + "\n")
                     out.flush()
                     print(f"[{n}/{total}] {case['id']:<32} {arm:<20} {dt:6.1f}s "
