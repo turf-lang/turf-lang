@@ -26,6 +26,11 @@ HERE = Path(__file__).resolve().parent
 REPO = L.REPO_ROOT
 
 
+# --split -> file in the corpus dir. test_fresh is the held-out set built after the
+# experiment design was fixed; it is only opened when a run asks for it.
+SPLIT_FILES = {"test": "test.jsonl", "test_fresh": "test_fresh.jsonl"}
+
+
 def load_jsonl(p: Path) -> list[dict]:
     return [json.loads(x) for x in p.read_text().splitlines() if x.strip()]
 
@@ -65,7 +70,8 @@ def start_server(a) -> tuple[subprocess.Popen | None, str]:
 def run(cmd, timeout, cwd=None):
     try:
         p = subprocess.run(cmd, capture_output=True, timeout=timeout, cwd=cwd)
-        return p.returncode, p.stdout.decode("utf-8", "replace"), False
+        return (p.returncode,
+                p.stderr.decode("utf-8", "replace") + p.stdout.decode("utf-8", "replace"), False)
     except subprocess.TimeoutExpired:
         return -1, "", True
 
@@ -73,6 +79,8 @@ def run(cmd, timeout, cwd=None):
 def score(a, case: dict, out: dict, scratch: Path) -> dict:
     res = dict(parsed=False, abstained=False, right_line=False, applied=False,
                compiles=False, correct=False, exact=False, line=None, new_code=None)
+    # retry bookkeeping, popped by the caller: why the patch was (not) rejected and what to tell the model
+    res["_reason"], res["_feedback"] = "unparsed", None
     try:
         obj = json.loads(out["raw"])
         line, nc = obj["line"], obj["new_code"]
@@ -82,19 +90,35 @@ def score(a, case: dict, out: dict, scratch: Path) -> dict:
     res.update(parsed=True, line=line, new_code=nc)
     if line == 0:
         res["abstained"] = True
+        res["_reason"] = "abstained"
         return res
     res["right_line"] = line == case["line"]
     res["exact"] = nc.strip() == case["original_line"].strip()
     src = case["mutated_source"].split("\n")
     if "\n" in nc or "\r" in nc or not (1 <= line <= len(src)):
+        res["_reason"] = "not_applied"
+        res["_feedback"] = L.msg_bad_line("new_code must be a single line" if ("\n" in nc or "\r" in nc)
+                                          else f"line {line} is not a line of the program")
         return res
+    before = list(src)
     src[line - 1] = nc
     res["applied"] = True
     f = scratch / f"{case['id']}__{out['arm']}.tr"
     exe = f.with_suffix(".bin")
     f.write_text("\n".join(src))
-    rc, _, _ = run([a.turfc, str(f), "-o", str(exe)], 120, cwd=REPO)
+    rc, cout, _ = run([a.turfc, str(f), "-o", str(exe)], 120, cwd=REPO)
     res["compiles"] = rc == 0 and exe.exists()
+    if not res["compiles"]:
+        res["_reason"] = "compile_error"
+        res["_diag"] = cout
+        if not nc.strip():
+            res["_reason"], res["_feedback"] = "empty_new_code", L.MSG_EMPTY_NEW_CODE
+        elif L.same_code(nc, before[line - 1]):
+            res["_reason"], res["_feedback"] = "unchanged", L.MSG_UNCHANGED_LINE
+        else:
+            res["_feedback"] = L.compile_feedback(case, cout, str(f), src, line, line, 1, False, before)
+    else:
+        res["_reason"] = "compiles_wrong"
     if res["compiles"]:
         try:
             p = subprocess.run([str(exe)], capture_output=True, timeout=10)
@@ -102,6 +126,8 @@ def score(a, case: dict, out: dict, scratch: Path) -> dict:
                               p.stdout.decode("utf-8", "replace") == case["expected_stdout"])
         except subprocess.TimeoutExpired:
             pass
+        if res["correct"]:
+            res["_reason"] = "correct"
     for x in (f, exe):
         try:
             x.unlink()
@@ -119,6 +145,7 @@ def score_text(a, case: dict, out: dict, scratch: Path) -> dict:
     res = dict(parsed=False, abstained=False, located=False, right_line=False, applied=False,
                compiles=False, correct=False, correct_top=False, exact=False, unchanged=False, n_cands=0,
                loc_how=None, original_code=None, new_code=None)
+    res["_reason"], res["_feedback"] = "unparsed", None
     try:
         obj = json.loads(out["raw"])
         oc, nc = obj["original_code"], obj["new_code"]
@@ -129,16 +156,23 @@ def score_text(a, case: dict, out: dict, scratch: Path) -> dict:
     oc, nc = L.trim_blank_edge_lines(oc), L.trim_blank_edge_lines(nc)
     if not oc.strip() and not nc.strip():
         res["abstained"] = True
+        res["_reason"] = "abstained"
         return res
     res["exact"] = nc.strip() == case["original_line"].strip()
     if not nc.strip() or (oc.strip() and L.same_code(oc, nc)):
         res["unchanged"] = True  # production rejects an empty new_code and an unchanged one
+        if not nc.strip():
+            res["_reason"], res["_feedback"] = "empty_new_code", L.MSG_EMPTY_NEW_CODE
+        else:
+            res["_reason"], res["_feedback"] = "unchanged", L.MSG_UNCHANGED
         return res
     src = case["mutated_source"].rstrip("\n").split("\n")
     err = case.get("diag_line") or case.get("line")
     cands = L.locate_original(case["mutated_source"], oc, err)
     res["n_cands"] = len(cands)
     if not cands:
+        ls = src[err - 1] if err and 1 <= err <= len(src) else ""
+        res["_reason"], res["_feedback"] = "not_found", L.msg_not_found(ls)
         return res
     res["located"] = True
     res["loc_how"] = cands[0]["how"]
@@ -154,9 +188,14 @@ def score_text(a, case: dict, out: dict, scratch: Path) -> dict:
         f = scratch / f"{case['id']}__{out['arm']}__{ci}.tr"
         exe = f.with_suffix(".bin")
         f.write_text("\n".join(patched) + "\n")
-        rc, _, _ = run([a.turfc, str(f), "-o", str(exe)], 120, cwd=REPO)
+        rc, cout, _ = run([a.turfc, str(f), "-o", str(exe)], 120, cwd=REPO)
         ok = rc == 0 and exe.exists()
         good = False
+        if ci == 0 and not ok:  # production feeds back the best-placed candidate's diagnostics
+            n_new = len(patched) - (len(src) - (e0 - s0 + 1)) if c["how"] != "insertion" else len(patched) - len(src) + 1
+            res["_diag"] = cout
+            res["_feedback"] = L.compile_feedback(case, cout, str(f), patched, s0, e0, n_new,
+                                                  c["how"] == "fuzzy", src)
         if ok:
             try:
                 p = subprocess.run([str(exe)], capture_output=True, timeout=10)
@@ -175,7 +214,74 @@ def score_text(a, case: dict, out: dict, scratch: Path) -> dict:
             res["compiles"], res["correct"] = True, good
             res["right_line"] = c["start"] <= case["line"] <= c["end"]
             break
+    res["_reason"] = "correct" if res["correct"] else ("compiles_wrong" if res["compiles"] else "compile_error")
+    if res["compiles"]:
+        res["_feedback"] = None
     return res
+
+
+RETRY_REASONS = ("compile_error", "empty_new_code", "unchanged", "not_found", "not_applied")
+
+
+def solve(a, server, retr, case: dict, arm: str, scratch: Path) -> dict | None:
+    """One (case, arm): up to `--attempts` model calls. Attempt k+1 happens only
+    when attempt k produced a patch production's sandbox would reject (see
+    RETRY_REASONS); abstaining, unparseable output and a patch that compiles
+    (right or wrong) end the case. The top-level fields are the final attempt's."""
+    text_fmt = a.patch_format == "text"
+    build = L.build_text_user_prompt if text_fmt else L.build_user_prompt
+    scorer = score_text if text_fmt else score
+    attempts: list[dict] = []
+    feedback = None
+    ctx = None
+    for k in range(1, a.attempts + 1):
+        if k == 1:
+            ctx, rinfo = retr.context(arm, case)
+        elif arm == "A7_examples_reretrieve":
+            new = L.parse_diag(prev_diag) if prev_diag else None
+            code, msg = new if new else (case.get("error_code", ""), case.get("error_message", ""))
+            ctx, rinfo = retr.examples_reretrieve(case, code, msg)
+            rinfo = {**rinfo, "query_error_code": code, "query_error_message": msg}
+        ctx_tokens = server.count(ctx) if ctx else 0
+        assert ctx_tokens <= a.budget, (arm, ctx_tokens)
+        user, trunc = build(server, case, ctx, feedback)
+        if a.dump:
+            print(f"=== {case['id']} / {arm} attempt {k} ({ctx_tokens} ctx tokens) {rinfo}\n{ctx}\n")
+            if not feedback:
+                return None
+        t0 = time.monotonic()
+        resp = server.chat(L.TEXT_SYSTEM_PROMPT if text_fmt else L.SYSTEM_PROMPT, user,
+                           L.TEXT_FIX_SCHEMA if text_fmt else L.FIX_SCHEMA,
+                           max_tokens=300 if text_fmt else 200, cache_prompt=a.cache_prompt)
+        dt = time.monotonic() - t0
+        raw = resp["choices"][0]["message"]["content"]
+        rec = {"id": case["id"], "arm": arm, "kind": case.get("kind"),
+               "error_code": case.get("error_code"), "split": case["split"],
+               "prompt_tokens": resp["usage"]["prompt_tokens"],
+               "ctx_tokens": ctx_tokens, "latency_s": round(dt, 3),
+               "program_truncated": trunc, "retrieved": rinfo, "raw": raw}
+        res = scorer(a, case, {"raw": raw, "arm": arm}, scratch)
+        reason, fb = res.pop("_reason"), res.pop("_feedback")
+        prev_diag = res.pop("_diag", None)
+        rec.update(res)
+        attempts.append({**rec, "attempt": k, "reason": reason, "feedback_given": feedback,
+                         "user_prompt": user if a.keep_prompts else None})
+        if reason not in RETRY_REASONS or k == a.attempts:
+            break
+        feedback = fb
+    if a.attempts > 1:
+        for at in attempts:
+            for key in ("id", "arm", "kind", "error_code", "split"):
+                at.pop(key, None)
+            if at["user_prompt"] is None:
+                del at["user_prompt"]
+        rec["attempts"] = attempts
+        rec["n_calls"] = len(attempts)
+        rec["correct_at"] = next((x["attempt"] for x in attempts if x["correct"]), None)
+        rec["compiled_at"] = next((x["attempt"] for x in attempts if x["compiles"]), None)
+        rec["latency_total_s"] = round(sum(x["latency_s"] for x in attempts), 3)
+        rec["final_reason"] = attempts[-1]["reason"]
+    return rec
 
 
 def selftest(server) -> None:
@@ -215,6 +321,11 @@ def main() -> int:
     ap.add_argument("--patch-format", choices=("line", "text"), default="line",
                     help="line: the model names a line number; text: it copies original_code and "
                          "the harness finds it (what production --smart does)")
+    ap.add_argument("--attempts", type=int, default=1,
+                    help="model calls per (case, arm); a retry happens only when production's sandbox "
+                         "would reject the patch, with the rejection fed back (default 1: no retry)")
+    ap.add_argument("--keep-prompts", action="store_true",
+                    help="store each attempt's full user prompt in the result row (large)")
     ap.add_argument("--selftest", action="store_true")
     ap.add_argument("--dump", action="store_true", help="print each prompt's context and exit after --limit cases without scoring")
     a = ap.parse_args()
@@ -227,7 +338,8 @@ def main() -> int:
 
     cdir = Path(a.corpus_dir)
     train = load_jsonl(cdir / "train.jsonl")
-    cases = load_jsonl(cdir / f"{a.split}.jsonl")
+    assert a.attempts >= 1
+    cases = load_jsonl(cdir / SPLIT_FILES.get(a.split, f"{a.split}.jsonl"))
     assert all(c["split"] == a.split for c in cases)
     if a.limit:
         cases = cases[: a.limit]
@@ -252,7 +364,7 @@ def main() -> int:
                 "model_sha256": sha256(Path(a.model)) if Path(a.model).exists() else None,
                 "llama_server_version": None, "gpu_layers": a.gpu_layers,
                 "threads": a.threads, "budget": a.budget, "arms": arms,
-                "patch_format": a.patch_format}
+                "patch_format": a.patch_format, "attempts": a.attempts, "split": a.split}
         try:
             v = subprocess.run([a.llama_server, "--version"], capture_output=True, text=True, timeout=30)
             info["llama_server_version"] = (v.stdout + v.stderr).strip().split("\n")[0]
@@ -262,8 +374,9 @@ def main() -> int:
             info["server_url"] = a.server_url
         if meta.exists():
             old = json.loads(meta.read_text())
-            keys = ("platform", "machine", "model_sha256", "llama_server_version", "patch_format")
+            keys = ("platform", "machine", "model_sha256", "llama_server_version", "patch_format", "attempts")
             old.setdefault("patch_format", "line")
+            old.setdefault("attempts", 1)
             diff = [k for k in keys if old.get(k) != info.get(k)]
             if diff:
                 sys.exit(f"run {a.run_name} was started with a different {diff}; use a new --run-name")
@@ -278,30 +391,14 @@ def main() -> int:
                     n += 1
                     if (case["id"], arm) in done:
                         continue
-                    ctx, rinfo = retr.context(arm, case)
-                    ctx_tokens = server.count(ctx) if ctx else 0
-                    assert ctx_tokens <= a.budget, (arm, ctx_tokens)
-                    text_fmt = a.patch_format == "text"
-                    user, trunc = (L.build_text_user_prompt if text_fmt else L.build_user_prompt)(server, case, ctx)
-                    if a.dump:
-                        print(f"=== {case['id']} / {arm} ({ctx_tokens} ctx tokens) {rinfo}\n{ctx}\n")
+                    rec = solve(a, server, retr, case, arm, scratch)
+                    if rec is None:  # --dump
                         continue
-                    t0 = time.monotonic()
-                    resp = server.chat(L.TEXT_SYSTEM_PROMPT if text_fmt else L.SYSTEM_PROMPT, user,
-                                       L.TEXT_FIX_SCHEMA if text_fmt else L.FIX_SCHEMA,
-                                       max_tokens=300 if text_fmt else 200, cache_prompt=a.cache_prompt)
-                    dt = time.monotonic() - t0
-                    raw = resp["choices"][0]["message"]["content"]
-                    rec = {"id": case["id"], "arm": arm, "kind": case.get("kind"),
-                           "error_code": case.get("error_code"), "split": case["split"],
-                           "prompt_tokens": resp["usage"]["prompt_tokens"],
-                           "ctx_tokens": ctx_tokens, "latency_s": round(dt, 3),
-                           "program_truncated": trunc, "retrieved": rinfo, "raw": raw}
-                    rec.update((score_text if text_fmt else score)(a, case, {"raw": raw, "arm": arm}, scratch))
                     out.write(json.dumps(rec) + "\n")
                     out.flush()
-                    print(f"[{n}/{total}] {case['id']:<32} {arm:<20} {dt:6.1f}s "
-                          f"ctx={ctx_tokens:<5} correct={rec['correct']} compiles={rec['compiles']}",
+                    extra = f" calls={rec['n_calls']}" if "attempts" in rec else ""
+                    print(f"[{n}/{total}] {case['id']:<32} {arm:<20} {rec['latency_s']:6.1f}s "
+                          f"ctx={rec['ctx_tokens']:<5} correct={rec['correct']} compiles={rec['compiles']}{extra}",
                           flush=True)
     finally:
         if proc and proc.poll() is None:

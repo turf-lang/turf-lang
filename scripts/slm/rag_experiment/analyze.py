@@ -14,7 +14,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ARMS = ["A0_none", "A1_category", "A1p_production", "A2_bm25_docs", "A3_examples",
         "A4_examples_docs",
-        "A5_random_examples", "A6_production_examples"]
+        "A5_random_examples", "A6_production_examples", "A7_examples_reretrieve"]
 # `exact_text`: new_code is the original line, wherever the model put it.
 # `exact`: the same text on the mutated line. The gap between them is a
 # localisation miss (the right fix on the wrong line).
@@ -60,9 +60,12 @@ def main() -> int:
     if any("located" in r for r in rows):
         rates[rates.index("right_line"):rates.index("right_line")] = ["located", "unchanged"]
         rates.append("correct_top")
+    retries = all("attempts" in r for r in rows)  # runs made with --attempts N > 1
     for r in rows:
         for k in rates:
             r.setdefault(k, False)
+        if retries:
+            r["correct@1"] = r["attempts"][0]["correct"]
     by: dict[str, dict[str, dict]] = {}
     for r in rows:
         r["exact_text"] = r["exact"]
@@ -87,25 +90,53 @@ def main() -> int:
         pt = sum(r["prompt_tokens"] for r in rs) / max(n, 1)
         ct = sum(r.get("ctx_tokens", 0) for r in rs) / max(n, 1)
         out.append(f"| {arm} | {n} | " + " | ".join(cells) + f" | {lat:.1f} | {pt:.0f} | {ct:.0f} |")
-    out += ["", "## Paired comparison of `correct` (exact McNemar)", "",
-            "b = arm correct and baseline wrong, c = baseline correct and arm wrong.", "",
-            "| arm | vs | arm correct | base correct | b | c | p |", "|---|---|---|---|---|---|---|"]
-    for base in ("A1p_production", "A1_category", "A0_none"):
-        if base not in arms:
-            continue
-        for arm in arms:
-            if arm == base:
+    metrics = ["correct"] + (["correct@1"] if retries else [])
+    for metric in metrics:
+        out += ["", f"## Paired comparison of `{metric}`" + (" (final outcome)" if retries and metric == "correct" else "")
+                + " (exact McNemar)", "",
+                "b = arm correct and baseline wrong, c = baseline correct and arm wrong.", "",
+                "| arm | vs | arm correct | base correct | b | c | p |", "|---|---|---|---|---|---|---|"]
+        for base in ("A1p_production", "A1_category", "A0_none"):
+            if base not in arms:
                 continue
-            b = sum(1 for i in ids if by[i][arm]["correct"] and not by[i][base]["correct"])
-            c = sum(1 for i in ids if by[i][base]["correct"] and not by[i][arm]["correct"])
-            ka = sum(1 for i in ids if by[i][arm]["correct"])
-            kb = sum(1 for i in ids if by[i][base]["correct"])
-            out.append(f"| {arm} | {base} | {ka} | {kb} | {b} | {c} | {mcnemar_exact(b, c):.4f} |")
+            for arm in arms:
+                if arm == base:
+                    continue
+                b = sum(1 for i in ids if by[i][arm][metric] and not by[i][base][metric])
+                c = sum(1 for i in ids if by[i][base][metric] and not by[i][arm][metric])
+                ka = sum(1 for i in ids if by[i][arm][metric])
+                kb = sum(1 for i in ids if by[i][base][metric])
+                out.append(f"| {arm} | {base} | {ka} | {kb} | {b} | {c} | {mcnemar_exact(b, c):.4f} |")
+    if retries:
+        top = max(len(by[i][x]["attempts"]) for i in ids for x in arms) if ids else 1
+        top = max(top, max((r["n_calls"] for r in rows), default=1))
+        cat = lambda r, k: r["correct_at"] is not None and r["correct_at"] <= k
+        out += ["", "## Retries with compiler feedback", "",
+                "`correct@k`: a correct patch within the first k attempts. A retry happens only after a patch "
+                "production's sandbox would reject; the final `correct` equals `correct@N`.", "",
+                "| arm | n | " + " | ".join(f"correct@{k}" for k in range(1, top + 1)) +
+                " | mean n_calls | mean total latency s |", "|---|---|" + "---|" * (top + 2)]
+        for arm in arms:
+            rs = [by[i][arm] for i in ids]
+            cells = [pct(sum(1 for r in rs if cat(r, k)), n) for k in range(1, top + 1)]
+            nc = sum(r["n_calls"] for r in rs) / max(n, 1)
+            lt = sum(r["latency_total_s"] for r in rs) / max(n, 1)
+            out.append(f"| {arm} | {n} | " + " | ".join(cells) + f" | {nc:.2f} | {lt:.1f} |")
+        out += ["", "## Gain from retries", "",
+                f"| arm | correct@1 | correct@{top} | gain | cases retried | retried and fixed |", "|---|---|---|---|---|---|"]
+        for arm in arms:
+            rs = [by[i][arm] for i in ids]
+            c1 = sum(1 for r in rs if cat(r, 1))
+            cn = sum(1 for r in rs if cat(r, top))
+            ret = [r for r in rs if r["n_calls"] > 1]
+            out.append(f"| {arm} | {c1}/{n} | {cn}/{n} | {cn - c1:+d} | {len(ret)} | "
+                       f"{sum(1 for r in ret if r['correct'])} |")
     # A test case whose (broken line, fixed line) pair also occurs in the train
     # bank can be answered by copying a retrieved example; "novel" cases cannot.
     cdir = Path(a.corpus_dir)
     train = [json.loads(x) for x in (cdir / "train.jsonl").read_text().splitlines() if x.strip()]
-    test = {e["id"]: e for e in (json.loads(x) for x in (cdir / "test.jsonl").read_text().splitlines() if x.strip())}
+    split = rows[0].get("split", "test") if rows else "test"
+    test = {e["id"]: e for e in (json.loads(x) for x in (cdir / f"{split}.jsonl").read_text().splitlines() if x.strip())}
     pairs = {(e["mutated_line"].strip(), e["original_line"].strip()) for e in train}
     seen = lambda i: i in test and (test[i]["mutated_line"].strip(), test[i]["original_line"].strip()) in pairs
     family = lambda i: "foreign" if (by[i][arms[0]].get("kind") or "").startswith("foreign") else "classic"

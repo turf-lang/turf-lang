@@ -424,6 +424,11 @@ class Retriever:
         block = self.server.truncate_to(example_block(ex), self.budget)
         return block, {"examples": [e["id"] for e in ex]}
 
+    # --- A7: A3's retrieval, re-run on a retry with the rejected patch's diagnostic
+    def examples_reretrieve(self, case: dict, error_code: str, error_message: str) -> tuple[str, dict]:
+        q = {**case, "error_code": error_code, "error_message": error_message}
+        return self.examples_block(q)  # query line stays the original mutated line; leak assert inside
+
     # --- A4
     def examples_docs(self, case: dict) -> tuple[str, dict]:
         ex = self.examples(case)
@@ -451,7 +456,7 @@ class Retriever:
             return self.production(case)
         if arm == "A2_bm25_docs":
             return self.docs(case)
-        if arm == "A3_examples":
+        if arm in ("A3_examples", "A7_examples_reretrieve"):
             return self.examples_block(case)
         if arm == "A4_examples_docs":
             return self.examples_docs(case)
@@ -463,7 +468,7 @@ class Retriever:
 
 
 ARMS = ["A0_none", "A1_category", "A1p_production", "A2_bm25_docs", "A3_examples",
-        "A4_examples_docs", "A5_random_examples", "A6_production_examples"]
+        "A4_examples_docs", "A5_random_examples", "A6_production_examples", "A7_examples_reretrieve"]
 
 # --------------------------------------------------------------------------
 # Prompt
@@ -515,7 +520,23 @@ def numbered_program(server: Server, case: dict) -> tuple[str, bool]:
     return fmt(a, b), True
 
 
-def build_user_prompt(server: Server, case: dict, context: str) -> tuple[str, bool]:
+RETRY_SENTENCE = (
+    "Your previous suggested fix was rejected -- \"PREVIOUS ATTEMPT FAILED\" above says why: "
+    "the compiler's own error for that attempt, or a problem with {what}. "
+    "Address that specific feedback; do not send the same fix again.\n\n")
+
+
+def feedback_block(feedback: str | None, what: str) -> str:
+    """The retry block of the user prompt. `what` names the format-specific
+    mistake (production: "how you copied original_code")."""
+    if not feedback:
+        return ""
+    return ("PREVIOUS ATTEMPT FAILED:\n" + feedback.strip("\n")[:FEEDBACK_MAX_CHARS] + "\n\n" +
+            RETRY_SENTENCE.format(what=what))
+
+
+def build_user_prompt(server: Server, case: dict, context: str,
+                      feedback: str | None = None) -> tuple[str, bool]:
     prog, trunc = numbered_program(server, case)
     return (
         "PROGRAM (line numbers are added for you, they are not part of the code):\n"
@@ -524,6 +545,7 @@ def build_user_prompt(server: Server, case: dict, context: str) -> tuple[str, bo
         f"{diag_for_prompt(case['diagnostic'])}\n\n"
         "CONTEXT:\n"
         f"{context if context else '(none)'}\n\n"
+        + feedback_block(feedback, "your reply (the line number or new_code)") +
         "Reply with ONLY the JSON object {\"line\": <int>, \"new_code\": <string>} "
         "for the one line to replace, or {\"line\": 0, \"new_code\": \"\"} if you cannot fix it."
     ), trunc
@@ -572,7 +594,8 @@ TEXT_SYSTEM_PROMPT = (
 )
 
 
-def build_text_user_prompt(server: Server, case: dict, context: str) -> tuple[str, bool]:
+def build_text_user_prompt(server: Server, case: dict, context: str,
+                           feedback: str | None = None) -> tuple[str, bool]:
     """Same program window, diagnostic and CONTEXT as build_user_prompt, but the
     program is shown verbatim (no line numbers, as in production) with the text
     of the error line beside it."""
@@ -594,6 +617,7 @@ def build_text_user_prompt(server: Server, case: dict, context: str) -> tuple[st
         f"{err_line}\n\n"
         "CONTEXT:\n"
         f"{context if context else '(none)'}\n\n"
+        + feedback_block(feedback, "how you copied original_code") +
         "Reply with ONLY the JSON object {\"original_code\": <the existing line, copied exactly>, "
         "\"new_code\": <the line that replaces it>}, or {\"original_code\": \"\", "
         "\"new_code\": \"\"} if you cannot fix it."
@@ -750,3 +774,68 @@ def trim_blank_edge_lines(text: str) -> str:
 def same_code(a: str, b: str) -> bool:
     norm = lambda s: [normalize_line(l) for l in _split_lines(s) if not _is_blank(l)]
     return norm(a) == norm(b)
+
+
+# --------------------------------------------------------------------------
+# Retry with compiler feedback (production: validateAndApplySuggestion() and
+# verifySuggestion() in src/slm/SLMIntegration.cpp)
+# --------------------------------------------------------------------------
+
+FEEDBACK_MAX_CHARS = 2500
+
+# verifySuggestion()'s rejection texts, verbatim except where a field name
+# differs in the harness ("code" is the PROGRAM block here).
+MSG_EMPTY_NEW_CODE = ("new_code was empty. Put the corrected Turf code in "
+                      "new_code; the harness cannot delete lines for you.")
+MSG_UNCHANGED = ("new_code is the same code as original_code. Change "
+                 "something: the error is still there.")
+MSG_UNCHANGED_LINE = ("new_code is the same code as the line you replace. Change "
+                      "something: the error is still there.")
+
+
+def msg_not_found(err_line_text: str) -> str:
+    return ("original_code does not appear in the program; copy the lines "
+            "exactly as they are in the PROGRAM, character for character. The line "
+            "the error is on reads: " + normalize_line(err_line_text))
+
+
+def msg_bad_line(why: str) -> str:
+    """Line format only (production has no line numbers): the patch cannot be applied."""
+    return f"The patch could not be applied: {why}."
+
+
+HEADER_RE = re.compile(r"──\s*error at line (\d+)(?:, col \d+)?\s*(?:\[(E\d+)[^\]]*\])?")
+
+
+def parse_diag(out: str) -> tuple[str, str] | None:
+    """(error code, message) of the first error in compiler output; the logic
+    of build_corpus.evaluate()."""
+    out = strip_ansi(out)
+    hs = list(HEADER_RE.finditer(out))
+    if not hs:
+        return None
+    after = out[hs[0].end():].splitlines()
+    msg = next((l.strip() for l in after if l.strip() and not l.strip().startswith("──")), "")
+    return hs[0].group(2) or "", msg
+
+
+def compile_feedback(case: dict, compile_out: str, path: str, patched: list[str],
+                     start: int, end: int, n_new: int, fuzzy: bool, src: list[str]) -> str:
+    """The text a failed compile hands back: the cleaned diagnostic of the
+    patched program, then (as production does for its best-placed candidate)
+    what the replaced lines became. `n_new` counts the lines that replaced
+    [start, end]."""
+    diag = diag_for_prompt(compile_out.replace(path, case.get("source_test") or "program.tr"))
+    fb = diag or "The previous suggested new_code failed to compile."
+    where = f" {start}" if start == end else f"s {start}-{end}"
+    if fuzzy:
+        fb += ("\nYour original_code was not an exact copy of the program; it was matched to line"
+               + where + ", which read:\n")
+        for i in range(start, end + 1):
+            fb += "  " + src[i - 1] + "\n"
+        fb += "Copy the lines exactly next time."
+    fb += "\nYour new_code replaced line" + where + "; afterwards the code read:\n"
+    lo, hi = max(1, start - 1), min(len(patched), start + n_new)
+    for i in range(lo, hi + 1):
+        fb += "  " + patched[i - 1] + "\n"
+    return fb

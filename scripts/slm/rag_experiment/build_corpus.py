@@ -577,8 +577,17 @@ def main():
     ap.add_argument("--train-target", type=int, default=320)
     ap.add_argument("--test-target", type=int, default=72)
     ap.add_argument("--max-try", type=int, default=30, help="candidates compiled per source file")
+    ap.add_argument("--fresh-test", action="store_true",
+                    help="build corpus/test_fresh.jsonl + STATS_fresh.md from test-bucket files not used by test.jsonl "
+                         "(default seed 20261020, target 100); leaves train/test untouched")
+    ap.add_argument("--out-dir", default=None, help="write outputs here instead of corpus/ (for reproducibility checks)")
     ap.add_argument("--per-file-pool", type=int, default=4, help="accepted mutants kept per file before selection")
     args = ap.parse_args()
+    global OUT
+    if args.out_dir:
+        OUT = Path(args.out_dir).resolve()
+    if args.fresh_test:
+        return main_fresh(args)
     if not TURFC.exists():
         sys.exit(f"missing {TURFC}")
     own_work = not os.environ.get("CORPUS_WORK")
@@ -640,6 +649,124 @@ def main():
     if own_work:
         shutil.rmtree(WORK, ignore_errors=True)
     print(f"train={len(train)} test={len(test)}")
+
+
+FRESH_SEED = 20261020
+
+
+def read_jsonl(path):
+    with open(path) as fh:
+        return [json.loads(l) for l in fh if l.strip()]
+
+
+def main_fresh(args):
+    """Fresh held-out test set: test-bucket files that are not sources of the old test.jsonl."""
+    global WORK
+    if not TURFC.exists():
+        sys.exit(f"missing {TURFC}")
+    seed = FRESH_SEED if args.seed == 20260 else args.seed
+    target = 100 if args.test_target == 72 else args.test_target
+    base = HERE / "corpus"  # the committed train/test, regardless of --out-dir
+    old_test = read_jsonl(base / "test.jsonl")
+    train = read_jsonl(base / "train.jsonl")
+    used = {e["source_test"] for e in old_test}
+    train_src = {e["source_test"] for e in train}
+    own_work = not os.environ.get("CORPUS_WORK")
+    WORK = Path(os.environ.get("CORPUS_WORK") or tempfile.mkdtemp(prefix="rag_corpus_fresh_"))
+    WORK.mkdir(parents=True, exist_ok=True)
+
+    skipped = collections.Counter()
+    files = []
+    for p in sorted((REPO / "tests").rglob("*.tr")):
+        f = str(p.relative_to(REPO))
+        if p.name.startswith("fail_"):
+            skipped["fail_* file"] += 1
+        elif f.startswith(SKIP_DIRS):
+            skipped["excluded directory"] += 1
+        elif split_of(f) != "test":
+            skipped["train bucket (never used)"] += 1
+        elif f in used:
+            skipped["already a source of test.jsonl"] += 1
+        else:
+            files.append(f)
+    assert not (set(files) & used) and not (set(files) & train_src)
+    assert all(split_of(f) == "test" for f in files)
+    files.sort(key=lambda p: hashlib.sha1((str(seed) + p).encode()).hexdigest())
+
+    pool, rejects, mined = [], collections.Counter(), 0
+    with cf.ThreadPoolExecutor(args.jobs) as ex:
+        pos, batch = 0, args.jobs * 6
+        while pos < len(files):  # every remaining file is tried
+            chunk = files[pos:pos + batch]
+            pos += batch
+            good = []
+            for f, o in zip(chunk, ex.map(check_original, chunk)):
+                if isinstance(o, str):
+                    skipped[o] += 1
+                else:
+                    good.append((f, o))
+            for acc, rej in ex.map(lambda fo: mine_file(fo[0], fo[1], seed, args.max_try, args.per_file_pool), good):
+                mined += 1
+                pool.extend(acc)
+                rejects.update(rej)
+            print(f"[fresh] files {min(pos, len(files))}/{len(files)} pool {len(pool)}", file=sys.stderr)
+
+    rng = random.Random(seed)
+    fresh = select(pool, target, 2, 0.35, rng)
+    fresh.sort(key=lambda e: (e["source_test"], e["line"], e["kind"]))
+    fsrc = {e["source_test"] for e in fresh}
+    assert not (fsrc & train_src), "fresh source leaks into train.jsonl"
+    assert not (fsrc & used), "fresh source also in test.jsonl"
+    assert all(split_of(s) == "test" for s in fsrc)
+    OUT.mkdir(parents=True, exist_ok=True)
+    with open(OUT / "test_fresh.jsonl", "w") as fh:
+        for i, e in enumerate(fresh):
+            e["split"] = "test_fresh"
+            h = hashlib.sha1((e["source_test"] + str(e["line"]) + e["kind"] + e["mutated_line"]).encode()).hexdigest()[:8]
+            e["id"] = f"fresh-{i:04d}-{h}"
+            fh.write(json.dumps({k: e[k] for k in FIELDS}, ensure_ascii=False) + "\n")
+    write_stats_fresh(fresh, old_test, skipped, rejects, pool, mined, seed, len(files))
+    if own_work:
+        shutil.rmtree(WORK, ignore_errors=True)
+    print(f"test_fresh={len(fresh)} files={len(fsrc)}")
+
+
+def fam_of(e):
+    return "foreign" if e["kind"].startswith("foreign") else "classic"
+
+
+def write_stats_fresh(fresh, old, skipped, rejects, pool, mined, seed, nfiles):
+    n = len(fresh)
+    L = ["# Fresh held-out test set statistics", "",
+         f"Generated by `build_corpus.py --fresh-test` (seed {seed}). Sources: test-hash-bucket files that are not a "
+         "`source_test` of test.jsonl and not in train.jsonl (asserted).", "",
+         f"- entries: {n}",
+         f"- distinct source files: {len({x['source_test'] for x in fresh})}",
+         f"- distinct error codes: {len({x['error_code'] for x in fresh})} (old test: {len({x['error_code'] for x in old})})",
+         f"- eligible fresh source files offered to mining: {nfiles}; mined (original compiles and runs): {mined}",
+         f"- candidate pool before balanced selection: {len(pool)}", "",
+         "## By kind", "", "| kind | fresh | fresh % | old test |", "|---|---|---|---|"]
+    kf = collections.Counter(x["kind"] for x in fresh)
+    ko = collections.Counter(x["kind"] for x in old)
+    for k in sorted(set(kf) | set(ko), key=lambda k: (-kf[k], k)):
+        L.append(f"| {k} | {kf[k]} | {100 * kf[k] / max(1, n):.1f}% | {ko[k]} |")
+    ff, fo = collections.Counter(map(fam_of, fresh)), collections.Counter(map(fam_of, old))
+    L += ["", "## Family mix vs old test", "", "| family | fresh | fresh % | old test | old % |", "|---|---|---|---|---|"]
+    for f in ("foreign", "classic"):
+        L.append(f"| {f} | {ff[f]} | {100 * ff[f] / max(1, n):.1f}% | {fo[f]} | {100 * fo[f] / max(1, len(old)):.1f}% |")
+    L += ["", f"Distinct kinds: fresh {len(kf)}, old test {len(ko)}. Largest kind share: fresh "
+          f"{100 * max(kf.values()) / max(1, n):.1f}%, old {100 * max(ko.values()) / max(1, len(old)):.1f}%.", "",
+          "## By error code", "", "| code | fresh | old test |", "|---|---|---|"]
+    cf_, co = collections.Counter(x["error_code"] for x in fresh), collections.Counter(x["error_code"] for x in old)
+    for k in sorted(set(cf_) | set(co), key=lambda k: (-cf_[k], k)):
+        L.append(f"| {k or '(none)'} | {cf_[k]} | {co[k]} |")
+    byreason = collections.Counter()
+    for (k, r), c in rejects.items():
+        byreason[r] += c
+    L += ["", "## Source files skipped", "", table(skipped, "reason"), "",
+          "## Rejected mutation candidates (by reason)", "",
+          f"Total compiled candidates rejected: {sum(byreason.values())}", "", table(byreason, "reason")]
+    (OUT / "STATS_fresh.md").write_text("\n".join(L) + "\n")
 
 
 def table(counter, head):

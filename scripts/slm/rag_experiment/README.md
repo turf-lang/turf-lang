@@ -43,6 +43,44 @@ diagnostic line). Candidate places are tried best first and the first patch that
 original_code, which production rejects), `n_cands`, `loc_how`. A run's format is recorded in its meta file, and a
 run is never resumed under a different one.
 
+## Retry with compiler feedback
+
+`--attempts N` (default 1: one model call per case and arm, the result rows and meta are as before) adds production's
+retry loop (`validateAndApplySuggestion()` in `src/slm/SLMIntegration.cpp`, three attempts there). Attempt k+1 happens
+only when attempt k produced a patch the `--smart` sandbox rejects:
+
+- the patch does not compile at any candidate place (`reason` `compile_error`),
+- `new_code` is empty (`empty_new_code`), or the same code as `original_code` (`unchanged`),
+- `original_code` cannot be located (`not_found`),
+- (line format only) the line is out of range or `new_code` spans several lines (`not_applied`).
+
+There is no retry when the model abstains, when its output does not parse (production gives up on an invalid model
+response), or when the patch compiles: production cannot know a compiling patch is semantically wrong, so a
+compiling-but-wrong patch ends the case. The line format has no production counterpart; there an empty or unchanged
+`new_code` is rejected for the retry only when the patch also fails to compile, so its scoring is the same at one attempt.
+
+The next prompt gets a `PREVIOUS ATTEMPT FAILED:` block (after CONTEXT) followed by production's sentence ("Your
+previous suggested fix was rejected -- ... Address that specific feedback; do not send the same fix again.").
+The block is `verifySuggestion()`'s own text for the three non-compile rejections (empty `new_code`, unchanged, `original_code`
+not found plus the line the error is on; "code" reads PROGRAM here). For a compile failure it is the cleaned compiler
+diagnostic of the rejected program from the best-ranked candidate place (ANSI stripped, temp path replaced by the case's
+`source_test`, `Fix:` and `--explain` lines removed), then, as production appends, a note when `original_code` was only a
+fuzzy match and "Your new_code replaced line N; afterwards the code read:" with the patched lines around the edit. The
+model's previous patch is shown only through that last part, as in production. CONTEXT is the attempt-1 context except in
+`A7_examples_reretrieve`. `--keep-prompts` stores every attempt's full user prompt.
+
+With `--attempts` > 1 a result row keeps the existing fields as the FINAL attempt's outcome (`correct`, `compiles`,
+`raw`, `latency_s`, `prompt_tokens`, `retrieved`, ...) and adds:
+
+- `attempts`: one dict per model call with `attempt`, `raw`, the scored fields, `reason` (`correct`, `compiles_wrong`,
+  `abstained`, `unparsed`, or a retry reason above), `feedback_given` (the block shown to that attempt, null on the
+  first), `retrieved`, `ctx_tokens`, `prompt_tokens`, `latency_s`
+- `n_calls`, `correct_at` and `compiled_at` (first attempt that was correct / compiled, or null),
+  `latency_total_s`, `final_reason`
+
+`attempts` is part of the meta file's checked keys (a meta file without it means 1), so runs with different attempt
+counts are never mixed.
+
 ## Arms
 
 The user prompt is identical across arms except for its CONTEXT block. Every
@@ -59,6 +97,7 @@ measured with the server's `/tokenize`).
 | `A4_examples_docs` | A3's examples, then A2's chunks in the budget that remains |
 | `A5_random_examples` | 3 random train examples (seeded by case id): the control that separates "any example teaches the format" from "relevant retrieval helps" |
 | `A6_production_examples` | `A3_examples`'s examples followed by `A1p_production`'s text, sharing the budget |
+| `A7_examples_reretrieve` | identical to `A3_examples` on attempt 1. On a retry (`--attempts` > 1) the examples are retrieved again with the error code and message parsed from the rejected patch's compiler output (the parser is build_corpus.py's header/message logic) and the original mutated line as the query; a rejection that has no new diagnostic (empty, unchanged, not found) keeps the case's own error. The leakage assertion applies to every retrieval and each attempt's retrieved ids are recorded |
 
 Retrieval never reads the test split and never returns an example with the
 query's `source_test` (asserted on every retrieval; `--selftest` checks the
@@ -84,6 +123,12 @@ line out of range is rejected. Per (case, arm) the result row records:
   the mutated line, so `exact_text` minus `exact` counts right fixes placed on the wrong line)
 - `prompt_tokens`, `ctx_tokens`, `latency_s`, `raw`, `retrieved` (chunk or example ids)
 
+## Splits
+
+`test` is the split the design was tuned against. `test_fresh` (`corpus/test_fresh.jsonl`, rows with
+`"split": "test_fresh"`) is held out: it is read only by a run that passes
+`--split test_fresh`, and `analyze.py` reads the split named in the result rows to find the pairs seen in train.
+
 ## Run
 
 ```
@@ -91,7 +136,8 @@ python3 scripts/slm/rag_experiment/run_rag.py --run-name full --split test
 python3 scripts/slm/rag_experiment/analyze.py full
 ```
 
-Flags: `--arms A0_none,A3_examples`, `--limit N`, `--corpus-dir`, `--split`,
+Flags: `--arms A0_none,A3_examples`, `--limit N`, `--corpus-dir`, `--split` (`test`, or `test_fresh`),
+`--attempts N`, `--keep-prompts`,
 `--server-url URL` (use a running server instead of starting one),
 `--turfc`, `--llama-server`, `--model`, `--threads` (8), `--gpu-layers` (0),
 `--port`, `--budget`, `--scratch` (default: system temp dir), `--cache-prompt`,
@@ -113,7 +159,9 @@ by subset, and `correct` by `kind`. The subsets are foreign-syntax vs classic
 mutations, and "pair seen in train" vs "novel pair": a test case whose exact
 (broken line, fixed line) pair also occurs in the train bank can be answered by
 copying a retrieved example, so a retrieval gain that holds only on seen pairs
-is recall, not generalisation. Output goes to stdout and `results/<run_name>.md`.
+is recall, not generalisation. When the rows carry `attempts` it adds `correct@1`, `correct@2`, ... per arm with mean
+`n_calls` and mean total latency, the paired McNemar tests for both the final `correct` and `correct@1`, and a "Gain from
+retries" table (`correct@N` minus `correct@1`, cases retried, retried and fixed). Output goes to stdout and `results/<run_name>.md`.
 
 ## Running on macOS
 
