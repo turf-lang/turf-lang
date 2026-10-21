@@ -1,0 +1,20 @@
+{
+ "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+ "machine": "arm64",
+ "python": "3.13.13",
+ "model": "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
+ "model_sha256": "cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046",
+ "llama_server_version": "version: 0.7.0 (build 11669, commit 620d2225c)",
+ "gpu_layers": 99,
+ "threads": 4,
+ "budget": 1200,
+ "arms": [
+  "A0_none",
+  "A1p_production",
+  "A3_examples",
+  "A7_examples_reretrieve"
+ ],
+ "patch_format": "text",
+ "attempts": 3,
+ "split": "test_fresh"
+}

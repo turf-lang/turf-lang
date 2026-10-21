@@ -1,0 +1,30 @@
+===== 2026-10-20 22:45:47 driver start =====
+git HEAD: d1173482f4b7f048062d821c9ae9b41f2cc8efa4  branch: experiment/rag-slm
+git status (harness dir):
+?? scripts/slm/rag_experiment/results/confirm-logs/
+?? scripts/slm/rag_experiment/run_confirm.sh
+--- sha256 of frozen inputs
+29128875fca9087fc5b7ccfd9caeb50b38e54426d116863a64a8dbc8419cd51d  scripts/slm/rag_experiment/run_rag.py
+ba1a8a5c7656db724dd937cea78d2a4e34336dd113145b191cb7fa5ad77e247a  scripts/slm/rag_experiment/rag_lib.py
+bb3b943f941c65c117731e69edff012658adec79f3420914cbdc7a17fa09f739  scripts/slm/rag_experiment/analyze.py
+1e42e5537be1dad7abb947bbd7d32c07c0c44f2472c2caf483266c7fe1cdeef6  scripts/slm/rag_experiment/corpus/train.jsonl
+e3eca1493c5502818eba4714bd4a2d9ce6aa39653f7ae513b4ac8e5cc24b5aef  scripts/slm/rag_experiment/corpus/test_fresh.jsonl
+fca9f9314cb59b73293cbc4f4958886645e8e1549b5c2139f49efd5ef51cc5a3  scripts/slm/rag_experiment/run_confirm.sh
+--- models
+cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046  models/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf
+724fb256bec1ff062b2f65e4569e871ad2e95ab2a3989723d1769c54294730b7  /Users/puang/models/qwen2.5-coder-3b/qwen2.5-coder-3b-instruct-q4_k_m.gguf
+509287f78cb4d4cf6b3843734733b914b2c158e43e22a7f4bf5e963800894d3c  /Users/puang/models/qwen2.5-coder-7b/qwen2.5-coder-7b-instruct-q4_k_m.gguf
+--- tools
+-rwxr-xr-x@ 1 puang  staff  3787512 20 Oct 01:31 build/turfc
+2d5ab48f49aafb63a93c4a15d458b04fede450614d33b4a3dfee77d65e7668d7  build/turfc
+version: 0.7.0 (build 11669, commit 620d2225c)
+built with AppleClang 21.0.0.21000334 for Darwin arm64
+Python 3.13.13
+--- machine
+ProductName:		macOS
+ProductVersion:		26.5.2
+BuildVersion:		25F84
+Apple M4
+25769803776
+Now drawing from 'AC Power'
+ -InternalBattery-0 (id=22020195)	97%; charging; 0:40 remaining present: true
