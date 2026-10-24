@@ -103,6 +103,31 @@ Notes:
   on this program, against #257's 53%: the gap is there, a little smaller than
   the figure recorded, and it is not closed.
 
+### 2026-10-24 — NM-4: one shared cold trap block per function (dropped)
+
+The question (roadmap NM-4, issue #296): with every overflow check in a
+function branching to ONE cold, `noreturn` trap block (the file and line merged
+by `phi`s, the branch weighted unlikely, `turf_rt_panic` marked `noreturn` and
+`cold`) instead of a trap block per check, does LLVM vectorize the hot loop?
+Measured on `roadmap/v2.2.0` plus the change, system LLVM 23.1.3, same machine,
+15 interleaved rounds pinned to CPU 2, process start-up included.
+
+| Program | Turf before | Turf after | `clang -O3` |
+|---|---|---|---|
+| `particles -O2` (min / median, ms) | 29.3 / 31.9 | 29.1 / 33.3 | 20.4 / 23.9 |
+| `particles -O3` | 30.4 / 33.3 | 28.3 / 33.8 | |
+| `structs -O2` | 654.9 / 689.0 | 648.9 / 680.4 | 582.7 / 623.7 |
+| `structs -O3` | 657.4 / 705.8 | 646.6 / 682.6 | |
+| packed-integer instructions in `main` | 0 | 0 | 2 (`particles`) |
+
+Every checksum matched. LLVM's loop vectorizer gives the same reason before and
+after (`opt -O3 -pass-remarks-missed=loop-vectorize`): "Early exit loop with
+store but no supported condition load". Early-exit vectorization in LLVM 23
+does not take a loop that stores, and these loops store every particle, so one
+exit block instead of several changes nothing it looks at. The differences are
+within run-to-run noise. The restructuring is not merged; NM-2 (proving checks
+away) and NM-3 (`math::wrapping_*`) are what remain for this loop.
+
 ## Fixed before the baseline
 
 Writing these benchmarks found five performance bugs (and one compiler crash,
