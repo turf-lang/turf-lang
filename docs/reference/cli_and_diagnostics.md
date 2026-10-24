@@ -117,6 +117,7 @@ run `turf help` for the list of commands
 | `--module` | With `--check`: the file is a module that is only ever imported, so it needs no `main`. Without `--check` it is an error. |
 | `--smart` | Asks a local language model to suggest a fix for an error the compiler has no fix of its own for. See [`--smart`](#--smart). |
 | `--smart-write-fix=<path>` | Writes your program to that file with every [`Fix:`](#fixes) the compiler showed applied; with `--smart`, when the compiler had no fix, the model's validated suggestion instead. Your source file is never changed. |
+| `--diagnostics=json` | Writes each diagnostic to stderr as one line of JSON instead of text, for tools. `--diagnostics=text` is the default. See [Diagnostics as JSON](#diagnostics-as-json). |
 | `--stdlib-warnings` | Shows warnings that point into the standard library, which are hidden by default. See [Warnings in the standard library](#warnings-in-the-standard-library). |
 | `--allow <code>` `--warn <code>` `--deny <code>` | Set the [level](#lint-levels) of one warning, such as `--deny E163`: `allow` does not report it, `warn` (every warning's default) reports it, `deny` reports it as an error and fails the build. Repeatable; a later flag for a code replaces an earlier one. |
 | `--lint-set <2.N>` | Starts every warning added after release 2.N at `allow`, so a newer compiler adds no warning to a build that pinned 2.N. See [Lint levels](#lint-levels). |
@@ -406,6 +407,20 @@ hint: upgrade turf: this compiler's interface is newer than this turf understand
 
 A differing *release* version is never an error on its own. In a project, a manifest's `turf = "2.0"` is about the compiler's release version and is checked separately ([Projects & Packages](projects_and_packages.md#2-turftoml)).
 
+**The interface manifest.** `turfc --version --json` prints the same facts as one JSON object, for tools: the interface, the version of each format the compiler reads or writes, and a list of named features, so a tool asks "does this compiler have `diagnostics-json`?" instead of comparing numbers. Keys are only ever added (`"manifest": 1`); the schema is `docs/reference/schemas/version.schema.json`.
+
+```text
+$ turfc --version --json
+{"features":["package-graph","exit-status-2","test","format-check","format-skip-unlexable","emit-obj","test-only","lint-levels","diagnostics-json","version-json","smart"],"interface":{"major":1,"minor":10},"llvm":"22.1.8","manifest":1,"root":"/opt/turf","runtime":"turf_rt_abi_2_0","schemas":{"diagnostics":"1.0","package_graph":1},"turfc":"2.1.1"}
+```
+
+| Key | Value |
+|---|---|
+| `interface` | `{"major", "minor"}`, as line 2 of `turfc --version`. |
+| `schemas` | `diagnostics`: the [diagnostics JSON](#diagnostics-as-json) schema version; `package_graph`: the package-graph `"format"` `--package-graph` reads. |
+| `features` | One name per addition to the interface, in order: `package-graph` (1.1), `exit-status-2` (1.2), `test` (1.3), `format-check` (1.4), `format-skip-unlexable` (1.5), `emit-obj` (1.6), `test-only` (1.7), `lint-levels` (1.8), `diagnostics-json` (1.9), `version-json` (1.10). Then what this build has: `smart`, `embedded-lld`, `bundled-runtime`. |
+| `turfc`, `llvm`, `runtime`, `root` | As the text lines. |
+
 ### Finding the compiler
 
 `turf` looks for `turfc` in this order and takes the first match:
@@ -437,7 +452,7 @@ Everything above is `turf`. This section is for whoever drives the compiler dire
 $ turfc help
 Usage: turfc <filename.tr> [-o output] [--emit-llvm | --emit-obj] [--smart]
          [--smart-write-fix=<path>] [--link <libname>]
-         [--allow-unsafe-modules] [--stdlib-warnings]
+         [--allow-unsafe-modules] [--stdlib-warnings] [--diagnostics=json|text]
          [--allow <code>] [--warn <code>] [--deny <code>] [--lint-set <2.N>]
          [-O0|-O1|-O2|-O3|-Os] [-g] [--target=<triple>] [-mcpu=<cpu>]
          [--check [--module]] [--package-graph <file>]
@@ -585,7 +600,33 @@ These errors can carry a `Fix:`:
 | E102 | the missing `;` is inserted |
 | E138 | the method gets its struct's type parameters (`fn<T>`) |
 
-Output that matches the text of diagnostics (a script, an editor extension) will see `Fix:` lines. Diagnostic wording is not part of the compatibility promise; the error codes are.
+Output that matches the text of diagnostics (a script, an editor extension) will see `Fix:` lines. Diagnostic wording is not part of the compatibility promise; the error codes are. A tool reads [the JSON form](#diagnostics-as-json) instead.
+
+### Diagnostics as JSON
+
+`turfc --diagnostics=json` (also `--check --diagnostics=json`) writes each diagnostic to stderr as one line holding one JSON object, in the order and at the moment the text form would print it, and nothing else in its place: no file headers, no colour. The exit status is the same as for the text form. A usage error (exit status 2) is still printed as text, since no diagnostic exists then.
+
+```text
+$ turfc main.tr --check --diagnostics=json
+{"category":"undeclared variable","code":"E040","denied":false,"file":"main.tr","fix":{"description":"replace 'nmae' with 'name'","edits":[{"file":"main.tr","replacement":"name","span":{"end":{"column":16,"line":4},"start":{"column":12,"line":4}}}]},"hint":"It may be from the current file: 'name'","message":"I can't find anything named 'nmae'.","related":[],"severity":"error","span":{"end":{"column":16,"line":4},"start":{"column":12,"line":4}},"title":null,"version":"1.0"}
+```
+
+| Field | Value |
+|---|---|
+| `version` | The schema version, `"1.0"`. A minor version adds fields; a major version changes or removes one. `turfc --version --json` reports it too. |
+| `severity` | `"error"` or `"warning"`. A warning whose [lint level](#lint-levels) is `deny` is an `"error"`, with `denied` set. |
+| `code` | `"E040"`. Every error has one; `null` only for a warning with no code. |
+| `category` | The code's category from the registry (`"type mismatch"`), or `null`. |
+| `title` | The heading line of the text form (`"Nothing to infer!"`), or `null`. |
+| `message` | The message, without colour. |
+| `hint` | The `Hint:` text, or `null`. |
+| `file` | The file, as the compiler opened it. |
+| `span` | `{"start": {"line", "column"}, "end": {"line", "column"}}`: 1-based, columns in bytes, `end` exclusive. `null` for a diagnostic about a whole file. |
+| `related` | The `Note:` locations: `[{"file", "span", "message"}]`. |
+| `fix` | The compiler's checked [fix](#fixes) as `{"description", "edits": [{"file", "span", "replacement"}]}`, or `null`. The edits apply to the original text and never overlap. |
+| `denied` | `true` for a warning made an error by `deny`. |
+
+The schema is `docs/reference/schemas/diagnostics.schema.json` (JSON Schema). `docs/reference/schemas/diagnostics-fixtures/` holds a source and its output for an error with a fix, an error with a related location and a warning; a tool's tests can read those files. `--smart`'s model suggestions are printed as text.
 
 ### Errors and warnings
 

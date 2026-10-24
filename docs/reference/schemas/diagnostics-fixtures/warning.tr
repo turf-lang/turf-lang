@@ -1,0 +1,9 @@
+// A warning: the program compiles, and the result of a call is dropped.
+fn one(): int {
+    return 1;
+}
+
+fn main(): int {
+    mut unused: int = one();
+    return 0;
+}
