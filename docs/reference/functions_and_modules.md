@@ -404,6 +404,13 @@ fn main(): int {
 }
 ```
 
+A literal is a receiver like a variable of its type: `21.double_it()` above,
+`4.is_even()`, `"hello".is_long()`. A minus sign is not part of an integer
+literal, and a call binds tighter than it, so `-1.abs()` is `-(1.abs())`,
+which is `-1`; write `(-1).abs()` for the absolute value of minus one. A
+decimal literal reads more clearly in parentheses, `(1.5).floor()`, than as
+`1.5.floor()`, where the eye has to decide which dot ends the number.
+
 How the call is resolved:
 
 1. **A method first.** If the receiver's type has an instance method of that
