@@ -227,9 +227,9 @@ field before 3.0 can promote it (B-1, B-13).
 
 | Area | Items |
 |---|---|
-| Export | EX-1 `@export`, EX-2 `turf build --lib` (static, shared, generated `.h`, `--cpp` `.hpp`) |
-| Runtime | EX-3 the library-mode runtime (start on first call, per-entry stack base, owner thread, no signal handlers), EX-4 handles; RT-7 runtime in pieces |
-| Python | EX-5 `turf-python` (its own repository): extension modules and wheels, and a `python` package for calling Python |
+| Export | EX-1 `@export` (functions and handle methods), EX-2 `turf build --lib` (static, shared, generated `.h`, `--cpp` `.hpp`), EX-6 the JSON export description |
+| Runtime | EX-3 the library-mode runtime (start on first call, per-entry stack base, one thread at a time behind an entry lock, no signal handlers), EX-4 handles; RT-7 runtime in pieces |
+| Host languages | Own repositories, released after 2.9.0 at their own pace: EX-5 `turf-python` (TDP-2-031), EX-7 `turf-node` (TDP-2-032), EX-8 `turf-lua` (TDP-2-033). Every other language with a C FFI uses the header (TDP-2-030's table). |
 | Platforms | F-20 cross-linking with per-target runtimes |
 
 ### 2.7.x — Tooling and the pure compiler (additive half)
@@ -272,6 +272,7 @@ TDP-3-001's checks apply only to code that starts a thread.
 |---|---|
 | 3.1 | CC-0 design accepted (TDP-3-001); CC-1 thread-aware runtime with a single-thread fast path; CC-2 `thread` module |
 | 3.2 | CC-3 `sync` module, CC-4 async (library first), CC-5 non-blocking I/O, CC-6 TLS and UDP (TDP-3-002) |
+| 3.3 | EX-9 parallel entry into Turf libraries; `turf-jvm`, `turf-dotnet`, `turf-go`, `turf-beam` (TDP-3-003) |
 
 Other candidates: RT-2 GC tier 2 (after threads), F-10 self-hosting, the
 assistant's own roadmap (SL-* beyond 2.2, F-9's LoRA adapters), more platforms.
@@ -336,9 +337,13 @@ written in this order; this table is updated if they are not.
 | TDP-2-027 | Struct layout chosen by the compiler | ML-1 … ML-4, B-22 | 2.6, 2.8, 3.0 |
 | TDP-2-028 | Diagnostics that explain | DX-5 … DX-10 | 2.2, 2.3 |
 | TDP-2-029 | Wrapping C libraries | CX-1 … CX-6 | (2.8.0) |
-| TDP-2-030 | Calling Turf from other languages | EX-1 … EX-5, F-20 | (2.9.0) |
+| TDP-2-030 | Calling Turf from other languages | EX-1 … EX-4, EX-6, F-20 | (2.9.0) |
+| TDP-2-031 | Python and Turf | EX-5 | after (2.9.0), own repository |
+| TDP-2-032 | Node.js and Turf | EX-7 | after (2.9.0), own repository |
+| TDP-2-033 | Lua and Turf | EX-8 | after (2.9.0), own repository |
 | TDP-3-001 | Threads and shared state | CC-0 … CC-3, B-8 | 3.1, 3.2 |
 | TDP-3-002 | Async and non-blocking I/O | CC-4, CC-5, CC-6 | 3.2 |
+| TDP-3-003 | Calling Turf in parallel from other runtimes | EX-9 | 3.3 |
 
 ---
 
@@ -1086,7 +1091,7 @@ the struct's own declaration, so separate compilation (F-7a) agrees on it.
 | **ML-3** | **Layout report**: `turfc --layout-report` (JSON, an IF-2 schema) and `turf layout`, each struct's size, alignment and offsets in both layouts. | A | S | `turf-lsp` can show sizes on hover. |
 | **ML-4** | **Warning: a struct whose address reaches C without `@layout(c)`** (an `extern fn` argument, a `to ptr`/`void*`/other-pointer conversion, a callback's parameter or return, a by-value field of such a struct), with a `Fix:` inserting the annotation. | W | M | Error in 3.0 (B-22). A struct's bytes copied by hand into `mem::alloc` memory are not seen; that path is already `unsafe`. |
 
-### 6.16 C interop (CX, EX) — TDP-2-029, TDP-2-030
+### 6.16 C interop (CX, EX) — TDP-2-029 … TDP-2-033, TDP-3-003
 
 Owner request, 2026-10-25: Python's ecosystem is mostly C wrapped once and
 imported by everyone; Turf takes the same path in both directions before 3.0.
@@ -1101,11 +1106,15 @@ is not proposed: it contradicts PC-1's pure compiler.
 | **CX-4** | **`@ownership(releases: self)` on a method**: a second call is E017, a use after it E018, inside one function. | A | S–M | Today E146. Not a borrow checker: per function, no caller annotations. |
 | **CX-5** | **`turf test --sanitize=address,undefined`** on `[native]` C sources and their dependencies. | A | S | Ships `libturfrt_asan.a`, a change to F-REL-1. LB-1 |
 | **CX-6** | **`.cpp` in `[native] sources`**, compiled with `CXX`/`c++`/`clang++`/`g++`; C++ used through `extern "C"` shims that catch every exception. | A | S | LB-1 |
-| **EX-1** | **`@export`** on a `pub` free function: C symbol `<package>_<name>` (or `@export(name:)`), C-form types only (scalars, `string` copied in and out, call-scoped `Slice<T>`, `@layout(c)` pointers, handles, capture-free `fn`, `!T` as a status code). | A | M | B-7 settles capture-free function values. |
+| **EX-1** | **`@export`** on a `pub` free function, or on a `pub` method of a handle type (`<package>_<Type>_<name>`): C symbol `<package>_<name>` (or `@export(name:)`), C-form types only (scalars, `string` copied in and out, call-scoped `Slice<T>`, `@layout(c)` pointers, handles, capture-free `fn`, `!T` as a status code). | A | M | B-7 settles capture-free function values. |
 | **EX-2** | **`turf build --lib`** / `[lib] kind`: static and shared libraries and `build/include/<package>.h` (`extern "C"`-guarded); `--cpp` adds an RAII `.hpp`. A shared library links the host's libc dynamically, never the bundled musl. | A | M | Needs a PIC `libturfrt`. |
-| **EX-3** | **Library-mode runtime**: `turf_rt_init()` on first call; stack base per outermost entry; the first caller's thread owns the runtime and another thread is a named panic until 3.1; no signal handlers unless asked. | A | M–L | FREEZE §6.5 "single-threaded" holds. |
+| **EX-3** | **Library-mode runtime**: `turf_rt_init()` on first call; stack base per outermost entry; **any thread, one at a time**: an entry lock keeps one thread inside Turf (nested entries on that thread pass), so the collector scans one stack; `PANIC_ON_CONTENTION` opt-in; no signal handlers unless asked. | A | M–L | FREEZE §6.5's single mutator holds; it is not always the same OS thread. Parallel entry is EX-9 (3.3). |
 | **EX-4** | **Handles**: a non-`@layout(c)` `&T` crossing to C is rooted (`mem::root`) and becomes an opaque pointer with a release function; a handle coming back is checked against a live table. | A | M | |
-| **EX-5** | **`turf-python`** (own repository): CPython extension modules on the limited API (abi3) and wheels from a Turf library; `!T` errors as exceptions; handles freed by Python's refcounting; a `python` package for calling Python from Turf. | A | L | Outside the compiler; reads only the generated header and the driver interface. |
+| **EX-5** | **`turf-python`** (TDP-2-031, own repository): CPython extension modules on the limited API (abi3), wheels and a PEP 517 backend, `.pyi` stubs, buffers without copies, `!T` as exceptions, handles freed by refcounting, the GIL released during Turf calls; a `python` package for calling Python. | A | L | Reads only the export description (EX-6). |
+| **EX-6** | **The export description**: `build/include/<package>.json` (an IF-2 schema, `exports.schema.json`): functions, C forms, slices, handles and their release functions, error codes by name, `@layout(c)` offsets, doc comments. Written from the same table as the header. | A | S–M | What every glue generator reads instead of parsing C. |
+| **EX-7** | **`turf-node`** (TDP-2-032, own repository): Node-API addons, `.d.ts`, per-platform npm packages with prebuilt binaries, typed arrays without copies, `*Async` variants on libuv's pool, handles released by the JavaScript collector or `using`. | A | M–L | |
+| **EX-8** | **`turf-lua`** (TDP-2-033, own repository): Lua 5.4 modules written in Turf (`require`), and a `lua` package embedding a sandboxed Lua with memory and instruction limits. No `longjmp` crosses a Turf frame: every Lua call from Turf runs under `lua_pcall`, and Lua reaches Turf only through generated C. | A | M | |
+| **EX-9** | **Parallel entry** (TDP-3-003): `[lib] entry = "parallel"` on the thread-aware runtime; foreign threads registered on first entry; only threads inside Turf join a collection; a handle locked per call unless its type is shareable (TDP-3-001's predicate); `turf-jvm`, `turf-dotnet`, `turf-go`, `turf-beam`. | A | L | 3.3. CC-1, CC-3. |
 
 ---
 
@@ -1262,4 +1271,4 @@ of the owner before the item it blocks starts.
   CC-0 … CC-6, DX-1 … DX-4, SL-0 … SL-8, NM-1 … NM-6, B-1 … B-11, D-1 … D-21.
   New in this document: PC-1 … PC-4, LB-1 … LB-5, PK-1 … PK-4, IF-1 … IF-5,
   B-12 … B-15, D-22 … D-26, DX-5 … DX-10, ML-1 … ML-4, B-22, D-28, D-29,
-  CX-1 … CX-6, EX-1 … EX-5, RT-7.
+  CX-1 … CX-6, EX-1 … EX-9, RT-7.
