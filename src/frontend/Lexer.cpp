@@ -20,6 +20,7 @@
 #include "diagnostics/Colors.h"
 #include "diagnostics/ErrorCodes.h"
 #include "diagnostics/LintLevels.h"
+#include "diagnostics/DiagnosticsJson.h" // DX-2: --diagnostics=json
 #include "diagnostics/ErrorsLex.h" // MalformedRadixPrefixError and friends (SEM-001) -- see
                        // ErrorsLex.h's own top comment for why Lexer.cpp,
                        // alone among the lexer/parser split, includes a
@@ -701,6 +702,17 @@ void DiagnosticEngine::flushAll() {
     if (D.IsWarning && !g_ShowStdlibWarnings && IsLibStdWarningLocation(D.Filename))
       continue;
     Shown.push_back(&D);
+  }
+
+  // DX-2: one line of JSON per diagnostic, in the same order, instead of the
+  // text (no file headers: every object names its file).
+  if (DiagnosticsJson::Enabled) {
+    for (const Diag *D : Shown)
+      std::cerr << DiagnosticsJson::render(
+                       *D, !D->Denied && (D->IsWarning || isMessageWarning(D->Msg)))
+                << "\n";
+    Diagnostics.clear();
+    return;
   }
 
   for (size_t Begin = 0; Begin < Shown.size();) {

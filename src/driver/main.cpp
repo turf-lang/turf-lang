@@ -22,6 +22,7 @@
 #include "diagnostics/Colors.h"
 #include "diagnostics/ErrorCategory.h"
 #include "diagnostics/ErrorCodes.h"
+#include "diagnostics/DiagnosticsJson.h" // DX-2: --diagnostics=json
 #include "tooling/Formatter.h"
 #include "diagnostics/LintLevels.h"
 #include "frontend/Lexer.h"
@@ -136,8 +137,9 @@ static constexpr int TurfcInterfaceMajor = 1;
 // --only <path>` (run some of the tests); `turf test <path>` asks for it. 1.8
 // (V-1) adds the lint levels, `--allow|--warn|--deny <code>` and `--lint-set
 // 2.N`, also accepted by `--test`; `turf` asks for it only when `turf.toml`
-// has a [lints] table.
-static constexpr int TurfcInterfaceMinor = 8;
+// has a [lints] table. 1.9 (DX-2) adds `--diagnostics=json|text`; a tool
+// that reads diagnostics as JSON asks for it.
+static constexpr int TurfcInterfaceMinor = 9;
 
 // The exit statuses (FREEZE.md 6.21, F-CLI-1, REL-001). The split exists so a script
 // or an editor can tell "your program has a mistake" (1: the compiler ran and
@@ -166,6 +168,7 @@ struct CompilerOptions {
   bool AIEnabled = false;             // --smart: enable SLM AI suggestions
   std::string SmartFixOutPath;        // --smart-write-fix=<path>: write the program with its shown fixes applied here: every compiler fix (TDP-2-001), or the --smart model's validated one
   bool AllowUnsafeModules = false;    // --allow-unsafe-modules: LANG-002, honor `unsafe module;` outside the install root
+  bool DiagnosticsJson = false;       // --diagnostics=json: DX-2, one JSON object per diagnostic
   bool ShowStdlibWarnings = false;    // --stdlib-warnings: OVH-012, print warnings anchored inside lib/std instead of hiding them
   bool DumpAST = false;               // --dump-ast: print AST via ASTPrinter
   bool RunResolver = false;           // --resolve: run Resolver pass (shadow mode, Issue #4)
@@ -431,7 +434,7 @@ static void handleExplainFlagIfPresent(int argc, char **argv) {
 static const char *turfcUsage() {
   return "Usage: turfc <filename.tr> [-o output] [--emit-llvm | --emit-obj] [--smart]\n"
          "         [--smart-write-fix=<path>] [--link <libname>]\n"
-         "         [--allow-unsafe-modules] [--stdlib-warnings]\n"
+         "         [--allow-unsafe-modules] [--stdlib-warnings] [--diagnostics=json|text]\n"
          "         [--allow <code>] [--warn <code>] [--deny <code>] [--lint-set <2.N>]\n"
          "         [-O0|-O1|-O2|-O3|-Os] [-g] [--target=<triple>] [-mcpu=<cpu>]\n"
          "         [--check [--module]] [--package-graph <file>]\n"
@@ -470,7 +473,7 @@ static const char *const KnownOptions[] = {
     "--test",             "--jobs",         "--timeout",
     "--diag-register",    "--exclude",      "--only",
     "--skip-unlexable", "--allow",      "--warn",         "--deny",
-    "--lint-set",
+    "--lint-set",         "--diagnostics=",
 };
 
 /// `--allow|--warn|--deny <code>` and `--lint-set <2.N>` (V-1, LintLevels.h):
@@ -561,6 +564,14 @@ static CompilerOptions parseArgs(int argc, char **argv) {
       opts.AllowUnsafeModules = true;
     } else if (arg == "--stdlib-warnings") {
       opts.ShowStdlibWarnings = true;
+    } else if (arg.rfind("--diagnostics=", 0) == 0) {
+      const std::string Form = arg.substr(std::string("--diagnostics=").size());
+      if (Form != "json" && Form != "text") {
+        std::cerr << "Error: '--diagnostics=" << Form
+                  << "' is not a diagnostics form (expected json or text).\n";
+        std::exit(ExitUsage);
+      }
+      opts.DiagnosticsJson = Form == "json";
     } else if (arg == "--check") {
       opts.Check = true;
     } else if (arg == "--module") {
@@ -1631,6 +1642,7 @@ static int runCompilerMain(int argc, char **argv) {
   // so it's fine to set this any time before that runs -- unlike
   // g_AllowUnsafeModules just above, nothing during parsing/resolving reads it.
   g_ShowStdlibWarnings = opts.ShowStdlibWarnings;
+  DiagnosticsJson::Enabled = opts.DiagnosticsJson;
 
   // TOOL-001: must be set before InitializeModule() runs (below) -- that's
   // the one call site that decides whether DBuilder/DebugCU get built at

@@ -1,0 +1,5 @@
+{
+  "error_with_fix": "docs/reference/schemas/diagnostics-fixtures/error_with_fix.tr",
+  "error_with_related": "docs/reference/schemas/diagnostics-fixtures/error_with_related.tr",
+  "warning": "docs/reference/schemas/diagnostics-fixtures/warning.tr"
+}
