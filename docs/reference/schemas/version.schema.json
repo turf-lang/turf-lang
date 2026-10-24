@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/turf-lang/turf-lang/blob/master/docs/reference/schemas/version.schema.json",
+  "title": "turfc --version --json, the interface manifest",
+  "description": "What a tool checks before relying on a turfc flag or format (IF-1). Manifest 1: keys are only added, never changed or removed; a feature name, once listed, keeps its meaning.",
+  "type": "object",
+  "required": ["manifest", "turfc", "interface", "schemas", "features", "llvm", "runtime", "root"],
+  "properties": {
+    "manifest": { "type": "integer", "minimum": 1 },
+    "turfc": { "type": "string", "description": "The release version, as line 1 of `turfc --version` prints it." },
+    "interface": {
+      "type": "object",
+      "required": ["major", "minor"],
+      "properties": { "major": { "type": "integer", "minimum": 1 }, "minor": { "type": "integer", "minimum": 0 } },
+      "description": "The driver interface, as line 2 of `turfc --version` prints it."
+    },
+    "schemas": {
+      "type": "object",
+      "required": ["diagnostics", "package_graph"],
+      "properties": {
+        "diagnostics": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$", "description": "The version of docs/reference/schemas/diagnostics.schema.json that --diagnostics=json writes." },
+        "package_graph": { "type": "integer", "minimum": 1, "description": "The package-graph \"format\" --package-graph reads." }
+      }
+    },
+    "features": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "One name per addition to the driver interface, then what this build has: smart, embedded-lld, bundled-runtime."
+    },
+    "llvm": { "type": "string" },
+    "runtime": { "type": "string" },
+    "root": { "type": "string" }
+  }
+}

@@ -407,6 +407,20 @@ hint: upgrade turf: this compiler's interface is newer than this turf understand
 
 A differing *release* version is never an error on its own. In a project, a manifest's `turf = "2.0"` is about the compiler's release version and is checked separately ([Projects & Packages](projects_and_packages.md#2-turftoml)).
 
+**The interface manifest.** `turfc --version --json` prints the same facts as one JSON object, for tools: the interface, the version of each format the compiler reads or writes, and a list of named features, so a tool asks "does this compiler have `diagnostics-json`?" instead of comparing numbers. Keys are only ever added (`"manifest": 1`); the schema is `docs/reference/schemas/version.schema.json`.
+
+```text
+$ turfc --version --json
+{"features":["package-graph","exit-status-2","test","format-check","format-skip-unlexable","emit-obj","test-only","lint-levels","diagnostics-json","version-json","smart"],"interface":{"major":1,"minor":10},"llvm":"22.1.8","manifest":1,"root":"/opt/turf","runtime":"turf_rt_abi_2_0","schemas":{"diagnostics":"1.0","package_graph":1},"turfc":"2.1.1"}
+```
+
+| Key | Value |
+|---|---|
+| `interface` | `{"major", "minor"}`, as line 2 of `turfc --version`. |
+| `schemas` | `diagnostics`: the [diagnostics JSON](#diagnostics-as-json) schema version; `package_graph`: the package-graph `"format"` `--package-graph` reads. |
+| `features` | One name per addition to the interface, in order: `package-graph` (1.1), `exit-status-2` (1.2), `test` (1.3), `format-check` (1.4), `format-skip-unlexable` (1.5), `emit-obj` (1.6), `test-only` (1.7), `lint-levels` (1.8), `diagnostics-json` (1.9), `version-json` (1.10). Then what this build has: `smart`, `embedded-lld`, `bundled-runtime`. |
+| `turfc`, `llvm`, `runtime`, `root` | As the text lines. |
+
 ### Finding the compiler
 
 `turf` looks for `turfc` in this order and takes the first match:

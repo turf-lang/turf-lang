@@ -30,6 +30,7 @@
 #include "tooling/MigratePub.h"
 #include "frontend/Parser.h"
 #include "tooling/PackageGraph.h"
+#include "llvm/Support/JSON.h" // IF-1: --version --json
 #include "analysis/CFG.h"
 #include "sema/Monomorphize.h" // TYPE-002 (S11b): --dump-instantiations
 #include "resolve/Resolver.h"
@@ -58,6 +59,7 @@
 #include "llvm/Analysis/LoopAnalysisManager.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/Passes/PassBuilder.h"
+#include <algorithm>
 #include <cctype>
 #include <cerrno>
 #include <cstdlib>
@@ -138,8 +140,24 @@ static constexpr int TurfcInterfaceMajor = 1;
 // (V-1) adds the lint levels, `--allow|--warn|--deny <code>` and `--lint-set
 // 2.N`, also accepted by `--test`; `turf` asks for it only when `turf.toml`
 // has a [lints] table. 1.9 (DX-2) adds `--diagnostics=json|text`; a tool
-// that reads diagnostics as JSON asks for it.
-static constexpr int TurfcInterfaceMinor = 9;
+// that reads diagnostics as JSON asks for it. 1.10 (IF-1) adds `--version
+// --json`, the manifest a tool reads instead of these lines.
+static constexpr int TurfcInterfaceMinor = 10;
+
+/// IF-1: the name of each addition to the driver interface, in the order of
+/// the history above, with the minor that added it. `turfc --version --json`
+/// lists the names, so a tool can ask for a feature instead of a number.
+struct InterfaceFeature {
+  const char *Name;
+  int SinceMinor;
+};
+static constexpr InterfaceFeature InterfaceFeatures[] = {
+    {"package-graph", 1},         {"exit-status-2", 2},
+    {"test", 3},                  {"format-check", 4},
+    {"format-skip-unlexable", 5}, {"emit-obj", 6},
+    {"test-only", 7},             {"lint-levels", 8},
+    {"diagnostics-json", 9},      {"version-json", 10},
+};
 
 // The exit statuses (FREEZE.md 6.21, F-CLI-1, REL-001). The split exists so a script
 // or an editor can tell "your program has a mistake" (1: the compiler ran and
@@ -1527,6 +1545,48 @@ static int linkObject(const std::string &ObjFile,
  * @param argv An array of command-line argument strings.
  * @return int Exit code (0 on success, non-zero on compilation failure).
  */
+/// IF-1: `turfc --version --json`, the interface manifest. One JSON object on
+/// stdout: what `turf`, `turf-lsp` and `turf-fuzz` check before relying on a
+/// flag or a format, instead of assuming a compiler revision. Schema in
+/// docs/reference/schemas/version.schema.json; keys are only ever added.
+static int printVersionManifest() {
+  std::string Root = TurfInstallRoot();
+  llvm::SmallString<256> RealRoot;
+  if (!llvm::sys::fs::real_path(Root, RealRoot))
+    Root = RealRoot.str().str();
+  const std::string RtPlatform = turf::BundledRuntimePlatform();
+  const bool BundledRuntime =
+      !RtPlatform.empty() &&
+      turf::BundledLinkAvailable(Root + "/lib/rt/" + RtPlatform);
+
+  llvm::json::Array Features;
+  for (const auto &F : InterfaceFeatures)
+    if (F.SinceMinor <= TurfcInterfaceMinor)
+      Features.push_back(F.Name);
+  // What this build has, beside what the interface promises.
+  if (SLM::SLMEngine::builtIn())
+    Features.push_back("smart");
+  if (!RtPlatform.empty())
+    Features.push_back("embedded-lld");
+  if (BundledRuntime)
+    Features.push_back("bundled-runtime");
+
+  llvm::json::Object Manifest{
+      {"manifest", 1},
+      {"turfc", TURF_VERSION},
+      {"interface", llvm::json::Object{{"major", TurfcInterfaceMajor},
+                                       {"minor", TurfcInterfaceMinor}}},
+      {"schemas", llvm::json::Object{{"diagnostics", DiagnosticsJson::SchemaVersion},
+                                     {"package_graph", PackageGraphFormat}}},
+      {"features", std::move(Features)},
+      {"llvm", LLVM_VERSION_STRING},
+      {"runtime", RuntimeAbiSymbol},
+      {"root", Root}};
+  llvm::outs() << llvm::json::Value(std::move(Manifest)) << "\n";
+  llvm::outs().flush();
+  return ExitOk;
+}
+
 static int runCompilerMain(int argc, char **argv) {
   // The `turf` front end runs `turfc --version` before EVERY compile to check
   // it speaks this compiler's driver interface (FREEZE.md 6.16, F-PKG-1), so
@@ -1538,6 +1598,10 @@ static int runCompilerMain(int argc, char **argv) {
   CompilerExecutablePath = llvm::sys::fs::getMainExecutable(argv[0], (void *)(intptr_t)runCompilerMain);
 
   for (int i = 1; i < argc; ++i) {
+    if (std::string(argv[i]) == "--version" &&
+        std::any_of(argv + 1, argv + argc,
+                    [](const char *A) { return std::string(A) == "--json"; }))
+      return printVersionManifest();
     if (std::string(argv[i]) == "--version") {
       // REL-001: what someone pastes into a bug report. `llvm` is the LLVM
       // this binary was built against (a mismatch with the machine's own LLVM

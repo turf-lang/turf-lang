@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""DX-2: `turfc --diagnostics=json` against its schema and the text form.
+"""DX-2 and IF-1: turfc's JSON outputs against their published schemas.
 
 Checks every tests/**/fail_*.tr (not tests/99_known_bugs, tests/custom or
 tests/compat) with `turfc <file> --check --diagnostics=json`, run from the
@@ -13,6 +13,10 @@ file's own directory, and fails when
   - a fixture under docs/reference/schemas/diagnostics-fixtures/ differs from
     what the compiler prints for its source (IF-2: the files a consumer's
     tests read). `--write` regenerates them.
+  - `turfc --version --json` (IF-1) does not match
+    docs/reference/schemas/version.schema.json, disagrees with the text
+    `--version` lines (release, interface), or names a diagnostics schema
+    version other than the one diagnostics carry.
 
 The schema is read from the published file and checked with the small subset
 of JSON Schema it uses (type, enum, pattern, required, properties, items,
@@ -33,6 +37,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SCHEMA = ROOT / "docs/reference/schemas/diagnostics.schema.json"
+VERSION_SCHEMA = ROOT / "docs/reference/schemas/version.schema.json"
 FIXTURES = ROOT / "docs/reference/schemas/diagnostics-fixtures"
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 HEADER = re.compile(r"^── (error|warning)\b[^\[]*(?:\[(E\d{3}))?")
@@ -129,6 +134,37 @@ def fixture_output(compiler, source):
     return out.stderr
 
 
+def check_manifest(compiler):
+    """Problems with `turfc --version --json`, as strings."""
+    env = dict(os.environ)
+    env.pop("TURF_HOME", None)
+    out = subprocess.run([compiler, "--version", "--json"], env=env,
+                         capture_output=True, text=True, timeout=60)
+    try:
+        manifest = json.loads(out.stdout)
+    except json.JSONDecodeError:
+        return [f"--version --json is not one JSON object: {out.stdout[:80]!r}"]
+    schema = json.loads(VERSION_SCHEMA.read_text())
+    problems = []
+    err = validate(manifest, schema, schema)
+    if err:
+        problems.append(f"--version --json: {err}")
+        return problems
+    lines = subprocess.run([compiler, "--version"], env=env, capture_output=True,
+                           text=True, timeout=60).stdout.splitlines()
+    want = f"interface {manifest['interface']['major']}.{manifest['interface']['minor']}"
+    if lines[:2] != [f"turfc {manifest['turfc']}", want]:
+        problems.append(f"--version says {lines[:2]}, --version --json says "
+                        f"turfc {manifest['turfc']}, {want}")
+    sample = (FIXTURES / "error_with_fix.jsonl").read_text().splitlines()[0]
+    if json.loads(sample)["version"] != manifest["schemas"]["diagnostics"]:
+        problems.append("the manifest's diagnostics schema version is not the "
+                        "version the diagnostics carry")
+    if "diagnostics-json" not in manifest["features"]:
+        problems.append("the manifest does not list diagnostics-json")
+    return problems
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--compiler", default=str(ROOT / "build/turfc"))
@@ -140,6 +176,10 @@ def main():
     schema = json.loads(SCHEMA.read_text())
 
     failed = 0
+    if not args.write:
+        for p in check_manifest(compiler):
+            print(f"FAIL {p}")
+            failed += 1
     sources = json.loads((FIXTURES / "sources.json").read_text())
     for name, src in sources.items():
         want = fixture_output(compiler, ROOT / src)
@@ -161,8 +201,8 @@ def main():
             for p in problems:
                 print(f"FAIL {path.relative_to(ROOT)}: {p}")
             failed += bool(problems)
-    print(f"diagnostics_json_check: {len(tests)} fail_*.tr files, "
-          f"{len(sources)} fixtures, {failed} failing")
+    print(f"diagnostics_json_check: the --version --json manifest, {len(tests)} "
+          f"fail_*.tr files, {len(sources)} fixtures, {failed} failing")
     return 1 if failed else 0
 
 
