@@ -17,6 +17,12 @@ INCORRECT (not really incorrect -- just discouraged):
     }
 
 CORRECT (call what the message names instead):
+    import list::List;
+
+    fn new_sort(l: List<int>): List<int> {
+        return l;
+    }
+
     fn main(): int {
         new_sort(List::default());
         return 0;
