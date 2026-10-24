@@ -163,6 +163,11 @@ jobs:
       - name: Diagnostic-code registry matches the reference
         run: python3 scripts/check/diagnostic_registry.py --check
 
+      # DX-2 (#290): every fail_*.tr test's diagnostics as JSON match the
+      # published schema and the text form, and the consumer fixtures hold.
+      - name: Diagnostics as JSON match the schema and the text form
+        run: python3 scripts/check/diagnostics_json_check.py
+
       # SLM_IMPROVEMENT_PLAN C1/C2: everything under docs/slm/ is pasted into
       # the --smart model's prompt, and a model copies what it sees. This
       # compiles every CORRECT example in the per-code pages, the category docs

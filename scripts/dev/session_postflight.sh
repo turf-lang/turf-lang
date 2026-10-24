@@ -155,6 +155,15 @@ else
     echo "$REG_OUT" | head -8 | sed 's/^/       /'
   fi
 
+  # DX-2 (#290): --diagnostics=json against its schema, the text form and the
+  # consumer fixtures.
+  if JSON_OUT=$(python3 scripts/check/diagnostics_json_check.py 2>&1); then
+    pass "$(echo "$JSON_OUT" | tail -1)"
+  else
+    fail "--diagnostics=json disagrees with its schema, the text form or a fixture:"
+    echo "$JSON_OUT" | head -8 | sed 's/^/       /'
+  fi
+
   # SLM_IMPROVEMENT_PLAN C1/C2: every CORRECT example in docs/slm/ (and the
   # syntax card) compiles, and every non-retired per-code page has one. The
   # model copies what the docs show it.
