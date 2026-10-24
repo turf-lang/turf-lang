@@ -128,6 +128,27 @@ exit block instead of several changes nothing it looks at. The differences are
 within run-to-run noise. The restructuring is not merged; NM-2 (proving checks
 away) and NM-3 (`math::wrapping_*`) are what remain for this loop.
 
+### 2026-10-24 — the SLP vectorizer at `-O2` and `-O3`
+
+`runOptimizationPipeline()` built its `PassBuilder` with LLVM's default
+`PipelineTuningOptions`, which leave the SLP vectorizer off; clang turns it on
+at `-O2` and `-O3`. It is the pass that vectorized `particles.c`: one
+`<2 x i64>` load of `{x, y}`, one of `{vx, vy}`, one add. Turf now turns it on
+at the same levels. Same machine, `particles` at `-O3`, 21 runs pinned to CPU 2,
+minimum, process start-up included:
+
+| Program | SLP off | SLP on | `clang -O3` |
+|---|---|---|---|
+| `particles` (checked `+`) | 25.4 ms | 25.3 ms | 17.9 ms |
+| `particles` with `math::wrapping_add` | 24.1 ms | 18.1 ms | |
+| packed-integer instructions in `main` (wrapped) | 0 | 8 | 6 |
+
+Every checksum matched. With the checks the loop stays scalar: each checked
+`+` branches to its own panic block, so the `x` and `y` additions are in
+different basic blocks and SLP, which works within one, cannot pair them.
+`--emit-llvm` runs the pipeline without a `TargetMachine`, so its IR never
+shows vectorization; count instructions in the binary (`objdump -d`).
+
 ## Fixed before the baseline
 
 Writing these benchmarks found five performance bugs (and one compiler crash,

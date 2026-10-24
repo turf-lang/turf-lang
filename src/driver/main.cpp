@@ -1044,7 +1044,14 @@ static void runOptimizationPipeline(Module &M, OptLevelKind Level,
   CGSCCAnalysisManager CGAM;
   ModuleAnalysisManager MAM;
 
-  PassBuilder PB(TM);
+  // LLVM's default PipelineTuningOptions leave the SLP vectorizer off; clang
+  // turns it on at -O2 and -O3, and so does Turf. It is what packs the
+  // neighbouring fields of a struct into one vector operation
+  // (bench/particles.tr with math::wrapping_add: 24 ms scalar, 18 ms with it,
+  // clang -O3's time). -O1 and -Os keep it off, as clang does.
+  PipelineTuningOptions PTO;
+  PTO.SLPVectorization = Level == OptLevelKind::O2 || Level == OptLevelKind::O3;
+  PassBuilder PB(TM, PTO);
   PB.registerModuleAnalyses(MAM);
   PB.registerCGSCCAnalyses(CGAM);
   PB.registerFunctionAnalyses(FAM);
