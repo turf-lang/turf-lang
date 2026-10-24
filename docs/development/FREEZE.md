@@ -1366,6 +1366,42 @@ V-1 and §5.4 (a new check lands as a warning; the warning can be silenced;
   cascade rule, reaches `turf::analyze` as `Severity::Error`. Its text keeps the
   `Warning:` label and a line says it is denied.
 
+---
+
+### 6.30 A panic ends the process — FROZEN (owner decision, 2026-10-25)
+
+Recorded on the project owner's explicit request (2026-10-25), as the decision
+TDP-2-002's NM-6 (checking overflow in batches) depends on. The behaviour below
+is what `runtime/turfrt_panic.c` and `docs/reference/error_handling.md` describe;
+this section makes it a promise, so a later feature cannot assume otherwise.
+Account: `docs/development/changes/TDP-2-002.md`, NM-6.
+
+- **A panic cannot be caught, and runs nothing on the way out (F-PANIC-1).** A
+  failed runtime check, `sys::panic` or a runtime-internal panic (out of memory,
+  stack overflow) flushes stdout, prints its message to stderr and aborts the
+  process (exit 134 on POSIX). No `defer` runs, nothing unwinds, no `atexit`
+  handler runs, and there are no finalizers (F-MEM-2). No language construct,
+  stdlib function or test harness catches, recovers from or intercepts a panic:
+  `recover` and `try` act on error values (F-ERR-1) and never on a panic, and
+  `turf test` / `@test` observe one only from outside the process that panicked.
+  When threads arrive (TDP-3-001), a panic on any thread ends the whole process;
+  a `join` never returns another thread's panic as a value. Adding a way to
+  catch a panic is a change to this decision, not a library addition.
+- **Memory after a panic is not observable (F-PANIC-2).** What a program
+  observes, for F-OPT-1, is its output (stdout, stderr, files, network), its
+  exit status and the effects of its calls, all of which happen in source
+  order. The contents of its own memory once a panic has begun are not: no Turf
+  code runs after the panic to read them. A debugger or a core dump is outside
+  the language.
+- **A check may run late, never be skipped (F-PANIC-3).** Given F-PANIC-1 and
+  F-PANIC-2, the compiler may perform a language-mandated check after the
+  operation it guards, provided that between the two the program does nothing
+  observable, the unchecked result reaches only memory and further
+  late-checked arithmetic, and the panic reports the same kind and location a
+  check in place would have reported first. Removal still needs a proof
+  (F-OPT-2); a late check is not a removal. The precise rule a compiler pass
+  applies is NM-6's, in its change record.
+
 ## Appendix — frozen-decision IDs
 
 A change record's *Frozen decisions relied on* row cites these IDs
@@ -1457,6 +1493,9 @@ Overhaul (F-TYPE-1), whose third column points at their section above.
 | **F-COLL-2** | `T::default()` sets every non-null `&U` field reachable by value to a fresh `heap(U::default())`; a type that reaches itself through `&` fields has no default (E147). | §6.27 above (owner decision 2026-10-12) |
 | **F-REFARR-1** | An array of references is spelled `(&N)[k]` (also `(&?N)[k]`, `(&N)[]`); `&N[k]` is a reference to an array. The two print as written. A Stack reference stored into an element of a non-local array is E086. | §6.28 above (owner decision 2026-10-12) |
 | **F-REFARR-2** | A `(&N)[k]` declaration, or one whose element type carries a `&U` inside it, needs an initializer (E128); `(&?N)[k]` starts all-null; an unwritten `string` inside an element reads `""`. | §6.28 above (owner decisions 2026-10-12; amended 2026-10-13) |
+| **F-PANIC-1** | A panic flushes stdout, prints to stderr and aborts the process; no `defer`, unwinding, `atexit` handler or finalizer runs, and nothing (`recover`, `try`, a test harness, a thread `join`) catches it. A panic on any thread ends the process. | §6.30 above (owner decision 2026-10-25) |
+| **F-PANIC-2** | Observable behaviour is output, exit status and the effects of calls, in source order; the program's own memory after a panic has begun is not observable. | §6.30 above |
+| **F-PANIC-3** | A mandated check may run after the operation it guards if nothing observable happens in between, the unchecked result reaches only memory and other late-checked arithmetic, and the panic's kind and location are those of the first check in place. Late is allowed; skipped still needs a proof (F-OPT-2). | §6.30 above |
 
 ---
 
