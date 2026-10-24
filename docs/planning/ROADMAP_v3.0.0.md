@@ -143,7 +143,7 @@ any change to default output.
 | Diagnostics | SL-0 provenance labels (the `[Model Suggestion]` label landed), DX-1 `Fix:` lines (landed), DX-3 hint backfill, DX-2 `--diagnostics=json` (open) |
 | Numeric speed | NM-1 baseline benchmark, NM-3 `math::wrapping_*`, NM-4 trap-block measurement |
 | Generics at use sites | LG-1 `List<int>::default()`, LG-2 `f::<int>(…)`, LG-7 hints that point at them |
-| Small language and runtime | F-11d `@test` functions, RT-6 stack-overflow depth hint |
+| Small language and runtime | F-11d `@test` functions (with `@test(Error::E…, "…")` and `@test(panic, "…")`), RT-6 stack-overflow depth hint, SY-1 `for c in s`, SY-2 (a) integer literal receivers documented and tested |
 | Libraries | LB-2 unsafe-surface report in `turf` |
 | Repositories | IF-1 interface manifest, IF-5 consumer fixtures in the compiler's CI |
 | Documentation | `docs/development/DOCS_BACKLOG.md` and the per-minor documentation gate (4.4) in force |
@@ -158,7 +158,8 @@ any change to default output.
 | Analysis (warnings only) | AN-1 `unsafe` checks, AN-2 loops, AN-3 (a)(b) recursion, AN-4 nullability, AN-5 manual-heap leaks, AN-6 precision lint, AN-7 dead code, LB-5 raw-receiver method calls |
 | Numeric speed | NM-2 proof-based elision over ranges |
 | Repositories | IF-2 versioned schemas for diagnostics and package-graph JSON; IF-3 website error pages generated from V-5 |
-| Internal | F-S2 no global symbol table, F-S4a analysis leaves Codegen |
+| Syntax | SY-2 (b) decimal-literal receiver warning, SY-3 `function`, SY-4 `static fn`, SY-5 `pub immut`, each old spelling with a warning and a `Fix:` |
+| Internal | F-S2 no global symbol table, F-S4a analysis leaves Codegen, F-11e the compiler's own tests move to `@test` expectations |
 
 The AN warnings and LB-5 land here so that each has at least two minors in the
 field before 3.0 can promote it (B-1, B-13).
@@ -296,6 +297,11 @@ written in this order; this table is updated if they are not.
 | TDP-2-018 | Safe library interfaces | LB-2, LB-4, LB-5, B-12, B-13 | 2.6, 3.0 |
 | TDP-2-019 | A pure compiler: `turfc`, `libturf` and the assistant | PC-1 … PC-4, IF-4, B-14, B-15 | 2.7, 3.0 |
 | TDP-2-020 | TurfLang 3.0.0 and the end of 2.x | Part 7, B-1, B-3, D-8 | 2.8, 3.0 |
+| TDP-2-021 | Iterating over a string | SY-1 | 2.1 |
+| TDP-2-022 | Methods on number literals | SY-2, B-18 | 2.1, 2.2, 3.0 |
+| TDP-2-023 | `function` as a spelling of `fn` | SY-3, B-19 | 2.2, 3.0 |
+| TDP-2-024 | `static` before `fn` | SY-4, B-20 | 2.2, 3.0 |
+| TDP-2-025 | `pub immut` replaces `export immut` | SY-5, B-21 | 2.2, 3.0 |
 | TDP-3-001 | Threads and shared state | CC-0 … CC-3, B-8 | 3.1, 3.2 |
 | TDP-3-002 | Async and non-blocking I/O | CC-4, CC-5, CC-6 | 3.2 |
 
@@ -549,7 +555,8 @@ collector and "write barriers in preparation".
 | **F-14b** | Payloads on plain `enum`s (sum types), reusing LEC-004's representation. | A | M | none |
 | **F-15b** | Closed error sets in signatures, error conversion. | A | M | AN-9 |
 | **F-16** | Circular imports. A module-system change, but it only *accepts* programs that are rejected today. | A | M | none |
-| **F-11d** | In-source `@test` functions. | A | S | `turf test` (§6.22) |
+| **F-11d** | In-source `@test` functions, including the expected-failure forms `@test(Error::E<code>, "text")` and `@test(panic, "text")` (TDP-2-006). | A | S | `turf test` (§6.22) |
+| **F-11e** | **Test-suite cleanup.** Move the compiler's own `tests/**/fail_*.tr` whose expected error lies inside one function body, and the `EXPECT-RUNTIME` panics, to `@test(Error::…)` / `@test(panic, …)` functions, several to a file; the file-name and `// EXPECT-*` conventions stay for what a function cannot express (syntax errors, declaration-level errors, exit statuses, `EXPECT-FIX`). `tests/compat/2.0/` is never touched. | I | M | F-11d |
 
 ### 6.5 Concurrency and async (CC)
 
@@ -1007,6 +1014,20 @@ none of them runs before the type is fully known.
 | **PK-3** | **Publish checks.** `turf publish` refuses unless: the package builds and its tests pass; its `pub` API, compared with the previous published version, matches the version bump (removing or changing a `pub` item needs a major; the stdlib's API-lock tooling, generalized); its LB-2 report and `[native]` table are recorded in the index entry. | A | M | Semver enforced by the tool, not by trust. |
 | **PK-4** | **Package documentation.** F-11c generates reference pages from `pub` items and doc comments; the registry shows them. | A | M | Same generator as the stdlib reference (IF-3). |
 
+### 6.14 Syntax (SY) — TDP-2-021 … TDP-2-025
+
+Owner requests, 2026-10-25. Each new spelling is additive in a minor; each old
+spelling it retires warns first (5.4) with a `Fix:`, and is removed in 3.0 with
+`turf migrate 3.0` doing the edit.
+
+| ID | Item | Kind | Cx | Notes |
+|---|---|---|---|---|
+| **SY-1** | **`for c in s` over a `string`** (TDP-2-021): one iteration per byte, `c` a `char`, `s` and its length evaluated once, each read through `s[i]`'s check. Today E005. | A | S | Byte iteration, as `s[i]`; TDP-2-011's protocol later makes `string` one more instance. |
+| **SY-2** | **Methods on number literals** (TDP-2-022): (a) `1.twice()` already compiles; document and test it, and that `-1.abs()` is `-(1.abs())`. (b) A decimal literal receiver (`1.5.floor()`, also compiling today) warns, with a `Fix:` writing `(1.5).floor()`. | A | S | (b) becomes B-18. |
+| **SY-3** | **`function` as a spelling of `fn`** (TDP-2-023): a contextual keyword where a function declaration starts; an identifier elsewhere, as it is today. | A | S | Reserved in 3.0: B-19. |
+| **SY-4** | **`[pub] static fn T.m(...): R`** (TDP-2-024), modifiers in front; `fn T.m(...) static: R` warns with a moving `Fix:`. | A | S | Old place removed in 3.0: B-20. |
+| **SY-5** | **`[pub] immut` module constants** (TDP-2-025): a top-level `immut`, private unless `pub`/`public`; `export immut` warns with a `Fix:` writing `pub immut`. Top-level `mut` stays E087. | A | S–M | `export` removed in 3.0: B-21. The stdlib moves in the same minor. |
+
 ---
 
 ## Part 7 — 3.0.0 and the end of 2.x
@@ -1030,6 +1051,10 @@ source-level entry as an error, so a project can be ready before it upgrades.
 | **B-15** | **One release flavour.** The `-smart` archives end; the assistant is its own download. | Install recipes and download URLs change. | Package recipes and the download page updated in 3.0.0. | yes |
 | **B-16** | **`recover` binds tighter than `=` and `+=`.** In 2.x `recover` binds more loosely than every operator, assignment included, so `v = f() recover run { ... };` parses as `(v = f()) recover ...` and is E066 (`Cannot assign value of type '!int'`): only a declaration (`mut v = f() recover ...`) or a parenthesized right side (`v = (f() recover run { ... });`) works. In 3.0 `recover` takes the whole right-hand side of an assignment, the way it already takes a declaration's initializer. | Changes the meaning of a program that compiles in 2.x: with `mut v: !int`, `v = f() recover produce 0;` is `(v = f()) recover produce 0` (v holds the error when f fails; checked 2026-10-15), and in 3.0 it would store 0 instead. | `turf migrate 3.0` adds the parentheses where the meaning would change; nothing to do for code that already parenthesizes. Until then the 2.x reference documents the parentheses as the way to write it. | yes |
 | **B-17** | **A generic struct's type arguments are written where it is built** (D-27). `List::default()` and `Box::new(x)` no longer take their type arguments from the type they are stored into, returned as or passed to; the call writes them, `List<int>::default()` (LG-1). `mut l: List<int> = List::default();` and `return Box::new("x");` in a function returning `Box<string>` are errors. Annotations themselves stay (`mut l: List<int> = List<int>::default();`, `mut n: int = 5;`), and so do type arguments inferred from the constructor's own arguments (LG-3), which take nothing from the context. | Rejects programs that compile in 2.x: every generic construction whose type arguments come from the context. | A warning in 2.3.0 (allow-by-default first, per the 5.4 ladder) at each such call, with a `Fix:` writing the arguments in; `turf migrate 3.0` applies them all, reading each one from the declared type exactly as 2.x does. | yes |
+| **B-18** | **A decimal literal receiver needs parentheses** (SY-2 b): `1.5.floor()` is an error; `(1.5).floor()` and `1.twice()` are unaffected. | Rejects programs that compile in 2.x. | The 2.3 warning's `Fix:`; `turf migrate 3.0` adds the parentheses. | yes |
+| **B-19** | **`function` is a reserved word** equal to `fn` (SY-3), usable wherever `fn` is, function types included. | An identifier named `function` stops parsing (a B-5 case, taken deliberately). | `lint-set = "3.0"` lists the names; `turf migrate 3.0` renames them. | yes |
+| **B-20** | **`static` only before `fn`** (SY-4): `fn T.m(...) static: R` is an error. | Rejects programs that compile in 2.x. | The 2.3 warning's `Fix:`; `turf migrate 3.0` moves the word. | yes |
+| **B-21** | **`export` removed** (SY-5): `export immut` is an error; `pub immut` is the spelling. `export` stays reserved. | Rejects programs that compile in 2.x. | The 2.3 warning's `Fix:`; `turf migrate 3.0` writes `pub immut`. | yes |
 | **B-4** | **GC write-barrier contract** (only if RT-2′ is chosen over RT-2). | `unsafe` and C code storing a GC pointer into a GC object must call a barrier. | `mem::` helper plus an RT-5 check that finds missing barriers. | no (RT-2 is 3.x) |
 | **B-5** | **New reserved words**, only if a contextual keyword cannot express a feature (CC-4(b)). | An identifier with that name stops parsing. | `turf migrate` renames it. | no |
 | **B-6** | **Meaning of `fn(T): R[N]`** (G-1, "fix the grammar"). | Changes the parse of an existing type. | Not needed if G-1's additive spelling suffices. | no |
@@ -1043,7 +1068,7 @@ site it changes: it is the type 2.x reads the arguments from.
 
 ### 7.2 What adds nothing to the register
 
-DX-1, DX-2, SL-0 … SL-7, NM-1 … NM-6, LG-1 … LG-7, LB-1 … LB-3, PK-1 … PK-4,
+DX-1, DX-2, SL-0 … SL-7, NM-1 … NM-6, LG-1 … LG-7, LB-1 … LB-3, PK-1 … PK-4, SY-1,
 PC-1 and PC-4 are additive or unobservable. The designs TDP-2-002 rejects (a
 global wrapping flag, wrapping by default in optimized builds, undefined
 overflow) would be breaking and stay rejected. If NM-3 and RT-5 together show
