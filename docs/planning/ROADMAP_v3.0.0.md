@@ -121,14 +121,14 @@ themes and is listed in each line's "Internal" row.
 |---|---|---|---|
 | **2.0.x** | Bug fixes found in 2.0.0 | patches | — |
 | **2.1.x** | Contract and quick wins | small, additive | 2-003, 2-004, 2-005, 2-006 (2-002 in part) |
-| **2.2.x** | Diagnostics you can trust; analysis I | medium, warn-first | 2-001, 2-002 (rest), 2-007, 2-008 |
-| **2.3.x** | Closures and generics | large | 2-009, 2-010 |
+| **2.2.x** | Diagnostics you can trust; analysis I | medium, warn-first | 2-001, 2-002 (rest), 2-007, 2-008, 2-028 (part) |
+| **2.3.x** | Closures and generics | large | 2-009, 2-010, 2-028 (rest) |
 | **2.4.x** | Iteration, views, patterns, errors | large | 2-011, 2-012, 2-013, 2-014 |
 | **2.5.x** | Runtime and memory checks | large, internal | 2-015 |
-| **2.6.x** | Packages and native code (aim B) | large | 2-016, 2-017, 2-018 |
+| **2.6.x** | Packages and native code (aim B) | large | 2-016, 2-017, 2-018, 2-027 |
 | **2.7.x** | Tooling and the pure compiler (aim A, additive half) | large | 2-019 |
 | **2.8.x** | Ready for 3.0 (last 2.x minor) | small | 2-020 |
-| **3.0.0** | The breaking register (Part 7) | breaking | 2-020 |
+| **3.0.0** | The breaking register (Part 7) | breaking | 2-020, 2-027 |
 | **3.x** | Concurrency, then what follows | large | 3-001, 3-002 |
 
 ### 2.1.x — Contract and quick wins
@@ -161,6 +161,7 @@ any change to default output.
 | Syntax | SY-2 (b) decimal-literal receiver warning, SY-3 `function`, SY-4 `static fn`, SY-5 `pub immut`, each old spelling with a warning and a `Fix:` |
 | Internal | F-S2 no global symbol table, F-S4a analysis leaves Codegen, F-11e the compiler's own tests move to `@test` expectations |
 | Tests | F-11f test options (TDP-2-026) |
+| Diagnostics | DX-9 the wording guide and every message rewritten to it, DX-10 a snapshot of every diagnostic, DX-5 labelled spans (TDP-2-028) |
 
 The AN warnings and LB-5 land here so that each has at least two minors in the
 field before 3.0 can promote it (B-1, B-13).
@@ -171,6 +172,7 @@ field before 3.0 can promote it (B-1, B-13).
 |---|---|
 | Closures | F-1 phases 1–2 (capture-free, then `{code, env}` with captures), G-1, B-7 decided in phase 1 |
 | Inference | LG-3 struct type arguments from constructor arguments, LG-4 return-only type parameters, LG-6 `List::from` / `Set::from` |
+| Diagnostics | DX-6 notes that show the related code, DX-7 messages that recognize the intent, DX-8 every independent error in one run (on F-S2 and F-S3) (TDP-2-028) |
 | Internal | F-S3 `SemanticModel` |
 
 ### 2.4.x — Iteration, views, patterns, errors
@@ -200,6 +202,7 @@ field before 3.0 can promote it (B-1, B-13).
 | Packages | PK-1 registry, semver ranges and `turf publish`; PK-2 workspaces; PK-3 publish checks; PK-4 package documentation (with F-11c) |
 | Native code | LB-1 `[native]` C sources and libraries; LB-3 checked boundary contracts on `extern fn` |
 | Safe APIs | LB-4 raw pointers in a package's `pub` API (warning) |
+| Struct layout | ML-1 `@layout(c)`, ML-2 `--struct-layout=compact` (opt-in), ML-3 `turf layout` report, ML-4 warning on a struct whose address reaches C without `@layout(c)` (TDP-2-027) |
 | Build speed | F-7a separate compilation |
 | Internal | F-S4d continues |
 
@@ -217,7 +220,7 @@ field before 3.0 can promote it (B-1, B-13).
 
 The last 2.x minor adds no feature. It makes the upgrade a non-event:
 `lint-set = "3.0"` reports every B-item as an error on a 2.8 compiler; `turf
-migrate 3.0` performs every mechanical migration; every deprecation that 3.0
+migrate 3.0` performs every mechanical migration (ML-4's `@layout(c)` included); every deprecation that 3.0
 removes has warned for at least two minors; the 3.0 migration guide is
 published on the website; TDP-2-020 is accepted.
 
@@ -225,7 +228,7 @@ published on the website; TDP-2-020 is accepted.
 
 The register in Part 7: the pure compiler's removals (B-14, B-15), the
 safe-library rules (B-12, B-13), the promoted warnings (B-1), debug checks on at
-`-O0` (B-2), deprecated items removed (B-3), old lint-set pins retired (B-10).
+`-O0` (B-2), deprecated items removed (B-3), old lint-set pins retired (B-10), compact struct layout by default (B-22).
 The others (B-4 … B-9, B-11) are expected to be empty.
 
 ### 3.x
@@ -304,6 +307,8 @@ written in this order; this table is updated if they are not.
 | TDP-2-024 | `static` before `fn` | SY-4, B-20 | 2.2, 3.0 |
 | TDP-2-025 | `pub immut` replaces `export immut` | SY-5, B-21 | 2.2, 3.0 |
 | TDP-2-026 | Test options | F-11f | 2.2 |
+| TDP-2-027 | Struct layout chosen by the compiler | ML-1 … ML-4, B-22 | 2.6, 2.8, 3.0 |
+| TDP-2-028 | Diagnostics that explain | DX-5 … DX-10 | 2.2, 2.3 |
 | TDP-3-001 | Threads and shared state | CC-0 … CC-3, B-8 | 3.1, 3.2 |
 | TDP-3-002 | Async and non-blocking I/O | CC-4, CC-5, CC-6 | 3.2 |
 
@@ -713,6 +718,12 @@ cheapest first step and is sequenced in 2.2.
 | **DX-2** | **Machine-readable diagnostics** (`--diagnostics=json`, SARIF-shaped): code, severity, spans, hint, related locations, and the DX-1 fix as a list of `{span, replacement}`. TDP-2-001 lists this as an open question. | A | M | `TurfcInterfaceMinor` bump. Gives `turf-lsp` quick fixes (F-11), the benchmark (SL-2) and tools a contract other than scraping text, which D-6 puts outside the compatibility promise. **Owner decision (2026-10-16):** DX-2 lands after DX-1, in a later 2.x minor. 2.1.0 prints `Fix:` lines in default output with no JSON form for tools to read instead; the release notes tell tool authors that diagnostic text is outside the promise. |
 | **DX-3** | **Hint backfill.** TDP-2-001 counts 20 codes whose hint is only general advice and 5 with none (E105, E106, E115, E116, E118). A fix builds on a concrete hint, so these come first. | A | S–M | The count is the TDP's; recompute it with the checked-in script DX-1 requires. |
 | **DX-4** | **`--fix` apply mode** (later proposal). Applies only validated edits, atomically, on explicit request, with the same verified-result guarantee `turf fmt` has (§6.23). | A | M | Not before DX-1 and DX-2. |
+| **DX-5** | **Labelled spans** (TDP-2-028). The primary span underlines the code that is wrong, with a label ("this is an `int`"); secondary spans underline where an expectation came from ("`s` is a `string` because of this"). Type mismatches and duplicate declarations first; every code gets a primary label. | A | M | Diagnostics schema 1.1 adds the primary `label`; `related` already carries the secondary spans. |
+| **DX-6** | **Notes that show the related code** (TDP-2-028): a related location is printed with its own source line, in place of "(line X, col Y)" inside the message. | A | S–M | |
+| **DX-7** | **Messages that recognize the intent** (TDP-2-028): the commonest parse mistakes (a declaration without `mut`/`immut`, `let`/`var`/`func`/`def`, `=` for `==`, an unclosed bracket reported where it opened, a type before its name), each with its own code and a `Fix:` when one edit is right. | A | M | The set is chosen from SL-3's corpus and `turf-fuzz`'s mutation kinds. A forgotten `mut` is E102 "Expected ';'" today. |
+| **DX-8** | **Every independent error in one run** (TDP-2-028): resolution and type checking continue after an error, an undecidable expression gets an error type that produces no further diagnostic, `--error-limit <n>` (default 20). | A | L | A file with three independent type errors prints `(1 error)` today (checked 2026-10-25). Needs F-S2 and F-S3. |
+| **DX-9** | **The wording guide** (TDP-2-028, D-28): `docs/development/DIAGNOSTICS_STYLE.md`, and every message rewritten to it. First person; one idea per sentence; name the types, never "value"; no exclamation marks; every hint is something the reader can do. Headings print the code's registered name, never the `--smart` category. | A | M | D-6 keeps text outside the promise. `EXPECT-DIAG` lines and tools quoting text move with it. |
+| **DX-10** | **A snapshot of every diagnostic** (TDP-2-028): each V-5 code has a test whose expected output is the full rendered text (colour stripped) and its JSON line; the registry check fails for a code without one. | A | S–M | Depends on V-5. |
 
 #### The SLM: scoring and checks on the model itself
 
@@ -1031,6 +1042,21 @@ spelling it retires warns first (5.4) with a `Fix:`, and is removed in 3.0 with
 | **SY-4** | **`[pub] static fn T.m(...): R`** (TDP-2-024), modifiers in front; `fn T.m(...) static: R` warns with a moving `Fix:`. | A | S | Old place removed in 3.0: B-20. |
 | **SY-5** | **`[pub] immut` module constants** (TDP-2-025): a top-level `immut`, private unless `pub`/`public`; `export immut` warns with a `Fix:` writing `pub immut`. Top-level `mut` stays E087. | A | S–M | `export` removed in 3.0: B-21. The stdlib moves in the same minor. |
 
+### 6.15 Struct layout (ML) — TDP-2-027
+
+A struct is laid out in declaration order today, as in C. Compact order places
+fields by decreasing alignment, declaration order among equals, and reads only
+the struct's own declaration, so separate compilation (F-7a) agrees on it.
+`Particle { alive: bool, x: double, tag: char, y: double, hits: int32 }` is
+40 bytes in declaration order and 24 in compact order (checked 2026-10-25).
+
+| ID | Item | Kind | Cx | Notes |
+|---|---|---|---|---|
+| **ML-1** | **`@layout(c)`** on a struct: declaration order and C's padding, always. Its by-value struct fields must be `@layout(c)` too. Through the existing annotation mechanism (`E146` for misuse). | A | S | Changes nothing in 2.x, where every struct is already in C order. |
+| **ML-2** | **`--struct-layout=declared\|compact`** on `turfc` and on `turf build`/`run`/`test`; default `declared` in 2.x. | A | M | `TurfcInterfaceMinor`. CI runs the suite, GC stress and ASan in both layouts from the line that ships it. |
+| **ML-3** | **Layout report**: `turfc --layout-report` (JSON, an IF-2 schema) and `turf layout`, each struct's size, alignment and offsets in both layouts. | A | S | `turf-lsp` can show sizes on hover. |
+| **ML-4** | **Warning: a struct whose address reaches C without `@layout(c)`** (an `extern fn` argument, a `to ptr`/`void*`/other-pointer conversion, a callback's parameter or return, a by-value field of such a struct), with a `Fix:` inserting the annotation. | W | M | Error in 3.0 (B-22). A struct's bytes copied by hand into `mem::alloc` memory are not seen; that path is already `unsafe`. |
+
 ---
 
 ## Part 7 — 3.0.0 and the end of 2.x
@@ -1058,6 +1084,7 @@ source-level entry as an error, so a project can be ready before it upgrades.
 | **B-19** | **`function` is a reserved word** equal to `fn` (SY-3), usable wherever `fn` is, function types included. | An identifier named `function` stops parsing (a B-5 case, taken deliberately). | `lint-set = "3.0"` lists the names; `turf migrate 3.0` renames them. | yes |
 | **B-20** | **`static` only before `fn`** (SY-4): `fn T.m(...) static: R` is an error. | Rejects programs that compile in 2.x. | The 2.3 warning's `Fix:`; `turf migrate 3.0` moves the word. | yes |
 | **B-21** | **`export` removed** (SY-5): `export immut` is an error; `pub immut` is the spelling. `export` stays reserved. | Rejects programs that compile in 2.x. | The 2.3 warning's `Fix:`; `turf migrate 3.0` writes `pub immut`. | yes |
+| **B-22** | **Compact struct layout by default** (TDP-2-027, D-29): a struct without `@layout(c)` is laid out by decreasing alignment; ML-4 becomes an error. | `sizeof` changes for most structs, and a struct whose bytes C reads without `@layout(c)` would see a different layout. | ML-4's warning and `Fix:` from 2.7; `turf migrate 3.0` adds `@layout(c)` where it fires; `--struct-layout=declared` stays for bisecting. | yes |
 | **B-4** | **GC write-barrier contract** (only if RT-2′ is chosen over RT-2). | `unsafe` and C code storing a GC pointer into a GC object must call a barrier. | `mem::` helper plus an RT-5 check that finds missing barriers. | no (RT-2 is 3.x) |
 | **B-5** | **New reserved words**, only if a contextual keyword cannot express a feature (CC-4(b)). | An identifier with that name stops parsing. | `turf migrate` renames it. | no |
 | **B-6** | **Meaning of `fn(T): R[N]`** (G-1, "fix the grammar"). | Changes the parse of an existing type. | Not needed if G-1's additive spelling suffices. | no |
@@ -1152,6 +1179,13 @@ calls that any TDP touching them may reopen.
 |---|---|---|---|
 | **D-27** | With LG-1 in, does a generic construction keep taking its type arguments from the declared type? | No, in 3.0: the type arguments are written where the value is built (`List<int>::default()`), which also works with `guess`. Annotations stay; only the context supplying a constructor's type arguments is retired. No style guide is needed to choose between the two spellings, since one of them goes. | B-17 (7.1) |
 
+### 8.4 Decided by the owner, 2026-10-25
+
+| ID | Question | Decision | Specified in |
+|---|---|---|---|
+| **D-28** | Which voice and rules do diagnostics follow? | The five rules of DX-9: first person; one idea per sentence; name the types, never "value"; no exclamation marks; every hint is something the reader can do. | TDP-2-028 |
+| **D-29** | Does the compiler choose struct layout by default? | Yes, from 3.0: compact order unless `@layout(c)`; opt-in and warn-first through 2.x. Speed and memory by default may cost compile time. | TDP-2-027, B-22 |
+
 No decision is open. A new one is added here with a recommendation and asked
 of the owner before the item it blocks starts.
 
@@ -1177,4 +1211,4 @@ of the owner before the item it blocks starts.
 - New in the proposal: LG-1 … LG-7, V-1 … V-5, AN-1 … AN-9, RT-1 … RT-6,
   CC-0 … CC-6, DX-1 … DX-4, SL-0 … SL-8, NM-1 … NM-6, B-1 … B-11, D-1 … D-21.
   New in this document: PC-1 … PC-4, LB-1 … LB-5, PK-1 … PK-4, IF-1 … IF-5,
-  B-12 … B-15, D-22 … D-26.
+  B-12 … B-15, D-22 … D-26, DX-5 … DX-10, ML-1 … ML-4, B-22, D-28, D-29.
