@@ -107,8 +107,10 @@ std::optional<PackageGraph> LoadPackageGraph(const std::string &File,
   // Checked first so a future format fails with a message about the format,
   // not with whatever field it renamed.
   auto Format = Top->getInteger("format");
-  if (!Format || *Format != 1)
-    return Fail("\"format\" must be 1 (this turfc reads package-graph format 1)");
+  if (!Format || *Format != PackageGraphFormat)
+    return Fail("\"format\" must be " + std::to_string(PackageGraphFormat) +
+                " (this turfc reads package-graph format " +
+                std::to_string(PackageGraphFormat) + ")");
   auto RootName = Top->getString("root");
   if (!RootName)
     return Fail("missing \"root\" (the name of the package being built)");

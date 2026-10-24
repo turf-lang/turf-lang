@@ -19,6 +19,10 @@
 #include <string>
 #include <vector>
 
+/// The `"format"` a package graph must declare: the one this turfc reads.
+/// Also reported by `turfc --version --json` (IF-1).
+inline constexpr int PackageGraphFormat = 1;
+
 struct PackageInfo {
   std::string Name;
   std::string SrcRoot;           ///< canonical absolute path of the package's src/
