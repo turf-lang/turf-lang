@@ -117,6 +117,12 @@ any line may carry them under the stdlib rules of 5.2.
 unobservable (5.2's internals row), so it runs alongside the user-visible
 themes and is listed in each line's "Internal" row.
 
+**Numbering.** This Part still uses the numbering from before 2.1.0 shipped
+early, one behind `TURFLANG_3.0.0_ORDER.md`, which wins on which line an item
+ships in. The two lines added on 2026-10-25 carry their order-file numbers in
+parentheses: they come after 2.6.x here, and push this Part's 2.7.x and 2.8.x
+to 2.10.0 and 2.11.0 in the order file.
+
 | Line | Theme | Size of change | TDPs |
 |---|---|---|---|
 | **2.0.x** | Bug fixes found in 2.0.0 | patches | — |
@@ -126,6 +132,8 @@ themes and is listed in each line's "Internal" row.
 | **2.4.x** | Iteration, views, patterns, errors | large | 2-011, 2-012, 2-013, 2-014 |
 | **2.5.x** | Runtime and memory checks | large, internal | 2-015 |
 | **2.6.x** | Packages and native code (aim B) | large | 2-016, 2-017, 2-018, 2-027 |
+| **(2.8.0)** | Turf uses C (order-file number) | medium | 2-029 |
+| **(2.9.0)** | C, C++, Rust and Python call Turf (order-file number) | large | 2-030 |
 | **2.7.x** | Tooling and the pure compiler (aim A, additive half) | large | 2-019 |
 | **2.8.x** | Ready for 3.0 (last 2.x minor) | small | 2-020 |
 | **3.0.0** | The breaking register (Part 7) | breaking | 2-020, 2-027 |
@@ -205,6 +213,24 @@ field before 3.0 can promote it (B-1, B-13).
 | Struct layout | ML-1 `@layout(c)`, ML-2 `--struct-layout=compact` (opt-in), ML-3 `turf layout` report, ML-4 warning on a struct whose address reaches C without `@layout(c)` (TDP-2-027) |
 | Build speed | F-7a separate compilation |
 | Internal | F-S4d continues |
+
+### (2.8.0) — Turf uses C
+
+| Area | Items |
+|---|---|
+| Contracts | CX-1 `@ownership(borrows:, keeps:)`, `@length(of:, from:)`; TDP-2-016's `owned` folded into `@ownership` |
+| Bindings | CX-2 `turf bind` (declarations from a header, `bind.toml` questions), CX-3 `turf bind --wrap` (safe wrapper modules as Turf source) |
+| Checks | CX-4 `@ownership(releases: self)` on methods (use-once), CX-5 `turf test --sanitize` on `[native]` C |
+| C++ | CX-6 `.cpp` in `[native] sources` with the system C++ compiler |
+
+### (2.9.0) — C, C++, Rust and Python call Turf
+
+| Area | Items |
+|---|---|
+| Export | EX-1 `@export`, EX-2 `turf build --lib` (static, shared, generated `.h`, `--cpp` `.hpp`) |
+| Runtime | EX-3 the library-mode runtime (start on first call, per-entry stack base, owner thread, no signal handlers), EX-4 handles; RT-7 runtime in pieces |
+| Python | EX-5 `turf-python` (its own repository): extension modules and wheels, and a `python` package for calling Python |
+| Platforms | F-20 cross-linking with per-target runtimes |
 
 ### 2.7.x — Tooling and the pure compiler (additive half)
 
@@ -309,6 +335,8 @@ written in this order; this table is updated if they are not.
 | TDP-2-026 | Test options | F-11f | 2.2 |
 | TDP-2-027 | Struct layout chosen by the compiler | ML-1 … ML-4, B-22 | 2.6, 2.8, 3.0 |
 | TDP-2-028 | Diagnostics that explain | DX-5 … DX-10 | 2.2, 2.3 |
+| TDP-2-029 | Wrapping C libraries | CX-1 … CX-6 | (2.8.0) |
+| TDP-2-030 | Calling Turf from other languages | EX-1 … EX-5, F-20 | (2.9.0) |
 | TDP-3-001 | Threads and shared state | CC-0 … CC-3, B-8 | 3.1, 3.2 |
 | TDP-3-002 | Async and non-blocking I/O | CC-4, CC-5, CC-6 | 3.2 |
 
@@ -544,6 +572,7 @@ collector and "write barriers in preparation".
 | **RT-1** | **GC tier 1: better algorithms inside §6.5.** Size-segregated free lists and bump allocation; lazy/incremental *sweep*; side mark-bit tables; adaptive heap-growth policy; a faster interior-pointer block lookup; **parallel marking** by N worker threads *while the world is stopped* (still stop-the-world; only the collector's own threads are new, which §6.5's "single-threaded" does not need to mean). | I | L | Unobservable. Gated by `TURF_GC_STRESS` + `TURF_GC_VALIDATE` + the benchmark floor. |
 | **RT-2** | **GC tier 2: generational or concurrent collection, no language change.** Dirty-page tracking from the OS instead of compiler-emitted write barriers (candidate mechanisms, none prototyped: Linux soft-dirty bits or `mprotect`, `GetWriteWatch` on Windows, Mach VM protection on macOS). It works for stores made by C code and by raw `T*` writes, which a compiler barrier cannot see. | I (if OS tracking) / D | XL | Reverses nothing in §6.5 if the collector stays non-moving and the mutator is unaware. Needs the owner to confirm that §E's "no generational collector" is about a *moving* one (D-4). |
 | **RT-2′** | Same goal with **compiler-emitted write barriers** on pointer-typed field stores. | **B** | XL | A store made by `unsafe` code or by C into a GC object skips the barrier, so a pointer hidden from the collector is freed live. That makes the FFI contract stricter (B-4). Only chosen if RT-2 is measured not to work. |
+| **RT-7** | **Runtime in pieces.** `libturfrt` split into one object per facility (net, fs, time, signals, …), built with `-ffunction-sections`, linked with `--gc-sections`, so a program or library carries only what it calls; symbols hidden for library builds (EX-3). | I | S–M | Smaller binaries and Python wheels. Unobservable. |
 | **RT-3** | **Per-thread allocation buffers and lock-free fast path.** | I | M | Prerequisite of CC-1; also lowers single-thread cost. |
 | **RT-4** | **Checked arithmetic vs vectorization** (F-24). Specified as NM-1 … NM-6 in 6.9 (draft TDP-2-002). The default stays checked. | I / A | M | `INV-OPT-2` (elision only when proven) is not weakened. |
 | **RT-5** | **Opt-in runtime check mode** (`turf build --debug-checks`, building on the existing `TURF_RT_SANITIZE`): red zones around `mem::alloc` blocks, poison on `mem::free`, double-free/invalid-free, `mem::copy`/`mem::set` bounds when the block size is known, uninitialised-read of a manual-heap block. Panics with a named diagnostic, exit 134. | A | M–L | Default off in 2.x. Default on at `-O0` is B-2. |
@@ -673,7 +702,7 @@ cheapest first step and is sequenced in 2.2.
 | **F-11b** | Real pretty-printer (trivia-preserving lexer). `turf fmt`'s verified-result guarantee (§6.23) holds. | A | M | F-S0 |
 | **F-11c** | Documentation generator over `pub` items and doc comments. | A | M | V-2 |
 | **F-19** | Standard library expansion: richer `os`, `time` formatting, regex, CSV, compression, crypto hashes, a process API. Each through LEC-007's conventions and the API lock. | A | varies | V-3 |
-| **F-20** | Cross-linking; other platforms (Linux/Windows arm64, others need their own register capture, INV-RT-4). | A | L | |
+| **F-20** | Cross-linking; other platforms (Linux/Windows arm64, others need their own register capture, INV-RT-4). | A | L | Cross-linking for Tier 1 targets is in TDP-2-030 (order file 2.9.0): per-target `libturfrt` (and its PIC build) beside REL-008's lld and C runtimes. |
 | **F-9** | SLM: LoRA adapters and corpus growth (SL-3), judged by SL-2's scoreboard; part of the assistant after PC-2. `@slm { }` blocks are dropped (SL-8). F-DIAG-1/2/3 keep their gates. | A | L | PC-2 |
 | **F-10** | Self-hosting. | A | XL | F-1, F-7a, a stable 2.x |
 | **F-25** | Speculative paradigms (`DESIGN_NOTES.md` §7–8). | D | — | Revisit later; §25 rejects user-facing `comptime`/macros. |
@@ -1057,6 +1086,27 @@ the struct's own declaration, so separate compilation (F-7a) agrees on it.
 | **ML-3** | **Layout report**: `turfc --layout-report` (JSON, an IF-2 schema) and `turf layout`, each struct's size, alignment and offsets in both layouts. | A | S | `turf-lsp` can show sizes on hover. |
 | **ML-4** | **Warning: a struct whose address reaches C without `@layout(c)`** (an `extern fn` argument, a `to ptr`/`void*`/other-pointer conversion, a callback's parameter or return, a by-value field of such a struct), with a `Fix:` inserting the annotation. | W | M | Error in 3.0 (B-22). A struct's bytes copied by hand into `mem::alloc` memory are not seen; that path is already `unsafe`. |
 
+### 6.16 C interop (CX, EX) — TDP-2-029, TDP-2-030
+
+Owner request, 2026-10-25: Python's ecosystem is mostly C wrapped once and
+imported by everyone; Turf takes the same path in both directions before 3.0.
+C++ and Rust come in through the C ABI. Direct C++ interop (an embedded Clang)
+is not proposed: it contradicts PC-1's pure compiler.
+
+| ID | Item | Kind | Cx | Notes |
+|---|---|---|---|---|
+| **CX-1** | **Contracts on `extern fn`**: `@ownership(borrows: p)`, `@ownership(keeps: p)`, `@length(of: x, from: n)`, beside today's `acquires`/`releases`. LB-3's `owned` is spelled with `@ownership`. | A | M | Checked by the E017/E018 per-function check. LB-3 |
+| **CX-2** | **`turf bind`**: `extern fn`, `@layout(c)` structs and constants from a C header (`clang -Xclang -ast-dump=json`, `-dM -E`); an unanswered ownership question leaves a raw `ptr` and a `bind.toml` entry. | A | M–L | Never guesses from names (Principle V). Needs Clang. ML-1 |
+| **CX-3** | **`turf bind --wrap`**: a safe wrapper module as ordinary Turf source: opaque handles, copy-in/copy-out with the contract's length, named panics after close. | A | M | No raw pointer in its `pub` API (LB-4). |
+| **CX-4** | **`@ownership(releases: self)` on a method**: a second call is E017, a use after it E018, inside one function. | A | S–M | Today E146. Not a borrow checker: per function, no caller annotations. |
+| **CX-5** | **`turf test --sanitize=address,undefined`** on `[native]` C sources and their dependencies. | A | S | Ships `libturfrt_asan.a`, a change to F-REL-1. LB-1 |
+| **CX-6** | **`.cpp` in `[native] sources`**, compiled with `CXX`/`c++`/`clang++`/`g++`; C++ used through `extern "C"` shims that catch every exception. | A | S | LB-1 |
+| **EX-1** | **`@export`** on a `pub` free function: C symbol `<package>_<name>` (or `@export(name:)`), C-form types only (scalars, `string` copied in and out, call-scoped `Slice<T>`, `@layout(c)` pointers, handles, capture-free `fn`, `!T` as a status code). | A | M | B-7 settles capture-free function values. |
+| **EX-2** | **`turf build --lib`** / `[lib] kind`: static and shared libraries and `build/include/<package>.h` (`extern "C"`-guarded); `--cpp` adds an RAII `.hpp`. A shared library links the host's libc dynamically, never the bundled musl. | A | M | Needs a PIC `libturfrt`. |
+| **EX-3** | **Library-mode runtime**: `turf_rt_init()` on first call; stack base per outermost entry; the first caller's thread owns the runtime and another thread is a named panic until 3.1; no signal handlers unless asked. | A | M–L | FREEZE §6.5 "single-threaded" holds. |
+| **EX-4** | **Handles**: a non-`@layout(c)` `&T` crossing to C is rooted (`mem::root`) and becomes an opaque pointer with a release function; a handle coming back is checked against a live table. | A | M | |
+| **EX-5** | **`turf-python`** (own repository): CPython extension modules on the limited API (abi3) and wheels from a Turf library; `!T` errors as exceptions; handles freed by Python's refcounting; a `python` package for calling Python from Turf. | A | L | Outside the compiler; reads only the generated header and the driver interface. |
+
 ---
 
 ## Part 7 — 3.0.0 and the end of 2.x
@@ -1211,4 +1261,5 @@ of the owner before the item it blocks starts.
 - New in the proposal: LG-1 … LG-7, V-1 … V-5, AN-1 … AN-9, RT-1 … RT-6,
   CC-0 … CC-6, DX-1 … DX-4, SL-0 … SL-8, NM-1 … NM-6, B-1 … B-11, D-1 … D-21.
   New in this document: PC-1 … PC-4, LB-1 … LB-5, PK-1 … PK-4, IF-1 … IF-5,
-  B-12 … B-15, D-22 … D-26, DX-5 … DX-10, ML-1 … ML-4, B-22, D-28, D-29.
+  B-12 … B-15, D-22 … D-26, DX-5 … DX-10, ML-1 … ML-4, B-22, D-28, D-29,
+  CX-1 … CX-6, EX-1 … EX-5, RT-7.
