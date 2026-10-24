@@ -1827,6 +1827,11 @@ static int runCompilerMain(int argc, char **argv) {
       // ClaimEntryFileImportSlot()'s own doc comment (ParserModule.cpp) for
       // the full rationale and why this call must sit exactly here (after
       // prelude injection, before this loop).
+      // Set when sub-pass 1 steps over a token that starts no declaration
+      // (`immut K = 3;`, `function f() {}` at the top level). Only the main
+      // pass reports those, so a pre-pass resolver failure must not end the
+      // compile before the main pass has parsed them (issue #321).
+      bool PrePassSkippedTopLevel = false;
       if (!ClaimEntryFileImportSlot(SourceFilename)) {
       while (CurTok != TOK_EOF) {
         if (CurTok == ';') { getNextToken(); continue; }
@@ -1893,6 +1898,7 @@ static int runCompilerMain(int argc, char **argv) {
           }
           g_recoverActive = false;
         } else {
+          PrePassSkippedTopLevel = true;
           getNextToken();
         }
       }
@@ -1904,6 +1910,9 @@ static int runCompilerMain(int argc, char **argv) {
       // This populates ResolvedCandidates on every FuncCallExprAST and sets
       // ResolvedCallTarget for unambiguous single-overload calls.
       Resolver PreR;
+      // The rest of the pre-pass is skipped and the main pass reports
+      // everything; see PrePassSkippedTopLevel.
+      bool PrePassAbandoned = false;
       {
         bool PreResolverClean = true;
         g_recoverActive = true;
@@ -1914,8 +1923,11 @@ static int runCompilerMain(int argc, char **argv) {
         }
         g_recoverActive = false;
         if (!PreResolverClean) {
-          DiagnosticEngine::flushAll();
-          return 1;
+          if (!PrePassSkippedTopLevel) {
+            DiagnosticEngine::flushAll();
+            return 1;
+          }
+          PrePassAbandoned = true;
         }
       }
 
@@ -1923,8 +1935,8 @@ static int runCompilerMain(int argc, char **argv) {
       // Run the TypeChecker over the pre-pass ASTs to narrow overloaded calls
       // (e.g. io.printline has 4 overloads; TypeChecker picks the right one
       // and sets ResolvedCallTarget so sub-pass 3b codegen reads it blindly).
-      bool PreTCClean = true;
-      {
+      bool PreTCClean = !PrePassAbandoned;
+      if (!PrePassAbandoned) {
         TypeChecker PreTC(PreR.symbolTable());
         // TYPE-002 (docs/development/changes/TYPE-002.md, S11b): this is
         // U-4's answer (U-4') in practice -- the real monomorphizer will
@@ -2054,6 +2066,7 @@ static int runCompilerMain(int argc, char **argv) {
       // exactly this reason (forward calls) -- process ALL of them, fully,
       // before ANY function prototype or body touches a struct type. Structs
       // are excluded from both loops below since they're entirely done here.
+      if (!PrePassAbandoned)
       for (auto &AST : PrePassASTs) {
         if (dynamic_cast<StructDeclExprAST *>(AST.get())) {
           g_recoverActive = true;
@@ -2072,6 +2085,7 @@ static int runCompilerMain(int argc, char **argv) {
       // TheModule->getFunction(mangledName) returns null.
       // We set a global flag to stop after prototype creation.
       g_protoOnlyPass = true;
+      if (!PrePassAbandoned)
       for (auto &AST : PrePassASTs) {
         // TYPE-002 (S12a-S14a): a FuncDefExprAST that STILL has a non-empty
         // TypeParams list is an uninstantiated GENERIC TEMPLATE -- the
