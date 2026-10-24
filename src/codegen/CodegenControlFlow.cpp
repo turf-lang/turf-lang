@@ -598,8 +598,9 @@ Value *ForExprAST::codegen() {
 
 // ForEachExprAST::codegen : desugars to a compiler-generated ascending
 // 0..Size-1 counted loop over the array's size -- compile-time for a `T[N]`,
-// the slice's run-time length for a `T[]` parameter (the TypeChecker already
-// guarantees the iterable is an array -- see TypeChecker::visitForEach()).
+// the slice's run-time length for a `T[]` parameter, `strlen` once for a
+// `string` (the TypeChecker already guarantees the iterable is one of those
+// -- see TypeChecker::visitForEach()).
 // Unlike ForExprAST, direction is always
 // ascending and step is always 1, so there's no need for the
 // ascending/descending dance ForExprAST::codegen() does for user-supplied
@@ -610,18 +611,19 @@ Value *ForEachExprAST::codegen() {
   SetDebugLoc(getLoc());
 
   const TurfType *IterableTy = getExprType(Iterable.get());
-  if (!IterableTy || !isArrayType(IterableTy)) {
+  const bool IsString = IterableTy && IterableTy->isString();
+  if (!IterableTy || (!IsString && !isArrayType(IterableTy))) {
     llvm::report_fatal_error(
-        "Internal error: for-each iterable is not an array. "
+        "Internal error: for-each iterable is not an array or a string. "
         "This should have been caught by the TypeChecker.");
     return nullptr;
   }
 
   const auto *ArrTy = dynamic_cast<const ::ArrayType *>(IterableTy);
-  int Size = ArrTy->getSize();
-  const bool IsSlice = Size < 0;
+  int Size = IsString ? -1 : ArrTy->getSize();
+  const bool IsSlice = !IsString && Size < 0;
 
-  TurfTypePtr ElemTy = ArrTy->getElementTypePtr();
+  TurfTypePtr ElemTy = IsString ? TurfChar() : ArrTy->getElementTypePtr();
   Type *ElemLLVMTy = getLLVMType(ElemTy.get());
 
   // 1. Get an address for the iterable to GEP into, and the bound. A `T[]`
@@ -633,7 +635,20 @@ Value *ForEachExprAST::codegen() {
   //    fresh temp alloca.
   Value *ArrPtr = nullptr;
   Value *SizeVal = nullptr;
-  if (IsSlice) {
+  if (IsString) {
+    // SY-1: the string and its length are taken once, before the first
+    // iteration. A string's allocation never shrinks and the collector does
+    // not move it, so every byte below that length stays readable whatever
+    // the body does; the per-byte check below covers a body that shortens it.
+    ArrPtr = Iterable->codegen();
+    if (!ArrPtr)
+      return nullptr;
+    FunctionType *StrlenTy = FunctionType::get(
+        Type::getInt64Ty(*TheContext), {PointerType::get(*TheContext, 0)},
+        /*isVarArg=*/false);
+    FunctionCallee StrlenFn = TheModule->getOrInsertFunction("strlen", StrlenTy);
+    SizeVal = Builder->CreateCall(StrlenFn, {ArrPtr}, "foreach.strlen");
+  } else if (IsSlice) {
     Value *Slice = Iterable->codegen();
     if (!Slice)
       return nullptr;
@@ -729,6 +744,21 @@ Value *ForEachExprAST::codegen() {
   Value *ElemPtr = Builder->CreateInBoundsGEP(ElemLLVMTy, ArrPtr, IdxForGEP,
                                               "foreach.elemptr");
   Value *ElemVal = Builder->CreateLoad(ElemLLVMTy, ElemPtr, "foreach.elem");
+  // SY-1: a `'\0'` here means the body made the string shorter than the
+  // loop's position, so `s[i]` would be out of bounds: panic as it does.
+  if (IsString) {
+    BasicBlock *OobBB = BasicBlock::Create(*TheContext, "foreach.str_oob", TheFunction);
+    BasicBlock *OkBB = BasicBlock::Create(*TheContext, "foreach.str_ok");
+    Value *IsNul = Builder->CreateICmpEQ(
+        ElemVal, ConstantInt::get(Type::getInt8Ty(*TheContext), 0), "foreach.isnul");
+    Builder->CreateCondBr(IsNul, OobBB, OkBB);
+    Builder->SetInsertPoint(OobBB);
+    CodegenPanic(Builder->CreateGlobalString("String index out of bounds"), Loc);
+    if (!blockHasTerminator(Builder->GetInsertBlock()))
+      Builder->CreateUnreachable();
+    TheFunction->insert(TheFunction->end(), OkBB);
+    Builder->SetInsertPoint(OkBB);
+  }
   Builder->CreateStore(ElemVal, ValueAlloca);
 
   // Push {StepBB, AfterBB} so 'continue' jumps to step, 'break' jumps to after.

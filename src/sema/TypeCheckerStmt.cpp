@@ -382,7 +382,11 @@ void TypeChecker::visitForEach(ForEachExprAST &Node) {
 
   TurfTypePtr IterableTy = getType(Node.getIterable());
 
-  if (!IterableTy || !isArrayType(IterableTy.get())) {
+  // SY-1 (TDP-2-021): a `string` is iterated byte by byte, each a `char`,
+  // as `s[i]` reads it.
+  const bool IsString = IterableTy && IterableTy->isString();
+
+  if (!IterableTy || (!IsString && !isArrayType(IterableTy.get()))) {
     ForEachNonArrayError(Node.getLoc(),
                          IterableTy ? IterableTy->getName() : "unknown")
         .raise();
@@ -394,7 +398,7 @@ void TypeChecker::visitForEach(ForEachExprAST &Node) {
   // slice that carries its length at run time (E006, which refused it, is
   // retired).
   const auto *ArrTy = dynamic_cast<const ArrayType *>(IterableTy.get());
-  TurfTypePtr ElemTy = ArrTy->getElementTypePtr();
+  TurfTypePtr ElemTy = IsString ? TurfChar() : ArrTy->getElementTypePtr();
 
   // If the element type is a NamedType (e.g. "User"), resolve it to the
   // actual TurfStructType/enum via the symbol table -- same "Issue #17 fix"

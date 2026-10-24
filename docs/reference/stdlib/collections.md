@@ -294,7 +294,7 @@ could break that (`s[0] = 1` is **E056**, "No `operator[]=` overload matches").
 ## Iteration
 
 A collection is not a built-in array, so `for x in l` does not work on it
-(**E005**, "for-each requires an array"). Walk a `List` by index, a `Stack` or
+(**E005**, "for-each requires an array or a string"). Walk a `List` by index, a `Stack` or
 `Queue` by emptying it, and a `Map` through `keys()` or `values()`.
 
 <!-- doc-example: fails E005 -->
