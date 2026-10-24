@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E066
+// EXPECT-DIAG: Type mismatch!
+// EXPECT-DIAG: with these type arguments is 'fn(string): string'
+
+fn<T> identity(x: T): T {
+    return x;
+}
+
+fn main(): int {
+    immut f: fn(int): int = identity::<string>;
+    return 0;
+}

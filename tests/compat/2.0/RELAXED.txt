@@ -14,3 +14,4 @@
 05_arrays_pointers_ffi/fail_array_use_before_any_write.tr  # 207cf09c: a fixed-size array T[N] is assigned from its declaration and reads as zero, FREEZE.md 6.4, owner decision 2026-10-15, docs/development/changes/ANA-001.md (2.1.0)
 10_default_init/fail_array_nested_write_reads_first.tr  # 207cf09c: same decision, ANA-001
 10_default_init/fail_array_of_struct_use_before_write.tr  # 207cf09c: same decision, ANA-001
+01_syntax/fail_parse_error_generic_call_expression_hint.tr  # 090aff61: `List<int>::default()` is a type-argument list (LG-1), ROADMAP_v3.0.0.md 6.10, docs/development/changes/TDP-2-005.md (2.2.0)

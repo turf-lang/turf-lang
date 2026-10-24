@@ -1,0 +1,16 @@
+// EXPECT-DIAG: E148
+// EXPECT-DIAG: only build a generic struct
+// Type arguments before '::' are for '::default()' and '::new(...)'.
+
+struct Box<T> {
+    val: T
+}
+
+fn<T> Box.make() static: int {
+    return 1;
+}
+
+fn main(): int {
+    immut a: int = Box<int>::make();
+    return 0;
+}

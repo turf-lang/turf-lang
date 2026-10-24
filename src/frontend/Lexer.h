@@ -513,6 +513,33 @@ enum Token {
 
 int gettok();
 void resetLexer();
+
+// ─── Lookahead (LG-1) ─────────────────────────────────────────────────────
+// The parser reads one token at a time, but `List<int>::default()` cannot be
+// told from `a < b` until the `>` and the `::` after it are seen. These lex
+// tokens past CurTok without making them current; getNextToken() hands them
+// out, in order, before it asks gettok() for a new one. A lexed-ahead token
+// carries everything gettok() sets, so making it current later is exactly
+// what lexing it then would have done.
+struct LexedToken {
+  int Tok;
+  std::string IdentifierStr, StringVal, NumLitSpelling, NumLitClean;
+  int NumLitRadix;
+  bool BoolVal;
+  char CharVal;
+  SourceLocation Loc;
+  int PrevTokEndLine, PrevTokEndCol;
+};
+/// The kind of the token `N + 1` places after CurTok (0 is the next one),
+/// lexing ahead as needed. CurTok and every token global stay as they are.
+int peekToken(size_t N);
+/// If a lexed-ahead token is waiting, make it the current token (its kind in
+/// `Tok`, its text and location in the globals) and return true.
+bool takeLookaheadToken(int &Tok);
+/// The waiting tokens, removed (an import's parse starts with none, and gets
+/// the importer's back with restoreLookahead()).
+std::vector<LexedToken> takeLookahead();
+void restoreLookahead(std::vector<LexedToken> Tokens);
 // `Category` is the ground-truth SLM::ErrorCategory for this diagnostic,
 // same role as TurfError::Category_ (Errors.h) plays for a typed error --
 // LogErrorAt() is the untyped path (no TurfError subclass instance exists to

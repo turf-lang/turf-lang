@@ -17,6 +17,8 @@
 
 // Defined in ParserCore.cpp
 TurfTypePtr ParseType();
+// A type-argument list `<T1, T2, ...>`, CurTok at its '<' (ParserCore.cpp).
+bool ParseTypeArgList(std::vector<TurfTypePtr> &TypeArgs);
 bool isDisallowedVoidType(const TurfType *T);
 
 /// True only while the local-variable declaration parse reads its type

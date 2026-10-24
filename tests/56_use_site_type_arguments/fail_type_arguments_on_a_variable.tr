@@ -1,0 +1,8 @@
+// EXPECT-DIAG: E148
+// EXPECT-DIAG: 'v' is a value, not a generic function
+
+fn main(): int {
+    immut v: int = 2;
+    immut a: int = v::<int>;
+    return 0;
+}

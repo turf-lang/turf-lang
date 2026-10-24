@@ -94,6 +94,7 @@ void Resolver::visitSizeOf(SizeOfExprAST &Node) {
 }
 
 void Resolver::visitVariable(VariableExprAST &Node) {
+  resolveWrittenTypeArgs(&Node);
   // A size parameter's read in an instantiation is a constant
   // (Monomorphize): there is no variable to find.
   if (Node.SizeValue)
