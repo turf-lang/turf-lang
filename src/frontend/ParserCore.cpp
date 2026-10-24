@@ -278,39 +278,53 @@ static TurfTypePtr WrapArrayDim(TurfTypePtr Base, const std::pair<int, std::stri
 
 static TurfTypePtr ParseTrailingArrayDims(TurfTypePtr Base);
 
-// LG-1: does the '<' at CurTok open a type-argument list that closes with
-// '>' immediately followed by '::' (`List<int>::default()`)? Only tokens that
-// can appear in a type are read, at most a few dozen, and none is consumed
-// (peekToken()). Anything else means the '<' is less-than. Committing is safe
-// because `a < b > ::c` is a syntax error with '<' as less-than: '::' cannot
-// begin an operand, so only programs rejected before change meaning.
-static bool TypeArgsThenScopeAhead() {
+// LG-1: if the '<' at CurTok opens a list of type-shaped tokens that closes
+// with its '>', the kind of the token after that '>' (0 otherwise), and in
+// `SawTypeKeyword` whether the list names a built-in type (`int`, `string`,
+// ...), which no operand can be. Only tokens that can appear in a type are
+// read, at most a few dozen, and none is consumed (peekToken()).
+static int TypeArgListFollower(bool *SawTypeKeyword = nullptr) {
   constexpr size_t MaxTokens = 64;
   int Depth = 1;
+  bool Keyword = false;
   for (size_t I = 0; I < MaxTokens; ++I) {
     // An array size (`int[3]`) is the one place a number appears in a type.
     if (peekToken(I) == TOK_INT_LITERAL && (I == 0 || peekToken(I - 1) != '['))
-      return false;
+      return 0;
     switch (peekToken(I)) {
     case '<': ++Depth; break;
     case '>': --Depth; break;
     case TOK_RSHIFT: Depth -= 2; break;
-    case TOK_IDENTIFIER: case TOK_TYPE_INT: case TOK_TYPE_INT32:
-    case TOK_TYPE_DOUBLE: case TOK_TYPE_BOOL: case TOK_TYPE_CHAR:
-    case TOK_TYPE_STRING: case TOK_TYPE_VOID: case TOK_PTR:
-    case TOK_SCOPE: case ',': case '[': case ']': case TOK_INT_LITERAL:
-    case '*': case '&': case '?': case '!': case TOK_FN: case '(': case ')':
-    case TOK_COLON:
+    case TOK_TYPE_INT: case TOK_TYPE_INT32: case TOK_TYPE_DOUBLE:
+    case TOK_TYPE_BOOL: case TOK_TYPE_CHAR: case TOK_TYPE_STRING:
+    case TOK_TYPE_VOID: case TOK_PTR:
+      Keyword = true;
+      break;
+    case TOK_IDENTIFIER: case TOK_SCOPE: case ',': case '[': case ']':
+    case TOK_INT_LITERAL: case '*': case '&': case '?': case '!': case TOK_FN:
+    case '(': case ')': case TOK_COLON:
       break;
     default:
-      return false;
+      return 0;
     }
-    if (Depth == 0)
-      return peekToken(I + 1) == TOK_SCOPE;
+    if (Depth == 0) {
+      if (SawTypeKeyword)
+        *SawTypeKeyword = Keyword;
+      return peekToken(I + 1);
+    }
     if (Depth < 0)
-      return false;
+      return 0;
   }
-  return false;
+  return 0;
+}
+
+// LG-1: does the '<' at CurTok open a type-argument list that closes with
+// '>' immediately followed by '::' (`List<int>::default()`)? Anything else
+// means the '<' is less-than. Committing is safe because `a < b > ::c` is a
+// syntax error with '<' as less-than: '::' cannot begin an operand, so only
+// programs rejected before change meaning.
+static bool TypeArgsThenScopeAhead() {
+  return TypeArgListFollower() == TOK_SCOPE;
 }
 
 // A type-argument list, `<T1, T2, ...>`, CurTok at its '<'. Shared by a
@@ -844,6 +858,26 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
       LeftType = std::make_shared<GenericType>(IdName, std::move(TypeArgs));
     }
 
+    // LG-7: `identity<int>(3)`, a generic function's type arguments without
+    // the `::`. A list naming a built-in type cannot be operands of `<` and
+    // `>`, so this is never a comparison; the fix writes the `::`.
+    if (!LeftType && CurTok == '<' && !ParsingPatternHeader) {
+      bool SawTypeKeyword = false;
+      if (TypeArgListFollower(&SawTypeKeyword) == '(' && SawTypeKeyword) {
+        SyntaxError(CurLoc, ErrCode::ExpectedKeyword,
+                    "Type arguments of a generic function are written after "
+                    "'::': '" + IdName + "<' starts a comparison.",
+                    "Write `" + IdName + "::<...>(...)`, e.g. `" + IdName +
+                        "::<int>(x)`, or leave the type arguments out and let "
+                        "the arguments decide them.")
+            .withInsertAfterTokenFixIt(IdLoc, IdName, "::")
+            .withFixReason("A generic function's type arguments follow '::' "
+                           "(`f::<int>(x)`); without it '<' is less-than.")
+            .raise();
+        return nullptr;
+      }
+    }
+
     // ── LG-2: name::<T> ──────────────────────────────────────────────────────
     // `identity::<int>(3)`, `immut g = identity::<int>;`: type arguments for a
     // generic function. `::` followed by `<` begins nothing else.
@@ -1089,15 +1123,15 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
   case TOK_TYPE_BOOL:
   case TOK_TYPE_CHAR:
     // A primitive type name is only ever valid after `mut x:` / `->`; here it
-    // usually means a generic type argument written in EXPRESSION position
-    // (`List<int>::default()` parses as `List < int ...`), which Turf does not
-    // have -- say where the type goes instead of leaving the user to guess
-    // from "begin a declaration".
+    // usually means a generic type argument written in EXPRESSION position in
+    // a shape LG-1/LG-2 do not read (`List<int>.f()`, `x < int`) -- say how
+    // type arguments are written instead of leaving the user to guess from
+    // "begin a declaration".
     LogErrorAt(CurLoc, ErrCode::ExpectedKeyword,
                "Expected 'mutable' or 'immutable' to begin a declaration."
-               "\n  Hint: if this is a generic type argument in an expression "
-               "(`List<int>::default()`), put the type on the variable "
-               "instead: `mut l: List<int> = List::default();`.",
+               "\n  Hint: if this is a generic type argument in an expression, "
+               "a generic struct's go before '::' (`List<int>::default()`) and "
+               "a generic function's after it (`identity::<int>(x)`).",
                SLM::ErrorCategory::DECLARATION);
     return nullptr;
 

@@ -20,9 +20,10 @@ A static method (`Point::origin`) has no value form. Wrap the call in a plain fu
 
 An `@caller_location` function is not a value either (only a direct call passes the location). Wrap the call in a plain function the same way.
 
-A generic function is a value only where a function type says what its type parameters are:
+A generic function is a value only where something says what its type parameters are: a function type, or type arguments written after `::`:
 
     fn<T> id(x: T): T { return x; }
 
     mut g = id;                       // E137: nothing says what T is
     immut f: fn(int): int = id;       // fine: T is int
+    immut h = id::<int>;              // fine: T is int

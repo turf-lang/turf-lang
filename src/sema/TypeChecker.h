@@ -312,6 +312,9 @@ public:
   /// `Name<Args>` as the type it builds, as if stored into a declaration of
   /// that type.
   void applyWrittenConstructedType(FuncCallExprAST &Node);
+  /// E129 for a `guess` declaration whose initializer is a generic struct
+  /// with no type arguments; with a fix when exactly one set fits (LG-7).
+  void reportNothingToInferGeneric(const VarDeclExprAST &Node);
   void visitMethodCall(MethodCallExprAST &Node) override;
   /// Resolution proper; visitMethodCall() adds the check that needs its result.
   void visitMethodCallImpl(MethodCallExprAST &Node);

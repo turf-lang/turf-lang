@@ -49,6 +49,7 @@ CORRECT (each fixed shape, written out):
 FIX:
   Compare what was written with the shape above and add or fix the piece the message
   asks for. A lookalike (`then` instead of `{`, `:=` instead of `=`) is the thing to
-  change: Turf has no aliases for them.
+  change: Turf has no aliases for them. A generic function's type arguments follow `::`:
+  `identity<int>(3)` is E110, `identity::<int>(3)` is right.
 
 RELATED: E103 (unexpected token), E107 (missing brace), E113 (removed syntax).
