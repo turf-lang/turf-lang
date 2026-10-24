@@ -82,10 +82,10 @@ GENERICS: `struct Box<T> { val: T }`, instantiated as `Box<int>`,
     fn<T> identity(x: T): T {
         return x;
     }
-  Type arguments are ALWAYS INFERRED from the call's argument types -- there
-  is NO explicit instantiation syntax like `identity<int>(5)` (that's a
-  parse error: Turf-Lang has no `<...>` after a function name at a call
-  site, only in a type ANNOTATION like `List<int>`).
+  Type arguments are inferred from the call's argument types, or written
+  after `::`: `identity::<int>(5)`. `identity<int>(5)` is a parse error
+  (`<` right after a function name is less-than). A generic struct's are
+  written before `::`: `mut l = List<int>::default();`.
 
 NAMESPACE: a struct/enum belongs to the module that declares it. Two
 different modules (or a module and your own file) may each declare a
@@ -131,5 +131,5 @@ COMMON MISTAKES:
 - A `new()` that does not assign every field on every path.
 - A method declared INSIDE the struct body: methods go outside, as
   `fn StructName.method(...)`.
-- Explicit `identity<int>(5)`: type arguments are always inferred.
+- `identity<int>(5)`: write `identity::<int>(5)`, or let the argument decide.
 - `==` on two structs: compare fields. A mutating method on an `immut` variable.

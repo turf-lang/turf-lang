@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E148
+// EXPECT-DIAG: a method call takes no type arguments
+// A method of a generic struct takes its type arguments from the receiver.
+
+import list::List;
+
+fn main(): int {
+    mut l = List<int>::default();
+    l.push::<int>(1);
+    return 0;
+}

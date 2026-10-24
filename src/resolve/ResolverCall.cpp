@@ -29,7 +29,31 @@
 #include <unordered_set>
 
 
+void Resolver::resolveWrittenTypeArgs(std::vector<TurfTypePtr> &Types,
+                                      SourceLocation Loc) {
+  for (auto &T : Types) {
+    validateNamedType(T, Loc, CurrentFuncTypeParams_);
+    T = substituteTypeParams(T, CurrentFuncTypeParams_);
+  }
+}
+
+void Resolver::resolveWrittenTypeArgs(ExprAST *Expr) {
+  if (auto *V = dynamic_cast<VariableExprAST *>(Expr)) {
+    resolveWrittenTypeArgs(V->TypeArgs, V->getLoc());
+  } else if (auto *S = dynamic_cast<ScopeAccessExprAST *>(Expr)) {
+    resolveWrittenTypeArgs(S->TypeArgs, S->getLoc());
+    if (S->LeftType) {
+      std::vector<TurfTypePtr> Left{S->LeftType};
+      resolveWrittenTypeArgs(Left, S->getLeftLoc());
+      S->LeftType = Left.front();
+    }
+  } else if (auto *M = dynamic_cast<MethodCallExprAST *>(Expr)) {
+    resolveWrittenTypeArgs(M->TypeArgs, M->getNameLoc());
+  }
+}
+
 void Resolver::visitFuncCall(FuncCallExprAST &Node) {
+  resolveWrittenTypeArgs(const_cast<ExprAST *>(Node.getCallee()));
   // Resolve argument expressions first so any nested variable lookups happen
   // before we inspect the callee.
   for (const auto &Arg : Node.getArgs())
@@ -713,6 +737,7 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
 
 
 void Resolver::visitMethodCall(MethodCallExprAST &Node) {
+  resolveWrittenTypeArgs(&Node);
   // Resolve argument expressions FIRST (mirrors visitFuncCall's own
   // ordering) so a genuinely broken argument (e.g. an undeclared variable)
   // is still reported even when the base itself turns out to be rejected
@@ -929,6 +954,7 @@ void Resolver::visitTry(TryExprAST &Node) {
 //     "First-class functions are not supported yet" internal error for
 //     exactly this shape once it gets that far un-rejected).
 void Resolver::visitScopeAccess(ScopeAccessExprAST &Node) {
+  resolveWrittenTypeArgs(&Node);
   // FDN-003: see the identical call in visitFuncCall().
   resolveScopeLeftType(Node, Node.getLeftLoc());
   const std::string &LeftName = Node.getLeftName();

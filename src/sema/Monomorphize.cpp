@@ -222,6 +222,8 @@ void substituteTypesInBody(const ExprAST *Node,
   // A size parameter (`N` in `fn<T, N: size>`): its reads become the
   // instantiation's constant, and `mut r: T[N];` gets that length.
   if (auto *V = const_cast<VariableExprAST *>(dynamic_cast<const VariableExprAST *>(Node))) {
+    for (auto &T : V->TypeArgs) // LG-2: `identity::<T>`
+      T = substituteConcreteTypes(T, Subst);
     if (V->IsSizeParamRef) {
       auto It = Subst.find(V->getName());
       if (It != Subst.end())
@@ -316,7 +318,18 @@ void substituteTypesInBody(const ExprAST *Node,
       substituteTypesInBody(Arg.get(), Subst);
     return;
   }
+  // LG-1/LG-2: the type arguments written in `List<T>::default()` and
+  // `module::f::<T>`.
+  if (auto *SA = const_cast<ScopeAccessExprAST *>(dynamic_cast<const ScopeAccessExprAST *>(Node))) {
+    if (SA->LeftType)
+      SA->LeftType = substituteConcreteTypes(SA->LeftType, Subst);
+    for (auto &T : SA->TypeArgs)
+      T = substituteConcreteTypes(T, Subst);
+    return;
+  }
   if (auto *MC = dynamic_cast<const MethodCallExprAST *>(Node)) {
+    for (auto &T : const_cast<MethodCallExprAST *>(MC)->TypeArgs)
+      T = substituteConcreteTypes(T, Subst);
     substituteTypesInBody(MC->getBase(), Subst);
     for (const auto &Arg : MC->getArgs())
       if (Arg) substituteTypesInBody(Arg.get(), Subst);

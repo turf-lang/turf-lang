@@ -220,6 +220,25 @@ void TypeChecker::visitVariable(VariableExprAST &Node) {
     return;
   }
 
+  // LG-2: `name::<T>` names a generic function. On anything else the type
+  // arguments have nothing to bind. (As a call's callee the name has neither
+  // a symbol nor a function reference; visitFuncCall() checks the count.)
+  if (!Node.TypeArgs.empty() &&
+      !(Node.ResolvedFunctionRef && !Node.ResolvedFunctionRef->TypeParams.empty()) &&
+      (Node.ResolvedFunctionRef || Node.ResolvedSymbol || Node.ResolvedConstant ||
+       LoopVarTypes_.count(Name))) {
+    reportError(Node.getLoc(), ErrCode::WrongTypeArgumentCount,
+                "'" + Name + "' " +
+                    (Node.ResolvedFunctionRef
+                         ? std::string("is not generic, so it takes no type arguments.")
+                         : std::string("is a value, not a generic function, so it "
+                                       "takes no type arguments.")),
+                {}, "Drop the '::<...>' after '" + Name + "'.",
+                "Wrong number of type arguments!");
+    setType(&Node, nullptr);
+    return;
+  }
+
   // 1. Check loop variable environment first (for-loop induction variables).
   //    These are not tracked by the Resolver's scope stack but are registered
   //    directly by visitFor() into LoopVarTypes_.
