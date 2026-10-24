@@ -252,6 +252,55 @@ void TypeChecker::typeGenericFunctionValue(VariableExprAST &Node) {
       (ExpectedFnSite_ == &Node && ExpectedFnType_ && ExpectedFnType_->isFunc())
           ? static_cast<const FuncType *>(ExpectedFnType_.get())
           : nullptr;
+
+  // LG-2: `immut g = identity::<int>;` -- the written type arguments are the
+  // source the bare name lacks. With an expected type too, the two must agree.
+  std::shared_ptr<FuncType> FromWritten;
+  if (!Node.TypeArgs.empty()) {
+    if (Node.TypeArgs.size() != Ref.TypeParams.size() || !Ref.SizeParams.empty()) {
+      const size_t Want = Ref.TypeParams.size();
+      reportError(Node.getLoc(), ErrCode::WrongTypeArgumentCount,
+                  "'" + Name + "' is " + Generic + ", which takes " +
+                      std::to_string(Want) + " type argument" + (Want == 1 ? "" : "s") +
+                      ", and " + std::to_string(Node.TypeArgs.size()) + " " +
+                      (Node.TypeArgs.size() == 1 ? "is" : "are") + " written." +
+                      (Ref.SizeParams.empty()
+                           ? std::string()
+                           : " A size parameter is not written; it comes from a "
+                             "function type the value is stored into."),
+                  {},
+                  Ref.SizeParams.empty()
+                      ? "Write one type for each of its type parameters, in order."
+                      : "Store it where a function type is declared, e.g. 'immut f: "
+                        "fn(...): ... = " + Name + ";'.",
+                  "Wrong number of type arguments!");
+      setType(&Node, nullptr);
+      return;
+    }
+    TypeWalk::SubstMap Subst;
+    for (size_t I = 0; I < Ref.TypeParams.size(); ++I)
+      Subst.emplace(Ref.TypeParams[I], Node.TypeArgs[I]);
+    std::vector<TurfTypePtr> Params;
+    for (const auto &P : Ref.Params)
+      Params.push_back(substituteReturnType(P.Type, Subst));
+    FromWritten = std::make_shared<FuncType>(
+        Ref.ReturnType ? substituteReturnType(Ref.ReturnType, Subst) : nullptr,
+        std::move(Params));
+    if (Want && !FromWritten->isEquivalent(Want)) {
+      reportError(Node.getLoc(), ErrCode::TypeMismatch,
+                  "'" + Node.getName() + "' with these type arguments is '" +
+                      FromWritten->getName() + "', but '" + Want->getName() +
+                      "' is expected here.",
+                  {},
+                  "Make the type arguments match the expected function type, or "
+                  "drop them and let '" + Want->getName() + "' supply them.",
+                  "Type mismatch!");
+      setType(&Node, nullptr);
+      return;
+    }
+    Want = FromWritten.get();
+  }
+
   if (!Want) {
     reportError(Node.getLoc(), ErrCode::NotAValue,
                 "'" + Name + "' is generic (" + Generic + "), so as a value it "
@@ -523,7 +572,67 @@ std::string copyOutArgHint(const std::vector<CandPtr> &Cands,
 }
 } // namespace
 
+// LG-2: the type arguments written on a call's callee (`identity::<int>`,
+// `module::f::<int>`), or null when none are.
+static const std::vector<TurfTypePtr> *writtenTypeArgs(const ExprAST *Callee) {
+  if (const auto *V = dynamic_cast<const VariableExprAST *>(Callee))
+    return V->TypeArgs.empty() ? nullptr : &V->TypeArgs;
+  if (const auto *S = dynamic_cast<const ScopeAccessExprAST *>(Callee))
+    return S->TypeArgs.empty() ? nullptr : &S->TypeArgs;
+  return nullptr;
+}
+
+// LG-2: the parameters `::<...>` writes -- `Fn`'s type parameters without
+// its size parameters, which an array argument or the target supplies.
+static std::vector<std::string> writableTypeParams(const ResolverFunctionSymbol &Fn) {
+  std::vector<std::string> Out;
+  for (const auto &P : Fn.TypeParams)
+    if (std::find(Fn.SizeParams.begin(), Fn.SizeParams.end(), P) == Fn.SizeParams.end())
+      Out.push_back(P);
+  return Out;
+}
+
+// LG-2: those parameters bound to the written type arguments, in declaration
+// order. The caller has checked the counts agree.
+static TypeWalk::SubstMap writtenSubst(const ResolverFunctionSymbol &Fn,
+                                       const std::vector<TurfTypePtr> &Written) {
+  TypeWalk::SubstMap Subst;
+  const auto Params = writableTypeParams(Fn);
+  for (size_t I = 0; I < Params.size() && I < Written.size(); ++I)
+    Subst.emplace(Params[I], Written[I]);
+  return Subst;
+}
+
 void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
+  visitFuncCallImpl(Node);
+  applyWrittenConstructedType(Node);
+}
+
+void TypeChecker::applyWrittenConstructedType(FuncCallExprAST &Node) {
+  const auto *SC = dynamic_cast<const ScopeAccessExprAST *>(Node.getCallee());
+  if (!SC || !SC->LeftType || !getType(&Node))
+    return;
+  if (SC->ResolvedKind != ScopeAccessKind::DefaultConstruct &&
+      SC->ResolvedKind != ScopeAccessKind::ConstructorCall) {
+    reportError(SC->getLeftLoc(), ErrCode::WrongTypeArgumentCount,
+                "Type arguments written before '::" + SC->getRightName() +
+                    "' only build a generic struct: '" +
+                    SC->LeftType->getName() + "::" + SC->getRightName() +
+                    "' is not a '::default()' or '::new(...)'.",
+                {},
+                "Drop the type arguments ('" +
+                    TypeIdentity::bareName(SC->getLeftName()) + "::" +
+                    SC->getRightName() + "'); a generic function takes its own "
+                    "after '::', e.g. 'f::<int>(...)'.",
+                "Wrong number of type arguments!");
+    setType(&Node, nullptr);
+    return;
+  }
+  noteConstructed(&Node, SC->LeftType);
+  setType(&Node, SC->LeftType);
+}
+
+void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
   // The type this call's result goes into, read before the arguments are
   // visited (each sets its own).
   // A `guess` declaration has no type to give.
@@ -541,11 +650,20 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
   // or a call through a function value -- a function-typed parameter is the
   // expected type of its argument, so a generic function can be passed.
   std::vector<TurfTypePtr> ExpectedParams;
+  const std::vector<TurfTypePtr> *Written = writtenTypeArgs(Node.getCallee());
   if (Node.ResolvedCandidates.size() == 1 &&
       Node.ResolvedCandidates[0]->TypeParams.empty() &&
       Node.ResolvedCandidates[0]->Params.size() == Node.getArgs().size()) {
     for (const auto &P : Node.ResolvedCandidates[0]->Params)
       ExpectedParams.push_back(P.Type);
+  } else if (Written && Node.ResolvedCandidates.size() == 1 &&
+             writableTypeParams(*Node.ResolvedCandidates[0]).size() == Written->size() &&
+             Node.ResolvedCandidates[0]->Params.size() == Node.getArgs().size()) {
+    // LG-2: `apply::<int>(double_it, 3)` -- the written type arguments make
+    // the parameter types known, so a generic function can be an argument.
+    const auto Subst = writtenSubst(*Node.ResolvedCandidates[0], *Written);
+    for (const auto &P : Node.ResolvedCandidates[0]->Params)
+      ExpectedParams.push_back(substituteReturnType(P.Type, Subst));
   } else if (Node.ResolvedCandidates.empty() && Node.getCallee()) {
     TurfTypePtr CalleeTy = getType(Node.getCallee());
     if (CalleeTy && CalleeTy->isFunc())
@@ -840,6 +958,35 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
         ArityMatches.push_back(Cand);
     }
 
+    // LG-2: written type arguments keep only the generic candidates that take
+    // that many.
+    if (Written && !ArityMatches.empty()) {
+      std::vector<std::shared_ptr<ResolverFunctionSymbol>> Generic;
+      for (const auto &Cand : ArityMatches)
+        if (writableTypeParams(*Cand).size() == Written->size())
+          Generic.push_back(Cand);
+      if (Generic.empty()) {
+        const size_t Want = writableTypeParams(*ArityMatches.front()).size();
+        std::vector<RelatedLocation> Related;
+        for (const auto &Cand : ArityMatches)
+          Related.push_back({candidateLocation(*Cand), "declared: " + Cand->signature()});
+        reportError(Node.getLoc(), ErrCode::WrongTypeArgumentCount,
+                    "'" + CalleeName + "' " +
+                        (Want == 0 ? std::string("is not generic, so it takes no type arguments")
+                                   : "takes " + std::to_string(Want) + " type argument" +
+                                         (Want == 1 ? "" : "s")) +
+                        ", and " + std::to_string(Written->size()) + " " +
+                        (Written->size() == 1 ? "is" : "are") + " written.",
+                    Related,
+                    Want == 0 ? "Drop the '::<...>' and call it as '" + CalleeName + "(...)'."
+                              : "Write one type for each of its type parameters, in order.",
+                    "Wrong number of type arguments!");
+        setType(&Node, nullptr);
+        return;
+      }
+      ArityMatches = std::move(Generic);
+    }
+
     if (ArityMatches.empty()) {
       // Build a human-readable list of known overloads for the error message.
       std::string Overloads;
@@ -870,8 +1017,11 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
     for (const auto &Cand : ArityMatches) {
       bool AllOk = true;
       int CheckCount = std::min(ArgCount, Cand->arity());
+      const auto CandSubst = Written ? writtenSubst(*Cand, *Written) : TypeWalk::SubstMap{};
       for (int i = 0; i < CheckCount; ++i) {
-        const TurfType *ParamTy = Cand->Params[i].Type.get();
+        const TurfTypePtr WrittenParam =
+            Written ? substituteReturnType(Cand->Params[i].Type, CandSubst) : nullptr;
+        const TurfType *ParamTy = Written ? WrittenParam.get() : Cand->Params[i].Type.get();
         const TurfType *ArgTy   = ArgTypes[i].get();
         // OVH-005: an untyped literal argument acquires 'int32' directly --
         // see untypedLiteralAcquiresInt32()'s own doc comment. Matters most
@@ -978,11 +1128,17 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
     // TurfGenericParamType -- see TypeWalk::unify()'s doc comment (TypeWalk.h)
     // for the gap this closes. A no-op (empty substitution map) for the
     // overwhelming majority of calls, which aren't generic at all.
+    // LG-2: written type arguments bind their parameters first; the
+    // arguments then bind only what is left (a size parameter).
     std::unordered_map<std::string, TurfTypePtr> Subst;
+    if (Written)
+      for (auto &[Param, Ty] : writtenSubst(*Best, *Written))
+        Subst.emplace(Param, Ty);
     int SubstCheckCount = std::min(ArgCount, Best->arity());
     std::vector<TurfTypePtr> Patterns;
     for (int i = 0; i < SubstCheckCount; ++i) {
-      Patterns.push_back(Best->Params[i].Type);
+      Patterns.push_back(Written ? substituteReturnType(Best->Params[i].Type, Subst)
+                                 : Best->Params[i].Type);
       TypeWalk::unify(Patterns.back(), ArgTypes[i], Subst);
     }
     if (!checkConsistentTypeArguments(Patterns, ArgTypes, CalleeName,
@@ -1382,6 +1538,26 @@ bool TypeChecker::rejectNullableNonVariableUse(const ExprAST *Base,
 }
 
 void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
+  // LG-2's `obj.method::<T>(...)`: a method of a generic struct takes its
+  // type arguments from the receiver, and a call through UFCS reaches no
+  // generic function, so written ones have nothing to bind.
+  if (!Node.TypeArgs.empty()) {
+    if (Node.getBase())
+      const_cast<ExprAST *>(Node.getBase())->accept(*this);
+    for (const auto &Arg : Node.getArgs())
+      const_cast<ExprAST *>(Arg.get())->accept(*this);
+    reportError(Node.getNameLoc(), ErrCode::WrongTypeArgumentCount,
+                "'" + Node.getMethod() + "' is called as a method, and a method "
+                "call takes no type arguments.",
+                {},
+                "A method of a generic struct takes them from its receiver "
+                "('mut l = List<int>::default(); l." + Node.getMethod() +
+                    "(...)'). For a generic function, call it directly: '" +
+                    Node.getMethod() + "::<...>(x, ...)'.",
+                "Wrong number of type arguments!");
+    setType(&Node, nullptr);
+    return;
+  }
   visitMethodCallImpl(Node);
   // After resolution, because only then is it known whether the receiver is
   // dereferenced: a bound method reads it as `self`; a UFCS callee declared

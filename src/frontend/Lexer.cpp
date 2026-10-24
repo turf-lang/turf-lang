@@ -798,7 +798,66 @@ void LogErrorAt(SourceLocation Loc, const char *Code, const std::string &Msg,
                         Code, Hints);
 }
 
+// Tokens lexed past CurTok and not yet current (Lexer.h, "Lookahead").
+static std::vector<LexedToken> Lookahead;
+
+static LexedToken captureToken(int Tok) {
+  return {Tok,          IdentifierStr, StringVal,      NumLitSpelling,
+          NumLitClean,  NumLitRadix,   BoolVal,        CharVal,
+          CurLoc,       PrevTokEndLine, PrevTokEndCol};
+}
+
+static void installToken(const LexedToken &T) {
+  IdentifierStr = T.IdentifierStr;
+  StringVal = T.StringVal;
+  NumLitSpelling = T.NumLitSpelling;
+  NumLitClean = T.NumLitClean;
+  NumLitRadix = T.NumLitRadix;
+  BoolVal = T.BoolVal;
+  CharVal = T.CharVal;
+  CurLoc = T.Loc;
+  PrevTokEndLine = T.PrevTokEndLine;
+  PrevTokEndCol = T.PrevTokEndCol;
+}
+
+int peekToken(size_t N) {
+  if (N < Lookahead.size())
+    return Lookahead[N].Tok;
+  // gettok() writes the globals that describe CurTok; put them back after.
+  // Each new token is lexed with the previous lookahead token installed, so
+  // its PrevTokEnd* are right.
+  const LexedToken Current = captureToken(0);
+  if (!Lookahead.empty())
+    installToken(Lookahead.back());
+  while (Lookahead.size() <= N) {
+    const int Tok = gettok();
+    Lookahead.push_back(captureToken(Tok));
+  }
+  installToken(Current);
+  return Lookahead[N].Tok;
+}
+
+bool takeLookaheadToken(int &Tok) {
+  if (Lookahead.empty())
+    return false;
+  installToken(Lookahead.front());
+  Tok = Lookahead.front().Tok;
+  Lookahead.erase(Lookahead.begin());
+  return true;
+}
+
+std::vector<LexedToken> takeLookahead() {
+  std::vector<LexedToken> Out = std::move(Lookahead);
+  Lookahead.clear();
+  return Out;
+}
+
+void restoreLookahead(std::vector<LexedToken> Tokens) {
+  Lookahead = std::move(Tokens);
+}
+
 void resetLexer() {
+  Lookahead.clear();
   LastChar = ' ';
   CurLine = 1;
   CurCol = 0;

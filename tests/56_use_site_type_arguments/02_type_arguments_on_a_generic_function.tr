@@ -1,0 +1,39 @@
+// LG-2: `name::<T>(...)` writes a generic function's type arguments at the
+// call, and `name::<T>` without a call is a function value instantiated at
+// them. A size parameter is not written: an argument or the target gives it.
+
+import arrays;
+import test;
+
+fn<T> identity(x: T): T {
+    return x;
+}
+
+fn<A, B> second(a: A, b: B): B {
+    return b;
+}
+
+fn<T> apply(f: fn(T): T, x: T): T {
+    return f(x);
+}
+
+fn<T> twice(x: T): T {
+    return identity::<T>(x);
+}
+
+fn main(): int {
+    test::assert(identity::<int>(7) == 7, "identity::<int>(7)");
+    test::assert(typeof(identity::<double>(1)) == "double", "an argument widens to the written type");
+    test::assert(second::<int, string>(1, "b") == "b", "two type arguments");
+    test::assert(twice(3) == 3 && twice("t") == "t", "identity::<T> in a generic body");
+
+    immut g = identity::<string>;
+    test::assert(g("hi") == "hi", "a function value with no declared type");
+    immut h: fn(int): int = identity::<int>;
+    test::assert(h(4) == 4, "a function value whose declared type agrees");
+    test::assert(apply::<int>(identity, 9) == 9, "a generic function as an argument");
+
+    mut a: double[3] = arrays::fill::<double>(1);
+    test::assert(a[2] == 1.0, "module-qualified, the size from the target");
+    return 0;
+}

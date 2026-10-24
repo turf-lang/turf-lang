@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E148
+// EXPECT-DIAG: 'identity' takes 1 type argument, and 2 are written.
+// One type per type parameter, in order.
+
+fn<T> identity(x: T): T {
+    return x;
+}
+
+fn main(): int {
+    immut a: int = identity::<int, int>(3);
+    return 0;
+}
