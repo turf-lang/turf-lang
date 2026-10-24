@@ -170,6 +170,15 @@ otherwise each answer differently, producing an incoherent language.
   **mark-sweep**, **precise on the heap** (per-type pointer bitmaps emitted
   by the compiler), **conservative on stack and registers**, **stop-the-
   world**, **single-threaded**.
+- **Amended 2026-10-25 (owner decision, TDP-2-030): single-threaded means one
+  mutator at a time, not one OS thread for life.** A program's mutator is
+  the thread that runs `main`. A library built with `turf build --lib` may be
+  entered from any host thread, one at a time: an entry lock admits one
+  thread, a nested entry on that thread passes, and every other thread waits
+  outside Turf holding only rooted handles. The collector scans the stack of
+  the thread inside Turf, from its current frame to its outermost Turf entry,
+  and no other. Two threads running Turf code at once needs the thread-aware
+  runtime (TDP-3-001, TDP-3-003). (F-MEM-6)
 - **Non-moving is non-negotiable.** A `string` handed to `write(2)` or a
   buffer handed to `send(2)` must not move; TurfLang's stdlib is
   overwhelmingly FFI.
@@ -1458,6 +1467,7 @@ Overhaul (F-TYPE-1), whose third column points at their section above.
 | **F-TYPE-1** | A named type's identity is (owning module, name); the main file's module is `main`, never spelled. Bare-spelling ambiguity is an error, not "local wins". | §6.11 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-003, not `ARCHITECTURE_OVERHAUL.md` §4) |
 | **F-HEAP-1** | `heap(expr): &T` is the closed-list intrinsic for safe heap allocation — no `new T` keyword, no grammar change. Always allocates with `T`'s real `TurfTypeDesc`, never `NULL`. | §6.12 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-001) |
 | **F-MEM-5** | A `Stack`-provenance reference (points into the current frame, on any path) can never flow into a `return`, a field of a `Param`/`Heap`-owned object, a collection mutator/`operator[]=`, `heap()`'s own operand, or an error payload, nor be carried there inside a struct or array value — enforced by `EscapePass`, with per-field tracking and one call summary (a function returning a reference parameter unchanged), no lifetime syntax. | §6.13 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-002; amended 2026-10-12) |
+| **F-MEM-6** | The mutator is single: at most one thread runs Turf code at a time. A library may be entered from different OS threads one at a time behind an entry lock; the collector scans only the stack of the thread inside Turf, up to its outermost entry. Parallel entry waits for the thread-aware runtime. | §6.5 above (owner decision 2026-10-25, TDP-2-030) |
 | **F-STR-1** | `s[i]` on a `string` is `char`; a negative `i` counts from the end (`s[-1]` is the last byte). A read panics outside `-strlen(s) <= i < strlen(s)`; a write wraps a negative index the same way and panics only if it is still below zero, by design — no upper bound, since a `string` under construction has no recoverable capacity to check against. | §6.14 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-004; amended 2026-10-12 for #256) |
 | **F-VIS-1** | A top-level declaration and a struct field are private to their module unless prefixed `pub`/`public` (synonyms, one token); enum/error variants and machine states follow their type; operators are visible wherever their operand types are; `export immut` is its own `pub`; a `pub` signature may not mention a private type; UFCS and monomorphized clones never bypass or leak visibility; every visibility diagnostic carries a fix-naming hint. | §6.15 above (post-Overhaul: `ROADMAP_v2.0.0.md` LEC-002) |
 | **F-PKG-1** | Two independently versioned programs: `turf` (Go, the turf-cli repository) is the user's tool and drives; `turfc` compiles and is the tooling interface (users are never asked to type it). They agree on a `major.minor` driver interface reported by `turfc --version` (same major, minor at least what `turf` needs), not on release versions. The compiler owns everything that depends on TurfLang source (import resolution, visibility, capabilities) and never touches the network or the manifest; the CLI owns files, network and reproducibility, never parses TurfLang, and never rewrites a diagnostic; they meet at an explicit package graph. `turf <non-subcommand args>` is `turfc <args>` unchanged. | §6.16 above (owner decisions 2026-09-30: overturning `ROADMAP_v2.0.0.md` LEC-001 entry 1 / DEC-8, then replacing "same version" with the driver interface) |
