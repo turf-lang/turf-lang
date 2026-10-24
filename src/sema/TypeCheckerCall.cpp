@@ -307,9 +307,9 @@ void TypeChecker::typeGenericFunctionValue(VariableExprAST &Node) {
                 "needs a function type to take its type arguments from, and "
                 "nothing here gives one.",
                 {},
-                "Use it where a function type is declared, e.g. 'immut f: "
-                "fn(int): int = " + Name + ";', or pass it to a parameter of "
-                "function type.");
+                "Write its type arguments, e.g. 'immut f = " + Name +
+                    "::<int>;', or use it where a function type is declared, "
+                    "e.g. 'immut f: fn(int): int = " + Name + ";'.");
     setType(&Node, nullptr);
     return;
   }

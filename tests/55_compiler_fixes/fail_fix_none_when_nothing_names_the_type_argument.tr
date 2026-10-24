@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E129
+// EXPECT-DIAG: List<int>::default()
+// EXPECT-NO-DIAG: Fix:
+// LG-7: `List::default()` has no argument to bind `T`, so there is no
+// candidate: the hint shows where a type argument goes, and no fix is printed.
+
+import list::List;
+
+fn main(): int {
+    mut l = List::default();
+    return 0;
+}

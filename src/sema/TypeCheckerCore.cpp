@@ -63,6 +63,11 @@ void productionErrorHandler(SourceLocation Loc, const char *Code,
     Err.withReceiverDecl(Hints.ReceiverDecl);
   if (!Hints.Construct.empty())
     Err.withConstruct(Hints.Construct);
+  // A compiler fix (TDP-2-001): the edit, and why it is right.
+  for (const auto &F : Hints.FixIts)
+    Err.withFixIt(F.Line, F.StartCol, F.EndCol, F.Replacement);
+  if (!Hints.FixReason.empty())
+    Err.withFixReason(Hints.FixReason);
   Err.raise();
 }
 #else
