@@ -814,7 +814,9 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
                         std::to_string(BI->Arity) + " argument" +
                         (BI->Arity == 1 ? "" : "s") + ", got " +
                         std::to_string(ArgCount) + ".",
-                    {}, "Check the number of arguments.",
+                    {}, "Call '" + CalleeName + "' with exactly " +
+                        std::to_string(BI->Arity) + " argument" +
+                        (BI->Arity == 1 ? "" : "s") + ".",
                     "Wrong argument count!", Hints);
         setType(&Node, nullptr);
         return;
@@ -837,7 +839,8 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
         if (!ArgTypes.empty() && ArgTypes[0] && ArgTypes[0]->isVoid()) {
           reportError(Node.getLoc(), ErrCode::VoidValue,
                       "'hash_of(...)' has no value to hash: the argument is 'void'.",
-                      {}, "Pass an expression that produces a real value.",
+                      {}, "Hash a variable or an expression with a value, not a call to a "
+                          "function declared `: void`.",
                       "Cannot hash 'void'!");
           setType(&Node, nullptr);
           return;
@@ -924,7 +927,8 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
           reportError(Node.getLoc(), ErrCode::VoidValue,
                       "'heap(...)' cannot allocate a 'void' value -- there "
                       "is nothing to copy onto the heap.",
-                      {}, "Pass an expression that produces a real value.",
+                      {}, "Pass a variable or an expression with a value to `heap(...)`, "
+                          "not a call to a function declared `: void`.",
                       "Cannot heap-allocate 'void'!");
           setType(&Node, nullptr);
           return;
@@ -1004,7 +1008,7 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
                       std::to_string(ArgCount) + " argument" +
                       (ArgCount == 1 ? "" : "s") +
                       "; known overloads: " + Overloads + ".",
-                  Related, "Check the number of arguments.",
+                  Related, "Pass the arguments one of the overloads above takes: " + Overloads + ".",
                   "Wrong argument count!");
       setType(&Node, nullptr);
       return;
@@ -1262,7 +1266,9 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
                           std::to_string(ParamTypes.size()) + " argument" +
                           (ParamTypes.size() == 1 ? "" : "s") + ", got " +
                           std::to_string(ArgCount) + ".",
-                      {}, "Check the number of arguments.",
+                      {}, "Call " + ShownIn + " with exactly " +
+                          std::to_string(ParamTypes.size()) + " argument" +
+                          (ParamTypes.size() == 1 ? "" : "s") + ".",
                       "Wrong argument count!");
           setType(&Node, nullptr);
           return;
@@ -1664,7 +1670,7 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
                       std::to_string(ArgCount) + " argument" +
                       (ArgCount == 1 ? "" : "s") +
                       "; known overloads: " + Overloads + ".",
-                  Related, "Check the number of arguments.",
+                  Related, "Pass the arguments one of the overloads above takes: " + Overloads + ".",
                   "Wrong argument count!");
       setType(&Node, nullptr);
       return;

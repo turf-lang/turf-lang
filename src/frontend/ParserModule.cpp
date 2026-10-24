@@ -276,7 +276,7 @@ void AppendFlattenedTopLevelDecl(std::unique_ptr<ExprAST> AST,
   if (TooDeep(AST.get())) {
     LogErrorAt(WhereIs(AST.get()), ErrCode::NestingTooDeep,
                "Expression nested too deeply to parse."
-               "\n  Hint: split this declaration into smaller parts.",
+               "\n  Hint: Move the inner part into a variable of its own (`mut part: int = ...;`) and use `part` here.",
                SLM::ErrorCategory::SYNTAX_ERROR);
     (void)AST.release();
     return;
@@ -308,14 +308,14 @@ void AppendFlattenedTopLevelDecl(std::unique_ptr<ExprAST> AST,
         LogErrorAt(Vd ? Vd->getLoc() : BlockLoc, ErrCode::StatementOutsideFunction,
                    "Statements are not allowed outside of a function, and a "
                    "top-level 'unsafe { }' block holds only declarations. Move "
-                   "this code into a function, inside its own 'unsafe { }'.",
+                   "this code into a function, inside its own 'unsafe { }'.\n  Hint: Declare the function in the block (`fn f(): void { ... }`) and do the work inside it: `unsafe { ... }` stays around the call.",
                    SLM::ErrorCategory::SYNTAX_ERROR);
         continue;
       }
       if (TooDeep(Child.get())) {
         LogErrorAt(WhereIs(Child.get()), ErrCode::NestingTooDeep,
                    "Expression nested too deeply to parse."
-                   "\n  Hint: split this declaration into smaller parts.",
+                   "\n  Hint: Move the inner part into a variable of its own (`mut part: int = ...;`) and use `part` here.",
                    SLM::ErrorCategory::SYNTAX_ERROR);
         (void)Child.release();
         continue;

@@ -9,8 +9,11 @@ number of codes that print a fix can be reproduced.
 
 Usage: scripts/dev/diagnostic_fix_coverage.py [--compiler build/turfc]
                                               [--jobs N] [--list] [--fixes]
+                                              [--check]
   --list   one row per code
   --fixes  every printed fix, with its file
+  --check  exit 1 if any error a fail_*.tr test reports prints no Hint: line,
+           naming the code and the file (DX-3: every code has a concrete hint)
 """
 
 import argparse
@@ -67,6 +70,7 @@ def main():
     ap.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) // 2))
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--fixes", action="store_true")
+    ap.add_argument("--check", action="store_true")
     args = ap.parse_args()
 
     tests = sorted(
@@ -78,15 +82,27 @@ def main():
     fixed = defaultdict(int)
     seen = defaultdict(int)
     fixes = []
+    unhinted = []
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
         for path, text in pool.map(lambda p: check(args.compiler, p), tests):
             for code, hint, fix in diagnostics(text):
                 files[code].add(path)
                 seen[code] += 1
                 hinted[code] += hint
+                if not hint:
+                    unhinted.append((code, path.relative_to(ROOT)))
                 if fix is not None:
                     fixed[code] += 1
                     fixes.append((path.relative_to(ROOT), code, fix))
+
+    if args.check:
+        for code, path in sorted(set(unhinted)):
+            print(f"{code}  {path}: error prints no Hint: line")
+        if unhinted:
+            print(f"{len(set(unhinted))} error(s) without a hint", file=sys.stderr)
+            return 1
+        print(f"every error in {len(tests)} fail_*.tr files prints a Hint:")
+        return 0
 
     registry = re.findall(r'\{"(E\d{3})"|\{ErrCode::(\w+)',
                           (ROOT / "src/diagnostics/ErrorCodes.h").read_text())
@@ -113,4 +129,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -35,8 +35,8 @@
 // compatible types." is advice for a type mismatch and nothing else.
 inline const char *typeErrorDefaultHint(const std::string &Code) {
   if (Code == ErrCode::ArithmeticOperand)
-    return "Check that both sides of the operator are values it works on: "
-           "numbers for + - * / %, whole numbers for & | ^ << >>.";
+    return "Use numbers with + - * / % and whole numbers with & | ^ << >>; "
+           "convert an operand with `to`, e.g. `n + (x to int)`.";
   if (Code == ErrCode::InvalidComparison)
     return "Compare values of the same kind (two ints, two strings, ...). To "
            "compare structs, compare the fields you care about.";
@@ -54,21 +54,25 @@ inline const char *typeErrorDefaultHint(const std::string &Code) {
            "a function `f` that takes that type is imported -- check the "
            "spelling and the import.";
   if (Code == ErrCode::ArgumentType || Code == ErrCode::ModuleArityOrType)
-    return "Check the type of each argument against the function's "
-           "parameters; the candidates are listed above.";
+    return "Pass each argument as the type its parameter declares, converting "
+           "with `to` where they differ (`x to int`); the candidates are "
+           "listed above.";
   if (Code == ErrCode::ReturnTypeMismatch)
-    return "Return a value of the declared type, or change the function's "
-           "declared return type.";
+    return "Return a value of the declared type (convert with `to`, e.g. "
+           "`return x to int;`), or change the type after `):` in the "
+           "function's declaration.";
   if (Code == ErrCode::ArrayTypeMismatch)
     return "Every value in the list must be the array's element type.";
   if (Code == ErrCode::WrongArity)
-    return "Check the number of arguments.";
+    return "Pass exactly as many arguments as the function declares "
+           "parameters.";
   if (Code == ErrCode::VoidValue)
     return "A function declared ': void' produces no value, so there is "
            "nothing to use here.";
   if (Code == ErrCode::InvalidCast)
-    return "Only some conversions are allowed with `to`; see `turf --explain "
-           "E134` for the list.";
+    return "`to` converts numbers, chars and text: `5 to double`, `3.9 to int`, "
+           "`42 to string`, `65 to char`. To test a number for zero write "
+           "`n != 0`; `turf --explain E134` lists the rest.";
   if (Code == ErrCode::StringConversion)
     return "Only these convert to text: `intExpr to string`, `doubleExpr to "
            "string`, `boolExpr to string` (and enum values).";
@@ -101,7 +105,8 @@ class TypeError : public TurfError {
     if (std::string(Code) != ErrCode::TypeMismatch)
       if (const char *Default = typeErrorDefaultHint(Code))
         return Default;
-    return "Check that both sides have compatible types.";
+    return "Make both sides the same type: convert one with `to` (`x to int`), "
+           "or change a declaration so the types agree.";
   }
 
 public:
@@ -147,8 +152,8 @@ public:
       : TurfError(Loc,
                   Colors::BRIGHT_RED + "compare error!\n" + Colors::RESET +
                       "  " + Msg,
-                  "Check the structure of your compare statement: matches "
-                  "arms need 'done', and 'otherwise' must be the last arm.") {
+                  "Write each arm as `matches value: ... done` and put "
+                  "`otherwise: ...` last, once.") {
     Category_ = SLM::ErrorCategory::CONTROL_FLOW;
   }
 };

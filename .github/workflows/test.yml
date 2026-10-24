@@ -168,6 +168,11 @@ jobs:
       - name: Diagnostics as JSON match the schema and the text form
         run: python3 scripts/check/diagnostics_json_check.py
 
+      # DX-3 (issue #291): every error a fail_*.tr test reports prints a
+      # concrete Hint: line; a raise site without one fails here.
+      - name: Every reported error carries a hint
+        run: python3 scripts/dev/diagnostic_fix_coverage.py --check
+
       # SLM_IMPROVEMENT_PLAN C1/C2: everything under docs/slm/ is pasted into
       # the --smart model's prompt, and a model copies what it sees. This
       # compiles every CORRECT example in the per-code pages, the category docs
