@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E056
+// EXPECT-DIAG: 'T' in 'pick' is 'int' from argument 1 but 'string' from argument 2
+// The receiver is argument 1: its T and the argument's must be one type.
+
+fn<T> pick(a: T, b: T): T {
+    return b;
+}
+
+fn main(): int {
+    mut a: int = 3;
+    io::printline(a.pick("s"));
+    return 0;
+}

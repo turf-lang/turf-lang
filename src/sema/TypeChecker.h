@@ -621,7 +621,7 @@ private:
    *                call" and report the latter with an accurate, specific
    *                message instead of a generic "no such method" one.
    */
-  bool tryUFCSFallback(MethodCallExprAST &Node, const TurfType *BaseTy,
+  bool tryUFCSFallback(MethodCallExprAST &Node, const TurfTypePtr &BaseTy,
                        const std::vector<TurfTypePtr> &ArgTypes,
                        std::vector<const ResolverFunctionSymbol *> *OutNamedCandidates = nullptr);
 
@@ -638,8 +638,8 @@ private:
    * @param ReceiverTy  The receiver's type before any unwrapping.
    * @param BaseTy      What visitMethodCall() unwrapped it to.
    */
-  bool tryUFCSOnReceiver(MethodCallExprAST &Node, const TurfType *ReceiverTy,
-                         const TurfType *BaseTy,
+  bool tryUFCSOnReceiver(MethodCallExprAST &Node, const TurfTypePtr &ReceiverTy,
+                         const TurfTypePtr &BaseTy,
                          const std::vector<TurfTypePtr> &ArgTypes,
                          std::vector<const ResolverFunctionSymbol *> *OutNamedCandidates = nullptr);
 

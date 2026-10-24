@@ -188,8 +188,30 @@ fn main(): int {
 ```
 
 The wrong number of type arguments, type arguments on a function that is not
-generic, and type arguments on a method call (`l.push::<int>(1)`; a method of a
-generic struct takes them from its receiver) are each E148.
+generic, and type arguments on a method's call (`l.push::<int>(1)`; a method of
+a generic struct takes them from its receiver) are each E148.
+
+**A generic function is callable through UFCS**, like any free function
+(`x.f()` is `f(x)`): its type parameters come from the receiver and the
+arguments, or are written after the name.
+
+```turflang
+fn<T> pick(a: T, b: T): T {
+    return b;
+}
+
+fn main(): int {
+    mut n: int = 3;
+    printline(n.pick(4));           // 4: T is int, from the receiver
+    printline(n.pick::<int>(5));    // 5: T written
+    return 0;
+}
+```
+
+The receiver still matches exactly once `T` is known: `n.pick::<string>("s")`
+is E056, since the `int` receiver is not a `string`. The receiver counts as
+argument 1, so `n.pick("s")` is E056 "Conflicting type arguments", as
+`pick(n, "s")` is.
 
 **A generic struct takes its type arguments from the type it is stored into,
 or from `Name<Args>::` written where it is built.** The first way is retired in

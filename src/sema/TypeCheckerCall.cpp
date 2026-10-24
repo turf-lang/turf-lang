@@ -1331,7 +1331,7 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
 
 
 bool TypeChecker::tryUFCSFallback(MethodCallExprAST &Node,
-                                  const TurfType *BaseTy,
+                                  const TurfTypePtr &BaseTy,
                                   const std::vector<TurfTypePtr> &ArgTypes,
                                   std::vector<const ResolverFunctionSymbol *> *OutNamedCandidates) {
   if (!BaseTy)
@@ -1371,17 +1371,99 @@ bool TypeChecker::tryUFCSFallback(MethodCallExprAST &Node,
   if (OutNamedCandidates)
     *OutNamedCandidates = Candidates;
 
+  // LG-2: written type arguments (`x.f::<int>()`) keep only the generic
+  // candidates that take that many, as they do for `f::<int>(x)`
+  // (visitFuncCall()).
+  const std::vector<TurfTypePtr> &Written = Node.TypeArgs;
+  if (!Written.empty()) {
+    std::vector<const ResolverFunctionSymbol *> ArityMatches, Generic;
+    for (const auto *C : Candidates)
+      if (C->arity() == ArgCount + 1) {
+        ArityMatches.push_back(C);
+        if (writableTypeParams(*C).size() == Written.size())
+          Generic.push_back(C);
+      }
+    if (!ArityMatches.empty() && Generic.empty()) {
+      const size_t Want = writableTypeParams(*ArityMatches.front()).size();
+      std::vector<RelatedLocation> Related;
+      for (const auto *C : ArityMatches)
+        Related.push_back({candidateLocation(*C), "declared: " + C->signature()});
+      reportError(Node.getNameLoc(), ErrCode::WrongTypeArgumentCount,
+                  "'" + MethodName + "' " +
+                      (Want == 0 ? std::string("is not generic, so it takes no type arguments")
+                                 : "takes " + std::to_string(Want) + " type argument" +
+                                       (Want == 1 ? "" : "s")) +
+                      ", and " + std::to_string(Written.size()) + " " +
+                      (Written.size() == 1 ? "is" : "are") + " written.",
+                  Related,
+                  Want == 0 ? "Drop the '::<...>' and call it as 'x." + MethodName + "(...)'."
+                            : "Write one type for each of its type parameters, in order.",
+                  "Wrong number of type arguments!");
+      setType(&Node, nullptr);
+      return true; // reported -- the caller must not also report
+    }
+    Candidates = std::move(Generic);
+  }
+
+  // A generic candidate (`fn<T> twice(x: T): T`) binds its type parameters
+  // before it is matched, as an ordinary call's does: the written type
+  // arguments first, then the receiver and the arguments. Its parameters are
+  // then compared SUBSTITUTED, so the receiver rule below is the same exact
+  // match a concrete candidate gets: `T` binding to `int` is not a coercion.
+  // A candidate with a parameter nothing binds does not match.
+  std::unordered_map<const ResolverFunctionSymbol *, TypeWalk::SubstMap> Bound;
+  auto bindTypeParams = [&](const ResolverFunctionSymbol *C) {
+    if (C->TypeParams.empty() || Bound.count(C))
+      return true;
+    TypeWalk::SubstMap Subst =
+        Written.empty() ? TypeWalk::SubstMap{} : writtenSubst(*C, Written);
+    const TypeWalk::SubstMap FromWritten = Subst;
+    TypeWalk::unify(substituteReturnType(C->Params[0].Type, FromWritten), BaseTy, Subst);
+    for (int i = 0; i < ArgCount; ++i)
+      if (ArgTypes[i])
+        TypeWalk::unify(substituteReturnType(C->Params[i + 1].Type, FromWritten),
+                        ArgTypes[i], Subst);
+    for (const auto &TP : C->TypeParams)
+      if (!Subst.count(TP))
+        return false;
+    Bound.emplace(C, std::move(Subst));
+    return true;
+  };
+  // Parameter I of C, substituted when C is generic.
+  auto paramType = [&](const ResolverFunctionSymbol *C, size_t I) {
+    auto It = Bound.find(C);
+    return It == Bound.end() ? C->Params[I].Type
+                             : substituteReturnType(C->Params[I].Type, It->second);
+  };
+  // One type parameter stands for one type across the receiver (argument 1)
+  // and the arguments; false once that is reported for a generic C.
+  auto consistentTypeArgs = [&](const ResolverFunctionSymbol *C) {
+    if (C->TypeParams.empty())
+      return true;
+    const TypeWalk::SubstMap FromWritten =
+        Written.empty() ? TypeWalk::SubstMap{} : writtenSubst(*C, Written);
+    std::vector<TurfTypePtr> Patterns{substituteReturnType(C->Params[0].Type, FromWritten)};
+    std::vector<TurfTypePtr> Actuals{BaseTy};
+    for (int i = 0; i < ArgCount; ++i) {
+      Patterns.push_back(substituteReturnType(C->Params[i + 1].Type, FromWritten));
+      Actuals.push_back(ArgTypes[i]);
+    }
+    return checkConsistentTypeArguments(Patterns, Actuals, MethodName, Node.getLoc());
+  };
+  auto receiverFits = [&](const ResolverFunctionSymbol *C) {
+    return C->arity() == ArgCount + 1 && !C->Params.empty() && bindTypeParams(C) &&
+           ufcsReceiverTypeMatches(paramType(C, 0).get(), BaseTy.get());
+  };
+
   // Receiver (implicit self-argument) matching is EXACT-name-match only --
   // no numeric coercion -- RFC §5.4 (arrays get the same unsized-matches-
   // any-size leniency ordinary calls already have, see
   // ufcsReceiverTypeMatches()). Arity must also account for the receiver
   // occupying the first declared parameter slot.
   std::vector<const ResolverFunctionSymbol *> ReceiverMatches;
-  for (const auto *C : Candidates) {
-    if (C->arity() == ArgCount + 1 && !C->Params.empty() &&
-        ufcsReceiverTypeMatches(C->Params[0].Type.get(), BaseTy))
+  for (const auto *C : Candidates)
+    if (receiverFits(C))
       ReceiverMatches.push_back(C);
-  }
   // `fn f(a: int[3])` and `fn f(a: int[])` both accept an int[3] receiver;
   // the exact one wins, as it does for the ordinary call `f(a)` (whose
   // tie-break compares type names). Without this the UFCS form reported the
@@ -1389,7 +1471,7 @@ bool TypeChecker::tryUFCSFallback(MethodCallExprAST &Node,
   {
     std::vector<const ResolverFunctionSymbol *> ExactReceiver;
     for (const auto *C : ReceiverMatches)
-      if (C->Params[0].Type && C->Params[0].Type->getName() == BaseTy->getName())
+      if (const auto P = paramType(C, 0); P && P->getName() == BaseTy->getName())
         ExactReceiver.push_back(C);
     if (!ExactReceiver.empty() && ExactReceiver.size() < ReceiverMatches.size())
       ReceiverMatches = ExactReceiver;
@@ -1400,8 +1482,7 @@ bool TypeChecker::tryUFCSFallback(MethodCallExprAST &Node,
     // function exists and what to do about it.
     std::vector<const ResolverFunctionSymbol *> HiddenMatches;
     for (const auto *C : HiddenCandidates)
-      if (C->arity() == ArgCount + 1 && !C->Params.empty() &&
-          ufcsReceiverTypeMatches(C->Params[0].Type.get(), BaseTy))
+      if (receiverFits(C))
         HiddenMatches.push_back(C);
     if (!HiddenMatches.empty()) {
       filterVisibleCandidates(HiddenMatches, Node.getLoc(), MethodName, "");
@@ -1419,7 +1500,8 @@ bool TypeChecker::tryUFCSFallback(MethodCallExprAST &Node,
   for (const auto *C : ReceiverMatches) {
     bool AllOk = true;
     for (int i = 0; i < ArgCount; ++i) {
-      const TurfType *ParamTy = C->Params[i + 1].Type.get();
+      const TurfTypePtr Param = paramType(C, i + 1);
+      const TurfType *ParamTy = Param.get();
       const TurfType *ArgTy = ArgTypes[i].get();
       // OVH-005: see the identical exception in visitFuncCall() above.
       if (ParamTy && ArgTy && !typesCompatible(ArgTy, ParamTy) &&
@@ -1431,8 +1513,16 @@ bool TypeChecker::tryUFCSFallback(MethodCallExprAST &Node,
     if (AllOk)
       TypeMatches.push_back(C);
   }
-  if (TypeMatches.empty())
+  if (TypeMatches.empty()) {
+    // `x.pick("s")` for `fn<T> pick(a: T, b: T)`: T is int from the receiver
+    // and string from the argument. Say that, as `pick(x, "s")` does.
+    for (const auto *C : ReceiverMatches)
+      if (!consistentTypeArgs(C)) {
+        setType(&Node, nullptr);
+        return true; // reported
+      }
     return false;
+  }
 
   // Prefer an exact-match-on-remaining-args candidate over a numeric-
   // promotion one, matching visitFuncCall's identical tie-break -- but if
@@ -1444,7 +1534,7 @@ bool TypeChecker::tryUFCSFallback(MethodCallExprAST &Node,
   for (const auto *C : TypeMatches) {
     bool ExactAll = true;
     for (int i = 0; i < ArgCount; ++i) {
-      const TurfType *P = C->Params[i + 1].Type.get();
+      const TurfTypePtr P = paramType(C, i + 1);
       const TurfType *A = ArgTypes[i].get();
       if (P && A && P->getName() != A->getName()) {
         ExactAll = false;
@@ -1486,6 +1576,32 @@ bool TypeChecker::tryUFCSFallback(MethodCallExprAST &Node,
   if (ExactMatches.size() == 1)
     Best = ExactMatches[0];
 
+  // A generic Best: its type arguments must agree (consistentTypeArgs()),
+  // and the call is an instantiation request
+  // whose site is this node (Monomorphize's rewriteNewFuncCallSites() points
+  // it at the clone). Requested only when fully concrete, as visitFuncCall()
+  // does: inside a generic template's own body a binding can still be open.
+  TypeWalk::SubstMap Subst;
+  if (auto It = Bound.find(Best); It != Bound.end()) {
+    Subst = It->second;
+    if (!consistentTypeArgs(Best)) {
+      setType(&Node, nullptr);
+      return true; // reported
+    }
+    checkSliceTypeArguments(Subst, MethodName, Node.getLoc()); // E140
+    if (MonoCollector_) {
+      std::vector<TurfTypePtr> TypeArgs = orderedTypeArgs(Best->TypeParams, Subst);
+      bool AllConcrete = TypeArgs.size() == Best->TypeParams.size();
+      for (const auto &A : TypeArgs)
+        AllConcrete &= isFullyConcreteType(A.get());
+      if (AllConcrete)
+        MonoCollector_->record({Monomorphize::InstantiationKind::FreeFunction,
+                                Best->BaseName, Best->SourceModule,
+                                std::move(TypeArgs), Node.getLoc(), Best->Decl},
+                               &Node);
+    }
+  }
+
   Node.ResolvedCallTarget = std::make_shared<ResolverFunctionSymbol>(*Best);
   Node.ResolvedViaUFCS = true;
   // SEM-002 -- see visitVarDecl()'s identical comment (TypeCheckerDecl.cpp).
@@ -1496,26 +1612,26 @@ bool TypeChecker::tryUFCSFallback(MethodCallExprAST &Node,
   noteConstructedArgs(Node.getArgs(), Best->Params, 1);
   noteSliceArguments(Node.getArgs(), Node.getBase(), Node.ResolvedCallTarget,
                      1, Node.getLoc()); // E141
-  setType(&Node, Best->ReturnType);
+  setType(&Node, substituteReturnType(Best->ReturnType, Subst));
   return true;
 }
 
 bool TypeChecker::tryUFCSOnReceiver(MethodCallExprAST &Node,
-                                    const TurfType *ReceiverTy,
-                                    const TurfType *BaseTy,
+                                    const TurfTypePtr &ReceiverTy,
+                                    const TurfTypePtr &BaseTy,
                                     const std::vector<TurfTypePtr> &ArgTypes,
                                     std::vector<const ResolverFunctionSymbol *> *OutNamedCandidates) {
   Node.UFCSLoadsReceiver = false;
   // A generic struct's instance is matched as written, `Box<string>`: BaseTy
   // is the struct it was unwrapped to, which has lost its type arguments.
-  if (ReceiverTy && dynamic_cast<const GenericType *>(ReceiverTy))
+  if (ReceiverTy && dynamic_cast<const GenericType *>(ReceiverTy.get()))
     return tryUFCSFallback(Node, ReceiverTy, ArgTypes, OutNamedCandidates);
   if (!ReceiverTy || ReceiverTy == BaseTy ||
-      !dynamic_cast<const TurfPointerType *>(ReceiverTy))
+      !dynamic_cast<const TurfPointerType *>(ReceiverTy.get()))
     return tryUFCSFallback(Node, BaseTy, ArgTypes, OutNamedCandidates);
   if (tryUFCSFallback(Node, ReceiverTy, ArgTypes, OutNamedCandidates))
     return true;
-  if (!dynamic_cast<const TurfStructType *>(BaseTy))
+  if (!dynamic_cast<const TurfStructType *>(BaseTy.get()))
     return false;
   // The pointer's own candidates already went to OutNamedCandidates; the
   // struct's are the same names, so this attempt need not report them.
@@ -1548,27 +1664,24 @@ bool TypeChecker::rejectNullableNonVariableUse(const ExprAST *Base,
 }
 
 void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
-  // LG-2's `obj.method::<T>(...)`: a method of a generic struct takes its
-  // type arguments from the receiver, and a call through UFCS reaches no
-  // generic function, so written ones have nothing to bind.
-  if (!Node.TypeArgs.empty()) {
-    if (Node.getBase())
-      const_cast<ExprAST *>(Node.getBase())->accept(*this);
-    for (const auto &Arg : Node.getArgs())
-      const_cast<ExprAST *>(Arg.get())->accept(*this);
+  visitMethodCallImpl(Node);
+  // LG-2's `obj.method::<T>(...)`: UFCS binds written type arguments to a
+  // generic function (tryUFCSFallback()). A method of a generic struct takes
+  // its type arguments from the receiver, so on a bound method they have
+  // nothing to bind.
+  if (!Node.TypeArgs.empty() && Node.getResolvedCallTarget() && !Node.ResolvedViaUFCS) {
     reportError(Node.getNameLoc(), ErrCode::WrongTypeArgumentCount,
-                "'" + Node.getMethod() + "' is called as a method, and a method "
-                "call takes no type arguments.",
+                "'" + Node.getMethod() + "' is a method, and a method call "
+                "takes no type arguments.",
                 {},
                 "A method of a generic struct takes them from its receiver "
                 "('mut l = List<int>::default(); l." + Node.getMethod() +
-                    "(...)'). For a generic function, call it directly: '" +
-                    Node.getMethod() + "::<...>(x, ...)'.",
+                    "(...)'). Only a generic function called through UFCS takes "
+                    "them: 'x.f::<int>()'.",
                 "Wrong number of type arguments!");
     setType(&Node, nullptr);
     return;
   }
-  visitMethodCallImpl(Node);
   // After resolution, because only then is it known whether the receiver is
   // dereferenced: a bound method reads it as `self`; a UFCS callee declared
   // `fn f(p: &?Node)` just receives it (rejectNullableNonVariableUse()).
@@ -2067,7 +2180,7 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
           // exact call -- right types don't exist for this arity. Try tier
           // 2 (UFCS) before reporting this as an error (RFC §5.2's tiering:
           // "this tier is exhausted in full before falling through").
-          if (tryUFCSOnReceiver(Node, ReceiverTy.get(), BaseTy.get(), ArgTypes))
+          if (tryUFCSOnReceiver(Node, ReceiverTy, BaseTy, ArgTypes))
             return;
 
           // Method name and argument COUNT are both right, but no overload's
@@ -2373,7 +2486,7 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
         // zero matches (whether because the method name doesn't exist at
         // all, or exists but not at this arity). Try tier 2 (UFCS) before
         // reporting either error.
-        if (tryUFCSOnReceiver(Node, ReceiverTy.get(), BaseTy.get(), ArgTypes))
+        if (tryUFCSOnReceiver(Node, ReceiverTy, BaseTy, ArgTypes))
           return;
 
         // Distinguish "this method doesn't exist on
@@ -2479,7 +2592,7 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
       // invariant violation. Confirmed via `x.foo()` on an int, a string,
       // and an `int*`.
       std::vector<const ResolverFunctionSymbol *> NamedCandidates;
-      if (tryUFCSOnReceiver(Node, ReceiverTy.get(), BaseTy.get(), ArgTypes, &NamedCandidates))
+      if (tryUFCSOnReceiver(Node, ReceiverTy, BaseTy, ArgTypes, &NamedCandidates))
         return;
       // FREEZE §6.1: whether `T` has this method is known only per
       // instantiation; the clone's re-check resolves it. Its result is

@@ -425,6 +425,12 @@ The two sides of a UFCS call are matched differently:
   any length. A raw pointer receiver is matched as the pointer it is, never
   as what it points to.
 - **The other arguments convert as in any call**, so `n.scale(2)` widens `2`.
+- **A generic function binds its type parameters first**, from the receiver,
+  the arguments and any written ones (`n.twice::<int>()`), and is then matched
+  by the two rules above: `fn<T> twice(x: T)` takes an `int` receiver as
+  `T = int`, which is not a conversion. A generic struct's instance is matched
+  as written (`Box<string>`), so `b.f()` reaches `fn f(b: Box<string>)` and
+  `fn<T> f(b: Box<T>)`.
 
 Failures: no candidate for the receiver is `E056` ("No visible 'describe'
 overload accepts a 'char' receiver via UFCS"):

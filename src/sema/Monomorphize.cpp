@@ -801,6 +801,8 @@ void rewriteNewFuncCallSites(InstantiationEntry &Entry) {
       FC->ResolvedCallTarget = Entry.ClonedSymbol;
     else if (auto *VE = dynamic_cast<VariableExprAST *>(Entry.Sites[i]))
       VE->ResolvedFunctionRef = Entry.ClonedSymbol; // a generic fn as a value
+    else if (auto *MC = dynamic_cast<MethodCallExprAST *>(Entry.Sites[i]))
+      MC->ResolvedCallTarget = Entry.ClonedSymbol; // `x.f()`, a generic fn via UFCS
     else
       retargetOperatorSite(Entry.Sites[i], Entry.Request.DeclKey,
                            Entry.ClonedSymbol);

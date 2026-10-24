@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E148
+// EXPECT-DIAG: 'twice' takes 1 type argument, and 2 are written.
+// Through UFCS as in a direct call: one type per type parameter.
+
+fn<T> twice(x: T): T {
+    return x;
+}
+
+fn main(): int {
+    mut a: int = 3;
+    io::printline(a.twice::<int, int>());
+    return 0;
+}
