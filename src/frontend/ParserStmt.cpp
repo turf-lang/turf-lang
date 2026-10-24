@@ -227,7 +227,8 @@ std::unique_ptr<ExprAST> ParseBlock() {
   if (CurTok != '}') {
     LogErrorAt(OpenBraceLoc, ErrCode::UnclosedDelimiter,
                "Missing closing '}' — every '{' must have a matching '}'."
-               "\n  Hint: Check that all your blocks are properly closed.", SLM::ErrorCategory::SYNTAX_ERROR);
+               "\n  Hint: Add a '}' to close the block opened on line " +
+                   std::to_string(OpenBraceLoc.Line) + ".", SLM::ErrorCategory::SYNTAX_ERROR);
     return nullptr;
   }
   getNextToken();
@@ -323,7 +324,7 @@ std::unique_ptr<ExprAST> ParseDoWhileExpr() {
     return nullptr;
 
   if (CurTok != TOK_WHILE) {
-    LogErrorAt(CurLoc, ErrCode::ExpectedKeyword, "Expected 'while' after do-block", SLM::ErrorCategory::CONTROL_FLOW);
+    LogErrorAt(CurLoc, ErrCode::ExpectedKeyword, "Expected 'while' after do-block\n  Hint: A do-block ends with its condition: `do { ... } while (cond);`.", SLM::ErrorCategory::CONTROL_FLOW);
     return nullptr;
   }
   getNextToken(); // eat 'while'
@@ -1162,7 +1163,7 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
         if (InitList.empty()) {
           LogErrorAt(NameLoc, ErrCode::InvalidArraySize,
                      "An empty literal can't give '" + Name +
-                         "' a size -- an array needs at least one element.",
+                         "' a size -- an array needs at least one element.\n  Hint: Give '" + Name + "' a size or a first element: `mut " + Name + ": int[3] = [0, 0, 0];` or `[1]`.",
                      SLM::ErrorCategory::ARRAY_ERROR);
           return nullptr;
         }

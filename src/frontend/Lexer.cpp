@@ -794,7 +794,56 @@ void LogErrorAt(SourceLocation Loc, const char *Code, const std::string &Msg,
   // ErrCode:: constant too; this catches a raw string literal.)
   assert(ErrorCodes::lookupByCode(Code) &&
          "LogErrorAt: code is not a row of AllErrorCodes (ErrorCodes.h)");
-  DiagnosticEngine::add(Loc, Msg, "", isMessageWarning(Msg), {}, Category,
+  // DX-3 (issue #291): every error carries a concrete hint. A raw site that
+  // wrote its own "\n  Hint: ..." keeps it; one that did not gets the line
+  // below for its code, so a diagnostic never prints without one.
+  std::string Full = Msg;
+  if (!isMessageWarning(Msg) && Msg.find("Hint:") == std::string::npos) {
+    const std::string C = Code;
+    const char *H = nullptr;
+    if (C == ErrCode::MissingSemicolon)
+      H = "End the statement with ';' right after its last token, e.g. "
+          "`x = x + 1;` or `return 0;`.";
+    else if (C == ErrCode::UnexpectedToken && Msg.rfind("Unexpected ';'", 0) == 0)
+      H = "Remove the extra ';' -- a statement ends with exactly one.";
+    else if (C == ErrCode::UnexpectedToken)
+      H = "Remove the token the arrow points at, or write what belongs there: "
+          "a value, a name, or a complete statement.";
+    else if (C == ErrCode::MissingComma)
+      H = "Put a ',' between the items of the list, e.g. `a, b, c`, and close "
+          "it with the matching bracket.";
+    else if (C == ErrCode::MissingColon)
+      H = "Put a ':' there: a name is followed by its type (`x: int`) and a "
+          "function's parameter list by its return type (`): int`).";
+    else if (C == ErrCode::MissingOpeningDelimiter)
+      H = "Open the block with '{' (or the list with '(') at the spot the "
+          "arrow points to.";
+    else if (C == ErrCode::ExpectedName)
+      H = "Write a name there: a letter or '_' followed by letters, digits "
+          "or '_', e.g. `total`.";
+    else if (C == ErrCode::ExpectedKeyword)
+      H = "Write the keyword the message names at the spot the arrow points "
+          "to.";
+    else if (C == ErrCode::InvalidOperatorDeclaration)
+      H = "Declare it with the parameter count its operator allows, e.g. "
+          "`operator +(a: T, b: T): T { ... }`.";
+    else if (C == ErrCode::ExternFunctionBody)
+      H = "End an `extern fn` declaration with ';' and no body, or drop "
+          "`extern` to write the body in Turf.";
+    else if (C == ErrCode::StatementOutsideFunction)
+      H = "Move the statement into a function body, e.g. `fn main(): int { "
+          "... return 0; }`.";
+    else if (C == ErrCode::InvalidArraySize)
+      H = "Give the array a whole-number size of at least 1, e.g. `int[3]`.";
+    else if (C == ErrCode::MissingInitializer)
+      H = "Give the variable its value on the spot: `mut x: int = 5;`.";
+    else if (C == ErrCode::SizeParameter)
+      H = "Declare `N: size` only on a free function, e.g. `fn<T, N: size> "
+          "first(a: T[N]): T`; not on an operator, a method or a struct.";
+    if (H)
+      Full += std::string("\n  Hint: ") + H;
+  }
+  DiagnosticEngine::add(Loc, Full, "", isMessageWarning(Msg), {}, Category,
                         Code, Hints);
 }
 

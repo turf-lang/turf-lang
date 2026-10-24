@@ -94,7 +94,11 @@ public:
       for (const auto &Sig : KnownSignatures)
         Message += "\n    " + Colors::CYAN + Sig + Colors::RESET;
     }
-    Hint_ = "Check the number of arguments.";
+    Hint_ = KnownSignatures.empty()
+                ? "Call '" + Name + "' with a different number of arguments "
+                  "than " + std::to_string(Got) + "."
+                : "Call '" + Name + "' the way one of the overloads above is "
+                  "declared, e.g. `" + KnownSignatures.front() + "`.";
   }
 };
 class NestedFunctionError : public TurfError {

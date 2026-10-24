@@ -418,7 +418,7 @@ std::vector<std::unique_ptr<ExprAST>> parseEntryFile(std::size_t &PreludeCount,
           LogErrorAt(spanOf(*AST).Loc, ErrCode::StatementOutsideFunction,
                      "Statements are not allowed outside of a function. "
                      "Please define 'fn main(): int' and move this code "
-                     "inside.",
+                     "inside.\n  Hint: Wrap it: `fn main(): int { <this statement> return 0; }`.",
                      SLM::ErrorCategory::SYNTAX_ERROR);
         }
       }

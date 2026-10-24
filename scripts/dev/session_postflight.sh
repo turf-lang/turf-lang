@@ -155,6 +155,14 @@ else
     echo "$REG_OUT" | head -8 | sed 's/^/       /'
   fi
 
+  # DX-3 (issue #291): every error a fail_*.tr test reports prints a Hint:.
+  if HINT_OUT=$(python3 scripts/dev/diagnostic_fix_coverage.py --check 2>&1); then
+    pass "$(echo "$HINT_OUT" | tail -1)"
+  else
+    fail "an error in the fail_*.tr suite prints no Hint: line:"
+    echo "$HINT_OUT" | head -8 | sed 's/^/       /'
+  fi
+
   # SLM_IMPROVEMENT_PLAN C1/C2: every CORRECT example in docs/slm/ (and the
   # syntax card) compiles, and every non-retired per-code page has one. The
   # model copies what the docs show it.

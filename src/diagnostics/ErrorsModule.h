@@ -621,7 +621,8 @@ public:
     // single "Hint: " lead-in, unlike every other Suggestions-based error
     // class in this file, which passes no prefix and reads cleanly.
     Hint_ = suggestionsOrFallback(Suggestions,
-      "Double-check your spelling, or maybe you need to define it?");
+      "Check the spelling of '" + MethodName + "', or declare `pub fn " +
+      MethodName + "(...)` in module '" + ModuleName + "'.");
     trySetDeterministicRename(MethodName, Suggestions);
   }
 };

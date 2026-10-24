@@ -717,8 +717,9 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     LogErrorAt(CurLoc, ErrCode::UnexpectedToken,
                "Unexpected token — expected a value, variable name, or "
                        "expression here."
-                       "\n  Hint: Check for stray characters, a missing "
-                       "operator, or an incomplete statement.", SLM::ErrorCategory::SYNTAX_ERROR);
+                       "\n  Hint: Remove the stray token, or put a value there: a "
+                       "number, a name, or a call such as `f(x)`. After a "
+                       "complete expression an operator (`+`, `==`) comes next.", SLM::ErrorCategory::SYNTAX_ERROR);
     return nullptr;
 
   case TOK_SIZEOF: {
