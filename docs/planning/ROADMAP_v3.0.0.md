@@ -1028,6 +1028,7 @@ source-level entry as an error, so a project can be ready before it upgrades.
 | **B-14** | **`turfc` is a compiler only** (PC-2, PC-3): `--smart`, `--smart-write-fix`, `--format`, `--migrate`, `--test` and `--explain` are removed from `turfc`; `TurfcInterfaceMajor` becomes 3. | Scripts calling those `turfc` flags fail. | The `turf` commands are unchanged; the deprecation notes have named them since 2.7. | yes |
 | **B-15** | **One release flavour.** The `-smart` archives end; the assistant is its own download. | Install recipes and download URLs change. | Package recipes and the download page updated in 3.0.0. | yes |
 | **B-16** | **`recover` binds tighter than `=` and `+=`.** In 2.x `recover` binds more loosely than every operator, assignment included, so `v = f() recover run { ... };` parses as `(v = f()) recover ...` and is E066 (`Cannot assign value of type '!int'`): only a declaration (`mut v = f() recover ...`) or a parenthesized right side (`v = (f() recover run { ... });`) works. In 3.0 `recover` takes the whole right-hand side of an assignment, the way it already takes a declaration's initializer. | Changes the meaning of a program that compiles in 2.x: with `mut v: !int`, `v = f() recover produce 0;` is `(v = f()) recover produce 0` (v holds the error when f fails; checked 2026-10-15), and in 3.0 it would store 0 instead. | `turf migrate 3.0` adds the parentheses where the meaning would change; nothing to do for code that already parenthesizes. Until then the 2.x reference documents the parentheses as the way to write it. | yes |
+| **B-17** | **A generic struct's type arguments are written where it is built** (D-27). `List::default()` and `Box::new(x)` no longer take their type arguments from the type they are stored into, returned as or passed to; the call writes them, `List<int>::default()` (LG-1). `mut l: List<int> = List::default();` and `return Box::new("x");` in a function returning `Box<string>` are errors. Annotations themselves stay (`mut l: List<int> = List<int>::default();`, `mut n: int = 5;`), and so do type arguments inferred from the constructor's own arguments (LG-3), which take nothing from the context. | Rejects programs that compile in 2.x: every generic construction whose type arguments come from the context. | A warning in 2.3.0 (allow-by-default first, per the 5.4 ladder) at each such call, with a `Fix:` writing the arguments in; `turf migrate 3.0` applies them all, reading each one from the declared type exactly as 2.x does. | yes |
 | **B-4** | **GC write-barrier contract** (only if RT-2′ is chosen over RT-2). | `unsafe` and C code storing a GC pointer into a GC object must call a barrier. | `mem::` helper plus an RT-5 check that finds missing barriers. | no (RT-2 is 3.x) |
 | **B-5** | **New reserved words**, only if a contextual keyword cannot express a feature (CC-4(b)). | An identifier with that name stops parsing. | `turf migrate` renames it. | no |
 | **B-6** | **Meaning of `fn(T): R[N]`** (G-1, "fix the grammar"). | Changes the parse of an existing type. | Not needed if G-1's additive spelling suffices. | no |
@@ -1035,6 +1036,9 @@ source-level entry as an error, so a project can be ready before it upgrades.
 | **B-8** | **Concurrency soundness rules that reject existing code.** | Concurrency ships in 3.x, so such a rule would need 4.0; TDP-3-001 is designed so it never does (its checks apply only to code that starts a thread). | — | no |
 | **B-9** | **`turf.toml` / `turf.lock` format major**, only if PK-1 needs it. | Old manifests rejected. | A converter in `turf`. | no |
 | **B-11** | **A different spelling for type arguments in type positions.** | Every program with generics. | Not planned: LG-1 removes the reason. | no |
+
+B-17's migration is mechanical because 2.x already knows the answer at every
+site it changes: it is the type 2.x reads the arguments from.
 
 ### 7.2 What adds nothing to the register
 
@@ -1112,6 +1116,12 @@ calls that any TDP touching them may reopen.
 | **D-24** | How the assistant reaches users. | A separate binary and archive (working name `turf-assist`), found by `turf` on the `PATH` or beside `turf`. The main release carries no model runtime. | TDP-2-019 |
 | **D-25** | Where format, migrate, test and explain go. | `explain` is data from V-5's registry, read by `turf`; format, migrate and test are one helper binary linked against `libturf`. The `turf` commands keep their spelling. | TDP-2-019 |
 | **D-26** | Which C compiler LB-1 uses. | The system C compiler (`CC`, then `cc`/`clang`/`gcc`, MSVC on Windows), with a clear error when none is found. Pure-Turf packages never need one. | TDP-2-016 |
+
+### 8.3 Decided by the owner, 2026-10-24
+
+| ID | Question | Decision | Specified in |
+|---|---|---|---|
+| **D-27** | With LG-1 in, does a generic construction keep taking its type arguments from the declared type? | No, in 3.0: the type arguments are written where the value is built (`List<int>::default()`), which also works with `guess`. Annotations stay; only the context supplying a constructor's type arguments is retired. No style guide is needed to choose between the two spellings, since one of them goes. | B-17 (7.1) |
 
 No decision is open. A new one is added here with a recommendation and asked
 of the owner before the item it blocks starts.
