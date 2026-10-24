@@ -143,7 +143,7 @@ any change to default output.
 | Diagnostics | SL-0 provenance labels (the `[Model Suggestion]` label landed), DX-1 `Fix:` lines (landed), DX-3 hint backfill, DX-2 `--diagnostics=json` (open) |
 | Numeric speed | NM-1 baseline benchmark, NM-3 `math::wrapping_*`, NM-4 trap-block measurement |
 | Generics at use sites | LG-1 `List<int>::default()`, LG-2 `f::<int>(…)`, LG-7 hints that point at them |
-| Small language and runtime | F-11d `@test` functions (with `@test(Error::E…, "…")` and `@test(panic, "…")`), RT-6 stack-overflow depth hint, SY-1 `for c in s`, SY-2 (a) integer literal receivers documented and tested |
+| Small language and runtime | F-11d `@test` functions with their outcomes (`compile_error`, `warning`, `no_warnings`, `panic`, `exit`, `error`), RT-6 stack-overflow depth hint, SY-1 `for c in s`, SY-2 (a) integer literal receivers documented and tested |
 | Libraries | LB-2 unsafe-surface report in `turf` |
 | Repositories | IF-1 interface manifest, IF-5 consumer fixtures in the compiler's CI |
 | Documentation | `docs/development/DOCS_BACKLOG.md` and the per-minor documentation gate (4.4) in force |
@@ -160,6 +160,7 @@ any change to default output.
 | Repositories | IF-2 versioned schemas for diagnostics and package-graph JSON; IF-3 website error pages generated from V-5 |
 | Syntax | SY-2 (b) decimal-literal receiver warning, SY-3 `function`, SY-4 `static fn`, SY-5 `pub immut`, each old spelling with a warning and a `Fix:` |
 | Internal | F-S2 no global symbol table, F-S4a analysis leaves Codegen, F-11e the compiler's own tests move to `@test` expectations |
+| Tests | F-11f test options (TDP-2-026) |
 
 The AN warnings and LB-5 land here so that each has at least two minors in the
 field before 3.0 can promote it (B-1, B-13).
@@ -302,6 +303,7 @@ written in this order; this table is updated if they are not.
 | TDP-2-023 | `function` as a spelling of `fn` | SY-3, B-19 | 2.2, 3.0 |
 | TDP-2-024 | `static` before `fn` | SY-4, B-20 | 2.2, 3.0 |
 | TDP-2-025 | `pub immut` replaces `export immut` | SY-5, B-21 | 2.2, 3.0 |
+| TDP-2-026 | Test options | F-11f | 2.2 |
 | TDP-3-001 | Threads and shared state | CC-0 … CC-3, B-8 | 3.1, 3.2 |
 | TDP-3-002 | Async and non-blocking I/O | CC-4, CC-5, CC-6 | 3.2 |
 
@@ -555,7 +557,8 @@ collector and "write barriers in preparation".
 | **F-14b** | Payloads on plain `enum`s (sum types), reusing LEC-004's representation. | A | M | none |
 | **F-15b** | Closed error sets in signatures, error conversion. | A | M | AN-9 |
 | **F-16** | Circular imports. A module-system change, but it only *accepts* programs that are rejected today. | A | M | none |
-| **F-11d** | In-source `@test` functions, including the expected-failure forms `@test(Error::E<code>, "text")` and `@test(panic, "text")` (TDP-2-006). | A | S | `turf test` (§6.22) |
+| **F-11d** | In-source `@test` functions and their outcomes (TDP-2-006): none (returns), `compile_error, E<code>, "text"` (optionally `fix: "text"`), `warning, E<code>, "text"`, `no_warnings`, `panic, "text"`, `exit, <status>`, `error, T::V` (a `!void` test). `compile_error`, not `Error::E041`, so a program's own error type named `Error` is never shadowed (Principle V). | A | S–M | `turf test` (§6.22) |
+| **F-11f** | **Test options** (TDP-2-026): `skip: "reason"`, `timeout: <ms>`, `levels: all \| [O0, …]`, `stdout: "…"`, `tag: "…"`, `serial`, after the outcome as `name: value`. Literals only; no retries, no setup hooks. | A | S–M | F-11d |
 | **F-11e** | **Test-suite cleanup.** Move the compiler's own `tests/**/fail_*.tr` whose expected error lies inside one function body, and the `EXPECT-RUNTIME` panics, to `@test(Error::…)` / `@test(panic, …)` functions, several to a file; the file-name and `// EXPECT-*` conventions stay for what a function cannot express (syntax errors, declaration-level errors, exit statuses, `EXPECT-FIX`). `tests/compat/2.0/` is never touched. | I | M | F-11d |
 
 ### 6.5 Concurrency and async (CC)
