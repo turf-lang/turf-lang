@@ -1506,6 +1506,10 @@ bool TypeChecker::tryUFCSOnReceiver(MethodCallExprAST &Node,
                                     const std::vector<TurfTypePtr> &ArgTypes,
                                     std::vector<const ResolverFunctionSymbol *> *OutNamedCandidates) {
   Node.UFCSLoadsReceiver = false;
+  // A generic struct's instance is matched as written, `Box<string>`: BaseTy
+  // is the struct it was unwrapped to, which has lost its type arguments.
+  if (ReceiverTy && dynamic_cast<const GenericType *>(ReceiverTy))
+    return tryUFCSFallback(Node, ReceiverTy, ArgTypes, OutNamedCandidates);
   if (!ReceiverTy || ReceiverTy == BaseTy ||
       !dynamic_cast<const TurfPointerType *>(ReceiverTy))
     return tryUFCSFallback(Node, BaseTy, ArgTypes, OutNamedCandidates);
