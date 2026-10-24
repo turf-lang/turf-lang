@@ -1,0 +1,5 @@
+// Helper module for 06_own_infinity_constant_is_its_own.tr. Named *_module.tr
+// so scripts/test_runner.sh does not run it on its own.
+
+export immut INFINITY: double = 0.0;
+export immut NAN: double = 1.5;

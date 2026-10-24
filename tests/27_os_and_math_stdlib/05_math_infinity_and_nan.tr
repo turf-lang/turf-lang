@@ -1,0 +1,25 @@
+// math::INFINITY, NEG_INFINITY and NAN have the values their names say,
+// though no literal spells them, and is_nan / is_infinite / is_finite tell
+// them apart: NaN equals nothing, itself included.
+import test;
+
+fn main(): int {
+    test::assert(math::INFINITY > math::DOUBLE_MAX, "INFINITY is above every finite double");
+    test::assert(math::NEG_INFINITY < math::DOUBLE_MIN, "NEG_INFINITY is below every finite double");
+    test::assert(math::INFINITY == 0.0 - math::NEG_INFINITY, "NEG_INFINITY is -INFINITY");
+    test::assert(math::log(0.0) == math::NEG_INFINITY, "the same -inf libm returns");
+
+    test::assert(math::NAN != math::NAN, "NaN is not equal to itself");
+    test::assert(!(math::NAN < 0.0) && !(math::NAN > 0.0), "NaN is unordered");
+    test::assert(math::NAN to string == "nan", "NaN prints as nan, not -nan");
+    test::assert(math::INFINITY to string == "inf", "INFINITY prints as inf");
+
+    test::assert(is_nan(math::NAN), "is_nan(NAN)");
+    test::assert(is_nan(math::sqrt(-1.0)), "is_nan of libm's NaN");
+    test::assert(!is_nan(math::INFINITY) && !is_nan(1.5), "is_nan of non-NaN");
+    test::assert(math::INFINITY.is_infinite() && math::NEG_INFINITY.is_infinite(), "is_infinite");
+    test::assert(!is_infinite(math::NAN) && !is_infinite(math::DOUBLE_MAX), "is_infinite of the rest");
+    test::assert(is_finite(math::DOUBLE_MAX) && is_finite(0.0), "is_finite");
+    test::assert(!is_finite(math::NAN) && !is_finite(math::NEG_INFINITY), "is_finite of the rest");
+    return 0;
+}

@@ -46,6 +46,10 @@
  *             `pub fn` declarations in lib/std whose calls Codegen replaces
  *             with one instruction (`math::wrapping_add`, NM-3). Recognized
  *             by the (module, function) of the resolved declaration.
+ *          6. Standard-library constants the compiler gives a value:
+ *             real `export immut` declarations in lib/std whose value no
+ *             literal spells (`math::INFINITY`, `math::NAN`, STD-004).
+ *             Recognized by the (module, constant) of the declaration.
  *
  * @copyright Copyright (c) 2026 TurfLang contributors. Licensed under the
  * Apache License.
@@ -385,6 +389,39 @@ inline LoweredFunction LookupLoweredFunction(const std::string &Module,
   if (Name == "wrapping_mul") return LoweredFunction::WrappingMul;
   if (Name == "wrapping_shl") return LoweredFunction::WrappingShl;
   return LoweredFunction::None;
+}
+
+// ─── 6. Standard-library constants the compiler gives a value (STD-004) ─────
+// Ordinary `export immut` declarations in lib/std with a name, a type and a
+// doc comment, whose value has no literal: Turf has no spelling for infinity
+// or NaN, and `/` by zero panics for a `double`. The declaration is written
+// with `0.0` and the Resolver replaces that value
+// (Resolver::hoistExportedConstant()). Keyed like kind 5, by the declaring
+// module's key, so a program's own `INFINITY` is its own constant. Change
+// record: docs/development/changes/STD-004.md.
+//
+//   math::INFINITY: double     -- +inf
+//   math::NEG_INFINITY: double -- -inf
+//   math::NAN: double          -- a quiet NaN, sign bit clear
+
+/// The closed set of kind-6 constants. `None` is every other declaration.
+enum class SuppliedConstant {
+  None,
+  Infinity,
+  NegInfinity,
+  NaN,
+};
+
+/// The kind-6 constant declared as `Name` in the module keyed `Module`, or
+/// `SuppliedConstant::None`.
+inline SuppliedConstant LookupSuppliedConstant(const std::string &Module,
+                                               const std::string &Name) {
+  if (Module != "math")
+    return SuppliedConstant::None;
+  if (Name == "INFINITY") return SuppliedConstant::Infinity;
+  if (Name == "NEG_INFINITY") return SuppliedConstant::NegInfinity;
+  if (Name == "NAN") return SuppliedConstant::NaN;
+  return SuppliedConstant::None;
 }
 
 #endif // TURF_INTRINSICS_H

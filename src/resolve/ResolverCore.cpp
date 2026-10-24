@@ -31,6 +31,7 @@
 #include "llvm/ADT/SmallString.h" // Num->getIntValExact().toString() below
 
 #include <cstring>
+#include <limits>     // kind-6 constants in hoistExportedConstant()
 #include <functional> // std::function -- checkStructLayoutAcyclicity()'s recursive DFS lambda
 #include <memory>
 #include <unordered_map> // checkStructLayoutAcyclicity()'s name -> AST / colour maps
@@ -1024,6 +1025,23 @@ void Resolver::hoistExportedConstant(const VarDeclExprAST &Var,
   } else {
     ExportNonConstantInitializerError(Loc, Var.getName()).raise();
     return;
+  }
+
+  // STD-004 (src/sema/Intrinsics.h, kind 6): the values no literal spells.
+  if (Sym.Type && Sym.Type->isDouble()) {
+    switch (LookupSuppliedConstant(ModuleName, Sym.Name)) {
+    case SuppliedConstant::Infinity:
+      Sym.DoubleVal = std::numeric_limits<double>::infinity();
+      break;
+    case SuppliedConstant::NegInfinity:
+      Sym.DoubleVal = -std::numeric_limits<double>::infinity();
+      break;
+    case SuppliedConstant::NaN:
+      Sym.DoubleVal = std::numeric_limits<double>::quiet_NaN();
+      break;
+    case SuppliedConstant::None:
+      break;
+    }
   }
 
   if (ModuleName.empty())

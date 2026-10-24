@@ -2,7 +2,7 @@
 
 | Module | For | Import |
 |---|---|---|
-| `math` | constants and numeric limits, `abs`, `min`, `max`, `clamp`, `power`, the libm functions, the `wrapping_*` family, `divide` | none (prelude) |
+| `math` | constants, numeric limits, infinity and NaN, `abs`, `min`, `max`, `clamp`, `power`, the libm functions, the `wrapping_*` family, `divide` | none (prelude) |
 | `os` | environment variables and command-line arguments | `import os;` |
 
 `math` is part of the [prelude](README.md#the-prelude): `abs(-3)`, `max(a, b)` and
@@ -44,6 +44,28 @@ as for the integers. The smallest positive normal `double` (C's `DBL_MIN`) is
 | `DOUBLE_MIN: double` | `-1.7976931348623157e308`, the most negative finite `double` |
 | `DOUBLE_MIN_POSITIVE: double` | `2.2250738585072014e-308`, the smallest positive normal `double` |
 | `DOUBLE_EPSILON: double` | `2.220446049250313e-16`, the gap between `1.0` and the next `double` |
+
+### Infinity and NaN
+
+| Constant | Value |
+|---|---|
+| `INFINITY: double` | positive infinity, above every finite `double` |
+| `NEG_INFINITY: double` | negative infinity |
+| `NAN: double` | not a number (prints as `nan`) |
+
+Turf arithmetic never produces these (`/` by zero panics for `double` too);
+they come from these constants and from the C math library (`log(0.0)` is
+`NEG_INFINITY`, `sqrt(-1.0)` is NaN). NaN equals nothing, itself included, so
+`x == math::NAN` is always `false`. Test for it with a function:
+
+| Function | Result |
+|---|---|
+| `is_nan(val: double): bool` | `true` for NaN |
+| `is_infinite(val: double): bool` | `true` for `INFINITY` and `NEG_INFINITY` |
+| `is_finite(val: double): bool` | `true` for every value that is neither |
+
+Like every `math` function they are bare-callable (`is_nan(x)`) and work through
+UFCS (`x.is_nan()`).
 
 Arithmetic past a limit is checked as always: `math::INT_MAX + 1` panics with
 "Integer overflow", and `math::wrapping_add(math::INT_MAX, 1)` is

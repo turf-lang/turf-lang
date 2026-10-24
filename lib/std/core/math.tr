@@ -45,6 +45,17 @@ export immut DOUBLE_MIN: double = -1.7976931348623157e308;
 export immut DOUBLE_MIN_POSITIVE: double = 2.2250738585072014e-308;
 export immut DOUBLE_EPSILON: double = 2.220446049250313e-16;
 
+// ─── infinity and NaN ────────────────────────────────────────────────────────
+//
+// No literal spells these, and `/` by zero panics for a double, so the
+// compiler gives these three their values (src/sema/Intrinsics.h, kind 6):
+// the `0.0` each is written with is never read. NaN equals nothing, itself
+// included, so `x == NAN` is always false: test with `is_nan(x)`.
+
+export immut INFINITY: double = 0.0;
+export immut NEG_INFINITY: double = 0.0;
+export immut NAN: double = 0.0;
+
 // ─── libm bindings ────────────────────────────────────────────────────────────
 
 pub extern from "m" fn pow(base: double, exp: double): double;
@@ -90,6 +101,21 @@ pub fn power(base: int, exp: double): double {
 
 pub fn power(base: double, exp: int): double {
     return pow(base, exp to double);
+}
+
+// ─── is_nan / is_infinite / is_finite ────────────────────────────────────────
+
+// NaN is the one value not equal to itself.
+pub fn is_nan(val: double): bool {
+    return val != val;
+}
+
+pub fn is_infinite(val: double): bool {
+    return val == INFINITY || val == NEG_INFINITY;
+}
+
+pub fn is_finite(val: double): bool {
+    return !is_nan(val) && !is_infinite(val);
 }
 
 // ─── min / max ────────────────────────────────────────────────────────────────
