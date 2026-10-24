@@ -37,7 +37,7 @@ can make.
 ## 2. The closed intrinsic list
 
 `src/sema/Intrinsics.h` is the single, enumerated answer to "what does the
-compiler know about by name?" There are four kinds, each recognized through a
+compiler know about by name?" There are five kinds, each recognized through a
 different mechanism:
 
 1. **Bare intrinsics**: `sizeof`, `typeof`, `heap`, `hash_of`, `gc_alloc`,
@@ -59,6 +59,17 @@ different mechanism:
    from Turf source: no `extern fn` in `lib/std` declares them.
 4. **The prelude module list** (§4): not a callable symbol, but the other half of
    "what the compiler knows by name".
+5. **Standard-library functions the compiler lowers itself**: `math::wrapping_add`,
+   `wrapping_sub`, `wrapping_mul` and `wrapping_shl` are ordinary `pub fn`
+   declarations in `lib/std/core/math.tr`, and Codegen emits each call, and each
+   body, as one plain `add`, `sub`, `mul` or `shl` (amount modulo 64) at every
+   `-O` level. The rest of the `wrapping_*` family is ordinary Turf built on them. `LookupLoweredFunction()`
+   compares the declaring module's key and the function's name once, when the
+   Resolver builds the declaration's symbol (`ResolverFunctionSymbol::Lowering`);
+   a call reads the flag off the declaration it resolved to. A program's own
+   `wrapping_add` is never lowered: the main file's key is empty, a root module
+   named `math` is an E090 at its import, and a dependency's modules are keyed
+   `<package>/<path>`.
 
 Adding to the list is an explicit, change-recorded act, never a side effect of
 unrelated work (F-STD-2).

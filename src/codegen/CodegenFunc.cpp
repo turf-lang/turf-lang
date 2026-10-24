@@ -303,6 +303,22 @@ public:
 };
 } // namespace
 
+// See CodegenInternal.h.
+Value *EmitLoweredFunction(LoweredFunction Kind, Value *A, Value *B) {
+  switch (Kind) {
+  case LoweredFunction::WrappingAdd: return Builder->CreateAdd(A, B, "wrapadd");
+  case LoweredFunction::WrappingSub: return Builder->CreateSub(A, B, "wrapsub");
+  case LoweredFunction::WrappingMul: return Builder->CreateMul(A, B, "wrapmul");
+  // The amount modulo 64, so `shl` is never poison (an amount >= 64 is).
+  case LoweredFunction::WrappingShl:
+    return Builder->CreateShl(
+        A, Builder->CreateAnd(B, ConstantInt::get(B->getType(), 63), "shlamt"),
+        "wrapshl");
+  case LoweredFunction::None:        break;
+  }
+  return nullptr;
+}
+
 Value *FuncDefExprAST::codegen() {
   // TYPE-002 (S14a): a FuncDefExprAST with non-empty TypeParams is an
   // uninstantiated generic TEMPLATE -- the monomorphizer (Monomorphize.cpp)
@@ -628,8 +644,14 @@ Value *FuncDefExprAST::codegen() {
     ValueRangePass().markElidableChecks(*ElisionCFG, ParamIDs);
   }
 
-  // Codegen the body
-  Body->codegen();
+  // Codegen the body -- or, for a kind-5 standard-library function
+  // (src/sema/Intrinsics.h), the one instruction its calls lower to, so a
+  // function value of it computes exactly what a direct call does.
+  if (ResolvedDef && ResolvedDef->Lowering != LoweredFunction::None)
+    Builder->CreateRet(EmitLoweredFunction(ResolvedDef->Lowering,
+                                           TheFunc->getArg(0), TheFunc->getArg(1)));
+  else
+    Body->codegen();
 
   // Build and analyze CFG for flow diagnostics
   if (Body) {
@@ -1303,6 +1325,19 @@ Value *FuncCallExprAST::codegen() {
     if (!ArgVal)
       return nullptr;
     return HeapAllocateValue(ArgVal);
+  }
+
+  // NM-3: a kind-5 standard-library function (`math::wrapping_add`, ...) is
+  // its one instruction, never a call, at every -O level
+  // (src/sema/Intrinsics.h).
+  if (ResolvedCallTarget && ResolvedCallTarget->Lowering != LoweredFunction::None) {
+    Value *A = Args[0]->codegen();
+    Value *B = Args[1]->codegen();
+    if (!A || !B)
+      return nullptr;
+    return EmitLoweredFunction(ResolvedCallTarget->Lowering,
+                               CastToType(A, TurfInt(), "argcast", Loc),
+                               CastToType(B, TurfInt(), "argcast", Loc));
   }
 
   std::vector<Value *> EvaluatedArgs;
