@@ -2,7 +2,7 @@
 
 | Module | For | Import |
 |---|---|---|
-| `math` | constants, `abs`, `min`, `max`, `clamp`, `power`, the libm functions, `wrapping_add`/`sub`/`mul`, `divide` | none (prelude) |
+| `math` | constants, `abs`, `min`, `max`, `clamp`, `power`, the libm functions, the `wrapping_*` family, `divide` | none (prelude) |
 | `os` | environment variables and command-line arguments | `import os;` |
 
 `math` is part of the [prelude](README.md#the-prelude): `abs(-3)`, `max(a, b)` and
@@ -132,22 +132,44 @@ fn main(): int {
 }
 ```
 
-### `wrapping_add`, `wrapping_sub`, `wrapping_mul`
+### The `wrapping_*` family
 
 ```text
 wrapping_add(a: int, b: int): int
 wrapping_sub(a: int, b: int): int
 wrapping_mul(a: int, b: int): int
+wrapping_shl(a: int, n: int): int
+wrapping_shr(a: int, n: int): int
+wrapping_neg(a: int): int
+wrapping_abs(a: int): int
+wrapping_div(a: int, b: int): int
+wrapping_rem(a: int, b: int): int
+wrapping_pow(base: int, exp: int): int
 ```
 
-`a + b`, `a - b` and `a * b` modulo 2^64, in two's complement. They never panic:
-a result that does not fit wraps around, so `wrapping_add(9223372036854775807, 1)`
-is `-9223372036854775808`. The operators `+`, `-` and `*` stay checked and panic
-with `Integer overflow`; these are for code where wrapping is the intended
-result, such as hashes, checksums and random-number generators.
+`int` arithmetic modulo 2^64, in two's complement: a result that does not fit
+wraps around instead of panicking, so `wrapping_add(9223372036854775807, 1)` is
+`-9223372036854775808`. The operators stay checked and panic with `Integer
+overflow`; these are for code where wrapping is the intended result, such as
+hashes, checksums and random-number generators.
 
-Each call compiles to a single machine add, subtract or multiply at every
-optimization level, `-O0` included, with no function call and no overflow check.
+| Function | Result | Where it differs from the operator |
+|---|---|---|
+| `wrapping_add`, `wrapping_sub`, `wrapping_mul` | `a + b`, `a - b`, `a * b` | wraps instead of panicking |
+| `wrapping_shl` | `a << (n modulo 64)`; bits shifted out are dropped | `<<` panics when a bit is lost or `n` is outside 0..63 |
+| `wrapping_shr` | `a >> (n modulo 64)`, keeping the sign | `>>` panics when `n` is outside 0..63 |
+| `wrapping_neg`, `wrapping_abs` | `-a`, `abs(a)` | the most negative `int` is its own negation and absolute value |
+| `wrapping_div` | `a / b`, truncated toward zero | the most negative `int` divided by `-1` is itself |
+| `wrapping_rem` | `a % b`, with the sign of `a` | none: `%` already gives `0` for the most negative `int` modulo `-1` |
+| `wrapping_pow` | `base` to the power `exp`, modulo 2^64 | `**` panics when the result does not fit |
+
+Division by zero has no wrapped result: `wrapping_div` and `wrapping_rem` panic
+for it, and `wrapping_pow` panics for a negative exponent, each naming the line
+of the call. Everything else never panics.
+
+`wrapping_add`, `wrapping_sub`, `wrapping_mul` and `wrapping_shl` each compile to
+one machine instruction at every optimization level, `-O0` included, with no
+function call and no check. The others are short functions built on them.
 
 ```turflang
 fn fnv1a(bytes: int[]): int {
@@ -164,6 +186,7 @@ fn main(): int {
     printline(fnv1a(a));                                        // -5808556873153909620
     printline(math::wrapping_add(9223372036854775807, 1));      // -9223372036854775808
     printline(math::wrapping_sub(-9223372036854775807 - 1, 1)); // 9223372036854775807
+    printline(math::wrapping_pow(3, 40));                       // -6289078614652622815
     return 0;
 }
 ```
@@ -205,9 +228,11 @@ fn main(): int {
 | Call | On a problem |
 |---|---|
 | `divide` | returns `MathError::DivisionByZero` |
+| `wrapping_div`, `wrapping_rem` | **panic** (`division by zero`, at the calling line) when `b` is `0` |
+| `wrapping_pow` | **panic** (`negative exponent`, at the calling line) when `exp` is negative |
 | `abs(int)`, `power(int, int)` | **panic** (`Integer overflow`) when the result does not fit |
 | the C math functions | return `nan` or `inf`; never fail |
-| `min`, `max`, `clamp`, `abs(double)`, the other `power` forms, `wrapping_add`, `wrapping_sub`, `wrapping_mul` | never fail |
+| `min`, `max`, `clamp`, `abs(double)`, the other `power` forms, the other `wrapping_*` functions | never fail |
 
 ---
 

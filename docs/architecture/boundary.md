@@ -60,9 +60,10 @@ different mechanism:
 4. **The prelude module list** (§4): not a callable symbol, but the other half of
    "what the compiler knows by name".
 5. **Standard-library functions the compiler lowers itself**: `math::wrapping_add`,
-   `wrapping_sub` and `wrapping_mul` are ordinary `pub fn` declarations in
-   `lib/std/core/math.tr`, and Codegen emits each call, and each body, as one
-   plain `add`, `sub` or `mul` at every `-O` level. `LookupLoweredFunction()`
+   `wrapping_sub`, `wrapping_mul` and `wrapping_shl` are ordinary `pub fn`
+   declarations in `lib/std/core/math.tr`, and Codegen emits each call, and each
+   body, as one plain `add`, `sub`, `mul` or `shl` (amount modulo 64) at every
+   `-O` level. The rest of the `wrapping_*` family is ordinary Turf built on them. `LookupLoweredFunction()`
    compares the declaring module's key and the function's name once, when the
    Resolver builds the declaration's symbol (`ResolverFunctionSymbol::Lowering`);
    a call reads the flag off the declaration it resolved to. A program's own

@@ -120,12 +120,15 @@ pub fn clamp(val: double, min_val: double, max_val: double): double {
 
 // ─── wrapping arithmetic ──────────────────────────────────────────────────────
 //
-// `int` arithmetic modulo 2^64 that never traps, for hashes, checksums and
-// random-number generators, where overflow is the intended result. `+`, `-`
-// and `*` stay checked. The compiler lowers every call, and each of these
-// bodies, to one plain add, subtract or multiply at every optimization level
-// (src/sema/Intrinsics.h, kind 5), so the `+`, `-` and `*` written below are
-// never compiled: they say which operation each one wraps.
+// `int` arithmetic modulo 2^64 that never traps on overflow, for hashes,
+// checksums and random-number generators, where overflow is the intended
+// result. The operators stay checked. The compiler lowers every call of the
+// first four, and each of their bodies, to one plain add, subtract, multiply
+// or shift at every optimization level (src/sema/Intrinsics.h, kind 5), so
+// the operators written in those four bodies are never compiled: they say
+// which operation each one wraps. The rest are built on those four. Division
+// by zero has no wrapped result, so `wrapping_div` and `wrapping_rem` still
+// panic for it, at the caller's line.
 
 pub fn wrapping_add(a: int, b: int): int {
     return a + b;
@@ -137,6 +140,75 @@ pub fn wrapping_sub(a: int, b: int): int {
 
 pub fn wrapping_mul(a: int, b: int): int {
     return a * b;
+}
+
+// `a` shifted left by `n` modulo 64 places; bits shifted out are dropped.
+pub fn wrapping_shl(a: int, n: int): int {
+    return a << n;
+}
+
+// `a` shifted right (arithmetic, keeping the sign) by `n` modulo 64 places.
+pub fn wrapping_shr(a: int, n: int): int {
+    return a >> (n & 63);
+}
+
+// `-a`; the most negative int is its own negation.
+pub fn wrapping_neg(a: int): int {
+    return wrapping_sub(0, a);
+}
+
+// `|a|`; the most negative int is its own absolute value.
+pub fn wrapping_abs(a: int): int {
+    if a < 0 {
+        return wrapping_neg(a);
+    }
+    return a;
+}
+
+// `a / b`, truncated toward zero; the most negative int divided by -1 is
+// itself. Panics when `b` is 0.
+@caller_location
+pub fn wrapping_div(a: int, b: int): int {
+    if b == 0 {
+        sys::panic(caller_location + ": math::wrapping_div: division by zero");
+    }
+    if b == -1 {
+        return wrapping_neg(a);
+    }
+    return a / b;
+}
+
+// `a % b`, with the sign of `a`; the most negative int modulo -1 is 0.
+// Panics when `b` is 0.
+@caller_location
+pub fn wrapping_rem(a: int, b: int): int {
+    if b == 0 {
+        sys::panic(caller_location + ": math::wrapping_rem: division by zero");
+    }
+    if b == -1 {
+        return 0;
+    }
+    return a % b;
+}
+
+// `base` to the power `exp` modulo 2^64. Panics when `exp` is negative: the
+// result would be a fraction.
+@caller_location
+pub fn wrapping_pow(base: int, exp: int): int {
+    if exp < 0 {
+        sys::panic(caller_location + ": math::wrapping_pow: negative exponent");
+    }
+    mut result: int = 1;
+    mut b: int = base;
+    mut e: int = exp;
+    while e > 0 {
+        if (e & 1) == 1 {
+            result = wrapping_mul(result, b);
+        }
+        b = wrapping_mul(b, b);
+        e = e >> 1;
+    }
+    return result;
 }
 
 // ─── divide ───────────────────────────────────────────────────────────────────

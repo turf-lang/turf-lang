@@ -110,6 +110,7 @@ fn main(): int {
     io::printline(math::wrapping_add(a, 1));
     io::printline(wrapping_sub(a, -1));
     io::printline(a.wrapping_mul(2));
+    io::printline(math::wrapping_shl(a, 65));
     return 0;
 }
 '@
@@ -127,10 +128,10 @@ if ($w.Rc -ne 0) {
   })
   if (@($mainIr | Where-Object { $_ -match 'call .*@turf_math_wrapping_' }).Count -gt 0) {
     Write-Fail 'a math::wrapping_* call is still a call at -O0'
-  } elseif (@($mainIr | Where-Object { $_ -match '= (add|sub|mul) i64 ' }).Count -lt 3) {
-    Write-Fail "expected a plain add, sub and mul in main's -O0 IR"
+  } elseif (@($mainIr | Where-Object { $_ -match '= (add|sub|mul|shl) i64 ' }).Count -lt 4) {
+    Write-Fail "expected a plain add, sub, mul and shl in main's -O0 IR"
   } else {
-    Write-Pass 'wrapping_add, wrapping_sub and wrapping_mul are plain add/sub/mul at -O0'
+    Write-Pass 'wrapping_add, _sub, _mul and _shl are plain add/sub/mul/shl at -O0'
   }
 }
 

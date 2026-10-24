@@ -1,5 +1,5 @@
-// `math::wrapping_add`, `wrapping_sub` and `wrapping_mul` are `int`
-// arithmetic modulo 2^64 that never traps (NM-3). Each form of call is
+// `math::wrapping_*` are `int` arithmetic modulo 2^64 that never traps on
+// overflow (NM-3). Each form of call is
 // checked: qualified, bare (the prelude), UFCS, and through a function value,
 // which runs the function's own definition rather than the inlined
 // instruction. Operands come through a function so no level can fold them
@@ -31,6 +31,24 @@ fn main(): int {
     immut mul = wrapping_mul;
     test::assert(add(max, 1) == min, "function value: wrapping_add");
     test::assert(mul(max, 3) == 9223372036854775805, "function value: wrapping_mul");
+
+    // The rest of the family.
+    test::assert(wrapping_neg(min) == min && wrapping_neg(id(5)) == -5, "wrapping_neg");
+    test::assert(wrapping_abs(min) == min && wrapping_abs(id(-5)) == 5, "wrapping_abs");
+    test::assert(wrapping_div(min, -1) == min, "MIN / -1 is MIN");
+    test::assert(wrapping_div(id(-7), 2) == -3, "division truncates toward zero");
+    test::assert(wrapping_rem(min, -1) == 0, "MIN % -1 is 0");
+    test::assert(wrapping_rem(id(-7), 2) == -1, "remainder has the sign of a");
+    test::assert(wrapping_shl(max, 1) == -2, "shl drops the bits shifted out");
+    test::assert(wrapping_shl(id(3), 65) == 6, "shl amount modulo 64");
+    test::assert(wrapping_shl(id(1), -1) == min, "shl by -1 is shl by 63");
+    test::assert(wrapping_shr(id(-16), 2) == -4 && wrapping_shr(id(-16), 66) == -4, "arithmetic shr, amount modulo 64");
+    test::assert(wrapping_pow(id(3), 40) == -6289078614652622815, "3 ** 40 modulo 2^64");
+    test::assert(wrapping_pow(id(2), 64) == 0 && wrapping_pow(id(-2), 63) == min, "powers of two wrap");
+    test::assert(wrapping_pow(id(7), 0) == 1, "x ** 0 is 1");
+    test::assert(max.wrapping_shl(1) == -2, "UFCS wrapping_shl");
+    immut shl = wrapping_shl;
+    test::assert(shl(id(3), 65) == 6, "function value: wrapping_shl");
 
     // A 64-bit FNV-1a step, the kind of code the functions are for.
     mut h: int = -3750763034362895579;

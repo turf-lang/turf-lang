@@ -107,8 +107,8 @@ llvm::Value *HeapAllocateValue(llvm::Value *Val);
 llvm::Value *BuildCallerLocationValue(const SourceLocation &StampLoc);
 
 /// NM-3: the one instruction a kind-5 standard-library function lowers to
-/// (src/sema/Intrinsics.h), on two `i64` operands: no `nsw`, so the result
-/// wraps modulo 2^64 and nothing traps. Used by an ordinary call, a UFCS call
+/// (src/sema/Intrinsics.h), on two `i64` operands: no `nsw`, and a shift
+/// amount taken modulo 64, so the result wraps modulo 2^64 and nothing traps. Used by an ordinary call, a UFCS call
 /// (CodegenStruct.cpp) and the function's own definition (CodegenFunc.cpp).
 llvm::Value *EmitLoweredFunction(LoweredFunction Kind, llvm::Value *A,
                                  llvm::Value *B);

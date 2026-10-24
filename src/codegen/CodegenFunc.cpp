@@ -309,6 +309,11 @@ Value *EmitLoweredFunction(LoweredFunction Kind, Value *A, Value *B) {
   case LoweredFunction::WrappingAdd: return Builder->CreateAdd(A, B, "wrapadd");
   case LoweredFunction::WrappingSub: return Builder->CreateSub(A, B, "wrapsub");
   case LoweredFunction::WrappingMul: return Builder->CreateMul(A, B, "wrapmul");
+  // The amount modulo 64, so `shl` is never poison (an amount >= 64 is).
+  case LoweredFunction::WrappingShl:
+    return Builder->CreateShl(
+        A, Builder->CreateAnd(B, ConstantInt::get(B->getType(), 63), "shlamt"),
+        "wrapshl");
   case LoweredFunction::None:        break;
   }
   return nullptr;

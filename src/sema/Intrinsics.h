@@ -356,8 +356,11 @@ inline const char *IntrinsicName(BareIntrinsic I) {
 //   math::wrapping_add(a: int, b: int): int -- `add i64`, no `nsw`
 //   math::wrapping_sub(a: int, b: int): int -- `sub i64`, no `nsw`
 //   math::wrapping_mul(a: int, b: int): int -- `mul i64`, no `nsw`
+//   math::wrapping_shl(a: int, n: int): int -- `shl i64` by `n & 63`
 //
 // Each is the result modulo 2^64 in two's complement and never traps. The
+// rest of the family (wrapping_neg, _abs, _div, _rem, _shr, _pow) is ordinary
+// Turf built on these four in lib/std/core/math.tr. The
 // lowering applies at every optimization level, `-O0` included: a call that
 // stayed a call would give the same result but lose the speed the functions
 // exist for.
@@ -368,6 +371,7 @@ enum class LoweredFunction {
   WrappingAdd,
   WrappingSub,
   WrappingMul,
+  WrappingShl,
 };
 
 /// The kind-5 function declared as `Name` in the module keyed `Module`, or
@@ -379,6 +383,7 @@ inline LoweredFunction LookupLoweredFunction(const std::string &Module,
   if (Name == "wrapping_add") return LoweredFunction::WrappingAdd;
   if (Name == "wrapping_sub") return LoweredFunction::WrappingSub;
   if (Name == "wrapping_mul") return LoweredFunction::WrappingMul;
+  if (Name == "wrapping_shl") return LoweredFunction::WrappingShl;
   return LoweredFunction::None;
 }
 
