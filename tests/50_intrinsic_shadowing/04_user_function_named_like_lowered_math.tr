@@ -1,0 +1,15 @@
+// `math::wrapping_add` is lowered by the compiler to one instruction, but that
+// is decided from the declaration a call resolves to, never from the name: a
+// program's own `wrapping_add` is an ordinary function, with its own meaning.
+
+import test;
+
+fn wrapping_add(a: int, b: int): int {
+    return a + b + 100;
+}
+
+fn main(): int {
+    test::assert(wrapping_add(1, 2) == 103, "the program's own wrapping_add");
+    test::assert(math::wrapping_add(1, 2) == 3, "math::wrapping_add is still the stdlib's");
+    return 0;
+}

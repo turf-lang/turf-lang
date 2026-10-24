@@ -97,9 +97,46 @@ foreach ($src in $serverClient) {
   if (-not $bad) { Write-Pass "$src compiles at every level" }
 }
 
+# --- NM-3: math::wrapping_* are one instruction at every level -----------------------------
+# A call that stayed a call would give the same result but lose the speed the functions
+# exist for, so -O0 IR is checked for the plain add/sub/mul with no call.
+Write-Host ''
+Write-Heading '4. math::wrapping_* lower to one instruction at -O0'
+$wrapSrc = Join-Path $work 'wrapping.tr'
+Set-Content -LiteralPath $wrapSrc -Encoding ascii -Value @'
+fn main(): int {
+    mut a: int = 9223372036854775807;
+    a = a + 0;
+    io::printline(math::wrapping_add(a, 1));
+    io::printline(wrapping_sub(a, -1));
+    io::printline(a.wrapping_mul(2));
+    return 0;
+}
+'@
+$wrapOut = Join-Path $work 'wrapping'
+$w = Invoke-Turfc -ArgList @($wrapSrc, '--emit-llvm', '-O0', '-o', $wrapOut)
+if ($w.Rc -ne 0) {
+  Write-CompileFailure $wrapSrc '-O0' $w
+} else {
+  $ir = Get-Content -LiteralPath "$wrapOut.ll"
+  $inMain = $false
+  $mainIr = @(foreach ($line in $ir) {
+    if ($line -match '^define .*@__turf_user_main') { $inMain = $true }
+    if ($inMain) { $line }
+    if ($inMain -and $line -eq '}') { $inMain = $false }
+  })
+  if (@($mainIr | Where-Object { $_ -match 'call .*@turf_math_wrapping_' }).Count -gt 0) {
+    Write-Fail 'a math::wrapping_* call is still a call at -O0'
+  } elseif (@($mainIr | Where-Object { $_ -match '= (add|sub|mul) i64 ' }).Count -lt 3) {
+    Write-Fail "expected a plain add, sub and mul in main's -O0 IR"
+  } else {
+    Write-Pass 'wrapping_add, wrapping_sub and wrapping_mul are plain add/sub/mul at -O0'
+  }
+}
+
 # --- Binary-size table --------------------------------------------------------------------
 Write-Host ''
-Write-Heading '4. Binary sizes by level (bytes)'
+Write-Heading '5. Binary sizes by level (bytes)'
 $programs = @($deterministic + $nondeterministic + $serverClient) |
     Where-Object { $_ -notlike '*llvm_ffi_selfhost_demo.tr' } |
     ForEach-Object { [System.IO.Path]::GetFileNameWithoutExtension($_) }

@@ -118,6 +118,27 @@ pub fn clamp(val: double, min_val: double, max_val: double): double {
     return val;
 }
 
+// ─── wrapping arithmetic ──────────────────────────────────────────────────────
+//
+// `int` arithmetic modulo 2^64 that never traps, for hashes, checksums and
+// random-number generators, where overflow is the intended result. `+`, `-`
+// and `*` stay checked. The compiler lowers every call, and each of these
+// bodies, to one plain add, subtract or multiply at every optimization level
+// (src/sema/Intrinsics.h, kind 5), so the `+`, `-` and `*` written below are
+// never compiled: they say which operation each one wraps.
+
+pub fn wrapping_add(a: int, b: int): int {
+    return a + b;
+}
+
+pub fn wrapping_sub(a: int, b: int): int {
+    return a - b;
+}
+
+pub fn wrapping_mul(a: int, b: int): int {
+    return a * b;
+}
+
 // ─── divide ───────────────────────────────────────────────────────────────────
 //
 // The raw `/` operator hard-panics (aborts the whole process) on division by

@@ -334,6 +334,11 @@ Value *MethodCallExprAST::codegen() {
       CastVals.push_back(V);
     }
 
+    // NM-3: `x.wrapping_add(y)` is its one instruction, as the bare call is.
+    if (ResolvedCallTarget->Lowering != LoweredFunction::None)
+      return EmitLoweredFunction(ResolvedCallTarget->Lowering, CastVals[0],
+                                 CastVals[1]);
+
     if (CalleeF->getReturnType()->isVoidTy())
       return Builder->CreateCall(CalleeF, CastVals);
     return Builder->CreateCall(CalleeF, CastVals, "ufcscalltmp");

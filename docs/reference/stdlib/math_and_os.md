@@ -2,7 +2,7 @@
 
 | Module | For | Import |
 |---|---|---|
-| `math` | constants, `abs`, `min`, `max`, `clamp`, `power`, the libm functions, `divide` | none (prelude) |
+| `math` | constants, `abs`, `min`, `max`, `clamp`, `power`, the libm functions, `wrapping_add`/`sub`/`mul`, `divide` | none (prelude) |
 | `os` | environment variables and command-line arguments | `import os;` |
 
 `math` is part of the [prelude](README.md#the-prelude): `abs(-3)`, `max(a, b)` and
@@ -132,6 +132,42 @@ fn main(): int {
 }
 ```
 
+### `wrapping_add`, `wrapping_sub`, `wrapping_mul`
+
+```text
+wrapping_add(a: int, b: int): int
+wrapping_sub(a: int, b: int): int
+wrapping_mul(a: int, b: int): int
+```
+
+`a + b`, `a - b` and `a * b` modulo 2^64, in two's complement. They never panic:
+a result that does not fit wraps around, so `wrapping_add(9223372036854775807, 1)`
+is `-9223372036854775808`. The operators `+`, `-` and `*` stay checked and panic
+with `Integer overflow`; these are for code where wrapping is the intended
+result, such as hashes, checksums and random-number generators.
+
+Each call compiles to a single machine add, subtract or multiply at every
+optimization level, `-O0` included, with no function call and no overflow check.
+
+```turflang
+fn fnv1a(bytes: int[]): int {
+    mut h: int = -3750763034362895579;
+    for b in bytes {
+        h = h ^ b;
+        h = math::wrapping_mul(h, 1099511628211);
+    }
+    return h;
+}
+
+fn main(): int {
+    immut a: int[1] = [97];
+    printline(fnv1a(a));                                        // -5808556873153909620
+    printline(math::wrapping_add(9223372036854775807, 1));      // -9223372036854775808
+    printline(math::wrapping_sub(-9223372036854775807 - 1, 1)); // 9223372036854775807
+    return 0;
+}
+```
+
 ### `error MathError` and `divide`
 
 ```text
@@ -171,7 +207,7 @@ fn main(): int {
 | `divide` | returns `MathError::DivisionByZero` |
 | `abs(int)`, `power(int, int)` | **panic** (`Integer overflow`) when the result does not fit |
 | the C math functions | return `nan` or `inf`; never fail |
-| `min`, `max`, `clamp`, `abs(double)`, the other `power` forms | never fail |
+| `min`, `max`, `clamp`, `abs(double)`, the other `power` forms, `wrapping_add`, `wrapping_sub`, `wrapping_mul` | never fail |
 
 ---
 

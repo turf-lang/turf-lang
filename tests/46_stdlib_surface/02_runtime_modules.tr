@@ -81,6 +81,7 @@ fn main(): int {
     test::assert(q == 2 && qd == 2.0, "math::divide (int / double)");
     test::assert(divide_error_is_division_by_zero(), "math::MathError");
     test::assert(math::PI > 3.14 && math::E > 2.71, "math::PI / E");
+    test::assert(math::wrapping_add(9223372036854775807, 1) < 0 && math::wrapping_sub(0, 1) == -1 && math::wrapping_mul(3, 4) == 12, "math::wrapping_add / wrapping_sub / wrapping_mul");
 
     // ── time ───────────────────────────────────────────────────────────────
     immut t0: int = time::clock_ticks();
