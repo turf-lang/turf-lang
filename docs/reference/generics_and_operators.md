@@ -192,7 +192,9 @@ generic, and type arguments on a method call (`l.push::<int>(1)`; a method of a
 generic struct takes them from its receiver) are each E148.
 
 **A generic struct takes its type arguments from the type it is stored into,
-or from `Name<Args>::` written where it is built.** `Box::default()` and
+or from `Name<Args>::` written where it is built.** The first way is retired in
+3.0 (roadmap B-17): from then on the type arguments are written where the value
+is built, and `turf migrate 3.0` writes them in. `Box::default()` and
 `Box::new(...)` read them from the declared type of the variable, parameter,
 field, return type or element they are assigned to:
 
