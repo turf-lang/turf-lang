@@ -183,7 +183,7 @@ std::unique_ptr<ExprAST> ParseStructDecl() {
     if (CurTok == ',') {
       getNextToken();
     } else if (CurTok != '}') {
-      LogErrorAt(CurLoc, ErrCode::MissingComma, "Expected ',' or '}' after field definition", SLM::ErrorCategory::DECLARATION);
+      LogErrorAt(CurLoc, ErrCode::MissingComma, "Expected ',' or '}' after field definition\n  Hint: Separate struct fields with ',' -- write `x: int, y: int` and put a ',' after the field on the line above this one.", SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
   }
@@ -770,7 +770,7 @@ std::unique_ptr<ExprAST> ParseExternDecl() {
   // extern functions must NOT have a body
   if (CurTok == '{') {
     LogErrorAt(ExternLoc, ErrCode::ExternFunctionBody,
-               "extern function declarations cannot have a body.", SLM::ErrorCategory::DECLARATION);
+               "extern function declarations cannot have a body.\n  Hint: End the declaration of '" + Name + "' with ';' and no body: `extern fn " + Name + "(...): T;`. To write the body in Turf, drop `extern`.", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
 
@@ -958,7 +958,7 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
   if (RejectReservedWordAsName())
     return nullptr;
   if (CurTok != TOK_IDENTIFIER) {
-    LogErrorAt(FnLoc, ErrCode::ExpectedName, "Expected a function name after 'fn'.", SLM::ErrorCategory::DECLARATION);
+    LogErrorAt(FnLoc, ErrCode::ExpectedName, "Expected a function name after 'fn'.\n  Hint: Name the function -- `fn name(...): T { ... }`.", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
   std::string FuncName = IdentifierStr;
@@ -1031,7 +1031,7 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
     if (CurTok != TOK_IDENTIFIER) {
       LogErrorAt(CurLoc, ErrCode::ExpectedName,
                  "Expected a parameter name in the parameter list of '" +
-                     FuncName + "'.", SLM::ErrorCategory::DECLARATION);
+                     FuncName + "'.\n  Hint: Give each parameter of '" + FuncName + "' a name and a type: `" + FuncName + "(a: int, b: int)`.", SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
     std::string ParamName = IdentifierStr;
@@ -1041,7 +1041,7 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
     if (CurTok != TOK_COLON) {
       LogErrorAt(CurLoc, ErrCode::MissingColon,
                  "Expected ':' after parameter name '" + ParamName + "' in '" +
-                     FuncName + "'.", SLM::ErrorCategory::DECLARATION);
+                     FuncName + "'.\n  Hint: Give each parameter of '" + FuncName + "' a name and a type: `" + FuncName + "(a: int, b: int)`.", SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
     getNextToken(); // consume ':'
@@ -1051,7 +1051,7 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
     if (!ParamType) {
       LogErrorAt(CurLoc, ErrCode::ExpectedType,
                  "Expected a parameter type after ':' in the parameter list of '" +
-                     FuncName + "'.", SLM::ErrorCategory::DECLARATION);
+                     FuncName + "'.\n  Hint: Give each parameter of '" + FuncName + "' a name and a type: `" + FuncName + "(a: int, b: int)`.", SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
 
@@ -1144,7 +1144,7 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
 
   // Expect TOK_COLON
   if (CurTok != TOK_COLON) {
-    LogErrorAt(CurLoc, ErrCode::MissingColon, "Expected ':' followed by return type after parameter list.", SLM::ErrorCategory::DECLARATION);
+    LogErrorAt(CurLoc, ErrCode::MissingColon, "Expected ':' followed by return type after parameter list.\n  Hint: Write the return type after a ':' -- `fn " + FuncName + "(...): int {` -- or `: void` if it returns nothing.", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
   getNextToken(); // eat ':'
@@ -1164,7 +1164,7 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
   // i: int): int ;` -- crashed the compiler instead of being diagnosed.
   if (CurTok == ';') {
     LogErrorAt(FnLoc, ErrCode::MissingOpeningDelimiter,
-               "'" + FuncName + "' has no body. A function needs a '{ ... }' body; to call a C function, declare it with 'extern fn'.",
+               "'" + FuncName + "' has no body. A function needs a '{ ... }' body; to call a C function, declare it with 'extern fn'.\n  Hint: Replace the ';' with a body: `fn " + FuncName + "(...): T { ... }`.",
                SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
@@ -1314,7 +1314,7 @@ std::unique_ptr<ExprAST> ParseOperatorDecl(bool HasCallerLocation) {
     if (CurTok != TOK_IDENTIFIER) {
       LogErrorAt(CurLoc, ErrCode::ExpectedName,
                  "Expected a parameter name in the parameter list of '" +
-                     FuncName + "'.", SLM::ErrorCategory::DECLARATION);
+                     FuncName + "'.\n  Hint: Give each parameter of '" + FuncName + "' a name and a type: `" + FuncName + "(a: int, b: int)`.", SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
     std::string ParamName = IdentifierStr;
@@ -1324,7 +1324,7 @@ std::unique_ptr<ExprAST> ParseOperatorDecl(bool HasCallerLocation) {
     if (CurTok != TOK_COLON) {
       LogErrorAt(CurLoc, ErrCode::MissingColon,
                  "Expected ':' after parameter name '" + ParamName + "' in '" +
-                     FuncName + "'.", SLM::ErrorCategory::DECLARATION);
+                     FuncName + "'.\n  Hint: Give each parameter of '" + FuncName + "' a name and a type: `" + FuncName + "(a: int, b: int)`.", SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
     getNextToken(); // consume ':'
@@ -1334,7 +1334,7 @@ std::unique_ptr<ExprAST> ParseOperatorDecl(bool HasCallerLocation) {
     if (!ParamType) {
       LogErrorAt(CurLoc, ErrCode::ExpectedType,
                  "Expected a parameter type after ':' in the parameter list of '" +
-                     FuncName + "'.", SLM::ErrorCategory::DECLARATION);
+                     FuncName + "'.\n  Hint: Give each parameter of '" + FuncName + "' a name and a type: `" + FuncName + "(a: int, b: int)`.", SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
 
@@ -1373,14 +1373,14 @@ std::unique_ptr<ExprAST> ParseOperatorDecl(bool HasCallerLocation) {
   if (IsIndexGet) {
     if (Params.size() != 2) {
       LogErrorAt(OpLoc, ErrCode::InvalidOperatorDeclaration, "'operator[]' must take exactly 2 parameters "
-                        "(self, index), got " + std::to_string(Params.size()) + ".",
+                        "(self, index), got " + std::to_string(Params.size()) + ".\n  Hint: Declare it as `operator[](self: T, index: int): V { ... }`.",
                 SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
   } else if (IsIndexSet) {
     if (Params.size() != 3) {
       LogErrorAt(OpLoc, ErrCode::InvalidOperatorDeclaration, "'operator[]=' must take exactly 3 parameters "
-                        "(self, index, value), got " + std::to_string(Params.size()) + ".",
+                        "(self, index, value), got " + std::to_string(Params.size()) + ".\n  Hint: Declare it as `operator[]=(self: T, index: int, value: V): void { ... }`.",
                 SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
@@ -1393,7 +1393,7 @@ std::unique_ptr<ExprAST> ParseOperatorDecl(bool HasCallerLocation) {
         LogErrorAt(OpLoc, ErrCode::InvalidOperatorDeclaration,
                    "'operator " + OpSpelling +
                        "' has no unary form -- it must take exactly 2 "
-                       "parameters (a binary overload).", SLM::ErrorCategory::DECLARATION);
+                       "parameters (a binary overload).\n  Hint: Take two parameters: `operator " + OpSpelling + "(a: T, b: T): T { ... }`.", SLM::ErrorCategory::DECLARATION);
         return nullptr;
       }
     } else if (Params.size() == 2) {
@@ -1401,21 +1401,21 @@ std::unique_ptr<ExprAST> ParseOperatorDecl(bool HasCallerLocation) {
         LogErrorAt(OpLoc, ErrCode::InvalidOperatorDeclaration,
                    "'operator " + OpSpelling +
                        "' has no binary form -- it must take exactly 1 "
-                       "parameter (a unary overload).", SLM::ErrorCategory::DECLARATION);
+                       "parameter (a unary overload).\n  Hint: Drop the second parameter: `operator " + OpSpelling + "(a: T): T { ... }`.", SLM::ErrorCategory::DECLARATION);
         return nullptr;
       }
     } else {
       std::string Arities = CanUnary && CanBinary ? "1 or 2" : (CanUnary ? "1" : "2");
       LogErrorAt(OpLoc, ErrCode::InvalidOperatorDeclaration,
                  "'operator " + OpSpelling + "' must take " + Arities +
-                     " parameter(s), got " + std::to_string(Params.size()) + ".", SLM::ErrorCategory::DECLARATION);
+                     " parameter(s), got " + std::to_string(Params.size()) + ".\n  Hint: Give 'operator " + OpSpelling + "' " + (CanUnary && CanBinary ? std::string("one parameter (unary) or two (binary)") : CanUnary ? std::string("exactly one parameter") : std::string("exactly two parameters")) + ".", SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
   }
 
   // Expect ':' then return type -- identical shape to ParseFuncDef()'s.
   if (CurTok != TOK_COLON) {
-    LogErrorAt(CurLoc, ErrCode::MissingColon, "Expected ':' followed by return type after parameter list.", SLM::ErrorCategory::DECLARATION);
+    LogErrorAt(CurLoc, ErrCode::MissingColon, "Expected ':' followed by return type after parameter list.\n  Hint: Write the return type after a ':' -- `fn " + FuncName + "(...): int {` -- or `: void` if it returns nothing.", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
   getNextToken(); // eat ':'
@@ -1429,7 +1429,7 @@ std::unique_ptr<ExprAST> ParseOperatorDecl(bool HasCallerLocation) {
   // Same null-Body hazard as ParseFunction's `;` case: no consumer accepts it.
   if (CurTok == ';') {
     LogErrorAt(OpLoc, ErrCode::MissingOpeningDelimiter,
-               "'operator " + FuncName.substr(8) + "' has no body. An operator needs a '{ ... }' body.",
+               "'operator " + FuncName.substr(8) + "' has no body. An operator needs a '{ ... }' body.\n  Hint: Replace the ';' with a body: `operator " + FuncName.substr(8) + "(...): T { ... }`.",
                SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
@@ -1517,7 +1517,7 @@ std::unique_ptr<ExprAST> ParseAnnotatedDecl() {
           } else {
             LogErrorAt(CurLoc, ErrCode::UnexpectedToken,
                        "Expected a word or a string in the arguments of '@" +
-                           Ann.Name + "'.",
+                           Ann.Name + "'.\n  Hint: Write the argument as a word or a string: `@" + Ann.Name + "(word)` or `@" + Ann.Name + "(\"text\")`.",
                        SLM::ErrorCategory::SYNTAX_ERROR);
             return false;
           }

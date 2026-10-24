@@ -673,9 +673,15 @@ std::shared_ptr<ResolverFunctionSymbol> finishInstantiation(
     const size_t Anchor = anchorIndex(Chain);
 
     std::string FullMsg = "In this instantiation: " + InnerMsg;
-    if (!InnerHint.empty())
-      FullMsg += " (" + InnerHint + ")";
-    SemanticError Err(Chain[Anchor]->Request.Site, FullMsg);
+    // The inner error's own hint becomes this one's; without one, say what to
+    // change at the instantiation (DX-3, issue #291).
+    SemanticError Err(
+        Chain[Anchor]->Request.Site, FullMsg,
+        !InnerHint.empty()
+            ? InnerHint
+            : "Call '" + describeRequest(Entry.Request) +
+                  "' with types its body works for, or change the body of '" +
+                  Entry.Request.DeclKey + "' so it accepts these types.");
     // The mistake is the inner error's (`<` on a struct is E124), not a
     // generic E011; `--explain` should name that one.
     if (InnerCode) {

@@ -2254,7 +2254,7 @@ static int runCompilerMain(int argc, char **argv) {
           LogErrorAt(StmtLoc, ErrCode::StatementOutsideFunction,
                      "Statements are not allowed outside of a function. "
                      "Please define 'fn main(): int' and move this code "
-                     "inside.",
+                     "inside.\n  Hint: Wrap it: `fn main(): int { <this statement> return 0; }`.",
                      SLM::ErrorCategory::SYNTAX_ERROR);
           DiagnosticEngine::flushAll();
           // _Exit (not exit): this raw exit point bypasses the rest of the

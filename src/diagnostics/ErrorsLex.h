@@ -33,15 +33,42 @@ public:
   // `Hint` replaces the default "check your punctuation" advice, which is
   // only right for a missing or misplaced token; a code that is not about
   // punctuation (a duplicate name, an invalid array size) must say its own.
+  // The advice for a code that sites raise without a hint of their own
+  // (DX-3, issue #291): each says what to write, so the punctuation line
+  // below stays only for a code with nothing more specific to say.
+  static std::string defaultHintFor(const char *Code) {
+    const std::string C = Code;
+    if (C == ErrCode::ExpectedType)
+      return "Write a type there: `int`, `double`, `string`, `bool`, `char`, a "
+             "struct or enum name, or a composite such as `int[5]` or `&int`.";
+    if (C == ErrCode::UnclosedDelimiter)
+      return "Add the matching closing bracket: every `(` needs a `)`, every "
+             "`[` a `]` and every `{` a `}`.";
+    if (C == ErrCode::MissingOpeningDelimiter)
+      return "Open it with the bracket the message names, e.g. `fn(int): int` "
+             "for a function type.";
+    if (C == ErrCode::MissingColon)
+      return "Put a `:` before the type, e.g. `x: int` or `fn(int): int`.";
+    if (C == ErrCode::MissingComma)
+      return "Put a `,` between the items, e.g. `Map<string, int>`, and close "
+             "the list with its bracket.";
+    if (C == ErrCode::MissingSemicolon)
+      return "End the statement with `;` right after its last token, e.g. "
+             "`unsafe module;`.";
+    if (C == ErrCode::DuplicateDeclaration)
+      return "Rename one of the two declarations, or delete the duplicate.";
+    if (C == ErrCode::VoidTypeNotAllowed)
+      return "Use `void` only as a return type, `fn f(): void`; for a variable "
+             "or parameter write a real type such as `int`.";
+    return "Check your spelling, punctuation like ';' or '}', and make sure "
+           "everything is closed properly.";
+  }
   SyntaxError(SourceLocation Loc, const char *Code, const std::string &Msg,
               const std::string &Hint = "")
       : TurfError(Loc, Colors::BRIGHT_RED +
                            "Oops! There's a tiny mistake here:\n" +
                            Colors::RESET + "  " + Msg,
-                  Hint.empty()
-                      ? "Check your spelling, punctuation like ';' or "
-                        "'}', and make sure everything is closed properly."
-                      : Hint) {
+                  Hint.empty() ? defaultHintFor(Code) : Hint) {
     Category_ = SLM::ErrorCategory::SYNTAX_ERROR;
     withCode(Code);
   }
