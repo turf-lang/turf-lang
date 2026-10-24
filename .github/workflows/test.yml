@@ -198,6 +198,44 @@ jobs:
       # stamps into the binary.
       - name: turf front end comes from turf-cli
         run: CI=1 ./scripts/smoke/cli_source_smoke.sh
+      # IF-5 (#293): the compiler-side half of "consumer fixtures live in the
+      # producer's CI". The three consumers at their default branch (not the
+      # pin above, which is what this commit ships): a compiler change that
+      # breaks the fixture tests of turf, turf-lsp (built against THIS tree's
+      # sources and query facade) or turf-fuzz (its pinned-verdict oracle)
+      # fails here. The consumers' own CI tests them against the latest
+      # release and a nightly compiler.
+      - name: Consumer checkout (turf-cli, default branch)
+        uses: actions/checkout@v4
+        with:
+          repository: turf-lang/turf-cli
+          path: consumers/turf-cli
+      - name: Consumer checkout (turf-lsp, default branch)
+        uses: actions/checkout@v4
+        with:
+          repository: turf-lang/turf-lsp
+          path: consumers/turf-lsp
+      - name: Consumer checkout (turf-fuzz, default branch)
+        uses: actions/checkout@v4
+        with:
+          repository: turf-lang/turf-fuzz
+          path: consumers/turf-fuzz
+      - name: Consumer fixtures (turf, turf-lsp, turf-fuzz)
+        env:
+          TURF_CLI_DIR: ${{ github.workspace }}/consumers/turf-cli
+          TURF_LSP_DIR: ${{ github.workspace }}/consumers/turf-lsp
+          TURF_FUZZ_DIR: ${{ github.workspace }}/consumers/turf-fuzz
+          CONSUMER_LOGS: ${{ github.workspace }}/consumer-logs
+        run: |
+          export CC="ccache gcc"
+          export CXX="ccache g++"
+          CI=1 ./scripts/check/consumer_fixtures.sh
+      - name: Upload consumer fixture logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: consumer-fixture-logs
+          path: consumer-logs/
       # LEC-001 stage 5: `turf` reads projects -- turf.toml, path dependencies,
       # the package graph handed to `turfc --package-graph`. Covers new/init/
       # add/remove/build/run/check/clean against the real compiler, the
