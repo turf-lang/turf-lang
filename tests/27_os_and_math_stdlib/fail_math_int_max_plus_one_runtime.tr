@@ -1,0 +1,12 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: Integer overflow
+// math::INT_MAX is the largest int, so `+ 1` on it is checked like any other.
+
+fn bump(n: int): int {
+    return n + 1;
+}
+
+fn main(): int {
+    io::printline(bump(math::INT_MAX));
+    return 0;
+}

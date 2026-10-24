@@ -1,0 +1,31 @@
+// math's numeric limits and its constants beyond PI and E: each value is the
+// one its name says, and each limit is the edge of its type.
+import test;
+
+fn main(): int {
+    test::assert(math::INT_MAX == 9223372036854775807, "INT_MAX");
+    test::assert(math::INT_MIN == -9223372036854775807 - 1, "INT_MIN");
+    test::assert(math::wrapping_add(math::INT_MAX, 1) == math::INT_MIN, "INT_MAX + 1 wraps to INT_MIN");
+
+    mut hi: int32 = math::INT32_MAX;
+    mut lo: int32 = math::INT32_MIN;
+    test::assert(hi to int == 2147483647, "INT32_MAX");
+    test::assert(lo to int == -2147483648, "INT32_MIN");
+
+    test::assert(math::DOUBLE_MAX == 1.7976931348623157e308, "DOUBLE_MAX");
+    test::assert(math::DOUBLE_MIN == 0.0 - math::DOUBLE_MAX, "DOUBLE_MIN is the most negative double");
+    test::assert(math::DOUBLE_MIN_POSITIVE > 0.0 && math::DOUBLE_MIN_POSITIVE < 2.3e-308,
+                 "DOUBLE_MIN_POSITIVE is the smallest normal double");
+    test::assert(1.0 + math::DOUBLE_EPSILON > 1.0, "1 + DOUBLE_EPSILON is above 1");
+    test::assert(1.0 + math::DOUBLE_EPSILON / 2.0 == 1.0, "1 + DOUBLE_EPSILON / 2 rounds to 1");
+
+    test::assert(math::TAU == 2.0 * math::PI, "TAU");
+    test::assert(math::abs(math::PHI * math::PHI - math::PHI - 1.0) < 1e-15, "PHI");
+    test::assert(math::abs(math::SQRT2 * math::SQRT2 - 2.0) < 1e-15, "SQRT2");
+    test::assert(math::abs(math::SQRT1_2 * math::SQRT2 - 1.0) < 1e-15, "SQRT1_2");
+    test::assert(math::abs(math::exp(math::LN2) - 2.0) < 1e-15, "LN2");
+    test::assert(math::abs(math::exp(math::LN10) - 10.0) < 1e-14, "LN10");
+    test::assert(math::abs(math::LOG2E * math::LN2 - 1.0) < 1e-15, "LOG2E");
+    test::assert(math::abs(math::LOG10E * math::LN10 - 1.0) < 1e-15, "LOG10E");
+    return 0;
+}

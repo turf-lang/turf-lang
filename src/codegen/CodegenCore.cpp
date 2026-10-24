@@ -2606,7 +2606,10 @@ Value *CodegenConstantValue(const ResolverConstantSymbol &C) {
   APInt Value(Bits, Magnitude, 10);
   if (Negative)
     Value = -Value;
-  return ConstantInt::get(*TheContext, Value.sextOrTrunc(64));
+  // An `int32` constant is an i32, as an `int32` variable is; the type
+  // checker has already checked that its value fits.
+  const unsigned Width = C.Type && C.Type->isInt32() ? 32 : 64;
+  return ConstantInt::get(*TheContext, Value.sextOrTrunc(Width));
 }
 
 

@@ -748,7 +748,10 @@ An `export` constant is always public (it is its own `pub`, so `pub export` is
 `E087`); other modules reach it as `m::LIMIT` or by name after an import. It is
 `immut` only (`export mut` is an error), appears only at the top level, and
 its value must be a literal the compiler can fold: every use is replaced by the
-value, and there is no storage behind it.
+value, and there is no storage behind it. A number may start with one `-`
+(`export immut FLOOR: int = -40;`), and an integer literal is accepted for a
+`double` constant (`export immut ONE: double = 1;` is `1.0`); anything more is
+`E022`.
 
 ### Circular imports
 

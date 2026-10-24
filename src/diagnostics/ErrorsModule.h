@@ -72,8 +72,8 @@ public:
                            Colors::BRIGHT_RED +
                            "' needs a literal value I can compute right now.",
                   "Exported constants must be initialised with a plain "
-                  "literal (a number, string, or bool), like "
-                  "'export immut " + Name + ": int = 42;' -- not an "
+                  "literal (a number, which may start with '-', a string, or a bool), "
+                  "like 'export immut " + Name + ": int = 42;' -- not an "
                   "expression or a call to another function.") {
     Category_ = SLM::ErrorCategory::DECLARATION;
   }

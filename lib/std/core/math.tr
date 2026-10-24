@@ -15,9 +15,35 @@
 //   mut q: int    = math::divide(10, 0) recover produce -1;
 
 // ─── constants ─────────────────────────────────────────────────────────────
+//
+// Always qualified (`math::PI`, `math::INT_MAX`): a constant is never a bare
+// name, so none of these can collide with a program's own.
 
 export immut PI: double = 3.14159265358979323846;
+export immut TAU: double = 6.28318530717958647692;
 export immut E: double = 2.71828182845904523536;
+export immut PHI: double = 1.61803398874989484820;
+export immut SQRT2: double = 1.41421356237309504880;
+export immut SQRT1_2: double = 0.70710678118654752440;
+export immut LN2: double = 0.69314718055994530942;
+export immut LN10: double = 2.30258509299404568402;
+export immut LOG2E: double = 1.44269504088896340736;
+export immut LOG10E: double = 0.43429448190325182765;
+
+// ─── limits ──────────────────────────────────────────────────────────────────
+//
+// The range of each numeric type. `MIN` is the most negative value of the
+// type for `double` as for the integers; the smallest positive normal
+// `double` (C's DBL_MIN) is `DOUBLE_MIN_POSITIVE`.
+
+export immut INT_MAX: int = 9223372036854775807;
+export immut INT_MIN: int = -9223372036854775808;
+export immut INT32_MAX: int32 = 2147483647;
+export immut INT32_MIN: int32 = -2147483648;
+export immut DOUBLE_MAX: double = 1.7976931348623157e308;
+export immut DOUBLE_MIN: double = -1.7976931348623157e308;
+export immut DOUBLE_MIN_POSITIVE: double = 2.2250738585072014e-308;
+export immut DOUBLE_EPSILON: double = 2.220446049250313e-16;
 
 // ─── libm bindings ────────────────────────────────────────────────────────────
 

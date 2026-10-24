@@ -2,7 +2,7 @@
 
 | Module | For | Import |
 |---|---|---|
-| `math` | constants, `abs`, `min`, `max`, `clamp`, `power`, the libm functions, the `wrapping_*` family, `divide` | none (prelude) |
+| `math` | constants and numeric limits, `abs`, `min`, `max`, `clamp`, `power`, the libm functions, the `wrapping_*` family, `divide` | none (prelude) |
 | `os` | environment variables and command-line arguments | `import os;` |
 
 `math` is part of the [prelude](README.md#the-prelude): `abs(-3)`, `max(a, b)` and
@@ -17,8 +17,37 @@ constants stay qualified (`math::PI`). `os` needs `import os;`.
 
 | Constant | Value |
 |---|---|
-| `PI: double` | `3.14159265358979323846` |
-| `E: double` | `2.71828182845904523536` |
+| `PI: double` | π, `3.14159265358979323846` |
+| `TAU: double` | 2π, `6.28318530717958647692` |
+| `E: double` | e, `2.71828182845904523536` |
+| `PHI: double` | the golden ratio, `1.61803398874989484820` |
+| `SQRT2: double` | √2, `1.41421356237309504880` |
+| `SQRT1_2: double` | 1/√2, `0.70710678118654752440` |
+| `LN2: double` | ln 2, `0.69314718055994530942` |
+| `LN10: double` | ln 10, `2.30258509299404568402` |
+| `LOG2E: double` | log₂ e, `1.44269504088896340736` |
+| `LOG10E: double` | log₁₀ e, `0.43429448190325182765` |
+
+### Limits
+
+The range of each numeric type. `MIN` is the most negative value for `double`
+as for the integers. The smallest positive normal `double` (C's `DBL_MIN`) is
+`DOUBLE_MIN_POSITIVE`.
+
+| Constant | Value |
+|---|---|
+| `INT_MAX: int` | `9223372036854775807` (2^63 − 1) |
+| `INT_MIN: int` | `-9223372036854775808` (−2^63) |
+| `INT32_MAX: int32` | `2147483647` (2^31 − 1) |
+| `INT32_MIN: int32` | `-2147483648` (−2^31) |
+| `DOUBLE_MAX: double` | `1.7976931348623157e308`, the largest finite `double` |
+| `DOUBLE_MIN: double` | `-1.7976931348623157e308`, the most negative finite `double` |
+| `DOUBLE_MIN_POSITIVE: double` | `2.2250738585072014e-308`, the smallest positive normal `double` |
+| `DOUBLE_EPSILON: double` | `2.220446049250313e-16`, the gap between `1.0` and the next `double` |
+
+Arithmetic past a limit is checked as always: `math::INT_MAX + 1` panics with
+"Integer overflow", and `math::wrapping_add(math::INT_MAX, 1)` is
+`math::INT_MIN`.
 
 ### Functions from the C math library
 
