@@ -1,0 +1,22 @@
+// LG-1 reads `<` after a name as a type-argument list only when the list
+// closes with `>` immediately followed by `::`. Everything else is still a
+// comparison, including the shapes that look most like type arguments.
+
+import test;
+
+fn both(a: bool, b: bool): bool {
+    return a && b;
+}
+
+fn main(): int {
+    immut a: int = 1;
+    immut b: int = 2;
+    immut c: int = 3;
+    immut d: int = 2;
+    test::assert(a < b, "a < b");
+    test::assert(both(a < b, c > d), "f(a < b, c > d)");
+    test::assert((a < b) == (c > d), "(a < b) == (c > d)");
+    test::assert(a < b && b < c, "a < b && b < c");
+    test::assert(!(a < b == false), "a < b == false");
+    return 0;
+}

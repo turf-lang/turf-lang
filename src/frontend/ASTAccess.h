@@ -232,11 +232,23 @@ public:
     const std::string& getVariant()  const { return RightName; }
     llvm::Value* codegen() override;
     void accept(ASTVisitor& V) override { V.visitScopeAccess(*this); }
+    /// LG-1: `Name<Args>::member` -- the left side written with its type
+    /// arguments, as the GenericType a type position would parse
+    /// (`List<int>` in `List<int>::default()`). Null for every other
+    /// `Left::Right`. The Resolver validates it like a declared type.
+    TurfTypePtr LeftType;
+
+    /// LG-2: `module::f::<T>` -- type arguments written for the generic
+    /// function this names. Empty for every other `Left::Right`.
+    std::vector<TurfTypePtr> TypeArgs;
+
     std::unique_ptr<ExprAST> clone() const override {
         auto Cloned = std::make_unique<ScopeAccessExprAST>(Loc, LeftName, LeftLoc,
                                                             RightName, RightLoc,
                                                             ModuleQualifier);
         Cloned->LeftIsTypeIdentity = LeftIsTypeIdentity;
+        Cloned->LeftType = LeftType;
+        Cloned->TypeArgs = TypeArgs;
         return Cloned;
     }
 };
@@ -460,11 +472,17 @@ public:
   /// clone-semantics contract as ResolvedCallTarget.
   std::unordered_map<std::string, TurfTypePtr> GenericSubstitution;
 
+  /// LG-2: `obj.method::<T>(...)` -- type arguments written for a generic
+  /// function called through UFCS. Empty for every other method call.
+  std::vector<TurfTypePtr> TypeArgs;
+
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitMethodCall(*this); }
   std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<MethodCallExprAST>(Loc, CloneExprAST(Base.get()),
-                                               Method, NameLoc, CloneExprList(Args));
+    auto Cloned = std::make_unique<MethodCallExprAST>(
+        Loc, CloneExprAST(Base.get()), Method, NameLoc, CloneExprList(Args));
+    Cloned->TypeArgs = TypeArgs;
+    return Cloned;
     // Note: ResolvedCallTarget, ResolvedViaUFCS, UFCSLoadsReceiver, IsMachineTransition,
     // TransitionCompileTimeProven, and GenericSubstitution intentionally
     // NOT copied — cloned ASTs are stale until re-resolved. ✓

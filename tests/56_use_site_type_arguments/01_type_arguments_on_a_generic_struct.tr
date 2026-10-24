@@ -1,0 +1,61 @@
+// LG-1: `Name<Args>::default()` and `Name<Args>::new(...)` write a generic
+// struct's type arguments where it is built, in their type-position
+// spelling. The result is the same instantiation the annotated declaration
+// `mut l: List<int> = List::default();` builds, so `guess` reads it.
+
+import list;
+import list::List;
+import map::Map;
+import test;
+
+struct Box<T> {
+    val: T
+}
+
+fn<T> Box.new(v: T): void {
+    self.val = v;
+}
+
+struct Pair<A, B> {
+    a: A,
+    b: B
+}
+
+// Inside a generic body the written arguments mention its own `T`.
+fn<T> singleton(x: T): List<T> {
+    mut l = List<T>::default();
+    l.push(x);
+    return l;
+}
+
+fn main(): int {
+    mut l = List<int>::default();
+    l.push(3);
+    test::assert(l.length() == 1 && l[0] == 3, "List<int>::default()");
+    mut annotated: List<int> = List::default();
+    test::assert(typeof(l) == typeof(annotated), "guess reads the written type");
+
+    mut b = Box<int>::new(42);
+    mut s = Box<string>::new("s");
+    test::assert(b.val == 42 && s.val == "s", "Box<T>::new(...)");
+
+    mut d = Box<double>::new(1);
+    test::assert(d.val == 1.0, "an argument widens to the written type");
+
+    mut p = Pair<string, double>::default();
+    p.a = "x";
+    test::assert(p.a == "x" && p.b == 0.0, "two type arguments");
+
+    mut m = Map<string, List<int>>::default();
+    m.put("k", List<int>::default());
+    m["k"].push(7);
+    test::assert(m["k"][0] == 7, "nested, with '>>' closing both lists");
+
+    mut q = list::List<int>::default();
+    q.push(1);
+    test::assert(q.length() == 1, "module-qualified");
+
+    test::assert(singleton(5)[0] == 5 && singleton("a")[0] == "a", "List<T> in a generic body");
+    test::assert(List<int>::default().length() == 0, "as an operand");
+    return 0;
+}

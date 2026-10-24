@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E148
+// EXPECT-DIAG: 'plain' is not generic, so it takes no type arguments
+
+fn plain(x: int): int {
+    return x;
+}
+
+fn main(): int {
+    immut a: int = plain::<int>(3);
+    return 0;
+}

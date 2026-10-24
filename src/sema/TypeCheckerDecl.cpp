@@ -269,6 +269,74 @@ void recordGenericFieldInstantiations(const TurfTypePtr &Ty, SourceLocation Loc,
   }
 }
 
+// LG-7: `mut b = Box::new(42);` builds a generic struct with nothing to name
+// its type arguments. When the constructor's arguments bind every one of
+// them, that is the only candidate, and the fix writes it where the value is
+// built (`Box<int>::new(42)`, LG-1); otherwise the hint shows both places a
+// type argument can go.
+void TypeChecker::reportNothingToInferGeneric(const VarDeclExprAST &Node) {
+  const auto *FC = dynamic_cast<const FuncCallExprAST *>(Node.getInitializer());
+  const auto *SC = FC ? dynamic_cast<const ScopeAccessExprAST *>(FC->getCallee()) : nullptr;
+  const std::string Struct =
+      SC ? TypeIdentity::bareName(SC->getLeftName()) : std::string("List");
+  const std::string Member =
+      SC && SC->ResolvedKind == ScopeAccessKind::ConstructorCall ? "new(...)" : "default()";
+
+  // The candidate: the constructor's parameters unified with its arguments.
+  std::string Written;
+  if (SC && SC->ResolvedKind == ScopeAccessKind::ConstructorCall && !SC->LeftType) {
+    const ResolverFunctionSymbol *Target = FC->getResolvedCallTarget();
+    if (Target && !Target->TypeParams.empty() &&
+        Target->Params.size() == FC->getArgs().size()) {
+      TypeWalk::SubstMap Subst;
+      for (size_t I = 0; I < Target->Params.size(); ++I)
+        if (TurfTypePtr ArgTy = getType(FC->getArgs()[I].get()))
+          TypeWalk::unify(Target->Params[I].Type, ArgTy, Subst);
+      for (const auto &TP : Target->TypeParams) {
+        auto It = Subst.find(TP);
+        if (It == Subst.end() || !It->second || !isFullyConcreteType(It->second.get()) ||
+            It->second->isNull()) {
+          Written.clear();
+          break;
+        }
+        Written += (Written.empty() ? "<" : ", ") + It->second->getName();
+      }
+      if (!Written.empty())
+        Written += ">";
+    }
+  }
+
+  SLM::DiagnosticHints Hints;
+  std::string Hint;
+  if (!Written.empty()) {
+    const std::string *Line = FixItSourceLine(SC->getLeftLoc());
+    const SourceLocation &At = SC->getLeftLoc();
+    if (Line && At.Col >= 1 &&
+        Line->compare(At.Col - 1, Struct.size(), Struct) == 0) {
+      const int Col = At.Col + static_cast<int>(Struct.size());
+      Hints.FixIts.push_back({At.Line, Col, Col, Written});
+      Hints.FixReason = "The arguments of '" + Struct + "::new' make every type "
+                        "argument of '" + Struct + "' " + Written + ", and "
+                        "nothing else says so; written where the value is "
+                        "built, they give 'guess' a type.";
+    }
+    Hint = "Write the type arguments where it is built, '" + Struct + Written +
+           "::new(...)', or on the variable, 'mut " + Node.getName() + ": " +
+           Struct + Written + " = ...;'.";
+  } else {
+    const std::string Example = SC && SC->ResolvedKind != ScopeAccessKind::Unresolved
+                                    ? Struct + "<int>"
+                                    : std::string("List<int>");
+    Hint = "'guess' has nothing to infer the type argument from here. Write it "
+           "where the value is built, e.g. '" + Example + "::" + Member +
+           "', or on the variable, e.g. 'mut " + Node.getName() + ": " +
+           Example + " = ...;'.";
+  }
+  reportError(Node.getLoc(), ErrCode::NothingToInfer,
+              "Cannot infer the type arguments of a generic type.", {}, Hint,
+              "Nothing to infer!", Hints);
+}
+
 void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
   if (Node.isImmutable() && !Node.hasExplicitInit()) {
     reportError(Node.getLoc(), ErrCode::MissingInitializer,
@@ -382,13 +450,7 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
       return;
     }
     if (containsUninstantiatedGenericParam(InitTy.get())) {
-      reportError(Node.getLoc(), ErrCode::NothingToInfer,
-                  "Cannot infer the type arguments of a generic type.",
-                  {},
-                  "'guess' has nothing to infer the type argument from here "
-                  "-- annotate it explicitly instead, e.g. 'mut " +
-                      Node.getName() + ": List<int> = ...;'.",
-                  "Nothing to infer!");
+      reportNothingToInferGeneric(Node);
       setType(&Node, nullptr);
       return;
     }

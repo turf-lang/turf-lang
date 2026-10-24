@@ -434,8 +434,14 @@ public:
   /// The size parameter's value in an instantiation (set by the
   /// monomorphizer): the read is the constant `int` SizeValue.
   std::optional<int> SizeValue;
+  /// LG-2: `name::<T>` -- type arguments written for the generic function
+  /// this names, called (`identity::<int>(3)`) or used as a value
+  /// (`immut g = identity::<int>;`). Empty for every other name.
+  std::vector<TurfTypePtr> TypeArgs;
+
   std::unique_ptr<ExprAST> clone() const override {
     auto Cloned = std::make_unique<VariableExprAST>(Loc, Name);
+    Cloned->TypeArgs = TypeArgs;
     Cloned->IsSizeParamRef = IsSizeParamRef;
     Cloned->SizeValue = SizeValue;
     return Cloned;

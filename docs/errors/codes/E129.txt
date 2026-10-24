@@ -6,16 +6,19 @@ There is nothing to work the type out from
     mut b: guess = print_it();        // print_it() returns void: no value, no type
     mut c: guess = List::default();   // which kind of List?
 
-Say the type yourself, the same way you would without `guess`:
+Say the type yourself, the same way you would without `guess`, or, for a generic struct, where the value is built:
 
     mut a: &?Point = null;
     mut c: List<int> = List::default();
+    mut d = List<int>::default();     // the same List<int>
+
+When a constructor's arguments decide the type arguments (`mut b = Box::new(42);`, a `Box<int>`), the compiler prints that one as a fix: `Box<int>::new(42)`.
 
 For the `void` case, the real problem is usually that the function was supposed to return something. Call it as a statement on its own if you only want what it does:
 
     print_it();
 
-The same error is reported at a generic function whose type parameter no parameter mentions. Type arguments are worked out from the arguments of each call, and there is no way to write them yourself, so `T` here could never be decided:
+The same error is reported at a generic function whose type parameter no parameter mentions. Every type parameter has to appear in a parameter, so a call can always work it out from its arguments; `T` here appears in none:
 
     fn<T> make(): T { ... }           // which T would `make()` be?
 

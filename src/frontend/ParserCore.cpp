@@ -62,6 +62,8 @@ int getNextToken() {
     g_curlyDepth++;
   else if (CurTok == '}' && g_curlyDepth > 0)
     g_curlyDepth--;
+  if (takeLookaheadToken(CurTok))
+    return CurTok;
   return CurTok = gettok();
 }
 
@@ -275,6 +277,107 @@ static TurfTypePtr WrapArrayDim(TurfTypePtr Base, const std::pair<int, std::stri
 }
 
 static TurfTypePtr ParseTrailingArrayDims(TurfTypePtr Base);
+
+// LG-1: if the '<' at CurTok opens a list of type-shaped tokens that closes
+// with its '>', the kind of the token after that '>' (0 otherwise), and in
+// `SawTypeKeyword` whether the list names a built-in type (`int`, `string`,
+// ...), which no operand can be. Only tokens that can appear in a type are
+// read, at most a few dozen, and none is consumed (peekToken()).
+static int TypeArgListFollower(bool *SawTypeKeyword = nullptr) {
+  constexpr size_t MaxTokens = 64;
+  int Depth = 1;
+  bool Keyword = false;
+  for (size_t I = 0; I < MaxTokens; ++I) {
+    // An array size (`int[3]`) is the one place a number appears in a type.
+    if (peekToken(I) == TOK_INT_LITERAL && (I == 0 || peekToken(I - 1) != '['))
+      return 0;
+    switch (peekToken(I)) {
+    case '<': ++Depth; break;
+    case '>': --Depth; break;
+    case TOK_RSHIFT: Depth -= 2; break;
+    case TOK_TYPE_INT: case TOK_TYPE_INT32: case TOK_TYPE_DOUBLE:
+    case TOK_TYPE_BOOL: case TOK_TYPE_CHAR: case TOK_TYPE_STRING:
+    case TOK_TYPE_VOID: case TOK_PTR:
+      Keyword = true;
+      break;
+    case TOK_IDENTIFIER: case TOK_SCOPE: case ',': case '[': case ']':
+    case TOK_INT_LITERAL: case '*': case '&': case '?': case '!': case TOK_FN:
+    case '(': case ')': case TOK_COLON:
+      break;
+    default:
+      return 0;
+    }
+    if (Depth == 0) {
+      if (SawTypeKeyword)
+        *SawTypeKeyword = Keyword;
+      return peekToken(I + 1);
+    }
+    if (Depth < 0)
+      return 0;
+  }
+  return 0;
+}
+
+// LG-1: does the '<' at CurTok open a type-argument list that closes with
+// '>' immediately followed by '::' (`List<int>::default()`)? Anything else
+// means the '<' is less-than. Committing is safe because `a < b > ::c` is a
+// syntax error with '<' as less-than: '::' cannot begin an operand, so only
+// programs rejected before change meaning.
+static bool TypeArgsThenScopeAhead() {
+  return TypeArgListFollower() == TOK_SCOPE;
+}
+
+// A type-argument list, `<T1, T2, ...>`, CurTok at its '<'. Shared by a
+// generic type (`List<int>`) and the expression-position spellings
+// `List<int>::default()` (LG-1) and `identity::<int>` (LG-2), so all three
+// read type arguments the same way. False after reporting an error.
+bool ParseTypeArgList(std::vector<TurfTypePtr> &TypeArgs) {
+  getNextToken(); // consume '<'
+  while (true) {
+    TurfTypePtr Arg = ParseType();
+    if (!Arg)
+      return false;
+    TypeArgs.push_back(std::move(Arg));
+    if (CurTok == '>') {
+      getNextToken(); // consume '>'
+      break;
+    }
+    // The lexer's maximal munch (INV-LEX-1 -- never special-
+    // cased there) fuses adjacent '>'-family characters into one token
+    // whenever a nested generic argument list closes with no space
+    // (`List<List<int>>` -> TOK_RSHIFT) or the close is immediately
+    // followed by '=' (`List<T>=`/`Map<K, List<V>>=` -> TOK_GEQ/
+    // TOK_RSHIFT_ASSIGN). The PARSER splits one '>' off such a token
+    // here by replacing CurTok with whatever is left over -- crucially,
+    // WITHOUT calling getNextToken(), which would ask the lexer for a
+    // brand new token and silently skip the leftover instead of handing
+    // it to whichever level of nesting (or the ordinary '=' this type
+    // annotation is followed by) actually owns it next. `break`ing with
+    // the replaced CurTok, rather than looping again, mirrors the real
+    // '>' branch just above: this level's own list is closed either way,
+    // real or split.
+    if (CurTok == TOK_RSHIFT) {        // '>>' -> '>' then '>'
+      CurTok = '>';
+      break;
+    }
+    if (CurTok == TOK_RSHIFT_ASSIGN) { // '>>=' -> '>' then '>='
+      CurTok = TOK_GEQ;
+      break;
+    }
+    if (CurTok == TOK_GEQ) {           // '>=' -> '>' then '=' -- reached
+                                        // directly (`List<T>=`) or as the
+                                        // second split of a '>>=' above
+      CurTok = TOK_ASSIGN;
+      break;
+    }
+    if (CurTok != ',') {
+      SyntaxError(CurLoc, ErrCode::MissingComma, "Expected '>' or ',' in generic type").raise();
+      return false;
+    }
+    getNextToken(); // consume ','
+  }
+  return true;
+}
 
 TurfTypePtr ParseType() {
   // Recurses into itself directly (generic type args, `!T` error unions,
@@ -500,51 +603,9 @@ TurfTypePtr ParseType() {
 
   // Check for generic parameter: BaseName<T1, T2, ...>
   if (CurTok == '<' && !IsBuiltinType) {
-    getNextToken(); // consume '<'
     std::vector<TurfTypePtr> TypeArgs;
-    while (true) {
-      TurfTypePtr Arg = ParseType();
-      if (!Arg)
-        return nullptr;
-      TypeArgs.push_back(std::move(Arg));
-      if (CurTok == '>') {
-        getNextToken(); // consume '>'
-        break;
-      }
-      // The lexer's maximal munch (INV-LEX-1 -- never special-
-      // cased there) fuses adjacent '>'-family characters into one token
-      // whenever a nested generic argument list closes with no space
-      // (`List<List<int>>` -> TOK_RSHIFT) or the close is immediately
-      // followed by '=' (`List<T>=`/`Map<K, List<V>>=` -> TOK_GEQ/
-      // TOK_RSHIFT_ASSIGN). The PARSER splits one '>' off such a token
-      // here by replacing CurTok with whatever is left over -- crucially,
-      // WITHOUT calling getNextToken(), which would ask the lexer for a
-      // brand new token and silently skip the leftover instead of handing
-      // it to whichever level of nesting (or the ordinary '=' this type
-      // annotation is followed by) actually owns it next. `break`ing with
-      // the replaced CurTok, rather than looping again, mirrors the real
-      // '>' branch just above: this level's own list is closed either way,
-      // real or split.
-      if (CurTok == TOK_RSHIFT) {        // '>>' -> '>' then '>'
-        CurTok = '>';
-        break;
-      }
-      if (CurTok == TOK_RSHIFT_ASSIGN) { // '>>=' -> '>' then '>='
-        CurTok = TOK_GEQ;
-        break;
-      }
-      if (CurTok == TOK_GEQ) {           // '>=' -> '>' then '=' -- reached
-                                          // directly (`List<T>=`) or as the
-                                          // second split of a '>>=' above
-        CurTok = TOK_ASSIGN;
-        break;
-      }
-      if (CurTok != ',') {
-        SyntaxError(CurLoc, ErrCode::MissingComma, "Expected '>' or ',' in generic type").raise();
-        return nullptr;
-      }
-      getNextToken(); // consume ','
-    }
+    if (!ParseTypeArgList(TypeArgs))
+      return nullptr;
     // Arrays of generics are rare but allowed: parse trailing [N]
     TurfTypePtr GenBase =
         std::make_shared<GenericType>(BaseName, std::move(TypeArgs), ModuleQualifier);
@@ -784,6 +845,50 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
       }
     }
 
+    // ── LG-1: Name<Args>::member ─────────────────────────────────────────────
+    // `List<int>::default()`: the type arguments of a generic type, written
+    // where the type is used, in its type-position spelling. Taken only when
+    // the list closes with `>` immediately followed by `::`
+    // (TypeArgsThenScopeAhead()); otherwise this '<' is less-than.
+    TurfTypePtr LeftType;
+    if (CurTok == '<' && !ParsingPatternHeader && TypeArgsThenScopeAhead()) {
+      std::vector<TurfTypePtr> TypeArgs;
+      if (!ParseTypeArgList(TypeArgs))
+        return nullptr;
+      LeftType = std::make_shared<GenericType>(IdName, std::move(TypeArgs));
+    }
+
+    // LG-7: `identity<int>(3)`, a generic function's type arguments without
+    // the `::`. A list naming a built-in type cannot be operands of `<` and
+    // `>`, so this is never a comparison; the fix writes the `::`.
+    if (!LeftType && CurTok == '<' && !ParsingPatternHeader) {
+      bool SawTypeKeyword = false;
+      if (TypeArgListFollower(&SawTypeKeyword) == '(' && SawTypeKeyword) {
+        SyntaxError(CurLoc, ErrCode::ExpectedKeyword,
+                    "Type arguments of a generic function are written after "
+                    "'::': '" + IdName + "<' starts a comparison.",
+                    "Write `" + IdName + "::<...>(...)`, e.g. `" + IdName +
+                        "::<int>(x)`, or leave the type arguments out and let "
+                        "the arguments decide them.")
+            .withInsertAfterTokenFixIt(IdLoc, IdName, "::")
+            .withFixReason("A generic function's type arguments follow '::' "
+                           "(`f::<int>(x)`); without it '<' is less-than.")
+            .raise();
+        return nullptr;
+      }
+    }
+
+    // ── LG-2: name::<T> ──────────────────────────────────────────────────────
+    // `identity::<int>(3)`, `immut g = identity::<int>;`: type arguments for a
+    // generic function. `::` followed by `<` begins nothing else.
+    if (!LeftType && CurTok == TOK_SCOPE && peekToken(0) == '<') {
+      getNextToken(); // eat '::'
+      auto Var = std::make_unique<VariableExprAST>(IdLoc, IdName);
+      if (!ParseTypeArgList(Var->TypeArgs))
+        return nullptr;
+      return Var;
+    }
+
     // ── Scope access: Left::Right ────────────────────────────────────────────
     // Purely syntax-directed: the parser doesn't know whether `IdName` names
     // an enum, a module, or something else -- ScopeAccessKind disambiguation
@@ -792,6 +897,17 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     // bare reference, etc.) is handled by the postfix-expression machinery.
     if (CurTok == TOK_SCOPE) {
       getNextToken(); // eat '::'
+      if (LeftType) {
+        if (CurTok != TOK_IDENTIFIER) {
+          LogErrorAt(CurLoc, ErrCode::ExpectedName, "Expected a name after '::'", SLM::ErrorCategory::DECLARATION);
+          return nullptr;
+        }
+        auto Node = std::make_unique<ScopeAccessExprAST>(IdLoc, IdName, IdLoc,
+                                                         IdentifierStr, CurLoc);
+        getNextToken(); // eat the member name
+        Node->LeftType = std::move(LeftType);
+        return Node;
+      }
       if (CurTok != TOK_IDENTIFIER) {
         LogErrorAt(CurLoc, ErrCode::ExpectedName, "Expected a name after '::'", SLM::ErrorCategory::DECLARATION);
         return nullptr;
@@ -824,6 +940,37 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
             return nullptr;
           }
         }
+      }
+
+      // LG-1, qualified: `list::List<int>::default()`. Built like the
+      // three-name chain below (`Module::Name::member`), with the type
+      // arguments on the middle name.
+      if (CurTok == '<' && !ParsingPatternHeader && TypeArgsThenScopeAhead()) {
+        std::vector<TurfTypePtr> TypeArgs;
+        if (!ParseTypeArgList(TypeArgs))
+          return nullptr;
+        getNextToken(); // eat '::' (TypeArgsThenScopeAhead() saw it)
+        if (CurTok != TOK_IDENTIFIER) {
+          LogErrorAt(CurLoc, ErrCode::ExpectedName, "Expected a name after '::'", SLM::ErrorCategory::DECLARATION);
+          return nullptr;
+        }
+        auto Node = std::make_unique<ScopeAccessExprAST>(
+            IdLoc, RightName, RightLoc, IdentifierStr, CurLoc,
+            /*ModuleQualifier=*/IdName);
+        getNextToken(); // eat the member name
+        Node->LeftType =
+            std::make_shared<GenericType>(RightName, std::move(TypeArgs), IdName);
+        return Node;
+      }
+
+      // LG-2, qualified: `module::f::<T>`.
+      if (CurTok == TOK_SCOPE && peekToken(0) == '<') {
+        getNextToken(); // eat '::'
+        auto Node = std::make_unique<ScopeAccessExprAST>(IdLoc, IdName, IdLoc,
+                                                         RightName, RightLoc);
+        if (!ParseTypeArgList(Node->TypeArgs))
+          return nullptr;
+        return Node;
       }
 
       // A THIRD name chained on: `IdName::RightName` just parsed was
@@ -976,15 +1123,15 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
   case TOK_TYPE_BOOL:
   case TOK_TYPE_CHAR:
     // A primitive type name is only ever valid after `mut x:` / `->`; here it
-    // usually means a generic type argument written in EXPRESSION position
-    // (`List<int>::default()` parses as `List < int ...`), which Turf does not
-    // have -- say where the type goes instead of leaving the user to guess
-    // from "begin a declaration".
+    // usually means a generic type argument written in EXPRESSION position in
+    // a shape LG-1/LG-2 do not read (`List<int>.f()`, `x < int`) -- say how
+    // type arguments are written instead of leaving the user to guess from
+    // "begin a declaration".
     LogErrorAt(CurLoc, ErrCode::ExpectedKeyword,
                "Expected 'mutable' or 'immutable' to begin a declaration."
-               "\n  Hint: if this is a generic type argument in an expression "
-               "(`List<int>::default()`), put the type on the variable "
-               "instead: `mut l: List<int> = List::default();`.",
+               "\n  Hint: if this is a generic type argument in an expression, "
+               "a generic struct's go before '::' (`List<int>::default()`) and "
+               "a generic function's after it (`identity::<int>(x)`).",
                SLM::ErrorCategory::DECLARATION);
     return nullptr;
 

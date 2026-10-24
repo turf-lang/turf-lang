@@ -497,8 +497,11 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
     // has its own imports; it must neither see the importer's aliases nor
     // leave its own behind for the importer's remaining tokens.
     std::map<std::string, std::string> SavedModuleAliases;
+    // LG-1: tokens the importer lexed ahead of its current one.
+    std::vector<LexedToken> SavedLookahead;
 
     LexerStateGuard() {
+      SavedLookahead = takeLookahead();
       SavedModuleAliases = std::move(CurrentFileModuleAliases);
       CurrentFileModuleAliases.clear();
       SavedSourceFile = SourceFile;
@@ -536,6 +539,7 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
       g_braceDepth = SavedBraceDepth;
       g_curlyDepth = SavedCurlyDepth;
       CurrentFileModuleAliases = std::move(SavedModuleAliases);
+      restoreLookahead(std::move(SavedLookahead));
     }
   } LGuard;
 

@@ -237,6 +237,22 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
       std::string MethodName = IdentifierStr;
       SourceLocation MethodLoc = CurLoc;
       getNextToken();
+      // LG-2: `obj.method::<T>(...)`, type arguments for a generic function
+      // called through UFCS. `::` then `<` begins nothing else.
+      std::vector<TurfTypePtr> MethodTypeArgs;
+      if (CurTok == TOK_SCOPE && peekToken(0) == '<') {
+        getNextToken(); // eat '::'
+        if (!ParseTypeArgList(MethodTypeArgs))
+          return nullptr;
+        if (CurTok != '(') {
+          LogErrorAt(CurLoc, ErrCode::MissingOpeningDelimiter,
+                     "Expected '(' after the type arguments of '" + MethodName + "'."
+                     "\n  Hint: type arguments on a method are only written on a "
+                     "call, e.g. `x." + MethodName + "::<int>(...)`.",
+                     SLM::ErrorCategory::SYNTAX_ERROR);
+          return nullptr;
+        }
+      }
       if (CurTok == '(') {
         getNextToken(); // eat '('
         std::vector<std::unique_ptr<ExprAST>> Args;
@@ -257,8 +273,10 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
           }
         }
         getNextToken(); // eat ')'
-        Base = std::make_unique<MethodCallExprAST>(Loc, std::move(Base),
-                                                   MethodName, MethodLoc, std::move(Args));
+        auto Call = std::make_unique<MethodCallExprAST>(
+            Loc, std::move(Base), MethodName, MethodLoc, std::move(Args));
+        Call->TypeArgs = std::move(MethodTypeArgs);
+        Base = std::move(Call);
       } else {
         if (MethodName == "length") {
           Base = std::make_unique<MethodCallExprAST>(

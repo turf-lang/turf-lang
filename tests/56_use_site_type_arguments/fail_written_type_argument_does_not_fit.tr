@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E056
+// EXPECT-DIAG: No overload of 'identity' matches argument types (int)
+// The argument must fit the written type; nothing is inferred over it.
+
+fn<T> identity(x: T): T {
+    return x;
+}
+
+fn main(): int {
+    immut s: string = identity::<string>(3);
+    return 0;
+}
