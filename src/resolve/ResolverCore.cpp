@@ -994,6 +994,10 @@ void Resolver::hoistExportedConstant(const VarDeclExprAST &Var,
       llvm::SmallString<32> Digits;
       Num->getIntValExact().toString(Digits, /*Radix=*/10);
       Sym.IntVal = std::string(Digits.str());
+      // `export immut X: double = 3;` -- an integer literal acquires the
+      // declared `double` type, and codegen reads a double's DoubleVal.
+      if (Sym.Type && Sym.Type->isDouble())
+        Sym.DoubleVal = Num->getIntValExact().roundToDouble();
     } else {
       Sym.DoubleVal = Num->getDoubleVal();
     }

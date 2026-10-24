@@ -1,0 +1,4 @@
+// Helper module for export_double_from_integer_literal.tr. Named *_module.tr
+// so scripts/test_runner.sh does not run it on its own.
+
+export immut THREE: double = 3;
