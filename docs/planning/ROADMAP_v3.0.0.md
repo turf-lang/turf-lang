@@ -156,7 +156,7 @@ any change to default output.
 | Fixes without a model | SL-7 rule-engine coverage beyond the 18 codes DX-1 shipped with in 2.1 |
 | Measured `--smart` | SL-3 corpus, SL-2 scoreboard, SL-1 Fix Score v2, SL-5 suggestion checks, SL-4 model checks, SL-6 prompt context (in that order) |
 | Analysis (warnings only) | AN-1 `unsafe` checks, AN-2 loops, AN-3 (a)(b) recursion, AN-4 nullability, AN-5 manual-heap leaks, AN-6 precision lint, AN-7 dead code, LB-5 raw-receiver method calls |
-| Numeric speed | NM-2 proof-based elision over ranges, NM-6 batched overflow checks (after its measurements) |
+| Numeric speed | NM-2 proof-based elision over ranges |
 | Repositories | IF-2 versioned schemas for diagnostics and package-graph JSON; IF-3 website error pages generated from V-5 |
 | Internal | F-S2 no global symbol table, F-S4a analysis leaves Codegen |
 
@@ -246,8 +246,10 @@ Other candidates: RT-2 GC tier 2 (after threads), F-10 self-hosting, the
 assistant's own roadmap (SL-* beyond 2.2, F-9's LoRA adapters), more platforms.
 
 **On no line, by design:** F-6c is LG-1/LG-2, F-7c is PK-1 and RT-4 is NM-1 …
-NM-6 (aliases); NM-5 waits for a measurement of its own; RT-2′ is chosen
-only if RT-2 is measured not to work (it would be B-4, so 4.0); SL-8 is dropped (4.2); F-7b and F-25 stay unscheduled.
+NM-6 (aliases); NM-5 waits for a measurement of its own and NM-6 for an LLVM
+that vectorizes it (measured 2026-10-25); RT-2′ is chosen only if RT-2 is
+measured not to work (it would be B-4, so 4.0); SL-8 is dropped (4.2); F-7b and
+F-25 stay unscheduled.
 
 ---
 
@@ -860,7 +862,7 @@ wrapping by default in optimized builds, and undefined overflow.
 | **NM-3** | **`math::wrapping_add`, `wrapping_sub`, `wrapping_mul`** (`int` only), defined modulo 2^64, never trapping. Functions, not operators: no grammar change, visible and searchable. | A | S–M | See findings below. |
 | **NM-4** | Re-measure with the trap exits restructured (one shared cold, `noreturn` trap block per function). | I | S | **Unverified idea**, not in the TDP: whether LLVM 22's early-exit vectorization could handle a loop whose only side exit is a shared noreturn call. A measurement, not a claim. If it works it removes the cost with no source change. |
 | **NM-5** | Shifts and negation (`EmitCheckedShl`, `EmitCheckedIntNegate`). | D | S | Out of scope until a measurement shows the same effect. |
-| **NM-6** | Batch-then-check: emit the operation unchecked with an overflow bit, flush the bits once per straight-line run (stage 1) or per loop strip (stage 2). | I | L | Proposal and applicability rule in `docs/development/changes/TDP-2-002.md` NM-6. Unobservable because a panic cannot be caught and memory after it is not observable (`FREEZE.md` §6.30, F-PANIC-1 … 3); no check is removed (INV-OPT-2). Stage 2 needs NM-2. Gated on three measurements recorded there, first stage 1 on `particles`. |
+| **NM-6** | Batch-then-check: emit the operation unchecked with an overflow bit, flush the bits once per straight-line run (stage 1) or per loop strip (stage 2). | I | L | Proposal and applicability rule in `docs/development/changes/TDP-2-002.md` NM-6. Unobservable because a panic cannot be caught and memory after it is not observable (`FREEZE.md` §6.30, F-PANIC-1 … 3); no check is removed (INV-OPT-2). Stage 2 needs NM-2. Measured 2026-10-25 (`BENCHMARKS.md`): stage 1 does not pay, stage 2 pays only as hand-written vector code, which §6.10 leaves to LLVM. Not implemented; on no line. |
 
 `RT-4` in 6.3 is replaced by NM-1 … NM-6.
 

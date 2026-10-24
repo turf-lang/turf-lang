@@ -149,6 +149,48 @@ different basic blocks and SLP, which works within one, cannot pair them.
 `--emit-llvm` runs the pipeline without a `TargetMachine`, so its IR never
 shows vectorization; count instructions in the binary (`objdump -d`).
 
+### 2026-10-25 — NM-6: overflow checks in batches, hand-written IR
+
+The question (TDP-2-002 NM-6, measurements 1 and 2): if the two checked `+` in
+`particles`' inner loop keep their overflow test but share one later branch,
+does the loop get to the speed of `math::wrapping_add`? No compiler change:
+`particles`' `-O0` IR from `turfc --emit-llvm` was rewritten by hand into each
+shape below, and every variant, the unmodified IR included, was built the same
+way (`clang -O2`, linked with `lib/libturfrt.a`), so the pipeline is the same
+for all. The unmodified IR through `clang` times the same as `turfc -O2`
+(24.9 against 25.1 ms). System LLVM 23.1.3, 21 interleaved rounds pinned to CPU
+2, minimum, process start-up included. Every checksum matched.
+
+| Shape | ms | packed integer ops |
+|---|---|---|
+| check in place (today) | 24.9 | 0 |
+| stage 1: `sadd.with.overflow` without its branch, one flush per iteration | 27.6 | 0 |
+| stage 1, overflow bit as `((a ^ r) & (b ^ r)) < 0` | 30.7 | 0 |
+| stage 1, the same written as `<2 x i64>` by hand | 25.4 | hand-written |
+| stage 2: the bit ORed across the inner loop, one flush after it | 31.5 | 0 |
+| stage 2, plus each operation's first overflowing iteration (rule 4) | 39.5 | 0 |
+| stage 2 written as `<2 x i64>` by hand | 19.9 | hand-written |
+| `math::wrapping_add` | 17.8 | yes |
+| `clang -O3` on `particles.c` | 17.6 | yes |
+
+- **Stage 1 does not pay.** Once the add has no branch of its own, LLVM proves
+  the bounds checks away and both adds share one block, but SLP does not pair
+  them: it cannot widen `sadd.with.overflow` (a struct result), and with the
+  xor form its cost model rejects the extra lanes. Even vectorized by hand, one
+  branch per iteration keeps the loop at today's speed. What makes
+  `wrapping_add` fast is SLP pairing `x` and `y` and the loop unrolling around
+  it, and a branch in every iteration prevents the second.
+- **Stage 2 pays only as hand-written vector code.** With the flag carried
+  across the loop and flushed once, the hand-vectorized loop is within 2 ms of
+  `wrapping_add`. Neither LLVM vectorizer produces that loop from the scalar
+  form (31.5 ms, scalar), and tracking each operation's first overflowing
+  iteration, which rule 4 needs to name the right line, costs another 8 ms in
+  scalar form. Emitting vector code from Turf would take over LLVM's job
+  (`FREEZE.md` §6.10).
+
+NM-6 is not implemented. `math::wrapping_*` (NM-3) and NM-2's proofs remain
+the answers for this loop.
+
 ## Fixed before the baseline
 
 Writing these benchmarks found five performance bugs (and one compiler crash,
