@@ -154,8 +154,37 @@ for src in "${SERVER_CLIENT[@]}"; do
   [ $ONE_BAD -eq 0 ] && pass "$src compiles at every level"
 done
 
+# ── NM-3: math::wrapping_* are one instruction at every level ─────────────
+# A call that stayed a call would give the same result (section 1's property)
+# but lose the speed the functions exist for, so -O0 IR is checked for the
+# plain `add`/`sub`/`mul` with no call (src/sema/Intrinsics.h, kind 5).
+echo -e "\n${BOLD}4. math::wrapping_* lower to one instruction at -O0${RESET}"
+cat > "$WORKDIR/wrapping.tr" <<'EOF2'
+fn main(): int {
+    mut a: int = 9223372036854775807;
+    a = a + 0;
+    io::printline(math::wrapping_add(a, 1));
+    io::printline(wrapping_sub(a, -1));
+    io::printline(a.wrapping_mul(2));
+    io::printline(math::wrapping_shl(a, 65));
+    return 0;
+}
+EOF2
+if "$TURF" "$WORKDIR/wrapping.tr" --emit-llvm -O0 -o "$WORKDIR/wrapping" > "$WORKDIR/wrapping.compile.log" 2>&1; then
+  MAIN_IR=$(sed -n '/^define .*@__turf_user_main/,/^}/p' "$WORKDIR/wrapping.ll")
+  if printf '%s\n' "$MAIN_IR" | grep -q "call .*@turf_math_wrapping_"; then
+    fail "a math::wrapping_* call is still a call at -O0"
+  elif [ "$(printf '%s\n' "$MAIN_IR" | grep -cE '= (add|sub|mul|shl) i64 ')" -lt 4 ]; then
+    fail "expected a plain add, sub, mul and shl in main's -O0 IR"
+  else
+    pass "wrapping_add, _sub, _mul and _shl are plain add/sub/mul/shl at -O0"
+  fi
+else
+  fail "wrapping.tr does not compile:"; head -5 "$WORKDIR/wrapping.compile.log" | sed 's/^/       /'
+fi
+
 # ── Binary-size table (change-record material, §8 OPT-001 stage 6) ─────────
-echo -e "\n${BOLD}4. Binary sizes by level (bytes)${RESET}"
+echo -e "\n${BOLD}5. Binary sizes by level (bytes)${RESET}"
 ALL_PROGRAMS=()
 for src in "${DETERMINISTIC[@]}" "${NONDETERMINISTIC[@]}" "${SERVER_CLIENT[@]}"; do
   ALL_PROGRAMS+=("$(basename "$src" .tr)")

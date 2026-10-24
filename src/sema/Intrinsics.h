@@ -19,10 +19,9 @@
  *          `typeof` gets its own function, not the built-in. Its job is to
  *          be the one place grep'd (or read) before adding a new
  *          special-cased symbol name anywhere in the compiler, so that act
- *          is never silent. Three genuinely different kinds of "intrinsic"
- *          are listed separately below because they're recognized through
- *          three different mechanisms -- conflating them would misstate how
- *          each is actually implemented:
+ *          is never silent. The kinds are listed separately below because
+ *          each is recognized through a different mechanism -- conflating
+ *          them would misstate how each is actually implemented:
  *
  *          1. Language-level bare intrinsics: real lexer keywords/tokens,
  *             callable from Turf source with no module qualifier and no
@@ -43,6 +42,10 @@
  *             name" (STD-001, ARCHITECTURE_OVERHAUL.md §8/§15.3) -- which
  *             module names get auto-imported into every top-level compile
  *             with no `import` statement.
+ *          5. Standard-library functions the compiler lowers itself: real
+ *             `pub fn` declarations in lib/std whose calls Codegen replaces
+ *             with one instruction (`math::wrapping_add`, NM-3). Recognized
+ *             by the (module, function) of the resolved declaration.
  *
  * @copyright Copyright (c) 2026 TurfLang contributors. Licensed under the
  * Apache License.
@@ -337,5 +340,51 @@ inline const char *IntrinsicName(BareIntrinsic I) {
 // contents rather than generated from them -- keeps that change visible
 // and deliberate (the same "explicit, change-recorded act" F-STD-2 asks of
 // the intrinsic list above).
+
+// ─── 5. Standard-library functions the compiler lowers itself (NM-3) ───────
+// Ordinary `pub fn` declarations in lib/std with a real signature, a doc
+// comment and a body, which Codegen replaces with one LLVM instruction both
+// at every direct call and in the function's own definition (so a function
+// value of one behaves the same). Keyed by the (module, function) of the
+// RESOLVED DECLARATION, never by the name at a call: the Resolver asks
+// LookupLoweredFunction() with the declaring module's key
+// (Resolver::buildFunctionSymbol()) and records the answer on the symbol
+// (ResolverFunctionSymbol::Lowering), so a program's own `wrapping_add`, in
+// its main file or its own module, is its own function. Change record:
+// docs/development/changes/TDP-2-002.md.
+//
+//   math::wrapping_add(a: int, b: int): int -- `add i64`, no `nsw`
+//   math::wrapping_sub(a: int, b: int): int -- `sub i64`, no `nsw`
+//   math::wrapping_mul(a: int, b: int): int -- `mul i64`, no `nsw`
+//   math::wrapping_shl(a: int, n: int): int -- `shl i64` by `n & 63`
+//
+// Each is the result modulo 2^64 in two's complement and never traps. The
+// rest of the family (wrapping_neg, _abs, _div, _rem, _shr, _pow) is ordinary
+// Turf built on these four in lib/std/core/math.tr. The
+// lowering applies at every optimization level, `-O0` included: a call that
+// stayed a call would give the same result but lose the speed the functions
+// exist for.
+
+/// The closed set of kind-5 functions. `None` is every other declaration.
+enum class LoweredFunction {
+  None,
+  WrappingAdd,
+  WrappingSub,
+  WrappingMul,
+  WrappingShl,
+};
+
+/// The kind-5 function declared as `Name` in the module keyed `Module`, or
+/// `LoweredFunction::None`.
+inline LoweredFunction LookupLoweredFunction(const std::string &Module,
+                                             const std::string &Name) {
+  if (Module != "math")
+    return LoweredFunction::None;
+  if (Name == "wrapping_add") return LoweredFunction::WrappingAdd;
+  if (Name == "wrapping_sub") return LoweredFunction::WrappingSub;
+  if (Name == "wrapping_mul") return LoweredFunction::WrappingMul;
+  if (Name == "wrapping_shl") return LoweredFunction::WrappingShl;
+  return LoweredFunction::None;
+}
 
 #endif // TURF_INTRINSICS_H

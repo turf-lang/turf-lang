@@ -559,6 +559,11 @@ Resolver::buildFunctionSymbol(const FuncDefExprAST &Node,
   Sym.HasCallerLocation = Node.hasCallerLocation();
   Sym.Annotations = Node.getAnnotations();
   Sym.IsPublic = Node.isPublic();
+  // NM-3 (src/sema/Intrinsics.h, kind 5). A module key names the standard
+  // library's module whenever it equals a stdlib name: a root module of that
+  // name is an E090 at its import, and a dependency's module is keyed
+  // `<package>/<path>`. So a user's own `wrapping_add` is never lowered.
+  Sym.Lowering = LookupLoweredFunction(ModuleName, Node.getName());
   ResolverSourceLocation DeclLoc;
   // getNameLoc(), not getLoc() -- getLoc() is the 'fn'/'operator' keyword's
   // own position (see FuncDefExprAST's doc comment in ASTDecl.h), which

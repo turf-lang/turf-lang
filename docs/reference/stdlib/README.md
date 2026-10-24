@@ -13,7 +13,7 @@ each.
 | `strings` | string search, slicing, trimming, splitting, parsing, `StringBuilder` | none (prelude) | [core.md](core.md#strings) |
 | `array` | `sum`, `max`, `min`, `contains`, `index_of` over `int[]`, `double[]`, `string[]` | none (prelude) | [core.md](core.md#array) |
 | `io` | printing, reading input, reading and writing files, `exists` | none (prelude) | [io_and_net.md](io_and_net.md) |
-| `math` | `abs`, `min`, `max`, `clamp`, `power`, libm functions, `divide`, constants | none (prelude) | [math_and_os.md](math_and_os.md) |
+| `math` | `abs`, `min`, `max`, `clamp`, `power`, libm functions, the `wrapping_*` family, `divide`, constants | none (prelude) | [math_and_os.md](math_and_os.md) |
 | `sys` | `panic`, `exit`, `abort` | none (prelude) | [io_and_net.md](io_and_net.md) |
 | `arrays` | build a whole array: `fill`, `generate`, `reversed`, `map` | `import arrays;` | [arrays.md](arrays.md) |
 | `list` | `List<T>`, a growable array | `import list::List;` | [collections.md](collections.md) |

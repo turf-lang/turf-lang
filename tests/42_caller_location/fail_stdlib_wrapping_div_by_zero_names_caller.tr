@@ -1,0 +1,11 @@
+// NM-3: division by zero has no wrapped result, so wrapping_div panics, naming
+// the caller's line.
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: fail_stdlib_wrapping_div_by_zero_names_caller.tr:9: math::wrapping_div: division by zero
+
+fn main(): int {
+    mut zero: int = 0;
+    zero = zero + 0;
+    immut q: int = math::wrapping_div(1, zero);
+    return q;
+}
