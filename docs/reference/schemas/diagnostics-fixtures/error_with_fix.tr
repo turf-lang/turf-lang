@@ -1,0 +1,5 @@
+// An error with a checked fix: the misspelt name has one close match.
+fn main(): int {
+    immut name: int = 1;
+    return nmae - 1;
+}

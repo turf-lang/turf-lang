@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/turf-lang/turf-lang/blob/master/docs/reference/schemas/diagnostics.schema.json",
+  "title": "turfc --diagnostics=json, one diagnostic",
+  "description": "Each line turfc writes to stderr under --diagnostics=json is one object of this shape. Schema version 1.0: a minor version adds fields, a major version changes or removes one. Lines and columns are 1-based; columns count bytes; a span's end is exclusive.",
+  "type": "object",
+  "required": ["version", "severity", "code", "category", "title", "message", "hint", "file", "span", "related", "fix", "denied"],
+  "properties": {
+    "version": { "type": "string", "pattern": "^1\\.[0-9]+$" },
+    "severity": { "enum": ["error", "warning"] },
+    "code": { "type": ["string", "null"], "pattern": "^E[0-9]{3}$", "description": "Every error has one; a warning without a registry row has null." },
+    "category": { "type": ["string", "null"] },
+    "title": { "type": ["string", "null"], "description": "The heading line of the text form, e.g. \"Nothing to infer!\"." },
+    "message": { "type": "string" },
+    "hint": { "type": ["string", "null"] },
+    "file": { "type": "string" },
+    "span": { "oneOf": [{ "$ref": "#/$defs/span" }, { "type": "null" }], "description": "null for a diagnostic about a whole file." },
+    "related": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["file", "span", "message"],
+        "properties": {
+          "file": { "type": "string" },
+          "span": { "$ref": "#/$defs/span" },
+          "message": { "type": "string" }
+        }
+      }
+    },
+    "fix": {
+      "description": "The compiler's checked fix (the text form's Fix: line), or null.",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["description", "edits"],
+          "properties": {
+            "description": { "type": "string" },
+            "edits": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["file", "span", "replacement"],
+                "properties": {
+                  "file": { "type": "string" },
+                  "span": { "$ref": "#/$defs/span" },
+                  "replacement": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "denied": { "type": "boolean", "description": "A warning whose lint level is deny; its severity is error." }
+  },
+  "$defs": {
+    "position": {
+      "type": "object",
+      "required": ["line", "column"],
+      "properties": { "line": { "type": "integer", "minimum": 0 }, "column": { "type": "integer", "minimum": 0 } }
+    },
+    "span": {
+      "type": "object",
+      "required": ["start", "end"],
+      "properties": { "start": { "$ref": "#/$defs/position" }, "end": { "$ref": "#/$defs/position" } }
+    }
+  }
+}

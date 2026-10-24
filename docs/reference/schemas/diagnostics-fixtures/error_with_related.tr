@@ -1,0 +1,12 @@
+// An error with a related location: the earlier declaration.
+struct Point {
+    x: int
+}
+
+struct Point {
+    y: int
+}
+
+fn main(): int {
+    return 0;
+}
