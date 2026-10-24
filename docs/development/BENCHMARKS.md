@@ -10,6 +10,7 @@ explanation recorded here (REL-007 runs the check on every release candidate).
 | Benchmark | Source | What it exercises |
 |---|---|---|
 | `structs` | `bench/structs.tr` + `bench/structs.c` | a numeric loop over an array of structs, every `+` overflow-checked; the C twin (`clang -O3`) gives the "vs C" ratio, which tracks FUTURE F-24 (checked arithmetic vs auto-vectorization) |
+| `particles` | `bench/particles.tr` + `bench/particles.c` | the 2000-particle, 20,000-step array-of-structs integrator behind #257's "53% slower than `clang -O3`" figure, reconstructed from that description; every `+` overflow-checked, the C twin (`clang -O3`) gives the "vs C" ratio |
 | `strings` | `bench/strings.tr` | `StringBuilder`, `s[i]` over a 200 KB string, `substring`, `replace`, `contains` |
 | `map_churn` | `bench/map_churn.tr` | `Map<string, int>` put / get / remove over a sliding window of 5000 keys |
 | `gc_alloc` | `bench/gc_alloc.tr` | 3 million allocations with 1000 kept alive: the allocator and collector |
@@ -78,6 +79,29 @@ Notes:
   next round: the collector lets the heap grow to twice the live data before
   collecting (`turfrt_gc.c`, the 1 MiB-floor doubling rule), and the live data
   at a collection includes the round in progress.
+
+### 2026-10-24 — `particles`, the program behind #257's figure (`bench/results/2026-10-24-particles.json`)
+
+Commit `5b91dbd` plus the benchmark, `build_release` (Release, system LLVM 23),
+15 rounds pinned to CPU 2, 13th Gen Intel Core i5-13500H (16 threads),
+Linux 6.18 under WSL2.
+
+| Benchmark | Median (s) | Min (s) | Peak RSS (KB) | vs C | Checksum |
+|---|---|---|---|---|---|
+| particles | 0.030 | 0.027 | 2360 | 1.46x | -40102000 |
+
+Notes:
+
+- `particles` is rebuilt from #257's description (2000 particles, 20,000
+  steps, `particles[i].x + particles[i].vx`-style additions loaded from the
+  array); the original program was never checked in. At #257's sizes it runs
+  for about 0.03 s, far under the 0.5–1 s the other benchmarks target, and the
+  sizes are kept so the figure can be reproduced.
+- `bench.py` builds Turf at `-O2`. Turf `-O3` against `clang -O3`, 41 runs each
+  pinned to CPU 2, process start-up included: 1.40x at the minimum and 1.42x at
+  the median (Turf `-O2`: 1.41x and 1.41x). Turf is about 40–46% slower than C
+  on this program, against #257's 53%: the gap is there, a little smaller than
+  the figure recorded, and it is not closed.
 
 ## Fixed before the baseline
 

@@ -1,0 +1,47 @@
+// NM-1 benchmark: the 2000-particle array-of-structs integrator behind #257.
+//
+// Reconstructed from #257's description, not copied: the original `structs`
+// program from the compiler's own suite ("2000-particle array-of-structs
+// integrator, 20,000 timesteps", Turf -O3 53% slower than `clang -O3`) was
+// never checked in. The sizes are #257's, so this runs for far less than the
+// 0.5-1 s the other benchmarks target; they are kept so the figure can be
+// reproduced. Each step adds every particle's velocity to its position, loaded
+// from the array (`ps[i].x + ps[i].vx`), and every `+` is checked (F-NUM-3).
+// particles.c is the same program in C, and scripts/dev/bench.py reports
+// Turf's time over C's.
+//
+// Prints a checksum so no level can delete the work, and a wrong answer shows.
+
+struct Particle {
+    x: int,
+    y: int,
+    vx: int,
+    vy: int
+}
+
+fn main(): int {
+    immut count: int = 2000;
+    immut steps: int = 20000;
+    mut ps: Particle[2000];
+    ps[0] = Particle::default(); // definitely assigned (F-INIT-1); the loop fills all
+    for i in 0..count {
+        mut p: Particle = Particle::default();
+        p.x = i;
+        p.y = count - i;
+        p.vx = (i % 7) - 3;
+        p.vy = 3 - (i % 5);
+        ps[i] = p;
+    }
+    for t in 0..steps {
+        for i in 0..count {
+            ps[i].x = ps[i].x + ps[i].vx;
+            ps[i].y = ps[i].y + ps[i].vy;
+        }
+    }
+    mut sum: int = 0;
+    for i in 0..count {
+        sum = sum + ps[i].x - ps[i].y;
+    }
+    io::printline(sum);
+    return 0;
+}

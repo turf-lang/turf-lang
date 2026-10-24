@@ -1,0 +1,43 @@
+{
+  "meta": {
+    "date": "2026-10-24",
+    "commit": "5b91dbd+dirty",
+    "turfc": "build_release/turfc",
+    "build_type": "Release",
+    "turfc_version": "turfc 2.1.1 / interface 1.7 / llvm 23.1.3 / runtime turf_rt_abi_2_0 / root /home/a2ys/turflang/turf-lang/turflang/.claude/worktrees/agent-a98204f4ea235b554 / linker system-cc / smart not-built",
+    "pinned_cpu": 2,
+    "machine": {
+      "cpu": "13th Gen Intel(R) Core(TM) i5-13500H",
+      "cores": 16,
+      "os": "Linux-6.18.54.1-microsoft-standard-WSL2-x86_64-with-glibc2.44"
+    }
+  },
+  "runs": 15,
+  "results": {
+    "particles": {
+      "median_s": 0.0297,
+      "min_s": 0.0273,
+      "runs_s": [
+        0.0326,
+        0.0288,
+        0.0294,
+        0.0301,
+        0.0302,
+        0.0273,
+        0.0301,
+        0.0321,
+        0.0294,
+        0.0307,
+        0.0292,
+        0.0297,
+        0.0302,
+        0.0292,
+        0.0279
+      ],
+      "rss_kb": 2360,
+      "checksum": "-40102000",
+      "c_median_s": 0.0204,
+      "ratio_vs_c": 1.456
+    }
+  }
+}
