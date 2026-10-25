@@ -86,8 +86,6 @@ static bool IsIdentifier(const std::string &S) {
 }
 
 std::optional<PackageGraph> LoadPackageGraph(const std::string &File,
-                                             const std::string &EntryFile,
-                                             bool EntryIsModule,
                                              std::string &Error) {
   auto Fail = [&](const std::string &Msg) -> std::optional<PackageGraph> {
     Error = "package graph " + File + ": " + Msg;
@@ -220,6 +218,22 @@ std::optional<PackageGraph> LoadPackageGraph(const std::string &File,
       return Fail("package '" + Name + "' is a dependency but has no root module " +
                   RootModule.str().str() + " (only a library package can be depended on)");
   }
+  return G;
+}
+
+std::optional<PackageGraph> LoadPackageGraph(const std::string &File,
+                                             const std::string &EntryFile,
+                                             bool EntryIsModule,
+                                             std::string &Error) {
+  auto Fail = [&](const std::string &Msg) -> std::optional<PackageGraph> {
+    Error = "package graph " + File + ": " + Msg;
+    return std::nullopt;
+  };
+  std::optional<PackageGraph> Loaded = LoadPackageGraph(File, Error);
+  if (!Loaded)
+    return std::nullopt;
+  PackageGraph &G = *Loaded;
+  const PackageInfo *Root = G.find(G.Root);
 
   std::string Entry = Canonical(EntryFile);
   // A graph that names tests/ is the one `turfc --test` hands each test
@@ -243,5 +257,5 @@ std::optional<PackageGraph> LoadPackageGraph(const std::string &File,
                   " (check another file of the package with --check --module; run a "
                   "single file on its own without --package-graph)");
   }
-  return G;
+  return Loaded;
 }

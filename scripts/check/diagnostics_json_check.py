@@ -17,10 +17,13 @@ file's own directory, and fails when
     docs/reference/schemas/version.schema.json, disagrees with the text
     `--version` lines (release, interface), or names a diagnostics schema
     version other than the one diagnostics carry.
+  - `turfc --unsafe-report` (LB-2), over a small project and over files, does
+    not match docs/reference/schemas/unsafe-report.schema.json.
 
 The schema is read from the published file and checked with the small subset
-of JSON Schema it uses (type, enum, pattern, required, properties, items,
-minItems, minimum, oneOf, $ref), so this needs no third-party package.
+of JSON Schema it uses (type, enum, const, pattern, required, properties,
+additionalProperties, items, minItems, minimum, oneOf, $ref), so this needs no
+third-party package.
 
 Usage: scripts/check/diagnostics_json_check.py [--compiler build/turfc]
                                               [--jobs N] [--write]
@@ -33,11 +36,13 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SCHEMA = ROOT / "docs/reference/schemas/diagnostics.schema.json"
 VERSION_SCHEMA = ROOT / "docs/reference/schemas/version.schema.json"
+UNSAFE_SCHEMA = ROOT / "docs/reference/schemas/unsafe-report.schema.json"
 FIXTURES = ROOT / "docs/reference/schemas/diagnostics-fixtures"
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 HEADER = re.compile(r"^── (error|warning)\b[^\[]*(?:\[(E\d{3}))?")
@@ -55,6 +60,8 @@ def validate(value, schema, root, where="$"):
         return None if len(matches) == 1 else f"{where}: matches {len(matches)} of oneOf"
     if "enum" in schema and value not in schema["enum"]:
         return f"{where}: {value!r} not in {schema['enum']}"
+    if "const" in schema and value != schema["const"]:
+        return f"{where}: {value!r} is not {schema['const']!r}"
     if "type" in schema:
         kinds = schema["type"] if isinstance(schema["type"], list) else [schema["type"]]
         ok = any(isinstance(value, int) and not isinstance(value, bool)
@@ -76,6 +83,13 @@ def validate(value, schema, root, where="$"):
                 err = validate(value[key], sub, root, f"{where}.{key}")
                 if err:
                     return err
+        extra = schema.get("additionalProperties")
+        if isinstance(extra, dict):
+            for key, sub in value.items():
+                if key not in schema.get("properties", {}):
+                    err = validate(sub, extra, root, f"{where}.{key}")
+                    if err:
+                        return err
     if isinstance(value, list):
         if len(value) < schema.get("minItems", 0):
             return f"{where}: fewer than {schema['minItems']} items"
@@ -162,6 +176,47 @@ def check_manifest(compiler):
                         "version the diagnostics carry")
     if "diagnostics-json" not in manifest["features"]:
         problems.append("the manifest does not list diagnostics-json")
+    if "unsafe-report" not in manifest["features"]:
+        problems.append("the manifest does not list unsafe-report")
+    return problems
+
+
+def check_unsafe_report(compiler):
+    """`turfc --unsafe-report` against its schema, both forms (LB-2)."""
+    schema = json.loads(UNSAFE_SCHEMA.read_text())
+    problems = []
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "app/src").mkdir(parents=True)
+        (root / "ffi/src").mkdir(parents=True)
+        (root / "app/src/main.tr").write_text("fn main(): int {\n    return 0;\n}\n")
+        (root / "ffi/src/ffi.tr").write_text(
+            'unsafe module;\nextern from "z" fn zlibVersion(): string;\n'
+            'pub fn f(): int {\n    return unsafe { 1; };\n}\n'
+            'pub fn g(): string {\n    return "open;\n}\n')
+        (root / "graph.json").write_text(json.dumps({
+            "format": 1, "root": "app", "packages": {
+                "app": {"src": "app/src", "deps": ["ffi"], "allow_unsafe": True},
+                "ffi": {"src": "ffi/src", "deps": []}}}))
+        runs = {
+            "--package-graph": [compiler, "--unsafe-report", "--package-graph", "graph.json"],
+            "files": [compiler, "--unsafe-report", "ffi/src/ffi.tr", "app/src/main.tr"],
+        }
+        for name, args in runs.items():
+            out = subprocess.run(args, cwd=root, capture_output=True, text=True, timeout=120)
+            if out.returncode != 0:
+                problems.append(f"--unsafe-report ({name}): exit {out.returncode}: {out.stderr.strip()}")
+                continue
+            try:
+                report = json.loads(out.stdout)
+            except json.JSONDecodeError as e:
+                problems.append(f"--unsafe-report ({name}): not JSON: {e}")
+                continue
+            err = validate(report, schema, schema)
+            if err:
+                problems.append(f"--unsafe-report ({name}): {err}")
+            elif name == "files" and "error" not in report["files"][0]:
+                problems.append("--unsafe-report: a file that does not lex has no \"error\"")
     return problems
 
 
@@ -177,7 +232,7 @@ def main():
 
     failed = 0
     if not args.write:
-        for p in check_manifest(compiler):
+        for p in check_manifest(compiler) + check_unsafe_report(compiler):
             print(f"FAIL {p}")
             failed += 1
     sources = json.loads((FIXTURES / "sources.json").read_text())

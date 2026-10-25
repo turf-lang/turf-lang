@@ -19,6 +19,7 @@
 #include "sema/Types.h"
 #include "tooling/Formatter.h"
 #include "tooling/MigratePub.h"
+#include "tooling/UnsafeReport.h"
 #include "diagnostics/ErrorCategory.h"
 #include "diagnostics/ErrorCodes.h"
 #include "diagnostics/LintLevels.h"
@@ -523,6 +524,128 @@ static void testCancellation() {
 
   // The next analysis is not affected by a cancelled one.
   CHECK_EQ(render(turf::analyze({{"c.tr", UndefinedVariable}})), Uncancelled);
+}
+
+// LB-2 (issue #325): `turfc --unsafe-report`'s counts. The lexer decides what
+// is code, so a keyword in a comment or a string is never counted, and
+// `unsafe module;` counts only where the compiler honors it, as the file's
+// first statement.
+static void testUnsafeReport(const ScratchDir &Dir) {
+  CurrentTest = "unsafe report";
+  namespace ur = turf::unsafe_report;
+
+  auto F = ur::scanSource("unsafe module;\n"
+                          "// unsafe { } and extern fn, in a comment\n"
+                          "extern from \"z\" fn zlibVersion(): string;\n"
+                          "@cleanup\nextern from \"z\" fn deflateEnd(p: ptr): int32;\n"
+                          "pub extern fn strlen(s: string): int;\n"
+                          "fn f(): int {\n"
+                          "    extern fn puts(s: string): int32;\n"
+                          "    unsafe { puts(\"unsafe { extern\"); }\n"
+                          "    return unsafe { strlen(\"x\"); };\n"
+                          "}\n");
+  CHECK(F.UnsafeModule);
+  CHECK_EQ(F.ExternFns, 4u);
+  CHECK_EQ(F.UnsafeBlocks, 2u);
+  CHECK_EQ(F.LinkLibraries.size(), 1u); // "z" once, though named twice
+  CHECK(F.Error.empty());
+  CHECK(F.any());
+
+  // Not the first statement: not the capability (the compiler rejects it).
+  auto Late = ur::scanSource("import mem;\nunsafe module;\n");
+  CHECK(!Late.UnsafeModule);
+  CHECK(!ur::scanSource("fn main(): int {\n    return 0;\n}\n").any());
+  // A file that does not lex: reported, with what came before the error.
+  auto Bad = ur::scanSource("extern fn a(): int;\nfn b(): string {\n    return \"open;\n}\n");
+  CHECK(!Bad.Error.empty());
+  CHECK_EQ(Bad.ExternFns, 1u);
+
+  // A project: the root, a granted dependency and an ungranted one.
+  const fs::path Base = Dir.Root / "unsafe-report";
+  fs::create_directories(Base / "app" / "src");
+  fs::create_directories(Base / "ffi" / "src" / "inner");
+  fs::create_directories(Base / "raw" / "src");
+  std::ofstream(Base / "app" / "src" / "main.tr")
+      << "import ffi;\nfn main(): int {\n    return ffi::len(\"ab\");\n}\n";
+  std::ofstream(Base / "ffi" / "src" / "ffi.tr")
+      << "unsafe module;\nextern fn strlen(s: string): int;\n"
+         "pub fn len(s: string): int {\n    return unsafe { strlen(s); };\n}\n";
+  std::ofstream(Base / "ffi" / "src" / "inner" / "m.tr")
+      << "extern from \"m\" fn sqrt(x: double): double;\n";
+  std::ofstream(Base / "raw" / "src" / "raw.tr")
+      << "unsafe module;\npub fn one(): int {\n    return 1;\n}\n";
+  const std::string GraphPath = (Base / "graph.json").string();
+  std::ofstream(GraphPath)
+      << "{\"format\": 1, \"root\": \"app\", \"packages\": {"
+         "\"app\": {\"src\": \"app/src\", \"deps\": [\"ffi\", \"raw\"], \"allow_unsafe\": true},"
+         "\"ffi\": {\"src\": \"ffi/src\", \"deps\": [], \"allow_unsafe\": true},"
+         "\"raw\": {\"src\": \"raw/src\", \"deps\": []}}}";
+  std::string Error;
+  auto Graph = LoadPackageGraph(GraphPath, Error);
+  CHECK(Graph.has_value());
+  if (!Graph)
+    return;
+  // This tree's lib/std (the test calls buildReport() directly, so no
+  // executable path is known to resolve an install root from).
+  const std::string Stdlib =
+      (fs::path(__FILE__).parent_path().parent_path().parent_path() / "lib" / "std").string();
+  ur::Report R;
+  CHECK(ur::buildReport(*Graph, Stdlib, R, Error));
+  CHECK_EQ(R.Packages.size(), 3u);
+  if (R.Packages.size() != 3)
+    return;
+  const auto &App = R.Packages[0], &Ffi = R.Packages[1], &Raw = R.Packages[2];
+  CHECK_EQ(App.Name, std::string("app"));
+  CHECK(App.AllowUnsafe);
+  CHECK_EQ(App.Modules, 1u);
+  CHECK(App.Files.empty());
+  CHECK_EQ(Ffi.Name, std::string("ffi"));
+  CHECK(Ffi.AllowUnsafe);
+  CHECK_EQ(Ffi.Modules, 2u);
+  CHECK_EQ(Ffi.UnsafeModules, 1u);
+  CHECK_EQ(Ffi.UnsafeBlocks, 1u);
+  CHECK_EQ(Ffi.ExternFns, 2u);
+  CHECK(Ffi.LinkLibraries.size() == 1 && Ffi.LinkLibraries[0] == "m");
+  CHECK_EQ(Ffi.Files.size(), 2u);
+  CHECK_EQ(Ffi.Files[1].Path, std::string("inner/m.tr"));
+  CHECK_EQ(Raw.Name, std::string("raw"));
+  CHECK(!Raw.AllowUnsafe); // no "allow_unsafe": not granted
+  CHECK_EQ(Raw.UnsafeModules, 1u);
+
+  // The stdlib, against a count made a second way: line by line, outside
+  // `//` comments.
+  CHECK(R.Stdlib.AllowUnsafe);
+  unsigned Files = 0, Pragmas = 0, Externs = 0;
+  for (const auto &E : fs::recursive_directory_iterator(Stdlib)) {
+    if (E.path().extension() != ".tr")
+      continue;
+    ++Files;
+    std::ifstream In(E.path());
+    std::string Line;
+    bool First = true;
+    while (std::getline(In, Line)) {
+      Line = Line.substr(0, Line.find("//"));
+      const size_t Start = Line.find_first_not_of(" \t\r");
+      if (Start == std::string::npos)
+        continue;
+      Line = Line.substr(Start);
+      if (First && Line.rfind("unsafe module;", 0) == 0)
+        ++Pragmas;
+      First = false;
+      if (Line.rfind("extern ", 0) == 0 || Line.rfind("pub extern ", 0) == 0)
+        ++Externs;
+    }
+  }
+  CHECK(Files > 0);
+  CHECK_EQ(R.Stdlib.Modules, Files);
+  CHECK_EQ(R.Stdlib.UnsafeModules, Pragmas);
+  CHECK_EQ(R.Stdlib.ExternFns, Externs);
+
+  // The JSON a driver reads.
+  const std::string Json = ur::reportJson(R);
+  CHECK(Json.find("\"format\":1") != std::string::npos);
+  CHECK(Json.find("\"raw\":{\"allow_unsafe\":false,\"extern_fns\":0,") != std::string::npos);
+  CHECK(Json.find("\"stdlib\":{\"allow_unsafe\":true,") != std::string::npos);
 }
 
 // A toolchain whose standard library cannot be found (an editor extension
@@ -2472,6 +2595,7 @@ int main() {
   testModuleNotImported(Dir);
   testPrivateInPublic(Dir);
   testMigratePub(Dir);
+  testUnsafeReport(Dir);
   testAmbiguousModuleImport(Dir);
   testModuleNotFoundHintsAtProject(Dir);
   testAnnotationDiagnostics();

@@ -431,6 +431,7 @@ add_library(turfcore STATIC
   src/codegen/CodegenStruct.cpp
   src/tooling/Formatter.cpp
   src/tooling/MigratePub.cpp
+  src/tooling/UnsafeReport.cpp
   src/frontend/Lexer.cpp
   src/diagnostics/CompilerFix.cpp
   src/diagnostics/DiagnosticsJson.cpp

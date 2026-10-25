@@ -69,4 +69,9 @@ std::optional<PackageGraph> LoadPackageGraph(const std::string &File,
                                              bool EntryIsModule,
                                              std::string &Error);
 
+/// The same checks with no file being compiled, for a tool that reads every
+/// package of a project instead (`turfc --unsafe-report`, LB-2).
+std::optional<PackageGraph> LoadPackageGraph(const std::string &File,
+                                             std::string &Error);
+
 #endif

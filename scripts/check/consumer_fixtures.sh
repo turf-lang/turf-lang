@@ -141,7 +141,32 @@ check_cli() {
     echo "   FAILED: turf hello.tr against build/turfc"; echo "$out" | sed 's/^/   | /'
     record turf FAIL "turf hello.tr against build/turfc (log: $log)"; return
   fi
-  record turf PASS "go vet, go test, handshake and run against build/turfc"
+  # LB-2: `turf audit` over a project with a granted dependency, an ungranted
+  # one and the stdlib, counted by this turfc (--unsafe-report, interface
+  # 1.12). A turf-cli that predates `turf audit` has no such command; that is
+  # said, not failed, until the turf release that has it is the default branch.
+  local audit="no turf audit in this turf-cli"
+  if "$TURF_BIN" help audit >/dev/null 2>&1; then
+    local P="$WORK/cli-audit"
+    mkdir -p "$P/app/src" "$P/ffi/src" "$P/raw/src"
+    printf '[package]\nname = "app"\nversion = "0.1.0"\n\n[dependencies]\nffi = { path = "../ffi" }\nraw = { path = "../raw" }\n\n[unsafe]\nallow = ["ffi"]\n' >"$P/app/turf.toml"
+    printf 'fn main(): int {\n    return 0;\n}\n' >"$P/app/src/main.tr"
+    printf '[package]\nname = "ffi"\nversion = "0.1.0"\n' >"$P/ffi/turf.toml"
+    printf 'unsafe module;\nextern from "z" fn zlibVersion(): string;\npub fn f(): int {\n    return unsafe { 1; };\n}\n' >"$P/ffi/src/ffi.tr"
+    printf '[package]\nname = "raw"\nversion = "0.1.0"\n' >"$P/raw/turf.toml"
+    printf 'unsafe module;\npub fn one(): int {\n    return 1;\n}\n' >"$P/raw/src/raw.tr"
+    if ! out=$(cd "$P/app" && TURF_COMPILER="$TURFC" "$TURF_BIN" audit 2>&1) \
+       || ! printf '%s\n' "$out" | grep -qE '^ffi +yes +1 +1 +1 +1 +z$' \
+       || ! printf '%s\n' "$out" | grep -qE '^raw +no +1 +1 +0 +0 +-$' \
+       || ! printf '%s\n' "$out" | grep -qE '^std +always ' \
+       || ! printf '%s\n' "$out" | grep -qF "in 'raw', which [unsafe] allow"; then
+      echo "$out" >>"$log"
+      echo "   FAILED: turf audit against build/turfc"; echo "$out" | sed 's/^/   | /'
+      record turf FAIL "turf audit against build/turfc (log: $log)"; return
+    fi
+    audit="turf audit"
+  fi
+  record turf PASS "go vet, go test, handshake, run and $audit against build/turfc"
 }
 
 check_lsp() {

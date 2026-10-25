@@ -29,6 +29,7 @@
 #include "frontend/Lexer.h"
 #include "analysis/Lint.h"
 #include "tooling/MigratePub.h"
+#include "tooling/UnsafeReport.h"
 #include "frontend/Parser.h"
 #include "tooling/PackageGraph.h"
 #include "llvm/Support/JSON.h" // IF-1: --version --json
@@ -145,8 +146,10 @@ static constexpr int TurfcInterfaceMajor = 1;
 // --json`, the manifest a tool reads instead of these lines. 1.11 (TDP-2-006)
 // adds `@test` functions: `--test` runs them (in the tests directory, and in
 // the root package's src/ when given a package graph) through `--test-build
-// <manifest>`, which only the runner passes.
-static constexpr int TurfcInterfaceMinor = 11;
+// <manifest>`, which only the runner passes. 1.12 (LB-2) adds
+// `--unsafe-report`, each package's unsafe surface as JSON; `turf audit` and
+// `turf graph --unsafe` ask for it.
+static constexpr int TurfcInterfaceMinor = 12;
 
 /// IF-1: the name of each addition to the driver interface, in the order of
 /// the history above, with the minor that added it. `turfc --version --json`
@@ -161,7 +164,7 @@ static constexpr InterfaceFeature InterfaceFeatures[] = {
     {"format-skip-unlexable", 5}, {"emit-obj", 6},
     {"test-only", 7},             {"lint-levels", 8},
     {"diagnostics-json", 9},      {"version-json", 10},
-    {"test-functions", 11},
+    {"test-functions", 11},       {"unsafe-report", 12},
 };
 
 // The exit statuses (FREEZE.md 6.21, F-CLI-1, REL-001). The split exists so a script
@@ -209,6 +212,7 @@ struct CompilerOptions {
   bool FormatWrite = false;           // --write (with --format or --migrate=pub): rewrite the file(s) in place instead
   bool FormatSkipUnlexable = false;   // --skip-unlexable (with --format --write|--check): a file the lexer rejects is reported as skipped, not as a failure
   bool MigratePub = false;            // --migrate=pub: LEC-002 -- add `pub` to every top-level declaration and struct field of the given files
+  bool UnsafeReport = false;          // --unsafe-report: LB-2 -- count each package's unsafe surface, as JSON
   std::vector<std::string> PositionalFiles; // every non-option argument, in order (--migrate=pub takes several)
   std::vector<std::string> LinkLibs;  // --link <name>: extra libraries to pass to the linker as -l<name>
   // OPT-001: `-O2` is the FROZEN default (FREEZE.md §6.10/§17.2) so a user
@@ -405,6 +409,57 @@ static int runMigratePub(const std::vector<std::string> &Files, bool Write) {
   return Status;
 }
 
+/// `turfc --unsafe-report --package-graph <file>` (LB-2): every package's
+/// unsafe surface and the stdlib's, as one line of JSON (UnsafeReport.h,
+/// docs/reference/schemas/unsafe-report.schema.json); `turf audit` and `turf
+/// graph --unsafe` read it. `turfc --unsafe-report <file.tr>...` reports the
+/// files given, outside any project. Compiles nothing. Exit status is 1 when
+/// the graph is not valid or a file cannot be read; a file that does not lex
+/// is reported (its "error"), not a failure.
+static int runUnsafeReport(const std::string &GraphFile,
+                           const std::vector<std::string> &Files) {
+  if (GraphFile.empty() == Files.empty()) {
+    std::cerr << "Usage: turfc --unsafe-report --package-graph <file>\n"
+                 "       turfc --unsafe-report <file.tr>...\n"
+                 "  Counts `unsafe module;` files, `unsafe { }` blocks, `extern fn`s and\n"
+                 "  `extern from` libraries: per package and for the standard library with\n"
+                 "  a package graph, per file without one. Prints JSON; compiles nothing.\n";
+    return ExitUsage;
+  }
+  if (!GraphFile.empty()) {
+    std::string Error;
+    auto Graph = LoadPackageGraph(GraphFile, Error);
+    if (!Graph) {
+      std::cerr << "Error: " << Error << "\n";
+      return ExitError;
+    }
+    llvm::SmallString<256> Stdlib(TurfInstallRoot());
+    llvm::sys::path::append(Stdlib, "lib", "std");
+    turf::unsafe_report::Report R;
+    if (!turf::unsafe_report::buildReport(*Graph, Stdlib.str().str(), R, Error)) {
+      std::cerr << "Error: " << Error << "\n";
+      return ExitError;
+    }
+    std::cout << turf::unsafe_report::reportJson(R) << "\n";
+    return ExitOk;
+  }
+  std::vector<turf::unsafe_report::FileSurface> Surfaces;
+  for (const auto &Path : Files) {
+    std::ifstream In(Path, std::ios::binary);
+    if (!In) {
+      std::cerr << "Error: Could not open file " << Path << "\n";
+      return ExitError;
+    }
+    std::ostringstream Text;
+    Text << In.rdbuf();
+    auto F = turf::unsafe_report::scanSource(Text.str());
+    F.Path = Path;
+    Surfaces.push_back(std::move(F));
+  }
+  std::cout << turf::unsafe_report::filesJson(Surfaces) << "\n";
+  return ExitOk;
+}
+
 static void handleExplainFlagIfPresent(int argc, char **argv) {
   for (int i = 1; i < argc; ++i) {
     if (std::string(argv[i]) != "--explain")
@@ -467,6 +522,7 @@ static const char *turfcUsage() {
          "         [--dump-instantiations]\n"
          "       turfc --format [--write | --check [--skip-unlexable]] <filename.tr>...\n"
          "       turfc --migrate=pub [--write] <module.tr>...\n"
+         "       turfc --unsafe-report (--package-graph <file> | <file.tr>...)\n"
          "       turfc --test [<tests-dir>] [--package-graph <file>] [--exclude <path>]\n"
          "         [--only <path>]\n"
          "         [-O0|-O1|-O2|-O3|-Os] [-g] [--link <libname>] [--jobs <n>]\n"
@@ -498,6 +554,7 @@ static const char *const KnownOptions[] = {
     "--diag-register",    "--exclude",      "--only",
     "--skip-unlexable", "--allow",      "--warn",         "--deny",
     "--lint-set",         "--diagnostics=", "--test-build",
+    "--unsafe-report",
 };
 
 /// `--allow|--warn|--deny <code>` and `--lint-set <2.N>` (V-1, LintLevels.h):
@@ -658,6 +715,8 @@ static CompilerOptions parseArgs(int argc, char **argv) {
         std::exit(ExitUsage);
       }
       opts.MigratePub = true;
+    } else if (arg == "--unsafe-report") {
+      opts.UnsafeReport = true;
     } else if (arg == "-o" && i + 1 < argc) {
       opts.OutputName = argv[++i];
     } else if (arg == "--package-graph" && i + 1 < argc) {
@@ -706,10 +765,10 @@ static CompilerOptions parseArgs(int argc, char **argv) {
     }
   }
 
-  // --migrate=pub takes any number of files and never compiles anything, so
-  // it skips the single-input-file checks below (runMigratePub() reports its
-  // own usage error).
-  if (opts.MigratePub)
+  // --migrate=pub and --unsafe-report take any number of files and never
+  // compile anything, so they skip the single-input-file checks below (each
+  // reports its own usage error).
+  if (opts.MigratePub || opts.UnsafeReport)
     return opts;
 
   // A module has no `main`, so it can be checked but never linked. Silently
@@ -1694,6 +1753,9 @@ static int runCompilerMain(int argc, char **argv) {
   // runs before any compiler state is initialized.
   if (opts.MigratePub)
     return runMigratePub(opts.PositionalFiles, opts.FormatWrite);
+  // LB-2: reads the files and the graph, compiles nothing.
+  if (opts.UnsafeReport)
+    return runUnsafeReport(opts.PackageGraphFile, opts.PositionalFiles);
 
   // Set the global AI flag so DiagnosticEngine knows whether to invoke the SLM.
   g_AIEnabled = opts.AIEnabled;

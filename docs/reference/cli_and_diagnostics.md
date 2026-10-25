@@ -411,14 +411,14 @@ A differing *release* version is never an error on its own. In a project, a mani
 
 ```text
 $ turfc --version --json
-{"features":["package-graph","exit-status-2","test","format-check","format-skip-unlexable","emit-obj","test-only","lint-levels","diagnostics-json","version-json","test-functions","smart"],"interface":{"major":1,"minor":11},"llvm":"22.1.8","manifest":1,"root":"/opt/turf","runtime":"turf_rt_abi_2_0","schemas":{"diagnostics":"1.0","package_graph":1},"turfc":"2.1.1"}
+{"features":["package-graph","exit-status-2","test","format-check","format-skip-unlexable","emit-obj","test-only","lint-levels","diagnostics-json","version-json","test-functions","unsafe-report","smart"],"interface":{"major":1,"minor":12},"llvm":"22.1.8","manifest":1,"root":"/opt/turf","runtime":"turf_rt_abi_2_0","schemas":{"diagnostics":"1.0","package_graph":1},"turfc":"2.1.1"}
 ```
 
 | Key | Value |
 |---|---|
 | `interface` | `{"major", "minor"}`, as line 2 of `turfc --version`. |
 | `schemas` | `diagnostics`: the [diagnostics JSON](#diagnostics-as-json) schema version; `package_graph`: the package-graph `"format"` `--package-graph` reads. |
-| `features` | One name per addition to the interface, in order: `package-graph` (1.1), `exit-status-2` (1.2), `test` (1.3), `format-check` (1.4), `format-skip-unlexable` (1.5), `emit-obj` (1.6), `test-only` (1.7), `lint-levels` (1.8), `diagnostics-json` (1.9), `version-json` (1.10), `test-functions` (1.11). Then what this build has: `smart`, `embedded-lld`, `bundled-runtime`. |
+| `features` | One name per addition to the interface, in order: `package-graph` (1.1), `exit-status-2` (1.2), `test` (1.3), `format-check` (1.4), `format-skip-unlexable` (1.5), `emit-obj` (1.6), `test-only` (1.7), `lint-levels` (1.8), `diagnostics-json` (1.9), `version-json` (1.10), `test-functions` (1.11), `unsafe-report` (1.12). Then what this build has: `smart`, `embedded-lld`, `bundled-runtime`. |
 | `turfc`, `llvm`, `runtime`, `root` | As the text lines. |
 
 ### Finding the compiler
@@ -461,6 +461,7 @@ Usage: turfc <filename.tr> [-o output] [--emit-llvm | --emit-obj] [--smart]
          [--dump-instantiations]
        turfc --format [--write | --check [--skip-unlexable]] <filename.tr>...
        turfc --migrate=pub [--write] <module.tr>...
+       turfc --unsafe-report (--package-graph <file> | <file.tr>...)
        turfc --test [<tests-dir>] [--package-graph <file>] [--exclude <path>]
          [--only <path>]
          [-O0|-O1|-O2|-O3|-Os] [-g] [--link <libname>] [--jobs <n>]
@@ -477,7 +478,7 @@ Usage: turfc <filename.tr> [-o output] [--emit-llvm | --emit-obj] [--smart]
 ```text
 $ turfc --version
 turfc 2.1.1
-interface 1.11
+interface 1.12
 llvm 22.1.8
 runtime turf_rt_abi_2_0
 root /opt/turf
@@ -485,7 +486,7 @@ linker system-cc
 smart built-in
 ```
 
-The interface covers what `turf` relies on: the flags it passes, the two-line start of `--version`, the exit statuses, and every other argument being accepted exactly as a direct invocation accepts it. A new flag or input raises the **minor**; removing a flag or changing its meaning raises the **major**. A tool that needs `--package-graph` requires interface 1.1 or later, `turfc --test` 1.3, `--emit-obj` 1.6, `turfc --test --only` 1.7, the lint-level flags 1.8, and `@test` functions in `turfc --test` 1.11.
+The interface covers what `turf` relies on: the flags it passes, the two-line start of `--version`, the exit statuses, and every other argument being accepted exactly as a direct invocation accepts it. A new flag or input raises the **minor**; removing a flag or changing its meaning raises the **major**. A tool that needs `--package-graph` requires interface 1.1 or later, `turfc --test` 1.3, `--emit-obj` 1.6, `turfc --test --only` 1.7, the lint-level flags 1.8, `@test` functions in `turfc --test` 1.11, and `--unsafe-report` 1.12.
 
 **Modes a tool uses:**
 
@@ -515,6 +516,12 @@ The interface covers what `turf` relies on: the flags it passes, the two-line st
   ```
 
   A bad graph is one line naming the file and exit 1. Without the flag `turfc` is in single-file mode. In a package build the file you name must be inside the root package's `src`.
+- `turfc --unsafe-report --package-graph <file.json>` counts where each package's unsafe code is (LB-2): for every package of the graph and for the standard library, the files that declare `unsafe module;`, the `unsafe { }` blocks, the `extern fn` declarations and the C libraries they name with `extern from`, and whether the package's `unsafe module;` is honored (`allow_unsafe`; always for the standard library). It reads every `.tr` file under each `src/`, imported or not, with the real lexer (a keyword in a comment or a string is not counted), compiles nothing and needs no entry file. `turfc --unsafe-report <file.tr>...` reports the files given. The output is one line of JSON, schema `docs/reference/schemas/unsafe-report.schema.json`; a file that does not lex carries an `"error"` and is counted up to it. Exit 1 for a bad graph or a file that cannot be read. `turf audit` and `turf graph --unsafe` run it ([Projects and packages](projects_and_packages.md#8-unsafe-module-in-dependencies)):
+
+  ```text
+  $ turfc --unsafe-report --package-graph build/package-graph.json
+  {"format":1,"packages":{"app":{"allow_unsafe":true,"extern_fns":0,"files":[],"link_libraries":[],"modules":1,"unsafe_blocks":0,"unsafe_modules":0},"ffi":{"allow_unsafe":true,"extern_fns":2,"files":[{"extern_fns":2,"link_libraries":["z"],"path":"ffi.tr","unsafe_blocks":1,"unsafe_module":true}],"link_libraries":["z"],"modules":1,"unsafe_blocks":1,"unsafe_modules":1}},"stdlib":{"allow_unsafe":true,...}}
+  ```
 - `turfc --format …`, `turfc --migrate=pub …`, `turfc --explain E0NN` and `turfc --test …` are what `turf fmt`, `turf migrate`, `turf explain` and `turf test` run.
 
 **`turf` never rewrites a compiler diagnostic.** A tool that runs `turf check` or `turfc --check` sees the same text and the same `[E0NN]` codes either way, and can match on them.

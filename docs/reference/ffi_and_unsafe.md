@@ -519,7 +519,10 @@ in a project. The details, including the errors for a bad name, are in
 
 Granting a dependency `[unsafe] allow` is a statement that you trust its
 author to get raw memory right: such a package is outside every guarantee in
-[Memory and safety](memory_and_safety.md).
+[Memory and safety](memory_and_safety.md). `turf audit` shows, per package,
+the `unsafe module;` files, `unsafe { }` blocks and `extern fn`s you would be
+trusting, and which packages are granted
+([Projects and packages](projects_and_packages.md#seeing-what-you-grant-turf-audit)).
 
 ---
 

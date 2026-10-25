@@ -813,7 +813,8 @@ is 1.
 | `turf run [--offline] [--locked] [flags] [-- args]` | `turf build`, then run `build/<name>`, passing the arguments after `--`, in the directory you typed the command in. The exit status is the program's. A library without `src/main.tr` says there is nothing to run and how to add one (section 1; exit 1). |
 | `turf check [--offline] [--locked] [flags]` | Every diagnostic, no executable. |
 | `turf clean` | Delete `build/`. Nothing to delete is not an error. |
-| `turf graph [--project <dir>] [--offline] [--locked]` | Print the package graph (the JSON `turf build` writes to `build/package-graph.json`) on stdout, including the root's `tests/` when the project has one. Writes nothing (no `turf.lock`, no `build/`) and needs no compiler. This is what an editor asks for, so that `import` there resolves as in `turf build`. |
+| `turf graph [--project <dir>] [--unsafe] [--offline] [--locked]` | Print the package graph (the JSON `turf build` writes to `build/package-graph.json`) on stdout, including the root's `tests/` when the project has one. Writes nothing (no `turf.lock`, no `build/`) and needs no compiler. This is what an editor asks for, so that `import` there resolves as in `turf build`. `--unsafe` adds each package's unsafe surface (an `"unsafe"` object per package and a top-level `"stdlib"`, section 8); that form needs a compiler, and is a report: `turfc` does not accept it back as a graph. |
+| `turf audit [--project <dir>] [--files] [--offline] [--locked]` | Show where the project's unsafe code is, one row per package and the standard library (section 8). Writes nothing. |
 | `turf fetch [--offline] [--locked]` | Do everything `build` does up to `turf.lock`, without compiling. Prints one line per git dependency: `jsonx de7262e335ed (tag=v1.0.0)`. Needs no compiler. |
 | `turf update [name…]` | Move git dependencies to what their refs point at now (section 5). |
 | `turf add <name> --path <dir>` / `--git <url> (--tag\|--branch\|--rev) <ref>` | Add a dependency (section 3). |
@@ -900,6 +901,50 @@ With that line the same build compiles.
   ```
 
 The standard library is always trusted.
+
+### Seeing what you grant: `turf audit`
+
+`turf audit` shows where the unsafe code is in the project and everything it
+depends on, so that what `[unsafe] allow` grants is something you can look at:
+
+```
+$ turf audit
+package   granted  files  unsafe module  unsafe { }  extern fn  C libraries
+app       own          1              0           0          0  -
+fastmath  no           1              1           0          1  m
+ffi       yes          2              2           1          3  z
+std       always      25             12           0         75  m
+
+note: 1 file declares `unsafe module;` in 'fastmath', which [unsafe] allow in /work/app/turf.toml does not list: the compiler rejects its raw-pointer uses (E130)
+```
+
+One row per package: the project's own first, its dependencies by name, then
+the standard library. `files` is how many `.tr` files are under the package's
+`src/` (every one is counted, imported or not), then how many of them declare
+`unsafe module;`, the `unsafe { }` blocks, the `extern fn` declarations and
+the C libraries they name with `extern from`. `granted` says whether the
+package's `unsafe module;` is honored: `own` for the project's own package,
+`yes` or `no` for a dependency as `[unsafe] allow` says, `always` for the
+standard library. `--files` adds a table of each file that has something to
+report:
+
+```
+$ turf audit --files
+...
+package   file                    unsafe module  unsafe { }  extern fn  C libraries
+fastmath  fastmath.tr             yes                     0          1  m
+ffi       ffi.tr                  yes                     1          2  z
+ffi       rawmod.tr               yes                     0          1  -
+std       collections/hashing.tr  yes                     0          0  -
+...
+```
+
+The counts come from the compiler (`turfc --unsafe-report`, which reads tokens
+with the real lexer, so a keyword in a comment or a string is not counted), so
+`turf audit` needs a compiler of driver interface 1.12 or later. It compiles
+nothing and writes nothing. `turf graph --unsafe` prints the same as JSON, for
+a tool. Native sources join the report with the `[native]` table (LB-1), which
+`turf.toml` does not have yet.
 
 ## 9. Distributing
 
