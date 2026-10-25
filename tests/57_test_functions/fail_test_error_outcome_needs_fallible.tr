@@ -1,0 +1,14 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: A test with an 'error' outcome returns '!void'
+// TDP-2-006: only a `!void` test can return the error it expects.
+error E {
+    Bad,
+}
+
+@test(error, E::Bad)
+fn a(): void {
+}
+
+fn main(): int {
+    return 0;
+}

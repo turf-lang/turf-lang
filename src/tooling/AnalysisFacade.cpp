@@ -16,6 +16,7 @@
 #include "turf/FrontEndIsolation.h"
 
 #include "frontend/AST.h"
+#include "frontend/TestRegistry.h"
 #include "analysis/Analysis.h"
 #include "analysis/CFG.h"
 #include "frontend/Lexer.h"
@@ -102,6 +103,13 @@ public:
     SavedDiagnostics_ = DiagnosticEngine::saveState();
     DiagnosticEngine::restoreState({});
 
+    // TDP-2-006: the analysis sees its own tests, in the caller's mode (a
+    // compile's fix check asks for every error, TestRegistry::Mode::Raw).
+    SavedTests_ = TestRegistry::save();
+    TestRegistry::State Fresh;
+    Fresh.M = SavedTests_.M;
+    TestRegistry::restore(std::move(Fresh));
+
     // The package graph decides what `import` can reach (LEC-001); an
     // analysis starts with none, as a plain single-file compile does, and
     // gets one only from AnalysisOptions::PackageGraphFile.
@@ -130,6 +138,7 @@ public:
 
     GlobalSymbolTable = std::move(SavedGlobalSymbolTable_);
     DiagnosticEngine::restoreState(std::move(SavedDiagnostics_));
+    TestRegistry::restore(std::move(SavedTests_));
 
     CompilerExecutablePath = SavedCompilerExecutablePath_;
     g_AllowUnsafeModules = SavedAllowUnsafeModules_;
@@ -180,6 +189,7 @@ private:
   bool SavedRecoverActive_, SavedAIEnabled_, SavedAllowUnsafeModules_;
   std::string SavedCompilerExecutablePath_;
   DiagnosticEngine::State SavedDiagnostics_;
+  TestRegistry::State SavedTests_;
   PackageGraph SavedPackageGraph_;
   std::unique_ptr<SymbolTable> SavedGlobalSymbolTable_;
 };
@@ -890,7 +900,9 @@ AnalysisResult analyze(const std::vector<SourceBuffer> &Buffers,
         ErrorLines.push_back(D.Loc.Line);
     for (size_t K = 0; K < I->Program.size(); ++K) {
       auto *F = dynamic_cast<FuncDefExprAST *>(I->Program[K].get());
-      if (!F || !F->getBody() || !F->getTypeParams().empty())
+      // A compile_error test whose expected error was taken has that error
+      // in no list here (TestRegistry.h); it is skipped like one that has.
+      if (!F || !F->getBody() || !F->getTypeParams().empty() || F->TestBodyFailed)
         continue;
       const int First = F->getLoc().Line;
       int End = std::numeric_limits<int>::max();

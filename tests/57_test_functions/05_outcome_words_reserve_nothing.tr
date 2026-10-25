@@ -1,0 +1,24 @@
+// TDP-2-006 (issue #299): `test` and the outcome words mean something only
+// inside `@test(...)`. A program that uses them as names is unaffected.
+import test;
+
+fn compile_error(n: int): int {
+    return n + 1;
+}
+
+fn no_warnings(): bool {
+    return true;
+}
+
+fn panic(message: string): int {
+    return message.length();
+}
+
+fn main(): int {
+    immut warning: int = compile_error(1);
+    mut exit: int = panic("ab");
+    exit = exit + warning;
+    test::assert(no_warnings(), "a function named no_warnings");
+    test::assert(exit == 4, "names that are outcome words");
+    return 0;
+}

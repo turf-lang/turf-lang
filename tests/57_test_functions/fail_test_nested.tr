@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E038
+// EXPECT-DIAG: Nested function definitions are not allowed
+// TDP-2-006: a test sits at the top level of a file; inside another function
+// it is a nested function, which Turf has none of.
+fn outer(): void {
+    @test
+    fn inner(): void {
+    }
+}
+
+fn main(): int {
+    return 0;
+}

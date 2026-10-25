@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: 'E041' is an error's code, not a warning's
+// TDP-2-006: the reverse of fail_test_warning_code_as_error.tr.
+@test(warning, E041, "")
+fn a(): void {
+}
+
+fn main(): int {
+    return 0;
+}

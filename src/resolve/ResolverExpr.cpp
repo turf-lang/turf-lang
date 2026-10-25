@@ -11,6 +11,7 @@
  */
 
 #include "resolve/Resolver.h"
+#include "frontend/TestAnnotation.h"
 #include "resolve/SymbolTable.h"
 
 #include <algorithm> // std::find
@@ -184,6 +185,11 @@ void Resolver::visitVariable(VariableExprAST &Node) {
       // A generic function is a template: the type checker instantiates it
       // from the function type its position expects
       // (TypeChecker::typeGenericFunctionValue()).
+      // TDP-2-006: a test is never part of a build, so it has no value (E173).
+      if (!Candidates[0]->annotationsNamed(TestAnnotation::Name).empty()) {
+        TestFunctionUseError(Node.getLoc(), Candidates[0]->BaseName).raise();
+        return;
+      }
       Node.ResolvedFunctionRef =
           std::make_shared<ResolverFunctionSymbol>(*Candidates[0]);
       return;

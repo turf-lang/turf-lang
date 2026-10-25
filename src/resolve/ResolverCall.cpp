@@ -11,6 +11,7 @@
  */
 
 #include "resolve/Resolver.h"
+#include "frontend/TestAnnotation.h"
 #include "resolve/SymbolTable.h"
 
 #include <algorithm> // std::find
@@ -51,6 +52,16 @@ void Resolver::resolveWrittenTypeArgs(ExprAST *Expr) {
     resolveWrittenTypeArgs(M->TypeArgs, M->getNameLoc());
   }
 }
+
+// TDP-2-006 (issue #299): a test is never part of a build, so nothing may
+// call it (E173). Every candidate the call could reach is checked: a test
+// takes no arguments, so it is a candidate exactly when the call passes none.
+static void rejectTestCall(const FuncCallExprAST &Node) {
+  for (const auto &Cand : Node.ResolvedCandidates)
+    if (Cand && !Cand->annotationsNamed(TestAnnotation::Name).empty())
+      TestFunctionUseError(Node.getLoc(), Cand->BaseName).raise();
+}
+
 
 void Resolver::visitFuncCall(FuncCallExprAST &Node) {
   resolveWrittenTypeArgs(const_cast<ExprAST *>(Node.getCallee()));
@@ -427,6 +438,7 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
         }
         if (Node.ResolvedCandidates.size() == 1)
           Node.ResolvedCallTarget = Node.ResolvedCandidates[0];
+        rejectTestCall(Node);
         return;
       }
 
@@ -733,6 +745,7 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
   if (Node.ResolvedCandidates.size() == 1) {
     Node.ResolvedCallTarget = Node.ResolvedCandidates[0];
   }
+  rejectTestCall(Node);
 }
 
 

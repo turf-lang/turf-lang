@@ -1,0 +1,17 @@
+// TDP-2-006 (issue #299): an `error` outcome names a module's error type the
+// way any code does, bare once imported by name or qualified by its module,
+// and is matched against the error value's own tag (`fs::FsError::...`).
+import fs;
+import fs::FsError;
+
+@test(error, FsError::RemoveFileFailed)
+fn imported_by_name(): !void {
+    try fs::remove_file("no/such/file/here");
+    return;
+}
+
+@test(error, fs::FsError::RemoveFileFailed)
+fn qualified_by_its_module(): !void {
+    try fs::remove_file("no/such/file/here");
+    return;
+}

@@ -49,6 +49,52 @@ std::vector<std::string> CheckRuntime(const std::string &Source, const std::stri
 /// `// EXPECT-EXIT: <status>`, for an abort that is silent by design.
 std::vector<std::string> CheckExit(const std::string &Source, int Status);
 
+/// TDP-2-006: whether @p Source declares a test function, a line that starts
+/// with `@test` (after blanks). The runner builds such a file's tests with
+/// `--test-build`; a comment or string that mentions `@test` mid-line does not
+/// count.
+bool HasTestFunctions(const std::string &Source);
+
+/// One `@test` function as a test build's manifest describes it
+/// (src/frontend/TestRegistry.cpp has the format).
+struct TestCase {
+  struct Diag {
+    std::string Code, Message, Fix;
+    int Line = 0;
+  };
+  std::string Name;
+  int Line = 0;
+  /// "returns", or the outcome word: compile_error, warning, no_warnings,
+  /// panic, exit, error.
+  std::string Outcome;
+  std::string Code, Text, Error;
+  bool HasFix = false;
+  std::string Fix;
+  int Status = 0;
+  /// The number the test program runs it by, -1 when it is not run.
+  int Run = -1;
+  std::vector<Diag> Errors, Warnings;
+};
+
+/// Reads a manifest. On failure returns false and sets @p Error.
+bool ParseManifest(const std::string &Text, std::vector<TestCase> &Cases, bool &HasMain,
+                   std::string &Error);
+
+/// A compile_error test: the errors inside its body against its outcome.
+std::vector<std::string> JudgeCompileError(const TestCase &C);
+
+/// A warning or no_warnings test, before it runs: the warnings inside its
+/// body against its outcome. Empty for any other outcome.
+std::vector<std::string> JudgeWarnings(const TestCase &C);
+
+/// How test @p C's own process ended against its outcome. @p Output is what
+/// it printed, with the line the test program reports through.
+std::vector<std::string> JudgeRun(const TestCase &C, int Status, bool TimedOut,
+                                  const std::string &Output);
+
+/// @p Output without the lines the test program reports through.
+std::string ProgramOutput(const std::string &Output);
+
 /// The register of tests whose diagnostic is not pinned by an error code
 /// (tests/DIAGNOSTIC_GAPS.txt, issue #263). It is a policy of the compiler's
 /// own suite, so `--test` applies it only when handed one; an ordinary

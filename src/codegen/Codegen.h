@@ -10,6 +10,8 @@
 #include "llvm/IR/Module.h"
 #include <map>
 #include <memory>
+#include <string>
+#include <vector>
 
 class ExprAST;
 
@@ -116,6 +118,13 @@ inline constexpr const char *RuntimeAbiSymbol = "turf_rt_abi_2_0";
 // through the wrapper's ordinary in-module call to it, needing no separate
 // preserve-set entry.
 void WrapMainWithRuntimeBootstrap();
+
+// TDP-2-006: a test build's entry point (`turfc --test-build`). Defines
+// `main(argc, argv)` to run the test numbered argv[1] -- @p TestSymbols[N],
+// each a test function already emitted -- and report how it ended
+// (CodegenFunc.cpp). Called in place of a program's own `main`, which a test
+// build drops, and before WrapMainWithRuntimeBootstrap(), which wraps it.
+void EmitTestHarness(const std::vector<std::string> &TestSymbols);
 
 // RT-001: emits a TurfTypeDesc constant global (runtime/turfrt.h) for every
 // real, fully-built aggregate type in the module. Defined in

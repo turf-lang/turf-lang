@@ -152,22 +152,17 @@ nothing can import a program.
 ### Tests: `turf test`
 
 `turf test` compiles and runs every `.tr` file under the project's `tests/`
-directory, at any depth, in parallel, and exits 0 only if all of them pass.
-**A project with no `tests/` directory is an error**, and so is one whose
-`tests/` holds no tests: a run of zero tests that reports success is how an
-untested project goes unnoticed.
+directory, at any depth, and every [`@test`](functions_and_modules.md#test)
+function in the files of its `src/`, in parallel, and exits 0 only if all of
+them pass. **A project with no test anywhere is an error**: no `tests/`
+directory and no `@test` function under `src/`, or a `tests/` that holds no
+tests. A run of zero tests that reports success is how an untested project goes
+unnoticed.
 
 ```
 $ turf test
-turf: this project has no tests/ directory (looked for /home/me/app/tests)
-hint: create it and put test files in it, for example tests/basic.tr:
-
-        import test;
-
-        fn main(): int {
-            test::assert(1 + 1 == 2, "arithmetic still works");
-            return 0;
-        }
+Error: no tests: 'tests' does not exist, and no file under src/ declares a `@test` function.
+  hint: write a `@test` function beside the code it checks, or create 'tests' and put test files (`.tr`) in it.
 ```
 
 A test is an ordinary program with a `main` that returns 0, and the stdlib's
@@ -180,6 +175,15 @@ the file's name:
 | `fail_name.tr` | it **fails to compile** (the compiler crashing does not count) |
 | `fail_name.tr` containing the comment `// RUNTIME_ABORT_EXPECTED` | it compiles and then aborts (exits non-zero) |
 | `name_module.tr` | never run: a companion for a test to `import` |
+
+A file with a line starting `@test` declares tests beside the code they check
+(see [`@test`](functions_and_modules.md#test)): it needs no `main`, and each
+`@test` function is a test of its own, reported as `file.tr: test_name`. A
+file under `tests/` that also has a `main` is run as an ordinary program too.
+The root package's `src/` files that declare tests are run as well (their
+`main` is not a test); `turf test <path>...` runs only the paths it names, so no
+`src/` test then. A file whose tests do not build is one failure, `COMPILE
+FAILED (its tests did not run)`.
 
 Comments can pin the reason, not only the outcome, so a test cannot keep passing
 because it broke in some other way:
@@ -815,7 +819,7 @@ is 1.
 | `turf add <name> --path <dir>` / `--git <url> (--tag\|--branch\|--rev) <ref>` | Add a dependency (section 3). |
 | `turf remove <name>` | Remove one. |
 | `turf publish` | Reserved. There is no registry in 2.0. |
-| `turf test [path...] [--offline] [--locked] [--jobs n] [--timeout s] [--exclude path]` | Compile and run every test under `tests/`, or only the files and directories named; an error if there is no `tests/` (section 1, *Tests*). |
+| `turf test [path...] [--offline] [--locked] [--jobs n] [--timeout s] [--exclude path]` | Compile and run every test under `tests/` and every `@test` function in `src/`, or only the files and directories of `tests/` named; an error if there is no test at all (section 1, *Tests*). |
 | `turf fmt`, `turf explain`, `turf migrate`, `turf dump`, `turf compile` | Work on files, in or out of a project ([CLI & Diagnostics](cli_and_diagnostics.md)). `turf fmt --write` with no path formats the project's `src/` and `tests/`. |
 
 **Compiler flags are forwarded.** `turf build -O2`, `turf build -g` and

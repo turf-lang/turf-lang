@@ -11,6 +11,8 @@
  */
 
 #include "sema/TypeChecker.h"
+#include "frontend/TestAnnotation.h"
+#include "frontend/TestRegistry.h"
 
 // AST.h is needed for the full definition of every node type.
 // It drags in LLVM headers, but TypeChecker itself does not use any LLVM API.
@@ -615,7 +617,45 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
 }
 
 
+// TDP-2-006: as Resolver::visitFuncDef() (ResolverDecl.cpp) -- an error
+// inside a compile_error test's body ends only that declaration, and is the
+// test's (TestRegistry.h).
 void TypeChecker::visitFuncDef(FuncDefExprAST &Node) {
+  if (Node.TestBodyFailed)
+    return;
+  if (!TestAnnotation::isCompileErrorTest(Node)) {
+    checkFuncDef(Node);
+    return;
+  }
+  const auto SavedReturns = ReturnTypeStack_;
+  const auto SavedNarrow = MachineNarrowStack_;
+  const auto SavedLoopVars = LoopVarTypes_;
+  const int SavedUnsafe = UnsafeDepth_;
+  const bool SavedCallerLocation = InCallerLocationFunc_;
+  const std::string SavedFuncName = CurrentFuncName_;
+  const std::string SavedModule = CurrentModule_;
+  const bool SavedRecover = g_recoverActive;
+  g_recoverActive = true;
+  try {
+    checkFuncDef(Node);
+  } catch (const RecoverUnwind &) {
+    g_recoverActive = SavedRecover;
+    if (!TestRegistry::lastErrorCaptured())
+      throw;
+    ReturnTypeStack_ = SavedReturns;
+    MachineNarrowStack_ = SavedNarrow;
+    LoopVarTypes_ = SavedLoopVars;
+    UnsafeDepth_ = SavedUnsafe;
+    InCallerLocationFunc_ = SavedCallerLocation;
+    CurrentFuncName_ = SavedFuncName;
+    CurrentModule_ = SavedModule;
+    Node.TestBodyFailed = true;
+    return;
+  }
+  g_recoverActive = SavedRecover;
+}
+
+void TypeChecker::checkFuncDef(FuncDefExprAST &Node) {
   // Unconditional (issue #238, "disallow outright" -- see
   // checkNoRawPointersInSignature()'s own doc comment): a plain function's
   // raw pointer parameter/return type is never fixable by wrapping in

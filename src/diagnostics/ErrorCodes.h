@@ -507,6 +507,9 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // `@deprecated("...")` (Lint.cpp). First code added after 2.1, hence the
     // explicit SinceMinor: `--lint-set 2.1` leaves it at `allow`.
     {"E172", "DeprecatedUseWarning", "Use of a deprecated item", SLM::ErrorCategory::DECLARATION, false, 2},
+    // TDP-2-006 (issue #299): a call to, or a value of, a `@test` function
+    // (ResolverCall.cpp, ResolverExpr.cpp).
+    {"E173", "TestFunctionUseError", "Use of a test function", SLM::ErrorCategory::DECLARATION, false, 2},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

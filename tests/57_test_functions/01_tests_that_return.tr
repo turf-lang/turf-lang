@@ -1,0 +1,40 @@
+// TDP-2-006 (issue #299): `@test` functions beside the code they check. A
+// file of tests needs no `main`: `turf test` builds the file's tests into a
+// program of their own and runs each one in a process of its own.
+import os;
+import test;
+
+error PortError {
+    OutOfRange,
+}
+
+fn parse_port(n: int): !int {
+    if n < 1 || n > 65535 {
+        return PortError::OutOfRange;
+    }
+    return n;
+}
+
+// Private, and still reachable: a test is in the same file as what it checks.
+fn double_it(n: int): int {
+    return n * 2;
+}
+
+@test
+fn doubles_a_number(): void {
+    test::assert(double_it(21) == 42, "21 doubled is 42");
+}
+
+@test
+fn accepts_a_valid_port(): !void {
+    immut port: int = try parse_port(8080);
+    test::assert(port == 8080, "8080 is a port");
+    return;
+}
+
+@test
+fn sees_every_argument(): void {
+    // The test program is run as `<program> <n>`: os::argc() works as in a
+    // program's own main.
+    test::assert(os::argc() == 2, "the test's number is its argument");
+}

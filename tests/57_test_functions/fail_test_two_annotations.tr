@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: A function has one '@test'
+// TDP-2-006: one test, one outcome.
+@test
+@test(panic, "")
+fn a(): void {
+}
+
+fn main(): int {
+    return 0;
+}

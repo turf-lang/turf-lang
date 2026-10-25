@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: 'compile_error' is an outcome, and an outcome is the first argument
+// TDP-2-006: the outcome comes first, so a word in any later place is a
+// mistake (here, two outcomes), not a second outcome.
+@test(panic, "boom", compile_error)
+fn a(): void {
+}
+
+fn main(): int {
+    return 0;
+}

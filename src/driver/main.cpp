@@ -19,6 +19,7 @@
 #include "sema/Builtins.h"
 #include "codegen/BundledLink.h"
 #include "codegen/Codegen.h"
+#include "frontend/TestRegistry.h"
 #include "diagnostics/Colors.h"
 #include "diagnostics/ErrorCategory.h"
 #include "diagnostics/ErrorCodes.h"
@@ -141,8 +142,11 @@ static constexpr int TurfcInterfaceMajor = 1;
 // 2.N`, also accepted by `--test`; `turf` asks for it only when `turf.toml`
 // has a [lints] table. 1.9 (DX-2) adds `--diagnostics=json|text`; a tool
 // that reads diagnostics as JSON asks for it. 1.10 (IF-1) adds `--version
-// --json`, the manifest a tool reads instead of these lines.
-static constexpr int TurfcInterfaceMinor = 10;
+// --json`, the manifest a tool reads instead of these lines. 1.11 (TDP-2-006)
+// adds `@test` functions: `--test` runs them (in the tests directory, and in
+// the root package's src/ when given a package graph) through `--test-build
+// <manifest>`, which only the runner passes.
+static constexpr int TurfcInterfaceMinor = 11;
 
 /// IF-1: the name of each addition to the driver interface, in the order of
 /// the history above, with the minor that added it. `turfc --version --json`
@@ -157,6 +161,7 @@ static constexpr InterfaceFeature InterfaceFeatures[] = {
     {"format-skip-unlexable", 5}, {"emit-obj", 6},
     {"test-only", 7},             {"lint-levels", 8},
     {"diagnostics-json", 9},      {"version-json", 10},
+    {"test-functions", 11},
 };
 
 // The exit statuses (FREEZE.md 6.21, F-CLI-1, REL-001). The split exists so a script
@@ -195,6 +200,7 @@ struct CompilerOptions {
   bool Check = false;                 // --check: LEC-001 -- run every diagnostic, write no output file
   bool CheckAsModule = false;         // --module (with --check): the file is an imported module, so no `main` is required
   std::string PackageGraphFile;       // --package-graph <file>: LEC-001 stage 4, a package build (PackageGraph.h)
+  std::string TestManifest;           // --test-build <file>: TDP-2-006, build the file's @test functions into a test program, and write what each expects here (TestRegistry.h)
   bool RunTypeChecker = false;        // --typecheck: run TypeChecker pass (shadow mode, Issue #7)
   bool DumpTypechecked = false;       // --dump-typechecked: run TypeChecker then print type-annotated AST
   bool DumpModules = false;           // --dump-modules: print full module-system introspection
@@ -455,7 +461,7 @@ static const char *turfcUsage() {
          "         [--allow-unsafe-modules] [--stdlib-warnings] [--diagnostics=json|text]\n"
          "         [--allow <code>] [--warn <code>] [--deny <code>] [--lint-set <2.N>]\n"
          "         [-O0|-O1|-O2|-O3|-Os] [-g] [--target=<triple>] [-mcpu=<cpu>]\n"
-         "         [--check [--module]] [--package-graph <file>]\n"
+         "         [--check [--module]] [--package-graph <file>] [--test-build <manifest>]\n"
          "         [--resolve] [--typecheck] [--dump-ast] [--dump-resolver-symbols]\n"
          "         [--dump-resolved] [--dump-typechecked] [--dump-modules]\n"
          "         [--dump-instantiations]\n"
@@ -491,7 +497,7 @@ static const char *const KnownOptions[] = {
     "--test",             "--jobs",         "--timeout",
     "--diag-register",    "--exclude",      "--only",
     "--skip-unlexable", "--allow",      "--warn",         "--deny",
-    "--lint-set",         "--diagnostics=",
+    "--lint-set",         "--diagnostics=", "--test-build",
 };
 
 /// `--allow|--warn|--deny <code>` and `--lint-set <2.N>` (V-1, LintLevels.h):
@@ -656,6 +662,8 @@ static CompilerOptions parseArgs(int argc, char **argv) {
       opts.OutputName = argv[++i];
     } else if (arg == "--package-graph" && i + 1 < argc) {
       opts.PackageGraphFile = argv[++i];
+    } else if (arg == "--test-build" && i + 1 < argc) {
+      opts.TestManifest = argv[++i];
     } else if (arg == "--link" && i + 1 < argc) {
       opts.LinkLibs.push_back(argv[++i]);
     } else if (isLintFlag(arg) && i + 1 < argc) {
@@ -684,7 +692,7 @@ static CompilerOptions parseArgs(int argc, char **argv) {
         std::exit(ExitUsage);
       }
     } else if (arg == "-o" || arg == "--package-graph" || arg == "--link" ||
-               isLintFlag(arg)) {
+               arg == "--test-build" || isLintFlag(arg)) {
       // Reaching here means the value-taking branches above did not match, i.e.
       // the option is the last argument. "Unknown option: -o" would be a lie.
       std::cerr << "Error: option '" << arg << "' needs a value.\n"
@@ -710,6 +718,12 @@ static CompilerOptions parseArgs(int argc, char **argv) {
   if (opts.CheckAsModule && !opts.Check) {
     std::cerr << "Error: --module only applies with --check (a module has no "
                  "entry point, so it cannot be linked).\n";
+    std::exit(ExitUsage);
+  }
+
+  if (!opts.TestManifest.empty() && opts.Check) {
+    std::cerr << "Error: --test-build builds a test program; it cannot be combined "
+                 "with --check.\n";
     std::exit(ExitUsage);
   }
 
@@ -1695,8 +1709,12 @@ static int runCompilerMain(int argc, char **argv) {
   // dependency.
   if (!opts.PackageGraphFile.empty()) {
     std::string GraphError;
+    // A test build's entry may be any file of the package: its tests are the
+    // program, wherever they are written (TDP-2-006).
     auto Graph = LoadPackageGraph(opts.PackageGraphFile, opts.InputFile,
-                                  /*EntryIsModule=*/opts.Check && opts.CheckAsModule, GraphError);
+                                  /*EntryIsModule=*/(opts.Check && opts.CheckAsModule) ||
+                                      !opts.TestManifest.empty(),
+                                  GraphError);
     if (!Graph) {
       std::cerr << "Error: " << GraphError << "\n";
       return 1;
@@ -1714,6 +1732,10 @@ static int runCompilerMain(int argc, char **argv) {
   // g_AllowUnsafeModules just above, nothing during parsing/resolving reads it.
   g_ShowStdlibWarnings = opts.ShowStdlibWarnings;
   DiagnosticsJson::Enabled = opts.DiagnosticsJson;
+  // TDP-2-006: before anything is parsed, since the Parser registers each
+  // test and every pass after it asks the registry about errors.
+  TestRegistry::setMode(opts.TestManifest.empty() ? TestRegistry::Mode::Build
+                                                  : TestRegistry::Mode::TestBuild);
 
   // TOOL-001: must be set before InitializeModule() runs (below) -- that's
   // the one call site that decides whether DBuilder/DebugCU get built at
@@ -2558,6 +2580,41 @@ static int runCompilerMain(int argc, char **argv) {
   if (DiagnosticEngine::hasErrors())
     return 1;
 
+  // TDP-2-006: a build leaves every test out (nothing can call one: E173);
+  // a test build makes the main file's runnable tests the program, in place
+  // of its own `main`.
+  bool HasMain = false;
+  {
+    Function *UserMain = TheModule->getFunction("main");
+    HasMain = UserMain && !UserMain->empty();
+  }
+  std::vector<std::string> RunnableTests;
+  if (!opts.TestManifest.empty()) {
+    for (const TestRegistry::Test *T : TestRegistry::mainFileTests())
+      if (!T->Symbol.empty() && T->SpecOk)
+        RunnableTests.push_back(T->Symbol);
+  }
+  for (const TestRegistry::Test &T : TestRegistry::tests()) {
+    if (T.Symbol.empty() ||
+        std::find(RunnableTests.begin(), RunnableTests.end(), T.Symbol) != RunnableTests.end())
+      continue;
+    if (Function *F = TheModule->getFunction(T.Symbol); F && F->use_empty())
+      F->eraseFromParent();
+  }
+  if (!opts.TestManifest.empty()) {
+    if (Function *UserMain = TheModule->getFunction("main")) {
+      UserMain->setName("__turf_program_main");
+      UserMain->setLinkage(GlobalValue::InternalLinkage);
+      if (UserMain->use_empty())
+        UserMain->eraseFromParent();
+    }
+    EmitTestHarness(RunnableTests);
+    if (!TestRegistry::writeManifest(opts.TestManifest, HasMain, RunnableTests)) {
+      std::cerr << "Error: cannot write the test manifest '" << opts.TestManifest << "'.\n";
+      return 1;
+    }
+  }
+
   // --check (LEC-001): `--typecheck`/`--resolve`/the `--dump-*` flags are named
   // like check modes but all fall through to here and link an executable, so
   // a check-only mode did not exist -- and the `turf` front end's `check`
@@ -2577,8 +2634,9 @@ static int runCompilerMain(int argc, char **argv) {
   // module (a module is only "a file someone imports"), so the caller says so:
   // `--module` checks a file as an importable module and skips the `main`
   // requirement. In a package build (LEC-001 stage 4) the package graph
-  // answers this instead: only src/main.tr is an entry point.
-  if (!(opts.Check && opts.CheckAsModule)) {
+  // answers this instead: only src/main.tr is an entry point. A test build's
+  // entry point is the one EmitTestHarness() just made.
+  if (!(opts.Check && opts.CheckAsModule) && opts.TestManifest.empty()) {
     // Verify that an explicit 'main' function was defined in the primary module
     Function *MainFunc = TheModule->getFunction("main");
     if (!MainFunc || MainFunc->empty()) {

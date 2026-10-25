@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: 'E999' is not a code the compiler has
+// TDP-2-006: an expected code is checked against the compiler's registry.
+@test(compile_error, E999, "")
+fn a(): void {
+    undeclared();
+}
+
+fn main(): int {
+    return 0;
+}

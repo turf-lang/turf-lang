@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E173
+// EXPECT-DIAG: 'first' is a test
+// TDP-2-006: tests run one at a time, each on its own; one test calling
+// another is an error too.
+@test
+fn first(): void {
+    io::printline(1);
+}
+
+@test
+fn second(): void {
+    first();
+}

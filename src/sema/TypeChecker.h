@@ -304,6 +304,9 @@ public:
 
   // ── Functions & calls ─────────────────────────────────────────────────────
   void visitFuncDef(FuncDefExprAST &Node) override;
+  /// visitFuncDef()'s work; visitFuncDef() skips a compile_error test the
+  /// Resolver already rejected and recovers around one (TestRegistry.h).
+  void checkFuncDef(FuncDefExprAST &Node);
   void visitFuncCall(FuncCallExprAST &Node) override;
   /// Resolution proper; visitFuncCall() applies an LG-1 written type
   /// (`List<int>::default()`) to its result.

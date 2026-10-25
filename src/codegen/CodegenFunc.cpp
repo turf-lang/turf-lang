@@ -17,6 +17,8 @@
  */
 
 #include "codegen/Codegen.h"
+#include "frontend/TestAnnotation.h"
+#include "frontend/TestRegistry.h"
 #include "frontend/AST.h"
 #include "frontend/ASTChildWalker.h"
 #include "frontend/Parser.h" // WasDeclaredInsideTopLevelUnsafe()
@@ -285,6 +287,77 @@ void WrapMainWithRuntimeBootstrap() {
     WB.CreateRet(Result);
 }
 
+// TDP-2-006: see Codegen.h. The program judges nothing itself: it runs the
+// one test its argument names and says how the test ended, on stdout, in a
+// line `turfc --test` reads -- `turf-test: returned` or `turf-test: error
+// <Type>::<Variant>`. A test that panics or calls sys::exit() never reaches
+// either, and the runner reads its exit status instead.
+void EmitTestHarness(const std::vector<std::string> &TestSymbols) {
+  Type *I32Ty = Type::getInt32Ty(*TheContext);
+  Type *PtrTy = PointerType::get(*TheContext, 0);
+  Function *Main = Function::Create(FunctionType::get(I32Ty, {I32Ty, PtrTy}, false),
+                                    Function::ExternalLinkage, "main", TheModule.get());
+  auto ArgIt = Main->args().begin();
+  Argument *Argc = &*ArgIt;
+  Argument *Argv = &*(++ArgIt);
+  Argc->setName("argc");
+  Argv->setName("argv");
+
+  FunctionCallee Atoi =
+      TheModule->getOrInsertFunction("atoi", FunctionType::get(I32Ty, {PtrTy}, false));
+  FunctionCallee Printf =
+      TheModule->getOrInsertFunction("printf", FunctionType::get(I32Ty, {PtrTy}, true));
+  FunctionCallee Fflush =
+      TheModule->getOrInsertFunction("fflush", FunctionType::get(I32Ty, {PtrTy}, false));
+
+  BasicBlock *Entry = BasicBlock::Create(*TheContext, "entry", Main);
+  BasicBlock *Usage = BasicBlock::Create(*TheContext, "usage", Main);
+  BasicBlock *Pick = BasicBlock::Create(*TheContext, "pick", Main);
+  Builder->SetInsertPoint(Entry);
+  // sys::args() inside a test reads the same storage a real main fills.
+  EnsureArgvHelpers();
+  Builder->CreateStore(Builder->CreateSExt(Argc, Type::getInt64Ty(*TheContext)), ArgcStorageGV);
+  Builder->CreateStore(Argv, ArgvStorageGV);
+  Builder->CreateCondBr(Builder->CreateICmpSLT(Argc, ConstantInt::get(I32Ty, 2)), Usage, Pick);
+
+  Builder->SetInsertPoint(Usage);
+  Builder->CreateRet(ConstantInt::get(I32Ty, 2));
+
+  Builder->SetInsertPoint(Pick);
+  Value *Which = Builder->CreateCall(
+      Atoi, {Builder->CreateLoad(PtrTy, Builder->CreateConstGEP1_64(PtrTy, Argv, 1), "arg1")},
+      "which");
+  SwitchInst *Switch = Builder->CreateSwitch(Which, Usage, TestSymbols.size());
+
+  auto Report = [&](const char *Format, std::vector<Value *> Args) {
+    Args.insert(Args.begin(), Builder->CreateGlobalString(Format, "testfmt"));
+    Builder->CreateCall(Printf, Args);
+    Builder->CreateCall(Fflush, {ConstantPointerNull::get(cast<PointerType>(PtrTy))});
+    Builder->CreateRet(ConstantInt::get(I32Ty, 0));
+  };
+  for (size_t I = 0; I < TestSymbols.size(); ++I) {
+    Function *Test = TheModule->getFunction(TestSymbols[I]);
+    BasicBlock *Case = BasicBlock::Create(*TheContext, "test", Main);
+    Switch->addCase(ConstantInt::get(cast<IntegerType>(I32Ty), I), Case);
+    Builder->SetInsertPoint(Case);
+    Value *Result = Builder->CreateCall(Test, {});
+    if (Test->getReturnType()->isVoidTy()) {
+      Report("\nturf-test: returned\n", {});
+      continue;
+    }
+    // `!void`: { i1 isOk, i64, ptr error } (getFallibleValueType()).
+    BasicBlock *Ok = BasicBlock::Create(*TheContext, "ok", Main);
+    BasicBlock *Failed = BasicBlock::Create(*TheContext, "failed", Main);
+    Builder->CreateCondBr(Builder->CreateExtractValue(Result, 0, "isok"), Ok, Failed);
+    Builder->SetInsertPoint(Ok);
+    Report("\nturf-test: returned\n", {});
+    Builder->SetInsertPoint(Failed);
+    Value *Err = Builder->CreateExtractValue(Result, 2, "err");
+    Report("\nturf-test: error %s\n", {LoadErrorValueField(Err, 0, "tag")});
+  }
+  Builder->ClearInsertionPoint();
+}
+
 // FuncDefExprAST::codegen
 // Two-pass strategy:
 //   Pass 1 (prototype): if no LLVM Function yet, create it (no body).
@@ -341,6 +414,7 @@ Value *FuncDefExprAST::codegen() {
     return Constant::getNullValue(Type::getInt64Ty(*TheContext));
 
   std::string MangledName = Name;
+  const bool CompileErrorTest = TestAnnotation::isCompileErrorTest(*this);
   std::string Prefix = "";
   if (GlobalSymbolTable && GlobalSymbolTable->IsInModule()) {
     Prefix = GlobalSymbolTable->GetCurrentModule() + "_";
@@ -358,6 +432,31 @@ Value *FuncDefExprAST::codegen() {
     for (const auto &P : Params) {
       MangledName += "_" + P.Type->getMangledName();
     }
+  }
+
+  // TDP-2-006: a compile_error test is never emitted -- its body is meant to
+  // be wrong. It is still linted and flow-checked like any function that got
+  // this far (the facade's way, without IR: AnalysisFacade.cpp), since its
+  // expected error may be one of those; an error there is the test's
+  // (TestRegistry.h), and only that declaration stops.
+  if (CompileErrorTest) {
+    if (!g_protoOnlyPass && !TestBodyFailed && Body) {
+      const bool SavedRecover = g_recoverActive;
+      g_recoverActive = true;
+      try {
+        LintExpression(Body.get());
+        auto Cfg = CFGBuilder().buildCFG(getSourceName(), ReturnType, Body.get(), Loc,
+                                         MangledName);
+        runFunctionFlowPasses(*Cfg, Name, Loc, {});
+      } catch (const RecoverUnwind &) {
+        g_recoverActive = SavedRecover;
+        if (!TestRegistry::lastErrorCaptured())
+          throw;
+        TestBodyFailed = true;
+      }
+      g_recoverActive = SavedRecover;
+    }
+    return Constant::getNullValue(Type::getInt64Ty(*TheContext));
   }
 
   // Build/look up the LLVM prototype
@@ -477,6 +576,10 @@ Value *FuncDefExprAST::codegen() {
   if (g_protoOnlyPass) {
     return TheFunc;
   }
+  // TDP-2-006: a build drops every test again, and a test build calls the
+  // main file's from its entry point (TestRegistry.h, main.cpp).
+  if (TestAnnotation::find(*this))
+    TestRegistry::noteEmitted(*this, TheFunc->getName().str());
 
   // Store full param types for call-site checking
   FuncParamTypes[MangledName] = {};

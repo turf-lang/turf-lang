@@ -25,6 +25,7 @@
                        // ErrorsLex.h's own top comment for why Lexer.cpp,
                        // alone among the lexer/parser split, includes a
                        // TurfError header directly
+#include "frontend/TestRegistry.h"
 #include "frontend/Parser.h"    // OVH-012: IsLibStdWarningLocation() -- flushAll()'s
                        // system-module-warning gate
 #include "slm/SLMIntegration.h"
@@ -512,6 +513,24 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
                            SLM::ErrorCategory Category,
                            const std::string &Code,
                            const SLM::DiagnosticHints &Hints) {
+  // Which file this diagnostic belongs to: Loc's own Filename if it has one
+  // (the normal case -- captured from CurLoc at parse time, see gettok()),
+  // else fall back to whatever file is currently active. AllSourceLines is a
+  // PERSISTENT cache (never overwritten/restored like SourceLines), so this
+  // resolves correctly even for diagnostics raised by a pass that runs after
+  // every file has already finished parsing (Resolver/TypeChecker/Codegen).
+  std::string Filename = Loc.Filename.empty() ? SourceFilename : Loc.Filename;
+
+  // TDP-2-006: an error inside a compile_error test's body is the test's
+  // (TestRegistry.h), and so is a warning there. Before the cascade rule
+  // below, so the registry hears about every error a pass raises.
+  {
+    Diag Probe{Loc, Msg, Hint, IsWarning, Related, Category, Filename, Code, Hints,
+               CompilerFix{}, false, false};
+    if (IsWarning ? TestRegistry::swallowWarning(Probe) : TestRegistry::captureError(Probe))
+      return;
+  }
+
   // If there is already an error on this line, suppress everything else
   // (both additional errors and warnings) to avoid cascading noise -- unless
   // an embedder opted into CollectAllDiagnostics (see its doc comment),
@@ -520,13 +539,6 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
     return;
 
   std::string finalMessage = Msg;
-  // Which file this diagnostic belongs to: Loc's own Filename if it has one
-  // (the normal case -- captured from CurLoc at parse time, see gettok()),
-  // else fall back to whatever file is currently active. AllSourceLines is a
-  // PERSISTENT cache (never overwritten/restored like SourceLines), so this
-  // resolves correctly even for diagnostics raised by a pass that runs after
-  // every file has already finished parsing (Resolver/TypeChecker/Codegen).
-  std::string Filename = Loc.Filename.empty() ? SourceFilename : Loc.Filename;
 
   // V-1 (LintLevels.h): the level the build chose for this warning's code.
   // `allow` records nothing; `deny` records an error, and from here on this IS
@@ -629,11 +641,15 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
           D.Filename == Filename && D.Msg == finalMessage)
         return;
 
+  if (IsWarning)
+    TestRegistry::noteWarning(New);
   Diagnostics.push_back(std::move(New));
 
   if (!IsWarning)
     ErrorLines.insert(Loc.Line);
 }
+
+void DiagnosticEngine::checkFix(Diag &D) { checkCompilerFix(D); }
 
 void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
                            bool IsWarning,

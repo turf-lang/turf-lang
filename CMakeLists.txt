@@ -441,6 +441,7 @@ add_library(turfcore STATIC
   src/frontend/ParserLiteral.cpp
   src/frontend/ParserStmt.cpp
   src/frontend/ParserDecl.cpp
+  src/frontend/TestRegistry.cpp
   src/frontend/ParserModule.cpp
   src/tooling/PackageGraph.cpp
   src/slm/Sandbox.cpp
