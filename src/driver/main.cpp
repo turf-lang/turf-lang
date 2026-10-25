@@ -2580,9 +2580,9 @@ static int runCompilerMain(int argc, char **argv) {
   if (DiagnosticEngine::hasErrors())
     return 1;
 
-  // TDP-2-006: a build leaves every test out (one that something calls
-  // stays: it is no longer only a test); a test build makes the main file's
-  // runnable tests the program, in place of its own `main`.
+  // TDP-2-006: a build leaves every test out (nothing can call one: E173);
+  // a test build makes the main file's runnable tests the program, in place
+  // of its own `main`.
   bool HasMain = false;
   {
     Function *UserMain = TheModule->getFunction("main");

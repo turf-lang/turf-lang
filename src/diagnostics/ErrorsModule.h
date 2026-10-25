@@ -1018,4 +1018,21 @@ public:
   }
 };
 
+// TDP-2-006 (issue #299): a call to, or a function value of, a function
+// marked `@test` (src/frontend/TestAnnotation.h). A test is run by `turf test`
+// and left out of every build; code that reached it would make the build
+// depend on a function the build does not contain, so any use is an error.
+class TestFunctionUseError : public TurfError {
+public:
+  TestFunctionUseError(SourceLocation Loc, const std::string &Name)
+      : TurfError(Loc,
+                  Colors::BRIGHT_RED + "'" + Colors::CYAN + Name + Colors::BRIGHT_RED +
+                      "' is a test: `turf test` runs it, and nothing else may call it or "
+                      "use it as a value." + Colors::RESET,
+                  "Move what the test and this code share into an ordinary function, and "
+                  "call that from both.") {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+  }
+};
+
 #endif

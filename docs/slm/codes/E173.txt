@@ -1,0 +1,37 @@
+TURF E173 -- USE OF A TEST FUNCTION:
+
+CAUSE:
+  Code calls a function marked `@test`, or uses one as a function value. A
+  test is run by `turf test` and left out of every build, so nothing may
+  reach it.
+
+INCORRECT:
+    @test
+    fn checks_add(): void {
+        io::printline(1 + 1);
+    }
+
+    fn main(): int {
+        checks_add();   // ERROR [E173]: 'checks_add' is a test
+        return 0;
+    }
+
+CORRECT (share an ordinary function instead):
+    fn add(a: int, b: int): int {
+        return a + b;
+    }
+
+    @test
+    fn checks_add(): void {
+        io::printline(add(1, 1));
+    }
+
+    fn main(): int {
+        return add(0, 0);
+    }
+
+FIX:
+  Move what the test and the caller share into an ordinary function and call
+  that from both. Remove the call to the test; `turf test` runs it.
+
+RELATED: E146 (a malformed `@test` annotation).
