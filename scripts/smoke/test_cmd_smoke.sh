@@ -464,6 +464,29 @@ expect_out "@test functions in src/ (a program's own tests)" pkgtests "main.tr: 
 expect_out "@test functions in src/ (its main is not a test)" pkgtests "Total Tests: 3"
 c pkgtests_only "$P" --test tests --package-graph graph.json --only plain.tr
 expect_out "--only runs what it names, not src/'s tests" pkgtests_only "Total Tests: 1"
+# A package whose tests are all in src/ needs no tests/ directory; one with no
+# test anywhere is still an error, never a silent pass.
+Q="$WORK/srconly"
+fixture "$Q" src/main.tr <<'EOF'
+import test;
+
+fn half(n: int): int { return n / 2; }
+
+@test
+fn halves(): void {
+    test::assert(half(8) == 4, "8 halved");
+}
+
+fn main(): int { return half(0); }
+EOF
+printf '{"format": 1, "root": "app", "packages": {"app": {"src": "src", "deps": []}}}\n' > "$Q/graph.json"
+c srconly "$Q" --test tests --package-graph graph.json
+expect_rc "@test functions in src/ with no tests/" srconly 0
+expect_out "@test functions in src/ with no tests/" srconly "main.tr: halves ... PASS"
+sed -i.bak 's/^@test$/\/\/ not a test/' "$Q/src/main.tr"
+c srconly_none "$Q" --test tests --package-graph graph.json
+expect_rc "no tests/ and no @test in src/" srconly_none 1
+expect_out "no tests/ and no @test in src/" srconly_none "no file under src/ declares a \`@test\` function"
 
 # --- --exclude, and the diagnostic register is opt-in ------------------------------
 X="$WORK/exclude"
@@ -541,8 +564,10 @@ EOF
 
   t no_tests "$PRJ/app" test
   expect_rc "turf test with no tests/ directory" no_tests 1
-  expect_out "turf test with no tests/ directory" no_tests "this project has no tests/ directory"
-  expect_out "the error shows how to start" no_tests "tests/basic.tr"
+  # turf's own message, or (a turf that leaves it to the compiler, which
+  # also looks for @test functions in src/) turfc's.
+  expect_out "turf test with no tests/ directory" no_tests "no tests"
+  expect_out "the error shows how to start" no_tests "put test files"
 
   mkdir -p "$PRJ/app/tests"
   t empty_tests "$PRJ/app" test

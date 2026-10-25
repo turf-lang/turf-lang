@@ -152,22 +152,17 @@ nothing can import a program.
 ### Tests: `turf test`
 
 `turf test` compiles and runs every `.tr` file under the project's `tests/`
-directory, at any depth, in parallel, and exits 0 only if all of them pass.
-**A project with no `tests/` directory is an error**, and so is one whose
-`tests/` holds no tests: a run of zero tests that reports success is how an
-untested project goes unnoticed.
+directory, at any depth, and every [`@test`](functions_and_modules.md#test)
+function in the files of its `src/`, in parallel, and exits 0 only if all of
+them pass. **A project with no test anywhere is an error**: no `tests/`
+directory and no `@test` function under `src/`, or a `tests/` that holds no
+tests. A run of zero tests that reports success is how an untested project goes
+unnoticed.
 
 ```
 $ turf test
-turf: this project has no tests/ directory (looked for /home/me/app/tests)
-hint: create it and put test files in it, for example tests/basic.tr:
-
-        import test;
-
-        fn main(): int {
-            test::assert(1 + 1 == 2, "arithmetic still works");
-            return 0;
-        }
+Error: no tests: 'tests' does not exist, and no file under src/ declares a `@test` function.
+  hint: write a `@test` function beside the code it checks, or create 'tests' and put test files (`.tr`) in it.
 ```
 
 A test is an ordinary program with a `main` that returns 0, and the stdlib's

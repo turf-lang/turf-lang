@@ -900,12 +900,17 @@ std::vector<TestFile> DiscoverSourceTests(const fs::path &Src) {
 int RunTests(const TestRunOptions &O) {
   std::error_code EC;
   fs::path Dir = fs::absolute(O.Dir, EC);
-  if (!fs::exists(Dir, EC)) {
+  // TDP-2-006: a package's tests may all be `@test` functions in its src/, so
+  // with a package graph a missing tests directory is not yet an error; a run
+  // that then finds no test anywhere is (below).
+  const fs::path Src = RootSourceDir(O.PackageGraph);
+  const bool HaveTestsDir = fs::exists(Dir, EC);
+  if (!HaveTestsDir && Src.empty()) {
     std::cerr << "Error: no tests directory: '" << O.Dir << "' does not exist.\n"
               << "  hint: create it and put test files (`.tr`) in it.\n";
     return 1;
   }
-  if (!fs::is_directory(Dir, EC)) {
+  if (HaveTestsDir && !fs::is_directory(Dir, EC)) {
     std::cerr << "Error: '" << O.Dir << "' is not a directory.\n";
     return 1;
   }
@@ -916,7 +921,9 @@ int RunTests(const TestRunOptions &O) {
   while (Spelling.size() > 1 && (Spelling.back() == '/' || Spelling.back() == '\\'))
     Spelling.pop_back();
 
-  std::vector<TestFile> Tests = Discover(Dir, Spelling, O.Excludes);
+  std::vector<TestFile> Tests;
+  if (HaveTestsDir)
+    Tests = Discover(Dir, Spelling, O.Excludes);
   if (!O.Only.empty()) {
     for (const auto &X : O.Only) {
       if (std::none_of(Tests.begin(), Tests.end(),
@@ -938,11 +945,17 @@ int RunTests(const TestRunOptions &O) {
   }
   // A run of named tests is about those; a full run also takes the package's
   // own `@test` functions.
-  if (O.Only.empty())
-    if (const fs::path Src = RootSourceDir(O.PackageGraph); !Src.empty()) {
-      auto InSrc = DiscoverSourceTests(Src);
-      Tests.insert(Tests.end(), InSrc.begin(), InSrc.end());
-    }
+  if (O.Only.empty() && !Src.empty()) {
+    auto InSrc = DiscoverSourceTests(Src);
+    Tests.insert(Tests.end(), InSrc.begin(), InSrc.end());
+  }
+  if (Tests.empty() && !HaveTestsDir) {
+    std::cerr << "Error: no tests: '" << O.Dir << "' does not exist, and no file under src/ "
+              << "declares a `@test` function.\n"
+              << "  hint: write a `@test` function beside the code it checks, or create '"
+              << O.Dir << "' and put test files (`.tr`) in it.\n";
+    return 1;
+  }
   if (Tests.empty()) {
     std::cerr << "Error: no tests found in '" << O.Dir << "'.\n"
               << "  hint: a test is a `.tr` file (not one ending in `_module.tr`, which is a companion "
