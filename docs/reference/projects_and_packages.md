@@ -819,7 +819,7 @@ is 1.
 | `turf add <name> --path <dir>` / `--git <url> (--tag\|--branch\|--rev) <ref>` | Add a dependency (section 3). |
 | `turf remove <name>` | Remove one. |
 | `turf publish` | Reserved. There is no registry in 2.0. |
-| `turf test [path...] [--offline] [--locked] [--jobs n] [--timeout s] [--exclude path]` | Compile and run every test under `tests/`, or only the files and directories named; an error if there is no `tests/` (section 1, *Tests*). |
+| `turf test [path...] [--offline] [--locked] [--jobs n] [--timeout s] [--exclude path]` | Compile and run every test under `tests/` and every `@test` function in `src/`, or only the files and directories of `tests/` named; an error if there is no test at all (section 1, *Tests*). |
 | `turf fmt`, `turf explain`, `turf migrate`, `turf dump`, `turf compile` | Work on files, in or out of a project ([CLI & Diagnostics](cli_and_diagnostics.md)). `turf fmt --write` with no path formats the project's `src/` and `tests/`. |
 
 **Compiler flags are forwarded.** `turf build -O2`, `turf build -g` and
