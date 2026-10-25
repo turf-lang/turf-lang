@@ -41,8 +41,6 @@
 #include <unordered_set>
 #include <vector>
 
-static std::unordered_set<std::string> ImportedFiles;
-
 // LEC-001 stage 4 (FREEZE.md 6.16, F-PKG-2): the file currently being
 // parsed's `import` spellings whose module identity differs from the
 // spelling -- a dependency package's modules, keyed `<package>/<path>` (see
@@ -57,105 +55,31 @@ static std::unordered_set<std::string> ImportedFiles;
 // every `hasModule()`/type-identity site and is exactly the kind of change
 // that misses one.
 //
-// Per file: ParseFile() saves the importer's map and starts the imported
-// file with an empty one (ParseStateGuard), and ParsePreludeImports() clears
-// it at the start of each top-level parse pass.
-static std::map<std::string, std::string> CurrentFileModuleAliases;
+// Per file: the map is ParserState::ModuleAliases (Parser.h), so an import,
+// which ParseFile() parses with a ParserState of its own, starts with an
+// empty one, and ParsePreludeImports() clears it at the start of each
+// top-level parse pass.
 
 const std::string &ModuleKeyFor(const std::string &Spelled) {
-  auto It = CurrentFileModuleAliases.find(Spelled);
-  return It == CurrentFileModuleAliases.end() ? Spelled : It->second;
+  auto It = Parser().ModuleAliases.find(Spelled);
+  return It == Parser().ModuleAliases.end() ? Spelled : It->second;
 }
 
-// Tracks the chain of modules currently being parsed (not yet finished) so a
-// circular `import` (A -> B -> ... -> A) can be reported as a real
-// diagnostic instead of silently truncating. This is deliberately a SEPARATE
-// structure from ImportedFiles above: ImportedFiles is a "fully parsed,
-// cacheable" set (a module already finished parsing returns an empty body on
-// a second import, by design -- see ParseFile()), while ImportStack is an
-// "in progress right now" stack that must be empty of a path the moment that
-// path's own ParseFile() call returns, cycle or not.
+// One frame of ParserCompileState::ImportStack: a module being parsed.
 struct ImportStackFrame {
   std::string ModuleName;
   std::string ResolvedPath;
   SourceLocation ImportLoc; // location of the `import` statement that pulled this in
 };
-static std::vector<ImportStackFrame> ImportStack;
 
-// FDN-003: the module whose file is being parsed right now ("" for the main
-// program file). ImportStack's top frame IS that module for the whole of its
-// own ParseFile() call -- the frame is pushed before the file's first token
-// is read and popped only after its last -- so this needs no state of its own.
-std::string CurrentParseModule() {
-  return ImportStack.empty() ? std::string() : ImportStack.back().ModuleName;
-}
-
-// Cache of every top-level AST node codegenned so far in this compile
-// (used by the sandbox to rebuild a full-program AST for diffing/retrying
-// -- see BuildProgramASTFromCache() below). Lives here alongside
-// ClearParsedTopLevelASTs(), which resets it together with the import
-// caches above on every fresh compile.
-static std::vector<std::unique_ptr<ExprAST>> ParsedTopLevelASTs;
-
-// Nodes spliced out of a top-level `unsafe { }` block by ParseFile()'s
-// dedicated TOK_UNSAFE branch below (issue #238). Every other consumer of
-// a file's top-level declaration list (Resolver::hoistTopLevel(),
-// main.cpp's multi-pass codegen driver, TypeChecker::checkAll()'s
-// resumable-per-declaration loop) walks a FLAT vector of decl-shaped
-// nodes, found by dynamic_cast, not a recursive AST walk -- wrapping a
-// top-level struct/fn declaration in a real nested UnsafeBlockExprAST node
-// would make it invisible to all of them. Flattening at parse time instead
-// (splice the unsafe block's own children directly into the file's
-// top-level list, tag each one here) means none of those consumers need
-// to change at all; only the TypeChecker's unsafe-gate checks consult this
-// set. Keyed by raw ExprAST* identity, the same idiom TypeChecker's own
-// NodeTypes_ map already uses for per-node side-state.
-static std::unordered_set<const ExprAST *> UnsafeTopLevelDecls;
-
-void ClearParsedTopLevelASTs() {
-  ParsedTopLevelASTs.clear();
-  ImportedFiles.clear();
-  // ImportStack should always be empty already (the RAII guard in ParseFile()
-  // pops every frame it pushes, cycle or not) -- cleared defensively anyway,
-  // mirroring ImportedFiles' own reset-between-compiles behavior above.
-  ImportStack.clear();
-  // Never cleared mid-compile -- reset here alongside the other per-compile
-  // parser caches so a stale entry can't survive into the next compile in
-  // the same process (a long-lived embedder, e.g. an LSP).
-  UnsafeTopLevelDecls.clear();
-}
-
-
-// LANG-002/STD-001: files that parsed a leading `unsafe module;` capability
-// pragma (ParseLeadingUnsafeModuleDecl() below), keyed by the SAME
-// real_path()-canonicalized form HasRawPointerCapability() queries with, so
-// registration and lookup can never disagree over path spelling
-// (relative-vs-absolute, symlinks, "./"). Re-registering the same file
-// across the pre-pass/main-pass/import re-parses this compiler does is
-// harmless (std::set::insert on an existing key is a no-op) -- see
-// ParseFile()'s own comment on why a file's content can be parsed more than
-// once in a single compile.
-static std::set<std::string> UnsafeModuleFiles;
-
-// SMP-001: the source text of files an embedder has open but not saved,
-// keyed by CanonicalOrOriginal() path. Consulted by ParseFile() before
-// disk, so an import of an edited module sees the editor's text. Set only
-// by the query facade (src/tooling/AnalysisFacade.cpp), inside its own
-// PushParserCompileState()/PopParserCompileState() bracket -- empty for
-// every CLI compile.
-static std::map<std::string, std::string> SourceOverlays;
-
-// SMP-001: AnalysisOptions::InstallRoot. Empty means TurfInstallRoot()'s
-// ordinary TURF_HOME / executable-relative lookup.
-static std::string InstallRootOverride;
-
-static std::string CanonicalOrOriginal(const std::string &Path);
-
-// Everything in this file that one compile accumulates and a second,
-// isolated compile in the same process must neither see nor disturb. A
-// stack, not one saved slot, so an isolated compile can itself run inside
-// another (the SLM Sandbox validates a fix while the real compile that
-// raised the diagnostic is still mid-flight).
+// Everything in this file that one compile accumulates across the files it
+// parses, and a second, isolated compile in the same process must neither see
+// nor disturb: the current compile's is `Compile`, and
+// Push/PopParserCompileState() stack the outer ones, not one saved slot, so an
+// isolated compile can itself run inside another (the SLM Sandbox validates a
+// fix while the real compile that raised the diagnostic is still
+// mid-flight). What the parser keeps for the one file it is parsing is
+// ParserState (Parser.h).
 //
 // UnsafeTopLevelDecls and UnsafeModuleFiles were once left out of the older
 // Push/PopImportCycleState() pair this replaces, and nothing else reset
@@ -164,92 +88,148 @@ static std::string CanonicalOrOriginal(const std::string &Path);
 // was deleted, and UnsafeTopLevelDecls kept raw pointers to freed AST
 // nodes, which a later compile's nodes could be allocated on top of.
 struct ParserCompileState {
-  std::vector<std::unique_ptr<ExprAST>> ParsedTopLevelASTs;
+  // Every file fully parsed so far: a second import of one returns an empty
+  // body (see ParseFile()).
   std::unordered_set<std::string> ImportedFiles;
+
+  // Tracks the chain of modules currently being parsed (not yet finished) so a
+  // circular `import` (A -> B -> ... -> A) can be reported as a real
+  // diagnostic instead of silently truncating. This is deliberately a SEPARATE
+  // structure from ImportedFiles: ImportedFiles is a "fully parsed,
+  // cacheable" set (a module already finished parsing returns an empty body on
+  // a second import, by design -- see ParseFile()), while ImportStack is an
+  // "in progress right now" stack that must be empty of a path the moment that
+  // path's own ParseFile() call returns, cycle or not.
   std::vector<ImportStackFrame> ImportStack;
+
+  // Cache of every top-level AST node codegenned so far in this compile
+  // (used by the sandbox to rebuild a full-program AST for diffing/retrying
+  // -- see BuildProgramASTFromCache() below). Lives here alongside
+  // ClearParsedTopLevelASTs(), which resets it together with the import
+  // caches on every fresh compile.
+  std::vector<std::unique_ptr<ExprAST>> ParsedTopLevelASTs;
+
+  // Nodes spliced out of a top-level `unsafe { }` block by ParseFile()'s
+  // dedicated TOK_UNSAFE branch below (issue #238). Every other consumer of
+  // a file's top-level declaration list (Resolver::hoistTopLevel(),
+  // main.cpp's multi-pass codegen driver, TypeChecker::checkAll()'s
+  // resumable-per-declaration loop) walks a FLAT vector of decl-shaped
+  // nodes, found by dynamic_cast, not a recursive AST walk -- wrapping a
+  // top-level struct/fn declaration in a real nested UnsafeBlockExprAST node
+  // would make it invisible to all of them. Flattening at parse time instead
+  // (splice the unsafe block's own children directly into the file's
+  // top-level list, tag each one here) means none of those consumers need
+  // to change at all; only the TypeChecker's unsafe-gate checks consult this
+  // set. Keyed by raw ExprAST* identity, the same idiom TypeChecker's own
+  // NodeTypes_ map already uses for per-node side-state.
   std::unordered_set<const ExprAST *> UnsafeTopLevelDecls;
+
+  // LANG-002/STD-001: files that parsed a leading `unsafe module;` capability
+  // pragma (ParseLeadingUnsafeModuleDecl() below), keyed by the SAME
+  // real_path()-canonicalized form HasRawPointerCapability() queries with, so
+  // registration and lookup can never disagree over path spelling
+  // (relative-vs-absolute, symlinks, "./"). Re-registering the same file
+  // across the pre-pass/main-pass/import re-parses this compiler does is
+  // harmless (std::set::insert on an existing key is a no-op) -- see
+  // ParseFile()'s own comment on why a file's content can be parsed more than
+  // once in a single compile.
   std::set<std::string> UnsafeModuleFiles;
+
+  // SMP-001: the source text of files an embedder has open but not saved,
+  // keyed by CanonicalOrOriginal() path. Consulted by ParseFile() before
+  // disk, so an import of an edited module sees the editor's text. Set only
+  // by the query facade (src/tooling/AnalysisFacade.cpp), inside its own
+  // PushParserCompileState()/PopParserCompileState() bracket -- empty for
+  // every CLI compile.
   std::map<std::string, std::string> SourceOverlays;
+
+  // SMP-001: AnalysisOptions::InstallRoot. Empty means TurfInstallRoot()'s
+  // ordinary TURF_HOME / executable-relative lookup.
   std::string InstallRootOverride;
+
+  // See NoteFunctionParseStarted() (Parser.h). Holds a name from the moment
+  // ParseFuncDef() reads it until the definition parses, so a definition that
+  // fails anywhere after its name -- a reported error returning nullptr, or a
+  // longjmp out of the body -- leaves its name here.
   std::unordered_set<std::string> UnparsedFunctionNames;
 };
+static ParserCompileState Compile;
 static std::vector<ParserCompileState> SavedParserCompileStates;
 
-// See NoteFunctionParseStarted() (Parser.h). Holds a name from the moment
-// ParseFuncDef() reads it until the definition parses, so a definition that
-// fails anywhere after its name -- a reported error returning nullptr, or a
-// longjmp out of the body -- leaves its name here.
-static std::unordered_set<std::string> UnparsedFunctionNames;
+// FDN-003: the module whose file is being parsed right now ("" for the main
+// program file). ImportStack's top frame IS that module for the whole of its
+// own ParseFile() call -- the frame is pushed before the file's first token
+// is read and popped only after its last -- so this needs no state of its own.
+std::string CurrentParseModule() {
+  return Compile.ImportStack.empty() ? std::string() : Compile.ImportStack.back().ModuleName;
+}
+
+void ClearParsedTopLevelASTs() {
+  Compile.ParsedTopLevelASTs.clear();
+  Compile.ImportedFiles.clear();
+  // ImportStack should always be empty already (the RAII guard in ParseFile()
+  // pops every frame it pushes, cycle or not) -- cleared defensively anyway,
+  // mirroring ImportedFiles' own reset-between-compiles behavior above.
+  Compile.ImportStack.clear();
+  // Never cleared mid-compile -- reset here alongside the other per-compile
+  // parser caches so a stale entry can't survive into the next compile in
+  // the same process (a long-lived embedder, e.g. an LSP).
+  Compile.UnsafeTopLevelDecls.clear();
+}
+
+
+static std::string CanonicalOrOriginal(const std::string &Path);
 
 void NoteFunctionParseStarted(const std::string &Name) {
-  UnparsedFunctionNames.insert(Name);
+  Compile.UnparsedFunctionNames.insert(Name);
 }
 
 void NoteFunctionParsed(const std::string &Name) {
-  UnparsedFunctionNames.erase(Name);
+  Compile.UnparsedFunctionNames.erase(Name);
 }
 
 bool FunctionFailedToParse(const std::string &Name) {
-  return UnparsedFunctionNames.count(Name) != 0;
+  return Compile.UnparsedFunctionNames.count(Name) != 0;
 }
 
 static void ClearPackageSourceIndex(); // defined beside the cache it empties
 
 void PushParserCompileState() {
   ClearPackageSourceIndex();
-  SavedParserCompileStates.push_back(
-      {std::move(ParsedTopLevelASTs), std::move(ImportedFiles),
-       std::move(ImportStack), std::move(UnsafeTopLevelDecls),
-       std::move(UnsafeModuleFiles), std::move(SourceOverlays),
-       std::move(InstallRootOverride), std::move(UnparsedFunctionNames)});
-  ParsedTopLevelASTs.clear();
-  ImportedFiles.clear();
-  ImportStack.clear();
-  UnsafeTopLevelDecls.clear();
-  UnsafeModuleFiles.clear();
-  SourceOverlays.clear();
-  InstallRootOverride.clear();
-  UnparsedFunctionNames.clear();
+  SavedParserCompileStates.push_back(std::move(Compile));
+  Compile = ParserCompileState();
 }
 
 void PopParserCompileState() {
   ClearPackageSourceIndex();
-  auto &Saved = SavedParserCompileStates.back();
-  ParsedTopLevelASTs = std::move(Saved.ParsedTopLevelASTs);
-  ImportedFiles = std::move(Saved.ImportedFiles);
-  ImportStack = std::move(Saved.ImportStack);
-  UnsafeTopLevelDecls = std::move(Saved.UnsafeTopLevelDecls);
-  UnsafeModuleFiles = std::move(Saved.UnsafeModuleFiles);
-  SourceOverlays = std::move(Saved.SourceOverlays);
-  InstallRootOverride = std::move(Saved.InstallRootOverride);
-  UnparsedFunctionNames = std::move(Saved.UnparsedFunctionNames);
+  Compile = std::move(SavedParserCompileStates.back());
   SavedParserCompileStates.pop_back();
 }
 
 void SetSourceOverlay(const std::string &Path, const std::string &Text) {
-  SourceOverlays[CanonicalOrOriginal(Path)] = Text;
+  Compile.SourceOverlays[CanonicalOrOriginal(Path)] = Text;
 }
 
 void SetInstallRootOverride(const std::string &Root) {
-  InstallRootOverride = Root;
+  Compile.InstallRootOverride = Root;
 }
 
 // The overlay text for Path, or null when the file should be read from disk.
 static const std::string *FindSourceOverlay(const std::string &Path) {
-  if (SourceOverlays.empty())
+  if (Compile.SourceOverlays.empty())
     return nullptr;
-  auto It = SourceOverlays.find(CanonicalOrOriginal(Path));
-  return It == SourceOverlays.end() ? nullptr : &It->second;
+  auto It = Compile.SourceOverlays.find(CanonicalOrOriginal(Path));
+  return It == Compile.SourceOverlays.end() ? nullptr : &It->second;
 }
 
 void RecordParsedTopLevelAST(const ExprAST *AST) {
   if (AST) {
-    ParsedTopLevelASTs.push_back(CloneExprAST(AST));
+    Compile.ParsedTopLevelASTs.push_back(CloneExprAST(AST));
   }
 }
 
 bool WasDeclaredInsideTopLevelUnsafe(const ExprAST *Node) {
-  return Node && UnsafeTopLevelDecls.count(Node) != 0;
+  return Node && Compile.UnsafeTopLevelDecls.count(Node) != 0;
 }
 
 void AppendFlattenedTopLevelDecl(std::unique_ptr<ExprAST> AST,
@@ -320,7 +300,7 @@ void AppendFlattenedTopLevelDecl(std::unique_ptr<ExprAST> AST,
         (void)Child.release();
         continue;
       }
-      UnsafeTopLevelDecls.insert(Child.get());
+      Compile.UnsafeTopLevelDecls.insert(Child.get());
       if (RecordForSandbox)
         RecordParsedTopLevelAST(Child.get());
       Target.push_back(std::move(Child));
@@ -333,7 +313,7 @@ void AppendFlattenedTopLevelDecl(std::unique_ptr<ExprAST> AST,
 }
 
 std::unique_ptr<ExprAST> BuildProgramASTFromCache() {
-  return std::make_unique<BlockExprAST>(CloneExprList(ParsedTopLevelASTs));
+  return std::make_unique<BlockExprAST>(CloneExprList(Compile.ParsedTopLevelASTs));
 }
 
 
@@ -382,7 +362,7 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
   // Fixed properly below by giving THIS ParseFile() invocation its own
   // LOCAL recovery boundary (its own setjmp() point, armed right before
   // the parse loop) instead of relying on some distant caller's. Since the
-  // jump target and ImportLexer/ParseStateGuard/ImportStackGuard now live in the exact
+  // jump target and ImportParser/ParseStateGuard/ImportStackGuard now live in the exact
   // same function scope, a longjmp() triggered by anything during this
   // file's own parsing -- or by a TurfError bubbling up through a
   // TRANSITIVELY nested `import` (that nested ParseFile() call installs
@@ -413,16 +393,16 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
   // conceptually the two checks answer different questions ("is this a
   // cycle" vs "did we already fully parse this") and cycle detection must
   // win when both could apply.
-  for (const auto &Frame : ImportStack) {
+  for (const auto &Frame : Compile.ImportStack) {
     if (Frame.ResolvedPath == Path) {
       CircularImportError(ImportLoc, ModuleName,
-                          BuildCircularImportChain(ImportStack, Path))
+                          BuildCircularImportChain(Compile.ImportStack, Path))
           .raise();
       return nullptr;
     }
   }
 
-  if (ImportedFiles.count(Path)) {
+  if (Compile.ImportedFiles.count(Path)) {
     return std::make_unique<BlockExprAST>(
         std::vector<std::unique_ptr<ExprAST>>{});
   }
@@ -463,23 +443,29 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
   // never silently poison every subsequent import in the same compile.
   struct ImportStackGuard {
     ImportStackGuard(std::string MN, std::string RP, SourceLocation Loc) {
-      ImportStack.push_back({std::move(MN), std::move(RP), Loc});
+      Compile.ImportStack.push_back({std::move(MN), std::move(RP), Loc});
     }
-    ~ImportStackGuard() { ImportStack.pop_back(); }
+    ~ImportStackGuard() { Compile.ImportStack.pop_back(); }
   } IGuard(ModuleName, Path, ImportLoc);
 
-  // The import gets a lexer of its own (F-S0): the importer's cursor, token
-  // and lookahead sit untouched in its LexerState until this one goes out of
-  // scope. Declared after the streams above so it never outlives them.
+  // The import gets a lexer and a parser of its own (F-S0, F-S1): the
+  // importer's cursor, token, lookahead, bracket depths and module aliases sit
+  // untouched in its LexerState and ParserState until these go out of scope.
+  // The bracket depths matter since issue #242: a failed import returns
+  // instead of exiting, and the importer's own parsing must not inherit a
+  // count left mid-way by this file's abandoned parse. The aliases (LEC-001
+  // stage 4) because an imported file has its own imports: it must neither see
+  // the importer's nor leave its own behind. Declared after the streams above
+  // so neither outlives them.
   LexerState ImportLexer(
       Overlay ? static_cast<std::istream &>(OverlayFile) : ImportFile, Path);
   ImportLexer.CurLoc = {1, 1};
-  LexerScope ImportLexerScope(ImportLexer);
+  ParserState ImportParser(ImportLexer);
+  ParserScope ImportParserScope(ImportParser);
 
-  // What the parser and the compile keep about the file being read, which
-  // the import replaces for its duration.
+  // What the compile keeps about the file being read, which the import
+  // replaces for its duration.
   struct ParseStateGuard {
-    int SavedCurTok;
     std::string SavedFilename;
     // SourceLines is what printDiag()'s caret snippet is snapshotted from
     // (see DiagnosticEngine::add() in Lexer.cpp) -- without saving/restoring
@@ -488,36 +474,14 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
     // would snapshot the IMPORTING file's line text (whatever line happened
     // to share the same line number) instead of the module's real line.
     std::vector<std::string> SavedSourceLines;
-    // g_braceDepth (issue #242): previously never needed saving/restoring
-    // here because a failed import always called std::exit() immediately --
-    // whatever this file's own parsing left g_braceDepth at, the process
-    // was already dead. Now that a failed import returns cleanly instead
-    // (see RecoveryBoundaryGuard above), the IMPORTING file's own
-    // subsequent parsing must not inherit a bracket-depth counter left
-    // mid-count by this file's abandoned parse.
-    int SavedBraceDepth;
-    int SavedCurlyDepth; // LEC-005: g_curlyDepth, saved for the same reason
-    // LEC-001 stage 4: the importing file's module aliases. An imported file
-    // has its own imports; it must neither see the importer's aliases nor
-    // leave its own behind for the importer's remaining tokens.
-    std::map<std::string, std::string> SavedModuleAliases;
 
     ParseStateGuard() {
-      SavedModuleAliases = std::move(CurrentFileModuleAliases);
-      CurrentFileModuleAliases.clear();
-      SavedCurTok = CurTok;
       SavedFilename = SourceFilename;
       SavedSourceLines = SourceLines;
-      SavedBraceDepth = g_braceDepth;
-      SavedCurlyDepth = g_curlyDepth;
     }
     ~ParseStateGuard() {
-      CurTok = SavedCurTok;
       SourceFilename = SavedFilename;
       SourceLines = SavedSourceLines;
-      g_braceDepth = SavedBraceDepth;
-      g_curlyDepth = SavedCurlyDepth;
-      CurrentFileModuleAliases = std::move(SavedModuleAliases);
     }
   } PGuard;
 
@@ -578,20 +542,20 @@ static std::unique_ptr<ExprAST> ParseFileDeclarations(const std::string &Path) {
 
   // Parse the file
   while (true) {
-    if (CurTok == TOK_EOF)
+    if (Parser().CurTok == TOK_EOF)
       break;
-    if (CurTok == ';') {
+    if (Parser().CurTok == ';') {
       getNextToken();
       continue;
     }
 
-    if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
-        CurTok == TOK_MACHINE || CurTok == TOK_AT ||
-        CurTok == TOK_EXTERN || CurTok == TOK_EXPORT || CurTok == TOK_OPERATOR ||
-        CurTok == TOK_ERROR || CurTok == TOK_UNSAFE || CurTok == TOK_PUB) {
+    if (Parser().CurTok == TOK_FN || Parser().CurTok == TOK_STRUCT || Parser().CurTok == TOK_ENUM ||
+        Parser().CurTok == TOK_MACHINE || Parser().CurTok == TOK_AT ||
+        Parser().CurTok == TOK_EXTERN || Parser().CurTok == TOK_EXPORT || Parser().CurTok == TOK_OPERATOR ||
+        Parser().CurTok == TOK_ERROR || Parser().CurTok == TOK_UNSAFE || Parser().CurTok == TOK_PUB) {
       auto Expr = ParseExpression();
       if (Expr) {
-        if (CurTok == ';') {
+        if (Parser().CurTok == ';') {
           LogErrorAt(Lex().CurLoc, ErrCode::UnexpectedToken, "Unexpected ';'", SLM::ErrorCategory::SYNTAX_ERROR);
           return nullptr;
         }
@@ -624,10 +588,10 @@ static std::unique_ptr<ExprAST> ParseFileDeclarations(const std::string &Path) {
       continue;
     }
 
-    if (CurTok == TOK_IMPORT) {
+    if (Parser().CurTok == TOK_IMPORT) {
       auto Expr = ParseImport();
       if (Expr) {
-        if (CurTok != ';') {
+        if (Parser().CurTok != ';') {
           LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement.", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
           return nullptr;
         }
@@ -643,7 +607,7 @@ static std::unique_ptr<ExprAST> ParseFileDeclarations(const std::string &Path) {
     // Everything else: must end with ';'
     auto Expr = ParseExpression();
     if (Expr) {
-      if (CurTok != ';') {
+      if (Parser().CurTok != ';') {
         LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement.", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
         return nullptr;
       }
@@ -658,7 +622,7 @@ static std::unique_ptr<ExprAST> ParseFileDeclarations(const std::string &Path) {
   // Only marked "fully imported" on this definite success path -- see the
   // NOTE above (issue #242 follow-up) for why this moved here instead of
   // being inserted eagerly before the parse was even attempted.
-  ImportedFiles.insert(Path);
+  Compile.ImportedFiles.insert(Path);
 
   return std::make_unique<BlockExprAST>(std::move(Exprs));
 }
@@ -688,8 +652,8 @@ static std::unique_ptr<ExprAST> ParseFileDeclarations(const std::string &Path) {
 std::string CompilerExecutablePath;
 
 std::string TurfInstallRoot() {
-  if (!InstallRootOverride.empty())
-    return InstallRootOverride;
+  if (!Compile.InstallRootOverride.empty())
+    return Compile.InstallRootOverride;
   if (const char *Env = std::getenv("TURF_HOME")) {
     if (*Env)
       return std::string(Env);
@@ -784,7 +748,7 @@ static std::string CanonicalOrOriginal(const std::string &Path) {
 bool HasRawPointerCapability(const std::string &Path) {
   if (Path.empty())
     return false;
-  if (!UnsafeModuleFiles.count(CanonicalOrOriginal(Path)))
+  if (!Compile.UnsafeModuleFiles.count(CanonicalOrOriginal(Path)))
     return false;
   if (IsPathUnderInstallRoot(Path))
     return true;
@@ -823,18 +787,18 @@ bool HasRawPointerCapability(const std::string &Path) {
 //     as if the caller had called ParseExpression() itself. Returns false.
 //   - CurTok is anything else: no-op. Returns false, `OutBlock` untouched.
 bool ParseLeadingUnsafeModuleDecl(std::unique_ptr<ExprAST> &OutBlock) {
-  if (CurTok != TOK_UNSAFE)
+  if (Parser().CurTok != TOK_UNSAFE)
     return false;
   SourceLocation KeywordLoc = Lex().CurLoc;
   getNextToken(); // consume 'unsafe'
-  if (CurTok == TOK_IDENTIFIER && Lex().IdentifierStr == "module") {
+  if (Parser().CurTok == TOK_IDENTIFIER && Lex().IdentifierStr == "module") {
     getNextToken(); // consume 'module'
-    if (CurTok != ';') {
+    if (Parser().CurTok != ';') {
       SyntaxError(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after 'unsafe module'").raise();
       return true; // still: not a real unsafe-block AST for the caller
     }
     getNextToken(); // consume ';'
-    UnsafeModuleFiles.insert(CanonicalOrOriginal(SourceFilename));
+    Compile.UnsafeModuleFiles.insert(CanonicalOrOriginal(SourceFilename));
     return true;
   }
   OutBlock = ParseUnsafeBlockBody(KeywordLoc);
@@ -1390,7 +1354,7 @@ ParseModuleImportByName(const std::string &ModuleName, SourceLocation Loc,
   const std::string Identity =
       Candidates.front().Key.empty() ? ModuleName : Candidates.front().Key;
   if (Identity != ModuleName)
-    CurrentFileModuleAliases[ModuleName] = Identity;
+    Parser().ModuleAliases[ModuleName] = Identity;
   size_t DiagCountBefore = DiagnosticEngine::getDiagnosticCount();
   std::unique_ptr<ExprAST> Block = ParseFile(ResolvedPath, Identity, Loc);
   if (!Block) {
@@ -1524,13 +1488,13 @@ bool ClaimEntryFileImportSlot(const std::string &EntryPath) {
     }
   }
 
-  if (ImportedFiles.count(EntryPath) ||
-      (!StdlibAlias.empty() && ImportedFiles.count(StdlibAlias)))
+  if (Compile.ImportedFiles.count(EntryPath) ||
+      (!StdlibAlias.empty() && Compile.ImportedFiles.count(StdlibAlias)))
     return true;
 
-  ImportedFiles.insert(EntryPath);
+  Compile.ImportedFiles.insert(EntryPath);
   if (!StdlibAlias.empty())
-    ImportedFiles.insert(StdlibAlias);
+    Compile.ImportedFiles.insert(StdlibAlias);
   return false;
 }
 
@@ -1553,7 +1517,7 @@ std::vector<std::unique_ptr<ExprAST>> ParsePreludeImports(SourceLocation Loc) {
   // is where the entry file starts with no module aliases -- the previous
   // pass's, or a previous analysis's program's, must not rewrite this one's
   // qualifiers.
-  CurrentFileModuleAliases.clear();
+  Parser().ModuleAliases.clear();
 
   // A top-level file that IS one of these prelude modules itself (e.g.
   // compiling lib/std/char.tr directly -- `turf lib/std/char.tr`, or the
@@ -1629,15 +1593,15 @@ std::unique_ptr<ExprAST> ParseImport() {
   // `string` (singular, the type keyword) doesn't need an entry here: the
   // actual module is `strings` (plural), a real TOK_IDENTIFIER, no collision.
   SourceLocation NameLoc = Lex().CurLoc; // location of the module-name token itself -- see #230
-  if (CurTok == TOK_IDENTIFIER) {
+  if (Parser().CurTok == TOK_IDENTIFIER) {
     ModuleName = Lex().IdentifierStr;
-  } else if (CurTok == TOK_TYPE_INT) {
+  } else if (Parser().CurTok == TOK_TYPE_INT) {
     ModuleName = "int";
-  } else if (CurTok == TOK_TYPE_DOUBLE) {
+  } else if (Parser().CurTok == TOK_TYPE_DOUBLE) {
     ModuleName = "double";
-  } else if (CurTok == TOK_TYPE_BOOL) {
+  } else if (Parser().CurTok == TOK_TYPE_BOOL) {
     ModuleName = "bool";
-  } else if (CurTok == TOK_TYPE_CHAR) {
+  } else if (Parser().CurTok == TOK_TYPE_CHAR) {
     ModuleName = "char";
   } else {
     LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "Expected module name after 'import'", SLM::ErrorCategory::DECLARATION);
@@ -1654,13 +1618,13 @@ std::unique_ptr<ExprAST> ParseImport() {
   // searched, since there's no lazy/partial parsing.
   ImportMode Mode = ImportMode::Bare;
   std::vector<ImportedSymbolRef> RequestedSymbols;
-  if (CurTok == TOK_SCOPE) {
+  if (Parser().CurTok == TOK_SCOPE) {
     getNextToken(); // eat '::'
-    if (CurTok == '[') {
+    if (Parser().CurTok == '[') {
       getNextToken(); // eat '['
-      if (CurTok == '*') {
+      if (Parser().CurTok == '*') {
         getNextToken(); // eat '*'
-        if (CurTok != ']') {
+        if (Parser().CurTok != ']') {
           LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "Expected ']' after '*' in import list", SLM::ErrorCategory::DECLARATION);
           return nullptr;
         }
@@ -1668,20 +1632,20 @@ std::unique_ptr<ExprAST> ParseImport() {
         Mode = ImportMode::Wildcard;
       } else {
         Mode = ImportMode::SymbolList;
-        while (CurTok != ']' && CurTok != TOK_EOF) {
-          if (CurTok != TOK_IDENTIFIER) {
+        while (Parser().CurTok != ']' && Parser().CurTok != TOK_EOF) {
+          if (Parser().CurTok != TOK_IDENTIFIER) {
             LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "Expected a symbol name in import list", SLM::ErrorCategory::DECLARATION);
             return nullptr;
           }
           RequestedSymbols.push_back({Lex().IdentifierStr, Lex().CurLoc});
           getNextToken();
-          if (CurTok == ',') {
+          if (Parser().CurTok == ',') {
             getNextToken();
           } else {
             break;
           }
         }
-        if (CurTok != ']') {
+        if (Parser().CurTok != ']') {
           LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "Expected ']' to close import list", SLM::ErrorCategory::DECLARATION);
           return nullptr;
         }
@@ -1691,7 +1655,7 @@ std::unique_ptr<ExprAST> ParseImport() {
           return nullptr;
         }
       }
-    } else if (CurTok == TOK_IDENTIFIER) {
+    } else if (Parser().CurTok == TOK_IDENTIFIER) {
       Mode = ImportMode::Symbol;
       RequestedSymbols.push_back({Lex().IdentifierStr, Lex().CurLoc});
       getNextToken();

@@ -78,22 +78,6 @@ bool DiagnosticEngine::CollectAllDiagnostics = false;
 bool g_recoverActive = false;
 bool g_protoOnlyPass = false; // set by pre-pass 3a to stop after prototype
 
-// Running count of unclosed '{'/'('/'[' minus '}'/')'/']', tracked globally
-// by getNextToken() (see Parser.cpp) as it consumes each token -- i.e. the
-// current nesting depth relative to the top level (0), regardless of how
-// deeply nested inside if/while/compare/etc. the parser currently is.
-// Used by main.cpp's SkipToNextTopLevelBoundary() to recover correctly from
-// a parse failure at ANY nesting depth, not just one level deep -- see that
-// function's doc comment for why a naive "assume depth 1" recovery isn't
-// enough. Reset to 0 by resetLexer() so a fresh parse pass (pre-pass vs.
-// main pass, or a Sandbox.cpp re-parse) never inherits a stale value.
-int g_braceDepth = 0;
-int g_curlyDepth = 0; // see Lexer.h
-
-// See Lexer.h for the full doc comment. A recovered error unwinds through
-// every live ParseRecursionGuard, which decrements it.
-int g_parseRecursionDepth = 0;
-
 // AI/SLM flag: only true when --smart is passed on the CLI.
 bool g_AIEnabled = false;
 std::string g_SmartFixOutPath;
@@ -126,23 +110,6 @@ void LexerState::reset() {
   PrevTokEndLine = -1;
   PrevTokEndCol = -1;
 }
-
-// The parser's current lexer (Lex(), Lexer.h). `Idle` is what it reads with
-// no LexerScope live: no stream, so EOF, and a location of {1, 0}. A tool
-// that asks for a location before any lex (a diagnostic raised outside a
-// parse) gets that rather than a dangling pointer.
-static LexerState *CurrentLexer = nullptr;
-
-LexerState &Lex() {
-  static LexerState Idle;
-  return CurrentLexer ? *CurrentLexer : Idle;
-}
-
-LexerScope::LexerScope(LexerState &L) : Saved(CurrentLexer) {
-  CurrentLexer = &L;
-}
-
-LexerScope::~LexerScope() { CurrentLexer = Saved; }
 
 const std::map<std::string, int> Keywords = {{"if", TOK_IF},
                                        {"else", TOK_ELSE},
@@ -919,12 +886,6 @@ bool takeLookaheadToken(int &Tok) {
   Tok = L.Lookahead.front().Tok;
   L.Lookahead.erase(L.Lookahead.begin());
   return true;
-}
-
-void resetLexer() {
-  Lex().reset();
-  g_braceDepth = 0;
-  g_curlyDepth = 0;
 }
 
 /**

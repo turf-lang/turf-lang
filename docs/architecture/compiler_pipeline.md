@@ -138,14 +138,9 @@ buffers can be tokenized in turn without either seeing the other's cursor
 (`tests/api/analysis_test.cpp`, `testTwoLexersInterleave`). `Keywords` is a
 constant table.
 
-The parser still keeps its own state in globals until F-S1 (`ParserState`,
-issue #302), and reads tokens from `Lex()`, the lexer of the innermost live
-`LexerScope`. The driver installs one for the input file; `ParseFile()` makes
-a fresh `LexerState` current for each import, and the query facade, the
-formatter and `--migrate=pub` do the same for their buffers, so the
-importer's or host's lexer is never touched and nothing has to be saved and
-restored field by field. With no scope live, `Lex()` is an empty lexer that
-yields `TOK_EOF`.
+The parser reads tokens from `Lex()`, the lexer of the current `ParserState`
+(see [`ParserState`](#parserstate) below). With no parser current, or one
+with no lexer, `Lex()` is an empty lexer that yields `TOK_EOF`.
 
 Not part of `LexerState`, because `gettok()` never reads them:
 `SourceFilename`, `SourceLines`, `AllSourceLines` and `MainSourceFilename`,
@@ -223,31 +218,62 @@ line (`ErrorLines`) to avoid cascades, unless an embedder sets
 `ParserLiteral.cpp`, `ParserModule.cpp` (with the cross-file declarations in
 `Parser.h` and `ParserInternal.h`). Recursive descent: each production is one
 function (`ParseIfExpr()`, `ParseStructDecl()`, `ParseType()`, ...) that
-consumes tokens through the shared `CurTok`/`getNextToken()` cursor.
+consumes tokens through the current parser's `CurTok`/`getNextToken()`
+cursor.
+
+### `ParserState`
+
+Everything the parser reads and writes while it parses one file lives in a
+`ParserState` (`Parser.h`, F-S1, issue #302): the lexer it reads (`Lexer`),
+the current token (`CurTok`), the bracket depths (`BraceDepth`,
+`CurlyDepth`), the recursion depth `ParseRecursionGuard` counts
+(`RecursionDepth`), the flags one construct sets for the ones nested in it
+(`AllowGuessType`, `SizeParamsInScope`, `InPatternHeader`,
+`PatternHeadCallPending`, `FuncUsesTry`) and the file's module aliases
+(`ModuleAliases`, see `ModuleKeyFor()`). The parse functions work on
+`Parser()`, the innermost live `ParserScope`'s parser.
+
+The driver makes one current for the input file. `ParseFile()` makes a fresh
+`ParserState`, with a fresh `LexerState`, current for each import, and the
+query facade, the formatter and `--migrate=pub` do the same for their
+buffers, so the importer's or host's parser is never touched and nothing has
+to be saved and restored field by field
+(`tests/api/analysis_test.cpp`, `testTwoParsersInterleave`). With no scope
+live, `Parser()` is an idle parser with no lexer.
+
+Not part of `ParserState`: what one compile accumulates across every file it
+parses (the import caches, the import stack, the parsed top-level
+declarations, the files that declared `unsafe module;`, the source overlays:
+`ParserCompileState` in `ParserModule.cpp`, which
+`PushParserCompileState()`/`PopParserCompileState()` stack for an isolated
+compile), `g_recoverActive` (error recovery, which the Resolver and
+TypeChecker arm too) and the compile's file bookkeeping (`SourceFilename`,
+`SourceLines`, `AllSourceLines`). `BinopPrecedence` is a constant table.
 
 ### `getNextToken()`: the one advance point
 
 ```cpp
 int getNextToken() {
-  if (CurTok == '{' || CurTok == '(' || CurTok == '[')
-    g_braceDepth++;
-  else if ((CurTok == '}' || CurTok == ')' || CurTok == ']') && g_braceDepth > 0)
-    g_braceDepth--;
-  /* ... the same for g_curlyDepth, '{' and '}' only ... */
-  if (takeLookaheadToken(CurTok))
-    return CurTok;
-  return CurTok = gettok(Lex());
+  ParserState &P = Parser();
+  if (P.CurTok == '{' || P.CurTok == '(' || P.CurTok == '[')
+    P.BraceDepth++;
+  else if ((P.CurTok == '}' || P.CurTok == ')' || P.CurTok == ']') && P.BraceDepth > 0)
+    P.BraceDepth--;
+  /* ... the same for P.CurlyDepth, '{' and '}' only ... */
+  if (takeLookaheadToken(P.CurTok))
+    return P.CurTok;
+  return P.CurTok = gettok(Lex());
 }
 ```
 
 Every token advance goes through it, which is why bracket depth is tracked
 here with no per-call-site bookkeeping. `SkipToNextTopLevelBoundary()` uses
-`g_braceDepth` and `g_curlyDepth` to resynchronize after an error at any
+`BraceDepth` and `CurlyDepth` to resynchronize after an error at any
 nesting depth.
 
 ### Expressions: precedence climbing
 
-A single table (`BinopPrecedence`, filled by `InitializePrecedence()`) drives
+A single constant table (`BinopPrecedence`) drives
 `ParseBinOpRHS()`; there is no per-level function chain. Low to high:
 assignment and compound assignment 10, cast (`to`) 12, `||` 15, `&&` 20,
 `==` `!=` 25, relational 30, `|` 33, `^` 35, `&` 37, shifts 38, `+` `-` 40,

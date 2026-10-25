@@ -541,7 +541,7 @@ so the bare form consumes its own, and no dangling `;` is left for those loops.
 branch:
 
 ```cpp
-if (CurTok == '!') {
+if (Parser().CurTok == '!') {
     getNextToken();
     TurfTypePtr Success = ParseType();
     return std::make_shared<TurfErrorUnionType>(Success);

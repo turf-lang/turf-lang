@@ -35,9 +35,35 @@
 #include <unordered_set>
 #include <vector>
 
-// Current state of the Parser
-int CurTok; // The current token the parser is looking at
-static std::map<int, int> BinopPrecedence; // Precedence table: '*' > '+'
+// The current parser (Parser(), Parser.h). `Idle` is the one with no
+// ParserScope live: no lexer, so EOF. A tool that asks for the current token
+// or a location outside any parse gets that rather than a dangling pointer.
+static ParserState *CurrentParser = nullptr;
+
+ParserState &Parser() {
+  static ParserState Idle;
+  return CurrentParser ? *CurrentParser : Idle;
+}
+
+ParserScope::ParserScope(ParserState &P) : Saved(CurrentParser) {
+  CurrentParser = &P;
+}
+
+ParserScope::~ParserScope() { CurrentParser = Saved; }
+
+// The current parser's lexer, or an empty one that yields EOF (Lexer.h).
+LexerState &Lex() {
+  static LexerState Idle;
+  LexerState *L = Parser().Lexer;
+  return L ? *L : Idle;
+}
+
+void resetLexer() {
+  ParserState &P = Parser();
+  Lex().reset();
+  P.BraceDepth = 0;
+  P.CurlyDepth = 0;
+}
 
 // Forward declaration: ParseBinOpRHS() (below) calls ParseUnary(), which is
 // defined later in this file (ParserInternal.h holds the cross-file
@@ -46,7 +72,7 @@ std::unique_ptr<ExprAST> ParseUnary();
 
 // Reads the next token from the Lexer and updates CurTok.
 //
-// Also maintains g_braceDepth (see Lexer.h/.cpp): consuming '{'/'('/'['
+// Also maintains BraceDepth (ParserState, Parser.h): consuming '{'/'('/'['
 // (i.e. CurTok is one of those RIGHT BEFORE we advance past it) increments
 // it, consuming '}'/')'/']' decrements it. This is the single choke point
 // every token advance in the entire parser goes through, which is exactly
@@ -54,17 +80,18 @@ std::unique_ptr<ExprAST> ParseUnary();
 // an always-accurate nesting depth with zero per-callsite bookkeeping,
 // regardless of how deeply a parse failure is nested.
 int getNextToken() {
-  if (CurTok == '{' || CurTok == '(' || CurTok == '[')
-    g_braceDepth++;
-  else if ((CurTok == '}' || CurTok == ')' || CurTok == ']') && g_braceDepth > 0)
-    g_braceDepth--;
-  if (CurTok == '{')
-    g_curlyDepth++;
-  else if (CurTok == '}' && g_curlyDepth > 0)
-    g_curlyDepth--;
-  if (takeLookaheadToken(CurTok))
-    return CurTok;
-  return CurTok = gettok(Lex());
+  ParserState &P = Parser();
+  if (P.CurTok == '{' || P.CurTok == '(' || P.CurTok == '[')
+    P.BraceDepth++;
+  else if ((P.CurTok == '}' || P.CurTok == ')' || P.CurTok == ']') && P.BraceDepth > 0)
+    P.BraceDepth--;
+  if (P.CurTok == '{')
+    P.CurlyDepth++;
+  else if (P.CurTok == '}' && P.CurlyDepth > 0)
+    P.CurlyDepth--;
+  if (takeLookaheadToken(P.CurTok))
+    return P.CurTok;
+  return P.CurTok = gettok(Lex());
 }
 
 SLM::DiagnosticHints MissingSemicolonHints() {
@@ -74,7 +101,7 @@ SLM::DiagnosticHints MissingSemicolonHints() {
   // same line anything else could be a missing operator or comma, and a ';'
   // there would validate as a different program than the one meant.
   const bool NextLine = Lex().PrevTokEndLine > 0 && Lex().CurLoc.Line > Lex().PrevTokEndLine;
-  if (!NextLine && CurTok != '}')
+  if (!NextLine && Parser().CurTok != '}')
     return Hints;
   if (Lex().PrevTokEndLine < 1 || Lex().PrevTokEndCol < 2)
     return Hints;
@@ -94,72 +121,73 @@ SLM::DiagnosticHints MissingSemicolonHints() {
   return Hints;
 }
 
-void InitializePrecedence() {
-  // Assignment (incl. all compound-assignment forms)
-  BinopPrecedence['='] = 10;
-  BinopPrecedence[TOK_ASSIGN] = 10;
-  BinopPrecedence[TOK_PLUS_ASSIGN] = 10;
-  BinopPrecedence[TOK_MINUS_ASSIGN] = 10;
-  BinopPrecedence[TOK_MUL_ASSIGN] = 10;
-  BinopPrecedence[TOK_DIV_ASSIGN] = 10;
-  BinopPrecedence[TOK_MOD_ASSIGN] = 10;
-  BinopPrecedence[TOK_AND_ASSIGN] = 10;
-  BinopPrecedence[TOK_OR_ASSIGN] = 10;
-  BinopPrecedence[TOK_XOR_ASSIGN] = 10;
-  BinopPrecedence[TOK_LSHIFT_ASSIGN] = 10;
-  BinopPrecedence[TOK_RSHIFT_ASSIGN] = 10;
-  BinopPrecedence[TOK_POWER_ASSIGN] = 10;
+// Binary operator precedence: '*' > '+'. A constant, like the lexer's
+// Keywords; GetTokPrecedence() reads it for every binary expression.
+static const std::map<int, int> BinopPrecedence = {
+    // Assignment (incl. all compound-assignment forms)
+    {'=', 10},
+    {TOK_ASSIGN, 10},
+    {TOK_PLUS_ASSIGN, 10},
+    {TOK_MINUS_ASSIGN, 10},
+    {TOK_MUL_ASSIGN, 10},
+    {TOK_DIV_ASSIGN, 10},
+    {TOK_MOD_ASSIGN, 10},
+    {TOK_AND_ASSIGN, 10},
+    {TOK_OR_ASSIGN, 10},
+    {TOK_XOR_ASSIGN, 10},
+    {TOK_LSHIFT_ASSIGN, 10},
+    {TOK_RSHIFT_ASSIGN, 10},
+    {TOK_POWER_ASSIGN, 10},
 
-  // Cast: just tighter than comparison (31 > 30), so a cast is an operand of
-  // a comparison and of `&&`/`||` -- `a < 3 && s to int > 5` is
-  // `(a < 3) && ((s to int) > 5)` -- and still of assignment (`y = x to int;`
-  // stores the cast value). It stays looser than the bitwise, shift and
-  // arithmetic operators, so `1 + 2 to double` is `(1 + 2) to double`.
-  BinopPrecedence[TOK_TO] = 31;
+    // Cast: just tighter than comparison (31 > 30), so a cast is an operand of
+    // a comparison and of `&&`/`||` -- `a < 3 && s to int > 5` is
+    // `(a < 3) && ((s to int) > 5)` -- and still of assignment (`y = x to int;`
+    // stores the cast value). It stays looser than the bitwise, shift and
+    // arithmetic operators, so `1 + 2 to double` is `(1 + 2) to double`.
+    {TOK_TO, 31},
 
-  // Logical
-  BinopPrecedence[TOK_OR] = 15;  // ||
-  BinopPrecedence[TOK_AND] = 20; // &&
+    // Logical
+    {TOK_OR, 15},  // ||
+    {TOK_AND, 20}, // &&
 
-  // Equality
-  BinopPrecedence[TOK_EQ] = 25;
-  BinopPrecedence[TOK_NEQ] = 25;
+    // Equality
+    {TOK_EQ, 25},
+    {TOK_NEQ, 25},
 
-  // Relational
-  BinopPrecedence['<'] = 30;
-  BinopPrecedence['>'] = 30;
-  BinopPrecedence[TOK_LEQ] = 30;
-  BinopPrecedence[TOK_GEQ] = 30;
+    // Relational
+    {'<', 30},
+    {'>', 30},
+    {TOK_LEQ, 30},
+    {TOK_GEQ, 30},
 
-  // Bitwise OR
-  BinopPrecedence['|'] = 33;
+    // Bitwise OR
+    {'|', 33},
 
-  // Bitwise XOR
-  BinopPrecedence['^'] = 35;
+    // Bitwise XOR
+    {'^', 35},
 
-  // Bitwise AND
-  BinopPrecedence['&'] = 37;
+    // Bitwise AND
+    {'&', 37},
 
-  // Bitwise shifts
-  BinopPrecedence[TOK_LSHIFT] = 38;
-  BinopPrecedence[TOK_RSHIFT] = 38;
+    // Bitwise shifts
+    {TOK_LSHIFT, 38},
+    {TOK_RSHIFT, 38},
 
-  // Additive
-  BinopPrecedence['+'] = 40;
-  BinopPrecedence['-'] = 40;
+    // Additive
+    {'+', 40},
+    {'-', 40},
 
-  // Multiplicative
-  BinopPrecedence['*'] = 50;
-  BinopPrecedence['/'] = 50;
-  BinopPrecedence['%'] = 50;
+    // Multiplicative
+    {'*', 50},
+    {'/', 50},
+    {'%', 50},
 
-  // Exponentiation (`**`)
-  BinopPrecedence[TOK_POWER] = 60;
-}
+    // Exponentiation (`**`)
+    {TOK_POWER, 60},
+};
 
 void InitializeCompilerGlobals() {
   InitializeSymbolTable();
-  InitializePrecedence();
 }
 
 // See Parser.h for the doc comment.
@@ -195,9 +223,9 @@ void SkipToNextTopLevelBoundary() {
   // 'operator -(a: Vec2): Vec2 { ... }' rejected for being unary, right after
   // its parameter list), the reset is a no-op and the loop below walks
   // through the untouched '{'...'}' body.
-  g_braceDepth = g_curlyDepth;
+  Parser().BraceDepth = Parser().CurlyDepth;
 
-  if (CurTok == TOK_EOF) return;
+  if (Parser().CurTok == TOK_EOF) return;
 
   // If the failed construct already consumed everything through its own
   // natural boundary before rejecting the result (e.g. ParseLetStatement()
@@ -207,7 +235,7 @@ void SkipToNextTopLevelBoundary() {
   // token here would eat that declaration's leading keyword and desync a
   // statement that was never broken (`fn main(): int` would become a bare
   // call `main()` and draw a second, unrelated "Expected ';'").
-  if (g_braceDepth == 0 && IsTopLevelBoundaryToken(CurTok)) return;
+  if (Parser().BraceDepth == 0 && IsTopLevelBoundaryToken(Parser().CurTok)) return;
 
   // Otherwise the failed construct left unconsumed text: anywhere from a
   // single bad token (e.g. an unsupported operator symbol, rejected before
@@ -224,20 +252,20 @@ void SkipToNextTopLevelBoundary() {
       getNextToken();
     } catch (const RecoverUnwind &) {
     }
-  } while (CurTok != TOK_EOF &&
-           (g_braceDepth > 0 || !IsTopLevelBoundaryToken(CurTok)));
+  } while (Parser().CurTok != TOK_EOF &&
+           (Parser().BraceDepth > 0 || !IsTopLevelBoundaryToken(Parser().CurTok)));
 
   // Stopped at a top-level boundary, so by definition no `{` is open -- even
   // if the skipped text closed a `(` with a `}` and left the counters
   // disagreeing, which must not leak into the next declaration.
-  g_braceDepth = 0;
-  g_curlyDepth = 0;
+  Parser().BraceDepth = 0;
+  Parser().CurlyDepth = 0;
 }
 
 // Returns the priority of the current operator. If it's not an operator (like a
 // number), returns -1.
 static int GetTokPrecedence() {
-  auto It = BinopPrecedence.find(CurTok);
+  auto It = BinopPrecedence.find(Parser().CurTok);
   if (It == BinopPrecedence.end() || It->second <= 0)
     return -1;
   return It->second;
@@ -252,16 +280,16 @@ static int GetTokPrecedence() {
 // ParseType: recursively parse a type expression from the token stream.
 // Handles primitives, void, generics like list<int>, and arrays like int[5].
 // Trailing [N] brackets are consumed here, making array types fully
-// first-class. Returns nullptr on failure.
-bool g_AllowGuessType = false;
-std::vector<std::string> g_SizeParamsInScope;
+// first-class. Returns nullptr on failure. `guess` is accepted only while
+// ParserState::AllowGuessType is set, and `[N]` reads N as a size parameter
+// only if it is in ParserState::SizeParamsInScope.
 
 // `[N]` in a type, with N a size parameter in scope (`fn<T, N: size>`):
 // consumes N and returns its name; otherwise consumes nothing and returns "".
 static std::string TakeSizeParamDim() {
-  if (CurTok != TOK_IDENTIFIER ||
-      std::find(g_SizeParamsInScope.begin(), g_SizeParamsInScope.end(),
-                Lex().IdentifierStr) == g_SizeParamsInScope.end())
+  if (Parser().CurTok != TOK_IDENTIFIER ||
+      std::find(Parser().SizeParamsInScope.begin(), Parser().SizeParamsInScope.end(),
+                Lex().IdentifierStr) == Parser().SizeParamsInScope.end())
     return "";
   std::string Name = Lex().IdentifierStr;
   getNextToken();
@@ -338,7 +366,7 @@ bool ParseTypeArgList(std::vector<TurfTypePtr> &TypeArgs) {
     if (!Arg)
       return false;
     TypeArgs.push_back(std::move(Arg));
-    if (CurTok == '>') {
+    if (Parser().CurTok == '>') {
       getNextToken(); // consume '>'
       break;
     }
@@ -356,21 +384,21 @@ bool ParseTypeArgList(std::vector<TurfTypePtr> &TypeArgs) {
     // the replaced CurTok, rather than looping again, mirrors the real
     // '>' branch just above: this level's own list is closed either way,
     // real or split.
-    if (CurTok == TOK_RSHIFT) {        // '>>' -> '>' then '>'
-      CurTok = '>';
+    if (Parser().CurTok == TOK_RSHIFT) {        // '>>' -> '>' then '>'
+      Parser().CurTok = '>';
       break;
     }
-    if (CurTok == TOK_RSHIFT_ASSIGN) { // '>>=' -> '>' then '>='
-      CurTok = TOK_GEQ;
+    if (Parser().CurTok == TOK_RSHIFT_ASSIGN) { // '>>=' -> '>' then '>='
+      Parser().CurTok = TOK_GEQ;
       break;
     }
-    if (CurTok == TOK_GEQ) {           // '>=' -> '>' then '=' -- reached
+    if (Parser().CurTok == TOK_GEQ) {           // '>=' -> '>' then '=' -- reached
                                         // directly (`List<T>=`) or as the
                                         // second split of a '>>=' above
-      CurTok = TOK_ASSIGN;
+      Parser().CurTok = TOK_ASSIGN;
       break;
     }
-    if (CurTok != ',') {
+    if (Parser().CurTok != ',') {
       SyntaxError(Lex().CurLoc, ErrCode::MissingComma, "Expected '>' or ',' in generic type").raise();
       return false;
     }
@@ -399,7 +427,7 @@ TurfTypePtr ParseType() {
   // parsed entirely inside EXPRESSION parsing; ParseType() is only ever
   // called from type positions (return types, parameter types, var-decl
   // annotations, struct/error-variant fields).
-  if (CurTok == '!') {
+  if (Parser().CurTok == '!') {
     getNextToken(); // consume '!'
     TurfTypePtr SuccessType = ParseType();
     if (!SuccessType)
@@ -423,10 +451,10 @@ TurfTypePtr ParseType() {
   // to the return type, so an array of function values is
   // `(fn(int): int)[2]`. Only those two may be parenthesised, and only to
   // put array dimensions after them: every other type takes `[N]` directly.
-  if (CurTok == '(') {
+  if (Parser().CurTok == '(') {
     SourceLocation OpenLoc = Lex().CurLoc;
     getNextToken(); // consume '('
-    if (CurTok != '&' && CurTok != TOK_FN) {
+    if (Parser().CurTok != '&' && Parser().CurTok != TOK_FN) {
       SyntaxError(OpenLoc, ErrCode::ExpectedType,
                   "Parentheses in a type are only for an array of references "
                   "or of functions, e.g. (&Node)[4] or (fn(int): int)[2].",
@@ -437,7 +465,7 @@ TurfTypePtr ParseType() {
     TurfTypePtr Elem = ParseType();
     if (!Elem)
       return nullptr;
-    if (CurTok != ')') {
+    if (Parser().CurTok != ')') {
       SyntaxError(Lex().CurLoc, ErrCode::UnclosedDelimiter,
                   "Expected ')' to close the parenthesised type, "
                   "e.g. (&Node)[4] or (fn(int): int)[2].")
@@ -445,7 +473,7 @@ TurfTypePtr ParseType() {
       return nullptr;
     }
     getNextToken(); // consume ')'
-    if (CurTok != '[') {
+    if (Parser().CurTok != '[') {
       SyntaxError(OpenLoc, ErrCode::ExpectedType,
                   "Parentheses in a type are only for an array of references "
                   "or of functions; expected '[' after ')'.",
@@ -457,10 +485,10 @@ TurfTypePtr ParseType() {
     return ParseTrailingArrayDims(std::move(Elem));
   }
 
-  if (CurTok == '&') {
+  if (Parser().CurTok == '&') {
     getNextToken(); // consume '&'
     bool IsNullable = false;
-    if (CurTok == '?') {
+    if (Parser().CurTok == '?') {
       IsNullable = true;
       getNextToken(); // consume '?'
     }
@@ -479,33 +507,33 @@ TurfTypePtr ParseType() {
   // a top-level `fn name(...)` declaration, which is parsed by
   // ParseFuncDef() at the statement level and never calls ParseType() to
   // consume its own leading 'fn'.
-  if (CurTok == TOK_FN) {
+  if (Parser().CurTok == TOK_FN) {
     getNextToken(); // consume 'fn'
-    if (CurTok != '(') {
+    if (Parser().CurTok != '(') {
       SyntaxError(Lex().CurLoc, ErrCode::MissingOpeningDelimiter, "Expected '(' after 'fn' in a function type").raise();
       return nullptr;
     }
     getNextToken(); // consume '('
     std::vector<TurfTypePtr> ParamTypes;
-    if (CurTok != ')') {
+    if (Parser().CurTok != ')') {
       while (true) {
         TurfTypePtr ParamTy = ParseType();
         if (!ParamTy)
           return nullptr;
         ParamTypes.push_back(std::move(ParamTy));
-        if (CurTok == ',') {
+        if (Parser().CurTok == ',') {
           getNextToken();
           continue;
         }
         break;
       }
     }
-    if (CurTok != ')') {
+    if (Parser().CurTok != ')') {
       SyntaxError(Lex().CurLoc, ErrCode::UnclosedDelimiter, "Expected ')' to close a function type's parameter list").raise();
       return nullptr;
     }
     getNextToken(); // consume ')'
-    if (CurTok != TOK_COLON) {
+    if (Parser().CurTok != TOK_COLON) {
       SyntaxError(Lex().CurLoc, ErrCode::MissingColon, "Expected ':' before a function type's return type").raise();
       return nullptr;
     }
@@ -516,12 +544,12 @@ TurfTypePtr ParseType() {
     return std::make_shared<FuncType>(std::move(RetType), std::move(ParamTypes));
   }
 
-  if (CurTok != TOK_IDENTIFIER && CurTok != TOK_TYPE_INT &&
-      CurTok != TOK_TYPE_INT32 &&
-      CurTok != TOK_TYPE_DOUBLE && CurTok != TOK_TYPE_BOOL &&
-      CurTok != TOK_TYPE_CHAR &&
-      CurTok != TOK_TYPE_STRING && CurTok != TOK_TYPE_VOID &&
-      CurTok != TOK_PTR && CurTok != TOK_GUESS) {
+  if (Parser().CurTok != TOK_IDENTIFIER && Parser().CurTok != TOK_TYPE_INT &&
+      Parser().CurTok != TOK_TYPE_INT32 &&
+      Parser().CurTok != TOK_TYPE_DOUBLE && Parser().CurTok != TOK_TYPE_BOOL &&
+      Parser().CurTok != TOK_TYPE_CHAR &&
+      Parser().CurTok != TOK_TYPE_STRING && Parser().CurTok != TOK_TYPE_VOID &&
+      Parser().CurTok != TOK_PTR && Parser().CurTok != TOK_GUESS) {
     SyntaxError(Lex().CurLoc, ErrCode::ExpectedType, "Expected a type name").raise();
     return nullptr;
   }
@@ -529,28 +557,28 @@ TurfTypePtr ParseType() {
   // A built-in type is never generic, so a '<' after one is the less-than
   // operator: `(s to int) < n` needs no parentheses, `s to int < n` parses
   // the same way.
-  const bool IsBuiltinType = CurTok != TOK_IDENTIFIER;
+  const bool IsBuiltinType = Parser().CurTok != TOK_IDENTIFIER;
   std::string BaseName;
-  if (CurTok == TOK_TYPE_INT)
+  if (Parser().CurTok == TOK_TYPE_INT)
     BaseName = "int";
-  else if (CurTok == TOK_TYPE_INT32)
+  else if (Parser().CurTok == TOK_TYPE_INT32)
     BaseName = "int32";
-  else if (CurTok == TOK_TYPE_DOUBLE)
+  else if (Parser().CurTok == TOK_TYPE_DOUBLE)
     BaseName = "double";
-  else if (CurTok == TOK_TYPE_BOOL)
+  else if (Parser().CurTok == TOK_TYPE_BOOL)
     BaseName = "bool";
-  else if (CurTok == TOK_TYPE_CHAR)
+  else if (Parser().CurTok == TOK_TYPE_CHAR)
     BaseName = "char";
-  else if (CurTok == TOK_TYPE_STRING)
+  else if (Parser().CurTok == TOK_TYPE_STRING)
     BaseName = "string";
-  else if (CurTok == TOK_TYPE_VOID)
+  else if (Parser().CurTok == TOK_TYPE_VOID)
     BaseName = "void";
-  else if (CurTok == TOK_PTR) {
+  else if (Parser().CurTok == TOK_PTR) {
     // `ptr` is a terminal type — no generics, no arrays (for now)
     getNextToken(); // consume 'ptr'
     return TurfPtr();
   }
-  else if (CurTok == TOK_GUESS) {
+  else if (Parser().CurTok == TOK_GUESS) {
     // `guess` is a terminal type-position placeholder (FREEZE.md §6.3)
     // -- never composed with generics/arrays/pointers, exactly like `ptr`
     // above. TypeChecker::visitVarDecl replaces it with the initializer's
@@ -562,7 +590,7 @@ TurfTypePtr ParseType() {
     // there, it would surface later and differently per position (a struct
     // field would compile, a parameter would fail at the call). Only the
     // local-declaration parse (ParseLetStatement) sets the flag.
-    if (!g_AllowGuessType) {
+    if (!Parser().AllowGuessType) {
       LogErrorAt(Lex().CurLoc, ErrCode::MissingInitializer,
                  "'guess' needs an initializer to infer from, so it can only "
                  "declare a local variable."
@@ -588,9 +616,9 @@ TurfTypePtr ParseType() {
   // after its first pass has registered every module, which cannot be known
   // here while the program is still being parsed.
   std::string ModuleQualifier;
-  if (CurTok == TOK_SCOPE) {
+  if (Parser().CurTok == TOK_SCOPE) {
     getNextToken(); // eat '::'
-    if (CurTok != TOK_IDENTIFIER) {
+    if (Parser().CurTok != TOK_IDENTIFIER) {
       SyntaxError(Lex().CurLoc, ErrCode::ExpectedType, "Expected a type name after '::'").raise();
       return nullptr;
     }
@@ -602,23 +630,23 @@ TurfTypePtr ParseType() {
   }
 
   // Check for generic parameter: BaseName<T1, T2, ...>
-  if (CurTok == '<' && !IsBuiltinType) {
+  if (Parser().CurTok == '<' && !IsBuiltinType) {
     std::vector<TurfTypePtr> TypeArgs;
     if (!ParseTypeArgList(TypeArgs))
       return nullptr;
     // Arrays of generics are rare but allowed: parse trailing [N]
     TurfTypePtr GenBase =
         std::make_shared<GenericType>(BaseName, std::move(TypeArgs), ModuleQualifier);
-    while (CurTok == '*') {
+    while (Parser().CurTok == '*') {
       getNextToken();
       GenBase = std::make_shared<TurfPointerType>(GenBase);
     }
     std::vector<std::pair<int, std::string>> GenArraySizes;
-    while (CurTok == '[') {
+    while (Parser().CurTok == '[') {
       getNextToken();
       int Size = -1;
       std::string SizeName = TakeSizeParamDim();
-      if (SizeName.empty() && CurTok == TOK_INT_LITERAL) {
+      if (SizeName.empty() && Parser().CurTok == TOK_INT_LITERAL) {
         // A best-effort (saturating) reading of the literal: an array size
         // is a small positive int in practice, no NumberExprAST node exists
         // for a type-position literal, and the exact-value representability
@@ -633,7 +661,7 @@ TurfTypePtr ParseType() {
         }
         getNextToken();
       }
-      if (CurTok != ']') {
+      if (Parser().CurTok != ']') {
         SyntaxError(Lex().CurLoc, ErrCode::UnclosedDelimiter, "Expected ']' to close array size").raise();
         return nullptr;
       }
@@ -666,7 +694,7 @@ TurfTypePtr ParseType() {
     Base = std::make_shared<NamedType>(BaseName, ModuleQualifier);
   }
 
-  while (CurTok == '*') {
+  while (Parser().CurTok == '*') {
     getNextToken();
     Base = std::make_shared<TurfPointerType>(Base);
   }
@@ -679,11 +707,11 @@ TurfTypePtr ParseType() {
 // none follow.
 static TurfTypePtr ParseTrailingArrayDims(TurfTypePtr Base) {
   std::vector<std::pair<int, std::string>> ArraySizes;
-  while (CurTok == '[') {
+  while (Parser().CurTok == '[') {
     getNextToken(); // eat '['
     int Size = -1;
     std::string SizeName = TakeSizeParamDim();
-    if (SizeName.empty() && CurTok == TOK_INT_LITERAL) {
+    if (SizeName.empty() && Parser().CurTok == TOK_INT_LITERAL) {
       // See the identical comment on the other array-size site above (this
       // file, `T[N]` in a generic base type) for why the best-effort
       // NumLitClean/NumLitRadix reading is the right choice here too.
@@ -697,8 +725,8 @@ static TurfTypePtr ParseTrailingArrayDims(TurfTypePtr Base) {
       }
       getNextToken(); // eat the literal
     }
-    if (CurTok != ']') {
-      if (CurTok == TOK_IDENTIFIER)
+    if (Parser().CurTok != ']') {
+      if (Parser().CurTok == TOK_IDENTIFIER)
         SyntaxError(Lex().CurLoc, ErrCode::InvalidArraySize,
                     "'" + Lex().IdentifierStr + "' is not a size: an array's size is a "
                     "positive whole number or a size parameter.",
@@ -759,7 +787,7 @@ static std::unique_ptr<ExprAST> ParseParenExpr() {
   if (!V)
     return nullptr;
 
-  if (CurTok != ')') {
+  if (Parser().CurTok != ')') {
     SyntaxError(Lex().CurLoc, ErrCode::UnclosedDelimiter,
                 "Missing closing ')' — every '(' must have a matching ')'")
         .raise();
@@ -772,7 +800,7 @@ static std::unique_ptr<ExprAST> ParseParenExpr() {
 
 // "Primary" means the basic building blocks: numbers or parentheses.
 static std::unique_ptr<ExprAST> ParsePrimaryBase() {
-  switch (CurTok) {
+  switch (Parser().CurTok) {
   default:
 
     LogErrorAt(Lex().CurLoc, ErrCode::UnexpectedToken,
@@ -786,7 +814,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
   case TOK_SIZEOF: {
     SourceLocation Loc = Lex().CurLoc;
     getNextToken(); // eat sizeof
-    if (CurTok != '(') {
+    if (Parser().CurTok != '(') {
       LogErrorAt(Lex().CurLoc, ErrCode::MissingOpeningDelimiter, "Expected '(' after sizeof", SLM::ErrorCategory::SYNTAX_ERROR);
       return nullptr;
     }
@@ -794,7 +822,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     TurfTypePtr Ty = ParseType();
     if (!Ty)
       return nullptr;
-    if (CurTok != ')') {
+    if (Parser().CurTok != ')') {
       LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "Expected ')' to close sizeof", SLM::ErrorCategory::SYNTAX_ERROR);
       return nullptr;
     }
@@ -829,7 +857,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     // error a few tokens later. A forward-declared struct misses this check,
     // which is fine: the ordinary parse failure that follows is still a real,
     // if less specific, diagnostic.
-    if (CurTok == '{' && GlobalSymbolTable && !ParsingPatternHeader) {
+    if (Parser().CurTok == '{' && GlobalSymbolTable && !Parser().InPatternHeader) {
       // A struct declared earlier in THIS module is registered under its
       // identity (`M::IdName`), not its bare spelling.
       if (auto T = GlobalSymbolTable->LookupType(
@@ -852,7 +880,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     // the list closes with `>` immediately followed by `::`
     // (TypeArgsThenScopeAhead()); otherwise this '<' is less-than.
     TurfTypePtr LeftType;
-    if (CurTok == '<' && !ParsingPatternHeader && TypeArgsThenScopeAhead()) {
+    if (Parser().CurTok == '<' && !Parser().InPatternHeader && TypeArgsThenScopeAhead()) {
       std::vector<TurfTypePtr> TypeArgs;
       if (!ParseTypeArgList(TypeArgs))
         return nullptr;
@@ -862,7 +890,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     // LG-7: `identity<int>(3)`, a generic function's type arguments without
     // the `::`. A list naming a built-in type cannot be operands of `<` and
     // `>`, so this is never a comparison; the fix writes the `::`.
-    if (!LeftType && CurTok == '<' && !ParsingPatternHeader) {
+    if (!LeftType && Parser().CurTok == '<' && !Parser().InPatternHeader) {
       bool SawTypeKeyword = false;
       if (TypeArgListFollower(&SawTypeKeyword) == '(' && SawTypeKeyword) {
         SyntaxError(Lex().CurLoc, ErrCode::ExpectedKeyword,
@@ -882,7 +910,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     // ── LG-2: name::<T> ──────────────────────────────────────────────────────
     // `identity::<int>(3)`, `immut g = identity::<int>;`: type arguments for a
     // generic function. `::` followed by `<` begins nothing else.
-    if (!LeftType && CurTok == TOK_SCOPE && peekToken(0) == '<') {
+    if (!LeftType && Parser().CurTok == TOK_SCOPE && peekToken(0) == '<') {
       getNextToken(); // eat '::'
       auto Var = std::make_unique<VariableExprAST>(IdLoc, IdName);
       if (!ParseTypeArgList(Var->TypeArgs))
@@ -896,10 +924,10 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     // happens entirely in the Resolver (visitScopeAccess / visitFuncCall).
     // Whatever follows this node syntactically (a postfix '(' for a call, a
     // bare reference, etc.) is handled by the postfix-expression machinery.
-    if (CurTok == TOK_SCOPE) {
+    if (Parser().CurTok == TOK_SCOPE) {
       getNextToken(); // eat '::'
       if (LeftType) {
-        if (CurTok != TOK_IDENTIFIER) {
+        if (Parser().CurTok != TOK_IDENTIFIER) {
           LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "Expected a name after '::'", SLM::ErrorCategory::DECLARATION);
           return nullptr;
         }
@@ -909,7 +937,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
         Node->LeftType = std::move(LeftType);
         return Node;
       }
-      if (CurTok != TOK_IDENTIFIER) {
+      if (Parser().CurTok != TOK_IDENTIFIER) {
         LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "Expected a name after '::'", SLM::ErrorCategory::DECLARATION);
         return nullptr;
       }
@@ -928,7 +956,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
       // `Module::StructName { ... }` spelling -- looked up by the identity
       // the qualifier names (`IdName::RightName` IS that identity when
       // IdName is the owning module).
-      if (CurTok == '{' && GlobalSymbolTable && !ParsingPatternHeader) {
+      if (Parser().CurTok == '{' && GlobalSymbolTable && !Parser().InPatternHeader) {
         if (auto T = GlobalSymbolTable->LookupType(
                 TypeIdentity::make(IdName, RightName))) {
           if (dynamic_cast<TurfStructType *>(T.get())) {
@@ -946,12 +974,12 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
       // LG-1, qualified: `list::List<int>::default()`. Built like the
       // three-name chain below (`Module::Name::member`), with the type
       // arguments on the middle name.
-      if (CurTok == '<' && !ParsingPatternHeader && TypeArgsThenScopeAhead()) {
+      if (Parser().CurTok == '<' && !Parser().InPatternHeader && TypeArgsThenScopeAhead()) {
         std::vector<TurfTypePtr> TypeArgs;
         if (!ParseTypeArgList(TypeArgs))
           return nullptr;
         getNextToken(); // eat '::' (TypeArgsThenScopeAhead() saw it)
-        if (CurTok != TOK_IDENTIFIER) {
+        if (Parser().CurTok != TOK_IDENTIFIER) {
           LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "Expected a name after '::'", SLM::ErrorCategory::DECLARATION);
           return nullptr;
         }
@@ -965,7 +993,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
       }
 
       // LG-2, qualified: `module::f::<T>`.
-      if (CurTok == TOK_SCOPE && peekToken(0) == '<') {
+      if (Parser().CurTok == TOK_SCOPE && peekToken(0) == '<') {
         getNextToken(); // eat '::'
         auto Node = std::make_unique<ScopeAccessExprAST>(IdLoc, IdName, IdLoc,
                                                          RightName, RightLoc);
@@ -981,9 +1009,9 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
       // a module-function-ref) or any other shape is nonsensical and left
       // to the Resolver to reject once it knows IdName isn't an enum's
       // module-qualifying prefix at all.
-      if (CurTok == TOK_SCOPE) {
+      if (Parser().CurTok == TOK_SCOPE) {
         getNextToken(); // eat second '::'
-        if (CurTok != TOK_IDENTIFIER) {
+        if (Parser().CurTok != TOK_IDENTIFIER) {
           LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "Expected a variant name after '::'", SLM::ErrorCategory::DECLARATION);
           return nullptr;
         }
@@ -1028,8 +1056,8 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
       // directly followed by '{' (e.g. 'els { ... }') still gets a real,
       // if less specific, diagnostic from whatever this identifier fails to
       // parse as further down.
-      if (CurTok == TOK_IDENTIFIER || CurTok == TOK_NUMBER ||
-          CurTok == TOK_INT_LITERAL || CurTok == TOK_STRING_LITERAL) {
+      if (Parser().CurTok == TOK_IDENTIFIER || Parser().CurTok == TOK_NUMBER ||
+          Parser().CurTok == TOK_INT_LITERAL || Parser().CurTok == TOK_STRING_LITERAL) {
         KeywordError(IdLoc, IdName).raise();
         return nullptr;
       }
@@ -1061,20 +1089,20 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     SourceLocation Loc = Lex().CurLoc;
     getNextToken(); // eat '['
     std::vector<std::unique_ptr<ExprAST>> Elements;
-    while (CurTok != ']' && CurTok != TOK_EOF) {
+    while (Parser().CurTok != ']' && Parser().CurTok != TOK_EOF) {
       if (auto Val = ParseExpression()) {
         Elements.push_back(std::move(Val));
       } else {
         return nullptr;
       }
-      if (CurTok == ',') {
+      if (Parser().CurTok == ',') {
         getNextToken(); // eat ','
-      } else if (CurTok != ']') {
+      } else if (Parser().CurTok != ']') {
         LogErrorAt(Lex().CurLoc, ErrCode::MissingComma, "Expected ',' or ']' in array literal", SLM::ErrorCategory::ARRAY_ERROR);
         return nullptr;
       }
     }
-    if (CurTok != ']') {
+    if (Parser().CurTok != ']') {
       LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "Expected ']' to close array literal", SLM::ErrorCategory::ARRAY_ERROR);
       return nullptr;
     }
@@ -1221,7 +1249,7 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
       return LHS;
 
     SourceLocation OpLoc = Lex().CurLoc;
-    int BinOp = CurTok;
+    int BinOp = Parser().CurTok;
     getNextToken(); // consume binop
 
     if (BinOp == TOK_TO) {
@@ -1345,13 +1373,13 @@ std::unique_ptr<ExprAST> ParseExpression() {
   if (!LHS)
     return nullptr;
 
-  if (CurTok == TOK_GIVE) {
+  if (Parser().CurTok == TOK_GIVE) {
     SourceLocation OpLoc = Lex().CurLoc;
     getNextToken(); // consume 'give'
     auto ThenExpr = ParseExpression();
     if (!ThenExpr)
       return nullptr;
-    if (CurTok != TOK_OTHERWISE) {
+    if (Parser().CurTok != TOK_OTHERWISE) {
       LogErrorAt(Lex().CurLoc, ErrCode::ExpectedKeyword, "Expected 'otherwise' after 'give' expression in ternary", SLM::ErrorCategory::CONTROL_FLOW);
       return nullptr;
     }
@@ -1372,11 +1400,11 @@ std::unique_ptr<ExprAST> ParseExpression() {
   // position as the give/otherwise ternary just above), since `recover`
   // attaches directly to a call expression, not to a sub-term of a larger
   // arithmetic expression.
-  if (CurTok == TOK_RECOVER) {
+  if (Parser().CurTok == TOK_RECOVER) {
     SourceLocation RecoverLoc = Lex().CurLoc;
     getNextToken(); // consume 'recover'
 
-    if (CurTok == TOK_PRODUCE) {
+    if (Parser().CurTok == TOK_PRODUCE) {
       getNextToken(); // consume 'produce'
       auto ProduceExpr = ParseExpression();
       if (!ProduceExpr)
@@ -1386,7 +1414,7 @@ std::unique_ptr<ExprAST> ParseExpression() {
           std::move(ProduceExpr), "", nullptr);
     }
 
-    if (CurTok == TOK_RUN) {
+    if (Parser().CurTok == TOK_RUN) {
       getNextToken(); // consume 'run'
       auto Block = ParseBlock();
       if (!Block)
@@ -1396,9 +1424,9 @@ std::unique_ptr<ExprAST> ParseExpression() {
                                               std::move(Block));
     }
 
-    if (CurTok == TOK_AS) {
+    if (Parser().CurTok == TOK_AS) {
       getNextToken(); // consume 'as'
-      if (CurTok != TOK_IDENTIFIER) {
+      if (Parser().CurTok != TOK_IDENTIFIER) {
         LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName,
                    "Expected an identifier after 'recover as' to "
                            "bind the failing error value."
@@ -1408,7 +1436,7 @@ std::unique_ptr<ExprAST> ParseExpression() {
       std::string BoundName = Lex().IdentifierStr;
       getNextToken(); // consume the bound name
 
-      if (CurTok != TOK_RUN) {
+      if (Parser().CurTok != TOK_RUN) {
         LogErrorAt(Lex().CurLoc, ErrCode::ExpectedKeyword,
                    "Expected 'run' after 'recover as " + BoundName +
                                "'."
@@ -1440,7 +1468,7 @@ std::unique_ptr<ExprAST> ParseExpression() {
 
 // Parse API
 std::unique_ptr<ExprAST> Parse() {
-  if (CurTok == 0)
+  if (Parser().CurTok == 0)
     getNextToken();
 
   return ParseExpression();
@@ -1464,17 +1492,17 @@ std::unique_ptr<ExprAST> ParseUnary() {
   // `try <expr>` -- error propagation (FREEZE.md §6.18). A prefix
   // operator with `!`/`-`'s precedence, so `try a() + try b()` is
   // `(try a()) + (try b())` and `try x.f(1)` propagates the whole call.
-  if (CurTok == TOK_TRY) {
+  if (Parser().CurTok == TOK_TRY) {
     SourceLocation Loc = Lex().CurLoc;
     getNextToken(); // consume 'try'
     auto Operand = ParseUnary();
     if (!Operand)
       return nullptr;
-    ParsingFuncUsesTry = true; // see FuncBodyTryScope (ParserInternal.h)
+    Parser().FuncUsesTry = true; // see FuncBodyTryScope (ParserInternal.h)
     return std::make_unique<TryExprAST>(Loc, std::move(Operand));
   }
 
-  if (CurTok == '!') {
+  if (Parser().CurTok == '!') {
     SourceLocation Loc = Lex().CurLoc;
     getNextToken(); // consume '!'
     auto Operand = ParseUnary();
@@ -1494,7 +1522,7 @@ std::unique_ptr<ExprAST> ParseUnary() {
   }
 
   // Bitwise NOT: ~expr
-  if (CurTok == '~') {
+  if (Parser().CurTok == '~') {
     SourceLocation Loc = Lex().CurLoc;
     getNextToken(); // consume '~'
     auto Operand = ParseUnary();
@@ -1511,8 +1539,8 @@ std::unique_ptr<ExprAST> ParseUnary() {
   // (`++(a + b)`) is not a parse error: TypeChecker::visitPostfixExpr()
   // (TypeCheckerExpr.cpp) rejects it with InvalidAssignmentTargetError via the
   // isAssignableLValue() check assignment and compound assignment use.
-  if (CurTok == TOK_PLUS_PLUS || CurTok == TOK_MINUS_MINUS) {
-    int OpType = CurTok;
+  if (Parser().CurTok == TOK_PLUS_PLUS || Parser().CurTok == TOK_MINUS_MINUS) {
+    int OpType = Parser().CurTok;
     SourceLocation Loc = Lex().CurLoc;
     getNextToken();
 
@@ -1528,7 +1556,7 @@ std::unique_ptr<ExprAST> ParseUnary() {
   // Address-of: &expr — takes the address of an lvalue.
   // The lexer already returns '&' as ASCII for a single ampersand;
   // '&&' is tokenised as TOK_AND and never reaches here.
-  if (CurTok == '&') {
+  if (Parser().CurTok == '&') {
     SourceLocation Loc = Lex().CurLoc;
     getNextToken(); // eat '&'
     auto Operand = ParseUnary();
@@ -1539,10 +1567,10 @@ std::unique_ptr<ExprAST> ParseUnary() {
 
   // If the current token is not an operator that handles unary (like '-' or
   // '+'), then it must be a primary expression.
-  if (CurTok != '-' && CurTok != '+')
+  if (Parser().CurTok != '-' && Parser().CurTok != '+')
     return ParsePrimary();
 
-  int Opc = CurTok;
+  int Opc = Parser().CurTok;
   SourceLocation Loc = Lex().CurLoc;
   getNextToken();
 

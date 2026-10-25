@@ -2,12 +2,146 @@
 #define PARSER_H
 
 #include "frontend/AST.h"
+#include <map>
 #include <memory>
+#include <string>
+#include <vector>
 
-// Expose all variables and functions to other files
-extern int CurTok;
+// ─── ParserState (F-S1, issue #302) ───────────────────────────────────────
+// Everything the parser reads and writes while it parses one file, owned by
+// whoever parses. These were process-wide globals (CurTok, the bracket and
+// recursion depths, the flags a construct sets for the ones nested in it,
+// the file's module aliases, and LexerScope's pointer to the current lexer),
+// so ParseFile() saved and restored them around every import, and the query
+// facade, the formatter and --migrate=pub each did it again with their own
+// list. A nested parse is now a second ParserState, made current by a
+// ParserScope, and nothing of the outer one is touched.
+//
+// Not here: what one compile accumulates across every file it parses (the
+// import caches, the files that declared `unsafe module;`, the parsed
+// top-level declarations: ParserModule.cpp's ParserCompileState, behind
+// Push/PopParserCompileState()), error recovery (g_recoverActive, which the
+// passes after the parser arm too), and the compile's file bookkeeping
+// (SourceFilename, SourceLines, AllSourceLines -- see LexerState).
+struct ParserState {
+  // A parser with no lexer reads EOF (Lex()'s idle lexer).
+  ParserState() = default;
+  explicit ParserState(LexerState &L) : Lexer(&L) {}
+  ParserState(const ParserState &) = delete;
+  ParserState &operator=(const ParserState &) = delete;
+
+  // The lexer this parser reads its tokens from (Lex()).
+  LexerState *Lexer = nullptr;
+  // The current token the parser is looking at.
+  int CurTok = 0;
+
+  // Current '{'/'('/'[' nesting depth relative to the top level (0), kept by
+  // getNextToken() as each token is consumed, so a parse failure at any
+  // nesting depth can recover: SkipToNextTopLevelBoundary() skips until it
+  // is back at 0. A naive "assume depth 1" recovery is not enough -- see that
+  // function. Reset to 0 by resetLexer() so a fresh parse pass (pre-pass vs.
+  // main pass, or a Sandbox.cpp re-parse) never inherits a stale value.
+  int BraceDepth = 0;
+  // LEC-005: the '{'/'}' share of BraceDepth alone. A parse error inside a
+  // function body leaves the body's own `{` open; resynchronising on that
+  // count (not on the all-bracket one, which an unclosed `(` makes useless --
+  // issue #245) is what lets recovery skip to the function's closing brace
+  // instead of stopping at the next `;` inside the body and parsing the rest
+  // of the body as top-level statements. Kept by getNextToken() beside
+  // BraceDepth.
+  int CurlyDepth = 0;
+  // How many ParseRecursionGuards are live (below). A recovered error
+  // unwinds through every one, which decrements it.
+  int RecursionDepth = 0;
+
+  // True only while the local-variable declaration parse reads its type
+  // annotation: the one place `guess` may appear (F-GUESS-3). See ParseType().
+  bool AllowGuessType = false;
+  // The size parameters (`N` in `fn<T, N: size>`) of the function being
+  // parsed: inside it, `[N]` in a type is an array whose size is N. Set by
+  // ParseFuncDef() for its whole declaration and body. See ParseType().
+  std::vector<std::string> SizeParamsInScope;
+  // LEC-003: true only while ParseCompareExpr() parses a `matches` header's
+  // pattern. There `Name {` is the START of a struct pattern (`matches Point
+  // { x, y }:`), not the removed struct brace-literal, so ParsePrimary()'s
+  // "'Name { ... }' is no longer valid syntax" hint -- which fires whenever a
+  // known struct name is followed by '{' -- must stand down. Scoped by an
+  // RAII guard around the one ParseExpression() call that reads the header,
+  // never left set across a statement.
+  bool InPatternHeader = false;
+  // LEC-004: set by ParsePattern() just before it reads a header, taken (and
+  // cleared) by the first ParsePostfixExpression() call. See there.
+  bool PatternHeadCallPending = false;
+  // LEC-004: true while the innermost function body being parsed has had a
+  // `try` in it. ParseUnary() sets it; FuncBodyTryScope (ParserInternal.h)
+  // saves, clears and restores it around each function body, so a `try` in
+  // a nested function marks that function and not its enclosing one.
+  bool FuncUsesTry = false;
+
+  // LEC-001 stage 4 (FREEZE.md 6.16, F-PKG-2): this file's `import` spellings
+  // whose module identity differs from the spelling -- see ModuleKeyFor()
+  // (ParserModule.cpp). Per file: an import parses with a ParserState of its
+  // own, so it neither sees the importer's aliases nor leaves its own behind,
+  // and ParsePreludeImports() clears it at the start of each top-level pass.
+  std::map<std::string, std::string> ModuleAliases;
+};
+
+// The parser that is parsing: the innermost live ParserScope's, or, with
+// none, an idle one with no lexer.
+ParserState &Parser();
+
+// Makes `P` the current parser (and so its lexer the current lexer, Lex())
+// for this scope's lifetime, and puts the previous one back after -- an
+// import's parse, the query facade's isolated analysis, the formatter and
+// --migrate=pub all parse or lex a second buffer this way without touching
+// the first.
+class ParserScope {
+public:
+  explicit ParserScope(ParserState &P);
+  ~ParserScope();
+  ParserScope(const ParserScope &) = delete;
+  ParserScope &operator=(const ParserScope &) = delete;
+
+private:
+  ParserState *Saved;
+};
+
+// The recursive-descent parser has no built-in recursion-depth limit --
+// ParseExpression()/ParseUnary()/ParsePrimary()/ParseBlock()/ParseType()
+// etc. are ordinary unbounded C++ recursion. Deeply nested malformed input
+// (a long run of unmatched '(' or '{', exactly what a half-typed
+// expression in an LSP's live edit buffer produces constantly while the
+// user is still typing) risks a genuine C++ stack overflow -- a hard
+// process crash, not something a diagnostic or setjmp/longjmp recovery can
+// catch. Guarded at four entry points: ParseExpression() and ParseBlock()
+// (the two top-level recursive-descent entry points reached from
+// statement/declaration parsing), plus ParseUnary() and ParseType()
+// (each recurses directly into ITSELF for chained prefix operators
+// (`!!!!x`) and nested generic/error-union types (`list<list<...>>`,
+// `!!T`) respectively, WITHOUT going back through ParseExpression() in
+// between -- confirmed via code review to be completely unbounded even
+// after the ParseExpression()/ParseBlock() guards existed, since neither
+// of those is re-entered by this kind of direct self-recursion). Every
+// OTHER recursive parse function either goes through one of these four on
+// its way to recursing, or is bounded by the token stream itself (e.g. a
+// parameter list can only be as long as the tokens the user actually
+// typed) rather than by unbounded self-recursion.
+constexpr int MaxParseRecursionDepth = 2000;
+
+// RAII guard: increments the current parser's RecursionDepth on
+// construction, decrements the same parser's on destruction, so every one
+// of ParseExpression()/ParseBlock()'s many early-return paths is covered
+// automatically with no manual bookkeeping at each one. Construct one as the
+// very first statement in the guarded function and check tooDeep() before
+// doing any real work.
+struct ParseRecursionGuard {
+  ParserState &P;
+  ParseRecursionGuard() : P(Parser()) { ++P.RecursionDepth; }
+  ~ParseRecursionGuard() { --P.RecursionDepth; }
+  bool tooDeep() const { return P.RecursionDepth > MaxParseRecursionDepth; }
+};
+
 int getNextToken();
-void InitializePrecedence();
 
 // The fix-it for an "Expected ';'" raised while CurTok is the token AFTER the
 // statement: insert ';' immediately after the statement's last token (which
@@ -21,20 +155,16 @@ void InitializePrecedence();
 // a complete statement. Defined in ParserCore.cpp.
 SLM::DiagnosticHints MissingSemicolonHints();
 
-// Both InitializePrecedence() (this file, defined ParserCore.cpp -- populates
-// the file-local BinopPrecedence table ParseBinOpRHS() depends on for every
-// binary expression) and InitializeSymbolTable() (SymbolTable.h, defined
-// SymbolTable.cpp -- allocates GlobalSymbolTable, which ParseStructDecl()
-// registers into and TypeChecker::visitMethodCall() reads back from) are
-// load-bearing for parse/typecheck CORRECTNESS, not just nice-to-haves, and
-// carry no built-in enforcement: skipping either doesn't crash, it silently
-// mis-parses the first binary expression anywhere in the source (precedence)
-// or fails every instance method call with a misleading "only struct
-// instances have methods" diagnostic (symbol table) -- see issue #231. Any
-// embedder driving the parser/resolver/typechecker outside main.cpp's own
-// pipeline (an LSP, a REPL, a unit test) MUST call this once before parsing
-// anything. Both underlying calls are individually idempotent (safe to call
-// more than once per process -- see their own definitions), so this is too.
+// InitializeSymbolTable() (SymbolTable.h, defined SymbolTable.cpp --
+// allocates GlobalSymbolTable, which ParseStructDecl() registers into and
+// TypeChecker::visitMethodCall() reads back from) is load-bearing for
+// typecheck CORRECTNESS and carries no built-in enforcement: skipping it
+// doesn't crash, it fails every instance method call with a misleading "only
+// struct instances have methods" diagnostic -- see issue #231. Any embedder
+// driving the parser/resolver/typechecker outside main.cpp's own pipeline (an
+// LSP, a REPL, a unit test) MUST call this once before parsing anything. It
+// is idempotent (safe to call more than once per process). The operator
+// precedence table it used to fill too is a constant (ParserCore.cpp, F-S1).
 void InitializeCompilerGlobals();
 
 // A token that legitimately starts a new top-level declaration (or ends the

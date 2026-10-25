@@ -62,18 +62,17 @@ std::unordered_map<int, LineDepth> computeLineIndents(std::string_view Source) {
   turf::detail::runIsolated([&] {
     std::istringstream Buffer{std::string(Source)};
     LexerState Lexer(Buffer, "<format>");
-    LexerScope Scope(Lexer);
+    ParserState P(Lexer);
+    ParserScope Scope(P);
     SourceFilename = "<format>";
-    resetLexer();
-    CurTok = 0;
     getNextToken();
 
     int LastSeenLine = -1;
-    while (CurTok != TOK_EOF) {
-      int Line = Lex().CurLoc.Line;
+    while (P.CurTok != TOK_EOF) {
+      int Line = Lexer.CurLoc.Line;
       if (Line != LastSeenLine) {
-        int Raw = g_braceDepth;
-        int Display = (isCloseBracket(CurTok) && Raw > 0) ? Raw - 1 : Raw;
+        int Raw = P.BraceDepth;
+        int Display = (isCloseBracket(P.CurTok) && Raw > 0) ? Raw - 1 : Raw;
         LineIndent[Line] = {Display, Raw};
         LastSeenLine = Line;
       }
@@ -250,12 +249,12 @@ struct LexJob {
 
 // Runs inside the guard; an error raised by getNextToken() skips the rest of it.
 void lexJob(LexJob &Job) {
-  CurTok = 0;
+  Parser().CurTok = 0;
   getNextToken();
-  while (CurTok != TOK_EOF) {
-    std::string Key = CurTok >= 0 ? std::string(1, static_cast<char>(CurTok))
-                                  : "token" + std::to_string(CurTok);
-    switch (CurTok) {
+  while (Parser().CurTok != TOK_EOF) {
+    std::string Key = Parser().CurTok >= 0 ? std::string(1, static_cast<char>(Parser().CurTok))
+                                  : "token" + std::to_string(Parser().CurTok);
+    switch (Parser().CurTok) {
     case TOK_IDENTIFIER: Key += ":" + Lex().IdentifierStr; break;
     case TOK_STRING_LITERAL: Key += ":" + Lex().StringVal; break;
     case TOK_INT_LITERAL:
@@ -275,9 +274,9 @@ bool tokenKeys(std::string_view Source, std::vector<std::string> &Keys, std::str
   turf::detail::runIsolated([&] {
     std::istringstream Buffer{std::string(Source)};
     LexerState Lexer(Buffer, "<format>");
-    LexerScope Scope(Lexer);
+    ParserState P(Lexer);
+    ParserScope Scope(P);
     SourceFilename = "<format>";
-    resetLexer();
 
     LexJob Job{&Keys};
     g_recoverActive = true;

@@ -84,7 +84,7 @@ struct LexedToken {
 // nothing of the outer one can be forgotten.
 //
 // Not here, because gettok() never reads them: the parser's own state
-// (CurTok, g_braceDepth, g_curlyDepth, recovery -- ParserState, issue #302),
+// (CurTok, the bracket depths, which lexer is current -- ParserState, F-S1),
 // and the compile's file bookkeeping (SourceFilename, SourceLines,
 // AllSourceLines, MainSourceFilename) that diagnostics and the passes after
 // parsing read.
@@ -163,26 +163,10 @@ struct LexerState {
 // Scans the next token from `L`, leaving its text, value and location in `L`.
 int gettok(LexerState &L);
 
-// The lexer the parser is reading from: the innermost live LexerScope's, or,
-// with none, an empty lexer that only ever yields EOF. This pointer is the
-// parser's state, not the lexer's (it moves into ParserState with issue
-// #302); a tool that only tokenizes calls gettok(L) and never needs it.
+// The lexer the parser is reading from: the current ParserState's (Parser(),
+// Parser.h), or, when it has none, an empty lexer that only ever yields EOF.
+// A tool that only tokenizes calls gettok(L) and never needs it.
 LexerState &Lex();
-
-// Makes `L` the lexer the parser reads for this scope's lifetime, and puts the
-// previous one back after -- an import's parse, the query facade's isolated
-// analysis and the formatter all lex a second buffer this way without
-// touching the first.
-class LexerScope {
-public:
-  explicit LexerScope(LexerState &L);
-  ~LexerScope();
-  LexerScope(const LexerScope &) = delete;
-  LexerScope &operator=(const LexerScope &) = delete;
-
-private:
-  LexerState *Saved;
-};
 
 extern std::vector<std::string> SourceLines;
 // Persistent, cross-pass cache of every file's source lines, keyed by the
@@ -231,54 +215,8 @@ struct RecoverUnwind {};
 extern bool g_recoverActive; // true only while a recovery point is armed
 extern bool g_protoOnlyPass; // true during sub-pass 3a: emit prototypes only
 
-// Current '{'/'('/'[' nesting depth relative to the top level (0), tracked
-// globally by getNextToken() as each token is consumed. See its definition
-// in Lexer.cpp for the full story (SkipToNextTopLevelBoundary()'s parse-
-// error recovery in main.cpp is what actually consumes this).
-extern int g_braceDepth;
-
-// LEC-005: the '{'/'}' share of g_braceDepth alone. A parse error inside a
-// function body leaves the body's own `{` open; resynchronising on that
-// count (not on the all-bracket one, which an unclosed `(` makes useless --
-// issue #245) is what lets recovery skip to the function's closing brace
-// instead of stopping at the next `;` inside the body and parsing the rest of
-// the body as top-level statements. Maintained by getNextToken() and
-// saved/restored everywhere g_braceDepth is.
-extern int g_curlyDepth;
-
-// The recursive-descent parser has no built-in recursion-depth limit --
-// ParseExpression()/ParseUnary()/ParsePrimary()/ParseBlock()/ParseType()
-// etc. are ordinary unbounded C++ recursion. Deeply nested malformed input
-// (a long run of unmatched '(' or '{', exactly what a half-typed
-// expression in an LSP's live edit buffer produces constantly while the
-// user is still typing) risks a genuine C++ stack overflow -- a hard
-// process crash, not something a diagnostic or setjmp/longjmp recovery can
-// catch. Guarded at four entry points: ParseExpression() and ParseBlock()
-// (the two top-level recursive-descent entry points reached from
-// statement/declaration parsing), plus ParseUnary() and ParseType()
-// (each recurses directly into ITSELF for chained prefix operators
-// (`!!!!x`) and nested generic/error-union types (`list<list<...>>`,
-// `!!T`) respectively, WITHOUT going back through ParseExpression() in
-// between -- confirmed via code review to be completely unbounded even
-// after the ParseExpression()/ParseBlock() guards existed, since neither
-// of those is re-entered by this kind of direct self-recursion). Every
-// OTHER recursive parse function either goes through one of these four on
-// its way to recursing, or is bounded by the token stream itself (e.g. a
-// parameter list can only be as long as the tokens the user actually
-// typed) rather than by unbounded self-recursion.
-constexpr int MaxParseRecursionDepth = 2000;
-extern int g_parseRecursionDepth;
-
-// RAII guard: increments on construction, decrements on destruction, so
-// every one of ParseExpression()/ParseBlock()'s many early-return paths is
-// covered automatically with no manual bookkeeping at each one. Construct
-// one as the very first statement in the guarded function and check
-// tooDeep() before doing any real work.
-struct ParseRecursionGuard {
-  ParseRecursionGuard() { ++g_parseRecursionDepth; }
-  ~ParseRecursionGuard() { --g_parseRecursionDepth; }
-  bool tooDeep() const { return g_parseRecursionDepth > MaxParseRecursionDepth; }
-};
+// The parser's bracket and recursion depths and the recursion guard are in
+// ParserState (Parser.h, F-S1).
 
 // When true, the SLM is loaded and AI suggestions are generated for errors.
 // Controlled by the --smart CLI flag. Default is off for deterministic output.
@@ -569,8 +507,8 @@ enum Token {
 };
 
 // Starts the current lexer (Lex()) over at its first token, and zeroes the
-// parser's bracket counts with it (g_braceDepth, g_curlyDepth) so a fresh parse
-// never inherits a stale value.
+// current parser's bracket counts with it (ParserState::BraceDepth,
+// CurlyDepth) so a fresh parse never inherits a stale value.
 void resetLexer();
 
 // ─── Lookahead (LG-1) ─────────────────────────────────────────────────────
@@ -578,8 +516,8 @@ void resetLexer();
 // told from `a < b` until the `>` and the `::` after it are seen. These lex
 // tokens past CurTok without making them current; getNextToken() hands them
 // out, in order, before it asks gettok() for a new one. They work on Lex(),
-// whose Lookahead holds the waiting tokens, so an import (a LexerScope of its
-// own) starts with none and leaves the importer's alone.
+// whose Lookahead holds the waiting tokens, so an import (a ParserState and
+// LexerState of its own) starts with none and leaves the importer's alone.
 /// The kind of the token `N + 1` places after CurTok (0 is the next one),
 /// lexing ahead as needed. CurTok and the current token's fields stay as they
 /// are.

@@ -64,7 +64,7 @@ std::unique_ptr<ExprAST> ParseStructDecl() {
   getNextToken(); // eat 'struct'
   if (RejectReservedWordAsName())
     return nullptr;
-  if (CurTok != TOK_IDENTIFIER) {
+  if (Parser().CurTok != TOK_IDENTIFIER) {
     LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "Expected identifier after 'struct'", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
@@ -73,12 +73,12 @@ std::unique_ptr<ExprAST> ParseStructDecl() {
   getNextToken();
 
   std::vector<std::string> TypeParams;
-  if (CurTok == '<') {
+  if (Parser().CurTok == '<') {
     getNextToken(); // eat '<'
-    while (CurTok == TOK_IDENTIFIER) {
+    while (Parser().CurTok == TOK_IDENTIFIER) {
       TypeParams.push_back(Lex().IdentifierStr);
       getNextToken();
-      if (CurTok == TOK_COLON) {
+      if (Parser().CurTok == TOK_COLON) {
         LogErrorAt(Lex().CurLoc, ErrCode::SizeParameter,
                    "A struct's type parameters are types: '" + TypeParams.back() +
                        ":' declares a size parameter, which only a function can have."
@@ -87,13 +87,13 @@ std::unique_ptr<ExprAST> ParseStructDecl() {
                    SLM::ErrorCategory::DECLARATION);
         return nullptr;
       }
-      if (CurTok == ',') {
+      if (Parser().CurTok == ',') {
         getNextToken();
       } else {
         break;
       }
     }
-    if (CurTok != '>') {
+    if (Parser().CurTok != '>') {
       LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "Expected '>' after generic type parameters", SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
@@ -114,23 +114,23 @@ std::unique_ptr<ExprAST> ParseStructDecl() {
       }
     }
 
-    if (CurTok != '{') {
+    if (Parser().CurTok != '{') {
       LogErrorAt(Lex().CurLoc, ErrCode::MissingOpeningDelimiter, "Expected '{' after struct name", SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
     getNextToken(); // eat '{'
 
-    while (CurTok != '}' && CurTok != TOK_EOF) {
+    while (Parser().CurTok != '}' && Parser().CurTok != TOK_EOF) {
     // LEC-002: `pub x: int` / `public x: int`. A field is private unless it
     // says so, even inside a `pub struct` (FREEZE.md §6.15) -- that is what
     // lets `List<T>.data` be hidden while the struct itself is public.
     VisibilityMark FieldVis;
-    if (CurTok == TOK_PUB) {
+    if (Parser().CurTok == TOK_PUB) {
       FieldVis = {true, Lex().CurLoc};
       getNextToken(); // eat 'pub'/'public'
     }
     // New syntax: name: type
-    if (CurTok != TOK_IDENTIFIER) {
+    if (Parser().CurTok != TOK_IDENTIFIER) {
       LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "Expected field name in struct definition", SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
@@ -154,7 +154,7 @@ std::unique_ptr<ExprAST> ParseStructDecl() {
       }
     }
 
-    if (CurTok != TOK_COLON) {
+    if (Parser().CurTok != TOK_COLON) {
       LogErrorAt(Lex().CurLoc, ErrCode::MissingColon,
                  "Expected ':' after field name '" + FieldName +
                      "' in struct definition (syntax: name: type)", SLM::ErrorCategory::DECLARATION);
@@ -181,15 +181,15 @@ std::unique_ptr<ExprAST> ParseStructDecl() {
 
     Fields.push_back({FieldName, std::move(FieldType), FieldNameLoc, FieldTypeLoc, FieldVis});
 
-    if (CurTok == ',') {
+    if (Parser().CurTok == ',') {
       getNextToken();
-    } else if (CurTok != '}') {
+    } else if (Parser().CurTok != '}') {
       LogErrorAt(Lex().CurLoc, ErrCode::MissingComma, "Expected ',' or '}' after field definition\n  Hint: Separate struct fields with ',' -- write `x: int, y: int` and put a ',' after the field on the line above this one.", SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
   }
 
-  if (CurTok != '}') {
+  if (Parser().CurTok != '}') {
     LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "Expected '}' to close struct definition", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
@@ -232,27 +232,27 @@ std::unique_ptr<ExprAST> ParseEnumDecl() {
   
   if (RejectReservedWordAsName())
     return nullptr;
-  if (CurTok != TOK_IDENTIFIER) {
+  if (Parser().CurTok != TOK_IDENTIFIER) {
     LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "Expected identifier after 'enum'", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
   std::string Name = Lex().IdentifierStr;
   getNextToken();
 
-  if (CurTok != '{') {
+  if (Parser().CurTok != '{') {
     LogErrorAt(Lex().CurLoc, ErrCode::MissingOpeningDelimiter, "Expected '{' after enum name", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
   getNextToken(); // eat '{'
 
   std::vector<std::string> Variants;
-  while (CurTok != '}' && CurTok != TOK_EOF) {
-    if (CurTok == TOK_PUB) {
+  while (Parser().CurTok != '}' && Parser().CurTok != TOK_EOF) {
+    if (Parser().CurTok == TOK_PUB) {
       // A variant is public exactly when its enum is (FREEZE.md §6.15).
       MisplacedVisibilityError(Lex().CurLoc, MisplacedVisibilityError::Where::OnEnumVariant).raise();
       return nullptr;
     }
-    if (CurTok != TOK_IDENTIFIER) {
+    if (Parser().CurTok != TOK_IDENTIFIER) {
       LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "Expected variant name in enum definition", SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
@@ -285,15 +285,15 @@ std::unique_ptr<ExprAST> ParseEnumDecl() {
     Variants.push_back(Lex().IdentifierStr);
     getNextToken(); // eat variant name
 
-    if (CurTok == ',') {
+    if (Parser().CurTok == ',') {
       getNextToken();
-    } else if (CurTok != '}') {
+    } else if (Parser().CurTok != '}') {
       LogErrorAt(Lex().CurLoc, ErrCode::MissingComma, "Expected ',' or '}' after variant name", SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
   }
 
-  if (CurTok != '}') {
+  if (Parser().CurTok != '}') {
     LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "Expected '}' to close enum definition", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
@@ -324,14 +324,14 @@ std::unique_ptr<ExprAST> ParseMachineDecl() {
 
   if (RejectReservedWordAsName())
     return nullptr;
-  if (CurTok != TOK_IDENTIFIER) {
+  if (Parser().CurTok != TOK_IDENTIFIER) {
     LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "Expected identifier after 'machine'", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
   std::string Name = Lex().IdentifierStr;
   getNextToken();
 
-  if (CurTok != '{') {
+  if (Parser().CurTok != '{') {
     LogErrorAt(Lex().CurLoc, ErrCode::MissingOpeningDelimiter, "Expected '{' after machine name", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
@@ -341,12 +341,12 @@ std::unique_ptr<ExprAST> ParseMachineDecl() {
   std::vector<MachineEdge> Edges;
   std::map<std::string, std::set<std::string>> EdgeSet; // adjacency, also used for duplicate-edge detection
 
-  while (CurTok != '}' && CurTok != TOK_EOF) {
-    if (CurTok == TOK_PUB) {
+  while (Parser().CurTok != '}' && Parser().CurTok != TOK_EOF) {
+    if (Parser().CurTok == TOK_PUB) {
       MisplacedVisibilityError(Lex().CurLoc, MisplacedVisibilityError::Where::OnMachineState).raise();
       return nullptr;
     }
-    if (CurTok != TOK_IDENTIFIER) {
+    if (Parser().CurTok != TOK_IDENTIFIER) {
       LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "Expected state name in machine definition", SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
@@ -354,13 +354,13 @@ std::unique_ptr<ExprAST> ParseMachineDecl() {
     SourceLocation EdgeLoc = Lex().CurLoc;
     getNextToken(); // eat From
 
-    if (CurTok != TOK_ARROW) {
+    if (Parser().CurTok != TOK_ARROW) {
       LogErrorAt(Lex().CurLoc, ErrCode::ExpectedKeyword, "Expected '->' after state name in machine definition", SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
     getNextToken(); // eat '->'
 
-    if (CurTok != TOK_IDENTIFIER) {
+    if (Parser().CurTok != TOK_IDENTIFIER) {
       LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "Expected target state name after '->' in machine definition", SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
@@ -394,15 +394,15 @@ std::unique_ptr<ExprAST> ParseMachineDecl() {
       if (!Seen) States.push_back(S);
     }
 
-    if (CurTok == ',') {
+    if (Parser().CurTok == ',') {
       getNextToken();
-    } else if (CurTok != '}') {
+    } else if (Parser().CurTok != '}') {
       LogErrorAt(Lex().CurLoc, ErrCode::MissingComma, "Expected ',' or '}' after transition", SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
   }
 
-  if (CurTok != '}') {
+  if (Parser().CurTok != '}') {
     LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "Expected '}' to close machine definition", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
@@ -437,8 +437,6 @@ std::unique_ptr<ExprAST> ParseMachineDecl() {
   return std::make_unique<MachineDeclExprAST>(Loc, Identity, States, Edges);
 }
 
-bool ParsingFuncUsesTry = false;
-
 // ParseErrorDecl - called when CurTok == TOK_ERROR
 // (docs/architecture/errors_and_recover.md). Parses either:
 //   error Name;                                          -- bare form, sugar
@@ -456,7 +454,7 @@ std::unique_ptr<ExprAST> ParseErrorDecl() {
 
   if (RejectReservedWordAsName())
     return nullptr;
-  if (CurTok != TOK_IDENTIFIER) {
+  if (Parser().CurTok != TOK_IDENTIFIER) {
     LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "Expected identifier after 'error'", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
@@ -466,7 +464,7 @@ std::unique_ptr<ExprAST> ParseErrorDecl() {
   std::vector<ErrorVariantInfo> Variants;
   bool IsBareForm = false;
 
-  if (CurTok == ';') {
+  if (Parser().CurTok == ';') {
     // Bare form: `error GeneralError;` -- sugar for a single implicit
     // DEFAULT variant (docs/architecture/errors_and_recover.md). Unlike the
     // braced form (which ends in '}', same as struct/enum), this form's own
@@ -487,7 +485,7 @@ std::unique_ptr<ExprAST> ParseErrorDecl() {
     // misread as unrelated statement garbage (it used to surface as a
     // cascade of unrelated "expected a value"/"expected ';'" errors instead
     // of naming the actual rule that was broken).
-    if (CurTok == '{') {
+    if (Parser().CurTok == '{') {
       LogErrorAt(Loc, ErrCode::InvalidErrorDeclaration,
                  "An 'error' declaration can't mix the bare ';' form with a "
                  "braced variant list."
@@ -496,17 +494,17 @@ std::unique_ptr<ExprAST> ParseErrorDecl() {
                  " { Variant1, Variant2, ... }' (braced), not both.", SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
-  } else if (CurTok == '{') {
+  } else if (Parser().CurTok == '{') {
     getNextToken(); // eat '{'
 
     // Variants follow ParseEnumDecl's loop, plus an optional payload field
     // list after the name (LEC-004).
-    while (CurTok != '}' && CurTok != TOK_EOF) {
-      if (CurTok == TOK_PUB) {
+    while (Parser().CurTok != '}' && Parser().CurTok != TOK_EOF) {
+      if (Parser().CurTok == TOK_PUB) {
         MisplacedVisibilityError(Lex().CurLoc, MisplacedVisibilityError::Where::OnErrorVariant).raise();
         return nullptr;
       }
-      if (CurTok != TOK_IDENTIFIER) {
+      if (Parser().CurTok != TOK_IDENTIFIER) {
         LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "Expected variant name in error type definition", SLM::ErrorCategory::DECLARATION);
         return nullptr;
       }
@@ -533,9 +531,9 @@ std::unique_ptr<ExprAST> ParseErrorDecl() {
       Info.Loc = VariantLoc;
       getNextToken(); // eat variant name
 
-      if (CurTok == '(') {
+      if (Parser().CurTok == '(') {
         getNextToken(); // eat '('
-        if (CurTok == ')') {
+        if (Parser().CurTok == ')') {
           ErrorPayloadError(
               VariantLoc,
               "'" + Name + "::" + VariantName + "' has empty parentheses.",
@@ -545,8 +543,8 @@ std::unique_ptr<ExprAST> ParseErrorDecl() {
               .raise();
           return nullptr;
         }
-        while (CurTok != ')') {
-          if (CurTok != TOK_IDENTIFIER) {
+        while (Parser().CurTok != ')') {
+          if (Parser().CurTok != TOK_IDENTIFIER) {
             ErrorPayloadError(
                 Lex().CurLoc,
                 "expected a field name in '" + Name + "::" + VariantName + "'.",
@@ -570,7 +568,7 @@ std::unique_ptr<ExprAST> ParseErrorDecl() {
             }
           }
           getNextToken(); // eat the field name
-          if (CurTok != TOK_COLON) {
+          if (Parser().CurTok != TOK_COLON) {
             ErrorPayloadError(
                 Lex().CurLoc,
                 "field '" + Field.Name + "' of '" + Name + "::" + VariantName +
@@ -585,9 +583,9 @@ std::unique_ptr<ExprAST> ParseErrorDecl() {
             return nullptr;
           Info.Fields.push_back(std::move(Field));
 
-          if (CurTok == ',') {
+          if (Parser().CurTok == ',') {
             getNextToken();
-          } else if (CurTok != ')') {
+          } else if (Parser().CurTok != ')') {
             LogErrorAt(Lex().CurLoc, ErrCode::MissingComma, "Expected ',' or ')' after a payload field of '" +
                                    Name + "::" + VariantName + "'",
                        SLM::ErrorCategory::DECLARATION);
@@ -598,15 +596,15 @@ std::unique_ptr<ExprAST> ParseErrorDecl() {
       }
       Variants.push_back(std::move(Info));
 
-      if (CurTok == ',') {
+      if (Parser().CurTok == ',') {
         getNextToken();
-      } else if (CurTok != '}') {
+      } else if (Parser().CurTok != '}') {
         LogErrorAt(Lex().CurLoc, ErrCode::MissingComma, "Expected ',' or '}' after error variant", SLM::ErrorCategory::DECLARATION);
         return nullptr;
       }
     }
 
-    if (CurTok != '}') {
+    if (Parser().CurTok != '}') {
       LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "Expected '}' to close error type definition", SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
@@ -641,14 +639,14 @@ std::unique_ptr<ExprAST> ParseExternDecl() {
   // Syntax: extern from "ssl" fn SSL_new(ctx: ptr): ptr;
   // The library name is passed to the linker as -lssl.
   std::string LibName;
-  if (CurTok == TOK_IDENTIFIER && Lex().IdentifierStr == "from") {
+  if (Parser().CurTok == TOK_IDENTIFIER && Lex().IdentifierStr == "from") {
     getNextToken(); // eat 'from'
-    if (CurTok != TOK_STRING_LITERAL) {
+    if (Parser().CurTok != TOK_STRING_LITERAL) {
       LogErrorAt(Lex().CurLoc, ErrCode::ExpectedKeyword,
                  "Expected a library name string after 'from' "
                  "(e.g. extern from \"ssl\" fn SSL_new(ctx: ptr): ptr;).", SLM::ErrorCategory::DECLARATION);
       // Panic-mode recovery: skip to ';' or EOF so the next statement parses.
-      while (CurTok != ';' && CurTok != TOK_EOF) getNextToken();
+      while (Parser().CurTok != ';' && Parser().CurTok != TOK_EOF) getNextToken();
       return nullptr;
     }
     LibName = Lex().StringVal;
@@ -656,7 +654,7 @@ std::unique_ptr<ExprAST> ParseExternDecl() {
   }
 
   // Expect 'fn'
-  if (CurTok != TOK_FN) {
+  if (Parser().CurTok != TOK_FN) {
     LogErrorAt(ExternLoc, ErrCode::ExpectedKeyword,
                "Expected 'fn' after 'extern' — e.g. extern fn malloc(size: int): ptr;", SLM::ErrorCategory::DECLARATION);
     return nullptr;
@@ -664,7 +662,7 @@ std::unique_ptr<ExprAST> ParseExternDecl() {
   getNextToken(); // eat 'fn'
 
   // Expect function name
-  if (CurTok != TOK_IDENTIFIER) {
+  if (Parser().CurTok != TOK_IDENTIFIER) {
     LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "Expected a function name after 'extern fn'.", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
@@ -673,7 +671,7 @@ std::unique_ptr<ExprAST> ParseExternDecl() {
   getNextToken(); // eat name
 
   // Expect '('
-  if (CurTok != '(') {
+  if (Parser().CurTok != '(') {
     LogErrorAt(NameLoc, ErrCode::MissingOpeningDelimiter,
                "Expected '(' after extern function name '" + Name + "'.", SLM::ErrorCategory::DECLARATION);
     return nullptr;
@@ -685,15 +683,15 @@ std::unique_ptr<ExprAST> ParseExternDecl() {
   std::vector<std::pair<std::string, TurfTypePtr>> Params;
   bool IsVarArg = false;
 
-  while (CurTok != ')' && CurTok != TOK_EOF) {
+  while (Parser().CurTok != ')' && Parser().CurTok != TOK_EOF) {
     // Check for '...' variadic marker — must be last in the list
-    if (CurTok == TOK_ELLIPSIS) {
+    if (Parser().CurTok == TOK_ELLIPSIS) {
       IsVarArg = true;
       getNextToken(); // eat '...'
       break;          // nothing after '...' except ')'
     }
 
-    if (CurTok != TOK_IDENTIFIER) {
+    if (Parser().CurTok != TOK_IDENTIFIER) {
       LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName,
                  "Expected a parameter name in extern function '" + Name + "'.", SLM::ErrorCategory::DECLARATION);
       return nullptr;
@@ -701,7 +699,7 @@ std::unique_ptr<ExprAST> ParseExternDecl() {
     std::string ParamName = Lex().IdentifierStr;
     getNextToken(); // eat param name
 
-    if (CurTok != TOK_COLON) {
+    if (Parser().CurTok != TOK_COLON) {
       LogErrorAt(Lex().CurLoc, ErrCode::MissingColon,
                  "Expected ':' after parameter name '" + ParamName +
                      "' in extern function '" + Name + "'.", SLM::ErrorCategory::DECLARATION);
@@ -730,20 +728,20 @@ std::unique_ptr<ExprAST> ParseExternDecl() {
 
     Params.emplace_back(ParamName, std::move(ParamType));
 
-    if (CurTok == ',') {
+    if (Parser().CurTok == ',') {
       getNextToken(); // eat ','
       // Allow '...' immediately after comma: printf(fmt: string, ...)
-      if (CurTok == TOK_ELLIPSIS) {
+      if (Parser().CurTok == TOK_ELLIPSIS) {
         IsVarArg = true;
         getNextToken(); // eat '...'
         break;
       }
-    } else if (CurTok != ')') {
+    } else if (Parser().CurTok != ')') {
       break;
     }
   }
 
-  if (CurTok != ')') {
+  if (Parser().CurTok != ')') {
     LogErrorAt(ExternLoc, ErrCode::UnclosedDelimiter,
                "Expected ')' to close parameter list of extern function '" +
                    Name + "'.", SLM::ErrorCategory::DECLARATION);
@@ -752,7 +750,7 @@ std::unique_ptr<ExprAST> ParseExternDecl() {
   getNextToken(); // eat ')'
 
   // Expect ':'
-  if (CurTok != TOK_COLON) {
+  if (Parser().CurTok != TOK_COLON) {
     LogErrorAt(Lex().CurLoc, ErrCode::MissingColon,
                "Expected ':' followed by return type after parameter list of "
                "extern function '" + Name + "'.", SLM::ErrorCategory::DECLARATION);
@@ -769,14 +767,14 @@ std::unique_ptr<ExprAST> ParseExternDecl() {
   }
 
   // extern functions must NOT have a body
-  if (CurTok == '{') {
+  if (Parser().CurTok == '{') {
     LogErrorAt(ExternLoc, ErrCode::ExternFunctionBody,
                "extern function declarations cannot have a body.\n  Hint: End the declaration of '" + Name + "' with ';' and no body: `extern fn " + Name + "(...): T;`. To write the body in Turf, drop `extern`.", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
 
   // Expect ';'
-  if (CurTok != ';') {
+  if (Parser().CurTok != ';') {
     LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon,
                "Expected ';' after extern function declaration '" + Name + "'.", SLM::ErrorCategory::DECLARATION,
                MissingSemicolonHints());
@@ -833,15 +831,15 @@ std::unique_ptr<ExprAST> ParseExportDecl() {
   // PAST the real boundary, e.g. eating the next `fn` and desyncing the
   // parse of the statement that follows).
   auto SkipRestOfBrokenStatement = [&]() {
-    while (CurTok != ';' && CurTok != TOK_EOF && CurTok != TOK_FN &&
-          CurTok != TOK_STRUCT && CurTok != TOK_ENUM && CurTok != TOK_MACHINE &&
-          CurTok != TOK_AT &&
-          CurTok != TOK_EXTERN && CurTok != TOK_EXPORT && CurTok != TOK_IMPORT &&
-          CurTok != TOK_ERROR)
+    while (Parser().CurTok != ';' && Parser().CurTok != TOK_EOF && Parser().CurTok != TOK_FN &&
+          Parser().CurTok != TOK_STRUCT && Parser().CurTok != TOK_ENUM && Parser().CurTok != TOK_MACHINE &&
+          Parser().CurTok != TOK_AT &&
+          Parser().CurTok != TOK_EXTERN && Parser().CurTok != TOK_EXPORT && Parser().CurTok != TOK_IMPORT &&
+          Parser().CurTok != TOK_ERROR)
       getNextToken();
   };
 
-  if (CurTok == TOK_MUTABLE) {
+  if (Parser().CurTok == TOK_MUTABLE) {
     LogErrorAt(ExportLoc, ErrCode::ExportMutNotSupported,
                "'export mut' is not supported yet -- only 'export immut' "
                "(a compile-time constant) works right now."
@@ -853,7 +851,7 @@ std::unique_ptr<ExprAST> ParseExportDecl() {
     return nullptr;
   }
 
-  if (CurTok != TOK_IMMUTABLE) {
+  if (Parser().CurTok != TOK_IMMUTABLE) {
     LogErrorAt(ExportLoc, ErrCode::ExpectedKeyword,
                "Expected 'immut' or 'immutable' after 'export'."
                "\n  Hint: 'export' only works on variable declarations, "
@@ -899,15 +897,15 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
   // `N: size` declares a size parameter: an array length, not a type.
   std::vector<std::string> SizeParams;
   SourceLocation SizeParamLoc;
-  if (CurTok == '<') {
+  if (Parser().CurTok == '<') {
     getNextToken(); // eat '<'
-    while (CurTok == TOK_IDENTIFIER) {
+    while (Parser().CurTok == TOK_IDENTIFIER) {
       TypeParams.push_back(Lex().IdentifierStr);
       SourceLocation ParamLoc = Lex().CurLoc;
       getNextToken();
-      if (CurTok == TOK_COLON) {
+      if (Parser().CurTok == TOK_COLON) {
         getNextToken(); // eat ':'
-        if (CurTok != TOK_IDENTIFIER || Lex().IdentifierStr != "size") {
+        if (Parser().CurTok != TOK_IDENTIFIER || Lex().IdentifierStr != "size") {
           LogErrorAt(Lex().CurLoc, ErrCode::SizeParameter,
                      "Expected 'size' after '" + TypeParams.back() +
                          ":': the only kind of generic parameter written with "
@@ -923,13 +921,13 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
           SizeParamLoc = ParamLoc;
         SizeParams.push_back(TypeParams.back());
       }
-      if (CurTok == ',') {
+      if (Parser().CurTok == ',') {
         getNextToken();
       } else {
         break;
       }
     }
-    if (CurTok != '>') {
+    if (Parser().CurTok != '>') {
       LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "Expected '>' after generic type parameters", SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
@@ -949,16 +947,16 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
   struct SizeParamScope {
     std::vector<std::string> Saved;
     explicit SizeParamScope(const std::vector<std::string> &Mine)
-        : Saved(g_SizeParamsInScope) {
-      g_SizeParamsInScope = Mine;
+        : Saved(Parser().SizeParamsInScope) {
+      Parser().SizeParamsInScope = Mine;
     }
-    ~SizeParamScope() { g_SizeParamsInScope = Saved; }
+    ~SizeParamScope() { Parser().SizeParamsInScope = Saved; }
   } SizeScope(SizeParams);
 
   // Expect TOK_IDENTIFIER → save as FuncName
   if (RejectReservedWordAsName())
     return nullptr;
-  if (CurTok != TOK_IDENTIFIER) {
+  if (Parser().CurTok != TOK_IDENTIFIER) {
     LogErrorAt(FnLoc, ErrCode::ExpectedName, "Expected a function name after 'fn'.\n  Hint: Name the function -- `fn name(...): T { ... }`.", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
@@ -968,7 +966,7 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
   std::string StructName = "";
   bool IsStaticMethodDecl = false;
 
-  if (CurTok == '.') {
+  if (Parser().CurTok == '.') {
     StructName = FuncName;
     if (!SizeParams.empty()) {
       LogErrorAt(SizeParamLoc, ErrCode::SizeParameter,
@@ -981,7 +979,7 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
       return nullptr;
     }
     getNextToken(); // eat '.'
-    if (CurTok != TOK_IDENTIFIER) {
+    if (Parser().CurTok != TOK_IDENTIFIER) {
       LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "Expected method name after '.'", SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
@@ -990,7 +988,7 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
     NameLoc = Lex().CurLoc;
     FuncName = StructName + "." + Lex().IdentifierStr;
     getNextToken();
-  } else if (CurTok == TOK_SCOPE) {
+  } else if (Parser().CurTok == TOK_SCOPE) {
     // `fn StructName::method(...)` used to declare a static method (no
     // implicit `self`). That form is gone -- ALL method declarations use
     // '.' now, static or not, distinguished by a trailing 'static' keyword
@@ -1014,7 +1012,7 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
   NoteFunctionParseStarted(FuncName);
 
   // Expect '('
-  if (CurTok != '(') {
+  if (Parser().CurTok != '(') {
     LogErrorAt(FnLoc, ErrCode::MissingOpeningDelimiter, "Expected '(' after function name '" + FuncName + "'.", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
@@ -1024,12 +1022,12 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
 
   // Parse parameter list: each param is: Identifier TOK_COLON ParseType()
   // Params separated by ','
-  while (CurTok != ')' && CurTok != TOK_EOF) {
-    if (CurTok == TOK_PUB) {
+  while (Parser().CurTok != ')' && Parser().CurTok != TOK_EOF) {
+    if (Parser().CurTok == TOK_PUB) {
       MisplacedVisibilityError(Lex().CurLoc, MisplacedVisibilityError::Where::OnParameter).raise();
       return nullptr;
     }
-    if (CurTok != TOK_IDENTIFIER) {
+    if (Parser().CurTok != TOK_IDENTIFIER) {
       LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName,
                  "Expected a parameter name in the parameter list of '" +
                      FuncName + "'.\n  Hint: Give each parameter of '" + FuncName + "' a name and a type: `" + FuncName + "(a: int, b: int)`.", SLM::ErrorCategory::DECLARATION);
@@ -1039,7 +1037,7 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
     SourceLocation ParamNameLoc = Lex().CurLoc;
     getNextToken(); // consume parameter name
 
-    if (CurTok != TOK_COLON) {
+    if (Parser().CurTok != TOK_COLON) {
       LogErrorAt(Lex().CurLoc, ErrCode::MissingColon,
                  "Expected ':' after parameter name '" + ParamName + "' in '" +
                      FuncName + "'.\n  Hint: Give each parameter of '" + FuncName + "' a name and a type: `" + FuncName + "(a: int, b: int)`.", SLM::ErrorCategory::DECLARATION);
@@ -1070,14 +1068,14 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
 
     Params.push_back({ParamType, ParamName, ParamNameLoc, ParamTypeLoc});
 
-    if (CurTok == ',')
+    if (Parser().CurTok == ',')
       getNextToken();
-    else if (CurTok != ')')
+    else if (Parser().CurTok != ')')
       break;
   }
 
   // Expect ')'
-  if (CurTok != ')') {
+  if (Parser().CurTok != ')') {
     LogErrorAt(
         FnLoc, ErrCode::UnclosedDelimiter,
         "Expected ')' to close the parameter list of '" + FuncName + "'.", SLM::ErrorCategory::DECLARATION);
@@ -1097,7 +1095,7 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
   // for the precedent this project already follows: a syntactically valid
   // but semantically-restricted combination is rejected downstream, with a
   // real diagnostic class, rather than in the parser.
-  IsStaticMethodDecl = (CurTok == TOK_STATIC);
+  IsStaticMethodDecl = (Parser().CurTok == TOK_STATIC);
   if (IsStaticMethodDecl)
     getNextToken(); // eat 'static'
 
@@ -1144,7 +1142,7 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
   }
 
   // Expect TOK_COLON
-  if (CurTok != TOK_COLON) {
+  if (Parser().CurTok != TOK_COLON) {
     LogErrorAt(Lex().CurLoc, ErrCode::MissingColon, "Expected ':' followed by return type after parameter list.\n  Hint: Write the return type after a ':' -- `fn " + FuncName + "(...): int {` -- or `: void` if it returns nothing.", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
@@ -1163,7 +1161,7 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
   // downstream accepts a null Body: CodegenFunc dereferenced it, so a stray `;`
   // after a signature -- found by the REL-004 fuzzer, e.g. `operator [](b: Box,
   // i: int): int ;` -- crashed the compiler instead of being diagnosed.
-  if (CurTok == ';') {
+  if (Parser().CurTok == ';') {
     LogErrorAt(FnLoc, ErrCode::MissingOpeningDelimiter,
                "'" + FuncName + "' has no body. A function needs a '{ ... }' body; to call a C function, declare it with 'extern fn'.\n  Hint: Replace the ';' with a body: `fn " + FuncName + "(...): T { ... }`.",
                SLM::ErrorCategory::DECLARATION);
@@ -1171,7 +1169,7 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
   }
 
   // Expect '{' to open function body
-  if (CurTok != '{') {
+  if (Parser().CurTok != '{') {
     LogErrorAt(FnLoc, ErrCode::MissingOpeningDelimiter, "Expected '{' to begin function body for '" + FuncName + "'.", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
@@ -1225,25 +1223,25 @@ std::unique_ptr<ExprAST> ParseOperatorDecl(bool HasCallerLocation) {
   // a '(' after it just means it was the operator.
   std::vector<std::string> TypeParams;
   bool LessIsOperator = false;
-  if (CurTok == '<') {
+  if (Parser().CurTok == '<') {
     getNextToken(); // eat '<'
-    if (CurTok == TOK_IDENTIFIER) {
-      while (CurTok == TOK_IDENTIFIER) {
+    if (Parser().CurTok == TOK_IDENTIFIER) {
+      while (Parser().CurTok == TOK_IDENTIFIER) {
         TypeParams.push_back(Lex().IdentifierStr);
         getNextToken();
-        if (CurTok == TOK_COLON) {
+        if (Parser().CurTok == TOK_COLON) {
           LogErrorAt(Lex().CurLoc, ErrCode::SizeParameter,
                      "An operator can't declare a size parameter ('" +
                          TypeParams.back() + ":'): only a free function can.",
                      SLM::ErrorCategory::DECLARATION);
           return nullptr;
         }
-        if (CurTok == ',')
+        if (Parser().CurTok == ',')
           getNextToken();
         else
           break;
       }
-      if (CurTok != '>') {
+      if (Parser().CurTok != '>') {
         LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "Expected '>' after generic type parameters", SLM::ErrorCategory::DECLARATION);
         return nullptr;
       }
@@ -1275,14 +1273,14 @@ std::unique_ptr<ExprAST> ParseOperatorDecl(bool HasCallerLocation) {
   if (LessIsOperator) {
     OpTok = '<';
     FuncName = operatorFunctionName(OpTok);
-  } else if (CurTok == '[') {
+  } else if (Parser().CurTok == '[') {
     getNextToken(); // eat '['
-    if (CurTok != ']') {
+    if (Parser().CurTok != ']') {
       LogErrorAt(OpLoc, ErrCode::UnclosedDelimiter, "Expected ']' to close 'operator['.", SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
     getNextToken(); // eat ']'
-    if (CurTok == TOK_ASSIGN) {
+    if (Parser().CurTok == TOK_ASSIGN) {
       getNextToken(); // eat '='
       IsIndexSet = true;
       FuncName = OperatorIndexSetName();
@@ -1290,8 +1288,8 @@ std::unique_ptr<ExprAST> ParseOperatorDecl(bool HasCallerLocation) {
       IsIndexGet = true;
       FuncName = OperatorIndexGetName();
     }
-  } else if (isOverloadableBinaryOp(CurTok) || isOverloadableUnaryOp(CurTok)) {
-    OpTok = CurTok;
+  } else if (isOverloadableBinaryOp(Parser().CurTok) || isOverloadableUnaryOp(Parser().CurTok)) {
+    OpTok = Parser().CurTok;
     FuncName = operatorFunctionName(OpTok);
     getNextToken(); // consume the operator token
   } else {
@@ -1303,7 +1301,7 @@ std::unique_ptr<ExprAST> ParseOperatorDecl(bool HasCallerLocation) {
   }
 
   // Expect '('
-  if (CurTok != '(') {
+  if (Parser().CurTok != '(') {
     LogErrorAt(OpLoc, ErrCode::MissingOpeningDelimiter, "Expected '(' after 'operator " + FuncName.substr(8) + "'.", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
@@ -1312,8 +1310,8 @@ std::unique_ptr<ExprAST> ParseOperatorDecl(bool HasCallerLocation) {
   std::vector<ParamDecl> Params;
 
   // Parse parameter list -- identical shape to ParseFuncDef()'s.
-  while (CurTok != ')' && CurTok != TOK_EOF) {
-    if (CurTok != TOK_IDENTIFIER) {
+  while (Parser().CurTok != ')' && Parser().CurTok != TOK_EOF) {
+    if (Parser().CurTok != TOK_IDENTIFIER) {
       LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName,
                  "Expected a parameter name in the parameter list of '" +
                      FuncName + "'.\n  Hint: Give each parameter of '" + FuncName + "' a name and a type: `" + FuncName + "(a: int, b: int)`.", SLM::ErrorCategory::DECLARATION);
@@ -1323,7 +1321,7 @@ std::unique_ptr<ExprAST> ParseOperatorDecl(bool HasCallerLocation) {
     SourceLocation ParamNameLoc = Lex().CurLoc;
     getNextToken(); // consume parameter name
 
-    if (CurTok != TOK_COLON) {
+    if (Parser().CurTok != TOK_COLON) {
       LogErrorAt(Lex().CurLoc, ErrCode::MissingColon,
                  "Expected ':' after parameter name '" + ParamName + "' in '" +
                      FuncName + "'.\n  Hint: Give each parameter of '" + FuncName + "' a name and a type: `" + FuncName + "(a: int, b: int)`.", SLM::ErrorCategory::DECLARATION);
@@ -1349,13 +1347,13 @@ std::unique_ptr<ExprAST> ParseOperatorDecl(bool HasCallerLocation) {
 
     Params.push_back({ParamType, ParamName, ParamNameLoc, ParamTypeLoc});
 
-    if (CurTok == ',')
+    if (Parser().CurTok == ',')
       getNextToken();
-    else if (CurTok != ')')
+    else if (Parser().CurTok != ')')
       break;
   }
 
-  if (CurTok != ')') {
+  if (Parser().CurTok != ')') {
     LogErrorAt(
         OpLoc, ErrCode::UnclosedDelimiter,
         "Expected ')' to close the parameter list of '" + FuncName + "'.", SLM::ErrorCategory::DECLARATION);
@@ -1416,7 +1414,7 @@ std::unique_ptr<ExprAST> ParseOperatorDecl(bool HasCallerLocation) {
   }
 
   // Expect ':' then return type -- identical shape to ParseFuncDef()'s.
-  if (CurTok != TOK_COLON) {
+  if (Parser().CurTok != TOK_COLON) {
     LogErrorAt(Lex().CurLoc, ErrCode::MissingColon, "Expected ':' followed by return type after parameter list.\n  Hint: Write the return type after a ':' -- `fn " + FuncName + "(...): int {` -- or `: void` if it returns nothing.", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
@@ -1429,14 +1427,14 @@ std::unique_ptr<ExprAST> ParseOperatorDecl(bool HasCallerLocation) {
   }
 
   // Same null-Body hazard as ParseFunction's `;` case: no consumer accepts it.
-  if (CurTok == ';') {
+  if (Parser().CurTok == ';') {
     LogErrorAt(OpLoc, ErrCode::MissingOpeningDelimiter,
                "'operator " + FuncName.substr(8) + "' has no body. An operator needs a '{ ... }' body.\n  Hint: Replace the ';' with a body: `operator " + FuncName.substr(8) + "(...): T { ... }`.",
                SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
 
-  if (CurTok != '{') {
+  if (Parser().CurTok != '{') {
     LogErrorAt(OpLoc, ErrCode::MissingOpeningDelimiter, "Expected '{' to begin the body of 'operator " +
                           FuncName.substr(8) + "'.", SLM::ErrorCategory::DECLARATION);
     return nullptr;
@@ -1471,15 +1469,15 @@ std::unique_ptr<ExprAST> ParseAnnotatedDecl() {
   std::vector<Annotation> Annotations;
   bool HasCallerLocation = false;
 
-  while (CurTok == TOK_AT) {
+  while (Parser().CurTok == TOK_AT) {
     SourceLocation AtLoc = Lex().CurLoc;
     getNextToken(); // eat '@'
-    if (CurTok == TOK_CALLER_LOCATION) {
+    if (Parser().CurTok == TOK_CALLER_LOCATION) {
       HasCallerLocation = true;
       getNextToken(); // eat 'caller_location'
       continue;
     }
-    if (CurTok != TOK_IDENTIFIER) {
+    if (Parser().CurTok != TOK_IDENTIFIER) {
       LogErrorAt(AtLoc, ErrCode::UnexpectedToken,
                  "'@' is not valid here.\n  Hint: '@' starts an annotation "
                  "such as '@ownership(acquires)', or the '@caller_location' "
@@ -1493,19 +1491,19 @@ std::unique_ptr<ExprAST> ParseAnnotatedDecl() {
     Ann.Loc = AtLoc;
     getNextToken(); // eat the annotation's name
 
-    if (CurTok == '(') {
+    if (Parser().CurTok == '(') {
       getNextToken(); // eat '('
       // A "word" in an argument is an identifier OR a keyword, spelled as
       // written: `@diagnostics(error: ...)` must be able to say `error`. The
       // lexer leaves a keyword's spelling in IdentifierStr; checking that it
       // maps back to CurTok keeps a non-word token (a number, '_') out.
       auto IsWord = []() {
-        if (CurTok == TOK_IDENTIFIER)
+        if (Parser().CurTok == TOK_IDENTIFIER)
           return true;
         auto It = Keywords.find(Lex().IdentifierStr);
-        return It != Keywords.end() && It->second == CurTok;
+        return It != Keywords.end() && It->second == Parser().CurTok;
       };
-      while (CurTok != ')') {
+      while (Parser().CurTok != ')') {
         AnnotationArg Arg;
         Arg.Loc = Lex().CurLoc;
         auto BadArgument = [&]() {
@@ -1519,7 +1517,7 @@ std::unique_ptr<ExprAST> ParseAnnotatedDecl() {
         // `ParseError::Empty` or `fs::FsError::RemoveFileFailed`
         // (`@test(error, ...)` names an error variant).
         auto ReadPathTail = [&](std::string &Value) {
-          while (CurTok == TOK_SCOPE) {
+          while (Parser().CurTok == TOK_SCOPE) {
             getNextToken(); // eat '::'
             if (!IsWord()) {
               LogErrorAt(Lex().CurLoc, ErrCode::UnexpectedToken,
@@ -1536,10 +1534,10 @@ std::unique_ptr<ExprAST> ParseAnnotatedDecl() {
         // A value is a word, a path, a whole number or a string; ReadValue
         // fills Arg from whichever it finds and reports if it finds none.
         auto ReadValue = [&]() {
-          if (CurTok == TOK_STRING_LITERAL) {
+          if (Parser().CurTok == TOK_STRING_LITERAL) {
             Arg.Value = Lex().StringVal;
             Arg.IsString = true;
-          } else if (CurTok == TOK_INT_LITERAL) {
+          } else if (Parser().CurTok == TOK_INT_LITERAL) {
             Arg.Value = Lex().NumLitSpelling;
             Arg.IsNumber = true;
           } else if (IsWord()) {
@@ -1556,7 +1554,7 @@ std::unique_ptr<ExprAST> ParseAnnotatedDecl() {
         if (IsWord()) {
           std::string Word = Lex().IdentifierStr;
           getNextToken();
-          if (CurTok == TOK_COLON) {
+          if (Parser().CurTok == TOK_COLON) {
             getNextToken(); // eat ':'
             Arg.Key = std::move(Word);
             if (!ReadValue())
@@ -1573,13 +1571,13 @@ std::unique_ptr<ExprAST> ParseAnnotatedDecl() {
         Ann.Args.push_back(std::move(Arg));
 
         // `1 + 2`: a number that starts an expression is not an argument.
-        if (WasNumber && CurTok != ',' && CurTok != ')') {
+        if (WasNumber && Parser().CurTok != ',' && Parser().CurTok != ')') {
           BadArgument();
           return nullptr;
         }
-        if (CurTok == ',') {
+        if (Parser().CurTok == ',') {
           getNextToken(); // eat ','
-        } else if (CurTok != ')') {
+        } else if (Parser().CurTok != ')') {
           LogErrorAt(Lex().CurLoc, ErrCode::UnexpectedToken,
                      "Expected ',' or ')' in the arguments of '@" + Ann.Name +
                          "'.",
@@ -1593,17 +1591,17 @@ std::unique_ptr<ExprAST> ParseAnnotatedDecl() {
   }
 
   VisibilityMark DecoratedVis;
-  if (CurTok == TOK_PUB) {
+  if (Parser().CurTok == TOK_PUB) {
     DecoratedVis = {true, Lex().CurLoc};
     getNextToken(); // eat 'pub'/'public'
   }
 
   std::unique_ptr<ExprAST> Decl;
-  if (CurTok == TOK_FN) {
+  if (Parser().CurTok == TOK_FN) {
     Decl = ParseFuncDef(HasCallerLocation);
-  } else if (CurTok == TOK_EXTERN && !HasCallerLocation) {
+  } else if (Parser().CurTok == TOK_EXTERN && !HasCallerLocation) {
     Decl = ParseExternDecl();
-  } else if (CurTok == TOK_OPERATOR && HasCallerLocation && Annotations.empty()) {
+  } else if (Parser().CurTok == TOK_OPERATOR && HasCallerLocation && Annotations.empty()) {
     // An operator that panics on a broken precondition (`List`'s `[]`) names
     // its caller's line like any other stdlib function (FREEZE F-API-3).
     // Every operator dispatch site passes the hidden location argument.
@@ -1661,7 +1659,7 @@ std::unique_ptr<ExprAST> ParseVisibilityPrefixed() {
   getNextToken(); // eat 'pub'/'public'
 
   std::unique_ptr<ExprAST> Decl;
-  switch (CurTok) {
+  switch (Parser().CurTok) {
   case TOK_FN:
     Decl = ParseFuncDef();
     break;
@@ -1704,9 +1702,9 @@ std::unique_ptr<ExprAST> ParseVisibilityPrefixed() {
     // the diagnostic exactly as it was. Error recovery skips to the next
     // declaration either way, so having consumed these tokens changes nothing.
     getNextToken(); // eat '@'
-    if (CurTok == TOK_CALLER_LOCATION) {
+    if (Parser().CurTok == TOK_CALLER_LOCATION) {
       getNextToken(); // eat 'caller_location'
-      if (CurTok == TOK_FN)
+      if (Parser().CurTok == TOK_FN)
         Err.withDecoratorOrderFixIt(Lex().CurLoc);
     }
     Err.raise();
@@ -1736,7 +1734,7 @@ std::unique_ptr<ExprAST> ParseVisibilityPrefixed() {
 // "Expected a variable name" would leave the writer guessing why, so this
 // names the cause and suggests a rename. Returns true if it reported.
 bool RejectReservedWordAsName() {
-  if (CurTok == TOK_WILDCARD) {
+  if (Parser().CurTok == TOK_WILDCARD) {
     // `_` alone is the wildcard pattern. `_name` is an ordinary identifier, and
     // is the spelling the unused-variable hint already recommends.
     InvalidPatternError(
@@ -1748,7 +1746,7 @@ bool RejectReservedWordAsName() {
         .raise();
     return true;
   }
-  if (CurTok != TOK_PUB)
+  if (Parser().CurTok != TOK_PUB)
     return false;
   MisplacedVisibilityError(Lex().CurLoc, MisplacedVisibilityError::Where::UsedAsName).raise();
   return true;

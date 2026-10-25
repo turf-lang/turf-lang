@@ -269,12 +269,15 @@ static void testHostStateIsRestored() {
   AllSourceLines["host.tr"] = SourceLines;
   std::istringstream HostStream("fn host(): int { return 1; }");
   LexerState Host(HostStream, "host.tr");
-  LexerScope HostScope(Host);
-  CurTok = TOK_IDENTIFIER;
+  ParserState HostParser(Host);
+  ParserScope HostScope(HostParser);
+  HostParser.CurTok = TOK_IDENTIFIER;
   Host.IdentifierStr = "hostIdent";
   Host.CurLine = 41;
   Host.CurCol = 7;
-  g_braceDepth = 2;
+  HostParser.BraceDepth = 2;
+  HostParser.CurlyDepth = 1;
+  HostParser.ModuleAliases["util"] = "geometry/util";
   g_recoverActive = true;
   g_AllowUnsafeModules = false;
   DiagnosticEngine::clearDiagnostics();
@@ -292,12 +295,17 @@ static void testHostStateIsRestored() {
   CHECK_EQ(SourceLines.size(), 2u);
   CHECK(AllSourceLines.count("host.tr") == 1);
   CHECK(AllSourceLines.count("undef.tr") == 0);
-  CHECK_EQ(CurTok, static_cast<int>(TOK_IDENTIFIER));
+  CHECK(&Parser() == &HostParser);
   CHECK(&Lex() == &Host);
+  CHECK_EQ(HostParser.CurTok, static_cast<int>(TOK_IDENTIFIER));
   CHECK_EQ(Host.IdentifierStr, std::string("hostIdent"));
   CHECK_EQ(Host.CurLine, 41);
   CHECK_EQ(Host.CurCol, 7);
-  CHECK_EQ(g_braceDepth, 2);
+  CHECK_EQ(HostParser.BraceDepth, 2);
+  CHECK_EQ(HostParser.CurlyDepth, 1);
+  CHECK_EQ(HostParser.RecursionDepth, 0);
+  CHECK_EQ(HostParser.ModuleAliases.size(), 1u);
+  CHECK_EQ(HostParser.ModuleAliases["util"], std::string("geometry/util"));
   CHECK(g_recoverActive);
   CHECK(!g_AllowUnsafeModules);
   CHECK(!DiagnosticEngine::getCollectAllDiagnostics());
@@ -313,7 +321,6 @@ static void testHostStateIsRestored() {
   SourceLines.clear();
   SourceFilename.clear();
   MainSourceFilename.clear();
-  g_braceDepth = 0;
 }
 
 // F-S0 (issue #301): a lexer is a value, so two can tokenize different
@@ -352,8 +359,65 @@ static void testTwoLexersInterleave() {
   CHECK_EQ(A.IdentifierStr, std::string("x"));
   CHECK_EQ(A.NumLitRadix, 10); // B's hex literal did not leak over
 
-  // With no LexerScope live, the parser's lexer is an empty one: EOF.
+  // With no ParserScope live, the parser's lexer is an empty one: EOF.
+  CHECK(Parser().Lexer == nullptr);
   CHECK_EQ(gettok(Lex()), static_cast<int>(TOK_EOF));
+}
+
+// F-S1 (issue #302): a parser is a value too. One parser stops part-way
+// through its buffer, inside brackets; a second parses a whole expression of
+// another buffer; the first then goes on exactly where it was -- its token,
+// bracket depths, module aliases and lexer untouched -- which is what an
+// import's parse, or an editor parsing several open files, needs.
+static void testTwoParsersInterleave() {
+  CurrentTest = "two parsers interleave";
+  InitializeCompilerGlobals();
+  std::istringstream AText("{ (alpha + [1, 2]) }");
+  std::istringstream BText("(1 + 2) * beta");
+  LexerState LA(AText, "a.tr");
+  LexerState LB(BText, "b.tr");
+  ParserState A(LA);
+  ParserState B(LB);
+  {
+    ParserScope ScopeA(A);
+    A.ModuleAliases["util"] = "geometry/util";
+    getNextToken(); // '{'
+    getNextToken(); // '('
+    getNextToken(); // alpha
+    CHECK_EQ(A.CurTok, static_cast<int>(TOK_IDENTIFIER));
+    CHECK_EQ(A.BraceDepth, 2);
+    CHECK_EQ(A.CurlyDepth, 1);
+
+    {
+      ParserScope ScopeB(B);
+      CHECK(&Parser() == &B);
+      CHECK(&Lex() == &LB);
+      getNextToken();
+      auto Expr = ParseExpression();
+      CHECK(Expr != nullptr);
+      CHECK_EQ(B.CurTok, static_cast<int>(TOK_EOF));
+      CHECK_EQ(B.BraceDepth, 0);
+      CHECK_EQ(B.RecursionDepth, 0);
+      CHECK(B.ModuleAliases.empty()); // A's aliases are A's
+      CHECK_EQ(LB.IdentifierStr, std::string("beta"));
+    }
+
+    CHECK(&Parser() == &A);
+    CHECK(&Lex() == &LA);
+    CHECK_EQ(A.CurTok, static_cast<int>(TOK_IDENTIFIER));
+    CHECK_EQ(LA.IdentifierStr, std::string("alpha"));
+    CHECK_EQ(A.BraceDepth, 2);
+    CHECK_EQ(A.CurlyDepth, 1);
+    CHECK_EQ(A.ModuleAliases["util"], std::string("geometry/util"));
+    getNextToken(); // '+'
+    CHECK_EQ(A.CurTok, static_cast<int>('+'));
+    getNextToken(); // '['
+    getNextToken(); // 1
+    CHECK_EQ(A.BraceDepth, 3);
+    CHECK_EQ(LA.CurLoc.Filename, std::string("a.tr"));
+  }
+  CHECK(&Parser() != &A);
+  CHECK(Parser().Lexer == nullptr);
 }
 
 // turf::keywords() is the lexer's own table: every word the language reserves,
@@ -413,11 +477,12 @@ static void testCancellation() {
     MainSourceFilename = "host.tr";
     SourceLines = {"host line 1"};
     LexerState Host;
-    LexerScope HostScope(Host);
-    CurTok = TOK_IDENTIFIER;
+    ParserState HostParser(Host);
+    ParserScope HostScope(HostParser);
+    HostParser.CurTok = TOK_IDENTIFIER;
     Host.IdentifierStr = "hostIdent";
     Host.CurLine = 41;
-    g_braceDepth = 2;
+    HostParser.BraceDepth = 2;
     DiagnosticEngine::clearDiagnostics();
     DiagnosticEngine::setCollectAllDiagnostics(false);
     DiagnosticEngine::add({3, 4, "host.tr"}, "host diagnostic");
@@ -440,11 +505,12 @@ static void testCancellation() {
     CHECK(GlobalSymbolTable.get() == HostTable);
     CHECK_EQ(SourceFilename, std::string("host.tr"));
     CHECK_EQ(SourceLines.size(), 1u);
-    CHECK_EQ(CurTok, static_cast<int>(TOK_IDENTIFIER));
+    CHECK(&Parser() == &HostParser);
     CHECK(&Lex() == &Host);
+    CHECK_EQ(HostParser.CurTok, static_cast<int>(TOK_IDENTIFIER));
     CHECK_EQ(Host.IdentifierStr, std::string("hostIdent"));
     CHECK_EQ(Host.CurLine, 41);
-    CHECK_EQ(g_braceDepth, 2);
+    CHECK_EQ(HostParser.BraceDepth, 2);
     CHECK(!DiagnosticEngine::getCollectAllDiagnostics());
     CHECK_EQ(DiagnosticEngine::getDiagnosticCount(), 1u);
     CHECK(DiagnosticEngine::hasErrorAt(3));
@@ -454,7 +520,6 @@ static void testCancellation() {
   SourceLines.clear();
   SourceFilename.clear();
   MainSourceFilename.clear();
-  g_braceDepth = 0;
 
   // The next analysis is not affected by a cancelled one.
   CHECK_EQ(render(turf::analyze({{"c.tr", UndefinedVariable}})), Uncancelled);
@@ -2387,6 +2452,7 @@ int main() {
   testUnsafeCapabilityDoesNotOutliveThePragma();
   testHostStateIsRestored();
   testTwoLexersInterleave();
+  testTwoParsersInterleave();
   testCancellation();
   testKeywords();
   testImportedModuleOverlay(Dir);

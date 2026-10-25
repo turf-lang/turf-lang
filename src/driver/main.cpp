@@ -1749,11 +1749,12 @@ static int runCompilerMain(int argc, char **argv) {
   if (opts.Format)
     return runFormat(opts.PositionalFiles, opts.FormatWrite, opts.Check, opts.FormatSkipUnlexable);
 
-  // The input file's lexer, current for the rest of the compile: the pre-pass
-  // and the main pass each reopen it from the top, and an import lexes with
-  // a LexerState of its own (ParseFile()).
+  // The input file's lexer and parser, current for the rest of the compile:
+  // the pre-pass and the main pass each reopen the file from the top, and an
+  // import parses with a ParserState and LexerState of its own (ParseFile()).
   LexerState MainLexer;
-  LexerScope MainLexerScope(MainLexer);
+  ParserState MainParser(MainLexer);
+  ParserScope MainParserScope(MainParser);
   if (!MainLexer.open(opts.InputFile)) {
     std::cerr << "Error: Could not open file " << opts.InputFile << "\n";
     return 1;
@@ -1808,7 +1809,7 @@ static int runCompilerMain(int argc, char **argv) {
       MainLexer.open(opts.InputFile);
 
       // Reset the lexer token stream
-      CurTok = 0;
+      Parser().CurTok = 0;
       getNextToken();
 
       // ── Pre-pass sub-pass 1: Parse ALL top-level declarations ─────────────
@@ -1858,18 +1859,18 @@ static int runCompilerMain(int argc, char **argv) {
       // compile before the main pass has parsed them (issue #321).
       bool PrePassSkippedTopLevel = false;
       if (!ClaimEntryFileImportSlot(SourceFilename)) {
-      while (CurTok != TOK_EOF) {
-        if (CurTok == ';') { getNextToken(); continue; }
-        if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
-            CurTok == TOK_MACHINE ||
-            CurTok == TOK_AT || CurTok == TOK_EXTERN || CurTok == TOK_EXPORT ||
-            CurTok == TOK_OPERATOR || CurTok == TOK_ERROR || CurTok == TOK_UNSAFE ||
-            CurTok == TOK_PUB) {
+      while (Parser().CurTok != TOK_EOF) {
+        if (Parser().CurTok == ';') { getNextToken(); continue; }
+        if (Parser().CurTok == TOK_FN || Parser().CurTok == TOK_STRUCT || Parser().CurTok == TOK_ENUM ||
+            Parser().CurTok == TOK_MACHINE ||
+            Parser().CurTok == TOK_AT || Parser().CurTok == TOK_EXTERN || Parser().CurTok == TOK_EXPORT ||
+            Parser().CurTok == TOK_OPERATOR || Parser().CurTok == TOK_ERROR || Parser().CurTok == TOK_UNSAFE ||
+            Parser().CurTok == TOK_PUB) {
           g_recoverActive = true;
           try {
             auto AST = ParseExpression();
             if (AST) {
-              if (CurTok == ';') {
+              if (Parser().CurTok == ';') {
                 LogErrorAt(Lex().CurLoc, ErrCode::UnexpectedToken, "Unexpected ';'", SLM::ErrorCategory::SYNTAX_ERROR);
               }
               // NOTE: no LintExpression() call here (deliberately -- see the
@@ -1901,12 +1902,12 @@ static int runCompilerMain(int argc, char **argv) {
             SkipToNextTopLevelBoundary();
           }
           g_recoverActive = false;
-        } else if (CurTok == TOK_IMPORT) {
+        } else if (Parser().CurTok == TOK_IMPORT) {
           g_recoverActive = true;
           try {
             auto AST = ParseImport();
             if (AST) {
-              if (CurTok != ';') {
+              if (Parser().CurTok != ';') {
                 LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
               } else {
                 getNextToken(); // eat ';'
@@ -2207,7 +2208,7 @@ static int runCompilerMain(int argc, char **argv) {
 
   // Re-open for the main pass
   MainLexer.open(opts.InputFile);
-  CurTok = 0;
+  Parser().CurTok = 0;
 
 
   // Main pass: re-enter the entry block and codegen everything.
@@ -2269,10 +2270,10 @@ static int runCompilerMain(int argc, char **argv) {
   // (ParserModule.cpp).
   if (!ClaimEntryFileImportSlot(SourceFilename)) {
   while (true) {
-    if (CurTok == TOK_EOF)
+    if (Parser().CurTok == TOK_EOF)
       break;
 
-    if (CurTok == ';') {
+    if (Parser().CurTok == ';') {
       getNextToken();
       continue;
     }
@@ -2285,16 +2286,16 @@ static int runCompilerMain(int argc, char **argv) {
     // in the pre-pass. TOK_EXPORT (export immut NAME: TYPE = LITERAL;) is
     // included for the same reason -- it's a genuine top-level declaration,
     // not a statement, and needs the exact same hoist-then-lint treatment.
-    if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
-        CurTok == TOK_MACHINE ||
-        CurTok == TOK_AT || CurTok == TOK_EXTERN || CurTok == TOK_EXPORT ||
-        CurTok == TOK_OPERATOR || CurTok == TOK_ERROR || CurTok == TOK_UNSAFE ||
-            CurTok == TOK_PUB) {
+    if (Parser().CurTok == TOK_FN || Parser().CurTok == TOK_STRUCT || Parser().CurTok == TOK_ENUM ||
+        Parser().CurTok == TOK_MACHINE ||
+        Parser().CurTok == TOK_AT || Parser().CurTok == TOK_EXTERN || Parser().CurTok == TOK_EXPORT ||
+        Parser().CurTok == TOK_OPERATOR || Parser().CurTok == TOK_ERROR || Parser().CurTok == TOK_UNSAFE ||
+            Parser().CurTok == TOK_PUB) {
       g_recoverActive = true;
       try {
         auto AST = ParseExpression();
         if (AST) {
-          if (CurTok == ';') {
+          if (Parser().CurTok == ';') {
             LogErrorAt(Lex().CurLoc, ErrCode::UnexpectedToken, "Unexpected ';'", SLM::ErrorCategory::SYNTAX_ERROR);
           }
           // lint only — not re-codegenned. Also transparently flattens a
@@ -2316,12 +2317,12 @@ static int runCompilerMain(int argc, char **argv) {
       continue;
     }
 
-    if (CurTok == TOK_IMPORT) {
+    if (Parser().CurTok == TOK_IMPORT) {
       g_recoverActive = true;
       try {
         auto AST = ParseImport();
         if (AST) {
-          if (CurTok != ';') {
+          if (Parser().CurTok != ';') {
             LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
           } else {
             getNextToken(); // eat ';'
@@ -2346,7 +2347,7 @@ static int runCompilerMain(int argc, char **argv) {
       const SourceLocation StmtLoc = Lex().CurLoc;
       auto AST = ParseExpression();
       if (AST) {
-        if (CurTok != ';') {
+        if (Parser().CurTok != ';') {
           LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
         } else {
           getNextToken(); // eat ';'
@@ -2398,10 +2399,10 @@ static int runCompilerMain(int argc, char **argv) {
     } catch (const RecoverUnwind &) {
       // An error was raised: skip to next statement boundary. A lexer error
       // in the skipped text is skipped too (see SkipToNextTopLevelBoundary()).
-      while (CurTok != ';' && CurTok != TOK_EOF && CurTok != TOK_FN &&
-             CurTok != TOK_STRUCT && CurTok != TOK_MUTABLE &&
-             CurTok != TOK_IMMUTABLE && CurTok != TOK_IF &&
-             CurTok != TOK_WHILE && CurTok != TOK_FOR && CurTok != TOK_RETURN) {
+      while (Parser().CurTok != ';' && Parser().CurTok != TOK_EOF && Parser().CurTok != TOK_FN &&
+             Parser().CurTok != TOK_STRUCT && Parser().CurTok != TOK_MUTABLE &&
+             Parser().CurTok != TOK_IMMUTABLE && Parser().CurTok != TOK_IF &&
+             Parser().CurTok != TOK_WHILE && Parser().CurTok != TOK_FOR && Parser().CurTok != TOK_RETURN) {
         try {
           getNextToken();
         } catch (const RecoverUnwind &) {

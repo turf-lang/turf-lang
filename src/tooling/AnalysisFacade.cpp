@@ -51,14 +51,15 @@ namespace {
 // different programs back to back and against fresh runs to catch a
 // missing one.
 //
-// The lexer is not saved field by field: the scope makes a LexerState of its
-// own current (F-S0) and the host's, mid-parse or not (the SLM Sandbox runs an
-// analysis inside a compile), is never touched -- its stream resumes at the
-// same byte, its cursor and lookahead where they were.
+// The lexer and the parser are not saved field by field: the scope makes a
+// ParserState and LexerState of its own current (F-S0, F-S1) and the host's,
+// mid-parse or not (the SLM Sandbox runs an analysis inside a compile), are
+// never touched -- its stream resumes at the same byte, its cursor, lookahead,
+// current token and bracket depths where they were.
 //
 // Deliberately NOT here:
-//   - BinopPrecedence and the builtin registry: filled once, identically,
-//     and never modified after.
+//   - The builtin registry: filled once, identically, and never modified
+//     after.
 //   - IndexModuleDir()'s directory index (ParserModule.cpp): a cache of
 //     what exists under lib/std, not per-compile state.
 //   - ExprAST::NextNodeID: only ever compared for equality within one tree.
@@ -67,11 +68,6 @@ namespace {
 class GlobalStateScope {
 public:
   GlobalStateScope() {
-    // Parser state (ParserState, issue #302, will make this a struct too).
-    SavedCurTok_ = CurTok;
-    SavedBraceDepth_ = g_braceDepth;
-    SavedCurlyDepth_ = g_curlyDepth;
-    SavedParseRecursionDepth_ = g_parseRecursionDepth;
     SavedProtoOnlyPass_ = g_protoOnlyPass;
 
     SavedSourceFilename_ = SourceFilename;
@@ -111,9 +107,6 @@ public:
     PushParserCompileState();
     PushResolverCompileState();
 
-    g_braceDepth = 0;
-    g_curlyDepth = 0;
-    g_parseRecursionDepth = 0;
     g_protoOnlyPass = false;
     g_recoverActive = false;
   }
@@ -138,22 +131,17 @@ public:
     SourceFilename = SavedSourceFilename_;
 
     g_protoOnlyPass = SavedProtoOnlyPass_;
-    g_parseRecursionDepth = SavedParseRecursionDepth_;
-    g_braceDepth = SavedBraceDepth_;
-    g_curlyDepth = SavedCurlyDepth_;
-    CurTok = SavedCurTok_;
   }
 
   GlobalStateScope(const GlobalStateScope &) = delete;
   GlobalStateScope &operator=(const GlobalStateScope &) = delete;
 
 private:
-  // The analysis's lexer, current until the scope ends; analyze() points it
-  // at the entry buffer.
+  // The analysis's lexer and parser, current until the scope ends; analyze()
+  // points the lexer at the entry buffer.
   LexerState Lexer_;
-  LexerScope LexerScope_{Lexer_};
-  int SavedCurTok_;
-  int SavedBraceDepth_, SavedCurlyDepth_, SavedParseRecursionDepth_;
+  ParserState Parser_{Lexer_};
+  ParserScope ParserScope_{Parser_};
   bool SavedProtoOnlyPass_;
   std::string SavedSourceFilename_, SavedMainSourceFilename_;
   std::vector<std::string> SavedSourceLines_;
@@ -371,24 +359,24 @@ std::vector<std::unique_ptr<ExprAST>> parseEntryFile(std::size_t &PreludeCount,
   if (ClaimEntryFileImportSlot(SourceFilename))
     return Program;
 
-  while (CurTok != TOK_EOF) {
-    if (CurTok == ';') {
+  while (Parser().CurTok != TOK_EOF) {
+    if (Parser().CurTok == ';') {
       getNextToken();
       continue;
     }
-    const int StartTok = CurTok;
+    const int StartTok = Parser().CurTok;
     g_recoverActive = true;
     try {
       auto AST = ParseExpression();
       if (!AST) {
         SkipToNextTopLevelBoundary();
       } else if (isDeclarationStart(StartTok)) {
-        if (CurTok == ';')
+        if (Parser().CurTok == ';')
           LogErrorAt(Lex().CurLoc, ErrCode::UnexpectedToken, "Unexpected ';'",
                      SLM::ErrorCategory::SYNTAX_ERROR);
         AppendFlattenedTopLevelDecl(std::move(AST), Program, true);
       } else {
-        if (CurTok != ';')
+        if (Parser().CurTok != ';')
           LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement",
                      SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
         else
@@ -754,7 +742,7 @@ AnalysisResult analyze(const std::vector<SourceBuffer> &Buffers,
   }
   AllSourceLines[Entry.Path] = SourceLines;
   resetLexer();
-  CurTok = 0;
+  Parser().CurTok = 0;
 
   I->Program = parseEntryFile(I->PreludeCount, Options.SkipPrelude);
 

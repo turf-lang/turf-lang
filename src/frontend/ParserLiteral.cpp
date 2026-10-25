@@ -136,8 +136,8 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
   // list holds patterns (`_`, `..`, `Name { .. }`), not expressions, so this
   // stops at the '(' and leaves it for ParsePattern() to read. Taken at entry
   // so it covers exactly the first primary whatever follows it.
-  const bool StopAtPatternCall = PatternHeadCallPending;
-  PatternHeadCallPending = false;
+  const bool StopAtPatternCall = Parser().PatternHeadCallPending;
+  Parser().PatternHeadCallPending = false;
 
   // A postfix chain is parsed by this LOOP, not by recursion, so
   // ParseRecursionGuard never saw it -- yet each link wraps the previous one,
@@ -148,24 +148,24 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
   // when the chain ends.
   struct ChainDepth {
     int Links = 0;
-    ~ChainDepth() { g_parseRecursionDepth -= Links; }
+    ~ChainDepth() { Parser().RecursionDepth -= Links; }
   } Chain;
 
   while (true) {
-    ++g_parseRecursionDepth;
+    ++Parser().RecursionDepth;
     ++Chain.Links;
-    if (g_parseRecursionDepth > MaxParseRecursionDepth) {
+    if (Parser().RecursionDepth > MaxParseRecursionDepth) {
       LogErrorAt(Lex().CurLoc, ErrCode::NestingTooDeep,
                  "Expression nested too deeply to parse."
                  "\n  Hint: check for a runaway chain of '.', '[]', '()' or '++'/'--'.",
                  SLM::ErrorCategory::SYNTAX_ERROR);
       return nullptr;
     }
-    if (StopAtPatternCall && CurTok == '(' &&
+    if (StopAtPatternCall && Parser().CurTok == '(' &&
         dynamic_cast<ScopeAccessExprAST *>(Base.get()))
       return Base;
 
-    if (CurTok == '[') {
+    if (Parser().CurTok == '[') {
       SourceLocation Loc = Lex().CurLoc;
       getNextToken();
       // `[start..end]` (either bound optional) is a slice. A `..` right
@@ -173,20 +173,20 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
       // an index -- `..` is never an operator inside an expression, so
       // ParseExpression() always stops in front of it.
       std::unique_ptr<ExprAST> Index;
-      if (CurTok != TOK_RANGE) {
+      if (Parser().CurTok != TOK_RANGE) {
         Index = ParseExpression();
         if (!Index)
           return nullptr;
       }
-      if (CurTok == TOK_RANGE) {
+      if (Parser().CurTok == TOK_RANGE) {
         getNextToken(); // eat '..'
         std::unique_ptr<ExprAST> End;
-        if (CurTok != ']') {
+        if (Parser().CurTok != ']') {
           End = ParseExpression();
           if (!End)
             return nullptr;
         }
-        if (CurTok != ']') {
+        if (Parser().CurTok != ']') {
           LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter,
                      "Expected ']' to close the slice -- e.g. arr[1..3]",
                      SLM::ErrorCategory::SYNTAX_ERROR);
@@ -197,28 +197,28 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
                                               std::move(Index), std::move(End));
         continue;
       }
-      if (CurTok != ']') {
+      if (Parser().CurTok != ']') {
         LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "Expected ']' to close the array index", SLM::ErrorCategory::SYNTAX_ERROR);
         return nullptr;
       }
       getNextToken();
       Base = std::make_unique<ArrayAccessExprAST>(Loc, std::move(Base),
                                                   std::move(Index));
-    } else if (CurTok == '(') {
+    } else if (Parser().CurTok == '(') {
       SourceLocation Loc = Lex().CurLoc;
       getNextToken();
       std::vector<std::unique_ptr<ExprAST>> Args;
-      while (CurTok != ')' && CurTok != TOK_EOF) {
+      while (Parser().CurTok != ')' && Parser().CurTok != TOK_EOF) {
         auto Arg = ParseExpression();
         if (!Arg)
           return nullptr;
         Args.push_back(std::move(Arg));
-        if (CurTok == ',')
+        if (Parser().CurTok == ',')
           getNextToken();
-        else if (CurTok != ')')
+        else if (Parser().CurTok != ')')
           break;
       }
-      if (CurTok != ')') {
+      if (Parser().CurTok != ')') {
         LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "Expected ')' to close the function call", SLM::ErrorCategory::SYNTAX_ERROR);
         return nullptr;
       }
@@ -227,10 +227,10 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
       // Positional Point(10, 20) is no longer valid; treat as a regular call.
       Base = std::make_unique<FuncCallExprAST>(Loc, std::move(Base),
                                                std::move(Args));
-    } else if (CurTok == '.') {
+    } else if (Parser().CurTok == '.') {
       SourceLocation Loc = Lex().CurLoc;
       getNextToken();
-      if (CurTok != TOK_IDENTIFIER) {
+      if (Parser().CurTok != TOK_IDENTIFIER) {
         LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "Expected a method name after '.'", SLM::ErrorCategory::SYNTAX_ERROR);
         return nullptr;
       }
@@ -240,11 +240,11 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
       // LG-2: `obj.method::<T>(...)`, type arguments for a generic function
       // called through UFCS. `::` then `<` begins nothing else.
       std::vector<TurfTypePtr> MethodTypeArgs;
-      if (CurTok == TOK_SCOPE && peekToken(0) == '<') {
+      if (Parser().CurTok == TOK_SCOPE && peekToken(0) == '<') {
         getNextToken(); // eat '::'
         if (!ParseTypeArgList(MethodTypeArgs))
           return nullptr;
-        if (CurTok != '(') {
+        if (Parser().CurTok != '(') {
           LogErrorAt(Lex().CurLoc, ErrCode::MissingOpeningDelimiter,
                      "Expected '(' after the type arguments of '" + MethodName + "'."
                      "\n  Hint: type arguments on a method are only written on a "
@@ -253,19 +253,19 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
           return nullptr;
         }
       }
-      if (CurTok == '(') {
+      if (Parser().CurTok == '(') {
         getNextToken(); // eat '('
         std::vector<std::unique_ptr<ExprAST>> Args;
-        if (CurTok != ')') {
+        if (Parser().CurTok != ')') {
           while (true) {
             if (auto Arg = ParseExpression()) {
               Args.push_back(std::move(Arg));
             } else {
               return nullptr;
             }
-            if (CurTok == ')')
+            if (Parser().CurTok == ')')
               break;
-            if (CurTok != ',') {
+            if (Parser().CurTok != ',') {
               LogErrorAt(Lex().CurLoc, ErrCode::MissingComma, "Expected ')' or ',' in argument list", SLM::ErrorCategory::SYNTAX_ERROR);
               return nullptr;
             }
@@ -287,8 +287,8 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
                                                       MethodName, MethodLoc);
         }
       }
-    } else if (CurTok == TOK_PLUS_PLUS || CurTok == TOK_MINUS_MINUS) {
-      int OpType = CurTok;
+    } else if (Parser().CurTok == TOK_PLUS_PLUS || Parser().CurTok == TOK_MINUS_MINUS) {
+      int OpType = Parser().CurTok;
       SourceLocation OpLoc = Lex().CurLoc;
       getNextToken();
       char Op = (OpType == TOK_PLUS_PLUS) ? '+' : '-';
