@@ -471,8 +471,10 @@ fact about that function to the compiler:
 @name(argument, key: argument, ...)
 ```
 
-An argument is a word (a keyword counts as a word) or a string; a key is a
-word. Anything richer, such as `@ownership(1 + 2)`, is a syntax error.
+An argument is a word (a keyword counts as a word), a string, a whole number or
+a `Type::Variant` path; a key is a word. Anything richer, such as
+`@ownership(1 + 2)`, is a syntax error (`E103`, "Expected a word or a string in
+the arguments of '@ownership'").
 Several annotations may be stacked, and they come **before** `pub`:
 
 ```text
@@ -486,7 +488,7 @@ after an annotation"). A name the compiler does not know, or an argument that
 does not fit the declaration, is `E146`; a misspelling gets a "Did you mean"
 suggestion. An annotation is never silently ignored.
 
-The annotations are `@caller_location`, `@ownership`, `@ffi` and `@deprecated`.
+The annotations are `@caller_location`, `@ownership`, `@ffi`, `@deprecated` and `@test`.
 
 ### `@caller_location`
 
@@ -636,6 +638,154 @@ The message is required and must be a non-empty string, written positionally
 `E146`. The warning has a [lint level](cli_and_diagnostics.md#lint-levels)
 like any other, so a build that already knows about a deprecation and isn't
 ready to migrate yet can set `E172` to `allow`.
+
+### `@test`
+
+`@test` marks a top-level function as a test written in the same file as the
+code it checks. A test takes no parameters and returns `void` or `!void`:
+
+```turflang
+import test;
+
+fn double_it(n: int): int {
+    return n * 2;
+}
+
+@test
+fn doubles_a_number(): void {
+    test::assert(double_it(21) == 42, "21 doubled is 42");
+}
+```
+
+A file of tests needs no `main`. A normal build checks every test and leaves it
+out: the object is identical to the program's without the tests. A test has
+the privileges of its file, so it can call a private function beside it.
+Nothing else may call a test or use it as a value: that is `E173`
+("'name' is a test: `turf test` runs it, and nothing else may call it or use it
+as a value"). Move what a test and other code share into an ordinary function,
+and call that from both. `turf test` (and
+`turfc --test`) builds a file with a line starting `@test` once, runs each test
+in a process of its own, and prints one line per test:
+
+```text
+[tests] doubles.tr: doubles_a_number ... PASS
+```
+
+Only a file under `tests/` is run that way; with a project, the `src/` files
+that declare tests are run too (see
+[Projects and packages](projects_and_packages.md#tests-turf-test)).
+
+#### Outcomes
+
+The first argument, when there is one, says how the test ends. Without it a
+test passes when its body returns (a `!void` body: without an error).
+
+| Annotation | The test passes when |
+|---|---|
+| `@test` | the body returns |
+| `@test(compile_error, E041, "text")` | every error inside the test has that code and one message contains `text` |
+| `@test(compile_error, E041, "text", fix: "text")` | ... and a printed `Fix:` description contains `text` |
+| `@test(warning, E172, "text")` | the test compiles with that warning, then runs and returns |
+| `@test(no_warnings)` | the test compiles with no warning, then runs and returns |
+| `@test(panic, "text")` | the test panics (exit status 134) and its output contains `text` |
+| `@test(exit, 3)` | the test ends through `sys::exit(3)`; the status is `0` to `255` |
+| `@test(error, ParseError::Empty)` | the `!void` body returns that error |
+
+The text `""` matches any message. Arguments are literals, codes and variant
+names, never expressions. The outcome words are not reserved: a program's own
+`error Error { E041 }` is unaffected, which is why the outcome is spelt
+`compile_error`.
+
+```turflang
+import test;
+
+error ParseError {
+    Empty,
+}
+
+fn parse(text: string): !int {
+    if text.length() == 0 {
+        return ParseError::Empty;
+    }
+    return text.length();
+}
+
+@test(error, ParseError::Empty)
+fn parsing_nothing_fails(): !void {
+    try parse("");
+    return;
+}
+
+@test(panic, "Division by zero")
+fn dividing_by_zero_panics(): void {
+    immut zero: int = 0;
+    io::printline(10 / zero);
+}
+
+@test(exit, 3)
+fn exits_with_three(): void {
+    sys::exit(3);
+}
+
+@test(no_warnings)
+fn a_clean_body_has_no_warning(): !void {
+    immut n: int = try parse("ab");
+    test::assert(n == 2, "two characters");
+    return;
+}
+```
+
+#### Tests that expect a compile error
+
+A `compile_error` test holds code the compiler must reject. Its body is
+checked like any other, but the errors with the expected code belong to the
+test: they are not printed and the build succeeds. The test is never emitted.
+
+```turflang
+@test(compile_error, E041, "Unknown function")
+fn an_undeclared_function_is_rejected(): void {
+    undeclared(1);
+}
+
+@test(compile_error, E041, "sqaure", fix: "replace 'sqaure' with 'square'")
+fn a_misspelt_function_has_a_fix(): void {
+    io::printline(sqaure(3));
+}
+
+fn square(n: int): int {
+    return n * n;
+}
+```
+
+"Inside the test" runs from the `fn` keyword to the end of the body, so a
+missing return (`E009`) is reported at the `fn`. The annotation line is outside,
+which means a malformed `@test` is always an ordinary error. An error with
+another code inside the test, or any error outside every test, is an ordinary
+error and fails the build. Warnings inside a `compile_error` test are not shown.
+In a test build every error inside a `compile_error` test of the main file is
+taken, so a test that fails for the wrong reason fails as that test while the
+file's other tests still run.
+
+#### Mistakes in a `@test`
+
+A `@test` that cannot be understood is `E146`, with a hint listing the outcomes:
+
+<!-- doc-example: fails E146 -->
+```turflang
+@test(compile_eror, E041, "x")
+fn misspelt_outcome(): void {
+}
+```
+
+The message names the rule: `'x' is not an outcome of '@test'`, `'compile_error'
+is an outcome, and an outcome is the first argument`, `'E999' is not a code the
+compiler has`, `'E172' is a warning's code, not an error's` (and the reverse),
+`A test takes no parameters`, `A test returns 'void' or '!void', not 'int'`,
+`A method cannot be a test`, `'main' cannot be a test`, `'@test' has no option
+'skip:'`, `'256' is not an exit status`, `A function has one '@test'`, `A test
+with an 'error' outcome returns '!void'`, `Error type 'T' has no variant 'V'` and
+`'T' is not an error type`. A `@test` function nested inside another function is
+`E038`; a call to a test is `E173`. `@test` takes no per-test options: `skip:`, `timeout:` and the like are `E146`.
 
 ---
 

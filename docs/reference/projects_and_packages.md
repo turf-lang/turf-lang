@@ -181,6 +181,15 @@ the file's name:
 | `fail_name.tr` containing the comment `// RUNTIME_ABORT_EXPECTED` | it compiles and then aborts (exits non-zero) |
 | `name_module.tr` | never run: a companion for a test to `import` |
 
+A file with a line starting `@test` declares tests beside the code they check
+(see [`@test`](functions_and_modules.md#test)): it needs no `main`, and each
+`@test` function is a test of its own, reported as `file.tr: test_name`. A
+file under `tests/` that also has a `main` is run as an ordinary program too.
+The root package's `src/` files that declare tests are run as well (their
+`main` is not a test); `turf test <path>...` runs only the paths it names, so no
+`src/` test then. A file whose tests do not build is one failure, `COMPILE
+FAILED (its tests did not run)`.
+
 Comments can pin the reason, not only the outcome, so a test cannot keep passing
 because it broke in some other way:
 

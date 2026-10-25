@@ -411,14 +411,14 @@ A differing *release* version is never an error on its own. In a project, a mani
 
 ```text
 $ turfc --version --json
-{"features":["package-graph","exit-status-2","test","format-check","format-skip-unlexable","emit-obj","test-only","lint-levels","diagnostics-json","version-json","smart"],"interface":{"major":1,"minor":10},"llvm":"22.1.8","manifest":1,"root":"/opt/turf","runtime":"turf_rt_abi_2_0","schemas":{"diagnostics":"1.0","package_graph":1},"turfc":"2.1.1"}
+{"features":["package-graph","exit-status-2","test","format-check","format-skip-unlexable","emit-obj","test-only","lint-levels","diagnostics-json","version-json","test-functions","smart"],"interface":{"major":1,"minor":11},"llvm":"22.1.8","manifest":1,"root":"/opt/turf","runtime":"turf_rt_abi_2_0","schemas":{"diagnostics":"1.0","package_graph":1},"turfc":"2.1.1"}
 ```
 
 | Key | Value |
 |---|---|
 | `interface` | `{"major", "minor"}`, as line 2 of `turfc --version`. |
 | `schemas` | `diagnostics`: the [diagnostics JSON](#diagnostics-as-json) schema version; `package_graph`: the package-graph `"format"` `--package-graph` reads. |
-| `features` | One name per addition to the interface, in order: `package-graph` (1.1), `exit-status-2` (1.2), `test` (1.3), `format-check` (1.4), `format-skip-unlexable` (1.5), `emit-obj` (1.6), `test-only` (1.7), `lint-levels` (1.8), `diagnostics-json` (1.9), `version-json` (1.10). Then what this build has: `smart`, `embedded-lld`, `bundled-runtime`. |
+| `features` | One name per addition to the interface, in order: `package-graph` (1.1), `exit-status-2` (1.2), `test` (1.3), `format-check` (1.4), `format-skip-unlexable` (1.5), `emit-obj` (1.6), `test-only` (1.7), `lint-levels` (1.8), `diagnostics-json` (1.9), `version-json` (1.10), `test-functions` (1.11). Then what this build has: `smart`, `embedded-lld`, `bundled-runtime`. |
 | `turfc`, `llvm`, `runtime`, `root` | As the text lines. |
 
 ### Finding the compiler
@@ -455,7 +455,7 @@ Usage: turfc <filename.tr> [-o output] [--emit-llvm | --emit-obj] [--smart]
          [--allow-unsafe-modules] [--stdlib-warnings] [--diagnostics=json|text]
          [--allow <code>] [--warn <code>] [--deny <code>] [--lint-set <2.N>]
          [-O0|-O1|-O2|-O3|-Os] [-g] [--target=<triple>] [-mcpu=<cpu>]
-         [--check [--module]] [--package-graph <file>]
+         [--check [--module]] [--package-graph <file>] [--test-build <manifest>]
          [--resolve] [--typecheck] [--dump-ast] [--dump-resolver-symbols]
          [--dump-resolved] [--dump-typechecked] [--dump-modules]
          [--dump-instantiations]
@@ -477,7 +477,7 @@ Usage: turfc <filename.tr> [-o output] [--emit-llvm | --emit-obj] [--smart]
 ```text
 $ turfc --version
 turfc 2.1.1
-interface 1.8
+interface 1.11
 llvm 22.1.8
 runtime turf_rt_abi_2_0
 root /opt/turf
@@ -485,10 +485,11 @@ linker system-cc
 smart built-in
 ```
 
-The interface covers what `turf` relies on: the flags it passes, the two-line start of `--version`, the exit statuses, and every other argument being accepted exactly as a direct invocation accepts it. A new flag or input raises the **minor**; removing a flag or changing its meaning raises the **major**. A tool that needs `--package-graph` requires interface 1.1 or later, `turfc --test` 1.3, `--emit-obj` 1.6, `turfc --test --only` 1.7, and the lint-level flags 1.8.
+The interface covers what `turf` relies on: the flags it passes, the two-line start of `--version`, the exit statuses, and every other argument being accepted exactly as a direct invocation accepts it. A new flag or input raises the **minor**; removing a flag or changing its meaning raises the **major**. A tool that needs `--package-graph` requires interface 1.1 or later, `turfc --test` 1.3, `--emit-obj` 1.6, `turfc --test --only` 1.7, the lint-level flags 1.8, and `@test` functions in `turfc --test` 1.11.
 
 **Modes a tool uses:**
 
+- `turfc <file.tr> --test-build <manifest> -o <program>` builds the `@test` functions of a file (and, with a package graph, of the root package's `src/` files) into a test program that runs the test its first argument numbers, and writes what each test expects to `<manifest>`. Only the `turfc --test` runner passes it; it cannot be combined with `--check`. See [`@test`](functions_and_modules.md#test).
 - `turfc --check <file.tr>` runs every diagnostic and writes nothing; the output and status match a compile of the same file. It checks a **program**, so it wants a `main`; `turfc --check --module <file.tr>` checks a file that is only ever imported. This is what `turf check` and `turf dump` run.
 - `turfc --package-graph <file.json> <file.tr>` compiles as a package build, and is the only way the compiler learns about packages. The graph lists each package's source root, its **direct** dependencies and whether its `unsafe module;` declarations are honored. `turf build` writes it as `build/package-graph.json`, and `turf graph` prints it:
 
@@ -723,7 +724,7 @@ Every code, with its kind, the 2.x release that added it, the level it starts at
 
 <!-- diagnostic-registry:begin (generated by scripts/check/diagnostic_registry.py --write; do not edit) -->
 
-172 codes, E001 to E172: 148 errors and 24 warnings (E074–E075, E094, E152–E172). 6 are retired (E006, E013, E015, E037, E055, E063).
+173 codes, E001 to E173: 149 errors and 24 warnings (E074–E075, E094, E152–E172). 6 are retired (E006, E013, E015, E037, E055, E063).
 
 | Code | Kind | Since | Level | Category | Name |
 |---|---|---|---|---|---|
@@ -899,6 +900,7 @@ Every code, with its kind, the 2.x release that added it, the level it starts at
 | E170 | warning | 2.0 | warn | memory error | PossibleUseAfterFreeWarning |
 | E171 | warning | 2.0 | warn | memory error | PossibleDoubleFreeWarning |
 | E172 | warning | 2.2 | warn | declaration | DeprecatedUseWarning |
+| E173 | error | 2.2 | error | declaration | TestFunctionUseError |
 
 <!-- diagnostic-registry:end -->
 

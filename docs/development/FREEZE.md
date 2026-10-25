@@ -1080,6 +1080,32 @@ over the same code, so how a test is judged exists once.
   `tests/`, written from the current directory) becomes an `--only`, and only
   then does `turf test` ask for interface 1.7. Exit status: 0 every test passed; 1 a test failed or
   the run could not start; 2 a usage error (§6.21).
+- **Tests beside the code: `@test` (F-11d, TDP-2-006).** A line starting
+  `@test` makes a file a source of tests: `@test` on a top-level function that
+  takes no parameters and returns `void` or `!void`, with an optional outcome as
+  first argument: none (the body returns), `compile_error, E<code>, "text"`
+  (with `fix: "text"` for a printed `Fix:`), `warning, E<code>, "text"`,
+  `no_warnings`, `panic, "text"` (exit 134), `exit, <0..255>` and
+  `error, Type::Variant`. `""` matches any message; arguments are literals,
+  codes and variant names, never expressions; the outcome words reserve
+  nothing. "Inside the test" runs from the `fn` keyword to the end of the body,
+  so the annotation line is outside it and a malformed `@test` is an ordinary
+  error (E146, E038 when nested). A normal build checks tests and leaves them
+  out (the object is the program's without them); errors with a
+  `compile_error` test's code inside it are the test's, any other error is
+  ordinary, and a warning inside one is not shown. A test is never called or
+  used as a value (E173). The runner builds a file with tests once with
+  `turfc <file> --test-build <manifest> -o <prog>` (driver interface **1.11**,
+  feature `test-functions`; only the runner passes the flag, and it cannot
+  combine with `--check`) and runs each test as `<prog> <n>` in its own process;
+  a `compile_error` test is judged from the errors the compile recorded inside
+  it. A `tests/` file with tests and a `main` also runs as a plain test.
+  `fail_*` files keep their convention. With a package graph the root package's
+  `src/` files that declare tests run too (their `main` is not a test);
+  `--only` runs only what it names. Report lines are
+  `[suite] file.tr: test_name ... PASS`; a file whose tests do not build is one
+  failure, `COMPILE FAILED (its tests did not run)`. Per-test options are
+  TDP-2-026.
 - **Not frozen:** the wording of the per-test report lines, the order tests
   finish in, and `turfc --test`'s behaviour on Windows (not supported yet; it
   needs a process runner for that platform, REL-008).

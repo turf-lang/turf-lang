@@ -671,6 +671,72 @@ EXPECT-NO-DIAG violated: the compiler output contains 'warning'
 Only the modules a test imports are part of its output, so a library with
 several modules needs a test that imports each of them.
 
+## Tests beside the code
+
+A test in `tests/` reaches the library through its `pub` items. A check on a
+private helper, or one that is clearest next to the function it checks, can be
+written in the library's own file as a function marked `@test`. It takes no
+parameters, returns `void` or `!void`, and needs no `main`. Add to the end of
+`src/temperature.tr`:
+
+<!-- doc-example: skip continues src/temperature.tr, which declares absolute_zero and to_kelvin -->
+```turflang
+import test;
+
+@test
+fn absolute_zero_is_below_freezing(): void {
+    test::assert(absolute_zero() < 0.0, "absolute zero is below 0 C");
+}
+
+@test(error, TempError::BelowAbsoluteZero)
+fn below_absolute_zero_is_refused(): !void {
+    try to_kelvin(-300.0);
+    return;
+}
+
+@test(panic, "not reached")
+fn fail_ends_the_test_with_a_panic(): void {
+    test::fail("not reached");
+}
+```
+
+`absolute_zero` is private, and the test calls it: a test is in the same file.
+`turf build` checks these functions and leaves them out of the program. `turf
+test` runs each one in a process of its own, so the panic in the third does not
+stop the others:
+
+```text
+$ turf test
+Running Turf Test Suites...
+
+[tests] convert_test.tr ... PASS
+...
+[src] temperature.tr: absolute_zero_is_below_freezing ... PASS
+[src] temperature.tr: below_absolute_zero_is_refused ... PASS
+[src] temperature.tr: fail_ends_the_test_with_a_panic ... PASS
+```
+
+The first argument of `@test` says how the test must end: `error, T::V` for a
+`!void` body that returns that error, `panic, "text"` for a panic whose output
+contains the text, and also `exit, <status>`, `warning`, `no_warnings` and
+`compile_error`. A `compile_error` test holds code the compiler must reject,
+which replaces a `fail_*` file when the mistake sits inside one function:
+
+```turflang
+@test(compile_error, E041, "Unknown function")
+fn an_undeclared_function_is_rejected(): void {
+    undeclared(1);
+}
+```
+
+The test passes when every error inside it has that code and one message
+contains the text; the build still succeeds and prints nothing for it. A mistake
+the test does not name, or one outside every test, is an ordinary error. A file
+or declaration-level mistake (a syntax error, a missing `import`) still needs a
+`fail_*` file. Nothing may call a test: that is `E173`, so move what a test and
+other code share into an ordinary function. The outcomes and rules are in the
+[reference](../reference/functions_and_modules.md#test).
+
 ## Shared helpers
 
 Tests repeat setup. A file named `<name>_module.tr` in `tests/` is a helper: it
