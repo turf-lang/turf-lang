@@ -17,15 +17,25 @@ do. This script is the CI gate for that. It fails when
      <program>.tr.expected holds the output, absent when it was empty);
   4. a RELAXED.txt entry is stale: it names a program 2.0.0 rejected that
      this compiler still rejects (the line must go), or one that is not in
-     the corpus.
+     the corpus;
+  5. a REWORDED.txt entry names a program that did not compile and run on
+     2.0.0, or is malformed.
 
-RELAXED.txt is the one register of exceptions. A program 2.0.0 REJECTED that a
-later minor deliberately accepts is not a program that stopped compiling, so
-it does not break the promise, but it is still a change to what the corpus
-says, so it is written down there with the commit and the reason, and the
-owner reviews the line. It can only name a fail_* program (a program that
-compiled on 2.0.0 is never an exception) and only ever shrinks or grows by
-review.
+There are two registers of exceptions, each line the owner's decision with its
+commit and reason, and each only ever changes by review:
+
+  - RELAXED.txt: a program 2.0.0 REJECTED that a later minor deliberately
+    accepts. That is not a program that stopped compiling, so it does not
+    break the promise, but it is still a change to what the corpus says. It
+    can only name a fail_* program.
+  - REWORDED.txt: a program that compiled and ran on 2.0.0 whose output a
+    later minor deliberately rewords (RT-6's stack-overflow panic now says how
+    deep the recursion was). Each line is a substitution, `s/<regex>/<text>/`,
+    applied to this compiler's output, after which it must still be 2.0.0's
+    output byte for byte: everything the substitution does not touch, and the
+    exit status, stay pinned. No line is checked for being stale, because a
+    reworded message may legitimately keep its 2.0.0 form somewhere (RT-6
+    prints the depth only where it can walk the stack).
 
 Output is compared byte for byte (stdout and stderr in one stream, as
 `turfc --test` sees it) except for one thing: the line number in a panic's
@@ -65,10 +75,11 @@ CORPUS = REPO / "tests" / "compat" / "2.0"
 SUMS = CORPUS / "SHA256SUMS"
 RUNS = CORPUS / "RUNS"
 RELAXED = CORPUS / "RELAXED.txt"
+REWORDED = CORPUS / "REWORDED.txt"
 COMPILE_TIMEOUT_SEC = 300
 
 # Files in the corpus directory that are not the frozen tree.
-OWN_FILES = {"SHA256SUMS", "RUNS", "RELAXED.txt", "README.md"}
+OWN_FILES = {"SHA256SUMS", "RUNS", "RELAXED.txt", "REWORDED.txt", "README.md"}
 
 STD_LOCATION = re.compile(rb"(?:[^\s:]*/)?lib/std/([^\s:]+):\d+:")
 
@@ -121,6 +132,33 @@ def read_relaxed() -> dict[str, str]:
         if not why:
             sys.exit(f"{RELAXED}:{n}: an entry needs `# <commit>: <reason>` after the path")
         out[name] = why
+    return out
+
+
+def read_reworded() -> dict[str, list[tuple[re.Pattern, bytes]]]:
+    """{program: [(regex, replacement)]}. A line is
+    `<path>  s<d><regex><d><replacement><d>  # <commit>: <reason>`, with any
+    delimiter <d> that occurs in neither part."""
+    out: dict[str, list[tuple[re.Pattern, bytes]]] = {}
+    if not REWORDED.exists():
+        return out
+    for n, line in enumerate(REWORDED.read_text().splitlines(), 1):
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        body, _, why = s.partition("  # ")
+        parts = body.split(None, 1)
+        if not why.strip() or len(parts) != 2:
+            sys.exit(f"{REWORDED}:{n}: an entry is `<path>  s/<regex>/<text>/  # <commit>: <reason>`")
+        name, sub = parts[0], parts[1].strip()
+        fields = sub[2:].split(sub[1]) if len(sub) > 2 and sub[0] == "s" else []
+        if len(fields) != 3 or fields[2] != "":
+            sys.exit(f"{REWORDED}:{n}: `{sub}` is not a substitution s/<regex>/<text>/")
+        try:
+            rx = re.compile(fields[0].encode())
+        except re.error as e:
+            sys.exit(f"{REWORDED}:{n}: bad regex `{fields[0]}`: {e}")
+        out.setdefault(name, []).append((rx, fields[1].encode()))
     return out
 
 
@@ -263,8 +301,13 @@ def check_relaxed(compiler: str, relaxed: dict[str, str], problems: list[str]) -
 
 
 def check_outputs(compiler: str, flags: list[str], jobs: int, run_timeout: int,
+                  reworded: dict[str, list[tuple[re.Pattern, bytes]]],
                   problems: list[str]) -> None:
     runs = read_runs()
+    for name in reworded:
+        if name not in runs:
+            problems.append(f"REWORDED.txt: {name} is not a program that compiled and ran on 2.0.0 "
+                            "(RUNS); a rejected one belongs in RELAXED.txt")
     progs = [CORPUS / name for name in sorted(runs)]
     results = run_all(compiler, flags, progs, jobs, run_timeout)
     broken = 0
@@ -276,6 +319,8 @@ def check_outputs(compiler: str, flags: list[str], jobs: int, run_timeout: int,
             broken += 1
             continue
         status, out = res[0]
+        for rx, text in reworded.get(name, []):
+            out = rx.sub(text, out)
         want_file = p.parent / (p.name + ".expected")
         want = want_file.read_bytes() if want_file.exists() else b""
         if status != runs[name]:
@@ -317,15 +362,17 @@ def main() -> int:
         print("\n".join(problems))
         return 1
     relaxed = read_relaxed()
+    reworded = read_reworded()
     check_relaxed(args.compiler, relaxed, problems)
     check_runner(args.compiler, args.flags, relaxed, problems)
-    check_outputs(args.compiler, args.flags, jobs, run_timeout, problems)
+    check_outputs(args.compiler, args.flags, jobs, run_timeout, reworded, problems)
     if problems:
         print(f"\n{len(problems)} problem(s): a program that compiled on 2.0.0 no longer "
               "compiles or no longer prints the same. A minor cannot do that (V-4).\n")
         print("\n".join(problems))
         return 1
     print(f"  relaxed: {len(relaxed)} program(s) 2.0.0 rejected that are now accepted, on the register")
+    print(f"  reworded: {len(reworded)} program(s) whose output is deliberately reworded, on the register")
     print("compat corpus holds")
     return 0
 

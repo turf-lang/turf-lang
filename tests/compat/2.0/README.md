@@ -13,6 +13,7 @@ minor that edits a file here to make it pass is a 3.0 change.
 | `RUNS` | `<exit status> <path>` for every program that compiled and ran on 2.0.0 (134 is an abort) |
 | `SHA256SUMS` | the hash of every file above; any edit, addition or removal fails the check |
 | `RELAXED.txt` | the register of programs 2.0.0 *rejected* that a later minor deliberately accepts, each with its commit and reason |
+| `REWORDED.txt` | the register of programs 2.0.0 *ran* whose output a later minor deliberately rewords: a substitution per line, after which the output must still be 2.0.0's byte for byte |
 
 ## Running it
 
@@ -35,8 +36,11 @@ Never here. A new test goes under `tests/<NN_topic>/` as always. A future
 * *no longer compiles*, *output changed*, *exit status changed*: the compiler
   broke a program that compiled on 2.0.0. Fix the compiler. If the owner
   decides the change is deliberate and only loosens what 2.0.0 rejected, that
-  is a `RELAXED.txt` line; if it changes what an accepted program does, it is
-  a 3.0 change.
+  is a `RELAXED.txt` line. If it only rewords what an accepted program prints
+  (a diagnostic or panic message says more, its exit status and everything
+  else unchanged) and the owner decides so, that is a `REWORDED.txt` line,
+  whose substitution must leave the rest of the output pinned. Any other
+  change to what an accepted program does is a 3.0 change.
 
 ## Provenance
 
