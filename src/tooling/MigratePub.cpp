@@ -21,17 +21,16 @@ struct Tok {
 };
 
 /// Tokenizes @p Source with the real lexer (the same getNextToken() the
-/// parser and the formatter use), saving and restoring every piece of global
-/// lexer state it touches so the tool is safe to run in-process beside the
-/// rest of the compiler.
+/// parser and the formatter use), on a lexer of its own, and saving and
+/// restoring the parser state it touches so the tool is safe to run in-process
+/// beside the rest of the compiler.
 std::vector<Tok> tokenize(std::string_view Source) {
-  std::istream *SavedSourceFile = SourceFile;
   std::string SavedSourceFilename = SourceFilename;
-  SourceLocation SavedCurLoc = CurLoc;
   int SavedCurTok = CurTok;
 
   std::istringstream Buffer{std::string(Source)};
-  SetSourceBuffer(Buffer);
+  LexerState Lexer(Buffer, "<migrate>");
+  LexerScope Scope(Lexer);
   SourceFilename = "<migrate>";
   resetLexer();
   CurTok = 0;
@@ -39,13 +38,11 @@ std::vector<Tok> tokenize(std::string_view Source) {
 
   std::vector<Tok> Toks;
   while (CurTok != TOK_EOF) {
-    Toks.push_back({CurTok, CurLoc.Line, CurLoc.Col});
+    Toks.push_back({CurTok, Lexer.CurLoc.Line, Lexer.CurLoc.Col});
     getNextToken();
   }
 
-  SourceFile = SavedSourceFile;
   SourceFilename = SavedSourceFilename;
-  CurLoc = SavedCurLoc;
   CurTok = SavedCurTok;
   return Toks;
 }

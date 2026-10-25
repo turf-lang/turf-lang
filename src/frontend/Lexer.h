@@ -60,64 +60,129 @@ struct RelatedLocation {
   std::string Description; // e.g. "declared here", "overload: fn foo(int)"
 };
 
-// Generalized to std::istream* (was std::ifstream*) so a buffer-based
-// embedder (an LSP's unsaved editor buffer, a REPL line, a fuzzer corpus
-// entry) can point this at an in-memory std::istringstream via
-// SetSourceBuffer() instead of round-tripping through a real temp file on
-// disk -- see issue #232. gettok() (Lexer.cpp) only ever calls ->get()/
-// ->peek(), both plain std::istream members, so nothing about token
-// scanning itself changes; only code that opens/closes the underlying file
-// needs to go through the helpers below instead of calling
-// ->open()/->close()/->is_open() directly (istream has no such members).
-extern std::istream *SourceFile;
+// A token lexed ahead of the parser's current one (LG-1, peekToken() below):
+// everything gettok() leaves in a LexerState that describes one token, so
+// making it current later is exactly what lexing it then would have done.
+struct LexedToken {
+  int Tok;
+  std::string IdentifierStr, StringVal, NumLitSpelling, NumLitClean;
+  int NumLitRadix;
+  bool BoolVal;
+  char CharVal;
+  SourceLocation Loc;
+  int PrevTokEndLine, PrevTokEndCol;
+};
 
-// Opens Path as the real on-disk source file and points SourceFile at it.
-// Returns false (mirrors std::ifstream::is_open()) if Path can't be opened.
-// The disk-file counterpart to SetSourceBuffer() below.
-bool OpenSourceFile(const std::string &Path);
+// ─── LexerState (F-S0, issue #301) ────────────────────────────────────────
+// Everything the lexer reads and writes, owned by whoever is lexing. These
+// were 17 process-wide globals (the stream, the cursor, the current token's
+// text and value, the lookahead, the keyword table's mutability), so only one
+// buffer could be tokenized at a time and every embedder -- ParseFile() for an
+// import, the query facade, the formatter, --migrate=pub -- saved and restored
+// them by hand, each with its own list. CharVal was missing from ParseFile()'s
+// list for as long as it existed. A nested lex is now a second LexerState, and
+// nothing of the outer one can be forgotten.
+//
+// Not here, because gettok() never reads them: the parser's own state
+// (CurTok, g_braceDepth, g_curlyDepth, recovery -- ParserState, issue #302),
+// and the compile's file bookkeeping (SourceFilename, SourceLines,
+// AllSourceLines, MainSourceFilename) that diagnostics and the passes after
+// parsing read.
+struct LexerState {
+  LexerState() = default;
+  // Lexes a caller-owned stream (an unsaved editor buffer, a REPL line, a
+  // fuzzer entry -- issue #232), which must outlive this lexer's use of it.
+  // `Filename` is what every token's SourceLocation names.
+  LexerState(std::istream &Buffer, std::string Filename);
+  LexerState(const LexerState &) = delete;
+  LexerState &operator=(const LexerState &) = delete;
 
-// Closes the on-disk file SourceFile currently points at. Safe to call even
-// when SourceFile points at a caller-owned buffer (SetSourceBuffer()) --
-// a no-op in that case, since there's nothing of ours to close.
-void CloseSourceFile();
+  // Opens Path as the lexer's own on-disk source and starts at its first
+  // character; false if it cannot be opened. Reopening the same path starts
+  // the file over, which is how the driver's pre-pass and main pass both read
+  // it from the top.
+  bool open(const std::string &Path);
+  // Back to the first token: cursor, lookahead and the last character read.
+  // Leaves the stream where it is (a caller that wants the file from the top
+  // reopens it).
+  void reset();
 
-// Points SourceFile at a caller-owned in-memory stream (typically a
-// std::istringstream wrapping an unsaved editor buffer) instead of a real
-// on-disk file -- see issue #232. The caller owns Buffer's lifetime and
-// must keep it alive for as long as SourceFile points at it; call
-// OpenSourceFile() or SetSourceBuffer() again (or let the process exit) to
-// stop using it. Import resolution still needs a real filesystem path to
-// search relative to -- set SourceFilename separately to whatever path the
-// buffer conceptually represents (its unsaved editor path, say), same as a
-// real file would.
-void SetSourceBuffer(std::istream &Buffer);
-// SEM-001 (docs/archive/ARCHITECTURE_OVERHAUL.md §8): the lexer used to
-// collapse every integer literal into a `long long` (via strtoll, silently
-// saturating on overflow) and every float literal into a `double` (via
-// strtod, silently rounding to `inf` on overflow) -- destroying the
-// literal's exact written value before the parser ever saw it. These three
-// globals replace `NumVal`/`IntVal` and carry the RAW, exact information
-// instead, deliberately kept LLVM-free (plain string/int, no APSInt/APFloat)
-// so Lexer.h itself stays free of an LLVM/AST dependency, same as it always
-// has been -- the caller (ParseNumberExpr, ParserLiteral.cpp, which already
-// needs LLVM for other reasons) is what actually builds the exact
-// llvm::APSInt/llvm::APFloat from these.
-//   NumLitSpelling -- the literal's exact original source text, including
-//     its radix prefix and every '_' separator, verbatim. For diagnostics
-//     and NumberExprAST::getSpelling() (round-trip proof).
-//   NumLitClean -- the same literal with the radix prefix and every '_'
-//     stripped: just the digits (int) or the digits/'.'/exponent (float),
-//     ready to hand directly to llvm::APInt's or llvm::APFloat's own
-//     string-parsing constructor with no further cleanup.
-//   NumLitRadix -- 10, 16, 2, or 8. Meaningful only when the token just
-//     returned was TOK_INT_LITERAL; unspecified (not reset) otherwise.
-extern std::string NumLitSpelling;
-extern std::string NumLitClean;
-extern int NumLitRadix;
-extern bool BoolVal;
-extern char CharVal;
-extern std::string IdentifierStr;
-extern std::string StringVal;
+  // The stream gettok() reads: File, or a caller's buffer. Null lexes as EOF.
+  std::istream *Source = nullptr;
+  std::ifstream File;
+  std::string Filename;
+
+  int LastChar = ' ';
+  int CurLine = 1;
+  int CurCol = 0;
+  // The current token's location (Filename included, so an AST node keeps the
+  // file it came from after the compile has moved on to another).
+  SourceLocation CurLoc = {1, 0, ""};
+  // Where the token BEFORE the current one ended (the same Line / exclusive-Col
+  // convention as SourceLocation::EndLine/EndCol), or -1/-1 before the first
+  // token. CurLoc only describes the current token, but "expected ';'" is
+  // raised at the token AFTER the statement and the ';' belongs right after the
+  // statement's last token, which may be on an earlier line -- gettok() records
+  // it for MissingSemicolonHints().
+  int PrevTokEndLine = -1;
+  int PrevTokEndCol = -1;
+
+  // The current token's text and value.
+  std::string IdentifierStr;
+  std::string StringVal;
+  // SEM-001 (docs/archive/ARCHITECTURE_OVERHAUL.md §8): the lexer used to
+  // collapse every integer literal into a `long long` (via strtoll, silently
+  // saturating on overflow) and every float literal into a `double` (via
+  // strtod, silently rounding to `inf` on overflow) -- destroying the
+  // literal's exact written value before the parser ever saw it. These three
+  // carry the RAW, exact information instead, deliberately kept LLVM-free
+  // (plain string/int, no APSInt/APFloat) so Lexer.h itself stays free of an
+  // LLVM/AST dependency -- the caller (ParseNumberExpr, ParserLiteral.cpp,
+  // which already needs LLVM for other reasons) is what actually builds the
+  // exact llvm::APSInt/llvm::APFloat from these.
+  //   NumLitSpelling -- the literal's exact original source text, including
+  //     its radix prefix and every '_' separator, verbatim. For diagnostics
+  //     and NumberExprAST::getSpelling() (round-trip proof).
+  //   NumLitClean -- the same literal with the radix prefix and every '_'
+  //     stripped: just the digits (int) or the digits/'.'/exponent (float),
+  //     ready to hand directly to llvm::APInt's or llvm::APFloat's own
+  //     string-parsing constructor with no further cleanup.
+  //   NumLitRadix -- 10, 16, 2, or 8. Meaningful only when the token just
+  //     returned was TOK_INT_LITERAL; unspecified (not reset) otherwise.
+  std::string NumLitSpelling;
+  std::string NumLitClean;
+  int NumLitRadix = 10;
+  bool BoolVal = false;
+  char CharVal = 0;
+
+  // Tokens lexed past the parser's current one and not yet current, in order
+  // (peekToken()).
+  std::vector<LexedToken> Lookahead;
+};
+
+// Scans the next token from `L`, leaving its text, value and location in `L`.
+int gettok(LexerState &L);
+
+// The lexer the parser is reading from: the innermost live LexerScope's, or,
+// with none, an empty lexer that only ever yields EOF. This pointer is the
+// parser's state, not the lexer's (it moves into ParserState with issue
+// #302); a tool that only tokenizes calls gettok(L) and never needs it.
+LexerState &Lex();
+
+// Makes `L` the lexer the parser reads for this scope's lifetime, and puts the
+// previous one back after -- an import's parse, the query facade's isolated
+// analysis and the formatter all lex a second buffer this way without
+// touching the first.
+class LexerScope {
+public:
+  explicit LexerScope(LexerState &L);
+  ~LexerScope();
+  LexerScope(const LexerScope &) = delete;
+  LexerScope &operator=(const LexerScope &) = delete;
+
+private:
+  LexerState *Saved;
+};
 
 extern std::vector<std::string> SourceLines;
 // Persistent, cross-pass cache of every file's source lines, keyed by the
@@ -132,30 +197,17 @@ extern std::vector<std::string> SourceLines;
 // that originated inside an imported module. Indexed by DiagnosticEngine at
 // print time via each Diag's Filename field.
 extern std::map<std::string, std::vector<std::string>> AllSourceLines;
-extern SourceLocation CurLoc;
-extern int CurLine;
-extern int CurCol;
-// Where the token BEFORE the current one ended (the same Line / exclusive-Col
-// convention as SourceLocation::EndLine/EndCol), or -1/-1 before the first
-// token. CurLoc only describes the current token, but "expected ';'" is
-// raised at the token AFTER the statement and the ';' belongs right after the
-// statement's last token, which may be on an earlier line -- gettok() records
-// it for MissingSemicolonHints().
-extern int PrevTokEndLine;
-extern int PrevTokEndCol;
 // The text of `Loc`'s line (`Loc.Filename`, or the file being compiled when it
 // has none), or nullptr when that file or line is not known. What a
 // FixIt-building call site reads to check that the source really says what it
 // is about to edit -- see TurfError::withFixIt() in Errors.h.
 const std::string *FixItSourceLine(const SourceLocation &Loc);
 // Reserved-word -> token-id table, consulted by gettok() after scanning any
-// identifier-shaped run of characters. Mutable (not const) purely because it
-// is a translation-unit-scope global initialized at static-init time in
-// Lexer.cpp; nothing outside Lexer.cpp writes to it at runtime. Note that
-// builtin/stdlib function names (print, malloc, abs, ...) are deliberately
-// NOT in this table -- they are ordinary identifiers resolved later by the
-// Resolver against lib/std/*.tr, not lexer-level keywords.
-extern std::map<std::string, int> Keywords;
+// identifier-shaped run of characters. Note that builtin/stdlib function
+// names (print, malloc, abs, ...) are deliberately NOT in this table -- they
+// are ordinary identifiers resolved later by the Resolver against
+// lib/std/*.tr, not lexer-level keywords.
+extern const std::map<std::string, int> Keywords;
 
 // Error recovery. While g_recoverActive is set, TurfError::raise() (Errors.h)
 // records its diagnostic and throws RecoverUnwind; each recovery point
@@ -516,35 +568,25 @@ enum Token {
                         ///< (never through Params_ / the ordinary arity-checked signature).
 };
 
-int gettok();
+// Starts the current lexer (Lex()) over at its first token, and zeroes the
+// parser's bracket counts with it (g_braceDepth, g_curlyDepth) so a fresh parse
+// never inherits a stale value.
 void resetLexer();
 
 // ─── Lookahead (LG-1) ─────────────────────────────────────────────────────
 // The parser reads one token at a time, but `List<int>::default()` cannot be
 // told from `a < b` until the `>` and the `::` after it are seen. These lex
 // tokens past CurTok without making them current; getNextToken() hands them
-// out, in order, before it asks gettok() for a new one. A lexed-ahead token
-// carries everything gettok() sets, so making it current later is exactly
-// what lexing it then would have done.
-struct LexedToken {
-  int Tok;
-  std::string IdentifierStr, StringVal, NumLitSpelling, NumLitClean;
-  int NumLitRadix;
-  bool BoolVal;
-  char CharVal;
-  SourceLocation Loc;
-  int PrevTokEndLine, PrevTokEndCol;
-};
+// out, in order, before it asks gettok() for a new one. They work on Lex(),
+// whose Lookahead holds the waiting tokens, so an import (a LexerScope of its
+// own) starts with none and leaves the importer's alone.
 /// The kind of the token `N + 1` places after CurTok (0 is the next one),
-/// lexing ahead as needed. CurTok and every token global stay as they are.
+/// lexing ahead as needed. CurTok and the current token's fields stay as they
+/// are.
 int peekToken(size_t N);
 /// If a lexed-ahead token is waiting, make it the current token (its kind in
-/// `Tok`, its text and location in the globals) and return true.
+/// `Tok`, its text and location in Lex()) and return true.
 bool takeLookaheadToken(int &Tok);
-/// The waiting tokens, removed (an import's parse starts with none, and gets
-/// the importer's back with restoreLookahead()).
-std::vector<LexedToken> takeLookahead();
-void restoreLookahead(std::vector<LexedToken> Tokens);
 // `Category` is the ground-truth SLM::ErrorCategory for this diagnostic,
 // same role as TurfError::Category_ (Errors.h) plays for a typed error --
 // LogErrorAt() is the untyped path (no TurfError subclass instance exists to
@@ -572,8 +614,6 @@ void restoreLookahead(std::vector<LexedToken> Tokens);
 void LogErrorAt(SourceLocation Loc, const char *Code, const std::string &Msg,
                 SLM::ErrorCategory Category,
                 const SLM::DiagnosticHints &Hints = {});
-int GetLastChar();
-void SetLastChar(int c);
 
 /**
  * @brief Render a binary/unary operator token code as a human-readable

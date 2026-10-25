@@ -130,7 +130,7 @@ void InitializeModule() {
     TheModule->addModuleFlag(Module::Warning, "Dwarf Version", 4);
 
     // MainSourceFilename (Lexer.h) is set by main.cpp strictly before this
-    // call (right after OpenSourceFile(), before InitializeModule()) -- see
+    // call (right after MainLexer.open(), before InitializeModule()) -- see
     // that assignment's own comment for why it's kept distinct from the
     // transient, per-imported-module SourceFilename.
     SmallString<256> AbsPath(MainSourceFilename);
@@ -2200,7 +2200,7 @@ Value *CastToType(Value *Val, const TurfType *DestType,
 
   // Strings cannot be cast to/from non-pointer types implicitly
   if (SrcType->isNamed("string") || DestType->isNamed("string")) {
-    TypeError(CurLoc, ErrCode::InvalidCast, "Cannot cast between string and non-pointer types. SrcType: " + SrcType->getName() + ", DestType: " + DestType->getName() + ", Context Name: " + Name)
+    TypeError(Lex().CurLoc, ErrCode::InvalidCast, "Cannot cast between string and non-pointer types. SrcType: " + SrcType->getName() + ", DestType: " + DestType->getName() + ", Context Name: " + Name)
         .raise();
     return Val;
   }

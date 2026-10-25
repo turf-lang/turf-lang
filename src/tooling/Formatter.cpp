@@ -61,7 +61,8 @@ std::unordered_map<int, LineDepth> computeLineIndents(std::string_view Source) {
 
   turf::detail::runIsolated([&] {
     std::istringstream Buffer{std::string(Source)};
-    SetSourceBuffer(Buffer);
+    LexerState Lexer(Buffer, "<format>");
+    LexerScope Scope(Lexer);
     SourceFilename = "<format>";
     resetLexer();
     CurTok = 0;
@@ -69,7 +70,7 @@ std::unordered_map<int, LineDepth> computeLineIndents(std::string_view Source) {
 
     int LastSeenLine = -1;
     while (CurTok != TOK_EOF) {
-      int Line = CurLoc.Line;
+      int Line = Lex().CurLoc.Line;
       if (Line != LastSeenLine) {
         int Raw = g_braceDepth;
         int Display = (isCloseBracket(CurTok) && Raw > 0) ? Raw - 1 : Raw;
@@ -255,12 +256,12 @@ void lexJob(LexJob &Job) {
     std::string Key = CurTok >= 0 ? std::string(1, static_cast<char>(CurTok))
                                   : "token" + std::to_string(CurTok);
     switch (CurTok) {
-    case TOK_IDENTIFIER: Key += ":" + IdentifierStr; break;
-    case TOK_STRING_LITERAL: Key += ":" + StringVal; break;
+    case TOK_IDENTIFIER: Key += ":" + Lex().IdentifierStr; break;
+    case TOK_STRING_LITERAL: Key += ":" + Lex().StringVal; break;
     case TOK_INT_LITERAL:
-    case TOK_NUMBER: Key += ":" + NumLitSpelling; break;
-    case TOK_CHAR_LITERAL: Key += ":" + std::string(1, CharVal); break;
-    case TOK_BOOL_LITERAL: Key += BoolVal ? ":true" : ":false"; break;
+    case TOK_NUMBER: Key += ":" + Lex().NumLitSpelling; break;
+    case TOK_CHAR_LITERAL: Key += ":" + std::string(1, Lex().CharVal); break;
+    case TOK_BOOL_LITERAL: Key += Lex().BoolVal ? ":true" : ":false"; break;
     default: break;
     }
     Job.Keys->push_back(std::move(Key));
@@ -273,7 +274,8 @@ bool tokenKeys(std::string_view Source, std::vector<std::string> &Keys, std::str
 
   turf::detail::runIsolated([&] {
     std::istringstream Buffer{std::string(Source)};
-    SetSourceBuffer(Buffer);
+    LexerState Lexer(Buffer, "<format>");
+    LexerScope Scope(Lexer);
     SourceFilename = "<format>";
     resetLexer();
 

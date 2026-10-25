@@ -51,12 +51,12 @@ namespace {
 // different programs back to back and against fresh runs to catch a
 // missing one.
 //
+// The lexer is not saved field by field: the scope makes a LexerState of its
+// own current (F-S0) and the host's, mid-parse or not (the SLM Sandbox runs an
+// analysis inside a compile), is never touched -- its stream resumes at the
+// same byte, its cursor and lookahead where they were.
+//
 // Deliberately NOT here:
-//   - GlobalSourceFile, the ifstream a CLI compile reads its input through.
-//     This scope never opens, closes, or seeks it -- analyze() points
-//     SourceFile at its own in-memory stream instead -- so a host compile
-//     that is mid-parse when an analysis runs inside it (the SLM Sandbox)
-//     resumes at the same byte.
 //   - BinopPrecedence and the builtin registry: filled once, identically,
 //     and never modified after.
 //   - IndexModuleDir()'s directory index (ParserModule.cpp): a cache of
@@ -67,21 +67,8 @@ namespace {
 class GlobalStateScope {
 public:
   GlobalStateScope() {
-    // Lexer cursor (the same set ParseFile()'s LexerStateGuard keeps, plus
-    // what that guard can leave alone because it never outlives a compile).
-    SavedSourceFile_ = SourceFile;
-    SavedLastChar_ = GetLastChar();
+    // Parser state (ParserState, issue #302, will make this a struct too).
     SavedCurTok_ = CurTok;
-    SavedCurLoc_ = CurLoc;
-    SavedCurLine_ = CurLine;
-    SavedCurCol_ = CurCol;
-    SavedNumLitSpelling_ = NumLitSpelling;
-    SavedNumLitClean_ = NumLitClean;
-    SavedNumLitRadix_ = NumLitRadix;
-    SavedBoolVal_ = BoolVal;
-    SavedCharVal_ = CharVal;
-    SavedIdentifierStr_ = IdentifierStr;
-    SavedStringVal_ = StringVal;
     SavedBraceDepth_ = g_braceDepth;
     SavedCurlyDepth_ = g_curlyDepth;
     SavedParseRecursionDepth_ = g_parseRecursionDepth;
@@ -154,33 +141,18 @@ public:
     g_parseRecursionDepth = SavedParseRecursionDepth_;
     g_braceDepth = SavedBraceDepth_;
     g_curlyDepth = SavedCurlyDepth_;
-    StringVal = SavedStringVal_;
-    IdentifierStr = SavedIdentifierStr_;
-    CharVal = SavedCharVal_;
-    BoolVal = SavedBoolVal_;
-    NumLitRadix = SavedNumLitRadix_;
-    NumLitClean = SavedNumLitClean_;
-    NumLitSpelling = SavedNumLitSpelling_;
-    CurCol = SavedCurCol_;
-    CurLine = SavedCurLine_;
-    CurLoc = SavedCurLoc_;
     CurTok = SavedCurTok_;
-    SetLastChar(SavedLastChar_);
-    SourceFile = SavedSourceFile_;
   }
 
   GlobalStateScope(const GlobalStateScope &) = delete;
   GlobalStateScope &operator=(const GlobalStateScope &) = delete;
 
 private:
-  std::istream *SavedSourceFile_;
-  int SavedLastChar_, SavedCurTok_, SavedCurLine_, SavedCurCol_;
-  SourceLocation SavedCurLoc_;
-  std::string SavedNumLitSpelling_, SavedNumLitClean_;
-  int SavedNumLitRadix_;
-  bool SavedBoolVal_;
-  char SavedCharVal_;
-  std::string SavedIdentifierStr_, SavedStringVal_;
+  // The analysis's lexer, current until the scope ends; analyze() points it
+  // at the entry buffer.
+  LexerState Lexer_;
+  LexerScope LexerScope_{Lexer_};
+  int SavedCurTok_;
   int SavedBraceDepth_, SavedCurlyDepth_, SavedParseRecursionDepth_;
   bool SavedProtoOnlyPass_;
   std::string SavedSourceFilename_, SavedMainSourceFilename_;
@@ -388,7 +360,7 @@ std::vector<std::unique_ptr<ExprAST>> parseEntryFile(std::size_t &PreludeCount,
   g_recoverActive = true;
   try {
     if (!SkipPrelude)
-      Program = ParsePreludeImports(CurLoc);
+      Program = ParsePreludeImports(Lex().CurLoc);
   } catch (const RecoverUnwind &) {
   }
   g_recoverActive = false;
@@ -412,12 +384,12 @@ std::vector<std::unique_ptr<ExprAST>> parseEntryFile(std::size_t &PreludeCount,
         SkipToNextTopLevelBoundary();
       } else if (isDeclarationStart(StartTok)) {
         if (CurTok == ';')
-          LogErrorAt(CurLoc, ErrCode::UnexpectedToken, "Unexpected ';'",
+          LogErrorAt(Lex().CurLoc, ErrCode::UnexpectedToken, "Unexpected ';'",
                      SLM::ErrorCategory::SYNTAX_ERROR);
         AppendFlattenedTopLevelDecl(std::move(AST), Program, true);
       } else {
         if (CurTok != ';')
-          LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement",
+          LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement",
                      SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
         else
           getNextToken();
@@ -769,7 +741,9 @@ AnalysisResult analyze(const std::vector<SourceBuffer> &Buffers,
   }
 
   std::istringstream EntryStream(Entry.Text);
-  SetSourceBuffer(EntryStream);
+  LexerState &EntryLexer = Lex(); // the GlobalStateScope's own
+  EntryLexer.Source = &EntryStream;
+  EntryLexer.Filename = Entry.Path;
   SourceFilename = Entry.Path;
   MainSourceFilename = Entry.Path;
   {

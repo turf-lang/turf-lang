@@ -126,10 +126,36 @@ an AST built in the normal way.
 `Token` values (`enum Token`: negative constants for multi-character tokens
 and keywords, raw ASCII values for single-character operators).
 
+### `LexerState`
+
+Everything the lexer reads and writes lives in a `LexerState` (F-S0, issue
+#301): the stream (`Source`, an owned `File` or a caller's buffer), the
+`Filename` stamped into every location, the cursor (`LastChar`, `CurLine`,
+`CurCol`), the current token (`CurLoc`, `IdentifierStr`, `StringVal`, the
+`NumLit*` fields, `BoolVal`, `CharVal`), the previous token's end and the
+lookahead. `gettok(LexerState &)` works on the one it is given, so two
+buffers can be tokenized in turn without either seeing the other's cursor
+(`tests/api/analysis_test.cpp`, `testTwoLexersInterleave`). `Keywords` is a
+constant table.
+
+The parser still keeps its own state in globals until F-S1 (`ParserState`,
+issue #302), and reads tokens from `Lex()`, the lexer of the innermost live
+`LexerScope`. The driver installs one for the input file; `ParseFile()` makes
+a fresh `LexerState` current for each import, and the query facade, the
+formatter and `--migrate=pub` do the same for their buffers, so the
+importer's or host's lexer is never touched and nothing has to be saved and
+restored field by field. With no scope live, `Lex()` is an empty lexer that
+yields `TOK_EOF`.
+
+Not part of `LexerState`, because `gettok()` never reads them:
+`SourceFilename`, `SourceLines`, `AllSourceLines` and `MainSourceFilename`,
+the compile's record of which file is being read and what its lines say,
+which diagnostics and the passes after parsing use.
+
 ### `gettok()` and `gettokScan()`
 
 `gettokScan()` is a hand-written maximal-munch scanner over `LastChar` and
-`SourceFile->peek()`: each branch consumes the longest token it can. The `:`
+`Source->peek()`: each branch consumes the longest token it can. The `:`
 branch peeks for a second `:` to choose between `TOK_COLON` and `TOK_SCOPE`;
 the `.` branch looks ahead to separate `.`, `..` (`TOK_RANGE`) and `...`
 (`TOK_ELLIPSIS`). Identifiers are scanned as an ordinary run and then looked
@@ -166,8 +192,8 @@ known and prints a single caret otherwise. The new fields are appended after
 `Filename` so the many `{Line, Col}` and `{Line, Col, Filename}`
 aggregate-initializers keep compiling.
 
-`Filename` is stamped at scan time from `SourceFilename`, which the import
-code repoints at each module while it is parsed. A diagnostic raised by a
+`Filename` is stamped at scan time from the lexer's own `Filename`, which is
+each import's path while that module is parsed. A diagnostic raised by a
 later pass therefore still finds the right file, through the persistent
 `AllSourceLines` cache (the single-file `SourceLines` is transient).
 
@@ -208,7 +234,9 @@ int getNextToken() {
   else if ((CurTok == '}' || CurTok == ')' || CurTok == ']') && g_braceDepth > 0)
     g_braceDepth--;
   /* ... the same for g_curlyDepth, '{' and '}' only ... */
-  return CurTok = gettok();
+  if (takeLookaheadToken(CurTok))
+    return CurTok;
+  return CurTok = gettok(Lex());
 }
 ```
 

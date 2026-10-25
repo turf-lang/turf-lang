@@ -58,7 +58,7 @@ static std::unordered_set<std::string> ImportedFiles;
 // that misses one.
 //
 // Per file: ParseFile() saves the importer's map and starts the imported
-// file with an empty one (LexerStateGuard), and ParsePreludeImports() clears
+// file with an empty one (ParseStateGuard), and ParsePreludeImports() clears
 // it at the start of each top-level parse pass.
 static std::map<std::string, std::string> CurrentFileModuleAliases;
 
@@ -271,7 +271,7 @@ void AppendFlattenedTopLevelDecl(std::unique_ptr<ExprAST> AST,
   auto WhereIs = [](ExprAST *Node) {
     if (auto *F = dynamic_cast<FuncDefExprAST *>(Node))
       return F->getLoc();
-    return CurLoc;
+    return Lex().CurLoc;
   };
   if (TooDeep(AST.get())) {
     LogErrorAt(WhereIs(AST.get()), ErrCode::NestingTooDeep,
@@ -382,7 +382,7 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
   // Fixed properly below by giving THIS ParseFile() invocation its own
   // LOCAL recovery boundary (its own setjmp() point, armed right before
   // the parse loop) instead of relying on some distant caller's. Since the
-  // jump target and LexerStateGuard/ImportStackGuard now live in the exact
+  // jump target and ImportLexer/ParseStateGuard/ImportStackGuard now live in the exact
   // same function scope, a longjmp() triggered by anything during this
   // file's own parsing -- or by a TurfError bubbling up through a
   // TRANSITIVELY nested `import` (that nested ParseFile() call installs
@@ -429,7 +429,7 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
 
   // An embedder's unsaved buffer for this file wins over the disk copy
   // (SetSourceOverlay(), SMP-001). Both streams live for the rest of this
-  // function, which is as long as LGuard keeps SourceFile pointed at one.
+  // function, which is as long as ImportLexer below reads one of them.
   const std::string *Overlay = FindSourceOverlay(Path);
   std::istringstream OverlayFile(Overlay ? *Overlay : std::string());
   std::ifstream ImportFile;
@@ -468,15 +468,19 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
     ~ImportStackGuard() { ImportStack.pop_back(); }
   } IGuard(ModuleName, Path, ImportLoc);
 
-  // Save current lexer state
-  struct LexerStateGuard {
-    std::istream *SavedSourceFile;
-    int SavedLastChar, SavedCurTok, SavedCurLine, SavedCurCol;
-    SourceLocation SavedCurLoc;
-    std::string SavedFilename, SavedIdentifierStr, SavedStringVal;
-    std::string SavedNumLitSpelling, SavedNumLitClean;
-    int SavedNumLitRadix;
-    bool SavedBoolVal;
+  // The import gets a lexer of its own (F-S0): the importer's cursor, token
+  // and lookahead sit untouched in its LexerState until this one goes out of
+  // scope. Declared after the streams above so it never outlives them.
+  LexerState ImportLexer(
+      Overlay ? static_cast<std::istream &>(OverlayFile) : ImportFile, Path);
+  ImportLexer.CurLoc = {1, 1};
+  LexerScope ImportLexerScope(ImportLexer);
+
+  // What the parser and the compile keep about the file being read, which
+  // the import replaces for its duration.
+  struct ParseStateGuard {
+    int SavedCurTok;
+    std::string SavedFilename;
     // SourceLines is what printDiag()'s caret snippet is snapshotted from
     // (see DiagnosticEngine::add() in Lexer.cpp) -- without saving/restoring
     // it here alongside SourceFilename, it never got populated for the
@@ -497,63 +501,31 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
     // has its own imports; it must neither see the importer's aliases nor
     // leave its own behind for the importer's remaining tokens.
     std::map<std::string, std::string> SavedModuleAliases;
-    // LG-1: tokens the importer lexed ahead of its current one.
-    std::vector<LexedToken> SavedLookahead;
 
-    LexerStateGuard() {
-      SavedLookahead = takeLookahead();
+    ParseStateGuard() {
       SavedModuleAliases = std::move(CurrentFileModuleAliases);
       CurrentFileModuleAliases.clear();
-      SavedSourceFile = SourceFile;
-      SavedLastChar = GetLastChar();
       SavedCurTok = CurTok;
-      SavedCurLoc = CurLoc;
-      SavedCurLine = CurLine;
-      SavedCurCol = CurCol;
       SavedFilename = SourceFilename;
-      SavedNumLitSpelling = NumLitSpelling;
-      SavedNumLitClean = NumLitClean;
-      SavedNumLitRadix = NumLitRadix;
-      SavedBoolVal = BoolVal;
-      SavedIdentifierStr = IdentifierStr;
-      SavedStringVal = StringVal;
       SavedSourceLines = SourceLines;
       SavedBraceDepth = g_braceDepth;
       SavedCurlyDepth = g_curlyDepth;
     }
-    ~LexerStateGuard() {
-      SourceFile = SavedSourceFile;
-      SetLastChar(SavedLastChar);
+    ~ParseStateGuard() {
       CurTok = SavedCurTok;
-      CurLoc = SavedCurLoc;
-      CurLine = SavedCurLine;
-      CurCol = SavedCurCol;
       SourceFilename = SavedFilename;
-      NumLitSpelling = SavedNumLitSpelling;
-      NumLitClean = SavedNumLitClean;
-      NumLitRadix = SavedNumLitRadix;
-      BoolVal = SavedBoolVal;
-      IdentifierStr = SavedIdentifierStr;
-      StringVal = SavedStringVal;
       SourceLines = SavedSourceLines;
       g_braceDepth = SavedBraceDepth;
       g_curlyDepth = SavedCurlyDepth;
       CurrentFileModuleAliases = std::move(SavedModuleAliases);
-      restoreLookahead(std::move(SavedLookahead));
     }
-  } LGuard;
+  } PGuard;
 
-  // Set new lexer state
-  SourceFile = Overlay ? static_cast<std::istream *>(&OverlayFile) : &ImportFile;
   SourceFilename = Path;
-  CurLine = 1;
-  CurCol = 0;
-  CurLoc = {1, 1};
-  SetLastChar(' ');
 
   // Populate SourceLines for THIS file so any diagnostic raised while
   // parsing it snapshots the module's own line text, not the importer's
-  // (see LexerStateGuard's doc comment above). Mirrors the read loop
+  // (see ParseStateGuard's doc comment above). Mirrors the read loop
   // main.cpp uses to populate SourceLines for the top-level input file.
   SourceLines.clear();
   {
@@ -569,7 +541,7 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
   }
   // Also seed the persistent cross-pass cache -- see AllSourceLines' doc
   // comment in Lexer.h. Unlike SourceLines, this entry survives past the
-  // LexerStateGuard's restore below, so Resolver/TypeChecker/Codegen
+  // ParseStateGuard's restore below, so Resolver/TypeChecker/Codegen
   // diagnostics about content inside THIS module can still find their line.
   AllSourceLines[Path] = SourceLines;
 
@@ -620,7 +592,7 @@ static std::unique_ptr<ExprAST> ParseFileDeclarations(const std::string &Path) {
       auto Expr = ParseExpression();
       if (Expr) {
         if (CurTok == ';') {
-          LogErrorAt(CurLoc, ErrCode::UnexpectedToken, "Unexpected ';'", SLM::ErrorCategory::SYNTAX_ERROR);
+          LogErrorAt(Lex().CurLoc, ErrCode::UnexpectedToken, "Unexpected ';'", SLM::ErrorCategory::SYNTAX_ERROR);
           return nullptr;
         }
         // Flattens Expr first if it's a top-level `unsafe { }` block -- see
@@ -656,7 +628,7 @@ static std::unique_ptr<ExprAST> ParseFileDeclarations(const std::string &Path) {
       auto Expr = ParseImport();
       if (Expr) {
         if (CurTok != ';') {
-          LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement.", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
+          LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement.", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
           return nullptr;
         }
         getNextToken(); // eat ';'
@@ -672,7 +644,7 @@ static std::unique_ptr<ExprAST> ParseFileDeclarations(const std::string &Path) {
     auto Expr = ParseExpression();
     if (Expr) {
       if (CurTok != ';') {
-        LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement.", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
+        LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement.", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
         return nullptr;
       }
       getNextToken(); // eat ';'
@@ -853,12 +825,12 @@ bool HasRawPointerCapability(const std::string &Path) {
 bool ParseLeadingUnsafeModuleDecl(std::unique_ptr<ExprAST> &OutBlock) {
   if (CurTok != TOK_UNSAFE)
     return false;
-  SourceLocation KeywordLoc = CurLoc;
+  SourceLocation KeywordLoc = Lex().CurLoc;
   getNextToken(); // consume 'unsafe'
-  if (CurTok == TOK_IDENTIFIER && IdentifierStr == "module") {
+  if (CurTok == TOK_IDENTIFIER && Lex().IdentifierStr == "module") {
     getNextToken(); // consume 'module'
     if (CurTok != ';') {
-      SyntaxError(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after 'unsafe module'").raise();
+      SyntaxError(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after 'unsafe module'").raise();
       return true; // still: not a real unsafe-block AST for the caller
     }
     getNextToken(); // consume ';'
@@ -1644,7 +1616,7 @@ std::vector<std::unique_ptr<ExprAST>> ParsePreludeImports(SourceLocation Loc) {
 
 
 std::unique_ptr<ExprAST> ParseImport() {
-  SourceLocation Loc = CurLoc;
+  SourceLocation Loc = Lex().CurLoc;
   getNextToken(); // eat import
   std::string ModuleName;
   // int/double/bool/char are prelude module names (STRING_UFCS_OPERATOR_
@@ -1656,9 +1628,9 @@ std::unique_ptr<ExprAST> ParseImport() {
   // through this token-based path at all, see ParsePreludeImports()).
   // `string` (singular, the type keyword) doesn't need an entry here: the
   // actual module is `strings` (plural), a real TOK_IDENTIFIER, no collision.
-  SourceLocation NameLoc = CurLoc; // location of the module-name token itself -- see #230
+  SourceLocation NameLoc = Lex().CurLoc; // location of the module-name token itself -- see #230
   if (CurTok == TOK_IDENTIFIER) {
-    ModuleName = IdentifierStr;
+    ModuleName = Lex().IdentifierStr;
   } else if (CurTok == TOK_TYPE_INT) {
     ModuleName = "int";
   } else if (CurTok == TOK_TYPE_DOUBLE) {
@@ -1668,7 +1640,7 @@ std::unique_ptr<ExprAST> ParseImport() {
   } else if (CurTok == TOK_TYPE_CHAR) {
     ModuleName = "char";
   } else {
-    LogErrorAt(CurLoc, ErrCode::ExpectedName, "Expected module name after 'import'", SLM::ErrorCategory::DECLARATION);
+    LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "Expected module name after 'import'", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
   getNextToken();
@@ -1689,7 +1661,7 @@ std::unique_ptr<ExprAST> ParseImport() {
       if (CurTok == '*') {
         getNextToken(); // eat '*'
         if (CurTok != ']') {
-          LogErrorAt(CurLoc, ErrCode::UnclosedDelimiter, "Expected ']' after '*' in import list", SLM::ErrorCategory::DECLARATION);
+          LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "Expected ']' after '*' in import list", SLM::ErrorCategory::DECLARATION);
           return nullptr;
         }
         getNextToken(); // eat ']'
@@ -1698,10 +1670,10 @@ std::unique_ptr<ExprAST> ParseImport() {
         Mode = ImportMode::SymbolList;
         while (CurTok != ']' && CurTok != TOK_EOF) {
           if (CurTok != TOK_IDENTIFIER) {
-            LogErrorAt(CurLoc, ErrCode::ExpectedName, "Expected a symbol name in import list", SLM::ErrorCategory::DECLARATION);
+            LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "Expected a symbol name in import list", SLM::ErrorCategory::DECLARATION);
             return nullptr;
           }
-          RequestedSymbols.push_back({IdentifierStr, CurLoc});
+          RequestedSymbols.push_back({Lex().IdentifierStr, Lex().CurLoc});
           getNextToken();
           if (CurTok == ',') {
             getNextToken();
@@ -1710,21 +1682,21 @@ std::unique_ptr<ExprAST> ParseImport() {
           }
         }
         if (CurTok != ']') {
-          LogErrorAt(CurLoc, ErrCode::UnclosedDelimiter, "Expected ']' to close import list", SLM::ErrorCategory::DECLARATION);
+          LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "Expected ']' to close import list", SLM::ErrorCategory::DECLARATION);
           return nullptr;
         }
         getNextToken(); // eat ']'
         if (RequestedSymbols.empty()) {
-          LogErrorAt(CurLoc, ErrCode::ExpectedName, "Expected at least one symbol name in import list", SLM::ErrorCategory::DECLARATION);
+          LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "Expected at least one symbol name in import list", SLM::ErrorCategory::DECLARATION);
           return nullptr;
         }
       }
     } else if (CurTok == TOK_IDENTIFIER) {
       Mode = ImportMode::Symbol;
-      RequestedSymbols.push_back({IdentifierStr, CurLoc});
+      RequestedSymbols.push_back({Lex().IdentifierStr, Lex().CurLoc});
       getNextToken();
     } else {
-      LogErrorAt(CurLoc, ErrCode::ExpectedName,
+      LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName,
                  "Expected a symbol name or '[' after '::' in import", SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }

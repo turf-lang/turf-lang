@@ -51,12 +51,6 @@ std::string SourceFilename;
 // flushAll() runs (after every pass has completed) it's already back to
 // this same value for every diagnostic, imported-module ones included.
 std::string MainSourceFilename;
-SourceLocation CurLoc = {1, 0};
-int CurLine = 1;
-int CurCol = 0;
-int PrevTokEndLine = -1;
-int PrevTokEndCol = -1;
-static int LastChar = ' ';
 
 const std::string *FixItSourceLine(const SourceLocation &Loc) {
   if (Loc.Line < 1)
@@ -110,42 +104,47 @@ bool g_ShowStdlibWarnings = false;
 // analysis of subsequent cascading errors.
 static bool g_slmFiredThisPass = false;
 
-// The real on-disk backing store for the common case (OpenSourceFile()
-// below). SourceFile itself is a std::istream* -- see Lexer.h's doc comment
-// -- so it can ALSO point at a caller-owned in-memory std::istringstream via
-// SetSourceBuffer() (issue #232) without gettok() (which only ever calls
-// ->get()/->peek(), both plain std::istream members) needing to know or
-// care which kind of stream is currently backing it.
-std::ifstream GlobalSourceFile;
-std::istream *SourceFile = &GlobalSourceFile;
+LexerState::LexerState(std::istream &Buffer, std::string Filename)
+    : Source(&Buffer), Filename(std::move(Filename)) {}
 
-bool OpenSourceFile(const std::string &Path) {
-  GlobalSourceFile.close();
-  GlobalSourceFile.clear(); // clear any eof/fail bits left over from a previous file
-  GlobalSourceFile.open(Path);
-  SourceFile = &GlobalSourceFile;
-  return GlobalSourceFile.is_open();
+bool LexerState::open(const std::string &Path) {
+  File.close();
+  File.clear(); // eof/fail bits left over from the last read of the file
+  File.open(Path);
+  Source = &File;
+  Filename = Path;
+  reset();
+  return File.is_open();
 }
 
-void CloseSourceFile() {
-  // A no-op when SourceFile currently points at a caller-owned buffer
-  // (SetSourceBuffer()) rather than GlobalSourceFile -- there is nothing of
-  // ours to close in that case; the caller owns that stream's lifetime.
-  if (SourceFile == &GlobalSourceFile)
-    GlobalSourceFile.close();
+void LexerState::reset() {
+  Lookahead.clear();
+  LastChar = ' ';
+  CurLine = 1;
+  CurCol = 0;
+  CurLoc = {1, 0};
+  PrevTokEndLine = -1;
+  PrevTokEndCol = -1;
 }
 
-void SetSourceBuffer(std::istream &Buffer) { SourceFile = &Buffer; }
-std::string NumLitSpelling;
-std::string NumLitClean;
-int NumLitRadix = 10;
-bool BoolVal;
-char CharVal;
-std::string IdentifierStr;
-std::string StringVal;
-int GetLastChar() { return LastChar; }
-void SetLastChar(int c) { LastChar = c; }
-std::map<std::string, int> Keywords = {{"if", TOK_IF},
+// The parser's current lexer (Lex(), Lexer.h). `Idle` is what it reads with
+// no LexerScope live: no stream, so EOF, and a location of {1, 0}. A tool
+// that asks for a location before any lex (a diagnostic raised outside a
+// parse) gets that rather than a dangling pointer.
+static LexerState *CurrentLexer = nullptr;
+
+LexerState &Lex() {
+  static LexerState Idle;
+  return CurrentLexer ? *CurrentLexer : Idle;
+}
+
+LexerScope::LexerScope(LexerState &L) : Saved(CurrentLexer) {
+  CurrentLexer = &L;
+}
+
+LexerScope::~LexerScope() { CurrentLexer = Saved; }
+
+const std::map<std::string, int> Keywords = {{"if", TOK_IF},
                                        {"else", TOK_ELSE},
                                        {"while", TOK_WHILE},
                                        {"do", TOK_DO},
@@ -875,72 +874,55 @@ void LogErrorAt(SourceLocation Loc, const char *Code, const std::string &Msg,
                         Code, Hints);
 }
 
-// Tokens lexed past CurTok and not yet current (Lexer.h, "Lookahead").
-static std::vector<LexedToken> Lookahead;
-
-static LexedToken captureToken(int Tok) {
-  return {Tok,          IdentifierStr, StringVal,      NumLitSpelling,
-          NumLitClean,  NumLitRadix,   BoolVal,        CharVal,
-          CurLoc,       PrevTokEndLine, PrevTokEndCol};
+static LexedToken captureToken(const LexerState &L, int Tok) {
+  return {Tok,           L.IdentifierStr, L.StringVal,      L.NumLitSpelling,
+          L.NumLitClean, L.NumLitRadix,   L.BoolVal,        L.CharVal,
+          L.CurLoc,      L.PrevTokEndLine, L.PrevTokEndCol};
 }
 
-static void installToken(const LexedToken &T) {
-  IdentifierStr = T.IdentifierStr;
-  StringVal = T.StringVal;
-  NumLitSpelling = T.NumLitSpelling;
-  NumLitClean = T.NumLitClean;
-  NumLitRadix = T.NumLitRadix;
-  BoolVal = T.BoolVal;
-  CharVal = T.CharVal;
-  CurLoc = T.Loc;
-  PrevTokEndLine = T.PrevTokEndLine;
-  PrevTokEndCol = T.PrevTokEndCol;
+static void installToken(LexerState &L, const LexedToken &T) {
+  L.IdentifierStr = T.IdentifierStr;
+  L.StringVal = T.StringVal;
+  L.NumLitSpelling = T.NumLitSpelling;
+  L.NumLitClean = T.NumLitClean;
+  L.NumLitRadix = T.NumLitRadix;
+  L.BoolVal = T.BoolVal;
+  L.CharVal = T.CharVal;
+  L.CurLoc = T.Loc;
+  L.PrevTokEndLine = T.PrevTokEndLine;
+  L.PrevTokEndCol = T.PrevTokEndCol;
 }
 
 int peekToken(size_t N) {
-  if (N < Lookahead.size())
-    return Lookahead[N].Tok;
-  // gettok() writes the globals that describe CurTok; put them back after.
+  LexerState &L = Lex();
+  if (N < L.Lookahead.size())
+    return L.Lookahead[N].Tok;
+  // gettok() writes the fields that describe CurTok; put them back after.
   // Each new token is lexed with the previous lookahead token installed, so
   // its PrevTokEnd* are right.
-  const LexedToken Current = captureToken(0);
-  if (!Lookahead.empty())
-    installToken(Lookahead.back());
-  while (Lookahead.size() <= N) {
-    const int Tok = gettok();
-    Lookahead.push_back(captureToken(Tok));
+  const LexedToken Current = captureToken(L, 0);
+  if (!L.Lookahead.empty())
+    installToken(L, L.Lookahead.back());
+  while (L.Lookahead.size() <= N) {
+    const int Tok = gettok(L);
+    L.Lookahead.push_back(captureToken(L, Tok));
   }
-  installToken(Current);
-  return Lookahead[N].Tok;
+  installToken(L, Current);
+  return L.Lookahead[N].Tok;
 }
 
 bool takeLookaheadToken(int &Tok) {
-  if (Lookahead.empty())
+  LexerState &L = Lex();
+  if (L.Lookahead.empty())
     return false;
-  installToken(Lookahead.front());
-  Tok = Lookahead.front().Tok;
-  Lookahead.erase(Lookahead.begin());
+  installToken(L, L.Lookahead.front());
+  Tok = L.Lookahead.front().Tok;
+  L.Lookahead.erase(L.Lookahead.begin());
   return true;
 }
 
-std::vector<LexedToken> takeLookahead() {
-  std::vector<LexedToken> Out = std::move(Lookahead);
-  Lookahead.clear();
-  return Out;
-}
-
-void restoreLookahead(std::vector<LexedToken> Tokens) {
-  Lookahead = std::move(Tokens);
-}
-
 void resetLexer() {
-  Lookahead.clear();
-  LastChar = ' ';
-  CurLine = 1;
-  CurCol = 0;
-  CurLoc = {1, 0};
-  PrevTokEndLine = -1;
-  PrevTokEndCol = -1;
+  Lex().reset();
   g_braceDepth = 0;
   g_curlyDepth = 0;
 }
@@ -956,19 +938,25 @@ void resetLexer() {
  * @return int The token type identifier (e.g., TOK_IDENTIFIER, TOK_NUMBER, or
  * ASCII value).
  */
-static int gettokScan() {
-  while (isspace(LastChar)) {
+static int gettokScan(LexerState &L) {
+  // No stream (Lex()'s idle lexer, or a LexerState never opened): EOF, at
+  // wherever the cursor is.
+  if (!L.Source) {
+    L.CurLoc = {L.CurLine, L.CurCol, L.Filename};
+    return TOK_EOF;
+  }
+  while (isspace(L.LastChar)) {
     // Handle newlines to track line numbers
-    if (LastChar == '\n') {
-      CurLine++;
-      CurCol = 0;
+    if (L.LastChar == '\n') {
+      L.CurLine++;
+      L.CurCol = 0;
     }
 
-    LastChar = SourceFile->get();
+    L.LastChar = L.Source->get();
 
     // Increment column for every character read
-    if (LastChar != EOF) {
-      CurCol++;
+    if (L.LastChar != EOF) {
+      L.CurCol++;
     }
   }
 
@@ -978,7 +966,7 @@ static int gettokScan() {
   // correctly remember which file it came from, even after later compiler
   // passes (Resolver/TypeChecker/Codegen) have moved on to a different file
   // and SourceFilename itself has changed. See AllSourceLines' doc comment.
-  CurLoc = {CurLine, CurCol, SourceFilename};
+  L.CurLoc = {L.CurLine, L.CurCol, L.Filename};
 
   // Identifiers: id = [a-zA-Z_][a-zA-Z0-9_]*
   //
@@ -988,25 +976,25 @@ static int gettokScan() {
   // silences the unused-variable warning -- and reserves `_` ALONE as the
   // wildcard pattern. The lone-`_` test below is on the WHOLE spelling, so
   // `__` and `_1` stay identifiers.
-  if (isalpha(LastChar) || LastChar == '_') {
-    IdentifierStr = LastChar;
-    LastChar = SourceFile->get();
-    CurCol++;
+  if (isalpha(L.LastChar) || L.LastChar == '_') {
+    L.IdentifierStr = L.LastChar;
+    L.LastChar = L.Source->get();
+    L.CurCol++;
 
-    while (isalnum(LastChar) || LastChar == '_') {
-      IdentifierStr += LastChar;
-      LastChar = SourceFile->get();
-      CurCol++;
+    while (isalnum(L.LastChar) || L.LastChar == '_') {
+      L.IdentifierStr += L.LastChar;
+      L.LastChar = L.Source->get();
+      L.CurCol++;
     }
 
-    if (IdentifierStr == "_")
+    if (L.IdentifierStr == "_")
       return TOK_WILDCARD;
 
     // Check for keywords
-    auto It = Keywords.find(IdentifierStr);
+    auto It = Keywords.find(L.IdentifierStr);
     if (It != Keywords.end()) {
       if (It->second == TOK_BOOL_LITERAL)
-        BoolVal = (IdentifierStr == "true");
+        L.BoolVal = (L.IdentifierStr == "true");
       return It->second;
     }
 
@@ -1025,42 +1013,42 @@ static int gettokScan() {
   // CurLine is only ever incremented by the whitespace-skipping logic at the
   // very top of gettok() (which this inner loop bypasses), every diagnostic
   // for the remainder of the file would then report the wrong line number.
-  if (LastChar == '"') {
-    StringVal = "";
-    LastChar = SourceFile->get();
-    CurCol++;
+  if (L.LastChar == '"') {
+    L.StringVal = "";
+    L.LastChar = L.Source->get();
+    L.CurCol++;
 
-    while (LastChar != '"' && LastChar != EOF && LastChar != '\n') {
-      if (LastChar == '\\') {
+    while (L.LastChar != '"' && L.LastChar != EOF && L.LastChar != '\n') {
+      if (L.LastChar == '\\') {
         // Handle escape sequences. Snapshot the backslash's own location
         // before consuming the escape character, so an "unknown escape"
         // diagnostic points at the actual '\' rather than wherever CurLoc
         // (the opening-quote location, unchanged since) happens to be.
-        SourceLocation EscapeLoc{CurLine, CurCol, ""};
-        LastChar = SourceFile->get();
-        CurCol++;
-        if (LastChar == 'n') {
-          StringVal += '\n';
-        } else if (LastChar == 't') {
-          StringVal += '\t';
-        } else if (LastChar == 'r') {
-          StringVal += '\r';
-        } else if (LastChar == '0') {
-          StringVal += '\0';
-        } else if (LastChar == 'a') {
-          StringVal += '\a';
-        } else if (LastChar == 'b') {
-          StringVal += '\b';
-        } else if (LastChar == 'f') {
-          StringVal += '\f';
-        } else if (LastChar == 'v') {
-          StringVal += '\v';
-        } else if (LastChar == '\\') {
-          StringVal += '\\';
-        } else if (LastChar == '"') {
-          StringVal += '"';
-        } else if (LastChar == '\'') {
-          StringVal += '\'';
+        SourceLocation EscapeLoc{L.CurLine, L.CurCol, ""};
+        L.LastChar = L.Source->get();
+        L.CurCol++;
+        if (L.LastChar == 'n') {
+          L.StringVal += '\n';
+        } else if (L.LastChar == 't') {
+          L.StringVal += '\t';
+        } else if (L.LastChar == 'r') {
+          L.StringVal += '\r';
+        } else if (L.LastChar == '0') {
+          L.StringVal += '\0';
+        } else if (L.LastChar == 'a') {
+          L.StringVal += '\a';
+        } else if (L.LastChar == 'b') {
+          L.StringVal += '\b';
+        } else if (L.LastChar == 'f') {
+          L.StringVal += '\f';
+        } else if (L.LastChar == 'v') {
+          L.StringVal += '\v';
+        } else if (L.LastChar == '\\') {
+          L.StringVal += '\\';
+        } else if (L.LastChar == '"') {
+          L.StringVal += '"';
+        } else if (L.LastChar == '\'') {
+          L.StringVal += '\'';
         } else {
           // Anything else after a '\' used to be silently accepted as if
           // the backslash weren't there at all -- e.g. "a\rb" used to
@@ -1071,18 +1059,18 @@ static int gettokScan() {
           // escape is now a clean error instead of a quiet pass-through.
           LogErrorAt(EscapeLoc, ErrCode::InvalidEscapeSequence,
                      std::string("Unknown escape sequence '\\") +
-                         static_cast<char>(LastChar) +
+                         static_cast<char>(L.LastChar) +
                          "' in string literal.\n  Hint: Recognized escapes "
                          "are \\n \\t \\r \\0 \\a \\b \\f \\v \\\\ \\\" \\'. "
                          "Did you mean to write a literal backslash? Use "
                          "'\\\\' instead.", SLM::ErrorCategory::SYNTAX_ERROR);
-          StringVal += LastChar;
+          L.StringVal += L.LastChar;
         }
       } else {
-        StringVal += LastChar;
+        L.StringVal += L.LastChar;
       }
-      LastChar = SourceFile->get();
-      CurCol++;
+      L.LastChar = L.Source->get();
+      L.CurCol++;
     }
 
     // Both the EOF and raw-newline paths below report the same underlying
@@ -1099,17 +1087,17 @@ static int gettokScan() {
         "string literals can't span multiple lines. Need an actual line "
         "break inside the string? Use the \\n escape instead.";
 
-    if (LastChar == EOF) {
+    if (L.LastChar == EOF) {
       // Ran off the end of the file with no closing '"' anywhere -- there is
       // truly nothing left to lex, so end the token stream here exactly as
       // the pre-existing behavior did.
-      LogErrorAt(CurLoc, ErrCode::UnterminatedLiteral,
+      LogErrorAt(L.CurLoc, ErrCode::UnterminatedLiteral,
                  std::string("Unterminated string literal") +
                      UnterminatedStringHint, SLM::ErrorCategory::SYNTAX_ERROR);
       return TOK_EOF;
     }
 
-    if (LastChar == '\n') {
+    if (L.LastChar == '\n') {
       // Hit end-of-line before a closing '"'. Report it at the opening-quote
       // location (CurLoc was snapshotted there at the top of gettok() and is
       // untouched since) and return the partial token WITHOUT consuming the
@@ -1118,15 +1106,15 @@ static int gettokScan() {
       // top of this function, which correctly bumps CurLine and resets
       // CurCol -- so lexing (and line tracking) of the rest of the file
       // recovers cleanly instead of desyncing for every line that follows.
-      LogErrorAt(CurLoc, ErrCode::UnterminatedLiteral,
+      LogErrorAt(L.CurLoc, ErrCode::UnterminatedLiteral,
                  std::string("Unterminated string literal") +
                      UnterminatedStringHint, SLM::ErrorCategory::SYNTAX_ERROR);
       return TOK_STRING_LITERAL;
     }
 
     // Consume closing "
-    LastChar = SourceFile->get();
-    CurCol++;
+    L.LastChar = L.Source->get();
+    L.CurCol++;
 
     return TOK_STRING_LITERAL;
   }
@@ -1139,114 +1127,114 @@ static int gettokScan() {
   // recognized inside double-quoted strings above (\n \t \r \0 \a \b \f \v
   // \\ \" \'), so the same source text means the same byte in both string
   // and char literals.
-  if (LastChar == '\'') {
-    LastChar = SourceFile->get();
-    CurCol++;
+  if (L.LastChar == '\'') {
+    L.LastChar = L.Source->get();
+    L.CurCol++;
 
-    if (LastChar == '\'') {
+    if (L.LastChar == '\'') {
       // Empty literal '' -- consume the closing quote so the lexer doesn't
       // desync, report, and recover with a placeholder value.
-      LogErrorAt(CurLoc, ErrCode::InvalidCharLiteral,
+      LogErrorAt(L.CurLoc, ErrCode::InvalidCharLiteral,
                  "Empty char literal.\n  Hint: A char literal must contain "
                  "exactly one character, e.g. 'a'.", SLM::ErrorCategory::SYNTAX_ERROR);
-      LastChar = SourceFile->get();
-      CurCol++;
-      CharVal = '\0';
+      L.LastChar = L.Source->get();
+      L.CurCol++;
+      L.CharVal = '\0';
       return TOK_CHAR_LITERAL;
     }
 
-    if (LastChar == EOF || LastChar == '\n') {
+    if (L.LastChar == EOF || L.LastChar == '\n') {
       // Same rationale as the unterminated-string case above: don't consume
       // the newline, so the next gettok() call's whitespace-skip recovers
       // line tracking cleanly instead of desyncing for the rest of the file.
-      LogErrorAt(CurLoc, ErrCode::UnterminatedLiteral,
+      LogErrorAt(L.CurLoc, ErrCode::UnterminatedLiteral,
                  std::string("Unterminated char literal") +
                      "\n  Hint: Add a closing ''' after the character.", SLM::ErrorCategory::SYNTAX_ERROR);
-      return LastChar == EOF ? TOK_EOF : TOK_CHAR_LITERAL;
+      return L.LastChar == EOF ? TOK_EOF : TOK_CHAR_LITERAL;
     }
 
-    if (LastChar == '\\') {
-      SourceLocation EscapeLoc{CurLine, CurCol, ""};
-      LastChar = SourceFile->get();
-      CurCol++;
-      if (LastChar == 'n') {
-        CharVal = '\n';
-      } else if (LastChar == 't') {
-        CharVal = '\t';
-      } else if (LastChar == 'r') {
-        CharVal = '\r';
-      } else if (LastChar == '0') {
-        CharVal = '\0';
-      } else if (LastChar == 'a') {
-        CharVal = '\a';
-      } else if (LastChar == 'b') {
-        CharVal = '\b';
-      } else if (LastChar == 'f') {
-        CharVal = '\f';
-      } else if (LastChar == 'v') {
-        CharVal = '\v';
-      } else if (LastChar == '\\') {
-        CharVal = '\\';
-      } else if (LastChar == '"') {
-        CharVal = '"';
-      } else if (LastChar == '\'') {
-        CharVal = '\'';
+    if (L.LastChar == '\\') {
+      SourceLocation EscapeLoc{L.CurLine, L.CurCol, ""};
+      L.LastChar = L.Source->get();
+      L.CurCol++;
+      if (L.LastChar == 'n') {
+        L.CharVal = '\n';
+      } else if (L.LastChar == 't') {
+        L.CharVal = '\t';
+      } else if (L.LastChar == 'r') {
+        L.CharVal = '\r';
+      } else if (L.LastChar == '0') {
+        L.CharVal = '\0';
+      } else if (L.LastChar == 'a') {
+        L.CharVal = '\a';
+      } else if (L.LastChar == 'b') {
+        L.CharVal = '\b';
+      } else if (L.LastChar == 'f') {
+        L.CharVal = '\f';
+      } else if (L.LastChar == 'v') {
+        L.CharVal = '\v';
+      } else if (L.LastChar == '\\') {
+        L.CharVal = '\\';
+      } else if (L.LastChar == '"') {
+        L.CharVal = '"';
+      } else if (L.LastChar == '\'') {
+        L.CharVal = '\'';
       } else {
         LogErrorAt(EscapeLoc, ErrCode::InvalidEscapeSequence,
                    std::string("Unknown escape sequence '\\") +
-                       static_cast<char>(LastChar) +
+                       static_cast<char>(L.LastChar) +
                        "' in char literal.\n  Hint: Recognized escapes are "
                        "\\n \\t \\r \\0 \\a \\b \\f \\v \\\\ \\\" \\'.", SLM::ErrorCategory::SYNTAX_ERROR);
-        CharVal = static_cast<char>(LastChar);
+        L.CharVal = static_cast<char>(L.LastChar);
       }
     } else {
-      CharVal = static_cast<char>(LastChar);
+      L.CharVal = static_cast<char>(L.LastChar);
     }
 
     // Consume the character (or the last byte of the escape) just recorded.
-    LastChar = SourceFile->get();
-    CurCol++;
+    L.LastChar = L.Source->get();
+    L.CurCol++;
 
-    if (LastChar != '\'') {
+    if (L.LastChar != '\'') {
       // More than one character before the closing quote, e.g. 'ab'. Skip
       // forward to the next ''' (or EOF/newline) so the rest of the file
       // keeps lexing from a sane point instead of every later token being
       // offset by the stray characters.
-      LogErrorAt(CurLoc, ErrCode::InvalidCharLiteral,
+      LogErrorAt(L.CurLoc, ErrCode::InvalidCharLiteral,
                  "Char literal must contain exactly one character.\n  Hint: "
                  "Use a string literal (\"ab\") for multiple characters, or "
                  "check for a missing closing '.", SLM::ErrorCategory::SYNTAX_ERROR);
-      while (LastChar != '\'' && LastChar != EOF && LastChar != '\n') {
-        LastChar = SourceFile->get();
-        CurCol++;
+      while (L.LastChar != '\'' && L.LastChar != EOF && L.LastChar != '\n') {
+        L.LastChar = L.Source->get();
+        L.CurCol++;
       }
-      if (LastChar == '\'') {
-        LastChar = SourceFile->get();
-        CurCol++;
+      if (L.LastChar == '\'') {
+        L.LastChar = L.Source->get();
+        L.CurCol++;
       }
       return TOK_CHAR_LITERAL;
     }
 
     // Consume closing '
-    LastChar = SourceFile->get();
-    CurCol++;
+    L.LastChar = L.Source->get();
+    L.CurCol++;
 
     return TOK_CHAR_LITERAL;
   }
 
   // Ellipsis '...' (variadic marker in extern fn) must be checked before '..'
   // (range operator) so three dots aren't consumed as range + stray dot.
-  if (LastChar == '.' && SourceFile->peek() == '.') {
+  if (L.LastChar == '.' && L.Source->peek() == '.') {
     // Peek at the character after the second dot
-    SourceFile->get(); CurCol++;
-    int third  = SourceFile->peek();
+    L.Source->get(); L.CurCol++;
+    int third  = L.Source->peek();
     if (third == '.') {
-      SourceFile->get(); CurCol++; // consume third dot
-      LastChar = SourceFile->get(); CurCol++;
+      L.Source->get(); L.CurCol++; // consume third dot
+      L.LastChar = L.Source->get(); L.CurCol++;
       return TOK_ELLIPSIS;
     }
     // Only two dots — range operator
-    LastChar = SourceFile->get(); CurCol++;
+    L.LastChar = L.Source->get(); L.CurCol++;
     return TOK_RANGE;
   }
 
@@ -1269,8 +1257,8 @@ static int gettokScan() {
   // back to ParseNumberExpr (ParserLiteral.cpp), which builds the real
   // llvm::APSInt/llvm::APFloat -- kept out of this file so Lexer.h/
   // Lexer.cpp stay LLVM-free, as they always have been.
-  if (isdigit(LastChar) || (LastChar == '.' && isdigit(SourceFile->peek()))) {
-    SourceLocation NumLoc = CurLoc; // stamped at the top of gettokScan()
+  if (isdigit(L.LastChar) || (L.LastChar == '.' && isdigit(L.Source->peek()))) {
+    SourceLocation NumLoc = L.CurLoc; // stamped at the top of gettokScan()
     std::string Spelling; // exact original text, prefix + separators intact
     std::string Clean;    // same text with the prefix and every '_' removed
 
@@ -1285,12 +1273,12 @@ static int gettokScan() {
     auto ScanDigitRun = [&](auto IsDigit) -> size_t {
       size_t RunStart = Spelling.size();
       size_t CleanStart = Clean.size();
-      while (IsDigit(LastChar) || LastChar == '_') {
-        if (LastChar != '_')
-          Clean += static_cast<char>(LastChar);
-        Spelling += static_cast<char>(LastChar);
-        LastChar = SourceFile->get();
-        CurCol++;
+      while (IsDigit(L.LastChar) || L.LastChar == '_') {
+        if (L.LastChar != '_')
+          Clean += static_cast<char>(L.LastChar);
+        Spelling += static_cast<char>(L.LastChar);
+        L.LastChar = L.Source->get();
+        L.CurCol++;
       }
       if (Spelling.size() > RunStart) {
         if (Spelling[RunStart] == '_')
@@ -1310,9 +1298,9 @@ static int gettokScan() {
     // legitimate continuations; everything else is E139. LastChar is the '.',
     // peek() the character after it.
     auto RejectStrayPoint = [&](bool Radix, bool AlreadyFloat) {
-      if (LastChar != '.')
+      if (L.LastChar != '.')
         return;
-      int Next = SourceFile->peek();
+      int Next = L.Source->peek();
       if (Next == '.' || isalpha(Next) || Next == '_')
         return;
       using K = MalformedNumberError::Kind;
@@ -1332,18 +1320,18 @@ static int gettokScan() {
     // looking `0755`), falls through to the plain-decimal path below
     // instead, per FREEZE's deliberate "no bare-leading-zero octal" rule:
     // `0755` stays decimal `755`.
-    if (LastChar == '0' &&
-        (SourceFile->peek() == 'x' || SourceFile->peek() == 'X' ||
-         SourceFile->peek() == 'b' || SourceFile->peek() == 'B' ||
-         SourceFile->peek() == 'o' || SourceFile->peek() == 'O')) {
+    if (L.LastChar == '0' &&
+        (L.Source->peek() == 'x' || L.Source->peek() == 'X' ||
+         L.Source->peek() == 'b' || L.Source->peek() == 'B' ||
+         L.Source->peek() == 'o' || L.Source->peek() == 'O')) {
       Spelling += '0';
-      LastChar = SourceFile->get(); CurCol++; // consume '0'
-      char RadixChar = static_cast<char>(LastChar);
+      L.LastChar = L.Source->get(); L.CurCol++; // consume '0'
+      char RadixChar = static_cast<char>(L.LastChar);
       Spelling += RadixChar;
-      LastChar = SourceFile->get(); CurCol++; // consume x/X/b/B/o/O
+      L.LastChar = L.Source->get(); L.CurCol++; // consume x/X/b/B/o/O
       bool IsHex = (RadixChar == 'x' || RadixChar == 'X');
       bool IsBin = (RadixChar == 'b' || RadixChar == 'B');
-      NumLitRadix = IsHex ? 16 : IsBin ? 2 : 8;
+      L.NumLitRadix = IsHex ? 16 : IsBin ? 2 : 8;
 
       size_t DigitsConsumed =
           IsHex ? ScanDigitRun([](int c) { return isxdigit(c) != 0; })
@@ -1357,21 +1345,21 @@ static int gettokScan() {
       // truly empty continuation (whitespace/operator/EOF right after the
       // prefix, or right after the last valid digit) is the bare-prefix
       // case.
-      if (isalnum(LastChar))
-        InvalidRadixDigitError(NumLoc, static_cast<char>(LastChar),
-                               NumLitRadix, Spelling)
+      if (isalnum(L.LastChar))
+        InvalidRadixDigitError(NumLoc, static_cast<char>(L.LastChar),
+                               L.NumLitRadix, Spelling)
             .raise();
       else if (DigitsConsumed == 0)
         MalformedRadixPrefixError(NumLoc, Spelling).raise();
 
       RejectStrayPoint(/*Radix=*/true, /*AlreadyFloat=*/false);
-      NumLitSpelling = Spelling;
-      NumLitClean = Clean;
+      L.NumLitSpelling = Spelling;
+      L.NumLitClean = Clean;
       return TOK_INT_LITERAL;
     }
 
     // Plain decimal: an integer (`[0-9_]+`), or one of the two float forms.
-    NumLitRadix = 10;
+    L.NumLitRadix = 10;
     ScanDigitRun(IsDecDigit); // integer part -- legitimately empty only via
                               // the leading-dot entry ('.5'), where LastChar
                               // is '.' and this call safely consumes nothing
@@ -1387,12 +1375,12 @@ static int gettokScan() {
     // `peek() != '.'` guard additionally keeps this from eating into the
     // START of the `..` range / `...` ellipsis operators (`1..5` must
     // still lex as NUMBER, RANGE, NUMBER).
-    if (LastChar == '.' && SourceFile->peek() != '.' &&
-        isdigit(SourceFile->peek())) {
+    if (L.LastChar == '.' && L.Source->peek() != '.' &&
+        isdigit(L.Source->peek())) {
       IsFloat = true;
       Spelling += '.';
       Clean += '.';
-      LastChar = SourceFile->get(); CurCol++;
+      L.LastChar = L.Source->get(); L.CurCol++;
       ScanDigitRun(IsDecDigit); // at least one digit guaranteed by the peek() above
     }
 
@@ -1402,81 +1390,81 @@ static int gettokScan() {
     // 'e'/'E' appears immediately here, it is ALWAYS committed to as an
     // exponent marker -- never silently reinterpreted as a separate
     // following token -- see MalformedExponentError's own doc comment.
-    if (LastChar == 'e' || LastChar == 'E') {
+    if (L.LastChar == 'e' || L.LastChar == 'E') {
       IsFloat = true;
-      Spelling += static_cast<char>(LastChar);
-      Clean += static_cast<char>(LastChar);
-      LastChar = SourceFile->get(); CurCol++;
-      if (LastChar == '+' || LastChar == '-') {
-        Spelling += static_cast<char>(LastChar);
-        Clean += static_cast<char>(LastChar);
-        LastChar = SourceFile->get(); CurCol++;
+      Spelling += static_cast<char>(L.LastChar);
+      Clean += static_cast<char>(L.LastChar);
+      L.LastChar = L.Source->get(); L.CurCol++;
+      if (L.LastChar == '+' || L.LastChar == '-') {
+        Spelling += static_cast<char>(L.LastChar);
+        Clean += static_cast<char>(L.LastChar);
+        L.LastChar = L.Source->get(); L.CurCol++;
       }
       if (ScanDigitRun(IsDecDigit) == 0)
         MalformedExponentError(NumLoc, Spelling).raise();
     }
 
     RejectStrayPoint(/*Radix=*/false, IsFloat);
-    NumLitSpelling = Spelling;
-    NumLitClean = Clean;
+    L.NumLitSpelling = Spelling;
+    L.NumLitClean = Clean;
     return IsFloat ? TOK_NUMBER : TOK_INT_LITERAL;
   }
 
-  if (LastChar == '=') {
-    LastChar = SourceFile->get();
-    CurCol++;
+  if (L.LastChar == '=') {
+    L.LastChar = L.Source->get();
+    L.CurCol++;
 
-    if (LastChar == '=') {
-      LastChar = SourceFile->get();
-      CurCol++;
+    if (L.LastChar == '=') {
+      L.LastChar = L.Source->get();
+      L.CurCol++;
       return TOK_EQ;
     }
 
     return TOK_ASSIGN;
   }
 
-  if (LastChar == ':') {
-    LastChar = SourceFile->get();
-    CurCol++;
+  if (L.LastChar == ':') {
+    L.LastChar = L.Source->get();
+    L.CurCol++;
 
-    if (LastChar == ':') {
-      LastChar = SourceFile->get();
-      CurCol++;
+    if (L.LastChar == ':') {
+      L.LastChar = L.Source->get();
+      L.CurCol++;
       return TOK_SCOPE;
     }
 
     return TOK_COLON;
   }
 
-  if (LastChar == '!') {
-    LastChar = SourceFile->get();
-    CurCol++;
+  if (L.LastChar == '!') {
+    L.LastChar = L.Source->get();
+    L.CurCol++;
 
-    if (LastChar == '=') {
-      LastChar = SourceFile->get();
-      CurCol++;
+    if (L.LastChar == '=') {
+      L.LastChar = L.Source->get();
+      L.CurCol++;
       return TOK_NEQ;
     }
 
     return '!';
   }
 
-  if (LastChar == '>') {
-    LastChar = SourceFile->get();
-    CurCol++;
+  if (L.LastChar == '>') {
+    L.LastChar = L.Source->get();
+    L.CurCol++;
 
-    if (LastChar == '=') {
-      LastChar = SourceFile->get();
-      CurCol++;
+    if (L.LastChar == '=') {
+      L.LastChar = L.Source->get();
+      L.CurCol++;
       return TOK_GEQ;
     }
 
-    if (LastChar == '>') {
-      LastChar = SourceFile->get();
-      CurCol++;
-      if (LastChar == '=') {
-        LastChar = SourceFile->get();
-        CurCol++;
+    if (L.LastChar == '>') {
+      L.LastChar = L.Source->get();
+      L.CurCol++;
+      if (L.LastChar == '=') {
+        L.LastChar = L.Source->get();
+        L.CurCol++;
         return TOK_RSHIFT_ASSIGN;
       }
       return TOK_RSHIFT;
@@ -1485,22 +1473,22 @@ static int gettokScan() {
     return '>';
   }
 
-  if (LastChar == '<') {
-    LastChar = SourceFile->get();
-    CurCol++;
+  if (L.LastChar == '<') {
+    L.LastChar = L.Source->get();
+    L.CurCol++;
 
-    if (LastChar == '=') {
-      LastChar = SourceFile->get();
-      CurCol++;
+    if (L.LastChar == '=') {
+      L.LastChar = L.Source->get();
+      L.CurCol++;
       return TOK_LEQ;
     }
 
-    if (LastChar == '<') {
-      LastChar = SourceFile->get();
-      CurCol++;
-      if (LastChar == '=') {
-        LastChar = SourceFile->get();
-        CurCol++;
+    if (L.LastChar == '<') {
+      L.LastChar = L.Source->get();
+      L.CurCol++;
+      if (L.LastChar == '=') {
+        L.LastChar = L.Source->get();
+        L.CurCol++;
         return TOK_LSHIFT_ASSIGN;
       }
       return TOK_LSHIFT;
@@ -1509,117 +1497,117 @@ static int gettokScan() {
     return '<';
   }
 
-  if (LastChar == '&') {
-    LastChar = SourceFile->get();
-    CurCol++;
+  if (L.LastChar == '&') {
+    L.LastChar = L.Source->get();
+    L.CurCol++;
 
-    if (LastChar == '&') {
-      LastChar = SourceFile->get();
-      CurCol++;
+    if (L.LastChar == '&') {
+      L.LastChar = L.Source->get();
+      L.CurCol++;
       return TOK_AND;
     }
 
-    if (LastChar == '=') {
-      LastChar = SourceFile->get();
-      CurCol++;
+    if (L.LastChar == '=') {
+      L.LastChar = L.Source->get();
+      L.CurCol++;
       return TOK_AND_ASSIGN;
     }
 
     return '&';
   }
 
-  if (LastChar == '|') {
-    LastChar = SourceFile->get();
-    CurCol++;
+  if (L.LastChar == '|') {
+    L.LastChar = L.Source->get();
+    L.CurCol++;
 
-    if (LastChar == '|') {
-      LastChar = SourceFile->get();
-      CurCol++;
+    if (L.LastChar == '|') {
+      L.LastChar = L.Source->get();
+      L.CurCol++;
       return TOK_OR;
     }
 
-    if (LastChar == '=') {
-      LastChar = SourceFile->get();
-      CurCol++;
+    if (L.LastChar == '=') {
+      L.LastChar = L.Source->get();
+      L.CurCol++;
       return TOK_OR_ASSIGN;
     }
 
     return '|';
   }
 
-  if (LastChar == '^') {
-    LastChar = SourceFile->get();
-    CurCol++;
+  if (L.LastChar == '^') {
+    L.LastChar = L.Source->get();
+    L.CurCol++;
 
-    if (LastChar == '=') {
-      LastChar = SourceFile->get();
-      CurCol++;
+    if (L.LastChar == '=') {
+      L.LastChar = L.Source->get();
+      L.CurCol++;
       return TOK_XOR_ASSIGN;
     }
 
     return '^';
   }
 
-  if (LastChar == '+') {
-    LastChar = SourceFile->get();
-    CurCol++;
+  if (L.LastChar == '+') {
+    L.LastChar = L.Source->get();
+    L.CurCol++;
 
-    if (LastChar == '+') {
-      LastChar = SourceFile->get();
-      CurCol++;
+    if (L.LastChar == '+') {
+      L.LastChar = L.Source->get();
+      L.CurCol++;
       return TOK_PLUS_PLUS;
     }
 
-    if (LastChar == '=') {
-      LastChar = SourceFile->get();
-      CurCol++;
+    if (L.LastChar == '=') {
+      L.LastChar = L.Source->get();
+      L.CurCol++;
       return TOK_PLUS_ASSIGN;
     }
 
     return '+';
   }
 
-  if (LastChar == '-') {
-    LastChar = SourceFile->get();
-    CurCol++;
+  if (L.LastChar == '-') {
+    L.LastChar = L.Source->get();
+    L.CurCol++;
 
-    if (LastChar == '-') {
-      LastChar = SourceFile->get();
-      CurCol++;
+    if (L.LastChar == '-') {
+      L.LastChar = L.Source->get();
+      L.CurCol++;
       return TOK_MINUS_MINUS;
     }
 
-    if (LastChar == '=') {
-      LastChar = SourceFile->get();
-      CurCol++;
+    if (L.LastChar == '=') {
+      L.LastChar = L.Source->get();
+      L.CurCol++;
       return TOK_MINUS_ASSIGN;
     }
 
-    if (LastChar == '>') {
-      LastChar = SourceFile->get();
-      CurCol++;
+    if (L.LastChar == '>') {
+      L.LastChar = L.Source->get();
+      L.CurCol++;
       return TOK_ARROW;
     }
 
     return '-';
   }
 
-  if (LastChar == '*') {
-    LastChar = SourceFile->get();
-    CurCol++;
+  if (L.LastChar == '*') {
+    L.LastChar = L.Source->get();
+    L.CurCol++;
 
-    if (LastChar == '=') {
-      LastChar = SourceFile->get();
-      CurCol++;
+    if (L.LastChar == '=') {
+      L.LastChar = L.Source->get();
+      L.CurCol++;
       return TOK_MUL_ASSIGN;
     }
 
-    if (LastChar == '*') {
-      LastChar = SourceFile->get();
-      CurCol++;
-      if (LastChar == '=') {
-        LastChar = SourceFile->get();
-        CurCol++;
+    if (L.LastChar == '*') {
+      L.LastChar = L.Source->get();
+      L.CurCol++;
+      if (L.LastChar == '=') {
+        L.LastChar = L.Source->get();
+        L.CurCol++;
         return TOK_POWER_ASSIGN;
       }
       return TOK_POWER;
@@ -1628,50 +1616,50 @@ static int gettokScan() {
     return '*';
   }
 
-  if (LastChar == '%') {
-    LastChar = SourceFile->get();
-    CurCol++;
+  if (L.LastChar == '%') {
+    L.LastChar = L.Source->get();
+    L.CurCol++;
 
-    if (LastChar == '=') {
-      LastChar = SourceFile->get();
-      CurCol++;
+    if (L.LastChar == '=') {
+      L.LastChar = L.Source->get();
+      L.CurCol++;
       return TOK_MOD_ASSIGN;
     }
 
     return '%';
   }
 
-  if (LastChar == '/') {
-    if (SourceFile->peek() == '/') {
+  if (L.LastChar == '/') {
+    if (L.Source->peek() == '/') {
       do {
-        LastChar = SourceFile->get();
-        CurCol++;
-      } while (LastChar != EOF && LastChar != '\n' && LastChar != '\r');
+        L.LastChar = L.Source->get();
+        L.CurCol++;
+      } while (L.LastChar != EOF && L.LastChar != '\n' && L.LastChar != '\r');
 
-      if (LastChar != EOF)
-        return gettokScan();
-    } else if (SourceFile->peek() == '=') {
-      LastChar = SourceFile->get();
-      CurCol++;
-      LastChar = SourceFile->get();
-      CurCol++;
+      if (L.LastChar != EOF)
+        return gettokScan(L);
+    } else if (L.Source->peek() == '=') {
+      L.LastChar = L.Source->get();
+      L.CurCol++;
+      L.LastChar = L.Source->get();
+      L.CurCol++;
       return TOK_DIV_ASSIGN;
     }
   }
 
-  if (LastChar == '@') {
-    LastChar = SourceFile->get();
-    CurCol++;
+  if (L.LastChar == '@') {
+    L.LastChar = L.Source->get();
+    L.CurCol++;
     return TOK_AT;
   }
 
-  if (LastChar == EOF)
+  if (L.LastChar == EOF)
     return TOK_EOF;
 
   // Handle ASCII characters
-  int ThisChar = LastChar;
-  LastChar = SourceFile->get();
-  CurCol++;
+  int ThisChar = L.LastChar;
+  L.LastChar = L.Source->get();
+  L.CurCol++;
 
   return ThisChar;
 }
@@ -1686,7 +1674,7 @@ static int gettokScan() {
  * past the token's last consumed character for every branch that fully
  * scans its token (this was true even before this wrapper existed --
  * confirmed by tracing the '='/'==' branch: CurCol is incremented once per
- * character actually read via SourceFile->get(), and every branch reads
+ * character actually read via L.Source->get(), and every branch reads
  * through the last character of its token before returning) -- i.e.
  * exactly the exclusive end column an LSP Range expects, and previously
  * only identifiers stamped explicitly (issue #243). The few branches that
@@ -1695,14 +1683,14 @@ static int gettokScan() {
  * always still the token's start line there too -- a same-line span is a
  * safe invariant to rely on unconditionally, not just for identifiers.
  */
-int gettok() {
+int gettok(LexerState &L) {
   // CurLoc still describes the token about to become the previous one, with
   // its end stamped below by the call that scanned it.
-  PrevTokEndLine = CurLoc.EndLine;
-  PrevTokEndCol = CurLoc.EndCol;
-  int Tok = gettokScan();
-  CurLoc.EndLine = CurLine;
-  CurLoc.EndCol = CurCol;
+  L.PrevTokEndLine = L.CurLoc.EndLine;
+  L.PrevTokEndCol = L.CurLoc.EndCol;
+  int Tok = gettokScan(L);
+  L.CurLoc.EndLine = L.CurLine;
+  L.CurLoc.EndCol = L.CurCol;
   return Tok;
 }
 

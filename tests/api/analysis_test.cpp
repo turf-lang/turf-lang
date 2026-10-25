@@ -267,18 +267,19 @@ static void testHostStateIsRestored() {
   MainSourceFilename = "host.tr";
   SourceLines = {"host line 1", "host line 2"};
   AllSourceLines["host.tr"] = SourceLines;
+  std::istringstream HostStream("fn host(): int { return 1; }");
+  LexerState Host(HostStream, "host.tr");
+  LexerScope HostScope(Host);
   CurTok = TOK_IDENTIFIER;
-  IdentifierStr = "hostIdent";
-  CurLine = 41;
-  CurCol = 7;
+  Host.IdentifierStr = "hostIdent";
+  Host.CurLine = 41;
+  Host.CurCol = 7;
   g_braceDepth = 2;
   g_recoverActive = true;
   g_AllowUnsafeModules = false;
   DiagnosticEngine::clearDiagnostics();
   DiagnosticEngine::setCollectAllDiagnostics(false);
   DiagnosticEngine::add({3, 4, "host.tr"}, "host diagnostic");
-  std::istringstream HostStream("fn host(): int { return 1; }");
-  SetSourceBuffer(HostStream);
 
   turf::AnalysisOptions Opts;
   Opts.AllowUnsafeModules = true;
@@ -292,18 +293,19 @@ static void testHostStateIsRestored() {
   CHECK(AllSourceLines.count("host.tr") == 1);
   CHECK(AllSourceLines.count("undef.tr") == 0);
   CHECK_EQ(CurTok, static_cast<int>(TOK_IDENTIFIER));
-  CHECK_EQ(IdentifierStr, std::string("hostIdent"));
-  CHECK_EQ(CurLine, 41);
-  CHECK_EQ(CurCol, 7);
+  CHECK(&Lex() == &Host);
+  CHECK_EQ(Host.IdentifierStr, std::string("hostIdent"));
+  CHECK_EQ(Host.CurLine, 41);
+  CHECK_EQ(Host.CurCol, 7);
   CHECK_EQ(g_braceDepth, 2);
   CHECK(g_recoverActive);
   CHECK(!g_AllowUnsafeModules);
   CHECK(!DiagnosticEngine::getCollectAllDiagnostics());
   CHECK_EQ(DiagnosticEngine::getDiagnosticCount(), 1u);
   CHECK(DiagnosticEngine::hasErrorAt(3));
-  CHECK(SourceFile == &HostStream);
+  CHECK(Host.Source == &HostStream);
   // The host's stream was not read by the analysis.
-  CHECK_EQ(gettok(), static_cast<int>(TOK_FN));
+  CHECK_EQ(gettok(Host), static_cast<int>(TOK_FN));
 
   g_recoverActive = false;
   DiagnosticEngine::clearDiagnostics();
@@ -312,6 +314,46 @@ static void testHostStateIsRestored() {
   SourceFilename.clear();
   MainSourceFilename.clear();
   g_braceDepth = 0;
+}
+
+// F-S0 (issue #301): a lexer is a value, so two can tokenize different
+// buffers in turn without either seeing the other's cursor, token text or
+// location -- what an editor with several open files, or a future concurrent
+// tokenizer, needs.
+static void testTwoLexersInterleave() {
+  CurrentTest = "two lexers interleave";
+  std::istringstream AText("fn alpha(x: int)");
+  std::istringstream BText("struct\n  Beta { 0x1F }");
+  LexerState A(AText, "a.tr");
+  LexerState B(BText, "b.tr");
+
+  CHECK_EQ(gettok(A), static_cast<int>(TOK_FN));
+  CHECK_EQ(gettok(B), static_cast<int>(TOK_STRUCT));
+  CHECK_EQ(gettok(A), static_cast<int>(TOK_IDENTIFIER));
+  CHECK_EQ(gettok(B), static_cast<int>(TOK_IDENTIFIER));
+  CHECK_EQ(A.IdentifierStr, std::string("alpha"));
+  CHECK_EQ(B.IdentifierStr, std::string("Beta"));
+  CHECK_EQ(A.CurLoc.Filename, std::string("a.tr"));
+  CHECK_EQ(B.CurLoc.Filename, std::string("b.tr"));
+  CHECK_EQ(A.CurLoc.Line, 1);
+  CHECK_EQ(A.CurLoc.Col, 4);
+  CHECK_EQ(B.CurLoc.Line, 2);
+  CHECK_EQ(B.CurLoc.Col, 3);
+  // B's end position is its own token's, not A's.
+  CHECK_EQ(B.CurLoc.EndCol, 7);
+  CHECK_EQ(B.PrevTokEndLine, 1);
+
+  CHECK_EQ(gettok(B), static_cast<int>('{'));
+  CHECK_EQ(gettok(B), static_cast<int>(TOK_INT_LITERAL));
+  CHECK_EQ(B.NumLitClean, std::string("1F"));
+  CHECK_EQ(B.NumLitRadix, 16);
+  CHECK_EQ(gettok(A), static_cast<int>('('));
+  CHECK_EQ(gettok(A), static_cast<int>(TOK_IDENTIFIER));
+  CHECK_EQ(A.IdentifierStr, std::string("x"));
+  CHECK_EQ(A.NumLitRadix, 10); // B's hex literal did not leak over
+
+  // With no LexerScope live, the parser's lexer is an empty one: EOF.
+  CHECK_EQ(gettok(Lex()), static_cast<int>(TOK_EOF));
 }
 
 // turf::keywords() is the lexer's own table: every word the language reserves,
@@ -370,9 +412,11 @@ static void testCancellation() {
     SourceFilename = "host.tr";
     MainSourceFilename = "host.tr";
     SourceLines = {"host line 1"};
+    LexerState Host;
+    LexerScope HostScope(Host);
     CurTok = TOK_IDENTIFIER;
-    IdentifierStr = "hostIdent";
-    CurLine = 41;
+    Host.IdentifierStr = "hostIdent";
+    Host.CurLine = 41;
     g_braceDepth = 2;
     DiagnosticEngine::clearDiagnostics();
     DiagnosticEngine::setCollectAllDiagnostics(false);
@@ -397,8 +441,9 @@ static void testCancellation() {
     CHECK_EQ(SourceFilename, std::string("host.tr"));
     CHECK_EQ(SourceLines.size(), 1u);
     CHECK_EQ(CurTok, static_cast<int>(TOK_IDENTIFIER));
-    CHECK_EQ(IdentifierStr, std::string("hostIdent"));
-    CHECK_EQ(CurLine, 41);
+    CHECK(&Lex() == &Host);
+    CHECK_EQ(Host.IdentifierStr, std::string("hostIdent"));
+    CHECK_EQ(Host.CurLine, 41);
     CHECK_EQ(g_braceDepth, 2);
     CHECK(!DiagnosticEngine::getCollectAllDiagnostics());
     CHECK_EQ(DiagnosticEngine::getDiagnosticCount(), 1u);
@@ -2341,6 +2386,7 @@ int main() {
   testWarningSurvivesReanalysis();
   testUnsafeCapabilityDoesNotOutliveThePragma();
   testHostStateIsRestored();
+  testTwoLexersInterleave();
   testCancellation();
   testKeywords();
   testImportedModuleOverlay(Dir);

@@ -1749,7 +1749,12 @@ static int runCompilerMain(int argc, char **argv) {
   if (opts.Format)
     return runFormat(opts.PositionalFiles, opts.FormatWrite, opts.Check, opts.FormatSkipUnlexable);
 
-  if (!OpenSourceFile(opts.InputFile)) {
+  // The input file's lexer, current for the rest of the compile: the pre-pass
+  // and the main pass each reopen it from the top, and an import lexes with
+  // a LexerState of its own (ParseFile()).
+  LexerState MainLexer;
+  LexerScope MainLexerScope(MainLexer);
+  if (!MainLexer.open(opts.InputFile)) {
     std::cerr << "Error: Could not open file " << opts.InputFile << "\n";
     return 1;
   }
@@ -1799,10 +1804,8 @@ static int runCompilerMain(int argc, char **argv) {
   // them. Every module a program uses must now be imported explicitly by
   // that program itself.
 
-  // Swap the global SourceFile for the pre-pass stream
-  CloseSourceFile();
-      OpenSourceFile(opts.InputFile);
-      CurLoc = {1, 0};
+  // The pre-pass reads the file from the top.
+      MainLexer.open(opts.InputFile);
 
       // Reset the lexer token stream
       CurTok = 0;
@@ -1836,7 +1839,7 @@ static int runCompilerMain(int argc, char **argv) {
       // Deliberately NOT passed to RecordParsedTopLevelAST() -- that tracks
       // the USER's own top-level declarations for sandbox/SLM diffing, and
       // these aren't part of the user's source.
-      for (auto &PreludeAST : ParsePreludeImports(CurLoc))
+      for (auto &PreludeAST : ParsePreludeImports(Lex().CurLoc))
         PrePassASTs.push_back(std::move(PreludeAST));
 
       // OVH-011: if a transitive import inside the prelude just injected
@@ -1867,7 +1870,7 @@ static int runCompilerMain(int argc, char **argv) {
             auto AST = ParseExpression();
             if (AST) {
               if (CurTok == ';') {
-                LogErrorAt(CurLoc, ErrCode::UnexpectedToken, "Unexpected ';'", SLM::ErrorCategory::SYNTAX_ERROR);
+                LogErrorAt(Lex().CurLoc, ErrCode::UnexpectedToken, "Unexpected ';'", SLM::ErrorCategory::SYNTAX_ERROR);
               }
               // NOTE: no LintExpression() call here (deliberately -- see the
               // "Phase Separation: Lint All" comment near FnASTs' declaration
@@ -1904,7 +1907,7 @@ static int runCompilerMain(int argc, char **argv) {
             auto AST = ParseImport();
             if (AST) {
               if (CurTok != ';') {
-                LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
+                LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
               } else {
                 getNextToken(); // eat ';'
               }
@@ -2203,9 +2206,7 @@ static int runCompilerMain(int argc, char **argv) {
       }
 
   // Re-open for the main pass
-  CloseSourceFile();
-  OpenSourceFile(opts.InputFile);
-  CurLoc = {1, 0};
+  MainLexer.open(opts.InputFile);
   CurTok = 0;
 
 
@@ -2257,7 +2258,7 @@ static int runCompilerMain(int argc, char **argv) {
   // into FnASTs, matching how a real `import X;` is categorized in this
   // pass (already codegenned in the pre-pass; re-parsed here purely for
   // Resolver/TypeChecker re-validation, not re-codegen).
-  for (auto &PreludeAST : ParsePreludeImports(CurLoc))
+  for (auto &PreludeAST : ParsePreludeImports(Lex().CurLoc))
     FnASTs.push_back(std::move(PreludeAST));
 
   // OVH-011: mandatory-pass side of the same skip the pre-pass applies
@@ -2294,7 +2295,7 @@ static int runCompilerMain(int argc, char **argv) {
         auto AST = ParseExpression();
         if (AST) {
           if (CurTok == ';') {
-            LogErrorAt(CurLoc, ErrCode::UnexpectedToken, "Unexpected ';'", SLM::ErrorCategory::SYNTAX_ERROR);
+            LogErrorAt(Lex().CurLoc, ErrCode::UnexpectedToken, "Unexpected ';'", SLM::ErrorCategory::SYNTAX_ERROR);
           }
           // lint only — not re-codegenned. Also transparently flattens a
           // top-level `unsafe { }` block -- see AppendFlattenedTopLevelDecl()'s
@@ -2321,7 +2322,7 @@ static int runCompilerMain(int argc, char **argv) {
         auto AST = ParseImport();
         if (AST) {
           if (CurTok != ';') {
-            LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
+            LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
           } else {
             getNextToken(); // eat ';'
           }
@@ -2342,11 +2343,11 @@ static int runCompilerMain(int argc, char **argv) {
       // Where the statement STARTS, for the "not allowed outside a function"
       // diagnostic below -- CurLoc will be past it once ParseExpression()
       // returns.
-      const SourceLocation StmtLoc = CurLoc;
+      const SourceLocation StmtLoc = Lex().CurLoc;
       auto AST = ParseExpression();
       if (AST) {
         if (CurTok != ';') {
-          LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
+          LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
         } else {
           getNextToken(); // eat ';'
         }

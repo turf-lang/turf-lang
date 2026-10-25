@@ -52,8 +52,8 @@
  * here needs to raise a diagnostic of its own.
  */
 std::unique_ptr<ExprAST> ParseNumberExpr(bool IsInteger) {
-  SourceLocation Loc = CurLoc;
-  std::string Spelling = NumLitSpelling;
+  SourceLocation Loc = Lex().CurLoc;
+  std::string Spelling = Lex().NumLitSpelling;
   std::unique_ptr<ExprAST> Result;
 
   if (IsInteger) {
@@ -71,11 +71,11 @@ std::unique_ptr<ExprAST> ParseNumberExpr(bool IsInteger) {
     // is explicitly deferred to whichever group actually enforces
     // representability against a destination type).
     unsigned Bits =
-        std::max(64u, llvm::APInt::getBitsNeeded(NumLitClean, NumLitRadix));
-    llvm::APInt Magnitude(Bits, NumLitClean, NumLitRadix);
+        std::max(64u, llvm::APInt::getBitsNeeded(Lex().NumLitClean, Lex().NumLitRadix));
+    llvm::APInt Magnitude(Bits, Lex().NumLitClean, Lex().NumLitRadix);
     if (Magnitude.isNegative()) {
       Bits += 1;
-      Magnitude = llvm::APInt(Bits, NumLitClean, NumLitRadix);
+      Magnitude = llvm::APInt(Bits, Lex().NumLitClean, Lex().NumLitRadix);
     }
     llvm::APSInt Exact(std::move(Magnitude), /*isUnsigned=*/false);
     Result = std::make_unique<NumberExprAST>(std::move(Exact), Spelling, Loc);
@@ -83,7 +83,7 @@ std::unique_ptr<ExprAST> ParseNumberExpr(bool IsInteger) {
     llvm::APFloat Value(llvm::APFloat::IEEEdouble());
     bool Overflowed = false;
     auto StatusOrErr =
-        Value.convertFromString(NumLitClean, llvm::APFloat::rmNearestTiesToEven);
+        Value.convertFromString(Lex().NumLitClean, llvm::APFloat::rmNearestTiesToEven);
     if (StatusOrErr) {
       Overflowed = (*StatusOrErr & llvm::APFloat::opOverflow) != 0;
     } else {
@@ -107,25 +107,25 @@ std::unique_ptr<ExprAST> ParseNumberExpr(bool IsInteger) {
 }
 
 std::unique_ptr<ExprAST> ParseBoolExpr() {
-  bool SavedBoolVal = BoolVal;
+  bool SavedBoolVal = Lex().BoolVal;
   getNextToken();
   return std::make_unique<BoolExprAST>(SavedBoolVal);
 }
 
 std::unique_ptr<ExprAST> ParseCharExpr() {
-  auto Result = std::make_unique<CharExprAST>(CharVal);
+  auto Result = std::make_unique<CharExprAST>(Lex().CharVal);
   getNextToken();
   return Result;
 }
 
 std::unique_ptr<ExprAST> ParseStringExpr() {
-  auto Result = std::make_unique<StringExprAST>(StringVal);
+  auto Result = std::make_unique<StringExprAST>(Lex().StringVal);
   getNextToken();
   return Result;
 }
 
 std::unique_ptr<ExprAST> ParseNullExpr() {
-  auto Result = std::make_unique<NullExprAST>(CurLoc);
+  auto Result = std::make_unique<NullExprAST>(Lex().CurLoc);
   getNextToken();
   return Result;
 }
@@ -155,7 +155,7 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
     ++g_parseRecursionDepth;
     ++Chain.Links;
     if (g_parseRecursionDepth > MaxParseRecursionDepth) {
-      LogErrorAt(CurLoc, ErrCode::NestingTooDeep,
+      LogErrorAt(Lex().CurLoc, ErrCode::NestingTooDeep,
                  "Expression nested too deeply to parse."
                  "\n  Hint: check for a runaway chain of '.', '[]', '()' or '++'/'--'.",
                  SLM::ErrorCategory::SYNTAX_ERROR);
@@ -166,7 +166,7 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
       return Base;
 
     if (CurTok == '[') {
-      SourceLocation Loc = CurLoc;
+      SourceLocation Loc = Lex().CurLoc;
       getNextToken();
       // `[start..end]` (either bound optional) is a slice. A `..` right
       // after '[' or after the first expression is what tells it apart from
@@ -187,7 +187,7 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
             return nullptr;
         }
         if (CurTok != ']') {
-          LogErrorAt(CurLoc, ErrCode::UnclosedDelimiter,
+          LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter,
                      "Expected ']' to close the slice -- e.g. arr[1..3]",
                      SLM::ErrorCategory::SYNTAX_ERROR);
           return nullptr;
@@ -198,14 +198,14 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
         continue;
       }
       if (CurTok != ']') {
-        LogErrorAt(CurLoc, ErrCode::UnclosedDelimiter, "Expected ']' to close the array index", SLM::ErrorCategory::SYNTAX_ERROR);
+        LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "Expected ']' to close the array index", SLM::ErrorCategory::SYNTAX_ERROR);
         return nullptr;
       }
       getNextToken();
       Base = std::make_unique<ArrayAccessExprAST>(Loc, std::move(Base),
                                                   std::move(Index));
     } else if (CurTok == '(') {
-      SourceLocation Loc = CurLoc;
+      SourceLocation Loc = Lex().CurLoc;
       getNextToken();
       std::vector<std::unique_ptr<ExprAST>> Args;
       while (CurTok != ')' && CurTok != TOK_EOF) {
@@ -219,7 +219,7 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
           break;
       }
       if (CurTok != ')') {
-        LogErrorAt(CurLoc, ErrCode::UnclosedDelimiter, "Expected ')' to close the function call", SLM::ErrorCategory::SYNTAX_ERROR);
+        LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "Expected ')' to close the function call", SLM::ErrorCategory::SYNTAX_ERROR);
         return nullptr;
       }
       getNextToken();
@@ -228,14 +228,14 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
       Base = std::make_unique<FuncCallExprAST>(Loc, std::move(Base),
                                                std::move(Args));
     } else if (CurTok == '.') {
-      SourceLocation Loc = CurLoc;
+      SourceLocation Loc = Lex().CurLoc;
       getNextToken();
       if (CurTok != TOK_IDENTIFIER) {
-        LogErrorAt(CurLoc, ErrCode::ExpectedName, "Expected a method name after '.'", SLM::ErrorCategory::SYNTAX_ERROR);
+        LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "Expected a method name after '.'", SLM::ErrorCategory::SYNTAX_ERROR);
         return nullptr;
       }
-      std::string MethodName = IdentifierStr;
-      SourceLocation MethodLoc = CurLoc;
+      std::string MethodName = Lex().IdentifierStr;
+      SourceLocation MethodLoc = Lex().CurLoc;
       getNextToken();
       // LG-2: `obj.method::<T>(...)`, type arguments for a generic function
       // called through UFCS. `::` then `<` begins nothing else.
@@ -245,7 +245,7 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
         if (!ParseTypeArgList(MethodTypeArgs))
           return nullptr;
         if (CurTok != '(') {
-          LogErrorAt(CurLoc, ErrCode::MissingOpeningDelimiter,
+          LogErrorAt(Lex().CurLoc, ErrCode::MissingOpeningDelimiter,
                      "Expected '(' after the type arguments of '" + MethodName + "'."
                      "\n  Hint: type arguments on a method are only written on a "
                      "call, e.g. `x." + MethodName + "::<int>(...)`.",
@@ -266,7 +266,7 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
             if (CurTok == ')')
               break;
             if (CurTok != ',') {
-              LogErrorAt(CurLoc, ErrCode::MissingComma, "Expected ')' or ',' in argument list", SLM::ErrorCategory::SYNTAX_ERROR);
+              LogErrorAt(Lex().CurLoc, ErrCode::MissingComma, "Expected ')' or ',' in argument list", SLM::ErrorCategory::SYNTAX_ERROR);
               return nullptr;
             }
             getNextToken();
@@ -289,7 +289,7 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
       }
     } else if (CurTok == TOK_PLUS_PLUS || CurTok == TOK_MINUS_MINUS) {
       int OpType = CurTok;
-      SourceLocation OpLoc = CurLoc;
+      SourceLocation OpLoc = Lex().CurLoc;
       getNextToken();
       char Op = (OpType == TOK_PLUS_PLUS) ? '+' : '-';
       Base = std::make_unique<PostfixExprAST>(OpLoc, Op, std::move(Base));
