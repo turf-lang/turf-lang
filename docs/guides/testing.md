@@ -143,8 +143,8 @@ several at a time. The exit status is `0` when every test passed and `1`
 otherwise. The `[tests]` label is the directory a file is in, and the order of
 the lines is whatever finishes first, so do not depend on it.
 
-A project with no `tests/` directory, or one with no tests in it, is an error,
-not a pass.
+A project with no test anywhere (no `tests/` directory and no `@test` function
+under `src/`, or a `tests/` with no tests in it) is an error, not a pass.
 
 When a check fails, the report shows what the program printed. Change the
 expected value to `213.0` and run again:
@@ -170,10 +170,11 @@ $ echo $?
 ```
 
 Exit status 134 is the program aborting: a failed assertion prints its message
-and aborts, which is all a failure is. There is no framework, no test discovery
-inside a file and no test attributes. One file is one test, so a file should
-check one thing, or a few closely related things: the first failed assertion
-ends the file, and the later ones do not run.
+and aborts, which is all a failure is. One file is one test, so a file should check one
+thing, or a few closely related things: the first failed assertion ends the
+file, and the later ones do not run. Functions marked `@test`
+([below](#tests-beside-the-code)) are the exception: each is a test of its own, run in
+a process of its own.
 
 ## Assertions
 
