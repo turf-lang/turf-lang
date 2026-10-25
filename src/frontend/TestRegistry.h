@@ -61,6 +61,10 @@ struct Test {
   bool SpecOk = false;
   TestAnnotation::Spec Spec;
   bool ReturnsError = false; ///< declared `!void`
+  /// error: the tag the program reports that error by, `<type identity>::
+  /// <variant>` (`fs::FsError::RemoveFileFailed`, `ParseError::Empty`), set by
+  /// the Resolver once it knows which type the test named.
+  std::string ErrorTag;
   /// compile_error: the errors reported inside the test.
   std::vector<DiagnosticEngine::Diag> Errors;
   /// Test build, main file: the warnings reported inside the test.
@@ -100,6 +104,9 @@ bool swallowWarning(const DiagnosticEngine::Diag &D);
 /// A warning that is being recorded: in a test build, kept with the
 /// main-file test it lies inside.
 void noteWarning(const DiagnosticEngine::Diag &D);
+
+/// The Resolver's answer for an `error` outcome: see Test::ErrorTag.
+void noteErrorTag(const FuncDefExprAST &F, const std::string &Tag);
 
 /// The symbol code generation gave test @p F.
 void noteEmitted(const FuncDefExprAST &F, const std::string &Symbol);

@@ -17,7 +17,7 @@
 //   @test(no_warnings)                         it compiles with no warning
 //   @test(panic, "text")                       it panics with that message
 //   @test(exit, 3)                             it ends through sys::exit(3)
-//   @test(error, FsError::NotFound)            its `!void` body returns that error
+//   @test(error, ParseError::Empty)            its `!void` body returns that error
 //
 // The outcome words mean this only as the FIRST argument, so they reserve
 // nothing: `compile_error` and not `Error::E041`, because `Error::E041` is
@@ -46,7 +46,8 @@ struct Spec {
   bool HasFix = false;
   std::string Fix; ///< compile_error's `fix:`: a printed `Fix:` line contains this
   int Status = 0;  ///< exit
-  std::string ErrorType, ErrorVariant; ///< error
+  /// error: the type as written (`ParseError`, `fs::FsError`) and the variant.
+  std::string ErrorType, ErrorVariant;
 };
 
 /// The word that names @p K in source, "" for Returns (which has none).
@@ -183,9 +184,10 @@ inline std::string parse(const Annotation &Ann, Spec &Out) {
     break;
   }
   case Outcome::Error: {
-    const size_t Sep = Rest.size() == 1 ? Rest[0]->Value.find("::") : std::string::npos;
+    // `ParseError::Empty`, or `fs::FsError::RemoveFileFailed` for a module's.
+    const size_t Sep = Rest.size() == 1 ? Rest[0]->Value.rfind("::") : std::string::npos;
     if (Rest.size() != 1 || Rest[0]->IsString || Rest[0]->IsNumber || Sep == std::string::npos)
-      return "'error' takes the error the test returns: '@test(error, FsError::NotFound)'.";
+      return "'error' takes the error the test returns: '@test(error, ParseError::Empty)'.";
     Out.ErrorType = Rest[0]->Value.substr(0, Sep);
     Out.ErrorVariant = Rest[0]->Value.substr(Sep + 2);
     break;

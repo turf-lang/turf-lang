@@ -22,8 +22,9 @@
 #include <vector>
 
 /// One argument of an annotation: `value` (positional, Key empty) or
-/// `key: value`. A key is a word; a value is a word, a path of two words
-/// (`FsError::NotFound`), a whole number or a string literal. A word is an
+/// `key: value`. A key is a word; a value is a word, a path of words
+/// (`ParseError::Empty`, `fs::FsError::RemoveFileFailed`), a whole number or a
+/// string literal. A word is an
 /// identifier or a keyword, as spelled (`error: ...` is a valid key). The
 /// grammar accepts nothing richer, so no pass has to evaluate an expression
 /// here.

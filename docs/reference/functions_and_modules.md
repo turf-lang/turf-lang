@@ -689,7 +689,7 @@ test passes when its body returns (a `!void` body: without an error).
 | `@test(no_warnings)` | the test compiles with no warning, then runs and returns |
 | `@test(panic, "text")` | the test panics (exit status 134) and its output contains `text` |
 | `@test(exit, 3)` | the test ends through `sys::exit(3)`; the status is `0` to `255` |
-| `@test(error, ParseError::Empty)` | the `!void` body returns that error |
+| `@test(error, ParseError::Empty)` | the `!void` body returns that error (a module's error type is written as in code: `FsError::X` once imported by name, or `fs::FsError::X`) |
 
 The text `""` matches any message. Arguments are literals, codes and variant
 names, never expressions. The outcome words are not reserved: a program's own

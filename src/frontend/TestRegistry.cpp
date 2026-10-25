@@ -111,6 +111,13 @@ void noteWarning(const DiagnosticEngine::Diag &D) {
     keepOnce(T->Warnings, D);
 }
 
+void noteErrorTag(const FuncDefExprAST &F, const std::string &Tag) {
+  for (auto &T : g_State.Tests)
+    if (T.File == F.getLoc().Filename && T.DeclLoc.Line == F.getLoc().Line &&
+        T.DeclLoc.Col == F.getLoc().Col)
+      T.ErrorTag = Tag;
+}
+
 void noteEmitted(const FuncDefExprAST &F, const std::string &Symbol) {
   for (auto &T : g_State.Tests)
     if (T.File == F.getLoc().Filename && T.DeclLoc.Line == F.getLoc().Line &&
@@ -137,7 +144,7 @@ std::vector<const Test *> mainFileTests() {
 //     {"name": "parses_a_port", "line": 12, "outcome": "returns",
 //      "returns_error": false, "run": 0,
 //      "code": "E041", "text": "...", "fix": "...", "status": 3,
-//      "error": "FsError::NotFound",
+//      "error": "ParseError::Empty",
 //      "errors": [{"code": "E041", "line": 14, "message": "...", "fix": "..."}],
 //      "warnings": [{"code": "E172", "line": 13, "message": "..."}]}]}
 //
@@ -184,7 +191,9 @@ bool writeManifest(const std::string &Path, bool HasMain,
       O["status"] = T->Spec.Status;
       break;
     case Outcome::Error:
-      O["error"] = T->Spec.ErrorType + "::" + T->Spec.ErrorVariant;
+      // As the program reports the error value (Test::ErrorTag).
+      O["error"] = !T->ErrorTag.empty() ? T->ErrorTag
+                                        : T->Spec.ErrorType + "::" + T->Spec.ErrorVariant;
       break;
     case Outcome::Returns:
     case Outcome::NoWarnings:

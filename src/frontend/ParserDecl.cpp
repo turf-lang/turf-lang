@@ -1459,7 +1459,7 @@ std::unique_ptr<ExprAST> ParseOperatorDecl(bool HasCallerLocation) {
 // Parses one or more `@name`, `@name(arg, key: arg, ...)` annotations in front
 // of a function or `extern fn`, plus the older `@caller_location` decorator
 // (STD-002), in any order. An annotation's arguments are words (identifiers or
-// keywords), two-word paths (`FsError::NotFound`), whole numbers or string
+// keywords), paths (`ParseError::Empty`), whole numbers or string
 // literals, nothing richer, so the grammar knows no annotation's meaning: the
 // Resolver rejects a name no pass has claimed, and the one pass that consumes a
 // name checks that name's arguments (src/frontend/Annotation.h).
@@ -1511,25 +1511,26 @@ std::unique_ptr<ExprAST> ParseAnnotatedDecl() {
         auto BadArgument = [&]() {
           LogErrorAt(CurLoc, ErrCode::UnexpectedToken,
                      "Expected a word or a string in the arguments of '@" + Ann.Name +
-                         "'.\n  Hint: An argument is a word, a path such as `FsError::NotFound`, a whole number or a string, never an expression: `@" +
+                         "'.\n  Hint: An argument is a word, a path such as `ParseError::Empty`, a whole number or a string, never an expression: `@" +
                          Ann.Name + "(word)` or `@" + Ann.Name + "(\"text\")`.",
                      SLM::ErrorCategory::SYNTAX_ERROR);
         };
-        // `Word::Word` after a word already eaten: a path such as
-        // `FsError::NotFound` (`@test(error, ...)` names an error variant).
+        // `::Word`s after a word already eaten: a path such as
+        // `ParseError::Empty` or `fs::FsError::RemoveFileFailed`
+        // (`@test(error, ...)` names an error variant).
         auto ReadPathTail = [&](std::string &Value) {
-          if (CurTok != TOK_SCOPE)
-            return true;
-          getNextToken(); // eat '::'
-          if (!IsWord()) {
-            LogErrorAt(CurLoc, ErrCode::UnexpectedToken,
-                       "Expected a name after '" + Value + "::' in the arguments of '@" +
-                           Ann.Name + "'.\n  Hint: A path names one thing inside another, e.g. `FsError::NotFound`.",
-                       SLM::ErrorCategory::SYNTAX_ERROR);
-            return false;
+          while (CurTok == TOK_SCOPE) {
+            getNextToken(); // eat '::'
+            if (!IsWord()) {
+              LogErrorAt(CurLoc, ErrCode::UnexpectedToken,
+                         "Expected a name after '" + Value + "::' in the arguments of '@" +
+                             Ann.Name + "'.\n  Hint: A path names one thing inside another, e.g. `ParseError::Empty`.",
+                         SLM::ErrorCategory::SYNTAX_ERROR);
+              return false;
+            }
+            Value += "::" + IdentifierStr;
+            getNextToken();
           }
-          Value += "::" + IdentifierStr;
-          getNextToken();
           return true;
         };
         // A value is a word, a path, a whole number or a string; ReadValue

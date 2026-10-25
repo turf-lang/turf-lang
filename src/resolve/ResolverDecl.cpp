@@ -197,20 +197,29 @@ void Resolver::checkTestFunction(const FuncDefExprAST &Node) {
                            Hint)
         .raise();
   if (Spec.Kind == TestAnnotation::Outcome::Error) {
-    auto ET = SymTable_.isErrorTypeName(Spec.ErrorType) ? SymTable_.lookupErrorType(Spec.ErrorType)
-                                                        : nullptr;
+    // Resolved the way a written `Type::Variant` is: `ParseError`, an
+    // imported `FsError`, or `fs::FsError`.
+    const char *ErrorHint = "An 'error' outcome names a variant of an error type the program "
+                            "declares or imports, e.g. '@test(error, ParseError::Empty)'.";
+    const size_t Sep = Spec.ErrorType.rfind("::");
+    const std::string Qualifier = Sep == std::string::npos ? "" : Spec.ErrorType.substr(0, Sep);
+    const std::string TypeName =
+        Sep == std::string::npos ? Spec.ErrorType : Spec.ErrorType.substr(Sep + 2);
+    auto Identity = tryResolveTypeSpelling(Qualifier, TypeName, currentModuleName());
+    auto ET = Identity && SymTable_.isErrorTypeName(*Identity)
+                  ? SymTable_.lookupErrorType(*Identity)
+                  : nullptr;
     if (!ET)
-      InvalidAnnotationError(Ann->Loc, "'" + Spec.ErrorType + "' is not an error type.",
-                             "An 'error' outcome names a variant of an error type the "
-                             "program declares or imports, e.g. '@test(error, FsError::NotFound)'.")
+      InvalidAnnotationError(Ann->Loc, "'" + Spec.ErrorType + "' is not an error type.", ErrorHint)
           .raise();
     else if (!ET->hasVariant(Spec.ErrorVariant))
       InvalidAnnotationError(Ann->Loc,
                              "Error type '" + Spec.ErrorType + "' has no variant '" +
                                  Spec.ErrorVariant + "'.",
-                             "An 'error' outcome names a variant of an error type the "
-                             "program declares or imports, e.g. '@test(error, FsError::NotFound)'.")
+                             ErrorHint)
           .raise();
+    else
+      TestRegistry::noteErrorTag(Node, *Identity + "::" + Spec.ErrorVariant);
   }
 }
 
