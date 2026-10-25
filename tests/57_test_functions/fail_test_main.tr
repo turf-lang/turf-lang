@@ -1,0 +1,6 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: 'main' cannot be a test
+// TDP-2-006: `main` is the program's entry point, which a test build replaces.
+@test
+fn main(): void {
+}

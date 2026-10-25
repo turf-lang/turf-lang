@@ -337,6 +337,11 @@ public:
   // Print all collected diagnostics (sorted by line) then clear them.
   static void flushAll();
 
+  // TDP-2-001: checks @p D's fix as flushAll() does for a printed error.
+  // TDP-2-006: used for a compile_error test's own errors, which are never
+  // printed (TestRegistry.h).
+  static void checkFix(Diag &D);
+
   // Discard everything (used between passes if needed).
   static void reset();
 

@@ -328,6 +328,13 @@ public:
   void visitDefer(DeferExprAST &Node) override;
 
   void visitFuncDef(FuncDefExprAST &Node) override;
+  /// visitFuncDef()'s work; visitFuncDef() adds a compile_error test's own
+  /// recovery point around it (TestRegistry.h).
+  void resolveFuncDef(FuncDefExprAST &Node);
+  /// TDP-2-006: what `@test` asks of a function beyond its annotation's
+  /// arguments (TestAnnotation::validate()): a plain top-level function, and
+  /// an `error` outcome that names a real error variant.
+  void checkTestFunction(const FuncDefExprAST &Node);
   void visitFuncCall(FuncCallExprAST &Node) override;
   void visitMethodCall(MethodCallExprAST &Node) override;
 

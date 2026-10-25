@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: A test takes no parameters
+// TDP-2-006: `turf test` calls a test with nothing. (So a generic test, whose
+// type would come from an argument, is impossible too.)
+@test
+fn a(n: int): void {
+}
+
+fn main(): int {
+    return 0;
+}

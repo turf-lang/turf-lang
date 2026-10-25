@@ -263,6 +263,18 @@ public:
   /// Pass 1, before any expression is visited, which is why the Parser (which
   /// sees every `try`) records it rather than a later scan trying to find one.
   bool UsesTry = false;
+
+  /// TDP-2-006 (TestRegistry.h): where the first token after the body's `}`
+  /// is, set by ParseFuncDef(). A diagnostic from the `fn` up to here is
+  /// "inside the test", which is what a compile_error test's outcome is
+  /// judged on. Unset (line 0) for an operator, which cannot be a test.
+  SourceLocation BodyEnd{0, 0, ""};
+  /// Set by the Resolver or the TypeChecker when an error was reported inside
+  /// a compile_error test's body and taken as the test's (TestRegistry.h):
+  /// every later pass skips this declaration, as a compile stops after the
+  /// pass that rejected a program.
+  bool TestBodyFailed = false;
+
   const SourceLocation &getLoc() const { return Loc; }
   const SourceLocation &getNameLoc() const { return NameLoc; }
   const TurfType *getReturnType() const { return ReturnType.get(); }
@@ -331,6 +343,7 @@ public:
     Cloned->setVisibility(getVisibility());
     Cloned->setAnnotations(getAnnotations());
     Cloned->UsesTry = UsesTry;
+    Cloned->BodyEnd = BodyEnd;
     Cloned->SizeParams = SizeParams;
     Cloned->SourceName = SourceName;
     return Cloned;

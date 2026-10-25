@@ -8,6 +8,8 @@
 #include "tooling/TestExpectations.h"
 #include "turf/Analysis.h"
 
+#include "llvm/Support/JSON.h"
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -421,6 +423,11 @@ struct TestFile {
   std::string Rel;  ///< path under the tests directory, '/'-separated
   std::string Key;  ///< the register's spelling: `<Dir>/<Rel>`
   fs::path Path;    ///< absolute
+  /// TDP-2-006: the file declares `@test` functions, each run as a test.
+  bool HasTests = false;
+  /// A file of the root package's src/ (it is there for its `@test`
+  /// functions alone: its own `main` is the program, not a test).
+  bool InSrc = false;
   std::string Suite() const { return Path.parent_path().filename().string(); }
   std::string Name() const { return Path.filename().string(); }
 };
@@ -446,9 +453,10 @@ public:
       : O_(O), Tests_(std::move(Tests)), Temp_(std::move(TempDir)), Jobs_(Jobs), Timeout_(Timeout),
         Reg_(Reg), Pal_(Pal) {}
 
-  /// Runs everything; the results are in input order.
-  std::vector<TestResult> runAll() {
-    std::vector<TestResult> Results(Tests_.size());
+  /// Runs everything; the results are in input order, a file of `@test`
+  /// functions giving one per test.
+  std::vector<std::vector<TestResult>> runAll() {
+    std::vector<std::vector<TestResult>> Results(Tests_.size());
     std::atomic<size_t> Next{0};
     auto Worker = [&] {
       for (;;) {
@@ -475,9 +483,10 @@ private:
   Palette Pal_;
   std::mutex PrintMu_;
 
-  void say(const TestFile &T, const std::string &Status) {
+  void say(const TestFile &T, const std::string &Status, const std::string &Test = "") {
     std::lock_guard<std::mutex> L(PrintMu_);
-    std::cout << "[" << Pal_.cyan(T.Suite()) << "] " << T.Name() << " ... " << Status << std::endl;
+    std::cout << "[" << Pal_.cyan(T.Suite()) << "] " << T.Name() << (Test.empty() ? "" : ": " + Test)
+              << " ... " << Status << std::endl;
   }
 
   void sayExtra(const std::string &Text) {
@@ -495,7 +504,8 @@ private:
     return {true, ""};
   }
 
-  ProcResult compile(const TestFile &T, const fs::path &Program) {
+  ProcResult compile(const TestFile &T, const fs::path &Program,
+                     const std::vector<std::string> &Extra = {}) {
     std::vector<std::string> Args;
     if (!O_.PackageGraph.empty()) {
       Args.push_back("--package-graph");
@@ -504,6 +514,7 @@ private:
     Args.push_back(T.Name());
     Args.push_back("-o");
     Args.push_back(Program.string());
+    Args.insert(Args.end(), Extra.begin(), Extra.end());
     Args.insert(Args.end(), O_.CompileFlags.begin(), O_.CompileFlags.end());
     return RunProcess(O_.Compiler, Args, T.Path.parent_path().string(), CompileTimeoutSec);
   }
@@ -581,17 +592,98 @@ private:
     return JoinLines(Lines) + (Output.empty() ? "" : "\n" + Output);
   }
 
-  TestResult runOne(size_t Index) {
+  std::vector<TestResult> runOne(size_t Index) {
     const TestFile &T = Tests_[Index];
-    const std::string Source = ReadFile(T.Path);
+    if (T.HasTests && !StartsWith(T.Name(), "fail_"))
+      return runTestFunctions(T, Index);
+    return {runFile(T, Index)};
+  }
+
+  /// TDP-2-006: a file's `@test` functions. The file is built once as a test
+  /// program (`--test-build`), whose manifest says what each test expects and
+  /// what its compile reported inside each body; a test that runs gets a
+  /// process of its own (`<program> <n>`), since a panic or an exit ends the
+  /// whole process (F-PANIC-1). A tests/ file that also has a `main` is run
+  /// as an ordinary test as well.
+  std::vector<TestResult> runTestFunctions(const TestFile &T, size_t Index) {
+    const fs::path Program = programPath(Index, "u");
+    const fs::path Manifest = Temp_ / ("u" + std::to_string(Index) + ".tests.json");
+    struct Cleanup {
+      fs::path A, B;
+      ~Cleanup() {
+        std::error_code EC;
+        fs::remove(A, EC);
+        fs::remove(B, EC);
+      }
+    } Clean{Program, Manifest};
+
+    std::vector<std::string> Extra = {"--test-build", Manifest.string()};
+    ProcResult C = compile(T, Program, Extra);
+    if (g_Interrupted)
+      return {{false, T.Key + " (interrupted)"}};
+    if (C.Status != 0)
+      return {fail(T, C.TimedOut ? "COMPILE TIMED OUT" : "COMPILE FAILED (its tests did not run)",
+                   "(Compile Error building its tests, exit " + std::to_string(C.Status) + "):\n" +
+                       C.Output)};
+    std::vector<TestExpect::TestCase> Cases;
+    bool HasMain = false;
+    std::string Why;
+    if (!TestExpect::ParseManifest(ReadFile(Manifest), Cases, HasMain, Why))
+      return {fail(T, "FAILED (" + Why + ")", "(" + Why + ")")};
+
+    std::vector<TestResult> Out;
+    for (const auto &Case : Cases) {
+      if (g_Interrupted)
+        break;
+      Out.push_back(judgeTestFunction(T, Program, Case));
+    }
+    if (HasMain && !T.InSrc && !g_Interrupted)
+      Out.push_back(runFile(T, Index));
+    return Out;
+  }
+
+  TestResult judgeTestFunction(const TestFile &T, const fs::path &Program,
+                               const TestExpect::TestCase &Case) {
+    const std::string Label = Case.Name;
+    const std::string Key = T.Key + ": " + Case.Name + " (line " + std::to_string(Case.Line) + ")";
+    auto Failed = [&](const std::string &Headline, const std::vector<std::string> &Why,
+                      const std::string &Output) -> TestResult {
+      say(T, Pal_.red(Headline), Label);
+      return {false, Key + ":\n" + With(Why, Output)};
+    };
+    if (Case.Outcome == "compile_error") {
+      if (auto Why = TestExpect::JudgeCompileError(Case); !Why.empty())
+        return Failed("FAILED (compile_error)", Why, "");
+      say(T, Pal_.green("PASS (Rejected properly)"), Label);
+      return {true, ""};
+    }
+    if (auto Why = TestExpect::JudgeWarnings(Case); !Why.empty())
+      return Failed("FAILED (" + Case.Outcome + ")", Why, "");
+    if (Case.Run < 0)
+      return Failed("FAILED (not built)", {"the test program has no entry for this test"}, "");
+    ProcResult R = RunProcess(Program.string(), {std::to_string(Case.Run)},
+                              T.Path.parent_path().string(), Timeout_);
+    if (auto Why = TestExpect::JudgeRun(Case, R.Status, R.TimedOut, R.Output); !Why.empty())
+      return Failed(R.TimedOut ? "TIMEOUT" : "FAILED (" + Case.Outcome + ")", Why,
+                    TestExpect::ProgramOutput(R.Output));
+    say(T, Pal_.green("PASS"), Label);
+    return {true, ""};
+  }
+
+  fs::path programPath(size_t Index, const char *Prefix) const {
 #ifdef _WIN32
     // turfc writes <name>.exe for `-o <name>` (and keeps a name that already ends
     // in .exe), so name the program with the suffix the existence checks and the
     // run below look for.
-    const fs::path Program = Temp_ / ("t" + std::to_string(Index) + ".exe");
+    return Temp_ / (Prefix + std::to_string(Index) + ".exe");
 #else
-    const fs::path Program = Temp_ / ("t" + std::to_string(Index));
+    return Temp_ / (Prefix + std::to_string(Index));
 #endif
+  }
+
+  TestResult runFile(const TestFile &T, size_t Index) {
+    const std::string Source = ReadFile(T.Path);
+    const fs::path Program = programPath(Index, "t");
     struct Cleanup {
       fs::path P;
       ~Cleanup() {
@@ -745,7 +837,59 @@ std::vector<TestFile> Discover(const fs::path &Dir, const std::string &DirSpelli
         Skipped = true;
     if (Skipped)
       continue;
-    Found.push_back({Rel, DirSpelling + "/" + Rel, P});
+    TestFile T{Rel, DirSpelling + "/" + Rel, P};
+    T.HasTests = TestExpect::HasTestFunctions(ReadFile(P));
+    Found.push_back(std::move(T));
+  }
+  std::sort(Found.begin(), Found.end(), [](const TestFile &A, const TestFile &B) { return A.Rel < B.Rel; });
+  return Found;
+}
+
+/// The root package's src/ directory named by package graph @p GraphFile, or
+/// "" (no graph, or one that does not say). The compile of each file checks
+/// the graph properly; this only finds where the package's own files are.
+fs::path RootSourceDir(const std::string &GraphFile) {
+  if (GraphFile.empty())
+    return {};
+  auto Parsed = llvm::json::parse(ReadFile(GraphFile));
+  if (!Parsed) {
+    llvm::consumeError(Parsed.takeError());
+    return {};
+  }
+  const llvm::json::Object *Top = Parsed->getAsObject();
+  const llvm::json::Object *Pkgs = Top ? Top->getObject("packages") : nullptr;
+  auto Root = Top ? Top->getString("root") : std::nullopt;
+  const llvm::json::Object *Pkg = Pkgs && Root ? Pkgs->getObject(*Root) : nullptr;
+  auto Src = Pkg ? Pkg->getString("src") : std::nullopt;
+  if (!Src)
+    return {};
+  fs::path P(Src->str());
+  if (P.is_relative())
+    P = fs::path(GraphFile).parent_path() / P;
+  std::error_code EC;
+  return fs::is_directory(P, EC) ? P.lexically_normal() : fs::path();
+}
+
+/// TDP-2-006: the files of the package's src/ that declare `@test`
+/// functions, sorted by path. Their tests run beside the tests directory's.
+std::vector<TestFile> DiscoverSourceTests(const fs::path &Src) {
+  std::vector<TestFile> Found;
+  std::error_code EC;
+  for (fs::recursive_directory_iterator I(Src, EC), E; !EC && I != E; I.increment(EC)) {
+    const fs::path &P = I->path();
+    const std::string Name = P.filename().string();
+    if (!Name.empty() && Name[0] == '.') {
+      if (I->is_directory(EC))
+        I.disable_recursion_pending();
+      continue;
+    }
+    if (!I->is_regular_file(EC) || !EndsWith(Name, ".tr") || !TestExpect::HasTestFunctions(ReadFile(P)))
+      continue;
+    const std::string Rel = "src/" + fs::relative(P, Src, EC).generic_string();
+    TestFile T{Rel, Rel, P};
+    T.HasTests = true;
+    T.InSrc = true;
+    Found.push_back(std::move(T));
   }
   std::sort(Found.begin(), Found.end(), [](const TestFile &A, const TestFile &B) { return A.Rel < B.Rel; });
   return Found;
@@ -792,6 +936,13 @@ int RunTests(const TestRunOptions &O) {
                                }),
                 Tests.end());
   }
+  // A run of named tests is about those; a full run also takes the package's
+  // own `@test` functions.
+  if (O.Only.empty())
+    if (const fs::path Src = RootSourceDir(O.PackageGraph); !Src.empty()) {
+      auto InSrc = DiscoverSourceTests(Src);
+      Tests.insert(Tests.end(), InSrc.begin(), InSrc.end());
+    }
   if (Tests.empty()) {
     std::cerr << "Error: no tests found in '" << O.Dir << "'.\n"
               << "  hint: a test is a `.tr` file (not one ending in `_module.tr`, which is a companion "
@@ -893,16 +1044,18 @@ int RunTests(const TestRunOptions &O) {
     return 130;
   }
 
-  size_t Passed = 0;
+  size_t Passed = 0, Total = 0;
   std::vector<std::string> Failures;
-  for (const auto &Res : Tests_) {
-    if (Res.Pass)
-      ++Passed;
-    else
-      Failures.push_back(Res.Detail);
-  }
+  for (const auto &FileResults : Tests_)
+    for (const auto &Res : FileResults) {
+      ++Total;
+      if (Res.Pass)
+        ++Passed;
+      else
+        Failures.push_back(Res.Detail);
+    }
   std::cout << "\n" << Pal.bold("=== Test Summary ===") << "\n"
-            << "Total Tests: " << Tests_.size() << "\n"
+            << "Total Tests: " << Total << "\n"
             << "Passed:      " << Pal.green(std::to_string(Passed)) << "\n"
             << "Failed:      " << Pal.red(std::to_string(Failures.size())) << "\n";
   // The register is owed work, never "expected": say how much, every run, so

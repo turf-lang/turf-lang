@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: 'NoSuchError' is not an error type
+// TDP-2-006: the type of an `error` outcome must exist.
+@test(error, NoSuchError::Empty)
+fn a(): !void {
+    return;
+}
+
+fn main(): int {
+    return 0;
+}

@@ -251,6 +251,220 @@ fn main(): int {
 }
 EOF
 
+# --- @test functions (TDP-2-006), broken on purpose ---------------------------------
+# One file, one failing test per way each outcome can fail, and one passing
+# test: every failure must name its reason, and the other tests must still run.
+F="$WORK/testfns"
+fixture "$F" tests/outcomes.tr <<'EOF'
+import test;
+
+error ParseError {
+    Empty,
+    TooBig,
+}
+
+fn parse(s: string): !int {
+    if s.length() == 0 {
+        return ParseError::Empty;
+    }
+    return 1;
+}
+
+fn square(n: int): int {
+    return n * n;
+}
+
+@deprecated("use square")
+fn old(n: int): int {
+    return n;
+}
+
+@test
+fn returns_assertion(): void {
+    test::assert(1 == 2, "one is not two");
+}
+
+@test
+fn returns_with_error(): !void {
+    try parse("");
+    return;
+}
+
+@test(compile_error, E041, "Unknown function")
+fn ce_no_error(): void {
+    io::printline(1);
+}
+
+@test(compile_error, E041, "Unknown function")
+fn ce_another_code(): void {
+    immut x: int = "text";
+}
+
+@test(compile_error, E041, "nothing like this")
+fn ce_another_message(): void {
+    undeclared(1);
+}
+
+@test(compile_error, E041, "sqaure", fix: "replace 'sqaure' with 'cube'")
+fn ce_another_fix(): void {
+    io::printline(sqaure(2));
+}
+
+@test(compile_error, E041, "undeclared", fix: "anything")
+fn ce_no_fix(): void {
+    io::printline(undeclared(2));
+}
+
+@test(warning, E172, "use square")
+fn warning_none(): void {
+    io::printline(1);
+}
+
+@test(warning, E172, "another text")
+fn warning_another(): void {
+    io::printline(old(1));
+}
+
+@test(no_warnings)
+fn no_warnings_has_one(): void {
+    io::printline(old(1));
+}
+
+@test(panic, "Division by zero")
+fn panic_returns(): void {
+    io::printline(1);
+}
+
+@test(panic, "Division by zero")
+fn panic_another_message(): void {
+    test::assert(false, "other");
+}
+
+@test(exit, 3)
+fn exit_returns(): void {
+    io::printline(1);
+}
+
+@test(exit, 3)
+fn exit_another_status(): void {
+    sys::exit(4);
+}
+
+@test(error, ParseError::TooBig)
+fn error_another(): !void {
+    try parse("");
+    return;
+}
+
+@test(error, ParseError::Empty)
+fn error_none(): !void {
+    try parse("x");
+    return;
+}
+
+@test
+fn still_runs(): void {
+    test::assert(true, "fine");
+}
+EOF
+c testfns "$F" --test --timeout 5
+expect_rc "@test failures" testfns 1
+expect_out "@test failures: the passing test still runs" testfns "outcomes.tr: still_runs ... PASS"
+expect_out "@test failures: the count" testfns "Failed:      16"
+tf() { expect_out "@test failure $1" testfns "$2"; }
+tf returns_assertion "it panicked; expected it to return"
+tf returns_with_error "it returned the error ParseError::Empty; expected it to return"
+tf ce_no_error "its body compiled without an error; expected E041 \"Unknown function\""
+tf ce_another_code "its body has another error, E066 at line 42"
+tf ce_another_message "no E041 message contains \"nothing like this\""
+tf ce_another_fix "E041 at line 52: Fix: replace 'sqaure' with 'square'"
+tf ce_no_fix "E041 at line 57: no fix"
+tf warning_none "its body compiled without warning E172 \"use square\""
+tf warning_another "its body compiled without warning E172 \"another text\"; its warnings:"
+tf no_warnings_has_one "its body compiled with a warning, E172 at line 72"
+tf panic_returns "it returned; expected a panic with \"Division by zero\""
+tf panic_another_message "it panicked, but its output does not contain \"Division by zero\""
+tf exit_returns "it returned; expected it to end through sys::exit(3)"
+tf exit_another_status "it ended with exit status 4; expected it to end through sys::exit(3)"
+tf error_another "it returned the error ParseError::Empty; expected it to return the error ParseError::TooBig"
+tf error_none "it returned; expected it to return the error ParseError::Empty"
+
+# A file whose tests do not build is one failure, with the compiler's reason.
+fixture "$F/b" tests/broken.tr <<'EOF'
+@test
+fn a(): void {
+    immut n: int = "text";
+}
+EOF
+c testfns_build "$F/b" --test
+expect_rc "@test file that does not build" testfns_build 1
+expect_out "@test file that does not build" testfns_build "broken.tr ... COMPILE FAILED (its tests did not run)"
+expect_out "@test file that does not build (the reason)" testfns_build "[E066"
+
+# A normal build leaves every test out: the object is byte for byte the
+# program's without them (same file name, so the module is named the same).
+mkdir -p "$F/with" "$F/without"
+cat > "$F/with/prog.tr" <<'EOF'
+fn twice(n: int): int { return n * 2; }
+
+@test
+fn doubles(): void {
+    io::printline(twice(2));
+}
+
+@test(compile_error, E041, "")
+fn undeclared_call(): void {
+    undeclared();
+}
+
+fn main(): int { return twice(0); }
+EOF
+cat > "$F/without/prog.tr" <<'EOF'
+fn twice(n: int): int { return n * 2; }
+
+fn main(): int { return twice(0); }
+EOF
+c obj_with "$F/with" prog.tr --emit-obj -o prog
+c obj_without "$F/without" prog.tr --emit-obj -o prog
+expect_rc "a build with tests" obj_with 0
+cmp -s "$F/with/prog.o" "$F/without/prog.o" ||
+  fail "a build with @test functions differs from the same program without them"
+
+# A package's own src/ files with tests run beside tests/, found through the
+# graph; a program's `main` there is the program, not a test.
+P="$WORK/pkgtests"
+fixture "$P" src/util.tr <<'EOF'
+import test;
+
+pub fn half(n: int): int { return n / 2; }
+
+@test
+fn halves(): void {
+    test::assert(half(8) == 4, "8 halved");
+}
+EOF
+fixture "$P" src/main.tr <<'EOF'
+import util;
+
+@test
+fn calls_its_module(): void {
+    io::printline(util::half(4));
+}
+
+fn main(): int { return util::half(0); }
+EOF
+fixture "$P" tests/plain.tr <<'EOF'
+fn main(): int { return 0; }
+EOF
+printf '{"format": 1, "root": "app", "packages": {"app": {"src": "src", "deps": [], "tests": "tests"}}}\n' > "$P/graph.json"
+c pkgtests "$P" --test tests --package-graph graph.json
+expect_rc "@test functions in src/" pkgtests 0
+expect_out "@test functions in src/" pkgtests "util.tr: halves ... PASS"
+expect_out "@test functions in src/ (a program's own tests)" pkgtests "main.tr: calls_its_module ... PASS"
+expect_out "@test functions in src/ (its main is not a test)" pkgtests "Total Tests: 3"
+c pkgtests_only "$P" --test tests --package-graph graph.json --only plain.tr
+expect_out "--only runs what it names, not src/'s tests" pkgtests_only "Total Tests: 1"
+
 # --- --exclude, and the diagnostic register is opt-in ------------------------------
 X="$WORK/exclude"
 fixture "$X" tests/plain.tr <<'EOF'

@@ -1,0 +1,16 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: Error type 'ParseError' has no variant 'Emptyy'
+// TDP-2-006: an `error` outcome is resolved like any other `E::V`, so a
+// misspelt variant is an error, not a test that can never pass.
+error ParseError {
+    Empty,
+}
+
+@test(error, ParseError::Emptyy)
+fn a(): !void {
+    return ParseError::Empty;
+}
+
+fn main(): int {
+    return 0;
+}

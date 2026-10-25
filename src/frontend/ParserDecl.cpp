@@ -17,6 +17,7 @@
  */
 
 #include "frontend/Parser.h"
+#include "frontend/TestRegistry.h"
 #include "frontend/AST.h"
 #include "analysis/Algorithms.h"
 #include "sema/Builtins.h"
@@ -1182,6 +1183,7 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
   auto Def = std::make_unique<FuncDefExprAST>(FnLoc, FuncName, NameLoc, RetType, Params,
                                               std::move(Body), TypeParams,
                                               IsStaticMethodDecl, HasCallerLocation);
+  Def->BodyEnd = CurLoc;
   Def->UsesTry = TryScope.used();
   Def->SizeParams = SizeParams;
   NoteFunctionParsed(FuncName);
@@ -1457,8 +1459,8 @@ std::unique_ptr<ExprAST> ParseOperatorDecl(bool HasCallerLocation) {
 // Parses one or more `@name`, `@name(arg, key: arg, ...)` annotations in front
 // of a function or `extern fn`, plus the older `@caller_location` decorator
 // (STD-002), in any order. An annotation's arguments are words (identifiers or
-// keywords) or string literals, nothing richer, so the grammar knows no
-// annotation's meaning: the
+// keywords), two-word paths (`FsError::NotFound`), whole numbers or string
+// literals, nothing richer, so the grammar knows no annotation's meaning: the
 // Resolver rejects a name no pass has claimed, and the one pass that consumes a
 // name checks that name's arguments (src/frontend/Annotation.h).
 //
@@ -1506,19 +1508,45 @@ std::unique_ptr<ExprAST> ParseAnnotatedDecl() {
       while (CurTok != ')') {
         AnnotationArg Arg;
         Arg.Loc = CurLoc;
-        // A value is a word or a string; ReadValue fills Arg from whichever
-        // it finds and reports if it finds neither.
+        auto BadArgument = [&]() {
+          LogErrorAt(CurLoc, ErrCode::UnexpectedToken,
+                     "Expected a word or a string in the arguments of '@" + Ann.Name +
+                         "'.\n  Hint: An argument is a word, a path such as `FsError::NotFound`, a whole number or a string, never an expression: `@" +
+                         Ann.Name + "(word)` or `@" + Ann.Name + "(\"text\")`.",
+                     SLM::ErrorCategory::SYNTAX_ERROR);
+        };
+        // `Word::Word` after a word already eaten: a path such as
+        // `FsError::NotFound` (`@test(error, ...)` names an error variant).
+        auto ReadPathTail = [&](std::string &Value) {
+          if (CurTok != TOK_SCOPE)
+            return true;
+          getNextToken(); // eat '::'
+          if (!IsWord()) {
+            LogErrorAt(CurLoc, ErrCode::UnexpectedToken,
+                       "Expected a name after '" + Value + "::' in the arguments of '@" +
+                           Ann.Name + "'.\n  Hint: A path names one thing inside another, e.g. `FsError::NotFound`.",
+                       SLM::ErrorCategory::SYNTAX_ERROR);
+            return false;
+          }
+          Value += "::" + IdentifierStr;
+          getNextToken();
+          return true;
+        };
+        // A value is a word, a path, a whole number or a string; ReadValue
+        // fills Arg from whichever it finds and reports if it finds none.
         auto ReadValue = [&]() {
           if (CurTok == TOK_STRING_LITERAL) {
             Arg.Value = StringVal;
             Arg.IsString = true;
+          } else if (CurTok == TOK_INT_LITERAL) {
+            Arg.Value = NumLitSpelling;
+            Arg.IsNumber = true;
           } else if (IsWord()) {
             Arg.Value = IdentifierStr;
+            getNextToken();
+            return ReadPathTail(Arg.Value);
           } else {
-            LogErrorAt(CurLoc, ErrCode::UnexpectedToken,
-                       "Expected a word or a string in the arguments of '@" +
-                           Ann.Name + "'.\n  Hint: Write the argument as a word or a string: `@" + Ann.Name + "(word)` or `@" + Ann.Name + "(\"text\")`.",
-                       SLM::ErrorCategory::SYNTAX_ERROR);
+            BadArgument();
             return false;
           }
           getNextToken();
@@ -1533,13 +1561,21 @@ std::unique_ptr<ExprAST> ParseAnnotatedDecl() {
             if (!ReadValue())
               return nullptr;
           } else {
+            if (!ReadPathTail(Word))
+              return nullptr;
             Arg.Value = std::move(Word);
           }
         } else if (!ReadValue()) {
           return nullptr;
         }
+        const bool WasNumber = Arg.IsNumber;
         Ann.Args.push_back(std::move(Arg));
 
+        // `1 + 2`: a number that starts an expression is not an argument.
+        if (WasNumber && CurTok != ',' && CurTok != ')') {
+          BadArgument();
+          return nullptr;
+        }
         if (CurTok == ',') {
           getNextToken(); // eat ','
         } else if (CurTok != ')') {
@@ -1597,6 +1633,10 @@ std::unique_ptr<ExprAST> ParseAnnotatedDecl() {
   if (!Annotations.empty()) {
     if (auto *Annotated = dynamic_cast<AnnotatedDecl *>(Decl.get()))
       Annotated->setAnnotations(std::move(Annotations));
+    // TDP-2-006: where each test's body is, before any pass reports an error
+    // inside it (TestRegistry.h).
+    if (auto *F = dynamic_cast<FuncDefExprAST *>(Decl.get()))
+      TestRegistry::noteTest(*F);
   }
   return Decl;
 }

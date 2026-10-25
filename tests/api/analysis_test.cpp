@@ -1503,6 +1503,35 @@ static void testModuleNotFoundHintsAtProject(const ScratchDir &Dir) {
 // fail_*.tr failed, so the code, and which half of the diagnostic names the
 // problem, are asserted here; and so is the line between E146 and a syntax
 // error, and the alias pass's error/warning split for `@ownership` calls.
+// TDP-2-006: an analysis is a build, so a compile_error test's expected error
+// is the test's, not the program's (an editor shows no error for it), while
+// another error inside it, or one outside it, still is.
+static void testCompileErrorTests() {
+  CurrentTest = "compile_error tests";
+  auto Expected = turf::analyze(
+      {{"tests.tr", "@test(compile_error, E041, \"Unknown function\")\n"
+                    "fn t(): void {\n    undeclared();\n}\n"
+                    "fn main(): int { return 0; }\n"}},
+      []() { turf::AnalysisOptions O; O.RunLint = true; O.RunFlowAnalysis = true; return O; }());
+  CHECK(Expected.succeeded());
+  if (!Expected.succeeded())
+    std::cerr << render(Expected);
+
+  auto Other = turf::analyze(
+      {{"tests.tr", "@test(compile_error, E041, \"Unknown function\")\n"
+                    "fn t(): void {\n    immut n: int = \"x\";\n}\n"
+                    "fn main(): int {\n    undeclared_here();\n    return 0;\n}\n"}});
+  bool SawTypeError = false, SawOutside = false;
+  for (const auto &D : Other.diagnostics()) {
+    SawTypeError = SawTypeError || (D.Code == "E066" && D.Where.Line == 3);
+    SawOutside = SawOutside || (D.Code == "E041" && D.Where.Line == 6);
+  }
+  CHECK(SawTypeError);
+  CHECK(SawOutside);
+  if (!SawTypeError || !SawOutside)
+    std::cerr << render(Other);
+}
+
 static void testAnnotationDiagnostics() {
   CurrentTest = "annotation diagnostics";
   struct Case {
@@ -1521,8 +1550,13 @@ static void testAnnotationDiagnostics() {
        "E146", "only sit on an 'extern fn'", "states a fact about the declaration"},
       {"keyword key reaches the owning pass", "@ownership(error: x)\nextern fn m(n: int): int*;\nfn main(): int { return 0; }\n",
        "E146", "Unknown '@ownership' argument 'error:'", "states a fact about the declaration"},
-      {"malformed is still a syntax error", "@ownership(1)\nextern fn m(n: int): int*;\nfn main(): int { return 0; }\n",
+      {"malformed is still a syntax error", "@ownership(1 + 2)\nextern fn m(n: int): int*;\nfn main(): int { return 0; }\n",
        "E103", "Expected a word or a string", ""},
+      // TDP-2-006: `@test`'s own hint lists the outcomes.
+      {"test outcome", "@test(skipped)\nfn t(): void {\n}\nfn main(): int { return 0; }\n",
+       "E146", "'skipped' is not an outcome of '@test'", "the outcomes are compile_error"},
+      {"test code kind", "@test(compile_error, E172, \"\")\nfn t(): void {\n}\nfn main(): int { return 0; }\n",
+       "E146", "'E172' is a warning's code", "the outcomes are"},
   };
   for (const auto &C : Cases) {
     auto R = turf::analyze({{"ann.tr", C.Source}});
@@ -2336,6 +2370,7 @@ int main() {
   testTypeArgumentCount();
   testLiteralNeverConverts();
   testImportedCandidateLocation();
+  testCompileErrorTests();
   testBuiltinDocRouting();
 
   if (Failures) {

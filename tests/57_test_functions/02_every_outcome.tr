@@ -1,0 +1,78 @@
+// TDP-2-006 (issue #299): one passing test per outcome. Each way an outcome
+// can fail is in scripts/smoke/test_cmd_smoke.sh, which must see `turf test`
+// fail for that reason.
+import test;
+
+error ParseError {
+    Empty,
+    TooLong,
+}
+
+fn parse(text: string): !int {
+    if text.length() == 0 {
+        return ParseError::Empty;
+    }
+    return text.length();
+}
+
+fn square(n: int): int {
+    return n * n;
+}
+
+@deprecated("use square")
+fn old_square(n: int): int {
+    return n * n;
+}
+
+@test(compile_error, E041, "Unknown function")
+fn calling_an_undeclared_function_is_an_error(): void {
+    undeclared(1);
+}
+
+// Reported at the `fn` and found by flow analysis, not the type checker.
+@test(compile_error, E009, "")
+fn a_fallible_function_must_return(): !void {
+    io::printline(1);
+}
+
+@test(compile_error, E041, "sqaure", fix: "replace 'sqaure' with 'square'")
+fn a_misspelt_function_has_a_fix(): void {
+    io::printline(sqaure(3));
+}
+
+@test(warning, E172, "use square")
+fn a_deprecated_call_warns(): void {
+    test::assert(old_square(3) == 9, "it still works");
+}
+
+@test(no_warnings)
+fn a_clean_body_has_no_warning(): void {
+    test::assert(square(3) == 9, "3 squared is 9");
+}
+
+@test(panic, "Division by zero")
+fn dividing_by_zero_panics(): void {
+    immut zero: int = 0;
+    io::printline(10 / zero);
+}
+
+@test(panic, "")
+fn a_failed_assertion_is_a_panic(): void {
+    test::assert(false, "always fails");
+}
+
+@test(exit, 3)
+fn exits_with_three(): void {
+    sys::exit(3);
+}
+
+@test(exit, 0)
+fn exits_with_zero(): void {
+    sys::exit(0);
+}
+
+@test(error, ParseError::Empty)
+fn parsing_nothing_fails(): !void {
+    try parse("");
+    return;
+}

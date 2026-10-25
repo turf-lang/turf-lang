@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: A test returns 'void' or '!void', not 'int'
+// TDP-2-006: nothing reads a test's result, so it has none.
+@test
+fn a(): int {
+    return 1;
+}
+
+fn main(): int {
+    return 0;
+}

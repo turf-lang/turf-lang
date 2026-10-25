@@ -1,0 +1,34 @@
+// TDP-2-006 (issue #299): the outcome is spelled `compile_error`, never
+// `Error::E041`, because a program may declare its own `error Error` with a
+// variant `E041`. That program is unaffected, and an `error` outcome names
+// its variant like any other.
+import test;
+
+error Error {
+    E041,
+}
+
+fn fails(): !void {
+    return Error::E041;
+}
+
+@test(error, Error::E041)
+fn its_own_error_named_e041(): !void {
+    try fails();
+    return;
+}
+
+@test(compile_error, E041, "Unknown function")
+fn the_compiler_s_e041(): void {
+    undeclared();
+}
+
+fn main(): int {
+    mut seen: int = 1;
+    fails() recover as err run {
+        if err == Error::E041 {
+            seen = 0;
+        }
+    };
+    return seen;
+}

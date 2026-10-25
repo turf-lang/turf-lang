@@ -22,6 +22,7 @@
 #include "resolve/ResolverSymbolTable.h"
 #include "resolve/ResolverInternal.h"
 #include "frontend/AnnotationRegistry.h" // KnownAnnotations
+#include "frontend/TestRegistry.h"
 #include "diagnostics/SuggestionIndex.h" // SuggestionIndex::suggestVisible
 #include "sema/Types.h"           // RankedSuggestions
 
@@ -109,10 +110,15 @@ static void checkAnnotations(const AnnotatedDecl &Decl,
     std::string Problem =
         Spec->Validate(Ann, Params, ReturnType, IsExtern, Decl.getAnnotations());
     if (!Problem.empty())
-      InvalidAnnotationError(Ann.Loc, Problem,
-                             "An annotation states a fact about the declaration "
-                             "under it (e.g. '@ownership(acquires)' on a "
-                             "function that returns a fresh allocation).")
+      InvalidAnnotationError(
+          Ann.Loc, Problem,
+          Ann.Name == TestAnnotation::Name
+              ? std::string("'@test', or '@test(<outcome>, ...)', marks a function that takes "
+                            "nothing and returns 'void' or '!void'; the outcomes are ") +
+                    TestAnnotation::OutcomeList + "."
+              : std::string("An annotation states a fact about the declaration "
+                            "under it (e.g. '@ownership(acquires)' on a "
+                            "function that returns a fresh allocation)."))
           .raise();
   }
 }
@@ -128,12 +134,93 @@ static void checkAnnotations(const ExternFuncDeclExprAST &Node) {
   checkAnnotations(Node, Node.getParams(), Node.getReturnType(), /*IsExtern=*/true);
 }
 
+// TDP-2-006: a compile_error test's body is expected to be rejected. Its own
+// recovery point lets the error that rejects it end only this declaration:
+// the error is the test's (TestRegistry.h), the rest of the program goes on
+// being resolved, and every later pass skips the declaration
+// (TestBodyFailed). An error the registry did not take is an ordinary one
+// and unwinds as before.
 void Resolver::visitFuncDef(FuncDefExprAST &Node) {
+  if (!TestAnnotation::isCompileErrorTest(Node)) {
+    resolveFuncDef(Node);
+    return;
+  }
+  const int SavedNesting = FunctionNestingDepth_, SavedDefer = DeferDepth_;
+  const size_t SavedDepth = SymTable_.currentDepth();
+  const auto SavedModules = ModuleStack_;
+  const auto SavedTypeParams = CurrentFuncTypeParams_;
+  const auto SavedSizeParams = CurrentSizeParams_;
+  const FuncDefExprAST *SavedFunc = CurrentFuncDef_, *SavedEnclosing = EnclosingFuncDef_;
+  const bool SavedRecover = g_recoverActive;
+  g_recoverActive = true;
+  try {
+    resolveFuncDef(Node);
+  } catch (const RecoverUnwind &) {
+    g_recoverActive = SavedRecover;
+    if (!TestRegistry::lastErrorCaptured())
+      throw;
+    FunctionNestingDepth_ = SavedNesting;
+    DeferDepth_ = SavedDefer;
+    SymTable_.resetToDepth(SavedDepth);
+    ModuleStack_ = SavedModules;
+    CurrentFuncTypeParams_ = SavedTypeParams;
+    CurrentSizeParams_ = SavedSizeParams;
+    CurrentFuncDef_ = SavedFunc;
+    EnclosingFuncDef_ = SavedEnclosing;
+    Node.TestBodyFailed = true;
+    return;
+  }
+  g_recoverActive = SavedRecover;
+}
+
+void Resolver::checkTestFunction(const FuncDefExprAST &Node) {
+  const Annotation *Ann = TestAnnotation::find(Node);
+  TestAnnotation::Spec Spec;
+  if (!Ann || !TestAnnotation::parse(*Ann, Spec).empty())
+    return;
+  const char *Hint = "A test is a plain top-level function, with '@test' on the line "
+                     "above it: 'fn parses_a_port(): void { ... }'.";
+  if (!Node.getTypeParams().empty() || !Node.SizeParams.empty())
+    InvalidAnnotationError(Ann->Loc, "A test cannot be generic: 'turf test' has no type to run it with.",
+                           Hint)
+        .raise();
+  if (Node.getName().find('.') != std::string::npos)
+    InvalidAnnotationError(Ann->Loc, "A method cannot be a test; '@test' marks a top-level function.",
+                           Hint)
+        .raise();
+  if (Node.getName() == "main")
+    InvalidAnnotationError(Ann->Loc, "'main' cannot be a test: it is the program's entry point.",
+                           Hint)
+        .raise();
+  if (Node.hasCallerLocation())
+    InvalidAnnotationError(Ann->Loc, "A test has no caller, so it cannot be '@caller_location'.",
+                           Hint)
+        .raise();
+  if (Spec.Kind == TestAnnotation::Outcome::Error) {
+    auto ET = SymTable_.isErrorTypeName(Spec.ErrorType) ? SymTable_.lookupErrorType(Spec.ErrorType)
+                                                        : nullptr;
+    if (!ET)
+      InvalidAnnotationError(Ann->Loc, "'" + Spec.ErrorType + "' is not an error type.",
+                             "An 'error' outcome names a variant of an error type the "
+                             "program declares or imports, e.g. '@test(error, FsError::NotFound)'.")
+          .raise();
+    else if (!ET->hasVariant(Spec.ErrorVariant))
+      InvalidAnnotationError(Ann->Loc,
+                             "Error type '" + Spec.ErrorType + "' has no variant '" +
+                                 Spec.ErrorVariant + "'.",
+                             "An 'error' outcome names a variant of an error type the "
+                             "program declares or imports, e.g. '@test(error, FsError::NotFound)'.")
+          .raise();
+  }
+}
+
+void Resolver::resolveFuncDef(FuncDefExprAST &Node) {
   if (FunctionNestingDepth_ > 0) {
     NestedFunctionError(Node.getLoc(), Node.getName()).raise();
     return;
   }
   checkAnnotations(Node);
+  checkTestFunction(Node);
 
   // LEC-002 stage 5: a `pub` signature may not mention this module's private
   // types. The receiver (`self`) is skipped: a `pub` method of a private type
