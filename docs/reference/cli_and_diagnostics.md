@@ -1230,7 +1230,7 @@ panic: runtime check: <what happened> (<file>:<line>)
 | Division or remainder by zero | `panic: runtime check: Division by zero (div.tr:2)` | 134 |
 | Integer overflow in `+`, `-`, `*` or negation | `panic: runtime check: Integer overflow (ovf.tr:2)` | 134 |
 | A `double` converted to `int` when the value does not fit (NaN, infinity, too large) | `panic: runtime check: Integer overflow (castf.tr:2)` | 134 |
-| Stack overflow (unbounded recursion) | `panic: stack overflow: the call stack exceeded its limit -- check for unbounded or missing-base-case recursion` | 134 |
+| Stack overflow (unbounded recursion) | `panic: stack overflow: the call stack exceeded its limit at about 74690 nested calls -- check for unbounded or missing-base-case recursion` | 134 |
 | Out of memory (an allocation that cannot be satisfied) | `panic: out of memory: …` | 134 |
 | A memory fault, which only unsafe code can cause | `panic: segmentation fault (this is a bug in unsafe code or in TurfLang) at address 0x…` | 134 |
 | A checked standard-library call, such as `List.get` with a bad index | `prog.tr:6: List.get: index out of bounds`, the line of the call in your code | 134 |

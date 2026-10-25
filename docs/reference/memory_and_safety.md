@@ -514,8 +514,15 @@ fn main(): int {
 Unbounded recursion exhausts the stack. This is a panic, not a crash:
 
 ```text
-panic: stack overflow: the call stack exceeded its limit -- check for unbounded or missing-base-case recursion
+panic: stack overflow: the call stack exceeded its limit at about 74690 nested calls -- check for unbounded or missing-base-case recursion
 ```
+
+The number is how deep the recursion was: compare it with the depth you
+expected. A recursion meant to go a thousand calls deep that reports tens of
+thousands has lost its base case. The count is approximate (the optimizer
+may merge calls) and varies with the optimization level and the platform's
+stack size. Where the runtime cannot work the depth out, the text is the same
+without the `at about N nested calls` part.
 
 ```turflang
 fn recurse(n: int): int {

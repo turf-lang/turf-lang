@@ -1,5 +1,6 @@
 // RUNTIME_ABORT_EXPECTED
 // EXPECT-RUNTIME: stack overflow
+// EXPECT-RUNTIME: nested calls
 // tests/41_gc/fail_stack_overflow_deep_recursion.tr
 // FDN-006 stage 1 (docs/planning/ROADMAP_v2.0.0.md): before this group, a
 // stack overflow was a bare SIGSEGV (exit 139, no message -- the Overhaul
@@ -16,6 +17,12 @@
 // artifact of an unoptimized build. The `n > 2000000000` bound only exists
 // to satisfy the compiler's own unconditional-infinite-recursion check
 // (E010) -- the stack overflows long before `n` could ever reach it.
+//
+// RT-6 (issue #300): the panic also says how deep the recursion was ("at
+// about N nested calls"), so a runaway recursion is told apart from a
+// legitimately deep one. The second EXPECT-RUNTIME pins that wording; the
+// number itself is not pinned, since it moves with the optimization level
+// (frame size) and the platform's stack limit.
 
 fn recurse(n: int): int {
     mut buf: int[8] = [1, 2, 3, 4, 5, 6, 7, 8];

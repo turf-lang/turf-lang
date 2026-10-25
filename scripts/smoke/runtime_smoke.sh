@@ -289,6 +289,12 @@ if "$TURF" "$WORKDIR/stack_overflow.tr" -o "$WORKDIR/stack_overflow" > /dev/null
   else
     fail "unexpected message:"; cat "$WORKDIR/stack_overflow.out"
   fi
+  # RT-6: the panic says how deep the recursion was, a positive number.
+  if grep -Eq "^panic: stack overflow: .* at about [1-9][0-9]* nested calls " "$WORKDIR/stack_overflow.out"; then
+    pass "message names the recursion depth ('at about N nested calls')"
+  else
+    fail "message has no recursion depth:"; cat "$WORKDIR/stack_overflow.out"
+  fi
 else
   fail "stack_overflow.tr failed to compile"
 fi

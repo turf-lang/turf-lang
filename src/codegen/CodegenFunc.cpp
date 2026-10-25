@@ -512,6 +512,11 @@ Value *FuncDefExprAST::codegen() {
         FunctionType::get(getLLVMType(ReturnType.get()), ParamTypes,
                           /*isVarArg=*/false);
     TheFunc = Function::Create(FT, Linkage, MangledName, TheModule.get());
+    // Every Turf function keeps a frame pointer: the stack-overflow handler
+    // (runtime/turfrt_signal.c, RT-6) counts how deep the recursion was by
+    // walking the saved-frame-pointer chain, and an optimized build would
+    // otherwise leave no chain to walk.
+    TheFunc->addFnAttr("frame-pointer", "all");
 
     unsigned ArgIdx = 0;
     for (auto &Arg : TheFunc->args())
