@@ -45,7 +45,7 @@ body:
     attributes:
       label: Version
       description: Output of `turf --version` (or `turfc --version`).
-      placeholder: 2.1.1
+      placeholder: 2.2.0
     validations:
       required: true
   - type: dropdown

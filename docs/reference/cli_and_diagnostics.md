@@ -386,7 +386,7 @@ The model's suggestion is labelled `[Model Suggestion]`. `--smart-write-fix=<pat
 ```text
 $ turf version
 turf 1.0.0  (needs turfc interface 1.1+)
-turfc 2.1.1  (interface 1.8, /opt/turf/bin/turfc)
+turfc 2.2.0  (interface 1.12, /opt/turf/bin/turfc)
   llvm 22.1.8
   runtime turf_rt_abi_2_0
   root /opt/turf
@@ -411,7 +411,7 @@ A differing *release* version is never an error on its own. In a project, a mani
 
 ```text
 $ turfc --version --json
-{"features":["package-graph","exit-status-2","test","format-check","format-skip-unlexable","emit-obj","test-only","lint-levels","diagnostics-json","version-json","test-functions","unsafe-report","smart"],"interface":{"major":1,"minor":12},"llvm":"22.1.8","manifest":1,"root":"/opt/turf","runtime":"turf_rt_abi_2_0","schemas":{"diagnostics":"1.0","package_graph":1},"turfc":"2.1.1"}
+{"features":["package-graph","exit-status-2","test","format-check","format-skip-unlexable","emit-obj","test-only","lint-levels","diagnostics-json","version-json","test-functions","unsafe-report","smart"],"interface":{"major":1,"minor":12},"llvm":"22.1.8","manifest":1,"root":"/opt/turf","runtime":"turf_rt_abi_2_0","schemas":{"diagnostics":"1.0","package_graph":1},"turfc":"2.2.0"}
 ```
 
 | Key | Value |
@@ -477,7 +477,7 @@ Usage: turfc <filename.tr> [-o output] [--emit-llvm | --emit-obj] [--smart]
 
 ```text
 $ turfc --version
-turfc 2.1.1
+turfc 2.2.0
 interface 1.12
 llvm 22.1.8
 runtime turf_rt_abi_2_0
