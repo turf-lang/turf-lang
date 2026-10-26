@@ -766,6 +766,33 @@ In a test build every error inside a `compile_error` test of the main file is
 taken, so a test that fails for the wrong reason fails as that test while the
 file's other tests still run.
 
+#### Tests that expect a warning
+
+A `warning` test owns its warning the same way: a warning inside the test with
+the code the annotation names belongs to the test. No
+[lint level](cli_and_diagnostics.md#lint-levels) applies to it, so
+`E172 = "deny"` in `[lints]` does not fail the build over a test that shows the
+deprecation, and `E172 = "allow"` does not hide the warning from the test. A
+normal build does not show it; a test build records it to judge the test. A
+warning with another code inside the test, or the same warning outside every
+test, keeps its level.
+
+```turflang
+@deprecated("use square")
+fn old_square(n: int): int {
+    return n * n;
+}
+
+fn square(n: int): int {
+    return n * n;
+}
+
+@test(warning, E172, "use square")
+fn the_old_name_still_works(): void {
+    io::printline(old_square(3));
+}
+```
+
 #### Mistakes in a `@test`
 
 A `@test` that cannot be understood is `E146`, with a hint listing the outcomes:
