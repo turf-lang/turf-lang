@@ -14,7 +14,10 @@
 //    any other is an ordinary error. In a test build (`--test-build`) every
 //    error inside a main-file compile_error test is taken, so a test that
 //    fails by reporting the wrong error is reported as that test's failure,
-//    with the file's other tests still run.
+//    with the file's other tests still run. A warning test's expected
+//    warning (its code, inside it) is its own in the same way: it takes no
+//    lint level, so `[lints]` cannot hide it or make it fail the build, and
+//    only a test build shows it, to judge the test (ownsWarning()).
 //
 //  - The end of the compile. A normal build drops every test function from
 //    the program; a test build makes the main file's tests its entry point
@@ -97,8 +100,16 @@ bool captureError(const DiagnosticEngine::Diag &D);
 /// not: an ordinary error unwinds as it always does.
 bool lastErrorCaptured();
 
-/// Whether warning @p D lies inside a compile_error test, where it is part
-/// of the mistake the test demonstrates and is not shown.
+/// Whether warning @p D is the one a `warning` test expects: inside the test,
+/// with the code its annotation names. Such a warning is the test's own, so
+/// no lint level applies to it: `allow` cannot hide it from the test and
+/// `deny` cannot turn the test's demonstration into a failed build.
+bool ownsWarning(const DiagnosticEngine::Diag &D);
+
+/// Whether warning @p D is not shown: it lies inside a compile_error test,
+/// where it is part of the mistake the test demonstrates, or it is a warning
+/// test's own warning (ownsWarning()) anywhere but in a test build's main
+/// file, where that test is judged by it.
 bool swallowWarning(const DiagnosticEngine::Diag &D);
 
 /// A warning that is being recorded: in a test build, kept with the

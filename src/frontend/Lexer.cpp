@@ -488,13 +488,16 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
   std::string Filename = Loc.Filename.empty() ? SourceFilename : Loc.Filename;
 
   // TDP-2-006: an error inside a compile_error test's body is the test's
-  // (TestRegistry.h), and so is a warning there. Before the cascade rule
+  // (TestRegistry.h), and so is a warning there; a warning test's expected
+  // warning is its own and takes no lint level. Before the cascade rule
   // below, so the registry hears about every error a pass raises.
+  bool OwnedByTest = false;
   {
     Diag Probe{Loc, Msg, Hint, IsWarning, Related, Category, Filename, Code, Hints,
                CompilerFix{}, false, false};
     if (IsWarning ? TestRegistry::swallowWarning(Probe) : TestRegistry::captureError(Probe))
       return;
+    OwnedByTest = IsWarning && TestRegistry::ownsWarning(Probe);
   }
 
   // If there is already an error on this line, suppress everything else
@@ -513,7 +516,7 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
   // warning it is: the user did not write that code and cannot fix it, so
   // `--deny` must not fail a build over it (--stdlib-warnings opts back in).
   bool Denied = false;
-  if (IsWarning && !Code.empty() && LintLevels::anySet()) {
+  if (IsWarning && !OwnedByTest && !Code.empty() && LintLevels::anySet()) {
     switch (LintLevels::levelOf(Code)) {
     case LintLevels::Level::Allow:
       return;

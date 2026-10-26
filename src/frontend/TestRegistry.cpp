@@ -97,11 +97,26 @@ bool captureError(const DiagnosticEngine::Diag &D) {
 
 bool lastErrorCaptured() { return g_State.LastErrorCaptured; }
 
+bool ownsWarning(const DiagnosticEngine::Diag &D) {
+  if (g_State.M == Mode::Raw)
+    return false;
+  const Test *T = testAround(D);
+  return T && T->SpecOk && T->Spec.Kind == TestAnnotation::Outcome::Warning &&
+         D.Code == T->Spec.Code;
+}
+
 bool swallowWarning(const DiagnosticEngine::Diag &D) {
   if (g_State.M == Mode::Raw)
     return false;
   const Test *T = testAround(D);
-  return T && T->SpecOk && T->Spec.Kind == TestAnnotation::Outcome::CompileError;
+  if (!T || !T->SpecOk)
+    return false;
+  if (T->Spec.Kind == TestAnnotation::Outcome::CompileError)
+    return true;
+  // A warning test's own warning is shown only where it is judged: in a test
+  // build, inside a main-file test (noteWarning()).
+  return ownsWarning(D) &&
+         !(g_State.M == Mode::TestBuild && D.Filename == MainSourceFilename);
 }
 
 void noteWarning(const DiagnosticEngine::Diag &D) {
