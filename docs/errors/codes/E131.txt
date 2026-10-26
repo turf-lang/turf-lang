@@ -22,3 +22,5 @@ An array has exactly two built-in methods, `length()` and `copy()`, and neither 
 (`copy()` is for arrays only. To take part of an array, slice it first: `a[1..3].copy()`.)
 
 (`x.f()` does work on a non-struct when a function `f` taking that type is imported -- that is how `text.length()` works on a `string`. So check the spelling, and that the module is imported.)
+
+A method declared on one of its own type parameters is this error too, at the declaration. In `fn<Holder> Holder.count()` the name `Holder` is the type parameter, not the struct, so it has no methods. Write `fn<T> Holder.count()` for `struct Holder<T>`.
