@@ -129,7 +129,8 @@ fn dividing_by_zero_panics(): void {
 ```
 
 An optional first argument names the outcome: `compile_error, E041, "text"`
-(optionally `fix: "text"`), `warning, E172, "text"`, `no_warnings`,
+(optionally `fix: "text"`), `warning, E172, "text"` (the expected warning is the
+test's own: no lint level applies to it), `no_warnings`,
 `panic, "text"`, `exit, 3` and `error, Type::Variant`. The full list is in the
 [reference](../reference/functions_and_modules.md#test). The report has one line
 per test, `[tests] file.tr: test_name ... PASS`.

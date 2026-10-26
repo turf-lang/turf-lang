@@ -488,6 +488,49 @@ c srconly_none "$Q" --test tests --package-graph graph.json
 expect_rc "no tests/ and no @test in src/" srconly_none 1
 expect_out "no tests/ and no @test in src/" srconly_none "no file under src/ declares a \`@test\` function"
 
+# --- a warning test owns its warning: no lint level applies to it ----------------
+# Denied, the expected warning would fail the build the test demonstrates it in;
+# allowed, the test could never see it. Any other warning keeps its level.
+L="$WORK/warnown"
+fixture "$L" tests/deprecated.tr <<'EOF'
+@deprecated("use square")
+fn old(n: int): int {
+    return n * n;
+}
+
+@test(warning, E172, "use square")
+fn warns(): void {
+    io::printline(old(2));
+}
+EOF
+fixture "$L" prog.tr <<'EOF'
+@deprecated("use square")
+fn old(n: int): int {
+    return n * n;
+}
+
+fn main(): int {
+    return 0;
+}
+
+@test(warning, E172, "use square")
+fn warns(): void {
+    io::printline(old(2));
+}
+EOF
+for lv in deny allow; do
+  c "warnown_$lv" "$L" --test "--$lv" E172
+  expect_rc "a warning test under --$lv E172" "warnown_$lv" 0
+  expect_out "a warning test under --$lv E172" "warnown_$lv" "deprecated.tr: warns ... PASS"
+done
+c warnown_build "$L" prog.tr -o prog --deny E172
+expect_rc "a normal build with a warning test, --deny E172" warnown_build 0
+expect_no_out "a normal build does not show a warning test's own warning" warnown_build "E172"
+sed -i.bak 's/^    return 0;$/    return old(0);/' "$L/prog.tr"
+c warnown_main "$L" prog.tr -o prog --deny E172
+expect_rc "the same warning outside the test is still denied" warnown_main 1
+expect_out "the same warning outside the test is still denied" warnown_main "[E172"
+
 # --- --exclude, and the diagnostic register is opt-in ------------------------------
 X="$WORK/exclude"
 fixture "$X" tests/plain.tr <<'EOF'

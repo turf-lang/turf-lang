@@ -734,7 +734,9 @@ The test passes when every error inside it has that code and one message
 contains the text; the build still succeeds and prints nothing for it. A mistake
 the test does not name, or one outside every test, is an ordinary error. A file
 or declaration-level mistake (a syntax error, a missing `import`) still needs a
-`fail_*` file. Nothing may call a test: that is `E173`, so move what a test and
+`fail_*` file. A `warning, E172, "text"` test owns its warning the same way: a
+project that denies `E172` in `[lints]` still builds, and the test still sees
+the warning. Nothing may call a test: that is `E173`, so move what a test and
 other code share into an ordinary function. The outcomes and rules are in the
 [reference](../reference/functions_and_modules.md#test).
 
