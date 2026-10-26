@@ -7,7 +7,7 @@ import lib_export_signed_constants_module;
 fn main(): int {
     test::assert(lib_export_signed_constants_module::BELOW == -42, "negative int");
     test::assert(lib_export_signed_constants_module::LOWEST == -9223372036854775807 - 1,
-                 "the lowest int");
+        "the lowest int");
     test::assert(lib_export_signed_constants_module::NEG_ZERO_INT == 0, "-0 is 0");
 
     mut small: int32 = lib_export_signed_constants_module::SMALL;
@@ -18,7 +18,7 @@ fn main(): int {
     test::assert(lib_export_signed_constants_module::NEG_DOUBLE == -2.5, "negative double");
     test::assert(lib_export_signed_constants_module::WHOLE_DOUBLE == 3.0, "integer literal as a double");
     test::assert(lib_export_signed_constants_module::NEG_WHOLE_DOUBLE == -1.0,
-                 "negative integer literal as a double");
+        "negative integer literal as a double");
     // `-0` is the integer 0, so +0.0, as `mut x: double = -0;` is.
     immut zero: string = lib_export_signed_constants_module::NEG_ZERO_DOUBLE to string;
     test::assert(zero == "0", "-0 as a double is +0.0");
