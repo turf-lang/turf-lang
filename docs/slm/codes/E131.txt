@@ -34,6 +34,11 @@ NOTE:
   (UFCS; this is how `text.length()` works on a `string`). So check the spelling and that
   the module is imported.
 
+  A method declared on one of its own type parameters is this error too, at the
+  declaration: in `fn<Holder> Holder.count()` the name `Holder` is the type parameter,
+  not the struct, so it has no methods. Write `fn<T> Holder.count()` for
+  `struct Holder<T>`.
+
 FIX:
   Call the function through its module (`module::function(x)`), fix the spelling/import,
   or correct the variable's type.

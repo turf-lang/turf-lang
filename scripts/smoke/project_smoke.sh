@@ -510,7 +510,7 @@ expect_out "turf init in a directory whose name is not a package name" init_bad 
 # turf's source is a turf-cli checkout: TURF_CLI_DIR, by default ../turf-cli.
 CLI_DIR=${TURF_CLI_DIR:-../turf-cli}
 if [ -f "$CLI_DIR/internal/manifest/manifest.go" ]; then
-  sed -n '/^std::map<std::string, int> Keywords/,/;$/p' src/frontend/Lexer.cpp |
+  sed -n '/^\(const \)\{0,1\}std::map<std::string, int> Keywords/,/;$/p' src/frontend/Lexer.cpp |
     grep -o '{"[a-z_0-9]*", TOK' | sed 's/{"\(.*\)", TOK/\1/' | sort > "$WORK/kw_lexer"
   sed -n '/^var reserved = /,/^}/p' "$CLI_DIR/internal/manifest/manifest.go" |
     grep -o '"[a-z_0-9]*"' | tr -d '"' | sort > "$WORK/kw_cli"

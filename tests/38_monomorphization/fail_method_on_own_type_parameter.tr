@@ -1,0 +1,16 @@
+// EXPECT-DIAG: E131
+// EXPECT-DIAG: 'Holder' is a type parameter of 'Holder.count', not a struct
+// The receiver names the method's own type parameter, which shadows the
+// struct: `self` would have no fields or methods. It was an internal compiler
+// error at `self.items` (turf-fuzz #20).
+import list::List;
+
+struct Holder<T> { items: List<T> }
+
+fn<Holder> Holder.count(): int {
+    return self.items.length();
+}
+
+fn main(): int {
+    return 0;
+}

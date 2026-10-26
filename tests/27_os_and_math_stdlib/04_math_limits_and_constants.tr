@@ -15,7 +15,7 @@ fn main(): int {
     test::assert(math::DOUBLE_MAX == 1.7976931348623157e308, "DOUBLE_MAX");
     test::assert(math::DOUBLE_MIN == 0.0 - math::DOUBLE_MAX, "DOUBLE_MIN is the most negative double");
     test::assert(math::DOUBLE_MIN_POSITIVE > 0.0 && math::DOUBLE_MIN_POSITIVE < 2.3e-308,
-                 "DOUBLE_MIN_POSITIVE is the smallest normal double");
+        "DOUBLE_MIN_POSITIVE is the smallest normal double");
     test::assert(1.0 + math::DOUBLE_EPSILON > 1.0, "1 + DOUBLE_EPSILON is above 1");
     test::assert(1.0 + math::DOUBLE_EPSILON / 2.0 == 1.0, "1 + DOUBLE_EPSILON / 2 rounds to 1");
 

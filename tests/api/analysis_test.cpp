@@ -1088,12 +1088,14 @@ static void testSkipPrelude() {
   CHECK(turf::analyze({{"bare.tr", Bare}}).succeeded());
 }
 
-// A lexer error in the very first token was raised before any recovery guard
-// was armed, so analyze() called exit() and took its host (turf-lsp) down.
-// Reaching the checks below at all is most of the test.
-static void testLexErrorInFirstToken() {
-  CurrentTest = "lex error in the first token";
-  for (const char *Source : {"0E\n", "0E\nfn main(): int {\n    return 0;\n}\n"}) {
+// A lexer error raised where no recovery guard is armed makes analyze() call
+// exit() and take its host (turf-lsp) down: in the very first token, and in
+// the token after a top-level `;` (turf-fuzz #19). Reaching the checks below
+// at all is most of the test.
+static void testLexErrorOutsideAStatement() {
+  CurrentTest = "lex error outside a statement";
+  for (const char *Source : {"0E\n", "0E\nfn main(): int {\n    return 0;\n}\n",
+                             ";\n.0.5;\n", "fn main(): int {\n    return 0;\n};\n.0.5[i];\n"}) {
     auto R = turf::analyze({{"lex.tr", Source}});
     CHECK(!R.succeeded());
     CHECK(!R.diagnostics().empty());
@@ -2588,7 +2590,7 @@ int main() {
   testEscapeThroughStructFieldsInFacade();
   testFlowWarningsAreInSourceOrder();
   testSkipPrelude();
-  testLexErrorInFirstToken();
+  testLexErrorOutsideAStatement();
   testEmptyInput();
   testVisibilityModifierPlacement();
   testPrivateSymbolAccess(Dir);
