@@ -360,13 +360,16 @@ std::vector<std::unique_ptr<ExprAST>> parseEntryFile(std::size_t &PreludeCount,
     return Program;
 
   while (Parser().CurTok != TOK_EOF) {
-    if (Parser().CurTok == ';') {
-      getNextToken();
-      continue;
-    }
     const int StartTok = Parser().CurTok;
     g_recoverActive = true;
     try {
+      // Stepping over a `;` lexes the next token, so it is guarded too: `;`
+      // then `.0.5` raised E139 with no guard armed (turf-fuzz #19).
+      if (StartTok == ';') {
+        getNextToken();
+        g_recoverActive = false;
+        continue;
+      }
       auto AST = ParseExpression();
       if (!AST) {
         SkipToNextTopLevelBoundary();
