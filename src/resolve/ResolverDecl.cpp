@@ -270,6 +270,25 @@ void Resolver::resolveFuncDef(FuncDefExprAST &Node) {
       ReservedConstructorNameError(Node.getLoc(), FullName.substr(0, Dot)).raise();
       return;
     }
+    // `fn<Holder> Holder.count()`: the receiver names one of the method's
+    // own type parameters, which shadows any struct of that name, so `self`
+    // would be a pointer to "some type" with no fields or methods. The
+    // body's first `self.x` was an internal compiler error (turf-fuzz #20).
+    if (IsStructBound) {
+      const std::string Receiver = FullName.substr(0, Dot);
+      const auto OwnParams = Node.getTypeOnlyParams();
+      if (std::find(OwnParams.begin(), OwnParams.end(), Receiver) != OwnParams.end()) {
+        TypeError(Node.getNameLoc(), ErrCode::MethodOnNonStruct,
+                  "'" + Receiver + "' is a type parameter of '" + FullName +
+                      "', not a struct, so it cannot have methods.",
+                  "A method is declared on a struct: name the struct after "
+                  "the '<...>' list and give its type parameters other names, "
+                  "as in 'fn<T> Box.get(): T' for 'struct Box<T>'.",
+                  "No such struct!")
+            .raise();
+        return;
+      }
+    }
     if (Node.isStaticDecl() && !IsStructBound) {
       // `static` only makes sense as "no self" on a struct-bound method --
       // on a free function it's meaningless (a free function never had
