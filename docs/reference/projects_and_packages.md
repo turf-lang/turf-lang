@@ -313,7 +313,7 @@ hint: upgrade turfc, or lower `turf` in that manifest
 
 ```
 $ turf version
-turf 1.0.0  (needs turfc interface 1.1+)
+turf 1.1.0  (needs turfc interface 1.1+)
 turfc 2.2.0  (interface 1.12, …/bin/turfc)
   …
 ```
