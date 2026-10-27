@@ -81,6 +81,15 @@ fn main(): int {
     test::assert(q == 2 && qd == 2.0, "math::divide (int / double)");
     test::assert(divide_error_is_division_by_zero(), "math::MathError");
     test::assert(math::PI > 3.14 && math::E > 2.71, "math::PI / E");
+    test::assert(math::TAU > 6.28 && math::PHI > 1.61 && math::SQRT2 > 1.41 && math::SQRT1_2 > 0.70, "math::TAU / PHI / SQRT2 / SQRT1_2");
+    test::assert(math::LN2 > 0.69 && math::LN10 > 2.30 && math::LOG2E > 1.44 && math::LOG10E > 0.43, "math::LN2 / LN10 / LOG2E / LOG10E");
+    test::assert(math::INT_MAX == 9223372036854775807 && math::INT_MIN < 0 && math::INT32_MAX == 2147483647 to int32 && math::INT32_MIN < 0 to int32, "math::INT_MAX / INT_MIN / INT32_MAX / INT32_MIN");
+    test::assert(math::DOUBLE_MAX > 1.0e308 && math::DOUBLE_MIN < -1.0e308 && math::DOUBLE_MIN_POSITIVE > 0.0 && math::DOUBLE_EPSILON > 0.0, "math::DOUBLE_MAX / DOUBLE_MIN / DOUBLE_MIN_POSITIVE / DOUBLE_EPSILON");
+    test::assert(math::is_infinite(math::INFINITY) && math::is_infinite(math::NEG_INFINITY) && math::is_nan(math::NAN), "math::INFINITY / NEG_INFINITY / NAN / is_nan / is_infinite");
+    test::assert(math::is_finite(1.0) && !math::is_finite(math::NAN), "math::is_finite");
+    test::assert(math::wrapping_add(9223372036854775807, 1) < 0 && math::wrapping_sub(0, 1) == -1 && math::wrapping_mul(3, 4) == 12, "math::wrapping_add / wrapping_sub / wrapping_mul");
+    test::assert(math::wrapping_div(-9, 2) == -4 && math::wrapping_rem(-9, 2) == -1 && math::wrapping_neg(3) == -3 && math::wrapping_abs(-3) == 3, "math::wrapping_div / rem / neg / abs");
+    test::assert(math::wrapping_shl(1, 3) == 8 && math::wrapping_shr(-8, 1) == -4 && math::wrapping_pow(2, 10) == 1024, "math::wrapping_shl / shr / pow");
 
     // ── time ───────────────────────────────────────────────────────────────
     immut t0: int = time::clock_ticks();

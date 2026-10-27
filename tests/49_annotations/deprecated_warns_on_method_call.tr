@@ -1,0 +1,22 @@
+// EXPECT-DIAG: E172
+// EXPECT-DIAG: 'Counter.bump_old' is deprecated: use 'bump' instead
+// The instance-method counterpart of deprecated_warns_on_call.tr -- a method
+// call also goes through a resolved call target (MethodCallExprAST), so
+// `@deprecated` reaches it the same way as a free function.
+
+struct Counter { n: int }
+
+@deprecated("use 'bump' instead")
+fn Counter.bump_old(k: int): void {
+    self.n = self.n + k;
+}
+
+fn Counter.bump(k: int): void {
+    self.n = self.n + k;
+}
+
+fn main(): int {
+    mut c: Counter = Counter::default();
+    c.bump_old(5);
+    return c.n - 5;
+}

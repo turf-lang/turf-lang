@@ -1,0 +1,24 @@
+TURF E160 -- DEAD STORE (WARNING):
+
+CAUSE:
+  A value is assigned to a local variable but never read: it is overwritten or
+  the function ends first. Variables named `_...` are skipped. This is a
+  WARNING: compilation still succeeds.
+
+INCORRECT:
+    mut total: int;
+    total = 10;         // WARNING: overwritten before it is read
+    total = 20;
+    printline(total to string);
+
+CORRECT (the first value is used):
+    mut total: int;
+    total = 10;
+    total += 10;
+    printline(total to string);
+
+FIX:
+  Delete the useless assignment, or read the value before it is replaced.
+
+RELATED: E161 (a declaration's initial value that is never read), E163 (a
+  variable never read at all).

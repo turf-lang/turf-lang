@@ -1,0 +1,18 @@
+// LEC-003 backward compatibility (FREEZE.md §6.17): at the top of a `matches`
+// header a bare identifier is STILL a variable compared by equality, never a
+// new binding -- only inside a destructuring pattern does an identifier bind.
+import test;
+fn f(s: string, key: string): int {
+    mut r: int = 0;
+    compare s {
+        matches key: r = 1; done
+        matches "other": r = 2; done
+    }
+    return r;
+}
+fn main(): int {
+    test::assert(f("a", "a") == 1, "a bare identifier at the top of a header is still a variable compared by equality");
+    test::assert(f("other", "a") == 2, "literal arm");
+    test::assert(f("zzz", "a") == 0, "no match");
+    return 0;
+}

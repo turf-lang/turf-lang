@@ -1,0 +1,14 @@
+// EXPECT-DIAG: E066
+// EXPECT-DIAG: Cannot assign value of type 'double' to variable of type 'int'
+// SEM-003 (§11.3, Model A, FROZEN): the guess-inferred type is permanently
+// fixed at the declaration. `x` infers `int` from `5`; assigning a `double`
+// later is the ordinary type-mismatch error, with a withRelated() note at
+// the declaration naming the inferred type (see the SAME
+// TypeChecker::visitAssignment() note this project already attaches for an
+// explicitly-annotated variable, specialized here to say "was inferred as"
+// instead of "declared here" -- VariableSymbol::WasGuessInferred).
+fn main(): int {
+    mut x = 5;
+    x = 5.5;
+    return 0;
+}

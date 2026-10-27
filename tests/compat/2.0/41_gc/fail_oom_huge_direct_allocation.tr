@@ -1,0 +1,18 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: out of memory
+// tests/41_gc/fail_oom_huge_direct_allocation.tr
+// FDN-006 stage 2 (docs/planning/ROADMAP_v2.0.0.md): verifies the fail-fast
+// OOM policy RT-001 put "in one place" (turf_rt_alloc/turf_rt_alloc_zeroed/
+// turf_rt_realloc, runtime/turfrt_alloc.c) actually panics rather than
+// returning NULL or silently misbehaving. The Overhaul closure audit's own
+// attempt to reach this path spun forever in strings::repeat()'s quadratic
+// loop instead of ever reaching a real allocation failure -- this test goes
+// straight at a single allocation no allocator on any real machine can
+// satisfy, rather than trying to exhaust memory incrementally.
+
+fn main(): int {
+    unsafe {
+        mut p: void* = gc_alloc(9223372036854775807); // i64 max bytes
+    }
+    return 0;
+}

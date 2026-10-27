@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E076
+// EXPECT-DIAG: not representable in type 'int'
+// SEM-002 (FREEZE.md §6.2 row 3): an integer literal whose exact value
+// doesn't fit 'int' is a hard error -- ARCHITECTURE_OVERHAUL.md §10.2's
+// own worked example. Before this group: silently became
+// 9223372036854775807 (old strtoll clamp) then, after SEM-001's exact-value
+// reshape but before this group's representability check, silently wrapped
+// via plain 64-bit truncation instead.
+fn main(): int {
+    mut x: int = 999999999999999999999999999999999999999999999999;
+    return 0;
+}

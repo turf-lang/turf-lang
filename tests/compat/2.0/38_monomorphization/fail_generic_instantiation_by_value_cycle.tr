@@ -1,0 +1,25 @@
+// EXPECT-DIAG: E069
+// EXPECT-DIAG: cycle: A_gen1_B -> B -> A_gen1_B
+// Regression test: OVH-004 -- a by-value cycle that only exists through a
+// CONCRETE generic instantiation must be rejected with StructLayoutCycleError
+// (E069), not left to reach Codegen (where it previously segfaulted the
+// compiler, exit 139, no output).
+//
+// `A<T>` alone is not cyclic (its own field is the still-open parameter
+// `T`), and `B` alone is not cyclic (its own field is the still-uninstantiated
+// generic type `A<B>`) -- the cycle `A<B> -> B -> A<B>` only closes once `T`
+// is substituted with the concrete `B`. byValueEdgeTarget() (ResolverCore.cpp)
+// used to resolve a `GenericType` field to its TEMPLATE's base name ("A"),
+// whose own field is still the placeholder `T` with no further edges, so the
+// walk from `B`'s `back: A<B>` field never reached back to the concrete clone
+// `A_gen1_B` that the monomorphizer had already put on the same DFS path.
+// Fixed by trying the field's mangled instantiation name
+// (Monomorphize::instantiatedDeclName()) first.
+
+struct A<T> { val: T }
+struct B { back: A<B> }
+
+fn main(): int {
+    mut x: A<B> = A::default();
+    return 0;
+}

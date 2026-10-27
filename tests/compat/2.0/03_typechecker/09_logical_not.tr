@@ -1,0 +1,43 @@
+import io;
+
+import test;
+// This file also (informally) covers a Lint.cpp fix: ParseUnary() desugars
+// every `!x` in the source into a `BinaryExprAST(TOK_NEQ, x, true)` node
+// (see Parser.cpp's "Desugar: !x -> x != true"), and Lint.cpp's redundant-
+// boolean-comparison check used to run on that desugared shape exactly as
+// if the user had literally written `x != true`, so EVERY use of `!` in the
+// entire language triggered a "this comparison is redundant, remove it"
+// warning about a comparison that doesn't exist in the source at all.
+// Fixed via BinaryExprAST::IsDesugaredNot (AST.h), set only at that one
+// desugar site and checked by the lint. The test harness only asserts on
+// exit codes, not stderr, so this can't be a hard assertion here -- verified
+// manually that this file now compiles with zero warnings.
+
+fn main(): int {
+    // 1. !true compiles to false
+    test::assert(!true == false, "!true should be false");
+
+    // 2. !false compiles to true
+    test::assert(!false == true, "!false should be true");
+
+    // 3. if !flag { ... } parses and compiles correctly
+    mutable flag: bool = false;
+    mutable ran: bool = false;
+    if !flag {
+        ran = true;
+    }
+    test::assert(ran == true, "if !flag block should execute");
+
+    // 4. !!x (double negation) parses as !(!x) and compiles correctly
+    mutable x: bool = true;
+    test::assert(!!x == true, "!!true should be true");
+    mutable y: bool = false;
+    test::assert(!!y == false, "!!false should be false");
+
+    // 5. != as a binary operator is unaffected
+    mutable a: int = 10;
+    mutable b: int = 20;
+    test::assert(a != b, "!= should work normally");
+
+    return 0;
+}

@@ -1,0 +1,46 @@
+// LEC-004: io::FileError::NotFound carries the path that could not be opened.
+// It is read by destructuring, and `==` against the bare variant (which looks at
+// the variant only) still works. read_lines() reports the same path.
+import io;
+import list::List;
+import test;
+
+fn missingPath(path: string): string {
+    immut _s: string = io::read_to_string(path) recover as err run {
+        compare err {
+            matches io::FileError::NotFound(p):
+            return p;
+            done
+            otherwise:
+            return "?";
+        }
+    };
+    return "";
+}
+
+fn linesMissingPath(path: string): string {
+    immut _l: List<string> = io::read_lines(path) recover as err run {
+        compare err {
+            matches io::FileError::NotFound(p):
+            return p;
+            done
+            otherwise:
+            return "?";
+        }
+    };
+    return "";
+}
+
+fn isNotFound(path: string): bool {
+    immut _s: string = io::read_to_string(path) recover as err run {
+        return err == io::FileError::NotFound;
+    };
+    return false;
+}
+
+fn main(): int {
+    test::assert(missingPath("/definitely/not/here.txt") == "/definitely/not/here.txt", "NotFound carries the path");
+    test::assert(linesMissingPath("/nope/lines.txt") == "/nope/lines.txt", "read_lines reports the path too");
+    test::assert(isNotFound("/definitely/not/here.txt"), "== still identifies the variant");
+    return 0;
+}

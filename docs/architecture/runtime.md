@@ -297,7 +297,16 @@ window errs toward "generic": the handler never calls a real memory-safety bug
 "just recursion".
 
 A classified overflow goes through `turf_rt_panic("stack overflow", ...)`, so it
-ends exactly like every other panic. Any other fault prints
+ends exactly like every other panic. Its text names the recursion depth
+(RT-6, issue #300): `turf_rt_walk_frames()` follows the saved-frame-pointer
+chain from the frame and stack pointers in the signal's `ucontext` and counts
+the links that lie on the stack, giving `... exceeded its limit at about N
+nested calls -- ...`. That chain exists because codegen puts
+`"frame-pointer"="all"` on every Turf function (`CodegenFunc.cpp`); frames of
+C code between Turf frames have none, so the count can fall short of the true
+depth but never exceeds it. When the registers cannot be read (a platform
+`turf_rt_fault_regs()` does not handle) or no frame validates, the text is
+printed without the depth. Any other fault prints
 `panic: segmentation fault (this is a bug in unsafe code or in TurfLang) at address <addr>`
 (`bus error` for `SIGBUS`) and calls `abort()`.
 
@@ -316,7 +325,9 @@ only, which is why the ASan CI job skips
 `turf_rt_install_segv_handler()` reserves 128 KiB of guaranteed stack with
 `SetThreadStackGuarantee()` (the counterpart of `sigaltstack`), installs a
 vectored exception handler (`turf_rt_veh`) that prints the same two messages as
-the POSIX handler, and sets the error mode and abort behaviour so a crash does
+the POSIX handler (on x64 the depth comes from the `Rbp` chain and
+`GetCurrentThreadStackLimits()`; other Windows targets print the overflow text
+without a depth), and sets the error mode and abort behaviour so a crash does
 not open the error-reporting dialog. It also hooks `SIGABRT` to
 `TerminateProcess` with status `0xE0545254`, because the C runtime's own
 `abort()` exits with 3, which an ordinary `return 3` also produces. The test
@@ -354,7 +365,7 @@ bumps the suffix (`_2_0` to `_2_1`, ...) in both places together (INV-RT-6).
 | Termination | Message | Exit code |
 |---|---|---|
 | A compiler-inserted runtime check (division by zero, overflow, array bounds, ...) | `panic: runtime check: <msg> (<file>:<line>)` | 134 (`SIGABRT`) |
-| Stack overflow | `panic: stack overflow: <msg>` | 134 |
+| Stack overflow | `panic: stack overflow: the call stack exceeded its limit[ at about <n> nested calls] -- <hint>` | 134 |
 | Any other `SIGSEGV` (and `SIGBUS` on POSIX) | `panic: segmentation fault (this is a bug in unsafe code or in TurfLang) at address <addr>` | 134 |
 | Out of memory, GC heap | `panic: out of memory: could not allocate <n> bytes[ for '<type>']` | 134 |
 | Out of memory, manual heap | `sys::panic()`'s own format | 134 |

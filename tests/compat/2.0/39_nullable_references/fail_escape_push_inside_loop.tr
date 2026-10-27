@@ -1,0 +1,19 @@
+// EXPECT-DIAG: E086
+// EXPECT-DIAG: can't be pushed into a collection
+// The collection sink inside a loop body, same cause as
+// fail_escape_return_after_loop.tr.
+import list::List;
+
+struct Node { val: int, next: &?Node }
+
+fn fill(l: List<&Node>): void {
+    mut n: Node = Node::default();
+    mut p: &Node = &n;
+    for i in 0..2 { l.push(p); }
+}
+
+fn main(): int {
+    mut l: List<&Node> = List::default();
+    fill(l);
+    return l.length();
+}

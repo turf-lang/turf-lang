@@ -1,0 +1,61 @@
+// Regression test: `Module::Type<Args>` and `Module::StructName { ... }`
+// are now BOTH real, validated syntax, not decoration -- confirms a real
+// gap a sharp user catch found: `mut l: totallyBogusModuleName::List<int>
+// = List { ... };` used to compile CLEANLY, silently discarding the
+// qualifier (ParseType() parsed it, never validated it against anything).
+//
+// Fixed in two parts:
+//   1. NamedType/GenericType (Types.h) gained a Module field, threaded
+//      through from ParseType()'s already-existing qualifier parsing
+//      (previously discarded), validated by the new
+//      Resolver::validateModuleQualifier() -- checks the qualifier names a
+//      real, known module (UnknownScopeQualifierError if not), AND that
+//      the module actually OWNS the type (UnknownModuleSymbolError if some
+//      OTHER real module owns it instead), via a new per-type
+//      ResolverSymbolTable::TypeOwningModule_ registry populated at
+//      hoisting time.
+//   2. Struct CONSTRUCTION previously had NO qualified form at all --
+//      `list::List { ... }` was a flat parse error ("Expected ';' after
+//      statement"), even though the TYPE annotation `list::List<int>`
+//      parsed fine right next to it. The brace-literal form this originally
+//      referred to is gone now (struct construction is `::new(...)`/
+//      `::default()` only, see the struct-construction-overhaul work), but
+//      the SAME qualifier validation applies identically to
+//      `Module::StructName::default()`/`::new(...)` -- Resolver::
+//      visitFuncCall's construction dispatch calls the same
+//      validateModuleQualifier() a qualified type annotation does, so the
+//      type annotation and its construction stay symmetrically qualified.
+//
+// Also found and fixed alongside this: validateNamedType() never
+// validated a GenericType's own BASE name at all (only its type
+// arguments) -- `NonExistentGeneric<int>` used to silently pass "unknown
+// type" validation and only fail later with an unrelated type-mismatch
+// error blaming the wrong thing.
+
+import io;
+import list;
+import list::List;
+
+import test;
+fn main(): int {
+    // Bare form (unqualified) -- works here because List is on-demand
+    // imported above; a plain `import list;` alone would only grant
+    // qualified access now (see the bare-type visibility gate).
+    mut a: List<int> = List::default();
+    a.push(1);
+    test::assert(a.length() == 1, "bare form still works");
+
+    // Fully qualified form -- type annotation AND construction.
+    mut b: list::List<int> = list::List::default();
+    b.push(2);
+    test::assert(b.length() == 1, "fully qualified form works");
+
+    // Mixed form (qualified type, bare construction) -- was already
+    // possible before this fix and must stay working.
+    mut c: list::List<int> = List::default();
+    c.push(3);
+    test::assert(c.length() == 1, "mixed qualified-type/bare-construction form works");
+
+    io::printline("all module-qualifier forms work correctly");
+    return 0;
+}

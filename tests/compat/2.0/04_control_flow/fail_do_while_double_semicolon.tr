@@ -1,0 +1,16 @@
+// EXPECT-DIAG: E103
+// EXPECT-DIAG: Unexpected ';'
+// Regression test (Issue #180 follow-up): a do-while already consumes its
+// own trailing ';' inside ParseDoWhileExpr() -- unlike if/while/for, which
+// never have one to begin with. ParseBlock()'s statement dispatcher treats
+// both cases the same way (TOK_DO sits in the "this statement doesn't need
+// ME to eat a ';'" branch alongside TOK_IF/TOK_WHILE/TOK_FOR), so a second,
+// stray ';' immediately after a valid do-while must still be rejected as
+// "Unexpected ';'" rather than silently accepted as an empty statement.
+fn main(): int {
+    mut x: int = 5;
+    do {
+        x = x - 1;
+    } while (x > 0);;
+    return 0;
+}

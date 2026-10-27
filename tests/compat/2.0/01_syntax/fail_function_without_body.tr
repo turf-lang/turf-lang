@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E107
+// EXPECT-DIAG: has no body
+// REL-004 (fuzzer): `fn f(...): T;` used to parse as a "forward declaration"
+// with a null body that Codegen dereferenced -- a segfault from one stray `;`
+// after a signature. It is now a diagnostic that points at `extern fn`.
+fn f(x: int): int ;
+
+fn main(): int {
+    return 0;
+}

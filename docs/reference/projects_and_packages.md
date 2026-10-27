@@ -152,22 +152,17 @@ nothing can import a program.
 ### Tests: `turf test`
 
 `turf test` compiles and runs every `.tr` file under the project's `tests/`
-directory, at any depth, in parallel, and exits 0 only if all of them pass.
-**A project with no `tests/` directory is an error**, and so is one whose
-`tests/` holds no tests: a run of zero tests that reports success is how an
-untested project goes unnoticed.
+directory, at any depth, and every [`@test`](functions_and_modules.md#test)
+function in the files of its `src/`, in parallel, and exits 0 only if all of
+them pass. **A project with no test anywhere is an error**: no `tests/`
+directory and no `@test` function under `src/`, or a `tests/` that holds no
+tests. A run of zero tests that reports success is how an untested project goes
+unnoticed.
 
 ```
 $ turf test
-turf: this project has no tests/ directory (looked for /home/me/app/tests)
-hint: create it and put test files in it, for example tests/basic.tr:
-
-        import test;
-
-        fn main(): int {
-            test::assert(1 + 1 == 2, "arithmetic still works");
-            return 0;
-        }
+Error: no tests: 'tests' does not exist, and no file under src/ declares a `@test` function.
+  hint: write a `@test` function beside the code it checks, or create 'tests' and put test files (`.tr`) in it.
 ```
 
 A test is an ordinary program with a `main` that returns 0, and the stdlib's
@@ -181,13 +176,22 @@ the file's name:
 | `fail_name.tr` containing the comment `// RUNTIME_ABORT_EXPECTED` | it compiles and then aborts (exits non-zero) |
 | `name_module.tr` | never run: a companion for a test to `import` |
 
+A file with a line starting `@test` declares tests beside the code they check
+(see [`@test`](functions_and_modules.md#test)): it needs no `main`, and each
+`@test` function is a test of its own, reported as `file.tr: test_name`. A
+file under `tests/` that also has a `main` is run as an ordinary program too.
+The root package's `src/` files that declare tests are run as well (their
+`main` is not a test); `turf test <path>...` runs only the paths it names, so no
+`src/` test then. A file whose tests do not build is one failure, `COMPILE
+FAILED (its tests did not run)`.
+
 Comments can pin the reason, not only the outcome, so a test cannot keep passing
 because it broke in some other way:
 
 | Comment | Holds when |
 |---|---|
 | `// EXPECT-DIAG: E011` | the compiler's output has the error code `E011` |
-| `// EXPECT-DIAG: some text` | ... or this text (for a warning, which has no code) |
+| `// EXPECT-DIAG: some text` | ... or this text (for a warning, whose code also works) |
 | `// EXPECT-NO-DIAG: some text` | the compiler's output does **not** have this text |
 | `// EXPECT-FIX: replace 'nmae' with 'name'` | the compiler printed that `Fix:` line (see [Fixes](cli_and_diagnostics.md#fixes)) |
 | `// EXPECT-RUNTIME: some text` | the aborting program printed this text |
@@ -261,7 +265,7 @@ turf = "2.0"
 [dependencies]
 ```
 
-There are three tables and no others.
+There are four tables and no others.
 
 | Table | Key | Meaning |
 |---|---|---|
@@ -270,13 +274,15 @@ There are three tables and no others.
 | | `turf` | Optional. The oldest compiler this package needs, `"<major>.<minor>"`. The major must equal the compiler's, and the minor must not be newer than it. |
 | `[dependencies]` | `<name> = { … }` | One entry per dependency (section 3). The key must be the dependency's own package name. |
 | `[unsafe]` | `allow = [ "<name>", … ]` | The dependencies whose `unsafe module;` declarations are honored (section 8). |
+| `[lints]` | `E163 = "allow"` | The level of a warning, by code: `allow`, `warn` or `deny` ([the `[lints]` table](#the-lints-table)). |
+| | `lint-set = "2.N"` | Optional. Pins the set of warnings to the ones release 2.N has. |
 
 **An unknown key or table is an error, not ignored.** A silently ignored
 setting is how a typo becomes a policy.
 
 ```
 turf: …/turf.toml:4: unknown key `authors` in [package]: the keys are name, version and turf
-turf: …/turf.toml:5: unknown key `build` at the top level: the tables are [package], [dependencies] and [unsafe]
+turf: …/turf.toml:5: unknown key `build` at the top level: the tables are [package], [dependencies], [unsafe] and [lints]
 turf: …/turf.toml:6: unknown key `deny` in [unsafe]: the only key is allow
 ```
 
@@ -297,9 +303,9 @@ turf: …/turf.toml: missing [package] table
 A `turf` requirement the compiler does not meet:
 
 ```
-turf: package 'app' (…/turf.toml) requires turf "9.0", but the compiler is turfc 2.1.1 (…/build/turfc): a different major version
+turf: package 'app' (…/turf.toml) requires turf "9.0", but the compiler is turfc 2.2.0 (…/build/turfc): a different major version
 hint: use a turfc 9.x, or change `turf` in that manifest
-turf: package 'app' (…/turf.toml) requires turf "2.99", but the compiler is turfc 2.1.1 (…/build/turfc), which is older
+turf: package 'app' (…/turf.toml) requires turf "2.99", but the compiler is turfc 2.2.0 (…/build/turfc), which is older
 hint: upgrade turfc, or lower `turf` in that manifest
 ```
 
@@ -308,13 +314,32 @@ hint: upgrade turfc, or lower `turf` in that manifest
 ```
 $ turf version
 turf 1.0.0  (needs turfc interface 1.1+)
-turfc 2.1.1  (interface 1.7, …/bin/turfc)
+turfc 2.2.0  (interface 1.12, …/bin/turfc)
   …
 ```
 
 The `turf` key in the manifest is about the *compiler's* version (`turfc`, the
 number after `turfc` above). The remaining lines of `turf version` are
 described in [CLI & Diagnostics](cli_and_diagnostics.md#versions).
+
+### The `[lints]` table
+
+A warning has a code and a level (`allow`, `warn`, `deny`; see [Lint levels](cli_and_diagnostics.md#lint-levels)). The table sets them for the whole build of the project, for `turf build`, `run`, `check` and `test` alike:
+
+```toml
+[lints]
+lint-set = "2.1"
+E163 = "allow"   # unused variable: do not report it
+E158 = "deny"    # function too complex: fail the build
+```
+
+Each key is a diagnostic code (`E` and three digits) and each value is `"allow"`, `"warn"` or `"deny"`. `lint-set` is the only other key, and its value is `"2.N"`. `turf` checks the shape of the table and passes it to the compiler as `--lint-set 2.1 --allow E163 --deny E158`, ahead of the flags you type, so `turf build --deny E163` beats `E163 = "allow"`. The compiler checks that each code exists and is a warning; a table naming an unknown code, or an error's code with `allow` or `warn`, fails the build with the compiler's message. A manifest with a `[lints]` table needs a compiler with driver interface 1.8 or later and says so otherwise. The table has no effect in a single-file compile, which has no manifest: pass the flags.
+
+```
+turf: …/turf.toml:5: unknown key `unused` in [lints]: the keys are lint-set and diagnostic codes such as E163
+turf: …/turf.toml:5: invalid level for `E163` in [lints]: 'forbid' is not allow, warn or deny
+turf: …/turf.toml:4: invalid `lint-set` in [lints]: '3.0' is not "2.N"
+```
 
 ## 3. Dependencies
 
@@ -788,13 +813,14 @@ is 1.
 | `turf run [--offline] [--locked] [flags] [-- args]` | `turf build`, then run `build/<name>`, passing the arguments after `--`, in the directory you typed the command in. The exit status is the program's. A library without `src/main.tr` says there is nothing to run and how to add one (section 1; exit 1). |
 | `turf check [--offline] [--locked] [flags]` | Every diagnostic, no executable. |
 | `turf clean` | Delete `build/`. Nothing to delete is not an error. |
-| `turf graph [--project <dir>] [--offline] [--locked]` | Print the package graph (the JSON `turf build` writes to `build/package-graph.json`) on stdout, including the root's `tests/` when the project has one. Writes nothing (no `turf.lock`, no `build/`) and needs no compiler. This is what an editor asks for, so that `import` there resolves as in `turf build`. |
+| `turf graph [--project <dir>] [--unsafe] [--offline] [--locked]` | Print the package graph (the JSON `turf build` writes to `build/package-graph.json`) on stdout, including the root's `tests/` when the project has one. Writes nothing (no `turf.lock`, no `build/`) and needs no compiler. This is what an editor asks for, so that `import` there resolves as in `turf build`. `--unsafe` adds each package's unsafe surface (an `"unsafe"` object per package and a top-level `"stdlib"`, section 8); that form needs a compiler, and is a report: `turfc` does not accept it back as a graph. |
+| `turf audit [--project <dir>] [--files] [--offline] [--locked]` | Show where the project's unsafe code is, one row per package and the standard library (section 8). Writes nothing. |
 | `turf fetch [--offline] [--locked]` | Do everything `build` does up to `turf.lock`, without compiling. Prints one line per git dependency: `jsonx de7262e335ed (tag=v1.0.0)`. Needs no compiler. |
 | `turf update [name…]` | Move git dependencies to what their refs point at now (section 5). |
 | `turf add <name> --path <dir>` / `--git <url> (--tag\|--branch\|--rev) <ref>` | Add a dependency (section 3). |
 | `turf remove <name>` | Remove one. |
 | `turf publish` | Reserved. There is no registry in 2.0. |
-| `turf test [path...] [--offline] [--locked] [--jobs n] [--timeout s] [--exclude path]` | Compile and run every test under `tests/`, or only the files and directories named; an error if there is no `tests/` (section 1, *Tests*). |
+| `turf test [path...] [--offline] [--locked] [--jobs n] [--timeout s] [--exclude path]` | Compile and run every test under `tests/` and every `@test` function in `src/`, or only the files and directories of `tests/` named; an error if there is no test at all (section 1, *Tests*). |
 | `turf fmt`, `turf explain`, `turf migrate`, `turf dump`, `turf compile` | Work on files, in or out of a project ([CLI & Diagnostics](cli_and_diagnostics.md)). `turf fmt --write` with no path formats the project's `src/` and `tests/`. |
 
 **Compiler flags are forwarded.** `turf build -O2`, `turf build -g` and
@@ -875,6 +901,50 @@ With that line the same build compiles.
   ```
 
 The standard library is always trusted.
+
+### Seeing what you grant: `turf audit`
+
+`turf audit` shows where the unsafe code is in the project and everything it
+depends on, so that what `[unsafe] allow` grants is something you can look at:
+
+```
+$ turf audit
+package   granted  files  unsafe module  unsafe { }  extern fn  C libraries
+app       own          1              0           0          0  -
+fastmath  no           1              1           0          1  m
+ffi       yes          2              2           1          3  z
+std       always      25             12           0         75  m
+
+note: 1 file declares `unsafe module;` in 'fastmath', which [unsafe] allow in /work/app/turf.toml does not list: the compiler rejects its raw-pointer uses (E130)
+```
+
+One row per package: the project's own first, its dependencies by name, then
+the standard library. `files` is how many `.tr` files are under the package's
+`src/` (every one is counted, imported or not), then how many of them declare
+`unsafe module;`, the `unsafe { }` blocks, the `extern fn` declarations and
+the C libraries they name with `extern from`. `granted` says whether the
+package's `unsafe module;` is honored: `own` for the project's own package,
+`yes` or `no` for a dependency as `[unsafe] allow` says, `always` for the
+standard library. `--files` adds a table of each file that has something to
+report:
+
+```
+$ turf audit --files
+...
+package   file                    unsafe module  unsafe { }  extern fn  C libraries
+fastmath  fastmath.tr             yes                     0          1  m
+ffi       ffi.tr                  yes                     1          2  z
+ffi       rawmod.tr               yes                     0          1  -
+std       collections/hashing.tr  yes                     0          0  -
+...
+```
+
+The counts come from the compiler (`turfc --unsafe-report`, which reads tokens
+with the real lexer, so a keyword in a comment or a string is not counted), so
+`turf audit` needs a compiler of driver interface 1.12 or later. It compiles
+nothing and writes nothing. `turf graph --unsafe` prints the same as JSON, for
+a tool. Native sources join the report with the `[native]` table (LB-1), which
+`turf.toml` does not have yet.
 
 ## 9. Distributing
 

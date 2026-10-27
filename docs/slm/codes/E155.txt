@@ -1,0 +1,24 @@
+TURF E155 -- REDUNDANT COMPARISON (WARNING):
+
+CAUSE:
+  A `bool` is compared with the literal `true` or `false` using `==` or `!=`.
+  The result is the value itself or its negation. This is a WARNING:
+  compilation still succeeds.
+
+INCORRECT:
+    immut ready: bool = true;
+    if ready == true {     // WARNING
+        printline("go");
+    }
+
+CORRECT (use the bool directly):
+    immut ready: bool = true;
+    if ready {
+        printline("go");
+    }
+
+FIX:
+  `x == true` and `x != false` become `x`; `x == false` and `x != true`
+  become `!x`.
+
+RELATED: E166 (comparing a value with itself).

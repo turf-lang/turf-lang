@@ -126,10 +126,31 @@ an AST built in the normal way.
 `Token` values (`enum Token`: negative constants for multi-character tokens
 and keywords, raw ASCII values for single-character operators).
 
+### `LexerState`
+
+Everything the lexer reads and writes lives in a `LexerState` (F-S0, issue
+#301): the stream (`Source`, an owned `File` or a caller's buffer), the
+`Filename` stamped into every location, the cursor (`LastChar`, `CurLine`,
+`CurCol`), the current token (`CurLoc`, `IdentifierStr`, `StringVal`, the
+`NumLit*` fields, `BoolVal`, `CharVal`), the previous token's end and the
+lookahead. `gettok(LexerState &)` works on the one it is given, so two
+buffers can be tokenized in turn without either seeing the other's cursor
+(`tests/api/analysis_test.cpp`, `testTwoLexersInterleave`). `Keywords` is a
+constant table.
+
+The parser reads tokens from `Lex()`, the lexer of the current `ParserState`
+(see [`ParserState`](#parserstate) below). With no parser current, or one
+with no lexer, `Lex()` is an empty lexer that yields `TOK_EOF`.
+
+Not part of `LexerState`, because `gettok()` never reads them:
+`SourceFilename`, `SourceLines`, `AllSourceLines` and `MainSourceFilename`,
+the compile's record of which file is being read and what its lines say,
+which diagnostics and the passes after parsing use.
+
 ### `gettok()` and `gettokScan()`
 
 `gettokScan()` is a hand-written maximal-munch scanner over `LastChar` and
-`SourceFile->peek()`: each branch consumes the longest token it can. The `:`
+`Source->peek()`: each branch consumes the longest token it can. The `:`
 branch peeks for a second `:` to choose between `TOK_COLON` and `TOK_SCOPE`;
 the `.` branch looks ahead to separate `.`, `..` (`TOK_RANGE`) and `...`
 (`TOK_ELLIPSIS`). Identifiers are scanned as an ordinary run and then looked
@@ -166,8 +187,8 @@ known and prints a single caret otherwise. The new fields are appended after
 `Filename` so the many `{Line, Col}` and `{Line, Col, Filename}`
 aggregate-initializers keep compiling.
 
-`Filename` is stamped at scan time from `SourceFilename`, which the import
-code repoints at each module while it is parsed. A diagnostic raised by a
+`Filename` is stamped at scan time from the lexer's own `Filename`, which is
+each import's path while that module is parsed. A diagnostic raised by a
 later pass therefore still finds the right file, through the persistent
 `AllSourceLines` cache (the single-file `SourceLines` is transient).
 
@@ -197,29 +218,62 @@ line (`ErrorLines`) to avoid cascades, unless an embedder sets
 `ParserLiteral.cpp`, `ParserModule.cpp` (with the cross-file declarations in
 `Parser.h` and `ParserInternal.h`). Recursive descent: each production is one
 function (`ParseIfExpr()`, `ParseStructDecl()`, `ParseType()`, ...) that
-consumes tokens through the shared `CurTok`/`getNextToken()` cursor.
+consumes tokens through the current parser's `CurTok`/`getNextToken()`
+cursor.
+
+### `ParserState`
+
+Everything the parser reads and writes while it parses one file lives in a
+`ParserState` (`Parser.h`, F-S1, issue #302): the lexer it reads (`Lexer`),
+the current token (`CurTok`), the bracket depths (`BraceDepth`,
+`CurlyDepth`), the recursion depth `ParseRecursionGuard` counts
+(`RecursionDepth`), the flags one construct sets for the ones nested in it
+(`AllowGuessType`, `SizeParamsInScope`, `InPatternHeader`,
+`PatternHeadCallPending`, `FuncUsesTry`) and the file's module aliases
+(`ModuleAliases`, see `ModuleKeyFor()`). The parse functions work on
+`Parser()`, the innermost live `ParserScope`'s parser.
+
+The driver makes one current for the input file. `ParseFile()` makes a fresh
+`ParserState`, with a fresh `LexerState`, current for each import, and the
+query facade, the formatter and `--migrate=pub` do the same for their
+buffers, so the importer's or host's parser is never touched and nothing has
+to be saved and restored field by field
+(`tests/api/analysis_test.cpp`, `testTwoParsersInterleave`). With no scope
+live, `Parser()` is an idle parser with no lexer.
+
+Not part of `ParserState`: what one compile accumulates across every file it
+parses (the import caches, the import stack, the parsed top-level
+declarations, the files that declared `unsafe module;`, the source overlays:
+`ParserCompileState` in `ParserModule.cpp`, which
+`PushParserCompileState()`/`PopParserCompileState()` stack for an isolated
+compile), `g_recoverActive` (error recovery, which the Resolver and
+TypeChecker arm too) and the compile's file bookkeeping (`SourceFilename`,
+`SourceLines`, `AllSourceLines`). `BinopPrecedence` is a constant table.
 
 ### `getNextToken()`: the one advance point
 
 ```cpp
 int getNextToken() {
-  if (CurTok == '{' || CurTok == '(' || CurTok == '[')
-    g_braceDepth++;
-  else if ((CurTok == '}' || CurTok == ')' || CurTok == ']') && g_braceDepth > 0)
-    g_braceDepth--;
-  /* ... the same for g_curlyDepth, '{' and '}' only ... */
-  return CurTok = gettok();
+  ParserState &P = Parser();
+  if (P.CurTok == '{' || P.CurTok == '(' || P.CurTok == '[')
+    P.BraceDepth++;
+  else if ((P.CurTok == '}' || P.CurTok == ')' || P.CurTok == ']') && P.BraceDepth > 0)
+    P.BraceDepth--;
+  /* ... the same for P.CurlyDepth, '{' and '}' only ... */
+  if (takeLookaheadToken(P.CurTok))
+    return P.CurTok;
+  return P.CurTok = gettok(Lex());
 }
 ```
 
 Every token advance goes through it, which is why bracket depth is tracked
 here with no per-call-site bookkeeping. `SkipToNextTopLevelBoundary()` uses
-`g_braceDepth` and `g_curlyDepth` to resynchronize after an error at any
+`BraceDepth` and `CurlyDepth` to resynchronize after an error at any
 nesting depth.
 
 ### Expressions: precedence climbing
 
-A single table (`BinopPrecedence`, filled by `InitializePrecedence()`) drives
+A single constant table (`BinopPrecedence`) drives
 `ParseBinOpRHS()`; there is no per-level function chain. Low to high:
 assignment and compound assignment 10, cast (`to`) 12, `||` 15, `&&` 20,
 `==` `!=` 25, relational 30, `|` 33, `^` 35, `&` 37, shifts 38, `+` `-` 40,

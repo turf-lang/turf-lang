@@ -1,0 +1,25 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: C::transition(Connecting) -- no such transition from the current state
+// After a reference the state in a narrowed arm is no longer known, so the
+// transition is checked when it runs instead of being trusted.
+machine C {
+    Idle -> Connecting,
+    Connecting -> Connected
+}
+
+fn advance(p: &C): void {
+    p.transition(C::Connecting);
+}
+
+fn main(): int {
+    mut x: C = C::Idle;
+    compare x {
+        matches C::Idle:
+        advance(&x);
+        x.transition(C::Connecting);
+        done
+        otherwise:
+        return 1;
+    }
+    return 0;
+}

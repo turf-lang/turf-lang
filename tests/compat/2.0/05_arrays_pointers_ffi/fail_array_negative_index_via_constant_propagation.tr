@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E001
+// #256: the constant-propagation twin of fail_array_negative_index_out_of_
+// range.tr -- the offending index is a local the dataflow proves is -4
+// (ValueRangePass::runOnCFG()), not a literal at the access. Spelled `0 - 4`
+// because evalConstExpr() folds binary arithmetic but not a unary minus.
+fn main(): int {
+    mut a: int[3] = [1, 2, 3];
+    mut i: int = 0 - 4;
+    return a[i];
+}

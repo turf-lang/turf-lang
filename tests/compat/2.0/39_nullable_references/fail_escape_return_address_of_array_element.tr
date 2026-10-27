@@ -1,0 +1,17 @@
+// EXPECT-DIAG: E086
+// EXPECT-DIAG: can't be returned
+// `&a[0]` of a local `N[2]` is inside this frame's storage. It used to be
+// Unknown for any `&expr[i]` (INV-MEM-3), because `&l.data[1]` indexes a heap
+// buffer through a raw pointer; field types now tell the two apart.
+struct N { val: int }
+
+fn make(): &N {
+    mut a: N[2] = [N::default(), N::default()];
+    a[0].val = 42;
+    return &a[0];
+}
+
+fn main(): int {
+    mut r: &N = make();
+    return r.val;
+}

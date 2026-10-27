@@ -1,0 +1,21 @@
+// Regression test: D5 (docs/development/changes/TYPE-002.md, S15) -- two
+// DIFFERENT modules declaring a same-named generic free function used to
+// collide once monomorphized: "Duplicate function definition:
+// 'tag_gen1_int'". InstantiationRequest::sameInstantiationAs() already
+// keyed on SourceModule (correctly distinct cache entries), but
+// instantiatedDeclName() -- the function that names the CLONE -- only ever
+// used (base name, type arguments), so both amod::tag<int> and
+// bmod::tag<int> produced the identically-spelled clone name. The
+// non-generic equivalent (`fn tag(x: int): int` in both modules) already
+// compiled fine; this shape compiled fine on the pre-TYPE-002 compiler too.
+import dup_generic_fn_amod_module;
+import dup_generic_fn_bmod_module;
+import test;
+
+fn main(): int {
+    immut a: int = dup_generic_fn_amod_module::tag(5);
+    immut b: int = dup_generic_fn_bmod_module::tag(5);
+    test::assert(a == 1, "amod's own tag<int> must return 1");
+    test::assert(b == 2, "bmod's own tag<int> must return 2, not amod's clone");
+    return 0;
+}

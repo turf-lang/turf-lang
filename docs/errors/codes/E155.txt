@@ -1,0 +1,19 @@
+Comparing a bool with `true` or `false` is redundant
+
+A condition that is already a `bool` doesn't need to be compared with a `bool` literal. The comparison just hands back the value you started with:
+
+    immut ready: bool = true;
+    if ready == true {     // WARNING: same as `if ready`
+        printline("go");
+    }
+
+`ready == true` is exactly `ready`; `ready == false` and `ready != true` are exactly `!ready`; `ready != false` is `ready` again. Drop the comparison:
+
+    immut ready: bool = true;
+    if ready {
+        printline("go");
+    }
+
+Turf only warns here when the comparison is one you wrote. A `!ready` you wrote is never flagged.
+
+This is a warning, not an error -- compilation still succeeds. To silence it for a whole build, set its lint level to allow: `turf build --allow E155` (or `[lints] E155 = "allow"` in turf.toml).

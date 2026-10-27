@@ -1,0 +1,23 @@
+TURF E161 -- INITIAL VALUE NEVER READ (WARNING):
+
+CAUSE:
+  A local is declared with `= value`, but every path assigns it again before
+  reading it. The starting value is never used. This is a WARNING:
+  compilation still succeeds.
+
+INCORRECT:
+    mut result: int = 0;    // WARNING: overwritten before it is read
+    result = 5;
+    printline(result to string);
+
+CORRECT (declare it without a value):
+    mut result: int;
+    result = 5;
+    printline(result to string);
+
+FIX:
+  Drop the initial value (`mut result: int;`), or read it before the next
+  assignment. Every read must still come after an assignment.
+
+RELATED: E160 (a later store that is never read), E163 (never read at all),
+  E008 (reading a variable before it is assigned).

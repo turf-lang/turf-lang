@@ -1,0 +1,33 @@
+// Helper module for 12_block_codegen_null_propagation.tr. Named *_module.tr
+// so scripts/test_runner.sh excludes it from standalone runs.
+//
+// Regression coverage for the "BlockExprAST::codegen() never checks for a
+// null statement result" gap, formerly tracked in the now-removed
+// docs/planning/CODE_REVIEW_GAPS_2026-07.md (see git history).
+// A module's whole file is codegen'd as ONE BlockExprAST (via
+// ModuleImportExprAST::codegen()'s Body->codegen()), with every top-level
+// declaration as a statement in it. Two declaration kinds used to return a
+// literal nullptr on their own SUCCESS path (not just on failure):
+// FuncDefExprAST (every function definition -- "statements don't produce a
+// value") and VarDeclExprAST for an `export immut` constant (no real LLVM
+// storage). Once BlockExprAST::codegen() was hardened to stop at the first
+// null statement instead of silently continuing, both of those legitimate
+// no-op returns looked identical to a real failure and truncated the rest
+// of the module -- any function declared AFTER the first function, or
+// after an export constant, silently never got a body (or even a
+// prototype, depending on which pass hit it). This file deliberately puts
+// an export constant, then a FIRST function, then a SECOND function that
+// depends on the first -- exercising both previously-broken no-op paths
+// with more file left after them.
+
+export immut BASE: int = 100;
+
+pub fn addBase(x: int): int {
+    return x + BASE;
+}
+
+// The function that would have been silently dropped: it's neither first
+// in the file nor the one immediately after the export constant.
+pub fn addBaseTwice(x: int): int {
+    return addBase(addBase(x));
+}

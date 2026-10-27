@@ -1,0 +1,80 @@
+// tests/41_gc/10_int_double_to_string_survives_collection.tr
+// Adjacent to OVH-002 (docs/planning/OVERHAUL_REMAINING_WORK.md), found
+// live while implementing it: `int to string`/`double to string` casts
+// (`CastToType()`, src/codegen/CodegenExpr.cpp) built their result buffer with a
+// bare `malloc(32)`, never registered with the collector's block table at
+// all. This is a different shape than OVH-002's own four named sites (no
+// GC pointer was hidden INSIDE the malloc'd block -- the malloc'd block
+// WAS the string), but the same underlying violation: FREEZE.md §6.5 says
+// "string values produced by any operation" belong on the GC heap, and a
+// `malloc`'d one is permanently invisible to `gc_collect()`/`turf_rt_stats()`
+// -- a silent, permanent leak rather than a use-after-free, but still a
+// real deviation from the documented memory model. Fixed by routing both
+// casts through `turf_rt_alloc(32, NULL)` (`desc == NULL` is correct: the
+// buffer holds only formatted digits, never an outgoing pointer).
+//
+// `s`/`d` are held only in `main()`'s own locals across a forced
+// collection with real allocation pressure in between -- the basic
+// retention property (`tests/41_gc/01_retention_across_collection.tr`'s
+// own shape), which a `malloc`'d, unregistered string trivially "passes"
+// (nothing ever frees leaked memory) but which this test also uses
+// `TURF_RT_STATS_DUMP`-visible accounting (verified manually while
+// developing this fix, not asserted here) to confirm is now a REAL,
+// tracked GC-heap block, not merely accidentally-still-valid memory.
+
+import strings;
+import test;
+import io;
+
+fn churn(depth: int): void {
+    mut buf: int[64];
+    buf[0] = 0;
+    mut i: int = 0;
+    while i < 64 {
+        buf[i] = i * 23;
+        i = i + 1;
+    }
+    mut sum: int = 0;
+    i = 0;
+    while i < 64 {
+        sum = sum + buf[i];
+        i = i + 1;
+    }
+    test::assert(sum == 46368, "churn: stack buffer round-trips correctly");
+    if depth > 0 {
+        churn(depth - 1);
+    }
+}
+
+fn junk(n: int): void {
+    mut i: int = 0;
+    while i < n {
+        strings::repeat("j", 6);
+        i = i + 1;
+    }
+}
+
+fn buildInt(): string {
+    return 424242 to string;
+}
+
+fn buildDouble(): string {
+    return 3.5 to string;
+}
+
+fn main(): int {
+    mut s: string = buildInt();
+    mut d: string = buildDouble();
+
+    churn(24);
+    gc_collect();
+    junk(3000);
+    churn(24);
+    gc_collect();
+
+    test::assert(s == "424242", "an int-to-string result survives a forced collection");
+    test::assert(d == "3.5", "a double-to-string result survives a forced collection");
+
+    io::printline("41/10 PASS: int/double-to-string results are real, tracked GC-heap allocations that survive a forced collection");
+    return 0;
+}

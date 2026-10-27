@@ -1,0 +1,16 @@
+// EXPECT-DIAG: E126
+// EXPECT-DIAG: Compound assignment through 'operator[]' is not supported
+// Getter-only twin of fail_index_compound_assign_setter_only.tr.
+struct IntBox {
+    a: int
+}
+
+operator [](box: IntBox, index: int): int {
+    return box.a;
+}
+
+fn main(): int {
+    mut box: IntBox = IntBox::default();
+    box[0] += 1;
+    return 0;
+}

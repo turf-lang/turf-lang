@@ -1,0 +1,3 @@
+stderr via eprint: ok
+stdout via print: ok
+04 PASS: io::eprint / io::eprintline / io::flush

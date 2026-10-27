@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: 'skipped' is not an outcome of '@test'
+// TDP-2-006: an outcome is one of the six words; anything else is an error,
+// never a test that silently expects nothing.
+@test(skipped)
+fn a(): void {
+}
+
+fn main(): int {
+    return 0;
+}

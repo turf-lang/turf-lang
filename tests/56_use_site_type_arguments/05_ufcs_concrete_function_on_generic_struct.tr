@@ -1,0 +1,18 @@
+// A generic struct's instance is a UFCS receiver as written: `b.f()` reaches
+// `fn f(b: Box<string>)`, whose parameter names the instance, not `Box`.
+import test;
+
+struct Box<T> {
+    v: T
+}
+
+fn unwrap_string(b: Box<string>): string {
+    return b.v;
+}
+
+fn main(): int {
+    mut b: Box<string> = Box<string>::default();
+    b.v = "boxed";
+    test::assert(b.unwrap_string() == "boxed", "concrete function, generic struct receiver");
+    return 0;
+}

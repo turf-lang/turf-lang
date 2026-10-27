@@ -19,7 +19,10 @@
 #include "sema/Types.h"
 #include "tooling/Formatter.h"
 #include "tooling/MigratePub.h"
+#include "tooling/UnsafeReport.h"
 #include "diagnostics/ErrorCategory.h"
+#include "diagnostics/ErrorCodes.h"
+#include "diagnostics/LintLevels.h"
 
 #include <filesystem>
 #include <fstream>
@@ -265,18 +268,22 @@ static void testHostStateIsRestored() {
   MainSourceFilename = "host.tr";
   SourceLines = {"host line 1", "host line 2"};
   AllSourceLines["host.tr"] = SourceLines;
-  CurTok = TOK_IDENTIFIER;
-  IdentifierStr = "hostIdent";
-  CurLine = 41;
-  CurCol = 7;
-  g_braceDepth = 2;
+  std::istringstream HostStream("fn host(): int { return 1; }");
+  LexerState Host(HostStream, "host.tr");
+  ParserState HostParser(Host);
+  ParserScope HostScope(HostParser);
+  HostParser.CurTok = TOK_IDENTIFIER;
+  Host.IdentifierStr = "hostIdent";
+  Host.CurLine = 41;
+  Host.CurCol = 7;
+  HostParser.BraceDepth = 2;
+  HostParser.CurlyDepth = 1;
+  HostParser.ModuleAliases["util"] = "geometry/util";
   g_recoverActive = true;
   g_AllowUnsafeModules = false;
   DiagnosticEngine::clearDiagnostics();
   DiagnosticEngine::setCollectAllDiagnostics(false);
   DiagnosticEngine::add({3, 4, "host.tr"}, "host diagnostic");
-  std::istringstream HostStream("fn host(): int { return 1; }");
-  SetSourceBuffer(HostStream);
 
   turf::AnalysisOptions Opts;
   Opts.AllowUnsafeModules = true;
@@ -289,19 +296,25 @@ static void testHostStateIsRestored() {
   CHECK_EQ(SourceLines.size(), 2u);
   CHECK(AllSourceLines.count("host.tr") == 1);
   CHECK(AllSourceLines.count("undef.tr") == 0);
-  CHECK_EQ(CurTok, static_cast<int>(TOK_IDENTIFIER));
-  CHECK_EQ(IdentifierStr, std::string("hostIdent"));
-  CHECK_EQ(CurLine, 41);
-  CHECK_EQ(CurCol, 7);
-  CHECK_EQ(g_braceDepth, 2);
+  CHECK(&Parser() == &HostParser);
+  CHECK(&Lex() == &Host);
+  CHECK_EQ(HostParser.CurTok, static_cast<int>(TOK_IDENTIFIER));
+  CHECK_EQ(Host.IdentifierStr, std::string("hostIdent"));
+  CHECK_EQ(Host.CurLine, 41);
+  CHECK_EQ(Host.CurCol, 7);
+  CHECK_EQ(HostParser.BraceDepth, 2);
+  CHECK_EQ(HostParser.CurlyDepth, 1);
+  CHECK_EQ(HostParser.RecursionDepth, 0);
+  CHECK_EQ(HostParser.ModuleAliases.size(), 1u);
+  CHECK_EQ(HostParser.ModuleAliases["util"], std::string("geometry/util"));
   CHECK(g_recoverActive);
   CHECK(!g_AllowUnsafeModules);
   CHECK(!DiagnosticEngine::getCollectAllDiagnostics());
   CHECK_EQ(DiagnosticEngine::getDiagnosticCount(), 1u);
   CHECK(DiagnosticEngine::hasErrorAt(3));
-  CHECK(SourceFile == &HostStream);
+  CHECK(Host.Source == &HostStream);
   // The host's stream was not read by the analysis.
-  CHECK_EQ(gettok(), static_cast<int>(TOK_FN));
+  CHECK_EQ(gettok(Host), static_cast<int>(TOK_FN));
 
   g_recoverActive = false;
   DiagnosticEngine::clearDiagnostics();
@@ -309,7 +322,103 @@ static void testHostStateIsRestored() {
   SourceLines.clear();
   SourceFilename.clear();
   MainSourceFilename.clear();
-  g_braceDepth = 0;
+}
+
+// F-S0 (issue #301): a lexer is a value, so two can tokenize different
+// buffers in turn without either seeing the other's cursor, token text or
+// location -- what an editor with several open files, or a future concurrent
+// tokenizer, needs.
+static void testTwoLexersInterleave() {
+  CurrentTest = "two lexers interleave";
+  std::istringstream AText("fn alpha(x: int)");
+  std::istringstream BText("struct\n  Beta { 0x1F }");
+  LexerState A(AText, "a.tr");
+  LexerState B(BText, "b.tr");
+
+  CHECK_EQ(gettok(A), static_cast<int>(TOK_FN));
+  CHECK_EQ(gettok(B), static_cast<int>(TOK_STRUCT));
+  CHECK_EQ(gettok(A), static_cast<int>(TOK_IDENTIFIER));
+  CHECK_EQ(gettok(B), static_cast<int>(TOK_IDENTIFIER));
+  CHECK_EQ(A.IdentifierStr, std::string("alpha"));
+  CHECK_EQ(B.IdentifierStr, std::string("Beta"));
+  CHECK_EQ(A.CurLoc.Filename, std::string("a.tr"));
+  CHECK_EQ(B.CurLoc.Filename, std::string("b.tr"));
+  CHECK_EQ(A.CurLoc.Line, 1);
+  CHECK_EQ(A.CurLoc.Col, 4);
+  CHECK_EQ(B.CurLoc.Line, 2);
+  CHECK_EQ(B.CurLoc.Col, 3);
+  // B's end position is its own token's, not A's.
+  CHECK_EQ(B.CurLoc.EndCol, 7);
+  CHECK_EQ(B.PrevTokEndLine, 1);
+
+  CHECK_EQ(gettok(B), static_cast<int>('{'));
+  CHECK_EQ(gettok(B), static_cast<int>(TOK_INT_LITERAL));
+  CHECK_EQ(B.NumLitClean, std::string("1F"));
+  CHECK_EQ(B.NumLitRadix, 16);
+  CHECK_EQ(gettok(A), static_cast<int>('('));
+  CHECK_EQ(gettok(A), static_cast<int>(TOK_IDENTIFIER));
+  CHECK_EQ(A.IdentifierStr, std::string("x"));
+  CHECK_EQ(A.NumLitRadix, 10); // B's hex literal did not leak over
+
+  // With no ParserScope live, the parser's lexer is an empty one: EOF.
+  CHECK(Parser().Lexer == nullptr);
+  CHECK_EQ(gettok(Lex()), static_cast<int>(TOK_EOF));
+}
+
+// F-S1 (issue #302): a parser is a value too. One parser stops part-way
+// through its buffer, inside brackets; a second parses a whole expression of
+// another buffer; the first then goes on exactly where it was -- its token,
+// bracket depths, module aliases and lexer untouched -- which is what an
+// import's parse, or an editor parsing several open files, needs.
+static void testTwoParsersInterleave() {
+  CurrentTest = "two parsers interleave";
+  InitializeCompilerGlobals();
+  std::istringstream AText("{ (alpha + [1, 2]) }");
+  std::istringstream BText("(1 + 2) * beta");
+  LexerState LA(AText, "a.tr");
+  LexerState LB(BText, "b.tr");
+  ParserState A(LA);
+  ParserState B(LB);
+  {
+    ParserScope ScopeA(A);
+    A.ModuleAliases["util"] = "geometry/util";
+    getNextToken(); // '{'
+    getNextToken(); // '('
+    getNextToken(); // alpha
+    CHECK_EQ(A.CurTok, static_cast<int>(TOK_IDENTIFIER));
+    CHECK_EQ(A.BraceDepth, 2);
+    CHECK_EQ(A.CurlyDepth, 1);
+
+    {
+      ParserScope ScopeB(B);
+      CHECK(&Parser() == &B);
+      CHECK(&Lex() == &LB);
+      getNextToken();
+      auto Expr = ParseExpression();
+      CHECK(Expr != nullptr);
+      CHECK_EQ(B.CurTok, static_cast<int>(TOK_EOF));
+      CHECK_EQ(B.BraceDepth, 0);
+      CHECK_EQ(B.RecursionDepth, 0);
+      CHECK(B.ModuleAliases.empty()); // A's aliases are A's
+      CHECK_EQ(LB.IdentifierStr, std::string("beta"));
+    }
+
+    CHECK(&Parser() == &A);
+    CHECK(&Lex() == &LA);
+    CHECK_EQ(A.CurTok, static_cast<int>(TOK_IDENTIFIER));
+    CHECK_EQ(LA.IdentifierStr, std::string("alpha"));
+    CHECK_EQ(A.BraceDepth, 2);
+    CHECK_EQ(A.CurlyDepth, 1);
+    CHECK_EQ(A.ModuleAliases["util"], std::string("geometry/util"));
+    getNextToken(); // '+'
+    CHECK_EQ(A.CurTok, static_cast<int>('+'));
+    getNextToken(); // '['
+    getNextToken(); // 1
+    CHECK_EQ(A.BraceDepth, 3);
+    CHECK_EQ(LA.CurLoc.Filename, std::string("a.tr"));
+  }
+  CHECK(&Parser() != &A);
+  CHECK(Parser().Lexer == nullptr);
 }
 
 // turf::keywords() is the lexer's own table: every word the language reserves,
@@ -368,10 +477,13 @@ static void testCancellation() {
     SourceFilename = "host.tr";
     MainSourceFilename = "host.tr";
     SourceLines = {"host line 1"};
-    CurTok = TOK_IDENTIFIER;
-    IdentifierStr = "hostIdent";
-    CurLine = 41;
-    g_braceDepth = 2;
+    LexerState Host;
+    ParserState HostParser(Host);
+    ParserScope HostScope(HostParser);
+    HostParser.CurTok = TOK_IDENTIFIER;
+    Host.IdentifierStr = "hostIdent";
+    Host.CurLine = 41;
+    HostParser.BraceDepth = 2;
     DiagnosticEngine::clearDiagnostics();
     DiagnosticEngine::setCollectAllDiagnostics(false);
     DiagnosticEngine::add({3, 4, "host.tr"}, "host diagnostic");
@@ -394,10 +506,12 @@ static void testCancellation() {
     CHECK(GlobalSymbolTable.get() == HostTable);
     CHECK_EQ(SourceFilename, std::string("host.tr"));
     CHECK_EQ(SourceLines.size(), 1u);
-    CHECK_EQ(CurTok, static_cast<int>(TOK_IDENTIFIER));
-    CHECK_EQ(IdentifierStr, std::string("hostIdent"));
-    CHECK_EQ(CurLine, 41);
-    CHECK_EQ(g_braceDepth, 2);
+    CHECK(&Parser() == &HostParser);
+    CHECK(&Lex() == &Host);
+    CHECK_EQ(HostParser.CurTok, static_cast<int>(TOK_IDENTIFIER));
+    CHECK_EQ(Host.IdentifierStr, std::string("hostIdent"));
+    CHECK_EQ(Host.CurLine, 41);
+    CHECK_EQ(HostParser.BraceDepth, 2);
     CHECK(!DiagnosticEngine::getCollectAllDiagnostics());
     CHECK_EQ(DiagnosticEngine::getDiagnosticCount(), 1u);
     CHECK(DiagnosticEngine::hasErrorAt(3));
@@ -407,10 +521,131 @@ static void testCancellation() {
   SourceLines.clear();
   SourceFilename.clear();
   MainSourceFilename.clear();
-  g_braceDepth = 0;
 
   // The next analysis is not affected by a cancelled one.
   CHECK_EQ(render(turf::analyze({{"c.tr", UndefinedVariable}})), Uncancelled);
+}
+
+// LB-2 (issue #325): `turfc --unsafe-report`'s counts. The lexer decides what
+// is code, so a keyword in a comment or a string is never counted, and
+// `unsafe module;` counts only where the compiler honors it, as the file's
+// first statement.
+static void testUnsafeReport(const ScratchDir &Dir) {
+  CurrentTest = "unsafe report";
+  namespace ur = turf::unsafe_report;
+
+  auto F = ur::scanSource("unsafe module;\n"
+                          "// unsafe { } and extern fn, in a comment\n"
+                          "extern from \"z\" fn zlibVersion(): string;\n"
+                          "@cleanup\nextern from \"z\" fn deflateEnd(p: ptr): int32;\n"
+                          "pub extern fn strlen(s: string): int;\n"
+                          "fn f(): int {\n"
+                          "    extern fn puts(s: string): int32;\n"
+                          "    unsafe { puts(\"unsafe { extern\"); }\n"
+                          "    return unsafe { strlen(\"x\"); };\n"
+                          "}\n");
+  CHECK(F.UnsafeModule);
+  CHECK_EQ(F.ExternFns, 4u);
+  CHECK_EQ(F.UnsafeBlocks, 2u);
+  CHECK_EQ(F.LinkLibraries.size(), 1u); // "z" once, though named twice
+  CHECK(F.Error.empty());
+  CHECK(F.any());
+
+  // Not the first statement: not the capability (the compiler rejects it).
+  auto Late = ur::scanSource("import mem;\nunsafe module;\n");
+  CHECK(!Late.UnsafeModule);
+  CHECK(!ur::scanSource("fn main(): int {\n    return 0;\n}\n").any());
+  // A file that does not lex: reported, with what came before the error.
+  auto Bad = ur::scanSource("extern fn a(): int;\nfn b(): string {\n    return \"open;\n}\n");
+  CHECK(!Bad.Error.empty());
+  CHECK_EQ(Bad.ExternFns, 1u);
+
+  // A project: the root, a granted dependency and an ungranted one.
+  const fs::path Base = Dir.Root / "unsafe-report";
+  fs::create_directories(Base / "app" / "src");
+  fs::create_directories(Base / "ffi" / "src" / "inner");
+  fs::create_directories(Base / "raw" / "src");
+  std::ofstream(Base / "app" / "src" / "main.tr")
+      << "import ffi;\nfn main(): int {\n    return ffi::len(\"ab\");\n}\n";
+  std::ofstream(Base / "ffi" / "src" / "ffi.tr")
+      << "unsafe module;\nextern fn strlen(s: string): int;\n"
+         "pub fn len(s: string): int {\n    return unsafe { strlen(s); };\n}\n";
+  std::ofstream(Base / "ffi" / "src" / "inner" / "m.tr")
+      << "extern from \"m\" fn sqrt(x: double): double;\n";
+  std::ofstream(Base / "raw" / "src" / "raw.tr")
+      << "unsafe module;\npub fn one(): int {\n    return 1;\n}\n";
+  const std::string GraphPath = (Base / "graph.json").string();
+  std::ofstream(GraphPath)
+      << "{\"format\": 1, \"root\": \"app\", \"packages\": {"
+         "\"app\": {\"src\": \"app/src\", \"deps\": [\"ffi\", \"raw\"], \"allow_unsafe\": true},"
+         "\"ffi\": {\"src\": \"ffi/src\", \"deps\": [], \"allow_unsafe\": true},"
+         "\"raw\": {\"src\": \"raw/src\", \"deps\": []}}}";
+  std::string Error;
+  auto Graph = LoadPackageGraph(GraphPath, Error);
+  CHECK(Graph.has_value());
+  if (!Graph)
+    return;
+  // This tree's lib/std (the test calls buildReport() directly, so no
+  // executable path is known to resolve an install root from).
+  const std::string Stdlib =
+      (fs::path(__FILE__).parent_path().parent_path().parent_path() / "lib" / "std").string();
+  ur::Report R;
+  CHECK(ur::buildReport(*Graph, Stdlib, R, Error));
+  CHECK_EQ(R.Packages.size(), 3u);
+  if (R.Packages.size() != 3)
+    return;
+  const auto &App = R.Packages[0], &Ffi = R.Packages[1], &Raw = R.Packages[2];
+  CHECK_EQ(App.Name, std::string("app"));
+  CHECK(App.AllowUnsafe);
+  CHECK_EQ(App.Modules, 1u);
+  CHECK(App.Files.empty());
+  CHECK_EQ(Ffi.Name, std::string("ffi"));
+  CHECK(Ffi.AllowUnsafe);
+  CHECK_EQ(Ffi.Modules, 2u);
+  CHECK_EQ(Ffi.UnsafeModules, 1u);
+  CHECK_EQ(Ffi.UnsafeBlocks, 1u);
+  CHECK_EQ(Ffi.ExternFns, 2u);
+  CHECK(Ffi.LinkLibraries.size() == 1 && Ffi.LinkLibraries[0] == "m");
+  CHECK_EQ(Ffi.Files.size(), 2u);
+  CHECK_EQ(Ffi.Files[1].Path, std::string("inner/m.tr"));
+  CHECK_EQ(Raw.Name, std::string("raw"));
+  CHECK(!Raw.AllowUnsafe); // no "allow_unsafe": not granted
+  CHECK_EQ(Raw.UnsafeModules, 1u);
+
+  // The stdlib, against a count made a second way: line by line, outside
+  // `//` comments.
+  CHECK(R.Stdlib.AllowUnsafe);
+  unsigned Files = 0, Pragmas = 0, Externs = 0;
+  for (const auto &E : fs::recursive_directory_iterator(Stdlib)) {
+    if (E.path().extension() != ".tr")
+      continue;
+    ++Files;
+    std::ifstream In(E.path());
+    std::string Line;
+    bool First = true;
+    while (std::getline(In, Line)) {
+      Line = Line.substr(0, Line.find("//"));
+      const size_t Start = Line.find_first_not_of(" \t\r");
+      if (Start == std::string::npos)
+        continue;
+      Line = Line.substr(Start);
+      if (First && Line.rfind("unsafe module;", 0) == 0)
+        ++Pragmas;
+      First = false;
+      if (Line.rfind("extern ", 0) == 0 || Line.rfind("pub extern ", 0) == 0)
+        ++Externs;
+    }
+  }
+  CHECK(Files > 0);
+  CHECK_EQ(R.Stdlib.Modules, Files);
+  CHECK_EQ(R.Stdlib.UnsafeModules, Pragmas);
+  CHECK_EQ(R.Stdlib.ExternFns, Externs);
+
+  // The JSON a driver reads.
+  const std::string Json = ur::reportJson(R);
+  CHECK(Json.find("\"format\":1") != std::string::npos);
+  CHECK(Json.find("\"raw\":{\"allow_unsafe\":false,\"extern_fns\":0,") != std::string::npos);
+  CHECK(Json.find("\"stdlib\":{\"allow_unsafe\":true,") != std::string::npos);
 }
 
 // A toolchain whose standard library cannot be found (an editor extension
@@ -853,12 +1088,14 @@ static void testSkipPrelude() {
   CHECK(turf::analyze({{"bare.tr", Bare}}).succeeded());
 }
 
-// A lexer error in the very first token was raised before any recovery guard
-// was armed, so analyze() called exit() and took its host (turf-lsp) down.
-// Reaching the checks below at all is most of the test.
-static void testLexErrorInFirstToken() {
-  CurrentTest = "lex error in the first token";
-  for (const char *Source : {"0E\n", "0E\nfn main(): int {\n    return 0;\n}\n"}) {
+// A lexer error raised where no recovery guard is armed makes analyze() call
+// exit() and take its host (turf-lsp) down: in the very first token, and in
+// the token after a top-level `;` (turf-fuzz #19). Reaching the checks below
+// at all is most of the test.
+static void testLexErrorOutsideAStatement() {
+  CurrentTest = "lex error outside a statement";
+  for (const char *Source : {"0E\n", "0E\nfn main(): int {\n    return 0;\n}\n",
+                             ";\n.0.5;\n", "fn main(): int {\n    return 0;\n};\n.0.5[i];\n"}) {
     auto R = turf::analyze({{"lex.tr", Source}});
     CHECK(!R.succeeded());
     CHECK(!R.diagnostics().empty());
@@ -1501,6 +1738,35 @@ static void testModuleNotFoundHintsAtProject(const ScratchDir &Dir) {
 // fail_*.tr failed, so the code, and which half of the diagnostic names the
 // problem, are asserted here; and so is the line between E146 and a syntax
 // error, and the alias pass's error/warning split for `@ownership` calls.
+// TDP-2-006: an analysis is a build, so a compile_error test's expected error
+// is the test's, not the program's (an editor shows no error for it), while
+// another error inside it, or one outside it, still is.
+static void testCompileErrorTests() {
+  CurrentTest = "compile_error tests";
+  auto Expected = turf::analyze(
+      {{"tests.tr", "@test(compile_error, E041, \"Unknown function\")\n"
+                    "fn t(): void {\n    undeclared();\n}\n"
+                    "fn main(): int { return 0; }\n"}},
+      []() { turf::AnalysisOptions O; O.RunLint = true; O.RunFlowAnalysis = true; return O; }());
+  CHECK(Expected.succeeded());
+  if (!Expected.succeeded())
+    std::cerr << render(Expected);
+
+  auto Other = turf::analyze(
+      {{"tests.tr", "@test(compile_error, E041, \"Unknown function\")\n"
+                    "fn t(): void {\n    immut n: int = \"x\";\n}\n"
+                    "fn main(): int {\n    undeclared_here();\n    return 0;\n}\n"}});
+  bool SawTypeError = false, SawOutside = false;
+  for (const auto &D : Other.diagnostics()) {
+    SawTypeError = SawTypeError || (D.Code == "E066" && D.Where.Line == 3);
+    SawOutside = SawOutside || (D.Code == "E041" && D.Where.Line == 6);
+  }
+  CHECK(SawTypeError);
+  CHECK(SawOutside);
+  if (!SawTypeError || !SawOutside)
+    std::cerr << render(Other);
+}
+
 static void testAnnotationDiagnostics() {
   CurrentTest = "annotation diagnostics";
   struct Case {
@@ -1519,8 +1785,13 @@ static void testAnnotationDiagnostics() {
        "E146", "only sit on an 'extern fn'", "states a fact about the declaration"},
       {"keyword key reaches the owning pass", "@ownership(error: x)\nextern fn m(n: int): int*;\nfn main(): int { return 0; }\n",
        "E146", "Unknown '@ownership' argument 'error:'", "states a fact about the declaration"},
-      {"malformed is still a syntax error", "@ownership(1)\nextern fn m(n: int): int*;\nfn main(): int { return 0; }\n",
+      {"malformed is still a syntax error", "@ownership(1 + 2)\nextern fn m(n: int): int*;\nfn main(): int { return 0; }\n",
        "E103", "Expected a word or a string", ""},
+      // TDP-2-006: `@test`'s own hint lists the outcomes.
+      {"test outcome", "@test(skipped)\nfn t(): void {\n}\nfn main(): int { return 0; }\n",
+       "E146", "'skipped' is not an outcome of '@test'", "the outcomes are compile_error"},
+      {"test code kind", "@test(compile_error, E172, \"\")\nfn t(): void {\n}\nfn main(): int { return 0; }\n",
+       "E146", "'E172' is a warning's code", "the outcomes are"},
   };
   for (const auto &C : Cases) {
     auto R = turf::analyze({{"ann.tr", C.Source}});
@@ -1905,6 +2176,75 @@ static void testBuiltinDocRouting() {
            std::string("docs/slm/builtin_typeof.txt"));
 }
 
+// V-1: lint levels. A level is a process-wide setting the compiler's own driver
+// makes before it analyses anything; the facade honours the same setting, so a
+// tool that sets it sees what the CLI prints.
+static void testLintLevels() {
+  CurrentTest = "lint levels";
+  const char *SelfCompare = "fn main(): int {\n    mut x: int = 1;\n"
+                            "    if x == x {\n        return 1;\n    }\n"
+                            "    return 0;\n}\n";
+  turf::AnalysisOptions Opts;
+  Opts.RunLint = true;
+  auto countCode = [&](const turf::AnalysisResult &R, const char *Code,
+                       turf::Severity Level) {
+    int N = 0;
+    for (const auto &D : R.diagnostics())
+      if (D.Code == Code && D.Level == Level)
+        ++N;
+    return N;
+  };
+
+  LintLevels::reset();
+  auto Plain = turf::analyze({{"lvl.tr", SelfCompare}}, Opts);
+  CHECK_EQ(countCode(Plain, "E166", turf::Severity::Warning), 1);
+  CHECK(Plain.succeeded());
+
+  std::string Err;
+  CHECK(LintLevels::setLevel("e166", LintLevels::Level::Deny, Err));
+  auto Denied = turf::analyze({{"lvl.tr", SelfCompare}}, Opts);
+  CHECK_EQ(countCode(Denied, "E166", turf::Severity::Error), 1);
+  CHECK_EQ(countCode(Denied, "E166", turf::Severity::Warning), 0);
+  CHECK(!Denied.succeeded());
+
+  CHECK(LintLevels::setLevel("E166", LintLevels::Level::Allow, Err));
+  auto Allowed = turf::analyze({{"lvl.tr", SelfCompare}}, Opts);
+  CHECK_EQ(countCode(Allowed, "E166", turf::Severity::Warning), 0);
+  CHECK_EQ(countCode(Allowed, "E166", turf::Severity::Error), 0);
+  CHECK(Allowed.succeeded());
+
+  // An error has no level to choose; naming one is refused, deny is a no-op.
+  CHECK(!LintLevels::setLevel("E102", LintLevels::Level::Allow, Err));
+  CHECK(!LintLevels::setLevel("E102", LintLevels::Level::Warn, Err));
+  CHECK(LintLevels::setLevel("E102", LintLevels::Level::Deny, Err));
+  CHECK(!LintLevels::setLevel("E999", LintLevels::Level::Deny, Err));
+  CHECK(!LintLevels::setLevel("163", LintLevels::Level::Deny, Err));
+
+  // The pin: a warning newer than the pinned set starts at allow, and an
+  // explicit level for its code wins either way.
+  LintLevels::reset();
+  CHECK(LintLevels::levelOfSince("E166", 3) == LintLevels::Level::Warn);
+  CHECK(!LintLevels::setLintSet("2.x", 5, Err));
+  CHECK(!LintLevels::setLintSet("3.0", 5, Err));
+  CHECK(!LintLevels::setLintSet("2.6", 5, Err));
+  CHECK(LintLevels::setLintSet("2.2", 5, Err));
+  CHECK(LintLevels::levelOfSince("E166", 2) == LintLevels::Level::Warn);
+  CHECK(LintLevels::levelOfSince("E166", 3) == LintLevels::Level::Allow);
+  CHECK(LintLevels::setLevel("E166", LintLevels::Level::Deny, Err));
+  CHECK(LintLevels::levelOfSince("E166", 3) == LintLevels::Level::Deny);
+  LintLevels::reset();
+  CHECK(!LintLevels::anySet());
+
+  // Every warning class has a row, so every warning can be named.
+  for (size_t I = 0; I < AllErrorCodesCount; ++I) {
+    const ErrorCodeEntry &E = AllErrorCodes[I];
+    if (ErrorCodes::isWarningCode(E)) {
+      CHECK(LintLevels::setLevel(E.Code, LintLevels::Level::Warn, Err));
+    }
+  }
+  LintLevels::reset();
+}
+
 static void testImportedCandidateLocation() {
   CurrentTest = "imported candidate overloads name their own file";
   struct Case {
@@ -2236,6 +2576,8 @@ int main() {
   testWarningSurvivesReanalysis();
   testUnsafeCapabilityDoesNotOutliveThePragma();
   testHostStateIsRestored();
+  testTwoLexersInterleave();
+  testTwoParsersInterleave();
   testCancellation();
   testKeywords();
   testImportedModuleOverlay(Dir);
@@ -2243,17 +2585,19 @@ int main() {
   testPackageGraph(Dir);
   testWarningDedupeIsPerFile(Dir);
   testLintIsOptIn();
+  testLintLevels();
   testFlowAnalysisIsOptIn();
   testEscapeThroughStructFieldsInFacade();
   testFlowWarningsAreInSourceOrder();
   testSkipPrelude();
-  testLexErrorInFirstToken();
+  testLexErrorOutsideAStatement();
   testEmptyInput();
   testVisibilityModifierPlacement();
   testPrivateSymbolAccess(Dir);
   testModuleNotImported(Dir);
   testPrivateInPublic(Dir);
   testMigratePub(Dir);
+  testUnsafeReport(Dir);
   testAmbiguousModuleImport(Dir);
   testModuleNotFoundHintsAtProject(Dir);
   testAnnotationDiagnostics();
@@ -2264,6 +2608,7 @@ int main() {
   testTypeArgumentCount();
   testLiteralNeverConverts();
   testImportedCandidateLocation();
+  testCompileErrorTests();
   testBuiltinDocRouting();
 
   if (Failures) {

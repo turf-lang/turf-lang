@@ -1,0 +1,6 @@
+// Helper module for export-keyword tests (see export_*.tr / fail_export_*.tr
+// in this directory). Named *_module.tr so scripts/test_runner.sh's file
+// discovery excludes it from being run as its own standalone test.
+
+export immut VERSION: int = 7;
+export immut GREETING: string = "hi from a module";

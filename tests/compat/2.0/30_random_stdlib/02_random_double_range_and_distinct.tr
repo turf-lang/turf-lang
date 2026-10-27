@@ -1,0 +1,25 @@
+// Regression coverage for the new `random` stdlib module:
+// random::random_double() must always land in [0.0, 1.0) -- never exactly
+// 1.0 -- and must not be stuck returning a single constant value.
+import random;
+import test;
+
+fn main(): int {
+    immut trials: int = 1000;
+
+    mut i: int = 0;
+    mut first: double = random::random_double();
+    mut sawDifferent: bool = false;
+    while i < trials {
+        immut v: double = random::random_double();
+        test::assert(v >= 0.0, "random_double() is never negative");
+        test::assert(v < 1.0, "random_double() is always strictly less than 1.0");
+        if v != first {
+            sawDifferent = true;
+        }
+        i = i + 1;
+    }
+    test::assert(sawDifferent, "random_double() is not stuck returning a single constant value across 1000 calls");
+
+    return 0;
+}

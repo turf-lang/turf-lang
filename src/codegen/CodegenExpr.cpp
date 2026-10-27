@@ -502,7 +502,7 @@ Value *BinaryExprAST::codegen() {
     return Builder->CreateCall(PowFunc, {L, R}, "powtmp");
   }
   default:
-    SemanticError(CurLoc, "Error: invalid binary operator");
+    SemanticError(Lex().CurLoc, "Error: invalid binary operator");
     return nullptr;
   }
 }

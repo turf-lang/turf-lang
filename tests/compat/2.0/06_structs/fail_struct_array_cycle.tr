@@ -1,0 +1,23 @@
+// EXPECT-DIAG: E069
+// EXPECT-DIAG: cycle: A -> B -> A
+// Regression test: an ARRAY of a struct still contains that struct by
+// value -- `B[2]` holds two full copies of `B` directly inside `A`, the
+// same as a plain `b: B` field would, just twice over. An array field must
+// therefore be unwrapped to its element type when building the by-value
+// containment graph, exactly like a plain struct field is (TYPE-001, see
+// fail_mutual_struct_cycle.tr for the non-array version of this same A/B
+// cycle). Before this unwrapping existed in checkStructLayoutAcyclicity(),
+// an array-mediated cycle like this one would have been invisible to a
+// naive "is this field's type directly a known struct name" check.
+
+struct A {
+    bs: B[2]
+}
+
+struct B {
+    a: A
+}
+
+fn main(): int {
+    return 0;
+}

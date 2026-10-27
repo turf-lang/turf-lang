@@ -1,0 +1,9 @@
+// EXPECT-DIAG: E135
+// EXPECT-DIAG: 'n' is a variable of type 'int', not a function
+// An inferred local is judged as a callee once its type is known; an `int`
+// one cannot be called.
+
+fn main(): int {
+    mut n = 3;
+    return n(1);
+}

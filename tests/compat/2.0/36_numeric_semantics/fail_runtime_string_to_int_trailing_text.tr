@@ -1,0 +1,9 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: Invalid string to int conversion
+// Text after the digits is not ignored: the whole string must be the number.
+
+fn main(): int {
+    mut s: string = "12" + "abc";
+    mut n: int = s to int;
+    return n;
+}

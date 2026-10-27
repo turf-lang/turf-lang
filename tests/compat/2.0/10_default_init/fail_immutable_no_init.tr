@@ -1,0 +1,7 @@
+// EXPECT-DIAG: E128
+// EXPECT-DIAG: Immutable variable 'x' requires an explicit initializer
+// Test: immutable must have initializer — no value = error
+fn main(): int {
+    immutable x: int;
+    return 0;
+}

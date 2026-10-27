@@ -1,0 +1,9 @@
+// EXPECT-DIAG: E126
+// EXPECT-DIAG: Cannot index a value of type '&?(int[3])'
+// A `&?T[N]` may be null, so it is narrowed to a `&T[N]` before indexing.
+
+fn main(): int {
+    mut a: int[3] = [1, 2, 3];
+    mut r: &?int[3] = &a;
+    return r[0];
+}

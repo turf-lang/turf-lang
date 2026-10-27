@@ -1,0 +1,12 @@
+// Helper module for export_negative_and_widened_literals.tr. Named
+// *_module.tr so scripts/test_runner.sh does not run it on its own.
+
+export immut BELOW: int = -42;
+export immut LOWEST: int = -9223372036854775808;
+export immut NEG_ZERO_INT: int = -0;
+export immut SMALL: int32 = -2147483648;
+export immut WIDE32: int32 = 2147483647;
+export immut NEG_DOUBLE: double = -2.5;
+export immut WHOLE_DOUBLE: double = 3;
+export immut NEG_WHOLE_DOUBLE: double = -1;
+export immut NEG_ZERO_DOUBLE: double = -0;

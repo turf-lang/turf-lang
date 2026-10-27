@@ -1,0 +1,31 @@
+// The `operator` mechanism is generic, not string-specific -- prove it with
+// a plain struct declared and used entirely in the main file, with zero
+// String involvement.
+import test;
+
+struct Vec2 {
+    x: int,
+    y: int
+}
+
+operator +(a: Vec2, b: Vec2): Vec2 {
+    mut r: Vec2 = Vec2::default();
+    r.x = a.x + b.x;
+    r.y = a.y + b.y;
+    return r;
+}
+
+fn main(): int {
+    mut a: Vec2 = Vec2::default();
+    a.x = 1;
+    a.y = 2;
+    mut b: Vec2 = Vec2::default();
+    b.x = 10;
+    b.y = 20;
+    mut c: Vec2 = a + b;
+
+    test::assert(c.x == 11, "Vec2 + Vec2 should add x components");
+    test::assert(c.y == 22, "Vec2 + Vec2 should add y components");
+
+    return 0;
+}

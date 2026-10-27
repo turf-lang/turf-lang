@@ -1,0 +1,6 @@
+// Regression test (#186): a variable declared but never read emits
+// UnusedVariableWarning. Compilation must still succeed.
+fn main(): int {
+    mutable x: int = 5;
+    return 0;
+}

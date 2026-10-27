@@ -1,0 +1,13 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: Array index out of bounds for 'arr'
+// Issue #260: indexing a `T[]` parameter is bounds-checked against the
+// caller's real length. It used to be raw pointer arithmetic, so `arr[3]` on
+// a three-element array silently read whatever came after it.
+fn at(arr: int[], i: int): int {
+    return arr[i];
+}
+
+fn main(): int {
+    mut a: int[3] = [1, 2, 3];
+    return at(a, 3);
+}

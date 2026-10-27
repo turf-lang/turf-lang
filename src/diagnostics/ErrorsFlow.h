@@ -19,10 +19,11 @@ public:
 // Semantic Error : General semantic violations
 class SemanticError : public TurfError {
 public:
-  SemanticError(SourceLocation Loc, const std::string &Msg)
+  SemanticError(SourceLocation Loc, const std::string &Msg,
+                const std::string &Hint = "")
       : TurfError(Loc, Colors::BRIGHT_RED +
                            "Oops! Something doesn't add up:\n" + Colors::RESET +
-                           "  " + Msg) {
+                           "  " + Msg, Hint) {
     // Intentionally left as the default GENERAL: this class is a genuine
     // catch-all for miscellaneous semantic violations that don't fit any
     // other bucket, not an oversight.

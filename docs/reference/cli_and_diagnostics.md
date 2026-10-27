@@ -117,7 +117,10 @@ run `turf help` for the list of commands
 | `--module` | With `--check`: the file is a module that is only ever imported, so it needs no `main`. Without `--check` it is an error. |
 | `--smart` | Asks a local language model to suggest a fix for an error the compiler has no fix of its own for. See [`--smart`](#--smart). |
 | `--smart-write-fix=<path>` | Writes your program to that file with every [`Fix:`](#fixes) the compiler showed applied; with `--smart`, when the compiler had no fix, the model's validated suggestion instead. Your source file is never changed. |
+| `--diagnostics=json` | Writes each diagnostic to stderr as one line of JSON instead of text, for tools. `--diagnostics=text` is the default. See [Diagnostics as JSON](#diagnostics-as-json). |
 | `--stdlib-warnings` | Shows warnings that point into the standard library, which are hidden by default. See [Warnings in the standard library](#warnings-in-the-standard-library). |
+| `--allow <code>` `--warn <code>` `--deny <code>` | Set the [level](#lint-levels) of one warning, such as `--deny E163`: `allow` does not report it, `warn` (every warning's default) reports it, `deny` reports it as an error and fails the build. Repeatable; a later flag for a code replaces an earlier one. |
+| `--lint-set <2.N>` | Starts every warning added after release 2.N at `allow`, so a newer compiler adds no warning to a build that pinned 2.N. See [Lint levels](#lint-levels). |
 | `--allow-unsafe-modules` | Honors `unsafe module;` in a module outside the install root, in a single-file compile. It does not apply in a project, where the manifest's `[unsafe] allow` decides ([Projects & Packages](projects_and_packages.md#8-unsafe-module-in-dependencies)). |
 | `--dump-ast`, `--resolve`, `--typecheck`, `--dump-resolved`, `--dump-typechecked`, `--dump-resolver-symbols`, `--dump-modules`, `--dump-instantiations` | Print what the compiler knows at each stage. `turf dump` is the friendly spelling of these. |
 
@@ -383,7 +386,7 @@ The model's suggestion is labelled `[Model Suggestion]`. `--smart-write-fix=<pat
 ```text
 $ turf version
 turf 1.0.0  (needs turfc interface 1.1+)
-turfc 2.1.1  (interface 1.7, /opt/turf/bin/turfc)
+turfc 2.2.0  (interface 1.12, /opt/turf/bin/turfc)
   llvm 22.1.8
   runtime turf_rt_abi_2_0
   root /opt/turf
@@ -403,6 +406,20 @@ hint: upgrade turf: this compiler's interface is newer than this turf understand
 ```
 
 A differing *release* version is never an error on its own. In a project, a manifest's `turf = "2.0"` is about the compiler's release version and is checked separately ([Projects & Packages](projects_and_packages.md#2-turftoml)).
+
+**The interface manifest.** `turfc --version --json` prints the same facts as one JSON object, for tools: the interface, the version of each format the compiler reads or writes, and a list of named features, so a tool asks "does this compiler have `diagnostics-json`?" instead of comparing numbers. Keys are only ever added (`"manifest": 1`); the schema is `docs/reference/schemas/version.schema.json`.
+
+```text
+$ turfc --version --json
+{"features":["package-graph","exit-status-2","test","format-check","format-skip-unlexable","emit-obj","test-only","lint-levels","diagnostics-json","version-json","test-functions","unsafe-report","smart"],"interface":{"major":1,"minor":12},"llvm":"22.1.8","manifest":1,"root":"/opt/turf","runtime":"turf_rt_abi_2_0","schemas":{"diagnostics":"1.0","package_graph":1},"turfc":"2.2.0"}
+```
+
+| Key | Value |
+|---|---|
+| `interface` | `{"major", "minor"}`, as line 2 of `turfc --version`. |
+| `schemas` | `diagnostics`: the [diagnostics JSON](#diagnostics-as-json) schema version; `package_graph`: the package-graph `"format"` `--package-graph` reads. |
+| `features` | One name per addition to the interface, in order: `package-graph` (1.1), `exit-status-2` (1.2), `test` (1.3), `format-check` (1.4), `format-skip-unlexable` (1.5), `emit-obj` (1.6), `test-only` (1.7), `lint-levels` (1.8), `diagnostics-json` (1.9), `version-json` (1.10), `test-functions` (1.11), `unsafe-report` (1.12). Then what this build has: `smart`, `embedded-lld`, `bundled-runtime`. |
+| `turfc`, `llvm`, `runtime`, `root` | As the text lines. |
 
 ### Finding the compiler
 
@@ -435,19 +452,22 @@ Everything above is `turf`. This section is for whoever drives the compiler dire
 $ turfc help
 Usage: turfc <filename.tr> [-o output] [--emit-llvm | --emit-obj] [--smart]
          [--smart-write-fix=<path>] [--link <libname>]
-         [--allow-unsafe-modules] [--stdlib-warnings]
+         [--allow-unsafe-modules] [--stdlib-warnings] [--diagnostics=json|text]
+         [--allow <code>] [--warn <code>] [--deny <code>] [--lint-set <2.N>]
          [-O0|-O1|-O2|-O3|-Os] [-g] [--target=<triple>] [-mcpu=<cpu>]
-         [--check [--module]] [--package-graph <file>]
+         [--check [--module]] [--package-graph <file>] [--test-build <manifest>]
          [--resolve] [--typecheck] [--dump-ast] [--dump-resolver-symbols]
          [--dump-resolved] [--dump-typechecked] [--dump-modules]
          [--dump-instantiations]
        turfc --format [--write | --check [--skip-unlexable]] <filename.tr>...
        turfc --migrate=pub [--write] <module.tr>...
+       turfc --unsafe-report (--package-graph <file> | <file.tr>...)
        turfc --test [<tests-dir>] [--package-graph <file>] [--exclude <path>]
          [--only <path>]
          [-O0|-O1|-O2|-O3|-Os] [-g] [--link <libname>] [--jobs <n>]
          [--timeout <seconds>] [--diag-register <file>]
          [--allow-unsafe-modules] [--stdlib-warnings]
+         [--allow <code>] [--warn <code>] [--deny <code>] [--lint-set <2.N>]
        turfc --explain E0NN
        turfc --version
        turfc help
@@ -457,8 +477,8 @@ Usage: turfc <filename.tr> [-o output] [--emit-llvm | --emit-obj] [--smart]
 
 ```text
 $ turfc --version
-turfc 2.1.1
-interface 1.7
+turfc 2.2.0
+interface 1.12
 llvm 22.1.8
 runtime turf_rt_abi_2_0
 root /opt/turf
@@ -466,10 +486,11 @@ linker system-cc
 smart built-in
 ```
 
-The interface covers what `turf` relies on: the flags it passes, the two-line start of `--version`, the exit statuses, and every other argument being accepted exactly as a direct invocation accepts it. A new flag or input raises the **minor**; removing a flag or changing its meaning raises the **major**. A tool that needs `--package-graph` requires interface 1.1 or later, `turfc --test` 1.3, and `--emit-obj` 1.6.
+The interface covers what `turf` relies on: the flags it passes, the two-line start of `--version`, the exit statuses, and every other argument being accepted exactly as a direct invocation accepts it. A new flag or input raises the **minor**; removing a flag or changing its meaning raises the **major**. A tool that needs `--package-graph` requires interface 1.1 or later, `turfc --test` 1.3, `--emit-obj` 1.6, `turfc --test --only` 1.7, the lint-level flags 1.8, `@test` functions in `turfc --test` 1.11, and `--unsafe-report` 1.12.
 
 **Modes a tool uses:**
 
+- `turfc <file.tr> --test-build <manifest> -o <program>` builds the `@test` functions of a file (and, with a package graph, of the root package's `src/` files) into a test program that runs the test its first argument numbers, and writes what each test expects to `<manifest>`. Only the `turfc --test` runner passes it; it cannot be combined with `--check`. See [`@test`](functions_and_modules.md#test).
 - `turfc --check <file.tr>` runs every diagnostic and writes nothing; the output and status match a compile of the same file. It checks a **program**, so it wants a `main`; `turfc --check --module <file.tr>` checks a file that is only ever imported. This is what `turf check` and `turf dump` run.
 - `turfc --package-graph <file.json> <file.tr>` compiles as a package build, and is the only way the compiler learns about packages. The graph lists each package's source root, its **direct** dependencies and whether its `unsafe module;` declarations are honored. `turf build` writes it as `build/package-graph.json`, and `turf graph` prints it:
 
@@ -495,6 +516,12 @@ The interface covers what `turf` relies on: the flags it passes, the two-line st
   ```
 
   A bad graph is one line naming the file and exit 1. Without the flag `turfc` is in single-file mode. In a package build the file you name must be inside the root package's `src`.
+- `turfc --unsafe-report --package-graph <file.json>` counts where each package's unsafe code is (LB-2): for every package of the graph and for the standard library, the files that declare `unsafe module;`, the `unsafe { }` blocks, the `extern fn` declarations and the C libraries they name with `extern from`, and whether the package's `unsafe module;` is honored (`allow_unsafe`; always for the standard library). It reads every `.tr` file under each `src/`, imported or not, with the real lexer (a keyword in a comment or a string is not counted), compiles nothing and needs no entry file. `turfc --unsafe-report <file.tr>...` reports the files given. The output is one line of JSON, schema `docs/reference/schemas/unsafe-report.schema.json`; a file that does not lex carries an `"error"` and is counted up to it. Exit 1 for a bad graph or a file that cannot be read. `turf audit` and `turf graph --unsafe` run it ([Projects and packages](projects_and_packages.md#8-unsafe-module-in-dependencies)):
+
+  ```text
+  $ turfc --unsafe-report --package-graph build/package-graph.json
+  {"format":1,"packages":{"app":{"allow_unsafe":true,"extern_fns":0,"files":[],"link_libraries":[],"modules":1,"unsafe_blocks":0,"unsafe_modules":0},"ffi":{"allow_unsafe":true,"extern_fns":2,"files":[{"extern_fns":2,"link_libraries":["z"],"path":"ffi.tr","unsafe_blocks":1,"unsafe_module":true}],"link_libraries":["z"],"modules":1,"unsafe_blocks":1,"unsafe_modules":1}},"stdlib":{"allow_unsafe":true,...}}
+  ```
 - `turfc --format …`, `turfc --migrate=pub …`, `turfc --explain E0NN` and `turfc --test …` are what `turf fmt`, `turf migrate`, `turf explain` and `turf test` run.
 
 **`turf` never rewrites a compiler diagnostic.** A tool that runs `turf check` or `turfc --check` sees the same text and the same `[E0NN]` codes either way, and can match on them.
@@ -581,14 +608,76 @@ These errors can carry a `Fix:`:
 | E102 | the missing `;` is inserted |
 | E138 | the method gets its struct's type parameters (`fn<T>`) |
 
-Output that matches the text of diagnostics (a script, an editor extension) will see `Fix:` lines. Diagnostic wording is not part of the compatibility promise; the error codes are.
+Output that matches the text of diagnostics (a script, an editor extension) will see `Fix:` lines. Diagnostic wording is not part of the compatibility promise; the error codes are. A tool reads [the JSON form](#diagnostics-as-json) instead.
+
+### Diagnostics as JSON
+
+`turfc --diagnostics=json` (also `--check --diagnostics=json`) writes each diagnostic to stderr as one line holding one JSON object, in the order and at the moment the text form would print it, and nothing else in its place: no file headers, no colour. The exit status is the same as for the text form. A usage error (exit status 2) is still printed as text, since no diagnostic exists then.
+
+```text
+$ turfc main.tr --check --diagnostics=json
+{"category":"undeclared variable","code":"E040","denied":false,"file":"main.tr","fix":{"description":"replace 'nmae' with 'name'","edits":[{"file":"main.tr","replacement":"name","span":{"end":{"column":16,"line":4},"start":{"column":12,"line":4}}}]},"hint":"It may be from the current file: 'name'","message":"I can't find anything named 'nmae'.","related":[],"severity":"error","span":{"end":{"column":16,"line":4},"start":{"column":12,"line":4}},"title":null,"version":"1.0"}
+```
+
+| Field | Value |
+|---|---|
+| `version` | The schema version, `"1.0"`. A minor version adds fields; a major version changes or removes one. `turfc --version --json` reports it too. |
+| `severity` | `"error"` or `"warning"`. A warning whose [lint level](#lint-levels) is `deny` is an `"error"`, with `denied` set. |
+| `code` | `"E040"`. Every error has one; `null` only for a warning with no code. |
+| `category` | The code's category from the registry (`"type mismatch"`), or `null`. |
+| `title` | The heading line of the text form (`"Nothing to infer!"`), or `null`. |
+| `message` | The message, without colour. |
+| `hint` | The `Hint:` text, or `null`. |
+| `file` | The file, as the compiler opened it. |
+| `span` | `{"start": {"line", "column"}, "end": {"line", "column"}}`: 1-based, columns in bytes, `end` exclusive. `null` for a diagnostic about a whole file. |
+| `related` | The `Note:` locations: `[{"file", "span", "message"}]`. |
+| `fix` | The compiler's checked [fix](#fixes) as `{"description", "edits": [{"file", "span", "replacement"}]}`, or `null`. The edits apply to the original text and never overlap. |
+| `denied` | `true` for a warning made an error by `deny`. |
+
+The schema is `docs/reference/schemas/diagnostics.schema.json` (JSON Schema). `docs/reference/schemas/diagnostics-fixtures/` holds a source and its output for an error with a fix, an error with a related location and a warning; a tool's tests can read those files. `--smart`'s model suggestions are printed as text.
 
 ### Errors and warnings
 
 - **Errors** stop the compile. The compiler still reports every error it can find (it recovers at the next statement or declaration and goes on), prints them all, and exits with status 1 without producing a program.
-- **Warnings** never stop the compile and never change the exit status. They say a thing is probably a mistake: a variable nobody reads, a loop that never ends, code that cannot run. A program with warnings compiles, links and runs. There is no flag that turns warnings into errors, and none that silences them one by one; the way to silence a warning is to fix what it points at.
+- **Warnings** do not stop the compile and do not change the exit status. They say a thing is probably a mistake: a variable nobody reads, a loop that never ends, code that cannot run. A program with warnings compiles, links and runs. Whoever builds the program can change that for any one warning with a [lint level](#lint-levels): `allow` hides it, `deny` makes it an error.
 
-Warnings are printed in the same format as errors, in yellow, with `warning` in the header.
+Warnings are printed in the same format as errors, in yellow, with `warning` in the header and the warning's code.
+
+### Lint levels
+
+Every warning has a code (`E163` is the unused-variable warning) and a **level**, which is how the build treats it:
+
+| Level | The warning is | The build |
+|---|---|---|
+| `allow` | not reported | succeeds |
+| `warn` | reported; every warning starts here | succeeds |
+| `deny` | reported as an error | fails with status 1 and writes no program |
+
+The level is chosen by whoever builds the program, in three places that mean the same thing. There is no syntax for it in the source: a program reads the same wherever it is built.
+
+- **The command line**, `turf` and `turfc` alike: `--allow E163`, `--warn E163`, `--deny E163`. Each names one code and the flags can be repeated. When a code is named twice, the later flag wins, so `--deny E163 --warn E163` leaves it a warning.
+- **`turf.toml`**, in a `[lints]` table: `E163 = "allow"`. `turf` hands the table to the compiler as these same flags, ahead of the ones you type, so a flag on the command line wins over the same code in the file. See [Projects & Packages](projects_and_packages.md#the-lints-table).
+- **A pin**, `--lint-set 2.N` or `lint-set = "2.N"` in `[lints]`. Every warning records the 2.x release that added it. With a pin, a warning added after 2.N starts at `allow` instead of `warn`, so a newer compiler adds no warning, and no failure under `deny`, to a build that pinned 2.N. A level named for the code itself still wins over the pin, in either direction. Pinning a set newer than the compiler is an error: a manifest written for a newer compiler says so instead of being read as an older one. Only `2.N` sets exist.
+
+```text
+$ turf check w.tr --deny E163
+w.tr (1 error, 2 warnings)
+
+── error at line 2, col 5 [E163 · control flow]
+
+  Warning: Variable 'unused' is declared but never used.
+
+  Hint: If the variable is intentionally unused, prefix its name with '_' by convention. Otherwise, remove the declaration or use its value.
+
+  E163 is a warning by default; its lint level here is deny.
+  ...
+```
+
+A denied warning is an error in every way that matters: it has the `error` header, it is counted as one, it fails `--check`, and the error that is already on a line hides other diagnostics on that line. Its text still says `Warning:` and the diagnostic adds the line saying why, so the reader knows the check is normally advice.
+
+A level that names nothing real is a usage error (status 2, nothing compiled), never silently ignored: a code the compiler does not have, a word that is not a code, a lint set that does not exist or is newer than the compiler, a flag with no code after it. An **error** has no level to choose, since a program with a type error cannot be built whatever the setting: `--allow` and `--warn` of an error's code are usage errors, and `--deny` of one is accepted and changes nothing. A [warning in the standard library](#warnings-in-the-standard-library) is never denied (it is not yours to fix) unless you also pass `--stdlib-warnings`. A level applies to every file of the compile, your dependencies included. `turfc --test` and `turf test` pass the levels to the compile of every test.
+
+The levels are the compiler's: it never reads `turf.toml`, so an editor or script that drives `turfc` sets them with the flags (interface 1.8).
 
 ### Warnings in the standard library
 
@@ -598,7 +687,7 @@ A warning whose position is inside the installed standard library is recorded bu
 $ turf check server.tr --stdlib-warnings
 lib/std/http/http.tr (1 warning)
 
-── warning at line 353, col 5
+── warning at line 353, col 5 [E159 · control flow]
 
   Warning: Function 'http::Server.listen' contains a loop with no exit path. This will run forever.
   ...
@@ -634,26 +723,193 @@ When there is exactly one match the compiler also prints it as a checked [`Fix:`
 
 ### Error codes
 
-Every error has a stable code, `E001` to `E150`: **150 codes** with no gaps. A code is assigned once and never reused or renumbered, and it is an identifier, not a ranking of severity. Every one has a page, `turf explain E0NN`, that says what the error means, shows a wrong program and the fix. The same pages are in the repository as `docs/errors/codes/E0NN.txt`, and the release archives carry them.
+Every error and every warning has a stable code, `E001` upward with no gaps. A code is assigned once and never reused or renumbered, and it is an identifier, not a ranking of severity. Only a warning has a [lint level](#lint-levels). Every code has a page, `turf explain E0NN`, that says what it means, shows a wrong program and the fix. The same pages are in the repository as `docs/errors/codes/E0NN.txt`, and the release archives carry them.
 
-Six codes are **retired**: the mistakes they described are now reported under another code, and the number stays so old references still resolve. `turf explain` on them says which code replaced them. They are E006 (an unsized array in a `for` loop; arrays carry their length now), E013 (merged into E012), E015 (syntax errors, now E099–E123), E037 (unknown functions are E041), and E055 and E063 (now E056).
+A **retired** code is one whose mistake is now reported under another code; the number stays so old references still resolve, and `turf explain` on it says which code replaced it. The table marks them. The replacements are: E006 (an unsized array in a `for` loop; arrays carry their length now), E013 (merged into E012), E015 (syntax errors, now E099–E123), E037 (unknown functions are E041), and E055 and E063 (now E056).
 
-The codes by category (the category is the word in the diagnostic header):
+Every code, with its kind, the 2.x release that added it, the level it starts at and its category (the word in the diagnostic header). This table is generated from the compiler's registry (`src/diagnostics/ErrorCodes.h`) by `scripts/check/diagnostic_registry.py --write`, and CI fails if it and the registry disagree, so edit the registry and regenerate; never edit the table. `scripts/check/diagnostic_registry.py --json` prints the same data for a tool.
 
-| Category | Codes |
-|---|---|
-| array error | E001–E006, E123, E140–E144 |
-| control flow | E007, E009–E010, E012–E013, E016, E058, E074–E075, E083, E092–E095, E120, E132–E133 |
-| undeclared variable | E008, E037, E040–E041, E043, E054, E068, E131 |
-| syntax error | E014–E015, E070–E073, E099–E111, E118, E139 |
-| declaration | E019–E024, E027–E034, E039, E042, E045–E046, E048–E053, E060–E061, E069, E079–E080, E084–E085, E087–E091, E096–E097, E112–E117, E119, E128–E129, E136, E138, E145–E148, E150 |
-| function signature | E025, E038, E044, E047, E067, E125, E135, E137 |
-| type mismatch | E035–E036, E056, E059, E062, E064, E066, E082, E098, E124, E126, E134, E149 |
-| arithmetic | E057, E076–E078, E127 |
-| string conversion | E065 |
-| builtin function | E055, E063 |
-| memory error | E017–E018, E081, E086, E130 |
-| general | E011, E026, E121–E122 |
+<!-- diagnostic-registry:begin (generated by scripts/check/diagnostic_registry.py --write; do not edit) -->
+
+173 codes, E001 to E173: 149 errors and 24 warnings (E074–E075, E094, E152–E172). 6 are retired (E006, E013, E015, E037, E055, E063).
+
+| Code | Kind | Since | Level | Category | Name |
+|---|---|---|---|---|---|
+| E001 | error | 2.0 | error | array error | ArrayBoundsError |
+| E002 | error | 2.0 | error | array error | ArrayNonIntegerIndexError |
+| E003 | error | 2.0 | error | array error | ArraySizeMismatchError |
+| E004 | error | 2.0 | error | array error | ArrayTypeMismatchError |
+| E005 | error | 2.0 | error | array error | ForEachNonArrayError |
+| E006 | error | 2.0 | error | array error | ForEachUnsizedArrayError (retired) |
+| E007 | error | 2.0 | error | control flow | ControlFlowError |
+| E008 | error | 2.0 | error | undeclared variable | DefiniteAssignmentError |
+| E009 | error | 2.0 | error | control flow | MissingReturnError |
+| E010 | error | 2.0 | error | control flow | RecursionWithoutBaseError (important) |
+| E011 | error | 2.0 | error | general | SemanticError |
+| E012 | error | 2.0 | error | control flow | StatementAfterTerminatorError |
+| E013 | error | 2.0 | error | control flow | UnreachableCodeError (retired) |
+| E014 | error | 2.0 | error | syntax error | KeywordError |
+| E015 | error | 2.0 | error | syntax error | SyntaxError (retired) |
+| E016 | error | 2.0 | error | control flow | BareErrorAsBindingError |
+| E017 | error | 2.0 | error | memory error | DoubleFreeError (important) |
+| E018 | error | 2.0 | error | memory error | UseAfterFreeError (important) |
+| E019 | error | 2.0 | error | declaration | CircularImportError |
+| E020 | error | 2.0 | error | declaration | ConflictingExternDeclarationError |
+| E021 | error | 2.0 | error | declaration | ExportMutNotSupportedError |
+| E022 | error | 2.0 | error | declaration | ExportNonConstantInitializerError |
+| E023 | error | 2.0 | error | declaration | ExportOutsideTopLevelError |
+| E024 | error | 2.0 | error | declaration | ImportSymbolCollisionError |
+| E025 | error | 2.0 | error | function signature | ModuleArityOrTypeError |
+| E026 | error | 2.0 | error | general | ModuleMethodNotFoundError |
+| E027 | error | 2.0 | error | declaration | ModuleNotFoundError |
+| E028 | error | 2.0 | error | declaration | OperatorBuiltinPairError |
+| E029 | error | 2.0 | error | declaration | ScopeOperatorOnInstanceError |
+| E030 | error | 2.0 | error | declaration | UnknownModuleSymbolError |
+| E031 | error | 2.0 | error | declaration | UnknownScopeQualifierError |
+| E032 | error | 2.0 | error | declaration | UnqualifiedTypeNotVisibleError |
+| E033 | error | 2.0 | error | declaration | DuplicateDeclarationError |
+| E034 | error | 2.0 | error | declaration | DuplicateTypeNameError |
+| E035 | error | 2.0 | error | type mismatch | InvalidTransitionError (important) |
+| E036 | error | 2.0 | error | type mismatch | InvalidTransitionTargetError (important) |
+| E037 | error | 2.0 | error | undeclared variable | LookupError (retired) |
+| E038 | error | 2.0 | error | function signature | NestedFunctionError |
+| E039 | error | 2.0 | error | declaration | NoSuchVariantError |
+| E040 | error | 2.0 | error | undeclared variable | ReferenceError |
+| E041 | error | 2.0 | error | undeclared variable | UnknownFunctionError |
+| E042 | error | 2.0 | error | declaration | UnknownTypeError |
+| E043 | error | 2.0 | error | undeclared variable | UseBeforeDeclarationError |
+| E044 | error | 2.0 | error | function signature | WrongArityError |
+| E045 | error | 2.0 | error | declaration | ConstructorCalledOnInstanceError |
+| E046 | error | 2.0 | error | declaration | ConstructorCannotBeStaticError |
+| E047 | error | 2.0 | error | function signature | DefaultConstructorArityError |
+| E048 | error | 2.0 | error | declaration | DotOperatorOnNonInstanceError |
+| E049 | error | 2.0 | error | declaration | IncompleteConstructorError |
+| E050 | error | 2.0 | error | declaration | NoConstructorDefinedError |
+| E051 | error | 2.0 | error | declaration | ReservedConstructorNameError |
+| E052 | error | 2.0 | error | declaration | StaticMethodCalledOnInstanceError |
+| E053 | error | 2.0 | error | declaration | StaticOutsideStructError |
+| E054 | error | 2.0 | error | undeclared variable | StructMethodNotFoundError |
+| E055 | error | 2.0 | error | builtin function | AbsArgTypeError (retired) |
+| E056 | error | 2.0 | error | type mismatch | ArgumentTypeError |
+| E057 | error | 2.0 | error | arithmetic | ArithmeticError |
+| E058 | error | 2.0 | error | control flow | CompareError |
+| E059 | error | 2.0 | error | type mismatch | CompareTypeError |
+| E060 | error | 2.0 | error | declaration | ImmutableAssignmentError |
+| E061 | error | 2.0 | error | declaration | InvalidAssignmentTargetError |
+| E062 | error | 2.0 | error | type mismatch | NullAssignmentError |
+| E063 | error | 2.0 | error | builtin function | PowerArgTypeError (retired) |
+| E064 | error | 2.0 | error | type mismatch | ReturnTypeMismatchError |
+| E065 | error | 2.0 | error | string conversion | StringConversionError |
+| E066 | error | 2.0 | error | type mismatch | TypeError |
+| E067 | error | 2.0 | error | function signature | VoidValueError |
+| E068 | error | 2.0 | error | undeclared variable | UnknownStructFieldError |
+| E069 | error | 2.0 | error | declaration | StructLayoutCycleError (important) |
+| E070 | error | 2.0 | error | syntax error | MalformedRadixPrefixError |
+| E071 | error | 2.0 | error | syntax error | InvalidRadixDigitError |
+| E072 | error | 2.0 | error | syntax error | MisplacedSeparatorError |
+| E073 | error | 2.0 | error | syntax error | MalformedExponentError |
+| E074 | warning | 2.0 | warn | control flow | UnreachableBlockWarning |
+| E075 | warning | 2.0 | warn | control flow | DeadBranchWarning |
+| E076 | error | 2.0 | error | arithmetic | IntegerLiteralOutOfRangeError |
+| E077 | error | 2.0 | error | arithmetic | IntegerLiteralNotExactAsDoubleError |
+| E078 | error | 2.0 | error | arithmetic | FloatLiteralOverflowError |
+| E079 | error | 2.0 | error | declaration | GenericInstantiationDepthError |
+| E080 | error | 2.0 | error | declaration | OperatorOrphanRuleError |
+| E081 | error | 2.0 | error | memory error | PossibleNullDereferenceError |
+| E082 | error | 2.0 | error | type mismatch | UnnarrowedNullableCastError |
+| E083 | error | 2.0 | error | control flow | DeferControlFlowError |
+| E084 | error | 2.0 | error | declaration | CallerLocationOutsideMarkedFunctionError |
+| E085 | error | 2.0 | error | declaration | AmbiguousTypeReferenceError |
+| E086 | error | 2.0 | error | memory error | DanglingReferenceEscapeError (important) |
+| E087 | error | 2.0 | error | declaration | MisplacedVisibilityError |
+| E088 | error | 2.0 | error | declaration | PrivateSymbolAccessError (important) |
+| E089 | error | 2.0 | error | declaration | PrivateInPublicError (important) |
+| E090 | error | 2.0 | error | declaration | AmbiguousModuleError |
+| E091 | error | 2.0 | error | declaration | ModuleNotImportableError |
+| E092 | error | 2.0 | error | control flow | InvalidPatternError |
+| E093 | error | 2.0 | error | control flow | NonExhaustiveCompareError |
+| E094 | warning | 2.0 | warn | control flow | UnreachableArmWarning |
+| E095 | error | 2.0 | error | control flow | TryMisuseError |
+| E096 | error | 2.0 | error | declaration | ErrorPayloadError |
+| E097 | error | 2.0 | error | declaration | GenericOperatorError |
+| E098 | error | 2.0 | error | type mismatch | OperatorTemporaryWriteError |
+| E099 | error | 2.0 | error | syntax error | UnterminatedLiteralError |
+| E100 | error | 2.0 | error | syntax error | InvalidEscapeSequenceError |
+| E101 | error | 2.0 | error | syntax error | InvalidCharLiteralError |
+| E102 | error | 2.0 | error | syntax error | MissingSemicolonError |
+| E103 | error | 2.0 | error | syntax error | UnexpectedTokenError |
+| E104 | error | 2.0 | error | syntax error | UnclosedDelimiterError |
+| E105 | error | 2.0 | error | syntax error | MissingCommaError |
+| E106 | error | 2.0 | error | syntax error | MissingColonError |
+| E107 | error | 2.0 | error | syntax error | MissingOpeningDelimiterError |
+| E108 | error | 2.0 | error | syntax error | ExpectedNameError |
+| E109 | error | 2.0 | error | syntax error | ExpectedTypeError |
+| E110 | error | 2.0 | error | syntax error | ExpectedKeywordError |
+| E111 | error | 2.0 | error | syntax error | NestingTooDeepError |
+| E112 | error | 2.0 | error | declaration | VoidTypeNotAllowedError |
+| E113 | error | 2.0 | error | declaration | RemovedSyntaxError |
+| E114 | error | 2.0 | error | declaration | DuplicateMemberError |
+| E115 | error | 2.0 | error | declaration | InvalidOperatorDeclarationError |
+| E116 | error | 2.0 | error | declaration | ExternFunctionBodyError |
+| E117 | error | 2.0 | error | declaration | InvalidErrorDeclarationError |
+| E118 | error | 2.0 | error | syntax error | StatementOutsideFunctionError |
+| E119 | error | 2.0 | error | declaration | MissingEntryPointError |
+| E120 | error | 2.0 | error | control flow | InvalidLoopFormError |
+| E121 | error | 2.0 | error | general | InternalCompilerError (important) |
+| E122 | error | 2.0 | error | general | NonAddressableExpressionError |
+| E123 | error | 2.0 | error | array error | InvalidArraySizeError |
+| E124 | error | 2.0 | error | type mismatch | InvalidComparisonError |
+| E125 | error | 2.0 | error | function signature | AmbiguousCallError |
+| E126 | error | 2.0 | error | type mismatch | UnsupportedOperationError |
+| E127 | error | 2.0 | error | arithmetic | EnumValueOutOfRangeError |
+| E128 | error | 2.0 | error | declaration | MissingInitializerError |
+| E129 | error | 2.0 | error | declaration | NothingToInferError |
+| E130 | error | 2.0 | error | memory error | RawPointerOutsideUnsafeError (important) |
+| E131 | error | 2.0 | error | undeclared variable | MethodOnNonStructError |
+| E132 | error | 2.0 | error | control flow | InvalidRecoverError |
+| E133 | error | 2.0 | error | control flow | DuplicateMatchArmError |
+| E134 | error | 2.0 | error | type mismatch | InvalidCastError |
+| E135 | error | 2.0 | error | function signature | NotCallableError |
+| E136 | error | 2.0 | error | declaration | InvalidModuleQualifierError |
+| E137 | error | 2.0 | error | function signature | NotAValueError |
+| E138 | error | 2.0 | error | declaration | MissingTypeArgumentsError |
+| E139 | error | 2.0 | error | syntax error | MalformedNumberError |
+| E140 | error | 2.0 | error | array error | UnsizedArrayPlacementError |
+| E141 | error | 2.0 | error | array error | ImmutableArrayWrittenThroughSliceError |
+| E142 | error | 2.0 | error | array error | SliceOfNonArrayError |
+| E143 | error | 2.0 | error | array error | SliceRangeOutOfBoundsError |
+| E144 | error | 2.0 | error | array error | MutableViewOfImmutableArrayError |
+| E145 | error | 2.0 | error | declaration | ModuleNotImportedError |
+| E146 | error | 2.0 | error | declaration | InvalidAnnotationError |
+| E147 | error | 2.0 | error | declaration | DefaultThroughReferenceCycleError |
+| E148 | error | 2.0 | error | declaration | WrongTypeArgumentCountError |
+| E149 | error | 2.0 | error | type mismatch | LiteralNeverConvertsError |
+| E150 | error | 2.0 | error | declaration | SizeParameterError |
+| E151 | error | 2.0 | error | declaration | LocalGenericStructError |
+| E152 | warning | 2.0 | warn | declaration | ShadowingWarning |
+| E153 | warning | 2.0 | warn | declaration | UnreachableStateWarning |
+| E154 | warning | 2.0 | warn | control flow | CompareWarning |
+| E155 | warning | 2.0 | warn | control flow | RedundantComparisonWarning |
+| E156 | warning | 2.0 | warn | general | SelfAssignmentWarning |
+| E157 | warning | 2.0 | warn | control flow | SuspiciousInfiniteLoopWarning |
+| E158 | warning | 2.0 | warn | control flow | CyclomaticComplexityWarning |
+| E159 | warning | 2.0 | warn | control flow | InfiniteLoopWarning |
+| E160 | warning | 2.0 | warn | control flow | DeadStoreWarning |
+| E161 | warning | 2.0 | warn | control flow | DeadInitializerWarning |
+| E162 | warning | 2.0 | warn | control flow | RangeNeverEndsWarning |
+| E163 | warning | 2.0 | warn | control flow | UnusedVariableWarning |
+| E164 | warning | 2.0 | warn | control flow | StuckForLoopVariableWarning |
+| E165 | warning | 2.0 | warn | control flow | EmptyBranchWarning |
+| E166 | warning | 2.0 | warn | general | SelfComparisonWarning |
+| E167 | warning | 2.0 | warn | arithmetic | DivisionByZeroLiteralWarning |
+| E168 | warning | 2.0 | warn | control flow | IdenticalBranchesWarning |
+| E169 | warning | 2.0 | warn | control flow | NeverReturnsErrorWarning |
+| E170 | warning | 2.0 | warn | memory error | PossibleUseAfterFreeWarning |
+| E171 | warning | 2.0 | warn | memory error | PossibleDoubleFreeWarning |
+| E172 | warning | 2.2 | warn | declaration | DeprecatedUseWarning |
+| E173 | error | 2.2 | error | declaration | TestFunctionUseError |
+
+<!-- diagnostic-registry:end -->
 
 Eleven codes are flagged **important**: concepts the one-line message alone does not teach. They get the stronger footer, `Worth reading in full`: **E010** (infinite recursion), **E017** (double free), **E018** (use after free), **E035** and **E036** (invalid state transitions), **E069** (a struct that contains itself), **E086** (a reference that would outlive its target), **E088** (a private item used from another module), **E089** (a private type in a public signature), **E121** (an internal compiler error: report it with the program that triggers it), and **E130** (raw pointer outside `unsafe`).
 
@@ -795,13 +1051,13 @@ fn main(): int {
 ```
 
 ```text
-── warning at line 2, col 5
+── warning at line 2, col 5 [E161 · control flow]
 
   Warning: The initial value of 'x' is never read: every path assigns 'x' again before reading it.
 
   Hint: Declare it without a value, 'mut x: int;' (every read still has to come after an assignment), or read the initial value before the next assignment.
 
-── warning at line 4, col 5
+── warning at line 4, col 5 [E163 · control flow]
 
   Warning: Variable 'unused' is declared but never used.
 ```
@@ -809,7 +1065,7 @@ fn main(): int {
 The first `x` (`5`) is a declaration's initializer that is overwritten before it is read; the second (`10`) is read by `x + 1`, so it is not reported. A store that is not a declaration's initializer gets the plain dead-store wording:
 
 ```text
-── warning at line 3, col 5
+── warning at line 3, col 5 [E160 · control flow]
 
   Warning: Variable 'x' is assigned but the value is never read (dead store).
 
@@ -946,16 +1202,24 @@ fn main(): int {
 
 A few more warnings come from simpler checks that look at one expression or statement:
 
-| Warning | Fires on |
-|---|---|
-| `You're using '/' with zero — this will crash at runtime!` | a literal `0` as the divisor of `/` or `%` |
-| `You're assigning 'k' to itself — this doesn't do anything!` | `k = k;` |
-| `You're comparing 'x' with itself!` | `x == x`, `x < x` and so on |
-| `Just so you know, you're creating a new 'n' that hides an older one!` | a local that shadows another in an enclosing scope |
-| `The loop variable 'i' is never changed by this loop's 'step' or its body, so it will loop forever` | a `for` whose variable nothing advances |
-| `The 'then' branch is empty` | an `if` or `else` with no statements |
-| `'f' is declared to return a fallible type ('!T') but never actually returns an error.` | a `!T` function with no error path |
-| `Machine 'M' declares state 'S' with no incoming transitions.` | a state no edge leads into (expected for the initial state) |
+| Code | Warning | Fires on |
+|---|---|---|
+| E167 | `You're using '/' with zero — this will crash at runtime!` | a literal `0` as the divisor of `/` or `%` |
+| E156 | `You're assigning 'k' to itself — this doesn't do anything!` | `k = k;` |
+| E166 | `You're comparing 'x' with itself!` | `x == x`, `x < x` and so on |
+| E155 | `This comparison is redundant!` | `x == true`, `x != false` |
+| E152 | `Just so you know, you're creating a new 'n' that hides an older one!` | a local that shadows another in an enclosing scope |
+| E164 | `The loop variable 'i' is never changed by this loop's 'step' or its body, so it will loop forever` | a `for` whose variable nothing advances |
+| E162 | `This loop never reaches its end` | a `for` range whose step moves away from its end |
+| E165 | `The 'then' branch is empty` | an `if` or `else` with no statements |
+| E168 | `Both branches of this 'if' do the same thing!` | an `if` and `else` with identical bodies |
+| E154 | `Empty compare statement has no arms and no 'otherwise'` | a `compare` with no arm |
+| E169 | `'f' is declared to return a fallible type ('!T') but never actually returns an error.` | a `!T` function with no error path |
+| E153 | `Machine 'M' declares state 'S' with no incoming transitions.` | a state no edge leads into (expected for the initial state) |
+| E170, E171 | `Possible use after free`, `Possible double free` | a pointer used or freed again after `mem::free` on some path |
+| E172 | `'old_fn' is deprecated: use new_fn() instead` | a call to an item marked `@deprecated("...")` |
+
+Each can be [allowed or denied](#lint-levels) by its code.
 
 ---
 
@@ -973,7 +1237,7 @@ panic: runtime check: <what happened> (<file>:<line>)
 | Division or remainder by zero | `panic: runtime check: Division by zero (div.tr:2)` | 134 |
 | Integer overflow in `+`, `-`, `*` or negation | `panic: runtime check: Integer overflow (ovf.tr:2)` | 134 |
 | A `double` converted to `int` when the value does not fit (NaN, infinity, too large) | `panic: runtime check: Integer overflow (castf.tr:2)` | 134 |
-| Stack overflow (unbounded recursion) | `panic: stack overflow: the call stack exceeded its limit -- check for unbounded or missing-base-case recursion` | 134 |
+| Stack overflow (unbounded recursion) | `panic: stack overflow: the call stack exceeded its limit at about 74690 nested calls -- check for unbounded or missing-base-case recursion` | 134 |
 | Out of memory (an allocation that cannot be satisfied) | `panic: out of memory: …` | 134 |
 | A memory fault, which only unsafe code can cause | `panic: segmentation fault (this is a bug in unsafe code or in TurfLang) at address 0x…` | 134 |
 | A checked standard-library call, such as `List.get` with a bad index | `prog.tr:6: List.get: index out of bounds`, the line of the call in your code | 134 |

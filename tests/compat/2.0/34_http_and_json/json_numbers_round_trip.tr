@@ -1,0 +1,28 @@
+// `json::stringify` writes a number so that it reads back exactly. It used
+// `to string`, six significant digits: 1700000000 came out as `1.7e+09` and
+// came back as a different number.
+
+import test;
+import json;
+
+fn text(d: double): string {
+    return json::stringify(json::JsonValue::from_number(d));
+}
+
+fn round_trips(d: double): bool {
+    immut back: json::JsonValue = json::parse(text(d)) recover produce json::JsonValue::from_number(-1.5);
+    return back.num_val == d;
+}
+
+fn main(): int {
+    test::assert(text(1700000000.0) == "1700000000", "a timestamp is an integer");
+    test::assert(text(1234567.0) == "1234567", "no exponent for a count");
+    test::assert(text(-3.0) == "-3", "negative integer");
+    test::assert(text(0.5) == "0.5", "shortest form");
+    test::assert(text(0.1 + 0.2) == "0.30000000000000004", "every digit it needs");
+    test::assert(text(1e21) == "1e+21", "beyond 2^53 with an exponent");
+    test::assert(round_trips(1.0 / 3.0) && round_trips(123.456) && round_trips(1e-7) &&
+        round_trips(9007199254740992.0),
+        "round trips");
+    return 0;
+}

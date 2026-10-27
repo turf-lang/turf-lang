@@ -1,0 +1,8 @@
+// EXPECT-DIAG: E101
+// EXPECT-DIAG: Empty char literal
+// Negative test: '' is an empty char literal -- a lexer-level error, since
+// a char literal must contain exactly one character.
+fn main(): int {
+    mut c: char = '';
+    return 0;
+}

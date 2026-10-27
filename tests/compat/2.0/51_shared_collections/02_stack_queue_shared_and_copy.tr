@@ -1,0 +1,39 @@
+// LEC-009 (F-COLL-1): Stack and Queue follow the List rule -- `=` and passing
+// share one header, `.copy()` is independent. A Queue copy keeps the order
+// after its head has moved (elements are copied from `head`, not from 0).
+import queue::Queue;
+import stack::Stack;
+import test;
+
+fn push_two(s: Stack<int>): void {
+    s.push(1);
+    s.push(2);
+}
+
+fn drain_one(q: Queue<int>): int {
+    return q.dequeue();
+}
+
+fn main(): int {
+    mut s: Stack<int> = Stack::default();
+    push_two(s);
+    test::assert(s.length() == 2 && s.peek() == 2, "callee push on a stack");
+    mut s2: Stack<int> = s;
+    test::assert(s2.pop() == 2 && s.length() == 1, "stack alias pop");
+    mut sc: Stack<int> = s.copy();
+    sc.push(9);
+    test::assert(s.length() == 1 && sc.length() == 2 && sc.peek() == 9, "stack copy");
+
+    mut q: Queue<int> = Queue::default();
+    q.enqueue(1);
+    q.enqueue(2);
+    q.enqueue(3);
+    test::assert(drain_one(q) == 1 && q.length() == 2, "callee dequeue on a queue");
+    mut qc: Queue<int> = q.copy();
+    test::assert(qc.dequeue() == 2 && qc.dequeue() == 3, "queue copy keeps the order after head moved");
+    test::assert(q.length() == 2 && q.peek() == 2, "the original is untouched");
+    mut q2: Queue<int> = q;
+    q2.enqueue(4);
+    test::assert(q.length() == 3, "queue alias enqueue");
+    return 0;
+}

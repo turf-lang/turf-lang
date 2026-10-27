@@ -5,7 +5,8 @@ CAUSE:
   written by its BARE name (`twice`, after `import helper::twice;` for a module's function).
   A qualified name (`io::printline`, `Point::origin`) is only ever called, and so is an
   `@caller_location` function. A generic function is a value only where a function type is
-  declared for it (`immut f: fn(int): int = id;`); `mut g = id;` gives it no type.
+  declared for it (`immut f: fn(int): int = id;`) or its type arguments are written
+  (`immut f = id::<int>;`); `mut g = id;` gives it no type.
 
 INCORRECT:
     import helper;

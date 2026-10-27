@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E005
+// EXPECT-DIAG: value of type 'list::List<int>'
+import list::List;
+
+fn main(): int {
+    mut l: List<int> = List::default();
+    for value in l {
+    }
+    return 0;
+}

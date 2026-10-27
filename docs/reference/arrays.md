@@ -620,7 +620,7 @@ fn main(): int {
 The loop variable is a copy of the element: assigning to it, or to a field of a
 struct element, does not change the array. Write through the index instead
 (`a[i] = ...`). A `List<T>`, a map, a struct or a scalar cannot be iterated with
-for-each (`E005`, "for-each requires an array!"); iterate a list by index with a
+for-each (`E005`, "for-each requires an array or a string!"); iterate a list by index with a
 range `for` and `l[i]`.
 
 ## Arrays of references: `(&T)[N]`

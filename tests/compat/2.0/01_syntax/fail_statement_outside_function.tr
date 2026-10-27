@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E118
+// EXPECT-DIAG: Statements are not allowed outside of a function
+// Issue #263: this message used to be a raw `std::cerr << "Error: ..."` in
+// main.cpp -- no code, no source line, no caret, no `--explain` -- the one
+// message a beginner meets the first time they paste code at the top level.
+// It now goes through the diagnostic engine like every other error.
+import io;
+
+io::printline("hello");
+
+fn main(): int {
+    return 0;
+}

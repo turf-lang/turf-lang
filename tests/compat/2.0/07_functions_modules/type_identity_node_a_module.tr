@@ -1,0 +1,43 @@
+// Companion module for the FDN-003 type-identity tests
+// (type_identity_same_name_in_two_modules.tr and friends). Declares a
+// `Node`, `Mode` and `Oops` that deliberately share their NAMES -- but not
+// their shapes -- with type_identity_node_b_module.tr's and with the main
+// test file's own. Before FDN-003 a struct/enum/error name was one
+// program-wide namespace, so importing both modules was a
+// DuplicateTypeNameError; each type is now identified by (module, name).
+pub struct Node {
+    pub a: int,
+    pub tag: string
+}
+
+pub fn Node.new(v: int): void {
+    self.a = v;
+    self.tag = "a";
+}
+
+pub fn Node.describe(): string {
+    return "a.Node";
+}
+
+pub fn Node.origin() static: Node {
+    return Node::new(1);
+}
+
+pub enum Mode { Fast, Slow }
+
+pub error Oops { Bad }
+
+pub fn make(v: int): Node {
+    return Node::new(v);
+}
+
+pub fn mode(): Mode {
+    return Mode::Slow;
+}
+
+pub fn check(n: int): !int {
+    if (n < 0) {
+        return Oops::Bad;
+    }
+    return n;
+}

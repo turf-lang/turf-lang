@@ -1,0 +1,10 @@
+// LEC-007: a stdlib precondition panic names the CALLER's line, not a line in stack.tr.
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: fail_stdlib_stack_pop_names_caller.tr:8: Stack.pop: pop on empty stack
+import stack::Stack;
+
+fn main(): int {
+    mut s: Stack<int> = Stack::default();
+    s.pop();
+    return 0;
+}

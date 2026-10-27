@@ -1,0 +1,17 @@
+// Test: Config::default() zero-inits every field (SEM-004: a plain
+// `mut cfg: Config;` with no initializer no longer eager-zero-inits --
+// see fail_struct_flat_use_before_init.tr for what that now does).
+import io;
+
+import test;
+struct Config {
+    retries: int,
+    timeout: int
+}
+
+fn main(): int {
+    mut cfg: Config = Config::default();
+    test::assert(cfg.retries == 0, "Config.retries default 0");
+    test::assert(cfg.timeout == 0, "Config.timeout default 0");
+    return 0;
+}

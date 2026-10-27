@@ -1,0 +1,18 @@
+// EXPECT-DIAG: E086
+// EXPECT-DIAG: can't be stored into a field that outlives this function
+// `h` is a by-value copy, but its `own` field is the reference the caller
+// passed: the node it points at is the caller's.
+struct N { val: int, next: &?N }
+struct H2 { k: int, own: &N }
+
+fn link(h: H2): void {
+    mut n: N = N::default();
+    n.val = 42;
+    h.own.next = &n;
+}
+
+fn main(): int {
+    mut h: H2 = H2::default();
+    link(h);
+    return 0;
+}

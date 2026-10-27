@@ -1,0 +1,8 @@
+// EXPECT-DIAG: E126
+// EXPECT-DIAG: Cannot index a value of type 'int'
+// REL-004 (fuzzer): `n[0]` on an `int` type-checked with no type and reached
+// Codegen's "Base is not an array or pointer" fatal error.
+fn main(): int {
+    mut n: int = 3;
+    return n[0];
+}

@@ -386,7 +386,41 @@ fn main(): int {
 5
 ```
 
-Only built-in arrays can be iterated. A scalar, a `string`, a struct, and the collection types `List`, `Map` and `Set` are rejected with error E005 (`for-each requires an array!`). To walk a collection, loop over its indices:
+A `string` is iterated byte by byte, and the loop variable is a `char`, the same byte `s[i]` reads:
+
+```turflang
+import io;
+
+fn main(): int {
+    immut csv: string = "a,b,,c";
+    mut commas: int = 0;
+    for c in csv {
+        if c == ',' {
+            commas++;
+        }
+    }
+    io::printline(commas);
+
+    for (i, c) in "hi" {
+        io::print(i);
+        io::print(": ");
+        io::printline(c);
+    }
+    return 0;
+}
+```
+
+```text
+3
+0: h
+1: i
+```
+
+- The string and its length are taken once, before the first iteration; reassigning the variable inside the loop does not change what the loop walks.
+- Each iteration reads the byte as it is then, so a byte the body changes before the loop reaches it is seen changed. If the body writes a `'\0'` that the loop then reaches, the string has become shorter than the loop's position, and the read panics with `String index out of bounds`, as `s[i]` would.
+- The bytes are bytes: a string holding UTF-8 text gives one `char` per byte, not per character, exactly like `s[i]` and `s.length()`.
+
+Arrays and strings are the only things for-each takes. A scalar, a struct, and the collection types `List`, `Map` and `Set` are rejected with error E005 (`for-each requires an array or a string!`). To walk a collection, loop over its indices:
 
 ```turflang
 import io;

@@ -1,0 +1,59 @@
+// Builds a JsonValue purely through the constructor/mutator API (no hand-
+// written JSON text), stringifies it, re-parses the result, and confirms
+// the re-parsed tree is equivalent to the original -- stringify() and
+// parse() are each other's inverse for every value shape this module
+// supports.
+import io;
+import json;
+import test;
+
+fn main(): int {
+    mut obj: json::JsonValue = json::JsonValue::new_object();
+    obj.set("name", json::JsonValue::from_string("roundtrip"));
+    obj.set("count", json::JsonValue::from_number(42.0));
+    obj.set("ok", json::JsonValue::from_bool(true));
+    obj.set("nothing", json::JsonValue::null_value());
+
+    mut arr: json::JsonValue = json::JsonValue::new_array();
+    arr.push(json::JsonValue::from_number(1.0));
+    arr.push(json::JsonValue::from_number(2.0));
+    arr.push(json::JsonValue::from_string("three"));
+    obj.set("items", arr);
+
+    immut text: string = json::stringify(obj);
+
+    mut reparsed: json::JsonValue = json::parse(text) recover run {
+        test::fail("re-parsing a value this module itself stringified should never fail");
+        return 1;
+    };
+
+    test::assert_eq(reparsed.get_string("name"), "roundtrip", "roundtrip string field");
+    test::assert_eq(reparsed.get_number("count"), 42.0, "roundtrip number field");
+    test::assert_eq(reparsed.get_bool("ok"), true, "roundtrip bool field");
+    test::assert(reparsed.get("nothing").kind == json::JsonType::Null, "roundtrip null field");
+
+    mut items: json::JsonValue = reparsed.get("items");
+    test::assert_eq(items.length(), 3, "roundtrip array length");
+    test::assert_eq(items.at(0).num_val, 1.0, "roundtrip array[0]");
+    test::assert_eq(items.at(1).num_val, 2.0, "roundtrip array[1]");
+    test::assert_eq(items.at(2).str_val, "three", "roundtrip array[2]");
+
+    // Also check stringify() on a bare (non-object/array) value works
+    // standalone -- a JSON body can legally be a single scalar.
+    test::assert_eq(json::stringify(json::JsonValue::from_number(7.0)), "7", "bare number stringify");
+    test::assert_eq(json::stringify(json::JsonValue::from_string("hi")), "\"hi\"", "bare string stringify");
+    test::assert_eq(json::stringify(json::JsonValue::from_bool(false)), "false", "bare bool stringify");
+    test::assert_eq(json::stringify(json::JsonValue::null_value()), "null", "bare null stringify");
+
+    // A string containing characters that need escaping round-trips too.
+    mut escaped: json::JsonValue = json::JsonValue::from_string("line1\nline2\t\"quoted\"\\end");
+    immut escapedText: string = json::stringify(escaped);
+    mut escapedBack: json::JsonValue = json::parse(escapedText) recover run {
+        test::fail("re-parsing an escaped string should never fail");
+        return 1;
+    };
+    test::assert_eq(escapedBack.str_val, "line1\nline2\t\"quoted\"\\end", "escaped string roundtrip");
+
+    io::printline("02 PASS: json roundtrip");
+    return 0;
+}

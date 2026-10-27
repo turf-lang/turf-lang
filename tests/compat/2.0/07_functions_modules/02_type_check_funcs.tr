@@ -1,0 +1,31 @@
+import test;
+
+fn add(a: int, b: int): int {
+    return a + b;
+}
+
+fn toDouble(x: double): double {
+    return x;
+}
+
+fn greet(): void {
+}
+
+fn main(): int {
+    // Passing int where double expected (implicit widening) — should work
+    mut result: double = toDouble(42);
+    test::assert(result == 42.0, "");
+
+    // Returning int from int function - should work
+    mut sum: int = add(3, 7);
+    test::assert(sum == 10, "");
+
+    // Calling void function as a statement - should work
+    greet();
+
+    // int-to-double widening inside arithmetic is fine
+    mut widened: double = toDouble(100);
+    test::assert(widened == 100.0, "");
+
+    return 0;
+}

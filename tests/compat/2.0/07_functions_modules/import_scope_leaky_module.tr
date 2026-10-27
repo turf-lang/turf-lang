@@ -1,0 +1,8 @@
+// Companion for fail_import_scope_in_module_body.tr (LEC-008): a MODULE (not the
+// main file) is held to the rule too. It imports the outer module, which loads
+// the inner one, but it never imports the inner module itself.
+import import_scope_outer_module;
+
+pub fn leaky(): int {
+    return import_scope_inner_module::inner_value();
+}

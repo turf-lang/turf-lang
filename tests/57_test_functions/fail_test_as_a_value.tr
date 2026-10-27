@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E173
+// EXPECT-DIAG: 'checks_add' is a test
+// TDP-2-006: a test has no value either: a build does not contain it.
+@test
+fn checks_add(): void {
+    io::printline(1 + 1);
+}
+
+fn main(): int {
+    immut f: fn(): void = checks_add;
+    f();
+    return 0;
+}

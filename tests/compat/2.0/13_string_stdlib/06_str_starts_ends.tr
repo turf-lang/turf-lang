@@ -1,0 +1,26 @@
+// tests/13_string_stdlib/06_str_starts_ends.tr
+// Tests strings::starts_with and strings::ends_with, including edge cases where
+// prefix/suffix equals the full string.
+
+import io;
+import strings;
+
+import test;
+fn main(): int {
+    test::assert(strings::starts_with("hello world", "hello"),         "starts_with: hello");
+    test::assert(strings::starts_with("hello world", "h"),             "starts_with: h");
+    test::assert(strings::starts_with("abc", "abc"),                   "starts_with: full string");
+
+    test::assert(strings::starts_with("hello world", "world") == false, "starts_with: world is not prefix");
+    test::assert(strings::starts_with("abc", "abcd") == false,          "starts_with: longer prefix");
+
+    test::assert(strings::ends_with("hello world", "world"),            "ends_with: world");
+    test::assert(strings::ends_with("hello world", "d"),                "ends_with: d");
+    test::assert(strings::ends_with("abc", "abc"),                      "ends_with: full string");
+
+    test::assert(strings::ends_with("hello world", "hello") == false,   "ends_with: hello is not suffix");
+    test::assert(strings::ends_with("abc", "xabc") == false,            "ends_with: longer suffix");
+
+    io::printline("06 PASS: strings::starts_with / strings::ends_with");
+    return 0;
+}

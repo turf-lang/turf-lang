@@ -1,0 +1,11 @@
+import test;
+
+fn main(): int {
+    immut numbers: int[5] = [10, 20, 30, 40, 50];
+    mut sum: int = 0;
+    for value in numbers {
+        sum = sum + value;
+    }
+    test::assert(sum == 150, "");
+    return 0;
+}

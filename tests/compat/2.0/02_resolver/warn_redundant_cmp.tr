@@ -1,0 +1,10 @@
+fn main(): int {
+    mut x: int = 42;
+
+    // Testing redundant comparison warning
+    if (x == x) {
+        x = 0;
+    }
+
+    return 0;
+}

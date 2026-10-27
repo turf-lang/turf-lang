@@ -1,0 +1,1 @@
+39/06 PASS: heap()-allocated dynamic binary tree survives collection, in-order sorted

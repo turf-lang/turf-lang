@@ -15,7 +15,14 @@
 //   - `fail_*.tr` containing `RUNTIME_ABORT_EXPECTED` must compile, then abort;
 //   - `// EXPECT-DIAG`, `// EXPECT-NO-DIAG`, `// EXPECT-RUNTIME` and
 //     `// EXPECT-EXIT` markers pin *why* (TestExpectations.h);
-//   - `*_module.tr` files are companions to be imported, never run.
+//   - `*_module.tr` files are companions to be imported, never run;
+//   - a file that declares `@test` functions (TDP-2-006) is built once with
+//     `--test-build`, and each test is judged by its outcome
+//     (src/frontend/TestAnnotation.h): a compile_error test by the errors
+//     its compile reported inside it, any other by how its own process
+//     ended. A tests/ file that also has a `main` runs as a plain file too.
+//     With a package graph, the root package's src/ files that declare tests
+//     run as well.
 // Every test runs with its own directory as the working directory.
 
 #include <string>

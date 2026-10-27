@@ -1,0 +1,30 @@
+TURF E164 -- LOOP VARIABLE NEVER CHANGES (WARNING):
+
+CAUSE:
+  In `for i in a..b step <expr>`, neither the step nor the body changes `i`
+  (by assignment, `+=`, `++`, ...), so the loop either never runs or never
+  ends. This is a WARNING: compilation still succeeds.
+
+INCORRECT:
+    mut count: int = 0;
+    mut j: int = 0;
+    for i in 0..10 step j += 10 {   // WARNING: step changes j, not i
+        count += 1;
+        if count > 3 {
+            break;
+        }
+    }
+
+CORRECT (the step moves the loop variable):
+    mut count: int = 0;
+    for i in 0..10 step i += 10 {
+        count += 1;
+    }
+    printline(count to string);
+
+FIX:
+  Make `step` change the loop variable (`step i += 1`), or use `while` when a
+  different variable decides when to stop.
+
+RELATED: E162 (a range that moves away from its end), E157 (`while true`
+  with no exit).

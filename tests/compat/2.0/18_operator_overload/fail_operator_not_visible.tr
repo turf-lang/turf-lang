@@ -1,0 +1,15 @@
+// EXPECT-DIAG: E057
+// EXPECT-DIAG: cannot apply '+' to 'Vec2' and 'Vec2'
+// Negative test: using `+` on a struct with no operator overload declared
+// anywhere must be a clean type error, not an ICE.
+struct Vec2 {
+    x: int,
+    y: int
+}
+
+fn main(): int {
+    mut a: Vec2 = Vec2::default();
+    mut b: Vec2 = Vec2::default();
+    mut r: Vec2 = a + b;
+    return 0;
+}

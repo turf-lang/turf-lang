@@ -1,0 +1,8 @@
+// EXPECT-DIAG: E066
+// EXPECT-DIAG: but this one has type 'string'
+fn main(): int {
+    for i in 0.."x" {
+        printline(i);
+    }
+    return 0;
+}

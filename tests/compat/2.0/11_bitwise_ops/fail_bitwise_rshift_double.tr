@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E057
+// EXPECT-DIAG: Bitwise operator requires integer operands, but left operand is 'double'
+// FAIL TEST: Bitwise right shift with double type
+// 1.5 >> 2 should emit a TypeError
+
+fn main(): int {
+    mut a: double = 1.5;
+    mut b: int = 2;
+    mut c: int = a >> b;  // TypeError: bitwise operator requires integer operands
+
+    return 0;
+}

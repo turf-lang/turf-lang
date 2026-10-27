@@ -157,27 +157,68 @@ returning it from a function that returns one. With no function type to read
 (`mut g = identity;`) it is E137. See [First-class
 functions](functions_and_modules.md#2-first-class-functions).
 
-**There is no syntax for writing type arguments at a use.** `<` after a name in
-an expression is always the less-than operator, so `identity<int>(3)` and
-`Box<int>::default()` do not parse (E110). Where a type argument cannot be
-inferred, put the type on a declaration instead:
+**Type arguments can be written at a use, after `::`.** `identity::<int>(3)`
+calls `identity` with `T` as `int`, and `identity::<int>` without a call is a
+function value instantiated at `int`, so `immut g = identity::<int>;` needs no
+declared type. The arguments must then fit the written types (with the usual
+implicit widening: `identity::<double>(1)` is `1.0`); nothing is inferred over
+them. A [size parameter](#size-parameters) is not written: `fill::<double>(1)`
+writes `T` and takes `N` from the target, as without `::<...>`. The `::` is what
+makes this readable: `identity<int>(3)` is two comparisons, `identity < int`
+and `... > (3)`, so it does not parse (E110).
 
-<!-- doc-example: fails E110 -->
 ```turflang
+import test;
+
 fn<T> identity(x: T): T {
     return x;
 }
 
+fn<A, B> second(a: A, b: B): B {
+    return b;
+}
+
 fn main(): int {
-    immut r: int = identity<int>(3);
+    test::assert(identity::<int>(3) == 3, "a call");
+    test::assert(second::<int, string>(1, "b") == "b", "two type arguments");
+    immut g = identity::<string>;
+    test::assert(g("hi") == "hi", "a function value");
     return 0;
 }
 ```
 
-**A generic struct takes its type arguments from the type it is stored into.**
-`Box::default()` and `Box::new(...)` have no type arguments of their own; the
-declared type of the variable, parameter, field, return type or element they
-are assigned to supplies them:
+The wrong number of type arguments, type arguments on a function that is not
+generic, and type arguments on a method's call (`l.push::<int>(1)`; a method of
+a generic struct takes them from its receiver) are each E148.
+
+**A generic function is callable through UFCS**, like any free function
+(`x.f()` is `f(x)`): its type parameters come from the receiver and the
+arguments, or are written after the name.
+
+```turflang
+fn<T> pick(a: T, b: T): T {
+    return b;
+}
+
+fn main(): int {
+    mut n: int = 3;
+    printline(n.pick(4));           // 4: T is int, from the receiver
+    printline(n.pick::<int>(5));    // 5: T written
+    return 0;
+}
+```
+
+The receiver still matches exactly once `T` is known: `n.pick::<string>("s")`
+is E056, since the `int` receiver is not a `string`. The receiver counts as
+argument 1, so `n.pick("s")` is E056 "Conflicting type arguments", as
+`pick(n, "s")` is.
+
+**A generic struct takes its type arguments from the type it is stored into,
+or from `Name<Args>::` written where it is built.** The first way is retired in
+3.0 (roadmap B-17): from then on the type arguments are written where the value
+is built, and `turf migrate 3.0` writes them in. `Box::default()` and
+`Box::new(...)` read them from the declared type of the variable, parameter,
+field, return type or element they are assigned to:
 
 ```turflang
 import list::List;
@@ -239,7 +280,38 @@ fn main(): int {
 }
 ```
 
-Write `mut l: List<int> = List::default();` instead.
+Write the type on the declaration, `mut l: List<int> = List::default();`, or
+where the value is built, `mut l = List<int>::default();`. The second spelling
+is the type-position spelling followed by `::` and the member, and works for
+`::default()` and `::new(...)` of any generic struct, qualified or not
+(`list::List<int>::default()`), and wherever an expression can appear. It
+builds exactly what the first one does. After a name, `<` begins type
+arguments only when the list closes with `>` immediately followed by `::`;
+anywhere else it is the less-than operator, so `f(a < b, c > d)` still compares.
+
+```turflang
+import list::List;
+import map::Map;
+import test;
+
+struct Box<T> {
+    val: T
+}
+
+fn<T> Box.new(v: T): void {
+    self.val = v;
+}
+
+fn main(): int {
+    mut l = List<int>::default();
+    l.push(3);
+    mut b = Box<string>::new("s");
+    mut m = Map<string, List<int>>::default();
+    m.put("k", List<int>::default());
+    test::assert(l[0] == 3 && b.val == "s" && m.length() == 1, "built with written types");
+    return 0;
+}
+```
 
 Generic types nest freely, with or without a space between the closing `>`s:
 
@@ -352,9 +424,9 @@ parameter appears in a parameter does not apply to it. It may appear only in
 the return type, since the target supplies it. It must appear in some array
 dimension of the parameters or the return type, or no call could fix it.
 
-**When nothing gives `N`, it is E129.** There is no syntax for writing it at
-the call (`fill<int, 4>(7)` is E110, as for type arguments). Put the length on
-a declaration, an assignment, a parameter or a return type instead:
+**When nothing gives `N`, it is E129.** A size is not written at the call:
+`fill::<int>(7)` writes `T` only, and `fill<int, 4>(7)` is E110. Put the length
+on a declaration, an assignment, a parameter or a return type instead:
 
 <!-- doc-example: fails E129 -->
 ```turflang

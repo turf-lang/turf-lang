@@ -1,0 +1,13 @@
+// A built-in type after `to` is never generic, so `<` after it is the
+// comparison: `s to int < 10` needs no parentheses.
+import test;
+
+fn main(): int {
+    immut s: string = "7";
+    immut d: double = 2.9;
+    test::assert(s to int < 10, "string to int, then <");
+    test::assert(d to int <= 2, "double to int, then <=");
+    test::assert(!(s to double < 1.0), "to double, then <");
+    test::assert((d to int < 3) && (s to int > 5), "each side of && needs its own parentheses: `to` binds loosest");
+    return 0;
+}

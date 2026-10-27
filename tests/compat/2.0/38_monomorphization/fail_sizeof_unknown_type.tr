@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E042
+// EXPECT-DIAG: Unknown type 'Tin'
+// Regression test (turf-fuzz): `sizeof` of a name that is no type was never
+// checked, reached Codegen as an unsized type and stopped there with an
+// internal error (E121). It is an unknown type, as for a variable's type.
+fn<T> sizeOfT(x: T): int {
+    return sizeof(Tin);
+}
+
+fn main(): int {
+    return sizeOfT(1.5);
+}

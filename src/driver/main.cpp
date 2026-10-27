@@ -19,15 +19,20 @@
 #include "sema/Builtins.h"
 #include "codegen/BundledLink.h"
 #include "codegen/Codegen.h"
+#include "frontend/TestRegistry.h"
 #include "diagnostics/Colors.h"
 #include "diagnostics/ErrorCategory.h"
 #include "diagnostics/ErrorCodes.h"
+#include "diagnostics/DiagnosticsJson.h" // DX-2: --diagnostics=json
 #include "tooling/Formatter.h"
+#include "diagnostics/LintLevels.h"
 #include "frontend/Lexer.h"
 #include "analysis/Lint.h"
 #include "tooling/MigratePub.h"
+#include "tooling/UnsafeReport.h"
 #include "frontend/Parser.h"
 #include "tooling/PackageGraph.h"
+#include "llvm/Support/JSON.h" // IF-1: --version --json
 #include "analysis/CFG.h"
 #include "sema/Monomorphize.h" // TYPE-002 (S11b): --dump-instantiations
 #include "resolve/Resolver.h"
@@ -56,6 +61,7 @@
 #include "llvm/Analysis/LoopAnalysisManager.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/Passes/PassBuilder.h"
+#include <algorithm>
 #include <cctype>
 #include <cerrno>
 #include <cstdlib>
@@ -132,8 +138,34 @@ using namespace llvm;
 static constexpr int TurfcInterfaceMajor = 1;
 // 1.6 adds `--emit-obj` (write the object, never link); a driver that wants
 // it asks for 1.6, everything else still needs 1.1. 1.7 adds `--test
-// --only <path>` (run some of the tests); `turf test <path>` asks for it.
-static constexpr int TurfcInterfaceMinor = 7;
+// --only <path>` (run some of the tests); `turf test <path>` asks for it. 1.8
+// (V-1) adds the lint levels, `--allow|--warn|--deny <code>` and `--lint-set
+// 2.N`, also accepted by `--test`; `turf` asks for it only when `turf.toml`
+// has a [lints] table. 1.9 (DX-2) adds `--diagnostics=json|text`; a tool
+// that reads diagnostics as JSON asks for it. 1.10 (IF-1) adds `--version
+// --json`, the manifest a tool reads instead of these lines. 1.11 (TDP-2-006)
+// adds `@test` functions: `--test` runs them (in the tests directory, and in
+// the root package's src/ when given a package graph) through `--test-build
+// <manifest>`, which only the runner passes. 1.12 (LB-2) adds
+// `--unsafe-report`, each package's unsafe surface as JSON; `turf audit` and
+// `turf graph --unsafe` ask for it.
+static constexpr int TurfcInterfaceMinor = 12;
+
+/// IF-1: the name of each addition to the driver interface, in the order of
+/// the history above, with the minor that added it. `turfc --version --json`
+/// lists the names, so a tool can ask for a feature instead of a number.
+struct InterfaceFeature {
+  const char *Name;
+  int SinceMinor;
+};
+static constexpr InterfaceFeature InterfaceFeatures[] = {
+    {"package-graph", 1},         {"exit-status-2", 2},
+    {"test", 3},                  {"format-check", 4},
+    {"format-skip-unlexable", 5}, {"emit-obj", 6},
+    {"test-only", 7},             {"lint-levels", 8},
+    {"diagnostics-json", 9},      {"version-json", 10},
+    {"test-functions", 11},       {"unsafe-report", 12},
+};
 
 // The exit statuses (FREEZE.md 6.21, F-CLI-1, REL-001). The split exists so a script
 // or an editor can tell "your program has a mistake" (1: the compiler ran and
@@ -162,6 +194,7 @@ struct CompilerOptions {
   bool AIEnabled = false;             // --smart: enable SLM AI suggestions
   std::string SmartFixOutPath;        // --smart-write-fix=<path>: write the program with its shown fixes applied here: every compiler fix (TDP-2-001), or the --smart model's validated one
   bool AllowUnsafeModules = false;    // --allow-unsafe-modules: LANG-002, honor `unsafe module;` outside the install root
+  bool DiagnosticsJson = false;       // --diagnostics=json: DX-2, one JSON object per diagnostic
   bool ShowStdlibWarnings = false;    // --stdlib-warnings: OVH-012, print warnings anchored inside lib/std instead of hiding them
   bool DumpAST = false;               // --dump-ast: print AST via ASTPrinter
   bool RunResolver = false;           // --resolve: run Resolver pass (shadow mode, Issue #4)
@@ -170,6 +203,7 @@ struct CompilerOptions {
   bool Check = false;                 // --check: LEC-001 -- run every diagnostic, write no output file
   bool CheckAsModule = false;         // --module (with --check): the file is an imported module, so no `main` is required
   std::string PackageGraphFile;       // --package-graph <file>: LEC-001 stage 4, a package build (PackageGraph.h)
+  std::string TestManifest;           // --test-build <file>: TDP-2-006, build the file's @test functions into a test program, and write what each expects here (TestRegistry.h)
   bool RunTypeChecker = false;        // --typecheck: run TypeChecker pass (shadow mode, Issue #7)
   bool DumpTypechecked = false;       // --dump-typechecked: run TypeChecker then print type-annotated AST
   bool DumpModules = false;           // --dump-modules: print full module-system introspection
@@ -178,6 +212,7 @@ struct CompilerOptions {
   bool FormatWrite = false;           // --write (with --format or --migrate=pub): rewrite the file(s) in place instead
   bool FormatSkipUnlexable = false;   // --skip-unlexable (with --format --write|--check): a file the lexer rejects is reported as skipped, not as a failure
   bool MigratePub = false;            // --migrate=pub: LEC-002 -- add `pub` to every top-level declaration and struct field of the given files
+  bool UnsafeReport = false;          // --unsafe-report: LB-2 -- count each package's unsafe surface, as JSON
   std::vector<std::string> PositionalFiles; // every non-option argument, in order (--migrate=pub takes several)
   std::vector<std::string> LinkLibs;  // --link <name>: extra libraries to pass to the linker as -l<name>
   // OPT-001: `-O2` is the FROZEN default (FREEZE.md §6.10/§17.2) so a user
@@ -374,6 +409,57 @@ static int runMigratePub(const std::vector<std::string> &Files, bool Write) {
   return Status;
 }
 
+/// `turfc --unsafe-report --package-graph <file>` (LB-2): every package's
+/// unsafe surface and the stdlib's, as one line of JSON (UnsafeReport.h,
+/// docs/reference/schemas/unsafe-report.schema.json); `turf audit` and `turf
+/// graph --unsafe` read it. `turfc --unsafe-report <file.tr>...` reports the
+/// files given, outside any project. Compiles nothing. Exit status is 1 when
+/// the graph is not valid or a file cannot be read; a file that does not lex
+/// is reported (its "error"), not a failure.
+static int runUnsafeReport(const std::string &GraphFile,
+                           const std::vector<std::string> &Files) {
+  if (GraphFile.empty() == Files.empty()) {
+    std::cerr << "Usage: turfc --unsafe-report --package-graph <file>\n"
+                 "       turfc --unsafe-report <file.tr>...\n"
+                 "  Counts `unsafe module;` files, `unsafe { }` blocks, `extern fn`s and\n"
+                 "  `extern from` libraries: per package and for the standard library with\n"
+                 "  a package graph, per file without one. Prints JSON; compiles nothing.\n";
+    return ExitUsage;
+  }
+  if (!GraphFile.empty()) {
+    std::string Error;
+    auto Graph = LoadPackageGraph(GraphFile, Error);
+    if (!Graph) {
+      std::cerr << "Error: " << Error << "\n";
+      return ExitError;
+    }
+    llvm::SmallString<256> Stdlib(TurfInstallRoot());
+    llvm::sys::path::append(Stdlib, "lib", "std");
+    turf::unsafe_report::Report R;
+    if (!turf::unsafe_report::buildReport(*Graph, Stdlib.str().str(), R, Error)) {
+      std::cerr << "Error: " << Error << "\n";
+      return ExitError;
+    }
+    std::cout << turf::unsafe_report::reportJson(R) << "\n";
+    return ExitOk;
+  }
+  std::vector<turf::unsafe_report::FileSurface> Surfaces;
+  for (const auto &Path : Files) {
+    std::ifstream In(Path, std::ios::binary);
+    if (!In) {
+      std::cerr << "Error: Could not open file " << Path << "\n";
+      return ExitError;
+    }
+    std::ostringstream Text;
+    Text << In.rdbuf();
+    auto F = turf::unsafe_report::scanSource(Text.str());
+    F.Path = Path;
+    Surfaces.push_back(std::move(F));
+  }
+  std::cout << turf::unsafe_report::filesJson(Surfaces) << "\n";
+  return ExitOk;
+}
+
 static void handleExplainFlagIfPresent(int argc, char **argv) {
   for (int i = 1; i < argc; ++i) {
     if (std::string(argv[i]) != "--explain")
@@ -427,19 +513,22 @@ static void handleExplainFlagIfPresent(int argc, char **argv) {
 static const char *turfcUsage() {
   return "Usage: turfc <filename.tr> [-o output] [--emit-llvm | --emit-obj] [--smart]\n"
          "         [--smart-write-fix=<path>] [--link <libname>]\n"
-         "         [--allow-unsafe-modules] [--stdlib-warnings]\n"
+         "         [--allow-unsafe-modules] [--stdlib-warnings] [--diagnostics=json|text]\n"
+         "         [--allow <code>] [--warn <code>] [--deny <code>] [--lint-set <2.N>]\n"
          "         [-O0|-O1|-O2|-O3|-Os] [-g] [--target=<triple>] [-mcpu=<cpu>]\n"
-         "         [--check [--module]] [--package-graph <file>]\n"
+         "         [--check [--module]] [--package-graph <file>] [--test-build <manifest>]\n"
          "         [--resolve] [--typecheck] [--dump-ast] [--dump-resolver-symbols]\n"
          "         [--dump-resolved] [--dump-typechecked] [--dump-modules]\n"
          "         [--dump-instantiations]\n"
          "       turfc --format [--write | --check [--skip-unlexable]] <filename.tr>...\n"
          "       turfc --migrate=pub [--write] <module.tr>...\n"
+         "       turfc --unsafe-report (--package-graph <file> | <file.tr>...)\n"
          "       turfc --test [<tests-dir>] [--package-graph <file>] [--exclude <path>]\n"
          "         [--only <path>]\n"
          "         [-O0|-O1|-O2|-O3|-Os] [-g] [--link <libname>] [--jobs <n>]\n"
          "         [--timeout <seconds>] [--diag-register <file>]\n"
          "         [--allow-unsafe-modules] [--stdlib-warnings]\n"
+         "         [--allow <code>] [--warn <code>] [--deny <code>] [--lint-set <2.N>]\n"
          "       turfc --explain E0NN\n"
          "       turfc --version\n"
          "       turfc help\n"
@@ -463,8 +552,47 @@ static const char *const KnownOptions[] = {
     "--target=",          "--explain",      "-mcpu=",
     "--test",             "--jobs",         "--timeout",
     "--diag-register",    "--exclude",      "--only",
-    "--skip-unlexable",
+    "--skip-unlexable", "--allow",      "--warn",         "--deny",
+    "--lint-set",         "--diagnostics=", "--test-build",
+    "--unsafe-report",
 };
+
+/// `--allow|--warn|--deny <code>` and `--lint-set <2.N>` (V-1, LintLevels.h):
+/// the lint levels. Both a compile and `--test` take them (the runner hands
+/// them on to every test's compile), so the check lives here once. A code the
+/// compiler does not have, an error's code given `--allow`/`--warn`, or a lint
+/// set that does not exist is a usage error: a level that silently did nothing
+/// would let a typo'd `--deny E16` pass a build it was meant to fail.
+static bool isLintFlag(const std::string &Arg) {
+  return Arg == "--allow" || Arg == "--warn" || Arg == "--deny" ||
+         Arg == "--lint-set";
+}
+
+/// This compiler's own 2.x minor, from the root VERSION ("2.1.1" is 1).
+static int compilerMinor() {
+  const std::string V = TURF_VERSION;
+  const size_t Dot = V.find('.');
+  return Dot == std::string::npos ? 0 : std::atoi(V.c_str() + Dot + 1);
+}
+
+static void applyLintFlag(const std::string &Flag, const std::string &Value) {
+  std::string Err;
+  bool Ok;
+  if (Flag == "--lint-set")
+    Ok = LintLevels::setLintSet(Value, compilerMinor(), Err);
+  else
+    Ok = LintLevels::setLevel(
+        Value,
+        Flag == "--allow"  ? LintLevels::Level::Allow
+        : Flag == "--warn" ? LintLevels::Level::Warn
+                           : LintLevels::Level::Deny,
+        Err);
+  if (!Ok) {
+    std::cerr << "Error: " << Flag << " " << Value << ": " << Err << ".\n"
+              << "Run `turfc help` for the options.\n";
+    std::exit(ExitUsage);
+  }
+}
 
 /// An unknown option is a usage error, never something to ignore: a typo'd
 /// `--chek` that was silently dropped would compile and link a program the
@@ -517,6 +645,14 @@ static CompilerOptions parseArgs(int argc, char **argv) {
       opts.AllowUnsafeModules = true;
     } else if (arg == "--stdlib-warnings") {
       opts.ShowStdlibWarnings = true;
+    } else if (arg.rfind("--diagnostics=", 0) == 0) {
+      const std::string Form = arg.substr(std::string("--diagnostics=").size());
+      if (Form != "json" && Form != "text") {
+        std::cerr << "Error: '--diagnostics=" << Form
+                  << "' is not a diagnostics form (expected json or text).\n";
+        std::exit(ExitUsage);
+      }
+      opts.DiagnosticsJson = Form == "json";
     } else if (arg == "--check") {
       opts.Check = true;
     } else if (arg == "--module") {
@@ -579,12 +715,19 @@ static CompilerOptions parseArgs(int argc, char **argv) {
         std::exit(ExitUsage);
       }
       opts.MigratePub = true;
+    } else if (arg == "--unsafe-report") {
+      opts.UnsafeReport = true;
     } else if (arg == "-o" && i + 1 < argc) {
       opts.OutputName = argv[++i];
     } else if (arg == "--package-graph" && i + 1 < argc) {
       opts.PackageGraphFile = argv[++i];
+    } else if (arg == "--test-build" && i + 1 < argc) {
+      opts.TestManifest = argv[++i];
     } else if (arg == "--link" && i + 1 < argc) {
       opts.LinkLibs.push_back(argv[++i]);
+    } else if (isLintFlag(arg) && i + 1 < argc) {
+      applyLintFlag(arg, argv[i + 1]);
+      ++i;
     } else if (arg.rfind("--target=", 0) == 0) {
       opts.TargetTriple = arg.substr(std::string("--target=").size());
     } else if (arg.rfind("-mcpu=", 0) == 0) {
@@ -607,7 +750,8 @@ static CompilerOptions parseArgs(int argc, char **argv) {
                   << "' (expected one of -O0, -O1, -O2, -O3, -Os).\n";
         std::exit(ExitUsage);
       }
-    } else if (arg == "-o" || arg == "--package-graph" || arg == "--link") {
+    } else if (arg == "-o" || arg == "--package-graph" || arg == "--link" ||
+               arg == "--test-build" || isLintFlag(arg)) {
       // Reaching here means the value-taking branches above did not match, i.e.
       // the option is the last argument. "Unknown option: -o" would be a lie.
       std::cerr << "Error: option '" << arg << "' needs a value.\n"
@@ -621,10 +765,10 @@ static CompilerOptions parseArgs(int argc, char **argv) {
     }
   }
 
-  // --migrate=pub takes any number of files and never compiles anything, so
-  // it skips the single-input-file checks below (runMigratePub() reports its
-  // own usage error).
-  if (opts.MigratePub)
+  // --migrate=pub and --unsafe-report take any number of files and never
+  // compile anything, so they skip the single-input-file checks below (each
+  // reports its own usage error).
+  if (opts.MigratePub || opts.UnsafeReport)
     return opts;
 
   // A module has no `main`, so it can be checked but never linked. Silently
@@ -633,6 +777,12 @@ static CompilerOptions parseArgs(int argc, char **argv) {
   if (opts.CheckAsModule && !opts.Check) {
     std::cerr << "Error: --module only applies with --check (a module has no "
                  "entry point, so it cannot be linked).\n";
+    std::exit(ExitUsage);
+  }
+
+  if (!opts.TestManifest.empty() && opts.Check) {
+    std::cerr << "Error: --test-build builds a test program; it cannot be combined "
+                 "with --check.\n";
     std::exit(ExitUsage);
   }
 
@@ -821,6 +971,11 @@ static int runTestMode(int argc, char **argv) {
     } else if (Arg == "--link") {
       T.CompileFlags.push_back(Arg);
       T.CompileFlags.push_back(NeedValue(I, Arg));
+    } else if (isLintFlag(Arg)) {
+      const std::string V = NeedValue(I, Arg);
+      applyLintFlag(Arg, V); // a bad one stops here, not in every test's compile
+      T.CompileFlags.push_back(Arg);
+      T.CompileFlags.push_back(V);
     } else if (Arg == "-g" || Arg == "--allow-unsafe-modules" || Arg == "--stdlib-warnings") {
       T.CompileFlags.push_back(Arg);
     } else if (Arg == "-O0" || Arg == "-O1" || Arg == "-O2" || Arg == "-O3" || Arg == "-Os") {
@@ -962,7 +1117,14 @@ static void runOptimizationPipeline(Module &M, OptLevelKind Level,
   CGSCCAnalysisManager CGAM;
   ModuleAnalysisManager MAM;
 
-  PassBuilder PB(TM);
+  // LLVM's default PipelineTuningOptions leave the SLP vectorizer off; clang
+  // turns it on at -O2 and -O3, and so does Turf. It is what packs the
+  // neighbouring fields of a struct into one vector operation
+  // (bench/particles.tr with math::wrapping_add: 24 ms scalar, 18 ms with it,
+  // clang -O3's time). -O1 and -Os keep it off, as clang does.
+  PipelineTuningOptions PTO;
+  PTO.SLPVectorization = Level == OptLevelKind::O2 || Level == OptLevelKind::O3;
+  PassBuilder PB(TM, PTO);
   PB.registerModuleAnalyses(MAM);
   PB.registerCGSCCAnalyses(CGAM);
   PB.registerFunctionAnalyses(FAM);
@@ -1463,6 +1625,48 @@ static int linkObject(const std::string &ObjFile,
  * @param argv An array of command-line argument strings.
  * @return int Exit code (0 on success, non-zero on compilation failure).
  */
+/// IF-1: `turfc --version --json`, the interface manifest. One JSON object on
+/// stdout: what `turf`, `turf-lsp` and `turf-fuzz` check before relying on a
+/// flag or a format, instead of assuming a compiler revision. Schema in
+/// docs/reference/schemas/version.schema.json; keys are only ever added.
+static int printVersionManifest() {
+  std::string Root = TurfInstallRoot();
+  llvm::SmallString<256> RealRoot;
+  if (!llvm::sys::fs::real_path(Root, RealRoot))
+    Root = RealRoot.str().str();
+  const std::string RtPlatform = turf::BundledRuntimePlatform();
+  const bool BundledRuntime =
+      !RtPlatform.empty() &&
+      turf::BundledLinkAvailable(Root + "/lib/rt/" + RtPlatform);
+
+  llvm::json::Array Features;
+  for (const auto &F : InterfaceFeatures)
+    if (F.SinceMinor <= TurfcInterfaceMinor)
+      Features.push_back(F.Name);
+  // What this build has, beside what the interface promises.
+  if (SLM::SLMEngine::builtIn())
+    Features.push_back("smart");
+  if (!RtPlatform.empty())
+    Features.push_back("embedded-lld");
+  if (BundledRuntime)
+    Features.push_back("bundled-runtime");
+
+  llvm::json::Object Manifest{
+      {"manifest", 1},
+      {"turfc", TURF_VERSION},
+      {"interface", llvm::json::Object{{"major", TurfcInterfaceMajor},
+                                       {"minor", TurfcInterfaceMinor}}},
+      {"schemas", llvm::json::Object{{"diagnostics", DiagnosticsJson::SchemaVersion},
+                                     {"package_graph", PackageGraphFormat}}},
+      {"features", std::move(Features)},
+      {"llvm", LLVM_VERSION_STRING},
+      {"runtime", RuntimeAbiSymbol},
+      {"root", Root}};
+  llvm::outs() << llvm::json::Value(std::move(Manifest)) << "\n";
+  llvm::outs().flush();
+  return ExitOk;
+}
+
 static int runCompilerMain(int argc, char **argv) {
   // The `turf` front end runs `turfc --version` before EVERY compile to check
   // it speaks this compiler's driver interface (FREEZE.md 6.16, F-PKG-1), so
@@ -1474,6 +1678,10 @@ static int runCompilerMain(int argc, char **argv) {
   CompilerExecutablePath = llvm::sys::fs::getMainExecutable(argv[0], (void *)(intptr_t)runCompilerMain);
 
   for (int i = 1; i < argc; ++i) {
+    if (std::string(argv[i]) == "--version" &&
+        std::any_of(argv + 1, argv + argc,
+                    [](const char *A) { return std::string(A) == "--json"; }))
+      return printVersionManifest();
     if (std::string(argv[i]) == "--version") {
       // REL-001: what someone pastes into a bug report. `llvm` is the LLVM
       // this binary was built against (a mismatch with the machine's own LLVM
@@ -1545,6 +1753,9 @@ static int runCompilerMain(int argc, char **argv) {
   // runs before any compiler state is initialized.
   if (opts.MigratePub)
     return runMigratePub(opts.PositionalFiles, opts.FormatWrite);
+  // LB-2: reads the files and the graph, compiles nothing.
+  if (opts.UnsafeReport)
+    return runUnsafeReport(opts.PackageGraphFile, opts.PositionalFiles);
 
   // Set the global AI flag so DiagnosticEngine knows whether to invoke the SLM.
   g_AIEnabled = opts.AIEnabled;
@@ -1560,8 +1771,12 @@ static int runCompilerMain(int argc, char **argv) {
   // dependency.
   if (!opts.PackageGraphFile.empty()) {
     std::string GraphError;
+    // A test build's entry may be any file of the package: its tests are the
+    // program, wherever they are written (TDP-2-006).
     auto Graph = LoadPackageGraph(opts.PackageGraphFile, opts.InputFile,
-                                  /*EntryIsModule=*/opts.Check && opts.CheckAsModule, GraphError);
+                                  /*EntryIsModule=*/(opts.Check && opts.CheckAsModule) ||
+                                      !opts.TestManifest.empty(),
+                                  GraphError);
     if (!Graph) {
       std::cerr << "Error: " << GraphError << "\n";
       return 1;
@@ -1578,6 +1793,11 @@ static int runCompilerMain(int argc, char **argv) {
   // so it's fine to set this any time before that runs -- unlike
   // g_AllowUnsafeModules just above, nothing during parsing/resolving reads it.
   g_ShowStdlibWarnings = opts.ShowStdlibWarnings;
+  DiagnosticsJson::Enabled = opts.DiagnosticsJson;
+  // TDP-2-006: before anything is parsed, since the Parser registers each
+  // test and every pass after it asks the registry about errors.
+  TestRegistry::setMode(opts.TestManifest.empty() ? TestRegistry::Mode::Build
+                                                  : TestRegistry::Mode::TestBuild);
 
   // TOOL-001: must be set before InitializeModule() runs (below) -- that's
   // the one call site that decides whether DBuilder/DebugCU get built at
@@ -1591,7 +1811,13 @@ static int runCompilerMain(int argc, char **argv) {
   if (opts.Format)
     return runFormat(opts.PositionalFiles, opts.FormatWrite, opts.Check, opts.FormatSkipUnlexable);
 
-  if (!OpenSourceFile(opts.InputFile)) {
+  // The input file's lexer and parser, current for the rest of the compile:
+  // the pre-pass and the main pass each reopen the file from the top, and an
+  // import parses with a ParserState and LexerState of its own (ParseFile()).
+  LexerState MainLexer;
+  ParserState MainParser(MainLexer);
+  ParserScope MainParserScope(MainParser);
+  if (!MainLexer.open(opts.InputFile)) {
     std::cerr << "Error: Could not open file " << opts.InputFile << "\n";
     return 1;
   }
@@ -1641,13 +1867,11 @@ static int runCompilerMain(int argc, char **argv) {
   // them. Every module a program uses must now be imported explicitly by
   // that program itself.
 
-  // Swap the global SourceFile for the pre-pass stream
-  CloseSourceFile();
-      OpenSourceFile(opts.InputFile);
-      CurLoc = {1, 0};
+  // The pre-pass reads the file from the top.
+      MainLexer.open(opts.InputFile);
 
       // Reset the lexer token stream
-      CurTok = 0;
+      Parser().CurTok = 0;
       getNextToken();
 
       // ── Pre-pass sub-pass 1: Parse ALL top-level declarations ─────────────
@@ -1678,7 +1902,7 @@ static int runCompilerMain(int argc, char **argv) {
       // Deliberately NOT passed to RecordParsedTopLevelAST() -- that tracks
       // the USER's own top-level declarations for sandbox/SLM diffing, and
       // these aren't part of the user's source.
-      for (auto &PreludeAST : ParsePreludeImports(CurLoc))
+      for (auto &PreludeAST : ParsePreludeImports(Lex().CurLoc))
         PrePassASTs.push_back(std::move(PreludeAST));
 
       // OVH-011: if a transitive import inside the prelude just injected
@@ -1691,20 +1915,25 @@ static int runCompilerMain(int argc, char **argv) {
       // ClaimEntryFileImportSlot()'s own doc comment (ParserModule.cpp) for
       // the full rationale and why this call must sit exactly here (after
       // prelude injection, before this loop).
+      // Set when sub-pass 1 steps over a token that starts no declaration
+      // (`immut K = 3;`, `function f() {}` at the top level). Only the main
+      // pass reports those, so a pre-pass resolver failure must not end the
+      // compile before the main pass has parsed them (issue #321).
+      bool PrePassSkippedTopLevel = false;
       if (!ClaimEntryFileImportSlot(SourceFilename)) {
-      while (CurTok != TOK_EOF) {
-        if (CurTok == ';') { getNextToken(); continue; }
-        if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
-            CurTok == TOK_MACHINE ||
-            CurTok == TOK_AT || CurTok == TOK_EXTERN || CurTok == TOK_EXPORT ||
-            CurTok == TOK_OPERATOR || CurTok == TOK_ERROR || CurTok == TOK_UNSAFE ||
-            CurTok == TOK_PUB) {
+      while (Parser().CurTok != TOK_EOF) {
+        if (Parser().CurTok == ';') { getNextToken(); continue; }
+        if (Parser().CurTok == TOK_FN || Parser().CurTok == TOK_STRUCT || Parser().CurTok == TOK_ENUM ||
+            Parser().CurTok == TOK_MACHINE ||
+            Parser().CurTok == TOK_AT || Parser().CurTok == TOK_EXTERN || Parser().CurTok == TOK_EXPORT ||
+            Parser().CurTok == TOK_OPERATOR || Parser().CurTok == TOK_ERROR || Parser().CurTok == TOK_UNSAFE ||
+            Parser().CurTok == TOK_PUB) {
           g_recoverActive = true;
           try {
             auto AST = ParseExpression();
             if (AST) {
-              if (CurTok == ';') {
-                LogErrorAt(CurLoc, ErrCode::UnexpectedToken, "Unexpected ';'", SLM::ErrorCategory::SYNTAX_ERROR);
+              if (Parser().CurTok == ';') {
+                LogErrorAt(Lex().CurLoc, ErrCode::UnexpectedToken, "Unexpected ';'", SLM::ErrorCategory::SYNTAX_ERROR);
               }
               // NOTE: no LintExpression() call here (deliberately -- see the
               // "Phase Separation: Lint All" comment near FnASTs' declaration
@@ -1735,13 +1964,13 @@ static int runCompilerMain(int argc, char **argv) {
             SkipToNextTopLevelBoundary();
           }
           g_recoverActive = false;
-        } else if (CurTok == TOK_IMPORT) {
+        } else if (Parser().CurTok == TOK_IMPORT) {
           g_recoverActive = true;
           try {
             auto AST = ParseImport();
             if (AST) {
-              if (CurTok != ';') {
-                LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
+              if (Parser().CurTok != ';') {
+                LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
               } else {
                 getNextToken(); // eat ';'
               }
@@ -1757,6 +1986,7 @@ static int runCompilerMain(int argc, char **argv) {
           }
           g_recoverActive = false;
         } else {
+          PrePassSkippedTopLevel = true;
           getNextToken();
         }
       }
@@ -1768,6 +1998,9 @@ static int runCompilerMain(int argc, char **argv) {
       // This populates ResolvedCandidates on every FuncCallExprAST and sets
       // ResolvedCallTarget for unambiguous single-overload calls.
       Resolver PreR;
+      // The rest of the pre-pass is skipped and the main pass reports
+      // everything; see PrePassSkippedTopLevel.
+      bool PrePassAbandoned = false;
       {
         bool PreResolverClean = true;
         g_recoverActive = true;
@@ -1778,8 +2011,11 @@ static int runCompilerMain(int argc, char **argv) {
         }
         g_recoverActive = false;
         if (!PreResolverClean) {
-          DiagnosticEngine::flushAll();
-          return 1;
+          if (!PrePassSkippedTopLevel) {
+            DiagnosticEngine::flushAll();
+            return 1;
+          }
+          PrePassAbandoned = true;
         }
       }
 
@@ -1787,8 +2023,8 @@ static int runCompilerMain(int argc, char **argv) {
       // Run the TypeChecker over the pre-pass ASTs to narrow overloaded calls
       // (e.g. io.printline has 4 overloads; TypeChecker picks the right one
       // and sets ResolvedCallTarget so sub-pass 3b codegen reads it blindly).
-      bool PreTCClean = true;
-      {
+      bool PreTCClean = !PrePassAbandoned;
+      if (!PrePassAbandoned) {
         TypeChecker PreTC(PreR.symbolTable());
         // TYPE-002 (docs/development/changes/TYPE-002.md, S11b): this is
         // U-4's answer (U-4') in practice -- the real monomorphizer will
@@ -1918,6 +2154,7 @@ static int runCompilerMain(int argc, char **argv) {
       // exactly this reason (forward calls) -- process ALL of them, fully,
       // before ANY function prototype or body touches a struct type. Structs
       // are excluded from both loops below since they're entirely done here.
+      if (!PrePassAbandoned)
       for (auto &AST : PrePassASTs) {
         if (dynamic_cast<StructDeclExprAST *>(AST.get())) {
           g_recoverActive = true;
@@ -1936,6 +2173,7 @@ static int runCompilerMain(int argc, char **argv) {
       // TheModule->getFunction(mangledName) returns null.
       // We set a global flag to stop after prototype creation.
       g_protoOnlyPass = true;
+      if (!PrePassAbandoned)
       for (auto &AST : PrePassASTs) {
         // TYPE-002 (S12a-S14a): a FuncDefExprAST that STILL has a non-empty
         // TypeParams list is an uninstantiated GENERIC TEMPLATE -- the
@@ -2031,10 +2269,8 @@ static int runCompilerMain(int argc, char **argv) {
       }
 
   // Re-open for the main pass
-  CloseSourceFile();
-  OpenSourceFile(opts.InputFile);
-  CurLoc = {1, 0};
-  CurTok = 0;
+  MainLexer.open(opts.InputFile);
+  Parser().CurTok = 0;
 
 
   // Main pass: re-enter the entry block and codegen everything.
@@ -2085,7 +2321,7 @@ static int runCompilerMain(int argc, char **argv) {
   // into FnASTs, matching how a real `import X;` is categorized in this
   // pass (already codegenned in the pre-pass; re-parsed here purely for
   // Resolver/TypeChecker re-validation, not re-codegen).
-  for (auto &PreludeAST : ParsePreludeImports(CurLoc))
+  for (auto &PreludeAST : ParsePreludeImports(Lex().CurLoc))
     FnASTs.push_back(std::move(PreludeAST));
 
   // OVH-011: mandatory-pass side of the same skip the pre-pass applies
@@ -2096,10 +2332,10 @@ static int runCompilerMain(int argc, char **argv) {
   // (ParserModule.cpp).
   if (!ClaimEntryFileImportSlot(SourceFilename)) {
   while (true) {
-    if (CurTok == TOK_EOF)
+    if (Parser().CurTok == TOK_EOF)
       break;
 
-    if (CurTok == ';') {
+    if (Parser().CurTok == ';') {
       getNextToken();
       continue;
     }
@@ -2112,17 +2348,17 @@ static int runCompilerMain(int argc, char **argv) {
     // in the pre-pass. TOK_EXPORT (export immut NAME: TYPE = LITERAL;) is
     // included for the same reason -- it's a genuine top-level declaration,
     // not a statement, and needs the exact same hoist-then-lint treatment.
-    if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
-        CurTok == TOK_MACHINE ||
-        CurTok == TOK_AT || CurTok == TOK_EXTERN || CurTok == TOK_EXPORT ||
-        CurTok == TOK_OPERATOR || CurTok == TOK_ERROR || CurTok == TOK_UNSAFE ||
-            CurTok == TOK_PUB) {
+    if (Parser().CurTok == TOK_FN || Parser().CurTok == TOK_STRUCT || Parser().CurTok == TOK_ENUM ||
+        Parser().CurTok == TOK_MACHINE ||
+        Parser().CurTok == TOK_AT || Parser().CurTok == TOK_EXTERN || Parser().CurTok == TOK_EXPORT ||
+        Parser().CurTok == TOK_OPERATOR || Parser().CurTok == TOK_ERROR || Parser().CurTok == TOK_UNSAFE ||
+            Parser().CurTok == TOK_PUB) {
       g_recoverActive = true;
       try {
         auto AST = ParseExpression();
         if (AST) {
-          if (CurTok == ';') {
-            LogErrorAt(CurLoc, ErrCode::UnexpectedToken, "Unexpected ';'", SLM::ErrorCategory::SYNTAX_ERROR);
+          if (Parser().CurTok == ';') {
+            LogErrorAt(Lex().CurLoc, ErrCode::UnexpectedToken, "Unexpected ';'", SLM::ErrorCategory::SYNTAX_ERROR);
           }
           // lint only — not re-codegenned. Also transparently flattens a
           // top-level `unsafe { }` block -- see AppendFlattenedTopLevelDecl()'s
@@ -2143,13 +2379,13 @@ static int runCompilerMain(int argc, char **argv) {
       continue;
     }
 
-    if (CurTok == TOK_IMPORT) {
+    if (Parser().CurTok == TOK_IMPORT) {
       g_recoverActive = true;
       try {
         auto AST = ParseImport();
         if (AST) {
-          if (CurTok != ';') {
-            LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
+          if (Parser().CurTok != ';') {
+            LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
           } else {
             getNextToken(); // eat ';'
           }
@@ -2170,11 +2406,11 @@ static int runCompilerMain(int argc, char **argv) {
       // Where the statement STARTS, for the "not allowed outside a function"
       // diagnostic below -- CurLoc will be past it once ParseExpression()
       // returns.
-      const SourceLocation StmtLoc = CurLoc;
+      const SourceLocation StmtLoc = Lex().CurLoc;
       auto AST = ParseExpression();
       if (AST) {
-        if (CurTok != ';') {
-          LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
+        if (Parser().CurTok != ';') {
+          LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
         } else {
           getNextToken(); // eat ';'
         }
@@ -2201,7 +2437,7 @@ static int runCompilerMain(int argc, char **argv) {
           LogErrorAt(StmtLoc, ErrCode::StatementOutsideFunction,
                      "Statements are not allowed outside of a function. "
                      "Please define 'fn main(): int' and move this code "
-                     "inside.",
+                     "inside.\n  Hint: Wrap it: `fn main(): int { <this statement> return 0; }`.",
                      SLM::ErrorCategory::SYNTAX_ERROR);
           DiagnosticEngine::flushAll();
           // _Exit (not exit): this raw exit point bypasses the rest of the
@@ -2225,10 +2461,10 @@ static int runCompilerMain(int argc, char **argv) {
     } catch (const RecoverUnwind &) {
       // An error was raised: skip to next statement boundary. A lexer error
       // in the skipped text is skipped too (see SkipToNextTopLevelBoundary()).
-      while (CurTok != ';' && CurTok != TOK_EOF && CurTok != TOK_FN &&
-             CurTok != TOK_STRUCT && CurTok != TOK_MUTABLE &&
-             CurTok != TOK_IMMUTABLE && CurTok != TOK_IF &&
-             CurTok != TOK_WHILE && CurTok != TOK_FOR && CurTok != TOK_RETURN) {
+      while (Parser().CurTok != ';' && Parser().CurTok != TOK_EOF && Parser().CurTok != TOK_FN &&
+             Parser().CurTok != TOK_STRUCT && Parser().CurTok != TOK_MUTABLE &&
+             Parser().CurTok != TOK_IMMUTABLE && Parser().CurTok != TOK_IF &&
+             Parser().CurTok != TOK_WHILE && Parser().CurTok != TOK_FOR && Parser().CurTok != TOK_RETURN) {
         try {
           getNextToken();
         } catch (const RecoverUnwind &) {
@@ -2408,6 +2644,41 @@ static int runCompilerMain(int argc, char **argv) {
   if (DiagnosticEngine::hasErrors())
     return 1;
 
+  // TDP-2-006: a build leaves every test out (nothing can call one: E173);
+  // a test build makes the main file's runnable tests the program, in place
+  // of its own `main`.
+  bool HasMain = false;
+  {
+    Function *UserMain = TheModule->getFunction("main");
+    HasMain = UserMain && !UserMain->empty();
+  }
+  std::vector<std::string> RunnableTests;
+  if (!opts.TestManifest.empty()) {
+    for (const TestRegistry::Test *T : TestRegistry::mainFileTests())
+      if (!T->Symbol.empty() && T->SpecOk)
+        RunnableTests.push_back(T->Symbol);
+  }
+  for (const TestRegistry::Test &T : TestRegistry::tests()) {
+    if (T.Symbol.empty() ||
+        std::find(RunnableTests.begin(), RunnableTests.end(), T.Symbol) != RunnableTests.end())
+      continue;
+    if (Function *F = TheModule->getFunction(T.Symbol); F && F->use_empty())
+      F->eraseFromParent();
+  }
+  if (!opts.TestManifest.empty()) {
+    if (Function *UserMain = TheModule->getFunction("main")) {
+      UserMain->setName("__turf_program_main");
+      UserMain->setLinkage(GlobalValue::InternalLinkage);
+      if (UserMain->use_empty())
+        UserMain->eraseFromParent();
+    }
+    EmitTestHarness(RunnableTests);
+    if (!TestRegistry::writeManifest(opts.TestManifest, HasMain, RunnableTests)) {
+      std::cerr << "Error: cannot write the test manifest '" << opts.TestManifest << "'.\n";
+      return 1;
+    }
+  }
+
   // --check (LEC-001): `--typecheck`/`--resolve`/the `--dump-*` flags are named
   // like check modes but all fall through to here and link an executable, so
   // a check-only mode did not exist -- and the `turf` front end's `check`
@@ -2427,8 +2698,9 @@ static int runCompilerMain(int argc, char **argv) {
   // module (a module is only "a file someone imports"), so the caller says so:
   // `--module` checks a file as an importable module and skips the `main`
   // requirement. In a package build (LEC-001 stage 4) the package graph
-  // answers this instead: only src/main.tr is an entry point.
-  if (!(opts.Check && opts.CheckAsModule)) {
+  // answers this instead: only src/main.tr is an entry point. A test build's
+  // entry point is the one EmitTestHarness() just made.
+  if (!(opts.Check && opts.CheckAsModule) && opts.TestManifest.empty()) {
     // Verify that an explicit 'main' function was defined in the primary module
     Function *MainFunc = TheModule->getFunction("main");
     if (!MainFunc || MainFunc->empty()) {

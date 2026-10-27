@@ -1,0 +1,15 @@
+// print(char)/printline(char) (lib/std/io.tr) should compile and run without
+// crashing -- this suite doesn't match stdout content, just compile+run
+// success, so pair the print calls with a real assert for a behavioral check.
+import io;
+import test;
+
+fn main(): int {
+    mut c: char = 'x';
+    io::print(c);
+    io::printline(c);
+    io::printline('!');
+    test::assert(c == 'x', "char survives being printed");
+
+    return 0;
+}

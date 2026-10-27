@@ -1,0 +1,20 @@
+// EXPECT-DIAG: E086
+// EXPECT-DIAG: can't be returned
+// `break` leaves the loop body, so its defer runs first: `p` is `&n` after
+// the loop.
+struct N { val: int, next: &?N }
+
+fn f(): &N {
+    mut n: N = N::default();
+    n.val = 42;
+    mut p: &N = heap(n);
+    while (true) {
+        defer p = &n;
+        break;
+    }
+    return p;
+}
+
+fn main(): int {
+    return f().val;
+}

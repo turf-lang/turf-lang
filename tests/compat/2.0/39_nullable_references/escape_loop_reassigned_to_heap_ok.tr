@@ -1,0 +1,31 @@
+// The accepted side of fail_escape_return_after_loop.tr: a reference that a
+// loop leaves pointing at the heap on every path out, and a stack reference
+// used only inside its own frame across a loop.
+import test;
+
+struct Node { val: int, next: &?Node }
+
+fn make(): &Node {
+    mut n: Node = Node::default();
+    n.val = 42;
+    mut p: &Node = heap(n);
+    mut k: int = 0;
+    while k < 3 {
+        k += 1;
+        p = heap(n);
+    }
+    return p;
+}
+
+fn local_only(): int {
+    mut n: Node = Node::default();
+    mut p: &Node = &n;
+    for i in 0..4 { p.val += i; }
+    return n.val;
+}
+
+fn main(): int {
+    test::assert(make().val == 42, "heap() on every path out of the loop");
+    test::assert(local_only() == 6, "a stack reference used inside its frame");
+    return 0;
+}

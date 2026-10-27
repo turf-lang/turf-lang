@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E067
+// EXPECT-DIAG: with value of type 'void'
+// A `void` function produces no value. Initialising a variable from one is E067
+// ("a void value can't be used here"), not the E066 "type mismatch" it used to
+// be reported as -- there is no type to convert, there is no value at all.
+fn log_it(msg: string): void {
+}
+
+fn main(): int {
+    mut r: string = log_it("hello");
+    return 0;
+}

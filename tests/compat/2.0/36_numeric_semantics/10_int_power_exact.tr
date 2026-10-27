@@ -1,0 +1,36 @@
+// `int ** int` is an exact int (owner decision 2026-10-12). It went through
+// pow() on doubles, so anything above 2^53 was rounded: `3 ** 39` was off by
+// 11 (found by turf-fuzz). A double on either side still gives a double.
+// Operands come through a function so no level can fold them away.
+
+import test;
+
+fn id(x: int): int {
+    return x;
+}
+
+fn main(): int {
+    test::assert(typeof(id(2) ** id(3)) == "int", "int ** int is int");
+    test::assert(typeof(id(2) ** 3.0) == "double", "int ** double is double");
+    test::assert(typeof(2.0 ** id(3)) == "double", "double ** int is double");
+
+    test::assert(id(3) ** id(39) == 4052555153018976267, "3 ** 39 is exact");
+    test::assert(id(2) ** id(62) == 4611686018427387904, "2 ** 62");
+    test::assert(id(-2) ** id(63) == -9223372036854775808, "(-2) ** 63 is INT_MIN, no trap");
+    test::assert(id(0) ** id(0) == 1, "0 ** 0 is 1");
+    test::assert(id(0) ** id(5) == 0, "0 ** 5 is 0");
+    test::assert(id(-1) ** id(9223372036854775807) == -1, "(-1) ** odd is -1");
+    test::assert(id(-1) ** id(1000000) == 1, "(-1) ** even is 1");
+    test::assert(id(7) ** id(1) == 7, "x ** 1 is x");
+
+    mut a: int32 = 3;
+    test::assert(a ** a == 27, "int32 operands give an exact int");
+
+    mut b: int = id(3);
+    b **= id(39);
+    test::assert(b == 4052555153018976267, "**= on an int is exact too");
+    mut c: int = id(2);
+    c **= 3.0;
+    test::assert(c == 8, "**= with a double right side still narrows a double");
+    return 0;
+}

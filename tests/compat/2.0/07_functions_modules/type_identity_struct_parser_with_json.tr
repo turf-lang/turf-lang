@@ -1,0 +1,27 @@
+// FDN-003: `lib/std/json` declares an internal helper `struct Parser`. A
+// program importing json used to be unable to declare ANY `Parser` of its
+// own -- a private implementation detail of a dependency reserved the name
+// for the whole program. Types are now identified by (module, name):
+// json's is `json::Parser`, this file's is `Parser`.
+
+import json;
+import test;
+
+struct Parser {
+    depth: int
+}
+
+fn Parser.deeper(): int {
+    return self.depth + 1;
+}
+
+fn main(): int {
+    mut p: Parser = Parser::default();
+    p.depth = 4;
+    test::assert(p.deeper() == 5, "the file's own Parser");
+
+    mut v: json::JsonValue = json::parse("[1, 2, 3]") recover produce json::JsonValue::default();
+    test::assert(v.length() == 3, "json's own Parser still parses");
+    test::assert(typeof(v) == "json::JsonValue", "an imported type's typeof() is qualified");
+    return 0;
+}

@@ -19,6 +19,7 @@
 #include "frontend/AST.h"
 #include "frontend/ASTChildWalker.h"
 #include "diagnostics/Errors.h"
+#include "frontend/DeprecatedAnnotation.h"
 #include "frontend/Lexer.h"
 #include "sema/Types.h"
 #include "llvm/ADT/SmallString.h"
@@ -251,6 +252,30 @@ static void LintIf(const IfExprAST *If);
 
 static void LintFor(const ForExprAST *For);
 
+// TDP-2-003 V-2 (issue #286): `Sym` is the call's resolved target (null for
+// an intrinsic, an indirect call through a value, or a call the TypeChecker
+// never reached because an earlier error aborted the compile -- all silently
+// skipped, same as every other check below that reads a resolved field).
+// Run from Lint rather than the Resolver/TypeChecker that set
+// ResolvedCallTarget: Lint is the one pass guaranteed to see each function
+// body exactly once (top-level statements once via the loop in main.cpp, a
+// function body once via its own FuncDefExprAST::codegen(), which skips the
+// pre-pass copy -- see that call site's comment), so this needs no dedupe
+// against the pre-pass/main-pass double-resolve every other warning raised
+// from the Resolver or TypeChecker has to guard against.
+static void WarnIfDeprecated(const ResolverFunctionSymbol *Sym,
+                             SourceLocation Loc) {
+  if (!Sym)
+    return;
+  for (const Annotation *Ann :
+       Sym->annotationsNamed(DeprecatedAnnotation::Name)) {
+    // validate() (DeprecatedAnnotation.h) already guarantees exactly one
+    // string argument on every `@deprecated` that reached here.
+    DeprecatedUseWarning(Loc, Sym->BaseName, Ann->Args[0].Value).warn();
+    return; // one declaration may repeat the annotation; its first message wins
+  }
+}
+
 namespace {
 /**
  * The lint walk. Derives from ASTChildWalker -- an ExhaustiveASTVisitor -- so
@@ -283,6 +308,14 @@ public:
   // by design), so ForEach takes the walker's plain recursion.
   void visitFor(ForExprAST &Node) override { LintFor(&Node); }
   void visitIf(IfExprAST &Node) override { LintIf(&Node); }
+  void visitFuncCall(FuncCallExprAST &Node) override {
+    WarnIfDeprecated(Node.getResolvedCallTarget(), Node.getLoc());
+    ASTChildWalker::visitFuncCall(Node);
+  }
+  void visitMethodCall(MethodCallExprAST &Node) override {
+    WarnIfDeprecated(Node.getResolvedCallTarget(), Node.getNameLoc());
+    ASTChildWalker::visitMethodCall(Node);
+  }
 };
 } // namespace
 
@@ -590,6 +623,16 @@ public:
     if (shouldLint(Node))
       LintIf(&Node);
     ASTChildWalker::visitIf(Node);
+  }
+  void visitFuncCall(FuncCallExprAST &Node) override {
+    if (shouldLint(Node))
+      WarnIfDeprecated(Node.getResolvedCallTarget(), Node.getLoc());
+    ASTChildWalker::visitFuncCall(Node);
+  }
+  void visitMethodCall(MethodCallExprAST &Node) override {
+    if (shouldLint(Node))
+      WarnIfDeprecated(Node.getResolvedCallTarget(), Node.getNameLoc());
+    ASTChildWalker::visitMethodCall(Node);
   }
 };
 } // namespace

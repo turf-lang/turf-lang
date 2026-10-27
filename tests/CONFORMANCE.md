@@ -41,7 +41,7 @@ inventory it sits in.
 |---|---|---|
 | Lexer/parser | `tests/01_syntax/`, `tests/35_numeric_literals/` | `tests/01_syntax/fail_*.tr`, `tests/35_numeric_literals/fail_*.tr` |
 | Type system | `tests/03_typechecker/`, `tests/17_char_type/`, `tests/19_int32_type/` | `tests/03_typechecker/fail_*.tr`, `tests/17_char_type/fail_*.tr`, `tests/19_int32_type/fail_*.tr` |
-| Generics & monomorphization | `tests/38_monomorphization/` | `tests/38_monomorphization/fail_*.tr` |
+| Generics & monomorphization | `tests/38_monomorphization/`, `tests/56_use_site_type_arguments/` | `tests/38_monomorphization/fail_*.tr`, `tests/56_use_site_type_arguments/fail_*.tr` |
 | Numeric semantics | `tests/36_numeric_semantics/`, `tests/11_bitwise_ops/` | `tests/36_numeric_semantics/fail_*.tr`, `tests/11_bitwise_ops/fail_*.tr` |
 | Initialization | `tests/10_default_init/` | `tests/10_default_init/fail_*.tr` |
 | Operators | `tests/18_operator_overload/` | `tests/18_operator_overload/fail_*.tr` |

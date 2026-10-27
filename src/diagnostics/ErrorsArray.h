@@ -29,17 +29,17 @@ public:
 // registered, never constructed. The TypeChecker reports all three through
 // reportError() with those codes -- see ErrorCodes.h's ErrCode:: block. E002's
 // check did not exist at all until then: `arr["one"]` compiled silently.)
-// for-each target isn't an array at all (scalar, bare struct, List<T>/Map<K,V>, etc.)
+// for-each target is neither an array nor a string (scalar, bare struct, List<T>/Map<K,V>, etc.)
 class ForEachNonArrayError : public TurfError {
 public:
   ForEachNonArrayError(SourceLocation Loc, const std::string &GotType)
       : TurfError(Loc,
-                  Colors::BRIGHT_RED + "for-each requires an array!\n" +
+                  Colors::BRIGHT_RED + "for-each requires an array or a string!\n" +
                       Colors::RESET + "  You tried to iterate over a value of type '" +
                       Colors::CYAN + GotType + Colors::RESET + "'.",
-                  "for-each only works on Turf's built-in fixed-size array "
-                  "type (T[N]). Lists, maps, structs, and scalars aren't "
-                  "supported yet.") {
+                  "for-each works on an array (T[N], or a T[] parameter) and "
+                  "on a string, byte by byte. Walk a List by index "
+                  "(`for i in 0..l.length()`) and a Map through keys().") {
     Category_ = SLM::ErrorCategory::ARRAY_ERROR;
   }
 };

@@ -1,0 +1,39 @@
+// A pointer receiver is matched as written: `p.free()` with `p: void*` is
+// `mem::free(p)`. It used to be matched as what it points at (`void`, then
+// `int` for an `int*`), so the call was rejected, and a pointer passed to a
+// function taking the pointee crashed the compiler (invalid LLVM IR).
+//
+// `self` is a pointer to the struct inside a method, and a free function that
+// takes the struct by value is still reached through it: Codegen loads the
+// receiver (MethodCallExprAST::UFCSLoadsReceiver). That case crashed too.
+
+import mem;
+import test;
+
+struct Point {
+    x: int,
+    y: int,
+}
+
+fn sum(p: Point): int {
+    return p.x + p.y;
+}
+
+fn Point.total(): int {
+    return self.sum();
+}
+
+fn main(): int {
+    unsafe {
+        mut p: void* = mem::alloc(16);
+        p.zero(16);
+        p.free();
+    }
+
+    mut pt = Point::default();
+    pt.x = 2;
+    pt.y = 3;
+    test::assert(pt.total() == 5, "self.sum() passes the struct the pointer names");
+    test::assert(pt.sum() == 5, "a struct value is passed as before");
+    return 0;
+}

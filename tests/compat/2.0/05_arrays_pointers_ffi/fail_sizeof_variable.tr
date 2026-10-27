@@ -1,0 +1,9 @@
+// EXPECT-DIAG: E109
+// EXPECT-DIAG: 'sizeof' takes a type, and 'a' is a variable
+// `sizeof(a)` on a variable was E042 "Unknown type 'a'", with a hint to
+// declare a struct named `a`. The hint names the variable's type.
+
+fn main(): int {
+    mut a: int = 3;
+    return sizeof(a);
+}

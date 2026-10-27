@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E064
+// EXPECT-DIAG: Return type mismatch: function declares 'int' but returns 'string'
+// `: int` is a promise that every `return` hands back an int. E064 -- reserved,
+// documented and raised by nothing until issue #263, which found every return
+// mismatch reported as the E066 catch-all instead.
+fn square(n: int): int {
+    return "nine";
+}
+
+fn main(): int {
+    return square(3);
+}

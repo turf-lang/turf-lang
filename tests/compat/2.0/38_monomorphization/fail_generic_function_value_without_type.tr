@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E137
+// EXPECT-DIAG: 'id' is generic (fn<T>(T): T), so as a value it needs a function type
+// `guess` has nothing to instantiate `id` at: the value's type would come
+// from the very thing being inferred.
+fn<T> id(x: T): T {
+    return x;
+}
+
+fn main(): int {
+    mut f = id;
+    return 0;
+}

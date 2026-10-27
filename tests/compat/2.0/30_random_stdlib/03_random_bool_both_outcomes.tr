@@ -1,0 +1,28 @@
+// Regression coverage for the new `random` stdlib module:
+// random::random_bool() must actually produce both true and false over
+// many calls, not silently collapse to always-true or always-false (which
+// a broken random_int(0, 1) == 1 implementation could easily do, e.g. if
+// the modulo/range math were off by one).
+import random;
+import test;
+
+fn main(): int {
+    immut trials: int = 500;
+
+    mut i: int = 0;
+    mut sawTrue: bool = false;
+    mut sawFalse: bool = false;
+    while i < trials {
+        if random::random_bool() {
+            sawTrue = true;
+        } else {
+            sawFalse = true;
+        }
+        i = i + 1;
+    }
+
+    test::assert(sawTrue, "random_bool() returned true at least once in 500 calls");
+    test::assert(sawFalse, "random_bool() returned false at least once in 500 calls");
+
+    return 0;
+}

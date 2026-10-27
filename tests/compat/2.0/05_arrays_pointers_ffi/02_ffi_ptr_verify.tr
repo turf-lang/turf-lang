@@ -1,0 +1,59 @@
+import io;
+
+import test;
+extern fn malloc(size: int): ptr;
+extern fn free(p: ptr): void;
+extern fn memset(p: ptr, c: int, n: int): ptr;
+extern fn memcpy(dst: ptr, src: ptr, n: int): ptr;
+extern fn strlen(s: string): int;
+extern fn puts(s: string): int;
+
+// (issue #238) The original scenarios #2/#3 here -- a plain (non-extern)
+// Turflang function taking a `ptr` parameter or returning `ptr`
+// (zero_buffer/make_buffer/release, removed) -- are no longer expressible
+// at all: a plain function may never have a raw ptr/T* parameter or
+// return type, even inside `unsafe { }` (see
+// checkNoRawPointersInSignature()). `ptr` is opaque (no pointee type), so
+// there's no `&T`-shaped safe equivalent to convert them to either --
+// unlike a concrete `Foo*`, which becomes `&Foo`. Coverage for the
+// disallow rule itself lives in
+// tests/05_arrays_pointers_ffi/fail_fn_signature_raw_pointer_disallowed.tr
+// (also see fail_ptr_outside_unsafe.tr and
+// fail_cast_raw_pointer_outside_unsafe.tr for the plain declaration/cast
+// gate this file's own `unsafe { }` blocks satisfy). Every remaining scenario
+// below (extern-fn-return bound to a caller-side local, multiple
+// independent locals, null, chaining between externs, string-to-ptr) is
+// still fully legal, just needs `unsafe { }` around each local
+// declaration.
+fn main(): int {
+    unsafe {
+        // 1. Basic alloc/free
+        mut a: ptr = malloc(64);
+        free(a);
+
+        // 2. Multiple independent ptr variables
+        mut d: ptr = malloc(8);
+        mut e: ptr = malloc(8);
+        mut f: ptr = memset(d, 1, 8);
+        mut g: ptr = memcpy(e, d, 8);
+        free(d);
+        free(e);
+
+        // 3. null assigned to ptr
+        mut h: ptr = null;
+
+        // 4. ptr from one extern as arg to another (chain)
+        mut src: ptr = malloc(64);
+        mut dst: ptr = malloc(64);
+        memset(src, 7, 64);
+        memcpy(dst, src, 64);
+        free(src);
+        free(dst);
+    }
+
+    // 5. string-to-ptr implicit (extern fn accepting string works as ptr)
+    mut len: int = strlen("verify");
+    test::assert(len == 6, "");
+
+    return 0;
+}

@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/turf-lang/turf-lang/blob/master/docs/reference/schemas/unsafe-report.schema.json",
+  "title": "turfc --unsafe-report, where a project's unsafe code is",
+  "description": "LB-2, driver interface 1.12. With --package-graph: every package of the graph and the standard library. With files instead: those files. Format 1: keys are only added, never changed or removed. Every .tr file under a package's src/ is counted, imported or not. Native sources are not here: they are LB-1's [native] table, which turf.toml does not have yet.",
+  "type": "object",
+  "required": ["format"],
+  "properties": {
+    "format": { "const": 1 },
+    "packages": {
+      "type": "object",
+      "description": "With --package-graph: one entry per package of the graph, keyed by its name.",
+      "additionalProperties": { "$ref": "#/$defs/package" }
+    },
+    "stdlib": {
+      "$ref": "#/$defs/package",
+      "description": "With --package-graph: lib/std of the compiler's install root. allow_unsafe is always true."
+    },
+    "files": {
+      "type": "array",
+      "description": "Without --package-graph: each file named on the command line, in order, with its path as given.",
+      "items": { "$ref": "#/$defs/file" }
+    }
+  },
+  "$defs": {
+    "package": {
+      "type": "object",
+      "required": ["allow_unsafe", "modules", "unsafe_modules", "unsafe_blocks", "extern_fns", "link_libraries", "files"],
+      "properties": {
+        "allow_unsafe": { "type": "boolean", "description": "Whether the package's `unsafe module;` is honored: the graph's allow_unsafe (the root's [unsafe] allow decides it for a dependency)." },
+        "modules": { "type": "integer", "minimum": 0, "description": "The .tr files read." },
+        "unsafe_modules": { "type": "integer", "minimum": 0, "description": "Files whose first statement is `unsafe module;`." },
+        "unsafe_blocks": { "type": "integer", "minimum": 0, "description": "`unsafe { }` blocks, as statements, expressions or around top-level declarations." },
+        "extern_fns": { "type": "integer", "minimum": 0, "description": "`extern fn` declarations, at the top level or inside a function." },
+        "link_libraries": { "type": "array", "items": { "type": "string" }, "description": "The libraries named by `extern from \"lib\"`, sorted, each once." },
+        "files": { "type": "array", "items": { "$ref": "#/$defs/file" }, "description": "The files with something to report (any count above, or an error), by path." }
+      }
+    },
+    "file": {
+      "type": "object",
+      "required": ["path", "unsafe_module", "unsafe_blocks", "extern_fns", "link_libraries"],
+      "properties": {
+        "path": { "type": "string", "description": "Relative to the package's src/ (or lib/std), with '/'." },
+        "unsafe_module": { "type": "boolean" },
+        "unsafe_blocks": { "type": "integer", "minimum": 0 },
+        "extern_fns": { "type": "integer", "minimum": 0 },
+        "link_libraries": { "type": "array", "items": { "type": "string" } },
+        "error": { "type": "string", "description": "Present when the file does not lex: \"line N: message\". The counts are those of the tokens before it." }
+      }
+    }
+  }
+}

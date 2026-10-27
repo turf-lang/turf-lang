@@ -1,0 +1,18 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-EXIT: 1
+//
+// Reading a nonexistent file must go through the `!string` error path via
+// `recover`, not crash/segfault on a null FILE* or garbage read. Compiles
+// fine (this is ordinary, valid code) -- the recover-run block
+// intentionally returns a non-zero exit code from main() so the test
+// harness can confirm the failure path was actually reached, rather than
+// e.g. fopen() unexpectedly succeeding and this test passing for the wrong
+// reason.
+import io;
+
+fn main(): int {
+    io::read_to_string("definitely_missing_28_nonexistent_file.txt") recover run {
+        return 1;
+    };
+    return 0;
+}

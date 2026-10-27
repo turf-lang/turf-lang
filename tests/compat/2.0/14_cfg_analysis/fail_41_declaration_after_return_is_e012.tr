@@ -1,0 +1,8 @@
+// EXPECT-DIAG: E012
+// Issue #263: a declaration after `return` used to be reported under a
+// separate, never-visible code (E013). It is the same mistake as any other
+// statement after a terminator, so it must be E012.
+fn main(): int {
+    return 0;
+    mut x: int = 5;
+}

@@ -1,0 +1,42 @@
+// Regression test (was DISCOVERED_ISSUES.md #14): `mut arr: int[5];` (no
+// explicit bracketed initializer) used to fail to parse with "Expected '='
+// after variable type" -- the language required a full literal like
+// `int[5] = [0, 0, 0, 0, 0]` even when zero-initialization was all that was
+// needed. Re-verified fixed: an array declared without an initializer is
+// zero-initialized and safely assignable element-by-element afterward.
+//
+// SEM-004 (§12.6, FREEZE.md §6.4) update: storage is still always zeroed
+// (F-INIT-2), but the STATIC definite-assignment check now applies to
+// arrays too, at whole-array granularity -- elements are not tracked
+// individually. An element WRITE (`arr[0] = 10`) counts as assigning the
+// entire array, which is what makes every read below (including of an
+// untouched element, still genuinely 0 from the zero-fill) legal. A read
+// with NO prior element write or initializer at all is now E008 --
+// see fail_array_use_before_any_write.tr.
+
+import test;
+
+fn main(): int {
+    mut arr: int[5];
+    arr[0] = 10;
+    arr[1] = 20;
+    arr[4] = 50;
+
+    // Untouched elements must be zero-initialized, not garbage.
+    test::assert(arr[2] == 0, "");
+    test::assert(arr[3] == 0, "");
+
+    test::assert(arr[0] == 10, "");
+    test::assert(arr[1] == 20, "");
+    test::assert(arr[4] == 50, "");
+
+    // Same for a double array -- the first element WRITE (not the read)
+    // is what assigns `darr` as a whole; reading the untouched arr[0]
+    // afterward is legal and still genuinely 0.0 from the zero-fill.
+    mut darr: double[3];
+    darr[1] = 3.5;
+    test::assert(darr[0] == 0.0, "");
+    test::assert(darr[1] == 3.5, "");
+
+    return 0;
+}

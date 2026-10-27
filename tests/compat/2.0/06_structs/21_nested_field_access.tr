@@ -1,0 +1,46 @@
+// Regression test (was DISCOVERED_ISSUES.md #5): TypeChecker::visitFieldAccess
+// used to be entirely unimplemented and hardcoded every field access's type
+// to nullptr, so chained access like `.l2.l3` crashed Codegen the moment it
+// tried to treat a null type as a struct. Re-verified fixed; covers several
+// depths and shapes since the original bug was specifically about *chained*
+// access, not single-level access (which had its own, separately-tracked
+// coverage already).
+
+import test;
+
+struct L3 { v: int }
+struct L2 { l3: L3, tag: int }
+struct L1 { l2: L2, name: string }
+
+// A 4-level-deep chain, to go one further than the minimum repro.
+struct Outer { inner: L1 }
+
+fn main(): int {
+    // This test is about chained field ACCESS, not construction -- build
+    // each level via ::default() and set the deeply-nested fields directly,
+    // rather than authoring a constructor per level.
+    mut o: L1 = L1::default();
+    o.l2.l3.v = 7;
+    o.l2.tag = 99;
+    o.name = "root";
+
+    // 3-level chain
+    test::assert(o.l2.l3.v == 7, "");
+    test::assert(o.l2.tag == 99, "");
+    test::assert(o.name == "root", "");
+
+    // Mutate through a chained field path
+    o.l2.l3.v = 42;
+    test::assert(o.l2.l3.v == 42, "");
+
+    // 4-level chain
+    mut deep: Outer = Outer::default();
+    deep.inner.l2.l3.v = 1;
+    deep.inner.name = "deep";
+    test::assert(deep.inner.l2.l3.v == 1, "");
+    deep.inner.l2.l3.v = 100;
+    test::assert(deep.inner.l2.l3.v == 100, "");
+    test::assert(deep.inner.name == "deep", "");
+
+    return 0;
+}

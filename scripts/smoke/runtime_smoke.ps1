@@ -208,6 +208,9 @@ if ($c.Rc -eq 0) {
   else { Write-Fail ('expected abort status 0x{0:X8}, got 0x{1:X}' -f $script:AbortStatus, $r.Rc); Write-Indented (Join-Output $r) }
   if ((Join-Output $r) -match '(?m)^panic: stack overflow') { Write-Pass "message starts 'panic: stack overflow'" }
   else { Write-Fail 'unexpected message:'; Write-Indented (Join-Output $r) }
+  # RT-6: the panic says how deep the recursion was, a positive number.
+  if ((Join-Output $r) -match '(?m)^panic: stack overflow: .* at about [1-9][0-9]* nested calls ') { Write-Pass "message names the recursion depth ('at about N nested calls')" }
+  else { Write-Fail 'message has no recursion depth:'; Write-Indented (Join-Output $r) }
 } else { Write-Fail 'stack_overflow.tr failed to compile' }
 
 # 6b. A direct huge allocation -> "panic: out of memory", then abort.

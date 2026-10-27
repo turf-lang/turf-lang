@@ -80,6 +80,7 @@ The file name decides what passing means:
 | `fail_name.tr` | it fails to compile (a compiler crash does not count) |
 | `fail_name.tr` with `// RUNTIME_ABORT_EXPECTED` | it compiles, then exits non-zero |
 | `name_module.tr` | never run: a helper another test imports |
+| `name.tr` with `@test` functions | every `@test` function passes; each is judged by its own outcome (see below) |
 
 A plain test checks behaviour with the `test` module:
 
@@ -95,6 +96,52 @@ fn main(): int {
 
 A bare `assert(...)` is E041: `assert` lives in the `test` module, not the
 prelude.
+
+### Tests beside the code: `@test`
+
+A function marked `@test` is a test written in the same file as what it checks.
+It takes no parameters and returns `void` or `!void`; the file needs no `main`.
+`turf test` builds a file that declares tests once and runs each test in a
+process of its own, so one test's panic or exit does not hide the others.
+
+```turflang
+import test;
+
+fn double_it(n: int): int {
+    return n * 2;
+}
+
+@test
+fn doubles_a_number(): void {
+    test::assert(double_it(21) == 42, "21 doubled is 42");
+}
+
+@test(compile_error, E041, "Unknown function")
+fn an_undeclared_call_is_rejected(): void {
+    undeclared(1);
+}
+
+@test(panic, "Division by zero")
+fn dividing_by_zero_panics(): void {
+    immut zero: int = 0;
+    io::printline(10 / zero);
+}
+```
+
+An optional first argument names the outcome: `compile_error, E041, "text"`
+(optionally `fix: "text"`), `warning, E172, "text"` (the expected warning is the
+test's own: no lint level applies to it), `no_warnings`,
+`panic, "text"`, `exit, 3` and `error, Type::Variant`. The full list is in the
+[reference](../reference/functions_and_modules.md#test). The report has one line
+per test, `[tests] file.tr: test_name ... PASS`.
+
+`tests/57_test_functions/` holds a passing test for each outcome and a `fail_*`
+test for each rule a malformed `@test` breaks. `scripts/smoke/test_cmd_smoke.sh`
+breaks each outcome every way it can fail and checks the reason. The runner
+builds such a file with `turfc <file> --test-build <manifest> -o <program>`; the
+flag is the runner's alone. A file of tests that also has a `main` is run as an
+ordinary plain test too. With a package graph, the root package's `src/` files
+that declare tests run as well; `--only` runs only the paths it names.
 
 ### Pin the reason, not just the outcome
 
@@ -175,10 +222,13 @@ Sweep both directions after adding or renaming a test:
 ```bash
 # tests wrongly skipped: named *_module.tr but have a main()
 find tests -name "*_module.tr" | xargs grep -lE '\bfn\s+(int\s+)?main\s*\('
-# helpers wrongly run: no main(), not *_module.tr, not fail_*
+# helpers wrongly run: no main(), no `@test` line, not *_module.tr, not fail_*
 find tests -name "*.tr" -not -name "*_module.tr" -not -name "fail_*" \
-  | xargs grep -LE '\bfn\s+(int\s+)?main\s*\('
+  | xargs grep -LE '\bfn\s+(int\s+)?main\s*\(' | xargs -r grep -L '^@test'
 ```
+
+A file of `@test` functions has no `main` and is a real test, which is why the
+second sweep leaves out a file with a line starting `@test`.
 
 Everything a module declares is private unless it says `pub`, so a helper
 needs `pub` on exactly what its test uses (E088 names what to add). Do not
@@ -238,10 +288,11 @@ Every error has a code, and every code has two pages and a raiser:
 
 | Script | Fails when |
 |---|---|
-| `scripts/check/error_codes_check.sh` | a registered code has no human or SLM page, or nothing raises it |
+| `scripts/check/error_codes_check.sh` | a registered code has no human or SLM page, or nothing raises it, or a warning class has no registry row |
 | `scripts/check/doc_examples.py` | a ```` ```turflang ```` block in `docs/reference/` or `docs/guides/` does not compile (or compiles when marked `<!-- doc-example: fails Exxx -->`) |
 | `scripts/check/check_doc_links.sh` | a link or anchor between docs is broken |
 | `scripts/check/stdlib_surface_check.sh` | a `pub` item of `lib/std` is used by no file in `tests/46_stdlib_surface/`, or a public name is not `snake_case` |
+| `scripts/check/prelude_shadow_check.sh NAME...` | not a CI gate: run it before adding a name to `io`, `math` or `sys`. It exits 1 and lists `path:line` for every `showcase/`, `examples/`, `tests/` and `lib/std` program that already declares a function of that name |
 | `scripts/check/conformance_check.py` | `tests/CONFORMANCE.md` or `tests/CONFORMANCE_ITEMS.md` names a test that does not exist, or a frozen decision has no evidence |
 | `scripts/check/check_boundary.sh` | the compiler/runtime/stdlib boundary rules are broken (`docs/architecture/boundary.md`) |
 | `scripts/slm/slm_doc_examples_check.sh` | a `CORRECT` example under `docs/slm/` does not compile |
@@ -251,6 +302,12 @@ Every error has a code, and every code has two pages and a raiser:
 Adding a `pub` item to `lib/std` means adding a use of it to
 `tests/46_stdlib_surface/` in the same change; renaming or removing one breaks
 the 2.x surface.
+
+Adding a function to `io`, `math` or `sys` also adds a bare-callable name
+(`FREEZE.md` §6.25), which a program that declares its own function of that
+name hides. Run `scripts/check/prelude_shadow_check.sh NAME` for each new name
+and read every program it lists before adding the name; a hit is a case to
+look at, not automatically a break.
 
 ## 7. Smoke scripts and other suites
 

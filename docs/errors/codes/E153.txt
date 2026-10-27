@@ -1,0 +1,22 @@
+A machine state has no way to be entered
+
+A `machine` lists the transitions it allows. Turf counts the arrows that point INTO each state, and warns about any state that nothing points at:
+
+    machine Door {
+        Closed -> Open,
+        Open -> Closed,
+        Locked -> Closed,   // WARNING: no transition leads to 'Locked'
+    }
+
+Once a `Door` leaves its starting value, there is no arrow that can bring it to `Locked`, so every use of that state after the first move is dead weight. It is usually a forgotten edge. Add the arrow:
+
+    machine Door {
+        Closed -> Open,
+        Open -> Closed,
+        Locked -> Closed,
+        Closed -> Locked,
+    }
+
+One case is a false positive: the state a machine STARTS in. A machine begins in whatever state you construct it with, so that state may legitimately have no incoming arrow, and Turf has no way to know which state you mean to start in. If `Locked` is only ever a starting state, the warning is expected and safe to ignore. Allowing the warning is the right tool for that.
+
+This is a warning, not an error -- compilation still succeeds. To silence it for a whole build, set its lint level to allow: `turf build --allow E153` (or `[lints] E153 = "allow"` in turf.toml).

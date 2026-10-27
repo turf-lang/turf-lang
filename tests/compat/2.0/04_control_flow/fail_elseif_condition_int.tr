@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E066
+// EXPECT-DIAG: The condition of 'if' must be a 'bool', but this one has type 'int'
+// Every branch's condition is checked, not only the first.
+fn main(): int {
+    mut n: int = 2;
+    if n == 1 {
+        return 1;
+    } elseif n {
+        return 2;
+    }
+    return 0;
+}

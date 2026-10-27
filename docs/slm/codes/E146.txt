@@ -3,9 +3,12 @@ TURF E146 -- INVALID ANNOTATION:
 CAUSE:
   An `@name(args)` annotation before a function or `extern fn` either has a name
   no compiler pass knows, or arguments that do not fit the declaration under it.
-  The known annotations are `@ownership` (`acquires`, or `releases: <param>`)
-  and `@ffi` (`linux:`/`macos:`/`windows:` followed by a C symbol name, on an
-  `extern fn` only). An annotation states a fact about the declaration; a wrong
+  The known annotations are `@ownership` (`acquires`, or `releases: <param>`),
+  `@ffi` (`linux:`/`macos:`/`windows:` followed by a C symbol name, on an
+  `extern fn` only), `@deprecated("message")` and `@test` (a top-level function
+  with no parameters returning `void` or `!void`, optionally with an outcome
+  first: `compile_error, E<code>, "text"`, `warning, E<code>, "text"`,
+  `no_warnings`, `panic, "text"`, `exit, <0..255>`, `error, Type::Variant`). An annotation states a fact about the declaration; a wrong
   one is rejected so it cannot silently switch a check off.
 
 CORRECT USAGE:
@@ -18,18 +21,29 @@ CORRECT USAGE:
     @ffi(macos: malloc_size)
     extern fn malloc_usable_size(p: void*): int;
 
+    @test
+    fn adds_up(): void { }
+
+    @test(exit, 3)
+    fn leaves_with_three(): void { sys::exit(3); }
+
 INCORRECT:
     @ownrship(acquires)                        // ERROR [E146]: Unknown annotation
     @ownership(aquires)                        // ERROR [E146]: Unknown argument
     @ownership(acquires) fn n(): int { ... }   // ERROR [E146]: does not return a pointer
     @ownership(releases: q) extern fn f(p: int*): void;  // ERROR [E146]: q is not a parameter
     @ffi(macos: malloc_size) fn g(): int { ... }         // ERROR [E146]: only on an extern fn
+    @test(compile_eror, E041, "x") fn t(): void { }      // ERROR [E146]: not an outcome of '@test'
+    @test fn t(n: int): void { }                         // ERROR [E146]: A test takes no parameters
+    @test fn t(): int { return 1; }                      // ERROR [E146]: A test returns 'void' or '!void'
+    @test(exit, 256) fn t(): void { }                    // ERROR [E146]: '256' is not an exit status
 
 FIX:
   Correct the misspelt name or argument (the message suggests one), make the
   argument match the declaration (name a real pointer parameter, return a
-  pointer for `acquires`), or remove the annotation. Never invent a new
-  annotation name: only the ones above exist.
+  pointer for `acquires`; give a `@test` no parameters and `void` or `!void`,
+  and an outcome word first), or remove the annotation. Never invent a new
+  annotation name or a `@test` option: only the ones above exist.
 
 RELATED: E087 (`pub` written before the annotation instead of after it),
   E017/E018 (the double free / use after free that `@ownership` lets the

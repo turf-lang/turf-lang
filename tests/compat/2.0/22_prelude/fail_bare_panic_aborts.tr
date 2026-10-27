@@ -1,0 +1,8 @@
+// A bare `panic` is the prelude's `sys::panic`: it compiles with no import and
+// aborts the program with the message.
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: prelude panic reached
+fn main(): int {
+    panic("prelude panic reached");
+    return 0;
+}

@@ -1,0 +1,1 @@
+panic: runtime check: Negative exponent in integer '**' (fail_runtime_power_negative_exponent.tr:10)

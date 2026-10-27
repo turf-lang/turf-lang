@@ -1,0 +1,23 @@
+import test;
+
+enum Status { Pending, Active, Done, Cancelled }
+
+fn main(): int {
+    immut statuses: Status[4] = [Status::Pending, Status::Active, Status::Done, Status::Cancelled];
+
+    mut doneCount: int = 0;
+    for status in statuses {
+        if status == Status::Done {
+            doneCount = doneCount + 1;
+        }
+    }
+    test::assert(doneCount == 1, "");
+
+    mut sumAsInt: int = 0;
+    for status in statuses {
+        sumAsInt = sumAsInt + (status to int);
+    }
+    test::assert(sumAsInt == 6, ""); // 0+1+2+3
+
+    return 0;
+}

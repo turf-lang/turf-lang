@@ -1,0 +1,15 @@
+import test;
+// A local may share a function's name as long as the name is not CALLED in its
+// scope (see fail_call_shadowed_by_local_variable.tr); other scopes still call
+// the function normally.
+fn helper(): int { return 7; }
+
+fn main(): int {
+    test::assert(helper() == 7, "function call outside the shadow");
+    if (true) {
+        immut helper: int = 3;
+        test::assert(helper == 3, "variable read");
+    }
+    test::assert(helper() == 7, "function call after the shadow ends");
+    return 0;
+}

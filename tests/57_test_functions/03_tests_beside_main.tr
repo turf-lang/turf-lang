@@ -1,0 +1,23 @@
+// TDP-2-006 (issue #299): a file with tests and a `main` is a program and its
+// tests. `turf test` runs the tests, and then the file as an ordinary test
+// (it must compile and exit 0); a normal build leaves every test out.
+import test;
+
+fn triple(n: int): int {
+    return n * 3;
+}
+
+@test
+fn triples(): void {
+    test::assert(triple(2) == 6, "2 tripled is 6");
+}
+
+// Its expected error is the test's: the program still builds.
+@test(compile_error, E066, "Type mismatch")
+fn a_string_is_not_an_int(): void {
+    immut n: int = "three";
+}
+
+fn main(): int {
+    return triple(0);
+}

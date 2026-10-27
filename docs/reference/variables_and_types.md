@@ -352,7 +352,8 @@ data. Every string an operation produces lives on the garbage-collected heap.
 `+` and the six comparison operators on strings are ordinary operator
 overloads defined in the standard library, available without an import (see
 [Operators: String operators](operators.md#string-operators)). `s[i]` is built
-into the language and is described next.
+into the language and is described next. `for c in s` walks a string's bytes
+the same way (see [Control Flow](control_flow.md)).
 
 #### Indexing a string
 

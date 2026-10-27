@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E138
+// EXPECT-DIAG: 'List' is generic -- it needs type arguments here
+// The stdlib `List` named without type arguments -- the one spelling the
+// Parser used to reject by name ("Expected '<' after 'list'"). Still
+// rejected, now by the general Resolver rule (see
+// fail_type_identity_generic_without_type_args.tr), not a hardcoded name.
+
+import list::List;
+
+fn main(): int {
+    mut l: List = List::default();
+    return 0;
+}

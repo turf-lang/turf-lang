@@ -1,0 +1,19 @@
+// EXPECT-DIAG: E056
+// EXPECT-DIAG: No overload of 'takesNonNull' matches argument types (&?Node<int>)
+// Regression test: OVH-008's own explicit non-goal, and INV-NREF-2
+// (docs/development/INVARIANTS.md) -- "`&?T -> &T` is never implicit, in
+// either direction, permanently." OVH-008 fixed the implicit `&T -> &?T`
+// WIDENING for a generic pointee (`generic_nullable_widening.tr`, the
+// positive twin of this test); this file locks in that the OPPOSITE
+// direction -- narrowing a nullable generic reference into a non-nullable
+// one -- is still rejected, exactly as before the fix and exactly as the
+// non-generic case already is.
+struct Node<T> { val: T, next: &?Node<T> }
+
+fn<T> takesNonNull(n: &Node<T>): int { return 0; }
+
+fn main(): int {
+    mut a: Node<int> = Node::default();
+    mut p: &?Node<int> = &a;
+    return takesNonNull(p);   // &?Node<int> -> &Node<T>: must be rejected
+}

@@ -15,9 +15,46 @@
 //   mut q: int    = math::divide(10, 0) recover produce -1;
 
 // ─── constants ─────────────────────────────────────────────────────────────
+//
+// Always qualified (`math::PI`, `math::INT_MAX`): a constant is never a bare
+// name, so none of these can collide with a program's own.
 
 export immut PI: double = 3.14159265358979323846;
+export immut TAU: double = 6.28318530717958647692;
 export immut E: double = 2.71828182845904523536;
+export immut PHI: double = 1.61803398874989484820;
+export immut SQRT2: double = 1.41421356237309504880;
+export immut SQRT1_2: double = 0.70710678118654752440;
+export immut LN2: double = 0.69314718055994530942;
+export immut LN10: double = 2.30258509299404568402;
+export immut LOG2E: double = 1.44269504088896340736;
+export immut LOG10E: double = 0.43429448190325182765;
+
+// ─── limits ──────────────────────────────────────────────────────────────────
+//
+// The range of each numeric type. `MIN` is the most negative value of the
+// type for `double` as for the integers; the smallest positive normal
+// `double` (C's DBL_MIN) is `DOUBLE_MIN_POSITIVE`.
+
+export immut INT_MAX: int = 9223372036854775807;
+export immut INT_MIN: int = -9223372036854775808;
+export immut INT32_MAX: int32 = 2147483647;
+export immut INT32_MIN: int32 = -2147483648;
+export immut DOUBLE_MAX: double = 1.7976931348623157e308;
+export immut DOUBLE_MIN: double = -1.7976931348623157e308;
+export immut DOUBLE_MIN_POSITIVE: double = 2.2250738585072014e-308;
+export immut DOUBLE_EPSILON: double = 2.220446049250313e-16;
+
+// ─── infinity and NaN ────────────────────────────────────────────────────────
+//
+// No literal spells these, and `/` by zero panics for a double, so the
+// compiler gives these three their values (src/sema/Intrinsics.h, kind 6):
+// the `0.0` each is written with is never read. NaN equals nothing, itself
+// included, so `x == NAN` is always false: test with `is_nan(x)`.
+
+export immut INFINITY: double = 0.0;
+export immut NEG_INFINITY: double = 0.0;
+export immut NAN: double = 0.0;
 
 // ─── libm bindings ────────────────────────────────────────────────────────────
 
@@ -64,6 +101,21 @@ pub fn power(base: int, exp: double): double {
 
 pub fn power(base: double, exp: int): double {
     return pow(base, exp to double);
+}
+
+// ─── is_nan / is_infinite / is_finite ────────────────────────────────────────
+
+// NaN is the one value not equal to itself.
+pub fn is_nan(val: double): bool {
+    return val != val;
+}
+
+pub fn is_infinite(val: double): bool {
+    return val == INFINITY || val == NEG_INFINITY;
+}
+
+pub fn is_finite(val: double): bool {
+    return !is_nan(val) && !is_infinite(val);
 }
 
 // ─── min / max ────────────────────────────────────────────────────────────────
@@ -116,6 +168,99 @@ pub fn clamp(val: double, min_val: double, max_val: double): double {
         return max_val;
     }
     return val;
+}
+
+// ─── wrapping arithmetic ──────────────────────────────────────────────────────
+//
+// `int` arithmetic modulo 2^64 that never traps on overflow, for hashes,
+// checksums and random-number generators, where overflow is the intended
+// result. The operators stay checked. The compiler lowers every call of the
+// first four, and each of their bodies, to one plain add, subtract, multiply
+// or shift at every optimization level (src/sema/Intrinsics.h, kind 5), so
+// the operators written in those four bodies are never compiled: they say
+// which operation each one wraps. The rest are built on those four. Division
+// by zero has no wrapped result, so `wrapping_div` and `wrapping_rem` still
+// panic for it, at the caller's line.
+
+pub fn wrapping_add(a: int, b: int): int {
+    return a + b;
+}
+
+pub fn wrapping_sub(a: int, b: int): int {
+    return a - b;
+}
+
+pub fn wrapping_mul(a: int, b: int): int {
+    return a * b;
+}
+
+// `a` shifted left by `n` modulo 64 places; bits shifted out are dropped.
+pub fn wrapping_shl(a: int, n: int): int {
+    return a << n;
+}
+
+// `a` shifted right (arithmetic, keeping the sign) by `n` modulo 64 places.
+pub fn wrapping_shr(a: int, n: int): int {
+    return a >> (n & 63);
+}
+
+// `-a`; the most negative int is its own negation.
+pub fn wrapping_neg(a: int): int {
+    return wrapping_sub(0, a);
+}
+
+// `|a|`; the most negative int is its own absolute value.
+pub fn wrapping_abs(a: int): int {
+    if a < 0 {
+        return wrapping_neg(a);
+    }
+    return a;
+}
+
+// `a / b`, truncated toward zero; the most negative int divided by -1 is
+// itself. Panics when `b` is 0.
+@caller_location
+pub fn wrapping_div(a: int, b: int): int {
+    if b == 0 {
+        sys::panic(caller_location + ": math::wrapping_div: division by zero");
+    }
+    if b == -1 {
+        return wrapping_neg(a);
+    }
+    return a / b;
+}
+
+// `a % b`, with the sign of `a`; the most negative int modulo -1 is 0.
+// Panics when `b` is 0.
+@caller_location
+pub fn wrapping_rem(a: int, b: int): int {
+    if b == 0 {
+        sys::panic(caller_location + ": math::wrapping_rem: division by zero");
+    }
+    if b == -1 {
+        return 0;
+    }
+    return a % b;
+}
+
+// `base` to the power `exp` modulo 2^64. Panics when `exp` is negative: the
+// result would be a fraction.
+@caller_location
+pub fn wrapping_pow(base: int, exp: int): int {
+    if exp < 0 {
+        sys::panic(caller_location + ": math::wrapping_pow: negative exponent");
+    }
+    mut result: int = 1;
+    mut b: int = base;
+    mut e: int = exp;
+    while e > 0 {
+        if (e & 1) == 1 {
+            result = wrapping_mul(result, b);
+        }
+        b = wrapping_mul(b, b);
+        e = e >> 1;
+    }
+    return result;
 }
 
 // ─── divide ───────────────────────────────────────────────────────────────────

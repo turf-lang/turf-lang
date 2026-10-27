@@ -1,0 +1,16 @@
+// EXPECT-DIAG: E096
+// EXPECT-DIAG: 'IOError::NotFound' declares payload fields (path: string) so it can't be used as a value on its own
+// LEC-004: a variant that declares fields has no value without its payload, so
+// naming it bare where a value is wanted is E096 (it is only legal as an
+// `==`/`!=` operand, or as a pattern head).
+error IOError {
+    NotFound(path: string)
+}
+
+fn open(p: string): !int {
+    return IOError::NotFound;
+}
+
+fn main(): int {
+    return 0;
+}

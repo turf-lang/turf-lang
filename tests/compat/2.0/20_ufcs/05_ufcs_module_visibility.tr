@@ -1,0 +1,12 @@
+// UFCS candidate visibility (Option A, same rule already established for
+// `operator` resolution): visible if the defining module is imported/known
+// anywhere in the compile.
+import ufcs_helpers_module;
+import test;
+
+fn main(): int {
+    mut n: int = 7;
+    test::assert(n.triple() == 21, "UFCS candidate from an imported module");
+
+    return 0;
+}

@@ -1,0 +1,17 @@
+// EXPECT-DIAG: E103
+// EXPECT-NO-DIAG: E041
+// EXPECT-NO-DIAG: Internal error
+// turf-fuzz: one syntax error in a function's body also reported every call
+// of that function as an unknown function (E041), burying the real error.
+// The definition failed to parse, so the name is noted and its calls are
+// not reported again.
+fn helper(): int {
+    defer { }
+    return 1;
+}
+
+fn main(): int {
+    mut a: int = helper();
+    mut b: int = helper();
+    return a + b;
+}

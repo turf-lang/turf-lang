@@ -1,0 +1,38 @@
+// Regression test: a struct success type (`!Point`, not just primitives)
+// must round-trip correctly through FallibleValue's boxed successBits slot.
+// A single-field `{x: int}` struct is still a real LLVM struct, not a bare
+// i64 -- found live while converting net.tr's TcpConnection::connect() to
+// `!T` (the struct's fields were silently truncated to zero before
+// BoxToI64Slot()/UnboxFromI64Slot() learned to heap-box non-scalar values).
+import test;
+
+error MyError {
+    Failed,
+}
+
+struct Point {
+    x: int,
+    y: int,
+}
+
+fn Point.new(x: int, y: int): void {
+    self.x = x;
+    self.y = y;
+}
+
+fn makePoint(shouldFail: bool): !Point {
+    if (shouldFail) {
+        return MyError::Failed;
+    }
+    return Point::new(42, 7);
+}
+
+fn main(): int {
+    mut p: Point = makePoint(false) recover run {
+        return -1;
+    };
+    test::assert_eq(p.x, 42, "struct success value's first field should round-trip correctly");
+    test::assert_eq(p.y, 7, "struct success value's second field should round-trip correctly");
+
+    return 0;
+}

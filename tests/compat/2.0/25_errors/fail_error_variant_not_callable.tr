@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E135
+// EXPECT-DIAG: 'MathError::DivisionByZero' is an error variant, not a function
+// Test (fail): an error variant is a bare, non-callable name, exactly like
+// an `enum` variant -- calling it (even with zero arguments) is rejected,
+// not just calling it with the wrong arity (there is no arity at all).
+error MathError {
+    DivisionByZero,
+}
+
+fn main(): int {
+    mut e: MathError = MathError::DivisionByZero();
+    return 0;
+}

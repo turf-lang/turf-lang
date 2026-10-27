@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E103
+// EXPECT-DIAG: Expected a word or a string in the arguments of '@test'
+// TDP-2-006: an argument is a literal, a code or a variant, never an
+// expression: whether a test exists and what it expects is known without
+// running anything.
+@test(exit, 1 + 2)
+fn a(): void {
+    sys::exit(3);
+}
+
+fn main(): int {
+    return 0;
+}

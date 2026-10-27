@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: needs a non-empty message
+// An empty message would warn every caller with nothing actionable to read.
+
+@deprecated("")
+fn make(): int {
+    return 1;
+}
+
+fn main(): int {
+    return make();
+}

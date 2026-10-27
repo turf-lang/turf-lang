@@ -1,0 +1,24 @@
+import test;
+
+struct Row {
+    val: int
+}
+
+struct Matrix {
+    row: Row
+}
+
+fn get_matrix(): Matrix {
+    mut matrix: Matrix = Matrix::default();
+    matrix.row.val = 10;
+    return matrix;
+}
+
+fn main(): int {
+    mut mat: Matrix = get_matrix();
+
+    // Test parsing Type System assignment and return types with nested structs
+    test::assert(mat.row.val == 10, "Type System parsing failed");
+
+    return 0;
+}

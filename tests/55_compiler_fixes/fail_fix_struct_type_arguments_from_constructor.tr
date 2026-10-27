@@ -1,0 +1,17 @@
+// EXPECT-DIAG: E129
+// EXPECT-FIX: insert '<int>' after 'Box'
+// LG-7: the constructor's argument binds Box's only type parameter, so there
+// is one candidate, written where the value is built (`Box<int>::new(42)`).
+
+struct Box<T> {
+    val: T
+}
+
+fn<T> Box.new(v: T): void {
+    self.val = v;
+}
+
+fn main(): int {
+    mut b = Box::new(42);
+    return b.val - 42;
+}

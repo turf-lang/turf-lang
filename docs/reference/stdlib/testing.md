@@ -11,8 +11,9 @@ import test;
 A test in Turf is an ordinary program. Its `main` makes assertions and returns
 `0`. An assertion that fails prints a message to standard error and aborts the
 program (exit status 134 on Linux and macOS), which `turf test` reports as a
-failed test. There is no test framework, no test discovery inside a file, and no
-test attributes: one file is one test.
+failed test. A file is one test, or, when it has functions marked
+[`@test`](../functions_and_modules.md#test), one test per such function; those
+call the same assertions.
 
 ## The functions
 

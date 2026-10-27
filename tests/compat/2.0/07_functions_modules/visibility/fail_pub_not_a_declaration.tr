@@ -1,0 +1,8 @@
+// EXPECT-DIAG: E087
+// EXPECT-DIAG: 'pub' can't be applied to a variable
+// LEC-002: E087 -- `pub` has to be followed by a declaration.
+pub immut LIMIT: int = 10;
+
+fn main(): int {
+    return 0;
+}

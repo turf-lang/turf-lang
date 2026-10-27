@@ -1,0 +1,19 @@
+TURF E163 -- UNUSED VARIABLE (WARNING):
+
+CAUSE:
+  A local variable is declared and never read. Names starting with `_` are
+  treated as deliberately unused. This is a WARNING: compilation still
+  succeeds.
+
+INCORRECT:
+    immut unused: int = 42;    // WARNING: never used
+
+CORRECT (use it, or mark it unused with `_`):
+    immut _unused: int = 42;
+    immut used: int = 42;
+    printline(used to string);
+
+FIX:
+  Delete the declaration, use the value, or rename it `_name`.
+
+RELATED: E160 (a stored value never read), E161 (a starting value never read).

@@ -1,0 +1,58 @@
+// Issue #260: a `T[]` parameter accepts any expression of array type, not
+// just a plain variable. Passing a literal or a call result used to be an
+// internal compiler error ("array argument must be a variable"). Also covers
+// a slice of rows (`int[][3]`, like C's `int arr[][3]`), whose elements are
+// themselves sized arrays.
+import test;
+
+fn sum(arr: int[]): int {
+    mut total: int = 0;
+    for v in arr {
+        total += v;
+    }
+    return total;
+}
+
+fn make(): int[3] {
+    return [1, 2, 3];
+}
+
+struct Holder {
+    data: int[2]
+}
+
+fn Holder.new(a: int, b: int): void {
+    self.data = [a, b];
+}
+
+// Rows of a fixed width; any number of rows.
+fn sum_grid(rows: int[][3]): int {
+    mut total: int = 0;
+    for row in rows {
+        for cell in row {
+            total += cell;
+        }
+    }
+    return total;
+}
+
+fn corner(rows: int[][3]): int {
+    return rows[-1][2];
+}
+
+fn main(): int {
+    test::assert(sum([4, 5, 6]) == 15, "array literal argument");
+    test::assert(sum(make()) == 6, "call-result argument");
+
+    mut h: Holder = Holder::new(20, 22);
+    test::assert(sum(h.data) == 42, "struct field argument");
+
+    mut grid: int[2][3] = [[1, 2, 3], [4, 5, 6]];
+    test::assert(sum(grid[1]) == 15, "one row of a 2D array");
+    test::assert(sum_grid(grid) == 21, "a slice of rows");
+    test::assert(corner(grid) == 6, "rows[-1][2]");
+
+    mut tall: int[3][3] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+    test::assert(sum_grid(tall) == 3, "a different number of rows");
+    return 0;
+}

@@ -1,0 +1,26 @@
+// EXPECT-NO-DIAG: may already have been freed
+// An `extern fn` called `free` that makes no ownership claim is just a function.
+// The compiler knows a fact about a function because its declaration says so,
+// never because of its name, so the second `free(p)` below is NOT reported as a
+// double free. (With `@ownership` on them, an unconditional second free is
+// rejected, ../05_arrays_pointers_ffi/fail_double_free.tr, and a guarded one
+// like this is a warning, conditional_free_is_a_warning.tr.) The second call
+// is guarded so the program never really frees twice.
+
+import test;
+
+extern fn malloc(size: int): int*;
+extern fn free(p: int*): void;
+
+fn main(): int {
+    mut second_free: int = 0;
+    unsafe {
+        mut p: int* = malloc(sizeof(int) * 4);
+        free(p);
+        if second_free == 1 {
+            free(p);
+        }
+    }
+    test::assert(second_free == 0, "the program freed once");
+    return 0;
+}

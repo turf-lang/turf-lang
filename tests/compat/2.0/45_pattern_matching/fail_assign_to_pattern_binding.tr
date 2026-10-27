@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E060
+// EXPECT-DIAG: You can't change the value of 'x' because it's immutable
+// LEC-003: a binding is immutable. Expected: E060.
+struct P { x: int }
+fn main(): int {
+    mut p: P = P::default();
+    compare p {
+        matches P { x }: x = 4; return x; done
+        otherwise: return 0;
+    }
+}

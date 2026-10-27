@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E066
+// EXPECT-DIAG: The condition of 'while' must be a 'bool', but this one has type 'int'
+// An int is not a condition; the loop says `n != 0`.
+fn main(): int {
+    mut n: int = 3;
+    while n {
+        n = n - 1;
+    }
+    return n;
+}

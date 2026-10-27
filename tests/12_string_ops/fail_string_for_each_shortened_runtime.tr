@@ -1,0 +1,16 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: String index out of bounds
+// SY-1 (TDP-2-021): the loop's length is taken once, so a body that writes a
+// '\0' ahead of it has made the string shorter than the loop's position.
+// Reading that byte panics, as `s[i]` would.
+
+fn main(): int {
+    mut s: string = strings::repeat("ab", 2);
+    for (i, c) in s {
+        if i == 0 {
+            s[2] = (0 to char);
+        }
+        io::printline(c);
+    }
+    return 0;
+}

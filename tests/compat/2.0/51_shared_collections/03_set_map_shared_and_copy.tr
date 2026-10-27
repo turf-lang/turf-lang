@@ -1,0 +1,45 @@
+// LEC-009 (F-COLL-1): Set and Map follow the List rule. These are the two
+// where the old by-value copy was worst: a copy shared the buckets but not
+// `len`/`bcap`, so growing one copy rehashed buckets under the other's stale
+// count. Here both names grow the same table well past several rehashes.
+import map::Map;
+import set::Set;
+import test;
+
+fn add_all(s: Set<int>, m: Map<int, int>, n: int): void {
+    mut i: int = 0;
+    while i < n {
+        s.add(i);
+        m.put(i, i * 10);
+        i = i + 1;
+    }
+}
+
+fn main(): int {
+    mut s: Set<int> = Set::default();
+    mut m: Map<int, int> = Map::default();
+    mut s2: Set<int> = s;
+    mut m2: Map<int, int> = m;
+    add_all(s2, m2, 50);
+    test::assert(s.length() == 50 && m.length() == 50, "callee adds through aliases");
+    test::assert(s.contains(49) && m.get(49) == 490, "lookups after rehashing");
+    s.remove(10);
+    m.remove(10);
+    test::assert(!s2.contains(10) && !m2.contains(10), "removal through the other name");
+
+    // `[]=` through an alias.
+    m2[7] = 0;
+    test::assert(m[7] == 0, "map alias write");
+
+    // `.copy()` keeps the dense order and is independent.
+    mut sc: Set<int> = s.copy();
+    mut mc: Map<int, int> = m.copy();
+    test::assert(sc.length() == 49 && sc[0] == s[0] && sc[48] == s[48], "set copy order");
+    test::assert(mc.keys()[5] == m.keys()[5] && mc.get(20) == 200, "map copy order and values");
+    sc.add(1000);
+    mc.put(1000, 1);
+    mc.put(20, -1);
+    test::assert(!s.contains(1000) && s.length() == 49, "set copy is independent");
+    test::assert(!m.contains(1000) && m.get(20) == 200, "map copy is independent");
+    return 0;
+}

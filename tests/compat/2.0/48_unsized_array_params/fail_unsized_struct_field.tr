@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E140
+// EXPECT-DIAG: Field 'values' of 'Bag' can't use the unsized array type 'int[]'
+// Issue #260: a field outlives any one call, so it can't hold a slice of
+// someone else's array. This used to compile silently.
+struct Bag {
+    values: int[]
+}
+
+fn main(): int {
+    return 0;
+}

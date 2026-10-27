@@ -1,0 +1,42 @@
+// Regression test: TYPE-002 -- completion criterion 3. Moved (and
+// rewritten to assert the now-CORRECT behavior) from
+// tests/99_known_bugs/set_string_dedup_broken.tr, which tracked this as an
+// accepted, deferred limitation from before monomorphization landed:
+// `Set<T>.indexOf()`'s `self.items[i] == item` used to compare by raw
+// pointer identity for T = string, not content, because a generic
+// method's body was type-checked/codegenned exactly ONCE, shared across
+// every instantiation -- `self.items[i]`/`item` never carried the concrete
+// type `string` for operator-overload resolution to dispatch
+// `strings.tr`'s real `operator==(string, string)` through. Monomorphized
+// methods (TYPE-002, S12b onward) give `Set<string>.indexOf()` its own
+// real, separately-codegenned clone, closing this for good -- see
+// set.tr's own `Set.indexOf()` doc comment (now updated to say "FIXED",
+// not "KNOWN LIMITATION") and `docs/archive/LIMITATIONS.md`.
+//
+// INV-TEST-1 (INVARIANTS.md): the duplicate below is built at RUNTIME via
+// strings::trim(), never a second occurrence of the same string literal.
+// Two identical string LITERALS in one source file are not a reliable
+// test of this fix -- the linker merges identical read-only string
+// constants into one address, so two literal "hello"s can end up
+// pointer-equal by sheer coincidence, making even the OLD, broken
+// pointer-identity comparison accidentally "pass". A duplicate built from
+// a genuinely separate allocation (trim/substring/concat/anything parsed
+// from input) carries no such coincidence.
+import test;
+import set::Set;
+import strings;
+
+fn main(): int {
+    mut s: Set<string> = Set::default();
+    s.add("hello");
+    s.add("world");
+    immut dup: string = strings::trim(" hello "); // content-equal to "hello", separate allocation
+    s.add(dup); // must be a no-op (duplicate)
+
+    test::assert(s.length() == 2,
+        "Set<string> dedup: duplicate add should be a no-op");
+    test::assert(s.contains("hello"), "Set<string> should still contain 'hello'");
+    test::assert(s.contains(dup), "Set<string> should recognize dup as already present");
+
+    return 0;
+}

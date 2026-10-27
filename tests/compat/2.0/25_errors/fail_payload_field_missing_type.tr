@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E096
+// EXPECT-DIAG: field 'path' of 'IOError::NotFound' has no type
+// LEC-004: each payload field is `name: Type`. A bare name is E096.
+error IOError {
+    NotFound(path)
+}
+
+fn main(): int {
+    return 0;
+}

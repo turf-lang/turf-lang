@@ -1,0 +1,27 @@
+TURF E168 -- IDENTICAL BRANCHES (WARNING):
+
+CAUSE:
+  The `if` and `else` bodies of an `if` / `else` contain the same code, so the
+  condition has no effect. Often a copy that was never edited. This is a
+  WARNING: compilation still succeeds.
+
+INCORRECT:
+    immut n: int = 3;
+    if n > 2 {
+        printline("big");
+    } else {
+        printline("big");        // WARNING: same as the 'if' branch
+    }
+
+CORRECT (the branches differ):
+    immut n: int = 3;
+    if n > 2 {
+        printline("big");
+    } else {
+        printline("small");
+    }
+
+FIX:
+  Edit the branch that was copied, or remove the `if` and keep one body.
+
+RELATED: E165 (an empty branch).

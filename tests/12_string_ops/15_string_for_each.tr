@@ -1,0 +1,98 @@
+// SY-1 (TDP-2-021, #319): `for c in s` walks a string's bytes, each a `char`,
+// and gives what the index loop over `s[i]` gives.
+import test;
+
+fn count_long_hand(s: string, want: char): int {
+    mut n: int = 0;
+    for i in 0..s.length() {
+        if s[i] == want {
+            n++;
+        }
+    }
+    return n;
+}
+
+fn count(s: string, want: char): int {
+    mut n: int = 0;
+    for c in s {
+        if c == want {
+            n++;
+        }
+    }
+    return n;
+}
+
+fn first_digit(s: string): int {
+    for (i, c) in s {
+        if c >= '0' && c <= '9' {
+            return i;
+        }
+    }
+    return -1;
+}
+
+fn main(): int {
+    // Empty, one byte, a literal, a string built at run time.
+    test::assert(count("", 'a') == 0, "empty");
+    test::assert(count("a", 'a') == 1, "one byte");
+    test::assert(count("banana", 'a') == count_long_hand("banana", 'a'), "literal");
+    immut built: string = strings::repeat("ab,", 3);
+    test::assert(count(built, ',') == 3, "run-time string");
+    test::assert(count(built, 'b') == count_long_hand(built, 'b'), "run-time, long hand");
+
+    // UTF-8: one char per byte, as s[i] and length().
+    mut bytes: int = 0;
+    for c in "é" {
+        bytes++;
+    }
+    test::assert(bytes == "é".length(), "one iteration per byte");
+
+    // The paired form, and `return` from inside the loop.
+    test::assert(first_digit("abc4d") == 3, "index and return");
+    test::assert(first_digit("abc") == -1, "no digit");
+
+    // break and continue.
+    mut seen: strings::StringBuilder = strings::StringBuilder::default();
+    for c in "a-b-c|d" {
+        if c == '-' {
+            continue;
+        }
+        if c == '|' {
+            break;
+        }
+        seen.append_char(c);
+    }
+    test::assert(seen.to_string() == "abc", "break and continue");
+
+    // Nested loops over two strings.
+    mut pairs: int = 0;
+    for a in "xy" {
+        for b in "xyz" {
+            if a == b {
+                pairs++;
+            }
+        }
+    }
+    test::assert(pairs == 2, "nested");
+
+    // The string is taken once: reassigning the variable does not change the walk.
+    mut s: string = "abc";
+    mut walked: int = 0;
+    for c in s {
+        s = "a much longer string";
+        walked++;
+    }
+    test::assert(walked == 3, "string evaluated once");
+
+    // A byte the body changes ahead of the loop is read changed.
+    mut w: string = strings::repeat("ab", 2);
+    mut out: strings::StringBuilder = strings::StringBuilder::default();
+    for (i, c) in w {
+        if i == 0 {
+            w[2] = 'X';
+        }
+        out.append_char(c);
+    }
+    test::assert(out.to_string() == "abXb", "a later byte changed by the body");
+    return 0;
+}

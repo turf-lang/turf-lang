@@ -1,0 +1,27 @@
+// Regression test: a static method declared inside a MODULE, called both
+// fully qualified (Module::StructName::method()) and bare
+// (StructName::method()) after Vec2 itself is on-demand imported for the
+// TYPE ANNOTATION's sake -- the static CALL itself never needed that
+// import: `::`-qualified access (including a static method call) bypasses
+// the bare-type visibility gate entirely (isKnownStruct() is an existence
+// check, not a visibility one -- see 2.7.1 in the architecture doc), same
+// as any other qualified reference. Also exercises a static method
+// RETURNING a struct by value across the module boundary (see
+// scope_struct_by_value_cross_module_test.tr's crash fix) combined with a
+// static method call, together in one path.
+
+import io;
+import static_shape_module;
+import static_shape_module::Vec2;
+
+import test;
+fn main(): int {
+    immut z: Vec2 = static_shape_module::Vec2::zero();
+    test::assert(z.x == 0 && z.y == 0, "fully qualified static method call across a module works");
+
+    immut v: Vec2 = Vec2::make(3, 4);
+    test::assert(v.length2() == 25, "bare static method call (via on-demand import) works, chained with an instance method");
+
+    io::printline("static methods across a module boundary work");
+    return 0;
+}

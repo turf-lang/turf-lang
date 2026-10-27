@@ -1,0 +1,14 @@
+// EXPECT-DIAG: E149
+// EXPECT-DIAG: "red" is not a variant of 'Color'
+// A variant name must match exactly, case included.
+
+enum Color {
+    Red,
+    Green
+}
+
+fn main(): int {
+    mut c: Color = "red" to Color;
+    printline(c to string);
+    return 0;
+}

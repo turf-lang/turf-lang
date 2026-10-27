@@ -1,0 +1,16 @@
+// Char literals reuse the exact same escape-sequence set already recognized
+// inside double-quoted strings. Round-tripped through `to int` to pin down
+// the exact byte value each escape produces.
+import test;
+
+fn main(): int {
+    test::assert(('\n' to int) == 10, "\\n should be byte 10");
+    test::assert(('\t' to int) == 9, "\\t should be byte 9");
+    test::assert(('\r' to int) == 13, "\\r should be byte 13");
+    test::assert(('\0' to int) == 0, "\\0 should be byte 0");
+    test::assert(('\\' to int) == 92, "\\\\ should be byte 92");
+    test::assert(('\'' to int) == 39, "\\' should be byte 39");
+    test::assert(('\"' to int) == 34, "\\\" should be byte 34");
+
+    return 0;
+}

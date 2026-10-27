@@ -1,0 +1,19 @@
+// LEC-003: `matches _:` is how a compare over an error value takes "any
+// error" -- the open-union rule is satisfied by an unguarded catch-all.
+error MathError { DivisionByZero, Overflow }
+
+fn risky(n: int): !int {
+    if n == 0 { return MathError::DivisionByZero; }
+    return n;
+}
+
+fn main(): int {
+    mut r: int = 0;
+    immut v: int = risky(0) recover as err run {
+        compare err {
+            matches _: r = 1; done
+        }
+        return r - 1;
+    };
+    return v;
+}

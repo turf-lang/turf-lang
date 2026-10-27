@@ -1,0 +1,44 @@
+// LANG-002/STD-001: two things folded into this group from §15.8.
+//
+// F1 -- a module that declares the raw-pointer capability (`unsafe
+// module;`, this file's first line) may write a `ptr`-taking function --
+// what a C callback (`qsort`'s comparator, a signal handler, ...) requires.
+// Before this group, `fn cmpints(a: ptr, b: ptr): int32` was rejected even
+// inside `unsafe { }`, everywhere -- `checkNoRawPointersInSignature()` had
+// no path to authorize it at all. `takesTwoRaw` below is exactly that
+// previously-impossible shape.
+//
+// F2 -- "a second `extern fn` inside a top-level `unsafe { }` block fails
+// to parse" was audited as a live parser bug (ARCHITECTURE_OVERHAUL.md
+// §15.8). A direct repro against the current parser (several variants: with
+// and without parameters, with and without `extern from "lib"`) did NOT
+// reproduce it -- see docs/development/changes/LANG-002.md's own "Known
+// pitfalls" for the verification. This test lock in the CORRECT behavior
+// either way: two `extern fn`s inside one top-level `unsafe { }` block.
+unsafe module;
+
+unsafe {
+    extern fn labs(x: int): int;
+    extern fn atol(s: string): int;
+}
+
+fn takesTwoRaw(a: ptr, b: ptr): int32 {
+    return 0 to int32;
+}
+
+fn main(): int {
+    if (labs(-7) != 7) {
+        return 1;
+    }
+    if (atol("42") != 42) {
+        return 2;
+    }
+    unsafe {
+        mut x: int = 1;
+        mut y: int = 2;
+        if (takesTwoRaw(&x to ptr, &y to ptr) != 0) {
+            return 3;
+        }
+    }
+    return 0;
+}

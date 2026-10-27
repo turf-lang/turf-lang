@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: 'E172' is a warning's code, not an error's
+// TDP-2-006: a compile_error test names an error's code; a warning's goes in
+// a warning outcome.
+@test(compile_error, E172, "deprecated")
+fn a(): void {
+}
+
+fn main(): int {
+    return 0;
+}

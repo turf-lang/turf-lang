@@ -19,6 +19,10 @@
 #include <string>
 #include <vector>
 
+/// The `"format"` a package graph must declare: the one this turfc reads.
+/// Also reported by `turfc --version --json` (IF-1).
+inline constexpr int PackageGraphFormat = 1;
+
 struct PackageInfo {
   std::string Name;
   std::string SrcRoot;           ///< canonical absolute path of the package's src/
@@ -63,6 +67,11 @@ extern PackageGraph g_PackageGraph;
 std::optional<PackageGraph> LoadPackageGraph(const std::string &File,
                                              const std::string &EntryFile,
                                              bool EntryIsModule,
+                                             std::string &Error);
+
+/// The same checks with no file being compiled, for a tool that reads every
+/// package of a project instead (`turfc --unsafe-report`, LB-2).
+std::optional<PackageGraph> LoadPackageGraph(const std::string &File,
                                              std::string &Error);
 
 #endif

@@ -431,14 +431,18 @@ add_library(turfcore STATIC
   src/codegen/CodegenStruct.cpp
   src/tooling/Formatter.cpp
   src/tooling/MigratePub.cpp
+  src/tooling/UnsafeReport.cpp
   src/frontend/Lexer.cpp
   src/diagnostics/CompilerFix.cpp
+  src/diagnostics/DiagnosticsJson.cpp
+  src/diagnostics/LintLevels.cpp
   src/analysis/Lint.cpp
   src/sema/Monomorphize.cpp
   src/frontend/ParserCore.cpp
   src/frontend/ParserLiteral.cpp
   src/frontend/ParserStmt.cpp
   src/frontend/ParserDecl.cpp
+  src/frontend/TestRegistry.cpp
   src/frontend/ParserModule.cpp
   src/tooling/PackageGraph.cpp
   src/slm/Sandbox.cpp

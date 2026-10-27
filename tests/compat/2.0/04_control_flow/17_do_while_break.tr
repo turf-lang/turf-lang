@@ -1,0 +1,19 @@
+import test;
+
+fn main(): int {
+    mut i: int = 0;
+    mut sum: int = 0;
+
+    do {
+        if i >= 5 {
+            break;
+        }
+        sum = sum + i;
+        i = i + 1;
+    } while (i < 100);
+
+    test::assert(sum == 10, "");
+    test::assert(i == 5, "");
+
+    return 0;
+}

@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E124
+// EXPECT-DIAG: Cannot compare struct values with '=='
+// A generic instance such as List<int> is a struct; without an `operator ==`
+// it has no `==`, the same as a plain struct.
+import list::List;
+
+fn main(): int {
+    mut a: List<int> = List::default();
+    mut b: List<int> = List::default();
+    printline(a == b);
+    return 0;
+}

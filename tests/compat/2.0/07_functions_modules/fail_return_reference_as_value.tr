@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E064
+// EXPECT-DIAG: Copy the value out with `to`: `x to P`
+// A reference is not the value it refers to: returning it where the value is
+// declared needs the explicit copy, `return p to P;`.
+struct P { x: int }
+
+fn f(p: &P): P {
+    return p;
+}
+
+fn main(): int { return 0; }

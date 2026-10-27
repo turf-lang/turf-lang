@@ -92,6 +92,19 @@ dups=$(while IFS= read -r row; do
        done <<< "$rows" | sort | uniq -d | tr '\n' ' ')
 [ -z "$dups" ] || say "more than one registry row for: $dups"
 
+# 5. every warning class has a row (V-1): a lint level names a CODE, so a warning
+#    with none could be neither allowed nor denied. A warning class is spelled
+#    `...Warning` (ErrorCodes::isWarningCode() tells a warning code from an
+#    error's by that suffix), and an error class never is.
+while IFS= read -r cls; do
+    [[ "$cls" == *Warning ]] || say "$cls derives from TurfWarning but is not named ...Warning (isWarningCode() would count its code as an error's)"
+    grep -qE "^[[:space:]]*\{(ErrCode::[A-Za-z0-9_]+|\"E[0-9]{3}\"), \"$cls\"," "$HDR" \
+        || say "warning class $cls has no row in AllErrorCodes, so no lint level can name it -- add one (ErrorCodes.h)"
+done < <(grep -hE '^class [A-Za-z0-9_]+ : public TurfWarning' src/diagnostics/*.h | sed -E 's/^class ([A-Za-z0-9_]+) .*/\1/')
+while IFS= read -r cls; do
+    [[ "$cls" != *Warning ]] || say "$cls derives from TurfError but is named ...Warning (isWarningCode() would count its code as a warning's)"
+done < <(grep -hE '^class [A-Za-z0-9_]+ : public TurfError' src/diagnostics/*.h | sed -E 's/^class ([A-Za-z0-9_]+) .*/\1/')
+
 if [ $fail -eq 0 ]; then
     echo "error_codes_check: OK ($(wc -l <<< "$rows") registered codes, every one documented (human + SLM) and raised)"
 fi

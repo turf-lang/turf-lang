@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E025
+// EXPECT-DIAG: No overload of 'math::abs' matches argument types (string)
+import io;
+import math;
+
+fn main(): int {
+    io::printline(math::abs("hello"));
+
+    return 0;
+}

@@ -1,0 +1,24 @@
+// EXPECT-DIAG: E042
+// EXPECT-DIAG: Unknown type 'Usre'
+// Regression test: a struct method declaration referencing a misspelled
+// struct name must still be rejected, even though ParseFuncDef() now builds
+// `self`'s type lazily (as a NamedType placeholder) instead of eagerly
+// resolving it via GlobalSymbolTable -- a change that was necessary to
+// support declaring a method before its struct (see
+// 19_method_before_struct.tr), but which also meant the old eager
+// "Unknown struct type 'X' in method declaration" parse-time check no
+// longer fires for a genuine typo. Resolver.cpp's validateNamedType(),
+// applied to every parameter (including the implicit `self`) in
+// visitFuncDef(), is where this validation now correctly lives instead.
+
+struct User {
+    age: int
+}
+
+fn Usre.grow(): void {
+    self.age = self.age + 1;
+}
+
+fn main(): int {
+    return 0;
+}

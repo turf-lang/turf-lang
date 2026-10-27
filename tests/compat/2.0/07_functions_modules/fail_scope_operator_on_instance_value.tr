@@ -1,0 +1,21 @@
+// EXPECT-DIAG: E029
+// EXPECT-DIAG: 'p' is a variable, not a type or module
+// Regression test: same as fail_scope_operator_on_instance_call.tr, but for
+// the non-call form (`instance::method`, no parens) -- exercises
+// visitScopeAccess()'s equivalent "you meant '.'" upgrade, a separate code
+// path from visitFuncCall's (only reached when a ScopeAccessExprAST is NOT
+// the direct callee of a call).
+
+struct P {
+    x: int
+}
+
+fn P.get(): int {
+    return self.x;
+}
+
+fn main(): int {
+    mut p: P = P::default();
+    immut y: int = p::get;
+    return 0;
+}

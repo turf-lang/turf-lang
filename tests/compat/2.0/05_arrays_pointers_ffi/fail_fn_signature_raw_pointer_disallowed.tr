@@ -1,0 +1,27 @@
+// EXPECT-DIAG: E130
+// EXPECT-DIAG: Raw pointer in function signature
+// EXPECT-DIAG: files that begin with 'unsafe module;' may use raw pointers
+// Regression test (issue #238): a plain (non-extern, non-lib/std)
+// function may never have a raw ptr/T* parameter or return type -- unlike
+// the declaration/cast/struct-field gates, this is NOT fixable by
+// wrapping in `unsafe { }` (block-scoped `unsafe` can't reach a function
+// SIGNATURE, only its body) -- see
+// TypeChecker::checkNoRawPointersInSignature()'s own doc comment. `extern
+// fn` bindings are unaffected (they go through a separate visitor,
+// visitExternFuncDecl(), and exist specifically to declare a raw-pointer-
+// shaped C ABI). Wrapping the whole declaration in `unsafe { }` here does
+// NOT help -- that's exactly the point of this test. See also
+// fail_ptr_outside_unsafe.tr, fail_cast_raw_pointer_outside_unsafe.tr, and
+// fail_struct_raw_ptr_field_outside_unsafe.tr for the other three gated
+// shapes, and 18_unsafe_block_and_safe_reference.tr for the corresponding
+// passing case (the identical function, but taking `&int` instead).
+
+unsafe {
+    fn takesRaw(p: ptr): int {
+        return 0;
+    }
+}
+
+fn main(): int {
+    return 0;
+}

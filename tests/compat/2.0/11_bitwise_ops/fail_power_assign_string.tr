@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E057
+// EXPECT-DIAG: Exponentiation compound assignment requires a numeric operand, but the left operand is 'string'
+// FAIL TEST: Compound exponentiation assignment on a non-numeric operand.
+// `**=` requires numeric operands (same as plain `**`); string has no
+// exponentiation overload.
+
+fn main(): int {
+    mut s: string = "abc";
+    s **= 2;  // TypeError: exponentiation compound assignment requires numeric operands
+
+    return 0;
+}

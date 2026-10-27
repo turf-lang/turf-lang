@@ -1,0 +1,25 @@
+// A method call through a raw-pointer receiver compiles inside `unsafe`.
+
+import test;
+
+unsafe {
+    struct Node {
+        val: int,
+        next: Node*
+    }
+}
+
+fn Node.value(): int {
+    return self.val;
+}
+
+fn main(): int {
+    mut b: Node = Node::default();
+    b.val = 7;
+    mut a: Node = Node::default();
+    unsafe {
+        a.next = &b to Node*;
+        test::assert(a.next.value() == 7, "method call through a raw pointer");
+    }
+    return 0;
+}

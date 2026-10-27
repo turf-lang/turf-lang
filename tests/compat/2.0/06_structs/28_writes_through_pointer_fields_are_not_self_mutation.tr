@@ -1,0 +1,46 @@
+// The other side of the fail_immutable_via_*_mutation.tr tests: the widened
+// "mutates self" scan must stop at a pointer or reference. `self.n.v = 5` writes
+// the pointee of the reference field `n`, not the Holder value, so calling it on
+// an `immut` Holder stays legal -- exactly as `List.set` (`self.data[i] = v` on a
+// `T*`) must stay callable through a copy, which is why `grid[i].set(j, v)`
+// works. Flagging these would reject programs that are correct and whose writes
+// really do land.
+import list::List;
+import test;
+
+struct Node {
+    v: int
+}
+
+fn Node.new(v: int): void {
+    self.v = v;
+}
+
+struct Holder {
+    n: &Node
+}
+
+fn Holder.new(n: &Node): void {
+    self.n = n;
+}
+
+fn Holder.poke(): void {
+    self.n.v = 5;
+}
+
+fn main(): int {
+    immut h: Holder = Holder::new(heap(Node::new(1)));
+    h.poke();
+    test::assert(h.n.v == 5, "write through a reference field reached the pointee");
+
+    // List.set writes through its buffer pointer: legal on an immut list and
+    // on an element of a list of lists, and the write lands.
+    immut l: List<int> = List::default();
+    mut grid: List<List<int>> = List::default();
+    mut row: List<int> = List::default();
+    row.push(0);
+    grid.push(row);
+    grid[0].set(0, 9);
+    test::assert(row[0] == 9, "grid[i].set(j, v) writes through the shared buffer");
+    return l.length();
+}

@@ -1,0 +1,21 @@
+import test;
+
+struct Inner {
+    val: int
+}
+
+struct Outer {
+    inner: Inner
+}
+
+fn main(): int {
+    mut o: Outer = Outer::default();
+    o.inner.val = 42;
+
+    // Assigning deeply nested dynamically evaluated L-Value
+    o.inner.val = 100;
+
+    test::assert(o.inner.val == 100, "L-value chained struct assignment failed");
+
+    return 0;
+}

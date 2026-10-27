@@ -1,0 +1,19 @@
+// EXPECT-DIAG: E066
+// EXPECT-DIAG: 'recover produce string' doesn't match this call's success type 'int'
+// Test (fail): "a recover block must evaluate to the function's success
+// type" (Errors.md) -- producing a string when the success type is int.
+error MathError {
+    DivisionByZero,
+}
+
+fn divide(a: int, b: int): !int {
+    if (b == 0) {
+        return MathError::DivisionByZero;
+    }
+    return a / b;
+}
+
+fn main(): int {
+    mut x: int = divide(10, 2) recover produce "oops";
+    return 0;
+}

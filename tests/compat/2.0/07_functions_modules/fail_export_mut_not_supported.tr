@@ -1,0 +1,9 @@
+// EXPECT-DIAG: E021
+// EXPECT-DIAG: 'export mut' is not supported yet
+// `export mut` (true mutable shared global state) isn't supported yet --
+// only `export immut` (a compile-time constant) is.
+export mut COUNTER: int = 0;
+
+fn main(): int {
+    return 0;
+}

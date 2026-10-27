@@ -1,0 +1,21 @@
+This `for` range moves away from its end
+
+A `for` over a numeric range counts up by default. If the start is already past the end, or the `step` goes the wrong way, the loop variable never gets to the end:
+
+    mut n: int = 0;
+    for i in 5..1 {        // WARNING: 5..1 counts down, but the step counts up
+        n += i;
+    }
+
+`5..1` is a range that wants to go down, and nothing in the loop goes down. Without a `break` or `return` it would run for ever. The fix is a step that matches the direction:
+
+    mut n: int = 0;
+    for i in 5..1 step i-- {
+        n += i;
+    }
+
+The same goes the other way: `for i in 1..5 step i--` counts down from a start that is below the end.
+
+Turf only judges this when both bounds are plain integer constants and the step is the default, `i++`, `i--`, `i += k` or `i -= k`. Anything it cannot work out at compile time is left alone. The body may still leave the loop, so this is a warning and not an error.
+
+This is a warning, not an error -- compilation still succeeds. To silence it for a whole build, set its lint level to allow: `turf build --allow E162` (or `[lints] E162 = "allow"` in turf.toml).

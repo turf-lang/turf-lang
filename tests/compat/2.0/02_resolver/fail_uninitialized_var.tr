@@ -1,0 +1,6 @@
+// EXPECT-DIAG: E008
+fn main(): int {
+    mut x: int;
+    mut y: int = x; // Error: x is not initialized
+    return 0;
+}

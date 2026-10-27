@@ -1,0 +1,16 @@
+# Programs that compiled and ran on 2.0.0 whose output a later 2.x minor
+# deliberately rewords.
+#
+# The corpus says "prints these bytes", so each line is the owner's call
+# written down, like RELAXED.txt (a reviewer reads this file, not the
+# compiler). One line per change:
+#
+#     <path under tests/compat/2.0/>  s/<regex>/<text>/  # <commit>: <why, and where it was decided>
+#
+# scripts/check/compat_corpus_check.py applies the substitution to this
+# compiler's output, which must then be 2.0.0's output byte for byte: what the
+# substitution does not touch, and the exit status, are still pinned. Only a
+# program in RUNS can be listed here; a program 2.0.0 rejected belongs in
+# RELAXED.txt. Any delimiter not in the regex or the text may replace `/`.
+
+41_gc/fail_stack_overflow_deep_recursion.tr  s/ at about [0-9]+ nested calls//  # ddaa1060: RT-6, the stack-overflow panic says how deep the recursion was; owner decision 2026-10-26. The depth differs between runs and machines, so it could not be pinned anyway; the rest of the message and the exit status still are

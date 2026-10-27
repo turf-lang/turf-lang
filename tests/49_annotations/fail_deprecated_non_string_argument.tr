@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: must be a string literal
+// `@deprecated`'s one argument is the message shown at every call; a bare
+// word is not a message, only a string literal is.
+
+@deprecated(use_make_checked)
+fn make(): int {
+    return 1;
+}
+
+fn main(): int {
+    return make();
+}

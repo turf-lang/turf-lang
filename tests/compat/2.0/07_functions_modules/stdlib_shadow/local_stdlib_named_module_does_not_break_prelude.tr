@@ -1,0 +1,15 @@
+// LEC-001 stage 3: a local list.tr sits beside this file, but the program never
+// imports `list`, so there is no ambiguity to report. String concatenation goes
+// through the prelude's `strings`, which imports the stdlib's `list` itself;
+// imports written inside lib/std resolve stdlib-only, so the local file cannot
+// capture them. Before that rule existed, examining every search root would
+// have turned this harmless program into an E090 raised from inside the stdlib.
+import io;
+import test;
+
+fn main(): int {
+    mut s: string = "ab" + "cd";
+    test::assert(s == "abcd", "prelude string concatenation still uses the stdlib's list");
+    io::printline(s);
+    return 0;
+}

@@ -1,0 +1,33 @@
+// Regression test: TYPE-002 S12a -- a generic free function calling
+// ANOTHER generic free function using its own type parameter must
+// correctly discover, drain, and rewrite the nested instantiation too.
+//
+// This exercises the worklist's fixed-point loop specifically
+// (Monomorphize.h/.cpp, drainFreeFunctionRequests()): re-typechecking
+// `outer`'s freshly-substituted clone is what DISCOVERS `inner<int>`'s
+// request in the first place (it does not exist before `outer<int>` is
+// itself being processed), so this only compiles correctly if a request
+// recorded DURING draining is picked up by the SAME drain loop rather than
+// requiring a second pass. Also the regression test for a real bug caught
+// live during this session: a `std::vector`-backed instantiation cache
+// dangled the `InstantiationEntry&` this exact nested-discovery pattern
+// holds across record() calls -- see the change record's *Removed
+// assumptions* for the fix (a `std::deque` instead).
+
+import test;
+
+fn<T> inner(x: T): T {
+    return x;
+}
+
+fn<T> outer(x: T): T {
+    return inner(x);
+}
+
+fn main(): int {
+    immut a: int = outer(7);
+    immut b: string = outer("hello");
+    test::assert(a == 7, "nested generic (int) failed");
+    test::assert(b == "hello", "nested generic (string) failed");
+    return 0;
+}

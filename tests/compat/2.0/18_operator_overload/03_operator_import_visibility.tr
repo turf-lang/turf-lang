@@ -1,0 +1,24 @@
+// Operator overload visibility (Option A, confirmed with the user): visible
+// if the defining module is imported anywhere in the compile -- matches how
+// qualified Module::func() calls already work today, since operators have
+// no qualifier syntax at all (`a + b`, never `geometry_operator_module::+(a,b)`).
+// The `Point` TYPE itself still needs an on-demand import to be bare-usable
+// (a separate, pre-existing visibility gate for struct/enum names --
+// unrelated to operator resolution, see fail_bare_type_no_visibility.tr).
+import geometry_operator_module::Point;
+import test;
+
+fn main(): int {
+    mut a: Point = Point::default();
+    a.x = 1;
+    a.y = 1;
+    mut b: Point = Point::default();
+    b.x = 2;
+    b.y = 3;
+    mut c: Point = a + b;
+
+    test::assert(c.x == 3, "Point + Point (from module) should add x");
+    test::assert(c.y == 4, "Point + Point (from module) should add y");
+
+    return 0;
+}

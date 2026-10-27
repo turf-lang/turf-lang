@@ -1,0 +1,14 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: Unknown annotation '@ownrship'
+// EXPECT-DIAG: Did you mean '@ownership'
+// A misspelt annotation must be an error, never silently ignored: ignoring it
+// would turn the check it was meant to enable off without a word.
+
+@ownrship(acquires)
+fn make(): int {
+    return 1;
+}
+
+fn main(): int {
+    return make();
+}

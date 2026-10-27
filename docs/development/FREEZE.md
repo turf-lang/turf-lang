@@ -170,6 +170,15 @@ otherwise each answer differently, producing an incoherent language.
   **mark-sweep**, **precise on the heap** (per-type pointer bitmaps emitted
   by the compiler), **conservative on stack and registers**, **stop-the-
   world**, **single-threaded**.
+- **Amended 2026-10-25 (owner decision, TDP-2-030): single-threaded means one
+  mutator at a time, not one OS thread for life.** A program's mutator is
+  the thread that runs `main`. A library built with `turf build --lib` may be
+  entered from any host thread, one at a time: an entry lock admits one
+  thread, a nested entry on that thread passes, and every other thread waits
+  outside Turf holding only rooted handles. The collector scans the stack of
+  the thread inside Turf, from its current frame to its outermost Turf entry,
+  and no other. Two threads running Turf code at once needs the thread-aware
+  runtime (TDP-3-001, TDP-3-003). (F-MEM-6)
 - **Non-moving is non-negotiable.** A `string` handed to `write(2)` or a
   buffer handed to `send(2)` must not move; TurfLang's stdlib is
   overwhelmingly FFI.
@@ -1071,6 +1080,32 @@ over the same code, so how a test is judged exists once.
   `tests/`, written from the current directory) becomes an `--only`, and only
   then does `turf test` ask for interface 1.7. Exit status: 0 every test passed; 1 a test failed or
   the run could not start; 2 a usage error (§6.21).
+- **Tests beside the code: `@test` (F-11d, TDP-2-006).** A line starting
+  `@test` makes a file a source of tests: `@test` on a top-level function that
+  takes no parameters and returns `void` or `!void`, with an optional outcome as
+  first argument: none (the body returns), `compile_error, E<code>, "text"`
+  (with `fix: "text"` for a printed `Fix:`), `warning, E<code>, "text"`,
+  `no_warnings`, `panic, "text"` (exit 134), `exit, <0..255>` and
+  `error, Type::Variant`. `""` matches any message; arguments are literals,
+  codes and variant names, never expressions; the outcome words reserve
+  nothing. "Inside the test" runs from the `fn` keyword to the end of the body,
+  so the annotation line is outside it and a malformed `@test` is an ordinary
+  error (E146, E038 when nested). A normal build checks tests and leaves them
+  out (the object is the program's without them); errors with a
+  `compile_error` test's code inside it are the test's, any other error is
+  ordinary, and a warning inside one is not shown. A test is never called or
+  used as a value (E173). The runner builds a file with tests once with
+  `turfc <file> --test-build <manifest> -o <prog>` (driver interface **1.11**,
+  feature `test-functions`; only the runner passes the flag, and it cannot
+  combine with `--check`) and runs each test as `<prog> <n>` in its own process;
+  a `compile_error` test is judged from the errors the compile recorded inside
+  it. A `tests/` file with tests and a `main` also runs as a plain test.
+  `fail_*` files keep their convention. With a package graph the root package's
+  `src/` files that declare tests run too (their `main` is not a test);
+  `--only` runs only what it names. Report lines are
+  `[suite] file.tr: test_name ... PASS`; a file whose tests do not build is one
+  failure, `COMPILE FAILED (its tests did not run)`. Per-test options are
+  TDP-2-026.
 - **Not frozen:** the wording of the per-test report lines, the order tests
   finish in, and `turfc --test`'s behaviour on Windows (not supported yet; it
   needs a process runner for that platform, REL-008).
@@ -1323,6 +1358,85 @@ types as `&N[2]`.
 
 ---
 
+### 6.29 Lint levels — FROZEN (TDP-2-003 V-1, 2026-10-19)
+
+Recorded under `docs/development/FREEZE.md` §6.0's rule that a decision made in
+the course of work is written down, not left in a commit. Account:
+`docs/development/changes/TDP-2-003.md`. Roadmap: `docs/planning/ROADMAP_v3.0.0.md`
+V-1 and §5.4 (a new check lands as a warning; the warning can be silenced;
+`--deny-warnings` is upgrade-unsafe without a pin).
+
+- **A level belongs to a warning code, and only a warning has one (F-LINT-1).**
+  `allow` records nothing, `warn` (every warning's start) prints it and the
+  build succeeds, `deny` records it as an error. An error's level is always
+  `deny`: `--allow`/`--warn` of an error's code is a usage error (exit 2),
+  `--deny` of one is accepted and does nothing. A level that names no code the
+  compiler has, a malformed code, or a flag with no value is a usage error,
+  never silently ignored.
+- **There is no source syntax (F-LINT-2).** A level is set by whoever builds,
+  in exactly three places: the compiler flags `--allow|--warn|--deny <code>`
+  and `--lint-set 2.N` (repeatable; the later flag for a code wins); `turf.toml`'s
+  `[lints]` table (`E163 = "allow"`, `lint-set = "2.N"`), which `turf` validates
+  for shape and hands to the compiler as those same flags ahead of the user's own
+  (so the command line beats the file); and the pin. The compiler never reads
+  `turf.toml` (F-PKG-1), and `turf` never needs the list of codes. Driver
+  interface 1.8 carries the flags; a manifest with `[lints]` needs it.
+- **The pin is a release (F-LINT-3).** Every code records the 2.x minor that
+  added it (`ErrorCodeEntry::SinceMinor`; 0 for everything in 2.0). `lint-set =
+  "2.N"` starts every warning added after 2.N at `allow`; a level named for the
+  code wins over the pin either way. A set newer than the compiler is an error;
+  only `2.N` sets exist until 3.0 (B-1 adds `"3.0"`, B-10 retires old pins).
+  This is what makes `--deny` upgrade-safe: a new warning in 2.N+1 cannot fail a
+  build that pinned 2.N.
+- **Every warning has a registry code (F-LINT-4).** A level names a code, so a
+  warning class with no row in `ErrorCodes.h` is a defect;
+  `scripts/check/error_codes_check.sh` fails it. A class derived from
+  `TurfWarning` is named `...Warning`, an error's never is (`isWarningCode()`).
+  E152–E171 were assigned to the twenty warnings that had none.
+- **The stdlib is never denied (F-LINT-5).** A warning inside `lib/std` stays
+  the hidden warning OVH-012 makes it, even under `--deny`, unless
+  `--stdlib-warnings` is also given.
+- **A denied warning is an error in every respect (F-LINT-6)**: error header,
+  counted as an error, blocks the build and `--check`, takes the one-error-per-line
+  cascade rule, reaches `turf::analyze` as `Severity::Error`. Its text keeps the
+  `Warning:` label and a line says it is denied.
+
+---
+
+### 6.30 A panic ends the process — FROZEN (owner decision, 2026-10-25)
+
+Recorded on the project owner's explicit request (2026-10-25), as the decision
+TDP-2-002's NM-6 (checking overflow in batches) depends on. The behaviour below
+is what `runtime/turfrt_panic.c` and `docs/reference/error_handling.md` describe;
+this section makes it a promise, so a later feature cannot assume otherwise.
+Account: `docs/development/changes/TDP-2-002.md`, NM-6.
+
+- **A panic cannot be caught, and runs nothing on the way out (F-PANIC-1).** A
+  failed runtime check, `sys::panic` or a runtime-internal panic (out of memory,
+  stack overflow) flushes stdout, prints its message to stderr and aborts the
+  process (exit 134 on POSIX). No `defer` runs, nothing unwinds, no `atexit`
+  handler runs, and there are no finalizers (F-MEM-2). No language construct,
+  stdlib function or test harness catches, recovers from or intercepts a panic:
+  `recover` and `try` act on error values (F-ERR-1) and never on a panic, and
+  `turf test` / `@test` observe one only from outside the process that panicked.
+  When threads arrive (TDP-3-001), a panic on any thread ends the whole process;
+  a `join` never returns another thread's panic as a value. Adding a way to
+  catch a panic is a change to this decision, not a library addition.
+- **Memory after a panic is not observable (F-PANIC-2).** What a program
+  observes, for F-OPT-1, is its output (stdout, stderr, files, network), its
+  exit status and the effects of its calls, all of which happen in source
+  order. The contents of its own memory once a panic has begun are not: no Turf
+  code runs after the panic to read them. A debugger or a core dump is outside
+  the language.
+- **A check may run late, never be skipped (F-PANIC-3).** Given F-PANIC-1 and
+  F-PANIC-2, the compiler may perform a language-mandated check after the
+  operation it guards, provided that between the two the program does nothing
+  observable, the unchecked result reaches only memory and further
+  late-checked arithmetic, and the panic reports the same kind and location a
+  check in place would have reported first. Removal still needs a proof
+  (F-OPT-2); a late check is not a removal. The precise rule a compiler pass
+  applies is NM-6's, in its change record.
+
 ## Appendix — frozen-decision IDs
 
 A change record's *Frozen decisions relied on* row cites these IDs
@@ -1368,12 +1482,18 @@ Overhaul (F-TYPE-1), whose third column points at their section above.
 | **F-DIAG-1** | Sandbox verification of SLM suggestions is **never removed**. | §16 |
 | **F-DIAG-2** | An unvalidated suggestion can never clear the display gate. | §16 |
 | **F-DIAG-3** | No new `SLM::ErrorCategory` values without an explicit request. | §16 |
+| **F-LINT-1** | Only a warning has a level (`allow`/`warn`/`deny`, default `warn`); an error is always `deny`, and `--allow`/`--warn` of an error's code is a usage error. A level naming nothing real is a usage error, never a no-op. | §6.29 above (TDP-2-003 V-1) |
+| **F-LINT-2** | Levels have no source syntax: the flags `--allow\|--warn\|--deny <code>`, `--lint-set 2.N`, and `turf.toml` `[lints]` (which `turf` passes as those flags before the user's own; the compiler never reads the manifest). Driver interface 1.8. | §6.29 above |
+| **F-LINT-3** | `lint-set = "2.N"` starts every warning added after 2.N at `allow`; an explicit level wins; a set newer than the compiler is an error. | §6.29 above |
+| **F-LINT-4** | Every warning class has a registry code, and `...Warning` is the name of a warning class only. | §6.29 above |
+| **F-LINT-5** | `deny` never applies to a warning inside `lib/std` unless `--stdlib-warnings` is given. | §6.29 above |
 | **F-OPT-1** | Optimization levels change speed/size/debuggability only — never observable behaviour. | §17 |
 | **F-OPT-2** | Bounds/overflow/div-by-zero checks may be *removed by proof*, never by flag. | §17 |
 | **F-TRACK-1** | Every implementation session updates a change record under `docs/development/`. | §18 |
 | **F-TYPE-1** | A named type's identity is (owning module, name); the main file's module is `main`, never spelled. Bare-spelling ambiguity is an error, not "local wins". | §6.11 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-003, not `ARCHITECTURE_OVERHAUL.md` §4) |
 | **F-HEAP-1** | `heap(expr): &T` is the closed-list intrinsic for safe heap allocation — no `new T` keyword, no grammar change. Always allocates with `T`'s real `TurfTypeDesc`, never `NULL`. | §6.12 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-001) |
 | **F-MEM-5** | A `Stack`-provenance reference (points into the current frame, on any path) can never flow into a `return`, a field of a `Param`/`Heap`-owned object, a collection mutator/`operator[]=`, `heap()`'s own operand, or an error payload, nor be carried there inside a struct or array value — enforced by `EscapePass`, with per-field tracking and one call summary (a function returning a reference parameter unchanged), no lifetime syntax. | §6.13 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-002; amended 2026-10-12) |
+| **F-MEM-6** | The mutator is single: at most one thread runs Turf code at a time. A library may be entered from different OS threads one at a time behind an entry lock; the collector scans only the stack of the thread inside Turf, up to its outermost entry. Parallel entry waits for the thread-aware runtime. | §6.5 above (owner decision 2026-10-25, TDP-2-030) |
 | **F-STR-1** | `s[i]` on a `string` is `char`; a negative `i` counts from the end (`s[-1]` is the last byte). A read panics outside `-strlen(s) <= i < strlen(s)`; a write wraps a negative index the same way and panics only if it is still below zero, by design — no upper bound, since a `string` under construction has no recoverable capacity to check against. | §6.14 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-004; amended 2026-10-12 for #256) |
 | **F-VIS-1** | A top-level declaration and a struct field are private to their module unless prefixed `pub`/`public` (synonyms, one token); enum/error variants and machine states follow their type; operators are visible wherever their operand types are; `export immut` is its own `pub`; a `pub` signature may not mention a private type; UFCS and monomorphized clones never bypass or leak visibility; every visibility diagnostic carries a fix-naming hint. | §6.15 above (post-Overhaul: `ROADMAP_v2.0.0.md` LEC-002) |
 | **F-PKG-1** | Two independently versioned programs: `turf` (Go, the turf-cli repository) is the user's tool and drives; `turfc` compiles and is the tooling interface (users are never asked to type it). They agree on a `major.minor` driver interface reported by `turfc --version` (same major, minor at least what `turf` needs), not on release versions. The compiler owns everything that depends on TurfLang source (import resolution, visibility, capabilities) and never touches the network or the manifest; the CLI owns files, network and reproducibility, never parses TurfLang, and never rewrites a diagnostic; they meet at an explicit package graph. `turf <non-subcommand args>` is `turfc <args>` unchanged. | §6.16 above (owner decisions 2026-09-30: overturning `ROADMAP_v2.0.0.md` LEC-001 entry 1 / DEC-8, then replacing "same version" with the driver interface) |
@@ -1409,6 +1529,9 @@ Overhaul (F-TYPE-1), whose third column points at their section above.
 | **F-COLL-2** | `T::default()` sets every non-null `&U` field reachable by value to a fresh `heap(U::default())`; a type that reaches itself through `&` fields has no default (E147). | §6.27 above (owner decision 2026-10-12) |
 | **F-REFARR-1** | An array of references is spelled `(&N)[k]` (also `(&?N)[k]`, `(&N)[]`); `&N[k]` is a reference to an array. The two print as written. A Stack reference stored into an element of a non-local array is E086. | §6.28 above (owner decision 2026-10-12) |
 | **F-REFARR-2** | A `(&N)[k]` declaration, or one whose element type carries a `&U` inside it, needs an initializer (E128); `(&?N)[k]` starts all-null; an unwritten `string` inside an element reads `""`. | §6.28 above (owner decisions 2026-10-12; amended 2026-10-13) |
+| **F-PANIC-1** | A panic flushes stdout, prints to stderr and aborts the process; no `defer`, unwinding, `atexit` handler or finalizer runs, and nothing (`recover`, `try`, a test harness, a thread `join`) catches it. A panic on any thread ends the process. | §6.30 above (owner decision 2026-10-25) |
+| **F-PANIC-2** | Observable behaviour is output, exit status and the effects of calls, in source order; the program's own memory after a panic has begun is not observable. | §6.30 above |
+| **F-PANIC-3** | A mandated check may run after the operation it guards if nothing observable happens in between, the unchecked result reaches only memory and other late-checked arithmetic, and the panic's kind and location are those of the first check in place. Late is allowed; skipped still needs a proof (F-OPT-2). | §6.30 above |
 
 ---
 

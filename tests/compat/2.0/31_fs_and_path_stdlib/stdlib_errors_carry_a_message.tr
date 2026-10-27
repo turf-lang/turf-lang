@@ -1,0 +1,52 @@
+// A standard library failure carries a message saying what failed, besides
+// its payload. Every one was built with no message, so a handler printing
+// `err.message` printed a blank line.
+
+import test;
+import fs;
+import json;
+import map::Map;
+
+fn fs_message(): string {
+    mut m: string = "";
+    fs::mkdir("/nonexistent_turf_dir/sub") recover as err run { m = err.message; };
+    return m;
+}
+
+fn io_message(): string {
+    immut s: string = io::read_to_string("/nonexistent_turf_dir/f.txt") recover as err run {
+        return err.message;
+    };
+    return "read " + s;
+}
+
+fn parse_message(): string {
+    immut n: int = strings::parse_int("x1") recover as err run { return err.message; };
+    return n to string;
+}
+
+fn divide_message(): string {
+    immut q: int = math::divide(1, 0) recover as err run { return err.message; };
+    return q to string;
+}
+
+fn map_message(): string {
+    mut m: Map<string, int> = Map::default();
+    immut v: int = m.try_get("k") recover as err run { return err.message; };
+    return v to string;
+}
+
+fn json_message(): string {
+    immut j: json::JsonValue = json::parse("[1,") recover as err run { return err.message; };
+    return typeof(j);
+}
+
+fn main(): int {
+    test::assert(fs_message() == "could not create directory '/nonexistent_turf_dir/sub'", "fs");
+    test::assert(io_message() == "file not found: '/nonexistent_turf_dir/f.txt'", "io");
+    test::assert(parse_message() == "not an int: 'x1'", "strings");
+    test::assert(divide_message() == "division by zero", "math");
+    test::assert(map_message() == "key not found", "map");
+    test::assert(json_message() == "unexpected end of JSON at offset 3", "json");
+    return 0;
+}

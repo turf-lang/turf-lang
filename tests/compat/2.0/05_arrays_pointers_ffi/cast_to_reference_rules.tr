@@ -1,0 +1,38 @@
+// Casts to a reference that stay safe: same pointee (`&N to &N`), widening
+// to nullable (`&N to &?N`), and a narrowed `&?N to &N`. Anything else that
+// makes a reference (`0 to &N`, `s to &N`, `&N to &M`) is E130 outside
+// `unsafe { }` (owner decision 2026-10-12) and allowed inside it; see the
+// fail_cast_*_to_reference_outside_unsafe.tr / fail_cast_reference_to_*
+// twins.
+
+import test;
+
+struct N {
+    v: int
+}
+
+struct M {
+    w: int
+}
+
+fn read(q: &?N): int {
+    if (q != null) {
+        return (q to &N).v;
+    }
+    return -1;
+}
+
+fn main(): int {
+    mut n: N = N::default();
+    n.v = 7;
+    mut r: &N = &n;
+    mut same: &N = r to &N;
+    mut q: &?N = r to &?N;
+    test::assert(same.v == 7, "&N to &N");
+    test::assert(read(q) == 7, "&N to &?N, then a narrowed &?N to &N");
+    unsafe {
+        mut m: &M = r to &M;
+        test::assert(m.w == 7, "&N to a same-layout &M is allowed inside unsafe");
+    }
+    return 0;
+}

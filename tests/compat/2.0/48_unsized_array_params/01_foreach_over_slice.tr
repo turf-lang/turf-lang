@@ -1,0 +1,78 @@
+// Issue #260: an unsized `T[]` parameter carries its length, so for-each
+// works over it -- for any element type and for any argument length. It used
+// to be E006 ("for-each requires a known array size"), which made a `T[]`
+// parameter all but useless: the function never knew how many elements it
+// had. The generic `display` below is the exact shape the issue reported.
+import io::[*];
+import test;
+
+fn<T> display(arr: T[]): void {
+    for i in arr {
+        printline(i);
+    }
+}
+
+fn sum(arr: int[]): int {
+    mut total: int = 0;
+    for value in arr {
+        total += value;
+    }
+    return total;
+}
+
+fn<T> count(arr: T[]): int {
+    mut n: int = 0;
+    for _item in arr {
+        n++;
+    }
+    return n;
+}
+
+// The paired form: the index runs 0..length-1 alongside the value.
+fn weighted(arr: int[]): int {
+    mut total: int = 0;
+    for (i, value) in arr {
+        total += i * value;
+    }
+    return total;
+}
+
+struct Point {
+    x: int,
+    y: int
+}
+
+fn Point.new(x: int, y: int): void {
+    self.x = x;
+    self.y = y;
+}
+
+fn sum_x(points: Point[]): int {
+    mut total: int = 0;
+    for p in points {
+        total += p.x;
+    }
+    return total;
+}
+
+fn main(): int {
+    display([1, 2, 3, 4]);
+    display(["a", "b"]);
+
+    mut three: int[3] = [1, 2, 3];
+    mut ten: int[10] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    test::assert(sum(three) == 6, "sum over an int[3]");
+    test::assert(sum(ten) == 55, "sum over an int[10]");
+    test::assert(sum([7]) == 7, "sum over a one-element literal");
+
+    mut names: string[2] = ["x", "y"];
+    test::assert(count(three) == 3, "count<int> sees all three elements");
+    test::assert(count(names) == 2, "count<string> sees both elements");
+
+    // 0*5 + 1*6 + 2*7 = 20
+    test::assert(weighted([5, 6, 7]) == 20, "paired for-each index");
+
+    mut pts: Point[2] = [Point::new(1, 0), Point::new(41, 0)];
+    test::assert(sum_x(pts) == 42, "for-each over a struct slice");
+    return 0;
+}

@@ -10,6 +10,7 @@ explanation recorded here (REL-007 runs the check on every release candidate).
 | Benchmark | Source | What it exercises |
 |---|---|---|
 | `structs` | `bench/structs.tr` + `bench/structs.c` | a numeric loop over an array of structs, every `+` overflow-checked; the C twin (`clang -O3`) gives the "vs C" ratio, which tracks FUTURE F-24 (checked arithmetic vs auto-vectorization) |
+| `particles` | `bench/particles.tr` + `bench/particles.c` | the 2000-particle, 20,000-step array-of-structs integrator behind #257's "53% slower than `clang -O3`" figure, reconstructed from that description; every `+` overflow-checked, the C twin (`clang -O3`) gives the "vs C" ratio |
 | `strings` | `bench/strings.tr` | `StringBuilder`, `s[i]` over a 200 KB string, `substring`, `replace`, `contains` |
 | `map_churn` | `bench/map_churn.tr` | `Map<string, int>` put / get / remove over a sliding window of 5000 keys |
 | `gc_alloc` | `bench/gc_alloc.tr` | 3 million allocations with 1000 kept alive: the allocator and collector |
@@ -78,6 +79,117 @@ Notes:
   next round: the collector lets the heap grow to twice the live data before
   collecting (`turfrt_gc.c`, the 1 MiB-floor doubling rule), and the live data
   at a collection includes the round in progress.
+
+### 2026-10-24 — `particles`, the program behind #257's figure (`bench/results/2026-10-24-particles.json`)
+
+Commit `5b91dbd` plus the benchmark, `build_release` (Release, system LLVM 23),
+15 rounds pinned to CPU 2, 13th Gen Intel Core i5-13500H (16 threads),
+Linux 6.18 under WSL2.
+
+| Benchmark | Median (s) | Min (s) | Peak RSS (KB) | vs C | Checksum |
+|---|---|---|---|---|---|
+| particles | 0.030 | 0.027 | 2360 | 1.46x | -40102000 |
+
+Notes:
+
+- `particles` is rebuilt from #257's description (2000 particles, 20,000
+  steps, `particles[i].x + particles[i].vx`-style additions loaded from the
+  array); the original program was never checked in. At #257's sizes it runs
+  for about 0.03 s, far under the 0.5–1 s the other benchmarks target, and the
+  sizes are kept so the figure can be reproduced.
+- `bench.py` builds Turf at `-O2`. Turf `-O3` against `clang -O3`, 41 runs each
+  pinned to CPU 2, process start-up included: 1.40x at the minimum and 1.42x at
+  the median (Turf `-O2`: 1.41x and 1.41x). Turf is about 40–46% slower than C
+  on this program, against #257's 53%: the gap is there, a little smaller than
+  the figure recorded, and it is not closed.
+
+### 2026-10-24 — NM-4: one shared cold trap block per function (dropped)
+
+The question (roadmap NM-4, issue #296): with every overflow check in a
+function branching to ONE cold, `noreturn` trap block (the file and line merged
+by `phi`s, the branch weighted unlikely, `turf_rt_panic` marked `noreturn` and
+`cold`) instead of a trap block per check, does LLVM vectorize the hot loop?
+Measured on `roadmap/v2.2.0` plus the change, system LLVM 23.1.3, same machine,
+15 interleaved rounds pinned to CPU 2, process start-up included.
+
+| Program | Turf before | Turf after | `clang -O3` |
+|---|---|---|---|
+| `particles -O2` (min / median, ms) | 29.3 / 31.9 | 29.1 / 33.3 | 20.4 / 23.9 |
+| `particles -O3` | 30.4 / 33.3 | 28.3 / 33.8 | |
+| `structs -O2` | 654.9 / 689.0 | 648.9 / 680.4 | 582.7 / 623.7 |
+| `structs -O3` | 657.4 / 705.8 | 646.6 / 682.6 | |
+| packed-integer instructions in `main` | 0 | 0 | 2 (`particles`) |
+
+Every checksum matched. LLVM's loop vectorizer gives the same reason before and
+after (`opt -O3 -pass-remarks-missed=loop-vectorize`): "Early exit loop with
+store but no supported condition load". Early-exit vectorization in LLVM 23
+does not take a loop that stores, and these loops store every particle, so one
+exit block instead of several changes nothing it looks at. The differences are
+within run-to-run noise. The restructuring is not merged; NM-2 (proving checks
+away) and NM-3 (`math::wrapping_*`) are what remain for this loop.
+
+### 2026-10-24 — the SLP vectorizer at `-O2` and `-O3`
+
+`runOptimizationPipeline()` built its `PassBuilder` with LLVM's default
+`PipelineTuningOptions`, which leave the SLP vectorizer off; clang turns it on
+at `-O2` and `-O3`. It is the pass that vectorized `particles.c`: one
+`<2 x i64>` load of `{x, y}`, one of `{vx, vy}`, one add. Turf now turns it on
+at the same levels. Same machine, `particles` at `-O3`, 21 runs pinned to CPU 2,
+minimum, process start-up included:
+
+| Program | SLP off | SLP on | `clang -O3` |
+|---|---|---|---|
+| `particles` (checked `+`) | 25.4 ms | 25.3 ms | 17.9 ms |
+| `particles` with `math::wrapping_add` | 24.1 ms | 18.1 ms | |
+| packed-integer instructions in `main` (wrapped) | 0 | 8 | 6 |
+
+Every checksum matched. With the checks the loop stays scalar: each checked
+`+` branches to its own panic block, so the `x` and `y` additions are in
+different basic blocks and SLP, which works within one, cannot pair them.
+`--emit-llvm` runs the pipeline without a `TargetMachine`, so its IR never
+shows vectorization; count instructions in the binary (`objdump -d`).
+
+### 2026-10-25 — NM-6: overflow checks in batches, hand-written IR
+
+The question (TDP-2-002 NM-6, measurements 1 and 2): if the two checked `+` in
+`particles`' inner loop keep their overflow test but share one later branch,
+does the loop get to the speed of `math::wrapping_add`? No compiler change:
+`particles`' `-O0` IR from `turfc --emit-llvm` was rewritten by hand into each
+shape below, and every variant, the unmodified IR included, was built the same
+way (`clang -O2`, linked with `lib/libturfrt.a`), so the pipeline is the same
+for all. The unmodified IR through `clang` times the same as `turfc -O2`
+(24.9 against 25.1 ms). System LLVM 23.1.3, 21 interleaved rounds pinned to CPU
+2, minimum, process start-up included. Every checksum matched.
+
+| Shape | ms | packed integer ops |
+|---|---|---|
+| check in place (today) | 24.9 | 0 |
+| stage 1: `sadd.with.overflow` without its branch, one flush per iteration | 27.6 | 0 |
+| stage 1, overflow bit as `((a ^ r) & (b ^ r)) < 0` | 30.7 | 0 |
+| stage 1, the same written as `<2 x i64>` by hand | 25.4 | hand-written |
+| stage 2: the bit ORed across the inner loop, one flush after it | 31.5 | 0 |
+| stage 2, plus each operation's first overflowing iteration (rule 4) | 39.5 | 0 |
+| stage 2 written as `<2 x i64>` by hand | 19.9 | hand-written |
+| `math::wrapping_add` | 17.8 | yes |
+| `clang -O3` on `particles.c` | 17.6 | yes |
+
+- **Stage 1 does not pay.** Once the add has no branch of its own, LLVM proves
+  the bounds checks away and both adds share one block, but SLP does not pair
+  them: it cannot widen `sadd.with.overflow` (a struct result), and with the
+  xor form its cost model rejects the extra lanes. Even vectorized by hand, one
+  branch per iteration keeps the loop at today's speed. What makes
+  `wrapping_add` fast is SLP pairing `x` and `y` and the loop unrolling around
+  it, and a branch in every iteration prevents the second.
+- **Stage 2 pays only as hand-written vector code.** With the flag carried
+  across the loop and flushed once, the hand-vectorized loop is within 2 ms of
+  `wrapping_add`. Neither LLVM vectorizer produces that loop from the scalar
+  form (31.5 ms, scalar), and tracking each operation's first overflowing
+  iteration, which rule 4 needs to name the right line, costs another 8 ms in
+  scalar form. Emitting vector code from Turf would take over LLVM's job
+  (`FREEZE.md` §6.10).
+
+NM-6 is not implemented. `math::wrapping_*` (NM-3) and NM-2's proofs remain
+the answers for this loop.
 
 ## Fixed before the baseline
 

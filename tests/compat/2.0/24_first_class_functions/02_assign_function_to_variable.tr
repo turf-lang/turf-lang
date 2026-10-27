@@ -1,0 +1,16 @@
+// A bare function name used as an ordinary initializer value, stored in a
+// fn(...):... -typed variable, then called indirectly through that variable.
+import test;
+
+fn double_it(n: int): int { return n * 2; }
+fn triple_it(n: int): int { return n * 3; }
+
+fn main(): int {
+    mutable f: fn(int): int = double_it;
+    test::assert(f(3) == 6, "f(3) should be 6 when f == double_it");
+
+    f = triple_it;
+    test::assert(f(3) == 9, "f(3) should be 9 after reassigning f to triple_it");
+
+    return 0;
+}

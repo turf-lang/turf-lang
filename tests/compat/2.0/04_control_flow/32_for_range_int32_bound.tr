@@ -1,0 +1,12 @@
+// An int32 bound is a number like any other.
+import test;
+
+fn main(): int {
+    mut n: int32 = 4;
+    mut sum: int = 0;
+    for i in 0..n {
+        sum = sum + i;
+    }
+    test::assert(sum == 6, "0 + 1 + 2 + 3");
+    return 0;
+}

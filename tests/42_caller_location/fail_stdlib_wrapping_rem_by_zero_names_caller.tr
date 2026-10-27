@@ -1,0 +1,9 @@
+// NM-3: wrapping_rem by zero panics, naming the caller's line.
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: fail_stdlib_wrapping_rem_by_zero_names_caller.tr:7: math::wrapping_rem: division by zero
+
+fn main(): int {
+    mut zero: int = 0;
+    immut r: int = wrapping_rem(1, zero);
+    return r;
+}

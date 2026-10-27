@@ -1,0 +1,10 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: Invalid string to double conversion
+// C strtod reads hex; `to double` takes decimal text only.
+
+fn main(): int {
+    mut s: string = "0x" + "1F";
+    mut d: double = s to double;
+    printline(d);
+    return 0;
+}

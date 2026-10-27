@@ -1,0 +1,21 @@
+// EXPECT-DIAG: E086
+// EXPECT-DIAG: can't be returned
+// `id` returns its reference parameter unchanged (every return is that bare
+// parameter: ResolverFunctionSymbol::ReturnsParam), so `id(&n)` is `&n`.
+// FDN-002's "through an intermediate call" residual.
+struct N { val: int }
+
+fn id(p: &N): &N {
+    return p;
+}
+
+fn make(): &N {
+    mut n: N = N::default();
+    n.val = 42;
+    return id(&n);
+}
+
+fn main(): int {
+    mut r: &N = make();
+    return r.val;
+}

@@ -304,7 +304,20 @@ public:
 
   // ── Functions & calls ─────────────────────────────────────────────────────
   void visitFuncDef(FuncDefExprAST &Node) override;
+  /// visitFuncDef()'s work; visitFuncDef() skips a compile_error test the
+  /// Resolver already rejected and recovers around one (TestRegistry.h).
+  void checkFuncDef(FuncDefExprAST &Node);
   void visitFuncCall(FuncCallExprAST &Node) override;
+  /// Resolution proper; visitFuncCall() applies an LG-1 written type
+  /// (`List<int>::default()`) to its result.
+  void visitFuncCallImpl(FuncCallExprAST &Node);
+  /// LG-1: `Name<Args>::default()` / `Name<Args>::new(...)` is the call with
+  /// `Name<Args>` as the type it builds, as if stored into a declaration of
+  /// that type.
+  void applyWrittenConstructedType(FuncCallExprAST &Node);
+  /// E129 for a `guess` declaration whose initializer is a generic struct
+  /// with no type arguments; with a fix when exactly one set fits (LG-7).
+  void reportNothingToInferGeneric(const VarDeclExprAST &Node);
   void visitMethodCall(MethodCallExprAST &Node) override;
   /// Resolution proper; visitMethodCall() adds the check that needs its result.
   void visitMethodCallImpl(MethodCallExprAST &Node);
@@ -611,7 +624,7 @@ private:
    *                call" and report the latter with an accurate, specific
    *                message instead of a generic "no such method" one.
    */
-  bool tryUFCSFallback(MethodCallExprAST &Node, const TurfType *BaseTy,
+  bool tryUFCSFallback(MethodCallExprAST &Node, const TurfTypePtr &BaseTy,
                        const std::vector<TurfTypePtr> &ArgTypes,
                        std::vector<const ResolverFunctionSymbol *> *OutNamedCandidates = nullptr);
 
@@ -628,8 +641,8 @@ private:
    * @param ReceiverTy  The receiver's type before any unwrapping.
    * @param BaseTy      What visitMethodCall() unwrapped it to.
    */
-  bool tryUFCSOnReceiver(MethodCallExprAST &Node, const TurfType *ReceiverTy,
-                         const TurfType *BaseTy,
+  bool tryUFCSOnReceiver(MethodCallExprAST &Node, const TurfTypePtr &ReceiverTy,
+                         const TurfTypePtr &BaseTy,
                          const std::vector<TurfTypePtr> &ArgTypes,
                          std::vector<const ResolverFunctionSymbol *> *OutNamedCandidates = nullptr);
 

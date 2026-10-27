@@ -1,0 +1,1 @@
+panic: runtime check: Integer overflow (fail_negate_int32_min_overflows.tr:5)

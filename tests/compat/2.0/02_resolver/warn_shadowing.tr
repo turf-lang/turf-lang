@@ -1,0 +1,10 @@
+fn main(): int {
+    mut x: int = 10;
+
+    if (x > 5) {
+        // Testing variable shadowing warning
+        mut x: int = 20;
+    }
+
+    return 0;
+}

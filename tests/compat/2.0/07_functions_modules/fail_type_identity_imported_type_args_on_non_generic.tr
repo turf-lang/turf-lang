@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E148
+// EXPECT-DIAG: 'Shape' is not generic -- it takes no type arguments
+// The same rule for a type reached through a module qualifier, here an enum.
+
+import type_identity_type_args_module;
+
+fn main(): int {
+    mut s: type_identity_type_args_module::Shape<int> = type_identity_type_args_module::Shape::Circle;
+    return 0;
+}

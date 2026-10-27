@@ -1,0 +1,22 @@
+// SEM-001: hexadecimal integer literals (0x/0X), with and without '_'.
+
+import test;
+
+fn main(): int {
+    mut a: int = 0xFF;
+    test::assert(a == 255, "lowercase prefix, uppercase digits");
+
+    mut b: int = 0Xff;
+    test::assert(b == 255, "uppercase prefix, lowercase digits");
+
+    mut c: int = 0x1_000;
+    test::assert(c == 4096, "hex with a separator");
+
+    mut d: int = 0x0;
+    test::assert(d == 0, "hex zero");
+
+    mut e: int = -0xFF;
+    test::assert(e == -255, "negated hex");
+
+    return 0;
+}

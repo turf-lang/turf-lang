@@ -1,0 +1,22 @@
+// EXPECT-DIAG: E074
+// EXPECT-DIAG: E075
+// EXPECT-DIAG: can never be reached
+// A loop that always returns never exits normally, so everything after it is
+// dead: E074 for the block, E075 for the `if` branch inside it. Both are
+// warnings, so the program still compiles and runs.
+fn pick(x: int): int {
+    while true {
+        return 1;
+    }
+    if x > 0 {
+        return 2;
+    }
+    return 3;
+}
+
+fn main(): int {
+    if pick(1) != 1 {
+        return 1;
+    }
+    return 0;
+}

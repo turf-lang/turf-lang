@@ -490,7 +490,7 @@ exported `TURF_HOME` pointing at one checkout silently makes every other build
   modules are identified as `<package>/<path under src/>`, and everything else by
   its name. The parser rewrites a file's spelling of an imported module to its
   identity at every qualifier it reads (`ModuleKeyFor()`, over the per-file
-  `CurrentFileModuleAliases`), so every later pass (the `Modules_` table,
+  `ParserState::ModuleAliases`), so every later pass (the `Modules_` table,
   `TypeIdentity`, flat imports, codegen names) keys on identities without change.
   Two packages may each have a `util` with a `Node`, and they are two modules and
   two types. In E088/E089, `DisplayModuleName()` shows a package's root module

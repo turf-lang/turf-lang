@@ -1,0 +1,25 @@
+// SY-2 (a) (TDP-2-022, #320): an integer literal is a receiver like an `int`
+// variable, through UFCS to an ordinary function, a generic function and a
+// prelude function. Unary minus is not part of the literal: `-1.abs()` is
+// `-(1.abs())`.
+import test;
+
+fn twice(x: int): int {
+    return x * 2;
+}
+
+fn<T> same(x: T): T {
+    return x;
+}
+
+fn main(): int {
+    test::assert(1.twice() == 2, "UFCS to an ordinary function");
+    test::assert(21.twice().twice() == 84, "calls chain");
+    test::assert(7.same() == 7, "generic function, T inferred");
+    test::assert(7.same::<int>() == 7, "generic function, T written");
+    test::assert(4.is_even(), "prelude function");
+    test::assert(-1.abs() == -1, "-1.abs() is -(1.abs())");
+    test::assert((-1).abs() == 1, "(-1).abs() is the absolute value");
+    test::assert(0.twice() == 0, "zero");
+    return 0;
+}

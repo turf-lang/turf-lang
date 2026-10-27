@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E028
+// EXPECT-DIAG: 'operator +(int32, int32)' is not allowed
+// Negative test: int32 joins the builtin operand-type set, so
+// operator +(int32, int32) must be rejected as a builtin-pair overload,
+// same as operator +(int, int) already is.
+operator +(a: int32, b: int32): int32 {
+    return a;
+}
+
+fn main(): int {
+    return 0;
+}

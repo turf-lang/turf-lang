@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E082
+// EXPECT-DIAG: Cannot copy the value out of 'n' here -- it might be 'null'
+struct Node { v: int, next: &?Node }
+
+fn f(n: &?Node): int {
+    immut c: Node = n to Node;
+    return c.v;
+}
+
+fn main(): int { return 0; }

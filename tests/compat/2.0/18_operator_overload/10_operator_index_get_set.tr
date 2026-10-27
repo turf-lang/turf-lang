@@ -1,0 +1,55 @@
+// LANG-001: operator[] (read) and operator[]= (write) -- the "self_ty,
+// index_ty : elem_ty" / "self_ty, index_ty, value_ty : void" shapes.
+import test;
+
+struct IntBox {
+    a: int,
+    b: int,
+    c: int
+}
+
+// NOTE: the parameter can't literally be spelled 'self' -- that's a
+// reserved keyword (TOK_SELF) reserved for the implicit receiver of a real
+// `.`-method; a plain top-level `operator` declaration takes an ordinary
+// identifier here instead (§8's LANG-001 section uses "self_ty" as
+// descriptive prose, not literal syntax).
+operator [](box: IntBox, index: int): int {
+    if index == 0 {
+        return box.a;
+    } else if index == 1 {
+        return box.b;
+    }
+    return box.c;
+}
+
+operator []=(box: &IntBox, index: int, value: int): void {
+    if index == 0 {
+        box.a = value;
+    } else if index == 1 {
+        box.b = value;
+    } else {
+        box.c = value;
+    }
+}
+
+fn main(): int {
+    mut box: IntBox = IntBox::default();
+    box.a = 10;
+    box.b = 20;
+    box.c = 30;
+
+    test::assert(box[0] == 10, "operator[] should read field a");
+    test::assert(box[1] == 20, "operator[] should read field b");
+    test::assert(box[2] == 30, "operator[] should read field c");
+
+    box[1] = 99;
+    test::assert(box[1] == 99, "operator[]= should write field b");
+    test::assert(box.b == 99, "operator[]= write should be visible through the struct directly");
+
+    // Builtin array indexing is completely unaffected by operator[]
+    // existing for an unrelated struct type.
+    mut arr: int[3] = [1, 2, 3];
+    test::assert(arr[0] == 1, "builtin array indexing still works");
+
+    return 0;
+}

@@ -1,0 +1,8 @@
+// EXPECT-DIAG: E132
+// EXPECT-DIAG: 'recover' can only be used on a fallible ('!T') expression
+// Test (fail): 'recover' only makes sense on a '!T' expression -- using it
+// on a plain, always-succeeding expression must be rejected.
+fn main(): int {
+    mut x: int = 5 recover produce 0;
+    return 0;
+}

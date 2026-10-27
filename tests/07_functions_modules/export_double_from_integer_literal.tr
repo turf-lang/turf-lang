@@ -1,0 +1,9 @@
+// An integer literal given to an exported `double` constant is that value as
+// a double, read from another module as from the declaring one.
+import test;
+import lib_export_double_from_int_module;
+
+fn main(): int {
+    test::assert(lib_export_double_from_int_module::THREE == 3.0, "integer literal as a double");
+    return 0;
+}

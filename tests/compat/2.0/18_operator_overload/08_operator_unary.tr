@@ -1,0 +1,70 @@
+// LANG-001: unary -, !, ~ are now overloadable (arity 1) -- this used to be
+// a fail_* test ("Unary operator overloading is not supported yet"); it is
+// now supported for exactly these three spellings.
+import test;
+
+struct Vec2 {
+    x: int,
+    y: int
+}
+
+operator -(a: Vec2): Vec2 {
+    mut r: Vec2 = Vec2::default();
+    r.x = -a.x;
+    r.y = -a.y;
+    return r;
+}
+
+// Same spelling '-' ALSO has its ordinary binary (subtraction) meaning on
+// the same struct type -- arity alone (1 vs. 2 parameters) distinguishes
+// the two, per operatorFunctionName()'s "key by (spelling, arity)" design.
+operator -(a: Vec2, b: Vec2): Vec2 {
+    mut r: Vec2 = Vec2::default();
+    r.x = a.x - b.x;
+    r.y = a.y - b.y;
+    return r;
+}
+
+operator ~(a: Vec2): Vec2 {
+    mut r: Vec2 = Vec2::default();
+    r.x = ~a.x;
+    r.y = ~a.y;
+    return r;
+}
+
+struct MaybeEmpty {
+    isEmpty: bool
+}
+
+// operator! is unary -- overloading it means `!x` for this type calls it
+// instead of the builtin `x != true` comparison.
+operator !(a: MaybeEmpty): bool {
+    return !a.isEmpty;
+}
+
+fn main(): int {
+    mut v: Vec2 = Vec2::default();
+    v.x = 3;
+    v.y = -4;
+
+    mut negated: Vec2 = -v;
+    test::assert(negated.x == -3, "unary - overload should negate x");
+    test::assert(negated.y == 4, "unary - overload should negate y");
+
+    mut inverted: Vec2 = ~v;
+    test::assert(inverted.x == ~3, "unary ~ overload should bitwise-not x");
+    test::assert(inverted.y == ~(-4), "unary ~ overload should bitwise-not y");
+
+    mut diff: Vec2 = v - negated;
+    test::assert(diff.x == 6, "binary - overload should still work alongside unary -");
+
+    mut m: MaybeEmpty = MaybeEmpty::default();
+    m.isEmpty = false;
+    test::assert(!m == true, "operator! should route '!x' through the user overload");
+
+    // Builtin unary -/~ on plain ints are completely unaffected.
+    test::assert(-5 == -5, "builtin unary - still works");
+    test::assert(~0 == -1, "builtin unary ~ still works");
+
+    return 0;
+}

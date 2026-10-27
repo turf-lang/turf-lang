@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E109
+// EXPECT-DIAG: expected '[' after ')'
+// `(&N)` alone is just `&N`: the parentheses only exist to put array
+// dimensions after a reference type.
+struct N { val: int }
+
+fn get(p: (&N)): int {
+    return p.val;
+}
+
+fn main(): int {
+    return 0;
+}

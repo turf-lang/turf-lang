@@ -1,0 +1,25 @@
+// `double -> int` / `int32` truncate toward zero and are valid up to the
+// destination's edges (the checks added for NaN and out-of-range values
+// must not reject these: see fail_runtime_double_to_int_*.tr). And a NaN is
+// "nan" as a string whatever its sign bit (owner decision 2026-10-12): `%g`
+// printed "-nan" for a run-time NaN at -O0 and "nan" at -O2.
+import test;
+
+fn id(x: double): double {
+    return x;
+}
+
+fn main(): int {
+    test::assert((id(2.9) to int) == 2 && (id(-2.9) to int) == -2, "truncates toward zero");
+    test::assert((id(-9223372036854775808.0) to int) == -9223372036854775807 - 1, "INT_MIN is reachable");
+    test::assert((id(9223372036854774784.0) to int) == 9223372036854774784, "the largest double below 2^63");
+    immut lo: int32 = id(-2147483648.9) to int32;
+    immut hi: int32 = id(2147483647.9) to int32;
+    test::assert((lo to int) == -2147483648 && (hi to int) == 2147483647, "int32 edges after truncation");
+
+    immut big: double = id(1e300) * id(1e300);
+    immut n: double = big - big;
+    test::assert((n to string) == "nan", "a NaN is \"nan\" as a string");
+    test::assert(((big - big) to string) == "nan", "at every -O level");
+    return 0;
+}

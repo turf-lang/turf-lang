@@ -1,0 +1,28 @@
+// Test: Bitwise AND operator
+// 5 & 3 == 1  (0b101 & 0b011 = 0b001)
+
+import test;
+
+fn main(): int {
+    mut a: int = 5 & 3;
+    test::assert(a == 1, "5 & 3 should equal 1");
+
+    // Additional AND tests
+    mut b: int = 255 & 15;
+    test::assert(b == 15, "255 & 15 should equal 15");
+
+    mut c: int = 12 & 10;   // 1100 & 1010 = 1000 = 8
+    test::assert(c == 8, "12 & 10 should equal 8");
+
+    mut d: int = 0 & 255;
+    test::assert(d == 0, "0 & 255 should equal 0");
+
+    mut e: int = 255 & 255;
+    test::assert(e == 255, "255 & 255 should equal 255");
+
+    // AND with negative numbers (two's complement)
+    mut f: int = -1 & 5;    // all-ones & 0b101 = 0b101
+    test::assert(f == 5, "-1 & 5 should equal 5");
+
+    return 0;
+}

@@ -1,0 +1,31 @@
+// EXPECT-DIAG: This loop never reaches its end: 5..1 counts down, but the step counts up
+// EXPECT-DIAG: This loop never reaches its end: 1..5 counts up, but the step counts down
+// EXPECT-DIAG: range_never_ends_warning.tr (2 warnings)
+// A `for` whose constant bounds and literal step move the loop variable away
+// from its end is warned about; `for i in 5..1 { }` used to compile silently
+// and run forever. The body may still leave the loop, so it is a warning.
+
+fn first_down(): int {
+    for i in 5..1 {
+        return i;
+    }
+    return 0;
+}
+
+fn first_up(): int {
+    for i in 1..5 step i-- {
+        return i;
+    }
+    return 0;
+}
+
+fn main(): int {
+    mut n: int = 0;
+    for i in 5..1 step i-- {
+        n += i;
+    }
+    for i in 1..5 step i += 2 {
+        n += i;
+    }
+    return first_down() + first_up() + n - 24;
+}

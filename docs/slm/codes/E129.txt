@@ -21,11 +21,13 @@ CORRECT:
 
     mut a: &?Point = null;
     mut c: List<int> = List::default();
+    mut d = List<int>::default();     // type arguments where it is built
     print_it();                       // call a void function as a statement
 
 FIX:
   For a generic function, use the type parameter in a parameter type or remove it.
-  Otherwise state the type explicitly. For the `void` case the function may have been meant to
+  Otherwise state the type explicitly, on the variable or, for a generic struct, before
+  `::` where it is built (`Box<int>::new(42)`). For the `void` case the function may have been meant to
   return something; otherwise just call it as a statement.
 
 RELATED: E128 (missing initializer), E067 (void value used), E138 (missing type

@@ -1,0 +1,19 @@
+// A prelude function a bare call reaches with no import (`sqrt`) is a value
+// by the same name. It was E040 unless imported by name first. A function of
+// this file with the same name still comes first, as it does for a call.
+
+import test;
+
+fn floor(x: double): double {
+    return 7.0;
+}
+
+fn main(): int {
+    immut f: fn(double): double = sqrt;
+    mut g = sqrt;
+    test::assert(f(16.0) == 4.0, "annotated");
+    test::assert(g(9.0) == 3.0, "inferred");
+    immut own: fn(double): double = floor;
+    test::assert(own(1.5) == 7.0, "this file's function hides the prelude one");
+    return 0;
+}

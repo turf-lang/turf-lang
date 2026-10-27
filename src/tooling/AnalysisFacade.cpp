@@ -16,6 +16,7 @@
 #include "turf/FrontEndIsolation.h"
 
 #include "frontend/AST.h"
+#include "frontend/TestRegistry.h"
 #include "analysis/Analysis.h"
 #include "analysis/CFG.h"
 #include "frontend/Lexer.h"
@@ -50,14 +51,15 @@ namespace {
 // different programs back to back and against fresh runs to catch a
 // missing one.
 //
+// The lexer and the parser are not saved field by field: the scope makes a
+// ParserState and LexerState of its own current (F-S0, F-S1) and the host's,
+// mid-parse or not (the SLM Sandbox runs an analysis inside a compile), are
+// never touched -- its stream resumes at the same byte, its cursor, lookahead,
+// current token and bracket depths where they were.
+//
 // Deliberately NOT here:
-//   - GlobalSourceFile, the ifstream a CLI compile reads its input through.
-//     This scope never opens, closes, or seeks it -- analyze() points
-//     SourceFile at its own in-memory stream instead -- so a host compile
-//     that is mid-parse when an analysis runs inside it (the SLM Sandbox)
-//     resumes at the same byte.
-//   - BinopPrecedence and the builtin registry: filled once, identically,
-//     and never modified after.
+//   - The builtin registry: filled once, identically, and never modified
+//     after.
 //   - IndexModuleDir()'s directory index (ParserModule.cpp): a cache of
 //     what exists under lib/std, not per-compile state.
 //   - ExprAST::NextNodeID: only ever compared for equality within one tree.
@@ -66,24 +68,6 @@ namespace {
 class GlobalStateScope {
 public:
   GlobalStateScope() {
-    // Lexer cursor (the same set ParseFile()'s LexerStateGuard keeps, plus
-    // what that guard can leave alone because it never outlives a compile).
-    SavedSourceFile_ = SourceFile;
-    SavedLastChar_ = GetLastChar();
-    SavedCurTok_ = CurTok;
-    SavedCurLoc_ = CurLoc;
-    SavedCurLine_ = CurLine;
-    SavedCurCol_ = CurCol;
-    SavedNumLitSpelling_ = NumLitSpelling;
-    SavedNumLitClean_ = NumLitClean;
-    SavedNumLitRadix_ = NumLitRadix;
-    SavedBoolVal_ = BoolVal;
-    SavedCharVal_ = CharVal;
-    SavedIdentifierStr_ = IdentifierStr;
-    SavedStringVal_ = StringVal;
-    SavedBraceDepth_ = g_braceDepth;
-    SavedCurlyDepth_ = g_curlyDepth;
-    SavedParseRecursionDepth_ = g_parseRecursionDepth;
     SavedProtoOnlyPass_ = g_protoOnlyPass;
 
     SavedSourceFilename_ = SourceFilename;
@@ -102,6 +86,13 @@ public:
     SavedDiagnostics_ = DiagnosticEngine::saveState();
     DiagnosticEngine::restoreState({});
 
+    // TDP-2-006: the analysis sees its own tests, in the caller's mode (a
+    // compile's fix check asks for every error, TestRegistry::Mode::Raw).
+    SavedTests_ = TestRegistry::save();
+    TestRegistry::State Fresh;
+    Fresh.M = SavedTests_.M;
+    TestRegistry::restore(std::move(Fresh));
+
     // The package graph decides what `import` can reach (LEC-001); an
     // analysis starts with none, as a plain single-file compile does, and
     // gets one only from AnalysisOptions::PackageGraphFile.
@@ -116,9 +107,6 @@ public:
     PushParserCompileState();
     PushResolverCompileState();
 
-    g_braceDepth = 0;
-    g_curlyDepth = 0;
-    g_parseRecursionDepth = 0;
     g_protoOnlyPass = false;
     g_recoverActive = false;
   }
@@ -130,6 +118,7 @@ public:
 
     GlobalSymbolTable = std::move(SavedGlobalSymbolTable_);
     DiagnosticEngine::restoreState(std::move(SavedDiagnostics_));
+    TestRegistry::restore(std::move(SavedTests_));
 
     CompilerExecutablePath = SavedCompilerExecutablePath_;
     g_AllowUnsafeModules = SavedAllowUnsafeModules_;
@@ -142,37 +131,17 @@ public:
     SourceFilename = SavedSourceFilename_;
 
     g_protoOnlyPass = SavedProtoOnlyPass_;
-    g_parseRecursionDepth = SavedParseRecursionDepth_;
-    g_braceDepth = SavedBraceDepth_;
-    g_curlyDepth = SavedCurlyDepth_;
-    StringVal = SavedStringVal_;
-    IdentifierStr = SavedIdentifierStr_;
-    CharVal = SavedCharVal_;
-    BoolVal = SavedBoolVal_;
-    NumLitRadix = SavedNumLitRadix_;
-    NumLitClean = SavedNumLitClean_;
-    NumLitSpelling = SavedNumLitSpelling_;
-    CurCol = SavedCurCol_;
-    CurLine = SavedCurLine_;
-    CurLoc = SavedCurLoc_;
-    CurTok = SavedCurTok_;
-    SetLastChar(SavedLastChar_);
-    SourceFile = SavedSourceFile_;
   }
 
   GlobalStateScope(const GlobalStateScope &) = delete;
   GlobalStateScope &operator=(const GlobalStateScope &) = delete;
 
 private:
-  std::istream *SavedSourceFile_;
-  int SavedLastChar_, SavedCurTok_, SavedCurLine_, SavedCurCol_;
-  SourceLocation SavedCurLoc_;
-  std::string SavedNumLitSpelling_, SavedNumLitClean_;
-  int SavedNumLitRadix_;
-  bool SavedBoolVal_;
-  char SavedCharVal_;
-  std::string SavedIdentifierStr_, SavedStringVal_;
-  int SavedBraceDepth_, SavedCurlyDepth_, SavedParseRecursionDepth_;
+  // The analysis's lexer and parser, current until the scope ends; analyze()
+  // points the lexer at the entry buffer.
+  LexerState Lexer_;
+  ParserState Parser_{Lexer_};
+  ParserScope ParserScope_{Parser_};
   bool SavedProtoOnlyPass_;
   std::string SavedSourceFilename_, SavedMainSourceFilename_;
   std::vector<std::string> SavedSourceLines_;
@@ -180,6 +149,7 @@ private:
   bool SavedRecoverActive_, SavedAIEnabled_, SavedAllowUnsafeModules_;
   std::string SavedCompilerExecutablePath_;
   DiagnosticEngine::State SavedDiagnostics_;
+  TestRegistry::State SavedTests_;
   PackageGraph SavedPackageGraph_;
   std::unique_ptr<SymbolTable> SavedGlobalSymbolTable_;
 };
@@ -378,7 +348,7 @@ std::vector<std::unique_ptr<ExprAST>> parseEntryFile(std::size_t &PreludeCount,
   g_recoverActive = true;
   try {
     if (!SkipPrelude)
-      Program = ParsePreludeImports(CurLoc);
+      Program = ParsePreludeImports(Lex().CurLoc);
   } catch (const RecoverUnwind &) {
   }
   g_recoverActive = false;
@@ -389,25 +359,28 @@ std::vector<std::unique_ptr<ExprAST>> parseEntryFile(std::size_t &PreludeCount,
   if (ClaimEntryFileImportSlot(SourceFilename))
     return Program;
 
-  while (CurTok != TOK_EOF) {
-    if (CurTok == ';') {
-      getNextToken();
-      continue;
-    }
-    const int StartTok = CurTok;
+  while (Parser().CurTok != TOK_EOF) {
+    const int StartTok = Parser().CurTok;
     g_recoverActive = true;
     try {
+      // Stepping over a `;` lexes the next token, so it is guarded too: `;`
+      // then `.0.5` raised E139 with no guard armed (turf-fuzz #19).
+      if (StartTok == ';') {
+        getNextToken();
+        g_recoverActive = false;
+        continue;
+      }
       auto AST = ParseExpression();
       if (!AST) {
         SkipToNextTopLevelBoundary();
       } else if (isDeclarationStart(StartTok)) {
-        if (CurTok == ';')
-          LogErrorAt(CurLoc, ErrCode::UnexpectedToken, "Unexpected ';'",
+        if (Parser().CurTok == ';')
+          LogErrorAt(Lex().CurLoc, ErrCode::UnexpectedToken, "Unexpected ';'",
                      SLM::ErrorCategory::SYNTAX_ERROR);
         AppendFlattenedTopLevelDecl(std::move(AST), Program, true);
       } else {
-        if (CurTok != ';')
-          LogErrorAt(CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement",
+        if (Parser().CurTok != ';')
+          LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement",
                      SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
         else
           getNextToken();
@@ -418,7 +391,7 @@ std::vector<std::unique_ptr<ExprAST>> parseEntryFile(std::size_t &PreludeCount,
           LogErrorAt(spanOf(*AST).Loc, ErrCode::StatementOutsideFunction,
                      "Statements are not allowed outside of a function. "
                      "Please define 'fn main(): int' and move this code "
-                     "inside.",
+                     "inside.\n  Hint: Wrap it: `fn main(): int { <this statement> return 0; }`.",
                      SLM::ErrorCategory::SYNTAX_ERROR);
         }
       }
@@ -759,7 +732,9 @@ AnalysisResult analyze(const std::vector<SourceBuffer> &Buffers,
   }
 
   std::istringstream EntryStream(Entry.Text);
-  SetSourceBuffer(EntryStream);
+  LexerState &EntryLexer = Lex(); // the GlobalStateScope's own
+  EntryLexer.Source = &EntryStream;
+  EntryLexer.Filename = Entry.Path;
   SourceFilename = Entry.Path;
   MainSourceFilename = Entry.Path;
   {
@@ -770,7 +745,7 @@ AnalysisResult analyze(const std::vector<SourceBuffer> &Buffers,
   }
   AllSourceLines[Entry.Path] = SourceLines;
   resetLexer();
-  CurTok = 0;
+  Parser().CurTok = 0;
 
   I->Program = parseEntryFile(I->PreludeCount, Options.SkipPrelude);
 
@@ -890,7 +865,9 @@ AnalysisResult analyze(const std::vector<SourceBuffer> &Buffers,
         ErrorLines.push_back(D.Loc.Line);
     for (size_t K = 0; K < I->Program.size(); ++K) {
       auto *F = dynamic_cast<FuncDefExprAST *>(I->Program[K].get());
-      if (!F || !F->getBody() || !F->getTypeParams().empty())
+      // A compile_error test whose expected error was taken has that error
+      // in no list here (TestRegistry.h); it is skipped like one that has.
+      if (!F || !F->getBody() || !F->getTypeParams().empty() || F->TestBodyFailed)
         continue;
       const int First = F->getLoc().Line;
       int End = std::numeric_limits<int>::max();

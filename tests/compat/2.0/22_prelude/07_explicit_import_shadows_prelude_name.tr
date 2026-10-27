@@ -1,0 +1,11 @@
+// FREEZE.md 6.25: an explicit on-demand import also outranks the prelude. With
+// `import prelude_shadow_helper_module::abs;` a bare `abs(...)` is the imported
+// one, not math's, while `math::abs` is still math's.
+import prelude_shadow_helper_module::abs;
+import test;
+
+fn main(): int {
+    test::assert(abs(-3) == 4997, "the explicitly imported abs wins over the prelude's");
+    test::assert(math::abs(-3) == 3, "math::abs is unaffected");
+    return 0;
+}

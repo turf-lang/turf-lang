@@ -1,0 +1,19 @@
+// EXPECT-DIAG: E076
+// EXPECT-DIAG: not representable in type 'int'
+// OVH-014 (docs/planning/OVERHAUL_REMAINING_WORK.md), FREEZE.md §6.2 row 6:
+// "Compile-time on typed constants: error." Before this fix, referencing an
+// `immut int` local inside further literal arithmetic was NOT folded --
+// `tryFoldUntypedIntConstant()` had no case for `VariableExprAST` -- so this
+// compiled successfully and only trapped at RUNTIME (via the ordinary
+// checked-arithmetic path), even though `a` is a compile-time-known typed
+// constant, not a runtime value. Contrast with fail_runtime_overflow_add.tr
+// in this same folder, where the operand truly is a `mut` (a real runtime
+// value) -- that one is correctly a runtime trap; this one must now be a
+// COMPILE-time E076, exactly like fail_compile_time_literal_arithmetic_
+// overflow.tr's bare-literal case, since `a + 1` folds to the same
+// out-of-range value once `a`'s own known-exact value is substituted in.
+fn main(): int {
+    immut a: int = 9223372036854775807;
+    immut b = a + 1;
+    return b to int;
+}

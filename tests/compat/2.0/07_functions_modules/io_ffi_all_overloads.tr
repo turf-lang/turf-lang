@@ -1,0 +1,35 @@
+// Regression test: lib/std/io.tr's print/printline, rewritten from the
+// removed @intrinsic("print"/"printline") mechanism to ordinary Turf
+// functions delegating to `extern fn printf(fmt: string, ...): int;`, must
+// still compile and run for every overload (int/double/bool/string) exactly
+// like the old compiler-native implementation did.
+//
+// Does not exercise io::input() here -- it blocks on stdin, and this suite
+// (unlike a folder literally named "io", which scripts/test_runner.sh
+// special-cases to pipe dummy input) runs with no stdin attached, so a
+// blocking read here would hang until the runner's timeout kills it.
+// input() was verified manually end-to-end (piped stdin, correct
+// echoed-back value) during this fix.
+
+import io;
+
+fn main(): int {
+    io::print(42);
+    io::print(" ");
+    io::print(3.14);
+    io::print(" ");
+    io::print(true);
+    io::print(" ");
+    io::print(false);
+    io::print(" ");
+    io::print("hello");
+    io::printline("");
+
+    io::printline(99);
+    io::printline(2.5);
+    io::printline(true);
+    io::printline(false);
+    io::printline("world");
+
+    return 0;
+}

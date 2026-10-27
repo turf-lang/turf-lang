@@ -1,0 +1,84 @@
+// Regression test: OVH-008 (docs/planning/OVERHAUL_REMAINING_WORK.md) --
+// the implicit `&T -> &?T` widening (FREEZE.md §6.6) never worked when the
+// pointee is, or contains, an open generic type parameter.
+//
+// Root cause: `typesCompatible()`'s Rule 2.5/2.6 (Types.cpp) -- the actual
+// rules that let a `&T` or `&?T` argument widen into a target pointer
+// parameter -- compared the two POINTEES with plain `isEquivalent()`
+// (structural getName() equality), never running any part of
+// `typesCompatible()` itself. A pointee shaped like `Node<T>`/`Node<int>`
+// therefore never got the SAME generic-parameter leniency this file
+// already grants a bare, unwrapped pairing (a lone `T`, or two
+// `GenericType`s of the same base name with a per-argument generic skip,
+// a few lines above Rule 2.5/2.6 in the same function) -- so `&Node<int>`
+// (a call site's own concrete argument) failed to match a declared
+// `&?Node<T>` parameter, even though the identical pairing, UNWRAPPED
+// (`Node<int>` vs `Node<T>` with no `&`/`&?` at all), already matched.
+//
+// Verified live before this fix:
+// ```turf
+// struct Node<T> { val: T, next: &?Node<T> }
+// fn<T> len(n: &?Node<T>): int { /* walk */ }
+// fn main(): int { mut a: Node<int> = Node::default(); return len(&a); }
+// // error: No overload of 'len' matches argument types (&Node<int>).
+// ```
+// The non-generic equivalent (`fn len(n: &?Node)`, `len(&a)`) already
+// compiled -- this test's own `main()` proves the generic case now does
+// too, walking a real (if short) linked list rather than just type-checking
+// the call.
+import test;
+
+struct Node<T> { val: T, next: &?Node<T> }
+
+fn<T> lenOf(n: &?Node<T>): int {
+    mut count: int = 0;
+    mut cur: &?Node<T> = n;
+    while cur != null {
+        count = count + 1;
+        cur = cur.next;
+    }
+    return count;
+}
+
+// The identical widening, but through a METHOD's own (non-self) argument
+// -- a structurally different call path (TypeChecker::visitMethodCall(),
+// not visitFuncCall()) that filters candidates through the same
+// typesCompatible(), worth exercising independently rather than assuming
+// one fixed call path implies the other (STD-003's own precedent: the
+// identical missing case was found duplicated across several independent
+// call sites at once).
+fn<T> Node.lengthFrom(n: &?Node<T>): int {
+    mut count: int = 0;
+    mut cur: &?Node<T> = n;
+    while cur != null {
+        count = count + 1;
+        cur = cur.next;
+    }
+    return count;
+}
+
+fn main(): int {
+    mut a: Node<int> = Node::default();
+    mut b: Node<int> = Node::default();
+    mut c: Node<int> = Node::default();
+    a.val = 1;
+    b.val = 2;
+    c.val = 3;
+    a.next = &b;
+    b.next = &c;
+
+    // `&a`/`&b`/`&c` are `&Node<int>` (never null) -- passed to a
+    // parameter declared `&?Node<T>` (T substituted to int). This is
+    // exactly the widening this item fixes.
+    test::assert(lenOf(&a) == 3, "lenOf(&a) should walk all 3 nodes");
+    test::assert(lenOf(&b) == 2, "lenOf(&b) should walk the remaining 2 nodes");
+    test::assert(lenOf(&c) == 1, "lenOf(&c) should count just itself");
+
+    // The same widening again, through Node.lengthFrom()'s own argument --
+    // `&b`/`&c` widen into that method's `n: &?Node<T>` parameter exactly
+    // as they did for the free function above.
+    test::assert(a.lengthFrom(&b) == 2, "a.lengthFrom(&b) should walk 2 nodes");
+    test::assert(a.lengthFrom(&c) == 1, "a.lengthFrom(&c) should walk 1 node");
+
+    return 0;
+}

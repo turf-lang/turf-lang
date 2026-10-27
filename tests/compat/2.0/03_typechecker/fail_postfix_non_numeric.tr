@@ -1,0 +1,7 @@
+// EXPECT-DIAG: E057
+// EXPECT-DIAG: postfix operator requires a numeric operand
+fn main(): int {
+    mut x: string = "hello";
+    x++;
+    return 0;
+}

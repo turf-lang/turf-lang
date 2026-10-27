@@ -1,0 +1,22 @@
+// EXPECT-DIAG: E086
+// EXPECT-DIAG: can't be returned
+// The loop that moves `p` to the heap may run zero times, and then `p` is
+// still `&n` (owner decision 2026-10-12, found by turf-fuzz). Contrast
+// escape_loop_reassigned_to_heap_ok.tr, where every path out is the heap.
+struct N { val: int, next: &?N }
+
+fn f(k: int): &N {
+    mut n: N = N::default();
+    n.val = 42;
+    mut p: &N = &n;
+    mut i: int = 0;
+    while (i < k) {
+        p = heap(n);
+        i += 1;
+    }
+    return p;
+}
+
+fn main(): int {
+    return f(3).val;
+}

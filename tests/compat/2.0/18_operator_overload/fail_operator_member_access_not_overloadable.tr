@@ -1,0 +1,16 @@
+// EXPECT-DIAG: E110
+// EXPECT-DIAG: Expected an overloadable operator after 'operator'
+// F-OP-4 / F-OP-2: member access '.' is not overloadable, so it cannot follow the keyword
+// 'operator'. (The compiler's own list of what can: + - * / % ** & | ^ << >> == != < > <= >=,
+// unary - ! ~, and [] / []=.)
+struct Vec {
+    x: int,
+}
+
+operator .(a: Vec, b: Vec): Vec {
+    return a;
+}
+
+fn main(): int {
+    return 0;
+}

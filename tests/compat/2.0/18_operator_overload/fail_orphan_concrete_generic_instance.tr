@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E080
+// EXPECT-DIAG: 'list::List' is declared in module 'list', not in the main file
+// `List<int>` is owned by the module that declares List, so a concrete
+// instance is subject to the orphan rule exactly like the generic form.
+import list::List;
+
+operator +(a: List<int>, b: List<int>): int {
+    return a.length() + b.length();
+}
+
+fn main(): int {
+    return 0;
+}

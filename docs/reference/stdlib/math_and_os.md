@@ -2,7 +2,7 @@
 
 | Module | For | Import |
 |---|---|---|
-| `math` | constants, `abs`, `min`, `max`, `clamp`, `power`, the libm functions, `divide` | none (prelude) |
+| `math` | constants, numeric limits, infinity and NaN, `abs`, `min`, `max`, `clamp`, `power`, the libm functions, the `wrapping_*` family, `divide` | none (prelude) |
 | `os` | environment variables and command-line arguments | `import os;` |
 
 `math` is part of the [prelude](README.md#the-prelude): `abs(-3)`, `max(a, b)` and
@@ -17,8 +17,59 @@ constants stay qualified (`math::PI`). `os` needs `import os;`.
 
 | Constant | Value |
 |---|---|
-| `PI: double` | `3.14159265358979323846` |
-| `E: double` | `2.71828182845904523536` |
+| `PI: double` | π, `3.14159265358979323846` |
+| `TAU: double` | 2π, `6.28318530717958647692` |
+| `E: double` | e, `2.71828182845904523536` |
+| `PHI: double` | the golden ratio, `1.61803398874989484820` |
+| `SQRT2: double` | √2, `1.41421356237309504880` |
+| `SQRT1_2: double` | 1/√2, `0.70710678118654752440` |
+| `LN2: double` | ln 2, `0.69314718055994530942` |
+| `LN10: double` | ln 10, `2.30258509299404568402` |
+| `LOG2E: double` | log₂ e, `1.44269504088896340736` |
+| `LOG10E: double` | log₁₀ e, `0.43429448190325182765` |
+
+### Limits
+
+The range of each numeric type. `MIN` is the most negative value for `double`
+as for the integers. The smallest positive normal `double` (C's `DBL_MIN`) is
+`DOUBLE_MIN_POSITIVE`.
+
+| Constant | Value |
+|---|---|
+| `INT_MAX: int` | `9223372036854775807` (2^63 − 1) |
+| `INT_MIN: int` | `-9223372036854775808` (−2^63) |
+| `INT32_MAX: int32` | `2147483647` (2^31 − 1) |
+| `INT32_MIN: int32` | `-2147483648` (−2^31) |
+| `DOUBLE_MAX: double` | `1.7976931348623157e308`, the largest finite `double` |
+| `DOUBLE_MIN: double` | `-1.7976931348623157e308`, the most negative finite `double` |
+| `DOUBLE_MIN_POSITIVE: double` | `2.2250738585072014e-308`, the smallest positive normal `double` |
+| `DOUBLE_EPSILON: double` | `2.220446049250313e-16`, the gap between `1.0` and the next `double` |
+
+### Infinity and NaN
+
+| Constant | Value |
+|---|---|
+| `INFINITY: double` | positive infinity, above every finite `double` |
+| `NEG_INFINITY: double` | negative infinity |
+| `NAN: double` | not a number (prints as `nan`) |
+
+Turf arithmetic never produces these (`/` by zero panics for `double` too);
+they come from these constants and from the C math library (`log(0.0)` is
+`NEG_INFINITY`, `sqrt(-1.0)` is NaN). NaN equals nothing, itself included, so
+`x == math::NAN` is always `false`. Test for it with a function:
+
+| Function | Result |
+|---|---|
+| `is_nan(val: double): bool` | `true` for NaN |
+| `is_infinite(val: double): bool` | `true` for `INFINITY` and `NEG_INFINITY` |
+| `is_finite(val: double): bool` | `true` for every value that is neither |
+
+Like every `math` function they are bare-callable (`is_nan(x)`) and work through
+UFCS (`x.is_nan()`).
+
+Arithmetic past a limit is checked as always: `math::INT_MAX + 1` panics with
+"Integer overflow", and `math::wrapping_add(math::INT_MAX, 1)` is
+`math::INT_MIN`.
 
 ### Functions from the C math library
 
@@ -132,6 +183,65 @@ fn main(): int {
 }
 ```
 
+### The `wrapping_*` family
+
+```text
+wrapping_add(a: int, b: int): int
+wrapping_sub(a: int, b: int): int
+wrapping_mul(a: int, b: int): int
+wrapping_shl(a: int, n: int): int
+wrapping_shr(a: int, n: int): int
+wrapping_neg(a: int): int
+wrapping_abs(a: int): int
+wrapping_div(a: int, b: int): int
+wrapping_rem(a: int, b: int): int
+wrapping_pow(base: int, exp: int): int
+```
+
+`int` arithmetic modulo 2^64, in two's complement: a result that does not fit
+wraps around instead of panicking, so `wrapping_add(9223372036854775807, 1)` is
+`-9223372036854775808`. The operators stay checked and panic with `Integer
+overflow`; these are for code where wrapping is the intended result, such as
+hashes, checksums and random-number generators.
+
+| Function | Result | Where it differs from the operator |
+|---|---|---|
+| `wrapping_add`, `wrapping_sub`, `wrapping_mul` | `a + b`, `a - b`, `a * b` | wraps instead of panicking |
+| `wrapping_shl` | `a << (n modulo 64)`; bits shifted out are dropped | `<<` panics when a bit is lost or `n` is outside 0..63 |
+| `wrapping_shr` | `a >> (n modulo 64)`, keeping the sign | `>>` panics when `n` is outside 0..63 |
+| `wrapping_neg`, `wrapping_abs` | `-a`, `abs(a)` | the most negative `int` is its own negation and absolute value |
+| `wrapping_div` | `a / b`, truncated toward zero | the most negative `int` divided by `-1` is itself |
+| `wrapping_rem` | `a % b`, with the sign of `a` | none: `%` already gives `0` for the most negative `int` modulo `-1` |
+| `wrapping_pow` | `base` to the power `exp`, modulo 2^64 | `**` panics when the result does not fit |
+
+Division by zero has no wrapped result: `wrapping_div` and `wrapping_rem` panic
+for it, and `wrapping_pow` panics for a negative exponent, each naming the line
+of the call. Everything else never panics.
+
+`wrapping_add`, `wrapping_sub`, `wrapping_mul` and `wrapping_shl` each compile to
+one machine instruction at every optimization level, `-O0` included, with no
+function call and no check. The others are short functions built on them.
+
+```turflang
+fn fnv1a(bytes: int[]): int {
+    mut h: int = -3750763034362895579;
+    for b in bytes {
+        h = h ^ b;
+        h = math::wrapping_mul(h, 1099511628211);
+    }
+    return h;
+}
+
+fn main(): int {
+    immut a: int[1] = [97];
+    printline(fnv1a(a));                                        // -5808556873153909620
+    printline(math::wrapping_add(9223372036854775807, 1));      // -9223372036854775808
+    printline(math::wrapping_sub(-9223372036854775807 - 1, 1)); // 9223372036854775807
+    printline(math::wrapping_pow(3, 40));                       // -6289078614652622815
+    return 0;
+}
+```
+
 ### `error MathError` and `divide`
 
 ```text
@@ -169,9 +279,11 @@ fn main(): int {
 | Call | On a problem |
 |---|---|
 | `divide` | returns `MathError::DivisionByZero` |
+| `wrapping_div`, `wrapping_rem` | **panic** (`division by zero`, at the calling line) when `b` is `0` |
+| `wrapping_pow` | **panic** (`negative exponent`, at the calling line) when `exp` is negative |
 | `abs(int)`, `power(int, int)` | **panic** (`Integer overflow`) when the result does not fit |
 | the C math functions | return `nan` or `inf`; never fail |
-| `min`, `max`, `clamp`, `abs(double)`, the other `power` forms | never fail |
+| `min`, `max`, `clamp`, `abs(double)`, the other `power` forms, the other `wrapping_*` functions | never fail |
 
 ---
 

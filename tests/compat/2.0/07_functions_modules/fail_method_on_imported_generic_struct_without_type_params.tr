@@ -1,0 +1,18 @@
+// EXPECT-DIAG: E138
+// EXPECT-DIAG: must declare its type parameters too
+// Same rule as tests/38_monomorphization/fail_method_on_generic_struct_without_type_params.tr,
+// on a struct imported from another module -- the shape first found live
+// (FDN-003's record): `fn List.extra()` declared in this file on the
+// stdlib's `list::List<T>`. Rejected at the declaration; the working form
+// is `fn<T> List.extra()` (tests/38_monomorphization/32_generic_extension_method_on_imported_struct.tr).
+
+import list::List;
+
+fn List.extra(): int {
+    return 7;
+}
+
+fn main(): int {
+    mut l: List<int> = List::default();
+    return l.extra() - 7;
+}

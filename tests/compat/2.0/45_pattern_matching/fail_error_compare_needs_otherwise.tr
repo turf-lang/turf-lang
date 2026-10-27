@@ -1,0 +1,22 @@
+// EXPECT-DIAG: E093
+// EXPECT-DIAG: Non-exhaustive comparison on '<error>'
+// LEC-003: an error value is an open union -- its variants can't be listed --
+// so a compare over it needs an arm that takes the rest, and a GUARDED arm
+// never counts (its guard may be false). Expected: E093.
+error MathError { DivisionByZero, Overflow }
+
+fn risky(n: int): !int {
+    if n == 0 { return MathError::DivisionByZero; }
+    return n;
+}
+
+fn main(): int {
+    mut r: int = 0;
+    immut v: int = risky(0) recover as err run {
+        compare err {
+            matches _ if r == 0: r = 1; done
+        }
+        return r;
+    };
+    return v;
+}

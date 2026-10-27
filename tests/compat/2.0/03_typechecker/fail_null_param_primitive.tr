@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E056
+// EXPECT-DIAG: No matching overload!
+fn foo(n: int): int {
+    return n;
+}
+
+fn main(): int {
+    foo(null);
+    return 0;
+}

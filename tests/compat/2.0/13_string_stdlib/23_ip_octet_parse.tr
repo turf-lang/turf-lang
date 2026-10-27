@@ -1,0 +1,40 @@
+// tests/13_string_stdlib/23_ip_octet_parse.tr
+// Real-world proof: split() + parse_int() together parse a dotted-decimal
+// IP string like "127.0.0.1" into its 4 integer octets -- exactly the
+// capability net.tr's own doc comment says was previously missing
+// ("strings.tr doesn't have a dotted-decimal parser (splitting on '.')
+// yet"). This is the actual motivating use case for adding split().
+
+import io;
+import strings;
+import list::List;
+
+import test;
+fn main(): int {
+    immut ip: string = "127.0.0.1";
+    mut octets: List<string> = strings::split(ip, ".");
+    test::assert_eq(octets.length(), 4, "IP string splits into 4 octets");
+
+    mut a: int = strings::parse_int(octets.get(0)) recover produce -1;
+    mut b: int = strings::parse_int(octets.get(1)) recover produce -1;
+    mut c: int = strings::parse_int(octets.get(2)) recover produce -1;
+    mut d: int = strings::parse_int(octets.get(3)) recover produce -1;
+
+    test::assert_eq(a, 127, "octet 0 == 127");
+    test::assert_eq(b, 0, "octet 1 == 0");
+    test::assert_eq(c, 0, "octet 2 == 0");
+    test::assert_eq(d, 1, "octet 3 == 1");
+
+    // A second address, to make sure it's not a fluke of the first byte
+    // matching the "127" prefix coincidentally.
+    immut ip2: string = "192.168.1.42";
+    mut octets2: List<string> = strings::split(ip2, ".");
+    test::assert_eq(octets2.length(), 4, "second IP string splits into 4 octets");
+    test::assert_eq(strings::parse_int(octets2.get(0)) recover produce -1, 192, "octet 0 == 192");
+    test::assert_eq(strings::parse_int(octets2.get(1)) recover produce -1, 168, "octet 1 == 168");
+    test::assert_eq(strings::parse_int(octets2.get(2)) recover produce -1, 1, "octet 2 == 1");
+    test::assert_eq(strings::parse_int(octets2.get(3)) recover produce -1, 42, "octet 3 == 42");
+
+    io::printline("23 PASS: dotted-IP parsing via strings::split + strings::parse_int");
+    return 0;
+}

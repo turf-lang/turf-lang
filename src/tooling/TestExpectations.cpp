@@ -7,6 +7,8 @@
 
 #include "tooling/TestExpectations.h"
 
+#include "llvm/Support/JSON.h"
+
 #include <algorithm>
 #include <cctype>
 #include <fstream>
@@ -77,6 +79,199 @@ std::string FieldValue(const std::string &Line, const char *Pattern) {
 }
 
 } // namespace
+
+bool HasTestFunctions(const std::string &Source) {
+  for (const auto &L : SplitLines(Source)) {
+    const size_t B = L.find_first_not_of(" \t");
+    if (B == std::string::npos || L.compare(B, 5, "@test") != 0)
+      continue;
+    const size_t After = B + 5;
+    if (After == L.size() ||
+        !(std::isalnum(static_cast<unsigned char>(L[After])) || L[After] == '_'))
+      return true;
+  }
+  return false;
+}
+
+bool ParseManifest(const std::string &Text, std::vector<TestCase> &Cases, bool &HasMain,
+                   std::string &Error) {
+  auto Parsed = llvm::json::parse(Text);
+  if (!Parsed) {
+    Error = "the test build's manifest is not valid JSON (" +
+            llvm::toString(Parsed.takeError()) + ")";
+    return false;
+  }
+  const llvm::json::Object *Top = Parsed->getAsObject();
+  const llvm::json::Array *Tests = Top ? Top->getArray("tests") : nullptr;
+  if (!Top || Top->getInteger("format") != 1 || !Tests) {
+    Error = "the test build's manifest is not format 1";
+    return false;
+  }
+  HasMain = Top->getBoolean("has_main").value_or(false);
+  auto Str = [](const llvm::json::Object &O, const char *K) {
+    auto V = O.getString(K);
+    return V ? V->str() : std::string();
+  };
+  auto Diags = [&](const llvm::json::Object &O, const char *K) {
+    std::vector<TestCase::Diag> Out;
+    if (const llvm::json::Array *A = O.getArray(K))
+      for (const auto &V : *A)
+        if (const llvm::json::Object *D = V.getAsObject())
+          Out.push_back({Str(*D, "code"), Str(*D, "message"), Str(*D, "fix"),
+                         static_cast<int>(D->getInteger("line").value_or(0))});
+    return Out;
+  };
+  for (const auto &V : *Tests) {
+    const llvm::json::Object *O = V.getAsObject();
+    if (!O)
+      continue;
+    TestCase C;
+    C.Name = Str(*O, "name");
+    C.Line = static_cast<int>(O->getInteger("line").value_or(0));
+    C.Outcome = Str(*O, "outcome");
+    C.Code = Str(*O, "code");
+    C.Text = Str(*O, "text");
+    C.Error = Str(*O, "error");
+    C.HasFix = O->getString("fix").has_value();
+    C.Fix = Str(*O, "fix");
+    C.Status = static_cast<int>(O->getInteger("status").value_or(0));
+    C.Run = static_cast<int>(O->getInteger("run").value_or(-1));
+    C.Errors = Diags(*O, "errors");
+    C.Warnings = Diags(*O, "warnings");
+    Cases.push_back(std::move(C));
+  }
+  return true;
+}
+
+namespace {
+
+std::string Quote(const std::string &S) { return "\"" + S + "\""; }
+
+std::string Describe(const TestCase::Diag &D) {
+  return (D.Code.empty() ? std::string("(no code)") : D.Code) + " at line " +
+         std::to_string(D.Line) + ": " + Trim(D.Message);
+}
+
+// The lines the test program reports through (EmitTestHarness(),
+// src/codegen/CodegenFunc.cpp).
+const char *const ReturnedLine = "turf-test: returned";
+const char *const ErrorLinePrefix = "turf-test: error ";
+
+} // namespace
+
+std::vector<std::string> JudgeCompileError(const TestCase &C) {
+  std::vector<std::string> Out;
+  const std::string Want = C.Code + (C.Text.empty() ? "" : " " + Quote(C.Text));
+  if (C.Errors.empty())
+    return {"its body compiled without an error; expected " + Want};
+  bool TextFound = false;
+  for (const auto &D : C.Errors) {
+    if (D.Code != C.Code)
+      Out.push_back("its body has another error, " + Describe(D) + "; expected " + C.Code);
+    else if (Contains(D.Message, C.Text))
+      TextFound = true;
+  }
+  if (!Out.empty())
+    return Out;
+  if (!TextFound) {
+    Out.push_back("no " + C.Code + " message contains " + Quote(C.Text) + ":");
+    for (const auto &D : C.Errors)
+      Out.push_back("  " + Describe(D));
+    return Out;
+  }
+  if (C.HasFix) {
+    bool FixFound = false;
+    for (const auto &D : C.Errors)
+      FixFound = FixFound || (!D.Fix.empty() && Contains(D.Fix, C.Fix));
+    if (!FixFound) {
+      Out.push_back("the compiler printed no fix containing " + Quote(C.Fix) + ":");
+      for (const auto &D : C.Errors)
+        Out.push_back("  " + D.Code + " at line " + std::to_string(D.Line) + ": " +
+                      (D.Fix.empty() ? std::string("no fix") : "Fix: " + D.Fix));
+    }
+  }
+  return Out;
+}
+
+std::vector<std::string> JudgeWarnings(const TestCase &C) {
+  std::vector<std::string> Out;
+  if (C.Outcome == "no_warnings") {
+    for (const auto &D : C.Warnings)
+      Out.push_back("its body compiled with a warning, " + Describe(D));
+    return Out;
+  }
+  if (C.Outcome != "warning")
+    return Out;
+  for (const auto &D : C.Warnings)
+    if (D.Code == C.Code && Contains(D.Message, C.Text))
+      return Out;
+  Out.push_back("its body compiled without warning " + C.Code +
+                (C.Text.empty() ? "" : " " + Quote(C.Text)) +
+                (C.Warnings.empty() ? "" : "; its warnings:"));
+  for (const auto &D : C.Warnings)
+    Out.push_back("  " + Describe(D));
+  return Out;
+}
+
+std::string ProgramOutput(const std::string &Output) {
+  std::string Out;
+  for (const auto &L : SplitLines(Output))
+    if (L != ReturnedLine && L.rfind(ErrorLinePrefix, 0) != 0)
+      Out += L + "\n";
+  // The report line starts on a line of its own, after a blank one.
+  while (!Out.empty() && (Out.back() == '\n'))
+    Out.pop_back();
+  return Out;
+}
+
+std::vector<std::string> JudgeRun(const TestCase &C, int Status, bool TimedOut,
+                                  const std::string &Output) {
+  bool Returned = false;
+  std::string ReturnedError;
+  for (const auto &L : SplitLines(Output)) {
+    if (L == ReturnedLine)
+      Returned = true;
+    else if (L.rfind(ErrorLinePrefix, 0) == 0)
+      ReturnedError = L.substr(std::string(ErrorLinePrefix).size());
+  }
+  const bool Panicked = !Returned && ReturnedError.empty() && Status == 134;
+  // How the test ended, in words, for any outcome it was not.
+  auto Ended = [&]() -> std::string {
+    if (TimedOut)
+      return "it did not finish (timed out)";
+    if (!ReturnedError.empty())
+      return "it returned the error " + ReturnedError;
+    if (Returned)
+      return "it returned";
+    if (Panicked)
+      return "it panicked";
+    return "it ended with exit status " + std::to_string(Status);
+  };
+
+  if (C.Outcome == "panic") {
+    if (!Panicked || TimedOut)
+      return {Ended() + "; expected a panic" +
+              (C.Text.empty() ? std::string() : " with " + Quote(C.Text))};
+    if (!Contains(Output, C.Text))
+      return {"it panicked, but its output does not contain " + Quote(C.Text)};
+    return {};
+  }
+  if (C.Outcome == "exit") {
+    if (TimedOut || Returned || !ReturnedError.empty() || Status != C.Status)
+      return {Ended() + "; expected it to end through sys::exit(" + std::to_string(C.Status) +
+              ")"};
+    return {};
+  }
+  if (C.Outcome == "error") {
+    if (ReturnedError == C.Error && !TimedOut)
+      return {};
+    return {Ended() + "; expected it to return the error " + C.Error};
+  }
+  // returns, warning, no_warnings: the body returns, and without an error.
+  if (Returned && !TimedOut)
+    return {};
+  return {Ended() + "; expected it to return"};
+}
 
 std::string StripAnsi(const std::string &Text) {
   std::string Out;
@@ -236,7 +431,7 @@ std::vector<std::string> Register::checkDiagPolicy(const std::string &Source, co
   const std::string FirstEmitted = Emitted.empty() ? "" : *Emitted.begin();
 
   // NO-CODE: a `── error` header with no `[Exxx]` is a plain error, so the
-  // beginner has no `--explain` page for it. Warnings carry no codes by design.
+  // beginner has no `--explain` page for it. (A warning has a code too, but is never judged here.)
   int Codeless = 0;
   // GENERIC-CODE: E066 is the TypeChecker's one catch-all class; the line under
   // its header is the real banner, and anything but "Type mismatch!" there is

@@ -1,0 +1,1 @@
+fail_random_int_max_below_min.tr:11: random_int: max (3) is less than min (7)

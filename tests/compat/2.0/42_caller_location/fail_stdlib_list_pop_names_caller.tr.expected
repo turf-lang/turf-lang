@@ -1,0 +1,1 @@
+fail_stdlib_list_pop_names_caller.tr:8: List.pop: pop on empty list

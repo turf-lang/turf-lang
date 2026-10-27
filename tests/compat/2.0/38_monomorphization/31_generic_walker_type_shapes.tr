@@ -1,0 +1,59 @@
+// Regression test: SMP-002 (one shared generic-type walker, TypeWalk.h).
+// Each of the type shapes TypeWalk::substitute()/unify() must handle,
+// exercised as BOTH a generic function's parameter type and its return
+// type, so a regression in any one wrapper case (the exact class of bug
+// this file's own doc comments elsewhere describe -- `&T` collapsing to
+// `T*`, `&?T` doing the same, a callback's own `T` never substituted) is
+// caught here directly rather than only by incidental stdlib usage.
+//
+// `&T` and `&?T` in particular exercise TypeWalk::substitute()'s ordering
+// requirement: TurfReferenceType/TurfNullableReferenceType are dynamic_cast
+// BEFORE the plain TurfPointerType case (Types.h: both ARE-A
+// TurfPointerType) -- checking in the wrong order would silently rebuild a
+// substituted `&T`/`&?T` as a plain `T*`.
+import test;
+
+// `&T` -- a generic function taking and returning a non-null reference.
+fn<T> identityRef(x: &T): &T {
+    return x;
+}
+
+// `&?T` -- same shape, nullable.
+fn<T> identityNullableRef(x: &?T): &?T {
+    return x;
+}
+
+// `T[]` -- an array of the open parameter, both directions.
+fn<T> firstOf(arr: T[]): T {
+    return arr[0];
+}
+
+// `!T` -- a fallible return type whose success type is the open parameter.
+// (SMP-002 gave Resolver::substituteTypeParams a TurfErrorUnionType case it
+// never had before, via the shared TypeWalk::substitute() -- previously
+// only Monomorphize::substituteConcreteTypes() handled this shape at all.)
+fn<T> wrapFallible(x: T): !T {
+    return x;
+}
+
+fn main(): int {
+    mut n: int = 7;
+    mut rn: &int = identityRef(&n);
+    test::assert(rn == &n, "identityRef<int> should return the same reference");
+    test::assert(n == 7, "identityRef<int> must not have mutated its argument");
+
+    mut m: int = 9;
+    mut pm: &?int = &m;
+    mut rm: &?int = identityNullableRef(pm);
+    test::assert(rm == pm, "identityNullableRef<int> should return the same reference");
+    test::assert(m == 9, "identityNullableRef<int> must not have mutated its argument");
+
+    mut arr: int[3] = [10, 20, 30];
+    test::assert(firstOf(arr) == 10, "firstOf<int> over an int[] array");
+
+    mut s: double = 2.5;
+    mut fallibleResult: double = wrapFallible(s) recover produce -1.0;
+    test::assert(fallibleResult == 2.5, "wrapFallible<double> should carry the success value through");
+
+    return 0;
+}

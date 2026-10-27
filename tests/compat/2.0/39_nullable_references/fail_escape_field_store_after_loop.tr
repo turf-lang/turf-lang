@@ -1,0 +1,17 @@
+// EXPECT-DIAG: E086
+// EXPECT-DIAG: can't be stored into a field
+// The field sink after a loop, same cause as fail_escape_return_after_loop.tr.
+struct Node { val: int, next: &?Node }
+
+fn link(p: &Node): void {
+    mut n: Node = Node::default();
+    mut r: &?Node = &n;
+    for i in 0..2 { p.val += i; }
+    p.next = r;
+}
+
+fn main(): int {
+    mut p: &Node = heap(Node::default());
+    link(p);
+    return 0;
+}

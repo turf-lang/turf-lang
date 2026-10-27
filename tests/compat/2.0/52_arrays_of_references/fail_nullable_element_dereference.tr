@@ -1,0 +1,16 @@
+// EXPECT-DIAG: E081
+// An element of a `(&?N)[2]` is a `&?N` that is not a variable, so reading
+// through it needs it stored in a variable and checked first.
+struct N { val: int }
+
+fn mk(v: int): &N {
+    mut n: N = N::default();
+    n.val = v;
+    return heap(n);
+}
+
+fn main(): int {
+    mut b: (&?N)[2];
+    b[1] = mk(3);
+    return b[0].val;
+}

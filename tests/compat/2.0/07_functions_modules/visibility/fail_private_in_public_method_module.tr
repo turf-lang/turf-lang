@@ -1,0 +1,13 @@
+// Companion for fail_private_in_public_method.tr: a `pub` METHOD of a `pub`
+// struct that takes a private struct of this module.
+struct Token {
+    pub id: int
+}
+
+pub struct Lexer {
+    pub pos: int
+}
+
+pub fn Lexer.accept(t: Token): int {
+    return t.id + self.pos;
+}

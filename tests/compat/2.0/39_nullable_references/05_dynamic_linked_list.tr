@@ -1,0 +1,100 @@
+// FDN-001 (docs/planning/ROADMAP_v2.0.0.md, DEC-5): the proof this
+// milestone's whole reason for existing is closed -- a linked list of
+// DYNAMIC size, built entirely from `heap()`-allocated nodes, no fixed set
+// of stack locals the way 01_linked_list.tr's `&a`/`&b`/`&c` needed. Before
+// `heap()`, the only safe way to obtain a `&Node` was `&localVar`, so a
+// data structure whose size isn't known until runtime (here, 1000 nodes
+// built in a loop) was unbuildable in safe TurfLang at all.
+//
+// churn()/gc_collect() proves the SAME direction every tests/41_gc/*.tr
+// file already proves (see that folder's own comments): a structure kept
+// reachable only through ordinary local variables survives a forced
+// collection, with its contents intact -- not "was reclaimed once
+// unreachable", which none of those tests attempt at the Turf-source level
+// either (an optimizer is free to keep a checked address alive in a
+// register, making that direction non-deterministic to assert here; see
+// tests/08_e2e_stress/07_heap_bounded_allocation.tr +
+// scripts/smoke/gc_rss_smoke.sh for how the reclaim direction is actually
+// verified, the same split 41_gc/11's own comment documents).
+import test;
+import io;
+
+struct Node {
+    val: int,
+    next: &?Node
+}
+
+fn cons(v: int, next: &?Node): &Node {
+    mut n: Node = Node::default();
+    n.val = v;
+    n.next = next;
+    return heap(n);
+}
+
+fn sum(head: &?Node): int {
+    mut total: int = 0;
+    mut current: &?Node = head;
+    while (current != null) {
+        total = total + current.val;
+        current = current.next;
+    }
+    return total;
+}
+
+fn length(head: &?Node): int {
+    mut count: int = 0;
+    mut current: &?Node = head;
+    while (current != null) {
+        count = count + 1;
+        current = current.next;
+    }
+    return count;
+}
+
+// Same "overwrite whatever stack memory a naive implementation might have
+// accidentally left a checked address sitting in" idiom as
+// tests/41_gc/01_retention_across_collection.tr -- see that file's own
+// comment for why this matters, not just filler between the collection and
+// the assertions.
+fn churn(depth: int): void {
+    mut buf: int[64];
+    buf[0] = 0;
+    mut i: int = 0;
+    while i < 64 {
+        buf[i] = i * 3;
+        i = i + 1;
+    }
+    mut total: int = 0;
+    i = 0;
+    while i < 64 {
+        total = total + buf[i];
+        i = i + 1;
+    }
+    test::assert(total == 6048, "churn: stack buffer round-trips correctly");
+    if depth > 0 {
+        churn(depth - 1);
+    }
+}
+
+fn main(): int {
+    immut n: int = 1000;
+    mut head: &?Node = null;
+    mut i: int = 0;
+    while i < n {
+        head = cons(i, head);
+        i = i + 1;
+    }
+
+    test::assert(length(head) == n, "1000 heap()-allocated nodes are all reachable");
+    test::assert(sum(head) == 499500, "sum(0..999) == 499500 before collection");
+
+    churn(24);
+    gc_collect();
+    churn(24);
+
+    test::assert(length(head) == n, "the whole list survives a forced collection while retained");
+    test::assert(sum(head) == 499500, "every node's value is intact after collection");
+
+    io::printline("39/05 PASS: heap()-allocated dynamic linked list survives collection");
+    return 0;
+}

@@ -1,0 +1,27 @@
+// Regression test: a generic function returning its own bare type parameter
+// must correctly round-trip a `double` argument through type erasure.
+//
+// This used to be a KNOWN_BUG (tests/10_known_bugs/fail_generic_double_param.tr)
+// -- `identity(3.5)` returned garbage (4.94066e-324) because
+// Codegen.cpp's CastToType() "cast from generic parameter (void*) back to
+// actual type" branch was dead code: it was gated on
+// `dynamic_cast<TurfGenericParamType>(SrcType.get())`, but SrcType a few
+// lines above is always produced by getTurfTypeFromLLVM(ValTy), which can
+// only ever return TurfDouble/TurfInt/TurfBool/TurfPtr/TurfVoid -- never
+// TurfGenericParamType -- so that condition could never match. Fixed by
+// gating on `ValTy->isPointerTy()` instead (see CastToType()'s comment),
+// which is what actually identifies "this is an erased generic value" at
+// that point in the pipeline. A `bool` return had the same gap and
+// segfaulted outright; see generic_identity_scalar.tr for that case.
+
+import test;
+
+fn<T> identity(x: T): T {
+    return x;
+}
+
+fn main(): int {
+    mut b: double = identity(3.5);
+    test::assert(b == 3.5, "");
+    return 0;
+}

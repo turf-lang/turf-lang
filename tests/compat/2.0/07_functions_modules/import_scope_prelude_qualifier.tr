@@ -1,0 +1,10 @@
+// LEC-008 (F-IMP-1): the prelude's modules are spellable in every file, not just
+// the main program -- a module that writes `strings::length(...)` with no import
+// keeps compiling.
+import import_scope_prelude_module;
+
+import test;
+fn main(): int {
+    test::assert(import_scope_prelude_module::char_count("abcd") == 4, "a prelude qualifier works inside a module");
+    return 0;
+}

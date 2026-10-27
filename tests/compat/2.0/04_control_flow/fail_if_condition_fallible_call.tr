@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E066
+// EXPECT-DIAG: has type '!void'
+// EXPECT-DIAG: A fallible call is not a condition
+// A `!void` call does not report success as a bool; its failure is handled
+// with `recover`.
+import os;
+
+fn main(): int {
+    if os::set_env("TURF_DEMO", "1", 1) {
+        return 1;
+    }
+    return 0;
+}

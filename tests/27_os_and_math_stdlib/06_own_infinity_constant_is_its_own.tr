@@ -1,0 +1,10 @@
+// A program's own INFINITY and NAN keep the values written for them: only
+// math's are given theirs by the compiler (src/sema/Intrinsics.h, kind 6).
+import test;
+import lib_own_infinity_module;
+
+fn main(): int {
+    test::assert(lib_own_infinity_module::INFINITY == 0.0, "a module's own INFINITY");
+    test::assert(lib_own_infinity_module::NAN == 1.5, "a module's own NAN");
+    return 0;
+}

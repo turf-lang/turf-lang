@@ -14,3 +14,8 @@ A few of the fixed shapes:
     machine Door { Open -> Closed }      // `->` between two states
 
 Compare what you wrote with the shape above and add or fix the piece the message asks for. If you wrote a lookalike (a `then` instead of `{`, `:=` instead of `=`), that is the one to change: Turf has no alias for it.
+
+One shape is a generic function's type arguments written without `::`. `identity<int>(3)` reads as `identity < int ...`, and `int` cannot be compared, so this is E110. Type arguments of a generic function follow `::`, and the compiler prints the fix:
+
+    immut a: int = identity<int>(3);      // E110
+    immut a: int = identity::<int>(3);    // fine

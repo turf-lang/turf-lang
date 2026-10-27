@@ -1,0 +1,22 @@
+// EXPECT-DIAG: E056
+// EXPECT-DIAG: No visible 'twice' overload accepts a 'int*' receiver via UFCS.
+// An `int*` receiver is not loaded implicitly to reach a function taking an
+// `int`: UFCS matches the receiver as written. This used to match `int` and
+// pass the pointer anyway, which crashed the compiler (invalid LLVM IR); the
+// error also named the receiver `int` instead of `int*`.
+
+import mem;
+
+fn twice(x: int): int {
+    return x * 2;
+}
+
+fn main(): int {
+    unsafe {
+        mut q: int* = mem::alloc(16);
+        q[0] = 21;
+        mut r: int = q.twice();
+        mem::free(q);
+    }
+    return 0;
+}

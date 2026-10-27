@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E088
+// EXPECT-DIAG: Function 'secret_twice' is private to module
+// LEC-002 E088: visibility must not be bypassable by call syntax. `secret_twice`
+// is a free function the module did not mark `pub`, so `s.secret_twice()` may
+// not resolve to it through UFCS from another module.
+import visibility_lib_module::Shown;
+
+fn main(): int {
+    mut s: Shown = Shown::default();
+    return s.secret_twice();
+}

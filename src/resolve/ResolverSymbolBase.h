@@ -46,6 +46,7 @@
 
 #include "frontend/Annotation.h" // Annotation -- attached to ResolverFunctionSymbol
 #include "frontend/Lexer.h" // TOK_EQ/TOK_NEQ/TOK_LEQ/TOK_GEQ -- operator token constants, lightweight/no LLVM
+#include "sema/Intrinsics.h" // LoweredFunction -- ResolverFunctionSymbol::Lowering
 #include "sema/Types.h" // TurfTypePtr, TurfType — pure C++ header, no LLVM
 
 #include <memory>
@@ -355,6 +356,12 @@ struct ResolverFunctionSymbol {
   /// flag intentionally has no corresponding entry in Params above (see
   /// FuncDefExprAST's own doc comment, ASTDecl.h, for why).
   bool                     HasCallerLocation = false;
+
+  /// NM-3: the standard-library function Codegen lowers to one instruction
+  /// (src/sema/Intrinsics.h, kind 5), or None. Set by Resolver::
+  /// buildFunctionSymbol() from the declaring module's key, so a program's
+  /// own function of the same name is never lowered.
+  LoweredFunction          Lowering = LoweredFunction::None;
 
   /// The `@name(args)` annotations written on this declaration, in source
   /// order (src/frontend/Annotation.h). A pass that consumes one asks the CALLEE'S

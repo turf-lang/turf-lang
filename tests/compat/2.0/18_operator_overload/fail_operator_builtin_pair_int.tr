@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E028
+// EXPECT-DIAG: 'operator +(int, int)' is not allowed
+// Negative test: operator +(int, int) is a hard error at the declaration
+// site -- both operand types are already builtin.
+operator +(a: int, b: int): int {
+    return a;
+}
+
+fn main(): int {
+    return 0;
+}

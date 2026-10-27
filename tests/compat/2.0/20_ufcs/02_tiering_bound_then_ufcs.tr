@@ -1,0 +1,29 @@
+// RFC §5.2's own worked example: a 0-arg bound User.print() AND a 2-param
+// free print(User, bool) both exist. user.print() (0 args) must resolve to
+// the bound method (tier 1 wins silently, tier 2 never consulted).
+// user.print(true) (1 arg) must resolve to the free function -- tier 1 is
+// exhausted (arity alone rules out the 0-arg bound method) before tier 2
+// is ever consulted.
+import test;
+
+struct User {
+    tag: int
+}
+
+fn User.print(): int {
+    return 1; // bound-method marker
+}
+
+fn print(u: User, verbose: bool): int {
+    return 2; // UFCS marker
+}
+
+fn main(): int {
+    mut u: User = User::default();
+    u.tag = 42;
+
+    test::assert(u.print() == 1, "0-arg call resolves to the bound method");
+    test::assert(u.print(true) == 2, "1-arg call falls through to UFCS");
+
+    return 0;
+}

@@ -222,6 +222,8 @@ void substituteTypesInBody(const ExprAST *Node,
   // A size parameter (`N` in `fn<T, N: size>`): its reads become the
   // instantiation's constant, and `mut r: T[N];` gets that length.
   if (auto *V = const_cast<VariableExprAST *>(dynamic_cast<const VariableExprAST *>(Node))) {
+    for (auto &T : V->TypeArgs) // LG-2: `identity::<T>`
+      T = substituteConcreteTypes(T, Subst);
     if (V->IsSizeParamRef) {
       auto It = Subst.find(V->getName());
       if (It != Subst.end())
@@ -316,7 +318,18 @@ void substituteTypesInBody(const ExprAST *Node,
       substituteTypesInBody(Arg.get(), Subst);
     return;
   }
+  // LG-1/LG-2: the type arguments written in `List<T>::default()` and
+  // `module::f::<T>`.
+  if (auto *SA = const_cast<ScopeAccessExprAST *>(dynamic_cast<const ScopeAccessExprAST *>(Node))) {
+    if (SA->LeftType)
+      SA->LeftType = substituteConcreteTypes(SA->LeftType, Subst);
+    for (auto &T : SA->TypeArgs)
+      T = substituteConcreteTypes(T, Subst);
+    return;
+  }
   if (auto *MC = dynamic_cast<const MethodCallExprAST *>(Node)) {
+    for (auto &T : const_cast<MethodCallExprAST *>(MC)->TypeArgs)
+      T = substituteConcreteTypes(T, Subst);
     substituteTypesInBody(MC->getBase(), Subst);
     for (const auto &Arg : MC->getArgs())
       if (Arg) substituteTypesInBody(Arg.get(), Subst);
@@ -673,9 +686,15 @@ std::shared_ptr<ResolverFunctionSymbol> finishInstantiation(
     const size_t Anchor = anchorIndex(Chain);
 
     std::string FullMsg = "In this instantiation: " + InnerMsg;
-    if (!InnerHint.empty())
-      FullMsg += " (" + InnerHint + ")";
-    SemanticError Err(Chain[Anchor]->Request.Site, FullMsg);
+    // The inner error's own hint becomes this one's; without one, say what to
+    // change at the instantiation (DX-3, issue #291).
+    SemanticError Err(
+        Chain[Anchor]->Request.Site, FullMsg,
+        !InnerHint.empty()
+            ? InnerHint
+            : "Call '" + describeRequest(Entry.Request) +
+                  "' with types its body works for, or change the body of '" +
+                  Entry.Request.DeclKey + "' so it accepts these types.");
     // The mistake is the inner error's (`<` on a struct is E124), not a
     // generic E011; `--explain` should name that one.
     if (InnerCode) {
@@ -782,6 +801,8 @@ void rewriteNewFuncCallSites(InstantiationEntry &Entry) {
       FC->ResolvedCallTarget = Entry.ClonedSymbol;
     else if (auto *VE = dynamic_cast<VariableExprAST *>(Entry.Sites[i]))
       VE->ResolvedFunctionRef = Entry.ClonedSymbol; // a generic fn as a value
+    else if (auto *MC = dynamic_cast<MethodCallExprAST *>(Entry.Sites[i]))
+      MC->ResolvedCallTarget = Entry.ClonedSymbol; // `x.f()`, a generic fn via UFCS
     else
       retargetOperatorSite(Entry.Sites[i], Entry.Request.DeclKey,
                            Entry.ClonedSymbol);

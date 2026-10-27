@@ -1,0 +1,16 @@
+// EXPECT-DIAG: E033
+// Regression test: a function with two parameters sharing the same name
+// must be rejected. Also exercises ParamDecl::Loc (AST.h) -- previously
+// ParamDecl had no source location field at all, so Resolver::visitFuncDef's
+// duplicate-parameter check hardcoded {0,0} for the "declared here" note,
+// always reporting "line 0, column 0" for the first occurrence, and pointed
+// the error itself at the function's own 'fn' keyword instead of the actual
+// duplicate parameter.
+
+fn add(x: int, x: int): int {
+    return x;
+}
+
+fn main(): int {
+    return 0;
+}

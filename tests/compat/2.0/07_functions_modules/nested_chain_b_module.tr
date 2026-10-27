@@ -1,0 +1,8 @@
+// Companion module for scope_nested_on_demand_chain.tr -- link B, imports
+// C's function on-demand from WITHIN its own file (not the top-level
+// user file), so bFunc() can call cFunc() bare.
+import nested_chain_c_module::cFunc;
+
+pub fn bFunc(): int {
+    return cFunc() + 1;
+}

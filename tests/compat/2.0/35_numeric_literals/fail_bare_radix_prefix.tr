@@ -1,0 +1,9 @@
+// EXPECT-DIAG: E070
+// EXPECT-DIAG: '0x' isn't followed by any digit
+// SEM-001: a radix prefix with no digit after it at all -- E070
+// (MalformedRadixPrefixError, docs/errors/codes/E070.txt).
+
+fn main(): int {
+    mut x: int = 0x;
+    return 0;
+}

@@ -31,6 +31,7 @@
 #include "llvm/ADT/SmallString.h" // Num->getIntValExact().toString() below
 
 #include <cstring>
+#include <limits>     // kind-6 constants in hoistExportedConstant()
 #include <functional> // std::function -- checkStructLayoutAcyclicity()'s recursive DFS lambda
 #include <memory>
 #include <unordered_map> // checkStructLayoutAcyclicity()'s name -> AST / colour maps
@@ -559,6 +560,11 @@ Resolver::buildFunctionSymbol(const FuncDefExprAST &Node,
   Sym.HasCallerLocation = Node.hasCallerLocation();
   Sym.Annotations = Node.getAnnotations();
   Sym.IsPublic = Node.isPublic();
+  // NM-3 (src/sema/Intrinsics.h, kind 5). A module key names the standard
+  // library's module whenever it equals a stdlib name: a root module of that
+  // name is an E090 at its import, and a dependency's module is keyed
+  // `<package>/<path>`. So a user's own `wrapping_add` is never lowered.
+  Sym.Lowering = LookupLoweredFunction(ModuleName, Node.getName());
   ResolverSourceLocation DeclLoc;
   // getNameLoc(), not getLoc() -- getLoc() is the 'fn'/'operator' keyword's
   // own position (see FuncDefExprAST's doc comment in ASTDecl.h), which
@@ -981,6 +987,17 @@ void Resolver::hoistExportedConstant(const VarDeclExprAST &Var,
   Sym.Type = Var.getTypePtr();
   Sym.DeclLoc = {Loc.Line, Loc.Col};
 
+  // A number may carry one leading '-' (`export immut INT_MIN: int =
+  // -9223372036854775808;`): the type checker checks the negated literal's
+  // range as it does for any `-5` (visitUnary()).
+  bool Negated = false;
+  if (const auto *U = dynamic_cast<const UnaryExprAST *>(Init);
+      U && U->getOpcode() == '-' &&
+      dynamic_cast<const NumberExprAST *>(U->getOperand())) {
+    Negated = true;
+    Init = U->getOperand();
+  }
+
   if (const auto *Num = dynamic_cast<const NumberExprAST *>(Init)) {
     if (Num->isInteger()) {
       // Exact decimal string, not the narrow getIntVal() -- see
@@ -989,8 +1006,17 @@ void Resolver::hoistExportedConstant(const VarDeclExprAST &Var,
       llvm::SmallString<32> Digits;
       Num->getIntValExact().toString(Digits, /*Radix=*/10);
       Sym.IntVal = std::string(Digits.str());
+      if (Negated && Sym.IntVal != "0")
+        Sym.IntVal = "-" + Sym.IntVal;
+      // `export immut X: double = 3;` -- an integer literal acquires the
+      // declared `double` type, and codegen reads a double's DoubleVal.
+      if (Sym.Type && Sym.Type->isDouble()) {
+        const double Magnitude = Num->getIntValExact().roundToDouble();
+        // `-0` is the integer 0, so +0.0, as in a function body.
+        Sym.DoubleVal = Negated && Magnitude != 0.0 ? -Magnitude : Magnitude;
+      }
     } else {
-      Sym.DoubleVal = Num->getDoubleVal();
+      Sym.DoubleVal = Negated ? -Num->getDoubleVal() : Num->getDoubleVal();
     }
   } else if (const auto *B = dynamic_cast<const BoolExprAST *>(Init)) {
     Sym.BoolVal = B->getVal();
@@ -999,6 +1025,23 @@ void Resolver::hoistExportedConstant(const VarDeclExprAST &Var,
   } else {
     ExportNonConstantInitializerError(Loc, Var.getName()).raise();
     return;
+  }
+
+  // STD-004 (src/sema/Intrinsics.h, kind 6): the values no literal spells.
+  if (Sym.Type && Sym.Type->isDouble()) {
+    switch (LookupSuppliedConstant(ModuleName, Sym.Name)) {
+    case SuppliedConstant::Infinity:
+      Sym.DoubleVal = std::numeric_limits<double>::infinity();
+      break;
+    case SuppliedConstant::NegInfinity:
+      Sym.DoubleVal = -std::numeric_limits<double>::infinity();
+      break;
+    case SuppliedConstant::NaN:
+      Sym.DoubleVal = std::numeric_limits<double>::quiet_NaN();
+      break;
+    case SuppliedConstant::None:
+      break;
+    }
   }
 
   if (ModuleName.empty())

@@ -66,6 +66,12 @@
  * rather than silently assumed away; see FDN-006.md's *Known pitfalls*.
  */
 
+/* <ucontext.h>'s REG_RBP / REG_RSP names are glibc extensions; must precede
+ * every include. */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 #include "turfrt.h"
 #include "turfrt_internal.h"
 
@@ -90,6 +96,65 @@
 #endif
 #endif
 
+#ifndef TURF_SIGNAL_ASAN /* only the fault handlers use the depth count */
+/*
+ * RT-6 (issue #300): how many calls deep the stack was when it ran out, so
+ * "unbounded recursion" is a number a user can compare with what they
+ * expected (a recursion meant to go 1000 deep that reports 130000 has lost
+ * its base case; one that reports 90000 for a legitimately deep input needs
+ * a loop or a collection).
+ *
+ * Counted by walking the saved-frame-pointer chain from the faulting
+ * context, which is why codegen gives every Turf function the
+ * `"frame-pointer"="all"` attribute (CodegenFunc.cpp): without it an
+ * optimized build keeps no chain to walk, and nothing else in a process
+ * with no unwinder can recover a depth after the fact. The count is
+ * "about": inlining merges frames, and C code between Turf frames (libc,
+ * the runtime) is built without frame pointers and breaks the chain, so it
+ * can only undercount, never invent frames. Every link is checked to lie
+ * on the stack and move strictly up, so a clobbered frame-pointer register
+ * (a libc leaf function is allowed to use it as a scratch register) ends
+ * the walk instead of reading outside the stack. Returns 0 when no frame
+ * validated, and the caller then prints the message without a depth rather
+ * than a wrong one.
+ */
+static unsigned long long turf_rt_walk_frames(uintptr_t fp, uintptr_t sp,
+                                              uintptr_t stack_base) {
+  if (stack_base == 0)
+    return 0;
+  unsigned long long depth = 0;
+  while (fp >= sp && fp + 2 * sizeof(uintptr_t) <= stack_base &&
+         (fp & (sizeof(uintptr_t) - 1)) == 0) {
+    uintptr_t next = ((uintptr_t *)fp)[0];
+    uintptr_t ret = ((uintptr_t *)fp)[1];
+    if (ret == 0)
+      break;
+    depth++;
+    if (next <= fp)
+      break;
+    fp = next;
+  }
+  return depth;
+}
+
+/* The text both platforms print; `depth` 0 means unknown. Static: the
+ * handler runs on a small alternate stack (POSIX) or on what the thread has
+ * left (Windows), neither of which is the place for a 160-byte buffer. */
+static const char *turf_rt_overflow_message(unsigned long long depth) {
+  static char msg[160];
+  if (depth > 0)
+    snprintf(msg, sizeof(msg),
+             "the call stack exceeded its limit at about %llu nested calls "
+             "-- check for unbounded or missing-base-case recursion",
+             depth);
+  else
+    snprintf(msg, sizeof(msg),
+             "the call stack exceeded its limit -- check for unbounded or "
+             "missing-base-case recursion");
+  return msg;
+}
+#endif /* !TURF_SIGNAL_ASAN */
+
 #if !defined(_WIN32)
 #include <signal.h>
 #include <sys/resource.h>
@@ -107,14 +172,58 @@ static unsigned char g_altstack[TURF_ALTSTACK_SIZE];
 
 #define TURF_STACK_GUARD_WINDOW ((uintptr_t)(256 * 1024))
 
+#if defined(__linux__)
+#include <ucontext.h>
+#endif
+
+#ifndef TURF_SIGNAL_ASAN /* only the handler below uses these */
+/* The frame and stack pointers of the faulting context, or 0 where this
+ * platform's register layout is not handled (the message then has no depth). */
+static int turf_rt_fault_regs(void *ucontext, uintptr_t *fp, uintptr_t *sp) {
+  if (!ucontext)
+    return 0;
+#if defined(__linux__) && defined(__x86_64__)
+  ucontext_t *uc = (ucontext_t *)ucontext;
+  *fp = (uintptr_t)uc->uc_mcontext.gregs[REG_RBP];
+  *sp = (uintptr_t)uc->uc_mcontext.gregs[REG_RSP];
+  return 1;
+#elif defined(__linux__) && defined(__aarch64__)
+  ucontext_t *uc = (ucontext_t *)ucontext;
+  *fp = (uintptr_t)uc->uc_mcontext.regs[29];
+  *sp = (uintptr_t)uc->uc_mcontext.sp;
+  return 1;
+#elif defined(__APPLE__) && defined(__aarch64__)
+  ucontext_t *uc = (ucontext_t *)ucontext;
+  *fp = (uintptr_t)uc->uc_mcontext->__ss.__fp;
+  *sp = (uintptr_t)uc->uc_mcontext->__ss.__sp;
+  return 1;
+#elif defined(__APPLE__) && defined(__x86_64__)
+  ucontext_t *uc = (ucontext_t *)ucontext;
+  *fp = (uintptr_t)uc->uc_mcontext->__ss.__rbp;
+  *sp = (uintptr_t)uc->uc_mcontext->__ss.__rsp;
+  return 1;
+#else
+  (void)fp;
+  (void)sp;
+  return 0;
+#endif
+}
+
+static unsigned long long turf_rt_count_frames(void *ucontext,
+                                               uintptr_t stack_base) {
+  uintptr_t fp, sp;
+  if (!turf_rt_fault_regs(ucontext, &fp, &sp))
+    return 0;
+  return turf_rt_walk_frames(fp, sp, stack_base);
+}
+#endif /* !TURF_SIGNAL_ASAN */
+
 /* Never referenced under TURF_SIGNAL_ASAN (see
  * turf_rt_install_segv_handler()'s own comment below) -- guarded out
  * entirely rather than left as dead code a -Wunused-function build would
  * otherwise flag. */
 #ifndef TURF_SIGNAL_ASAN
 static void turf_rt_segv_handler(int sig, siginfo_t *info, void *ucontext) {
-  (void)ucontext;
-
   uintptr_t fault_addr = (uintptr_t)info->si_addr;
   uintptr_t stack_base = turf_gc_get_stack_base();
   int is_stack_overflow = 0;
@@ -135,8 +244,8 @@ static void turf_rt_segv_handler(int sig, siginfo_t *info, void *ucontext) {
 
   if (is_stack_overflow) {
     turf_rt_panic("stack overflow",
-                  "the call stack exceeded its limit -- check for unbounded "
-                  "or missing-base-case recursion",
+                  turf_rt_overflow_message(
+                      turf_rt_count_frames(ucontext, stack_base)),
                   NULL, 0);
   } else {
     fprintf(stderr,
@@ -232,10 +341,17 @@ void turf_rt_install_segv_handler(void) {
 static LONG WINAPI turf_rt_veh(EXCEPTION_POINTERS *ep) {
   const DWORD code = ep->ExceptionRecord->ExceptionCode;
   if (code == EXCEPTION_STACK_OVERFLOW) {
-    turf_rt_panic("stack overflow",
-                  "the call stack exceeded its limit -- check for unbounded "
-                  "or missing-base-case recursion",
-                  NULL, 0);
+    unsigned long long depth = 0;
+#if defined(_M_X64) || defined(__x86_64__)
+    /* The x64 frame-pointer chain, as on POSIX (RT-6); other Windows
+     * targets print the message without a depth. */
+    ULONG_PTR lo = 0, hi = 0;
+    GetCurrentThreadStackLimits(&lo, &hi);
+    depth = turf_rt_walk_frames((uintptr_t)ep->ContextRecord->Rbp,
+                                (uintptr_t)ep->ContextRecord->Rsp,
+                                (uintptr_t)hi);
+#endif
+    turf_rt_panic("stack overflow", turf_rt_overflow_message(depth), NULL, 0);
   } else if (code == EXCEPTION_ACCESS_VIOLATION) {
     /* ExceptionInformation[0] is read/write/execute, [1] the faulting address. */
     void *addr = ep->ExceptionRecord->NumberParameters >= 2

@@ -117,18 +117,26 @@ any line may carry them under the stdlib rules of 5.2.
 unobservable (5.2's internals row), so it runs alongside the user-visible
 themes and is listed in each line's "Internal" row.
 
+**Numbering.** This Part still uses the numbering from before 2.1.0 shipped
+early, one behind `TURFLANG_3.0.0_ORDER.md`, which wins on which line an item
+ships in. The two lines added on 2026-10-25 carry their order-file numbers in
+parentheses: they come after 2.6.x here, and push this Part's 2.7.x and 2.8.x
+to 2.10.0 and 2.11.0 in the order file.
+
 | Line | Theme | Size of change | TDPs |
 |---|---|---|---|
 | **2.0.x** | Bug fixes found in 2.0.0 | patches | — |
 | **2.1.x** | Contract and quick wins | small, additive | 2-003, 2-004, 2-005, 2-006 (2-002 in part) |
-| **2.2.x** | Diagnostics you can trust; analysis I | medium, warn-first | 2-001, 2-002 (rest), 2-007, 2-008 |
-| **2.3.x** | Closures and generics | large | 2-009, 2-010 |
+| **2.2.x** | Diagnostics you can trust; analysis I | medium, warn-first | 2-001, 2-002 (rest), 2-007, 2-008, 2-028 (part) |
+| **2.3.x** | Closures and generics | large | 2-009, 2-010, 2-028 (rest) |
 | **2.4.x** | Iteration, views, patterns, errors | large | 2-011, 2-012, 2-013, 2-014 |
 | **2.5.x** | Runtime and memory checks | large, internal | 2-015 |
-| **2.6.x** | Packages and native code (aim B) | large | 2-016, 2-017, 2-018 |
+| **2.6.x** | Packages and native code (aim B) | large | 2-016, 2-017, 2-018, 2-027 |
+| **(2.8.0)** | Turf uses C (order-file number) | medium | 2-029 |
+| **(2.9.0)** | C, C++, Rust and Python call Turf (order-file number) | large | 2-030 |
 | **2.7.x** | Tooling and the pure compiler (aim A, additive half) | large | 2-019 |
 | **2.8.x** | Ready for 3.0 (last 2.x minor) | small | 2-020 |
-| **3.0.0** | The breaking register (Part 7) | breaking | 2-020 |
+| **3.0.0** | The breaking register (Part 7) | breaking | 2-020, 2-027 |
 | **3.x** | Concurrency, then what follows | large | 3-001, 3-002 |
 
 ### 2.1.x — Contract and quick wins
@@ -143,7 +151,7 @@ any change to default output.
 | Diagnostics | SL-0 provenance labels (the `[Model Suggestion]` label landed), DX-1 `Fix:` lines (landed), DX-3 hint backfill, DX-2 `--diagnostics=json` (open) |
 | Numeric speed | NM-1 baseline benchmark, NM-3 `math::wrapping_*`, NM-4 trap-block measurement |
 | Generics at use sites | LG-1 `List<int>::default()`, LG-2 `f::<int>(…)`, LG-7 hints that point at them |
-| Small language and runtime | F-11d `@test` functions, RT-6 stack-overflow depth hint |
+| Small language and runtime | F-11d `@test` functions with their outcomes (`compile_error`, `warning`, `no_warnings`, `panic`, `exit`, `error`), RT-6 stack-overflow depth hint, SY-1 `for c in s`, SY-2 (a) integer literal receivers documented and tested |
 | Libraries | LB-2 unsafe-surface report in `turf` |
 | Repositories | IF-1 interface manifest, IF-5 consumer fixtures in the compiler's CI |
 | Documentation | `docs/development/DOCS_BACKLOG.md` and the per-minor documentation gate (4.4) in force |
@@ -158,7 +166,10 @@ any change to default output.
 | Analysis (warnings only) | AN-1 `unsafe` checks, AN-2 loops, AN-3 (a)(b) recursion, AN-4 nullability, AN-5 manual-heap leaks, AN-6 precision lint, AN-7 dead code, LB-5 raw-receiver method calls |
 | Numeric speed | NM-2 proof-based elision over ranges |
 | Repositories | IF-2 versioned schemas for diagnostics and package-graph JSON; IF-3 website error pages generated from V-5 |
-| Internal | F-S2 no global symbol table, F-S4a analysis leaves Codegen |
+| Syntax | SY-2 (b) decimal-literal receiver warning, SY-3 `function`, SY-4 `static fn`, SY-5 `pub immut`, each old spelling with a warning and a `Fix:` |
+| Internal | F-S2 no global symbol table, F-S4a analysis leaves Codegen, F-11e the compiler's own tests move to `@test` expectations |
+| Tests | F-11f test options (TDP-2-026) |
+| Diagnostics | DX-9 the wording guide and every message rewritten to it, DX-10 a snapshot of every diagnostic, DX-5 labelled spans (TDP-2-028) |
 
 The AN warnings and LB-5 land here so that each has at least two minors in the
 field before 3.0 can promote it (B-1, B-13).
@@ -169,6 +180,7 @@ field before 3.0 can promote it (B-1, B-13).
 |---|---|
 | Closures | F-1 phases 1–2 (capture-free, then `{code, env}` with captures), G-1, B-7 decided in phase 1 |
 | Inference | LG-3 struct type arguments from constructor arguments, LG-4 return-only type parameters, LG-6 `List::from` / `Set::from` |
+| Diagnostics | DX-6 notes that show the related code, DX-7 messages that recognize the intent, DX-8 every independent error in one run (on F-S2 and F-S3) (TDP-2-028) |
 | Internal | F-S3 `SemanticModel` |
 
 ### 2.4.x — Iteration, views, patterns, errors
@@ -198,8 +210,27 @@ field before 3.0 can promote it (B-1, B-13).
 | Packages | PK-1 registry, semver ranges and `turf publish`; PK-2 workspaces; PK-3 publish checks; PK-4 package documentation (with F-11c) |
 | Native code | LB-1 `[native]` C sources and libraries; LB-3 checked boundary contracts on `extern fn` |
 | Safe APIs | LB-4 raw pointers in a package's `pub` API (warning) |
+| Struct layout | ML-1 `@layout(c)`, ML-2 `--struct-layout=compact` (opt-in), ML-3 `turf layout` report, ML-4 warning on a struct whose address reaches C without `@layout(c)` (TDP-2-027) |
 | Build speed | F-7a separate compilation |
 | Internal | F-S4d continues |
+
+### (2.8.0) — Turf uses C
+
+| Area | Items |
+|---|---|
+| Contracts | CX-1 `@ownership(borrows:, keeps:)`, `@length(of:, from:)`; TDP-2-016's `owned` folded into `@ownership` |
+| Bindings | CX-2 `turf bind` (declarations from a header, `bind.toml` questions), CX-3 `turf bind --wrap` (safe wrapper modules as Turf source) |
+| Checks | CX-4 `@ownership(releases: self)` on methods (use-once), CX-5 `turf test --sanitize` on `[native]` C |
+| C++ | CX-6 `.cpp` in `[native] sources` with the system C++ compiler |
+
+### (2.9.0) — C, C++, Rust and Python call Turf
+
+| Area | Items |
+|---|---|
+| Export | EX-1 `@export` (functions and handle methods), EX-2 `turf build --lib` (static, shared, generated `.h`, `--cpp` `.hpp`), EX-6 the JSON export description |
+| Runtime | EX-3 the library-mode runtime (start on first call, per-entry stack base, one thread at a time behind an entry lock, no signal handlers), EX-4 handles; RT-7 runtime in pieces |
+| Host languages | Own repositories, released after 2.9.0 at their own pace: EX-5 `turf-python` (TDP-2-031), EX-7 `turf-node` (TDP-2-032), EX-8 `turf-lua` (TDP-2-033). Every other language with a C FFI uses the header (TDP-2-030's table). |
+| Platforms | F-20 cross-linking with per-target runtimes |
 
 ### 2.7.x — Tooling and the pure compiler (additive half)
 
@@ -215,7 +246,7 @@ field before 3.0 can promote it (B-1, B-13).
 
 The last 2.x minor adds no feature. It makes the upgrade a non-event:
 `lint-set = "3.0"` reports every B-item as an error on a 2.8 compiler; `turf
-migrate 3.0` performs every mechanical migration; every deprecation that 3.0
+migrate 3.0` performs every mechanical migration (ML-4's `@layout(c)` included); every deprecation that 3.0
 removes has warned for at least two minors; the 3.0 migration guide is
 published on the website; TDP-2-020 is accepted.
 
@@ -223,7 +254,7 @@ published on the website; TDP-2-020 is accepted.
 
 The register in Part 7: the pure compiler's removals (B-14, B-15), the
 safe-library rules (B-12, B-13), the promoted warnings (B-1), debug checks on at
-`-O0` (B-2), deprecated items removed (B-3), old lint-set pins retired (B-10).
+`-O0` (B-2), deprecated items removed (B-3), old lint-set pins retired (B-10), compact struct layout by default (B-22).
 The others (B-4 … B-9, B-11) are expected to be empty.
 
 ### 3.x
@@ -241,14 +272,16 @@ TDP-3-001's checks apply only to code that starts a thread.
 |---|---|
 | 3.1 | CC-0 design accepted (TDP-3-001); CC-1 thread-aware runtime with a single-thread fast path; CC-2 `thread` module |
 | 3.2 | CC-3 `sync` module, CC-4 async (library first), CC-5 non-blocking I/O, CC-6 TLS and UDP (TDP-3-002) |
+| 3.3 | EX-9 parallel entry into Turf libraries; `turf-jvm`, `turf-dotnet`, `turf-go`, `turf-beam` (TDP-3-003) |
 
 Other candidates: RT-2 GC tier 2 (after threads), F-10 self-hosting, the
 assistant's own roadmap (SL-* beyond 2.2, F-9's LoRA adapters), more platforms.
 
 **On no line, by design:** F-6c is LG-1/LG-2, F-7c is PK-1 and RT-4 is NM-1 …
-NM-6 (aliases); NM-5 and NM-6 wait for a measurement or a proposal of their
-own; RT-2′ is chosen only if RT-2 is measured not to work (it would be B-4, so
-4.0); SL-8 is dropped (4.2); F-7b and F-25 stay unscheduled.
+NM-6 (aliases); NM-5 waits for a measurement of its own and NM-6 for an LLVM
+that vectorizes it (measured 2026-10-25); RT-2′ is chosen only if RT-2 is
+measured not to work (it would be B-4, so 4.0); SL-8 is dropped (4.2); F-7b and
+F-25 stay unscheduled.
 
 ---
 
@@ -295,8 +328,22 @@ written in this order; this table is updated if they are not.
 | TDP-2-018 | Safe library interfaces | LB-2, LB-4, LB-5, B-12, B-13 | 2.6, 3.0 |
 | TDP-2-019 | A pure compiler: `turfc`, `libturf` and the assistant | PC-1 … PC-4, IF-4, B-14, B-15 | 2.7, 3.0 |
 | TDP-2-020 | TurfLang 3.0.0 and the end of 2.x | Part 7, B-1, B-3, D-8 | 2.8, 3.0 |
+| TDP-2-021 | Iterating over a string | SY-1 | 2.1 |
+| TDP-2-022 | Methods on number literals | SY-2, B-18 | 2.1, 2.2, 3.0 |
+| TDP-2-023 | `function` as a spelling of `fn` | SY-3, B-19 | 2.2, 3.0 |
+| TDP-2-024 | `static` before `fn` | SY-4, B-20 | 2.2, 3.0 |
+| TDP-2-025 | `pub immut` replaces `export immut` | SY-5, B-21 | 2.2, 3.0 |
+| TDP-2-026 | Test options | F-11f | 2.2 |
+| TDP-2-027 | Struct layout chosen by the compiler | ML-1 … ML-4, B-22 | 2.6, 2.8, 3.0 |
+| TDP-2-028 | Diagnostics that explain | DX-5 … DX-10 | 2.2, 2.3 |
+| TDP-2-029 | Wrapping C libraries | CX-1 … CX-6 | (2.8.0) |
+| TDP-2-030 | Calling Turf from other languages | EX-1 … EX-4, EX-6, F-20 | (2.9.0) |
+| TDP-2-031 | Python and Turf | EX-5 | after (2.9.0), own repository |
+| TDP-2-032 | Node.js and Turf | EX-7 | after (2.9.0), own repository |
+| TDP-2-033 | Lua and Turf | EX-8 | after (2.9.0), own repository |
 | TDP-3-001 | Threads and shared state | CC-0 … CC-3, B-8 | 3.1, 3.2 |
 | TDP-3-002 | Async and non-blocking I/O | CC-4, CC-5, CC-6 | 3.2 |
+| TDP-3-003 | Calling Turf in parallel from other runtimes | EX-9 | 3.3 |
 
 ---
 
@@ -530,6 +577,7 @@ collector and "write barriers in preparation".
 | **RT-1** | **GC tier 1: better algorithms inside §6.5.** Size-segregated free lists and bump allocation; lazy/incremental *sweep*; side mark-bit tables; adaptive heap-growth policy; a faster interior-pointer block lookup; **parallel marking** by N worker threads *while the world is stopped* (still stop-the-world; only the collector's own threads are new, which §6.5's "single-threaded" does not need to mean). | I | L | Unobservable. Gated by `TURF_GC_STRESS` + `TURF_GC_VALIDATE` + the benchmark floor. |
 | **RT-2** | **GC tier 2: generational or concurrent collection, no language change.** Dirty-page tracking from the OS instead of compiler-emitted write barriers (candidate mechanisms, none prototyped: Linux soft-dirty bits or `mprotect`, `GetWriteWatch` on Windows, Mach VM protection on macOS). It works for stores made by C code and by raw `T*` writes, which a compiler barrier cannot see. | I (if OS tracking) / D | XL | Reverses nothing in §6.5 if the collector stays non-moving and the mutator is unaware. Needs the owner to confirm that §E's "no generational collector" is about a *moving* one (D-4). |
 | **RT-2′** | Same goal with **compiler-emitted write barriers** on pointer-typed field stores. | **B** | XL | A store made by `unsafe` code or by C into a GC object skips the barrier, so a pointer hidden from the collector is freed live. That makes the FFI contract stricter (B-4). Only chosen if RT-2 is measured not to work. |
+| **RT-7** | **Runtime in pieces.** `libturfrt` split into one object per facility (net, fs, time, signals, …), built with `-ffunction-sections`, linked with `--gc-sections`, so a program or library carries only what it calls; symbols hidden for library builds (EX-3). | I | S–M | Smaller binaries and Python wheels. Unobservable. |
 | **RT-3** | **Per-thread allocation buffers and lock-free fast path.** | I | M | Prerequisite of CC-1; also lowers single-thread cost. |
 | **RT-4** | **Checked arithmetic vs vectorization** (F-24). Specified as NM-1 … NM-6 in 6.9 (draft TDP-2-002). The default stays checked. | I / A | M | `INV-OPT-2` (elision only when proven) is not weakened. |
 | **RT-5** | **Opt-in runtime check mode** (`turf build --debug-checks`, building on the existing `TURF_RT_SANITIZE`): red zones around `mem::alloc` blocks, poison on `mem::free`, double-free/invalid-free, `mem::copy`/`mem::set` bounds when the block size is known, uninitialised-read of a manual-heap block. Panics with a named diagnostic, exit 134. | A | M–L | Default off in 2.x. Default on at `-O0` is B-2. |
@@ -548,7 +596,9 @@ collector and "write barriers in preparation".
 | **F-14b** | Payloads on plain `enum`s (sum types), reusing LEC-004's representation. | A | M | none |
 | **F-15b** | Closed error sets in signatures, error conversion. | A | M | AN-9 |
 | **F-16** | Circular imports. A module-system change, but it only *accepts* programs that are rejected today. | A | M | none |
-| **F-11d** | In-source `@test` functions. | A | S | `turf test` (§6.22) |
+| **F-11d** | In-source `@test` functions and their outcomes (TDP-2-006): none (returns), `compile_error, E<code>, "text"` (optionally `fix: "text"`), `warning, E<code>, "text"`, `no_warnings`, `panic, "text"`, `exit, <status>`, `error, T::V` (a `!void` test). `compile_error`, not `Error::E041`, so a program's own error type named `Error` is never shadowed (Principle V). **Shipped in 2.2.0 (issue #299, driver interface 1.11, `test-functions`).** A test is never part of a build and nothing may call one (E173). | A | S–M | `turf test` (§6.22) |
+| **F-11f** | **Test options** (TDP-2-026): `skip: "reason"`, `timeout: <ms>`, `levels: all \| [O0, …]`, `stdout: "…"`, `tag: "…"`, `serial`, after the outcome as `name: value`. Literals only; no retries, no setup hooks. | A | S–M | F-11d |
+| **F-11e** | **Test-suite cleanup.** Move the compiler's own `tests/**/fail_*.tr` whose expected error lies inside one function body, and the `EXPECT-RUNTIME` panics, to `@test(Error::…)` / `@test(panic, …)` functions, several to a file; the file-name and `// EXPECT-*` conventions stay for what a function cannot express (syntax errors, declaration-level errors, exit statuses, `EXPECT-FIX`). `tests/compat/2.0/` is never touched. | I | M | F-11d |
 
 ### 6.5 Concurrency and async (CC)
 
@@ -657,7 +707,7 @@ cheapest first step and is sequenced in 2.2.
 | **F-11b** | Real pretty-printer (trivia-preserving lexer). `turf fmt`'s verified-result guarantee (§6.23) holds. | A | M | F-S0 |
 | **F-11c** | Documentation generator over `pub` items and doc comments. | A | M | V-2 |
 | **F-19** | Standard library expansion: richer `os`, `time` formatting, regex, CSV, compression, crypto hashes, a process API. Each through LEC-007's conventions and the API lock. | A | varies | V-3 |
-| **F-20** | Cross-linking; other platforms (Linux/Windows arm64, others need their own register capture, INV-RT-4). | A | L | |
+| **F-20** | Cross-linking; other platforms (Linux/Windows arm64, others need their own register capture, INV-RT-4). | A | L | Cross-linking for Tier 1 targets is in TDP-2-030 (order file 2.9.0): per-target `libturfrt` (and its PIC build) beside REL-008's lld and C runtimes. |
 | **F-9** | SLM: LoRA adapters and corpus growth (SL-3), judged by SL-2's scoreboard; part of the assistant after PC-2. `@slm { }` blocks are dropped (SL-8). F-DIAG-1/2/3 keep their gates. | A | L | PC-2 |
 | **F-10** | Self-hosting. | A | XL | F-1, F-7a, a stable 2.x |
 | **F-25** | Speculative paradigms (`DESIGN_NOTES.md` §7–8). | D | — | Revisit later; §25 rejects user-facing `comptime`/macros. |
@@ -702,6 +752,12 @@ cheapest first step and is sequenced in 2.2.
 | **DX-2** | **Machine-readable diagnostics** (`--diagnostics=json`, SARIF-shaped): code, severity, spans, hint, related locations, and the DX-1 fix as a list of `{span, replacement}`. TDP-2-001 lists this as an open question. | A | M | `TurfcInterfaceMinor` bump. Gives `turf-lsp` quick fixes (F-11), the benchmark (SL-2) and tools a contract other than scraping text, which D-6 puts outside the compatibility promise. **Owner decision (2026-10-16):** DX-2 lands after DX-1, in a later 2.x minor. 2.1.0 prints `Fix:` lines in default output with no JSON form for tools to read instead; the release notes tell tool authors that diagnostic text is outside the promise. |
 | **DX-3** | **Hint backfill.** TDP-2-001 counts 20 codes whose hint is only general advice and 5 with none (E105, E106, E115, E116, E118). A fix builds on a concrete hint, so these come first. | A | S–M | The count is the TDP's; recompute it with the checked-in script DX-1 requires. |
 | **DX-4** | **`--fix` apply mode** (later proposal). Applies only validated edits, atomically, on explicit request, with the same verified-result guarantee `turf fmt` has (§6.23). | A | M | Not before DX-1 and DX-2. |
+| **DX-5** | **Labelled spans** (TDP-2-028). The primary span underlines the code that is wrong, with a label ("this is an `int`"); secondary spans underline where an expectation came from ("`s` is a `string` because of this"). Type mismatches and duplicate declarations first; every code gets a primary label. | A | M | Diagnostics schema 1.1 adds the primary `label`; `related` already carries the secondary spans. |
+| **DX-6** | **Notes that show the related code** (TDP-2-028): a related location is printed with its own source line, in place of "(line X, col Y)" inside the message. | A | S–M | |
+| **DX-7** | **Messages that recognize the intent** (TDP-2-028): the commonest parse mistakes (a declaration without `mut`/`immut`, `let`/`var`/`func`/`def`, `=` for `==`, an unclosed bracket reported where it opened, a type before its name), each with its own code and a `Fix:` when one edit is right. | A | M | The set is chosen from SL-3's corpus and `turf-fuzz`'s mutation kinds. A forgotten `mut` is E102 "Expected ';'" today. |
+| **DX-8** | **Every independent error in one run** (TDP-2-028): resolution and type checking continue after an error, an undecidable expression gets an error type that produces no further diagnostic, `--error-limit <n>` (default 20). | A | L | A file with three independent type errors prints `(1 error)` today (checked 2026-10-25). Needs F-S2 and F-S3. |
+| **DX-9** | **The wording guide** (TDP-2-028, D-28): `docs/development/DIAGNOSTICS_STYLE.md`, and every message rewritten to it. First person; one idea per sentence; name the types, never "value"; no exclamation marks; every hint is something the reader can do. Headings print the code's registered name, never the `--smart` category. | A | M | D-6 keeps text outside the promise. `EXPECT-DIAG` lines and tools quoting text move with it. |
+| **DX-10** | **A snapshot of every diagnostic** (TDP-2-028): each V-5 code has a test whose expected output is the full rendered text (colour stripped) and its JSON line; the registry check fails for a code without one. | A | S–M | Depends on V-5. |
 
 #### The SLM: scoring and checks on the model itself
 
@@ -861,7 +917,7 @@ wrapping by default in optimized builds, and undefined overflow.
 | **NM-3** | **`math::wrapping_add`, `wrapping_sub`, `wrapping_mul`** (`int` only), defined modulo 2^64, never trapping. Functions, not operators: no grammar change, visible and searchable. | A | S–M | See findings below. |
 | **NM-4** | Re-measure with the trap exits restructured (one shared cold, `noreturn` trap block per function). | I | S | **Unverified idea**, not in the TDP: whether LLVM 22's early-exit vectorization could handle a loop whose only side exit is a shared noreturn call. A measurement, not a claim. If it works it removes the cost with no source change. |
 | **NM-5** | Shifts and negation (`EmitCheckedShl`, `EmitCheckedIntNegate`). | D | S | Out of scope until a measurement shows the same effect. |
-| **NM-6** | Batch-then-check. | D | L | Deferred by the TDP: it can change what runs before the panic. May return as its own proposal for effect-free reductions, with a precise applicability rule. |
+| **NM-6** | Batch-then-check: emit the operation unchecked with an overflow bit, flush the bits once per straight-line run (stage 1) or per loop strip (stage 2). | I | L | Proposal and applicability rule in `docs/development/changes/TDP-2-002.md` NM-6. Unobservable because a panic cannot be caught and memory after it is not observable (`FREEZE.md` §6.30, F-PANIC-1 … 3); no check is removed (INV-OPT-2). Stage 2 needs NM-2. Measured 2026-10-25 (`BENCHMARKS.md`): stage 1 does not pay, stage 2 pays only as hand-written vector code, which §6.10 leaves to LLVM. Not implemented; on no line. |
 
 `RT-4` in 6.3 is replaced by NM-1 … NM-6.
 
@@ -992,7 +1048,7 @@ none of them runs before the type is fully known.
 | ID | Item | Kind | Cx | Notes |
 |---|---|---|---|---|
 | **LB-1** | **Native code in packages.** A `[native]` table in `turf.toml`: C sources compiled with the system C compiler (D-26) and linked into the package's consumers, system libraries to link (generalizing `--link`), include paths. The C sources are part of the package's tree hash, so `turf.lock` pins them. | A | M–L | `turf-cli` work plus a driver input (`TurfcInterfaceMinor`). |
-| **LB-2** | **Unsafe-surface report.** `turf graph` (and a readable `turf audit`) lists, per package: files declaring `unsafe module;`, `unsafe { }` blocks, `extern fn` declarations, native sources, and whether the consumer's `[unsafe] allow` grants the package. | A | S | The compiler supplies the counts through the package-graph output (IF-2). |
+| **LB-2** | **Unsafe-surface report.** `turf graph` (and a readable `turf audit`) lists, per package: files declaring `unsafe module;`, `unsafe { }` blocks, `extern fn` declarations, native sources, and whether the consumer's `[unsafe] allow` grants the package. **Shipped in 2.2.0 (issue #325, driver interface 1.12, `unsafe-report`)**, without native sources, which wait for LB-1's `[native]` table. | A | S | The compiler supplies the counts (`turfc --unsafe-report`, schema `unsafe-report.schema.json`); `turf graph --unsafe` carries them and `turf audit` prints them. Plain `turf graph` is unchanged, since `turfc` reads it back. |
 | **LB-3** | **Checked boundary contracts on `extern fn`.** Let a binding state, in safe types the compiler lowers, what it would otherwise check by hand: a non-null pointer (`&T`), a nullable one (`&?T`), an array view lowered to pointer plus length, and who frees a returned pointer. The compiler emits the checks and conversions at the call, so the call needs no `unsafe { }`. Spelling is TDP-2-016's, under 4.1. | A | M–L | Removes most hand-written unsafe code from typical bindings. |
 | **LB-4** | **Safe library APIs.** A raw pointer type (`ptr`, `T*`) in a package's `pub` API is a warning. The 3.0 rule (B-12) is TDP-2-018's to choose: forbidden outright, or usable only from code that itself holds the raw-pointer capability. | W | S–M | Warning from 2.6. |
 | **LB-5** | **Raw-receiver method calls.** A method call through a raw-pointer receiver (`a.next.getval()` with `next: Node*`) needs no `unsafe { }` today (`pointers_and_references.md` §1.2's known gap). Warning in 2.2, error in 3.0 (B-13). | W | S | |
@@ -1005,6 +1061,60 @@ none of them runs before the type is fully known.
 | **PK-2** | **Workspaces.** Several packages in one tree with one lock and one build directory. | A | M | |
 | **PK-3** | **Publish checks.** `turf publish` refuses unless: the package builds and its tests pass; its `pub` API, compared with the previous published version, matches the version bump (removing or changing a `pub` item needs a major; the stdlib's API-lock tooling, generalized); its LB-2 report and `[native]` table are recorded in the index entry. | A | M | Semver enforced by the tool, not by trust. |
 | **PK-4** | **Package documentation.** F-11c generates reference pages from `pub` items and doc comments; the registry shows them. | A | M | Same generator as the stdlib reference (IF-3). |
+
+### 6.14 Syntax (SY) — TDP-2-021 … TDP-2-025
+
+Owner requests, 2026-10-25. Each new spelling is additive in a minor; each old
+spelling it retires warns first (5.4) with a `Fix:`, and is removed in 3.0 with
+`turf migrate 3.0` doing the edit.
+
+| ID | Item | Kind | Cx | Notes |
+|---|---|---|---|---|
+| **SY-1** | **`for c in s` over a `string`** (TDP-2-021): one iteration per byte, `c` a `char`, `s` and its length evaluated once, each read through `s[i]`'s check. Today E005. | A | S | Byte iteration, as `s[i]`; TDP-2-011's protocol later makes `string` one more instance. |
+| **SY-2** | **Methods on number literals** (TDP-2-022): (a) `1.twice()` already compiles; document and test it, and that `-1.abs()` is `-(1.abs())`. (b) A decimal literal receiver (`1.5.floor()`, also compiling today) warns, with a `Fix:` writing `(1.5).floor()`. | A | S | (b) becomes B-18. |
+| **SY-3** | **`function` as a spelling of `fn`** (TDP-2-023): a contextual keyword where a function declaration starts; an identifier elsewhere, as it is today. | A | S | Reserved in 3.0: B-19. |
+| **SY-4** | **`[pub] static fn T.m(...): R`** (TDP-2-024), modifiers in front; `fn T.m(...) static: R` warns with a moving `Fix:`. | A | S | Old place removed in 3.0: B-20. |
+| **SY-5** | **`[pub] immut` module constants** (TDP-2-025): a top-level `immut`, private unless `pub`/`public`; `export immut` warns with a `Fix:` writing `pub immut`. Top-level `mut` stays E087. | A | S–M | `export` removed in 3.0: B-21. The stdlib moves in the same minor. |
+
+### 6.15 Struct layout (ML) — TDP-2-027
+
+A struct is laid out in declaration order today, as in C. Compact order places
+fields by decreasing alignment, declaration order among equals, and reads only
+the struct's own declaration, so separate compilation (F-7a) agrees on it.
+`Particle { alive: bool, x: double, tag: char, y: double, hits: int32 }` is
+40 bytes in declaration order and 24 in compact order (checked 2026-10-25).
+
+| ID | Item | Kind | Cx | Notes |
+|---|---|---|---|---|
+| **ML-1** | **`@layout(c)`** on a struct: declaration order and C's padding, always. Its by-value struct fields must be `@layout(c)` too. Through the existing annotation mechanism (`E146` for misuse). | A | S | Changes nothing in 2.x, where every struct is already in C order. |
+| **ML-2** | **`--struct-layout=declared\|compact`** on `turfc` and on `turf build`/`run`/`test`; default `declared` in 2.x. | A | M | `TurfcInterfaceMinor`. CI runs the suite, GC stress and ASan in both layouts from the line that ships it. |
+| **ML-3** | **Layout report**: `turfc --layout-report` (JSON, an IF-2 schema) and `turf layout`, each struct's size, alignment and offsets in both layouts. | A | S | `turf-lsp` can show sizes on hover. |
+| **ML-4** | **Warning: a struct whose address reaches C without `@layout(c)`** (an `extern fn` argument, a `to ptr`/`void*`/other-pointer conversion, a callback's parameter or return, a by-value field of such a struct), with a `Fix:` inserting the annotation. | W | M | Error in 3.0 (B-22). A struct's bytes copied by hand into `mem::alloc` memory are not seen; that path is already `unsafe`. |
+
+### 6.16 C interop (CX, EX) — TDP-2-029 … TDP-2-033, TDP-3-003
+
+Owner request, 2026-10-25: Python's ecosystem is mostly C wrapped once and
+imported by everyone; Turf takes the same path in both directions before 3.0.
+C++ and Rust come in through the C ABI. Direct C++ interop (an embedded Clang)
+is not proposed: it contradicts PC-1's pure compiler.
+
+| ID | Item | Kind | Cx | Notes |
+|---|---|---|---|---|
+| **CX-1** | **Contracts on `extern fn`**: `@ownership(borrows: p)`, `@ownership(keeps: p)`, `@length(of: x, from: n)`, beside today's `acquires`/`releases`. LB-3's `owned` is spelled with `@ownership`. | A | M | Checked by the E017/E018 per-function check. LB-3 |
+| **CX-2** | **`turf bind`**: `extern fn`, `@layout(c)` structs and constants from a C header (`clang -Xclang -ast-dump=json`, `-dM -E`); an unanswered ownership question leaves a raw `ptr` and a `bind.toml` entry. | A | M–L | Never guesses from names (Principle V). Needs Clang. ML-1 |
+| **CX-3** | **`turf bind --wrap`**: a safe wrapper module as ordinary Turf source: opaque handles, copy-in/copy-out with the contract's length, named panics after close. | A | M | No raw pointer in its `pub` API (LB-4). |
+| **CX-4** | **`@ownership(releases: self)` on a method**: a second call is E017, a use after it E018, inside one function. | A | S–M | Today E146. Not a borrow checker: per function, no caller annotations. |
+| **CX-5** | **`turf test --sanitize=address,undefined`** on `[native]` C sources and their dependencies. | A | S | Ships `libturfrt_asan.a`, a change to F-REL-1. LB-1 |
+| **CX-6** | **`.cpp` in `[native] sources`**, compiled with `CXX`/`c++`/`clang++`/`g++`; C++ used through `extern "C"` shims that catch every exception. | A | S | LB-1 |
+| **EX-1** | **`@export`** on a `pub` free function, or on a `pub` method of a handle type (`<package>_<Type>_<name>`): C symbol `<package>_<name>` (or `@export(name:)`), C-form types only (scalars, `string` copied in and out, call-scoped `Slice<T>`, `@layout(c)` pointers, handles, capture-free `fn`, `!T` as a status code). | A | M | B-7 settles capture-free function values. |
+| **EX-2** | **`turf build --lib`** / `[lib] kind`: static and shared libraries and `build/include/<package>.h` (`extern "C"`-guarded); `--cpp` adds an RAII `.hpp`. A shared library links the host's libc dynamically, never the bundled musl. | A | M | Needs a PIC `libturfrt`. |
+| **EX-3** | **Library-mode runtime**: `turf_rt_init()` on first call; stack base per outermost entry; **any thread, one at a time**: an entry lock keeps one thread inside Turf (nested entries on that thread pass), so the collector scans one stack; `PANIC_ON_CONTENTION` opt-in; no signal handlers unless asked. | A | M–L | FREEZE §6.5's single mutator holds; it is not always the same OS thread. Parallel entry is EX-9 (3.3). |
+| **EX-4** | **Handles and boundary errors**: a non-`@layout(c)` `&T` crossing to C is rooted (`mem::root`) and becomes an opaque pointer with a release function; a handle coming back is checked against a live table. A caller's mistake (dead, forged or wrongly typed handle, null, bad length) is a negative status code (`TURF_E_*`) that glue turns into the host's error, never a panic; a panic is reserved for a bug inside the library. | A | M | Exported functions taking handles, references, strings or slices use the status form. |
+| **EX-5** | **`turf-python`** (TDP-2-031, own repository): CPython extension modules on the limited API (abi3), wheels and a PEP 517 backend, `.pyi` stubs, buffers without copies, `!T` as exceptions, handles freed by refcounting, the GIL released during Turf calls; a `python` package for calling Python. | A | L | Reads only the export description (EX-6). |
+| **EX-6** | **The export description**: `build/include/<package>.json` (an IF-2 schema, `exports.schema.json`): functions, C forms, slices, handles and their release functions, error codes by name, `@layout(c)` offsets, doc comments. Written from the same table as the header. | A | S–M | What every glue generator reads instead of parsing C. |
+| **EX-7** | **`turf-node`** (TDP-2-032, own repository): Node-API addons, `.d.ts`, per-platform npm packages with prebuilt binaries, typed arrays without copies, `*Async` variants on libuv's pool, handles released by the JavaScript collector or `using`. | A | M–L | |
+| **EX-8** | **`turf-lua`** (TDP-2-033, own repository): Lua 5.4 modules written in Turf (`require`), and a `lua` package embedding a sandboxed Lua with memory and instruction limits. No `longjmp` crosses a Turf frame: every Lua call from Turf runs under `lua_pcall`, and Lua reaches Turf only through generated C. | A | M | |
+| **EX-9** | **Parallel entry** (TDP-3-003): `[lib] entry = "parallel"` on the thread-aware runtime; foreign threads registered on first entry; only threads inside Turf join a collection; a handle locked per call unless its type is shareable (TDP-3-001's predicate); `turf-jvm`, `turf-dotnet`, `turf-go`, `turf-beam`. | A | L | 3.3. CC-1, CC-3. |
 
 ---
 
@@ -1028,6 +1138,12 @@ source-level entry as an error, so a project can be ready before it upgrades.
 | **B-14** | **`turfc` is a compiler only** (PC-2, PC-3): `--smart`, `--smart-write-fix`, `--format`, `--migrate`, `--test` and `--explain` are removed from `turfc`; `TurfcInterfaceMajor` becomes 3. | Scripts calling those `turfc` flags fail. | The `turf` commands are unchanged; the deprecation notes have named them since 2.7. | yes |
 | **B-15** | **One release flavour.** The `-smart` archives end; the assistant is its own download. | Install recipes and download URLs change. | Package recipes and the download page updated in 3.0.0. | yes |
 | **B-16** | **`recover` binds tighter than `=` and `+=`.** In 2.x `recover` binds more loosely than every operator, assignment included, so `v = f() recover run { ... };` parses as `(v = f()) recover ...` and is E066 (`Cannot assign value of type '!int'`): only a declaration (`mut v = f() recover ...`) or a parenthesized right side (`v = (f() recover run { ... });`) works. In 3.0 `recover` takes the whole right-hand side of an assignment, the way it already takes a declaration's initializer. | Changes the meaning of a program that compiles in 2.x: with `mut v: !int`, `v = f() recover produce 0;` is `(v = f()) recover produce 0` (v holds the error when f fails; checked 2026-10-15), and in 3.0 it would store 0 instead. | `turf migrate 3.0` adds the parentheses where the meaning would change; nothing to do for code that already parenthesizes. Until then the 2.x reference documents the parentheses as the way to write it. | yes |
+| **B-17** | **A generic struct's type arguments are written where it is built** (D-27). `List::default()` and `Box::new(x)` no longer take their type arguments from the type they are stored into, returned as or passed to; the call writes them, `List<int>::default()` (LG-1). `mut l: List<int> = List::default();` and `return Box::new("x");` in a function returning `Box<string>` are errors. Annotations themselves stay (`mut l: List<int> = List<int>::default();`, `mut n: int = 5;`), and so do type arguments inferred from the constructor's own arguments (LG-3), which take nothing from the context. | Rejects programs that compile in 2.x: every generic construction whose type arguments come from the context. | A warning in 2.3.0 (allow-by-default first, per the 5.4 ladder) at each such call, with a `Fix:` writing the arguments in; `turf migrate 3.0` applies them all, reading each one from the declared type exactly as 2.x does. | yes |
+| **B-18** | **A decimal literal receiver needs parentheses** (SY-2 b): `1.5.floor()` is an error; `(1.5).floor()` and `1.twice()` are unaffected. | Rejects programs that compile in 2.x. | The 2.3 warning's `Fix:`; `turf migrate 3.0` adds the parentheses. | yes |
+| **B-19** | **`function` is a reserved word** equal to `fn` (SY-3), usable wherever `fn` is, function types included. | An identifier named `function` stops parsing (a B-5 case, taken deliberately). | `lint-set = "3.0"` lists the names; `turf migrate 3.0` renames them. | yes |
+| **B-20** | **`static` only before `fn`** (SY-4): `fn T.m(...) static: R` is an error. | Rejects programs that compile in 2.x. | The 2.3 warning's `Fix:`; `turf migrate 3.0` moves the word. | yes |
+| **B-21** | **`export` removed** (SY-5): `export immut` is an error; `pub immut` is the spelling. `export` stays reserved. | Rejects programs that compile in 2.x. | The 2.3 warning's `Fix:`; `turf migrate 3.0` writes `pub immut`. | yes |
+| **B-22** | **Compact struct layout by default** (TDP-2-027, D-29): a struct without `@layout(c)` is laid out by decreasing alignment; ML-4 becomes an error. | `sizeof` changes for most structs, and a struct whose bytes C reads without `@layout(c)` would see a different layout. | ML-4's warning and `Fix:` from 2.7; `turf migrate 3.0` adds `@layout(c)` where it fires; `--struct-layout=declared` stays for bisecting. | yes |
 | **B-4** | **GC write-barrier contract** (only if RT-2′ is chosen over RT-2). | `unsafe` and C code storing a GC pointer into a GC object must call a barrier. | `mem::` helper plus an RT-5 check that finds missing barriers. | no (RT-2 is 3.x) |
 | **B-5** | **New reserved words**, only if a contextual keyword cannot express a feature (CC-4(b)). | An identifier with that name stops parsing. | `turf migrate` renames it. | no |
 | **B-6** | **Meaning of `fn(T): R[N]`** (G-1, "fix the grammar"). | Changes the parse of an existing type. | Not needed if G-1's additive spelling suffices. | no |
@@ -1036,9 +1152,12 @@ source-level entry as an error, so a project can be ready before it upgrades.
 | **B-9** | **`turf.toml` / `turf.lock` format major**, only if PK-1 needs it. | Old manifests rejected. | A converter in `turf`. | no |
 | **B-11** | **A different spelling for type arguments in type positions.** | Every program with generics. | Not planned: LG-1 removes the reason. | no |
 
+B-17's migration is mechanical because 2.x already knows the answer at every
+site it changes: it is the type 2.x reads the arguments from.
+
 ### 7.2 What adds nothing to the register
 
-DX-1, DX-2, SL-0 … SL-7, NM-1 … NM-6, LG-1 … LG-7, LB-1 … LB-3, PK-1 … PK-4,
+DX-1, DX-2, SL-0 … SL-7, NM-1 … NM-6, LG-1 … LG-7, LB-1 … LB-3, PK-1 … PK-4, SY-1,
 PC-1 and PC-4 are additive or unobservable. The designs TDP-2-002 rejects (a
 global wrapping flag, wrapping by default in optimized builds, undefined
 overflow) would be breaking and stay rejected. If NM-3 and RT-5 together show
@@ -1113,6 +1232,19 @@ calls that any TDP touching them may reopen.
 | **D-25** | Where format, migrate, test and explain go. | `explain` is data from V-5's registry, read by `turf`; format, migrate and test are one helper binary linked against `libturf`. The `turf` commands keep their spelling. | TDP-2-019 |
 | **D-26** | Which C compiler LB-1 uses. | The system C compiler (`CC`, then `cc`/`clang`/`gcc`, MSVC on Windows), with a clear error when none is found. Pure-Turf packages never need one. | TDP-2-016 |
 
+### 8.3 Decided by the owner, 2026-10-24
+
+| ID | Question | Decision | Specified in |
+|---|---|---|---|
+| **D-27** | With LG-1 in, does a generic construction keep taking its type arguments from the declared type? | No, in 3.0: the type arguments are written where the value is built (`List<int>::default()`), which also works with `guess`. Annotations stay; only the context supplying a constructor's type arguments is retired. No style guide is needed to choose between the two spellings, since one of them goes. | B-17 (7.1) |
+
+### 8.4 Decided by the owner, 2026-10-25
+
+| ID | Question | Decision | Specified in |
+|---|---|---|---|
+| **D-28** | Which voice and rules do diagnostics follow? | The five rules of DX-9: first person; one idea per sentence; name the types, never "value"; no exclamation marks; every hint is something the reader can do. | TDP-2-028 |
+| **D-29** | Does the compiler choose struct layout by default? | Yes, from 3.0: compact order unless `@layout(c)`; opt-in and warn-first through 2.x. Speed and memory by default may cost compile time. | TDP-2-027, B-22 |
+
 No decision is open. A new one is added here with a recommendation and asked
 of the owner before the item it blocks starts.
 
@@ -1138,4 +1270,5 @@ of the owner before the item it blocks starts.
 - New in the proposal: LG-1 … LG-7, V-1 … V-5, AN-1 … AN-9, RT-1 … RT-6,
   CC-0 … CC-6, DX-1 … DX-4, SL-0 … SL-8, NM-1 … NM-6, B-1 … B-11, D-1 … D-21.
   New in this document: PC-1 … PC-4, LB-1 … LB-5, PK-1 … PK-4, IF-1 … IF-5,
-  B-12 … B-15, D-22 … D-26.
+  B-12 … B-15, D-22 … D-26, DX-5 … DX-10, ML-1 … ML-4, B-22, D-28, D-29,
+  CX-1 … CX-6, EX-1 … EX-9, RT-7.

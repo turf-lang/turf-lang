@@ -1,0 +1,18 @@
+// EXPECT-DIAG: E002
+// EXPECT-DIAG: Index must be an integer
+// A `char` used to be accepted as an array index (as its byte value, for the
+// `freq[s[i]]` idiom). That is banned: a character is not a position, so it
+// needs an explicit `(c to int)` like any other non-int value.
+fn main(): int {
+    mut freq: int[128] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    mut s: string = "hello";
+    mut x: int = freq[s[0]];
+    return x;
+}

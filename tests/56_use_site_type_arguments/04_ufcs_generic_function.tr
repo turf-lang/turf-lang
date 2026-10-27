@@ -1,0 +1,66 @@
+// LG-2: a generic function is callable through UFCS. Its type parameters
+// are inferred from the receiver and the arguments, or written after the
+// name (`x.f::<int>()`), and the receiver still matches exactly.
+import list::List;
+import test;
+
+struct Box<T> {
+    v: T
+}
+
+fn<T> twice(x: T): T {
+    return x;
+}
+
+fn<T> pick(a: T, b: T): T {
+    return b;
+}
+
+fn<A, B> second(a: A, b: B): B {
+    return b;
+}
+
+fn<T> first(arr: T[]): T {
+    return arr[0];
+}
+
+fn<T> unwrap(b: Box<T>): T {
+    return b.v;
+}
+
+fn<T> count(l: &List<T>): int {
+    return l.length();
+}
+
+// Inside a generic body the call is checked once per instance.
+fn<T> twice_via_ufcs(x: T): T {
+    return x.twice();
+}
+
+fn main(): int {
+    mut a: int = 3;
+    test::assert(a.twice() == 3, "T from an int receiver");
+    test::assert(a.twice::<int>() == 3, "T written");
+    test::assert("s".twice() == "s", "T from a string receiver");
+    test::assert(2.5.pick(4.5) == 4.5, "T from the receiver and an argument");
+    test::assert(a.second("b") == "b", "two type parameters");
+    test::assert(a.second::<int, string>("w") == "w", "two written");
+
+    mut arr: int[3] = [7, 8, 9];
+    test::assert(arr.first() == 7, "T from an array receiver");
+
+    mut b: Box<string> = Box<string>::default();
+    b.v = "boxed";
+    test::assert(b.unwrap() == "boxed", "T from a generic struct receiver");
+
+    mut l = List<int>::default();
+    l.push(1);
+    l.push(2);
+    mut r: &List<int> = &l;
+    test::assert(r.count() == 2, "T from a reference receiver");
+
+    test::assert(twice_via_ufcs(5) == 5, "inside a generic body, int");
+    test::assert(twice_via_ufcs("o") == "o", "inside a generic body, string");
+    test::assert(1.5.pick(2.0).twice() == 2.0, "calls chain");
+    return 0;
+}

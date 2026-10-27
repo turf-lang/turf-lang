@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E148
+// EXPECT-DIAG: 'plain' is not generic, so it takes no type arguments
+// A function with no type parameters takes none through UFCS either.
+
+fn plain(x: int): int {
+    return x;
+}
+
+fn main(): int {
+    mut a: int = 3;
+    io::printline(a.plain::<int>());
+    return 0;
+}

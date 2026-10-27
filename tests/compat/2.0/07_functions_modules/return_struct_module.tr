@@ -1,0 +1,17 @@
+pub struct Point {
+    pub x: int,
+    pub y: int
+}
+
+pub fn Point.new(x: int, y: int): void {
+    self.x = x;
+    self.y = y;
+}
+
+pub fn makeOrigin(): Point {
+    return Point::default();
+}
+
+pub fn addPoints(a: Point, b: Point): Point {
+    return Point::new(a.x + b.x, a.y + b.y);
+}

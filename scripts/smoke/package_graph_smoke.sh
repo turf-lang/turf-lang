@@ -9,7 +9,8 @@
 # directory and checks each rule end to end: resolution against the graph
 # (own modules, direct dependencies, stdlib), module identity per
 # (package, path) so two packages' `util` modules and their types coexist,
-# E090/E091, graph validation, and the per-package unsafe bit. Each case
+# E090/E091, graph validation, the per-package unsafe bit, and
+# `--unsafe-report` (LB-2), which reads every package of a graph. Each case
 # checks the exit status and the error code or message it is about, never
 # just "it failed" (AGENTS.md: a failure for the wrong reason is not a pass).
 #
@@ -344,6 +345,39 @@ printf 'import leak;\nfn main(): int {\n    return leak::one();\n}\n' > leak/src
 run leak_field --check --package-graph gll.json leak/src/main.tr
 expect_rc "a root module's pub field of an internal type" leak_field 1
 expect_out "a root module's pub field of an internal type" leak_field "Public field 'Box.t' of package 'leak'"
+
+# --- --unsafe-report (LB-2, driver interface 1.12) ------------------------------
+# Each package's unsafe surface, granted or not, and the stdlib's; the exact
+# counts are turf-api-tests' testUnsafeReport, this is the command line.
+mkdir -p ur_app/src ur_ffi/src ur_raw/src
+printf 'import ur_ffi;\nfn main(): int {\n    return ur_ffi::len("ab");\n}\n' > ur_app/src/main.tr
+printf 'unsafe module;\n// extern fn in a comment\nextern from "z" fn zlibVersion(): string;\nextern fn strlen(s: string): int;\npub fn len(s: string): int {\n    return unsafe { strlen(s); };\n}\n' > ur_ffi/src/ur_ffi.tr
+printf 'unsafe module;\npub fn one(): int {\n    return 1;\n}\n' > ur_raw/src/ur_raw.tr
+graph ur.json '{"format":1,"root":"ur_app","packages":{
+  "ur_app": {"src": "ur_app/src", "deps": ["ur_ffi", "ur_raw"], "allow_unsafe": true},
+  "ur_ffi": {"src": "ur_ffi/src", "deps": [], "allow_unsafe": true},
+  "ur_raw": {"src": "ur_raw/src", "deps": [], "allow_unsafe": false}}}'
+run ur --unsafe-report --package-graph ur.json
+expect_rc "unsafe report of a project" ur 0
+expect_out "unsafe report: a granted dependency" ur '"ur_ffi":{"allow_unsafe":true,"extern_fns":2,"files":[{"extern_fns":2,"link_libraries":["z"],"path":"ur_ffi.tr","unsafe_blocks":1,"unsafe_module":true}],"link_libraries":["z"],"modules":1,"unsafe_blocks":1,"unsafe_modules":1}'
+expect_out "unsafe report: an ungranted dependency" ur '"ur_raw":{"allow_unsafe":false,"extern_fns":0,'
+expect_out "unsafe report: the root, nothing to report" ur '"ur_app":{"allow_unsafe":true,"extern_fns":0,"files":[],'
+expect_out "unsafe report: the stdlib, always granted" ur '"stdlib":{"allow_unsafe":true,'
+expect_out "unsafe report: the stdlib's unsafe modules" ur '"path":"mem/mem.tr","unsafe_blocks":0,"unsafe_module":true}'
+# The report needs no entry file and compiles nothing, so a project whose
+# main.tr does not compile is still reported.
+printf 'fn main(): int {\n    return nope;\n}\n' > ur_app/src/main.tr
+run ur_broken --unsafe-report --package-graph ur.json
+expect_rc "unsafe report of a project that does not compile" ur_broken 0
+run ur_files --unsafe-report ur_ffi/src/ur_ffi.tr
+expect_rc "unsafe report of a single file" ur_files 0
+expect_out "unsafe report of a single file" ur_files '"path":"ur_ffi/src/ur_ffi.tr","unsafe_blocks":1,"unsafe_module":true}'
+run ur_none --unsafe-report
+expect_rc "unsafe report with nothing to report on" ur_none 2
+graph ur_bad.json '{"format":1,"root":"ur_app","packages":{"ur_app":{"src":"ur_app/src","deps":["missing"]}}}'
+run ur_bad --unsafe-report --package-graph ur_bad.json
+expect_rc "unsafe report of an invalid graph" ur_bad 1
+expect_out "unsafe report of an invalid graph" ur_bad "depends on 'missing', which is not in \"packages\""
 
 if [ "$FAILED" -ne 0 ]; then
   echo "package_graph_smoke: $FAILED check(s) failed"

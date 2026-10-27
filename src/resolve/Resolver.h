@@ -328,6 +328,13 @@ public:
   void visitDefer(DeferExprAST &Node) override;
 
   void visitFuncDef(FuncDefExprAST &Node) override;
+  /// visitFuncDef()'s work; visitFuncDef() adds a compile_error test's own
+  /// recovery point around it (TestRegistry.h).
+  void resolveFuncDef(FuncDefExprAST &Node);
+  /// TDP-2-006: what `@test` asks of a function beyond its annotation's
+  /// arguments (TestAnnotation::validate()): a plain top-level function, and
+  /// an `error` outcome that names a real error variant.
+  void checkTestFunction(const FuncDefExprAST &Node);
   void visitFuncCall(FuncCallExprAST &Node) override;
   void visitMethodCall(MethodCallExprAST &Node) override;
 
@@ -534,6 +541,13 @@ private:
   void validateNamedType(const TurfTypePtr &Ty, SourceLocation Loc,
                          const std::vector<std::string> &TypeParams = {},
                          bool AllowBareGeneric = false) const;
+
+  /// LG-1/LG-2: the types written as type arguments in an expression
+  /// (`List<int>::default()`, `identity::<T>(x)`), checked and rewritten as a
+  /// declared type is (validateNamedType(), then this function's own type
+  /// parameters made real). Idempotent: a call's callee is seen twice.
+  void resolveWrittenTypeArgs(std::vector<TurfTypePtr> &Types, SourceLocation Loc);
+  void resolveWrittenTypeArgs(ExprAST *Expr);
 
   /**
    * @brief LEC-003: resolves one `matches` header's pattern tree inside its

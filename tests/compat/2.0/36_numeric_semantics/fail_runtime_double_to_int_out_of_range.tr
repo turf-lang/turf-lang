@@ -1,0 +1,12 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: runtime check: Integer overflow
+// 2^63 is one past INT_MAX, so `x to int` panics instead of producing poison
+// (see fail_runtime_double_to_int_nan.tr). The same check covers +-inf.
+fn id(x: double): double {
+    return x;
+}
+
+fn main(): int {
+    io::printline(id(9223372036854775808.0) to int);
+    return 0;
+}

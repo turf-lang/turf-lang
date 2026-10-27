@@ -5,6 +5,7 @@
 
 #include "diagnostics/Colors.h"
 #include "frontend/Lexer.h"
+#include "frontend/TestRegistry.h"
 #include "turf/Analysis.h"
 
 #include <algorithm>
@@ -83,6 +84,19 @@ bool sameError(const ErrorKey &A, const ErrorKey &B) {
          samePath(std::get<0>(A), std::get<0>(B));
 }
 
+// Analyses @p Buffers reporting every error, a compile_error test's included
+// (TDP-2-006, TestRegistry::Mode::Raw): a fix for a test's expected error is
+// checked against that error like any other, and the other tests' errors are
+// in the program before and after alike.
+turf::AnalysisResult analyzeAll(const std::vector<turf::SourceBuffer> &Buffers,
+                                const turf::AnalysisOptions &Options) {
+  const TestRegistry::Mode Saved = TestRegistry::mode();
+  TestRegistry::setMode(TestRegistry::Mode::Raw);
+  turf::AnalysisResult R = turf::analyze(Buffers, Options);
+  TestRegistry::setMode(Saved);
+  return R;
+}
+
 turf::AnalysisOptions checkOptions() {
   turf::AnalysisOptions O;
   O.AllowUnsafeModules = g_AllowUnsafeModules;
@@ -106,8 +120,8 @@ const std::vector<ErrorKey> &baselineErrors() {
   if (!Done) {
     Done = true;
     if (const auto *Lines = entryLines())
-      Errors = errorsOf(turf::analyze({{MainSourceFilename, joinLines(*Lines)}},
-                                      checkOptions()));
+      Errors = errorsOf(analyzeAll({{MainSourceFilename, joinLines(*Lines)}},
+                                   checkOptions()));
   }
   return Errors;
 }
@@ -211,7 +225,7 @@ bool check(const CompilerFix &Fix, const std::string &File,
     Buffers.push_back({MainSourceFilename, joinLines(*Entry)});
     Buffers.push_back({File, Fix.PatchedFile});
   }
-  const auto After = errorsOf(turf::analyze(Buffers, checkOptions()));
+  const auto After = errorsOf(analyzeAll(Buffers, checkOptions()));
 
   // Every error left must be one the original program had, other than the
   // one being fixed: as many of each as before, never more.

@@ -1,0 +1,12 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: Array index out of bounds for 'r'
+// Indexing through a `&T[N]` is bounds-checked like the array itself.
+
+fn at(r: &int[3], i: int): int {
+    return r[i];
+}
+
+fn main(): int {
+    mut a: int[3] = [1, 2, 3];
+    return at(&a, 3);
+}

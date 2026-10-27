@@ -1,0 +1,14 @@
+// EXPECT-DIAG: E147
+// EXPECT-DIAG: 'Node' has no default value
+// LEC-009 (F-COLL-2): a `&U` field defaults to a fresh `U::default()`, so a
+// type that reaches itself through `&` fields has no finite default. Rejected
+// instead of allocating until the stack runs out; the hint suggests `&?Node`.
+struct Node {
+    v: int,
+    next: &Node
+}
+
+fn main(): int {
+    mut n: Node = Node::default();
+    return n.v;
+}

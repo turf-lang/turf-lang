@@ -1,0 +1,14 @@
+// EXPECT-DIAG: E172
+// EXPECT-DIAG: 'old_strlen' is deprecated: use 'strings::length' instead
+// `@deprecated` applies to an `extern fn` exactly as it does to an ordinary
+// `fn` -- both carry the AnnotatedDecl mixin (src/frontend/Annotation.h).
+
+@deprecated("use 'strings::length' instead")
+@ffi(linux: strlen)
+@ffi(macos: strlen)
+@ffi(windows: strlen)
+extern fn old_strlen(s: string): int;
+
+fn main(): int {
+    return old_strlen("hello") - 5;
+}

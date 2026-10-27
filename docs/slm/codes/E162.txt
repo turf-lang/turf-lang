@@ -1,0 +1,26 @@
+TURF E162 -- RANGE THAT NEVER ENDS (WARNING):
+
+CAUSE:
+  A `for` whose bounds are integer constants and whose step is the default
+  (`i++`) or a literal `i--`, `i += k`, `i -= k` moves away from its end:
+  `5..1` with an upward step, or `1..5` with a downward step. This is a
+  WARNING: compilation still succeeds.
+
+INCORRECT:
+    mut n: int = 0;
+    for i in 5..1 {        // WARNING: counts up from above the end
+        n += i;
+    }
+
+CORRECT (the step matches the direction):
+    mut n: int = 0;
+    for i in 5..1 step i-- {
+        n += i;
+    }
+    printline(n to string);
+
+FIX:
+  Add `step i--` (or a negative `i -= k`) for a descending range, or swap the
+  bounds (`1..5`) for an ascending one.
+
+RELATED: E164 (a loop variable that no step or body ever changes).

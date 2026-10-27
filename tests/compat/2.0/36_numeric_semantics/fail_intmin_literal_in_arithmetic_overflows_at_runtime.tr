@@ -1,0 +1,14 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: runtime check: Integer overflow
+// `v - -9223372036854775808` is v + 2^63, which does not fit for v >= 0.
+// Accepting the literal in every position must not turn into wrapping: the
+// checked arithmetic still traps (FREEZE.md §6.2 row 6, runtime signed).
+fn id(x: int): int {
+    return x;
+}
+
+fn main(): int {
+    mut v: int = id(5);
+    mut r: int = v - -9223372036854775808;
+    return r;
+}

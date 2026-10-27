@@ -1,0 +1,57 @@
+// The other side of fail_immutable_via_transitive_mutating_method.tr: the
+// transitive "mutates self" check must not over-reach. Calling methods that
+// only READ self -- directly, through a chain of `self.m()` calls, and through a
+// mutually recursive pair that never assigns anything -- stays legal on an
+// `immut` variable. A hard error here would reject correct programs, which is
+// why the closure only ever adds a method when a real mutation is reachable.
+import test;
+
+struct Counter {
+    val: int
+}
+
+fn Counter.get(): int {
+    return self.val;
+}
+
+fn Counter.twice(): int {
+    return self.get() + self.get();
+}
+
+fn Counter.describe(): int {
+    return self.twice() + 1;
+}
+
+// Mutual recursion with no assignment anywhere: must stay read-only.
+fn Counter.isEven(n: int): bool {
+    if (n == 0) {
+        return true;
+    }
+    return self.isOdd(n - 1);
+}
+
+fn Counter.isOdd(n: int): bool {
+    if (n == 0) {
+        return false;
+    }
+    return self.isEven(n - 1);
+}
+
+fn Counter.bump(): void {
+    self.val = self.val + 1;
+}
+
+fn main(): int {
+    immut c: Counter = Counter::default();
+    test::assert(c.get() == 0, "direct read");
+    test::assert(c.twice() == 0, "one-hop read chain");
+    test::assert(c.describe() == 1, "two-hop read chain");
+    test::assert(c.isEven(4), "mutually recursive read-only pair");
+
+    // The same chain is still fine on a mutable variable, and a real mutator
+    // still works there.
+    mut m: Counter = Counter::default();
+    m.bump();
+    test::assert(m.describe() == 3, "chain on a mutable variable after a real mutation");
+    return 0;
+}

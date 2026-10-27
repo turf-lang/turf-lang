@@ -1,0 +1,26 @@
+// EXPECT-DIAG: E040
+// EXPECT-DIAG: E108
+// EXPECT-DIAG: Expected a parameter name in the parameter list
+// Regression test for issue #245: SkipToNextTopLevelBoundary()'s brace-depth
+// counter used to permanently mis-track when a failed top-level construct
+// opened a '(' it never got to close (the parse error fires before any
+// matching ')' is ever seen) -- every declaration after the broken one was
+// silently swallowed as "still skipping" instead of being recovered and
+// reported on its own.
+//
+// This file must still fail to compile (the runner only checks pass/fail),
+// but confirmed via `turf --resolve` directly: before the fix, only the
+// line-1 parse error was ever reported; after the fix, the line-4
+// "undefined reference" error below is ALSO reported, proving `ok()`'s body
+// (and `main()`) were actually recovered and parsed/resolved instead of
+// being swallowed by the permanently-offset brace-depth counter.
+fn broken(: int {
+    }
+
+    fn ok(): int {
+        return undefinedVariableXyz;
+    }
+
+    fn main(): int {
+        return ok();
+    }

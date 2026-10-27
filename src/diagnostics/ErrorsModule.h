@@ -72,8 +72,8 @@ public:
                            Colors::BRIGHT_RED +
                            "' needs a literal value I can compute right now.",
                   "Exported constants must be initialised with a plain "
-                  "literal (a number, string, or bool), like "
-                  "'export immut " + Name + ": int = 42;' -- not an "
+                  "literal (a number, which may start with '-', a string, or a bool), "
+                  "like 'export immut " + Name + ": int = 42;' -- not an "
                   "expression or a call to another function.") {
     Category_ = SLM::ErrorCategory::DECLARATION;
   }
@@ -621,7 +621,8 @@ public:
     // single "Hint: " lead-in, unlike every other Suggestions-based error
     // class in this file, which passes no prefix and reads cleanly.
     Hint_ = suggestionsOrFallback(Suggestions,
-      "Double-check your spelling, or maybe you need to define it?");
+      "Check the spelling of '" + MethodName + "', or declare `pub fn " +
+      MethodName + "(...)` in module '" + ModuleName + "'.");
     trySetDeterministicRename(MethodName, Suggestions);
   }
 };
@@ -996,6 +997,40 @@ public:
   InvalidAnnotationError(SourceLocation Loc, const std::string &What,
                          const std::string &Hint)
       : TurfError(Loc, Colors::BRIGHT_RED + What + Colors::RESET, Hint) {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+  }
+};
+
+// TDP-2-003 V-2 (issue #286): a call (or other use) of an item marked
+// `@deprecated("...")` (src/frontend/DeprecatedAnnotation.h). `Message` is the
+// declaration's own, shown verbatim -- whoever deprecated the item already
+// wrote a complete sentence naming what to use instead. Never fatal:
+// compilation still succeeds, since removing a deprecated item is a 3.0 job
+// (B-3), not this warning's concern.
+class DeprecatedUseWarning : public TurfWarning {
+public:
+  DeprecatedUseWarning(SourceLocation Loc, const std::string &Name,
+                       const std::string &Message)
+      : TurfWarning(Loc, TurfWarning::WarningLabel() + "'" + Colors::CYAN +
+                             Name + Colors::BRIGHT_YELLOW +
+                             "' is deprecated: " + Message + Colors::RESET) {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+  }
+};
+
+// TDP-2-006 (issue #299): a call to, or a function value of, a function
+// marked `@test` (src/frontend/TestAnnotation.h). A test is run by `turf test`
+// and left out of every build; code that reached it would make the build
+// depend on a function the build does not contain, so any use is an error.
+class TestFunctionUseError : public TurfError {
+public:
+  TestFunctionUseError(SourceLocation Loc, const std::string &Name)
+      : TurfError(Loc,
+                  Colors::BRIGHT_RED + "'" + Colors::CYAN + Name + Colors::BRIGHT_RED +
+                      "' is a test: `turf test` runs it, and nothing else may call it or "
+                      "use it as a value." + Colors::RESET,
+                  "Move what the test and this code share into an ordinary function, and "
+                  "call that from both.") {
     Category_ = SLM::ErrorCategory::DECLARATION;
   }
 };

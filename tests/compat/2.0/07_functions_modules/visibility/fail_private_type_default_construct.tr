@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E088
+// EXPECT-DIAG: Type 'Hidden' is private to module
+// LEC-002 E088: `Module::Hidden::default()` on a private type -- the type is
+// reached through the scope-access path, not a type annotation, so it needs
+// its own gate.
+import visibility_lib_module;
+
+fn main(): int {
+    immut n: int = visibility_lib_module::Hidden::default().v;
+    return n;
+}

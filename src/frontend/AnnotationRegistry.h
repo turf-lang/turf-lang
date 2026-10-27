@@ -11,7 +11,9 @@
 
 #include "analysis/AliasAnalysis.h"
 #include "frontend/Annotation.h"
+#include "frontend/DeprecatedAnnotation.h"
 #include "frontend/FfiAnnotation.h"
+#include "frontend/TestAnnotation.h"
 
 #include <string>
 #include <utility>
@@ -33,6 +35,8 @@ inline const std::vector<AnnotationSpec> &KnownAnnotations() {
   static const std::vector<AnnotationSpec> Specs = {
       {OwnershipAnnotation::Name, OwnershipAnnotation::validate},
       {FfiAnnotation::Name, FfiAnnotation::validate},
+      {DeprecatedAnnotation::Name, DeprecatedAnnotation::validate},
+      {TestAnnotation::Name, TestAnnotation::validate},
   };
   return Specs;
 }

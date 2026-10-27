@@ -1,0 +1,14 @@
+// LEC-002 stage 2: an imported module written with `pub` still imports and
+// runs exactly as before -- visibility is stored on every declaration but not
+// yet enforced, and stage 3 must keep this file passing (it uses only `pub`
+// items of the module).
+import test;
+import pub_module_helper_module::[make_counter, reveal, Counter];
+
+fn main(): int {
+    mut c: Counter = make_counter(5);
+    test::assert(c.bump() == 5, "first bump");
+    test::assert(c.bump() == 10, "second bump");
+    test::assert(reveal() == 99, "pub fn calling a private helper in its own module");
+    return 0;
+}

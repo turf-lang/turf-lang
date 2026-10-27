@@ -22,14 +22,19 @@
 #include <vector>
 
 /// One argument of an annotation: `value` (positional, Key empty) or
-/// `key: value`. A key is a word; a value is a word or a string literal. A
-/// word is an identifier or a keyword, as spelled (`error: ...` is a valid
-/// key). The grammar accepts nothing richer, so no pass has to evaluate an
-/// expression here.
+/// `key: value`. A key is a word; a value is a word, a path of words
+/// (`ParseError::Empty`, `fs::FsError::RemoveFileFailed`), a whole number or a
+/// string literal. A word is an
+/// identifier or a keyword, as spelled (`error: ...` is a valid key). The
+/// grammar accepts nothing richer, so no pass has to evaluate an expression
+/// here.
 struct AnnotationArg {
   std::string Key;   ///< empty for a positional argument
-  std::string Value; ///< the word as spelled, or the string literal's contents
+  /// The word or path as spelled, the number's digits, or the string
+  /// literal's contents.
+  std::string Value;
   bool IsString = false;
+  bool IsNumber = false;
   SourceLocation Loc;
 };
 
@@ -49,7 +54,7 @@ struct Annotation {
   /// True if a positional (keyless) argument spells `Word`.
   bool hasWord(const std::string &Word) const {
     for (const auto &A : Args)
-      if (A.Key.empty() && !A.IsString && A.Value == Word)
+      if (A.Key.empty() && !A.IsString && !A.IsNumber && A.Value == Word)
         return true;
     return false;
   }

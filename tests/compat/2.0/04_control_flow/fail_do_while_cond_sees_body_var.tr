@@ -1,0 +1,16 @@
+// EXPECT-DIAG: E040
+// EXPECT-DIAG: I can't find anything named 'finished'
+// Regression test (Issue #180 follow-up): a do-while's body is its own
+// block scope (Resolver::visitBlock() enters/exits a scope around it) and
+// Resolver::visitDoWhile() resolves the body BEFORE the condition -- by the
+// time the condition is resolved, the body's scope has already been exited.
+// A variable declared only inside the body must therefore be a
+// ReferenceError when read from the condition, exactly like real-world
+// do-while semantics (C/C++ have the identical rule: the condition sits
+// outside the body's own block scope).
+fn main(): int {
+    do {
+        mut finished: bool = true;
+    } while finished;
+    return 0;
+}

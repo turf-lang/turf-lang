@@ -1,0 +1,34 @@
+// SEM-003 (§11.6): a call returning `!T` infers `!T` itself (not T) --
+// `r`'s guessed type is `!int`, and it must then be `recover`ed like any
+// other `!T`-typed value, exactly as if `r` had been written `mut r: !int
+// = divide(...);`. Also covers `&expr` inferring `&T`.
+import test;
+
+error MathError {
+    DivisionByZero,
+}
+
+fn divide(a: int, b: int): !int {
+    if (b == 0) {
+        return MathError::DivisionByZero;
+    }
+    return a / b;
+}
+
+struct Point { x: int, y: int }
+
+fn main(): int {
+    mut r = divide(10, 2);
+    mut ok = r recover produce -1;
+    test::assert(ok == 5, "guess infers !T from a fallible call; recover on it works");
+
+    mut failed = divide(10, 0);
+    mut fallback = failed recover produce -1;
+    test::assert(fallback == -1, "guess-inferred !T variable recovers on the failure path too");
+
+    mut p = Point::default();
+    mut addr = &p;
+    test::assert(addr.x == 0, "&expr initializer infers &T under guess");
+
+    return 0;
+}

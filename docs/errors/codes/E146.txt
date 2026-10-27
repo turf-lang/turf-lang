@@ -16,7 +16,7 @@ That is why a wrong annotation is an error rather than something quietly
 skipped. A misspelt one would otherwise switch off the very check it was
 written to turn on, and you would never find out.
 
-There are two ways to get this error.
+There are three ways to get this error.
 
 The name is not one the compiler knows. The message suggests the closest one
 and lists them all:
@@ -39,8 +39,48 @@ The arguments do not fit the declaration. The message says what is wrong:
     fn helper(): int { return 0; }
     // '@ffi' can only sit on an 'extern fn'.
 
+A `@test` is malformed. `@test` marks a top-level function as a test (see the
+language reference, `@test`): it takes no parameters, returns `void` or `!void`,
+and may start with an outcome (`compile_error`, `warning`, `no_warnings`,
+`panic`, `exit`, `error`). The message names the rule and the hint lists the
+outcomes:
+
+    @test(compile_eror, E041, "x")
+    fn t(): void { }
+    // 'compile_eror' is not an outcome of '@test'.
+
+    @test(compile_error, E999, "x")
+    fn t(): void { }
+    // 'E999' is not a code the compiler has.
+
+    @test(compile_error, E172, "x")
+    fn t(): void { }
+    // 'E172' is a warning's code, not an error's.
+
+    @test
+    fn t(n: int): void { }
+    // A test takes no parameters.
+
+    @test
+    fn t(): int { return 1; }
+    // A test returns 'void' or '!void', not 'int'.
+
+    @test(exit, 256)
+    fn t(): void { }
+    // '256' is not an exit status.
+
+    @test(error, ParseError::Gone)
+    fn t(): !void { return; }
+    // Error type 'ParseError' has no variant 'Gone'.
+
+Also rejected: an outcome that is not the first argument, a method or `main`
+as a test, an option (`@test(skip: "x")`), a second `@test` on one function,
+and an `error` outcome on a function that does not return `!void`. A `@test`
+function nested in another function is E038.
+
 The fix is to correct the spelling, or to say what is actually true of the
 declaration, or to remove the annotation.
 
-A malformed annotation -- a missing ')' or a number where a word belongs -- is
-a syntax error instead, reported where the parser stopped.
+A malformed annotation -- a missing ')' or an expression such as `1 + 2` in the
+arguments -- is a syntax error instead (E103), reported where the parser stopped.
+An argument may be a word, a string, a whole number or a `Type::Variant` path.

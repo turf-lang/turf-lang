@@ -1,0 +1,44 @@
+// Byte sizes computed during codegen use the target's data layout (found by
+// turf-fuzz: `malloc(): corrupted top size` from safe code). The module got
+// its layout only after codegen, so sizes came from LLVM's default layout,
+// which aligns i64 to 4 bytes: `{bool, int, bool[4]}` was 16 bytes instead of
+// 24. `.copy()` of an array of such structs then allocated too small a block
+// and wrote past it, and `sizeof` (which sizes every List<T> buffer) was
+// short the same way.
+
+import test;
+import list::List;
+
+struct P { a: bool, n: int, b: bool[4] }
+
+fn mk(n: int): P {
+    mut p: P = P::default();
+    p.n = n;
+    p.b[3] = true;
+    return p;
+}
+
+fn main(): int {
+    test::assert(sizeof(P) == 24, "sizeof uses the target layout");
+
+    mut arr: P[3] = [mk(1), mk(2), mk(3)];
+    mut c: P[] = arr.copy();
+    c[1].n = 50;
+    test::assert(c[0].n == 1 && c[1].n == 50 && c[2].n == 3, "copy holds every element");
+    test::assert(c[2].b[3], "including the trailing field");
+    test::assert(arr[1].n == 2, "and is independent of the original");
+
+    mut l: List<P> = List::default();
+    mut i: int = 0;
+    while i < 100 {
+        l.push(mk(i));
+        i += 1;
+    }
+    mut sum: int = 0;
+    for j in 0..100 {
+        sum += l[j].n;
+        test::assert(l[j].b[3], "every pushed element intact");
+    }
+    test::assert(sum == 4950, "a List of padded structs grows without overlap");
+    return 0;
+}

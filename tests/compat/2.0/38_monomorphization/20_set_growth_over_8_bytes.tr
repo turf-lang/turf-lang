@@ -1,0 +1,41 @@
+// Regression test: D3's set.tr counterpart of
+// 17_stack_growth_over_8_bytes.tr -- same `self.cap * 8` under-allocation
+// bug, in Set<T>.add()'s grow branch. `Set<T>` requires `T` to support
+// `==` (Set.index_of() does `self.items[i] == item`), which a plain struct
+// doesn't by default (see D7/fail_generic_requires_operator.tr) -- so this
+// test uses a >8-byte struct with an explicit `operator ==` overload,
+// rather than leaving Set's own allocation fix untested.
+import set::Set;
+import test;
+
+struct Big {
+    a: int,
+    b: int,
+    c: int
+}
+
+fn Big.new(x: int, y: int, z: int): void { self.a = x; self.b = y; self.c = z; }
+
+operator ==(x: Big, y: Big): bool {
+    return x.a == y.a && x.b == y.b && x.c == y.c;
+}
+
+fn main(): int {
+    mut s: Set<Big> = Set::default();
+    mut i: int = 0;
+    while i < 20 {
+        s.add(Big::new(i, i * 2, i * 3));
+        i = i + 1;
+    }
+    test::assert(s.length() == 20, "Set<Big> should hold 20 distinct elements after growth");
+
+    // Re-adding an already-present element must stay a no-op (proves
+    // Set.contains()/index_of() is still reading real, uncorrupted data
+    // after growth, not just that the buffer didn't crash).
+    s.add(Big::new(5, 10, 15));
+    test::assert(s.length() == 20, "re-adding an existing Big must not grow the set");
+    test::assert(s.contains(Big::new(19, 38, 57)), "the last-added element must survive uncorrupted");
+    test::assert(!s.contains(Big::new(100, 200, 300)), "a never-added element must not be reported present");
+
+    return 0;
+}

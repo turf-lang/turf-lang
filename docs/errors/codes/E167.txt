@@ -1,0 +1,23 @@
+Dividing by a literal zero
+
+`/` or `%` with a literal `0` on the right is a division by zero, and it will crash the program when it runs:
+
+    fn main(): int {
+        immut n: int = 10;
+        return n / 0;        // WARNING: division by zero
+    }
+
+Turf catches this when it can see the zero in your source. The right-hand side should be the real divisor. If it can legitimately be zero at run time, check for that first:
+
+    fn main(): int {
+        immut n: int = 10;
+        immut d: int = 2;
+        if d == 0 {
+            return 1;
+        }
+        return n / d - 5;
+    }
+
+This warning only looks at literal `0` and `0.0`. A divisor that turns out to be zero only at run time is not caught, so a check like the one above is still the right habit.
+
+This is a warning, not an error -- compilation still succeeds. To silence it for a whole build, set its lint level to allow: `turf build --allow E167` (or `[lints] E167 = "allow"` in turf.toml).

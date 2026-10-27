@@ -1,0 +1,56 @@
+// Regression test (OVH-003, docs/planning/OVERHAUL_REMAINING_WORK.md):
+// `List<T>.get(i)`/`.set(i, value)` -- the bounds-checked, GENUINELY
+// generic replacement for reading/writing an element via the raw `data:
+// T*` field directly (`l.data[i]`, now gated outside `unsafe { }` -- see
+// tests/05_arrays_pointers_ffi/fail_raw_pointer_index_outside_unsafe.tr).
+// Unlike `operator[]`/`operator[]=` (LANG-001), which are declared for
+// the concrete `List<int>` only, `get`/`set` work for any `T` -- covered
+// here across a primitive (`int`), a GC-heap pointer type (`string`), and
+// a genuine multi-field by-value struct (`Triple`, 24 bytes -- three
+// int64 fields, exercising the >8-byte-struct-by-value path TYPE-002
+// made possible).
+
+import list::List;
+import test;
+
+struct Triple {
+    a: int,
+    b: int,
+    c: int
+}
+
+fn main(): int {
+    // int
+    mut li: List<int> = List::default();
+    li.push(10);
+    li.push(20);
+    li.push(30);
+    test::assert(li.get(0) == 10 && li.get(1) == 20 && li.get(2) == 30,
+        "List<int>.get reads pushed values");
+    li.set(1, 99);
+    test::assert(li.get(1) == 99, "List<int>.set overwrites in place");
+
+    // string (a GC-heap pointer element type)
+    mut ls: List<string> = List::default();
+    ls.push("alpha");
+    ls.push("beta");
+    test::assert(ls.get(0) == "alpha" && ls.get(1) == "beta",
+        "List<string>.get reads pushed values");
+    ls.set(0, "gamma");
+    test::assert(ls.get(0) == "gamma", "List<string>.set overwrites in place");
+
+    // a genuine multi-field by-value struct, 24 bytes
+    mut lt: List<Triple> = List::default();
+    mut t1: Triple = Triple::default();
+    t1.a = 1; t1.b = 2; t1.c = 3;
+    lt.push(t1);
+    test::assert(lt.get(0).a == 1 && lt.get(0).b == 2 && lt.get(0).c == 3,
+        "List<Triple>.get reads all three fields correctly");
+    mut t2: Triple = Triple::default();
+    t2.a = 7; t2.b = 8; t2.c = 9;
+    lt.set(0, t2);
+    test::assert(lt.get(0).a == 7 && lt.get(0).b == 8 && lt.get(0).c == 9,
+        "List<Triple>.set overwrites the whole struct in place");
+
+    return 0;
+}

@@ -1,0 +1,21 @@
+// `@ownership(...)` is carried through the front end in every valid shape: on an
+// `extern fn` (raw pointers only appear in extern signatures), stacked, and
+// before `pub`. Declaring ownership changes nothing about how a program
+// compiles or runs.
+
+import test;
+
+@ownership(acquires)
+extern fn take_block(size: int): void*;
+
+@ownership(releases: block)
+extern fn give_block_back(block: void*): void;
+
+@ownership(acquires)
+@ownership(releases: old)
+pub extern fn resize_block(old: void*, size: int): void*;
+
+fn main(): int {
+    test::assert(1 + 1 == 2, "annotated declarations do not disturb compilation");
+    return 0;
+}

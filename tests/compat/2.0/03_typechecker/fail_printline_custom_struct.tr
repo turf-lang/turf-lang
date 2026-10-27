@@ -1,0 +1,16 @@
+// EXPECT-DIAG: E025
+// EXPECT-DIAG: No overload of 'io::printline' matches argument types (Point)
+// Regression test (was DISCOVERED_ISSUES.md #11): passing a custom struct
+// value directly to io::printline() (no matching overload exists) must be
+// rejected with a clean TypeChecker type-mismatch error, not crash the
+// compiler via the pre-pass codegen path (see fail_math_abs_string.tr for
+// the sibling issue #9, the same underlying architectural bypass).
+import io;
+
+struct Point { x: int, y: int }
+
+fn main(): int {
+    mut p: Point = Point::default();
+    io::printline(p);
+    return 0;
+}

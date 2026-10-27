@@ -1,0 +1,21 @@
+// Regression test: a diamond import shape (both diamond_left_module and
+// diamond_right_module import the SAME diamond_shared_module) must NOT be
+// mistaken for a cycle. This is structurally the case most likely to
+// false-positive if circular-import detection were implemented against the
+// wrong set: ParseFile()'s existing ImportedFiles cache set legitimately
+// contains diamond_shared_module twice (once per importer), which is fine
+// and by design -- cycle detection uses a SEPARATE, in-progress-only
+// ImportStack that pops each frame the moment that module finishes parsing,
+// so by the time the second sibling imports diamond_shared_module, the
+// first one's frame is long gone and this compiles cleanly.
+import io;
+import diamond_left_module;
+import diamond_right_module;
+
+import test;
+fn main(): int {
+    test::assert(diamond_left_module::leftValue() == 1, "leftValue should be 1");
+    test::assert(diamond_right_module::rightValue() == 2, "rightValue should be 2");
+    io::printline("diamond import ok");
+    return 0;
+}

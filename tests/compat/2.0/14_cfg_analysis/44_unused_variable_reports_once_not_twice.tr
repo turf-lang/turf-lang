@@ -1,0 +1,12 @@
+// EXPECT-DIAG: Variable 'k' is declared but never used
+// EXPECT-NO-DIAG: Variable 'k' is assigned but the value is never read
+// LEC-005: a variable that is never read at all used to be reported twice --
+// "declared but never used" AND "assigned but never read (dead store)" for its
+// own initializer -- the same finding with two hints. The never-used warning
+// is the one that says what to do about it; the dead-store warning is kept
+// for variables that ARE read somewhere (see 15_dead_store_in_loop.tr and
+// 43_...).
+fn main(): int {
+    immut k: int = 5;
+    return 0;
+}

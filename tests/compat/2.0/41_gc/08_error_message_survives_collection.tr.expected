@@ -1,0 +1,1 @@
+41/08 PASS: a message-carrying error value's GC-heap message string is precisely traced through a forced collection

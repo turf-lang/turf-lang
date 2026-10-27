@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E057
+// EXPECT-DIAG: cannot apply '+' to 'int' and 'Point'
+import io;
+
+struct Point { x: int }
+
+fn main(): int {
+    mut a: int = 5;
+    mut p: Point = Point::default();
+    mut c: int = a + p;
+
+    return 0;
+}

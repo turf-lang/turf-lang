@@ -1,0 +1,28 @@
+// LEC-003: a compare with patterns inside a loop body, with `continue` inside
+// an arm; the subject slot must not grow the stack per iteration.
+import test;
+
+struct P { x: int, y: int }
+
+fn main(): int {
+    mut total: int = 0;
+    for i in 0..5 step i += 1 {
+        mut p: P = P::default();
+        p.x = i;
+        p.y = i * 2;
+        compare p {
+            matches P { x: 0, .. }:
+            total = total + 100;
+            done
+            matches P { y, .. } if y > 4:
+            total = total + y;
+            continue;
+            done
+            matches P { x, .. }:
+            total = total + x;
+            done
+        }
+    }
+    test::assert(total == 100 + 1 + 2 + 6 + 8, "per-iteration matching");
+    return 0;
+}

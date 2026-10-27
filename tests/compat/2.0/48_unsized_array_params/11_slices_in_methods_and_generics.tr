@@ -1,0 +1,59 @@
+// Range slicing inside struct methods (views of self's array fields) and
+// generic functions (an explicitly typed `T[]` view of a `T[]` parameter).
+// A method that only READS through a slice of self can be called on an
+// `immut` value; one that writes through it needs a `mut` one (see
+// fail_immut_receiver_method_writes_field_slice.tr).
+import test;
+
+fn fill(arr: int[], v: int): void {
+    for (i, _x) in arr {
+        arr[i] = v;
+    }
+}
+
+struct Box {
+    data: int[4]
+}
+
+fn Box.new(): void {
+    self.data = [1, 2, 3, 4];
+}
+
+fn Box.tail_total(): int {
+    mut t: int = 0;
+    for x in self.data[1..] {
+        t += x;
+    }
+    return t;
+}
+
+fn Box.clear_tail(): void {
+    fill(self.data[2..], 0);
+}
+
+fn Box.bump_second(): void {
+    mut v: int[] = self.data[1..];
+    v[0] += 10;
+}
+
+fn<T> second(arr: T[]): T {
+    immut rest: T[] = arr[1..];
+    return rest[0];
+}
+
+fn main(): int {
+    immut fixed: Box = Box::new();
+    test::assert(fixed.tail_total() == 9, "a read-only slice of self on an immut value");
+
+    mut b: Box = Box::new();
+    b.bump_second();
+    test::assert(b.data[1] == 12, "a write through a local view of self");
+    b.clear_tail();
+    test::assert(b.data[2] == 0 && b.data[3] == 0 && b.data[0] == 1, "a slice of self handed to fill()");
+
+    mut ints: int[3] = [7, 8, 9];
+    mut words: string[2] = ["a", "b"];
+    test::assert(second(ints) == 8, "second<int>");
+    test::assert(second(words) == "b", "second<string>");
+    return 0;
+}

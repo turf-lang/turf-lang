@@ -1,0 +1,9 @@
+// EXPECT-DIAG: E123
+// EXPECT-DIAG: Array size must be
+// An array's size counts its slots, so it has to be a positive whole number.
+// This was the generic E015 until the typed SyntaxError became a vehicle that
+// takes its code from the caller (issue #263).
+fn main(): int {
+    mut empty: int[0];
+    return 0;
+}

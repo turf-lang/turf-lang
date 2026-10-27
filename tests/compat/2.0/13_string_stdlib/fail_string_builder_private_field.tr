@@ -1,0 +1,12 @@
+// LEC-007: StringBuilder's buffer, length and capacity are private. `buf` is a
+// raw buffer whose NUL-terminator invariant only the methods maintain, and a
+// writable `cap` would let a caller claim room that is not there.
+// EXPECT-DIAG: E088
+import strings;
+
+fn main(): int {
+    mut sb: strings::StringBuilder = strings::StringBuilder::default();
+    sb.append("x");
+    sb.cap = 1000000;
+    return 0;
+}
