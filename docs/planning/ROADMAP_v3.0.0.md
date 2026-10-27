@@ -310,10 +310,10 @@ written in this order; this table is updated if they are not.
 |---|---|---|---|
 | TDP-2-001 | Fixes in diagnostics without `--smart` (landed in 2.1) | DX-1, SL-0, SL-7 | 2.1 (DX-1, SL-0 label), 2.2 (SL-7) |
 | TDP-2-002 | Checked arithmetic and auto-vectorization (draft) | NM-1 … NM-6 | 2.1, 2.2 |
-| TDP-2-003 | Lint levels, deprecation and the 2.x compatibility contract | V-1, V-2, V-4, V-5, B-10 | 2.1 |
+| TDP-2-003 | Lint levels, deprecation and the 2.x compatibility contract (landed in 2.2) | V-1, V-2, V-4, V-5, B-10 | 2.1 |
 | TDP-2-004 | Machine-readable diagnostics and applying fixes | DX-2, IF-2 (diagnostics schema), DX-4 | 2.1, 2.7 |
-| TDP-2-005 | Type arguments at the use site | LG-1, LG-2, LG-7 | 2.1 |
-| TDP-2-006 | Tests in source files | F-11d | 2.1 |
+| TDP-2-005 | Type arguments at the use site (landed in 2.2) | LG-1, LG-2, LG-7 | 2.1 |
+| TDP-2-006 | Tests in source files (landed in 2.2) | F-11d | 2.1 |
 | TDP-2-007 | Analysis warnings for unsafe code, loops, recursion and leaks | AN-1 … AN-7, LB-5 (warning) | 2.2 |
 | TDP-2-008 | Measured suggestions: the Fix Score and the benchmark | SL-1 … SL-6, DX-3 | 2.2 |
 | TDP-2-009 | Closures and function values | F-1, G-1, B-7, LG-5 | 2.3, 2.4, 2.5 |
@@ -328,7 +328,7 @@ written in this order; this table is updated if they are not.
 | TDP-2-018 | Safe library interfaces | LB-2, LB-4, LB-5, B-12, B-13 | 2.6, 3.0 |
 | TDP-2-019 | A pure compiler: `turfc`, `libturf` and the assistant | PC-1 … PC-4, IF-4, B-14, B-15 | 2.7, 3.0 |
 | TDP-2-020 | TurfLang 3.0.0 and the end of 2.x | Part 7, B-1, B-3, D-8 | 2.8, 3.0 |
-| TDP-2-021 | Iterating over a string | SY-1 | 2.1 |
+| TDP-2-021 | Iterating over a string (landed in 2.2) | SY-1 | 2.1 |
 | TDP-2-022 | Methods on number literals | SY-2, B-18 | 2.1, 2.2, 3.0 |
 | TDP-2-023 | `function` as a spelling of `fn` | SY-3, B-19 | 2.2, 3.0 |
 | TDP-2-024 | `static` before `fn` | SY-4, B-20 | 2.2, 3.0 |
