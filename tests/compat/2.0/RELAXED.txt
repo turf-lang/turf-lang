@@ -15,4 +15,4 @@
 10_default_init/fail_array_nested_write_reads_first.tr  # 207cf09c: same decision, ANA-001
 10_default_init/fail_array_of_struct_use_before_write.tr  # 207cf09c: same decision, ANA-001
 01_syntax/fail_parse_error_generic_call_expression_hint.tr  # 090aff61: `List<int>::default()` is a type-argument list (LG-1), ROADMAP_v3.0.0.md 6.10, docs/development/changes/TDP-2-005.md (2.2.0)
-07_functions_modules/visibility/fail_pub_not_a_declaration.tr  # SYNTAX_COMMIT: `pub immut` declares a public module constant, SY-5, TDP-2-025 (ROADMAP_v3.0.0.md 6.14, issue #329, owner's 2.3.0 plan) (2.3.0)
+07_functions_modules/visibility/fail_pub_not_a_declaration.tr  # 21808223: `pub immut` declares a public module constant, SY-5, TDP-2-025 (ROADMAP_v3.0.0.md 6.14, issue #329, owner's 2.3.0 plan) (2.3.0)
