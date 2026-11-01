@@ -212,8 +212,8 @@ static std::string displayPath(const std::string &Path) {
 
 // TDP-2-001: builds and checks D's fix, at most once per diagnostic and for at
 // most CompilerFixes::MaxChecksPerCompile diagnostics in one compile. Any
-// error whose raise site attached fix-its, in a file the user wrote (never
-// lib/std), gets one when the re-check passes.
+// error or warning whose raise site attached fix-its, in a file the user wrote
+// (never lib/std), gets one when the re-check passes.
 // `D` must not be an element of DiagnosticEngine's own list (see flushAll()).
 static void checkCompilerFix(DiagnosticEngine::Diag &D) {
   static int Checks = 0;
@@ -223,7 +223,7 @@ static void checkCompilerFix(DiagnosticEngine::Diag &D) {
   const bool Debug = std::getenv("TURF_FIX_DEBUG") != nullptr;
   if (Debug)
     std::cerr << "[fix] " << D.Code << " line " << D.Loc.Line << ": looking\n";
-  if (D.FixChecked || D.IsWarning || D.Hints.FixIts.empty() ||
+  if (D.FixChecked || D.Hints.FixIts.empty() ||
       D.Code.empty() || IsLibStdWarningLocation(D.Filename))
     return;
   D.FixChecked = true;
@@ -239,7 +239,7 @@ static void checkCompilerFix(DiagnosticEngine::Diag &D) {
     return;
   }
   ++Checks;
-  if (!CompilerFixes::check(Fix, D.Filename, D.Code, D.Loc.Line)) {
+  if (!CompilerFixes::check(Fix, D.Filename, D.Code, D.Loc.Line, D.IsWarning)) {
     if (Debug)
       std::cerr << "[fix] " << D.Code << " line " << D.Loc.Line << ": '"
                 << Fix.Description << "' failed the re-check\n";
@@ -511,8 +511,10 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
   // facade as an error). A denied warning inside lib/std stays the hidden
   // warning it is: the user did not write that code and cannot fix it, so
   // `--deny` must not fail a build over it (--stdlib-warnings opts back in).
+  // Asked even with no level set: a warning whose row is AllowByDefault is
+  // `allow` until something names it.
   bool Denied = false;
-  if (IsWarning && !OwnedByTest && !Code.empty() && LintLevels::anySet()) {
+  if (IsWarning && !OwnedByTest && !Code.empty()) {
     switch (LintLevels::levelOf(Code)) {
     case LintLevels::Level::Allow:
       return;

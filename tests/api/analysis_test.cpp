@@ -2235,6 +2235,16 @@ static void testLintLevels() {
   LintLevels::reset();
   CHECK(!LintLevels::anySet());
 
+  // An allow-by-default warning is `allow` until its code is named, and the
+  // pin keeps a newer one at `allow` whatever its default.
+  CHECK(LintLevels::levelOfSince("E166", 0, true) == LintLevels::Level::Allow);
+  CHECK(LintLevels::setLevel("E166", LintLevels::Level::Warn, Err));
+  CHECK(LintLevels::levelOfSince("E166", 0, true) == LintLevels::Level::Warn);
+  LintLevels::reset();
+  CHECK(LintLevels::setLintSet("2.2", 5, Err));
+  CHECK(LintLevels::levelOfSince("E166", 3, false) == LintLevels::Level::Allow);
+  LintLevels::reset();
+
   // Every warning class has a row, so every warning can be named.
   for (size_t I = 0; I < AllErrorCodesCount; ++I) {
     const ErrorCodeEntry &E = AllErrorCodes[I];

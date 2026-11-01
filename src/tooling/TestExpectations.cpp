@@ -338,6 +338,26 @@ size_t CountFixes(const std::string &CompileOutput) {
   return PrintedFixes(CompileOutput).size();
 }
 
+std::vector<std::string> LintFlags(const std::string &Source, std::vector<std::string> &Bad) {
+  std::vector<std::string> Out;
+  for (const auto &Line : MarkerLines(Source, "^[ \t]*//[ \t]*LINT:")) {
+    std::istringstream In(Line.substr(Line.find(':') + 1));
+    std::string Flag, Value;
+    while (In >> Flag) {
+      const bool Known = Flag == "--allow" || Flag == "--warn" || Flag == "--deny" ||
+                         Flag == "--lint-set";
+      if (!Known || !(In >> Value)) {
+        Bad.push_back("LINT: '" + Flag + "' is not a lint flag with a value (--allow, --warn, "
+                      "--deny <code>, --lint-set <2.N>)");
+        break;
+      }
+      Out.push_back(Flag);
+      Out.push_back(Value);
+    }
+  }
+  return Out;
+}
+
 bool HasFixMarker(const std::string &Source) {
   return !MarkerLines(Source, "^[ \t]*//[ \t]*EXPECT-FIX:").empty();
 }

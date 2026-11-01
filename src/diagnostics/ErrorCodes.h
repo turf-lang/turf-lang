@@ -76,6 +76,11 @@ struct ErrorCodeEntry {
   // a code added in 2.N states it as the fifth value of its row, after
   // `Important`.
   int SinceMinor = 0;
+  // A warning that starts at `allow` (the 5.4 ladder's first rung for a check
+  // still collecting its false-positive record, and every opt-in lint): it is
+  // reported only after `--warn`/`--deny` of its code or a `[lints]` entry.
+  // The sixth value of its row. Never read for an error.
+  bool AllowByDefault = false;
 };
 
 // The codes the raw LogErrorAt() path (Lexer.h) uses -- named, so a call site

@@ -6,6 +6,7 @@
 #include "tooling/TestRunner.h"
 
 #include "tooling/TestExpectations.h"
+#include "diagnostics/LintLevels.h"
 #include "turf/Analysis.h"
 
 #include "llvm/Support/JSON.h"
@@ -515,12 +516,39 @@ private:
     Args.push_back("-o");
     Args.push_back(Program.string());
     Args.insert(Args.end(), Extra.begin(), Extra.end());
+    std::vector<std::string> Bad;
+    const auto Lint = TestExpect::LintFlags(ReadFile(T.Path), Bad);
+    Args.insert(Args.end(), Lint.begin(), Lint.end());
     Args.insert(Args.end(), O_.CompileFlags.begin(), O_.CompileFlags.end());
     return RunProcess(O_.Compiler, Args, T.Path.parent_path().string(), CompileTimeoutSec);
   }
 
   ProcResult runProgram(const TestFile &T, const fs::path &Program) {
     return RunProcess(Program.string(), {}, T.Path.parent_path().string(), Timeout_);
+  }
+
+  /// The lint flags in @p Flags (`--warn E174`, `--lint-set 2.2`, ...), set in
+  /// this process for an in-process analysis; anything else is skipped. The
+  /// compile already refused a bad one with a usage error.
+  static void applyLint(const std::vector<std::string> &Flags) {
+    const std::string V = TURF_VERSION;
+    const size_t Dot = V.find('.');
+    const int Minor = Dot == std::string::npos ? 0 : std::atoi(V.c_str() + Dot + 1);
+    std::string Err;
+    for (size_t I = 0; I + 1 < Flags.size(); ++I) {
+      const std::string &F = Flags[I], &Val = Flags[I + 1];
+      if (F == "--lint-set")
+        LintLevels::setLintSet(Val, Minor, Err);
+      else if (F == "--allow" || F == "--warn" || F == "--deny")
+        LintLevels::setLevel(Val,
+                             F == "--allow"  ? LintLevels::Level::Allow
+                             : F == "--warn" ? LintLevels::Level::Warn
+                                             : LintLevels::Level::Deny,
+                             Err);
+      else
+        continue;
+      ++I;
+    }
   }
 
   /// TDP-2-001: a fix the compiler printed is applied and the program checked
@@ -547,22 +575,38 @@ private:
     Args.push_back(T.Name());
     Args.push_back("--check");
     Args.push_back("--smart-write-fix=" + Fixed.string());
+    std::vector<std::string> Bad;
+    const auto Lint = TestExpect::LintFlags(Source, Bad);
+    Args.insert(Args.end(), Lint.begin(), Lint.end());
     RunProcess(O_.Compiler, Args, T.Path.parent_path().string(), CompileTimeoutSec);
     const std::string FixedSource = ReadFile(Fixed);
     if (FixedSource.empty())
       return "the compiler printed a fix but wrote no fixed program (--smart-write-fix)";
 
-    using Key = std::pair<unsigned, std::string>;
-    auto Errors = [&](const std::string &Text) {
+    // A fix may be a warning's (a retired spelling, SY-2 … SY-5), so the
+    // check counts warnings too, at the lint levels the file's compile used.
+    struct Key {
+      unsigned Line;
+      std::string Code;
+      bool Warning;
+      bool operator==(const Key &O) const {
+        return Line == O.Line && Code == O.Code && Warning == O.Warning;
+      }
+    };
+    auto Diags = [&](const std::string &Text) {
       turf::AnalysisOptions Opt;
       Opt.RunLint = true;
       Opt.RunFlowAnalysis = true;
       Opt.PackageGraphFile = O_.PackageGraph;
       std::vector<Key> Out;
+      LintLevels::reset();
+      applyLint(O_.CompileFlags);
+      applyLint(Lint);
       const turf::AnalysisResult R = turf::analyze({{T.Path.string(), Text}}, Opt);
+      LintLevels::reset();
       for (const auto &D : R.diagnostics())
-        if (D.Level == turf::Severity::Error)
-          Out.emplace_back(D.Where.Line, D.Code);
+        if (D.Level == turf::Severity::Error || D.Level == turf::Severity::Warning)
+          Out.push_back({D.Where.Line, D.Code, D.Level == turf::Severity::Warning});
       return Out;
     };
     std::vector<Key> Before, After;
@@ -570,19 +614,24 @@ private:
       // The analysis runs on the compiler's process-wide state: one at a time.
       static std::mutex AnalysisMu;
       std::lock_guard<std::mutex> L(AnalysisMu);
-      Before = Errors(Source);
-      After = Errors(FixedSource);
+      Before = Diags(Source);
+      After = Diags(FixedSource);
     }
+    // A new warning is allowed: an error that stopped the analysis early hid
+    // the warnings after it, which its fix brings back.
     for (const auto &K : After) {
       auto It = std::find(Before.begin(), Before.end(), K);
+      if (It == Before.end() && K.Warning)
+        continue;
       if (It == Before.end())
-        return "with its fixes applied the program has an error it did not have: " + K.second +
-               " at line " + std::to_string(K.first) + "\n--- fixed program ---\n" + FixedSource;
+        return std::string("with its fixes applied the program has an error it did not have: ") +
+               K.Code +
+               " at line " + std::to_string(K.Line) + "\n--- fixed program ---\n" + FixedSource;
       Before.erase(It);
     }
     if (Before.size() < Fixes)
       return "with its " + std::to_string(Fixes) + " fix(es) applied the program still has " +
-             "the errors they fix\n--- fixed program ---\n" + FixedSource;
+             "the diagnostics they fix\n--- fixed program ---\n" + FixedSource;
     return "";
   }
 
@@ -693,6 +742,8 @@ private:
     } Clean{Program};
 
     const bool FailPrefix = StartsWith(T.Name(), "fail_");
+    if (std::vector<std::string> Bad; TestExpect::LintFlags(Source, Bad), !Bad.empty())
+      return fail(T, "FAILED (a LINT: line is malformed)", "(LINT:):\n" + JoinLines(Bad));
     ProcResult C = compile(T, Program);
     if (g_Interrupted)
       return {false, T.Key + " (interrupted)"};
@@ -776,6 +827,17 @@ private:
     // absence), judged on the compile output before the program runs.
     if (auto Miss = TestExpect::CheckDiag(Source, C.Output); !Miss.empty())
       return fail(T, "FAILED (EXPECT-DIAG)", "(EXPECT-DIAG):\n" + With(Miss, C.Output));
+    // A warning's fix (a retired spelling) is pinned and applied as an
+    // error's is.
+    if (auto Miss = TestExpect::CheckFix(Source, C.Output, /*RequireAllPinned=*/Reg_ != nullptr);
+        !Miss.empty())
+      return fail(T, "FAILED (EXPECT-FIX not met)",
+                  "(EXPECT-FIX not met):\n" + With(Miss, C.Output));
+    if (const size_t Fixes = TestExpect::CountFixes(C.Output);
+        Fixes && (Reg_ || TestExpect::HasFixMarker(Source)))
+      if (auto Why = checkFixesApply(T, Index, Source, Fixes); !Why.empty())
+        return fail(T, "FAILED (EXPECT-FIX: the fix does not apply)",
+                    "(EXPECT-FIX: the fix does not apply): " + Why);
 
     ProcResult R = runProgram(T, Program);
     if (R.TimedOut || R.Status == 137 || R.Status == 143 || R.Status == 211) {

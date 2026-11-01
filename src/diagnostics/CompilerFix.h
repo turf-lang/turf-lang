@@ -1,8 +1,8 @@
 #ifndef COMPILER_FIX_H
 #define COMPILER_FIX_H
 
-// TDP-2-001: a fix the compiler prints with an error, in every build, with no
-// model and no flag.
+// TDP-2-001: a fix the compiler prints with an error or a warning, in every
+// build, with no model and no flag.
 //
 // A raise site that knows the exact edit attaches it as fix-its
 // (SLM::DiagnosticHints::FixIts, through the withFixIt() family in Errors.h).
@@ -69,10 +69,12 @@ bool build(const SLM::DiagnosticHints &Hints, int ErrorLine,
 
 // Applies `Fix` to an in-memory copy of the program and analyses it again.
 // True only when the original program's own analysis reports `Code` at
-// `ErrorLine` of `File`, and the patched program reports no error there with
-// that code and no error the original did not have.
+// `ErrorLine` of `File`, and the patched program reports no diagnostic there
+// with that code and no error the original did not have. With `IsWarning` the
+// diagnostic being fixed is a warning (a retired spelling's `Fix:`, SY-2 …
+// SY-5), looked for among the warnings before and after.
 bool check(const CompilerFix &Fix, const std::string &File,
-           const std::string &Code, int ErrorLine);
+           const std::string &Code, int ErrorLine, bool IsWarning = false);
 
 // The `Fix:` block printDiag() prints under the source snippet: the
 // description, then each changed line as it reads after the fix, with the new

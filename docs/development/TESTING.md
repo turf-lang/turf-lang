@@ -165,6 +165,7 @@ The markers, all matched literally against the output with colour stripped:
 | `// EXPECT-FIX: replace 'nmae' with 'name'` | the output has a `Fix:` line with exactly this description |
 | `// EXPECT-RUNTIME: some text` | the program's own output contains it (abort tests) |
 | `// EXPECT-EXIT: 134` | the program exits with this status (an abort that prints nothing) |
+| `// LINT: --warn E174` | not a check: the file is compiled with these lint levels (`--allow`/`--warn`/`--deny <code>`, `--lint-set <2.N>`), as a project's `[lints]` would; how a test reaches a warning that starts at `allow` |
 
 Every line must hold, and they work on plain, `fail_*` and abort tests alike: a
 plain test can pin the warnings it compiles with. Match prose, never column
@@ -175,7 +176,7 @@ apart.
 
 ### Pin the fix
 
-An error whose raise site knows the exact edit prints a `Fix:` block in every
+An error or a warning whose raise site knows the exact edit prints a `Fix:` block in every
 build (`src/diagnostics/CompilerFix.cpp`; `docs/reference/cli_and_diagnostics.md`,
 "Fixes"). The runner treats the fix as part of what a test pins:
 
@@ -183,12 +184,13 @@ build (`src/diagnostics/CompilerFix.cpp`; `docs/reference/cli_and_diagnostics.md
   (`replace 'nmae' with 'name'`, `remove 'pub'`, `insert ';' at the end of line 12`).
 - In this repository's suite (run with `--diag-register`, as
   `scripts/test_runner.sh` does), every printed `Fix:` line must have a marker.
-  A `fail_*` test that starts printing a fix fails until it is pinned, so a new
-  fix cannot appear unreviewed. A project's own `turf test` has no register,
+  A test that starts printing a fix fails until it is pinned, so a new
+  fix cannot appear unreviewed; a plain test pins its warnings' fixes the same way. A project's own `turf test` has no register,
   so there the marker is opt-in.
 - Then (always here, and in a project only for a test with a marker) the runner reruns the compiler with `--smart-write-fix`, analyses the
-  fixed program in-process, and requires it to have at least as many fewer
-  errors as fixes printed and no error the original lacked.
+  fixed program in-process, at the file's lint levels, and requires it to have
+  at least as many fewer diagnostics as fixes printed and no error the original
+  lacked (a warning the fix uncovers is allowed).
 - To pin that a fix is *not* offered (an ambiguous typo), use
   `// EXPECT-NO-DIAG: Fix:`; see `tests/55_compiler_fixes/`.
 

@@ -37,6 +37,13 @@ std::vector<std::string> CheckDiag(const std::string &Source, const std::string 
 std::vector<std::string> CheckFix(const std::string &Source, const std::string &CompileOutput,
                                   bool RequireAllPinned);
 
+/// The lint flags a test file asks to be compiled with: every
+/// `// LINT: --warn E174 --deny E163 --lint-set 2.2` line's flags, in order.
+/// Only --allow/--warn/--deny <code> and --lint-set <2.N>; anything else is
+/// reported in @p Bad (a test's flags are the lint levels a project would put
+/// in [lints], never other compiler options).
+std::vector<std::string> LintFlags(const std::string &Source, std::vector<std::string> &Bad);
+
 /// Whether @p Source has any `// EXPECT-FIX:` marker.
 bool HasFixMarker(const std::string &Source);
 

@@ -86,18 +86,20 @@ bool setLintSet(const std::string &Spec, int CompilerMinor, std::string &Err) {
   return true;
 }
 
-Level levelOfSince(const std::string &Code, int SinceMinor) {
+Level levelOfSince(const std::string &Code, int SinceMinor,
+                   bool AllowByDefault) {
   const auto It = Explicit.find(Code);
   if (It != Explicit.end())
     return It->second;
   if (PinnedMinor >= 0 && SinceMinor > PinnedMinor)
     return Level::Allow;
-  return Level::Warn;
+  return AllowByDefault ? Level::Allow : Level::Warn;
 }
 
 Level levelOf(const std::string &Code) {
   const ErrorCodeEntry *Entry = ErrorCodes::lookupByCode(Code);
-  return levelOfSince(Code, Entry ? Entry->SinceMinor : 0);
+  return levelOfSince(Code, Entry ? Entry->SinceMinor : 0,
+                      Entry && Entry->AllowByDefault);
 }
 
 bool anySet() { return !Explicit.empty() || PinnedMinor >= 0; }

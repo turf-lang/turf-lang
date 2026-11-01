@@ -71,10 +71,11 @@ bool samePath(const std::string &A, const std::string &B) {
 // the column: an edit on a line moves the columns of whatever follows it.
 using ErrorKey = std::tuple<std::string, unsigned, std::string>;
 
-std::vector<ErrorKey> errorsOf(const turf::AnalysisResult &R) {
+std::vector<ErrorKey> errorsOf(const turf::AnalysisResult &R,
+                               turf::Severity Level = turf::Severity::Error) {
   std::vector<ErrorKey> Out;
   for (const auto &D : R.diagnostics())
-    if (D.Level == turf::Severity::Error)
+    if (D.Level == Level)
       Out.emplace_back(D.Where.Path, D.Where.Line, D.Code);
   return Out;
 }
@@ -113,17 +114,23 @@ const std::vector<std::string> *entryLines() {
   return It == AllSourceLines.end() ? nullptr : &It->second;
 }
 
-// The original program's errors, analysed once per compile.
-const std::vector<ErrorKey> &baselineErrors() {
+// The original program's errors and warnings, analysed once per compile.
+struct Baseline {
+  std::vector<ErrorKey> Errors, Warnings;
+};
+const Baseline &baseline() {
   static bool Done = false;
-  static std::vector<ErrorKey> Errors;
+  static Baseline B;
   if (!Done) {
     Done = true;
-    if (const auto *Lines = entryLines())
-      Errors = errorsOf(analyzeAll({{MainSourceFilename, joinLines(*Lines)}},
-                                   checkOptions()));
+    if (const auto *Lines = entryLines()) {
+      const auto R = analyzeAll({{MainSourceFilename, joinLines(*Lines)}},
+                                checkOptions());
+      B.Errors = errorsOf(R);
+      B.Warnings = errorsOf(R, turf::Severity::Warning);
+    }
   }
-  return Errors;
+  return B;
 }
 
 } // namespace
@@ -195,7 +202,7 @@ bool build(const SLM::DiagnosticHints &Hints, int ErrorLine,
 }
 
 bool check(const CompilerFix &Fix, const std::string &File,
-           const std::string &Code, int ErrorLine) {
+           const std::string &Code, int ErrorLine, bool IsWarning) {
   // An analysis reports through the same DiagnosticEngine, and must never
   // come back here.
   static bool Checking = false;
@@ -210,11 +217,15 @@ bool check(const CompilerFix &Fix, const std::string &File,
   } G;
 
   const ErrorKey Original{File, static_cast<unsigned>(ErrorLine), Code};
-  const auto &Before = baselineErrors();
-  // The analysis must see the error the compile saw, or a clean re-check would
-  // prove nothing (a package build analysed without its graph stops at the
-  // imports, long before the line the error is on).
-  if (std::none_of(Before.begin(), Before.end(),
+  const auto &Base = baseline();
+  const auto &Before = Base.Errors;
+  // The analysis must see the diagnostic the compile saw, or a clean re-check
+  // would prove nothing (a package build analysed without its graph stops at
+  // the imports, long before the line the error is on). A warning is looked
+  // for among the warnings: the analysis runs at the compile's lint levels,
+  // so a warning that was printed is reported there too.
+  const auto &Seen = IsWarning ? Base.Warnings : Before;
+  if (std::none_of(Seen.begin(), Seen.end(),
                    [&](const ErrorKey &K) { return sameError(K, Original); }))
     return false;
 
@@ -225,13 +236,23 @@ bool check(const CompilerFix &Fix, const std::string &File,
     Buffers.push_back({MainSourceFilename, joinLines(*Entry)});
     Buffers.push_back({File, Fix.PatchedFile});
   }
-  const auto After = errorsOf(analyzeAll(Buffers, checkOptions()));
+  const auto Patched = analyzeAll(Buffers, checkOptions());
+  const auto After = errorsOf(Patched);
+
+  // A warning's fix must take that warning away, as an error's fix takes the
+  // error away below (the error list never had the warning in it).
+  if (IsWarning) {
+    const auto Left = errorsOf(Patched, turf::Severity::Warning);
+    if (std::any_of(Left.begin(), Left.end(),
+                    [&](const ErrorKey &K) { return sameError(K, Original); }))
+      return false;
+  }
 
   // Every error left must be one the original program had, other than the
   // one being fixed: as many of each as before, never more.
   std::vector<ErrorKey> Allowed;
   for (const auto &K : Before)
-    if (!sameError(K, Original))
+    if (IsWarning || !sameError(K, Original))
       Allowed.push_back(K);
   for (const auto &K : After) {
     auto It = std::find_if(Allowed.begin(), Allowed.end(),
