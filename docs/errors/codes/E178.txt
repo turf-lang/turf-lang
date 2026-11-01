@@ -1,0 +1,17 @@
+Nothing calls or names a private function
+
+A function or method declared without `pub` can only be used inside its own file. When nothing there calls it, passes it as a value, or calls it through UFCS, it is dead code:
+
+    fn old_helper(x: int): int {   // WARNING (E178 at `warn`)
+        return x * 2;
+    }
+
+    fn main(): int {
+        return 0;
+    }
+
+Remove it, or call it where it was meant to be used. If another module is meant to call it, mark it `pub`.
+
+`main`, operators, `extern fn` declarations and `@test` functions are never reported, and nothing in the standard library is.
+
+This warning starts at `allow`: turn it on with `turf build --warn E178` (or `[lints] E178 = "warn"` in turf.toml).

@@ -368,4 +368,35 @@ public:
   }
 };
 
+// AN-7 (TDP-2-007, issue #334): dead code (analysis/UnusedDecls.cpp).
+class UnusedPrivateFunctionWarning : public TurfWarning {
+public:
+  UnusedPrivateFunctionWarning(SourceLocation Loc, const std::string &Name)
+      : TurfWarning(Loc, "Nothing calls or names the function `" + Name + "`.",
+                    "Remove `" + Name + "`, or call it where it was meant to be "
+                    "used. Mark it `pub` if another module is meant to call it.") {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+  }
+};
+
+class UnusedImportWarning : public TurfWarning {
+public:
+  UnusedImportWarning(SourceLocation Loc, const std::string &Module)
+      : TurfWarning(Loc, "Nothing in this file uses the import of `" + Module + "`.",
+                    "Remove the `import` line.") {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+  }
+};
+
+class UnusedPubInBinaryWarning : public TurfWarning {
+public:
+  UnusedPubInBinaryWarning(SourceLocation Loc, const std::string &Name)
+      : TurfWarning(Loc, "Nothing calls the `pub` function `" + Name +
+                             "`, and no other module can: this file is the program's root.",
+                    "Remove `" + Name + "`, or call it from `main`. `pub` has no "
+                    "effect in a program's root file.") {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+  }
+};
+
 #endif

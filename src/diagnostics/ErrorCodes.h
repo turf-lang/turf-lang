@@ -532,6 +532,11 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // come from the context (TypeCheckerCall.cpp). Starts at `allow`; an
     // error in 3.0, which `turf migrate 3.0` writes the arguments in for.
     {"E177", "TypeArgsFromContextWarning", "Type arguments taken from the context", SLM::ErrorCategory::TYPE_MISMATCH, false, 3, true},
+    // AN-7 (issue #334): dead code, analysis/UnusedDecls.cpp. Each starts at
+    // `allow` while its false-positive record grows (the 5.4 ladder).
+    {"E178", "UnusedPrivateFunctionWarning", "Unused private function", SLM::ErrorCategory::DECLARATION, false, 3, true},
+    {"E179", "UnusedImportWarning", "Unused import", SLM::ErrorCategory::DECLARATION, false, 3, true},
+    {"E180", "UnusedPubInBinaryWarning", "Unused `pub` function in a program's root file", SLM::ErrorCategory::DECLARATION, false, 3, true},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

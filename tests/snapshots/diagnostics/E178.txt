@@ -1,0 +1,22 @@
+tests/49_annotations/deprecated_warns_on_call.tr (2 warnings)
+
+── warning at line 13, col 4 [E178 · unused private function]
+
+  Nothing calls or names the function `add`.
+
+  Hint: Remove `add`, or call it where it was meant to be used. Mark it `pub` if another module is meant to call it.
+
+  13 │ fn add(a: int, b: int): int {
+     │    ^~~ Here!
+
+  Run `turf --explain E178` for more details.
+
+── warning at line 18, col 19 [E172 · use of a deprecated item]
+
+  Warning: 'add_old' is deprecated: use 'add' instead
+
+  18 │     return add_old(1, 2) - 3;
+     │                   ^ Here!
+
+  Run `turf --explain E172` for more details.
+

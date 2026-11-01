@@ -471,6 +471,7 @@ add_library(turfcore STATIC
   src/sema/Types.cpp
   src/sema/TypeWalk.cpp
   src/analysis/ValueRange.cpp
+  src/analysis/UnusedDecls.cpp
 )
 
 # `include` carries the public API (turf/Analysis.h); `src` lets every

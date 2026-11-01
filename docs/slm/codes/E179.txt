@@ -1,0 +1,22 @@
+TURF E179 -- UNUSED IMPORT (WARNING):
+
+CAUSE:
+  An `import` whose module nothing in the file uses. This is a WARNING (it
+  starts at `allow`); compilation succeeds.
+
+INCORRECT (compiles, but warns at `warn`):
+    import list;
+
+    fn main(): int {
+        return 0;
+    }
+
+CORRECT (the import removed):
+    fn main(): int {
+        return 0;
+    }
+
+FIX:
+  Remove the `import` line.
+
+RELATED: E178 (unused private function).

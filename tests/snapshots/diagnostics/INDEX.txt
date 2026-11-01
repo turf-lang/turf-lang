@@ -172,3 +172,6 @@ E174 tests/01_syntax/decimal_literal_receiver_allowed_by_default.tr --warn E174
 E175 tests/07_functions_modules/type_identity_method_on_imported_struct.tr --warn E175
 E176 tests/07_functions_modules/export_immut_warns.tr --warn E176
 E177 tests/07_functions_modules/type_identity_operators_errors_machines.tr --warn E177
+E178 tests/49_annotations/deprecated_warns_on_call.tr --warn E178
+E179 tests/57_test_functions/04_error_type_named_error.tr --warn E179
+E180 tests/14_cfg_analysis/unused_declarations_warn.tr --warn E180

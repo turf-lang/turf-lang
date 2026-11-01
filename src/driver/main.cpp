@@ -26,6 +26,7 @@
 #include "diagnostics/DiagnosticsJson.h" // DX-2: --diagnostics=json
 #include "tooling/Formatter.h"
 #include "diagnostics/LintLevels.h"
+#include "analysis/UnusedDecls.h"
 #include "frontend/Lexer.h"
 #include "analysis/Lint.h"
 #include "tooling/MigratePub.h"
@@ -2591,6 +2592,16 @@ static int runCompilerMain(int argc, char **argv) {
       TCClean = false;
     }
     g_recoverActive = false;
+
+    // AN-7 (UnusedDecls.h): dead code, once the whole program has checked.
+    if (TCClean && !DiagnosticEngine::hasErrors()) {
+      std::vector<const ExprAST *> Decls;
+      for (const auto &AST : FnASTs)
+        Decls.push_back(AST.get());
+      for (const auto &AST : TopLevelASTs)
+        Decls.push_back(AST.get());
+      UnusedDecls::report(Decls, !opts.CheckAsModule);
+    }
 
     if (opts.RunTypeChecker) {
       if (TCClean)

@@ -21,6 +21,7 @@
 #include "analysis/CFG.h"
 #include "frontend/Lexer.h"
 #include "analysis/Lint.h"
+#include "analysis/UnusedDecls.h"
 #include "tooling/PackageGraph.h"
 #include "frontend/Parser.h"
 #include "resolve/Resolver.h"
@@ -851,6 +852,18 @@ AnalysisResult analyze(const std::vector<SourceBuffer> &Buffers,
       } catch (const RecoverUnwind &) {
       }
       g_recoverActive = false;
+    }
+    // AN-7: dead code, over a program the TypeChecker finished (its uses are
+    // what the passes recorded). A file with a `main` is a program's root.
+    if (HoistingClean && !DiagnosticEngine::hasErrors()) {
+      std::vector<const ExprAST *> Decls;
+      bool HasMain = false;
+      for (const auto &AST : I->Program) {
+        Decls.push_back(AST.get());
+        if (const auto *F = dynamic_cast<const FuncDefExprAST *>(AST.get()))
+          HasMain |= F->getName() == "main";
+      }
+      UnusedDecls::report(Decls, HasMain);
     }
   }
 
