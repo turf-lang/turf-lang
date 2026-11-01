@@ -1,0 +1,45 @@
+TURF E186 -- LOOP WHOSE EVERY EXIT FOLLOWS A CALL THAT ENDS THE PROGRAM (WARNING):
+
+CAUSE:
+  Every way out of the loop that can be taken comes after a call to
+  `sys::panic`, `sys::abort` or `sys::exit`, which never return, so the loop
+  never finishes and the code after it never runs. This is a WARNING (it
+  starts at `allow`).
+
+INCORRECT (compiles, but warns at `warn`):
+    import sys;
+
+    fn find(limit: int): int {
+        mut j: int = 0;
+        while true {
+            j += 1;
+            if j > limit {
+                sys::panic("too far");
+                break;
+            }
+        }
+        return j;
+    }
+
+    fn main(): int {
+        return 0;
+    }
+
+CORRECT (the loop leaves before ending the program):
+    fn find(limit: int): int {
+        mut j: int = 0;
+        while j <= limit {
+            j += 1;
+        }
+        return j;
+    }
+
+    fn main(): int {
+        return find(2) - 3;
+    }
+
+FIX:
+  Move the way out before the call that ends the program, or, if ending the
+  program is intended, drop the dead `break` after it.
+
+RELATED: E184, E185, E157.

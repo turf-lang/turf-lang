@@ -487,4 +487,44 @@ public:
   }
 };
 
+// AN-2 (TDP-2-007, issue #350): loops that never end. Warnings only, in
+// every version: termination is undecidable.
+class LoopTestNeverChangesWarning : public TurfWarning {
+public:
+  LoopTestNeverChangesWarning(SourceLocation Loc, const std::string &Vars)
+      : TurfWarning(Loc,
+                    "This loop's test reads " + Vars + ", which nothing in the "
+                    "loop changes, and the test is its only way out: once the "
+                    "loop starts, it never ends.",
+                    "Change " + Vars + " inside the loop, or leave it with "
+                    "`break` or `return`.") {
+    Category_ = SLM::ErrorCategory::CONTROL_FLOW;
+  }
+};
+
+class LoopExitsNeverTakenWarning : public TurfWarning {
+public:
+  explicit LoopExitsNeverTakenWarning(SourceLocation Loc)
+      : TurfWarning(Loc,
+                    "This loop never ends: every way out of it is guarded by a "
+                    "test that the values reaching it make false.",
+                    "Check the loop's test and each `break` condition against "
+                    "the values the loop computes.") {
+    Category_ = SLM::ErrorCategory::CONTROL_FLOW;
+  }
+};
+
+class LoopExitsBehindNoReturnWarning : public TurfWarning {
+public:
+  explicit LoopExitsBehindNoReturnWarning(SourceLocation Loc)
+      : TurfWarning(Loc,
+                    "This loop never finishes: every way out of it comes after a "
+                    "call that ends the program (`panic`, `abort` or `exit`).",
+                    "If the loop is meant to stop, let it leave before that call; "
+                    "if ending the program is the way out, write the loop as "
+                    "`while true`.") {
+    Category_ = SLM::ErrorCategory::CONTROL_FLOW;
+  }
+};
+
 #endif

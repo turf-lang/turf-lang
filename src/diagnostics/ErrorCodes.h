@@ -546,6 +546,11 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // AN-3 (b) (issue #333): a recursive base case the value-range analysis
     // proves unreachable (ValueRange.cpp). Starts at `allow`; a B-1 candidate.
     {"E183", "UnreachableBaseCaseWarning", "Recursive base case that is never reached", SLM::ErrorCategory::CONTROL_FLOW, false, 3, true},
+    // AN-2 (issue #350): loops that never end (ValueRange.cpp). Warnings in
+    // every version (termination is undecidable); each starts at `allow`.
+    {"E184", "LoopTestNeverChangesWarning", "Loop whose test never changes", SLM::ErrorCategory::CONTROL_FLOW, false, 3, true},
+    {"E185", "LoopExitsNeverTakenWarning", "Loop whose every exit is never taken", SLM::ErrorCategory::CONTROL_FLOW, false, 3, true},
+    {"E186", "LoopExitsBehindNoReturnWarning", "Loop whose every exit follows a call that ends the program", SLM::ErrorCategory::CONTROL_FLOW, false, 3, true},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

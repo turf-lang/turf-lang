@@ -1,0 +1,23 @@
+Every way out of a loop is a test that is never true
+
+The loop has ways out -- its own test, a `break` or `return` behind an `if` -- but the compiler proves from the values the loop computes that none of them is ever taken:
+
+    fn spin(): int {
+        mut i: int = 0;
+        while i >= 0 {           // WARNING (E185 at `warn`): i is always 0..9
+            i = (i + 1) % 10;
+        }
+        return i;
+    }
+
+`(i + 1) % 10` is never negative, so `i >= 0` is always true. Fix the test, or the computation it is meant to watch:
+
+    fn spin(): int {
+        mut i: int = 0;
+        while i < 9 {
+            i = (i + 1) % 10;
+        }
+        return i;
+    }
+
+The proof uses constants, a range `for`'s bounds, tests earlier on the path and what `%`, `&` and `>>` leave of a value. A test the compiler cannot reason about is never reported. This warning starts at `allow` in 2.3: turn it on with `turf build --warn E185` (or `[lints] E185 = "warn"` in turf.toml).

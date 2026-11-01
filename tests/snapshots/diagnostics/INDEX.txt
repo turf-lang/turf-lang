@@ -178,3 +178,6 @@ E180 tests/14_cfg_analysis/unused_declarations_warn.tr --warn E180
 E181 tests/25_errors/24_try_passes_error_unchanged.tr --warn E181
 E182 tests/14_cfg_analysis/mutual_recursion_warns.tr --warn E182
 E183 tests/14_cfg_analysis/unreachable_base_case_warns.tr --warn E183
+E184 tests/14_cfg_analysis/endless_loops_warn.tr --warn E184
+E185 tests/14_cfg_analysis/endless_loops_warn.tr --warn E185
+E186 tests/14_cfg_analysis/endless_loops_warn.tr --warn E186

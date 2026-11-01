@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <map>
 #include <set>
 #include <functional>
 #include <optional>
@@ -174,6 +175,12 @@ public:
 
   void scanStatement(ExprAST *Stmt) {
     Root = Stmt;
+    // A bare variable as a whole statement is a test (`while go`, `if ok`):
+    // a read.
+    if (dynamic_cast<const VariableExprAST *>(Stmt)) {
+      read(Stmt);
+      return;
+    }
     visitChild(Stmt);
   }
 
@@ -673,6 +680,52 @@ static std::optional<RangeMap> edgeState(const TurfBasicBlock *P, const TurfBasi
   return M;
 }
 
+namespace {
+// A depth-first walk from the entry: each block's reverse-postorder number
+// (N for a block the walk never reaches), the loop heads (targets of an edge
+// back to a block still on the walk's stack) and those back edges. Every
+// cycle passes through a loop head.
+struct DepthFirst {
+  std::vector<size_t> Rpo;
+  std::vector<bool> LoopHead;
+  std::vector<std::pair<size_t, size_t>> BackEdges; // (from, head)
+};
+} // namespace
+
+static DepthFirst depthFirst(const CFG &Cfg,
+                             const std::unordered_map<const TurfBasicBlock *, size_t> &Index) {
+  const auto &Blocks = Cfg.getBlocks();
+  const size_t N = Blocks.size();
+  DepthFirst DF;
+  DF.Rpo.assign(N, N);
+  DF.LoopHead.assign(N, false);
+  if (!Cfg.getEntryBlock()) return DF;
+  std::vector<int> State(N, 0); // 0 new, 1 on the stack, 2 done
+  const size_t Entry = Index.at(Cfg.getEntryBlock());
+  std::vector<std::pair<size_t, size_t>> Stack{{Entry, 0}};
+  State[Entry] = 1;
+  size_t Next = N;
+  while (!Stack.empty()) {
+    auto &[B, I] = Stack.back();
+    const auto &Succs = Blocks[B]->getSuccessors();
+    if (I < Succs.size()) {
+      size_t S = Index.at(Succs[I++]);
+      if (State[S] == 1) {
+        DF.LoopHead[S] = true;
+        DF.BackEdges.push_back({B, S});
+      } else if (State[S] == 0) {
+        State[S] = 1;
+        Stack.push_back({S, 0});
+      }
+      continue;
+    }
+    State[B] = 2;
+    DF.Rpo[B] = --Next;
+    Stack.pop_back();
+  }
+  return DF;
+}
+
 static RangeSolution solveRanges(const CFG &Cfg, const TrackedVars &TV) {
   const auto &Blocks = Cfg.getBlocks();
   const size_t N = Blocks.size();
@@ -689,36 +742,9 @@ static RangeSolution solveRanges(const CFG &Cfg, const TrackedVars &TV) {
 
   const TurfBasicBlock *Entry = Cfg.getEntryBlock();
   if (!Entry) return Sol;
-  // A depth-first walk from the entry gives each block its reverse-postorder
-  // number (the worklist takes the lowest first, so a loop settles before
-  // the code after it) and finds the loop heads: the targets of edges back
-  // to a block still on the walk's stack. Every cycle passes through one,
-  // so widening there, and only there, ends the solve without widening a
-  // value a test has just narrowed.
-  std::vector<size_t> Rpo(N, N);
-  std::vector<bool> LoopHead(N, false);
-  {
-    std::vector<int> State(N, 0); // 0 new, 1 on the stack, 2 done
-    std::vector<std::pair<size_t, size_t>> Stack{{Index[Entry], 0}};
-    State[Index[Entry]] = 1;
-    size_t Next = N;
-    while (!Stack.empty()) {
-      auto &[B, I] = Stack.back();
-      const auto &Succs = Blocks[B]->getSuccessors();
-      if (I < Succs.size()) {
-        size_t S = Index[Succs[I++]];
-        if (State[S] == 1) LoopHead[S] = true;
-        else if (State[S] == 0) {
-          State[S] = 1;
-          Stack.push_back({S, 0});
-        }
-        continue;
-      }
-      State[B] = 2;
-      Rpo[B] = --Next;
-      Stack.pop_back();
-    }
-  }
+  const DepthFirst DF = depthFirst(Cfg, Index);
+  const std::vector<size_t> &Rpo = DF.Rpo;
+  const std::vector<bool> &LoopHead = DF.LoopHead;
   auto ByRpo = [&](size_t A, size_t B) { return Rpo[A] != Rpo[B] ? Rpo[A] < Rpo[B] : A < B; };
   std::set<size_t, decltype(ByRpo)> Work(ByRpo);
   Work.insert(Index[Entry]);
@@ -919,6 +945,191 @@ static void reportConstantOutOfBounds(const ExprAST *N, const ConstMap &cur,
   }
 }
 
+// ─── AN-2: loops that never end (E184, E185, E186) ─────────────────────────
+// TDP-2-007, issue #350. Warnings only, forever: termination is undecidable,
+// so each case reports only what the CFG and the ranges prove, and a loop
+// with a way out the CFG does not model (a `?`, a call that ends the
+// program) is left alone by the first two.
+
+namespace {
+// What a loop's statements contain that the CFG's edges do not show.
+class LoopContents : public ASTChildWalker {
+public:
+  bool HasTry = false;       // `?`: an early return the CFG does not draw
+  bool HasNoReturn = false;  // sys::panic / sys::abort / sys::exit
+
+  static bool isNoReturn(const FuncCallExprAST &Call) {
+    const ResolverFunctionSymbol *F = Call.getResolvedCallTarget();
+    return F && F->SourceModule == "sys" &&
+           (F->BaseName == "panic" || F->BaseName == "abort" || F->BaseName == "exit");
+  }
+  void visitTry(TryExprAST &Node) override {
+    HasTry = true;
+    ASTChildWalker::visitTry(Node);
+  }
+  void visitFuncCall(FuncCallExprAST &Node) override {
+    HasNoReturn |= isNoReturn(Node);
+    ASTChildWalker::visitFuncCall(Node);
+  }
+  void scan(const ExprAST *E) { visitChild(E); }
+};
+
+// The variables a loop test reads, when it is built only of variables,
+// literals and operators (anything else may change without a write here).
+bool testVariables(const ExprAST *E, std::unordered_set<const VariableSymbol *> &Out) {
+  if (!E) return false;
+  if (dynamic_cast<const NumberExprAST *>(E) || dynamic_cast<const BoolExprAST *>(E))
+    return true;
+  if (auto *V = dynamic_cast<const VariableExprAST *>(E)) {
+    if (!V->getResolvedSymbol()) return false;
+    Out.insert(V->getResolvedSymbol());
+    return true;
+  }
+  if (auto *B = dynamic_cast<const BinaryExprAST *>(E))
+    return testVariables(B->getLHS(), Out) && testVariables(B->getRHS(), Out);
+  if (auto *U = dynamic_cast<const UnaryExprAST *>(E))
+    return testVariables(U->getOperand(), Out);
+  if (auto *C = dynamic_cast<const CastExprAST *>(E))
+    return testVariables(C->getOperand(), Out);
+  return false;
+}
+
+// The variable a whole-statement write assigns (the only writes a Trackable
+// or Ranged variable has, computeTrackedVars()).
+const VariableSymbol *writtenBy(const ExprAST *Stmt) {
+  const ExprAST *Target = nullptr;
+  if (auto *A = dynamic_cast<const AssignmentExprAST *>(Stmt)) Target = A->getLHS();
+  else if (auto *CA = dynamic_cast<const CompoundAssignmentExprAST *>(Stmt)) Target = CA->getLHS();
+  else if (auto *P = dynamic_cast<const PostfixExprAST *>(Stmt)) Target = P->getOperand();
+  else if (auto *Vd = dynamic_cast<const VarDeclExprAST *>(Stmt)) return Vd->getResolvedSymbol();
+  auto *V = dynamic_cast<const VariableExprAST *>(Target);
+  return V ? V->getResolvedSymbol() : nullptr;
+}
+
+std::string joinNames(const std::unordered_set<const VariableSymbol *> &Vars) {
+  std::vector<std::string> Names;
+  for (const VariableSymbol *S : Vars) Names.push_back("`" + S->Name + "`");
+  std::sort(Names.begin(), Names.end());
+  std::string Out;
+  for (size_t I = 0; I < Names.size(); ++I)
+    Out += (I == 0 ? "" : I + 1 == Names.size() ? " and " : ", ") + Names[I];
+  return Out;
+}
+} // namespace
+
+static void reportEndlessLoops(const CFG &Cfg, const RangeSolution &RS, const TrackedVars &TV) {
+  const bool Unchanged = LintLevels::levelOf("E184") != LintLevels::Level::Allow;
+  const bool DeadExits = LintLevels::levelOf("E185") != LintLevels::Level::Allow;
+  const bool NoReturnExits = LintLevels::levelOf("E186") != LintLevels::Level::Allow;
+  if (!Unchanged && !DeadExits && !NoReturnExits) return;
+  const auto &Blocks = Cfg.getBlocks();
+  const size_t N = Blocks.size();
+  std::unordered_map<const TurfBasicBlock *, size_t> Index;
+  for (size_t I = 0; I < N; ++I) Index[Blocks[I].get()] = I;
+  const DepthFirst DF = depthFirst(Cfg, Index);
+
+  // Natural loops, one per head: the head and every block that reaches one
+  // of its back edges without passing through it.
+  std::map<size_t, std::set<size_t>> Loops;
+  for (const auto &[From, Head] : DF.BackEdges) {
+    std::set<size_t> &L = Loops[Head];
+    L.insert(Head);
+    std::vector<size_t> Work;
+    if (L.insert(From).second) Work.push_back(From);
+    while (!Work.empty()) {
+      size_t B = Work.back();
+      Work.pop_back();
+      for (const TurfBasicBlock *P : Blocks[B]->getPredecessors())
+        if (size_t PI = Index.at(P); L.insert(PI).second) Work.push_back(PI);
+    }
+  }
+
+  for (const auto &[Head, L] : Loops) {
+    const TurfBasicBlock *H = Blocks[Head].get();
+    if (!RS.Reached[Head]) continue;
+    LoopContents Contents;
+    for (size_t B : L) {
+      for (const ExprAST *Stmt : Blocks[B]->getStatements()) Contents.scan(Stmt);
+      if (Blocks[B]->ForStep) Contents.scan(Blocks[B]->ForStep->getStep());
+    }
+    if (Contents.HasTry) continue;
+
+    std::vector<CFG::Edge> Exits;
+    for (size_t B : L)
+      for (const TurfBasicBlock *S : Blocks[B]->getSuccessors())
+        if (!L.count(Index.at(S))) Exits.push_back({Blocks[B].get(), S});
+    if (Exits.empty()) continue; // no way out at all: E157 / hasUnbreakableLoop()
+
+    // The loop's own test: a `while` or `do while` block whose false edge
+    // leaves the loop and whose true edge stays in it.
+    const TurfBasicBlock *Test = nullptr;
+    for (size_t B : L) {
+      const TurfBasicBlock *BB = Blocks[B].get();
+      if (BB->BranchCond && BB->TrueSucc && BB->FalseSucc && L.count(Index.at(BB->TrueSucc)) &&
+          !L.count(Index.at(BB->FalseSucc)) && (BB == H || BB->getSuccessors().front() == H))
+        Test = BB;
+    }
+    SourceLocation Loc = H->ForTest ? H->ForTest->getLoc()
+                       : Test ? Test->getTerminatorLoc() : H->getTerminatorLoc();
+    if (!Loc.Line || IsLibStdWarningLocation(Loc.Filename)) continue;
+
+    auto IsDead = [&](const CFG::Edge &E) {
+      return !RS.Reached[Index.at(E.first)] || RS.DeadEdges.count(E);
+    };
+
+    // E184: the test reads only variables nothing in the loop writes, and
+    // its false edge is the only way out.
+    if (Test && !Contents.HasNoReturn && Exits.size() == 1 && Exits[0].first == Test &&
+        !RS.DeadEdges.count({Test, Test->TrueSucc})) {
+      std::unordered_set<const VariableSymbol *> Vars;
+      bool Simple = testVariables(Test->BranchCond, Vars) && !Vars.empty();
+      for (const VariableSymbol *V : Vars)
+        Simple = Simple && (TV.Trackable.count(V) || TV.Ranged.count(V));
+      if (Simple) {
+        bool Written = false;
+        for (size_t B : L) {
+          for (const ExprAST *Stmt : Blocks[B]->getStatements())
+            Written |= Vars.count(writtenBy(Stmt)) > 0;
+          if (Blocks[B]->ForStep)
+            Written |= Vars.count(writtenBy(Blocks[B]->ForStep->getStep())) > 0;
+        }
+        if (!Written) {
+          if (Unchanged) LoopTestNeverChangesWarning(Loc, joinNames(Vars)).emit();
+          continue;
+        }
+      }
+    }
+
+    // E185: every way out is an edge the ranges prove is never taken.
+    if (!Contents.HasNoReturn &&
+        std::all_of(Exits.begin(), Exits.end(), IsDead)) {
+      if (DeadExits) LoopExitsNeverTakenWarning(Loc).emit();
+      continue;
+    }
+
+    // E186: every way out that can be taken passes a call that ends the
+    // program: in the block it leaves from, or in the `break`/`return`
+    // block it leads to (which a natural loop does not contain).
+    auto EndsProgram = [](const TurfBasicBlock *BB) {
+      LoopContents Block;
+      for (const ExprAST *Stmt : BB->getStatements()) Block.scan(Stmt);
+      return Block.HasNoReturn;
+    };
+    bool AnyLive = false, AllBehindNoReturn = true;
+    for (const CFG::Edge &E : Exits) {
+      if (IsDead(E)) continue;
+      AnyLive = true;
+      const TurfBasicBlock *To = E.second;
+      bool Leaves = (To->getTerminator() == TerminatorKind::Break ||
+                     To->getTerminator() == TerminatorKind::Return) &&
+                    To->getPredecessors().size() == 1;
+      AllBehindNoReturn = AllBehindNoReturn && (EndsProgram(E.first) || (Leaves && EndsProgram(To)));
+    }
+    if (AnyLive && AllBehindNoReturn && NoReturnExits)
+      LoopExitsBehindNoReturnWarning(Loc).emit();
+  }
+}
+
 // AN-3 (b) (E183): a recursive function whose base case the interval
 // dataflow proves is never reached, so every path that runs calls the
 // function again. E010 already covers a function with no base case at all.
@@ -964,6 +1175,7 @@ void ValueRangePass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> & /*InitialA
     }
   }
   reportUnreachableBaseCase(Cfg, RS);
+  reportEndlessLoops(Cfg, RS, TV);
 }
 
 // ─── OPT-002: check-elision pre-pass ───────────────────────────────────────

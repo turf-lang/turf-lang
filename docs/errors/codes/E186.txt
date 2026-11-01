@@ -1,0 +1,27 @@
+Every way out of a loop comes after a call that ends the program
+
+Each way out of this loop that can be taken passes a call that never returns -- `sys::panic`, `sys::abort` or `sys::exit` -- so the code after the loop never runs:
+
+    fn find(limit: int): int {
+        mut j: int = 0;
+        while true {             // WARNING (E186 at `warn`)
+            j += 1;
+            if j > limit {
+                sys::panic("too far");
+                break;           // never reached
+            }
+        }
+        return j;
+    }
+
+If the loop is meant to stop, let it leave before the call:
+
+    fn find(limit: int): int {
+        mut j: int = 0;
+        while j <= limit {
+            j += 1;
+        }
+        return j;
+    }
+
+If ending the program is the intended way out, the `break` after the call is dead code: remove it and write the loop as `while true`. This warning starts at `allow` in 2.3: turn it on with `turf build --warn E186` (or `[lints] E186 = "warn"` in turf.toml).
