@@ -537,6 +537,9 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     {"E178", "UnusedPrivateFunctionWarning", "Unused private function", SLM::ErrorCategory::DECLARATION, false, 3, true},
     {"E179", "UnusedImportWarning", "Unused import", SLM::ErrorCategory::DECLARATION, false, 3, true},
     {"E180", "UnusedPubInBinaryWarning", "Unused `pub` function in a program's root file", SLM::ErrorCategory::DECLARATION, false, 3, true},
+    // AN-6 (issue #353): an `int` converted to `double` not proven within
+    // +-2^53 (ValueRange.cpp). Opt-in, a warning in every version.
+    {"E181", "IntToDoublePrecisionWarning", "`int` to `double` that may lose precision", SLM::ErrorCategory::TYPE_MISMATCH, false, 3, true},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

@@ -28,6 +28,7 @@
 #include "sema/Monomorphize.h" // TYPE-002 (S11b): report-only instantiation collector
 #include "frontend/Parser.h"       // IsPreludeModuleName — UFCS home-module tie-break
 #include "sema/TypeWalk.h" // SMP-002: shared unify()/collectParamOrder() walkers
+#include "analysis/AnalysisFacts.h"
 
 #include <algorithm>
 #include <regex>
@@ -416,6 +417,15 @@ std::string spelledType(const TurfType *T) {
 }
 } // namespace
 
+void TypeChecker::noteIntToDouble(const ExprAST *E, const TurfType *To) {
+  AnalysisFacts *F = Facts();
+  if (!F || !E || !To || !To->isDouble())
+    return;
+  const TurfTypePtr From = getType(E);
+  if (From && From->isInt() && !From->isDouble())
+    F->IntToDouble.insert(E->getNodeID());
+}
+
 void TypeChecker::warnTypeArgsFromContext(const FuncCallExprAST &FC) {
   const auto *SC = dynamic_cast<const ScopeAccessExprAST *>(FC.getCallee());
   const auto *GT = dynamic_cast<const GenericType *>(FC.ConstructedType.get());
@@ -456,6 +466,7 @@ void TypeChecker::warnTypeArgsFromContext(const FuncCallExprAST &FC) {
 }
 
 void TypeChecker::noteConstructed(const ExprAST *E, const TurfTypePtr &Expected) {
+  noteIntToDouble(E, Expected.get());
   noteConstructedType(E, Expected);
   const auto *FC = dynamic_cast<const FuncCallExprAST *>(E);
   if (!FC || !FC->ConstructedType)

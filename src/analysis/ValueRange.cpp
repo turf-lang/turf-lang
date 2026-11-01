@@ -1,4 +1,6 @@
 #include "analysis/ValueRange.h"
+#include "analysis/AnalysisFacts.h"
+#include "diagnostics/LintLevels.h"
 #include "frontend/AST.h"
 #include "frontend/ASTChildWalker.h"
 #include "diagnostics/Errors.h"
@@ -6,6 +8,7 @@
 #include "llvm/ADT/APInt.h"
 
 #include <climits>
+#include <cmath>
 #include <functional>
 #include <optional>
 #include <queue>
@@ -310,11 +313,57 @@ static std::vector<ConstMap> solveConstants(const CFG &Cfg, const TrackedVars &T
   return IN;
 }
 
+// Where an expression starts, for a diagnostic about the whole expression.
+static SourceLocation locationOf(const ExprAST *N) {
+  if (auto *V = dynamic_cast<const VariableExprAST *>(N)) return V->getLoc();
+  if (auto *B = dynamic_cast<const BinaryExprAST *>(N)) return locationOf(B->getLHS());
+  if (auto *U = dynamic_cast<const UnaryExprAST *>(N)) return U->getLoc();
+  if (auto *C = dynamic_cast<const FuncCallExprAST *>(N)) return C->getLoc();
+  if (auto *M = dynamic_cast<const MethodCallExprAST *>(N)) return M->getLoc();
+  if (auto *F = dynamic_cast<const FieldAccessExprAST *>(N)) return F->getLoc();
+  if (auto *A = dynamic_cast<const ArrayAccessExprAST *>(N)) return A->getLoc();
+  if (auto *Num = dynamic_cast<const NumberExprAST *>(N)) return Num->getLoc();
+  if (auto *P = dynamic_cast<const PostfixExprAST *>(N)) return locationOf(P->getOperand());
+  if (auto *C = dynamic_cast<const CastExprAST *>(N)) return locationOf(C->getOperand());
+  if (auto *S = dynamic_cast<const ScopeAccessExprAST *>(N)) return S->getLoc();
+  return {};
+}
+
+// An `int` whose value is within +-2^53 for a reason the constant dataflow
+// does not track: an enum's `COUNT` (its number of variants), or a constant
+// `double` literal converted to `int`.
+static bool boundedByConstruction(const ExprAST *N) {
+  if (auto *S = dynamic_cast<const ScopeAccessExprAST *>(N))
+    return S->getRightName() == "COUNT";
+  if (auto *C = dynamic_cast<const CastExprAST *>(N))
+    if (auto *Num = dynamic_cast<const NumberExprAST *>(C->getOperand()))
+      return !Num->isInteger() && std::fabs(Num->getDoubleVal()) <= 9007199254740992.0;
+  return false;
+}
+
+// AN-6 (E181): an `int` converted to `double` (AnalysisFacts::IntToDouble)
+// that this dataflow cannot prove within +-2^53, where every int converts
+// exactly. Opt-in: nothing is done unless E181 is turned on.
+static void reportPrecisionLoss(const ExprAST *N, const ConstMap &cur) {
+  AnalysisFacts *F = Facts();
+  if (!F || F->IntToDouble.empty() || !F->IntToDouble.count(N->getNodeID()))
+    return;
+  if (LintLevels::levelOf("E181") == LintLevels::Level::Allow)
+    return;
+  constexpr long long Exact = 1LL << 53;
+  if (auto V = evalConstExpr(N, cur); V && *V >= -Exact && *V <= Exact)
+    return;
+  if (boundedByConstruction(N))
+    return;
+  IntToDoublePrecisionWarning(locationOf(N)).emit();
+}
+
 // A compile-time out-of-range constant index (E001), reported once the
 // dataflow has converged, so every report comes from a value proven on every
 // path reaching the access.
 static void reportConstantOutOfBounds(const ExprAST *N, const ConstMap &cur) {
   if (!N) return;
+  reportPrecisionLoss(N, cur);
   if (auto AA = dynamic_cast<const ArrayAccessExprAST *>(N)) {
     auto idxVal = evalConstExpr(AA->getIndex(), cur);
     if (idxVal.has_value()) {

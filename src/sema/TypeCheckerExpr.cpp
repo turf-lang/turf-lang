@@ -1370,6 +1370,7 @@ void TypeChecker::visitCast(CastExprAST &Node) {
   // first, the dynamic_cast below could never match, silently defeating
   // this whole check.
   TurfTypePtr DestTy = Node.getDestTypePtr();
+  noteIntToDouble(Node.getOperand(), DestTy.get()); // AN-6 (E181)
   // E140 (issue #260): nothing converts TO a slice -- a `T[N]` becomes one
   // only by being passed to a `T[]` parameter.
   if (checkUnsizedArrayPlacement(

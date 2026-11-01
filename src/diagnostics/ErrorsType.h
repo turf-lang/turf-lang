@@ -333,4 +333,19 @@ public:
   }
 };
 
+// AN-6 (TDP-2-007, F-22, issue #353): an `int` past 2^53 has no exact
+// `double`, so converting one may lose its last digits. Opt-in (starts at
+// `allow` and stays a warning: Overhaul 10.5).
+class IntToDoublePrecisionWarning : public TurfWarning {
+public:
+  explicit IntToDoublePrecisionWarning(SourceLocation Loc)
+      : TurfWarning(Loc,
+                    "This `int` becomes a `double`, which holds every `int` "
+                    "only up to 2^53; a larger value loses its last digits.",
+                    "Keep the value an `int`, or make sure it stays within "
+                    "+-9007199254740992 (2^53) before converting it.") {
+    Category_ = SLM::ErrorCategory::TYPE_MISMATCH;
+  }
+};
+
 #endif

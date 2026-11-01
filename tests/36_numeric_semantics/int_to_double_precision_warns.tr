@@ -1,0 +1,47 @@
+// AN-6 (F-22), issue #353: converting an `int` the compiler cannot prove
+// within +-2^53 to `double` warns once E181 is turned on (it is opt-in):
+// explicitly, by an initializer, an argument and a return. A constant within
+// range, a literal, an enum's COUNT and a converted `double` literal do not
+// warn.
+// LINT: --warn E181
+// EXPECT-DIAG: [E181
+// EXPECT-DIAG: mut d: double = n to double;
+// EXPECT-DIAG: mut e: double = n;
+// EXPECT-DIAG: return n;
+// EXPECT-NO-DIAG: mut exact: double = small to double;
+// EXPECT-NO-DIAG: mut lit: double = 5;
+// EXPECT-NO-DIAG: Color::COUNT to double
+// EXPECT-NO-DIAG: (9.9 to int) to double
+import test;
+
+enum Color {
+    Red,
+    Green,
+}
+
+fn half(x: double): double {
+    return x / 2.0;
+}
+
+fn widen(n: int): double {
+    return n;
+}
+
+fn convert(n: int): double {
+    mut small: int = 1000;
+    mut exact: double = small to double;
+    mut lit: double = 5;
+    mut d: double = n to double;
+    mut e: double = n;
+    immut count: double = Color::COUNT to double;
+    immut nine: double = (9.9 to int) to double;
+    test::assert(count + nine == 11.0, "bounded by construction");
+    test::assert(half(n) >= 0.0, "argument");
+    return exact + lit + d + e;
+}
+
+fn main(): int {
+    test::assert(widen(3) == 3.0, "return");
+    test::assert(convert(1) == 1007.0, "values");
+    return 0;
+}

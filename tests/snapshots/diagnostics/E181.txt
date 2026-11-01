@@ -1,0 +1,13 @@
+tests/25_errors/24_try_passes_error_unchanged.tr (1 warning)
+
+── warning at line 26, col 13 [E181 · `int` to `double` that may lose precision]
+
+  This `int` becomes a `double`, which holds every `int` only up to 2^53; a larger value loses its last digits.
+
+  Hint: Keep the value an `int`, or make sure it stays within +-9007199254740992 (2^53) before converting it.
+
+  26 │     return (n to double) * 2.0;
+     │             ^ Here!
+
+  Run `turf --explain E181` for more details.
+

@@ -22,6 +22,7 @@
 #include "frontend/Lexer.h"
 #include "analysis/Lint.h"
 #include "analysis/UnusedDecls.h"
+#include "analysis/AnalysisFacts.h"
 #include "tooling/PackageGraph.h"
 #include "frontend/Parser.h"
 #include "resolve/Resolver.h"
@@ -157,6 +158,8 @@ public:
 private:
   std::unique_ptr<SymbolTable> Symbols_ = std::make_unique<SymbolTable>();
   SymbolTableScope SymbolsScope_{Symbols_.get()};
+  AnalysisFacts Facts_;
+  AnalysisFactsScope FactsScope_{&Facts_};
 };
 
 // One analysis at a time per process: everything GlobalStateScope saves is

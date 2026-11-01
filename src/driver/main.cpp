@@ -27,6 +27,7 @@
 #include "tooling/Formatter.h"
 #include "diagnostics/LintLevels.h"
 #include "analysis/UnusedDecls.h"
+#include "analysis/AnalysisFacts.h"
 #include "frontend/Lexer.h"
 #include "analysis/Lint.h"
 #include "tooling/MigratePub.h"
@@ -1858,6 +1859,8 @@ static int runCompilerMain(int argc, char **argv) {
   // sandbox analyse with tables of their own.
   auto ProgramSymbols = std::make_unique<SymbolTable>();
   SymbolTableScope ProgramSymbolsScope(ProgramSymbols.get());
+  AnalysisFacts ProgramFacts;
+  AnalysisFactsScope ProgramFactsScope(&ProgramFacts);
 
   // Pre-pass: hoist 'fn' function prototypes so that forward calls work.
   // We perform a second full parse of the file, i.e. only processing
