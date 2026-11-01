@@ -11,6 +11,7 @@ E007 tests/04_control_flow/fail_continue_outside_loop.tr
 E008 tests/10_default_init/fail_mut_bool_before_init.tr
 E009 tests/04_control_flow/fail_missing_return_on_one_path.tr
 E010 tests/14_cfg_analysis/fail_19_infinite_recursion_simple.tr
+E011 tests/07_functions_modules/fail_call_main_directly.tr
 E012 tests/14_cfg_analysis/fail_42_statement_after_return_is_e012.tr
 E014 tests/01_syntax/fail_bad_keyword.tr
 E016 tests/25_errors/fail_recover_as_err_bare_only.tr
@@ -85,6 +86,7 @@ E087 tests/07_functions_modules/visibility/fail_pub_not_a_declaration.tr
 E088 tests/07_functions_modules/visibility/fail_private_method_call.tr
 E089 tests/07_functions_modules/visibility/fail_private_in_public_field.tr
 E090 tests/07_functions_modules/stdlib_shadow/fail_import_local_module_named_like_stdlib.tr
+E091 tests/snapshots/diagnostics/programs/E091/app/src/main.tr --package-graph tests/snapshots/diagnostics/programs/E091/graph.json
 E092 tests/45_pattern_matching/fail_pattern_wrong_struct.tr
 E093 tests/45_pattern_matching/fail_bool_compare_missing_value.tr
 E094 tests/45_pattern_matching/20_unreachable_arm_after_catch_all_warns.tr --warn E094
@@ -166,5 +168,7 @@ E170 tests/49_annotations/conditional_free_is_a_warning.tr --warn E170
 E171 tests/49_annotations/conditional_free_is_a_warning.tr --warn E171
 E172 tests/49_annotations/deprecated_warns_on_call.tr --warn E172
 E173 tests/57_test_functions/fail_test_called_by_a_test.tr
-E011 tests/07_functions_modules/fail_call_main_directly.tr
-E091 tests/snapshots/diagnostics/programs/E091/app/src/main.tr --package-graph tests/snapshots/diagnostics/programs/E091/graph.json
+E174 tests/01_syntax/decimal_literal_receiver_allowed_by_default.tr --warn E174
+E175 tests/07_functions_modules/type_identity_method_on_imported_struct.tr --warn E175
+E176 tests/07_functions_modules/export_immut_warns.tr --warn E176
+E177 tests/07_functions_modules/type_identity_operators_errors_machines.tr --warn E177

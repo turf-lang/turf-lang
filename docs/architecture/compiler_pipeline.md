@@ -93,7 +93,7 @@ before any function body is compiled.
    clones reach Codegen.
 7. *Bodies* (3b), only when `PreTCClean`. Every function body is codegenned,
    which is where the per-function CFG analyses of section 6 run. Structs
-   (already done in 2c), `export immut` constants (no storage) and generic
+   (already done in 2c), `pub immut` constants (no storage) and generic
    templates are skipped.
 
 **Main pass.** The file is reset and parsed again from scratch into a fresh
@@ -361,7 +361,7 @@ Pass 1 looks only at top-level declarations, never inside a function body.
 It registers each type under its identity (the modules document, section 2.6),
 resolves the type spellings written in struct fields and signatures, and
 registers every function signature (`registerFunctionSignature()`), every
-`export immut` constant, and every import. Pass 2 then visits everything
+`pub immut` constant, and every import. Pass 2 then visits everything
 through the `ASTVisitor` interface. With `RecoverPerDeclaration` set (the
 analysis facade does this) each top-level node gets its own recovery point.
 

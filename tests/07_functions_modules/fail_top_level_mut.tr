@@ -1,0 +1,10 @@
+// SY-5, issue #329: a module-level value is a constant. Top-level `mut` is
+// E087 with a Fix writing `immut`.
+// EXPECT-DIAG: E087
+// EXPECT-DIAG: a module-level value is a constant
+// EXPECT-FIX: replace 'mut' with 'immut'
+mut LIMIT: int = 10;
+
+fn main(): int {
+    return LIMIT;
+}

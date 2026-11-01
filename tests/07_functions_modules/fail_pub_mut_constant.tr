@@ -1,0 +1,9 @@
+// SY-5: a module-level value is a constant; `pub mut` is E021 with a hint
+// that names `pub immut`.
+// EXPECT-DIAG: E021
+// EXPECT-DIAG: 'pub mut' is not supported
+pub mut LIMIT: int = 10;
+
+fn main(): int {
+    return 0;
+}

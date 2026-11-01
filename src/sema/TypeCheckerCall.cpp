@@ -30,6 +30,7 @@
 #include "sema/TypeWalk.h" // SMP-002: shared unify()/collectParamOrder() walkers
 
 #include <algorithm>
+#include <regex>
 #include <cassert>
 #include <iostream>
 #include <optional>
@@ -405,11 +406,61 @@ void TypeChecker::noteConstructedArgs(
   }
 }
 
+namespace {
+// A type as the reader writes it: module qualifiers off (`List<Point>`, not
+// `list::List<geo::Point>`). The Fix that writes it in is re-checked, so a
+// name this spells wrongly gives no fix, never a wrong one.
+std::string spelledType(const TurfType *T) {
+  static const std::regex Qualifier("\\b[A-Za-z_][A-Za-z0-9_]*::");
+  return T ? std::regex_replace(T->getName(), Qualifier, "") : "?";
+}
+} // namespace
+
+void TypeChecker::warnTypeArgsFromContext(const FuncCallExprAST &FC) {
+  const auto *SC = dynamic_cast<const ScopeAccessExprAST *>(FC.getCallee());
+  const auto *GT = dynamic_cast<const GenericType *>(FC.ConstructedType.get());
+  if (!SC || SC->LeftType || !GT || GT->getTypeArgs().empty())
+    return;
+  // LG-3: arguments that bind every type parameter take nothing from the
+  // context, whatever the context says.
+  if (SC->ResolvedKind == ScopeAccessKind::ConstructorCall) {
+    const auto *Target = FC.getResolvedCallTarget();
+    if (!Target)
+      return;
+    bool Unbound = false;
+    for (const auto &TP : Target->TypeParams)
+      Unbound |= !FC.GenericSubstitution.count(TP);
+    if (!Unbound)
+      return;
+  }
+  std::string Args = "<";
+  for (size_t I = 0; I < GT->getTypeArgs().size(); ++I)
+    Args += (I ? ", " : "") + spelledType(GT->getTypeArgs()[I].get());
+  Args += ">";
+  const SourceLocation &At = SC->getLeftLoc();
+  const std::string *Line = FixItSourceLine(At);
+  const std::string Tail = "::" + SC->getRightName();
+  if (!Line || At.Col < 1)
+    return;
+  const size_t Start = At.Col - 1;
+  const size_t Sep = Line->find(Tail, Start);
+  if (Sep == std::string::npos)
+    return;
+  const std::string Name = Line->substr(Start, Sep - Start);
+  const std::string Parens =
+      SC->ResolvedKind == ScopeAccessKind::DefaultConstruct ? "()" : "(...)";
+  TypeArgsFromContextWarning W(At, Name + Tail + Parens, Args, Name + Args + Tail + Parens);
+  W.withFixIt(At.Line, static_cast<int>(Sep) + 1, static_cast<int>(Sep) + 1, Args)
+      .withFixDescription("write '" + Name + Args + "'")
+      .emit();
+}
+
 void TypeChecker::noteConstructed(const ExprAST *E, const TurfTypePtr &Expected) {
   noteConstructedType(E, Expected);
   const auto *FC = dynamic_cast<const FuncCallExprAST *>(E);
   if (!FC || !FC->ConstructedType)
     return;
+  warnTypeArgsFromContext(*FC);
   const auto *Target = FC->getResolvedCallTarget();
   const auto *GT = dynamic_cast<const GenericType *>(FC->ConstructedType.get());
   if (!Target || !GT || Target->TypeParams.size() != GT->getTypeArgs().size())

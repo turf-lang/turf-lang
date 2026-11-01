@@ -666,16 +666,16 @@ public:
     switch (W) {
     case Where::NotFollowedByDeclaration:
       What = "'" + Pub + "' has to be followed by a declaration.";
-      Hint_ = "Put `pub` right before `fn`, `struct`, `enum`, `error`, "
-              "`machine` or `extern fn`, or before a struct field -- e.g. "
+      Hint_ = "Put `pub` right before `fn`, `static fn`, `struct`, `enum`, "
+              "`error`, `machine`, `extern fn` or a module constant's `immut`, "
+              "or before a struct field -- e.g. "
               "`pub fn area(r: int): int { ... }` or `pub struct Point { pub "
               "x: int }`. (`public` is accepted as a synonym.)";
       break;
     case Where::WithExport:
       What = "'" + Pub + "' can't be combined with 'export'.";
-      Hint_ = "`export immut NAME: T = value;` is already visible to every "
-              "module that imports this one -- `export` is its `pub`. Just "
-              "remove `pub`.";
+      Hint_ = "Write `pub immut NAME: T = value;`: `pub` alone makes the "
+              "constant visible to importers, so remove `export`.";
       break;
     case Where::OnOperator:
       What = "'" + Pub + "' can't be applied to an operator.";
@@ -692,10 +692,9 @@ public:
       break;
     case Where::OnVariable:
       What = "'" + Pub + "' can't be applied to a variable.";
-      Hint_ = "A top-level constant is declared `export immut NAME: T = "
-              "value;` -- `export` already makes it visible to importers. A "
-              "local variable is never visible outside its function, so "
-              "just remove `pub`.";
+      Hint_ = "A local variable is never visible outside its function, so "
+              "remove `pub`. A module constant is declared at the top level, "
+              "`pub immut NAME: T = value;`.";
       break;
     case Where::OnEnumVariant:
       What = "'" + Pub + "' can't be applied to an enum variant.";
@@ -848,7 +847,7 @@ private:
 class PrivateSymbolAccessError : public TurfError {
 public:
   /// Field and Method are about a member of a type: @p Owner names the type.
-  enum class Kind { Function, Type, Field, Method };
+  enum class Kind { Function, Type, Field, Method, Constant };
 
   /// @param Keyword what to write after `pub` -- "fn" for a function or
   ///        method, the declaring keyword ("struct"/"enum"/"error"/"machine")
@@ -880,6 +879,10 @@ public:
       What = "Field"; Shown = Owner + "." + Name;
       Fix = "`pub " + Name + ": ...` inside `struct " + Owner + "`";
       Noun = "methods";
+      break;
+    case Kind::Constant:
+      What = "Constant"; Shown = Name;
+      Fix = "`pub immut " + Name + ": ...`"; Noun = "constants";
       break;
     case Kind::Method:
       What = "Method"; Shown = Owner + "." + Name;

@@ -294,7 +294,7 @@ dotted address resolves to itself. `NetworkError::ResolutionFailed` if the name
 does not resolve (a typo, no DNS record, no network) or is empty. IPv6 addresses
 are not returned.
 
-### `TcpConnection::connect(a: int, b: int, c: int, d: int, port: int) static: !TcpConnection`
+### `TcpConnection::connect(a: int, b: int, c: int, d: int, port: int): !TcpConnection`
 
 Dials `a.b.c.d:port`. See the table above for the errors. Each octet is taken
 modulo 256.
@@ -329,7 +329,7 @@ closed.
 Wraps a descriptor you already own, so that `read`, `write` and `close` work on
 it. The connection takes responsibility for closing it.
 
-### `TcpListener::bind(port: int) static: !TcpListener`
+### `TcpListener::bind(port: int): !TcpListener`
 
 Listens on every local interface at `port`, with a backlog of 128. It sets
 `SO_REUSEADDR` first, so restarting a server does not fail with "address in use"

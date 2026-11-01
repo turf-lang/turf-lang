@@ -216,7 +216,12 @@ argument 1, so `n.pick("s")` is E056 "Conflicting type arguments", as
 **A generic struct takes its type arguments from the type it is stored into,
 or from `Name<Args>::` written where it is built.** The first way is retired in
 3.0 (roadmap B-17): from then on the type arguments are written where the value
-is built, and `turf migrate 3.0` writes them in. `Box::default()` and
+is built, and `turf migrate 3.0` writes them in. Warning E177 marks each
+construction that still takes them from the context; it starts at `allow`
+(`--warn E177` or `[lints] E177 = "warn"` turns it on), and its `Fix:` writes
+the arguments in exactly as they were resolved. A constructor whose own
+arguments fix every type argument (`Box::new(5)` for `fn<T> Box.new(v: T)`)
+takes nothing from the context and does not warn. `Box::default()` and
 `Box::new(...)` read them from the declared type of the variable, parameter,
 field, return type or element they are assigned to:
 

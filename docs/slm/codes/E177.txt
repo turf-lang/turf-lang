@@ -1,0 +1,31 @@
+TURF E177 -- TYPE ARGUMENTS TAKEN FROM THE CONTEXT (WARNING):
+
+CAUSE:
+  A generic struct is built with `::default()` or `::new(...)` without its
+  type arguments, and they come from the declared type, the return type or
+  the parameter the value goes to: `mut l: List<int> = List::default();`.
+  This is a WARNING (it starts at `allow`); the program is correct.
+
+INCORRECT (compiles, but warns at `warn`):
+    import list::List;
+
+    fn main(): int {
+        mut l: List<int> = List::default();
+        l.push(1);
+        return 0;
+    }
+
+CORRECT (the type arguments written where it is built):
+    import list::List;
+
+    fn main(): int {
+        mut l: List<int> = List<int>::default();
+        l.push(1);
+        return 0;
+    }
+
+FIX:
+  Write the type arguments after the struct name: `List<int>::default()`,
+  `Box<string>::new(...)`. Keep the declared type as it is.
+
+RELATED: E138 (missing type arguments), E148 (wrong number of type arguments).

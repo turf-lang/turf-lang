@@ -1,0 +1,13 @@
+// SY-5, issue #329: `export immut` still works and warns (E176, allow by
+// default, turned on here) with a Fix that writes `pub`.
+// LINT: --warn E176
+// EXPECT-DIAG: [E176
+// EXPECT-FIX: replace 'export' with 'pub'
+import test;
+
+export immut LIMIT: int = 10;
+
+fn main(): int {
+    test::assert(LIMIT == 10, "export immut still works");
+    return 0;
+}

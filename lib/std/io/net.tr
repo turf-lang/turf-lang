@@ -97,10 +97,10 @@ extern fn gethostbyname(name: string): ptr;
 // SO_REUSEADDR are NOT (0xffff and 4 on Windows and macOS). This module does not
 // use these two itself any more (turfrt_net_reuseaddr does the setsockopt), so
 // only a caller passing them to its own FFI call needs to know.
-export immut AF_INET: int = 2;
-export immut SOCK_STREAM: int = 1;
-export immut SOL_SOCKET: int = 1;
-export immut SO_REUSEADDR: int = 2;
+pub immut AF_INET: int = 2;
+pub immut SOCK_STREAM: int = 1;
+pub immut SOL_SOCKET: int = 1;
+pub immut SO_REUSEADDR: int = 2;
 
 // One variant per distinct syscall failure connect()/bind()/accept() can
 // report (docs/planning/Errors.md) -- kept separate rather than one generic
@@ -234,7 +234,7 @@ pub fn TcpConnection.new(fd: int): void {
 // Dial out to a.b.c.d:port. Returns `!TcpConnection`: a refused connection
 // (nothing listening) or a local socket() failure are both ordinary,
 // expected outcomes -- the caller decides how to recover.
-pub fn TcpConnection.connect(a: int, b: int, c: int, d: int, port: int) static: !TcpConnection {
+pub static fn TcpConnection.connect(a: int, b: int, c: int, d: int, port: int): !TcpConnection {
     mut fd: int = turfrt_net_socket();
     if !(fd >= 0) {
         return NetworkError::SocketCreationFailed("could not create a socket");
@@ -321,7 +321,7 @@ pub fn TcpListener.new(fd: int): void {
 // failure, is an ordinary startup condition the caller decides how to
 // handle (most programs will just treat it as fatal via `recover run {
 // sys::exit(1); }`, but that's the caller's call, not this function's).
-pub fn TcpListener.bind(port: int) static: !TcpListener {
+pub static fn TcpListener.bind(port: int): !TcpListener {
     mut fd: int = turfrt_net_socket();
     if !(fd >= 0) {
         return NetworkError::SocketCreationFailed("could not create a socket");

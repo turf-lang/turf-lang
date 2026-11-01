@@ -84,7 +84,7 @@ Another module reaches only the `pub` ones.
   module). `T::default()` is exempt because it only zero-fills.
 - A `pub` signature or field may not mention a private type of its own module
   (E089).
-- `export immut` constants are always public (`export` is their `pub`).
+- `pub immut` constants are always public (`export` is their `pub`).
   Operators are not gated: they are visible wherever their operand types are.
 - `pub` where it means nothing (on an operator, import, variable, variant,
   parameter, inside a function, with `export`, before a decorator, or as a name)
@@ -225,17 +225,17 @@ mut p: Point = ...;        // AmbiguousTypeReferenceError (E085): write
 Two on-demand imports that both bring in a `Point` are rejected at the second
 import (`ImportSymbolCollisionError`), as for functions.
 
-### 1.7 Exporting constants: `export immut`
+### 1.7 Exporting constants: `pub immut`
 
 Functions, structs, enums, errors and machines are exported with `pub`. A plain
 variable only makes sense inside a function, so top-level constants have their
 own keyword, which covers exactly that gap:
 
 ```turf
-export immut PI: double = 3.14159;
-export immut MAX_USERS: int = 100;
-export immut GREETING: string = "hello";
-export immut DEBUG: bool = true;
+pub immut PI: double = 3.14159;
+pub immut MAX_USERS: int = 100;
+pub immut GREETING: string = "hello";
+pub immut DEBUG: bool = true;
 ```
 
 - **Top level only.** `export` inside a function body is
@@ -256,7 +256,7 @@ Access follows the rules of functions (1.3):
 
 ```turf
 // consts.tr
-export immut VERSION: int = 7;
+pub immut VERSION: int = 7;
 ```
 
 ```turf
@@ -293,11 +293,11 @@ VERSION                // bare access: only after an on-demand import, or inside
 | `MisplacedVisibilityError` | E087 | `pub` where visibility means nothing (1.3) |
 | `ExportOutsideTopLevelError` | E023 | `export` inside a function body |
 | `ExportMutNotSupportedError` | E021 | `export mut` |
-| `ExportNonConstantInitializerError` | E022 | `export immut X = <non-literal>;` |
+| `ExportNonConstantInitializerError` | E022 | `pub immut X = <non-literal>;` |
 | `NoConstructorDefinedError` | E050 | `StructName::new(...)` for a struct with no `new` |
 | `ReservedConstructorNameError` | E051 | `fn StructName.default(...)` declared by hand; `default` is always synthesized |
 | `StaticOutsideStructError` | E053 | `static` on a function that is not struct-bound |
-| `ConstructorCannotBeStaticError` | E046 | `fn StructName.new(...) static: ...` |
+| `ConstructorCannotBeStaticError` | E046 | `static fn StructName.new(...): ...` |
 | `DefaultConstructorArityError` | E047 | `StructName::default(x, ...)` |
 | `ConstructorCalledOnInstanceError` | E045 | `instance.new(...)` or `instance.default(...)` |
 | `IncompleteConstructorError` | E049 | `new()` does not assign every field on every path |
@@ -534,7 +534,7 @@ over three sub-tables, each LLVM-free: `ResolverScopeTable` (lexical scopes),
 
 ```
 Modules_               unordered_map<ModuleName, ResolverModule>
-                       Every function/extern and `export immut` constant declared in
+                       Every function/extern and `pub immut` constant declared in
                        EVERY loaded module, namespaced per module. Backs qualified calls
                        (Module::func(...)) and findInModules() suggestions. GLOBAL on
                        purpose: it answers "was this module loaded anywhere", which UFCS,
@@ -580,7 +580,7 @@ TypeOwningModule_      unordered_map<TypeIdentity, ModuleName>
 TypeVisibility_        identity -> {IsPublic, DeclLoc, keyword}, marked in pass 1a, so a
                        diagnostic about a private type can point at its declaration.
 
-CurrentFileConstants_, `export immut` constants: a Name -> ResolverConstantSymbol map,
+CurrentFileConstants_, `pub immut` constants: a Name -> ResolverConstantSymbol map,
 Modules_[M].Variables  never a vector (constants do not overload). The symbol stores the
                        constant's VALUE (a tagged union of int64/double/bool/string, the
                        integer kept as an exact decimal string), not a pointer to the
@@ -588,7 +588,7 @@ Modules_[M].Variables  never a vector (constants do not overload). The symbol st
                        LLVM, no AST dependency" rule.
 ```
 
-`export immut` constants are populated during pass 1 by
+`pub immut` constants are populated during pass 1 by
 `Resolver::hoistExportedConstant()` and consumed through
 `VariableExprAST::ResolvedConstant` and `ScopeAccessExprAST::ResolvedConstant`
 (set by `visitVariable()` and `visitScopeAccess()`). Codegen reads them directly
@@ -667,7 +667,7 @@ this order because each needs the previous one complete:
    walk top-level declarations only (no function bodies) and register
    `FuncDefExprAST` and `ExternFuncDeclExprAST` in `Modules_[ModuleName]` (module
    context) or `CurrentFileFunctions_` (main file, `ModuleName.empty()`), through
-   `registerFunctionSignature()`; `export immut` constants through
+   `registerFunctionSignature()`; `pub immut` constants through
    `hoistExportedConstant()`; and a nested `ModuleImportExprAST` by recursing.
 
 `hoistModuleBody()` calls `SymTable_.registerModule(ModuleName)` before iterating
@@ -683,7 +683,7 @@ constant name the module has is flat-registered. For `Symbol` and `SymbolList`,
 each requested name must resolve to something `SourceModule` owns: a function
 (`findInModules()` filtered to `SourceModule`), a type (`SourceModule::Name` is a
 registered identity, which is **ownership**, not mere existence anywhere), or an
-`export immut` constant. A private function or type is skipped by `[*]`; when
+`pub immut` constant. A private function or type is skipped by `[*]`; when
 requested by name it is `E088` (`raisePrivateFunction()`, `raisePrivateType()`).
 A name found nowhere is `UnknownModuleSymbolError` with suggestions drawn from
 all three name kinds. Flat registration colliding with a different module's
@@ -826,13 +826,16 @@ module, so `pub` generics keep access to their own private fields.
 
 #### 2.8.1 True static struct methods
 
-`fn StructName.method(...) static: RetType { ... }` declares a method with no
-implicit `self`, callable only as `StructName::method(args)`.
+`static fn StructName.method(...): RetType { ... }` declares a method with no
+implicit `self`, callable only as `StructName::method(args)`. The older place,
+`fn StructName.method(...) static: RetType`, declares the same method and warns
+(E175, allow by default).
 
 *Declaration.* `ParseFuncDef()` (`ParserDecl.cpp`) handles every method
 declaration, static or not, in the single `.` branch: the function name becomes
 `StructName.method` (the same flat name for static and instance methods of one
-struct). A trailing `static`, consumed right after the parameter list and before
+struct). A `static` in front (`ParseStaticPrefixed()`, `ParseVisibilityPrefixed()`)
+is passed in as `StaticLoc`; a trailing `static`, consumed right after the parameter list and before
 the return-type `:`, is what skips injecting `self: StructName*` as parameter 0.
 There is no `::` in a `fn` declaration: `::` is reserved for call and reference
 syntax. Because the name is the same, overload resolution, mangling and

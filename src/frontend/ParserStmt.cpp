@@ -173,7 +173,7 @@ std::unique_ptr<ExprAST> ParseBlock() {
       continue;
     }
     if (Parser().CurTok == TOK_IF || Parser().CurTok == TOK_WHILE || Parser().CurTok == TOK_DO || Parser().CurTok == TOK_FOR ||
-        Parser().CurTok == TOK_FN || Parser().CurTok == TOK_STRUCT || Parser().CurTok == TOK_ENUM || Parser().CurTok == TOK_MACHINE ||
+        Parser().CurTok == TOK_FN || Parser().CurTok == TOK_STATIC || Parser().CurTok == TOK_STRUCT || Parser().CurTok == TOK_ENUM || Parser().CurTok == TOK_MACHINE ||
         Parser().CurTok == TOK_COMPARE || Parser().CurTok == TOK_ERROR || Parser().CurTok == TOK_UNSAFE ||
         Parser().CurTok == TOK_PUB || Parser().CurTok == TOK_AT) {
       // TOK_AT: `@name(args)` before a nested `extern fn` (or `fn`). Like
@@ -833,7 +833,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
           continue;
         }
         if (Parser().CurTok == TOK_IF || Parser().CurTok == TOK_WHILE || Parser().CurTok == TOK_DO || Parser().CurTok == TOK_FOR ||
-            Parser().CurTok == TOK_FN || Parser().CurTok == TOK_STRUCT || Parser().CurTok == TOK_ENUM || Parser().CurTok == TOK_MACHINE ||
+            Parser().CurTok == TOK_FN || Parser().CurTok == TOK_STATIC || Parser().CurTok == TOK_STRUCT || Parser().CurTok == TOK_ENUM || Parser().CurTok == TOK_MACHINE ||
             Parser().CurTok == TOK_COMPARE || Parser().CurTok == TOK_ERROR || Parser().CurTok == TOK_PUB) {
           auto E = ParseExpression();
           if (!E) return nullptr;
@@ -984,7 +984,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
         continue;
       }
       if (Parser().CurTok == TOK_IF || Parser().CurTok == TOK_WHILE || Parser().CurTok == TOK_DO || Parser().CurTok == TOK_FOR ||
-          Parser().CurTok == TOK_FN || Parser().CurTok == TOK_STRUCT || Parser().CurTok == TOK_ENUM || Parser().CurTok == TOK_MACHINE ||
+          Parser().CurTok == TOK_FN || Parser().CurTok == TOK_STATIC || Parser().CurTok == TOK_STRUCT || Parser().CurTok == TOK_ENUM || Parser().CurTok == TOK_MACHINE ||
           Parser().CurTok == TOK_COMPARE || Parser().CurTok == TOK_ERROR || Parser().CurTok == TOK_PUB) {
         auto E = ParseExpression();
         if (!E) return nullptr;

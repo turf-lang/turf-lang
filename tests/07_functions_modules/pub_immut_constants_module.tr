@@ -1,0 +1,10 @@
+// Companion of pub_immut_constants.tr (SY-5): every spelling of a module
+// constant, and a private one the module uses itself.
+pub immut LIMIT: int = 10;
+public immut NAME: string = "turf";
+export immut RATIO: double = 0.5;
+immut SECRET: int = 7;
+
+pub fn secret_doubled(): int {
+    return SECRET * 2;
+}

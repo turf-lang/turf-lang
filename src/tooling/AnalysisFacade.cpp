@@ -295,7 +295,7 @@ bool isDeclarationStart(int Tok) {
   return Tok == TOK_FN || Tok == TOK_STRUCT || Tok == TOK_ENUM ||
          Tok == TOK_MACHINE || Tok == TOK_AT || Tok == TOK_EXTERN ||
          Tok == TOK_EXPORT || Tok == TOK_OPERATOR || Tok == TOK_ERROR ||
-         Tok == TOK_UNSAFE || Tok == TOK_PUB;
+         Tok == TOK_UNSAFE || Tok == TOK_PUB || Tok == TOK_STATIC || Tok == TOK_IMMUTABLE;
 }
 
 // The kinds main.cpp accepts from its "anything else" branch. Any other

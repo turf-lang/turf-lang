@@ -1,0 +1,21 @@
+`static` is written after the parameter list
+
+A static method -- one with no `self`, called as `Type::name(...)` -- is written with `static` in front of `fn`:
+
+    struct Counter {
+        n: int
+    }
+
+    pub static fn Counter.limit(): int {
+        return 100;
+    }
+
+The older place, after the parameter list, still compiles to the same method:
+
+    pub fn Counter.limit() static: int {   // WARNING (E175 at `warn`)
+        return 100;
+    }
+
+The compiler's `Fix:` moves the word. Writing `static` in both places is an error, and so is `static pub fn` (the order is `pub static fn`).
+
+This warning starts at `allow` in 2.3: turn it on with `turf build --warn E175` (or `[lints] E175 = "warn"` in turf.toml). TurfLang 3.0 removes the old place, and `turf migrate 3.0` moves every `static` for you.

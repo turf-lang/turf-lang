@@ -1,0 +1,33 @@
+TURF E174 -- DECIMAL LITERAL AS A RECEIVER WITHOUT PARENTHESES (WARNING):
+
+CAUSE:
+  A decimal number literal is the receiver of a call with no parentheses
+  around it: `1.5.half()`, `2.0.floor()`, `1e3.half()`. This is a WARNING
+  (it starts at `allow`); compilation still succeeds and the program is
+  correct.
+
+INCORRECT (compiles, but warns at `warn`):
+    fn half(x: double): double {
+        return x / 2.0;
+    }
+
+    fn main(): int {
+        printline(1.5.half());
+        return 0;
+    }
+
+CORRECT (the literal in parentheses):
+    fn half(x: double): double {
+        return x / 2.0;
+    }
+
+    fn main(): int {
+        printline((1.5).half());
+        return 0;
+    }
+
+FIX:
+  Put the decimal literal in parentheses: `(1.5).half()`. Nothing else
+  changes. An integer receiver (`1.twice()`) needs no parentheses.
+
+RELATED: E139 (a number with two decimal points, `1.5.5`).

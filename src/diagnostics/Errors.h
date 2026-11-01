@@ -467,6 +467,7 @@ protected:
   // AI-augmentation block is gated on `!IsWarning`), so no warning's
   // category is ever read. Kept for consistency and in case that changes.
   SLM::ErrorCategory Category_ = SLM::ErrorCategory::GENERAL;
+  SLM::DiagnosticHints Hints_; // a warning's fix-its (withFixIt())
 
 public:
   TurfWarning(SourceLocation Loc, const std::string &Msg,
@@ -488,6 +489,34 @@ public:
     return *this;
   }
 
+  // A warning's fix (TDP-2-001's `Fix:`, checked the way an error's is,
+  // CompilerFix.h): a retired spelling's replacement (SY-2 … SY-5, B-17). The
+  // edit is the raw one TurfError::withFixIt() takes, and the builder below
+  // checks the source text first, so a mis-pointed location gives no fix.
+  TurfWarning &withFixIt(int Line, int StartCol, int EndCol,
+                         const std::string &Replacement) {
+    Hints_.FixIts.push_back({Line, StartCol, EndCol, Replacement});
+    return *this;
+  }
+
+  TurfWarning &withFixDescription(const std::string &Description) {
+    Hints_.FixDescription = Description;
+    return *this;
+  }
+
+  // Replace the text `Expected` that starts exactly at `At` with
+  // `Replacement`; nothing unless the line really reads `Expected` there.
+  TurfWarning &withTokenFixIt(const SourceLocation &At, const std::string &Expected,
+                              const std::string &Replacement) {
+    const std::string *Line = FixItSourceLine(At);
+    if (!Line || At.Col < 1 ||
+        !(At.Filename.empty() || Loc.Filename.empty() || At.Filename == Loc.Filename) ||
+        Line->compare(At.Col - 1, Expected.size(), Expected) != 0)
+      return *this;
+    return withFixIt(At.Line, At.Col, At.Col + static_cast<int>(Expected.size()),
+                     Replacement);
+  }
+
   // Mirrors TurfError::getCode() exactly (see its own doc comment) -- added
   // for HYG-001, the first warning classes (UnreachableBlockWarning,
   // DeadBranchWarning) to register a real "E0NN" code. Every other warning
@@ -503,7 +532,7 @@ public:
   // NEVER interrupts compilation flow — always returns normally.
   void emit() const {
     DiagnosticEngine::add(Loc, Message, Hint_, /*IsWarning=*/true,
-                          RelatedLocations_, Category_, getCode());
+                          RelatedLocations_, Category_, getCode(), Hints_);
   }
 
   void warn() const { emit(); }

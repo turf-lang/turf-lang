@@ -142,7 +142,7 @@ struct Counter { n: int }
 fn Counter.new(start: int): void { self.n = start; }
 fn Counter.bump(by: int): void { self.n += by; }
 fn Counter.get(): int { return self.n; }
-fn Counter.zero() static: Counter { return Counter::default(); }
+static fn Counter.zero(): Counter { return Counter::default(); }
 
 fn main(): int {
     mut c: Counter = Counter::new(5);
@@ -345,7 +345,7 @@ What can be used as a value:
   <!-- doc-example: fails E137 -->
   ```turflang
   struct MathUtil {}
-  fn MathUtil.square(x: int) static: int { return x * x; }
+  static fn MathUtil.square(x: int): int { return x * x; }
 
   fn main(): int {
       mut g = MathUtil::square;
@@ -408,8 +408,11 @@ A literal is a receiver like a variable of its type: `21.double_it()` above,
 `4.is_even()`, `"hello".is_long()`. A minus sign is not part of an integer
 literal, and a call binds tighter than it, so `-1.abs()` is `-(1.abs())`,
 which is `-1`; write `(-1).abs()` for the absolute value of minus one. A
-decimal literal reads more clearly in parentheses, `(1.5).floor()`, than as
-`1.5.floor()`, where the eye has to decide which dot ends the number.
+decimal literal is written in parentheses, `(1.5).floor()`: in `1.5.floor()`
+the eye has to decide which dot ends the number. The unparenthesized form
+compiles to the same program and is warning E174 (it starts at `allow`;
+`--warn E174` turns it on), whose `Fix:` writes the parentheses in. TurfLang
+3.0 makes it an error.
 
 How the call is resolved:
 
@@ -824,7 +827,7 @@ program (its module is `main`, a name you never write); every file it imports
 is another module.
 
 A module is made of top-level declarations: functions, structs, enums, errors,
-machines, `extern fn`s, constants (`export immut`) and its own `import`s. Code
+machines, `extern fn`s, constants (`pub immut`) and its own `import`s. Code
 other than declarations does not run at the top level.
 
 ### Import forms
@@ -874,7 +877,7 @@ pub struct Point { pub x: int, pub y: int }
 
 pub fn Point.len(): int { return self.x + self.y; }
 pub fn origin(): Point { return Point::default(); }
-export immut LIMIT: int = 10;
+pub immut LIMIT: int = 10;
 
 // main.tr
 import shapes;
@@ -920,13 +923,13 @@ fn main(): int {
 }
 ```
 
-### Constants: `export immut`
+### Constants: `pub immut`
 
-A module shares a constant with `export immut`:
+A module shares a constant with `pub immut`:
 
 ```turflang
-export immut LIMIT: int = 10;
-export immut RATIO: double = 0.5;
+pub immut LIMIT: int = 10;
+pub immut RATIO: double = 0.5;
 
 fn main(): int {
     printline(LIMIT * 2);      // 20
@@ -939,8 +942,8 @@ An `export` constant is always public (it is its own `pub`, so `pub export` is
 `immut` only (`export mut` is an error), appears only at the top level, and
 its value must be a literal the compiler can fold: every use is replaced by the
 value, and there is no storage behind it. A number may start with one `-`
-(`export immut FLOOR: int = -40;`), and an integer literal is accepted for a
-`double` constant (`export immut ONE: double = 1;` is `1.0`); anything more is
+(`pub immut FLOOR: int = -40;`), and an integer literal is accepted for a
+`double` constant (`pub immut ONE: double = 1;` is `1.0`); anything more is
 `E022`.
 
 ### Circular imports
@@ -1093,7 +1096,7 @@ Rules:
   the states of a `pub machine` are public; there is no per-variant `pub`.
 - **Operators follow their operand types.** An `operator` is usable wherever
   its operand types are, so `pub operator` is `E087`: make the type `pub`.
-- **`export immut` is its own `pub`.**
+- **`pub immut` is its own `pub`.**
 - `T::default()` is allowed from any module for any visible type: it only
   zero-fills.
 - A module's own code always sees its own private names, and a program's main

@@ -94,6 +94,7 @@ function braces(s,   t, o, c) {
 }
 function is_decl(s) {
     return s ~ /^(@[A-Za-z_]+|(pub |public )?(fn|struct|enum|error|machine|extern|operator|import|export|impl|static)[ <(])/ \
+        || s ~ /^(pub|public) immut / \
         || s ~ /^(pub |public )?(fn|struct|enum|error|machine)$/
 }
 # Builds one program from blk[from..to]; sets prog_text, prog_has_main and

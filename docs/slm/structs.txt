@@ -56,7 +56,7 @@ The implicit receiver is `self` (a pointer to the instance):
   A STATIC method (no `self` at all) uses the exact same declaration form
   plus a trailing `static` keyword, but is CALLED via `::` on the type
   itself, never through an instance:
-    fn Point.origin() static: Point {
+    static fn Point.origin(): Point {
         return Point::default();
     }
     Point::origin();      // note '::', not '.' -- no instance involved

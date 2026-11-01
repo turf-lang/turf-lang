@@ -43,7 +43,7 @@ extern fn strlen(s: string): int;
 
 // ─── Turf-level helpers ───────────────────────────────────────────────────
 
-export immut STDERR_FD: int = 2;
+pub immut STDERR_FD: int = 2;
 
 // panic: write `msg` (plus a trailing newline) to stderr, then abort. Never
 // returns -- every stdlib module's internal "this should be impossible"

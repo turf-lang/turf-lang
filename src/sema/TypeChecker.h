@@ -723,6 +723,9 @@ private:
   /// string. The call itself only saw its arguments, from which it bound
   /// T = int.
   void noteConstructed(const ExprAST *E, const TurfTypePtr &Expected);
+  // B-17 (E177): FC built a generic struct whose type arguments came from
+  // the context, neither written nor bound by the call's own arguments.
+  void warnTypeArgsFromContext(const FuncCallExprAST &FC);
 
   /// E138 for `Box::default().get()` / `Box::default().v` on a generic
   /// `Box`: a receiver has no declared type for noteConstructed() to take

@@ -19,6 +19,6 @@ The usual causes:
 
 - A stray character that isn't part of Turf, or an `@` that isn't `@caller_location` (the only decorator Turf has).
 
-- A declaration keyword in the wrong place. A top-level `mut x: int = 5;` outside any function is not a declaration Turf accepts: variables live inside functions (a constant you want to share across files is `export immut`).
+- A declaration keyword in the wrong place. A top-level `mut x: int = 5;` outside any function is not a declaration Turf accepts: variables live inside functions (a constant you want to share across files is `pub immut`).
 
 Delete the stray token, or add what was supposed to be there, and the error goes away. If the highlighted spot looks fine, check the line just above it: an unclosed bracket earlier on is often what makes a later, perfectly good token look wrong.

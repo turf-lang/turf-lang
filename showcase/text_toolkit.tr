@@ -46,7 +46,7 @@ fn main(): int {
 
     immut clock_start: int = time::clock_ticks();
 
-    mut lines: List<string> = List::default();
+    mut lines: List<string> = List<string>::default();
     lines.push("Turf compiles directly to native code");
     lines.push("Turf has structs enums generics and pointers");
     lines.push("The standard library now has JSON time and random");
@@ -55,8 +55,8 @@ fn main(): int {
     io::print("  lines: ");
     io::printline(line_count to string);
 
-    mut distinct_lengths: Set<int> = Set::default();
-    mut word_lengths: List<int> = List::default();
+    mut distinct_lengths: Set<int> = Set<int>::default();
+    mut word_lengths: List<int> = List<int>::default();
     mut word_count: int = 0;
 
     while lines.length() > 0 {

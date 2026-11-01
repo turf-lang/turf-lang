@@ -3,7 +3,7 @@ unsafe module;
 // list.tr — List<T>: a dynamically-growing array.
 // Usage:
 //   import list::List;   // (or `import list;` + spell it `list::List<int>` below)
-//   mut l: List<int> = List::default();
+//   mut l: List<int> = List<int>::default();
 //   l.push(1);
 //   l.push(2);
 //   mut x: int = l.pop();   // 2
@@ -102,7 +102,7 @@ pub fn<T> List.length(): int {
 // copied as values, so a `List<SomeStruct*>` copy still points at the same
 // structs.
 pub fn<T> List.copy(): List<T> {
-    mut out: List<T> = List::default();
+    mut out: List<T> = List<T>::default();
     mut i: int = 0;
     while i < self.h.len {
         out.push(self.h.data[i]);

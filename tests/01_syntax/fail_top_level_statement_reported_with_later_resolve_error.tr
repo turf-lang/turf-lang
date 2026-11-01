@@ -4,7 +4,7 @@
 // has a name the resolver cannot find. The pre-pass skips the stray line,
 // and its resolver failure must not end the compile before the main pass
 // reports it (issue #321).
-immut K: int = 3;
+* K = 3;
 
 fn main(): int {
     io::printline(K);

@@ -22,7 +22,7 @@ CORRECT SYNTAX:
         self.y = y;
     }
 
-    fn Point.origin() static: Point {
+    static fn Point.origin(): Point {
         return Point::default();
     }
 

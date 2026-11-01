@@ -1,0 +1,39 @@
+TURF E175 -- `static` AFTER THE PARAMETER LIST (WARNING):
+
+CAUSE:
+  A static method is declared with `static` after its parameter list:
+  `fn Counter.limit() static: int`. This is the older spelling; it still
+  compiles and warns (the warning starts at `allow`).
+
+INCORRECT (compiles, but warns at `warn`):
+    struct Counter {
+        n: int
+    }
+
+    fn Counter.limit() static: int {
+        return 100;
+    }
+
+    fn main(): int {
+        return Counter::limit();
+    }
+
+CORRECT (`static` before `fn`):
+    struct Counter {
+        n: int
+    }
+
+    static fn Counter.limit(): int {
+        return 100;
+    }
+
+    fn main(): int {
+        return Counter::limit();
+    }
+
+FIX:
+  Move `static` to just before `fn`: `static fn T.m(...)`, `pub static fn
+  T.m(...)`. Never write it in both places, and never before `pub`.
+
+RELATED: E046 (a constructor `new` cannot be static), E053 (`static` on
+  something that is not a method).

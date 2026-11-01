@@ -1,0 +1,20 @@
+// SY-4 (TDP-2-024), issue #328: `static` after the parameter list still
+// works, and warns (E175, allow by default, turned on here) with a Fix that
+// moves the word before `fn`.
+// LINT: --warn E175
+// EXPECT-DIAG: [E175
+// EXPECT-FIX: move 'static' before 'fn'
+import test;
+
+struct Counter {
+    n: int
+}
+
+pub fn Counter.limit() static: int {
+    return 100;
+}
+
+fn main(): int {
+    test::assert(Counter::limit() == 100, "old place still works");
+    return 0;
+}

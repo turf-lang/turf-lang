@@ -986,6 +986,7 @@ void Resolver::hoistExportedConstant(const VarDeclExprAST &Var,
   Sym.SourceModule = ModuleName;
   Sym.Type = Var.getTypePtr();
   Sym.DeclLoc = {Loc.Line, Loc.Col};
+  Sym.IsPublic = Var.isPublicConstant();
 
   // A number may carry one leading '-' (`export immut INT_MIN: int =
   // -9223372036854775808;`): the type checker checks the negated literal's
@@ -1457,8 +1458,11 @@ void Resolver::registerOnDemandImports(const ModuleImportExprAST &Import,
   // types are separate from functions -- see that map's doc comment.
   auto RegisterConstantIfPresent = [&](const std::string &Name,
                                        SourceLocation Loc) -> bool {
-    if (!SymTable_.findModuleConstant(SourceModule, Name))
+    const auto *Const = SymTable_.findModuleConstant(SourceModule, Name);
+    if (!Const)
       return false;
+    if (!Const->IsPublic && SourceModule != ContextLabel)
+      raisePrivateConstant(Loc, SourceModule, *Const);
     ResolverSymbolTable::FlatImportedSymbol Sym{SourceModule, {Loc.Line, Loc.Col}};
     if (auto Prev = SymTable_.registerFlatConstantImport(ContextLabel, Name, Sym)) {
       if (Prev->SourceModule != SourceModule) {

@@ -1,0 +1,40 @@
+// SY-3 (TDP-2-023), issue #327: `function` is a spelling of `fn` where a
+// declaration starts -- after `pub`/`public` and `extern` too, and with type
+// parameters -- and an ordinary identifier everywhere else.
+import test;
+
+function twice(x: int): int {
+    return x * 2;
+}
+
+pub function thrice(x: int): int {
+    return x * 3;
+}
+
+public function<T> first(a: T, b: T): T {
+    return a;
+}
+
+struct Box {
+    function: int
+}
+
+function Box.get(): int {
+    return self.function;
+}
+
+function apply(function: fn(int): int, x: int): int {
+    return function(x);
+}
+
+function main(): int {
+    immut function: int = 3;
+    test::assert(twice(function) == 6, "a variable named function");
+    test::assert(thrice(2) == 6, "pub function");
+    test::assert(first(4, 5) == 4, "function<T>");
+    mut b: Box = Box::default();
+    b.function = 7;
+    test::assert(b.get() == 7, "a field named function");
+    test::assert(apply(twice, 5) == 10, "a parameter named function");
+    return 0;
+}

@@ -264,4 +264,44 @@ private:
   }
 };
 
+// SY-2 (b), TDP-2-022: `1.5.floor()`. The first '.' is the number's and the
+// second the call's, which the reader has to work out; `(1.5).floor()` says
+// it. An integer receiver (`1.twice()`) has one dot and is left alone.
+class DecimalLiteralReceiverWarning : public TurfWarning {
+public:
+  DecimalLiteralReceiverWarning(SourceLocation Loc, const std::string &Spelling)
+      : TurfWarning(Loc,
+                    "The decimal number `" + Spelling +
+                        "` is the receiver of a call, and its own dot sits "
+                        "right before the call's.",
+                    "Write `(" + Spelling + ")` so the dot that ends the number "
+                    "is clear.") {
+    Category_ = SLM::ErrorCategory::SYNTAX_ERROR;
+  }
+};
+
+// SY-4, TDP-2-024: `fn T.m() static: R`. `static` is written in front now,
+// `static fn T.m(): R`, where a reader looks for what kind of function it is.
+class StaticAfterParametersWarning : public TurfWarning {
+public:
+  StaticAfterParametersWarning(SourceLocation Loc, const std::string &FuncName)
+      : TurfWarning(Loc,
+                    "`static` for `" + FuncName +
+                        "` is written after the parameter list.",
+                    "Move `static` before `fn`: `static fn " + FuncName + "(...)`.") {
+    Category_ = SLM::ErrorCategory::SYNTAX_ERROR;
+  }
+};
+
+// SY-5, TDP-2-025: `export immut NAME: T = v;`. A module constant is
+// `pub immut` now, the word every other public declaration uses.
+class ExportImmutWarning : public TurfWarning {
+public:
+  explicit ExportImmutWarning(SourceLocation Loc)
+      : TurfWarning(Loc, "`export immut` is the old spelling of a public module constant.",
+                    "Write `pub immut` instead of `export immut`.") {
+    Category_ = SLM::ErrorCategory::SYNTAX_ERROR;
+  }
+};
+
 #endif

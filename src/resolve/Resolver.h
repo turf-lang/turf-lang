@@ -618,6 +618,9 @@ private:
 
   /// Raises PrivateSymbolAccessError (E088) for private function @p Name of
   /// module @p Module, pointing at its declaration.
+  // SY-5: a module constant declared without `pub`, used from another module.
+  void raisePrivateConstant(SourceLocation Loc, const std::string &Module,
+                            const ResolverConstantSymbol &Const) const;
   void raisePrivateFunction(SourceLocation Loc, const std::string &Module,
                             const std::string &Name) const;
   /// Raises PrivateSymbolAccessError (E088) for private type @p Identity.

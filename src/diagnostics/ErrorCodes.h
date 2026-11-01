@@ -165,6 +165,8 @@ inline constexpr const char *UnknownStructField = "E068";
 inline constexpr const char *OperatorTemporaryWrite = "E098";
 inline constexpr const char *ModuleArityOrType = "E025";
 inline constexpr const char *DuplicateDeclaration = "E033";
+inline constexpr const char *MisplacedVisibility = "E087";
+inline constexpr const char *UnknownKeyword = "E014";
 } // namespace ErrCode
 
 inline const ErrorCodeEntry AllErrorCodes[] = {
@@ -516,6 +518,20 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // TDP-2-006 (issue #299): a call to, or a value of, a `@test` function
     // (ResolverCall.cpp, ResolverExpr.cpp).
     {"E173", "TestFunctionUseError", "Use of a test function", SLM::ErrorCategory::DECLARATION, false, 2},
+    // SY-2 (b), TDP-2-022 (issue #326): a decimal literal written as a
+    // receiver without parentheses, `1.5.floor()` (ParserCore.cpp). Starts at
+    // `allow`; the precursor of B-18, which makes it an error in 3.0.
+    {"E174", "DecimalLiteralReceiverWarning", "Decimal literal as a receiver without parentheses", SLM::ErrorCategory::SYNTAX_ERROR, false, 3, true},
+    // SY-4, TDP-2-024 (issue #328): `fn T.m() static: R`, the old place of
+    // `static` (ParserDecl.cpp). Starts at `allow`; removed in 3.0 (B-20).
+    {"E175", "StaticAfterParametersWarning", "`static` after the parameter list", SLM::ErrorCategory::SYNTAX_ERROR, false, 3, true},
+    // SY-5, TDP-2-025 (issue #329): `export immut`, the old spelling of
+    // `pub immut` (ParserDecl.cpp). Starts at `allow`; removed in 3.0 (B-21).
+    {"E176", "ExportImmutWarning", "`export immut` instead of `pub immut`", SLM::ErrorCategory::SYNTAX_ERROR, false, 3, true},
+    // B-17 / D-27 (issue #330): a generic construction whose type arguments
+    // come from the context (TypeCheckerCall.cpp). Starts at `allow`; an
+    // error in 3.0, which `turf migrate 3.0` writes the arguments in for.
+    {"E177", "TypeArgsFromContextWarning", "Type arguments taken from the context", SLM::ErrorCategory::TYPE_MISMATCH, false, 3, true},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

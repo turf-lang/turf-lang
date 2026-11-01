@@ -33,7 +33,7 @@ NOT ERRORS:
   A module using its own private names; a `pub` generic whose body uses a
   private helper (the instantiated copy is still checked as the module that
   wrote it); `Point::default()` (zero-fill only); `[*]` imports (they silently
-  skip private names); `export immut` constants (always public).
+  skip private names); `pub immut` constants (always public).
 
 FIX:
   If the name is yours and meant to be shared, add `pub` in the owning module's

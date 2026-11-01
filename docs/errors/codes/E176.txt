@@ -1,0 +1,14 @@
+`export immut` is the old spelling of `pub immut`
+
+A module constant is declared at the top level of a module with `immut`. Written `pub immut` (or `public immut`), other modules can use it as `module::NAME`; without `pub` it is private to its module:
+
+    pub immut MAX_USERS: int = 100;   // module::MAX_USERS from an importer
+    immut RETRIES: int = 3;           // only this module
+
+`export immut` is the older spelling of `pub immut` and means the same:
+
+    export immut MAX_USERS: int = 100;   // WARNING (E176 at `warn`)
+
+The compiler's `Fix:` replaces `export` with `pub`.
+
+This warning starts at `allow` in 2.3: turn it on with `turf build --warn E176` (or `[lints] E176 = "warn"` in turf.toml). TurfLang 3.0 removes `export`, and `turf migrate 3.0` rewrites it for you.

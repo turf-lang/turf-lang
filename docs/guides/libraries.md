@@ -238,7 +238,7 @@ Here they are in the root module:
 <!-- doc-example: skip uses the types and the internal module of the package -->
 ```turflang
 // Input that can be wrong returns `!Interval`.
-pub fn Interval.of(low: int, high: int) static: !Interval {
+pub static fn Interval.of(low: int, high: int): !Interval {
     if low > high {
         immut why: string = "low " + (low to string) + " is above high " + (high to string);
         return IntervalError::Inverted(low, high, why);
@@ -737,7 +737,7 @@ pub struct Counter {
     open: bool
 }
 
-pub fn Counter.start() static: !Counter {
+pub static fn Counter.start(): !Counter {
     mut c: Counter = Counter::default();
     c.handle = tally_new();
     if c.handle == null {

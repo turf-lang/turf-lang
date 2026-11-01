@@ -317,4 +317,20 @@ public:
   }
 };
 
+// B-17 / D-27 (issue #330): `mut l: List<int> = List::default();` -- the
+// construction's type arguments come from where its value goes, not from the
+// call. Written where it is built, `List<int>::default()`, the call says what
+// it builds on its own; 3.0 requires that (B-17).
+class TypeArgsFromContextWarning : public TurfWarning {
+public:
+  TypeArgsFromContextWarning(SourceLocation Loc, const std::string &Call,
+                             const std::string &Args, const std::string &Written)
+      : TurfWarning(Loc,
+                    "`" + Call + "` takes its type arguments, `" + Args +
+                        "`, from where its value goes.",
+                    "Write them where it is built: `" + Written + "`.") {
+    Category_ = SLM::ErrorCategory::TYPE_MISMATCH;
+  }
+};
+
 #endif

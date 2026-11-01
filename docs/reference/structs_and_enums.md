@@ -38,7 +38,7 @@ An empty struct is legal. It is useful as a namespace for
 ```turflang
 struct MathUtil {}
 
-fn MathUtil.square(x: int) static: int {
+static fn MathUtil.square(x: int): int {
     return x * x;
 }
 
@@ -267,7 +267,7 @@ called with `::`:
 ```turflang
 struct Temperature {}
 
-fn Temperature.to_fahrenheit(c: double) static: double {
+static fn Temperature.to_fahrenheit(c: double): double {
     return c * 9.0 / 5.0 + 32.0;
 }
 
@@ -317,14 +317,14 @@ fn<T> Box.get(): T { return self.val; }
 fn<T> Box.put(v: T): void { self.val = v; }
 
 // A static method repeats them too when it mentions `T`.
-fn<T> Box.of(v: T) static: Box<T> {
+static fn<T> Box.of(v: T): Box<T> {
     mut b: Box<T> = Box::default();
     b.val = v;
     return b;
 }
 
 // A static method that does not mention `T` needs none.
-fn Box.empty_label() static: string { return "box"; }
+static fn Box.empty_label(): string { return "box"; }
 
 fn main(): int {
     mut a: Box<int> = Box::of(41);

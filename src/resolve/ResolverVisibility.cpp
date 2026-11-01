@@ -60,6 +60,13 @@ void Resolver::raisePrivateFunction(SourceLocation Loc, const std::string &Modul
       .raise();
 }
 
+void Resolver::raisePrivateConstant(SourceLocation Loc, const std::string &Module,
+                                    const ResolverConstantSymbol &Const) const {
+  PrivateSymbolAccessError(Loc, PrivateSymbolAccessError::Kind::Constant, Const.Name,
+                           Module, toSourceLocation(Const.DeclLoc), "immut", {})
+      .raise();
+}
+
 void Resolver::raisePrivateType(SourceLocation Loc, const std::string &Identity) const {
   const std::string Module = TypeIdentity::owningModule(Identity);
   SourceLocation DeclLoc = Loc;

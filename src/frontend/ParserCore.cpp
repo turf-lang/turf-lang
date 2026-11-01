@@ -79,8 +79,41 @@ std::unique_ptr<ExprAST> ParseUnary();
 // why it's the right place for this: it gives SkipToNextTopLevelBoundary()
 // an always-accurate nesting depth with zero per-callsite bookkeeping,
 // regardless of how deeply a parse failure is nested.
+// SY-3 (TDP-2-023): `function` is a spelling of `fn` where a declaration can
+// start -- the start of the file, after `;`, `}`, `{` (a top-level `unsafe { }`),
+// `)` (an annotation's arguments), `pub`/`public`, `extern`, or an annotation
+// name -- and only when a name or `<` follows it (`function main()`,
+// `function<T> id(...)`, `extern function malloc(...)`). Everywhere else it is
+// an ordinary identifier: `immut function: int = 3;`, a parameter or field
+// named `function`, `function(3)`. Function TYPES stay `fn(...)`. The token
+// becomes TOK_FN, so every rule `fn` has holds for it; its text is still
+// "function" in the source, which the formatter keeps.
+static bool mayStartDeclaration(int PrevTok) {
+  switch (PrevTok) {
+  case 0: case ';': case '}': case '{': case ')':
+  case TOK_PUB: case TOK_EXTERN: case TOK_IDENTIFIER: case TOK_CALLER_LOCATION:
+    return true;
+  default:
+    return false;
+  }
+}
+
+static int contextualKeyword(int PrevTok, int Tok) {
+  if (Tok != TOK_IDENTIFIER || Lex().IdentifierStr != "function" ||
+      !mayStartDeclaration(PrevTok))
+    return Tok;
+  const int Next = peekToken(0);
+  // `function name` is never an identifier followed by a name, so it is the
+  // keyword after any of the tokens above; `function<` is also `function < x`,
+  // an expression, which a declaration-start position does not hold.
+  if (Next == TOK_IDENTIFIER || (Next == '<' && PrevTok != TOK_IDENTIFIER))
+    return TOK_FN;
+  return Tok;
+}
+
 int getNextToken() {
   ParserState &P = Parser();
+  const int Prev = P.CurTok;
   if (P.CurTok == '{' || P.CurTok == '(' || P.CurTok == '[')
     P.BraceDepth++;
   else if ((P.CurTok == '}' || P.CurTok == ')' || P.CurTok == ']') && P.BraceDepth > 0)
@@ -89,9 +122,9 @@ int getNextToken() {
     P.CurlyDepth++;
   else if (P.CurTok == '}' && P.CurlyDepth > 0)
     P.CurlyDepth--;
-  if (takeLookaheadToken(P.CurTok))
-    return P.CurTok;
-  return P.CurTok = gettok(Lex());
+  if (!takeLookaheadToken(P.CurTok))
+    P.CurTok = gettok(Lex());
+  return P.CurTok = contextualKeyword(Prev, P.CurTok);
 }
 
 SLM::DiagnosticHints MissingSemicolonHints() {
@@ -189,7 +222,7 @@ static const std::map<int, int> BinopPrecedence = {
 
 // See Parser.h for the doc comment.
 bool IsTopLevelBoundaryToken(int Tok) {
-  return Tok == TOK_EOF || Tok == ';' || Tok == TOK_FN || Tok == TOK_STRUCT ||
+  return Tok == TOK_EOF || Tok == ';' || Tok == TOK_FN || Tok == TOK_STATIC || Tok == TOK_IMMUTABLE || Tok == TOK_STRUCT ||
          Tok == TOK_ENUM || Tok == TOK_MACHINE || Tok == TOK_EXTERN ||
          Tok == TOK_EXPORT || Tok == TOK_PUB ||
          Tok == TOK_OPERATOR || Tok == TOK_ERROR || Tok == TOK_IMPORT ||
@@ -1024,6 +1057,21 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
                                                    RightName, RightLoc);
     }
 
+    // SY-3: another language's word for `fn` (`func main()`, `def main()`,
+    // `fun main()`) followed by the function's name. Without this, `func`
+    // and `def` read as a name and the next token as a missing `;` (E102).
+    if ((IdName == "func" || IdName == "def" || IdName == "fun") &&
+        Parser().CurTok == TOK_IDENTIFIER &&
+        !(Symbols() && Symbols()->LookupSymbol(IdName))) {
+      TurfError Err(IdLoc,
+                    "'" + IdName + "' is not a TurfLang keyword: a function "
+                    "declaration starts with 'fn'.",
+                    "Write `fn` instead of `" + IdName + "`.");
+      Err.withCode(ErrCode::UnknownKeyword);
+      Err.withTokenFixIt(IdLoc, IdName, "fn").raise();
+      return nullptr;
+    }
+
     bool CouldBeKeywordTypo = false;
 
     // Only flag a typo if this name is NOT already a known variable.
@@ -1064,8 +1112,19 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     return Base;
   }
 
-  case TOK_NUMBER:
-    return ParseNumberExpr(false);
+  case TOK_NUMBER: {
+    auto Num = ParseNumberExpr(false);
+    // SY-2 (b): a decimal literal followed by `.` is a receiver written
+    // without parentheses. A parenthesized one comes through
+    // ParseParenExpr() and never reaches here.
+    if (Num && Parser().CurTok == '.')
+      if (const auto *N = dynamic_cast<const NumberExprAST *>(Num.get()))
+        DecimalLiteralReceiverWarning(N->getLoc(), N->getSpelling())
+            .withTokenFixIt(N->getLoc(), N->getSpelling(), "(" + N->getSpelling() + ")")
+            .withFixDescription("write '(" + N->getSpelling() + ")'")
+            .emit();
+    return Num;
+  }
 
   case TOK_INT_LITERAL:
     return ParseNumberExpr(true);
@@ -1168,6 +1227,37 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
 
   case TOK_FN:
     return ParseFuncDef();
+
+  case TOK_STATIC:
+    return ParseStaticPrefixed();
+
+  // SY-5: `immut NAME: T = value;` where a declaration starts is a private
+  // module constant. Only the top level reaches here: a block parses its
+  // own `mut`/`immut` statements (ParseBlock()).
+  case TOK_IMMUTABLE:
+    return ParseModuleConstant(Lex().CurLoc, /*IsPublic=*/false, "");
+
+  // A module-level value is a constant; `mut` there is E087, with `immut`
+  // as the Fix (checked: a program that then assigns it gets no fix).
+  case TOK_MUTABLE: {
+    const SourceLocation MutLoc = Lex().CurLoc;
+    const std::string *Line = FixItSourceLine(MutLoc);
+    std::string Word = "mut";
+    if (Line && Line->compare(MutLoc.Col - 1, 7, "mutable") == 0)
+      Word = "mutable";
+    TurfError Err(MutLoc,
+                  "A value declared outside a function can't be '" + Word +
+                      "': a module-level value is a constant.",
+                  "Write `immut` for a module constant (`pub immut` to share it), "
+                  "or move the variable into the function that changes it.");
+    Err.withCode(ErrCode::MisplacedVisibility);
+    Err.withTokenFixIt(MutLoc, Word, "immut");
+    // Past the `mut` first: recovery stops AT a `mut` (main.cpp), so raising
+    // on it would find the same token again, forever.
+    getNextToken();
+    Err.raise();
+    return nullptr;
+  }
 
   case TOK_OPERATOR:
     return ParseOperatorDecl();

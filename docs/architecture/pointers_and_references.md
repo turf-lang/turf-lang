@@ -93,10 +93,13 @@ Four things are exempt from the gate:
 4. **Code lexically inside an `unsafe { }`**, including a struct, `fn`, `enum`
    or `machine` declaration wrapped in a top-level `unsafe { }` (1.4).
 
-Two things are *not* gated, and are known gaps rather than design: a **method
-call** through a raw-pointer receiver (`a.next.getval()` with `next: Node*`)
-needs no `unsafe { }`, and a field *read* of a raw-pointer-typed field is only a
-dereference if something is then accessed through it.
+A **method call** through a raw-pointer receiver (`a.next.getval()` with
+`next: Node*`) reads the receiver as `self`, so it is a dereference like
+`a.next.val` and needs `unsafe { }` the same way (E130,
+`tests/05_arrays_pointers_ffi/fail_raw_pointer_method_call_outside_unsafe.tr`);
+a UFCS call whose function takes the pointer itself does not dereference it.
+A field *read* of a raw-pointer-typed field (`a.next` alone) copies the pointer
+and is not a dereference; what is then accessed through it is.
 
 ### 1.3 `&T`, in detail
 

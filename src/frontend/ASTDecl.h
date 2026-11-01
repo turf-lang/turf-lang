@@ -101,6 +101,9 @@ class VarDeclExprAST : public ExprAST {
   // IsImmutable), not resolve-time state, so unlike ResolvedSymbol it IS
   // copied by clone().
   bool IsExported = false;
+  // SY-5: a module constant (IsExported) is private unless written
+  // `pub immut` (or the older `export immut`).
+  bool IsPublicConstant = false;
 
 public:
   VarDeclExprAST(SourceLocation Loc, std::string Name, SourceLocation NameLoc,
@@ -123,6 +126,8 @@ public:
   bool hasExplicitInit() const { return HasExplicitInit; }
   bool isExported() const { return IsExported; }
   void setExported(bool V) { IsExported = V; }
+  bool isPublicConstant() const { return IsPublicConstant; }
+  void setPublicConstant(bool V) { IsPublicConstant = V; }
 
   /// Populated by the Resolver after a successful declareVariable().
   /// Nulled by clone() semantics (fresh node, default nullptr). Cloned ASTs must be re-resolved.
@@ -137,6 +142,7 @@ public:
     auto Cloned = std::make_unique<VarDeclExprAST>(Loc, Name, NameLoc, Type,
                                             CloneExprAST(InitVal.get()), IsImmutable, HasExplicitInit, TypeLoc);
     Cloned->IsExported = IsExported;
+    Cloned->IsPublicConstant = IsPublicConstant;
     return Cloned;
     // Note: ResolvedSymbol intentionally NOT copied. ✓
   }

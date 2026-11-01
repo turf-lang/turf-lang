@@ -9,7 +9,7 @@ CAUSE:
     compare x { matches 1: ... }         // `matches` or `otherwise` inside compare
     value recover run { ... };           // `run`, `produce` or `as` after `recover`
     extern fn malloc(n: int): ptr;       // `fn` after `extern`
-    export immut MAX: int = 3;           // `immut` after `export`
+    pub immut MAX: int = 3;           // `immut` after `export`
     machine Door { Open -> Closed }      // `->` between two states
 
 CORRECT (each fixed shape, written out):
@@ -18,7 +18,7 @@ CORRECT (each fixed shape, written out):
         Open -> Closed,
         Closed -> Open,
     }
-    export immut MAX: int = 3;
+    pub immut MAX: int = 3;
     extern fn malloc(n: int): ptr;
 
     fn risky(): !int {

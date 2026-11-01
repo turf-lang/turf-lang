@@ -1133,10 +1133,10 @@ static void testVisibilityModifierPlacement() {
   };
   const std::string Main = "\nfn main(): int { return 0; }\n";
   const std::vector<std::pair<std::string, Case>> Rejected = {
-      {"pub export", {"", "pub export immut X: int = 1;", "Just remove `pub`"}},
+      {"pub export", {"", "pub export immut X: int = 1;", "so remove `export`"}},
       {"pub operator", {"", "pub operator +(a: string, b: int): string { return a; }", "make the type itself `pub`"}},
       {"pub import", {"", "pub import io;", "never re-exported"}},
-      {"pub immut", {"", "pub immut X: int = 1;", "export immut NAME"}},
+      {"top-level mut", {"", "mut X: int = 1;", "Write `immut` for a module constant"}},
       {"enum variant", {"", "enum E { pub A, B }", "pub enum Name"}},
       {"error variant", {"", "error E { pub A }", "pub error Name"}},
       {"machine state", {"", "machine M { pub A -> B }", "pub machine Name"}},
@@ -1144,7 +1144,7 @@ static void testVisibilityModifierPlacement() {
       {"pub unsafe", {"", "pub unsafe { }", "declarations inside the block"}},
       {"before decorator", {"", "pub @caller_location\nfn f(): string { return caller_location; }", "annotations first"}},
       {"not a declaration", {"", "pub 5;", "right before `fn`"}},
-      {"public spelling", {"", "public export immut X: int = 1;", "Just remove `pub`"}},
+      {"public spelling", {"", "public export immut X: int = 1;", "so remove `export`"}},
       {"reserved as variable", {"", "fn g(): int { mut pub: int = 1; return pub; }", "is_public"}},
       {"reserved as function", {"", "fn public(): int { return 1; }", "is_public"}},
       {"reserved as type", {"", "struct pub { x: int }", "is_public"}},

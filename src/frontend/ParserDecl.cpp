@@ -811,7 +811,21 @@ std::unique_ptr<ExprAST> ParseExternDecl() {
 // docs/reference/functions_and_modules.md's `export` section.
 std::unique_ptr<ExprAST> ParseExportDecl() {
   SourceLocation ExportLoc = Lex().CurLoc;
+  // SY-5 (TDP-2-025): `export immut` is the old spelling of `pub immut`. It
+  // still works, and warns (E176) with a Fix writing `pub`.
+  ExportImmutWarning(ExportLoc)
+      .withTokenFixIt(ExportLoc, "export", "pub")
+      .withFixDescription("replace 'export' with 'pub'")
+      .emit();
   getNextToken(); // eat 'export'
+  return ParseModuleConstant(ExportLoc, /*IsPublic=*/true, "export");
+}
+
+// A module constant, `[pub] immut NAME: T = literal;` (SY-5): CurTok is the
+// `immut`/`mut` after `pub`/`export`, or the `immut` that starts a private
+// one. `Spelling` is the word before it, for the messages ("" for none).
+std::unique_ptr<ExprAST> ParseModuleConstant(SourceLocation ExportLoc, bool IsPublic,
+                                             const std::string &Spelling) {
 
   // Both error paths below fire BEFORE any '{' could possibly be open (right
   // after the 'export' keyword), so the CALLER's SkipToNextTopLevelBoundary()
@@ -839,23 +853,25 @@ std::unique_ptr<ExprAST> ParseExportDecl() {
       getNextToken();
   };
 
+  const std::string Word = Spelling.empty() ? "" : Spelling + " ";
   if (Parser().CurTok == TOK_MUTABLE) {
     LogErrorAt(ExportLoc, ErrCode::ExportMutNotSupported,
-               "'export mut' is not supported yet -- only 'export immut' "
-               "(a compile-time constant) works right now."
-               "\n  Hint: true mutable shared global state needs its own "
-               "future feature (initialization ordering, real global-"
-               "variable codegen). If you don't need to mutate it, use "
-               "'export immut' instead.", SLM::ErrorCategory::DECLARATION);
+               "'" + Word + "mut' is not supported yet: a module-level value is "
+               "a constant, 'immut'."
+               "\n  Hint: Write '" + (IsPublic ? std::string("pub ") : std::string()) +
+                   "immut NAME: T = value;' for a constant, or keep the value in "
+                   "a function or a struct if it has to change.",
+               SLM::ErrorCategory::DECLARATION);
     SkipRestOfBrokenStatement();
     return nullptr;
   }
 
   if (Parser().CurTok != TOK_IMMUTABLE) {
     LogErrorAt(ExportLoc, ErrCode::ExpectedKeyword,
-               "Expected 'immut' or 'immutable' after 'export'."
-               "\n  Hint: 'export' only works on variable declarations, "
-               "e.g. export immut PI: double = 3.14159;", SLM::ErrorCategory::DECLARATION);
+               "Expected 'immut' or 'immutable' after '" + Spelling + "'."
+               "\n  Hint: '" + Spelling + "' before a value declares a module "
+               "constant, e.g. pub immut PI: double = 3.14159;",
+               SLM::ErrorCategory::DECLARATION);
     SkipRestOfBrokenStatement();
     return nullptr;
   }
@@ -872,13 +888,14 @@ std::unique_ptr<ExprAST> ParseExportDecl() {
     // place, so that shape is rejected here rather than silently accepted
     // and then failing some other way downstream.
     LogErrorAt(ExportLoc, ErrCode::ExportNonConstantInitializer,
-               "'export immut' requires an explicit initializer value."
-               "\n  Hint: e.g. export immut MAX_RETRIES: int = 3; -- an "
-               "exported constant with no value has nothing to export.", SLM::ErrorCategory::DECLARATION);
+               "A module constant requires an explicit initializer value."
+               "\n  Hint: Give it one, e.g. pub immut MAX_RETRIES: int = 3;",
+               SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
 
   VarDecl->setExported(true);
+  VarDecl->setPublicConstant(IsPublic);
   return Decl;
 }
 
@@ -889,8 +906,9 @@ std::unique_ptr<ExprAST> ParseExportDecl() {
 // through as a plain parameter rather than a global/thread-local flag so
 // this function stays reentrant-safe the same way every other parameter
 // here already is (matters for Sandbox.cpp's incremental reparse passes).
-std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
+std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation, SourceLocation StaticLoc) {
   SourceLocation FnLoc = Lex().CurLoc;
+  const bool StaticInFront = StaticLoc.Line > 0;
   getNextToken(); // consume TOK_FN
 
   std::vector<std::string> TypeParams;
@@ -998,8 +1016,8 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
     LogErrorAt(Lex().CurLoc, ErrCode::RemovedSyntax,
                "'fn " + FuncName + "::method(...)' is no longer valid syntax "
                "for declaring a static method."
-               "\n  Hint: declare it as 'fn " + FuncName +
-               ".method(...) static: ReturnType { ... }' instead -- '.' is "
+               "\n  Hint: declare it as 'static fn " + FuncName +
+               ".method(...): ReturnType { ... }' instead -- '.' is "
                "used for every method declaration now (instance or static); "
                "'static' marks the no-self case. '::' is only for calling "
                "it (StructName::method(...) is unchanged).", SLM::ErrorCategory::DECLARATION);
@@ -1095,9 +1113,34 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
   // for the precedent this project already follows: a syntactically valid
   // but semantically-restricted combination is rejected downstream, with a
   // real diagnostic class, rather than in the parser.
-  IsStaticMethodDecl = (Parser().CurTok == TOK_STATIC);
-  if (IsStaticMethodDecl)
+  // SY-4 (TDP-2-024): `static` goes in front, `static fn T.m()`. The old
+  // place, after the parameter list, still works and warns (E175) with a
+  // Fix that moves the word; written in both places it is an error.
+  if (Parser().CurTok == TOK_STATIC) {
+    const SourceLocation OldLoc = Lex().CurLoc;
+    if (StaticInFront) {
+      LogErrorAt(OldLoc, ErrCode::UnexpectedToken,
+                 "'static' is written twice for '" + FuncName +
+                     "': once before 'fn' and once after the parameters."
+                     "\n  Hint: Keep the one before 'fn' and remove this one.",
+                 SLM::ErrorCategory::DECLARATION);
+      return nullptr;
+    }
     getNextToken(); // eat 'static'
+    IsStaticMethodDecl = true;
+    StaticAfterParametersWarning W(OldLoc, FuncName);
+    // Delete ` static` (the blank before it with it) and write `static `
+    // before `fn`: one edit each, checked against the source text.
+    if (const std::string *Line = FixItSourceLine(OldLoc);
+        Line && OldLoc.Col >= 2 && Line->compare(OldLoc.Col - 1, 6, "static") == 0 &&
+        (*Line)[OldLoc.Col - 2] == ' ')
+      W.withFixIt(OldLoc.Line, OldLoc.Col - 1, OldLoc.Col + 6, "");
+    W.withTokenFixIt(FnLoc, "fn", "static fn")
+        .withFixDescription("move 'static' before 'fn'")
+        .emit();
+  }
+  if (StaticInFront)
+    IsStaticMethodDecl = true;
 
   if (!StructName.empty() && !IsStaticMethodDecl) {
     // Build 'self' as a pointer to a lazy NamedType(StructName) placeholder
@@ -1640,6 +1683,42 @@ std::unique_ptr<ExprAST> ParseAnnotatedDecl() {
   return Decl;
 }
 
+// ParseStaticPrefixed - called when CurTok == TOK_STATIC at the start of a
+// declaration (SY-4). `static fn T.m()` is a static method; `static pub fn`
+// puts the words in the wrong order (E087, with a Fix that swaps them).
+std::unique_ptr<ExprAST> ParseStaticPrefixed() {
+  const SourceLocation StaticLoc = Lex().CurLoc;
+  getNextToken(); // eat 'static'
+  if (Parser().CurTok == TOK_PUB) {
+    const SourceLocation PubLoc = Lex().CurLoc;
+    const std::string *Line = FixItSourceLine(PubLoc);
+    std::string PubWord = "pub";
+    if (Line && Line->compare(PubLoc.Col - 1, 6, "public") == 0)
+      PubWord = "public";
+    TurfError Err(StaticLoc,
+                  "'static' comes after '" + PubWord + "', not before it.",
+                  "Write '" + PubWord + " static fn'.");
+    Err.withCode(ErrCode::MisplacedVisibility);
+    if (Line && StaticLoc.Line == PubLoc.Line &&
+        Line->compare(StaticLoc.Col - 1, 6, "static") == 0 &&
+        PubLoc.Col == StaticLoc.Col + 7)
+      Err.withFixIt(StaticLoc.Line, StaticLoc.Col,
+                    PubLoc.Col + static_cast<int>(PubWord.size()),
+                    PubWord + " static")
+          .withFixDescription("write '" + PubWord + " static'");
+    Err.raise();
+    return nullptr;
+  }
+  if (Parser().CurTok != TOK_FN) {
+    LogErrorAt(StaticLoc, ErrCode::ExpectedKeyword,
+               "'static' has to be followed by 'fn'."
+               "\n  Hint: Write a static method as 'static fn Type.name(...): R'.",
+               SLM::ErrorCategory::DECLARATION);
+    return nullptr;
+  }
+  return ParseFuncDef(false, StaticLoc);
+}
+
 // ParseVisibilityPrefixed - called when CurTok == TOK_PUB (`pub`/`public`).
 //
 // The ONE place a declaration's visibility mark is set, so "pub on something
@@ -1663,6 +1742,19 @@ std::unique_ptr<ExprAST> ParseVisibilityPrefixed() {
   case TOK_FN:
     Decl = ParseFuncDef();
     break;
+  case TOK_STATIC: {
+    const SourceLocation StaticLoc = Lex().CurLoc;
+    getNextToken(); // eat 'static'
+    if (Parser().CurTok != TOK_FN) {
+      LogErrorAt(StaticLoc, ErrCode::ExpectedKeyword,
+                 "'static' has to be followed by 'fn'."
+                 "\n  Hint: Write a static method as 'pub static fn Type.name(...): R'.",
+                 SLM::ErrorCategory::DECLARATION);
+      return nullptr;
+    }
+    Decl = ParseFuncDef(false, StaticLoc);
+    break;
+  }
   case TOK_STRUCT:
     Decl = ParseStructDecl();
     break;
@@ -1688,9 +1780,15 @@ std::unique_ptr<ExprAST> ParseVisibilityPrefixed() {
     MisplacedVisibilityError(Mark.Loc, Where::OnImport).raise();
     return nullptr;
   case TOK_MUTABLE:
-  case TOK_IMMUTABLE:
-    MisplacedVisibilityError(Mark.Loc, Where::OnVariable).raise();
-    return nullptr;
+  case TOK_IMMUTABLE: {
+    // SY-5: `pub immut NAME: T = value;` is a public module constant.
+    // ParseModuleConstant() reports `pub mut`.
+    std::string Word = "pub";
+    if (const std::string *Line = FixItSourceLine(Mark.Loc);
+        Line && Line->compare(Mark.Loc.Col - 1, 6, "public") == 0)
+      Word = "public";
+    return ParseModuleConstant(Mark.Loc, /*IsPublic=*/true, Word);
+  }
   case TOK_UNSAFE:
     MisplacedVisibilityError(Mark.Loc, Where::OnUnsafeBlock).raise();
     return nullptr;

@@ -79,12 +79,12 @@ pub extern fn usleep(usec: int32): int32;
 // How many clock() ticks make up one second of CPU time. See this file's
 // design note above for why this is a hardcoded, glibc/Linux-specific
 // constant rather than something read out of a C macro.
-export immut CLOCKS_PER_SEC: int = 1000000;
+pub immut CLOCKS_PER_SEC: int = 1000000;
 
 // The largest microsecond count a single usleep() call is documented-safe
 // for (POSIX: behavior is undefined at or above one second per call).
 // sleep_seconds()/sleep_ms() use this internally to chunk longer sleeps.
-export immut MAX_USLEEP_USEC: int = 1000000;
+pub immut MAX_USLEEP_USEC: int = 1000000;
 
 // ─── Turf-level helpers ────────────────────────────────────────────────────
 

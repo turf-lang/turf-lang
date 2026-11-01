@@ -1,0 +1,52 @@
+// B-17 / D-27, issue #330: a generic construction whose type arguments come
+// from the context warns (E177, allow by default, turned on here), in an
+// initializer, a return and an argument, with a Fix writing
+// them in. Written arguments, and arguments the constructor's own parameters
+// bind, do not warn.
+// LINT: --warn E177
+// EXPECT-DIAG: [E177
+// EXPECT-FIX: write 'List<int>'
+// EXPECT-FIX: write 'Holder<string>'
+// EXPECT-FIX: write 'List<double>'
+// EXPECT-FIX: write 'Holder<bool>'
+import test;
+import list::List;
+
+struct Box<T> {
+    v: T
+}
+
+fn<T> Box.new(v: T): void {
+    self.v = v;
+}
+
+struct Holder<T> {
+    n: int
+}
+
+fn<T> Holder.new(n: int): void {
+    self.n = n;
+}
+
+fn make(): Holder<string> {
+    return Holder::new(4);
+}
+
+fn count(l: List<double>): int {
+    return l.length();
+}
+
+fn main(): int {
+    mut a: List<int> = List::default();
+    a.push(1);
+    mut d: List<double> = List<double>::default();
+    test::assert(count(List::default()) == 0, "argument");
+    mut h: Holder<bool> = Holder::new(3);
+    mut b: Box<int> = Box::new(5);
+    test::assert(make().n == 4, "return");
+    test::assert(a.length() == 1, "initializer");
+    test::assert(h.n == 3, "type parameter only in the struct");
+    test::assert(b.v == 5, "bound by the argument: no warning");
+    d.push(1.0);
+    return 0;
+}

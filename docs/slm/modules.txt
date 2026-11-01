@@ -57,10 +57,10 @@ CLASHES AND CYCLES: two on-demand imports that bring in the same bare name are
   reports the chain `a --imports--> b --imports--> a`: move what both need into a
   third module. Two modules importing the same third one is fine.
 
-CONSTANTS: a top-level constant is `export immut NAME: Type = literal;` and
+CONSTANTS: a top-level constant is `pub immut NAME: Type = literal;` and
   nothing else (not `export mut`, not inside a function, and the value must be a
   plain literal). Use it as `consts::NAME`, or bare after `import consts::NAME;`.
-    export immut MAX_USERS: int = 100;
+    pub immut MAX_USERS: int = 100;
 
 ENUMS: `enum Color { Red, Green }`, `Color::Red`, `Color::COUNT` (number of
   variants). A name before `::` that is not an enum, struct or imported module is

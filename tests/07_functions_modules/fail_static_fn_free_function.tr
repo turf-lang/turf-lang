@@ -1,0 +1,10 @@
+// SY-4: `static` in front marks a static METHOD; on a free function it is the
+// same E053 the old place gives.
+// EXPECT-DIAG: E053
+static fn helper(): int {
+    return 1;
+}
+
+fn main(): int {
+    return helper();
+}

@@ -9,7 +9,7 @@ REMOVED -> REPLACEMENT:
       ->  Point::new(1, 2)        // a struct with a constructor
       ->  Point::default()        // every field zeroed
     Static method via `::` in the declaration:  fn Point::origin(): Point { ... }
-      ->  fn Point.origin() static: Point { ... }
+      ->  static fn Point.origin(): Point { ... }
 
 CORRECT (the replacements, written out):
     struct Point { x: int, y: int }
@@ -19,7 +19,7 @@ CORRECT (the replacements, written out):
         self.y = y;
     }
 
-    fn Point.origin() static: Point {
+    static fn Point.origin(): Point {
         return Point::default();
     }
 

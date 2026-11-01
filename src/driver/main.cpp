@@ -1929,7 +1929,7 @@ static int runCompilerMain(int argc, char **argv) {
         if (Parser().CurTok == ';') { getNextToken(); continue; }
         if (Parser().CurTok == TOK_FN || Parser().CurTok == TOK_STRUCT || Parser().CurTok == TOK_ENUM ||
             Parser().CurTok == TOK_MACHINE ||
-            Parser().CurTok == TOK_AT || Parser().CurTok == TOK_EXTERN || Parser().CurTok == TOK_EXPORT ||
+            Parser().CurTok == TOK_AT || Parser().CurTok == TOK_EXTERN || Parser().CurTok == TOK_EXPORT || Parser().CurTok == TOK_STATIC || Parser().CurTok == TOK_IMMUTABLE ||
             Parser().CurTok == TOK_OPERATOR || Parser().CurTok == TOK_ERROR || Parser().CurTok == TOK_UNSAFE ||
             Parser().CurTok == TOK_PUB) {
           g_recoverActive = true;
@@ -2354,7 +2354,7 @@ static int runCompilerMain(int argc, char **argv) {
     // not a statement, and needs the exact same hoist-then-lint treatment.
     if (Parser().CurTok == TOK_FN || Parser().CurTok == TOK_STRUCT || Parser().CurTok == TOK_ENUM ||
         Parser().CurTok == TOK_MACHINE ||
-        Parser().CurTok == TOK_AT || Parser().CurTok == TOK_EXTERN || Parser().CurTok == TOK_EXPORT ||
+        Parser().CurTok == TOK_AT || Parser().CurTok == TOK_EXTERN || Parser().CurTok == TOK_EXPORT || Parser().CurTok == TOK_STATIC || Parser().CurTok == TOK_IMMUTABLE ||
         Parser().CurTok == TOK_OPERATOR || Parser().CurTok == TOK_ERROR || Parser().CurTok == TOK_UNSAFE ||
             Parser().CurTok == TOK_PUB) {
       g_recoverActive = true;

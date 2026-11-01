@@ -62,7 +62,17 @@ std::unique_ptr<ExprAST> ParseMachineDecl();
 std::unique_ptr<ExprAST> ParseErrorDecl();
 std::unique_ptr<ExprAST> ParseExternDecl();
 std::unique_ptr<ExprAST> ParseExportDecl();
-std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation = false);
+// SY-5: a module constant after `pub`/`public`/`export` (IsPublic) or with
+// none (private); CurTok is the `immut`/`mut`.
+std::unique_ptr<ExprAST> ParseModuleConstant(SourceLocation StartLoc, bool IsPublic,
+                                             const std::string &Spelling);
+// `StaticLoc` is where a `static` written in front was (`static fn T.m()`,
+// SY-4); Line 0 when there was none.
+std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation = false,
+                                      SourceLocation StaticLoc = {});
+// SY-4: `static` at the start of a declaration, before `fn` (CurTok ==
+// TOK_STATIC). `static pub fn` is E087 with a Fix that reorders the words.
+std::unique_ptr<ExprAST> ParseStaticPrefixed();
 std::unique_ptr<ExprAST> ParseOperatorDecl(bool HasCallerLocation = false);
 std::unique_ptr<ExprAST> ParseVisibilityPrefixed();
 // Called when CurTok == TOK_AT: one or more `@name(args)` annotations (plus the

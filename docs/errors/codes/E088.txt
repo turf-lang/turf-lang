@@ -75,4 +75,4 @@ a `pub` generic -- function or struct method -- whose body uses a private
 helper or a private field: when you instantiate it from your own file, the
 copy is still checked as the module that wrote it.
 
-`export immut` constants are always public: `export` is their `pub`.
+`pub immut` constants are always public: `export` is their `pub`.

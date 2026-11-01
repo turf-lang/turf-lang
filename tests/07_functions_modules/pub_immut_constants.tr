@@ -1,0 +1,17 @@
+// SY-5 (TDP-2-025), issue #329: `pub immut`, `public immut` and `export immut`
+// give importers the same `m::NAME`; a bare top-level `immut` is private to
+// its module and usable inside it. A private constant in the main file works
+// like any other.
+import test;
+import pub_immut_constants_module;
+
+immut LOCAL: int = 3;
+
+fn main(): int {
+    test::assert(pub_immut_constants_module::LIMIT == 10, "pub immut");
+    test::assert(pub_immut_constants_module::NAME == "turf", "public immut");
+    test::assert(pub_immut_constants_module::RATIO == 0.5, "export immut");
+    test::assert(pub_immut_constants_module::secret_doubled() == 14, "private, used inside");
+    test::assert(LOCAL == 3, "a private constant of the main file");
+    return 0;
+}

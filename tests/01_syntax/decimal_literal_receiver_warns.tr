@@ -1,0 +1,29 @@
+// SY-2 (b), issue #326: a decimal literal as a receiver without parentheses
+// warns (E174, allow by default, turned on here) with a Fix: that writes the
+// parentheses; the fixed program means the same. A parenthesized literal, an
+// integer literal and a variable receiver do not warn.
+// LINT: --warn E174
+// EXPECT-DIAG: [E174
+// EXPECT-FIX: write '(1.5)'
+// EXPECT-FIX: write '(2.0)'
+// EXPECT-FIX: write '(1e3)'
+import test;
+
+fn half(x: double): double {
+    return x / 2.0;
+}
+
+fn twice(x: int): int {
+    return x * 2;
+}
+
+fn main(): int {
+    test::assert(1.5.half() == 0.75, "1.5.half()");
+    test::assert(2.0.floor() == 2.0, "2.0.floor()");
+    test::assert(1e3.half() == 500.0, "1e3.half()");
+    mut d: double = 3.0;
+    test::assert((1.5).half() == 0.75, "(1.5).half()");
+    test::assert(d.half() == 1.5, "d.half()");
+    test::assert(1.twice() == 2, "1.twice()");
+    return 0;
+}

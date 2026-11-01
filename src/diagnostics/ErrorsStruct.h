@@ -36,8 +36,8 @@ public:
     Hint_ = suggestionsOrFallback(Suggestions,
       "Double-check the spelling, or make sure the method is declared as "
       "`fn " + StructName + "." + MethodName + "(...): ReturnType` (instance "
-      "method, called as `x." + MethodName + "(...)`) or `fn " + StructName +
-      "." + MethodName + "(...) static: ReturnType` (static method, called "
+      "method, called as `x." + MethodName + "(...)`) or `static fn " + StructName +
+      "." + MethodName + "(...): ReturnType` (static method, called "
       "as `" + StructName + "::" + MethodName + "(...)`).");
     trySetDeterministicRename(MethodName, Suggestions);
   }
@@ -149,8 +149,8 @@ public:
     Category_ = SLM::ErrorCategory::DECLARATION;
     Hint_ = "'" + FuncName + "' isn't declared as 'StructName." + FuncName +
             "(...)', so there's no 'self' to omit. Remove 'static', or "
-            "declare it as a method: 'fn StructName." + FuncName +
-            "(...) static: ReturnType { ... }'.";
+            "declare it as a method: 'static fn StructName." + FuncName +
+            "(...): ReturnType { ... }'.";
   }
 };
 // `fn StructName.new(...) static: ...` -- 'new' always constructs via

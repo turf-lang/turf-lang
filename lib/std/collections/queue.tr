@@ -3,7 +3,7 @@ unsafe module;
 // Queue<T> — FIFO (First In, First Out) collection.
 // Usage:
 //   import queue::Queue;   // (or `import queue;` + spell it `queue::Queue<int>` below)
-//   mut q: Queue<int> = Queue::default();
+//   mut q: Queue<int> = Queue<int>::default();
 //   q.enqueue(1)  q.dequeue()  q.peek()  q.length()  q.copy()
 //
 // Shared by default, copied on demand (LEC-009, FREEZE.md §6.27): a
@@ -96,7 +96,7 @@ pub fn<T> Queue.length(): int {
 
 // An independent queue with the same elements in the same order (F-COLL-1).
 pub fn<T> Queue.copy(): Queue<T> {
-    mut out: Queue<T> = Queue::default();
+    mut out: Queue<T> = Queue<T>::default();
     mut i: int = 0;
     while i < self.h.len {
         out.enqueue(self.h.data[self.h.head + i]);

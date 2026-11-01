@@ -3,7 +3,7 @@ unsafe module;
 // Stack<T> — LIFO (Last In, First Out) collection.
 // Usage:
 //   import stack::Stack;   // (or `import stack;` + spell it `stack::Stack<int>` below)
-//   mut s: Stack<int> = Stack::default();
+//   mut s: Stack<int> = Stack<int>::default();
 //   s.push(1)  s.pop()  s.peek()  s.length()  s.copy()
 //
 // Shared by default, copied on demand (LEC-009, FREEZE.md §6.27): a
@@ -85,7 +85,7 @@ pub fn<T> Stack.length(): int {
 
 // An independent stack with the same elements in the same order (F-COLL-1).
 pub fn<T> Stack.copy(): Stack<T> {
-    mut out: Stack<T> = Stack::default();
+    mut out: Stack<T> = Stack<T>::default();
     mut i: int = 0;
     while i < self.h.len {
         out.push(self.h.data[i]);

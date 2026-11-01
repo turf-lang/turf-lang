@@ -128,6 +128,12 @@ std::vector<Insertion> findInsertions(const std::vector<Tok> &Toks) {
       PendingStruct = true;
     if (T == TOK_EXTERN)
       InExtern = true;
+    // `static fn T.m()` (SY-4): `pub` goes before `static`.
+    if (T == TOK_FN && Prev == TOK_STATIC && I >= 1) {
+      if (I < 2 || Toks[I - 2].T != TOK_PUB)
+        Out.push_back({Toks[I - 1].Line, Toks[I - 1].Col, ""});
+      continue;
+    }
     if (Prev != TOK_PUB)
       Out.push_back({Toks[I].Line, Toks[I].Col, ""});
   }

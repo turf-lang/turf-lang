@@ -1045,6 +1045,10 @@ void Resolver::visitScopeAccess(ScopeAccessExprAST &Node) {
     // just below, since a constant genuinely IS usable as a value (unlike a
     // bare `module::function`).
     if (const auto *Const = SymTable_.findModuleConstant(LeftName, RightName)) {
+      if (!Const->IsPublic && LeftName != currentModuleName()) {
+        raisePrivateConstant(Node.getLoc(), LeftName, *Const);
+        return;
+      }
       Node.ResolvedKind = ScopeAccessKind::ModuleConstantRef;
       Node.ResolvedConstant = Const;
       return;
