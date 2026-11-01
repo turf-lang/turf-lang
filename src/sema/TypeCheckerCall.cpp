@@ -160,21 +160,29 @@ static bool isExternStringToPtrCoercion(const TurfType *ArgTy,
 // see TypeWalk::unify()'s own doc comment for why this is a best-effort
 // binder, not a second compatibility oracle).
 
-/// TYPE-002 (S11b): turn a (possibly partial) Subst map into the ordered
-/// TypeArgs vector an InstantiationRequest needs, using CanonicalOrder
-/// (from TypeWalk::collectParamOrder() above) to fix the index order. A
-/// name in CanonicalOrder with no Subst entry (a return-only phantom type
-/// parameter that never appeared in any argument position) is skipped --
-/// the request is still meaningful over the parameters that DID resolve.
+/// TYPE-002 (S11b): turn a Subst map into the ordered TypeArgs vector an
+/// InstantiationRequest needs. The drains pair TypeArgs POSITIONALLY with the
+/// template's declared type parameters (`Template->getTypeParams()`), so the
+/// order is the declaration's whenever the symbol carries it: the order the
+/// parameters first appear in (TypeWalk::collectParamOrder(), @p Fallback)
+/// differs for `fn<A, B> f(x: B, y: A)`, and bound A to B's type. A declared
+/// parameter with no Subst entry gives a null entry, which no site records
+/// (isFullyConcreteType(nullptr) is false): skipping it would shift every
+/// later argument onto the wrong parameter.
 static std::vector<TurfTypePtr> orderedTypeArgs(
-    const std::vector<std::string> &CanonicalOrder,
+    const std::vector<std::string> &DeclaredOrder,
+    const std::vector<std::string> &Fallback,
     const std::unordered_map<std::string, TurfTypePtr> &Subst) {
+  const std::vector<std::string> &Order =
+      DeclaredOrder.empty() ? Fallback : DeclaredOrder;
   std::vector<TurfTypePtr> Args;
-  Args.reserve(CanonicalOrder.size());
-  for (const auto &Name : CanonicalOrder) {
+  Args.reserve(Order.size());
+  for (const auto &Name : Order) {
     auto It = Subst.find(Name);
     if (It != Subst.end())
       Args.push_back(It->second);
+    else if (!DeclaredOrder.empty())
+      Args.push_back(nullptr);
   }
   return Args;
 }
@@ -357,7 +365,7 @@ void TypeChecker::typeGenericFunctionValue(VariableExprAST &Node) {
     TypeWalk::collectParamOrder(P.Type, Order);
   if (Ref.ReturnType)
     TypeWalk::collectParamOrder(Ref.ReturnType, Order);
-  std::vector<TurfTypePtr> TypeArgs = orderedTypeArgs(Order, Subst);
+  std::vector<TurfTypePtr> TypeArgs = orderedTypeArgs(Ref.TypeParams, Order, Subst);
   for (const auto &A : TypeArgs)
     if (!isFullyConcreteType(A.get()))
       return; // inside a generic template: its own clone records the real one
@@ -443,12 +451,22 @@ void TypeChecker::noteConstructed(const ExprAST *E, const TurfTypePtr &Expected)
                     "argument has.");
     return;
   }
-  if (!Widened || !MonoCollector_ || !isFullyConcreteType(GT))
+  // A type parameter no argument mentions (`fn<T> Box.new(k: int)`) is
+  // bound only here, by the type being built: the visit recorded no request
+  // for it, and without one the call named a function nothing emitted
+  // (turf-fuzz #28).
+  bool Unbound = false;
+  for (const auto &TP : Target->TypeParams)
+    Unbound |= !FC->GenericSubstitution.count(TP);
+  if ((!Widened && !Unbound) || !MonoCollector_ || !isFullyConcreteType(GT))
     return;
   std::vector<std::string> Order;
   for (size_t i = Offset; i < Target->Params.size(); ++i)
     TypeWalk::collectParamOrder(Target->Params[i].Type, Order);
-  std::vector<TurfTypePtr> TypeArgs = orderedTypeArgs(Order, Subst);
+  std::vector<TurfTypePtr> TypeArgs = orderedTypeArgs(Target->TypeParams, Order, Subst);
+  for (const auto &A : TypeArgs)
+    if (!isFullyConcreteType(A.get()))
+      return;
   auto *Site = const_cast<FuncCallExprAST *>(FC);
   MonoCollector_->forgetSite(Site);
   MonoCollector_->record({Monomorphize::InstantiationKind::FreeFunction,
@@ -1189,12 +1207,10 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
         std::vector<std::string> Order;
         for (int i = 0; i < SubstCheckCount; ++i)
           TypeWalk::collectParamOrder(Best->Params[i].Type, Order);
-        // With a size parameter the return type may be what binds one, so
-        // the arguments follow the declaration's own order, which is the
-        // order the drain pairs them with.
-        if (!Best->SizeParams.empty())
-          Order = Best->TypeParams;
-        std::vector<TurfTypePtr> TypeArgs = orderedTypeArgs(Order, Subst);
+        // The arguments follow the declaration's own order, which is the
+        // order the drain pairs them with (orderedTypeArgs()).
+        std::vector<TurfTypePtr> TypeArgs =
+            orderedTypeArgs(Best->TypeParams, Order, Subst);
         // TYPE-002 (S14a): only a FULLY CONCRETE substitution is a real
         // instantiation request -- found live, not anticipated: a generic
         // function calling ANOTHER generic function through its own STILL-
@@ -1590,7 +1606,7 @@ bool TypeChecker::tryUFCSFallback(MethodCallExprAST &Node,
     }
     checkSliceTypeArguments(Subst, MethodName, Node.getLoc()); // E140
     if (MonoCollector_) {
-      std::vector<TurfTypePtr> TypeArgs = orderedTypeArgs(Best->TypeParams, Subst);
+      std::vector<TurfTypePtr> TypeArgs = orderedTypeArgs(Best->TypeParams, {}, Subst);
       bool AllConcrete = TypeArgs.size() == Best->TypeParams.size();
       for (const auto &A : TypeArgs)
         AllConcrete &= isFullyConcreteType(A.get());
@@ -2461,7 +2477,7 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
                 int ParamOffset = IsStaticMethod ? 0 : 1;
                 for (int i = 0; i < ArgCount; ++i)
                   TypeWalk::collectParamOrder(Best->Params[i + ParamOffset].Type, Order);
-                std::vector<TurfTypePtr> TypeArgs = orderedTypeArgs(Order, MethodOwnSubst);
+                std::vector<TurfTypePtr> TypeArgs = orderedTypeArgs(Best->TypeParams, Order, MethodOwnSubst);
                 bool AllConcrete = true;
                 for (const auto &A : TypeArgs)
                   if (!isFullyConcreteType(A.get())) { AllConcrete = false; break; }

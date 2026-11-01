@@ -1,0 +1,26 @@
+// turf-fuzz #28: a generic struct's constructor whose parameters never
+// mention T takes T from the type being built, written or declared. No
+// request was recorded for it and the call named a function nothing emitted
+// (an internal error).
+import test;
+
+struct Box<T> {
+    v: T,
+    n: int
+}
+
+fn<T> Box.new(k: int): void {
+    self.n = k;
+}
+
+fn<T> Box.count(): int {
+    return self.n;
+}
+
+fn main(): int {
+    mut a: Box<string> = Box<string>::new(42);
+    test::assert(a.count() == 42, "written type arguments");
+    mut b: Box<double> = Box::new(7);
+    test::assert(b.count() == 7, "declared type");
+    return 0;
+}

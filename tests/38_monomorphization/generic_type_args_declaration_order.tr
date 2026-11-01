@@ -1,0 +1,29 @@
+// A call's type arguments are paired with the declaration's type parameters
+// in the order they are declared, not the order the parameters mention them:
+// `fn<A, B> f(x: B, y: A)` called as f(1, "s") is A = string, B = int. The
+// first-appearance order bound A to int and the call failed to compile.
+import test;
+
+fn<A, B> second(x: B, y: A): A {
+    return y;
+}
+
+struct Pair<K, V> {
+    k: K,
+    v: V
+}
+
+fn<K, V> Pair.swap_into(v: V, k: K): void {
+    self.k = k;
+    self.v = v;
+}
+
+fn main(): int {
+    test::assert(second(1, "s") == "s", "A is string, B is int");
+    test::assert(second("t", 2) == 2, "A is int, B is string");
+    mut p: Pair<string, int> = Pair<string, int>::default();
+    p.swap_into(7, "seven");
+    test::assert(p.k == "seven", "K is string");
+    test::assert(p.v == 7, "V is int");
+    return 0;
+}
