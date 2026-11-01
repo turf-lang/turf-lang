@@ -251,7 +251,7 @@ These need no manifest and work on any `.tr` file. Each runs the compiler in one
 $ turf check mod.tr
 mod.tr (1 error)
 
-── error [E119 · declaration]
+── error [E119 · no main function]
 
   No entry point found. Please define 'fn main(): int' in your file.
   Hint: checking a module that is only ever imported? add --module: `turf check --module <file.tr>`
@@ -343,7 +343,7 @@ A module exists in this build, but this package may not import it
 $ turf prog.tr --smart -o prog
 prog.tr (1 error)
 
-── error at line 1, col 1 [E009 · control flow]
+── error at line 1, col 1 [E009 · missing return]
 
   [Model Suggestion]
   Explanation: The function never returns a value.
@@ -536,7 +536,7 @@ The interface covers what `turf` relies on: the flags it passes, the two-line st
 $ turf check oob.tr
 oob.tr (1 error)
 
-── error at line 4, col 18 [E001 · array error]
+── error at line 4, col 18 [E001 · array bounds]
 
   Array index out of bounds!
   You tried to access 'primes[5]', but 'primes' only has 3 elements (indices 0 to 2, or -1 to -3 counting from the end).
@@ -552,7 +552,7 @@ oob.tr (1 error)
 Top to bottom:
 
 1. **File header.** The path of the file the diagnostics below belong to, then a count: `src/main.tr (2 errors, 1 warning)`. Diagnostics are batched **per file**: the file you compiled comes first, then each imported module, and within a file they are sorted by line and column. The path is relative to the directory you ran the command from; a standard-library file is shown from `lib/std/` on.
-2. **Diagnostic header.** `── error at line 4, col 18 [E001 · array error]`: the position, the **code** (`E001`) and the **category** (`array error`). The code is what you give to `turf explain`. The categories are type mismatch, undeclared variable, control flow, syntax error, arithmetic, string conversion, array error, declaration, function signature, builtin function, memory error and general. A diagnostic with no source position (a missing `main`) omits "at line, col". Many warnings carry no code and no category.
+2. **Diagnostic header.** `── error at line 4, col 18 [E001 · array bounds]`: the position, the **code** (`E001`) and the **category** (`array error`). The code is what you give to `turf explain`. The categories are type mismatch, undeclared variable, control flow, syntax error, arithmetic, string conversion, array error, declaration, function signature, builtin function, memory error and general. A diagnostic with no source position (a missing `main`) omits "at line, col". Many warnings carry no code and no category.
 3. **The message**, in plain words.
 4. Zero or more `Note:` lines, one per related location (`Note: declared here (line 2, col 5)`).
 5. An optional **hint**: one line saying how to fix it.
@@ -570,7 +570,7 @@ When the compiler knows the exact edit that removes an error, it prints it under
 $ turf check greet.tr
 greet.tr (1 error)
 
-── error at line 6, col 27 [E040 · undeclared variable]
+── error at line 6, col 27 [E040 · unknown name]
 
   I can't find anything named 'nmae'.
 
@@ -663,7 +663,7 @@ The level is chosen by whoever builds the program, in three places that mean the
 $ turf check w.tr --deny E163
 w.tr (1 error, 2 warnings)
 
-── error at line 2, col 5 [E163 · control flow]
+── error at line 2, col 5 [E163 · unused variable]
 
   Warning: Variable 'unused' is declared but never used.
 
@@ -687,7 +687,7 @@ A warning whose position is inside the installed standard library is recorded bu
 $ turf check server.tr --stdlib-warnings
 lib/std/http/http.tr (1 warning)
 
-── warning at line 353, col 5 [E159 · control flow]
+── warning at line 353, col 5 [E159 · loop with no exit path]
 
   Warning: Function 'http::Server.listen' contains a loop with no exit path. This will run forever.
   ...
@@ -703,7 +703,7 @@ When you use a name the compiler does not know (a variable, a type, a field, a m
 $ turf check typo.tr
 typo.tr (1 error)
 
-── error at line 3, col 12 [E040 · undeclared variable]
+── error at line 3, col 12 [E040 · unknown name]
 
   I can't find anything named 'contaner'.
 
@@ -942,7 +942,7 @@ fn main(): int {
 ```
 
 ```text
-── error at line 2, col 5 [E012 · control flow]
+── error at line 2, col 5 [E012 · statement after terminator]
 
   This code comes after a return/break/continue, so it's impossible to reach it!
 
@@ -970,7 +970,7 @@ fn main(): int {
 ```
 
 ```text
-── warning at line 5, col 5 [E074 · control flow]
+── warning at line 5, col 5 [E074 · unreachable block]
 
   Warning: The code in 'while.end' inside 'pick' can never be reached!
 
@@ -1002,7 +1002,7 @@ fn main(): int {
 ```
 
 ```text
-── error at line 1, col 1 [E009 · control flow]
+── error at line 1, col 1 [E009 · missing return]
 
   The function 'pick' promises to give back a result, but sometimes it doesn't!
 
@@ -1027,7 +1027,7 @@ fn main(): int {
 ```
 
 ```text
-── error at line 6, col 12 [E008 · undeclared variable]
+── error at line 6, col 12 [E008 · variable read before it has a value]
 
   Oops! You're using 'y' (type 'int') before it has a value.
   Note: declared here (line 2, col 5)
@@ -1051,13 +1051,13 @@ fn main(): int {
 ```
 
 ```text
-── warning at line 2, col 5 [E161 · control flow]
+── warning at line 2, col 5 [E161 · initial value never read]
 
   Warning: The initial value of 'x' is never read: every path assigns 'x' again before reading it.
 
   Hint: Declare it without a value, 'mut x: int;' (every read still has to come after an assignment), or read the initial value before the next assignment.
 
-── warning at line 4, col 5 [E163 · control flow]
+── warning at line 4, col 5 [E163 · unused variable]
 
   Warning: Variable 'unused' is declared but never used.
 ```
@@ -1065,7 +1065,7 @@ fn main(): int {
 The first `x` (`5`) is a declaration's initializer that is overwritten before it is read; the second (`10`) is read by `x + 1`, so it is not reported. A store that is not a declaration's initializer gets the plain dead-store wording:
 
 ```text
-── warning at line 3, col 5 [E160 · control flow]
+── warning at line 3, col 5 [E160 · dead store]
 
   Warning: Variable 'x' is assigned but the value is never read (dead store).
 
@@ -1110,7 +1110,7 @@ fn main(): int {
 ```
 
 ```text
-── error at line 1, col 1 [E010 · control flow]
+── error at line 1, col 1 [E010 · recursion with no base case]
 
   Infinite recursion detected in 'foo'.
 
@@ -1145,7 +1145,7 @@ fn main(): int {
 ```
 
 ```text
-── error at line 12, col 14 [E018 · memory error]
+── error at line 12, col 14 [E018 · use after free]
 
   Oops! You're using memory from 'p' after it was freed.
   Note: freed here (line 11, col 13)

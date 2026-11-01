@@ -254,7 +254,7 @@ looks like this:
 $ turf check
 src/main.tr (1 error)
 
-── error at line 12, col 51 [E088 · declaration]
+── error at line 12, col 51 [E088 · private symbol access]
 
   Function 'follow' is private to module 'route'.
   Note: 'follow' is declared in module 'route' without `pub` (line 4, col 4)
@@ -294,7 +294,7 @@ unused variable is reported like this, and the build goes ahead:
 $ turf check
 src/main.tr (1 warning)
 
-── warning at line 11, col 5 [E163 · control flow]
+── warning at line 11, col 5 [E163 · unused variable]
 
   Warning: Variable 'unused' is declared but never used.
 
@@ -378,7 +378,7 @@ it.
 $ turf check
 src/main.tr (1 error)
 
-── error at line 3, col 8 [E091 · declaration]
+── error at line 3, col 8 [E091 · module not importable from this package]
 
   Module 'vecmath' is internal to package 'geometry'.
     /home/me/code/geometry/src/vecmath.tr

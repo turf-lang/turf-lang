@@ -24,6 +24,7 @@
 
 #include "diagnostics/ErrorCategory.h"
 
+#include <cctype>
 #include <cstring>
 #include <fstream>
 #include <string>
@@ -169,19 +170,19 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     {ErrCode::ArrayNonIntegerIndex, "ArrayNonIntegerIndexError", "Index must be an integer", SLM::ErrorCategory::ARRAY_ERROR},
     {ErrCode::ArraySizeMismatch, "ArraySizeMismatchError", "Array size mismatch", SLM::ErrorCategory::ARRAY_ERROR},
     {ErrCode::ArrayTypeMismatch, "ArrayTypeMismatchError", "Array element type mismatch", SLM::ErrorCategory::ARRAY_ERROR},
-    {"E005", "ForEachNonArrayError", "For each non array", SLM::ErrorCategory::ARRAY_ERROR},
+    {"E005", "ForEachNonArrayError", "For loop over a non-array", SLM::ErrorCategory::ARRAY_ERROR},
     {"E006", "ForEachUnsizedArrayError", "For each unsized array (retired: T[] carries its length now)", SLM::ErrorCategory::ARRAY_ERROR},
-    {"E007", "ControlFlowError", "Control flow", SLM::ErrorCategory::CONTROL_FLOW},
-    {"E008", "DefiniteAssignmentError", "Definite assignment", SLM::ErrorCategory::UNDECLARED_VAR},
+    {"E007", "ControlFlowError", "break, continue or return out of place", SLM::ErrorCategory::CONTROL_FLOW},
+    {"E008", "DefiniteAssignmentError", "Variable read before it has a value", SLM::ErrorCategory::UNDECLARED_VAR},
     {"E009", "MissingReturnError", "Missing return", SLM::ErrorCategory::CONTROL_FLOW},
-    {"E010", "RecursionWithoutBaseError", "Recursion without base", SLM::ErrorCategory::CONTROL_FLOW, true},
-    {"E011", "SemanticError", "Semantic", SLM::ErrorCategory::GENERAL},
+    {"E010", "RecursionWithoutBaseError", "Recursion with no base case", SLM::ErrorCategory::CONTROL_FLOW, true},
+    {"E011", "SemanticError", "Broken language rule", SLM::ErrorCategory::GENERAL},
     {"E012", "StatementAfterTerminatorError", "Statement after terminator", SLM::ErrorCategory::CONTROL_FLOW},
     // RETIRED (issue #263): the same mistake as E012 ("code after a return /
     // break / continue"), reported only from a Codegen backstop that the CFG
     // pass always pre-empted with E012. The backstop now raises E012 itself.
     {"E013", "UnreachableCodeError", "Unreachable code (retired: now E012)", SLM::ErrorCategory::CONTROL_FLOW},
-    {"E014", "KeywordError", "Keyword", SLM::ErrorCategory::SYNTAX_ERROR},
+    {"E014", "KeywordError", "Unknown keyword", SLM::ErrorCategory::SYNTAX_ERROR},
     // RETIRED (issue #263): one code for every "the shape of this code is wrong"
     // message told a beginner nothing about WHICH shape. Nothing raises E015
     // any more -- SyntaxError now takes its code from the caller (ErrCode::,
@@ -193,15 +194,15 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     {"E018", "UseAfterFreeError", "Use after free", SLM::ErrorCategory::MEMORY_ERROR, true},
     {"E019", "CircularImportError", "Circular import", SLM::ErrorCategory::DECLARATION},
     {"E020", "ConflictingExternDeclarationError", "Conflicting extern declaration", SLM::ErrorCategory::DECLARATION},
-    {"E021", "ExportMutNotSupportedError", "Export mut not supported", SLM::ErrorCategory::DECLARATION},
-    {"E022", "ExportNonConstantInitializerError", "Export non constant initializer", SLM::ErrorCategory::DECLARATION},
-    {"E023", "ExportOutsideTopLevelError", "Export outside top level", SLM::ErrorCategory::DECLARATION},
+    {"E021", "ExportMutNotSupportedError", "Exported mutable variable", SLM::ErrorCategory::DECLARATION},
+    {"E022", "ExportNonConstantInitializerError", "Exported constant with a non-constant value", SLM::ErrorCategory::DECLARATION},
+    {"E023", "ExportOutsideTopLevelError", "Export inside a block", SLM::ErrorCategory::DECLARATION},
     {"E024", "ImportSymbolCollisionError", "Import symbol collision", SLM::ErrorCategory::DECLARATION},
     {ErrCode::ModuleArityOrType, "ModuleArityOrTypeError", "No matching overload", SLM::ErrorCategory::FUNCTION_SIGNATURE},
     {"E026", "ModuleMethodNotFoundError", "Module method not found", SLM::ErrorCategory::GENERAL},
     {"E027", "ModuleNotFoundError", "Module not found", SLM::ErrorCategory::DECLARATION},
-    {"E028", "OperatorBuiltinPairError", "Operator builtin pair", SLM::ErrorCategory::DECLARATION},
-    {"E029", "ScopeOperatorOnInstanceError", "Scope operator on instance", SLM::ErrorCategory::DECLARATION},
+    {"E028", "OperatorBuiltinPairError", "Operator overload for two built-in types", SLM::ErrorCategory::DECLARATION},
+    {"E029", "ScopeOperatorOnInstanceError", "`::` used on a variable", SLM::ErrorCategory::DECLARATION},
     {"E030", "UnknownModuleSymbolError", "Unknown module symbol", SLM::ErrorCategory::DECLARATION},
     {"E031", "UnknownScopeQualifierError", "Unknown scope qualifier", SLM::ErrorCategory::DECLARATION},
     {"E032", "UnqualifiedTypeNotVisibleError", "Unqualified type not visible", SLM::ErrorCategory::DECLARATION},
@@ -214,15 +215,15 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     {"E037", "LookupError", "Lookup (retired: unknown functions are E041)", SLM::ErrorCategory::UNDECLARED_VAR},
     {"E038", "NestedFunctionError", "Nested function", SLM::ErrorCategory::FUNCTION_SIGNATURE},
     {"E039", "NoSuchVariantError", "No such variant", SLM::ErrorCategory::DECLARATION},
-    {"E040", "ReferenceError", "Reference", SLM::ErrorCategory::UNDECLARED_VAR},
+    {"E040", "ReferenceError", "Unknown name", SLM::ErrorCategory::UNDECLARED_VAR},
     {"E041", "UnknownFunctionError", "Unknown function", SLM::ErrorCategory::UNDECLARED_VAR},
     {"E042", "UnknownTypeError", "Unknown type", SLM::ErrorCategory::DECLARATION},
     {"E043", "UseBeforeDeclarationError", "Use before declaration", SLM::ErrorCategory::UNDECLARED_VAR},
     {ErrCode::WrongArity, "WrongArityError", "Wrong number of arguments", SLM::ErrorCategory::FUNCTION_SIGNATURE},
     {"E045", "ConstructorCalledOnInstanceError", "Constructor called on instance", SLM::ErrorCategory::DECLARATION},
     {"E046", "ConstructorCannotBeStaticError", "Constructor cannot be static", SLM::ErrorCategory::DECLARATION},
-    {"E047", "DefaultConstructorArityError", "Default constructor arity", SLM::ErrorCategory::FUNCTION_SIGNATURE},
-    {"E048", "DotOperatorOnNonInstanceError", "Dot operator on non instance", SLM::ErrorCategory::DECLARATION},
+    {"E047", "DefaultConstructorArityError", "Arguments passed to default()", SLM::ErrorCategory::FUNCTION_SIGNATURE},
+    {"E048", "DotOperatorOnNonInstanceError", "`.` used on a type or module", SLM::ErrorCategory::DECLARATION},
     {"E049", "IncompleteConstructorError", "Incomplete constructor", SLM::ErrorCategory::DECLARATION},
     {"E050", "NoConstructorDefinedError", "No constructor defined", SLM::ErrorCategory::DECLARATION},
     {"E051", "ReservedConstructorNameError", "Reserved constructor name", SLM::ErrorCategory::DECLARATION},
@@ -237,15 +238,15 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     {"E055", "AbsArgTypeError", "Abs arg type (retired: now E056)", SLM::ErrorCategory::BUILTIN_FUNCTION},
     {ErrCode::ArgumentType, "ArgumentTypeError", "Wrong argument type", SLM::ErrorCategory::TYPE_MISMATCH},
     {ErrCode::ArithmeticOperand, "ArithmeticError", "Operator applied to the wrong kind of value", SLM::ErrorCategory::ARITHMETIC},
-    {"E058", "CompareError", "Compare", SLM::ErrorCategory::CONTROL_FLOW},
-    {"E059", "CompareTypeError", "Compare type", SLM::ErrorCategory::TYPE_MISMATCH},
+    {"E058", "CompareError", "Malformed compare block", SLM::ErrorCategory::CONTROL_FLOW},
+    {"E059", "CompareTypeError", "Compare arm of the wrong type", SLM::ErrorCategory::TYPE_MISMATCH},
     {"E060", "ImmutableAssignmentError", "Immutable assignment", SLM::ErrorCategory::DECLARATION},
     {"E061", "InvalidAssignmentTargetError", "Invalid assignment target", SLM::ErrorCategory::DECLARATION},
     {"E062", "NullAssignmentError", "Null assignment", SLM::ErrorCategory::TYPE_MISMATCH},
     {"E063", "PowerArgTypeError", "Power arg type (retired: now E056)", SLM::ErrorCategory::BUILTIN_FUNCTION},
     {ErrCode::ReturnTypeMismatch, "ReturnTypeMismatchError", "Wrong return type", SLM::ErrorCategory::TYPE_MISMATCH},
-    {"E065", "StringConversionError", "String conversion", SLM::ErrorCategory::STRING_CONVERSION},
-    {"E066", "TypeError", "Type", SLM::ErrorCategory::TYPE_MISMATCH},
+    {"E065", "StringConversionError", "No conversion to string", SLM::ErrorCategory::STRING_CONVERSION},
+    {"E066", "TypeError", "Type mismatch", SLM::ErrorCategory::TYPE_MISMATCH},
     {ErrCode::VoidValue, "VoidValueError", "A void value can't be used here", SLM::ErrorCategory::FUNCTION_SIGNATURE},
     // Appended after the initial 67-entry generation (see this file's own
     // doc comment on why new entries go at the end, not resorted in).
@@ -282,7 +283,7 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // depth constant it guards (Monomorphize::kMaxInstantiationDepth) even
     // though nothing raises it until S12a's worklist actually drains --
     // see docs/development/changes/TYPE-002.md.
-    {"E079", "GenericInstantiationDepthError", "Generic instantiation depth exceeded", SLM::ErrorCategory::DECLARATION},
+    {"E079", "GenericInstantiationDepthError", "Generic instantiation limit exceeded", SLM::ErrorCategory::DECLARATION},
     // LANG-001 (docs/development/changes/LANG-001.md, §13.4's orphan rule):
     // an operator declaration where no operand is a struct/enum declared in
     // the SAME module as the operator. Prevents a third-party module from
@@ -301,7 +302,7 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // enclosing function/loop, never "just" the defer. Routed to the
     // existing CONTROL_FLOW category, per §8's explicit instruction not to
     // add a new SLM::ErrorCategory for these.
-    {"E083", "DeferControlFlowError", "Defer control flow", SLM::ErrorCategory::CONTROL_FLOW},
+    {"E083", "DeferControlFlowError", "Control flow inside defer", SLM::ErrorCategory::CONTROL_FLOW},
 
     // STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(a)): `caller_location`
     // read outside a function declared `@caller_location`. DECLARATION,
@@ -536,6 +537,23 @@ inline const ErrorCodeEntry *lookupByCode(const std::string &Code) {
     if (Code == Entry.Code)
       return &Entry;
   return nullptr;
+}
+
+// The code's registered name as a diagnostic heading prints it (DX-9,
+// docs/development/DIAGNOSTICS_STYLE.md): `[E068 · unknown struct field]`.
+// Lowercased except code in backticks, and without a retired row's "(retired: ...)" note.
+inline std::string headingName(const ErrorCodeEntry &Entry) {
+  std::string Name = Entry.Description;
+  if (const size_t P = Name.find(" (retired"); P != std::string::npos)
+    Name.erase(P);
+  bool InCode = false;
+  for (size_t I = 0; I < Name.size(); ++I) {
+    if (Name[I] == '`')
+      InCode = !InCode;
+    else if (!InCode)
+      Name[I] = static_cast<char>(std::tolower(static_cast<unsigned char>(Name[I])));
+  }
+  return Name;
 }
 
 // True for a code whose diagnostic is a warning: its class derives from

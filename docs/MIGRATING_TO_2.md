@@ -118,7 +118,7 @@ fn main(): int {
 compile in 1.x. In 2.0 the second file is rejected:
 
 ```text
-── error at line 5, col 5 [E088 · declaration]
+── error at line 5, col 5 [E088 · private symbol access]
 
   Type 'Point' is private to module 'util'.
 ```

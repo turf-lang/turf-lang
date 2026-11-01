@@ -482,7 +482,7 @@ honored only when someone has agreed to it:
 
   ```text
   $ turfc pair.tr
-  ── error at line 4, col 1 [E130 · memory error]
+  ── error at line 4, col 1 [E130 · raw pointer outside unsafe]
     Unsafe pointer use!
     Raw pointer type 'Pair*' cannot be used outside an 'unsafe' block.
   $ turfc pair.tr --allow-unsafe-modules

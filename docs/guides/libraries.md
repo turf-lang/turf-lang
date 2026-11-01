@@ -50,7 +50,7 @@ other module is internal. A dependent that tries to import one is refused,
 whatever the module marks `pub`:
 
 ```text
-── error at line 3, col 8 [E091 · declaration]
+── error at line 3, col 8 [E091 · module not importable from this package]
 
   Module 'numbers' is internal to package 'interval'.
     /home/me/code/interval/src/numbers.tr
@@ -142,7 +142,7 @@ fn checksum(r: Interval): int {
 and a dependent calls `interval::checksum(r)`:
 
 ```text
-── error at line 9, col 29 [E088 · declaration]
+── error at line 9, col 29 [E088 · private symbol access]
 
   Function 'checksum' is private to module 'interval'.
   Note: 'checksum' is declared in module 'interval' without `pub` (line 87, col 4)
@@ -173,7 +173,7 @@ pub fn warm(): Cache {
 ```
 
 ```text
-── error at line 91, col 8 [E089 · declaration]
+── error at line 91, col 8 [E089 · private type in public signature]
 
   Public function 'warm' exposes the private type 'Cache'.
   Note: 'Cache' is declared in module 'interval' without `pub` (line 87, col 1)
@@ -199,7 +199,7 @@ pub fn stats(values: int[]): numbers::Stats {
 ```
 
 ```text
-── error at line 3, col 8 [E089 · declaration]
+── error at line 3, col 8 [E089 · private type in public signature]
 
   Public function 'stats' of package 'interval' exposes 'Stats', a type of its internal module 'numbers'.
   Note: 'Stats' is declared in module 'numbers', which only package 'interval' can import (src/numbers.tr, line 3, col 5)
@@ -844,7 +844,7 @@ Without the consent, the build fails in the library's file:
 $ turf build
 /home/me/code/counter/src/counter.tr (1 error)
 
-── error at line 17, col 5 [E130 · memory error]
+── error at line 17, col 5 [E130 · raw pointer outside unsafe]
 
   Unsafe pointer use!
   Raw pointer type 'ptr' cannot be used outside an 'unsafe' block.

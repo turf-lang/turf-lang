@@ -489,7 +489,7 @@ first line, the same file fails:
 EXPECT-DIAG missed: no [E066] in the compiler output
 fail_typo.tr (1 error)
 
-── error at line 5, col 44 [E026 · general]
+── error at line 5, col 44 [E026 · module method not found]
 
   Oops! Module 'temperature' has no function named 'to_kelvn'.
   ...
@@ -663,7 +663,7 @@ shows the warning:
 EXPECT-NO-DIAG violated: the compiler output contains 'warning'
 ~/code/temperature/src/temperature.tr (1 warning)
 
-── warning at line 4, col 5 [E163 · control flow]
+── warning at line 4, col 5 [E163 · unused variable]
 
   Warning: Variable 'spare' is declared but never used.
   ...
@@ -782,7 +782,7 @@ Two things go wrong:
   --- tests/helpers.tr (Compile Error, exit 1):
   helpers.tr (1 error)
 
-  ── error [E119 · declaration]
+  ── error [E119 · no main function]
 
     No entry point found. Please define 'fn main(): int' in your file.
   ```

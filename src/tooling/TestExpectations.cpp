@@ -57,7 +57,7 @@ std::vector<std::string> MarkerLines(const std::string &Source, const char *Line
   return Out;
 }
 
-/// "Exxx" with a diagnostic header's code spelling: `[E011 · control flow]`
+/// "Exxx" with a diagnostic header's code spelling: `[E011 · broken language rule]`
 /// puts a space after the code, a bare `[E011]` a bracket.
 bool HasCode(const std::string &Plain, const std::string &Code) {
   return std::regex_search(Plain, std::regex("\\[" + Code + "[ \\]]"));

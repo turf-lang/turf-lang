@@ -687,7 +687,7 @@ fn main(): int {
 ```text
 main.tr (1 error)
 
-── error at line 12, col 6 [E124 · type mismatch]
+── error at line 12, col 6 [E124 · values can't be compared]
 
   Oops! Something doesn't add up:
   In this instantiation: Cannot compare struct values with '=='. (Structs have
