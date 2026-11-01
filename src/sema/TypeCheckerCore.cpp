@@ -10,6 +10,7 @@
  * @copyright Copyright (c) 2026 TurfLang contributors.  Apache License.
  */
 
+#include "analysis/AnalysisFacts.h"
 #include "sema/TypeChecker.h"
 
 // AST.h is needed for the full definition of every node type.
@@ -154,6 +155,8 @@ bool TypeChecker::hasType(const ExprAST *Node) const {
 
 void TypeChecker::setType(const ExprAST *Node, TurfTypePtr Ty) {
   assert(Node && "setType: null node");
+  if (AnalysisFacts *F = Facts())
+    F->noteType(Node->getNodeID(), Ty && Ty->isInt());
   NodeTypes_[Node] = std::move(Ty);
 }
 

@@ -11,6 +11,7 @@
 
 // Forward declarations
 class ExprAST;
+class ForExprAST;
 
 // Unique identifier for each basic block
 using BlockID = size_t;
@@ -47,6 +48,19 @@ private:
   bool IsReachable;             // Whether this block is reachable from entry
 
 public:
+  // What the value-range analysis (ValueRange.cpp) needs to narrow a value
+  // on an edge. A block ending in an `if`/`else if`/`while`/`do while` test
+  // holds that test as its last statement and records it here, with the
+  // successor taken when it is true and the one taken when it is false (null
+  // for a `while true`). A range `for` records itself on its test block
+  // (ForTest) and on its step block (ForStep), whose `step` expression is in
+  // no block's statements.
+  const ExprAST *BranchCond = nullptr;
+  TurfBasicBlock *TrueSucc = nullptr;
+  TurfBasicBlock *FalseSucc = nullptr;
+  const ForExprAST *ForTest = nullptr;
+  const ForExprAST *ForStep = nullptr;
+
   TurfBasicBlock(BlockID ID, std::string Name)
       : ID(ID), Name(std::move(Name)), Terminator(TerminatorKind::None),
         IsReachable(false) {}
@@ -182,6 +196,9 @@ public:
   std::vector<std::string> calledFunctions() const;
   bool allPathsCallAnyOf(const std::unordered_set<std::string> &Targets) const;
   const SourceLocation &getFuncLoc() const { return FuncLoc; }
+  // An edge between two blocks (the value-range analysis lists those it
+  // proves are never taken).
+  using Edge = std::pair<const TurfBasicBlock *, const TurfBasicBlock *>;
 
 private:
   // allPathsRecurse()'s walk, for any set of "calls into the cycle" blocks.

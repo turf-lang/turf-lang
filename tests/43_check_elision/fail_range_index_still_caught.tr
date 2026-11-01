@@ -1,0 +1,12 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: Array index out of bounds
+// NM-2 (issue #348): `for i in 0..17` over an `int[16]` reaches index 16, so
+// the range [0, 16] does not prove the access and its bounds check stays.
+fn main(): int {
+    mut a: int[16];
+    mut t: int = 0;
+    for i in 0..17 {
+        t = t + a[i];
+    }
+    return t;
+}

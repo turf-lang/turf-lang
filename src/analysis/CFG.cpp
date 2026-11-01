@@ -770,6 +770,11 @@ void CFGBuilder::visitIf(ExprAST *E) {
     CurrentCFG->addEdge(CurrentCondBlock, ThenBB);
     CurrentCFG->addEdge(CurrentCondBlock, NextBB);
     CurrentCondBlock->setTerminator(TerminatorKind::Branch, Branches[i].Loc);
+    if (Branches[i].Cond) {
+      CurrentCondBlock->BranchCond = Branches[i].Cond.get();
+      CurrentCondBlock->TrueSucc = ThenBB;
+      CurrentCondBlock->FalseSucc = NextBB;
+    }
 
     // Build then/elseif body
     setInsertPoint(ThenBB);
@@ -1006,6 +1011,9 @@ void CFGBuilder::visitWhile(ExprAST *E) {
   if (const auto *BoolCond = dynamic_cast<const BoolExprAST *>(While->getCond()))
     IsLiteralTrue = BoolCond->getVal();
 
+  CondBB->BranchCond = While->getCond();
+  CondBB->TrueSucc = BodyBB;
+  CondBB->FalseSucc = IsLiteralTrue ? nullptr : ExitBB;
   if (!IsLiteralTrue) {
     CurrentCFG->addEdge(CondBB, ExitBB);
     CondBB->setTerminator(TerminatorKind::Branch, While->getLoc());
@@ -1101,6 +1109,9 @@ void CFGBuilder::visitDoWhile(ExprAST *E) {
   if (const auto *BoolCond = dynamic_cast<const BoolExprAST *>(DoWhile->getCond()))
     IsLiteralTrue = BoolCond->getVal();
 
+  CondBB->BranchCond = DoWhile->getCond();
+  CondBB->TrueSucc = BodyBB;
+  CondBB->FalseSucc = IsLiteralTrue ? nullptr : ExitBB;
   if (!IsLiteralTrue) {
     CurrentCFG->addEdge(CondBB, ExitBB);
     CondBB->setTerminator(TerminatorKind::Branch, DoWhile->getLoc());
@@ -1139,6 +1150,10 @@ void CFGBuilder::visitFor(ExprAST *E) {
   CurrentCFG->addEdge(CondBB, BodyBB);
   CurrentCFG->addEdge(CondBB, ExitBB);
   CondBB->setTerminator(TerminatorKind::Branch, SourceLocation{});
+  CondBB->ForTest = For;
+  CondBB->TrueSucc = BodyBB;
+  CondBB->FalseSucc = ExitBB;
+  StepBB->ForStep = For;
 
   // Save loop targets for break/continue
   TurfBasicBlock *SavedBreak = LoopBreakTarget;

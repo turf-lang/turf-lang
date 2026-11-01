@@ -17,6 +17,23 @@ struct AnalysisFacts {
   // The value-range walk warns at each one it cannot prove within +-2^53.
   std::unordered_set<uint64_t> IntToDouble;
 
+  // NM-2: the expressions the TypeChecker gave type `int` every time it
+  // checked them. The value-range analysis trusts a range only for these: a
+  // comparison against a `double` or an operand of unknown type narrows
+  // nothing. A node also seen with another type (a generic body checked once
+  // per instantiation) is never in IntExprs.
+  std::unordered_set<uint64_t> IntExprs;
+  std::unordered_set<uint64_t> NotIntExprs;
+
+  void noteType(uint64_t Id, bool IsInt) {
+    if (IsInt && !NotIntExprs.count(Id)) {
+      IntExprs.insert(Id);
+    } else if (!IsInt) {
+      IntExprs.erase(Id);
+      NotIntExprs.insert(Id);
+    }
+  }
+  bool isInt(uint64_t Id) const { return IntExprs.count(Id) > 0; }
 };
 
 // The current compilation's facts, or null outside any.
