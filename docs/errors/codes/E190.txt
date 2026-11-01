@@ -1,0 +1,25 @@
+A write through a pointer into an `immut` array
+
+A pointer made from an `immut` array (`&a to int*`) points at values declared never to change. Writing through it changes them anyway, behind the compiler's back, which may also have used the old values already:
+
+    fn patch(): int {
+        immut a: int[4] = [1, 2, 3, 4];
+        unsafe {
+            mut p: int* = &a to int*;
+            p[0] = 9;                    // WARNING (E190 at `warn`)
+        }
+        return a[0];
+    }
+
+Declare the array `mut` if it is meant to change:
+
+    fn patch(): int {
+        mut a: int[4] = [1, 2, 3, 4];
+        unsafe {
+            mut p: int* = &a to int*;
+            p[0] = 9;
+        }
+        return a[0];
+    }
+
+The compiler reports this only when every value the pointer could hold points into the same `immut` array. This warning starts at `allow` in 2.3: turn it on with `turf build --warn E190` (or `[lints] E190 = "warn"` in turf.toml).

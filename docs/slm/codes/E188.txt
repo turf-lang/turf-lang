@@ -1,0 +1,46 @@
+TURF E188 -- RAW POINTER THAT MAY BE NULL, DEREFERENCED (WARNING):
+
+CAUSE:
+  A raw pointer variable is dereferenced (a field, an index or a method
+  through it) where it is not proven non-null: it was not tested against
+  `null` on every path, and it does not come from `mem::alloc`, `&x` or
+  `self`. This is a WARNING (it starts at `allow`).
+
+INCORRECT (compiles, but warns at `warn`):
+    import mem;
+
+    fn first(): int {
+        unsafe {
+            mut p: int* = mem::malloc(16) to int*;
+            p[0] = 1;
+            return 0;
+        }
+    }
+
+    fn main(): int {
+        return 0;
+    }
+
+CORRECT:
+    import mem;
+
+    fn first(): int {
+        unsafe {
+            mut p: int* = mem::malloc(16) to int*;
+            if p != null {
+                p[0] = 1;
+                mem::free(p);
+            }
+            return 0;
+        }
+    }
+
+    fn main(): int {
+        return first();
+    }
+
+FIX:
+  Test the pointer with `if p != null { ... }` before using it, or allocate
+  with `mem::alloc`, which never returns null.
+
+RELATED: E087 (a `&?T` used without a test), E189, E191.

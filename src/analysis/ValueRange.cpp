@@ -461,6 +461,10 @@ public:
     }
     if (auto *A = dynamic_cast<const AssignmentExprAST *>(E))
       return eval(A->getRHS(), M);
+    // An enum's COUNT: its number of variants, far below 2^31.
+    if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(E))
+      if (SA->getRightName() == "COUNT")
+        return {0, INT32_MAX};
     if (auto *U = dynamic_cast<const UnaryExprAST *>(E)) {
       if (U->getOpcode() != '-') return {};
       Range R = eval(U->getOperand(), M);
@@ -877,6 +881,25 @@ static void reportPrecisionLoss(const ExprAST *N, const RangeMap &Ranges,
   IntToDoublePrecisionWarning(locationOf(N)).emit();
 }
 
+// AN-1 (E191): `p[i]` through a raw pointer, where the ranges give `i` no
+// evidence of staying inside what `p` points to: not proven non-negative,
+// or with no upper bound below the type's limit (`i < n` with nothing known
+// about `n` bounds `i` only by the largest `int`).
+static void reportUnboundedPointerIndex(const ExprAST *N, const RangeMap &Ranges,
+                                        const RangeEval &Ev) {
+  auto *AA = dynamic_cast<const ArrayAccessExprAST *>(N);
+  if (!AA || LintLevels::levelOf("E191") == LintLevels::Level::Allow) return;
+  auto *Base = dynamic_cast<const VariableExprAST *>(AA->getBase());
+  const VariableSymbol *S = Base ? Base->getResolvedSymbol() : nullptr;
+  if (!S || !S->Type || !S->Type->isPointer() || S->Type->isReference() ||
+      S->Type->isNullableReference())
+    return;
+  Range I = Ev.eval(AA->getIndex(), Ranges);
+  if (I.Lo >= 0 && I.Hi < IntMax - 1) return;
+  if (IsLibStdWarningLocation(AA->getLoc().Filename)) return;
+  UncheckedPointerIndexWarning(AA->getLoc(), Base->getName()).emit();
+}
+
 // A compile-time out-of-range constant index (E001), reported once the
 // dataflow has converged, so every report comes from a value proven on every
 // path reaching the access.
@@ -884,6 +907,7 @@ static void reportConstantOutOfBounds(const ExprAST *N, const ConstMap &cur,
                                       const RangeMap &Ranges, const RangeEval &Ev) {
   if (!N) return;
   reportPrecisionLoss(N, Ranges, Ev);
+  reportUnboundedPointerIndex(N, Ranges, Ev);
   if (auto AA = dynamic_cast<const ArrayAccessExprAST *>(N)) {
     auto idxVal = evalConstExpr(AA->getIndex(), cur);
     if (idxVal.has_value()) {

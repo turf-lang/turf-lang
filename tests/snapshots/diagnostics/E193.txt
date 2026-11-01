@@ -1,0 +1,13 @@
+tests/06_structs/14_struct_stress.tr (1 warning)
+
+── warning at line 52, col 5 [E193 · `unsafe` block that nothing needs]
+
+  Nothing in this `unsafe { }` block needs it: it holds no raw-pointer declaration, cast or dereference.
+
+  Hint: Remove the `unsafe { }` and keep its statements, so the unsafe blocks that remain mark the code that needs care.
+
+  52 │     unsafe {
+     │     ^~~~~~ Here!
+
+  Run `turf --explain E193` for more details.
+

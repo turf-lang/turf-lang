@@ -6,6 +6,8 @@
 #include "frontend/ASTChildWalker.h"
 #include "resolve/SymbolTable.h"
 #include "resolve/ResolverSymbolTable.h"
+#include "diagnostics/LintLevels.h"
+#include "frontend/Parser.h" // IsLibStdWarningLocation
 #include "sema/Monomorphize.h" // instantiatedDeclName(): a generic struct's registered layout
 
 #include <algorithm>
@@ -868,6 +870,33 @@ bool isTrackedNullableRef(const VariableSymbol *Sym) {
   return Sym && Sym->Type && Sym->Type->isNullableReference();
 }
 
+// AN-1 (E188): a raw-pointer variable (`T*`, `ptr`). Tracked like a `&?T`
+// when E188 is on, but an unproven dereference through it is a warning: a
+// raw pointer is unchecked by design. `self` is never null and never tracked.
+bool isTrackedRawPointer(const VariableSymbol *Sym) {
+  return Sym && Sym->Type && Sym->Type->isPointer() && !Sym->Type->isReference() &&
+         !Sym->Type->isNullableReference() && Sym->Name != "self" &&
+         LintLevels::levelOf("E188") != LintLevels::Level::Allow;
+}
+
+// A dereference of tracked `Sym` (named `Name`) at `Loc` that the NonNullSet
+// does not cover: E087's error for a `&?T`, E188's warning for a raw pointer.
+void reportUnprovenDereference(const VariableSymbol *Sym, const std::string &Name,
+                               const std::string &Member, SourceLocation Loc,
+                               PossibleNullDereferenceError::Member Kind) {
+  if (isTrackedNullableRef(Sym)) {
+    PossibleNullDereferenceError Err(Loc, Name, Member, Kind);
+    Err.withRelated({Sym->DeclLoc.Line, Sym->DeclLoc.Col, Loc.Filename}, "declared here");
+    Err.raise();
+    return;
+  }
+  if (IsLibStdWarningLocation(Loc.Filename))
+    return;
+  RawPointerMaybeNullWarning W(Loc, Name);
+  W.withRelated({Sym->DeclLoc.Line, Sym->DeclLoc.Col, Loc.Filename}, "declared here");
+  W.emit();
+}
+
 // Collects every &?T-typed VariableSymbol* touched anywhere in the function
 // -- both body-declared locals (VarDeclExprAST) and PARAMETERS, discovered
 // the same way AnalysisVisitor discovers parameter reads elsewhere in this
@@ -882,7 +911,7 @@ bool isTrackedNullableRef(const VariableSymbol *Sym) {
 // makes NullabilityPass skip the whole function.
 class NullableRefCollector : public ASTChildWalker {
   void addIfTracked(const VariableSymbol *Sym) {
-    if (isTrackedNullableRef(Sym))
+    if (isTrackedNullableRef(Sym) || isTrackedRawPointer(Sym))
       Tracked.insert(Sym);
   }
 
@@ -948,7 +977,27 @@ bool classifyRHSNonNull(const ExprAST *RHS, const NonNullSet &In,
     return false;
   if (dynamic_cast<const AddressOfExprAST *>(RHS))
     return true;
+  // A conversion keeps whether its operand can be null (`mem::alloc(n) to
+  // int*`, `&x to int*`).
+  if (const auto *C = dynamic_cast<const CastExprAST *>(RHS))
+    return classifyRHSNonNull(C->getOperand(), In, Tracked);
+  // An enum's VALUES / NAMES table is a static array, never null.
+  if (dynamic_cast<const ScopeAccessExprAST *>(RHS))
+    return true;
+  // The garbage-collected allocators panic when memory runs out.
+  if (const auto *FC = dynamic_cast<const FuncCallExprAST *>(RHS))
+    if (const auto *Callee = dynamic_cast<const VariableExprAST *>(FC->getCallee()))
+      if (!FC->getResolvedCallTarget() &&
+          (Callee->getName() == "gc_alloc" || Callee->getName() == "gc_alloc_zeroed" ||
+           Callee->getName() == "gc_realloc"))
+        return true;
+  // An allocation written in Turf (`mem::alloc`) panics instead of returning
+  // null; an `extern` one (`malloc`) may return null.
+  if (const ResolverFunctionSymbol *F = OwnershipAnnotation::calledFunction(*RHS))
+    return OwnershipAnnotation::acquires(*F) && !F->IsExtern;
   if (const auto *VE = dynamic_cast<const VariableExprAST *>(RHS)) {
+    if (VE->getName() == "self")
+      return true;
     const VariableSymbol *Sym = VE->getResolvedSymbol();
     if (!Sym)
       return false;
@@ -1052,13 +1101,9 @@ public:
     checkOnly(Node.getBase(), OnTrue, Tracked, DoReport);
     if (const auto *BaseVar = dynamic_cast<const VariableExprAST *>(Node.getBase())) {
       const VariableSymbol *Sym = BaseVar->getResolvedSymbol();
-      if (Sym && Tracked.count(Sym) && !OnTrue.count(Sym) && DoReport) {
-        PossibleNullDereferenceError Err(Node.getLoc(), BaseVar->getName(),
-                                         Node.getFieldName());
-        Err.withRelated({Sym->DeclLoc.Line, Sym->DeclLoc.Col, Node.getLoc().Filename},
-                        "declared here");
-        Err.raise();
-      }
+      if (Sym && Tracked.count(Sym) && !OnTrue.count(Sym) && DoReport)
+        reportUnprovenDereference(Sym, BaseVar->getName(), Node.getFieldName(),
+                                  Node.getLoc(), PossibleNullDereferenceError::Member::Field);
     }
   }
 
@@ -1073,7 +1118,8 @@ public:
       if (const auto *BaseVar =
               dynamic_cast<const VariableExprAST *>(Node.getOperand())) {
         const VariableSymbol *Sym = BaseVar->getResolvedSymbol();
-        if (Sym && Tracked.count(Sym) && !OnTrue.count(Sym) && DoReport)
+        if (Sym && isTrackedNullableRef(Sym) && Tracked.count(Sym) && !OnTrue.count(Sym) &&
+            DoReport)
           UnnarrowedNullableCastError(Node.getLoc(), BaseVar->getName(), ToValue)
               .raise();
       }
@@ -1146,14 +1192,9 @@ public:
         (!Node.ResolvedViaUFCS || Node.UFCSLoadsReceiver)) {
       if (const auto *BaseVar = dynamic_cast<const VariableExprAST *>(Node.getBase())) {
         const VariableSymbol *Sym = BaseVar->getResolvedSymbol();
-        if (Sym && Tracked.count(Sym) && !OnTrue.count(Sym) && DoReport) {
-          PossibleNullDereferenceError Err(
-              Node.getLoc(), BaseVar->getName(), Node.getMethod(),
-              PossibleNullDereferenceError::Member::Method);
-          Err.withRelated({Sym->DeclLoc.Line, Sym->DeclLoc.Col, Node.getLoc().Filename},
-                          "declared here");
-          Err.raise();
-        }
+        if (Sym && Tracked.count(Sym) && !OnTrue.count(Sym) && DoReport)
+          reportUnprovenDereference(Sym, BaseVar->getName(), Node.getMethod(),
+                                    Node.getLoc(), PossibleNullDereferenceError::Member::Method);
       }
     }
     for (const auto &A : Node.getArgs())
@@ -1162,6 +1203,14 @@ public:
   void visitArrayAccess(ArrayAccessExprAST &Node) override {
     checkOnly(Node.getBase(), OnTrue, Tracked, DoReport);
     checkOnly(Node.getIndex(), OnTrue, Tracked, DoReport);
+    // Indexing through a raw pointer reads or writes what it points to.
+    if (const auto *BaseVar = dynamic_cast<const VariableExprAST *>(Node.getBase())) {
+      const VariableSymbol *Sym = BaseVar->getResolvedSymbol();
+      if (Sym && isTrackedRawPointer(Sym) && Tracked.count(Sym) && !OnTrue.count(Sym) &&
+          DoReport)
+        reportUnprovenDereference(Sym, BaseVar->getName(), "", Node.getLoc(),
+                                  PossibleNullDereferenceError::Member::Field);
+    }
   }
   void visitArrayLiteral(ArrayLiteralExprAST &Node) override {
     for (const auto &E : Node.getElements())

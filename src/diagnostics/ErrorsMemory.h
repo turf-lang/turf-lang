@@ -230,4 +230,108 @@ public:
   }
 };
 
+// ─── AN-1 (TDP-2-007, issue #349): checks on `unsafe` code ─────────────────
+// Warnings, each starting at `allow`; B-1 decides which become errors in 3.0.
+
+// E188: a dereference (field, index, method) through a raw-pointer variable
+// that is not proven non-null on every path (NullabilityPass).
+class RawPointerMaybeNullWarning : public TurfWarning {
+public:
+  RawPointerMaybeNullWarning(SourceLocation Loc, const std::string &Var)
+      : TurfWarning(Loc,
+                    "`" + Var + "` is a raw pointer that may be null here, and "
+                    "this reads or writes through it.",
+                    "Test it first (`if " + Var + " != null { ... }`), or use a "
+                    "`&T`, which is never null.") {
+    Category_ = SLM::ErrorCategory::MEMORY_ERROR;
+  }
+};
+
+// E189: freeing memory this function provably did not get from an
+// allocation: the address of a variable, or a number made into a pointer.
+class FreeOfNonHeapPointerWarning : public TurfWarning {
+public:
+  FreeOfNonHeapPointerWarning(SourceLocation Loc, const std::string &What)
+      : TurfWarning(Loc,
+                    "This frees " + What + ", which did not come from an "
+                    "allocation: freeing it corrupts memory.",
+                    "Free only what `mem::alloc` (or another allocating "
+                    "function) returned; the address of a variable is freed "
+                    "when its function returns.") {
+    Category_ = SLM::ErrorCategory::MEMORY_ERROR;
+  }
+};
+
+// E190: a write through a pointer made from an `immut` array.
+class WriteThroughImmutableArrayWarning : public TurfWarning {
+public:
+  WriteThroughImmutableArrayWarning(SourceLocation Loc, const std::string &Var,
+                                    const std::string &Array)
+      : TurfWarning(Loc,
+                    "This writes through `" + Var + "`, which points into `" +
+                    Array + "`, an `immut` array: the write changes a value "
+                    "declared never to change.",
+                    "Declare `" + Array + "` with `mut`, or copy it into a "
+                    "`mut` array and point into that.") {
+    Category_ = SLM::ErrorCategory::MEMORY_ERROR;
+  }
+};
+
+// E191: indexing a raw pointer with an index not proven within a known,
+// non-negative range (ValueRangePass).
+class UncheckedPointerIndexWarning : public TurfWarning {
+public:
+  UncheckedPointerIndexWarning(SourceLocation Loc, const std::string &Var)
+      : TurfWarning(Loc,
+                    "This indexes the raw pointer `" + Var + "` with an index "
+                    "the compiler cannot bound: nothing checks that it stays "
+                    "inside the memory `" + Var + "` points to.",
+                    "Keep the index in a range the code makes visible (a loop "
+                    "`for i in 0..N`, or a test `if i >= 0 && i < N`), or use an "
+                    "array, whose index is checked.") {
+    Category_ = SLM::ErrorCategory::MEMORY_ERROR;
+  }
+};
+
+// E192: an integer converted to a pointer or a reference.
+class IntToPointerCastWarning : public TurfWarning {
+public:
+  IntToPointerCastWarning(SourceLocation Loc, const std::string &Dest)
+      : TurfWarning(Loc,
+                    "This converts an integer to `" + Dest + "`: the compiler "
+                    "cannot know what, if anything, is at that address.",
+                    "Get the pointer from what it points to (`&x`, an "
+                    "allocation), or write `null` for no address.") {
+    Category_ = SLM::ErrorCategory::MEMORY_ERROR;
+  }
+};
+
+// E193: an `unsafe { }` block in which nothing needs it.
+class UnneededUnsafeBlockWarning : public TurfWarning {
+public:
+  explicit UnneededUnsafeBlockWarning(SourceLocation Loc)
+      : TurfWarning(Loc,
+                    "Nothing in this `unsafe { }` block needs it: it holds no "
+                    "raw-pointer declaration, cast or dereference.",
+                    "Remove the `unsafe { }` and keep its statements, so the "
+                    "unsafe blocks that remain mark the code that needs care.") {
+    Category_ = SLM::ErrorCategory::MEMORY_ERROR;
+  }
+};
+
+// E194: an `unsafe { }` block with more statements than LargeUnsafeLimit.
+class LargeUnsafeBlockWarning : public TurfWarning {
+public:
+  static constexpr int LargeUnsafeLimit = 40;
+  LargeUnsafeBlockWarning(SourceLocation Loc, int Statements)
+      : TurfWarning(Loc,
+                    "This `unsafe { }` block holds " + std::to_string(Statements) +
+                    " statements (more than " + std::to_string(LargeUnsafeLimit) +
+                    "): the code that needs care is hard to find in it.",
+                    "Keep only the raw-pointer operations inside `unsafe { }`, "
+                    "and move the rest out, or into a function.") {
+    Category_ = SLM::ErrorCategory::MEMORY_ERROR;
+  }
+};
+
 #endif

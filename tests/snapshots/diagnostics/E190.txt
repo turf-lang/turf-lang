@@ -1,0 +1,24 @@
+tests/05_arrays_pointers_ffi/unsafe_checks_warn.tr (2 warnings)
+
+── warning at line 63, col 15 [E190 · write through a pointer into an `immut` array]
+
+  This writes through `pa`, which points into `a`, an `immut` array: the write changes a value declared never to change.
+
+  Hint: Declare `a` with `mut`, or copy it into a `mut` array and point into that.
+
+  63 │         pa[0] = 9;
+     │               ^ Here!
+
+  Run `turf --explain E190` for more details.
+
+── warning at line 106, col 9 [E163 · unused variable]
+
+  Warning: Variable 'raw' is declared but never used.
+
+  Hint: If the variable is intentionally unused, prefix its name with '_' by convention. Otherwise, remove the declaration or use its value.
+
+  106 │         mut raw: int* = &t to int*;
+      │         ^ Here!
+
+  Run `turf --explain E163` for more details.
+

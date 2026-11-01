@@ -554,6 +554,16 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // AN-5 (issue #352): manual-heap memory never freed (AliasAnalysis.cpp).
     // Starts at `allow`.
     {"E187", "ManualHeapLeakWarning", "Manual-heap memory that is never freed", SLM::ErrorCategory::MEMORY_ERROR, false, 3, true},
+    // AN-1 (issue #349): checks on `unsafe` code (NullabilityPass,
+    // AliasAnalysis.cpp, ValueRange.cpp, the TypeChecker). Each starts at
+    // `allow`; B-1 decides promotions for 3.0.
+    {"E188", "RawPointerMaybeNullWarning", "Raw pointer that may be null, dereferenced", SLM::ErrorCategory::MEMORY_ERROR, false, 3, true},
+    {"E189", "FreeOfNonHeapPointerWarning", "Freeing memory that was never allocated", SLM::ErrorCategory::MEMORY_ERROR, false, 3, true},
+    {"E190", "WriteThroughImmutableArrayWarning", "Write through a pointer into an `immut` array", SLM::ErrorCategory::MEMORY_ERROR, false, 3, true},
+    {"E191", "UncheckedPointerIndexWarning", "Raw-pointer index with no bound", SLM::ErrorCategory::MEMORY_ERROR, false, 3, true},
+    {"E192", "IntToPointerCastWarning", "Integer converted to a pointer", SLM::ErrorCategory::MEMORY_ERROR, false, 3, true},
+    {"E193", "UnneededUnsafeBlockWarning", "`unsafe` block that nothing needs", SLM::ErrorCategory::MEMORY_ERROR, false, 3, true},
+    {"E194", "LargeUnsafeBlockWarning", "Very large `unsafe` block", SLM::ErrorCategory::MEMORY_ERROR, false, 3, true},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

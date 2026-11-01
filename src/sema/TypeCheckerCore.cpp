@@ -267,8 +267,11 @@ void TypeChecker::reportError(SourceLocation Loc, const char *Code,
 
 bool TypeChecker::isUnsafeGateExempt(const SourceLocation &Loc,
                                      const ExprAST *Node) const {
-  if (UnsafeDepth_ > 0)
+  if (UnsafeDepth_ > 0) {
+    // Every enclosing block authorizes this use (E193 reads it).
+    std::fill(UnsafeUsed_.begin(), UnsafeUsed_.end(), 1);
     return true;
+  }
   if (Node && WasDeclaredInsideTopLevelUnsafe(Node))
     return true;
   return HasRawPointerCapability(Loc.Filename);
@@ -343,10 +346,35 @@ void TypeChecker::checkNoRawPointersInSignature(const FuncDefExprAST &Node) {
 }
 
 
+namespace {
+// The statements in E, counting those of every nested block (E194).
+int countStatements(const ExprAST *E) {
+  struct Counter : ASTChildWalker {
+    int N = 0;
+    void visitBlock(BlockExprAST &Node) override {
+      N += static_cast<int>(Node.getExpressions().size());
+      ASTChildWalker::visitBlock(Node);
+    }
+  } C;
+  C.visitChild(E);
+  return C.N;
+}
+} // namespace
+
 void TypeChecker::visitUnsafeBlock(UnsafeBlockExprAST &Node) {
   ++UnsafeDepth_;
+  UnsafeUsed_.push_back(0);
   check(Node.getBodyMut());
+  const bool Used = !UnsafeUsed_.empty() && UnsafeUsed_.back();
+  if (!UnsafeUsed_.empty()) UnsafeUsed_.pop_back();
   --UnsafeDepth_;
+  // AN-1: a block nothing in it needs (E193), and a very large one (E194).
+  if (!IsLibStdWarningLocation(Node.getLoc().Filename)) {
+    if (!Used)
+      UnneededUnsafeBlockWarning(Node.getLoc()).emit();
+    if (int N = countStatements(Node.getBody()); N > LargeUnsafeBlockWarning::LargeUnsafeLimit)
+      LargeUnsafeBlockWarning(Node.getLoc(), N).emit();
+  }
   // The unsafe block's type is its Body's type -- mirrors visitBlock()
   // (TypeCheckerStmt.cpp)'s own "last expression's type, or void if empty"
   // rule, since Body is always a BlockExprAST (see ParseUnsafeExpr()) and

@@ -182,3 +182,10 @@ E184 tests/14_cfg_analysis/endless_loops_warn.tr --warn E184
 E185 tests/14_cfg_analysis/endless_loops_warn.tr --warn E185
 E186 tests/14_cfg_analysis/endless_loops_warn.tr --warn E186
 E187 tests/05_arrays_pointers_ffi/manual_heap_leak_warns.tr --warn E187
+E188 tests/05_arrays_pointers_ffi/fail_null_raw_pointer_write_faults_at_zero.tr --warn E188
+E189 tests/05_arrays_pointers_ffi/unsafe_checks_warn.tr --warn E189
+E190 tests/05_arrays_pointers_ffi/unsafe_checks_warn.tr --warn E190
+E191 tests/05_arrays_pointers_ffi/unsafe_checks_warn.tr --warn E191
+E192 tests/46_stdlib_surface/02_runtime_modules.tr --warn E192
+E193 tests/06_structs/14_struct_stress.tr --warn E193
+E194 tests/05_arrays_pointers_ffi/unsafe_checks_warn.tr --warn E194

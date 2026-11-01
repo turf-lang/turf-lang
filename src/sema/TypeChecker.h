@@ -235,6 +235,7 @@ public:
     // otherwise leave every SUBSEQUENT top-level declaration in the same file
     // wrongly gate-exempt for the rest of the compile.
     UnsafeDepth_ = 0;
+    UnsafeUsed_.clear();
     // Same reasoning as UnsafeDepth_ immediately above -- a TypeError raised
     // mid-body inside a `@caller_location` function skips visitFuncDef()'s
     // own restore of InCallerLocationFunc_ on the way out.
@@ -913,6 +914,10 @@ private:
   /// (Resolver.h) -- incremented/decremented bracketing visitUnsafeBlock()'s
   /// body traversal. Consulted by isUnsafeGateExempt().
   int UnsafeDepth_ = 0;
+  /// AN-1 (E193): one entry per open `unsafe { }` block, innermost last; set
+  /// when a gated use inside it is let through (isUnsafeGateExempt()).
+  /// Mutable because that check is const.
+  mutable std::vector<char> UnsafeUsed_;
 
   /// True while visiting the body of a function declared
   /// `@caller_location`. A plain bool, not a counter like UnsafeDepth_:

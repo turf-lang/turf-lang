@@ -1,0 +1,23 @@
+An integer converted to a pointer
+
+`x to T*` with an integer `x` makes a pointer to whatever happens to be at that address. The compiler cannot know what is there, or whether anything is:
+
+    fn device(): int {
+        unsafe {
+            mut port: int* = 4096 to int*;   // WARNING (E192 at `warn`)
+        }
+        return 0;
+    }
+
+Get a pointer from what it points to -- `&x`, an allocation -- or write `null` for "no address":
+
+    fn device(): int {
+        mut value: int = 0;
+        unsafe {
+            mut port: int* = &value to int*;
+            mut none: int* = null;
+        }
+        return value;
+    }
+
+This warning starts at `allow` in 2.3: turn it on with `turf build --warn E192` (or `[lints] E192 = "warn"` in turf.toml).

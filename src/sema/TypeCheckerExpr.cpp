@@ -10,6 +10,7 @@
  * @copyright Copyright (c) 2026 TurfLang contributors.  Apache License.
  */
 
+#include "frontend/Parser.h" // IsLibStdWarningLocation
 #include "sema/TypeChecker.h"
 
 // AST.h is needed for the full definition of every node type.
@@ -1454,6 +1455,11 @@ void TypeChecker::visitCast(CastExprAST &Node) {
   const bool SelfCopy = CopyOut && OperandVar && OperandVar->getName() == "self";
   if (!checkUnsafeGate(Node.getDestTypePtr().get(), Node.getLoc(), &Node) && !SelfCopy)
     checkUnsafeGate(OperandTy.get(), Node.getLoc(), &Node);
+  // AN-1 (E192): an integer made into a pointer or a reference.
+  if (OperandTy && (OperandTy->isInt() || OperandTy->isInt32()) && DestTy &&
+      (DestTy->isPointer() || DestTy->isReference() || DestTy->isNullableReference()) &&
+      !IsLibStdWarningLocation(Node.getLoc().Filename))
+    IntToPointerCastWarning(Node.getLoc(), DestTy->getName()).emit();
 
   // `(h.next to &Node)`: NullabilityPass proves `&?T -> &T` only for a
   // variable operand, and used to let every other operand through unchecked

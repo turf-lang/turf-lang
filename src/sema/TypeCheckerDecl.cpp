@@ -631,6 +631,7 @@ void TypeChecker::visitFuncDef(FuncDefExprAST &Node) {
   const auto SavedNarrow = MachineNarrowStack_;
   const auto SavedLoopVars = LoopVarTypes_;
   const int SavedUnsafe = UnsafeDepth_;
+  const size_t SavedUnsafeUsed = UnsafeUsed_.size();
   const bool SavedCallerLocation = InCallerLocationFunc_;
   const std::string SavedFuncName = CurrentFuncName_;
   const std::string SavedModule = CurrentModule_;
@@ -646,6 +647,7 @@ void TypeChecker::visitFuncDef(FuncDefExprAST &Node) {
     MachineNarrowStack_ = SavedNarrow;
     LoopVarTypes_ = SavedLoopVars;
     UnsafeDepth_ = SavedUnsafe;
+    UnsafeUsed_.resize(SavedUnsafeUsed);
     InCallerLocationFunc_ = SavedCallerLocation;
     CurrentFuncName_ = SavedFuncName;
     CurrentModule_ = SavedModule;

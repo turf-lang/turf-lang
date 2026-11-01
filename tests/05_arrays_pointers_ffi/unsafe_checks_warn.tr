@@ -1,0 +1,156 @@
+// AN-1, issue #349: the checks on `unsafe` code, each a warning that starts
+// at `allow` (turned on here), each with its negative beside it:
+//   E188 a raw pointer that may be null, dereferenced (`malloc` may return
+//        null; `mem::alloc` and a tested pointer do not warn);
+//   E189 freeing the address of a variable (freeing an allocation does not);
+//   E190 a write through a pointer into an `immut` array (a `mut` one does
+//        not);
+//   E191 indexing a raw pointer with an index nothing bounds (`0..10` does
+//        not);
+//   E192 an integer made into a pointer (`&x` made into one does not);
+//   E193 an `unsafe` block nothing in it needs;
+//   E194 an `unsafe` block of more than 40 statements.
+// LINT: --warn E188 --warn E189 --warn E190 --warn E191 --warn E192 --warn E193 --warn E194
+// EXPECT-DIAG: `r` is a raw pointer that may be null here
+// EXPECT-NO-DIAG: `q` is a raw pointer that may be null here
+// EXPECT-NO-DIAG: `p` is a raw pointer that may be null here
+// EXPECT-DIAG: This frees `px` (`&x`), which did not come from an allocation
+// EXPECT-NO-DIAG: This frees `q`
+// EXPECT-DIAG: This writes through `pa`, which points into `a`, an `immut` array
+// EXPECT-NO-DIAG: which points into `b`
+// EXPECT-DIAG: This indexes the raw pointer `p` with an index the compiler cannot bound
+// EXPECT-DIAG: p[i] = i;
+// EXPECT-NO-DIAG: p[k] = k;
+// EXPECT-DIAG: This converts an integer to `int*`
+// EXPECT-DIAG: mut addr: int* = 4096 to int*;
+// EXPECT-DIAG: Nothing in this `unsafe { }` block needs it
+// EXPECT-DIAG: This `unsafe { }` block holds 42 statements (more than 40)
+import mem;
+import test;
+
+fn may_be_null(): int {
+    unsafe {
+        mut q: int* = mem::alloc(16) to int*;
+        q[0] = 1;
+        mut p: int* = null;
+        if p != null {
+            p[0] = 2;
+        }
+        mut r: int* = mem::malloc(16) to int*;
+        r[0] = 3;
+        mem::free(q);
+        mem::free(r);
+    }
+    return 0;
+}
+
+fn frees_a_variable(): int {
+    mut x: int = 5;
+    unsafe {
+        mut px: void* = &x to void*;
+        mem::free(px);
+        mut q: void* = mem::alloc(8);
+        mem::free(q);
+    }
+    return x;
+}
+
+fn writes_immutable(): int {
+    immut a: int[4] = [1, 2, 3, 4];
+    mut b: int[4] = [1, 2, 3, 4];
+    unsafe {
+        mut pa: int* = &a to int*;
+        pa[0] = 9;
+        mut pb: int* = &b to int*;
+        pb[0] = 9;
+    }
+    return a[0] + b[0];
+}
+
+fn indexes(n: int): int {
+    unsafe {
+        mut w: int* = mem::alloc(80) to int*;
+        mut p: int* = w;
+        for i in 0..n {
+            p[i] = i;
+        }
+        for k in 0..10 {
+            p[k] = k;
+        }
+        mem::free(w);
+    }
+    return 0;
+}
+
+fn from_integer(): int {
+    mut x: int = 1;
+    unsafe {
+        mut addr: int* = 4096 to int*;
+        mut fine: int* = &x to int*;
+        test::assert(addr != fine, "different");
+    }
+    return 0;
+}
+
+fn needless(): int {
+    mut y: int = 1;
+    unsafe {
+        y += 1;
+    }
+    return y;
+}
+
+fn large(): int {
+    mut t: int = 0;
+    unsafe {
+        mut raw: int* = &t to int*;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+        t += 1;
+    }
+    return t;
+}
+
+fn main(): int {
+    test::assert(needless() == 2, "needless");
+    test::assert(large() == 41, "large");
+    return 0;
+}

@@ -1,0 +1,29 @@
+A raw pointer that may be null is dereferenced
+
+A raw pointer (`T*`, `ptr`) can be null, and nothing checks it at run time: reading a field, an index or a method through a null pointer crashes the program. This dereference is not proven safe, because the pointer was not tested against `null` on every path that reaches it and does not come from something that is never null:
+
+    import mem;
+
+    fn first(): int {
+        unsafe {
+            mut p: int* = mem::malloc(16) to int*;   // malloc may return null
+            p[0] = 1;                                // WARNING (E188 at `warn`)
+            return p[0];
+        }
+    }
+
+Test the pointer first, or get it from something that is never null: `mem::alloc` (which stops the program instead of returning null), `&x`, or `self`:
+
+    import mem;
+
+    fn first(): int {
+        unsafe {
+            mut p: int* = mem::alloc(16) to int*;
+            p[0] = 1;
+            mut v: int = p[0];
+            mem::free(p);
+            return v;
+        }
+    }
+
+Only a pointer held in a variable is checked; a pointer read from a field is not. This warning starts at `allow` in 2.3: turn it on with `turf build --warn E188` (or `[lints] E188 = "warn"` in turf.toml).

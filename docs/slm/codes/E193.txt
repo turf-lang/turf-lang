@@ -1,0 +1,35 @@
+TURF E193 -- UNSAFE BLOCK THAT NOTHING NEEDS (WARNING):
+
+CAUSE:
+  An `unsafe { }` block holds no raw-pointer declaration, cast or
+  dereference, so nothing in it needs `unsafe`. This is a WARNING (it starts
+  at `allow`).
+
+INCORRECT (compiles, but warns at `warn`):
+    fn bump(): int {
+        mut y: int = 1;
+        unsafe {
+            y += 1;
+        }
+        return y;
+    }
+
+    fn main(): int {
+        return 0;
+    }
+
+CORRECT:
+    fn bump(): int {
+        mut y: int = 1;
+        y += 1;
+        return y;
+    }
+
+    fn main(): int {
+        return bump() - 2;
+    }
+
+FIX:
+  Remove the `unsafe { }` braces and keep the statements.
+
+RELATED: E130 (raw pointer outside unsafe), E194.

@@ -1,0 +1,27 @@
+TURF E194 -- VERY LARGE UNSAFE BLOCK (WARNING):
+
+CAUSE:
+  An `unsafe { }` block holds more than 40 statements (counting nested
+  blocks), so the operations that need care are hard to find in it. This is
+  a WARNING (it starts at `allow`).
+
+CORRECT:
+    fn work(): int {
+        mut t: int = 0;
+        unsafe {
+            mut raw: int* = &t to int*;
+            raw[0] = 1;
+        }
+        t += 1;
+        return t;
+    }
+
+    fn main(): int {
+        return work() - 2;
+    }
+
+FIX:
+  Keep only the raw-pointer operations inside `unsafe { }`; move the other
+  statements out of the block or into a function.
+
+RELATED: E193.

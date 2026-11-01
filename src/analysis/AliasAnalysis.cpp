@@ -337,6 +337,174 @@ static void reportLeaks(const CFG &Cfg) {
 }
 
 
+// ─── AN-1: where a pointer came from (E189, E190) ──────────────────────────
+// TDP-2-007, issue #349. Variables assigned to one another form a group, as
+// for E187. A group is classified only when every value bound into it comes
+// from the same provable source, so a group that is ever given anything
+// else (an allocation, a parameter, a call's result) is never reported:
+//   - Stack: the address of a local value (`&x`, `&x to int*`): freeing it
+//     is E189;
+//   - an `immut` array (`&a to int*`, `&a[i] to int*`): a write through it
+//     (`p[i] = v`, `p.f = v`, `p[i] += v`, `p[i]++`) is E190.
+namespace {
+class ProvenanceScan : public ASTChildWalker {
+public:
+  struct Source {
+    bool Stack = false;
+    const VariableSymbol *ImmutArray = nullptr;
+    std::string Address; // what `&` was taken of, for the message
+  };
+  std::unordered_map<const VariableSymbol *, const VariableSymbol *> Parent;
+  // Every binding into a group, by representative, after the walk.
+  std::vector<std::pair<const VariableSymbol *, Source>> Bindings;
+  struct Write { const VariableSymbol *Var; SourceLocation Loc; std::string Name; };
+  std::vector<Write> Writes;
+  struct Free { const VariableSymbol *Var; Source Direct; SourceLocation Loc; std::string Name; };
+  std::vector<Free> Frees;
+
+  const VariableSymbol *find(const VariableSymbol *V) {
+    for (auto It = Parent.find(V); It != Parent.end() && It->second != V; It = Parent.find(V))
+      V = It->second;
+    return V;
+  }
+
+  static Source classify(const ExprAST *E) {
+    Source S;
+    if (auto *C = dynamic_cast<const CastExprAST *>(E))
+      return classify(C->getOperand());
+    auto *A = dynamic_cast<const AddressOfExprAST *>(E);
+    if (!A) return S;
+    const ExprAST *Of = A->getOperand();
+    if (auto *AA = dynamic_cast<const ArrayAccessExprAST *>(Of))
+      Of = AA->getBase();
+    auto *V = dynamic_cast<const VariableExprAST *>(Of);
+    const VariableSymbol *Sym = V ? V->getResolvedSymbol() : nullptr;
+    if (!Sym || !Sym->Type || Sym->Type->isPointer() || Sym->Type->isReference() ||
+        Sym->Type->isNullableReference() || Sym->IsParameter)
+      return S;
+    if (Of == A->getOperand()) {
+      S.Stack = true;
+      S.Address = "`&" + Sym->Name + "`";
+    }
+    if (Sym->IsImmutable && Sym->Type->isArray())
+      S.ImmutArray = Sym;
+    return S;
+  }
+
+  void visitVarDecl(VarDeclExprAST &Node) override {
+    bind(Node.getResolvedSymbol(), Node.getInitializer());
+    visitChild(Node.getInitializer());
+  }
+  void visitAssignment(AssignmentExprAST &Node) override {
+    if (auto *V = dynamic_cast<const VariableExprAST *>(Node.getLHS()))
+      bind(V->getResolvedSymbol(), Node.getRHS());
+    else
+      noteWrite(Node.getLHS(), Node.getLoc());
+    ASTChildWalker::visitAssignment(Node);
+  }
+  void visitCompoundAssignment(CompoundAssignmentExprAST &Node) override {
+    if (auto *V = dynamic_cast<const VariableExprAST *>(Node.getLHS()))
+      bind(V->getResolvedSymbol(), nullptr);
+    else
+      noteWrite(Node.getLHS(), Node.getLoc());
+    ASTChildWalker::visitCompoundAssignment(Node);
+  }
+  void visitPostfixExpr(PostfixExprAST &Node) override {
+    if (auto *V = dynamic_cast<const VariableExprAST *>(Node.getOperand()))
+      bind(V->getResolvedSymbol(), nullptr);
+    else
+      noteWrite(Node.getOperand(), Node.getLoc());
+    ASTChildWalker::visitPostfixExpr(Node);
+  }
+  void visitFuncCall(FuncCallExprAST &Node) override {
+    noteFree(Node);
+    ASTChildWalker::visitFuncCall(Node);
+  }
+  void visitMethodCall(MethodCallExprAST &Node) override {
+    noteFree(Node);
+    ASTChildWalker::visitMethodCall(Node);
+  }
+  // `&x` handed anywhere but a binding or a free gives the group no source
+  // here; writes through other paths are the callee's business.
+
+private:
+  void bind(const VariableSymbol *S, const ExprAST *Value) {
+    if (!S) return;
+    Parent.try_emplace(S, S);
+    if (auto *R = dynamic_cast<const VariableExprAST *>(Value)) {
+      if (const VariableSymbol *RS = R->getResolvedSymbol()) {
+        Parent.try_emplace(RS, RS);
+        Parent[find(S)] = find(RS);
+        if (RS->IsParameter) Bindings.push_back({RS, Source{}});
+        return;
+      }
+    }
+    Bindings.push_back({S, Value ? classify(Value) : Source{}});
+  }
+  void noteWrite(const ExprAST *Target, SourceLocation Loc) {
+    const ExprAST *Base = nullptr;
+    if (auto *AA = dynamic_cast<const ArrayAccessExprAST *>(Target)) Base = AA->getBase();
+    else if (auto *FA = dynamic_cast<const FieldAccessExprAST *>(Target)) Base = FA->getBase();
+    auto *V = dynamic_cast<const VariableExprAST *>(Base);
+    if (V && V->getResolvedSymbol() && V->getResolvedSymbol()->Type &&
+        V->getResolvedSymbol()->Type->isPointer() && !V->getResolvedSymbol()->Type->isReference())
+      Writes.push_back({V->getResolvedSymbol(), Loc, V->getName()});
+  }
+  void noteFree(const ExprAST &Call) {
+    const ExprAST *Freed = OwnershipAnnotation::releasedArgument(Call);
+    if (!Freed) return;
+    SourceLocation Loc;
+    if (auto *MC = dynamic_cast<const MethodCallExprAST *>(&Call)) Loc = MC->getLoc();
+    else Loc = static_cast<const FuncCallExprAST &>(Call).getLoc();
+    if (auto *V = dynamic_cast<const VariableExprAST *>(Freed))
+      Frees.push_back({V->getResolvedSymbol(), Source{}, Loc, V->getName()});
+    else
+      Frees.push_back({nullptr, classify(Freed), Loc, ""});
+  }
+};
+} // namespace
+
+static void reportPointerProvenance(const CFG &Cfg) {
+  const bool FreeCheck = LintLevels::levelOf("E189") != LintLevels::Level::Allow;
+  const bool WriteCheck = LintLevels::levelOf("E190") != LintLevels::Level::Allow;
+  if (!FreeCheck && !WriteCheck) return;
+  ProvenanceScan Scan;
+  for (const auto &BB : Cfg.getBlocks())
+    for (const ExprAST *Stmt : BB->getStatements())
+      Scan.visitChild(Stmt);
+  // Per group: every binding is stack (and which), every binding comes from
+  // one immut array (and which).
+  struct Group { bool AllStack = true, AllImmut = true; std::string Address;
+                 const VariableSymbol *Array = nullptr; bool Any = false; };
+  std::unordered_map<const VariableSymbol *, Group> Groups;
+  for (const auto &[V, Src] : Scan.Bindings) {
+    Group &G = Groups[Scan.find(V)];
+    G.Any = true;
+    G.AllStack = G.AllStack && Src.Stack;
+    if (Src.Stack) G.Address = Src.Address;
+    G.AllImmut = G.AllImmut && Src.ImmutArray && (!G.Array || G.Array == Src.ImmutArray);
+    if (Src.ImmutArray) G.Array = Src.ImmutArray;
+  }
+  auto groupOf = [&](const VariableSymbol *V) -> const Group * {
+    auto It = Groups.find(Scan.find(V));
+    return It == Groups.end() || !It->second.Any ? nullptr : &It->second;
+  };
+  if (FreeCheck)
+    for (const auto &F : Scan.Frees) {
+      if (IsLibStdWarningLocation(F.Loc.Filename)) continue;
+      if (!F.Var && F.Direct.Stack)
+        FreeOfNonHeapPointerWarning(F.Loc, F.Direct.Address).emit();
+      else if (const Group *G = F.Var ? groupOf(F.Var) : nullptr; G && G->AllStack)
+        FreeOfNonHeapPointerWarning(F.Loc, "`" + F.Name + "` (" + G->Address + ")").emit();
+    }
+  if (WriteCheck)
+    for (const auto &W : Scan.Writes) {
+      if (IsLibStdWarningLocation(W.Loc.Filename)) continue;
+      if (const Group *G = groupOf(W.Var); G && G->AllImmut && G->Array)
+        WriteThroughImmutableArrayWarning(W.Loc, W.Name, G->Array->Name).emit();
+    }
+}
+
 void AliasAnalysisPass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> & /*InitialAssigned*/) {
 
   const auto &Blocks = Cfg.getBlocks();
@@ -633,4 +801,5 @@ void AliasAnalysisPass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> & /*Initi
       transfer(b, IN[b], /*Report=*/true);
 
   reportLeaks(Cfg);
+  reportPointerProvenance(Cfg);
 }

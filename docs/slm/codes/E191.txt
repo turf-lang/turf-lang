@@ -1,0 +1,48 @@
+TURF E191 -- RAW-POINTER INDEX WITH NO BOUND (WARNING):
+
+CAUSE:
+  A raw pointer is indexed (`p[i]`) with an index the compiler cannot bound:
+  not proven non-negative, or with no limit from above. Nothing checks the
+  index at run time. This is a WARNING (it starts at `allow`).
+
+INCORRECT (compiles, but warns at `warn`):
+    import mem;
+
+    fn fill(n: int): int {
+        unsafe {
+            mut p: int* = mem::alloc(80) to int*;
+            for i in 0..n {
+                p[i] = i;
+            }
+            mem::free(p);
+        }
+        return 0;
+    }
+
+    fn main(): int {
+        return 0;
+    }
+
+CORRECT:
+    import mem;
+
+    fn fill(n: int): int {
+        unsafe {
+            mut p: int* = mem::alloc(80) to int*;
+            for i in 0..10 {
+                p[i] = i;
+            }
+            mem::free(p);
+        }
+        return n;
+    }
+
+    fn main(): int {
+        return fill(0);
+    }
+
+FIX:
+  Keep the index in a range the code makes visible (`for i in 0..10`, or a
+  test `if i >= 0 && i < 10`), or use an array, whose index is checked.
+
+RELATED: E001 (constant array index out of bounds), E188.

@@ -1,0 +1,24 @@
+tests/05_arrays_pointers_ffi/unsafe_checks_warn.tr (2 warnings)
+
+── warning at line 105, col 5 [E194 · very large `unsafe` block]
+
+  This `unsafe { }` block holds 42 statements (more than 40): the code that needs care is hard to find in it.
+
+  Hint: Keep only the raw-pointer operations inside `unsafe { }`, and move the rest out, or into a function.
+
+  105 │     unsafe {
+      │     ^~~~~~ Here!
+
+  Run `turf --explain E194` for more details.
+
+── warning at line 106, col 9 [E163 · unused variable]
+
+  Warning: Variable 'raw' is declared but never used.
+
+  Hint: If the variable is intentionally unused, prefix its name with '_' by convention. Otherwise, remove the declaration or use its value.
+
+  106 │         mut raw: int* = &t to int*;
+      │         ^ Here!
+
+  Run `turf --explain E163` for more details.
+
