@@ -16,6 +16,7 @@
  * @date 2026-05-25
  */
 
+#include "analysis/AnalysisFacts.h"
 #include "codegen/Codegen.h"
 #include "frontend/AST.h"
 #include "analysis/Algorithms.h"
@@ -275,10 +276,10 @@ Value *BinaryExprAST::codegen() {
     // above, so NumericType->isNamed("int") is naturally false for it --
     // no separate exclusion needed (see §8 SEM-002's own "Generic
     // interactions" note on why this group must not touch that case).
-  // OPT-002: ProvenNoOverflow is set by ValueRangePass::markElidableChecks()
-  // (ValueRange.cpp) BEFORE Body->codegen() runs, when both operands proved
-  // to be the same known constants on every path reaching this node, AND
-  // the exact checked result is representable -- so `nsw` is sound here
+  // OPT-002 / NM-2: provenNoOverflow() (AnalysisFacts) holds the nodes
+  // ValueRangePass::markElidableChecks() (ValueRange.cpp) proved BEFORE
+  // Body->codegen() runs: the operands' ranges on every path reaching this
+  // node keep the exact checked result representable -- so `nsw` is sound here
   // specifically BECAUSE the trap was already proved unreachable (F-OPT-2,
   // §17.3), never attached speculatively.
   case '+':
@@ -286,7 +287,7 @@ Value *BinaryExprAST::codegen() {
     if (NumericType->isNamed("double"))
       return Builder->CreateFAdd(L, R, "addtmp");
     if (NumericType->isNamed("int"))
-      return ProvenNoOverflow ? Builder->CreateNSWAdd(L, R, "addtmp")
+      return provenNoOverflow(getNodeID()) ? Builder->CreateNSWAdd(L, R, "addtmp")
                               : EmitCheckedIntArith('+', L, R, Loc);
     return Builder->CreateAdd(L, R, "addtmp");
 
@@ -295,7 +296,7 @@ Value *BinaryExprAST::codegen() {
     if (NumericType->isNamed("double"))
       return Builder->CreateFSub(L, R, "subtmp");
     if (NumericType->isNamed("int"))
-      return ProvenNoOverflow ? Builder->CreateNSWSub(L, R, "subtmp")
+      return provenNoOverflow(getNodeID()) ? Builder->CreateNSWSub(L, R, "subtmp")
                               : EmitCheckedIntArith('-', L, R, Loc);
     return Builder->CreateSub(L, R, "subtmp");
 
@@ -304,7 +305,7 @@ Value *BinaryExprAST::codegen() {
     if (NumericType->isNamed("double"))
       return Builder->CreateFMul(L, R, "multmp");
     if (NumericType->isNamed("int"))
-      return ProvenNoOverflow ? Builder->CreateNSWMul(L, R, "multmp")
+      return provenNoOverflow(getNodeID()) ? Builder->CreateNSWMul(L, R, "multmp")
                               : EmitCheckedIntArith('*', L, R, Loc);
     return Builder->CreateMul(L, R, "multmp");
 
@@ -471,10 +472,10 @@ Value *BinaryExprAST::codegen() {
   // gate is needed here the way +/-/* need one (those also accept
   // double).
   case TOK_LSHIFT:
-    // OPT-002: see the '+'/'-'/'*' cases above for ProvenNoOverflow's
+    // OPT-002: see the '+'/'-'/'*' cases above for provenNoOverflow()'s
     // contract. Shl has no `with.overflow` intrinsic to build a plain
     // variant from -- the checked-safe result IS a plain CreateShl.
-    return ProvenNoOverflow ? Builder->CreateShl(L, R, "lshifttmp")
+    return provenNoOverflow(getNodeID()) ? Builder->CreateShl(L, R, "lshifttmp")
                             : EmitCheckedShl(L, R, Loc);
 
   // Bitwise right shift (arithmetic, preserves sign) -- amount checked,
@@ -571,9 +572,9 @@ Value *UnaryExprAST::codegen() {
       // Checked (FREEZE.md §6.2 row 7 names negation alongside +/-/*):
       // negating a genuine runtime INT64_MIN value is the one input with
       // no representable int64 result -- see EmitCheckedIntNegate()'s own
-      // doc comment. OPT-002: ProvenNoOverflow (see BinaryExprAST's cases,
+      // doc comment. OPT-002: provenNoOverflow() (see BinaryExprAST's cases,
       // CodegenExpr.cpp) means the operand is already known != INT64_MIN.
-      if (ProvenNoOverflow)
+      if (provenNoOverflow(getNodeID()))
         return Builder->CreateNSWNeg(OperandV, "negtmp");
       return EmitCheckedIntNegate(OperandV, Loc);
     }

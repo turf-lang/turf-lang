@@ -34,10 +34,31 @@ struct AnalysisFacts {
     }
   }
   bool isInt(uint64_t Id) const { return IntExprs.count(Id) > 0; }
+
+  // OPT-002 / NM-2: checks ValueRangePass::markElidableChecks() proved can
+  // never fire, so Codegen emits none (F-OPT-2: removal by proof only, never
+  // by `-O` level). ProvenNoOverflow: a checked `int` `+`, `-`, `*`, `<<`,
+  // unary `-`, `op=` or `++`/`--`, emitted as plain `nsw` arithmetic.
+  // ProvenInBounds: an index into a fixed-size array, emitted without its
+  // bounds check. A clone (a monomorphized body) has new node ids and is
+  // marked by its own analysis.
+  std::unordered_set<uint64_t> ProvenNoOverflow;
+  std::unordered_set<uint64_t> ProvenInBounds;
 };
 
 // The current compilation's facts, or null outside any.
 AnalysisFacts *Facts();
+
+// Whether the node with this id was proven to need no overflow / bounds
+// check (false outside a compilation).
+inline bool provenNoOverflow(uint64_t Id) {
+  const AnalysisFacts *F = Facts();
+  return F && F->ProvenNoOverflow.count(Id);
+}
+inline bool provenInBounds(uint64_t Id) {
+  const AnalysisFacts *F = Facts();
+  return F && F->ProvenInBounds.count(Id);
+}
 
 class AnalysisFactsScope {
 public:

@@ -16,6 +16,7 @@
  * @date 2026-05-25
  */
 
+#include "analysis/AnalysisFacts.h"
 #include "codegen/Codegen.h"
 #include "frontend/AST.h"
 #include "analysis/Algorithms.h"
@@ -670,8 +671,8 @@ Value *ArrayAccessExprAST::codegenLValue() {
       if (!Folded)
         return nullptr;
       IndexVal = ConstantInt::get(Type::getInt64Ty(*TheContext), *Folded);
-    } else if (!ProvenInBounds) {
-      // OPT-002: ProvenInBounds is set by ValueRangePass::markElidableChecks()
+    } else if (!provenInBounds(getNodeID())) {
+      // OPT-002: provenInBounds() (AnalysisFacts) is filled by ValueRangePass::markElidableChecks()
       // (ValueRange.cpp), which runs on a throwaway CFG BEFORE Body->codegen()
       // -- see that call site's own comment (CodegenFunc.cpp). F-OPT-2
       // (ARCHITECTURE_OVERHAUL.md §17.3): removal by proof only, independent
@@ -821,14 +822,14 @@ Value *ArrayAccessExprAST::codegen() {
       Builder->CreateStore(BaseVal, TempAlloca);
 
       // OPT-002: see codegenLValue()'s identical guard's comment. In
-      // practice ProvenInBounds is never true on THIS path -- markNode()
-      // (ValueRange.cpp) only sets it when the base is a plain array
+      // practice provenInBounds() is never true on THIS path -- markNode()
+      // (ValueRange.cpp) only records it when the base is a plain array
       // variable, and a plain array variable's base always succeeds via
       // codegenLValue() above, which never reaches this R-value fallback --
       // but the guard is kept here too rather than assumed, for the same
       // reason the compile-time-constant check just above is duplicated
       // rather than shared between the two branches.
-      if (!ProvenInBounds)
+      if (!provenInBounds(getNodeID()))
         IndexVal = EmitRuntimeBoundsCheck(
             IndexVal, ConstantInt::get(Type::getInt64Ty(*TheContext), ArraySize),
             ArrayDisplayName(Base.get()), Loc);

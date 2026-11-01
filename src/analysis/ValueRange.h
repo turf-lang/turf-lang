@@ -26,11 +26,10 @@ public:
   // check, so its results arrive too late to suppress anything this
   // compile emits). Never raises a diagnostic -- out-of-range constant
   // indices are still caught only by the existing, untouched runOnCFG()
-  // call, at the same point it always has. The only effect here is setting
-  // ArrayAccessExprAST::ProvenInBounds / {Binary,Unary,CompoundAssignment,
-  // Postfix}ExprAST::ProvenNoOverflow on nodes this dataflow proves safe, so
-  // Codegen can skip emitting the corresponding runtime check -- F-OPT-2:
-  // removal by proof only, independent of `-O` level.
+  // call, at the same point it always has. The only effect here is adding
+  // the nodes this dataflow proves safe to AnalysisFacts::ProvenInBounds /
+  // ProvenNoOverflow, so Codegen can skip emitting the corresponding runtime
+  // check -- F-OPT-2: removal by proof only, independent of `-O` level.
   void markElidableChecks(CFG &Cfg, const std::vector<SymbolID> &InitialAssigned);
 };
 

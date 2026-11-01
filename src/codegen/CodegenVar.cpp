@@ -16,6 +16,7 @@
  * @date 2026-05-25
  */
 
+#include "analysis/AnalysisFacts.h"
 #include "codegen/Codegen.h"
 #include "frontend/AST.h"
 #include "analysis/Algorithms.h"
@@ -521,21 +522,21 @@ Value *CompoundAssignmentExprAST::codegen() {
   // literal re-walk of BinaryExprAST at the Codegen layer (each already had
   // its own div-by-zero check, above/below, before this group) -- see
   // EmitCheckedIntArith()'s own doc comment (CodegenCore.cpp). OPT-002:
-  // ProvenNoOverflow -- see BinaryExprAST::codegen()'s identical cases
+  // provenNoOverflow() -- see BinaryExprAST::codegen()'s identical cases
   // (CodegenExpr.cpp) for the contract.
   case '+':
     Result = isDouble ? Builder->CreateFAdd(LHSVal, CastRHS, "addtmp")
-             : ProvenNoOverflow ? Builder->CreateNSWAdd(LHSVal, CastRHS, "addtmp")
+             : provenNoOverflow(getNodeID()) ? Builder->CreateNSWAdd(LHSVal, CastRHS, "addtmp")
                                 : EmitCheckedIntArith('+', LHSVal, CastRHS, Loc);
     break;
   case '-':
     Result = isDouble ? Builder->CreateFSub(LHSVal, CastRHS, "subtmp")
-             : ProvenNoOverflow ? Builder->CreateNSWSub(LHSVal, CastRHS, "subtmp")
+             : provenNoOverflow(getNodeID()) ? Builder->CreateNSWSub(LHSVal, CastRHS, "subtmp")
                                 : EmitCheckedIntArith('-', LHSVal, CastRHS, Loc);
     break;
   case '*':
     Result = isDouble ? Builder->CreateFMul(LHSVal, CastRHS, "multmp")
-             : ProvenNoOverflow ? Builder->CreateNSWMul(LHSVal, CastRHS, "multmp")
+             : provenNoOverflow(getNodeID()) ? Builder->CreateNSWMul(LHSVal, CastRHS, "multmp")
                                 : EmitCheckedIntArith('*', LHSVal, CastRHS, Loc);
     break;
   case '/': {
@@ -599,8 +600,8 @@ Value *CompoundAssignmentExprAST::codegen() {
     break;
   case TOK_LSHIFT:
     // Checked -- see EmitCheckedShl()'s own doc comment (CodegenCore.cpp).
-    // OPT-002: ProvenNoOverflow, same contract as the '+'/'-'/'*' cases above.
-    Result = ProvenNoOverflow ? Builder->CreateShl(LHSVal, CastRHS, "lshiftassigntmp")
+    // OPT-002: provenNoOverflow(), same contract as the '+'/'-'/'*' cases above.
+    Result = provenNoOverflow(getNodeID()) ? Builder->CreateShl(LHSVal, CastRHS, "lshiftassigntmp")
                               : EmitCheckedShl(LHSVal, CastRHS, Loc);
     break;
   case TOK_RSHIFT:
@@ -673,14 +674,14 @@ Value *PostfixExprAST::codegen() {
     // Checked for int (never double) -- `x++`/`x--` is arithmetically
     // `x = x +/- 1`, so it gets the same SEM-002 overflow trap as any other
     // '+'/'-' -- see EmitCheckedIntArith()'s own doc comment (CodegenCore.cpp).
-    // OPT-002: ProvenNoOverflow, same contract as BinaryExprAST's cases
+    // OPT-002: provenNoOverflow(), same contract as BinaryExprAST's cases
     // (CodegenExpr.cpp).
     NewVal = isDouble ? Builder->CreateFAdd(OldVal, One, "inctmp")
-             : ProvenNoOverflow ? Builder->CreateNSWAdd(OldVal, One, "inctmp")
+             : provenNoOverflow(getNodeID()) ? Builder->CreateNSWAdd(OldVal, One, "inctmp")
                                 : EmitCheckedIntArith('+', OldVal, One, Loc);
   } else {
     NewVal = isDouble ? Builder->CreateFSub(OldVal, One, "dectmp")
-             : ProvenNoOverflow ? Builder->CreateNSWSub(OldVal, One, "dectmp")
+             : provenNoOverflow(getNodeID()) ? Builder->CreateNSWSub(OldVal, One, "dectmp")
                                 : EmitCheckedIntArith('-', OldVal, One, Loc);
   }
 

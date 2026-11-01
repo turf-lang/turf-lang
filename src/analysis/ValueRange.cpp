@@ -1251,11 +1251,10 @@ struct ElisionStats {
 ElisionStats Stats;
 } // namespace
 
-// Marks every node this dataflow proves safe. Needs a non-const ExprAST*
-// throughout (the entire point is to mutate ProvenInBounds/ProvenNoOverflow),
-// so getters whose declared return type is `const ExprAST *` are const_cast
-// back -- these are still genuinely non-const objects owned by the same Body
-// tree Codegen is about to walk. A node kind with no case here is simply
+// Records every node this dataflow proves safe in the compilation's
+// AnalysisFacts (ProvenInBounds / ProvenNoOverflow, keyed by node id), which
+// Codegen reads. The walk takes non-const nodes for the visitors it shares,
+// so getters returning `const ExprAST *` are const_cast back. A node kind with no case here is simply
 // never marked, which keeps its checks. Within one statement no Ranged
 // variable changes (computeTrackedVars()), so the statement's entry state
 // holds for every node in it.
@@ -1266,7 +1265,7 @@ static void markNode(ExprAST *N, const RangeMap &Cur, const TrackedVars &TV,
   auto Cast = [](const ExprAST *C) { return const_cast<ExprAST *>(C); };
 
   if (auto *AA = dynamic_cast<ArrayAccessExprAST *>(N)) {
-    // A negative index counts from the end (#256), and ProvenInBounds skips
+    // A negative index counts from the end (#256), and a proven-in-bounds index skips
     // that adjustment too, so only [0, size) is proven.
     Range Idx = Ev.eval(AA->getIndex(), Cur);
     if (auto *BaseVar = dynamic_cast<const VariableExprAST *>(AA->getBase())) {
@@ -1274,7 +1273,7 @@ static void markNode(ExprAST *N, const RangeMap &Cur, const TrackedVars &TV,
       if (S && S->Type && S->Type->isArray() && !TV.Tainted.count(S))
         if (const auto *AT = dynamic_cast<const ArrayType *>(S->Type.get()))
           if (AT->getSize() > 0 && Idx.Lo >= 0 && Idx.Hi < AT->getSize()) {
-            AA->ProvenInBounds = true;
+            Facts()->ProvenInBounds.insert(AA->getNodeID());
             ++Stats.Bounds;
           }
     }
@@ -1291,7 +1290,7 @@ static void markNode(ExprAST *N, const RangeMap &Cur, const TrackedVars &TV,
     else if (Op == TOK_LSHIFT)
       Safe = shlProvablySafe(Ev.eval(B->getLHS(), Cur), Ev.eval(B->getRHS(), Cur));
     if (Safe) {
-      B->ProvenNoOverflow = true;
+      Facts()->ProvenNoOverflow.insert(B->getNodeID());
       ++Stats.Overflow;
     }
     Mark(Cast(B->getLHS()));
@@ -1301,7 +1300,7 @@ static void markNode(ExprAST *N, const RangeMap &Cur, const TrackedVars &TV,
 
   if (auto *U = dynamic_cast<UnaryExprAST *>(N)) {
     if (U->getOpcode() == '-' && negProvablySafe(Ev.eval(U->getOperand(), Cur))) {
-      U->ProvenNoOverflow = true;
+      Facts()->ProvenNoOverflow.insert(U->getNodeID());
       ++Stats.Overflow;
     }
     Mark(Cast(U->getOperand()));
@@ -1319,7 +1318,7 @@ static void markNode(ExprAST *N, const RangeMap &Cur, const TrackedVars &TV,
     bool Safe = Op == TOK_LSHIFT ? shlProvablySafe(L, R)
               : (Op == '+' || Op == '-' || Op == '*') && arithProvablySafe(Op, L, R);
     if (Safe) {
-      CA->ProvenNoOverflow = true;
+      Facts()->ProvenNoOverflow.insert(CA->getNodeID());
       ++Stats.Overflow;
     }
     Mark(Cast(CA->getLHS()));
@@ -1330,7 +1329,7 @@ static void markNode(ExprAST *N, const RangeMap &Cur, const TrackedVars &TV,
   if (auto *P = dynamic_cast<PostfixExprAST *>(N)) {
     Range V = Ev.eval(P->getOperand(), Cur);
     if (!V.full() && (P->getOpcode() == '+' ? V.Hi < IntMax : V.Lo > IntMin)) {
-      P->ProvenNoOverflow = true;
+      Facts()->ProvenNoOverflow.insert(P->getNodeID());
       ++Stats.Overflow;
     }
     Mark(Cast(P->getOperand()));
@@ -1377,7 +1376,7 @@ void ValueRangePass::markElidableChecks(CFG &Cfg,
   // TURF_NO_ELISION=1 keeps every check: the differential fuzz
   // (scripts/dev/fuzz/elision_diff.py) compares a program built with and
   // without, since a wrong range would silently drop a needed check.
-  if (std::getenv("TURF_NO_ELISION")) return;
+  if (std::getenv("TURF_NO_ELISION") || !Facts()) return;
   TrackedVars TV = computeTrackedVars(Cfg);
   // Converge first, then mark in one walk per block from the converged IN[],
   // so every mark comes from dataflow state proven on EVERY path, never a
