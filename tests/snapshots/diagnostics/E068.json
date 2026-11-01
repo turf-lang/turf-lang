@@ -1,0 +1,1 @@
+{"category":"undeclared variable","code":"E068","denied":false,"file":"tests/45_pattern_matching/fail_pattern_unknown_field.tr","fix":null,"hint":"It may be from the current file: 'x', 'y'","message":"Struct 'P' has no field named 'z'.","related":[],"severity":"error","span":{"end":{"column":22,"line":9},"start":{"column":21,"line":9}},"title":null,"version":"1.0"}

@@ -1,0 +1,14 @@
+tests/05_arrays_pointers_ffi/16_alias_analysis_shadowing.tr (1 warning)
+
+── warning at line 28, col 13 [E152 · shadowed variable]
+
+  Warning: Just so you know, you're creating a new 'p' that hides an older one!
+  Note: originally declared here (line 24, col 9)
+
+  Hint: It's better to give this new variable a different name to avoid confusion later.
+
+  28 │             mut p: int* = null;
+     │             ^~~ Here!
+
+  Run `turf --explain E152` for more details.
+

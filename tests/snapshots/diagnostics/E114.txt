@@ -1,0 +1,12 @@
+tests/06_structs/fail_duplicate_struct_field.tr (1 error)
+
+── error at line 11, col 5 [E114 · duplicate member]
+
+  Struct 'User' already has a field named 'name'.
+  Hint: Field names must be unique within a struct -- rename one of them.
+
+  11 │     name: int
+     │     ^~~~ Here!
+
+  Run `turf --explain E114` for more details.
+

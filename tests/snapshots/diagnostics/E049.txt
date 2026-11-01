@@ -1,0 +1,25 @@
+tests/06_structs/fail_incomplete_constructor_never_assigned.tr (1 error, 1 warning)
+
+── error at line 13, col 1 [E049 · incomplete constructor]
+
+  'Point.new' doesn't assign every field on all paths.
+  Not definitely assigned on every path: y
+
+  Hint: Every field of 'Point' must be set via 'self.<field> = ...' on every path through 'new' -- including inside every if/else branch and before any early return.
+
+  13 │ fn Point.new(x: int): void {
+     │ ^~ Here!
+
+  Run `turf --explain E049` for more details.
+
+── warning at line 18, col 5 [E163 · unused variable]
+
+  Warning: Variable 'p' is declared but never used.
+
+  Hint: If the variable is intentionally unused, prefix its name with '_' by convention. Otherwise, remove the declaration or use its value.
+
+  18 │     mut p: Point = Point::new(1);
+     │     ^ Here!
+
+  Run `turf --explain E163` for more details.
+

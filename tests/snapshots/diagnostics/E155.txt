@@ -1,0 +1,14 @@
+tests/14_cfg_analysis/47_lint_reaches_unsafe_block.tr (1 warning)
+
+── warning at line 6, col 15 [E155 · redundant comparison]
+
+  Warning: This comparison is redundant!
+  comparing with 'true' or 'false' using '==' is the same as just writing just the value itself (drop the '== true' / '== false').
+
+  Hint: You can simplify this by removing the comparison entirely.
+
+  6 │         if (b == true) {
+    │               ^~ Here!
+
+  Run `turf --explain E155` for more details.
+

@@ -1,0 +1,17 @@
+tests/55_compiler_fixes/fail_fix_unknown_qualifier.tr (1 error)
+
+── error at line 7, col 22 [E031 · unknown scope qualifier]
+
+  'Colr' isn't a known enum, struct, or module.
+
+  Hint: It may be from the current file: 'Color::Red'
+
+  7 │     immut c: Color = Colr::Red;
+    │                      ^~~~ Here!
+
+  Fix: replace 'Colr' with 'Color'
+  7 │     immut c: Color = Color::Red;
+    │                      ~~~~~
+
+  Run `turf --explain E031` for more details.
+

@@ -108,7 +108,9 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
     if (CalleeName == "main") {
       SemanticError(Node.getLoc(),
                      "'main' cannot be called directly -- it is the "
-                     "program's entry point, not an ordinary function.")
+                     "program's entry point, not an ordinary function.",
+                     "Move the code both places need into a function of its "
+                     "own, and call that from 'main' and from here.")
           .raise();
       return;
     }

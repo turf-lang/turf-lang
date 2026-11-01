@@ -1,0 +1,17 @@
+tests/01_syntax/fail_bad_keyword.tr (1 error)
+
+── error at line 7, col 5 [E014 · unknown keyword]
+
+  Hmm, I don't know the word 'iff'.
+
+  Hint: Did you mean: 'if'?
+
+  7 │     iff x > 5 {
+    │     ^~~ Here!
+
+  Fix: replace 'iff' with 'if'
+  7 │     if x > 5 {
+    │     ~~
+
+  Run `turf --explain E014` for more details.
+

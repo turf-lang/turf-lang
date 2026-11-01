@@ -1,0 +1,13 @@
+tests/25_errors/fail_payload_field_missing_type.tr (1 error)
+
+── error at line 5, col 18 [E096 · invalid error payload]
+
+  Invalid error payload: field 'path' of 'IOError::NotFound' has no type.
+
+  Hint: Write the type after a colon: `path: string`.
+
+  5 │     NotFound(path)
+    │                  ^ Here!
+
+  Run `turf --explain E096` for more details.
+

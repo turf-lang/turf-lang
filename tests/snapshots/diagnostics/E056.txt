@@ -1,0 +1,15 @@
+tests/03_typechecker/fail_null_param_primitive.tr (1 error)
+
+── error at line 8, col 8 [E056 · wrong argument type]
+
+  No matching overload!
+  No overload of 'foo' matches argument types (null).
+  Note: candidate: foo(int n) -> int (line 3, col 4)
+
+  Hint: 'null' is only valid for pointer-typed parameters -- none of the overloads above take a pointer here.
+
+  8 │     foo(null);
+    │        ^ Here!
+
+  Run `turf --explain E056` for more details.
+

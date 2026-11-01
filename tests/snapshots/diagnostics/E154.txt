@@ -1,0 +1,13 @@
+tests/04_control_flow/12_compare_empty.tr (1 warning)
+
+── warning at line 6, col 5 [E154 · empty compare]
+
+  Warning: Empty compare statement has no arms and no 'otherwise' — this is a no-op.
+
+  Hint: Add at least one 'matches' arm or an 'otherwise' arm.
+
+  6 │     compare x {}
+    │     ^~~~~~~ Here!
+
+  Run `turf --explain E154` for more details.
+

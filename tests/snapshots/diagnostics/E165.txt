@@ -1,0 +1,25 @@
+tests/04_control_flow/fail_break_outside_loop.tr (1 error, 1 warning)
+
+── error at line 5, col 9 [E007 · break, continue or return out of place]
+
+  Control flow error!
+  'break' used outside of a loop.
+
+  Hint: Make sure 'break' and 'continue' are inside a loop, and 'return' is inside a function.
+
+  5 │         break;
+    │         ^~~~~ Here!
+
+  Run `turf --explain E007` for more details.
+
+── warning at line 6, col 7 [E165 · empty branch]
+
+  Warning: The 'else' branch is empty — it doesn't do anything!
+
+  Hint: If you haven't written the code yet, add a comment like '// TODO'. Otherwise, you may be able to simplify this 'if' statement.
+
+  6 │     } else {}
+    │       ^~~~ Here!
+
+  Run `turf --explain E165` for more details.
+

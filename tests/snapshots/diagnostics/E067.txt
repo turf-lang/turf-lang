@@ -1,0 +1,14 @@
+tests/39_nullable_references/fail_heap_of_void.tr (1 error)
+
+── error at line 12, col 9 [E067 · a void value can't be used here]
+
+  Cannot heap-allocate 'void'!
+  'heap(...)' cannot allocate a 'void' value -- there is nothing to copy onto the heap.
+
+  Hint: Pass a variable or an expression with a value to `heap(...)`, not a call to a function declared `: void`.
+
+  12 │     heap(nothing());
+     │         ^ Here!
+
+  Run `turf --explain E067` for more details.
+

@@ -1,0 +1,1 @@
+{"category":"syntax error","code":"E107","denied":false,"file":"tests/04_control_flow/fail_do_while_missing_open_brace.tr","fix":null,"hint":"do-while loops must use braces: do { ... } while cond;","message":"Expected '{' to open the do-block body.","related":[],"severity":"error","span":{"end":{"column":7,"line":9},"start":{"column":5,"line":9}},"title":null,"version":"1.0"}

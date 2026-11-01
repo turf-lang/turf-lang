@@ -1,0 +1,15 @@
+tests/07_functions_modules/stdlib_shadow/fail_import_local_module_named_like_stdlib.tr (1 error)
+
+── error at line 7, col 8 [E090 · ambiguous module import]
+
+  Module 'list' is ambiguous: 2 different files answer to that name.
+    standard library                                       ./lib/std/collections/list.tr
+    next to fail_import_local_module_named_like_stdlib.tr  ./tests/07_functions_modules/stdlib_shadow/list.tr
+
+  Hint: A module may not share its name with a standard-library module. Rename ./tests/07_functions_modules/stdlib_shadow/list.tr (for example to 'my_list.tr') and import it by the new name.
+
+  7 │ import list;
+    │        ^~~~ Here!
+
+  Run `turf --explain E090` for more details.
+

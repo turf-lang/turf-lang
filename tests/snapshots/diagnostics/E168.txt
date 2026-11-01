@@ -1,0 +1,13 @@
+tests/14_cfg_analysis/42_identical_branches_warn.tr (1 warning)
+
+── warning at line 10, col 5 [E168 · identical branches]
+
+  Warning: Both branches of this 'if' do the same thing!
+
+  Hint: The 'if'/'else' can be removed — just keep the body. Or did you forget to change one of the branches?
+
+  10 │     if a > 0 {
+     │     ^~ Here!
+
+  Run `turf --explain E168` for more details.
+

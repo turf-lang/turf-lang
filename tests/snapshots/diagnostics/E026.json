@@ -1,0 +1,1 @@
+{"category":"general","code":"E026","denied":false,"file":"tests/02_resolver/fail_builtin_typo.tr","fix":null,"hint":"It may be from the current file: 'print', 'eprint', 'printf'","message":"Oops! Module 'io' has no function named 'pritn'.","related":[],"severity":"error","span":{"end":{"column":15,"line":6},"start":{"column":14,"line":6}},"title":null,"version":"1.0"}

@@ -1,0 +1,12 @@
+tests/06_structs/fail_void_struct_field.tr (1 error)
+
+── error at line 10, col 8 [E112 · void used as a type]
+
+  'void' cannot be a struct field's type.
+  Hint: 'void' only makes sense as a function's return type. Give field 'x' a real type instead.
+
+  10 │     x: void
+     │        ^~~~ Here!
+
+  Run `turf --explain E112` for more details.
+

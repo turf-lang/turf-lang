@@ -1,0 +1,7 @@
+// DX-10 snapshot of E091: `geometry` is in the build only as a dependency of
+// `shapes`, so `app` cannot import it.
+import geometry;
+
+fn main(): int {
+    return 0;
+}

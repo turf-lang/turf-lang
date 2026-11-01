@@ -1,0 +1,14 @@
+tests/07_functions_modules/fail_call_main_directly.tr (1 error)
+
+── error at line 7, col 16 [E011 · broken language rule]
+
+  Oops! Something doesn't add up:
+  'main' cannot be called directly -- it is the program's entry point, not an ordinary function.
+
+  Hint: Move the code both places need into a function of its own, and call that from 'main' and from here.
+
+  7 │     return main();
+    │                ^ Here!
+
+  Run `turf --explain E011` for more details.
+

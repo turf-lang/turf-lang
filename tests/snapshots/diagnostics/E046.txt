@@ -1,0 +1,17 @@
+tests/06_structs/fail_constructor_cannot_be_static.tr (1 error)
+
+── error at line 14, col 1 [E046 · constructor cannot be static]
+
+  'new' can't be 'static'.
+
+  Hint: 'Point.new' always initializes 'self' -- remove 'static' from its declaration.
+
+  14 │ fn Point.new(x: int, y: int) static: void {
+     │ ^~ Here!
+
+  Fix: remove 'static'
+  14 │ fn Point.new(x: int, y: int): void {
+     │                             ^
+
+  Run `turf --explain E046` for more details.
+

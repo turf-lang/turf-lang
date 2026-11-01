@@ -1,0 +1,1 @@
+{"category":"syntax error","code":"E109","denied":false,"file":"tests/05_arrays_pointers_ffi/fail_sizeof_variable.tr","fix":null,"hint":"Write its type instead: 'sizeof(int)'.","message":"'sizeof' takes a type, and 'a' is a variable.","related":[],"severity":"error","span":{"end":{"column":18,"line":8},"start":{"column":12,"line":8}},"title":"Expected a type!","version":"1.0"}

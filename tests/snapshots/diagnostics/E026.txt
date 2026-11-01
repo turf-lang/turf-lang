@@ -1,0 +1,13 @@
+tests/02_resolver/fail_builtin_typo.tr (1 error)
+
+── error at line 6, col 14 [E026 · module method not found]
+
+  Oops! Module 'io' has no function named 'pritn'.
+
+  Hint: It may be from the current file: 'print', 'eprint', 'printf'
+
+  6 │     io::pritn("Testing builtin typo");
+    │              ^ Here!
+
+  Run `turf --explain E026` for more details.
+

@@ -1,0 +1,13 @@
+tests/14_cfg_analysis/01_high_complexity_warns.tr (1 warning)
+
+── warning at line 10, col 1 [E158 · function too complex]
+
+  Warning: Function 'complex' has cyclomatic complexity 17 (threshold: 15). Consider breaking it into smaller functions.
+
+  Hint: High cyclomatic complexity makes code harder to test and maintain. Try splitting this function into smaller, focused helpers.
+
+  10 │ fn complex(x: int): int {
+     │ ^~ Here!
+
+  Run `turf --explain E158` for more details.
+

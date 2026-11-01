@@ -1,0 +1,12 @@
+tests/07_functions_modules/fail_export_mut_not_supported.tr (1 error)
+
+── error at line 5, col 1 [E021 · exported mutable variable]
+
+  'export mut' is not supported yet -- only 'export immut' (a compile-time constant) works right now.
+  Hint: true mutable shared global state needs its own future feature (initialization ordering, real global-variable codegen). If you don't need to mutate it, use 'export immut' instead.
+
+  5 │ export mut COUNTER: int = 0;
+    │ ^~~~~~ Here!
+
+  Run `turf --explain E021` for more details.
+

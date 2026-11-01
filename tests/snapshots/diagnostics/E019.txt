@@ -1,0 +1,30 @@
+tests/07_functions_modules/cycle_a_module.tr (1 error)
+
+── error at line 6, col 1 [E027 · module not found]
+
+  Could not find module 'cycle_b_module'.
+
+  Hint: Make sure the file 'cycle_b_module.tr' exists in the standard library or your current directory.
+
+  6 │ import cycle_b_module;
+    │ ^~~~~~ Here!
+
+  Run `turf --explain E027` for more details.
+
+tests/07_functions_modules/cycle_b_module.tr (1 error)
+
+── error at line 4, col 1 [E019 · circular import]
+
+  Circular import detected -- these modules are waiting on each other.
+
+    cycle_a_module  --imports-->  cycle_b_module  --imports-->  cycle_a_module  <- back to the start!
+  Note: imports 'cycle_a_module' here (tests/07_functions_modules/fail_circular_import_two.tr, line 15, col 1)
+  Note: imports 'cycle_b_module' here (tests/07_functions_modules/cycle_a_module.tr, line 6, col 1)
+
+  Hint: Break the cycle by removing one of these imports, or moving the code both sides actually need into a third module that neither one has to import the other to reach.
+
+  4 │ import cycle_a_module;
+    │ ^~~~~~ Here!
+
+  Run `turf --explain E019` for more details.
+

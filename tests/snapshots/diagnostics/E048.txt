@@ -1,0 +1,13 @@
+tests/06_structs/fail_static_method_call.tr (1 error)
+
+── error at line 40, col 26 [E048 · `.` used on a type or module]
+
+  '.' can't be used here -- 'MathUtil' is a struct type, not an instance.
+
+  Hint: '.' is for instance-member access only. Use 'MathUtil::square(...)' instead.
+
+  40 │     mut y: int = MathUtil.square(5);
+     │                          ^ Here!
+
+  Run `turf --explain E048` for more details.
+

@@ -1,0 +1,14 @@
+tests/48_unsized_array_params/fail_literal_sized_array_element_type.tr (1 error)
+
+── error at line 6, col 9 [E004 · array element type mismatch]
+
+  Array element type mismatch!
+  Cannot initialize an array of 'int' with a value of type 'string'.
+
+  Hint: Every value in the list must be the array's element type.
+
+  6 │     mut a: int[] = [1, "x"];
+    │         ^ Here!
+
+  Run `turf --explain E004` for more details.
+

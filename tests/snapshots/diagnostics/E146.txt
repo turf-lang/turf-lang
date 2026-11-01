@@ -1,0 +1,13 @@
+tests/42_caller_location/fail_at_decorator_unsupported.tr (1 error)
+
+── error at line 5, col 1 [E146 · invalid annotation]
+
+  Unknown annotation '@intrinsic'.
+
+  Hint: The known annotations are: @ownership, @ffi, @deprecated, @test.
+
+  5 │ @intrinsic("foo")
+    │ ^ Here!
+
+  Run `turf --explain E146` for more details.
+

@@ -1,0 +1,13 @@
+tests/26_state_machines/fail_machine_narrowing_lost_after_loop.tr (1 warning)
+
+── warning at line 5, col 1 [E153 · machine state with no incoming transition]
+
+  Warning: Machine 'C' declares state 'Idle' with no incoming transitions.
+
+  Hint: If 'Idle' is meant to be C's starting state, this is expected and safe to ignore. Otherwise, it's unreachable once the machine leaves its initial value -- double check for a missing `-> Idle` edge.
+
+  5 │ machine C {
+    │ ^~~~~~~ Here!
+
+  Run `turf --explain E153` for more details.
+

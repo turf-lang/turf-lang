@@ -1,0 +1,14 @@
+tests/37_guess_inference/fail_guess_no_init.tr (1 error)
+
+── error at line 9, col 5 [E128 · missing initializer]
+
+  Missing initializer!
+  'guess' needs an initializer to infer from.
+
+  Hint: Give the variable its value on the spot: `immut X: int = 5;`, `mut x: guess = 5;`.
+
+  9 │     mut x: guess;
+    │     ^~~ Here!
+
+  Run `turf --explain E128` for more details.
+

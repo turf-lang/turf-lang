@@ -168,6 +168,12 @@ jobs:
       - name: Diagnostics as JSON match the schema and the text form
         run: python3 scripts/check/diagnostics_json_check.py
 
+      # DX-10 (#336): every registered code has a snapshot of its full text and
+      # its JSON line; a missing or stale one fails (--write after a deliberate
+      # change, reviewed as a diff).
+      - name: Every diagnostic matches its snapshot
+        run: python3 scripts/check/diagnostic_snapshots.py
+
       # DX-3 (issue #291): every error a fail_*.tr test reports prints a
       # concrete Hint: line; a raise site without one fails here.
       - name: Every reported error carries a hint

@@ -1,0 +1,1 @@
+{"category":"function signature","code":"E044","denied":false,"file":"tests/24_first_class_functions/fail_wrong_arity_indirect_call.tr","fix":null,"hint":"Call 'f' with exactly 1 argument.","message":"'f' expects 1 argument, got 2.","related":[],"severity":"error","span":{"end":{"column":14,"line":7},"start":{"column":13,"line":7}},"title":"Wrong argument count!","version":"1.0"}

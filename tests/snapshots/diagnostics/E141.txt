@@ -1,0 +1,16 @@
+tests/48_unsized_array_params/fail_immut_array_written_via_ufcs.tr (1 error)
+
+── error at line 10, col 6 [E141 · immutable array passed to a function that changes it]
+
+  Immutable array changed!
+  'a' is immutable, but 'zero' writes to the array it is given as 'arr'.
+  Note: declared immutable here (line 9, col 11)
+  Note: 'zero' changes its parameter 'arr' (line 4, col 4)
+
+  Hint: An unsized parameter ('int[]') shares the caller's array instead of copying it, so the change would land in 'a'. Declare 'a' with 'mut', or copy it into a 'mut' array first and pass the copy.
+
+  10 │     a.zero();
+     │      ^ Here!
+
+  Run `turf --explain E141` for more details.
+

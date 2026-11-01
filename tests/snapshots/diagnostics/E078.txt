@@ -1,0 +1,14 @@
+tests/36_numeric_semantics/fail_float_literal_overflow.tr (1 error)
+
+── error at line 8, col 21 [E078 · float literal overflow]
+
+  Float literal is too large to represent -- it rounds to infinity.
+  '1e400' overflows 'double's range.
+
+  Hint: 'double' (IEEE-754) can represent roughly up to 1.8e308. Did you mean a smaller value, or a different unit?
+
+  8 │     mut d: double = 1e400;
+    │                     ^~~~~ Here!
+
+  Run `turf --explain E078` for more details.
+

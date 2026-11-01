@@ -1,0 +1,14 @@
+tests/03_typechecker/fail_bool_equals_int.tr (1 error)
+
+── error at line 4, col 20 [E124 · values can't be compared]
+
+  Values can't be compared!
+  Cannot compare 'bool' with 'int'.
+
+  Hint: Compare values of the same kind (two ints, two strings, ...). To compare structs, compare the fields you care about.
+
+  4 │     printline(true == 1);
+    │                    ^~ Here!
+
+  Run `turf --explain E124` for more details.
+

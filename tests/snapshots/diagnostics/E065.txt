@@ -1,0 +1,14 @@
+tests/03_typechecker/fail_string_conversion.tr (1 error)
+
+── error at line 9, col 23 [E065 · no conversion to string]
+
+  No conversion to string!
+  Cannot explicitly cast 'Point' to 'string'
+
+  Hint: Only these convert to text: `intExpr to string`, `doubleExpr to string`, `boolExpr to string` (and enum values).
+
+  9 │     mut s: string = p to string;
+    │                       ^~ Here!
+
+  Run `turf --explain E065` for more details.
+

@@ -164,6 +164,14 @@ else
     echo "$JSON_OUT" | head -8 | sed 's/^/       /'
   fi
 
+  # DX-10 (#336): a snapshot of every diagnostic code, text and JSON.
+  if SNAP_OUT=$(python3 scripts/check/diagnostic_snapshots.py 2>&1); then
+    pass "$(echo "$SNAP_OUT" | tail -1)"
+  else
+    fail "a diagnostic differs from its snapshot (tests/snapshots/diagnostics/; --write after a deliberate change):"
+    echo "$SNAP_OUT" | head -12 | sed 's/^/       /'
+  fi
+
   # DX-3 (issue #291): every error a fail_*.tr test reports prints a Hint:.
   if HINT_OUT=$(python3 scripts/dev/diagnostic_fix_coverage.py --check 2>&1); then
     pass "$(echo "$HINT_OUT" | tail -1)"

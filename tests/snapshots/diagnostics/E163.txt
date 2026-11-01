@@ -1,0 +1,13 @@
+tests/14_cfg_analysis/12_dead_store_simple.tr (1 warning)
+
+── warning at line 5, col 5 [E163 · unused variable]
+
+  Warning: Variable 'x' is declared but never used.
+
+  Hint: If the variable is intentionally unused, prefix its name with '_' by convention. Otherwise, remove the declaration or use its value.
+
+  5 │     mutable x: int = 5;
+    │     ^ Here!
+
+  Run `turf --explain E163` for more details.
+

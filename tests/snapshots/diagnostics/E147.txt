@@ -1,0 +1,12 @@
+tests/10_default_init/fail_default_reference_cycle_through_value.tr (1 error)
+
+── error at line 15, col 26 [E147 · no default through a reference cycle]
+
+  'A' has no default value: defaulting it gives every '&' field a new default value, and 'A' reaches itself through '&' fields, so that never ends.
+  Hint: Make one of the fields on the cycle '&?A' (it defaults to null), or build the value with '::new(...)'.
+
+  15 │     mut x: A = A::default();
+     │                          ^ Here!
+
+  Run `turf --explain E147` for more details.
+

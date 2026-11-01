@@ -1,0 +1,14 @@
+tests/05_arrays_pointers_ffi/fail_ptr_outside_unsafe.tr (1 error)
+
+── error at line 15, col 5 [E130 · raw pointer outside unsafe]
+
+  Unsafe pointer use!
+  Raw pointer type 'ptr' cannot be used outside an 'unsafe' block.
+
+  Hint: Wrap this in 'unsafe { }', or use a safe reference ('&T') instead if you don't actually need a possibly-null raw pointer.
+
+  15 │     mutable p: ptr = null;
+     │     ^~~~~~~ Here!
+
+  Worth reading in full -- run `turf --explain E130` before you patch this one.
+

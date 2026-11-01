@@ -1,0 +1,13 @@
+tests/40_defer/fail_break_in_defer.tr (1 error)
+
+── error at line 8, col 11 [E083 · control flow inside defer]
+
+  A deferred statement can't 'break'!
+
+  Hint: 'break' inside a 'defer' would jump out of the enclosing function or loop, not just the deferred statement -- move it out of the 'defer'.
+
+  8 │     defer break;
+    │           ^~~~~ Here!
+
+  Run `turf --explain E083` for more details.
+

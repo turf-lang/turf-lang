@@ -1,0 +1,13 @@
+tests/01_syntax/fail_assign_true.tr (1 error)
+
+── error at line 3, col 10 [E061 · invalid assignment target]
+
+  Cannot assign to a boolean literal -- it isn't a variable, struct field, or array element.
+
+  Hint: Only those can appear on the left of '='.
+
+  3 │     true = 5;
+    │          ^ Here!
+
+  Run `turf --explain E061` for more details.
+

@@ -1,0 +1,12 @@
+tests/48_unsized_array_params/fail_empty_literal_sizes_nothing.tr (1 error)
+
+── error at line 6, col 9 [E123 · invalid array size]
+
+  An empty literal can't give 'a' a size -- an array needs at least one element.
+  Hint: Give 'a' a size or a first element: `mut a: int[3] = [0, 0, 0];` or `[1]`.
+
+  6 │     mut a: int[] = [];
+    │         ^ Here!
+
+  Run `turf --explain E123` for more details.
+

@@ -1,0 +1,12 @@
+tests/01_syntax/fail_parse_error_in_body_no_cascade.tr (1 error)
+
+── error at line 13, col 13 [E108 · expected a name]
+
+  Expected a function name after 'fn'.
+  Hint: Name the function -- `fn name(...): T { ... }`.
+
+  13 │     mut f = fn(a: int): int { return a; };
+     │             ^~ Here!
+
+  Run `turf --explain E108` for more details.
+

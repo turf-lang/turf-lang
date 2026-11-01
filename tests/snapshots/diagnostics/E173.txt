@@ -1,0 +1,13 @@
+tests/57_test_functions/fail_test_called_by_a_test.tr (1 error)
+
+── error at line 12, col 10 [E173 · use of a test function]
+
+  'first' is a test: `turf test` runs it, and nothing else may call it or use it as a value.
+
+  Hint: Move what the test and this code share into an ordinary function, and call that from both.
+
+  12 │     first();
+     │          ^ Here!
+
+  Run `turf --explain E173` for more details.
+

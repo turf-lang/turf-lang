@@ -1,0 +1,12 @@
+tests/18_operator_overload/fail_operator_unary_arity_mismatch.tr (1 error)
+
+── error at line 11, col 1 [E115 · invalid operator declaration]
+
+  'operator ~' has no binary form -- it must take exactly 1 parameter (a unary overload).
+  Hint: Drop the second parameter: `operator ~(a: T): T { ... }`.
+
+  11 │ operator ~(a: Vec2, b: Vec2): Vec2 {
+     │ ^~~~~~~~ Here!
+
+  Run `turf --explain E115` for more details.
+

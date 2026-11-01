@@ -1,0 +1,15 @@
+tests/07_functions_modules/fail_type_identity_ambiguous_wildcard_vs_local.tr (1 error)
+
+── error at line 17, col 5 [E085 · ambiguous type reference]
+
+  'Node' is ambiguous here -- it could mean more than one type.
+  Note: could be 'Node' declared in this program's main file
+  Note: could be 'type_identity_node_a_module::Node' from module 'type_identity_node_a_module'
+
+  Hint: Write the imported one qualified (`type_identity_node_a_module::Node`) and leave 'Node' out of the `import` (list the names you need instead of `[*]`), so 'Node' means just one type.
+
+  17 │     mut n: Node = Node::default();
+     │     ^~~ Here!
+
+  Run `turf --explain E085` for more details.
+

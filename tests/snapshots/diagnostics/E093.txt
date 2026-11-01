@@ -1,0 +1,15 @@
+tests/45_pattern_matching/fail_bool_compare_missing_value.tr (1 error)
+
+── error at line 7, col 5 [E093 · non-exhaustive compare]
+
+  Non-exhaustive bool comparison on 'bool'.
+Missing values:
+    false
+
+  Hint: Add `matches true:` and `matches false:` arms, or 'otherwise:' to handle the rest. A guarded arm doesn't count: its guard may be false.
+
+  7 │     compare b {
+    │     ^~~~~~~ Here!
+
+  Run `turf --explain E093` for more details.
+

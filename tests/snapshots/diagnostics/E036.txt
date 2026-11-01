@@ -1,0 +1,24 @@
+tests/26_state_machines/fail_machine_transition_wrong_type.tr (1 error, 1 warning)
+
+── warning at line 7, col 1 [E153 · machine state with no incoming transition]
+
+  Warning: Machine 'ConnectionState' declares state 'Idle' with no incoming transitions.
+
+  Hint: If 'Idle' is meant to be ConnectionState's starting state, this is expected and safe to ignore. Otherwise, it's unreachable once the machine leaves its initial value -- double check for a missing `-> Idle` edge.
+
+  7 │ machine ConnectionState {
+    │ ^~~~~~~ Here!
+
+  Run `turf --explain E153` for more details.
+
+── error at line 20, col 9 [E036 · invalid transition target]
+
+  'transition' target must be a state of 'ConnectionState', got 'TrafficLight'.
+
+  Hint: Pass a state of 'ConnectionState' (e.g. 'ConnectionState::SomeState') to transition().
+
+  20 │     conn.transition(TrafficLight::Red);
+     │         ^ Here!
+
+  Worth reading in full -- run `turf --explain E036` before you patch this one.
+

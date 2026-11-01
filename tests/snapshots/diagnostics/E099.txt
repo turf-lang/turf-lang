@@ -1,0 +1,22 @@
+tests/01_syntax/fail_unterminated_string.tr (2 errors)
+
+── error at line 10, col 21 [E099 · unterminated string or character literal]
+
+  Unterminated string literal
+  Hint: Add a closing '"' before the end of the line -- Turf string literals can't span multiple lines. Need an actual line break inside the string? Use the \n escape instead.
+
+  10 │     mut s: string = "oops, forgot the closing quote;
+     │                     ^ Here!
+
+  Run `turf --explain E099` for more details.
+
+── error at line 11, col 5 [E102 · missing semicolon]
+
+  Expected ';' after statement.
+  Hint: End the statement with ';' right after its last token, e.g. `x = x + 1;` or `return 0;`.
+
+  11 │     return 0;
+     │     ^~~~~~ Here!
+
+  Run `turf --explain E102` for more details.
+

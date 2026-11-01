@@ -1,0 +1,13 @@
+tests/06_structs/fail_default_construction_with_args.tr (1 error)
+
+── error at line 13, col 34 [E047 · arguments passed to default()]
+
+  'Point::default()' takes no arguments, but got 2.
+
+  Hint: 'Point::default()' always zero-initializes every field with no input -- use 'Point::new(...)' if you need to pass values in.
+
+  13 │     mut p: Point = Point::default(1, 2);
+     │                                  ^ Here!
+
+  Run `turf --explain E047` for more details.
+

@@ -1,0 +1,13 @@
+tests/18_operator_overload/fail_generic_operator_param_not_in_operands.tr (1 error)
+
+── error at line 12, col 1 [E097 · invalid generic operator]
+
+  'operator []' declares type parameter 'T', but no operand mentions it.
+
+  Hint: A generic operator's type arguments are inferred from its operands (there is no way to write them at a use). Use 'T' in an operand type, or drop it from the '<...>' list.
+
+  12 │ operator<T> [](p: Cell<int>, i: int): T {
+     │ ^ Here!
+
+  Run `turf --explain E097` for more details.
+

@@ -1,0 +1,12 @@
+tests/07_functions_modules/fail_export_array_no_initializer.tr (1 error)
+
+── error at line 6, col 1 [E022 · exported constant with a non-constant value]
+
+  'export immut' requires an explicit initializer value.
+  Hint: e.g. export immut MAX_RETRIES: int = 3; -- an exported constant with no value has nothing to export.
+
+  6 │ export immut BUF: int[5];
+    │ ^~~~~~ Here!
+
+  Run `turf --explain E022` for more details.
+

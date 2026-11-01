@@ -1,0 +1,4 @@
+{"format": 1, "root": "app", "packages": {
+  "app":      {"src": "app/src",      "deps": ["shapes"]},
+  "shapes":   {"src": "shapes/src",   "deps": ["geometry"]},
+  "geometry": {"src": "geometry/src", "deps": []}}}

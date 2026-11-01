@@ -1,0 +1,15 @@
+tests/48_unsized_array_params/fail_mut_guess_view_of_immut_array.tr (1 error)
+
+── error at line 6, col 5 [E144 · mutable view of an immutable array]
+
+  Mutable view of an immutable array!
+  't' is a 'mut' view of 'a', which is immutable.
+  Note: declared immutable here (line 5, col 11)
+
+  Hint: A slice shares the array it looks at, so writing through 't' would change 'a'. Declare 't' with 'immut' if you only read it, or make 'a' 'mut'.
+
+  6 │     mut t = a[..];
+    │     ^~~ Here!
+
+  Run `turf --explain E144` for more details.
+

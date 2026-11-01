@@ -1,0 +1,14 @@
+tests/48_unsized_array_params/fail_slice_of_list.tr (1 error)
+
+── error at line 9, col 16 [E142 · slicing something that isn't an array]
+
+  Not an array!
+  Cannot slice a value of type 'list::List<int>' with [a..b].
+
+  Hint: Only a built-in array (like int[5], or an int[] parameter) can be sliced. To take part of a collection, copy the elements you need in a loop.
+
+  9 │     immut t = l[0..1];
+    │                ^ Here!
+
+  Run `turf --explain E142` for more details.
+

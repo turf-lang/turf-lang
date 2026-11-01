@@ -1,0 +1,14 @@
+tests/37_guess_inference/fail_guess_null.tr (1 error)
+
+── error at line 8, col 5 [E129 · nothing to infer a type from]
+
+  Nothing to infer!
+  Cannot infer a type from 'null'.
+
+  Hint: Annotate the reference type explicitly, e.g. 'mut x: &?Point = null;'.
+
+  8 │     mut x = null;
+    │     ^~~ Here!
+
+  Run `turf --explain E129` for more details.
+

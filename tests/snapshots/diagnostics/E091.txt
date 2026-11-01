@@ -1,0 +1,14 @@
+tests/snapshots/diagnostics/programs/E091/app/src/main.tr (1 error)
+
+── error at line 3, col 8 [E091 · module not importable from this package]
+
+  Package 'geometry' is not a dependency of 'app'.
+    It is in this build because 'shapes' depends on it.
+
+  Hint: A package can import only its own modules, its direct dependencies and the standard library. Add 'geometry' to [dependencies] in app's turf.toml to import it here.
+
+  3 │ import geometry;
+    │        ^~~~~~~~ Here!
+
+  Run `turf --explain E091` for more details.
+

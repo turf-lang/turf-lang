@@ -1,0 +1,14 @@
+tests/36_numeric_semantics/fail_int_literal_not_exact_as_double.tr (1 error)
+
+── error at line 7, col 5 [E077 · integer literal not exact as double]
+
+  Integer literal cannot be represented EXACTLY as a 'double'.
+  The literal's value is 9223372036854775807; converting it to 'double' would silently lose precision.
+
+  Hint: Use 'int' instead, or write the value as a float literal ('9223372036854775807.0') if the rounded value is what you actually want.
+
+  7 │     mut d: double = 9223372036854775807;
+    │     ^~~ Here!
+
+  Run `turf --explain E077` for more details.
+

@@ -1,0 +1,13 @@
+tests/07_functions_modules/fail_bare_type_no_visibility.tr (1 error)
+
+── error at line 16, col 5 [E032 · unqualified type not visible]
+
+  'Rect' isn't visible here without qualification.
+
+  Hint: 'Rect' is declared in module 'geometry_module'. Either use it qualified (`geometry_module::Rect`), or bring it into scope with `import geometry_module::Rect;`.
+
+  16 │     mut r: Rect = Rect::new(2, 3);
+     │     ^~~ Here!
+
+  Run `turf --explain E032` for more details.
+

@@ -1,0 +1,15 @@
+tests/06_structs/fail_self_containing_struct.tr (1 error)
+
+── error at line 19, col 1 [E069 · struct layout cycle]
+
+  struct 'A' cannot contain itself by value.
+  cycle: A -> A
+  Note: field 'A::me' has type 'A' (line 20, col 5)
+
+  Hint: Make one of these fields a reference or pointer ('&A', '&?A', 'A*') instead of holding the struct by value -- a struct that contains itself by value has no finite size.
+
+  19 │ struct A {
+     │ ^~~~~~ Here!
+
+  Worth reading in full -- run `turf --explain E069` before you patch this one.
+

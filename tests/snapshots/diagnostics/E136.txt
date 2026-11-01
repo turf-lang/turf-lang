@@ -1,0 +1,14 @@
+tests/07_functions_modules/fail_nested_module_qualifier_call.tr (1 error)
+
+── error at line 16, col 23 [E136 · invalid module qualifier]
+
+  Invalid module qualifier!
+  'mem::io' -- modules can't be qualified by another module; just write 'io::printline(...)'.
+
+  Hint: Modules aren't nested inside each other -- drop the 'mem::' prefix.
+
+  16 │     mem::io::printline("should not compile");
+     │                       ^ Here!
+
+  Run `turf --explain E136` for more details.
+

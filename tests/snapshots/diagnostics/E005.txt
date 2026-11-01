@@ -1,0 +1,14 @@
+tests/04_control_flow/fail_foreach_over_int.tr (1 error)
+
+── error at line 5, col 5 [E005 · for loop over a non-array]
+
+  for-each requires an array or a string!
+  You tried to iterate over a value of type 'int'.
+
+  Hint: for-each works on an array (T[N], or a T[] parameter) and on a string, byte by byte. Walk a List by index (`for i in 0..l.length()`) and a Map through keys().
+
+  5 │     for value in x {
+    │     ^~~ Here!
+
+  Run `turf --explain E005` for more details.
+

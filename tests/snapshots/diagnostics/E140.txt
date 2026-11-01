@@ -1,0 +1,14 @@
+tests/48_unsized_array_params/fail_unsized_struct_field.tr (1 error)
+
+── error at line 6, col 13 [E140 · unsized array where a size is needed]
+
+  Unsized array here!
+  Field 'values' of 'Bag' can't use the unsized array type 'int[]'.
+
+  Hint: A struct field needs a fixed size (e.g. 'int[5]'), or use a List<T> for a collection that grows.
+
+  6 │     values: int[]
+    │             ^~~ Here!
+
+  Run `turf --explain E140` for more details.
+

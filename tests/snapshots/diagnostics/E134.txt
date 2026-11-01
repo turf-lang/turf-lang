@@ -1,0 +1,14 @@
+tests/09_boss_fights/fail_recursive_struct.tr (1 error)
+
+── error at line 28, col 28 [E134 · that conversion isn't allowed]
+
+  That conversion isn't allowed!
+  Cannot explicitly cast 'ptr' to 'Node'
+
+  Hint: `to` converts numbers, chars and text: `5 to double`, `3.9 to int`, `42 to string`, `65 to char`. To test a number for zero write `n != 0`; `turf --explain E134` lists the rest.
+
+  28 │         mut h: Node = head to Node;
+     │                            ^~ Here!
+
+  Run `turf --explain E134` for more details.
+

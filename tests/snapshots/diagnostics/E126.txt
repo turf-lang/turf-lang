@@ -1,0 +1,14 @@
+tests/19_int32_type/fail_int32_increment.tr (1 error)
+
+── error at line 14, col 6 [E126 · operation not supported here]
+
+  Operation not supported here!
+  postfix '++' is not supported on 'int32' -- int32 is never itself an arithmetic result type.
+
+  Hint: Write 'c = (c + 1) to int32;' explicitly instead.
+
+  14 │     c++;
+     │      ^~ Here!
+
+  Run `turf --explain E126` for more details.
+

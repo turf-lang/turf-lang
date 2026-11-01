@@ -1,0 +1,13 @@
+tests/14_cfg_analysis/13_no_warn_compound_assign.tr (1 warning)
+
+── warning at line 6, col 7 [E160 · dead store]
+
+  Warning: Variable 'x' is assigned but the value is never read (dead store).
+
+  Hint: The assigned value is overwritten or the function returns before this variable is ever used. Remove the assignment or use the value.
+
+  6 │     x += 3;
+    │       ^~ Here!
+
+  Run `turf --explain E160` for more details.
+

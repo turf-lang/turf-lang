@@ -1,0 +1,15 @@
+tests/36_numeric_semantics/fail_int32_literal_out_of_range.tr (1 error)
+
+── error at line 20, col 5 [E076 · integer literal out of range]
+
+  Integer literal is not representable in type 'int32'.
+  The literal's value is 99999999999.
+  'int32' holds -2147483648 .. 2147483647.
+
+  Hint: Use 'int' instead, or an explicit 'to int32' cast if truncation is actually what you want.
+
+  20 │     mut x: int32 = 99999999999;
+     │     ^~~ Here!
+
+  Run `turf --explain E076` for more details.
+

@@ -1,0 +1,12 @@
+tests/01_syntax/fail_missing_brace.tr (1 error)
+
+── error at line 3, col 16 [E104 · unclosed bracket, brace or parenthesis]
+
+  Missing closing '}' — every '{' must have a matching '}'.
+  Hint: Add a '}' to close the block opened on line 3.
+
+  3 │ fn main(): int {
+    │                ^ Here!
+
+  Run `turf --explain E104` for more details.
+

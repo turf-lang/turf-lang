@@ -1,0 +1,1 @@
+{"category":"syntax error","code":"E104","denied":false,"file":"tests/01_syntax/fail_missing_brace.tr","fix":null,"hint":"Add a '}' to close the block opened on line 3.","message":"Missing closing '}' — every '{' must have a matching '}'.","related":[],"severity":"error","span":{"end":{"column":17,"line":3},"start":{"column":16,"line":3}},"title":null,"version":"1.0"}

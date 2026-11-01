@@ -1,0 +1,13 @@
+tests/38_monomorphization/fail_sizeof_unknown_type.tr (1 error)
+
+── error at line 7, col 12 [E042 · unknown type]
+
+  Error: Unknown type 'Tin'.
+
+  Hint: Make sure the struct 'Tin' is declared before it is used, or check the spelling.
+
+  7 │     return sizeof(Tin);
+    │            ^~~~~~ Here!
+
+  Run `turf --explain E042` for more details.
+

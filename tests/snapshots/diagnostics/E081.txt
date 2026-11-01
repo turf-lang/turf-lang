@@ -1,0 +1,14 @@
+tests/39_nullable_references/fail_deref_without_check.tr (1 error)
+
+── error at line 8, col 13 [E081 · possible null dereference]
+
+  Possible null dereference: 'b' might be 'null' here, but you're accessing its 'val' field.
+  Note: declared here (line 7, col 8)
+
+  Hint: Add a null check first, e.g. 'if (b != null) { ... }', and access '.val' only inside it.
+
+  8 │     return b.val;
+    │             ^ Here!
+
+  Run `turf --explain E081` for more details.
+

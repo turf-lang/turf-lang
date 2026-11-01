@@ -1,0 +1,14 @@
+tests/04_control_flow/fail_continue_outside_loop.tr (1 error)
+
+── error at line 5, col 9 [E007 · break, continue or return out of place]
+
+  Control flow error!
+  'continue' used outside of a loop.
+
+  Hint: Make sure 'break' and 'continue' are inside a loop, and 'return' is inside a function.
+
+  5 │         continue;
+    │         ^~~~~~~~ Here!
+
+  Run `turf --explain E007` for more details.
+
