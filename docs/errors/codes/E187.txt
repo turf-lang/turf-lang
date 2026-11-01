@@ -1,0 +1,26 @@
+Manual-heap memory that is never freed
+
+Memory from `mem::alloc` (and every other function declared `@ownership(acquires)`) lives outside the garbage collector: it stays allocated until something calls `mem::free` on it. This allocation is kept in a variable that nothing frees and nothing passes on, or its result is thrown away, so the memory is lost for the rest of the program:
+
+    import mem;
+
+    fn scratch(): void {
+        unsafe {
+            mut buf: void* = mem::alloc(32);   // WARNING (E187 at `warn`)
+            mem::zero(buf, 32);
+        }
+    }
+
+Free it when you are done. `defer` right after the allocation frees it on every path out of the function:
+
+    import mem;
+
+    fn scratch(): void {
+        unsafe {
+            mut buf: void* = mem::alloc(32);
+            defer mem::free(buf);
+            mem::zero(buf, 32);
+        }
+    }
+
+The compiler is conservative: memory that is stored in a field or an array, passed to a call that may keep it (a `mem::Pool`, `mem::root`), converted, or captured by a closure may be freed elsewhere, so it is never reported. Garbage-collected values are never reported. This warning starts at `allow` in 2.3: turn it on with `turf build --warn E187` (or `[lints] E187 = "warn"` in turf.toml).

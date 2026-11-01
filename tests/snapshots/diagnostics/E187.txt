@@ -1,0 +1,24 @@
+tests/05_arrays_pointers_ffi/manual_heap_leak_warns.tr (2 warnings)
+
+── warning at line 32, col 37 [E187 · manual-heap memory that is never freed]
+
+  The memory allocated into `lost` is never freed, and nothing passes it out of this function.
+
+  Hint: Free it with `mem::free(lost)` when you are done (`defer mem::free(lost);` right after the allocation frees it on every path), or use a garbage-collected value instead.
+
+  32 │         mut lost: void* = mem::alloc(32);
+     │                                     ^ Here!
+
+  Run `turf --explain E187` for more details.
+
+── warning at line 39, col 15 [E187 · manual-heap memory that is never freed]
+
+  This allocation is never freed: its result is thrown away, so nothing can free it.
+
+  Hint: Keep the pointer and free it with `mem::free` when you are done.
+
+  39 │     mem::alloc(8);
+     │               ^ Here!
+
+  Run `turf --explain E187` for more details.
+

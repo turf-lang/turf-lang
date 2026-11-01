@@ -3,6 +3,11 @@
 #include "diagnostics/Errors.h"
 #include "diagnostics/SuggestionIndex.h"
 #include "resolve/SymbolTable.h"
+#include "diagnostics/LintLevels.h"
+#include "frontend/ASTChildWalker.h"
+#include "frontend/Parser.h" // IsLibStdWarningLocation
+
+#include <set>
 
 #include <functional>
 #include <iterator>
@@ -141,6 +146,196 @@ std::string validate(const Annotation &Ann,
 }
 
 } // namespace OwnershipAnnotation
+
+
+// ─── AN-5: manual-heap memory that is never freed (E187) ───────────────────
+// TDP-2-007, F-6, issue #352. Flow-insensitive and conservative: a leak is
+// reported only when nothing in the function can free the allocation or let
+// it out. Variables assigned to one another (`q = p`, `mut q = p`) form one
+// group; an allocation stored into a group's variable is freed if any call
+// anywhere in the function -- a `defer` included -- releases a variable of
+// the group, and escapes if a variable of the group is used anywhere but as
+// an index or field base, an operand of `==`/`!=`, the argument a releasing
+// call frees, an argument to a `mem` function that stores nothing, or the
+// target of an assignment. Returning it, storing it in a field or an array,
+// passing it to any other call, converting it, or capturing it in a closure
+// is an escape. Garbage-collected memory comes from no `@ownership(acquires)`
+// call, so it is never reported.
+namespace {
+class LeakScan : public ASTChildWalker {
+public:
+  struct Site {
+    const ExprAST *Call;
+    const VariableSymbol *Holder; // null: the result was thrown away
+  };
+  std::vector<Site> Sites;
+  std::unordered_set<const VariableSymbol *> Escaped, Released;
+  std::unordered_map<const VariableSymbol *, const VariableSymbol *> Parent;
+
+  const VariableSymbol *find(const VariableSymbol *V) {
+    for (auto It = Parent.find(V); It != Parent.end() && It->second != V; It = Parent.find(V))
+      V = It->second;
+    return V;
+  }
+  void unite(const VariableSymbol *A, const VariableSymbol *B) {
+    if (!A || !B) return;
+    Parent.try_emplace(A, A);
+    Parent.try_emplace(B, B);
+    Parent[find(A)] = find(B);
+  }
+
+  void scanStatement(const ExprAST *Stmt) {
+    Root = Stmt;
+    visitChild(Stmt);
+  }
+
+  // An occurrence no parent below claimed: it may let the pointer out.
+  void visitVariable(VariableExprAST &Node) override {
+    if (Node.getResolvedSymbol()) Escaped.insert(Node.getResolvedSymbol());
+  }
+
+  void visitAssignment(AssignmentExprAST &Node) override {
+    bind(Node.getLHS(), Node.getRHS());
+  }
+  void visitVarDecl(VarDeclExprAST &Node) override {
+    if (const ExprAST *Init = Node.getInitializer())
+      bindSymbol(Node.getResolvedSymbol(), Init);
+  }
+  void visitArrayAccess(ArrayAccessExprAST &Node) override {
+    safeOrVisit(Node.getBase());
+    visitChild(Node.getIndex());
+  }
+  void visitFieldAccess(FieldAccessExprAST &Node) override { safeOrVisit(Node.getBase()); }
+  void visitBinary(BinaryExprAST &Node) override {
+    if (Node.getOp() == TOK_EQ || Node.getOp() == TOK_NEQ) {
+      safeOrVisit(Node.getLHS());
+      safeOrVisit(Node.getRHS());
+      return;
+    }
+    ASTChildWalker::visitBinary(Node);
+  }
+  void visitFuncCall(FuncCallExprAST &Node) override {
+    if (call(Node)) return;
+    ASTChildWalker::visitFuncCall(Node);
+  }
+  void visitMethodCall(MethodCallExprAST &Node) override {
+    if (call(Node)) return;
+    ASTChildWalker::visitMethodCall(Node);
+  }
+
+private:
+  const ExprAST *Root = nullptr;
+
+  static bool acquires(const ExprAST *E) {
+    const ResolverFunctionSymbol *T = E ? OwnershipAnnotation::calledFunction(*E) : nullptr;
+    return T && OwnershipAnnotation::acquires(*T);
+  }
+  // A `mem` function that reads or writes the block and keeps nothing.
+  static bool keepsNothing(const ResolverFunctionSymbol *T) {
+    static const std::unordered_set<std::string> Names = {
+        "zero", "usable_size", "memcpy", "memmove", "memset", "memcmp", "malloc_usable_size"};
+    return T && T->SourceModule == "mem" && Names.count(T->BaseName);
+  }
+  void safeOrVisit(const ExprAST *E) {
+    if (!dynamic_cast<const VariableExprAST *>(E)) visitChild(E);
+  }
+  // `Target = Value` where Target may be a variable.
+  void bind(const ExprAST *Target, const ExprAST *Value) {
+    if (auto *V = dynamic_cast<const VariableExprAST *>(Target)) {
+      bindSymbol(V->getResolvedSymbol(), Value);
+      return;
+    }
+    // `a[i] = v`, `s.f = v`: v is stored, so it escapes (an acquiring call
+    // there is recorded as handed on by call()).
+    visitChild(Target);
+    visitChild(Value);
+  }
+  void bindSymbol(const VariableSymbol *S, const ExprAST *Value) {
+    if (acquires(Value)) {
+      Sites.push_back({Value, S});
+      visitArgs(Value);
+    } else if (auto *R = dynamic_cast<const VariableExprAST *>(Value)) {
+      unite(S, R->getResolvedSymbol());
+    } else {
+      visitChild(Value);
+    }
+  }
+  void visitArgs(const ExprAST *Call) {
+    if (auto *FC = dynamic_cast<const FuncCallExprAST *>(Call))
+      for (const auto &A : FC->getArgs()) visitChild(A.get());
+    else if (auto *MC = dynamic_cast<const MethodCallExprAST *>(Call)) {
+      visitChild(MC->getBase());
+      for (const auto &A : MC->getArgs()) visitChild(A.get());
+    }
+  }
+  // Handles a call this scan understands; false to walk it as usual.
+  bool call(const ExprAST &Node) {
+    if (acquires(&Node)) {
+      // Reached here, the result is neither stored in a variable nor
+      // assigned: thrown away as a statement, or handed on (an argument, a
+      // `return`, a conversion), which lets it out.
+      if (&Node == Root) Sites.push_back({&Node, nullptr});
+      else Stored.insert(&Node);
+      visitArgs(&Node);
+      return true;
+    }
+    if (const ExprAST *Freed = OwnershipAnnotation::releasedArgument(Node)) {
+      if (auto *V = dynamic_cast<const VariableExprAST *>(Freed))
+        if (V->getResolvedSymbol()) Released.insert(V->getResolvedSymbol());
+      std::vector<const ExprAST *> Args;
+      if (auto *FC = dynamic_cast<const FuncCallExprAST *>(&Node))
+        for (const auto &A : FC->getArgs()) Args.push_back(A.get());
+      else if (auto *MC = dynamic_cast<const MethodCallExprAST *>(&Node)) {
+        Args.push_back(MC->getBase());
+        for (const auto &A : MC->getArgs()) Args.push_back(A.get());
+      }
+      for (const ExprAST *A : Args)
+        if (A != Freed) visitChild(A);
+      return true;
+    }
+    if (keepsNothing(OwnershipAnnotation::calledFunction(Node))) {
+      if (auto *FC = dynamic_cast<const FuncCallExprAST *>(&Node)) {
+        for (const auto &A : FC->getArgs()) safeOrVisit(A.get());
+        return true;
+      }
+    }
+    return false;
+  }
+
+public:
+  std::unordered_set<const ExprAST *> Stored; // acquiring calls whose result escapes
+};
+
+SourceLocation acquireLoc(const ExprAST *E) {
+  if (auto *MC = dynamic_cast<const MethodCallExprAST *>(E)) return MC->getLoc();
+  return static_cast<const FuncCallExprAST *>(E)->getLoc();
+}
+} // namespace
+
+static void reportLeaks(const CFG &Cfg) {
+  if (LintLevels::levelOf("E187") == LintLevels::Level::Allow) return;
+  LeakScan Scan;
+  for (const auto &BB : Cfg.getBlocks())
+    for (const ExprAST *Stmt : BB->getStatements())
+      Scan.scanStatement(Stmt);
+  if (Scan.Sites.empty()) return;
+  std::unordered_set<const VariableSymbol *> EscapedGroups, ReleasedGroups;
+  for (const VariableSymbol *V : Scan.Escaped) if (V) EscapedGroups.insert(Scan.find(V));
+  for (const VariableSymbol *V : Scan.Released) ReleasedGroups.insert(Scan.find(V));
+  std::set<std::pair<unsigned, unsigned>> Seen;
+  for (const auto &Site : Scan.Sites) {
+    if (Scan.Stored.count(Site.Call)) continue;
+    if (Site.Holder) {
+      const VariableSymbol *G = Scan.find(Site.Holder);
+      if (EscapedGroups.count(G) || ReleasedGroups.count(G)) continue;
+    }
+    SourceLocation Loc = acquireLoc(Site.Call);
+    if (!Loc.Line || IsLibStdWarningLocation(Loc.Filename) || !Seen.insert({Loc.Line, Loc.Col}).second)
+      continue;
+    ManualHeapLeakWarning(Loc, Site.Holder ? Site.Holder->Name : "").emit();
+  }
+}
+
 
 void AliasAnalysisPass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> & /*InitialAssigned*/) {
 
@@ -436,4 +631,6 @@ void AliasAnalysisPass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> & /*Initi
   for (size_t b = 0; b < N; ++b)
     if (Visited[b])
       transfer(b, IN[b], /*Report=*/true);
+
+  reportLeaks(Cfg);
 }

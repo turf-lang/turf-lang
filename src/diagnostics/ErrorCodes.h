@@ -551,6 +551,9 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     {"E184", "LoopTestNeverChangesWarning", "Loop whose test never changes", SLM::ErrorCategory::CONTROL_FLOW, false, 3, true},
     {"E185", "LoopExitsNeverTakenWarning", "Loop whose every exit is never taken", SLM::ErrorCategory::CONTROL_FLOW, false, 3, true},
     {"E186", "LoopExitsBehindNoReturnWarning", "Loop whose every exit follows a call that ends the program", SLM::ErrorCategory::CONTROL_FLOW, false, 3, true},
+    // AN-5 (issue #352): manual-heap memory never freed (AliasAnalysis.cpp).
+    // Starts at `allow`.
+    {"E187", "ManualHeapLeakWarning", "Manual-heap memory that is never freed", SLM::ErrorCategory::MEMORY_ERROR, false, 3, true},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

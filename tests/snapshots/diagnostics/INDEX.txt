@@ -181,3 +181,4 @@ E183 tests/14_cfg_analysis/unreachable_base_case_warns.tr --warn E183
 E184 tests/14_cfg_analysis/endless_loops_warn.tr --warn E184
 E185 tests/14_cfg_analysis/endless_loops_warn.tr --warn E185
 E186 tests/14_cfg_analysis/endless_loops_warn.tr --warn E186
+E187 tests/05_arrays_pointers_ffi/manual_heap_leak_warns.tr --warn E187

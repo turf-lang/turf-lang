@@ -1,0 +1,43 @@
+TURF E187 -- MANUAL-HEAP MEMORY THAT IS NEVER FREED (WARNING):
+
+CAUSE:
+  Memory from `mem::alloc` (or another `@ownership(acquires)` function) is
+  kept in a variable that nothing frees and nothing passes on, or the
+  allocation's result is thrown away. Manual-heap memory is not collected,
+  so it is lost. This is a WARNING (it starts at `allow`).
+
+INCORRECT (compiles, but warns at `warn`):
+    import mem;
+
+    fn scratch(): void {
+        unsafe {
+            mut buf: void* = mem::alloc(32);
+            mem::zero(buf, 32);
+        }
+    }
+
+    fn main(): int {
+        return 0;
+    }
+
+CORRECT (freed on every path):
+    import mem;
+
+    fn scratch(): void {
+        unsafe {
+            mut buf: void* = mem::alloc(32);
+            defer mem::free(buf);
+            mem::zero(buf, 32);
+        }
+    }
+
+    fn main(): int {
+        scratch();
+        return 0;
+    }
+
+FIX:
+  Call `mem::free(p)` when the memory is no longer needed, or write
+  `defer mem::free(p);` right after the allocation.
+
+RELATED: E017 (double free), E018 (use after free).

@@ -527,4 +527,28 @@ public:
   }
 };
 
+// AN-5 (TDP-2-007, F-6, issue #352): manual-heap memory (an
+// `@ownership(acquires)` call such as mem::alloc) that nothing frees and
+// nothing lets out of the function. Garbage-collected memory is never
+// reported.
+class ManualHeapLeakWarning : public TurfWarning {
+public:
+  ManualHeapLeakWarning(SourceLocation Loc, const std::string &Var)
+      : TurfWarning(Loc,
+                    Var.empty()
+                        ? std::string("This allocation is never freed: its result is "
+                                      "thrown away, so nothing can free it.")
+                        : "The memory allocated into `" + Var + "` is never freed, and "
+                          "nothing passes it out of this function.",
+                    Var.empty()
+                        ? std::string("Keep the pointer and free it with `mem::free` "
+                                      "when you are done.")
+                        : "Free it with `mem::free(" + Var + ")` when you are done "
+                          "(`defer mem::free(" + Var + ");` right after the allocation "
+                          "frees it on every path), or use a garbage-collected value "
+                          "instead.") {
+    Category_ = SLM::ErrorCategory::MEMORY_ERROR;
+  }
+};
+
 #endif
