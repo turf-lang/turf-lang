@@ -1414,6 +1414,27 @@ bool drainStructRequests(
     auto *Clone = static_cast<StructDeclExprAST *>(ClonedUP.get());
     for (auto &Field : Clone->getFieldsMut())
       Field.Type = substituteConcreteTypes(Field.Type, Subst);
+    // `void` as a type argument is fine while the struct only points at it
+    // (`PoolHeader<void*>`, a `p: T*` field), but a field whose type BECOMES
+    // `void` (or `void[N]`) has no layout: the parser's E112 check on a
+    // written `v: void` never sees it, and Codegen spun forever asking LLVM
+    // for the alignment of such a struct (turf-fuzz #30, `Box<Box<void>>`).
+    for (const auto &Field : Clone->getFields()) {
+      const TurfType *FT = Field.Type.get();
+      while (FT && isArrayType(FT))
+        FT = getArrayElementType(FT);
+      if (FT && FT->isVoid()) {
+        TypeError(Entry.Request.Site, ErrCode::VoidTypeNotAllowed,
+                  "'" + describeRequest(Entry.Request) + "' gives field '" +
+                      Field.Name + "' the type 'void'.",
+                  "'void' only makes sense as a function's return type. Give '" +
+                      Entry.Request.DeclKey +
+                      "' a real type here, or a pointer such as 'void*'.",
+                  "'void' cannot be a struct field's type.")
+            .raise();
+        return DidWork;
+      }
+    }
     // A generic type a field names (`List<Big>`'s `h: &ListHeader<Big>`,
     // LEC-009) is requested here: a clone is never type-checked, so nothing
     // else would, and the field's layout would stay an opaque stub. The

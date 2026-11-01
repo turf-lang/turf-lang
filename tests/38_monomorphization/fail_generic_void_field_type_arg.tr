@@ -1,0 +1,17 @@
+// turf-fuzz #30: `void` filling a type parameter a field uses gives that
+// field the type `void`, which has no layout. A written `v: void` is E112 in
+// the parser; this is the same mistake reached through `Box<void>`, and the
+// compiler hung in Codegen on it.
+// EXPECT-DIAG: E112
+// EXPECT-DIAG: 'Box<void>' gives field 'v' the type 'void'.
+struct Box<T> {
+    v: T
+}
+
+fn unused_nested(b: Box<Box<void>>): int {
+    return 0;
+}
+
+fn main(): int {
+    return 0;
+}

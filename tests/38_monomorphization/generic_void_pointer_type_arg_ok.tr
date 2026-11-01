@@ -1,0 +1,18 @@
+// `void` may fill a type parameter the struct only points at (`p: T*`): the
+// field is `void*`, which has a layout. The E112 check on a field whose type
+// becomes `void` (turf-fuzz #30) must leave this alone.
+unsafe module;
+
+import test;
+
+struct Handle<T> {
+    p: T*,
+    n: int
+}
+
+fn main(): int {
+    mut h: Handle<void> = Handle<void>::default();
+    h.n = 3;
+    test::assert(h.n == 3, "Handle<void> keeps its int field");
+    return 0;
+}
