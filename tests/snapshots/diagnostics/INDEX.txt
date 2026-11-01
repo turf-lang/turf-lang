@@ -177,3 +177,4 @@ E179 tests/57_test_functions/04_error_type_named_error.tr --warn E179
 E180 tests/14_cfg_analysis/unused_declarations_warn.tr --warn E180
 E181 tests/25_errors/24_try_passes_error_unchanged.tr --warn E181
 E182 tests/14_cfg_analysis/mutual_recursion_warns.tr --warn E182
+E183 tests/14_cfg_analysis/unreachable_base_case_warns.tr --warn E183

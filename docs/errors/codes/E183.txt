@@ -1,0 +1,24 @@
+A recursive function's base case can never run
+
+A recursive function stops through its base case: a path that returns without calling itself. When the values that reach the base case rule it out -- an earlier guard already excluded them, a constant never matches, a loop counter never gets there -- the base case is dead code, and every call that runs calls the function again until the stack runs out:
+
+    fn countdown(n: int): int {
+        if n < 1 {
+            return countdown(1);
+        }
+        if n == 0 {
+            return 0;            // WARNING (E183 at `warn`): n is at least 1 here
+        }
+        return countdown(n - 1);
+    }
+
+`countdown(1)` calls `countdown(0)`, which the first test sends back to `countdown(1)`. Make the base case reachable, for example by testing it first:
+
+    fn countdown(n: int): int {
+        if n <= 0 {
+            return 0;
+        }
+        return countdown(n - 1);
+    }
+
+The compiler reports this only when it can prove the values: from constants, from a range `for`'s bounds, and from conditions earlier on the path. A base case it cannot reason about is left alone. A function with no base case at all is E010. This warning starts at `allow` in 2.3: turn it on with `turf build --warn E183` (or `[lints] E183 = "warn"` in turf.toml).

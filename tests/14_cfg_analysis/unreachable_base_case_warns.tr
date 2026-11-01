@@ -1,0 +1,74 @@
+// AN-3 (b), issue #333: a recursive function whose base case the value-range
+// analysis proves is never reached warns at that base case (E183, allow by
+// default, turned on here): from a constant, a loop counter, and a parameter
+// narrowed by an earlier guard. Where the range is unknown, or the base case
+// can run, nothing is reported. The program never calls the bad functions.
+// LINT: --warn E183
+// EXPECT-DIAG: [E183
+// EXPECT-DIAG: This base case of `spin` can never run
+// EXPECT-DIAG: This base case of `walk` can never run
+// EXPECT-DIAG: This base case of `countdown` can never run
+// EXPECT-NO-DIAG: `fact`
+// EXPECT-NO-DIAG: `steps`
+// EXPECT-NO-DIAG: `bounded`
+import test;
+
+fn spin(n: int): int {
+    mut limit: int = 10;
+    if limit < 0 {
+        return n;
+    }
+    return spin(n + 1);
+}
+
+fn walk(n: int): int {
+    for i in 0..10 {
+        if i > 20 {
+            return i;
+        }
+    }
+    return walk(n);
+}
+
+fn countdown(n: int): int {
+    if n < 1 {
+        return countdown(1);
+    }
+    if n == 0 {
+        return 0;
+    }
+    return countdown(n - 1);
+}
+
+fn fact(n: int): int {
+    if n <= 1 {
+        return 1;
+    }
+    return n * fact(n - 1);
+}
+
+fn steps(n: int): int {
+    if n < 0 {
+        return steps(0 - n);
+    }
+    if n == 0 {
+        return 0;
+    }
+    return 1 + steps(n - 1);
+}
+
+fn bounded(n: int): int {
+    for i in 0..n {
+        if i > 5 {
+            return i;
+        }
+    }
+    return bounded(n + 1);
+}
+
+fn main(): int {
+    test::assert(fact(5) == 120, "fact");
+    test::assert(steps(-3) == 3, "steps");
+    test::assert(bounded(10) == 6, "bounded");
+    return 0;
+}

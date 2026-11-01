@@ -543,6 +543,9 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // AN-3 (a) (issue #332): mutual recursion with no base case on any path
     // (MutualRecursion.cpp). Starts at `allow`; a B-1 candidate for 3.0.
     {"E182", "MutualRecursionWarning", "Mutual recursion with no base case", SLM::ErrorCategory::CONTROL_FLOW, false, 3, true},
+    // AN-3 (b) (issue #333): a recursive base case the value-range analysis
+    // proves unreachable (ValueRange.cpp). Starts at `allow`; a B-1 candidate.
+    {"E183", "UnreachableBaseCaseWarning", "Recursive base case that is never reached", SLM::ErrorCategory::CONTROL_FLOW, false, 3, true},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

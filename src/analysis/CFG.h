@@ -196,13 +196,21 @@ public:
   std::vector<std::string> calledFunctions() const;
   bool allPathsCallAnyOf(const std::unordered_set<std::string> &Targets) const;
   const SourceLocation &getFuncLoc() const { return FuncLoc; }
-  // An edge between two blocks (the value-range analysis lists those it
-  // proves are never taken).
+
+  // AN-3 (b): an edge the value-range analysis proved is never taken.
   using Edge = std::pair<const TurfBasicBlock *, const TurfBasicBlock *>;
+  // Whether every path calls this function itself once the edges in Dead are
+  // removed (allPathsRecurse() with every edge), and the blocks from which
+  // the exit is reachable without a self call (a base case starts in one).
+  bool allPathsRecurseWithout(const std::set<Edge> &Dead) const;
+  std::unordered_set<const TurfBasicBlock *> blocksReachingExitWithoutSelfCall() const;
 
 private:
-  // allPathsRecurse()'s walk, for any set of "calls into the cycle" blocks.
-  bool allPathsThrough(const std::unordered_set<const TurfBasicBlock *> &Blocks) const;
+  std::unordered_set<const TurfBasicBlock *> selfCallBlocks() const;
+  // allPathsRecurse()'s walk, for any set of "calls into the cycle" blocks,
+  // never following an edge in Dead.
+  bool allPathsThrough(const std::unordered_set<const TurfBasicBlock *> &Blocks,
+                       const std::set<Edge> &Dead = {}) const;
 
 public:
 

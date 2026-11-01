@@ -364,6 +364,35 @@ bool CFG::allPathsRecurse() const {
   return allPathsThrough(SelfCallBlocks);
 }
 
+std::unordered_set<const TurfBasicBlock *> CFG::selfCallBlocks() const {
+  std::unordered_set<const TurfBasicBlock *> Out;
+  for (const auto &BB : Blocks)
+    if (blockContainsSelfCall(BB.get(), FunctionName, MangledFunctionName))
+      Out.insert(BB.get());
+  return Out;
+}
+
+bool CFG::allPathsRecurseWithout(const std::set<Edge> &Dead) const {
+  if (!EntryBlock || !ExitBlock) return false;
+  return allPathsThrough(selfCallBlocks(), Dead);
+}
+
+std::unordered_set<const TurfBasicBlock *> CFG::blocksReachingExitWithoutSelfCall() const {
+  std::unordered_set<const TurfBasicBlock *> Out;
+  if (!ExitBlock) return Out;
+  const auto Self = selfCallBlocks();
+  std::vector<const TurfBasicBlock *> Work{ExitBlock};
+  Out.insert(ExitBlock);
+  while (!Work.empty()) {
+    const TurfBasicBlock *B = Work.back();
+    Work.pop_back();
+    for (const TurfBasicBlock *P : B->getPredecessors())
+      if (!Self.count(P) && Out.insert(P).second)
+        Work.push_back(P);
+  }
+  return Out;
+}
+
 std::vector<std::string> CFG::calledFunctions() const {
   std::vector<std::string> Out;
   for (const auto &BB : Blocks)
@@ -387,7 +416,8 @@ bool CFG::allPathsCallAnyOf(const std::unordered_set<std::string> &Targets) cons
   return allPathsThrough(CallBlocks);
 }
 
-bool CFG::allPathsThrough(const std::unordered_set<const TurfBasicBlock *> &SelfCallBlocks) const {
+bool CFG::allPathsThrough(const std::unordered_set<const TurfBasicBlock *> &SelfCallBlocks,
+                          const std::set<Edge> &Dead) const {
   // If there are no self-call blocks at all, it's not recursive.
   if (SelfCallBlocks.empty()) return false;
 
@@ -420,6 +450,8 @@ bool CFG::allPathsThrough(const std::unordered_set<const TurfBasicBlock *> &Self
 
     OnPath.insert(Cur);
     for (const TurfBasicBlock *Succ : Succs) {
+      if (Dead.count({Cur, Succ}))
+        continue;
       std::unordered_set<const TurfBasicBlock *> ChildPath = OnPath;
       if (!dfs(Succ, NowSeen, ChildPath)) {
         return false; // Found a base-case path — not all paths recurse

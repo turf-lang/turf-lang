@@ -4,6 +4,7 @@
 #include "frontend/AST.h"
 #include "frontend/ASTChildWalker.h"
 #include "diagnostics/Errors.h"
+#include "frontend/Parser.h" // IsLibStdWarningLocation
 
 #include "llvm/ADT/APInt.h"
 
@@ -348,7 +349,7 @@ static std::vector<ConstMap> solveConstants(const CFG &Cfg, const TrackedVars &T
 // (TDP-2-002, issue #348). A second dataflow over the same CFG and the same
 // TrackedVars, keeping a closed interval [Lo, Hi] for each Ranged variable
 // instead of one constant. It is what check elision (markElidableChecks),
-// E181 reads; E001 keeps the constant dataflow above, so no
+// E181 and AN-3 (b) read; E001 keeps the constant dataflow above, so no
 // program is rejected on a range.
 //
 // What it adds over constants:
@@ -816,6 +817,7 @@ static SourceLocation locationOf(const ExprAST *N) {
   if (auto *P = dynamic_cast<const PostfixExprAST *>(N)) return locationOf(P->getOperand());
   if (auto *C = dynamic_cast<const CastExprAST *>(N)) return locationOf(C->getOperand());
   if (auto *S = dynamic_cast<const ScopeAccessExprAST *>(N)) return S->getLoc();
+  if (auto *R = dynamic_cast<const ReturnExprAST *>(N)) return R->getLoc();
   return {};
 }
 
@@ -917,6 +919,29 @@ static void reportConstantOutOfBounds(const ExprAST *N, const ConstMap &cur,
   }
 }
 
+// AN-3 (b) (E183): a recursive function whose base case the interval
+// dataflow proves is never reached, so every path that runs calls the
+// function again. E010 already covers a function with no base case at all.
+static void reportUnreachableBaseCase(const CFG &Cfg, const RangeSolution &RS) {
+  if (RS.DeadEdges.empty() || LintLevels::levelOf("E183") == LintLevels::Level::Allow)
+    return;
+  if (Cfg.allPathsRecurse() || !Cfg.allPathsRecurseWithout(RS.DeadEdges))
+    return;
+  const auto BaseBlocks = Cfg.blocksReachingExitWithoutSelfCall();
+  std::set<std::pair<unsigned, unsigned>> Seen;
+  for (const auto &[From, To] : RS.DeadEdges) {
+    if (!BaseBlocks.count(To))
+      continue;
+    SourceLocation Loc = From->getTerminatorLoc();
+    if (!To->getStatements().empty())
+      if (SourceLocation First = locationOf(To->getStatements().front()); First.Line)
+        Loc = First;
+    if (!Loc.Line || IsLibStdWarningLocation(Loc.Filename) || !Seen.insert({Loc.Line, Loc.Col}).second)
+      continue;
+    UnreachableBaseCaseWarning(Loc, Cfg.getFunctionName()).emit();
+  }
+}
+
 void ValueRangePass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> & /*InitialAssigned*/) {
   // InitialAssigned (parameter SymbolIDs from the codegen-time SymbolTable)
   // is intentionally unused: the constant dataflow never tracks a
@@ -938,6 +963,7 @@ void ValueRangePass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> & /*InitialA
       applyRangeTransfer(Stmt, Ranges, TV, Ev);
     }
   }
+  reportUnreachableBaseCase(Cfg, RS);
 }
 
 // ─── OPT-002: check-elision pre-pass ───────────────────────────────────────

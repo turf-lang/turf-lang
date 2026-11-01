@@ -469,4 +469,22 @@ public:
   }
 };
 
+// AN-3 (b) (TDP-2-007, issue #333): a recursive function's base case that
+// the value-range analysis proves is never reached, so every path that runs
+// calls the function again. Like E010, which has no base case at all, but a
+// warning (allow by default) through 2.x.
+class UnreachableBaseCaseWarning : public TurfWarning {
+public:
+  UnreachableBaseCaseWarning(SourceLocation Loc, const std::string &Fn)
+      : TurfWarning(Loc,
+                    "This base case of `" + Fn + "` can never run: the values that "
+                    "reach it rule it out, so every call of `" + Fn +
+                    "` calls it again and never returns.",
+                    "Check the condition in front of this base case against the "
+                    "values that reach it, such as an earlier guard or the loop "
+                    "that bounds them.") {
+    Category_ = SLM::ErrorCategory::CONTROL_FLOW;
+  }
+};
+
 #endif
