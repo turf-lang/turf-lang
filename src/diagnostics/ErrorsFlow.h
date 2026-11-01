@@ -454,4 +454,19 @@ public:
   }
 };
 
+// AN-3 (a) (TDP-2-007, issue #332): functions that call each other, where
+// every path through every one of them calls back into the cycle. Like E010
+// for one function, but a warning (allow by default) through 2.x.
+class MutualRecursionWarning : public TurfWarning {
+public:
+  MutualRecursionWarning(SourceLocation Loc, const std::string &Cycle)
+      : TurfWarning(Loc,
+                    "The functions " + Cycle + " call each other on every path, "
+                    "so none of them can ever return.",
+                    "Give one of them a path that returns without calling back "
+                    "into the cycle: a base case, such as `if n == 0 { return 0; }`.") {
+    Category_ = SLM::ErrorCategory::CONTROL_FLOW;
+  }
+};
+
 #endif

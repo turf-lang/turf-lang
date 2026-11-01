@@ -6,6 +6,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 // Forward declarations
@@ -173,6 +174,20 @@ public:
   // no base case exists. Uses DFS with a visited-set to handle CFG cycles
   // (loops within a recursive function) without infinite traversal.
   bool allPathsRecurse() const;
+
+  // AN-3 (a): the mangled names of every function a resolved call in this
+  // CFG reaches (the call graph's edges), and whether every path from entry
+  // to exit passes through a call to one of `Targets` (a call-graph cycle
+  // with no base case on any path, when every member says so).
+  std::vector<std::string> calledFunctions() const;
+  bool allPathsCallAnyOf(const std::unordered_set<std::string> &Targets) const;
+  const SourceLocation &getFuncLoc() const { return FuncLoc; }
+
+private:
+  // allPathsRecurse()'s walk, for any set of "calls into the cycle" blocks.
+  bool allPathsThrough(const std::unordered_set<const TurfBasicBlock *> &Blocks) const;
+
+public:
 
   // Diagnostics
   void reportFlowDiagnostics() const;

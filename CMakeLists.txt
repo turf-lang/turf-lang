@@ -473,6 +473,7 @@ add_library(turfcore STATIC
   src/analysis/ValueRange.cpp
   src/analysis/UnusedDecls.cpp
   src/analysis/AnalysisFacts.cpp
+  src/analysis/MutualRecursion.cpp
 )
 
 # `include` carries the public API (turf/Analysis.h); `src` lets every

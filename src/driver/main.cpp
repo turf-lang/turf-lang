@@ -28,6 +28,7 @@
 #include "diagnostics/LintLevels.h"
 #include "analysis/UnusedDecls.h"
 #include "analysis/AnalysisFacts.h"
+#include "analysis/MutualRecursion.h"
 #include "frontend/Lexer.h"
 #include "analysis/Lint.h"
 #include "tooling/MigratePub.h"
@@ -2274,6 +2275,8 @@ static int runCompilerMain(int argc, char **argv) {
           }
           g_recoverActive = false;
         }
+        // AN-3 (a): every function's CFG exists now, so the call graph does.
+        MutualRecursion::report(GlobalCFGs);
       }
 
   // Re-open for the main pass

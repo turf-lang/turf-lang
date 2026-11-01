@@ -243,6 +243,37 @@ bool CFG::hasUnbreakableLoop() const {
   return false;
 }
 
+// Whether a statement of BB holds a FuncCallExprAST for which IsTarget is
+// true, looking through the expression shapes a call can sit in.
+static bool blockCallsAny(const TurfBasicBlock *BB,
+                          const std::function<bool(const FuncCallExprAST *)> &IsTarget) {
+  for (const ExprAST *Stmt : BB->getStatements()) {
+    std::function<bool(const ExprAST *)> scan = [&](const ExprAST *E) -> bool {
+      if (!E) return false;
+      if (const auto *Call = dynamic_cast<const FuncCallExprAST *>(E)) {
+        if (IsTarget(Call)) return true;
+        for (const auto &Arg : Call->getArgs())
+          if (scan(Arg.get())) return true;
+      }
+      if (const auto *B = dynamic_cast<const BinaryExprAST *>(E))
+        return scan(B->getLHS()) || scan(B->getRHS());
+      if (const auto *U = dynamic_cast<const UnaryExprAST *>(E))
+        return scan(U->getOperand());
+      if (const auto *T = dynamic_cast<const TryExprAST *>(E))
+        return scan(T->getOperand());
+      if (const auto *R = dynamic_cast<const ReturnExprAST *>(E))
+        return scan(R->getVal());
+      if (const auto *V = dynamic_cast<const VarDeclExprAST *>(E))
+        return scan(V->getInitializer());
+      if (const auto *A = dynamic_cast<const AssignmentExprAST *>(E))
+        return scan(A->getLHS()) || scan(A->getRHS());
+      return false;
+    };
+    if (scan(Stmt)) return true;
+  }
+  return false;
+}
+
 // Helper (file-scope, anonymous namespace): returns true if the given block
 // contains at least one direct call to the function identified by
 // (FuncName, MangledFuncName). When MangledFuncName is non-empty and the
@@ -330,7 +361,33 @@ bool CFG::allPathsRecurse() const {
     if (blockContainsSelfCall(BB.get(), FunctionName, MangledFunctionName))
       SelfCallBlocks.insert(BB.get());
   }
+  return allPathsThrough(SelfCallBlocks);
+}
 
+std::vector<std::string> CFG::calledFunctions() const {
+  std::vector<std::string> Out;
+  for (const auto &BB : Blocks)
+    blockCallsAny(BB.get(), [&](const FuncCallExprAST *Call) {
+      if (Call->ResolvedCallTarget)
+        Out.push_back(Call->ResolvedCallTarget->mangledName());
+      return false; // see every call
+    });
+  return Out;
+}
+
+bool CFG::allPathsCallAnyOf(const std::unordered_set<std::string> &Targets) const {
+  if (!EntryBlock || !ExitBlock) return false;
+  std::unordered_set<const TurfBasicBlock *> CallBlocks;
+  for (const auto &BB : Blocks)
+    if (blockCallsAny(BB.get(), [&](const FuncCallExprAST *Call) {
+          return Call->ResolvedCallTarget &&
+                 Targets.count(Call->ResolvedCallTarget->mangledName());
+        }))
+      CallBlocks.insert(BB.get());
+  return allPathsThrough(CallBlocks);
+}
+
+bool CFG::allPathsThrough(const std::unordered_set<const TurfBasicBlock *> &SelfCallBlocks) const {
   // If there are no self-call blocks at all, it's not recursive.
   if (SelfCallBlocks.empty()) return false;
 

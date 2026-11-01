@@ -540,6 +540,9 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // AN-6 (issue #353): an `int` converted to `double` not proven within
     // +-2^53 (ValueRange.cpp). Opt-in, a warning in every version.
     {"E181", "IntToDoublePrecisionWarning", "`int` to `double` that may lose precision", SLM::ErrorCategory::TYPE_MISMATCH, false, 3, true},
+    // AN-3 (a) (issue #332): mutual recursion with no base case on any path
+    // (MutualRecursion.cpp). Starts at `allow`; a B-1 candidate for 3.0.
+    {"E182", "MutualRecursionWarning", "Mutual recursion with no base case", SLM::ErrorCategory::CONTROL_FLOW, false, 3, true},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

@@ -1,0 +1,55 @@
+// AN-3 (a), issue #332: functions that call each other on every path warn
+// (E182, allow by default, turned on here), once per cycle and naming every
+// function in it: a 2-cycle and a 3-cycle. A cycle with a base case on any
+// path, and recursion through a function value, do not warn. The program
+// never calls the bad cycles.
+// LINT: --warn E182
+// EXPECT-DIAG: The functions `ping`, `pong` call each other on every path
+// EXPECT-DIAG: The functions `a`, `b`, `c` call each other on every path
+// EXPECT-NO-DIAG: `is_even`
+// EXPECT-NO-DIAG: `via_value`
+import test;
+
+fn ping(n: int): int {
+    return pong(n + 1);
+}
+
+fn pong(n: int): int {
+    return ping(n - 1);
+}
+
+fn a(n: int): int {
+    return b(n);
+}
+
+fn b(n: int): int {
+    return c(n);
+}
+
+fn c(n: int): int {
+    return a(n);
+}
+
+fn is_even(n: int): bool {
+    if n == 0 {
+        return true;
+    }
+    return is_odd(n - 1);
+}
+
+fn is_odd(n: int): bool {
+    return is_even(n - 1);
+}
+
+fn via_value(n: int, f: fn(int): int): int {
+    return f(n);
+}
+
+fn calls_back(n: int): int {
+    return via_value(n, calls_back);
+}
+
+fn main(): int {
+    test::assert(is_even(4), "a cycle with a base case runs");
+    return 0;
+}
