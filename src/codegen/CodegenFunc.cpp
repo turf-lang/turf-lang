@@ -416,8 +416,8 @@ Value *FuncDefExprAST::codegen() {
   std::string MangledName = Name;
   const bool CompileErrorTest = TestAnnotation::isCompileErrorTest(*this);
   std::string Prefix = "";
-  if (GlobalSymbolTable && GlobalSymbolTable->IsInModule()) {
-    Prefix = GlobalSymbolTable->GetCurrentModule() + "_";
+  if (Symbols() && Symbols()->IsInModule()) {
+    Prefix = Symbols()->GetCurrentModule() + "_";
     MangledName = Prefix + Name;
   }
 
@@ -594,7 +594,7 @@ Value *FuncDefExprAST::codegen() {
   // Phase 2: also register this function in the SymbolTable's module registry.
   // This populates the hashmap used by MethodCallExprAST to do namespace-aware
   // overload resolution without string-prefix scanning.
-  if (GlobalSymbolTable && Name != "main") {
+  if (Symbols() && Name != "main") {
     FunctionSymbol FSym;
     FSym.BaseName    = Name; // user-visible name, e.g. "printline"
     FSym.MangledName = MangledName; // e.g. "turf_io_printline_int"
@@ -607,10 +607,10 @@ Value *FuncDefExprAST::codegen() {
     // IsInModule() is true when we're currently inside a ModuleImportExprAST
     // codegen block (i.e. compiling a library like io.tr or math.tr).
     std::string ModuleName =
-        (GlobalSymbolTable->IsInModule())
-            ? GlobalSymbolTable->GetCurrentModule()
+        (Symbols()->IsInModule())
+            ? Symbols()->GetCurrentModule()
             : "main";
-    GlobalSymbolTable->RegisterModuleFunction(ModuleName, FSym);
+    Symbols()->RegisterModuleFunction(ModuleName, FSym);
   }
 
   // Code that can dereference a raw pointer (an `unsafe` block, or a
@@ -650,11 +650,11 @@ Value *FuncDefExprAST::codegen() {
   SetDebugLoc(Loc);
 
   // Enter a new scope for the function body
-  if (GlobalSymbolTable) {
-    GlobalSymbolTable->EnterScope();
+  if (Symbols()) {
+    Symbols()->EnterScope();
   }
 
-  // Alloca each parameter and add to NamedValues and GlobalSymbolTable.
+  // Alloca each parameter and add to NamedValues and Symbols().
   // `main`'s two LLVM-level args (argc/argv) are not real Turf parameters --
   // they're not in Params and have no Turf type to alloca -- so they're
   // stashed into the argv-plumbing globals instead (see EnsureArgvHelpers()
@@ -697,9 +697,9 @@ Value *FuncDefExprAST::codegen() {
       NamedValues[std::string(Arg.getName())] = {Alloca, RegisteredType};
 
       // Add parameter to symbol table
-      if (GlobalSymbolTable) {
+      if (Symbols()) {
         SourceLocation ParamLoc = Loc;
-        SymbolID id = GlobalSymbolTable->DeclareSymbol(
+        SymbolID id = Symbols()->DeclareSymbol(
             std::string(Arg.getName()), RegisteredType, ParamLoc, Alloca);
         ParamIDs.push_back(id);
       }
@@ -821,8 +821,8 @@ Value *FuncDefExprAST::codegen() {
     DBuilder->finalizeSubprogram(CurrentDebugScope);
 
   // Exit function scope
-  if (GlobalSymbolTable) {
-    GlobalSymbolTable->ExitScope();
+  if (Symbols()) {
+    Symbols()->ExitScope();
   }
 
   // Restore caller context
@@ -976,9 +976,9 @@ Value *ExternFuncDeclExprAST::codegen() {
   FuncParamTypes[Name_] = ParamTurfTypes;
   FuncReturnTypes[Name_] = ReturnType_;
 
-  // Register in the GlobalSymbolTable so FuncCallExprAST can find this
+  // Register in the Symbols() so FuncCallExprAST can find this
   // function by its user-visible name (without mangling).
-  if (GlobalSymbolTable) {
+  if (Symbols()) {
     FunctionSymbol FSym;
     FSym.BaseName    = Name_;
     FSym.MangledName = Name_; // extern fns use their C name directly
@@ -987,7 +987,7 @@ Value *ExternFuncDeclExprAST::codegen() {
     FSym.IsVarArg    = IsVarArg_;  // propagate variadic flag to the symbol
     for (const auto &[PName, PType] : Params_)
       FSym.ParamTypes.push_back(PType);
-    GlobalSymbolTable->RegisterModuleFunction("main", FSym);
+    Symbols()->RegisterModuleFunction("main", FSym);
   }
 
   // If this extern fn specifies a library (extern from "ssl" fn ...),
@@ -1113,11 +1113,11 @@ Value *FuncCallExprAST::codegen() {
       if (auto *CGT = dynamic_cast<const GenericType *>(ConstructedType.get())) {
         std::string MangledName =
             Monomorphize::instantiatedDeclName(CGT->getBaseName(), CGT->getTypeArgs());
-        T = GlobalSymbolTable ? GlobalSymbolTable->LookupType(MangledName) : nullptr;
+        T = Symbols() ? Symbols()->LookupType(MangledName) : nullptr;
       }
     }
     if (!T)
-      T = GlobalSymbolTable ? GlobalSymbolTable->LookupType(StructName) : nullptr;
+      T = Symbols() ? Symbols()->LookupType(StructName) : nullptr;
     auto *SType = dynamic_cast<TurfStructType *>(T.get());
     if (!SType) {
       SemanticError(Loc, "Internal error: unknown struct type '" + StructName +
@@ -1661,7 +1661,7 @@ Value *RecoverExprAST::codegen() {
     Builder->CreateBr(MergeBB);
   } else {
     // Run / AsRun: AsRun binds `err` to the error payload for the duration
-    // of the block, same save/restore-NamedValues + GlobalSymbolTable
+    // of the block, same save/restore-NamedValues + Symbols()
     // scope-push/pop idiom ForExprAST::codegen() already uses for its loop
     // variable.
     bool HadOldBinding = false;
@@ -1677,9 +1677,9 @@ Value *RecoverExprAST::codegen() {
       }
       NamedValues[BoundName] = {ErrAlloca, TurfAnyError()};
 
-      if (GlobalSymbolTable) {
-        GlobalSymbolTable->EnterScope();
-        GlobalSymbolTable->DeclareSymbol(BoundName, TurfAnyError(),
+      if (Symbols()) {
+        Symbols()->EnterScope();
+        Symbols()->DeclareSymbol(BoundName, TurfAnyError(),
                                         {Loc.Line, Loc.Col}, ErrAlloca);
       }
     }
@@ -1687,8 +1687,8 @@ Value *RecoverExprAST::codegen() {
     Value *BlockResult = Block ? Block->codegen() : nullptr;
 
     if (Kind == RecoverKind::AsRun) {
-      if (GlobalSymbolTable)
-        GlobalSymbolTable->ExitScope();
+      if (Symbols())
+        Symbols()->ExitScope();
       if (HadOldBinding)
         NamedValues[BoundName] = SavedBinding;
       else

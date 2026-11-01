@@ -41,10 +41,10 @@
 struct SymbolScopeGuard {
   bool Active;
   SymbolScopeGuard(bool ShouldEnter) : Active(ShouldEnter) {
-    if (Active && GlobalSymbolTable) GlobalSymbolTable->EnterScope();
+    if (Active && Symbols()) Symbols()->EnterScope();
   }
   ~SymbolScopeGuard() {
-    if (Active && GlobalSymbolTable) GlobalSymbolTable->ExitScope();
+    if (Active && Symbols()) Symbols()->ExitScope();
   }
 };
 
@@ -108,9 +108,9 @@ std::unique_ptr<ExprAST> ParseStructDecl() {
   std::vector<StructField> Fields;
   {
     SymbolScopeGuard Guard(!TypeParams.empty());
-    if (GlobalSymbolTable && !TypeParams.empty()) {
+    if (Symbols() && !TypeParams.empty()) {
       for (const auto &TP : TypeParams) {
-        GlobalSymbolTable->RegisterType(TP, std::make_shared<TurfGenericParamType>(TP));
+        Symbols()->RegisterType(TP, std::make_shared<TurfGenericParamType>(TP));
       }
     }
 
@@ -204,7 +204,7 @@ std::unique_ptr<ExprAST> ParseStructDecl() {
   // moved out into its own block above) -- meaning it got POPPED along with
   // the temporary generic-params scope the instant this function returned,
   // so ANY generic struct's own name became permanently unlookupable via
-  // GlobalSymbolTable->LookupType() immediately after being parsed.
+  // Symbols()->LookupType() immediately after being parsed.
   // Confirmed via `struct Box<T> { val: T* }` followed later by
   // `Box { val: null }` in the same file: Codegen's
   // StructInitExprAST::codegen() failed with "Unknown struct type 'Box'"
@@ -218,8 +218,8 @@ std::unique_ptr<ExprAST> ParseStructDecl() {
   // here. See TypeIdentity (Types.h).
   std::string Identity = TypeIdentity::make(CurrentParseModule(), Name);
   auto SType = std::make_shared<TurfStructType>(Identity, Fields, TypeParams);
-  if (GlobalSymbolTable) {
-    GlobalSymbolTable->RegisterGlobalType(Identity, SType);
+  if (Symbols()) {
+    Symbols()->RegisterGlobalType(Identity, SType);
   }
 
   return std::make_unique<StructDeclExprAST>(Loc, Identity, NameLoc, Fields, TypeParams);
@@ -299,14 +299,14 @@ std::unique_ptr<ExprAST> ParseEnumDecl() {
   }
   getNextToken(); // eat '}'
 
-  // Register the enum type in GlobalSymbolTable so that codegen can look it up
-  // via GlobalSymbolTable->LookupType(Name), mirroring how struct types are
+  // Register the enum type in Symbols() so that codegen can look it up
+  // via Symbols()->LookupType(Name), mirroring how struct types are
   // registered during ParseStructDecl.
   // FDN-003: under the type identity -- see ParseStructDecl().
   std::string Identity = TypeIdentity::make(CurrentParseModule(), Name);
   auto EType = std::make_shared<TurfEnumType>(Identity, Variants, TurfInt());
-  if (GlobalSymbolTable) {
-    GlobalSymbolTable->RegisterGlobalType(Identity, EType);
+  if (Symbols()) {
+    Symbols()->RegisterGlobalType(Identity, EType);
   }
 
   return std::make_unique<EnumDeclExprAST>(Loc, Identity, Variants);
@@ -424,14 +424,14 @@ std::unique_ptr<ExprAST> ParseMachineDecl() {
         UnreachableStateWarning(Loc, Name, S).warn();
   }
 
-  // Register the machine type in GlobalSymbolTable so that a parse-time
+  // Register the machine type in Symbols() so that a parse-time
   // lookup elsewhere in the same file already sees it -- mirrors
   // ParseEnumDecl()'s identical registration just above.
   // FDN-003: under the type identity -- see ParseStructDecl().
   std::string Identity = TypeIdentity::make(CurrentParseModule(), Name);
   auto MType = std::make_shared<TurfMachineType>(Identity, States, EdgeSet);
-  if (GlobalSymbolTable) {
-    GlobalSymbolTable->RegisterGlobalType(Identity, MType);
+  if (Symbols()) {
+    Symbols()->RegisterGlobalType(Identity, MType);
   }
 
   return std::make_unique<MachineDeclExprAST>(Loc, Identity, States, Edges);
@@ -617,13 +617,13 @@ std::unique_ptr<ExprAST> ParseErrorDecl() {
     return nullptr;
   }
 
-  // Register the error type in GlobalSymbolTable, mirroring how struct/enum
+  // Register the error type in Symbols(), mirroring how struct/enum
   // types are registered during ParseStructDecl/ParseEnumDecl.
   // FDN-003: under the type identity -- see ParseStructDecl().
   std::string Identity = TypeIdentity::make(CurrentParseModule(), Name);
   auto ErrType = std::make_shared<TurfUserErrorType>(Identity, Variants, IsBareForm);
-  if (GlobalSymbolTable) {
-    GlobalSymbolTable->RegisterGlobalType(Identity, ErrType);
+  if (Symbols()) {
+    Symbols()->RegisterGlobalType(Identity, ErrType);
   }
 
   return std::make_unique<ErrorDeclExprAST>(Loc, Identity, std::move(Variants), IsBareForm);
@@ -937,11 +937,11 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
   // Push scope to allow ParseType to resolve generic parameters. A size
   // parameter is not a type: ParseType() reads it only inside `[ ]`.
   SymbolScopeGuard Guard(!TypeParams.empty());
-  if (GlobalSymbolTable && !TypeParams.empty()) {
+  if (Symbols() && !TypeParams.empty()) {
     for (const auto &TP : TypeParams) {
       if (std::find(SizeParams.begin(), SizeParams.end(), TP) != SizeParams.end())
         continue;
-      GlobalSymbolTable->RegisterType(TP, std::make_shared<TurfGenericParamType>(TP));
+      Symbols()->RegisterType(TP, std::make_shared<TurfGenericParamType>(TP));
     }
   }
   struct SizeParamScope {
@@ -1101,14 +1101,14 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
 
   if (!StructName.empty() && !IsStaticMethodDecl) {
     // Build 'self' as a pointer to a lazy NamedType(StructName) placeholder
-    // rather than eagerly resolving StructName via GlobalSymbolTable here.
+    // rather than eagerly resolving StructName via Symbols() here.
     //
     // This intentionally mirrors how every OTHER struct-type reference in
     // this parser works (see ParseType()'s `Base = std::make_shared<NamedType>(BaseName);`
     // fallback for any non-primitive name) instead of special-casing this
     // one spot to require the struct to already be registered.
     //
-    // Why this matters: GlobalSymbolTable is populated by ParseStructDecl()
+    // Why this matters: Symbols() is populated by ParseStructDecl()
     // as it is encountered during this single top-to-bottom parse -- there is
     // no separate pre-pass that hoists struct names ahead of the parser the
     // way the Resolver later hoists them ahead of name resolution. An eager
@@ -1123,7 +1123,7 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
     // This is safe: TypeChecker::visitFieldAccess/visitMethodCall and
     // Codegen's FieldAccessExprAST/MethodCallExprAST already unwrap a
     // TurfPointerType's pointee and, if it's a NamedType, resolve it via
-    // GlobalSymbolTable->LookupType() at every `self.field` / `self.method()`
+    // Symbols()->LookupType() at every `self.field` / `self.method()`
     // use site inside the method body -- that resolve-on-use path is exactly
     // what runs for every other NamedType field/parameter already, so 'self'
     // is not gaining or losing any capability here, just becoming consistent.
@@ -1255,9 +1255,9 @@ std::unique_ptr<ExprAST> ParseOperatorDecl(bool HasCallerLocation) {
   // in the operand and return types into a TurfGenericParamType. Lives until
   // the function returns, covering the body too.
   SymbolScopeGuard Guard(!TypeParams.empty());
-  if (GlobalSymbolTable && !TypeParams.empty()) {
+  if (Symbols() && !TypeParams.empty()) {
     for (const auto &TP : TypeParams)
-      GlobalSymbolTable->RegisterType(TP, std::make_shared<TurfGenericParamType>(TP));
+      Symbols()->RegisterType(TP, std::make_shared<TurfGenericParamType>(TP));
   }
 
   // `operator[]` / `operator[]=` -- no single Lexer token to switch on (`[`

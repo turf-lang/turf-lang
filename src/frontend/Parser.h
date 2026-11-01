@@ -155,17 +155,12 @@ int getNextToken();
 // a complete statement. Defined in ParserCore.cpp.
 SLM::DiagnosticHints MissingSemicolonHints();
 
-// InitializeSymbolTable() (SymbolTable.h, defined SymbolTable.cpp --
-// allocates GlobalSymbolTable, which ParseStructDecl() registers into and
-// TypeChecker::visitMethodCall() reads back from) is load-bearing for
-// typecheck CORRECTNESS and carries no built-in enforcement: skipping it
-// doesn't crash, it fails every instance method call with a misleading "only
-// struct instances have methods" diagnostic -- see issue #231. Any embedder
-// driving the parser/resolver/typechecker outside main.cpp's own pipeline (an
-// LSP, a REPL, a unit test) MUST call this once before parsing anything. It
-// is idempotent (safe to call more than once per process). The operator
-// precedence table it used to fill too is a constant (ParserCore.cpp, F-S1).
-void InitializeCompilerGlobals();
+// The parser registers structs and enums into the current compilation's
+// symbol table (Symbols(), SymbolTable.h, F-S2), which the TypeChecker reads
+// back. Anything that parses a program -- the driver, the query facade --
+// owns a SymbolTable and makes it current with a SymbolTableScope first;
+// parsing with none current registers nothing, and every instance method call
+// then fails with "only struct instances have methods" (issue #231).
 
 // A token that legitimately starts a new top-level declaration (or ends the
 // previous statement). TOK_AT is deliberately excluded: STD-002 added back

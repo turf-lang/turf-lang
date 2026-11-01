@@ -20,7 +20,7 @@
  *    functions, forward references resolve correctly.
  *
  * This two-pass design is why the compiler no longer needs
- * `GlobalSymbolTable->LookupType()` in `ParseType()`: the parser creates a
+ * `Symbols()->LookupType()` in `ParseType()`: the parser creates a
  * `NamedType("MyStruct")` placeholder, and the Resolver's Pass 2 validates
  * it by looking up the name that was registered in Pass 1.
  *
@@ -61,7 +61,7 @@
  *
  * Usage:
  * @code
- *   InitializeCompilerGlobals();     // see Parser.h -- required once per process, before the below
+ *   SymbolTable Symbols; SymbolTableScope S(&Symbols); // F-S2, before the below
  *   Resolver resolver;
  *   resolver.resolve(programRoot);   // throws on the first error found
  * @endcode
@@ -73,15 +73,15 @@
  * Despite this header being LLVM-free/self-contained (see file doc comment
  * above), the Resolver is NOT fully decoupled from process-global state:
  * ParseStructDecl() (Parser, not this class) registers every parsed struct
- * into the global `GlobalSymbolTable` (SymbolTable.h), which TypeChecker's
- * visitMethodCall() later reads back from to decide whether a call's base
- * expression is a struct instance. `GlobalSymbolTable` is null until
- * `InitializeCompilerGlobals()`/`InitializeSymbolTable()` runs -- every read
+ * into the current compilation's `Symbols()` (SymbolTable.h, F-S2), which
+ * TypeChecker's visitMethodCall() later reads back from to decide whether a
+ * call's base expression is a struct instance. `Symbols()` is null outside a
+ * SymbolTableScope -- every read
  * site is null-guarded so skipping it will not crash, but every struct
  * registration and lookup silently becomes a no-op instead, which surfaces
  * later as misleading unrelated diagnostics (see issue #231). An embedder
  * constructing a bare `Resolver` outside main.cpp's own pipeline (e.g. a
- * unit test exercising just resolution) still needs this call first if the
+ * unit test exercising just resolution) still needs a current table if the
  * source under test declares or calls into any struct.
  */
 class Resolver : public ASTVisitor {
@@ -527,7 +527,7 @@ private:
    *                   bare identifier like `T` names a generic parameter
    *                   rather than a struct, so it always produces a plain
    *                   NamedType("T") -- never a TurfGenericParamType -- for
-   *                   type ANNOTATIONS (as opposed to the GlobalSymbolTable
+   *                   type ANNOTATIONS (as opposed to the Symbols()
    *                   registration ParseFuncDef/ParseStructDecl perform for
    *                   Codegen's benefit, which is a separate, LLVM-aware
    *                   table this LLVM-free pass does not consult). Without

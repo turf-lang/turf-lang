@@ -39,7 +39,6 @@ public:
   struct CompilerStateSnapshot {
     std::vector<std::string> SourceCode;          // Deep copy of source lines
     std::unique_ptr<ExprAST> AST;                 // Deep copy of AST root
-    std::unique_ptr<SymbolTable> SymbolTableCopy; // Deep copy of symbol table
     // The host compile's diagnostics when the sandbox was created (only
     // OriginalSnapshot's is ever filled; a validation's own go in
     // ValidationDiagnostics).
@@ -128,21 +127,8 @@ private:
   // per-node clone methods on all ExprAST subclasses)
   static std::unique_ptr<ExprAST> cloneAST(const ExprAST *original);
 
-  // Deep copy the symbol table
-  static std::unique_ptr<SymbolTable>
-  cloneSymbolTable(const SymbolTable *original);
-
   // Classify the edited line so we know whether a localized update is safe.
   static EditKind classifyEditKind(const std::string &lineText);
-
-  // Extract declaration metadata from a single-line declaration.
-  static bool parseDeclarationLine(const std::string &lineText,
-                                   std::string &name, TurfTypePtr &type,
-                                   bool &isArray, int &arraySize);
-
-  // Update the cloned symbol table for a localized line edit.
-  void updateSymbolTableForEdit(int lineNumber, const std::string &newLine,
-                                EditKind kind);
 
   // Apply source-level fix: splice the line range [startLine, endLine]
   // (1-based, inclusive) out and insert newLines in its place.
@@ -151,10 +137,6 @@ private:
 
   // Update AST nodes that reference the modified line (stub)
   void updateASTAfterFix(int lineNumber);
-
-  // Update symbol table after a fix (localized line-based update)
-  void updateSymbolTableAfterFix(int lineNumber, const std::string &newLine,
-                                 EditKind kind);
 
   // Determine whether a line change is safe for localized updates only.
   static bool isLocalizedEdit(EditKind kind);

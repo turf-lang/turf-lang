@@ -186,8 +186,8 @@ static bool typeHoldsString(const TurfType *T, int Depth = 0) {
   if (const auto *AT = dynamic_cast<const ::ArrayType *>(T))
     return AT->getSize() > 0 && typeHoldsString(AT->getElementType(), Depth + 1);
   const auto *ST = dynamic_cast<const TurfStructType *>(T);
-  if (!ST && GlobalSymbolTable && dynamic_cast<const NamedType *>(T))
-    ST = dynamic_cast<const TurfStructType *>(GlobalSymbolTable->LookupType(T->getName()).get());
+  if (!ST && Symbols() && dynamic_cast<const NamedType *>(T))
+    ST = dynamic_cast<const TurfStructType *>(Symbols()->LookupType(T->getName()).get());
   if (!ST)
     return false;
   for (const auto &F : ST->getFields())
@@ -220,8 +220,8 @@ Value *ArrayDeclExprAST::codegen() {
     Builder->CreateStore(SliceVal, SliceSlot);
 
     TurfTypePtr SliceType = makeArrayType(ElementType, Size);
-    if (GlobalSymbolTable)
-      GlobalSymbolTable->DeclareSymbol(Name, SliceType, Loc, SliceSlot);
+    if (Symbols())
+      Symbols()->DeclareSymbol(Name, SliceType, Loc, SliceSlot);
     NamedValues[Name] = {SliceSlot, SliceType};
     return Constant::getNullValue(Type::getInt64Ty(*TheContext));
   }
@@ -295,8 +295,8 @@ Value *ArrayDeclExprAST::codegen() {
 
   // Register in symbol table — array type already carries the size
   TurfTypePtr ArrType = makeArrayType(ElementType, Size);
-  if (GlobalSymbolTable) {
-    GlobalSymbolTable->DeclareSymbol(Name, ArrType, Loc, Alloca);
+  if (Symbols()) {
+    Symbols()->DeclareSymbol(Name, ArrType, Loc, Alloca);
   }
 
   NamedValues[Name] = {Alloca, ArrType};
@@ -408,8 +408,8 @@ FoldConstantArrayIndex(long long Idx, int ArraySize, ExprAST *Base,
   auto *BaseVar = dynamic_cast<const VariableExprAST *>(Base);
   ArrayBoundsError Err(Loc, BaseVar ? BaseVar->getName() : "array", Idx,
                        ArraySize);
-  if (BaseVar && GlobalSymbolTable) {
-    if (Symbol *S = GlobalSymbolTable->LookupSymbol(BaseVar->getName()))
+  if (BaseVar && Symbols()) {
+    if (Symbol *S = Symbols()->LookupSymbol(BaseVar->getName()))
       Err.withRelated(S->DeclLoc, "array declared here");
   }
   Err.raise();

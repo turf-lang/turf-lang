@@ -262,8 +262,9 @@ static void testUnsafeCapabilityDoesNotOutliveThePragma() {
 // progress, when the SLM Sandbox calls in -- must be exactly as it was.
 static void testHostStateIsRestored() {
   CurrentTest = "host state restored";
-  InitializeCompilerGlobals();
-  SymbolTable *HostTable = GlobalSymbolTable.get();
+  SymbolTable HostSymbols;
+  SymbolTableScope HostSymbolsScope(&HostSymbols);
+  SymbolTable *HostTable = Symbols();
   SourceFilename = "host.tr";
   MainSourceFilename = "host.tr";
   SourceLines = {"host line 1", "host line 2"};
@@ -290,7 +291,7 @@ static void testHostStateIsRestored() {
   auto R = turf::analyze({{"undef.tr", UndefinedVariable}}, Opts);
   CHECK(!R.succeeded());
 
-  CHECK(GlobalSymbolTable.get() == HostTable);
+  CHECK(Symbols() == HostTable);
   CHECK_EQ(SourceFilename, std::string("host.tr"));
   CHECK_EQ(MainSourceFilename, std::string("host.tr"));
   CHECK_EQ(SourceLines.size(), 2u);
@@ -372,7 +373,8 @@ static void testTwoLexersInterleave() {
 // import's parse, or an editor parsing several open files, needs.
 static void testTwoParsersInterleave() {
   CurrentTest = "two parsers interleave";
-  InitializeCompilerGlobals();
+  SymbolTable Table;
+  SymbolTableScope TableScope(&Table);
   std::istringstream AText("{ (alpha + [1, 2]) }");
   std::istringstream BText("(1 + 2) * beta");
   LexerState LA(AText, "a.tr");
@@ -472,8 +474,9 @@ static void testCancellation() {
 
   // Cancelled after each boundary in turn (the first asks, the second asks).
   for (int FireAt : {1, 2}) {
-    InitializeCompilerGlobals();
-    SymbolTable *HostTable = GlobalSymbolTable.get();
+    SymbolTable HostSymbols;
+    SymbolTableScope HostSymbolsScope(&HostSymbols);
+    SymbolTable *HostTable = Symbols();
     SourceFilename = "host.tr";
     MainSourceFilename = "host.tr";
     SourceLines = {"host line 1"};
@@ -503,7 +506,7 @@ static void testCancellation() {
     CHECK(!R.definitionOf("clean.tr", 2, 12).has_value());
     CHECK(R.symbolsInScope("clean.tr", 2, 12).empty());
     // And the host is exactly where it left off.
-    CHECK(GlobalSymbolTable.get() == HostTable);
+    CHECK(Symbols() == HostTable);
     CHECK_EQ(SourceFilename, std::string("host.tr"));
     CHECK_EQ(SourceLines.size(), 1u);
     CHECK(&Parser() == &HostParser);

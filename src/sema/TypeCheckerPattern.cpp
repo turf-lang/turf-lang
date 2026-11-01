@@ -70,8 +70,8 @@ TurfTypePtr resolveNamed(const TurfTypePtr &T) {
   if (!T)
     return T;
   if (const auto *NT = dynamic_cast<const NamedType *>(T.get()))
-    if (GlobalSymbolTable)
-      if (auto R = GlobalSymbolTable->LookupType(NT->getName()))
+    if (Symbols())
+      if (auto R = Symbols()->LookupType(NT->getName()))
         return R;
   return T;
 }
@@ -151,8 +151,8 @@ bool TypeChecker::checkPattern(
     TurfTypePtr Resolved = ValueTy;
     if (const auto *GT = dynamic_cast<const GenericType *>(ValueTy.get())) {
       GenericArgs = GT->getTypeArgs();
-      if (GlobalSymbolTable)
-        Resolved = GlobalSymbolTable->LookupType(GT->getBaseName());
+      if (Symbols())
+        Resolved = Symbols()->LookupType(GT->getBaseName());
     } else {
       Resolved = resolveNamed(ValueTy);
     }
@@ -294,8 +294,8 @@ bool TypeChecker::checkPattern(
 
     const auto *Head = dynamic_cast<const ScopeAccessExprAST *>(EV->getHead());
     const TurfUserErrorType *ET = nullptr;
-    if (Head && GlobalSymbolTable)
-      if (auto T = GlobalSymbolTable->LookupType(Head->getLeftName()))
+    if (Head && Symbols())
+      if (auto T = Symbols()->LookupType(Head->getLeftName()))
         ET = dynamic_cast<const TurfUserErrorType *>(T.get());
     const ErrorVariantInfo *Info = ET ? ET->getVariantInfo(Head->getRightName()) : nullptr;
     if (!Info) // The Resolver already reported an unknown type or variant.

@@ -18,7 +18,7 @@
 // fully executed -- which means every EnterScope()/ExitScope() pair opened
 // by nested BlockExprAST::codegen() calls (including the function's own
 // top-level body block, see BlockExprAST::codegen()) has already unwound by
-// the time this pass runs. GlobalSymbolTable->LookupSymbol(name) walks the
+// the time this pass runs. Symbols()->LookupSymbol(name) walks the
 // *current* scope stack, so at this point it can no longer find ANY local
 // variable of the function being analyzed -- not just ones declared in
 // nested blocks, but even top-level ones, since the body's own block scope

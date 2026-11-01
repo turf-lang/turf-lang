@@ -69,8 +69,8 @@ Value *MethodCallExprAST::codegen() {
     if (RefTy)
       BaseTy = RefTy->getPointee().get();
     if (auto *NT = dynamic_cast<const NamedType *>(BaseTy)) {
-      if (GlobalSymbolTable)
-        BaseTy = GlobalSymbolTable->LookupType(NT->getName()).get();
+      if (Symbols())
+        BaseTy = Symbols()->LookupType(NT->getName()).get();
     }
     Value *Ptr = RefTy ? Base->codegen() : Base->codegenLValue();
     if (!Ptr)
@@ -163,7 +163,7 @@ Value *MethodCallExprAST::codegen() {
     // Resolver::visitMethodCall) -- rather than independently re-deriving
     // "is this a module call" from the raw variable name here.
     //
-    // The raw-name check (GlobalSymbolTable->HasModule(Var->getName())) used
+    // The raw-name check (Symbols()->HasModule(Var->getName())) used
     // to live here instead, and it doesn't know about local variables at
     // all: a variable that happens to share a name with an imported module
     // (concretely, `io` -- auto-imported into EVERY Turf program via
@@ -411,8 +411,8 @@ Value *MethodCallExprAST::codegen() {
   // Without this, `expr.method()` where expr has type NamedType("T") will not
   // find the struct name and falls through to the fatal error below.
   if (auto *NT = dynamic_cast<const NamedType *>(BaseTy)) {
-    if (GlobalSymbolTable)
-      if (auto R = GlobalSymbolTable->LookupType(NT->getName()))
+    if (Symbols())
+      if (auto R = Symbols()->LookupType(NT->getName()))
         BaseTy = R.get();
   }
   if (auto *StructTy = dynamic_cast<const TurfStructType *>(BaseTy)) {
@@ -652,7 +652,7 @@ Value *ScopeAccessExprAST::codegen() {
     return BuildErrorTag(LeftName, RightName);
   }
 
-  auto EnumTy = GlobalSymbolTable->LookupType(LeftName);
+  auto EnumTy = Symbols()->LookupType(LeftName);
   auto *ET = dynamic_cast<const TurfEnumType *>(EnumTy.get());
   if (!ET) {
     LogErrorAt(Loc, ErrCode::InternalCompilerError, "Internal error: enum type not found in codegen", SLM::ErrorCategory::GENERAL);
@@ -1143,8 +1143,8 @@ Value *FieldAccessExprAST::codegenLValue() {
   }
   // Resolve NamedType base to TurfStructType for chained field access.
   if (auto *NT = dynamic_cast<const NamedType *>(BaseType)) {
-    if (GlobalSymbolTable) {
-      if (auto R = GlobalSymbolTable->LookupType(NT->getName()))
+    if (Symbols()) {
+      if (auto R = Symbols()->LookupType(NT->getName()))
         BaseType = R.get();
     }
   }
@@ -1154,17 +1154,17 @@ Value *FieldAccessExprAST::codegenLValue() {
   // collapse (every instantiation used to share ONE registered
   // TurfStructType, correct only because Type Erasure made every T/K/V a
   // uniform 8-byte slot). drainStructRequests() (S13a) registers a real,
-  // distinct TurfStructType per instantiation in GlobalSymbolTable under
+  // distinct TurfStructType per instantiation in Symbols() under
   // exactly this mangled name -- see the change record's *Removed
   // assumptions* for the two real bugs found live wiring this up (a
   // FieldAccessExprAST that never went through a VarDecl or method call
   // needed its OWN instantiation-request recording site, TypeCheckerCall.cpp's
   // visitFieldAccess).
   if (auto *GT = dynamic_cast<const GenericType *>(BaseType)) {
-    if (GlobalSymbolTable) {
+    if (Symbols()) {
       std::string MangledName =
           Monomorphize::instantiatedDeclName(GT->getBaseName(), GT->getTypeArgs());
-      if (auto R = GlobalSymbolTable->LookupType(MangledName))
+      if (auto R = Symbols()->LookupType(MangledName))
         BaseType = R.get();
     }
   }
@@ -1222,17 +1222,17 @@ Value *FieldAccessExprAST::codegen() {
   // already does. Without this, `p: Node*` has pointee NamedType("Node") —
   // not TurfStructType — and the cast below would fail.
   if (auto *NT = dynamic_cast<const NamedType *>(BaseType)) {
-    if (GlobalSymbolTable)
-      if (auto R = GlobalSymbolTable->LookupType(NT->getName()))
+    if (Symbols())
+      if (auto R = Symbols()->LookupType(NT->getName()))
         BaseType = R.get();
   }
   // Resolve a GenericType base (e.g. `Box<int>`) the same way -- see the
   // matching comment in codegenLValue() just above.
   if (auto *GT = dynamic_cast<const GenericType *>(BaseType)) {
-    if (GlobalSymbolTable) {
+    if (Symbols()) {
       std::string MangledName =
           Monomorphize::instantiatedDeclName(GT->getBaseName(), GT->getTypeArgs());
-      if (auto R = GlobalSymbolTable->LookupType(MangledName))
+      if (auto R = Symbols()->LookupType(MangledName))
         BaseType = R.get();
     }
   }
@@ -1250,12 +1250,12 @@ Value *FieldAccessExprAST::codegen() {
 
 
 Value *ModuleImportExprAST::codegen() {
-  if (GlobalSymbolTable) {
-    GlobalSymbolTable->EnterModule(ModuleName);
+  if (Symbols()) {
+    Symbols()->EnterModule(ModuleName);
   }
   Value *Res = Body->codegen();
-  if (GlobalSymbolTable) {
-    GlobalSymbolTable->ExitModule();
+  if (Symbols()) {
+    Symbols()->ExitModule();
   }
   return Res;
 }

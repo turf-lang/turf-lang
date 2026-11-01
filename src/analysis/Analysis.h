@@ -168,7 +168,7 @@ public:
 // return / unreachable code (CFG::reportFlowDiagnostics()), the complexity and
 // infinite-loop warnings, definite assignment, value range, alias (E017/E018),
 // nullability, escape, liveness, recursion without a base case, and, for a
-// `fn S.new()`, the constructor's field assignment (needs GlobalSymbolTable to
+// `fn S.new()`, the constructor's field assignment (needs Symbols() to
 // know S). The one sequence both FuncDefExprAST::codegen() and the query
 // facade's AnalysisOptions::RunFlowAnalysis run, so they cannot drift apart.
 // An error raises, ending the sequence for this function.

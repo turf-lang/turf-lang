@@ -69,16 +69,16 @@ const TurfStructType *structTypeOf(const TurfType *T) {
   if (!T)
     return nullptr;
   if (const auto *NT = dynamic_cast<const NamedType *>(T)) {
-    if (GlobalSymbolTable)
-      if (auto R = GlobalSymbolTable->LookupType(NT->getName()))
+    if (Symbols())
+      if (auto R = Symbols()->LookupType(NT->getName()))
         return dynamic_cast<const TurfStructType *>(R.get());
     return nullptr;
   }
   if (const auto *GT = dynamic_cast<const GenericType *>(T)) {
-    if (GlobalSymbolTable) {
+    if (Symbols()) {
       std::string Mangled =
           Monomorphize::instantiatedDeclName(GT->getBaseName(), GT->getTypeArgs());
-      if (auto R = GlobalSymbolTable->LookupType(Mangled))
+      if (auto R = Symbols()->LookupType(Mangled))
         return dynamic_cast<const TurfStructType *>(R.get());
     }
     return nullptr;
@@ -254,8 +254,8 @@ Value *CompareExprAST::codegenPatterns() {
     // and to the body, and to nothing after the arm.
     AllocaMap Slots;
     std::vector<std::pair<std::string, std::optional<VarInfo>>> SavedNamed;
-    if (GlobalSymbolTable)
-      GlobalSymbolTable->EnterScope();
+    if (Symbols())
+      Symbols()->EnterScope();
     for (const auto &Sym : Arm.Bindings) {
       AllocaInst *Slot = CreateEntryBlockAlloca(TheFunction, Sym->Name, Sym->Type.get());
       Slots[Sym->Name] = Slot;
@@ -265,8 +265,8 @@ Value *CompareExprAST::codegenPatterns() {
                                            ? std::nullopt
                                            : std::optional<VarInfo>(Old->second)});
       NamedValues[Sym->Name] = {Slot, Sym->Type};
-      if (GlobalSymbolTable)
-        GlobalSymbolTable->DeclareSymbol(Sym->Name, Sym->Type, Arm.Loc, Slot);
+      if (Symbols())
+        Symbols()->DeclareSymbol(Sym->Name, Sym->Type, Arm.Loc, Slot);
     }
 
     BasicBlock *BodyBB =
@@ -306,16 +306,16 @@ Value *CompareExprAST::codegenPatterns() {
     TheFunction->insert(TheFunction->end(), BodyBB);
     Builder->SetInsertPoint(BodyBB);
     if (!Arm.Body->codegen()) {
-      if (GlobalSymbolTable)
-        GlobalSymbolTable->ExitScope();
+      if (Symbols())
+        Symbols()->ExitScope();
       return nullptr;
     }
     if (!blockHasTerminator(Builder->GetInsertBlock()))
       Builder->CreateBr(MergeBB);
     Builder->SetInsertPoint(Resume);
 
-    if (GlobalSymbolTable)
-      GlobalSymbolTable->ExitScope();
+    if (Symbols())
+      Symbols()->ExitScope();
     for (auto &[Name, Saved] : SavedNamed) {
       if (Saved)
         NamedValues[Name] = *Saved;

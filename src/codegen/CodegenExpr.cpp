@@ -693,7 +693,7 @@ Value *CastExprAST::codegen() {
       SrcType = std::make_shared<TurfPointerType>(TurfVoid());
     else if (ExprTy->isEnum()) {
       // Preserve the enum type pointer directly so isEnum() checks work below.
-      SrcType = GlobalSymbolTable->LookupType(ExprTy->getName());
+      SrcType = Symbols()->LookupType(ExprTy->getName());
       if (!SrcType) SrcType = getTurfTypeFromLLVM(Val->getType());
     }
     else
@@ -706,8 +706,8 @@ Value *CastExprAST::codegen() {
   // Resolve DestType: NamedType may point to a registered enum/struct — look it
   // up at codegen time so isEnum() and isStruct() return the correct value.
   TurfTypePtr ResolvedDest = DestType;
-  if (dynamic_cast<const NamedType *>(DestType.get()) && GlobalSymbolTable) {
-    if (auto Registered = GlobalSymbolTable->LookupType(DestType->getName()))
+  if (dynamic_cast<const NamedType *>(DestType.get()) && Symbols()) {
+    if (auto Registered = Symbols()->LookupType(DestType->getName()))
       ResolvedDest = Registered;
   }
   const std::string DstName = ResolvedDest->getName();
@@ -764,15 +764,15 @@ Value *CastExprAST::codegen() {
   if (SrcName == "int" && DstName == "char")
     return Builder->CreateTrunc(Val, Type::getInt8Ty(*TheContext), "inttochar");
 
-  // Resolve both SrcType and DestType through GlobalSymbolTable so that
+  // Resolve both SrcType and DestType through Symbols() so that
   // enum types (stored as NamedType at parse time) are correctly identified.
   // All primitive type names ("int", "double", etc.) return null from
   // LookupType and are handled by the existing branches.
   TurfTypePtr SrcEnum, DstEnum;
-  if (GlobalSymbolTable) {
-    if (auto R = GlobalSymbolTable->LookupType(SrcName))
+  if (Symbols()) {
+    if (auto R = Symbols()->LookupType(SrcName))
       if (dynamic_cast<const TurfEnumType *>(R.get())) SrcEnum = R;
-    if (auto R = GlobalSymbolTable->LookupType(DstName))
+    if (auto R = Symbols()->LookupType(DstName))
       if (dynamic_cast<const TurfEnumType *>(R.get())) DstEnum = R;
   }
 

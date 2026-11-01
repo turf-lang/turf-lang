@@ -1806,7 +1806,7 @@ static int runCompilerMain(int argc, char **argv) {
 
   // --format needs none of the lex/parse/resolve/typecheck/codegen
   // pipeline below -- just the raw source text -- so it short-circuits
-  // before any of that global state (GlobalSymbolTable, LLVM
+  // before any of that global state (Symbols(), LLVM
   // module, ...) gets initialized at all.
   if (opts.Format)
     return runFormat(opts.PositionalFiles, opts.FormatWrite, opts.Check, opts.FormatSkipUnlexable);
@@ -1852,7 +1852,11 @@ static int runCompilerMain(int argc, char **argv) {
     return 1;
   }
   ClearGlobalCFGs();
-  InitializeCompilerGlobals(); // GlobalSymbolTable + BinopPrecedence -- see Parser.h
+  // F-S2: this compile's symbol table, current until runCompilerMain()
+  // returns (SymbolTable.h). A compiler fix's re-check and the --smart
+  // sandbox analyse with tables of their own.
+  auto ProgramSymbols = std::make_unique<SymbolTable>();
+  SymbolTableScope ProgramSymbolsScope(ProgramSymbols.get());
 
   // Pre-pass: hoist 'fn' function prototypes so that forward calls work.
   // We perform a second full parse of the file, i.e. only processing
@@ -2141,7 +2145,7 @@ static int runCompilerMain(int argc, char **argv) {
       // struct type while it was still opaque (zero fields). The opaque
       // llvm::StructType* object identity is correctly preserved and later
       // filled in via setBody() -- so by the time the module finishes,
-      // GlobalSymbolTable and LLVMTypeCache both point at a fully-populated
+      // Symbols() and LLVMTypeCache both point at a fully-populated
       // struct -- but the GEP instruction itself was already permanently
       // constructed while that type had no known fields, and its embedded
       // "indexed type" information doesn't get retroactively fixed up by a
@@ -2254,14 +2258,14 @@ static int runCompilerMain(int argc, char **argv) {
           // Block ... does not have terminator") in an unrelated function.
           if (dynamic_cast<VarDeclExprAST *>(AST.get()))
             continue;
-          size_t SavedDepth = GlobalSymbolTable ? GlobalSymbolTable->GetDepth() : 0;
+          size_t SavedDepth = Symbols() ? Symbols()->GetDepth() : 0;
           g_recoverActive = true;
           try {
             AST->codegen();
           } catch (const RecoverUnwind &) {
-            if (GlobalSymbolTable) {
-              GlobalSymbolTable->ResetToDepth(SavedDepth);
-              GlobalSymbolTable->ResetEarlyExitForCurrentScope();
+            if (Symbols()) {
+              Symbols()->ResetToDepth(SavedDepth);
+              Symbols()->ResetEarlyExitForCurrentScope();
             }
           }
           g_recoverActive = false;
@@ -2624,15 +2628,15 @@ static int runCompilerMain(int argc, char **argv) {
   // Phase Separation: Codegen All
   // Only non-fn top-level statements need codegen here. fn bodies were already
   // compiled in the pre-pass; codegenning them again would duplicate them.
-  size_t SavedDepth = GlobalSymbolTable ? GlobalSymbolTable->GetDepth() : 0;
+  size_t SavedDepth = Symbols() ? Symbols()->GetDepth() : 0;
   for (auto &AST : TopLevelASTs) {
     g_recoverActive = true;
     try {
       AST->codegen();
     } catch (const RecoverUnwind &) {
-      if (GlobalSymbolTable) {
-        GlobalSymbolTable->ResetToDepth(SavedDepth);
-        GlobalSymbolTable->ResetEarlyExitForCurrentScope();
+      if (Symbols()) {
+        Symbols()->ResetToDepth(SavedDepth);
+        Symbols()->ResetEarlyExitForCurrentScope();
       }
     }
     g_recoverActive = false;

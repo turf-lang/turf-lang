@@ -1363,7 +1363,7 @@ void TypeChecker::visitCast(CastExprAST &Node) {
   // validated at compile time and is left alone, same as before).
   // ParseType() always parses a bare identifier as NamedType, never
   // resolving it to the real registered TurfEnumType (that resolution
-  // normally happens via GlobalSymbolTable elsewhere in the pipeline) --
+  // normally happens via Symbols() elsewhere in the pipeline) --
   // and Resolver::visitCast() doesn't touch DestType at all, so
   // Node.getDestTypePtr() for `... to Color` is still NamedType("Color")
   // by the time this runs, not TurfEnumType. Without resolving it here
@@ -1381,8 +1381,8 @@ void TypeChecker::visitCast(CastExprAST &Node) {
     return;
   }
   if (auto *NT = dynamic_cast<const NamedType *>(DestTy.get())) {
-    if (GlobalSymbolTable) {
-      if (auto Resolved = GlobalSymbolTable->LookupType(NT->getName()))
+    if (Symbols()) {
+      if (auto Resolved = Symbols()->LookupType(NT->getName()))
         DestTy = Resolved;
     }
   }
@@ -1532,14 +1532,14 @@ void TypeChecker::visitCast(CastExprAST &Node) {
       const std::string SrcName = OperandTy->getName();
       const std::string DstName = DestTy->getName();
 
-      // Resolve OperandTy through GlobalSymbolTable too, mirroring DestTy's
+      // Resolve OperandTy through Symbols() too, mirroring DestTy's
       // own resolution above -- an enum-typed operand is otherwise still a
       // bare NamedType at this point (same root cause as the enum-literal
       // check above).
       TurfTypePtr ResolvedOperandTy = OperandTy;
       if (auto *NT2 = dynamic_cast<const NamedType *>(OperandTy.get())) {
-        if (GlobalSymbolTable) {
-          if (auto Resolved = GlobalSymbolTable->LookupType(NT2->getName()))
+        if (Symbols()) {
+          if (auto Resolved = Symbols()->LookupType(NT2->getName()))
             ResolvedOperandTy = Resolved;
         }
       }
@@ -1627,8 +1627,8 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
   // producing a false "missing return" error for perfectly valid code.
   if (SubjectTy) {
     if (const auto *NT = dynamic_cast<const NamedType *>(SubjectTy.get())) {
-      if (GlobalSymbolTable) {
-        if (auto Resolved = GlobalSymbolTable->LookupType(NT->getName()))
+      if (Symbols()) {
+        if (auto Resolved = Symbols()->LookupType(NT->getName()))
           SubjectTy = Resolved;
       }
     }

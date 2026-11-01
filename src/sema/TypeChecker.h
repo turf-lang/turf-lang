@@ -32,11 +32,10 @@
  *
  * Global-state dependency
  * ───────────────────────
- *  Struct lookups (visitMethodCall() among them) consult the process-global
- *  `GlobalSymbolTable` (SymbolTable.h, populated by the Parser's
- *  ParseStructDecl()) to decide whether a call's base expression is a struct
- *  instance. It is null until `InitializeCompilerGlobals()`/
- *  `InitializeSymbolTable()` (Parser.h) runs once per process; the read sites
+ *  Struct lookups (visitMethodCall() among them) consult the current
+ *  compilation's symbol table, `Symbols()` (SymbolTable.h, F-S2, populated by
+ *  the Parser's ParseStructDecl()) to decide whether a call's base expression
+ *  is a struct instance. It is null outside a SymbolTableScope; the read sites
  *  are null-guarded so this will not crash, but every instance method call
  *  silently fails to resolve instead, with a diagnostic ("only struct
  *  instances have methods") that reads exactly like a real type error in
@@ -45,7 +44,7 @@
  * Usage
  * ─────
  * @code
- *   InitializeCompilerGlobals();     // see Parser.h -- required once per process, before the below
+ *   SymbolTable Symbols; SymbolTableScope S(&Symbols); // F-S2, before the below
  *   // 1. Build the symbol table (Resolver pass fills it).
  *   ResolverSymbolTable rst;
  *   // ... Resolver runs here ...

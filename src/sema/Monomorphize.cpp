@@ -6,7 +6,7 @@
 #include "diagnostics/ErrorsMonomorphize.h"
 #include "frontend/Parser.h" // IsLibStdWarningLocation(): which hop of a chain is user code
 #include "resolve/Resolver.h"
-#include "resolve/SymbolTable.h" // GlobalSymbolTable -- RegisterType()'s target, distinct from Resolver's own SymTable_
+#include "resolve/SymbolTable.h" // Symbols() -- RegisterType()'s target, distinct from Resolver's own SymTable_
 #include "sema/TypeChecker.h"
 #include "sema/TypeWalk.h" // SMP-002: shared substitute() walker
 #include "sema/TypeCheckerInternal.h" // recordGenericFieldInstantiations(): a clone's own generic fields
@@ -585,12 +585,12 @@ std::shared_ptr<ResolverFunctionSymbol> finishInstantiation(
   //   - ResolverFunctionSymbol::mangledName() (ResolverSymbolBase.h) prepends
   //     Sym.SourceModule.
   //   - FuncDefExprAST::codegen() (CodegenFunc.cpp) prepends
-  //     GlobalSymbolTable::GetCurrentModule() instead -- a CODEGEN-TIME
+  //     Symbols()::GetCurrentModule() instead -- a CODEGEN-TIME
   //     GLOBAL, normally set/cleared around a ModuleImportExprAST's own
   //     codegen() traversal of that module's body.
   // The clone is appended directly to PrePassASTs (finishInstantiation,
   // below) and codegenned from THAT flat loop, never from inside any
-  // module-import traversal -- GlobalSymbolTable::IsInModule() is false the
+  // module-import traversal -- Symbols()::IsInModule() is false the
   // whole time. Leaving Sym.SourceModule as "list" would make the CALL
   // SITE's mangledName() (which reads Sym.SourceModule) disagree with what
   // the clone's OWN codegen() actually registers the LLVM function under
@@ -895,7 +895,7 @@ bool drainFreeFunctionRequests(
     // is declared as a bare pointer with no <...>, TypeCheckerCall.cpp's
     // visitMethodCall doc comment). A body referencing `self.<field>`
     // (which a constructor always does) resolves that field's type from
-    // GlobalSymbolTable's SHARED, never-per-instantiation-substituted
+    // Symbols()'s SHARED, never-per-instantiation-substituted
     // struct registration -- substituting this clone's OWN Params/body
     // cannot fix that; only S13a's real per-instantiation struct layout
     // can. Found live: `Box::new(42)` re-typechecked as "Cannot assign
@@ -1309,7 +1309,7 @@ namespace {
 /// same-named generic structs are therefore two registry entries.
 ///
 /// History: this used to be keyed by BARE name on the argument that struct
-/// names were one program-wide namespace (GlobalSymbolTable::RegisterType()
+/// names were one program-wide namespace (Symbols()::RegisterType()
 /// took no module), so a bare key lost nothing -- and because a Struct-kind
 /// request's SourceModule was then read off the use site's SPELLED
 /// qualifier (empty for an unqualified `List<int>` inside list.tr itself),
@@ -1453,7 +1453,7 @@ bool drainStructRequests(
     Clone->clearTypeParams();
 
     // Per-instantiation acyclicity -- BEFORE registering the new type, so a
-    // genuinely cyclic instantiation never reaches GlobalSymbolTable/Codegen
+    // genuinely cyclic instantiation never reaches Symbols()/Codegen
     // at all. Raises StructLayoutCycleError directly (propagates to
     // main.cpp's own sub-pass-2b.5-level setjmp, the SAME already-verified
     // path GenericInstantiationDepthError above already relies on -- see
@@ -1462,14 +1462,14 @@ bool drainStructRequests(
     // re-raise).
     PreR.checkStructLayoutAcyclicityForClone(Clone);
 
-    // Register the new, distinct TurfStructType -- GlobalSymbolTable (the
+    // Register the new, distinct TurfStructType -- Symbols() (the
     // codegen/typechecker-facing type registry), NOT Resolver's own
     // SymTable_ (a different, name-existence-only registry -- see
     // resolveMonomorphizedClone() below for that one). This is bullet 1 of
     // S13a's own plan (TYPE-002.md): "one real TurfStructType ... per struct
     // instantiation," registered "under extended mangled names."
-    if (GlobalSymbolTable)
-      GlobalSymbolTable->RegisterType(
+    if (Symbols())
+      Symbols()->RegisterType(
           Clone->getName(),
           std::make_shared<TurfStructType>(Clone->getName(), Clone->getFields()));
 

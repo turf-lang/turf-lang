@@ -186,9 +186,6 @@ static const std::map<int, int> BinopPrecedence = {
     {TOK_POWER, 60},
 };
 
-void InitializeCompilerGlobals() {
-  InitializeSymbolTable();
-}
 
 // See Parser.h for the doc comment.
 bool IsTopLevelBoundaryToken(int Tok) {
@@ -857,10 +854,10 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     // error a few tokens later. A forward-declared struct misses this check,
     // which is fine: the ordinary parse failure that follows is still a real,
     // if less specific, diagnostic.
-    if (Parser().CurTok == '{' && GlobalSymbolTable && !Parser().InPatternHeader) {
+    if (Parser().CurTok == '{' && Symbols() && !Parser().InPatternHeader) {
       // A struct declared earlier in THIS module is registered under its
       // identity (`M::IdName`), not its bare spelling.
-      if (auto T = GlobalSymbolTable->LookupType(
+      if (auto T = Symbols()->LookupType(
               TypeIdentity::make(CurrentParseModule(), IdName))) {
         if (dynamic_cast<TurfStructType *>(T.get())) {
           LogErrorAt(IdLoc, ErrCode::RemovedSyntax,
@@ -956,8 +953,8 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
       // `Module::StructName { ... }` spelling -- looked up by the identity
       // the qualifier names (`IdName::RightName` IS that identity when
       // IdName is the owning module).
-      if (Parser().CurTok == '{' && GlobalSymbolTable && !Parser().InPatternHeader) {
-        if (auto T = GlobalSymbolTable->LookupType(
+      if (Parser().CurTok == '{' && Symbols() && !Parser().InPatternHeader) {
+        if (auto T = Symbols()->LookupType(
                 TypeIdentity::make(IdName, RightName))) {
           if (dynamic_cast<TurfStructType *>(T.get())) {
             LogErrorAt(IdLoc, ErrCode::RemovedSyntax,
@@ -1031,8 +1028,8 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
 
     // Only flag a typo if this name is NOT already a known variable.
     bool IsKnownVariable = false;
-    if (GlobalSymbolTable)
-      IsKnownVariable = (GlobalSymbolTable->LookupSymbol(IdName) != nullptr);
+    if (Symbols())
+      IsKnownVariable = (Symbols()->LookupSymbol(IdName) != nullptr);
     if (!IsKnownVariable)
       IsKnownVariable = (NamedValues.find(IdName) != NamedValues.end());
 

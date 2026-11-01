@@ -407,8 +407,8 @@ void TypeChecker::visitForEach(ForEachExprAST &Node) {
   // and the field access inside the body would fail to type-check.
   if (ElemTy) {
     if (const auto *NT = dynamic_cast<const NamedType *>(ElemTy.get())) {
-      if (GlobalSymbolTable) {
-        if (auto Resolved = GlobalSymbolTable->LookupType(NT->getName()))
+      if (Symbols()) {
+        if (auto Resolved = Symbols()->LookupType(NT->getName()))
           ElemTy = Resolved;
       }
     }
@@ -485,8 +485,8 @@ static bool isDeclaredErrorTypeValue(const TurfType *T) {
   if (T->isAnyError())
     return true;
   if (const auto *NT = dynamic_cast<const NamedType *>(T)) {
-    if (GlobalSymbolTable) {
-      if (auto Registered = GlobalSymbolTable->LookupType(NT->getName()))
+    if (Symbols()) {
+      if (auto Registered = Symbols()->LookupType(NT->getName()))
         return Registered->isUserError();
     }
   }

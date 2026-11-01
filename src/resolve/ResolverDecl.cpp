@@ -397,7 +397,7 @@ void Resolver::resolveFuncDef(FuncDefExprAST &Node) {
   // TurfPointerType(NamedType(StructName))), so a genuinely misspelled
   // struct name in a method declaration (`fn Usre.grow()`) is caught here --
   // that specific check used to live in the Parser as an eager
-  // GlobalSymbolTable lookup, but had to be made lazy to support struct
+  // Symbols() lookup, but had to be made lazy to support struct
   // methods declared before their struct (see ParseFuncDef's comment); this
   // is where that validation now correctly belongs instead. (By this point
   // the substitution above has already turned any of this function's own
@@ -804,7 +804,7 @@ void Resolver::validateNamedType(
   // (IntType, DoubleType, etc.) and never reach here as NamedType. A true
   // TurfGenericParamType instance is a different class entirely and is
   // correctly never matched here either -- but ParseType() never actually
-  // produces one for a type ANNOTATION (only GlobalSymbolTable's separate,
+  // produces one for a type ANNOTATION (only Symbols()'s separate,
   // Codegen-facing registration does), so the caller-supplied TypeParams
   // list below is what actually exempts `T` in `fn<T> f(x: T)`.
   //
@@ -1013,12 +1013,12 @@ void Resolver::visitStructDecl(StructDeclExprAST &Node) {
     for (auto &Field : Node.getFieldsMut())
       Field.Type = substituteTypeParams(Field.Type, TypeParams);
 
-    // OVH-006: GlobalSymbolTable's registered TurfStructType for this name
+    // OVH-006: Symbols()'s registered TurfStructType for this name
     // (ParseStructDecl(), built at PARSE time, directly from the as-parsed
     // Fields) is a SEPARATE object from this AST node -- the substitution
     // two lines up only ever updated the node's OWN field list, so every
     // downstream consumer that resolves a field type by looking the struct
-    // back up via GlobalSymbolTable->LookupType(Name) (TypeCheckerCall.cpp's
+    // back up via Symbols()->LookupType(Name) (TypeCheckerCall.cpp's
     // visitFieldAccess/visitMethodCall, CodegenCore.cpp's mirrors) saw the
     // stale, unsubstituted NamedType("T") forever, never a real
     // TurfGenericParamType. That NamedType then had to be told apart from an
@@ -1034,8 +1034,8 @@ void Resolver::visitStructDecl(StructDeclExprAST &Node) {
     // NamedType-vs-registered-type heuristics simply never fires for a
     // struct's own type parameter again, regardless of what else in the
     // program happens to be named the same.
-    if (GlobalSymbolTable)
-      GlobalSymbolTable->RegisterType(
+    if (Symbols())
+      Symbols()->RegisterType(
           Node.getName(),
           std::make_shared<TurfStructType>(Node.getName(), Node.getFields(),
                                            Node.getTypeParams()));

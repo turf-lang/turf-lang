@@ -18,7 +18,7 @@
 // Use raw VariableSymbol* as the definiteness key.
 // VariableSymbol objects are owned by shared_ptrs attached to AST nodes and
 // survive the entire compilation of a function — unlike SymbolID from
-// GlobalSymbolTable which is erased when a lexical scope exits.
+// Symbols() which is erased when a lexical scope exits.
 using AssignSet = std::unordered_set<const VariableSymbol *>;
 
 namespace {
@@ -1406,13 +1406,13 @@ bool isRawPointerDest(const TurfType *T) {
 const TurfStructType *escapeStructOf(const TurfType *T) {
   if (const auto *ST = dynamic_cast<const TurfStructType *>(T))
     return ST;
-  if (!T || !GlobalSymbolTable)
+  if (!T || !Symbols())
     return nullptr;
   TurfTypePtr Registered;
   if (dynamic_cast<const NamedType *>(T))
-    Registered = GlobalSymbolTable->LookupType(T->getName());
+    Registered = Symbols()->LookupType(T->getName());
   else if (const auto *GT = dynamic_cast<const GenericType *>(T))
-    Registered = GlobalSymbolTable->LookupType(
+    Registered = Symbols()->LookupType(
         Monomorphize::instantiatedDeclName(GT->getBaseName(), GT->getTypeArgs()));
   return dynamic_cast<const TurfStructType *>(Registered.get());
 }
@@ -1616,8 +1616,8 @@ bool typeHoldsNoAddress(const TurfType *T, bool ExceptRefs = false, int Depth = 
     return false;
   if (dynamic_cast<const TurfEnumType *>(T))
     return true;
-  if (dynamic_cast<const NamedType *>(T) && GlobalSymbolTable)
-    if (dynamic_cast<const TurfEnumType *>(GlobalSymbolTable->LookupType(T->getName()).get()))
+  if (dynamic_cast<const NamedType *>(T) && Symbols())
+    if (dynamic_cast<const TurfEnumType *>(Symbols()->LookupType(T->getName()).get()))
       return true;
   if (const auto *AT = dynamic_cast<const ArrayType *>(T))
     return AT->getSize() >= 0 &&
@@ -2413,7 +2413,7 @@ void runFunctionFlowPasses(CFG &Cfg, const std::string &Name, SourceLocation Loc
   if (Dot != std::string::npos && Name.substr(Dot + 1) == "new") {
     std::string CtorStructName = Name.substr(0, Dot);
     TurfTypePtr CtorStructT =
-        GlobalSymbolTable ? GlobalSymbolTable->LookupType(CtorStructName) : nullptr;
+        Symbols() ? Symbols()->LookupType(CtorStructName) : nullptr;
     if (auto *CtorSType = dynamic_cast<TurfStructType *>(CtorStructT.get())) {
       std::vector<std::string> FieldNames;
       for (const auto &F : CtorSType->getFields())

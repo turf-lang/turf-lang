@@ -99,11 +99,6 @@ public:
     SavedPackageGraph_ = std::move(g_PackageGraph);
     g_PackageGraph = PackageGraph();
 
-    // InitializeCompilerGlobals() replaces GlobalSymbolTable outright; the
-    // host's must survive it.
-    SavedGlobalSymbolTable_ = std::move(GlobalSymbolTable);
-    InitializeCompilerGlobals();
-
     PushParserCompileState();
     PushResolverCompileState();
 
@@ -116,7 +111,6 @@ public:
     PopResolverCompileState();
     PopParserCompileState();
 
-    GlobalSymbolTable = std::move(SavedGlobalSymbolTable_);
     DiagnosticEngine::restoreState(std::move(SavedDiagnostics_));
     TestRegistry::restore(std::move(SavedTests_));
 
@@ -151,7 +145,17 @@ private:
   DiagnosticEngine::State SavedDiagnostics_;
   TestRegistry::State SavedTests_;
   PackageGraph SavedPackageGraph_;
-  std::unique_ptr<SymbolTable> SavedGlobalSymbolTable_;
+
+public:
+  // The analysis's own symbol table (F-S2), current until the scope ends.
+  // The host compile's table, if any, is current again after: it was never
+  // touched. takeSymbols() hands it to the result, whose inferred types may
+  // point into what it registered.
+  std::unique_ptr<SymbolTable> takeSymbols() { return std::move(Symbols_); }
+
+private:
+  std::unique_ptr<SymbolTable> Symbols_ = std::make_unique<SymbolTable>();
+  SymbolTableScope SymbolsScope_{Symbols_.get()};
 };
 
 // One analysis at a time per process: everything GlobalStateScope saves is
@@ -419,7 +423,7 @@ struct AnalysisResult::Impl {
   std::size_t PreludeCount = 0;
   std::unique_ptr<Resolver> R;
   std::unique_ptr<TypeChecker> TC;
-  // The analysis's own GlobalSymbolTable. Nothing queries it after
+  // The analysis's own symbol table (F-S2). Nothing queries it after
   // analyze() returns, but types the TypeChecker inferred may point into
   // what it registered, so it lives as long as they do.
   std::unique_ptr<SymbolTable> Types;
@@ -922,7 +926,7 @@ AnalysisResult analyze(const std::vector<SourceBuffer> &Buffers,
     I->Diagnostics.push_back(toDiagnostic(D, Entry.Path));
   }
 
-  I->Types = std::move(GlobalSymbolTable);
+  I->Types = Scope.takeSymbols();
   return AnalysisResult(std::move(I));
 }
 

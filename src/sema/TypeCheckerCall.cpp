@@ -40,7 +40,7 @@
 // The field scan's fallback reads through a NamedType that is not a
 // registered type (see TypeWalk::structTypeArgSubst()).
 static bool isRegisteredTypeName(const std::string &Name) {
-  return GlobalSymbolTable && GlobalSymbolTable->LookupType(Name) != nullptr;
+  return Symbols() && Symbols()->LookupType(Name) != nullptr;
 }
 
 
@@ -748,8 +748,8 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
     const std::string Full =
         TypeIdentity::bareName(ScopeCallee->getLeftName()) + "::" + CalleeName;
     const ErrorVariantInfo *Info = nullptr;
-    if (GlobalSymbolTable)
-      if (auto T = GlobalSymbolTable->LookupType(ScopeCallee->getLeftName()))
+    if (Symbols())
+      if (auto T = Symbols()->LookupType(ScopeCallee->getLeftName()))
         if (const auto *ET = dynamic_cast<const TurfUserErrorType *>(T.get()))
           Info = ET->getVariantInfo(CalleeName);
     const size_t FieldCount = Info ? Info->Fields.size() : 0;
@@ -801,8 +801,8 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
     // `AnyErrorType` and a value whose type isUserError(), which a NamedType
     // is not, so the comparison was a type error ("Cannot compare '<error>'
     // with 'E'") for as long as STD-002's construction returned the NamedType.
-    TurfTypePtr ErrTy = GlobalSymbolTable
-                            ? GlobalSymbolTable->LookupType(ScopeCallee->getLeftName())
+    TurfTypePtr ErrTy = Symbols()
+                            ? Symbols()->LookupType(ScopeCallee->getLeftName())
                             : nullptr;
     setType(&Node, ErrTy ? ErrTy : makeResolvedNamedType(ScopeCallee->getLeftName()));
     return;
@@ -1719,9 +1719,9 @@ void TypeChecker::rejectUninstantiatedReceiver(const ExprAST *Base) {
   const auto *FC = dynamic_cast<const FuncCallExprAST *>(Base);
   const auto *SC = FC ? dynamic_cast<const ScopeAccessExprAST *>(FC->getCallee()) : nullptr;
   if (!SC || SC->ResolvedKind != ScopeAccessKind::DefaultConstruct || FC->ConstructedType ||
-      !GlobalSymbolTable)
+      !Symbols())
     return;
-  auto T = GlobalSymbolTable->LookupType(SC->getLeftName());
+  auto T = Symbols()->LookupType(SC->getLeftName());
   const auto *STy = dynamic_cast<const TurfStructType *>(T.get());
   if (!STy || STy->getTypeParams().empty())
     return;
@@ -1885,9 +1885,9 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
     TurfTypePtr BaseTy = getType(Node.getBase());
     bool IsStaticMethod = false;
     if (auto *Var = dynamic_cast<const VariableExprAST *>(Node.getBase())) {
-      if (Var->IsStructName && GlobalSymbolTable) {
+      if (Var->IsStructName && Symbols()) {
         IsStaticMethod = true;
-        BaseTy = GlobalSymbolTable->LookupType(Var->getName());
+        BaseTy = Symbols()->LookupType(Var->getName());
       }
     }
 
@@ -1929,8 +1929,8 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
     // Resolve NamedType to TurfStructType
     if (BaseTy) {
       if (auto *NT = dynamic_cast<const NamedType *>(BaseTy.get())) {
-        if (GlobalSymbolTable)
-          BaseTy = GlobalSymbolTable->LookupType(NT->getName());
+        if (Symbols())
+          BaseTy = Symbols()->LookupType(NT->getName());
       }
     }
     // Snapshot BaseTy here, BEFORE the bare-name GenericType->TurfStructType
@@ -1983,8 +1983,8 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
     // could reach (e.g. inside assert()), nowhere near the real cause.
     if (BaseTy) {
       if (auto *GT = dynamic_cast<const GenericType *>(BaseTy.get())) {
-        if (GlobalSymbolTable)
-          BaseTy = GlobalSymbolTable->LookupType(GT->getBaseName());
+        if (Symbols())
+          BaseTy = Symbols()->LookupType(GT->getBaseName());
       }
     }
     // ── Machine transition call (e.g. conn.transition(ConnectionState::X)) ──
@@ -2320,7 +2320,7 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
           // found with GT's type args positionally.
           //
           // TurfGenericParamType, as of OVH-006 -- Resolver::visitStructDecl()
-          // now re-registers GlobalSymbolTable's TurfStructType for this
+          // now re-registers Symbols()'s TurfStructType for this
           // struct with the same substituted field list it writes onto the
           // AST node, so the Scan below hits the `GP` branch directly for an
           // ordinary generic struct field. (Before that fix, the registered
@@ -2723,8 +2723,8 @@ TurfTypePtr TypeChecker::instantiatedFieldType(
 
   if (FieldTy) {
     if (auto *NT = dynamic_cast<const NamedType *>(FieldTy.get())) {
-      if (GlobalSymbolTable) {
-        if (auto R = GlobalSymbolTable->LookupType(NT->getName()))
+      if (Symbols()) {
+        if (auto R = Symbols()->LookupType(NT->getName()))
           FieldTy = R;
       }
     }
@@ -2741,7 +2741,7 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
 
 #ifndef TYPECHECKER_NO_ERRORS
   // Resolve the base type and look up the field.
-  // GlobalSymbolTable is only available in the full build (not unit tests).
+  // Symbols() is only available in the full build (not unit tests).
   TurfTypePtr BaseTy = getType(Node.getBase());
 
   // `unsafe { }` gate (issue #238): field/member access through a raw
@@ -2802,8 +2802,8 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
   // Resolve NamedType to TurfStructType via symbol table
   if (BaseTy) {
     if (auto *NT = dynamic_cast<const NamedType *>(BaseTy.get())) {
-      if (GlobalSymbolTable)
-        BaseTy = GlobalSymbolTable->LookupType(NT->getName());
+      if (Symbols())
+        BaseTy = Symbols()->LookupType(NT->getName());
     }
   }
   // Resolve GenericType (e.g. a `Box<int>`-typed variable) to its underlying
@@ -2858,8 +2858,8 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
   }
   if (BaseTy) {
     if (auto *GT = dynamic_cast<const GenericType *>(BaseTy.get())) {
-      if (GlobalSymbolTable)
-        BaseTy = GlobalSymbolTable->LookupType(GT->getBaseName());
+      if (Symbols())
+        BaseTy = Symbols()->LookupType(GT->getBaseName());
     }
   }
 
@@ -2904,7 +2904,7 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
     // A concrete type that is not a struct has no fields at all. An open
     // generic parameter (a template's body, checked before it is cloned) is
     // left to its instantiations.
-    if (GlobalSymbolTable && isFullyConcreteType(BaseTy.get()) &&
+    if (Symbols() && isFullyConcreteType(BaseTy.get()) &&
         !dynamic_cast<const NamedType *>(BaseTy.get()) &&
         !dynamic_cast<const GenericType *>(BaseTy.get())) {
       UnknownStructFieldError(Node.getNameLoc(), UnknownStructFieldError::NotAStruct{},
@@ -3158,8 +3158,8 @@ void TypeChecker::visitScopeAccess(ScopeAccessExprAST &Node) {
   // SOME type too, harmlessly, exactly like the comment above already
   // describes for ModuleFunctionRef/StaticMethodRef).
   if (Node.ResolvedKind == ScopeAccessKind::ErrorVariantRef) {
-    if (GlobalSymbolTable) {
-      if (auto ET = GlobalSymbolTable->LookupType(Node.getLeftName()))
+    if (Symbols()) {
+      if (auto ET = Symbols()->LookupType(Node.getLeftName()))
         setType(&Node, ET);
     }
     return;
@@ -3168,7 +3168,7 @@ void TypeChecker::visitScopeAccess(ScopeAccessExprAST &Node) {
   if (Node.ResolvedKind != ScopeAccessKind::EnumVariant)
     return;
 
-  auto ET = GlobalSymbolTable ? GlobalSymbolTable->LookupType(Node.getLeftName()) : nullptr;
+  auto ET = Symbols() ? Symbols()->LookupType(Node.getLeftName()) : nullptr;
   if (!ET) return; // Should not happen, Resolver catches this
 
   if (Node.getRightName() == "COUNT") {
@@ -3274,11 +3274,11 @@ void TypeChecker::visitArrayAccess(ArrayAccessExprAST &Node) {
     // Issue #17 fix: if the element type is a NamedType (e.g. "User"), resolve
     // it to the actual TurfStructType via the symbol table. Without this,
     // arr[0].field fails because the type never becomes a struct.
-    // GlobalSymbolTable is only available in the full build (not unit tests).
+    // Symbols() is only available in the full build (not unit tests).
     if (ElemTy) {
       if (const auto *NT = dynamic_cast<const NamedType *>(ElemTy.get())) {
-        if (GlobalSymbolTable) {
-          if (auto Resolved = GlobalSymbolTable->LookupType(NT->getName()))
+        if (Symbols()) {
+          if (auto Resolved = Symbols()->LookupType(NT->getName()))
             ElemTy = Resolved;
         }
       }
@@ -3339,8 +3339,8 @@ void TypeChecker::visitArrayAccess(ArrayAccessExprAST &Node) {
       }
       if (ElemTy) {
         if (const auto *NT = dynamic_cast<const NamedType *>(ElemTy.get())) {
-          if (GlobalSymbolTable) {
-            if (auto Resolved = GlobalSymbolTable->LookupType(NT->getName()))
+          if (Symbols()) {
+            if (auto Resolved = Symbols()->LookupType(NT->getName()))
               ElemTy = Resolved;
           }
         }

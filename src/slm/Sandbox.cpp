@@ -179,18 +179,8 @@ void Sandbox::captureCompilerState(CompilerStateSnapshot &target) {
   // Capture the parsed top-level AST cache as a program block, if available.
   target.AST = BuildProgramASTFromCache();
 
-  // Deliberately NOT cloning GlobalSymbolTable here (used to be an
-  // unconditional cloneSymbolTable() call on every CreateSandbox()). This is
-  // the only call site of captureCompilerState() (constructor -> Original-
-  // Snapshot); Snapshot's own SymbolTableCopy is never populated by this
-  // function at all (see the constructor -- it's left null, deferred). A
-  // full SymbolTable copy-construct deep-clones the ENTIRE symbol universe
-  // (every stdlib module's function registry, every declared symbol) --
-  // real cost for any program importing a few stdlib modules -- yet nothing
-  // in this class ever reads OriginalSnapshot.SymbolTableCopy back
-  // (confirmed: no reference anywhere below, or in Sandbox.h's accessors).
-  // With SLMIntegration.cpp's retry loop calling CreateSandbox() up to 3x
-  // per diagnostic, that was 3x a full, unread deep clone for nothing.
+  // No symbol table here: a validation analyses the patched program through
+  // the query facade, which gives it a table of its own (F-S2).
 
   // Capture current diagnostics
   target.Diagnostics = DiagnosticEngine::getDiagnostics();
@@ -204,12 +194,6 @@ Sandbox::cloneSource(const std::vector<std::string> &source) {
 
 std::unique_ptr<ExprAST> Sandbox::cloneAST(const ExprAST *original) {
   return original ? original->clone() : nullptr;
-}
-
-std::unique_ptr<SymbolTable>
-Sandbox::cloneSymbolTable(const SymbolTable *original) {
-  return original ? std::make_unique<SymbolTable>(*original)
-                  : std::make_unique<SymbolTable>();
 }
 
 bool Sandbox::applyFix(int startLine, int endLine, const std::string &newText) {
@@ -236,10 +220,7 @@ bool Sandbox::applyFix(int startLine, int endLine, const std::string &newText) {
       isSingleLineEdit && isLocalizedEdit(LastEditKind);
   applySourceFix(startLine, endLine, newLines);
 
-  // Update AST and symbol table
   updateASTAfterFix(startLine);
-  if (isSingleLineEdit)
-    updateSymbolTableAfterFix(startLine, newText, LastEditKind);
 
   logDebug("Applied fix to line(s) [" + std::to_string(startLine) + ", " +
            std::to_string(endLine) + "]");
@@ -279,56 +260,6 @@ Sandbox::EditKind Sandbox::classifyEditKind(const std::string &lineText) {
   return EditKind::EXPRESSION;
 }
 
-bool Sandbox::parseDeclarationLine(const std::string &lineText,
-                                   std::string &name, TurfTypePtr &type,
-                                   bool &isArray, int &arraySize) {
-  static const std::regex arrayPattern(
-      R"(^\s*(?:mut|immut)\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(int|double|float|bool|string)\s*\[\s*(\d+)\s*\]\s*(=|;|$))");
-  static const std::regex scalarPattern(
-      R"(^\s*(?:mut|immut)\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(int|double|float|bool|string)\s*(=|;|$))");
-
-  std::smatch match;
-  if (std::regex_search(lineText, match, arrayPattern)) {
-    name = match[1];
-    std::string typeName = match[2];
-    std::string sizeText = match[3];
-    arraySize = std::stoi(sizeText);
-    isArray = true;
-    TurfTypePtr ElemType;
-    if (typeName == "int")
-      ElemType = TurfInt();
-    else if (typeName == "double" || typeName == "float")
-      ElemType = TurfDouble();
-    else if (typeName == "bool")
-      ElemType = TurfBool();
-    else if (typeName == "string")
-      ElemType = TurfString();
-    else
-      return false;
-    type = makeArrayType(ElemType, arraySize);
-    return true;
-  }
-
-  if (!std::regex_search(lineText, match, scalarPattern))
-    return false;
-
-  name = match[1];
-  std::string typeName = match[2];
-  isArray = false;
-  arraySize = 0;
-  if (typeName == "int")
-    type = TurfInt();
-  else if (typeName == "double" || typeName == "float")
-    type = TurfDouble();
-  else if (typeName == "bool")
-    type = TurfBool();
-  else if (typeName == "string")
-    type = TurfString();
-  else
-    return false;
-  return true;
-}
-
 bool Sandbox::isLocalizedEdit(EditKind kind) {
   return kind == EditKind::EXPRESSION ||
          kind == EditKind::VARIABLE_DECLARATION ||
@@ -357,37 +288,6 @@ void Sandbox::updateASTAfterFix(int lineNumber) {
   (void)lineNumber;
 }
 
-void Sandbox::updateSymbolTableForEdit(int lineNumber,
-                                       const std::string &newLine,
-                                       EditKind kind) {
-  if (!Snapshot.SymbolTableCopy)
-    return;
-
-  if (kind != EditKind::VARIABLE_DECLARATION &&
-      kind != EditKind::ARRAY_DECLARATION)
-    return;
-
-  std::string name;
-  TurfTypePtr type;
-  bool isArray = false;
-  int arraySize = 0;
-  if (!parseDeclarationLine(newLine, name, type, isArray, arraySize))
-    return;
-
-  SourceLocation declLoc{lineNumber, 1};
-
-  if (Symbol *S = Snapshot.SymbolTableCopy->LookupSymbol(name)) {
-    S->Type = type;
-  } else {
-    Snapshot.SymbolTableCopy->DeclareSymbol(name, type, declLoc, nullptr);
-  }
-}
-
-void Sandbox::updateSymbolTableAfterFix(int lineNumber,
-                                        const std::string &newLine,
-                                        EditKind kind) {
-  updateSymbolTableForEdit(lineNumber, newLine, kind);
-}
 
 bool Sandbox::validate() {
   // Clear any previous validation diagnostics

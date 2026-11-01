@@ -61,12 +61,12 @@ static bool nonNullRefFieldPath(const TurfType *Ty, const std::string &Name,
     return AT->getSize() >= 0 &&
            nonNullRefFieldPath(AT->getElementType(), Name + "[i]", Path, Depth + 1);
   const TurfStructType *ST = dynamic_cast<const TurfStructType *>(Ty);
-  if (!ST && GlobalSymbolTable) {
+  if (!ST && Symbols()) {
     TurfTypePtr Registered;
     if (dynamic_cast<const NamedType *>(Ty))
-      Registered = GlobalSymbolTable->LookupType(Ty->getName());
+      Registered = Symbols()->LookupType(Ty->getName());
     else if (const auto *GT = dynamic_cast<const GenericType *>(Ty))
-      Registered = GlobalSymbolTable->LookupType(
+      Registered = Symbols()->LookupType(
           Monomorphize::instantiatedDeclName(GT->getBaseName(), GT->getTypeArgs()));
     ST = dynamic_cast<const TurfStructType *>(Registered.get());
   }
@@ -93,8 +93,8 @@ static bool nonNullRefFieldPath(const TurfType *Ty, const std::string &Name,
 // field, as of OVH-006: Resolver::visitStructDecl() rewrites
 // NamedType("T") -> TurfGenericParamType("T") on the STRUCT DECLARATION AST
 // NODE's own field list (Node.getFieldsMut()) AND re-registers the
-// corrected field list into GlobalSymbolTable at the same moment -- before
-// that fix, GlobalSymbolTable's registered TurfStructType was a SEPARATE
+// corrected field list into Symbols() at the same moment -- before
+// that fix, Symbols()'s registered TurfStructType was a SEPARATE
 // object, built from a snapshot of the fields at PARSE time (ParserDecl.cpp,
 // before the substitution ever ran) and never updated afterward, so a
 // generic struct's globally-registered field types stayed plain
@@ -117,7 +117,7 @@ static bool nonNullRefFieldPath(const TurfType *Ty, const std::string &Name,
 // struct-declaration time -- so a name that is neither a primitive nor
 // globally registered can only be the third case) now lives once, in
 // TypeWalk::containsOpenParam()'s own NamedType branch; this call site
-// supplies `GlobalSymbolTable->LookupType()` as the registry lookup.
+// supplies `Symbols()->LookupType()` as the registry lookup.
 // ParamScope::ThroughWrappers is this function's exact original scope: it
 // never looked inside a GenericType's own argument list (see
 // isFullyConcreteType()'s own comment below for why that scope needs to).
@@ -125,7 +125,7 @@ bool isOrWrapsGenericParam(const TurfType *Ty) {
   return TypeWalk::containsOpenParam(
       Ty, TypeWalk::ParamScope::ThroughWrappers,
       [](const std::string &Name) {
-        return GlobalSymbolTable && GlobalSymbolTable->LookupType(Name) != nullptr;
+        return Symbols() && Symbols()->LookupType(Name) != nullptr;
       });
 }
 
@@ -164,8 +164,8 @@ bool isFullyConcreteType(const TurfType *Ty) {
   return Ty && !TypeWalk::containsOpenParam(
                    Ty, TypeWalk::ParamScope::ThroughGenericArgs,
                    [](const std::string &Name) {
-                     return GlobalSymbolTable &&
-                            GlobalSymbolTable->LookupType(Name) != nullptr;
+                     return Symbols() &&
+                            Symbols()->LookupType(Name) != nullptr;
                    });
 }
 
@@ -402,8 +402,8 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
     // checks below can see the real struct type.
 #ifndef TYPECHECKER_NO_ERRORS
     if (auto *InitNT = dynamic_cast<const NamedType *>(InitTy.get())) {
-      if (GlobalSymbolTable) {
-        if (auto InitStructTy = GlobalSymbolTable->LookupType(InitNT->getName()))
+      if (Symbols()) {
+        if (auto InitStructTy = Symbols()->LookupType(InitNT->getName()))
           InitTy = InitStructTy;
       }
     }
@@ -477,8 +477,8 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
 #ifndef TYPECHECKER_NO_ERRORS
   // Resolve NamedType -> TurfStructType
   if (auto *NT = dynamic_cast<const NamedType *>(DeclTy.get())) {
-    if (GlobalSymbolTable) {
-      if (auto StructTy = GlobalSymbolTable->LookupType(NT->getName())) {
+    if (Symbols()) {
+      if (auto StructTy = Symbols()->LookupType(NT->getName())) {
         DeclTy = StructTy;
         Node.setTypePtr(StructTy);
         if (Node.ResolvedSymbol) {

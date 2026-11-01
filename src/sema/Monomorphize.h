@@ -483,7 +483,7 @@ bool drainConstructorRequests(
 /// TYPE-002 (S13a): the Struct-kind counterpart to
 /// drainFreeFunctionRequests()/drainMethodRequests() -- gives each generic
 /// struct instantiation (e.g. `List<int>`, `List<string>`) its own real
-/// `TurfStructType` (registered in GlobalSymbolTable under its mangled
+/// `TurfStructType` (registered in Symbols() under its mangled
 /// instantiation name) and, once the clone is appended to @p PrePassASTs,
 /// its own real, distinct `llvm::StructType` (main.cpp's ordinary sub-pass
 /// 2c struct-codegen loop already codegens every StructDeclExprAST it finds
