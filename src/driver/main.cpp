@@ -29,6 +29,7 @@
 #include "analysis/UnusedDecls.h"
 #include "analysis/AnalysisFacts.h"
 #include "analysis/MutualRecursion.h"
+#include "analysis/Analysis.h" // runProgramFlowPasses()
 #include "frontend/Lexer.h"
 #include "analysis/Lint.h"
 #include "tooling/MigratePub.h"
@@ -2242,6 +2243,14 @@ static int runCompilerMain(int argc, char **argv) {
       // cleanly before its own codegen ever runs, so skipping this is always
       // safe when !PreTCClean, never a missed compile.
       if (PreTCClean) {
+        // F-S4a: the flow passes, as their own phase before any body is
+        // generated (Analysis.h, runProgramFlowPasses()).
+        {
+          std::vector<const ExprAST *> Decls;
+          for (const auto &AST : PrePassASTs)
+            Decls.push_back(AST.get());
+          runProgramFlowPasses(Decls);
+        }
         for (auto &AST : PrePassASTs) {
           if (dynamic_cast<StructDeclExprAST *>(AST.get()))
             continue;

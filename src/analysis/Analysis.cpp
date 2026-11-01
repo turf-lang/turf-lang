@@ -1,4 +1,6 @@
 #include "analysis/Analysis.h"
+#include "frontend/TestAnnotation.h"
+#include "analysis/AnalysisFacts.h"
 #include "analysis/AliasAnalysis.h"
 #include "diagnostics/Errors.h"
 #include "analysis/ValueRange.h"
@@ -2471,3 +2473,43 @@ void runFunctionFlowPasses(CFG &Cfg, const std::string &Name, SourceLocation Loc
     }
   }
 }
+
+namespace {
+// Every function runProgramFlowPasses() analyses, in source order.
+class FlowPhaseWalker : public ASTChildWalker {
+public:
+  std::vector<FuncDefExprAST *> Functions;
+  void visitFuncDef(FuncDefExprAST &Node) override {
+    if (!Node.getTypeParams().empty())
+      return; // a template: only its clones are compiled
+    if (!TestAnnotation::isCompileErrorTest(Node) && !Node.TestBodyFailed &&
+        Node.getBodyMut() && Node.getResolvedDef())
+      Functions.push_back(&Node);
+    ASTChildWalker::visitFuncDef(Node);
+  }
+  void visitModuleImport(ModuleImportExprAST &Node) override { visitChild(Node.getBody()); }
+};
+} // namespace
+
+void runProgramFlowPasses(const std::vector<const ExprAST *> &Decls) {
+  AnalysisFacts *F = Facts();
+  if (!F) return;
+  FlowPhaseWalker W;
+  for (const ExprAST *D : Decls)
+    W.visitChild(D);
+  for (FuncDefExprAST *FD : W.Functions) {
+    if (!F->FlowChecked.insert(FD->getNodeID()).second)
+      continue;
+    const bool SavedRecover = g_recoverActive;
+    g_recoverActive = true;
+    try {
+      GlobalCFGs.push_back(CFGBuilder().buildCFG(FD->getSourceName(), FD->getReturnTypePtr(),
+                                                 FD->getBodyMut(), FD->getLoc(),
+                                                 FD->getResolvedDef()->mangledName()));
+      runFunctionFlowPasses(*GlobalCFGs.back(), FD->getName(), FD->getLoc(), {});
+    } catch (const RecoverUnwind &) {
+    }
+    g_recoverActive = SavedRecover;
+  }
+}
+

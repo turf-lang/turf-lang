@@ -44,6 +44,10 @@ struct AnalysisFacts {
   // marked by its own analysis.
   std::unordered_set<uint64_t> ProvenNoOverflow;
   std::unordered_set<uint64_t> ProvenInBounds;
+
+  // F-S4a: the functions (FuncDefExprAST node ids) whose flow passes the
+  // phase before Codegen already ran (runProgramFlowPasses()).
+  std::unordered_set<uint64_t> FlowChecked;
 };
 
 // The current compilation's facts, or null outside any.
@@ -54,6 +58,10 @@ AnalysisFacts *Facts();
 inline bool provenNoOverflow(uint64_t Id) {
   const AnalysisFacts *F = Facts();
   return F && F->ProvenNoOverflow.count(Id);
+}
+inline bool flowChecked(uint64_t Id) {
+  const AnalysisFacts *F = Facts();
+  return F && F->FlowChecked.count(Id);
 }
 inline bool provenInBounds(uint64_t Id) {
   const AnalysisFacts *F = Facts();

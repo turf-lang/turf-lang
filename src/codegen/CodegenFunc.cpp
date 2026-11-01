@@ -16,6 +16,7 @@
  * @date 2026-05-25
  */
 
+#include "analysis/AnalysisFacts.h"
 #include "codegen/Codegen.h"
 #include "frontend/TestAnnotation.h"
 #include "frontend/TestRegistry.h"
@@ -761,8 +762,9 @@ Value *FuncDefExprAST::codegen() {
   else
     Body->codegen();
 
-  // Build and analyze CFG for flow diagnostics
-  if (Body) {
+  // Build and analyze CFG for flow diagnostics, unless the phase before
+  // Codegen (runProgramFlowPasses(), F-S4a) already did.
+  if (Body && !flowChecked(getNodeID())) {
     CFGBuilder CFGBuilder;
     auto FuncCFG = CFGBuilder.buildCFG(getSourceName(), ReturnType, Body.get(), Loc, MangledName);
 
