@@ -1,11 +1,13 @@
 tests/05_arrays_pointers_ffi/fail_address_of_non_addressable.tr (1 error)
 
-── error at line 9, col 19 [E122 · cannot take the address of this]
+── error at line 8, col 19 [E122 · cannot take the address of this]
 
+  Cannot take the address of this!
   Cannot take the address of a non-addressable expression.
+
   Hint: Only variables, struct fields, and array elements are addressable.
 
-  9 │     mut r: &int = &(x + 1);
+  8 │     mut r: &int = &(x + 1);
     │                   ^ Here!
 
   Run `turf --explain E122` for more details.

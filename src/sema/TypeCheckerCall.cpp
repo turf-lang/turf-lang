@@ -417,6 +417,54 @@ std::string spelledType(const TurfType *T) {
 }
 } // namespace
 
+
+namespace {
+// E147 (F-S4a: raised by the TypeChecker, so `--check` sees it): the walk
+// emitDefaultValueRec() (CodegenCore.cpp) makes to build `S::default()`,
+// without building anything. Every `&` field gets a fresh default value, so
+// a struct that reaches itself through `&` fields has none. Returns the
+// struct whose default was asked for and the one reached again, or nulls.
+const TurfStructType *defaultStructOf(const TurfType *T) {
+  if (auto *ST = dynamic_cast<const TurfStructType *>(T))
+    return ST;
+  if (!Symbols())
+    return nullptr;
+  TurfTypePtr Registered;
+  if (const auto *NT = dynamic_cast<const NamedType *>(T))
+    Registered = Symbols()->LookupType(NT->getName());
+  else if (const auto *GT = dynamic_cast<const GenericType *>(T))
+    Registered = Symbols()->LookupType(
+        Monomorphize::instantiatedDeclName(GT->getBaseName(), GT->getTypeArgs()));
+  return dynamic_cast<const TurfStructType *>(Registered.get());
+}
+
+std::pair<const TurfStructType *, const TurfStructType *>
+defaultReferenceCycle(const TurfType *T, std::vector<const TurfStructType *> &InProgress) {
+  if (auto *RT = dynamic_cast<const TurfReferenceType *>(T)) {
+    const TurfType *Pointee = RT->getPointee().get();
+    const TurfStructType *PST = defaultStructOf(Pointee);
+    if (PST && std::find(InProgress.begin(), InProgress.end(), PST) != InProgress.end())
+      return {InProgress.front(), PST};
+    if (PST) InProgress.push_back(PST);
+    auto Found = defaultReferenceCycle(PST ? PST : Pointee, InProgress);
+    if (PST) InProgress.pop_back();
+    return Found;
+  }
+  if (auto *AT = dynamic_cast<const ::ArrayType *>(T))
+    return AT->getSize() > 0 ? defaultReferenceCycle(AT->getElementType(), InProgress)
+                             : std::pair<const TurfStructType *, const TurfStructType *>{};
+  if (const TurfStructType *ST = defaultStructOf(T)) {
+    const bool Outer = InProgress.empty();
+    if (Outer) InProgress.push_back(ST);
+    for (const auto &Field : ST->getFields())
+      if (auto Found = defaultReferenceCycle(Field.Type.get(), InProgress); Found.first)
+        return Found;
+    if (Outer) InProgress.pop_back();
+  }
+  return {};
+}
+} // namespace
+
 void TypeChecker::noteIntToDouble(const ExprAST *E, const TurfType *To) {
   AnalysisFacts *F = Facts();
   if (!F || !E || !To || !To->isDouble())
@@ -789,6 +837,18 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
     // into a generic call as an inferred `T`, it is never re-read as a
     // spelling in the template's own module.
     setType(&Node, makeResolvedNamedType(ScopeCallee->getLeftName()));
+    std::vector<const TurfStructType *> InProgress;
+    if (TurfTypePtr T = getType(&Node))
+      if (auto [Outer, Cycle] = defaultReferenceCycle(T.get(), InProgress); Outer)
+        reportError(Node.getLoc(), ErrCode::DefaultThroughReferenceCycle,
+                    "'" + TypeIdentity::bareName(Outer->getName()) +
+                        "' has no default value: defaulting it gives every '&' field a "
+                        "new default value, and '" + TypeIdentity::bareName(Cycle->getName()) +
+                        "' reaches itself through '&' fields, so that never ends.",
+                    {},
+                    "Make one of the fields on the cycle '&?" +
+                        TypeIdentity::bareName(Cycle->getName()) +
+                        "' (it defaults to null), or build the value with '::new(...)'.");
     return;
   }
 

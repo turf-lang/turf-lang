@@ -903,6 +903,31 @@ static void reportUnboundedPointerIndex(const ExprAST *N, const RangeMap &Ranges
 // A compile-time out-of-range constant index (E001), reported once the
 // dataflow has converged, so every report comes from a value proven on every
 // path reaching the access.
+// An index written as a constant: literals, `-` and size parameters,
+// combined with `+`, `-` and `*` -- what Codegen folds to a constant and
+// bounds-checks at compile time (CodegenArray.cpp). No variable is read, so
+// a program the constant dataflow accepts is never rejected through it.
+static std::optional<long long> literalIndex(const ExprAST *E) {
+  if (auto *N = dynamic_cast<const NumberExprAST *>(E))
+    return N->isInteger() ? std::optional<long long>(N->getIntVal()) : std::nullopt;
+  if (auto *V = dynamic_cast<const VariableExprAST *>(E))
+    return V->SizeValue ? std::optional<long long>(*V->SizeValue) : std::nullopt;
+  if (auto *U = dynamic_cast<const UnaryExprAST *>(E)) {
+    auto X = U->getOpcode() == '-' ? literalIndex(U->getOperand()) : std::nullopt;
+    return X && *X != LLONG_MIN ? std::optional<long long>(-*X) : std::nullopt;
+  }
+  if (auto *B = dynamic_cast<const BinaryExprAST *>(E)) {
+    auto L = literalIndex(B->getLHS()), R = literalIndex(B->getRHS());
+    if (!L || !R) return std::nullopt;
+    __int128 W = B->getOp() == '+' ? (__int128)*L + *R
+               : B->getOp() == '-' ? (__int128)*L - *R
+               : B->getOp() == '*' ? (__int128)*L * *R : (__int128)LLONG_MAX + 1;
+    if (W > LLONG_MAX || W < LLONG_MIN) return std::nullopt;
+    return static_cast<long long>(W);
+  }
+  return std::nullopt;
+}
+
 static void reportConstantOutOfBounds(const ExprAST *N, const ConstMap &cur,
                                       const RangeMap &Ranges, const RangeEval &Ev) {
   if (!N) return;
@@ -910,10 +935,23 @@ static void reportConstantOutOfBounds(const ExprAST *N, const ConstMap &cur,
   reportUnboundedPointerIndex(N, Ranges, Ev);
   if (auto AA = dynamic_cast<const ArrayAccessExprAST *>(N)) {
     auto idxVal = evalConstExpr(AA->getIndex(), cur);
+    if (!idxVal) idxVal = literalIndex(AA->getIndex());
     if (idxVal.has_value()) {
       if (auto BaseVar = dynamic_cast<const VariableExprAST *>(AA->getBase())) {
         const VariableSymbol *S = BaseVar->getResolvedSymbol();
-        if (S && S->Type && S->Type->isArray()) {
+        // A safe reference to one value is one element (CodegenArray.cpp):
+        // `r[0]` and `r[-1]` are the value, any other index is out of bounds.
+        const auto *Ref = S && S->Type ? dynamic_cast<const TurfPointerType *>(S->Type.get()) : nullptr;
+        // Only a written constant, as Codegen folds: an index through a
+        // variable stays a run-time check here.
+        auto Lit = literalIndex(AA->getIndex());
+        if (Ref && Ref->isReference() && Ref->getPointee() && !Ref->getPointee()->isArray()) {
+          long long iv = Lit ? *Lit : 0;
+          if (Lit && (iv < -1 || iv >= 1)) {
+            ArrayBoundsError err(AA->getLoc(), BaseVar->getName(), iv, 1);
+            err.raise();
+          }
+        } else if (S && S->Type && S->Type->isArray()) {
           const ArrayType *AT = dynamic_cast<const ArrayType *>(S->Type.get());
           if (AT) {
             int sz = AT->getSize();

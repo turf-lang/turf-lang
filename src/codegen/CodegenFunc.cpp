@@ -730,8 +730,10 @@ Value *FuncDefExprAST::codegen() {
     }
   }
 
-  // Lint the function body before codegen
-  LintExpression(Body.get());
+  // Lint the function body before codegen, unless the phase before Codegen
+  // (runProgramFlowPasses(), F-S4a) already did.
+  if (!flowChecked(getNodeID()))
+    LintExpression(Body.get());
 
   // OPT-002 (ARCHITECTURE_OVERHAUL.md §8, §17.3): a THROWAWAY, EARLY CFG,
   // built and analyzed here purely so Codegen (about to run, right below)

@@ -2251,6 +2251,9 @@ static int runCompilerMain(int argc, char **argv) {
             Decls.push_back(AST.get());
           runProgramFlowPasses(Decls);
         }
+        // --check generates no function body: every diagnostic a body can
+        // have was raised above or by the Resolver and TypeChecker.
+        if (!opts.Check)
         for (auto &AST : PrePassASTs) {
           if (dynamic_cast<StructDeclExprAST *>(AST.get()))
             continue;
@@ -2655,6 +2658,7 @@ static int runCompilerMain(int argc, char **argv) {
   // Only non-fn top-level statements need codegen here. fn bodies were already
   // compiled in the pre-pass; codegenning them again would duplicate them.
   size_t SavedDepth = Symbols() ? Symbols()->GetDepth() : 0;
+  if (!opts.Check)
   for (auto &AST : TopLevelASTs) {
     g_recoverActive = true;
     try {
@@ -2713,10 +2717,10 @@ static int runCompilerMain(int argc, char **argv) {
   // like check modes but all fall through to here and link an executable, so
   // a check-only mode did not exist -- and the `turf` front end's `check`
   // needs one that provably writes no file. This is the right return point,
-  // not "right after the TypeChecker": the CFG, definite-assignment, escape
-  // and lint diagnostics are raised inside FuncDefExprAST::codegen() during the
-  // pre-pass above (CodegenFunc.cpp), so every diagnostic a real compile can
-  // print has already been flushed by now. What is left below the entry-point
+  // not "right after the TypeChecker": lint, the CFG passes and shadowing are
+  // the flow phase before Codegen (runProgramFlowPasses(), F-S4a), which
+  // --check runs and which generates no code, so every diagnostic a real
+  // compile can print has already been flushed by now. What is left below the entry-point
   // check is only what needs a runnable program (runtime bootstrap,
   // optimization, object emission, link) and is deliberately skipped. All
   // --dump-* output prints before this line, so they combine with --check
@@ -2732,8 +2736,9 @@ static int runCompilerMain(int argc, char **argv) {
   // entry point is the one EmitTestHarness() just made.
   if (!(opts.Check && opts.CheckAsModule) && opts.TestManifest.empty()) {
     // Verify that an explicit 'main' function was defined in the primary module
+    // --check generated no bodies, so `main`'s prototype is what it has.
     Function *MainFunc = TheModule->getFunction("main");
-    if (!MainFunc || MainFunc->empty()) {
+    if (!MainFunc || (MainFunc->empty() && !opts.Check)) {
       // Through the diagnostic engine (issue #263), not a raw std::cerr: a
       // beginner who forgets `main` -- or runs `turf` on an importable module
       // -- used to get one uncoded "Error:" line and no `--explain`. Raised at

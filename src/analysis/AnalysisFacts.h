@@ -48,6 +48,9 @@ struct AnalysisFacts {
   // F-S4a: the functions (FuncDefExprAST node ids) whose flow passes the
   // phase before Codegen already ran (runProgramFlowPasses()).
   std::unordered_set<uint64_t> FlowChecked;
+  // F-S4a: the `mut`/`immut` declarations whose shadowing (E152) the phase
+  // before Codegen already checked.
+  std::unordered_set<uint64_t> ShadowChecked;
 };
 
 // The current compilation's facts, or null outside any.
@@ -58,6 +61,10 @@ AnalysisFacts *Facts();
 inline bool provenNoOverflow(uint64_t Id) {
   const AnalysisFacts *F = Facts();
   return F && F->ProvenNoOverflow.count(Id);
+}
+inline bool shadowChecked(uint64_t Id) {
+  const AnalysisFacts *F = Facts();
+  return F && F->ShadowChecked.count(Id);
 }
 inline bool flowChecked(uint64_t Id) {
   const AnalysisFacts *F = Facts();

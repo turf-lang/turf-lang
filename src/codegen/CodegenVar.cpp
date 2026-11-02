@@ -128,8 +128,9 @@ Value *VarDeclExprAST::codegen() {
     return nullptr;
   }
 
-  // Check for shadowing
-  if (Symbols()) {
+  // Check for shadowing, unless the phase before Codegen already did (E152,
+  // runProgramFlowPasses(), F-S4a).
+  if (Symbols() && !shadowChecked(getNodeID())) {
     Symbol *Shadowed = Symbols()->FindShadowedSymbol(Name);
     if (Shadowed) {
       ShadowingWarning(Loc, Name, Shadowed->DeclLoc).warn();

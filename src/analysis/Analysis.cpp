@@ -1,4 +1,5 @@
 #include "analysis/Analysis.h"
+#include "analysis/Lint.h"
 #include "frontend/TestAnnotation.h"
 #include "analysis/AnalysisFacts.h"
 #include "analysis/AliasAnalysis.h"
@@ -2491,9 +2492,117 @@ public:
 };
 } // namespace
 
+
+namespace {
+// E152 (F-S4a: before Codegen, so `--check` sees it): a `mut`/`immut` that
+// shadows a variable of an enclosing scope. The scopes are Codegen's own
+// (Symbols()->EnterScope()): a function's parameters, every block, a range
+// `for` or `for each` and its variables, a `recover ... as` binding, a
+// `compare` arm's bindings; a function declared inside another sees the
+// outer one's variables. Each declaration checked here is recorded in
+// AnalysisFacts::ShadowChecked, and VarDeclExprAST::codegen() warns only for
+// one it was not.
+class ShadowWalker : public ASTChildWalker {
+  std::vector<std::unordered_map<std::string, SourceLocation>> Scopes;
+
+  void declare(const std::string &Name, SourceLocation Loc) {
+    if (!Scopes.empty() && !Name.empty()) Scopes.back().emplace(Name, Loc);
+  }
+  struct Scope {
+    ShadowWalker &W;
+    explicit Scope(ShadowWalker &W) : W(W) { W.Scopes.emplace_back(); }
+    ~Scope() { W.Scopes.pop_back(); }
+  };
+
+public:
+  void visitFuncDef(FuncDefExprAST &Node) override {
+    // What Codegen never generates a body for declares nothing either.
+    if (!Node.getTypeParams().empty() || TestAnnotation::isCompileErrorTest(Node) ||
+        Node.TestBodyFailed ||
+        (Node.getResolvedDef() && Node.getResolvedDef()->Lowering != LoweredFunction::None))
+      return;
+    Scope S(*this);
+    for (const auto &P : Node.getParams()) declare(P.Name, Node.getLoc());
+    visitChild(Node.getBody());
+  }
+  void visitBlock(BlockExprAST &Node) override {
+    Scope S(*this);
+    ASTChildWalker::visitBlock(Node);
+  }
+  void visitFor(ForExprAST &Node) override {
+    visitChild(Node.getStart());
+    Scope S(*this);
+    declare(Node.getVarName(), Node.getLoc());
+    visitChild(Node.getEnd());
+    visitChild(Node.getStep());
+    visitChild(Node.getBody());
+  }
+  void visitForEach(ForEachExprAST &Node) override {
+    visitChild(Node.getIterable());
+    Scope S(*this);
+    declare(Node.getValueVarName(), Node.getLoc());
+    declare(Node.getIndexVarName(), Node.getLoc());
+    visitChild(Node.getBody());
+  }
+  void visitRecoverExpr(RecoverExprAST &Node) override {
+    visitChild(Node.getWrapped());
+    if (Node.getKind() == RecoverKind::Produce) {
+      visitChild(Node.getProduceExpr());
+      return;
+    }
+    std::optional<Scope> S;
+    if (Node.getKind() == RecoverKind::AsRun) {
+      S.emplace(*this);
+      declare(Node.getBoundName(), Node.getLoc());
+    }
+    visitChild(Node.getBlock());
+  }
+  void visitCompare(CompareExprAST &Node) override {
+    visitChild(Node.getSubject());
+    for (auto &Arm : Node.getArmsMut()) {
+      for (auto &Val : Arm.Values) visitChild(Val.get());
+      Scope S(*this);
+      for (const auto &Sym : Arm.Bindings) declare(Sym->Name, Arm.Loc);
+      for (auto &Guard : Arm.Guards) visitChild(Guard.get());
+      visitChild(Arm.Body.get());
+    }
+    visitChild(Node.getOtherBody());
+  }
+  void visitArrayDecl(ArrayDeclExprAST &Node) override {
+    ASTChildWalker::visitArrayDecl(Node);
+    declare(Node.getName(), Node.getLoc());
+  }
+  void visitVarDecl(VarDeclExprAST &Node) override {
+    if (Node.isExported()) return; // a module constant: no storage, no scope entry
+    visitChild(Node.getInitializer());
+    if (AnalysisFacts *F = Facts()) F->ShadowChecked.insert(Node.getNodeID());
+    if (Scopes.size() > 1)
+      for (auto It = Scopes.rbegin() + 1; It != Scopes.rend(); ++It)
+        if (auto Found = It->find(Node.getName()); Found != It->end()) {
+          ShadowingWarning(Node.getLoc(), Node.getName(), Found->second).warn();
+          break;
+        }
+    declare(Node.getName(), Node.getLoc());
+  }
+  // A module's body is a block Codegen enters as a scope.
+  void visitModuleImport(ModuleImportExprAST &Node) override { visitChild(Node.getBody()); }
+};
+} // namespace
+
 void runProgramFlowPasses(const std::vector<const ExprAST *> &Decls) {
   AnalysisFacts *F = Facts();
   if (!F) return;
+  {
+    const bool SavedRecover = g_recoverActive;
+    g_recoverActive = true;
+    try {
+      ShadowWalker SW;
+      for (const ExprAST *D : Decls)
+        SW.visitChild(D);
+    } catch (const RecoverUnwind &) {
+    }
+    g_recoverActive = SavedRecover;
+  }
   FlowPhaseWalker W;
   for (const ExprAST *D : Decls)
     W.visitChild(D);
@@ -2503,6 +2612,7 @@ void runProgramFlowPasses(const std::vector<const ExprAST *> &Decls) {
     const bool SavedRecover = g_recoverActive;
     g_recoverActive = true;
     try {
+      LintExpression(FD->getBodyMut());
       GlobalCFGs.push_back(CFGBuilder().buildCFG(FD->getSourceName(), FD->getReturnTypePtr(),
                                                  FD->getBodyMut(), FD->getLoc(),
                                                  FD->getResolvedDef()->mangledName()));

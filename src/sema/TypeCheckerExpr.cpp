@@ -621,6 +621,24 @@ void TypeChecker::visitAddressOf(AddressOfExprAST &Node) {
     setType(&Node, nullptr);
     return;
   }
+  // E122 (F-S4a: raised here, before Codegen, so `--check` sees it): only a
+  // variable, a field or an element has an address. An `operator[]` read
+  // returns its element by value, so it has none either. Codegen keeps its
+  // own check (AddressOfExprAST::codegen()) as the backstop.
+  {
+    const ExprAST *Op = Node.getOperand();
+    const auto *AA = dynamic_cast<const ArrayAccessExprAST *>(Op);
+    const bool Addressable = dynamic_cast<const VariableExprAST *>(Op) ||
+                             dynamic_cast<const FieldAccessExprAST *>(Op) ||
+                             (AA && !AA->ResolvedIndexGetTarget);
+    if (!Addressable) {
+      reportError(Node.getLoc(), ErrCode::NonAddressableExpression,
+                  "Cannot take the address of a non-addressable expression.", {},
+                  "Only variables, struct fields, and array elements are addressable.");
+      setType(&Node, nullptr);
+      return;
+    }
+  }
   // &expr produces a TurfReferenceType wrapping the operand's type (issue
   // #238 -- a breaking retype: this used to produce a raw TurfPointerType).
   // Codegen is unaffected -- AddressOfExprAST::codegen() just returns the
