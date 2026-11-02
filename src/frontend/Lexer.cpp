@@ -990,25 +990,25 @@ void LogErrorAt(SourceLocation Loc, const char *Code, const std::string &Msg,
     const std::string C = Code;
     const char *H = nullptr;
     if (C == ErrCode::MissingSemicolon)
-      H = "End the statement with ';' right after its last token, e.g. "
+      H = "End the statement with `;` right after its last token, as in "
           "`x = x + 1;` or `return 0;`.";
-    else if (C == ErrCode::UnexpectedToken && Msg.rfind("Unexpected ';'", 0) == 0)
-      H = "Remove the extra ';' -- a statement ends with exactly one.";
+    else if (C == ErrCode::UnexpectedToken && Msg.rfind("I did not expect a `;`", 0) == 0)
+      H = "Remove the extra `;`, because a statement ends with exactly one.";
     else if (C == ErrCode::UnexpectedToken)
       H = "Remove the token the arrow points at, or write what belongs there: "
-          "a value, a name, or a complete statement.";
+          "an expression, a name or a complete statement.";
     else if (C == ErrCode::MissingComma)
-      H = "Put a ',' between the items of the list, e.g. `a, b, c`, and close "
+      H = "Put a `,` between the items of the list, as in `a, b, c`, and close "
           "it with the matching bracket.";
     else if (C == ErrCode::MissingColon)
-      H = "Put a ':' there: a name is followed by its type (`x: int`) and a "
+      H = "Put a `:` there: a name is followed by its type (`x: int`) and a "
           "function's parameter list by its return type (`): int`).";
     else if (C == ErrCode::MissingOpeningDelimiter)
-      H = "Open the block with '{' (or the list with '(') at the spot the "
+      H = "Open the block with `{`, or the list with `(`, at the spot the "
           "arrow points to.";
     else if (C == ErrCode::ExpectedName)
-      H = "Write a name there: a letter or '_' followed by letters, digits "
-          "or '_', e.g. `total`.";
+      H = "Write a name there: a letter or `_` followed by letters, digits "
+          "or `_`, as in `total`.";
     else if (C == ErrCode::ExpectedKeyword)
       H = "Write the keyword the message names at the spot the arrow points "
           "to.";
@@ -1016,15 +1016,15 @@ void LogErrorAt(SourceLocation Loc, const char *Code, const std::string &Msg,
       H = "Declare it with the parameter count its operator allows, e.g. "
           "`operator +(a: T, b: T): T { ... }`.";
     else if (C == ErrCode::ExternFunctionBody)
-      H = "End an `extern fn` declaration with ';' and no body, or drop "
+      H = "End an `extern fn` declaration with `;` and no body, or drop "
           "`extern` to write the body in Turf.";
     else if (C == ErrCode::StatementOutsideFunction)
-      H = "Move the statement into a function body, e.g. `fn main(): int { "
+      H = "Move the statement into a function body, as in `fn main(): int { "
           "... return 0; }`.";
     else if (C == ErrCode::InvalidArraySize)
-      H = "Give the array a whole-number size of at least 1, e.g. `int[3]`.";
+      H = "Give the array a whole-number size of at least 1, as in `int[3]`.";
     else if (C == ErrCode::MissingInitializer)
-      H = "Give the variable its value on the spot: `mut x: int = 5;`.";
+      H = "Give the variable its initial value on the spot: `mut x: int = 5;`.";
     else if (C == ErrCode::SizeParameter)
       H = "Declare `N: size` only on a free function, e.g. `fn<T, N: size> "
           "first(a: T[N]): T`; not on an operator, a method or a struct.";
@@ -1213,12 +1213,12 @@ static int gettokScan(LexerState &L) {
           // compile time, not silently miscompiled: an unrecognized
           // escape is now a clean error instead of a quiet pass-through.
           LogErrorAt(EscapeLoc, ErrCode::InvalidEscapeSequence,
-                     std::string("Unknown escape sequence '\\") +
+                     std::string("I do not know the escape sequence `\\") +
                          static_cast<char>(L.LastChar) +
-                         "' in string literal.\n  Hint: Recognized escapes "
-                         "are \\n \\t \\r \\0 \\a \\b \\f \\v \\\\ \\\" \\'. "
-                         "Did you mean to write a literal backslash? Use "
-                         "'\\\\' instead.", SLM::ErrorCategory::SYNTAX_ERROR);
+                         "` in this string literal.\n  Hint: Use one of the "
+                         "escapes `\\n`, `\\t`, `\\r`, `\\0`, `\\a`, `\\b`, `\\f`, `\\v`, `\\\\`, `\\\"` or `\\'`. "
+                         "To write a literal backslash, write "
+                         "`\\\\`.", SLM::ErrorCategory::SYNTAX_ERROR);
           L.StringVal += L.LastChar;
         }
       } else {
@@ -1238,16 +1238,16 @@ static int gettokScan(LexerState &L) {
     // a structured Hint_ field instead; LogErrorAt has no such field, so the
     // hint is appended directly into the message text).
     static const char *const UnterminatedStringHint =
-        "\n  Hint: Add a closing '\"' before the end of the line -- Turf "
-        "string literals can't span multiple lines. Need an actual line "
-        "break inside the string? Use the \\n escape instead.";
+        "\n  Hint: Add a closing `\"` before the end of the line, because a "
+        "Turf string literal cannot span multiple lines. To put a line "
+        "break inside the string, use the `\\n` escape.";
 
     if (L.LastChar == EOF) {
       // Ran off the end of the file with no closing '"' anywhere -- there is
       // truly nothing left to lex, so end the token stream here exactly as
       // the pre-existing behavior did.
       LogErrorAt(L.CurLoc, ErrCode::UnterminatedLiteral,
-                 std::string("Unterminated string literal") +
+                 std::string("I found a string literal that is never closed.") +
                      UnterminatedStringHint, SLM::ErrorCategory::SYNTAX_ERROR);
       return TOK_EOF;
     }
@@ -1262,7 +1262,7 @@ static int gettokScan(LexerState &L) {
       // CurCol -- so lexing (and line tracking) of the rest of the file
       // recovers cleanly instead of desyncing for every line that follows.
       LogErrorAt(L.CurLoc, ErrCode::UnterminatedLiteral,
-                 std::string("Unterminated string literal") +
+                 std::string("I found a string literal that is never closed.") +
                      UnterminatedStringHint, SLM::ErrorCategory::SYNTAX_ERROR);
       return TOK_STRING_LITERAL;
     }
@@ -1290,8 +1290,8 @@ static int gettokScan(LexerState &L) {
       // Empty literal '' -- consume the closing quote so the lexer doesn't
       // desync, report, and recover with a placeholder value.
       LogErrorAt(L.CurLoc, ErrCode::InvalidCharLiteral,
-                 "Empty char literal.\n  Hint: A char literal must contain "
-                 "exactly one character, e.g. 'a'.", SLM::ErrorCategory::SYNTAX_ERROR);
+                 "I found an empty char literal.\n  Hint: Write exactly "
+                 "one character between the quotes, as in `'a'`.", SLM::ErrorCategory::SYNTAX_ERROR);
       L.LastChar = L.Source->get();
       L.CurCol++;
       L.CharVal = '\0';
@@ -1303,8 +1303,8 @@ static int gettokScan(LexerState &L) {
       // the newline, so the next gettok() call's whitespace-skip recovers
       // line tracking cleanly instead of desyncing for the rest of the file.
       LogErrorAt(L.CurLoc, ErrCode::UnterminatedLiteral,
-                 std::string("Unterminated char literal") +
-                     "\n  Hint: Add a closing ''' after the character.", SLM::ErrorCategory::SYNTAX_ERROR);
+                 std::string("I found a char literal that is never closed.") +
+                     "\n  Hint: Add a closing `'` after the character.", SLM::ErrorCategory::SYNTAX_ERROR);
       return L.LastChar == EOF ? TOK_EOF : TOK_CHAR_LITERAL;
     }
 
@@ -1336,10 +1336,10 @@ static int gettokScan(LexerState &L) {
         L.CharVal = '\'';
       } else {
         LogErrorAt(EscapeLoc, ErrCode::InvalidEscapeSequence,
-                   std::string("Unknown escape sequence '\\") +
+                   std::string("I do not know the escape sequence `\\") +
                        static_cast<char>(L.LastChar) +
-                       "' in char literal.\n  Hint: Recognized escapes are "
-                       "\\n \\t \\r \\0 \\a \\b \\f \\v \\\\ \\\" \\'.", SLM::ErrorCategory::SYNTAX_ERROR);
+                       "` in this char literal.\n  Hint: Use one of the escapes "
+                       "`\\n`, `\\t`, `\\r`, `\\0`, `\\a`, `\\b`, `\\f`, `\\v`, `\\\\`, `\\\"` or `\\'`.", SLM::ErrorCategory::SYNTAX_ERROR);
         L.CharVal = static_cast<char>(L.LastChar);
       }
     } else {
@@ -1356,9 +1356,9 @@ static int gettokScan(LexerState &L) {
       // keeps lexing from a sane point instead of every later token being
       // offset by the stray characters.
       LogErrorAt(L.CurLoc, ErrCode::InvalidCharLiteral,
-                 "Char literal must contain exactly one character.\n  Hint: "
-                 "Use a string literal (\"ab\") for multiple characters, or "
-                 "check for a missing closing '.", SLM::ErrorCategory::SYNTAX_ERROR);
+                 "I found a char literal with more than one character.\n  Hint: "
+                 "Use a string literal such as `\"ab\"` for several characters, or "
+                 "add the missing closing `'`.", SLM::ErrorCategory::SYNTAX_ERROR);
       while (L.LastChar != '\'' && L.LastChar != EOF && L.LastChar != '\n') {
         L.LastChar = L.Source->get();
         L.CurCol++;

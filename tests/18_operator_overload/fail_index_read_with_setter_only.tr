@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E126
-// EXPECT-DIAG: Cannot index a value of type 'IntBox'
+// EXPECT-DIAG: I cannot index an `IntBox`.
 // A type that declares only `operator []=` can be written through but not
 // read: `box[0]` has no `operator []` to call. The checker counted the setter
 // as "this type is indexable", gave the read no type, and Codegen died with

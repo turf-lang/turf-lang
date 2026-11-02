@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E086
-// EXPECT-DIAG: A reference into this function's own local storage can't be returned
+// EXPECT-DIAG: I cannot let a reference into this function's own local storage be returned
 // LEC-005 / INV-LINT-1, found while auditing the other hand-written visitors:
 // EscapeCheckVisitor (F-MEM-5) had no branch for `recover`, and a `recover run
 // { ... }` block is NOT split into CFG statements -- the whole block reaches

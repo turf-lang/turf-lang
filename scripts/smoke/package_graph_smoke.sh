@@ -173,8 +173,8 @@ graph gt.json '{"format": 1, "root": "myapp", "packages": {
 run transitive --check --package-graph gt.json myapp/src/main.tr
 expect_rc "transitive dependency" transitive 1
 expect_out "transitive dependency" transitive "[E091"
-expect_out "transitive dependency" transitive "'plotter' depends on it"
-expect_out "transitive dependency" transitive "Add 'geometry' to [dependencies]"
+expect_out "transitive dependency" transitive "\`plotter\` depends on it"
+expect_out "transitive dependency" transitive "Add \`geometry\` to [dependencies]"
 
 printf 'import shapes;\nfn main(): int {\n    return 0;\n}\n' > cases/internal.tr
 as_main internal.tr
@@ -182,7 +182,7 @@ run internal --check --package-graph g.json myapp/src/main.tr
 restore_main
 expect_rc "another package's internal module" internal 1
 expect_out "another package's internal module" internal "[E091"
-expect_out "another package's internal module" internal "internal to package 'geometry'"
+expect_out "another package's internal module" internal "internal to package \`geometry\`"
 
 cp myapp/src/util.tr myapp/src/geometry.tr
 run owndep --check --package-graph g.json myapp/src/main.tr
@@ -202,7 +202,7 @@ restore_main
 expect_rc "cwd is not searched" stray 1
 expect_out "cwd is not searched" stray "[E027"
 # ...and the hint names the places a package build does look, not the cwd.
-expect_out "cwd is not searched" stray "In a project, \`import stray;\` names one of three things"
+expect_out "cwd is not searched" stray "In a project, \`import stray;\` names a module of this package"
 
 # A dependency's private function: E088 names the package, not its identity.
 printf 'import geometry;\nfn main(): int {\n    return geometry::hidden();\n}\n' > cases/priv.tr
@@ -211,8 +211,8 @@ run priv --check --package-graph g.json myapp/src/main.tr
 restore_main
 expect_rc "private function of a dependency" priv 1
 expect_out "private function of a dependency" priv "[E088"
-expect_out "private function of a dependency" priv "is private to module 'geometry'"
-expect_out "private function of a dependency" priv "mark it \`pub\` in geometry.tr"
+expect_out "private function of a dependency" priv "is private to module \`geometry\`"
+expect_out "private function of a dependency" priv "as \`pub\` in geometry.tr"
 
 # --- the unsafe bit (F-PKG-4) ---------------------------------------------------
 printf 'unsafe module;\npub fn raw(): int {\n    mut p: int* = null;\n    return 1;\n}\n' > geometry/src/rawmod.tr
@@ -332,11 +332,11 @@ cp leak/src/main.tr leakapp/src/main.tr
 run leak_lib --check --package-graph gll.json leak/src/main.tr
 expect_rc "a root module's pub fn returning an internal type" leak_lib 1
 expect_out "a root module's pub fn returning an internal type" leak_lib "[E089"
-expect_out "a root module's pub fn returning an internal type" leak_lib "Public function 'get' of package 'leak' exposes 'Thing', a type of its internal module 'inner'."
+expect_out "a root module's pub fn returning an internal type" leak_lib "I cannot let the public function \`get\` of package \`leak\` expose \`Thing\`, a type of its internal module \`inner\`."
 # The root module checked on its own, as `turf check` and editors do.
 run leak_module --check --module --package-graph gll.json leak/src/leak.tr
 expect_rc "the same, checking the root module with --module" leak_module 1
-expect_out "the same, checking the root module with --module" leak_module "exposes 'Thing', a type of its internal module 'inner'"
+expect_out "the same, checking the root module with --module" leak_module "expose \`Thing\`, a type of its internal module \`inner\`"
 run leak_dep --check --package-graph gla.json leakapp/src/main.tr
 expect_rc "the same, with the library as a dependency" leak_dep 1
 expect_out "the same, with the library as a dependency" leak_dep "[E089"
@@ -344,7 +344,7 @@ printf 'import inner;\npub struct Box {\n    pub t: inner::Thing\n}\npub fn one(
 printf 'import leak;\nfn main(): int {\n    return leak::one();\n}\n' > leak/src/main.tr
 run leak_field --check --package-graph gll.json leak/src/main.tr
 expect_rc "a root module's pub field of an internal type" leak_field 1
-expect_out "a root module's pub field of an internal type" leak_field "Public field 'Box.t' of package 'leak'"
+expect_out "a root module's pub field of an internal type" leak_field "the public field \`Box.t\` of package \`leak\`"
 
 # --- --unsafe-report (LB-2, driver interface 1.12) ------------------------------
 # Each package's unsafe surface, granted or not, and the stdlib's; the exact

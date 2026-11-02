@@ -1,6 +1,5 @@
 // EXPECT-DIAG: E148
-// EXPECT-DIAG: 'plain' is not generic, so it takes no type arguments
-
+// EXPECT-DIAG: `plain` is not generic, so it takes no type arguments, and 1 is written.
 fn plain(x: int): int {
     return x;
 }

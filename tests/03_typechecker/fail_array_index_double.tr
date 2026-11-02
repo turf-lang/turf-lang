@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E002
-// EXPECT-DIAG: as an index into 'int[3]'
+// EXPECT-DIAG: An index into `int[3]` must be an `int`, and I found a `double`.
 // A decimal is not a whole number: `a[1.5]` has no meaning, and Turf will not
 // guess whether `a[1.0]` meant index 1. Convert explicitly with `to int`.
 // (A `char` IS accepted as an index -- tests/13_string_stdlib/

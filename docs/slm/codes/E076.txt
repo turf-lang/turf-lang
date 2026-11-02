@@ -19,9 +19,9 @@ CORRECT:
 
 INCORRECT:
     mut x: int = 999999999999999999999999999999999999999999999999;
-    // ERROR: too big for 'int' [E076]
+    // ERROR: The literal ... does not fit in an `int` [E076]
     mut c: int = 9223372036854775807 + 1;
-    // ERROR: the sum overflows 'int' [E076]
+    // ERROR: The literal 9223372036854775808 does not fit in an `int` [E076]
 
 FIX:
   Use a literal (or literal expression) that fits the destination type's

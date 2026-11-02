@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E109
-// EXPECT-DIAG: Parentheses in a type are only for an array of references
+// EXPECT-DIAG: I accept parentheses in a type only around an array of references
 // Every type but a reference takes `[N]` directly, so parentheses are only
 // for `(&N)[2]`.
 fn main(): int {

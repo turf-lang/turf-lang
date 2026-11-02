@@ -269,6 +269,11 @@ otherwise each answer differently, producing an incoherent language.
   An unvalidated suggestion is capped below the display gate.
 - No new `ErrorCategory` values or `docs/slm/` category files without an
   explicit request.
+- Message text is outside the compatibility promise; codes and exit statuses
+  are the contract (D-6). The 2.0 corpus gate holds a `fail_*` program to the
+  codes its `EXPECT-DIAG` lines name and not to their quoted text
+  (`TURF_TEST_DIAG_CODES_ONLY`, `scripts/check/compat_corpus_check.py`), so a
+  minor may reword any message (DX-9, decided 2026-11-02).
 
 ### 6.10 Optimization — FROZEN
 

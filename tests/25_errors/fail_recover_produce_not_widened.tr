@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E066
-// EXPECT-DIAG: 'recover produce int' doesn't match this call's success type 'double' exactly
+// EXPECT-DIAG: `recover produce` gives an `int`, and this call succeeds with a `double`: the fallback is not converted.
 // The fallback of `recover produce` has the call's success type exactly: an
 // `int` variable for a `!double` call was silently widened.
 

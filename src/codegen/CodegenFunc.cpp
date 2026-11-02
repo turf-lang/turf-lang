@@ -571,7 +571,9 @@ Value *FuncDefExprAST::codegen() {
   } else {
     // If the function already has a body, this is a duplicate definition
     if (!TheFunc->empty()) {
-      SemanticError(Loc, "Duplicate function definition: '" + Name + "'")
+      SemanticError(Loc, "I found a second definition of `" + Name +
+                             "` with the same parameter types.",
+                    "Rename one of the two, or give them different parameter types.")
           .raise();
       return nullptr;
     }

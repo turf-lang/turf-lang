@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E042
-// EXPECT-DIAG: Unknown type 'NoSuchType'
+// EXPECT-DIAG: I cannot find a type named `NoSuchType`
 // Regression test: an unknown type used as a generic type ARGUMENT
 // (List<NoSuchType>) must be rejected with a clean "unknown type"
 // diagnostic pointing at the actual problem. Before this fix,

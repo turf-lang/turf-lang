@@ -194,8 +194,8 @@ Value *MethodCallExprAST::codegen() {
       // propagate nullptr so Codegen can bail out cleanly.
       if (!ResolvedCallTarget) {
         LogErrorAt(Loc, ErrCode::ModuleArityOrType,
-                   "No matching overload found for '" + ModuleName + "." +
-                            Method + "' (see type-mismatch error above)", SLM::ErrorCategory::FUNCTION_SIGNATURE);
+                   "I found no overload of `" + ModuleName + "." +
+                            Method + "` that matches this call, as the type error above explains.", SLM::ErrorCategory::FUNCTION_SIGNATURE);
         return nullptr;
       }
       std::string MangledName = ResolvedCallTarget->mangledName();
@@ -638,7 +638,7 @@ Value *ScopeAccessExprAST::codegen() {
   // first since every other branch below assumes LeftName names an enum.
   if (ResolvedKind == ScopeAccessKind::ModuleConstantRef) {
     if (!ResolvedConstant) {
-      LogErrorAt(Loc, ErrCode::InternalCompilerError, "Internal error: exported constant not resolved in codegen", SLM::ErrorCategory::GENERAL);
+      LogErrorAt(Loc, ErrCode::InternalCompilerError, "This is a compiler bug: I could not resolve an exported constant.\n  Hint: Report it with the smallest code that shows it at https://github.com/turf-lang/turf-lang/issues.", SLM::ErrorCategory::GENERAL);
       return nullptr;
     }
     return CodegenConstantValue(*ResolvedConstant);
@@ -655,7 +655,7 @@ Value *ScopeAccessExprAST::codegen() {
   auto EnumTy = Symbols()->LookupType(LeftName);
   auto *ET = dynamic_cast<const TurfEnumType *>(EnumTy.get());
   if (!ET) {
-    LogErrorAt(Loc, ErrCode::InternalCompilerError, "Internal error: enum type not found in codegen", SLM::ErrorCategory::GENERAL);
+    LogErrorAt(Loc, ErrCode::InternalCompilerError, "This is a compiler bug: I could not find an enum type.\n  Hint: Report it with the smallest code that shows it at https://github.com/turf-lang/turf-lang/issues.", SLM::ErrorCategory::GENERAL);
     return nullptr;
   }
 
@@ -1065,7 +1065,7 @@ Value *StructDeclExprAST::codegen() {
     // runtime-visible name are both derived from this LLVM name.
     ST = StructType::create(*TheContext, TypeIdentity::llvmName(Name));
     if (!ST) {
-      LogErrorAt(Loc, ErrCode::InternalCompilerError, "Failed to create LLVM StructType for '" + Name + "'", SLM::ErrorCategory::GENERAL);
+      LogErrorAt(Loc, ErrCode::InternalCompilerError, "This is a compiler bug: I could not create the struct type `" + Name + "`.\n  Hint: Report it with the smallest code that shows it at https://github.com/turf-lang/turf-lang/issues.", SLM::ErrorCategory::GENERAL);
       return nullptr;
     }
   }
@@ -1083,7 +1083,7 @@ Value *StructDeclExprAST::codegen() {
   for (const auto &Field : Fields) {
     Type *LLVMType = getLLVMType(Field.Type.get());
     if (!LLVMType) {
-      LogErrorAt(Loc, ErrCode::InternalCompilerError, "Unknown type for field '" + Field.Name + "'", SLM::ErrorCategory::GENERAL);
+      LogErrorAt(Loc, ErrCode::InternalCompilerError, "This is a compiler bug: I do not know the type of the field `" + Field.Name + "`.\n  Hint: Report it with the smallest code that shows it at https://github.com/turf-lang/turf-lang/issues.", SLM::ErrorCategory::GENERAL);
       return nullptr;
     }
     LLVMFieldTypes.push_back(LLVMType);
@@ -1170,15 +1170,15 @@ Value *FieldAccessExprAST::codegenLValue() {
   }
   auto *SType = dynamic_cast<const TurfStructType *>(BaseType);
   if (!SType) {
-    LogErrorAt(Loc, ErrCode::InternalCompilerError, "Cannot access field on non-struct type", SLM::ErrorCategory::DECLARATION);
+    LogErrorAt(Loc, ErrCode::InternalCompilerError, "This is a compiler bug: I was asked to access a field of a type that is not a struct.\n  Hint: Report it with the smallest code that shows it at https://github.com/turf-lang/turf-lang/issues.", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
 
   int FieldIdx = SType->getFieldIndex(FieldName);
   if (FieldIdx < 0) {
     LogErrorAt(Loc, ErrCode::UnknownStructField,
-               "Struct '" + SType->getName() + "' has no field named '" +
-                        FieldName + "'", SLM::ErrorCategory::UNDECLARED_VAR);
+               "Struct `" + SType->getName() + "` has no field named `" +
+                        FieldName + "`.", SLM::ErrorCategory::UNDECLARED_VAR);
     return nullptr;
   }
 
@@ -1239,7 +1239,7 @@ Value *FieldAccessExprAST::codegen() {
 
   auto *SType = dynamic_cast<const TurfStructType *>(BaseType);
   if (!SType) {
-    LogErrorAt(Loc, ErrCode::InternalCompilerError, "Cannot load field on non-struct type", SLM::ErrorCategory::DECLARATION);
+    LogErrorAt(Loc, ErrCode::InternalCompilerError, "This is a compiler bug: I was asked to load a field of a type that is not a struct.\n  Hint: Report it with the smallest code that shows it at https://github.com/turf-lang/turf-lang/issues.", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
   TurfTypePtr FieldType = SType->getFieldType(FieldName);

@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E129
-// EXPECT-DIAG: 'int[]' is not an array of a fixed size
+// EXPECT-DIAG: I cannot tell the size `N` of the array `fill` returns: no argument has it, and `int[]` is not an array of a fixed size.
 // An unsized 'int[]' parameter has no length to give.
 
 fn<T, N: size> fill(value: T): T[N] {

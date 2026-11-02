@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E064
-// EXPECT-DIAG: In this instantiation: Return type mismatch: function declares 'int' but returns '&int'
+// EXPECT-DIAG: In this instantiation: I cannot return a `&int` from a function that returns an `int`.
 // The template is checked again for T = int, where `&T` is not `T`.
 fn<T> deref(p: &T): T {
     return p;

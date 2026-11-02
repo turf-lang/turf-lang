@@ -311,15 +311,15 @@ or `return err;` inside `recover as err`) counts as returning one.
 
 | Diagnostic | Raised when |
 |---|---|
-| E135 `NotCallableError` ("Not callable!") | A variant with no fields is called with other than exactly one `string` argument |
+| E135 `NotCallableError` (``I cannot call `MathError::Overflow`, which is an error variant and not a function``) | A variant with no fields is called with other than exactly one `string` argument |
 | E039 `NoSuchVariantError` | A reference, call target or construction names an unknown variant (with suggestions) |
 | E034 `DuplicateTypeNameError` | Two `error` (or `error`/`struct`/`enum`) declarations share a name in one file |
 | E096 `ErrorPayloadError` | A payload declared wrongly (empty parentheses, missing type, duplicate field, a field of error/`!T`/`void` type) or constructed wrongly (argument count not *N* or *N+1*, an argument not its field's type, a trailing message not a `string`); a bare `E::V` value for a variant that has fields; `err.<field>` other than `.message` |
 | E095 `TryMisuseError` | `try` at the top level, in a function not returning `!V` (`main` gets its own hint), inside a `defer`, or on a non-fallible operand |
 | E092 `InvalidPatternError` / E093 `NonExhaustiveCompareError` | An error-variant pattern that lists the wrong fields, names a bare variant that has fields, has empty parentheses, or sits over a non-error or other-error-type subject; an open error union, or a declared error type with an uncovered variant, without `otherwise` |
-| E132 `InvalidRecoverError` | `recover` on an expression that is not `!T` ("Invalid 'recover' use!"); a `recover run`/`as err run` block on a non-`void` `T` that does not diverge ("Non-diverging 'recover run'!", §1.5) |
+| E132 `InvalidRecoverError` | `recover` on an expression that is not `!T` (`` `recover` follows a call that can fail, one that returns `!T`, and this expression cannot fail ``); a `recover run`/`as err run` block on a non-`void` `T` that does not diverge (``A path through `recover run` ends without a `return`, and the block gives the call nothing to stand for``, §1.5) |
 | E016 `BareErrorAsBindingError` | `recover as err run` where every possible error is bare-form (§1.7) |
-| E066 `Type mismatch!` | `recover produce value` where `value`'s type isn't `T`, or on a `!void`; a `!T` used to initialise or assign a `T` |
+| E066 `TypeError` | `recover produce value` where `value`'s type isn't `T`, or on a `!void`; a `!T` used to initialise or assign a `T` |
 | E064 (return type mismatch) | `return f();` of a `!T` from a function that does not return `!T` (the hint names `recover` and `try`), or whose success type differs — except `return f();` of exactly the function's own `!T` (§1.11) |
 | `NeverReturnsErrorWarning` | A `!T` function whose body never returns an error value (§1.8) |
 

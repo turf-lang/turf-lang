@@ -1943,7 +1943,7 @@ static int runCompilerMain(int argc, char **argv) {
             auto AST = ParseExpression();
             if (AST) {
               if (Parser().CurTok == ';') {
-                LogErrorAt(Lex().CurLoc, ErrCode::UnexpectedToken, "Unexpected ';'", SLM::ErrorCategory::SYNTAX_ERROR);
+                LogErrorAt(Lex().CurLoc, ErrCode::UnexpectedToken, "I did not expect a `;` here.", SLM::ErrorCategory::SYNTAX_ERROR);
               }
               // NOTE: no LintExpression() call here (deliberately -- see the
               // "Phase Separation: Lint All" comment near FnASTs' declaration
@@ -1980,7 +1980,7 @@ static int runCompilerMain(int argc, char **argv) {
             auto AST = ParseImport();
             if (AST) {
               if (Parser().CurTok != ';') {
-                LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
+                LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "I expected a `;` after this statement.", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
               } else {
                 getNextToken(); // eat ';'
               }
@@ -2381,7 +2381,7 @@ static int runCompilerMain(int argc, char **argv) {
         auto AST = ParseExpression();
         if (AST) {
           if (Parser().CurTok == ';') {
-            LogErrorAt(Lex().CurLoc, ErrCode::UnexpectedToken, "Unexpected ';'", SLM::ErrorCategory::SYNTAX_ERROR);
+            LogErrorAt(Lex().CurLoc, ErrCode::UnexpectedToken, "I did not expect a `;` here.", SLM::ErrorCategory::SYNTAX_ERROR);
           }
           // lint only — not re-codegenned. Also transparently flattens a
           // top-level `unsafe { }` block -- see AppendFlattenedTopLevelDecl()'s
@@ -2408,7 +2408,7 @@ static int runCompilerMain(int argc, char **argv) {
         auto AST = ParseImport();
         if (AST) {
           if (Parser().CurTok != ';') {
-            LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
+            LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "I expected a `;` after this statement.", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
           } else {
             getNextToken(); // eat ';'
           }
@@ -2433,7 +2433,7 @@ static int runCompilerMain(int argc, char **argv) {
       auto AST = ParseExpression();
       if (AST) {
         if (Parser().CurTok != ';') {
-          LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
+          LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "I expected a `;` after this statement.", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
         } else {
           getNextToken(); // eat ';'
         }
@@ -2458,9 +2458,8 @@ static int runCompilerMain(int argc, char **argv) {
           // `--explain` page -- the one message every first-time beginner who
           // pastes code at the top level meets. (issue #263)
           LogErrorAt(StmtLoc, ErrCode::StatementOutsideFunction,
-                     "Statements are not allowed outside of a function. "
-                     "Please define 'fn main(): int' and move this code "
-                     "inside.\n  Hint: Wrap it: `fn main(): int { <this statement> return 0; }`.",
+                     "I found a statement outside a function."
+                     "\n  Hint: Move it into a function, as in `fn main(): int { <this statement> return 0; }`.",
                      SLM::ErrorCategory::SYNTAX_ERROR);
           DiagnosticEngine::flushAll();
           // _Exit (not exit): this raw exit point bypasses the rest of the
@@ -2745,10 +2744,10 @@ static int runCompilerMain(int argc, char **argv) {
       // Line 0: it is about the whole file, not a place in it (printDiag()
       // then prints no "at line").
       std::string NoMain =
-          "No entry point found. Please define 'fn main(): int' in your file.";
+          "I found no entry point. Define `fn main(): int` in your file.";
       if (opts.Check)
-        NoMain += "\n  Hint: checking a module that is only ever imported? add "
-                  "--module: `turf check --module <file.tr>`";
+        NoMain += "\n  Hint: To check a module that is only ever imported, add "
+                  "`--module`: `turf check --module <file.tr>`.";
       LogErrorAt(SourceLocation{0, 0, ""}, ErrCode::MissingEntryPoint, NoMain,
                  SLM::ErrorCategory::DECLARATION);
       DiagnosticEngine::flushAll();

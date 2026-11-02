@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E065
-// EXPECT-DIAG: Cannot explicitly cast 'Point' to 'string'
+// EXPECT-DIAG: I cannot convert a `Point` to a `string` with `to`.
 import io;
 
 struct Point { x: int }

@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E004
-// EXPECT-DIAG: from a value of type 'string[3]'
+// EXPECT-DIAG: I cannot initialize `c`, an `int[3]`, from a `string[3]`.
 // fill's element type comes from its argument, its length from the target.
 
 import arrays;

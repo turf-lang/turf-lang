@@ -5,7 +5,7 @@ A `machine` lists the transitions it allows. Turf counts the arrows that point I
     machine Door {
         Closed -> Open,
         Open -> Closed,
-        Locked -> Closed,   // WARNING: no transition leads to 'Locked'
+        Locked -> Closed,   // WARNING: Machine `Door` declares state `Locked` with no incoming transitions.
     }
 
 Once a `Door` leaves its starting value, there is no arrow that can bring it to `Locked`, so every use of that state after the first move is dead weight. It is usually a forgotten edge. Add the arrow:

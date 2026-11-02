@@ -2,10 +2,9 @@ tests/25_errors/fail_recover_on_non_fallible.tr (1 error)
 
 ── error at line 6, col 20 [E132 · invalid recover]
 
-  Invalid 'recover' use!
-  'recover' can only be used on a fallible ('!T') expression.
+  `recover` follows a call that can fail, one that returns `!T`, and this expression cannot fail.
 
-  Hint: Only a call whose declared return type is '!T' can be followed by 'recover' -- an ordinary, non-fallible call has nothing to recover from.
+  Hint: Remove the `recover`, or call a function that returns `!T`.
 
   6 │     mut x: int = 5 recover produce 0;
     │                    ^~~~~~~ this `recover` is not valid

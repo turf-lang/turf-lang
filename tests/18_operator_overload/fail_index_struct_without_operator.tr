@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E126
-// EXPECT-DIAG: Cannot index a value of type 'IntBox'
+// EXPECT-DIAG: I cannot index an `IntBox`.
 // REL-004 (fuzzer): a struct that declares no `operator []` was indexed anyway;
 // the access had no type and Codegen stopped with "Base is not an array or
 // pointer". Found as a one-token mutation of

@@ -2,9 +2,9 @@ tests/15_enums/local_type_declarations.tr (1 warning)
 
 ── warning at line 28, col 5 [E074 · unreachable block]
 
-  Warning: The code in 'compare.end' inside 'classify' can never be reached!
+  I can never reach the code in `compare.end` inside `classify`.
 
-  Hint: Check your 'if' conditions. Are they impossible to be true, or did you 'return' before this block?
+  Hint: Check whether an `if` condition can never be true, or whether a `return` comes before this block.
 
   28 │     return 99;
      │     ^~~~~~ this block never runs

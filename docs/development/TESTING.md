@@ -116,7 +116,7 @@ fn doubles_a_number(): void {
     test::assert(double_it(21) == 42, "21 doubled is 42");
 }
 
-@test(compile_error, E041, "Unknown function")
+@test(compile_error, E041, "function named")
 fn an_undeclared_call_is_rejected(): void {
     undeclared(1);
 }
@@ -246,7 +246,7 @@ pinned, and the diagnostics a beginner-friendly compiler should not produce:
 | `UNPINNED` | not yet confirmed to fail for its stated reason; only ever shrinks |
 | `WRONG-REASON` | rejected, but for a different reason than the test was written for |
 | `NO-CODE` | an error printed with no `[Exxx]`, so `turf explain` has nothing to say |
-| `GENERIC-CODE` | the right error under a catch-all code (an E066 that is not "Type mismatch!") |
+| `GENERIC-CODE` | the right error under a catch-all code (an E066 that is not a type mismatch), listed by hand with `code=` and a `title=` fragment of its message |
 | `CASCADE` | one mistake, several errors |
 
 The runner checks every entry against the real output, so a fixed entry left in

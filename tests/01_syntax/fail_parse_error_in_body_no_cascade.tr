@@ -1,6 +1,6 @@
 // EXPECT-DIAG: E108
-// EXPECT-DIAG: Expected a function name after 'fn'
-// EXPECT-NO-DIAG: Statements are not allowed outside of a function
+// EXPECT-DIAG: I expected a function name after `fn`
+// EXPECT-NO-DIAG: I found a statement outside a function
 // LEC-005: a syntax error INSIDE a function body (here a lambda attempt --
 // `fn(...)` where an expression belongs) must resynchronise at that
 // function's closing brace. SkipToNextTopLevelBoundary() used to reset its

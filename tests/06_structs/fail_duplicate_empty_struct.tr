@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E034
-// EXPECT-DIAG: A struct named 'Empty' is already declared
+// EXPECT-DIAG: I found a second struct named `Empty`
 // Regression test: two struct declarations sharing a name are rejected
 // exactly the same way regardless of whether either one has any fields --
 // DuplicateTypeNameError's check happens before field parsing/registration

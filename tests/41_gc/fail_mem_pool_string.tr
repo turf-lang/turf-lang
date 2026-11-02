@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E056
-// EXPECT-DIAG: No overload of 'mem::Pool.track' matches argument types (string)
+// EXPECT-DIAG: No overload of `mem::Pool.track` takes the argument types (string).
 // A Pool's storage is manual memory the collector never scans, so a GC value
 // tracked there would be freed under it. Pool holds `void*` only, and a
 // `string` does not convert to `void*` without an explicit cast.

@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E002
-// EXPECT-DIAG: Index must be an integer
+// EXPECT-DIAG: An index into `int[3]` must be an `int`, and I found a `string`.
 // Issue #263: `arr["one"]` compiled with NO diagnostic at all -- E002's
 // `--explain` page promised "the compiler stops you here" and nothing did. A
 // string is not a whole number and cannot index an array.

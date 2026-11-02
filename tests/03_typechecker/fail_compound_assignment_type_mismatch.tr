@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E057
-// EXPECT-DIAG: cannot apply '+' to 'int' and 'string'
+// EXPECT-DIAG: I cannot use `+` on an `int` and a `string`.
 fn main(): int {
     mut x: int = 5;
     x += "hello";

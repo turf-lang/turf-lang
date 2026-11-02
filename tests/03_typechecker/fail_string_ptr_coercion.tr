@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E066
-// EXPECT-DIAG: Cannot assign value of type 'string' to variable of type 'ptr'
+// EXPECT-DIAG: I cannot assign a `string` to `p`, which is a `ptr`.
 // EXPECT-NO-DIAG: Unsafe pointer use!
 fn main(): int {
     // string should not implicitly coerce to T*.

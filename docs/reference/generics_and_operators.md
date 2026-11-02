@@ -210,7 +210,7 @@ fn main(): int {
 
 The receiver still matches exactly once `T` is known: `n.pick::<string>("s")`
 is E056, since the `int` receiver is not a `string`. The receiver counts as
-argument 1, so `n.pick("s")` is E056 "Conflicting type arguments", as
+argument 1, so `n.pick("s")` is E056 (`T` in `pick` is an `int` from argument 1 and a `string` from argument 2), as
 `pick(n, "s")` is.
 
 **A generic struct takes its type arguments from the type it is stored into,
@@ -272,7 +272,7 @@ stores `1.0`, and with `Box<int32>` declared an untyped literal such as
 the conversion (`Box::new(2.5 to int)`).
 
 When nothing supplies the type, there is nothing to infer from. `mut l =
-List::default();` is rejected with E129 (Nothing to infer! Cannot infer the
+List::default();` is rejected with E129 (I cannot infer the
 type arguments of a generic type):
 
 <!-- doc-example: fails E129 -->
@@ -481,8 +481,7 @@ fn main(): int {
 ```
 
 To change a number derived from `N`, copy it first: `mut n: int = N;`. A name
-inside `[ ]` that is not a declared size parameter is E123 (`'M' is not a
-size`).
+inside `[ ]` that is not a declared size parameter is E123 (``I cannot use `M` as an array size, which must be a positive whole number or a size parameter``).
 
 The standard library builds on this: the [`arrays` module](stdlib/arrays.md)
 has `fill`, `generate`, `reversed` and `map`.
@@ -495,7 +494,7 @@ generic types.
 
 A method on a generic struct repeats the struct's type parameters after `fn`:
 `fn<T> Box.get()` for `struct Box<T>`, `fn<K, V> Map.put(...)` for
-`struct Map<K, V>`. Leaving them off is E138 (Missing type parameters!), because
+`struct Map<K, V>`. Leaving them off is E138 (`Box` is generic, so its method `get` must declare the type parameters too), because
 `self`'s layout depends on the type arguments:
 
 <!-- doc-example: fails E138 -->
@@ -694,15 +693,14 @@ main.tr (1 error)
 
 ── error at line 12, col 6 [E124 · values can't be compared]
 
-  Oops! Something doesn't add up:
-  In this instantiation: Cannot compare struct values with '=='. (Structs have
-  no built-in comparison: compare the fields you care about (e.g. `a.x ==
-  b.x`), or declare `operator ==` for the type.)
-  Note: 'Set<Big>.add' requires 'Set<Big>.contains' here (lib/std/collections/set.tr, ...)
-  Note: 'Set<Big>.contains' requires 'Set<Big>.index_of' here (lib/std/collections/set.tr, ...)
-  Note: 'Set<Big>.index_of' requires 'Set<Big>.bucket_find' here (lib/std/collections/set.tr, ...)
-  Note: the error itself, inside 'Set<Big>.bucket_find' (lib/std/collections/set.tr, ...)
-  Note: in generic declaration 'set::Set.bucket_find' (lib/std/collections/set.tr, ...)
+  In this instantiation: I cannot compare two `Big` structs with `==`: a struct has no built-in comparison.
+  Note: `Set<Big>.add` needs `Set<Big>.contains` here (lib/std/collections/set.tr, ...)
+  Note: `Set<Big>.contains` needs `Set<Big>.index_of` here (lib/std/collections/set.tr, ...)
+  Note: `Set<Big>.index_of` needs `Set<Big>.bucket_find` here (lib/std/collections/set.tr, ...)
+  Note: the error itself, inside `Set<Big>.bucket_find` (lib/std/collections/set.tr, ...)
+  Note: in the generic declaration `set::Set.bucket_find` (lib/std/collections/set.tr, ...)
+
+  Hint: Compare the fields you care about, e.g. `a.x == b.x`, or declare `operator ==` for the type.
 
   12 │     s.add(b);
      │      ^ these values cannot be compared
@@ -714,7 +712,7 @@ to two `Big`s. The fix here is to declare `operator ==(a: Big, b: Big): bool`
 (see [Operator overloading](#operator-overloading)).
 
 The same reporting applies to a call that finds no overload for the concrete
-type (`No overload of 'len' matches argument types (int).`) or an operation
+type (``No overload of `len` takes the argument types (int).``) or an operation
 such as indexing that the type does not support.
 
 Three further limits protect the compiler from a generic that never finishes:
@@ -1111,9 +1109,9 @@ assigned back" to `a`); if no operator matches, it is E057.
 
 `operator []` makes `x[i]` readable and `operator []=` makes `x[i] = v` writable.
 They are independent: declare only `[]` and the type is read-only; declare only
-`[]=` and it is write-only (a read is then E126, Cannot index a value of type
-...). A use with an index or value type that matches no overload is E056 (No
-'operator[]' overload matches ...). The operator picked is the one whose
+`[]=` and it is write-only (a read is then E126, I cannot index a `Grid`).
+A use with an index or value type that matches no overload is E056 (No
+`operator[]` matches `Grid[string]`). The operator picked is the one whose
 parameter types match exactly, so a type can have several, for instance one
 indexed by `int` and one by `string`.
 

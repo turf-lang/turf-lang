@@ -2,10 +2,9 @@ tests/04_control_flow/fail_compare_type_mismatch.tr (1 error)
 
 ── error at line 8, col 9 [E059 · compare arm of the wrong type]
 
-  Type mismatch in compare!
-  Subject has type 'int' but a matches arm has type 'string'.
+  I cannot match an `int` subject against a `string` arm.
 
-  Hint: All matches arm values must have the same type as the compare subject (int or string).
+  Hint: Write each `matches` arm with the subject's type, `int`.
 
   8 │         matches "hello":
     │         ^~~~~~~ this arm has the wrong type

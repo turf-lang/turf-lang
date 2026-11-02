@@ -34,7 +34,7 @@ CORRECT FIELD ACCESS SYNTAX:
 
 INCORRECT:
     mut pw: string = u.pasword;
-    // ERROR: Struct 'User' has no field named 'pasword'.
+    // ERROR: I cannot find a field named `pasword` on the struct `User`.
     //   (did-you-mean suggests 'password' when it's a close match)
 
 WHAT THIS ERROR IS NOT:

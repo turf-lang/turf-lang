@@ -2,9 +2,9 @@ tests/39_nullable_references/fail_escape_defer_in_loop.tr (1 error)
 
 ── error at line 17, col 5 [E086 · dangling reference escape]
 
-  A reference into this function's own local storage can't be returned -- it would dangle the moment this function returns.
+  I cannot let a reference into this function's own local storage be returned, because it would dangle when this function returns.
 
-  Hint: heap(value) copies it onto the GC heap first and gives you back a reference that outlives this function; or return/store a reference you received as a parameter instead of a local's.
+  Hint: Copy it onto the GC heap first with `heap(value)`, which gives a reference that outlives this function, or return or store a reference you received as a parameter instead of a local's.
 
   17 │     return p;
      │     ^~~~~~ this reference outlives what it points at

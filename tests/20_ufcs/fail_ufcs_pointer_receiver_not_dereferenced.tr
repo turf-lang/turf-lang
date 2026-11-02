@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E056
-// EXPECT-DIAG: No visible 'twice' overload accepts a 'int*' receiver via UFCS.
+// EXPECT-DIAG: No visible `twice` takes an `int*` as its receiver: a call with `.` matches the receiver's type exactly and never converts it.
 // An `int*` receiver is not loaded implicitly to reach a function taking an
 // `int`: UFCS matches the receiver as written. This used to match `int` and
 // pass the pointer anyway, which crashed the compiler (invalid LLVM IR); the

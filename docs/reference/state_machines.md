@@ -36,18 +36,18 @@ allowed.
   appears on either side of an edge. Its ordinal is its order of first
   appearance, counting from 0: here `Idle` is 0, `Connecting` 1, `Connected`
   2, `Failed` 3 and `Closing` 4.
-- The same edge twice is `E114` (`Machine 'M' already declares a transition
-  from 'A' to 'B'`).
+- The same edge twice is `E114` (``Machine `M` already declares a transition
+  from `A` to `B` ``).
 - A missing `->` is `E110`.
 - A state with no incoming edge anywhere in the machine produces a warning
-  (`Machine 'ConnectionState' declares state 'Idle' with no incoming
-  transitions`). That is the normal situation for a start state, so the
+  (``Machine `ConnectionState` declares state `Idle` with no incoming
+  transitions ``). That is the normal situation for a start state, so the
   warning is safe to ignore for it; for any other state it usually means a
   missing edge. There is no syntax to mark a start state.
 - A state that has to exist must appear in at least one edge.
 - `pub machine Name { ... }` makes the machine and all its states visible to
-  other modules. `pub` on a single state or edge is `E087` (`'pub' can't be
-  applied to a machine state or transition`).
+  other modules. `pub` on a single state or edge is `E087` (``I cannot apply `pub` to a machine state or
+  transition ``).
 - A machine has no `::default()` (`ConnectionState::default()` is `E135`).
   Initialise a variable with the state you want; a **struct field** of
   machine type that you leave alone starts as the machine's first state.
@@ -99,18 +99,16 @@ no result. These rules hold at every call:
 
 1. The receiver must be mutable: a transition changes it, so on an `immut`
    variable it is `E060`, like an assignment.
-2. It takes exactly one argument. Any other count is `E044` (`'transition'
-   expects exactly 1 argument (the target state)`).
+2. It takes exactly one argument. Any other count is `E044` (`` `transition` takes 1 argument, the target state, and this call passes 2 ``).
 3. The argument must be written as a state of the **same** machine as the
    receiver, `Machine::State`. A state of another machine is `E036`
-   (`'transition' target must be a state of 'ConnectionState', got
-   'TrafficLight'`), and so is any other expression. A variable or call
-   that holds a state of the right machine is `E036` too (`'transition'
-   target must be written as a state, like 'ConnectionState::SomeState', not
-   a value that holds one`): to move to a state chosen at run time, `compare`
+   (``I cannot `transition` to `TrafficLight`, which is not a state of
+   `ConnectionState` ``), and so is any other expression. A variable or call
+   that holds a state of the right machine is `E036` too (``I cannot tell which state this holds, and `transition`
+   needs a state written as `M::SomeState` ``): to move to a state chosen at run time, `compare`
    the value that chooses it and write one transition per arm. A name that is
-   no state at all is the ordinary `E039` (`Enum 'ConnectionState' has no
-   variant 'Bogus'`).
+   no state at all is the ordinary `E039` (``I cannot find a variant `Bogus` in the enum
+   `ConnectionState` ``).
 
 <!-- doc-example: fails E036 -->
 ```turflang
@@ -220,10 +218,11 @@ fn main(): int {
 ```
 
 ```text
-error [E035]: 'ConnectionState' has no transition from 'Idle' to 'Closing'.
-  Hint: This arm has already narrowed the receiver to 'Idle', which has no
-  declared edge to 'Closing' -- add `Idle -> Closing,` to the machine's
-  declaration, or transition to a state 'Idle' actually has an edge to.
+`ConnectionState` has no transition from `Idle` to `Closing`.
+  Hint: Add `Idle -> Closing,` to the declaration of `ConnectionState`, or transition to a state that `Idle` has an edge to.
+
+  13 │             conn.transition(ConnectionState::Closing);   // E035: no edge Idle -> Closing
+     │                 ^ this transition is not allowed
 ```
 
 The check compares the target with the state the value is in at that point
@@ -409,13 +408,13 @@ it is the start state, so that is expected.
 
 | Code | Message | Cause |
 |---|---|---|
-| `E035` | `'M' has no transition from 'A' to 'B'` | A `.transition` in a single-pattern `compare` arm whose matched state has no edge to the target. |
-| `E036` | `'transition' target must be a state of 'M', got 'X'` | The target is not written as a state of the receiver's machine. |
-| `E039` | `Enum 'M' has no variant 'X'` | The state name does not exist. |
-| `E044` | `'transition' expects exactly 1 argument` | Wrong number of arguments. |
-| `E087` | `'pub' can't be applied to a machine state or transition` | `pub` on a state; write `pub machine`. |
+| `E035` | `` `M` has no transition from `A` to `B` `` | A `.transition` in a single-pattern `compare` arm whose matched state has no edge to the target. |
+| `E036` | ``I cannot `transition` to `X`, which is not a state of `M` `` | The target is not written as a state of the receiver's machine. |
+| `E039` | ``I cannot find a variant `X` in the enum `M` `` | The state name does not exist. |
+| `E044` | `` `transition` takes 1 argument, the target state, and this call passes 2 `` | Wrong number of arguments. |
+| `E087` | ``I cannot apply `pub` to a machine state or transition`` | `pub` on a state; write `pub machine`. |
 | `E110` | expected `->` | A malformed edge. |
-| `E114` | `Machine 'M' already declares a transition from 'A' to 'B'` | The same edge twice. |
-| `E135` | `'M::default' is an enum variant, not a function` | `M::default()`; name a state instead. |
-| warning | `Machine 'M' declares state 'S' with no incoming transitions` | Nothing leads to `S`; expected for a start state. |
+| `E114` | ``Machine `M` already declares a transition from `A` to `B` `` | The same edge twice. |
+| `E135` | ``I cannot call `M::default`, which is an enum variant and not a function`` | `M::default()`; name a state instead. |
+| warning | ``Machine `M` declares state `S` with no incoming transitions`` | Nothing leads to `S`; expected for a start state. |
 | abort | `M::transition(X) -- no such transition from the current state` | A run-time-checked move with no edge. |

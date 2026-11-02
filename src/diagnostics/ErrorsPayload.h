@@ -27,9 +27,7 @@ public:
   ErrorPayloadError(SourceLocation Loc, const std::string &Problem,
                     const std::string &Hint)
       : TurfError(Loc,
-                  Colors::BRIGHT_RED + "Invalid error payload: " +
-                      Colors::RESET + Problem,
-                  Hint) {
+                  Problem, Hint) {
     Category_ = SLM::ErrorCategory::DECLARATION;
   }
 };
@@ -48,9 +46,7 @@ public:
   TryMisuseError(SourceLocation Loc, const std::string &Problem,
                  const std::string &Hint)
       : TurfError(Loc,
-                  Colors::BRIGHT_RED + "Misplaced 'try': " + Colors::RESET +
-                      Problem,
-                  Hint) {
+                  Problem, Hint) {
     Category_ = SLM::ErrorCategory::CONTROL_FLOW;
   }
 };

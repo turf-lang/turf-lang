@@ -11,7 +11,7 @@ CAUSE:
 
 EXAMPLE:
     import shapes::area;
-    import geometry::area;   // ERROR: 'area' now means two different things
+    import geometry::area;   // ERROR: I found `area` imported from two different modules.
 
 CORRECT (import the modules and qualify every call):
     // shapes.tr

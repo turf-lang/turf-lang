@@ -641,6 +641,44 @@ void Resolver::registerFunctionSignature(const FuncDefExprAST &Node,
   auto Sym = buildFunctionSymbol(Node, ModuleName);
   validateOperatorDecl(Sym);
   validateGenericParamsInferable(Node, Sym, ModuleName);
+  // Two definitions of one name with the same parameter types are one
+  // function defined twice (E011). Raised here, before Codegen, so `turf
+  // check` reports it too (F-S4a); FuncDefExprAST::codegen() keeps its own
+  // check as the backstop. The same declaration registered again (hoisting,
+  // then the visit) is not a second one.
+  {
+    auto sameParams = [&](const ResolverFunctionSymbol &Other) {
+      if (Other.Decl == Sym.Decl || Other.Params.size() != Sym.Params.size() ||
+          Other.IsExtern)
+        return false;
+      for (size_t I = 0; I < Sym.Params.size(); ++I) {
+        const auto &A = Sym.Params[I].Type, &B = Other.Params[I].Type;
+        if (!A || !B || A->getName() != B->getName())
+          return false;
+      }
+      return true;
+    };
+    const ResolverFunctionSymbol *First = nullptr;
+    if (ModuleName.empty()) {
+      for (const auto *Other : SymTable_.lookupCurrentFileFunctions(Sym.BaseName))
+        if (!First && sameParams(*Other))
+          First = Other;
+    } else {
+      for (const auto &Match : SymTable_.findInModules(Sym.BaseName))
+        if (!First && Match.ModuleName == ModuleName && sameParams(*Match.Symbol))
+          First = Match.Symbol;
+    }
+    if (First) {
+      SemanticError Err(Node.getLoc(),
+                        "I found a second definition of `" + Sym.BaseName +
+                            "` with the same parameter types.",
+                        "Rename one of the two, or give them different parameter types.");
+      Err.withRelated(candidateLocation(*First), "first defined here");
+      Err.withLabel("defined a second time here");
+      Err.raise();
+      return;
+    }
+  }
   if (ModuleName.empty()) {
     SymTable_.registerCurrentFileFunction(Sym);
   } else {
@@ -708,20 +746,20 @@ void Resolver::validateGenericParamsInferable(const FuncDefExprAST &Node,
       AsType |= spellsTypeName(P.Type.get(), SP);
     if (AsType) {
       TypeError(toSourceLocation(Sym.DeclLoc), ErrCode::SizeParameter,
-                "'" + SP + "' is a size parameter, not a type: in '" + FnName +
-                    "' it can only be an array's size, as in 'T[" + SP + "]'.",
-                "For a value of the element type, declare a type parameter too: "
-                "'fn<T, " + SP + ": size>' and use 'T'.")
+                "`" + SP + "` is a size parameter, so in `" + FnName +
+                    "` it can only be an array's size, as in `T[" + SP + "]`.",
+                "Declare a type parameter too, as in `fn<T, " + SP +
+                    ": size>`, and use `T` for the element type.")
           .raise();
       return;
     }
     for (const auto &P : Sym.Params)
       if (P.Name == SP) {
         TypeError(toSourceLocation(Sym.DeclLoc), ErrCode::SizeParameter,
-                  "'" + FnName + "' has a size parameter and a parameter both "
-                  "named '" + SP + "'.",
-                  "Rename one: the size parameter '" + SP +
-                      "' already reads as an int in the body.")
+                  "`" + FnName + "` has a size parameter and a parameter both "
+                  "named `" + SP + "`.",
+                  "Rename one of them, because the size parameter `" + SP +
+                      "` is already an `int` in the body.")
             .raise();
         return;
       }
@@ -729,11 +767,11 @@ void Resolver::validateGenericParamsInferable(const FuncDefExprAST &Node,
         std::find(FromReturn.begin(), FromReturn.end(), SP) != FromReturn.end())
       continue;
     TypeError(toSourceLocation(Sym.DeclLoc), ErrCode::NothingToInfer,
-              "'" + FnName + "' declares size parameter '" + SP +
-                  "', but no array in its parameters or return type has the size '" +
-                  SP + "', so no call can infer it.",
-              "Use it as an array size, e.g. 'T[" + SP + "]', or drop it from the "
-              "'<...>' list.")
+              "`" + FnName + "` declares the size parameter `" + SP +
+                  "`, but no array in its parameters or return type has the size `" +
+                  SP + "`, so no call can infer it.",
+              "Use it as an array size, as in `T[" + SP + "]`, or remove it from the "
+              "`<...>` list.")
         .raise();
     return;
   }
@@ -742,11 +780,10 @@ void Resolver::validateGenericParamsInferable(const FuncDefExprAST &Node,
         std::find(Sym.SizeParams.begin(), Sym.SizeParams.end(), TP) != Sym.SizeParams.end())
       continue;
     TypeError(toSourceLocation(Sym.DeclLoc), ErrCode::NothingToInfer,
-              "'" + FnName + "' declares type parameter '" + TP +
-                  "', but no parameter mentions it, so no call can infer it.",
-              "Type arguments are inferred from the arguments, and there is no "
-              "way to write them at a call. Use '" + TP +
-                  "' in a parameter type, or drop it from the '<...>' list.")
+              "`" + FnName + "` declares the type parameter `" + TP +
+                  "`, but no parameter mentions it, so no call can infer it.",
+              "Use `" + TP +
+                  "` in a parameter type, or remove it from the `<...>` list.")
         .raise();
     return;
   }
@@ -800,11 +837,10 @@ void Resolver::validateOperatorDecl(const ResolverFunctionSymbol &Sym) const {
       if (std::find(Bound.begin(), Bound.end(), TP) == Bound.end()) {
         GenericOperatorError(
             toSourceLocation(Sym.DeclLoc),
-            "'operator " + OpSpelling + "' declares type parameter '" + TP +
-                "', but no operand mentions it.",
-            "A generic operator's type arguments are inferred from its "
-            "operands (there is no way to write them at a use). Use '" + TP +
-                "' in an operand type, or drop it from the '<...>' list.")
+            "`operator " + OpSpelling + "` declares the type parameter `" + TP +
+                "`, but no operand mentions it.",
+            "Use `" + TP +
+                "` in an operand type, or remove it from the `<...>` list.")
             .raise();
         return;
       }
@@ -858,13 +894,11 @@ void Resolver::validateOperatorDecl(const ResolverFunctionSymbol &Sym) const {
       } else {
         GenericOperatorError(
             toSourceLocation(Sym.DeclLoc),
-            "'operator " + OpSpelling + "' is generic but none of its "
+            "`operator " + OpSpelling + "` is generic, but none of its "
             "operands is a type declared in this " +
                 (Sym.SourceModule.empty() ? "file" : "module") + ".",
-            "A bare type parameter matches every type, so the operator would "
-            "apply to types this module does not own. Make an operand a "
-            "struct or enum declared here, e.g. 'List<T>' in the module that "
-            "declares List.")
+            "Make an operand a struct or enum declared here, such as "
+            "`List<T>` in the module that declares `List`.")
             .raise();
       }
       return;
@@ -1326,13 +1360,13 @@ void detectStructLayoutCycles(
         for (size_t I = Start; I + 1 < PathNames.size(); ++I) {
           const StructField *F = findField(ByName.at(PathNames[I]), PathFields[I]);
           if (F)
-            Err.withRelated(F->NameLoc, "field '" + PathNames[I] + "::" +
-                                            F->Name + "' has type '" +
-                                            F->Type->getName() + "'");
+            Err.withRelated(F->NameLoc, "field `" + PathNames[I] + "::" +
+                                            F->Name + "` has type `" +
+                                            F->Type->getName() + "`");
         }
-        Err.withRelated(Field.NameLoc, "field '" + Name + "::" + Field.Name +
-                                          "' has type '" +
-                                          Field.Type->getName() + "'");
+        Err.withRelated(Field.NameLoc, "field `" + Name + "::" + Field.Name +
+                                          "` has type `" +
+                                          Field.Type->getName() + "`");
         Err.raise();
         continue;
       }

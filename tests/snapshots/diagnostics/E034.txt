@@ -2,10 +2,10 @@ tests/06_structs/fail_duplicate_empty_struct.tr (1 error)
 
 ── error at line 9, col 1 [E034 · duplicate type name]
 
-  A struct named 'Empty' is already declared.
-  Note: a type name can only be declared once per file; another file or module may reuse it.
+  I found a second struct named `Empty`.
+  A type name can be declared only once per file; another file or module may reuse it.
 
-  Hint: Rename one of the two 'Empty' declarations.
+  Hint: Rename one of the two `Empty` declarations.
 
   8 │ struct Empty {}
     │ - first declared here

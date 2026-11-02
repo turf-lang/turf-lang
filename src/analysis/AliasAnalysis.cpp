@@ -87,19 +87,19 @@ std::string validate(const Annotation &Ann,
                      const TurfTypePtr &ReturnType, bool /*IsExtern*/,
                      const std::vector<Annotation> & /*All*/) {
   if (Ann.Args.empty())
-    return "'@ownership' needs an argument: 'acquires' or 'releases: <parameter>'.";
+    return "`@ownership` needs an argument: `acquires` or `releases: <parameter>`.";
 
   // The pass reads the annotation off function CALLS; an instance method is
   // reached through `x.method()`, which it does not look at, so the claim
   // would silently check nothing. A static method (`T::m()`) is a call.
   if (!Params.empty() && Params[0].first == "self")
-    return "'@ownership' cannot go on an instance method yet: the double-free "
+    return "`@ownership` cannot go on an instance method yet: the double-free "
            "check reads it only from calls to plain functions and static "
            "methods.";
 
   const std::string WordsNotStrings =
-      "The arguments of '@ownership' are words, not strings: 'acquires' or "
-      "'releases: <parameter>'.";
+      "The arguments of `@ownership` are words, not strings: `acquires` or "
+      "`releases: <parameter>`.";
 
   for (const AnnotationArg &Arg : Ann.Args) {
     if (Arg.Key.empty()) {
@@ -107,23 +107,23 @@ std::string validate(const Annotation &Ann,
         return WordsNotStrings;
       if (Arg.Value == "acquires") {
         if (!ReturnType || !ReturnType->isPointer())
-          return "'@ownership(acquires)' says the function returns a fresh "
+          return "`@ownership(acquires)` says the function returns a fresh "
                  "allocation, but it does not return a pointer.";
         continue;
       }
       if (Arg.Value == "releases")
-        return "'releases' needs the parameter it frees: "
-               "'@ownership(releases: p)'.";
-      std::string Msg = "Unknown '@ownership' argument '" + Arg.Value + "'.";
+        return "`releases` needs the parameter it frees: "
+               "`@ownership(releases: p)`.";
+      std::string Msg = "I do not know the `@ownership` argument `" + Arg.Value + "`.";
       auto Near = SuggestionIndex::suggestVisible(Arg.Value, {"acquires", "releases"});
       if (!Near.empty())
-        Msg += " Did you mean '" + Near.front() + "'?";
-      return Msg + " Use 'acquires' or 'releases: <parameter>'.";
+        Msg += " Write `" + Near.front() + "` if you meant it.";
+      return Msg + " Use `acquires` or `releases: <parameter>`.";
     }
 
     if (Arg.Key != "releases")
-      return "Unknown '@ownership' argument '" + Arg.Key + ":'. The only keyed "
-             "argument is 'releases: <parameter>'.";
+      return "I do not know the `@ownership` argument `" + Arg.Key + ":`. The only keyed "
+             "argument is `releases: <parameter>`.";
     if (Arg.IsString)
       return WordsNotStrings;
     const std::pair<std::string, TurfTypePtr> *Param = nullptr;
@@ -131,15 +131,15 @@ std::string validate(const Annotation &Ann,
       if (P.first == Arg.Value)
         Param = &P;
     if (!Param)
-      return "'@ownership(releases: " + Arg.Value + ")' names '" + Arg.Value +
-             "', which is not a parameter of this function.";
+      return "`@ownership(releases: " + Arg.Value + ")` names `" + Arg.Value +
+             "`, which is not a parameter of this function.";
     if (!Param->second || !Param->second->isPointer())
-      return "'@ownership(releases: " + Arg.Value + ")' says the call frees '" +
-             Arg.Value + "', but that parameter is not a pointer.";
+      return "`@ownership(releases: " + Arg.Value + ")` says the call frees `" +
+             Arg.Value + "`, but that parameter is not a pointer.";
     // A `&T`/`&?T` is GC-managed: nothing frees it, so the claim cannot be true.
     if (Param->second->isReference() || Param->second->isNullableReference())
-      return "'@ownership(releases: " + Arg.Value + ")' says the call frees '" +
-             Arg.Value + "', but that parameter is a reference ('&T'), which "
+      return "`@ownership(releases: " + Arg.Value + ")` says the call frees `" +
+             Arg.Value + "`, but that parameter is a reference (`&T`), which "
              "the garbage collector owns; only a raw pointer is released.";
   }
   return "";

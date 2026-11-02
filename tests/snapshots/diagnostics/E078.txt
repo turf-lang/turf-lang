@@ -2,10 +2,9 @@ tests/36_numeric_semantics/fail_float_literal_overflow.tr (1 error)
 
 ── error at line 8, col 21 [E078 · float literal overflow]
 
-  Float literal is too large to represent -- it rounds to infinity.
-  '1e400' overflows 'double's range.
+  The literal `1e400` is too large for a `double`, which holds up to about 1.8e308.
 
-  Hint: 'double' (IEEE-754) can represent roughly up to 1.8e308. Did you mean a smaller value, or a different unit?
+  Hint: Write a smaller number, or measure in a larger unit.
 
   8 │     mut d: double = 1e400;
     │                     ^~~~~ this literal is too large for a `double`

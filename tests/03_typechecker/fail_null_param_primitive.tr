@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E056
-// EXPECT-DIAG: No matching overload!
+// EXPECT-DIAG: No overload of `foo` takes the argument types (null).
 fn foo(n: int): int {
     return n;
 }

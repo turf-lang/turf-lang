@@ -2,9 +2,9 @@ tests/18_operator_overload/fail_operator_builtin_pair_int.tr (1 error)
 
 ── error at line 5, col 1 [E028 · operator overload for two built-in types]
 
-  'operator +(int, int)' is not allowed.
+  I cannot accept `operator +(int, int)`, because both operand types are built in.
 
-  Hint: Both operand types are already built in -- overloading an operator between two builtin types would make ordinary arithmetic ambiguous. Operator overloads only make sense when at least one operand is a struct or 'string'.
+  Hint: Make at least one operand a struct or a `string`: overloading an operator between two built-in types would make ordinary arithmetic ambiguous.
 
   5 │ operator +(a: int, b: int): int {
     │ ^ both operands of this operator are built-in types

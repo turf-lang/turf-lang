@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E135
-// EXPECT-DIAG: This expression has type 'int', not a function
+// EXPECT-DIAG: This expression is an `int`, not a function, so I cannot call it.
 // Regression test: same crash as fail_call_literal.tr, via a call's result.
 fn helper(): int { return 1; }
 

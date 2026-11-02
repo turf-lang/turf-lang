@@ -118,7 +118,7 @@ properties that matter when you cross into C:
 `heap(expr)` copies the value of `expr` onto the GC heap and gives you a `&T`
 to the copy. It is a built-in, needs no import and no `unsafe`. `T` is any type
 with a size: a struct, a fixed array or a primitive. `heap` of a `void`
-expression is `E067` ("Cannot heap-allocate 'void'").
+expression is `E067` ("`heap(...)` has nothing to copy onto the heap: its argument is `void`").
 
 A reference from `&local` points into a stack frame that ends when the function
 returns; a reference from `heap(local)` points at a copy that lives as long as
@@ -177,13 +177,13 @@ counts as non-null on that path; using it where it might be null is `E081`:
 struct Node { val: int, next: &?Node }
 
 fn first_val(n: &?Node): int {
-    return n.val;       // E081: Possible null dereference: 'n' might be 'null' here
+    return n.val;       // E081: I cannot access the field `val` of `n`, which might be `null` here
 }
 ```
 
 ```text
-Possible null dereference: 'n' might be 'null' here, but you're accessing its 'val' field.
-Hint: Add a null check first, e.g. 'if (n != null) { ... }', and access '.val' only inside it.
+I cannot access the field `val` of `n`, which might be `null` here.
+Hint: Add a null check first, for example `if (n != null) { ... }`, and access `.val` only inside it.
 ```
 
 To turn a `&?T` into a `&T` you may cast with `to &T`, but only where the
@@ -194,7 +194,7 @@ compiler has seen the null test; elsewhere it is `E082`:
 struct Node { val: int, next: &?Node }
 
 fn force(n: &?Node): &Node {
-    return n to &Node;  // E082: Cannot cast 'n' to a non-null reference here -- it might be 'null'
+    return n to &Node;  // E082: I cannot cast `n` to a non-null reference here, because it might be `null`
 }
 ```
 
@@ -246,7 +246,7 @@ a plain address into the stack, which leads to the next section.
 A local variable lives until its function returns, then its stack slot is
 reused. A `&T` into it would then point at something else. TurfLang refuses
 the common ways of letting such a reference leave the function: it is
-`E086`, "A reference into this function's own local storage can't be ..."
+`E086`, "I cannot let a reference into this function's own local storage be ..."
 
 <!-- doc-example: fails E086 -->
 ```turflang
@@ -255,16 +255,13 @@ struct Counter { n: int }
 fn make(): &Counter {
     mut c: Counter = Counter::default();
     c.n = 1;
-    return &c;          // E086: ... can't be returned
+    return &c;          // E086: I cannot let it be returned
 }
 ```
 
 ```text
-A reference into this function's own local storage can't be returned -- it would
-dangle the moment this function returns.
-Hint: heap(value) copies it onto the GC heap first and gives you back a reference
-that outlives this function; or return/store a reference you received as a
-parameter instead of a local's.
+I cannot let a reference into this function's own local storage be returned, because it would dangle when this function returns.
+Hint: Copy it onto the GC heap first with `heap(value)`, which gives a reference that outlives this function, or return or store a reference you received as a parameter instead of a local's.
 ```
 
 The fix the diagnostic suggests is `heap(c)`. A reference you **received** as a
@@ -315,7 +312,7 @@ struct Node { val: int, next: &?Node }
 fn link(head: &Node): void {
     mut tmp: Node = Node::default();
     tmp.val = 7;
-    head.next = &tmp;   // E086: can't be stored into a field that outlives this function
+    head.next = &tmp;   // E086: I cannot let it be stored into a field that outlives this function
 }
 ```
 
@@ -327,7 +324,7 @@ struct Item { v: int }
 
 fn fill(into: list::List<&Item>): void {
     mut it: Item = Item::default();
-    into.push(&it);     // E086: can't be pushed into a collection
+    into.push(&it);     // E086: I cannot let it be pushed into a collection
 }
 ```
 
@@ -340,7 +337,7 @@ fn wrap(): Holder {
     mut it: Item = Item::default();
     mut h: Holder = Holder::default();
     h.item = &it;
-    return h;           // E086: can't be returned inside a struct or array value
+    return h;           // E086: I cannot let it be returned inside a struct or array value
 }
 ```
 
@@ -396,7 +393,7 @@ runs at run time:
 ```turflang
 fn main(): int {
     mut a: int[3] = [1, 2, 3];
-    printline(a[3]);        // E001: Array index out of bounds!
+    printline(a[3]);        // E001: I cannot use `a[3]`, because `a` has only 3 elements
     return 0;
 }
 ```

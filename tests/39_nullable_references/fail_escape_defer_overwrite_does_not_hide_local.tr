@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E086
-// EXPECT-DIAG: can't be returned
+// EXPECT-DIAG: be returned
 // `return p` returns `&n`: the deferred `p = heap(n)` runs only after the
 // value is computed. While a defer counted where it is written, this looked
 // like a heap return and compiled.

@@ -72,7 +72,7 @@ struct field was visible to any file that imported the module.
 
 **New.** A declaration is visible outside its file only if it is marked `pub`
 (`public` is the same word). Using a private one from another module is error
-**E088** (`Type 'Point' is private to module 'util'`). A single-file program is
+**E088** (``I cannot use the type `Point`, which is private to module `util` ``). A single-file program is
 not affected.
 
 A module `util.tr`:
@@ -120,7 +120,7 @@ compile in 1.x. In 2.0 the second file is rejected:
 ```text
 ── error at line 5, col 5 [E088 · private symbol access]
 
-  Type 'Point' is private to module 'util'.
+  I cannot use the type `Point`, which is private to module `util`.
 ```
 
 **Fix.** Mark the public interface of `util.tr` with `pub`: `pub struct Point`,
@@ -152,8 +152,7 @@ or a non-prelude module's functions because `json` imported them itself.
 Writing `import list::List;` also let you spell `list::List<int>`.
 
 **New.** A file may write `m::` only for a module it imports with a plain
-`import m;`. Anything else is error **E145** (`Module 'list' is not imported in
-this file`), and the hint is the exact line to add. `import list::List;` brings
+`import m;`. Anything else is error **E145** (``I cannot find an import of module `list` in this file``), and the hint is the exact line to add. `import list::List;` brings
 in the name `List` only, not the qualifier `list::`. The prelude modules (`io`,
 `math`, `sys`, `strings`, `int`, `double`, `bool`, `char`, `array`) need no
 import.
@@ -190,8 +189,7 @@ fn main(): int {
 **Old.** A module of yours named `list.tr` next to your main file silently
 shadowed the standard library's `list`.
 
-**New.** `import list;` with both present is error **E090** (`Module 'list' is
-ambiguous: 2 different files answer to that name`). The message names both
+**New.** `import list;` with both present is error **E090** (``I found 2 different files that answer to the module name `list` ``). The message names both
 files.
 
 **Fix.** Rename your module (`my_list.tr`) and import it by the new name. This
@@ -207,9 +205,9 @@ error:
 
 | Word | Error |
 |---|---|
-| `guess`, `defer`, `caller_location`, `try` | **E108** (`Expected a variable name after 'mutable' or 'immutable'`) |
-| `pub`, `public` | **E087** (`'pub' is a reserved word and can't be used as a name`) |
-| `_` | **E092** (`'_' is the wildcard pattern, so it can't be used as a name`) |
+| `guess`, `defer`, `caller_location`, `try` | **E108** (``I expected a variable name after `mutable` or `immutable` ``) |
+| `pub`, `public` | **E087** (`` `pub` is a reserved word, so I cannot use it as a name ``) |
+| `_` | **E092** (`` `_` is the wildcard pattern, so I cannot use it as a name ``) |
 
 The bare `_` could not be lexed as a name before, so no real 1.x program is
 affected by that one. In 2.0 `_` is the wildcard pattern in `compare`, and a name
@@ -243,8 +241,8 @@ fn main(): int {
 zeros and was readable straight away.
 
 **New.** A declared variable has no value until you assign one, and reading it
-before every path has assigned it is error **E008** (`You're using 'c' ... before
-it has a value`). The message names the type and suggests the fix.
+before every path has assigned it is error **E008** (``I cannot use `c` (type `Config`) before
+it has a value``). The message names the type and suggests the fix.
 
 <!-- doc-example: fails E008 -->
 ```turflang
@@ -293,8 +291,7 @@ gives the exact replacement.
 `int` (`99999999999999999999` became `9223372036854775807`), and a constant
 expression such as `9223372036854775807 + 1` wrapped.
 
-**New.** Both are error **E076** (`Integer literal is not representable in type
-'int'`), and the message states the type's range.
+**New.** Both are error **E076** (``The literal 99999999999999999999 does not fit in an `int`, which holds -9223372036854775808 .. 9223372036854775807``), and the message states the type's range.
 
 <!-- doc-example: fails E076 -->
 ```turflang
@@ -415,7 +412,7 @@ hit this was already returning a dangling reference. See
 
 **Old.** `struct Node { next: Node }` compiled, then crashed when used.
 
-**New.** Error **E069** (`struct 'Node' cannot contain itself by value`), even
+**New.** Error **E069** (``I cannot let the struct `Node` contain itself by value``), even
 if the struct is never instantiated; the message prints the cycle.
 
 <!-- doc-example: fails E069 -->
@@ -461,8 +458,7 @@ This is a design choice, so no tool does it. See
 Three separate changes, all about raw pointers (`T*`, `ptr`).
 
 **Raw pointers in function signatures.** In 1.x a function whose parameter is a
-raw pointer could not be written at all; in 2.0 it is error **E130** (`Raw
-pointer in function signature`), except in an `extern fn` and in a file that
+raw pointer could not be written at all; in 2.0 it is error **E130** (``The parameter `p` of `first` cannot have the raw pointer type `int*` ``), except in an `extern fn` and in a file that
 begins with `unsafe module;`. That declaration is honored for files under the
 compiler's install root, and elsewhere only when the compile passes
 `--allow-unsafe-modules` (for a dependency in a project, the root manifest's
@@ -491,7 +487,7 @@ outside an `unsafe { }` block (or an `unsafe module;`) is error **E130**
 
 **Indexing a collection's buffer.** 1.x code could reach into a collection with
 `l.data[i]`, unchecked. The buffer is private in 2.0 and the compiler rejects the
-access (**E068**, `Struct 'list::List' has no field named 'data'`). Use the
+access (**E068**, ``I cannot find a field named `data` on the struct `list::List` ``). Use the
 checked accessors:
 
 ```turflang
@@ -518,7 +514,7 @@ compiler.
 
 **New.** An integer literal is accepted for an `int32` when its value is
 representable. `++`, `--` and compound assignment (`+=` and so on) on an `int32`
-are a clear error, **E126** (`postfix '++' is not supported on 'int32'`).
+are a clear error, **E126** (``I cannot use `++` on an `int32`: arithmetic on an `int32` gives an `int` ``).
 
 <!-- doc-example: fails E126 -->
 ```turflang
@@ -554,10 +550,9 @@ compare, a `matches true:` arm could silently never match, so a compare that
 **New.** Without an `otherwise`:
 
 - a `bool` compare must have both `matches true:` and `matches false:`, or it is
-  error **E093** (`Non-exhaustive bool comparison`);
+  error **E093** (``This `compare` on `bool` does not cover every case ``);
 - a compare over the error bound by `recover as err run` must end with
-  `otherwise` or `matches _:`, or it is **E093** (`Non-exhaustive comparison on
-  '<error>'`), because such a value can be any error a callee returns.
+  `otherwise` or `matches _:`, or it is **E093** (``This `compare` on `error` does not cover every case ``), because such a value can be any error a callee returns.
 
 <!-- doc-example: fails E093 -->
 ```turflang
@@ -633,10 +628,10 @@ tidied it. Every item here is a compile error in an unmigrated program.
 
 | 1.x | 2.0 | What you see |
 |---|---|---|
-| `c.isDigit()` `isUpper` `isLower` `isAlpha` `isAlphaNumeric` `isPunctuation` `isWhitespace` `toUpper` `toLower` on a `char` | `is_digit` `is_upper` `is_lower` `is_alpha` `is_alphanumeric` `is_punctuation` `is_whitespace` `to_upper` `to_lower` | **E131** (`No such method`) |
-| `Map.indexOf`, `Set.indexOf` | `index_of` | **E054** (`has no method named 'indexOf'`), with the new name as the hint |
+| `c.isDigit()` `isUpper` `isLower` `isAlpha` `isAlphaNumeric` `isPunctuation` `isWhitespace` `toUpper` `toLower` on a `char` | `is_digit` `is_upper` `is_lower` `is_alpha` `is_alphanumeric` `is_punctuation` `is_whitespace` `to_upper` `to_lower` | **E131** (``I cannot call the method `isDigit` on a `char`: only a struct has methods``) |
+| `Map.indexOf`, `Set.indexOf` | `index_of` | **E054** (``I cannot find a method named `indexOf` on the struct `map::Map` ``), with the new name as the hint |
 | `Map.tryGet` | `try_get` | **E054** |
-| `import list::list_sort;` and `list_binary_search`, `list_find` | `l.sort(cmp)`, `l.binary_search(x, cmp)`, `l.find(pred)` | **E030** (`Module 'list' has nothing named 'list_sort'`) |
+| `import list::list_sort;` and `list_binary_search`, `list_find` | `l.sort(cmp)`, `l.binary_search(x, cmp)`, `l.find(pred)` | **E030** (``I cannot find `list_sort` in the module `list` ``) |
 | `io::write_string(path, s): bool` | `: !void`, fails with `FileError::WriteFailed(path)` | **E066** / **E124** |
 | `fs::mkdir`, `fs::remove_file`, `fs::remove_dir`: `bool` | `!void`, fail with `FsError::MkdirFailed` / `RemoveFileFailed` / `RemoveDirFailed` (each carries the path) | **E124** / **E066** |
 | `os::set_env(...): bool` | `!void`, fails with `OsError::SetEnvFailed(name)` | type error where the `bool` was used |
@@ -723,8 +718,7 @@ Several small changes to error handling:
 - `try` is a reserved word ([Section 4](#4-new-reserved-words)).
 - `io::FileError` variants now carry the path, and `json::JsonError` variants
   carry the byte offset. Constructing one by hand needs the argument, and naming
-  a payload variant without it is error **E096** (`declares payload fields ...
-  so it can't be used as a value on its own`). Comparing with `==` is
+  a payload variant without it is error **E096** (``I cannot use `FileError::NotFound` on its own, because it declares payload fields (path: string)``). Comparing with `==` is
   unchanged: `e == io::FileError::NotFound` compares the variant only.
 - `return f();` is now legal when `f` returns a matching `!T`. It was an error
   before; code that worked around it with a `recover` that re-returned can be

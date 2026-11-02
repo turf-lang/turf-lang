@@ -81,8 +81,8 @@ An unknown type in the signature is `E042`, like anywhere else.
 ### Redeclaring a function
 
 Two declarations of the same C function are fine if their signatures are
-identical, and an error (`E020`, "conflicts with an earlier declaration of the
-same name") if they differ in arity, a parameter type or the return type. This
+identical, and an error (`E020`, "I found two `extern fn strlen` declarations with different
+signatures") if they differ in arity, a parameter type or the return type. This
 includes the functions the standard library already declares: `strlen` above
 is also declared by `sys`, with the same signature, so it is accepted;
 declaring `strlen` with a different return type is `E020`.
@@ -172,7 +172,7 @@ fn main(): int {
     unsafe {
         mut p: ptr = malloc(8);
         free(p);
-        free(p);          // E017: Double free detected for 'p'
+        free(p);          // E017: I found a second free of `p`
     }
     return 0;
 }
@@ -189,7 +189,7 @@ fn main(): int {
     unsafe {
         mut p: int* = malloc(8);
         free(p);
-        p[0] = 1;         // E018: you're using memory from 'p' after it was freed
+        p[0] = 1;         // E018: I cannot use the memory of `p` after it was freed
     }
     return 0;
 }
@@ -275,12 +275,11 @@ there is no `*p`.
 A raw pointer type can be used only where the compiler has been told you
 accept that: inside an `unsafe { }` block ([section 4](#4-unsafe--)), in a
 file that begins `unsafe module;` ([section 5](#5-unsafe-module)), or in an
-`extern fn` signature. Anywhere else it is `E130` ("Unsafe pointer use!"):
+`extern fn` signature. Anywhere else it is `E130`:
 
 ```text
-Raw pointer type 'ptr' cannot be used outside an 'unsafe' block.
-Hint: Wrap this in 'unsafe { }', or use a safe reference ('&T') instead if you
-don't actually need a possibly-null raw pointer.
+I cannot use the raw pointer type `ptr` outside an `unsafe` block.
+Hint: Wrap this in `unsafe { }`, or use the safe reference `&T` if it is never null.
 ```
 
 Four kinds of use are gated:
@@ -354,7 +353,7 @@ the standard library, and a function in a file that declares
 <!-- doc-example: fails E130 -->
 ```turflang
 unsafe {
-    fn takes(p: ptr): int {       // E130: Raw pointer in function signature!
+    fn takes(p: ptr): int {       // E130: the parameter `p` of `takes` cannot have the raw pointer type `ptr`
         return 0;
     }
 }
@@ -363,10 +362,8 @@ fn main(): int { return 0; }
 ```
 
 ```text
-Function 'takes' cannot use raw pointer type 'ptr' for parameter 'p'.
-Hint: Raw pointer types are never allowed in an ordinary function's signature,
-even inside 'unsafe { }' -- use '&T' instead. Only 'extern fn' bindings and
-files that begin with 'unsafe module;' may use raw pointers here.
+The parameter `p` of `takes` cannot have the raw pointer type `ptr`.
+Hint: Use a reference, `&T`, instead: only an `extern fn` and a file that begins with `unsafe module;` may have raw pointers in a signature, even inside `unsafe { }`.
 ```
 
 ### `self`
@@ -483,8 +480,7 @@ honored only when someone has agreed to it:
   ```text
   $ turfc pair.tr
   ── error at line 4, col 1 [E130 · raw pointer outside unsafe]
-    Unsafe pointer use!
-    Raw pointer type 'Pair*' cannot be used outside an 'unsafe' block.
+    I cannot use the raw pointer type `Pair*` outside an `unsafe` block.
   $ turfc pair.tr --allow-unsafe-modules
   ```
 
@@ -567,7 +563,7 @@ type forges an address and is `E130` outside `unsafe { }`: `0 to &N`,
 ```turflang
 fn main(): int {
     mut x: int = 5;
-    mut q: &int = x to &int;      // E130: Unsafe reference conversion!
+    mut q: &int = x to &int;      // E130: I cannot convert an `int` to the reference `&int` outside an `unsafe` block
     return 0;
 }
 ```

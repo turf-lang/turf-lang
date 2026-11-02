@@ -2,8 +2,7 @@ tests/15_enums/fail_duplicate_matches_int_literal.tr (1 error)
 
 ── error at line 15, col 9 [E133 · duplicate matches pattern]
 
-  Duplicate pattern!
-  Duplicate 'matches' pattern: this value is already handled by an earlier arm in this compare block, so this arm can never run.
+  An earlier arm of this `compare` already matches this pattern, so this arm never runs.
 
   Hint: Remove the duplicate arm, or combine it with the earlier one by stacking (`matches A:` then `matches B:` sharing one body).
 

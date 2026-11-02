@@ -429,7 +429,7 @@ bool ParseTypeArgList(std::vector<TurfTypePtr> &TypeArgs) {
       break;
     }
     if (Parser().CurTok != ',') {
-      SyntaxError(Lex().CurLoc, ErrCode::MissingComma, "Expected '>' or ',' in generic type").raise();
+      SyntaxError(Lex().CurLoc, ErrCode::MissingComma, "I expected a `>` or a `,` in this generic type.").raise();
       return false;
     }
     getNextToken(); // consume ','
@@ -445,8 +445,8 @@ TurfTypePtr ParseType() {
   ParseRecursionGuard RecursionGuard;
   if (RecursionGuard.tooDeep()) {
     LogErrorAt(Lex().CurLoc, ErrCode::NestingTooDeep,
-               "Type nested too deeply to parse."
-               "\n  Hint: check for unbalanced '<', '[', or '!'.", SLM::ErrorCategory::SYNTAX_ERROR);
+               "I cannot parse this type because it is nested too deeply."
+               "\n  Hint: Check for an unclosed `<`, `[` or `!`.", SLM::ErrorCategory::SYNTAX_ERROR);
     return nullptr;
   }
 
@@ -486,8 +486,8 @@ TurfTypePtr ParseType() {
     getNextToken(); // consume '('
     if (Parser().CurTok != '&' && Parser().CurTok != TOK_FN) {
       SyntaxError(OpenLoc, ErrCode::ExpectedType,
-                  "Parentheses in a type are only for an array of references "
-                  "or of functions, e.g. (&Node)[4] or (fn(int): int)[2].",
+                  "I accept parentheses in a type only around an array of references "
+                  "or of functions, as in `(&Node)[4]` or `(fn(int): int)[2]`.",
                   "Write the type without the parentheses, e.g. `int[4]`.")
           .raise();
       return nullptr;
@@ -497,17 +497,17 @@ TurfTypePtr ParseType() {
       return nullptr;
     if (Parser().CurTok != ')') {
       SyntaxError(Lex().CurLoc, ErrCode::UnclosedDelimiter,
-                  "Expected ')' to close the parenthesised type, "
-                  "e.g. (&Node)[4] or (fn(int): int)[2].")
+                  "I expected a `)` to close the parenthesised type, "
+                  "as in `(&Node)[4]` or `(fn(int): int)[2]`.")
           .raise();
       return nullptr;
     }
     getNextToken(); // consume ')'
     if (Parser().CurTok != '[') {
       SyntaxError(OpenLoc, ErrCode::ExpectedType,
-                  "Parentheses in a type are only for an array of references "
-                  "or of functions; expected '[' after ')'.",
-                  "A single one needs no parentheses: write `" +
+                  "I accept parentheses in a type only around an array of references "
+                  "or of functions, so I expected a `[` after the `)`.",
+                  "Remove the parentheses around a single type and write `" +
                       Elem->getName() + "`.")
           .raise();
       return nullptr;
@@ -540,7 +540,7 @@ TurfTypePtr ParseType() {
   if (Parser().CurTok == TOK_FN) {
     getNextToken(); // consume 'fn'
     if (Parser().CurTok != '(') {
-      SyntaxError(Lex().CurLoc, ErrCode::MissingOpeningDelimiter, "Expected '(' after 'fn' in a function type").raise();
+      SyntaxError(Lex().CurLoc, ErrCode::MissingOpeningDelimiter, "I expected a `(` after `fn` in a function type.").raise();
       return nullptr;
     }
     getNextToken(); // consume '('
@@ -559,12 +559,12 @@ TurfTypePtr ParseType() {
       }
     }
     if (Parser().CurTok != ')') {
-      SyntaxError(Lex().CurLoc, ErrCode::UnclosedDelimiter, "Expected ')' to close a function type's parameter list").raise();
+      SyntaxError(Lex().CurLoc, ErrCode::UnclosedDelimiter, "I expected a `)` to close the parameter list of this function type.").raise();
       return nullptr;
     }
     getNextToken(); // consume ')'
     if (Parser().CurTok != TOK_COLON) {
-      SyntaxError(Lex().CurLoc, ErrCode::MissingColon, "Expected ':' before a function type's return type").raise();
+      SyntaxError(Lex().CurLoc, ErrCode::MissingColon, "I expected a `:` before the return type of this function type.").raise();
       return nullptr;
     }
     getNextToken(); // consume ':'
@@ -580,7 +580,7 @@ TurfTypePtr ParseType() {
       Parser().CurTok != TOK_TYPE_CHAR &&
       Parser().CurTok != TOK_TYPE_STRING && Parser().CurTok != TOK_TYPE_VOID &&
       Parser().CurTok != TOK_PTR && Parser().CurTok != TOK_GUESS) {
-    SyntaxError(Lex().CurLoc, ErrCode::ExpectedType, "Expected a type name").raise();
+    SyntaxError(Lex().CurLoc, ErrCode::ExpectedType, "I expected a type name.").raise();
     return nullptr;
   }
 
@@ -622,10 +622,10 @@ TurfTypePtr ParseType() {
     // local-declaration parse (ParseLetStatement) sets the flag.
     if (!Parser().AllowGuessType) {
       LogErrorAt(Lex().CurLoc, ErrCode::MissingInitializer,
-                 "'guess' needs an initializer to infer from, so it can only "
-                 "declare a local variable."
-                 "\n  Hint: a parameter, return type or struct field has no "
-                 "initializer; write its type, e.g. `x: int`.",
+                 "I cannot infer a type with `guess` here because there is no "
+                 "initializer, so I accept `guess` only on a local variable."
+                 "\n  Hint: Write the type of a parameter, return type or struct "
+                 "field instead, for example `x: int`.",
                  SLM::ErrorCategory::DECLARATION);
       getNextToken(); // consume 'guess' so the caller's recovery starts after it
       return nullptr;
@@ -649,7 +649,7 @@ TurfTypePtr ParseType() {
   if (Parser().CurTok == TOK_SCOPE) {
     getNextToken(); // eat '::'
     if (Parser().CurTok != TOK_IDENTIFIER) {
-      SyntaxError(Lex().CurLoc, ErrCode::ExpectedType, "Expected a type name after '::'").raise();
+      SyntaxError(Lex().CurLoc, ErrCode::ExpectedType, "I expected a type name after `::`.").raise();
       return nullptr;
     }
     // The qualifier as written may be an alias for a dependency module's
@@ -685,14 +685,14 @@ TurfTypePtr ParseType() {
         // exact-value path a value-position literal takes.
         Size = static_cast<int>(strtoll(Lex().NumLitClean.c_str(), nullptr, Lex().NumLitRadix));
         if (Size <= 0) {
-          SyntaxError(Lex().CurLoc, ErrCode::InvalidArraySize, "Array size must be positive",
-                    "An array's size counts its slots: write a positive whole number, e.g. int[5].").raise();
+          SyntaxError(Lex().CurLoc, ErrCode::InvalidArraySize, "I need an array size greater than 0.",
+                    "Write a positive whole number as the array size, as in `int[5]`.").raise();
           return nullptr;
         }
         getNextToken();
       }
       if (Parser().CurTok != ']') {
-        SyntaxError(Lex().CurLoc, ErrCode::UnclosedDelimiter, "Expected ']' to close array size").raise();
+        SyntaxError(Lex().CurLoc, ErrCode::UnclosedDelimiter, "I expected a `]` to close the array size.").raise();
         return nullptr;
       }
       getNextToken();
@@ -748,8 +748,8 @@ static TurfTypePtr ParseTrailingArrayDims(TurfTypePtr Base) {
       Size = static_cast<int>(strtoll(Lex().NumLitClean.c_str(), nullptr, Lex().NumLitRadix));
       if (Size <= 0) {
         SyntaxError(Lex().CurLoc, ErrCode::InvalidArraySize,
-                    "Array size must be a positive integer (greater than 0)",
-                    "An array's size counts its slots: write a positive whole number, e.g. int[5].")
+                    "I need an array size greater than 0.",
+                    "Write a positive whole number as the array size, as in `int[5]`.")
             .raise();
         return nullptr;
       }
@@ -758,14 +758,14 @@ static TurfTypePtr ParseTrailingArrayDims(TurfTypePtr Base) {
     if (Parser().CurTok != ']') {
       if (Parser().CurTok == TOK_IDENTIFIER)
         SyntaxError(Lex().CurLoc, ErrCode::InvalidArraySize,
-                    "'" + Lex().IdentifierStr + "' is not a size: an array's size is a "
+                    "I cannot use `" + Lex().IdentifierStr + "` as an array size, which must be a "
                     "positive whole number or a size parameter.",
-                    "Write a number, e.g. int[5]. A generic function can take "
-                    "the size as a parameter: 'fn<T, " + Lex().IdentifierStr +
-                        ": size> f(a: T[" + Lex().IdentifierStr + "])'.")
+                    "Write a number, as in `int[5]`. A generic function can take "
+                    "the size as a parameter: `fn<T, " + Lex().IdentifierStr +
+                        ": size> f(a: T[" + Lex().IdentifierStr + "])`.")
             .raise();
       else
-        SyntaxError(Lex().CurLoc, ErrCode::UnclosedDelimiter, "Expected ']' to close array size — e.g. mut arr: int[5];")
+        SyntaxError(Lex().CurLoc, ErrCode::UnclosedDelimiter, "I expected a `]` to close the array size, as in `mut arr: int[5];`.")
             .raise();
       return nullptr;
     }
@@ -819,7 +819,7 @@ static std::unique_ptr<ExprAST> ParseParenExpr() {
 
   if (Parser().CurTok != ')') {
     SyntaxError(Lex().CurLoc, ErrCode::UnclosedDelimiter,
-                "Missing closing ')' — every '(' must have a matching ')'")
+                "I did not find the `)` that closes this `(`.")
         .raise();
     return nullptr;
   }
@@ -834,18 +834,18 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
   default:
 
     LogErrorAt(Lex().CurLoc, ErrCode::UnexpectedToken,
-               "Unexpected token — expected a value, variable name, or "
-                       "expression here."
-                       "\n  Hint: Remove the stray token, or put a value there: a "
-                       "number, a name, or a call such as `f(x)`. After a "
-                       "complete expression an operator (`+`, `==`) comes next.", SLM::ErrorCategory::SYNTAX_ERROR);
+               "I expected an expression here but found an unexpected token."
+                       "\n  Hint: Remove the stray token, or write an expression "
+                       "there, such as a number, a name or a call like `f(x)`. "
+                       "After a complete expression, write an operator such as "
+                       "`+` or `==`.", SLM::ErrorCategory::SYNTAX_ERROR);
     return nullptr;
 
   case TOK_SIZEOF: {
     SourceLocation Loc = Lex().CurLoc;
     getNextToken(); // eat sizeof
     if (Parser().CurTok != '(') {
-      LogErrorAt(Lex().CurLoc, ErrCode::MissingOpeningDelimiter, "Expected '(' after sizeof", SLM::ErrorCategory::SYNTAX_ERROR);
+      LogErrorAt(Lex().CurLoc, ErrCode::MissingOpeningDelimiter, "I expected a `(` after `sizeof`.", SLM::ErrorCategory::SYNTAX_ERROR);
       return nullptr;
     }
     getNextToken(); // eat '('
@@ -853,7 +853,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     if (!Ty)
       return nullptr;
     if (Parser().CurTok != ')') {
-      LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "Expected ')' to close sizeof", SLM::ErrorCategory::SYNTAX_ERROR);
+      LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "I expected a `)` to close `sizeof`.", SLM::ErrorCategory::SYNTAX_ERROR);
       return nullptr;
     }
     getNextToken(); // eat ')'
@@ -894,11 +894,11 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
               TypeIdentity::make(CurrentParseModule(), IdName))) {
         if (dynamic_cast<TurfStructType *>(T.get())) {
           LogErrorAt(IdLoc, ErrCode::RemovedSyntax,
-                     "'" + IdName + " { ... }' is no longer valid syntax "
-                             "for constructing a struct."
-                             "\n  Hint: use '" + IdName + "::new(...)' (if '" +
-                             IdName + "' declares a constructor) or '" + IdName +
-                             "::default()' instead.", SLM::ErrorCategory::DECLARATION);
+                     "`" + IdName + " { ... }` is not valid syntax for "
+                             "constructing a struct."
+                             "\n  Hint: Write `" + IdName + "::new(...)` if `" +
+                             IdName + "` declares a constructor, or `" + IdName +
+                             "::default()`.", SLM::ErrorCategory::DECLARATION);
           return nullptr;
         }
       }
@@ -924,8 +924,8 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
       bool SawTypeKeyword = false;
       if (TypeArgListFollower(&SawTypeKeyword) == '(' && SawTypeKeyword) {
         SyntaxError(Lex().CurLoc, ErrCode::ExpectedKeyword,
-                    "Type arguments of a generic function are written after "
-                    "'::': '" + IdName + "<' starts a comparison.",
+                    "I read `" + IdName + "<` as a comparison, but the type arguments of a "
+                    "generic function are written after `::`.",
                     "Write `" + IdName + "::<...>(...)`, e.g. `" + IdName +
                         "::<int>(x)`, or leave the type arguments out and let "
                         "the arguments decide them.")
@@ -958,7 +958,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
       getNextToken(); // eat '::'
       if (LeftType) {
         if (Parser().CurTok != TOK_IDENTIFIER) {
-          LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "Expected a name after '::'", SLM::ErrorCategory::DECLARATION);
+          LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "I expected a name after `::`.", SLM::ErrorCategory::DECLARATION);
           return nullptr;
         }
         auto Node = std::make_unique<ScopeAccessExprAST>(IdLoc, IdName, IdLoc,
@@ -968,7 +968,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
         return Node;
       }
       if (Parser().CurTok != TOK_IDENTIFIER) {
-        LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "Expected a name after '::'", SLM::ErrorCategory::DECLARATION);
+        LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "I expected a name after `::`.", SLM::ErrorCategory::DECLARATION);
         return nullptr;
       }
       std::string RightName = Lex().IdentifierStr;
@@ -991,11 +991,11 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
                 TypeIdentity::make(IdName, RightName))) {
           if (dynamic_cast<TurfStructType *>(T.get())) {
             LogErrorAt(IdLoc, ErrCode::RemovedSyntax,
-                       "'" + IdName + "::" + RightName + " { ... }' is no "
-                               "longer valid syntax for constructing a struct."
-                               "\n  Hint: use '" + IdName + "::" + RightName +
-                               "::new(...)' or '" + IdName + "::" + RightName +
-                               "::default()' instead.", SLM::ErrorCategory::DECLARATION);
+                       "`" + IdName + "::" + RightName + " { ... }` is not "
+                               "valid syntax for constructing a struct."
+                               "\n  Hint: Write `" + IdName + "::" + RightName +
+                               "::new(...)` or `" + IdName + "::" + RightName +
+                               "::default()`.", SLM::ErrorCategory::DECLARATION);
             return nullptr;
           }
         }
@@ -1010,7 +1010,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
           return nullptr;
         getNextToken(); // eat '::' (TypeArgsThenScopeAhead() saw it)
         if (Parser().CurTok != TOK_IDENTIFIER) {
-          LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "Expected a name after '::'", SLM::ErrorCategory::DECLARATION);
+          LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "I expected a name after `::`.", SLM::ErrorCategory::DECLARATION);
           return nullptr;
         }
         auto Node = std::make_unique<ScopeAccessExprAST>(
@@ -1042,7 +1042,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
       if (Parser().CurTok == TOK_SCOPE) {
         getNextToken(); // eat second '::'
         if (Parser().CurTok != TOK_IDENTIFIER) {
-          LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "Expected a variant name after '::'", SLM::ErrorCategory::DECLARATION);
+          LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "I expected a variant name after `::`.", SLM::ErrorCategory::DECLARATION);
           return nullptr;
         }
         std::string VariantName = Lex().IdentifierStr;
@@ -1064,8 +1064,8 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
         Parser().CurTok == TOK_IDENTIFIER &&
         !(Symbols() && Symbols()->LookupSymbol(IdName))) {
       TurfError Err(IdLoc,
-                    "'" + IdName + "' is not a TurfLang keyword: a function "
-                    "declaration starts with 'fn'.",
+                    "`" + IdName + "` is not a Turf keyword, and a function "
+                    "declaration starts with `fn`.",
                     "Write `fn` instead of `" + IdName + "`.");
       Err.withCode(ErrCode::UnknownKeyword);
       Err.withTokenFixIt(IdLoc, IdName, "fn").raise();
@@ -1154,12 +1154,12 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
       if (Parser().CurTok == ',') {
         getNextToken(); // eat ','
       } else if (Parser().CurTok != ']') {
-        LogErrorAt(Lex().CurLoc, ErrCode::MissingComma, "Expected ',' or ']' in array literal", SLM::ErrorCategory::ARRAY_ERROR);
+        LogErrorAt(Lex().CurLoc, ErrCode::MissingComma, "I expected a `,` or a `]` in this array literal.", SLM::ErrorCategory::ARRAY_ERROR);
         return nullptr;
       }
     }
     if (Parser().CurTok != ']') {
-      LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "Expected ']' to close array literal", SLM::ErrorCategory::ARRAY_ERROR);
+      LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "I expected a `]` to close this array literal.", SLM::ErrorCategory::ARRAY_ERROR);
       return nullptr;
     }
     getNextToken(); // eat ']'
@@ -1192,12 +1192,12 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     std::string IdName = Lex().IdentifierStr;
     getNextToken();
     LogErrorAt(KeywordLoc, ErrCode::UnexpectedToken,
-               "Unexpected '" + IdName +
-                   "' keyword here — expected a value or expression."
-                   "\n  Hint: '" +
+               "I expected an expression here but found the keyword `" + IdName +
+                   "`."
+                   "\n  Hint: Move `" +
                    IdName +
-                   "' is a control-flow keyword; it can't appear standalone in "
-                   "an expression.", SLM::ErrorCategory::CONTROL_FLOW);
+                   "` to the start of a statement, because it controls the "
+                   "flow of a block and is not part of an expression.", SLM::ErrorCategory::CONTROL_FLOW);
     return nullptr;
   }
 
@@ -1213,15 +1213,15 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     // type arguments are written instead of leaving the user to guess from
     // "begin a declaration".
     LogErrorAt(Lex().CurLoc, ErrCode::ExpectedKeyword,
-               "Expected 'mutable' or 'immutable' to begin a declaration."
-               "\n  Hint: if this is a generic type argument in an expression, "
-               "a generic struct's go before '::' (`List<int>::default()`) and "
+               "I expected `mutable` or `immutable` to begin a declaration."
+               "\n  Hint: To write a generic type argument in an expression, put a "
+               "generic struct's before `::` (`List<int>::default()`) and "
                "a generic function's after it (`identity::<int>(x)`).",
                SLM::ErrorCategory::DECLARATION);
     return nullptr;
 
   case TOK_TYPE_VOID:
-    SyntaxError(Lex().CurLoc, ErrCode::VoidTypeNotAllowed, "'void' may only be used as a function return type")
+    SyntaxError(Lex().CurLoc, ErrCode::VoidTypeNotAllowed, "I accept `void` only as a function return type.")
         .raise();
     return nullptr;
 
@@ -1246,8 +1246,8 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     if (Line && Line->compare(MutLoc.Col - 1, 7, "mutable") == 0)
       Word = "mutable";
     TurfError Err(MutLoc,
-                  "A value declared outside a function can't be '" + Word +
-                      "': a module-level value is a constant.",
+                  "I cannot accept `" + Word +
+                      "` outside a function, because a module-level variable is a constant.",
                   "Write `immut` for a module constant (`pub immut` to share it), "
                   "or move the variable into the function that changes it.");
     Err.withCode(ErrCode::MisplacedVisibility);
@@ -1446,8 +1446,8 @@ std::unique_ptr<ExprAST> ParseExpression() {
   ParseRecursionGuard RecursionGuard;
   if (RecursionGuard.tooDeep()) {
     LogErrorAt(Lex().CurLoc, ErrCode::NestingTooDeep,
-               "Expression nested too deeply to parse."
-               "\n  Hint: check for unbalanced '(', '[', or '{'.", SLM::ErrorCategory::SYNTAX_ERROR);
+               "I cannot parse this expression because it is nested too deeply."
+               "\n  Hint: Check for an unclosed `(`, `[` or `{`.", SLM::ErrorCategory::SYNTAX_ERROR);
     return nullptr;
   }
 
@@ -1481,7 +1481,7 @@ std::unique_ptr<ExprAST> ParseExpression() {
     if (!ThenExpr)
       return nullptr;
     if (Parser().CurTok != TOK_OTHERWISE) {
-      LogErrorAt(Lex().CurLoc, ErrCode::ExpectedKeyword, "Expected 'otherwise' after 'give' expression in ternary", SLM::ErrorCategory::CONTROL_FLOW);
+      LogErrorAt(Lex().CurLoc, ErrCode::ExpectedKeyword, "I expected `otherwise` after the `give` expression of this ternary.", SLM::ErrorCategory::CONTROL_FLOW);
       return nullptr;
     }
     SourceLocation ElseLoc = Lex().CurLoc;
@@ -1529,9 +1529,8 @@ std::unique_ptr<ExprAST> ParseExpression() {
       getNextToken(); // consume 'as'
       if (Parser().CurTok != TOK_IDENTIFIER) {
         LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName,
-                   "Expected an identifier after 'recover as' to "
-                           "bind the failing error value."
-                           "\n  Hint: `recover as err run { ... }`.", SLM::ErrorCategory::CONTROL_FLOW);
+                   "I expected a name after `recover as` to bind the error."
+                           "\n  Hint: Write `recover as err run { ... }`.", SLM::ErrorCategory::CONTROL_FLOW);
         return nullptr;
       }
       std::string BoundName = Lex().IdentifierStr;
@@ -1539,9 +1538,9 @@ std::unique_ptr<ExprAST> ParseExpression() {
 
       if (Parser().CurTok != TOK_RUN) {
         LogErrorAt(Lex().CurLoc, ErrCode::ExpectedKeyword,
-                   "Expected 'run' after 'recover as " + BoundName +
-                               "'."
-                               "\n  Hint: `recover as " +
+                   "I expected `run` after `recover as " + BoundName +
+                               "`."
+                               "\n  Hint: Write `recover as " +
                                BoundName + " run { ... }`.", SLM::ErrorCategory::CONTROL_FLOW);
         return nullptr;
       }
@@ -1556,9 +1555,9 @@ std::unique_ptr<ExprAST> ParseExpression() {
     }
 
     LogErrorAt(Lex().CurLoc, ErrCode::ExpectedKeyword,
-               "Expected 'produce', 'run', or 'as' after 'recover'."
-                       "\n  Hint: `recover produce value`, "
-                       "`recover run { ... }`, or "
+               "I expected `produce`, `run` or `as` after `recover`."
+                       "\n  Hint: Write `recover produce value`, "
+                       "`recover run { ... }` or "
                        "`recover as err run { ... }`.", SLM::ErrorCategory::CONTROL_FLOW);
     return nullptr;
   }
@@ -1597,8 +1596,8 @@ static std::unique_ptr<ExprAST> ParseUnaryImpl() {
   ParseRecursionGuard RecursionGuard;
   if (RecursionGuard.tooDeep()) {
     LogErrorAt(Lex().CurLoc, ErrCode::NestingTooDeep,
-               "Expression nested too deeply to parse."
-               "\n  Hint: check for a runaway chain of unary operators.", SLM::ErrorCategory::SYNTAX_ERROR);
+               "I cannot parse this expression because it is nested too deeply."
+               "\n  Hint: Remove the extra unary operators from the long chain.", SLM::ErrorCategory::SYNTAX_ERROR);
     return nullptr;
   }
 

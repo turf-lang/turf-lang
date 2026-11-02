@@ -2,10 +2,9 @@ tests/06_structs/fail_local_generic_struct.tr (1 error)
 
 ── error at line 7, col 5 [E151 · generic struct declared inside a function]
 
-  Generic struct inside a function!
-  'Box' is declared inside a function, so it can't have type parameters.
+  I cannot give `Box` type parameters, because it is declared inside a function.
 
-  Hint: Move 'struct Box<...>' to the top level of the file, or drop its type parameters and give its fields concrete types.
+  Hint: Move `struct Box<...>` to the top level of the file, or remove its type parameters and give its fields concrete types.
 
   7 │     struct Box<T> {
     │     ^~~~~~ this generic struct is inside a function

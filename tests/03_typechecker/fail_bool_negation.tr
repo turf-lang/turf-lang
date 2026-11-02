@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E057
-// EXPECT-DIAG: Unary '-' requires a numeric operand, got 'bool'
+// EXPECT-DIAG: The unary `-` needs a number, and I found a `bool`.
 fn main(): int {
     mut ok: bool = true;
     printline(-ok);

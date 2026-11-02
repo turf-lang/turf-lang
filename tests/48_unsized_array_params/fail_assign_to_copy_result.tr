@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E061
-// EXPECT-DIAG: Cannot assign to a function call's result
+// EXPECT-DIAG: I cannot assign to a function call's result: only a variable, a struct field or an array element can be assigned.
 // The copy is a temporary; there is nothing to assign to.
 fn main(): int {
     mut a: int[3] = [1, 2, 3];

@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E061
-// EXPECT-DIAG: Cannot assign to this expression
+// EXPECT-DIAG: I cannot assign to this expression: only a variable, a struct field or an array element can be assigned.
 // Negative test: prefix ++/-- on a non-lvalue operand is a clean
 // InvalidAssignmentTargetError at TypeCheck time now (LANG-001 follow-up
 // lifted the old "must be a bare identifier" PARSE-time restriction, which

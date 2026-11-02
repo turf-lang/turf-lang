@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E135
-// EXPECT-DIAG: 'Color::Red' is an enum variant, not a function
+// EXPECT-DIAG: I cannot call `Color::Red`, which is an enum variant and not a function
 // Regression test: `EnumName::Variant(...)` -- calling an enum variant as
 // if it were a function -- must be a clean TypeError, not reach Codegen
 // (where a real function call site expects a callable target, not a

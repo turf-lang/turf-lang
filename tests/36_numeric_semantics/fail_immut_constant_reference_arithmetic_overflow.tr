@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E076
-// EXPECT-DIAG: not representable in type 'int'
+// EXPECT-DIAG: The literal 9223372036854775808 does not fit in an `int`, which holds -9223372036854775808 .. 9223372036854775807.
 // OVH-014 (docs/planning/OVERHAUL_REMAINING_WORK.md), FREEZE.md §6.2 row 6:
 // "Compile-time on typed constants: error." Before this fix, referencing an
 // `immut int` local inside further literal arithmetic was NOT folded --

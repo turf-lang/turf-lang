@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E109
-// EXPECT-DIAG: Parentheses in a type are only for an array of references or of functions
+// EXPECT-DIAG: I accept parentheses in a type only around an array of references or of functions
 // A function type is parenthesised only to put array dimensions after it.
 
 fn main(): int {

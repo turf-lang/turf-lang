@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E124
-// EXPECT-DIAG: Cannot compare struct values with '=='
+// EXPECT-DIAG: I cannot compare two `list::List<int>` structs with `==`: a struct has no built-in comparison.
 // A generic instance such as List<int> is a struct; without an `operator ==`
 // it has no `==`, the same as a plain struct.
 import list::List;

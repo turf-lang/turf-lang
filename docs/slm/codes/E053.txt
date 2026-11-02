@@ -25,7 +25,7 @@ INCORRECT:
     fn add(a: int, b: int) static: int {
         return a + b;
     }
-    // ERROR: 'static' can only be used on a struct-bound method.
+    // ERROR: I cannot use `static` on a function that does not belong to a struct.
 
 FIX:
   Either remove `static` (if this was meant to be an ordinary free

@@ -355,18 +355,18 @@ static void LintBinaryExpr(const BinaryExprAST *Bin) {
     bool LHSIsBool = dynamic_cast<const BoolExprAST *>(LHS) != nullptr;
 
     if (RHSIsBool || LHSIsBool) {
-      if (Op == TOK_EQ) {
-        RedundantComparisonWarning(
-            Bin->getLoc(), "comparing with 'true' or 'false' using '=='",
-            "just the value itself (drop the '== true' / '== false')")
-            .warn();
-      } else {
-        RedundantComparisonWarning(
-            Bin->getLoc(), "comparing with 'true' or 'false' using '!='",
-            "just the value itself, or negate it (drop the '!= true' / '!= "
-            "false')")
-            .warn();
-      }
+      // Name the other operand when it is a plain variable; otherwise `x`.
+      const ExprAST *Other = RHSIsBool ? LHS : RHS;
+      const BoolExprAST *Lit = dynamic_cast<const BoolExprAST *>(RHSIsBool ? RHS : LHS);
+      std::string Operand = "x";
+      if (const auto *V = dynamic_cast<const VariableExprAST *>(Other))
+        Operand = V->getName();
+      const bool Positive = (Op == TOK_EQ) == Lit->getVal();
+      RedundantComparisonWarning(
+          Bin->getLoc(),
+          Operand + (Op == TOK_EQ ? " == " : " != ") + (Lit->getVal() ? "true" : "false"),
+          Positive ? Operand : "!" + Operand)
+          .warn();
     }
   }
 
@@ -512,9 +512,8 @@ static void LintFor(const ForExprAST *For) {
     // start/end aren't both literals (the common case), fall back to the
     // honest "one or the other, can't tell which" phrasing.
     std::string Outcome =
-        "this loop's fate was already decided before it started -- it "
-        "either runs forever or never runs at all, depending on how '" +
-        VarName + "' compares to the end value.";
+        "the loop either runs forever or never runs at all, depending on how `" +
+        VarName + "` compares to the end value.";
 
     auto *StartLit = dynamic_cast<const NumberExprAST *>(For->getStart());
     auto *EndLit = dynamic_cast<const NumberExprAST *>(For->getEnd());
@@ -526,15 +525,14 @@ static void LintFor(const ForExprAST *For) {
                         ? static_cast<double>(EndLit->getIntVal())
                         : EndLit->getDoubleVal();
       if (StartV < EndV)
-        Outcome = "it will loop forever: '" + VarName +
-                  "' starts below the end value and never changes.";
+        Outcome = "the loop runs forever, because `" + VarName +
+                  "` starts below the end value and never changes.";
       else if (StartV > EndV)
-        Outcome = "it will loop forever: '" + VarName +
-                  "' starts above the end value and never changes "
-                  "(descending range).";
+        Outcome = "the loop runs forever, because `" + VarName +
+                  "` starts above the end value and never changes.";
       else
-        Outcome = "the body will never execute even once: '" + VarName +
-                  "' already equals the end value at the start.";
+        Outcome = "the body never runs, because `" + VarName +
+                  "` already equals the end value at the start.";
     }
 
     StuckForLoopVariableWarning(For->getLoc(), VarName, Outcome).warn();

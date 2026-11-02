@@ -2,9 +2,9 @@ tests/18_operator_overload/fail_index_result_field_postfix.tr (1 error)
 
 ── error at line 18, col 12 [E098 · write to a temporary]
 
-  Cannot update part of the value an 'operator[]' read returned: it is a copy, so the update would be lost.
+  I cannot update part of what an `operator[]` read returned: it is a copy, so the update would be lost.
 
-  Hint: 'x[i]' returns the element by value, so this would only change a copy. Read the element into a variable, change that, and store it back: `mut e: T = x[i]; e.field = v; x[i] = e;`. Writing THROUGH a pointer or reference element, or into a nested list (`grid[i][j] = v`), is fine.
+  Hint: Read the element into a variable, change that, and store it back: `mut e: T = x[i]; e.field = v; x[i] = e;`. `x[i]` returns the element by value, so a write would change only a copy. Writing through a pointer or reference element, or into a nested list (`grid[i][j] = v`), is fine.
 
   18 │     bs[0].a++;
      │            ^~ this is a temporary value

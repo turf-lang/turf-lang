@@ -510,23 +510,26 @@ The directory of the importing file, the current directory and `lib/usr` are
 `lib/usr`, is not found by `import helper;`:
 
 ```
-── error at line 1, col 1 [E027]
+── error at line 1, col 1 [E027 · module not found]
 
-  Could not find module 'helper'.
+  I cannot find a module named `helper`.
 
-  Hint: In a project, `import helper;` names one of three things: a module of this package (a file 'helper.tr' anywhere under hello's src/), a package listed under [dependencies] in its turf.toml, or a standard-library module. Check the spelling, create src/helper.tr, or add the dependency (`turf add helper --path <dir>`).
+  Hint: Check the spelling, create `src/helper.tr`, or add the dependency with `turf add helper --path <dir>`. In a project, `import helper;` names a module of this package (a file `helper.tr` anywhere under `hello`'s `src/`), a package listed under [dependencies] in its `turf.toml`, or a standard-library module.
+
+  1 │ import helper;
+    │ ^~~~~~ no module of this name
 ```
 
 ### E090: two things answer to one name
 
 ```
-── error at line 1, col 8 [E090]
+── error at line 1, col 8 [E090 · ambiguous module import]
 
-  Module 'list' is ambiguous: 2 different files answer to that name.
+  I found 2 different files that answer to the module name `list`.
     standard library            …/lib/std/collections/list.tr
     module of package 'shapes'  ./src/list.tr
 
-  Hint: A module may not share its name with a standard-library module. Rename ./src/list.tr (for example to 'my_list.tr') and import it by the new name.
+  Hint: Rename ./src/list.tr (for example to `my_list.tr`) and import it by the new name. A module may not share its name with a standard-library module.
 
   1 │ import list;
     │        ^~~~ more than one module has this name
@@ -535,23 +538,23 @@ The directory of the importing file, the current directory and `lib/usr` are
 The other collisions read the same way:
 
 ```
-  Module 'geometry' is ambiguous: 2 different files answer to that name.
+  I found 2 different files that answer to the module name `geometry`.
     module of package 'shapes'  ./src/geometry.tr
     dependency 'geometry'       …/geometry/src/geometry.tr
 
-  Hint: A module may not share its name with a dependency. Rename ./src/geometry.tr (for example to 'my_geometry.tr') and import it by the new name.
+  Hint: Rename ./src/geometry.tr (for example to `my_geometry.tr`) and import it by the new name. A module may not share its name with a dependency.
 ```
 
 ```
-  Module 'shouter' is ambiguous: 2 different files answer to that name.
+  I found 2 different files that answer to the module name `shouter`.
     module of package 'deep'  ./src/other/shouter.tr
     module of package 'deep'  ./src/util/text/shouter.tr
 
-  Hint: These are different files that both answer to 'shouter'. Rename one of them, or delete the one you did not mean.
+  Hint: Rename one of them, or delete the one you did not mean.
 ```
 
 The E090 is the real error. Each later use of the module (`list::n()`) also
-reports an `E145` ("Module 'list' is not imported in this file"); read the first
+reports an `E145` ("I cannot find an import of module `list` in this file"); read the first
 diagnostic, not the ones after it.
 
 Two **different packages** can each have an internal module named `util`, each
@@ -565,24 +568,24 @@ in the build but is not yours to import. This is a different error from "not
 found" because the fix is different:
 
 ```
-── error at line 2, col 8 [E091]
+── error at line 2, col 8 [E091 · module not importable from this package]
 
-  Package 'basepkg' is not a dependency of 'plotter'.
-    It is in this build because 'geometry' depends on it.
+  I cannot import package `basepkg`, because it is not a dependency of `plotter`.
+    It is in this build because `geometry` depends on it.
 
-  Hint: A package can import only its own modules, its direct dependencies and the standard library. Add 'basepkg' to [dependencies] in plotter's turf.toml to import it here.
+  Hint: Add `basepkg` to [dependencies] in `plotter`'s `turf.toml` to import it here. A package can import only its own modules, its direct dependencies and the standard library.
 
   2 │ import basepkg;
     │        ^~~~~~~ this module cannot be imported from here
 ```
 
 ```
-── error at line 2, col 8 [E091]
+── error at line 2, col 8 [E091 · module not importable from this package]
 
-  Module 'vecmath' is internal to package 'geometry'.
+  I cannot import the module `vecmath`, because it is internal to package `geometry`.
     …/geometry/src/vecmath.tr
 
-  Hint: Only a package's root module can be imported from outside it. Import 'geometry' and use what its root module makes `pub`; if 'geometry' should offer this, its root module has to expose it.
+  Hint: Import `geometry` and use what its root module makes `pub`; if `geometry` should offer this, expose it from its root module. Only a package's root module can be imported from outside it.
 
   2 │ import vecmath;
     │        ^~~~~~~ this module cannot be imported from here
@@ -597,12 +600,12 @@ module, visibility is the ordinary rule (everything is private unless `pub`),
 which applies across packages too:
 
 ```
-── error at line 4, col 22 [E088]
+── error at line 4, col 22 [E088 · private symbol access]
 
-  Function 'hidden' is private to module 'geometry'.
-  Note: 'hidden' is declared in module 'geometry' without `pub` (line 44, col 4)
+  I cannot use the function `hidden`, which is private to module `geometry`.
+  Note: declared in module `geometry` without `pub` (<module geometry/geometry>, line 44, col 4)
 
-  Hint: If 'hidden' is meant to be used from other modules, mark it `pub` in geometry.tr: `pub fn hidden(...)`. Otherwise, 'geometry' offers these public functions: distance_squared, manhattan, pick, size_of_type.
+  Hint: Mark `hidden` as `pub` in geometry.tr with `pub fn hidden(...)`, if other modules are meant to use it. Otherwise, use one of the public functions that `geometry` offers: distance_squared, manhattan, pick, size_of_type.
 ```
 
 So a package has two levels: private to a module, and `pub`; and `pub` in an
@@ -620,13 +623,13 @@ examines **all** of them. If more than one distinct file answers, it is the
 same E090:
 
 ```
-── error at line 1, col 8 [E090]
+── error at line 1, col 8 [E090 · ambiguous module import]
 
-  Module 'list' is ambiguous: 2 different files answer to that name.
+  I found 2 different files that answer to the module name `list`.
     standard library  …/lib/std/collections/list.tr
     next to b.tr      ./list.tr
 
-  Hint: A module may not share its name with a standard-library module. Rename ./list.tr (for example to 'my_list.tr') and import it by the new name.
+  Hint: Rename ./list.tr (for example to `my_list.tr`) and import it by the new name. A module may not share its name with a standard-library module.
 ```
 
 The same file found twice (the source directory *is* the current directory) is
@@ -638,11 +641,11 @@ above, the error says so:
 
 ```
 $ turf compile src/main.tr
-── error at line 1, col 1 [E027]
+── error at line 1, col 1 [E027 · module not found]
 
-  Could not find module 'geometry'.
+  I cannot find a module named `geometry`.
 
-  Hint: Make sure the file 'geometry.tr' exists in the standard library or your current directory. This file is inside a TurfLang project (…/sf/turf.toml). Its dependencies are only visible to `turf build`, which compiles the project with its package graph.
+  Hint: Check that the file `geometry.tr` exists in the standard library or your current directory. This file is inside a TurfLang project (…/sf/turf.toml). Its dependencies are only visible to `turf build`, which compiles the project with its package graph.
 ```
 
 The compiler only checks that a manifest file *exists*; it never reads it.
@@ -862,12 +865,14 @@ A module that begins `unsafe module;` may use raw pointers (`int*`) outside an
 $ turf build
 ../ffi/src/rawmod.tr (1 error)
 
-── error at line 3, col 5 [E130]
+── error at line 3, col 5 [E130 · raw pointer outside unsafe]
 
-  Unsafe pointer use!
-  Raw pointer type 'int*' cannot be used outside an 'unsafe' block.
+  I cannot use the raw pointer type `int*` outside an `unsafe` block.
 
-  Hint: Wrap this in 'unsafe { }', or use a safe reference ('&int') instead if you don't actually need a possibly-null raw pointer.
+  Hint: Wrap this in `unsafe { }`, or use the safe reference `&int` if it is never null.
+
+  3 │     mut p: int* = null;
+    │     ^~~ this needs `unsafe`
 ```
 
 ```toml

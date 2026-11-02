@@ -7,7 +7,7 @@
 // real request chain (InstantiationRequest::Parent): 70 siblings are chains of
 // length 1.
 // EXPECT-NO-DIAG: E079
-// EXPECT-NO-DIAG: instantiation depth exceeded
+// EXPECT-NO-DIAG: chain of generic instantiations
 // (Generated: 70 one-field structs and one ident<S> call each; edit by hand, not by
 // regenerating, if you change it.)
 import test;

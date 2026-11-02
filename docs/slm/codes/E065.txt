@@ -16,7 +16,7 @@ CORRECT USAGE:
 
 INCORRECT:
     mut bad: string = my_struct to string;
-    // ERROR: I can't convert 'MyStruct' to a string!
+    // ERROR: I cannot convert a `MyStruct` to a `string` with `to`.
 
 FIX:
   Only convert `int`, `double`, or `bool` expressions with `to string`.

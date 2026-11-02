@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E139
-// EXPECT-DIAG: '5.' ends in a '.' with no digit after it
+// EXPECT-DIAG: `5.` ends in a `.` with no digit after it
 // A bare trailing dot (`5.`, nothing after it) is not a number: FREEZE.md's
 // dotted-float grammar requires at least one fractional digit after '.'.
 // The lexer used to return `5` and leave the '.' to the parser, which said

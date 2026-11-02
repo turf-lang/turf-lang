@@ -1,5 +1,5 @@
 // EXPECT-DIAG: identical_branches_any_statement.tr (3 warnings)
-// EXPECT-DIAG: Both branches of this 'if' do the same thing!
+// EXPECT-DIAG: Both branches of this `if` do the same thing
 // The identical-branches lint compares bodies of any statement: a call, a
 // return, an assignment. It recognized only expression shapes, so none of
 // these three was reported; the three pairs that differ are not.

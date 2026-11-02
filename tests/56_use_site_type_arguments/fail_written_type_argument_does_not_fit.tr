@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E056
-// EXPECT-DIAG: No overload of 'identity' matches argument types (int)
+// EXPECT-DIAG: No overload of `identity` takes the argument types (int).
 // The argument must fit the written type; nothing is inferred over it.
 
 fn<T> identity(x: T): T {

@@ -2,8 +2,7 @@ tests/03_typechecker/fail_math_abs_string.tr (1 error)
 
 ── error at line 7, col 28 [E025 · no matching overload]
 
-  No matching overload!
-  No overload of 'math::abs' matches argument types (string).
+  No overload of `math::abs` takes the argument types (string).
   Note: candidate: abs(double val) -> double (lib/std/core/math.tr, line 77, col 8)
   Note: candidate: abs(int val) -> int (lib/std/core/math.tr, line 81, col 8)
 

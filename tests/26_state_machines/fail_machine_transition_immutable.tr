@@ -1,6 +1,6 @@
 // EXPECT-DIAG: E060
 // EXPECT-FIX: replace 'immut' with 'mut'
-// EXPECT-DIAG: You can't change the value of 'c' because it's immutable
+// EXPECT-DIAG: I cannot change `c`: it is immutable.
 // A transition changes its receiver, so an `immut` machine cannot move.
 machine C {
     Idle -> Connecting

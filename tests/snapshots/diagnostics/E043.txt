@@ -2,9 +2,9 @@ tests/02_resolver/fail_use_before_declaration_in_function.tr (1 error)
 
 ── error at line 6, col 18 [E043 · use before declaration]
 
-  Hold on! You're trying to use 'x' before telling me what it is.
+  I cannot use `x` before its declaration.
 
-  Hint: 'x' is declared further down in this function, but a variable only exists from its declaration onwards. Move that declaration above this line.
+  Hint: Move the declaration of `x` above this line: a variable exists only from its declaration onwards.
 
   6 │     mut y: int = x + 1;
     │                  ^ used here before its declaration

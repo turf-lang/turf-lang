@@ -1,5 +1,5 @@
-// EXPECT-DIAG: Variable 'k' is declared but never used
-// EXPECT-NO-DIAG: Variable 'k' is assigned but the value is never read
+// EXPECT-DIAG: Variable `k` is declared but never used
+// EXPECT-NO-DIAG: The value assigned to `k` is never read
 // LEC-005: a variable that is never read at all used to be reported twice --
 // "declared but never used" AND "assigned but never read (dead store)" for its
 // own initializer -- the same finding with two hints. The never-used warning

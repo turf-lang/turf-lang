@@ -2,9 +2,9 @@ tests/42_caller_location/fail_caller_location_outside_marked_function.tr (1 erro
 
 ── error at line 6, col 12 [E084 · caller location outside a marked function]
 
-  'caller_location' can only be used inside a function declared '@caller_location'.
+  I cannot use `caller_location` outside a function declared `@caller_location`.
 
-  Hint: Add '@caller_location' immediately before this function's 'fn' keyword, or remove this use.
+  Hint: Add `@caller_location` immediately before this function's `fn` keyword, or remove this use.
 
   6 │     return caller_location;
     │            ^~~~~~~~~~~~~~~ this function is not marked to receive a caller location

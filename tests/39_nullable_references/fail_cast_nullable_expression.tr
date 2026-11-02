@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E082
-// EXPECT-DIAG: Cannot cast this '&?Node' value to a non-null reference
+// EXPECT-DIAG: I cannot cast this `&?Node` to a non-null reference, because it might be `null`.
 // `(h.head to &Node)`: E082 was only raised for a variable operand, so this
 // turned a null into a `&Node` with no check. Found by turf-fuzz probing.
 struct Node { val: int, next: &?Node }

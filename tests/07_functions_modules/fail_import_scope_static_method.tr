@@ -1,7 +1,7 @@
 // LEC-008: `module::Type::method()` and `module::Type::default()` spell the
 // module too, so they are gated like `module::function()`.
 // EXPECT-DIAG: E145
-// EXPECT-DIAG: is not imported in this file
+// EXPECT-DIAG: I cannot find an import of module
 import import_scope_outer_module;
 
 fn main(): int {

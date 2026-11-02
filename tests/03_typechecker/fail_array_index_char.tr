@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E002
-// EXPECT-DIAG: Index must be an integer
+// EXPECT-DIAG: An index into `int[128]` must be an `int`, and I found a `char`.
 // A `char` used to be accepted as an array index (as its byte value, for the
 // `freq[s[i]]` idiom). That is banned: a character is not a position, so it
 // needs an explicit `(c to int)` like any other non-int value.

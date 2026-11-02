@@ -2,9 +2,9 @@ tests/35_numeric_literals/fail_trailing_separator.tr (1 error)
 
 ── error at line 7, col 18 [E072 · misplaced separator]
 
-  A digit run can't end with '_'.
+  I cannot end a run of digits with `_`.
 
-  Hint: '_' is only a separator BETWEEN digits (like '1_000_000'), never at the very start or end of a digit run. Remove the trailing underscore in '5_'.
+  Hint: Remove the trailing underscore in `5_`: `_` goes only between digits, as in `1_000_000`.
 
   7 │     mut x: int = 5_;
     │                  ^ this separator is out of place

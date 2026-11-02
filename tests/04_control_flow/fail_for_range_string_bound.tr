@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E066
-// EXPECT-DIAG: but this one has type 'string'
+// EXPECT-DIAG: A `for` range bound must be an `int`, an `int32` or a `double`, and I found a `string`.
 fn main(): int {
     for i in 0.."x" {
         printline(i);

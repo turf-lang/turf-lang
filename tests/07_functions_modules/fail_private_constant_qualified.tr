@@ -1,7 +1,7 @@
 // SY-5: a module constant without `pub` is private to its module; a
 // qualified use from another file is E088, with the usual hint.
 // EXPECT-DIAG: E088
-// EXPECT-DIAG: Constant 'SECRET' is private to module
+// EXPECT-DIAG: I cannot use the constant `SECRET`, which is private to module
 import pub_immut_constants_module;
 
 fn main(): int {

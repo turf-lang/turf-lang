@@ -1,8 +1,8 @@
 // EXPECT-DIAG: E066
-// EXPECT-DIAG: Type mismatch!
+// EXPECT-DIAG: I cannot store a `string` in `n`, which is an `int`.
 // TDP-2-006: in a normal build only the expected code is a compile_error
 // test's own; an error with another code inside it is an ordinary error.
-@test(compile_error, E041, "Unknown function")
+@test(compile_error, E041, "function named")
 fn a(): void {
     immut n: int = "text";
 }

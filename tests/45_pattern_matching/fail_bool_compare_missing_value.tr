@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E093
-// EXPECT-DIAG: Non-exhaustive bool comparison on 'bool'
+// EXPECT-DIAG: This `compare` on `bool` does not cover every case, and it has no `otherwise`.
 // LEC-003: a bool compare without `otherwise` must cover true and false.
 // Expected: E093.
 fn f(b: bool): int {

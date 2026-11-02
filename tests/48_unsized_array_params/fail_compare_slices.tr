@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E124
-// EXPECT-DIAG: Cannot compare arrays with '!='.
+// EXPECT-DIAG: I cannot compare arrays with `!=`.
 // The same for slices, which used to compare their { pointer, length } pairs
 // the same broken way. "Equal" could mean same elements or same storage, so
 // it has to be written out.

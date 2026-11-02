@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E068
-// EXPECT-DIAG: A value of type 'string' has no fields, so it has no field named 'size'
+// EXPECT-DIAG: The type `string` has no fields, so I cannot read the field `size`
 // A field read on a value that is not a struct. The type checker let it
 // through, and Codegen reported "Cannot access field on non-struct type" as
 // an internal compiler error (E121).

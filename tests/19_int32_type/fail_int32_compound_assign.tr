@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E126
-// EXPECT-DIAG: Compound assignment '+=' is not supported on 'int32'
+// EXPECT-DIAG: I cannot use `+=` on an `int32`: arithmetic on an `int32` gives an `int`.
 // OVH-005: compound assignment (`+=` etc.) on an 'int32' lvalue must be a
 // clean, DEDICATED compile error naming the actual reason (int32 is never
 // itself an arithmetic result type) rather than the generic "Cannot assign

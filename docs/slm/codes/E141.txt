@@ -35,7 +35,7 @@ INCORRECT:
     }
     immut a: int[3] = [1, 2, 3];
     fill(a, 0);
-    // ERROR [E141]: 'a' is immutable, but 'fill' writes to the array it is given as 'arr'.
+    // ERROR [E141]: `a` is immutable, and `fill` writes to the array it takes as `arr`.
 
 FIX:
   Declare the array `mut`, or copy it into a `mut` array (`mut c: int[3] = a;`) and pass the

@@ -14,7 +14,7 @@ INCORRECT:
     immut t = s[1..3];                   // string
     immut u = l[0..1];                   // List<int>
     immut v = n[0..1];                   // int
-    // ERROR [E142]: Cannot slice a value of type 'string' with [a..b].
+    // ERROR [E142]: I cannot slice an `int` with `[a..b]`: only an array has slices.
 
 FIX:
   For a string use `strings::substring(s, start, end)`. For a List, copy the wanted elements

@@ -42,19 +42,18 @@ CORRECT EXAMPLES:
 
 INCORRECT EXAMPLES:
   mut x: int = 3.14;
-    // ERROR: "Type mismatch! Cannot initialise 'int' variable 'x' with
-    //         value of type 'double'."
+    // ERROR: "I cannot store a `double` in `x`, which is an `int`."
   mut s: string = 42;
-    // ERROR: Cannot initialise 'string' variable 's' with value of type 'int'.
+    // ERROR: I cannot store an `int` in `s`, which is a `string`.
   mut n: int = "hello";
-    // ERROR: Cannot initialise 'int' variable 'n' with value of type 'string'.
+    // ERROR: I cannot store a `string` in `n`, which is an `int`.
 
 FUNCTION EXAMPLE:
   fn add(a: int, b: int): int {
       return a + b;
   }
   // Calling with wrong argument types is caught before Codegen ever runs:
-  add(1, 2.5);            // ERROR: no overload of 'add' matches argument types
+  add(1, 2.5);            // ERROR: No overload of `add` takes the argument types (int, double).
   // Fix:
   add(1, 2.5 to int);      // OK
 
@@ -62,11 +61,12 @@ STRUCT-METHOD ARGUMENT TYPES ARE ALSO CHECKED:
   A struct method call's argument types are checked against its declared
   parameters too, not just its argument COUNT -- e.g. calling a
   `List<int>`'s `push(item: T)` with a string is rejected: "No overload of
-  'List.push' matches argument types (string)."
+  `list::List.push` takes the argument types (string)."
 
 STRUCTS DON'T SUPPORT == / != :
   mut a: Point = Point { x: 1, y: 1 };
   mut b: Point = Point { x: 1, y: 1 };
   if (a == b) { }
-    // ERROR: "Cannot compare struct values with '=='." Compare individual
+    // ERROR: "I cannot compare two `Point` structs with `==`: a struct has no
+    // built-in comparison." Compare individual
     // fields instead: `a.x == b.x && a.y == b.y`.

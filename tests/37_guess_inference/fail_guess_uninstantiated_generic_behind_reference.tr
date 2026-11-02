@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E129
-// EXPECT-DIAG: Cannot infer the type arguments of a generic type
+// EXPECT-DIAG: I cannot infer the type arguments of a generic type.
 // LEC-009: `guess` of a generic struct whose only field names its type
 // parameter inside another generic type (`h: &Inner<T>`, the shape every
 // collection has since LEC-009). The E129 check looked for a bare `T` field

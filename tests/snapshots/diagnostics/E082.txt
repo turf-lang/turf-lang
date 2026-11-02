@@ -2,9 +2,9 @@ tests/07_functions_modules/fail_copy_out_of_unnarrowed_nullable.tr (1 error)
 
 ── error at line 6, col 23 [E082 · unnarrowed nullable-to-safe-reference cast]
 
-  Cannot copy the value out of 'n' here -- it might be 'null'.
+  I cannot copy `n` out here, because it might be `null`.
 
-  Hint: Narrow it first with a direct null check, e.g. 'if (n != null) { ... n to T ... }', so the cast only runs where it's known to be safe.
+  Hint: Narrow it first with a direct null check, for example `if (n != null) { ... n to T ... }`, so the cast runs only where it is known to be safe.
 
   6 │     immut c: Node = n to Node;
     │                       ^~ this may be `null`, and nothing has checked it

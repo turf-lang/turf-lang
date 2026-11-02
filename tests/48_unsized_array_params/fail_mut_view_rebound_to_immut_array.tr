@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E144
-// EXPECT-DIAG: 'view' is a 'mut' view of 'fixed', which is immutable.
+// EXPECT-DIAG: `view` is a `mut` view of `fixed`, which is immutable. A slice shares its array, so writing through `view` would change `fixed`.
 // ...and when an existing `mut` view is pointed at an immutable array later.
 fn main(): int {
     immut fixed: int[3] = [1, 2, 3];

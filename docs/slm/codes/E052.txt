@@ -25,8 +25,8 @@ CORRECT SYNTAX:
 INCORRECT:
     mut p: Point = Point::new(1, 2);
     p.origin();
-    // ERROR: 'origin' is a static method -- it can't be called through
-    //        an instance with '.'.
+    // ERROR: `origin` is a static method, so I cannot call it through an
+    //        instance with `.`.
 
 FIX:
   Call the method via '::' on the struct's type name instead of '.' on an

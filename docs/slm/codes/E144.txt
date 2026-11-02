@@ -17,7 +17,7 @@ INCORRECT:
     mut t = a[..];                       // inferred
     mut t: int[] = a;                    // whole array
     view = fixed[1..];                   // rebinding a mut view to an immutable array
-    // ERROR [E144]: 't' is a 'mut' view of 'a', which is immutable.
+    // ERROR [E144]: `t` is a `mut` view of `a`, which is immutable.
 
 FIX:
   Declare the view `immut`, make the array `mut`, or, if an editable copy is wanted, use

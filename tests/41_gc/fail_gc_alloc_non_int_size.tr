@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E056
-// EXPECT-DIAG: Argument 1 to 'gc_alloc' is a byte count and expects 'int', got 'double'
+// EXPECT-DIAG: Argument 1 of `gc_alloc` is a byte count, so it is an `int`, and I found a `double`.
 // Regression test (turf-fuzz): gc_alloc's byte count was not type-checked, so a
 // double reached the runtime's 64-bit size parameter and the IR was invalid
 // (an internal compiler error) instead of a diagnostic.

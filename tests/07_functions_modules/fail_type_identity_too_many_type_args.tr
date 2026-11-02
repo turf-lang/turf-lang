@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E148
-// EXPECT-DIAG: 'Box' takes 1 type argument (T), but 2 were given
+// EXPECT-DIAG: `Box` takes 1 type argument (T), but I found 2
 // Every type parameter takes exactly one argument; an extra one would have
 // been dropped without a word.
 

@@ -150,8 +150,7 @@ struct field (`a.next = &b;`) compiles outside `unsafe { }` for the same reason:
 the assignment names no raw type. A raw pointer might be null, so turning one
 into a `&T` is an explicit `to` cast, and that cast is a gated "cast" use.
 
-`null` is never compatible with `&T` (E062, `Cannot assign 'null' to variable
-... of type '&int'`).
+`null` is never compatible with `&T` (E062, ``I cannot store `null` in `r`, which is a `&int` ``).
 
 ### 1.4 `unsafe { }`, in detail
 
@@ -388,7 +387,7 @@ unsafe {
 
 **Using a `&?T` requires a null check first.** `p.val`, `p.next` and `p.method()`
 compile only where `NullabilityPass` (2.8) has proven `p` non-null on every path
-reaching the use. Without it, E081 (`Possible null dereference`). Narrowing
+reaching the use. Without it, E081 (``I cannot access the field `val` of `p`, which might be `null` here``). Narrowing
 sources: a direct `p != null` / `p == null` comparison, flowing through `if` /
 `else`, an early `return`, a `while` condition, a `&&` / `||` chain (not `!`), and
 assignment from `&x` or from a `&T` value (both non-null by construction).
@@ -704,8 +703,7 @@ void checkNoRawPointersInSignature(const FuncDefExprAST &Node);
    in a package build (`PackageInfo::AllowUnsafe`), or `--allow-unsafe-modules`
    (`g_AllowUnsafeModules`) otherwise.
 
-`checkUnsafeGate()` raises E130 (`Raw pointer type '...' cannot be used outside an
-'unsafe' block.`, banner `Unsafe pointer use!`) when `T` is a raw pointer and the
+`checkUnsafeGate()` raises E130 (``I cannot use the raw pointer type `...` outside an `unsafe` block``) when `T` is a raw pointer and the
 location is not exempt.
 
 `UnsafeDepth_` is incremented and decremented around the body in

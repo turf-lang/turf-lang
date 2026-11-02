@@ -256,10 +256,10 @@ src/main.tr (1 error)
 
 ── error at line 12, col 51 [E088 · private symbol access]
 
-  Function 'follow' is private to module 'route'.
-  Note: 'follow' is declared in module 'route' without `pub` (line 4, col 4)
+  I cannot use the function `follow`, which is private to module `route`.
+  Note: declared in module `route` without `pub` (src/route.tr, line 4, col 4)
 
-  Hint: If 'follow' is meant to be used from other modules, mark it `pub` in route.tr: `pub fn follow(...)`. Otherwise, 'route' offers these public functions: end_position, farthest.
+  Hint: Mark `follow` as `pub` in route.tr with `pub fn follow(...)`, if other modules are meant to use it. Otherwise, use one of the public functions that `route` offers: end_position, farthest.
 
   12 │     io::printline(report::line("farthest", route::follow(steps, 2)));
      │                                                   ^~~~~~ this is private to its module
@@ -296,9 +296,9 @@ src/main.tr (1 warning)
 
 ── warning at line 11, col 5 [E163 · unused variable]
 
-  Warning: Variable 'unused' is declared but never used.
+  Variable `unused` is declared but never used.
 
-  Hint: If the variable is intentionally unused, prefix its name with '_' by convention. Otherwise, remove the declaration or use its value.
+  Hint: Remove `unused`, or use it. If it is unused on purpose, rename it `_unused`, or pass `--allow E163`.
 
   11 │     mut unused: int = 0;
      │     ^ this variable is never used
@@ -380,10 +380,10 @@ src/main.tr (1 error)
 
 ── error at line 3, col 8 [E091 · module not importable from this package]
 
-  Module 'vecmath' is internal to package 'geometry'.
+  I cannot import the module `vecmath`, because it is internal to package `geometry`.
     /home/me/code/geometry/src/vecmath.tr
 
-  Hint: Only a package's root module can be imported from outside it. Import 'geometry' and use what its root module makes `pub`; if 'geometry' should offer this, its root module has to expose it.
+  Hint: Import `geometry` and use what its root module makes `pub`; if `geometry` should offer this, expose it from its root module. Only a package's root module can be imported from outside it.
 
   3 │ import vecmath;
     │        ^~~~~~~ this module cannot be imported from here

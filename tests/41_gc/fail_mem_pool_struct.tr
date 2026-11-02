@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E056
-// EXPECT-DIAG: No overload of 'mem::Pool.track' matches argument types (Named)
+// EXPECT-DIAG: No overload of `mem::Pool.track` takes the argument types (Named).
 // A struct holding a GC pointer cannot be tracked either.
 import mem;
 

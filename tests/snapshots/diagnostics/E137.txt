@@ -2,10 +2,9 @@ tests/42_caller_location/fail_caller_location_fn_as_value.tr (1 error)
 
 ── error at line 11, col 27 [E137 · not a value]
 
-  Not a value!
-  'where' is marked @caller_location, so it can't be used as a function value; only direct calls can supply the caller's location.
+  I cannot use `where` as a function value, because it is marked `@caller_location` and only a direct call can supply the caller's location.
 
-  Hint: Write an unmarked function with the same parameters that calls 'where', and use that as the value.
+  Hint: Write an unmarked function with the same parameters that calls `where`, and use that as the value.
 
   11 │     mut f: fn(): string = where;
      │                           ^~~~~ this is not a value

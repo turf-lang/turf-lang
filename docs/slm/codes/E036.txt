@@ -25,14 +25,14 @@ CORRECT USAGE:
 
 INCORRECT:
     conn.transition(LightState::On);
-    // ERROR: 'transition' target must be a state of 'ConnectionState', got 'LightState'.
+    // ERROR: I cannot `transition` to `LightState`, which is not a state of `ConnectionState`.
 
     conn.transition(5);
-    // ERROR: 'transition' target must be a state of 'ConnectionState', got 'int'.
+    // ERROR: I cannot `transition` to an `int`, which is not a state of `ConnectionState`.
 
     conn.transition(next);   // next: ConnectionState, a variable
-    // ERROR: 'transition' target must be written as a state, like
-    // 'ConnectionState::SomeState', not a value that holds one.
+    // ERROR: I cannot tell which state this holds, and `transition` needs a
+    // state written as `ConnectionState::SomeState`.
 
 WHAT THIS ERROR IS NOT:
   - Not "the state name doesn't exist on this machine at all" -- that

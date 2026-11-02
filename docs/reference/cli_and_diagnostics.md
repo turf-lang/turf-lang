@@ -253,8 +253,8 @@ mod.tr (1 error)
 
 ── error [E119 · no main function]
 
-  No entry point found. Please define 'fn main(): int' in your file.
-  Hint: checking a module that is only ever imported? add --module: `turf check --module <file.tr>`
+  I found no entry point. Define `fn main(): int` in your file.
+  Hint: To check a module that is only ever imported, add `--module`: `turf check --module <file.tr>`.
 
   Run `turf --explain E119` for more details.
 $ turf check --module mod.tr
@@ -538,10 +538,9 @@ oob.tr (1 error)
 
 ── error at line 4, col 18 [E001 · array bounds]
 
-  Array index out of bounds!
-  You tried to access 'primes[5]', but 'primes' only has 3 elements (indices 0 to 2, or -1 to -3 counting from the end).
+  I cannot use `primes[5]`, because `primes` has only 3 elements.
 
-  Hint: Array indices start at 0 and go up to size - 1; a negative index counts back from the end (-1 is the last element).
+  Hint: Use an index from 0 to 2, or `-1` to `-3` to count from the end.
 
   4 │     return primes[i];
     │                  ^ this index is outside the array
@@ -552,7 +551,7 @@ oob.tr (1 error)
 Top to bottom:
 
 1. **File header.** The path of the file the diagnostics below belong to, then a count: `src/main.tr (2 errors, 1 warning)`. Diagnostics are batched **per file**: the file you compiled comes first, then each imported module, and within a file they are sorted by line and column. The path is relative to the directory you ran the command from; a standard-library file is shown from `lib/std/` on.
-2. **Diagnostic header.** `── error at line 4, col 18 [E001 · array bounds]`: the position, the **code** (`E001`) and the **category** (`array error`). The code is what you give to `turf explain`. The categories are type mismatch, undeclared variable, control flow, syntax error, arithmetic, string conversion, array error, declaration, function signature, builtin function, memory error and general. A diagnostic with no source position (a missing `main`) omits "at line, col". Many warnings carry no code and no category.
+2. **Diagnostic header.** `── error at line 4, col 18 [E001 · array bounds]`: the position, the **code** (`E001`) and the code's **name** (`array bounds`), a short lowercase noun phrase. The code is what you give to `turf explain`. A diagnostic with no source position (a missing `main`) omits "at line, col". Many warnings carry no code.
 3. **The message**, in plain words.
 4. Zero or more `Note:` lines, one per related location the snippet does not show (`Note: candidate: f(string s) -> int (other.tr, line 2, col 4)`): one in another file, on a later line, or beyond the first three.
 5. An optional **hint**: one line saying how to fix it.
@@ -579,9 +578,9 @@ greet.tr (1 error)
 
 ── error at line 6, col 27 [E040 · unknown name]
 
-  I can't find anything named 'nmae'.
+  I cannot find anything named `nmae`.
 
-  Hint: It may be from the current file: 'name'
+  Hint: Use a name from this file: `name`
 
   6 │     printline("Hello, " + nmae + "!");
     │                           ^~~~ nothing of this name is in scope
@@ -625,7 +624,7 @@ Output that matches the text of diagnostics (a script, an editor extension) will
 
 ```text
 $ turfc main.tr --check --diagnostics=json
-{"category":"undeclared variable","code":"E040","denied":false,"file":"main.tr","fix":{"description":"replace 'nmae' with 'name'","edits":[{"file":"main.tr","replacement":"name","span":{"end":{"column":16,"line":4},"start":{"column":12,"line":4}}}]},"hint":"It may be from the current file: 'name'","message":"I can't find anything named 'nmae'.","related":[],"severity":"error","span":{"end":{"column":16,"line":4},"start":{"column":12,"line":4}},"title":null,"version":"1.0"}
+{"category":"undeclared variable","code":"E040","denied":false,"file":"main.tr","fix":{"description":"replace 'nmae' with 'name'","edits":[{"file":"main.tr","replacement":"name","span":{"end":{"column":16,"line":4},"start":{"column":12,"line":4}}}]},"hint":"Use a name from this file: `name`","label":"nothing of this name is in scope","message":"I cannot find anything named `nmae`.","related":[],"severity":"error","span":{"end":{"column":16,"line":4},"start":{"column":12,"line":4}},"title":null,"version":"1.1"}
 ```
 
 | Field | Value |
@@ -634,7 +633,7 @@ $ turfc main.tr --check --diagnostics=json
 | `severity` | `"error"` or `"warning"`. A warning whose [lint level](#lint-levels) is `deny` is an `"error"`, with `denied` set. |
 | `code` | `"E040"`. Every error has one; `null` only for a warning with no code. |
 | `category` | The code's category from the registry (`"type mismatch"`), or `null`. |
-| `title` | The heading line of the text form (`"Nothing to infer!"`), or `null`. |
+| `title` | A banner line above the message. Diagnostics carry no banner, so it is `null`. |
 | `message` | The message, without colour. |
 | `hint` | The `Hint:` text, or `null`. |
 | `file` | The file, as the compiler opened it. |
@@ -675,15 +674,15 @@ w.tr (1 error, 2 warnings)
 
 ── error at line 2, col 5 [E163 · unused variable]
 
-  Warning: Variable 'unused' is declared but never used.
+  Variable `unused` is declared but never used.
 
-  Hint: If the variable is intentionally unused, prefix its name with '_' by convention. Otherwise, remove the declaration or use its value.
+  Hint: Remove `unused`, or use it. If it is unused on purpose, rename it `_unused`, or pass `--allow E163`.
 
   E163 is a warning by default; its lint level here is deny.
   ...
 ```
 
-A denied warning is an error in every way that matters: it has the `error` header, it is counted as one, it fails `--check`, and the error that is already on a line hides other diagnostics on that line. Its text still says `Warning:` and the diagnostic adds the line saying why, so the reader knows the check is normally advice.
+A denied warning is an error in every way that matters: it has the `error` header, it is counted as one, it fails `--check`, and the error that is already on a line hides other diagnostics on that line. Its text is the warning's own, and the diagnostic adds the line saying why, so the reader knows the check is normally advice.
 
 A level that names nothing real is a usage error (status 2, nothing compiled), never silently ignored: a code the compiler does not have, a word that is not a code, a lint set that does not exist or is newer than the compiler, a flag with no code after it. An **error** has no level to choose, since a program with a type error cannot be built whatever the setting: `--allow` and `--warn` of an error's code are usage errors, and `--deny` of one is accepted and changes nothing. A [warning in the standard library](#warnings-in-the-standard-library) is never denied (it is not yours to fix) unless you also pass `--stdlib-warnings`. A level applies to every file of the compile, your dependencies included. `turfc --test` and `turf test` pass the levels to the compile of every test.
 
@@ -699,7 +698,9 @@ lib/std/http/http.tr (1 warning)
 
 ── warning at line 353, col 5 [E159 · loop with no exit path]
 
-  Warning: Function 'http::Server.listen' contains a loop with no exit path. This will run forever.
+  Function `http::Server.listen` contains a loop with no exit path, so it will run forever.
+
+  Hint: Add a `break`, a `return` or a condition that can become false, so the loop can exit.
   ...
 ```
 
@@ -715,9 +716,9 @@ typo.tr (1 error)
 
 ── error at line 3, col 12 [E040 · unknown name]
 
-  I can't find anything named 'contaner'.
+  I cannot find anything named `contaner`.
 
-  Hint: It may be from the current file: 'container'
+  Hint: Use a name from this file: `container`
 
   3 │     return contaner;
     │            ^~~~~~~~ nothing of this name is in scope
@@ -737,7 +738,7 @@ Every error and every warning has a stable code, `E001` upward with no gaps. A c
 
 A **retired** code is one whose mistake is now reported under another code; the number stays so old references still resolve, and `turf explain` on it says which code replaced it. The table marks them. The replacements are: E006 (an unsized array in a `for` loop; arrays carry their length now), E013 (merged into E012), E015 (syntax errors, now E099–E123), E037 (unknown functions are E041), and E055 and E063 (now E056).
 
-Every code, with its kind, the 2.x release that added it, the level it starts at and its category (the word in the diagnostic header). This table is generated from the compiler's registry (`src/diagnostics/ErrorCodes.h`) by `scripts/check/diagnostic_registry.py --write`, and CI fails if it and the registry disagree, so edit the registry and regenerate; never edit the table. `scripts/check/diagnostic_registry.py --json` prints the same data for a tool.
+Every code, with its kind, the 2.x release that added it, the level it starts at, its category and its name (the lowercase phrase in the diagnostic header). This table is generated from the compiler's registry (`src/diagnostics/ErrorCodes.h`) by `scripts/check/diagnostic_registry.py --write`, and CI fails if it and the registry disagree, so edit the registry and regenerate; never edit the table. `scripts/check/diagnostic_registry.py --json` prints the same data for a tool.
 
 <!-- diagnostic-registry:begin (generated by scripts/check/diagnostic_registry.py --write; do not edit) -->
 
@@ -975,9 +976,9 @@ fn main(): int {
 ```text
 ── error at line 2, col 5 [E012 · statement after terminator]
 
-  This code comes after a return/break/continue, so it's impossible to reach it!
+  This code comes after a return/break/continue, so I can never reach it.
 
-  Hint: Delete this code or move it before the 'return/break/continue' statement.
+  Hint: Delete this code or move it before the `return/break/continue` statement.
 
   2 │     return 0;
     │     ^~~~~~ nothing after the statement before this runs
@@ -1003,9 +1004,9 @@ fn main(): int {
 ```text
 ── warning at line 5, col 5 [E074 · unreachable block]
 
-  Warning: The code in 'while.end' inside 'pick' can never be reached!
+  I can never reach the code in `while.end` inside `pick`.
 
-  Hint: Check your 'if' conditions. Are they impossible to be true, or did you 'return' before this block?
+  Hint: Check whether an `if` condition can never be true, or whether a `return` comes before this block.
 
   5 │     return 2;
     │     ^~~~~~ this block never runs
@@ -1035,9 +1036,12 @@ fn main(): int {
 ```text
 ── error at line 1, col 1 [E009 · missing return]
 
-  The function 'pick' promises to give back a result, but sometimes it doesn't!
+  I found a path through `pick` that ends without returning a result.
 
-  Hint: Make sure every path in your function (like inside 'if' and 'else') has a 'return' statement.
+  Hint: Add a `return` statement to every path in `pick`, including each `if` and `else` branch.
+
+  1 │ fn pick(flag: bool): int {
+    │ ^~ a path through this function ends without a `return`
 ```
 
 A function returning `void` is never checked for this.
@@ -1060,10 +1064,15 @@ fn main(): int {
 ```text
 ── error at line 6, col 12 [E008 · variable read before it has a value]
 
-  Oops! You're using 'y' (type 'int') before it has a value.
-  Note: declared here (line 2, col 5)
+  I cannot use `y` (type `int`) before it has a value.
 
-  Hint: Make sure every path assigns to 'y' before you use it.
+  Hint: Assign to `y` on every path before it is used.
+
+  2 │     mut y: int;
+    │     - declared here
+    ┊
+  6 │     return y;
+    │            ^ read here before it has a value
 ```
 
 The same analysis requires a struct's `new` method to assign every field on every path (E049), described in [Structs & Enums](structs_and_enums.md#constructing-a-struct).
@@ -1084,13 +1093,21 @@ fn main(): int {
 ```text
 ── warning at line 2, col 5 [E161 · initial value never read]
 
-  Warning: The initial value of 'x' is never read: every path assigns 'x' again before reading it.
+  The initial value of `x` is never read, because every path assigns `x` again before reading it.
 
-  Hint: Declare it without a value, 'mut x: int;' (every read still has to come after an assignment), or read the initial value before the next assignment.
+  Hint: Declare it without a value, `mut x: int;` (every read still has to come after an assignment), or read the initial value before the next assignment.
+
+  2 │     mut x: int = 5;
+    │     ^~~ this initial value is never read
 
 ── warning at line 4, col 5 [E163 · unused variable]
 
-  Warning: Variable 'unused' is declared but never used.
+  Variable `unused` is declared but never used.
+
+  Hint: Remove `unused`, or use it. If it is unused on purpose, rename it `_unused`, or pass `--allow E163`.
+
+  4 │     mut unused: int = 1;
+    │     ^ this variable is never used
 ```
 
 The first `x` (`5`) is a declaration's initializer that is overwritten before it is read; the second (`10`) is read by `x + 1`, so it is not reported. A store that is not a declaration's initializer gets the plain dead-store wording:
@@ -1098,9 +1115,12 @@ The first `x` (`5`) is a declaration's initializer that is overwritten before it
 ```text
 ── warning at line 3, col 5 [E160 · dead store]
 
-  Warning: Variable 'x' is assigned but the value is never read (dead store).
+  The value assigned to `x` is never read.
 
-  Hint: The assigned value is overwritten or the function returns before this variable is ever used. Remove the assignment or use the value.
+  Hint: Remove the assignment, or read `x` before it is overwritten or the function returns. To silence this on purpose, pass `--allow E160`.
+
+  3 │     x = 1;
+    │       ^ this value is never read
 ```
 
 Writing one element of an array, `x[0] = 1;`, keeps the rest of the array, so it does not make an earlier store to the array dead. An array that is written but never read gets one dead-store warning, at the write.
@@ -1123,7 +1143,7 @@ fn main(): int {
 }
 ```
 
-This prints three warnings: one on the function (`contains a loop with no exit path. This will run forever.`), one on the loop (`This looks like an infinite loop! The condition is always true and the body has no 'break', 'continue', or 'return'.`) and the unreachable `return x;` (E074). A `while` whose condition is not a literal is never reported this way. A server's accept loop is a legitimate infinite loop; the warning is advisory.
+This prints three warnings: one on the function (`contains a loop with no exit path, so it will run forever.`), one on the loop (`This loop looks infinite: its condition is always true and its body has no `break`, `continue` or `return`.`) and the unreachable `return x;` (E074). A `while` whose condition is not a literal is never reported this way. A server's accept loop is a legitimate infinite loop; the warning is advisory.
 
 ### Infinite recursion (E010)
 
@@ -1143,9 +1163,12 @@ fn main(): int {
 ```text
 ── error at line 1, col 1 [E010 · recursion with no base case]
 
-  Infinite recursion detected in 'foo'.
+  I found infinite recursion in `foo`.
 
-  Hint: Every recursive function needs a base case — a path that returns without calling itself.
+  Hint: Add a base case, a path that returns without calling itself.
+
+  1 │ fn foo(): int {
+    │ ^~ this recursion has no way to stop
 
   Worth reading in full -- run `turf --explain E010` before you patch this one.
 ```
@@ -1178,13 +1201,19 @@ fn main(): int {
 ```text
 ── error at line 12, col 14 [E018 · use after free]
 
-  Oops! You're using memory from 'p' after it was freed.
-  Note: freed here (line 11, col 13)
+  I cannot use the memory of `p` after it was freed.
+
+  Hint: Stop using `p` after it is released by `free()` or by a function declared `@ownership(releases: ...)`, or set the pointer to `null` after releasing it.
+
+  11 │         free(p);
+     │             - freed here
+  12 │         r = p[0];
+     │              ^ used here after it was freed
 
   Worth reading in full -- run `turf --explain E018` before you patch this one.
 ```
 
-When only some paths release the allocation, the same findings are warnings (`'p' may already have been freed on some path reaching this use.`). The analysis is not a full alias analysis: it follows plain variables and copies between them, and an allocation that escapes into a struct or another function is not tracked. Memory management is covered in [Memory & Safety](memory_and_safety.md).
+When only some paths release the allocation, the same findings are warnings (`` `p` may already have been freed on some path reaching this use. ``). The analysis is not a full alias analysis: it follows plain variables and copies between them, and an allocation that escapes into a struct or another function is not tracked. Memory management is covered in [Memory & Safety](memory_and_safety.md).
 
 ### Constant array indexes (E001)
 
@@ -1203,7 +1232,7 @@ An index that depends on a parameter or on input is checked at run time instead 
 
 ### Complexity and other warnings
 
-A function whose cyclomatic complexity (the number of independent paths through it) is above 15 gets an advisory warning, `Function 'f' has cyclomatic complexity 17 (threshold: 15). Consider breaking it into smaller functions.` Sixteen separate `if` statements, as here, are enough:
+A function whose cyclomatic complexity (the number of independent paths through it) is above 15 gets an advisory warning, `` Function `f` has cyclomatic complexity 17, above the threshold of 15. `` Sixteen separate `if` statements, as here, are enough:
 
 ```turflang
 fn f(x: int): int {
@@ -1235,20 +1264,20 @@ A few more warnings come from simpler checks that look at one expression or stat
 
 | Code | Warning | Fires on |
 |---|---|---|
-| E167 | `You're using '/' with zero — this will crash at runtime!` | a literal `0` as the divisor of `/` or `%` |
-| E156 | `You're assigning 'k' to itself — this doesn't do anything!` | `k = k;` |
-| E166 | `You're comparing 'x' with itself!` | `x == x`, `x < x` and so on |
-| E155 | `This comparison is redundant!` | `x == true`, `x != false` |
-| E152 | `Just so you know, you're creating a new 'n' that hides an older one!` | a local that shadows another in an enclosing scope |
-| E164 | `The loop variable 'i' is never changed by this loop's 'step' or its body, so it will loop forever` | a `for` whose variable nothing advances |
-| E162 | `This loop never reaches its end` | a `for` range whose step moves away from its end |
-| E165 | `The 'then' branch is empty` | an `if` or `else` with no statements |
-| E168 | `Both branches of this 'if' do the same thing!` | an `if` and `else` with identical bodies |
-| E154 | `Empty compare statement has no arms and no 'otherwise'` | a `compare` with no arm |
-| E169 | `'f' is declared to return a fallible type ('!T') but never actually returns an error.` | a `!T` function with no error path |
-| E153 | `Machine 'M' declares state 'S' with no incoming transitions.` | a state no edge leads into (expected for the initial state) |
-| E170, E171 | `Possible use after free`, `Possible double free` | a pointer used or freed again after `mem::free` on some path |
-| E172 | `'old_fn' is deprecated: use new_fn() instead` | a call to an item marked `@deprecated("...")` |
+| E167 | `I found '/' used with zero, which will crash at runtime.` | a literal `0` as the divisor of `/` or `%` |
+| E156 | `` `k` is assigned to itself, so this does nothing. `` | `k = k;` |
+| E166 | `` `x` is compared with itself, so the result is always true (unless the value can be NaN). `` | `x == x`, `x < x` and so on |
+| E155 | `` `b == true` is the same as `b`. `` | `x == true`, `x != false` |
+| E152 | `` This new `n` hides an older one. `` | a local that shadows another in an enclosing scope |
+| E164 | `` The loop variable `i` is never changed by this loop's `step` or its body, ... `` | a `for` whose variable nothing advances |
+| E162 | `This loop never reaches its end: 5..1 counts down, but the step counts up.` | a `for` range whose step moves away from its end |
+| E165 | `` The `then` branch is empty. `` | an `if` or `else` with no statements |
+| E168 | `` Both branches of this `if` do the same thing. `` | an `if` and `else` with identical bodies |
+| E154 | `` This `compare` has no `matches` arm and no `otherwise`, so it does nothing. `` | a `compare` with no arm |
+| E169 | `` `f` is declared to return a fallible type (`!T`) but never actually returns an error. `` | a `!T` function with no error path |
+| E153 | `` Machine `M` declares state `S` with no incoming transitions. `` | a state no edge leads into (expected for the initial state) |
+| E170, E171 | `` `p` may already have been freed on some path reaching this use. ``, `` `p` may already have been freed on some path reaching this call. `` | a pointer used or freed again after `mem::free` on some path |
+| E172 | `` `old_fn` is deprecated: use new_fn() instead `` | a call to an item marked `@deprecated("...")` |
 
 Each can be [allowed or denied](#lint-levels) by its code.
 

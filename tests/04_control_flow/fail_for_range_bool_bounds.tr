@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E066
-// EXPECT-DIAG: A 'for' range bound must be an 'int', 'int32' or 'double', but this one has type 'bool'
+// EXPECT-DIAG: A `for` range bound must be an `int`, an `int32` or a `double`, and I found a `bool`.
 // A bool is not a number to count with; this must not compile into a loop
 // that never ends.
 fn main(): int {

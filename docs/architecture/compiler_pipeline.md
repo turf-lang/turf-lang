@@ -102,7 +102,7 @@ else). The mandatory `Resolver` and `TypeChecker` run over that AST; failure
 of either returns before any `codegen()` call of this pass. Only
 `TopLevelASTs` is codegenned here, because function bodies were already
 emitted by the pre-pass. A statement that is not a declaration is rejected
-as "Statements are not allowed outside of a function".
+as "I found a statement outside a function".
 
 What follows is shared by both: after the diagnostics are flushed, `--check`
 returns (after the entry-point check), and otherwise the driver wraps `main`

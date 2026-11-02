@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E008
-// EXPECT-DIAG: You're using 'x' (type 'int') before it has a value
+// EXPECT-DIAG: I cannot use `x` (type `int`) before it has a value
 // A `recover run { }` block runs before the statement holding it completes,
 // so it sees only what was assigned before that statement.
 

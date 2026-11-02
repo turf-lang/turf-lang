@@ -14,7 +14,7 @@ DECLARATIONS AND ASSIGNMENT:
   assigned later is allowed, as long as every path assigns before the read.
   `mut x: guess = 5;` infers the type from the value.
   Reassign with the name only: `x = 10;  x += 5;  x++;`. Never repeat `mut`/`immut`
-  or the type: that is "already created a variable".
+  or the type: that is "I cannot declare ... again".
   Operators: + - * / %  ** (always a double)  == != < > <= >=  && || !  & | ^ ~ << >>
 
 CASTS: postfix `expr to Type`, never `Type(expr)`.

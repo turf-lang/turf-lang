@@ -103,7 +103,7 @@ if ((Get-Listing $d) -ne $before) { Write-Fail "check created a file: before='$b
 # A file with no main is checked as a program by default, and as a module only with --module.
 $r = Cap $T $work $null @('check', 'm.tr')
 Assert-Rc 'check m.tr (no main)' $r 1
-Assert-Err 'check m.tr (no main)' $r 'No entry point found'
+Assert-Err 'check m.tr (no main)' $r 'I found no entry point'
 Assert-Err 'check m.tr (no main)' $r '--module'
 Assert-Rc 'check --module m.tr' (Cap $T $work $null @('check', '--module', 'm.tr')) 0
 Assert-Rc 'check --module pass.tr (a program is a fine module too)' (Cap $T $work $null @('check', '--module', 'pass.tr')) 0

@@ -2,9 +2,9 @@ tests/39_nullable_references/fail_deref_without_check.tr (1 error)
 
 ── error at line 8, col 13 [E081 · possible null dereference]
 
-  Possible null dereference: 'b' might be 'null' here, but you're accessing its 'val' field.
+  I cannot access the field `val` of `b`, which might be `null` here.
 
-  Hint: Add a null check first, e.g. 'if (b != null) { ... }', and access '.val' only inside it.
+  Hint: Add a null check first, for example `if (b != null) { ... }`, and access `.val` only inside it.
 
   7 │ fn bad(b: &?Box): int {
     │        - declared here

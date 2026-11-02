@@ -2,10 +2,9 @@ tests/05_arrays_pointers_ffi/fail_array_decl_init_size_mismatch.tr (1 error)
 
 ── error at line 10, col 9 [E003 · array size mismatch]
 
-  Array size mismatch!
-  Cannot initialize 'b' ('int[5]') from a value of type 'int[2]'.
+  I cannot initialize `b`, an `int[5]`, from an `int[2]`.
 
-  Hint: An array can only be initialized from an array of the same size and element type.
+  Hint: Initialize it from an array of the same size and element type.
 
   10 │     mut b: int[5] = a;
      │         ^ this array has the wrong number of elements

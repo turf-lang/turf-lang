@@ -18,7 +18,7 @@ CORRECT:
 
 INCORRECT:
     mut x: int = 0x;
-    // ERROR: '0x' isn't followed by any digit [E070]
+    // ERROR: `0x` is not followed by any digit [E070]
 
 FIX:
   Finish the literal with at least one valid digit for the chosen radix, or

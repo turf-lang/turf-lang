@@ -178,7 +178,7 @@ identical "check fail_x.tr vs turfc --check" ck_fail ck_failc
 # Before this, `turf check` passed a file that `turf compile` rejects.
 capture ck_nomain  "$TURF" check m.tr
 expect_rc "check m.tr (no main)" ck_nomain 1
-expect_err "check m.tr (no main)" ck_nomain "No entry point found"
+expect_err "check m.tr (no main)" ck_nomain "I found no entry point"
 expect_err "check m.tr (no main)" ck_nomain "--module"
 capture ck_module  "$TURF" check --module m.tr
 expect_rc "check --module m.tr" ck_module 0

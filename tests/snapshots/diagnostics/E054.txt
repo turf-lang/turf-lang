@@ -2,9 +2,9 @@ tests/55_compiler_fixes/fail_fix_unknown_method.tr (1 error)
 
 ── error at line 14, col 7 [E054 · struct method not found]
 
-  'Counter' has no method named 'bmup'.
+  I cannot find a method named `bmup` on the struct `Counter`.
 
-  Hint: It may be from the current file: 'bump'
+  Hint: Use a name from this file: `bump`
 
   14 │     c.bmup();
      │       ^~~~ the struct has no method of this name

@@ -2,8 +2,7 @@ tests/04_control_flow/fail_compare_missing_done.tr (1 error)
 
 ── error at line 11, col 9 [E058 · malformed compare block]
 
-  compare error!
-  Expected 'done' after matches arm body.
+  I expected `done` after the body of this `matches` arm.
 
   Hint: Write each arm as `matches value: ... done` and put `otherwise: ...` last, once.
 

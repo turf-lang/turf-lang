@@ -20,7 +20,7 @@ CORRECT USAGE:
 INCORRECT:
     import json;                  // json imports list itself
     mut l: list::List<int> = list::List::default();
-    // ERROR [E145]: Module 'list' is not imported in this file.
+    // ERROR [E145]: I cannot find an import of module `list` in this file.
 
     import list::List;            // brings in the name `List` only
     mut l: list::List<int> = ...; // ERROR [E145]: the `list::` qualifier needs `import list;`

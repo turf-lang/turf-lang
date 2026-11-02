@@ -20,7 +20,7 @@ CORRECT:
 
 INCORRECT:
     grete("world");
-    // ERROR: Unknown function 'grete'.
+    // ERROR: I cannot find a function named `grete`.
     //   (suggests 'greet' when it's a close match)
 
 WHAT THIS ERROR IS NOT:

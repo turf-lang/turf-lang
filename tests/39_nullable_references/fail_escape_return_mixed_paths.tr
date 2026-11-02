@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E086
-// EXPECT-DIAG: can't be returned
+// EXPECT-DIAG: be returned
 // `p` is a heap node on one path and `&n` on the other. The `c` path returns
 // a reference into a dead frame, so the return is E086 even though the other
 // path is fine (owner decision 2026-10-12: any path that carries the local

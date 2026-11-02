@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E086
-// EXPECT-DIAG: can't be pushed into a collection
+// EXPECT-DIAG: be pushed into a collection
 // The collection sink inside a loop body, same cause as
 // fail_escape_return_after_loop.tr.
 import list::List;

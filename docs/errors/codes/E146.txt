@@ -2,8 +2,8 @@ An annotation the declaration under it cannot carry
 
     @ownrship(acquires)
     pub extern fn malloc(size: int): void*;
-    // ERROR [E146]: Unknown annotation '@ownrship'.
-    //   Hint: Did you mean '@ownership'? The known annotations are: @ownership, @ffi.
+    // ERROR [E146]: I do not know an annotation named `@ownrship`.
+    //   Hint: Write `@ownership` instead, or use one of the known annotations: @ownership, @ffi.
 
 An annotation, `@name(arguments)` written on the line before a function or an
 `extern fn`, tells the compiler a fact about that declaration. The compiler
@@ -71,7 +71,7 @@ outcomes:
 
     @test(error, ParseError::Gone)
     fn t(): !void { return; }
-    // Error type 'ParseError' has no variant 'Gone'.
+    // The error type `ParseError` has no variant `Gone`.
 
 Also rejected: an outcome that is not the first argument, a method or `main`
 as a test, an option (`@test(skip: "x")`), a second `@test` on one function,

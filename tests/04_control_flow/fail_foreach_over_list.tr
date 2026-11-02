@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E005
-// EXPECT-DIAG: value of type 'list::List<int>'
+// EXPECT-DIAG: I cannot use for-each on the type `list::List<int>`, which is not an array or a string.
 import list::List;
 
 fn main(): int {

@@ -160,9 +160,9 @@ std::string describeNonLValue(const ExprAST *E) {
   if (dynamic_cast<const NumberExprAST *>(E)) return "a numeric literal";
   if (dynamic_cast<const StringExprAST *>(E)) return "a string literal";
   if (dynamic_cast<const CharExprAST *>(E)) return "a character literal";
-  if (dynamic_cast<const NullExprAST *>(E)) return "'null'";
-  if (dynamic_cast<const BreakExprAST *>(E)) return "the 'break' keyword";
-  if (dynamic_cast<const ContinueExprAST *>(E)) return "the 'continue' keyword";
+  if (dynamic_cast<const NullExprAST *>(E)) return "`null`";
+  if (dynamic_cast<const BreakExprAST *>(E)) return "the `break` keyword";
+  if (dynamic_cast<const ContinueExprAST *>(E)) return "the `continue` keyword";
   if (dynamic_cast<const FuncCallExprAST *>(E) ||
       dynamic_cast<const MethodCallExprAST *>(E))
     return "a function call's result";
@@ -230,13 +230,13 @@ void TypeChecker::visitVariable(VariableExprAST &Node) {
       (Node.ResolvedFunctionRef || Node.ResolvedSymbol || Node.ResolvedConstant ||
        LoopVarTypes_.count(Name))) {
     reportError(Node.getLoc(), ErrCode::WrongTypeArgumentCount,
-                "'" + Name + "' " +
+                "`" + Name + "` " +
                     (Node.ResolvedFunctionRef
                          ? std::string("is not generic, so it takes no type arguments.")
-                         : std::string("is a value, not a generic function, so it "
+                         : std::string("is a variable, not a generic function, so it "
                                        "takes no type arguments.")),
-                {}, "Drop the '::<...>' after '" + Name + "'.",
-                "Wrong number of type arguments!");
+                {}, "Remove the `::<...>` after `" + Name + "`.",
+                "");
     setType(&Node, nullptr);
     return;
   }
@@ -329,9 +329,8 @@ void TypeChecker::visitBinary(BinaryExprAST &Node) {
                                 &Node, Node.getLoc(), R)) {
         if (Node.ResolvedNotOperatorTarget) {
           reportError(Node.getLoc(), ErrCode::AmbiguousCall,
-                      "Ambiguous 'operator!(" + LhsTy->getName() +
-                          ")' call: more than one visible overload matches "
-                          "at this call site.");
+                      "More than one visible `operator!(" + LhsTy->getName() +
+                          ")` matches here, so I cannot choose one.");
           break;
         }
         Node.ResolvedNotOperatorTarget = C;
@@ -357,8 +356,8 @@ void TypeChecker::visitBinary(BinaryExprAST &Node) {
   if (Node.IsDesugaredNot && !Node.ResolvedNotOperatorTarget && LhsTy &&
       !LhsTy->isBool()) {
     reportError(Node.getLoc(), ErrCode::ArithmeticOperand,
-                "Cannot apply '!' to '" + LhsTy->getName() +
-                    "': its operand must be a 'bool'.",
+                "I cannot use `!` on " + SpanLabels::aType(LhsTy) +
+                    ": its operand must be a `bool`.",
                 {}, "Write a comparison, e.g. `n == 0` instead of `!n`.");
     setType(&Node, TurfBool());
     return;
@@ -386,10 +385,9 @@ void TypeChecker::visitBinary(BinaryExprAST &Node) {
           // TurfModule::registerFunction origin-tracking fix, out of scope
           // for this pass).
           reportError(Node.getLoc(), ErrCode::AmbiguousCall,
-                      "Ambiguous 'operator " + OpToDisplayString(Op) +
+                      "More than one visible `operator " + OpToDisplayString(Op) +
                           "(" + LhsTy->getName() + ", " + RhsTy->getName() +
-                          ")' call: more than one visible overload matches "
-                          "at this call site.");
+                          ")` matches here, so I cannot choose one.");
           break;
         }
         Node.ResolvedOperatorTarget = C;
@@ -446,13 +444,15 @@ void TypeChecker::visitBinary(BinaryExprAST &Node) {
 
     if (!lhsOk) {
       reportError(Node.getLoc(), ErrCode::ArithmeticOperand,
-                  "Bitwise operator requires integer operands, but left operand is '" +
-                      LhsTy->getName() + "'.");
+                  "A bitwise operator needs `int` operands, and the left one is " +
+                      SpanLabels::aType(LhsTy) + ".",
+                  {}, "Convert the operand with `to int`, or use an arithmetic operator.");
     }
     if (!rhsOk) {
       reportError(Node.getLoc(), ErrCode::ArithmeticOperand,
-                  "Bitwise operator requires integer operands, but right operand is '" +
-                      RhsTy->getName() + "'.");
+                  "A bitwise operator needs `int` operands, and the right one is " +
+                      SpanLabels::aType(RhsTy) + ".",
+                  {}, "Convert the operand with `to int`, or use an arithmetic operator.");
     }
     setType(&Node, TurfInt());
     return;
@@ -471,15 +471,17 @@ void TypeChecker::visitBinary(BinaryExprAST &Node) {
   if (Op == -78 /*TOK_POWER*/) {
     if (LhsTy && !LhsTy->isNumeric()) {
       reportError(Node.getLoc(), ErrCode::ArithmeticOperand,
-                  "Exponentiation operator '**' requires numeric operands, but left operand is '" +
-                      LhsTy->getName() + "'.");
+                  "`**` needs number operands, and the left one is " +
+                      SpanLabels::aType(LhsTy) + ".",
+                  {}, "Use an `int` or a `double` on each side of `**`.");
       setType(&Node, nullptr);
       return;
     }
     if (RhsTy && !RhsTy->isNumeric()) {
       reportError(Node.getLoc(), ErrCode::ArithmeticOperand,
-                  "Exponentiation operator '**' requires numeric operands, but right operand is '" +
-                      RhsTy->getName() + "'.");
+                  "`**` needs number operands, and the right one is " +
+                      SpanLabels::aType(RhsTy) + ".",
+                  {}, "Use an `int` or a `double` on each side of `**`.");
       setType(&Node, nullptr);
       return;
     }
@@ -520,10 +522,8 @@ void TypeChecker::visitUnary(UnaryExprAST &Node) {
                                 Node.getLoc(), R)) {
         if (Node.ResolvedOperatorTarget) {
           reportError(Node.getLoc(), ErrCode::AmbiguousCall,
-                      "Ambiguous 'operator " + OpToDisplayString(Op) + "(" +
-                          OperandTy->getName() +
-                          ")' call: more than one visible overload matches "
-                          "at this call site.");
+                      "More than one visible `operator " + OpToDisplayString(Op) + "(" +
+                          OperandTy->getName() + ")` matches here, so I cannot choose one.");
           break;
         }
         Node.ResolvedOperatorTarget = C;
@@ -549,9 +549,10 @@ void TypeChecker::visitUnary(UnaryExprAST &Node) {
     // rejected rather than silently passing the string through.
     if (OperandTy && !OperandTy->isNumeric()) {
       reportError(Node.getLoc(), ErrCode::ArithmeticOperand,
-                  "Unary '" + std::string(1, static_cast<char>(Op)) +
-                      "' requires a numeric operand, got '" +
-                      OperandTy->getName() + "'.");
+                  "The unary `" + std::string(1, static_cast<char>(Op)) +
+                      "` needs a number, and I found " +
+                      SpanLabels::aType(OperandTy) + ".",
+                  {}, "Use it on an `int` or a `double`.");
       setType(&Node, nullptr);
       return;
     }
@@ -569,8 +570,8 @@ void TypeChecker::visitUnary(UnaryExprAST &Node) {
     // Bitwise NOT: operand must be int
     if (OperandTy && !OperandTy->isNamed("int")) {
       reportError(Node.getLoc(), ErrCode::ArithmeticOperand,
-                  "Unary '~' (bitwise NOT) requires an integer operand, got '" +
-                      OperandTy->getName() + "'.");
+                  "`~` needs an `int`, and I found " + SpanLabels::aType(OperandTy) + ".",
+                  {}, "Convert the operand with `to int` first.");
       setType(&Node, nullptr);
       return;
     }
@@ -600,14 +601,14 @@ static bool rejectSizeParamPlace(const ExprAST *Target, SourceLocation Loc,
   if (!V || !V->SizeValue)
     return false;
   TypeError(Loc, ErrCode::SizeParameter,
-            "'" + V->getName() + "' is a size parameter: it can't be " + What + ".",
-            "Copy it into a local first: 'mut n: int = " + V->getName() + ";'.")
+            "`" + V->getName() + "` is a size parameter, so it cannot be " + What + ".",
+            "Copy it into a local first: `mut n: int = " + V->getName() + ";`.")
       .raise();
   return true;
 }
 
 void TypeChecker::visitAddressOf(AddressOfExprAST &Node) {
-  if (rejectSizeParamPlace(Node.getOperand(), Node.getLoc(), "referenced with '&'")) {
+  if (rejectSizeParamPlace(Node.getOperand(), Node.getLoc(), "referenced with `&`")) {
     setType(&Node, nullptr);
     return;
   }
@@ -634,8 +635,9 @@ void TypeChecker::visitAddressOf(AddressOfExprAST &Node) {
                              (AA && !AA->ResolvedIndexGetTarget);
     if (!Addressable) {
       reportError(Node.getLoc(), ErrCode::NonAddressableExpression,
-                  "Cannot take the address of a non-addressable expression.", {},
-                  "Only variables, struct fields, and array elements are addressable.");
+                  "I cannot take the address of this expression: only a "
+                  "variable, a struct field or an array element has one.", {},
+                  "Store the result in a variable and take the variable's address.");
       setType(&Node, nullptr);
       return;
     }
@@ -742,7 +744,7 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
     if (!IsOperatorIndex)
       rejectOperatorTemporaryWrite(
           Node.getLHS(), Node.getLoc(),
-          "Cannot assign to part of the value an 'operator[]' read returned: "
+          "I cannot assign to part of what an `operator[]` read returned: "
           "it is a copy, so the write would be lost.",
           /*PlaceIsStoreTarget=*/true);
   }
@@ -804,11 +806,9 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
                                   MutableArrAcc->getLoc(), Unused)) {
           if (MutableArrAcc->ResolvedIndexSetTarget) {
             reportError(Node.getLoc(), ErrCode::AmbiguousCall,
-                        "Ambiguous 'operator[]=(" + ArrBaseTy->getName() +
+                        "More than one visible `operator[]=(" + ArrBaseTy->getName() +
                             ", " + ArrIndexTy->getName() + ", " +
-                            RhsTy->getName() +
-                            ")' call: more than one visible overload "
-                            "matches at this call site.");
+                            RhsTy->getName() + ")` matches here, so I cannot choose one.");
             break;
           }
           MutableArrAcc->ResolvedIndexSetTarget = C;
@@ -825,8 +825,8 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
           MutableArrAcc->ResolvedIndexSetTarget->Params[0].Type->isReference())
         rejectOperatorTemporaryWrite(
             ArrAcc->getBase(), Node.getLoc(),
-            "Cannot assign through 'operator[]=' on the value another "
-            "'operator[]' read returned: the container is a copy, so the "
+            "I cannot assign through `operator[]=` on what another "
+            "`operator[]` read returned: the container is a copy, so the "
             "write would be lost.",
             /*PlaceIsStoreTarget=*/false);
     }
@@ -839,9 +839,11 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
     if (!HandledViaOperatorIndexSet && ArrBaseTy &&
         needsOperatorIndex(ArrBaseTy.get())) {
       reportError(Node.getLoc(), ErrCode::ArgumentType,
-                  "No 'operator[]=' overload matches '" + ArrBaseTy->getName() +
+                  "No `operator[]=` matches `" + ArrBaseTy->getName() +
                       "[" + (ArrIndexTy ? ArrIndexTy->getName() : "?") +
-                      "] = " + (RhsTy ? RhsTy->getName() : "?") + "'.");
+                      "] = " + (RhsTy ? RhsTy->getName() : "?") + "`.",
+                  {}, "Declare an `operator[]=` that takes these types, or "
+                      "convert the index or the element with `to`.");
     }
   }
 
@@ -918,8 +920,10 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
       Hints.Label = SpanLabels::thisIs(RhsTy.get());
       reportError(SpanLabels::spanOf(Node.getRHS(), Node.getLoc()),
                   codeForMismatch(RhsTy.get(), nullptr, ErrCode::TypeMismatch),
-                  "Cannot assign value of type '" + RhsTy->getName() +
-                      "' to variable of type '" + LhsTy->getName() + "'.",
+                  "I cannot assign " + SpanLabels::aType(RhsTy) + " to " +
+                      (LHSIsBareVariable && LHSVar ? "`" + LHSVar->getName() + "`, which is "
+                                                   : std::string("a place that holds ")) +
+                      SpanLabels::aType(LhsTy) + ".",
                   Related, hintForMismatch(RhsTy.get(), nullptr, "", LhsTy.get()), "", Hints);
     } else {
       // SEM-002 -- see visitVarDecl()'s identical comment (TypeCheckerDecl.cpp).
@@ -1002,7 +1006,7 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
     if (!(LAA && LBase && needsOperatorIndex(LBase.get())))
       rejectOperatorTemporaryWrite(
           Node.getLHS(), Node.getLoc(),
-          "Cannot update part of the value an 'operator[]' read returned: "
+          "I cannot update part of what an `operator[]` read returned: "
           "it is a copy, so the update would be lost.",
           /*PlaceIsStoreTarget=*/true);
   }
@@ -1031,10 +1035,9 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
                                 Node.getLoc(), R)) {
         if (Node.ResolvedOperatorTarget) {
           reportError(Node.getLoc(), ErrCode::AmbiguousCall,
-                      "Ambiguous 'operator " + OpToDisplayString(Op) + "=(" +
+                      "More than one visible `operator " + OpToDisplayString(Op) + "=(" +
                           LhsTy->getName() + ", " + RhsTy->getName() +
-                          ")' call: more than one visible overload matches "
-                          "at this call site.");
+                          ")` matches here, so I cannot choose one.");
           break;
         }
         Node.ResolvedOperatorTarget = C;
@@ -1050,10 +1053,11 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
       // coercion" rule every other operator-overload call site enforces).
       if (OpResultTy && !sameTypeExact(OpResultTy.get(), LhsTy.get())) {
         reportError(Node.getLoc(), ErrCode::TypeMismatch,
-                    "'operator " + OpToDisplayString(Op) + "' returns '" +
-                        OpResultTy->getName() + "', which cannot be "
-                        "assigned back to '" + LhsTy->getName() +
-                        "' without an explicit cast.");
+                    "`operator " + OpToDisplayString(Op) + "` returns " +
+                        SpanLabels::aType(OpResultTy) + ", which I cannot "
+                        "store back in " + SpanLabels::aType(LhsTy) + ".",
+                    {}, "Write the assignment out and convert with `to`: `x = (x " +
+                        OpToDisplayString(Op) + " y) to " + LhsTy->getName() + ";`.");
       }
       setType(&Node, LhsTy);
       return;
@@ -1087,10 +1091,9 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
     // would otherwise defeat a "LhsTy is null" check entirely.
     if (ArrBaseTy && needsOperatorIndex(ArrBaseTy.get())) {
       reportError(Node.getLoc(), ErrCode::UnsupportedOperation,
-                  "Compound assignment through 'operator[]' is not "
-                  "supported -- write 'x[i] = x[i] " + OpToDisplayString(Op) +
-                      " " + (RhsTy ? RhsTy->getName() : "value") +
-                      "' explicitly instead.");
+                  "I cannot use `" + OpToDisplayString(Op) + "=` through "
+                  "`operator[]`.",
+                  {}, "Write it out: `x[i] = x[i] " + OpToDisplayString(Op) + " y;`.");
       setType(&Node, RhsTy);
       return;
     }
@@ -1110,13 +1113,15 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
   if (isBitwiseOp(Op)) {
     if (LhsTy && !LhsTy->isNamed("int")) {
       reportError(Node.getLoc(), ErrCode::ArithmeticOperand,
-                  "Bitwise compound assignment requires an integer operand, "
-                  "but the left operand is '" + LhsTy->getName() + "'.");
+                  "A bitwise assignment needs `int` operands, and the left one is " +
+                      SpanLabels::aType(LhsTy) + ".",
+                  {}, "Convert the operand with `to int`, or use an arithmetic operator.");
     }
     if (RhsTy && !RhsTy->isNamed("int")) {
       reportError(Node.getLoc(), ErrCode::ArithmeticOperand,
-                  "Bitwise compound assignment requires an integer operand, "
-                  "but the right operand is '" + RhsTy->getName() + "'.");
+                  "A bitwise assignment needs `int` operands, and the right one is " +
+                      SpanLabels::aType(RhsTy) + ".",
+                  {}, "Convert the operand with `to int`, or use an arithmetic operator.");
     }
     // LhsTy is set on Node below (unconditionally, same as every other
     // branch) -- nothing further to do here.
@@ -1131,13 +1136,15 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
     // operator specifically. Int on both sides is exact (EmitCheckedIntPow()).
     if (LhsTy && !LhsTy->isNumeric()) {
       reportError(Node.getLoc(), ErrCode::ArithmeticOperand,
-                  "Exponentiation compound assignment requires a numeric "
-                  "operand, but the left operand is '" + LhsTy->getName() + "'.");
+                  "`**=` needs number operands, and the left one is " +
+                      SpanLabels::aType(LhsTy) + ".",
+                  {}, "Use an `int` or a `double` on each side of `**=`.");
     }
     if (RhsTy && !RhsTy->isNumeric()) {
       reportError(Node.getLoc(), ErrCode::ArithmeticOperand,
-                  "Exponentiation compound assignment requires a numeric "
-                  "operand, but the right operand is '" + RhsTy->getName() + "'.");
+                  "`**=` needs number operands, and the right one is " +
+                      SpanLabels::aType(RhsTy) + ".",
+                  {}, "Use an `int` or a `double` on each side of `**=`.");
     }
     // LhsTy is set on Node below (unconditionally, same as every other
     // branch) -- nothing further to do here.
@@ -1155,14 +1162,11 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
     const VariableExprAST *LHSVar_i32 = findRootVariable(Node.getLHS());
     std::string VarSpelling = LHSVar_i32 ? LHSVar_i32->getName() : "x";
     reportError(Node.getLoc(), ErrCode::UnsupportedOperation,
-                "Compound assignment '" + OpToDisplayString(Op) +
-                    "=' is not supported on 'int32' -- int32 is never "
-                    "itself an arithmetic result type.",
+                "I cannot use `" + OpToDisplayString(Op) +
+                    "=` on an `int32`: arithmetic on an `int32` gives an `int`.",
                 {},
-                "Write '" + VarSpelling + " = (" + VarSpelling + " " +
-                    OpToDisplayString(Op) + " " +
-                    (RhsTy ? RhsTy->getName() : "value") +
-                    ") to int32;' explicitly instead.");
+                "Write it out: `" + VarSpelling + " = (" + VarSpelling + " " +
+                    OpToDisplayString(Op) + " y) to int32;`.");
   } else if (LhsTy && RhsTy) {
     if (inferArithmeticType(Node.getLoc(), Op, LhsTy.get(), RhsTy.get(), ResultTy)) {
       if (!typesCompatible(ResultTy.get(), LhsTy.get())) {
@@ -1172,8 +1176,8 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
           Related.push_back({toSourceLocation(LHSVar_early->ResolvedSymbol->DeclLoc),
                              "declared here"});
         reportError(Node.getLoc(), ErrCode::TypeMismatch,
-                    "Cannot assign value of type '" + ResultTy->getName() +
-                        "' to variable of type '" + LhsTy->getName() + "'.",
+                    "I cannot store " + SpanLabels::aType(ResultTy) + " back in " +
+                        SpanLabels::aType(LhsTy) + ".",
                     Related);
       }
     }
@@ -1210,7 +1214,7 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
 
 
 void TypeChecker::visitPostfixExpr(PostfixExprAST &Node) {
-  if (rejectSizeParamPlace(Node.getOperand(), Node.getLoc(), "changed with '++' or '--'")) {
+  if (rejectSizeParamPlace(Node.getOperand(), Node.getLoc(), "changed with `++` or `--`")) {
     setType(&Node, nullptr);
     return;
   }
@@ -1244,7 +1248,7 @@ void TypeChecker::visitPostfixExpr(PostfixExprAST &Node) {
     if (!(OAA && OBase && needsOperatorIndex(OBase.get())))
       rejectOperatorTemporaryWrite(
           Node.getOperand(), Node.getLoc(),
-          "Cannot update part of the value an 'operator[]' read returned: "
+          "I cannot update part of what an `operator[]` read returned: "
           "it is a copy, so the update would be lost.",
           /*PlaceIsStoreTarget=*/true);
   }
@@ -1266,9 +1270,8 @@ void TypeChecker::visitPostfixExpr(PostfixExprAST &Node) {
     TurfTypePtr ArrBaseTy = getType(ArrAcc->getBase());
     if (ArrBaseTy && needsOperatorIndex(ArrBaseTy.get())) {
       reportError(Node.getLoc(), ErrCode::UnsupportedOperation,
-                  std::string(Dir) + " '" + OpSpelling + OpSpelling +
-                      "' through 'operator[]' is not supported -- write "
-                      "'x[i] = x[i] " + OpSpelling + " 1' explicitly instead.");
+                  "I cannot use `" + OpSpelling + OpSpelling + "` through `operator[]`.",
+                  {}, "Write it out: `x[i] = x[i] " + OpSpelling + " 1;`.");
       setType(&Node, OpTy);
       return;
     }
@@ -1291,10 +1294,9 @@ void TypeChecker::visitPostfixExpr(PostfixExprAST &Node) {
         OpResultTy = R;
         if (Node.ResolvedOperatorTarget) {
           reportError(Node.getLoc(), ErrCode::AmbiguousCall,
-                      "Ambiguous " + std::string(Dir) + " 'operator " + OpSpelling + "(" +
-                          OpTy->getName() +
-                          ", int)' call: more than one visible overload "
-                          "matches at this call site.");
+                      "More than one visible `operator " + OpSpelling + "(" +
+                          OpTy->getName() + ", int)` matches this " + std::string(Dir) +
+                          ", so I cannot choose one.");
           break;
         }
         Node.ResolvedOperatorTarget = C;
@@ -1303,11 +1305,12 @@ void TypeChecker::visitPostfixExpr(PostfixExprAST &Node) {
     if (Node.ResolvedOperatorTarget) {
       if (OpResultTy && !sameTypeExact(OpResultTy.get(), OpTy.get())) {
         reportError(Node.getLoc(), ErrCode::TypeMismatch,
-                    "'operator " + OpSpelling + "' returns '" +
-                        OpResultTy->getName() +
-                        "', which cannot be stored back into '" +
-                        OpTy->getName() + "' for " + Dir + " '" + OpSpelling +
-                        OpSpelling + "'.");
+                    "`operator " + OpSpelling + "` returns " +
+                        SpanLabels::aType(OpResultTy) + ", which I cannot store "
+                        "back in " + SpanLabels::aType(OpTy) + " for `" + OpSpelling +
+                        OpSpelling + "`.",
+                    {}, "Write it out and convert with `to`: `x = (x " + OpSpelling +
+                        " 1) to " + OpTy->getName() + ";`.");
       }
       HandledViaOperator = true;
     }
@@ -1333,20 +1336,20 @@ void TypeChecker::visitPostfixExpr(PostfixExprAST &Node) {
     const VariableExprAST *OperandVar = findRootVariable(Node.getOperand());
     std::string VarSpelling = OperandVar ? OperandVar->getName() : "x";
     reportError(Node.getLoc(), ErrCode::UnsupportedOperation,
-                std::string(Dir) + " '" + OpSpelling + OpSpelling +
-                    "' is not supported on 'int32' -- int32 is never itself "
-                    "an arithmetic result type.",
+                "I cannot use `" + OpSpelling + OpSpelling +
+                    "` on an `int32`: arithmetic on an `int32` gives an `int`.",
                 {},
-                "Write '" + VarSpelling + " = (" + VarSpelling + " " +
-                    OpSpelling + " 1) to int32;' explicitly instead.");
+                "Write it out: `" + VarSpelling + " = (" + VarSpelling + " " +
+                    OpSpelling + " 1) to int32;`.");
     setType(&Node, OpTy);
     return;
   }
 
   if (!HandledViaOperator && OpTy && !OpTy->isNumeric()) {
     reportError(Node.getLoc(), ErrCode::ArithmeticOperand,
-                (std::string(Dir) + " operator requires a numeric operand, got '") +
-                    OpTy->getName() + "'.");
+                "`" + std::string(OpSpelling) + OpSpelling + "` needs a number, and I found " +
+                    SpanLabels::aType(OpTy) + ".",
+                {}, "Use it on an `int` or a `double` variable.");
   }
 
   setType(&Node, OpTy);
@@ -1408,8 +1411,8 @@ void TypeChecker::visitCast(CastExprAST &Node) {
   if (checkUnsizedArrayPlacement(
           DestTy.get(), /*AllowAtTop=*/false, Node.getLoc(),
           "A conversion",
-          "There is no conversion to an unsized array. Pass the array "
-          "straight to the 'T[]' parameter; it is accepted as it is.")) {
+          "Pass the array straight to the `T[]` parameter, which takes it as "
+          "it is: nothing converts to an unsized array.")) {
     setType(&Node, nullptr);
     return;
   }
@@ -1425,27 +1428,27 @@ void TypeChecker::visitCast(CastExprAST &Node) {
     const std::string Dest = DestTy->getName();
     std::string Kind, Hint;
     if (Dest == "int" && !literalConvertsToInt(Text)) {
-      Kind = "an int";
-      Hint = "'to int' takes an optional '-' and decimal digits, in int's "
-             "range. Write the number itself, e.g. 42, not \"42\" to int.";
+      Kind = "an `int`";
+      Hint = "Write the number itself, e.g. `42`, not `\"42\" to int`: `to int` "
+             "takes an optional `-` and decimal digits, in the range of `int`.";
     } else if (Dest == "double" && !literalConvertsToDouble(Text)) {
-      Kind = "a double";
-      Hint = "'to double' takes an optional '-', digits with at most one "
-             "'.', and an optional exponent (1e3). Write the number itself, "
-             "e.g. 2.5, not \"2.5\" to double.";
+      Kind = "a `double`";
+      Hint = "Write the number itself, e.g. `2.5`, not `\"2.5\" to double`: "
+             "`to double` takes an optional `-`, digits with at most one `.`, "
+             "and an optional exponent (`1e3`).";
     } else if (auto *ET = dynamic_cast<const TurfEnumType *>(DestTy.get())) {
       const auto &Vs = ET->getVariants();
       if (std::find(Vs.begin(), Vs.end(), Text) == Vs.end()) {
-        Kind = "a variant of '" + ET->getName() + "'";
-        Hint = "Name the variant directly, e.g. '" + ET->getName() +
-               "::" + (Vs.empty() ? std::string("X") : Vs.front()) + "'.";
+        Kind = "a variant of `" + ET->getName() + "`";
+        Hint = "Name the variant directly, e.g. `" + ET->getName() +
+               "::" + (Vs.empty() ? std::string("X") : Vs.front()) + "`.";
       }
     }
     if (!Kind.empty())
       reportError(Node.getLoc(), ErrCode::LiteralNeverConverts,
                   "\"" + Text + "\" is not " + Kind +
-                      ", so this conversion would always panic when it runs.",
-                  {}, Hint, "Conversion can never succeed!");
+                      ", so this conversion would panic every time it runs.",
+                  {}, Hint, "");
   }
   if (auto *ET = dynamic_cast<const TurfEnumType *>(DestTy.get())) {
     if (auto *Lit = dynamic_cast<const NumberExprAST *>(Node.getOperand())) {
@@ -1453,14 +1456,13 @@ void TypeChecker::visitCast(CastExprAST &Node) {
         long long V = Lit->getIntVal();
         if (V < 0 || V >= ET->numVariants()) {
           reportError(Node.getLoc(), ErrCode::EnumValueOutOfRange,
-                      "Value " + std::to_string(V) + " is out of range for enum '" +
-                          ET->getName() + "' (valid range: 0 to " +
-                          std::to_string(ET->numVariants() - 1) + ").",
+                      std::to_string(V) + " is not a variant of the enum `" +
+                          ET->getName() + "`, whose variants are 0 to " +
+                          std::to_string(ET->numVariants() - 1) + ".",
                       {},
-                      "Use one of '" + ET->getName() +
-                          "'s declared variants instead of an arbitrary "
-                          "integer literal.",
-                      "Value out of range!");
+                      "Use one of the variants of `" + ET->getName() +
+                          "` by name, e.g. `" + ET->getName() + "::...`.",
+                      "");
         }
       }
     }
@@ -1524,12 +1526,11 @@ void TypeChecker::visitCast(CastExprAST &Node) {
         typesCompatible(DstRef->getPointee().get(), SrcRef->getPointee().get());
     if (!SamePointee && !typesCompatible(OperandTy.get(), DestTy.get()))
       reportError(Node.getLoc(), ErrCode::RawPointerOutsideUnsafe,
-                  "Converting '" + OperandTy->getName() + "' to the reference '" +
-                      DestTy->getName() + "' cannot be done outside an 'unsafe' block.",
+                  "I cannot convert " + SpanLabels::aType(OperandTy) + " to the reference `" +
+                      DestTy->getName() + "` outside an `unsafe` block: it may point at nothing.",
                   {},
-                  "A reference made this way may point at nothing. Wrap the "
-                  "conversion in 'unsafe { }' if the address is known to be valid.",
-                  "Unsafe reference conversion!");
+                  "Wrap the conversion in `unsafe { }` if the address is valid.",
+                  "");
   }
 
   // `r to string` with `r: &T` reinterprets the reference's address as a
@@ -1538,12 +1539,12 @@ void TypeChecker::visitCast(CastExprAST &Node) {
   if (OperandTy && DestTy && (OperandTy->isReference() || OperandTy->isNullableReference()) &&
       DestTy->getName() == "string" && !isUnsafeGateExempt(Node.getLoc(), &Node))
     reportError(Node.getLoc(), ErrCode::RawPointerOutsideUnsafe,
-                "Converting the reference '" + OperandTy->getName() +
-                    "' to 'string' cannot be done outside an 'unsafe' block.",
+                "I cannot convert the reference `" + OperandTy->getName() +
+                    "` to a `string` outside an `unsafe` block: it reads the bytes it "
+                    "points at as text.",
                 {},
-                "This reads the referenced bytes as text; it does not format the "
-                "value. Convert a field or element instead (`r.x to string`).",
-                "Unsafe reference conversion!");
+                "Convert a field or an element instead, e.g. `r.x to string`.",
+                "");
 
   // SEM-002 (docs/archive/ARCHITECTURE_OVERHAUL.md §8): 'to'-cast
   // legality, Rule B1 -- moved here from Codegen (CastExprAST::codegen(),
@@ -1618,8 +1619,8 @@ void TypeChecker::visitCast(CastExprAST &Node) {
         TypeError(Node.getLoc(),
                   DstName == "string" ? ErrCode::StringConversion
                                       : ErrCode::InvalidCast,
-                  "Cannot explicitly cast '" + SrcName +
-                                      "' to '" + DstName + "'")
+                  "I cannot convert " + SpanLabels::aType(OperandTy) + " to " +
+                                      SpanLabels::aType(DestTy) + " with `to`.")
             .raise();
 #else
         throw std::runtime_error("TypeError: Cannot explicitly cast");
@@ -1810,14 +1811,13 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
       // remembered for the next header to collide with.
       if (PatternKey && !Guard && !SeenPatternKeys.insert(*PatternKey).second) {
         reportError(Arm.Loc, ErrCode::DuplicateMatchArm,
-                    "Duplicate 'matches' pattern: this value is already "
-                    "handled by an earlier arm in this compare block, so "
-                    "this arm can never run.",
+                    "An earlier arm of this `compare` already matches this "
+                    "pattern, so this arm never runs.",
                     {},
                     "Remove the duplicate arm, or combine it with the "
                     "earlier one by stacking (`matches A:` then "
                     "`matches B:` sharing one body).",
-                    "Duplicate pattern!");
+                    "");
       }
 
       if (!Guard) {
@@ -1836,8 +1836,8 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
         if (GuardTy && !GuardTy->isNamed("bool")) {
           InvalidPatternError(
               Arm.Loc,
-              "a guard must be a 'bool' condition, but this one has type '" +
-                  GuardTy->getName() + "'.",
+              "A guard must be a `bool`, and I found " +
+                  SpanLabels::aType(GuardTy) + ".",
               "Write a comparison, e.g. `matches Point { x, y } if x == y:`.")
               .raise();
         }
@@ -1890,7 +1890,7 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
   // 3. Type-check the 'otherwise' body if present
   if (Node.getOtherBodyMut()) {
     if (CatchAllLoc && FirstWarningAt("unreachable-arm", Node.getOtherLoc()))
-      UnreachableArmWarning(Node.getOtherLoc(), "The 'otherwise' arm", *CatchAllLoc).emit();
+      UnreachableArmWarning(Node.getOtherLoc(), "The `otherwise` arm", *CatchAllLoc).emit();
     ControlScope OtherScope(*this, /*Loop=*/false);
     check(Node.getOtherBodyMut());
   }
@@ -1923,9 +1923,9 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
         NonExhaustiveCompareError(
             Node.getLoc(), "enum comparison", ET->getName(), "Missing variants:",
             Missing,
-            "Add an arm for each missing variant, or 'otherwise:' (or "
-            "`matches _:`) to handle the rest. A guarded arm doesn't count: "
-            "its guard may be false.")
+            "Add an arm for each missing variant, or `otherwise:` (or "
+            "`matches _:`) for the rest. A guarded arm does not count: its "
+            "guard may be false.")
             .raise();
     } else if (SubjectTy && SubjectTy->isNamed("bool")) {
       std::vector<std::string> Missing;
@@ -1937,9 +1937,8 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
       else
         NonExhaustiveCompareError(
             Node.getLoc(), "bool comparison", "bool", "Missing values:", Missing,
-            "Add `matches true:` and `matches false:` arms, or 'otherwise:' "
-            "to handle the rest. A guarded arm doesn't count: its guard may "
-            "be false.")
+            "Add `matches true:` and `matches false:` arms, or `otherwise:` "
+            "for the rest. A guarded arm does not count: its guard may be false.")
             .raise();
     } else if (const auto *UET =
                    SubjectTy ? dynamic_cast<const TurfUserErrorType *>(SubjectTy.get())
@@ -1957,17 +1956,17 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
         NonExhaustiveCompareError(
             Node.getLoc(), "error comparison", UET->getName(), "Missing variants:",
             Missing,
-            "Add an arm for each missing variant, or 'otherwise:' (or `matches "
-            "_:`) to handle the rest. A guarded arm doesn't count, and neither "
-            "does one whose payload pattern can fail to match (`E::V(0)`): use "
-            "`E::V(..)` or `E::V(name)` to cover the variant.")
+            "Add an arm for each missing variant, or `otherwise:` (or `matches "
+            "_:`) for the rest. Use `E::V(..)` or `E::V(name)` to cover a "
+            "variant: a guarded arm does not count, and neither does one whose "
+            "payload pattern can fail to match (`E::V(0)`).")
             .raise();
     } else if (SubjectTy && SubjectTy->isAnyError()) {
       NonExhaustiveCompareError(
-          Node.getLoc(), "comparison", SubjectTy->getName(), "", {},
-          "An error value can be any error a callee might return, which "
-          "can't be listed. End the compare with 'otherwise:' (or `matches "
-          "_:`) to handle the ones you don't name.")
+          Node.getLoc(), "comparison", "error", "", {},
+          "End the `compare` with `otherwise:` (or `matches _:`) for the "
+          "errors you do not name: this error can be any error a callee "
+          "returns, so they cannot all be listed.")
           .raise();
     }
   }

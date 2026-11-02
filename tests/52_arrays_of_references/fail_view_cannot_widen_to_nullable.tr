@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E056
-// EXPECT-DIAG: No overload of 'f' matches argument types ((&N)[1])
+// EXPECT-DIAG: No overload of `f` takes the argument types ((&N)[1]).
 // A `(&?N)[]` parameter views the caller's array. Viewing a `(&N)[1]` that way
 // would let the callee store null into an array whose elements can't be null,
 // so only a literal (a fresh value) widens to `&?N` elements.

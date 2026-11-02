@@ -11,7 +11,7 @@ And here's the kind of mistake that trips this error -- a typo in the function n
 
     import io;
     io::printlne("hello");
-    // ERROR: Module 'io' has nothing named 'printlne'.
+    // ERROR: I cannot find `printlne` in the module `io`.
 
 Just like with struct fields, Turf will usually notice how close your typo is to a real name and suggest it for you, so you can fix the spelling and move on.
 

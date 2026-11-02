@@ -8,7 +8,7 @@ CAUSE:
 INCORRECT:
     immut count: int = 1;
     if count > 0 {
-        immut count: int = 2;   // WARNING: hides the first 'count'
+        immut count: int = 2;   // WARNING: This new `count` hides an older one.
         printline(count to string);
     }
 

@@ -10,7 +10,7 @@ Here's a correctly declared enum and a correct use of one of its variants:
 And here's the mistake -- asking for a variant that was never declared:
 
     immut c: Color = Color::Purple;
-    // ERROR: Enum 'Color' has no variant 'Purple'.
+    // ERROR: I cannot find a variant `Purple` in the enum `Color`.
 
 Just like with struct fields, if your typo is close to a real variant name, Turf will usually suggest the one it thinks you meant.
 

@@ -2,9 +2,9 @@ tests/25_errors/fail_error_unknown_variant.tr (1 error)
 
 ── error at line 10, col 31 [E039 · no such variant]
 
-  Error type 'IOError' has no variant 'Nonexistent'.
+  I cannot find a variant `Nonexistent` in the error type `IOError`.
 
-  Hint: Double-check the spelling against IOError's declared variants.
+  Hint: Check the spelling against the variants declared in `IOError`.
 
   10 │     mut e: IOError = IOError::Nonexistent;
      │                               ^~~~~~~~~~~ no variant of this name

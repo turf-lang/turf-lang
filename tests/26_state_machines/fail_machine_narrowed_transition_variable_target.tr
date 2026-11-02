@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E036
-// EXPECT-DIAG: target must be written as a state
+// EXPECT-DIAG: needs a state written as
 // EXPECT-NO-DIAG: E035
 // In a narrowed arm too: the target is checked before any edge, so there is
 // no "no transition from 'Idle' to ''".

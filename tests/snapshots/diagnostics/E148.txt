@@ -2,10 +2,9 @@ tests/07_functions_modules/fail_type_identity_type_args_on_non_generic.tr (1 err
 
 ── error at line 11, col 1 [E148 · wrong number of type arguments]
 
-  Wrong number of type arguments!
-  'Point' is not generic -- it takes no type arguments.
+  `Point` is not generic, so it takes no type arguments.
 
-  Hint: Write it as plain 'Point'.
+  Hint: Write it as plain `Point`.
 
   11 │ fn first(p: Point<int>): int {
      │ ^~ this has the wrong number of type arguments

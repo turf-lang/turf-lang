@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E066
-// EXPECT-DIAG: Cannot initialise 'int' variable 'x' with value of type '!int'
+// EXPECT-DIAG: I cannot store a `!int` in `x`, which is an `int`.
 // Test (fail): a '!T' value can't be assigned directly to a 'T'-typed
 // variable without going through 'recover' first.
 error MathError {

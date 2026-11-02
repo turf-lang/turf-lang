@@ -20,9 +20,8 @@ CORRECT SYNTAX (example):
 
 INCORRECT:
     add(2, 3, 4);
-    // ERROR: 'add' was called with 3 arguments, but no overload accepts
-    //        that many.
-    //   Known overloads:
+    // ERROR: I found no overload of `add` that takes 3 arguments.
+    //   The overloads are:
     //     fn add(int, int): int
 
 WHAT THIS ERROR IS NOT:

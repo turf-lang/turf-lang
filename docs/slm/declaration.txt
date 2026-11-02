@@ -33,12 +33,12 @@ REASSIGNMENT (after first declaration):
 
   INCORRECT:
     mut count: int = 0;
-    mut count: int = 10;    // ERROR: "Wait a minute! You already created a
-                             // variable named 'count'."
+    mut count: int = 10;    // ERROR: "I cannot declare `count` again, because it
+                             // is already declared."
 
   Reassigning an `immut` variable at all (`count = 10;` where count was
-  declared `immut`) is also an error: "Oops! You can't change the value of
-  'count' because it's immutable." This includes indirectly, through a
+  declared `immut`) is also an error: "I cannot change `count`: it is
+  immutable." This includes indirectly, through a
   struct method that mutates one of its own fields (`immut c: Counter =
   ...; c.increment();` is rejected the same way if increment() assigns to
   `self.val`).

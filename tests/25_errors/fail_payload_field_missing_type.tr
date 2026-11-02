@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E096
-// EXPECT-DIAG: field 'path' of 'IOError::NotFound' has no type
+// EXPECT-DIAG: I found no type for the field `path` of `IOError::NotFound`.
 // LEC-004: each payload field is `name: Type`. A bare name is E096.
 error IOError {
     NotFound(path)

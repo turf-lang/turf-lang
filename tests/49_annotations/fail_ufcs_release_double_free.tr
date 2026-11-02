@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E017
-// EXPECT-DIAG: Double free detected for 'p'.
+// EXPECT-DIAG: I found a second free of `p`.
 // `p.free()` is `mem::free(p)` through UFCS, so the alias analysis reads the
 // callee's `@ownership(releases: p)` the same way, with the receiver as the
 // first argument. Before, a method-call form was never looked at.

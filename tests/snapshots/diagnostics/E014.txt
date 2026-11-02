@@ -2,9 +2,9 @@ tests/01_syntax/fail_bad_keyword.tr (1 error)
 
 ── error at line 7, col 5 [E014 · unknown keyword]
 
-  Hmm, I don't know the word 'iff'.
+  I do not know the word `iff`.
 
-  Hint: Did you mean: 'if'?
+  Hint: Write `if` instead.
 
   7 │     iff x > 5 {
     │     ^~~ this word is not a keyword

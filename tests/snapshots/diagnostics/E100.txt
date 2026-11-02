@@ -2,8 +2,8 @@ tests/01_syntax/fail_unknown_escape_sequence.tr (1 error)
 
 ── error at line 10, col 27 [E100 · invalid escape sequence]
 
-  Unknown escape sequence '\q' in string literal.
-  Hint: Recognized escapes are \n \t \r \0 \a \b \f \v \\ \" \'. Did you mean to write a literal backslash? Use '\\' instead.
+  I do not know the escape sequence `\q` in this string literal.
+  Hint: Use one of the escapes `\n`, `\t`, `\r`, `\0`, `\a`, `\b`, `\f`, `\v`, `\\`, `\"` or `\'`. To write a literal backslash, write `\\`.
 
   10 │     immut s: string = "bad\qescape";
      │                           ^ this escape sequence is not valid

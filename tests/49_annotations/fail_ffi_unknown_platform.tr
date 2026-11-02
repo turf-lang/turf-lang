@@ -1,6 +1,6 @@
 // EXPECT-DIAG: E146
-// EXPECT-DIAG: Unknown '@ffi' platform 'lunix'
-// EXPECT-DIAG: Did you mean 'linux'
+// EXPECT-DIAG: I do not know the `@ffi` platform `lunix`. Write `linux` if you meant it. The platforms are `linux`, `macos` and `windows`.
+// EXPECT-DIAG: I do not know the `@ffi` platform `lunix`. Write `linux` if you meant it. The platforms are `linux`, `macos` and `windows`.
 // A misspelt platform would leave the declaration unforwarded on the platform
 // it was written for, so it is an error rather than a silent no-op.
 

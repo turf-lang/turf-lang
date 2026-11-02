@@ -1,11 +1,10 @@
 `pub` (or `public`) was written where it does nothing
 
     pub operator +(a: Money, b: Money): Money { ... }
-    // ERROR: 'pub' can't be applied to an operator.
-    //   Hint: An operator is visible wherever its operand types are, so
-    //   there is nothing to export. Remove `pub` from the `operator`
-    //   declaration; to let another module use `a + b` on your type, make
-    //   the type itself `pub`.
+    // ERROR: I cannot apply `pub` to an operator.
+    //   Hint: Remove `pub` from the `operator` declaration, since an
+    //   operator is visible wherever its operand types are. To let another
+    //   module use `a + b` on your type, make the type itself `pub`.
 
 `pub` (and its synonym `public`, spelled exactly like `mut`/`mutable`) marks
 a declaration as visible to other modules. A `pub` that could never change

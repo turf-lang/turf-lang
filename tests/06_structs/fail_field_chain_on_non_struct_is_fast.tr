@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E068
-// EXPECT-DIAG: A value of type 'string' has no fields
+// EXPECT-DIAG: The type `string` has no fields
 // Sixty `.a` links on a string. Codegen retried each link of an invalid
 // chain two ways (as a place, then as a value), so the time doubled with
 // every `.a`: 22 links took 10 s, and turf-fuzz's crash fuzzer found an input

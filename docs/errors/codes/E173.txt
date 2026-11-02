@@ -8,7 +8,7 @@ A function marked `@test` is run by `turf test`, one test at a time, and every b
     }
 
     fn main(): int {
-        parses_a_port();   // ERROR: 'parses_a_port' is a test
+        parses_a_port();   // ERROR: I cannot use the test `parses_a_port`
         return 0;
     }
 

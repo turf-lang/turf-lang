@@ -52,10 +52,10 @@ whatever the module marks `pub`:
 ```text
 ── error at line 3, col 8 [E091 · module not importable from this package]
 
-  Module 'numbers' is internal to package 'interval'.
+  I cannot import the module `numbers`, because it is internal to package `interval`.
     /home/me/code/interval/src/numbers.tr
 
-  Hint: Only a package's root module can be imported from outside it. Import 'interval' and use what its root module makes `pub`; if 'interval' should offer this, its root module has to expose it.
+  Hint: Import `interval` and use what its root module makes `pub`; if `interval` should offer this, expose it from its root module. Only a package's root module can be imported from outside it.
 
   3 │ import numbers;
     │        ^~~~~~~ this module cannot be imported from here
@@ -144,10 +144,10 @@ and a dependent calls `interval::checksum(r)`:
 ```text
 ── error at line 9, col 29 [E088 · private symbol access]
 
-  Function 'checksum' is private to module 'interval'.
-  Note: 'checksum' is declared in module 'interval' without `pub` (line 87, col 4)
+  I cannot use the function `checksum`, which is private to module `interval`.
+  Note: declared in module `interval` without `pub` (<module interval/interval>, line 87, col 4)
 
-  Hint: If 'checksum' is meant to be used from other modules, mark it `pub` in interval.tr: `pub fn checksum(...)`. Otherwise, 'interval' offers these public functions: parse.
+  Hint: Mark `checksum` as `pub` in interval.tr with `pub fn checksum(...)`, if other modules are meant to use it. Otherwise, use one of the public functions that `interval` offers: parse.
 
   9 │     io::printline(interval::checksum(r));
     │                             ^~~~~~~~ this is private to its module
@@ -175,12 +175,12 @@ pub fn warm(): Cache {
 ```text
 ── error at line 91, col 8 [E089 · private type in public signature]
 
-  Public function 'warm' exposes the private type 'Cache'.
+  I cannot let the public function `warm` expose the private type `Cache`.
 
-  Hint: Anything `pub` is visible to other modules, but 'Cache' is not, so they would receive values of a type they cannot name. Either make the type public -- `pub struct Cache` in interval.tr -- or keep the function internal by removing its `pub`.
+  Hint: Make the type public with `pub struct Cache` in interval.tr, or keep the function internal by removing its `pub`. Other modules would otherwise receive a `Cache`, a type they cannot name.
 
   87 │ struct Cache {
-     │ - 'Cache' is declared in module 'interval' without `pub`
+     │ - declared in module `interval` without `pub`
      ┊
   91 │ pub fn warm(): Cache {
      │        ^~~~ this type is private, and the signature is `pub`
@@ -203,10 +203,10 @@ pub fn stats(values: int[]): numbers::Stats {
 ```text
 ── error at line 3, col 8 [E089 · private type in public signature]
 
-  Public function 'stats' of package 'interval' exposes 'Stats', a type of its internal module 'numbers'.
-  Note: 'Stats' is declared in module 'numbers', which only package 'interval' can import (src/numbers.tr, line 3, col 5)
+  I cannot let the public function `stats` of package `interval` expose `Stats`, a type of its internal module `numbers`.
+  Note: declared in module `numbers`, which only package `interval` can import (src/numbers.tr, line 3, col 5)
 
-  Hint: Other packages import only 'interval', its root module, so they would receive values of a type they cannot name. Either move `pub struct Stats` into the root module, interval.tr, or keep the function internal by removing its `pub`.
+  Hint: Move `pub struct Stats` into the root module, `interval.tr`, or keep the function internal by removing its `pub`. Other packages import only `interval`, its root module, so they would receive a `Stats`, a type they cannot name.
 
   3 │ pub fn stats(values: int[]): numbers::Stats {
     │        ^~~~~ this type is private, and the signature is `pub`
@@ -848,10 +848,9 @@ $ turf build
 
 ── error at line 17, col 5 [E130 · raw pointer outside unsafe]
 
-  Unsafe pointer use!
-  Raw pointer type 'ptr' cannot be used outside an 'unsafe' block.
+  I cannot use the raw pointer type `ptr` outside an `unsafe` block.
 
-  Hint: Wrap this in 'unsafe { }', or use a safe reference ('&T') instead if you don't actually need a possibly-null raw pointer.
+  Hint: Wrap this in `unsafe { }`, or use the safe reference `&T` if it is never null.
 
   17 │ pub struct Counter {
      │     ^~~~~~ this needs `unsafe`

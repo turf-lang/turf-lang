@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E001
-// EXPECT-DIAG: counting from the end
+// EXPECT-DIAG: I cannot use `a[-4]`, because `a` has only 3 elements.
 // #256: with Python-style negative indexing the valid range of an `int[3]` is
 // -3..2. `-4` is one past the start, so it is still rejected at compile time
 // (ArrayBoundsError) -- not wrapped around to the last element.

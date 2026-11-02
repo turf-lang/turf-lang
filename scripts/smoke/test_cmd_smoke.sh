@@ -290,12 +290,12 @@ fn returns_with_error(): !void {
     return;
 }
 
-@test(compile_error, E041, "Unknown function")
+@test(compile_error, E041, "function named")
 fn ce_no_error(): void {
     io::printline(1);
 }
 
-@test(compile_error, E041, "Unknown function")
+@test(compile_error, E041, "function named")
 fn ce_another_code(): void {
     immut x: int = "text";
 }
@@ -374,7 +374,7 @@ expect_out "@test failures: the count" testfns "Failed:      16"
 tf() { expect_out "@test failure $1" testfns "$2"; }
 tf returns_assertion "it panicked; expected it to return"
 tf returns_with_error "it returned the error ParseError::Empty; expected it to return"
-tf ce_no_error "its body compiled without an error; expected E041 \"Unknown function\""
+tf ce_no_error "its body compiled without an error; expected E041 \"function named\""
 tf ce_another_code "its body has another error, E066 at line 42"
 tf ce_another_message "no E041 message contains \"nothing like this\""
 tf ce_another_fix "E041 at line 52: Fix: replace 'sqaure' with 'square'"

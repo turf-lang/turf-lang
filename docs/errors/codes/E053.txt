@@ -16,7 +16,7 @@ Here's the difference between the two shapes: a struct method (where `static` is
 
 If you accidentally add `static` to that second kind, you'll see this error:
 
-    fn add(a: int, b: int) static: int {   // ERROR: 'static' can only be used on a struct-bound method
+    fn add(a: int, b: int) static: int {   // ERROR: I cannot use `static` on a function that does not belong to a struct.
         return a + b;
     }
 

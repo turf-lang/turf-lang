@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E081
-// EXPECT-DIAG: this '&?Node' value might be 'null', but you're calling its 'bump' method
+// EXPECT-DIAG: I cannot call the method `bump` of this `&?Node`, which might be `null`
 // A method call whose receiver is a `&?T` that is not a variable.
 struct Node { val: int, next: &?Node }
 

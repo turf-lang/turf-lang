@@ -2,10 +2,10 @@ tests/06_structs/fail_incomplete_constructor_never_assigned.tr (1 error, 1 warni
 
 ── error at line 13, col 1 [E049 · incomplete constructor]
 
-  'Point.new' doesn't assign every field on all paths.
-  Not definitely assigned on every path: y
+  `Point.new` does not assign every field on all paths.
+  Fields not assigned on every path: y
 
-  Hint: Every field of 'Point' must be set via 'self.<field> = ...' on every path through 'new' -- including inside every if/else branch and before any early return.
+  Hint: Assign every field of `Point` with `self.<field> = ...` on every path through `new`, including inside every `if` and `else` branch and before any early return.
 
   13 │ fn Point.new(x: int): void {
      │ ^~ this constructor leaves fields without a value
@@ -14,9 +14,9 @@ tests/06_structs/fail_incomplete_constructor_never_assigned.tr (1 error, 1 warni
 
 ── warning at line 18, col 5 [E163 · unused variable]
 
-  Warning: Variable 'p' is declared but never used.
+  Variable `p` is declared but never used.
 
-  Hint: If the variable is intentionally unused, prefix its name with '_' by convention. Otherwise, remove the declaration or use its value.
+  Hint: Remove `p`, or use it. If it is unused on purpose, rename it `_p`, or pass `--allow E163`.
 
   18 │     mut p: Point = Point::new(1);
      │     ^ this variable is never used

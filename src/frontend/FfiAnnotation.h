@@ -51,28 +51,28 @@ inline std::string validate(const Annotation &Ann,
                             const TurfTypePtr &, bool IsExtern,
                             const std::vector<Annotation> &All) {
   if (!IsExtern)
-    return "'@ffi' describes how an 'extern fn' binds to its C symbol, so it "
-           "can only sit on an 'extern fn'.";
+    return "`@ffi` describes how an `extern fn` binds to its C symbol, so it "
+           "can only sit on an `extern fn`.";
   if (Ann.Args.empty())
-    return "'@ffi' needs an argument: a platform and the symbol to forward to, "
-           "e.g. '@ffi(macos: malloc_size)'.";
+    return "`@ffi` needs an argument: a platform and the symbol to forward to, "
+           "e.g. `@ffi(macos: malloc_size)`.";
   const std::vector<std::string> Platforms = {"linux", "macos", "windows"};
   for (const AnnotationArg &Arg : Ann.Args) {
     if (Arg.Key.empty())
-      return "'@ffi' arguments are written 'platform: symbol', e.g. "
-             "'@ffi(macos: malloc_size)'.";
+      return "`@ffi` arguments are written `platform: symbol`, e.g. "
+             "`@ffi(macos: malloc_size)`.";
     bool Known = false;
     for (const auto &P : Platforms)
       Known = Known || P == Arg.Key;
     if (!Known) {
-      std::string Msg = "Unknown '@ffi' platform '" + Arg.Key + "'.";
+      std::string Msg = "I do not know the `@ffi` platform `" + Arg.Key + "`.";
       auto Near = SuggestionIndex::suggestVisible(Arg.Key, Platforms);
       if (!Near.empty())
-        Msg += " Did you mean '" + Near.front() + "'?";
-      return Msg + " The platforms are 'linux', 'macos' and 'windows'.";
+        Msg += " Write `" + Near.front() + "` if you meant it.";
+      return Msg + " The platforms are `linux`, `macos` and `windows`.";
     }
     if (Arg.IsString || Arg.Value.empty())
-      return "'@ffi(" + Arg.Key + ": ...)' names the symbol as a plain word, "
+      return "`@ffi(" + Arg.Key + ": ...)` names the symbol as a plain word, "
              "not a string.";
     // forwardTarget() takes the first match, so a second entry for the same
     // platform -- in this annotation or an earlier `@ffi` on the same
@@ -84,7 +84,7 @@ inline std::string validate(const Annotation &Ann,
       Twice = Twice || (Earlier.Name == Name && Earlier.findKeyed(Arg.Key));
     }
     if (Twice)
-      return "'@ffi' names the platform '" + Arg.Key + "' twice; give each "
+      return "`@ffi` names the platform `" + Arg.Key + "` twice; give each "
              "platform one symbol.";
   }
   return "";

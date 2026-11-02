@@ -7,7 +7,7 @@ CAUSE:
   the current project. There is no `module_name.tr` file findable.
 
 EXAMPLE:
-    import strnigs;   // ERROR: no such module -- typo for 'strings'
+    import strnigs;   // ERROR: I cannot find a module named `strnigs`.
 
 CORRECT:
     import strings;

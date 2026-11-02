@@ -1,6 +1,5 @@
 // EXPECT-DIAG: E148
-// EXPECT-DIAG: 'v' is a value, not a generic function
-
+// EXPECT-DIAG: `v` is a variable, not a generic function, so it takes no type arguments.
 fn main(): int {
     immut v: int = 2;
     immut a: int = v::<int>;

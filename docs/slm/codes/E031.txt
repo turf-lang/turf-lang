@@ -38,7 +38,7 @@ CORRECT SYNTAX:
 
 INCORRECT:
     io::printline("hello");   // 'io' was never imported
-    // ERROR: 'io' isn't a known enum, struct, or module.
+    // ERROR: I cannot find an enum, struct or module named `io`.
 
 FIX:
   Double-check the spelling of the name before '::'. If it's a module,

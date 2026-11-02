@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E146
-// EXPECT-DIAG: names the platform 'macos' twice
+// EXPECT-DIAG: `@ffi` names the platform `macos` twice; give each platform one symbol.
 // The same platform named in two separate `@ffi` annotations on one declaration
 // is the same mistake as naming it twice in one (fail_ffi_platform_named_twice.tr):
 // only the first would be used, so the second used to be silently ignored.

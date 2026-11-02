@@ -2,9 +2,9 @@ tests/14_cfg_analysis/41_unreachable_block_and_dead_branch_warn.tr (4 warnings)
 
 ── warning at line 11, col 5 [E074 · unreachable block]
 
-  Warning: The code in 'while.end' inside 'pick' can never be reached!
+  I can never reach the code in `while.end` inside `pick`.
 
-  Hint: Check your 'if' conditions. Are they impossible to be true, or did you 'return' before this block?
+  Hint: Check whether an `if` condition can never be true, or whether a `return` comes before this block.
 
   11 │     if x > 0 {
      │     ^~ this block never runs
@@ -13,9 +13,9 @@ tests/14_cfg_analysis/41_unreachable_block_and_dead_branch_warn.tr (4 warnings)
 
 ── warning at line 11, col 5 [E075 · dead branch]
 
-  Warning: There's a part of 'pick' that will never be executed!
+  A part of `pick` can never run.
 
-  Hint: Check if you have code after a 'return', 'break', or 'continue' that can't be reached.
+  Hint: Remove the code after a `return`, `break` or `continue`, or move it before that statement.
 
   11 │     if x > 0 {
      │     ^~ this branch is never taken
@@ -24,9 +24,9 @@ tests/14_cfg_analysis/41_unreachable_block_and_dead_branch_warn.tr (4 warnings)
 
 ── warning at line 12, col 9 [E074 · unreachable block]
 
-  Warning: The code in 'if.then' inside 'pick' can never be reached!
+  I can never reach the code in `if.then` inside `pick`.
 
-  Hint: Check your 'if' conditions. Are they impossible to be true, or did you 'return' before this block?
+  Hint: Check whether an `if` condition can never be true, or whether a `return` comes before this block.
 
   12 │         return 2;
      │         ^~~~~~ this block never runs
@@ -35,9 +35,9 @@ tests/14_cfg_analysis/41_unreachable_block_and_dead_branch_warn.tr (4 warnings)
 
 ── warning at line 14, col 5 [E074 · unreachable block]
 
-  Warning: The code in 'if.end' inside 'pick' can never be reached!
+  I can never reach the code in `if.end` inside `pick`.
 
-  Hint: Check your 'if' conditions. Are they impossible to be true, or did you 'return' before this block?
+  Hint: Check whether an `if` condition can never be true, or whether a `return` comes before this block.
 
   14 │     return 3;
      │     ^~~~~~ this block never runs

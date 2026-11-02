@@ -1,4 +1,4 @@
-// EXPECT-DIAG: '/' with zero
+// EXPECT-DIAG: `/` used with zero
 // LEC-005 / INV-LINT-1: LintExpression() was a chain of independent
 // dynamic_casts with no branch for a call's arguments, so `f(a / 0)` warned
 // about nothing -- the lint ran over a declaration's initializer (DIAG-001's

@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E056
-// EXPECT-DIAG: Argument 1 is 'int', but building a 'Box<string>' needs 'string'
+// EXPECT-DIAG: Argument 1 is an `int`, and building a `Box<string>` needs a `string` there.
 // A generic constructor's T comes from the declared type; the argument must
 // already have that type, since it is not converted on the way in.
 struct Box<T> {

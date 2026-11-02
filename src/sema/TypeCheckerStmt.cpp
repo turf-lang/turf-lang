@@ -123,8 +123,8 @@ void TypeChecker::rejectDeferredNullableUse(const BlockExprAST &Block) {
       if (U.Kind == DeferredNullableUse::Cast) {
         UnnarrowedNullableCastError Err(U.Loc, U.Name);
         Err.withRelated({It->second.Line, It->second.Col},
-                        "the deferred statement runs when the block exits, after '" +
-                            U.Name + "' is assigned here");
+                        "the deferred statement runs when the block exits, after `" +
+                            U.Name + "` is assigned here");
         Err.raise();
       }
       PossibleNullDereferenceError Err(
@@ -133,8 +133,8 @@ void TypeChecker::rejectDeferredNullableUse(const BlockExprAST &Block) {
               ? PossibleNullDereferenceError::Member::Method
               : PossibleNullDereferenceError::Member::Field);
       Err.withRelated({It->second.Line, It->second.Col},
-                      "the deferred statement runs when the block exits, after '" +
-                          U.Name + "' is assigned here");
+                      "the deferred statement runs when the block exits, after `" +
+                          U.Name + "` is assigned here");
       Err.raise();
 #else
       throw std::runtime_error("PossibleNullDereferenceError");
@@ -173,9 +173,8 @@ void TypeChecker::checkCondition(ExprAST *Cond, SourceLocation Loc,
     Related.push_back({Loc, std::string("`") + Construct + "` needs a `bool`"});
   reportError(At,
               codeForMismatch(Ty.get(), TurfBool().get(), ErrCode::TypeMismatch),
-              std::string("The condition of '") + Construct +
-                  "' must be a 'bool', but this one has type '" +
-                  Ty->getName() + "'.",
+              std::string("The condition of `") + Construct +
+                  "` must be a `bool`, and I found " + SpanLabels::aType(Ty.get()) + ".",
               Related,
               Ty->isErrorUnion()
                   ? "A fallible call is not a condition. Handle its failure with "
@@ -219,9 +218,11 @@ void TypeChecker::visitIf(IfExprAST &Node) {
         }
       } else {
         reportError(Node.getLoc(), ErrCode::TypeMismatch,
-                    "Type mismatch in ternary expression: 'then' type '" +
-                        ThenTy->getName() + "' and 'else' type '" +
-                        ElseTy->getName() + "' are incompatible.");
+                    "The two branches of this `if` expression have different "
+                    "types: " + SpanLabels::aType(ThenTy.get()) + " and " +
+                        SpanLabels::aType(ElseTy.get()) + ".",
+                    {}, "Give both branches the same type, converting one with "
+                        "`to` where they differ.");
         setType(&Node, TurfVoid());
       }
     } else {
@@ -314,8 +315,8 @@ void TypeChecker::visitFor(ForExprAST &Node) {
     if (Bound && !Bound->isInt() && !Bound->isInt32() && !Bound->isDouble()) {
       reportError(Node.getLoc(),
                   codeForMismatch(Bound.get(), TurfInt().get(), ErrCode::TypeMismatch),
-                  "A 'for' range bound must be an 'int', 'int32' or 'double', "
-                  "but this one has type '" + Bound->getName() + "'.",
+                  "A `for` range bound must be an `int`, an `int32` or a "
+                  "`double`, and I found " + SpanLabels::aType(Bound.get()) + ".",
                   {},
                   "Range over numbers (`for i in 0..n`), or use `for x in arr` "
                   "to walk an array.");
@@ -570,21 +571,19 @@ void TypeChecker::visitReturn(ReturnExprAST &Node) {
           // so the way out is to take the success value out first.
           const std::string Hint =
               Declared->isErrorUnion()
-                  ? "A `return f();` passes a fallible value through only when it "
-                    "is exactly this function's '" + Declared->getName() +
-                        "'; nothing converts a '" + RetTy->getName() + "' into it. "
-                        "Take the value out first with `try f()` (an error still "
-                        "leaves this function) or `recover`, then return a '" +
-                        static_cast<const TurfErrorUnionType *>(Declared)
-                            ->getSuccessType()->getName() + "'."
-                  : "That value can fail. Handle the failure here with `recover`, "
-                    "or declare this function '" + RetTy->getName() +
-                        "' so it can pass the error on -- then `return f();` or "
-                        "`try f()` both work.";
+                  ? "Take the success out first with `try f()` (an error still "
+                    "leaves this function) or `recover`, then return " +
+                        SpanLabels::aType(static_cast<const TurfErrorUnionType *>(Declared)
+                                              ->getSuccessType()) +
+                        ": `return f();` passes " + SpanLabels::aType(RetTy) +
+                        " through only when the function returns exactly that."
+                  : "Handle the failure here with `recover`, or declare this "
+                    "function `" + RetTy->getName() + "` so it can pass the "
+                    "error on with `return f();` or `try f()`.";
           reportError(Node.getLoc(), ErrCode::ReturnTypeMismatch,
-                      "Return type mismatch: function declares '" +
-                          Declared->getName() + "' but returns '" +
-                          RetTy->getName() + "'.",
+                      "I cannot return " + SpanLabels::aType(RetTy.get()) +
+                          " from a function that returns " +
+                          SpanLabels::aType(Declared) + ".",
                       {}, Hint);
         } else {
           // The types of the identifiers in the returned expression, for the
@@ -603,9 +602,9 @@ void TypeChecker::visitReturn(ReturnExprAST &Node) {
           reportError(SpanLabels::spanOf(Node.getVal(), Node.getLoc()),
                       codeForMismatch(RetTy.get(), nullptr,
                                       ErrCode::ReturnTypeMismatch),
-                      "Return type mismatch: function declares '" +
-                          Declared->getName() + "' but returns '" +
-                          RetTy->getName() + "'.",
+                      "I cannot return " + SpanLabels::aType(RetTy.get()) +
+                          " from a function that returns " +
+                          SpanLabels::aType(Declared) + ".",
                       Related, hintForMismatch(RetTy.get(), nullptr, "", Declared), "", Hints);
         }
       } else {
@@ -636,9 +635,9 @@ void TypeChecker::visitReturn(ReturnExprAST &Node) {
             : Declared;
     if (Effective && !Effective->isVoid()) {
       reportError(Node.getLoc(), ErrCode::ReturnTypeMismatch,
-                  "Return type mismatch: function declares '" + Declared->getName() +
-                      "' but this 'return' gives back no value.",
-                  {}, "Write the value to return, e.g. `return 0;`, or declare the function as returning void.");
+                  "This `return` gives back nothing, and the function returns " +
+                      SpanLabels::aType(Declared) + ".",
+                  {}, "Write what to return, e.g. `return 0;`, or declare the function `: void`.");
     }
   }
 

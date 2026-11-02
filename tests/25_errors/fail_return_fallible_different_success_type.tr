@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E064
-// EXPECT-DIAG: function declares '!int' but returns '!string'
+// EXPECT-DIAG: I cannot return a `!string` from a function that returns a `!int`.
 // LEC-004: `return f();` passes a `!T` through only when the function returns
 // exactly that `!T`. A `!string` from a `!int` function is still a mismatch --
 // the pass-through never converts or unwraps anything.

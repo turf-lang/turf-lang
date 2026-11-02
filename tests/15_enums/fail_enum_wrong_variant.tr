@@ -1,7 +1,7 @@
 // EXPECT-DIAG: E039
 // EXPECT-FIX: replace 'Norht' with 'North'
-// EXPECT-DIAG: Enum 'Direction' has no variant 'Norht'
-// EXPECT-DIAG: It may be from the current file: 'North'
+// EXPECT-DIAG: I cannot find a variant `Norht` in the enum `Direction`
+// EXPECT-DIAG: Use a name from this file: `North`
 // Test (fail): Misspelled enum variant should produce resolver error with suggestion
 enum Direction { North, East, South, West }
 

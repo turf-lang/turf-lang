@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E056
-// EXPECT-DIAG: 'T' in 'pick' is 'int' from argument 1 but 'string' from argument 2
+// EXPECT-DIAG: `T` in `pick` is an `int` from argument 1 and a `string` from argument 2. One type parameter stands for one type.
 // The receiver is argument 1: its T and the argument's must be one type.
 
 fn<T> pick(a: T, b: T): T {

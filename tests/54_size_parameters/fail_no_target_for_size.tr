@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E129
-// EXPECT-DIAG: Can't tell the size 'N'
+// EXPECT-DIAG: I cannot tell the size `N` of the array `fill` returns: no argument has it, and nothing says what type the result is.
 // A call whose result goes nowhere has no type to take N from.
 
 fn<T, N: size> fill(value: T): T[N] {

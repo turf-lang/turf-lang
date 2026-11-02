@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E149
-// EXPECT-DIAG: "inf" is not a double
+// EXPECT-DIAG: "inf" is not a `double`, so this conversion would panic every time it runs.
 // `to double` takes decimal text only, as parse_double does.
 
 fn main(): int {

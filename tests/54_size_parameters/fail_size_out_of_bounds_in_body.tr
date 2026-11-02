@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E001
-// EXPECT-DIAG: only has 2 elements
+// EXPECT-DIAG: has only 2 elements
 // The body is checked per instantiation, with N's value: 'r[N]' is one past
 // the end of every T[N].
 

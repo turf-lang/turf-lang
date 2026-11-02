@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <cstdlib>
 #include <regex>
 #include <set>
 #include <sstream>
@@ -295,7 +296,13 @@ bool IsRuntimeAbortTest(const std::string &Source) {
   return Contains(Source, "RUNTIME_ABORT_EXPECTED");
 }
 
-std::vector<std::string> CheckDiag(const std::string &Source, const std::string &CompileOutput) {
+bool DiagCodesOnly() {
+  const char *V = std::getenv("TURF_TEST_DIAG_CODES_ONLY");
+  return V && std::string(V) == "1";
+}
+
+std::vector<std::string> CheckDiag(const std::string &Source, const std::string &CompileOutput,
+                                   bool CodesOnly) {
   std::vector<std::string> Missed;
   const auto Markers = MarkerLines(Source, "^[ \t]*//[ \t]*EXPECT(-NO)?-DIAG:");
   if (Markers.empty())
@@ -307,6 +314,8 @@ std::vector<std::string> CheckDiag(const std::string &Source, const std::string 
     const std::string Kind = Line.substr(0, Colon);
     const std::string Arg = Trim(Line.substr(Colon + 1));
     if (Arg.empty())
+      continue;
+    if (CodesOnly && !std::regex_match(Arg, CodeOnly))
       continue;
     if (Kind == "EXPECT-NO-DIAG") {
       if (Contains(Plain, Arg))
@@ -453,9 +462,10 @@ std::vector<std::string> Register::checkDiagPolicy(const std::string &Source, co
   // NO-CODE: a `── error` header with no `[Exxx]` is a plain error, so the
   // beginner has no `--explain` page for it. (A warning has a code too, but is never judged here.)
   int Codeless = 0;
-  // GENERIC-CODE: E066 is the TypeChecker's one catch-all class; the line under
-  // its header is the real banner, and anything but "Type mismatch!" there is
-  // a more specific mistake wearing the catch-all's code.
+  // GENERIC-CODE entries are written by hand: a diagnostic has no banner
+  // (DIAGNOSTICS_STYLE.md rule 4), so no line of the output says that an E066
+  // is a more specific mistake wearing the type-mismatch code. An entry is
+  // still checked against the output below.
   std::string CatchAll;
   // CASCADE: the "(N errors)" count the compiler prints under a file name,
   // summed over every header (an error in an imported module prints under its
@@ -465,22 +475,10 @@ std::vector<std::string> Register::checkDiagPolicy(const std::string &Source, co
   {
     const std::string ErrHeader = "── error";
     const std::regex HasCodeRe("\\[E[0-9]{3}");
-    const std::regex E066Header("^── error.*\\[E066[ \\]]");
     const std::regex CountRe("^[^ ]+ \\(([0-9]+) errors?\\)");
-    bool AfterE066 = false;
     for (const auto &L : PlainLines) {
       if (L.compare(0, ErrHeader.size(), ErrHeader) == 0 && !std::regex_search(L, HasCodeRe))
         ++Codeless;
-      if (std::regex_search(L, E066Header)) {
-        AfterE066 = true;
-        continue;
-      }
-      if (AfterE066 && !Trim(L).empty()) {
-        const std::string Banner = Trim(L);
-        if (CatchAll.empty() && Banner != "Type mismatch!")
-          CatchAll = Banner;
-        AfterE066 = false;
-      }
       std::smatch M;
       if (std::regex_search(L, M, CountRe)) {
         ActualErrors += std::stoi(M[1].str());

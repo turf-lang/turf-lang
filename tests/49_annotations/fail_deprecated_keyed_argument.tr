@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E146
-// EXPECT-DIAG: argument is positional, not 'key: value'
+// EXPECT-DIAG: The argument of `@deprecated` is positional, not `key: value`: write `@deprecated("use new_fn() instead")`.
 // `@deprecated`'s message is positional, not `key: value` like `@ffi`'s
 // platform pairs -- one declaration deprecates in exactly one way.
 

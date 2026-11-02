@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E150
-// EXPECT-DIAG: A method can't declare a size parameter
+// EXPECT-DIAG: on a method
 
 struct S {
     a: int

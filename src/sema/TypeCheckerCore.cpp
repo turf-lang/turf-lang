@@ -12,6 +12,7 @@
 
 #include "analysis/AnalysisFacts.h"
 #include "sema/TypeChecker.h"
+#include "sema/SpanLabels.h"
 
 // AST.h is needed for the full definition of every node type.
 // It drags in LLVM headers, but TypeChecker itself does not use any LLVM API.
@@ -237,13 +238,12 @@ std::string TypeChecker::hintForMismatch(const TurfType *A, const TurfType *B,
                                          const std::string &Default,
                                          const TurfType *Dest) {
   if ((A && A->isVoid()) || (B && B->isVoid()))
-    return "A function declared ': void' produces no value, so there is "
-           "nothing to use here. Call it as a statement on its own, or give "
-           "the function a return type and a `return` that gives the value.";
+    return "Call the function as a statement of its own, or give it a return "
+           "type and a `return`: a function declared `: void` gives back nothing.";
   if (isCopyOut(A, Dest))
-    return "'" + A->getName() + "' refers to a '" + Dest->getName() +
-           "'; it is not one. Copy the value out with `to`: `x to " +
-           Dest->getName() + "` makes an independent copy.";
+    return "Copy it out with `to`: " + SpanLabels::aType(A) + " refers to " +
+           SpanLabels::aType(Dest) + " and is not one, and `x to " + Dest->getName() +
+           "` makes an independent copy.";
   return Default;
 }
 
@@ -298,12 +298,15 @@ bool TypeChecker::checkUnsafeGate(const TurfType *T, SourceLocation Loc,
   std::string SuggestedRef = PtrTy ? "&" + PtrTy->getPointee()->getName() : "&T";
   reportError(
       Loc, ErrCode::RawPointerOutsideUnsafe,
-      "Raw pointer type '" + T->getName() +
-          "' cannot be used outside an 'unsafe' block.",
+      "I cannot use the raw pointer type `" + T->getName() +
+          "` outside an `unsafe` block.",
       {},
-      "Wrap this in 'unsafe { }', or use a safe reference ('" + SuggestedRef +
-          "') instead if you don't actually need a possibly-null raw pointer.",
-      "Unsafe pointer use!");
+      PtrTy && PtrTy->getPointee()->isVoid()
+          ? std::string("Wrap this in `unsafe { }`: an untyped pointer has no "
+                        "safe reference to use instead.")
+          : "Wrap this in `unsafe { }`, or use the safe reference `" + SuggestedRef +
+                "` if it is never null.",
+      "");
   return true;
 }
 
@@ -312,10 +315,9 @@ bool TypeChecker::checkUnsafeGate(const TurfType *T, SourceLocation Loc,
 // that begins `unsafe module;`, honoured in lib/std and wherever the build
 // allows it.
 static const char *const RawPointerSignatureHint =
-    "Raw pointer types are never allowed in an ordinary function's "
-    "signature, even inside 'unsafe { }' -- use '&T' instead. Only "
-    "'extern fn' bindings and files that begin with 'unsafe module;' may use "
-    "raw pointers here.";
+    "Use a reference, `&T`, instead: only an `extern fn` and a file that "
+    "begins with `unsafe module;` may have raw pointers in a signature, even "
+    "inside `unsafe { }`.";
 
 void TypeChecker::checkNoRawPointersInSignature(const FuncDefExprAST &Node) {
   if (HasRawPointerCapability(Node.getLoc().Filename))
@@ -333,21 +335,21 @@ void TypeChecker::checkNoRawPointersInSignature(const FuncDefExprAST &Node) {
     if (isRawPointer(Param.Type.get())) {
       reportError(
           Node.getLoc(), ErrCode::RawPointerOutsideUnsafe,
-          "Function '" + Node.getName() + "' cannot use raw pointer type '" +
-              Param.Type->getName() + "' for parameter '" + Param.Name + "'.",
+          "The parameter `" + Param.Name + "` of `" + Node.getName() +
+              "` cannot have the raw pointer type `" + Param.Type->getName() + "`.",
           {},
           RawPointerSignatureHint,
-          "Raw pointer in function signature!");
+          "");
     }
   }
   if (isRawPointer(Node.getReturnType())) {
     reportError(
         Node.getLoc(), ErrCode::RawPointerOutsideUnsafe,
-        "Function '" + Node.getName() + "' cannot return raw pointer type '" +
-            Node.getReturnType()->getName() + "'.",
+        "`" + Node.getName() + "` cannot return the raw pointer type `" +
+            Node.getReturnType()->getName() + "`.",
         {},
         RawPointerSignatureHint,
-        "Raw pointer in function signature!");
+        "");
   }
 }
 
@@ -687,11 +689,9 @@ bool TypeChecker::inferArithmeticType(SourceLocation Loc, int Op,
   // ── anything else is a mismatch ──────────────────────────────────────────
   std::string Hint;
   if (LhsTy->isString() || RhsTy->isString()) {
-    Hint = "String '" + OpToDisplayString(Op) + "' is provided by an "
-           "'operator " + OpToDisplayString(Op) + "' overload in "
-           "lib/std/strings.tr -- make sure 'strings' is imported. To "
-           "concatenate a non-string, convert it first with `<expr> to "
-           "string`.";
+    Hint = "Convert the operand that is not a `string` first, e.g. `n to "
+           "string`: `" + OpToDisplayString(Op) + "` on strings comes from the "
+           "`strings` module, which works on two `string`s.";
   } else if (LhsTy->isStruct() || RhsTy->isStruct()) {
     // Distinguishes two different reasons this can happen: no overload was
     // ever declared for this operator on these types at all, OR one WAS
@@ -702,18 +702,16 @@ bool TypeChecker::inferArithmeticType(SourceLocation Loc, int Op,
     // this call passed an int. Naming both possibilities here avoids the
     // false impression that no '+' overload exists at all when one
     // actually does, just not for this exact pairing.
-    Hint = "'" + OpToDisplayString(Op) + "' isn't a builtin operation on a "
-           "struct -- declare 'operator " + OpToDisplayString(Op) + "(" +
-           LhsTy->getName() + ", " + RhsTy->getName() +
-           "): ReturnType { ... }', or check that an existing overload's "
-           "parameter types match EXACTLY (operator resolution never "
-           "widens int to double the way an ordinary function call does).";
+    Hint = "Declare `operator " + OpToDisplayString(Op) + "(a: " +
+           LhsTy->getName() + ", b: " + RhsTy->getName() +
+           "): T { ... }`, or make the operands match an existing overload's "
+           "parameter types exactly: an operator never converts an `int` to a "
+           "`double`.";
   }
   reportError(Loc,
               codeForMismatch(LhsTy, RhsTy, ErrCode::ArithmeticOperand),
-              "Type mismatch: cannot apply '" + OpToDisplayString(Op) +
-                  "' to '" + LhsTy->getName() + "' and '" +
-                  RhsTy->getName() + "'.",
+              "I cannot use `" + OpToDisplayString(Op) + "` on " +
+                  SpanLabels::aType(LhsTy) + " and " + SpanLabels::aType(RhsTy) + ".",
               {}, hintForMismatch(LhsTy, RhsTy, Hint));
   ResultOut = nullptr;
   return false;
@@ -733,9 +731,9 @@ TurfTypePtr TypeChecker::inferRelationalType(SourceLocation Loc, int Op,
     if (LhsTy->isBool() && RhsTy->isBool())
       return TurfBool();
     reportError(Loc, ErrCode::ArithmeticOperand,
-                "Cannot use '" + std::string(Op == -20 ? "&&" : "||") +
-                    "' with '" + LhsTy->getName() + "' and '" +
-                    RhsTy->getName() + "': both operands must be 'bool'.",
+                "I cannot use `" + std::string(Op == -20 ? "&&" : "||") +
+                    "` on " + SpanLabels::aType(LhsTy) + " and " +
+                    SpanLabels::aType(RhsTy) + ": both operands must be `bool`s.",
                 {}, "Write a comparison, e.g. `n != 0 && m != 0`.");
     return TurfBool();
   }
@@ -773,12 +771,11 @@ TurfTypePtr TypeChecker::inferRelationalType(SourceLocation Loc, int Op,
         LhsTy->getName() == RhsTy->getName();
     if (LhsTy->isStruct() || RhsTy->isStruct() || SameGenericInstance) {
       reportError(Loc, ErrCode::InvalidComparison,
-                  "Cannot compare struct values with '" +
-                      OpToDisplayString(Op) + "'.",
+                  "I cannot compare two `" + LhsTy->getName() + "` structs with `" +
+                      OpToDisplayString(Op) + "`: a struct has no built-in comparison.",
                   {},
-                  "Structs have no built-in comparison: compare the fields "
-                  "you care about (e.g. `a.x == b.x`), or declare "
-                  "`operator ==` for the type.");
+                  "Compare the fields you care about, e.g. `a.x == b.x`, or "
+                  "declare `operator ==` for the type.");
       return TurfBool();
     }
     // Arrays, for the same reason: two `int[3]`s share a type name, so the
@@ -788,12 +785,11 @@ TurfTypePtr TypeChecker::inferRelationalType(SourceLocation Loc, int Op,
     // could mean same elements or same storage, so it is spelled out instead.
     if (LhsTy->isArray() || RhsTy->isArray()) {
       reportError(Loc, ErrCode::InvalidComparison,
-                  "Cannot compare arrays with '" + OpToDisplayString(Op) + "'.",
+                  "I cannot compare arrays with `" + OpToDisplayString(Op) + "`.",
                   {},
-                  "Arrays (and slices) can't be compared directly -- compare "
-                  "their lengths and elements in a loop, e.g. for (i, x) in a "
-                  "{ if x != b[i] { ... } }.",
-                  "Values can't be compared!");
+                  "Compare their lengths, then their elements in a loop, e.g. "
+                  "`for (i, x) in a { if x != b[i] { ... } }`.",
+                  "");
       return TurfBool();
     }
     // `err == MathError::DivisionByZero` inside `recover as err run { ... }`
@@ -833,14 +829,14 @@ TurfTypePtr TypeChecker::inferRelationalType(SourceLocation Loc, int Op,
     }
 
     reportError(Loc, ErrCode::InvalidComparison,
-                "Cannot compare '" + LhsTy->getName() + "' with '" +
-                         RhsTy->getName() + "'.",
+                "I cannot compare " + SpanLabels::aType(LhsTy) + " with " +
+                         SpanLabels::aType(RhsTy) + ".",
                 {},
                 (LhsTy->isNull() || RhsTy->isNull())
-                    ? "'null' is only valid for pointer types -- a plain "
-                      "int/double/bool/string value can never be null, so "
-                      "this comparison can never be true."
-                    : "");
+                    ? "Remove the comparison, or make the variable a pointer or "
+                      "a `&?` reference: only those can be `null`."
+                    : "Compare two operands of the same type, converting one "
+                      "with `to` where they differ.");
     return TurfBool(); // continue with bool to limit cascade errors
   }
 
@@ -862,8 +858,9 @@ TurfTypePtr TypeChecker::inferRelationalType(SourceLocation Loc, int Op,
   if (LhsTy->isEnum() || RhsTy->isEnum()) {
     std::string EnumName = LhsTy->isEnum() ? LhsTy->getName() : RhsTy->getName();
     reportError(Loc, ErrCode::InvalidComparison,
-                "Cannot use ordering operators on enum type '" + EnumName +
-                     "'. Cast to int first: (a to int) < (b to int)");
+                "I cannot order the enum `" + EnumName + "` with `" +
+                     OpToDisplayString(Op) + "`: only `==` and `!=` compare enum variants.",
+                {}, "Convert both to `int` first: `(a to int) < (b to int)`.");
     return TurfBool();
   }
 
@@ -871,8 +868,10 @@ TurfTypePtr TypeChecker::inferRelationalType(SourceLocation Loc, int Op,
     return TurfBool();
 
   reportError(Loc, ErrCode::InvalidComparison,
-              "Cannot compare '" + LhsTy->getName() + "' with '" +
-                       RhsTy->getName() + "' using '" +
-                       OpToDisplayString(Op) + "'.");
+              "I cannot compare " + SpanLabels::aType(LhsTy) + " with " +
+                       SpanLabels::aType(RhsTy) + " using `" +
+                       OpToDisplayString(Op) + "`.",
+              {}, "Compare two operands of the same type, converting one with "
+                  "`to` where they differ.");
   return TurfBool(); // continue with bool
 }

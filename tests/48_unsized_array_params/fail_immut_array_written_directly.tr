@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E141
-// EXPECT-DIAG: 'a' is immutable, but 'fill' writes to the array it is given as 'arr'.
+// EXPECT-DIAG: `a` is immutable, and `fill` writes to the array it takes as `arr`. As an `int[]` parameter, it shares the caller's array, so the change would land in `a`.
 // Issue #260: a `T[]` parameter shares the caller's array, so this call would
 // change `a` even though it is `immut`. It used to compile and run, and `a`
 // came back changed.

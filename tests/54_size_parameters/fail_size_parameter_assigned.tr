@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E150
-// EXPECT-DIAG: 'N' is a size parameter: it can't be assigned
+// EXPECT-DIAG: In this instantiation: `N` is a size parameter, so it cannot be assigned.
 // N is a constant in each instantiation.
 
 fn<N: size> count(a: int[N]): int {

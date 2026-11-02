@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E056
-// EXPECT-DIAG: Argument 1 is 'double', but building a 'Box<int>' needs 'int'
+// EXPECT-DIAG: Argument 1 is a `double`, and building a `Box<int>` needs an `int` there.
 // The arguments of a generic constructor widen to the declared type but never
 // narrow: a double does not become an int on the way in.
 struct Box<T> {

@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E146
-// EXPECT-DIAG: A method cannot be a test
+// EXPECT-DIAG: I cannot use a method as a test
 // TDP-2-006: a test is a top-level function; a method has a receiver nothing
 // could supply.
 struct Counter {

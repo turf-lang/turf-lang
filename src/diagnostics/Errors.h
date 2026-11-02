@@ -341,9 +341,8 @@ public:
     if (Any)
       Hints_.FixReason =
           Reason.empty()
-              ? "'" + OldName + "' isn't declared anywhere visible, but '" +
-                    NewName + "' is an exact, unambiguous match nearby, so "
-                    "this is almost certainly a typo."
+              ? "I cannot find `" + OldName + "`, and `" + NewName +
+                    "` is the one close match, so this is most likely a typo."
               : Reason;
     return *this;
   }
@@ -422,19 +421,21 @@ public:
     bool hasModule = !Suggestions.Module.empty();
 
     if (hasLocal) {
-      result += "\n  " + Colors::BRIGHT_GREEN + "It may be from the current file: ";
+      result += "\n  " + Colors::BRIGHT_GREEN + "Use a name from this file: ";
       for (size_t i = 0; i < Suggestions.Local.size(); ++i) {
-        result += Colors::BRIGHT_YELLOW + "'" + Suggestions.Local[i] + "'" + Colors::BRIGHT_GREEN;
+        result += Colors::BRIGHT_YELLOW + "`" + Suggestions.Local[i] + "`" + Colors::BRIGHT_GREEN;
         if (i != Suggestions.Local.size() - 1) result += ", ";
       }
     }
     
     if (hasModule) {
-      result += "\n  " + Colors::BRIGHT_GREEN + "Or, could be one of these from the imported files:";
+      result += std::string("\n  ") + Colors::BRIGHT_GREEN +
+                (hasLocal ? "Or use one of these from the imported modules:"
+                          : "Use one of these from the imported modules:");
       for (const auto &pair : Suggestions.Module) {
-        result += "\n    - In module '" + Colors::BRIGHT_CYAN + pair.first + Colors::BRIGHT_GREEN + "': ";
+        result += "\n    - In module `" + Colors::BRIGHT_CYAN + pair.first + Colors::BRIGHT_GREEN + "`: ";
         for (size_t i = 0; i < pair.second.size(); ++i) {
-          result += Colors::BRIGHT_YELLOW + "'" + pair.second[i] + "'" + Colors::BRIGHT_GREEN;
+          result += Colors::BRIGHT_YELLOW + "`" + pair.second[i] + "`" + Colors::BRIGHT_GREEN;
           if (i != pair.second.size() - 1) result += ", ";
         }
       }
@@ -558,12 +559,11 @@ public:
 
   void warn() const { emit(); }
 
-  // Shared "Warning: " label every subclass message below starts with.
-  // Extracted because ~15 subclasses across ErrorsFlow.h/ErrorsScope.h
-  // repeated this exact literal color-code sequence verbatim.
+  // The colour every warning message below starts in. The heading already
+  // says "warning" and emit() marks the diagnostic a warning, so the message
+  // itself starts with the fact.
   static std::string WarningLabel() {
-    return Colors::BOLD + Colors::BRIGHT_YELLOW + "Warning: " +
-           Colors::RESET + Colors::BRIGHT_YELLOW;
+    return Colors::BRIGHT_YELLOW;
   }
 };
 

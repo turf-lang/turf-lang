@@ -2,8 +2,8 @@ tests/54_size_parameters/fail_size_parameter_on_method.tr (1 error)
 
 ── error at line 8, col 4 [E150 · size parameter used where it can't be]
 
-  A method can't declare a size parameter ('N: size'): only a free function can.
-  Hint: write a function that takes the value, e.g. 'fn<T, N: size> f(a: T[N])'.
+  I cannot accept the size parameter `N: size` on a method, because only a free function can declare one.
+  Hint: Write a free function instead, as in `fn<T, N: size> f(a: T[N])`.
 
   8 │ fn<N: size> S.first(a: int[N]): int {
     │    ^ a size parameter cannot be used here

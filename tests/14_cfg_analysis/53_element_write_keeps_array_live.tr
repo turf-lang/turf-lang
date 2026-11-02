@@ -1,4 +1,4 @@
-// EXPECT-NO-DIAG: dead store
+// EXPECT-NO-DIAG: The value assigned to
 // EXPECT-NO-DIAG: is never read
 // EXPECT-NO-DIAG: never used
 // Writing one element keeps the others, so it does not end the life of the

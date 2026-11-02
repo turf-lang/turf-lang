@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E146
-// EXPECT-DIAG: A function has one '@test'
+// EXPECT-DIAG: A function has one `@test`; write its outcome in that one.
 // TDP-2-006: one test, one outcome.
 @test
 @test(panic, "")

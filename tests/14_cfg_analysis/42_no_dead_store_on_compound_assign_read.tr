@@ -1,4 +1,4 @@
-// EXPECT-NO-DIAG: dead store
+// EXPECT-NO-DIAG: The value assigned to
 // EXPECT-NO-DIAG: never used
 // LEC-005: `x += 1` READS x. The dead-store walk used to apply a statement's
 // reads first and then its definitions, so for a read-modify-write the

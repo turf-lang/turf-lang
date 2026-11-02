@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E033
-// EXPECT-DIAG: You already created a variable named 'x'
+// EXPECT-DIAG: I cannot declare `x` again
 fn main(): int {
     immut numbers: int[3] = [1, 2, 3];
     for (x, x) in numbers {

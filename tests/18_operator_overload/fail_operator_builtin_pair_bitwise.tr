@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E028
-// EXPECT-DIAG: 'operator &(int, int)' is not allowed
+// EXPECT-DIAG: I cannot accept `operator &(int, int)`, because both operand types are built in
 // Negative test: operator &(int, int) is a hard error -- both operand
 // types are already builtin, same rule as +/-/*/  (LANG-001 extends the
 // overloadable set to include bitwise operators, but the all-primitive

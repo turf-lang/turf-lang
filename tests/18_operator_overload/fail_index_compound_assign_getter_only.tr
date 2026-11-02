@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E126
-// EXPECT-DIAG: Compound assignment through 'operator[]' is not supported
+// EXPECT-DIAG: I cannot use `+=` through `operator[]`.
 // Getter-only twin of fail_index_compound_assign_setter_only.tr.
 struct IntBox {
     a: int

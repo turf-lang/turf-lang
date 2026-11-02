@@ -20,7 +20,7 @@ INCORRECT:
         mut buf: int* = mem::malloc(40);
         mem::free(buf);
         unsafe { buf[0] = 5; }
-        // ERROR: Oops! You're using memory from 'buf' after it was freed.
+        // ERROR: I cannot use the memory of `buf` after it was freed.
     }
 
 WHAT THIS ERROR IS NOT:

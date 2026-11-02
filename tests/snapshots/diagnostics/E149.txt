@@ -2,10 +2,9 @@ tests/15_enums/fail_literal_string_to_enum_unknown_variant.tr (1 error)
 
 ── error at line 11, col 26 [E149 · conversion that can never succeed]
 
-  Conversion can never succeed!
-  "red" is not a variant of 'Color', so this conversion would always panic when it runs.
+  "red" is not a variant of `Color`, so this conversion would panic every time it runs.
 
-  Hint: Name the variant directly, e.g. 'Color::Red'.
+  Hint: Name the variant directly, e.g. `Color::Red`.
 
   11 │     mut c: Color = "red" to Color;
      │                          ^~ this conversion never succeeds

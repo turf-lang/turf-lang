@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E066
-// EXPECT-DIAG: Cannot initialise 'Direction' variable 'd' with value of type 'int'
+// EXPECT-DIAG: I cannot store an `int` in `d`, which is a `Direction`.
 // Test (fail): No implicit int -> enum assignment without cast
 // Should fail with type mismatch error
 enum Direction { North, East, South, West }

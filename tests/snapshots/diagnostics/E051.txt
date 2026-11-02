@@ -2,9 +2,9 @@ tests/06_structs/fail_reserved_default_declared.tr (1 error)
 
 ── error at line 12, col 1 [E051 · reserved constructor name]
 
-  'default' is reserved and can't be declared by hand.
+  I cannot accept a hand-written `default`, because it is reserved.
 
-  Hint: 'Point::default()' is always compiler-generated (every field recursively zero-initialized) -- remove this declaration. Define 'Point.new(...)' instead if you need custom construction logic.
+  Hint: Remove this declaration: `Point::default()` is always generated, with every field zero-initialized. Declare `Point.new(...)` instead if you need custom construction logic.
 
   12 │ fn Point.default(): void {
      │ ^~ this name is reserved for constructors

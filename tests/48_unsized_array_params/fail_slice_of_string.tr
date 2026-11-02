@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E142
-// EXPECT-DIAG: Cannot slice a value of type 'string' with [a..b].
+// EXPECT-DIAG: I cannot slice a `string` with `[a..b]`: only an array has slices.
 // EXPECT-DIAG: strings::substring
 // A string is text ending at a zero byte, not an array: a view into its
 // middle would have no terminator. The hint points at strings::substring.

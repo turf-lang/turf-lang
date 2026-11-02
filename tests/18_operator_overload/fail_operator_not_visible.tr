@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E057
-// EXPECT-DIAG: cannot apply '+' to 'Vec2' and 'Vec2'
+// EXPECT-DIAG: I cannot use `+` on a `Vec2` and a `Vec2`.
 // Negative test: using `+` on a struct with no operator overload declared
 // anywhere must be a clean type error, not an ICE.
 struct Vec2 {

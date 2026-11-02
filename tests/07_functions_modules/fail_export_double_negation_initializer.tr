@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E022
-// EXPECT-DIAG: needs a literal value
+// EXPECT-DIAG: at compile time, which an exported constant needs
 // One '-' before a number is part of the literal; a second makes it an
 // expression, which an exported constant cannot hold.
 export immut TWICE: int = --1;

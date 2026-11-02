@@ -318,36 +318,36 @@ void TypeChecker::reportNothingToInferGeneric(const VarDeclExprAST &Node) {
         Line->compare(At.Col - 1, Struct.size(), Struct) == 0) {
       const int Col = At.Col + static_cast<int>(Struct.size());
       Hints.FixIts.push_back({At.Line, Col, Col, Written});
-      Hints.FixReason = "The arguments of '" + Struct + "::new' make every type "
-                        "argument of '" + Struct + "' " + Written + ", and "
-                        "nothing else says so; written where the value is "
-                        "built, they give 'guess' a type.";
+      Hints.FixReason = "The arguments of `" + Struct + "::new` make every type "
+                        "argument of `" + Struct + "` " + Written + ", and "
+                        "nothing else says so; written where it is built, they "
+                        "give `guess` a type.";
     }
-    Hint = "Write the type arguments where it is built, '" + Struct + Written +
-           "::new(...)', or on the variable, 'mut " + Node.getName() + ": " +
-           Struct + Written + " = ...;'.";
+    Hint = "Write the type arguments where it is built, `" + Struct + Written +
+           "::new(...)`, or on the variable, `mut " + Node.getName() + ": " +
+           Struct + Written + " = ...;`.";
   } else {
     const std::string Example = SC && SC->ResolvedKind != ScopeAccessKind::Unresolved
                                     ? Struct + "<int>"
                                     : std::string("List<int>");
-    Hint = "'guess' has nothing to infer the type argument from here. Write it "
-           "where the value is built, e.g. '" + Example + "::" + Member +
-           "', or on the variable, e.g. 'mut " + Node.getName() + ": " +
-           Example + " = ...;'.";
+    Hint = "Write the type argument where it is built, e.g. `" + Example + "::" +
+           Member + "`, or on the variable, e.g. `mut " + Node.getName() + ": " +
+           Example + " = ...;`: `guess` has nothing to infer it from here.";
   }
   reportError(Node.getLoc(), ErrCode::NothingToInfer,
-              "Cannot infer the type arguments of a generic type.", {}, Hint,
-              "Nothing to infer!", Hints);
+              "I cannot infer the type arguments of a generic type.", {}, Hint,
+              "", Hints);
 }
 
 void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
   if (Node.isImmutable() && !Node.hasExplicitInit()) {
     reportError(Node.getLoc(), ErrCode::MissingInitializer,
-                "Immutable variable '" + Node.getName() + "' requires an explicit initializer.",
+                "The immutable variable `" + Node.getName() + "` has no initial "
+                "value, and nothing can assign it one later.",
                 {},
-                "'immutable'/'immut' variables can never be assigned to "
-                "later, so they must get their only value right here.",
-                "Missing initializer!");
+                "Give `" + Node.getName() + "` its value here, e.g. `immut " +
+                    Node.getName() + ": int = 5;`, or declare it `mut`.",
+                "");
   }
 
   // Visit the initializer first (bottom-up). A declared function type is what
@@ -361,7 +361,7 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
   // `mut a: int[]` is an ArrayDeclExprAST instead (visitArrayDecl()).
   if (checkUnsizedArrayPlacement(DeclTy.get(), /*AllowAtTop=*/!Node.isExported(),
                                  Node.getLoc(),
-                                 "Variable '" + Node.getName() + "'", "")) {
+                                 "The variable `" + Node.getName() + "`", "")) {
     setType(&Node, nullptr);
     return;
   }
@@ -387,8 +387,11 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
       // declaration now (SEM-004, F-INIT-1 -- no type-specific default is
       // ever synthesized there any more), so this is the only place
       // 'mut x: guess;' is ever caught: nothing to infer the type from.
-      reportError(Node.getLoc(), ErrCode::MissingInitializer, "'guess' needs an initializer to infer from.",
-                  {}, "", "Missing initializer!");
+      reportError(Node.getLoc(), ErrCode::MissingInitializer,
+                  "`" + Node.getName() + "` is declared `guess` with no initial "
+                  "value, so I have nothing to infer its type from.",
+                  {}, "Give it an initial value, or write its type instead of `guess`.",
+                  "");
       setType(&Node, nullptr);
       return;
     }
@@ -417,20 +420,22 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
       return;
     }
     if (InitTy->isVoid()) {
-      reportError(Node.getLoc(), ErrCode::NothingToInfer, "Cannot infer a type from a 'void' expression.",
+      reportError(Node.getLoc(), ErrCode::NothingToInfer,
+                  "I cannot infer the type of `" + Node.getName() +
+                      "` from an expression that is `void`.",
                   {},
-                  "'guess' needs a value to infer a type from -- give '" +
-                      Node.getName() + "' an explicit type annotation instead.",
-                  "Nothing to infer!");
+                  "Write the type of `" + Node.getName() + "` instead of `guess`.",
+                  "");
       setType(&Node, nullptr);
       return;
     }
     if (InitTy->isNull()) {
-      reportError(Node.getLoc(), ErrCode::NothingToInfer, "Cannot infer a type from 'null'.",
+      reportError(Node.getLoc(), ErrCode::NothingToInfer,
+                  "I cannot infer the type of `" + Node.getName() + "` from `null`.",
                   {},
-                  "Annotate the reference type explicitly, e.g. 'mut " +
-                      Node.getName() + ": &?Point = null;'.",
-                  "Nothing to infer!");
+                  "Write the reference type, e.g. `mut " +
+                      Node.getName() + ": &?Point = null;`.",
+                  "");
       setType(&Node, nullptr);
       return;
     }
@@ -440,7 +445,7 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
     // nested inside the inferred type, and an exported constant.
     if (checkUnsizedArrayPlacement(
             InitTy.get(), /*AllowAtTop=*/!Node.isExported(), Node.getLoc(),
-            "Variable '" + Node.getName() + "'", "")) {
+            "The variable `" + Node.getName() + "`", "")) {
       setType(&Node, nullptr);
       return;
     }
@@ -572,10 +577,10 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
             DeclPtr->getPointee()->isArray() && InitArr &&
             (InitArr->getElementType()->isReference() ||
              InitArr->getElementType()->isNullableReference()))
-          Hint = "'" + DeclTy->getName() + "' is a reference to an array: '&' "
-                 "takes the whole type after it. An array of references is "
-                 "written with parentheses, e.g. 'mut " + Node.getName() + ": " +
-                 InitTy->getName() + " = ...'.";
+          Hint = "Write an array of references with parentheses, e.g. `mut " +
+                 Node.getName() + ": " + InitTy->getName() + " = ...`: `" +
+                 DeclTy->getName() + "` is a reference to an array, since `&` "
+                 "takes the whole type after it.";
         // DX-5: the initializer is the primary span; the written type is
         // where the expectation came from.
         Hints.Label = SpanLabels::thisIs(InitTy.get());
@@ -586,9 +591,9 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
                                     " because of this"});
         reportError(SpanLabels::spanOf(Node.getInitializer(), Node.getLoc()),
                     codeForMismatch(InitTy.get(), nullptr, ErrCode::TypeMismatch),
-                    "Cannot initialise '" + DeclTy->getName() +
-                        "' variable '" + Node.getName() + "' with value of type '" +
-                        InitTy->getName() + "'.",
+                    "I cannot store " + SpanLabels::aType(InitTy.get()) + " in `" +
+                        Node.getName() + "`, which is " +
+                        SpanLabels::aType(DeclTy.get()) + ".",
                     Related, Hint, "", Hints);
       } else {
         // SEM-002: typesCompatible() only checks the KIND of conversion
@@ -681,14 +686,13 @@ void TypeChecker::checkFuncDef(FuncDefExprAST &Node) {
     checkUnsizedArrayPlacement(
         Param.Type.get(), /*AllowAtTop=*/true,
         Param.TypeLoc.Line > 0 ? Param.TypeLoc : Node.getLoc(),
-        "Parameter '" + Param.Name + "' of '" + Node.getName() + "'", "");
+        "The parameter `" + Param.Name + "` of `" + Node.getName() + "`", "");
   }
   checkUnsizedArrayPlacement(
       Node.getReturnType(), /*AllowAtTop=*/false, Node.getLoc(),
-      "The return type of '" + Node.getName() + "'",
-      "A function can't return an unsized array: the caller would get a "
-      "slice of storage that no longer exists. Return a sized array (e.g. "
-      "'int[5]') or a List<T> instead.");
+      "The return type of `" + Node.getName() + "`",
+      "Return a sized array, e.g. `int[5]`, or a `List<T>` instead: a "
+      "returned slice would view storage that no longer exists.");
 
   // A generic type named only by this signature (`fn f(p: Box<int>)` with no
   // other `Box<int>` in the program) still needs its layout: the function's
@@ -789,8 +793,8 @@ void TypeChecker::visitErrorDecl(ErrorDeclExprAST &Node) {
     for (const auto &Field : Variant.Fields) {
       checkUnsizedArrayPlacement(Field.Type.get(), /*AllowAtTop=*/false,
                                  Node.getLoc(),
-                                 "Payload field '" + Field.Name + "' of '" +
-                                     Node.getName() + "::" + Variant.Name + "'",
+                                 "The payload field `" + Field.Name + "` of `" +
+                                     Node.getName() + "::" + Variant.Name + "`",
                                  ""); // E140
       if (!Gated && isRawPointer(Field.Type.get())) {
         checkUnsafeGate(Field.Type.get(), Node.getLoc(), &Node);
@@ -826,9 +830,9 @@ void TypeChecker::visitStructDecl(StructDeclExprAST &Node) {
     checkUnsizedArrayPlacement(
         Field.Type.get(), /*AllowAtTop=*/false,
         Field.TypeLoc.Line > 0 ? Field.TypeLoc : Node.getLoc(),
-        "Field '" + Field.Name + "' of '" + Node.getName() + "'",
-        "A struct field needs a fixed size (e.g. 'int[5]'), or use a "
-        "List<T> for a collection that grows.");
+        "The field `" + Field.Name + "` of `" + Node.getName() + "`",
+        "Give the field a size, e.g. `int[5]`, or use a `List<T>` for a "
+        "collection that grows.");
 
   // TYPE-002 (S15/D2): a generic type used only as a struct FIELD (no
   // variable of that type, no method called on it, anywhere in the
@@ -862,7 +866,7 @@ void TypeChecker::visitArrayDecl(ArrayDeclExprAST &Node) {
   // `int[2][]`), and it always needs something to view.
   if (checkUnsizedArrayPlacement(DeclArrTy.get(), /*AllowAtTop=*/true,
                                  Node.getLoc(),
-                                 "Variable '" + Node.getName() + "'", "")) {
+                                 "The variable `" + Node.getName() + "`", "")) {
     setType(&Node, nullptr);
     return;
   }
@@ -879,19 +883,19 @@ void TypeChecker::visitArrayDecl(ArrayDeclExprAST &Node) {
           SrcArr && SrcArr->getElementType()->isEquivalent(Node.getElementType());
       reportError(Node.getLoc(),
                   SameElem ? ErrCode::ArraySizeMismatch : ErrCode::ArrayTypeMismatch,
-                  "Cannot initialize '" + Node.getName() + "' ('" +
-                      DeclArrTy->getName() + "') from a value of type '" +
-                      SrcTy->getName() + "'.",
+                  "I cannot initialize `" + Node.getName() + "`, " +
+                      SpanLabels::aType(DeclArrTy) + ", from " +
+                      SpanLabels::aType(SrcTy.get()) + ".",
                   {},
                   SrcArr && SrcArr->getSize() < 0
-                      ? "A slice's length is only known when the program runs, "
-                        "so it can't be copied into a fixed-size array. Declare '" +
-                            Node.getName() + "' as '" +
+                      ? "Declare `" + Node.getName() + "` as `" +
                             Node.getElementTypePtr()->getName() +
-                            "[]' to view it, or copy the elements in a loop."
-                      : "An array can only be initialized from an array of "
-                        "the same size and element type.",
-                  SameElem ? "Array size mismatch!" : "Array element type mismatch!");
+                            "[]` to view the slice, or copy the elements in a "
+                            "loop: a slice's length is known only when the "
+                            "program runs."
+                      : "Initialize it from an array of the same size and "
+                        "element type.",
+                  "");
       setType(&Node, nullptr);
       return;
     }
@@ -900,15 +904,14 @@ void TypeChecker::visitArrayDecl(ArrayDeclExprAST &Node) {
   if (Node.getSize() < 0) {
     if (Node.getInitList().empty() && !Node.getInitExpr()) {
       reportError(Node.getLoc(), ErrCode::MissingInitializer,
-                  "The slice '" + Node.getName() + "' needs an initializer.",
+                  "The slice `" + Node.getName() + "` has no array to view.",
                   {},
-                  "A '" + DeclArrTy->getName() + "' is a view of an array, so "
-                  "it needs one to look at, e.g. 'immut " + Node.getName() +
-                  ": " + DeclArrTy->getName() + " = other[1..];'. For an "
-                  "empty array of your own, give it a size: 'mut " +
+                  "Give it one, e.g. `immut " + Node.getName() +
+                  ": " + DeclArrTy->getName() + " = other[1..];`, or give an "
+                  "array of your own a size: `mut " +
                   Node.getName() + ": " + Node.getElementTypePtr()->getName() +
-                  "[5];'.",
-                  "Missing initializer!");
+                  "[5];`.",
+                  "");
       setType(&Node, nullptr);
       return;
     }
@@ -916,13 +919,13 @@ void TypeChecker::visitArrayDecl(ArrayDeclExprAST &Node) {
       TurfTypePtr SrcTy = getType(Src);
       if (SrcTy && !typesCompatible(SrcTy.get(), DeclArrTy.get())) {
         reportError(Node.getLoc(), ErrCode::ArrayTypeMismatch,
-                    "Cannot make the slice '" + Node.getName() + "' ('" +
-                        DeclArrTy->getName() + "') from a value of type '" +
-                        SrcTy->getName() + "'.",
+                    "I cannot make the slice `" + Node.getName() + "`, " +
+                        SpanLabels::aType(DeclArrTy) + ", from " +
+                        SpanLabels::aType(SrcTy.get()) + ".",
                     {},
-                    "A slice views an array with the same element type, "
-                    "e.g. an int[5] or another int[] for an int[].",
-                    "Array element type mismatch!");
+                    "View an array with the same element type, e.g. an "
+                    "`int[5]` or another `int[]` for an `int[]`.",
+                    "");
         setType(&Node, nullptr);
         return;
       }
@@ -948,27 +951,26 @@ void TypeChecker::visitArrayDecl(ArrayDeclExprAST &Node) {
     std::string Holder; // "H.own" when the reference is a field of Elem
     if (Elem && !Elem->isReference() && nonNullRefFieldPath(Elem, Elem->getName(), Holder)) {
       reportError(Node.getLoc(), ErrCode::MissingInitializer,
-                  "The array '" + Node.getName() + "' ('" + DeclArrTy->getName() +
-                      "') needs an initializer.",
+                  "The array `" + Node.getName() + "`, " + SpanLabels::aType(DeclArrTy) +
+                      ", needs an initial value: it would start zero-filled, and `" +
+                      Holder + "` is a reference that cannot be null.",
                   {},
-                  "An array starts zero-filled, and '" + Holder +
-                      "' is a reference that can't be null: give every element "
-                      "a value, e.g. '= [" + Elem->getName() + "::default(), ...]'.",
-                  "Missing initializer!");
+                  "Give every element a value, e.g. `= [" + Elem->getName() +
+                      "::default(), ...]`.",
+                  "");
       setType(&Node, nullptr);
       return;
     }
     if (Elem && Elem->isReference()) {
       reportError(Node.getLoc(), ErrCode::MissingInitializer,
-                  "The array '" + Node.getName() + "' ('" + DeclArrTy->getName() +
-                      "') needs an initializer.",
+                  "The array `" + Node.getName() + "`, " + SpanLabels::aType(DeclArrTy) +
+                      ", needs an initial value: it would start zero-filled, and "
+                      "a reference cannot be null.",
                   {},
-                  "An array of '" + Elem->getName() + "' starts zero-filled, "
-                  "and a reference can't be null: give every element a value, "
-                  "e.g. '= [a, b]'. To start with no references, declare it '(&?" +
+                  "Give every element a value, e.g. `= [a, b]`, or declare it `(&?" +
                       static_cast<const TurfPointerType *>(Elem)->getPointee()->getName() +
-                      ")[" + std::to_string(Node.getSize()) + "]' instead.",
-                  "Missing initializer!");
+                      ")[" + std::to_string(Node.getSize()) + "]` to start with no references.",
+                  "");
       setType(&Node, nullptr);
       return;
     }
@@ -989,15 +991,15 @@ void TypeChecker::visitArrayDecl(ArrayDeclExprAST &Node) {
     if (Node.getSize() >= 0 &&
         Node.getInitList().size() != static_cast<size_t>(Node.getSize())) {
       reportError(Node.getLoc(), ErrCode::ArraySizeMismatch,
-                  "Array declared with size " + std::to_string(Node.getSize()) +
-                      " but initialized with " +
-                      std::to_string(Node.getInitList().size()) +
-                      " element" +
-                      (Node.getInitList().size() == 1 ? "" : "s") + ".",
+                  "`" + Node.getName() + "` is declared with " +
+                      std::to_string(Node.getSize()) + " element" +
+                      (Node.getSize() == 1 ? "" : "s") + ", and its initializer has " +
+                      std::to_string(Node.getInitList().size()) + ".",
                   {},
-                  "Change the declared size to match the initializer list, "
-                  "or add/remove elements so the counts agree.",
-                  "Array size mismatch!");
+                  "Change the declared size to " +
+                      std::to_string(Node.getInitList().size()) +
+                      ", or add or remove elements so the counts agree.",
+                  "");
     }
     // ExprAST has no base-class getLoc() (each concrete node declares its
     // own, inconsistently), so this uses the array declaration's own
@@ -1009,9 +1011,8 @@ void TypeChecker::visitArrayDecl(ArrayDeclExprAST &Node) {
       if (DeclaredElemTy && InitTy) {
         if (!typesCompatible(InitTy.get(), DeclaredElemTy.get())) {
           reportError(Node.getLoc(), ErrCode::ArrayTypeMismatch,
-                      "Cannot initialize an array of '" +
-                          DeclaredElemTy->getName() + "' with a value of type '" +
-                          InitTy->getName() + "'.",
+                      "I cannot put " + SpanLabels::aType(InitTy.get()) +
+                          " in an array of `" + DeclaredElemTy->getName() + "`.",
                       {});
         } else {
           // SEM-002 -- see visitVarDecl()'s identical comment.
@@ -1118,11 +1119,10 @@ void TypeChecker::visitSizeOf(SizeOfExprAST &Node) {
   // lowers to a sized LLVM type.
   if (Node.getTypeArg() && Node.getTypeArg()->isVoid()) {
     reportError(Node.getLoc(), ErrCode::UnsupportedOperation,
-                "'sizeof(void)' is not supported -- 'void' has no size.",
+                "`sizeof(void)` has no answer: `void` has no size.",
                 {},
-                "Use 'sizeof' on a type that holds a value, e.g. "
-                "'sizeof(int)'. If you meant the size of an untyped pointer, "
-                "write 'sizeof(void*)'.");
+                "Use `sizeof` on a type with a size, e.g. `sizeof(int)`, or "
+                "write `sizeof(void*)` for the size of an untyped pointer.");
   }
   // sizeof(T) always produces int
   setType(&Node, TurfInt());
@@ -1153,24 +1153,23 @@ void TypeChecker::visitExternFuncDecl(ExternFuncDeclExprAST &Node) {
 
   checkType(Node.getReturnType(), "return type");
   for (const auto &[PName, PType] : Node.getParams())
-    checkType(PType, "parameter '" + PName + "'");
+    checkType(PType, "parameter `" + PName + "`");
 
   // E140 (issue #260): C has no slice type, so an `extern fn` can't take or
   // return a `T[]` at all -- not even as a parameter's own type.
   const std::string ExternHint =
-      "C has no unsized-array type to match: declare the C parameter as a "
-      "pointer ('T*') plus a separate length, and pass 'arr to T*' inside "
-      "'unsafe { }'.";
+      "Declare the C parameter as a pointer, `T*`, plus a separate length, "
+      "and pass `arr to T*` inside `unsafe { }`: C has no unsized-array type.";
   for (const auto &[PName, PType] : Node.getParams())
     if (checkUnsizedArrayPlacement(PType.get(), /*AllowAtTop=*/false,
                                    Node.getLoc(),
-                                   "Parameter '" + PName + "' of extern fn '" +
-                                       Node.getName() + "'",
+                                   "The parameter `" + PName + "` of `extern fn " +
+                                       Node.getName() + "`",
                                    ExternHint))
       break;
   checkUnsizedArrayPlacement(Node.getReturnType().get(), /*AllowAtTop=*/false,
                              Node.getLoc(),
-                             "The return type of extern fn '" + Node.getName() + "'",
+                             "The return type of `extern fn " + Node.getName() + "`",
                              ExternHint);
 
   // The declaration itself has no runtime value.

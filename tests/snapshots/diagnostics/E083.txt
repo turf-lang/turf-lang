@@ -2,9 +2,9 @@ tests/40_defer/fail_break_in_defer.tr (1 error)
 
 ── error at line 8, col 11 [E083 · control flow inside defer]
 
-  A deferred statement can't 'break'!
+  I cannot let a deferred statement `break`.
 
-  Hint: 'break' inside a 'defer' would jump out of the enclosing function or loop, not just the deferred statement -- move it out of the 'defer'.
+  Hint: Move the `break` out of the `defer`: it would jump out of the enclosing function or loop, not just the deferred statement.
 
   8 │     defer break;
     │           ^~~~~ this leaves a `defer`

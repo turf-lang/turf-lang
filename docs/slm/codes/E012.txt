@@ -18,8 +18,7 @@ INCORRECT:
     fn example(): int {
         return 5;
         io::printline("this never prints");
-        // ERROR: this code comes after a return, so it's impossible to
-        // reach it.
+        // ERROR: this code comes after a return, so I can never reach it.
     }
 
 WHAT THIS ERROR IS NOT:

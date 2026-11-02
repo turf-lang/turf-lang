@@ -2,10 +2,9 @@ tests/04_control_flow/fail_break_outside_loop.tr (1 error, 1 warning)
 
 ── error at line 5, col 9 [E007 · break, continue or return out of place]
 
-  Control flow error!
-  'break' used outside of a loop.
+  I cannot use `break` outside of a loop.
 
-  Hint: Make sure 'break' and 'continue' are inside a loop, and 'return' is inside a function.
+  Hint: Move `break` and `continue` inside a loop, and `return` inside a function.
 
   5 │         break;
     │         ^~~~~ this is not inside a loop or a function
@@ -14,9 +13,9 @@ tests/04_control_flow/fail_break_outside_loop.tr (1 error, 1 warning)
 
 ── warning at line 6, col 7 [E165 · empty branch]
 
-  Warning: The 'else' branch is empty — it doesn't do anything!
+  The `else` branch is empty.
 
-  Hint: If you haven't written the code yet, add a comment like '// TODO'. Otherwise, you may be able to simplify this 'if' statement.
+  Hint: Write the code for it, or add a comment such as `// TODO` if it is not written yet. If the branch is not needed, simplify the `if` statement, or pass `--allow E165` to silence this.
 
   6 │     } else {}
     │       ^~~~ this branch is empty

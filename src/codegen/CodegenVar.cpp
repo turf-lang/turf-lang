@@ -337,10 +337,10 @@ Value *AssignmentExprAST::codegen() {
         // write (a null here reads to every caller as "an error was already
         // reported").
         LogErrorAt(Loc, ErrCode::OperatorTemporaryWrite,
-                   "Cannot assign through 'operator[]=' on a temporary: the "
+                   "I cannot assign through `operator[]=` on a temporary, because the "
                    "container being indexed is the result of another "
-                   "'operator[]' call, so the write would only change a copy."
-                   "\n  Hint: read the inner container into a variable first, "
+                   "`operator[]` call, so the write would only change a copy."
+                   "\n  Hint: Read the inner container into a variable first, "
                    "write to it there, and store it back.",
                    SLM::ErrorCategory::TYPE_MISMATCH);
         return nullptr;

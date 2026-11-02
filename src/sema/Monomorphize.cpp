@@ -568,9 +568,8 @@ std::shared_ptr<ResolverFunctionSymbol> finishInstantiation(
   }
   if (ResolveFailed) {
     SemanticError(Entry.Request.Site,
-                  "Internal error: monomorphized instantiation of '" +
-                      Entry.Request.DeclKey +
-                      "' failed to re-resolve. This is a compiler bug.")
+                  "I could not resolve the instantiation of `" +
+                      Entry.Request.DeclKey + "` I built. This is a compiler bug: report it at https://github.com/turf-lang/turf-lang/issues with this program.")
         .raise();
     return nullptr;
   }
@@ -692,9 +691,9 @@ std::shared_ptr<ResolverFunctionSymbol> finishInstantiation(
         Chain[Anchor]->Request.Site, FullMsg,
         !InnerHint.empty()
             ? InnerHint
-            : "Call '" + describeRequest(Entry.Request) +
-                  "' with types its body works for, or change the body of '" +
-                  Entry.Request.DeclKey + "' so it accepts these types.");
+            : "Call `" + describeRequest(Entry.Request) +
+                  "` with types its body works for, or change the body of `" +
+                  Entry.Request.DeclKey + "` so it accepts these types.");
     // The mistake is the inner error's (`<` on a struct is E124), not a
     // generic E011; `--explain` should name that one.
     if (InnerCode) {
@@ -703,13 +702,13 @@ std::shared_ptr<ResolverFunctionSymbol> finishInstantiation(
     }
     for (size_t i = Anchor + 1; i < Chain.size(); ++i)
       Err.withRelated(Chain[i]->Request.Site,
-                      "'" + describeRequest(Chain[i - 1]->Request) +
-                          "' requires '" + describeRequest(Chain[i]->Request) +
-                          "' here");
-    Err.withRelated(InnerLoc, "the error itself, inside '" +
-                                  describeRequest(Entry.Request) + "'");
+                      "`" + describeRequest(Chain[i - 1]->Request) +
+                          "` needs `" + describeRequest(Chain[i]->Request) +
+                          "` here");
+    Err.withRelated(InnerLoc, "the error itself, inside `" +
+                                  describeRequest(Entry.Request) + "`");
     Err.withRelated(Template->getNameLoc(),
-                    "in generic declaration '" + Entry.Request.DeclKey + "'");
+                    "in the generic declaration `" + Entry.Request.DeclKey + "`");
     // The anchor's other call sites -- the same instantiation, asked for from
     // several places in the user's code.
     const InstantiationEntry &AnchorEntry = *Chain[Anchor];
@@ -877,9 +876,9 @@ bool drainFreeFunctionRequests(
       // not a user error -- mirrors CodegenFunc.cpp's identical "should be
       // unreachable if the Resolver ran correctly" defensive diagnostic.
       SemanticError(Entry.Request.Site,
-                    "Internal error: no generic declaration found for '" +
+                    "I found no generic declaration for `" +
                         Entry.Request.DeclKey +
-                        "' during monomorphization. This is a compiler bug.")
+                        "` while instantiating it. This is a compiler bug: report it at https://github.com/turf-lang/turf-lang/issues with this program.")
           .raise();
       return DidWork;
     }
@@ -1104,9 +1103,8 @@ bool drainMethodRequests(
       // identical "should be unreachable if the Resolver ran correctly"
       // defensive diagnostic.
       SemanticError(Entry.Request.Site,
-                    "Internal error: no generic method declaration found "
-                    "for '" + Entry.Request.DeclKey +
-                        "' during monomorphization. This is a compiler bug.")
+                    "I found no generic method declaration for `" + Entry.Request.DeclKey +
+                        "` while instantiating it. This is a compiler bug: report it at https://github.com/turf-lang/turf-lang/issues with this program.")
           .raise();
       return DidWork;
     }
@@ -1121,9 +1119,8 @@ bool drainMethodRequests(
       // routed through visitFuncCall (FreeFunction-kind, self-STRIPPED) --
       // see drainFreeFunctionRequests()'s own struct-bound exclusion.
       SemanticError(Entry.Request.Site,
-                    "Internal error: '" + Entry.Request.DeclKey +
-                        "' resolved as a Method-kind instantiation request "
-                        "but has no 'self' parameter. This is a compiler bug.")
+                    "I instantiated `" + Entry.Request.DeclKey +
+                        "` as a method, and it has no `self` parameter. This is a compiler bug: report it at https://github.com/turf-lang/turf-lang/issues with this program.")
           .raise();
       return DidWork;
     }
@@ -1237,9 +1234,9 @@ bool drainConstructorRequests(
       // practice. Kept for defensive symmetry with the other two drain
       // functions, not because a different outcome is expected here.
       SemanticError(Entry.Request.Site,
-                    "Internal error: no generic declaration found for '" +
+                    "I found no generic declaration for `" +
                         Entry.Request.DeclKey +
-                        "' during monomorphization. This is a compiler bug.")
+                        "` while instantiating it. This is a compiler bug: report it at https://github.com/turf-lang/turf-lang/issues with this program.")
           .raise();
       return DidWork;
     }
@@ -1382,9 +1379,8 @@ bool drainStructRequests(
       // TypeCheckerDecl.cpp) that only ever produces a GenericType for an
       // already-resolved, real struct declaration.
       SemanticError(Entry.Request.Site,
-                    "Internal error: no generic struct declaration found "
-                    "for '" + Entry.Request.DeclKey +
-                        "' during monomorphization. This is a compiler bug.")
+                    "I found no generic struct declaration for `" + Entry.Request.DeclKey +
+                        "` while instantiating it. This is a compiler bug: report it at https://github.com/turf-lang/turf-lang/issues with this program.")
           .raise();
       return DidWork;
     }
@@ -1425,11 +1421,11 @@ bool drainStructRequests(
         FT = getArrayElementType(FT);
       if (FT && FT->isVoid()) {
         TypeError(Entry.Request.Site, ErrCode::VoidTypeNotAllowed,
-                  "'" + describeRequest(Entry.Request) + "' gives field '" +
-                      Field.Name + "' the type 'void'.",
-                  "'void' only makes sense as a function's return type. Give '" +
-                      Entry.Request.DeclKey +
-                      "' a real type here, or a pointer such as 'void*'.",
+                  "`" + describeRequest(Entry.Request) + "` gives the field `" +
+                      Field.Name + "` the type `void`, which is only a function's "
+                      "return type.",
+                  "Instantiate `" + Entry.Request.DeclKey +
+                      "` with a type that has values here, or a pointer such as `void*`.",
                   "'void' cannot be a struct field's type.")
             .raise();
         return DidWork;
@@ -1504,9 +1500,9 @@ bool drainStructRequests(
     }
     if (ResolveFailed) {
       SemanticError(Entry.Request.Site,
-                    "Internal error: monomorphized instantiation of '" +
+                    "I could not resolve the instantiation of `" +
                         Entry.Request.DeclKey +
-                        "' failed to re-resolve. This is a compiler bug.")
+                        "` I built. This is a compiler bug: report it at https://github.com/turf-lang/turf-lang/issues with this program.")
           .raise();
       return DidWork;
     }

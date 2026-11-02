@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E143
-// EXPECT-DIAG: The slice [3..1] of 'int[]' is out of range: the start comes after the end.
+// EXPECT-DIAG: The slice `[3..1]` of `int[]` is out of range: the start comes after the end.
 // With no length known (a `T[]`), start > end is still provable when both
 // bounds are constants of the same sign.
 fn f(arr: int[]): int {

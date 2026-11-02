@@ -2,9 +2,9 @@ tests/35_numeric_literals/fail_invalid_radix_digit.tr (1 error)
 
 ── error at line 8, col 18 [E071 · invalid radix digit]
 
-  '2' isn't a valid digit in '0b01' (binary, 0-1).
+  `2` is not a valid digit in `0b01`, which is binary (0-1).
 
-  Hint: Every digit after '0b' must be valid in that radix. Double-check the digit, or did you mean to write a decimal number instead (drop the '0b' prefix)?
+  Hint: Replace the digit with one that is valid after `0b`, or drop the `0b` prefix to write a decimal number.
 
   8 │     mut x: int = 0b012;
     │                  ^ this digit is not valid in this radix

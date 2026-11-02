@@ -2,8 +2,8 @@ tests/25_errors/fail_error_brace_and_semicolon.tr (1 error)
 
 ── error at line 6, col 1 [E117 · invalid error declaration]
 
-  An 'error' declaration can't mix the bare ';' form with a braced variant list.
-  Hint: use either 'error GeneralError;' (bare, a single implicit DEFAULT variant) or 'error GeneralError { Variant1, Variant2, ... }' (braced), not both.
+  I cannot mix the bare `;` form of an `error` declaration with a braced variant list.
+  Hint: Write either `error GeneralError;` (bare, with a single implicit `DEFAULT` variant) or `error GeneralError { Variant1, Variant2, ... }` (braced), not both.
 
   6 │ error GeneralError; {
     │ ^~~~~ this error declaration is not valid

@@ -2,9 +2,9 @@ tests/05_arrays_pointers_ffi/fail_use_after_free.tr (1 error)
 
 ── error at line 22, col 10 [E018 · use after free]
 
-  Oops! You're using memory from 'p' after it was freed.
+  I cannot use the memory of `p` after it was freed.
 
-  Hint: Don't use memory after it has been released (by free() or any function declared '@ownership(releases: ...)'). Consider setting the pointer to null after releasing it.
+  Hint: Stop using `p` after it is released by `free()` or by a function declared `@ownership(releases: ...)`, or set the pointer to `null` after releasing it.
 
   21 │         free(p);
      │             - freed here

@@ -12,10 +12,10 @@ CORRECT USAGE:
 
 INCORRECT:
     mut bad: int = 3 + "4";
-    // ERROR: Math trouble! <details on the specific type clash>
+    // ERROR: I cannot use `+` on an `int` and a `string`.
 
     mut boom: int = 10 / 0;
-    // ERROR: Math trouble! <division by a literal zero>
+    // WARNING (E167): I found `/` used with zero, which will crash at runtime.
 
 WHAT THIS ERROR IS NOT:
   - Not TypeError (E066) or ArgumentTypeError (E056) -- those are about

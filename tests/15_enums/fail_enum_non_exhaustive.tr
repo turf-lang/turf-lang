@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E093
-// EXPECT-DIAG: Non-exhaustive enum comparison on 'Direction'
+// EXPECT-DIAG: This `compare` on `Direction` does not cover every case, and it has no `otherwise`.
 // Test (fail): Non-exhaustive enum compare without otherwise clause
 // Missing East and West -> should be a compile error
 enum Direction { North, East, South, West }

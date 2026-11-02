@@ -23,7 +23,7 @@ INCORRECT:
     fn main(): int { return util::helper(); }   // helper is private
 
     // shapes.tr: pub struct Point { pub x: int, cache: int }
-    p.cache      // ERROR: field 'Point.cache' is private to module 'shapes'
+    p.cache      // ERROR: I cannot use the field `Point.cache`, which is private to module `shapes`.
 
 CORRECT:
     pub fn helper(): int { return 41; }     // if it is meant to be shared

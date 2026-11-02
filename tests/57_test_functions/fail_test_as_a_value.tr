@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E173
-// EXPECT-DIAG: 'checks_add' is a test
+// EXPECT-DIAG: I cannot use the test `checks_add`
 // TDP-2-006: a test has no value either: a build does not contain it.
 @test
 fn checks_add(): void {

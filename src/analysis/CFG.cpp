@@ -1300,7 +1300,7 @@ void CFGBuilder::visitBreak(ExprAST *E) {
     return;
 
   if (!LoopBreakTarget) {
-    ControlFlowError(Brk->getLoc(), "'break' used outside of a loop.").raise();
+    ControlFlowError(Brk->getLoc(), "I cannot use `break` outside of a loop.").raise();
     return;
   }
 
@@ -1320,7 +1320,7 @@ void CFGBuilder::visitContinue(ExprAST *E) {
     return;
 
   if (!LoopContinueTarget) {
-    ControlFlowError(Cont->getLoc(), "'continue' used outside of a loop.").raise();
+    ControlFlowError(Cont->getLoc(), "I cannot use `continue` outside of a loop.").raise();
     return;
   }
 

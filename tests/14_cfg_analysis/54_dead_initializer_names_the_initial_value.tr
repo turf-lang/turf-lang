@@ -1,5 +1,5 @@
-// EXPECT-DIAG: The initial value of 'x' is never read
-// EXPECT-NO-DIAG: is assigned but the value is never read
+// EXPECT-DIAG: The initial value of `x` is never read
+// EXPECT-NO-DIAG: The value assigned to
 // EXPECT-NO-DIAG: never used
 // `x` is read, but every path assigns it again first: the warning is about
 // the initial value, not the variable.

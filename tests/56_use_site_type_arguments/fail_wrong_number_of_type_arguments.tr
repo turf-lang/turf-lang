@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E148
-// EXPECT-DIAG: 'identity' takes 1 type argument, and 2 are written.
+// EXPECT-DIAG: `identity` takes 1 type argument, and 2 are written.
 // One type per type parameter, in order.
 
 fn<T> identity(x: T): T {

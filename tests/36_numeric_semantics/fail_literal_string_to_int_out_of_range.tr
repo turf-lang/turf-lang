@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E149
-// EXPECT-DIAG: "9223372036854775808" is not an int
+// EXPECT-DIAG: "9223372036854775808" is not an `int`, so this conversion would panic every time it runs.
 // One past the largest int: `to int` does not saturate.
 
 fn main(): int {

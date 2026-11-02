@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E056
-// EXPECT-DIAG: 'U' in 'echo' is 'int' from argument 1 but 'bool' from argument 2
+// EXPECT-DIAG: `U` in `echo` is an `int` from argument 1 and a `bool` from argument 2. One type parameter stands for one type.
 struct Plain {
     n: int
 }

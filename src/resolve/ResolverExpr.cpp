@@ -78,9 +78,9 @@ void Resolver::visitSizeOf(SizeOfExprAST &Node) {
         const std::string VarType =
             Var->Type && !Var->Type->isGuess() ? Var->Type->getName() : "";
         TypeError(Node.getLoc(), ErrCode::ExpectedType,
-                  "'sizeof' takes a type, and '" + Name + "' is a variable.",
-                  VarType.empty() ? "Write the variable's type: 'sizeof(int)', 'sizeof(Point)'."
-                                  : "Write its type instead: 'sizeof(" + VarType + ")'.")
+                  "`sizeof` takes a type, but `" + Name + "` is a variable.",
+                  VarType.empty() ? "Write the variable's type, as in `sizeof(int)` or `sizeof(Point)`."
+                                  : "Write its type instead, as in `sizeof(" + VarType + ")`.")
             .raise();
         return;
       }
@@ -173,12 +173,11 @@ void Resolver::visitVariable(VariableExprAST &Node) {
       // value would have nothing to pass for it.
       if (Candidates[0]->HasCallerLocation) {
         TypeError(Node.getLoc(), ErrCode::NotAValue,
-                  "'" + Node.getName() +
-                      "' is marked @caller_location, so it can't be used as a "
-                      "function value; only direct calls can supply the "
-                      "caller's location.",
+                  "I cannot use `" + Node.getName() +
+                      "` as a function value, because it is marked `@caller_location` "
+                      "and only a direct call can supply the caller's location.",
                   "Write an unmarked function with the same parameters that "
-                  "calls '" + Node.getName() + "', and use that as the value.")
+                  "calls `" + Node.getName() + "`, and use that as the value.")
             .raise();
         return;
       }
@@ -195,13 +194,11 @@ void Resolver::visitVariable(VariableExprAST &Node) {
       return;
     }
     if (Candidates.size() > 1) {
-      TypeError(Node.getLoc(), ErrCode::AmbiguousCall, "'" + Node.getName() +
-                                   "' is overloaded, so it can't be used as a "
-                                   "function value: there is no single "
-                                   "signature to take.",
+      TypeError(Node.getLoc(), ErrCode::AmbiguousCall, "I cannot use `" + Node.getName() +
+                                   "` as a function value, because it is overloaded "
+                                   "and has no single signature.",
                 "Write a function with its own name that calls the overload "
-                "you want, and use that as the value.",
-                "Ambiguous reference!")
+                "you want, and use that as the value.")
           .raise();
       return;
     }
@@ -406,9 +403,8 @@ void Resolver::resolveArmPattern(
         HeaderNames.end()) {
       InvalidPatternError(
           B->getLoc(),
-          "'" + B->getName() + "' is bound twice in the same pattern.",
-          "A name can bind one value per pattern. Give the second one its "
-          "own name, or write '_' to ignore it.")
+          "I found `" + B->getName() + "` bound twice in the same pattern.",
+          "Give the second one its own name, or write `_` to ignore it.")
           .raise();
       return;
     }
@@ -444,9 +440,9 @@ void Resolver::resolveArmPattern(
       if (std::find(SeenFields.begin(), SeenFields.end(), F.Name) !=
           SeenFields.end()) {
         InvalidPatternError(
-            F.Loc, "field '" + F.Name + "' is listed twice in this pattern.",
-            "Each field can appear once. To test a field and also keep its "
-            "value, bind it and add a guard: `matches P { x } if x == 0:`.")
+            F.Loc, "I found the field `" + F.Name + "` listed twice in this pattern.",
+            "Remove one of them. To test a field and also keep it, bind it and "
+            "add a guard, as in `matches P { x } if x == 0:`.")
             .raise();
         continue;
       }
@@ -499,11 +495,10 @@ void Resolver::normalizeHeaderPattern(std::unique_ptr<ExprAST> &Slot) {
                  dynamic_cast<ErrorVariantPatternExprAST *>(Sub.get())) {
         InvalidPatternError(
             EV->getLoc(),
-            "'" + Head->getLeftName() + "::" + Head->getRightName() +
-                "(...)' is not an error variant, so it can't be destructured.",
-            "Only an error type's variant takes a pattern in parentheses. If "
-            "'" + Head->getRightName() + "' is a function, pass it plain "
-            "arguments; if you meant an error, check the type's name.")
+            "I cannot destructure `" + Head->getLeftName() + "::" + Head->getRightName() +
+                "(...)`, because it is not an error variant.",
+            "Pass plain arguments if `" + Head->getRightName() + "` is a function, "
+            "or check the type's name if you meant an error.")
             .raise();
         return;
       } else {
@@ -512,8 +507,9 @@ void Resolver::normalizeHeaderPattern(std::unique_ptr<ExprAST> &Slot) {
     }
     if (EV->hasRest()) {
       InvalidPatternError(
-          EV->getRestLoc(), "'..' is only meaningful in a pattern over an error variant.",
-          "'" + Head->getLeftName() + "' is not an error type.")
+          EV->getRestLoc(), "I cannot use `..` here, because `" + Head->getLeftName() +
+              "` is not an error type.",
+          "Remove the `..`, or use an error type's variant.")
           .raise();
       return;
     }
@@ -567,11 +563,9 @@ void Resolver::visitCompare(CompareExprAST &Node) {
         if (Sorted(HeaderNames) != Sorted(FirstHeaderNames)) {
           InvalidPatternError(
               Arm.Loc,
-              "stacked `matches` headers must bind the same names, but this "
-              "arm's headers bind different ones.",
-              "The arms share one body, so every header has to bind exactly "
-              "the same names (or none): either give each header the same "
-              "bindings, or split them into separate arms.")
+              "I found stacked `matches` headers that bind different names.",
+              "Give each header the same bindings, or split them into "
+              "separate arms.")
               .raise();
         }
       }

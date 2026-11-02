@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E131
-// EXPECT-DIAG: Cannot call method 'nonexistent_method' on type 'int'
+// EXPECT-DIAG: I cannot call the method `nonexistent_method` on an `int`: only a struct has methods.
 // Negative test: a method call on a primitive with no UFCS candidate at
 // all must be a clean type error, not the old "internal compiler error"
 // abort (confirmed live before this feature existed).

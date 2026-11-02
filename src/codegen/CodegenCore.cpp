@@ -2363,13 +2363,13 @@ static llvm::Value *emitDefaultValueRec(const TurfType *T, SourceLocation Loc,
     const TurfStructType *PST = defaultStructOf(Pointee);
     if (PST && std::find(InProgress.begin(), InProgress.end(), PST) != InProgress.end()) {
       LogErrorAt(Loc, ErrCode::DefaultThroughReferenceCycle,
-                 "'" + TypeIdentity::bareName(InProgress.front()->getName()) +
-                     "' has no default value: defaulting it gives every '&' field a "
-                     "new default value, and '" + TypeIdentity::bareName(PST->getName()) +
-                     "' reaches itself through '&' fields, so that never ends."
-                     "\n  Hint: Make one of the fields on the cycle '&?" +
+                 "`" + TypeIdentity::bareName(InProgress.front()->getName()) +
+                     "` has no default, because defaulting it gives every `&` field a "
+                     "new default, and `" + TypeIdentity::bareName(PST->getName()) +
+                     "` reaches itself through `&` fields, so that never ends."
+                     "\n  Hint: Change one of the fields on the cycle to `&?" +
                      TypeIdentity::bareName(PST->getName()) +
-                     "' (it defaults to null), or build the value with '::new(...)'.",
+                     "` (it defaults to null), or build the struct with `::new(...)`.",
                  SLM::ErrorCategory::DECLARATION);
       Failed = true;
       return nullptr;

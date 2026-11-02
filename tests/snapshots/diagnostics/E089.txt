@@ -2,12 +2,12 @@ tests/07_functions_modules/visibility/fail_private_in_public_field_module.tr (1 
 
 ── error at line 8, col 9 [E089 · private type in public signature]
 
-  Public field 'Outer.inner' exposes the private type 'Inner'.
+  I cannot let the public field `Outer.inner` expose the private type `Inner`.
 
-  Hint: Anything `pub` is visible to other modules, but 'Inner' is not, so they would receive values of a type they cannot name. Either make the type public -- `pub struct Inner` in fail_private_in_public_field_module.tr -- or keep the field internal by removing its `pub`.
+  Hint: Make the type public with `pub struct Inner` in fail_private_in_public_field_module.tr, or keep the field internal by removing its `pub`. Other modules would otherwise receive values of `Inner`, a type they cannot name.
 
   3 │ struct Inner {
-    │ - 'Inner' is declared in module 'fail_private_in_public_field_module' without `pub`
+    │ - declared in module `fail_private_in_public_field_module` without `pub`
     ┊
   8 │     pub inner: Inner
     │         ^~~~~ this type is private, and the signature is `pub`

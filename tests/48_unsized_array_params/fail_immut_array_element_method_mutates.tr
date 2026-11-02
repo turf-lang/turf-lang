@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E141
-// EXPECT-DIAG: 'cs' is immutable, but 'bump_all' writes to the array it is given as 'arr'.
+// EXPECT-DIAG: `cs` is immutable, and `bump_all` writes to the array it takes as `arr`. As a `Counter[]` parameter, it shares the caller's array, so the change would land in `cs`.
 // Issue #260: calling a method that changes its receiver on a slice element
 // (`arr[i].bump()`) writes the caller's element too.
 struct Counter {

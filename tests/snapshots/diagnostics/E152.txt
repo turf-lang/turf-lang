@@ -2,9 +2,9 @@ tests/05_arrays_pointers_ffi/16_alias_analysis_shadowing.tr (1 warning)
 
 ── warning at line 28, col 13 [E152 · shadowed variable]
 
-  Warning: Just so you know, you're creating a new 'p' that hides an older one!
+  This new `p` hides an older one.
 
-  Hint: It's better to give this new variable a different name to avoid confusion later.
+  Hint: Give the new variable a different name, so the older one stays reachable. To silence this on purpose, pass `--allow E152`.
 
   24 │         mut p: int* = malloc(sizeof(int) * 4);
      │         --- originally declared here

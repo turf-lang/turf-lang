@@ -2,10 +2,9 @@ tests/43_check_elision/fail_bounds_still_caught_after_elision.tr (1 error)
 
 ── error at line 12, col 8 [E001 · array bounds]
 
-  Array index out of bounds!
-  You tried to access 'arr[9]', but 'arr' only has 5 elements (indices 0 to 4, or -1 to -5 counting from the end).
+  I cannot use `arr[9]`, because `arr` has only 5 elements.
 
-  Hint: Array indices start at 0 and go up to size - 1; a negative index counts back from the end (-1 is the last element).
+  Hint: Use an index from 0 to 4, or `-1` to `-5` to count from the end.
 
   12 │     arr[i] = 1;
      │        ^ this index is outside the array

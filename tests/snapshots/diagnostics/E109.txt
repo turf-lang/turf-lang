@@ -2,10 +2,9 @@ tests/05_arrays_pointers_ffi/fail_sizeof_variable.tr (1 error)
 
 ── error at line 8, col 12 [E109 · expected a type]
 
-  Expected a type!
-  'sizeof' takes a type, and 'a' is a variable.
+  `sizeof` takes a type, but `a` is a variable.
 
-  Hint: Write its type instead: 'sizeof(int)'.
+  Hint: Write its type instead, as in `sizeof(int)`.
 
   8 │     return sizeof(a);
     │            ^~~~~~ a type is expected here

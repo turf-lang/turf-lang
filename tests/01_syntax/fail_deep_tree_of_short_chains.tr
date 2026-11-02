@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E111
-// EXPECT-DIAG: Expression nested too deeply to parse
+// EXPECT-DIAG: I cannot parse this expression because it is nested too deeply
 // REL-004 (fuzzer): three parenthesised chains of 1500 `--`. Each piece is
 // inside the parser's nesting limit (2000), so no recursion guard fires, but
 // the tree is their sum -- 4500 levels -- and the type checker overflowed the C++

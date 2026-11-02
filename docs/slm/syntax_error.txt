@@ -2,7 +2,7 @@ TURF SYNTAX ERROR:
 
 NOTE ON SEMICOLONS:
   Semicolons are REQUIRED after every statement. Missing one produces
-  "Expected ';' after statement."
+  "I expected a `;` after this statement."
 
 COMMON SYNTAX ERRORS:
 
@@ -39,7 +39,7 @@ COMMON SYNTAX ERRORS:
 3. KEYWORD TYPO:
    The compiler detects near-matches to declared names (variables,
    functions, struct/enum names) via spelling-distance suggestions and
-   offers a "Did you mean...?" hint.
+   offers a hint such as "Write `if` instead."
 
 4. UNTERMINATED STRING:
    Occurs when a string is opened with " but never closed.

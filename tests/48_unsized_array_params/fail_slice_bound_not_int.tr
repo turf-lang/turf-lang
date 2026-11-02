@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E002
-// EXPECT-DIAG: You used a value of type 'double' as a slice bound of 'int[3]'.
+// EXPECT-DIAG: A slice bound of `int[3]` must be an `int`, and I found a `double`.
 // Slice bounds are ints, exactly as indices are.
 fn main(): int {
     immut a: int[3] = [1, 2, 3];

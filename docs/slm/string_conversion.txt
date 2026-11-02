@@ -21,7 +21,7 @@ SUPPORTED CONVERSIONS FROM STRING:
 
 WHAT IS NOT SUPPORTED:
   some_string + 5
-    // ERROR: "Cannot apply operator '+' to types 'string' and 'int'."
+    // ERROR: "I cannot use `+` on a `string` and an `int`."
     //        Fix: some_string + (5 to string)
   some_array to string
     // ERROR: arrays cannot be converted to strings this way.

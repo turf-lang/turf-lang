@@ -491,7 +491,7 @@ fail_typo.tr (1 error)
 
 ── error at line 5, col 44 [E026 · module method not found]
 
-  Oops! Module 'temperature' has no function named 'to_kelvn'.
+  I cannot find a function named `to_kelvn` in the module `temperature`.
   ...
 ```
 
@@ -513,8 +513,7 @@ mixed_up.tr (1 error)
 
 ── error at line 4, col 5 [E066 · type mismatch]
 
-  Type mismatch!
-  Cannot initialise 'double' variable 'k' with value of type '!double'.
+  I cannot store a `!double` in `k`, which is a `double`.
   ...
   Run `turf --explain E066` for more details.
 ```
@@ -665,7 +664,7 @@ EXPECT-NO-DIAG violated: the compiler output contains 'warning'
 
 ── warning at line 4, col 5 [E163 · unused variable]
 
-  Warning: Variable 'spare' is declared but never used.
+  Variable `spare` is declared but never used.
   ...
 ```
 
@@ -724,7 +723,7 @@ contains the text, and also `exit, <status>`, `warning`, `no_warnings` and
 which replaces a `fail_*` file when the mistake sits inside one function:
 
 ```turflang
-@test(compile_error, E041, "Unknown function")
+@test(compile_error, E041, "function named")
 fn an_undeclared_function_is_rejected(): void {
     undeclared(1);
 }
@@ -784,7 +783,7 @@ Two things go wrong:
 
   ── error [E119 · no main function]
 
-    No entry point found. Please define 'fn main(): int' in your file.
+    I found no entry point. Define `fn main(): int` in your file.
   ```
 
 A test can import the package's own modules under `src/`, its direct

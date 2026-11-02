@@ -2,8 +2,8 @@ tests/01_syntax/fail_missing_colon_before_return_type.tr (1 error)
 
 ── error at line 7, col 24 [E106 · missing colon]
 
-  Expected ':' followed by return type after parameter list.
-  Hint: Write the return type after a ':' -- `fn add(...): int {` -- or `: void` if it returns nothing.
+  I expected a `:` followed by a return type after the parameter list.
+  Hint: Write the return type after a `:`, as in `fn add(...): int {`, or write `: void` if it returns nothing.
 
   7 │ fn add(a: int, b: int) int {
     │                        ^~~ a `:` is missing here

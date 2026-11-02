@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E092
-// EXPECT-DIAG: a 'double' literal can't be a pattern
+// EXPECT-DIAG: A `double` literal cannot be a pattern: exact equality on a `double` is almost never what you mean.
 // LEC-003: no double literal patterns in 2.0. Expected: E092.
 struct P { x: double }
 fn main(): int {

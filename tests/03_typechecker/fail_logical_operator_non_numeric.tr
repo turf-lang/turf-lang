@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E057
-// EXPECT-DIAG: Cannot use '&&' with 'A' and 'B'
+// EXPECT-DIAG: I cannot use `&&` on an `A` and a `B`: both operands must be `bool`s.
 // Regression test: `&&`/`||` between non-numeric, incompatible operands
 // (here two different struct types) must be rejected with a real, readable
 // error message.

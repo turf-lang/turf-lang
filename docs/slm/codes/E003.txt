@@ -10,12 +10,10 @@ CORRECT USAGE:
 
 INCORRECT:
     immut primes: int[3] = [2, 3, 5, 7];
-    // ERROR: Array size mismatch! 'primes' was declared with size 3,
-    //   but you gave 4 initial values.
+    // ERROR: `primes` is declared with 3 elements, and its initializer has 4.
 
     immut evens: int[4] = [2, 4];
-    // ERROR: 'evens' was declared with size 4, but you gave 2 initial
-    //   values.
+    // ERROR: `evens` is declared with 4 elements, and its initializer has 2.
 
 FIX:
   Either change the declared size to match how many values you're

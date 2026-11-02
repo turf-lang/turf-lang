@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E057
-// EXPECT-DIAG: cannot apply '+' to 'char' and 'char'
+// EXPECT-DIAG: I cannot use `+` on a `char` and a `char`.
 // Negative test: char has no arithmetic (RFC §3) -- 'a' + 'b' must be
 // rejected at compile time. Arithmetic requires an explicit `to int` cast.
 fn main(): int {

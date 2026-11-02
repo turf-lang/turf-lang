@@ -2,9 +2,9 @@ tests/07_functions_modules/fail_import_symbol_wrong_owner_type.tr (1 error)
 
 ── error at line 15, col 13 [E030 · unknown module symbol]
 
-  Module 'mem' has nothing named 'List'.
+  I cannot find `List` in the module `mem`.
 
-  Hint: Double-check the spelling, or check mem.tr for its actual exported names.
+  Hint: Check the spelling, or look in `mem.tr` for its exported names.
 
   15 │ import mem::List;
      │             ^~~~ the module has nothing of this name

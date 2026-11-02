@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E106
-// EXPECT-DIAG: Expected ':' followed by return type after parameter list
+// EXPECT-DIAG: I expected a `:` followed by a return type after the parameter list
 // EXPECT-NO-DIAG: E041
 // Issue #263: forgetting the colon before a function's return type -- the most
 // common beginner slip in a function declaration -- is E106, "a colon is

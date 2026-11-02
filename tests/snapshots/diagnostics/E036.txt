@@ -2,9 +2,9 @@ tests/26_state_machines/fail_machine_transition_wrong_type.tr (1 error, 1 warnin
 
 ── warning at line 7, col 1 [E153 · machine state with no incoming transition]
 
-  Warning: Machine 'ConnectionState' declares state 'Idle' with no incoming transitions.
+  Machine `ConnectionState` declares state `Idle` with no incoming transitions.
 
-  Hint: If 'Idle' is meant to be ConnectionState's starting state, this is expected and safe to ignore. Otherwise, it's unreachable once the machine leaves its initial value -- double check for a missing `-> Idle` edge.
+  Hint: Add a `-> Idle` edge if the machine can reach `Idle` after it starts. If `Idle` is the starting state of `ConnectionState`, pass `--allow E153` to silence this.
 
   7 │ machine ConnectionState {
     │ ^~~~~~~ no transition leads to this state
@@ -13,9 +13,9 @@ tests/26_state_machines/fail_machine_transition_wrong_type.tr (1 error, 1 warnin
 
 ── error at line 20, col 9 [E036 · invalid transition target]
 
-  'transition' target must be a state of 'ConnectionState', got 'TrafficLight'.
+  I cannot `transition` to `TrafficLight`, which is not a state of `ConnectionState`.
 
-  Hint: Pass a state of 'ConnectionState' (e.g. 'ConnectionState::SomeState') to transition().
+  Hint: Pass a state of `ConnectionState`, such as `ConnectionState::SomeState`, to `transition()`.
 
   20 │     conn.transition(TrafficLight::Red);
      │         ^ this is not a state of the machine

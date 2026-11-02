@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E128
-// EXPECT-DIAG: 'H.own' is a reference that can't be null
+// EXPECT-DIAG: The array `a`, a `H[2]`, needs an initial value: it would start zero-filled, and `H.own` is a reference that cannot be null.
 // An element that carries a `&U` has no valid zero value either: `a[1].own`
 // was a null `&U` (owner decision 2026-10-12, found by turf-fuzz). Same rule
 // as `(&N)[2]` (fail_array_of_references_without_initializer.tr); an `&?U`

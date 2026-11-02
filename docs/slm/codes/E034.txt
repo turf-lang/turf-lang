@@ -16,7 +16,7 @@ CORRECT:
 INCORRECT:
     struct Point { x: int, y: int }
     struct Point { x: double, y: double }
-    // ERROR: A struct named 'Point' is already declared.
+    // ERROR: I found a second struct named `Point`.
     //   Note: first declared here (line 1, ...)
 
 FIX:

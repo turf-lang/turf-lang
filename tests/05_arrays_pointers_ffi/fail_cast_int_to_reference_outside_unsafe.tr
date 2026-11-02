@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E130
-// EXPECT-DIAG: Converting 'int' to the reference '&N' cannot be done outside an 'unsafe' block
+// EXPECT-DIAG: I cannot convert an `int` to the reference `&N` outside an `unsafe` block: it may point at nothing.
 // `0 to &N` made a reference to address 0 in safe code, which faulted on
 // first use (found by turf-fuzz). Forging a reference from something that
 // is not already one needs `unsafe { }`, like `p to &N` from a raw pointer

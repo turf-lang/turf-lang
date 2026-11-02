@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E081
-// EXPECT-DIAG: the deferred statement runs when the block exits, after 'w' is assigned here
+// EXPECT-DIAG: the deferred statement runs when the block exits, after `w` is assigned here
 // A deferred statement runs when its block exits, after the walk's last
 // statement has moved `w` on, possibly to null. NullabilityPass checked
 // `w.val` where the `defer` is written (inside the null check), so this

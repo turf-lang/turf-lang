@@ -4,7 +4,7 @@
     fn open(p: string): !int { ... }
 
     fn main(): int {
-        immut n: int = try open("x");   // ERROR: 'main' returns 'int'
+        immut n: int = try open("x");   // ERROR: `main` returns an `int`, so `try` has nowhere to return an error to.
         return n;
     }
     //   Hint: Handle the error here instead: `f() recover as err run { ... }`.

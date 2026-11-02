@@ -12,8 +12,7 @@ CORRECT USAGE:
 
 INCORRECT:
     immut primes: int[3] = [2, 3, "five"];
-    // ERROR: Array element type mismatch! Array 'primes' holds 'int'
-    //   values, but you tried to store a 'string'.
+    // ERROR: I cannot put a `string` in an array of `int`.
 
 FIX:
   Make every element in the initializer list the declared element type.

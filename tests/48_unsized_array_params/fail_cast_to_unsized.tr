@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E140
-// EXPECT-DIAG: A conversion can't use the unsized array type 'int[]'
+// EXPECT-DIAG: A conversion cannot use the unsized array type `int[]`.
 // Issue #260: an array becomes a slice only by being passed to a `T[]`
 // parameter; there is no conversion that makes one.
 fn sum(arr: int[]): int {

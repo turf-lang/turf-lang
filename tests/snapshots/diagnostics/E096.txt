@@ -2,7 +2,7 @@ tests/25_errors/fail_payload_field_missing_type.tr (1 error)
 
 ── error at line 5, col 18 [E096 · invalid error payload]
 
-  Invalid error payload: field 'path' of 'IOError::NotFound' has no type.
+  I found no type for the field `path` of `IOError::NotFound`.
 
   Hint: Write the type after a colon: `path: string`.
 

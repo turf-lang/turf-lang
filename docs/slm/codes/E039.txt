@@ -19,7 +19,7 @@ CORRECT SYNTAX:
 INCORRECT:
     enum Color { Red, Green, Blue }
     immut c: Color = Color::Purple;
-    // ERROR: Enum 'Color' has no variant 'Purple'.
+    // ERROR: I cannot find a variant `Purple` in the enum `Color`.
     //   (did-you-mean suggests a close variant name if one exists)
 
 FIX:

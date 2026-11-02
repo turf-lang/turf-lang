@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E009
-// EXPECT-DIAG: 'Box.size'
+// EXPECT-DIAG: I found a path through `Box.size` that ends without returning a result.
 // A generic method that never returns its value is E009 named as written.
 // On a struct whose fields do not mention T this was an internal compiler
 // error instead (the call was never instantiated), and the message named the

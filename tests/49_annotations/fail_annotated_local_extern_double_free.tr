@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E017
-// EXPECT-DIAG: Double free detected for 'p'
+// EXPECT-DIAG: I found a second free of `p`
 // The `@ownership` annotations on externs declared inside a function body
 // reach the alias analysis exactly as file-scope ones do.
 

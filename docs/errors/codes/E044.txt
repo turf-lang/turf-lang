@@ -10,7 +10,7 @@ For example, if `add` is declared like this:
 
 ...then calling it with three arguments instead of two will trigger this error:
 
-    add(2, 3, 4);   // ERROR: 'add' was called with 3 arguments, but no overload accepts that many.
+    add(2, 3, 4);   // ERROR: I found no overload of `add` that takes 3 arguments.
 
 The fix is almost always just counting again -- look at the "Known overloads" list the error prints, and match your call to one of them exactly. Either you added or forgot an argument, or the function's own declaration needs to change if it's supposed to accept a different number of values.
 

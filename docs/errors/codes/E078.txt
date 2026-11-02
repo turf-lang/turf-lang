@@ -1,7 +1,7 @@
 A float literal is too large -- it rounds to infinity
 
     mut d: double = 1e400;
-    // ERROR: 1e400 overflows 'double's range and rounds to +inf
+    // ERROR: The literal `1e400` is too large for a `double`, which holds up to about 1.8e308.
 
 'double' is an IEEE-754 double-precision float, which can represent
 roughly up to ~1.8 * 10^308. A literal bigger than that has no finite

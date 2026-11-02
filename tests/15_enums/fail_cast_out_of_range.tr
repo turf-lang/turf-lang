@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E127
-// EXPECT-DIAG: Value 99 is out of range for enum 'Color'
+// EXPECT-DIAG: 99 is not a variant of the enum `Color`, whose variants are 0 to 2.
 // Regression test: casting an out-of-range integer LITERAL to an enum type
 // must be rejected at compile time. Before this fix,
 // TypeChecker::visitCast() never validated the destination type at all --

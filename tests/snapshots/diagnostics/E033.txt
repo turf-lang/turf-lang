@@ -2,10 +2,10 @@ tests/04_control_flow/fail_foreach_duplicate_names.tr (1 error)
 
 ── error at line 5, col 5 [E033 · duplicate declaration]
 
-  Wait a minute! You already created a variable named 'x'.
+  I cannot declare `x` again, because it is already declared.
   Note: first declared here (line 5, col 5)
 
-  Hint: If you want to change its value, just do `x = new_value;` without the type (like 'int' or 'string'). If you want a new variable, give it a different name!
+  Hint: Write `x = new_value;` without the type to change its value, or give the new variable a different name.
 
   5 │     for (x, x) in numbers {
     │     ^~~ declared a second time here

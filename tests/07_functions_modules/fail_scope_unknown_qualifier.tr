@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E031
-// EXPECT-DIAG: 'nosuchmodule' isn't a known enum, struct, or module
+// EXPECT-DIAG: I cannot find an enum, struct or module named `nosuchmodule`
 // Regression test: `Left::Right` where `Left` names neither a known enum, a
 // known struct, nor a known (imported) module must be a clean
 // UnknownScopeQualifierError, not an internal compiler error or a silent

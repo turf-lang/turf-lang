@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E057
-// EXPECT-DIAG: postfix operator requires a numeric operand
+// EXPECT-DIAG: `++` needs a number, and I found a `string`.
 fn main(): int {
     mut x: string = "hello";
     x++;

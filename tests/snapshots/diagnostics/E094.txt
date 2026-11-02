@@ -2,9 +2,9 @@ tests/45_pattern_matching/20_unreachable_arm_after_catch_all_warns.tr (2 warning
 
 ── warning at line 15, col 9 [E094 · unreachable compare arm]
 
-  Warning: This arm can never run.
+  This arm can never run, because an earlier arm without a guard already matches every case.
 
-  Hint: An earlier arm without a guard already matches every value, so arms are never tried past it. Delete this arm, or move it above the catch-all (arms are tried in source order).
+  Hint: Delete this arm, or move it above the catch-all: arms are tried in source order.
 
   12 │         matches _:
      │                 - this header matches everything
@@ -16,9 +16,9 @@ tests/45_pattern_matching/20_unreachable_arm_after_catch_all_warns.tr (2 warning
 
 ── warning at line 19, col 5 [E074 · unreachable block]
 
-  Warning: The code in 'compare.end' inside 'main' can never be reached!
+  I can never reach the code in `compare.end` inside `main`.
 
-  Hint: Check your 'if' conditions. Are they impossible to be true, or did you 'return' before this block?
+  Hint: Check whether an `if` condition can never be true, or whether a `return` comes before this block.
 
   19 │     return 0;
      │     ^~~~~~ this block never runs

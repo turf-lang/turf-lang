@@ -3,7 +3,7 @@ A `compare` header is not a legal pattern
     struct Point { x: int, y: int }
 
     compare p {
-        matches Point { x }:          // ERROR: doesn't mention the field 'y'
+        matches Point { x }:          // ERROR: This pattern does not mention the field `y` of `Point`.
         matches Point { x: 1 + 2, .. }: // ERROR: a field pattern can't be an expression
         matches Q { x, .. }:          // ERROR: the value is a Point, not a Q
     }

@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E113
-// EXPECT-DIAG: 'Point { ... }' is no longer valid syntax
+// EXPECT-DIAG: `Point { ... }` is not valid syntax for constructing a struct.
 // Regression test: the old `StructName { field: val, ... }` brace-literal
 // construction syntax is gone entirely (removed from the parser along with
 // the g_AllowStructInit flag it needed) -- must be rejected with a clear,

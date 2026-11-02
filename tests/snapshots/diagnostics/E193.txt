@@ -4,7 +4,7 @@ tests/06_structs/14_struct_stress.tr (1 warning)
 
   Nothing in this `unsafe { }` block needs it: it holds no raw-pointer declaration, cast or dereference.
 
-  Hint: Remove the `unsafe { }` and keep its statements, so the unsafe blocks that remain mark the code that needs care.
+  Hint: Remove the `unsafe { }` and keep its statements, so the unsafe blocks that remain mark the code that needs care. To silence this on purpose, pass `--allow E193`.
 
   52 │     unsafe {
      │     ^~~~~~ nothing in this `unsafe` block needs it

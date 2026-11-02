@@ -6,7 +6,7 @@ When the `if` body and the `else` body are the same, the condition doesn't matte
     if n > 2 {
         printline("big");
     } else {
-        printline("big");        // WARNING: identical to the 'if' branch
+        printline("big");        // WARNING: Both branches of this `if` do the same thing.
     }
 
 Either the branches really are the same, in which case the `if` can be dropped and the body kept, or one of them was copied and never edited. Change the one you forgot:

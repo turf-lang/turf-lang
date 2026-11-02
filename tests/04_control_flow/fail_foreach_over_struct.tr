@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E005
-// EXPECT-DIAG: value of type 'Point'
+// EXPECT-DIAG: I cannot use for-each on the type `Point`, which is not an array or a string.
 struct Point {
     x: int,
     y: int

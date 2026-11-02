@@ -2,7 +2,7 @@
 // start is E014 with a Fix writing `fn` (it used to read as a name followed
 // by a missing ';').
 // EXPECT-DIAG: E014
-// EXPECT-DIAG: 'func' is not a TurfLang keyword
+// EXPECT-DIAG: `func` is not a Turf keyword, and a function declaration starts with `fn`.
 // EXPECT-FIX: replace 'func' with 'fn'
 func main(): int {
     return 0;

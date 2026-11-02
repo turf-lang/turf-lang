@@ -13,9 +13,9 @@ after a number, it commits to reading an exponent -- it will never quietly
 reinterpret it as something else, so leaving it unfinished is always an
 error rather than the number just ending early:
 
-    mut x: double = 1.5e;    // ERROR: nothing after 'e'
+    mut x: double = 1.5e;    // ERROR: `1.5e` has an exponent marker with no exponent after it.
     mut y: double = 1.5e+;   // ERROR: '+' with no digit after it
-    mut z: double = 1e_5;    // ERROR: '_' can't be the first thing after 'e' either
+    mut z: double = 1e_5;    // ERROR: I cannot start a run of digits with `_` (E072).
 
 The fix is to either finish the exponent:
 

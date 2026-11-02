@@ -18,8 +18,8 @@ CORRECT SYNTAX:
 
 INCORRECT:
     fn outer(): int {
-        fn helper(x: int): int {   // ERROR: nested function definitions
-            return x * 2;          //         are not allowed: 'helper'
+        fn helper(x: int): int {   // ERROR: I cannot declare `helper`
+            return x * 2;          //         inside another function
         }
         return helper(2);
     }

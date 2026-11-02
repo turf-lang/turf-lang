@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E126
-// EXPECT-DIAG: 'sizeof(void)' is not supported
+// EXPECT-DIAG: `sizeof(void)` has no answer: `void` has no size.
 // `void` has no size. The type checker used to accept `sizeof(void)` and
 // Codegen then asked LLVM for the allocation size of its unsized `void` type,
 // a call that never returns: the compiler hung forever (found by turf-fuzz).

@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E044
-// EXPECT-DIAG: 'multiply' was called with 1 argument
+// EXPECT-DIAG: I found no overload of `multiply` that takes 1 argument
 import io;
 
 fn multiply(x: int, y: int): int {

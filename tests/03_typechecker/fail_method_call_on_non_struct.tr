@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E131
-// EXPECT-DIAG: No such method!
+// EXPECT-DIAG: I cannot call the method `foo` on an `int`: only a struct has methods.
 // Regression test: calling a method on a non-struct value (int, string,
 // pointer-to-non-struct) must be a clean compile error.
 //

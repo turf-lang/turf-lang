@@ -15,7 +15,7 @@ That fully-qualified form needs the plain `import list;` (without it the error i
 Here's what triggers the error -- using the short name with neither of those:
 
     mut l: List<int> = List::default();
-    // ERROR: 'List' isn't visible here without qualification.
+    // ERROR: I cannot use `List` here without qualification.
 
 If you're not sure which module a type actually lives in, the error message tells you -- it names the owning module directly, so you can copy that name straight into either the qualified form or the import line.
 

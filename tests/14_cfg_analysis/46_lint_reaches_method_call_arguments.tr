@@ -1,4 +1,4 @@
-// EXPECT-DIAG: '/' with zero
+// EXPECT-DIAG: `/` used with zero
 // LEC-005 / INV-LINT-1: the method-call counterpart of
 // 45_lint_reaches_call_arguments.tr -- both the receiver and the arguments of
 // a method call are children the lint walk must reach. `dead()` is never

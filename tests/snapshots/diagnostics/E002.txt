@@ -2,10 +2,9 @@ tests/48_unsized_array_params/fail_slice_bound_not_int.tr (1 error)
 
 ── error at line 6, col 16 [E002 · index must be an integer]
 
-  Index must be an integer!
-  You used a value of type 'double' as a slice bound of 'int[3]'.
+  A slice bound of `int[3]` must be an `int`, and I found a `double`.
 
-  Hint: Slice bounds are ints, like arr[1..3] or arr[i..j]. To turn a number or a char into an int: (x to int).
+  Hint: Convert the bound with `to int`, e.g. `arr[(x to int)..3]`.
 
   6 │     immut t = a[1.5..];
     │                ^ this index is not an integer

@@ -2,8 +2,8 @@ tests/17_char_type/fail_char_empty_literal.tr (1 error)
 
 ── error at line 6, col 19 [E101 · invalid character literal]
 
-  Empty char literal.
-  Hint: A char literal must contain exactly one character, e.g. 'a'.
+  I found an empty char literal.
+  Hint: Write exactly one character between the quotes, as in `'a'`.
 
   6 │     mut c: char = '';
     │                   ^ this character literal is not valid

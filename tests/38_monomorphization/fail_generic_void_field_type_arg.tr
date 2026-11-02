@@ -3,7 +3,7 @@
 // the parser; this is the same mistake reached through `Box<void>`, and the
 // compiler hung in Codegen on it.
 // EXPECT-DIAG: E112
-// EXPECT-DIAG: 'Box<void>' gives field 'v' the type 'void'.
+// EXPECT-DIAG: `Box<void>` gives the field `v` the type `void`, which is only a function's return type.
 struct Box<T> {
     v: T
 }

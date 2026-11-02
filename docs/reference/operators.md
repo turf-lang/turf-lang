@@ -168,7 +168,7 @@ enum. `bool`s can be compared for equality.
 operators](#string-operators). For a **struct**, the comparison operators do
 not exist until you declare them, and each one is declared separately:
 declaring `operator ==` does not give you `!=`, and `operator <` does not give
-you `>`. Using one that is missing is E124 ("Values can't be compared"). Arrays
+you `>`. Using one that is missing is E124 (``I cannot compare two `P` structs with `!=`: a struct has no built-in comparison``). Arrays
 cannot be compared with `==` either; compare elements.
 
 ## Logical: `&& || !`
@@ -217,8 +217,7 @@ fn main(): int {
 ```
 
 All bitwise operators, including unary `~`, take `int` operands. A `double`,
-`bool` or `int32` operand is E057 ("Bitwise operator requires integer
-operands"); there is no implicit conversion.
+`bool` or `int32` operand is E057 (``A bitwise operator needs `int` operands, and the left one is a `bool` ``); there is no implicit conversion.
 
 - `>>` is an **arithmetic** shift: it copies the sign bit. `-8 >> 1` is `-4`
   and `-1 >> 1` is `-1`.

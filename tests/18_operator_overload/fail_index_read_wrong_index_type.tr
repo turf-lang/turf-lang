@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E056
-// EXPECT-DIAG: No 'operator[]' overload matches 'IntBox[string]'
+// EXPECT-DIAG: No `operator[]` matches `IntBox[string]`.
 // The type has an `operator []`, but it takes an `int` index and the read
 // passes a string. Operator overloads match exactly (F-OP-1). This used to be
 // accepted with no type and then died in Codegen ("Base is not an array or

@@ -6,7 +6,7 @@ A type name you used could mean more than one type
 
     fn main(): int {
         mut p: Point = Point::default();
-        // ERROR: 'Point' is ambiguous here -- it could mean more than one type.
+        // ERROR: `Point` could mean more than one type here.
         //   Note: could be 'Point' declared in this program's main file
         //   Note: could be 'shapes::Point' from module 'shapes'
         return 0;

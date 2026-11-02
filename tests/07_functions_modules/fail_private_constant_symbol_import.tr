@@ -1,6 +1,6 @@
 // SY-5: importing a private module constant by name is E088 too.
 // EXPECT-DIAG: E088
-// EXPECT-DIAG: Constant 'SECRET' is private to module
+// EXPECT-DIAG: I cannot use the constant `SECRET`, which is private to module
 import pub_immut_constants_module::SECRET;
 
 fn main(): int {

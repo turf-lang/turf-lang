@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E005
-// EXPECT-DIAG: value of type 'int'
+// EXPECT-DIAG: I cannot use for-each on the type `int`, which is not an array or a string.
 fn main(): int {
     immut x: int = 5;
     for (index, value) in x {

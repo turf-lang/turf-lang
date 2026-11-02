@@ -156,8 +156,8 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
     ++Chain.Links;
     if (Parser().RecursionDepth > MaxParseRecursionDepth) {
       LogErrorAt(Lex().CurLoc, ErrCode::NestingTooDeep,
-                 "Expression nested too deeply to parse."
-                 "\n  Hint: check for a runaway chain of '.', '[]', '()' or '++'/'--'.",
+                 "I cannot parse this expression because it is nested too deeply."
+                 "\n  Hint: Shorten the long chain of `.`, `[]`, `()` or `++`/`--`.",
                  SLM::ErrorCategory::SYNTAX_ERROR);
       return nullptr;
     }
@@ -188,7 +188,7 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
         }
         if (Parser().CurTok != ']') {
           LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter,
-                     "Expected ']' to close the slice -- e.g. arr[1..3]",
+                     "I expected a `]` to close the slice, as in `arr[1..3]`.",
                      SLM::ErrorCategory::SYNTAX_ERROR);
           return nullptr;
         }
@@ -198,7 +198,7 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
         continue;
       }
       if (Parser().CurTok != ']') {
-        LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "Expected ']' to close the array index", SLM::ErrorCategory::SYNTAX_ERROR);
+        LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "I expected a `]` to close the array index.", SLM::ErrorCategory::SYNTAX_ERROR);
         return nullptr;
       }
       getNextToken();
@@ -223,7 +223,7 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
           break;
       }
       if (Parser().CurTok != ')') {
-        LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "Expected ')' to close the function call", SLM::ErrorCategory::SYNTAX_ERROR);
+        LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "I expected a `)` to close the function call.", SLM::ErrorCategory::SYNTAX_ERROR);
         return nullptr;
       }
       Spans.CloseLine = Lex().CurLoc.Line;
@@ -240,7 +240,7 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
       SourceLocation Loc = Lex().CurLoc;
       getNextToken();
       if (Parser().CurTok != TOK_IDENTIFIER) {
-        LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "Expected a method name after '.'", SLM::ErrorCategory::SYNTAX_ERROR);
+        LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "I expected a method name after `.`.", SLM::ErrorCategory::SYNTAX_ERROR);
         return nullptr;
       }
       std::string MethodName = Lex().IdentifierStr;
@@ -255,9 +255,9 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
           return nullptr;
         if (Parser().CurTok != '(') {
           LogErrorAt(Lex().CurLoc, ErrCode::MissingOpeningDelimiter,
-                     "Expected '(' after the type arguments of '" + MethodName + "'."
-                     "\n  Hint: type arguments on a method are only written on a "
-                     "call, e.g. `x." + MethodName + "::<int>(...)`.",
+                     "I expected a `(` after the type arguments of `" + MethodName + "`."
+                     "\n  Hint: Write type arguments on a method only in a "
+                     "call, as in `x." + MethodName + "::<int>(...)`.",
                      SLM::ErrorCategory::SYNTAX_ERROR);
           return nullptr;
         }
@@ -279,7 +279,7 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
             if (Parser().CurTok == ')')
               break;
             if (Parser().CurTok != ',') {
-              LogErrorAt(Lex().CurLoc, ErrCode::MissingComma, "Expected ')' or ',' in argument list", SLM::ErrorCategory::SYNTAX_ERROR);
+              LogErrorAt(Lex().CurLoc, ErrCode::MissingComma, "I expected a `)` or a `,` in this argument list.", SLM::ErrorCategory::SYNTAX_ERROR);
               return nullptr;
             }
             getNextToken();

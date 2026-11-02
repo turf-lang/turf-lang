@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E117
-// EXPECT-DIAG: can't mix the bare ';' form with a braced variant list
+// EXPECT-DIAG: I cannot mix the bare `;` form
 // Test (fail): mixing the bare-form ';' with a braced variant list is not
 // valid syntax -- an error type is either bare (`error Name;`) or braced
 // (`error Name { ... }`), never both.

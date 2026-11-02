@@ -4,7 +4,7 @@ A struct, enum, or error type belongs to the file (or module) that declares it -
 
     struct Point { x: int, y: int }
     struct Point { x: double, y: double }
-    // ERROR: A struct named 'Point' is already declared.
+    // ERROR: I found a second struct named `Point`.
 
 Different files are a different story: if a module you import also declares a `struct Config`, that's fine -- it's a separate type, `thatmodule::Config`, and your own `Config` stays yours. (If you import it by name, `import thatmodule::Config;`, a bare `Config` could mean either one -- that's a different error, E085, and Turf will name both.)
 

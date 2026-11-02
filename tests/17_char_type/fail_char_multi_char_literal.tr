@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E101
-// EXPECT-DIAG: Char literal must contain exactly one character
+// EXPECT-DIAG: I found a char literal with more than one character
 // Negative test: a char literal must contain exactly one character --
 // 'ab' is a lexer-level error, not a parser/typechecker one.
 fn main(): int {

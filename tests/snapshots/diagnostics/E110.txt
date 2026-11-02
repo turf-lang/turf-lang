@@ -2,8 +2,8 @@ tests/04_control_flow/fail_do_while_missing_while.tr (1 error)
 
 ── error at line 9, col 1 [E110 · expected a specific word or symbol]
 
-  Expected 'while' after do-block
-  Hint: A do-block ends with its condition: `do { ... } while (cond);`.
+  I expected `while` after the body of this `do` loop.
+  Hint: End the loop with its condition: `do { ... } while (cond);`.
 
   9 │ }
     │ ^ something else is expected here

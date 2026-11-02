@@ -2,9 +2,9 @@ tests/06_structs/fail_constructor_cannot_be_static.tr (1 error)
 
 ── error at line 14, col 1 [E046 · constructor cannot be static]
 
-  'new' can't be 'static'.
+  I cannot make `new` `static`.
 
-  Hint: 'Point.new' always initializes 'self' -- remove 'static' from its declaration.
+  Hint: Remove `static` from the declaration of `Point.new`, which always initializes `self`.
 
   14 │ fn Point.new(x: int, y: int) static: void {
      │ ^~ a constructor cannot be `static`

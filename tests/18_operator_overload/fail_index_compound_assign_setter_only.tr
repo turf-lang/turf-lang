@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E126
-// EXPECT-DIAG: Cannot index a value of type 'IntBox'
+// EXPECT-DIAG: I cannot index an `IntBox`.
 // `box[0] += 1` is a read AND a write. With only the setter declared there is
 // no read to perform; the read half is reported, as for a plain `box[0]`. It
 // must be a diagnostic whichever half is missing, never Codegen's "Base is not

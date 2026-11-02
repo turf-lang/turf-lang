@@ -2,9 +2,9 @@ tests/02_resolver/warn_self_assign.tr (2 warnings)
 
 ── warning at line 5, col 7 [E156 · assignment to itself]
 
-  Warning: You're assigning 'x' to itself — this doesn't do anything!
+  `x` is assigned to itself, so this does nothing.
 
-  Hint: Did you mean to assign a different value, or is this left over from an edit?
+  Hint: Remove this assignment, or assign the value you meant; it may be left over from an edit.
 
   5 │     x = x;
     │       ^ this assigns a variable to itself
@@ -13,9 +13,9 @@ tests/02_resolver/warn_self_assign.tr (2 warnings)
 
 ── warning at line 5, col 7 [E160 · dead store]
 
-  Warning: Variable 'x' is assigned but the value is never read (dead store).
+  The value assigned to `x` is never read.
 
-  Hint: The assigned value is overwritten or the function returns before this variable is ever used. Remove the assignment or use the value.
+  Hint: Remove the assignment, or read `x` before it is overwritten or the function returns. To silence this on purpose, pass `--allow E160`.
 
   5 │     x = x;
     │       ^ this value is never read

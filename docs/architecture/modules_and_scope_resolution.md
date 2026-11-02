@@ -783,7 +783,7 @@ named type it turns the spelling into an identity or reports why it cannot:
 Whatever it checks it also rewrites to the identity, and a trailing step resolves
 the positions it does not descend into, so no spelling survives pass 2
 unresolved because its position was never validated. A bare generic struct name
-without type arguments is `TypeError` ("Missing type arguments!"), except for
+without type arguments is `TypeError` (`` `Box` is generic, so I need type arguments here ``), except for
 `self`.
 
 **`validateModuleQualifier()`** is the shared helper for the qualified forms:

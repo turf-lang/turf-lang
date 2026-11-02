@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E025
-// EXPECT-DIAG: No overload of 'math::power' matches argument types (bool, int)
+// EXPECT-DIAG: No overload of `math::power` takes the argument types (bool, int).
 import io;
 import math;
 

@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E066
-// EXPECT-DIAG: The condition of 'if' must be a 'bool', but this one has type 'int'
+// EXPECT-DIAG: The condition of `if` must be a `bool`, and I found an `int`.
 // Every branch's condition is checked, not only the first.
 fn main(): int {
     mut n: int = 2;

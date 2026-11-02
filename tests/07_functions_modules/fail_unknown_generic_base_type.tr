@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E042
-// EXPECT-DIAG: Unknown type 'NonExistentGeneric'
+// EXPECT-DIAG: I cannot find a type named `NonExistentGeneric`
 // Regression test: found alongside the module-qualifier validation work.
 // validateNamedType() recursed into a GenericType's own TYPE ARGUMENTS
 // (see fail_unknown_generic_type_arg.tr) but never validated the

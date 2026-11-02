@@ -11,7 +11,7 @@ And here's what triggers the error -- declaring `count` a second time instead of
 
     mut count: int = 0;
     mut count: int = 5;
-    // ERROR: Wait a minute! You already created a variable named 'count'.
+    // ERROR: I cannot declare `count` again, because it is already declared.
 
 Turf will also point you back to exactly where the first declaration was, so you can see both at once.
 

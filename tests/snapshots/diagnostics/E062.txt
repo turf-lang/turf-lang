@@ -2,9 +2,9 @@ tests/03_typechecker/fail_null_coercion.tr (1 error)
 
 ── error at line 4, col 5 [E062 · null assignment]
 
-  Cannot assign 'null' to variable 'x' of type 'int'.
+  I cannot store `null` in `x`, which is an `int`.
 
-  Hint: 'null' is only valid for pointer types. If you want a zero value, use the default initializer (declare without '= null').
+  Hint: Declare it as a pointer or a `&?` reference to hold `null`, or give it an `int`.
 
   4 │     mut x: int = null;
     │     ^~~ this cannot hold `null`

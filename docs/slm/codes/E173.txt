@@ -12,7 +12,7 @@ INCORRECT:
     }
 
     fn main(): int {
-        checks_add();   // ERROR [E173]: 'checks_add' is a test
+        checks_add();   // ERROR [E173]: I cannot use the test `checks_add`
         return 0;
     }
 

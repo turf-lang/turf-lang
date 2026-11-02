@@ -6,7 +6,7 @@ A `compare` doesn't cover every value of its subject
         matches Color::Red:  ...  done
         matches Color::Green ...  done
     }
-    // ERROR: Non-exhaustive enum comparison on 'Color'.
+    // ERROR: This `compare` on `Color` does not cover every case, and it has no `otherwise`.
     //        Missing variants: Color::Blue
     //   Hint: Add an arm for each missing variant, or 'otherwise:' (or
     //   `matches _:`) to handle the rest.

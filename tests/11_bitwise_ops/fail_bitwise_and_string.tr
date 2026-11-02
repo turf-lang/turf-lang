@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E057
-// EXPECT-DIAG: Bitwise operator requires integer operands, but left operand is 'string'
+// EXPECT-DIAG: A bitwise operator needs `int` operands, and the left one is a `string`.
 // FAIL TEST: Bitwise AND with string type
 // "hello" & 2 should emit a TypeError
 

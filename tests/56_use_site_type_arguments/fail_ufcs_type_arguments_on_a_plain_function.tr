@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E148
-// EXPECT-DIAG: 'plain' is not generic, so it takes no type arguments
+// EXPECT-DIAG: `plain` is not generic, so it takes no type arguments, and 1 is written.
 // A function with no type parameters takes none through UFCS either.
 
 fn plain(x: int): int {

@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E135
-// EXPECT-DIAG: 'printline' is a variable of type 'int', not a function
+// EXPECT-DIAG: I cannot call `printline`, which is a variable of type `int` and not a function
 // Regression test: a local variable that is not callable but shares a name with
 // an imported function used to be silently ignored at the call site, so
 // `printline("Hi")` compiled and called io::printline. The local is what the

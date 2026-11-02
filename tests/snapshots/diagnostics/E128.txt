@@ -2,10 +2,9 @@ tests/37_guess_inference/fail_guess_no_init.tr (1 error)
 
 ── error at line 9, col 5 [E128 · missing initializer]
 
-  Missing initializer!
-  'guess' needs an initializer to infer from.
+  `x` is declared `guess` with no initial value, so I have nothing to infer its type from.
 
-  Hint: Give the variable its value on the spot: `immut X: int = 5;`, `mut x: guess = 5;`.
+  Hint: Give it an initial value, or write its type instead of `guess`.
 
   9 │     mut x: guess;
     │     ^~~ this has no initial value

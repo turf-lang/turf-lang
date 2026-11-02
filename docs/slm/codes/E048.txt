@@ -38,9 +38,9 @@ CORRECT SYNTAX:
 
 INCORRECT:
     io.printline("hi");
-    // ERROR: '.' can't be used here -- 'io' is a module, not an instance.
+    // ERROR: I cannot use `.` on `io`, which is a module, not an instance.
     Point.origin();
-    // ERROR: '.' can't be used here -- 'Point' is a struct, not an
+    // ERROR: I cannot use `.` on `Point`, which is a struct type, not an
     //        instance.
 
 FIX:

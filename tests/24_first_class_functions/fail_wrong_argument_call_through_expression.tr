@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E056
-// EXPECT-DIAG: Argument 1 to the called function value expects 'int', got 'string'
+// EXPECT-DIAG: Argument 1 of the called function is an `int`, and I found a `string`.
 // A call through an expression checks each argument's type.
 fn inc(x: int): int { return x + 1; }
 

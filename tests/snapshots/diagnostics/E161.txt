@@ -2,7 +2,7 @@ tests/39_nullable_references/escape_mixed_paths_kept_local_ok.tr (1 warning)
 
 ── warning at line 23, col 5 [E161 · initial value never read]
 
-  Warning: The initial value of 'p' is never read: every path assigns 'p' again before reading it.
+  The initial value of `p` is never read, because every path assigns `p` again before reading it.
 
   Hint: Remove the initial value, or read it before the next assignment.
 

@@ -15,7 +15,7 @@ CORRECT USAGE:
 
 INCORRECT:
     mut result: string = log_message("hello");
-    // ERROR: You can't use a void value here!
+    // ERROR: I cannot store a `void` in `result`, which is a `string`.
     //   <context describing where the void result was used>
 
 FIX:

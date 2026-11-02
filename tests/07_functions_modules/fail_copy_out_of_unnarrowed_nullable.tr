@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E082
-// EXPECT-DIAG: Cannot copy the value out of 'n' here -- it might be 'null'
+// EXPECT-DIAG: I cannot copy `n` out here, because it might be `null`
 struct Node { v: int, next: &?Node }
 
 fn f(n: &?Node): int {

@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E042
-// EXPECT-DIAG: Unknown type 'NoSuchStruct'
+// EXPECT-DIAG: I cannot find a type named `NoSuchStruct`
 // Regression test: an unknown/misspelled struct type name used as a
 // function parameter's type must be rejected. Before the fix this compiled
 // silently -- Resolver::visitStructDecl() validated struct FIELD types

@@ -9,10 +9,9 @@ public:
   ControlFlowError(SourceLocation Loc, const std::string &Msg)
       : TurfError(
             Loc,
-            Colors::BRIGHT_RED + "Control flow error!\n" + Colors::RESET +
-                "  " + Msg,
-            "Make sure 'break' and 'continue' are inside a loop, "
-            "and 'return' is inside a function.") {
+            Msg,
+            "Move `break` and `continue` inside a loop, and `return` inside "
+            "a function.") {
     Category_ = SLM::ErrorCategory::CONTROL_FLOW;
   }
 };
@@ -21,9 +20,7 @@ class SemanticError : public TurfError {
 public:
   SemanticError(SourceLocation Loc, const std::string &Msg,
                 const std::string &Hint = "")
-      : TurfError(Loc, Colors::BRIGHT_RED +
-                           "Oops! Something doesn't add up:\n" + Colors::RESET +
-                           "  " + Msg, Hint) {
+      : TurfError(Loc, Msg, Hint) {
     // Intentionally left as the default GENERAL: this class is a genuine
     // catch-all for miscellaneous semantic violations that don't fit any
     // other bucket, not an oversight.
@@ -38,12 +35,12 @@ public:
   MissingReturnError(SourceLocation Loc, const std::string &FunctionName)
       : TurfError(
             Loc,
-            Colors::BRIGHT_RED + "The function '" + Colors::CYAN +
+            Colors::BRIGHT_RED + "I found a path through `" + Colors::CYAN +
                 FunctionName + Colors::BRIGHT_RED +
-                "' promises to give back a result, but sometimes it doesn't!" +
+                "` that ends without returning a result." +
                 Colors::RESET,
-            "Make sure every path in your function (like inside 'if' "
-            "and 'else') has a 'return' statement.") {
+            "Add a `return` statement to every path in `" + FunctionName +
+                "`, including each `if` and `else` branch.") {
     Category_ = SLM::ErrorCategory::CONTROL_FLOW;
   }
 };
@@ -52,11 +49,11 @@ public:
   UnreachableBlockWarning(SourceLocation Loc, const std::string &FunctionName,
                           const std::string &BlockName)
       : TurfWarning(Loc,
-                    TurfWarning::WarningLabel() + "The code in '" + BlockName +
-                        "' inside '" + FunctionName +
-                        "' can never be reached!" + Colors::RESET,
-                    "Check your 'if' conditions. Are they impossible to be "
-                    "true, or did you 'return' before this block?") {
+                    TurfWarning::WarningLabel() + "I can never reach the code in `" +
+                        BlockName + "` inside `" + FunctionName + "`." +
+                        Colors::RESET,
+                    "Check whether an `if` condition can never be true, or "
+                    "whether a `return` comes before this block.") {
     Category_ = SLM::ErrorCategory::CONTROL_FLOW;
   }
 };
@@ -64,11 +61,11 @@ class DeadBranchWarning : public TurfWarning {
 public:
   DeadBranchWarning(SourceLocation Loc, const std::string &FunctionName)
       : TurfWarning(Loc,
-                    TurfWarning::WarningLabel() + "There's a part of '" +
-                        FunctionName + "' that will never be executed!" +
+                    TurfWarning::WarningLabel() + "A part of `" +
+                        FunctionName + "` can never run." +
                         Colors::RESET,
-                    "Check if you have code after a 'return', 'break', or "
-                    "'continue' that can't be reached.") {
+                    "Remove the code after a `return`, `break` or `continue`, "
+                    "or move it before that statement.") {
     Category_ = SLM::ErrorCategory::CONTROL_FLOW;
   }
 };
@@ -77,10 +74,10 @@ public:
   StatementAfterTerminatorError(SourceLocation Loc,
                                 const std::string &Terminator)
       : TurfError(Loc, Colors::BRIGHT_RED + "This code comes after a " +
-                           Terminator + ", so it's impossible to reach it!" +
+                           Terminator + ", so I can never reach it." +
                            Colors::RESET,
-                  "Delete this code or move it before the '" +
-                  Terminator + "' statement.") {
+                  "Delete this code or move it before the `" +
+                  Terminator + "` statement.") {
     Category_ = SLM::ErrorCategory::CONTROL_FLOW;
   }
 };
@@ -93,11 +90,11 @@ public:
 class DeferControlFlowError : public TurfError {
 public:
   DeferControlFlowError(SourceLocation Loc, const std::string &Kind)
-      : TurfError(Loc, Colors::BRIGHT_RED + "A deferred statement can't '" +
-                           Kind + "'!" + Colors::RESET,
-                  "'" + Kind + "' inside a 'defer' would jump out of the "
-                  "enclosing function or loop, not just the deferred "
-                  "statement -- move it out of the 'defer'.") {
+      : TurfError(Loc, Colors::BRIGHT_RED + "I cannot let a deferred statement `" +
+                           Kind + "`." + Colors::RESET,
+                  "Move the `" + Kind + "` out of the `defer`: it would jump "
+                  "out of the enclosing function or loop, not just the "
+                  "deferred statement.") {
     Category_ = SLM::ErrorCategory::CONTROL_FLOW;
   }
 };
@@ -112,13 +109,13 @@ class CallerLocationOutsideMarkedFunctionError : public TurfError {
 public:
   explicit CallerLocationOutsideMarkedFunctionError(SourceLocation Loc)
       : TurfError(Loc,
-                  Colors::BRIGHT_RED + "'" + Colors::CYAN + "caller_location" +
+                  Colors::BRIGHT_RED + "I cannot use `" + Colors::CYAN + "caller_location" +
                       Colors::BRIGHT_RED +
-                      "' can only be used inside a function declared '" +
+                      "` outside a function declared `" +
                       Colors::CYAN + "@caller_location" + Colors::BRIGHT_RED +
-                      "'." + Colors::RESET,
-                  "Add '@caller_location' immediately before this "
-                  "function's 'fn' keyword, or remove this use.") {
+                      "`." + Colors::RESET,
+                  "Add `@caller_location` immediately before this "
+                  "function's `fn` keyword, or remove this use.") {
     Category_ = SLM::ErrorCategory::DECLARATION;
   }
 };
@@ -129,12 +126,11 @@ public:
   RedundantComparisonWarning(SourceLocation Loc, const std::string &Expr,
                              const std::string &Simplified)
       : TurfWarning(Loc,
-                    TurfWarning::WarningLabel() + "This comparison is redundant!" + Colors::RESET + "\n  " +
-                        Colors::BRIGHT_CYAN + Expr + Colors::RESET +
-                        " is the same as just writing " + Colors::BRIGHT_CYAN +
-                        Simplified + Colors::RESET + ".",
-                    "You can simplify this by removing the comparison "
-                    "entirely.") {
+                    TurfWarning::WarningLabel() + "`" + Colors::BRIGHT_CYAN + Expr +
+                        Colors::BRIGHT_YELLOW + "` is the same as `" +
+                        Colors::BRIGHT_CYAN + Simplified +
+                        Colors::BRIGHT_YELLOW + "`." + Colors::RESET,
+                    "Write `" + Simplified + "` instead of the comparison.") {
     Category_ = SLM::ErrorCategory::CONTROL_FLOW;
   }
 };
@@ -143,11 +139,11 @@ class SelfAssignmentWarning : public TurfWarning {
 public:
   SelfAssignmentWarning(SourceLocation Loc, const std::string &Name)
       : TurfWarning(Loc,
-                    TurfWarning::WarningLabel() + "You're assigning '" + Colors::CYAN + Name +
-                        Colors::BRIGHT_YELLOW + "' to itself — this doesn't do anything!" +
+                    TurfWarning::WarningLabel() + "`" + Colors::CYAN + Name +
+                        Colors::BRIGHT_YELLOW + "` is assigned to itself, so this does nothing." +
                         Colors::RESET,
-                    "Did you mean to assign a different value, or is this "
-                    "left over from an edit?") {
+                    "Remove this assignment, or assign the value you meant; it "
+                    "may be left over from an edit.") {
     Category_ = SLM::ErrorCategory::GENERAL;
   }
 };
@@ -156,13 +152,13 @@ class SuspiciousInfiniteLoopWarning : public TurfWarning {
 public:
   SuspiciousInfiniteLoopWarning(SourceLocation Loc)
       : TurfWarning(Loc,
-                    TurfWarning::WarningLabel() + "This looks like an infinite loop!" + Colors::RESET +
-                        " The condition is always true and the body has no " +
-                        Colors::CYAN + "'break'" + Colors::BRIGHT_YELLOW + ", " +
-                        Colors::CYAN + "'continue'" + Colors::BRIGHT_YELLOW + ", or " +
-                        Colors::CYAN + "'return'" + Colors::BRIGHT_YELLOW + ".",
-                    "If this is intentional, consider adding a comment. "
-                    "Otherwise, add a 'break' or a proper exit condition.") {
+                    TurfWarning::WarningLabel() + "This loop looks infinite: its condition is always true and its body has no " +
+                        Colors::CYAN + "`break`" + Colors::BRIGHT_YELLOW + ", " +
+                        Colors::CYAN + "`continue`" + Colors::BRIGHT_YELLOW + " or " +
+                        Colors::CYAN + "`return`" + Colors::BRIGHT_YELLOW + "." +
+                        Colors::RESET,
+                    "Add a `break` or a real exit condition. If the loop is "
+                    "meant to run forever, pass `--allow E157` to silence this.") {
     Category_ = SLM::ErrorCategory::CONTROL_FLOW;
   }
 };
@@ -175,13 +171,13 @@ public:
                               int M)
       : TurfWarning(
             Loc,
-            TurfWarning::WarningLabel() + "Function '" + Colors::CYAN + FuncName +
-                Colors::BRIGHT_YELLOW + "' has cyclomatic complexity " +
+            TurfWarning::WarningLabel() + "Function `" + Colors::CYAN + FuncName +
+                Colors::BRIGHT_YELLOW + "` has cyclomatic complexity " +
                 Colors::CYAN + std::to_string(M) + Colors::BRIGHT_YELLOW +
-                " (threshold: 15). Consider breaking it into smaller functions." +
+                ", above the threshold of 15." +
                 Colors::RESET,
-            "High cyclomatic complexity makes code harder to test and maintain. "
-            "Try splitting this function into smaller, focused helpers.") {
+            "Split `" + FuncName + "` into smaller, focused functions. To "
+            "silence this on purpose, pass `--allow E158`.") {
     Category_ = SLM::ErrorCategory::CONTROL_FLOW;
   }
 };
@@ -196,12 +192,12 @@ public:
   InfiniteLoopWarning(SourceLocation Loc, const std::string &FuncName)
       : TurfWarning(
             Loc,
-            TurfWarning::WarningLabel() + "Function '" + Colors::CYAN + FuncName +
+            TurfWarning::WarningLabel() + "Function `" + Colors::CYAN + FuncName +
                 Colors::BRIGHT_YELLOW +
-                "' contains a loop with no exit path. "
-                "This will run forever." + Colors::RESET,
-            "Add a 'break', 'return', or a condition that can become false "
-            "to allow the loop to exit.") {
+                "` contains a loop with no exit path, so it will run forever." +
+                Colors::RESET,
+            "Add a `break`, a `return` or a condition that can become false, "
+            "so the loop can exit.") {
     Category_ = SLM::ErrorCategory::CONTROL_FLOW;
   }
 };
@@ -213,13 +209,13 @@ public:
   DeadStoreWarning(SourceLocation Loc, const std::string &VarName)
       : TurfWarning(
             Loc,
-            TurfWarning::WarningLabel() + "Variable '" + Colors::CYAN + VarName +
+            TurfWarning::WarningLabel() + "The value assigned to `" + Colors::CYAN + VarName +
                 Colors::BRIGHT_YELLOW +
-                "' is assigned but the value is never read (dead store)." +
+                "` is never read." +
                 Colors::RESET,
-            "The assigned value is overwritten or the function returns before "
-            "this variable is ever used. Remove the assignment or use the "
-            "value.") {
+            "Remove the assignment, or read `" + VarName + "` before it is "
+            "overwritten or the function returns. To silence this on "
+            "purpose, pass `--allow E160`.") {
     Category_ = SLM::ErrorCategory::CONTROL_FLOW;
   }
 };
@@ -232,15 +228,15 @@ public:
                          const std::string &TypeName)
       : TurfWarning(
             Loc,
-            TurfWarning::WarningLabel() + "The initial value of '" +
+            TurfWarning::WarningLabel() + "The initial value of `" +
                 Colors::CYAN + VarName + Colors::BRIGHT_YELLOW +
-                "' is never read: every path assigns '" + VarName +
-                "' again before reading it." + Colors::RESET,
+                "` is never read, because every path assigns `" + VarName +
+                "` again before reading it." + Colors::RESET,
             TypeName.empty()
                 ? "Remove the initial value, or read it before the next "
                   "assignment."
-                : "Declare it without a value, 'mut " + VarName + ": " +
-                      TypeName + ";' (every read still has to come after an "
+                : "Declare it without a value, `mut " + VarName + ": " +
+                      TypeName + ";` (every read still has to come after an "
                       "assignment), or read the initial value before the "
                       "next assignment.") {
     Category_ = SLM::ErrorCategory::CONTROL_FLOW;
@@ -261,11 +257,10 @@ public:
                 (Start > End ? "down" : "up") + ", but the step counts " +
                 (StepCountsUp ? "up" : "down") + "." + Colors::RESET,
             Start > End
-                ? "A descending range needs a decreasing step: `for " + Var + " in " +
+                ? "Add a decreasing step: `for " + Var + " in " +
                       std::to_string(Start) + ".." + std::to_string(End) +
                       " step " + Var + "-- { ... }`."
-                : "An ascending range needs an increasing step, such as the "
-                  "default.") {
+                : "Use an increasing step, such as the default.") {
     Category_ = SLM::ErrorCategory::CONTROL_FLOW;
   }
 };
@@ -276,12 +271,11 @@ public:
   UnusedVariableWarning(SourceLocation Loc, const std::string &VarName)
       : TurfWarning(
             Loc,
-            TurfWarning::WarningLabel() + "Variable '" + Colors::CYAN + VarName +
+            TurfWarning::WarningLabel() + "Variable `" + Colors::CYAN + VarName +
                 Colors::BRIGHT_YELLOW +
-                "' is declared but never used." + Colors::RESET,
-            "If the variable is intentionally unused, prefix its name with "
-            "'_' by convention. Otherwise, remove the declaration or use "
-            "its value.") {
+                "` is declared but never used." + Colors::RESET,
+            "Remove `" + VarName + "`, or use it. If it is unused on purpose, "
+            "rename it `_" + VarName + "`, or pass `--allow E163`.") {
     Category_ = SLM::ErrorCategory::CONTROL_FLOW;
   }
 };
@@ -294,11 +288,11 @@ class RecursionWithoutBaseError : public TurfError {
 public:
   RecursionWithoutBaseError(SourceLocation Loc, const std::string &FuncName)
       : TurfError(Loc,
-                  Colors::BRIGHT_RED + "Infinite recursion detected in '" +
-                      Colors::CYAN + FuncName + Colors::BRIGHT_RED + "'." +
+                  Colors::BRIGHT_RED + "I found infinite recursion in `" +
+                      Colors::CYAN + FuncName + Colors::BRIGHT_RED + "`." +
                       Colors::RESET,
-                  "Every recursive function needs a base case — "
-                  "a path that returns without calling itself.") {
+                  "Add a base case, a path that returns without calling "
+                  "itself.") {
     Category_ = SLM::ErrorCategory::CONTROL_FLOW;
   }
 };
@@ -331,16 +325,15 @@ public:
       : TurfWarning(
             Loc,
             TurfWarning::WarningLabel() +
-                "The loop variable '" + Colors::CYAN + VarName +
+                "The loop variable `" + Colors::CYAN + VarName +
                 Colors::BRIGHT_YELLOW +
-                "' is never changed by this loop's 'step' or its body, so " +
+                "` is never changed by this loop's `step` or its body, so " +
                 Outcome + Colors::RESET,
-            "Make sure 'step' (or something in the body) actually updates '" +
+            "Make `step`, or something in the body, update `" +
                 VarName +
-                "'. If a DIFFERENT variable is meant to control when the "
-                "loop ends, use 'while' instead of 'for' -- 'for' always "
-                "iterates its own induction variable, it doesn't watch "
-                "other variables for you.") {
+                "`. If a different variable is meant to control when the "
+                "loop ends, use `while` instead of `for`, which iterates "
+                "only its own variable.") {
     Category_ = SLM::ErrorCategory::CONTROL_FLOW;
   }
 };
@@ -349,12 +342,13 @@ class EmptyBranchWarning : public TurfWarning {
 public:
   EmptyBranchWarning(SourceLocation Loc, const std::string &BranchKind)
       : TurfWarning(Loc,
-                    TurfWarning::WarningLabel() + "The '" + Colors::CYAN + BranchKind +
-                        Colors::BRIGHT_YELLOW + "' branch is empty — it doesn't do anything!" +
+                    TurfWarning::WarningLabel() + "The `" + Colors::CYAN + BranchKind +
+                        Colors::BRIGHT_YELLOW + "` branch is empty." +
                         Colors::RESET,
-                    "If you haven't written the code yet, add a comment "
-                    "like '// TODO'. Otherwise, you may be able to simplify this "
-                    "'if' statement.") {
+                    "Write the code for it, or add a comment such as `// TODO` "
+                    "if it is not written yet. If the branch is not needed, "
+                    "simplify the `if` statement, or pass `--allow E165` to "
+                    "silence this.") {
     Category_ = SLM::ErrorCategory::CONTROL_FLOW;
   }
 };
@@ -364,11 +358,11 @@ public:
   SelfComparisonWarning(SourceLocation Loc, const std::string &Name,
                         const std::string &Result)
       : TurfWarning(Loc,
-                    TurfWarning::WarningLabel() + "You're comparing '" + Colors::CYAN + Name +
-                        Colors::BRIGHT_YELLOW + "' with itself!" + Colors::RESET +
-                        " This is always " + Colors::BRIGHT_CYAN + Result +
-                        Colors::RESET + ".",
-                    "Did you mean to compare with a different variable?") {
+                    TurfWarning::WarningLabel() + "`" + Colors::CYAN + Name +
+                        Colors::BRIGHT_YELLOW + "` is compared with itself, so the result is always " +
+                        Colors::BRIGHT_CYAN + Result +
+                        Colors::BRIGHT_YELLOW + "." + Colors::RESET,
+                    "Compare `" + Name + "` with a different variable.") {
     Category_ = SLM::ErrorCategory::GENERAL;
   }
 };
@@ -377,9 +371,9 @@ class DivisionByZeroLiteralWarning : public TurfWarning {
 public:
   DivisionByZeroLiteralWarning(SourceLocation Loc, const std::string &Op)
       : TurfWarning(Loc,
-                    TurfWarning::WarningLabel() + "You're using '" + Colors::CYAN + Op + Colors::BRIGHT_YELLOW +
-                        "' with zero — this will crash at runtime!" + Colors::RESET,
-                    "Check the right-hand side. Division or modulo by zero "
+                    TurfWarning::WarningLabel() + "I found `" + Colors::CYAN + Op + Colors::BRIGHT_YELLOW +
+                        "` used with zero, which will crash at runtime." + Colors::RESET,
+                    "Change the right-hand side: division or modulo by zero "
                     "is undefined behavior.") {
     Category_ = SLM::ErrorCategory::ARITHMETIC;
   }
@@ -389,10 +383,10 @@ class IdenticalBranchesWarning : public TurfWarning {
 public:
   IdenticalBranchesWarning(SourceLocation Loc)
       : TurfWarning(Loc,
-                    TurfWarning::WarningLabel() + "Both branches of this 'if' do the same thing!" +
+                    TurfWarning::WarningLabel() + "Both branches of this `if` do the same thing." +
                         Colors::RESET,
-                    "The 'if'/'else' can be removed — just keep the body. "
-                    "Or did you forget to change one of the branches?") {
+                    "Remove the `if` and `else` and keep one body, or change "
+                    "one of the branches if they were meant to differ.") {
     Category_ = SLM::ErrorCategory::CONTROL_FLOW;
   }
 };
@@ -400,13 +394,13 @@ public:
 class DefiniteAssignmentError : public TurfError {
   static std::string buildHint(const std::string &Name, const std::string &TypeName,
                                 bool SuggestDefault) {
-    std::string Hint = "Make sure every path assigns to '" + Name + "' before you use it.";
+    std::string Hint = "Assign to `" + Name + "` on every path before it is used.";
     if (SuggestDefault) {
       // SEM-004 (§8, FREEZE.md §6.4): the mechanical migration off the
       // removed eager-default mechanism is always the same shape, so name
       // it directly rather than making every caller rediscover it.
-      Hint += " Or give it an explicit default right away: 'mut " + Name +
-              ": " + TypeName + " = " + TypeName + "::default();'.";
+      Hint += " Or give it an explicit default right away: `mut " + Name +
+              ": " + TypeName + " = " + TypeName + "::default();`.";
     }
     return Hint;
   }
@@ -419,9 +413,9 @@ public:
                            const std::string &TypeName = "",
                            bool SuggestDefault = false)
       : TurfError(Loc,
-                  Colors::BRIGHT_RED + "Oops! You're using '" + Colors::CYAN + Name +
-                      Colors::BRIGHT_RED + "'" +
-                      (TypeName.empty() ? "" : " (type '" + TypeName + "')") +
+                  Colors::BRIGHT_RED + "I cannot use `" + Colors::CYAN + Name +
+                      Colors::BRIGHT_RED + "`" +
+                      (TypeName.empty() ? "" : " (type `" + TypeName + "`)") +
                       " before it has a value." + Colors::RESET,
                   buildHint(Name, TypeName, SuggestDefault)) {
     Category_ = SLM::ErrorCategory::UNDECLARED_VAR;
@@ -444,12 +438,12 @@ class NeverReturnsErrorWarning : public TurfWarning {
 public:
   NeverReturnsErrorWarning(SourceLocation Loc, const std::string &FuncName)
       : TurfWarning(Loc,
-                    TurfWarning::WarningLabel() + "'" + FuncName +
-                        "' is declared to return a fallible type ('!T') but "
+                    TurfWarning::WarningLabel() + "`" + FuncName +
+                        "` is declared to return a fallible type (`!T`) but "
                         "never actually returns an error." + Colors::RESET,
-                    "If this function can never really fail, its return "
-                    "type doesn't need the '!' -- drop it and return T "
-                    "directly.") {
+                    "Drop the `!` from the return type and return `T` "
+                    "directly if the function can never fail, or pass "
+                    "`--allow E169` to silence this.") {
     Category_ = SLM::ErrorCategory::CONTROL_FLOW;
   }
 };

@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E022
-// EXPECT-DIAG: needs a literal value
+// EXPECT-DIAG: at compile time, which an exported constant needs
 // Exported constants have no real storage -- Codegen inlines the literal
 // value at every reference site -- so the initializer must be a plain
 // literal the compiler can fold right now, not a function call.

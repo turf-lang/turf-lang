@@ -4,7 +4,7 @@ tests/05_arrays_pointers_ffi/unsafe_checks_warn.tr (2 warnings)
 
   This `unsafe { }` block holds 42 statements (more than 40): the code that needs care is hard to find in it.
 
-  Hint: Keep only the raw-pointer operations inside `unsafe { }`, and move the rest out, or into a function.
+  Hint: Keep only the raw-pointer operations inside `unsafe { }`, and move the rest out, or into a function. To silence this on purpose, pass `--allow E194`.
 
   105 │     unsafe {
       │     ^~~~~~ this `unsafe` block is very large
@@ -13,9 +13,9 @@ tests/05_arrays_pointers_ffi/unsafe_checks_warn.tr (2 warnings)
 
 ── warning at line 106, col 9 [E163 · unused variable]
 
-  Warning: Variable 'raw' is declared but never used.
+  Variable `raw` is declared but never used.
 
-  Hint: If the variable is intentionally unused, prefix its name with '_' by convention. Otherwise, remove the declaration or use its value.
+  Hint: Remove `raw`, or use it. If it is unused on purpose, rename it `_raw`, or pass `--allow E163`.
 
   106 │         mut raw: int* = &t to int*;
       │         ^ this variable is never used

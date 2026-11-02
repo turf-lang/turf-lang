@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E086
-// EXPECT-DIAG: can't be boxed with heap() inside a struct or array value
+// EXPECT-DIAG: be boxed with heap() inside a struct or array
 // heap(m) copies `m` onto the GC heap, `m.next` included: the boxed node
 // outlives this frame but points into it.
 struct N { val: int, next: &?N }

@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E148
-// EXPECT-DIAG: 'twice' takes 1 type argument, and 2 are written.
+// EXPECT-DIAG: `twice` takes 1 type argument, and 2 are written.
 // Through UFCS as in a direct call: one type per type parameter.
 
 fn<T> twice(x: T): T {

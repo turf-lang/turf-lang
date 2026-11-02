@@ -1,6 +1,6 @@
 // SY-4: `static pub fn` puts the words in the wrong order; the Fix swaps them.
 // EXPECT-DIAG: E087
-// EXPECT-DIAG: 'static' comes after 'pub', not before it.
+// EXPECT-DIAG: I expected `static` after `pub`, not before it.
 // EXPECT-FIX: write 'pub static'
 struct Counter {
     n: int

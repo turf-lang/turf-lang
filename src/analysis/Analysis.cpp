@@ -2050,7 +2050,7 @@ class EscapeCheckVisitor : public ASTChildWalker {
       DanglingReferenceEscapeError(Loc, SinkDescription).raise();
     if (holdsStack(ValueExpr))
       DanglingReferenceEscapeError(
-          Loc, SinkDescription + " inside a struct or array value").raise();
+          Loc, SinkDescription + " inside a struct or array").raise();
   }
 
   // What a value of type T, computed by RHS, stores at each reference path

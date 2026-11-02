@@ -14,8 +14,7 @@ CORRECT USAGE:
 INCORRECT:
     mut d: double = 1.0;
     mut val: int = primes[d];
-    // ERROR: Array index must be an integer! You used a value of type
-    //   'double' as an array index.
+    // ERROR: An index of `int[3]` must be an `int`, and I found a `double`.
 
 FIX:
   Convert the value to an int first if it's genuinely meant to be a whole

@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E147
-// EXPECT-DIAG: 'A' has no default value
+// EXPECT-DIAG: `A` has no default: defaulting it gives every `&` field a new default, and `A` reaches itself through `&` fields, so that never ends.
 // LEC-009 (F-COLL-2): the cycle may pass through a field held by value. `A`
 // holds a `B`, and `B` points back at an `A`, so defaulting `A` would never
 // end. A by-value cycle with no `&` at all is the separate layout error.

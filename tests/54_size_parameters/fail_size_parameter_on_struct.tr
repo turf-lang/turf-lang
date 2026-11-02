@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E150
-// EXPECT-DIAG: A struct's type parameters are types
+// EXPECT-DIAG: The type parameters of a struct are types
 
 struct Buffer<N: size> {
     used: int

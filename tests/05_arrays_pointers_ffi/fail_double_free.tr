@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E017
-// EXPECT-DIAG: Double free detected for 'p'
+// EXPECT-DIAG: I found a second free of `p`
 // EXPECT-NO-DIAG: Unsafe pointer use
 // Regression test: AliasAnalysisPass must reject a genuine double free of
 // the SAME variable/allocation. There was no existing test coverage for

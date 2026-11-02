@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E128
-// EXPECT-DIAG: Missing initializer!
+// EXPECT-DIAG: The immutable variable `PI` has no initial value, and nothing can assign it one later.
 fn main(): int {
     immutable PI: double;
     return 0;

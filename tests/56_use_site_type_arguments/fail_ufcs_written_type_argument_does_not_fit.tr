@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E056
-// EXPECT-DIAG: No visible 'twice' overload accepts a 'int' receiver via UFCS
+// EXPECT-DIAG: No visible `twice` takes an `int` as its receiver: a call with `.` matches the receiver's type exactly and never converts it.
 // A written type argument fixes T; the receiver must then match it exactly.
 
 fn<T> twice(x: T): T {

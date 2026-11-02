@@ -2,8 +2,7 @@ tests/03_typechecker/fail_logical_not_int.tr (1 error)
 
 ── error at line 6, col 20 [E057 · operator applied to the wrong kind of value]
 
-  Operator applied to the wrong kind of value!
-  Cannot apply '!' to 'int': its operand must be a 'bool'.
+  I cannot use `!` on an `int`: its operand must be a `bool`.
 
   Hint: Write a comparison, e.g. `n == 0` instead of `!n`.
 

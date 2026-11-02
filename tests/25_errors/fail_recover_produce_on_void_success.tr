@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E066
-// EXPECT-DIAG: 'recover produce int' doesn't match this call's success type 'void'
+// EXPECT-DIAG: `recover produce` gives an `int`, and this call succeeds with a `void`.
 // Test (fail): Errors.md's own explicit example -- 'recover produce value'
 // is invalid when the call's success type is 'void' (there's no value to
 // produce a mismatched replacement for).

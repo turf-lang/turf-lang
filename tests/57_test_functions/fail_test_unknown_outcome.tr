@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E146
-// EXPECT-DIAG: 'skipped' is not an outcome of '@test'
+// EXPECT-DIAG: `skipped` is not an outcome of `@test`. The outcomes are compile_error, warning, no_warnings, panic, exit and error, e.g. `@test(panic, "Division by zero")`.
 // TDP-2-006: an outcome is one of the six words; anything else is an error,
 // never a test that silently expects nothing.
 @test(skipped)

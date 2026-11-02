@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E028
-// EXPECT-DIAG: 'operator +(char, char)' is not allowed
+// EXPECT-DIAG: I cannot accept `operator +(char, char)`, because both operand types are built in
 // Negative test: operator +(char, char) is a hard error -- char is in the
 // builtin operand set (RFC §1/§3: char arithmetic can never be added back
 // via a user overload, only via an explicit `to int` cast first).

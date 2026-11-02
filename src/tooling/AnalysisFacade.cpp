@@ -384,12 +384,12 @@ std::vector<std::unique_ptr<ExprAST>> parseEntryFile(std::size_t &PreludeCount,
         SkipToNextTopLevelBoundary();
       } else if (isDeclarationStart(StartTok)) {
         if (Parser().CurTok == ';')
-          LogErrorAt(Lex().CurLoc, ErrCode::UnexpectedToken, "Unexpected ';'",
+          LogErrorAt(Lex().CurLoc, ErrCode::UnexpectedToken, "I did not expect a `;` here.",
                      SLM::ErrorCategory::SYNTAX_ERROR);
         AppendFlattenedTopLevelDecl(std::move(AST), Program, true);
       } else {
         if (Parser().CurTok != ';')
-          LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement",
+          LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "I expected a `;` after this statement.",
                      SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
         else
           getNextToken();
@@ -398,9 +398,8 @@ std::vector<std::unique_ptr<ExprAST>> parseEntryFile(std::size_t &PreludeCount,
           Program.push_back(std::move(AST));
         } else {
           LogErrorAt(spanOf(*AST).Loc, ErrCode::StatementOutsideFunction,
-                     "Statements are not allowed outside of a function. "
-                     "Please define 'fn main(): int' and move this code "
-                     "inside.\n  Hint: Wrap it: `fn main(): int { <this statement> return 0; }`.",
+                     "I found a statement outside a function."
+                     "\n  Hint: Move it into a function, as in `fn main(): int { <this statement> return 0; }`.",
                      SLM::ErrorCategory::SYNTAX_ERROR);
         }
       }

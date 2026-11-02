@@ -11,7 +11,11 @@ do. This script is the CI gate for that. It fails when
      SHA256SUMS: a minor that edits a test to make it pass is a 3.0 change.
      Add a new test under tests/<NN_topic>/, never here;
   2. `turfc --test` fails on the tree (a program that compiled stops
-     compiling, a rejected one is accepted, a marker no longer holds);
+     compiling, a rejected one is accepted, a marker no longer holds). A
+     `fail_*` program is held to the codes its `EXPECT-DIAG` lines name, not
+     to their message text (`TURF_TEST_DIAG_CODES_ONLY=1`): the promise
+     covers codes and exit statuses, never wording (D-6, FREEZE.md 6.9), so a
+     minor may reword a message the corpus quotes;
   3. a program that compiled and ran on 2.0.0 exits with another status or
      prints other bytes (RUNS lists the programs and their exit statuses;
      <program>.tr.expected holds the output, absent when it was empty);
@@ -276,8 +280,9 @@ def check_runner(compiler: str, flags: list[str], relaxed: dict[str, str],
     cmd = [compiler, "--test", str(CORPUS)]
     for name in relaxed:
         cmd += ["--exclude", name]
+    env = dict(os.environ, TURF_TEST_DIAG_CODES_ONLY="1")
     r = subprocess.run(cmd + flags, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                       stderr=subprocess.STDOUT, text=True, errors="replace")
+                       stderr=subprocess.STDOUT, text=True, errors="replace", env=env)
     if r.returncode != 0:
         tail = re.sub(r"\x1b\[[0-9;]*m", "", r.stdout)
         failed = tail.split("Failed Tests Details:", 1)[-1] if "Failed Tests Details:" in tail else tail[-4000:]

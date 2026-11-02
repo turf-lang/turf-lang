@@ -20,7 +20,7 @@ INCORRECT:
     unsafe {
         mut buf: int* = mem::malloc(40);
         mem::free(buf);
-        mem::free(buf);   // ERROR: Double free detected for 'buf'.
+        mem::free(buf);   // ERROR: I found a second free of `buf`.
     }
 
 WHAT THIS ERROR IS NOT:

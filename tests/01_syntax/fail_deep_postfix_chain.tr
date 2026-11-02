@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E111
-// EXPECT-DIAG: Expression nested too deeply to parse
+// EXPECT-DIAG: I cannot parse this expression because it is nested too deeply
 // REL-004 (fuzzer): a postfix chain is parsed by a loop, not recursion, so the
 // nesting guard never saw it; `0` followed by thousands of `--` built an AST
 // thousands deep and the type checker overflowed the C++ stack (segfault).

@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E004
-// EXPECT-DIAG: Cannot initialize an array of 'int' with a value of type 'string'
+// EXPECT-DIAG: I cannot put a `string` in an array of `int`.
 // Regression test: an array declaration's initializer list elements must
 // match the declared element type. Before this fix, TypeChecker::
 // visitArrayDecl() visited each initializer (so each got its own inferred

@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E086
-// EXPECT-DIAG: can't be returned
+// EXPECT-DIAG: be returned
 // The loop that moves `p` to the heap may run zero times, and then `p` is
 // still `&n` (owner decision 2026-10-12, found by turf-fuzz). Contrast
 // escape_loop_reassigned_to_heap_ok.tr, where every path out is the heap.

@@ -63,8 +63,8 @@ false
 true
 ```
 
-Any other type has no overload: `printline(some_struct)` is E025 ("No matching
-overload!"). Convert it to a `string` first. To print several values, build one
+Any other type has no overload: `printline(some_struct)` is E025 ("No overload of `io::printline` takes the
+argument types (B)"). Convert it to a `string` first. To print several values, build one
 string with `+` and `to string`.
 
 ### Buffering: `flush(): void`

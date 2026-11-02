@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E146
-// EXPECT-DIAG: arguments are written 'platform: symbol'
+// EXPECT-DIAG: `@ffi` arguments are written `platform: symbol`, e.g. `@ffi(macos: malloc_size)`.
 // `@ffi` takes `platform: symbol` pairs; a bare word has no platform.
 
 @ffi(strlen)

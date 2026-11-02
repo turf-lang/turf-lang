@@ -2,10 +2,9 @@ tests/19_int32_type/fail_int32_increment.tr (1 error)
 
 ── error at line 14, col 6 [E126 · operation not supported here]
 
-  Operation not supported here!
-  postfix '++' is not supported on 'int32' -- int32 is never itself an arithmetic result type.
+  I cannot use `++` on an `int32`: arithmetic on an `int32` gives an `int`.
 
-  Hint: Write 'c = (c + 1) to int32;' explicitly instead.
+  Hint: Write it out: `c = (c + 1) to int32;`.
 
   14 │     c++;
      │      ^~ this is not supported here

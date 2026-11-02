@@ -2,9 +2,9 @@ tests/45_pattern_matching/fail_pattern_unknown_field.tr (1 error)
 
 ── error at line 9, col 21 [E068 · unknown struct field]
 
-  Struct 'P' has no field named 'z'.
+  I cannot find a field named `z` on the struct `P`.
 
-  Hint: It may be from the current file: 'x', 'y'
+  Hint: Use a name from this file: `x`, `y`
 
   9 │         matches P { z, .. }: return z; done
     │                     ^ no field of this name

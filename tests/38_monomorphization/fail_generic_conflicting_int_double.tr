@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E056
-// EXPECT-DIAG: 'T' in 'pair' is 'int' from argument 1 but 'double' from argument 2
+// EXPECT-DIAG: `T` in `pair` is an `int` from argument 1 and a `double` from argument 2. One type parameter stands for one type.
 // Inference does not widen: 2.5 is not passed to an int clone.
 fn<T> pair(a: T, b: T): T {
     return b;

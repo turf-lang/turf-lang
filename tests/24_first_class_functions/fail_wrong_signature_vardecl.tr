@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E066
-// EXPECT-DIAG: Cannot initialise 'fn(int): int' variable 'f' with value of type 'fn(double): string'
+// EXPECT-DIAG: I cannot store a `fn(double): string` in `f`, which is a `fn(int): int`.
 // Issue #187 acceptance criterion, vardecl form: a fn(...):... -typed
 // variable's initializer must match its declared signature exactly.
 fn describe(n: double): string { return "x"; }

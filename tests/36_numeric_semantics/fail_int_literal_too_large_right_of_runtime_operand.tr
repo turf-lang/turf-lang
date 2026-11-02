@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E076
-// EXPECT-DIAG: not representable in type 'int'
+// EXPECT-DIAG: The literal 9223372036854775808 does not fit in an `int`, which holds -9223372036854775808 .. 9223372036854775807.
 // The out-of-range literal is the RIGHT operand of a runtime expression. The
 // leaf check lived inside a fold that stopped at the runtime left operand, so
 // `c + 9223372036854775808` compiled and silently added INT_MIN while the

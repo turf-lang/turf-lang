@@ -107,8 +107,8 @@ void Resolver::visitVarDecl(VarDeclExprAST &Node) {
       DuplicateDeclarationError(Node.getLoc(), Node.getName(), PrevLoc).raise();
     } else {
       // Fallback (should not happen, but be safe).
-      SyntaxError(Node.getLoc(), ErrCode::DuplicateDeclaration, "Variable '" + Node.getName() +
-                                     "' is already declared in this scope.")
+      SyntaxError(Node.getLoc(), ErrCode::DuplicateDeclaration, "I found `" + Node.getName() +
+                                     "` declared twice in this scope.")
           .raise();
     }
   }
@@ -188,8 +188,8 @@ void Resolver::visitFor(ForExprAST &Node) {
       SourceLocation PrevLoc{Prev->DeclLoc.Line, Prev->DeclLoc.Col};
       DuplicateDeclarationError(ErrLoc, Node.getVarName(), PrevLoc).raise();
     } else {
-      SyntaxError(ErrLoc, ErrCode::DuplicateDeclaration, "Loop variable '" + Node.getVarName() +
-                               "' conflicts with an existing declaration.")
+      SyntaxError(ErrLoc, ErrCode::DuplicateDeclaration, "I cannot declare the loop variable `" + Node.getVarName() +
+                               "` because that name is already declared.")
           .raise();
     }
   }
@@ -232,8 +232,8 @@ void Resolver::visitForEach(ForEachExprAST &Node) {
       SourceLocation PrevLoc{Prev->DeclLoc.Line, Prev->DeclLoc.Col};
       DuplicateDeclarationError(ErrLoc, Node.getValueVarName(), PrevLoc).raise();
     } else {
-      SyntaxError(ErrLoc, ErrCode::DuplicateDeclaration, "Loop variable '" + Node.getValueVarName() +
-                               "' conflicts with an existing declaration.")
+      SyntaxError(ErrLoc, ErrCode::DuplicateDeclaration, "I cannot declare the loop variable `" + Node.getValueVarName() +
+                               "` because that name is already declared.")
           .raise();
     }
   }
@@ -253,8 +253,8 @@ void Resolver::visitForEach(ForEachExprAST &Node) {
         SourceLocation PrevLoc{Prev->DeclLoc.Line, Prev->DeclLoc.Col};
         DuplicateDeclarationError(ErrLoc, Node.getIndexVarName(), PrevLoc).raise();
       } else {
-        SyntaxError(ErrLoc, ErrCode::DuplicateDeclaration, "Loop variable '" + Node.getIndexVarName() +
-                                 "' conflicts with an existing declaration.")
+        SyntaxError(ErrLoc, ErrCode::DuplicateDeclaration, "I cannot declare the loop variable `" + Node.getIndexVarName() +
+                                 "` because that name is already declared.")
             .raise();
       }
     }

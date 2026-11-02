@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E172
-// EXPECT-DIAG: 'Counter.bump_old' is deprecated: use 'bump' instead
+// EXPECT-DIAG: `Counter.bump_old` is deprecated: use 'bump' instead
 // The instance-method counterpart of deprecated_warns_on_call.tr -- a method
 // call also goes through a resolved call target (MethodCallExprAST), so
 // `@deprecated` reaches it the same way as a free function.

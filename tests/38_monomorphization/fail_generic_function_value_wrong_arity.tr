@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E066
-// EXPECT-DIAG: makes it 'fn(int, int): int'
+// EXPECT-DIAG: `id` is fn<T>(T): T, and no choice of `T` makes it `fn(int, int): int`.
 // An instantiation never changes how many parameters a function has.
 fn<T> id(x: T): T {
     return x;

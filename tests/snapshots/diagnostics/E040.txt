@@ -2,9 +2,9 @@ tests/55_compiler_fixes/fail_fix_none_when_ambiguous.tr (1 error)
 
 ── error at line 8, col 12 [E040 · unknown name]
 
-  I can't find anything named 'cax'.
+  I cannot find anything named `cax`.
 
-  Hint: It may be from the current file: 'car', 'cat'
+  Hint: Use a name from this file: `car`, `cat`
 
   8 │     return cax - 1;
     │            ^~~ nothing of this name is in scope

@@ -12,7 +12,7 @@ CAUSE:
 
 INCORRECT:
     // a local list.tr exists next to main.tr, and the standard library has list
-    import list;        // ERROR: Module 'list' is ambiguous: 2 files answer
+    import list;        // ERROR: I found 2 files that answer to the module name `list`
 
 CORRECT (the local file has a name no other module has):
     // my_list.tr

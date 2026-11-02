@@ -23,7 +23,7 @@ INCORRECT:
         next: &Node
     }
     mut n: Node = Node::default();
-    // ERROR [E147]: 'Node' has no default value: ... reaches itself through '&' fields
+    // ERROR [E147]: `Node` has no default: ... `Node` reaches itself through `&` fields, so that never ends
 
 FIX:
   Change one field on the cycle from `&Node` to `&?Node` (nullable; it defaults to null

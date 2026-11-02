@@ -603,9 +603,8 @@ Value *AddressOfExprAST::codegen() {
   Value *LVal = Operand->codegenLValue();
   if (!LVal) {
     LogErrorAt(Loc, ErrCode::NonAddressableExpression,
-               "Cannot take the address of a non-addressable expression."
-                    "\n  Hint: Only variables, struct fields, and array elements"
-                    " are addressable.", SLM::ErrorCategory::GENERAL);
+               "I cannot take the address of this expression."
+                    "\n  Hint: Take the address of a variable, a struct field or an array element.", SLM::ErrorCategory::GENERAL);
     return nullptr;
   }
   return LVal;
@@ -621,7 +620,7 @@ Value *SizeOfExprAST::codegen() {
   // hand it one even if a future type slips past the checker.
   if (!LLVMTy->isSized()) {
     LogErrorAt(Loc, ErrCode::InternalCompilerError,
-               "Internal error: sizeof of an unsized type reached codegen",
+               "This is a compiler bug: I was asked for the size of a type that has none.\n  Hint: Report it with the smallest code that shows it at https://github.com/turf-lang/turf-lang/issues.",
                SLM::ErrorCategory::GENERAL);
     return nullptr;
   }

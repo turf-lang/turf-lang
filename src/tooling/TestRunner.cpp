@@ -760,7 +760,7 @@ private:
       std::error_code EC;
       if (!fs::exists(Program, EC))
         return fail(T, "NO EXECUTABLE PRODUCED", "(No executable)");
-      if (auto Miss = TestExpect::CheckDiag(Source, C.Output); !Miss.empty())
+      if (auto Miss = TestExpect::CheckDiag(Source, C.Output, TestExpect::DiagCodesOnly()); !Miss.empty())
         return fail(T, "FAILED (EXPECT-DIAG)", "(EXPECT-DIAG):\n" + With(Miss, C.Output));
       ProcResult R = runProgram(T, Program);
       if (R.Status == 0 || R.Status == 137 || R.Status == 143)
@@ -793,7 +793,7 @@ private:
                         ", instead of rejecting cleanly)",
                     "(Compiler crashed with exit " + std::to_string(C.Status) +
                         " instead of a clean diagnostic):\n" + C.Output);
-      if (auto Miss = TestExpect::CheckDiag(Source, C.Output); !Miss.empty())
+      if (auto Miss = TestExpect::CheckDiag(Source, C.Output, TestExpect::DiagCodesOnly()); !Miss.empty())
         return fail(T, "FAILED (Rejected, but EXPECT-DIAG not met)",
                     "(Rejected, but EXPECT-DIAG not met):\n" + With(Miss, C.Output));
       // The compiler's own suite (run with its register) pins every fix it
@@ -825,7 +825,7 @@ private:
       return fail(T, "NO EXECUTABLE PRODUCED", "(No executable)");
     // A plain test compiles, so what it can pin is its WARNINGS (or their
     // absence), judged on the compile output before the program runs.
-    if (auto Miss = TestExpect::CheckDiag(Source, C.Output); !Miss.empty())
+    if (auto Miss = TestExpect::CheckDiag(Source, C.Output, TestExpect::DiagCodesOnly()); !Miss.empty())
       return fail(T, "FAILED (EXPECT-DIAG)", "(EXPECT-DIAG):\n" + With(Miss, C.Output));
     // A warning's fix (a retired spelling) is pinned and applied as an
     // error's is.

@@ -87,8 +87,8 @@ inline std::string parse(const Annotation &Ann, Spec &Out) {
   for (const auto &A : Ann.Args) {
     if (!A.Key.empty()) {
       if (A.Key != "fix")
-        return "'@test' has no option '" + A.Key +
-               ":'. Its one option is 'fix:', after a compile_error outcome.";
+        return "`@test` has no option `" + A.Key +
+               ":`. Its one option is `fix:`, after a compile_error outcome.";
       continue;
     }
     Positional.push_back(&A);
@@ -97,27 +97,27 @@ inline std::string parse(const Annotation &Ann, Spec &Out) {
     Outcome K;
     if (!Positional[I]->IsString && !Positional[I]->IsNumber &&
         outcomeOf(Positional[I]->Value, K))
-      return "'" + Positional[I]->Value +
-             "' is an outcome, and an outcome is the first argument: '@test(" +
-             Positional[I]->Value + ", ...)'.";
+      return "`" + Positional[I]->Value +
+             "` is an outcome, and an outcome is the first argument: `@test(" +
+             Positional[I]->Value + ", ...)`.";
   }
   if (Positional.empty()) {
     if (!Ann.Args.empty())
-      return "'@test(fix: ...)' needs a compile_error outcome first: "
-             "'@test(compile_error, E041, \"text\", fix: \"text\")'.";
+      return "`@test(fix: ...)` needs a compile_error outcome first: "
+             "`@test(compile_error, E041, \"text\", fix: \"text\")`.";
     return "";
   }
 
   const AnnotationArg &First = *Positional[0];
   if (First.IsString || First.IsNumber || !outcomeOf(First.Value, Out.Kind))
-    return "'" + First.Value + "' is not an outcome of '@test'. The outcomes are " +
-           OutcomeList + ", e.g. '@test(panic, \"Division by zero\")'.";
+    return "`" + First.Value + "` is not an outcome of `@test`. The outcomes are " +
+           OutcomeList + ", e.g. `@test(panic, \"Division by zero\")`.";
   const std::string Word = outcomeWord(Out.Kind);
   std::vector<const AnnotationArg *> Rest(Positional.begin() + 1, Positional.end());
   const AnnotationArg *Fix = Ann.findKeyed("fix");
   if (Fix && Out.Kind != Outcome::CompileError)
-    return "'fix:' belongs to a compile_error outcome: "
-           "'@test(compile_error, E041, \"text\", fix: \"text\")'.";
+    return "`fix:` belongs to a compile_error outcome: "
+           "`@test(compile_error, E041, \"text\", fix: \"text\")`.";
 
   // `E041`, which the registry must know, as an error (@p WantWarning false)
   // or a warning.
@@ -127,18 +127,18 @@ inline std::string parse(const Annotation &Ann, Spec &Out) {
     for (size_t I = 1; Shaped && I < C.size(); ++I)
       Shaped = std::isdigit(static_cast<unsigned char>(C[I])) != 0;
     if (!Shaped)
-      return "'" + C + "' is not a diagnostic code: write one such as 'E041'.";
+      return "`" + C + "` is not a diagnostic code: write one such as `E041`.";
     const ErrorCodeEntry *Row = ErrorCodes::lookupByCode(C);
     if (!Row)
-      return "'" + C + "' is not a code the compiler has: `turf --explain " + C +
+      return "`" + C + "` is not a code the compiler has: `turf --explain " + C +
              "` lists none.";
     const bool IsWarning = ErrorCodes::isWarningCode(*Row);
     if (WantWarning && !IsWarning)
-      return "'" + C + "' is an error's code, not a warning's: write '@test(compile_error, " + C +
-             ", \"...\")'.";
+      return "`" + C + "` is an error's code, not a warning's: write `@test(compile_error, " + C +
+             ", \"...\")`.";
     if (!WantWarning && IsWarning)
-      return "'" + C + "' is a warning's code, not an error's: write '@test(warning, " + C +
-             ", \"...\")'.";
+      return "`" + C + "` is a warning's code, not an error's: write `@test(warning, " + C +
+             ", \"...\")`.";
     Out.Code = C;
     return "";
   };
@@ -148,16 +148,16 @@ inline std::string parse(const Annotation &Ann, Spec &Out) {
     break;
   case Outcome::CompileError:
   case Outcome::Warning: {
-    const std::string Shape = "'@test(" + Word + ", E041, \"text\")'";
+    const std::string Shape = "`@test(" + Word + ", E041, \"text\")`";
     if (Rest.size() != 2 || !Rest[1]->IsString)
-      return "'" + Word + "' takes a code and a message: " + Shape +
+      return "`" + Word + "` takes a code and a message: " + Shape +
              " (\"\" matches any message).";
     if (std::string Why = ReadCode(*Rest[0], Out.Kind == Outcome::Warning); !Why.empty())
       return Why;
     Out.Text = Rest[1]->Value;
     if (Fix) {
       if (!Fix->IsString)
-        return "'fix:' takes a string: the text of the 'Fix:' line, e.g. 'fix: \"add ';'\"'.";
+        return "`fix:` takes a string: the text of the `Fix:` line, e.g. `fix: \"add ';'\"`.";
       Out.HasFix = true;
       Out.Fix = Fix->Value;
     }
@@ -165,21 +165,21 @@ inline std::string parse(const Annotation &Ann, Spec &Out) {
   }
   case Outcome::NoWarnings:
     if (!Rest.empty())
-      return "'no_warnings' takes nothing more: '@test(no_warnings)'.";
+      return "`no_warnings` takes nothing more: `@test(no_warnings)`.";
     break;
   case Outcome::Panic:
     if (Rest.size() != 1 || !Rest[0]->IsString)
-      return "'panic' takes the panic's message: '@test(panic, \"Division by zero\")' "
+      return "`panic` takes the panic's message: `@test(panic, \"Division by zero\")` "
              "(\"\" matches any message).";
     Out.Text = Rest[0]->Value;
     break;
   case Outcome::Exit: {
     if (Rest.size() != 1 || !Rest[0]->IsNumber)
-      return "'exit' takes the exit status: '@test(exit, 3)'.";
+      return "`exit` takes the exit status: `@test(exit, 3)`.";
     const std::string &N = Rest[0]->Value;
     if (N.size() > 3 || N.find_first_not_of("0123456789") != std::string::npos ||
         std::stoi(N) > 255)
-      return "'" + N + "' is not an exit status: a status is a whole number from 0 to 255.";
+      return "`" + N + "` is not an exit status: a status is a whole number from 0 to 255.";
     Out.Status = std::stoi(N);
     break;
   }
@@ -187,7 +187,7 @@ inline std::string parse(const Annotation &Ann, Spec &Out) {
     // `ParseError::Empty`, or `fs::FsError::RemoveFileFailed` for a module's.
     const size_t Sep = Rest.size() == 1 ? Rest[0]->Value.rfind("::") : std::string::npos;
     if (Rest.size() != 1 || Rest[0]->IsString || Rest[0]->IsNumber || Sep == std::string::npos)
-      return "'error' takes the error the test returns: '@test(error, ParseError::Empty)'.";
+      return "`error` takes the error the test returns: `@test(error, ParseError::Empty)`.";
     Out.ErrorType = Rest[0]->Value.substr(0, Sep);
     Out.ErrorVariant = Rest[0]->Value.substr(Sep + 2);
     break;
@@ -216,26 +216,26 @@ inline std::string validate(const Annotation &Ann,
                             const TurfTypePtr &ReturnType, bool IsExtern,
                             const std::vector<Annotation> &All) {
   if (IsExtern)
-    return "'@test' marks a function written in Turf, not an 'extern fn'.";
+    return "`@test` marks a function written in Turf, not an `extern fn`.";
   size_t Count = 0;
   for (const auto &A : All)
     Count += A.Name == Name;
   if (Count > 1)
-    return "A function has one '@test'; write its outcome in that one.";
+    return "A function has one `@test`; write its outcome in that one.";
   Spec S;
   if (std::string Why = parse(Ann, S); !Why.empty())
     return Why;
   if (!Params.empty())
-    return "A test takes no parameters: 'turf test' calls it with none.";
+    return "A test takes no parameters: `turf test` calls it with none.";
   const bool ReturnsVoid = !ReturnType || ReturnType->isVoid();
   bool ReturnsFallibleVoid = false;
   if (ReturnType && ReturnType->isErrorUnion())
     if (const auto *EU = dynamic_cast<const TurfErrorUnionType *>(ReturnType.get()))
       ReturnsFallibleVoid = EU->getSuccessType() && EU->getSuccessType()->isVoid();
   if (!ReturnsVoid && !ReturnsFallibleVoid)
-    return "A test returns 'void' or '!void', not '" + ReturnType->getName() + "'.";
+    return "A test returns `void` or `!void`, not `" + ReturnType->getName() + "`.";
   if (S.Kind == Outcome::Error && !ReturnsFallibleVoid)
-    return "A test with an 'error' outcome returns '!void', so it can return the error.";
+    return "A test with an `error` outcome returns `!void`, so it can return the error.";
   return "";
 }
 

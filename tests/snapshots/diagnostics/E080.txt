@@ -2,9 +2,9 @@ tests/18_operator_overload/fail_operator_orphan_rule.tr (1 error)
 
 ── error at line 11, col 1 [E080 · operator orphan rule violation]
 
-  'operator +' does not own any of its operand types.
+  `operator +` does not own any of its operand types.
 
-  Hint: 'orphan_a_module::A' is declared in module 'orphan_a_module', not in the main file -- at least one operand of an operator declaration must be a struct or enum declared in the same module/file as the operator itself, so an operator's meaning never depends on import order.
+  Hint: Declare the operator in module `orphan_a_module`, where `orphan_a_module::A` is declared, or make an operand a struct or enum declared in the main file. An operator then never depends on import order.
 
   11 │ operator +(a: A, b: B): A {
      │ ^ neither the operator nor its types are declared here

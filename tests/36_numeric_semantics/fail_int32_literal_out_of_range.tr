@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E076
-// EXPECT-DIAG: not representable in type 'int32'
+// EXPECT-DIAG: The literal 99999999999 does not fit in an `int32`, which holds -2147483648 .. 2147483647.
 // SEM-002 (FREEZE.md §6.2 row 3): the same representability check applies
 // to 'int32', not just 'int' -- a literal that fits 'int' comfortably but
 // exceeds int32's 32-bit signed range is still rejected, since it's

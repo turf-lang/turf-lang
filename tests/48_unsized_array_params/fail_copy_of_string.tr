@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E131
-// EXPECT-DIAG: Cannot call method 'copy' on type 'string'
+// EXPECT-DIAG: I cannot call the method `copy` on a `string`: only a struct has methods.
 // copy() is an array method; a string has none.
 fn main(): int {
     mut s: string = "abc";

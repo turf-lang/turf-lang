@@ -27,7 +27,15 @@ bool IsRuntimeAbortTest(const std::string &Source);
 
 /// `// EXPECT-DIAG: E011` / `// EXPECT-DIAG: some text` /
 /// `// EXPECT-NO-DIAG: some text`, matched against the compile output.
-std::vector<std::string> CheckDiag(const std::string &Source, const std::string &CompileOutput);
+/// With @p CodesOnly, only the markers that name a code are checked: what the
+/// compatibility promise covers (codes and exit statuses, not message text,
+/// decision D-6), which the 2.0 corpus gate holds a compiler to.
+std::vector<std::string> CheckDiag(const std::string &Source, const std::string &CompileOutput,
+                                   bool CodesOnly = false);
+
+/// Whether this run checks codes only (`TURF_TEST_DIAG_CODES_ONLY=1`, set by
+/// scripts/check/compat_corpus_check.py for tests/compat/2.0).
+bool DiagCodesOnly();
 
 /// `// EXPECT-FIX: <description>` (TDP-2-001): each marker names a `Fix:` line
 /// of the compile output exactly. With @p RequireAllPinned (the compiler's own

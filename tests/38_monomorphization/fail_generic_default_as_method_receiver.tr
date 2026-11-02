@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E138
-// EXPECT-DIAG: 'Map::default()' needs type arguments here
+// EXPECT-DIAG: `Map` is generic, so `Map::default()` needs type arguments, and nothing here says which.
 // A receiver has no declared type to take an instantiation from, so
 // `Map::default().get(...)` cannot know K and V. It was an internal compiler
 // error ("failed to re-resolve") plus an E148 inside lib/std/collections/map.tr.

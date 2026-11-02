@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E146
-// EXPECT-DIAG: '@test' has no option 'skip:'
+// EXPECT-DIAG: `@test` has no option `skip:`. Its one option is `fix:`, after a compile_error outcome.
 // TDP-2-006: `fix:` is the one option; the others (TDP-2-026) are not part of
 // the language yet, so writing one is an error rather than ignored.
 @test(skip: "later")
