@@ -223,7 +223,7 @@ static void checkCompilerFix(DiagnosticEngine::Diag &D) {
   const bool Debug = std::getenv("TURF_FIX_DEBUG") != nullptr;
   if (Debug)
     std::cerr << "[fix] " << D.Code << " line " << D.Loc.Line << ": looking\n";
-  if (D.FixChecked || D.Hints.FixIts.empty() ||
+  if (D.FixChecked || !D.Hints.hasFix() ||
       D.Code.empty() || IsLibStdWarningLocation(D.Filename))
     return;
   D.FixChecked = true;
@@ -231,6 +231,43 @@ static void checkCompilerFix(DiagnosticEngine::Diag &D) {
   if (Lines == AllSourceLines.end() ||
       Checks >= CompilerFixes::MaxChecksPerCompile)
     return;
+  // SL-7: alternatives, of which exactly one may pass. Every one is checked
+  // (one that is not cannot be ruled out), so they need the budget for all.
+  if (D.Hints.FixIts.empty()) {
+    const auto &Alts = D.Hints.FixAlternatives;
+    if (static_cast<int>(Alts.size()) > CompilerFixes::MaxChecksPerCompile - Checks) {
+      if (Debug)
+        std::cerr << "[fix] " << D.Code << " line " << D.Loc.Line << ": "
+                  << Alts.size() << " alternatives exceed the check budget\n";
+      return;
+    }
+    CompilerFix Passed;
+    int Passing = 0;
+    for (const auto &Alt : Alts) {
+      SLM::DiagnosticHints H;
+      H.FixIts = Alt.FixIts;
+      H.FixReason = Alt.FixReason;
+      H.FixDescription = Alt.FixDescription;
+      CompilerFix Fix;
+      if (!CompilerFixes::build(H, D.Loc.Line, Lines->second, Fix))
+        continue;
+      ++Checks;
+      if (!CompilerFixes::check(Fix, D.Filename, D.Code, D.Loc.Line, D.IsWarning)) {
+        if (Debug)
+          std::cerr << "[fix] " << D.Code << " line " << D.Loc.Line << ": '"
+                    << Fix.Description << "' failed the re-check\n";
+        continue;
+      }
+      if (++Passing == 1)
+        Passed = std::move(Fix);
+    }
+    if (Passing == 1)
+      D.Fix = std::move(Passed);
+    else if (Debug && Passing > 1)
+      std::cerr << "[fix] " << D.Code << " line " << D.Loc.Line << ": "
+                << Passing << " alternatives pass, so none is shown\n";
+    return;
+  }
   CompilerFix Fix;
   if (!CompilerFixes::build(D.Hints, D.Loc.Line, Lines->second, Fix)) {
     if (Debug)
@@ -661,7 +698,7 @@ void DiagnosticEngine::flushAll() {
   // list: it works on a copy, never on an element of the list itself.
   if (CompilerFixes::Enabled)
     for (size_t I = 0; I < Diagnostics.size(); ++I) {
-      if (Diagnostics[I].FixChecked || Diagnostics[I].Hints.FixIts.empty())
+      if (Diagnostics[I].FixChecked || !Diagnostics[I].Hints.hasFix())
         continue;
       Diag D = Diagnostics[I];
       checkCompilerFix(D);

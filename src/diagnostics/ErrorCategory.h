@@ -77,8 +77,24 @@ struct DiagnosticHints {
   // that together move a word read "move 'pub' to just before 'fn'".
   std::string FixDescription;
 
+  // SL-7: fixes the raise site cannot choose between by itself -- which of
+  // the arguments of a call with one too many to delete, which return type a
+  // function with none declares. Each is a whole fix (its own FixIts, reason
+  // and description). Every one is checked like FixIts above, and the error
+  // gets a `Fix:` only when exactly one passes: two that pass mean the
+  // compiler cannot tell which was meant. Used only when FixIts is empty.
+  struct Alternative {
+    std::vector<FixIt> FixIts;
+    std::string FixReason;
+    std::string FixDescription;
+  };
+  std::vector<Alternative> FixAlternatives;
+
+  // A fix to check: FixIts, or alternatives to choose one from.
+  bool hasFix() const { return !FixIts.empty() || !FixAlternatives.empty(); }
+
   bool empty() const {
-    return KnownTypes.empty() && ReceiverDecl.empty() && FixIts.empty();
+    return KnownTypes.empty() && ReceiverDecl.empty() && !hasFix();
   }
 };
 

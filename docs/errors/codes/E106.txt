@@ -12,6 +12,8 @@ The commonest case is forgetting the colon before a function's return type:
         return a + b;
     }
 
+A function that declares no return type at all reports the same error: every function says what it returns, `: void` when it returns nothing. The compiler tries `void`, the basic types and the types of the function's parameters, and when exactly one of them compiles with the body and the function's callers, it prints that as a `Fix:`.
+
 The same shape shows up for a parameter or a struct field, which is `name: type`:
 
     fn greet(name string) { }        // should be `name: string`

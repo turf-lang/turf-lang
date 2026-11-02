@@ -1,6 +1,7 @@
 #ifndef AST_ACCESS_H
 #define AST_ACCESS_H
 
+#include "diagnostics/CompilerFix.h"
 #include "frontend/AST.h"
 #include "sema/Intrinsics.h"
 
@@ -20,6 +21,9 @@ public:
   const ExprAST *getCallee() const { return Callee.get(); }
   const SourceLocation &getLoc() const { return Loc; }
   const std::vector<std::unique_ptr<ExprAST>> &getArgs() const { return Args; }
+  // Where each argument and the ')' are written (SL-7: the fix for a wrong
+  // argument count). Set by the parser; empty for a call it did not parse.
+  CallArgSpans ArgSpans;
 
   /// All overloads matching the call name.  TypeChecker narrows this to one.
   /// clone() returns a fresh node, so this is empty in cloned trees.
@@ -102,8 +106,10 @@ public:
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitFuncCall(*this); }
   std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<FuncCallExprAST>(Loc, CloneExprAST(Callee.get()),
-                                             CloneExprList(Args));
+    auto Cloned = std::make_unique<FuncCallExprAST>(Loc, CloneExprAST(Callee.get()),
+                                                    CloneExprList(Args));
+    Cloned->ArgSpans = ArgSpans; // where the source writes it, like Loc
+    return Cloned;
     // Note: ResolvedCandidates, ResolvedCallTarget, GenericSubstitution,
     // ConstructedType and TypeOfOperand are intentionally NOT copied — cloned ASTs are stale
     // until re-resolved. ✓
@@ -401,6 +407,9 @@ public:
       : Base(std::move(Base)), Method(std::move(Method)), Args(std::move(Args)),
         Loc(Loc), NameLoc(NameLoc) {}
 
+  // Where each argument and the ')' are written (SL-7), as FuncCallExprAST.
+  CallArgSpans ArgSpans;
+
   const SourceLocation &getLoc() const { return Loc; }
   const SourceLocation &getNameLoc() const { return NameLoc; }
   const ExprAST *getBase() const { return Base.get(); }
@@ -468,6 +477,7 @@ public:
     auto Cloned = std::make_unique<MethodCallExprAST>(
         Loc, CloneExprAST(Base.get()), Method, NameLoc, CloneExprList(Args));
     Cloned->TypeArgs = TypeArgs;
+    Cloned->ArgSpans = ArgSpans;
     return Cloned;
     // Note: ResolvedCallTarget, ResolvedViaUFCS, UFCSLoadsReceiver, IsMachineTransition,
     // TransitionCompileTimeProven, and GenericSubstitution intentionally

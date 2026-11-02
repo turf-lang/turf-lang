@@ -208,10 +208,14 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
       SourceLocation Loc = Lex().CurLoc;
       getNextToken();
       std::vector<std::unique_ptr<ExprAST>> Args;
+      CallArgSpans Spans;
       while (Parser().CurTok != ')' && Parser().CurTok != TOK_EOF) {
+        const SourceLocation ArgStart = Lex().CurLoc;
         auto Arg = ParseExpression();
         if (!Arg)
           return nullptr;
+        Spans.Args.push_back({ArgStart.Line, ArgStart.Col, Lex().PrevTokEndLine,
+                              Lex().PrevTokEndCol});
         Args.push_back(std::move(Arg));
         if (Parser().CurTok == ',')
           getNextToken();
@@ -222,11 +226,16 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
         LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "Expected ')' to close the function call", SLM::ErrorCategory::SYNTAX_ERROR);
         return nullptr;
       }
+      Spans.CloseLine = Lex().CurLoc.Line;
+      Spans.CloseCol = Lex().CurLoc.Col;
+      Spans.File = Lex().CurLoc.Filename;
       getNextToken();
       // Struct initialization now uses brace syntax: Point { x: 10, y: 20 }
       // Positional Point(10, 20) is no longer valid; treat as a regular call.
-      Base = std::make_unique<FuncCallExprAST>(Loc, std::move(Base),
-                                               std::move(Args));
+      auto Call = std::make_unique<FuncCallExprAST>(Loc, std::move(Base),
+                                                    std::move(Args));
+      Call->ArgSpans = std::move(Spans);
+      Base = std::move(Call);
     } else if (Parser().CurTok == '.') {
       SourceLocation Loc = Lex().CurLoc;
       getNextToken();
@@ -256,9 +265,13 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
       if (Parser().CurTok == '(') {
         getNextToken(); // eat '('
         std::vector<std::unique_ptr<ExprAST>> Args;
+        CallArgSpans Spans;
         if (Parser().CurTok != ')') {
           while (true) {
+            const SourceLocation ArgStart = Lex().CurLoc;
             if (auto Arg = ParseExpression()) {
+              Spans.Args.push_back({ArgStart.Line, ArgStart.Col,
+                                    Lex().PrevTokEndLine, Lex().PrevTokEndCol});
               Args.push_back(std::move(Arg));
             } else {
               return nullptr;
@@ -272,10 +285,14 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
             getNextToken();
           }
         }
+        Spans.CloseLine = Lex().CurLoc.Line;
+        Spans.CloseCol = Lex().CurLoc.Col;
+        Spans.File = Lex().CurLoc.Filename;
         getNextToken(); // eat ')'
         auto Call = std::make_unique<MethodCallExprAST>(
             Loc, std::move(Base), MethodName, MethodLoc, std::move(Args));
         Call->TypeArgs = std::move(MethodTypeArgs);
+        Call->ArgSpans = std::move(Spans);
         Base = std::move(Call);
       } else {
         if (MethodName == "length") {

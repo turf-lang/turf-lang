@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E106
+// EXPECT-FIX: declare the return type ': int'
+// `twice` returns a value but declares no return type. Of the types the
+// compiler tries, only `int` compiles with its body and its caller.
+fn twice(x: int) {
+    return x * 2;
+}
+
+fn main(): int {
+    immut y: int = twice(4);
+    return y - 8;
+}

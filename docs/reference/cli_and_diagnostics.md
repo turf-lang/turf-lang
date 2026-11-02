@@ -590,7 +590,7 @@ The line after `Fix:` says the edit in words: `replace 'a' with 'b'`, `remove 'p
 
 A `Fix:` is printed in every build, with no flag and no model. It is **checked** before it is shown: the compiler applies the edit to a copy of your program in memory, analyses that copy as it would any program (type checking, lint and flow analysis), and prints the fix only if the original error is gone from that line and the copy has no error your program did not already have. A fix that does not pass is not printed. Your files are never changed; to get the fixed program, use `--smart-write-fix=<path>`.
 
-A fix is offered only where there is exactly one candidate. A misspelled name with two equally close matches gets the hint that lists both and no `Fix:`. Only errors get fixes, never warnings, never an error inside the standard library, and at most ten fixes are checked in one compile. A clean compile does no fix work.
+A fix is offered only where there is exactly one candidate. A misspelled name with two equally close matches gets the hint that lists both and no `Fix:`. For some errors the compiler checks several edits, such as each argument it could remove from a call with one too many, and prints a `Fix:` only when exactly one of them passes. Only errors get fixes, never warnings, never an error inside the standard library, and at most ten fixes are checked in one compile. A clean compile does no fix work.
 
 These errors can carry a `Fix:`:
 
@@ -600,12 +600,14 @@ These errors can carry a `Fix:`:
 | E026, E030, E031 | the closest function in a module, symbol in an `import`, or scope qualifier |
 | E029 | `x::m` on an instance becomes `x.m` |
 | E039, E040, E041, E042, E054, E068 | the closest enum or error variant, variable, function, type, method or field |
+| E044 | a call with one argument too many loses the one argument whose removal makes the rest fit; a call with one too few passes the variable named like the missing parameter |
 | E046 | `static` is removed from a constructor |
 | E048 | `Type.m` becomes `Type::m` |
 | E052 | a static method called through an instance is called through its type |
 | E060 | the variable's `immutable` becomes `mutable` (`immut` becomes `mut`) |
 | E087 | a misplaced `pub` is moved or removed |
 | E102 | the missing `;` is inserted |
+| E106 | a function with no return type gets the one its body and callers compile with (`: void`, `: int`, ...) |
 | E138 | the method gets its struct's type parameters (`fn<T>`) |
 
 Output that matches the text of diagnostics (a script, an editor extension) will see `Fix:` lines. Diagnostic wording is not part of the compatibility promise; the error codes are. A tool reads [the JSON form](#diagnostics-as-json) instead.

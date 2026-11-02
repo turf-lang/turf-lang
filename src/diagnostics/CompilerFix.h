@@ -18,6 +18,7 @@
 
 #include "diagnostics/ErrorCategory.h"
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -44,6 +45,20 @@ struct CompilerFix {
   std::string PatchedFile;
 
   bool empty() const { return Edits.empty(); }
+};
+
+// SL-7: where a call's arguments are written, recorded by the parser for the
+// fix of a call with the wrong number of arguments. 1-based columns; an end is
+// the column just after the last character.
+struct CallArgSpans {
+  struct Span {
+    int Line = 0, StartCol = 0, EndLine = 0, EndCol = 0;
+  };
+  std::vector<Span> Args;
+  int CloseLine = 0, CloseCol = 0; // the ')'
+  std::string File;                // the file the call is written in
+
+  bool empty() const { return CloseLine == 0; }
 };
 
 namespace CompilerFixes {
@@ -80,6 +95,21 @@ bool check(const CompilerFix &Fix, const std::string &File,
 // description, then each changed line as it reads after the fix, with the new
 // text marked.
 std::string render(const CompilerFix &Fix);
+
+// SL-7: the fixes to choose from for a call to `Callee` written as `Spans`,
+// whose overloads take the parameters named in `Overloads` (one list each,
+// `self` left out). For an overload that takes one argument fewer, deleting
+// each argument; for one that takes one more, passing a variable for the
+// missing parameter, where a variable of that parameter's name may be
+// visible (`IsVariable`; a site that keeps no scopes says yes to every name). The re-check keeps the one that compiles
+// (DiagnosticHints::FixAlternatives). Empty when the call spans lines, no
+// overload is one argument away, or there are more alternatives than
+// MaxArityAlternatives.
+inline constexpr int MaxArityAlternatives = 6;
+std::vector<SLM::DiagnosticHints::Alternative>
+arityAlternatives(const std::string &Callee, const CallArgSpans &Spans,
+                  const std::vector<std::vector<std::string>> &Overloads,
+                  const std::function<bool(const std::string &)> &IsVariable);
 
 } // namespace CompilerFixes
 

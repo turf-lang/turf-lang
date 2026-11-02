@@ -22,6 +22,7 @@
 #include "analysis/Algorithms.h"
 #include "sema/Builtins.h"
 #include "codegen/Codegen.h"
+#include "diagnostics/CompilerFix.h"
 #include "diagnostics/Errors.h"
 #include "frontend/Lexer.h"
 #include "diagnostics/SuggestionIndex.h"
@@ -906,6 +907,38 @@ std::unique_ptr<ExprAST> ParseModuleConstant(SourceLocation ExportLoc, bool IsPu
 // through as a plain parameter rather than a global/thread-local flag so
 // this function stays reentrant-safe the same way every other parameter
 // here already is (matters for Sandbox.cpp's incremental reparse passes).
+// SL-7: the fix for a function with no return type (E106, "Expected ':'
+// followed by return type"), raised with the token after the ')' current.
+// The parser has not read the body, so it cannot know the type: each likely
+// one -- `void`, the basic types, the parameters' own types -- is an
+// alternative, inserted right after the ')', and the re-check keeps the one
+// the body compiles with (DiagnosticHints::FixAlternatives). Two that compile
+// (`return 0;` fits `int` and `double`) give no fix. Only when a body follows.
+static SLM::DiagnosticHints MissingReturnTypeHints(const std::vector<ParamDecl> &Params) {
+  SLM::DiagnosticHints Hints;
+  if (Parser().CurTok != '{' || Lex().PrevTokEndLine < 1 || Lex().PrevTokEndCol < 2)
+    return Hints;
+  const std::string *Line = FixItSourceLine(
+      SourceLocation{Lex().PrevTokEndLine, Lex().PrevTokEndCol, Lex().CurLoc.Filename});
+  if (!Line || Lex().PrevTokEndCol > static_cast<int>(Line->size()) + 1 ||
+      (*Line)[Lex().PrevTokEndCol - 2] != ')')
+    return Hints;
+  std::vector<std::string> Types = {"void", "int", "double", "bool", "string"};
+  for (const auto &P : Params)
+    if (P.Type && P.Name != "self" &&
+        std::find(Types.begin(), Types.end(), P.Type->getName()) == Types.end())
+      Types.push_back(P.Type->getName());
+  if (Types.size() > static_cast<size_t>(CompilerFixes::MaxArityAlternatives))
+    Types.resize(CompilerFixes::MaxArityAlternatives);
+  for (const auto &T : Types)
+    Hints.FixAlternatives.push_back(
+        {{{Lex().PrevTokEndLine, Lex().PrevTokEndCol, Lex().PrevTokEndCol, ": " + T}},
+         "Every function declares what it returns, after its parameters; of "
+         "the types tried, '" + T + "' is the one its body compiles with.",
+         "declare the return type ': " + T + "'"});
+  return Hints;
+}
+
 std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation, SourceLocation StaticLoc) {
   SourceLocation FnLoc = Lex().CurLoc;
   const bool StaticInFront = StaticLoc.Line > 0;
@@ -1186,7 +1219,8 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation, SourceLocation Sta
 
   // Expect TOK_COLON
   if (Parser().CurTok != TOK_COLON) {
-    LogErrorAt(Lex().CurLoc, ErrCode::MissingColon, "Expected ':' followed by return type after parameter list.\n  Hint: Write the return type after a ':' -- `fn " + FuncName + "(...): int {` -- or `: void` if it returns nothing.", SLM::ErrorCategory::DECLARATION);
+    LogErrorAt(Lex().CurLoc, ErrCode::MissingColon, "Expected ':' followed by return type after parameter list.\n  Hint: Write the return type after a ':' -- `fn " + FuncName + "(...): int {` -- or `: void` if it returns nothing.", SLM::ErrorCategory::DECLARATION,
+               MissingReturnTypeHints(Params));
     return nullptr;
   }
   getNextToken(); // eat ':'
@@ -1458,7 +1492,8 @@ std::unique_ptr<ExprAST> ParseOperatorDecl(bool HasCallerLocation) {
 
   // Expect ':' then return type -- identical shape to ParseFuncDef()'s.
   if (Parser().CurTok != TOK_COLON) {
-    LogErrorAt(Lex().CurLoc, ErrCode::MissingColon, "Expected ':' followed by return type after parameter list.\n  Hint: Write the return type after a ':' -- `fn " + FuncName + "(...): int {` -- or `: void` if it returns nothing.", SLM::ErrorCategory::DECLARATION);
+    LogErrorAt(Lex().CurLoc, ErrCode::MissingColon, "Expected ':' followed by return type after parameter list.\n  Hint: Write the return type after a ':' -- `fn " + FuncName + "(...): int {` -- or `: void` if it returns nothing.", SLM::ErrorCategory::DECLARATION,
+               MissingReturnTypeHints(Params));
     return nullptr;
   }
   getNextToken(); // eat ':'

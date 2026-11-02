@@ -54,6 +54,11 @@ FIXTURES=(
   tests/07_functions_modules/fail_scope_operator_on_instance_call.tr
   tests/07_functions_modules/fail_static_method_via_instance.tr
   tests/06_structs/fail_constructor_cannot_be_static.tr
+  tests/55_compiler_fixes/fail_fix_extra_argument.tr
+  tests/55_compiler_fixes/fail_fix_missing_argument.tr
+  tests/55_compiler_fixes/fail_fix_method_missing_argument.tr
+  tests/55_compiler_fixes/fail_fix_missing_return_type.tr
+  tests/55_compiler_fixes/fail_fix_missing_return_type_void.tr
 )
 
 WORK=$(mktemp -d)

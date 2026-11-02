@@ -18,6 +18,7 @@
 
 #include "resolve/SymbolTable.h"
 
+#include "diagnostics/CompilerFix.h"
 #include "diagnostics/Errors.h"
 #include "diagnostics/SuggestionIndex.h"
 
@@ -463,6 +464,26 @@ defaultReferenceCycle(const TurfType *T, std::vector<const TurfStructType *> &In
   }
   return {};
 }
+} // namespace
+
+namespace {
+// SL-7: the parameter names of a call's overloads, for
+// CompilerFixes::arityAlternatives(); a method's `self` is left out, since
+// the call never writes it among its arguments.
+void addOverloadParams(const ResolverFunctionSymbol &Sym,
+                       std::vector<std::vector<std::string>> &Out) {
+  if (Sym.isVarArg())
+    return;
+  std::vector<std::string> Names;
+  for (size_t I = 0; I < Sym.Params.size(); ++I)
+    if (!(I == 0 && Sym.Params[I].Name == "self"))
+      Names.push_back(Sym.Params[I].Name);
+  Out.push_back(std::move(Names));
+}
+// The TypeChecker keeps no scopes of its own (the Resolver annotated every
+// name), so a missing argument is tried under every parameter's name, and the
+// re-check rejects one that names no variable.
+bool anyName(const std::string &) { return true; }
 } // namespace
 
 void TypeChecker::noteIntToDouble(const ExprAST *E, const TurfType *To) {
@@ -1143,13 +1164,21 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
                              "overload: " + Cand->signature()});
         }
       }
+      std::vector<std::vector<std::string>> Params;
+      for (const auto &Cand : Node.ResolvedCandidates)
+        if (Cand)
+          addOverloadParams(*Cand, Params);
+      SLM::DiagnosticHints Hints;
+      Hints.FixAlternatives = CompilerFixes::arityAlternatives(
+          CalleeName, Node.ArgSpans, Params,
+          anyName);
       reportError(Node.getLoc(), ErrCode::WrongArity,
                   "'" + CalleeName + "' called with " +
                       std::to_string(ArgCount) + " argument" +
                       (ArgCount == 1 ? "" : "s") +
                       "; known overloads: " + Overloads + ".",
                   Related, "Pass the arguments one of the overloads above takes: " + Overloads + ".",
-                  "Wrong argument count!");
+                  "Wrong argument count!", Hints);
       setType(&Node, nullptr);
       return;
     }
@@ -1920,13 +1949,20 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
         Related.push_back({candidateLocation(*Cand),
                            "overload: " + ModuleName + "." + Cand->signature()});
       }
+      std::vector<std::vector<std::string>> Params;
+      for (const auto *Cand : Candidates)
+        addOverloadParams(*Cand, Params);
+      SLM::DiagnosticHints Hints;
+      Hints.FixAlternatives = CompilerFixes::arityAlternatives(
+          ModuleName + "::" + MethodName, Node.ArgSpans, Params,
+          anyName);
       reportError(Node.getLoc(), ErrCode::WrongArity,
                   "'" + ModuleName + "::" + MethodName + "' called with " +
                       std::to_string(ArgCount) + " argument" +
                       (ArgCount == 1 ? "" : "s") +
                       "; known overloads: " + Overloads + ".",
                   Related, "Pass the arguments one of the overloads above takes: " + Overloads + ".",
-                  "Wrong argument count!");
+                  "Wrong argument count!", Hints);
       setType(&Node, nullptr);
       return;
     }
@@ -2710,6 +2746,13 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
                                      ArgCount, KnownSigs);
           for (const auto &R : Related)
             Err.withRelated(R.Loc, R.Description);
+          std::vector<std::vector<std::string>> Params;
+          for (const auto *Cand : Candidates)
+            addOverloadParams(*Cand, Params);
+          for (const auto &Alt : CompilerFixes::arityAlternatives(
+                   StructName + "." + MethodName, Node.ArgSpans, Params,
+                   anyName))
+            Err.withFixAlternative(Alt);
           Err.raise();
         }
         setType(&Node, nullptr);

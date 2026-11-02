@@ -1,0 +1,13 @@
+// EXPECT-DIAG: E044
+// EXPECT-NO-DIAG: Fix:
+// Removing any one of the three arguments leaves two ints, so the compiler
+// cannot tell which was extra: the hint lists the overload and no fix is
+// printed.
+fn add(a: int, b: int): int {
+    return a + b;
+}
+
+fn main(): int {
+    immut z: int = add(1, 2, 3);
+    return z - 3;
+}

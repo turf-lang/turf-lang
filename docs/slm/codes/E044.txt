@@ -37,3 +37,8 @@ FIX:
   argument count exactly. If the function is meant to take a different
   number of arguments than it currently does, the fix is in the function's
   own declaration, not the call site.
+
+COMPILER FIX:
+  With one argument too many, the compiler tries removing each argument and
+  prints a `Fix:` when exactly one removal type-checks. With one too few, it
+  passes a variable named like the missing parameter, when one is in scope.

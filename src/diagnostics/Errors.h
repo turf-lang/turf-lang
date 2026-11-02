@@ -192,6 +192,14 @@ public:
     return *this;
   }
 
+  // One of several fixes the site cannot choose between
+  // (DiagnosticHints::FixAlternatives, SL-7): shown only if it is the one
+  // alternative whose re-check passes.
+  TurfError &withFixAlternative(const SLM::DiagnosticHints::Alternative &Alt) {
+    Hints_.FixAlternatives.push_back(Alt);
+    return *this;
+  }
+
   // Why the fix is right (DiagnosticHints::FixReason), in a sentence.
   TurfError &withFixReason(const std::string &Reason) {
     Hints_.FixReason = Reason;

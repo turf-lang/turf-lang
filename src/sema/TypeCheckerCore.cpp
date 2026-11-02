@@ -69,6 +69,10 @@ void productionErrorHandler(SourceLocation Loc, const char *Code,
     Err.withFixIt(F.Line, F.StartCol, F.EndCol, F.Replacement);
   if (!Hints.FixReason.empty())
     Err.withFixReason(Hints.FixReason);
+  if (!Hints.FixDescription.empty())
+    Err.withFixDescription(Hints.FixDescription);
+  for (const auto &Alt : Hints.FixAlternatives)
+    Err.withFixAlternative(Alt);
   Err.raise();
 }
 #else

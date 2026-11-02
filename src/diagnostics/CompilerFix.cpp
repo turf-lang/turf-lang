@@ -300,4 +300,94 @@ std::string render(const CompilerFix &Fix) {
   return Out;
 }
 
+std::vector<SLM::DiagnosticHints::Alternative>
+arityAlternatives(const std::string &Callee, const CallArgSpans &Spans,
+                  const std::vector<std::vector<std::string>> &Overloads,
+                  const std::function<bool(const std::string &)> &IsVariable) {
+  using Alternative = SLM::DiagnosticHints::Alternative;
+  std::vector<Alternative> Out;
+  if (Spans.empty())
+    return Out;
+  // Every edit stays on one line, so the whole call has to be on one.
+  const int Line = Spans.CloseLine;
+  for (const auto &A : Spans.Args)
+    if (A.Line != Line || A.EndLine != Line || A.StartCol < 1 || A.EndCol <= A.StartCol)
+      return Out;
+  const std::string *Text = FixItSourceLine(SourceLocation{Line, 1, Spans.File});
+  if (!Text)
+    return Out;
+  const int N = static_cast<int>(Spans.Args.size());
+  auto argText = [&](int I) {
+    const auto &A = Spans.Args[I];
+    return Text->substr(A.StartCol - 1, A.EndCol - A.StartCol);
+  };
+  auto add = [&](int StartCol, int EndCol, const std::string &Replacement,
+                 const std::string &Description, const std::string &Reason) {
+    for (const auto &Have : Out)
+      if (Have.FixIts.front().StartCol == StartCol &&
+          Have.FixIts.front().EndCol == EndCol &&
+          Have.FixIts.front().Replacement == Replacement)
+        return;
+    Out.push_back({{{Line, StartCol, EndCol, Replacement}}, Reason, Description});
+  };
+  auto count = [](size_t K) {
+    return std::to_string(K) + (K == 1 ? " argument" : " arguments");
+  };
+
+  for (const auto &Params : Overloads) {
+    const int Want = static_cast<int>(Params.size());
+    if (Want == N - 1) {
+      // One argument too many: delete one, with the ',' that joins it to
+      // its neighbour.
+      for (int I = 0; I < N; ++I) {
+        const auto &A = Spans.Args[I];
+        int From = A.StartCol, To = A.EndCol;
+        if (I + 1 < N)
+          To = Spans.Args[I + 1].StartCol;
+        else if (I > 0)
+          From = Spans.Args[I - 1].EndCol;
+        add(From, To, "", "remove the argument '" + argText(I) + "'",
+            "'" + Callee + "' takes " + count(Want) + " and this call passes " +
+                std::to_string(N) + "; without '" + argText(I) +
+                "' the others match its parameters.");
+      }
+    } else if (Want == N + 1) {
+      // One argument too few: pass the variable named like the parameter.
+      for (int K = 0; K < Want; ++K) {
+        const std::string &Name = Params[K];
+        if (Name.empty() || !IsVariable(Name))
+          continue;
+        // Not where it would push an argument already named for its
+        // parameter out of place (`area(width)` misses `height`, not a
+        // second `width`), and not a variable the call already passes.
+        bool Displaces = false;
+        for (int J = 0; J < N && !Displaces; ++J)
+          Displaces = argText(J) == Name || (J >= K && argText(J) == Params[J]);
+        if (Displaces)
+          continue;
+        int Col;
+        std::string Insert;
+        if (K < N) {
+          Col = Spans.Args[K].StartCol;
+          Insert = Name + ", ";
+        } else if (N > 0) {
+          Col = Spans.Args[N - 1].EndCol;
+          Insert = ", " + Name;
+        } else {
+          Col = Spans.CloseCol;
+          Insert = Name;
+        }
+        add(Col, Col, Insert,
+            "pass '" + Name + "' as argument " + std::to_string(K + 1),
+            "'" + Callee + "' takes " + count(Want) + " and this call passes " +
+                std::to_string(N) + "; its parameter '" + Name +
+                "' is missing, and a variable of that name is in scope.");
+      }
+    }
+  }
+  if (static_cast<int>(Out.size()) > MaxArityAlternatives)
+    Out.clear();
+  return Out;
+}
+
 } // namespace CompilerFixes

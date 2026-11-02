@@ -18,6 +18,7 @@
 
 #include "frontend/AST.h"
 #include "sema/Builtins.h"        // LookupBuiltin — for skipping bare intrinsics in visitFuncCall
+#include "diagnostics/CompilerFix.h"     // arityAlternatives (SL-7)
 #include "diagnostics/Errors.h"          // ReferenceError, DuplicateDeclarationError
 #include "diagnostics/ErrorsFlow.h"      // SemanticError
 #include "frontend/Parser.h"          // IsPreludeBareModule — the prelude tier of a bare call
@@ -717,6 +718,27 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
       Err.withRelated(toSourceLocation(Sym->DeclLoc), "candidate");
     for (const auto &Match : ModuleMatches)
       Err.withRelated(candidateLocation(*Match.Symbol), "candidate");
+    // SL-7: a call one argument away from an overload gets the edit that
+    // makes it fit, when exactly one such edit compiles.
+    std::vector<std::vector<std::string>> Overloads;
+    auto addOverload = [&](const ResolverFunctionSymbol &Sym) {
+      if (Sym.isVarArg())
+        return;
+      std::vector<std::string> Names;
+      for (const auto &P : Sym.Params)
+        Names.push_back(P.Name);
+      Overloads.push_back(std::move(Names));
+    };
+    for (const auto *Sym : CurrentFileMatches)
+      addOverload(*Sym);
+    for (const auto &Match : ModuleMatches)
+      addOverload(*Match.Symbol);
+    for (const auto &Alt : CompilerFixes::arityAlternatives(
+             CalleeName, Node.ArgSpans, Overloads,
+             [&](const std::string &Name) {
+               return SymTable_.lookupVariable(Name) != nullptr;
+             }))
+      Err.withFixAlternative(Alt);
     Err.raise();
     return;
   }
