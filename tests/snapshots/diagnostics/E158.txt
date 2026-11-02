@@ -7,7 +7,7 @@ tests/14_cfg_analysis/01_high_complexity_warns.tr (1 warning)
   Hint: High cyclomatic complexity makes code harder to test and maintain. Try splitting this function into smaller, focused helpers.
 
   10 │ fn complex(x: int): int {
-     │ ^~ Here!
+     │ ^~ this function is very complex
 
   Run `turf --explain E158` for more details.
 

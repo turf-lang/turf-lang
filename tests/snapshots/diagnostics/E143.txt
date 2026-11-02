@@ -8,7 +8,7 @@ tests/48_unsized_array_params/fail_slice_end_past_length.tr (1 error)
   Hint: A slice [start..end] needs 0 <= start <= end <= length; the end is exclusive, so arr[0..length] is the whole array and arr[i..i] is empty. A negative bound counts from the end (arr[-2..] is the last two elements).
 
   7 │     immut t = a[1..4];
-    │                ^ Here!
+    │                ^ this range is outside the array
 
   Run `turf --explain E143` for more details.
 

@@ -34,10 +34,19 @@ public:
   static void ResetNodeIDCounter();
   uint64_t getNodeID() const { return NodeID; }
 
+  // DX-5: the source text this expression was parsed from, first token to
+  // last ([Line:Col, EndLine:EndCol), EndCol just after the last character),
+  // for a diagnostic's labelled span. Line 0 for a node the parser did not
+  // read (one it or a later pass builds). CloneExprAST() copies it.
+  const SourceLocation &getSpan() const { return Span; }
+  bool hasSpan() const { return Span.Line > 0; }
+  void setSpan(const SourceLocation &S) { Span = S; }
+
 protected:
   // Each node gets a unique ID when created, for diffing purposes
   uint64_t NodeID;
   static uint64_t NextNodeID;
+  SourceLocation Span{0, 0, "", -1, -1};
 
   ExprAST() : NodeID(NextNodeID++) {}
 };

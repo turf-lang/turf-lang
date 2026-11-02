@@ -8,7 +8,7 @@ tests/39_nullable_references/fail_heap_of_void.tr (1 error)
   Hint: Pass a variable or an expression with a value to `heap(...)`, not a call to a function declared `: void`.
 
   12 │     heap(nothing());
-     │         ^ Here!
+     │         ^ this is `void`
 
   Run `turf --explain E067` for more details.
 

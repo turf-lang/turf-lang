@@ -6,7 +6,7 @@ tests/01_syntax/fail_parse_error_in_body_no_cascade.tr (1 error)
   Hint: Name the function -- `fn name(...): T { ... }`.
 
   13 │     mut f = fn(a: int): int { return a; };
-     │             ^~ Here!
+     │             ^~ a name is expected here
 
   Run `turf --explain E108` for more details.
 

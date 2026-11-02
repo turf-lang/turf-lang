@@ -3,12 +3,13 @@ tests/21_extern_conflict/fail_extern_conflicting_arity.tr (1 error)
 ── error at line 6, col 1 [E020 · conflicting extern declaration]
 
   'extern fn baz' conflicts with an earlier declaration of the same name.
-  Note: first declared here (line 5, col 1)
 
   Hint: Two 'extern fn baz' declarations exist with different signatures (parameter types, return type, or variadic-ness). Only ONE C function can actually be called through this name -- make both declarations match exactly, or give one a different name.
 
+  5 │ extern fn baz(x: int): void;
+    │ ------ first declared here
   6 │ extern fn baz(x: int, y: int): void;
-    │ ^~~~~~ Here!
+    │ ^~~~~~ this declaration conflicts with an earlier one
 
   Run `turf --explain E020` for more details.
 

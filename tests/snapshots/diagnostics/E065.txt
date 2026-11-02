@@ -8,7 +8,7 @@ tests/03_typechecker/fail_string_conversion.tr (1 error)
   Hint: Only these convert to text: `intExpr to string`, `doubleExpr to string`, `boolExpr to string` (and enum values).
 
   9 │     mut s: string = p to string;
-    │                       ^~ Here!
+    │                       ^~ this has no conversion to `string`
 
   Run `turf --explain E065` for more details.
 

@@ -7,7 +7,7 @@ tests/57_test_functions/fail_test_called_by_a_test.tr (1 error)
   Hint: Move what the test and this code share into an ordinary function, and call that from both.
 
   12 │     first();
-     │          ^ Here!
+     │          ^ this is a test function
 
   Run `turf --explain E173` for more details.
 

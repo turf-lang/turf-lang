@@ -7,7 +7,7 @@ tests/25_errors/fail_payload_field_missing_type.tr (1 error)
   Hint: Write the type after a colon: `path: string`.
 
   5 │     NotFound(path)
-    │                  ^ Here!
+    │                  ^ this payload is not valid
 
   Run `turf --explain E096` for more details.
 

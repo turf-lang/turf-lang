@@ -7,7 +7,7 @@ tests/14_cfg_analysis/fail_19_infinite_recursion_simple.tr (1 error)
   Hint: Every recursive function needs a base case — a path that returns without calling itself.
 
   6 │ fn foo(): int {
-    │ ^~ Here!
+    │ ^~ this recursion has no way to stop
 
   Worth reading in full -- run `turf --explain E010` before you patch this one.
 

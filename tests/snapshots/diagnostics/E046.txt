@@ -7,7 +7,7 @@ tests/06_structs/fail_constructor_cannot_be_static.tr (1 error)
   Hint: 'Point.new' always initializes 'self' -- remove 'static' from its declaration.
 
   14 │ fn Point.new(x: int, y: int) static: void {
-     │ ^~ Here!
+     │ ^~ a constructor cannot be `static`
 
   Fix: remove 'static'
   14 │ fn Point.new(x: int, y: int): void {

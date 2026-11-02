@@ -7,7 +7,7 @@ tests/06_structs/fail_default_construction_with_args.tr (1 error)
   Hint: 'Point::default()' always zero-initializes every field with no input -- use 'Point::new(...)' if you need to pass values in.
 
   13 │     mut p: Point = Point::default(1, 2);
-     │                                  ^ Here!
+     │                                  ^ `default()` takes no arguments
 
   Run `turf --explain E047` for more details.
 

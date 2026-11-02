@@ -288,6 +288,7 @@ Diagnostic toDiagnostic(const DiagnosticEngine::Diag &D,
   Out.Code = D.Code;
   Out.Message = stripAnsi(D.Msg);
   Out.Hint = stripAnsi(D.Hint);
+  Out.Label = stripAnsi(diagLabel(D));
   Out.Where = toLocation(D.Loc, D.Filename.empty() ? EntryPath : D.Filename);
   for (const auto &R : D.RelatedLocations)
     Out.Related.push_back(

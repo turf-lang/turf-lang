@@ -7,7 +7,7 @@ tests/25_errors/24_try_passes_error_unchanged.tr (1 warning)
   Hint: Keep the value an `int`, or make sure it stays within +-9007199254740992 (2^53) before converting it.
 
   26 │     return (n to double) * 2.0;
-     │             ^ Here!
+     │             ^ this `int` may lose precision as a `double`
 
   Run `turf --explain E181` for more details.
 

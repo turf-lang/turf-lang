@@ -7,7 +7,7 @@ tests/14_cfg_analysis/45_lint_reaches_call_arguments.tr (1 warning)
   Hint: Check the right-hand side. Division or modulo by zero is undefined behavior.
 
   14 │     return f(a / 0);
-     │                ^ Here!
+     │                ^ this divides by zero
 
   Run `turf --explain E167` for more details.
 

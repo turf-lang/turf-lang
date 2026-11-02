@@ -8,7 +8,7 @@ tests/05_arrays_pointers_ffi/fail_sizeof_variable.tr (1 error)
   Hint: Write its type instead: 'sizeof(int)'.
 
   8 │     return sizeof(a);
-    │            ^~~~~~ Here!
+    │            ^~~~~~ a type is expected here
 
   Run `turf --explain E109` for more details.
 

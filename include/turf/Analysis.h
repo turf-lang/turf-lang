@@ -175,6 +175,9 @@ struct Diagnostic {
   std::string Message;
   std::string Hint;
   Location Where;
+  // What the underline at `Where` says (DX-5): "this is an `int`", or the
+  // code's own label. `Related` are the secondary spans, each with its own.
+  std::string Label;
   std::vector<RelatedInformation> Related;
 };
 

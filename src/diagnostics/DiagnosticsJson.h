@@ -26,7 +26,7 @@ namespace DiagnosticsJson {
 
 /// The schema's version, "major.minor". Also printed by `turfc --version
 /// --json` (IF-1) so a tool can check it before reading a line.
-inline constexpr const char *SchemaVersion = "1.0";
+inline constexpr const char *SchemaVersion = "1.1";
 
 /// Set by the driver's `--diagnostics=json`. Off by default.
 extern bool Enabled;

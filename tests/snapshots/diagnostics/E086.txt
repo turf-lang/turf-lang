@@ -7,7 +7,7 @@ tests/39_nullable_references/fail_escape_defer_in_loop.tr (1 error)
   Hint: heap(value) copies it onto the GC heap first and gives you back a reference that outlives this function; or return/store a reference you received as a parameter instead of a local's.
 
   17 │     return p;
-     │     ^~~~~~ Here!
+     │     ^~~~~~ this reference outlives what it points at
 
   Worth reading in full -- run `turf --explain E086` before you patch this one.
 

@@ -8,7 +8,7 @@ tests/15_enums/fail_cast_out_of_range.tr (1 error)
   Hint: Use one of 'Color's declared variants instead of an arbitrary integer literal.
 
   15 │     immut c: Color = 99 to Color;
-     │                         ^~ Here!
+     │                         ^~ this value is not a variant of the enum
 
   Run `turf --explain E127` for more details.
 

@@ -7,7 +7,7 @@ tests/07_functions_modules/fail_bare_type_no_visibility.tr (1 error)
   Hint: 'Rect' is declared in module 'geometry_module'. Either use it qualified (`geometry_module::Rect`), or bring it into scope with `import geometry_module::Rect;`.
 
   16 │     mut r: Rect = Rect::new(2, 3);
-     │     ^~~ Here!
+     │     ^~~ this type is not visible here
 
   Run `turf --explain E032` for more details.
 

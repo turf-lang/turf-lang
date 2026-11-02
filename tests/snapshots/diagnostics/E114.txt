@@ -6,7 +6,7 @@ tests/06_structs/fail_duplicate_struct_field.tr (1 error)
   Hint: Field names must be unique within a struct -- rename one of them.
 
   11 │     name: int
-     │     ^~~~ Here!
+     │     ^~~~ this member is declared twice
 
   Run `turf --explain E114` for more details.
 

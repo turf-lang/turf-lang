@@ -8,7 +8,7 @@ tests/07_functions_modules/fail_type_identity_generic_without_type_args.tr (1 er
   Hint: Write the instantiation you mean, e.g. 'Box<int>'.
 
   17 │     mut b: Box = Box::default();
-     │     ^~~ Here!
+     │     ^~~ type arguments are missing here
 
   Run `turf --explain E138` for more details.
 

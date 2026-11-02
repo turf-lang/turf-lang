@@ -4,12 +4,13 @@ tests/06_structs/fail_duplicate_empty_struct.tr (1 error)
 
   A struct named 'Empty' is already declared.
   Note: a type name can only be declared once per file; another file or module may reuse it.
-  Note: first declared here (line 8, col 1)
 
   Hint: Rename one of the two 'Empty' declarations.
 
+  8 │ struct Empty {}
+    │ - first declared here
   9 │ struct Empty {}
-    │ ^~~~~~ Here!
+    │ ^~~~~~ this type name is already taken
 
   Run `turf --explain E034` for more details.
 

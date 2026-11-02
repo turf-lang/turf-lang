@@ -7,7 +7,7 @@ tests/03_typechecker/fail_null_coercion.tr (1 error)
   Hint: 'null' is only valid for pointer types. If you want a zero value, use the default initializer (declare without '= null').
 
   4 │     mut x: int = null;
-    │     ^~~ Here!
+    │     ^~~ this cannot hold `null`
 
   Run `turf --explain E062` for more details.
 

@@ -7,7 +7,7 @@ tests/35_numeric_literals/fail_bare_trailing_dot.tr (1 error)
   Hint: A decimal number needs a digit after the point. Write '5.0' for the decimal, or just '5' for the whole number.
 
   11 │     mut x: double = 5.;
-     │                     ^ Here!
+     │                     ^ this number is malformed
 
   Run `turf --explain E139` for more details.
 

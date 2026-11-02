@@ -7,7 +7,7 @@ tests/07_functions_modules/type_identity_operators_errors_machines.tr (1 warning
   Hint: Write them where it is built: `List<Vec>::default()`.
 
   51 │     mut l: List<type_identity_ops_b_module::Vec> = List::default();
-     │                                                    ^~~~ Here!
+     │                                                    ^~~~ these type arguments come from the context
 
   Run `turf --explain E177` for more details.
 

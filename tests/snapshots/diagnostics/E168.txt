@@ -7,7 +7,7 @@ tests/14_cfg_analysis/42_identical_branches_warn.tr (1 warning)
   Hint: The 'if'/'else' can be removed — just keep the body. Or did you forget to change one of the branches?
 
   10 │     if a > 0 {
-     │     ^~ Here!
+     │     ^~ this branch is the same as the other one
 
   Run `turf --explain E168` for more details.
 

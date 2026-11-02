@@ -8,7 +8,7 @@ tests/14_cfg_analysis/47_lint_reaches_unsafe_block.tr (1 warning)
   Hint: You can simplify this by removing the comparison entirely.
 
   6 │         if (b == true) {
-    │               ^~ Here!
+    │               ^~ this comparison always has the same result
 
   Run `turf --explain E155` for more details.
 

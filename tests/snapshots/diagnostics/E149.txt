@@ -8,7 +8,7 @@ tests/15_enums/fail_literal_string_to_enum_unknown_variant.tr (1 error)
   Hint: Name the variant directly, e.g. 'Color::Red'.
 
   11 │     mut c: Color = "red" to Color;
-     │                          ^~ Here!
+     │                          ^~ this conversion never succeeds
 
   Run `turf --explain E149` for more details.
 

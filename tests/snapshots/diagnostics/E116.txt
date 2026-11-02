@@ -6,7 +6,7 @@ tests/01_syntax/fail_extern_function_with_body.tr (1 error)
   Hint: End the declaration of 'malloc' with ';' and no body: `extern fn malloc(...): T;`. To write the body in Turf, drop `extern`.
 
   5 │ extern fn malloc(size: int): ptr {
-    │ ^~~~~~ Here!
+    │ ^~~~~~ an `extern` function has no body
 
   Run `turf --explain E116` for more details.
 

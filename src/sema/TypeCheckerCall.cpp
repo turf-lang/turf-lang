@@ -11,6 +11,7 @@
  */
 
 #include "sema/TypeChecker.h"
+#include "sema/SpanLabels.h"
 
 // AST.h is needed for the full definition of every node type.
 // It drags in LLVM headers, but TypeChecker itself does not use any LLVM API.
@@ -1187,6 +1188,8 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
     // For vararg functions, only check the declared (named) params.
     // Extra args beyond Cand->arity() are passed raw per C ABI.
     std::vector<std::shared_ptr<ResolverFunctionSymbol>> TypeMatches;
+    // DX-5: with one candidate, the first argument that does not fit it.
+    int OnlyBadArg = -1;
     for (const auto &Cand : ArityMatches) {
       bool AllOk = true;
       int CheckCount = std::min(ArgCount, Cand->arity());
@@ -1205,6 +1208,8 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
             !(Cand->IsExtern && isExternStringToPtrCoercion(ArgTy, ParamTy)) &&
             !literalAcquiresType(Node.getArgs()[i].get(), ParamTy)) {
           AllOk = false;
+          if (ArityMatches.size() == 1)
+            OnlyBadArg = i;
           break;
         }
       }
@@ -1249,7 +1254,24 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
       SLM::DiagnosticHints Hints;
       for (const auto &Arg : Node.getArgs())
         addIdentifierTypes(Arg.get(), Hints);
-      reportError(Node.getLoc(),
+      // DX-5: one candidate, so one argument is wrong: it is the primary
+      // span, and its parameter's written type the secondary.
+      SourceLocation At = Node.getLoc();
+      if (OnlyBadArg >= 0 && ArgTypes[OnlyBadArg]) {
+        const ExprAST *Arg = Node.getArgs()[OnlyBadArg].get();
+        At = SpanLabels::spanOf(Arg, At);
+        Hints.Label = SpanLabels::thisIs(ArgTypes[OnlyBadArg].get());
+        const auto &Cand = ArityMatches.front();
+        if (Cand && Cand->Decl &&
+            OnlyBadArg < static_cast<int>(Cand->Decl->getParams().size())) {
+          const ParamDecl &P = Cand->Decl->getParams()[OnlyBadArg];
+          if (P.TypeLoc.EndCol > P.TypeLoc.Col && P.TypeLoc.EndLine == P.TypeLoc.Line)
+            Related.push_back({P.TypeLoc, "`" + P.Name + "` is " +
+                                              SpanLabels::aType(P.Type.get()) +
+                                              " because of this"});
+        }
+      }
+      reportError(At,
                   IsModuleCall ? ErrCode::ModuleArityOrType : ErrCode::ArgumentType,
                   "No overload of '" +
                       (IsModuleCall ? CandidateModule + "::" : std::string()) +

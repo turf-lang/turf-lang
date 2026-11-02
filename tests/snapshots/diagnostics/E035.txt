@@ -7,7 +7,7 @@ tests/26_state_machines/fail_machine_invalid_transition_narrowed.tr (1 error)
   Hint: This arm has already narrowed the receiver to 'Idle', which has no declared edge to 'Closing' -- add `Idle -> Closing,` to the machine's declaration, or transition to a state 'Idle' actually has an edge to.
 
   22 │         conn.transition(ConnectionState::Closing);
-     │             ^ Here!
+     │             ^ this transition is not allowed
 
   Worth reading in full -- run `turf --explain E035` before you patch this one.
 

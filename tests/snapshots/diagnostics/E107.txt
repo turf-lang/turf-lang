@@ -6,7 +6,7 @@ tests/04_control_flow/fail_do_while_missing_open_brace.tr (1 error)
   Hint: do-while loops must use braces: do { ... } while cond;
 
   9 │     do while (true) {
-    │     ^~ Here!
+    │     ^~ an opening brace or parenthesis is missing here
 
   Run `turf --explain E107` for more details.
 

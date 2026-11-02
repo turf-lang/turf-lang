@@ -7,7 +7,7 @@ tests/04_control_flow/fail_missing_return_on_one_path.tr (1 error)
   Hint: Make sure every path in your function (like inside 'if' and 'else') has a 'return' statement.
 
   5 │ fn sign(x: int): int {
-    │ ^~ Here!
+    │ ^~ a path through this function ends without a `return`
 
   Run `turf --explain E009` for more details.
 

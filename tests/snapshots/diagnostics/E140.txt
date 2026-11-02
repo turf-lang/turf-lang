@@ -8,7 +8,7 @@ tests/48_unsized_array_params/fail_unsized_struct_field.tr (1 error)
   Hint: A struct field needs a fixed size (e.g. 'int[5]'), or use a List<T> for a collection that grows.
 
   6 │     values: int[]
-    │             ^~~ Here!
+    │             ^~~ this array needs a size
 
   Run `turf --explain E140` for more details.
 

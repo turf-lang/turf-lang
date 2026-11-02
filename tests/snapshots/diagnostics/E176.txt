@@ -7,7 +7,7 @@ tests/07_functions_modules/export_immut_warns.tr (1 warning)
   Hint: Write `pub immut` instead of `export immut`.
 
   8 │ export immut LIMIT: int = 10;
-    │ ^~~~~~ Here!
+    │ ^~~~~~ this is `export immut`
 
   Fix: replace 'export' with 'pub'
   8 │ pub immut LIMIT: int = 10;

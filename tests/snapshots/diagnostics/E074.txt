@@ -7,7 +7,7 @@ tests/15_enums/local_type_declarations.tr (1 warning)
   Hint: Check your 'if' conditions. Are they impossible to be true, or did you 'return' before this block?
 
   28 │     return 99;
-     │     ^~~~~~ Here!
+     │     ^~~~~~ this block never runs
 
   Run `turf --explain E074` for more details.
 

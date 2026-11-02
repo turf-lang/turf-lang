@@ -7,7 +7,7 @@ tests/42_caller_location/fail_caller_location_outside_marked_function.tr (1 erro
   Hint: Add '@caller_location' immediately before this function's 'fn' keyword, or remove this use.
 
   6 │     return caller_location;
-    │            ^~~~~~~~~~~~~~~ Here!
+    │            ^~~~~~~~~~~~~~~ this function is not marked to receive a caller location
 
   Run `turf --explain E084` for more details.
 

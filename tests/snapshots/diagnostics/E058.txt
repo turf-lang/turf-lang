@@ -8,7 +8,7 @@ tests/04_control_flow/fail_compare_missing_done.tr (1 error)
   Hint: Write each arm as `matches value: ... done` and put `otherwise: ...` last, once.
 
   11 │         matches 2:
-     │         ^~~~~~~ Here!
+     │         ^~~~~~~ this `compare` block is malformed
 
   Run `turf --explain E058` for more details.
 

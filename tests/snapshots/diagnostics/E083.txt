@@ -7,7 +7,7 @@ tests/40_defer/fail_break_in_defer.tr (1 error)
   Hint: 'break' inside a 'defer' would jump out of the enclosing function or loop, not just the deferred statement -- move it out of the 'defer'.
 
   8 │     defer break;
-    │           ^~~~~ Here!
+    │           ^~~~~ this leaves a `defer`
 
   Run `turf --explain E083` for more details.
 

@@ -8,7 +8,7 @@ tests/37_guess_inference/fail_guess_no_init.tr (1 error)
   Hint: Give the variable its value on the spot: `immut X: int = 5;`, `mut x: guess = 5;`.
 
   9 │     mut x: guess;
-    │     ^~~ Here!
+    │     ^~~ this has no initial value
 
   Run `turf --explain E128` for more details.
 

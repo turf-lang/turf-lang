@@ -200,6 +200,13 @@ public:
     return *this;
   }
 
+  // What the primary span's underline says (DiagnosticHints::Label, DX-5):
+  // "this is an 'int'". Without one, the code's own label.
+  TurfError &withLabel(const std::string &Label) {
+    Hints_.Label = Label;
+    return *this;
+  }
+
   // Why the fix is right (DiagnosticHints::FixReason), in a sentence.
   TurfError &withFixReason(const std::string &Reason) {
     Hints_.FixReason = Reason;
@@ -501,6 +508,12 @@ public:
   // CompilerFix.h): a retired spelling's replacement (SY-2 … SY-5, B-17). The
   // edit is the raw one TurfError::withFixIt() takes, and the builder below
   // checks the source text first, so a mis-pointed location gives no fix.
+  // What the primary span's underline says (DX-5), as TurfError::withLabel().
+  TurfWarning &withLabel(const std::string &Label) {
+    Hints_.Label = Label;
+    return *this;
+  }
+
   TurfWarning &withFixIt(int Line, int StartCol, int EndCol,
                          const std::string &Replacement) {
     Hints_.FixIts.push_back({Line, StartCol, EndCol, Replacement});

@@ -7,7 +7,7 @@ tests/01_syntax/fail_bad_keyword.tr (1 error)
   Hint: Did you mean: 'if'?
 
   7 │     iff x > 5 {
-    │     ^~~ Here!
+    │     ^~~ this word is not a keyword
 
   Fix: replace 'iff' with 'if'
   7 │     if x > 5 {

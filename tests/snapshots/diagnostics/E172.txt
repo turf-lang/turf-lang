@@ -5,7 +5,7 @@ tests/49_annotations/deprecated_warns_on_call.tr (1 warning)
   Warning: 'add_old' is deprecated: use 'add' instead
 
   18 │     return add_old(1, 2) - 3;
-     │                   ^ Here!
+     │                   ^ this is deprecated
 
   Run `turf --explain E172` for more details.
 

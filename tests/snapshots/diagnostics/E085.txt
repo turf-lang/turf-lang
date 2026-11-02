@@ -9,7 +9,7 @@ tests/07_functions_modules/fail_type_identity_ambiguous_wildcard_vs_local.tr (1 
   Hint: Write the imported one qualified (`type_identity_node_a_module::Node`) and leave 'Node' out of the `import` (list the names you need instead of `[*]`), so 'Node' means just one type.
 
   17 │     mut n: Node = Node::default();
-     │     ^~~ Here!
+     │     ^~~ this type name has more than one meaning
 
   Run `turf --explain E085` for more details.
 

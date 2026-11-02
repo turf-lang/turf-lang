@@ -7,7 +7,7 @@ tests/05_arrays_pointers_ffi/manual_heap_leak_warns.tr (2 warnings)
   Hint: Free it with `mem::free(lost)` when you are done (`defer mem::free(lost);` right after the allocation frees it on every path), or use a garbage-collected value instead.
 
   32 │         mut lost: void* = mem::alloc(32);
-     │                                     ^ Here!
+     │                                     ^ this memory is never freed
 
   Run `turf --explain E187` for more details.
 
@@ -18,7 +18,7 @@ tests/05_arrays_pointers_ffi/manual_heap_leak_warns.tr (2 warnings)
   Hint: Keep the pointer and free it with `mem::free` when you are done.
 
   39 │     mem::alloc(8);
-     │               ^ Here!
+     │               ^ this memory is never freed
 
   Run `turf --explain E187` for more details.
 

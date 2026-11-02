@@ -275,6 +275,9 @@ public:
   /// "inside the test", which is what a compile_error test's outcome is
   /// judged on. Unset (line 0) for an operator, which cannot be a test.
   SourceLocation BodyEnd{0, 0, ""};
+  // DX-5: the declared return type as written (`int` in `): int {`), for the
+  // span a `return` of the wrong type points back at. Line 0 when unknown.
+  SourceLocation RetTypeLoc{0, 0, ""};
   /// Set by the Resolver or the TypeChecker when an error was reported inside
   /// a compile_error test's body and taken as the test's (TestRegistry.h):
   /// every later pass skips this declaration, as a compile stops after the
@@ -350,6 +353,7 @@ public:
     Cloned->setAnnotations(getAnnotations());
     Cloned->UsesTry = UsesTry;
     Cloned->BodyEnd = BodyEnd;
+    Cloned->RetTypeLoc = RetTypeLoc;
     Cloned->SizeParams = SizeParams;
     Cloned->SourceName = SourceName;
     return Cloned;

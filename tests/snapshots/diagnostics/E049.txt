@@ -8,7 +8,7 @@ tests/06_structs/fail_incomplete_constructor_never_assigned.tr (1 error, 1 warni
   Hint: Every field of 'Point' must be set via 'self.<field> = ...' on every path through 'new' -- including inside every if/else branch and before any early return.
 
   13 │ fn Point.new(x: int): void {
-     │ ^~ Here!
+     │ ^~ this constructor leaves fields without a value
 
   Run `turf --explain E049` for more details.
 
@@ -19,7 +19,7 @@ tests/06_structs/fail_incomplete_constructor_never_assigned.tr (1 error, 1 warni
   Hint: If the variable is intentionally unused, prefix its name with '_' by convention. Otherwise, remove the declaration or use its value.
 
   18 │     mut p: Point = Point::new(1);
-     │     ^ Here!
+     │     ^ this variable is never used
 
   Run `turf --explain E163` for more details.
 

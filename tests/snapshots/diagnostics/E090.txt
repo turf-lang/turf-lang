@@ -9,7 +9,7 @@ tests/07_functions_modules/stdlib_shadow/fail_import_local_module_named_like_std
   Hint: A module may not share its name with a standard-library module. Rename ./tests/07_functions_modules/stdlib_shadow/list.tr (for example to 'my_list.tr') and import it by the new name.
 
   7 │ import list;
-    │        ^~~~ Here!
+    │        ^~~~ more than one module has this name
 
   Run `turf --explain E090` for more details.
 

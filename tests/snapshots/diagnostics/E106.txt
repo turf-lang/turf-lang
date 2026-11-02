@@ -6,7 +6,7 @@ tests/01_syntax/fail_missing_colon_before_return_type.tr (1 error)
   Hint: Write the return type after a ':' -- `fn add(...): int {` -- or `: void` if it returns nothing.
 
   7 │ fn add(a: int, b: int) int {
-    │                        ^~~ Here!
+    │                        ^~~ a `:` is missing here
 
   Run `turf --explain E106` for more details.
 

@@ -7,7 +7,7 @@ tests/18_operator_overload/fail_operator_builtin_pair_int.tr (1 error)
   Hint: Both operand types are already built in -- overloading an operator between two builtin types would make ordinary arithmetic ambiguous. Operator overloads only make sense when at least one operand is a struct or 'string'.
 
   5 │ operator +(a: int, b: int): int {
-    │ ^ Here!
+    │ ^ both operands of this operator are built-in types
 
   Run `turf --explain E028` for more details.
 

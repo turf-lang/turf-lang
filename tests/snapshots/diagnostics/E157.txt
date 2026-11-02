@@ -7,7 +7,7 @@ tests/14_cfg_analysis/34_do_while_in_for_no_break_warns.tr (2 warnings)
   Hint: Add a 'break', 'return', or a condition that can become false to allow the loop to exit.
 
   12 │ fn main(): int {
-     │ ^~ Here!
+     │ ^~ this loop has no way out
 
   Run `turf --explain E159` for more details.
 
@@ -18,7 +18,7 @@ tests/14_cfg_analysis/34_do_while_in_for_no_break_warns.tr (2 warnings)
   Hint: If this is intentional, consider adding a comment. Otherwise, add a 'break' or a proper exit condition.
 
   19 │         do {
-     │         ^~ Here!
+     │         ^~ this loop looks like it never ends
 
   Run `turf --explain E157` for more details.
 

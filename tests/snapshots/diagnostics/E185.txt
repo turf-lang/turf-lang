@@ -7,7 +7,7 @@ tests/14_cfg_analysis/endless_loops_warn.tr (2 warnings)
   Hint: Check the loop's test and each `break` condition against the values the loop computes.
 
   62 │     while i >= 0 {
-     │     ^~~~~ Here!
+     │     ^~~~~ no exit of this loop is ever taken
 
   Run `turf --explain E185` for more details.
 
@@ -18,7 +18,7 @@ tests/14_cfg_analysis/endless_loops_warn.tr (2 warnings)
   Hint: Check the loop's test and each `break` condition against the values the loop computes.
 
   70 │     while k > 0 {
-     │     ^~~~~ Here!
+     │     ^~~~~ no exit of this loop is ever taken
 
   Run `turf --explain E185` for more details.
 

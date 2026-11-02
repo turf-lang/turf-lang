@@ -7,7 +7,7 @@ tests/14_cfg_analysis/33_do_while_nested_true_inner_break_outer_warns.tr (2 warn
   Hint: Add a 'break', 'return', or a condition that can become false to allow the loop to exit.
 
   13 │ fn main(): int {
-     │ ^~ Here!
+     │ ^~ this loop has no way out
 
   Run `turf --explain E159` for more details.
 
@@ -18,7 +18,7 @@ tests/14_cfg_analysis/33_do_while_nested_true_inner_break_outer_warns.tr (2 warn
   Hint: Check your 'if' conditions. Are they impossible to be true, or did you 'return' before this block?
 
   26 │     return 0;
-     │     ^~~~~~ Here!
+     │     ^~~~~~ this block never runs
 
   Run `turf --explain E074` for more details.
 

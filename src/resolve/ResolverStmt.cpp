@@ -93,6 +93,11 @@ void Resolver::visitVarDecl(VarDeclExprAST &Node) {
     ResolverSourceLocation Loc{Node.getLoc().Line, Node.getLoc().Col};
     Node.ResolvedSymbol =
         SymTable_.declareVariable(Node.getName(), Node.getTypePtr(), Loc, Node.isImmutable());
+    if (const SourceLocation &T = Node.getTypeLoc();
+        Node.ResolvedSymbol && T.EndCol > T.Col && T.EndLine == T.Line) {
+      Node.ResolvedSymbol->TypeLoc = {T.Line, T.Col};
+      Node.ResolvedSymbol->TypeEndCol = T.EndCol;
+    }
   } catch (const std::runtime_error &) {
     // The name is already in the current scope — emit a rich diagnostic.
     // Look up the previous declaration for the "declared at line N" note.

@@ -6,7 +6,7 @@ tests/01_syntax/fail_unknown_escape_sequence.tr (1 error)
   Hint: Recognized escapes are \n \t \r \0 \a \b \f \v \\ \" \'. Did you mean to write a literal backslash? Use '\\' instead.
 
   10 │     immut s: string = "bad\qescape";
-     │                           ^ Here!
+     │                           ^ this escape sequence is not valid
 
   Run `turf --explain E100` for more details.
 

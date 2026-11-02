@@ -7,7 +7,7 @@ tests/07_functions_modules/fail_scope_operator_on_instance_value.tr (1 error)
   Hint: '::' is for namespace-qualified access (enum variants, module functions, static methods) -- 'p' holds an instance. Did you mean 'p.get(...)'?
 
   19 │     immut y: int = p::get;
-     │                    ^ Here!
+     │                    ^ this is a variable, so it takes `.`
 
   Run `turf --explain E029` for more details.
 

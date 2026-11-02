@@ -8,7 +8,7 @@ tests/05_arrays_pointers_ffi/fail_address_of_non_addressable.tr (1 error)
   Hint: Only variables, struct fields, and array elements are addressable.
 
   8 │     mut r: &int = &(x + 1);
-    │                   ^ Here!
+    │                   ^ this has no address
 
   Run `turf --explain E122` for more details.
 

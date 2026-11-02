@@ -8,7 +8,7 @@ tests/07_functions_modules/fail_nested_module_qualifier_call.tr (1 error)
   Hint: Modules aren't nested inside each other -- drop the 'mem::' prefix.
 
   16 │     mem::io::printline("should not compile");
-     │                       ^ Here!
+     │                       ^ this module qualifier is not valid
 
   Run `turf --explain E136` for more details.
 

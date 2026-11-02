@@ -9,7 +9,7 @@ Missing values:
   Hint: Add `matches true:` and `matches false:` arms, or 'otherwise:' to handle the rest. A guarded arm doesn't count: its guard may be false.
 
   7 │     compare b {
-    │     ^~~~~~~ Here!
+    │     ^~~~~~~ this `compare` does not cover every value
 
   Run `turf --explain E093` for more details.
 

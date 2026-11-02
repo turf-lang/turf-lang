@@ -8,7 +8,7 @@ tests/04_control_flow/fail_foreach_duplicate_names.tr (1 error)
   Hint: If you want to change its value, just do `x = new_value;` without the type (like 'int' or 'string'). If you want a new variable, give it a different name!
 
   5 │     for (x, x) in numbers {
-    │     ^~~ Here!
+    │     ^~~ declared a second time here
 
   Run `turf --explain E033` for more details.
 

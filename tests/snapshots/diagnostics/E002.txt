@@ -8,7 +8,7 @@ tests/48_unsized_array_params/fail_slice_bound_not_int.tr (1 error)
   Hint: Slice bounds are ints, like arr[1..3] or arr[i..j]. To turn a number or a char into an int: (x to int).
 
   6 │     immut t = a[1.5..];
-    │                ^ Here!
+    │                ^ this index is not an integer
 
   Run `turf --explain E002` for more details.
 

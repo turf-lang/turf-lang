@@ -7,7 +7,7 @@ tests/02_resolver/fail_builtin_typo.tr (1 error)
   Hint: It may be from the current file: 'print', 'eprint', 'printf'
 
   6 │     io::pritn("Testing builtin typo");
-    │              ^ Here!
+    │              ^ the module has no function of this name
 
   Run `turf --explain E026` for more details.
 

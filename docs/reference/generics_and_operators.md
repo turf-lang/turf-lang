@@ -705,7 +705,7 @@ main.tr (1 error)
   Note: in generic declaration 'set::Set.bucket_find' (lib/std/collections/set.tr, ...)
 
   12 │     s.add(b);
-     │      ^ Here!
+     │      ^ these values cannot be compared
 ```
 
 Read the notes from top to bottom: `add` needed `contains`, which needed

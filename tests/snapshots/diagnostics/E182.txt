@@ -8,7 +8,7 @@ tests/14_cfg_analysis/mutual_recursion_warns.tr (2 warnings)
   Hint: Give one of them a path that returns without calling back into the cycle: a base case, such as `if n == 0 { return 0; }`.
 
   13 │ fn ping(n: int): int {
-     │ ^~ Here!
+     │ ^~ this recursion has no way to stop
 
   Run `turf --explain E182` for more details.
 
@@ -21,7 +21,7 @@ tests/14_cfg_analysis/mutual_recursion_warns.tr (2 warnings)
   Hint: Give one of them a path that returns without calling back into the cycle: a base case, such as `if n == 0 { return 0; }`.
 
   21 │ fn a(n: int): int {
-     │ ^~ Here!
+     │ ^~ this recursion has no way to stop
 
   Run `turf --explain E182` for more details.
 

@@ -6,7 +6,7 @@ tests/17_char_type/fail_char_empty_literal.tr (1 error)
   Hint: A char literal must contain exactly one character, e.g. 'a'.
 
   6 │     mut c: char = '';
-    │                   ^ Here!
+    │                   ^ this character literal is not valid
 
   Run `turf --explain E101` for more details.
 

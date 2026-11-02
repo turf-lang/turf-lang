@@ -7,7 +7,7 @@ tests/04_control_flow/range_never_ends_warning.tr (2 warnings)
   Hint: A descending range needs a decreasing step: `for i in 5..1 step i-- { ... }`.
 
   9 │     for i in 5..1 {
-    │     ^~~ Here!
+    │     ^~~ this range never ends
 
   Run `turf --explain E162` for more details.
 
@@ -18,7 +18,7 @@ tests/04_control_flow/range_never_ends_warning.tr (2 warnings)
   Hint: An ascending range needs an increasing step, such as the default.
 
   16 │     for i in 1..5 step i-- {
-     │     ^~~ Here!
+     │     ^~~ this range never ends
 
   Run `turf --explain E162` for more details.
 

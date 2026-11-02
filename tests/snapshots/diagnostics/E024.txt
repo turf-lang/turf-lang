@@ -3,12 +3,13 @@ tests/07_functions_modules/fail_import_wildcard_collision.tr (1 error)
 ── error at line 12, col 1 [E024 · import symbol collision]
 
   'shared' is imported from two different modules -- 'import_collision_a_module' and 'import_collision_b_module'.
-  Note: 'shared' first imported from 'import_collision_a_module' here (line 11, col 1)
 
   Hint: Either qualify one of them explicitly (`import_collision_a_module::shared` or `import_collision_b_module::shared`), or switch one of the wildcard/list imports to a more targeted one that leaves 'shared' out.
 
+  11 │ import import_collision_a_module::[*];
+     │ - 'shared' first imported from 'import_collision_a_module' here
   12 │ import import_collision_b_module::[*];
-     │ ^~~~~~ Here!
+     │ ^~~~~~ this imported name is already taken
 
   Run `turf --explain E024` for more details.
 

@@ -7,7 +7,7 @@ tests/18_operator_overload/fail_generic_operator_param_not_in_operands.tr (1 err
   Hint: A generic operator's type arguments are inferred from its operands (there is no way to write them at a use). Use 'T' in an operand type, or drop it from the '<...>' list.
 
   12 │ operator<T> [](p: Cell<int>, i: int): T {
-     │ ^ Here!
+     │ ^ this generic operator is not valid
 
   Run `turf --explain E097` for more details.
 

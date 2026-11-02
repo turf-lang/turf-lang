@@ -7,7 +7,7 @@ tests/07_functions_modules/fail_import_symbol_wrong_owner_type.tr (1 error)
   Hint: Double-check the spelling, or check mem.tr for its actual exported names.
 
   15 │ import mem::List;
-     │             ^~~~ Here!
+     │             ^~~~ the module has nothing of this name
 
   Run `turf --explain E030` for more details.
 

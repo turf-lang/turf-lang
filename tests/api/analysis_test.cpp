@@ -23,7 +23,9 @@
 #include "diagnostics/ErrorCategory.h"
 #include "diagnostics/ErrorCodes.h"
 #include "diagnostics/LintLevels.h"
+#include "diagnostics/PrimaryLabels.h"
 
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -2258,6 +2260,44 @@ static void testLintLevels() {
   LintLevels::reset();
 }
 
+// DX-5: every code has a primary label, worded by the style guide, and a
+// type mismatch labels its value and points back at the written type.
+static void testPrimaryLabels() {
+  CurrentTest = "primary span labels";
+  for (size_t I = 0; I < AllErrorCodesCount; ++I) {
+    const ErrorCodeEntry &E = AllErrorCodes[I];
+    const char *L = ErrorCodes::defaultLabel(E.Code);
+    if (!L || !*L) {
+      std::cerr << "  no primary label for " << E.Code << " (src/diagnostics/PrimaryLabels.h)\n";
+      CHECK(false);
+      continue;
+    }
+    const std::string Label = L;
+    // A lowercase phrase with no full stop (DIAGNOSTICS_STYLE.md).
+    CHECK(!std::isupper(static_cast<unsigned char>(Label[0])));
+    CHECK(Label.back() != '.' && Label.back() != '!');
+  }
+  for (const auto &Row : ErrorCodes::PrimaryLabels)
+    CHECK(ErrorCodes::lookupByCode(Row.Code) != nullptr);
+
+  auto R = turf::analyze({{"labels.tr",
+                           "fn main(): int {\n    immut s: string = 5;\n    return 0;\n}\n"}});
+  const turf::Diagnostic *D = nullptr;
+  for (const auto &X : R.diagnostics())
+    if (X.Code == "E066")
+      D = &X;
+  CHECK(D != nullptr);
+  if (!D)
+    return;
+  CHECK(D->Label == "this is an `int`");
+  CHECK(D->Where.Line == 2 && D->Where.Col == 23);
+  bool TypeSpan = false;
+  for (const auto &Rel : D->Related)
+    TypeSpan = TypeSpan || (Rel.Where.Line == 2 && Rel.Where.Col == 14 &&
+                            Rel.Message == "`s` is a `string` because of this");
+  CHECK(TypeSpan);
+}
+
 static void testImportedCandidateLocation() {
   CurrentTest = "imported candidate overloads name their own file";
   struct Case {
@@ -2621,6 +2661,7 @@ int main() {
   testTypeArgumentCount();
   testLiteralNeverConverts();
   testImportedCandidateLocation();
+  testPrimaryLabels();
   testCompileErrorTests();
   testBuiltinDocRouting();
 

@@ -7,7 +7,7 @@ tests/25_errors/fail_error_unknown_variant.tr (1 error)
   Hint: Double-check the spelling against IOError's declared variants.
 
   10 │     mut e: IOError = IOError::Nonexistent;
-     │                               ^~~~~~~~~~~ Here!
+     │                               ^~~~~~~~~~~ no variant of this name
 
   Run `turf --explain E039` for more details.
 

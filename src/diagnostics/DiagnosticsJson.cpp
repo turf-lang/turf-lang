@@ -138,6 +138,7 @@ std::string render(const DiagnosticEngine::Diag &D, bool IsWarning) {
       {"hint", orNull(Hint)},
       {"file", cleanPath(D.Filename)},
       {"span", D.Loc.Line > 0 ? llvm::json::Value(span(D.Loc)) : llvm::json::Value(nullptr)},
+      {"label", D.Loc.Line > 0 ? llvm::json::Value(stripAnsi(diagLabel(D))) : llvm::json::Value(nullptr)},
       {"related", std::move(Related)},
       {"fix", std::move(Fix)},
       {"denied", D.Denied}};

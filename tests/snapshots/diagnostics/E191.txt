@@ -7,7 +7,7 @@ tests/05_arrays_pointers_ffi/unsafe_checks_warn.tr (2 warnings)
   Hint: Keep the index in a range the code makes visible (a loop `for i in 0..N`, or a test `if i >= 0 && i < N`), or use an array, whose index is checked.
 
   75 │             p[i] = i;
-     │              ^ Here!
+     │              ^ nothing bounds this index
 
   Run `turf --explain E191` for more details.
 
@@ -18,7 +18,7 @@ tests/05_arrays_pointers_ffi/unsafe_checks_warn.tr (2 warnings)
   Hint: If the variable is intentionally unused, prefix its name with '_' by convention. Otherwise, remove the declaration or use its value.
 
   106 │         mut raw: int* = &t to int*;
-      │         ^ Here!
+      │         ^ this variable is never used
 
   Run `turf --explain E163` for more details.
 

@@ -7,7 +7,7 @@ tests/05_arrays_pointers_ffi/unsafe_checks_warn.tr (2 warnings)
   Hint: Declare `a` with `mut`, or copy it into a `mut` array and point into that.
 
   63 │         pa[0] = 9;
-     │               ^ Here!
+     │               ^ this writes into an `immut` array
 
   Run `turf --explain E190` for more details.
 
@@ -18,7 +18,7 @@ tests/05_arrays_pointers_ffi/unsafe_checks_warn.tr (2 warnings)
   Hint: If the variable is intentionally unused, prefix its name with '_' by convention. Otherwise, remove the declaration or use its value.
 
   106 │         mut raw: int* = &t to int*;
-      │         ^ Here!
+      │         ^ this variable is never used
 
   Run `turf --explain E163` for more details.
 

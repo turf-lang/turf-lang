@@ -6,7 +6,7 @@ tests/04_control_flow/fail_foreach_range_with_pair.tr (1 error)
   Hint: Range-based for only binds a single scalar variable: for i in 0..10 step i += 1 { }
 
   4 │     for (index, value) in 0..10 step index += 1 {
-    │     ^~~ Here!
+    │     ^~~ this loop form is not supported
 
   Run `turf --explain E120` for more details.
 

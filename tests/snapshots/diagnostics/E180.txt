@@ -7,7 +7,7 @@ tests/14_cfg_analysis/unused_declarations_warn.tr (1 warning)
   Hint: Remove `unused_pub`, or call it from `main`. `pub` has no effect in a program's root file.
 
   43 │ pub fn unused_pub(): int {
-     │        ^~~~~~~~~~ Here!
+     │        ^~~~~~~~~~ nothing calls this `pub` function
 
   Run `turf --explain E180` for more details.
 

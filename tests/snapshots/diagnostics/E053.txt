@@ -7,7 +7,7 @@ tests/06_structs/fail_static_outside_struct.tr (1 error)
   Hint: 'compute' isn't declared as 'StructName.compute(...)', so there's no 'self' to omit. Remove 'static', or declare it as a method: 'static fn StructName.compute(...): ReturnType { ... }'.
 
   8 │ fn compute(x: int) static: int {
-    │ ^~ Here!
+    │ ^~ `static` is only for methods
 
   Run `turf --explain E053` for more details.
 

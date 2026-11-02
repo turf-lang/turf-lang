@@ -7,7 +7,7 @@ tests/02_resolver/warn_self_assign.tr (2 warnings)
   Hint: Did you mean to assign a different value, or is this left over from an edit?
 
   5 │     x = x;
-    │       ^ Here!
+    │       ^ this assigns a variable to itself
 
   Run `turf --explain E156` for more details.
 
@@ -18,7 +18,7 @@ tests/02_resolver/warn_self_assign.tr (2 warnings)
   Hint: The assigned value is overwritten or the function returns before this variable is ever used. Remove the assignment or use the value.
 
   5 │     x = x;
-    │       ^ Here!
+    │       ^ this value is never read
 
   Run `turf --explain E160` for more details.
 

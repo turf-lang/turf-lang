@@ -58,7 +58,7 @@ whatever the module marks `pub`:
   Hint: Only a package's root module can be imported from outside it. Import 'interval' and use what its root module makes `pub`; if 'interval' should offer this, its root module has to expose it.
 
   3 │ import numbers;
-    │        ^~~~~~~ Here!
+    │        ^~~~~~~ this module cannot be imported from here
 ```
 
 So you have two levels of privacy to work with. Inside a module, everything is
@@ -150,7 +150,7 @@ and a dependent calls `interval::checksum(r)`:
   Hint: If 'checksum' is meant to be used from other modules, mark it `pub` in interval.tr: `pub fn checksum(...)`. Otherwise, 'interval' offers these public functions: parse.
 
   9 │     io::printline(interval::checksum(r));
-    │                             ^~~~~~~~ Here!
+    │                             ^~~~~~~~ this is private to its module
 ```
 
 The fix is on your side: either make it `pub` and own it as part of your API, or
@@ -176,12 +176,14 @@ pub fn warm(): Cache {
 ── error at line 91, col 8 [E089 · private type in public signature]
 
   Public function 'warm' exposes the private type 'Cache'.
-  Note: 'Cache' is declared in module 'interval' without `pub` (line 87, col 1)
 
   Hint: Anything `pub` is visible to other modules, but 'Cache' is not, so they would receive values of a type they cannot name. Either make the type public -- `pub struct Cache` in interval.tr -- or keep the function internal by removing its `pub`.
 
+  87 │ struct Cache {
+     │ - 'Cache' is declared in module 'interval' without `pub`
+     ┊
   91 │ pub fn warm(): Cache {
-     │        ^~~~ Here!
+     │        ^~~~ this type is private, and the signature is `pub`
 ```
 
 **Declare the types of your API in the root module.** A `pub` type of an
@@ -207,7 +209,7 @@ pub fn stats(values: int[]): numbers::Stats {
   Hint: Other packages import only 'interval', its root module, so they would receive values of a type they cannot name. Either move `pub struct Stats` into the root module, interval.tr, or keep the function internal by removing its `pub`.
 
   3 │ pub fn stats(values: int[]): numbers::Stats {
-    │        ^~~~~ Here!
+    │        ^~~~~ this type is private, and the signature is `pub`
 ```
 
 Define `Stats` in `src/interval.tr` and the error goes away. An internal
@@ -852,7 +854,7 @@ $ turf build
   Hint: Wrap this in 'unsafe { }', or use a safe reference ('&T') instead if you don't actually need a possibly-null raw pointer.
 
   17 │ pub struct Counter {
-     │     ^~~~~~ Here!
+     │     ^~~~~~ this needs `unsafe`
 ```
 
 The dependent adds the table, and the same build compiles:

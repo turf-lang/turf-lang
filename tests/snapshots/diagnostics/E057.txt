@@ -8,7 +8,7 @@ tests/03_typechecker/fail_logical_not_int.tr (1 error)
   Hint: Write a comparison, e.g. `n == 0` instead of `!n`.
 
   6 │     mut ok: bool = !5;
-    │                    ^ Here!
+    │                    ^ this operator does not apply to these operands
 
   Run `turf --explain E057` for more details.
 

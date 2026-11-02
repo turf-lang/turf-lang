@@ -8,7 +8,7 @@ tests/19_int32_type/fail_int32_increment.tr (1 error)
   Hint: Write 'c = (c + 1) to int32;' explicitly instead.
 
   14 │     c++;
-     │      ^~ Here!
+     │      ^~ this is not supported here
 
   Run `turf --explain E126` for more details.
 

@@ -529,7 +529,7 @@ The directory of the importing file, the current directory and `lib/usr` are
   Hint: A module may not share its name with a standard-library module. Rename ./src/list.tr (for example to 'my_list.tr') and import it by the new name.
 
   1 │ import list;
-    │        ^~~~ Here!
+    │        ^~~~ more than one module has this name
 ```
 
 The other collisions read the same way:
@@ -573,7 +573,7 @@ found" because the fix is different:
   Hint: A package can import only its own modules, its direct dependencies and the standard library. Add 'basepkg' to [dependencies] in plotter's turf.toml to import it here.
 
   2 │ import basepkg;
-    │        ^~~~~~~ Here!
+    │        ^~~~~~~ this module cannot be imported from here
 ```
 
 ```
@@ -585,7 +585,7 @@ found" because the fix is different:
   Hint: Only a package's root module can be imported from outside it. Import 'geometry' and use what its root module makes `pub`; if 'geometry' should offer this, its root module has to expose it.
 
   2 │ import vecmath;
-    │        ^~~~~~~ Here!
+    │        ^~~~~~~ this module cannot be imported from here
 ```
 
 ### Internal modules are private to their package

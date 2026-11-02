@@ -6,7 +6,7 @@ tests/07_functions_modules/fail_export_mut_not_supported.tr (1 error)
   Hint: Write 'pub immut NAME: T = value;' for a constant, or keep the value in a function or a struct if it has to change.
 
   5 │ export mut COUNTER: int = 0;
-    │ ^~~~~~ Here!
+    │ ^~~~~~ this exported variable can be changed
 
   Run `turf --explain E021` for more details.
 

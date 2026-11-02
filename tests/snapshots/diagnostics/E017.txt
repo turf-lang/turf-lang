@@ -3,12 +3,13 @@ tests/05_arrays_pointers_ffi/fail_double_free.tr (1 error)
 ── error at line 28, col 13 [E017 · double free]
 
   Double free detected for 'p'.
-  Note: first freed here (line 27, col 13)
 
   Hint: Release a pointer once: free() and every function declared '@ownership(releases: ...)' release what they are given.
 
+  27 │         free(p);
+     │             - first freed here
   28 │         free(p);
-     │             ^ Here!
+     │             ^ freed a second time here
 
   Worth reading in full -- run `turf --explain E017` before you patch this one.
 

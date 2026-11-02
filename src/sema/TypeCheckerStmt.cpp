@@ -11,6 +11,7 @@
  */
 
 #include "sema/TypeChecker.h"
+#include "sema/SpanLabels.h"
 
 // AST.h is needed for the full definition of every node type.
 // It drags in LLVM headers, but TypeChecker itself does not use any LLVM API.
@@ -162,16 +163,25 @@ void TypeChecker::checkCondition(ExprAST *Cond, SourceLocation Loc,
   TurfTypePtr Ty = getType(Cond);
   if (!Ty || Ty->isBool())
     return;
-  reportError(Loc,
+  // DX-5: the condition is the primary span; the keyword is what asks for a
+  // `bool`.
+  SLM::DiagnosticHints Hints;
+  Hints.Label = SpanLabels::thisIs(Ty.get());
+  const SourceLocation At = SpanLabels::spanOf(Cond, Loc);
+  std::vector<RelatedLocation> Related;
+  if (At.Line != Loc.Line || At.Col != Loc.Col)
+    Related.push_back({Loc, std::string("`") + Construct + "` needs a `bool`"});
+  reportError(At,
               codeForMismatch(Ty.get(), TurfBool().get(), ErrCode::TypeMismatch),
               std::string("The condition of '") + Construct +
                   "' must be a 'bool', but this one has type '" +
                   Ty->getName() + "'.",
-              {},
+              Related,
               Ty->isErrorUnion()
                   ? "A fallible call is not a condition. Handle its failure with "
                     "`recover`, e.g. `f() recover run { ... }`."
-                  : "Write a comparison, e.g. `n != 0` or `s.length() > 0`.");
+                  : "Write a comparison, e.g. `n != 0` or `s.length() > 0`.",
+              "", Hints);
 }
 
 void TypeChecker::visitIf(IfExprAST &Node) {
@@ -581,13 +591,22 @@ void TypeChecker::visitReturn(ReturnExprAST &Node) {
           // SLM (see visitVarDecl()).
           SLM::DiagnosticHints Hints;
           addIdentifierTypes(Node.getVal(), Hints);
-          reportError(Node.getLoc(),
+          // DX-5: the returned value is the primary span; the declared
+          // return type is where the expectation came from.
+          Hints.Label = SpanLabels::thisIs(RetTy.get());
+          std::vector<RelatedLocation> Related;
+          if (!FuncStack_.empty() && FuncStack_.back() &&
+              FuncStack_.back()->RetTypeLoc.Line > 0)
+            Related.push_back({FuncStack_.back()->RetTypeLoc,
+                               "`" + FuncStack_.back()->getSourceName() + "` returns " +
+                                   SpanLabels::aType(Declared) + " because of this"});
+          reportError(SpanLabels::spanOf(Node.getVal(), Node.getLoc()),
                       codeForMismatch(RetTy.get(), nullptr,
                                       ErrCode::ReturnTypeMismatch),
                       "Return type mismatch: function declares '" +
                           Declared->getName() + "' but returns '" +
                           RetTy->getName() + "'.",
-                      {}, hintForMismatch(RetTy.get(), nullptr, "", Declared), "", Hints);
+                      Related, hintForMismatch(RetTy.get(), nullptr, "", Declared), "", Hints);
         }
       } else {
         // SEM-002 -- see visitVarDecl()'s identical comment

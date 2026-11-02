@@ -6,7 +6,7 @@ tests/04_control_flow/fail_do_while_double_semicolon.tr (1 error)
   Hint: Remove the extra ';' -- a statement ends with exactly one.
 
   14 │     } while (x > 0);;
-     │                     ^ Here!
+     │                     ^ this token is unexpected
 
   Run `turf --explain E103` for more details.
 

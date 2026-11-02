@@ -7,7 +7,7 @@ tests/06_structs/fail_reserved_default_declared.tr (1 error)
   Hint: 'Point::default()' is always compiler-generated (every field recursively zero-initialized) -- remove this declaration. Define 'Point.new(...)' instead if you need custom construction logic.
 
   12 │ fn Point.default(): void {
-     │ ^~ Here!
+     │ ^~ this name is reserved for constructors
 
   Run `turf --explain E051` for more details.
 

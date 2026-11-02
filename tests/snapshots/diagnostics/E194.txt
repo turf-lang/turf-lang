@@ -7,7 +7,7 @@ tests/05_arrays_pointers_ffi/unsafe_checks_warn.tr (2 warnings)
   Hint: Keep only the raw-pointer operations inside `unsafe { }`, and move the rest out, or into a function.
 
   105 │     unsafe {
-      │     ^~~~~~ Here!
+      │     ^~~~~~ this `unsafe` block is very large
 
   Run `turf --explain E194` for more details.
 
@@ -18,7 +18,7 @@ tests/05_arrays_pointers_ffi/unsafe_checks_warn.tr (2 warnings)
   Hint: If the variable is intentionally unused, prefix its name with '_' by convention. Otherwise, remove the declaration or use its value.
 
   106 │         mut raw: int* = &t to int*;
-      │         ^ Here!
+      │         ^ this variable is never used
 
   Run `turf --explain E163` for more details.
 

@@ -7,7 +7,7 @@ tests/14_cfg_analysis/41_unreachable_block_and_dead_branch_warn.tr (4 warnings)
   Hint: Check your 'if' conditions. Are they impossible to be true, or did you 'return' before this block?
 
   11 │     if x > 0 {
-     │     ^~ Here!
+     │     ^~ this block never runs
 
   Run `turf --explain E074` for more details.
 
@@ -18,7 +18,7 @@ tests/14_cfg_analysis/41_unreachable_block_and_dead_branch_warn.tr (4 warnings)
   Hint: Check if you have code after a 'return', 'break', or 'continue' that can't be reached.
 
   11 │     if x > 0 {
-     │     ^~ Here!
+     │     ^~ this branch is never taken
 
   Run `turf --explain E075` for more details.
 
@@ -29,7 +29,7 @@ tests/14_cfg_analysis/41_unreachable_block_and_dead_branch_warn.tr (4 warnings)
   Hint: Check your 'if' conditions. Are they impossible to be true, or did you 'return' before this block?
 
   12 │         return 2;
-     │         ^~~~~~ Here!
+     │         ^~~~~~ this block never runs
 
   Run `turf --explain E074` for more details.
 
@@ -40,7 +40,7 @@ tests/14_cfg_analysis/41_unreachable_block_and_dead_branch_warn.tr (4 warnings)
   Hint: Check your 'if' conditions. Are they impossible to be true, or did you 'return' before this block?
 
   14 │     return 3;
-     │     ^~~~~~ Here!
+     │     ^~~~~~ this block never runs
 
   Run `turf --explain E074` for more details.
 

@@ -1069,6 +1069,10 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
     Type = ParseType();
     Parser().AllowGuessType = SavedAllowGuess;
     if (!Type) return nullptr;
+    // DX-5: the whole annotation, for a span that points at it. Only an
+    // annotation has an end; an omitted type leaves TypeLoc without one.
+    TypeLoc.EndLine = Lex().PrevTokEndLine;
+    TypeLoc.EndCol = Lex().PrevTokEndCol;
   } else {
     Type = TurfGuess();
   }

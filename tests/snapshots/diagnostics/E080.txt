@@ -7,7 +7,7 @@ tests/18_operator_overload/fail_operator_orphan_rule.tr (1 error)
   Hint: 'orphan_a_module::A' is declared in module 'orphan_a_module', not in the main file -- at least one operand of an operator declaration must be a struct or enum declared in the same module/file as the operator itself, so an operator's meaning never depends on import order.
 
   11 │ operator +(a: A, b: B): A {
-     │ ^ Here!
+     │ ^ neither the operator nor its types are declared here
 
   Run `turf --explain E080` for more details.
 

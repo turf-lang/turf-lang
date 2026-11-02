@@ -8,7 +8,7 @@ tests/04_control_flow/fail_continue_outside_loop.tr (1 error)
   Hint: Make sure 'break' and 'continue' are inside a loop, and 'return' is inside a function.
 
   5 │         continue;
-    │         ^~~~~~~~ Here!
+    │         ^~~~~~~~ this is not inside a loop or a function
 
   Run `turf --explain E007` for more details.
 

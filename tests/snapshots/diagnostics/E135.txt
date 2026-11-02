@@ -8,7 +8,7 @@ tests/03_typechecker/fail_call_literal.tr (1 error)
   Hint: Only a function, or a variable holding one, can be followed by '(...)'.
 
   7 │     5();
-    │      ^ Here!
+    │      ^ this cannot be called
 
   Run `turf --explain E135` for more details.
 

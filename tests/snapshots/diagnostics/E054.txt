@@ -7,7 +7,7 @@ tests/55_compiler_fixes/fail_fix_unknown_method.tr (1 error)
   Hint: It may be from the current file: 'bump'
 
   14 │     c.bmup();
-     │       ^~~~ Here!
+     │       ^~~~ the struct has no method of this name
 
   Fix: replace 'bmup' with 'bump'
   14 │     c.bump();

@@ -8,7 +8,7 @@ tests/snapshots/diagnostics/programs/E091/app/src/main.tr (1 error)
   Hint: A package can import only its own modules, its direct dependencies and the standard library. Add 'geometry' to [dependencies] in app's turf.toml to import it here.
 
   3 │ import geometry;
-    │        ^~~~~~~~ Here!
+    │        ^~~~~~~~ this module cannot be imported from here
 
   Run `turf --explain E091` for more details.
 

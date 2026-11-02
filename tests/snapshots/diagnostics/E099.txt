@@ -6,7 +6,7 @@ tests/01_syntax/fail_unterminated_string.tr (2 errors)
   Hint: Add a closing '"' before the end of the line -- Turf string literals can't span multiple lines. Need an actual line break inside the string? Use the \n escape instead.
 
   10 │     mut s: string = "oops, forgot the closing quote;
-     │                     ^ Here!
+     │                     ^ this literal is never closed
 
   Run `turf --explain E099` for more details.
 
@@ -16,7 +16,7 @@ tests/01_syntax/fail_unterminated_string.tr (2 errors)
   Hint: End the statement with ';' right after its last token, e.g. `x = x + 1;` or `return 0;`.
 
   11 │     return 0;
-     │     ^~~~~~ Here!
+     │     ^~~~~~ a `;` is missing here
 
   Run `turf --explain E102` for more details.
 

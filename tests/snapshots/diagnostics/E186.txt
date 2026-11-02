@@ -7,7 +7,7 @@ tests/14_cfg_analysis/endless_loops_warn.tr (1 warning)
   Hint: If the loop is meant to stop, let it leave before that call; if ending the program is the way out, write the loop as `while true`.
 
   78 │     while true {
-     │     ^~~~~ Here!
+     │     ^~~~~ every exit of this loop ends the program first
 
   Run `turf --explain E186` for more details.
 

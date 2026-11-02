@@ -7,7 +7,7 @@ tests/35_numeric_literals/fail_trailing_separator.tr (1 error)
   Hint: '_' is only a separator BETWEEN digits (like '1_000_000'), never at the very start or end of a digit run. Remove the trailing underscore in '5_'.
 
   7 │     mut x: int = 5_;
-    │                  ^ Here!
+    │                  ^ this separator is out of place
 
   Run `turf --explain E072` for more details.
 

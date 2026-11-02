@@ -7,7 +7,7 @@ tests/18_operator_overload/19_generic_operator_user_struct_forms.tr (1 warning)
   Hint: Did you mean to compare with a different variable?
 
   67 │     test::assert(ci == ci, "Cell<int> == Cell<int>");
-     │                     ^~ Here!
+     │                     ^~ this compares a value with itself
 
   Run `turf --explain E166` for more details.
 

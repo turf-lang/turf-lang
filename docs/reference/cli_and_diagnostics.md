@@ -544,7 +544,7 @@ oob.tr (1 error)
   Hint: Array indices start at 0 and go up to size - 1; a negative index counts back from the end (-1 is the last element).
 
   4 │     return primes[i];
-    │                  ^ Here!
+    │                  ^ this index is outside the array
 
   Run `turf --explain E001` for more details.
 ```
@@ -554,9 +554,16 @@ Top to bottom:
 1. **File header.** The path of the file the diagnostics below belong to, then a count: `src/main.tr (2 errors, 1 warning)`. Diagnostics are batched **per file**: the file you compiled comes first, then each imported module, and within a file they are sorted by line and column. The path is relative to the directory you ran the command from; a standard-library file is shown from `lib/std/` on.
 2. **Diagnostic header.** `── error at line 4, col 18 [E001 · array bounds]`: the position, the **code** (`E001`) and the **category** (`array error`). The code is what you give to `turf explain`. The categories are type mismatch, undeclared variable, control flow, syntax error, arithmetic, string conversion, array error, declaration, function signature, builtin function, memory error and general. A diagnostic with no source position (a missing `main`) omits "at line, col". Many warnings carry no code and no category.
 3. **The message**, in plain words.
-4. Zero or more `Note:` lines, one per related location (`Note: declared here (line 2, col 5)`).
+4. Zero or more `Note:` lines, one per related location the snippet does not show (`Note: candidate: f(string s) -> int (other.tr, line 2, col 4)`): one in another file, on a later line, or beyond the first three.
 5. An optional **hint**: one line saying how to fix it.
-6. A **source snippet**: the line, with an underline under the offending token and the word `Here!`. A single-token span is underlined `^~~~`; where only a position is known, it is a bare `^`.
+6. A **source snippet** with **labelled spans**. The **primary span** is underlined `^~~~` under the code that is wrong, with a label saying what it is: `this is an `int``. Where only a position is known, it is a bare `^`. The **secondary spans** are the related locations in the same file, on the same line or an earlier one, underlined `---` with their own label: where an expectation came from (`` `s` is a `string` because of this ``), or a first declaration. Every line that carries a span is shown, in order; `┆` marks lines left out between them. When spans share a line, the rightmost label is written beside its underline and the others hang below it, joined to their span by `│`; spans that overlap are underlined on separate rows.
+
+   ```text
+     2 │     immut s: string = 5;
+       │              ------   ^ this is an `int`
+       │              │
+       │              `s` is a `string` because of this
+   ```
 7. An optional **`Fix:`**, the corrected line (see [Fixes](#fixes)).
 8. A **footer**, when the diagnostic has a code: ``Run `turf --explain E0NN` for more details.`` For the codes that most need reading in full, it is the stronger `Worth reading in full -- run `turf --explain E0NN` before you patch this one.`
 
@@ -577,7 +584,7 @@ greet.tr (1 error)
   Hint: It may be from the current file: 'name'
 
   6 │     printline("Hello, " + nmae + "!");
-    │                           ^~~~ Here!
+    │                           ^~~~ nothing of this name is in scope
 
   Fix: replace 'nmae' with 'name'
   6 │     printline("Hello, " + name + "!");
@@ -623,7 +630,7 @@ $ turfc main.tr --check --diagnostics=json
 
 | Field | Value |
 |---|---|
-| `version` | The schema version, `"1.0"`. A minor version adds fields; a major version changes or removes one. `turfc --version --json` reports it too. |
+| `version` | The schema version, `"1.1"`. A minor version adds fields; a major version changes or removes one. `turfc --version --json` reports it too. Version 1.1 added `label`. |
 | `severity` | `"error"` or `"warning"`. A warning whose [lint level](#lint-levels) is `deny` is an `"error"`, with `denied` set. |
 | `code` | `"E040"`. Every error has one; `null` only for a warning with no code. |
 | `category` | The code's category from the registry (`"type mismatch"`), or `null`. |
@@ -632,7 +639,8 @@ $ turfc main.tr --check --diagnostics=json
 | `hint` | The `Hint:` text, or `null`. |
 | `file` | The file, as the compiler opened it. |
 | `span` | `{"start": {"line", "column"}, "end": {"line", "column"}}`: 1-based, columns in bytes, `end` exclusive. `null` for a diagnostic about a whole file. |
-| `related` | The `Note:` locations: `[{"file", "span", "message"}]`. |
+| `label` | What the primary span's underline says (`"this is an `int`"`), or `null` when `span` is. |
+| `related` | The secondary spans and `Note:` locations, every related location the text form shows: `[{"file", "span", "message"}]`. `message` is the label. |
 | `fix` | The compiler's checked [fix](#fixes) as `{"description", "edits": [{"file", "span", "replacement"}]}`, or `null`. The edits apply to the original text and never overlap. |
 | `denied` | `true` for a warning made an error by `deny`. |
 
@@ -712,7 +720,7 @@ typo.tr (1 error)
   Hint: It may be from the current file: 'container'
 
   3 │     return contaner;
-    │            ^~~~~~~~ Here!
+    │            ^~~~~~~~ nothing of this name is in scope
 
   Fix: replace 'contaner' with 'container'
   3 │     return container;
@@ -972,7 +980,7 @@ fn main(): int {
   Hint: Delete this code or move it before the 'return/break/continue' statement.
 
   2 │     return 0;
-    │     ^~~~~~ Here!
+    │     ^~~~~~ nothing after the statement before this runs
 ```
 
 ### Unreachable code (E074)
@@ -1000,7 +1008,7 @@ fn main(): int {
   Hint: Check your 'if' conditions. Are they impossible to be true, or did you 'return' before this block?
 
   5 │     return 2;
-    │     ^~~~~~ Here!
+    │     ^~~~~~ this block never runs
 
   Run `turf --explain E074` for more details.
 ```

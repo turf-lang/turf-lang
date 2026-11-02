@@ -1104,6 +1104,8 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation, SourceLocation Sta
                      FuncName + "'.\n  Hint: Give each parameter of '" + FuncName + "' a name and a type: `" + FuncName + "(a: int, b: int)`.", SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
+    ParamTypeLoc.EndLine = Lex().PrevTokEndLine; // DX-5: the whole type
+    ParamTypeLoc.EndCol = Lex().PrevTokEndCol;
 
     // See isDisallowedVoidType()'s doc comment above ParseType(): a
     // void-typed parameter was observed to hang the compiler indefinitely
@@ -1226,11 +1228,15 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation, SourceLocation Sta
   getNextToken(); // eat ':'
 
   // Call ParseType() → save as ReturnType
+  const SourceLocation RetTypeStart = Lex().CurLoc;
   TurfTypePtr RetType = ParseType();
   if (!RetType) {
     LogErrorAt(Lex().CurLoc, ErrCode::ExpectedType, "Expected return type.", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
+  // DX-5: the declared return type, for the span a wrong `return` points back at.
+  const SourceLocation RetTypeLoc{RetTypeStart.Line, RetTypeStart.Col, RetTypeStart.Filename,
+                                  Lex().PrevTokEndLine, Lex().PrevTokEndCol};
 
   // `fn f(): int;` used to build a FuncDefExprAST with a null Body as a
   // "forward declaration". Turf has none (the program is one pass over all
@@ -1259,6 +1265,7 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation, SourceLocation Sta
                                               std::move(Body), TypeParams,
                                               IsStaticMethodDecl, HasCallerLocation);
   Def->BodyEnd = Lex().CurLoc;
+  Def->RetTypeLoc = RetTypeLoc;
   Def->UsesTry = TryScope.used();
   Def->SizeParams = SizeParams;
   NoteFunctionParsed(FuncName);
@@ -1414,6 +1421,8 @@ std::unique_ptr<ExprAST> ParseOperatorDecl(bool HasCallerLocation) {
                      FuncName + "'.\n  Hint: Give each parameter of '" + FuncName + "' a name and a type: `" + FuncName + "(a: int, b: int)`.", SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
+    ParamTypeLoc.EndLine = Lex().PrevTokEndLine; // DX-5: the whole type
+    ParamTypeLoc.EndCol = Lex().PrevTokEndCol;
 
     if (isDisallowedVoidType(ParamType.get())) {
       LogErrorAt(ParamTypeLoc, ErrCode::VoidTypeNotAllowed,

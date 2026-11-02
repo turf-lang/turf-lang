@@ -7,7 +7,7 @@ tests/04_control_flow/warn_for_loop_var_never_advances.tr (2 warnings)
   Hint: If the variable is intentionally unused, prefix its name with '_' by convention. Otherwise, remove the declaration or use its value.
 
   16 │     mut j: int = 0;
-     │     ^ Here!
+     │     ^ this variable is never used
 
   Run `turf --explain E163` for more details.
 
@@ -18,7 +18,7 @@ tests/04_control_flow/warn_for_loop_var_never_advances.tr (2 warnings)
   Hint: Make sure 'step' (or something in the body) actually updates 'i'. If a DIFFERENT variable is meant to control when the loop ends, use 'while' instead of 'for' -- 'for' always iterates its own induction variable, it doesn't watch other variables for you.
 
   20 │     for i in 0..10 step j += 10 {
-     │     ^~~ Here!
+     │     ^~~ this loop variable never changes
 
   Run `turf --explain E164` for more details.
 

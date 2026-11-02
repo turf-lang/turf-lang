@@ -8,7 +8,7 @@ tests/04_control_flow/fail_break_outside_loop.tr (1 error, 1 warning)
   Hint: Make sure 'break' and 'continue' are inside a loop, and 'return' is inside a function.
 
   5 │         break;
-    │         ^~~~~ Here!
+    │         ^~~~~ this is not inside a loop or a function
 
   Run `turf --explain E007` for more details.
 
@@ -19,7 +19,7 @@ tests/04_control_flow/fail_break_outside_loop.tr (1 error, 1 warning)
   Hint: If you haven't written the code yet, add a comment like '// TODO'. Otherwise, you may be able to simplify this 'if' statement.
 
   6 │     } else {}
-    │       ^~~~ Here!
+    │       ^~~~ this branch is empty
 
   Run `turf --explain E165` for more details.
 

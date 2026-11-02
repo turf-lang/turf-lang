@@ -8,7 +8,7 @@ tests/04_control_flow/fail_foreach_over_int.tr (1 error)
   Hint: for-each works on an array (T[N], or a T[] parameter) and on a string, byte by byte. Walk a List by index (`for i in 0..l.length()`) and a Map through keys().
 
   5 │     for value in x {
-    │     ^~~ Here!
+    │     ^~~ this is not an array
 
   Run `turf --explain E005` for more details.
 

@@ -7,7 +7,7 @@ tests/55_compiler_fixes/fail_fix_none_when_ambiguous.tr (1 error)
   Hint: It may be from the current file: 'car', 'cat'
 
   8 │     return cax - 1;
-    │            ^~~ Here!
+    │            ^~~ nothing of this name is in scope
 
   Run `turf --explain E040` for more details.
 

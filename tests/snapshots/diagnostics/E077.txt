@@ -8,7 +8,7 @@ tests/36_numeric_semantics/fail_int_literal_not_exact_as_double.tr (1 error)
   Hint: Use 'int' instead, or write the value as a float literal ('9223372036854775807.0') if the rounded value is what you actually want.
 
   7 │     mut d: double = 9223372036854775807;
-    │     ^~~ Here!
+    │     ^~~ this literal is not exact as a `double`
 
   Run `turf --explain E077` for more details.
 

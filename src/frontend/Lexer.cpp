@@ -20,6 +20,7 @@
 #include "diagnostics/Colors.h"
 #include "diagnostics/ErrorCodes.h"
 #include "diagnostics/LintLevels.h"
+#include "diagnostics/PrimaryLabels.h" // DX-5: a code's own primary label
 #include "diagnostics/DiagnosticsJson.h" // DX-2: --diagnostics=json
 #include "diagnostics/ErrorsLex.h" // MalformedRadixPrefixError and friends (SEM-001) -- see
                        // ErrorsLex.h's own top comment for why Lexer.cpp,
@@ -322,6 +323,194 @@ static void writeCompilerFixes(const std::vector<DiagnosticEngine::Diag> &Diags)
     Out << L << '\n';
 }
 
+std::string diagLabel(const DiagnosticEngine::Diag &D) {
+  if (!D.Hints.Label.empty())
+    return D.Hints.Label;
+  if (const char *L = ErrorCodes::defaultLabel(D.Code.c_str()))
+    return L;
+  return "here";
+}
+
+namespace {
+
+// At most this many related locations are drawn as secondary spans; the rest
+// are notes. A list of every overload is a note, not a picture.
+constexpr size_t MaxSecondarySpans = 3;
+
+const std::vector<std::string> *diagFileLines(const DiagnosticEngine::Diag &D) {
+  auto It = AllSourceLines.find(D.Filename);
+  if (It == AllSourceLines.end() || D.Loc.Line < 1 ||
+      D.Loc.Line > static_cast<int>(It->second.size()))
+    return nullptr;
+  return &It->second;
+}
+
+// One underlined stretch of a snippet line: [Col, Col + Width), 1-based.
+struct SnippetSpan {
+  int Line = 0, Col = 1, Width = 1;
+  bool Primary = false;
+  std::string Label;
+};
+
+int spanWidth(const SourceLocation &L, const std::string &Text) {
+  int W = 1;
+  if (L.EndCol != -1 && L.EndLine == L.Line && L.EndCol > L.Col)
+    W = L.EndCol - L.Col;
+  const int Room = static_cast<int>(Text.size()) - (L.Col - 1);
+  return std::max(1, std::min(W, std::max(Room, 1)));
+}
+
+} // namespace
+
+// DX-5: which of D's related locations renderSnippet() draws: in D's own
+// file, on D's line or an earlier one, not at D's own position, and only the
+// first MaxSecondarySpans of those.
+static std::vector<bool> drawnRelated(const DiagnosticEngine::Diag &D) {
+  std::vector<bool> Drawn(D.RelatedLocations.size(), false);
+  const auto *Lines = diagFileLines(D);
+  if (!Lines)
+    return Drawn;
+  size_t Count = 0;
+  for (size_t I = 0; I < D.RelatedLocations.size() && Count < MaxSecondarySpans; ++I) {
+    const SourceLocation &L = D.RelatedLocations[I].Loc;
+    const bool SameFile = L.Filename.empty() || L.Filename == D.Filename;
+    if (!SameFile || L.Line < 1 || L.Line > D.Loc.Line || L.Col < 1 ||
+        L.Col > static_cast<int>((*Lines)[L.Line - 1].size()) ||
+        (L.Line == D.Loc.Line && L.Col == D.Loc.Col))
+      continue;
+    Drawn[I] = true;
+    ++Count;
+  }
+  return Drawn;
+}
+
+// DX-5: the snippet under a diagnostic. Every line that carries a span is
+// shown, in order, with a gap mark between lines that are not adjacent (one
+// line between is shown instead). On a line, the spans are underlined --
+// `^~~` for the primary, `---` for a secondary -- on one row when they do not
+// overlap, on rows below when they do. The rightmost span of a row has its
+// label beside it; the others hang below, joined to their span by `│`.
+static std::string renderSnippet(const DiagnosticEngine::Diag &D,
+                                 const std::vector<bool> &Drawn,
+                                 const std::string &AccentColor) {
+  const auto *Lines = diagFileLines(D);
+  if (!Lines)
+    return "";
+  std::vector<SnippetSpan> Spans;
+  {
+    const std::string &Text = (*Lines)[D.Loc.Line - 1];
+    SnippetSpan P;
+    P.Line = D.Loc.Line;
+    P.Col = std::max(D.Loc.Col, 1);
+    P.Width = spanWidth(SourceLocation{D.Loc.Line, P.Col, "", D.Loc.EndLine, D.Loc.EndCol}, Text);
+    P.Primary = true;
+    P.Label = diagLabel(D);
+    Spans.push_back(P);
+  }
+  for (size_t I = 0; I < D.RelatedLocations.size(); ++I) {
+    if (!Drawn[I])
+      continue;
+    const auto &R = D.RelatedLocations[I];
+    SnippetSpan S;
+    S.Line = R.Loc.Line;
+    S.Col = R.Loc.Col;
+    S.Width = spanWidth(R.Loc, (*Lines)[R.Loc.Line - 1]);
+    S.Label = R.Description;
+    Spans.push_back(S);
+  }
+
+  std::vector<int> Shown;
+  for (const auto &S : Spans)
+    Shown.push_back(S.Line);
+  std::sort(Shown.begin(), Shown.end());
+  Shown.erase(std::unique(Shown.begin(), Shown.end()), Shown.end());
+  // One line between two shown ones is shown itself; more are a gap.
+  for (size_t I = 1; I < Shown.size(); ++I)
+    if (Shown[I] - Shown[I - 1] == 2) {
+      Shown.insert(Shown.begin() + I, Shown[I - 1] + 1);
+      ++I;
+    }
+
+  const size_t NumWidth = std::to_string(Shown.back()).size();
+  const std::string Blank(NumWidth, ' ');
+  auto gutter = [&](const std::string &Num) {
+    return Colors::BRIGHT_BLACK + "  " + std::string(NumWidth - Num.size(), ' ') +
+           Num + " │ " + Colors::RESET;
+  };
+  auto colorOf = [&](const SnippetSpan &S) {
+    return S.Primary ? Colors::BOLD + AccentColor : Colors::BRIGHT_BLUE;
+  };
+
+  std::string Out = "\n";
+  for (size_t LI = 0; LI < Shown.size(); ++LI) {
+    const int Line = Shown[LI];
+    if (LI > 0 && Line - Shown[LI - 1] > 1)
+      Out += Colors::BRIGHT_BLACK + "  " + Blank + " ┊" + Colors::RESET + "\n";
+    Out += gutter(std::to_string(Line)) + (*Lines)[Line - 1] + "\n";
+
+    // This line's spans, in rows that do not overlap: the primary first.
+    std::vector<const SnippetSpan *> Here;
+    for (const auto &S : Spans)
+      if (S.Line == Line)
+        Here.push_back(&S);
+    std::stable_sort(Here.begin(), Here.end(), [](const SnippetSpan *A, const SnippetSpan *B) {
+      return A->Primary > B->Primary;
+    });
+    std::vector<std::vector<const SnippetSpan *>> Rows;
+    for (const SnippetSpan *S : Here) {
+      bool Placed = false;
+      for (auto &Row : Rows) {
+        bool Clear = true;
+        for (const SnippetSpan *O : Row)
+          Clear = Clear && (S->Col + S->Width < O->Col || O->Col + O->Width < S->Col);
+        if (Clear) {
+          Row.push_back(S);
+          Placed = true;
+          break;
+        }
+      }
+      if (!Placed)
+        Rows.push_back({S});
+    }
+
+    for (auto &Row : Rows) {
+      std::sort(Row.begin(), Row.end(), [](const SnippetSpan *A, const SnippetSpan *B) {
+        return A->Col < B->Col;
+      });
+      // The underlines, and the rightmost span's label beside its own.
+      std::string Marks;
+      int At = 1;
+      for (const SnippetSpan *S : Row) {
+        Marks += std::string(S->Col - At, ' ') + colorOf(*S) +
+                 (S->Primary ? "^" + std::string(S->Width - 1, '~')
+                             : std::string(S->Width, '-')) +
+                 Colors::RESET;
+        At = S->Col + S->Width;
+      }
+      const SnippetSpan *Last = Row.back();
+      Out += gutter("") + Marks + colorOf(*Last) + " " + Last->Label + Colors::RESET + "\n";
+      // The others' labels hang below, right to left.
+      for (size_t K = Row.size() - 1; K-- > 0;) {
+        auto bars = [&](size_t UpTo) {
+          std::string B;
+          int Col = 1;
+          for (size_t J = 0; J < UpTo; ++J) {
+            B += std::string(Row[J]->Col - Col, ' ') + colorOf(*Row[J]) + "│" + Colors::RESET;
+            Col = Row[J]->Col + 1;
+          }
+          return std::make_pair(B, Col);
+        };
+        auto [Above, ColA] = bars(K + 1);
+        Out += gutter("") + Above + "\n";
+        auto [Left, ColL] = bars(K);
+        Out += gutter("") + Left + std::string(Row[K]->Col - ColL, ' ') + colorOf(*Row[K]) +
+               Row[K]->Label + Colors::RESET + "\n";
+      }
+    }
+  }
+  return Out;
+}
+
 // Internal helper: physically print one diagnostic to stderr.
 static void printDiag(const DiagnosticEngine::Diag &D) {
   // A denied warning is an error even though its text still says "Warning:".
@@ -365,20 +554,14 @@ static void printDiag(const DiagnosticEngine::Diag &D) {
   // Message body — embedded ANSI codes from error classes render intact.
   std::cerr << "  " << D.Msg << "\n";
 
-  // Structural "declared here" / "candidate: ..." context -- e.g. where an
-  // earlier conflicting declaration or a rejected overload actually lives.
-  // ~30 call sites across the compiler already attach these via
-  // TurfError::withRelated()/RelatedLocations_, but until now they were
-  // ONLY ever fed to the SLM prompt as pinned context (see RelatedLocation's
-  // own doc comment) -- an ordinary compile with no --smart/--online never
-  // rendered them at all, so e.g. an extern-conflict or duplicate-
-  // 'otherwise'-arm error pointed at the new occurrence with no way to see
-  // where the original one was. Rendered as one blue note per location,
-  // mirroring the hand-rolled "Note: you first created it at line X..."
-  // wording a couple of error classes used to build manually before this
-  // existed (now redundant there and removed, see DuplicateDeclarationError/
-  // ShadowingWarning).
-  for (const auto &Rel : D.RelatedLocations) {
+  // The related locations drawn in the snippet below (DX-5): the secondary
+  // spans. The rest -- another file, a later line, beyond the first few --
+  // are notes here, one per location.
+  const std::vector<bool> Drawn = drawnRelated(D);
+  for (size_t I = 0; I < D.RelatedLocations.size(); ++I) {
+    if (Drawn[I])
+      continue;
+    const auto &Rel = D.RelatedLocations[I];
     // LEC-005: a note in a DIFFERENT file than the diagnostic (an
     // instantiation chain walks from the user's file into `lib/std`) names
     // it -- "line 125, col 29" alone would read as a position in the user's
@@ -403,39 +586,12 @@ static void printDiag(const DiagnosticEngine::Diag &D) {
               << " is a warning by default; its lint level here is deny."
               << Colors::RESET << "\n";
 
-  // Code snippet with │ gutter. Looked up from AllSourceLines (a persistent,
-  // cross-pass, per-file cache) via D.Filename, NOT the transient global
-  // SourceLines -- see AllSourceLines' doc comment in Lexer.h for why: by
-  // the time flushAll() runs, SourceLines reflects whatever file was parsed
-  // LAST (normally back to the main file), which is the wrong content for
-  // any diagnostic whose Loc originated inside an imported module.
-  auto FileLinesIt = AllSourceLines.find(D.Filename);
-  if (FileLinesIt != AllSourceLines.end() && D.Loc.Line > 0 &&
-      D.Loc.Line <= static_cast<int>(FileLinesIt->second.size())) {
-    const std::string &LineContent = FileLinesIt->second[D.Loc.Line - 1];
-    std::string LineNumStr = std::to_string(D.Loc.Line);
-    int CaretOffset = (D.Loc.Col > 0) ? D.Loc.Col - 1 : 0;
-
-    // Underline the token's full width when an end position was recorded
-    // (EndCol != -1, same line as the start -- see SourceLocation's own doc
-    // comment in Lexer.h for which token kinds populate this) instead of
-    // just a single '^'. Falls back to a bare '^' for locations with no end
-    // position yet (multi-token spans -- a whole sub-expression -- remain
-    // out of scope, see issue #241 Track D) or a degenerate zero-width span.
-    int SpanWidth = 1;
-    if (D.Loc.EndCol != -1 && D.Loc.EndLine == D.Loc.Line &&
-        D.Loc.EndCol > D.Loc.Col)
-      SpanWidth = D.Loc.EndCol - D.Loc.Col;
-    std::string Underline = "^" + std::string(SpanWidth - 1, '~');
-
-    std::cerr << "\n"
-              << Colors::BRIGHT_BLACK << "  " << LineNumStr << " \u2502 "
-              << Colors::RESET << LineContent << "\n"
-              << Colors::BRIGHT_BLACK << "  "
-              << std::string(LineNumStr.length(), ' ') << " \u2502 "
-              << Colors::RESET << std::string(CaretOffset, ' ') << Colors::BOLD
-              << AccentColor << Underline << " Here!" << Colors::RESET << "\n";
-  }
+  // Code snippet with │ gutter, the primary span labelled and the drawn
+  // related locations as secondary spans (DX-5, renderSnippet()). Looked up
+  // from AllSourceLines (a persistent, cross-pass, per-file cache) via
+  // D.Filename, NOT the transient global SourceLines: by the time flushAll()
+  // runs, SourceLines reflects whatever file was parsed LAST.
+  std::cerr << renderSnippet(D, Drawn, AccentColor);
 
   // TDP-2-001: the checked fix, as the corrected line(s).
   std::cerr << CompilerFixes::render(D.Fix);

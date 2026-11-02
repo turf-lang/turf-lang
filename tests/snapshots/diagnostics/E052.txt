@@ -7,7 +7,7 @@ tests/07_functions_modules/fail_static_method_via_instance_no_args.tr (1 error)
   Hint: 'MathUtil.square' takes no implicit 'self' (it's declared 'static'). Call it as 'MathUtil::square(...)' instead.
 
   16 │     immut y: int = mu.square();
-     │                      ^ Here!
+     │                      ^ this method is `static`, so it has no instance
 
   Run `turf --explain E052` for more details.
 

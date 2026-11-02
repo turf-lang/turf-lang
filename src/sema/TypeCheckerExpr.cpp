@@ -12,6 +12,7 @@
 
 #include "frontend/Parser.h" // IsLibStdWarningLocation
 #include "sema/TypeChecker.h"
+#include "sema/SpanLabels.h"
 
 // AST.h is needed for the full definition of every node type.
 // It drags in LLVM headers, but TypeChecker itself does not use any LLVM API.
@@ -872,12 +873,23 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
         // explicit annotation does, so the generic "declared here" note
         // would leave a reader to go re-read the initializer themselves --
         // name the inferred type directly instead.
-        std::string Note = LHSVar->ResolvedSymbol->WasGuessInferred
-            ? "'" + LHSVar->getName() + "' was inferred as '" +
-                  LhsTy->getName() + "' here"
-            : "declared here";
-        Related.push_back({toSourceLocation(LHSVar->ResolvedSymbol->DeclLoc),
-                           Note});
+        // DX-5: a written type is where the expectation came from, and
+        // the span points at it.
+        const VariableSymbol &Sym = *LHSVar->ResolvedSymbol;
+        if (Sym.WasGuessInferred) {
+          Related.push_back({toSourceLocation(Sym.DeclLoc),
+                             "'" + LHSVar->getName() + "' was inferred as '" +
+                                 LhsTy->getName() + "' here"});
+        } else if (Sym.TypeLoc.Line > 0 && Sym.TypeEndCol > Sym.TypeLoc.Col) {
+          SourceLocation T = toSourceLocation(Sym.TypeLoc);
+          T.EndLine = T.Line;
+          T.EndCol = Sym.TypeEndCol;
+          Related.push_back({T, "`" + LHSVar->getName() + "` is " +
+                                    SpanLabels::aType(LhsTy.get()) +
+                                    " because of this"});
+        } else {
+          Related.push_back({toSourceLocation(Sym.DeclLoc), "declared here"});
+        }
       }
       // SLM-001 §16.3 item 3: surface a `guess`-inferred operand's resolved
       // type as a structured fact for the SLM prompt. Deliberately narrower
@@ -903,7 +915,8 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
       // Every other identifier in the assigned value (SLM C4): its type is
       // what the mismatch is about, and it may be declared out of sight.
       addIdentifierTypes(Node.getRHS(), Hints);
-      reportError(Node.getLoc(),
+      Hints.Label = SpanLabels::thisIs(RhsTy.get());
+      reportError(SpanLabels::spanOf(Node.getRHS(), Node.getLoc()),
                   codeForMismatch(RhsTy.get(), nullptr, ErrCode::TypeMismatch),
                   "Cannot assign value of type '" + RhsTy->getName() +
                       "' to variable of type '" + LhsTy->getName() + "'.",

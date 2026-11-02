@@ -73,6 +73,8 @@ void productionErrorHandler(SourceLocation Loc, const char *Code,
     Err.withFixDescription(Hints.FixDescription);
   for (const auto &Alt : Hints.FixAlternatives)
     Err.withFixAlternative(Alt);
+  if (!Hints.Label.empty())
+    Err.withLabel(Hints.Label);
   Err.raise();
 }
 #else

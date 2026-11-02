@@ -7,7 +7,7 @@ tests/01_syntax/fail_assign_true.tr (1 error)
   Hint: Only those can appear on the left of '='.
 
   3 │     true = 5;
-    │          ^ Here!
+    │          ^ this cannot be assigned to
 
   Run `turf --explain E061` for more details.
 

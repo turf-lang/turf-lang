@@ -227,6 +227,7 @@ public:
    */
   void resetForRecovery() {
     ReturnTypeStack_.clear();
+    FuncStack_.clear();
     MachineNarrowStack_.clear();
     LoopVarTypes_.clear();
     // UnsafeDepth_: mirrors ReturnTypeStack_/MachineNarrowStack_ above -- a
@@ -825,6 +826,9 @@ private:
   /// Stack of expected return types for nested function definitions.
   /// Empty when we are at the top level.
   std::vector<TurfTypePtr> ReturnTypeStack_;
+  // The function each ReturnTypeStack_ entry is from, for the span a wrong
+  // `return` points back at (DX-5, FuncDefExprAST::RetTypeLoc).
+  std::vector<const FuncDefExprAST *> FuncStack_;
   /// The `base[i]` on the left of the assignment being checked, if any.
   /// visitArrayAccess() reports "cannot index a value of type X" for a base
   /// nothing can index, but an assignment target has a more specific diagnostic

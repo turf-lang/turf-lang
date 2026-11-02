@@ -7,7 +7,7 @@ tests/07_functions_modules/cycle_a_module.tr (1 error)
   Hint: Make sure the file 'cycle_b_module.tr' exists in the standard library or your current directory.
 
   6 │ import cycle_b_module;
-    │ ^~~~~~ Here!
+    │ ^~~~~~ no module of this name
 
   Run `turf --explain E027` for more details.
 
@@ -24,7 +24,7 @@ tests/07_functions_modules/cycle_b_module.tr (1 error)
   Hint: Break the cycle by removing one of these imports, or moving the code both sides actually need into a third module that neither one has to import the other to reach.
 
   4 │ import cycle_a_module;
-    │ ^~~~~~ Here!
+    │ ^~~~~~ this import leads back to this file
 
   Run `turf --explain E019` for more details.
 

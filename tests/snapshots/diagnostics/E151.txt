@@ -8,7 +8,7 @@ tests/06_structs/fail_local_generic_struct.tr (1 error)
   Hint: Move 'struct Box<...>' to the top level of the file, or drop its type parameters and give its fields concrete types.
 
   7 │     struct Box<T> {
-    │     ^~~~~~ Here!
+    │     ^~~~~~ this generic struct is inside a function
 
   Run `turf --explain E151` for more details.
 

@@ -7,7 +7,7 @@ tests/07_functions_modules/fail_export_inside_function.tr (1 error)
   Hint: Move this declaration to the top level of the file (outside any function) if it needs to be exported. A regular 'mut LOCAL' or 'immut LOCAL' declaration (no 'export') is fine right here if it doesn't need to be shared with other files.
 
   7 │     export immut LOCAL: int = 5;
-    │            ^~~~~ Here!
+    │            ^~~~~ this export is inside a block
 
   Run `turf --explain E023` for more details.
 

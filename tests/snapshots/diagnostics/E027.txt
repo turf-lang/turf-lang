@@ -7,7 +7,7 @@ tests/07_functions_modules/fail_import_self.tr (1 error)
   Hint: Make sure the file 'fail_import_self.tr' exists in the standard library or your current directory.
 
   5 │ import fail_import_self;
-    │ ^~~~~~ Here!
+    │ ^~~~~~ no module of this name
 
   Run `turf --explain E027` for more details.
 

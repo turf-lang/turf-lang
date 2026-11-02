@@ -1320,6 +1320,12 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
 }
 
 
+// DX-5: the span from `Start` to the end of the token just read.
+static SourceLocation spanFrom(const SourceLocation &Start) {
+  return SourceLocation{Start.Line, Start.Col, Start.Filename,
+                        Lex().PrevTokEndLine, Lex().PrevTokEndCol};
+}
+
 // This function handles the "Right Hand Side" of an expression.
 // ExprPrec: The precedence of the operator strictly to our left.
 static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
@@ -1343,7 +1349,12 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
       auto CastType = ParseType();
       if (!CastType)
         return nullptr;
-      LHS = std::make_unique<CastExprAST>(OpLoc, CastType, std::move(LHS));
+      {
+        const SourceLocation Start = LHS->getSpan();
+        LHS = std::make_unique<CastExprAST>(OpLoc, CastType, std::move(LHS));
+        if (Start.Line > 0)
+          LHS->setSpan(spanFrom(Start));
+      }
       continue;
     }
 
@@ -1374,7 +1385,8 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
         return nullptr;
     }
 
-    // Merge LHS and RHS into a new node
+    // Merge LHS and RHS into a new node, which spans both (DX-5).
+    const SourceLocation LHSStart = LHS->getSpan();
     if (BinOp == TOK_ASSIGN) {
       LHS = std::make_unique<AssignmentExprAST>(OpLoc, std::move(LHS),
                                                 std::move(RHS));
@@ -1416,6 +1428,8 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
       LHS = std::make_unique<BinaryExprAST>(OpLoc, BinOp, std::move(LHS),
                                             std::move(RHS));
     }
+    if (LHSStart.Line > 0)
+      LHS->setSpan(spanFrom(LHSStart));
   }
 }
 
@@ -1562,7 +1576,19 @@ std::unique_ptr<ExprAST> Parse() {
 }
 
 
+static std::unique_ptr<ExprAST> ParseUnaryImpl();
+
+// A unary expression -- a literal, a name, a call, a postfix chain, a prefix
+// operator and its operand -- with the span it was read from (ExprAST::Span).
 std::unique_ptr<ExprAST> ParseUnary() {
+  const SourceLocation Start = Lex().CurLoc;
+  auto E = ParseUnaryImpl();
+  if (E && !E->hasSpan() && Start.Line > 0)
+    E->setSpan(spanFrom(Start));
+  return E;
+}
+
+static std::unique_ptr<ExprAST> ParseUnaryImpl() {
   // Recurses into itself directly for chained prefix operators (`!!!!x`,
   // `~~~x`, `---x`) without going back through ParseExpression(), so it
   // needs its OWN recursion guard: otherwise a long run of `!` is that many

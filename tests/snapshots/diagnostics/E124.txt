@@ -8,7 +8,7 @@ tests/03_typechecker/fail_bool_equals_int.tr (1 error)
   Hint: Compare values of the same kind (two ints, two strings, ...). To compare structs, compare the fields you care about.
 
   4 │     printline(true == 1);
-    │                    ^~ Here!
+    │                    ^~ these values cannot be compared
 
   Run `turf --explain E124` for more details.
 

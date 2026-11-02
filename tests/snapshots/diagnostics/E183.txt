@@ -7,7 +7,7 @@ tests/14_cfg_analysis/unreachable_base_case_warns.tr (3 warnings)
   Hint: Check the condition in front of this base case against the values that reach it, such as an earlier guard or the loop that bounds them.
 
   19 │         return n;
-     │         ^~~~~~ Here!
+     │         ^~~~~~ this base case is never reached
 
   Run `turf --explain E183` for more details.
 
@@ -18,7 +18,7 @@ tests/14_cfg_analysis/unreachable_base_case_warns.tr (3 warnings)
   Hint: Check the condition in front of this base case against the values that reach it, such as an earlier guard or the loop that bounds them.
 
   27 │             return i;
-     │             ^~~~~~ Here!
+     │             ^~~~~~ this base case is never reached
 
   Run `turf --explain E183` for more details.
 
@@ -29,7 +29,7 @@ tests/14_cfg_analysis/unreachable_base_case_warns.tr (3 warnings)
   Hint: Check the condition in front of this base case against the values that reach it, such as an earlier guard or the loop that bounds them.
 
   38 │         return 0;
-     │         ^~~~~~ Here!
+     │         ^~~~~~ this base case is never reached
 
   Run `turf --explain E183` for more details.
 

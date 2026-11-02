@@ -7,7 +7,7 @@ tests/05_arrays_pointers_ffi/unsafe_checks_warn.tr (2 warnings)
   Hint: Free only what `mem::alloc` (or another allocating function) returned; the address of a variable is freed when its function returns.
 
   51 │         mem::free(px);
-     │                  ^ Here!
+     │                  ^ this memory was never allocated
 
   Run `turf --explain E189` for more details.
 
@@ -18,7 +18,7 @@ tests/05_arrays_pointers_ffi/unsafe_checks_warn.tr (2 warnings)
   Hint: If the variable is intentionally unused, prefix its name with '_' by convention. Otherwise, remove the declaration or use its value.
 
   106 │         mut raw: int* = &t to int*;
-      │         ^ Here!
+      │         ^ this variable is never used
 
   Run `turf --explain E163` for more details.
 

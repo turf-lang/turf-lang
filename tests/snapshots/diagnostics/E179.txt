@@ -7,7 +7,7 @@ tests/57_test_functions/04_error_type_named_error.tr (1 warning)
   Hint: Remove the `import` line.
 
   5 │ import test;
-    │ ^~~~~~ Here!
+    │ ^~~~~~ nothing uses this import
 
   Run `turf --explain E179` for more details.
 

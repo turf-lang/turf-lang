@@ -8,7 +8,7 @@ tests/37_guess_inference/fail_guess_null.tr (1 error)
   Hint: Annotate the reference type explicitly, e.g. 'mut x: &?Point = null;'.
 
   8 │     mut x = null;
-    │     ^~~ Here!
+    │     ^~~ nothing here gives a type
 
   Run `turf --explain E129` for more details.
 

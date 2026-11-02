@@ -7,7 +7,7 @@ tests/01_syntax/decimal_literal_receiver_allowed_by_default.tr (1 warning)
   Hint: Write `(1.5)` so the dot that ends the number is clear.
 
   11 │     test::assert(1.5.half() == 0.75, "1.5.half()");
-     │                  ^~~ Here!
+     │                  ^~~ this decimal literal needs parentheses
 
   Fix: write '(1.5)'
   11 │     test::assert((1.5).half() == 0.75, "1.5.half()");

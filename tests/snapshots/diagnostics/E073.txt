@@ -7,7 +7,7 @@ tests/35_numeric_literals/fail_malformed_exponent.tr (1 error)
   Hint: After 'e'/'E' (optionally followed by '+' or '-'), at least one digit is required -- e.g. '1e6', '1.5e-3', '1E+10'.
 
   10 │     mut x: double = 1.5e;
-     │                     ^ Here!
+     │                     ^ this exponent is malformed
 
   Run `turf --explain E073` for more details.
 

@@ -8,7 +8,7 @@ tests/10_default_init/fail_default_reference_cycle_through_value.tr (1 error)
   Hint: Make one of the fields on the cycle '&?A' (it defaults to null), or build the value with '::new(...)'.
 
   15 │     mut x: A = A::default();
-     │                          ^ Here!
+     │                          ^ this type has no default value
 
   Run `turf --explain E147` for more details.
 

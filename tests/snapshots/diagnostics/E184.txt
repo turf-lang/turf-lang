@@ -7,7 +7,7 @@ tests/14_cfg_analysis/endless_loops_warn.tr (2 warnings)
   Hint: Change `n` inside the loop, or leave it with `break` or `return`.
 
   45 │     while n > 0 {
-     │     ^~~~~ Here!
+     │     ^~~~~ nothing changes this test
 
   Run `turf --explain E184` for more details.
 
@@ -18,7 +18,7 @@ tests/14_cfg_analysis/endless_loops_warn.tr (2 warnings)
   Hint: Change `go` inside the loop, or leave it with `break` or `return`.
 
   54 │     do {
-     │     ^~ Here!
+     │     ^~ nothing changes this test
 
   Run `turf --explain E184` for more details.
 

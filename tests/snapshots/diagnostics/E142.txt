@@ -8,7 +8,7 @@ tests/48_unsized_array_params/fail_slice_of_list.tr (1 error)
   Hint: Only a built-in array (like int[5], or an int[] parameter) can be sliced. To take part of a collection, copy the elements you need in a loop.
 
   9 │     immut t = l[0..1];
-    │                ^ Here!
+    │                ^ this is not an array
 
   Run `turf --explain E142` for more details.
 

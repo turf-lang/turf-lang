@@ -8,7 +8,7 @@ tests/43_check_elision/fail_bounds_still_caught_after_elision.tr (1 error)
   Hint: Array indices start at 0 and go up to size - 1; a negative index counts back from the end (-1 is the last element).
 
   12 │     arr[i] = 1;
-     │        ^ Here!
+     │        ^ this index is outside the array
 
   Run `turf --explain E001` for more details.
 

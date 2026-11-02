@@ -7,7 +7,7 @@ tests/35_numeric_literals/fail_invalid_radix_digit.tr (1 error)
   Hint: Every digit after '0b' must be valid in that radix. Double-check the digit, or did you mean to write a decimal number instead (drop the '0b' prefix)?
 
   8 │     mut x: int = 0b012;
-    │                  ^ Here!
+    │                  ^ this digit is not valid in this radix
 
   Run `turf --explain E071` for more details.
 

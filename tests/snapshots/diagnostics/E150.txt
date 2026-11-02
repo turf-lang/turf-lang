@@ -6,7 +6,7 @@ tests/54_size_parameters/fail_size_parameter_on_method.tr (1 error)
   Hint: write a function that takes the value, e.g. 'fn<T, N: size> f(a: T[N])'.
 
   8 │ fn<N: size> S.first(a: int[N]): int {
-    │    ^ Here!
+    │    ^ a size parameter cannot be used here
 
   Run `turf --explain E150` for more details.
 

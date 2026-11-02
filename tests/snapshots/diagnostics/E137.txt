@@ -8,7 +8,7 @@ tests/42_caller_location/fail_caller_location_fn_as_value.tr (1 error)
   Hint: Write an unmarked function with the same parameters that calls 'where', and use that as the value.
 
   11 │     mut f: fn(): string = where;
-     │                           ^~~~~ Here!
+     │                           ^~~~~ this is not a value
 
   Run `turf --explain E137` for more details.
 

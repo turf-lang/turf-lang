@@ -6,7 +6,7 @@ tests/07_functions_modules/fail_export_array_no_initializer.tr (1 error)
   Hint: Give it one, e.g. pub immut MAX_RETRIES: int = 3;
 
   6 │ export immut BUF: int[5];
-    │ ^~~~~~ Here!
+    │ ^~~~~~ this value is not a constant
 
   Run `turf --explain E022` for more details.
 

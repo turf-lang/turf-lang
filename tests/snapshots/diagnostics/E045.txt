@@ -7,7 +7,7 @@ tests/06_structs/fail_dot_call_new.tr (1 error)
   Hint: 'new' only works as 'StructName::new(...)', never through an existing instance.
 
   22 │     p.new(3, 4);
-     │      ^ Here!
+     │      ^ a constructor is called on its type, not an instance
 
   Run `turf --explain E045` for more details.
 

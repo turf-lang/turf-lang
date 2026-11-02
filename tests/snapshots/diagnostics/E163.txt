@@ -7,7 +7,7 @@ tests/14_cfg_analysis/12_dead_store_simple.tr (1 warning)
   Hint: If the variable is intentionally unused, prefix its name with '_' by convention. Otherwise, remove the declaration or use its value.
 
   5 │     mutable x: int = 5;
-    │     ^ Here!
+    │     ^ this variable is never used
 
   Run `turf --explain E163` for more details.
 

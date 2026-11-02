@@ -8,7 +8,7 @@ tests/38_monomorphization/fail_generic_recursion_depth.tr (1 error)
   Hint: A generic function or struct that requests a new instantiation of itself every time it runs never bottoms out. If this is intentional (e.g. a type-level Peano count), it's past what this compiler will monomorphize -- restructure it to stop growing the type at some concrete depth.
 
   24 │     return wrap(&v);
-     │                ^ Here!
+     │                ^ instantiated too many times from here
 
   Run `turf --explain E079` for more details.
 

@@ -7,7 +7,7 @@ tests/25_errors/fail_try_in_defer.tr (1 error)
   Hint: A `defer` runs while the function is already returning, so it has nowhere to propagate an error to. Handle the error inside the deferred statement: `defer f() recover run { ... };`.
 
   18 │     defer n = try open();
-     │               ^~~ Here!
+     │               ^~~ this `try` is out of place
 
   Run `turf --explain E095` for more details.
 

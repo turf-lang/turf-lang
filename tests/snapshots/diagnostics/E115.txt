@@ -6,7 +6,7 @@ tests/18_operator_overload/fail_operator_unary_arity_mismatch.tr (1 error)
   Hint: Drop the second parameter: `operator ~(a: T): T { ... }`.
 
   11 │ operator ~(a: Vec2, b: Vec2): Vec2 {
-     │ ^~~~~~~~ Here!
+     │ ^~~~~~~~ this operator declaration is not valid
 
   Run `turf --explain E115` for more details.
 

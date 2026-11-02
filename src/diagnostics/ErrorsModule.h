@@ -23,6 +23,21 @@ inline std::string DisplayModuleName(const std::string &Identity) {
 // The file a "mark it `pub` in <file>" hint names: the declaration's own file
 // when its location is known. `<module>.tr` was right while a module's name
 // was always its file stem, and is wrong for a dependency's `geometry/util`.
+std::string ResolveModuleFile(const std::string &ModuleName,
+                              const std::string &ImportingFile); // Parser.h
+
+// A declaration's location in module `Module`, with the module's file when
+// the symbol table kept only a line and column: a note without it would be
+// read as a place in the file being compiled, and drawn there (DX-5).
+inline SourceLocation InModuleFile(SourceLocation DeclLoc, const std::string &Module) {
+  if (DeclLoc.Filename.empty() && !Module.empty()) {
+    DeclLoc.Filename = ResolveModuleFile(Module, SourceFilename);
+    if (DeclLoc.Filename.empty())
+      DeclLoc.Filename = "<module " + Module + ">";
+  }
+  return DeclLoc;
+}
+
 inline std::string DeclaringFileName(const SourceLocation &DeclLoc,
                                      const std::string &Module) {
   if (DeclLoc.Filename.empty())
@@ -896,8 +911,8 @@ public:
     Message = Colors::BRIGHT_RED + What + " '" + Colors::CYAN + Shown +
               Colors::BRIGHT_RED + "' is private to module '" + Colors::CYAN +
               ModuleShown + Colors::BRIGHT_RED + "'." + Colors::RESET;
-    withRelated(DeclLoc, "'" + Shown + "' is declared in module '" + ModuleShown +
-                             "' without `pub`");
+    withRelated(InModuleFile(DeclLoc, Module),
+                "'" + Shown + "' is declared in module '" + ModuleShown + "' without `pub`");
 
     const std::string File = DeclaringFileName(DeclLoc, Module);
     Hint_ = "If '" + Shown + "' is meant to be used from other modules, mark "

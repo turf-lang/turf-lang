@@ -6,7 +6,7 @@ tests/06_structs/fail_void_struct_field.tr (1 error)
   Hint: 'void' only makes sense as a function's return type. Give field 'x' a real type instead.
 
   10 │     x: void
-     │        ^~~~ Here!
+     │        ^~~~ `void` is not a type a value can have
 
   Run `turf --explain E112` for more details.
 

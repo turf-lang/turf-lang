@@ -9,7 +9,7 @@ tests/06_structs/fail_self_containing_struct.tr (1 error)
   Hint: Make one of these fields a reference or pointer ('&A', '&?A', 'A*') instead of holding the struct by value -- a struct that contains itself by value has no finite size.
 
   19 │ struct A {
-     │ ^~~~~~ Here!
+     │ ^~~~~~ this struct contains itself
 
   Worth reading in full -- run `turf --explain E069` before you patch this one.
 

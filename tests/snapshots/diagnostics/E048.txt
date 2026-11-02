@@ -7,7 +7,7 @@ tests/06_structs/fail_static_method_call.tr (1 error)
   Hint: '.' is for instance-member access only. Use 'MathUtil::square(...)' instead.
 
   40 │     mut y: int = MathUtil.square(5);
-     │                          ^ Here!
+     │                          ^ this is a type or a module, so it takes `::`
 
   Run `turf --explain E048` for more details.
 

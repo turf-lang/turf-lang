@@ -549,6 +549,11 @@ bool takeLookaheadToken(int &Tok);
 // (TurfError::Hints_): the way for a raw site that knows the exact fix, such as
 // the parser's "expected ';'", to attach a FixIt without becoming a class. Most
 // sites pass nothing, and the diagnostic is unchanged.
+// DX-5: what D's primary span says -- the raise site's label
+// (DiagnosticHints::Label), else the code's (ErrorCodes::defaultLabel()),
+// else "here". The text form, the JSON form and the query facade all use it.
+std::string diagLabel(const DiagnosticEngine::Diag &D);
+
 void LogErrorAt(SourceLocation Loc, const char *Code, const std::string &Msg,
                 SLM::ErrorCategory Category,
                 const SLM::DiagnosticHints &Hints = {});

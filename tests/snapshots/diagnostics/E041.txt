@@ -7,7 +7,7 @@ tests/16_sys_and_test_stdlib/fail_bare_assert_no_import.tr (1 error)
   Hint: Double-check the spelling or import the module that defines it.
 
   9 │     assert(true);
-    │           ^ Here!
+    │           ^ no function of this name
 
   Run `turf --explain E041` for more details.
 

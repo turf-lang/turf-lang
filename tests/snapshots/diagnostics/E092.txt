@@ -7,7 +7,7 @@ tests/45_pattern_matching/fail_pattern_wrong_struct.tr (1 error)
   Hint: Name the value's own struct: `P { ... }`.
 
   10 │         matches Q { x }: return x; done
-     │                 ^ Here!
+     │                 ^ this pattern is not valid
 
   Run `turf --explain E092` for more details.
 

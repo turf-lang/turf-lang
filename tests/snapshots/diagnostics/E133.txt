@@ -8,7 +8,7 @@ tests/15_enums/fail_duplicate_matches_int_literal.tr (1 error)
   Hint: Remove the duplicate arm, or combine it with the earlier one by stacking (`matches A:` then `matches B:` sharing one body).
 
   15 │         matches 1:
-     │         ^~~~~~~ Here!
+     │         ^~~~~~~ this pattern is already matched
 
   Run `turf --explain E133` for more details.
 

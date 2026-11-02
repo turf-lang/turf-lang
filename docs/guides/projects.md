@@ -262,7 +262,7 @@ src/main.tr (1 error)
   Hint: If 'follow' is meant to be used from other modules, mark it `pub` in route.tr: `pub fn follow(...)`. Otherwise, 'route' offers these public functions: end_position, farthest.
 
   12 │     io::printline(report::line("farthest", route::follow(steps, 2)));
-     │                                                   ^~~~~~ Here!
+     │                                                   ^~~~~~ this is private to its module
 
   Worth reading in full -- run `turf --explain E088` before you patch this one.
 ```
@@ -301,7 +301,7 @@ src/main.tr (1 warning)
   Hint: If the variable is intentionally unused, prefix its name with '_' by convention. Otherwise, remove the declaration or use its value.
 
   11 │     mut unused: int = 0;
-     │     ^ Here!
+     │     ^ this variable is never used
 ```
 
 One mistake can cause others below it (a failed import makes every later use of
@@ -386,7 +386,7 @@ src/main.tr (1 error)
   Hint: Only a package's root module can be imported from outside it. Import 'geometry' and use what its root module makes `pub`; if 'geometry' should offer this, its root module has to expose it.
 
   3 │ import vecmath;
-    │        ^~~~~~~ Here!
+    │        ^~~~~~~ this module cannot be imported from here
 ```
 
 `turf.lock` lists the dependency:

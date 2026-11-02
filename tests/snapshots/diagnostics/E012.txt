@@ -7,7 +7,7 @@ tests/14_cfg_analysis/fail_42_statement_after_return_is_e012.tr (1 error)
   Hint: Delete this code or move it before the 'return/break/continue' statement.
 
   8 │     return 0;
-    │     ^~~~~~ Here!
+    │     ^~~~~~ nothing after the statement before this runs
 
   Run `turf --explain E012` for more details.
 

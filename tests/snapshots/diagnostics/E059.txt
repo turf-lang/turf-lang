@@ -8,7 +8,7 @@ tests/04_control_flow/fail_compare_type_mismatch.tr (1 error)
   Hint: All matches arm values must have the same type as the compare subject (int or string).
 
   8 │         matches "hello":
-    │         ^~~~~~~ Here!
+    │         ^~~~~~~ this arm has the wrong type
 
   Run `turf --explain E059` for more details.
 

@@ -7,7 +7,7 @@ tests/06_structs/fail_no_constructor_defined.tr (1 error)
   Hint: Define one with `fn Point.new(...): void { self.field = ...; }`, or use `Point::default()` if you just want every field zero-initialized.
 
   15 │     mut p: Point = Point::new(1, 2);
-     │                              ^ Here!
+     │                              ^ this struct has no constructor
 
   Run `turf --explain E050` for more details.
 

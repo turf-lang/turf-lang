@@ -7,7 +7,7 @@ tests/02_resolver/fail_use_before_declaration_in_function.tr (1 error)
   Hint: 'x' is declared further down in this function, but a variable only exists from its declaration onwards. Move that declaration above this line.
 
   6 │     mut y: int = x + 1;
-    │                  ^ Here!
+    │                  ^ used here before its declaration
 
   Run `turf --explain E043` for more details.
 

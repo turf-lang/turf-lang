@@ -7,7 +7,7 @@ tests/42_caller_location/fail_at_decorator_unsupported.tr (1 error)
   Hint: The known annotations are: @ownership, @ffi, @deprecated, @test.
 
   5 │ @intrinsic("foo")
-    │ ^ Here!
+    │ ^ this annotation is not valid
 
   Run `turf --explain E146` for more details.
 

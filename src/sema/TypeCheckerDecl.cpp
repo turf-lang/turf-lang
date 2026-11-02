@@ -11,6 +11,7 @@
  */
 
 #include "sema/TypeChecker.h"
+#include "sema/SpanLabels.h"
 #include "frontend/TestAnnotation.h"
 #include "frontend/TestRegistry.h"
 
@@ -575,12 +576,20 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
                  "takes the whole type after it. An array of references is "
                  "written with parentheses, e.g. 'mut " + Node.getName() + ": " +
                  InitTy->getName() + " = ...'.";
-        reportError(Node.getLoc(),
+        // DX-5: the initializer is the primary span; the written type is
+        // where the expectation came from.
+        Hints.Label = SpanLabels::thisIs(InitTy.get());
+        std::vector<RelatedLocation> Related;
+        if (const SourceLocation &T = Node.getTypeLoc(); T.EndCol > T.Col)
+          Related.push_back({T, "`" + Node.getName() + "` is " +
+                                    SpanLabels::aType(DeclTy.get()) +
+                                    " because of this"});
+        reportError(SpanLabels::spanOf(Node.getInitializer(), Node.getLoc()),
                     codeForMismatch(InitTy.get(), nullptr, ErrCode::TypeMismatch),
                     "Cannot initialise '" + DeclTy->getName() +
                         "' variable '" + Node.getName() + "' with value of type '" +
                         InitTy->getName() + "'.",
-                    {}, Hint, "", Hints);
+                    Related, Hint, "", Hints);
       } else {
         // SEM-002: typesCompatible() only checks the KIND of conversion
         // (e.g. "int-literal -> int is fine"), never the literal's own
@@ -695,6 +704,7 @@ void TypeChecker::checkFuncDef(FuncDefExprAST &Node) {
 
   // Push the declared return type so visitReturn() can validate it
   ReturnTypeStack_.push_back(Node.getReturnTypePtr());
+  FuncStack_.push_back(&Node);
 
   // STD-002: save/restore rather than a blind push/pop pair, since a `fn`
   // CAN be declared lexically inside another function's body block in this
@@ -728,6 +738,7 @@ void TypeChecker::checkFuncDef(FuncDefExprAST &Node) {
   InCallerLocationFunc_ = SavedInCallerLocationFunc;
   CurrentFuncName_ = SavedFuncName;
   ReturnTypeStack_.pop_back();
+  FuncStack_.pop_back();
   setType(&Node, TurfVoid());
 }
 

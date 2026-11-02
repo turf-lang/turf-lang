@@ -8,7 +8,7 @@ tests/09_boss_fights/fail_recursive_struct.tr (1 error)
   Hint: `to` converts numbers, chars and text: `5 to double`, `3.9 to int`, `42 to string`, `65 to char`. To test a number for zero write `n != 0`; `turf --explain E134` lists the rest.
 
   28 │         mut h: Node = head to Node;
-     │                            ^~ Here!
+     │                            ^~ this conversion is not allowed
 
   Run `turf --explain E134` for more details.
 

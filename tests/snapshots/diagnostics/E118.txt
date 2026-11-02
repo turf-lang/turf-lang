@@ -6,7 +6,7 @@ tests/01_syntax/fail_statement_outside_function.tr (1 error)
   Hint: Wrap it: `fn main(): int { <this statement> return 0; }`.
 
   9 │ io::printline("hello");
-    │ ^~ Here!
+    │ ^~ this statement is outside a function
 
   Run `turf --explain E118` for more details.
 

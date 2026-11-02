@@ -7,7 +7,7 @@ tests/06_structs/14_struct_stress.tr (1 warning)
   Hint: Remove the `unsafe { }` and keep its statements, so the unsafe blocks that remain mark the code that needs care.
 
   52 │     unsafe {
-     │     ^~~~~~ Here!
+     │     ^~~~~~ nothing in this `unsafe` block needs it
 
   Run `turf --explain E193` for more details.
 

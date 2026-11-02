@@ -7,7 +7,7 @@ tests/07_functions_modules/type_identity_node_a_module.tr (1 warning)
   Hint: Move `static` before `fn`: `static fn Node.origin(...)`.
 
   22 │ pub fn Node.origin() static: Node {
-     │                      ^~~~~~ Here!
+     │                      ^~~~~~ `static` belongs before `fn`
 
   Fix: move 'static' before 'fn'
   22 │ pub static fn Node.origin(): Node {

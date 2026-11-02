@@ -90,6 +90,12 @@ struct DiagnosticHints {
   };
   std::vector<Alternative> FixAlternatives;
 
+  // DX-5: what the primary span's underline says -- "this is an 'int'".
+  // Empty: the code's own label (ErrorCodes::defaultLabel()). The secondary
+  // spans are the diagnostic's related locations, each labelled with its
+  // description.
+  std::string Label;
+
   // A fix to check: FixIts, or alternatives to choose one from.
   bool hasFix() const { return !FixIts.empty() || !FixAlternatives.empty(); }
 

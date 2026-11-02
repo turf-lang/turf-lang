@@ -6,7 +6,7 @@ tests/04_control_flow/fail_do_while_missing_while.tr (1 error)
   Hint: A do-block ends with its condition: `do { ... } while (cond);`.
 
   9 │ }
-    │ ^ Here!
+    │ ^ something else is expected here
 
   Run `turf --explain E110` for more details.
 

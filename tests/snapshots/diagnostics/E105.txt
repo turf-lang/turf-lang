@@ -6,7 +6,7 @@ tests/01_syntax/fail_missing_comma_between_struct_fields.tr (1 error)
   Hint: Separate struct fields with ',' -- write `x: int, y: int` and put a ',' after the field on the line above this one.
 
   8 │     y: int
-    │     ^ Here!
+    │     ^ a `,` is missing here
 
   Run `turf --explain E105` for more details.
 

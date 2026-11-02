@@ -8,7 +8,7 @@ tests/36_numeric_semantics/fail_float_literal_overflow.tr (1 error)
   Hint: 'double' (IEEE-754) can represent roughly up to 1.8e308. Did you mean a smaller value, or a different unit?
 
   8 │     mut d: double = 1e400;
-    │                     ^~~~~ Here!
+    │                     ^~~~~ this literal is too large for a `double`
 
   Run `turf --explain E078` for more details.
 

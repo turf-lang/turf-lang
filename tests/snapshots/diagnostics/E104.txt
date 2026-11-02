@@ -6,7 +6,7 @@ tests/01_syntax/fail_missing_brace.tr (1 error)
   Hint: Add a '}' to close the block opened on line 3.
 
   3 │ fn main(): int {
-    │                ^ Here!
+    │                ^ this is never closed
 
   Run `turf --explain E104` for more details.
 

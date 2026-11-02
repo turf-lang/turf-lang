@@ -7,7 +7,7 @@ tests/04_control_flow/12_compare_empty.tr (1 warning)
   Hint: Add at least one 'matches' arm or an 'otherwise' arm.
 
   6 │     compare x {}
-    │     ^~~~~~~ Here!
+    │     ^~~~~~~ this `compare` has no arms
 
   Run `turf --explain E154` for more details.
 

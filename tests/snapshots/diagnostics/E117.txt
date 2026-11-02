@@ -6,7 +6,7 @@ tests/25_errors/fail_error_brace_and_semicolon.tr (1 error)
   Hint: use either 'error GeneralError;' (bare, a single implicit DEFAULT variant) or 'error GeneralError { Variant1, Variant2, ... }' (braced), not both.
 
   6 │ error GeneralError; {
-    │ ^~~~~ Here!
+    │ ^~~~~ this error declaration is not valid
 
   Run `turf --explain E117` for more details.
 

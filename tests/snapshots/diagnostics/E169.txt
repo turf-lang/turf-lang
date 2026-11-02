@@ -7,7 +7,7 @@ tests/41_gc/09_boxed_fallible_success_survives_collection.tr (1 warning)
   Hint: If this function can never really fail, its return type doesn't need the '!' -- drop it and return T directly.
 
   37 │ fn makeRec(): !Rec {
-     │ ^~ Here!
+     │ ^~ this function never fails
 
   Run `turf --explain E169` for more details.
 

@@ -7,7 +7,7 @@ tests/45_pattern_matching/fail_pattern_unknown_field.tr (1 error)
   Hint: It may be from the current file: 'x', 'y'
 
   9 │         matches P { z, .. }: return z; done
-    │                     ^ Here!
+    │                     ^ no field of this name
 
   Run `turf --explain E068` for more details.
 

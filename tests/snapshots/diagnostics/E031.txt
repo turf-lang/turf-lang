@@ -7,7 +7,7 @@ tests/55_compiler_fixes/fail_fix_unknown_qualifier.tr (1 error)
   Hint: It may be from the current file: 'Color::Red'
 
   7 │     immut c: Color = Colr::Red;
-    │                      ^~~~ Here!
+    │                      ^~~~ nothing of this name to qualify with
 
   Fix: replace 'Colr' with 'Color'
   7 │     immut c: Color = Color::Red;

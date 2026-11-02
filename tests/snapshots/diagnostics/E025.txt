@@ -10,7 +10,7 @@ tests/03_typechecker/fail_math_abs_string.tr (1 error)
   Hint: Pass each argument as the type its parameter declares, converting with `to` where they differ (`x to int`); the candidates are listed above.
 
   7 │     io::printline(math::abs("hello"));
-    │                            ^ Here!
+    │                            ^ no overload takes these arguments
 
   Run `turf --explain E025` for more details.
 

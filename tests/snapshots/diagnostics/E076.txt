@@ -9,7 +9,7 @@ tests/36_numeric_semantics/fail_int32_literal_out_of_range.tr (1 error)
   Hint: Use 'int' instead, or an explicit 'to int32' cast if truncation is actually what you want.
 
   20 │     mut x: int32 = 99999999999;
-     │     ^~~ Here!
+     │     ^~~ this literal does not fit its type
 
   Run `turf --explain E076` for more details.
 

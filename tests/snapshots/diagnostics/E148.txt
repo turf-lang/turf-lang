@@ -8,7 +8,7 @@ tests/07_functions_modules/fail_type_identity_type_args_on_non_generic.tr (1 err
   Hint: Write it as plain 'Point'.
 
   11 │ fn first(p: Point<int>): int {
-     │ ^~ Here!
+     │ ^~ this has the wrong number of type arguments
 
   Run `turf --explain E148` for more details.
 
