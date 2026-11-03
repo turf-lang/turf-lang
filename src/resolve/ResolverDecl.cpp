@@ -115,9 +115,10 @@ static void checkAnnotations(const AnnotatedDecl &Decl,
       InvalidAnnotationError(
           Ann.Loc, Problem,
           Ann.Name == TestAnnotation::Name
-              ? std::string("Put `@test`, or `@test(<outcome>, ...)`, on a function that takes "
-                            "nothing and returns `void` or `!void`. The outcomes are ") +
-                    TestAnnotation::OutcomeList + "."
+              ? std::string("Put `@test`, or `@test(<outcome>, <options>)`, on a function that "
+                            "takes nothing and returns `void` or `!void`. The outcomes are ") +
+                    TestAnnotation::OutcomeList + "; the options are " +
+                    TestAnnotation::OptionList + "."
               : std::string("Put the annotation on a declaration it describes, as in "
                             "`@ownership(acquires)` on a function that returns a "
                             "fresh allocation."))

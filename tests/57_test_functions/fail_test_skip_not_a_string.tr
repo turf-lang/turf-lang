@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: `skip:` takes the reason the test is set aside, a string
+// TDP-2-026: the reason is a string literal.
+@test(skip: later)
+fn a(): void {
+}
+
+fn main(): int {
+    return 0;
+}

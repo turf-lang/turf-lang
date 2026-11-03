@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: `@test` has `serial` twice. Write each option once.
+// TDP-2-026: `serial`, the option with no value, at most once too.
+@test(serial, serial)
+fn a(): void {
+}
+
+fn main(): int {
+    return 0;
+}

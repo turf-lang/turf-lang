@@ -19,6 +19,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <mutex>
 #include <sstream>
 #include <thread>
@@ -81,6 +82,9 @@ struct ProcResult {
   int Status = 0;
   bool TimedOut = false;
   std::string Output; ///< stdout and stderr together
+  /// With `SplitStdout`, what the process wrote to stdout alone (F-11f, a
+  /// test's `stdout:`); Output still has both.
+  std::string Stdout;
 };
 
 #ifndef _WIN32
@@ -90,21 +94,26 @@ std::atomic<bool> g_Interrupted{false};
 extern "C" void onInterrupt(int) { g_Interrupted = true; }
 
 /// Runs @p Exe with @p Args in directory @p Cwd, stdin from /dev/null, and
-/// collects its output. A positive @p TimeoutSec kills the whole process
+/// collects its output. A positive @p TimeoutMs kills the whole process
 /// group when it expires: a test that spawned a helper must not leave it
 /// behind. The caller's Ctrl-C does the same, since the child is in its own
-/// group and would otherwise never see it.
+/// group and would otherwise never see it. With @p SplitStdout, stdout comes
+/// through a pipe of its own and is also kept apart (ProcResult::Stdout).
 ProcResult RunProcess(const std::string &Exe, const std::vector<std::string> &Args,
-                      const std::string &Cwd, int TimeoutSec) {
+                      const std::string &Cwd, int TimeoutMs, bool SplitStdout = false) {
   ProcResult R;
-  int Pipe[2];
-  if (pipe(Pipe) != 0) {
+  int Pipe[2], OutPipe[2] = {-1, -1};
+  if (pipe(Pipe) != 0 || (SplitStdout && pipe(OutPipe) != 0)) {
     R.Status = 127;
     R.Output = "cannot create a pipe";
     return R;
   }
   fcntl(Pipe[0], F_SETFD, FD_CLOEXEC);
   fcntl(Pipe[1], F_SETFD, FD_CLOEXEC);
+  if (SplitStdout) {
+    fcntl(OutPipe[0], F_SETFD, FD_CLOEXEC);
+    fcntl(OutPipe[1], F_SETFD, FD_CLOEXEC);
+  }
 
   // Everything the child needs is built before fork(): only
   // async-signal-safe calls may run between fork and exec in a process that
@@ -121,6 +130,10 @@ ProcResult RunProcess(const std::string &Exe, const std::vector<std::string> &Ar
   if (Pid < 0) {
     close(Pipe[0]);
     close(Pipe[1]);
+    if (SplitStdout) {
+      close(OutPipe[0]);
+      close(OutPipe[1]);
+    }
     R.Status = 127;
     R.Output = "cannot start a process";
     return R;
@@ -132,7 +145,7 @@ ProcResult RunProcess(const std::string &Exe, const std::vector<std::string> &Ar
     int Nul = open("/dev/null", O_RDONLY);
     if (Nul >= 0)
       dup2(Nul, 0);
-    dup2(Pipe[1], 1);
+    dup2(SplitStdout ? OutPipe[1] : Pipe[1], 1);
     dup2(Pipe[1], 2);
     execv(Exe.c_str(), Argv.data());
     _exit(127);
@@ -140,39 +153,51 @@ ProcResult RunProcess(const std::string &Exe, const std::vector<std::string> &Ar
   setpgid(Pid, Pid); // also here: whichever runs first wins the race
   close(Pipe[1]);
   fcntl(Pipe[0], F_SETFL, fcntl(Pipe[0], F_GETFL) | O_NONBLOCK);
+  if (SplitStdout) {
+    close(OutPipe[1]);
+    fcntl(OutPipe[0], F_SETFL, fcntl(OutPipe[0], F_GETFL) | O_NONBLOCK);
+  }
 
   using Clock = std::chrono::steady_clock;
   const auto Start = Clock::now();
-  bool Killed = false, Eof = false, Reaped = false;
+  bool Killed = false, Eof = false, OutEof = !SplitStdout, Reaped = false;
   int WaitStatus = 0;
   char Buf[65536];
-  auto Drain = [&] {
+  auto DrainOne = [&](int Fd, bool &AtEof, std::string *AlsoInto) {
     for (;;) {
-      ssize_t Got = read(Pipe[0], Buf, sizeof Buf);
+      ssize_t Got = read(Fd, Buf, sizeof Buf);
       if (Got > 0) {
         if (R.Output.size() < MaxCapturedBytes)
           R.Output.append(Buf, static_cast<size_t>(Got));
+        if (AlsoInto && AlsoInto->size() < MaxCapturedBytes)
+          AlsoInto->append(Buf, static_cast<size_t>(Got));
         continue;
       }
       if (Got == 0)
-        Eof = true;
+        AtEof = true;
       return; // EAGAIN (nothing more yet), EOF or an error
     }
+  };
+  auto Drain = [&] {
+    if (SplitStdout && !OutEof)
+      DrainOne(OutPipe[0], OutEof, &R.Stdout);
+    if (!Eof)
+      DrainOne(Pipe[0], Eof, nullptr);
   };
 
   while (!Reaped) {
     if (!Killed) {
       const bool Expired =
-          TimeoutSec > 0 && Clock::now() - Start >= std::chrono::seconds(TimeoutSec);
+          TimeoutMs > 0 && Clock::now() - Start >= std::chrono::milliseconds(TimeoutMs);
       if (Expired || g_Interrupted) {
         killpg(Pid, SIGKILL);
         Killed = true;
         R.TimedOut = Expired;
       }
     }
-    if (!Eof) {
-      pollfd P{Pipe[0], POLLIN, 0};
-      poll(&P, 1, 50);
+    if (!Eof || !OutEof) {
+      pollfd P[2] = {{Pipe[0], POLLIN, 0}, {SplitStdout ? OutPipe[0] : -1, POLLIN, 0}};
+      poll(P, 2, 50);
       Drain();
     } else {
       poll(nullptr, 0, 20);
@@ -182,6 +207,8 @@ ProcResult RunProcess(const std::string &Exe, const std::vector<std::string> &Ar
   }
   Drain(); // what the process wrote just before it exited
   close(Pipe[0]);
+  if (SplitStdout)
+    close(OutPipe[0]);
   killpg(Pid, SIGKILL); // a helper the test left running (ESRCH when none)
 
   if (WIFEXITED(WaitStatus))
@@ -282,7 +309,7 @@ int WindowsExitStatus(DWORD Code) {
 }
 
 ProcResult RunProcess(const std::string &Exe, const std::vector<std::string> &Args,
-                      const std::string &Cwd, int TimeoutSec) {
+                      const std::string &Cwd, int TimeoutMs, bool SplitStdout = false) {
   ProcResult R;
   auto Fail = [&](const char *What) {
     R.Status = 127;
@@ -295,6 +322,13 @@ ProcResult RunProcess(const std::string &Exe, const std::vector<std::string> &Ar
   if (!CreatePipe(&ReadEnd, &WriteEnd, &Inheritable, 0))
     return Fail("cannot create a pipe");
   SetHandleInformation(ReadEnd, HANDLE_FLAG_INHERIT, 0); // the child gets only the write end
+  // SplitStdout: stdout through a pipe of its own (ProcResult::Stdout).
+  HANDLE OutRead = nullptr, OutWrite = nullptr;
+  if (SplitStdout) {
+    if (!CreatePipe(&OutRead, &OutWrite, &Inheritable, 0))
+      return Fail("cannot create a pipe");
+    SetHandleInformation(OutRead, HANDLE_FLAG_INHERIT, 0);
+  }
   HANDLE Nul = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &Inheritable,
                            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
 
@@ -302,8 +336,10 @@ ProcResult RunProcess(const std::string &Exe, const std::vector<std::string> &Ar
   // every inheritable handle" lets a test process started by another worker
   // thread at the same moment inherit THIS pipe's write end, and this pipe then
   // never reaches end-of-file while that unrelated process lives.
-  HANDLE Inherit[2] = {WriteEnd, Nul};
-  const DWORD InheritCount = Nul != INVALID_HANDLE_VALUE ? 2 : 1;
+  HANDLE Inherit[3] = {WriteEnd, Nul, OutWrite};
+  DWORD InheritCount = Nul != INVALID_HANDLE_VALUE ? 2 : 1;
+  if (SplitStdout)
+    Inherit[InheritCount++] = OutWrite;
   SIZE_T AttrSize = 0;
   InitializeProcThreadAttributeList(nullptr, 1, 0, &AttrSize);
   std::vector<char> AttrBuf(AttrSize);
@@ -316,7 +352,7 @@ ProcResult RunProcess(const std::string &Exe, const std::vector<std::string> &Ar
   SI.StartupInfo.cb = sizeof SI;
   SI.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
   SI.StartupInfo.hStdInput = Nul != INVALID_HANDLE_VALUE ? Nul : GetStdHandle(STD_INPUT_HANDLE);
-  SI.StartupInfo.hStdOutput = WriteEnd;
+  SI.StartupInfo.hStdOutput = SplitStdout ? OutWrite : WriteEnd;
   SI.StartupInfo.hStdError = WriteEnd;
   SI.lpAttributeList = Attrs;
 
@@ -334,10 +370,14 @@ ProcResult RunProcess(const std::string &Exe, const std::vector<std::string> &Ar
   const DWORD StartError = GetLastError();
   DeleteProcThreadAttributeList(Attrs);
   CloseHandle(WriteEnd); // the child holds its own copy
+  if (SplitStdout)
+    CloseHandle(OutWrite);
   if (Nul != INVALID_HANDLE_VALUE)
     CloseHandle(Nul);
   if (!Started) {
     CloseHandle(ReadEnd);
+    if (SplitStdout)
+      CloseHandle(OutRead);
     R.Status = 127;
     R.Output = "cannot start '" + Exe + "' (Win32 error " + std::to_string(StartError) + ")";
     return R;
@@ -356,24 +396,30 @@ ProcResult RunProcess(const std::string &Exe, const std::vector<std::string> &Ar
   const auto Start = Clock::now();
   bool Killed = false;
   char Buf[65536];
-  // Reads whatever the pipe holds now; false when there was nothing.
-  auto Drain = [&]() -> bool {
+  // Reads whatever a pipe holds now; false when there was nothing.
+  auto DrainOne = [&](HANDLE End, std::string *AlsoInto) -> bool {
     DWORD Avail = 0;
-    if (!PeekNamedPipe(ReadEnd, nullptr, 0, nullptr, &Avail, nullptr) || Avail == 0)
+    if (!PeekNamedPipe(End, nullptr, 0, nullptr, &Avail, nullptr) || Avail == 0)
       return false;
     DWORD Got = 0;
-    if (!ReadFile(ReadEnd, Buf, static_cast<DWORD>(std::min<size_t>(sizeof Buf, Avail)), &Got, nullptr) || Got == 0)
+    if (!ReadFile(End, Buf, static_cast<DWORD>(std::min<size_t>(sizeof Buf, Avail)), &Got, nullptr) || Got == 0)
       return false;
     if (R.Output.size() < MaxCapturedBytes)
       R.Output.append(Buf, Got);
+    if (AlsoInto && AlsoInto->size() < MaxCapturedBytes)
+      AlsoInto->append(Buf, Got);
     return true;
+  };
+  auto Drain = [&]() -> bool {
+    const bool Out = SplitStdout && DrainOne(OutRead, &R.Stdout);
+    return DrainOne(ReadEnd, nullptr) || Out;
   };
 
   for (;;) {
     if (Drain())
       continue;
     if (!Killed) {
-      const bool Expired = TimeoutSec > 0 && Clock::now() - Start >= std::chrono::seconds(TimeoutSec);
+      const bool Expired = TimeoutMs > 0 && Clock::now() - Start >= std::chrono::milliseconds(TimeoutMs);
       if (Expired || g_Interrupted) {
         if (Job)
           TerminateJobObject(Job, 137);
@@ -396,6 +442,8 @@ ProcResult RunProcess(const std::string &Exe, const std::vector<std::string> &Ar
   R.Status = Killed ? 137 : WindowsExitStatus(Code);
 
   CloseHandle(ReadEnd);
+  if (SplitStdout)
+    CloseHandle(OutRead);
   CloseHandle(PI.hThread);
   CloseHandle(PI.hProcess);
   if (Job)
@@ -437,6 +485,9 @@ struct TestResult {
   bool Pass = false;
   /// Printed under "Failed Tests Details" for a failure.
   std::string Detail;
+  /// TDP-2-026 `skip:`: neither passed nor failed; Detail is the test and its
+  /// reason, listed under "Skipped Tests".
+  bool Skipped = false;
 };
 
 /// Joins output lines for a failure's detail block.
@@ -506,7 +557,8 @@ private:
   }
 
   ProcResult compile(const TestFile &T, const fs::path &Program,
-                     const std::vector<std::string> &Extra = {}) {
+                     const std::vector<std::string> &Extra = {},
+                     const std::string &Level = "") {
     std::vector<std::string> Args;
     if (!O_.PackageGraph.empty()) {
       Args.push_back("--package-graph");
@@ -519,12 +571,44 @@ private:
     std::vector<std::string> Bad;
     const auto Lint = TestExpect::LintFlags(ReadFile(T.Path), Bad);
     Args.insert(Args.end(), Lint.begin(), Lint.end());
-    Args.insert(Args.end(), O_.CompileFlags.begin(), O_.CompileFlags.end());
-    return RunProcess(O_.Compiler, Args, T.Path.parent_path().string(), CompileTimeoutSec);
+    // TDP-2-026 `levels:`: this build's level replaces the run's own.
+    for (const auto &F : O_.CompileFlags)
+      if (Level.empty() || !isLevelFlag(F))
+        Args.push_back(F);
+    if (!Level.empty())
+      Args.push_back("-" + Level);
+    return RunProcess(O_.Compiler, Args, T.Path.parent_path().string(), CompileTimeoutSec * 1000);
+  }
+
+  static bool isLevelFlag(const std::string &F) {
+    return F == "-O0" || F == "-O1" || F == "-O2" || F == "-O3" || F == "-Os";
+  }
+
+  /// The level the run builds at, as `levels:` spells it ("O0" when no -O
+  /// flag was given, the compiler's default).
+  std::string runLevel() const {
+    std::string L = "O0";
+    for (const auto &F : O_.CompileFlags)
+      if (isLevelFlag(F))
+        L = F.substr(1);
+    return L;
+  }
+
+  /// TDP-2-026 `--tag` / `--skip-tag`: whether a test with @p Tags runs.
+  bool selected(const std::vector<std::string> &Tags) const {
+    auto Has = [&](const std::vector<std::string> &Want) {
+      for (const auto &W : Want)
+        if (std::find(Tags.begin(), Tags.end(), W) != Tags.end())
+          return true;
+      return false;
+    };
+    if (!O_.Tags.empty() && !Has(O_.Tags))
+      return false;
+    return !Has(O_.SkipTags);
   }
 
   ProcResult runProgram(const TestFile &T, const fs::path &Program) {
-    return RunProcess(Program.string(), {}, T.Path.parent_path().string(), Timeout_);
+    return RunProcess(Program.string(), {}, T.Path.parent_path().string(), Timeout_ * 1000);
   }
 
   /// The lint flags in @p Flags (`--warn E174`, `--lint-set 2.2`, ...), set in
@@ -578,7 +662,7 @@ private:
     std::vector<std::string> Bad;
     const auto Lint = TestExpect::LintFlags(Source, Bad);
     Args.insert(Args.end(), Lint.begin(), Lint.end());
-    RunProcess(O_.Compiler, Args, T.Path.parent_path().string(), CompileTimeoutSec);
+    RunProcess(O_.Compiler, Args, T.Path.parent_path().string(), CompileTimeoutSec * 1000);
     const std::string FixedSource = ReadFile(Fixed);
     if (FixedSource.empty())
       return "the compiler printed a fix but wrote no fixed program (--smart-write-fix)";
@@ -645,6 +729,9 @@ private:
     const TestFile &T = Tests_[Index];
     if (T.HasTests && !StartsWith(T.Name(), "fail_"))
       return runTestFunctions(T, Index);
+    // A file is a test without tags: `--tag` selects only tagged `@test`s.
+    if (!selected({}))
+      return {};
     return {runFile(T, Index)};
   }
 
@@ -680,20 +767,78 @@ private:
     if (!TestExpect::ParseManifest(ReadFile(Manifest), Cases, HasMain, Why))
       return {fail(T, "FAILED (" + Why + ")", "(" + Why + ")")};
 
+    // TDP-2-026 `levels:`: one more build of the file per level a test asks
+    // for, made when the first test needs it.
+    std::map<std::string, fs::path> ByLevel{{runLevel(), Program}};
+    std::map<std::string, std::string> LevelFailed;
+    struct LevelCleanup {
+      std::map<std::string, fs::path> *M;
+      fs::path Keep;
+      ~LevelCleanup() {
+        std::error_code EC;
+        for (const auto &[L, P] : *M)
+          if (P != Keep)
+            fs::remove(P, EC);
+      }
+    } CleanLevels{&ByLevel, Program};
+    auto ProgramAt = [&](const std::string &Level) -> const fs::path * {
+      if (auto It = ByLevel.find(Level); It != ByLevel.end())
+        return &It->second;
+      if (LevelFailed.count(Level))
+        return nullptr;
+      const fs::path P = programPath(Index, ("u" + Level + "_").c_str());
+      const fs::path M = Temp_ / ("u" + std::to_string(Index) + "_" + Level + ".tests.json");
+      ProcResult LC = compile(T, P, {"--test-build", M.string()}, Level);
+      std::error_code EC;
+      fs::remove(M, EC);
+      if (LC.Status != 0) {
+        LevelFailed[Level] = LC.Output;
+        return nullptr;
+      }
+      return &(ByLevel[Level] = P);
+    };
+
     std::vector<TestResult> Out;
     for (const auto &Case : Cases) {
       if (g_Interrupted)
         break;
-      Out.push_back(judgeTestFunction(T, Program, Case));
+      if (!selected(Case.Tags))
+        continue;
+      if (Case.Skip) {
+        say(T, Pal_.yellow("SKIPPED (" + Case.SkipReason + ")"), Case.Name);
+        Out.push_back({false, T.Key + ": " + Case.Name + ": " + Case.SkipReason, true});
+        continue;
+      }
+      if (Case.Levels.empty() || Case.Outcome == "compile_error") {
+        Out.push_back(judgeTestFunction(T, Program, Case));
+        continue;
+      }
+      // Every listed level; the first that fails is the test's failure.
+      TestResult Res{true, ""};
+      for (const auto &Level : Case.Levels) {
+        const fs::path *P = ProgramAt(Level);
+        if (!P) {
+          say(T, Pal_.red("FAILED (did not build at -" + Level + ")"), Case.Name);
+          Res = {false, T.Key + ": " + Case.Name + " (line " + std::to_string(Case.Line) +
+                            "): the file did not build at -" + Level + ":\n" + LevelFailed[Level]};
+          break;
+        }
+        Res = judgeTestFunction(T, *P, Case, Level);
+        if (!Res.Pass)
+          break;
+      }
+      Out.push_back(Res);
     }
-    if (HasMain && !T.InSrc && !g_Interrupted)
+    if (HasMain && !T.InSrc && !g_Interrupted && selected({}))
       Out.push_back(runFile(T, Index));
     return Out;
   }
 
   TestResult judgeTestFunction(const TestFile &T, const fs::path &Program,
-                               const TestExpect::TestCase &Case) {
-    const std::string Label = Case.Name;
+                               const TestExpect::TestCase &Case,
+                               const std::string &Level = "") {
+    // A test built at a level of its own (`levels:`) says which.
+    const std::string Label = Level.empty() ? Case.Name : Case.Name + " [-" + Level + "]";
     const std::string Key = T.Key + ": " + Case.Name + " (line " + std::to_string(Case.Line) + ")";
     auto Failed = [&](const std::string &Headline, const std::vector<std::string> &Why,
                       const std::string &Output) -> TestResult {
@@ -710,11 +855,26 @@ private:
       return Failed("FAILED (" + Case.Outcome + ")", Why, "");
     if (Case.Run < 0)
       return Failed("FAILED (not built)", {"the test program has no entry for this test"}, "");
+    // `timeout:` is the test's own limit, in milliseconds; `stdout:` needs
+    // what the test printed to stdout alone.
+    const int LimitMs = Case.TimeoutMs > 0 ? Case.TimeoutMs : Timeout_ * 1000;
     ProcResult R = RunProcess(Program.string(), {std::to_string(Case.Run)},
-                              T.Path.parent_path().string(), Timeout_);
+                              T.Path.parent_path().string(), LimitMs, Case.HasStdout);
+    if (R.TimedOut && Case.TimeoutMs > 0)
+      return Failed("TIMEOUT", {"the test did not end within its `timeout: " +
+                                std::to_string(Case.TimeoutMs) + "` (milliseconds)"},
+                    TestExpect::ProgramOutput(R.Output));
     if (auto Why = TestExpect::JudgeRun(Case, R.Status, R.TimedOut, R.Output); !Why.empty())
       return Failed(R.TimedOut ? "TIMEOUT" : "FAILED (" + Case.Outcome + ")", Why,
                     TestExpect::ProgramOutput(R.Output));
+    if (Case.HasStdout) {
+      const std::string Printed = TestExpect::TestStdout(R.Stdout);
+      if (Printed != Case.Stdout)
+        return Failed("FAILED (stdout)",
+                      {"the test printed " + TestExpect::Quoted(Printed) + ", and its `stdout:` is " +
+                       TestExpect::Quoted(Case.Stdout)},
+                      "");
+    }
     say(T, Pal_.green("PASS"), Label);
     return {true, ""};
   }
@@ -1120,11 +1280,13 @@ int RunTests(const TestRunOptions &O) {
   }
 
   size_t Passed = 0, Total = 0;
-  std::vector<std::string> Failures;
+  std::vector<std::string> Failures, Skipped;
   for (const auto &FileResults : Tests_)
     for (const auto &Res : FileResults) {
       ++Total;
-      if (Res.Pass)
+      if (Res.Skipped)
+        Skipped.push_back(Res.Detail);
+      else if (Res.Pass)
         ++Passed;
       else
         Failures.push_back(Res.Detail);
@@ -1133,6 +1295,14 @@ int RunTests(const TestRunOptions &O) {
             << "Total Tests: " << Total << "\n"
             << "Passed:      " << Pal.green(std::to_string(Passed)) << "\n"
             << "Failed:      " << Pal.red(std::to_string(Failures.size())) << "\n";
+  // TDP-2-026: a skipped test is counted apart and listed with its reason, so
+  // a test set aside stays visible.
+  if (!Skipped.empty()) {
+    std::cout << "Skipped:     " << Pal.yellow(std::to_string(Skipped.size())) << "\n\n"
+              << Pal.bold(Pal.yellow("Skipped Tests:")) << "\n";
+    for (const auto &S : Skipped)
+      std::cout << "  " << S << "\n";
+  }
   // The register is owed work, never "expected": say how much, every run, so
   // the number is visible and can only be seen to go down.
   if (!O.DiagRegister.empty())

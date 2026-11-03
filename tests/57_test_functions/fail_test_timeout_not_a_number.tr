@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: `timeout:` takes a whole number of milliseconds greater than 0
+// TDP-2-026: Turf has no duration literal; the unit is milliseconds.
+@test(timeout: "2s")
+fn a(): void {
+}
+
+fn main(): int {
+    return 0;
+}

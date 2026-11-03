@@ -1109,8 +1109,20 @@ over the same code, so how a test is judged exists once.
   `src/` files that declare tests run too (their `main` is not a test);
   `--only` runs only what it names. Report lines are
   `[suite] file.tr: test_name ... PASS`; a file whose tests do not build is one
-  failure, `COMPILE FAILED (its tests did not run)`. Per-test options are
-  TDP-2-026.
+  failure, `COMPILE FAILED (its tests did not run)`.
+- **Test options (F-11f, TDP-2-026, 2.3).** After the outcome, each at most
+  once, in any order, values literals only: `skip: "reason"` (not empty;
+  compiled and checked, not run; reported `SKIPPED (reason)` and counted
+  apart), `timeout: <ms>` (more than 0; the test fails with its process killed
+  when it has not ended in time), `levels: all | [O0, ...]` (`all` is O0 to
+  O3; built and run at each, the first failing level named), `stdout: "text"`
+  (stdout exactly), `tag: "t" | ["t", ...]` (selected by `--test --tag` /
+  `--skip-tag`, driver interface **1.13**, feature `test-tags`; a file that is
+  a test of its own has no tags) and the bare word `serial` (accepted; no
+  effect while one file's tests run one at a time). `timeout:` and `stdout:`
+  on a `compile_error` test, an unknown option, a repeat and a value of the
+  wrong kind are E146. No retries, no setup hooks. An annotation argument may
+  be a `[...]` list of literals.
 - **Not frozen:** the wording of the per-test report lines, the order tests
   finish in, and `turfc --test`'s behaviour on Windows (not supported yet; it
   needs a process runner for that platform, REL-008).

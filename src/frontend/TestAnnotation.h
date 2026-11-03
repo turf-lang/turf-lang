@@ -22,11 +22,24 @@
 // The outcome words mean this only as the FIRST argument, so they reserve
 // nothing: `compile_error` and not `Error::E041`, because `Error::E041` is
 // already how a program names a variant of its own `error Error`.
+//
+// TDP-2-026 (roadmap F-11f, issue #340): OPTIONS, how the test is run, follow
+// the outcome in any order, each at most once:
+//
+//   skip: "reason"           compiled and checked, not run; listed with the reason
+//   timeout: 2000            fails if it has not ended within 2000 ms
+//   levels: all | [O0, O2]   built and run at each level (all: O0 to O3)
+//   stdout: "text"           what it prints to stdout is exactly this
+//   tag: "net" | ["a", "b"]  `turf test --tag net` / `--skip-tag net` select by it
+//   serial                   never runs beside another test (accepted, no effect yet)
+//
+// Values are literals. The names mean this only inside `@test(...)`.
 
 #include "diagnostics/ErrorCodes.h"
 #include "frontend/Annotation.h"
 #include "sema/Types.h"
 
+#include <algorithm>
 #include <cctype>
 #include <string>
 #include <utility>
@@ -48,7 +61,28 @@ struct Spec {
   int Status = 0;  ///< exit
   /// error: the type as written (`ParseError`, `fs::FsError`) and the variant.
   std::string ErrorType, ErrorVariant;
+
+  // Options (TDP-2-026).
+  bool Skip = false;
+  std::string SkipReason;
+  int TimeoutMs = 0; ///< 0: the runner's own limit
+  /// The optimization levels to build and run at (`O0`, ..., `Os`); empty: the
+  /// level `turf test` was given.
+  std::vector<std::string> Levels;
+  bool HasStdout = false;
+  std::string Stdout;
+  std::vector<std::string> Tags;
+  bool Serial = false;
 };
+
+inline const char *OptionList =
+    "`skip:`, `timeout:`, `levels:`, `stdout:`, `tag:` and `serial`, and `fix:` "
+    "after a compile_error outcome";
+
+/// The optimization levels `levels:` names; `all` is O0 to O3.
+inline bool isLevelWord(const std::string &W) {
+  return W == "O0" || W == "O1" || W == "O2" || W == "O3" || W == "Os";
+}
 
 /// The word that names @p K in source, "" for Returns (which has none).
 inline const char *outcomeWord(Outcome K) {
@@ -84,14 +118,86 @@ inline const char *OutcomeList =
 inline std::string parse(const Annotation &Ann, Spec &Out) {
   Out = Spec();
   std::vector<const AnnotationArg *> Positional;
+  std::vector<std::string> Seen;
+  auto Once = [&](const std::string &Name) -> std::string {
+    if (std::find(Seen.begin(), Seen.end(), Name) != Seen.end())
+      return "`@test` has `" + Name + "` twice. Write each option once.";
+    Seen.push_back(Name);
+    return "";
+  };
+  auto IsWordArg = [](const AnnotationArg &A) {
+    return !A.IsString && !A.IsNumber && !A.IsList;
+  };
   for (const auto &A : Ann.Args) {
-    if (!A.Key.empty()) {
-      if (A.Key != "fix")
-        return "`@test` has no option `" + A.Key +
-               ":`. Its one option is `fix:`, after a compile_error outcome.";
+    if (A.Key.empty()) {
+      // `serial`, the one option with no value, is a bare word anywhere
+      // after the outcome.
+      if (IsWordArg(A) && A.Value == "serial") {
+        if (std::string Why = Once("serial"); !Why.empty())
+          return Why;
+        Out.Serial = true;
+        continue;
+      }
+      Positional.push_back(&A);
       continue;
     }
-    Positional.push_back(&A);
+    const std::string &K = A.Key;
+    if (K != "fix" && K != "skip" && K != "timeout" && K != "levels" && K != "stdout" &&
+        K != "tag")
+      return "`@test` has no option `" + K + ":`. Its options are " + OptionList + ".";
+    if (std::string Why = Once(K + ":"); !Why.empty())
+      return Why;
+    if (K == "skip") {
+      if (!A.IsString || A.Value.empty())
+        return "`skip:` takes the reason the test is set aside, a string that is not "
+               "empty: `@test(skip: \"waits for #123\")`.";
+      Out.Skip = true;
+      Out.SkipReason = A.Value;
+    } else if (K == "timeout") {
+      const bool Digits = A.IsNumber && !A.Value.empty() && A.Value.size() <= 9 &&
+                          A.Value.find_first_not_of("0123456789") == std::string::npos;
+      if (!Digits || std::stoi(A.Value) <= 0)
+        return "`timeout:` takes a whole number of milliseconds greater than 0: "
+               "`@test(timeout: 2000)`.";
+      Out.TimeoutMs = std::stoi(A.Value);
+    } else if (K == "levels") {
+      if (IsWordArg(A) && A.Value == "all") {
+        Out.Levels = {"O0", "O1", "O2", "O3"};
+      } else if (A.IsList && !A.Items.empty()) {
+        for (const auto &I : A.Items) {
+          if (!IsWordArg(I) || !isLevelWord(I.Value))
+            return "`levels:` takes `all` or a list of levels from `O0`, `O1`, `O2`, "
+                   "`O3` and `Os`: `@test(levels: [O0, O2])`.";
+          if (std::find(Out.Levels.begin(), Out.Levels.end(), I.Value) == Out.Levels.end())
+            Out.Levels.push_back(I.Value);
+        }
+      } else {
+        return "`levels:` takes `all` or a list of levels from `O0`, `O1`, `O2`, "
+               "`O3` and `Os`: `@test(levels: [O0, O2])`.";
+      }
+    } else if (K == "stdout") {
+      if (!A.IsString)
+        return "`stdout:` takes the exact text the test prints, a string: "
+               "`@test(stdout: \"3\\n\")`.";
+      Out.HasStdout = true;
+      Out.Stdout = A.Value;
+    } else if (K == "tag") {
+      auto Bad = [] {
+        return std::string("`tag:` takes a string or a list of strings, none of them "
+                           "empty: `@test(tag: \"net\")` or `@test(tag: [\"net\", \"slow\"])`.");
+      };
+      if (A.IsString && !A.Value.empty()) {
+        Out.Tags.push_back(A.Value);
+      } else if (A.IsList && !A.Items.empty()) {
+        for (const auto &I : A.Items) {
+          if (!I.IsString || I.Value.empty())
+            return Bad();
+          Out.Tags.push_back(I.Value);
+        }
+      } else {
+        return Bad();
+      }
+    }
   }
   for (size_t I = 1; I < Positional.size(); ++I) {
     Outcome K;
@@ -102,7 +208,7 @@ inline std::string parse(const Annotation &Ann, Spec &Out) {
              Positional[I]->Value + ", ...)`.";
   }
   if (Positional.empty()) {
-    if (!Ann.Args.empty())
+    if (Ann.findKeyed("fix"))
       return "`@test(fix: ...)` needs a compile_error outcome first: "
              "`@test(compile_error, E041, \"text\", fix: \"text\")`.";
     return "";
@@ -118,6 +224,11 @@ inline std::string parse(const Annotation &Ann, Spec &Out) {
   if (Fix && Out.Kind != Outcome::CompileError)
     return "`fix:` belongs to a compile_error outcome: "
            "`@test(compile_error, E041, \"text\", fix: \"text\")`.";
+  // A compile_error test never runs, so it has no time to limit and no output.
+  if (Out.Kind == Outcome::CompileError && (Out.TimeoutMs > 0 || Out.HasStdout))
+    return std::string("`") + (Out.TimeoutMs > 0 ? "timeout:" : "stdout:") +
+           "` needs a test that runs, and a compile_error test is only compiled. "
+           "Remove it, or give the test an outcome that runs.";
 
   // `E041`, which the registry must know, as an error (@p WantWarning false)
   // or a warning.

@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: `@test` has `skip:` twice. Write each option once.
+// TDP-2-026: each option at most once.
+@test(skip: "a", skip: "b")
+fn a(): void {
+}
+
+fn main(): int {
+    return 0;
+}

@@ -1,0 +1,53 @@
+import test;
+
+// TDP-2-026: each option on a test that passes. `skip:` is listed with its
+// reason and not run; `timeout:`, `levels:`, `stdout:`, `tag:` and `serial`
+// run the test their way. (tests/../scripts/smoke/test_cmd_smoke.sh has the
+// failing side: a time-out, a wrong `stdout:`, a level that fails, `--tag`.)
+
+@test(skip: "shown as skipped: the summary counts it apart")
+fn set_aside(): void {
+    test::assert(false, "a skipped test never runs");
+}
+
+@test(timeout: 10000)
+fn ends_in_time(): void {
+    test::assert(2 * 3 == 6, "2 * 3 is 6");
+}
+
+@test(levels: all)
+fn same_at_every_level(): void {
+    mut sum: int = 0;
+    for i in 0..10 {
+        sum = sum + i;
+    }
+    test::assert(sum == 45, "0 + ... + 9 is 45");
+}
+
+@test(levels: [O0, Os])
+fn same_at_two_levels(): void {
+    test::assert(7 / 2 == 3, "7 / 2 is 3");
+}
+
+@test(stdout: "3\nindex 0\nindex 1\n")
+fn prints_exactly(): void {
+    printline(3);
+    for i in 0..2 {
+        printline("index " + (i to string));
+    }
+}
+
+@test(tag: "strings", serial)
+fn tagged_and_serial(): void {
+}
+
+@test(tag: ["net", "slow"])
+fn two_tags(): void {
+}
+
+@test(panic, "Division by zero", timeout: 5000, levels: [O0, O2])
+fn options_after_an_outcome(): void {
+    mut zero: int = 0;
+    immut n: int = 1 / zero;
+    printline(n);
+}

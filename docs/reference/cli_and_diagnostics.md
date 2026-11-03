@@ -418,7 +418,7 @@ $ turfc --version --json
 |---|---|
 | `interface` | `{"major", "minor"}`, as line 2 of `turfc --version`. |
 | `schemas` | `diagnostics`: the [diagnostics JSON](#diagnostics-as-json) schema version; `package_graph`: the package-graph `"format"` `--package-graph` reads. |
-| `features` | One name per addition to the interface, in order: `package-graph` (1.1), `exit-status-2` (1.2), `test` (1.3), `format-check` (1.4), `format-skip-unlexable` (1.5), `emit-obj` (1.6), `test-only` (1.7), `lint-levels` (1.8), `diagnostics-json` (1.9), `version-json` (1.10), `test-functions` (1.11), `unsafe-report` (1.12). Then what this build has: `smart`, `embedded-lld`, `bundled-runtime`. |
+| `features` | One name per addition to the interface, in order: `package-graph` (1.1), `exit-status-2` (1.2), `test` (1.3), `format-check` (1.4), `format-skip-unlexable` (1.5), `emit-obj` (1.6), `test-only` (1.7), `lint-levels` (1.8), `diagnostics-json` (1.9), `version-json` (1.10), `test-functions` (1.11), `unsafe-report` (1.12), `test-tags` (1.13). Then what this build has: `smart`, `embedded-lld`, `bundled-runtime`. |
 | `turfc`, `llvm`, `runtime`, `root` | As the text lines. |
 
 ### Finding the compiler
@@ -463,7 +463,7 @@ Usage: turfc <filename.tr> [-o output] [--emit-llvm | --emit-obj] [--smart]
        turfc --migrate=pub [--write] <module.tr>...
        turfc --unsafe-report (--package-graph <file> | <file.tr>...)
        turfc --test [<tests-dir>] [--package-graph <file>] [--exclude <path>]
-         [--only <path>]
+         [--only <path>] [--tag <tag>] [--skip-tag <tag>]
          [-O0|-O1|-O2|-O3|-Os] [-g] [--link <libname>] [--jobs <n>]
          [--timeout <seconds>] [--diag-register <file>]
          [--allow-unsafe-modules] [--stdlib-warnings]
@@ -486,7 +486,7 @@ linker system-cc
 smart built-in
 ```
 
-The interface covers what `turf` relies on: the flags it passes, the two-line start of `--version`, the exit statuses, and every other argument being accepted exactly as a direct invocation accepts it. A new flag or input raises the **minor**; removing a flag or changing its meaning raises the **major**. A tool that needs `--package-graph` requires interface 1.1 or later, `turfc --test` 1.3, `--emit-obj` 1.6, `turfc --test --only` 1.7, the lint-level flags 1.8, `@test` functions in `turfc --test` 1.11, and `--unsafe-report` 1.12.
+The interface covers what `turf` relies on: the flags it passes, the two-line start of `--version`, the exit statuses, and every other argument being accepted exactly as a direct invocation accepts it. A new flag or input raises the **minor**; removing a flag or changing its meaning raises the **major**. A tool that needs `--package-graph` requires interface 1.1 or later, `turfc --test` 1.3, `--emit-obj` 1.6, `turfc --test --only` 1.7, the lint-level flags 1.8, `@test` functions in `turfc --test` 1.11, `--unsafe-report` 1.12, and the `@test` options with `turfc --test --tag`/`--skip-tag` 1.13.
 
 **Modes a tool uses:**
 

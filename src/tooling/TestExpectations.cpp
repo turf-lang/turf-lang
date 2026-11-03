@@ -139,6 +139,22 @@ bool ParseManifest(const std::string &Text, std::vector<TestCase> &Cases, bool &
     C.Run = static_cast<int>(O->getInteger("run").value_or(-1));
     C.Errors = Diags(*O, "errors");
     C.Warnings = Diags(*O, "warnings");
+    auto Strings = [&](const char *K) {
+      std::vector<std::string> Out;
+      if (const llvm::json::Array *A = O->getArray(K))
+        for (const auto &E : *A)
+          if (auto S = E.getAsString())
+            Out.push_back(S->str());
+      return Out;
+    };
+    C.Skip = O->getString("skip").has_value();
+    C.SkipReason = Str(*O, "skip");
+    C.TimeoutMs = static_cast<int>(O->getInteger("timeout_ms").value_or(0));
+    C.Levels = Strings("levels");
+    C.HasStdout = O->getString("stdout").has_value();
+    C.Stdout = Str(*O, "stdout");
+    C.Tags = Strings("tags");
+    C.Serial = O->getBoolean("serial").value_or(false);
     Cases.push_back(std::move(C));
   }
   return true;
@@ -212,6 +228,30 @@ std::vector<std::string> JudgeWarnings(const TestCase &C) {
   for (const auto &D : C.Warnings)
     Out.push_back("  " + Describe(D));
   return Out;
+}
+
+std::string TestStdout(const std::string &Stdout) {
+  // The report is "\nturf-test: ...\n" at the end; a test that never got
+  // there (a panic, an exit) has none.
+  const size_t At = Stdout.rfind("\nturf-test: ");
+  if (At != std::string::npos && Stdout.find('\n', At + 1) == Stdout.size() - 1)
+    return Stdout.substr(0, At);
+  return Stdout;
+}
+
+std::string Quoted(const std::string &S) {
+  std::string Out = "\"";
+  for (char C : S) {
+    if (C == '\n')
+      Out += "\\n";
+    else if (C == '\t')
+      Out += "\\t";
+    else if (C == '"' || C == '\\')
+      Out += std::string("\\") + C;
+    else
+      Out += C;
+  }
+  return Out + "\"";
 }
 
 std::string ProgramOutput(const std::string &Output) {

@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: `stdout:` needs a test that runs, and a compile_error test is only compiled.
+// TDP-2-026: a compile_error test is never run, so it prints nothing.
+@test(compile_error, E041, "", stdout: "x")
+fn a(): void {
+    nope();
+}
+
+fn main(): int {
+    return 0;
+}

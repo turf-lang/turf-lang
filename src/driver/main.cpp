@@ -152,8 +152,9 @@ static constexpr int TurfcInterfaceMajor = 1;
 // the root package's src/ when given a package graph) through `--test-build
 // <manifest>`, which only the runner passes. 1.12 (LB-2) adds
 // `--unsafe-report`, each package's unsafe surface as JSON; `turf audit` and
-// `turf graph --unsafe` ask for it.
-static constexpr int TurfcInterfaceMinor = 12;
+// `turf graph --unsafe` ask for it. 1.13 (TDP-2-026) adds the `@test` options
+// and `--test --tag <tag>` / `--skip-tag <tag>`; `turf test --tag` asks for it.
+static constexpr int TurfcInterfaceMinor = 13;
 
 /// IF-1: the name of each addition to the driver interface, in the order of
 /// the history above, with the minor that added it. `turfc --version --json`
@@ -169,6 +170,7 @@ static constexpr InterfaceFeature InterfaceFeatures[] = {
     {"test-only", 7},             {"lint-levels", 8},
     {"diagnostics-json", 9},      {"version-json", 10},
     {"test-functions", 11},       {"unsafe-report", 12},
+    {"test-tags", 13},
 };
 
 // The exit statuses (FREEZE.md 6.21, F-CLI-1, REL-001). The split exists so a script
@@ -528,7 +530,7 @@ static const char *turfcUsage() {
          "       turfc --migrate=pub [--write] <module.tr>...\n"
          "       turfc --unsafe-report (--package-graph <file> | <file.tr>...)\n"
          "       turfc --test [<tests-dir>] [--package-graph <file>] [--exclude <path>]\n"
-         "         [--only <path>]\n"
+         "         [--only <path>] [--tag <tag>] [--skip-tag <tag>]\n"
          "         [-O0|-O1|-O2|-O3|-Os] [-g] [--link <libname>] [--jobs <n>]\n"
          "         [--timeout <seconds>] [--diag-register <file>]\n"
          "         [--allow-unsafe-modules] [--stdlib-warnings]\n"
@@ -556,6 +558,7 @@ static const char *const KnownOptions[] = {
     "--target=",          "--explain",      "-mcpu=",
     "--test",             "--jobs",         "--timeout",
     "--diag-register",    "--exclude",      "--only",
+    "--tag",              "--skip-tag",
     "--skip-unlexable", "--allow",      "--warn",         "--deny",
     "--lint-set",         "--diagnostics=", "--test-build",
     "--unsafe-report",
@@ -966,6 +969,14 @@ static int runTestMode(int argc, char **argv) {
       while (X.size() > 2 && X.compare(0, 2, "./") == 0)
         X.erase(0, 2);
       (Arg == "--only" ? T.Only : T.Excludes).push_back(X);
+    } else if (Arg == "--tag" || Arg == "--skip-tag") {
+      // TDP-2-026: select `@test` functions by their `tag:`.
+      std::string Tag = NeedValue(I, Arg);
+      if (Tag.empty()) {
+        std::cerr << "Error: option '" << Arg << "' needs a tag that is not empty.\n";
+        std::exit(ExitUsage);
+      }
+      (Arg == "--tag" ? T.Tags : T.SkipTags).push_back(Tag);
     } else if (Arg == "--diag-register") {
       T.DiagRegister = NeedValue(I, Arg);
     } else if (Arg == "--jobs") {

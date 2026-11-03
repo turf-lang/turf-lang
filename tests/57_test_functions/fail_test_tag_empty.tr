@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: `tag:` takes a string or a list of strings, none of them empty
+// TDP-2-026: a tag is a string that is not empty.
+@test(tag: "")
+fn a(): void {
+}
+
+fn main(): int {
+    return 0;
+}

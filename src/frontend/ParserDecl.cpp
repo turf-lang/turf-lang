@@ -1596,7 +1596,7 @@ std::unique_ptr<ExprAST> ParseAnnotatedDecl() {
         auto BadArgument = [&]() {
           LogErrorAt(Lex().CurLoc, ErrCode::UnexpectedToken,
                      "I expected a word or a string in the arguments of `@" + Ann.Name +
-                         "`.\n  Hint: Write an argument as a word, a path such as `ParseError::Empty`, a whole number or a string, never an expression: `@" +
+                         "`.\n  Hint: Write an argument as a word, a path such as `ParseError::Empty`, a whole number, a string or a `[...]` list of those, never an expression: `@" +
                          Ann.Name + "(word)` or `@" + Ann.Name + "(\"text\")`.",
                      SLM::ErrorCategory::SYNTAX_ERROR);
         };
@@ -1620,7 +1620,49 @@ std::unique_ptr<ExprAST> ParseAnnotatedDecl() {
         };
         // A value is a word, a path, a whole number or a string; ReadValue
         // fills Arg from whichever it finds and reports if it finds none.
+        // One item of a `[...]` list: a word, a path, a whole number or a
+        // string, never another list.
+        auto ReadItem = [&](AnnotationArg &Item) {
+          Item.Loc = Lex().CurLoc;
+          if (Parser().CurTok == TOK_STRING_LITERAL) {
+            Item.Value = Lex().StringVal;
+            Item.IsString = true;
+          } else if (Parser().CurTok == TOK_INT_LITERAL) {
+            Item.Value = Lex().NumLitSpelling;
+            Item.IsNumber = true;
+          } else if (IsWord()) {
+            Item.Value = Lex().IdentifierStr;
+            getNextToken();
+            return ReadPathTail(Item.Value);
+          } else {
+            BadArgument();
+            return false;
+          }
+          getNextToken();
+          return true;
+        };
         auto ReadValue = [&]() {
+          if (Parser().CurTok == '[') {
+            getNextToken(); // eat '['
+            Arg.IsList = true;
+            while (Parser().CurTok != ']') {
+              AnnotationArg Item;
+              if (!ReadItem(Item))
+                return false;
+              Arg.Items.push_back(std::move(Item));
+              if (Parser().CurTok == ',') {
+                getNextToken();
+              } else if (Parser().CurTok != ']') {
+                LogErrorAt(Lex().CurLoc, ErrCode::UnexpectedToken,
+                           "I expected a `,` or a `]` in a list in the arguments of `@" +
+                               Ann.Name + "`.",
+                           SLM::ErrorCategory::SYNTAX_ERROR);
+                return false;
+              }
+            }
+            getNextToken(); // eat ']'
+            return true;
+          }
           if (Parser().CurTok == TOK_STRING_LITERAL) {
             Arg.Value = Lex().StringVal;
             Arg.IsString = true;

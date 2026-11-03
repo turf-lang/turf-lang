@@ -798,9 +798,50 @@ fn the_old_name_still_works(): void {
 }
 ```
 
+#### Options
+
+After the outcome, options say how the test is run (TDP-2-026). Each is
+written once at most, in any order, as `name: value`, except `serial`, a bare
+word. Values are literals only.
+
+| Option | Value | Meaning |
+|---|---|---|
+| `skip: "reason"` | a string, not empty | Compiled and checked, not run. Reported as `SKIPPED (reason)`, listed under `Skipped Tests` and counted apart from passes and failures. A `compile_error` test with `skip:` is still compiled. |
+| `timeout: 2000` | milliseconds, a whole number more than 0 | The test fails if it has not ended within that time; its process (and any it started) is killed, and the file's other tests still run. Without it the run's `--timeout` applies. |
+| `levels: all`, `levels: [O0, O2]` | `all` is O0, O1, O2 and O3; a list names levels from `O0` … `O3` and `Os` | The file is built at each level and the test runs at each, reported as `name [-O2]`. The first level that fails ends the test, and the report names it. |
+| `stdout: "text"` | a string | What the test prints to stdout is exactly `text`. Without it, output is not checked. |
+| `tag: "net"`, `tag: ["net", "slow"]` | a string or a list of strings, none empty | `turfc --test --tag net` (`turf test --tag net`) runs only the `@test` functions with one of the tags given; `--skip-tag net` leaves out those with it. A file that is a test of its own has no tags, so `--tag` leaves it out. |
+| `serial` | none | The test never runs beside another. The tests of one file run one at a time, so this changes nothing yet; it marks the tests that must stay so. |
+
+```turflang
+import test;
+
+@test(skip: "waits for the new rounding rules")
+fn rounds_down(): void {
+    test::assert(7 / 2 == 4, "not yet");
+}
+
+@test(stdout: "3\n", levels: all, tag: ["io", "fast"])
+fn prints_three(): void {
+    io::printline(3);
+}
+
+@test(panic, "Division by zero", timeout: 2000, serial)
+fn dividing_by_zero_panics(): void {
+    immut zero: int = 0;
+    io::printline(10 / zero);
+}
+```
+
+`timeout:` and `stdout:` need a test that runs: a `compile_error` test with
+either is `E146`. The option names mean this only inside `@test(...)`; they
+reserve nothing. There are no retries and no setup hooks: a test calls its own
+helper.
+
 #### Mistakes in a `@test`
 
-A `@test` that cannot be understood is `E146`, with a hint listing the outcomes:
+A `@test` that cannot be understood is `E146`, with a hint listing the outcomes
+and the options:
 
 <!-- doc-example: fails E146 -->
 ```turflang
@@ -811,9 +852,9 @@ fn misspelt_outcome(): void {
 
 The message names the rule: `` `x` is not an outcome of `@test` ``, `` `compile_error` is an outcome, and an outcome is the first argument ``, `` `E999` is not a code the compiler has ``, `` `E172` is a warning's code, not an error's `` (and the reverse),
 `` A test takes no parameters ``, `` A test returns `void` or `!void`, not `int` ``,
-`` I cannot use a method as a test, because `@test` marks a top-level function ``, `` I cannot use `main` as a test, because it is the program's entry point ``, `` `@test` has no option `skip:` ``, `` `256` is not an exit status ``, `` A function has one `@test` ``, `` A test with an `error` outcome returns `!void` ``, `` The error type `T` has no variant `V` `` and
+`` I cannot use a method as a test, because `@test` marks a top-level function ``, `` I cannot use `main` as a test, because it is the program's entry point ``, `` `@test` has no option `retries:` ``, `` `@test` has `skip:` twice ``, `` `timeout:` takes a whole number of milliseconds greater than 0 ``, `` `256` is not an exit status ``, `` A function has one `@test` ``, `` A test with an `error` outcome returns `!void` ``, `` The error type `T` has no variant `V` `` and
 `` I cannot use `T` in `@test`, because it is not an error type ``. A `@test` function nested inside another function is
-`E038`; a call to a test is `E173`. `@test` takes no per-test options: `skip:`, `timeout:` and the like are `E146`.
+`E038`; a call to a test is `E173`.
 
 ---
 

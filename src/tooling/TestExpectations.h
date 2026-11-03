@@ -89,6 +89,15 @@ struct TestCase {
   /// The number the test program runs it by, -1 when it is not run.
   int Run = -1;
   std::vector<Diag> Errors, Warnings;
+  // TDP-2-026 options (TestAnnotation.h).
+  bool Skip = false;
+  std::string SkipReason;
+  int TimeoutMs = 0;
+  std::vector<std::string> Levels;
+  bool HasStdout = false;
+  std::string Stdout;
+  std::vector<std::string> Tags;
+  bool Serial = false;
 };
 
 /// Reads a manifest. On failure returns false and sets @p Error.
@@ -106,6 +115,13 @@ std::vector<std::string> JudgeWarnings(const TestCase &C);
 /// it printed, with the line the test program reports through.
 std::vector<std::string> JudgeRun(const TestCase &C, int Status, bool TimedOut,
                                   const std::string &Output);
+
+/// TDP-2-026 `stdout:`: what a test printed to stdout, @p Stdout without the
+/// line the test program reports its end through (`turf-test: ...`).
+std::string TestStdout(const std::string &Stdout);
+
+/// @p S as a quoted string with `\n` and `\t` written out, for a message.
+std::string Quoted(const std::string &S);
 
 /// @p Output without the lines the test program reports through.
 std::string ProgramOutput(const std::string &Output);

@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: `levels:` takes `all` or a list of levels
+// TDP-2-026: `levels:` is `all` or a list, `[O2]` for one level.
+@test(levels: O2)
+fn a(): void {
+}
+
+fn main(): int {
+    return 0;
+}

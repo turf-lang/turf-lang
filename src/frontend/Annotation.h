@@ -23,8 +23,9 @@
 
 /// One argument of an annotation: `value` (positional, Key empty) or
 /// `key: value`. A key is a word; a value is a word, a path of words
-/// (`ParseError::Empty`, `fs::FsError::RemoveFileFailed`), a whole number or a
-/// string literal. A word is an
+/// (`ParseError::Empty`, `fs::FsError::RemoveFileFailed`), a whole number, a
+/// string literal, or a list of those in `[...]` (F-11f: `levels: [O0, O2]`,
+/// `tag: ["net", "slow"]`), never a list of lists. A word is an
 /// identifier or a keyword, as spelled (`error: ...` is a valid key). The
 /// grammar accepts nothing richer, so no pass has to evaluate an expression
 /// here.
@@ -35,6 +36,9 @@ struct AnnotationArg {
   std::string Value;
   bool IsString = false;
   bool IsNumber = false;
+  /// A `[...]` list: its items are in Items, and Value is empty.
+  bool IsList = false;
+  std::vector<AnnotationArg> Items;
   SourceLocation Loc;
 };
 
