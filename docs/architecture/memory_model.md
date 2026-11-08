@@ -158,7 +158,7 @@ that identity is **not** license to treat it like a manual-heap pointer.
 `mem::free()` checks every pointer against the collector's block table
 (`gc_checked_free`, which becomes `turf_rt_checked_free`) and panics with a named
 diagnostic (`cross-heap free`) if it is the start of a live GC block, instead of
-corrupting either heap's bookkeeping (`tests/41_gc/fail_free_gc_pointer.tr`,
+corrupting either heap's bookkeeping (`tests/41_gc/panics_in_functions.tr: panics_free_gc_pointer`,
 INV-MEM-1).
 
 ### 1.5 Structs
@@ -518,7 +518,7 @@ in `FuncCallExprAST::codegen()` (`src/codegen/CodegenFunc.cpp`) to
 `turf_rt_is_gc_pointer`, `turf_rt_checked_free`, `turf_rt_pin`/`turf_rt_unpin`
 (`runtime/turfrt.h`). They are the standard library's allocation surface, not
 documented user API. `gc_alloc`'s byte count must be an `int`
-(`tests/41_gc/fail_gc_alloc_non_int_size.tr`).
+(`tests/41_gc/rejected_in_functions.tr: rejects_gc_alloc_non_int_size`).
 
 #### 2.6.1 `heap(expr)`: a user value, GC-heap-allocated with a real descriptor
 

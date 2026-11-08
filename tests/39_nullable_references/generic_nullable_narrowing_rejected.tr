@@ -1,0 +1,16 @@
+// A `&?Node<int>` passed to a generic `&Node<T>` parameter is accepted only
+// where NullabilityPass proves it non-null (AN-4); here `p` may be null.
+// The positive twin is 13_narrowed_generic_argument.tr.
+struct Node<T> { val: T, next: &?Node<T> }
+
+fn<T> takesNonNull(n: &Node<T>): int { return 0; }
+
+@test(compile_error, E082, "I cannot use `p` as a non-null reference here, because it might be `null`.")
+fn rejects_generic_nullable_narrowing(): void {
+    mut a: Node<int> = Node::default();
+    mut p: &?Node<int> = &a;
+    if a.val > 0 {
+        p = null;
+    }
+    takesNonNull(p);
+}

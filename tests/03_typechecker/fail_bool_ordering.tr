@@ -1,6 +1,0 @@
-// EXPECT-DIAG: E124
-// EXPECT-DIAG: I cannot compare a `bool` with a `bool` using `<`.
-fn main(): int {
-    mut ok: bool = true < false;
-    return 0;
-}

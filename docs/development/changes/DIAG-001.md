@@ -187,7 +187,7 @@ here; see *Known pitfalls*.
 
 ## Tests
 
-- Added `tests/14_cfg_analysis/fail_37_lint_vardecl_div_by_zero.tr`
+- Added `tests/14_cfg_analysis/37_lint_vardecl_div_by_zero_panics.tr: panics_37_lint_vardecl_div_by_zero`
   (`RUNTIME_ABORT_EXPECTED` — the warning is non-fatal, but `5 / 0` still
   genuinely traps at runtime once compiled), `38_lint_vardecl_self_comparison.tr`,
   `39_lint_vardecl_redundant_bool.tr` — each proves a specific

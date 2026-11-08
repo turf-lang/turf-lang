@@ -1,0 +1,8 @@
+// Test (fail): No implicit int -> enum assignment without cast
+// Should fail with type mismatch error
+enum Direction { North, East, South, West }
+
+@test(compile_error, E066, "I cannot store an `int` in `d`, which is a `Direction`.")
+fn rejects_enum_wrong_type(): void {
+    mut d: Direction = 3;
+}

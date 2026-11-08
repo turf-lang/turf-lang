@@ -1,7 +1,0 @@
-// EXPECT-DIAG: E057
-// EXPECT-DIAG: `++` needs a number, and I found a `string`.
-fn main(): int {
-    mut x: string = "hello";
-    x++;
-    return 0;
-}

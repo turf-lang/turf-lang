@@ -1,0 +1,11 @@
+// A `&int` is one element, so an index other than 0 or -1 panics.
+
+fn at(r: &int, i: int): int {
+    return r[i];
+}
+
+@test(panic, "Array index out of bounds for 'r'")
+fn panics_scalar_reference_index_out_of_bounds_runtime(): void {
+    mut x: int = 5;
+    at(&x, 1);
+}

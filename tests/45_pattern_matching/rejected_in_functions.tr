@@ -1,0 +1,62 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+import shapes_module::Shape;
+
+// LEC-003: a binding is immutable. Expected: E060.
+struct P { x: int }
+@test(compile_error, E060, "I cannot change `x`: it is immutable.")
+fn rejects_assign_to_pattern_binding(): void {
+    mut p: P = P::default();
+    compare p {
+        matches P { x }: x = 4; return x; done
+        otherwise: return 0;
+    }
+}
+
+// LEC-003: an error value is an open union -- its variants can't be listed --
+// so a compare over it needs an arm that takes the rest, and a GUARDED arm
+// never counts (its guard may be false). Expected: E093.
+error MathError { DivisionByZero, Overflow }
+
+fn risky(n: int): !int {
+    if n == 0 { return MathError::DivisionByZero; }
+    return n;
+}
+
+@test(compile_error, E093, "This `compare` on `error` does not cover every case, and it has no `otherwise`.")
+fn rejects_error_compare_needs_otherwise(): void {
+    mut r: int = 0;
+    immut v: int = risky(0) recover as err run {
+        compare err {
+            matches _ if r == 0: r = 1; done
+        }
+        r;
+        return;
+    };
+    v;
+}
+
+// LEC-003: a pattern reads fields exactly as `.field` does, so another
+// module's private field is refused. Expected: E088.
+
+@test(compile_error, E088, "I cannot use the field `Shape.secret`, which is private to module `shapes_module`")
+fn rejects_pattern_private_field(): void {
+    mut s: Shape = Shape::default();
+    compare s {
+        matches Shape { secret, .. }: return secret; done
+        otherwise: return 0;
+    }
+}
+
+// LEC-003: listing only the public field is not enough -- the private one
+// must be waved off with `..`. Expected: E092.
+
+@test(compile_error, E092, "This pattern does not mention the field `secret` of `shapes_module::Shape`.")
+fn rejects_pattern_unlisted_private_field_needs_rest(): void {
+    mut s: Shape = Shape::default();
+    compare s {
+        matches Shape { kind }: return kind; done
+        otherwise: return 0;
+    }
+}

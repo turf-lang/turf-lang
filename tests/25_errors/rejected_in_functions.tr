@@ -1,0 +1,91 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+// Test (fail): a '!T' value can't be assigned directly to a 'T'-typed
+// variable without going through 'recover' first.
+error MathError {
+    DivisionByZero,
+}
+
+fn divide(a: int, b: int): !int {
+    if (b == 0) {
+        return MathError::DivisionByZero;
+    }
+    return a / b;
+}
+
+@test(compile_error, E066, "I cannot store a `!int` in `x`, which is an `int`.")
+fn rejects_assign_fallible_without_recover(): void {
+    mut x: int = divide(10, 2);
+}
+
+// LEC-004: a subject of a DECLARED error type has a listable set of variants,
+// so leaving one uncovered without `otherwise` is E093 naming it.
+error IOError {
+    NotFound(path: string),
+    Timeout,
+    Closed
+}
+
+@test(compile_error, E093, "This `compare` on `IOError` does not cover every case, and it has no `otherwise`.")
+fn rejects_error_compare_declared_type_missing_variant(): void {
+    mut e: IOError = IOError::Timeout;
+    compare e {
+        matches IOError::NotFound(_):
+        return;
+        done
+        matches IOError::Timeout:
+        return;
+        done
+    }
+}
+
+// The fallback of `recover produce` has the call's success type exactly: an
+// `int` variable for a `!double` call was silently widened.
+
+error E {
+    Bad
+}
+
+fn half(x: double): !double {
+    if x < 0.0 {
+        return E::Bad;
+    }
+    return x / 2.0;
+}
+
+@test(compile_error, E066, "`recover produce` gives an `int`, and this call succeeds with a `double`: the fallback is not converted.")
+fn rejects_recover_produce_not_widened(): void {
+    mut n: int = 3;
+    immut r: double = half(-1.0) recover produce n;
+}
+
+// Test (fail): 'recover produce value' must match the wrapped call's
+// SUCCESS type exactly, including when that success type is a struct, not
+// just a primitive -- producing an int against a !Point call must be
+// rejected the same way producing a string against a !int call already is.
+error MyError {
+    Failed,
+}
+
+struct Point {
+    x: int,
+    y: int
+}
+
+fn Point.new(x: int, y: int): void {
+    self.x = x;
+    self.y = y;
+}
+
+fn makePoint(shouldFail: bool): !Point {
+    if (shouldFail) {
+        return MyError::Failed;
+    }
+    return Point::new(42, 7);
+}
+
+@test(compile_error, E066, "`recover produce` gives an `int`, and this call succeeds with a `Point`.")
+fn rejects_recover_produce_wrong_type_struct(): void {
+    mut p: Point = makePoint(true) recover produce -1;
+}

@@ -1,0 +1,33 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+// OVH-005: compound assignment (`+=` etc.) on an 'int32' lvalue must be a
+// clean, DEDICATED compile error naming the actual reason (int32 is never
+// itself an arithmetic result type) rather than the generic "Cannot assign
+// value of type 'int' to variable of type 'int32'" message, which reads
+// like an ordinary type mismatch a wider RHS type could fix -- none ever
+// could, since inferArithmeticType() always promotes an int32 operand to
+// plain 'int'.
+@test(compile_error, E126, "I cannot use `+=` on an `int32`: arithmetic on an `int32` gives an `int`.")
+fn rejects_int32_compound_assign(): void {
+    mut c: int32 = 5 to int32;
+    c += 1;
+    c to int;
+}
+
+// Negative test: a genuinely `int`-TYPED value narrowing to `int32` must
+// still be rejected without an explicit `to int32` cast, same as
+// double -> int is rejected -- OVH-005 only changes what happens to an
+// UNTYPED integer LITERAL reaching an `int32` destination (see
+// int32_untyped_literal_init.tr's positive `mut n: int32 = 5;` case,
+// tests/36_numeric_semantics/fail_implicit_narrow_int_to_int32.tr's
+// identical VarDecl-init case, and untypedLiteralAcquiresInt32()'s own doc
+// comment, TypeChecker.h) -- this file exercises the same rule at the
+// ARGUMENT type-fixing site instead, which VarDecl init does not cover.
+fn takesInt32(x: int32): int32 { return x; }
+
+@test(compile_error, E056, "No overload of `takesInt32` takes the argument types (int).")
+fn rejects_int32_implicit_narrow(): void {
+    mut existing: int = 5;
+    mut n: int32 = takesInt32(existing);
+}

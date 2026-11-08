@@ -1,0 +1,71 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+import mem;
+import ufcs_ambiguous_a_module;
+import ufcs_ambiguous_b_module;
+
+// Negative test: two visible UFCS candidates with an identical signature
+// (same name, same receiver type, same remaining params) from two
+// different modules -- RFC §5.4's universal conflict rule, a hard error.
+
+@test(compile_error, E125, "More than one visible function `describe_int` takes this receiver, so I cannot choose one.")
+fn rejects_ufcs_ambiguous_call(): void {
+    mut n: int = 5;
+    mut r: string = n.describe_int();
+}
+
+// Negative test: a method call on a primitive with no UFCS candidate at
+// all must be a clean type error, not the old "internal compiler error"
+// abort (confirmed live before this feature existed).
+@test(compile_error, E131, "I cannot call the method `nonexistent_method` on an `int`: only a struct has methods.")
+fn rejects_ufcs_no_match_primitive(): void {
+    mut n: int = 5;
+    n.nonexistent_method();
+}
+
+// Negative test: a method call matching neither tier (no bound method, no
+// UFCS candidate) must be a clean type error, not an ICE.
+struct Vec2 {
+    x: int,
+    y: int
+}
+
+@test(compile_error, E054, "I cannot find a method named `nonexistent_method` on the struct `Vec2`")
+fn rejects_ufcs_no_match_struct(): void {
+    mut v: Vec2 = Vec2::default();
+    v.nonexistent_method();
+}
+
+// An `int*` receiver is not loaded implicitly to reach a function taking an
+// `int`: UFCS matches the receiver as written. This used to match `int` and
+// pass the pointer anyway, which crashed the compiler (invalid LLVM IR); the
+// error also named the receiver `int` instead of `int*`.
+
+fn twice(x: int): int {
+    return x * 2;
+}
+
+@test(compile_error, E056, "No visible `twice` takes an `int*` as its receiver: a call with `.` matches the receiver's type exactly and never converts it.")
+fn rejects_ufcs_pointer_receiver_not_dereferenced(): void {
+    unsafe {
+        mut q: int* = mem::alloc(16);
+        q[0] = 21;
+        mut r: int = q.twice();
+        mem::free(q);
+    }
+}
+
+// Negative test: the receiver position is exact-match only, no numeric
+// coercion (RFC §5.4). A UFCS candidate declared for `int` must NOT match
+// a `char` receiver, even though char->int has an explicit widening cast
+// available -- UFCS never applies it implicitly.
+fn describe(x: int): string {
+    return "int";
+}
+
+@test(compile_error, E056, "No visible `describe` takes a `char` as its receiver: a call with `.` matches the receiver's type exactly and never converts it.")
+fn rejects_ufcs_receiver_no_coercion(): void {
+    mut c: char = 'a';
+    mut r: string = c.describe();
+}

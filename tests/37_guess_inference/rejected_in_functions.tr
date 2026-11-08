@@ -1,0 +1,74 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+import list;
+
+// SEM-003 (§11.6, the §20 worked example): proves SEM-001 -> SEM-002 ->
+// SEM-003 compose correctly. §11.6 is explicit that the DEFAULT type is
+// chosen first (int, for an untyped integer literal) and representability
+// is checked AGAINST THAT DEFAULT second -- so this must be the ordinary
+// SEM-002 out-of-range error against 'int', never a promotion to some wider
+// type (there is no wider integer type, FREEZE.md §6.2). Falls out of
+// TypeChecker::visitVarDecl reusing the pre-existing
+// checkLiteralRepresentable() call after guess resolves DeclTy = InitTy,
+// with no guess-specific representability code at all.
+@test(compile_error, E076, "The literal 999999999999999999999999999999999999999999999999 does not fit in an `int`, which holds -9223372036854775808 .. 9223372036854775807.")
+fn rejects_guess_literal_out_of_range(): void {
+    mut x = 999999999999999999999999999999999999999999999999;
+}
+
+// SEM-003 (§11.3, Model A, FROZEN): the guess-inferred type is permanently
+// fixed at the declaration. `x` infers `int` from `5`; assigning a `double`
+// later is the ordinary type-mismatch error, with a withRelated() note at
+// the declaration naming the inferred type (see the SAME
+// TypeChecker::visitAssignment() note this project already attaches for an
+// explicitly-annotated variable, specialized here to say "was inferred as"
+// instead of "declared here" -- VariableSymbol::WasGuessInferred).
+@test(compile_error, E066, "I cannot assign a `double` to `x`, which is an `int`.")
+fn rejects_guess_reassign_wrong_type(): void {
+    mut x = 5;
+    x = 5.5;
+}
+
+// SEM-003 (§11.6, §20's cross-feature note): `mut l = List::default();`
+// cannot infer List<T>'s type argument -- there is nothing in the call to
+// infer T from (F-GUESS-3). Must be a clear, dedicated error rather than
+// silently binding `l` to List's type-erased (and un-usable) template
+// shape. containsUninstantiatedGenericParam() (TypeCheckerDecl.cpp) detects
+// this via List's registered field `data: T*`, whose `T` is an unresolved
+// NamedType naming neither a primitive nor any registered struct/enum.
+
+@test(compile_error, E129, "I cannot infer the type arguments of a generic type.")
+fn rejects_guess_uninstantiated_generic(): void {
+    mut l = list::List::default();
+}
+
+// LEC-009: `guess` of a generic struct whose only field names its type
+// parameter inside another generic type (`h: &Inner<T>`, the shape every
+// collection has since LEC-009). The E129 check looked for a bare `T` field
+// only, missed this one, and the program reached Codegen with an open `T`
+// (an LLVM-verifier internal error). See fail_guess_uninstantiated_generic.tr
+// for the same mistake with `List`.
+struct Inner<T> {
+    v: T
+}
+
+struct Wrap<T> {
+    h: &Inner<T>
+}
+
+@test(compile_error, E129, "I cannot infer the type arguments of a generic type.")
+fn rejects_guess_uninstantiated_generic_behind_reference(): void {
+    mut w = Wrap::default();
+}
+
+// SEM-003 (§11.6): `guess` from a `void`-returning call has nothing to
+// infer -- `void` is never a real variable type (see isDisallowedVoidType's
+// own rationale), so this must be a hard error, not a silently-void variable.
+fn doNothing(): void {
+}
+
+@test(compile_error, E129, "I cannot infer the type of `x` from an expression that is `void`.")
+fn rejects_guess_void(): void {
+    mut x = doNothing();
+}

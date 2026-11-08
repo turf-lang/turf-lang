@@ -1,0 +1,18 @@
+// An unsized 'int[]' parameter has no length to give.
+
+fn<T, N: size> fill(value: T): T[N] {
+    mut r: T[N];
+    for i in 0..N {
+        r[i] = value;
+    }
+    return r;
+}
+
+fn take(a: int[]): int {
+    return a.length();
+}
+
+@test(compile_error, E129, "I cannot tell the size `N` of the array `fill` returns: no argument has it, and `int[]` is not an array of a fixed size.")
+fn rejects_unsized_target_gives_no_size(): void {
+    take(fill(0));
+}

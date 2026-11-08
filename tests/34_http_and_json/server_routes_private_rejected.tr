@@ -1,0 +1,10 @@
+// LEC-007: http::Server's `routes` and `listener` are private. get()/has_route()/
+// get_route()/listen() are the interface; a writable `routes` would bypass
+// them and a writable `listener` would swap the socket listen() serves on.
+import http;
+
+@test(compile_error, E088, "")
+fn rejects_server_routes_private(): void {
+    mut app: http::Server = http::Server::default();
+    app.routes = app.routes;
+}

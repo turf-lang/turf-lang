@@ -1,0 +1,46 @@
+// F-11e: tests moved from fail_*.tr files that abort at run time, one function each;
+// each `@test(panic, ...)` names the text its panic prints.
+
+// After a assignment the state in a narrowed arm is no longer known, so the
+// transition is checked when it runs instead of being trusted.
+machine C {
+    Idle -> Connecting,
+    Connecting -> Connected
+}
+
+fn advance(p: &C): void {
+    p.transition(C::Connecting);
+}
+
+@test(panic, "C::transition(Connecting) -- no such transition from the current state")
+fn panics_machine_narrowing_lost_after_assignment(): void {
+    mut x: C = C::Idle;
+    compare x {
+        matches C::Idle:
+        x = C::Connected;
+        x.transition(C::Connecting);
+        done
+        otherwise:
+        return;
+    }
+}
+
+// Test: an unnarrowed .transition() call whose actual runtime state has no
+// declared edge to the target must compile cleanly (this is outside any
+// compare arm, so TypeChecker has no static proof either way) and then
+// abort at runtime via Codegen's switch+CodegenPanic() guard.
+
+machine ConnectionState {
+    Idle -> Connecting,
+    Connecting -> Connected,
+    Connecting -> Failed,
+    Connected -> Closing,
+    Closing -> Idle,
+}
+
+@test(panic, "no such transition from the current state")
+fn panics_machine_transition_runtime_abort(): void {
+    mut conn: ConnectionState = ConnectionState::Idle;
+    // Idle has no declared edge straight to Closing -- must abort at runtime.
+    conn.transition(ConnectionState::Closing);
+}

@@ -1,0 +1,271 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+import io;
+
+// Regression test: an array declaration's initializer list length must
+// match the declared array size. Before this fix, TypeChecker::
+// visitArrayDecl() never checked this at all -- `int[3] arr = [1,2,3,4,5]`
+// (5 elements into a declared size-3 array) compiled with zero diagnostic.
+
+@test(compile_error, E003, "`arr` is declared with 3 elements, and its initializer has 5.")
+fn rejects_array_decl_length_mismatch(): void {
+    mut arr: int[3] = [1, 2, 3, 4, 5];
+}
+
+// Regression test: an array declaration's initializer list elements must
+// match the declared element type. Before this fix, TypeChecker::
+// visitArrayDecl() visited each initializer (so each got its own inferred
+// type) but never compared that type against the declared element type --
+// unlike the sibling ArrayLiteralExprAST path (visitArrayLiteral), which
+// DOES cross-check its elements. Confirmed as a genuine type-safety hole,
+// not just a missing diagnostic: `int[3] arr = [1, "two", 3]` compiled with
+// zero diagnostic, and reading `arr[1] to string` back printed the string
+// literal's raw pointer bits reinterpreted as an int.
+
+@test(compile_error, E004, "I cannot put a `string` in an array of `int`.")
+fn rejects_array_decl_type_mismatch(): void {
+    mut arr: int[3] = [1, "two", 3];
+}
+
+// #256: with Python-style negative indexing the valid range of an `int[3]` is
+// -3..2. `-4` is one past the start, so it is still rejected at compile time
+// (ArrayBoundsError) -- not wrapped around to the last element.
+@test(compile_error, E001, "I cannot use `a[-4]`, because `a` has only 3 elements.")
+fn rejects_array_negative_index_out_of_range(): void {
+    mut a: int[3] = [1, 2, 3];
+    mut x: int = a[-4];
+    x;
+}
+
+// #256: the constant-propagation twin of fail_array_negative_index_out_of_
+// range.tr -- the offending index is a local the dataflow proves is -4
+// (ValueRangePass::runOnCFG()), not a literal at the access. Spelled `0 - 4`
+// because evalConstExpr() folds binary arithmetic but not a unary minus.
+@test(compile_error, E001, "")
+fn rejects_array_negative_index_via_constant_propagation(): void {
+    mut a: int[3] = [1, 2, 3];
+    mut i: int = 0 - 4;
+    a[i];
+}
+
+// Companion to fail_array_oob_via_constant_propagation.tr: same constant-
+// propagation bounds bug, but with the offending variable declared inside a
+// NESTED block rather than at the function's top level -- the shape that
+// originally motivated the "scope already unwound" hypothesis (see
+// src/analysis/ValueRange.cpp's ValueRangePass::runOnCFG() doc comment for the full
+// root-cause writeup, which turned out to apply to top-level locals too).
+
+@test(compile_error, E001, "I cannot use `arr[5]`")
+fn rejects_array_oob_nested_block_constant(): void {
+    mut arr: int[3] = [10, 20, 30];
+    if true {
+        mut i: int = 5;
+        io::printline(arr[i]);
+    }
+}
+
+// Regression test: ValueRangePass must reject an array access indexed by a
+// LOCAL VARIABLE whose value is provably a constant out-of-bounds index --
+// not just a literal index (see the pre-existing fail_array_out_of_bounds.tr,
+// which only covers `arr[3]` written directly as a literal).
+//
+// Root cause: ValueRangePass::runOnCFG() resolved variables via
+// GlobalSymbolTable->LookupSymbol(name) -- a lookup against the SymbolTable's
+// *current* scope stack. This pass runs inside FuncDefExprAST::codegen()
+// AFTER Body->codegen() has already fully executed, and BlockExprAST::codegen()
+// unconditionally EnterScope()s/ExitScope()s around its statements -- including
+// the function's own top-level body block. By the time ValueRangePass ran,
+// that scope (and every local declared in it, e.g. `i` below) had already been
+// popped, so LookupSymbol("i") always returned nullptr and constant tracking
+// was silently a no-op for every local in the function: `mut i: int = 5;
+// arr[i]` compiled with zero diagnostics and only failed at RUNTIME via the
+// separate, existing bounds-check codegen path. Fixed by keying the pass's
+// constant map on VariableExprAST/VarDeclExprAST's ResolvedSymbol (a
+// VariableSymbol* set once by the Resolver and owned by the AST node itself,
+// independent of the SymbolTable's scope-stack timing) -- the same fix
+// already applied to DefiniteAssignmentPass, see Analysis.cpp.
+
+@test(compile_error, E001, "I cannot use `arr[5]`")
+fn rejects_array_oob_via_constant_propagation(): void {
+    mut arr: int[3] = [10, 20, 30];
+    mut i: int = 5;
+    io::printline(arr[i]);
+}
+
+@test(compile_error, E001, "I cannot use `arr[3]`")
+fn rejects_array_out_of_bounds(): void {
+    mut arr: int[3] = [1, 2, 3];
+
+    // Out of bounds error
+    mut x: int = arr[3];
+
+    // Assignment type error
+    // arr = 5;
+
+}
+
+// Regression test: assigning an array of one declared size into a variable
+// declared with a DIFFERENT concrete size must be a type error.
+//
+// Before the fix, ArrayType::getName() rendered every array as "T[]" with no
+// size, and typesCompatible()'s first check was a raw getName() string
+// comparison -- so int[5] and int[10] looked like "the same type" and this
+// assignment compiled with ZERO diagnostics. It was not just a missed type
+// error: Codegen's CastToType() has the identical getName()-equality fast
+// path, so the mismatch reached a raw LLVM `store` of an 80-byte array value
+// into a's 40-byte stack allocation -- a real stack buffer overflow,
+// reproduced and confirmed before this fix. See Types.cpp's typesCompatible().
+
+@test(compile_error, E066, "I cannot assign an `int[10]` to `a`, which is an `int[5]`.")
+fn rejects_array_size_mismatch(): void {
+    mut a: int[5] = [1, 2, 3, 4, 5];
+    mut b: int[10] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    a = b;
+}
+
+// `0 to &N` made a reference to address 0 in safe code, which faulted on
+// first use (found by turf-fuzz). Forging a reference from something that
+// is not already one needs `unsafe { }`, like `p to &N` from a raw pointer
+// (owner decision 2026-10-12). See cast_to_reference_rules.tr for what
+// stays safe.
+
+struct N {
+    v: int
+}
+
+@test(compile_error, E130, "I cannot convert an `int` to the reference `&N` outside an `unsafe` block: it may point at nothing.")
+fn rejects_cast_int_to_reference_outside_unsafe(): void {
+    mut a: &N = 0 to &N;
+    a.v;
+}
+
+// Regression test (issue #238): a `to`-cast whose destination type is a
+// raw pointer (`ptr`/`T*`) must be rejected outside `unsafe { }` -- this
+// is the "cast" leg of the three explicitly gated uses (declaration,
+// cast, dereference) FINAL_SPRINT.md's Track A specifies. `r` is a `&int`
+// safe reference (no raw pointer declared anywhere) explicitly cast `to
+// int*`: `typesCompatible()` already allows `&T -> T*` implicitly (see
+// its Rule 2.5, src/sema/Types.cpp), but an EXPLICIT cast still goes through
+// the same gate check as any other cast involving a raw pointer type,
+// regardless of whether the conversion itself would have been implicitly
+// allowed -- the cast is checked (and fails) before `p`'s own
+// raw-pointer-typed declaration would separately be gated too, since
+// visitVarDecl() visits the initializer expression first. See also
+// fail_ptr_outside_unsafe.tr,
+// fail_struct_raw_ptr_field_outside_unsafe.tr, and
+// fail_fn_signature_raw_pointer_disallowed.tr for the other three gated
+// shapes, and 18_unsafe_block_and_safe_reference.tr for the corresponding
+// passing cases.
+
+@test(compile_error, E130, "I cannot use the raw pointer type `int*` outside an `unsafe` block.")
+fn rejects_cast_raw_pointer_outside_unsafe(): void {
+    mutable v: int = 5;
+    mutable r: &int = &v;
+    mutable p: int* = r to int*;
+}
+
+// A `string` is a C pointer, so `r to string` read the int's bytes as text and
+// printed garbage in safe code. It is the mirror of `string to &T` and needs
+// `unsafe { }` the same way.
+
+@test(compile_error, E130, "I cannot convert the reference `&int` to a `string` outside an `unsafe` block: it reads the bytes it points at as text.")
+fn rejects_cast_reference_to_string_outside_unsafe(): void {
+    mut x: int = 5;
+    mut r: &int = &x;
+    printline(r to string);
+}
+
+// REL-004 (fuzzer): `n[0]` on an `int` type-checked with no type and reached
+// Codegen's "Base is not an array or pointer" fatal error.
+@test(compile_error, E126, "I cannot index an `int`.")
+fn rejects_index_into_int(): void {
+    mut n: int = 3;
+    n[0];
+}
+
+// A `&?T[N]` may be null, so it is narrowed to a `&T[N]` before indexing.
+
+@test(compile_error, E126, "I cannot index a `&?(int[3])`.")
+fn rejects_index_nullable_array_reference(): void {
+    mut a: int[3] = [1, 2, 3];
+    mut r: &?int[3] = &a;
+    r[0];
+}
+
+// Regression test (OVH-003, docs/planning/OVERHAUL_REMAINING_WORK.md):
+// indexing a raw pointer-typed base (`buf.data[i]`, where `data: int*`) must
+// be rejected outside `unsafe { }`/a raw-pointer-capability module, exactly
+// like field/member access through one already is. Before this fix,
+// TypeChecker::visitArrayAccess() never called checkUnsafeGate() at all --
+// `l.data[100000] = 42;` compiled with no `unsafe { }` and no capability
+// declared anywhere in this file, an out-of-bounds write reachable from
+// ordinary safe code (F-PTR-1's "raw pointers are FFI-only" promise silently
+// didn't apply to indexing). See raw_pointer_index_inside_unsafe_ok.tr for
+// the corresponding passing case, and list_get_set_generic.tr for the safe,
+// bounds-checked replacement (`List<T>.get()`/`.set()`) this file's uses
+// should migrate to instead of reaching for `unsafe { }`.
+//
+// LEC-002: the pointer used to be `List<int>`'s own `data` field, which is
+// private to list.tr now (and would fail HERE for that reason, not the one
+// this test is about -- so this test declares its own struct). The struct
+// itself sits in `unsafe { }` because a raw pointer field requires it.
+
+unsafe {
+    struct Buf {
+        data: int*,
+        len: int
+    }
+}
+
+@test(compile_error, E130, "I cannot use the raw pointer type `int*` outside an `unsafe` block.")
+fn rejects_raw_pointer_index_outside_unsafe(): void {
+    mut b: Buf = Buf::default();
+    b.data[100000] = 42;
+}
+
+// A method call reads its receiver as `self`, so calling one through a raw
+// pointer is a dereference like `p.field`. It compiled in safe code and read
+// through a null `next`.
+
+unsafe {
+    struct Node {
+        val: int,
+        next: Node*
+    }
+}
+
+fn Node.value(): int {
+    return self.val;
+}
+
+@test(compile_error, E130, "I cannot use the raw pointer type `Node*` outside an `unsafe` block.")
+fn rejects_raw_pointer_method_call_outside_unsafe(): void {
+    mut a: Node = Node::default();
+    a.next.value();
+}
+
+// A `&int` is indexed as one element: `r[0]` is the int it refers to. Only a
+// raw `T*` is pointer arithmetic; `r[100000] = 3` wrote past the int in safe
+// code.
+
+@test(compile_error, E001, "I cannot use `r[100000]`")
+fn rejects_scalar_reference_index_out_of_bounds(): void {
+    mut x: int = 5;
+    mut r: &int = &x;
+    r[100000] = 3;
+}
+
+// `void` has no size. The type checker used to accept `sizeof(void)` and
+// Codegen then asked LLVM for the allocation size of its unsized `void` type,
+// a call that never returns: the compiler hung forever (found by turf-fuzz).
+// `sizeof(void*)` is a pointer and stays legal -- see
+// sizeof_void_pointer_ok.tr.
+extern fn malloc(size: int): int*;
+
+@test(compile_error, E126, "`sizeof(void)` has no answer: `void` has no size.")
+fn rejects_sizeof_void(): void {
+    unsafe {
+        mut counter: &int = malloc(sizeof(void)) to &int;
+    }
+}

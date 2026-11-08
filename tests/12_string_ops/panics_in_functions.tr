@@ -1,0 +1,100 @@
+// F-11e: tests moved from fail_*.tr files that abort at run time, one function each;
+// each `@test(panic, ...)` names the text its panic prints.
+
+// SY-1 (TDP-2-021): the loop's length is taken once, so a body that writes a
+// '\0' ahead of it has made the string shorter than the loop's position.
+// Reading that byte panics, as `s[i]` would.
+
+@test(panic, "String index out of bounds")
+fn panics_string_for_each_shortened_runtime(): void {
+    mut s: string = strings::repeat("ab", 2);
+    for (i, c) in s {
+        if i == 0 {
+            s[2] = (0 to char);
+        }
+        io::printline(c);
+    }
+}
+
+// FDN-004 (D17, ROADMAP_v2.0.0.md): an index below the start must panic -- the
+// "normalized index < 0" half of EmitStringBoundsCheck() (src/codegen/CodegenArray.cpp),
+// distinct from the "index >= strlen(s)" half fail_string_index_oob_read_
+// runtime.tr (this folder) already covers.
+//
+// #256: `-1` itself is no longer such an index -- a negative index counts from
+// the end (14_string_negative_index.tr), so "abc" accepts -3..-1. -4 is the
+// first one past the start; if the wrap were modular instead of checked it
+// would land on 'c' and this would exit 0.
+@test(panic, "String index out of bounds")
+fn panics_string_index_negative_read_runtime(): void {
+    immut s: string = "abc";
+    immut i: int = 0 - 4;
+    immut c: char = s[i];
+    c to int;
+}
+
+// FDN-004: the write side (`s[i] = c;`, ArrayAccessExprAST::codegenLValue())
+// does NOT check the `strlen()` upper bound a read gets, because the write
+// target is very often a `gc_alloc`'d buffer being filled one byte at a time
+// BEFORE its NUL terminator is written (every strings.tr function that builds
+// a string this way would panic on its own very first write otherwise -- see
+// EmitStringBoundsCheck()'s doc comment, src/codegen/CodegenArray.cpp, for the
+// confirmed-live failure this test's positive counterpart would be).
+//
+// #256: a negative index is now counted from the end, so the write is bad only
+// when it reaches past the start. A zero-filled buffer has strlen 0, so even
+// `buf[-1]` wraps to -1 and still panics -- which is what this pins.
+//
+// The buffer is `gc_alloc_zeroed`, not `gc_alloc`: a negative index makes the
+// write path call `strlen()` on the buffer, and `gc_alloc` is plain malloc, so
+// its first bytes are whatever the heap held. This test used to rely on that
+// being zero; AddressSanitizer (the gc_hardening_asan CI job) caught the
+// `strlen` reading 5 bytes past a 4-byte block.
+@test(panic, "String index out of bounds")
+fn panics_string_index_negative_write_runtime(): void {
+    unsafe {
+        mut buf: string = gc_alloc_zeroed(4) to string;
+        immut i: int = 0 - 1;
+        buf[i] = 'x';
+    }
+}
+
+// FDN-004 (D17, ROADMAP_v2.0.0.md): `s[i]` on a `string` is now bounds-
+// checked at runtime -- before this, `"abc"[5]` compiled and silently read
+// past the terminator, returning garbage (audit finding F-17). Unlike a
+// fixed-size Turf array, ValueRangePass has no compile-time constant-
+// folding path for a string index at all (markNode(), src/analysis/ValueRange.cpp,
+// only ever looks at `S->Type->isArray()`), so even this literal,
+// obviously-out-of-range index reaches the unconditional runtime
+// `strlen()`-based check every string read gets (EmitStringBoundsCheck(),
+// src/codegen/CodegenArray.cpp) rather than a compile-time diagnostic.
+@test(panic, "String index out of bounds")
+fn panics_string_index_oob_read_runtime(): void {
+    immut s: string = "abc";
+    immut c: char = s[5];
+    c to int;
+}
+
+// A string literal is read-only data, not a heap string, so a byte write into
+// it panics. It was lost silently at -O2 and crashed at -O0.
+
+@test(panic, "Cannot write into this string: it is not a heap string")
+fn panics_string_literal_write_runtime(): void {
+    mut s: string = "hello";
+    s[0] = 'j';
+    printline(s);
+}
+
+// A string byte write is bounded by the string's allocation. A write 100
+// bytes past the end of `strings::repeat("ab", 2)` was not checked at all and
+// corrupted the heap; a far one segfaulted.
+
+fn poke(s: string, i: int): void {
+    s[i] = 'x';
+}
+
+@test(panic, "String index out of bounds")
+fn panics_string_write_past_allocation_runtime(): void {
+    mut s: string = strings::repeat("ab", 2);
+    poke(s, 103);
+}

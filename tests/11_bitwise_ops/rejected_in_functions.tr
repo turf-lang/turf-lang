@@ -1,0 +1,156 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+// FAIL TEST: Compound bitwise-AND assignment with a non-integer LHS.
+// d &= 3 should emit a TypeError (double is not an integer type), same
+// restriction as the plain `d & 3` form (see fail_bitwise_and_double.tr).
+
+@test(compile_error, E057, "A bitwise assignment needs `int` operands, and the left one is a `double`.")
+fn rejects_bitwise_and_assign_double(): void {
+    mut d: double = 1.5;
+    d &= 3;  // TypeError: bitwise compound assignment requires integer operands
+
+}
+
+// FAIL TEST: Compound bitwise-AND assignment with a non-integer RHS (the
+// LHS is a valid int -- this exercises the RHS-side check specifically,
+// as opposed to fail_bitwise_and_assign_double.tr which is LHS-side).
+
+@test(compile_error, E057, "A bitwise assignment needs `int` operands, and the right one is a `double`.")
+fn rejects_bitwise_and_assign_double_rhs(): void {
+    mut a: int = 5;
+    mut d: double = 1.5;
+    a &= d;  // TypeError: bitwise compound assignment requires integer operands
+
+}
+
+// FAIL TEST: Bitwise AND with non-integer types
+// 1.5 & 2 should emit a TypeError (double is not an integer type)
+
+@test(compile_error, E057, "A bitwise operator needs `int` operands, and the left one is a `double`.")
+fn rejects_bitwise_and_double(): void {
+    mut a: double = 1.5;
+    mut b: int = 2;
+    mut c: int = a & b;  // TypeError: bitwise operator requires integer operands
+
+}
+
+// FAIL TEST: Bitwise AND with string type
+// "hello" & 2 should emit a TypeError
+
+@test(compile_error, E057, "A bitwise operator needs `int` operands, and the left one is a `string`.")
+fn rejects_bitwise_and_string(): void {
+    mut a: string = "hello";
+    mut b: int = 2;
+    mut c: int = a & b;  // TypeError: bitwise operator requires integer operands
+
+}
+
+// FAIL TEST: Compound left-shift assignment with a non-integer LHS.
+// d <<= 3 should emit a TypeError (double is not an integer type), same
+// restriction as the plain `d << 3` form (see fail_bitwise_lshift_double.tr).
+
+@test(compile_error, E057, "A bitwise assignment needs `int` operands, and the left one is a `double`.")
+fn rejects_bitwise_lshift_assign_double(): void {
+    mut d: double = 1.5;
+    d <<= 3;  // TypeError: bitwise compound assignment requires integer operands
+
+}
+
+// FAIL TEST: Bitwise left shift with double type
+// 1.5 << 2 should emit a TypeError
+
+@test(compile_error, E057, "A bitwise operator needs `int` operands, and the left one is a `double`.")
+fn rejects_bitwise_lshift_double(): void {
+    mut a: double = 1.5;
+    mut b: int = 2;
+    mut c: int = a << b;  // TypeError: bitwise operator requires integer operands
+
+}
+
+// FAIL TEST: Bitwise NOT (~) with non-integer type
+// ~1.5 should emit a TypeError
+
+@test(compile_error, E057, "`~` needs an `int`, and I found a `double`.")
+fn rejects_bitwise_not_double(): void {
+    mut a: double = 1.5;
+    mut b: int = ~a;  // TypeError: bitwise NOT requires integer operand
+
+}
+
+// FAIL TEST: Compound bitwise-OR assignment with a non-integer LHS.
+// d |= 3 should emit a TypeError (double is not an integer type), same
+// restriction as the plain `d | 3` form (see fail_bitwise_or_double.tr).
+
+@test(compile_error, E057, "A bitwise assignment needs `int` operands, and the left one is a `double`.")
+fn rejects_bitwise_or_assign_double(): void {
+    mut d: double = 1.5;
+    d |= 3;  // TypeError: bitwise compound assignment requires integer operands
+
+}
+
+// FAIL TEST: Bitwise OR with double type
+// 1.5 | 2 should emit a TypeError
+
+@test(compile_error, E057, "A bitwise operator needs `int` operands, and the left one is a `double`.")
+fn rejects_bitwise_or_double(): void {
+    mut a: double = 1.5;
+    mut b: int = 2;
+    mut c: int = a | b;  // TypeError: bitwise operator requires integer operands
+
+}
+
+// FAIL TEST: Compound right-shift assignment with a non-integer LHS.
+// d >>= 3 should emit a TypeError (double is not an integer type), same
+// restriction as the plain `d >> 3` form (see fail_bitwise_rshift_double.tr).
+
+@test(compile_error, E057, "A bitwise assignment needs `int` operands, and the left one is a `double`.")
+fn rejects_bitwise_rshift_assign_double(): void {
+    mut d: double = 1.5;
+    d >>= 3;  // TypeError: bitwise compound assignment requires integer operands
+
+}
+
+// FAIL TEST: Bitwise right shift with double type
+// 1.5 >> 2 should emit a TypeError
+
+@test(compile_error, E057, "A bitwise operator needs `int` operands, and the left one is a `double`.")
+fn rejects_bitwise_rshift_double(): void {
+    mut a: double = 1.5;
+    mut b: int = 2;
+    mut c: int = a >> b;  // TypeError: bitwise operator requires integer operands
+
+}
+
+// FAIL TEST: Compound bitwise-XOR assignment with a non-integer LHS.
+// d ^= 3 should emit a TypeError (double is not an integer type), same
+// restriction as the plain `d ^ 3` form (see fail_bitwise_xor_double.tr).
+
+@test(compile_error, E057, "A bitwise assignment needs `int` operands, and the left one is a `double`.")
+fn rejects_bitwise_xor_assign_double(): void {
+    mut d: double = 1.5;
+    d ^= 3;  // TypeError: bitwise compound assignment requires integer operands
+
+}
+
+// FAIL TEST: Bitwise XOR with double type
+// 1.5 ^ 2 should emit a TypeError (^ is XOR, requires integer operands)
+
+@test(compile_error, E057, "A bitwise operator needs `int` operands, and the left one is a `double`.")
+fn rejects_bitwise_xor_double(): void {
+    mut a: double = 1.5;
+    mut b: int = 2;
+    mut c: int = a ^ b;  // TypeError: bitwise operator requires integer operands
+
+}
+
+// FAIL TEST: Compound exponentiation assignment on a non-numeric operand.
+// `**=` requires numeric operands (same as plain `**`); string has no
+// exponentiation overload.
+
+@test(compile_error, E057, "`**=` needs number operands, and the left one is a `string`.")
+fn rejects_power_assign_string(): void {
+    mut s: string = "abc";
+    s **= 2;  // TypeError: exponentiation compound assignment requires numeric operands
+
+}

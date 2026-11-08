@@ -1,0 +1,10 @@
+// math::INT_MAX is the largest int, so `+ 1` on it is checked like any other.
+
+fn bump(n: int): int {
+    return n + 1;
+}
+
+@test(panic, "Integer overflow")
+fn panics_math_int_max_plus_one_runtime(): void {
+    io::printline(bump(math::INT_MAX));
+}

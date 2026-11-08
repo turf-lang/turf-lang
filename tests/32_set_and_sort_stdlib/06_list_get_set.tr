@@ -2,7 +2,7 @@
 // `List<T>.get(i)`/`.set(i, value)` -- the bounds-checked, GENUINELY
 // generic replacement for reading/writing an element via the raw `data:
 // T*` field directly (`l.data[i]`, now gated outside `unsafe { }` -- see
-// tests/05_arrays_pointers_ffi/fail_raw_pointer_index_outside_unsafe.tr).
+// tests/05_arrays_pointers_ffi/rejected_in_functions.tr: rejects_raw_pointer_index_outside_unsafe).
 // Unlike `operator[]`/`operator[]=` (LANG-001), which are declared for
 // the concrete `List<int>` only, `get`/`set` work for any `T` -- covered
 // here across a primitive (`int`), a GC-heap pointer type (`string`), and

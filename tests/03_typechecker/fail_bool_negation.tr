@@ -1,7 +1,0 @@
-// EXPECT-DIAG: E057
-// EXPECT-DIAG: The unary `-` needs a number, and I found a `bool`.
-fn main(): int {
-    mut ok: bool = true;
-    printline(-ok);
-    return 0;
-}

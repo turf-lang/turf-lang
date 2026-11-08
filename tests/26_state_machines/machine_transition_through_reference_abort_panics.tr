@@ -1,0 +1,15 @@
+// The run-time guard reads the current state through the reference.
+machine C {
+    Idle -> Connecting,
+    Connecting -> Connected
+}
+
+fn jump(p: &C): void {
+    p.transition(C::Connected);
+}
+
+@test(panic, "C::transition(Connected) -- no such transition from the current state")
+fn panics_machine_transition_through_reference_abort(): void {
+    mut c: C = C::Idle;
+    jump(&c);
+}

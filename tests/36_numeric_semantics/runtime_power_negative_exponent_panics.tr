@@ -1,0 +1,10 @@
+// `int ** int` is an int, which cannot hold 2 ** -1; a negative exponent
+// panics. A double on either side (`2 ** -1.0`) is the way to get 0.5.
+fn id(x: int): int {
+    return x;
+}
+
+@test(panic, "runtime check: Negative exponent in integer '**'")
+fn panics_runtime_power_negative_exponent(): void {
+    io::printline(id(2) ** id(-1));
+}

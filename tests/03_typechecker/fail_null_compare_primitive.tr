@@ -1,9 +1,0 @@
-// EXPECT-DIAG: E124
-// EXPECT-DIAG: I cannot compare an `int` with a `null`.
-fn main(): int {
-    mut x: int = 42;
-    if x == null {
-        return 1;
-    }
-    return 0;
-}

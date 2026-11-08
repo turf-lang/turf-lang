@@ -1,0 +1,16 @@
+// An element of a `(&?N)[2]` is a `&?N` that is not a variable, so reading
+// through it needs it stored in a variable and checked first.
+struct N { val: int }
+
+fn mk(v: int): &N {
+    mut n: N = N::default();
+    n.val = v;
+    return heap(n);
+}
+
+@test(compile_error, E081, "")
+fn rejects_nullable_element_dereference(): void {
+    mut b: (&?N)[2];
+    b[1] = mk(3);
+    b[0].val;
+}

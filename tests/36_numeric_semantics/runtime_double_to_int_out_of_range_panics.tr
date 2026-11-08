@@ -1,0 +1,10 @@
+// 2^63 is one past INT_MAX, so `x to int` panics instead of producing poison
+// (see fail_runtime_double_to_int_nan.tr). The same check covers +-inf.
+fn id(x: double): double {
+    return x;
+}
+
+@test(panic, "runtime check: Integer overflow")
+fn panics_runtime_double_to_int_out_of_range(): void {
+    io::printline(id(9223372036854775808.0) to int);
+}

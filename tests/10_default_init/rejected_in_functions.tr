@@ -1,0 +1,94 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+import list::List;
+import test;
+
+// LEC-009 (F-COLL-2): a `&U` field defaults to a fresh `U::default()`, so a
+// type that reaches itself through `&` fields has no finite default. Rejected
+// instead of allocating until the stack runs out; the hint suggests `&?Node`.
+struct Node {
+    v: int,
+    next: &Node
+}
+
+@test(compile_error, E147, "`Node` has no default: defaulting it gives every `&` field a new default, and `Node` reaches itself through `&` fields, so that never ends.")
+fn rejects_default_reference_cycle(): void {
+    mut n: Node = Node::default();
+    n.v;
+}
+
+// SEM-004 (F-INIT-1): an enum-typed local declared without an initializer
+// is statically unassigned -- reading it before any assignment is
+// DefiniteAssignmentError (E008). Before SEM-004, an enum was a
+// Mechanism-B type Codegen eagerly defaulted to its ordinal-0 variant, so
+// this compiled; see 15_enum_assign_then_use.tr for the still-legal
+// assign-then-use shape.
+enum Direction {
+    North,
+    East,
+    South,
+    West
+}
+
+@test(compile_error, E008, "I cannot use `d` (type `Direction`) before it has a value")
+fn rejects_enum_use_before_init(): void {
+    mut d: Direction;
+    if (d to int) == 0 {
+        return;
+    }
+}
+
+// SEM-004 (F-INIT-1): a generic-typed local declared without an
+// initializer is statically unassigned -- calling a method on it before
+// any assignment is DefiniteAssignmentError (E008). Before SEM-004,
+// `List<T>` was a Mechanism-B type Codegen eagerly zeroed, so this
+// compiled; see 17_generic_list_default_then_use.tr for the still-legal
+// default()-then-use shape.
+
+@test(compile_error, E008, "I cannot use `l` (type `list::List<int>`) before it has a value")
+fn rejects_generic_list_use_before_init(): void {
+    mut l: List<int>;
+    l.push(5);
+}
+
+// SEM-004 (F-INIT-1): an `int32` local declared without an initializer is
+// statically unassigned -- reading it before any assignment is
+// DefiniteAssignmentError (E008). Before SEM-004, `int32` was a
+// Mechanism-B type Codegen eagerly zeroed, so this compiled; see
+// 14_int32_assign_then_use.tr for the still-legal assign-then-use shape.
+@test(compile_error, E008, "I cannot use `n` (type `int32`) before it has a value")
+fn rejects_int32_use_before_init(): void {
+    mut n: int32;
+    if n == (0 to int32) {
+        return;
+    }
+}
+
+// Test: mut double used before assignment — must fail
+@test(compile_error, E008, "I cannot use `d` (type `double`) before it has a value")
+fn rejects_mut_double_before_init(): void {
+    mut d: double;
+    mut result: double = d + 1.0;
+}
+
+// Test: reading a mut primitive before any assignment — must fail
+@test(compile_error, E008, "I cannot use `x` (type `int`) before it has a value")
+fn rejects_mut_use_before_init(): void {
+    mut x: int;
+    mut y: int = x;
+}
+
+// SEM-004 (F-INIT-1): the bad direction 02_struct_flat_default.tr's own
+// comment points at -- a struct declared with no initializer at all is
+// statically unassigned; reading a field is DefiniteAssignmentError (E008).
+struct Config {
+    retries: int,
+    timeout: int
+}
+
+@test(compile_error, E008, "I cannot use `cfg` (type `Config`) before it has a value")
+fn rejects_struct_flat_use_before_init(): void {
+    mut cfg: Config;
+    test::assert(cfg.retries == 0, "unreachable: this read must not compile");
+}

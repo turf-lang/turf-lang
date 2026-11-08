@@ -1,7 +1,0 @@
-// EXPECT-DIAG: E140
-// EXPECT-DIAG: The variable `rows` cannot use the unsized array type `int[]` (inside `int[2][]`).
-// A local slice is fine, but only its outermost dimension may be unsized.
-fn main(): int {
-    mut rows: int[2][] = [[1], [2]];
-    return 0;
-}

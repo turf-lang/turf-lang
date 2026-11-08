@@ -96,7 +96,7 @@ Four things are exempt from the gate:
 A **method call** through a raw-pointer receiver (`a.next.getval()` with
 `next: Node*`) reads the receiver as `self`, so it is a dereference like
 `a.next.val` and needs `unsafe { }` the same way (E130,
-`tests/05_arrays_pointers_ffi/fail_raw_pointer_method_call_outside_unsafe.tr`);
+`tests/05_arrays_pointers_ffi/rejected_in_functions.tr: rejects_raw_pointer_method_call_outside_unsafe`);
 a UFCS call whose function takes the pointer itself does not dereference it.
 A field *read* of a raw-pointer-typed field (`a.next` alone) copies the pointer
 and is not a dereference; what is then accessed through it is.
@@ -329,7 +329,7 @@ Regression tests: `tests/05_arrays_pointers_ffi/` (`fail_ptr_outside_unsafe.tr`,
 `fail_cast_string_to_reference_outside_unsafe.tr`,
 `fail_cast_reference_to_other_reference_outside_unsafe.tr`,
 `18_unsafe_block_and_safe_reference.tr`), and
-`tests/39_nullable_references/fail_null_to_safe_reference.tr`.
+`tests/39_nullable_references/rejected_in_functions.tr: rejects_null_to_safe_reference`.
 
 ### 1.7 The raw-pointer capability declaration
 

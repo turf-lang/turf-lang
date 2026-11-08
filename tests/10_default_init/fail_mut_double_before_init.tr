@@ -1,8 +1,0 @@
-// EXPECT-DIAG: E008
-// EXPECT-DIAG: I cannot use `d` (type `double`) before it has a value
-// Test: mut double used before assignment — must fail
-fn main(): int {
-    mut d: double;
-    mut result: double = d + 1.0;
-    return 0;
-}

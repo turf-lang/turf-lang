@@ -1,0 +1,14 @@
+// A method call reads its receiver as `self`, so on a `&?T` it needs the same
+// null check a field read does. Only `q.field` was checked: this compiled and
+// faulted at address 0x0. Found by turf-fuzz probing.
+struct Node { val: int, next: &?Node }
+
+fn Node.bump(k: int): void {
+    self.val = self.val + k;
+}
+
+@test(compile_error, E081, "the method `bump` of `q`, which might be `null` here")
+fn rejects_method_call_without_check(): void {
+    mut q: &?Node = null;
+    q.bump(1);
+}

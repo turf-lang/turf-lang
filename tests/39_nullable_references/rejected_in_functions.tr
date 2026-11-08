@@ -1,0 +1,25 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+// `(h.head to &Node)` with no check on `h.head` would turn a null into a
+// `&Node`. Found by turf-fuzz probing.
+struct Node { val: int, next: &?Node }
+struct Holder { head: &?Node }
+
+@test(compile_error, E082, "I cannot cast `h.head` to a non-null reference here, because it might be `null`.")
+fn rejects_cast_nullable_expression(): void {
+    mut h: Holder = Holder::default();
+    mut p: &Node = (h.head to &Node);
+    p.val;
+}
+
+// LANG-002's own "Must NOT reinterpret" list: "&T stays non-null -- do not
+// merge the two types." `null` must never be assignable to a plain `&T`,
+// even in a codebase that now also has `&?T` -- the two stay maximally
+// distinct.
+struct Box { val: int }
+
+@test(compile_error, E062, "I cannot store `null` in `r`, which is a `&Box`.")
+fn rejects_null_to_safe_reference(): void {
+    mut r: &Box = null;
+}

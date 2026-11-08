@@ -1,7 +1,0 @@
-// EXPECT-DIAG: E057
-// EXPECT-DIAG: I cannot use `+` on a `string` and a `double`.
-// Negative test: string + double should emit TypeChecker error
-fn main(): int {
-    mut s: string = "hi" + 3.14;
-    return 0;
-}

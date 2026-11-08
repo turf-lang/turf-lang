@@ -1,0 +1,16 @@
+// A `(&?N)[]` parameter views the caller's array. Viewing a `(&N)[1]` that way
+// would let the callee store null into an array whose elements can't be null,
+// so only a literal (a fresh value) widens to `&?N` elements.
+struct N { val: int }
+
+fn f(xs: (&?N)[]): int {
+    xs[0] = null;
+    return 0;
+}
+
+@test(compile_error, E056, "No overload of `f` takes the argument types ((&N)[1]).")
+fn rejects_view_cannot_widen_to_nullable(): void {
+    mut n: N = N::default();
+    mut a: (&N)[1] = [heap(n)];
+    f(a);
+}

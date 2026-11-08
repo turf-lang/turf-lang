@@ -1,0 +1,14 @@
+// A call whose result goes nowhere has no type to take N from.
+
+fn<T, N: size> fill(value: T): T[N] {
+    mut r: T[N];
+    for i in 0..N {
+        r[i] = value;
+    }
+    return r;
+}
+
+@test(compile_error, E129, "I cannot tell the size `N` of the array `fill` returns: no argument has it, and nothing says what type the result is.")
+fn rejects_no_target_for_size(): void {
+    fill(0);
+}

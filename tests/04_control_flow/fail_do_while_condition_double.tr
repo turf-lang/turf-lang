@@ -1,9 +1,0 @@
-// EXPECT-DIAG: E066
-// EXPECT-DIAG: The condition of `do-while` must be a `bool`, and I found a `double`.
-fn main(): int {
-    mut x: double = 1.0;
-    do {
-        x = x - 1.0;
-    } while x;
-    return 0;
-}

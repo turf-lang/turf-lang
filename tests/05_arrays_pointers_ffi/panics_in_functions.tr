@@ -1,0 +1,54 @@
+// F-11e: tests moved from fail_*.tr files that abort at run time, one function each;
+// each `@test(panic, ...)` names the text its panic prints.
+
+// #256: the run-time half of fail_array_negative_index_out_of_range.tr. The
+// index comes back from a call, so the compiler cannot fold it and the
+// select-based wrap in EmitRuntimeBoundsCheck() decides. -4 on an `int[3]`
+// wraps to -1, which must still panic: the wrap happens once, it is not
+// modular. If it were, this would read a[2] and exit 0.
+fn idx(): int {
+    return 0 - 4;
+}
+
+@test(panic, "Array index out of bounds for 'a'")
+fn panics_array_negative_index_out_of_range_runtime(): void {
+    mut a: int[3] = [1, 2, 3];
+    a[idx()];
+}
+
+// RT-001 (docs/archive/ARCHITECTURE_OVERHAUL.md §8): regression test for
+// "the new panic path still aborts" -- CodegenPanic() (src/sema/Builtins.cpp)
+// now calls libturfrt's turf_rt_panic() instead of an inline
+// fprintf+abort, and this is the one runtime check in this whole folder
+// that exercises it: fail_array_out_of_bounds.tr (same folder) uses a
+// LITERAL constant index, which ValueRangePass rejects at COMPILE time
+// (a completely different diagnostic, ArrayBoundsError/E001) -- it never
+// reaches CodegenPanic/CodegenArray.cpp's EmitRuntimeBoundsCheck() at all.
+// The index here comes back from a function call, which ValueRangePass's
+// evalConstExpr() cannot fold (it only tracks literals and simple
+// arithmetic combinations of already-known constants, never a call
+// result), so this compiles clean and the out-of-bounds access is caught
+// only by the UNCONDITIONAL runtime bounds check every array access gets
+// -- the exact path this test exists to keep covered.
+fn get_index(): int {
+    return 5;
+}
+
+@test(panic, "Array index out of bounds for 'arr'")
+fn panics_array_out_of_bounds_runtime(): void {
+    mut arr: int[3] = [1, 2, 3];
+    mut x: int = arr[get_index()];
+    x;
+}
+
+// Indexing through a `&T[N]` is bounds-checked like the array itself.
+
+fn at(r: &int[3], i: int): int {
+    return r[i];
+}
+
+@test(panic, "Array index out of bounds for 'r'")
+fn panics_reference_to_array_out_of_bounds_runtime(): void {
+    mut a: int[3] = [1, 2, 3];
+    at(&a, 3);
+}

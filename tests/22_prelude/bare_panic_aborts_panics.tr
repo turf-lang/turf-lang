@@ -1,0 +1,6 @@
+// A bare `panic` is the prelude's `sys::panic`: it compiles with no import and
+// aborts the program with the message.
+@test(panic, "prelude panic reached")
+fn panics_bare_panic_aborts(): void {
+    panic("prelude panic reached");
+}

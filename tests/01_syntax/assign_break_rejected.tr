@@ -1,0 +1,4 @@
+@test(compile_error, E061, "")
+fn rejects_assign_break(): void {
+    break = 5;
+}

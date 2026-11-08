@@ -1,0 +1,8 @@
+// fill's element type comes from its argument, its length from the target.
+
+import arrays;
+
+@test(compile_error, E004, "I cannot initialize `c`, an `int[3]`, from a `string[3]`.")
+fn rejects_fill_wrong_element_type(): void {
+    mut c: int[3] = arrays::fill("x");
+}

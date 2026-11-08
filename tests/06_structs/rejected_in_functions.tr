@@ -1,0 +1,68 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+// Regression test: `instance.default()` must be rejected with the same
+// specific ConstructorCalledOnInstanceError as fail_dot_call_new.tr, not a
+// generic "unknown method" error -- even though `default` is never a real
+// registered function at all (always compiler-synthesized), the check must
+// fire unconditionally on the method NAME, before any method-lookup even
+// happens.
+
+struct Point {
+    x: int,
+    y: int
+}
+
+@test(compile_error, E045, "I cannot call `default` on an instance")
+fn rejects_dot_call_default(): void {
+    mut p: Point = Point::default();
+    p.default();
+}
+
+// Sixty `.a` links on a string. Codegen retried each link of an invalid
+// chain two ways (as a place, then as a value), so the time doubled with
+// every `.a`: 22 links took 10 s, and turf-fuzz's crash fuzzer found an input
+// that ran past 60 s. The type checker now rejects the first link, so this
+// finishes at once; the runner's timeout is what this test pins.
+@test(compile_error, E068, "The type `string` has no fields")
+fn rejects_field_chain_on_non_struct_is_fast(): void {
+    mut s: string = "x".a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a;
+}
+
+// A field read on a value that is not a struct. The type checker let it
+// through, and Codegen reported "Cannot access field on non-struct type" as
+// an internal compiler error (E121).
+@test(compile_error, E068, "The type `string` has no fields, so I cannot read the field `size`")
+fn rejects_field_on_non_struct_value(): void {
+    mut s: string = "abc";
+    mut n: int = s.size;
+    n;
+}
+
+// Regression test: assigning a value to a struct field must be type-checked
+// against that field's declared type, same as assigning to an ordinary
+// variable. Originally written against the old brace-literal struct
+// constructor (`User { age: "not a number", name: "Alice" }`, since removed
+// -- see StructName::new(...)/StructName::default()) -- before the fix,
+// TypeChecker::visitStructInit() only checked for UNKNOWN field names (a
+// typo'd field), never that a correctly-named field's VALUE actually
+// matched its declared type, and `age: "not a number"` (age declared as
+// int) compiled with ZERO diagnostics, storing the string literal's raw
+// pointer bit-pattern directly into the field's i64 storage slot: silent
+// type confusion producing garbage data (confirmed: printing the resulting
+// `age` gave a nonsense value like 102697087172654, not even a crash to
+// signal something was wrong). Re-expressed here as a direct field
+// assignment (`u.age = ...`), the modern equivalent of supplying a field
+// value -- still exercises ordinary field-typed assignment checking, the
+// same underlying guarantee this test exists to protect.
+
+struct User {
+    age: int,
+    name: string
+}
+
+@test(compile_error, E066, "I cannot assign a `string` to a place that holds an `int`.")
+fn rejects_struct_field_type_mismatch(): void {
+    mut u: User = User::default();
+    u.age = "not a number";
+}
