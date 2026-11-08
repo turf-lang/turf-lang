@@ -93,12 +93,15 @@ answers from recorded responses instead. `scripts/slm/slm_benchmark_smoke.sh`
 
 ### Rules-only baseline
 
-| Split | Cases | Utility | 95% interval | Fixes shown | Wrong | Silent on hard negatives |
-|---|---|---|---|---|---|---|
-| train | 446 | −0.038 | [−0.099, +0.018] | 47 | 16 | 5 of 5 |
-| heldout | 130 | +0.023 | [−0.077, +0.108] | 15 | 3 | 1 of 1 |
+| Commit | Split | Cases | Utility | 95% interval | Fixes shown | Wrong | Silent on hard negatives |
+|---|---|---|---|---|---|---|---|
+| ec03fa91 | train | 446 | −0.038 | [−0.099, +0.018] | 47 | 16 | 5 of 5 |
+| ec03fa91 | heldout | 130 | +0.023 | [−0.077, +0.108] | 15 | 3 | 1 of 1 |
+| ad291df3 (SL-1) | train | 446 | +0.043 | [+0.004, +0.081] | 35 | 4 | 5 of 5 |
+| ad291df3 (SL-1) | heldout | 130 | +0.023 | [−0.077, +0.108] | 15 | 3 | 1 of 1 |
 
-Of the 16 wrong rule fixes on train, 12 are fixes for errors that follow a
-parse error (a `;` after `}`, `mut` to `immut`) while the first error has
-none, and 4 are two-error cases where the first fix is right and the second
-error remains.
+At ec03fa91, 12 of the 16 wrong rule fixes on train were fixes for errors
+that follow a parse error (a `;` after `}`, `mut` to `immut`) while the first
+error had none. SL-1 gives no fix while the parser recovers, which removed
+those 12 and no right fix. The 4 left are two-error cases where the first fix
+is right and the second error remains. Every rule fix shown is `proven`.
