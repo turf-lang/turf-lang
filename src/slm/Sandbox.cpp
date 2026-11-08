@@ -137,11 +137,19 @@ const char *sandboxDepthName(SandboxDepth D) {
 // SandboxDepth::Codegen: compiles `sourceLines` as `asIfPath` would be, to
 // LLVM IR in a child compiler (Codegen and the module verifier, no linking,
 // nothing run). True when it compiles; otherwise `why` holds the child's
-// first lines of output. A copy that cannot be written next to the file
-// (a read-only directory) is not checked, and says so under TURF_SLM_DEBUG.
+// first lines of output. A program it cannot compile as a copy (a package
+// build, whose entry must be the root package's src/main.tr; a read-only
+// directory) is not checked, and says so under TURF_SLM_DEBUG.
 static bool codegenRecheck(const std::vector<std::string> &sourceLines,
                            const std::string &asIfPath, std::string &why) {
   namespace fs = llvm::sys::fs;
+  // A package build takes only the root package's src/main.tr as its entry,
+  // so a copy beside it cannot be compiled the way the file is.
+  if (!CompilerFixes::PackageGraphFile.empty()) {
+    if (std::getenv("TURF_SLM_DEBUG"))
+      std::cerr << "[Sandbox] codegen recheck skipped: a package build\n";
+    return true;
+  }
   llvm::SmallString<256> Dir(asIfPath);
   llvm::sys::path::remove_filename(Dir);
   if (Dir.empty())
@@ -173,10 +181,6 @@ static bool codegenRecheck(const std::vector<std::string> &sourceLines,
   llvm::sys::path::append(IR, "turf-smart-check-" + std::to_string(::getpid()));
   std::vector<std::string> Args = {CompilerExecutablePath, std::string(CopyPath), "--emit-llvm",
                                    "-O0", "-o", std::string(IR)};
-  if (!CompilerFixes::PackageGraphFile.empty()) {
-    Args.push_back("--package-graph");
-    Args.push_back(CompilerFixes::PackageGraphFile);
-  }
   if (g_AllowUnsafeModules)
     Args.push_back("--allow-unsafe-modules");
   std::vector<llvm::StringRef> Refs(Args.begin(), Args.end());

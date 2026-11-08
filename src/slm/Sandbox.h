@@ -34,7 +34,8 @@
 // the compiler's process-wide LLVM state, which the compile the sandbox runs
 // inside is still using, so this runs in a child `turfc --emit-llvm` on a
 // hidden copy written next to the file (its imports resolve as the file's
-// do) and removed straight after. TURF_SLM_SANDBOX_DEPTH=frontend|analysis|
+// do) and removed straight after. A package build is not rechecked this
+// way: its entry must be the root package's src/main.tr. TURF_SLM_SANDBOX_DEPTH=frontend|analysis|
 // codegen picks one.
 enum class SandboxDepth { FrontEnd, Analysis, Codegen };
 SandboxDepth sandboxDepth();

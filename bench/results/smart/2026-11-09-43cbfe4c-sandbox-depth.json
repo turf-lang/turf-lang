@@ -1,0 +1,39 @@
+{
+ "date": "2026-11-09",
+ "commit": "43cbfe4c",
+ "split": "train",
+ "cases": 422,
+ "summary": {
+  "frontend": {
+   "cases_sandboxed": 319,
+   "candidates": 322,
+   "validated": 307,
+   "mean_ms": 36.7,
+   "p50_ms": 36.4,
+   "p95_ms": 47.1
+  },
+  "analysis": {
+   "cases_sandboxed": 319,
+   "candidates": 322,
+   "validated": 307,
+   "mean_ms": 39.4,
+   "p50_ms": 39.4,
+   "p95_ms": 48.9
+  },
+  "codegen": {
+   "cases_sandboxed": 319,
+   "candidates": 323,
+   "validated": 304,
+   "mean_ms": 109.3,
+   "p50_ms": 112.0,
+   "p95_ms": 132.9
+  }
+ },
+ "lost_at_analysis": [],
+ "lost_at_codegen": [
+  "train-0005-6ef93ca8",
+  "train-0006-efaddc15",
+  "train-0007-9038a31b"
+ ],
+ "gained_at_analysis": []
+}
