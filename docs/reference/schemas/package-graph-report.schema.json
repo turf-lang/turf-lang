@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/turf-lang/turf-lang/blob/master/docs/reference/schemas/package-graph-report.schema.json",
+  "title": "turf graph --unsafe: a package graph with each package's unsafe surface",
+  "description": "IF-2, LB-2. The package graph (package-graph.schema.json, same \"format\") with an \"unsafe\" object in every package and a top-level \"stdlib\", each as turfc --unsafe-report counted it (unsafe-report.schema.json's package). A report for people and tools: turfc does not accept it as --package-graph. Keys are only added within a format.",
+  "type": "object",
+  "required": ["format", "root", "packages", "stdlib"],
+  "properties": {
+    "format": { "const": 1 },
+    "root": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+    "packages": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/package" }
+    },
+    "stdlib": {
+      "type": "object",
+      "required": ["unsafe"],
+      "properties": { "unsafe": { "$ref": "#/$defs/unsafe" } }
+    }
+  },
+  "$defs": {
+    "package": {
+      "type": "object",
+      "required": ["src", "deps", "allow_unsafe", "unsafe"],
+      "properties": {
+        "src": { "type": "string" },
+        "deps": { "type": "array", "items": { "type": "string" } },
+        "allow_unsafe": { "type": "boolean" },
+        "tests": { "type": "string" },
+        "unsafe": { "$ref": "#/$defs/unsafe" }
+      }
+    },
+    "unsafe": {
+      "type": "object",
+      "description": "unsafe-report.schema.json's package object.",
+      "required": ["allow_unsafe", "modules", "unsafe_modules", "unsafe_blocks", "extern_fns", "link_libraries", "files"],
+      "properties": {
+        "allow_unsafe": { "type": "boolean" },
+        "modules": { "type": "integer", "minimum": 0 },
+        "unsafe_modules": { "type": "integer", "minimum": 0 },
+        "unsafe_blocks": { "type": "integer", "minimum": 0 },
+        "extern_fns": { "type": "integer", "minimum": 0 },
+        "link_libraries": { "type": "array", "items": { "type": "string" } },
+        "files": { "type": "array" }
+      }
+    }
+  }
+}

@@ -1,0 +1,7 @@
+import shapes;
+import test;
+
+@test
+fn area_multiplies(): void {
+    test::assert(shapes::area(2, 3) == 6, "2 by 3 is 6");
+}

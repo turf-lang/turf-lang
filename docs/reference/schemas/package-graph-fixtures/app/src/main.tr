@@ -1,0 +1,5 @@
+import shapes;
+
+fn main(): int {
+    return shapes::area(2, 3) - 6;
+}
