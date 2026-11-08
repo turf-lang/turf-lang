@@ -475,11 +475,11 @@ def example_packages():
 PACKAGES: dict = {}
 
 
-def compile_package(rel: str, text: str, exe: Path):
-    """Compile the program package that holds `rel`, with `rel` replaced by
-    `text`. Paths in the output are the repository's."""
+def package_tree(rel: str, text: str, base: Path):
+    """Copy the program package that holds `rel` (and its dependencies) under
+    `base`, with `rel` replaced by `text`, and write `base`/graph.json.
+    -> (graph path, the root package's main.tr, the copy of `rel`)."""
     pkg = PACKAGES[rel]
-    base = workdir() / "pkg"
     shutil.rmtree(base, ignore_errors=True)
     graph = {"format": 1, "root": pkg["root"], "packages": {}}
     for name, src in pkg["pkgs"].items():
@@ -487,11 +487,20 @@ def compile_package(rel: str, text: str, exe: Path):
         graph["packages"][name] = {"src": str(base / name), "deps": pkg["deps"][name],
                                    "allow_unsafe": name == pkg["root"]}
     owner = next(n for n, s in pkg["pkgs"].items() if rel.startswith(s + "/"))
-    (base / owner / Path(rel).relative_to(pkg["pkgs"][owner])).write_text(text)
+    copy = base / owner / Path(rel).relative_to(pkg["pkgs"][owner])
+    copy.write_text(text)
     (base / "graph.json").write_text(json.dumps(graph))
-    root_main = base / pkg["root"] / "main.tr"
+    return base / "graph.json", base / pkg["root"] / "main.tr", copy
+
+
+def compile_package(rel: str, text: str, exe: Path):
+    """Compile the program package that holds `rel`, with `rel` replaced by
+    `text`. Paths in the output are the repository's."""
+    pkg = PACKAGES[rel]
+    base = workdir() / "pkg"
+    graph_path, root_main, _ = package_tree(rel, text, base)
     try:
-        p = subprocess.run([str(TURFC), "--package-graph", str(base / "graph.json"), str(root_main), "-O0",
+        p = subprocess.run([str(TURFC), "--package-graph", str(graph_path), str(root_main), "-O0",
                             "-o", str(exe)], cwd=workdir(), capture_output=True, text=True, timeout=TIMEOUT,
                            stdin=subprocess.DEVNULL, env=clean_env(), errors="replace")
     except subprocess.TimeoutExpired:

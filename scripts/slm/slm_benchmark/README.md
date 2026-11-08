@@ -45,3 +45,59 @@ line and a compile error.
 
 `corpus.json` is the original 22-case corpus `mutate.py` writes; the snapshot
 INDEX and a few docs refer to cases in it by name.
+
+## Scoring
+
+`run_benchmark.py` compiles every case of one split once per path:
+
+| Path | What runs |
+|---|---|
+| `rules` | the compiler alone: its checked `Fix:` lines, no model |
+| `model` | the same compile with `--smart`: a rule fix where there is one, otherwise the model or its cache |
+
+    python3 scripts/slm/slm_benchmark/run_benchmark.py --split train --paths rules,model
+
+What was shown comes from `--diagnostics=json` (each error's `fix` edits,
+applied as `--smart-write-fix` applies them) and from the program
+`--smart-write-fix` writes for a model fix; stdout is never read. Provenance is
+`rule`, `model`, `cache` (the model's answer from the suggestion cache) or
+`none`.
+
+| Outcome | Utility |
+|---|---|
+| a shown fix the oracle accepts | +1 |
+| nothing shown | 0 |
+| a shown fix the oracle rejects, one that does not compile, or any fix on a hard negative | −K (K = 3, D-12) |
+
+The report gives, per path: the mean utility with a bootstrap 95% interval
+(the headline), how many fixes were shown and the share of them that were
+wrong (false confidence), the rate of silence on hard negatives, the Brier
+score of the confidence printed with each fix (a rule fix counts as 1.0, a
+model fix as its post-sandbox confidence from `TURF_SLM_DEBUG=1`), the correct
+rate and p50/p95 latency and peak RSS by provenance, and mean utility by error
+category, code and mutation kind. With both paths it adds model − rules with
+a paired bootstrap interval, and says whether the two paths' intervals
+separate: a change is an improvement only when they do.
+
+Each run writes one JSON record, `bench/results/smart/<date>-<commit>-<split>.json`:
+the compiler's `--version --json`, the model file and its SHA-256, the corpus
+hash, K, the summaries and every case's outcome. `--no-record` skips it;
+`--limit`, `--ids` and `--cases` score a part or another file (the record
+says so).
+
+The model path needs exactly one `.gguf` in `models/` and runs one case at a
+time; at tens of seconds a case, a split takes hours. `TURF_SLM_REPLAY=<file>`
+answers from recorded responses instead. `scripts/slm/slm_benchmark_smoke.sh`
+(CI) checks the scorer on four cases with no model.
+
+### Rules-only baseline
+
+| Split | Cases | Utility | 95% interval | Fixes shown | Wrong | Silent on hard negatives |
+|---|---|---|---|---|---|---|
+| train | 446 | −0.038 | [−0.099, +0.018] | 47 | 16 | 5 of 5 |
+| heldout | 130 | +0.023 | [−0.077, +0.108] | 15 | 3 | 1 of 1 |
+
+Of the 16 wrong rule fixes on train, 12 are fixes for errors that follow a
+parse error (a `;` after `}`, `mut` to `immut`) while the first error has
+none, and 4 are two-error cases where the first fix is right and the second
+error remains.

@@ -486,6 +486,8 @@ jobs:
         run: ./scripts/slm/slm_deterministic_fix_smoke.sh
       - name: SLM replay smoke test (recorded responses, never loads the model)
         run: ./scripts/slm/slm_replay_smoke.sh
+      - name: SLM benchmark scorer smoke test (SL-2; recorded responses, never loads the model)
+        run: ./scripts/slm/slm_benchmark_smoke.sh
       - name: SLM cache smoke test (positive and negative entries, never loads the model)
         run: ./scripts/slm/slm_cache_smoke.sh
 
