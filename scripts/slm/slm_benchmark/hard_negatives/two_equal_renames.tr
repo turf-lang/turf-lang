@@ -1,0 +1,7 @@
+// HARD-NEGATIVE: `carx` is one edit from both `cart` and `card`; either rename is as good as the other.
+fn main(): int {
+    mut cart: int = 1;
+    mut card: int = 2;
+    printline(carx + cart + card);
+    return 0;
+}

@@ -187,6 +187,11 @@ jobs:
       - name: SLM docs show only Turf the compiler accepts
         run: ./scripts/slm/slm_doc_examples_check.sh
 
+      # SL-3: the benchmark's held-out split is read only to score; anything
+      # that tunes the --smart path reads train.
+      - name: --smart tuning never reads the held-out benchmark split
+        run: python3 scripts/slm/slm_benchmark/check_heldout.py
+
       # SLM_IMPROVEMENT_PLAN C3: the system prompt (rules + syntax card + the
       # biggest code page + a category doc) must fit n_batch (4096 tokens), or
       # the model silently loses the middle of its docs. Measured with

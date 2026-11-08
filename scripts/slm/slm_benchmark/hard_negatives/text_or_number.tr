@@ -1,0 +1,6 @@
+// HARD-NEGATIVE: a string stored in an `int`; parsing it with `to int` can fail at run time, and declaring a `string` changes every later use.
+fn main(): int {
+    mut count: int = "12";
+    printline(count + 1);
+    return 0;
+}

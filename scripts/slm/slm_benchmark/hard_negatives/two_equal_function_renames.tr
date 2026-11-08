@@ -1,0 +1,16 @@
+// HARD-NEGATIVE: `mx` is one edit from both `max` and `mix`, which take the same arguments.
+fn max(a: int, b: int): int {
+    if a > b {
+        return a;
+    }
+    return b;
+}
+
+fn mix(a: int, b: int): int {
+    return (a + b) / 2;
+}
+
+fn main(): int {
+    printline(mx(3, 4));
+    return 0;
+}

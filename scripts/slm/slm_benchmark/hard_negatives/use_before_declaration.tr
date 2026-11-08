@@ -1,0 +1,8 @@
+// HARD-NEGATIVE: `total` is used before it is declared; moving the declaration up or the use down changes what prints.
+fn main(): int {
+    printline(total);
+    mut total: int = 3;
+    total += 4;
+    printline(total);
+    return 0;
+}
