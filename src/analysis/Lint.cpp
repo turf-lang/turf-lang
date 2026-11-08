@@ -16,11 +16,14 @@
  */
 
 #include "analysis/Lint.h"
+#include "analysis/AnalysisFacts.h"
 #include "frontend/AST.h"
 #include "frontend/ASTChildWalker.h"
 #include "diagnostics/Errors.h"
 #include "frontend/DeprecatedAnnotation.h"
 #include "frontend/Lexer.h"
+#include "frontend/Parser.h" // IsLibStdWarningLocation
+#include "frontend/TestAnnotation.h"
 #include "sema/Types.h"
 #include "llvm/ADT/SmallString.h"
 #include <string>
@@ -84,6 +87,22 @@ static std::string Fingerprint(const ExprAST *E) {
 // block (whose `break` leaves the enclosing loop). A `break` of an inner loop
 // counts too: this only decides whether to warn, and a loop with any way out
 // in it is not reported.
+// A function or method call anywhere in an expression.
+class CallFinder : public ASTChildWalker {
+public:
+  bool Found = false;
+  void visitFuncCall(FuncCallExprAST &) override { Found = true; }
+  void visitMethodCall(MethodCallExprAST &) override { Found = true; }
+};
+
+static bool ContainsCall(const ExprAST *E) {
+  if (!E)
+    return false;
+  CallFinder Finder;
+  const_cast<ExprAST *>(E)->accept(Finder);
+  return Finder.Found;
+}
+
 class LoopExitFinder : public ASTChildWalker {
 public:
   bool Found = false;
@@ -117,6 +136,38 @@ static bool IsEffectivelyEmpty(const ExprAST *E) {
   }
 
   return false;
+}
+
+// Issue #362: an empty body holding a comment (`{ // nothing to free }`) is
+// deliberate. The parser gives a block its span from `{` to `}`
+// (ParseBlock()); the source between them is read for `//` or `/*`.
+static bool HasComment(const ExprAST *Block) {
+  if (!Block || !Block->hasSpan())
+    return false;
+  const SourceLocation &S = Block->getSpan();
+  auto It = AllSourceLines.find(S.Filename);
+  const std::vector<std::string> *Lines =
+      It != AllSourceLines.end() ? &It->second : &SourceLines;
+  for (int L = S.Line; L <= S.EndLine && L >= 1 && L <= (int)Lines->size(); ++L) {
+    const std::string &Text = (*Lines)[L - 1];
+    const size_t From = L == S.Line ? std::min<size_t>(S.Col, Text.size()) : 0;
+    const size_t To = L == S.EndLine && S.EndCol > 0
+                          ? std::min<size_t>(S.EndCol, Text.size())
+                          : Text.size();
+    if (From >= To)
+      continue;
+    const std::string Part = Text.substr(From, To - From);
+    if (Part.find("//") != std::string::npos || Part.find("/*") != std::string::npos)
+      return true;
+  }
+  return false;
+}
+
+// An empty body that warns (E195-E197): nothing in it, not even a comment,
+// and not in lib/std.
+static bool WarnsAsEmpty(const ExprAST *Body, const SourceLocation &Loc) {
+  return Body && IsEffectivelyEmpty(Body) && !HasComment(Body) &&
+         !IsLibStdWarningLocation(Loc.Filename);
 }
 
 // Helper: check if a NumberExprAST is a zero literal
@@ -307,6 +358,16 @@ public:
   // for-each has no analog (its value/index vars are never advanced by hand
   // by design), so ForEach takes the walker's plain recursion.
   void visitFor(ForExprAST &Node) override { LintFor(&Node); }
+  void visitForEach(ForEachExprAST &Node) override {
+    if (WarnsAsEmpty(Node.getBody(), Node.getLoc()))
+      EmptyLoopBodyWarning(Node.getLoc(), "for").warn();
+    ASTChildWalker::visitForEach(Node);
+  }
+  void visitRecoverExpr(RecoverExprAST &Node) override {
+    if (Node.getBlock() && WarnsAsEmpty(Node.getBlock(), Node.getLoc()))
+      EmptyRecoverBlockWarning(Node.getLoc()).warn();
+    ASTChildWalker::visitRecoverExpr(Node);
+  }
   void visitIf(IfExprAST &Node) override { LintIf(&Node); }
   void visitFuncCall(FuncCallExprAST &Node) override {
     WarnIfDeprecated(Node.getResolvedCallTarget(), Node.getLoc());
@@ -466,6 +527,11 @@ static void LintWhile(const WhileExprAST *While) {
     }
   }
 
+  // E195. A condition that calls something (`while advance() { }`) does
+  // its work in the test; that loop is not empty.
+  if (WarnsAsEmpty(While->getBody(), While->getLoc()) && !ContainsCall(Cond))
+    EmptyLoopBodyWarning(While->getLoc(), "while").warn();
+
   LintExpression(const_cast<ExprAST *>(While->getCond()));
   // Recurse into body
   LintExpression(const_cast<ExprAST *>(While->getBody()));
@@ -486,6 +552,9 @@ static void LintDoWhile(const DoWhileExprAST *DoWhile) {
       }
     }
   }
+
+  if (WarnsAsEmpty(DoWhile->getBody(), DoWhile->getLoc()) && !ContainsCall(Cond))
+    EmptyLoopBodyWarning(DoWhile->getLoc(), "do").warn();
 
   LintExpression(const_cast<ExprAST *>(DoWhile->getCond()));
   // Recurse into body
@@ -537,6 +606,9 @@ static void LintFor(const ForExprAST *For) {
 
     StuckForLoopVariableWarning(For->getLoc(), VarName, Outcome).warn();
   }
+
+  if (WarnsAsEmpty(For->getBody(), For->getLoc()))
+    EmptyLoopBodyWarning(For->getLoc(), "for").warn();
 
   LintExpression(const_cast<ExprAST *>(For->getStart()));
   LintExpression(const_cast<ExprAST *>(For->getEnd()));
@@ -642,4 +714,26 @@ void LintChangedNodesOnly(ExprAST *E,
     return;
   ChangedNodesLintVisitor V(ChangedNodeIDs);
   E->accept(V);
+}
+
+// Issue #362, E196: a function whose body is empty. A `@test` function (an
+// empty test passes by returning) and a function returning a value (E009
+// reports it) are left alone. Called once per function body, by the flow
+// phase; a generic function's instantiations share one location and warn
+// once.
+void LintFunctionBody(const FuncDefExprAST &FD) {
+  if (!FD.getBody() || TestAnnotation::find(FD))
+    return;
+  const TurfType *Ret = FD.getReturnType();
+  if (Ret && !Ret->isVoid())
+    return;
+  if (!WarnsAsEmpty(FD.getBody(), FD.getLoc()))
+    return;
+  if (AnalysisFacts *F = Facts())
+    if (!F->EmptyBodyReported
+             .insert(FD.getLoc().Filename + ":" + std::to_string(FD.getLoc().Line) + ":" +
+                     std::to_string(FD.getLoc().Col))
+             .second)
+      return;
+  EmptyFunctionBodyWarning(FD.getLoc(), FD.getSourceName()).warn();
 }

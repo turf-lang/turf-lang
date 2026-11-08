@@ -564,6 +564,12 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     {"E192", "IntToPointerCastWarning", "Integer converted to a pointer", SLM::ErrorCategory::MEMORY_ERROR, false, 3, true},
     {"E193", "UnneededUnsafeBlockWarning", "`unsafe` block that nothing needs", SLM::ErrorCategory::MEMORY_ERROR, false, 3, true},
     {"E194", "LargeUnsafeBlockWarning", "Very large `unsafe` block", SLM::ErrorCategory::MEMORY_ERROR, false, 3, true},
+    // Issue #362 (TDP-2-007): an empty loop body, function body or `recover`
+    // block, beside E165 (an empty `if` branch) and E154 (an empty
+    // `compare`). Warn by default; a body holding a comment is deliberate.
+    {"E195", "EmptyLoopBodyWarning", "Empty loop body", SLM::ErrorCategory::CONTROL_FLOW, false, 3},
+    {"E196", "EmptyFunctionBodyWarning", "Empty function body", SLM::ErrorCategory::CONTROL_FLOW, false, 3},
+    {"E197", "EmptyRecoverBlockWarning", "Empty `recover` block", SLM::ErrorCategory::CONTROL_FLOW, false, 3},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

@@ -1,0 +1,31 @@
+TURF E197 -- EMPTY RECOVER BLOCK (WARNING):
+
+CAUSE:
+  A `recover ... run { }` block has no statements and no comment, so the
+  error it catches is dropped without a trace. This is a WARNING.
+
+INCORRECT (compiles, but warns):
+    import fs;
+
+    fn main(): int {
+        fs::mkdir("out") recover as err run {
+        };
+        return 0;
+    }
+
+CORRECT:
+    import fs;
+
+    fn main(): int {
+        fs::mkdir("out") recover as err run {
+            printline("could not create out/");
+        };
+        return 0;
+    }
+
+FIX:
+  Handle the error in the block: print it, return it, or set a default. Never
+  empty a `recover` block to make another diagnostic go away. If ignoring the
+  error is right, keep a comment in the block saying why.
+
+RELATED: E195, E196, E132 (a `recover` block that must return).

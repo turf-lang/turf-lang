@@ -352,6 +352,47 @@ public:
     Category_ = SLM::ErrorCategory::CONTROL_FLOW;
   }
 };
+// Issue #362: E195-E197, the empty bodies E165 does not cover. A body that
+// holds a comment is deliberate and does not warn (Lint.cpp, HasComment()).
+class EmptyLoopBodyWarning : public TurfWarning {
+public:
+  EmptyLoopBodyWarning(SourceLocation Loc, const std::string &LoopKind)
+      : TurfWarning(Loc,
+                    TurfWarning::WarningLabel() + "The body of this `" + Colors::CYAN +
+                        LoopKind + Colors::BRIGHT_YELLOW + "` loop is empty." +
+                        Colors::RESET,
+                    "Write what the loop should do, or remove it. If it is meant "
+                    "to do nothing, put a comment in the body saying why.") {
+    Category_ = SLM::ErrorCategory::CONTROL_FLOW;
+  }
+};
+
+class EmptyFunctionBodyWarning : public TurfWarning {
+public:
+  EmptyFunctionBodyWarning(SourceLocation Loc, const std::string &Name)
+      : TurfWarning(Loc,
+                    TurfWarning::WarningLabel() + "The body of `" + Colors::CYAN + Name +
+                        Colors::BRIGHT_YELLOW + "` is empty." + Colors::RESET,
+                    "Write the function, or remove it. If it is meant to do "
+                    "nothing, put a comment in the body saying why.") {
+    Category_ = SLM::ErrorCategory::CONTROL_FLOW;
+  }
+};
+
+class EmptyRecoverBlockWarning : public TurfWarning {
+public:
+  explicit EmptyRecoverBlockWarning(SourceLocation Loc)
+      : TurfWarning(Loc,
+                    TurfWarning::WarningLabel() +
+                        "This `recover` block is empty, so the error is dropped "
+                        "without a trace." + Colors::RESET,
+                    "Handle the error in the block: report it, return it, or "
+                    "use a default. If ignoring it is right, put a comment in "
+                    "the block saying why.") {
+    Category_ = SLM::ErrorCategory::CONTROL_FLOW;
+  }
+};
+
 // Self-comparison: x == x, x != x, x < x, etc.
 class SelfComparisonWarning : public TurfWarning {
 public:

@@ -2901,6 +2901,7 @@ void runProgramFlowPasses(const std::vector<const ExprAST *> &Decls) {
     g_recoverActive = true;
     try {
       LintExpression(FD->getBodyMut());
+      LintFunctionBody(*FD);
       GlobalCFGs.push_back(CFGBuilder().buildCFG(FD->getSourceName(), FD->getReturnTypePtr(),
                                                  FD->getBodyMut(), FD->getLoc(),
                                                  FD->getResolvedDef()->mangledName()));

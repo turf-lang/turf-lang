@@ -9,6 +9,7 @@
 // analysis (a compiler fix's re-check) never sees the outer one's facts.
 
 #include <cstdint>
+#include <string>
 #include <unordered_set>
 
 struct AnalysisFacts {
@@ -51,6 +52,9 @@ struct AnalysisFacts {
   // F-S4a: the `mut`/`immut` declarations whose shadowing (E152) the phase
   // before Codegen already checked.
   std::unordered_set<uint64_t> ShadowChecked;
+  // Issue #362: the function locations ("file:line:col") E196 already
+  // reported, so a generic function's instantiations warn once.
+  std::unordered_set<std::string> EmptyBodyReported;
 };
 
 // The current compilation's facts, or null outside any.

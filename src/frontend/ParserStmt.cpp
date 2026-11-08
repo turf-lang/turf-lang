@@ -233,7 +233,12 @@ std::unique_ptr<ExprAST> ParseBlock() {
   }
   getNextToken();
 
-  return std::make_unique<BlockExprAST>(std::move(Exprs));
+  // From `{` to `}`: the empty-body warnings (E195-E197) read the source
+  // between them for a comment.
+  auto Block = std::make_unique<BlockExprAST>(std::move(Exprs));
+  Block->setSpan(SourceLocation{OpenBraceLoc.Line, OpenBraceLoc.Col, OpenBraceLoc.Filename,
+                                Lex().PrevTokEndLine, Lex().PrevTokEndCol});
+  return Block;
 }
 
 std::unique_ptr<ExprAST> ParseWhileExpr() {

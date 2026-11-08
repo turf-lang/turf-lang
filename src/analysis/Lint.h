@@ -10,6 +10,9 @@
 // Emits warnings to stderr; never halts compilation.
 void LintExpression(ExprAST *E);
 
+/// Issue #362: E196 for an empty function body.
+void LintFunctionBody(const FuncDefExprAST &FD);
+
 // Semantic pruning: Only lint nodes that have changed (by node ID).
 // Used by incremental validation to skip re-checking unchanged subtrees.
 // If ChangedNodeIDs is empty, behaves like LintExpression (lint everything).

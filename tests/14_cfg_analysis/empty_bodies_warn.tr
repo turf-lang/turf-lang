@@ -1,0 +1,61 @@
+// Issue #362: an empty loop body (E195), function body (E196) and `recover`
+// block (E197) warn, each beside a body that does not: one holding a comment,
+// a `while` whose condition calls (it does its work in the test), a `@test`
+// function, and a generic function, which warns once for all its uses.
+// EXPECT-DIAG: The body of this `while` loop is empty.
+// EXPECT-DIAG: The body of this `for` loop is empty.
+// EXPECT-DIAG: The body of `nothing` is empty.
+// EXPECT-DIAG: The body of `generic` is empty.
+// EXPECT-DIAG: This `recover` block is empty, so the error is dropped without a trace.
+// EXPECT-NO-DIAG: The body of `commented` is empty.
+// EXPECT-NO-DIAG: The body of `advance` is empty.
+// EXPECT-NO-DIAG: The body of `an_empty_test` is empty.
+// EXPECT-NO-DIAG: The body of this `do` loop is empty.
+error Missing { Gone }
+
+fn nothing(): void {
+}
+
+fn commented(): void {
+    // nothing to set up: the defaults are right
+}
+
+fn<T> generic(x: T): void {
+}
+
+fn advance(n: &int): bool {
+    n[0] = n[0] + 1;
+    return n[0] < 3;
+}
+
+fn fails(): !void {
+    return Missing::Gone;
+}
+
+@test
+fn an_empty_test(): void {
+}
+
+fn main(): int {
+    mut arr: int[3] = [1, 2, 3];
+    mut n: int = 0;
+    while arr[0] > 5 {
+    }
+    while advance(&n) {
+    }
+    for v in arr {
+    }
+    for i in 0..3 {
+        // counted, nothing else
+    }
+    fails() recover as err run {
+    };
+    fails() recover as err run {
+        // nothing was there to remove
+    };
+    generic(1);
+    generic(2.0);
+    nothing();
+    commented();
+    return 0;
+}

@@ -1,0 +1,57 @@
+tests/14_cfg_analysis/empty_bodies_warn.tr (5 warnings)
+
+── warning at line 16, col 1 [E196 · empty function body]
+
+  The body of `nothing` is empty.
+
+  Hint: Write the function, or remove it. If it is meant to do nothing, put a comment in the body saying why.
+
+  16 │ fn nothing(): void {
+     │ ^~ here
+
+  Run `turf --explain E196` for more details.
+
+── warning at line 23, col 1 [E196 · empty function body]
+
+  The body of `generic` is empty.
+
+  Hint: Write the function, or remove it. If it is meant to do nothing, put a comment in the body saying why.
+
+  23 │ fn<T> generic(x: T): void {
+     │ ^~ here
+
+  Run `turf --explain E196` for more details.
+
+── warning at line 42, col 5 [E195 · empty loop body]
+
+  The body of this `while` loop is empty.
+
+  Hint: Write what the loop should do, or remove it. If it is meant to do nothing, put a comment in the body saying why.
+
+  42 │     while arr[0] > 5 {
+     │     ^~~~~ here
+
+  Run `turf --explain E195` for more details.
+
+── warning at line 46, col 5 [E195 · empty loop body]
+
+  The body of this `for` loop is empty.
+
+  Hint: Write what the loop should do, or remove it. If it is meant to do nothing, put a comment in the body saying why.
+
+  46 │     for v in arr {
+     │     ^~~ here
+
+  Run `turf --explain E195` for more details.
+
+── warning at line 51, col 13 [E197 · empty `recover` block]
+
+  This `recover` block is empty, so the error is dropped without a trace.
+
+  Hint: Handle the error in the block: report it, return it, or use a default. If ignoring it is right, put a comment in the block saying why.
+
+  51 │     fails() recover as err run {
+     │             ^~~~~~~ here
+
+  Run `turf --explain E197` for more details.
+

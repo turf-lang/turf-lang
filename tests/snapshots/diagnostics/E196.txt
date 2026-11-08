@@ -1,0 +1,13 @@
+tests/07_functions_modules/02_type_check_funcs.tr (1 warning)
+
+── warning at line 11, col 1 [E196 · empty function body]
+
+  The body of `greet` is empty.
+
+  Hint: Write the function, or remove it. If it is meant to do nothing, put a comment in the body saying why.
+
+  11 │ fn greet(): void {
+     │ ^~ here
+
+  Run `turf --explain E196` for more details.
+

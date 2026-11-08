@@ -189,3 +189,6 @@ E191 tests/05_arrays_pointers_ffi/unsafe_checks_warn.tr --warn E191
 E192 tests/46_stdlib_surface/02_runtime_modules.tr --warn E192
 E193 tests/06_structs/14_struct_stress.tr --warn E193
 E194 tests/05_arrays_pointers_ffi/unsafe_checks_warn.tr --warn E194
+E195 tests/04_control_flow/warn_for_loop_var_never_advances.tr --warn E195
+E196 tests/07_functions_modules/02_type_check_funcs.tr --warn E196
+E197 tests/14_cfg_analysis/empty_bodies_warn.tr --warn E197

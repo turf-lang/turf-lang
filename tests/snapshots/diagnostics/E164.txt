@@ -1,4 +1,4 @@
-tests/04_control_flow/warn_for_loop_var_never_advances.tr (2 warnings)
+tests/04_control_flow/warn_for_loop_var_never_advances.tr (3 warnings)
 
 ── warning at line 16, col 5 [E163 · unused variable]
 
@@ -21,4 +21,15 @@ tests/04_control_flow/warn_for_loop_var_never_advances.tr (2 warnings)
      │     ^~~ this loop variable never changes
 
   Run `turf --explain E164` for more details.
+
+── warning at line 20, col 5 [E195 · empty loop body]
+
+  The body of this `for` loop is empty.
+
+  Hint: Write what the loop should do, or remove it. If it is meant to do nothing, put a comment in the body saying why.
+
+  20 │     for i in 0..10 step j += 10 {
+     │     ^~~ here
+
+  Run `turf --explain E195` for more details.
 

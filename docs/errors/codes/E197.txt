@@ -1,0 +1,30 @@
+An empty `recover` block
+
+`recover ... run { }` handles a failure. An empty block handles nothing: the error is dropped without a trace, which is what `recover` exists to prevent.
+
+    import fs;
+
+    fn main(): int {
+        fs::mkdir("out") recover as err run {
+        };                      // the error is dropped -- WARNING
+        return 0;
+    }
+
+Handle the error in the block: report it, return it, or use a default:
+
+    import fs;
+
+    fn main(): int {
+        fs::mkdir("out") recover as err run {
+            printline("could not create out/");
+        };
+        return 0;
+    }
+
+If ignoring the error is right, put a comment in the block saying why. A block holding a comment does not warn:
+
+        fs::mkdir("out") recover as err run {
+            // the directory may exist already, which is fine
+        };
+
+This is a warning, not an error -- compilation still succeeds. To silence it for a whole build, set its lint level to allow: `turf build --allow E197` (or `[lints] E197 = "allow"` in turf.toml).
