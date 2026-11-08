@@ -1,6 +1,6 @@
 // EXPECT-DIAG: E081
-// EXPECT-DIAG: I cannot call the method `bump` of this `&?Node`, which might be `null`
-// A method call whose receiver is a `&?T` that is not a variable.
+// EXPECT-DIAG: I cannot call the method `bump` of `p.next`, which might be `null` here.
+// A method call whose receiver is a `&?T` field nothing checked.
 struct Node { val: int, next: &?Node }
 
 fn Node.bump(k: int): void {

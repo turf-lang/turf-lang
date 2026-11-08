@@ -89,10 +89,10 @@ public:
     Category_ = SLM::ErrorCategory::MEMORY_ERROR;
   }
 
-  /// A `&?T` value that is not a variable: `p.next.val`, `get().val`,
-  /// `list[i].val`. Only a variable compared with `null` is ever narrowed
-  /// (NullabilityPass), so no check written around such an expression can
-  /// prove it; the fix is always to name the value first.
+  /// A `&?T` value that is neither a variable nor a field path: `get().val`,
+  /// `list[i].val`. Only a variable or a field path compared with `null` is
+  /// ever narrowed (NullabilityPass, AN-4), so no check written around such
+  /// an expression can prove it; the fix is always to name the value first.
   PossibleNullDereferenceError(SourceLocation Loc, NotAVariable,
                                const std::string &TypeName,
                                const std::string &MemberName,
@@ -104,7 +104,7 @@ public:
                       TypeName + Colors::BRIGHT_RED +
                       "`, which might be `null`." + Colors::RESET,
                   "Store it in a variable and check that, because a null check "
-                  "works only on a variable: `mut r: " + TypeName +
+                  "works only on a variable or a field (`a.next`): `mut r: " + TypeName +
                       " = ...; if (r != null) { ... r." + MemberName +
                       (Kind == Member::Method ? "()" : "") + " ... }`.") {
     Category_ = SLM::ErrorCategory::MEMORY_ERROR;
@@ -155,8 +155,32 @@ public:
     Category_ = SLM::ErrorCategory::TYPE_MISMATCH;
   }
 
-  /// `(h.next to &Node)`: the operand is not a variable, so nothing can have
-  /// narrowed it (see PossibleNullDereferenceError's second constructor).
+  /// AN-4: a `&?T` variable or field path used as a `&T` without a cast.
+  enum class Use {
+    /// Passed, returned or stored as a `&T` where it is not proven non-null.
+    Converted,
+    /// Inside a `defer`: it runs at the scope's exits, where no check made
+    /// before them is known to hold.
+    Deferred
+  };
+  UnnarrowedNullableCastError(SourceLocation Loc, const std::string &Name, Use U)
+      : TurfError(Loc,
+                  Colors::BRIGHT_RED + "I cannot use `" + Colors::CYAN + Name +
+                      Colors::BRIGHT_RED + "` as a non-null reference " +
+                      (U == Use::Deferred ? "in a `defer`" : "here") +
+                      ", because it might be `null`." + Colors::RESET,
+                  U == Use::Deferred
+                      ? "Check it inside the deferred statement and cast there: `defer if " +
+                            Name + " != null { ... " + Name + " to &T ... }`."
+                      : "Check it first, `if " + Name + " != null { ... }`, and use it "
+                            "inside. A check on a field holds until the next call or "
+                            "the next write to a field of that name.") {
+    Category_ = SLM::ErrorCategory::TYPE_MISMATCH;
+  }
+
+  /// `(get() to &Node)`: the operand is neither a variable nor a field path,
+  /// so nothing can have narrowed it (see PossibleNullDereferenceError's
+  /// second constructor).
   UnnarrowedNullableCastError(SourceLocation Loc, NotAVariable,
                               const std::string &TypeName, bool CopyOut = false)
       : TurfError(Loc,
@@ -167,7 +191,7 @@ public:
                                      Colors::BRIGHT_RED + "` to a non-null reference") +
                       ", because it might be `null`." + Colors::RESET,
                   "Store it in a variable, check it, and cast inside the "
-                  "check, because a null check works only on a variable: "
+                  "check, because a null check works only on a variable or a field (`a.next`): "
                   "`mut r: " + TypeName + " = ...; if (r != null) { ... r " +
                       (CopyOut ? "to T" : "to &T") + " ... }`.") {
     Category_ = SLM::ErrorCategory::TYPE_MISMATCH;

@@ -11,6 +11,7 @@
  */
 
 #include "analysis/AnalysisFacts.h"
+#include "sema/NullablePlace.h"
 #include "sema/TypeChecker.h"
 #include "sema/SpanLabels.h"
 
@@ -632,6 +633,25 @@ bool TypeChecker::arrayLiteralWidensToNullableRefs(const ExprAST *Val,
       static_cast<const ArrayLiteralExprAST *>(Val));
   Lit->CachedType = Widened;
   setType(Val, Widened);
+  return true;
+}
+
+
+bool TypeChecker::nullablePlaceNarrows(const ExprAST *Val, const TurfType *Dest) {
+  // A `&?T` is never a `&T` by type (typesCompatible()); a variable or field
+  // path is, where NullabilityPass proves it non-null (AN-4).
+  if (!Val || !Dest || !Dest->isReference() || Dest->isNullableReference())
+    return false;
+  TurfTypePtr From = getType(Val);
+  if (!From || !From->isNullableReference() || !NullablePlace::isPlace(Val))
+    return false;
+  const auto *S = static_cast<const TurfPointerType *>(From.get());
+  const auto *D = dynamic_cast<const TurfPointerType *>(Dest);
+  if (!D || !S->getPointee() || !D->getPointee() ||
+      !typesCompatible(S->getPointee().get(), D->getPointee().get()) ||
+      !typesCompatible(D->getPointee().get(), S->getPointee().get()))
+    return false;
+  const_cast<ExprAST *>(Val)->NeedsNonNull = true;
   return true;
 }
 

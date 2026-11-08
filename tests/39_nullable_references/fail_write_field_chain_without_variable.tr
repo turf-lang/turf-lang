@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E081
-// EXPECT-DIAG: I cannot access the field `val` of this `&?Node`, which might be `null`
+// EXPECT-DIAG: I cannot access the field `val` of `p.next`, which might be `null` here.
 // The write form of fail_deref_field_chain_without_variable.tr.
 struct Node { val: int, next: &?Node }
 

@@ -198,6 +198,44 @@ fn force(n: &?Node): &Node {
 }
 ```
 
+Where the null test has been seen, the cast is not needed either: a `&?T`
+variable, or a field reached from one (`h.next`, `h.next.next`), is passed,
+returned or stored as a `&T` as it is. A test on a field narrows that field
+the same way a test on a variable does, and a field just given a `&T` counts
+as non-null:
+
+```turflang
+struct Node { val: int, next: &?Node }
+
+fn get(n: &Node): int {
+    return n.val;
+}
+
+fn second(h: &Node): &Node {
+    if h.next != null {
+        return h.next;              // a checked field is a &Node
+    }
+    return h;
+}
+
+fn sum(h: &Node): int {
+    if h.next != null && h.next.next != null {
+        return h.next.next.val + get(h.next.next);
+    }
+    return 0;
+}
+```
+
+A test on a field holds until something may change the field: any function or
+method call (it may write any field it can reach, so `get(h.next)` above comes
+after `h.next.next.val`, not before), an assignment to a field of the same
+name anywhere (`o.next = null` may write the very node `h` refers to), an
+assignment to the variable the path starts from, or a write to a whole struct
+or an array element. After that, or where it was never tested, using it as a
+`&T` is `E082`, and reading through it is `E081`. Inside a `defer`, whose
+statement runs at the end of the scope, no earlier test counts. To keep a
+checked value across a call, give it a name: `immut n: &Node = h.next;`.
+
 A `&T` converts to a `&?T` by itself. A reference never turns into the value
 it refers to by itself: `r to T` copies the value out, and the copy is
 independent of the original. That holds wherever the value goes, an

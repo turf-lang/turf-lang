@@ -11,6 +11,7 @@
  */
 
 #include "frontend/Parser.h" // IsLibStdWarningLocation
+#include "sema/NullablePlace.h"
 #include "sema/TypeChecker.h"
 #include "sema/SpanLabels.h"
 
@@ -1494,12 +1495,19 @@ void TypeChecker::visitCast(CastExprAST &Node) {
       !IsLibStdWarningLocation(Node.getLoc().Filename))
     IntToPointerCastWarning(Node.getLoc(), DestTy->getName()).emit();
 
-  // `(h.next to &Node)`: NullabilityPass proves `&?T -> &T` only for a
-  // variable operand, and used to let every other operand through unchecked
-  // (a null became a `&T`). Nothing narrows a non-variable, so it is E082.
+  // `(get() to &Node)`: NullabilityPass proves `&?T -> &T` for a variable
+  // or a field path operand only. Nothing narrows any other operand, so it
+  // is E082.
+  // AN-4: a field path (`h.next to &Node`) is narrowed like a variable;
+  // NullabilityPass proves the marked operand or reports E082.
   if (OperandTy && OperandTy->isNullableReference() && DestTy &&
       ((DestTy->isReference() && !DestTy->isNullableReference()) || CopyOut) &&
-      !dynamic_cast<const VariableExprAST *>(Node.getOperand())) {
+      NullablePlace::isPlace(Node.getOperand()) &&
+      !dynamic_cast<const VariableExprAST *>(Node.getOperand()))
+    const_cast<ExprAST *>(Node.getOperand())->NeedsNonNull = true;
+  if (OperandTy && OperandTy->isNullableReference() && DestTy &&
+      ((DestTy->isReference() && !DestTy->isNullableReference()) || CopyOut) &&
+      !NullablePlace::isPlace(Node.getOperand())) {
 #ifndef TYPECHECKER_NO_ERRORS
     UnnarrowedNullableCastError(Node.getLoc(),
                                 UnnarrowedNullableCastError::NotAVariable{},

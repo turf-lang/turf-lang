@@ -1,0 +1,18 @@
+// EXPECT-DIAG: E082
+// EXPECT-DIAG: I cannot use `h.next` as a non-null reference here, because it might be `null`.
+// A check on a field holds until the next call: `clear` may write `h.next`.
+struct Node { val: int, next: &?Node }
+
+fn get(n: &Node): int { return n.val; }
+
+fn clear(h: &Node): void { h.next = null; }
+
+fn f(h: &Node): int {
+    if h.next != null {
+        clear(h);
+        return get(h.next);
+    }
+    return 0;
+}
+
+fn main(): int { return 0; }

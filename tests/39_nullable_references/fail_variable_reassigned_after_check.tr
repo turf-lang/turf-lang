@@ -1,0 +1,17 @@
+// EXPECT-DIAG: E082
+// EXPECT-DIAG: I cannot use `p` as a non-null reference here, because it might be `null`.
+// Assigning `p` after its check undoes it.
+struct Node { val: int, next: &?Node }
+
+fn get(n: &Node): int { return n.val; }
+
+fn f(h: &Node, o: &?Node): int {
+    mut p: &?Node = h;
+    if p != null {
+        p = o;
+        return get(p);
+    }
+    return 0;
+}
+
+fn main(): int { return 0; }

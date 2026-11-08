@@ -19,17 +19,20 @@ Check it first, and convert inside the check:
         return 0;
     }
 
-Often you don't need the conversion at all: inside the `if b != null { ... }`, `b` can be used directly.
+Often you don't need the conversion at all: inside the `if b != null { ... }`, `b` can be used directly, and passed, returned or stored as a `&Box` as it is.
 
-Only a variable can be checked, so only a variable can be converted. For a `&?Box` that is a field, a call result or a list element (`h.item to &Box`), store it in a variable first, check that, and convert inside the check:
+The same error is reported when a `&?Box` is used as a `&Box` without the check (`return b;` from a function that returns `&Box`, or `f(b)` for an `f` that takes one).
+
+A variable can be checked, and so can a field reached from one (`h.item`), until the next call or the next write to a field with that name:
 
     struct Holder { item: &?Box }
 
-    fn good(h: Holder): int {
-        mut b: &?Box = h.item;
-        if b != null {
-            mut safe: &Box = b to &Box;
+    fn good(h: &Holder): int {
+        if h.item != null {
+            mut safe: &Box = h.item;
             return safe.val;
         }
         return 0;
     }
+
+A `&?Box` from a call or a list element is stored in a variable first, then checked and converted.

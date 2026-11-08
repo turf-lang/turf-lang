@@ -323,14 +323,15 @@ public:
   /// Resolution proper; visitMethodCall() adds the check that needs its result.
   void visitMethodCallImpl(MethodCallExprAST &Node);
 
-  /// Reports E081 when @p Base, of type @p BaseTy, is a `&?T` that is not a
-  /// plain variable and @p Member (a field, or a method if @p IsMethod) is
-  /// reached through it: `p.next.val`, `get().val`, `list[i].val`.
-  /// NullabilityPass narrows variables only, by design, so it cannot cover any
-  /// other `&?T` base; without this check a null one is dereferenced
-  /// unchecked: it faults, or reads garbage once optimized (FREEZE §6.6: a
-  /// `&?T` "must be null-tested before use"). A variable base is left to that
-  /// pass. Returns true if it reported.
+  /// Reports E081 when @p Base, of type @p BaseTy, is a `&?T` that is neither
+  /// a variable nor a field path and @p Member (a field, or a method if
+  /// @p IsMethod) is reached through it: `get().val`, `list[i].val`.
+  /// NullabilityPass narrows variables and field paths only, so it cannot
+  /// cover any other `&?T` base; without this check a null one is
+  /// dereferenced unchecked: it faults, or reads garbage once optimized
+  /// (FREEZE §6.6: a `&?T` "must be null-tested before use"). A variable base
+  /// is left to that pass, and a field path base is marked
+  /// (ExprAST::NeedsNonNull) for it. Returns true if it reported.
   bool rejectNullableNonVariableUse(const ExprAST *Base, const TurfType *BaseTy,
                                     SourceLocation Loc, const std::string &Member,
                                     bool IsMethod);
@@ -768,11 +769,20 @@ private:
   /// literal is retyped to @p Dest.
   bool arrayLiteralWidensToNullableRefs(const ExprAST *Val, const TurfType *Dest);
 
-  /// untypedLiteralAcquiresInt32() or arrayLiteralWidensToNullableRefs():
-  /// what every type-fixing call site checks alongside typesCompatible().
+  /// AN-4: true when @p Val is a `&?T` variable or field path
+  /// (NullablePlace::isPlace) and @p Dest is the `&T` of the same pointee:
+  /// passed, returned or stored as a `&T`, it is accepted here and marked
+  /// (ExprAST::NeedsNonNull) for NullabilityPass, which proves it non-null
+  /// where it is used or reports E082.
+  bool nullablePlaceNarrows(const ExprAST *Val, const TurfType *Dest);
+
+  /// untypedLiteralAcquiresInt32(), arrayLiteralWidensToNullableRefs() or
+  /// nullablePlaceNarrows(): what every type-fixing call site checks
+  /// alongside typesCompatible().
   bool literalAcquiresType(const ExprAST *Val, const TurfType *Dest) {
     return untypedLiteralAcquiresInt32(Val, Dest) ||
-           arrayLiteralWidensToNullableRefs(Val, Dest);
+           arrayLiteralWidensToNullableRefs(Val, Dest) ||
+           nullablePlaceNarrows(Val, Dest);
   }
 
   /// If writing into @p Place would write into the by-value result

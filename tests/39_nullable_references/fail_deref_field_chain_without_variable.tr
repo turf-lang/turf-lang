@@ -1,10 +1,8 @@
 // EXPECT-DIAG: E081
-// EXPECT-DIAG: I cannot access the field `val` of this `&?Node`, which might be `null`
-// EXPECT-DIAG: I cannot access the field `val` of this `&?Node`, which might be `null`.
-// `p.next` is a `&?Node`; reading `.val` through it was never checked, because
-// NullabilityPass looked at variable bases only. With `next` null this faulted
-// at -O0 and printed garbage at -O2 (FREEZE 6.6: a `&?T` "must be null-tested
-// before use"). Found by turf-fuzz probing.
+// EXPECT-DIAG: I cannot access the field `val` of `p.next`, which might be `null` here.
+// `p.next` is a `&?Node` nothing checked; with `next` null, reading `.val`
+// through it faults at -O0 and reads garbage at -O2 (FREEZE 6.6: a `&?T`
+// "must be null-tested before use"). Found by turf-fuzz probing.
 struct Node { val: int, next: &?Node }
 
 fn main(): int {

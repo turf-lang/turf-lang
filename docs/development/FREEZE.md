@@ -203,7 +203,14 @@ otherwise each answer differently, producing an incoherent language.
 | `ptr` | yes | none | same as `T*` |
 
 - `&T` → `&?T` → `T*` widens implicitly; nothing widens back without an
-  explicit `unsafe`-gated `to`-cast.
+  explicit `to`-cast (`unsafe`-gated from `T*`), except one case:
+- A `&?T` variable or field path (`h.next`) is a `&T` as an argument, a
+  return value, an initializer or an assigned value where `NullabilityPass`
+  proves it non-null (AN-4, TDP-2-007; amended for 2.3.0). A test on a field
+  path holds until the next call, the next write to a field of that name, a
+  write to the path's root variable, or a write to a whole struct or an
+  element; nothing proved before a `defer` holds inside it. Unproven, it is
+  `E082`; read through, `E081`.
 - `self` remains a raw `StructName*` internally and remains exempt. Do not
   change this.
 

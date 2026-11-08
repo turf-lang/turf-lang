@@ -10,6 +10,7 @@
  * @copyright Copyright (c) 2026 TurfLang contributors.  Apache License.
  */
 
+#include "sema/NullablePlace.h"
 #include "sema/TypeChecker.h"
 #include "sema/SpanLabels.h"
 
@@ -1836,6 +1837,12 @@ bool TypeChecker::rejectNullableNonVariableUse(const ExprAST *Base,
     return false;
   if (dynamic_cast<const VariableExprAST *>(Base))
     return false; // flow-sensitive: NullabilityPass decides, per path
+  // AN-4: a field path (`h.next.val`) is narrowed by `h.next != null` the
+  // same way; NullabilityPass proves the marked base or reports E081.
+  if (NullablePlace::isPlace(Base)) {
+    const_cast<ExprAST *>(Base)->NeedsNonNull = true;
+    return false;
+  }
 #ifndef TYPECHECKER_NO_ERRORS
   PossibleNullDereferenceError(
       Loc, PossibleNullDereferenceError::NotAVariable{}, BaseTy->getName(), Member,

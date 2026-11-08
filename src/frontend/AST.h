@@ -42,6 +42,14 @@ public:
   bool hasSpan() const { return Span.Line > 0; }
   void setSpan(const SourceLocation &S) { Span = S; }
 
+  /// AN-4: a `&?T` variable or field path (`h.next`) the TypeChecker let
+  /// through where it must not be null -- passed, returned or stored as a
+  /// `&T`, or a field path read or called through. NullabilityPass proves it
+  /// non-null at this point or reports it (E081/E082). Set by the TypeChecker
+  /// on every check of the node; never copied by CloneExprAST(), since a
+  /// clone is checked again.
+  bool NeedsNonNull = false;
+
 protected:
   // Each node gets a unique ID when created, for diffing purposes
   uint64_t NodeID;

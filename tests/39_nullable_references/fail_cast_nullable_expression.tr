@@ -1,7 +1,7 @@
 // EXPECT-DIAG: E082
-// EXPECT-DIAG: I cannot cast this `&?Node` to a non-null reference, because it might be `null`.
-// `(h.head to &Node)`: E082 was only raised for a variable operand, so this
-// turned a null into a `&Node` with no check. Found by turf-fuzz probing.
+// EXPECT-DIAG: I cannot cast `h.head` to a non-null reference here, because it might be `null`.
+// `(h.head to &Node)` with no check on `h.head` would turn a null into a
+// `&Node`. Found by turf-fuzz probing.
 struct Node { val: int, next: &?Node }
 struct Holder { head: &?Node }
 
