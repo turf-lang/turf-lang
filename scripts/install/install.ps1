@@ -28,6 +28,9 @@
 #                     --smart only says it is not included. (env: TURF_INSTALL_SMART=1)
 #   -NoModifyPath     change no PATH; print the command to run instead
 #   -Uninstall        remove what this script installed and its PATH entry
+#   -WaitForProcess N wait (up to 60 s) for process N to exit before replacing the install:
+#                     `turf upgrade` runs this script and exits, since a running turf.exe
+#                     holds the folder it is in
 #   -Help             this text
 #
 # Environment: TURF_INSTALL_BASE_URL points at a mirror, or a directory of
@@ -51,6 +54,7 @@ param(
   [switch]$Smart,
   [switch]$NoModifyPath,
   [switch]$Uninstall,
+  [int]$WaitForProcess = 0,
   [switch]$Help
 )
 
@@ -293,6 +297,17 @@ function Invoke-Install([string]$PrefixDir, [string]$Ver, [bool]$EditPath, [bool
     $src = $srcDirs[0].FullName
 
     # ---- install ----
+    # `turf upgrade` (-WaitForProcess): the turf.exe that started this holds the folder
+    # until it exits, which it does right after starting this script.
+    if ($WaitForProcess -gt 0) {
+      $waiting = Get-Process -Id $WaitForProcess -ErrorAction SilentlyContinue
+      if ($waiting) {
+        Say "Waiting for turf (process $WaitForProcess) to exit..."
+        if (-not $waiting.WaitForExit(60000)) {
+          throw "turf (process $WaitForProcess) is still running after 60 seconds; nothing was installed. Close it and run turf upgrade again."
+        }
+      }
+    }
     New-Item -ItemType Directory -Force -Path $PrefixDir | Out-Null
     # Move the old install aside and put it back if the new one cannot be moved in, so a
     # failed upgrade (turf.exe still running locks its own files) leaves the previous
@@ -381,7 +396,7 @@ function Invoke-Main {
 
   if ($Help) {
     $self = $PSCommandPath
-    if ($self) { Get-Content -LiteralPath $self | Select-Object -First 43 | ForEach-Object { $_ -replace '^# ?', '' } }
+    if ($self) { Get-Content -LiteralPath $self | Select-Object -First 46 | ForEach-Object { $_ -replace '^# ?', '' } }
     else { Say 'install.ps1: see the comment at the top of the file (https://github.com/turf-lang/turf-lang).' }
     return
   }

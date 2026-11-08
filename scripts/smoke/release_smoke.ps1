@@ -164,6 +164,15 @@ try {
   $again = Get-Raw $testKey
   if (@($again.Split(';') | Where-Object { $_ -eq $bin }).Count -eq 1 -and $again -eq $after) { Write-Pass 'installing again leaves the same single entry' } else { Write-Fail "PATH after a second install: $again" }
 
+  # `turf upgrade` on Windows: it starts the installer with -WaitForProcess <its own pid>
+  # and exits, and the installer replaces the install only once that process is gone.
+  # A process that sleeps 5 seconds stands in for turf.exe.
+  $sleeper = Start-Process -FilePath 'powershell.exe' -ArgumentList '-NoProfile', '-Command', 'Start-Sleep -Seconds 5' -PassThru -WindowStyle Hidden
+  $r = Invoke-Installer @('-Version', $tag, '-Prefix', $prefix, '-NoModifyPath', '-WaitForProcess', "$($sleeper.Id)") $base
+  if ($r.Rc -eq 0 -and $sleeper.HasExited -and (Join-Output $r) -match "Waiting for turf \(process $($sleeper.Id)\) to exit") {
+    Write-Pass '-WaitForProcess waits for the process before replacing the install'
+  } else { Write-Fail "-WaitForProcess: rc $($r.Rc), exited $($sleeper.HasExited): $((Join-Output $r).Trim())" }
+
   # The latest-release lookup, by way of the directory install.ps1 builds it from.
   $latestPrefix = Join-Path $work 'latestprefix'
   $latestDir = Join-Path $work 'release\latest'

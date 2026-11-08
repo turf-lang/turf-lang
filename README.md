@@ -50,6 +50,8 @@ Options, `install.sh` / `install.ps1`: `--version v2.0.0` / `-Version` (a releas
 
 A piped `irm | iex` cannot take options; use the environment variables `TURF_INSTALL_VERSION`, `TURF_INSTALL_DIR` and `TURF_INSTALL_SMART=1`, or save the script and run it with the options above. Uninstalling removes exactly what the installer added and never your projects, the package cache or a model you put in `models/`.
 
+**Upgrading:** `turf upgrade` moves an install made by either installer to the latest release (`--version v2.3.0` for a given one, `--check` to only see whether there is one), keeping the plain or smart build (`--smart` / `--plain` switches). It downloads that release's own installer, checks it against the release's `checksums.txt`, and runs it on the same folder; your `PATH` and any model in `models/` stay as they are. turf never looks for a release unless you ask. A Homebrew or Scoop install is updated with `brew upgrade turf` / `scoop update turf`, which `turf upgrade` tells you.
+
 **By hand:** download the archive from the [Releases page](../../releases), unpack it anywhere, and run `bin/turf` or put `bin/` on your `PATH`. It is one folder: `bin/` (`turf`, `turfc`), `lib/` (runtime and standard library), `docs/`, `share/turf/examples/`. No `TURF_HOME` is needed: the compiler finds `lib/` relative to its own location, through symlinks too. (`TURF_HOME` is only for binaries copied out of that folder.)
 
 **From source:** see [Building from source](#building-from-source).
