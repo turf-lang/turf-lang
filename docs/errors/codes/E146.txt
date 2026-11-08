@@ -42,8 +42,8 @@ The arguments do not fit the declaration. The message says what is wrong:
 A `@test` is malformed. `@test` marks a top-level function as a test (see the
 language reference, `@test`): it takes no parameters, returns `void` or `!void`,
 and may start with an outcome (`compile_error`, `warning`, `no_warnings`,
-`panic`, `exit`, `error`). The message names the rule and the hint lists the
-outcomes:
+`panic`, `exit`, `error`), followed by options such as `timeout: 2000`. The
+message names the rule and the hint lists the outcomes and the options:
 
     @test(compile_eror, E041, "x")
     fn t(): void { }
@@ -73,9 +73,19 @@ outcomes:
     fn t(): !void { return; }
     // The error type `ParseError` has no variant `Gone`.
 
+    @test(retries: 3)
+    fn t(): void { }
+    // `@test` has no option `retries:`.
+
+    @test(timeout: 0)
+    fn t(): void { }
+    // `timeout:` takes a whole number of milliseconds greater than 0.
+
 Also rejected: an outcome that is not the first argument, a method or `main`
-as a test, an option (`@test(skip: "x")`), a second `@test` on one function,
-and an `error` outcome on a function that does not return `!void`. A `@test`
+as a test, a second `@test` on one function, an option written twice, a
+`timeout:` or `stdout:` on a `compile_error` test, and an `error` outcome on a
+function that does not return `!void`. The options are `skip:`, `timeout:`,
+`levels:`, `stdout:`, `tag:` and `serial`, after the outcome. A `@test`
 function nested in another function is E038.
 
 The fix is to correct the spelling, or to say what is actually true of the
