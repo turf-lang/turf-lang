@@ -93,6 +93,11 @@ public:
     return OriginalSnapshot.SourceCode;
   }
 
+  // The diagnostics of the program before any fix (SL-1's warning delta).
+  const std::vector<DiagnosticEngine::Diag> &getOriginalDiagnostics() const {
+    return OriginalSnapshot.Diagnostics;
+  }
+
   // Get diagnostics from the most recent validate() call
   const std::vector<turf::Diagnostic> &getValidationDiagnostics() const {
     return ValidationDiagnostics;

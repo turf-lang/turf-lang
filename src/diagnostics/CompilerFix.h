@@ -17,6 +17,7 @@
 // that the program then compiles (TestRunner.cpp).
 
 #include "diagnostics/ErrorCategory.h"
+#include "diagnostics/FixScore.h"
 
 #include <functional>
 #include <string>
@@ -43,6 +44,9 @@ struct CompilerFix {
   // The whole file after the edits, one '\n' after each line: what
   // --smart-write-fix writes.
   std::string PatchedFile;
+  // SL-1: the Fix Score of a checked fix (FixScore.h). A `plausible` fix is
+  // printed with its flags; a fix that is not valid is never kept.
+  FixScore::Facts Score;
 
   bool empty() const { return Edits.empty(); }
 };
@@ -88,8 +92,12 @@ bool build(const SLM::DiagnosticHints &Hints, int ErrorLine,
 // with that code and no error the original did not have. With `IsWarning` the
 // diagnostic being fixed is a warning (a retired spelling's `Fix:`, SY-2 …
 // SY-5), looked for among the warnings before and after.
+// With `NewWarnings`, also the warnings the patched program has on the fix's
+// lines that the original did not have there (SL-1); `Index` counts from
+// Fix.FirstLine.
 bool check(const CompilerFix &Fix, const std::string &File,
-           const std::string &Code, int ErrorLine, bool IsWarning = false);
+           const std::string &Code, int ErrorLine, bool IsWarning = false,
+           std::vector<FixScore::Warning> *NewWarnings = nullptr);
 
 // The `Fix:` block printDiag() prints under the source snippet: the
 // description, then each changed line as it reads after the fix, with the new

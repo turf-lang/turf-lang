@@ -202,7 +202,8 @@ bool build(const SLM::DiagnosticHints &Hints, int ErrorLine,
 }
 
 bool check(const CompilerFix &Fix, const std::string &File,
-           const std::string &Code, int ErrorLine, bool IsWarning) {
+           const std::string &Code, int ErrorLine, bool IsWarning,
+           std::vector<FixScore::Warning> *NewWarnings) {
   // An analysis reports through the same DiagnosticEngine, and must never
   // come back here.
   static bool Checking = false;
@@ -261,6 +262,26 @@ bool check(const CompilerFix &Fix, const std::string &File,
       return false;
     Allowed.erase(It);
   }
+  // A fix never adds or removes a line, so a warning on one of its lines
+  // after it is new unless the original had it on that line too.
+  if (NewWarnings) {
+    NewWarnings->clear();
+    std::vector<ErrorKey> Had = Base.Warnings;
+    for (const auto &D : Patched.diagnostics()) {
+      const int Line = static_cast<int>(D.Where.Line);
+      const ErrorKey K{D.Where.Path, D.Where.Line, D.Code};
+      if (D.Level != turf::Severity::Warning || Line < Fix.FirstLine ||
+          Line > Fix.LastLine || !samePath(D.Where.Path, File) ||
+          (IsWarning && sameError(K, Original)))
+        continue;
+      auto It = std::find_if(Had.begin(), Had.end(),
+                             [&](const ErrorKey &H) { return sameError(H, K); });
+      if (It != Had.end())
+        Had.erase(It);
+      else
+        NewWarnings->push_back({Line - Fix.FirstLine, static_cast<int>(D.Where.Col), D.Code});
+    }
+  }
   return true;
 }
 
@@ -297,6 +318,10 @@ std::string render(const CompilerFix &Fix) {
            "  " + std::string(Width.size(), ' ') + " │ " + Colors::RESET +
            Colors::BRIGHT_GREEN + Marks + Colors::RESET + "\n";
   }
+  // SL-1: a plausible fix says what to check before it is applied.
+  const std::string Flags = FixScore::flagLine(Fix.Score);
+  if (!Flags.empty())
+    Out += "  " + Colors::YELLOW + Flags + Colors::RESET + "\n";
   return Out;
 }
 

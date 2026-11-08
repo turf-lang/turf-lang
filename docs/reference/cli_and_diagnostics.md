@@ -337,7 +337,7 @@ A module exists in this build, but this package may not import it
 
 ### `--smart`
 
-`--smart` asks a small language model, running locally, to suggest a fix for the first error of a compile that the compiler has no [`Fix:`](#fixes) of its own for. The compiler's own fix always comes first: when an error has one, it is printed and the model is never called. The compiler checks the model's suggestion in an isolated copy of your program, and shows it only if it removes the error without introducing another; otherwise you see the compiler's own diagnostic, unchanged. Nothing runs on a clean compile, warnings never start it, and no network is involved.
+`--smart` asks a small language model, running locally, to suggest a fix for the first error of a compile that the compiler has no [`Fix:`](#fixes) of its own for. The compiler's own fix always comes first: when an error has one, it is printed and the model is never called. The compiler checks the model's suggestion in an isolated copy of your program, and shows it only if it removes the error without introducing another; otherwise you see the compiler's own diagnostic, unchanged. A suggestion that passes is then scored on what the edit does (see [How a fix is scored](#how-a-fix-is-scored)): with nothing to flag it is shown with a `Checked:` line, and with a flag it is shown with a `Check before applying:` line that says what to look at. Nothing runs on a clean compile, warnings never start it, and no network is involved.
 
 ```text
 $ turf prog.tr --smart -o prog
@@ -349,6 +349,7 @@ prog.tr (1 error)
   Explanation: The function never returns a value.
   Suggested fix:
     + 2 |     return 42;
+  Checked: it compiles, adds no warning, is a small edit, removes no call, `return` or assignment, and changes no declaration.
   ...
 ```
 
@@ -364,6 +365,8 @@ What it does with the folder:
 | no `.gguf` file | prints `note: --smart has no model to run. Put one .gguf file in <root>/models …; showing the compiler's own diagnostics.` and carries on with the compiler's diagnostics |
 | one `.gguf` file | loads it and uses it |
 | more than one | uses none of them, because it cannot know which you meant; prints `note: --smart uses exactly one model and found 2 in <root>/models (a.gguf, b.gguf). Leave one .gguf file there; showing the compiler's own diagnostics.` |
+
+`--smart=thorough` also asks the model for two more answers once one passes, sampled rather than taking the most likely answer each time (seeded, so a run repeats). Each is checked the same way. When the ones that pass all make the same program, nothing changes; when two different programs pass, the suggestion is shown as plausible with `2 different fixes pass these checks`, since the model could not settle on one. It takes about three times as long, and the extra answers are never cached.
 
 The model's suggestion is labelled `[Model Suggestion]`. `--smart-write-fix=<path>` writes the suggestion's program to that file when the compiler had no fix of its own; the compiler's own fixes are written with or without `--smart` (see [Fixes](#fixes)). A model has to load and run on the CPU, so a suggestion can take from several seconds to a minute or more per error. A suggestion the model cannot get validated after three attempts is dropped, and you see the compiler's diagnostic. The prompt design and sandbox are internals, described under [`docs/architecture/`](../architecture/).
 
@@ -418,7 +421,7 @@ $ turfc --version --json
 |---|---|
 | `interface` | `{"major", "minor"}`, as line 2 of `turfc --version`. |
 | `schemas` | `diagnostics`: the [diagnostics JSON](#diagnostics-as-json) schema version; `package_graph`: the package-graph `"format"` `--package-graph` reads. |
-| `features` | One name per addition to the interface, in order: `package-graph` (1.1), `exit-status-2` (1.2), `test` (1.3), `format-check` (1.4), `format-skip-unlexable` (1.5), `emit-obj` (1.6), `test-only` (1.7), `lint-levels` (1.8), `diagnostics-json` (1.9), `version-json` (1.10), `test-functions` (1.11), `unsafe-report` (1.12), `test-tags` (1.13), `registry-json` (1.14). Then what this build has: `smart`, `embedded-lld`, `bundled-runtime`. |
+| `features` | One name per addition to the interface, in order: `package-graph` (1.1), `exit-status-2` (1.2), `test` (1.3), `format-check` (1.4), `format-skip-unlexable` (1.5), `emit-obj` (1.6), `test-only` (1.7), `lint-levels` (1.8), `diagnostics-json` (1.9), `version-json` (1.10), `test-functions` (1.11), `unsafe-report` (1.12), `test-tags` (1.13), `registry-json` (1.14), `smart-thorough` (1.15). Then what this build has: `smart`, `embedded-lld`, `bundled-runtime`. |
 | `turfc`, `llvm`, `runtime`, `root` | As the text lines. |
 
 ### Finding the compiler
@@ -450,7 +453,7 @@ Everything above is `turf`. This section is for whoever drives the compiler dire
 
 ```text
 $ turfc help
-Usage: turfc <filename.tr> [-o output] [--emit-llvm | --emit-obj] [--smart]
+Usage: turfc <filename.tr> [-o output] [--emit-llvm | --emit-obj] [--smart[=thorough]]
          [--smart-write-fix=<path>] [--link <libname>]
          [--allow-unsafe-modules] [--stdlib-warnings] [--diagnostics=json|text]
          [--allow <code>] [--warn <code>] [--deny <code>] [--lint-set <2.N>]
@@ -487,7 +490,7 @@ linker system-cc
 smart built-in
 ```
 
-The interface covers what `turf` relies on: the flags it passes, the two-line start of `--version`, the exit statuses, and every other argument being accepted exactly as a direct invocation accepts it. A new flag or input raises the **minor**; removing a flag or changing its meaning raises the **major**. A tool that needs `--package-graph` requires interface 1.1 or later, `turfc --test` 1.3, `--emit-obj` 1.6, `turfc --test --only` 1.7, the lint-level flags 1.8, `@test` functions in `turfc --test` 1.11, `--unsafe-report` 1.12, the `@test` options with `turfc --test --tag`/`--skip-tag` 1.13, and `--registry-json` 1.14.
+The interface covers what `turf` relies on: the flags it passes, the two-line start of `--version`, the exit statuses, and every other argument being accepted exactly as a direct invocation accepts it. A new flag or input raises the **minor**; removing a flag or changing its meaning raises the **major**. A tool that needs `--package-graph` requires interface 1.1 or later, `turfc --test` 1.3, `--emit-obj` 1.6, `turfc --test --only` 1.7, the lint-level flags 1.8, `@test` functions in `turfc --test` 1.11, `--unsafe-report` 1.12, the `@test` options with `turfc --test --tag`/`--skip-tag` 1.13, `--registry-json` 1.14, and `--smart=thorough` 1.15.
 
 **Modes a tool uses:**
 
@@ -598,6 +601,8 @@ The line after `Fix:` says the edit in words: `replace 'a' with 'b'`, `remove 'p
 
 A `Fix:` is printed in every build, with no flag and no model. It is **checked** before it is shown: the compiler applies the edit to a copy of your program in memory, analyses that copy as it would any program (type checking, lint and flow analysis), and prints the fix only if the original error is gone from that line and the copy has no error your program did not already have. A fix that does not pass is not printed. Your files are never changed; to get the fixed program, use `--smart-write-fix=<path>`.
 
+An error the parser reports while it is recovering from a syntax error gets no fix: one from the syntax error's line up to the next line that starts a declaration (`fn`, `struct`, `pub` … in the first column), that line included. Such an error may exist only because of the first: an edit that makes it go away passes the check (your program already had all the other errors) and still leaves a program that does not parse. Fix the first error and compile again. An error in a later declaration is found after the parser has recovered, and gets its fix as usual.
+
 A fix is offered only where there is exactly one candidate. A misspelled name with two equally close matches gets the hint that lists both and no `Fix:`. For some errors the compiler checks several edits, such as each argument it could remove from a call with one too many, and prints a `Fix:` only when exactly one of them passes. Only errors get fixes, never warnings, never an error inside the standard library, and at most ten fixes are checked in one compile. A clean compile does no fix work.
 
 These errors can carry a `Fix:`:
@@ -618,6 +623,27 @@ These errors can carry a `Fix:`:
 | E106 | a function with no return type gets the one its body and callers compile with (`: void`, `: int`, ...) |
 | E138 | the method gets its struct's type parameters (`fn<T>`) |
 
+#### How a fix is scored
+
+A fix that passes its check is also scored on what the edit does, the compiler's own `Fix:` and a `--smart` suggestion alike. The facts are worked out from the lines the fix replaces and what replaces them:
+
+| Fact | Raised when the fix |
+|---|---|
+| Removes something | has fewer calls, asserts, `return`s or assignments than the lines it replaces (a "fix" that deletes the failing statement) |
+| Changes a declaration | changes or removes a function, struct, enum or constant declaration, or a struct field, other than the one on the error's own line |
+| Adds a warning | leaves a warning pointing into the text it changed that was not there before |
+| Rewrites a lot | changes more tokens than the error's line holds, and more than 6 |
+| Is one of several | is one of two or more different fixes that pass |
+
+A fix with none of these is **proven** (the compiler's own) or **verified** (the model's) and is shown as it is. A fix with one is **plausible**: it is shown with the flag spelled out under it, for you to check:
+
+```text
+  Fix: ...
+  Check before applying: it changes the declaration `fn total(): int`.
+```
+
+A fix that does not pass its check is never shown. [The JSON form](#diagnostics-as-json) carries the tier and the flags.
+
 Output that matches the text of diagnostics (a script, an editor extension) will see `Fix:` lines. Diagnostic wording is not part of the compatibility promise; the error codes are. A tool reads [the JSON form](#diagnostics-as-json) instead.
 
 ### Diagnostics as JSON
@@ -626,12 +652,12 @@ Output that matches the text of diagnostics (a script, an editor extension) will
 
 ```text
 $ turfc main.tr --check --diagnostics=json
-{"category":"undeclared variable","code":"E040","denied":false,"file":"main.tr","fix":{"description":"replace 'nmae' with 'name'","edits":[{"file":"main.tr","replacement":"name","span":{"end":{"column":16,"line":4},"start":{"column":12,"line":4}}}]},"hint":"Use a name from this file: `name`","label":"nothing of this name is in scope","message":"I cannot find anything named `nmae`.","related":[],"severity":"error","span":{"end":{"column":16,"line":4},"start":{"column":12,"line":4}},"title":null,"version":"1.1"}
+{"category":"undeclared variable","code":"E040","denied":false,"file":"main.tr","fix":{"description":"replace 'nmae' with 'name'","edits":[{"file":"main.tr","replacement":"name","span":{"end":{"column":16,"line":4},"start":{"column":12,"line":4}}}],"flags":[],"tier":"proven"},"hint":"Use a name from this file: `name`","label":"nothing of this name is in scope","message":"I cannot find anything named `nmae`.","related":[],"severity":"error","span":{"end":{"column":16,"line":4},"start":{"column":12,"line":4}},"title":null,"version":"1.2"}
 ```
 
 | Field | Value |
 |---|---|
-| `version` | The schema version, `"1.1"`. A minor version adds fields; a major version changes or removes one. `turfc --version --json` reports it too. Version 1.1 added `label`. |
+| `version` | The schema version, `"1.2"`. A minor version adds fields; a major version changes or removes one. `turfc --version --json` reports it too. Version 1.1 added `label`; 1.2 added the fix's `tier` and `flags`. |
 | `severity` | `"error"` or `"warning"`. A warning whose [lint level](#lint-levels) is `deny` is an `"error"`, with `denied` set. |
 | `code` | `"E040"`. Every error has one; `null` only for a warning with no code. |
 | `category` | The code's category from the registry (`"type mismatch"`), or `null`. |
@@ -642,7 +668,7 @@ $ turfc main.tr --check --diagnostics=json
 | `span` | `{"start": {"line", "column"}, "end": {"line", "column"}}`: 1-based, columns in bytes, `end` exclusive. `null` for a diagnostic about a whole file. |
 | `label` | What the primary span's underline says (`"this is an `int`"`), or `null` when `span` is. |
 | `related` | The secondary spans and `Note:` locations, every related location the text form shows: `[{"file", "span", "message"}]`. `message` is the label. |
-| `fix` | The compiler's checked [fix](#fixes) as `{"description", "edits": [{"file", "span", "replacement"}]}`, or `null`. The edits apply to the original text and never overlap. |
+| `fix` | The compiler's checked [fix](#fixes) as `{"description", "edits": [{"file", "span", "replacement"}], "tier", "flags"}`, or `null`. The edits apply to the original text and never overlap. `tier` is `"proven"` or `"plausible"` and `flags` lists, one plain sentence each, why a plausible fix needs a look (see [How a fix is scored](#how-a-fix-is-scored)); it is empty for a proven fix. |
 | `denied` | `true` for a warning made an error by `deny`. |
 
 The schema is `docs/reference/schemas/diagnostics.schema.json` (JSON Schema). `docs/reference/schemas/diagnostics-fixtures/` holds a source and its output for an error with a fix, an error with a related location and a warning; a tool's tests can read those files. `--smart`'s model suggestions are printed as text.

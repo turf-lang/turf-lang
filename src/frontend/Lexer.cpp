@@ -38,7 +38,9 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <map>
+#include <set>
 
 std::vector<std::string> SourceLines;
 std::map<std::string, std::vector<std::string>> AllSourceLines;
@@ -211,6 +213,29 @@ static std::string displayPath(const std::string &Path) {
   return Rel;
 }
 
+// SL-1: the facts of a rule fix that passed its re-check (FixScore.h). The
+// re-check is the validity gate; the rest is read from the lines the fix
+// replaces and what replaces them.
+static void scoreCompilerFix(CompilerFix &Fix, const DiagnosticEngine::Diag &D,
+                             const std::vector<std::string> &Lines,
+                             const std::vector<FixScore::Warning> &Added) {
+  FixScore::Facts &F = Fix.Score;
+  F.From = FixScore::Provenance::Rule;
+  F.Valid = true;
+  std::vector<std::string> Before(Lines.begin() + (Fix.FirstLine - 1),
+                                  Lines.begin() + Fix.LastLine);
+  F.NewWarnings = FixScore::warningsInChangedText(Before, Fix.NewLines, Added);
+  const int ErrLine = D.Loc.Line;
+  FixScore::describeEdit(F, Before, Fix.NewLines,
+                         ErrLine >= 1 && ErrLine <= static_cast<int>(Lines.size())
+                             ? Lines[ErrLine - 1]
+                             : std::string(),
+                         ErrLine - Fix.FirstLine);
+  if (std::getenv("TURF_FIX_DEBUG"))
+    std::cerr << "[fix] " << D.Code << " line " << D.Loc.Line << ": tier "
+              << FixScore::tierName(FixScore::tier(F)) << "\n";
+}
+
 // TDP-2-001: builds and checks D's fix, at most once per diagnostic and for at
 // most CompilerFixes::MaxChecksPerCompile diagnostics in one compile. Any
 // error or warning whose raise site attached fix-its, in a file the user wrote
@@ -253,14 +278,17 @@ static void checkCompilerFix(DiagnosticEngine::Diag &D) {
       if (!CompilerFixes::build(H, D.Loc.Line, Lines->second, Fix))
         continue;
       ++Checks;
-      if (!CompilerFixes::check(Fix, D.Filename, D.Code, D.Loc.Line, D.IsWarning)) {
+      std::vector<FixScore::Warning> Added;
+      if (!CompilerFixes::check(Fix, D.Filename, D.Code, D.Loc.Line, D.IsWarning, &Added)) {
         if (Debug)
           std::cerr << "[fix] " << D.Code << " line " << D.Loc.Line << ": '"
                     << Fix.Description << "' failed the re-check\n";
         continue;
       }
-      if (++Passing == 1)
+      if (++Passing == 1) {
         Passed = std::move(Fix);
+        scoreCompilerFix(Passed, D, Lines->second, Added);
+      }
     }
     if (Passing == 1)
       D.Fix = std::move(Passed);
@@ -277,12 +305,14 @@ static void checkCompilerFix(DiagnosticEngine::Diag &D) {
     return;
   }
   ++Checks;
-  if (!CompilerFixes::check(Fix, D.Filename, D.Code, D.Loc.Line, D.IsWarning)) {
+  std::vector<FixScore::Warning> Added;
+  if (!CompilerFixes::check(Fix, D.Filename, D.Code, D.Loc.Line, D.IsWarning, &Added)) {
     if (Debug)
       std::cerr << "[fix] " << D.Code << " line " << D.Loc.Line << ": '"
                 << Fix.Description << "' failed the re-check\n";
     return;
   }
+  scoreCompilerFix(Fix, D, Lines->second, Added);
   D.Fix = std::move(Fix);
 }
 
@@ -747,8 +777,11 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
         SLM::AISuggestion ai = SLM::validateAndApplySuggestion(
             Msg, Loc.Line, Hint, Related, Category, Hints, Code);
 
-        if (ai.valid && ai.confidence >= 0.8f && ai.fix_mode != "NONE") {
-          // Replace compiler message with high-confidence model suggestion.
+        // SL-1: the tier decides. A validated suggestion is `verified` or,
+        // with a flag raised, `plausible` and shown with the flag.
+        const FixScore::Tier tier = FixScore::tier(ai.score);
+        if (ai.valid && tier != FixScore::Tier::Rejected && ai.fix_mode != "NONE") {
+          // Replace the compiler's message with the model's suggestion.
           g_slmFiredThisPass = true;
           finalMessage = Colors::BOLD + Colors::BRIGHT_CYAN +
                          "[Model Suggestion]" + Colors::RESET + "  " +
@@ -768,6 +801,15 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
                             "Suggested fix:" + Colors::RESET + "\n    " +
                             patchDiff;
           }
+          if (tier == FixScore::Tier::Plausible)
+            finalMessage += "\n  " + Colors::YELLOW + FixScore::flagLine(ai.score) +
+                            Colors::RESET;
+          else
+            finalMessage += "\n  " + Colors::BRIGHT_BLACK +
+                            "Checked: it compiles, adds no warning, is a small "
+                            "edit, removes no call, `return` or assignment, and "
+                            "changes no declaration." +
+                            Colors::RESET;
 
           if (!ai.warning.empty()) {
             finalMessage +=
@@ -852,10 +894,50 @@ void DiagnosticEngine::flushAll() {
   // first errors' fixes.
   // The check analyses the program again, which saves and restores this
   // list: it works on a copy, never on an element of the list itself.
+  //
+  // SL-1: a fix is valid only when its re-check can tell. After a syntax error
+  // the parser recovers at the next top-level declaration (LEC-005); until
+  // then, the errors it reports may exist only because of the first: their
+  // fixes pass the re-check (the original had the same errors) and leave a
+  // program that still does not parse. An error from a syntax error's line
+  // up to the next line that starts a declaration (in the first column, with
+  // a word or an annotation: `fn`, `pub`, `struct`, `@test`) gets no fix. That
+  // line is included: a broken statement can still swallow its first token.
+  std::map<std::string, std::vector<std::pair<int, int>>> Recovering; // file -> [from, to]
+  auto isSyntaxError = [](const Diag &D) {
+    const ErrorCodeEntry *Row = ErrorCodes::lookupByCode(D.Code);
+    return !D.IsWarning && Row && Row->Category == SLM::ErrorCategory::SYNTAX_ERROR;
+  };
+  auto nextDeclaration = [](const Diag &D) {
+    auto Lines = AllSourceLines.find(D.Filename);
+    if (Lines == AllSourceLines.end())
+      return std::numeric_limits<int>::max();
+    for (int L = D.Loc.Line + 1; L <= static_cast<int>(Lines->second.size()); ++L) {
+      const std::string &T = Lines->second[L - 1];
+      if (!T.empty() && (std::isalpha(static_cast<unsigned char>(T[0])) || T[0] == '_' ||
+                         T[0] == '@'))
+        return L;
+    }
+    return std::numeric_limits<int>::max();
+  };
   if (CompilerFixes::Enabled)
     for (size_t I = 0; I < Diagnostics.size(); ++I) {
+      const Diag &Cur = Diagnostics[I];
+      bool InRecovery = false;
+      for (const auto &[From, To] : Recovering[Cur.Filename])
+        InRecovery = InRecovery || (static_cast<int>(Cur.Loc.Line) >= From &&
+                                    static_cast<int>(Cur.Loc.Line) <= To);
+      if (isSyntaxError(Cur))
+        Recovering[Cur.Filename].push_back({static_cast<int>(Cur.Loc.Line), nextDeclaration(Cur)});
       if (Diagnostics[I].FixChecked || !Diagnostics[I].Hints.hasFix())
         continue;
+      if (InRecovery && !Diagnostics[I].IsWarning) {
+        if (std::getenv("TURF_FIX_DEBUG"))
+          std::cerr << "[fix] " << Diagnostics[I].Code << " line " << Diagnostics[I].Loc.Line
+                    << ": the parser is recovering from a syntax error, no fix\n";
+        Diagnostics[I].FixChecked = true;
+        continue;
+      }
       Diag D = Diagnostics[I];
       checkCompilerFix(D);
       Diagnostics[I].FixChecked = true;

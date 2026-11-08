@@ -24,6 +24,7 @@
 #include "slm/SLMEngine.h"
 #include "frontend/AST.h"
 #include "llvm/ADT/SmallString.h"
+#include <set>
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/JSON.h"
 #include "llvm/Support/Path.h"
@@ -835,12 +836,10 @@ static bool sameCode(const std::string &a, const std::string &b) {
 }
 
 // Computes a structural prior for confidence from shallow, pre-sandbox signals.
-// This is NOT the final confidence — sandbox validation hasn't run yet.
-// The score is meant to estimate plausibility; finalizeConfidence() then
-// incorporates the strongest signal (empirical sandbox pass/fail) to produce
-// the true confidence used by the display gate. (In practice that makes the
-// prior matter only for logging and for ranking an unvalidated answer below
-// the display gate; keep it cheap and honest rather than clever.)
+// finalizeConfidence() then folds in the sandbox's pass or fail. The result
+// decides nothing: what is shown is decided by the Fix Score's tier (SL-1,
+// diagnostics/FixScore.h). It is printed under TURF_SLM_DEBUG, and the
+// --smart benchmark reads it for the old score's Brier score.
 //
 //   +0.4  Error category resolved by hardcoded rules (not SLM fallback)
 //   +0.2  fix_mode == MODIFY
@@ -941,14 +940,13 @@ static float computeStructuralPrior(const AISuggestion &s, ErrorCategory categor
 // it can no longer veto a proven-correct fix.
 //
 // If sandbox did not validate (NONE mode, or sandbox rejected the fix), the
-// structural prior is all we have. It is capped below the display gate (0.8)
-// so that an unvalidated fix never auto-applies.
+// structural prior is all we have, capped at 0.5.
 static float finalizeConfidence(float structuralPrior, bool sandboxValidated) {
   if (sandboxValidated) {
     // Proven-correct: clamp to at least 0.9, no longer blockable by the prior.
     return std::max(0.9f, structuralPrior);
   }
-  // Not validated: cap well below the gate so it can never auto-apply.
+  // Not validated.
   return std::min(structuralPrior, 0.5f);
 }
 
@@ -1259,6 +1257,12 @@ static void evictSlmNegativeCache(const std::string &Key) {
 // TURF_SLM_REPLAY_CACHE=1 turns that bypass off, for the one smoke test that
 // has to exercise the cache itself (scripts/slm/slm_cache_smoke.sh, which points
 // HOME at a temp directory first).
+int ExtraSamples = 0;
+// Which answer fetchSuggestion() is getting: 0 the greedy one, 1.. a
+// --smart=thorough extra one (sampled, and never read from or written to the
+// cache).
+static int SampleIndex = 0;
+
 static bool slmCacheBypassed() {
   return std::getenv("TURF_SLM_REPLAY") != nullptr &&
          std::getenv("TURF_SLM_REPLAY_CACHE") == nullptr;
@@ -1523,7 +1527,7 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
       slmCacheKey(errorCode, cleanError, promptBody, docContent);
   suggestion.cacheKey = cacheKey;
   const bool replaying = std::getenv("TURF_SLM_REPLAY") != nullptr;
-  if (previousAttemptFailed.empty() && !slmCacheBypassed()) {
+  if (previousAttemptFailed.empty() && !slmCacheBypassed() && SampleIndex == 0) {
     AISuggestion cached;
     if (readSlmCache(cacheKey, cached)) {
       if (std::getenv("TURF_SLM_DEBUG")) {
@@ -1754,7 +1758,9 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
   std::string rawResponse =
       replaying ? nextReplayResponse()
                 : SLMEngine::getInstance().generateSuggestion(
-                      systemPrompt, userPrompt, grammarStr);
+                      systemPrompt, userPrompt, grammarStr,
+                      SampleIndex > 0 ? ThoroughTemperature : 0.0f,
+                      static_cast<unsigned>(SampleIndex));
 
   if (std::getenv("TURF_SLM_DEBUG")) {
     std::cerr << "Clean Error: " << cleanError << "\n";
@@ -1831,6 +1837,48 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
 }
 
 // Sandbox-Based Suggestion Validation
+
+// SL-1: the facts of a suggestion the sandbox validated, replacing lines
+// [start, end] with `text` (FixScore.h). The model's own ambiguity is not
+// measured (Candidates = 0).
+static void scoreSuggestion(AISuggestion &s, const Sandbox &sandbox, int start,
+                            int end, const std::string &text, int errorLine) {
+  FixScore::Facts &F = s.score;
+  F = FixScore::Facts();
+  F.From = s.fromCache ? FixScore::Provenance::Cache : FixScore::Provenance::Model;
+  F.Valid = true;
+  F.Candidates = 0;
+  const std::vector<std::string> after = splitTextLines(text);
+  std::vector<std::string> before;
+  for (int i = start; i <= end && i <= static_cast<int>(SourceLines.size()); ++i)
+    before.push_back(SourceLines[i - 1]);
+  const int n = static_cast<int>(SourceLines.size());
+  FixScore::describeEdit(F, before, after,
+                         errorLine >= 1 && errorLine <= n ? SourceLines[errorLine - 1]
+                                                          : std::string(),
+                         errorLine - start);
+  // Warnings on the lines the fix wrote, less those the replaced lines had,
+  // kept when they point into the text it changed.
+  std::vector<std::string> had;
+  for (const auto &d : sandbox.getOriginalDiagnostics())
+    if (d.IsWarning && static_cast<int>(d.Loc.Line) >= start &&
+        static_cast<int>(d.Loc.Line) <= end)
+      had.push_back(d.Code);
+  const int last = start + static_cast<int>(after.size()) - 1;
+  std::vector<FixScore::Warning> added;
+  for (const auto &d : sandbox.getValidationDiagnostics()) {
+    if (d.Level != turf::Severity::Warning || static_cast<int>(d.Where.Line) < start ||
+        static_cast<int>(d.Where.Line) > last)
+      continue;
+    auto it = std::find(had.begin(), had.end(), d.Code);
+    if (it != had.end())
+      had.erase(it);
+    else
+      added.push_back({static_cast<int>(d.Where.Line) - start,
+                       static_cast<int>(d.Where.Col), d.Code});
+  }
+  F.NewWarnings = FixScore::warningsInChangedText(before, after, added);
+}
 
 bool verifySuggestion(AISuggestion &suggestion, int errorLine,
                       std::string *outDiagnostics,
@@ -1962,6 +2010,7 @@ bool verifySuggestion(AISuggestion &suggestion, int errorLine,
         joined += "\n";
       }
       suggestion.appliedSource = std::move(joined);
+      scoreSuggestion(suggestion, *sandbox, c.start, c.end, fixLine, errorLine);
       // Where it went, for renderPatchDiff() -- the lines that were really
       // replaced, which for a fuzzy copy are not the model's words.
       suggestion.patchStart = c.start;
@@ -2060,6 +2109,38 @@ std::string renderPatchDiff(const AISuggestion &s) {
   return out;
 }
 
+// SL-1, --smart=thorough: asks the model for ExtraSamples more answers to the
+// same prompt, sampled, checks each in the sandbox, and sets the validated
+// suggestion's Candidates to the number of different programs the validated
+// answers make. One means every validated answer agreed (or none other
+// validated); more makes the suggestion plausible.
+static void measureAgreement(AISuggestion &suggestion, const std::string &errorMessage,
+                             int errorLine, const std::string &hint,
+                             const std::vector<RelatedLocation> &related,
+                             ErrorCategory category,
+                             const std::string &previousAttemptFailed,
+                             const DiagnosticHints &hints, const std::string &errorCode) {
+  std::set<std::string> programs{suggestion.appliedSource};
+  int validated = 0;
+  for (int k = 1; k <= ExtraSamples; ++k) {
+    SampleIndex = k;
+    AISuggestion extra = fetchSuggestion(errorMessage, errorLine, hint, related, category,
+                                         previousAttemptFailed, hints, errorCode);
+    SampleIndex = 0;
+    if (!extra.valid || extra.fix_mode != "MODIFY")
+      continue;
+    if (verifySuggestion(extra, errorLine, nullptr, related)) {
+      ++validated;
+      programs.insert(extra.appliedSource);
+    }
+  }
+  suggestion.score.Candidates = static_cast<int>(programs.size());
+  if (std::getenv("TURF_SLM_DEBUG"))
+    std::cerr << "[SLM] thorough: " << validated << " of " << ExtraSamples
+              << " extra answers validated; " << programs.size()
+              << " different program(s)\n";
+}
+
 // High-Level Auto-Fix API
 
 // Retry cap for the loop below -- matches the roadmap wording exactly
@@ -2126,12 +2207,8 @@ AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
     bool isValid =
         verifySuggestion(suggestion, errorLine, &diagnosticText, related);
 
-    // Finalize confidence NOW — after sandbox validation.
-    // The structural prior (computed before sandbox ran) is only a prior;
-    // the sandbox result is the strongest possible signal (empirical proof).
-    // A proven-correct fix is clamped to >= 0.9; an unvalidated fix is capped
-    // at <= 0.5, making it impossible for a pre-validation guess to veto a
-    // validated fix, or to promote an unvalidated one past the display gate.
+    // The old confidence score, kept for TURF_SLM_DEBUG and the benchmark;
+    // display is decided by the Fix Score's tier (SL-1).
     suggestion.confidence = finalizeConfidence(suggestion.confidence, isValid);
 
     if (!slmCacheBypassed() && !suggestion.cacheKey.empty()) {
@@ -2150,6 +2227,9 @@ AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
 
     if (isValid) {
       suggestion.valid = true;
+      if (ExtraSamples > 0)
+        measureAgreement(suggestion, errorMessage, errorLine, hint, related,
+                         category, previousAttemptFailed, hints, errorCode);
       std::cerr << Colors::BRIGHT_GREEN << "[Sandbox] ✓ Suggestion validated"
                 << (attempt > 1 ? " (attempt " + std::to_string(attempt) + "/" +
                                       std::to_string(kMaxSlmAttempts) + ")"
@@ -2157,6 +2237,10 @@ AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
                 << Colors::RESET << "\n";
       if (std::getenv("TURF_SLM_DEBUG")) {
         std::cerr << "Final Confidence (post-sandbox): " << suggestion.confidence << "\n";
+        std::cerr << "Fix tier: " << FixScore::tierName(FixScore::tier(suggestion.score));
+        for (const auto &f : FixScore::flags(suggestion.score))
+          std::cerr << " | " << f;
+        std::cerr << "\n";
       }
       return suggestion;
     }

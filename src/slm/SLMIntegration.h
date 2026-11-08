@@ -2,6 +2,7 @@
 #define SLM_INTEGRATION_H
 
 #include "diagnostics/ErrorCategory.h" // for ErrorCategory
+#include "diagnostics/FixScore.h"     // SL-1
 #include "frontend/Lexer.h"            // for RelatedLocation
 #include <string>
 #include <vector>
@@ -57,6 +58,10 @@ struct AISuggestion {
   // answer meant a wrong one was replayed as attempt 1 on every later run.
   std::string cacheKey;
   bool fromCache = false;
+  // SL-1: the Fix Score of a validated suggestion (diagnostics/FixScore.h).
+  // Display is decided by its tier, never by `confidence`, which is kept as
+  // the old score for TURF_SLM_DEBUG and the benchmark's Brier score.
+  FixScore::Facts score;
 };
 
 // The source lines [errorLine - contextSize, errorLine + contextSize], joined
@@ -64,6 +69,15 @@ struct AISuggestion {
 // marker. Verbatim on purpose, so any line copied out of it is a valid
 // `original_code`; which line the error is on travels in the prompt's own
 // "error_line" field. Empty when no source has been loaded.
+// SL-1, --smart=thorough: how many more answers the model is asked for
+// after one validates (0 without the flag). Each is sampled (temperature
+// ThoroughTemperature, seeded by its number, so a run repeats), checked in the
+// sandbox, and never cached; the number of different programs among the
+// validated ones is the suggestion's `Candidates`.
+inline constexpr int ThoroughSamples = 2;
+inline constexpr float ThoroughTemperature = 0.7f;
+extern int ExtraSamples;
+
 std::string getCodeContext(int errorLine, int contextSize = 10);
 
 // The coloured before/after of a validated suggestion, ready to print under

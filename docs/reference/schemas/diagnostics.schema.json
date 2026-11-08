@@ -37,6 +37,8 @@
           "required": ["description", "edits"],
           "properties": {
             "description": { "type": "string" },
+            "tier": { "enum": ["proven", "plausible"], "description": "Since 1.2. The Fix Score's tier (SL-1): proven, or plausible when a flag is raised. A fix that is not valid is never reported." },
+            "flags": { "type": "array", "items": { "type": "string" }, "description": "Since 1.2. Why a plausible fix needs a look, one plain sentence each (\"it removes a call\"); empty for a proven fix." },
             "edits": {
               "type": "array",
               "minItems": 1,

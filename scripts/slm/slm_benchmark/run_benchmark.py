@@ -173,6 +173,7 @@ def judge(case, fixed_text: str):
 
 
 CONF = re.compile(r"Final Confidence \(post-sandbox(?:, capped)?\): ([0-9.]+)")
+TIER = re.compile(r"^Fix tier: (\w+)", re.M)
 
 
 def run_case(case, path, k):
@@ -199,10 +200,15 @@ def run_case(case, path, k):
         shown = model_text
         m = CONF.findall(err)
         conf = float(m[-1]) if m else None
+        t = TIER.findall(err)
+        tier = t[-1] if t else "(unknown)"
     elif rule_text is not None:
         prov, shown, conf = "rule", rule_text, 1.0
+        # A plausible fix among several shown makes the whole shown program plausible.
+        tiers = {x["fix"].get("tier", "(unknown)") for x in errors if x.get("fix")}
+        tier = "plausible" if "plausible" in tiers else "proven" if tiers == {"proven"} else "(unknown)"
     else:
-        prov, shown, conf = "none", None, None
+        prov, shown, conf, tier = "none", None, None, None
     if code is None:
         outcome = "timeout"
     elif code == 0:
@@ -215,7 +221,7 @@ def run_case(case, path, k):
     if outcome in ("timeout", "compiled"):
         utility = 0
     return dict(id=case["id"], path=path, code=case["error_code"], category=first.get("category") or "(none)",
-                kind=case["kind"], oracle=case["oracle"], provenance=prov, outcome=outcome, utility=utility,
+                kind=case["kind"], oracle=case["oracle"], provenance=prov, tier=tier, outcome=outcome, utility=utility,
                 confidence=conf, seconds=round(secs, 3), rss_mb=round(rss, 1))
 
 
@@ -264,6 +270,12 @@ def summarize(rows, boots, seed):
                           p50_s=round(pct([r["seconds"] for r in g], .5), 3),
                           p95_s=round(pct([r["seconds"] for r in g], .95), 3),
                           peak_rss_mb=max(r["rss_mb"] for r in g))
+    by_tier = {}
+    for t in sorted({r["tier"] for r in shown}):
+        g = [r for r in shown if r["tier"] == t]
+        rate = mean([r["outcome"] == "correct" for r in g])
+        tlo, thi = bootstrap([float(r["outcome"] == "correct") for r in g], boots, rng)
+        by_tier[t] = dict(shown=len(g), correct_rate=round(rate, 4), ci95=[round(tlo, 4), round(thi, 4)])
     scored = [r for r in shown if r["confidence"] is not None]
     brier = mean([(r["confidence"] - (r["outcome"] == "correct")) ** 2 for r in scored]) if scored else None
 
@@ -278,7 +290,7 @@ def summarize(rows, boots, seed):
                 false_confidence=round(mean([r["outcome"] != "correct" for r in shown]), 4) if shown else None,
                 hard_negative_silence=round(mean([r["provenance"] == "none" for r in hard]), 4) if hard else None,
                 hard_negatives=len(hard), brier=round(brier, 4) if brier is not None else None,
-                brier_cases=len(scored), by_provenance=by_prov, by_code=table("code"),
+                brier_cases=len(scored), by_tier=by_tier, by_provenance=by_prov, by_code=table("code"),
                 by_category=table("category"), by_kind=table("kind"))
 
 
@@ -310,6 +322,10 @@ def report(split, k, summaries, diff):
               f"over {diff['cases']} cases; {sep}.")
     for path, s in summaries.items():
         print(f"\n--- {path}: outcomes {s['outcomes']}")
+        print(f"{'tier':10s} {'shown':>5s} {'correct':>8s} {'95% interval':>18s}")
+        for t, v in s["by_tier"].items():
+            print(f"{t:10s} {v['shown']:5d} {100 * v['correct_rate']:7.1f}% "
+                  f"[{100 * v['ci95'][0]:5.1f}%, {100 * v['ci95'][1]:5.1f}%]")
         print(f"{'provenance':10s} {'cases':>5s} {'shown':>5s} {'correct':>8s} {'p50 s':>7s} {'p95 s':>7s} {'peak MB':>8s}")
         for p, v in s["by_provenance"].items():
             cr = "-" if v["correct_rate"] is None else f"{100 * v['correct_rate']:.1f}%"

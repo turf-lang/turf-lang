@@ -434,6 +434,7 @@ add_library(turfcore STATIC
   src/tooling/UnsafeReport.cpp
   src/frontend/Lexer.cpp
   src/diagnostics/CompilerFix.cpp
+  src/diagnostics/FixScore.cpp
   src/diagnostics/DiagnosticsJson.cpp
   src/diagnostics/LintLevels.cpp
   src/analysis/Lint.cpp

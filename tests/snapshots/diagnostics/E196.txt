@@ -7,7 +7,7 @@ tests/07_functions_modules/02_type_check_funcs.tr (1 warning)
   Hint: Write the function, or remove it. If it is meant to do nothing, put a comment in the body saying why.
 
   11 │ fn greet(): void {
-     │ ^~ here
+     │ ^~ this function's body is empty
 
   Run `turf --explain E196` for more details.
 

@@ -46,9 +46,13 @@ public:
   // has none llama.cpp knows). The system part is evaluated and cached. If it
   // matches the previously cached one, the KV cache for those tokens is reused.
   // If grammarStr is non-empty, grammar-constrained sampling is applied.
+  // Greedy with `temperature` 0 (every --smart answer); with a temperature
+  // above 0, sampled from the distribution seeded by `seed`
+  // (--smart=thorough's extra answers).
   std::string generateSuggestion(const std::string &systemPrompt,
                                  const std::string &userPrompt,
-                                 const std::string &grammarStr = "");
+                                 const std::string &grammarStr = "",
+                                 float temperature = 0.0f, unsigned seed = 0);
   void release();
 };
 

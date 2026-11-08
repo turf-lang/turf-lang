@@ -273,7 +273,16 @@ otherwise each answer differently, producing an incoherent language.
 - Every `TurfError` subclass carries its own code and category. **Deriving a
   category by matching text in the message is to be deleted**, not extended.
 - SLM: grammar-constrained output and sandbox verification are permanent.
-  An unvalidated suggestion is capped below the display gate.
+  An unvalidated suggestion is never shown. What is shown is decided by the
+  Fix Score's tier (SL-1, 2.3.0; `src/diagnostics/FixScore.h`), for the
+  compiler's own fixes and the model's alike: `proven` (a rule fix, the only
+  one that passes, no flag), `verified` (a model fix, no flag), `plausible`
+  (a flag is raised; shown with the flag spelled out), `rejected` (never
+  shown). The facts are deterministic and carry no weights; the one
+  threshold (minimality's) is fitted on the benchmark's train split. An error
+  the parser reports while recovering from a syntax error (from its line to
+  the next declaration's first line) gets no compiler fix: its re-check
+  cannot tell.
 - No new `ErrorCategory` values or `docs/slm/` category files without an
   explicit request.
 - Message text is outside the compatibility promise; codes and exit statuses

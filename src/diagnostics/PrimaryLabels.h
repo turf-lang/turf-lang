@@ -212,6 +212,9 @@ inline constexpr PrimaryLabel PrimaryLabels[] = {
     {"E192", "this converts an integer to a pointer"},
     {"E193", "nothing in this `unsafe` block needs it"},
     {"E194", "this `unsafe` block is very large"},
+    {"E195", "this loop's body is empty"},
+    {"E196", "this function's body is empty"},
+    {"E197", "this `recover` block is empty"},
 };
 
 // The label for `Code`, or nullptr for a code with no row.

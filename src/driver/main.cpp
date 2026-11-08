@@ -24,6 +24,7 @@
 #include "diagnostics/ErrorCategory.h"
 #include "diagnostics/ErrorCodes.h"
 #include "diagnostics/DiagnosticsJson.h" // DX-2: --diagnostics=json
+#include "slm/SLMIntegration.h"        // SL-1: --smart=thorough
 #include "tooling/Formatter.h"
 #include "diagnostics/LintLevels.h"
 #include "analysis/UnusedDecls.h"
@@ -156,7 +157,9 @@ static constexpr int TurfcInterfaceMajor = 1;
 // and `--test --tag <tag>` / `--skip-tag <tag>`; `turf test --tag` asks for it.
 // 1.14 (IF-3) adds `--registry-json`, the diagnostic-code registry with each
 // code's explanation; the release archive and the website's error pages read it.
-static constexpr int TurfcInterfaceMinor = 14;
+// 1.15 (SL-1) adds `--smart=thorough`: the model is asked for two more
+// samples and a fix they disagree with is shown as plausible.
+static constexpr int TurfcInterfaceMinor = 15;
 
 /// IF-1: the name of each addition to the driver interface, in the order of
 /// the history above, with the minor that added it. `turfc --version --json`
@@ -173,6 +176,7 @@ static constexpr InterfaceFeature InterfaceFeatures[] = {
     {"diagnostics-json", 9},      {"version-json", 10},
     {"test-functions", 11},       {"unsafe-report", 12},
     {"test-tags", 13},            {"registry-json", 14},
+    {"smart-thorough", 15},
 };
 
 // The exit statuses (FREEZE.md 6.21, F-CLI-1, REL-001). The split exists so a script
@@ -200,6 +204,7 @@ struct CompilerOptions {
   bool EmitLLVM = false;              // --emit-llvm: write .ll instead
   bool EmitObj = false;               // --emit-obj: write the .o, never link
   bool AIEnabled = false;             // --smart: enable SLM AI suggestions
+  bool SmartThorough = false;         // --smart=thorough: SL-1's ambiguity, from extra samples
   std::string SmartFixOutPath;        // --smart-write-fix=<path>: write the program with its shown fixes applied here: every compiler fix (TDP-2-001), or the --smart model's validated one
   bool AllowUnsafeModules = false;    // --allow-unsafe-modules: LANG-002, honor `unsafe module;` outside the install root
   bool DiagnosticsJson = false;       // --diagnostics=json: DX-2, one JSON object per diagnostic
@@ -565,7 +570,7 @@ static void handleExplainFlagIfPresent(int argc, char **argv) {
 /// no source file can be mistaken for it), and the unknown-option message
 /// below points there.
 static const char *turfcUsage() {
-  return "Usage: turfc <filename.tr> [-o output] [--emit-llvm | --emit-obj] [--smart]\n"
+  return "Usage: turfc <filename.tr> [-o output] [--emit-llvm | --emit-obj] [--smart[=thorough]]\n"
          "         [--smart-write-fix=<path>] [--link <libname>]\n"
          "         [--allow-unsafe-modules] [--stdlib-warnings] [--diagnostics=json|text]\n"
          "         [--allow <code>] [--warn <code>] [--deny <code>] [--lint-set <2.N>]\n"
@@ -598,6 +603,7 @@ static const char *turfcUsage() {
 /// as `--targt=` against `--target=`.
 static const char *const KnownOptions[] = {
     "--emit-llvm",        "--emit-obj",     "--smart",        "--smart-write-fix=",
+    "--smart=thorough",
     "--allow-unsafe-modules", "--stdlib-warnings", "--check",
     "--module",           "--version",      "--dump-ast",
     "--dump-instantiations", "--resolve",   "--dump-resolver-symbols",
@@ -695,6 +701,9 @@ static CompilerOptions parseArgs(int argc, char **argv) {
       opts.EmitObj = true;
     } else if (arg == "--smart") {
       opts.AIEnabled = true;
+    } else if (arg == "--smart=thorough") {
+      opts.AIEnabled = true;
+      opts.SmartThorough = true;
     } else if (arg.rfind("--smart-write-fix=", 0) == 0) {
       opts.SmartFixOutPath = arg.substr(std::string("--smart-write-fix=").size());
     } else if (arg == "--allow-unsafe-modules") {
@@ -1825,6 +1834,7 @@ static int runCompilerMain(int argc, char **argv) {
 
   // Set the global AI flag so DiagnosticEngine knows whether to invoke the SLM.
   g_AIEnabled = opts.AIEnabled;
+  SLM::ExtraSamples = opts.SmartThorough ? SLM::ThoroughSamples : 0;
   g_SmartFixOutPath = opts.SmartFixOutPath;
   // LANG-002: must be set before any parsing happens -- HasRawPointerCapability()
   // (ParserModule.cpp) consults it for every `unsafe module;` pragma outside

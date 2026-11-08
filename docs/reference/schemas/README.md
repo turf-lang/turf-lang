@@ -7,7 +7,7 @@ checked against the schemas by `scripts/check/diagnostics_json_check.py` in CI.
 
 | Format | Schema | Version field | Producer | Fixtures |
 |---|---|---|---|---|
-| `turfc --diagnostics=json`, one line per diagnostic | `diagnostics.schema.json` | `"version"`, `"1.1"` | turfc | `diagnostics-fixtures/` |
+| `turfc --diagnostics=json`, one line per diagnostic | `diagnostics.schema.json` | `"version"`, `"1.2"` | turfc | `diagnostics-fixtures/` |
 | `turfc --version --json`, the interface manifest | `version.schema.json` | `"interface"` and `"schemas"` | turfc | (the check runs the built compiler) |
 | `turfc --unsafe-report` | `unsafe-report.schema.json` | `"format"`, `1` | turfc | (the check builds a project) |
 | A package graph: `turfc --package-graph`'s input, `turf graph`'s output | `package-graph.schema.json` | `"format"`, `1` | turf (`turf build`, `turf test`, `turf graph`) | `package-graph-fixtures/` |

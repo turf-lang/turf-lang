@@ -46,7 +46,7 @@ CASES=(
   # The issue #267 shape: attempt 1 is genuinely wrong (no field `m`), and
   # attempt 2 is the right block. The feedback after attempt 1 must describe
   # attempt 1's own mistake, not a misplacement, and attempt 2 is what wins.
-  "method_block.wrong_line_after_retry:validated|no field named 'm'|(attempt 2/3)"
+  "method_block.wrong_line_after_retry:validated|a field named `m`|(attempt 2/3)"
   # A `:` sent as \u003a, which the old decoder left as literal text.
   "method_block.unicode_escape:validated"
   # The `>> 12 |` gutter echoed on every line of original_code and new_code.
@@ -74,7 +74,16 @@ CASES=(
   "dup_first.nearest_wins:validated|candidate [7, 7] (exact copy): validated|!candidate [11, 11]"
   # An empty original_code is an insertion right after the error line (the
   # function header, line 1).
-  "insert_line.empty_original:validated|candidate [1, 1] (insertion after the error line): validated"
+  "insert_line.empty_original:validated|candidate [1, 1] (insertion after the error line): validated|Fix tier: verified|Checked: it compiles"
+  # SL-1: a "fix" that comments out the failing statement compiles and runs,
+  # so the sandbox accepts it; the Fix Score caps it at plausible and says why.
+  # SL-1, --smart=thorough (a case named *thorough* runs with it): two more
+  # answers are sampled and checked. When they make the same program the fix
+  # stays verified; a second, different program that also passes makes it
+  # plausible.
+  "insert_line.thorough_agree:validated|thorough: 2 of 2 extra answers validated; 1 different program(s)|Fix tier: verified"
+  "insert_line.thorough_disagree:validated|thorough: 2 of 2 extra answers validated; 2 different program(s)|Fix tier: plausible|2 different fixes pass these checks"
+  "deletion.comment_out:validated|Fix tier: plausible|it removes a call and an assignment|Check before applying: it removes a call and an assignment."
   # An empty new_code is never a fix (it would delete the line), and says so.
   "method_block.empty_new_code:rejected|new_code was empty"
 
@@ -111,8 +120,10 @@ for entry in "${CASES[@]}"; do
   responses="$DIR/$name.responses"
   fixed="$TMP/$name.fixed.tr"
 
+  smart=--smart
+  case "$name" in *thorough*) smart=--smart=thorough ;; esac
   output=$(TURF_SLM_DEBUG=1 TURF_SLM_DUMP_PROMPT=1 TURF_SLM_REPLAY="$responses" \
-    "$TURF" --smart "--smart-write-fix=$fixed" "$program" 2>&1)
+    "$TURF" "$smart" "--smart-write-fix=$fixed" "$program" 2>&1)
 
   ok=1
   if [ "$expect" = "validated" ]; then

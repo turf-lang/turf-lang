@@ -7,9 +7,9 @@
 #
 # Cases (written here, so they never go stale with the corpus):
 #   typo        a misspelt name: the compiler's own fix, judged by running the
-#               fixed program (oracle asserts)              -> rules: correct
+#               fixed program (oracle asserts)              -> rules: correct, proven
 #   hard        two equally good renames (oracle abstain)   -> rules: silent
-#   replay_ok   the replayed answer fixes the program       -> model: correct
+#   replay_ok   the replayed answer fixes the program       -> model: correct, verified
 #   replay_bad  the same answer, but the program must print
 #               something it never prints                    -> model: wrong, -K
 #
@@ -44,14 +44,15 @@ python3 - "$WORK/record.json" <<'EOF'
 import json, sys
 rec = json.load(open(sys.argv[1]))
 got = {(r["path"], r["id"]): r for p in rec["cases"].values() for r in p}
-want = [("rules", "typo", "rule", "correct", 1), ("rules", "hard", "none", "none", 0),
-        ("model", "replay_ok", "model", "correct", 1), ("model", "replay_bad", "model", "wrong", -3)]
+want = [("rules", "typo", "rule", "correct", 1, "proven"), ("rules", "hard", "none", "none", 0, None),
+        ("model", "replay_ok", "model", "correct", 1, "verified"),
+        ("model", "replay_bad", "model", "wrong", -3, "verified")]
 bad = 0
-for path, id, prov, outcome, util in want:
+for path, id, prov, outcome, util, tier in want:
     r = got[(path, id)]
-    ok = (r["provenance"], r["outcome"], r["utility"]) == (prov, outcome, util)
-    print(("PASS" if ok else "FAIL") + f": {path}/{id}: {r['provenance']} {r['outcome']} {r['utility']:+g}"
-          + ("" if ok else f" (want {prov} {outcome} {util:+d})"))
+    ok = (r["provenance"], r["outcome"], r["utility"], r["tier"]) == (prov, outcome, util, tier)
+    print(("PASS" if ok else "FAIL") + f": {path}/{id}: {r['provenance']} {r['outcome']} {r['utility']:+g} {r['tier']}"
+          + ("" if ok else f" (want {prov} {outcome} {util:+d} {tier})"))
     bad += not ok
 s = rec["summary"]["rules"]
 if s["hard_negative_silence"] != 1.0:

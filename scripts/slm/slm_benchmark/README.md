@@ -74,7 +74,8 @@ The report gives, per path: the mean utility with a bootstrap 95% interval
 wrong (false confidence), the rate of silence on hard negatives, the Brier
 score of the confidence printed with each fix (a rule fix counts as 1.0, a
 model fix as its post-sandbox confidence from `TURF_SLM_DEBUG=1`), the correct
-rate and p50/p95 latency and peak RSS by provenance, and mean utility by error
+rate and p50/p95 latency and peak RSS by provenance, the correct rate by Fix
+Score tier (`proven`, `verified`, `plausible`; SL-1) with a bootstrap interval, and mean utility by error
 category, code and mutation kind. With both paths it adds model − rules with
 a paired bootstrap interval, and says whether the two paths' intervals
 separate: a change is an improvement only when they do.

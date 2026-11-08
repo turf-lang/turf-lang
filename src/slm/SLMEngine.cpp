@@ -240,7 +240,8 @@ ChatPrompt formatChatPrompt(const llama_model *Model, const std::string &System,
  */
 std::string SLMEngine::generateSuggestion(const std::string &systemPrompt,
                                           const std::string &userPrompt,
-                                          const std::string &grammarStr) {
+                                          const std::string &grammarStr,
+                                          float temperature, unsigned seed) {
   if (!ctx)
     return "";
 
@@ -436,7 +437,14 @@ std::string SLMEngine::generateSuggestion(const std::string &systemPrompt,
   // Greedy decoding: pick the highest-probability token deterministically.
   // Note: a temperature sampler is intentionally NOT chained before greedy —
   // temperature only reshapes the distribution and has zero effect on argmax.
-  llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
+  // --smart=thorough's extra answers are sampled instead, from a fixed seed
+  // so the same run gives the same answers.
+  if (temperature > 0.0f) {
+    llama_sampler_chain_add(sampler, llama_sampler_init_temp(temperature));
+    llama_sampler_chain_add(sampler, llama_sampler_init_dist(seed));
+  } else {
+    llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
+  }
 
   std::string result;
   // Longest stop token is "<|im_start|>" (13 chars). Keep a trailing window
