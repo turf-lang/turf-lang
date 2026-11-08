@@ -337,7 +337,7 @@ A module exists in this build, but this package may not import it
 
 ### `--smart`
 
-`--smart` asks a small language model, running locally, to suggest a fix for the first error of a compile that the compiler has no [`Fix:`](#fixes) of its own for. The compiler's own fix always comes first: when an error has one, it is printed and the model is never called. The compiler checks the model's suggestion in an isolated copy of your program, and shows it only if it removes the error without introducing another; otherwise you see the compiler's own diagnostic, unchanged. A suggestion that passes is then scored on what the edit does (see [How a fix is scored](#how-a-fix-is-scored)): with nothing to flag it is shown with a `Checked:` line, and with a flag it is shown with a `Check before applying:` line that says what to look at. Nothing runs on a clean compile, warnings never start it, and no network is involved.
+`--smart` asks a small language model, running locally, to suggest a fix for the first error of a compile that the compiler has no [`Fix:`](#fixes) of its own for. The compiler's own fix always comes first: when an error has one, it is printed and the model is never called. The compiler checks the model's suggestion in an isolated copy of your program, with every check a compile makes before it generates code (parsing, names, types, lints and the flow analyses: missing `return`, use before assignment, double free, ...), and shows it only if it removes the error without introducing another; otherwise you see the compiler's own diagnostic, unchanged. A suggestion that passes is then scored on what the edit does (see [How a fix is scored](#how-a-fix-is-scored)): with nothing to flag it is shown with a `Checked:` line, and with a flag it is shown with a `Check before applying:` line that says what to look at. Nothing runs on a clean compile, warnings never start it, and no network is involved.
 
 ```text
 $ turf prog.tr --smart -o prog
@@ -349,7 +349,7 @@ prog.tr (1 error)
   Explanation: The function never returns a value.
   Suggested fix:
     + 2 |     return 42;
-  Checked: it compiles, adds no warning, is a small edit, removes no call, `return` or assignment, and changes no declaration.
+  Checked: it compiles, adds no warning, is a small edit, removes no call, `return` or assignment, changes no declaration, and adds no `unsafe`, `extern`, system import, raw pointer or `mem::` call.
   ...
 ```
 
@@ -625,13 +625,14 @@ These errors can carry a `Fix:`:
 
 #### How a fix is scored
 
-A fix that passes its check is also scored on what the edit does, the compiler's own `Fix:` and a `--smart` suggestion alike. The facts are worked out from the lines the fix replaces and what replaces them:
+A fix that passes its check is also scored on what the edit does, the compiler's own `Fix:` and a `--smart` suggestion alike. The facts are worked out from the whole file before and after the fix, and from the same analysis of each:
 
 | Fact | Raised when the fix |
 |---|---|
-| Removes something | has fewer calls, asserts, `return`s or assignments than the lines it replaces (a "fix" that deletes the failing statement) |
-| Changes a declaration | changes or removes a function, struct, enum or constant declaration, or a struct field, other than the one on the error's own line |
-| Adds a warning | leaves a warning pointing into the text it changed that was not there before |
+| Removes something | leaves fewer calls, asserts, `return`s or assignments in the file (a "fix" that deletes the failing statement) |
+| Changes a declaration | changes or removes a function, struct, enum or constant declaration, or a struct field, other than the one on the error's own line; or adds a `pub` item, or a field to a struct the program already had |
+| Reaches further | adds `unsafe`, an `extern` declaration, a raw pointer or a `mem::` call, or imports `os`, `fs`, `http` or `io` when the program did not |
+| Adds a warning | leaves a warning the program did not have: one pointing into the text it changed, or one elsewhere, in a function that had no error before the fix or naming something the fix removed or added (`it adds warning E163 (line 7)`) |
 | Rewrites a lot | changes more tokens than the error's line holds, and more than 6 |
 | Is one of several | is one of two or more different fixes that pass |
 

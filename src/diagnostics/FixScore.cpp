@@ -1,8 +1,11 @@
 // SL-1: the Fix Score (FixScore.h).
 #include "diagnostics/FixScore.h"
+#include "diagnostics/ErrorCodes.h"
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
+#include <iterator>
 #include <set>
 
 namespace FixScore {
@@ -135,6 +138,150 @@ std::string joinWords(const std::vector<std::string> &Parts) {
   return Out;
 }
 
+std::string joinLines(const std::vector<std::string> &Lines) {
+  std::string Out;
+  for (const auto &L : Lines)
+    Out += L + "\n";
+  return Out;
+}
+
+// A declaration as describeProgram() compares them. `Owner` is the struct a
+// field line belongs to ("" for anything else).
+struct Decl {
+  std::string Text, Owner;
+  int Line = 0;
+  bool Pub = false;
+};
+
+std::string shownDeclaration(const std::string &Line) {
+  std::string Shown = squeeze(Line);
+  if (!Shown.empty() && Shown.back() == '{')
+    Shown.pop_back();
+  while (!Shown.empty() && (Shown.back() == ' ' || Shown.back() == ','))
+    Shown.pop_back();
+  return Shown;
+}
+
+// The declarations of a file, line by line: function, struct, enum and
+// constant headers, and the field lines of a struct's body. A line is taken
+// for a field when it has the `name: type` shape with no `;`, `=` or `(` (a
+// statement has one of them) and sits directly in a struct's braces.
+std::vector<Decl> declarations(const std::vector<std::string> &Lines) {
+  std::vector<Decl> Out;
+  int Depth = 0;
+  std::vector<std::pair<int, std::string>> Structs; // body depth, name
+  for (size_t I = 0; I < Lines.size(); ++I) {
+    const auto T = tokenize(Lines[I]);
+    const bool InStruct = !Structs.empty() && Structs.back().first == Depth;
+    const bool FieldShape = std::find(T.begin(), T.end(), ";") == T.end() &&
+                            std::find(T.begin(), T.end(), "=") == T.end() &&
+                            std::find(T.begin(), T.end(), "(") == T.end();
+    if (isDeclaration(T, InStruct && FieldShape))
+      Out.push_back({shownDeclaration(Lines[I]), InStruct ? Structs.back().second : "",
+                     static_cast<int>(I) + 1, !T.empty() && T[0] == "pub"});
+    // A struct header opens a body at its first `{`.
+    std::string StructName;
+    size_t K = 0;
+    while (K < T.size() && T[K] == "pub")
+      ++K;
+    if (K + 1 < T.size() && T[K] == "struct")
+      StructName = T[K + 1];
+    bool Opened = false;
+    for (const auto &Tok : T) {
+      if (Tok == "{") {
+        ++Depth;
+        if (!StructName.empty() && !Opened)
+          Structs.push_back({Depth, StructName});
+        Opened = true;
+      } else if (Tok == "}") {
+        if (!Structs.empty() && Structs.back().first == Depth)
+          Structs.pop_back();
+        Depth = std::max(0, Depth - 1);
+      }
+    }
+  }
+  return Out;
+}
+
+// The top-level item each line belongs to: [first line, next item's first
+// line), as the analysis bounds a function. An item starts at depth 0 with a
+// line whose first character is not a blank or `}` and that is not a comment.
+std::vector<std::pair<int, int>> topLevelItems(const std::vector<std::string> &Lines) {
+  std::vector<int> Starts;
+  int Depth = 0;
+  for (size_t I = 0; I < Lines.size(); ++I) {
+    const std::string &L = Lines[I];
+    const auto T = tokenize(L);
+    if (Depth == 0 && !T.empty() && !L.empty() && !std::isspace(static_cast<unsigned char>(L[0])) &&
+        L[0] != '}')
+      Starts.push_back(static_cast<int>(I) + 1);
+    for (const auto &Tok : T)
+      Depth = Tok == "{" ? Depth + 1 : Tok == "}" ? std::max(0, Depth - 1) : Depth;
+  }
+  std::vector<std::pair<int, int>> Out;
+  for (size_t I = 0; I < Starts.size(); ++I)
+    Out.push_back({Starts[I], I + 1 < Starts.size() ? Starts[I + 1]
+                                                    : static_cast<int>(Lines.size()) + 1});
+  return Out;
+}
+
+// What a program reaches for (capabilityDiff()).
+struct Reach {
+  int Unsafe = 0, Extern = 0, RawPointers = 0, MemCalls = 0;
+  std::set<std::string> Imports; // the first word of each `import`
+};
+
+Reach reachOf(const std::vector<std::string> &Lines) {
+  static const std::set<std::string> AfterPointer = {")", ",", ";", "=", ">",
+                                                     "{", "]", "*"};
+  Reach R;
+  const auto T = tokenize(joinLines(Lines));
+  for (size_t I = 0; I < T.size(); ++I) {
+    const std::string &Tok = T[I];
+    const std::string Prev = I > 0 ? T[I - 1] : "";
+    const std::string Next = I + 1 < T.size() ? T[I + 1] : "";
+    if (Tok == "unsafe")
+      ++R.Unsafe;
+    else if (Tok == "extern")
+      ++R.Extern;
+    else if (Tok == "import" && !Next.empty() && identStart(Next[0]))
+      R.Imports.insert(Next);
+    else if (Tok == "mem" && Next == "::")
+      ++R.MemCalls;
+    // `ptr` written as a type, or a type followed by `*` (`int*`, `Box<T>*`)
+    // where a product would have an operand next.
+    else if ((Tok == "ptr" && (Prev == ":" || Prev == "->" || Prev == "<")) ||
+             (Tok == "*" && !Prev.empty() && (identChar(Prev.back()) || Prev == ">") &&
+              (Next.empty() || AfterPointer.count(Next))))
+      ++R.RawPointers;
+  }
+  return R;
+}
+
+// The words between backticks in a diagnostic's message.
+std::set<std::string> quotedWords(const std::string &Message) {
+  std::set<std::string> Out;
+  size_t At = 0;
+  while ((At = Message.find('`', At)) != std::string::npos) {
+    const size_t Close = Message.find('`', At + 1);
+    if (Close == std::string::npos)
+      break;
+    for (const auto &T : tokenize(Message.substr(At + 1, Close - At - 1)))
+      if (identStart(T[0]))
+        Out.insert(T);
+    At = Close + 1;
+  }
+  return Out;
+}
+
+std::set<std::string> words(const std::vector<std::string> &Lines) {
+  std::set<std::string> Out;
+  for (const auto &T : tokenize(joinLines(Lines)))
+    if (identStart(T[0]))
+      Out.insert(T);
+  return Out;
+}
+
 } // namespace
 
 std::vector<std::string> tokenize(const std::string &Text) {
@@ -178,58 +325,12 @@ std::vector<std::string> tokenize(const std::string &Text) {
 
 void describeEdit(Facts &F, const std::vector<std::string> &Before,
                   const std::vector<std::string> &After,
-                  const std::string &ErrorLine, int ErrorIndex) {
-  std::string B, A;
-  for (const auto &L : Before)
-    B += L + "\n";
-  for (const auto &L : After)
-    A += L + "\n";
-  const auto BT = tokenize(B), AT = tokenize(A);
+                  const std::string &ErrorLine) {
+  const auto BT = tokenize(joinLines(Before)), AT = tokenize(joinLines(After));
   F.TokenDistance = editDistance(BT, AT);
   F.LinesTouched = static_cast<int>(std::max(Before.size(), After.size()));
   F.SpanTokens = std::max<int>(1, static_cast<int>(tokenize(ErrorLine).size()));
   F.Wide = F.TokenDistance > std::max(kWideFloor, static_cast<int>(kWideRatio * F.SpanTokens));
-
-  const Counts Was = count(BT), Is = count(AT);
-  F.Lost.clear();
-  if (Is.Asserts < Was.Asserts)
-    F.Lost.push_back("an assert");
-  if (Is.Calls - Is.Asserts < Was.Calls - Was.Asserts)
-    F.Lost.push_back("a call");
-  if (Is.Returns < Was.Returns)
-    F.Lost.push_back("a `return`");
-  if (Is.Assignments < Was.Assignments)
-    F.Lost.push_back("an assignment");
-
-  // A declaration among the replaced lines that does not read the same among
-  // the new ones. A replaced line is taken for a struct field when it has the
-  // `name: type` shape with no `;`, `=` or `(` (a statement has one of them).
-  std::multiset<std::string> Now;
-  for (const auto &L : After)
-    Now.insert(squeeze(L));
-  F.SurfaceChanges.clear();
-  for (size_t I = 0; I < Before.size(); ++I) {
-    if (static_cast<int>(I) == ErrorIndex)
-      continue;
-    const std::string &L = Before[I];
-    const auto T = tokenize(L);
-    const bool Field = std::find(T.begin(), T.end(), ";") == T.end() &&
-                       std::find(T.begin(), T.end(), "=") == T.end() &&
-                       std::find(T.begin(), T.end(), "(") == T.end();
-    if (!isDeclaration(T, Field))
-      continue;
-    auto It = Now.find(squeeze(L));
-    if (It != Now.end()) {
-      Now.erase(It);
-      continue;
-    }
-    std::string Shown = squeeze(L);
-    if (!Shown.empty() && Shown.back() == '{')
-      Shown.pop_back();
-    while (!Shown.empty() && (Shown.back() == ' ' || Shown.back() == ','))
-      Shown.pop_back();
-    F.SurfaceChanges.push_back(Shown);
-  }
 }
 
 std::vector<std::string> warningsInChangedText(const std::vector<std::string> &Before,
@@ -260,14 +361,194 @@ std::vector<std::string> warningsInChangedText(const std::vector<std::string> &B
   return Out;
 }
 
+std::vector<std::string> capabilityDiff(const std::vector<std::string> &Before,
+                                        const std::vector<std::string> &After) {
+  static const char *System[] = {"os", "fs", "http", "io"};
+  const Reach Was = reachOf(Before), Is = reachOf(After);
+  std::vector<std::string> Out;
+  if (Is.Unsafe > Was.Unsafe)
+    Out.push_back("it adds `unsafe`");
+  if (Is.Extern > Was.Extern)
+    Out.push_back("it adds an `extern` declaration");
+  for (const char *M : System)
+    if (Is.Imports.count(M) && !Was.Imports.count(M))
+      Out.push_back(std::string("it imports `") + M + "`");
+  if (Is.RawPointers > Was.RawPointers)
+    Out.push_back("it adds a raw pointer");
+  if (Is.MemCalls > Was.MemCalls)
+    Out.push_back("it adds a `mem::` call");
+  return Out;
+}
+
+void describeProgram(Facts &F, const Program &P) {
+  const int NB = static_cast<int>(P.Before.size());
+  const int NA = static_cast<int>(P.After.size());
+  const int Replaced = P.End - P.Start + 1;
+  const int Written = NA - NB + Replaced;
+  if (P.Start < 1 || P.End < P.Start || P.End > NB || Written < 0)
+    return;
+  const std::vector<std::string> SpanB(P.Before.begin() + (P.Start - 1),
+                                       P.Before.begin() + P.End);
+  const std::vector<std::string> SpanA(P.After.begin() + (P.Start - 1),
+                                       P.After.begin() + (P.Start - 1 + Written));
+  describeEdit(F, SpanB, SpanA,
+               P.ErrorLine >= 1 && P.ErrorLine <= NB ? P.Before[P.ErrorLine - 1]
+                                                     : std::string());
+
+  // Deletion, over the whole file.
+  const Counts Was = count(tokenize(joinLines(P.Before)));
+  const Counts Is = count(tokenize(joinLines(P.After)));
+  F.Lost.clear();
+  if (Is.Asserts < Was.Asserts)
+    F.Lost.push_back("an assert");
+  if (Is.Calls - Is.Asserts < Was.Calls - Was.Asserts)
+    F.Lost.push_back("a call");
+  if (Is.Returns < Was.Returns)
+    F.Lost.push_back("a `return`");
+  if (Is.Assignments < Was.Assignments)
+    F.Lost.push_back("an assignment");
+
+  // API surface: a declaration that does not read the same after the fix, and
+  // a `pub` item or a field of an existing struct the fix adds. The
+  // declaration on the error's line may change; what it became is not an
+  // addition either.
+  const auto DB = declarations(P.Before), DA = declarations(P.After);
+  auto key = [](const Decl &D) { return D.Owner + "\x1f" + D.Text; };
+  std::multiset<std::string> Now, Had;
+  for (const auto &D : DA)
+    Now.insert(key(D));
+  std::set<std::string> Structs;
+  for (const auto &D : DB) {
+    Had.insert(key(D));
+    if (D.Owner.empty()) {
+      const auto T = tokenize(D.Text);
+      for (size_t I = 0; I + 1 < T.size(); ++I)
+        if (T[I] == "struct")
+          Structs.insert(T[I + 1]);
+    }
+  }
+  F.SurfaceChanges.clear();
+  bool ErrorDeclChanged = false;
+  for (const auto &D : DB) {
+    auto It = Now.find(key(D));
+    if (It != Now.end()) {
+      Now.erase(It);
+      continue;
+    }
+    if (D.Line == P.ErrorLine)
+      ErrorDeclChanged = true;
+    else
+      F.SurfaceChanges.push_back(D.Text);
+  }
+  std::vector<Decl> Added;
+  // The error's line as the fix wrote it (same offset into the written
+  // lines): a declaration there is the error's own, whatever it was before
+  // (`export immut` -> `pub immut`).
+  const int ErrorLineAfter = P.ErrorLine >= P.Start && P.ErrorLine <= P.End &&
+                                     P.ErrorLine - P.Start < Written
+                                 ? P.ErrorLine
+                                 : -1;
+  for (const auto &D : DA) {
+    auto It = Had.find(key(D));
+    if (It != Had.end())
+      Had.erase(It);
+    else if (D.Line != ErrorLineAfter)
+      Added.push_back(D);
+  }
+  if (ErrorDeclChanged && !Added.empty()) {
+    auto Nearest = std::min_element(Added.begin(), Added.end(), [&](const Decl &A, const Decl &B) {
+      return std::abs(A.Line - P.ErrorLine) < std::abs(B.Line - P.ErrorLine);
+    });
+    Added.erase(Nearest);
+  }
+  F.SurfaceAdded.clear();
+  for (const auto &D : Added) {
+    if (!D.Owner.empty() && Structs.count(D.Owner))
+      F.SurfaceAdded.push_back("it adds the field `" + D.Text + "` to `" + D.Owner + "`");
+    else if (D.Owner.empty() && D.Pub)
+      F.SurfaceAdded.push_back("it adds the public declaration `" + D.Text + "`");
+  }
+
+  F.Capabilities = capabilityDiff(P.Before, P.After);
+
+  // The warning delta. In the text the fix wrote: SL-1's rule.
+  const int FirstNew = P.Start, LastNew = P.Start + Written - 1;
+  std::vector<std::string> HadHere;
+  for (const auto &D : P.BeforeDiags)
+    if (!D.Error && D.Line >= P.Start && D.Line <= P.End)
+      HadHere.push_back(D.Code);
+  std::vector<Warning> AddedHere;
+  for (const auto &D : P.AfterDiags) {
+    if (D.Error || D.Line < FirstNew || D.Line > LastNew)
+      continue;
+    auto It = std::find(HadHere.begin(), HadHere.end(), D.Code);
+    if (It != HadHere.end())
+      HadHere.erase(It);
+    else
+      AddedHere.push_back({D.Line - FirstNew, D.Col, D.Code});
+  }
+  F.NewWarnings = warningsInChangedText(SpanB, SpanA, AddedHere);
+
+  // Elsewhere: a warning the original did not have on the same line (lines
+  // after the fix are moved back by what it added). The original's analysis
+  // skipped every function with an error in it, and every flow check after a
+  // syntax error, so a warning there counts only when it names a word the fix
+  // removed or added.
+  bool SyntaxError = false;
+  std::vector<int> ErrorLines;
+  for (const auto &D : P.BeforeDiags)
+    if (D.Error) {
+      ErrorLines.push_back(D.Line);
+      const ErrorCodeEntry *Row = ErrorCodes::lookupByCode(D.Code);
+      SyntaxError |= Row && Row->Category == SLM::ErrorCategory::SYNTAX_ERROR;
+    }
+  const auto Items = topLevelItems(P.Before);
+  auto analysedInFull = [&](int Line) {
+    if (SyntaxError)
+      return false;
+    for (const auto &[From, To] : Items)
+      if (Line >= From && Line < To)
+        return std::none_of(ErrorLines.begin(), ErrorLines.end(),
+                            [&](int E) { return E >= From && E < To; });
+    return true;
+  };
+  std::set<std::string> Touched;
+  {
+    const auto WB = words(SpanB), WA = words(SpanA);
+    std::set_symmetric_difference(WB.begin(), WB.end(), WA.begin(), WA.end(),
+                                  std::inserter(Touched, Touched.end()));
+  }
+  std::multiset<std::pair<int, std::string>> HadElsewhere;
+  for (const auto &D : P.BeforeDiags)
+    if (!D.Error)
+      HadElsewhere.insert({D.Line, D.Code});
+  const int Shift = Written - Replaced;
+  for (const auto &D : P.AfterDiags) {
+    if (D.Error || (D.Line >= FirstNew && D.Line <= LastNew))
+      continue;
+    const int Was = D.Line < P.Start ? D.Line : D.Line - Shift;
+    auto It = HadElsewhere.find({Was, D.Code});
+    if (It != HadElsewhere.end()) {
+      HadElsewhere.erase(It);
+      continue;
+    }
+    bool Named = false;
+    for (const auto &W : quotedWords(D.Message))
+      Named |= Touched.count(W) > 0;
+    if (Named || analysedInFull(Was))
+      F.NewWarnings.push_back((D.Code.empty() ? std::string("a warning") : D.Code) +
+                              " (line " + std::to_string(D.Line) + ")");
+  }
+}
+
 std::vector<std::string> flags(const Facts &F) {
   std::vector<std::string> Out;
   if (!F.Lost.empty())
     Out.push_back("it removes " + joinWords(F.Lost));
   for (const auto &S : F.SurfaceChanges)
     Out.push_back("it changes the declaration `" + S + "`");
-  if (!F.Capability.empty())
-    Out.push_back(F.Capability);
+  Out.insert(Out.end(), F.SurfaceAdded.begin(), F.SurfaceAdded.end());
+  Out.insert(Out.end(), F.Capabilities.begin(), F.Capabilities.end());
   if (!F.NewWarnings.empty())
     Out.push_back(std::string("it adds warning") + (F.NewWarnings.size() > 1 ? "s " : " ") +
                   joinWords(F.NewWarnings));

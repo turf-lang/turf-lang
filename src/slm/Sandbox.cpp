@@ -18,16 +18,25 @@
 #include "slm/Sandbox.h"
 #include "frontend/ASTChildWalker.h" // CollectAllNodeIDsInternal()
 #include "codegen/Codegen.h"
+#include "diagnostics/CompilerFix.h"
 #include "diagnostics/Colors.h"
 #include "frontend/Lexer.h"
 #include "analysis/Lint.h"
 #include "frontend/Parser.h"
 #include "slm/SLMIntegration.h"
 #include "turf/Analysis.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Path.h"
+#include "llvm/Support/Program.h"
+#include "llvm/Support/raw_ostream.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <cctype>
 #include <cstring>
+#include <fstream>
+#include <optional>
+#include <unistd.h>
 #include <iostream>
 #include <regex>
 #include <set>
@@ -101,33 +110,122 @@ static std::string joinSourceLines(const std::vector<std::string> &source) {
   return joined;
 }
 
-// Runs the real semantic pipeline (parse -> resolve -> typecheck, plus the
-// built-in Linter a real compile runs during Codegen -- shadowing/
-// unreachable-code/void-assignment/etc.) over `source` through the query
+SandboxDepth sandboxDepth() {
+  static const SandboxDepth Depth = [] {
+    const char *E = std::getenv("TURF_SLM_SANDBOX_DEPTH");
+    if (E && (std::strcmp(E, "frontend") == 0 || std::strcmp(E, "front-end") == 0))
+      return SandboxDepth::FrontEnd;
+    if (E && std::strcmp(E, "codegen") == 0)
+      return SandboxDepth::Codegen;
+    return SandboxDepth::Analysis;
+  }();
+  return Depth;
+}
+
+const char *sandboxDepthName(SandboxDepth D) {
+  switch (D) {
+  case SandboxDepth::FrontEnd:
+    return "front end";
+  case SandboxDepth::Codegen:
+    return "codegen";
+  case SandboxDepth::Analysis:
+    break;
+  }
+  return "analysis";
+}
+
+// SandboxDepth::Codegen: compiles `sourceLines` as `asIfPath` would be, to
+// LLVM IR in a child compiler (Codegen and the module verifier, no linking,
+// nothing run). True when it compiles; otherwise `why` holds the child's
+// first lines of output. A copy that cannot be written next to the file
+// (a read-only directory) is not checked, and says so under TURF_SLM_DEBUG.
+static bool codegenRecheck(const std::vector<std::string> &sourceLines,
+                           const std::string &asIfPath, std::string &why) {
+  namespace fs = llvm::sys::fs;
+  llvm::SmallString<256> Dir(asIfPath);
+  llvm::sys::path::remove_filename(Dir);
+  if (Dir.empty())
+    Dir = ".";
+  llvm::SmallString<256> Copy(Dir);
+  llvm::sys::path::append(Copy, ".turf-smart-check-%%%%%%.tr");
+  int FD = -1;
+  llvm::SmallString<256> CopyPath;
+  if (fs::createUniqueFile(Copy, FD, CopyPath)) {
+    if (std::getenv("TURF_SLM_DEBUG"))
+      std::cerr << "[Sandbox] codegen recheck skipped: cannot write next to "
+                << asIfPath << "\n";
+    return true;
+  }
+  {
+    llvm::raw_fd_ostream Out(FD, /*shouldClose=*/true);
+    Out << joinSourceLines(sourceLines);
+  }
+  llvm::SmallString<256> Log, IR;
+  if (fs::createTemporaryFile("turf-smart-check", "log", Log)) {
+    (void)fs::remove(CopyPath);
+    if (std::getenv("TURF_SLM_DEBUG"))
+      std::cerr << "[Sandbox] codegen recheck skipped: no temporary file\n";
+    return true;
+  }
+  // The IR goes to a temporary file (the compiler appends `.ll` to -o), read
+  // by nobody and removed below.
+  llvm::sys::path::system_temp_directory(/*ErasedOnReboot=*/true, IR);
+  llvm::sys::path::append(IR, "turf-smart-check-" + std::to_string(::getpid()));
+  std::vector<std::string> Args = {CompilerExecutablePath, std::string(CopyPath), "--emit-llvm",
+                                   "-O0", "-o", std::string(IR)};
+  if (!CompilerFixes::PackageGraphFile.empty()) {
+    Args.push_back("--package-graph");
+    Args.push_back(CompilerFixes::PackageGraphFile);
+  }
+  if (g_AllowUnsafeModules)
+    Args.push_back("--allow-unsafe-modules");
+  std::vector<llvm::StringRef> Refs(Args.begin(), Args.end());
+  std::optional<llvm::StringRef> Redirects[] = {llvm::StringRef(""), llvm::StringRef(Log),
+                                                llvm::StringRef(Log)};
+  const int Status = llvm::sys::ExecuteAndWait(CompilerExecutablePath, Refs, std::nullopt,
+                                               Redirects, /*SecondsToWait=*/60);
+  (void)fs::remove(CopyPath);
+  (void)fs::remove(IR + ".ll");
+  if (Status != 0) {
+    std::ifstream In(std::string(Log.str()));
+    std::string Line;
+    for (int I = 0; I < 6 && std::getline(In, Line); ++I)
+      why += (why.empty() ? "" : "\n") + Line;
+    if (why.empty())
+      why = "the compiler stopped with status " + std::to_string(Status);
+  }
+  (void)fs::remove(Log);
+  return Status == 0;
+}
+
+// Runs the semantic pipeline (parse -> resolve -> typecheck -> lint, and at
+// the analysis depth the flow analyses) over `sourceLines` through the query
 // facade (include/turf/Analysis.h), which owns every save/restore of global
 // compiler state this needs. That matters more here than for any other
 // caller: this runs from inside DiagnosticEngine::add() while the real
-// compile that raised the diagnostic is still mid-flight.
+// compile that raised the diagnostic is still mid-flight. Imports resolve as
+// the compile's do (its package graph, when it has one).
 //
-// This replaces what used to be TWO separate, much shallower passes here
-// (runParseOnlyPass()/runParseAndLintPass(), removed) that only ever
-// re-parsed and re-linted a fix, never re-resolved or re-typechecked it --
-// meaning a "fix" that remained syntactically valid but was semantically
-// wrong (e.g. still didn't compile per the TypeChecker, or was a byte-for-
-// byte no-op) could pass validation simply because nothing downstream of
-// the parser ever ran against it. Found via a real, reproducible case: a
-// SLM-proposed replacement_line identical to the original erroring line was
-// reported as "validated" by the old code.
+// A fix is valid when the analysis reports no error. Warnings never count
+// against it: a real compile emits a binary with warnings present, and a
+// warning is often the original program's own (a state machine with a source
+// state, a shadowed name). The Fix Score is what looks at the warnings a fix
+// adds (SL-1, SL-5).
+static turf::AnalysisResult analyzeAtDepth(const std::vector<std::string> &sourceLines,
+                                           const std::string &asIfPath) {
+  turf::AnalysisOptions Options;
+  Options.AllowUnsafeModules = g_AllowUnsafeModules;
+  Options.RunLint = true;
+  Options.RunFlowAnalysis = sandboxDepth() != SandboxDepth::FrontEnd;
+  Options.PackageGraphFile = CompilerFixes::PackageGraphFile;
+  return turf::analyze({{asIfPath, joinSourceLines(sourceLines)}}, Options);
+}
+
 static bool runFullSemanticPass(const std::vector<std::string> &sourceLines,
                                 const std::string &asIfPath,
                                 std::unique_ptr<ExprAST> &parsedASTOut,
                                 std::vector<turf::Diagnostic> &diagsOut) {
-  turf::AnalysisOptions Options;
-  Options.AllowUnsafeModules = g_AllowUnsafeModules;
-  Options.RunLint = true;
-  turf::AnalysisResult Result =
-      turf::analyze({{asIfPath, joinSourceLines(sourceLines)}}, Options);
-
+  turf::AnalysisResult Result = analyzeAtDepth(sourceLines, asIfPath);
   diagsOut = Result.diagnostics();
 
   // The user's own declarations only -- the synthetic prelude imports ahead
@@ -138,25 +236,21 @@ static bool runFullSemanticPass(const std::vector<std::string> &sourceLines,
   for (size_t i = Result.preludeImportCount(); i < Program.size(); ++i)
     UserDecls.push_back(CloneExprAST(Program[i].get()));
   parsedASTOut = std::make_unique<BlockExprAST>(std::move(UserDecls));
-
-  // A fix is "valid" when it produces no ERROR-level diagnostics. Warnings
-  // must NOT count as validation failures: they don't stop a real compile
-  // (`turf file.tr` emits the binary and exits 0 with warnings present), and
-  // a warning is frequently pre-existing in the original source rather than
-  // introduced by the fix. Counting warnings here was silently sinking
-  // otherwise-correct fixes -- found while benchmarking:
-  // fail_machine_duplicate_edge.tr's correct fix (drop the duplicate edge)
-  // re-parsed cleanly with zero errors but ONE warning ("Idle has no incoming
-  // transitions", inherent to that machine and present in the original too),
-  // and the old `diagsOut.empty()` check rejected it on that warning alone,
-  // across all 3 retry attempts. This affects any category whose valid fix
-  // legitimately still warns (shadowing, unreachable code, a state machine
-  // with a source/sink state, ...), not just this one case. The authoritative
-  // "did we make things worse" check is isOriginalErrorResolved(), which
-  // already compares ERROR lines only -- so leaving warnings in diagsOut here
-  // is correct: they stay visible to that check without falsely failing
-  // this one.
   return Result.succeeded();
+}
+
+const std::vector<turf::Diagnostic> &Sandbox::getOriginalAnalysisDiagnostics() const {
+  // One compile has one program before any fix; every candidate of every
+  // attempt compares against the same analysis of it.
+  static std::string Key;
+  static std::vector<turf::Diagnostic> Diags;
+  const std::string Text = joinSourceLines(OriginalSnapshot.SourceCode);
+  const std::string NewKey = SourceFilename + '\0' + sandboxDepthName(sandboxDepth()) + '\0' + Text;
+  if (Key != NewKey) {
+    Key = NewKey;
+    Diags = analyzeAtDepth(OriginalSnapshot.SourceCode, SourceFilename).diagnostics();
+  }
+  return Diags;
 }
 
 Sandbox::Sandbox(const std::vector<std::string> &SourceLines) {
@@ -298,6 +392,14 @@ bool Sandbox::validate() {
   // its relative imports resolve against.
   bool validationSucceeded = runFullSemanticPass(
       Snapshot.SourceCode, SourceFilename, Snapshot.AST, ValidationDiagnostics);
+  std::string CodegenWhy;
+  if (validationSucceeded && sandboxDepth() == SandboxDepth::Codegen &&
+      !codegenRecheck(Snapshot.SourceCode, SourceFilename, CodegenWhy)) {
+    validationSucceeded = false;
+    turf::Diagnostic D;
+    D.Message = "The fixed program did not compile to LLVM IR: " + CodegenWhy;
+    ValidationDiagnostics.push_back(std::move(D));
+  }
 
   // If validation succeeded, compute which AST nodes changed
   // This enables incremental semantic validation in future passes
@@ -333,12 +435,19 @@ bool Sandbox::validateIncremental() {
 
 bool Sandbox::isOriginalErrorResolved(int errorLine) const {
   // Build a set of lines that had errors before the fix (original state)
+  // The host compile's and the same-depth analysis's: an error the flow
+  // analyses find in the original, which the host compile never reached, is
+  // the original's, not the fix's.
   std::set<int> originalErrorLines;
   for (const auto &diag : OriginalSnapshot.Diagnostics) {
     if (!diag.IsWarning) {
       originalErrorLines.insert(diag.Loc.Line);
     }
   }
+  for (const auto &diag : getOriginalAnalysisDiagnostics())
+    if (diag.Level == turf::Severity::Error &&
+        (diag.Where.Path.empty() || diag.Where.Path == SourceFilename))
+      originalErrorLines.insert(static_cast<int>(diag.Where.Line));
 
   // Check that the original error at errorLine is no longer present
   for (const auto &diag : ValidationDiagnostics) {

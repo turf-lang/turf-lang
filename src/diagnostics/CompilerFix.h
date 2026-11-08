@@ -92,12 +92,12 @@ bool build(const SLM::DiagnosticHints &Hints, int ErrorLine,
 // with that code and no error the original did not have. With `IsWarning` the
 // diagnostic being fixed is a warning (a retired spelling's `Fix:`, SY-2 …
 // SY-5), looked for among the warnings before and after.
-// With `NewWarnings`, also the warnings the patched program has on the fix's
-// lines that the original did not have there (SL-1); `Index` counts from
-// Fix.FirstLine.
+// With `Scored`, also fills its BeforeDiags and AfterDiags: `File`'s
+// diagnostics in the original program's analysis and the patched one's, for
+// the Fix Score (FixScore::describeProgram(), SL-5).
 bool check(const CompilerFix &Fix, const std::string &File,
            const std::string &Code, int ErrorLine, bool IsWarning = false,
-           std::vector<FixScore::Warning> *NewWarnings = nullptr);
+           FixScore::Program *Scored = nullptr);
 
 // The `Fix:` block printDiag() prints under the source snippet: the
 // description, then each changed line as it reads after the fix, with the new

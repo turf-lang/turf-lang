@@ -214,23 +214,22 @@ static std::string displayPath(const std::string &Path) {
 }
 
 // SL-1: the facts of a rule fix that passed its re-check (FixScore.h). The
-// re-check is the validity gate; the rest is read from the lines the fix
-// replaces and what replaces them.
+// re-check is the validity gate; the rest is read from the file before and
+// after the fix and from the re-check's two analyses (SL-5).
 static void scoreCompilerFix(CompilerFix &Fix, const DiagnosticEngine::Diag &D,
                              const std::vector<std::string> &Lines,
-                             const std::vector<FixScore::Warning> &Added) {
+                             FixScore::Program &P) {
   FixScore::Facts &F = Fix.Score;
   F.From = FixScore::Provenance::Rule;
   F.Valid = true;
-  std::vector<std::string> Before(Lines.begin() + (Fix.FirstLine - 1),
-                                  Lines.begin() + Fix.LastLine);
-  F.NewWarnings = FixScore::warningsInChangedText(Before, Fix.NewLines, Added);
-  const int ErrLine = D.Loc.Line;
-  FixScore::describeEdit(F, Before, Fix.NewLines,
-                         ErrLine >= 1 && ErrLine <= static_cast<int>(Lines.size())
-                             ? Lines[ErrLine - 1]
-                             : std::string(),
-                         ErrLine - Fix.FirstLine);
+  P.Before = Lines;
+  P.After = Lines;
+  for (int L = Fix.FirstLine; L <= Fix.LastLine; ++L)
+    P.After[L - 1] = Fix.NewLines[L - Fix.FirstLine];
+  P.Start = Fix.FirstLine;
+  P.End = Fix.LastLine;
+  P.ErrorLine = D.Loc.Line;
+  FixScore::describeProgram(F, P);
   if (std::getenv("TURF_FIX_DEBUG"))
     std::cerr << "[fix] " << D.Code << " line " << D.Loc.Line << ": tier "
               << FixScore::tierName(FixScore::tier(F)) << "\n";
@@ -278,8 +277,8 @@ static void checkCompilerFix(DiagnosticEngine::Diag &D) {
       if (!CompilerFixes::build(H, D.Loc.Line, Lines->second, Fix))
         continue;
       ++Checks;
-      std::vector<FixScore::Warning> Added;
-      if (!CompilerFixes::check(Fix, D.Filename, D.Code, D.Loc.Line, D.IsWarning, &Added)) {
+      FixScore::Program Scored;
+      if (!CompilerFixes::check(Fix, D.Filename, D.Code, D.Loc.Line, D.IsWarning, &Scored)) {
         if (Debug)
           std::cerr << "[fix] " << D.Code << " line " << D.Loc.Line << ": '"
                     << Fix.Description << "' failed the re-check\n";
@@ -287,7 +286,7 @@ static void checkCompilerFix(DiagnosticEngine::Diag &D) {
       }
       if (++Passing == 1) {
         Passed = std::move(Fix);
-        scoreCompilerFix(Passed, D, Lines->second, Added);
+        scoreCompilerFix(Passed, D, Lines->second, Scored);
       }
     }
     if (Passing == 1)
@@ -305,14 +304,14 @@ static void checkCompilerFix(DiagnosticEngine::Diag &D) {
     return;
   }
   ++Checks;
-  std::vector<FixScore::Warning> Added;
-  if (!CompilerFixes::check(Fix, D.Filename, D.Code, D.Loc.Line, D.IsWarning, &Added)) {
+  FixScore::Program Scored;
+  if (!CompilerFixes::check(Fix, D.Filename, D.Code, D.Loc.Line, D.IsWarning, &Scored)) {
     if (Debug)
       std::cerr << "[fix] " << D.Code << " line " << D.Loc.Line << ": '"
                 << Fix.Description << "' failed the re-check\n";
     return;
   }
-  scoreCompilerFix(Fix, D, Lines->second, Added);
+  scoreCompilerFix(Fix, D, Lines->second, Scored);
   D.Fix = std::move(Fix);
 }
 
@@ -807,8 +806,10 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
           else
             finalMessage += "\n  " + Colors::BRIGHT_BLACK +
                             "Checked: it compiles, adds no warning, is a small "
-                            "edit, removes no call, `return` or assignment, and "
-                            "changes no declaration." +
+                            "edit, removes no call, `return` or assignment, "
+                            "changes no declaration, and adds no `unsafe`, "
+                            "`extern`, system import, raw pointer or `mem::` "
+                            "call." +
                             Colors::RESET;
 
           if (!ai.warning.empty()) {

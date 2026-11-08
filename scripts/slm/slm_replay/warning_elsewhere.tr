@@ -1,0 +1,12 @@
+fn helper(): int {
+    mut spare: int = 1;
+    return 4;
+}
+
+fn main(): int {
+    mut factor: int = 3;
+    mut total: int = helper();
+    total = total + tripple(factor);
+    printline(total);
+    return 0;
+}

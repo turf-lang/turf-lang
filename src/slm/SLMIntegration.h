@@ -62,6 +62,9 @@ struct AISuggestion {
   // Display is decided by its tier, never by `confidence`, which is kept as
   // the old score for TURF_SLM_DEBUG and the benchmark's Brier score.
   FixScore::Facts score;
+  // How far the sandbox re-checked it: "front end" or "analysis" (#363,
+  // Sandbox.h's SandboxDepth). Empty for a suggestion never sandboxed.
+  std::string sandboxDepth;
 };
 
 // The source lines [errorLine - contextSize, errorLine + contextSize], joined

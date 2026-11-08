@@ -1,0 +1,6 @@
+fn main(): int {
+    mut total: int = 2;
+    total = total + tripple(3);
+    printline(total);
+    return 0;
+}

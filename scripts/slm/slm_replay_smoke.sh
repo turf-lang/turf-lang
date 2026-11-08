@@ -46,7 +46,7 @@ CASES=(
   # The issue #267 shape: attempt 1 is genuinely wrong (no field `m`), and
   # attempt 2 is the right block. The feedback after attempt 1 must describe
   # attempt 1's own mistake, not a misplacement, and attempt 2 is what wins.
-  "method_block.wrong_line_after_retry:validated|a field named `m`|(attempt 2/3)"
+  'method_block.wrong_line_after_retry:validated|a field named `m`|(attempt 2/3)'
   # A `:` sent as \u003a, which the old decoder left as literal text.
   "method_block.unicode_escape:validated"
   # The `>> 12 |` gutter echoed on every line of original_code and new_code.
@@ -84,6 +84,22 @@ CASES=(
   "insert_line.thorough_agree:validated|thorough: 2 of 2 extra answers validated; 1 different program(s)|Fix tier: verified"
   "insert_line.thorough_disagree:validated|thorough: 2 of 2 extra answers validated; 2 different program(s)|Fix tier: plausible|2 different fixes pass these checks"
   "deletion.comment_out:validated|Fix tier: plausible|it removes a call and an assignment|Check before applying: it removes a call and an assignment."
+  # SL-5: what a fix does to the whole program. Each check can only lower the
+  # tier: these fixes all compile and run, and every one is plausible.
+  # Capability: `unsafe`, a system import, a raw pointer, a `mem::` call.
+  'capability.unsafe_block:validated|Fix tier: plausible|it adds `unsafe`'
+  'capability.import_os:validated|Fix tier: plausible|it imports `os`'
+  'capability.mem_call:validated|Fix tier: plausible|it adds `unsafe` | it adds a raw pointer | it adds a `mem::` call'
+  # API surface: a `pub` item the program did not have.
+  'capability.add_pub:validated|Fix tier: plausible|it adds the public declaration `pub fn tripple(n: int): int`'
+  # Warning delta outside the lines the fix wrote: removing the only use of
+  # `factor` leaves it unused (line 7). The helper's own unused `spare` was
+  # there before the fix and is not counted.
+  'warning_elsewhere.unused_after_fix:validated|Fix tier: plausible|it adds warning E163 (line 7)|!(line 2)'
+  # #363: the sandbox runs the flow analyses. Replacing lines 9-11 drops main's
+  # `return`, which the front end accepts and the analysis rejects (missing
+  # return); the same new_code on the error line alone passes.
+  'flow_reject.missing_return:validated|candidate [9, 11] (exact copy): rejected (depth analysis|candidate [9, 9] (error line): validated (depth analysis|Sandbox depth: analysis|Fix tier: verified'
   # An empty new_code is never a fix (it would delete the line), and says so.
   "method_block.empty_new_code:rejected|new_code was empty"
 

@@ -117,6 +117,7 @@ const std::vector<std::string> *entryLines() {
 // The original program's errors and warnings, analysed once per compile.
 struct Baseline {
   std::vector<ErrorKey> Errors, Warnings;
+  std::vector<turf::Diagnostic> All;
 };
 const Baseline &baseline() {
   static bool Done = false;
@@ -128,6 +129,7 @@ const Baseline &baseline() {
                                 checkOptions());
       B.Errors = errorsOf(R);
       B.Warnings = errorsOf(R, turf::Severity::Warning);
+      B.All = R.diagnostics();
     }
   }
   return B;
@@ -203,7 +205,7 @@ bool build(const SLM::DiagnosticHints &Hints, int ErrorLine,
 
 bool check(const CompilerFix &Fix, const std::string &File,
            const std::string &Code, int ErrorLine, bool IsWarning,
-           std::vector<FixScore::Warning> *NewWarnings) {
+           FixScore::Program *Scored) {
   // An analysis reports through the same DiagnosticEngine, and must never
   // come back here.
   static bool Checking = false;
@@ -262,25 +264,18 @@ bool check(const CompilerFix &Fix, const std::string &File,
       return false;
     Allowed.erase(It);
   }
-  // A fix never adds or removes a line, so a warning on one of its lines
-  // after it is new unless the original had it on that line too.
-  if (NewWarnings) {
-    NewWarnings->clear();
-    std::vector<ErrorKey> Had = Base.Warnings;
-    for (const auto &D : Patched.diagnostics()) {
-      const int Line = static_cast<int>(D.Where.Line);
-      const ErrorKey K{D.Where.Path, D.Where.Line, D.Code};
-      if (D.Level != turf::Severity::Warning || Line < Fix.FirstLine ||
-          Line > Fix.LastLine || !samePath(D.Where.Path, File) ||
-          (IsWarning && sameError(K, Original)))
-        continue;
-      auto It = std::find_if(Had.begin(), Had.end(),
-                             [&](const ErrorKey &H) { return sameError(H, K); });
-      if (It != Had.end())
-        Had.erase(It);
-      else
-        NewWarnings->push_back({Line - Fix.FirstLine, static_cast<int>(D.Where.Col), D.Code});
-    }
+  // SL-5: the file's diagnostics before and after, for the Fix Score.
+  if (Scored) {
+    auto collect = [&](const std::vector<turf::Diagnostic> &From,
+                       std::vector<FixScore::ProgramDiag> &To) {
+      To.clear();
+      for (const auto &D : From)
+        if (samePath(D.Where.Path, File))
+          To.push_back({static_cast<int>(D.Where.Line), static_cast<int>(D.Where.Col),
+                        D.Code, D.Message, D.Level == turf::Severity::Error});
+    };
+    collect(Base.All, Scored->BeforeDiags);
+    collect(Patched.diagnostics(), Scored->AfterDiags);
   }
   return true;
 }

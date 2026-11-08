@@ -24,6 +24,22 @@
 // 4. If valid and high confidence, commit the fix to the main state
 // 5. If invalid, discard the sandbox changes and fall back to original error
 
+// How far a candidate fix is re-checked (#363, SL-5). FrontEnd: parse,
+// resolve, type-check and lint. Analysis (the default): also the flow
+// analyses a compile runs before Codegen (missing return, use before
+// assignment, double free, unchecked nullable references, ...), so a fix the
+// front end accepts and a compile would still reject is turned down. Codegen
+// (opt-in): a candidate that passes the analysis is also compiled to LLVM IR
+// and run through the LLVM verifier, never linked or run. Codegen works on
+// the compiler's process-wide LLVM state, which the compile the sandbox runs
+// inside is still using, so this runs in a child `turfc --emit-llvm` on a
+// hidden copy written next to the file (its imports resolve as the file's
+// do) and removed straight after. TURF_SLM_SANDBOX_DEPTH=frontend|analysis|
+// codegen picks one.
+enum class SandboxDepth { FrontEnd, Analysis, Codegen };
+SandboxDepth sandboxDepth();
+const char *sandboxDepthName(SandboxDepth D);
+
 class Sandbox {
 public:
   enum class EditKind {
@@ -93,10 +109,16 @@ public:
     return OriginalSnapshot.SourceCode;
   }
 
-  // The diagnostics of the program before any fix (SL-1's warning delta).
+  // The diagnostics of the program before any fix, as the host compile
+  // reported them.
   const std::vector<DiagnosticEngine::Diag> &getOriginalDiagnostics() const {
     return OriginalSnapshot.Diagnostics;
   }
+
+  // The program before any fix, analysed exactly as validate() analyses a
+  // candidate (same depth, same options): what the Fix Score's warning delta
+  // compares against (SL-5). Analysed once per compile.
+  const std::vector<turf::Diagnostic> &getOriginalAnalysisDiagnostics() const;
 
   // Get diagnostics from the most recent validate() call
   const std::vector<turf::Diagnostic> &getValidationDiagnostics() const {

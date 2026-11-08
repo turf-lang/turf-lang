@@ -283,6 +283,12 @@ otherwise each answer differently, producing an incoherent language.
   the parser reports while recovering from a syntax error (from its line to
   the next declaration's first line) gets no compiler fix: its re-check
   cannot tell.
+  SL-5 (2.3.0): the facts are read from the whole file before and after the
+  fix and from the same analysis of each (deletion, API surface, capability,
+  warning delta); a check can only lower the tier, never reject. A model's
+  candidate is re-checked through the flow analyses by default (#363); the
+  Codegen recheck (D-16) is opt-in and runs in a child compiler, never in the
+  compile's own process, and nothing it produces is linked or run.
 - No new `ErrorCategory` values or `docs/slm/` category files without an
   explicit request.
 - Message text is outside the compatibility promise; codes and exit statuses

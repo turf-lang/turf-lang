@@ -1839,45 +1839,32 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
 // Sandbox-Based Suggestion Validation
 
 // SL-1: the facts of a suggestion the sandbox validated, replacing lines
-// [start, end] with `text` (FixScore.h). The model's own ambiguity is not
-// measured (Candidates = 0).
+// [start, end] (FixScore.h): the file before and after it and the same-depth
+// analysis of each (SL-5). The model's own ambiguity is not measured
+// (Candidates = 0).
 static void scoreSuggestion(AISuggestion &s, const Sandbox &sandbox, int start,
-                            int end, const std::string &text, int errorLine) {
+                            int end, int errorLine) {
   FixScore::Facts &F = s.score;
   F = FixScore::Facts();
   F.From = s.fromCache ? FixScore::Provenance::Cache : FixScore::Provenance::Model;
   F.Valid = true;
   F.Candidates = 0;
-  const std::vector<std::string> after = splitTextLines(text);
-  std::vector<std::string> before;
-  for (int i = start; i <= end && i <= static_cast<int>(SourceLines.size()); ++i)
-    before.push_back(SourceLines[i - 1]);
-  const int n = static_cast<int>(SourceLines.size());
-  FixScore::describeEdit(F, before, after,
-                         errorLine >= 1 && errorLine <= n ? SourceLines[errorLine - 1]
-                                                          : std::string(),
-                         errorLine - start);
-  // Warnings on the lines the fix wrote, less those the replaced lines had,
-  // kept when they point into the text it changed.
-  std::vector<std::string> had;
-  for (const auto &d : sandbox.getOriginalDiagnostics())
-    if (d.IsWarning && static_cast<int>(d.Loc.Line) >= start &&
-        static_cast<int>(d.Loc.Line) <= end)
-      had.push_back(d.Code);
-  const int last = start + static_cast<int>(after.size()) - 1;
-  std::vector<FixScore::Warning> added;
-  for (const auto &d : sandbox.getValidationDiagnostics()) {
-    if (d.Level != turf::Severity::Warning || static_cast<int>(d.Where.Line) < start ||
-        static_cast<int>(d.Where.Line) > last)
-      continue;
-    auto it = std::find(had.begin(), had.end(), d.Code);
-    if (it != had.end())
-      had.erase(it);
-    else
-      added.push_back({static_cast<int>(d.Where.Line) - start,
-                       static_cast<int>(d.Where.Col), d.Code});
-  }
-  F.NewWarnings = FixScore::warningsInChangedText(before, after, added);
+  FixScore::Program P;
+  P.Before = sandbox.getOriginalSource();
+  P.After = sandbox.getModifiedSource();
+  P.Start = start;
+  P.End = end;
+  P.ErrorLine = errorLine;
+  auto collect = [](const std::vector<turf::Diagnostic> &From,
+                    std::vector<FixScore::ProgramDiag> &To) {
+    for (const auto &d : From)
+      if (d.Where.Path.empty() || d.Where.Path == SourceFilename)
+        To.push_back({static_cast<int>(d.Where.Line), static_cast<int>(d.Where.Col), d.Code,
+                      d.Message, d.Level == turf::Severity::Error});
+  };
+  collect(sandbox.getOriginalAnalysisDiagnostics(), P.BeforeDiags);
+  collect(sandbox.getValidationDiagnostics(), P.AfterDiags);
+  FixScore::describeProgram(F, P);
 }
 
 bool verifySuggestion(AISuggestion &suggestion, int errorLine,
@@ -1990,12 +1977,20 @@ bool verifySuggestion(AISuggestion &suggestion, int errorLine,
       return false;
     }
     const std::string &fixLine = c.text;
+    const auto began = std::chrono::steady_clock::now();
     bool ok = ApplyAndValidateFix(*sandbox, errorLine, c.start, c.end, fixLine,
                                   suggestion, /*reportFailure=*/debug);
+    const double ms = std::chrono::duration<double, std::milli>(
+                          std::chrono::steady_clock::now() - began)
+                          .count();
+    suggestion.sandboxDepth = sandboxDepthName(sandboxDepth());
     if (debug)
       std::cerr << Colors::BRIGHT_BLACK << "[Sandbox] candidate [" << c.start
                 << ", " << c.end << "] (" << c.why << "): "
-                << (ok ? "validated" : "rejected") << Colors::RESET << "\n";
+                << (ok ? "validated" : "rejected") << " (depth "
+                << suggestion.sandboxDepth << ", " << std::fixed
+                << std::setprecision(1) << ms << " ms)" << std::defaultfloat
+                << Colors::RESET << "\n";
 
     // SLM-001 follow-up: on success, capture the FULL patched source -- not
     // just the one line that changed -- so a caller can write out (or
@@ -2010,7 +2005,7 @@ bool verifySuggestion(AISuggestion &suggestion, int errorLine,
         joined += "\n";
       }
       suggestion.appliedSource = std::move(joined);
-      scoreSuggestion(suggestion, *sandbox, c.start, c.end, fixLine, errorLine);
+      scoreSuggestion(suggestion, *sandbox, c.start, c.end, errorLine);
       // Where it went, for renderPatchDiff() -- the lines that were really
       // replaced, which for a fuzzy copy are not the model's words.
       suggestion.patchStart = c.start;
@@ -2237,6 +2232,7 @@ AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
                 << Colors::RESET << "\n";
       if (std::getenv("TURF_SLM_DEBUG")) {
         std::cerr << "Final Confidence (post-sandbox): " << suggestion.confidence << "\n";
+        std::cerr << "Sandbox depth: " << suggestion.sandboxDepth << "\n";
         std::cerr << "Fix tier: " << FixScore::tierName(FixScore::tier(suggestion.score));
         for (const auto &f : FixScore::flags(suggestion.score))
           std::cerr << " | " << f;

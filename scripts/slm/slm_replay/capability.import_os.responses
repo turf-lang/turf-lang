@@ -1,0 +1,1 @@
+{"explanation": "x", "fix_mode": "MODIFY", "original_code": "fn main(): int {\n    mut total: int = 2;\n    total = total + tripple(3);", "new_code": "import os;\n\nfn main(): int {\n    mut total: int = 2;\n    total = total + 9 * os::argc();", "suggested_comment": "", "warning": "", "category": "UNDECLARED_VARIABLE"}
