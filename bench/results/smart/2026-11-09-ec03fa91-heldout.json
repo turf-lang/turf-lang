@@ -1,0 +1,2439 @@
+{
+ "meta": {
+  "date": "2026-11-09",
+  "commit": "ec03fa91",
+  "turfc": {
+   "features": [
+    "package-graph",
+    "exit-status-2",
+    "test",
+    "format-check",
+    "format-skip-unlexable",
+    "emit-obj",
+    "test-only",
+    "lint-levels",
+    "diagnostics-json",
+    "version-json",
+    "test-functions",
+    "unsafe-report",
+    "test-tags",
+    "registry-json",
+    "smart"
+   ],
+   "interface": {
+    "major": 1,
+    "minor": 14
+   },
+   "llvm": "23.1.3",
+   "manifest": 1,
+   "root": "/home/a2ys/turflang/turf-lang/turflang",
+   "runtime": "turf_rt_abi_2_0",
+   "schemas": {
+    "diagnostics": "1.1",
+    "package_graph": 1
+   },
+   "turfc": "2.2.0"
+  },
+  "model": null,
+  "split": "heldout",
+  "cases_file": null,
+  "corpus_sha256": "27f6c7cc437eb1c6d1342031cb4a7fc662d78f50d99b7e67b0691fd73e5277b5",
+  "k": 3.0,
+  "boots": 2000,
+  "seed": 20260,
+  "paths": [
+   "rules"
+  ],
+  "subset": false
+ },
+ "summary": {
+  "rules": {
+   "cases": 130,
+   "utility": 0.0231,
+   "ci95": [
+    -0.0769,
+    0.1077
+   ],
+   "outcomes": {
+    "correct": 12,
+    "none": 115,
+    "recompile_failed": 3
+   },
+   "shown": 15,
+   "false_confidence": 0.2,
+   "hard_negative_silence": 1.0,
+   "hard_negatives": 1,
+   "brier": 0.2,
+   "brier_cases": 15,
+   "by_provenance": {
+    "rule": {
+     "cases": 15,
+     "shown": 15,
+     "correct_rate": 0.8,
+     "p50_s": 0.095,
+     "p95_s": 0.115,
+     "peak_rss_mb": 61.1
+    },
+    "none": {
+     "cases": 115,
+     "shown": 0,
+     "correct_rate": null,
+     "p50_s": 0.048,
+     "p95_s": 0.073,
+     "peak_rss_mb": 61.2
+    }
+   },
+   "by_code": {
+    "E010": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "E014": {
+     "cases": 4,
+     "utility": 0.5
+    },
+    "E016": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "E018": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "E023": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "E026": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "E027": {
+     "cases": 3,
+     "utility": 0.0
+    },
+    "E030": {
+     "cases": 1,
+     "utility": 1.0
+    },
+    "E031": {
+     "cases": 1,
+     "utility": 1.0
+    },
+    "E035": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "E040": {
+     "cases": 5,
+     "utility": 0.2
+    },
+    "E041": {
+     "cases": 6,
+     "utility": 0.0
+    },
+    "E042": {
+     "cases": 1,
+     "utility": 1.0
+    },
+    "E044": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "E045": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "E047": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "E048": {
+     "cases": 2,
+     "utility": 1.0
+    },
+    "E050": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "E054": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "E056": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "E058": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "E059": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "E064": {
+     "cases": 3,
+     "utility": 0.0
+    },
+    "E066": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "E072": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "E076": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "E077": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "E078": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "E084": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "E086": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "E101": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "E102": {
+     "cases": 24,
+     "utility": -0.125
+    },
+    "E103": {
+     "cases": 11,
+     "utility": -0.273
+    },
+    "E104": {
+     "cases": 4,
+     "utility": 0.0
+    },
+    "E105": {
+     "cases": 3,
+     "utility": 0.0
+    },
+    "E106": {
+     "cases": 5,
+     "utility": 0.0
+    },
+    "E107": {
+     "cases": 3,
+     "utility": 0.0
+    },
+    "E108": {
+     "cases": 10,
+     "utility": 0.0
+    },
+    "E110": {
+     "cases": 8,
+     "utility": 0.0
+    },
+    "E113": {
+     "cases": 2,
+     "utility": 0.0
+    },
+    "E117": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "E118": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "E127": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "E131": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "E135": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "E137": {
+     "cases": 2,
+     "utility": 0.0
+    },
+    "E138": {
+     "cases": 1,
+     "utility": 1.0
+    },
+    "E140": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "E141": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "E143": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "E148": {
+     "cases": 1,
+     "utility": 0.0
+    }
+   },
+   "by_category": {
+    "arithmetic": {
+     "cases": 4,
+     "utility": 0.0
+    },
+    "array error": {
+     "cases": 3,
+     "utility": 0.0
+    },
+    "control flow": {
+     "cases": 3,
+     "utility": 0.0
+    },
+    "declaration": {
+     "cases": 17,
+     "utility": 0.353
+    },
+    "function signature": {
+     "cases": 5,
+     "utility": 0.0
+    },
+    "general": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "memory error": {
+     "cases": 2,
+     "utility": 0.0
+    },
+    "syntax error": {
+     "cases": 75,
+     "utility": -0.053
+    },
+    "type mismatch": {
+     "cases": 7,
+     "utility": 0.0
+    },
+    "undeclared variable": {
+     "cases": 13,
+     "utility": 0.077
+    }
+   },
+   "by_kind": {
+    "delete_semicolon": {
+     "cases": 3,
+     "utility": 1.0
+    },
+    "drop_closing_brace": {
+     "cases": 2,
+     "utility": 0.0
+    },
+    "drop_paren": {
+     "cases": 2,
+     "utility": 0.0
+    },
+    "fail_test": {
+     "cases": 25,
+     "utility": 0.12
+    },
+    "foreign_array_brace": {
+     "cases": 2,
+     "utility": 0.0
+    },
+    "foreign_arrow_call": {
+     "cases": 2,
+     "utility": 0.0
+    },
+    "foreign_bool_literal": {
+     "cases": 2,
+     "utility": 0.0
+    },
+    "foreign_break": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "foreign_case": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "foreign_cast_c": {
+     "cases": 3,
+     "utility": 0.0
+    },
+    "foreign_cast_call": {
+     "cases": 2,
+     "utility": 0.0
+    },
+    "foreign_comment_hash": {
+     "cases": 2,
+     "utility": 0.0
+    },
+    "foreign_const_keyword": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "foreign_ctor_braces": {
+     "cases": 2,
+     "utility": 0.0
+    },
+    "foreign_ctor_call": {
+     "cases": 2,
+     "utility": 0.0
+    },
+    "foreign_decl_auto": {
+     "cases": 2,
+     "utility": 0.0
+    },
+    "foreign_decl_c": {
+     "cases": 2,
+     "utility": 0.0
+    },
+    "foreign_decl_const": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "foreign_decl_let": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "foreign_decl_let_mut": {
+     "cases": 2,
+     "utility": 0.0
+    },
+    "foreign_decl_var": {
+     "cases": 2,
+     "utility": 0.0
+    },
+    "foreign_decl_walrus": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "foreign_default": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "foreign_field_c": {
+     "cases": 2,
+     "utility": 0.0
+    },
+    "foreign_fn_keyword": {
+     "cases": 2,
+     "utility": 1.0
+    },
+    "foreign_for_c": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "foreign_for_paren": {
+     "cases": 2,
+     "utility": 0.0
+    },
+    "foreign_for_range": {
+     "cases": 2,
+     "utility": 0.0
+    },
+    "foreign_import": {
+     "cases": 2,
+     "utility": 0.0
+    },
+    "foreign_length": {
+     "cases": 2,
+     "utility": 0.0
+    },
+    "foreign_logic_word": {
+     "cases": 2,
+     "utility": 0.0
+    },
+    "foreign_method_decl": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "foreign_module_dot": {
+     "cases": 2,
+     "utility": 1.0
+    },
+    "foreign_new_keyword": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "foreign_null": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "foreign_param_c": {
+     "cases": 2,
+     "utility": 0.0
+    },
+    "foreign_print": {
+     "cases": 2,
+     "utility": 0.0
+    },
+    "foreign_return_arrow": {
+     "cases": 3,
+     "utility": 0.0
+    },
+    "foreign_static_dot": {
+     "cases": 3,
+     "utility": 0.0
+    },
+    "foreign_switch": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "foreign_ternary": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "foreign_tostring": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "hard_negative": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "multi:delete_semicolon+foreign_decl_let_mut": {
+     "cases": 1,
+     "utility": -3.0
+    },
+    "multi:delete_semicolon+foreign_fn_keyword": {
+     "cases": 1,
+     "utility": -3.0
+    },
+    "multi:foreign_comment_hash+delete_semicolon": {
+     "cases": 1,
+     "utility": -3.0
+    },
+    "multi:foreign_comment_hash+drop_closing_brace": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "multi:foreign_comment_hash+foreign_decl_auto": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "multi:foreign_comment_hash+swap_return_type": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "multi:foreign_comment_hash+swap_type": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "multi:foreign_ctor_braces+drop_closing_brace": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "multi:foreign_decl_auto+foreign_decl_var": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "multi:foreign_field_c+foreign_return_arrow": {
+     "cases": 2,
+     "utility": 0.0
+    },
+    "multi:foreign_import+drop_closing_brace": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "multi:foreign_import+foreign_ctor_braces": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "multi:foreign_import+foreign_decl_auto": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "multi:foreign_import+foreign_decl_let": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "multi:foreign_import+foreign_decl_walrus": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "multi:foreign_logic_word+foreign_decl_let": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "multi:foreign_method_decl+foreign_static_dot": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "multi:foreign_method_decl+swap_return_type": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "multi:foreign_param_c+drop_paren": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "multi:foreign_param_c+foreign_static_dot": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "multi:foreign_return_arrow+delete_semicolon": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "multi:typo_identifier+drop_paren": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "multi:typo_identifier+foreign_decl_let": {
+     "cases": 1,
+     "utility": 0.0
+    },
+    "swap_return_type": {
+     "cases": 3,
+     "utility": 0.0
+    },
+    "swap_type": {
+     "cases": 2,
+     "utility": 0.0
+    },
+    "typo_identifier": {
+     "cases": 3,
+     "utility": 0.667
+    }
+   }
+  }
+ },
+ "model_minus_rules": null,
+ "cases": {
+  "rules": [
+   {
+    "id": "heldout-0000-9e731037",
+    "path": "rules",
+    "code": "E041",
+    "category": "undeclared variable",
+    "kind": "hard_negative",
+    "oracle": "abstain",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.019,
+    "rss_mb": 45.5
+   },
+   {
+    "id": "heldout-0001-fa5cb665",
+    "path": "rules",
+    "code": "E064",
+    "category": "type mismatch",
+    "kind": "swap_return_type",
+    "oracle": "recompile",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.064,
+    "rss_mb": 54.4
+   },
+   {
+    "id": "heldout-0002-588ab2ec",
+    "path": "rules",
+    "code": "E102",
+    "category": "syntax error",
+    "kind": "foreign_decl_let_mut",
+    "oracle": "recompile",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.091,
+    "rss_mb": 60.4
+   },
+   {
+    "id": "heldout-0003-d9cb57fd",
+    "path": "rules",
+    "code": "E102",
+    "category": "syntax error",
+    "kind": "foreign_decl_var",
+    "oracle": "recompile",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.087,
+    "rss_mb": 60.4
+   },
+   {
+    "id": "heldout-0004-6ee84ae4",
+    "path": "rules",
+    "code": "E110",
+    "category": "syntax error",
+    "kind": "foreign_cast_c",
+    "oracle": "recompile",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.044,
+    "rss_mb": 52.6
+   },
+   {
+    "id": "heldout-0005-ba44d9ed",
+    "path": "rules",
+    "code": "E102",
+    "category": "syntax error",
+    "kind": "delete_semicolon",
+    "oracle": "recompile",
+    "provenance": "rule",
+    "outcome": "correct",
+    "utility": 1,
+    "confidence": 1.0,
+    "seconds": 0.123,
+    "rss_mb": 61.1
+   },
+   {
+    "id": "heldout-0006-e7e05652",
+    "path": "rules",
+    "code": "E106",
+    "category": "syntax error",
+    "kind": "foreign_return_arrow",
+    "oracle": "recompile",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.025,
+    "rss_mb": 49.2
+   },
+   {
+    "id": "heldout-0007-043cfb37",
+    "path": "rules",
+    "code": "E137",
+    "category": "function signature",
+    "kind": "foreign_static_dot",
+    "oracle": "recompile",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.031,
+    "rss_mb": 49.2
+   },
+   {
+    "id": "heldout-0008-acc44b56",
+    "path": "rules",
+    "code": "E040",
+    "category": "undeclared variable",
+    "kind": "typo_identifier",
+    "oracle": "recompile",
+    "provenance": "rule",
+    "outcome": "correct",
+    "utility": 1,
+    "confidence": 1.0,
+    "seconds": 0.067,
+    "rss_mb": 54.1
+   },
+   {
+    "id": "heldout-0009-9e4eefb9",
+    "path": "rules",
+    "code": "E041",
+    "category": "undeclared variable",
+    "kind": "foreign_for_range",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.024,
+    "rss_mb": 48.5
+   },
+   {
+    "id": "heldout-0010-4f722c42",
+    "path": "rules",
+    "code": "E014",
+    "category": "syntax error",
+    "kind": "foreign_fn_keyword",
+    "oracle": "asserts",
+    "provenance": "rule",
+    "outcome": "correct",
+    "utility": 1,
+    "confidence": 1.0,
+    "seconds": 0.111,
+    "rss_mb": 59.2
+   },
+   {
+    "id": "heldout-0011-4421a9d1",
+    "path": "rules",
+    "code": "E064",
+    "category": "type mismatch",
+    "kind": "swap_return_type",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.053,
+    "rss_mb": 52.7
+   },
+   {
+    "id": "heldout-0012-3d5e1450",
+    "path": "rules",
+    "code": "E118",
+    "category": "syntax error",
+    "kind": "fail_test",
+    "oracle": "recompile",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.057,
+    "rss_mb": 54.0
+   },
+   {
+    "id": "heldout-0013-1be92607",
+    "path": "rules",
+    "code": "E027",
+    "category": "declaration",
+    "kind": "multi:typo_identifier+drop_paren",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.052,
+    "rss_mb": 55.4
+   },
+   {
+    "id": "heldout-0014-6c916b0b",
+    "path": "rules",
+    "code": "E040",
+    "category": "undeclared variable",
+    "kind": "foreign_bool_literal",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.023,
+    "rss_mb": 48.8
+   },
+   {
+    "id": "heldout-0015-fdcb3fb8",
+    "path": "rules",
+    "code": "E048",
+    "category": "declaration",
+    "kind": "foreign_module_dot",
+    "oracle": "asserts",
+    "provenance": "rule",
+    "outcome": "correct",
+    "utility": 1,
+    "confidence": 1.0,
+    "seconds": 0.066,
+    "rss_mb": 52.6
+   },
+   {
+    "id": "heldout-0016-5894f184",
+    "path": "rules",
+    "code": "E103",
+    "category": "syntax error",
+    "kind": "foreign_import",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.057,
+    "rss_mb": 55.5
+   },
+   {
+    "id": "heldout-0017-07e3992d",
+    "path": "rules",
+    "code": "E103",
+    "category": "syntax error",
+    "kind": "multi:foreign_import+foreign_decl_walrus",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.057,
+    "rss_mb": 55.2
+   },
+   {
+    "id": "heldout-0018-732d4dc1",
+    "path": "rules",
+    "code": "E135",
+    "category": "function signature",
+    "kind": "fail_test",
+    "oracle": "recompile",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.041,
+    "rss_mb": 51.9
+   },
+   {
+    "id": "heldout-0019-14a09861",
+    "path": "rules",
+    "code": "E044",
+    "category": "function signature",
+    "kind": "fail_test",
+    "oracle": "recompile",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.073,
+    "rss_mb": 51.6
+   },
+   {
+    "id": "heldout-0020-859057db",
+    "path": "rules",
+    "code": "E064",
+    "category": "type mismatch",
+    "kind": "swap_return_type",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.042,
+    "rss_mb": 52.7
+   },
+   {
+    "id": "heldout-0021-54a36612",
+    "path": "rules",
+    "code": "E059",
+    "category": "type mismatch",
+    "kind": "fail_test",
+    "oracle": "recompile",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.036,
+    "rss_mb": 51.9
+   },
+   {
+    "id": "heldout-0022-6799c19e",
+    "path": "rules",
+    "code": "E102",
+    "category": "syntax error",
+    "kind": "delete_semicolon",
+    "oracle": "asserts",
+    "provenance": "rule",
+    "outcome": "correct",
+    "utility": 1,
+    "confidence": 1.0,
+    "seconds": 0.102,
+    "rss_mb": 58.8
+   },
+   {
+    "id": "heldout-0023-4aabd75a",
+    "path": "rules",
+    "code": "E110",
+    "category": "syntax error",
+    "kind": "foreign_cast_call",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.074,
+    "rss_mb": 56.2
+   },
+   {
+    "id": "heldout-0024-5efa13bc",
+    "path": "rules",
+    "code": "E105",
+    "category": "syntax error",
+    "kind": "foreign_for_paren",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.057,
+    "rss_mb": 55.6
+   },
+   {
+    "id": "heldout-0025-f7d2c6c8",
+    "path": "rules",
+    "code": "E102",
+    "category": "syntax error",
+    "kind": "multi:foreign_import+foreign_decl_auto",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.04,
+    "rss_mb": 50.6
+   },
+   {
+    "id": "heldout-0026-b0d2c5b0",
+    "path": "rules",
+    "code": "E102",
+    "category": "syntax error",
+    "kind": "foreign_decl_auto",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.061,
+    "rss_mb": 56.5
+   },
+   {
+    "id": "heldout-0027-bec4b110",
+    "path": "rules",
+    "code": "E103",
+    "category": "syntax error",
+    "kind": "multi:foreign_comment_hash+delete_semicolon",
+    "oracle": "asserts",
+    "provenance": "rule",
+    "outcome": "recompile_failed",
+    "utility": -3.0,
+    "confidence": 1.0,
+    "seconds": 0.095,
+    "rss_mb": 58.7
+   },
+   {
+    "id": "heldout-0028-31a6ac89",
+    "path": "rules",
+    "code": "E102",
+    "category": "syntax error",
+    "kind": "multi:delete_semicolon+foreign_fn_keyword",
+    "oracle": "asserts",
+    "provenance": "rule",
+    "outcome": "recompile_failed",
+    "utility": -3.0,
+    "confidence": 1.0,
+    "seconds": 0.111,
+    "rss_mb": 59.5
+   },
+   {
+    "id": "heldout-0029-316ceeb7",
+    "path": "rules",
+    "code": "E102",
+    "category": "syntax error",
+    "kind": "foreign_new_keyword",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.055,
+    "rss_mb": 55.5
+   },
+   {
+    "id": "heldout-0030-2a1fc7ac",
+    "path": "rules",
+    "code": "E108",
+    "category": "syntax error",
+    "kind": "multi:foreign_param_c+foreign_static_dot",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.022,
+    "rss_mb": 48.6
+   },
+   {
+    "id": "heldout-0031-0460b6ca",
+    "path": "rules",
+    "code": "E108",
+    "category": "syntax error",
+    "kind": "foreign_field_c",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.071,
+    "rss_mb": 52.4
+   },
+   {
+    "id": "heldout-0032-7e074710",
+    "path": "rules",
+    "code": "E108",
+    "category": "syntax error",
+    "kind": "multi:foreign_field_c+foreign_return_arrow",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.068,
+    "rss_mb": 52.5
+   },
+   {
+    "id": "heldout-0033-277f6c63",
+    "path": "rules",
+    "code": "E014",
+    "category": "syntax error",
+    "kind": "foreign_decl_c",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.098,
+    "rss_mb": 59.1
+   },
+   {
+    "id": "heldout-0034-9d827504",
+    "path": "rules",
+    "code": "E041",
+    "category": "undeclared variable",
+    "kind": "foreign_ctor_call",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.02,
+    "rss_mb": 48.7
+   },
+   {
+    "id": "heldout-0035-b8c5380c",
+    "path": "rules",
+    "code": "E047",
+    "category": "function signature",
+    "kind": "fail_test",
+    "oracle": "recompile",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.021,
+    "rss_mb": 48.2
+   },
+   {
+    "id": "heldout-0036-77d94156",
+    "path": "rules",
+    "code": "E050",
+    "category": "declaration",
+    "kind": "fail_test",
+    "oracle": "recompile",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.023,
+    "rss_mb": 48.1
+   },
+   {
+    "id": "heldout-0037-1b751c87",
+    "path": "rules",
+    "code": "E045",
+    "category": "declaration",
+    "kind": "foreign_static_dot",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.033,
+    "rss_mb": 49.6
+   },
+   {
+    "id": "heldout-0038-ea243148",
+    "path": "rules",
+    "code": "E023",
+    "category": "declaration",
+    "kind": "fail_test",
+    "oracle": "recompile",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.021,
+    "rss_mb": 48.2
+   },
+   {
+    "id": "heldout-0039-d4aec231",
+    "path": "rules",
+    "code": "E138",
+    "category": "declaration",
+    "kind": "fail_test",
+    "oracle": "recompile",
+    "provenance": "rule",
+    "outcome": "correct",
+    "utility": 1,
+    "confidence": 1.0,
+    "seconds": 0.062,
+    "rss_mb": 51.5
+   },
+   {
+    "id": "heldout-0040-b143b94b",
+    "path": "rules",
+    "code": "E148",
+    "category": "declaration",
+    "kind": "fail_test",
+    "oracle": "recompile",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.025,
+    "rss_mb": 48.1
+   },
+   {
+    "id": "heldout-0041-66bd115e",
+    "path": "rules",
+    "code": "E103",
+    "category": "syntax error",
+    "kind": "foreign_comment_hash",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.061,
+    "rss_mb": 55.5
+   },
+   {
+    "id": "heldout-0042-ef292fa2",
+    "path": "rules",
+    "code": "E026",
+    "category": "general",
+    "kind": "foreign_ctor_call",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.022,
+    "rss_mb": 48.6
+   },
+   {
+    "id": "heldout-0043-279e9b24",
+    "path": "rules",
+    "code": "E041",
+    "category": "undeclared variable",
+    "kind": "foreign_length",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.022,
+    "rss_mb": 48.8
+   },
+   {
+    "id": "heldout-0044-07a73c5e",
+    "path": "rules",
+    "code": "E103",
+    "category": "syntax error",
+    "kind": "foreign_array_brace",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.062,
+    "rss_mb": 55.6
+   },
+   {
+    "id": "heldout-0045-e26aa245",
+    "path": "rules",
+    "code": "E102",
+    "category": "syntax error",
+    "kind": "multi:foreign_method_decl+foreign_static_dot",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.039,
+    "rss_mb": 51.3
+   },
+   {
+    "id": "heldout-0046-7b52e8a6",
+    "path": "rules",
+    "code": "E040",
+    "category": "undeclared variable",
+    "kind": "foreign_null",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.026,
+    "rss_mb": 48.9
+   },
+   {
+    "id": "heldout-0047-18ac9f81",
+    "path": "rules",
+    "code": "E027",
+    "category": "declaration",
+    "kind": "multi:typo_identifier+foreign_decl_let",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.058,
+    "rss_mb": 55.4
+   },
+   {
+    "id": "heldout-0048-cdf0e31d",
+    "path": "rules",
+    "code": "E102",
+    "category": "syntax error",
+    "kind": "foreign_decl_let",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.053,
+    "rss_mb": 55.5
+   },
+   {
+    "id": "heldout-0049-b33e70c2",
+    "path": "rules",
+    "code": "E105",
+    "category": "syntax error",
+    "kind": "drop_closing_brace",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.058,
+    "rss_mb": 55.5
+   },
+   {
+    "id": "heldout-0050-197dda4d",
+    "path": "rules",
+    "code": "E108",
+    "category": "syntax error",
+    "kind": "multi:foreign_field_c+foreign_return_arrow",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.023,
+    "rss_mb": 48.5
+   },
+   {
+    "id": "heldout-0051-a586b4f3",
+    "path": "rules",
+    "code": "E108",
+    "category": "syntax error",
+    "kind": "multi:foreign_param_c+drop_paren",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.058,
+    "rss_mb": 54.1
+   },
+   {
+    "id": "heldout-0052-3a28ea73",
+    "path": "rules",
+    "code": "E041",
+    "category": "undeclared variable",
+    "kind": "foreign_print",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.023,
+    "rss_mb": 46.9
+   },
+   {
+    "id": "heldout-0053-6f40ed8a",
+    "path": "rules",
+    "code": "E066",
+    "category": "type mismatch",
+    "kind": "swap_type",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.043,
+    "rss_mb": 52.6
+   },
+   {
+    "id": "heldout-0054-6edb1712",
+    "path": "rules",
+    "code": "E027",
+    "category": "declaration",
+    "kind": "typo_identifier",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.068,
+    "rss_mb": 56.2
+   },
+   {
+    "id": "heldout-0055-3be1459e",
+    "path": "rules",
+    "code": "E072",
+    "category": "syntax error",
+    "kind": "foreign_comment_hash",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.026,
+    "rss_mb": 50.7
+   },
+   {
+    "id": "heldout-0056-07f6764c",
+    "path": "rules",
+    "code": "E040",
+    "category": "undeclared variable",
+    "kind": "foreign_bool_literal",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.027,
+    "rss_mb": 48.7
+   },
+   {
+    "id": "heldout-0057-b3f35d31",
+    "path": "rules",
+    "code": "E014",
+    "category": "syntax error",
+    "kind": "foreign_fn_keyword",
+    "oracle": "asserts",
+    "provenance": "rule",
+    "outcome": "correct",
+    "utility": 1,
+    "confidence": 1.0,
+    "seconds": 0.101,
+    "rss_mb": 59.3
+   },
+   {
+    "id": "heldout-0058-c3b171b4",
+    "path": "rules",
+    "code": "E105",
+    "category": "syntax error",
+    "kind": "foreign_for_paren",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.057,
+    "rss_mb": 55.5
+   },
+   {
+    "id": "heldout-0059-412bac6d",
+    "path": "rules",
+    "code": "E108",
+    "category": "syntax error",
+    "kind": "foreign_for_c",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.057,
+    "rss_mb": 54.8
+   },
+   {
+    "id": "heldout-0060-ddfb523c",
+    "path": "rules",
+    "code": "E103",
+    "category": "syntax error",
+    "kind": "multi:foreign_comment_hash+swap_type",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.039,
+    "rss_mb": 52.1
+   },
+   {
+    "id": "heldout-0061-099e1d04",
+    "path": "rules",
+    "code": "E104",
+    "category": "syntax error",
+    "kind": "drop_paren",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.061,
+    "rss_mb": 56.2
+   },
+   {
+    "id": "heldout-0062-d1d4e17d",
+    "path": "rules",
+    "code": "E010",
+    "category": "control flow",
+    "kind": "fail_test",
+    "oracle": "recompile",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.048,
+    "rss_mb": 55.2
+   },
+   {
+    "id": "heldout-0063-13f51d3c",
+    "path": "rules",
+    "code": "E113",
+    "category": "declaration",
+    "kind": "foreign_ctor_braces",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.061,
+    "rss_mb": 55.7
+   },
+   {
+    "id": "heldout-0064-c36a1946",
+    "path": "rules",
+    "code": "E103",
+    "category": "syntax error",
+    "kind": "foreign_import",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.045,
+    "rss_mb": 53.7
+   },
+   {
+    "id": "heldout-0065-e97fb226",
+    "path": "rules",
+    "code": "E102",
+    "category": "syntax error",
+    "kind": "multi:delete_semicolon+foreign_decl_let_mut",
+    "oracle": "asserts",
+    "provenance": "rule",
+    "outcome": "recompile_failed",
+    "utility": -3.0,
+    "confidence": 1.0,
+    "seconds": 0.099,
+    "rss_mb": 58.7
+   },
+   {
+    "id": "heldout-0066-caf2387f",
+    "path": "rules",
+    "code": "E106",
+    "category": "syntax error",
+    "kind": "foreign_return_arrow",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.063,
+    "rss_mb": 55.5
+   },
+   {
+    "id": "heldout-0067-a476bcc1",
+    "path": "rules",
+    "code": "E127",
+    "category": "arithmetic",
+    "kind": "fail_test",
+    "oracle": "recompile",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.041,
+    "rss_mb": 52.2
+   },
+   {
+    "id": "heldout-0068-2b7a33b6",
+    "path": "rules",
+    "code": "E110",
+    "category": "syntax error",
+    "kind": "foreign_case",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.025,
+    "rss_mb": 48.6
+   },
+   {
+    "id": "heldout-0069-b9c087dc",
+    "path": "rules",
+    "code": "E110",
+    "category": "syntax error",
+    "kind": "foreign_cast_c",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.038,
+    "rss_mb": 50.9
+   },
+   {
+    "id": "heldout-0070-b406f477",
+    "path": "rules",
+    "code": "E103",
+    "category": "syntax error",
+    "kind": "multi:foreign_comment_hash+drop_closing_brace",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.063,
+    "rss_mb": 55.7
+   },
+   {
+    "id": "heldout-0071-4ea938e9",
+    "path": "rules",
+    "code": "E103",
+    "category": "syntax error",
+    "kind": "multi:foreign_import+drop_closing_brace",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.061,
+    "rss_mb": 54.8
+   },
+   {
+    "id": "heldout-0072-b55820e1",
+    "path": "rules",
+    "code": "E108",
+    "category": "syntax error",
+    "kind": "drop_paren",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.058,
+    "rss_mb": 55.5
+   },
+   {
+    "id": "heldout-0073-d6519fd5",
+    "path": "rules",
+    "code": "E104",
+    "category": "syntax error",
+    "kind": "foreign_arrow_call",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.057,
+    "rss_mb": 55.5
+   },
+   {
+    "id": "heldout-0074-c91129e0",
+    "path": "rules",
+    "code": "E110",
+    "category": "syntax error",
+    "kind": "foreign_decl_c",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.061,
+    "rss_mb": 55.5
+   },
+   {
+    "id": "heldout-0075-4b12056d",
+    "path": "rules",
+    "code": "E107",
+    "category": "syntax error",
+    "kind": "foreign_logic_word",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.025,
+    "rss_mb": 48.5
+   },
+   {
+    "id": "heldout-0076-1e6893e9",
+    "path": "rules",
+    "code": "E014",
+    "category": "syntax error",
+    "kind": "foreign_switch",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.061,
+    "rss_mb": 52.6
+   },
+   {
+    "id": "heldout-0077-59e0d8c9",
+    "path": "rules",
+    "code": "E058",
+    "category": "control flow",
+    "kind": "foreign_break",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.024,
+    "rss_mb": 48.7
+   },
+   {
+    "id": "heldout-0078-1ada6b67",
+    "path": "rules",
+    "code": "E040",
+    "category": "undeclared variable",
+    "kind": "foreign_print",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.022,
+    "rss_mb": 48.9
+   },
+   {
+    "id": "heldout-0079-7288eba8",
+    "path": "rules",
+    "code": "E117",
+    "category": "declaration",
+    "kind": "fail_test",
+    "oracle": "recompile",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.059,
+    "rss_mb": 54.7
+   },
+   {
+    "id": "heldout-0080-3c3f1ee0",
+    "path": "rules",
+    "code": "E016",
+    "category": "control flow",
+    "kind": "fail_test",
+    "oracle": "recompile",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.02,
+    "rss_mb": 48.2
+   },
+   {
+    "id": "heldout-0081-e315c77d",
+    "path": "rules",
+    "code": "E035",
+    "category": "type mismatch",
+    "kind": "fail_test",
+    "oracle": "recompile",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.046,
+    "rss_mb": 52.1
+   },
+   {
+    "id": "heldout-0082-aba0746b",
+    "path": "rules",
+    "code": "E110",
+    "category": "syntax error",
+    "kind": "foreign_cast_c",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.064,
+    "rss_mb": 55.5
+   },
+   {
+    "id": "heldout-0083-ea2766c6",
+    "path": "rules",
+    "code": "E103",
+    "category": "syntax error",
+    "kind": "multi:foreign_comment_hash+foreign_decl_auto",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.065,
+    "rss_mb": 56.2
+   },
+   {
+    "id": "heldout-0084-b777dfd1",
+    "path": "rules",
+    "code": "E110",
+    "category": "syntax error",
+    "kind": "foreign_default",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.024,
+    "rss_mb": 48.8
+   },
+   {
+    "id": "heldout-0085-1bb63390",
+    "path": "rules",
+    "code": "E102",
+    "category": "syntax error",
+    "kind": "foreign_decl_auto",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.06,
+    "rss_mb": 55.4
+   },
+   {
+    "id": "heldout-0086-ae6e90e5",
+    "path": "rules",
+    "code": "E102",
+    "category": "syntax error",
+    "kind": "multi:foreign_ctor_braces+drop_closing_brace",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.087,
+    "rss_mb": 61.2
+   },
+   {
+    "id": "heldout-0087-e34e4eeb",
+    "path": "rules",
+    "code": "E056",
+    "category": "type mismatch",
+    "kind": "swap_type",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.049,
+    "rss_mb": 54.0
+   },
+   {
+    "id": "heldout-0088-88e1ba40",
+    "path": "rules",
+    "code": "E108",
+    "category": "syntax error",
+    "kind": "foreign_field_c",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.023,
+    "rss_mb": 48.7
+   },
+   {
+    "id": "heldout-0089-45857e31",
+    "path": "rules",
+    "code": "E041",
+    "category": "undeclared variable",
+    "kind": "foreign_for_range",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.028,
+    "rss_mb": 50.2
+   },
+   {
+    "id": "heldout-0090-82bc3313",
+    "path": "rules",
+    "code": "E137",
+    "category": "function signature",
+    "kind": "foreign_static_dot",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.026,
+    "rss_mb": 50.0
+   },
+   {
+    "id": "heldout-0091-af143a9b",
+    "path": "rules",
+    "code": "E131",
+    "category": "undeclared variable",
+    "kind": "foreign_tostring",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.049,
+    "rss_mb": 52.5
+   },
+   {
+    "id": "heldout-0092-3ef72e32",
+    "path": "rules",
+    "code": "E078",
+    "category": "arithmetic",
+    "kind": "fail_test",
+    "oracle": "recompile",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.044,
+    "rss_mb": 51.9
+   },
+   {
+    "id": "heldout-0093-e614056d",
+    "path": "rules",
+    "code": "E076",
+    "category": "arithmetic",
+    "kind": "fail_test",
+    "oracle": "recompile",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.042,
+    "rss_mb": 52.0
+   },
+   {
+    "id": "heldout-0094-601656ba",
+    "path": "rules",
+    "code": "E077",
+    "category": "arithmetic",
+    "kind": "fail_test",
+    "oracle": "recompile",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.041,
+    "rss_mb": 52.0
+   },
+   {
+    "id": "heldout-0095-3847961b",
+    "path": "rules",
+    "code": "E102",
+    "category": "syntax error",
+    "kind": "foreign_method_decl",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.038,
+    "rss_mb": 50.9
+   },
+   {
+    "id": "heldout-0096-191d2a89",
+    "path": "rules",
+    "code": "E102",
+    "category": "syntax error",
+    "kind": "multi:foreign_method_decl+swap_return_type",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.039,
+    "rss_mb": 50.9
+   },
+   {
+    "id": "heldout-0097-75b940cc",
+    "path": "rules",
+    "code": "E048",
+    "category": "declaration",
+    "kind": "foreign_module_dot",
+    "oracle": "asserts",
+    "provenance": "rule",
+    "outcome": "correct",
+    "utility": 1,
+    "confidence": 1.0,
+    "seconds": 0.059,
+    "rss_mb": 52.4
+   },
+   {
+    "id": "heldout-0098-216f3142",
+    "path": "rules",
+    "code": "E108",
+    "category": "syntax error",
+    "kind": "multi:foreign_import+foreign_decl_let",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.022,
+    "rss_mb": 48.5
+   },
+   {
+    "id": "heldout-0099-9d12e2dc",
+    "path": "rules",
+    "code": "E102",
+    "category": "syntax error",
+    "kind": "foreign_decl_var",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.056,
+    "rss_mb": 55.8
+   },
+   {
+    "id": "heldout-0100-cf2ec209",
+    "path": "rules",
+    "code": "E106",
+    "category": "syntax error",
+    "kind": "multi:foreign_return_arrow+delete_semicolon",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.106,
+    "rss_mb": 59.9
+   },
+   {
+    "id": "heldout-0101-a5630603",
+    "path": "rules",
+    "code": "E042",
+    "category": "declaration",
+    "kind": "typo_identifier",
+    "oracle": "asserts",
+    "provenance": "rule",
+    "outcome": "correct",
+    "utility": 1,
+    "confidence": 1.0,
+    "seconds": 0.064,
+    "rss_mb": 53.4
+   },
+   {
+    "id": "heldout-0102-5e17f481",
+    "path": "rules",
+    "code": "E104",
+    "category": "syntax error",
+    "kind": "foreign_arrow_call",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.059,
+    "rss_mb": 55.4
+   },
+   {
+    "id": "heldout-0103-5ad727dc",
+    "path": "rules",
+    "code": "E102",
+    "category": "syntax error",
+    "kind": "delete_semicolon",
+    "oracle": "asserts",
+    "provenance": "rule",
+    "outcome": "correct",
+    "utility": 1,
+    "confidence": 1.0,
+    "seconds": 0.097,
+    "rss_mb": 58.7
+   },
+   {
+    "id": "heldout-0104-999a18ed",
+    "path": "rules",
+    "code": "E102",
+    "category": "syntax error",
+    "kind": "foreign_ternary",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.023,
+    "rss_mb": 48.7
+   },
+   {
+    "id": "heldout-0105-6bb832cd",
+    "path": "rules",
+    "code": "E106",
+    "category": "syntax error",
+    "kind": "foreign_return_arrow",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.023,
+    "rss_mb": 48.7
+   },
+   {
+    "id": "heldout-0106-056b6771",
+    "path": "rules",
+    "code": "E086",
+    "category": "memory error",
+    "kind": "fail_test",
+    "oracle": "recompile",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.052,
+    "rss_mb": 55.2
+   },
+   {
+    "id": "heldout-0107-2b6d0662",
+    "path": "rules",
+    "code": "E104",
+    "category": "syntax error",
+    "kind": "drop_closing_brace",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.059,
+    "rss_mb": 55.6
+   },
+   {
+    "id": "heldout-0108-40a8870a",
+    "path": "rules",
+    "code": "E107",
+    "category": "syntax error",
+    "kind": "foreign_logic_word",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.021,
+    "rss_mb": 48.9
+   },
+   {
+    "id": "heldout-0109-bbdda6a6",
+    "path": "rules",
+    "code": "E107",
+    "category": "syntax error",
+    "kind": "multi:foreign_logic_word+foreign_decl_let",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.02,
+    "rss_mb": 48.5
+   },
+   {
+    "id": "heldout-0110-c3e2ada8",
+    "path": "rules",
+    "code": "E102",
+    "category": "syntax error",
+    "kind": "foreign_decl_let_mut",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.059,
+    "rss_mb": 55.3
+   },
+   {
+    "id": "heldout-0111-4e7b77cc",
+    "path": "rules",
+    "code": "E102",
+    "category": "syntax error",
+    "kind": "foreign_decl_const",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.063,
+    "rss_mb": 55.7
+   },
+   {
+    "id": "heldout-0112-6ff5cbe5",
+    "path": "rules",
+    "code": "E084",
+    "category": "declaration",
+    "kind": "fail_test",
+    "oracle": "recompile",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.041,
+    "rss_mb": 52.0
+   },
+   {
+    "id": "heldout-0113-2d5a57e3",
+    "path": "rules",
+    "code": "E113",
+    "category": "declaration",
+    "kind": "foreign_ctor_braces",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.062,
+    "rss_mb": 55.6
+   },
+   {
+    "id": "heldout-0114-c54ebfe3",
+    "path": "rules",
+    "code": "E108",
+    "category": "syntax error",
+    "kind": "foreign_param_c",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.025,
+    "rss_mb": 48.9
+   },
+   {
+    "id": "heldout-0115-a3e7b211",
+    "path": "rules",
+    "code": "E101",
+    "category": "syntax error",
+    "kind": "multi:foreign_comment_hash+swap_return_type",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.063,
+    "rss_mb": 56.0
+   },
+   {
+    "id": "heldout-0116-a78eaaa6",
+    "path": "rules",
+    "code": "E102",
+    "category": "syntax error",
+    "kind": "multi:foreign_decl_auto+foreign_decl_var",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.062,
+    "rss_mb": 55.7
+   },
+   {
+    "id": "heldout-0117-380b6ed4",
+    "path": "rules",
+    "code": "E102",
+    "category": "syntax error",
+    "kind": "foreign_const_keyword",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.029,
+    "rss_mb": 48.6
+   },
+   {
+    "id": "heldout-0118-c1d0554b",
+    "path": "rules",
+    "code": "E141",
+    "category": "array error",
+    "kind": "fail_test",
+    "oracle": "recompile",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.043,
+    "rss_mb": 52.1
+   },
+   {
+    "id": "heldout-0119-ff6f8789",
+    "path": "rules",
+    "code": "E143",
+    "category": "array error",
+    "kind": "fail_test",
+    "oracle": "recompile",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.041,
+    "rss_mb": 51.9
+   },
+   {
+    "id": "heldout-0120-a149d277",
+    "path": "rules",
+    "code": "E140",
+    "category": "array error",
+    "kind": "fail_test",
+    "oracle": "recompile",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.04,
+    "rss_mb": 52.0
+   },
+   {
+    "id": "heldout-0121-7bee15cf",
+    "path": "rules",
+    "code": "E018",
+    "category": "memory error",
+    "kind": "fail_test",
+    "oracle": "recompile",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.056,
+    "rss_mb": 55.5
+   },
+   {
+    "id": "heldout-0122-1d20826a",
+    "path": "rules",
+    "code": "E054",
+    "category": "undeclared variable",
+    "kind": "foreign_length",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.058,
+    "rss_mb": 54.6
+   },
+   {
+    "id": "heldout-0123-34ba7814",
+    "path": "rules",
+    "code": "E103",
+    "category": "syntax error",
+    "kind": "foreign_array_brace",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.072,
+    "rss_mb": 55.8
+   },
+   {
+    "id": "heldout-0124-42a6c10c",
+    "path": "rules",
+    "code": "E102",
+    "category": "syntax error",
+    "kind": "foreign_decl_walrus",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.065,
+    "rss_mb": 55.4
+   },
+   {
+    "id": "heldout-0125-4c6c0247",
+    "path": "rules",
+    "code": "E110",
+    "category": "syntax error",
+    "kind": "foreign_cast_call",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.042,
+    "rss_mb": 51.3
+   },
+   {
+    "id": "heldout-0126-654e0b2f",
+    "path": "rules",
+    "code": "E030",
+    "category": "declaration",
+    "kind": "fail_test",
+    "oracle": "recompile",
+    "provenance": "rule",
+    "outcome": "correct",
+    "utility": 1,
+    "confidence": 1.0,
+    "seconds": 0.05,
+    "rss_mb": 51.1
+   },
+   {
+    "id": "heldout-0127-74557efc",
+    "path": "rules",
+    "code": "E031",
+    "category": "declaration",
+    "kind": "fail_test",
+    "oracle": "recompile",
+    "provenance": "rule",
+    "outcome": "correct",
+    "utility": 1,
+    "confidence": 1.0,
+    "seconds": 0.057,
+    "rss_mb": 51.5
+   },
+   {
+    "id": "heldout-0128-8ea24118",
+    "path": "rules",
+    "code": "E102",
+    "category": "syntax error",
+    "kind": "multi:foreign_import+foreign_ctor_braces",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.068,
+    "rss_mb": 57.1
+   },
+   {
+    "id": "heldout-0129-481fc4f0",
+    "path": "rules",
+    "code": "E106",
+    "category": "syntax error",
+    "kind": "foreign_param_c",
+    "oracle": "asserts",
+    "provenance": "none",
+    "outcome": "none",
+    "utility": 0,
+    "confidence": null,
+    "seconds": 0.048,
+    "rss_mb": 52.7
+   }
+  ]
+ }
+}
