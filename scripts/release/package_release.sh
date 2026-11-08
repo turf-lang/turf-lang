@@ -9,7 +9,7 @@
 #     lib/rt/<platform>/**          (the bundled C runtime, only when built:
 #                                    REL-008 stage 4; turfc's embedded linker uses it)
 #     docs/errors/**  docs/slm/**   (`turf explain` and `--smart` read these)
-#     share/turf/examples/**
+#     share/turf/examples/**  share/turf/diagnostic-registry.json (IF-3)
 #     LICENSE  README.md
 #
 # plus `<archive>.sha256` beside it. The layout is what makes an unpacked
@@ -137,6 +137,12 @@ cp -r docs/errors docs/slm "$DIR/docs/"
 cp -r examples "$DIR/share/turf/examples"
 # A project built inside the checkout leaves build/ and .turf/ behind.
 find "$DIR/share/turf/examples" \( -name build -o -name .turf \) -prune -exec rm -rf {} + 2>/dev/null || true
+# IF-3: the diagnostic-code registry, each code with its `turf --explain` text,
+# written by the staged compiler from the staged docs/ (so it is exactly what
+# this archive explains). The website builds its error pages from it.
+if ! "$DIR/bin/turfc$EXE" --registry-json > "$DIR/share/turf/diagnostic-registry.json"; then
+  echo "package_release.sh: $DIR/bin/turfc$EXE --registry-json failed" >&2; exit 1
+fi
 cp LICENSE README.md "$DIR/"
 if [ "$SMART" = 1 ]; then
   # What --smart reads beside the compiler: the grammar its output is held to,

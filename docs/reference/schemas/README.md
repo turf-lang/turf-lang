@@ -12,6 +12,7 @@ checked against the schemas by `scripts/check/diagnostics_json_check.py` in CI.
 | `turfc --unsafe-report` | `unsafe-report.schema.json` | `"format"`, `1` | turfc | (the check builds a project) |
 | A package graph: `turfc --package-graph`'s input, `turf graph`'s output | `package-graph.schema.json` | `"format"`, `1` | turf (`turf build`, `turf test`, `turf graph`) | `package-graph-fixtures/` |
 | `turf graph --unsafe` | `package-graph-report.schema.json` | `"format"`, `1` | turf | `package-graph-fixtures/report.json` |
+| `turfc --registry-json`, `share/turf/diagnostic-registry.json` in the release archive | `diagnostic-registry.schema.json` | `"format"`, `1` | turfc (the archive's own) | `diagnostic-registry-sample.json` (four entries the check compares) |
 
 ## The versioning rule
 

@@ -154,7 +154,9 @@ static constexpr int TurfcInterfaceMajor = 1;
 // `--unsafe-report`, each package's unsafe surface as JSON; `turf audit` and
 // `turf graph --unsafe` ask for it. 1.13 (TDP-2-026) adds the `@test` options
 // and `--test --tag <tag>` / `--skip-tag <tag>`; `turf test --tag` asks for it.
-static constexpr int TurfcInterfaceMinor = 13;
+// 1.14 (IF-3) adds `--registry-json`, the diagnostic-code registry with each
+// code's explanation; the release archive and the website's error pages read it.
+static constexpr int TurfcInterfaceMinor = 14;
 
 /// IF-1: the name of each addition to the driver interface, in the order of
 /// the history above, with the minor that added it. `turfc --version --json`
@@ -170,7 +172,7 @@ static constexpr InterfaceFeature InterfaceFeatures[] = {
     {"test-only", 7},             {"lint-levels", 8},
     {"diagnostics-json", 9},      {"version-json", 10},
     {"test-functions", 11},       {"unsafe-report", 12},
-    {"test-tags", 13},
+    {"test-tags", 13},            {"registry-json", 14},
 };
 
 // The exit statuses (FREEZE.md 6.21, F-CLI-1, REL-001). The split exists so a script
@@ -466,6 +468,57 @@ static int runUnsafeReport(const std::string &GraphFile,
   return ExitOk;
 }
 
+// The file `turf --explain` shows for a code: its own page, else the
+// construct or category page (see the tiers above). Shared with
+// --registry-json, so the website's page and the terminal say the same.
+static std::string explainDocPath(const ErrorCodeEntry &Entry, bool *PerCode = nullptr) {
+  std::string DocPath = ErrorCodes::getHumanCodeDocPath(Entry.Code);
+  if (PerCode)
+    *PerCode = !DocPath.empty();
+  if (DocPath.empty()) {
+    std::string Keyword = SLM::extractContextKeyword(Entry.Description);
+    DocPath = InstalledDocPath(SLM::getCategoryDocPath(Entry.Category, Keyword));
+  }
+  return DocPath;
+}
+
+// IF-3: `turfc --registry-json` prints the V-5 registry as one JSON document
+// (docs/reference/schemas/diagnostic-registry.schema.json): every code, its
+// class name, title, category, severity, default lint level, the minor that
+// added it, whether it is retired, and its `--explain` text. The release
+// archive carries it as share/turf/diagnostic-registry.json.
+static int printRegistryJson() {
+  llvm::json::Array Codes;
+  for (size_t I = 0; I < AllErrorCodesCount; ++I) {
+    const ErrorCodeEntry &E = AllErrorCodes[I];
+    const bool Warning = ErrorCodes::isWarningCode(E);
+    bool PerCode = false;
+    std::ifstream Doc(explainDocPath(E, &PerCode));
+    llvm::json::Value Explanation = nullptr;
+    if (Doc.is_open()) {
+      std::stringstream Text;
+      Text << Doc.rdbuf();
+      Explanation = Text.str();
+    }
+    Codes.push_back(llvm::json::Object{
+        {"code", E.Code},
+        {"name", E.ClassName},
+        {"title", E.Description},
+        {"category", SLM::getCategoryName(E.Category)},
+        {"severity", Warning ? "warning" : "error"},
+        {"default_level", !Warning ? "error" : E.AllowByDefault ? "allow" : "warn"},
+        {"since", "2." + std::to_string(E.SinceMinor)},
+        {"retired", std::string(E.Description).find("(retired") != std::string::npos},
+        {"important", E.Important},
+        {"explanation", std::move(Explanation)},
+        {"explanation_source", PerCode ? "code" : "category"}});
+  }
+  llvm::json::Object Registry{{"format", 1}, {"turfc", TURF_VERSION}, {"codes", std::move(Codes)}};
+  llvm::outs() << llvm::json::Value(std::move(Registry)) << "\n";
+  llvm::outs().flush();
+  return ExitOk;
+}
+
 static void handleExplainFlagIfPresent(int argc, char **argv) {
   for (int i = 1; i < argc; ++i) {
     if (std::string(argv[i]) != "--explain")
@@ -489,15 +542,10 @@ static void handleExplainFlagIfPresent(int argc, char **argv) {
               << Colors::RESET << "  " << Entry->ClassName << " ("
               << SLM::getCategoryName(Entry->Category) << ")\n\n";
 
-    std::string DocPath = ErrorCodes::getHumanCodeDocPath(Entry->Code);
-    if (DocPath.empty()) {
-      std::string Keyword = SLM::extractContextKeyword(Entry->Description);
-      // Category docs come back relative; resolve them against the install
-      // root like the per-code ones (InstalledDocPath(), ErrorCodes.h), not
-      // against whatever directory `turf explain` was run from.
-      DocPath = InstalledDocPath(SLM::getCategoryDocPath(Entry->Category, Keyword));
-    }
-    std::ifstream Doc(DocPath);
+    // A category page comes back relative and is resolved against the install
+    // root like a per-code one (InstalledDocPath(), ErrorCodes.h), never
+    // against the directory `turf explain` was run from.
+    std::ifstream Doc(explainDocPath(*Entry));
     if (Doc.is_open()) {
       printHumanExplainDoc(Doc);
     } else {
@@ -528,6 +576,7 @@ static const char *turfcUsage() {
          "         [--dump-instantiations]\n"
          "       turfc --format [--write | --check [--skip-unlexable]] <filename.tr>...\n"
          "       turfc --migrate=pub [--write] <module.tr>...\n"
+         "       turfc --registry-json\n"
          "       turfc --unsafe-report (--package-graph <file> | <file.tr>...)\n"
          "       turfc --test [<tests-dir>] [--package-graph <file>] [--exclude <path>]\n"
          "         [--only <path>] [--tag <tag>] [--skip-tag <tag>]\n"
@@ -1693,6 +1742,8 @@ static int runCompilerMain(int argc, char **argv) {
   CompilerExecutablePath = llvm::sys::fs::getMainExecutable(argv[0], (void *)(intptr_t)runCompilerMain);
 
   for (int i = 1; i < argc; ++i) {
+    if (std::string(argv[i]) == "--registry-json")
+      return printRegistryJson();
     if (std::string(argv[i]) == "--version" &&
         std::any_of(argv + 1, argv + argc,
                     [](const char *A) { return std::string(A) == "--json"; }))

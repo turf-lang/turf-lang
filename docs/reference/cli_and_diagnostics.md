@@ -418,7 +418,7 @@ $ turfc --version --json
 |---|---|
 | `interface` | `{"major", "minor"}`, as line 2 of `turfc --version`. |
 | `schemas` | `diagnostics`: the [diagnostics JSON](#diagnostics-as-json) schema version; `package_graph`: the package-graph `"format"` `--package-graph` reads. |
-| `features` | One name per addition to the interface, in order: `package-graph` (1.1), `exit-status-2` (1.2), `test` (1.3), `format-check` (1.4), `format-skip-unlexable` (1.5), `emit-obj` (1.6), `test-only` (1.7), `lint-levels` (1.8), `diagnostics-json` (1.9), `version-json` (1.10), `test-functions` (1.11), `unsafe-report` (1.12), `test-tags` (1.13). Then what this build has: `smart`, `embedded-lld`, `bundled-runtime`. |
+| `features` | One name per addition to the interface, in order: `package-graph` (1.1), `exit-status-2` (1.2), `test` (1.3), `format-check` (1.4), `format-skip-unlexable` (1.5), `emit-obj` (1.6), `test-only` (1.7), `lint-levels` (1.8), `diagnostics-json` (1.9), `version-json` (1.10), `test-functions` (1.11), `unsafe-report` (1.12), `test-tags` (1.13), `registry-json` (1.14). Then what this build has: `smart`, `embedded-lld`, `bundled-runtime`. |
 | `turfc`, `llvm`, `runtime`, `root` | As the text lines. |
 
 ### Finding the compiler
@@ -461,6 +461,7 @@ Usage: turfc <filename.tr> [-o output] [--emit-llvm | --emit-obj] [--smart]
          [--dump-instantiations]
        turfc --format [--write | --check [--skip-unlexable]] <filename.tr>...
        turfc --migrate=pub [--write] <module.tr>...
+       turfc --registry-json
        turfc --unsafe-report (--package-graph <file> | <file.tr>...)
        turfc --test [<tests-dir>] [--package-graph <file>] [--exclude <path>]
          [--only <path>] [--tag <tag>] [--skip-tag <tag>]
@@ -486,7 +487,7 @@ linker system-cc
 smart built-in
 ```
 
-The interface covers what `turf` relies on: the flags it passes, the two-line start of `--version`, the exit statuses, and every other argument being accepted exactly as a direct invocation accepts it. A new flag or input raises the **minor**; removing a flag or changing its meaning raises the **major**. A tool that needs `--package-graph` requires interface 1.1 or later, `turfc --test` 1.3, `--emit-obj` 1.6, `turfc --test --only` 1.7, the lint-level flags 1.8, `@test` functions in `turfc --test` 1.11, `--unsafe-report` 1.12, and the `@test` options with `turfc --test --tag`/`--skip-tag` 1.13.
+The interface covers what `turf` relies on: the flags it passes, the two-line start of `--version`, the exit statuses, and every other argument being accepted exactly as a direct invocation accepts it. A new flag or input raises the **minor**; removing a flag or changing its meaning raises the **major**. A tool that needs `--package-graph` requires interface 1.1 or later, `turfc --test` 1.3, `--emit-obj` 1.6, `turfc --test --only` 1.7, the lint-level flags 1.8, `@test` functions in `turfc --test` 1.11, `--unsafe-report` 1.12, the `@test` options with `turfc --test --tag`/`--skip-tag` 1.13, and `--registry-json` 1.14.
 
 **Modes a tool uses:**
 
@@ -516,6 +517,7 @@ The interface covers what `turf` relies on: the flags it passes, the two-line st
   ```
 
   The schema is `docs/reference/schemas/package-graph.schema.json` (and `package-graph-report.schema.json` for `turf graph --unsafe`), with fixtures in `docs/reference/schemas/package-graph-fixtures/`; `docs/reference/schemas/README.md` states how each format is versioned. A bad graph is one line naming the file and exit 1. Without the flag `turfc` is in single-file mode. In a package build the file you name must be inside the root package's `src`.
+- `turfc --registry-json` prints the diagnostic-code registry as one JSON document (IF-3, interface 1.14): every code with its class name, title, category, severity, default lint level, the minor that added it, whether it is retired, and the text `turf --explain` shows for it, read from the same file. Schema `docs/reference/schemas/diagnostic-registry.schema.json`. The release archive carries it as `share/turf/diagnostic-registry.json`, and the website's error pages are built from that file.
 - `turfc --unsafe-report --package-graph <file.json>` counts where each package's unsafe code is (LB-2): for every package of the graph and for the standard library, the files that declare `unsafe module;`, the `unsafe { }` blocks, the `extern fn` declarations and the C libraries they name with `extern from`, and whether the package's `unsafe module;` is honored (`allow_unsafe`; always for the standard library). It reads every `.tr` file under each `src/`, imported or not, with the real lexer (a keyword in a comment or a string is not counted), compiles nothing and needs no entry file. `turfc --unsafe-report <file.tr>...` reports the files given. The output is one line of JSON, schema `docs/reference/schemas/unsafe-report.schema.json`; a file that does not lex carries an `"error"` and is counted up to it. Exit 1 for a bad graph or a file that cannot be read. `turf audit` and `turf graph --unsafe` run it ([Projects and packages](projects_and_packages.md#8-unsafe-module-in-dependencies)):
 
   ```text

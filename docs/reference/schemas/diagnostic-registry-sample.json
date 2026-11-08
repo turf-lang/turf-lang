@@ -1,0 +1,57 @@
+{
+ "format": 1,
+ "codes": [
+  {
+   "category": "UNDECLARED_VARIABLE",
+   "code": "E041",
+   "default_level": "error",
+   "explanation": "I don't know a function by that name\n\nYou called a function -- something with parentheses after it, like `do_something()` -- and Turf couldn't find any function with that exact name anywhere it looked: not in this file, not among the built-ins, not through anything you've imported.\n\n    fn greet(name: string): void {\n        printline(\"Hello, \" + name);\n    }\n\n    greet(\"world\");   // works -- \"greet\" is declared right above\n\nUsually this is just a small typo in the function's name:\n\n    grete(\"world\");   // typo! should be \"greet\"\n\nJust like with variable names, Turf will often notice a close match nearby and suggest it for you, so check the error message for a suggestion before anything else.\n\nIf it's not a typo, the function might genuinely not exist yet in your code (you can write it yourself with `fn`), or it might live in a standard-library module you haven't imported. Things like `strings::length(...)` or `mem::malloc(...)` need their module imported first with `import strings;` or `import mem;` before Turf can see them. Once the name matches something real and reachable, you're good to go.\n\nOne more cause, specific to types: Turf has no constructor-call syntax, so `Node(5)` for a struct named `Node` is an unknown function too -- the error's hint says so when that is what happened. Build the value with `Node::new(5)` (if `Node` declares a `.new` method) or `Node::default()`, and for an enum or error type name one of its variants (`Color::Red`).\n",
+   "explanation_source": "code",
+   "important": false,
+   "name": "UnknownFunctionError",
+   "retired": false,
+   "severity": "error",
+   "since": "2.0",
+   "title": "Unknown function"
+  },
+  {
+   "category": "CONTROL_FLOW",
+   "code": "E165",
+   "default_level": "warn",
+   "explanation": "This branch of an `if` is empty\n\nAn `if`, `elseif` or `else` whose block holds no statements does nothing:\n\n    immut n: int = 3;\n    if n > 2 {\n    } else {                    // the 'then' branch is empty -- WARNING\n        printline(\"small\");\n    }\n\nThe usual fix is to flip the condition so the work lives in the `if` and the empty branch goes away:\n\n    immut n: int = 3;\n    if n <= 2 {\n        printline(\"small\");\n    }\n\nIf you simply haven't written the code yet, put a comment such as `// TODO` in the block. Turf counts a block holding only comments as empty too, so that does not silence the warning, but it does tell the next reader the branch is deliberate. An empty `else` can simply be deleted.\n\nThis is a warning, not an error -- compilation still succeeds. To silence it for a whole build, set its lint level to allow: `turf build --allow E165` (or `[lints] E165 = \"allow\"` in turf.toml).\n",
+   "explanation_source": "code",
+   "important": false,
+   "name": "EmptyBranchWarning",
+   "retired": false,
+   "severity": "warning",
+   "since": "2.0",
+   "title": "Empty branch"
+  },
+  {
+   "category": "MEMORY_ERROR",
+   "code": "E188",
+   "default_level": "allow",
+   "explanation": "A raw pointer that may be null is dereferenced\n\nA raw pointer (`T*`, `ptr`) can be null, and nothing checks it at run time: reading a field, an index or a method through a null pointer crashes the program. This dereference is not proven safe, because the pointer was not tested against `null` on every path that reaches it and does not come from something that is never null:\n\n    import mem;\n\n    fn first(): int {\n        unsafe {\n            mut p: int* = mem::malloc(16) to int*;   // malloc may return null\n            p[0] = 1;                                // WARNING (E188 at `warn`)\n            return p[0];\n        }\n    }\n\nTest the pointer first, or get it from something that is never null: `mem::alloc` (which stops the program instead of returning null), `&x`, or `self`:\n\n    import mem;\n\n    fn first(): int {\n        unsafe {\n            mut p: int* = mem::alloc(16) to int*;\n            p[0] = 1;\n            mut v: int = p[0];\n            mem::free(p);\n            return v;\n        }\n    }\n\nOnly a pointer held in a variable is checked; a pointer read from a field is not. This warning starts at `allow` in 2.3: turn it on with `turf build --warn E188` (or `[lints] E188 = \"warn\"` in turf.toml).\n",
+   "explanation_source": "code",
+   "important": false,
+   "name": "RawPointerMaybeNullWarning",
+   "retired": false,
+   "severity": "warning",
+   "since": "2.3",
+   "title": "Raw pointer that may be null, dereferenced"
+  },
+  {
+   "category": "CONTROL_FLOW",
+   "code": "E013",
+   "default_level": "error",
+   "explanation": "E013 is retired -- code after a return is now always E012\n\nOlder versions of Turf had two codes for the same mistake: E012 for a statement that comes after a `return`, `break` or `continue`, and E013 for a *declaration* in that position. In practice E012 always fired first, so E013 was documented and nobody ever saw it. The number is kept so an old log that mentions it still has somewhere to land, and is never reused.\n\n    fn compute(): int {\n        return 1;\n        mut x: int = 5;        // can never run -- E012\n    }\n\nRun `turf --explain E012` for the explanation and the fix: delete the code, or move it before the `return`.\n",
+   "explanation_source": "code",
+   "important": false,
+   "name": "UnreachableCodeError",
+   "retired": true,
+   "severity": "error",
+   "since": "2.0",
+   "title": "Unreachable code (retired: now E012)"
+  }
+ ]
+}

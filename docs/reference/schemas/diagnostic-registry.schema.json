@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/turf-lang/turf-lang/blob/master/docs/reference/schemas/diagnostic-registry.schema.json",
+  "title": "turfc --registry-json, the diagnostic-code registry",
+  "description": "IF-3, driver interface 1.14. Every code of the V-5 registry with its --explain text; the release archive carries it as share/turf/diagnostic-registry.json, and the website's error pages are built from it. Format 1: keys are only added, never changed or removed.",
+  "type": "object",
+  "required": ["format", "turfc", "codes"],
+  "properties": {
+    "format": { "const": 1 },
+    "turfc": { "type": "string", "description": "The release version of the compiler that wrote it." },
+    "codes": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/code" } }
+  },
+  "$defs": {
+    "code": {
+      "type": "object",
+      "required": ["code", "name", "title", "category", "severity", "default_level", "since", "retired", "important", "explanation", "explanation_source"],
+      "properties": {
+        "code": { "type": "string", "pattern": "^E[0-9]{3}$" },
+        "name": { "type": "string", "description": "The diagnostic's class name, e.g. \"UnknownFunctionError\"." },
+        "title": { "type": "string", "description": "The registry's one-line description." },
+        "category": { "type": "string" },
+        "severity": { "enum": ["error", "warning"] },
+        "default_level": { "enum": ["error", "warn", "allow"], "description": "An error is always \"error\"; a warning starts at \"warn\" or \"allow\"." },
+        "since": { "type": "string", "pattern": "^2\\.[0-9]+$", "description": "The 2.x minor that added the code (2.0 for every code 2.0 shipped)." },
+        "retired": { "type": "boolean", "description": "Nothing raises it any more; its page says what replaced it." },
+        "important": { "type": "boolean", "description": "Its message asks the reader to run --explain before fixing." },
+        "explanation": { "type": ["string", "null"], "description": "The text `turf --explain` shows, as written in docs/; null if the archive has no page for it." },
+        "explanation_source": { "enum": ["code", "category"], "description": "\"code\": the code's own docs/errors/codes page; \"category\": the shared page for its kind of mistake." }
+      }
+    }
+  }
+}

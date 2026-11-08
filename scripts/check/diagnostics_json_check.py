@@ -25,6 +25,11 @@ file's own directory, and fails when
     does not build and test the fixture project through them, turfc and the
     schema disagree on a graph with an unknown package key, or (when build/turf
     exists) what `turf graph` prints for examples/plotter does not match.
+  - `turfc --registry-json` (IF-3) does not match
+    docs/reference/schemas/diagnostic-registry.schema.json, lists a code
+    twice, gives a code that is not retired no explanation, or differs from
+    the four entries in docs/reference/schemas/diagnostic-registry-sample.json
+    (`--write` regenerates it).
 
 The schema is read from the published file and checked with the small subset
 of JSON Schema it uses (type, enum, const, pattern, required, properties,
@@ -53,6 +58,10 @@ UNSAFE_SCHEMA = ROOT / "docs/reference/schemas/unsafe-report.schema.json"
 GRAPH_SCHEMA = ROOT / "docs/reference/schemas/package-graph.schema.json"
 REPORT_SCHEMA = ROOT / "docs/reference/schemas/package-graph-report.schema.json"
 GRAPH_FIXTURES = ROOT / "docs/reference/schemas/package-graph-fixtures"
+REGISTRY_SCHEMA = ROOT / "docs/reference/schemas/diagnostic-registry.schema.json"
+REGISTRY_SAMPLE = ROOT / "docs/reference/schemas/diagnostic-registry-sample.json"
+# An error with its own page, a warning at warn, one at allow, a retired code.
+REGISTRY_SAMPLE_CODES = ["E041", "E165", "E188", "E013"]
 FIXTURES = ROOT / "docs/reference/schemas/diagnostics-fixtures"
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 HEADER = re.compile(r"^── (error|warning)\b[^\[]*(?:\[(E\d{3}))?")
@@ -290,6 +299,48 @@ def check_package_graphs(compiler):
     return problems
 
 
+def registry(compiler):
+    env = dict(os.environ)
+    env.pop("TURF_HOME", None)
+    out = subprocess.run([compiler, "--registry-json"], env=env, capture_output=True,
+                         text=True, timeout=120)
+    if out.returncode != 0:
+        raise RuntimeError(f"exit {out.returncode}: {out.stderr.strip()}")
+    return json.loads(out.stdout)
+
+
+def registry_sample(reg):
+    by_code = {c["code"]: c for c in reg["codes"]}
+    return json.dumps({"format": reg["format"],
+                       "codes": [by_code[c] for c in REGISTRY_SAMPLE_CODES]},
+                      indent=1, ensure_ascii=False) + "\n"
+
+
+def check_registry(compiler):
+    """IF-3: the registry the release archive carries."""
+    schema = json.loads(REGISTRY_SCHEMA.read_text())
+    try:
+        reg = registry(compiler)
+    except (RuntimeError, json.JSONDecodeError) as e:
+        return [f"--registry-json: {e}"]
+    problems = []
+    err = validate(reg, schema, schema)
+    if err:
+        problems.append(f"--registry-json: {err}")
+        return problems
+    seen = set()
+    for c in reg["codes"]:
+        if c["code"] in seen:
+            problems.append(f"--registry-json: {c['code']} is listed twice")
+        seen.add(c["code"])
+        if not c["retired"] and not c["explanation"]:
+            problems.append(f"--registry-json: {c['code']} has no explanation")
+    if not REGISTRY_SAMPLE.exists() or REGISTRY_SAMPLE.read_text() != registry_sample(reg):
+        problems.append(f"{REGISTRY_SAMPLE.relative_to(ROOT)} differs from --registry-json "
+                        "(regenerate with --write if the change is meant)")
+    return problems
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--compiler", default=str(ROOT / "build/turfc"))
@@ -303,7 +354,7 @@ def main():
     failed = 0
     if not args.write:
         for p in (check_manifest(compiler) + check_unsafe_report(compiler) +
-                  check_package_graphs(compiler)):
+                  check_package_graphs(compiler) + check_registry(compiler)):
             print(f"FAIL {p}")
             failed += 1
     sources = json.loads((FIXTURES / "sources.json").read_text())
@@ -318,6 +369,8 @@ def main():
                   "(regenerate with --write if the change is meant)")
             failed += 1
     if args.write:
+        REGISTRY_SAMPLE.write_text(registry_sample(registry(compiler)))
+        print(f"wrote {REGISTRY_SAMPLE.relative_to(ROOT)}")
         return 0
 
     tests = sorted(p for p in (ROOT / "tests").rglob("fail_*.tr")

@@ -1281,7 +1281,7 @@ embedded lld, bundled C runtime) is REL-008, not this section.
   on Windows) unpacks to one directory holding `bin/turf`, `bin/turfc` (plus the
   DLLs `turfc.exe` needs, in `bin/`), `lib/libturfrt.a`, `lib/std/**`,
   `docs/errors/**`, `docs/slm/**` (both read from the install root by `turf
-  explain` and `--smart`), `share/turf/examples/**`, `LICENSE`, `README.md`.
+  explain` and `--smart`), `share/turf/examples/**`, `share/turf/diagnostic-registry.json` (IF-3, written by the archive's own `turfc --registry-json`; amended for 2.3.0), `LICENSE`, `README.md`.
   `libturfrt_asan.a` is never shipped. The shape is not cosmetic: `turfc` derives
   its install root from its own real path, `<bin>/..`, and `turf` finds `turfc`
   beside itself, so this layout works unpacked, symlinked or relocated with no
@@ -1539,7 +1539,7 @@ Overhaul (F-TYPE-1), whose third column points at their section above.
 | **F-CLI-2** | An unknown option or command is a usage error (2) with a nearest-spelling suggestion; never ignored, never forwarded as a file. | §6.21 above |
 | **F-CLI-3** | Help is `turf help`/`turf <cmd> --help`/`turfc help`; `turfc --help` is deliberately an unknown option pointing at `turfc help`. | §6.21 above (owner decision 2026-10-06) |
 | **F-CLI-4** | `turfc --version` lines 1-2 are the driver-interface contract; later `<key> <value>` lines (`llvm`, `runtime`, `root`) are informational and extendable. | §6.21 above |
-| **F-REL-1** | Release archive layout: `bin/` (turf, turfc, DLLs), `lib/` (libturfrt.a, std), `docs/`, `share/turf/examples`, `LICENSE`, `README.md`; install root = `<bin>/..`; no `libturfrt_asan.a`, no `lib/usr`. | §6.26 above (owner-confirmed 2026-10-07) |
+| **F-REL-1** | Release archive layout: `bin/` (turf, turfc, DLLs), `lib/` (libturfrt.a, std), `docs/`, `share/turf/examples`, `share/turf/diagnostic-registry.json`, `LICENSE`, `README.md`; install root = `<bin>/..`; no `libturfrt_asan.a`, no `lib/usr`. | §6.26 above (owner-confirmed 2026-10-07) |
 | **F-REL-2** | `--target` for a non-host machine emits its object, then exits 1 with a TurfLang "cross-linking is not supported in 2.0" diagnostic naming the target and the host; vendor-only differences are the host; cross-linking is F-20. | §6.26 above (D20, owner-confirmed 2026-10-07) |
 | **F-REL-3** | `install.sh` verifies the SHA-256 or installs nothing; one marked, idempotent PATH block; `--no-modify-path`; `--uninstall` removes exactly what it added and never the cache. | §6.26 above (owner-confirmed 2026-10-07) |
 | **F-REL-4** | The archive version is `VERSION`; a tag other than `v<VERSION>`, or a `-dev` VERSION, refuses to package. | §6.26 above (owner-confirmed 2026-10-07) |
