@@ -1,6 +1,7 @@
 #ifndef SLM_ENGINE_H
 #define SLM_ENGINE_H
 
+#include <chrono>
 #include <string>
 #include <vector>
 
@@ -53,6 +54,20 @@ public:
                                  const std::string &userPrompt,
                                  const std::string &grammarStr = "",
                                  float temperature = 0.0f, unsigned seed = 0);
+
+  // SL-4 resource bounds. An answer is at most kMaxAnswerTokens tokens, and
+  // generation stops at the deadline (the --smart run's wall-clock budget,
+  // SLMIntegration.cpp): an answer cut short is returned as it is and fails
+  // to parse, so the run falls back to the compiler's own diagnostics. The
+  // default deadline is never.
+  static constexpr int kMaxAnswerTokens = 512;
+  void setDeadline(std::chrono::steady_clock::time_point D) { Deadline = D; }
+
+private:
+  std::chrono::steady_clock::time_point Deadline =
+      std::chrono::steady_clock::time_point::max();
+
+public:
   void release();
 };
 

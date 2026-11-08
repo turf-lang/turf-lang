@@ -1,1 +1,1 @@
-{"explanation": "x", "fix_mode": "MODIFY", "original_code": "    total = total + tripple(3);", "new_code": "    // total = total + tripple(3);", "suggested_comment": "", "warning": "", "category": "UNDECLARED_VARIABLE"}
+{"reasoning": "x", "fix_mode": "MODIFY", "original_code": "    total = total + tripple(3);", "new_code": "    // total = total + tripple(3);", "category": "UNDECLARED_VARIABLE"}

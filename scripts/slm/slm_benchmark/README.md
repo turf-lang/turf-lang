@@ -105,3 +105,25 @@ that follow a parse error (a `;` after `}`, `mut` to `immut`) while the first
 error had none. SL-1 gives no fix while the parser recovers, which removed
 those 12 and no right fix. The 4 left are two-error cases where the first fix
 is right and the second error remains. Every rule fix shown is `proven`.
+
+## Checks on the model (SL-4)
+
+`scripts/slm/qualify_model.sh <file.gguf>` measures one model: the determinism
+check, then the train split on both paths with `TURF_SLM_MODEL` set, recorded
+under `bench/results/smart/qualify/<date>-<sha256 first 12>.json`. It prints the
+model's SHA-256, utility, false-confidence rate, latency and peak RSS, and
+whether it meets the thresholds in `docs/slm/qualified_models.tsv`; `--record`
+adds a model that does to that list.
+
+Every model-path run carries its output conformance (`summary.model.conformance`):
+answers, empty answers, parse failures, grammar escapes, and splice failures by
+kind. A rise is a harness regression, not a model one.
+
+`check_drift.py <record.json>` compares a model-path record with the model's
+newest qualification record: it fails when utility falls below the
+qualification's interval or a conformance rate per answer rises.
+`.github/workflows/slm-drift.yml` runs it weekly when the repository variable
+`SLM_QUALIFIED_MODEL_SHA256` names a model in the Actions cache.
+
+`sandbox_depth_timing.py` replays each single-mutation train case's right fix
+at each sandbox depth and records the time per candidate (#363).

@@ -24,10 +24,13 @@
 #include "slm/SLMEngine.h"
 #include "frontend/AST.h"
 #include "llvm/ADT/SmallString.h"
+#include <map>
 #include <set>
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/JSON.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/SHA256.h"
+#include "llvm/ADT/StringExtras.h"
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -40,6 +43,16 @@
 #include <iostream>
 #include <regex>
 #include <sstream>
+#include <thread>
+#if defined(__APPLE__)
+#include <mach/mach.h>
+#include <unistd.h>
+#elif defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 static std::string stripAnsiCodes(const std::string &input) {
   static const std::regex ansiPattern("\\033\\[[0-9;]*m");
@@ -1041,6 +1054,20 @@ static bool resolveSmartModel(std::string &ModelPath) {
     return true;
   }
 
+  // SL-4: TURF_SLM_MODEL=<file.gguf> names the model outright, for
+  // scripts/slm/qualify_model.sh and the benchmark, which measure one model
+  // without moving it into the install.
+  if (const char *Forced = std::getenv("TURF_SLM_MODEL"); Forced && *Forced) {
+    if (!llvm::sys::fs::is_regular_file(Forced)) {
+      Note(std::string("TURF_SLM_MODEL names ") + Forced + ", which is not a file");
+      return false;
+    }
+    Cached = Forced;
+    ModelPath = Cached;
+    Found = true;
+    return true;
+  }
+
   llvm::SmallString<128> Dir(CompilerExecutablePath);
   llvm::sys::fs::make_absolute(Dir);
   llvm::sys::path::remove_filename(Dir);
@@ -1093,6 +1120,134 @@ static std::string slmCacheDir() {
   return std::string(Home) + "/.cache/turf/slm";
 }
 
+// ── SL-4: which model, and may it run here ─────────────────────────────────
+
+// The SHA-256 of the model file, hex. Hashing a 1 GB file takes seconds, so
+// the result is kept beside the suggestion cache, keyed by the file's path,
+// size and modification time. Empty when the file cannot be read.
+static std::string modelSha256(const std::string &Path) {
+  llvm::sys::fs::file_status St;
+  if (llvm::sys::fs::status(Path, St))
+    return "";
+  const std::string Stamp =
+      std::to_string(St.getSize()) + " " +
+      std::to_string(St.getLastModificationTime().time_since_epoch().count());
+  const std::string Dir = slmCacheDir();
+  const std::string Memo = Dir.empty() ? "" : Dir + "/model-" + fnv1aHex(Path) + ".sha256";
+  if (!Memo.empty()) {
+    std::ifstream In(Memo);
+    std::string Line;
+    if (std::getline(In, Line) && Line.rfind(Stamp + " ", 0) == 0)
+      return Line.substr(Stamp.size() + 1);
+  }
+  std::ifstream File(Path, std::ios::binary);
+  if (!File)
+    return "";
+  llvm::SHA256 Hasher;
+  std::vector<char> Buf(1 << 20);
+  while (File) {
+    File.read(Buf.data(), static_cast<std::streamsize>(Buf.size()));
+    const std::streamsize Got = File.gcount();
+    if (Got > 0)
+      Hasher.update(llvm::ArrayRef<uint8_t>(reinterpret_cast<const uint8_t *>(Buf.data()),
+                                            static_cast<size_t>(Got)));
+  }
+  const std::string Hex = llvm::toHex(Hasher.final(), /*LowerCase=*/true);
+  if (!Memo.empty() && !llvm::sys::fs::create_directories(Dir)) {
+    std::ofstream Out(Memo, std::ios::trunc);
+    Out << Stamp << " " << Hex << "\n";
+  }
+  return Hex;
+}
+
+// What answers depend on besides the prompt: the llama.cpp revision the
+// runtime was built from and the model file's SHA-256. Part of the cache
+// fingerprint, so an answer one model gave is never served for another.
+// "replay" under TURF_SLM_REPLAY (no model runs).
+static const std::string &smartModelIdentity() {
+  static const std::string Id = [] {
+    if (std::getenv("TURF_SLM_REPLAY"))
+      return std::string("replay");
+    std::string Path;
+    const std::string Sha = resolveSmartModel(Path) ? modelSha256(Path) : "";
+    return std::string("llama=") + TURF_LLAMA_REVISION + ";model=" + Sha;
+  }();
+  return Id;
+}
+
+// Qualified models: docs/slm/qualified_models.tsv, one line per model that
+// met the published thresholds under scripts/slm/qualify_model.sh (its
+// SHA-256 first, then its file name, the date and the record). Any other
+// model still runs; one note says it is not qualified.
+static void noteIfUnqualified(const std::string &Path) {
+  static bool Noted = false;
+  if (Noted)
+    return;
+  Noted = true;
+  const std::string Sha = modelSha256(Path);
+  std::ifstream List(InstalledDocPath("docs/slm/qualified_models.tsv"));
+  std::string Line;
+  while (std::getline(List, Line))
+    if (!Sha.empty() && Line.rfind(Sha + "\t", 0) == 0)
+      return;
+  std::cerr << "note: --smart is running " << llvm::sys::path::filename(Path).str()
+            << ", which is not a qualified model (scripts/slm/qualify_model.sh); "
+               "its suggestions are checked the same way.\n";
+}
+
+// Bytes of memory the system can still give, or 0 when it cannot be told.
+// TURF_SLM_ASSUME_FREE_MB overrides it (tests).
+static uint64_t availableMemoryBytes() {
+  if (const char *Forced = std::getenv("TURF_SLM_ASSUME_FREE_MB"))
+    return static_cast<uint64_t>(std::strtoull(Forced, nullptr, 10)) << 20;
+#if defined(__linux__)
+  std::ifstream Info("/proc/meminfo");
+  std::string Key;
+  uint64_t Kb = 0;
+  std::string Unit;
+  while (Info >> Key >> Kb >> Unit)
+    if (Key == "MemAvailable:")
+      return Kb << 10;
+  return 0;
+#elif defined(__APPLE__)
+  vm_statistics64_data_t Stats;
+  mach_msg_type_number_t Count = HOST_VM_INFO64_COUNT;
+  if (host_statistics64(mach_host_self(), HOST_VM_INFO64,
+                        reinterpret_cast<host_info64_t>(&Stats), &Count) != KERN_SUCCESS)
+    return 0;
+  const uint64_t Page = static_cast<uint64_t>(sysconf(_SC_PAGESIZE));
+  return (static_cast<uint64_t>(Stats.free_count) + Stats.inactive_count +
+          Stats.purgeable_count) * Page;
+#elif defined(_WIN32)
+  MEMORYSTATUSEX M;
+  M.dwLength = sizeof(M);
+  return GlobalMemoryStatusEx(&M) ? static_cast<uint64_t>(M.ullAvailPhys) : 0;
+#else
+  return 0;
+#endif
+}
+
+// SL-4 resource bound: the model's file plus room for its context (the KV
+// cache at n_ctx 10240 and llama.cpp's buffers, kModelHeadroomMB) must fit
+// in the memory still free, or the model is not loaded. A system that does
+// not say how much is free is not refused.
+static constexpr uint64_t kModelHeadroomMB = 512;
+static bool enoughMemoryFor(const std::string &Path) {
+  uint64_t Size = 0;
+  if (llvm::sys::fs::file_size(Path, Size))
+    return true;
+  const uint64_t Free = availableMemoryBytes();
+  const uint64_t Need = Size + (kModelHeadroomMB << 20);
+  if (Free == 0 && !std::getenv("TURF_SLM_ASSUME_FREE_MB"))
+    return true;
+  if (Free >= Need)
+    return true;
+  std::cerr << "note: --smart needs about " << (Need >> 20) << " MB free to load "
+            << llvm::sys::path::filename(Path).str() << " and " << (Free >> 20)
+            << " MB is; showing the compiler's own diagnostics.\n";
+  return false;
+}
+
 // See this section's own top comment for why the compiler binary's
 // size+mtime (rather than a version string this project doesn't have) is
 // the invalidation fingerprint. Computed fresh per call rather than once
@@ -1123,7 +1278,8 @@ static std::string slmCompilerFingerprint() {
     return ""; // stat() failed -- never matches a real cache entry below
   auto Mtime = Status.getLastModificationTime().time_since_epoch().count();
   return "schema" + std::to_string(kSlmSchemaVersion) + ":" +
-         std::to_string(Status.getSize()) + ":" + std::to_string(Mtime);
+         std::to_string(Status.getSize()) + ":" + std::to_string(Mtime) + ":" +
+         smartModelIdentity();
 }
 
 static bool readSlmCache(const std::string &Key, AISuggestion &Out) {
@@ -1268,9 +1424,96 @@ int ExtraSamples = 0;
 // cache).
 static int SampleIndex = 0;
 
+// TURF_SLM_NO_CACHE: neither read nor write the suggestion cache, so every
+// answer comes from the model (SL-4's determinism check: a cache would hide a
+// model that answers differently twice).
 static bool slmCacheBypassed() {
+  if (std::getenv("TURF_SLM_NO_CACHE"))
+    return true;
   return std::getenv("TURF_SLM_REPLAY") != nullptr &&
          std::getenv("TURF_SLM_REPLAY_CACHE") == nullptr;
+}
+
+// ── SL-4: the run's budget and its output conformance ──────────────────────
+
+// One --smart run (validateAndApplySuggestion(): every attempt, the
+// explanation, --smart=thorough's samples) gets kSmartBudgetSeconds of wall
+// clock, TURF_SLM_BUDGET_SECONDS to change it. Past it no model call starts,
+// a generation in progress stops (SLMEngine::setDeadline()), and a run with
+// no validated fix yet ends with the compiler's own diagnostics. A fix that
+// already passed is still shown (without an explanation if that did not fit).
+static constexpr int kSmartBudgetSeconds = 180;
+static std::chrono::steady_clock::time_point RunDeadline =
+    std::chrono::steady_clock::time_point::max();
+
+static int smartBudgetSeconds() {
+  if (const char *E = std::getenv("TURF_SLM_BUDGET_SECONDS")) {
+    const long V = std::strtol(E, nullptr, 10);
+    if (V > 0)
+      return static_cast<int>(V);
+  }
+  return kSmartBudgetSeconds;
+}
+
+static bool overBudget() { return std::chrono::steady_clock::now() >= RunDeadline; }
+
+// Counts of what the model's answers looked like, per run: a rise is a harness
+// regression (the issue-#267 class), not a model one. TURF_SLM_DEBUG prints
+// them at the end of the run as `[SLM] conformance: ...`, which
+// scripts/slm/slm_benchmark/run_benchmark.py sums per benchmark run.
+//   empty            the model returned nothing
+//   parse_failures   no JSON object, or one that does not parse
+//   grammar_escapes  JSON that parses but breaks the grammar's shape (a field
+//                    missing, fix_mode or category outside its values)
+//   splice_*         an answer the harness could not place: original_code
+//                    found nowhere, an empty new_code, new_code == original_code
+struct Conformance {
+  int Answers = 0, Empty = 0, ParseFailures = 0, GrammarEscapes = 0;
+  int SpliceNotFound = 0, SpliceEmptyNewCode = 0, SpliceUnchanged = 0;
+};
+static Conformance Conf;
+
+// Counts one answer against the keys its grammar requires; `Allowed` maps a
+// key to the values it may take (empty: any string).
+static void countAnswer(const std::string &Raw, const std::vector<std::string> &Keys,
+                        const std::map<std::string, std::set<std::string>> &Allowed = {}) {
+  ++Conf.Answers;
+  if (Raw.find_first_not_of(" \t\r\n") == std::string::npos) {
+    ++Conf.Empty;
+    return;
+  }
+  const size_t From = Raw.find('{'), To = Raw.rfind('}');
+  if (From == std::string::npos || To == std::string::npos || To < From) {
+    ++Conf.ParseFailures;
+    return;
+  }
+  auto Parsed = llvm::json::parse(Raw.substr(From, To - From + 1));
+  if (!Parsed) {
+    llvm::consumeError(Parsed.takeError());
+    ++Conf.ParseFailures;
+    return;
+  }
+  const llvm::json::Object *Obj = Parsed->getAsObject();
+  bool Escaped = !Obj;
+  for (const auto &K : Keys) {
+    if (Escaped)
+      break;
+    auto V = Obj->getString(K);
+    auto A = Allowed.find(K);
+    Escaped = !V || (A != Allowed.end() && !A->second.count(V->str()));
+  }
+  if (Escaped)
+    ++Conf.GrammarEscapes;
+}
+
+static std::string conformanceLine() {
+  return "[SLM] conformance: answers=" + std::to_string(Conf.Answers) +
+         " empty=" + std::to_string(Conf.Empty) +
+         " parse_failures=" + std::to_string(Conf.ParseFailures) +
+         " grammar_escapes=" + std::to_string(Conf.GrammarEscapes) +
+         " splice_not_found=" + std::to_string(Conf.SpliceNotFound) +
+         " splice_empty_new_code=" + std::to_string(Conf.SpliceEmptyNewCode) +
+         " splice_unchanged=" + std::to_string(Conf.SpliceUnchanged);
 }
 
 // TURF_SLM_REPLAY=<file>: answer each model call with the next recorded
@@ -1302,6 +1545,18 @@ static std::string nextReplayResponse() {
     }
     if (Current.find_first_not_of(" \t\r\n") != std::string::npos)
       Responses.push_back(Current);
+  }
+  // TURF_SLM_REPLAY_DELAY_MS: each answer takes this long, as a slow model's
+  // would, and one that would end past the run's budget is cut off empty, as
+  // SLMEngine's deadline cuts a generation (SL-4's budget test).
+  if (const char *Delay = std::getenv("TURF_SLM_REPLAY_DELAY_MS")) {
+    const auto Until = std::chrono::steady_clock::now() +
+                       std::chrono::milliseconds(std::strtol(Delay, nullptr, 10));
+    std::this_thread::sleep_until(std::min(Until, RunDeadline));
+    if (Until > RunDeadline) {
+      ++Next;
+      return "";
+    }
   }
   return Next < Responses.size() ? Responses[Next++] : "";
 }
@@ -1560,10 +1815,18 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
 
   if (!replaying) {
     std::string ModelPath;
-    if (!resolveSmartModel(ModelPath) ||
-        !SLMEngine::getInstance().initialize(ModelPath)) {
+    if (!resolveSmartModel(ModelPath))
       return suggestion;
+    if (SLMEngine::builtIn()) {
+      if (std::getenv("TURF_SLM_DEBUG"))
+        std::cerr << "[SLM] model: " << ModelPath << " (" << smartModelIdentity() << ")\n";
+      static const bool Fits = enoughMemoryFor(ModelPath);
+      if (!Fits)
+        return suggestion;
+      noteIfUnqualified(ModelPath);
     }
+    if (!SLMEngine::getInstance().initialize(ModelPath))
+      return suggestion;
   }
 
   // Resolve the GBNF grammar file (same binary-relative pattern as model path).
@@ -1764,6 +2027,12 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
                       SampleIndex > 0 ? ThoroughTemperature : 0.0f,
                       static_cast<unsigned>(SampleIndex));
 
+  countAnswer(rawResponse, {"reasoning", "fix_mode", "original_code", "new_code", "category"},
+              {{"fix_mode", {"MODIFY", "NONE"}},
+               {"category",
+                {"TYPE_MISMATCH", "UNDECLARED_VARIABLE", "CONTROL_FLOW", "SYNTAX_ERROR",
+                 "ARITHMETIC", "STRING_CONVERSION", "ARRAY_ERROR", "DECLARATION",
+                 "FUNCTION_SIGNATURE", "BUILTIN_FUNCTION", "MEMORY_ERROR", "GENERAL"}}});
   if (std::getenv("TURF_SLM_DEBUG")) {
     std::cerr << "Clean Error: " << cleanError << "\n";
     std::cerr << "\n--- SLM RAW RESPONSE DEBUG ---\n"
@@ -1891,13 +2160,17 @@ bool verifySuggestion(AISuggestion &suggestion, int errorLine,
   // would otherwise "fix" most errors by deleting the line they are on, and
   // the sandbox -- which only asks "does it compile and is the error gone?" --
   // would approve it.
-  if (suggestion.new_code.empty())
+  if (suggestion.new_code.empty()) {
+    ++Conf.SpliceEmptyNewCode;
     return reject("new_code was empty. Put the corrected Turf code in "
                   "new_code; the harness cannot delete lines for you.");
+  }
   if (!isBlankLine(suggestion.original_code) &&
-      sameCode(suggestion.original_code, suggestion.new_code))
+      sameCode(suggestion.original_code, suggestion.new_code)) {
+    ++Conf.SpliceUnchanged;
     return reject("new_code is the same code as original_code. Change "
                   "something: the error is still there.");
+  }
 
   // Where the model's copy is. See locateOriginal() for the whole contract;
   // the one thing to know here is that a copy found nowhere stops the attempt
@@ -1905,7 +2178,8 @@ bool verifySuggestion(AISuggestion &suggestion, int errorLine,
   // being told its CODE was wrong when only its line number was).
   const std::vector<OriginalMatch> located =
       locateOriginal(suggestion.original_code, errorLine, related);
-  if (located.empty())
+  if (located.empty()) {
+    ++Conf.SpliceNotFound;
     // The error line is quoted, not numbered: the model is not shown line
     // numbers any more (getCodeContext()), and a number it cannot see in its
     // input would only invite it to count lines again.
@@ -1913,6 +2187,7 @@ bool verifySuggestion(AISuggestion &suggestion, int errorLine,
         "original_code does not appear in the program; copy the lines "
         "exactly as they are in \"code\", character for character. The line "
         "the error is on reads: " + normalizeLine(lineText(errorLine)));
+  }
 
   // Candidate edits, tried in order until one validates: each located range
   // (nearest the error first; for an exact copy that is the only one that
@@ -2119,7 +2394,12 @@ static void measureAgreement(AISuggestion &suggestion, const std::string &errorM
                              const DiagnosticHints &hints, const std::string &errorCode) {
   std::set<std::string> programs{suggestion.appliedSource};
   int validated = 0;
+  bool cut = false;
   for (int k = 1; k <= ExtraSamples; ++k) {
+    if (overBudget()) {
+      cut = true;
+      break;
+    }
     SampleIndex = k;
     AISuggestion extra = fetchSuggestion(errorMessage, errorLine, hint, related, category,
                                          previousAttemptFailed, hints, errorCode);
@@ -2131,9 +2411,10 @@ static void measureAgreement(AISuggestion &suggestion, const std::string &errorM
       programs.insert(extra.appliedSource);
     }
   }
-  suggestion.score.Candidates = static_cast<int>(programs.size());
+  // Cut short by the budget with no disagreement seen: not measured.
+  suggestion.score.Candidates = cut && programs.size() == 1 ? 0 : static_cast<int>(programs.size());
   if (std::getenv("TURF_SLM_DEBUG"))
-    std::cerr << "[SLM] thorough: " << validated << " of " << ExtraSamples
+    std::cerr << "[SLM] thorough: " << (cut ? "cut short by the budget; " : "") << validated << " of " << ExtraSamples
               << " extra answers validated; " << programs.size()
               << " different program(s)\n";
 }
@@ -2172,13 +2453,40 @@ static void explainFix(AISuggestion &s, const std::string &errorMessage,
                        int errorLine, const std::vector<std::string> &errorsMet) {
   if (s.fromCache)
     return;
+  if (overBudget()) {
+    if (std::getenv("TURF_SLM_DEBUG"))
+      std::cerr << "[SLM] explain: skipped, out of the run's budget\n";
+    return;
+  }
   const bool replaying = std::getenv("TURF_SLM_REPLAY") != nullptr;
   const int n = static_cast<int>(SourceLines.size());
   std::string user = "{\n  \"error\": \"" + escapeJsonString(stripAnsiCodes(errorMessage)) + "\",\n";
   user += "  \"error_line\": \"" +
           escapeJsonString(errorLine >= 1 && errorLine <= n ? SourceLines[errorLine - 1] : "") +
           "\",\n";
-  user += "  \"edit\": \"" + escapeJsonString(renderPatchDiff(s, /*color=*/false)) + "\"";
+  // The edit as the lines it replaced and the lines that replace them, the
+  // ones equal at both ends left out (as renderPatchDiff() does), with no
+  // gutter: a small model reads `- 12 |` as part of the code.
+  {
+    std::vector<std::string> was, now = splitTextLines(s.patchText);
+    for (int i = s.patchStart; i >= 1 && i <= s.patchEnd && i <= n; ++i)
+      was.push_back(SourceLines[i - 1]);
+    size_t head = 0;
+    while (head < was.size() && head < now.size() && was[head] == now[head])
+      ++head;
+    size_t tail = 0;
+    while (tail < was.size() - head && tail < now.size() - head &&
+           was[was.size() - 1 - tail] == now[now.size() - 1 - tail])
+      ++tail;
+    auto join = [&](const std::vector<std::string> &v) {
+      std::string out;
+      for (size_t i = head; i < v.size() - tail; ++i)
+        out += (out.empty() ? "" : "\n") + normalizeLine(v[i]);
+      return out;
+    };
+    user += "  \"before\": \"" + escapeJsonString(join(was)) + "\",\n";
+    user += "  \"after\": \"" + escapeJsonString(join(now)) + "\"";
+  }
   if (!errorsMet.empty())
     user += ",\n  \"errors_on_the_way\": " + jsonStringArray(errorsMet);
   user += "\n}\nRespond with ONLY this JSON object: {\"summary\": <one line: what the "
@@ -2189,12 +2497,16 @@ static void explainFix(AISuggestion &s, const std::string &errorMessage,
       "the compiler's own voice: warm, direct, second-person ('you'), never "
       "condescending. The fix is already checked: the compiler compiled the "
       "fixed program and the error is gone, so never say you are unsure "
-      "whether it works. \"edit\" is the whole change, from the program as it "
-      "was ('-' lines) to the fixed one ('+' lines); describe that edit and "
-      "nothing else. \"errors_on_the_way\", when present, are errors earlier "
+      "whether it works. \"before\" is the code the fix replaced and "
+      "\"after\" what replaced it: the whole change. Say what changed from "
+      "before to after, and describe nothing else. \"errors_on_the_way\", when present, are errors earlier "
       "drafts of the fix ran into: do not describe the drafts, but you may "
       "use them to say why the edit is the way it is. Do not suggest other "
-      "changes. Respond ONLY in valid JSON without markdown code blocks.\n";
+      "changes. When you name code, copy it from the edit exactly, in "
+      "backticks (`self.n to string`): Turf-Lang is not C, Python or Rust, "
+      "so never rename it into another language's spelling, such as a method "
+      "the edit does not call. Respond ONLY in valid JSON without markdown "
+      "code blocks.\n";
   if (std::getenv("TURF_SLM_DUMP_PROMPT"))
     std::cerr << "--- EXPLAIN SYSTEM PROMPT ---\n" << system << "--- END EXPLAIN SYSTEM PROMPT ---\n"
               << "--- EXPLAIN USER PROMPT ---\n" << user << "--- END EXPLAIN USER PROMPT ---\n";
@@ -2207,6 +2519,7 @@ static void explainFix(AISuggestion &s, const std::string &errorMessage,
                                     : SLMEngine::getInstance().generateSuggestion(system, user, grammar);
   const double ms =
       std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count();
+  countAnswer(raw, {"summary", "explanation"});
   const size_t from = raw.find('{'), to = raw.rfind('}');
   if (from != std::string::npos && to != std::string::npos && to > from) {
     const std::string json = raw.substr(from, to - from + 1);
@@ -2241,7 +2554,26 @@ AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
   std::string previousAttemptFailed; // empty on attempt 1
   std::vector<std::string> errorsMet; // each failed attempt's first error
 
+  // SL-4: this run's budget, and its conformance counts at the end.
+  RunDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(smartBudgetSeconds());
+  SLMEngine::getInstance().setDeadline(RunDeadline);
+  Conf = Conformance();
+  struct ReportConformance {
+    ~ReportConformance() {
+      if (std::getenv("TURF_SLM_DEBUG"))
+        std::cerr << conformanceLine() << "\n";
+    }
+  } Report;
+
   for (int attempt = 1; attempt <= kMaxSlmAttempts; ++attempt) {
+    if (overBudget()) {
+      // Fail closed: no fix has passed, so the compiler's own diagnostic.
+      std::cerr << "note: --smart stopped at its " << smartBudgetSeconds()
+                << "-second budget; showing the compiler's own diagnostics.\n";
+      suggestion.valid = false;
+      suggestion.fix_mode = "NONE";
+      return suggestion;
+    }
     suggestion = fetchSuggestion(errorMessage, errorLine, hint, related,
                                  category, previousAttemptFailed, hints,
                                  errorCode);
@@ -2250,6 +2582,9 @@ AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
       // The SLM itself failed/timed out/produced unparsable JSON -- not a
       // sandbox rejection, so retrying with the same unreachable model
       // wouldn't help. Bail immediately, same as the old single-shot path.
+      if (overBudget())
+        std::cerr << "note: --smart stopped at its " << smartBudgetSeconds()
+                  << "-second budget; showing the compiler's own diagnostics.\n";
       return suggestion;
     }
 

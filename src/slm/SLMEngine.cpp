@@ -348,7 +348,7 @@ std::string SLMEngine::generateSuggestion(const std::string &systemPrompt,
   int total_tokens = CachedSystemTokens.size() + n_user;
 
   // Token-budget guard
-  static constexpr int GEN_BUDGET = 512;
+  static constexpr int GEN_BUDGET = kMaxAnswerTokens;
   if (total_tokens > n_ctx - GEN_BUDGET) {
     if (saved_stderr != -1) {
       dup2(saved_stderr, STDERR_FILENO);
@@ -455,7 +455,9 @@ std::string SLMEngine::generateSuggestion(const std::string &systemPrompt,
   const std::string STOP_IM_START = "<|im_start|>";
 
   const llama_vocab *vocab = llama_model_get_vocab(llama_get_model(ctx));
-  for (int i = 0; i < 512; i++) {
+  for (int i = 0; i < kMaxAnswerTokens; i++) {
+    if (std::chrono::steady_clock::now() >= Deadline)
+      break; // out of the run's budget: what there is fails to parse
     llama_token token = llama_sampler_sample(sampler, ctx, -1);
     if (llama_vocab_is_eog(vocab, token))
       break;

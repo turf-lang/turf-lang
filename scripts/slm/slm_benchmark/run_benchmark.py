@@ -174,6 +174,10 @@ def judge(case, fixed_text: str):
 
 CONF = re.compile(r"Final Confidence \(post-sandbox(?:, capped)?\): ([0-9.]+)")
 TIER = re.compile(r"^Fix tier: (\w+)", re.M)
+# SL-4: the run's output conformance (src/slm/SLMIntegration.cpp, conformanceLine()).
+CONFORMANCE = re.compile(r"^\[SLM\] conformance: (.*)$", re.M)
+CONFORMANCE_KEYS = ("answers", "empty", "parse_failures", "grammar_escapes", "splice_not_found",
+                    "splice_empty_new_code", "splice_unchanged")
 
 
 def run_case(case, path, k):
@@ -195,6 +199,12 @@ def run_case(case, path, k):
     model_text = written.read_text() if written.exists() and written.read_text().strip() else None
     if model_text is not None and rule_text is not None and model_text.rstrip("\n") == rule_text.rstrip("\n"):
         model_text = None  # the compiler's own fixes, written by --smart-write-fix
+    conformance = dict.fromkeys(CONFORMANCE_KEYS, 0)
+    for line in CONFORMANCE.findall(err):
+        for kv in line.split():
+            key, _, val = kv.partition("=")
+            if key in conformance and val.isdigit():
+                conformance[key] += int(val)
     if model_text is not None:
         prov = "cache" if "[SLM] Cache hit" in err else "model"
         shown = model_text
@@ -222,7 +232,7 @@ def run_case(case, path, k):
         utility = 0
     return dict(id=case["id"], path=path, code=case["error_code"], category=first.get("category") or "(none)",
                 kind=case["kind"], oracle=case["oracle"], provenance=prov, tier=tier, outcome=outcome, utility=utility,
-                confidence=conf, seconds=round(secs, 3), rss_mb=round(rss, 1))
+                confidence=conf, seconds=round(secs, 3), rss_mb=round(rss, 1), conformance=conformance)
 
 
 # ----------------------------------------------------------------------------
@@ -290,7 +300,9 @@ def summarize(rows, boots, seed):
                 false_confidence=round(mean([r["outcome"] != "correct" for r in shown]), 4) if shown else None,
                 hard_negative_silence=round(mean([r["provenance"] == "none" for r in hard]), 4) if hard else None,
                 hard_negatives=len(hard), brier=round(brier, 4) if brier is not None else None,
-                brier_cases=len(scored), by_tier=by_tier, by_provenance=by_prov, by_code=table("code"),
+                brier_cases=len(scored), by_tier=by_tier, by_provenance=by_prov,
+                conformance={k: sum(r["conformance"][k] for r in rows) for k in CONFORMANCE_KEYS},
+                by_code=table("code"),
                 by_category=table("category"), by_kind=table("kind"))
 
 
@@ -322,6 +334,8 @@ def report(split, k, summaries, diff):
               f"over {diff['cases']} cases; {sep}.")
     for path, s in summaries.items():
         print(f"\n--- {path}: outcomes {s['outcomes']}")
+        if s["conformance"]["answers"]:
+            print("conformance: " + " ".join(f"{k}={v}" for k, v in s["conformance"].items()))
         print(f"{'tier':10s} {'shown':>5s} {'correct':>8s} {'95% interval':>18s}")
         for t, v in s["by_tier"].items():
             print(f"{t:10s} {v['shown']:5d} {100 * v['correct_rate']:7.1f}% "
@@ -351,9 +365,13 @@ def git_commit():
 def model_identity():
     if os.environ.get("TURF_SLM_REPLAY"):
         return {"replay": os.environ["TURF_SLM_REPLAY"]}
-    ggufs = sorted((REPO / "models").glob("*.gguf"))
+    if os.environ.get("TURF_SLM_MODEL"):  # the compiler honours it too (SL-4)
+        ggufs = [Path(os.environ["TURF_SLM_MODEL"])]
+    else:
+        ggufs = sorted((REPO / "models").glob("*.gguf"))
     if len(ggufs) != 1:
-        sys.exit(f"the model path needs exactly one .gguf in {REPO / 'models'} (found {len(ggufs)})")
+        sys.exit(f"the model path needs exactly one .gguf in {REPO / 'models'} (found {len(ggufs)}), "
+                 "or TURF_SLM_MODEL=<file.gguf>")
     h = hashlib.sha256()
     with open(ggufs[0], "rb") as f:
         for b in iter(lambda: f.read(1 << 20), b""):

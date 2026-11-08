@@ -366,6 +366,14 @@ What it does with the folder:
 | one `.gguf` file | loads it and uses it |
 | more than one | uses none of them, because it cannot know which you meant; prints `note: --smart uses exactly one model and found 2 in <root>/models (a.gguf, b.gguf). Leave one .gguf file there; showing the compiler's own diagnostics.` |
 
+Three limits keep `--smart` from costing more than it is worth, and each ends with the compiler's own diagnostics and a note:
+
+- **Memory.** Before loading the model, it checks that the model's file and about 512 MB for its working memory fit in the memory still free.
+- **Time.** One `--smart` run (every attempt, the explanation, `--smart=thorough`'s extra answers) has 180 seconds of wall-clock time, or what `TURF_SLM_BUDGET_SECONDS` says. Past it no new answer is asked for and one in progress stops; a fix that already passed is still shown.
+- **Length.** An answer is at most 512 tokens.
+
+A model that is not on the list of qualified models (`docs/slm/qualified_models.tsv` in your install) gets one note, `note: --smart is running <file>, which is not a qualified model …`, and runs anyway: you choose the model, and its suggestions are checked the same way. A model is qualified by `scripts/slm/qualify_model.sh` in the source tree, which measures it on the `--smart` benchmark against published thresholds. `TURF_SLM_MODEL=<file.gguf>` runs that file instead of the one in `<root>/models`.
+
 `--smart=thorough` also asks the model for two more answers once one passes, sampled rather than taking the most likely answer each time (seeded, so a run repeats). Each is checked the same way. When the ones that pass all make the same program, nothing changes; when two different programs pass, the suggestion is shown as plausible with `2 different fixes pass these checks`, since the model could not settle on one. It takes about three times as long, and the extra answers are never cached.
 
 The model's suggestion is labelled `[Model Suggestion]`. `--smart-write-fix=<path>` writes the suggestion's program to that file when the compiler had no fix of its own; the compiler's own fixes are written with or without `--smart` (see [Fixes](#fixes)). A model has to load and run on the CPU, so a suggestion can take from several seconds to a minute or more per error. A suggestion the model cannot get validated after three attempts is dropped, and you see the compiler's diagnostic. The prompt design and sandbox are internals, described under [`docs/architecture/`](../architecture/).

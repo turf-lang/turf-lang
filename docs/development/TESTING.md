@@ -335,6 +335,12 @@ The runner only covers `tests/`. These cover the rest:
 - `scripts/slm/slm_replay_smoke.sh`: the `--smart` path without a model
   (`TURF_SLM_REPLAY`). Run it after changing `src/slm/SLMIntegration.cpp` or
   `Sandbox.cpp`.
+- `scripts/slm/slm_model_checks_smoke.sh`: SL-4's checks that need no model
+  (the note for an unqualified model, the memory check, the run's time budget,
+  the cache fingerprint). Run it after changing how `--smart` finds, loads or
+  times its model. `scripts/slm/slm_determinism_check.sh` (the same answer
+  twice, cache off) and `scripts/slm/qualify_model.sh <file.gguf>` need a
+  model and SKIP without one.
 - `scripts/slm/slm_deterministic_fix_smoke.sh`: the compiler's own fixes end to
   end. Each fixture prints its `EXPECT-FIX` with and without `--smart`; `--smart`
   never reaches the model; the program `--smart-write-fix` writes compiles and

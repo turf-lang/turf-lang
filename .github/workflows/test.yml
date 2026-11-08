@@ -490,6 +490,8 @@ jobs:
         run: ./scripts/slm/slm_benchmark_smoke.sh
       - name: SLM cache smoke test (positive and negative entries, never loads the model)
         run: ./scripts/slm/slm_cache_smoke.sh
+      - name: SLM model checks smoke test (SL-4 qualification note, memory, budget, cache fingerprint; never loads a model)
+        run: ./scripts/slm/slm_model_checks_smoke.sh
 
   # FDN-005 stage 3 (docs/planning/ROADMAP_v2.0.0.md): independent validation
   # of the collector via an ASan+UBSan-instrumented libturfrt

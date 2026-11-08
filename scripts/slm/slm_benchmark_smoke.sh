@@ -57,6 +57,15 @@ for path, id, prov, outcome, util, tier in want:
 s = rec["summary"]["rules"]
 if s["hard_negative_silence"] != 1.0:
     print("FAIL: rules path not silent on the hard negative"); bad += 1
+# SL-4: each model-path run's output conformance is summed into the record. The
+# replayed file holds one fix and no explanation answer, and three model-path
+# cases reach the model (the rule fix's never does): each counts the fix and an
+# empty explanation answer.
+c = rec["summary"]["model"]["conformance"]
+if (c["answers"], c["empty"], c["parse_failures"], c["grammar_escapes"]) != (6, 3, 0, 0):
+    print(f"FAIL: model conformance {c}"); bad += 1
+else:
+    print(f"PASS: model conformance {c}")
 if rec["model_minus_rules"]["cases"] != 4:
     print("FAIL: model - rules is not paired over all 4 cases"); bad += 1
 sys.exit(1 if bad else 0)

@@ -1,7 +1,7 @@
-{"explanation": "x", "fix_mode": "MODIFY", "original_code": "", "new_code": "    return 42;", "suggested_comment": "", "warning": "", "category": "TYPE_MISMATCH"}
+{"reasoning": "x", "fix_mode": "MODIFY", "original_code": "", "new_code": "    return 42;", "category": "TYPE_MISMATCH"}
 %%
 {"summary": "Return 42 from the function.", "explanation": "The function promises an int but never returns one, so the fix returns 42."}
 %%
-{"explanation": "x", "fix_mode": "MODIFY", "original_code": "", "new_code": "    return 40 + 2;", "suggested_comment": "", "warning": "", "category": "TYPE_MISMATCH"}
+{"reasoning": "x", "fix_mode": "MODIFY", "original_code": "", "new_code": "    return 40 + 2;", "category": "TYPE_MISMATCH"}
 %%
-{"explanation": "x", "fix_mode": "MODIFY", "original_code": "", "new_code": "    return 42;", "suggested_comment": "", "warning": "", "category": "TYPE_MISMATCH"}
+{"reasoning": "x", "fix_mode": "MODIFY", "original_code": "", "new_code": "    return 42;", "category": "TYPE_MISMATCH"}

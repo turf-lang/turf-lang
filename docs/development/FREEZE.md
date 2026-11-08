@@ -296,6 +296,11 @@ otherwise each answer differently, producing an incoherent language.
   Once a fix passes the sandbox, one more request writes the summary and
   explanation from the error, the whole original-to-final edit and the
   errors earlier attempts met; they are cached with the fix.
+  SL-4 (2.3.0): --smart never blocks on the model's identity (an unqualified
+  model gets one note), and every bound on it (memory before loading, the
+  run's wall-clock budget, the answer's token cap) fails closed to the
+  compiler's own diagnostics. The suggestion cache is keyed to the llama.cpp
+  revision and the model's SHA-256 as well as the compiler.
 - No new `ErrorCategory` values or `docs/slm/` category files without an
   explicit request.
 - Message text is outside the compatibility promise; codes and exit statuses
