@@ -1,0 +1,8 @@
+// EXPECT-DIAG: E004
+// EXPECT-DIAG: Declare `flags` as `int[2]`, or write `bool` values.
+// #365: with no conversion from `int` to `bool`, the value side is to write
+// other values.
+fn main(): int {
+    mut flags: bool[2] = [1, 2];
+    return 0;
+}

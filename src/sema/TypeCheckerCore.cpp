@@ -248,6 +248,23 @@ std::string TypeChecker::hintForMismatch(const TurfType *A, const TurfType *B,
   return Default;
 }
 
+std::string TypeChecker::hintForDeclarationMismatch(const std::string &Var,
+                                                     const TurfType *ValueTy,
+                                                     const std::string &ValueSpelling,
+                                                     const TurfType *Dest, bool Plural) const {
+  if (!ValueTy || !Dest || ValueTy->isVoid() || ValueTy->isNull() || ValueTy->isFunc() ||
+      ValueTy->isErrorUnion() || ValueSpelling.empty())
+    return "";
+  const std::string D = Dest->getName();
+  std::string ValueSide;
+  if (conversionExists(ValueTy, Dest))
+    ValueSide = Plural ? "convert each value with `to " + D + "`"
+                       : "convert the value with `to " + D + "`";
+  else
+    ValueSide = Plural ? "write `" + D + "` values" : "give it " + SpanLabels::aType(Dest) + " value";
+  return "Declare `" + Var + "` as `" + ValueSpelling + "`, or " + ValueSide + ".";
+}
+
 bool TypeChecker::isCopyOut(const TurfType *Src, const TurfType *Dest) {
   const auto *PT = dynamic_cast<const TurfPointerType *>(Src);
   if (!PT || !Dest || !PT->getPointee() || dynamic_cast<const TurfPointerType *>(Dest))

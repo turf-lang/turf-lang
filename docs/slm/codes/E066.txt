@@ -23,4 +23,6 @@ FIX:
   Read the message carefully -- it names the two concrete types (or the specific
   structural issue, e.g. which enum variant wasn't handled) involved. Make
   the value's actual type match what was expected, or fix the declared
-  type if IT was actually the mistake.
+  type if IT was actually the mistake. For a declaration the hint names both
+  ("Declare `n` as `bool`, or give it an `int` value"): decide from the
+  surrounding code which side is wrong, and change only that side.

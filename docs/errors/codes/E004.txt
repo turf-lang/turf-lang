@@ -10,8 +10,11 @@ If one of the values is the wrong type:
 
 Turf tells you the element type the array holds and the type of the value it found, so you know what to look for when you scan the list for the odd one out.
 
-To fix it, make sure every value in the list is really the array's declared type. If you have a value of a different type that should logically become that type, convert it explicitly:
+Either side can be the mistake: the values, or the type written for the array. When every value has the same type, the hint names both fixes:
 
-    immut primes: int[3] = [2, 3, 5];   // just use the right value directly
+    mut codes: char[3] = [10, 20, 30];
+    // Hint: Declare `codes` as `int[3]`, or convert each value with `to char`.
+
+If the values are what you meant, change the declaration (`mut codes: int[3]`). If the type is, make the values that type: convert them with `to` where a conversion exists, or write values of that type where none does (`mut flags: bool[2] = [1, 2];` needs `bool` values, since an `int` does not convert to a `bool`).
 
 This is a great one to double-check whenever you're typing out a long list of values by hand -- it's easy for one typo (like quoting a number by accident) to slip in.

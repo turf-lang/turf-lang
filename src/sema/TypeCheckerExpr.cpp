@@ -1383,6 +1383,57 @@ void TypeChecker::visitPostfixExpr(PostfixExprAST &Node) {
 }
 
 
+// What `x to T` accepts between two types (visitCast()), apart from copying
+// a value out of a reference: the numeric, char, enum, string and pointer
+// conversions. Also read by the mismatch hints (#365), which offer a `to`
+// only where one exists.
+bool TypeChecker::conversionExists(const TurfType *Src, const TurfType *Dst) const {
+  if (!Src || !Dst)
+    return false;
+  const std::string SrcName = Src->getName();
+  const std::string DstName = Dst->getName();
+  // An enum-typed operand may still be a bare NamedType here; resolve it as
+  // the destination was.
+  const TurfType *ResolvedSrc = Src;
+  TurfTypePtr Holder;
+  if (auto *NT2 = dynamic_cast<const NamedType *>(Src))
+    if (Symbols())
+      if ((Holder = Symbols()->LookupType(NT2->getName())))
+        ResolvedSrc = Holder.get();
+  const TurfType *ResolvedDst = Dst;
+  TurfTypePtr DstHolder;
+  if (auto *NT3 = dynamic_cast<const NamedType *>(Dst))
+    if (Symbols())
+      if ((DstHolder = Symbols()->LookupType(NT3->getName())))
+        ResolvedDst = DstHolder.get();
+  const bool SrcIsEnum = dynamic_cast<const TurfEnumType *>(ResolvedSrc) != nullptr;
+  const bool DstIsEnum = dynamic_cast<const TurfEnumType *>(ResolvedDst) != nullptr;
+  const bool SrcIsPtrLike = dynamic_cast<const TurfPointerType *>(Src) != nullptr ||
+                            SrcName == "ptr" || SrcName == "string";
+  const bool DstIsPtrLike = dynamic_cast<const TurfPointerType *>(Dst) != nullptr ||
+                            DstName == "ptr" || DstName == "string";
+  return SrcName == DstName ||
+         (SrcName == "int" && DstName == "double") ||
+         (SrcName == "double" && DstName == "int") ||
+         (SrcName == "int32" && DstName == "int") ||
+         (SrcName == "int" && DstName == "int32") ||
+         (SrcName == "int32" && DstName == "double") ||
+         (SrcName == "double" && DstName == "int32") ||
+         (SrcName == "char" && DstName == "int") ||
+         (SrcName == "int" && DstName == "char") ||
+         (SrcIsEnum && DstName == "int") ||
+         (SrcName == "int" && DstIsEnum) ||
+         (SrcName == "string" && DstName == "int") ||
+         (SrcName == "string" && DstName == "double") ||
+         (SrcName == "int" && DstName == "string") ||
+         (SrcName == "double" && DstName == "string") ||
+         (SrcName == "bool" && DstName == "string") ||
+         (SrcIsEnum && DstName == "string") ||
+         (SrcName == "string" && DstIsEnum) ||
+         (SrcName == "int" && dynamic_cast<const TurfPointerType *>(Dst) != nullptr) ||
+         (SrcIsPtrLike && DstIsPtrLike);
+}
+
 void TypeChecker::visitCast(CastExprAST &Node) {
   // Visit the operand
   if (Node.getOperand())
@@ -1576,48 +1627,9 @@ void TypeChecker::visitCast(CastExprAST &Node) {
         TypeWalk::containsOpenParam(DestTy.get(), TypeWalk::ParamScope::Bare);
 
     if (!EitherSideIsGenericParam) {
-      const std::string SrcName = OperandTy->getName();
       const std::string DstName = DestTy->getName();
 
-      // Resolve OperandTy through Symbols() too, mirroring DestTy's
-      // own resolution above -- an enum-typed operand is otherwise still a
-      // bare NamedType at this point (same root cause as the enum-literal
-      // check above).
-      TurfTypePtr ResolvedOperandTy = OperandTy;
-      if (auto *NT2 = dynamic_cast<const NamedType *>(OperandTy.get())) {
-        if (Symbols()) {
-          if (auto Resolved = Symbols()->LookupType(NT2->getName()))
-            ResolvedOperandTy = Resolved;
-        }
-      }
-      bool SrcIsEnum = dynamic_cast<const TurfEnumType *>(ResolvedOperandTy.get()) != nullptr;
-      bool DstIsEnum = dynamic_cast<const TurfEnumType *>(DestTy.get()) != nullptr;
-      bool SrcIsPtrLike = dynamic_cast<const TurfPointerType *>(OperandTy.get()) != nullptr ||
-                          SrcName == "ptr" || SrcName == "string";
-      bool DstIsPtrLike = dynamic_cast<const TurfPointerType *>(DestTy.get()) != nullptr ||
-                          DstName == "ptr" || DstName == "string";
-
-      bool Legal =
-          CopyOut || SrcName == DstName ||
-          (SrcName == "int" && DstName == "double") ||
-          (SrcName == "double" && DstName == "int") ||
-          (SrcName == "int32" && DstName == "int") ||
-          (SrcName == "int" && DstName == "int32") ||
-          (SrcName == "int32" && DstName == "double") ||
-          (SrcName == "double" && DstName == "int32") ||
-          (SrcName == "char" && DstName == "int") ||
-          (SrcName == "int" && DstName == "char") ||
-          (SrcIsEnum && DstName == "int") ||
-          (SrcName == "int" && DstIsEnum) ||
-          (SrcName == "string" && DstName == "int") ||
-          (SrcName == "string" && DstName == "double") ||
-          (SrcName == "int" && DstName == "string") ||
-          (SrcName == "double" && DstName == "string") ||
-          (SrcName == "bool" && DstName == "string") ||
-          (SrcIsEnum && DstName == "string") ||
-          (SrcName == "string" && DstIsEnum) ||
-          (SrcName == "int" && dynamic_cast<const TurfPointerType *>(DestTy.get()) != nullptr) ||
-          (SrcIsPtrLike && DstIsPtrLike);
+      const bool Legal = CopyOut || conversionExists(OperandTy.get(), DestTy.get());
 
       if (!Legal) {
 #ifndef TYPECHECKER_NO_ERRORS

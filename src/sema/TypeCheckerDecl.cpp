@@ -567,6 +567,10 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
         SLM::DiagnosticHints Hints;
         addIdentifierTypes(Node.getInitializer(), Hints);
         std::string Hint = hintForMismatch(InitTy.get(), nullptr, "", DeclTy.get());
+        // #365: name both sides; a copy-out or a `void` value keeps its own hint.
+        if (Hint.empty())
+          Hint = hintForDeclarationMismatch(Node.getName(), InitTy.get(), InitTy->getName(),
+                                            DeclTy.get(), /*Plural=*/false);
         // `mut a: &N[2] = [r1, r2];`: `&` takes the whole type after it, so
         // the declaration is a reference to an array, and the literal is an
         // array of references (turf-fuzz findings/wrong-message/
@@ -1006,14 +1010,34 @@ void TypeChecker::visitArrayDecl(ArrayDeclExprAST &Node) {
     // location rather than each individual initializer's -- matching what
     // visitArrayLiteral does just below for its own analogous mismatch.
     TurfTypePtr DeclaredElemTy = Node.getElementTypePtr();
+    // #365: when every value has one type, the declaration may be the
+    // mistake as well as the values; the hint names both.
+    TurfTypePtr CommonTy;
+    for (const auto &Init : Node.getInitList()) {
+      TurfTypePtr T = getType(Init.get());
+      if (!T || (CommonTy && CommonTy->getName() != T->getName())) {
+        CommonTy = nullptr;
+        break;
+      }
+      CommonTy = T;
+    }
     for (const auto &Init : Node.getInitList()) {
       TurfTypePtr InitTy = getType(Init.get());
       if (DeclaredElemTy && InitTy) {
         if (!typesCompatible(InitTy.get(), DeclaredElemTy.get())) {
+          std::string Hint;
+          if (CommonTy && !literalAcquiresType(Init.get(), DeclaredElemTy.get()))
+            Hint = hintForDeclarationMismatch(
+                Node.getName(), CommonTy.get(),
+                CommonTy->getName() + "[" + std::to_string(Node.getInitList().size()) + "]",
+                DeclaredElemTy.get(), /*Plural=*/true);
+          if (Hint.empty() && !conversionExists(InitTy.get(), DeclaredElemTy.get()))
+            Hint = "Write `" + DeclaredElemTy->getName() + "` values: there is no "
+                   "conversion from `" + InitTy->getName() + "`.";
           reportError(Node.getLoc(), ErrCode::ArrayTypeMismatch,
                       "I cannot put " + SpanLabels::aType(InitTy.get()) +
                           " in an array of `" + DeclaredElemTy->getName() + "`.",
-                      {});
+                      {}, Hint);
         } else {
           // SEM-002 -- see visitVarDecl()'s identical comment.
           checkLiteralRepresentable(Init.get(), DeclaredElemTy.get(), Node.getLoc());

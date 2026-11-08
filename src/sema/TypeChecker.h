@@ -769,6 +769,20 @@ private:
   /// literal is retyped to @p Dest.
   bool arrayLiteralWidensToNullableRefs(const ExprAST *Val, const TurfType *Dest);
 
+  /// What `x to T` accepts from @p Src to @p Dst, apart from copying a value
+  /// out of a reference (visitCast()).
+  bool conversionExists(const TurfType *Src, const TurfType *Dst) const;
+
+  /// Issue #365: the hint for a declaration whose written type and value
+  /// disagree. The compiler cannot tell which side is wrong, so it names
+  /// both: declare @p Var as @p ValueSpelling (the value's type), or make the
+  /// value (@p Plural: the values of a list) the declared @p Dest -- by
+  /// `to` where a conversion exists, else by writing one. Empty when the
+  /// value's type is not one a declaration can name (`null`, `void`).
+  std::string hintForDeclarationMismatch(const std::string &Var, const TurfType *ValueTy,
+                                         const std::string &ValueSpelling,
+                                         const TurfType *Dest, bool Plural) const;
+
   /// AN-4: true when @p Val is a `&?T` variable or field path
   /// (NullablePlace::isPlace) and @p Dest is the `&T` of the same pointee:
   /// passed, returned or stored as a `&T`, it is accepted here and marked
