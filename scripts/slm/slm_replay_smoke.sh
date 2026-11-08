@@ -100,6 +100,13 @@ CASES=(
   # `return`, which the front end accepts and the analysis rejects (missing
   # return); the same new_code on the error line alone passes.
   'flow_reject.missing_return:validated|candidate [9, 11] (exact copy): rejected (depth analysis|candidate [9, 9] (error line): validated (depth analysis|Sandbox depth: analysis|Fix tier: verified'
+  # #364: the explanation is written after the sandbox accepts the fix, by
+  # one more request that sees the whole edit and the errors met on the way;
+  # the attempts' own reasoning is never shown. Attempt 1 uses a field `m`
+  # Box lacks; attempt 2 passes; the third answer is the explanation.
+  'method_block.explain_after_retry:validated|(attempt 2/3)|"errors_on_the_way": [|a field named `m`|"edit": "- 11 | fn Box.count(): string {|count() now returns an int.|count() said it returns a string but gives back self.n|[SLM] explain: written in'
+  # A fix whose explanation request gets no answer is shown without one.
+  'method_block.exact_copy:validated|[SLM] explain: no answer|!Explanation:'
   # An empty new_code is never a fix (it would delete the line), and says so.
   "method_block.empty_new_code:rejected|new_code was empty"
 

@@ -15,9 +15,19 @@ namespace SLM {
 
 struct AISuggestion {
   float confidence = 0.0f;
+  // What the user reads about a fix, written after the sandbox accepted it by
+  // one more request that sees the error and the whole original-to-final
+  // edit (explainFix(), #364): a one-line summary and a short explanation.
+  // Empty until then, and empty for a fix whose explanation request fails
+  // (the fix is shown without one). Cached with the fix.
+  std::string summary;
   std::string explanation;
+  // The model's own reasoning before its edit (the fix request's first
+  // field, so a small model thinks before it writes code). Never shown,
+  // never cached: it is written before the sandbox runs, so it may doubt
+  // what the sandbox then settles.
+  std::string reasoning;
   std::string fix_mode = "NONE";
-  std::string suggested_comment;
   // The edit, as the model states it (schema version kSlmSchemaVersion, see
   // SLMIntegration.cpp): the lines it wants to change, copied from the code
   // it was shown, and what they should become. The model never says WHERE --
@@ -37,7 +47,6 @@ struct AISuggestion {
   int patchStart = 0;
   int patchEnd = 0;
   std::string patchText;
-  std::string warning;
   std::string self_reported_category; // Model's own assessment of error category
   bool valid = false;
   bool sandbox_validated = false; // Whether sandbox validation passed
@@ -91,7 +100,7 @@ std::string getCodeContext(int errorLine, int contextSize = 10);
 // (SourceLines is never committed to), not from original_code/new_code, so a
 // fuzzy-matched copy shows what was really replaced. Empty when the
 // suggestion carries no validated patch.
-std::string renderPatchDiff(const AISuggestion &suggestion);
+std::string renderPatchDiff(const AISuggestion &suggestion, bool color = true);
 
 // Fetches a suggestion from the SLM based on the error message, source
 // context, and optional hint. Returns an empty AISuggestion if the SLM fails or times out.

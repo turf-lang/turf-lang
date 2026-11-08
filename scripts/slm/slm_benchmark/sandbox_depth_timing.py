@@ -42,9 +42,9 @@ def run(case, depth, work: Path):
     d = Path(tempfile.mkdtemp(prefix="c", dir=work))
     try:
         args, _ = rb.setup(case, case["mutated_source"], d)
-        answer = {"explanation": "replayed", "fix_mode": "MODIFY",
+        answer = {"reasoning": "replayed", "fix_mode": "MODIFY",
                   "original_code": case["mutated_line"], "new_code": case["original_line"],
-                  "suggested_comment": "", "warning": "", "category": "GENERAL"}
+                  "category": "GENERAL"}
         replay = d / "answer.responses"
         replay.write_text(json.dumps(answer) + "\n")
         env = bc.clean_env()

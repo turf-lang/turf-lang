@@ -337,7 +337,7 @@ A module exists in this build, but this package may not import it
 
 ### `--smart`
 
-`--smart` asks a small language model, running locally, to suggest a fix for the first error of a compile that the compiler has no [`Fix:`](#fixes) of its own for. The compiler's own fix always comes first: when an error has one, it is printed and the model is never called. The compiler checks the model's suggestion in an isolated copy of your program, with every check a compile makes before it generates code (parsing, names, types, lints and the flow analyses: missing `return`, use before assignment, double free, ...), and shows it only if it removes the error without introducing another; otherwise you see the compiler's own diagnostic, unchanged. A suggestion that passes is then scored on what the edit does (see [How a fix is scored](#how-a-fix-is-scored)): with nothing to flag it is shown with a `Checked:` line, and with a flag it is shown with a `Check before applying:` line that says what to look at. Nothing runs on a clean compile, warnings never start it, and no network is involved.
+`--smart` asks a small language model, running locally, to suggest a fix for the first error of a compile that the compiler has no [`Fix:`](#fixes) of its own for. The compiler's own fix always comes first: when an error has one, it is printed and the model is never called. The compiler checks the model's suggestion in an isolated copy of your program, with every check a compile makes before it generates code (parsing, names, types, lints and the flow analyses: missing `return`, use before assignment, double free, ...), and shows it only if it removes the error without introducing another; otherwise you see the compiler's own diagnostic, unchanged. The model writes no explanation while it works out a fix: once a fix passes, one more short request explains it, from the error and the whole edit shown under `Suggested fix:`, so the explanation always describes that edit, even when the fix took more than one attempt. If that request gets no answer, the fix is shown without an explanation. A suggestion that passes is then scored on what the edit does (see [How a fix is scored](#how-a-fix-is-scored)): with nothing to flag it is shown with a `Checked:` line, and with a flag it is shown with a `Check before applying:` line that says what to look at. Nothing runs on a clean compile, warnings never start it, and no network is involved.
 
 ```text
 $ turf prog.tr --smart -o prog
@@ -345,8 +345,8 @@ prog.tr (1 error)
 
 ── error at line 1, col 1 [E009 · missing return]
 
-  [Model Suggestion]
-  Explanation: The function never returns a value.
+  [Model Suggestion]  Return 42 from main.
+  Explanation: main says it returns an int but never does, so the fix returns 42 at its end.
   Suggested fix:
     + 2 |     return 42;
   Checked: it compiles, adds no warning, is a small edit, removes no call, `return` or assignment, changes no declaration, and adds no `unsafe`, `extern`, system import, raw pointer or `mem::` call.

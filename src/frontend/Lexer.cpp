@@ -783,8 +783,8 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
           // Replace the compiler's message with the model's suggestion.
           g_slmFiredThisPass = true;
           finalMessage = Colors::BOLD + Colors::BRIGHT_CYAN +
-                         "[Model Suggestion]" + Colors::RESET + "  " +
-                         ai.suggested_comment;
+                         "[Model Suggestion]" + Colors::RESET +
+                         (ai.summary.empty() ? std::string() : "  " + ai.summary);
 
           if (!ai.explanation.empty()) {
             finalMessage += "\n  " + Colors::CYAN +
@@ -812,10 +812,6 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
                             "call." +
                             Colors::RESET;
 
-          if (!ai.warning.empty()) {
-            finalMessage +=
-                "\n  " + Colors::YELLOW + "Note: " + Colors::RESET + ai.warning;
-          }
 
           // SLM-001 follow-up: write the full patched source out, if asked.
           // Deliberately gated on the SAME confidence/fix_mode check as the

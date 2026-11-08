@@ -289,6 +289,13 @@ otherwise each answer differently, producing an incoherent language.
   candidate is re-checked through the flow analyses by default (#363); the
   Codegen recheck (D-16) is opt-in and runs in a child compiler, never in the
   compile's own process, and nothing it produces is linked or run.
+  #364 (2.3.0, decided 2026-11-09): the model writes nothing the user reads
+  while it works out a fix. The fix request's first field is `reasoning`,
+  never shown or cached (kept so a small model reasons before it writes
+  code; to be dropped only if the model benchmark shows it does not help).
+  Once a fix passes the sandbox, one more request writes the summary and
+  explanation from the error, the whole original-to-final edit and the
+  errors earlier attempts met; they are cached with the fix.
 - No new `ErrorCategory` values or `docs/slm/` category files without an
   explicit request.
 - Message text is outside the compatibility promise; codes and exit statuses

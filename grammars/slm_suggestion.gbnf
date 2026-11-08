@@ -1,14 +1,16 @@
 # GBNF grammar for SLM suggestion JSON output.
 # Constrains the model to emit a well-formed JSON object with exactly the
-# seven required fields in order, and token-constrains fix_mode to only
+# five required fields in order, and token-constrains fix_mode to only
 # "MODIFY" or "NONE" — it is physically impossible for the model to emit any
 # other value.
 #
 # Field order is fixed; update this file if the prompt schema changes. It is
-# also the order that suits a small model: `explanation` first (it reasons
-# before it commits), then `original_code` (copying the real text anchors it
-# on the program it was shown), then `new_code` (the edit, written against
-# that copy). The model gives no line numbers: the harness finds
+# also the order that suits a small model: `reasoning` first (it reasons
+# before it commits; never shown or cached, #364), then `original_code`
+# (copying the real text anchors it on the program it was shown), then
+# `new_code` (the edit, written against that copy). What the user reads
+# about a fix is written afterwards, once the sandbox has accepted it
+# (grammars/slm_explanation.gbnf). The model gives no line numbers: the harness finds
 # `original_code` in the source (SLMIntegration.cpp, locateOriginal()). Both
 # code fields are plain JSON strings, with lines joined by the \n escape, and
 # either may be empty (`original_code` empty means "insert after the error
@@ -32,12 +34,10 @@
 # file now follows.
 
 root ::= "{" ws (
-         "\"explanation\":"      ws string "," ws
+         "\"reasoning\":"        ws string "," ws
          "\"fix_mode\":"         ws fix-mode "," ws
          "\"original_code\":"    ws string "," ws
          "\"new_code\":"         ws string "," ws
-         "\"suggested_comment\":" ws string "," ws
-         "\"warning\":"          ws string "," ws
          "\"category\":"         ws category
          ) ws "}"
 

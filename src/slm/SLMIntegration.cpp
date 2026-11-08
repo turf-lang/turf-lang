@@ -35,6 +35,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <regex>
@@ -422,35 +423,38 @@ static std::string extractJsonFieldString(const std::string &json,
 // field. The extractors stay as the fallback for a response that is not one
 // well-formed object (no grammar loaded, or generation cut short), which is
 // exactly what they were written for.
+// `Cached`: Json is a cache entry, whose `summary` and `explanation` are the
+// ones written after the sandbox accepted the fix (#364). From the model,
+// `reasoning` is its private scratch (an older response's `explanation` is
+// read as that too), and anything else it says about the fix is ignored.
 static void parseSuggestionJson(const std::string &Json,
                                 const std::string &categoryKey,
-                                AISuggestion &Out) {
-  if (auto Parsed = llvm::json::parse(Json)) {
-    if (const llvm::json::Object *Obj = Parsed->getAsObject()) {
-      auto Str = [&](llvm::StringRef Key) -> std::string {
-        if (auto S = Obj->getString(Key))
-          return S->str();
-        return "";
-      };
-      Out.explanation = Str("explanation");
-      Out.fix_mode = Str("fix_mode");
-      Out.original_code = Str("original_code");
-      Out.new_code = Str("new_code");
-      Out.suggested_comment = Str("suggested_comment");
-      Out.warning = Str("warning");
-      Out.self_reported_category = Str(categoryKey);
-      return;
-    }
-  } else {
+                                AISuggestion &Out, bool Cached = false) {
+  std::function<std::string(const char *)> Str;
+  llvm::Expected<llvm::json::Value> Parsed = llvm::json::parse(Json);
+  const llvm::json::Object *Obj = Parsed ? Parsed->getAsObject() : nullptr;
+  if (!Parsed)
     llvm::consumeError(Parsed.takeError());
+  if (Obj)
+    Str = [&](const char *Key) -> std::string {
+      if (auto S = Obj->getString(Key))
+        return S->str();
+      return "";
+    };
+  else
+    Str = [&](const char *Key) { return extractJsonFieldString(Json, Key); };
+  Out.fix_mode = Str("fix_mode");
+  Out.original_code = Str("original_code");
+  Out.new_code = Str("new_code");
+  Out.self_reported_category = Str(categoryKey.c_str());
+  if (Cached) {
+    Out.summary = Str("summary");
+    Out.explanation = Str("explanation");
+  } else {
+    Out.reasoning = Str("reasoning");
+    if (Out.reasoning.empty())
+      Out.reasoning = Str("explanation");
   }
-  Out.explanation = extractJsonFieldString(Json, "explanation");
-  Out.fix_mode = extractJsonFieldString(Json, "fix_mode");
-  Out.original_code = extractJsonFieldString(Json, "original_code");
-  Out.new_code = extractJsonFieldString(Json, "new_code");
-  Out.suggested_comment = extractJsonFieldString(Json, "suggested_comment");
-  Out.warning = extractJsonFieldString(Json, "warning");
-  Out.self_reported_category = extractJsonFieldString(Json, categoryKey);
 }
 
 // ── Finding `original_code` in the source ───────────────────────────────────
@@ -1109,7 +1113,9 @@ static std::string slmCacheDir() {
 //   2: original_code / new_code (workstream B)
 //   3: the code is shown verbatim, with no line-number gutter, and the
 //      diagnostic's facts are structured fields (workstream C, C4/C5)
-static constexpr int kSlmSchemaVersion = 3;
+//   4: reasoning / fix_mode / original_code / new_code / category; the
+//      summary and explanation are written after the sandbox (#364)
+static constexpr int kSlmSchemaVersion = 4;
 
 static std::string slmCompilerFingerprint() {
   llvm::sys::fs::file_status Status;
@@ -1137,7 +1143,7 @@ static bool readSlmCache(const std::string &Key, AISuggestion &Out) {
   std::string Json = Rest.str();
   if (Json.empty())
     return false;
-  parseSuggestionJson(Json, "self_reported_category", Out);
+  parseSuggestionJson(Json, "self_reported_category", Out, /*Cached=*/true);
   if (Out.fix_mode.empty())
     Out.fix_mode = "NONE";
   Out.valid = true;
@@ -1161,12 +1167,11 @@ static void writeSlmCache(const std::string &Key, const AISuggestion &S) {
     return;
   File << slmCompilerFingerprint() << "\n"
        << "{"
+       << "\"summary\":\"" << escapeJsonString(S.summary) << "\","
        << "\"explanation\":\"" << escapeJsonString(S.explanation) << "\","
        << "\"fix_mode\":\"" << escapeJsonString(S.fix_mode) << "\","
        << "\"original_code\":\"" << escapeJsonString(S.original_code) << "\","
        << "\"new_code\":\"" << escapeJsonString(S.new_code) << "\","
-       << "\"suggested_comment\":\"" << escapeJsonString(S.suggested_comment) << "\","
-       << "\"warning\":\"" << escapeJsonString(S.warning) << "\","
        << "\"self_reported_category\":\"" << escapeJsonString(S.self_reported_category)
        << "\"}\n";
 }
@@ -1658,11 +1663,10 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
       "in mainstream languages -- do not silently 'correct' these into "
       "something more familiar. If a construct isn't shown in the "
       "documentation below, don't invent it. If you are not sure whether "
-      "something is valid Turf-Lang, SAY SO in explanation rather than "
-      "guessing confidently -- an honest 'I'm not certain this is right' "
-      "is more useful than a fluent wrong answer, since only "
-      "new_code gets sandbox-validated before a user sees it; "
-      "explanation and suggested_comment do not.\n\n"
+      "something is valid Turf-Lang, say so in reasoning, or answer "
+      "NONE, rather than guessing confidently. reasoning is for you: the "
+      "user never sees it. The compiler checks new_code before anything "
+      "is shown.\n\n"
       "Error category: " +
       categoryName + "\n\n" + docContent +
       "\n"
@@ -1706,8 +1710,8 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
       "confident enough\n"
       "   to suggest a specific change.\n"
       "6. Respond ONLY in valid JSON without markdown code blocks.\n"
-      "7. Keep explanation, suggested_comment, and warning to 1-3 sentences "
-      "-- warm and human-sized, not a one-word reply, but never rambling.\n";
+      "7. Keep reasoning to a few sentences: what is wrong, and what the "
+      "edit must do.\n";
 
   // The user turn: buildUserPrompt() renders the JSON header -- the error, the
   // verbatim code, and every structured fact the raise site holds (item 3's
@@ -1726,15 +1730,13 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
   }
   userPrompt +=
       "Respond with ONLY this JSON object — fill every field yourself:\n"
-      "{\"explanation\": <string>, \"fix_mode\": <MODIFY|NONE>, "
+      "{\"reasoning\": <string>, \"fix_mode\": <MODIFY|NONE>, "
       "\"original_code\": <the existing line(s) you change, copied exactly "
       "from \"code\" or \"related\", separated by \\n if more than one — "
       "see rule 2>, "
       "\"new_code\": <THE EXACT Turf-Lang code that replaces "
       "original_code — no explanation, no prose, just the raw code, lines "
       "separated by \\n if more than one>, "
-      "\"suggested_comment\": <string>, "
-      "\"warning\": <string>, "
       "\"category\": <one of: TYPE_MISMATCH, UNDECLARED_VARIABLE, "
       "CONTROL_FLOW, SYNTAX_ERROR, ARITHMETIC, STRING_CONVERSION, "
       "ARRAY_ERROR, DECLARATION, FUNCTION_SIGNATURE, BUILTIN_FUNCTION, "
@@ -2070,7 +2072,7 @@ bool verifySuggestion(AISuggestion &suggestion, int errorLine,
 // an insertion after the error line just `+` lines. The first `+` line carries
 // the line number, the rest `..`, because new lines have no number of their own
 // in the file being compiled.
-std::string renderPatchDiff(const AISuggestion &s) {
+std::string renderPatchDiff(const AISuggestion &s, bool color) {
   const int n = static_cast<int>(SourceLines.size());
   if (s.patchStart < 1 || s.patchEnd < s.patchStart || s.patchEnd > n)
     return "";
@@ -2095,12 +2097,12 @@ std::string renderPatchDiff(const AISuggestion &s) {
     out += line;
   };
   for (size_t i = head; i < oldLines.size() - tail; ++i)
-    emit(Colors::BRIGHT_RED + "- " + std::to_string(s.patchStart + i) + " | " +
-         oldLines[i] + Colors::RESET);
+    emit((color ? Colors::BRIGHT_RED : std::string()) + "- " + std::to_string(s.patchStart + i) + " | " +
+         oldLines[i] + (color ? Colors::RESET : std::string()));
   for (size_t i = head; i < newLines.size() - tail; ++i)
-    emit(Colors::BRIGHT_GREEN + "+ " +
+    emit((color ? Colors::BRIGHT_GREEN : std::string()) + "+ " +
          (i == head ? std::to_string(s.patchStart + head) : std::string("..")) +
-         " | " + newLines[i] + Colors::RESET);
+         " | " + newLines[i] + (color ? Colors::RESET : std::string()));
   return out;
 }
 
@@ -2159,6 +2161,73 @@ static constexpr int kMaxSlmAttempts = 3;
 // kMaxSlmAttempts total. computeStructuralPrior()/finalizeConfidence()
 // themselves are unchanged -- they just run once per attempt instead of
 // once total, exactly like every other step in the loop body.
+// #364: what the user reads about a fix is written once the sandbox has
+// accepted it, by one short request that sees the error, the whole edit from
+// the original program to the fixed one, and the errors earlier attempts met.
+// It cannot doubt that the fix compiles (it is told it does), and after a
+// retry it describes the whole edit, not the last step. On no answer the fix
+// is shown without an explanation. A fix from the cache keeps the
+// explanation cached with it, and is never sent back to the model for one.
+static void explainFix(AISuggestion &s, const std::string &errorMessage,
+                       int errorLine, const std::vector<std::string> &errorsMet) {
+  if (s.fromCache)
+    return;
+  const bool replaying = std::getenv("TURF_SLM_REPLAY") != nullptr;
+  const int n = static_cast<int>(SourceLines.size());
+  std::string user = "{\n  \"error\": \"" + escapeJsonString(stripAnsiCodes(errorMessage)) + "\",\n";
+  user += "  \"error_line\": \"" +
+          escapeJsonString(errorLine >= 1 && errorLine <= n ? SourceLines[errorLine - 1] : "") +
+          "\",\n";
+  user += "  \"edit\": \"" + escapeJsonString(renderPatchDiff(s, /*color=*/false)) + "\"";
+  if (!errorsMet.empty())
+    user += ",\n  \"errors_on_the_way\": " + jsonStringArray(errorsMet);
+  user += "\n}\nRespond with ONLY this JSON object: {\"summary\": <one line: what the "
+          "fix does>, \"explanation\": <1-3 sentences: why the error happened and "
+          "how this edit removes it>}\n";
+  const std::string system =
+      "You explain a fix to a Turf-Lang program to the person who wrote it, in "
+      "the compiler's own voice: warm, direct, second-person ('you'), never "
+      "condescending. The fix is already checked: the compiler compiled the "
+      "fixed program and the error is gone, so never say you are unsure "
+      "whether it works. \"edit\" is the whole change, from the program as it "
+      "was ('-' lines) to the fixed one ('+' lines); describe that edit and "
+      "nothing else. \"errors_on_the_way\", when present, are errors earlier "
+      "drafts of the fix ran into: do not describe the drafts, but you may "
+      "use them to say why the edit is the way it is. Do not suggest other "
+      "changes. Respond ONLY in valid JSON without markdown code blocks.\n";
+  if (std::getenv("TURF_SLM_DUMP_PROMPT"))
+    std::cerr << "--- EXPLAIN SYSTEM PROMPT ---\n" << system << "--- END EXPLAIN SYSTEM PROMPT ---\n"
+              << "--- EXPLAIN USER PROMPT ---\n" << user << "--- END EXPLAIN USER PROMPT ---\n";
+  llvm::SmallString<128> GrammarPath(CompilerExecutablePath);
+  llvm::sys::path::remove_filename(GrammarPath);
+  llvm::sys::path::append(GrammarPath, "..", "grammars", "slm_explanation.gbnf");
+  const std::string grammar = loadDocFile(GrammarPath.str().str());
+  const auto began = std::chrono::steady_clock::now();
+  const std::string raw = replaying ? nextReplayResponse()
+                                    : SLMEngine::getInstance().generateSuggestion(system, user, grammar);
+  const double ms =
+      std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count();
+  const size_t from = raw.find('{'), to = raw.rfind('}');
+  if (from != std::string::npos && to != std::string::npos && to > from) {
+    const std::string json = raw.substr(from, to - from + 1);
+    s.summary = extractJsonFieldString(json, "summary");
+    s.explanation = extractJsonFieldString(json, "explanation");
+    if (auto Parsed = llvm::json::parse(json)) {
+      if (const auto *Obj = Parsed->getAsObject()) {
+        if (auto V = Obj->getString("summary"))
+          s.summary = V->str();
+        if (auto V = Obj->getString("explanation"))
+          s.explanation = V->str();
+      }
+    } else {
+      llvm::consumeError(Parsed.takeError());
+    }
+  }
+  if (std::getenv("TURF_SLM_DEBUG"))
+    std::cerr << "[SLM] explain: " << (s.explanation.empty() ? "no answer" : "written") << " in "
+              << std::fixed << std::setprecision(1) << ms << std::defaultfloat << " ms\n";
+}
+
 AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
                                         int errorLine, const std::string &hint,
                                         const std::vector<RelatedLocation> &related,
@@ -2170,6 +2239,7 @@ AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
   // model is asked only when there is none.
   AISuggestion suggestion;
   std::string previousAttemptFailed; // empty on attempt 1
+  std::vector<std::string> errorsMet; // each failed attempt's first error
 
   for (int attempt = 1; attempt <= kMaxSlmAttempts; ++attempt) {
     suggestion = fetchSuggestion(errorMessage, errorLine, hint, related,
@@ -2205,6 +2275,14 @@ AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
     // The old confidence score, kept for TURF_SLM_DEBUG and the benchmark;
     // display is decided by the Fix Score's tier (SL-1).
     suggestion.confidence = finalizeConfidence(suggestion.confidence, isValid);
+
+    // Explained once it is known to work, and before it is cached, so the
+    // cache holds the explanation that goes with it (#364).
+    if (isValid)
+      explainFix(suggestion, errorMessage, errorLine, errorsMet);
+    else if (!diagnosticText.empty())
+      errorsMet.push_back(
+          diagnosticText.substr(0, std::min(diagnosticText.find('\n'), diagnosticText.find(" | "))));
 
     if (!slmCacheBypassed() && !suggestion.cacheKey.empty()) {
       if (isValid && !suggestion.fromCache) {
