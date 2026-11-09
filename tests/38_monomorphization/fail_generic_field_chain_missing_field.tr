@@ -1,0 +1,12 @@
+// turf-fuzz #34: the template leaves `a.inner.get()` open (FREEZE 6.1); an
+// instantiation whose type has no field `inner` is reported there, as an
+// unknown field, never as an internal compiler error.
+// EXPECT-DIAG: E068
+// EXPECT-NO-DIAG: compiler bug
+fn<T> read_inner(a: T): int {
+    return a.inner.get();
+}
+
+fn main(): int {
+    return read_inner(5);
+}

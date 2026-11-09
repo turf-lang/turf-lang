@@ -2879,6 +2879,33 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
   // cheap safety net against ever reaching Codegen's fatal-error fallback
   // with zero diagnostic printed at all, in case some future code path
   // reaches here with a null BaseTy that ISN'T already covered elsewhere.
+  //
+  // A base reached through a template's open type parameter (`a.f.get()`
+  // with `a: T`) has no type in the template on purpose: whether `T` has
+  // the field `f` is checked per instantiation (FREEZE §6.1), and
+  // visitFieldAccess() leaves the field's type open. The call is left open
+  // the same way (turf-fuzz #34); the clone's own check reports a real
+  // error.
+  for (const ExprAST *E = Node.getBase(); E;) {
+    TurfTypePtr ET = getType(E);
+    if (ET && (isOpenTypeParam(ET.get()) ||
+               (ET->isReference() &&
+                isOpenTypeParam(static_cast<const TurfPointerType *>(ET.get())
+                                    ->getPointee().get())))) {
+      setType(&Node, nullptr);
+      return;
+    }
+    if (ET)
+      break; // a concrete type on the way: the gap is not the template's
+    if (const auto *FA = dynamic_cast<const FieldAccessExprAST *>(E))
+      E = FA->getBase();
+    else if (const auto *MC = dynamic_cast<const MethodCallExprAST *>(E))
+      E = MC->getBase();
+    else if (const auto *AA = dynamic_cast<const ArrayAccessExprAST *>(E))
+      E = AA->getBase();
+    else
+      break;
+  }
   reportError(Node.getLoc(), ErrCode::InternalCompilerError,
               "I could not work out the type of the expression before `." +
                   MethodName + "`. This is a compiler bug.",
