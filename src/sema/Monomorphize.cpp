@@ -507,6 +507,29 @@ std::shared_ptr<ResolverFunctionSymbol> finishInstantiation(
     std::unique_ptr<ExprAST> ClonedUP, const InstantiationEntry &Entry,
     std::vector<std::unique_ptr<ExprAST>> &PrePassASTs,
     InstantiationCollector &Collector, Resolver &PreR) {
+  // A parameter whose type BECOMES `void` (or `void[N]`) has no layout,
+  // like a field (drainStructRequests()). The parser's E112 check on a
+  // written `x: void` never sees it: `w(v())` with `v(): void`, or
+  // `w(continue)`, infers T = void, and Codegen spun forever asking LLVM
+  // for the alignment of the parameter's slot (turf-fuzz #39). `void*`
+  // keeps a layout and stays accepted.
+  for (const auto &Param : Clone->getParams()) {
+    const TurfType *PT = Param.Type.get();
+    while (PT && isArrayType(PT))
+      PT = getArrayElementType(PT);
+    if (PT && PT->isVoid()) {
+      TypeError(Entry.Request.Site, ErrCode::VoidTypeNotAllowed,
+                "`" + describeRequest(Entry.Request) + "` gives the parameter `" +
+                    Param.Name + "` the type `void`, which is only a function's "
+                    "return type.",
+                "Pass a value here: a call of a `void` function, `break` or "
+                "`continue` has no value to give `" + Param.Name + "`.",
+                "'void' cannot be a parameter's type.")
+          .raise();
+      return nullptr;
+    }
+  }
+
   // Rename to a unique, collision-free internal name (§9.5's mangling
   // requirement) BEFORE resolving -- Resolver::visitFuncDef() (called
   // below) registers whatever name the node currently has into the
