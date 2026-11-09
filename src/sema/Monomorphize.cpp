@@ -590,6 +590,18 @@ std::shared_ptr<ResolverFunctionSymbol> finishInstantiation(
     g_recoverActive = SavedRecoverActive;
   }
   if (ResolveFailed) {
+    // An error the program really has (an unknown name in the template's
+    // body, turf-fuzz #36) makes the clone fail to resolve too; that error
+    // is already reported, and calling this a compiler bug on top of it
+    // would be wrong. Only a failure with no error behind it is one. The
+    // pass still stops as raise() stops it: carrying on would instantiate
+    // further templates against a half-resolved clone.
+    if (DiagnosticEngine::hasErrors()) {
+      if (g_recoverActive)
+        throw RecoverUnwind{};
+      DiagnosticEngine::flushAll();
+      std::exit(1);
+    }
     SemanticError(Entry.Request.Site,
                   "I could not resolve the instantiation of `" +
                       Entry.Request.DeclKey + "` I built. This is a compiler bug: report it at https://github.com/turf-lang/turf-lang/issues with this program.")
