@@ -1,0 +1,12 @@
+// turf-fuzz #38: a `@deprecated` without its message on a function whose
+// body fails to parse. The lint still saw the annotation, read its missing
+// argument, and crashed (SIGSEGV); the program's own error is what it gets.
+// EXPECT-DIAG: E102
+// EXPECT-NO-DIAG: Stack dump
+@deprecated
+fn make(): int {
+    [[]]}
+
+fn main(): int {
+    return make();
+}

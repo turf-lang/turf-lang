@@ -320,8 +320,12 @@ static void WarnIfDeprecated(const ResolverFunctionSymbol *Sym,
     return;
   for (const Annotation *Ann :
        Sym->annotationsNamed(DeprecatedAnnotation::Name)) {
-    // validate() (DeprecatedAnnotation.h) already guarantees exactly one
-    // string argument on every `@deprecated` that reached here.
+    // validate() (DeprecatedAnnotation.h) reports a `@deprecated` without
+    // its one string argument, but the symbol still carries the annotation
+    // and the lint can run after that error (turf-fuzz #38: a body that
+    // only fails later). That error is the program's; say nothing more.
+    if (Ann->Args.empty())
+      return;
     DeprecatedUseWarning(Loc, Sym->BaseName, Ann->Args[0].Value).warn();
     return; // one declaration may repeat the annotation; its first message wins
   }
