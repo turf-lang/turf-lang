@@ -467,6 +467,14 @@ public:
         return {0, INT32_MAX};
     if (auto *U = dynamic_cast<const UnaryExprAST *>(E)) {
       if (U->getOpcode() != '-') return {};
+      // `-9223372036854775808`: the magnitude 2^63 is stored as INT64_MIN
+      // and the literal is that value, folded with no negation at run time
+      // (TypeCheckerCore.cpp). Negating {MIN, MIN} here gave 2^63, clamped
+      // to MAX, and `-9223372036854775808 + v` with `v` = -9 was proven
+      // safe and wrapped (turf-fuzz differential, seed 2026307001214).
+      if (auto *N = dynamic_cast<const NumberExprAST *>(U->getOperand()))
+        if (N->isInteger() && N->getIntVal() == IntMin)
+          return {IntMin, IntMin};
       Range R = eval(U->getOperand(), M);
       if (R.full()) return {};
       return clamp(-static_cast<Wide>(R.Hi), -static_cast<Wide>(R.Lo));

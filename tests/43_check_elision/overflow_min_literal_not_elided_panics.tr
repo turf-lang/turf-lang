@@ -1,0 +1,35 @@
+// The literal `-9223372036854775808` is INT_MIN itself; its magnitude 2^63 is
+// stored as INT_MIN. The range analysis negated that, got 2^63, clamped it
+// to INT_MAX, and proved `-9223372036854775808 + v` safe for a known
+// negative `v`: the check was removed and the sum wrapped to a large positive
+// number at every level (found by turf-fuzz's differential oracle).
+
+import test;
+
+@test(panic, "Integer overflow")
+fn panics_min_literal_plus_known_negative(): void {
+    mut v: int = -9;
+    mut r: int = -9223372036854775808 + v;
+    printline(r);
+}
+
+@test(panic, "Integer overflow")
+fn panics_min_literal_minus_known_positive(): void {
+    mut v: int = 1;
+    mut r: int = -9223372036854775808 - v;
+    printline(r);
+}
+
+@test(panic, "Integer overflow")
+fn panics_min_literal_compound(): void {
+    mut v: int = -9;
+    v *= (-9223372036854775808 + v) % 100;
+    printline(v);
+}
+
+@test
+fn min_literal_plus_known_positive_is_exact(): void {
+    mut v: int = 9;
+    mut r: int = -9223372036854775808 + v;
+    test::assert(r == -9223372036854775799, "MIN + 9");
+}
