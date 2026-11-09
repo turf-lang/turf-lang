@@ -64,6 +64,12 @@ void productionErrorHandler(SourceLocation Loc, const char *Code,
     Err.withKnownType(Fact);
   if (!Hints.ReceiverDecl.empty())
     Err.withReceiverDecl(Hints.ReceiverDecl);
+  for (const auto &S : Hints.Structs)
+    Err.withStructDecl(S);
+  if (!Hints.Callee.empty())
+    Err.withCallee(Hints.Callee);
+  for (const auto &P : Hints.Params)
+    Err.withParam(P);
   if (!Hints.Construct.empty())
     Err.withConstruct(Hints.Construct);
   // A compiler fix (TDP-2-001): the edit, and why it is right.
@@ -282,8 +288,66 @@ void TypeChecker::reportError(SourceLocation Loc, const char *Code,
                               const std::string &CustomBanner,
                               const SLM::DiagnosticHints &Hints) {
   HadError_ = true;
-  if (ErrorHandler_)
-    ErrorHandler_(Loc, Code, Msg, Related, CustomHint, CustomBanner, Hints);
+  if (!ErrorHandler_)
+    return;
+  // SL-6: what the model cannot read off its lines, added here once for every
+  // site: the parameters of the function the error is in, and for an error
+  // about a binary expression's operands (OperandScope_), their identifiers'
+  // types and the structs they are.
+  SLM::DiagnosticHints H = Hints;
+  if (H.Params.empty() && !FuncStack_.empty() && FuncStack_.back())
+    if (const auto *Def = FuncStack_.back()->getResolvedDef())
+      for (const auto &P : Def->Params)
+        H.Params.push_back(P.Name + ": " + (P.Type ? P.Type->getName() : "?"));
+  if (OperandScope_) {
+    if (H.KnownTypes.empty()) {
+      addIdentifierTypes(OperandLHS_, H);
+      addIdentifierTypes(OperandRHS_, H);
+    }
+    if (OperandLHS_)
+      addStructDecl(getType(OperandLHS_).get(), H);
+    if (OperandRHS_)
+      addStructDecl(getType(OperandRHS_).get(), H);
+  }
+  ErrorHandler_(Loc, Code, Msg, Related, CustomHint, CustomBanner, H);
+}
+
+void TypeChecker::addStructDecl(const TurfType *T, SLM::DiagnosticHints &Hints) {
+  constexpr size_t kMaxStructs = 3;
+  // An array or a reference of a struct is about that struct.
+  while (T) {
+    if (const auto *A = dynamic_cast<const ArrayType *>(T))
+      T = A->getElementType();
+    else if (const auto *R = dynamic_cast<const TurfReferenceType *>(T))
+      T = R->getPointee().get();
+    else
+      break;
+  }
+  // A parameter keeps the type as written, a NamedType, until it is looked up.
+  TurfTypePtr Looked;
+  if (const auto *NT = dynamic_cast<const NamedType *>(T))
+    if (Symbols() && (Looked = Symbols()->LookupType(NT->getName())))
+      T = Looked.get();
+  const std::string D = describeStruct(T);
+  if (D.empty() || D == Hints.ReceiverDecl || Hints.Structs.size() >= kMaxStructs ||
+      std::find(Hints.Structs.begin(), Hints.Structs.end(), D) != Hints.Structs.end())
+    return;
+  Hints.Structs.push_back(D);
+}
+
+std::string TypeChecker::turfSignature(const ResolverFunctionSymbol &F) {
+  std::string S = "fn";
+  if (!F.TypeParams.empty()) {
+    S += "<";
+    for (size_t I = 0; I < F.TypeParams.size(); ++I)
+      S += (I ? ", " : "") + F.TypeParams[I];
+    S += ">";
+  }
+  S += " " + F.BaseName + "(";
+  for (size_t I = 0; I < F.Params.size(); ++I)
+    S += (I ? ", " : "") + F.Params[I].Name + ": " +
+         (F.Params[I].Type ? F.Params[I].Type->getName() : "?");
+  return S + "): " + (F.ReturnType ? F.ReturnType->getName() : "void");
 }
 
 

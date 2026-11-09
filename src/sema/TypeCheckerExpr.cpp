@@ -310,6 +310,8 @@ void TypeChecker::visitBinary(BinaryExprAST &Node) {
   if (Node.getRHS())
     const_cast<ExprAST *>(Node.getRHS())->accept(*this);
 
+  // SL-6: an error from here on is about these operands (OperandScope_).
+  OperandScopeGuard Scope(*this, &Node, Node.getLHS(), Node.getRHS());
   const TurfType *LhsTy = getType(Node.getLHS()).get();
   const TurfType *RhsTy = getType(Node.getRHS()).get();
   int Op = Node.getOp();
@@ -1012,6 +1014,7 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
           /*PlaceIsStoreTarget=*/true);
   }
 
+  OperandScopeGuard Scope(*this, &Node, Node.getLHS(), Node.getRHS()); // SL-6
   TurfTypePtr LhsTy = getType(Node.getLHS());
   TurfTypePtr RhsTy = getType(Node.getRHS());
   TurfTypePtr ResultTy;

@@ -107,6 +107,13 @@ CASES=(
   'method_block.explain_after_retry:validated|(attempt 2/3)|"errors_on_the_way": [|a field named `m`|"before": "fn Box.count(): string {"|"after": "fn Box.count(): int {"|count() now returns an int.|count() said it returns a string but gives back self.n|[SLM] explain: written in'
   # A fix whose explanation request gets no answer is shown without one.
   'method_block.exact_copy:validated|[SLM] explain: no answer|!Explanation:'
+  # SL-6: what the model cannot read off its lines, for an initializer, an
+  # operator and a call mismatch: the parameters of the function the error is
+  # in, the structs involved, and the called function's signature in Turf's
+  # own syntax.
+  'context_init.fields:validated|"params": ["p: Point", "n: int"]|"structs": ["struct Point { x: int, y: int }"]'
+  'context_op.fields:validated|"params": ["p: Point", "n: int"]|"structs": ["struct Point { x: int, y: int }"]|"known_types": ["p: Point", "n: int"]'
+  'context_call.fields:validated|"callee": "fn area(w: int, h: int): int"|"structs": ["struct Point { x: int, y: int }"]'
   # SL-4, prompt injection: the program's comment and a string literal try to
   # steer the model. The source reaches the model only as the JSON string
   # "code" (the literal's quotes and braces escaped), and when a replayed answer

@@ -60,6 +60,17 @@ struct DiagnosticHints {
   // "receiver", never inside the code.
   std::string ReceiverDecl;
 
+  // SL-6: more of what the model cannot read off the lines it is shown.
+  // `Structs`: the declarations of the structs a mismatch is about, other
+  // than ReceiverDecl (`struct Point { x: int, y: int }`), at most three.
+  // `Callee`: the signature of the function a call mismatch is about, in
+  // Turf's own syntax (`fn area(w: int, h: int): int`). `Params`: the
+  // parameters of the function the diagnostic is in (`n: int`), filled by the
+  // TypeChecker for every error it raises inside a function.
+  std::vector<std::string> Structs;
+  std::string Callee;
+  std::vector<std::string> Params;
+
   // The exact edit the raising site already knows fixes this diagnostic -- an
   // unambiguous "did you mean" rename, a missing `<T>`, a misplaced `pub`, a
   // missing ';' (see the withFixIt() family in Errors.h for which sites attach

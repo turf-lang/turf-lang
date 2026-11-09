@@ -1267,6 +1267,15 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
                                               " because of this"});
         }
       }
+      // SL-6: the one candidate's signature as Turf writes it, and the
+      // structs its parameters and the arguments are.
+      if (ArityMatches.size() == 1 && ArityMatches.front()) {
+        Hints.Callee = turfSignature(*ArityMatches.front());
+        for (const auto &P : ArityMatches.front()->Params)
+          addStructDecl(P.Type.get(), Hints);
+      }
+      for (const auto &A : ArgTypes)
+        addStructDecl(A.get(), Hints);
       reportError(At,
                   IsModuleCall ? ErrCode::ModuleArityOrType : ErrCode::ArgumentType,
                   "No overload of `" +

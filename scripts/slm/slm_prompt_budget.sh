@@ -146,6 +146,23 @@ if [ "$n_explain" -gt "$LIMIT" ]; then
     fail=1
 fi
 
+# SL-6: the user turn is decoded in one batch too. The fullest one the replay
+# programs make (a call mismatch: params, callee, structs, known types and the
+# code window) is measured the same way.
+TURF_SLM_DEBUG=1 TURF_SLM_REPLAY=/dev/null "$TURFC" --smart scripts/slm/slm_replay/context_call.tr 2>&1 |
+    sed -E 's/\x1b\[[0-9;]*m//g' |
+    awk '/^--- USER PROMPT ---$/{f=1;next} /^-------------------$/{f=0} f' >"$TMP/user"
+if [ ! -s "$TMP/user" ]; then
+    echo "slm_prompt_budget: the compiler printed no user prompt for context_call.tr"
+    exit 2
+fi
+n_user=$(tokens "$TMP/user")
+echo "  user prompt with SL-6's fields         $n_user tokens"
+if [ "$n_user" -gt "$LIMIT" ]; then
+    echo "FAIL the user prompt is over the $LIMIT-token cap"
+    fail=1
+fi
+
 if [ $fail -ne 0 ]; then
     echo "slm_prompt_budget: FAILED -- over the $LIMIT-token cap, the model would lose the middle of its documentation; trim the doc"
     exit 1

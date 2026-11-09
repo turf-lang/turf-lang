@@ -168,6 +168,20 @@ public:
     return *this;
   }
 
+  // SL-6 (DiagnosticHints::Structs, Callee, Params). Chainable.
+  TurfError &withStructDecl(const std::string &Decl) {
+    Hints_.Structs.push_back(Decl);
+    return *this;
+  }
+  TurfError &withCallee(const std::string &Signature) {
+    Hints_.Callee = Signature;
+    return *this;
+  }
+  TurfError &withParam(const std::string &Param) {
+    Hints_.Params.push_back(Param);
+    return *this;
+  }
+
   // ── Fix-its (SLM-001 item 1, DiagnosticHints::FixIts) ──────────────────────
   //
   // A fix-it is an exact edit the raise site already knows. The compiler

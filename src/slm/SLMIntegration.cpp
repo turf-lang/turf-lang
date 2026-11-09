@@ -1583,6 +1583,12 @@ struct PromptFacts {
   std::string receiver;
   // DiagnosticHints::KnownTypes: `x: int`, `n was declared with 'guess' ...`.
   std::vector<std::string> knownTypes;
+  // SL-6: the structs a mismatch is about (`struct Point { x: int, y: int }`),
+  // the called function's signature (`fn area(w: int, h: int): int`) and the
+  // parameters of the function the error is in (`n: int`).
+  std::vector<std::string> structs;
+  std::string callee;
+  std::vector<std::string> params;
   // The raise site's related locations (candidates, "declared here", ...).
   std::vector<PinnedLine> related;
 };
@@ -1618,6 +1624,12 @@ static std::string buildUserPrompt(const PromptFacts &f,
     out += ",\n  \"receiver\": \"" + escapeJsonString(f.receiver) + "\"";
   if (!f.knownTypes.empty())
     out += ",\n  \"known_types\": " + jsonStringArray(f.knownTypes);
+  if (!f.params.empty())
+    out += ",\n  \"params\": " + jsonStringArray(f.params);
+  if (!f.callee.empty())
+    out += ",\n  \"callee\": \"" + escapeJsonString(f.callee) + "\"";
+  if (!f.structs.empty())
+    out += ",\n  \"structs\": " + jsonStringArray(f.structs);
   if (!f.related.empty()) {
     out += ",\n  \"related\": [";
     for (size_t i = 0; i < f.related.size(); ++i) {
@@ -1704,6 +1716,9 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
   }
   facts.receiver = hints.ReceiverDecl;
   facts.knownTypes = hints.KnownTypes;
+  facts.structs = hints.Structs;
+  facts.callee = hints.Callee;
+  facts.params = hints.Params;
   facts.related = collectPinnedLines(related);
   std::string categoryName = getCategoryName(category);
   // Everything in the prompt that depends on the diagnostic -- hashed into the
@@ -1950,8 +1965,10 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
       "If the fix only ADDS a line, copy the line it goes next to and "
       "repeat that line in new_code. Leave original_code empty only to "
       "insert new lines directly after the line the error is on. "
-      "\"inside\", \"receiver\" and \"known_types\" are facts the compiler "
-      "knows: rely on them, they are not lines to copy.\n"
+      "\"inside\", \"receiver\", \"known_types\", \"params\" (the "
+      "parameters of the function the error is in), \"callee\" (the "
+      "function a call is to) and \"structs\" (the structs involved) are "
+      "facts the compiler knows: rely on them, they are not lines to copy.\n"
       "3. new_code: the Turf-Lang code that replaces original_code -- the "
       "same lines with your fix applied, lines separated by \\n. It must "
       "differ from original_code, and it is just code: no explanation, no "

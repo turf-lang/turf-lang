@@ -566,6 +566,9 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
         // the code window (or by `guess`) has its type on no line the model sees.
         SLM::DiagnosticHints Hints;
         addIdentifierTypes(Node.getInitializer(), Hints);
+        // SL-6: the structs on either side.
+        addStructDecl(DeclTy.get(), Hints);
+        addStructDecl(InitTy.get(), Hints);
         std::string Hint = hintForMismatch(InitTy.get(), nullptr, "", DeclTy.get());
         // #365: name both sides; a copy-out or a `void` value keeps its own hint.
         if (Hint.empty())

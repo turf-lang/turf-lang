@@ -407,6 +407,14 @@ private:
   /// line the model is shown. Call it at a raise site with the expression the
   /// message is about, before reportError(). Bounded (6 facts per diagnostic).
   void addIdentifierTypes(const ExprAST *E, SLM::DiagnosticHints &Hints);
+  /// SL-6: adds @p T's declaration to @p Hints.Structs when it is a struct
+  /// (through arrays and references) that is not already the receiver; at most
+  /// three.
+  void addStructDecl(const TurfType *T, SLM::DiagnosticHints &Hints);
+  /// SL-6: @p F's signature as Turf writes it, `fn area(w: int, h: int): int`
+  /// (DiagnosticHints::Callee); not ResolverFunctionSymbol::signature()'s
+  /// `area(int w, int h) -> int`, which reads as another language to a model.
+  static std::string turfSignature(const ResolverFunctionSymbol &F);
   /// The hint for a value of type @p A where another type is needed. @p Dest,
   /// when given, is that type: a reference to a @p Dest (`&P` where a `P`
   /// belongs) gets the explicit copy, `x to P`.
@@ -961,6 +969,28 @@ private:
   /// fallible, so the hint differs -- from one in any other function that
   /// returns a plain type.
   std::string CurrentFuncName_;
+  /// SL-6: the binary expression whose operands are being judged, set by
+  /// visitBinary() and visitCompoundAssignment() once the operands are
+  /// checked: an error raised meanwhile is about them, and reportError() gives
+  /// it their identifiers' types and the structs they are.
+  const ExprAST *OperandScope_ = nullptr;
+  const ExprAST *OperandLHS_ = nullptr;
+  const ExprAST *OperandRHS_ = nullptr;
+  struct OperandScopeGuard {
+    TypeChecker &TC;
+    const ExprAST *SavedScope, *SavedLHS, *SavedRHS;
+    OperandScopeGuard(TypeChecker &T, const ExprAST *Node, const ExprAST *L, const ExprAST *R)
+        : TC(T), SavedScope(T.OperandScope_), SavedLHS(T.OperandLHS_), SavedRHS(T.OperandRHS_) {
+      TC.OperandScope_ = Node;
+      TC.OperandLHS_ = L;
+      TC.OperandRHS_ = R;
+    }
+    ~OperandScopeGuard() {
+      TC.OperandScope_ = SavedScope;
+      TC.OperandLHS_ = SavedLHS;
+      TC.OperandRHS_ = SavedRHS;
+    }
+  };
 
   // ── Visibility (FREEZE.md §6.15) ─────────────────────────────────────────────
   //
