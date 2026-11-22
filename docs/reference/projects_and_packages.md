@@ -824,6 +824,7 @@ is 1.
 | `turf remove <name>` | Remove one. |
 | `turf publish` | Reserved. There is no registry in 2.0. |
 | `turf test [path...] [--offline] [--locked] [--jobs n] [--timeout s] [--exclude path]` | Compile and run every test under `tests/` and every `@test` function in `src/`, or only the files and directories of `tests/` named; an error if there is no test at all (section 1, *Tests*). |
+| `turf upgrade [--check] [--version vX.Y.Z] [--smart\|--plain]` | Move an install made by either installer to the latest release, or to the one `--version` names; `--check` only says whether there is one. It keeps the plain or smart build unless `--smart` or `--plain` switches it, downloads that release's own installer, checks it against the release's `checksums.txt` and runs it on the same folder, so `PATH` and any model in `models/` stay as they are. A release from 2.3.0 on can be the target. A Homebrew, Scoop or source install is told how to update itself (`brew upgrade turf`, `scoop update turf`). Needs no project. |
 | `turf fmt`, `turf explain`, `turf migrate`, `turf dump`, `turf compile` | Work on files, in or out of a project ([CLI & Diagnostics](cli_and_diagnostics.md)). `turf fmt --write` with no path formats the project's `src/` and `tests/`. |
 
 **Compiler flags are forwarded.** `turf build -O2`, `turf build -g` and

@@ -32,7 +32,10 @@ fn main(): int {
 }
 ```
 
-The shape is `fn name(param: Type, ...): ReturnType { body }`.
+The shape is `fn name(param: Type, ...): ReturnType { body }`. `function` may
+be written for `fn` where a declaration starts (`function add(a: int, b: int):
+int`); everywhere else `function` is an ordinary name, so a variable, field or
+parameter may be called `function`.
 
 - The return type is always written. A function that returns nothing says
   `void`; leaving the `: type` out is `E106` ("I expected a `:` followed by a
@@ -156,9 +159,11 @@ fn main(): int {
 
 - An **instance method** gets `self` implicitly and is called with `.` on a
   value: `c.bump(2)`. Inside it, `self.field` reads and writes the receiver.
-- A **static method** puts `static` after the parameter list, before the
-  return type, has no `self`, and is called as `Counter::zero()`. Calling it
-  through a value is `E052`.
+- A **static method** puts `static` in front of `fn` (`static fn
+  Counter.zero(): Counter`, `pub static fn` when public), has no `self`, and
+  is called as `Counter::zero()`. Calling it through a value is `E052`.
+  `static` after the parameter list declares the same method and is `E175`
+  (allow by default), whose `Fix:` moves the word.
 - `new` and `default` are the construction names. `Counter::default()`
   zero-fills; `Counter::new(args)` runs the method named `new` (without a
   `fn T.new`, `T::new(...)` is `E050`). `new` is never `static`, and `default`

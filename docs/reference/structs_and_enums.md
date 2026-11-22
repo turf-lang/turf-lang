@@ -261,8 +261,7 @@ when its first parameter is a `User`; see
 ### Static methods
 
 A **static** method has no `self`. It is declared like an instance method,
-with `static` after the parameter list and before the return type, and is
-called with `::`:
+with `static` in front of `fn`, and is called with `::`:
 
 ```turflang
 struct Temperature {}
