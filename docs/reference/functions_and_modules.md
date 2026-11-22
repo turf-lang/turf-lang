@@ -976,9 +976,12 @@ fn main(): int {
 }
 ```
 
-An `export` constant is always public (it is its own `pub`, so `pub export` is
-`E087`); other modules reach it as `m::LIMIT` or by name after an import. It is
-`immut` only (`export mut` is an error), appears only at the top level, and
+A `pub immut` constant is public: other modules reach it as `m::LIMIT` or by
+name after an import. A top-level `immut` without `pub` is private to its
+module, and another module that uses it gets `E088`. `export immut` means the
+same as `pub immut` and is `E176` (allow by default), whose `Fix:` writes `pub`;
+`pub export` is `E087`. A constant is `immut` only (`export mut` is `E021`, a
+top-level `mut` is `E087`), appears only at the top level, and
 its value must be a literal the compiler can fold: every use is replaced by the
 value, and there is no storage behind it. A number may start with one `-`
 (`pub immut FLOOR: int = -40;`), and an integer literal is accepted for a
