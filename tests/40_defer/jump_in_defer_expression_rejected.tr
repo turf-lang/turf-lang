@@ -1,0 +1,35 @@
+// LANG-003: a deferred statement may not return, break or continue out of
+// itself, wherever the jump sits in it: a `compare` arm is not a loop, and a
+// loop's condition is outside the loop's body, so a `break` in either escapes
+// the defer. The `return` shapes are fail_return_in_defer_assignment.tr and
+// fail_return_in_defer_call_argument.tr.
+
+fn g(x: int): int {
+    return x;
+}
+
+@test(compile_error, E083, "I cannot let a deferred statement `break`")
+fn rejects_break_in_compare_arm_in_defer(): void {
+    mut i: int = 0;
+    while i < 3 {
+        i += 1;
+        defer compare i {
+            matches 1:
+            break;
+            done
+            otherwise:
+            g(i);
+        };
+    }
+}
+
+@test(compile_error, E083, "I cannot let a deferred statement `break`")
+fn rejects_break_in_loop_condition_in_defer(): void {
+    mut i: int = 0;
+    while i < 3 {
+        i += 1;
+        defer while g(break) < 3 {
+            i += 1;
+        };
+    }
+}
