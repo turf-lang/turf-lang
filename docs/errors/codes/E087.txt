@@ -15,7 +15,11 @@ fails much later, in a different module.
 Each place it can go wrong has its own message and its own fix:
 
     pub export immut LIMIT: int = 10;
-        // `export` already IS the `pub` of a constant. Just remove `pub`.
+        // `export` already makes the constant public. Write `pub immut
+        // LIMIT: int = 10;` alone.
+
+    static pub fn Point.origin(): Point { ... }
+        // `pub` comes first: `pub static fn Point.origin(): Point`.
 
     pub operator +(a: Money, b: Money): Money { ... }
         // Operators are visible wherever their operand types are. Remove
@@ -25,8 +29,9 @@ Each place it can go wrong has its own message and its own fix:
         // Imports only affect the file that writes them and are never
         // re-exported. Remove `pub`; the other module writes its own import.
 
-    pub immut LIMIT: int = 10;
-        // A top-level constant is `export immut NAME: T = value;`.
+    mut COUNTER: int = 0;
+        // A top-level value is a constant of its module: `immut COUNTER:
+        // int = 0;`, or `pub immut` for other modules to use it.
 
     enum Color { Red, pub Green }
     error Oops { pub Bad }

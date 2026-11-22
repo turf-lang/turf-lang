@@ -4,7 +4,7 @@ A `static` method on a struct doesn't take a `self` at all -- it's not tied to a
 
 Here's a static method declared correctly, and called the right way:
 
-    fn Point.origin() static: Point {
+    static fn Point.origin(): Point {
         return Point::default();
     }
 
