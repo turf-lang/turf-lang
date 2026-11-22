@@ -28,7 +28,8 @@ has none, choosing the shortest-output tests/**/*.tr that reports it (warnings
 are looked for with every lint at `warn`).
 
 The programs are compiled from the repository root with `--check`, so paths
-in the output read `tests/...` everywhere; the `.tr` files stay where they
+in the output read `tests/...` everywhere, and the root is cut from an absolute
+path (a standard-library location reads `lib/std/...`); the `.tr` files stay where they
 are and keep their own `EXPECT-*` markers.
 
 Usage: scripts/check/diagnostic_snapshots.py [--compiler build/turfc]
@@ -110,6 +111,10 @@ def compile_once(compiler, prog, flags, json_mode):
     except subprocess.TimeoutExpired:
         return None, "timed out"
     out = ANSI.sub("", p.stdout + p.stderr)
+    # A related location in the standard library is an absolute path (an editor
+    # opens it as given); the checkout's own root is cut from it so a snapshot
+    # reads `lib/std/...` on every machine.
+    out = out.replace(str(ROOT) + "/", "")
     return p.returncode, out
 
 
