@@ -30,12 +30,15 @@
 #            lists libSystem only; libc++ is added because it ships with the
 #            OS (in the dyld shared cache), so a static libstdc++ equivalent is
 #            not needed for it. Remove those two lines if the owner disagrees.
-#            libresolv is added for the Go front end (turf), which cannot drop it;
+#            libresolv is added for the Go front end (turf), which cannot drop it,
+#            and so are CoreFoundation and Security: turf upgrade downloads over
+#            HTTPS, and Go verifies a certificate against the system's roots
+#            through those two frameworks;
 #            libz and libncurses for a static LLVM (zlib and terminfo are the OS's).
 #            A SMART archive (its name ends -smart) may also use the frameworks
 #            ggml's Metal and Accelerate backends call, which are the OS's too:
-#            Accelerate, Metal, MetalKit, Foundation, CoreFoundation, and libobjc.
-#            The plain archive may not: it has no reason to.
+#            Accelerate, Metal, MetalKit, Foundation and libobjc. The plain
+#            archive may not: it has no reason to.
 #   windows  KERNEL32 KERNELBASE NTDLL UCRTBASE api-ms-win-* WS2_32 ADVAPI32,
 #            plus ole32 shell32 bcrypt version psapi (what a static LLVM still
 #            imports). msvcrt.dll is NOT allowed: the target is UCRT (Windows
@@ -137,6 +140,9 @@ allowed() {
         /usr/lib/libSystem.B.dylib|/usr/lib/libc++.1.dylib|/usr/lib/libc++abi.dylib) return 0 ;;
         # Go's net package on darwin: the front end (turf) imports it.
         /usr/lib/libresolv.9.dylib) return 0 ;;
+        # Go's crypto/x509 on darwin verifies against the system roots through
+        # these, for turf upgrade's HTTPS; both ship with every macOS.
+        /System/Library/Frameworks/CoreFoundation.framework/*|/System/Library/Frameworks/Security.framework/*) return 0 ;;
         # What a static LLVM links on macOS: zlib and terminfo, both part of the OS.
         /usr/lib/libz.1.dylib|/usr/lib/libncurses.5.4.dylib) return 0 ;;
       esac
