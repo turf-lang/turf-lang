@@ -769,7 +769,7 @@ fn prints_freezing_in_kelvin(): void {
 | `skip:` | a string, not empty | The test is compiled and checked, but not run. `turf test` reports it as `SKIPPED (reason)` and lists it under `Skipped Tests`, counted apart from the passes. |
 | `timeout:` | a whole number of milliseconds, more than 0 | The test fails with `TIMEOUT` if it has not ended in time; its process is killed and the file's other tests still run. Without it, `--timeout` applies. |
 | `levels:` | `all` (O0 to O3), or a list such as `[O0, O2]` from `O0` … `O3` and `Os` | The file is built at each level and the test runs at each, reported as `name [-O2]`; the first level that fails is the test's failure. |
-| `stdout:` | a string | What the test prints to stdout must be exactly this. Without it, output is not checked. |
+| `stdout:` | a string | What the test prints to stdout must be exactly this, with each line ending in `\n` on every platform (a Windows `\r\n` compares as `\n`). Without it, output is not checked. |
 | `tag:` | a string, or a list of strings | `turf test --tag slow` runs only the tests with that tag; `--skip-tag slow` runs the others. |
 | `serial` | none | The test never runs beside another. Tests of one file already run one after another, so this marks such a test for when they do not. |
 

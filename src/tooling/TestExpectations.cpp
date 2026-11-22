@@ -230,7 +230,18 @@ std::vector<std::string> JudgeWarnings(const TestCase &C) {
   return Out;
 }
 
-std::string TestStdout(const std::string &Stdout) {
+std::string TestStdout(const std::string &Raw) {
+#ifdef _WIN32
+  // The C runtime writes stdout in text mode on Windows, so every "\n" the
+  // program printed arrives as "\r\n"; a `stdout:` is written with "\n".
+  std::string Stdout;
+  Stdout.reserve(Raw.size());
+  for (size_t I = 0; I < Raw.size(); ++I)
+    if (!(Raw[I] == '\r' && I + 1 < Raw.size() && Raw[I + 1] == '\n'))
+      Stdout += Raw[I];
+#else
+  const std::string &Stdout = Raw;
+#endif
   // The report is "\nturf-test: ...\n" at the end; a test that never got
   // there (a panic, an exit) has none.
   const size_t At = Stdout.rfind("\nturf-test: ");
@@ -244,6 +255,8 @@ std::string Quoted(const std::string &S) {
   for (char C : S) {
     if (C == '\n')
       Out += "\\n";
+    else if (C == '\r')
+      Out += "\\r";
     else if (C == '\t')
       Out += "\\t";
     else if (C == '"' || C == '\\')
