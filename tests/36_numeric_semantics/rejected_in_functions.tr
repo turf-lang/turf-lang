@@ -1,0 +1,152 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+// SEM-002 (FREEZE.md §6.2 row 6, ARCHITECTURE_OVERHAUL.md §10.2's own
+// worked example): "compile-time arithmetic over untyped literals is
+// exact; only the final value is checked" -- each literal individually
+// fits 'int', but their sum doesn't, so this is a COMPILE-time error
+// (TypeChecker::tryFoldUntypedIntConstant() folds the expression with
+// arbitrary precision), not a runtime trap. Contrast with
+// runtime_overflow_add.tr in this same folder, where the operands are
+// ordinary variables instead of literals -- that one is a RUNTIME trap.
+@test(compile_error, E076, "The literal 9223372036854775808 does not fit in an `int`, which holds -9223372036854775808 .. 9223372036854775807.")
+fn rejects_compile_time_literal_arithmetic_overflow(): void {
+    mut c: int = 9223372036854775807 + 1;
+}
+
+// OVH-014 (docs/planning/OVERHAUL_REMAINING_WORK.md), FREEZE.md §6.2 row 6.
+// The `export immut` twin of fail_immut_constant_reference_arithmetic_
+// overflow.tr in this same folder: an `export immut int` constant's exact
+// value is already carried as a decimal string on its ResolverConstantSymbol
+// (SEM-001) specifically so Codegen can inline it -- this fix reads that
+// same string back as the TypeChecker's own folded value, so a reference to
+// one inside further literal arithmetic is now caught at compile time too,
+// not just a bare `immut` local's.
+export immut MAXV: int = 9223372036854775807;
+
+@test(compile_error, E076, "The literal 9223372036854775808 does not fit in an `int`, which holds -9223372036854775808 .. 9223372036854775807.")
+fn rejects_export_immut_constant_reference_arithmetic_overflow(): void {
+    immut b = MAXV + 1;
+    b to int;
+}
+
+// SEM-002 Rule B1: cast legality is now enforced in the TypeChecker
+// (TypeChecker::visitCast(), TypeCheckerExpr.cpp), not only in Codegen --
+// this is a regression check that an illegal pairing (bool -> int was
+// never supported, docs/reference/variables_and_types.md's "Not supported
+// at all" list) is still rejected after the check moved.
+@test(compile_error, E134, "I cannot convert a `bool` to an `int` with `to`.")
+fn rejects_illegal_cast_bool_to_int(): void {
+    mut flag: bool = true;
+    mut n: int = flag to int;
+}
+
+// OVH-014 (docs/planning/OVERHAUL_REMAINING_WORK.md), FREEZE.md §6.2 row 6:
+// "Compile-time on typed constants: error." Before this fix, referencing an
+// `immut int` local inside further literal arithmetic was NOT folded --
+// `tryFoldUntypedIntConstant()` had no case for `VariableExprAST` -- so this
+// compiled successfully and only trapped at RUNTIME (via the ordinary
+// checked-arithmetic path), even though `a` is a compile-time-known typed
+// constant, not a runtime value. Contrast with fail_runtime_overflow_add.tr
+// in this same folder, where the operand truly is a `mut` (a real runtime
+// value) -- that one is correctly a runtime trap; this one must now be a
+// COMPILE-time E076, exactly like fail_compile_time_literal_arithmetic_
+// overflow.tr's bare-literal case, since `a + 1` folds to the same
+// out-of-range value once `a`'s own known-exact value is substituted in.
+@test(compile_error, E076, "The literal 9223372036854775808 does not fit in an `int`, which holds -9223372036854775808 .. 9223372036854775807.")
+fn rejects_immut_constant_reference_arithmetic_overflow(): void {
+    immut a: int = 9223372036854775807;
+    immut b = a + 1;
+    b to int;
+}
+
+// Regression (pre-existing behavior, unchanged by SEM-002): 'double -> int'
+// is NOT one of the three implicit conversions (FREEZE.md §6.2 row 4) --
+// needs an explicit 'to int' (which truncates toward zero). Confirmed
+// still correct after this group's changes.
+@test(compile_error, E066, "I cannot store a `double` in `x`, which is an `int`.")
+fn rejects_implicit_double_to_int(): void {
+    mut x: int = 5.5;
+}
+
+// Regression (pre-existing behavior, unchanged by SEM-002): 'int -> int32'
+// is NOT one of the three implicit conversions (FREEZE.md §6.2 row 4) --
+// narrowing always needs an explicit 'to int32'. Confirmed still correct
+// after this group's cast-legality move (Rule B1) and representability
+// checks -- neither touches implicit-conversion rules at all.
+@test(compile_error, E066, "I cannot store an `int` in `b`, which is an `int32`.")
+fn rejects_implicit_narrow_int_to_int32(): void {
+    mut a: int = 5;
+    mut b: int32 = a;
+}
+
+// SEM-002 (FREEZE.md §6.2 row 3): an integer literal whose exact value
+// doesn't fit 'int' is a hard error -- ARCHITECTURE_OVERHAUL.md §10.2's
+// own worked example. Before this group: silently became
+// 9223372036854775807 (old strtoll clamp) then, after SEM-001's exact-value
+// reshape but before this group's representability check, silently wrapped
+// via plain 64-bit truncation instead.
+@test(compile_error, E076, "The literal 999999999999999999999999999999999999999999999999 does not fit in an `int`, which holds -9223372036854775808 .. 9223372036854775807.")
+fn rejects_int_literal_too_large(): void {
+    mut x: int = 999999999999999999999999999999999999999999999999;
+}
+
+// The out-of-range literal is the RIGHT operand of a runtime expression. The
+// leaf check lived inside a fold that stopped at the runtime left operand, so
+// `c + 9223372036854775808` compiled and silently added INT_MIN while the
+// mirror `9223372036854775808 + c` was rejected (found by turf-fuzz).
+@test(compile_error, E076, "The literal 9223372036854775808 does not fit in an `int`, which holds -9223372036854775808 .. 9223372036854775807.")
+fn rejects_int_literal_too_large_right_of_runtime_operand(): void {
+    mut c: int = 1;
+    mut r: int = c + 9223372036854775808;
+}
+
+// SEM-002 (FREEZE.md §6.2 row 3): the negative-direction mirror of
+// fail_int_literal_too_large.tr -- unary '-' folds into the literal first
+// (so this is genuinely checking a value one past INT64_MIN, not a
+// negation-overflow at runtime), and THAT folded value is still out of
+// range.
+@test(compile_error, E076, "The literal -9999999999999999999999999999999999999999999999999 does not fit in an `int`, which holds -9223372036854775808 .. 9223372036854775807.")
+fn rejects_int_literal_too_small(): void {
+    mut x: int = -9999999999999999999999999999999999999999999999999;
+}
+
+// Left-hand twin: -9223372036854775809 is one below INT_MIN. The INT_MIN fix
+// judges the NEGATED literal, so one below must stay rejected.
+@test(compile_error, E076, "The literal -9223372036854775809 does not fit in an `int`, which holds -9223372036854775808 .. 9223372036854775807.")
+fn rejects_int_literal_too_small_left_of_runtime_operand(): void {
+    mut c: int = 1;
+    mut r: int = -9223372036854775809 + c;
+}
+
+// Negative twin of fail_int_literal_too_large_right_of_runtime_operand.tr:
+// -9223372036854775809 is one below INT_MIN, in the right-hand position.
+@test(compile_error, E076, "The literal -9223372036854775809 does not fit in an `int`, which holds -9223372036854775808 .. 9223372036854775807.")
+fn rejects_int_literal_too_small_right_of_runtime_operand(): void {
+    mut c: int = 1;
+    mut r: int = c + -9223372036854775809;
+}
+
+// `to double` takes decimal text only, as parse_double does.
+
+@test(compile_error, E149, "\"inf\" is not a `double`, so this conversion would panic every time it runs.")
+fn rejects_literal_string_to_double_never_converts(): void {
+    mut d: double = "inf" to double;
+    printline(d);
+}
+
+// A string literal that `to int` would always reject is a compile-time error.
+
+@test(compile_error, E149, "\"12abc\" is not an `int`, so this conversion would panic every time it runs.")
+fn rejects_literal_string_to_int_never_converts(): void {
+    mut n: int = "12abc" to int;
+    n;
+}
+
+// One past the largest int: `to int` does not saturate.
+
+@test(compile_error, E149, "\"9223372036854775808\" is not an `int`, so this conversion would panic every time it runs.")
+fn rejects_literal_string_to_int_out_of_range(): void {
+    mut n: int = "9223372036854775808" to int;
+    n;
+}

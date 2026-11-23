@@ -29,7 +29,10 @@ CORRECT:
 
 FIX:
   Add the `:` the message points at. The commonest case is the colon before a
-  function's return type.
+  function's return type. A function with no return type at all
+  (`fn twice(x: int) {`) needs `: T` after the `)`, `: void` if it returns
+  nothing; the compiler prints that as a `Fix:` when exactly one of `void`, the
+  basic types and the parameters' types compiles.
 
 NOTE: a missing colon before a return type can additionally trigger a bogus
   unknown-function error afterwards (a registered cascade); fix the colon first.

@@ -1,0 +1,24 @@
+tests/14_cfg_analysis/endless_loops_warn.tr (2 warnings)
+
+── warning at line 45, col 5 [E184 · loop whose test never changes]
+
+  This loop's test reads `n`, which nothing in the loop changes, and the test is its only way out: once the loop starts, it never ends.
+
+  Hint: Change `n` inside the loop, or leave it with `break` or `return`.
+
+  45 │     while n > 0 {
+     │     ^~~~~ nothing changes this test
+
+  Run `turf --explain E184` for more details.
+
+── warning at line 54, col 5 [E184 · loop whose test never changes]
+
+  This loop's test reads `go`, which nothing in the loop changes, and the test is its only way out: once the loop starts, it never ends.
+
+  Hint: Change `go` inside the loop, or leave it with `break` or `return`.
+
+  54 │     do {
+     │     ^~ nothing changes this test
+
+  Run `turf --explain E184` for more details.
+

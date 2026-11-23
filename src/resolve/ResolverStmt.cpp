@@ -16,6 +16,7 @@
 #include <algorithm> // std::find
 
 #include "frontend/AST.h"
+#include "frontend/ASTChildWalker.h"
 #include "sema/Builtins.h"        // LookupBuiltin — for skipping bare intrinsics in visitFuncCall
 #include "diagnostics/Errors.h"          // ReferenceError, DuplicateDeclarationError
 #include "resolve/ResolverSymbolTable.h"
@@ -93,6 +94,11 @@ void Resolver::visitVarDecl(VarDeclExprAST &Node) {
     ResolverSourceLocation Loc{Node.getLoc().Line, Node.getLoc().Col};
     Node.ResolvedSymbol =
         SymTable_.declareVariable(Node.getName(), Node.getTypePtr(), Loc, Node.isImmutable());
+    if (const SourceLocation &T = Node.getTypeLoc();
+        Node.ResolvedSymbol && T.EndCol > T.Col && T.EndLine == T.Line) {
+      Node.ResolvedSymbol->TypeLoc = {T.Line, T.Col};
+      Node.ResolvedSymbol->TypeEndCol = T.EndCol;
+    }
   } catch (const std::runtime_error &) {
     // The name is already in the current scope — emit a rich diagnostic.
     // Look up the previous declaration for the "declared at line N" note.
@@ -102,8 +108,8 @@ void Resolver::visitVarDecl(VarDeclExprAST &Node) {
       DuplicateDeclarationError(Node.getLoc(), Node.getName(), PrevLoc).raise();
     } else {
       // Fallback (should not happen, but be safe).
-      SyntaxError(Node.getLoc(), ErrCode::DuplicateDeclaration, "Variable '" + Node.getName() +
-                                     "' is already declared in this scope.")
+      SyntaxError(Node.getLoc(), ErrCode::DuplicateDeclaration, "I found `" + Node.getName() +
+                                     "` declared twice in this scope.")
           .raise();
     }
   }
@@ -183,8 +189,8 @@ void Resolver::visitFor(ForExprAST &Node) {
       SourceLocation PrevLoc{Prev->DeclLoc.Line, Prev->DeclLoc.Col};
       DuplicateDeclarationError(ErrLoc, Node.getVarName(), PrevLoc).raise();
     } else {
-      SyntaxError(ErrLoc, ErrCode::DuplicateDeclaration, "Loop variable '" + Node.getVarName() +
-                               "' conflicts with an existing declaration.")
+      SyntaxError(ErrLoc, ErrCode::DuplicateDeclaration, "I cannot declare the loop variable `" + Node.getVarName() +
+                               "` because that name is already declared.")
           .raise();
     }
   }
@@ -227,8 +233,8 @@ void Resolver::visitForEach(ForEachExprAST &Node) {
       SourceLocation PrevLoc{Prev->DeclLoc.Line, Prev->DeclLoc.Col};
       DuplicateDeclarationError(ErrLoc, Node.getValueVarName(), PrevLoc).raise();
     } else {
-      SyntaxError(ErrLoc, ErrCode::DuplicateDeclaration, "Loop variable '" + Node.getValueVarName() +
-                               "' conflicts with an existing declaration.")
+      SyntaxError(ErrLoc, ErrCode::DuplicateDeclaration, "I cannot declare the loop variable `" + Node.getValueVarName() +
+                               "` because that name is already declared.")
           .raise();
     }
   }
@@ -248,8 +254,8 @@ void Resolver::visitForEach(ForEachExprAST &Node) {
         SourceLocation PrevLoc{Prev->DeclLoc.Line, Prev->DeclLoc.Col};
         DuplicateDeclarationError(ErrLoc, Node.getIndexVarName(), PrevLoc).raise();
       } else {
-        SyntaxError(ErrLoc, ErrCode::DuplicateDeclaration, "Loop variable '" + Node.getIndexVarName() +
-                                 "' conflicts with an existing declaration.")
+        SyntaxError(ErrLoc, ErrCode::DuplicateDeclaration, "I cannot declare the loop variable `" + Node.getIndexVarName() +
+                                 "` because that name is already declared.")
             .raise();
       }
     }
@@ -285,60 +291,70 @@ void Resolver::visitReturn(ReturnExprAST &Node) {
 }
 
 namespace {
-// Structural scan for a `return`/`break`/`continue` that would escape PAST
-// a deferred statement (LANG-003, ARCHITECTURE_OVERHAUL.md §8: "a deferred
-// statement may not return, break, or continue out of itself"). Same
-// non-interprocedural recursion shape as MutatesSelfField()/
-// CollectReturnedErrorTypeNames() (ResolverCore.cpp) -- descends through
-// the same handful of AST shapes that can nest a statement (Block/If/
-// While/For/ForEach; DoWhile/Compare deliberately excluded, matching that
-// exact precedent).
+// Finds a `return`/`break`/`continue` that would escape PAST a deferred
+// statement (LANG-003, ARCHITECTURE_OVERHAUL.md §8: "a deferred statement may
+// not return, break, or continue out of itself"). It walks every child the
+// ASTChildWalker knows, so a jump in an expression position is found too:
+// `defer p = return p;` and `defer g(return p);` reach Codegen otherwise,
+// where flushing the defer at that `return` runs the same `return` again
+// until the stack overflows (turf-fuzz #42).
 //
-// `InLoop` tracks whether the recursion has already descended into a
-// While/For/ForEach body that itself began INSIDE the deferred statement --
-// a break/continue found there is absorbed by that inner loop (it can
-// never reach past the defer at all) and must NOT be flagged. A `return`,
-// by contrast, always escapes even through an arbitrary number of nested
-// loops, since nothing in this language can catch it early -- so `return`
-// is never absorbed, regardless of `InLoop`.
-const ExprAST *FindEscapingControlFlow(const ExprAST *E, bool InLoop) {
-  if (!E)
-    return nullptr;
+// A break/continue inside a loop that began INSIDE the deferred statement is
+// absorbed by that loop (it never reaches past the defer) and is not flagged;
+// the loop's condition, bounds and iterable are outside its body, so a jump
+// there is. A `return` always escapes, through any number of nested loops.
+// `defer f() recover run { return 5; };`: a `recover` block's jump acts on the
+// function or loop containing the `recover` (docs/architecture/
+// errors_and_recover.md §1.4.2), here the one the defer is about to leave, so
+// it is flagged like any other.
+class EscapingControlFlowFinder : public ASTChildWalker {
+public:
+  const ExprAST *Found = nullptr;
 
-  if (dynamic_cast<const ReturnExprAST *>(E))
-    return E;
-  if (dynamic_cast<const BreakExprAST *>(E) ||
-      dynamic_cast<const ContinueExprAST *>(E))
-    return InLoop ? nullptr : E;
+  void visitReturn(ReturnExprAST &Node) override {
+    if (!Found)
+      Found = &Node;
+  }
+  void visitBreak(BreakExprAST &Node) override {
+    if (!Found && LoopDepth_ == 0)
+      Found = &Node;
+  }
+  void visitContinue(ContinueExprAST &Node) override {
+    if (!Found && LoopDepth_ == 0)
+      Found = &Node;
+  }
+  void visitWhile(WhileExprAST &Node) override {
+    visitChild(Node.getCond());
+    visitLoopBody(Node.getBody());
+  }
+  void visitDoWhile(DoWhileExprAST &Node) override {
+    visitLoopBody(Node.getBody());
+    visitChild(Node.getCond());
+  }
+  void visitFor(ForExprAST &Node) override {
+    visitChild(Node.getStart());
+    visitChild(Node.getEnd());
+    visitChild(Node.getStep());
+    visitLoopBody(Node.getBody());
+  }
+  void visitForEach(ForEachExprAST &Node) override {
+    visitChild(Node.getIterable());
+    visitLoopBody(Node.getBody());
+  }
 
-  if (auto *Blk = dynamic_cast<const BlockExprAST *>(E)) {
-    for (const auto &Child : Blk->getExpressions())
-      if (const ExprAST *Found = FindEscapingControlFlow(Child.get(), InLoop))
-        return Found;
-    return nullptr;
+private:
+  int LoopDepth_ = 0;
+  void visitLoopBody(const ExprAST *Body) {
+    ++LoopDepth_;
+    visitChild(Body);
+    --LoopDepth_;
   }
-  if (auto *If = dynamic_cast<const IfExprAST *>(E)) {
-    for (const auto &B : If->getBranches())
-      if (const ExprAST *Found = FindEscapingControlFlow(B.Body.get(), InLoop))
-        return Found;
-    return FindEscapingControlFlow(If->getElseBody(), InLoop);
-  }
-  if (auto *W = dynamic_cast<const WhileExprAST *>(E))
-    return FindEscapingControlFlow(W->getBody(), /*InLoop=*/true);
-  if (auto *F = dynamic_cast<const ForExprAST *>(E))
-    return FindEscapingControlFlow(F->getBody(), /*InLoop=*/true);
-  if (auto *FE = dynamic_cast<const ForEachExprAST *>(E))
-    return FindEscapingControlFlow(FE->getBody(), /*InLoop=*/true);
-  // `defer f() recover run { return 5; };`: a `recover` block's `return` /
-  // `break` / `continue` operates on the function or loop CONTAINING the
-  // `recover` (docs/architecture/errors_and_recover.md §1.4.2), which here is
-  // the one the defer is about to leave. Found live while writing LEC-004's `try`
-  // check: this used to pass the check and then crash Codegen
-  // (sanitizeSymbolName). Only the block can jump; `produce`'s expression
-  // cannot hold a statement.
-  if (auto *Rec = dynamic_cast<const RecoverExprAST *>(E))
-    return FindEscapingControlFlow(Rec->getBlock(), InLoop);
-  return nullptr;
+};
+
+const ExprAST *FindEscapingControlFlow(const ExprAST *Stmt) {
+  EscapingControlFlowFinder Finder;
+  Finder.visitChild(Stmt);
+  return Finder.Found;
 }
 } // namespace
 
@@ -347,7 +363,7 @@ void Resolver::visitDefer(DeferExprAST &Node) {
   visitChild(Node.getStmt());
   --DeferDepth_;
 
-  if (const ExprAST *Bad = FindEscapingControlFlow(Node.getStmt(), false)) {
+  if (const ExprAST *Bad = FindEscapingControlFlow(Node.getStmt())) {
     // ExprAST has no virtual getLoc() (every concrete node type defines its
     // own, non-polymorphically -- docs/architecture/compiler_pipeline.md
     // §6), so the three candidate kinds FindEscapingControlFlow() can ever

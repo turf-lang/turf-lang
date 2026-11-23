@@ -205,7 +205,7 @@ scans, so the type keeps GC pointers out of it at compile time:
   ("Wrong number of type arguments").
 - `Pool.track(item: void*)` takes `void*`. Any `T*` converts to `void*`
   implicitly; a `string`, a collection or a struct does not, so
-  `pool.track(someString)` is E056 ("No matching overload").
+  `pool.track(someString)` is E056 (``No overload of `mem::Pool.track` takes the argument types (string)``).
 
 The only way to put a GC pointer in a pool is an explicit `to void*` cast inside
 `unsafe`, the same explicit step that stores one in any other manual memory

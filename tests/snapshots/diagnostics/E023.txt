@@ -1,0 +1,13 @@
+tests/07_functions_modules/fail_export_inside_function.tr (1 error)
+
+── error at line 7, col 12 [E023 · export inside a block]
+
+  I cannot export `LOCAL` from inside a function.
+
+  Hint: Move this declaration to the top level of the file, outside any function, if it needs to be exported. Otherwise declare it as `mut LOCAL` or `immut LOCAL`, without `export`.
+
+  7 │     export immut LOCAL: int = 5;
+    │            ^~~~~ this export is inside a block
+
+  Run `turf --explain E023` for more details.
+

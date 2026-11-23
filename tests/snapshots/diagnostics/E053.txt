@@ -1,0 +1,13 @@
+tests/06_structs/fail_static_outside_struct.tr (1 error)
+
+── error at line 8, col 1 [E053 · static outside struct]
+
+  I cannot use `static` on a function that does not belong to a struct.
+
+  Hint: Remove `static` from `compute`, which has no `self` to omit, or declare it as a method: `static fn StructName.compute(...): ReturnType { ... }`.
+
+  8 │ fn compute(x: int) static: int {
+    │ ^~ `static` is only for methods
+
+  Run `turf --explain E053` for more details.
+

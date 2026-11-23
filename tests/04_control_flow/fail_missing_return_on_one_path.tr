@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E009
-// EXPECT-DIAG: promises to give back a result
+// EXPECT-DIAG: that ends without returning a result
 // A function that declares `: int` must return on EVERY path. The `if` below
 // returns; falling out of its end does not.
 fn sign(x: int): int {

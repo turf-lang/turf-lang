@@ -1,0 +1,61 @@
+// AN-7, issue #334: an unused private function (E178), an unused import
+// (E179, with a Fix that removes it) and an unused `pub` function in a
+// program's root (E180) warn once turned on. Uses through UFCS, a generic
+// instantiation, a function value and a method call count, and `main` and
+// `@test` functions are never reported.
+// LINT: --warn E178 --warn E179 --warn E180
+// EXPECT-DIAG: Nothing calls or names the function `unused_helper`.
+// EXPECT-DIAG: Nothing in this file uses the import of `list`.
+// EXPECT-DIAG: Nothing calls the `pub` function `unused_pub`
+// EXPECT-FIX: remove 'import list'
+// EXPECT-NO-DIAG: `twice`
+// EXPECT-NO-DIAG: `ident`
+// EXPECT-NO-DIAG: `apply_one`
+// EXPECT-NO-DIAG: `Counter.bump`
+// EXPECT-NO-DIAG: `checked_by_test`
+import list;
+import test;
+
+struct Counter {
+    n: int
+}
+
+fn Counter.bump(): void {
+    self.n += 1;
+}
+
+fn twice(x: int): int {
+    return x * 2;
+}
+
+fn<T> ident(x: T): T {
+    return x;
+}
+
+fn apply_one(x: int): int {
+    return x + 1;
+}
+
+fn unused_helper(): int {
+    return 7;
+}
+
+pub fn unused_pub(): int {
+    return 8;
+}
+
+@test
+fn checked_by_test(): void {
+    test::assert(true, "a test function");
+}
+
+fn main(): int {
+    mut c: Counter = Counter::default();
+    c.bump();
+    mut f: fn(int): int = apply_one;
+    test::assert(3.twice() == 6, "UFCS");
+    test::assert(ident(4) == 4, "generic");
+    test::assert(f(1) == 2, "function value");
+    test::assert(c.n == 1, "method");
+    return 0;
+}

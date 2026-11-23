@@ -1,0 +1,13 @@
+tests/35_numeric_literals/fail_bare_trailing_dot.tr (1 error)
+
+── error at line 11, col 21 [E139 · malformed number]
+
+  `5.` ends in a `.` with no digit after it.
+
+  Hint: Write `5.0` for the decimal, or `5` for the whole number.
+
+  11 │     mut x: double = 5.;
+     │                     ^ this number is malformed
+
+  Run `turf --explain E139` for more details.
+

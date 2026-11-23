@@ -1,0 +1,16 @@
+{
+  "format": 1,
+  "root": "app",
+  "packages": {
+    "app": {
+      "src": "app/src",
+      "deps": ["shapes"],
+      "allow_unsafe": false
+    },
+    "shapes": {
+      "src": "shapes/src",
+      "deps": [],
+      "allow_unsafe": false
+    }
+  }
+}

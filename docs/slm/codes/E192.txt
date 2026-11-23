@@ -1,0 +1,37 @@
+TURF E192 -- INTEGER CONVERTED TO A POINTER (WARNING):
+
+CAUSE:
+  An integer is converted to a pointer or a reference (`4096 to int*`). The
+  compiler cannot know what is at that address. This is a WARNING (it
+  starts at `allow`).
+
+INCORRECT (compiles, but warns at `warn`):
+    fn device(): int {
+        unsafe {
+            mut port: int* = 4096 to int*;
+        }
+        return 0;
+    }
+
+    fn main(): int {
+        return 0;
+    }
+
+CORRECT:
+    fn device(): int {
+        mut value: int = 0;
+        unsafe {
+            mut port: int* = &value to int*;
+        }
+        return value;
+    }
+
+    fn main(): int {
+        return device();
+    }
+
+FIX:
+  Take the address of what the pointer should point to (`&x`), use an
+  allocation, or write `null`.
+
+RELATED: E130 (raw pointer outside unsafe), E188.

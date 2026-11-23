@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E146
-// EXPECT-DIAG: '256' is not an exit status
+// EXPECT-DIAG: `256` is not an exit status: a status is a whole number from 0 to 255.
 // TDP-2-006: a process's exit status is 0 to 255.
 @test(exit, 256)
 fn a(): void {

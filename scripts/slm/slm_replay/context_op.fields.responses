@@ -1,0 +1,1 @@
+{"reasoning": "add the field, not the struct.", "fix_mode": "MODIFY", "original_code": "    mut sum: int = p + n;", "new_code": "    mut sum: int = p.x + n;", "category": "TYPE_MISMATCH"}

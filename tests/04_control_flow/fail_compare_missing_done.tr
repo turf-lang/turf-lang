@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E058
-// EXPECT-DIAG: Expected 'done' after matches arm body
+// EXPECT-DIAG: I expected `done` after the body of this `matches` arm
 import io;
 
 fn main(): int {

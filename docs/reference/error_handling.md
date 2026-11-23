@@ -30,7 +30,7 @@ fn main(): int {
 }
 ```
 
-A trailing comma after the last variant is accepted. A variant is named `Type::Variant`, and is a plain value, not a function: `MathError::Overflow` is complete, and `MathError::Overflow()` is rejected (E135, "Not callable").
+A trailing comma after the last variant is accepted. A variant is named `Type::Variant`, and is a plain value, not a function: `MathError::Overflow` is complete, and `MathError::Overflow()` is rejected (E135, "I cannot call `MathError::Overflow`, which is an error variant and not a function").
 
 ### The bare form
 
@@ -566,7 +566,7 @@ fn main(): int {
 the write failed
 ```
 
-For any other `T` there is no value to fall back on, so every path through the block must leave with `return`, `break` or `continue`. A block that can fall off its end is E132, "Non-diverging `recover run`". (Calling a function that panics does not count as leaving; the compiler does not know it never returns.)
+For any other `T` there is no value to fall back on, so every path through the block must leave with `return`, `break` or `continue`. A block that can fall off its end is E132, "A path through `recover run` ends without a `return`, and the block gives the call nothing to stand for". (Calling a function that panics does not count as leaving; the compiler does not know it never returns.)
 
 <!-- doc-example: fails E132 -->
 ```turflang

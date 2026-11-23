@@ -27,8 +27,11 @@ CORRECT:
 
 FIX:
   Do the `to &T` inside an `if x != null { ... }`. Often the conversion is not
-  needed at all: inside the check, `b` can be used directly. Only a VARIABLE
-  can be checked: if the operand is a field, a call result or a list element
-  (`h.item to &Box`), first `mut b: &?Box = h.item;`, then check and cast `b`.
+  needed at all: inside the check, `b` can be used directly and passed,
+  returned or stored as a `&Box` as it is. The same error is reported for a
+  `&?T` used as a `&T` with no check (`return b;`, `f(b)`). A variable or a
+  field reached from one (`h.item`) can be checked; a check on a field lasts
+  until the next call or the next write to a field with that name. A call
+  result or a list element is stored in a variable first, then checked.
 
 RELATED: E081 (reading a field of a `&?T` without the check).

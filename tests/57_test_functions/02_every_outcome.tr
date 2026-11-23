@@ -24,7 +24,7 @@ fn old_square(n: int): int {
     return n * n;
 }
 
-@test(compile_error, E041, "Unknown function")
+@test(compile_error, E041, "function named")
 fn calling_an_undeclared_function_is_an_error(): void {
     undeclared(1);
 }

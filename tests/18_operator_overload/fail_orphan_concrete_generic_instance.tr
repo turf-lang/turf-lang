@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E080
-// EXPECT-DIAG: 'list::List' is declared in module 'list', not in the main file
+// EXPECT-DIAG: where `list::List` is declared
 // `List<int>` is owned by the module that declares List, so a concrete
 // instance is subject to the orphan rule exactly like the generic form.
 import list::List;

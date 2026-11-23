@@ -27,7 +27,7 @@ CORRECT USAGE:
 INCORRECT:
     fn broken(): void {
         if true {
-            break;   // ERROR: 'break' used outside of a loop.
+            break;   // ERROR: I cannot use `break` outside of a loop.
         }
     }
 

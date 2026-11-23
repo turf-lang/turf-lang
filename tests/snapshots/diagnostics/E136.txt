@@ -1,0 +1,13 @@
+tests/07_functions_modules/fail_nested_module_qualifier_call.tr (1 error)
+
+── error at line 16, col 23 [E136 · invalid module qualifier]
+
+  I cannot qualify the module `io` with `mem::`.
+
+  Hint: Remove the `mem::` prefix and write `io::printline(...)`.
+
+  16 │     mem::io::printline("should not compile");
+     │                       ^ this module qualifier is not valid
+
+  Run `turf --explain E136` for more details.
+

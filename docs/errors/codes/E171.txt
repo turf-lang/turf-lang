@@ -11,7 +11,7 @@ The compiler follows each allocation through the function. When a pointer has be
             if flag == 1 {
                 mem::free(p);
             }
-            mem::free(p);     // WARNING: 'p' may already have been freed
+            mem::free(p);     // WARNING: `p` may already have been freed
         }
         return 0;
     }

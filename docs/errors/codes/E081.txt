@@ -23,20 +23,23 @@ Calling a method counts as a use, exactly like reading a field: `b.grow()` needs
 
 A `defer`red use happens when the block ends, not where it is written: `defer io::printline(b.val);` followed later in the same block by `b = b.next;` is rejected, because `b` may be null by the time the deferred line runs.
 
-The check works on a variable, and only on a variable. A `&?Box` you got from somewhere else (a field, a call, a list element) has to be put in one first:
+The check works on a variable, and on a field reached from one (`n.next`, `n.next.next`):
 
     struct Node { val: int, next: &?Node }
 
     fn bad(n: &Node): int {
-        return n.next.val;       // n.next might be null, and no check can be written around it
+        return n.next.val;       // n.next might be null
     }
 
     fn good(n: &Node): int {
-        mut r: &?Node = n.next;
-        if r != null {
-            return r.val;
+        if n.next != null {
+            return n.next.val;
         }
         return 0;
     }
+
+A check on a field lasts until the next function or method call (it may change any field it can reach) or the next write to a field with that name (another reference may point at the same struct). Read the field before calling anything, or give it a name: `immut r: &Node = n.next;` inside the check.
+
+A `&?Box` you get from a call or a list element is checked by putting it in a variable first.
 
 If a value can never be `null`, say so in its type: `&Box` (no `?`) needs no check at all.

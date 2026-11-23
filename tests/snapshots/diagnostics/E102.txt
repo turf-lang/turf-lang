@@ -1,0 +1,12 @@
+tests/01_syntax/fail_typo_keyword_cascading_error.tr (1 error)
+
+── error at line 27, col 17 [E102 · missing semicolon]
+
+  I expected a `;` after this statement.
+  Hint: Replace `iff` with `if` if you meant the keyword.
+
+  27 │     iff (5 > 3) {
+     │                 ^ a `;` is missing here
+
+  Run `turf --explain E102` for more details.
+

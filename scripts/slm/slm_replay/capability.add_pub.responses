@@ -1,0 +1,1 @@
+{"reasoning": "x", "fix_mode": "MODIFY", "original_code": "fn main(): int {", "new_code": "pub fn tripple(n: int): int {\n    return n * 3;\n}\n\nfn main(): int {", "category": "UNDECLARED_VARIABLE"}

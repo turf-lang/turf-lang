@@ -24,6 +24,23 @@
 // 4. If valid and high confidence, commit the fix to the main state
 // 5. If invalid, discard the sandbox changes and fall back to original error
 
+// How far a candidate fix is re-checked (#363, SL-5). FrontEnd: parse,
+// resolve, type-check and lint. Analysis (the default): also the flow
+// analyses a compile runs before Codegen (missing return, use before
+// assignment, double free, unchecked nullable references, ...), so a fix the
+// front end accepts and a compile would still reject is turned down. Codegen
+// (opt-in): a candidate that passes the analysis is also compiled to LLVM IR
+// and run through the LLVM verifier, never linked or run. Codegen works on
+// the compiler's process-wide LLVM state, which the compile the sandbox runs
+// inside is still using, so this runs in a child `turfc --emit-llvm` on a
+// hidden copy written next to the file (its imports resolve as the file's
+// do) and removed straight after. A package build is not rechecked this
+// way: its entry must be the root package's src/main.tr. TURF_SLM_SANDBOX_DEPTH=frontend|analysis|
+// codegen picks one.
+enum class SandboxDepth { FrontEnd, Analysis, Codegen };
+SandboxDepth sandboxDepth();
+const char *sandboxDepthName(SandboxDepth D);
+
 class Sandbox {
 public:
   enum class EditKind {
@@ -39,7 +56,6 @@ public:
   struct CompilerStateSnapshot {
     std::vector<std::string> SourceCode;          // Deep copy of source lines
     std::unique_ptr<ExprAST> AST;                 // Deep copy of AST root
-    std::unique_ptr<SymbolTable> SymbolTableCopy; // Deep copy of symbol table
     // The host compile's diagnostics when the sandbox was created (only
     // OriginalSnapshot's is ever filled; a validation's own go in
     // ValidationDiagnostics).
@@ -94,6 +110,17 @@ public:
     return OriginalSnapshot.SourceCode;
   }
 
+  // The diagnostics of the program before any fix, as the host compile
+  // reported them.
+  const std::vector<DiagnosticEngine::Diag> &getOriginalDiagnostics() const {
+    return OriginalSnapshot.Diagnostics;
+  }
+
+  // The program before any fix, analysed exactly as validate() analyses a
+  // candidate (same depth, same options): what the Fix Score's warning delta
+  // compares against (SL-5). Analysed once per compile.
+  const std::vector<turf::Diagnostic> &getOriginalAnalysisDiagnostics() const;
+
   // Get diagnostics from the most recent validate() call
   const std::vector<turf::Diagnostic> &getValidationDiagnostics() const {
     return ValidationDiagnostics;
@@ -128,21 +155,8 @@ private:
   // per-node clone methods on all ExprAST subclasses)
   static std::unique_ptr<ExprAST> cloneAST(const ExprAST *original);
 
-  // Deep copy the symbol table
-  static std::unique_ptr<SymbolTable>
-  cloneSymbolTable(const SymbolTable *original);
-
   // Classify the edited line so we know whether a localized update is safe.
   static EditKind classifyEditKind(const std::string &lineText);
-
-  // Extract declaration metadata from a single-line declaration.
-  static bool parseDeclarationLine(const std::string &lineText,
-                                   std::string &name, TurfTypePtr &type,
-                                   bool &isArray, int &arraySize);
-
-  // Update the cloned symbol table for a localized line edit.
-  void updateSymbolTableForEdit(int lineNumber, const std::string &newLine,
-                                EditKind kind);
 
   // Apply source-level fix: splice the line range [startLine, endLine]
   // (1-based, inclusive) out and insert newLines in its place.
@@ -151,10 +165,6 @@ private:
 
   // Update AST nodes that reference the modified line (stub)
   void updateASTAfterFix(int lineNumber);
-
-  // Update symbol table after a fix (localized line-based update)
-  void updateSymbolTableAfterFix(int lineNumber, const std::string &newLine,
-                                 EditKind kind);
 
   // Determine whether a line change is safe for localized updates only.
   static bool isLocalizedEdit(EditKind kind);

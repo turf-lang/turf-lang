@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E066
-// EXPECT-DIAG: has type '!void'
+// EXPECT-DIAG: The condition of `if` must be a `bool`, and I found a `!void`.
 // EXPECT-DIAG: A fallible call is not a condition
 // A `!void` call does not report success as a bool; its failure is handled
 // with `recover`.

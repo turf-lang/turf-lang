@@ -1,0 +1,9 @@
+// SY-3, issue #327: another language's word for `fn` at a declaration
+// start is E014 with a Fix writing `fn` (it used to read as a name followed
+// by a missing ';').
+// EXPECT-DIAG: E014
+// EXPECT-DIAG: `def` is not a Turf keyword, and a function declaration starts with `fn`.
+// EXPECT-FIX: replace 'def' with 'fn'
+def main(): int {
+    return 0;
+}

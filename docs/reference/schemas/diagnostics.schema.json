@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/turf-lang/turf-lang/blob/master/docs/reference/schemas/diagnostics.schema.json",
   "title": "turfc --diagnostics=json, one diagnostic",
-  "description": "Each line turfc writes to stderr under --diagnostics=json is one object of this shape. Schema version 1.0: a minor version adds fields, a major version changes or removes one. Lines and columns are 1-based; columns count bytes; a span's end is exclusive.",
+  "description": "Each line turfc writes to stderr under --diagnostics=json is one object of this shape. Schema version 1.1: a minor version adds fields, a major version changes or removes one. Lines and columns are 1-based; columns count bytes; a span's end is exclusive.",
   "type": "object",
   "required": ["version", "severity", "code", "category", "title", "message", "hint", "file", "span", "related", "fix", "denied"],
   "properties": {
@@ -15,6 +15,7 @@
     "hint": { "type": ["string", "null"] },
     "file": { "type": "string" },
     "span": { "oneOf": [{ "$ref": "#/$defs/span" }, { "type": "null" }], "description": "null for a diagnostic about a whole file." },
+    "label": { "type": ["string", "null"], "description": "Since 1.1. What the underline at `span` says, e.g. \"this is an `int`\"; null when `span` is. The entries of `related` are the secondary spans, each labelled by its `message`." },
     "related": {
       "type": "array",
       "items": {
@@ -36,6 +37,8 @@
           "required": ["description", "edits"],
           "properties": {
             "description": { "type": "string" },
+            "tier": { "enum": ["proven", "plausible"], "description": "Since 1.2. The Fix Score's tier (SL-1): proven, or plausible when a flag is raised. A fix that is not valid is never reported." },
+            "flags": { "type": "array", "items": { "type": "string" }, "description": "Since 1.2. Why a plausible fix needs a look, one plain sentence each (\"it removes a call\"); empty for a proven fix." },
             "edits": {
               "type": "array",
               "minItems": 1,

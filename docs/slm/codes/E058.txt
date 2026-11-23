@@ -26,7 +26,7 @@ INCORRECT:
     compare x {
         matches 1:
             result = 1;
-        // ERROR: Expected 'done' after matches arm body -- arm has no body
+        // ERROR: I expected `done` after the body of this `matches` arm -- arm has no body
         // wasn't closed before the next arm started.
         matches 2:
             result = 2;

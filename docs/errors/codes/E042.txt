@@ -10,7 +10,7 @@ Here's a struct declared correctly and then used correctly:
 And here's the typo that trips this error:
 
     mut p: Piont = Point::default();
-    // ERROR: Unknown type 'Piont'.
+    // ERROR: I cannot find a type named `Piont`.
 
 As usual, if your typo is close to a real type name, Turf will suggest the one it thinks you meant.
 

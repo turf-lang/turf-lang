@@ -1,0 +1,13 @@
+tests/15_enums/fail_cast_out_of_range.tr (1 error)
+
+── error at line 15, col 25 [E127 · enum value out of range]
+
+  99 is not a variant of the enum `Color`, whose variants are 0 to 2.
+
+  Hint: Use one of the variants of `Color` by name, e.g. `Color::...`.
+
+  15 │     immut c: Color = 99 to Color;
+     │                         ^~ this value is not a variant of the enum
+
+  Run `turf --explain E127` for more details.
+

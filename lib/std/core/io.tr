@@ -53,7 +53,7 @@ extern fn fflush(stream: void*): int;
 // libc global like `stderr`, and repeatedly fdopen()-ing fd 2 for every
 // eprint() call would leak one FILE* per call with no way to free it, since
 // this language has no way to cache a persistent handle across calls --
-// only `export immut` constants exist at module scope, not mutable
+// only `pub immut` constants exist at module scope, not mutable
 // globals). A raw write() to the well-known stderr fd sidesteps both
 // problems entirely.
 extern fn write(fd: int, buf: string, count: int): int;

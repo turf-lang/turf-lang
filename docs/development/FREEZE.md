@@ -203,7 +203,14 @@ otherwise each answer differently, producing an incoherent language.
 | `ptr` | yes | none | same as `T*` |
 
 - `&T` → `&?T` → `T*` widens implicitly; nothing widens back without an
-  explicit `unsafe`-gated `to`-cast.
+  explicit `to`-cast (`unsafe`-gated from `T*`), except one case:
+- A `&?T` variable or field path (`h.next`) is a `&T` as an argument, a
+  return value, an initializer or an assigned value where `NullabilityPass`
+  proves it non-null (AN-4, TDP-2-007; amended for 2.3.0). A test on a field
+  path holds until the next call, the next write to a field of that name, a
+  write to the path's root variable, or a write to a whole struct or an
+  element; nothing proved before a `defer` holds inside it. Unproven, it is
+  `E082`; read through, `E081`.
 - `self` remains a raw `StructName*` internally and remains exempt. Do not
   change this.
 
@@ -266,9 +273,41 @@ otherwise each answer differently, producing an incoherent language.
 - Every `TurfError` subclass carries its own code and category. **Deriving a
   category by matching text in the message is to be deleted**, not extended.
 - SLM: grammar-constrained output and sandbox verification are permanent.
-  An unvalidated suggestion is capped below the display gate.
+  An unvalidated suggestion is never shown. What is shown is decided by the
+  Fix Score's tier (SL-1, 2.3.0; `src/diagnostics/FixScore.h`), for the
+  compiler's own fixes and the model's alike: `proven` (a rule fix, the only
+  one that passes, no flag), `verified` (a model fix, no flag), `plausible`
+  (a flag is raised; shown with the flag spelled out), `rejected` (never
+  shown). The facts are deterministic and carry no weights; the one
+  threshold (minimality's) is fitted on the benchmark's train split. An error
+  the parser reports while recovering from a syntax error (from its line to
+  the next declaration's first line) gets no compiler fix: its re-check
+  cannot tell.
+  SL-5 (2.3.0): the facts are read from the whole file before and after the
+  fix and from the same analysis of each (deletion, API surface, capability,
+  warning delta); a check can only lower the tier, never reject. A model's
+  candidate is re-checked through the flow analyses by default (#363); the
+  Codegen recheck (D-16) is opt-in and runs in a child compiler, never in the
+  compile's own process, and nothing it produces is linked or run.
+  #364 (2.3.0, decided 2026-11-09): the model writes nothing the user reads
+  while it works out a fix. The fix request's first field is `reasoning`,
+  never shown or cached (kept so a small model reasons before it writes
+  code; to be dropped only if the model benchmark shows it does not help).
+  Once a fix passes the sandbox, one more request writes the summary and
+  explanation from the error, the whole original-to-final edit and the
+  errors earlier attempts met; they are cached with the fix.
+  SL-4 (2.3.0): --smart never blocks on the model's identity (an unqualified
+  model gets one note), and every bound on it (memory before loading, the
+  run's wall-clock budget, the answer's token cap) fails closed to the
+  compiler's own diagnostics. The suggestion cache is keyed to the llama.cpp
+  revision and the model's SHA-256 as well as the compiler.
 - No new `ErrorCategory` values or `docs/slm/` category files without an
   explicit request.
+- Message text is outside the compatibility promise; codes and exit statuses
+  are the contract (D-6). The 2.0 corpus gate holds a `fail_*` program to the
+  codes its `EXPECT-DIAG` lines name and not to their quoted text
+  (`TURF_TEST_DIAG_CODES_ONLY`, `scripts/check/compat_corpus_check.py`), so a
+  minor may reword any message (DX-9, decided 2026-11-02).
 
 ### 6.10 Optimization — FROZEN
 
@@ -1104,8 +1143,20 @@ over the same code, so how a test is judged exists once.
   `src/` files that declare tests run too (their `main` is not a test);
   `--only` runs only what it names. Report lines are
   `[suite] file.tr: test_name ... PASS`; a file whose tests do not build is one
-  failure, `COMPILE FAILED (its tests did not run)`. Per-test options are
-  TDP-2-026.
+  failure, `COMPILE FAILED (its tests did not run)`.
+- **Test options (F-11f, TDP-2-026, 2.3).** After the outcome, each at most
+  once, in any order, values literals only: `skip: "reason"` (not empty;
+  compiled and checked, not run; reported `SKIPPED (reason)` and counted
+  apart), `timeout: <ms>` (more than 0; the test fails with its process killed
+  when it has not ended in time), `levels: all | [O0, ...]` (`all` is O0 to
+  O3; built and run at each, the first failing level named), `stdout: "text"`
+  (stdout exactly), `tag: "t" | ["t", ...]` (selected by `--test --tag` /
+  `--skip-tag`, driver interface **1.13**, feature `test-tags`; a file that is
+  a test of its own has no tags) and the bare word `serial` (accepted; no
+  effect while one file's tests run one at a time). `timeout:` and `stdout:`
+  on a `compile_error` test, an unknown option, a repeat and a value of the
+  wrong kind are E146. No retries, no setup hooks. An annotation argument may
+  be a `[...]` list of literals.
 - **Not frozen:** the wording of the per-test report lines, the order tests
   finish in, and `turfc --test`'s behaviour on Windows (not supported yet; it
   needs a process runner for that platform, REL-008).
@@ -1257,7 +1308,7 @@ embedded lld, bundled C runtime) is REL-008, not this section.
   on Windows) unpacks to one directory holding `bin/turf`, `bin/turfc` (plus the
   DLLs `turfc.exe` needs, in `bin/`), `lib/libturfrt.a`, `lib/std/**`,
   `docs/errors/**`, `docs/slm/**` (both read from the install root by `turf
-  explain` and `--smart`), `share/turf/examples/**`, `LICENSE`, `README.md`.
+  explain` and `--smart`), `share/turf/examples/**`, `share/turf/diagnostic-registry.json` (IF-3, written by the archive's own `turfc --registry-json`; amended for 2.3.0), `LICENSE`, `README.md`.
   `libturfrt_asan.a` is never shipped. The shape is not cosmetic: `turfc` derives
   its install root from its own real path, `<bin>/..`, and `turf` finds `turfc`
   beside itself, so this layout works unpacked, symlinked or relocated with no
@@ -1515,7 +1566,7 @@ Overhaul (F-TYPE-1), whose third column points at their section above.
 | **F-CLI-2** | An unknown option or command is a usage error (2) with a nearest-spelling suggestion; never ignored, never forwarded as a file. | §6.21 above |
 | **F-CLI-3** | Help is `turf help`/`turf <cmd> --help`/`turfc help`; `turfc --help` is deliberately an unknown option pointing at `turfc help`. | §6.21 above (owner decision 2026-10-06) |
 | **F-CLI-4** | `turfc --version` lines 1-2 are the driver-interface contract; later `<key> <value>` lines (`llvm`, `runtime`, `root`) are informational and extendable. | §6.21 above |
-| **F-REL-1** | Release archive layout: `bin/` (turf, turfc, DLLs), `lib/` (libturfrt.a, std), `docs/`, `share/turf/examples`, `LICENSE`, `README.md`; install root = `<bin>/..`; no `libturfrt_asan.a`, no `lib/usr`. | §6.26 above (owner-confirmed 2026-10-07) |
+| **F-REL-1** | Release archive layout: `bin/` (turf, turfc, DLLs), `lib/` (libturfrt.a, std), `docs/`, `share/turf/examples`, `share/turf/diagnostic-registry.json`, `LICENSE`, `README.md`; install root = `<bin>/..`; no `libturfrt_asan.a`, no `lib/usr`. | §6.26 above (owner-confirmed 2026-10-07) |
 | **F-REL-2** | `--target` for a non-host machine emits its object, then exits 1 with a TurfLang "cross-linking is not supported in 2.0" diagnostic naming the target and the host; vendor-only differences are the host; cross-linking is F-20. | §6.26 above (D20, owner-confirmed 2026-10-07) |
 | **F-REL-3** | `install.sh` verifies the SHA-256 or installs nothing; one marked, idempotent PATH block; `--no-modify-path`; `--uninstall` removes exactly what it added and never the cache. | §6.26 above (owner-confirmed 2026-10-07) |
 | **F-REL-4** | The archive version is `VERSION`; a tag other than `v<VERSION>`, or a `-dev` VERSION, refuses to package. | §6.26 above (owner-confirmed 2026-10-07) |

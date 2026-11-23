@@ -1,0 +1,13 @@
+tests/35_numeric_literals/fail_malformed_exponent.tr (1 error)
+
+── error at line 10, col 21 [E073 · malformed exponent]
+
+  `1.5e` has an exponent marker with no exponent after it.
+
+  Hint: Write at least one digit after `e` or `E`, with an optional `+` or `-` before it, such as `1e6`, `1.5e-3` or `1E+10`.
+
+  10 │     mut x: double = 1.5e;
+     │                     ^ this exponent is malformed
+
+  Run `turf --explain E073` for more details.
+

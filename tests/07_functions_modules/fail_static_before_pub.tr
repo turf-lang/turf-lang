@@ -1,0 +1,15 @@
+// SY-4: `static pub fn` puts the words in the wrong order; the Fix swaps them.
+// EXPECT-DIAG: E087
+// EXPECT-DIAG: I expected `static` after `pub`, not before it.
+// EXPECT-FIX: write 'pub static'
+struct Counter {
+    n: int
+}
+
+static pub fn Counter.limit(): int {
+    return 100;
+}
+
+fn main(): int {
+    return Counter::limit();
+}

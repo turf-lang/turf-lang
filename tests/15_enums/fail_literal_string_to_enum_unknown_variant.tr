@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E149
-// EXPECT-DIAG: "red" is not a variant of 'Color'
+// EXPECT-DIAG: "red" is not a variant of `Color`, so this conversion would panic every time it runs.
 // A variant name must match exactly, case included.
 
 enum Color {

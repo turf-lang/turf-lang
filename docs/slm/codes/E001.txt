@@ -19,9 +19,9 @@ CORRECT USAGE:
 
 INCORRECT:
     mut oops: int = primes[3];
-    // ERROR: Array index out of bounds! You tried to access
-    //   'primes[3]', but 'primes' only has 3 elements (indices 0 to 2, or
-    //   -1 to -3 counting from the end).
+    // ERROR: I cannot use `primes[3]`, because `primes` has only 3 elements.
+    //   Hint: Use an index from 0 to 2, or `-1` to `-3` to count from the
+    //   end.
     mut oops2: int = primes[-4];   // same error: below -SIZE
 
 FIX:

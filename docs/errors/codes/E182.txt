@@ -1,0 +1,29 @@
+Functions call each other on every path, so none can return
+
+Two or more functions that call each other form a cycle. When every path through every one of them calls back into the cycle -- no function has a way to return without calling another -- the program recurses until the stack runs out, exactly as a single function with no base case does (E010):
+
+    fn is_even(n: int): bool {
+        return is_odd(n - 1);    // WARNING (E182 at `warn`): no path returns
+    }
+
+    fn is_odd(n: int): bool {
+        return is_even(n - 1);
+    }
+
+Give one of them a path that returns without calling back:
+
+    fn is_even(n: int): bool {
+        if n == 0 {
+            return true;
+        }
+        return is_odd(n - 1);
+    }
+
+    fn is_odd(n: int): bool {
+        if n == 0 {
+            return false;
+        }
+        return is_even(n - 1);
+    }
+
+A call through a function value or to an `extern fn` never closes a cycle, since the compiler cannot see where it leads. This warning starts at `allow` in 2.3: turn it on with `turf build --warn E182` (or `[lints] E182 = "warn"` in turf.toml).

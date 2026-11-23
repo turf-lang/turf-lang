@@ -1,0 +1,15 @@
+// EXPECT-DIAG: E044
+// EXPECT-FIX: remove the argument '7'
+// `describe` takes an int and a bool. Of the three arguments, only removing
+// the `7` leaves ones that match, so that is the fix.
+fn describe(count: int, finished: bool): int {
+    if (finished) {
+        return count;
+    }
+    return 0;
+}
+
+fn main(): int {
+    immut n: int = describe(3, true, 7);
+    return n - 3;
+}

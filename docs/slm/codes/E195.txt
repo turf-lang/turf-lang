@@ -1,0 +1,31 @@
+TURF E195 -- EMPTY LOOP BODY (WARNING):
+
+CAUSE:
+  A `while`, `do`, `for` or `for ... in` loop has a body with no statements
+  and no comment, so it does nothing on each pass. A `while` or `do` whose
+  condition calls a function does not warn. This is a WARNING.
+
+INCORRECT (compiles, but warns):
+    fn main(): int {
+        mut arr: int[3] = [1, 2, 3];
+        for v in arr {
+        }
+        return 0;
+    }
+
+CORRECT:
+    fn main(): int {
+        mut arr: int[3] = [1, 2, 3];
+        mut total: int = 0;
+        for v in arr {
+            total += v;
+        }
+        return total - 6;
+    }
+
+FIX:
+  Write what the loop should do, or remove the loop. Never empty a loop body
+  to make another diagnostic go away. If doing nothing is right, keep a
+  comment in the body saying why.
+
+RELATED: E165 (empty if branch), E154 (empty compare), E196, E197.

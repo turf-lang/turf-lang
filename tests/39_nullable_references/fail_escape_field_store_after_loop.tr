@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E086
-// EXPECT-DIAG: can't be stored into a field
+// EXPECT-DIAG: be stored into a field
 // The field sink after a loop, same cause as fail_escape_return_after_loop.tr.
 struct Node { val: int, next: &?Node }
 

@@ -1,0 +1,82 @@
+// AN-4: a `&?T` variable or field path, once a check proves it non-null, is
+// passed, returned and stored as a `&T` without a cast, and read through
+// field by field (`h.next.next.val`).
+import test;
+
+struct Node { val: int, next: &?Node }
+struct Holder { head: &?Node }
+
+fn get(n: &Node): int {
+    return n.val;
+}
+
+fn first(h: &?Node, d: &Node): &Node {
+    if h == null {
+        return d;
+    }
+    return h;
+}
+
+fn second(h: &Node): &Node {
+    if h.next != null {
+        return h.next;
+    }
+    return h;
+}
+
+fn via_field(h: &Node): int {
+    if h.next != null {
+        return h.next.val + get(h.next);
+    }
+    return 0;
+}
+
+fn deep(h: &Node): int {
+    if h.next != null && h.next.next != null {
+        immut r: &Node = h.next.next;
+        return r.val;
+    }
+    return -1;
+}
+
+fn stored(h: &Holder, n: &Node): int {
+    h.head = n;
+    return get(h.head);
+}
+
+fn after_or(h: &Node): int {
+    if h.next == null || h.next.val < 0 {
+        return 0;
+    }
+    return get(h.next);
+}
+
+fn Node.after(): int {
+    if self.next != null {
+        return get(self.next);
+    }
+    return 0;
+}
+
+fn main(): int {
+    mut a: Node = Node::default();
+    a.val = 1;
+    mut b: Node = Node::default();
+    b.val = 2;
+    b.next = &a;
+    mut c: Node = Node::default();
+    c.val = 3;
+    c.next = &b;
+    immut p: &?Node = &b;
+    test::assert(first(p, &a).val == 2, "a checked variable is returned as a &Node");
+    test::assert(first(null, &a).val == 1, "and the other path returns the default");
+    test::assert(second(&b).val == 1, "a checked field is returned as a &Node");
+    test::assert(via_field(&b) == 2, "and passed as one");
+    test::assert(deep(&c) == 1, "a path two fields deep is checked link by link");
+    test::assert(deep(&a) == -1, "an absent link is not followed");
+    mut h: Holder = Holder::default();
+    test::assert(stored(&h, &c) == 3, "a field just given a &Node is non-null");
+    test::assert(after_or(&b) == 1, "the false side of `== null ||` is checked");
+    test::assert(b.after() == 1, "a field of self is checked the same way");
+    return 0;
+}

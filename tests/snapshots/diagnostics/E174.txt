@@ -1,0 +1,17 @@
+tests/01_syntax/decimal_literal_receiver_allowed_by_default.tr (1 warning)
+
+── warning at line 11, col 18 [E174 · decimal literal as a receiver without parentheses]
+
+  The decimal number `1.5` is the receiver of a call, and its own dot sits right before the call's.
+
+  Hint: Write `(1.5)` so the dot that ends the number is clear.
+
+  11 │     test::assert(1.5.half() == 0.75, "1.5.half()");
+     │                  ^~~ this decimal literal needs parentheses
+
+  Fix: write '(1.5)'
+  11 │     test::assert((1.5).half() == 0.75, "1.5.half()");
+     │                  ~~~~~
+
+  Run `turf --explain E174` for more details.
+

@@ -19,11 +19,10 @@ CORRECT USAGE:
 
 INCORRECT:
     greet(3, "Ada");
-    // ERROR: Type mismatch in call to 'greet'!
-    //   Parameter 'name' (argument 1) expects 'string', but got 'int'.
+    // ERROR: No overload of `greet` takes the argument types (int, string).
 
     greet("Ada", "three");
-    // ERROR: Parameter 'times' (argument 2) expects 'int', but got 'string'.
+    // ERROR: No overload of `greet` takes the argument types (string, string).
 
 FIX:
   Reorder or convert the arguments so each one matches its parameter's

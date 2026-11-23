@@ -1,0 +1,13 @@
+tests/46_stdlib_surface/02_runtime_modules.tr (1 warning)
+
+── warning at line 150, col 29 [E192 · integer converted to a pointer]
+
+  This converts an integer to `void*`: the compiler cannot know what, if anything, is at that address.
+
+  Hint: Get the pointer from what it points to (`&x`, an allocation), or write `null` for no address.
+
+  150 │         mem::free(slot_i[0] to void*);
+      │                             ^~ this converts an integer to a pointer
+
+  Run `turf --explain E192` for more details.
+

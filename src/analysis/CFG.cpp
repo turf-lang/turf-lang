@@ -243,6 +243,37 @@ bool CFG::hasUnbreakableLoop() const {
   return false;
 }
 
+// Whether a statement of BB holds a FuncCallExprAST for which IsTarget is
+// true, looking through the expression shapes a call can sit in.
+static bool blockCallsAny(const TurfBasicBlock *BB,
+                          const std::function<bool(const FuncCallExprAST *)> &IsTarget) {
+  for (const ExprAST *Stmt : BB->getStatements()) {
+    std::function<bool(const ExprAST *)> scan = [&](const ExprAST *E) -> bool {
+      if (!E) return false;
+      if (const auto *Call = dynamic_cast<const FuncCallExprAST *>(E)) {
+        if (IsTarget(Call)) return true;
+        for (const auto &Arg : Call->getArgs())
+          if (scan(Arg.get())) return true;
+      }
+      if (const auto *B = dynamic_cast<const BinaryExprAST *>(E))
+        return scan(B->getLHS()) || scan(B->getRHS());
+      if (const auto *U = dynamic_cast<const UnaryExprAST *>(E))
+        return scan(U->getOperand());
+      if (const auto *T = dynamic_cast<const TryExprAST *>(E))
+        return scan(T->getOperand());
+      if (const auto *R = dynamic_cast<const ReturnExprAST *>(E))
+        return scan(R->getVal());
+      if (const auto *V = dynamic_cast<const VarDeclExprAST *>(E))
+        return scan(V->getInitializer());
+      if (const auto *A = dynamic_cast<const AssignmentExprAST *>(E))
+        return scan(A->getLHS()) || scan(A->getRHS());
+      return false;
+    };
+    if (scan(Stmt)) return true;
+  }
+  return false;
+}
+
 // Helper (file-scope, anonymous namespace): returns true if the given block
 // contains at least one direct call to the function identified by
 // (FuncName, MangledFuncName). When MangledFuncName is non-empty and the
@@ -330,7 +361,63 @@ bool CFG::allPathsRecurse() const {
     if (blockContainsSelfCall(BB.get(), FunctionName, MangledFunctionName))
       SelfCallBlocks.insert(BB.get());
   }
+  return allPathsThrough(SelfCallBlocks);
+}
 
+std::unordered_set<const TurfBasicBlock *> CFG::selfCallBlocks() const {
+  std::unordered_set<const TurfBasicBlock *> Out;
+  for (const auto &BB : Blocks)
+    if (blockContainsSelfCall(BB.get(), FunctionName, MangledFunctionName))
+      Out.insert(BB.get());
+  return Out;
+}
+
+bool CFG::allPathsRecurseWithout(const std::set<Edge> &Dead) const {
+  if (!EntryBlock || !ExitBlock) return false;
+  return allPathsThrough(selfCallBlocks(), Dead);
+}
+
+std::unordered_set<const TurfBasicBlock *> CFG::blocksReachingExitWithoutSelfCall() const {
+  std::unordered_set<const TurfBasicBlock *> Out;
+  if (!ExitBlock) return Out;
+  const auto Self = selfCallBlocks();
+  std::vector<const TurfBasicBlock *> Work{ExitBlock};
+  Out.insert(ExitBlock);
+  while (!Work.empty()) {
+    const TurfBasicBlock *B = Work.back();
+    Work.pop_back();
+    for (const TurfBasicBlock *P : B->getPredecessors())
+      if (!Self.count(P) && Out.insert(P).second)
+        Work.push_back(P);
+  }
+  return Out;
+}
+
+std::vector<std::string> CFG::calledFunctions() const {
+  std::vector<std::string> Out;
+  for (const auto &BB : Blocks)
+    blockCallsAny(BB.get(), [&](const FuncCallExprAST *Call) {
+      if (Call->ResolvedCallTarget)
+        Out.push_back(Call->ResolvedCallTarget->mangledName());
+      return false; // see every call
+    });
+  return Out;
+}
+
+bool CFG::allPathsCallAnyOf(const std::unordered_set<std::string> &Targets) const {
+  if (!EntryBlock || !ExitBlock) return false;
+  std::unordered_set<const TurfBasicBlock *> CallBlocks;
+  for (const auto &BB : Blocks)
+    if (blockCallsAny(BB.get(), [&](const FuncCallExprAST *Call) {
+          return Call->ResolvedCallTarget &&
+                 Targets.count(Call->ResolvedCallTarget->mangledName());
+        }))
+      CallBlocks.insert(BB.get());
+  return allPathsThrough(CallBlocks);
+}
+
+bool CFG::allPathsThrough(const std::unordered_set<const TurfBasicBlock *> &SelfCallBlocks,
+                          const std::set<Edge> &Dead) const {
   // If there are no self-call blocks at all, it's not recursive.
   if (SelfCallBlocks.empty()) return false;
 
@@ -363,6 +450,8 @@ bool CFG::allPathsRecurse() const {
 
     OnPath.insert(Cur);
     for (const TurfBasicBlock *Succ : Succs) {
+      if (Dead.count({Cur, Succ}))
+        continue;
       std::unordered_set<const TurfBasicBlock *> ChildPath = OnPath;
       if (!dfs(Succ, NowSeen, ChildPath)) {
         return false; // Found a base-case path — not all paths recurse
@@ -713,6 +802,11 @@ void CFGBuilder::visitIf(ExprAST *E) {
     CurrentCFG->addEdge(CurrentCondBlock, ThenBB);
     CurrentCFG->addEdge(CurrentCondBlock, NextBB);
     CurrentCondBlock->setTerminator(TerminatorKind::Branch, Branches[i].Loc);
+    if (Branches[i].Cond) {
+      CurrentCondBlock->BranchCond = Branches[i].Cond.get();
+      CurrentCondBlock->TrueSucc = ThenBB;
+      CurrentCondBlock->FalseSucc = NextBB;
+    }
 
     // Build then/elseif body
     setInsertPoint(ThenBB);
@@ -949,6 +1043,9 @@ void CFGBuilder::visitWhile(ExprAST *E) {
   if (const auto *BoolCond = dynamic_cast<const BoolExprAST *>(While->getCond()))
     IsLiteralTrue = BoolCond->getVal();
 
+  CondBB->BranchCond = While->getCond();
+  CondBB->TrueSucc = BodyBB;
+  CondBB->FalseSucc = IsLiteralTrue ? nullptr : ExitBB;
   if (!IsLiteralTrue) {
     CurrentCFG->addEdge(CondBB, ExitBB);
     CondBB->setTerminator(TerminatorKind::Branch, While->getLoc());
@@ -1044,6 +1141,9 @@ void CFGBuilder::visitDoWhile(ExprAST *E) {
   if (const auto *BoolCond = dynamic_cast<const BoolExprAST *>(DoWhile->getCond()))
     IsLiteralTrue = BoolCond->getVal();
 
+  CondBB->BranchCond = DoWhile->getCond();
+  CondBB->TrueSucc = BodyBB;
+  CondBB->FalseSucc = IsLiteralTrue ? nullptr : ExitBB;
   if (!IsLiteralTrue) {
     CurrentCFG->addEdge(CondBB, ExitBB);
     CondBB->setTerminator(TerminatorKind::Branch, DoWhile->getLoc());
@@ -1082,6 +1182,10 @@ void CFGBuilder::visitFor(ExprAST *E) {
   CurrentCFG->addEdge(CondBB, BodyBB);
   CurrentCFG->addEdge(CondBB, ExitBB);
   CondBB->setTerminator(TerminatorKind::Branch, SourceLocation{});
+  CondBB->ForTest = For;
+  CondBB->TrueSucc = BodyBB;
+  CondBB->FalseSucc = ExitBB;
+  StepBB->ForStep = For;
 
   // Save loop targets for break/continue
   TurfBasicBlock *SavedBreak = LoopBreakTarget;
@@ -1196,7 +1300,7 @@ void CFGBuilder::visitBreak(ExprAST *E) {
     return;
 
   if (!LoopBreakTarget) {
-    ControlFlowError(Brk->getLoc(), "'break' used outside of a loop.").raise();
+    ControlFlowError(Brk->getLoc(), "I cannot use `break` outside of a loop.").raise();
     return;
   }
 
@@ -1216,7 +1320,7 @@ void CFGBuilder::visitContinue(ExprAST *E) {
     return;
 
   if (!LoopContinueTarget) {
-    ControlFlowError(Cont->getLoc(), "'continue' used outside of a loop.").raise();
+    ControlFlowError(Cont->getLoc(), "I cannot use `continue` outside of a loop.").raise();
     return;
   }
 

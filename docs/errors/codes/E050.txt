@@ -9,7 +9,7 @@ For example, this struct never declared a `.new`:
         y: int
     }
 
-    mut p: Point = Point::new(1, 2);   // ERROR: 'Point' has no constructor -- 'Point::new(...)' can't be called
+    mut p: Point = Point::new(1, 2);   // ERROR: I cannot call `Point::new(...)`, because `Point` has no constructor.
 
 You've got two good options here, depending on what you actually want:
 

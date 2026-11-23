@@ -1,0 +1,54 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+import mem;
+
+// Regression test (turf-fuzz): gc_alloc's byte count was not type-checked, so a
+// double reached the runtime's 64-bit size parameter and the IR was invalid
+// (an internal compiler error) instead of a diagnostic.
+@test(compile_error, E056, "Argument 1 of `gc_alloc` is a byte count, so it is an `int`, and I found a `double`.")
+fn rejects_gc_alloc_non_int_size(): void {
+    unsafe {
+        mut _p: void* = gc_alloc(0.0);
+    }
+}
+
+// A Pool's storage is manual memory the collector never scans, so a GC value
+// tracked there would be freed under it. Pool holds `void*` only, and a
+// `string` does not convert to `void*` without an explicit cast.
+
+@test(compile_error, E056, "No overload of `mem::Pool.track` takes the argument types (string).")
+fn rejects_mem_pool_string(): void {
+    unsafe {
+        mut pool: mem::Pool = mem::Pool::default();
+        pool.track("a" + "b");
+        mem::free_pool(pool);
+    }
+}
+
+// A struct holding a GC pointer cannot be tracked either.
+
+struct Named {
+    name: string
+}
+
+@test(compile_error, E056, "No overload of `mem::Pool.track` takes the argument types (Named).")
+fn rejects_mem_pool_struct(): void {
+    unsafe {
+        mut pool: mem::Pool = mem::Pool::default();
+        mut n: Named = Named::default();
+        pool.track(n);
+        mem::free_pool(pool);
+    }
+}
+
+// `mem::Pool` is not generic: there is no `Pool<string>` whose storage would
+// hide GC pointers from the collector.
+
+@test(compile_error, E148, "`Pool` is not generic, so it takes no type arguments")
+fn rejects_mem_pool_type_argument(): void {
+    unsafe {
+        mut pool: mem::Pool<string> = mem::Pool::default();
+        mem::free_pool(pool);
+    }
+}

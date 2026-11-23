@@ -15,7 +15,7 @@ The compiler follows each allocation through the function. When a pointer has be
             if flag == 1 {
                 free(q);
             }
-            q[0] = 1;         // WARNING: 'q' may already have been freed
+            q[0] = 1;         // WARNING: `q` may already have been freed
         }
         return 0;
     }

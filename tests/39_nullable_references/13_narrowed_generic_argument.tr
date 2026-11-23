@@ -1,0 +1,17 @@
+// A checked `&?Node<int>` passed to a generic `&Node<T>` parameter (AN-4).
+// fail_generic_nullable_narrowing.tr is the unchecked twin.
+import test;
+
+struct Node<T> { val: T, next: &?Node<T> }
+
+fn<T> takesNonNull(n: &Node<T>): T { return n.val; }
+
+fn main(): int {
+    mut a: Node<int> = Node::default();
+    a.val = 7;
+    mut p: &?Node<int> = &a;
+    if p != null {
+        test::assert(takesNonNull(p) == 7, "a checked argument binds T");
+    }
+    return 0;
+}

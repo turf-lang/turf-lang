@@ -58,6 +58,15 @@ while IFS= read -r row; do
 
     retired=0; [[ "$desc" == *"(retired"* ]] && retired=1
 
+    # 1c. every code has a registered name: the diagnostic heading prints it
+    #    (`[E068 · unknown struct field]`, ErrorCodes::headingName(), DX-9), so
+    #    an empty or placeholder name is an empty heading. A name says the kind
+    #    of mistake (DIAGNOSTICS_STYLE.md): no "!" and no full stop.
+    name="${desc%% (retired*}"
+    [ -n "$name" ] || say "$code ($cls) has no registered name -- its heading would be empty"
+    [[ "$name" == *"!"* || "$name" == *. ]] && \
+        say "$code ($cls) name \"$name\" ends a sentence -- a name is a noun phrase (DIAGNOSTICS_STYLE.md)"
+
     # 2. every code is raised by something. A class is raised if its name
     #    appears in a file other than the one defining it; a raw-path family
     #    (an ErrCode:: constant, no class) is raised if the constant appears in

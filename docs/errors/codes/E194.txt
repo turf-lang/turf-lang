@@ -1,0 +1,27 @@
+A very large `unsafe` block
+
+This `unsafe { }` block holds more than 40 statements, counting those of the blocks inside it. The few operations that need care are hard to find among the rest, and every statement inside is exempt from the raw-pointer checks:
+
+    fn work(): int {
+        mut t: int = 0;
+        unsafe {                     // WARNING (E194 at `warn`)
+            mut raw: int* = &t to int*;
+            t += 1;
+            // ... forty more statements that need no `unsafe`
+        }
+        return t;
+    }
+
+Keep only the raw-pointer operations inside `unsafe { }`, and move the rest out, or into a function:
+
+    fn work(): int {
+        mut t: int = 0;
+        unsafe {
+            mut raw: int* = &t to int*;
+            raw[0] = 1;
+        }
+        t += 1;
+        return t;
+    }
+
+This warning starts at `allow` in 2.3: turn it on with `turf build --warn E194` (or `[lints] E194 = "warn"` in turf.toml).

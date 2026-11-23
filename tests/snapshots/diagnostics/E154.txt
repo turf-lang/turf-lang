@@ -1,0 +1,13 @@
+tests/04_control_flow/12_compare_empty.tr (1 warning)
+
+── warning at line 6, col 5 [E154 · empty compare]
+
+  This `compare` has no `matches` arm and no `otherwise`, so it does nothing.
+
+  Hint: Add a `matches` arm or an `otherwise` arm, or remove the `compare`.
+
+  6 │     compare x {}
+    │     ^~~~~~~ this `compare` has no arms
+
+  Run `turf --explain E154` for more details.
+

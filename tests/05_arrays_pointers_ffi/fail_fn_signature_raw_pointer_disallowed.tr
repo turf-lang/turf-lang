@@ -1,6 +1,6 @@
 // EXPECT-DIAG: E130
-// EXPECT-DIAG: Raw pointer in function signature
-// EXPECT-DIAG: files that begin with 'unsafe module;' may use raw pointers
+// EXPECT-DIAG: The parameter `p` of `takesRaw` cannot have the raw pointer type `ptr`.
+// EXPECT-DIAG: Use a reference, `&T`, instead: only an `extern fn` and a file that begins with `unsafe module;` may have raw pointers in a signature, even inside `unsafe { }`.
 // Regression test (issue #238): a plain (non-extern, non-lib/std)
 // function may never have a raw ptr/T* parameter or return type -- unlike
 // the declaration/cast/struct-field gates, this is NOT fixable by

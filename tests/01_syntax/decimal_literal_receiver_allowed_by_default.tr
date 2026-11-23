@@ -1,0 +1,13 @@
+// SY-2 (b), issue #326: E174 starts at `allow`, so a program with no lint
+// level set compiles `1.5.half()` with no warning.
+// EXPECT-NO-DIAG: E174
+import test;
+
+fn half(x: double): double {
+    return x / 2.0;
+}
+
+fn main(): int {
+    test::assert(1.5.half() == 0.75, "1.5.half()");
+    return 0;
+}

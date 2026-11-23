@@ -1,6 +1,6 @@
 // EXPECT-DIAG: E074
 // EXPECT-DIAG: E075
-// EXPECT-DIAG: can never be reached
+// EXPECT-DIAG: I can never reach the code in
 // A loop that always returns never exits normally, so everything after it is
 // dead: E074 for the block, E075 for the `if` branch inside it. Both are
 // warnings, so the program still compiles and runs.

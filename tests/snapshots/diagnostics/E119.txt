@@ -1,0 +1,9 @@
+tests/01_syntax/fail_no_main_function.tr (1 error)
+
+── error [E119 · no main function]
+
+  I found no entry point. Define `fn main(): int` in your file.
+  Hint: To check a module that is only ever imported, add `--module`: `turf check --module <file.tr>`.
+
+  Run `turf --explain E119` for more details.
+

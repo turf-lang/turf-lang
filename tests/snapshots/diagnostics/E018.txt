@@ -1,0 +1,15 @@
+tests/05_arrays_pointers_ffi/fail_use_after_free.tr (1 error)
+
+── error at line 22, col 10 [E018 · use after free]
+
+  I cannot use the memory of `p` after it was freed.
+
+  Hint: Stop using `p` after it is released by `free()` or by a function declared `@ownership(releases: ...)`, or set the pointer to `null` after releasing it.
+
+  21 │         free(p);
+     │             - freed here
+  22 │         p[0] = 1;
+     │          ^ used here after it was freed
+
+  Worth reading in full -- run `turf --explain E018` before you patch this one.
+

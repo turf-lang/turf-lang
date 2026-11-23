@@ -1,0 +1,12 @@
+tests/04_control_flow/fail_do_while_double_semicolon.tr (1 error)
+
+── error at line 14, col 21 [E103 · unexpected token]
+
+  I did not expect a `;` here.
+  Hint: Remove the extra `;`, because a statement ends with exactly one.
+
+  14 │     } while (x > 0);;
+     │                     ^ this token is unexpected
+
+  Run `turf --explain E103` for more details.
+

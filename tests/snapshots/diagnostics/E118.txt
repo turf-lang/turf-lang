@@ -1,0 +1,12 @@
+tests/01_syntax/fail_statement_outside_function.tr (1 error)
+
+── error at line 9, col 1 [E118 · statement outside a function]
+
+  I found a statement outside a function.
+  Hint: Move it into a function, as in `fn main(): int { <this statement> return 0; }`.
+
+  9 │ io::printline("hello");
+    │ ^~ this statement is outside a function
+
+  Run `turf --explain E118` for more details.
+

@@ -1,0 +1,13 @@
+tests/06_structs/fail_no_constructor_defined.tr (1 error)
+
+── error at line 15, col 30 [E050 · no constructor defined]
+
+  I cannot call `Point::new(...)`, because `Point` has no constructor.
+
+  Hint: Declare one with `fn Point.new(...): void { self.field = ...; }`, or call `Point::default()` to zero-initialize every field.
+
+  15 │     mut p: Point = Point::new(1, 2);
+     │                              ^ this struct has no constructor
+
+  Run `turf --explain E050` for more details.
+

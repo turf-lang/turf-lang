@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E110
-// EXPECT-DIAG: Type arguments of a generic function are written after '::'
+// EXPECT-DIAG: the type arguments of a generic function are written after `::`
 // EXPECT-FIX: insert '::' after 'identity'
 // LG-7: `identity<int>(3)` reads as comparisons; `int` cannot be an operand,
 // so it is a generic function's type arguments missing the '::'.

@@ -32,11 +32,10 @@
  *
  * Global-state dependency
  * ───────────────────────
- *  Struct lookups (visitMethodCall() among them) consult the process-global
- *  `GlobalSymbolTable` (SymbolTable.h, populated by the Parser's
- *  ParseStructDecl()) to decide whether a call's base expression is a struct
- *  instance. It is null until `InitializeCompilerGlobals()`/
- *  `InitializeSymbolTable()` (Parser.h) runs once per process; the read sites
+ *  Struct lookups (visitMethodCall() among them) consult the current
+ *  compilation's symbol table, `Symbols()` (SymbolTable.h, F-S2, populated by
+ *  the Parser's ParseStructDecl()) to decide whether a call's base expression
+ *  is a struct instance. It is null outside a SymbolTableScope; the read sites
  *  are null-guarded so this will not crash, but every instance method call
  *  silently fails to resolve instead, with a diagnostic ("only struct
  *  instances have methods") that reads exactly like a real type error in
@@ -45,7 +44,7 @@
  * Usage
  * ─────
  * @code
- *   InitializeCompilerGlobals();     // see Parser.h -- required once per process, before the below
+ *   SymbolTable Symbols; SymbolTableScope S(&Symbols); // F-S2, before the below
  *   // 1. Build the symbol table (Resolver pass fills it).
  *   ResolverSymbolTable rst;
  *   // ... Resolver runs here ...
@@ -228,6 +227,7 @@ public:
    */
   void resetForRecovery() {
     ReturnTypeStack_.clear();
+    FuncStack_.clear();
     MachineNarrowStack_.clear();
     LoopVarTypes_.clear();
     // UnsafeDepth_: mirrors ReturnTypeStack_/MachineNarrowStack_ above -- a
@@ -236,6 +236,7 @@ public:
     // otherwise leave every SUBSEQUENT top-level declaration in the same file
     // wrongly gate-exempt for the rest of the compile.
     UnsafeDepth_ = 0;
+    UnsafeUsed_.clear();
     // Same reasoning as UnsafeDepth_ immediately above -- a TypeError raised
     // mid-body inside a `@caller_location` function skips visitFuncDef()'s
     // own restore of InCallerLocationFunc_ on the way out.
@@ -322,14 +323,15 @@ public:
   /// Resolution proper; visitMethodCall() adds the check that needs its result.
   void visitMethodCallImpl(MethodCallExprAST &Node);
 
-  /// Reports E081 when @p Base, of type @p BaseTy, is a `&?T` that is not a
-  /// plain variable and @p Member (a field, or a method if @p IsMethod) is
-  /// reached through it: `p.next.val`, `get().val`, `list[i].val`.
-  /// NullabilityPass narrows variables only, by design, so it cannot cover any
-  /// other `&?T` base; without this check a null one is dereferenced
-  /// unchecked: it faults, or reads garbage once optimized (FREEZE §6.6: a
-  /// `&?T` "must be null-tested before use"). A variable base is left to that
-  /// pass. Returns true if it reported.
+  /// Reports E081 when @p Base, of type @p BaseTy, is a `&?T` that is neither
+  /// a variable nor a field path and @p Member (a field, or a method if
+  /// @p IsMethod) is reached through it: `get().val`, `list[i].val`.
+  /// NullabilityPass narrows variables and field paths only, so it cannot
+  /// cover any other `&?T` base; without this check a null one is
+  /// dereferenced unchecked: it faults, or reads garbage once optimized
+  /// (FREEZE §6.6: a `&?T` "must be null-tested before use"). A variable base
+  /// is left to that pass, and a field path base is marked
+  /// (ExprAST::NeedsNonNull) for it. Returns true if it reported.
   bool rejectNullableNonVariableUse(const ExprAST *Base, const TurfType *BaseTy,
                                     SourceLocation Loc, const std::string &Member,
                                     bool IsMethod);
@@ -405,6 +407,14 @@ private:
   /// line the model is shown. Call it at a raise site with the expression the
   /// message is about, before reportError(). Bounded (6 facts per diagnostic).
   void addIdentifierTypes(const ExprAST *E, SLM::DiagnosticHints &Hints);
+  /// SL-6: adds @p T's declaration to @p Hints.Structs when it is a struct
+  /// (through arrays and references) that is not already the receiver; at most
+  /// three.
+  void addStructDecl(const TurfType *T, SLM::DiagnosticHints &Hints);
+  /// SL-6: @p F's signature as Turf writes it, `fn area(w: int, h: int): int`
+  /// (DiagnosticHints::Callee); not ResolverFunctionSymbol::signature()'s
+  /// `area(int w, int h) -> int`, which reads as another language to a model.
+  static std::string turfSignature(const ResolverFunctionSymbol &F);
   /// The hint for a value of type @p A where another type is needed. @p Dest,
   /// when given, is that type: a reference to a @p Dest (`&P` where a `P`
   /// belongs) gets the explicit copy, `x to P`.
@@ -724,6 +734,12 @@ private:
   /// string. The call itself only saw its arguments, from which it bound
   /// T = int.
   void noteConstructed(const ExprAST *E, const TurfTypePtr &Expected);
+  // B-17 (E177): FC built a generic struct whose type arguments came from
+  // the context, neither written nor bound by the call's own arguments.
+  void warnTypeArgsFromContext(const FuncCallExprAST &FC);
+  // AN-6: E, an `int`, converted to @p To when that is a `double`, is noted
+  // in the compilation's AnalysisFacts for the value-range walk (E181).
+  void noteIntToDouble(const ExprAST *E, const TurfType *To);
 
   /// E138 for `Box::default().get()` / `Box::default().v` on a generic
   /// `Box`: a receiver has no declared type for noteConstructed() to take
@@ -761,11 +777,34 @@ private:
   /// literal is retyped to @p Dest.
   bool arrayLiteralWidensToNullableRefs(const ExprAST *Val, const TurfType *Dest);
 
-  /// untypedLiteralAcquiresInt32() or arrayLiteralWidensToNullableRefs():
-  /// what every type-fixing call site checks alongside typesCompatible().
+  /// What `x to T` accepts from @p Src to @p Dst, apart from copying a value
+  /// out of a reference (visitCast()).
+  bool conversionExists(const TurfType *Src, const TurfType *Dst) const;
+
+  /// Issue #365: the hint for a declaration whose written type and value
+  /// disagree. The compiler cannot tell which side is wrong, so it names
+  /// both: declare @p Var as @p ValueSpelling (the value's type), or make the
+  /// value (@p Plural: the values of a list) the declared @p Dest -- by
+  /// `to` where a conversion exists, else by writing one. Empty when the
+  /// value's type is not one a declaration can name (`null`, `void`).
+  std::string hintForDeclarationMismatch(const std::string &Var, const TurfType *ValueTy,
+                                         const std::string &ValueSpelling,
+                                         const TurfType *Dest, bool Plural) const;
+
+  /// AN-4: true when @p Val is a `&?T` variable or field path
+  /// (NullablePlace::isPlace) and @p Dest is the `&T` of the same pointee:
+  /// passed, returned or stored as a `&T`, it is accepted here and marked
+  /// (ExprAST::NeedsNonNull) for NullabilityPass, which proves it non-null
+  /// where it is used or reports E082.
+  bool nullablePlaceNarrows(const ExprAST *Val, const TurfType *Dest);
+
+  /// untypedLiteralAcquiresInt32(), arrayLiteralWidensToNullableRefs() or
+  /// nullablePlaceNarrows(): what every type-fixing call site checks
+  /// alongside typesCompatible().
   bool literalAcquiresType(const ExprAST *Val, const TurfType *Dest) {
     return untypedLiteralAcquiresInt32(Val, Dest) ||
-           arrayLiteralWidensToNullableRefs(Val, Dest);
+           arrayLiteralWidensToNullableRefs(Val, Dest) ||
+           nullablePlaceNarrows(Val, Dest);
   }
 
   /// If writing into @p Place would write into the by-value result
@@ -819,6 +858,9 @@ private:
   /// Stack of expected return types for nested function definitions.
   /// Empty when we are at the top level.
   std::vector<TurfTypePtr> ReturnTypeStack_;
+  // The function each ReturnTypeStack_ entry is from, for the span a wrong
+  // `return` points back at (DX-5, FuncDefExprAST::RetTypeLoc).
+  std::vector<const FuncDefExprAST *> FuncStack_;
   /// The `base[i]` on the left of the assignment being checked, if any.
   /// visitArrayAccess() reports "cannot index a value of type X" for a base
   /// nothing can index, but an assignment target has a more specific diagnostic
@@ -908,6 +950,10 @@ private:
   /// (Resolver.h) -- incremented/decremented bracketing visitUnsafeBlock()'s
   /// body traversal. Consulted by isUnsafeGateExempt().
   int UnsafeDepth_ = 0;
+  /// AN-1 (E193): one entry per open `unsafe { }` block, innermost last; set
+  /// when a gated use inside it is let through (isUnsafeGateExempt()).
+  /// Mutable because that check is const.
+  mutable std::vector<char> UnsafeUsed_;
 
   /// True while visiting the body of a function declared
   /// `@caller_location`. A plain bool, not a counter like UnsafeDepth_:
@@ -923,6 +969,28 @@ private:
   /// fallible, so the hint differs -- from one in any other function that
   /// returns a plain type.
   std::string CurrentFuncName_;
+  /// SL-6: the binary expression whose operands are being judged, set by
+  /// visitBinary() and visitCompoundAssignment() once the operands are
+  /// checked: an error raised meanwhile is about them, and reportError() gives
+  /// it their identifiers' types and the structs they are.
+  const ExprAST *OperandScope_ = nullptr;
+  const ExprAST *OperandLHS_ = nullptr;
+  const ExprAST *OperandRHS_ = nullptr;
+  struct OperandScopeGuard {
+    TypeChecker &TC;
+    const ExprAST *SavedScope, *SavedLHS, *SavedRHS;
+    OperandScopeGuard(TypeChecker &T, const ExprAST *Node, const ExprAST *L, const ExprAST *R)
+        : TC(T), SavedScope(T.OperandScope_), SavedLHS(T.OperandLHS_), SavedRHS(T.OperandRHS_) {
+      TC.OperandScope_ = Node;
+      TC.OperandLHS_ = L;
+      TC.OperandRHS_ = R;
+    }
+    ~OperandScopeGuard() {
+      TC.OperandScope_ = SavedScope;
+      TC.OperandLHS_ = SavedLHS;
+      TC.OperandRHS_ = SavedRHS;
+    }
+  };
 
   // ── Visibility (FREEZE.md §6.15) ─────────────────────────────────────────────
   //

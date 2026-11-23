@@ -1,0 +1,11 @@
+// EXPECT-DIAG: E106
+// EXPECT-FIX: declare the return type ': void'
+// `greet` returns nothing and declares no return type, so the fix is `: void`.
+fn greet(name: string) {
+    io::printline(name);
+}
+
+fn main(): int {
+    greet("turf");
+    return 0;
+}

@@ -1,0 +1,15 @@
+tests/10_default_init/fail_mut_bool_before_init.tr (1 error)
+
+── error at line 6, col 8 [E008 · variable read before it has a value]
+
+  I cannot use `flag` (type `bool`) before it has a value.
+
+  Hint: Assign to `flag` on every path before it is used.
+
+  5 │     mut flag: bool;
+    │     - declared here
+  6 │     if flag {
+    │        ^~~~ read here before it has a value
+
+  Run `turf --explain E008` for more details.
+

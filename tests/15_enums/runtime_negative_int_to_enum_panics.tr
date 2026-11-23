@@ -1,0 +1,16 @@
+// A negative run-time int is outside every enum's variant range too.
+enum Color {
+    Red,
+    Green,
+    Blue
+}
+
+fn id(x: int): int {
+    return x;
+}
+
+@test(panic, "Invalid int to enum conversion")
+fn panics_runtime_negative_int_to_enum(): void {
+    mut c: Color = id(-1) to Color;
+    io::printline(c to int);
+}

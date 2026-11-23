@@ -1,0 +1,29 @@
+TURF E178 -- UNUSED PRIVATE FUNCTION (WARNING):
+
+CAUSE:
+  A function declared without `pub` is never called, passed as a value or
+  called through UFCS anywhere in its file. This is a WARNING (it starts at
+  `allow`); compilation succeeds.
+
+INCORRECT (compiles, but warns at `warn`):
+    fn old_helper(x: int): int {
+        return x * 2;
+    }
+
+    fn main(): int {
+        return 0;
+    }
+
+CORRECT (the function is used, or removed):
+    fn helper(x: int): int {
+        return x * 2;
+    }
+
+    fn main(): int {
+        return helper(0);
+    }
+
+FIX:
+  Remove the function, or call it where it was meant to be used.
+
+RELATED: E179 (unused import), E180 (unused `pub` function in a program's root).

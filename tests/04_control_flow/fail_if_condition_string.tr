@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E066
-// EXPECT-DIAG: The condition of 'if' must be a 'bool', but this one has type 'string'
+// EXPECT-DIAG: The condition of `if` must be a `bool`, and I found a `string`.
 // A condition has no truthiness: a string is not a condition, and this must be
 // a diagnostic, not invalid IR from Codegen.
 fn main(): int {

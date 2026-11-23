@@ -28,17 +28,17 @@ public:
   StructMethodNotFoundError(SourceLocation Loc, const std::string &StructName,
                             const std::string &MethodName,
                             const RankedSuggestions &Suggestions)
-      : TurfError(Loc, Colors::BRIGHT_RED + "'" + Colors::CYAN + StructName +
-                           Colors::BRIGHT_RED + "' has no method named '" +
+      : TurfError(Loc, Colors::BRIGHT_RED + "I cannot find a method named `" +
                            Colors::CYAN + MethodName + Colors::BRIGHT_RED +
-                           "'." + Colors::RESET) {
+                           "` on the struct `" + Colors::CYAN + StructName +
+                           Colors::BRIGHT_RED + "`." + Colors::RESET) {
     Category_ = SLM::ErrorCategory::UNDECLARED_VAR;
     Hint_ = suggestionsOrFallback(Suggestions,
-      "Double-check the spelling, or make sure the method is declared as "
-      "`fn " + StructName + "." + MethodName + "(...): ReturnType` (instance "
-      "method, called as `x." + MethodName + "(...)`) or `fn " + StructName +
-      "." + MethodName + "(...) static: ReturnType` (static method, called "
-      "as `" + StructName + "::" + MethodName + "(...)`).");
+      "Check the spelling, or declare `fn " + StructName + "." + MethodName +
+      "(...): ReturnType` for an instance method, called as `x." + MethodName +
+      "(...)`, or `static fn " + StructName + "." + MethodName +
+      "(...): ReturnType` for a static method, called as `" + StructName +
+      "::" + MethodName + "(...)`.");
     trySetDeterministicRename(MethodName, Suggestions);
   }
 };
@@ -69,16 +69,14 @@ public:
   UnknownStructFieldError(SourceLocation Loc, const std::string &StructName,
                           const std::string &FieldName,
                           const RankedSuggestions &Suggestions)
-      : TurfError(Loc, Colors::BRIGHT_RED + "Struct '" + Colors::CYAN +
-                           StructName + Colors::BRIGHT_RED +
-                           "' has no field named '" + Colors::CYAN +
-                           FieldName + Colors::BRIGHT_RED + "'." +
-                           Colors::RESET) {
+      : TurfError(Loc, Colors::BRIGHT_RED + "I cannot find a field named `" +
+                           Colors::CYAN + FieldName + Colors::BRIGHT_RED +
+                           "` on the struct `" + Colors::CYAN + StructName +
+                           Colors::BRIGHT_RED + "`." + Colors::RESET) {
     Category_ = SLM::ErrorCategory::UNDECLARED_VAR;
     Hint_ = suggestionsOrFallback(
-        Suggestions, "Double-check the spelling, or make sure '" +
-                         FieldName + "' is declared as a field on '" +
-                         StructName + "'.");
+        Suggestions, "Check the spelling, or declare `" + FieldName +
+                         "` as a field of `" + StructName + "`.");
     trySetDeterministicRename(FieldName, Suggestions);
   }
 
@@ -90,14 +88,14 @@ public:
   struct NotAStruct {};
   UnknownStructFieldError(SourceLocation Loc, NotAStruct, const std::string &TypeName,
                           const std::string &FieldName)
-      : TurfError(Loc, Colors::BRIGHT_RED + "A value of type '" + Colors::CYAN +
+      : TurfError(Loc, Colors::BRIGHT_RED + "The type `" + Colors::CYAN +
                            TypeName + Colors::BRIGHT_RED +
-                           "' has no fields, so it has no field named '" +
-                           Colors::CYAN + FieldName + Colors::BRIGHT_RED + "'." +
-                           Colors::RESET) {
+                           "` has no fields, so I cannot read the field `" +
+                           Colors::CYAN + FieldName + Colors::BRIGHT_RED +
+                           "`." + Colors::RESET) {
     Category_ = SLM::ErrorCategory::UNDECLARED_VAR;
-    Hint_ = "Only a struct has fields. If you meant a method, call it with "
-            "parentheses: '." + FieldName + "()'.";
+    Hint_ = "Use a struct, the only type with fields. To call a method "
+            "instead, write it with parentheses: `." + FieldName + "()`.";
   }
 };
 // `StructName::new(...)` was called but `StructName` has no `.new`
@@ -108,15 +106,15 @@ public:
 class NoConstructorDefinedError : public TurfError {
 public:
   NoConstructorDefinedError(SourceLocation Loc, const std::string &StructName)
-      : TurfError(Loc, Colors::BRIGHT_RED + "'" + Colors::CYAN + StructName +
-                           Colors::BRIGHT_RED +
-                           "' has no constructor -- '" + Colors::CYAN +
+      : TurfError(Loc, Colors::BRIGHT_RED + "I cannot call `" + Colors::CYAN +
                            StructName + "::new(...)" + Colors::BRIGHT_RED +
-                           "' can't be called." + Colors::RESET) {
+                           "`, because `" + Colors::CYAN + StructName +
+                           Colors::BRIGHT_RED + "` has no constructor." +
+                           Colors::RESET) {
     Category_ = SLM::ErrorCategory::DECLARATION;
-    Hint_ = "Define one with `fn " + StructName +
-            ".new(...): void { self.field = ...; }`, or use `" + StructName +
-            "::default()` if you just want every field zero-initialized.";
+    Hint_ = "Declare one with `fn " + StructName +
+            ".new(...): void { self.field = ...; }`, or call `" + StructName +
+            "::default()` to zero-initialize every field.";
   }
 };
 // `fn StructName.default(...)` declared by hand -- `default` is always
@@ -125,15 +123,15 @@ public:
 class ReservedConstructorNameError : public TurfError {
 public:
   ReservedConstructorNameError(SourceLocation Loc, const std::string &StructName)
-      : TurfError(Loc, Colors::BRIGHT_RED + "'" + Colors::CYAN + "default" +
-                           Colors::BRIGHT_RED +
-                           "' is reserved and can't be declared by hand." +
+      : TurfError(Loc, Colors::BRIGHT_RED + "I cannot accept a hand-written `" +
+                           Colors::CYAN + "default" + Colors::BRIGHT_RED +
+                           "`, because it is reserved." +
                            Colors::RESET) {
     Category_ = SLM::ErrorCategory::DECLARATION;
-    Hint_ = "'" + StructName + "::default()' is always compiler-generated "
-            "(every field recursively zero-initialized) -- remove this "
-            "declaration. Define '" + StructName +
-            ".new(...)' instead if you need custom construction logic.";
+    Hint_ = "Remove this declaration: `" + StructName + "::default()` is "
+            "always generated, with every field zero-initialized. Declare `" +
+            StructName + ".new(...)` instead if you need custom construction "
+            "logic.";
   }
 };
 // `static` written on a function that isn't struct-bound at all (no
@@ -142,15 +140,14 @@ public:
 class StaticOutsideStructError : public TurfError {
 public:
   StaticOutsideStructError(SourceLocation Loc, const std::string &FuncName)
-      : TurfError(Loc, Colors::BRIGHT_RED + "'" + Colors::CYAN + "static" +
-                           Colors::BRIGHT_RED +
-                           "' can only be used on a struct-bound method." +
+      : TurfError(Loc, Colors::BRIGHT_RED + "I cannot use `" + Colors::CYAN +
+                           "static" + Colors::BRIGHT_RED +
+                           "` on a function that does not belong to a struct." +
                            Colors::RESET) {
     Category_ = SLM::ErrorCategory::DECLARATION;
-    Hint_ = "'" + FuncName + "' isn't declared as 'StructName." + FuncName +
-            "(...)', so there's no 'self' to omit. Remove 'static', or "
-            "declare it as a method: 'fn StructName." + FuncName +
-            "(...) static: ReturnType { ... }'.";
+    Hint_ = "Remove `static` from `" + FuncName + "`, which has no `self` to "
+            "omit, or declare it as a method: `static fn StructName." +
+            FuncName + "(...): ReturnType { ... }`.";
   }
 };
 // `fn StructName.new(...) static: ...` -- 'new' always constructs via
@@ -160,16 +157,16 @@ public:
 class ConstructorCannotBeStaticError : public TurfError {
 public:
   ConstructorCannotBeStaticError(SourceLocation Loc, const std::string &StructName)
-      : TurfError(Loc, Colors::BRIGHT_RED + "'" + Colors::CYAN + "new" +
-                           Colors::BRIGHT_RED + "' can't be '" + Colors::CYAN +
-                           "static" + Colors::BRIGHT_RED + "'." +
+      : TurfError(Loc, Colors::BRIGHT_RED + "I cannot make `" + Colors::CYAN +
+                           "new" + Colors::BRIGHT_RED + "` `" + Colors::CYAN +
+                           "static" + Colors::BRIGHT_RED + "`." +
                            Colors::RESET) {
     Category_ = SLM::ErrorCategory::DECLARATION;
-    Hint_ = "'" + StructName + ".new' always initializes 'self' -- remove "
-            "'static' from its declaration.";
+    Hint_ = "Remove `static` from the declaration of `" + StructName +
+            ".new`, which always initializes `self`.";
     withWordDeletionFixIt(
-        "static", "'" + StructName + ".new' always initializes 'self', and "
-                  "'static' means there is no 'self' -- removing 'static' is "
+        "static", "`" + StructName + ".new` always initializes `self`, and "
+                  "`static` means there is no `self`, so removing `static` is "
                   "the fix.");
   }
 };
@@ -179,14 +176,13 @@ class DefaultConstructorArityError : public TurfError {
 public:
   DefaultConstructorArityError(SourceLocation Loc, const std::string &StructName,
                                int Got)
-      : TurfError(Loc, Colors::BRIGHT_RED + "'" + Colors::CYAN + StructName +
+      : TurfError(Loc, Colors::BRIGHT_RED + "`" + Colors::CYAN + StructName +
                            "::default()" + Colors::BRIGHT_RED +
-                           "' takes no arguments, but got " +
+                           "` takes no arguments, but I got " +
                            std::to_string(Got) + "." + Colors::RESET) {
     Category_ = SLM::ErrorCategory::FUNCTION_SIGNATURE;
-    Hint_ = "'" + StructName + "::default()' always zero-initializes every "
-            "field with no input -- use '" + StructName +
-            "::new(...)' if you need to pass values in.";
+    Hint_ = "Call `" + StructName + "::default()` with no arguments, or use `" +
+            StructName + "::new(...)` to pass values in.";
   }
 };
 // `instance.new(...)` / `instance.default(...)` -- these are reserved for
@@ -196,13 +192,13 @@ public:
 class ConstructorCalledOnInstanceError : public TurfError {
 public:
   ConstructorCalledOnInstanceError(SourceLocation Loc, const std::string &MethodName)
-      : TurfError(Loc, Colors::BRIGHT_RED + "'" + Colors::CYAN + MethodName +
-                           Colors::BRIGHT_RED +
-                           "' can't be called on an instance with '.'." +
+      : TurfError(Loc, Colors::BRIGHT_RED + "I cannot call `" + Colors::CYAN +
+                           MethodName + Colors::BRIGHT_RED +
+                           "` on an instance with `.`." +
                            Colors::RESET) {
     Category_ = SLM::ErrorCategory::DECLARATION;
-    Hint_ = "'" + MethodName + "' only works as 'StructName::" + MethodName +
-            "(...)', never through an existing instance.";
+    Hint_ = "Write `StructName::" + MethodName + "(...)`: `" + MethodName +
+            "` never works through an existing instance.";
   }
 };
 // `new()` doesn't assign every field of its struct on all paths -- a real,
@@ -213,9 +209,9 @@ class IncompleteConstructorError : public TurfError {
 public:
   IncompleteConstructorError(SourceLocation Loc, const std::string &StructName,
                              const std::vector<std::string> &MissingFields)
-      : TurfError(Loc, Colors::BRIGHT_RED + "'" + Colors::CYAN + StructName +
+      : TurfError(Loc, Colors::BRIGHT_RED + "`" + Colors::CYAN + StructName +
                            ".new" + Colors::BRIGHT_RED +
-                           "' doesn't assign every field on all paths." +
+                           "` does not assign every field on all paths." +
                            Colors::RESET) {
     Category_ = SLM::ErrorCategory::DECLARATION;
     std::string Fields;
@@ -224,11 +220,11 @@ public:
       Fields += MissingFields[i];
     }
     Message += "\n  " + Colors::BRIGHT_GREEN +
-               "Not definitely assigned on every path: " + Colors::RESET +
+               "Fields not assigned on every path: " + Colors::RESET +
                Colors::CYAN + Fields + Colors::RESET;
-    Hint_ = "Every field of '" + StructName + "' must be set via "
-            "'self.<field> = ...' on every path through 'new' -- including "
-            "inside every if/else branch and before any early return.";
+    Hint_ = "Assign every field of `" + StructName + "` with "
+            "`self.<field> = ...` on every path through `new`, including "
+            "inside every `if` and `else` branch and before any early return.";
   }
 };
 // Raised when '.' -- reserved for instance-member access -- is used on a
@@ -252,18 +248,18 @@ public:
   DotOperatorOnNonInstanceError(SourceLocation Loc, const std::string &Name,
                                 const std::string &Kind,
                                 const std::string &MethodName)
-      : TurfError(Loc, Colors::BRIGHT_RED + "'.' can't be used here -- '" +
+      : TurfError(Loc, Colors::BRIGHT_RED + "I cannot use `.` on `" +
                            Colors::CYAN + Name + Colors::BRIGHT_RED +
-                           "' is a " + Kind + ", not an instance." +
+                           "`, which is a " + Kind + ", not an instance." +
                            Colors::RESET) {
     Category_ = SLM::ErrorCategory::DECLARATION;
-    Hint_ = "'.' is for instance-member access only. Use '" + Name + "::" +
-            MethodName + "(...)' instead.";
+    Hint_ = "Write `" + Name + "::" + MethodName +
+            "(...)` instead: `.` is for instance members only.";
     // The hint spells the exact spelling out, so --smart writes it for us.
     withDeterministicFix(Name + "." + MethodName, Name + "::" + MethodName,
-                         "'.' is for instance-member access only, and '" + Name +
-                             "' is a " + Kind + ", not an instance -- a call "
-                             "on it is written with '::'.");
+                         "`.` is for instance members only, and `" + Name +
+                             "` is a " + Kind + ", not an instance, so a call "
+                             "on it is written with `::`.");
   }
 };
 // The reverse of DotOperatorOnNonInstanceError: the base IS a real
@@ -281,14 +277,14 @@ public:
   StaticMethodCalledOnInstanceError(SourceLocation Loc,
                                     const std::string &StructName,
                                     const std::string &MethodName)
-      : TurfError(Loc, Colors::BRIGHT_RED + "'" + Colors::CYAN + MethodName +
+      : TurfError(Loc, Colors::BRIGHT_RED + "`" + Colors::CYAN + MethodName +
                            Colors::BRIGHT_RED +
-                           "' is a static method -- it can't be called "
-                           "through an instance with '.'." + Colors::RESET) {
+                           "` is a static method, so I cannot call it "
+                           "through an instance with `.`." + Colors::RESET) {
     Category_ = SLM::ErrorCategory::DECLARATION;
-    Hint_ = "'" + StructName + "." + MethodName + "' takes no implicit "
-            "'self' (it's declared 'static'). Call it as '" + StructName +
-            "::" + MethodName + "(...)' instead.";
+    Hint_ = "Call it as `" + StructName + "::" + MethodName + "(...)`: `" +
+            StructName + "." + MethodName + "` is declared `static` and takes "
+            "no implicit `self`.";
   }
 };
 
@@ -334,9 +330,9 @@ public:
    */
   StructLayoutCycleError(SourceLocation Loc, const std::string &StructName,
                          const std::vector<std::string> &CyclePath)
-      : TurfError(Loc, Colors::BRIGHT_RED + "struct '" + Colors::CYAN +
-                           StructName + Colors::BRIGHT_RED +
-                           "' cannot contain itself by value." +
+      : TurfError(Loc, Colors::BRIGHT_RED + "I cannot let the struct `" +
+                           Colors::CYAN + StructName + Colors::BRIGHT_RED +
+                           "` contain itself by value." +
                            Colors::RESET) {
     Category_ = SLM::ErrorCategory::DECLARATION;
     std::string Path;
@@ -346,10 +342,10 @@ public:
     }
     Message += "\n  " + Colors::BRIGHT_GREEN + "cycle: " + Colors::CYAN +
                Path + Colors::RESET;
-    Hint_ = "Make one of these fields a reference or pointer ('&" +
-            StructName + "', '&?" + StructName + "', '" + StructName +
-            "*') instead of holding the struct by value -- a struct that "
-            "contains itself by value has no finite size.";
+    Hint_ = "Make one of these fields a reference or pointer (`&" +
+            StructName + "`, `&?" + StructName + "`, `" + StructName +
+            "*`) instead of holding the struct by value, which would give it "
+            "no finite size.";
   }
 };
 

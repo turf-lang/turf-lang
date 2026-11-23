@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E066
-// EXPECT-DIAG: Type mismatch!
+// EXPECT-DIAG: I cannot store a `double` in `x`, which is an `int`.
 fn main(): int {
     // double should not implicitly narrow to int
     mut x: int = 3.14;

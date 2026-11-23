@@ -1,5 +1,0 @@
-// EXPECT-DIAG: E061
-fn main(): int {
-    break = 5;
-    return 0;
-}

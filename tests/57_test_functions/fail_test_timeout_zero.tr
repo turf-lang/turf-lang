@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: `timeout:` takes a whole number of milliseconds greater than 0
+// TDP-2-026: a time limit is a whole number of milliseconds, more than 0.
+@test(timeout: 0)
+fn a(): void {
+}
+
+fn main(): int {
+    return 0;
+}

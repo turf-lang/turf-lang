@@ -1,0 +1,44 @@
+TURF E189 -- FREEING MEMORY THAT WAS NEVER ALLOCATED (WARNING):
+
+CAUSE:
+  `mem::free` (or another releasing function) is given a pointer that only
+  ever holds the address of a variable (`&x`). That memory was never
+  allocated, and freeing it corrupts memory. This is a WARNING (it starts at
+  `allow`).
+
+INCORRECT (compiles, but warns at `warn`):
+    import mem;
+
+    fn wrong(): int {
+        mut x: int = 5;
+        unsafe {
+            mut p: void* = &x to void*;
+            mem::free(p);
+        }
+        return x;
+    }
+
+    fn main(): int {
+        return 0;
+    }
+
+CORRECT:
+    import mem;
+
+    fn right(): int {
+        unsafe {
+            mut p: void* = mem::alloc(8);
+            mem::free(p);
+        }
+        return 0;
+    }
+
+    fn main(): int {
+        return right();
+    }
+
+FIX:
+  Free only what `mem::alloc` returned. A variable's own memory is released
+  when its function returns; do not free it.
+
+RELATED: E017 (double free), E187, E188.

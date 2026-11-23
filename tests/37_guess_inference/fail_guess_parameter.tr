@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E128
-// EXPECT-DIAG: can only declare a local variable
+// EXPECT-DIAG: I accept `guess` only on a local variable
 // F-GUESS-3: inference is local and one-directional, never for a parameter.
 // A parameter has no initializer to infer from. Before, this compiled and the
 // error appeared at the CALL as "No matching overload".

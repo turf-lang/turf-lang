@@ -22,11 +22,11 @@ INCORRECT:
     mut a: int = _5;
     // ERROR: A digit run can't start with '_' [E072]
     mut b: int = 5_;
-    // ERROR: A digit run can't end with '_' [E072]
+    // ERROR: I cannot end a run of digits with `_` [E072]
     mut c: int = 0x_FF;
-    // ERROR: leading '_' right after the radix prefix [E072]
+    // ERROR: I cannot start a run of digits with `_` [E072]
     mut d: double = 1e_5;
-    // ERROR: leading '_' right after the exponent marker [E072]
+    // ERROR: I cannot start a run of digits with `_` [E072]
 
 FIX:
   Remove the leading or trailing underscore. Every `_` must have a real

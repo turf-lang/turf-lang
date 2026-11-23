@@ -1,0 +1,25 @@
+A generic construction takes its type arguments from the context
+
+A generic struct built with `::default()` or `::new(...)` can take its type arguments from where its value goes -- the declared type of the variable, the function's return type, the parameter it is passed to:
+
+    import list::List;
+
+    fn main(): int {
+        mut l: List<int> = List::default();   // WARNING (E177 at `warn`): <int> comes from `List<int>` on the left
+        l.push(1);
+        return 0;
+    }
+
+Read on its own, `List::default()` does not say what it builds. Write the type arguments where it is built:
+
+    import list::List;
+
+    fn main(): int {
+        mut l: List<int> = List<int>::default();
+        l.push(1);
+        return 0;
+    }
+
+The compiler's `Fix:` writes them in, exactly as it already resolved them, so the program does not change. A constructor whose own arguments fix every type argument (`Box::new(5)` for a `fn<T> Box.new(v: T)`) takes nothing from the context and does not warn.
+
+This warning starts at `allow` in 2.3: turn it on with `turf build --warn E177` (or `[lints] E177 = "warn"` in turf.toml). TurfLang 3.0 makes it an error (B-17), and `turf migrate 3.0` writes every one in.

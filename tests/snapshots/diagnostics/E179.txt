@@ -1,0 +1,13 @@
+tests/57_test_functions/04_error_type_named_error.tr (1 warning)
+
+── warning at line 5, col 1 [E179 · unused import]
+
+  Nothing in this file uses the import of `test`.
+
+  Hint: Remove the `import` line.
+
+  5 │ import test;
+    │ ^~~~~~ nothing uses this import
+
+  Run `turf --explain E179` for more details.
+

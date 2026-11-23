@@ -1,0 +1,84 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+import list::List;
+
+// Negative test (LEC-006): operand ORDER is part of the signature. The
+// operator is declared for `Cell<T> + int`; `1 + c` is `int + Cell<int>`, and
+// no operator is commutative by itself.
+// Expected: E066, "cannot apply '+' to 'int' and 'Cell<int>'".
+struct Cell<T> {
+    v: T,
+    n: int
+}
+
+fn<T> Cell.new(v: T): void {
+    self.v = v;
+    self.n = 1;
+}
+
+operator<T> +(a: Cell<T>, k: int): Cell<T> {
+    return a;
+}
+
+@test(compile_error, E057, "I cannot use `+` on an `int` and a `Cell<int>`.")
+fn rejects_generic_operator_operand_order(): void {
+    mut c: Cell<int> = Cell::new(1);
+    mut d: Cell<int> = 1 + c;
+}
+
+// A type that declares only `operator []=` can be written through but not
+// read: `box[0]` has no `operator []` to call. The checker counted the setter
+// as "this type is indexable", gave the read no type, and Codegen died with
+// "LLVM ERROR: Base is not an array or pointer" (found by turf-fuzz, as a
+// mutation of 10_operator_index_get_set.tr that deleted the getter).
+struct IntBox {
+    a: int
+}
+
+operator []=(box: &IntBox, index: int, value: int): void {
+    box.a = value;
+}
+
+@test(compile_error, E126, "I cannot index an `IntBox`.")
+fn rejects_index_read_with_setter_only(): void {
+    mut box: IntBox = IntBox::default();
+    box[0];
+}
+
+// Negative test (LEC-006, E098): `bs[0].bump()` assigns to `self.a`, but the
+// receiver is the copy bs[0] returned, so the list's element never changes.
+// Expected: E098, "Cannot call 'bump' on the value an 'operator[]' read returned".
+
+struct Big {
+    a: int
+}
+
+fn Big.new(a: int): void {
+    self.a = a;
+}
+
+fn Big.bump(): void {
+    self.a = self.a + 1;
+}
+
+@test(compile_error, E098, "I cannot call `bump` on what an `operator[]` read returned: it changes its receiver, and the receiver is a copy, so the change would be lost.")
+fn rejects_index_result_mutating_method(): void {
+    mut bs: List<Big> = List::default();
+    bs.push(Big::new(1));
+    bs[0].bump();
+}
+
+// Negative test: using `+` on a struct with no operator overload declared
+// anywhere must be a clean type error, not an ICE.
+struct Vec2 {
+    x: int,
+    y: int
+}
+
+@test(compile_error, E057, "I cannot use `+` on a `Vec2` and a `Vec2`.")
+fn rejects_operator_not_visible(): void {
+    mut a: Vec2 = Vec2::default();
+    mut b: Vec2 = Vec2::default();
+    mut r: Vec2 = a + b;
+}

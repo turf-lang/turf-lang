@@ -1,0 +1,342 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+import cross_module_bare_call_module;
+import functionless_module_enum_module;
+import import_scope_outer_module;
+import io;
+import list::List;
+import list;
+import mem;
+import pub_immut_constants_module;
+import static_shape_module::Vec2;
+import type_identity_node_a_module::Node;
+import type_identity_type_args_module;
+
+// Regression test: this is the literal bug report. Before this fix,
+// Resolver::visitFuncCall resolved ANY bare (unqualified) function call by
+// searching EVERY module ever transitively imported anywhere in the
+// program (SymTable_.findInModules(CalleeName), with no check that the
+// CURRENT file itself imported -- let alone asked to expose unqualified --
+// that specific module). Confirmed live: bare `printline("x");` compiled
+// successfully with ZERO import statements anywhere in user code, because
+// lib/std/prelude.tr always `import io;`-ed for every compile and this
+// lookup didn't care who actually requested that visibility.
+//
+// A bare call must now resolve ONLY to (a) a function declared directly in
+// the current file, or (b) -- if the bare call happens INSIDE a module's
+// own body -- another function declared in that SAME module (self-
+// reference, see selfref_module.tr/selfref_module_call.tr). Calling an
+// imported module's function bare from OUTSIDE that module, like here,
+// must be a clean UnknownFunctionError telling you to qualify it, not a
+// silent cross-module resolution.
+
+@test(compile_error, E041, "I cannot find a function named `helperFn`")
+fn rejects_bare_cross_module_call(): void {
+    mut x: int = helperFn();
+}
+
+fn multiply(x: int, y: int): int {
+    return x * y;
+}
+
+@test(compile_error, E044, "I found no overload of `multiply` that takes 1 argument")
+fn rejects_function_sig(): void {
+    // ... some padding lines so multiply is out of the +/-5 window
+    io::printline("padding");
+    io::printline("padding");
+    io::printline("padding");
+    io::printline("padding");
+    io::printline("padding");
+    io::printline("padding");
+    io::printline("padding");
+    io::printline("padding");
+
+    mut res: int = multiply(5); // missing argument
+    io::printline(res);
+
+}
+
+// LEC-008: `module::Type::method()` and `module::Type::default()` spell the
+// module too, so they are gated like `module::function()`.
+
+@test(compile_error, E145, "I cannot find an import of module")
+fn rejects_import_scope_static_method(): void {
+    immut b: int = import_scope_outer_module::outer_value();
+    mut made = import_scope_inner_module::InnerBox::default();
+    made.value = b;
+    made.get();
+}
+
+// LEC-008 (F-IMP-1): importing a module that itself imports another does not
+// make the other one spellable here.
+
+@test(compile_error, E145, "I cannot find an import of module")
+fn rejects_import_scope_transitive_call(): void {
+    immut v: int = import_scope_inner_module::inner_value();
+    v;
+}
+
+// LEC-008 (F-IMP-1): an `export immut` constant is reached through the module
+// qualifier, so it needs the module's own `import` like a function does.
+
+@test(compile_error, E145, "I cannot find an import of module")
+fn rejects_import_scope_transitive_constant(): void {
+    immut c: int = import_scope_inner_module::INNER_LIMIT;
+    c;
+}
+
+// LEC-008 (F-IMP-1, F-IMP-3): the VALUE of a transitively-loaded type may be
+// held (see import_scope_value_held_not_spelled.tr); only SPELLING its module
+// qualifier is gated.
+
+@test(compile_error, E145, "I cannot find an import of module")
+fn rejects_import_scope_transitive_type(): void {
+    immut b: import_scope_inner_module::InnerBox = import_scope_outer_module::outer_make(1);
+    b.get();
+}
+
+// Regression test: List<int>.push() must reject an argument of the wrong
+// type at COMPILE time. Before this fix, struct method calls (unlike free
+// function / module calls) never checked argument TYPES at all -- only
+// argument COUNT -- because `push(item: T)`'s declared parameter type is
+// the generic placeholder T, which trivially "matched" anything with no
+// check. Confirmed as a genuine type-safety hole, not just a missing
+// diagnostic: `l.push("hello")` on a `List<int>` compiled clean, and the
+// next `l.pop()` read the string's raw pointer bits back reinterpreted as
+// an int. See TypeChecker::visitMethodCall()'s TypeMatches filter (mirrors
+// the equivalent check the module-call path already had) for the fix.
+
+@test(compile_error, E056, "No overload of `list::List.push` takes the argument types (string).")
+fn rejects_list_push_wrong_type(): void {
+    mut l: List<int> = List::default();
+    l.push("hello");
+}
+
+// SY-5: a module constant without `pub` is private to its module; a
+// qualified use from another file is E088, with the usual hint.
+
+@test(compile_error, E088, "I cannot use the constant `SECRET`, which is private to module")
+fn rejects_private_constant_qualified(): void {
+    pub_immut_constants_module::SECRET;
+}
+
+// Regression test: `EnumName::Variant(...)` -- calling an enum variant as
+// if it were a function -- must be a clean TypeError, not reach Codegen
+// (where a real function call site expects a callable target, not a
+// compile-time constant integer).
+
+enum Color { Red, Green, Blue }
+
+@test(compile_error, E135, "I cannot call `Color::Red`, which is an enum variant and not a function")
+fn rejects_scope_call_enum_variant(): void {
+    mut c: Color = Color::Red();
+}
+
+// Regression test: `Module::func(...)` where Module IS real but doesn't
+// declare `func` must raise a specific, on-topic ModuleMethodNotFoundError
+// ("Module 'io' has no function named 'nosuchfunction'"), not fall through
+// to the generic bare-call UnknownFunctionError path (whose hint --
+// "Double-check the spelling or import the module that defines it" --  is
+// actively confusing once the user has ALREADY written the qualifier).
+//
+// Found during a systematic import bug hunt: ModuleMethodNotFoundError
+// existed in Errors.h (built for the old dot-based module-call syntax)
+// but was never actually wired up anywhere in Resolver::visitFuncCall's
+// new ScopeAccessExprAST-callee branch -- confirmed dead code via grep
+// before this fix.
+
+@test(compile_error, E026, "I cannot find a function named `nosuchfunction` in the module `io`")
+fn rejects_scope_call_wrong_function_real_mod(): void {
+    io::nosuchfunction("test");
+}
+
+// Regression test: same wrong-module check as
+// fail_scope_type_wrong_module.tr, but for qualified CONSTRUCTION
+// (mem::List::default()) rather than a type annotation -- confirms
+// Resolver::visitFuncCall's construction dispatch (new/default) calls
+// validateModuleQualifier() too, not just validateNamedType()'s.
+
+@test(compile_error, E030, "I cannot find `List` in the module `mem`")
+fn rejects_scope_construction_wrong_mod(): void {
+    mut l: list::List<int> = mem::List::default();
+}
+
+// Regression test: `Module::EnumName::Variant` where Module and EnumName
+// are both correct but Variant doesn't actually exist on that enum must
+// still be rejected with the ordinary "no variant" diagnostic -- proves
+// the 3-part chain reaches the SAME variant-existence check the 2-part
+// bare form (EnumName::Variant) already had, not a separate, less-checked
+// path.
+
+@test(compile_error, E039, "I cannot find a variant `NoSuchVariant`")
+fn rejects_scope_enum_chain_bad_variant(): void {
+    immut s: functionless_module_enum_module::Shade =
+    functionless_module_enum_module::Shade::NoSuchVariant;
+}
+
+// Regression test: `Module::EnumName::Variant` where Module is real but
+// doesn't own EnumName must be rejected -- same wrong-module validation
+// as a qualified type/struct-literal, applied to the newly-added 3-part
+// enum-value-access chain.
+
+@test(compile_error, E030, "I cannot find `Shade` in the module `mem`")
+fn rejects_scope_enum_chain_wrong_mod(): void {
+    immut s: mem::Shade = mem::Shade::Dark;
+}
+
+// Regression test: same ScopeOperatorOnInstanceError, but the method being
+// reached for is a TRUE static method (fn StructName.method(...) static:
+// RetType, no self) rather than an instance method -- confirms the "you
+// meant '.'" diagnosis fires purely based on whether the LEFT-hand name is
+// a real variable, independent of what kind of method the RIGHT-hand name
+// would have resolved to.
+
+struct P {}
+
+fn P.square(x: int) static: int {
+    return x * x;
+}
+
+@test(compile_error, E029, "`p` is a variable, not a type or module, so I cannot use `::` on it.")
+fn rejects_scope_operator_on_instance_static_method(): void {
+    mut p: P = P::default();
+    immut y: int = p::square(5);
+}
+
+// Regression test: this is the literal bug report. A type annotation
+// qualified with a module name that doesn't exist at all must be
+// rejected -- before the fix, ParseType() accepted ANY qualifier
+// syntactically and silently discarded it, so this compiled cleanly.
+
+@test(compile_error, E031, "I cannot find an enum, struct or module named `totallyBogusModuleNameThatDoesNotExist`")
+fn rejects_scope_type_unknown_mod(): void {
+    mut l: totallyBogusModuleNameThatDoesNotExist::List<int> = List::default();
+}
+
+// Regression test: a type annotation qualified with a REAL module that
+// simply doesn't own the named type (List actually lives in `list`, not
+// `mem`) must be rejected, not just an unknown-module-name qualifier.
+// Confirms validateModuleQualifier() checks OWNERSHIP (via the new
+// ResolverSymbolTable::TypeOwningModule_ registry), not just "is this
+// string a real module name".
+
+@test(compile_error, E030, "I cannot find `List` in the module `mem`")
+fn rejects_scope_type_wrong_mod(): void {
+    mut l: mem::List<int> = list::List::default();
+}
+
+// Regression test: `Left::Right` where `Left` names neither a known enum, a
+// known struct, nor a known (imported) module must be a clean
+// UnknownScopeQualifierError, not an internal compiler error or a silent
+// pass-through to Codegen. See fail_scope_operator_on_instance_*.tr for the
+// DIFFERENT, more specific error raised when Left is a real declared
+// variable instead of a genuinely unknown name.
+
+@test(compile_error, E031, "I cannot find an enum, struct or module named `nosuchmodule`")
+fn rejects_scope_unknown_qualifier(): void {
+    nosuchmodule::foo();
+}
+
+// Regression test: `StructName::method(...)` where StructName is real but
+// has no method (static or instance) by that name must raise a clean
+// StructMethodNotFoundError, not a crash or a confusing "unknown scope
+// qualifier" error (that would be the wrong diagnostic -- StructName IS a
+// known qualifier, it's the method name that's wrong).
+
+struct MathUtil {}
+
+fn MathUtil.square(x: int) static: int {
+    return x * x;
+}
+
+@test(compile_error, E054, "I cannot find a method named `cube` on the struct `MathUtil`")
+fn rejects_static_method_not_found(): void {
+    immut y: int = MathUtil::cube(5);
+}
+
+// Regression test: `Module::StructName::method(...)` where StructName is
+// real but declared in a DIFFERENT module (not Module) must be rejected --
+// the 3-part chain's leading ModuleQualifier used to be silently ignored
+// entirely for a static-method-call callee (only the struct/method names
+// mattered), so ANY qualifier -- right or completely wrong -- produced the
+// identical result. Confirmed live as a genuine bug before this check
+// existed: `mem::Vec2::zero()` compiled cleanly even though Vec2 actually
+// lives in static_shape_module, not mem.
+
+@test(compile_error, E030, "I cannot find `Vec2` in the module `mem`")
+fn rejects_static_method_wrong_module_qualifier(): void {
+    immut z: Vec2 = mem::Vec2::zero();
+}
+
+// Regression test: a struct declared in a module but never imported at all
+// (not bare-imported, not symbol-imported, not qualified) must be an
+// "Unknown type" error, not silently visible -- companion negative case to
+// scope_instance_method_via_symbol_import.tr.
+
+@test(compile_error, E042, "I cannot find a type named `Counter`")
+fn rejects_struct_type_not_imported(): void {
+    mut c: Counter = Counter::new(5);
+    io::printline("should not compile");
+}
+
+// FDN-003: E085 through an explicit single-symbol import rather than a
+// wildcard -- `import M::Node;` plus this file's own `Node` make the bare
+// spelling ambiguous exactly the same way (see
+// fail_type_identity_ambiguous_wildcard_vs_local.tr). Here the ambiguous use
+// is a construction, not a type annotation: `Node::default()`'s `Node` goes
+// through the Resolver's `Left::Right` path, a separate code path from
+// validateNamedType().
+
+struct Node {
+    s: string
+}
+
+@test(compile_error, E085, "`Node` could mean more than one type here")
+fn rejects_type_identity_ambiguous_symbol_import_vs_local(): void {
+    mut n = Node::default();
+}
+
+// The same rule for a type reached through a module qualifier, here an enum.
+
+@test(compile_error, E148, "`Shape` is not generic, so it takes no type arguments")
+fn rejects_type_identity_imported_type_args_on_non_generic(): void {
+    mut s: type_identity_type_args_module::Shape<int> = type_identity_type_args_module::Shape::Circle;
+}
+
+// The stdlib `List` named without type arguments -- the one spelling the
+// Parser used to reject by name ("Expected '<' after 'list'"). Still
+// rejected, now by the general Resolver rule (see
+// fail_type_identity_generic_without_type_args.tr), not a hardcoded name.
+
+@test(compile_error, E138, "`List` is generic, so I need type arguments here")
+fn rejects_type_identity_stdlib_list_without_type_args(): void {
+    mut l: List = List::default();
+}
+
+// Every type parameter takes exactly one argument; an extra one would have
+// been dropped without a word.
+
+struct Box<T> {
+    v: T
+}
+
+@test(compile_error, E148, "`Box` takes 1 type argument (T), but I found 2")
+fn rejects_type_identity_too_many_type_args(): void {
+    mut b: Box<int, string> = Box::default();
+    b.v;
+}
+
+// Regression test: found alongside the module-qualifier validation work.
+// validateNamedType() recursed into a GenericType's own TYPE ARGUMENTS
+// (see fail_unknown_generic_type_arg.tr) but never validated the
+// generic's own BASE name at all -- `NonExistentGeneric<int>` used to
+// slip through "unknown type" validation entirely and only surface later
+// as an unrelated, misattributed type-mismatch error far from the real
+// cause. Must now be a clean "unknown type" error, same as any other
+// undeclared type name.
+
+@test(compile_error, E042, "I cannot find a type named `NonExistentGeneric`")
+fn rejects_unknown_generic_base_type(): void {
+    mut x: NonExistentGeneric<int> = 5;
+}

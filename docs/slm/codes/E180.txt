@@ -1,0 +1,29 @@
+TURF E180 -- UNUSED `pub` FUNCTION IN A PROGRAM'S ROOT FILE (WARNING):
+
+CAUSE:
+  A `pub` function in the file that holds `main` is never called. Nothing
+  imports a program's root file, so `pub` does nothing there. This is a
+  WARNING (it starts at `allow`).
+
+INCORRECT (compiles, but warns at `warn`):
+    pub fn report(): int {
+        return 1;
+    }
+
+    fn main(): int {
+        return 0;
+    }
+
+CORRECT:
+    fn report(): int {
+        return 1;
+    }
+
+    fn main(): int {
+        return report();
+    }
+
+FIX:
+  Remove the function or call it. `pub` is not needed in a program's root.
+
+RELATED: E178 (unused private function).

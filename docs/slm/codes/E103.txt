@@ -9,10 +9,10 @@ CAUSE:
     - a stray character that is not Turf, or an `@` that is not `@caller_location`
       (the only decorator Turf has);
     - a declaration keyword in the wrong place: a top-level `mut x: int = 5;` outside
-      any function is not accepted (share a constant across files with `export immut`).
+      any function is not accepted (share a constant across files with `pub immut`).
 
 CORRECT:
-    export immut LIMIT: int = 5;       // a constant shared across files: `export immut`
+    pub immut LIMIT: int = 5;       // a constant shared across files: `pub immut`
 
     fn main(): int {
         mut x: int = 5 + 1;            // every operand present

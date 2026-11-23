@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E057
-// EXPECT-DIAG: In this instantiation: Type mismatch: cannot apply '+' to 'bool' and 'bool'
+// EXPECT-DIAG: In this instantiation: I cannot use `+` on a `bool` and a `bool`.
 // EXPECT-DIAG: immut s: bool = twice(true);
 // `+` on `T` is checked for `T = bool`, at the call.
 

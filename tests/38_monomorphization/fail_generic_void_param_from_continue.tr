@@ -1,0 +1,16 @@
+// turf-fuzz #39: `continue` as an argument has no value, so T is inferred as
+// `void` and the instantiation's parameter has no layout. The compiler hung
+// in Codegen on it; it is E112, as for a parameter written `x: void`.
+// EXPECT-DIAG: E112
+// EXPECT-DIAG: gives the parameter `x` the type `void`, which is only a function's return type.
+fn<T> count_one(x: T): int {
+    return 1;
+}
+
+fn main(): int {
+    mut n: int = 0;
+    while n < 3 {
+        n += count_one(continue);
+    }
+    return 0;
+}

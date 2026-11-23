@@ -20,7 +20,7 @@ CORRECT SYNTAX:
 
 INCORRECT:
     mut p: Piont = Point::default();
-    // ERROR: Unknown type 'Piont'.
+    // ERROR: I cannot find a type named `Piont`.
     //   (did-you-mean suggests 'Point' when it's a close match)
 
 FIX:

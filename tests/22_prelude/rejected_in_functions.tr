@@ -1,0 +1,25 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+// F-PRE-2: only the free functions of io, math and sys are callable by their
+// bare names. `strings` is a prelude module too (spellable as `strings::` with
+// no import, and a receiver's methods through UFCS), but its functions are not
+// flattened into the global namespace: `trim("..")` is not `strings::trim("..")`.
+@test(compile_error, E041, "I cannot find a function named `trim`")
+fn rejects_bare_call_of_unflattened_prelude_function(): void {
+    mut s: string = trim("  padded  ");
+}
+
+// FREEZE.md 6.25: the price of "your declaration hides the prelude name". Once
+// this file declares ANY `max`, a bare `max(...)` looks only at the file's own
+// functions, so a call shaped for math's `max(double, double)` is reported
+// against YOUR `max` rather than quietly falling through. Write `math::max` to
+// reach the prelude's.
+fn max(a: int, b: int): int {
+    return a;
+}
+
+@test(compile_error, E056, "No overload of `max` takes the argument types (double, double).")
+fn rejects_user_declaration_hides_other_overloads(): void {
+    immut best: double = max(1.5, 0.5);
+}

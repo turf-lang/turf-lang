@@ -1,0 +1,26 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+// TDP-2-006: a test has no value either: a build does not contain it.
+@test
+fn checks_add(): void {
+    io::printline(1 + 1);
+}
+
+@test(compile_error, E173, "I cannot use the test `checks_add`")
+fn rejects_test_as_a_value(): void {
+    immut f: fn(): void = checks_add;
+    f();
+}
+
+// TDP-2-006: a compile_error test takes the errors inside it only; the same
+// mistake anywhere else in the file is the program's.
+@test(compile_error, E041, "function named")
+fn a(): void {
+    undeclared();
+}
+
+@test(compile_error, E041, "I cannot find a function named `undeclared_elsewhere`")
+fn rejects_test_compile_error_outside_the_test(): void {
+    undeclared_elsewhere();
+}

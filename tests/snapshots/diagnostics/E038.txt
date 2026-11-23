@@ -1,0 +1,13 @@
+tests/57_test_functions/fail_test_nested.tr (1 error)
+
+── error at line 7, col 5 [E038 · nested function]
+
+  I cannot declare `inner` inside another function.
+
+  Hint: Move `inner` to the top level of the file or module.
+
+  7 │     fn inner(): void {
+    │     ^~ this function is inside another function
+
+  Run `turf --explain E038` for more details.
+

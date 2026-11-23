@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E041
-// EXPECT-DIAG: 'Node' is a struct, and Turf has no `Node(...)` constructor-call syntax
+// EXPECT-DIAG: Build one with `Node::default()`, or `Node::new(...)` if it declares a `.new` method, for example `mut v: Node = Node::default();`. Turf has no `Node(...)` constructor-call syntax.
 // EXPECT-DIAG: Node::new(...)
 // EXPECT-NO-DIAG: import the module that defines it
 // LEC-005: `Node(5)` is the construction syntax most languages have and Turf

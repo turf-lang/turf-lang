@@ -1,0 +1,44 @@
+tests/49_annotations/conditional_free_is_a_warning.tr (3 warnings)
+
+── warning at line 28, col 22 [E171 · possible double free]
+
+  `p` may already have been freed on some path reaching this call.
+
+  Hint: Release `p` only once. If a condition rules that path out, pass `--allow E171` to silence this.
+
+  24 │             mem::free(p);
+     │                      - freed here, on some paths
+     ┊
+  28 │             mem::free(p);
+     │                      ^ this may be freed a second time
+
+  Run `turf --explain E171` for more details.
+
+── warning at line 46, col 14 [E170 · possible use after free]
+
+  `q` may already have been freed on some path reaching this use.
+
+  Hint: Avoid using `q` after releasing it. If a condition rules that path out, pass `--allow E170` to silence this.
+
+  42 │             free(q);
+     │                 - freed here, on some paths
+     ┊
+  46 │             q[0] = 1;
+     │              ^ this may be used after it is freed
+
+  Run `turf --explain E170` for more details.
+
+── warning at line 47, col 17 [E171 · possible double free]
+
+  `q` may already have been freed on some path reaching this call.
+
+  Hint: Release `q` only once. If a condition rules that path out, pass `--allow E171` to silence this.
+
+  42 │             free(q);
+     │                 - freed here, on some paths
+     ┊
+  47 │             free(q);
+     │                 ^ this may be freed a second time
+
+  Run `turf --explain E171` for more details.
+

@@ -25,7 +25,7 @@ INCORRECT:
         self.x = 0;
         self.y = 0;
     }
-    // ERROR: 'default' is reserved and can't be declared by hand.
+    // ERROR: I cannot accept a hand-written `default`, because it is reserved.
 
 FIX:
   Remove the hand-written `.default` declaration entirely -- the compiler

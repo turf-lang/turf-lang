@@ -1,0 +1,13 @@
+tests/14_cfg_analysis/13_no_warn_compound_assign.tr (1 warning)
+
+── warning at line 6, col 7 [E160 · dead store]
+
+  The value assigned to `x` is never read.
+
+  Hint: Remove the assignment, or read `x` before it is overwritten or the function returns. To silence this on purpose, pass `--allow E160`.
+
+  6 │     x += 3;
+    │       ^~ this value is never read
+
+  Run `turf --explain E160` for more details.
+

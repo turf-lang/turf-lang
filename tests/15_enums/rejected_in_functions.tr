@@ -1,0 +1,53 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+// Regression test (was CODE_REVIEW_GAPS_2026-07.md gap #4): a duplicate
+// 'matches' pattern across two arms of the same compare block must be
+// rejected at compile time, not silently accepted.
+//
+// Before the fix, this compiled with zero diagnostics. At the LLVM level,
+// CompareExprAST::codegen()'s SwitchInst-based path issued two
+// SwitchInst::addCase() calls with the SAME case value (Color::Red) pointing
+// at two different basic blocks -- which arm actually ran was an artifact of
+// LLVM's case-insertion order, not a specified language semantic. Fixed in
+// TypeChecker::visitCompare() by tracking seen enum-variant/int-literal/
+// string-literal pattern keys across all arms and rejecting a repeat.
+
+enum Color { Red, Green, Blue }
+
+@test(compile_error, E133, "An earlier arm of this `compare` already matches this pattern, so this arm never runs.")
+fn rejects_duplicate_matches_pattern(): void {
+    mut c: Color = Color::Red;
+    mut result: int = 0;
+    compare c {
+        matches Color::Red:
+        result = 1;
+        done
+        matches Color::Red:
+        result = 2;
+        done
+        matches Color::Green:
+        result = 3;
+        done
+        matches Color::Blue:
+        result = 4;
+        done
+    }
+}
+
+// Test (fail): Non-exhaustive enum compare without otherwise clause
+// Missing East and West -> should be a compile error
+enum Direction { North, East, South, West }
+
+@test(compile_error, E093, "This `compare` on `Direction` does not cover every case, and it has no `otherwise`.")
+fn rejects_enum_non_exhaustive(): void {
+    immut d: Direction = Direction::North;
+    compare d {
+        matches Direction::North:
+        return;
+        done
+        matches Direction::South:
+        return;
+        done
+    }
+}

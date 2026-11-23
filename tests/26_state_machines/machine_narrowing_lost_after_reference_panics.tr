@@ -1,0 +1,23 @@
+// After a reference the state in a narrowed arm is no longer known, so the
+// transition is checked when it runs instead of being trusted.
+machine C {
+    Idle -> Connecting,
+    Connecting -> Connected
+}
+
+fn advance(p: &C): void {
+    p.transition(C::Connecting);
+}
+
+@test(panic, "C::transition(Connecting) -- no such transition from the current state")
+fn panics_machine_narrowing_lost_after_reference(): void {
+    mut x: C = C::Idle;
+    compare x {
+        matches C::Idle:
+        advance(&x);
+        x.transition(C::Connecting);
+        done
+        otherwise:
+        return;
+    }
+}

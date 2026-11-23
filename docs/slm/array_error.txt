@@ -36,9 +36,8 @@ ELEMENT ACCESS:
     wrap around.
   - Index must be of type int.
   - Accessing out of bounds with a LITERAL index is a compile-time error:
-    "Array index out of bounds! You tried to access 'array[5]', but the
-    array only has 3 elements (indices 0 to 2, or -1 to -3 counting from
-    the end)." A computed (non-literal) out-of-bounds index is not caught at
+    "I cannot use `array[5]`, because `array` has only 3 elements." The hint
+    gives the valid range (0 to 2, or -1 to -3 counting from the end). A computed (non-literal) out-of-bounds index is not caught at
     compile time; it panics at run time instead.
 
 ARRAY LENGTH:

@@ -1,25 +1,26 @@
-An exported constant needs a value Turf can know right away
+A module constant needs a value Turf can know right away
 
-`export immut` shares a constant with every file that imports it, but it does that by baking the literal value directly into each importing file at compile time -- there's no shared storage behind the scenes. That means the value has to be something Turf can figure out immediately, like a plain number (a negative one such as -1 too), string, or true/false, not something computed from another variable or a function call.
+A top-level `immut` (`pub immut` when other files may use it) is a constant of its module, and Turf bakes its literal value directly into every place that uses it at compile time -- there's no shared storage behind the scenes. That means the value has to be something Turf can figure out immediately, like a plain number (a negative one such as -1 too), string, or true/false, not something computed from another variable or a function call.
 
-    immut base: int = 10;
-    export immut total: int = base * 2;
+    pub immut base: int = 10;
+    pub immut total: int = base * 2;
 
-Even though `base * 2` is obviously 20 to a person reading this, Turf's exported constants can only hold a literal value written directly, not an expression -- even a simple one like this. The fix is just to write out the actual value:
+Even though `base * 2` is obviously 20 to a person reading this, a module constant can only hold a literal value written directly, not an expression -- even a simple one like this. The fix is just to write out the actual value:
 
-    export immut total: int = 20;
+    pub immut total: int = 20;
 
-If the real value genuinely needs to be computed (not just a simple literal you can write by hand), it can't be an exported constant. Instead, keep it as a normal (non-exported) variable and compute it wherever it's actually used:
+If the real value genuinely needs to be computed (not just a simple literal you can write by hand), it can't be a module constant. Instead, compute it in a function, where any expression works:
 
-    immut base: int = 10;
-    immut total: int = base * 2;   // fine -- not exported, so any expression works
+    fn total(): int {
+        return BASE * 2;
+    }
 
-This is a small tradeoff for how `export immut` works, but it's a fair one: it means every file that imports a constant gets a value with zero runtime cost, right there at compile time.
+This is a small tradeoff for how module constants work, but it's a fair one: every file that uses a constant gets a value with zero runtime cost, right there at compile time.
 
 The same rule explains the other way to trip this error: leaving the value out altogether.
 
-    export immut MAX_RETRIES: int;      // nothing to export
+    pub immut MAX_RETRIES: int;      // nothing to share
 
-An exported constant *is* its value, so it has to be given one on the spot:
+A module constant *is* its value, so it has to be given one on the spot:
 
-    export immut MAX_RETRIES: int = 3;
+    pub immut MAX_RETRIES: int = 3;

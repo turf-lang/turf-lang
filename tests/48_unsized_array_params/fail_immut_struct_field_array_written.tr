@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E141
-// EXPECT-DIAG: 'h' is immutable, but 'clear' writes to the array it is given as 'arr'.
+// EXPECT-DIAG: `h` is immutable, and `clear` writes to the array it takes as `arr`. As an `int[]` parameter, it shares the caller's array, so the change would land in `h`.
 // Issue #260: an array FIELD of an immutable struct is just as immutable.
 struct Holder {
     data: int[2]

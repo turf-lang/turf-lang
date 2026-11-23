@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <cstdlib>
 #include <regex>
 #include <set>
 #include <sstream>
@@ -57,7 +58,7 @@ std::vector<std::string> MarkerLines(const std::string &Source, const char *Line
   return Out;
 }
 
-/// "Exxx" with a diagnostic header's code spelling: `[E011 · control flow]`
+/// "Exxx" with a diagnostic header's code spelling: `[E011 · broken language rule]`
 /// puts a space after the code, a bare `[E011]` a bracket.
 bool HasCode(const std::string &Plain, const std::string &Code) {
   return std::regex_search(Plain, std::regex("\\[" + Code + "[ \\]]"));
@@ -138,6 +139,22 @@ bool ParseManifest(const std::string &Text, std::vector<TestCase> &Cases, bool &
     C.Run = static_cast<int>(O->getInteger("run").value_or(-1));
     C.Errors = Diags(*O, "errors");
     C.Warnings = Diags(*O, "warnings");
+    auto Strings = [&](const char *K) {
+      std::vector<std::string> Out;
+      if (const llvm::json::Array *A = O->getArray(K))
+        for (const auto &E : *A)
+          if (auto S = E.getAsString())
+            Out.push_back(S->str());
+      return Out;
+    };
+    C.Skip = O->getString("skip").has_value();
+    C.SkipReason = Str(*O, "skip");
+    C.TimeoutMs = static_cast<int>(O->getInteger("timeout_ms").value_or(0));
+    C.Levels = Strings("levels");
+    C.HasStdout = O->getString("stdout").has_value();
+    C.Stdout = Str(*O, "stdout");
+    C.Tags = Strings("tags");
+    C.Serial = O->getBoolean("serial").value_or(false);
     Cases.push_back(std::move(C));
   }
   return true;
@@ -211,6 +228,43 @@ std::vector<std::string> JudgeWarnings(const TestCase &C) {
   for (const auto &D : C.Warnings)
     Out.push_back("  " + Describe(D));
   return Out;
+}
+
+std::string TestStdout(const std::string &Raw) {
+#ifdef _WIN32
+  // The C runtime writes stdout in text mode on Windows, so every "\n" the
+  // program printed arrives as "\r\n"; a `stdout:` is written with "\n".
+  std::string Stdout;
+  Stdout.reserve(Raw.size());
+  for (size_t I = 0; I < Raw.size(); ++I)
+    if (!(Raw[I] == '\r' && I + 1 < Raw.size() && Raw[I + 1] == '\n'))
+      Stdout += Raw[I];
+#else
+  const std::string &Stdout = Raw;
+#endif
+  // The report is "\nturf-test: ...\n" at the end; a test that never got
+  // there (a panic, an exit) has none.
+  const size_t At = Stdout.rfind("\nturf-test: ");
+  if (At != std::string::npos && Stdout.find('\n', At + 1) == Stdout.size() - 1)
+    return Stdout.substr(0, At);
+  return Stdout;
+}
+
+std::string Quoted(const std::string &S) {
+  std::string Out = "\"";
+  for (char C : S) {
+    if (C == '\n')
+      Out += "\\n";
+    else if (C == '\r')
+      Out += "\\r";
+    else if (C == '\t')
+      Out += "\\t";
+    else if (C == '"' || C == '\\')
+      Out += std::string("\\") + C;
+    else
+      Out += C;
+  }
+  return Out + "\"";
 }
 
 std::string ProgramOutput(const std::string &Output) {
@@ -295,7 +349,13 @@ bool IsRuntimeAbortTest(const std::string &Source) {
   return Contains(Source, "RUNTIME_ABORT_EXPECTED");
 }
 
-std::vector<std::string> CheckDiag(const std::string &Source, const std::string &CompileOutput) {
+bool DiagCodesOnly() {
+  const char *V = std::getenv("TURF_TEST_DIAG_CODES_ONLY");
+  return V && std::string(V) == "1";
+}
+
+std::vector<std::string> CheckDiag(const std::string &Source, const std::string &CompileOutput,
+                                   bool CodesOnly) {
   std::vector<std::string> Missed;
   const auto Markers = MarkerLines(Source, "^[ \t]*//[ \t]*EXPECT(-NO)?-DIAG:");
   if (Markers.empty())
@@ -307,6 +367,8 @@ std::vector<std::string> CheckDiag(const std::string &Source, const std::string 
     const std::string Kind = Line.substr(0, Colon);
     const std::string Arg = Trim(Line.substr(Colon + 1));
     if (Arg.empty())
+      continue;
+    if (CodesOnly && !std::regex_match(Arg, CodeOnly))
       continue;
     if (Kind == "EXPECT-NO-DIAG") {
       if (Contains(Plain, Arg))
@@ -336,6 +398,26 @@ std::vector<std::string> PrintedFixes(const std::string &CompileOutput) {
 
 size_t CountFixes(const std::string &CompileOutput) {
   return PrintedFixes(CompileOutput).size();
+}
+
+std::vector<std::string> LintFlags(const std::string &Source, std::vector<std::string> &Bad) {
+  std::vector<std::string> Out;
+  for (const auto &Line : MarkerLines(Source, "^[ \t]*//[ \t]*LINT:")) {
+    std::istringstream In(Line.substr(Line.find(':') + 1));
+    std::string Flag, Value;
+    while (In >> Flag) {
+      const bool Known = Flag == "--allow" || Flag == "--warn" || Flag == "--deny" ||
+                         Flag == "--lint-set";
+      if (!Known || !(In >> Value)) {
+        Bad.push_back("LINT: '" + Flag + "' is not a lint flag with a value (--allow, --warn, "
+                      "--deny <code>, --lint-set <2.N>)");
+        break;
+      }
+      Out.push_back(Flag);
+      Out.push_back(Value);
+    }
+  }
+  return Out;
 }
 
 bool HasFixMarker(const std::string &Source) {
@@ -433,9 +515,10 @@ std::vector<std::string> Register::checkDiagPolicy(const std::string &Source, co
   // NO-CODE: a `── error` header with no `[Exxx]` is a plain error, so the
   // beginner has no `--explain` page for it. (A warning has a code too, but is never judged here.)
   int Codeless = 0;
-  // GENERIC-CODE: E066 is the TypeChecker's one catch-all class; the line under
-  // its header is the real banner, and anything but "Type mismatch!" there is
-  // a more specific mistake wearing the catch-all's code.
+  // GENERIC-CODE entries are written by hand: a diagnostic has no banner
+  // (DIAGNOSTICS_STYLE.md rule 4), so no line of the output says that an E066
+  // is a more specific mistake wearing the type-mismatch code. An entry is
+  // still checked against the output below.
   std::string CatchAll;
   // CASCADE: the "(N errors)" count the compiler prints under a file name,
   // summed over every header (an error in an imported module prints under its
@@ -445,22 +528,10 @@ std::vector<std::string> Register::checkDiagPolicy(const std::string &Source, co
   {
     const std::string ErrHeader = "── error";
     const std::regex HasCodeRe("\\[E[0-9]{3}");
-    const std::regex E066Header("^── error.*\\[E066[ \\]]");
     const std::regex CountRe("^[^ ]+ \\(([0-9]+) errors?\\)");
-    bool AfterE066 = false;
     for (const auto &L : PlainLines) {
       if (L.compare(0, ErrHeader.size(), ErrHeader) == 0 && !std::regex_search(L, HasCodeRe))
         ++Codeless;
-      if (std::regex_search(L, E066Header)) {
-        AfterE066 = true;
-        continue;
-      }
-      if (AfterE066 && !Trim(L).empty()) {
-        const std::string Banner = Trim(L);
-        if (CatchAll.empty() && Banner != "Type mismatch!")
-          CatchAll = Banner;
-        AfterE066 = false;
-      }
       std::smatch M;
       if (std::regex_search(L, M, CountRe)) {
         ActualErrors += std::stoi(M[1].str());

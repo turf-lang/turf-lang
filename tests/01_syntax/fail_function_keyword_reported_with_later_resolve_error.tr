@@ -1,9 +1,11 @@
-// EXPECT-DIAG: E102
+// EXPECT-DIAG: E014
 // EXPECT-DIAG: E041
-// `function` is not a keyword (yet: TDP-2-023). The line that uses it is a
-// syntax error, reported beside the later "unknown function" error rather
-// than hidden by it (issue #321).
-function add(a: int, b: int): int { return a + b; }
+// EXPECT-FIX: replace 'func' with 'fn'
+// `func` is not a keyword (`fn` is, and `function` where a declaration
+// starts, TDP-2-023). The line that uses it is a syntax error, reported
+// beside the later "unknown function" error rather than hidden by it
+// (issue #321).
+func add(a: int, b: int): int { return a + b; }
 
 fn main(): int {
     io::printline(add(1, 2));

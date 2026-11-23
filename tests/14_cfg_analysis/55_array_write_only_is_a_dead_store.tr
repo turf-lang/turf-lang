@@ -1,5 +1,5 @@
-// EXPECT-DIAG: Variable 'w' is assigned but the value is never read
-// EXPECT-NO-DIAG: Variable 'w' is declared but never used
+// EXPECT-DIAG: The value assigned to `w` is never read
+// EXPECT-NO-DIAG: Variable `w` is declared but never used
 // An array that is written and never read gets one warning, at the write.
 
 fn main(): int {

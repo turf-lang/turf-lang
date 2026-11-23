@@ -1,6 +1,6 @@
 // EXPECT-DIAG: E137
-// EXPECT-DIAG: 'io::printline' can't be used as a value: a qualified function name is only called
-// EXPECT-DIAG: import it by name (`import io::printline;`)
+// EXPECT-DIAG: I cannot use `io::printline` as a value, because a qualified function name can only be called
+// EXPECT-DIAG: Import it by name with `import io::printline;` and write `printline`, or call it as `io::printline(...)`.
 // EXPECT-NO-DIAG: first-class yet
 // `io::printline` referenced WITHOUT being called is a clean E137: a function
 // value is spelled by its bare name, and the hint says how to get one. Any

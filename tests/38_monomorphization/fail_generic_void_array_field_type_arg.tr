@@ -1,0 +1,11 @@
+// turf-fuzz #30: an array of `void` has no layout either.
+// EXPECT-DIAG: E112
+// EXPECT-DIAG: `Row<void>` gives the field `cells` the type `void`, which is only a function's return type.
+struct Row<T> {
+    cells: T[4]
+}
+
+fn main(): int {
+    mut r: Row<void> = Row<void>::default();
+    return 0;
+}

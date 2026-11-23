@@ -1,0 +1,169 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+import list::List;
+import map::Map;
+import set::Set;
+
+// Negative test (LEC-006, F-OP-1): a generic operator is still matched by
+// EXACT operand type. `operator<T> +(a: Cell<T>, k: int)` accepts a Cell and
+// an int; the double 1.5 must not be widened or narrowed to fit, exactly as
+// fail_operator_exact_match_no_coercion.tr holds a concrete operator to.
+// Expected: E066, "cannot apply '+' to 'Cell<string>' and 'double'".
+struct Cell<T> {
+    v: T,
+    n: int
+}
+
+fn<T> Cell.new(v: T): void {
+    self.v = v;
+    self.n = 1;
+}
+
+operator<T> +(a: Cell<T>, k: int): Cell<T> {
+    return a;
+}
+
+@test(compile_error, E057, "I cannot use `+` on a `Cell<string>` and a `double`.")
+fn rejects_generic_operator_exact_match_no_coercion(): void {
+    mut c: Cell<string> = Cell::new("s");
+    mut d: Cell<string> = c + 1.5;
+}
+
+// A generic instance such as List<int> is a struct; without an `operator ==`
+// it has no `==`, the same as a plain struct.
+
+@test(compile_error, E124, "I cannot compare two `list::List<int>` structs with `==`: a struct has no built-in comparison.")
+fn rejects_generic_struct_equality_without_operator(): void {
+    mut a: List<int> = List::default();
+    mut b: List<int> = List::default();
+    printline(a == b);
+}
+
+// Getter-only twin of fail_index_compound_assign_setter_only.tr.
+struct IntBox {
+    a: int
+}
+
+operator [](box: IntBox, index: int): int {
+    return box.a;
+}
+
+@test(compile_error, E126, "I cannot use `+=` through `operator[]`.")
+fn rejects_index_compound_assign_getter_only(): void {
+    mut box: IntBox = IntBox::default();
+    box[0] += 1;
+}
+
+// Negative test (LEC-006 follow-up, E098): `bs[0].fill()` assigns to
+// `self.arr[0]`, an element of a fixed-array field inside the struct value. The
+// element bs[0] returned is a copy, so the list never sees it. E098 depends on
+// the "mutates self" scan, which used to miss this shape.
+// Expected: E098, "Cannot call 'fill' on the value an 'operator[]' read returned".
+
+struct Slots {
+    arr: int[3]
+}
+
+fn Slots.fill(): void {
+    self.arr[0] = 1;
+}
+
+@test(compile_error, E098, "I cannot call `fill` on what an `operator[]` read returned: it changes its receiver, and the receiver is a copy, so the change would be lost.")
+fn rejects_index_result_array_field_method(): void {
+    mut bs: List<Slots> = List::default();
+    bs.push(Slots::default());
+    bs[0].fill();
+}
+
+// Negative test (LEC-006, E098): `bs[0]` is the element returned BY VALUE by
+// operator[], so `bs[0].a = 50` would change a copy and the list would never see
+// it. Before E098 this compiled and silently lost the write.
+// Expected: E098, "Cannot assign to part of the value an 'operator[]' read returned".
+
+struct Big {
+    a: int
+}
+
+fn Big.new(a: int): void {
+    self.a = a;
+}
+
+@test(compile_error, E098, "I cannot assign to part of what an `operator[]` read returned: it is a copy, so the write would be lost.")
+fn rejects_index_result_field_assign(): void {
+    mut bs: List<Big> = List::default();
+    bs.push(Big::new(1));
+    bs[0].a = 50;
+}
+
+// Negative test: only operator +(Vec2, double) is declared. Calling it with
+// (Vec2, int) must FAIL -- no numeric coercion in operator resolution
+// (RFC §4.2), unlike ordinary `fn` overload resolution which does permit
+// int->double widening. This is the key behavioral difference from
+// typesCompatible()-based call resolution.
+struct Vec2 {
+    x: int,
+    y: int
+}
+
+operator +(a: Vec2, b: double): Vec2 {
+    return a;
+}
+
+@test(compile_error, E057, "I cannot use `+` on a `Vec2` and an `int`.")
+fn rejects_operator_exact_match_no_coercion(): void {
+    mut a: Vec2 = Vec2::default();
+    a.x = 1;
+    a.y = 2;
+    mut r: Vec2 = a + 5;
+}
+
+// Negative test (LEC-006): `mm["a"]["b"] = 1` writes into the Map that
+// `mm["a"]` RETURNS -- operator[] returns the element by value, so that is a
+// copy, and `operator<K, V> []=` takes its container by reference to mutate
+// it. The write would be silently lost, so it is a clean error instead of an
+// ICE (before LEC-006 it was "Base is not an array or pointer") or a quiet
+// no-op. (A List's `[]=` takes its header by value and writes through the
+// shared buffer, so `grid[i][j] = v` is fine -- 22_index_result_writes_that_land.tr.)
+// Expected: E098, "Cannot assign through 'operator[]=' on the value another
+// 'operator[]' read returned".
+
+@test(compile_error, E098, "I cannot assign through `operator[]=` on what another `operator[]` read returned: the container is a copy, so the write would be lost.")
+fn rejects_operator_index_set_on_temporary(): void {
+    mut mm: Map<string, Map<string, int>> = Map::default();
+    mm["a"]["b"] = 1;
+}
+
+// Negative test: prefix ++/-- on a non-lvalue operand is a clean
+// InvalidAssignmentTargetError at TypeCheck time now (LANG-001 follow-up
+// lifted the old "must be a bare identifier" PARSE-time restriction, which
+// used to reject this earlier and more bluntly, as "Expected identifier
+// after prefix ++ or --").
+@test(compile_error, E061, "I cannot assign to this expression: only a variable, a struct field or an array element can be assigned.")
+fn rejects_prefix_non_lvalue(): void {
+    mut a: int = 1;
+    mut b: int = 2;
+    ++(a + b);
+}
+
+// Negative test: Set<int> deliberately has NO operator[]= (see set.tr's own
+// doc comment on this decision, and 14_stdlib_set_index.tr) -- assigning
+// through '[]' on a Set must be a clean type error.
+
+@test(compile_error, E056, "No `operator[]=` matches `set::Set<int>[int] = int`.")
+fn rejects_stdlib_set_no_index_set(): void {
+    mut s: Set<int> = Set::default();
+    s.add(10);
+    s[0] = 99;
+}
+
+struct Box<T> {
+    v: T
+}
+
+@test(compile_error, E124, "I cannot compare two `Box<int>` structs with `!=`: a struct has no built-in comparison.")
+fn rejects_user_generic_struct_inequality(): void {
+    mut a: Box<int> = Box::default();
+    mut b: Box<int> = Box::default();
+    printline(a != b);
+}

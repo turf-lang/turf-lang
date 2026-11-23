@@ -1,0 +1,22 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+// The field-access twin of fail_generic_default_as_method_receiver.tr.
+struct Box<T> {
+    v: T,
+}
+
+@test(compile_error, E138, "`Box` is generic, so `Box::default()` needs type arguments, and nothing here says which.")
+fn rejects_generic_default_as_field_base(): void {
+    printline(Box::default().v);
+}
+
+// `id` returns its own argument's type, so no instantiation is fn(int): string.
+fn<T> id(x: T): T {
+    return x;
+}
+
+@test(compile_error, E066, "`id` is fn<T>(T): T, and no choice of `T` makes it `fn(int): string`.")
+fn rejects_generic_function_value_wrong_type(): void {
+    immut f: fn(int): string = id;
+}

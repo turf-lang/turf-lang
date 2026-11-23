@@ -1,0 +1,40 @@
+TURF E184 -- LOOP WHOSE TEST NEVER CHANGES (WARNING):
+
+CAUSE:
+  The test of a `while` or `do while` loop reads only variables that nothing
+  inside the loop writes, and the test is the loop's only way out, so once
+  the loop starts it never ends. This is a WARNING (it starts at `allow`).
+
+INCORRECT (compiles, but warns at `warn`):
+    fn wait(n: int): int {
+        mut s: int = 0;
+        while n > 0 {
+            s += 1;
+        }
+        return s;
+    }
+
+    fn main(): int {
+        return 0;
+    }
+
+CORRECT (the loop changes what its test reads):
+    fn wait(n: int): int {
+        mut s: int = 0;
+        mut left: int = n;
+        while left > 0 {
+            s += 1;
+            left -= 1;
+        }
+        return s;
+    }
+
+    fn main(): int {
+        return wait(3) - 3;
+    }
+
+FIX:
+  Assign to a variable the test reads inside the loop, or leave the loop
+  with `break` or `return`.
+
+RELATED: E157 (`while true` with no way out), E185, E186.

@@ -29,8 +29,8 @@ Use whichever spelling you like, even both in one file.
 ```
 
 A `mut` variable can be assigned again after its declaration. An `immut`
-variable cannot, and assigning to one is an error (E060, "You can't change the
-value of ... because it's immutable").
+variable cannot, and assigning to one is an error (E060, "I cannot change `x`: it is
+immutable").
 
 <!-- doc-example: fails E060 -->
 ```turflang
@@ -39,7 +39,7 @@ limit = 20;
 ```
 
 An `immut` variable must be given its value in the declaration, for every
-type. `immut x: int;` is E128 ("Missing initializer"): the variable could never
+type. `immut x: int;` is E128 ("The immutable variable `x` has no initial value, and nothing can assign it one later"): the variable could never
 get a value later. A `mut` variable may be declared without one, as described
 under [Definite assignment](#definite-assignment).
 
@@ -99,20 +99,25 @@ x = 5.5;
 ```
 
 ```text
-Type mismatch!
-Cannot assign value of type 'double' to variable of type 'int'.
-Note: 'x' was inferred as 'int' here (line 1, col 18)
+I cannot assign a `double` to `x`, which is an `int`.
+
+Hint: Make both sides the same type: convert one with `to` (`x to int`), or change a declaration so the types agree.
+
+1 │ mut x = 5;
+  │ - 'x' was inferred as 'int' here
+2 │ x = 5.5;
+  │     ^~~ this is a `double`
 ```
 
 Inference is local and takes its type from one initializer. It does not apply
 to:
 
 - a declaration without an initializer: `mut x: guess;` and `mut x;` are E128
-  ("`guess` needs an initializer to infer from");
+  (`` `x` is declared `guess` with no initial value, so I have nothing to infer its type from ``);
 - a function parameter, a return type or a struct field: `guess` there is E128
-  ("can only declare a local variable");
+  (``I cannot infer a type with `guess` here because there is no initializer, so I accept `guess` only on a local variable``);
 - an initializer with no usable type: `mut x = null;`, or the result of a
-  `void` call, is E129 ("Cannot infer a type from ...");
+  `void` call, is E129 (``I cannot infer the type of `x` from `null` ``);
 - a generic type given without its type arguments (E129).
 
 ## Definite assignment
@@ -120,7 +125,7 @@ to:
 A `mut` variable declared without an initializer holds no value yet. The
 compiler tracks, for every path through the function, whether it has been
 assigned, and a read that some path reaches before any assignment is E008
-("You're using 'x' before it has a value"). The rule is the same for every
+("I cannot use `x` (type `int`) before it has a value"). The rule is the same for every
 scalar, struct and string: no read sees a value nothing assigned. A fixed-size
 array `T[N]` is the exception; it is assigned from its declaration and its
 elements read as zero until written (see [Arrays](arrays.md#initialization)).
@@ -275,7 +280,7 @@ fn main(): int {
   of two `int32` values to an `int32` variable is E066; cast it back with `to
   int32`.
 - **`++`, `--` and every compound assignment on an `int32` variable are E126**
-  ("not supported on 'int32'"). Write the operation out:
+  (``I cannot use `++` on an `int32`: arithmetic on an `int32` gives an `int` ``). Write the operation out:
 
   ```turflang
   fn main(): int {
@@ -302,7 +307,7 @@ and converts to `string`, as `nan`.
 
 `true` or `false`. A `bool` has no conversion to or from a number, either
 implicit or explicit: `mut x: int = true;` is E066, and `true to int` is E134
-("That conversion isn't allowed"). To get a number from a condition, say what
+(``I cannot convert a `bool` to an `int` with `to` ``). To get a number from a condition, say what
 you want: `cond give 1 otherwise 0`. The one cast out of `bool` is `bool to
 string`, which gives `"true"` or `"false"`. Nor is a `bool` an operand of
 arithmetic or ordering: `true + 1` is E057, and `true < false` and `1 < 2 < 3`
@@ -337,7 +342,7 @@ fn main(): int {
 - There is **no arithmetic** on a `char`. `'a' + 1` is E057. Convert to `int`
   first.
 - There is **no implicit conversion** either way. `mut c: char = 97;` is E066 and
-  `c == 97` is E124 ("Values can't be compared"). Write `'a'`, or `c to int ==
+  `c == 97` is E124 (``I cannot compare a `char` with an `int` ``). Write `'a'`, or `c to int ==
   97`.
 - The explicit casts are between `char` and `int` only: `char to int`
   zero-extends (always 0 to 255), and `int to char` keeps the low byte
@@ -458,8 +463,7 @@ fn main(): int {
 }
 ```
 
-A number that ends in a bare point is rejected: `5.` is E139 ("ends in a '.'
-with no digit after it"), so write `5.0` or `5`. Hex, binary and octal
+A number that ends in a bare point is rejected: `5.` is E139 (`` `5.` ends in a `.` with no digit after it ``), so write `5.0` or `5`. Hex, binary and octal
 literals are whole numbers only: `0x1.8` is E139. A digit sequence cannot hold
 two points (`1.5.5`, E139).
 
@@ -529,11 +533,11 @@ This is a compile-time error. The same arithmetic on `mut` variables is a
 `true` and `false` are keywords. A char literal is exactly one character or one
 escape between single quotes: `'a'`, `'\n'`, `'\''`.
 
-- `''` is E101 ("Empty char literal").
-- `'ab'` is E101 ("Char literal must contain exactly one character").
+- `''` is E101 ("I found an empty char literal").
+- `'ab'` is E101 ("I found a char literal with more than one character").
 
 A string literal is in double quotes and cannot continue onto the next line. A
-missing closing quote is E099 ("Unterminated string literal"), reported at the
+missing closing quote is E099 ("I found a string literal that is never closed"), reported at the
 line where the string began. Use `\n` for a line break inside the text.
 
 Escapes, in both char and string literals:
@@ -547,7 +551,7 @@ Escapes, in both char and string literals:
 | `\\` | backslash (92) | `\'` | single quote (39) |
 | `\"` | double quote (34) | | |
 
-Any other escape (`\q`, `\x41`) is E100 ("Unknown escape sequence"). Each
+Any other escape (`\q`, `\x41`) is E100 (``I do not know the escape sequence `\q` in this string literal``). Each
 escape is one byte: `"a\rb"` is three bytes long.
 
 ### `null`
@@ -613,8 +617,7 @@ is `y = (x to int)`. Parenthesise to cast one operand: `(x to double) * 2`.
 Writing `x to double * 2` without parentheses does not work: the `*` after a
 type name is read as a pointer type.
 
-An illegal cast is rejected at compile time (E134, "That conversion isn't
-allowed", or E065 for the text conversions).
+An illegal cast is rejected at compile time (E134, "I cannot convert a `bool` to an `int` with `to`", or E065 for the text conversions).
 
 ### Conversion table
 

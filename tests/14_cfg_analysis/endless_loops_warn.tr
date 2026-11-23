@@ -1,0 +1,145 @@
+// AN-2, issue #350: loops that never end warn (each code allow by default,
+// turned on here). E184: the test reads only variables nothing in the loop
+// writes. E185: every way out is a test the value ranges prove false. E186:
+// every way out comes after a call that ends the program. A write through
+// `&`, a test that calls a method, a `break` that can run, a `?` and a loop
+// that ends the program on purpose do not warn. The bad loops never run.
+// LINT: --warn E184 --warn E185 --warn E186
+// EXPECT-DIAG: This loop's test reads `n`, which nothing in the loop changes
+// EXPECT-DIAG: This loop's test reads `go`, which nothing in the loop changes
+// EXPECT-DIAG: [E185
+// EXPECT-DIAG: while i >= 0 {
+// EXPECT-DIAG: while k > 0 {
+// EXPECT-DIAG: [E186
+// EXPECT-DIAG: while true {
+// EXPECT-NO-DIAG: while m < 10 {
+// EXPECT-NO-DIAG: while !c.finished() {
+// EXPECT-NO-DIAG: while r < 100 {
+// EXPECT-NO-DIAG: while t < 3 {
+// EXPECT-NO-DIAG: while w < 5 {
+import sys;
+import test;
+
+error Stop {
+    Halt,
+}
+
+struct Counter {
+    n: int,
+}
+
+fn Counter.finished(): bool {
+    return self.n >= 3;
+}
+
+fn Counter.advance(): void {
+    self.n = self.n + 1;
+}
+
+fn bump(p: &int): int {
+    return 0;
+}
+
+fn unchanged(n: int): int {
+    mut s: int = 0;
+    while n > 0 {
+        s += 1;
+    }
+    return s;
+}
+
+fn unchanged_do(): int {
+    mut go: bool = true;
+    mut s: int = 0;
+    do {
+        s += 1;
+    } while go;
+    return s;
+}
+
+fn masked_away(): int {
+    mut i: int = 0;
+    while i >= 0 {
+        i = (i + 1) % 10;
+    }
+    return i;
+}
+
+fn constant_values(): int {
+    mut k: int = 5;
+    while k > 0 {
+        k = 3;
+    }
+    return k;
+}
+
+fn behind_panic(limit: int): int {
+    mut j: int = 0;
+    while true {
+        j += 1;
+        if j > limit {
+            sys::panic("too far");
+            break;
+        }
+    }
+    return j;
+}
+
+fn through_reference(): int {
+    mut m: int = 0;
+    while m < 10 {
+        bump(&m);
+        m += 0;
+    }
+    return m;
+}
+
+fn by_method(): int {
+    mut c: Counter = Counter::default();
+    while !c.finished() {
+        c.advance();
+    }
+    return c.n;
+}
+
+fn with_break(): int {
+    mut r: int = 0;
+    mut seen: int = 0;
+    while r < 100 {
+        seen += 1;
+        if seen > 4 {
+            break;
+        }
+    }
+    return seen;
+}
+
+fn may_fail(x: int): !int {
+    if x > 1 {
+        return Stop::Halt;
+    }
+    return x;
+}
+
+fn with_try(): !int {
+    mut t: int = 0;
+    mut seen: int = 0;
+    while t < 3 {
+        seen = seen + try may_fail(seen + 1);
+    }
+    return seen;
+}
+
+fn ends_program(): int {
+    mut w: int = 0;
+    while w < 5 {
+        sys::exit(0);
+    }
+    return w;
+}
+
+fn main(): int {
+    test::assert(by_method() == 3, "method test");
+    test::assert(with_break() == 5, "break");
+    return 0;
+}

@@ -1,6 +1,5 @@
 // EXPECT-DIAG: E150
-// EXPECT-DIAG: 'N' is a size parameter, not a type
-
+// EXPECT-DIAG: `N` is a size parameter, so in `first` it can only be an array's size, as in `T[N]`.
 fn<N: size> first(a: N, b: int[N]): int {
     return b[0];
 }

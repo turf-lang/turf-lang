@@ -1,0 +1,17 @@
+tests/07_functions_modules/export_immut_warns.tr (1 warning)
+
+── warning at line 8, col 1 [E176 · `export immut` instead of `pub immut`]
+
+  `export immut` is the old spelling of a public module constant.
+
+  Hint: Write `pub immut` instead of `export immut`.
+
+  8 │ export immut LIMIT: int = 10;
+    │ ^~~~~~ this is `export immut`
+
+  Fix: replace 'export' with 'pub'
+  8 │ pub immut LIMIT: int = 10;
+    │ ~~~
+
+  Run `turf --explain E176` for more details.
+

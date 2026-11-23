@@ -14,19 +14,19 @@
 inline std::string typeUsedAsValueHint(const std::string &Name,
                                        const std::string &TypeKind,
                                        bool Called) {
-  const std::string Is = "'" + Name + "' is " +
+  const std::string Is = "`" + Name + "` is " +
                          (TypeKind == "enum" ? "an " : "a ") + TypeKind;
   if (TypeKind == "struct")
-    return Is + (Called ? ", and Turf has no `" + Name + "(...)` constructor-call "
-                          "syntax. "
-                        : ", not a value. ") +
-           "Build one with `" + Name + "::default()` (or `" + Name +
-           "::new(...)` if it declares a `.new` method), e.g. `mut v: " + Name +
-           " = " + Name + "::default();`.";
+    return "Build one with `" + Name + "::default()`, or `" + Name +
+           "::new(...)` if it declares a `.new` method, for example `mut v: " +
+           Name + " = " + Name + "::default();`. " +
+           (Called ? "Turf has no `" + Name + "(...)` constructor-call syntax."
+                   : Is + ", not a value.");
   if (TypeKind == "enum" || TypeKind == "error type")
-    return Is + (Called ? ", not a function. " : ", not a value. ") +
-           "Name one of its variants instead, as `" + Name + "::Variant`.";
-  return Is + (Called ? ", not a function." : ", not a value.");
+    return "Name one of its variants, as `" + Name + "::Variant`. " + Is +
+           (Called ? ", not a function." : ", not a value.");
+  return std::string(Called ? "Call a function here. " : "Write a value here. ") +
+         Is + (Called ? ", not a function." : ", not a value.");
 }
 
 // (LookupError, E037, was deleted in issue #263: nothing ever constructed it --
@@ -42,8 +42,8 @@ public:
   UnknownFunctionError(SourceLocation Loc, const std::string &Name,
                        const RankedSuggestions &Suggestions,
                        const std::string &TypeKind = "")
-      : TurfError(Loc, Colors::BRIGHT_RED + "Error: Unknown function '" +
-                           Colors::CYAN + Name + Colors::BRIGHT_RED + "'." +
+      : TurfError(Loc, Colors::BRIGHT_RED + "I cannot find a function named `" +
+                           Colors::CYAN + Name + Colors::BRIGHT_RED + "`." +
                            Colors::RESET) {
     // UNDECLARED_VAR, not BUILTIN_FUNCTION: this is about an unresolved *name*
     // (could be a typo'd user function), not a builtin's own argument-type rules.
@@ -53,8 +53,7 @@ public:
       return;
     }
     Hint_ = suggestionsOrFallback(Suggestions,
-      "Double-check the spelling or import the module that "
-      "defines it.");
+      "Check the spelling, or import the module that defines it.");
     trySetDeterministicRename(Name, Suggestions);
   }
 };
@@ -64,13 +63,12 @@ class UnknownTypeError : public TurfError {
 public:
   UnknownTypeError(SourceLocation Loc, const std::string &TypeName,
                    const RankedSuggestions &Suggestions)
-      : TurfError(Loc, Colors::BRIGHT_RED + "Error: Unknown type '" +
-                           Colors::CYAN + TypeName + Colors::BRIGHT_RED + "'." +
+      : TurfError(Loc, Colors::BRIGHT_RED + "I cannot find a type named `" +
+                           Colors::CYAN + TypeName + Colors::BRIGHT_RED + "`." +
                            Colors::RESET) {
     Category_ = SLM::ErrorCategory::DECLARATION;
     Hint_ = suggestionsOrFallback(Suggestions,
-      "Make sure the struct '" + TypeName +
-      "' is declared before it is used, or check the spelling.");
+      "Declare `" + TypeName + "` before it is used, or check the spelling.");
     trySetDeterministicRename(TypeName, Suggestions);
   }
 };
@@ -81,34 +79,32 @@ public:
   WrongArityError(SourceLocation Loc, const std::string &Name,
                   int Got, const std::vector<std::string> &KnownSignatures)
       : TurfError(Loc,
-                  Colors::BRIGHT_RED + "'" + Colors::CYAN + Name +
-                      Colors::BRIGHT_RED + "' was called with " +
+                  Colors::BRIGHT_RED + "I found no overload of `" + Colors::CYAN +
+                      Name + Colors::BRIGHT_RED + "` that takes " +
                       std::to_string(Got) + " argument" +
-                      (Got == 1 ? "" : "s") +
-                      ", but no overload accepts that many." +
-                      Colors::RESET) {
+                      (Got == 1 ? "" : "s") + "." + Colors::RESET) {
     Category_ = SLM::ErrorCategory::FUNCTION_SIGNATURE;
     if (!KnownSignatures.empty()) {
-      Message += "\n  " + Colors::BRIGHT_GREEN + "Known overloads:" +
+      Message += "\n  " + Colors::BRIGHT_GREEN + "The overloads are:" +
                  Colors::RESET;
       for (const auto &Sig : KnownSignatures)
         Message += "\n    " + Colors::CYAN + Sig + Colors::RESET;
     }
     Hint_ = KnownSignatures.empty()
-                ? "Call '" + Name + "' with a different number of arguments "
+                ? "Call `" + Name + "` with a different number of arguments "
                   "than " + std::to_string(Got) + "."
-                : "Call '" + Name + "' the way one of the overloads above is "
-                  "declared, e.g. `" + KnownSignatures.front() + "`.";
+                : "Call `" + Name + "` the way one of the overloads above is "
+                  "declared, for example `" + KnownSignatures.front() + "`.";
   }
 };
 class NestedFunctionError : public TurfError {
 public:
   NestedFunctionError(SourceLocation Loc, const std::string &Name)
       : TurfError(Loc, Colors::BRIGHT_RED +
-                           "Nested function definitions are not allowed: '" +
-                           Colors::CYAN + Name + Colors::BRIGHT_RED + "'.",
-                  "Move the function to the top level of the "
-                  "file or module.") {
+                           "I cannot declare `" + Colors::CYAN + Name +
+                           Colors::BRIGHT_RED + "` inside another function.",
+                  "Move `" + Name + "` to the top level of the file or "
+                  "module.") {
     Category_ = SLM::ErrorCategory::FUNCTION_SIGNATURE;
   }
 };
@@ -121,17 +117,16 @@ public:
   ReferenceError(SourceLocation Loc, const std::string &Name,
                  const RankedSuggestions &Suggestions,
                  const std::string &TypeKind = "")
-      : TurfError(Loc, Colors::BRIGHT_RED + "I can't find anything named '" +
-                           Colors::CYAN + Name + Colors::BRIGHT_RED + "'.") {
+      : TurfError(Loc, Colors::BRIGHT_RED + "I cannot find anything named `" +
+                           Colors::CYAN + Name + Colors::BRIGHT_RED + "`.") {
     Category_ = SLM::ErrorCategory::UNDECLARED_VAR;
     if (!TypeKind.empty()) {
       Hint_ = typeUsedAsValueHint(Name, TypeKind, /*Called=*/false);
       return;
     }
     Hint_ = suggestionsOrFallback(Suggestions,
-      "Did you forget to create this variable? You have to "
-      "create it before you can use it, like this: `mut " +
-      Name + ": int = 5;`");
+      "Declare it before you use it, for example `mut " + Name +
+      ": int = 5;`.");
     trySetDeterministicRename(Name, Suggestions);
   }
 };
@@ -150,18 +145,17 @@ class UseBeforeDeclarationError : public TurfError {
 public:
   UseBeforeDeclarationError(SourceLocation UseLoc, const std::string &Name,
                             const RankedSuggestions &Suggestions)
-      : TurfError(UseLoc, Colors::BRIGHT_RED + "Hold on! You're trying to use '" +
-                           Colors::CYAN + Name + Colors::BRIGHT_RED +
-                           "' before telling me what it is.") {
+      : TurfError(UseLoc, Colors::BRIGHT_RED + "I cannot use `" + Colors::CYAN +
+                           Name + Colors::BRIGHT_RED +
+                           "` before its declaration.") {
     Category_ = SLM::ErrorCategory::UNDECLARED_VAR;
     // NOT "did you forget to create this variable?" -- this variable IS
     // created, further down; the mistake is the order. (Suggestions are not
     // offered either: a rename would point at a different variable, see this
     // class's own comment above.)
     (void)Suggestions;
-    Hint_ = "'" + Name + "' is declared further down in this function, but a "
-            "variable only exists from its declaration onwards. Move that "
-            "declaration above this line.";
+    Hint_ = "Move the declaration of `" + Name + "` above this line: a "
+            "variable exists only from its declaration onwards.";
   }
 };
 class DuplicateDeclarationError : public TurfError {
@@ -169,13 +163,12 @@ public:
   DuplicateDeclarationError(SourceLocation NewLoc, const std::string &Name,
                             SourceLocation PrevLoc)
       : TurfError(NewLoc,
-                  Colors::BRIGHT_RED +
-                      "Wait a minute! You already created a variable named '" +
-                      Colors::CYAN + Name + Colors::BRIGHT_RED + "'.") {
+                  Colors::BRIGHT_RED + "I cannot declare `" + Colors::CYAN +
+                      Name + Colors::BRIGHT_RED +
+                      "` again, because it is already declared.") {
     Category_ = SLM::ErrorCategory::DECLARATION;
-    Hint_ = "If you want to change its value, just do `" + Name +
-            " = new_value;` without the type (like 'int' or 'string'). If "
-            "you want a new variable, give it a different name!";
+    Hint_ = "Write `" + Name + " = new_value;` without the type to change its "
+            "value, or give the new variable a different name.";
     // Renders as "Note: first declared here (line X, col Y)" -- printDiag()
     // (Lexer.cpp) now shows every RelatedLocation, so this used to also be
     // hand-embedded directly into Message with its own wording ("Note: You
@@ -210,20 +203,20 @@ public:
   DuplicateTypeNameError(SourceLocation NewLoc, const std::string &Name,
                          const std::string &Kind, SourceLocation PrevLoc)
       : TurfError(NewLoc,
-                  Colors::BRIGHT_RED + (startsWithVowel(Kind) ? "An " : "A ") +
-                      Kind + " named '" + Colors::CYAN + Name +
-                      Colors::BRIGHT_RED + "' is already declared.") {
+                  Colors::BRIGHT_RED + "I found a second " + Kind +
+                      " named `" + Colors::CYAN + Name +
+                      Colors::BRIGHT_RED + "`.") {
     Category_ = SLM::ErrorCategory::DECLARATION;
     // FDN-003: only a SAME-module duplicate reaches here -- two modules
     // may each declare a type of the same name (type identity is
     // (module, name)), so the old "shared across every module you import"
     // note no longer describes the rule.
     Message += "\n  " + Colors::BRIGHT_BLUE +
-               "Note: a type name can only be declared once per file; "
-               "another file or module may reuse it." +
+               "A type name can be declared only once per file; another file "
+               "or module may reuse it." +
                Colors::RESET;
-    Hint_ = "Rename one of the two '" + TypeIdentity::bareName(Name) +
-            "' declarations.";
+    Hint_ = "Rename one of the two `" + TypeIdentity::bareName(Name) +
+            "` declarations.";
     RelatedLocations_.push_back({PrevLoc, "first declared here"});
   }
 };
@@ -232,11 +225,12 @@ public:
   ShadowingWarning(SourceLocation NewLoc, const std::string &Name,
                    SourceLocation PrevLoc)
       : TurfWarning(NewLoc,
-                    TurfWarning::WarningLabel() + "Just so you know, you're creating a new '" +
+                    TurfWarning::WarningLabel() + "This new `" +
                         Colors::CYAN + Name + Colors::BRIGHT_YELLOW +
-                        "' that hides an older one!" + Colors::RESET,
-                    "It's better to give this new variable a different name "
-                    "to avoid confusion later.") {
+                        "` hides an older one." + Colors::RESET,
+                    "Give the new variable a different name, so the older one "
+                    "stays reachable. To silence this on purpose, pass "
+                    "`--allow E152`.") {
     Category_ = SLM::ErrorCategory::DECLARATION;
     // Renders as "Note: originally declared here (line X, col Y)" -- see
     // DuplicateDeclarationError's matching comment for why this is no
@@ -261,13 +255,14 @@ public:
   NoSuchVariantError(SourceLocation Loc, const std::string &Kind,
                      const std::string &TypeName, const std::string &VariantName,
                      const RankedSuggestions &Suggestions)
-      : TurfError(Loc, Colors::BRIGHT_RED + (Kind == "enum" ? "Enum '" : "Error type '") +
-                           Colors::CYAN + TypeName + Colors::BRIGHT_RED +
-                           "' has no variant '" + Colors::CYAN + VariantName +
-                           Colors::BRIGHT_RED + "'." + Colors::RESET) {
+      : TurfError(Loc, Colors::BRIGHT_RED + "I cannot find a variant `" +
+                           Colors::CYAN + VariantName + Colors::BRIGHT_RED +
+                           (Kind == "enum" ? "` in the enum `" : "` in the error type `") +
+                           Colors::CYAN + TypeName + Colors::BRIGHT_RED + "`." +
+                           Colors::RESET) {
     Category_ = SLM::ErrorCategory::DECLARATION;
     Hint_ = suggestionsOrFallback(Suggestions,
-      "Double-check the spelling against " + TypeName + "'s declared variants.");
+      "Check the spelling against the variants declared in `" + TypeName + "`.");
     trySetDeterministicRename(VariantName, Suggestions);
   }
 };
@@ -287,14 +282,14 @@ class InvalidTransitionTargetError : public TurfError {
 public:
   InvalidTransitionTargetError(SourceLocation Loc, const std::string &MachineName,
                                const std::string &GotTypeName)
-      : TurfError(Loc, Colors::BRIGHT_RED + "'" + Colors::CYAN + "transition" +
-                           Colors::BRIGHT_RED + "' target must be a state of '" +
-                           Colors::CYAN + MachineName + Colors::BRIGHT_RED +
-                           "', got '" + Colors::CYAN + GotTypeName +
-                           Colors::BRIGHT_RED + "'." + Colors::RESET) {
+      : TurfError(Loc, Colors::BRIGHT_RED + "I cannot `" + Colors::CYAN + "transition" +
+                           Colors::BRIGHT_RED + "` to `" + Colors::CYAN +
+                           GotTypeName + Colors::BRIGHT_RED +
+                           "`, which is not a state of `" + Colors::CYAN +
+                           MachineName + Colors::BRIGHT_RED + "`." + Colors::RESET) {
     Category_ = SLM::ErrorCategory::TYPE_MISMATCH;
-    Hint_ = "Pass a state of '" + MachineName + "' (e.g. '" + MachineName +
-           "::SomeState') to transition().";
+    Hint_ = "Pass a state of `" + MachineName + "`, such as `" + MachineName +
+           "::SomeState`, to `transition()`.";
   }
 
   /// The target has the receiver's machine type but is a value (a variable,
@@ -302,15 +297,15 @@ public:
   struct NotWrittenAsState {};
   InvalidTransitionTargetError(SourceLocation Loc, const std::string &MachineName,
                                NotWrittenAsState)
-      : TurfError(Loc, Colors::BRIGHT_RED + "'" + Colors::CYAN + "transition" +
-                           Colors::BRIGHT_RED + "' target must be written as a "
-                           "state, like '" + Colors::CYAN + MachineName +
-                           "::SomeState" + Colors::BRIGHT_RED +
-                           "', not a value that holds one." + Colors::RESET) {
+      : TurfError(Loc, Colors::BRIGHT_RED + "I cannot tell which state this holds, and `" +
+                           Colors::CYAN + "transition" + Colors::BRIGHT_RED +
+                           "` needs a state written as `" + Colors::CYAN +
+                           MachineName + "::SomeState" + Colors::BRIGHT_RED +
+                           "`." + Colors::RESET) {
     Category_ = SLM::ErrorCategory::TYPE_MISMATCH;
-    Hint_ = "Name the state the value should move to. To move to a state "
-            "chosen at run time, `compare` the value that chooses it and "
-            "write one transition per arm.";
+    Hint_ = "Write the state to move to. To move to a state chosen at run "
+            "time, `compare` the value that chooses it and write one "
+            "transition per arm.";
   }
 };
 
@@ -324,17 +319,16 @@ class InvalidTransitionError : public TurfError {
 public:
   InvalidTransitionError(SourceLocation Loc, const std::string &MachineName,
                          const std::string &FromState, const std::string &ToState)
-      : TurfError(Loc, Colors::BRIGHT_RED + "'" + Colors::CYAN + MachineName +
-                           Colors::BRIGHT_RED + "' has no transition from '" +
+      : TurfError(Loc, Colors::BRIGHT_RED + "`" + Colors::CYAN + MachineName +
+                           Colors::BRIGHT_RED + "` has no transition from `" +
                            Colors::CYAN + FromState + Colors::BRIGHT_RED +
-                           "' to '" + Colors::CYAN + ToState + Colors::BRIGHT_RED +
-                           "'." + Colors::RESET) {
+                           "` to `" + Colors::CYAN + ToState + Colors::BRIGHT_RED +
+                           "`." + Colors::RESET) {
     Category_ = SLM::ErrorCategory::TYPE_MISMATCH;
-    Hint_ = "This arm has already narrowed the receiver to '" + FromState +
-           "', which has no declared edge to '" + ToState +
-           "' -- add `" + FromState + " -> " + ToState +
-           ",` to the machine's declaration, or transition to a state '" +
-           FromState + "' actually has an edge to.";
+    Hint_ = "Add `" + FromState + " -> " + ToState +
+           ",` to the declaration of `" + MachineName +
+           "`, or transition to a state that `" + FromState +
+           "` has an edge to.";
   }
 };
 
@@ -354,16 +348,46 @@ public:
   UnreachableStateWarning(SourceLocation Loc, const std::string &MachineName,
                           const std::string &StateName)
       : TurfWarning(Loc,
-                    TurfWarning::WarningLabel() + "Machine '" +
+                    TurfWarning::WarningLabel() + "Machine `" +
                         Colors::CYAN + MachineName + Colors::BRIGHT_YELLOW +
-                        "' declares state '" + Colors::CYAN + StateName +
+                        "` declares state `" + Colors::CYAN + StateName +
                         Colors::BRIGHT_YELLOW +
-                        "' with no incoming transitions." + Colors::RESET,
-                    "If '" + StateName + "' is meant to be " + MachineName +
-                    "'s starting state, this is expected and safe to ignore. "
-                    "Otherwise, it's unreachable once the machine leaves its "
-                    "initial value -- double check for a missing `-> " +
-                    StateName + "` edge.") {
+                        "` with no incoming transitions." + Colors::RESET,
+                    "Add a `-> " + StateName + "` edge if the machine can "
+                    "reach `" + StateName + "` after it starts. If `" +
+                    StateName + "` is the starting state of `" + MachineName +
+                    "`, pass `--allow E153` to silence this.") {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+  }
+};
+
+// AN-7 (TDP-2-007, issue #334): dead code (analysis/UnusedDecls.cpp).
+class UnusedPrivateFunctionWarning : public TurfWarning {
+public:
+  UnusedPrivateFunctionWarning(SourceLocation Loc, const std::string &Name)
+      : TurfWarning(Loc, "Nothing calls or names the function `" + Name + "`.",
+                    "Remove `" + Name + "`, or call it where it was meant to be "
+                    "used. Mark it `pub` if another module is meant to call it.") {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+  }
+};
+
+class UnusedImportWarning : public TurfWarning {
+public:
+  UnusedImportWarning(SourceLocation Loc, const std::string &Module)
+      : TurfWarning(Loc, "Nothing in this file uses the import of `" + Module + "`.",
+                    "Remove the `import` line.") {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+  }
+};
+
+class UnusedPubInBinaryWarning : public TurfWarning {
+public:
+  UnusedPubInBinaryWarning(SourceLocation Loc, const std::string &Name)
+      : TurfWarning(Loc, "Nothing calls the `pub` function `" + Name +
+                             "`, and no other module can: this file is the program's root.",
+                    "Remove `" + Name + "`, or call it from `main`. `pub` has no "
+                    "effect in a program's root file.") {
     Category_ = SLM::ErrorCategory::DECLARATION;
   }
 };

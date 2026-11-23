@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E096
-// EXPECT-DIAG: 'IOError::Denied' field 'mode' has type 'int' but the argument has type 'string'
+// EXPECT-DIAG: The field `mode` of `IOError::Denied` is an `int`, and argument 2 is a `string`.
 // LEC-004: each constructor argument is checked against its field's declared
 // type. A string where `mode: int` is declared is E096 naming the field.
 error IOError {

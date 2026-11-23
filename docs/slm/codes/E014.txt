@@ -14,13 +14,13 @@ CORRECT:
     }
 
 INCORRECT:
-    iff x > 0 {          // ERROR: 'iff' isn't a keyword
+    iff x > 0 {          // ERROR: I do not know the word `iff`
         return x;
     }
 
   Turf runs the misspelled word through the same suggestion engine used
   for misspelled variable/function names, so the error usually already
-  names the keyword it thinks you meant (e.g. "Did you mean: 'if'?").
+  names the keyword it thinks you meant (e.g. "Write `if` instead.").
 
 WHAT THIS ERROR IS NOT:
   Not about a misspelled VARIABLE or FUNCTION name (that's ReferenceError

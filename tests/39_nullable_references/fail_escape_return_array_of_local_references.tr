@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E086
-// EXPECT-DIAG: can't be returned inside a struct or array value
+// EXPECT-DIAG: be returned inside a struct or array
 // An array of references (`(&N)[k]`, F-REFARR-1) returned with one element
 // pointing at this frame's `n`.
 struct N { val: int }

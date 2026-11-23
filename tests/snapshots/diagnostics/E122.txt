@@ -1,0 +1,13 @@
+tests/05_arrays_pointers_ffi/fail_address_of_non_addressable.tr (1 error)
+
+── error at line 8, col 19 [E122 · cannot take the address of this]
+
+  I cannot take the address of this expression: only a variable, a struct field or an array element has one.
+
+  Hint: Store the result in a variable and take the variable's address.
+
+  8 │     mut r: &int = &(x + 1);
+    │                   ^ this has no address
+
+  Run `turf --explain E122` for more details.
+

@@ -1,9 +1,8 @@
 // EXPECT-DIAG: E122
-// EXPECT-DIAG: Cannot take the address of a non-addressable expression
+// EXPECT-DIAG: I cannot take the address of this expression
 // `&x` needs a place to point at: a variable, a struct field or an array
 // element. `(x + 1)` is a temporary value, so there is nothing to take the
-// address of. Raised by Codegen's backstop through LogErrorAt (issue #263:
-// every raw error now names its code).
+// address of. Raised by the TypeChecker, so `turf check` reports it too.
 fn main(): int {
     mut x: int = 5;
     mut r: &int = &(x + 1);

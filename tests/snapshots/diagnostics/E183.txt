@@ -1,0 +1,35 @@
+tests/14_cfg_analysis/unreachable_base_case_warns.tr (3 warnings)
+
+── warning at line 19, col 9 [E183 · recursive base case that is never reached]
+
+  This base case of `spin` can never run: the values that reach it rule it out, so every call of `spin` calls it again and never returns.
+
+  Hint: Check the condition in front of this base case against the values that reach it, such as an earlier guard or the loop that bounds them.
+
+  19 │         return n;
+     │         ^~~~~~ this base case is never reached
+
+  Run `turf --explain E183` for more details.
+
+── warning at line 27, col 13 [E183 · recursive base case that is never reached]
+
+  This base case of `walk` can never run: the values that reach it rule it out, so every call of `walk` calls it again and never returns.
+
+  Hint: Check the condition in front of this base case against the values that reach it, such as an earlier guard or the loop that bounds them.
+
+  27 │             return i;
+     │             ^~~~~~ this base case is never reached
+
+  Run `turf --explain E183` for more details.
+
+── warning at line 38, col 9 [E183 · recursive base case that is never reached]
+
+  This base case of `countdown` can never run: the values that reach it rule it out, so every call of `countdown` calls it again and never returns.
+
+  Hint: Check the condition in front of this base case against the values that reach it, such as an earlier guard or the loop that bounds them.
+
+  38 │         return 0;
+     │         ^~~~~~ this base case is never reached
+
+  Run `turf --explain E183` for more details.
+

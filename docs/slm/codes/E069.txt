@@ -37,16 +37,16 @@ CORRECT (a reference breaks the cycle):
 
 INCORRECT (rejected):
     struct A { me: A }
-    // ERROR: struct 'A' cannot contain itself by value [E069]
+    // ERROR: I cannot let the struct `A` contain itself by value [E069]
     //   cycle: A -> A
-    //   Note: field 'A::me' has type 'A' (line N, col N)
+    //   Note: field `A::me` has type `A` (line N, col N)
 
     struct A { b: B }
     struct B { a: A }
-    // ERROR: struct 'A' cannot contain itself by value [E069]
+    // ERROR: I cannot let the struct `A` contain itself by value [E069]
     //   cycle: A -> B -> A
-    //   Note: field 'A::b' has type 'B' (line N, col N)
-    //   Note: field 'B::a' has type 'A' (line N, col N)
+    //   Note: field `A::b` has type `B` (line N, col N)
+    //   Note: field `B::a` has type `A` (line N, col N)
 
 WHAT THIS ERROR IS NOT:
   - Not about reference fields at all -- `next: &?Node` is the

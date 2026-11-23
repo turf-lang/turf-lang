@@ -1,7 +1,7 @@
 // EXPECT-DIAG: E082
-// EXPECT-DIAG: Cannot copy the value out of this '&?Node' value
-// Only a variable can be null-checked, so a `&?T` field is copied out by way
-// of one.
+// EXPECT-DIAG: I cannot copy `n.next` out here, because it might be `null`.
+// A `&?T` field is copied out only where a check on the field path
+// (`n.next != null`) proves it non-null.
 struct Node { v: int, next: &?Node }
 
 fn f(n: &Node): int {

@@ -1,0 +1,13 @@
+tests/07_functions_modules/fail_type_identity_generic_without_type_args.tr (1 error)
+
+── error at line 17, col 5 [E138 · missing type arguments]
+
+  `Box` is generic, so I need type arguments here.
+
+  Hint: Write the instantiation you mean, as in `Box<int>`.
+
+  17 │     mut b: Box = Box::default();
+     │     ^~~ type arguments are missing here
+
+  Run `turf --explain E138` for more details.
+

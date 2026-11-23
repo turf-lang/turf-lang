@@ -1,0 +1,41 @@
+TURF E183 -- RECURSIVE BASE CASE THAT IS NEVER REACHED (WARNING):
+
+CAUSE:
+  A recursive function has a base case (a path that returns without calling
+  itself), but the values that reach it rule it out: an earlier guard, a
+  constant or a loop counter means its condition is never true. Every call
+  that runs therefore calls the function again, and the stack overflows at
+  run time. This is a WARNING (it starts at `allow`).
+
+INCORRECT (compiles, but warns at `warn`):
+    fn countdown(n: int): int {
+        if n < 1 {
+            return countdown(1);
+        }
+        if n == 0 {
+            return 0;
+        }
+        return countdown(n - 1);
+    }
+
+    fn main(): int {
+        return 0;
+    }
+
+CORRECT (the base case is tested where it can be true):
+    fn countdown(n: int): int {
+        if n <= 0 {
+            return 0;
+        }
+        return countdown(n - 1);
+    }
+
+    fn main(): int {
+        return countdown(3);
+    }
+
+FIX:
+  Move or rewrite the base case so its condition can hold for the values
+  that reach it, usually by testing it before the guard that excludes them.
+
+RELATED: E010 (a recursive function with no base case at all), E182.

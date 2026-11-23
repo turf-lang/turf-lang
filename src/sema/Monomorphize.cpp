@@ -6,7 +6,7 @@
 #include "diagnostics/ErrorsMonomorphize.h"
 #include "frontend/Parser.h" // IsLibStdWarningLocation(): which hop of a chain is user code
 #include "resolve/Resolver.h"
-#include "resolve/SymbolTable.h" // GlobalSymbolTable -- RegisterType()'s target, distinct from Resolver's own SymTable_
+#include "resolve/SymbolTable.h" // Symbols() -- RegisterType()'s target, distinct from Resolver's own SymTable_
 #include "sema/TypeChecker.h"
 #include "sema/TypeWalk.h" // SMP-002: shared substitute() walker
 #include "sema/TypeCheckerInternal.h" // recordGenericFieldInstantiations(): a clone's own generic fields
@@ -507,6 +507,29 @@ std::shared_ptr<ResolverFunctionSymbol> finishInstantiation(
     std::unique_ptr<ExprAST> ClonedUP, const InstantiationEntry &Entry,
     std::vector<std::unique_ptr<ExprAST>> &PrePassASTs,
     InstantiationCollector &Collector, Resolver &PreR) {
+  // A parameter whose type BECOMES `void` (or `void[N]`) has no layout,
+  // like a field (drainStructRequests()). The parser's E112 check on a
+  // written `x: void` never sees it: `w(v())` with `v(): void`, or
+  // `w(continue)`, infers T = void, and Codegen spun forever asking LLVM
+  // for the alignment of the parameter's slot (turf-fuzz #39). `void*`
+  // keeps a layout and stays accepted.
+  for (const auto &Param : Clone->getParams()) {
+    const TurfType *PT = Param.Type.get();
+    while (PT && isArrayType(PT))
+      PT = getArrayElementType(PT);
+    if (PT && PT->isVoid()) {
+      TypeError(Entry.Request.Site, ErrCode::VoidTypeNotAllowed,
+                "`" + describeRequest(Entry.Request) + "` gives the parameter `" +
+                    Param.Name + "` the type `void`, which is only a function's "
+                    "return type.",
+                "Pass a value here: a call of a `void` function, `break` or "
+                "`continue` has no value to give `" + Param.Name + "`.",
+                "'void' cannot be a parameter's type.")
+          .raise();
+      return nullptr;
+    }
+  }
+
   // Rename to a unique, collision-free internal name (§9.5's mangling
   // requirement) BEFORE resolving -- Resolver::visitFuncDef() (called
   // below) registers whatever name the node currently has into the
@@ -567,10 +590,21 @@ std::shared_ptr<ResolverFunctionSymbol> finishInstantiation(
     g_recoverActive = SavedRecoverActive;
   }
   if (ResolveFailed) {
+    // An error the program really has (an unknown name in the template's
+    // body, turf-fuzz #36) makes the clone fail to resolve too; that error
+    // is already reported, and calling this a compiler bug on top of it
+    // would be wrong. Only a failure with no error behind it is one. The
+    // pass still stops as raise() stops it: carrying on would instantiate
+    // further templates against a half-resolved clone.
+    if (DiagnosticEngine::hasErrors()) {
+      if (g_recoverActive)
+        throw RecoverUnwind{};
+      DiagnosticEngine::flushAll();
+      std::exit(1);
+    }
     SemanticError(Entry.Request.Site,
-                  "Internal error: monomorphized instantiation of '" +
-                      Entry.Request.DeclKey +
-                      "' failed to re-resolve. This is a compiler bug.")
+                  "I could not resolve the instantiation of `" +
+                      Entry.Request.DeclKey + "` I built. This is a compiler bug: report it at https://github.com/turf-lang/turf-lang/issues with this program.")
         .raise();
     return nullptr;
   }
@@ -585,12 +619,12 @@ std::shared_ptr<ResolverFunctionSymbol> finishInstantiation(
   //   - ResolverFunctionSymbol::mangledName() (ResolverSymbolBase.h) prepends
   //     Sym.SourceModule.
   //   - FuncDefExprAST::codegen() (CodegenFunc.cpp) prepends
-  //     GlobalSymbolTable::GetCurrentModule() instead -- a CODEGEN-TIME
+  //     Symbols()::GetCurrentModule() instead -- a CODEGEN-TIME
   //     GLOBAL, normally set/cleared around a ModuleImportExprAST's own
   //     codegen() traversal of that module's body.
   // The clone is appended directly to PrePassASTs (finishInstantiation,
   // below) and codegenned from THAT flat loop, never from inside any
-  // module-import traversal -- GlobalSymbolTable::IsInModule() is false the
+  // module-import traversal -- Symbols()::IsInModule() is false the
   // whole time. Leaving Sym.SourceModule as "list" would make the CALL
   // SITE's mangledName() (which reads Sym.SourceModule) disagree with what
   // the clone's OWN codegen() actually registers the LLVM function under
@@ -692,9 +726,9 @@ std::shared_ptr<ResolverFunctionSymbol> finishInstantiation(
         Chain[Anchor]->Request.Site, FullMsg,
         !InnerHint.empty()
             ? InnerHint
-            : "Call '" + describeRequest(Entry.Request) +
-                  "' with types its body works for, or change the body of '" +
-                  Entry.Request.DeclKey + "' so it accepts these types.");
+            : "Call `" + describeRequest(Entry.Request) +
+                  "` with types its body works for, or change the body of `" +
+                  Entry.Request.DeclKey + "` so it accepts these types.");
     // The mistake is the inner error's (`<` on a struct is E124), not a
     // generic E011; `--explain` should name that one.
     if (InnerCode) {
@@ -703,13 +737,13 @@ std::shared_ptr<ResolverFunctionSymbol> finishInstantiation(
     }
     for (size_t i = Anchor + 1; i < Chain.size(); ++i)
       Err.withRelated(Chain[i]->Request.Site,
-                      "'" + describeRequest(Chain[i - 1]->Request) +
-                          "' requires '" + describeRequest(Chain[i]->Request) +
-                          "' here");
-    Err.withRelated(InnerLoc, "the error itself, inside '" +
-                                  describeRequest(Entry.Request) + "'");
+                      "`" + describeRequest(Chain[i - 1]->Request) +
+                          "` needs `" + describeRequest(Chain[i]->Request) +
+                          "` here");
+    Err.withRelated(InnerLoc, "the error itself, inside `" +
+                                  describeRequest(Entry.Request) + "`");
     Err.withRelated(Template->getNameLoc(),
-                    "in generic declaration '" + Entry.Request.DeclKey + "'");
+                    "in the generic declaration `" + Entry.Request.DeclKey + "`");
     // The anchor's other call sites -- the same instantiation, asked for from
     // several places in the user's code.
     const InstantiationEntry &AnchorEntry = *Chain[Anchor];
@@ -877,9 +911,9 @@ bool drainFreeFunctionRequests(
       // not a user error -- mirrors CodegenFunc.cpp's identical "should be
       // unreachable if the Resolver ran correctly" defensive diagnostic.
       SemanticError(Entry.Request.Site,
-                    "Internal error: no generic declaration found for '" +
+                    "I found no generic declaration for `" +
                         Entry.Request.DeclKey +
-                        "' during monomorphization. This is a compiler bug.")
+                        "` while instantiating it. This is a compiler bug: report it at https://github.com/turf-lang/turf-lang/issues with this program.")
           .raise();
       return DidWork;
     }
@@ -895,7 +929,7 @@ bool drainFreeFunctionRequests(
     // is declared as a bare pointer with no <...>, TypeCheckerCall.cpp's
     // visitMethodCall doc comment). A body referencing `self.<field>`
     // (which a constructor always does) resolves that field's type from
-    // GlobalSymbolTable's SHARED, never-per-instantiation-substituted
+    // Symbols()'s SHARED, never-per-instantiation-substituted
     // struct registration -- substituting this clone's OWN Params/body
     // cannot fix that; only S13a's real per-instantiation struct layout
     // can. Found live: `Box::new(42)` re-typechecked as "Cannot assign
@@ -1104,9 +1138,8 @@ bool drainMethodRequests(
       // identical "should be unreachable if the Resolver ran correctly"
       // defensive diagnostic.
       SemanticError(Entry.Request.Site,
-                    "Internal error: no generic method declaration found "
-                    "for '" + Entry.Request.DeclKey +
-                        "' during monomorphization. This is a compiler bug.")
+                    "I found no generic method declaration for `" + Entry.Request.DeclKey +
+                        "` while instantiating it. This is a compiler bug: report it at https://github.com/turf-lang/turf-lang/issues with this program.")
           .raise();
       return DidWork;
     }
@@ -1121,9 +1154,8 @@ bool drainMethodRequests(
       // routed through visitFuncCall (FreeFunction-kind, self-STRIPPED) --
       // see drainFreeFunctionRequests()'s own struct-bound exclusion.
       SemanticError(Entry.Request.Site,
-                    "Internal error: '" + Entry.Request.DeclKey +
-                        "' resolved as a Method-kind instantiation request "
-                        "but has no 'self' parameter. This is a compiler bug.")
+                    "I instantiated `" + Entry.Request.DeclKey +
+                        "` as a method, and it has no `self` parameter. This is a compiler bug: report it at https://github.com/turf-lang/turf-lang/issues with this program.")
           .raise();
       return DidWork;
     }
@@ -1237,9 +1269,9 @@ bool drainConstructorRequests(
       // practice. Kept for defensive symmetry with the other two drain
       // functions, not because a different outcome is expected here.
       SemanticError(Entry.Request.Site,
-                    "Internal error: no generic declaration found for '" +
+                    "I found no generic declaration for `" +
                         Entry.Request.DeclKey +
-                        "' during monomorphization. This is a compiler bug.")
+                        "` while instantiating it. This is a compiler bug: report it at https://github.com/turf-lang/turf-lang/issues with this program.")
           .raise();
       return DidWork;
     }
@@ -1309,7 +1341,7 @@ namespace {
 /// same-named generic structs are therefore two registry entries.
 ///
 /// History: this used to be keyed by BARE name on the argument that struct
-/// names were one program-wide namespace (GlobalSymbolTable::RegisterType()
+/// names were one program-wide namespace (Symbols()::RegisterType()
 /// took no module), so a bare key lost nothing -- and because a Struct-kind
 /// request's SourceModule was then read off the use site's SPELLED
 /// qualifier (empty for an unqualified `List<int>` inside list.tr itself),
@@ -1382,9 +1414,8 @@ bool drainStructRequests(
       // TypeCheckerDecl.cpp) that only ever produces a GenericType for an
       // already-resolved, real struct declaration.
       SemanticError(Entry.Request.Site,
-                    "Internal error: no generic struct declaration found "
-                    "for '" + Entry.Request.DeclKey +
-                        "' during monomorphization. This is a compiler bug.")
+                    "I found no generic struct declaration for `" + Entry.Request.DeclKey +
+                        "` while instantiating it. This is a compiler bug: report it at https://github.com/turf-lang/turf-lang/issues with this program.")
           .raise();
       return DidWork;
     }
@@ -1414,6 +1445,27 @@ bool drainStructRequests(
     auto *Clone = static_cast<StructDeclExprAST *>(ClonedUP.get());
     for (auto &Field : Clone->getFieldsMut())
       Field.Type = substituteConcreteTypes(Field.Type, Subst);
+    // `void` as a type argument is fine while the struct only points at it
+    // (`PoolHeader<void*>`, a `p: T*` field), but a field whose type BECOMES
+    // `void` (or `void[N]`) has no layout: the parser's E112 check on a
+    // written `v: void` never sees it, and Codegen spun forever asking LLVM
+    // for the alignment of such a struct (turf-fuzz #30, `Box<Box<void>>`).
+    for (const auto &Field : Clone->getFields()) {
+      const TurfType *FT = Field.Type.get();
+      while (FT && isArrayType(FT))
+        FT = getArrayElementType(FT);
+      if (FT && FT->isVoid()) {
+        TypeError(Entry.Request.Site, ErrCode::VoidTypeNotAllowed,
+                  "`" + describeRequest(Entry.Request) + "` gives the field `" +
+                      Field.Name + "` the type `void`, which is only a function's "
+                      "return type.",
+                  "Instantiate `" + Entry.Request.DeclKey +
+                      "` with a type that has values here, or a pointer such as `void*`.",
+                  "'void' cannot be a struct field's type.")
+            .raise();
+        return DidWork;
+      }
+    }
     // A generic type a field names (`List<Big>`'s `h: &ListHeader<Big>`,
     // LEC-009) is requested here: a clone is never type-checked, so nothing
     // else would, and the field's layout would stay an opaque stub. The
@@ -1432,7 +1484,7 @@ bool drainStructRequests(
     Clone->clearTypeParams();
 
     // Per-instantiation acyclicity -- BEFORE registering the new type, so a
-    // genuinely cyclic instantiation never reaches GlobalSymbolTable/Codegen
+    // genuinely cyclic instantiation never reaches Symbols()/Codegen
     // at all. Raises StructLayoutCycleError directly (propagates to
     // main.cpp's own sub-pass-2b.5-level setjmp, the SAME already-verified
     // path GenericInstantiationDepthError above already relies on -- see
@@ -1441,14 +1493,14 @@ bool drainStructRequests(
     // re-raise).
     PreR.checkStructLayoutAcyclicityForClone(Clone);
 
-    // Register the new, distinct TurfStructType -- GlobalSymbolTable (the
+    // Register the new, distinct TurfStructType -- Symbols() (the
     // codegen/typechecker-facing type registry), NOT Resolver's own
     // SymTable_ (a different, name-existence-only registry -- see
     // resolveMonomorphizedClone() below for that one). This is bullet 1 of
     // S13a's own plan (TYPE-002.md): "one real TurfStructType ... per struct
     // instantiation," registered "under extended mangled names."
-    if (GlobalSymbolTable)
-      GlobalSymbolTable->RegisterType(
+    if (Symbols())
+      Symbols()->RegisterType(
           Clone->getName(),
           std::make_shared<TurfStructType>(Clone->getName(), Clone->getFields()));
 
@@ -1483,9 +1535,9 @@ bool drainStructRequests(
     }
     if (ResolveFailed) {
       SemanticError(Entry.Request.Site,
-                    "Internal error: monomorphized instantiation of '" +
+                    "I could not resolve the instantiation of `" +
                         Entry.Request.DeclKey +
-                        "' failed to re-resolve. This is a compiler bug.")
+                        "` I built. This is a compiler bug: report it at https://github.com/turf-lang/turf-lang/issues with this program.")
           .raise();
       return DidWork;
     }

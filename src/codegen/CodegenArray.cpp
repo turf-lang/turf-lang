@@ -16,6 +16,7 @@
  * @date 2026-05-25
  */
 
+#include "analysis/AnalysisFacts.h"
 #include "codegen/Codegen.h"
 #include "frontend/AST.h"
 #include "analysis/Algorithms.h"
@@ -186,8 +187,8 @@ static bool typeHoldsString(const TurfType *T, int Depth = 0) {
   if (const auto *AT = dynamic_cast<const ::ArrayType *>(T))
     return AT->getSize() > 0 && typeHoldsString(AT->getElementType(), Depth + 1);
   const auto *ST = dynamic_cast<const TurfStructType *>(T);
-  if (!ST && GlobalSymbolTable && dynamic_cast<const NamedType *>(T))
-    ST = dynamic_cast<const TurfStructType *>(GlobalSymbolTable->LookupType(T->getName()).get());
+  if (!ST && Symbols() && dynamic_cast<const NamedType *>(T))
+    ST = dynamic_cast<const TurfStructType *>(Symbols()->LookupType(T->getName()).get());
   if (!ST)
     return false;
   for (const auto &F : ST->getFields())
@@ -220,8 +221,8 @@ Value *ArrayDeclExprAST::codegen() {
     Builder->CreateStore(SliceVal, SliceSlot);
 
     TurfTypePtr SliceType = makeArrayType(ElementType, Size);
-    if (GlobalSymbolTable)
-      GlobalSymbolTable->DeclareSymbol(Name, SliceType, Loc, SliceSlot);
+    if (Symbols())
+      Symbols()->DeclareSymbol(Name, SliceType, Loc, SliceSlot);
     NamedValues[Name] = {SliceSlot, SliceType};
     return Constant::getNullValue(Type::getInt64Ty(*TheContext));
   }
@@ -295,8 +296,8 @@ Value *ArrayDeclExprAST::codegen() {
 
   // Register in symbol table — array type already carries the size
   TurfTypePtr ArrType = makeArrayType(ElementType, Size);
-  if (GlobalSymbolTable) {
-    GlobalSymbolTable->DeclareSymbol(Name, ArrType, Loc, Alloca);
+  if (Symbols()) {
+    Symbols()->DeclareSymbol(Name, ArrType, Loc, Alloca);
   }
 
   NamedValues[Name] = {Alloca, ArrType};
@@ -408,8 +409,8 @@ FoldConstantArrayIndex(long long Idx, int ArraySize, ExprAST *Base,
   auto *BaseVar = dynamic_cast<const VariableExprAST *>(Base);
   ArrayBoundsError Err(Loc, BaseVar ? BaseVar->getName() : "array", Idx,
                        ArraySize);
-  if (BaseVar && GlobalSymbolTable) {
-    if (Symbol *S = GlobalSymbolTable->LookupSymbol(BaseVar->getName()))
+  if (BaseVar && Symbols()) {
+    if (Symbol *S = Symbols()->LookupSymbol(BaseVar->getName()))
       Err.withRelated(S->DeclLoc, "array declared here");
   }
   Err.raise();
@@ -670,8 +671,8 @@ Value *ArrayAccessExprAST::codegenLValue() {
       if (!Folded)
         return nullptr;
       IndexVal = ConstantInt::get(Type::getInt64Ty(*TheContext), *Folded);
-    } else if (!ProvenInBounds) {
-      // OPT-002: ProvenInBounds is set by ValueRangePass::markElidableChecks()
+    } else if (!provenInBounds(getNodeID())) {
+      // OPT-002: provenInBounds() (AnalysisFacts) is filled by ValueRangePass::markElidableChecks()
       // (ValueRange.cpp), which runs on a throwaway CFG BEFORE Body->codegen()
       // -- see that call site's own comment (CodegenFunc.cpp). F-OPT-2
       // (ARCHITECTURE_OVERHAUL.md §17.3): removal by proof only, independent
@@ -821,14 +822,14 @@ Value *ArrayAccessExprAST::codegen() {
       Builder->CreateStore(BaseVal, TempAlloca);
 
       // OPT-002: see codegenLValue()'s identical guard's comment. In
-      // practice ProvenInBounds is never true on THIS path -- markNode()
-      // (ValueRange.cpp) only sets it when the base is a plain array
+      // practice provenInBounds() is never true on THIS path -- markNode()
+      // (ValueRange.cpp) only records it when the base is a plain array
       // variable, and a plain array variable's base always succeeds via
       // codegenLValue() above, which never reaches this R-value fallback --
       // but the guard is kept here too rather than assumed, for the same
       // reason the compile-time-constant check just above is duplicated
       // rather than shared between the two branches.
-      if (!ProvenInBounds)
+      if (!provenInBounds(getNodeID()))
         IndexVal = EmitRuntimeBoundsCheck(
             IndexVal, ConstantInt::get(Type::getInt64Ty(*TheContext), ArraySize),
             ArrayDisplayName(Base.get()), Loc);

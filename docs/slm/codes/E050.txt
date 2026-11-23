@@ -28,8 +28,8 @@ INCORRECT:
     // no fn Point.new(...) declared anywhere
 
     mut p: Point = Point::new(1, 2);
-    // ERROR: 'Point' has no constructor -- 'Point::new(...)' can't be
-    //        called.
+    // ERROR: I cannot call `Point::new(...)`, because `Point` has no
+    //        constructor.
 
 FIX:
   Either declare a `.new` constructor for the struct (assigning every

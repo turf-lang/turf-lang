@@ -10,7 +10,7 @@ A few of the fixed shapes:
     compare x { matches 1: ... }         // `matches` or `otherwise` in a compare
     value recover run { ... };           // `run`, `produce` or `as` after `recover`
     extern fn malloc(n: int): ptr;       // `fn` after `extern`
-    export immut MAX: int = 3;           // `immut` after `export`
+    pub immut MAX: int = 3;           // `immut` after `export`
     machine Door { Open -> Closed }      // `->` between two states
 
 Compare what you wrote with the shape above and add or fix the piece the message asks for. If you wrote a lookalike (a `then` instead of `{`, `:=` instead of `=`), that is the one to change: Turf has no alias for it.

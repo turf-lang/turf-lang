@@ -1,0 +1,12 @@
+// A method call whose receiver is a `&?T` field nothing checked.
+struct Node { val: int, next: &?Node }
+
+fn Node.bump(k: int): void {
+    self.val = self.val + k;
+}
+
+@test(compile_error, E081, "I cannot call the method `bump` of `p.next`, which might be `null` here.")
+fn rejects_method_call_on_nullable_expression(): void {
+    mut p: &Node = heap(Node::default());
+    p.next.bump(1);
+}

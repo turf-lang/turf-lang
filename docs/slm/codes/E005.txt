@@ -16,8 +16,8 @@ INCORRECT:
     for value in n {
         io::printline(value to string);
     }
-    // ERROR: for-each requires an array or a string! You tried to iterate over a
-    //   value of type 'int'.
+    // ERROR: I cannot use for-each on the type `int`, which is not an array
+    //   or a string.
 
 WHAT THIS ERROR IS NOT:
   Not about array SIZE -- a for-each over an unsized array parameter

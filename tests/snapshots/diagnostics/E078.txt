@@ -1,0 +1,13 @@
+tests/36_numeric_semantics/fail_float_literal_overflow.tr (1 error)
+
+── error at line 8, col 21 [E078 · float literal overflow]
+
+  The literal `1e400` is too large for a `double`, which holds up to about 1.8e308.
+
+  Hint: Write a smaller number, or measure in a larger unit.
+
+  8 │     mut d: double = 1e400;
+    │                     ^~~~~ this literal is too large for a `double`
+
+  Run `turf --explain E078` for more details.
+

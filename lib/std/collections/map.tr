@@ -3,7 +3,7 @@ unsafe module;
 // map.tr — Map<K, V>: a key/value association.
 // Usage:
 //   import map::Map;
-//   mut m: Map<string, int> = Map::default();
+//   mut m: Map<string, int> = Map<string, int>::default();
 //   m.put("a", 1);
 //   m.put("b", 2);
 //   mut x: int = m.get("a");        // 1
@@ -323,7 +323,7 @@ pub fn<K, V> Map.length(): int {
 // (F-COLL-1), so `copy().keys()` lists what `keys()` lists until either map
 // changes.
 pub fn<K, V> Map.copy(): Map<K, V> {
-    mut out: Map<K, V> = Map::default();
+    mut out: Map<K, V> = Map<K, V>::default();
     mut i: int = 0;
     while i < self.h.len {
         out.put(self.h.keys[i], self.h.values[i]);
@@ -343,7 +343,7 @@ pub fn<K, V> Map.copy(): Map<K, V> {
 // values()[i] belong to the same entry as long as the map is not modified
 // between the two calls.
 pub fn<K, V> Map.keys(): List<K> {
-    mut out: List<K> = List::default();
+    mut out: List<K> = List<K>::default();
     mut i: int = 0;
     while i < self.h.len {
         out.push(self.h.keys[i]);
@@ -353,7 +353,7 @@ pub fn<K, V> Map.keys(): List<K> {
 }
 
 pub fn<K, V> Map.values(): List<V> {
-    mut out: List<V> = List::default();
+    mut out: List<V> = List<V>::default();
     mut i: int = 0;
     while i < self.h.len {
         out.push(self.h.values[i]);

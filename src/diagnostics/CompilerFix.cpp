@@ -71,10 +71,11 @@ bool samePath(const std::string &A, const std::string &B) {
 // the column: an edit on a line moves the columns of whatever follows it.
 using ErrorKey = std::tuple<std::string, unsigned, std::string>;
 
-std::vector<ErrorKey> errorsOf(const turf::AnalysisResult &R) {
+std::vector<ErrorKey> errorsOf(const turf::AnalysisResult &R,
+                               turf::Severity Level = turf::Severity::Error) {
   std::vector<ErrorKey> Out;
   for (const auto &D : R.diagnostics())
-    if (D.Level == turf::Severity::Error)
+    if (D.Level == Level)
       Out.emplace_back(D.Where.Path, D.Where.Line, D.Code);
   return Out;
 }
@@ -113,17 +114,25 @@ const std::vector<std::string> *entryLines() {
   return It == AllSourceLines.end() ? nullptr : &It->second;
 }
 
-// The original program's errors, analysed once per compile.
-const std::vector<ErrorKey> &baselineErrors() {
+// The original program's errors and warnings, analysed once per compile.
+struct Baseline {
+  std::vector<ErrorKey> Errors, Warnings;
+  std::vector<turf::Diagnostic> All;
+};
+const Baseline &baseline() {
   static bool Done = false;
-  static std::vector<ErrorKey> Errors;
+  static Baseline B;
   if (!Done) {
     Done = true;
-    if (const auto *Lines = entryLines())
-      Errors = errorsOf(analyzeAll({{MainSourceFilename, joinLines(*Lines)}},
-                                   checkOptions()));
+    if (const auto *Lines = entryLines()) {
+      const auto R = analyzeAll({{MainSourceFilename, joinLines(*Lines)}},
+                                checkOptions());
+      B.Errors = errorsOf(R);
+      B.Warnings = errorsOf(R, turf::Severity::Warning);
+      B.All = R.diagnostics();
+    }
   }
-  return Errors;
+  return B;
 }
 
 } // namespace
@@ -195,7 +204,8 @@ bool build(const SLM::DiagnosticHints &Hints, int ErrorLine,
 }
 
 bool check(const CompilerFix &Fix, const std::string &File,
-           const std::string &Code, int ErrorLine) {
+           const std::string &Code, int ErrorLine, bool IsWarning,
+           FixScore::Program *Scored) {
   // An analysis reports through the same DiagnosticEngine, and must never
   // come back here.
   static bool Checking = false;
@@ -210,11 +220,15 @@ bool check(const CompilerFix &Fix, const std::string &File,
   } G;
 
   const ErrorKey Original{File, static_cast<unsigned>(ErrorLine), Code};
-  const auto &Before = baselineErrors();
-  // The analysis must see the error the compile saw, or a clean re-check would
-  // prove nothing (a package build analysed without its graph stops at the
-  // imports, long before the line the error is on).
-  if (std::none_of(Before.begin(), Before.end(),
+  const auto &Base = baseline();
+  const auto &Before = Base.Errors;
+  // The analysis must see the diagnostic the compile saw, or a clean re-check
+  // would prove nothing (a package build analysed without its graph stops at
+  // the imports, long before the line the error is on). A warning is looked
+  // for among the warnings: the analysis runs at the compile's lint levels,
+  // so a warning that was printed is reported there too.
+  const auto &Seen = IsWarning ? Base.Warnings : Before;
+  if (std::none_of(Seen.begin(), Seen.end(),
                    [&](const ErrorKey &K) { return sameError(K, Original); }))
     return false;
 
@@ -225,13 +239,23 @@ bool check(const CompilerFix &Fix, const std::string &File,
     Buffers.push_back({MainSourceFilename, joinLines(*Entry)});
     Buffers.push_back({File, Fix.PatchedFile});
   }
-  const auto After = errorsOf(analyzeAll(Buffers, checkOptions()));
+  const auto Patched = analyzeAll(Buffers, checkOptions());
+  const auto After = errorsOf(Patched);
+
+  // A warning's fix must take that warning away, as an error's fix takes the
+  // error away below (the error list never had the warning in it).
+  if (IsWarning) {
+    const auto Left = errorsOf(Patched, turf::Severity::Warning);
+    if (std::any_of(Left.begin(), Left.end(),
+                    [&](const ErrorKey &K) { return sameError(K, Original); }))
+      return false;
+  }
 
   // Every error left must be one the original program had, other than the
   // one being fixed: as many of each as before, never more.
   std::vector<ErrorKey> Allowed;
   for (const auto &K : Before)
-    if (!sameError(K, Original))
+    if (IsWarning || !sameError(K, Original))
       Allowed.push_back(K);
   for (const auto &K : After) {
     auto It = std::find_if(Allowed.begin(), Allowed.end(),
@@ -239,6 +263,19 @@ bool check(const CompilerFix &Fix, const std::string &File,
     if (It == Allowed.end())
       return false;
     Allowed.erase(It);
+  }
+  // SL-5: the file's diagnostics before and after, for the Fix Score.
+  if (Scored) {
+    auto collect = [&](const std::vector<turf::Diagnostic> &From,
+                       std::vector<FixScore::ProgramDiag> &To) {
+      To.clear();
+      for (const auto &D : From)
+        if (samePath(D.Where.Path, File))
+          To.push_back({static_cast<int>(D.Where.Line), static_cast<int>(D.Where.Col),
+                        D.Code, D.Message, D.Level == turf::Severity::Error});
+    };
+    collect(Base.All, Scored->BeforeDiags);
+    collect(Patched.diagnostics(), Scored->AfterDiags);
   }
   return true;
 }
@@ -276,6 +313,100 @@ std::string render(const CompilerFix &Fix) {
            "  " + std::string(Width.size(), ' ') + " │ " + Colors::RESET +
            Colors::BRIGHT_GREEN + Marks + Colors::RESET + "\n";
   }
+  // SL-1: a plausible fix says what to check before it is applied.
+  const std::string Flags = FixScore::flagLine(Fix.Score);
+  if (!Flags.empty())
+    Out += "  " + Colors::YELLOW + Flags + Colors::RESET + "\n";
+  return Out;
+}
+
+std::vector<SLM::DiagnosticHints::Alternative>
+arityAlternatives(const std::string &Callee, const CallArgSpans &Spans,
+                  const std::vector<std::vector<std::string>> &Overloads,
+                  const std::function<bool(const std::string &)> &IsVariable) {
+  using Alternative = SLM::DiagnosticHints::Alternative;
+  std::vector<Alternative> Out;
+  if (Spans.empty())
+    return Out;
+  // Every edit stays on one line, so the whole call has to be on one.
+  const int Line = Spans.CloseLine;
+  for (const auto &A : Spans.Args)
+    if (A.Line != Line || A.EndLine != Line || A.StartCol < 1 || A.EndCol <= A.StartCol)
+      return Out;
+  const std::string *Text = FixItSourceLine(SourceLocation{Line, 1, Spans.File});
+  if (!Text)
+    return Out;
+  const int N = static_cast<int>(Spans.Args.size());
+  auto argText = [&](int I) {
+    const auto &A = Spans.Args[I];
+    return Text->substr(A.StartCol - 1, A.EndCol - A.StartCol);
+  };
+  auto add = [&](int StartCol, int EndCol, const std::string &Replacement,
+                 const std::string &Description, const std::string &Reason) {
+    for (const auto &Have : Out)
+      if (Have.FixIts.front().StartCol == StartCol &&
+          Have.FixIts.front().EndCol == EndCol &&
+          Have.FixIts.front().Replacement == Replacement)
+        return;
+    Out.push_back({{{Line, StartCol, EndCol, Replacement}}, Reason, Description});
+  };
+  auto count = [](size_t K) {
+    return std::to_string(K) + (K == 1 ? " argument" : " arguments");
+  };
+
+  for (const auto &Params : Overloads) {
+    const int Want = static_cast<int>(Params.size());
+    if (Want == N - 1) {
+      // One argument too many: delete one, with the ',' that joins it to
+      // its neighbour.
+      for (int I = 0; I < N; ++I) {
+        const auto &A = Spans.Args[I];
+        int From = A.StartCol, To = A.EndCol;
+        if (I + 1 < N)
+          To = Spans.Args[I + 1].StartCol;
+        else if (I > 0)
+          From = Spans.Args[I - 1].EndCol;
+        add(From, To, "", "remove the argument '" + argText(I) + "'",
+            "'" + Callee + "' takes " + count(Want) + " and this call passes " +
+                std::to_string(N) + "; without '" + argText(I) +
+                "' the others match its parameters.");
+      }
+    } else if (Want == N + 1) {
+      // One argument too few: pass the variable named like the parameter.
+      for (int K = 0; K < Want; ++K) {
+        const std::string &Name = Params[K];
+        if (Name.empty() || !IsVariable(Name))
+          continue;
+        // Not where it would push an argument already named for its
+        // parameter out of place (`area(width)` misses `height`, not a
+        // second `width`), and not a variable the call already passes.
+        bool Displaces = false;
+        for (int J = 0; J < N && !Displaces; ++J)
+          Displaces = argText(J) == Name || (J >= K && argText(J) == Params[J]);
+        if (Displaces)
+          continue;
+        int Col;
+        std::string Insert;
+        if (K < N) {
+          Col = Spans.Args[K].StartCol;
+          Insert = Name + ", ";
+        } else if (N > 0) {
+          Col = Spans.Args[N - 1].EndCol;
+          Insert = ", " + Name;
+        } else {
+          Col = Spans.CloseCol;
+          Insert = Name;
+        }
+        add(Col, Col, Insert,
+            "pass '" + Name + "' as argument " + std::to_string(K + 1),
+            "'" + Callee + "' takes " + count(Want) + " and this call passes " +
+                std::to_string(N) + "; its parameter '" + Name +
+                "' is missing, and a variable of that name is in scope.");
+      }
+    }
+  }
+  if (static_cast<int>(Out.size()) > MaxArityAlternatives)
+    Out.clear();
   return Out;
 }
 

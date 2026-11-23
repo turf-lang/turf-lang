@@ -25,8 +25,9 @@ A script named as evidence must be run by a workflow under .github/workflows/,
 or the evidence would never be exercised. A new frozen decision with no row, a
 row with no such decision, and a path that matches nothing all fail the check.
 
-"Usable evidence" is a `.tr` test (negative: a `fail_*` one) or a script under
-scripts/. It cannot judge whether the evidence is ENOUGH; that stays a
+"Usable evidence" is a `.tr` test (negative: a `fail_*` one, or a `@test`
+function whose outcome is `compile_error` or `panic`) or a script under
+scripts/. One `@test` function is named `path.tr: name`. It cannot judge whether the evidence is ENOUGH; that stays a
 reviewer's call, and tests/CONFORMANCE.md has a section to write holes down in.
 
 Usage: scripts/check/conformance_check.py    (from anywhere; paths are repo-relative)
@@ -43,8 +44,40 @@ REPO = Path(__file__).resolve().parents[2]
 MAP = REPO / "tests" / "CONFORMANCE.md"
 
 
+NEGATIVE_OUTCOME = re.compile(r"^@test\((compile_error|panic)\b", re.M)
+TEST_ENTRY = re.compile(r"^(.+\.tr): ([A-Za-z_]\w*)$")
+
+
+def negative_test(file: Path, name: str) -> bool:
+    """True if `file` declares `@test(compile_error|panic, ...)` on `fn name`."""
+    try:
+        text = file.read_text()
+    except OSError:
+        return False
+    return re.search(r"^@test\((compile_error|panic)\b[^\n]*\n(?:@[^\n]*\n)*fn " +
+                     re.escape(name) + r"\(", text, re.M) is not None
+
+
+def is_negative(f: Path) -> bool:
+    """A `fail_*` test, or a file of `@test` functions expected to be rejected
+    or to panic (F-11e moved most function-shaped `fail_*` files there)."""
+    if f.name.startswith("fail_"):
+        return True
+    try:
+        text = f.read_text()
+    except OSError:
+        return False
+    return bool(NEGATIVE_OUTCOME.search(text)) and "fn main(" not in text and \
+        not re.search(r"^@test(\(\s*(no_warnings|warning|exit|error)\b[^\n]*)?\s*$", text, re.M)
+
+
 def expand(path: str) -> list[Path]:
-    """Files a cell entry stands for: a directory is every file below it."""
+    """Files a cell entry stands for: a directory is every file below it, and
+    `file.tr: name` is that file when it declares a negative `@test` `name`."""
+    m = TEST_ENTRY.match(path)
+    if m:
+        f = REPO / m.group(1)
+        return [f] if f.is_file() and negative_test(f, m.group(2)) else []
     out: list[Path] = []
     for hit in sorted(glob.glob(str(REPO / path), recursive=True)):
         p = Path(hit)
@@ -63,7 +96,7 @@ def classify(files: list[Path], negative: bool) -> tuple[int, list[str]]:
         if f.suffix == ".tr":
             if f.name.endswith("_module.tr"):
                 continue  # a companion, not a test
-            is_fail = f.name.startswith("fail_")
+            is_fail = is_negative(f)
             if negative and not is_fail:
                 continue  # a directory entry also holds positives; only fail_* counts
             if not negative and is_fail:
@@ -139,10 +172,12 @@ def check_items(problems: list[str]) -> int:
                 files += hit
                 # A named test file must be filed on the side it belongs to;
                 # a directory or glob legitimately holds both kinds.
+                if TEST_ENTRY.match(p) and label == "Positive":
+                    problems.append(f"{fid}: Positive path '{p}' is a test expected to fail")
                 if p.endswith(".tr") and "*" not in p and (REPO / p).is_file():
-                    is_fail = Path(p).name.startswith("fail_")
+                    is_fail = is_negative(REPO / p)
                     if label == "Negative" and not is_fail:
-                        problems.append(f"{fid}: Negative path '{p}' is not a fail_* test")
+                        problems.append(f"{fid}: Negative path '{p}' is not a test expected to fail")
                     if label == "Positive" and is_fail:
                         problems.append(f"{fid}: Positive path '{p}' is a fail_* test")
                 for f in hit:
@@ -215,9 +250,9 @@ def main() -> int:
                 files += hit
                 if label == "Negative":
                     for f in hit:
-                        if f.suffix == ".tr" and not f.name.startswith("fail_") and "*" not in p \
+                        if f.suffix == ".tr" and not is_negative(f) and "*" not in p \
                                 and not p.endswith("/") and f.is_file() and Path(REPO / p).is_file():
-                            problems.append(f"{area}: Negative path '{p}' is not a fail_* test")
+                            problems.append(f"{area}: Negative path '{p}' is not a test expected to fail")
             count, _ = classify(files, negative=(label == "Negative"))
             if count == 0:
                 what = "a fail_* test or a script" if label == "Negative" else "a passing test or a script"

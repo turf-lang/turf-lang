@@ -1,0 +1,13 @@
+tests/45_pattern_matching/fail_pattern_unknown_field.tr (1 error)
+
+── error at line 9, col 21 [E068 · unknown struct field]
+
+  I cannot find a field named `z` on the struct `P`.
+
+  Hint: Use a name from this file: `x`, `y`
+
+  9 │         matches P { z, .. }: return z; done
+    │                     ^ no field of this name
+
+  Run `turf --explain E068` for more details.
+

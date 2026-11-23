@@ -1,0 +1,14 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+// Negative test: string + double should emit TypeChecker error
+@test(compile_error, E057, "I cannot use `+` on a `string` and a `double`.")
+fn rejects_string_plus_double(): void {
+    mut s: string = "hi" + 3.14;
+}
+
+// Negative test: "hi" + 5 should emit TypeChecker error with hint
+@test(compile_error, E057, "I cannot use `+` on a `string` and an `int`.")
+fn rejects_string_plus_int(): void {
+    mut s: string = "hi" + 5;
+}

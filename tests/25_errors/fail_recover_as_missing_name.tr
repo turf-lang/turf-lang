@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E108
-// EXPECT-DIAG: Expected an identifier after 'recover as'
+// EXPECT-DIAG: I expected a name after `recover as`
 // Test (fail): `recover as run { ... }` without a bound name after 'as'
 // must be rejected at parse time.
 fn main(): int {

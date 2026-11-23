@@ -1,0 +1,13 @@
+tests/05_arrays_pointers_ffi/fail_array_decl_init_size_mismatch.tr (1 error)
+
+── error at line 10, col 9 [E003 · array size mismatch]
+
+  I cannot initialize `b`, an `int[5]`, from an `int[2]`.
+
+  Hint: Initialize it from an array of the same size and element type.
+
+  10 │     mut b: int[5] = a;
+     │         ^ this array has the wrong number of elements
+
+  Run `turf --explain E003` for more details.
+

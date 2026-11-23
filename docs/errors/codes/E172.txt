@@ -8,7 +8,7 @@ A function (or `extern fn`) marked `@deprecated("...")` warns at every call to i
     }
 
     fn main(): int {
-        old_sort(List::default());   // WARNING: 'old_sort' is deprecated: use new_sort() instead
+        old_sort(List::default());   // WARNING: `old_sort` is deprecated: use new_sort() instead
         return 0;
     }
 

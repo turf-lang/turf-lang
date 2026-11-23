@@ -191,6 +191,30 @@ for all. The unmodified IR through `clang` times the same as `turfc -O2`
 NM-6 is not implemented. `math::wrapping_*` (NM-3) and NM-2's proofs remain
 the answers for this loop.
 
+### 2026-11-02 — NM-2: check elision over ranges
+
+`ValueRangePass::markElidableChecks()` proves checks away from value ranges
+instead of constants only (TDP-2-002 NM-2, issue #348). Same machine,
+`build_release` at c9a44e21 plus NM-2, 21 interleaved rounds pinned to CPU 2;
+"all checks" is the same compiler with `TURF_NO_ELISION=1`.
+
+| Benchmark | all checks (min / median, s) | NM-2 (min / median, s) |
+|---|---|---|
+| `particles` | 0.026 / 0.026 | 0.025 / 0.026 |
+| `structs` | 0.520 / 0.529 | 0.518 / 0.526 |
+
+No change, as the TDP says: both loops' checked `+` adds an array element
+(`particles[i].x + particles[i].vx`, `ps[i].x + ps[i].vx`), whose value no range
+bounds. NM-2 makes no claim for sums of array elements; `math::wrapping_*`
+(NM-3) remains the answer there.
+
+Over the 764 programs `scripts/dev/fuzz/elision_diff.py --corpus` builds
+(tests, showcase, examples), `TURF_ELISION_STATS=1` counts 46,943 overflow
+checks and 352 bounds checks removed across 117,079 compiled functions. A
+program compiles the stdlib functions it uses, so those count once per
+program. The differential (`--corpus` plus 1,096 generated programs, seed
+3481) found no program whose exit status or output differs with elision off.
+
 ## Fixed before the baseline
 
 Writing these benchmarks found five performance bugs (and one compiler crash,

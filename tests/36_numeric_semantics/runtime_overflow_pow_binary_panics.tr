@@ -1,0 +1,9 @@
+// `int ** int` checks each multiply like `*`: 2 ** 63 is one past INT_MAX.
+fn id(x: int): int {
+    return x;
+}
+
+@test(panic, "runtime check: Integer overflow")
+fn panics_runtime_overflow_pow_binary(): void {
+    io::printline(id(2) ** id(63));
+}

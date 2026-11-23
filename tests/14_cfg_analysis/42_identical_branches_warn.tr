@@ -1,4 +1,4 @@
-// EXPECT-DIAG: Both branches of this 'if' do the same thing
+// EXPECT-DIAG: Both branches of this `if` do the same thing
 // An if/else whose two bodies are the same is either redundant or a branch
 // that was meant to differ. A lint warning, so the program still compiles and
 // runs. NOTE the shape: the lint fingerprints only literals, variables and

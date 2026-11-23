@@ -1,0 +1,17 @@
+struct Point {
+    x: int,
+    y: int
+}
+
+fn area(w: int, h: int): int {
+    return w * h;
+}
+
+fn describe(p: Point, n: int): int {
+    mut sum: int = p + n;
+    return sum;
+}
+
+fn main(): int {
+    return describe(Point::default(), 0);
+}

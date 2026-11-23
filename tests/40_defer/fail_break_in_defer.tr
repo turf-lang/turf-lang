@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E083
-// EXPECT-DIAG: A deferred statement can't 'break'
+// EXPECT-DIAG: I cannot let a deferred statement `break`
 // LANG-003: same rule as fail_return_in_defer.tr, for `break` -- a bare
 // `break` directly inside a deferred statement (not absorbed by a loop
 // that itself begins inside the defer, contrast

@@ -251,10 +251,10 @@ These need no manifest and work on any `.tr` file. Each runs the compiler in one
 $ turf check mod.tr
 mod.tr (1 error)
 
-── error [E119 · declaration]
+── error [E119 · no main function]
 
-  No entry point found. Please define 'fn main(): int' in your file.
-  Hint: checking a module that is only ever imported? add --module: `turf check --module <file.tr>`
+  I found no entry point. Define `fn main(): int` in your file.
+  Hint: To check a module that is only ever imported, add `--module`: `turf check --module <file.tr>`.
 
   Run `turf --explain E119` for more details.
 $ turf check --module mod.tr
@@ -337,18 +337,19 @@ A module exists in this build, but this package may not import it
 
 ### `--smart`
 
-`--smart` asks a small language model, running locally, to suggest a fix for the first error of a compile that the compiler has no [`Fix:`](#fixes) of its own for. The compiler's own fix always comes first: when an error has one, it is printed and the model is never called. The compiler checks the model's suggestion in an isolated copy of your program, and shows it only if it removes the error without introducing another; otherwise you see the compiler's own diagnostic, unchanged. Nothing runs on a clean compile, warnings never start it, and no network is involved.
+`--smart` asks a small language model, running locally, to suggest a fix for the first error of a compile that the compiler has no [`Fix:`](#fixes) of its own for. The compiler's own fix always comes first: when an error has one, it is printed and the model is never called. The compiler checks the model's suggestion in an isolated copy of your program, with every check a compile makes before it generates code (parsing, names, types, lints and the flow analyses: missing `return`, use before assignment, double free, ...), and shows it only if it removes the error without introducing another; otherwise you see the compiler's own diagnostic, unchanged. The model writes no explanation while it works out a fix: once a fix passes, one more short request explains it, from the error and the whole edit shown under `Suggested fix:`, so the explanation always describes that edit, even when the fix took more than one attempt. If that request gets no answer, the fix is shown without an explanation. A suggestion that passes is then scored on what the edit does (see [How a fix is scored](#how-a-fix-is-scored)): with nothing to flag it is shown with a `Checked:` line, and with a flag it is shown with a `Check before applying:` line that says what to look at. Nothing runs on a clean compile, warnings never start it, and no network is involved.
 
 ```text
 $ turf prog.tr --smart -o prog
 prog.tr (1 error)
 
-── error at line 1, col 1 [E009 · control flow]
+── error at line 1, col 1 [E009 · missing return]
 
-  [Model Suggestion]
-  Explanation: The function never returns a value.
+  [Model Suggestion]  Return 42 from main.
+  Explanation: main says it returns an int but never does, so the fix returns 42 at its end.
   Suggested fix:
     + 2 |     return 42;
+  Checked: it compiles, adds no warning, is a small edit, removes no call, `return` or assignment, changes no declaration, and adds no `unsafe`, `extern`, system import, raw pointer or `mem::` call.
   ...
 ```
 
@@ -364,6 +365,16 @@ What it does with the folder:
 | no `.gguf` file | prints `note: --smart has no model to run. Put one .gguf file in <root>/models …; showing the compiler's own diagnostics.` and carries on with the compiler's diagnostics |
 | one `.gguf` file | loads it and uses it |
 | more than one | uses none of them, because it cannot know which you meant; prints `note: --smart uses exactly one model and found 2 in <root>/models (a.gguf, b.gguf). Leave one .gguf file there; showing the compiler's own diagnostics.` |
+
+Three limits keep `--smart` from costing more than it is worth, and each ends with the compiler's own diagnostics and a note:
+
+- **Memory.** Before loading the model, it checks that the model's file and about 512 MB for its working memory fit in the memory still free.
+- **Time.** One `--smart` run (every attempt, the explanation, `--smart=thorough`'s extra answers) has 180 seconds of wall-clock time, or what `TURF_SLM_BUDGET_SECONDS` says. Past it no new answer is asked for and one in progress stops; a fix that already passed is still shown.
+- **Length.** An answer is at most 512 tokens.
+
+A model that is not on the list of qualified models (`docs/slm/qualified_models.tsv` in your install) gets one note, `note: --smart is running <file>, which is not a qualified model …`, and runs anyway: you choose the model, and its suggestions are checked the same way. A model is qualified by `scripts/slm/qualify_model.sh` in the source tree, which measures it on the `--smart` benchmark against published thresholds. `TURF_SLM_MODEL=<file.gguf>` runs that file instead of the one in `<root>/models`.
+
+`--smart=thorough` also asks the model for two more answers once one passes, sampled rather than taking the most likely answer each time (seeded, so a run repeats). Each is checked the same way. When the ones that pass all make the same program, nothing changes; when two different programs pass, the suggestion is shown as plausible with `2 different fixes pass these checks`, since the model could not settle on one. It takes about three times as long, and the extra answers are never cached.
 
 The model's suggestion is labelled `[Model Suggestion]`. `--smart-write-fix=<path>` writes the suggestion's program to that file when the compiler had no fix of its own; the compiler's own fixes are written with or without `--smart` (see [Fixes](#fixes)). A model has to load and run on the CPU, so a suggestion can take from several seconds to a minute or more per error. A suggestion the model cannot get validated after three attempts is dropped, and you see the compiler's diagnostic. The prompt design and sandbox are internals, described under [`docs/architecture/`](../architecture/).
 
@@ -385,8 +396,8 @@ The model's suggestion is labelled `[Model Suggestion]`. `--smart-write-fix=<pat
 
 ```text
 $ turf version
-turf 1.1.0  (needs turfc interface 1.1+)
-turfc 2.2.0  (interface 1.12, /opt/turf/bin/turfc)
+turf 1.2.0  (needs turfc interface 1.1+)
+turfc 2.3.0  (interface 1.15, /opt/turf/bin/turfc)
   llvm 22.1.8
   runtime turf_rt_abi_2_0
   root /opt/turf
@@ -411,14 +422,14 @@ A differing *release* version is never an error on its own. In a project, a mani
 
 ```text
 $ turfc --version --json
-{"features":["package-graph","exit-status-2","test","format-check","format-skip-unlexable","emit-obj","test-only","lint-levels","diagnostics-json","version-json","test-functions","unsafe-report","smart"],"interface":{"major":1,"minor":12},"llvm":"22.1.8","manifest":1,"root":"/opt/turf","runtime":"turf_rt_abi_2_0","schemas":{"diagnostics":"1.0","package_graph":1},"turfc":"2.2.0"}
+{"features":["package-graph","exit-status-2","test","format-check","format-skip-unlexable","emit-obj","test-only","lint-levels","diagnostics-json","version-json","test-functions","unsafe-report","test-tags","registry-json","smart-thorough","smart"],"interface":{"major":1,"minor":15},"llvm":"22.1.8","manifest":1,"root":"/opt/turf","runtime":"turf_rt_abi_2_0","schemas":{"diagnostics":"1.2","package_graph":1},"turfc":"2.3.0"}
 ```
 
 | Key | Value |
 |---|---|
 | `interface` | `{"major", "minor"}`, as line 2 of `turfc --version`. |
 | `schemas` | `diagnostics`: the [diagnostics JSON](#diagnostics-as-json) schema version; `package_graph`: the package-graph `"format"` `--package-graph` reads. |
-| `features` | One name per addition to the interface, in order: `package-graph` (1.1), `exit-status-2` (1.2), `test` (1.3), `format-check` (1.4), `format-skip-unlexable` (1.5), `emit-obj` (1.6), `test-only` (1.7), `lint-levels` (1.8), `diagnostics-json` (1.9), `version-json` (1.10), `test-functions` (1.11), `unsafe-report` (1.12). Then what this build has: `smart`, `embedded-lld`, `bundled-runtime`. |
+| `features` | One name per addition to the interface, in order: `package-graph` (1.1), `exit-status-2` (1.2), `test` (1.3), `format-check` (1.4), `format-skip-unlexable` (1.5), `emit-obj` (1.6), `test-only` (1.7), `lint-levels` (1.8), `diagnostics-json` (1.9), `version-json` (1.10), `test-functions` (1.11), `unsafe-report` (1.12), `test-tags` (1.13), `registry-json` (1.14), `smart-thorough` (1.15). Then what this build has: `smart`, `embedded-lld`, `bundled-runtime`. |
 | `turfc`, `llvm`, `runtime`, `root` | As the text lines. |
 
 ### Finding the compiler
@@ -450,7 +461,7 @@ Everything above is `turf`. This section is for whoever drives the compiler dire
 
 ```text
 $ turfc help
-Usage: turfc <filename.tr> [-o output] [--emit-llvm | --emit-obj] [--smart]
+Usage: turfc <filename.tr> [-o output] [--emit-llvm | --emit-obj] [--smart[=thorough]]
          [--smart-write-fix=<path>] [--link <libname>]
          [--allow-unsafe-modules] [--stdlib-warnings] [--diagnostics=json|text]
          [--allow <code>] [--warn <code>] [--deny <code>] [--lint-set <2.N>]
@@ -461,9 +472,10 @@ Usage: turfc <filename.tr> [-o output] [--emit-llvm | --emit-obj] [--smart]
          [--dump-instantiations]
        turfc --format [--write | --check [--skip-unlexable]] <filename.tr>...
        turfc --migrate=pub [--write] <module.tr>...
+       turfc --registry-json
        turfc --unsafe-report (--package-graph <file> | <file.tr>...)
        turfc --test [<tests-dir>] [--package-graph <file>] [--exclude <path>]
-         [--only <path>]
+         [--only <path>] [--tag <tag>] [--skip-tag <tag>]
          [-O0|-O1|-O2|-O3|-Os] [-g] [--link <libname>] [--jobs <n>]
          [--timeout <seconds>] [--diag-register <file>]
          [--allow-unsafe-modules] [--stdlib-warnings]
@@ -477,7 +489,7 @@ Usage: turfc <filename.tr> [-o output] [--emit-llvm | --emit-obj] [--smart]
 
 ```text
 $ turfc --version
-turfc 2.2.0
+turfc 2.3.0
 interface 1.12
 llvm 22.1.8
 runtime turf_rt_abi_2_0
@@ -486,7 +498,7 @@ linker system-cc
 smart built-in
 ```
 
-The interface covers what `turf` relies on: the flags it passes, the two-line start of `--version`, the exit statuses, and every other argument being accepted exactly as a direct invocation accepts it. A new flag or input raises the **minor**; removing a flag or changing its meaning raises the **major**. A tool that needs `--package-graph` requires interface 1.1 or later, `turfc --test` 1.3, `--emit-obj` 1.6, `turfc --test --only` 1.7, the lint-level flags 1.8, `@test` functions in `turfc --test` 1.11, and `--unsafe-report` 1.12.
+The interface covers what `turf` relies on: the flags it passes, the two-line start of `--version`, the exit statuses, and every other argument being accepted exactly as a direct invocation accepts it. A new flag or input raises the **minor**; removing a flag or changing its meaning raises the **major**. A tool that needs `--package-graph` requires interface 1.1 or later, `turfc --test` 1.3, `--emit-obj` 1.6, `turfc --test --only` 1.7, the lint-level flags 1.8, `@test` functions in `turfc --test` 1.11, `--unsafe-report` 1.12, the `@test` options with `turfc --test --tag`/`--skip-tag` 1.13, `--registry-json` 1.14, and `--smart=thorough` 1.15.
 
 **Modes a tool uses:**
 
@@ -515,7 +527,8 @@ The interface covers what `turf` relies on: the flags it passes, the two-line st
   }
   ```
 
-  A bad graph is one line naming the file and exit 1. Without the flag `turfc` is in single-file mode. In a package build the file you name must be inside the root package's `src`.
+  The schema is `docs/reference/schemas/package-graph.schema.json` (and `package-graph-report.schema.json` for `turf graph --unsafe`), with fixtures in `docs/reference/schemas/package-graph-fixtures/`; `docs/reference/schemas/README.md` states how each format is versioned. A bad graph is one line naming the file and exit 1. Without the flag `turfc` is in single-file mode. In a package build the file you name must be inside the root package's `src`.
+- `turfc --registry-json` prints the diagnostic-code registry as one JSON document (IF-3, interface 1.14): every code with its class name, title, category, severity, default lint level, the minor that added it, whether it is retired, and the text `turf --explain` shows for it, read from the same file. Schema `docs/reference/schemas/diagnostic-registry.schema.json`. The release archive carries it as `share/turf/diagnostic-registry.json`, and the website's error pages are built from that file.
 - `turfc --unsafe-report --package-graph <file.json>` counts where each package's unsafe code is (LB-2): for every package of the graph and for the standard library, the files that declare `unsafe module;`, the `unsafe { }` blocks, the `extern fn` declarations and the C libraries they name with `extern from`, and whether the package's `unsafe module;` is honored (`allow_unsafe`; always for the standard library). It reads every `.tr` file under each `src/`, imported or not, with the real lexer (a keyword in a comment or a string is not counted), compiles nothing and needs no entry file. `turfc --unsafe-report <file.tr>...` reports the files given. The output is one line of JSON, schema `docs/reference/schemas/unsafe-report.schema.json`; a file that does not lex carries an `"error"` and is counted up to it. Exit 1 for a bad graph or a file that cannot be read. `turf audit` and `turf graph --unsafe` run it ([Projects and packages](projects_and_packages.md#8-unsafe-module-in-dependencies)):
 
   ```text
@@ -536,15 +549,14 @@ The interface covers what `turf` relies on: the flags it passes, the two-line st
 $ turf check oob.tr
 oob.tr (1 error)
 
-── error at line 4, col 18 [E001 · array error]
+── error at line 4, col 18 [E001 · array bounds]
 
-  Array index out of bounds!
-  You tried to access 'primes[5]', but 'primes' only has 3 elements (indices 0 to 2, or -1 to -3 counting from the end).
+  I cannot use `primes[5]`, because `primes` has only 3 elements.
 
-  Hint: Array indices start at 0 and go up to size - 1; a negative index counts back from the end (-1 is the last element).
+  Hint: Use an index from 0 to 2, or `-1` to `-3` to count from the end.
 
   4 │     return primes[i];
-    │                  ^ Here!
+    │                  ^ this index is outside the array
 
   Run `turf --explain E001` for more details.
 ```
@@ -552,11 +564,18 @@ oob.tr (1 error)
 Top to bottom:
 
 1. **File header.** The path of the file the diagnostics below belong to, then a count: `src/main.tr (2 errors, 1 warning)`. Diagnostics are batched **per file**: the file you compiled comes first, then each imported module, and within a file they are sorted by line and column. The path is relative to the directory you ran the command from; a standard-library file is shown from `lib/std/` on.
-2. **Diagnostic header.** `── error at line 4, col 18 [E001 · array error]`: the position, the **code** (`E001`) and the **category** (`array error`). The code is what you give to `turf explain`. The categories are type mismatch, undeclared variable, control flow, syntax error, arithmetic, string conversion, array error, declaration, function signature, builtin function, memory error and general. A diagnostic with no source position (a missing `main`) omits "at line, col". Many warnings carry no code and no category.
+2. **Diagnostic header.** `── error at line 4, col 18 [E001 · array bounds]`: the position, the **code** (`E001`) and the code's **name** (`array bounds`), a short lowercase noun phrase. The code is what you give to `turf explain`. A diagnostic with no source position (a missing `main`) omits "at line, col". Many warnings carry no code.
 3. **The message**, in plain words.
-4. Zero or more `Note:` lines, one per related location (`Note: declared here (line 2, col 5)`).
+4. Zero or more `Note:` lines, one per related location the snippet does not show (`Note: candidate: f(string s) -> int (other.tr, line 2, col 4)`): one in another file, on a later line, or beyond the first three.
 5. An optional **hint**: one line saying how to fix it.
-6. A **source snippet**: the line, with an underline under the offending token and the word `Here!`. A single-token span is underlined `^~~~`; where only a position is known, it is a bare `^`.
+6. A **source snippet** with **labelled spans**. The **primary span** is underlined `^~~~` under the code that is wrong, with a label saying what it is: `this is an `int``. Where only a position is known, it is a bare `^`. The **secondary spans** are the related locations in the same file, on the same line or an earlier one, underlined `---` with their own label: where an expectation came from (`` `s` is a `string` because of this ``), or a first declaration. Every line that carries a span is shown, in order; `┆` marks lines left out between them. When spans share a line, the rightmost label is written beside its underline and the others hang below it, joined to their span by `│`; spans that overlap are underlined on separate rows.
+
+   ```text
+     2 │     immut s: string = 5;
+       │              ------   ^ this is an `int`
+       │              │
+       │              `s` is a `string` because of this
+   ```
 7. An optional **`Fix:`**, the corrected line (see [Fixes](#fixes)).
 8. A **footer**, when the diagnostic has a code: ``Run `turf --explain E0NN` for more details.`` For the codes that most need reading in full, it is the stronger `Worth reading in full -- run `turf --explain E0NN` before you patch this one.`
 
@@ -570,14 +589,14 @@ When the compiler knows the exact edit that removes an error, it prints it under
 $ turf check greet.tr
 greet.tr (1 error)
 
-── error at line 6, col 27 [E040 · undeclared variable]
+── error at line 6, col 27 [E040 · unknown name]
 
-  I can't find anything named 'nmae'.
+  I cannot find anything named `nmae`.
 
-  Hint: It may be from the current file: 'name'
+  Hint: Use a name from this file: `name`
 
   6 │     printline("Hello, " + nmae + "!");
-    │                           ^~~~ Here!
+    │                           ^~~~ nothing of this name is in scope
 
   Fix: replace 'nmae' with 'name'
   6 │     printline("Hello, " + name + "!");
@@ -590,7 +609,9 @@ The line after `Fix:` says the edit in words: `replace 'a' with 'b'`, `remove 'p
 
 A `Fix:` is printed in every build, with no flag and no model. It is **checked** before it is shown: the compiler applies the edit to a copy of your program in memory, analyses that copy as it would any program (type checking, lint and flow analysis), and prints the fix only if the original error is gone from that line and the copy has no error your program did not already have. A fix that does not pass is not printed. Your files are never changed; to get the fixed program, use `--smart-write-fix=<path>`.
 
-A fix is offered only where there is exactly one candidate. A misspelled name with two equally close matches gets the hint that lists both and no `Fix:`. Only errors get fixes, never warnings, never an error inside the standard library, and at most ten fixes are checked in one compile. A clean compile does no fix work.
+An error the parser reports while it is recovering from a syntax error gets no fix: one from the syntax error's line up to the next line that starts a declaration (`fn`, `struct`, `pub` … in the first column), that line included. Such an error may exist only because of the first: an edit that makes it go away passes the check (your program already had all the other errors) and still leaves a program that does not parse. Fix the first error and compile again. An error in a later declaration is found after the parser has recovered, and gets its fix as usual.
+
+A fix is offered only where there is exactly one candidate. A misspelled name with two equally close matches gets the hint that lists both and no `Fix:`. For some errors the compiler checks several edits, such as each argument it could remove from a call with one too many, and prints a `Fix:` only when exactly one of them passes. A warning gets a fix as an error does (E174 to E177 and E179 have one), with the same check: the warning goes away and no error appears. No fix is offered for a diagnostic inside the standard library, and at most ten fixes are checked in one compile. A clean compile does no fix work.
 
 These errors can carry a `Fix:`:
 
@@ -600,13 +621,37 @@ These errors can carry a `Fix:`:
 | E026, E030, E031 | the closest function in a module, symbol in an `import`, or scope qualifier |
 | E029 | `x::m` on an instance becomes `x.m` |
 | E039, E040, E041, E042, E054, E068 | the closest enum or error variant, variable, function, type, method or field |
+| E044 | a call with one argument too many loses the one argument whose removal makes the rest fit; a call with one too few passes the variable named like the missing parameter |
 | E046 | `static` is removed from a constructor |
 | E048 | `Type.m` becomes `Type::m` |
 | E052 | a static method called through an instance is called through its type |
 | E060 | the variable's `immutable` becomes `mutable` (`immut` becomes `mut`) |
 | E087 | a misplaced `pub` is moved or removed |
 | E102 | the missing `;` is inserted |
+| E106 | a function with no return type gets the one its body and callers compile with (`: void`, `: int`, ...) |
 | E138 | the method gets its struct's type parameters (`fn<T>`) |
+
+#### How a fix is scored
+
+A fix that passes its check is also scored on what the edit does, the compiler's own `Fix:` and a `--smart` suggestion alike. The facts are worked out from the whole file before and after the fix, and from the same analysis of each:
+
+| Fact | Raised when the fix |
+|---|---|
+| Removes something | leaves fewer calls, asserts, `return`s or assignments in the file (a "fix" that deletes the failing statement) |
+| Changes a declaration | changes or removes a function, struct, enum or constant declaration, or a struct field, other than the one on the error's own line; or adds a `pub` item, or a field to a struct the program already had |
+| Reaches further | adds `unsafe`, an `extern` declaration, a raw pointer or a `mem::` call, or imports `os`, `fs`, `http` or `io` when the program did not |
+| Adds a warning | leaves a warning the program did not have: one pointing into the text it changed, or one elsewhere, in a function that had no error before the fix or naming something the fix removed or added (`it adds warning E163 (line 7)`) |
+| Rewrites a lot | changes more tokens than the error's line holds, and more than 6 |
+| Is one of several | is one of two or more different fixes that pass |
+
+A fix with none of these is **proven** (the compiler's own) or **verified** (the model's) and is shown as it is. A fix with one is **plausible**: it is shown with the flag spelled out under it, for you to check:
+
+```text
+  Fix: ...
+  Check before applying: it changes the declaration `fn total(): int`.
+```
+
+A fix that does not pass its check is never shown. [The JSON form](#diagnostics-as-json) carries the tier and the flags.
 
 Output that matches the text of diagnostics (a script, an editor extension) will see `Fix:` lines. Diagnostic wording is not part of the compatibility promise; the error codes are. A tool reads [the JSON form](#diagnostics-as-json) instead.
 
@@ -616,22 +661,23 @@ Output that matches the text of diagnostics (a script, an editor extension) will
 
 ```text
 $ turfc main.tr --check --diagnostics=json
-{"category":"undeclared variable","code":"E040","denied":false,"file":"main.tr","fix":{"description":"replace 'nmae' with 'name'","edits":[{"file":"main.tr","replacement":"name","span":{"end":{"column":16,"line":4},"start":{"column":12,"line":4}}}]},"hint":"It may be from the current file: 'name'","message":"I can't find anything named 'nmae'.","related":[],"severity":"error","span":{"end":{"column":16,"line":4},"start":{"column":12,"line":4}},"title":null,"version":"1.0"}
+{"category":"undeclared variable","code":"E040","denied":false,"file":"main.tr","fix":{"description":"replace 'nmae' with 'name'","edits":[{"file":"main.tr","replacement":"name","span":{"end":{"column":16,"line":4},"start":{"column":12,"line":4}}}],"flags":[],"tier":"proven"},"hint":"Use a name from this file: `name`","label":"nothing of this name is in scope","message":"I cannot find anything named `nmae`.","related":[],"severity":"error","span":{"end":{"column":16,"line":4},"start":{"column":12,"line":4}},"title":null,"version":"1.2"}
 ```
 
 | Field | Value |
 |---|---|
-| `version` | The schema version, `"1.0"`. A minor version adds fields; a major version changes or removes one. `turfc --version --json` reports it too. |
+| `version` | The schema version, `"1.2"`. A minor version adds fields; a major version changes or removes one. `turfc --version --json` reports it too. Version 1.1 added `label`; 1.2 added the fix's `tier` and `flags`. |
 | `severity` | `"error"` or `"warning"`. A warning whose [lint level](#lint-levels) is `deny` is an `"error"`, with `denied` set. |
 | `code` | `"E040"`. Every error has one; `null` only for a warning with no code. |
 | `category` | The code's category from the registry (`"type mismatch"`), or `null`. |
-| `title` | The heading line of the text form (`"Nothing to infer!"`), or `null`. |
+| `title` | A banner line above the message. Diagnostics carry no banner, so it is `null`. |
 | `message` | The message, without colour. |
 | `hint` | The `Hint:` text, or `null`. |
 | `file` | The file, as the compiler opened it. |
 | `span` | `{"start": {"line", "column"}, "end": {"line", "column"}}`: 1-based, columns in bytes, `end` exclusive. `null` for a diagnostic about a whole file. |
-| `related` | The `Note:` locations: `[{"file", "span", "message"}]`. |
-| `fix` | The compiler's checked [fix](#fixes) as `{"description", "edits": [{"file", "span", "replacement"}]}`, or `null`. The edits apply to the original text and never overlap. |
+| `label` | What the primary span's underline says (`"this is an `int`"`), or `null` when `span` is. |
+| `related` | The secondary spans and `Note:` locations, every related location the text form shows: `[{"file", "span", "message"}]`. `message` is the label. |
+| `fix` | The compiler's checked [fix](#fixes) as `{"description", "edits": [{"file", "span", "replacement"}], "tier", "flags"}`, or `null`. The edits apply to the original text and never overlap. `tier` is `"proven"` or `"plausible"` and `flags` lists, one plain sentence each, why a plausible fix needs a look (see [How a fix is scored](#how-a-fix-is-scored)); it is empty for a proven fix. |
 | `denied` | `true` for a warning made an error by `deny`. |
 
 The schema is `docs/reference/schemas/diagnostics.schema.json` (JSON Schema). `docs/reference/schemas/diagnostics-fixtures/` holds a source and its output for an error with a fix, an error with a related location and a warning; a tool's tests can read those files. `--smart`'s model suggestions are printed as text.
@@ -663,17 +709,17 @@ The level is chosen by whoever builds the program, in three places that mean the
 $ turf check w.tr --deny E163
 w.tr (1 error, 2 warnings)
 
-── error at line 2, col 5 [E163 · control flow]
+── error at line 2, col 5 [E163 · unused variable]
 
-  Warning: Variable 'unused' is declared but never used.
+  Variable `unused` is declared but never used.
 
-  Hint: If the variable is intentionally unused, prefix its name with '_' by convention. Otherwise, remove the declaration or use its value.
+  Hint: Remove `unused`, or use it. If it is unused on purpose, rename it `_unused`, or pass `--allow E163`.
 
   E163 is a warning by default; its lint level here is deny.
   ...
 ```
 
-A denied warning is an error in every way that matters: it has the `error` header, it is counted as one, it fails `--check`, and the error that is already on a line hides other diagnostics on that line. Its text still says `Warning:` and the diagnostic adds the line saying why, so the reader knows the check is normally advice.
+A denied warning is an error in every way that matters: it has the `error` header, it is counted as one, it fails `--check`, and the error that is already on a line hides other diagnostics on that line. Its text is the warning's own, and the diagnostic adds the line saying why, so the reader knows the check is normally advice.
 
 A level that names nothing real is a usage error (status 2, nothing compiled), never silently ignored: a code the compiler does not have, a word that is not a code, a lint set that does not exist or is newer than the compiler, a flag with no code after it. An **error** has no level to choose, since a program with a type error cannot be built whatever the setting: `--allow` and `--warn` of an error's code are usage errors, and `--deny` of one is accepted and changes nothing. A [warning in the standard library](#warnings-in-the-standard-library) is never denied (it is not yours to fix) unless you also pass `--stdlib-warnings`. A level applies to every file of the compile, your dependencies included. `turfc --test` and `turf test` pass the levels to the compile of every test.
 
@@ -687,9 +733,11 @@ A warning whose position is inside the installed standard library is recorded bu
 $ turf check server.tr --stdlib-warnings
 lib/std/http/http.tr (1 warning)
 
-── warning at line 353, col 5 [E159 · control flow]
+── warning at line 353, col 5 [E159 · loop with no exit path]
 
-  Warning: Function 'http::Server.listen' contains a loop with no exit path. This will run forever.
+  Function `http::Server.listen` contains a loop with no exit path, so it will run forever.
+
+  Hint: Add a `break`, a `return` or a condition that can become false, so the loop can exit.
   ...
 ```
 
@@ -703,14 +751,14 @@ When you use a name the compiler does not know (a variable, a type, a field, a m
 $ turf check typo.tr
 typo.tr (1 error)
 
-── error at line 3, col 12 [E040 · undeclared variable]
+── error at line 3, col 12 [E040 · unknown name]
 
-  I can't find anything named 'contaner'.
+  I cannot find anything named `contaner`.
 
-  Hint: It may be from the current file: 'container'
+  Hint: Use a name from this file: `container`
 
   3 │     return contaner;
-    │            ^~~~~~~~ Here!
+    │            ^~~~~~~~ nothing of this name is in scope
 
   Fix: replace 'contaner' with 'container'
   3 │     return container;
@@ -727,11 +775,11 @@ Every error and every warning has a stable code, `E001` upward with no gaps. A c
 
 A **retired** code is one whose mistake is now reported under another code; the number stays so old references still resolve, and `turf explain` on it says which code replaced it. The table marks them. The replacements are: E006 (an unsized array in a `for` loop; arrays carry their length now), E013 (merged into E012), E015 (syntax errors, now E099–E123), E037 (unknown functions are E041), and E055 and E063 (now E056).
 
-Every code, with its kind, the 2.x release that added it, the level it starts at and its category (the word in the diagnostic header). This table is generated from the compiler's registry (`src/diagnostics/ErrorCodes.h`) by `scripts/check/diagnostic_registry.py --write`, and CI fails if it and the registry disagree, so edit the registry and regenerate; never edit the table. `scripts/check/diagnostic_registry.py --json` prints the same data for a tool.
+Every code, with its kind, the 2.x release that added it, the level it starts at, its category and its name (the lowercase phrase in the diagnostic header). This table is generated from the compiler's registry (`src/diagnostics/ErrorCodes.h`) by `scripts/check/diagnostic_registry.py --write`, and CI fails if it and the registry disagree, so edit the registry and regenerate; never edit the table. `scripts/check/diagnostic_registry.py --json` prints the same data for a tool.
 
 <!-- diagnostic-registry:begin (generated by scripts/check/diagnostic_registry.py --write; do not edit) -->
 
-173 codes, E001 to E173: 149 errors and 24 warnings (E074–E075, E094, E152–E172). 6 are retired (E006, E013, E015, E037, E055, E063).
+197 codes, E001 to E197: 149 errors and 48 warnings (E074–E075, E094, E152–E172, E174–E197). 6 are retired (E006, E013, E015, E037, E055, E063).
 
 | Code | Kind | Since | Level | Category | Name |
 |---|---|---|---|---|---|
@@ -908,6 +956,30 @@ Every code, with its kind, the 2.x release that added it, the level it starts at
 | E171 | warning | 2.0 | warn | memory error | PossibleDoubleFreeWarning |
 | E172 | warning | 2.2 | warn | declaration | DeprecatedUseWarning |
 | E173 | error | 2.2 | error | declaration | TestFunctionUseError |
+| E174 | warning | 2.3 | allow | syntax error | DecimalLiteralReceiverWarning |
+| E175 | warning | 2.3 | allow | syntax error | StaticAfterParametersWarning |
+| E176 | warning | 2.3 | allow | syntax error | ExportImmutWarning |
+| E177 | warning | 2.3 | allow | type mismatch | TypeArgsFromContextWarning |
+| E178 | warning | 2.3 | allow | declaration | UnusedPrivateFunctionWarning |
+| E179 | warning | 2.3 | allow | declaration | UnusedImportWarning |
+| E180 | warning | 2.3 | allow | declaration | UnusedPubInBinaryWarning |
+| E181 | warning | 2.3 | allow | type mismatch | IntToDoublePrecisionWarning |
+| E182 | warning | 2.3 | allow | control flow | MutualRecursionWarning |
+| E183 | warning | 2.3 | allow | control flow | UnreachableBaseCaseWarning |
+| E184 | warning | 2.3 | allow | control flow | LoopTestNeverChangesWarning |
+| E185 | warning | 2.3 | allow | control flow | LoopExitsNeverTakenWarning |
+| E186 | warning | 2.3 | allow | control flow | LoopExitsBehindNoReturnWarning |
+| E187 | warning | 2.3 | allow | memory error | ManualHeapLeakWarning |
+| E188 | warning | 2.3 | allow | memory error | RawPointerMaybeNullWarning |
+| E189 | warning | 2.3 | allow | memory error | FreeOfNonHeapPointerWarning |
+| E190 | warning | 2.3 | allow | memory error | WriteThroughImmutableArrayWarning |
+| E191 | warning | 2.3 | allow | memory error | UncheckedPointerIndexWarning |
+| E192 | warning | 2.3 | allow | memory error | IntToPointerCastWarning |
+| E193 | warning | 2.3 | allow | memory error | UnneededUnsafeBlockWarning |
+| E194 | warning | 2.3 | allow | memory error | LargeUnsafeBlockWarning |
+| E195 | warning | 2.3 | warn | control flow | EmptyLoopBodyWarning |
+| E196 | warning | 2.3 | warn | control flow | EmptyFunctionBodyWarning |
+| E197 | warning | 2.3 | warn | control flow | EmptyRecoverBlockWarning |
 
 <!-- diagnostic-registry:end -->
 
@@ -942,14 +1014,14 @@ fn main(): int {
 ```
 
 ```text
-── error at line 2, col 5 [E012 · control flow]
+── error at line 2, col 5 [E012 · statement after terminator]
 
-  This code comes after a return/break/continue, so it's impossible to reach it!
+  This code comes after a return/break/continue, so I can never reach it.
 
-  Hint: Delete this code or move it before the 'return/break/continue' statement.
+  Hint: Delete this code or move it before the `return/break/continue` statement.
 
   2 │     return 0;
-    │     ^~~~~~ Here!
+    │     ^~~~~~ nothing after the statement before this runs
 ```
 
 ### Unreachable code (E074)
@@ -970,14 +1042,14 @@ fn main(): int {
 ```
 
 ```text
-── warning at line 5, col 5 [E074 · control flow]
+── warning at line 5, col 5 [E074 · unreachable block]
 
-  Warning: The code in 'while.end' inside 'pick' can never be reached!
+  I can never reach the code in `while.end` inside `pick`.
 
-  Hint: Check your 'if' conditions. Are they impossible to be true, or did you 'return' before this block?
+  Hint: Check whether an `if` condition can never be true, or whether a `return` comes before this block.
 
   5 │     return 2;
-    │     ^~~~~~ Here!
+    │     ^~~~~~ this block never runs
 
   Run `turf --explain E074` for more details.
 ```
@@ -1002,11 +1074,14 @@ fn main(): int {
 ```
 
 ```text
-── error at line 1, col 1 [E009 · control flow]
+── error at line 1, col 1 [E009 · missing return]
 
-  The function 'pick' promises to give back a result, but sometimes it doesn't!
+  I found a path through `pick` that ends without returning a result.
 
-  Hint: Make sure every path in your function (like inside 'if' and 'else') has a 'return' statement.
+  Hint: Add a `return` statement to every path in `pick`, including each `if` and `else` branch.
+
+  1 │ fn pick(flag: bool): int {
+    │ ^~ a path through this function ends without a `return`
 ```
 
 A function returning `void` is never checked for this.
@@ -1027,12 +1102,17 @@ fn main(): int {
 ```
 
 ```text
-── error at line 6, col 12 [E008 · undeclared variable]
+── error at line 6, col 12 [E008 · variable read before it has a value]
 
-  Oops! You're using 'y' (type 'int') before it has a value.
-  Note: declared here (line 2, col 5)
+  I cannot use `y` (type `int`) before it has a value.
 
-  Hint: Make sure every path assigns to 'y' before you use it.
+  Hint: Assign to `y` on every path before it is used.
+
+  2 │     mut y: int;
+    │     - declared here
+    ┊
+  6 │     return y;
+    │            ^ read here before it has a value
 ```
 
 The same analysis requires a struct's `new` method to assign every field on every path (E049), described in [Structs & Enums](structs_and_enums.md#constructing-a-struct).
@@ -1051,25 +1131,36 @@ fn main(): int {
 ```
 
 ```text
-── warning at line 2, col 5 [E161 · control flow]
+── warning at line 2, col 5 [E161 · initial value never read]
 
-  Warning: The initial value of 'x' is never read: every path assigns 'x' again before reading it.
+  The initial value of `x` is never read, because every path assigns `x` again before reading it.
 
-  Hint: Declare it without a value, 'mut x: int;' (every read still has to come after an assignment), or read the initial value before the next assignment.
+  Hint: Declare it without a value, `mut x: int;` (every read still has to come after an assignment), or read the initial value before the next assignment.
 
-── warning at line 4, col 5 [E163 · control flow]
+  2 │     mut x: int = 5;
+    │     ^~~ this initial value is never read
 
-  Warning: Variable 'unused' is declared but never used.
+── warning at line 4, col 5 [E163 · unused variable]
+
+  Variable `unused` is declared but never used.
+
+  Hint: Remove `unused`, or use it. If it is unused on purpose, rename it `_unused`, or pass `--allow E163`.
+
+  4 │     mut unused: int = 1;
+    │     ^ this variable is never used
 ```
 
 The first `x` (`5`) is a declaration's initializer that is overwritten before it is read; the second (`10`) is read by `x + 1`, so it is not reported. A store that is not a declaration's initializer gets the plain dead-store wording:
 
 ```text
-── warning at line 3, col 5 [E160 · control flow]
+── warning at line 3, col 5 [E160 · dead store]
 
-  Warning: Variable 'x' is assigned but the value is never read (dead store).
+  The value assigned to `x` is never read.
 
-  Hint: The assigned value is overwritten or the function returns before this variable is ever used. Remove the assignment or use the value.
+  Hint: Remove the assignment, or read `x` before it is overwritten or the function returns. To silence this on purpose, pass `--allow E160`.
+
+  3 │     x = 1;
+    │       ^ this value is never read
 ```
 
 Writing one element of an array, `x[0] = 1;`, keeps the rest of the array, so it does not make an earlier store to the array dead. An array that is written but never read gets one dead-store warning, at the write.
@@ -1092,7 +1183,7 @@ fn main(): int {
 }
 ```
 
-This prints three warnings: one on the function (`contains a loop with no exit path. This will run forever.`), one on the loop (`This looks like an infinite loop! The condition is always true and the body has no 'break', 'continue', or 'return'.`) and the unreachable `return x;` (E074). A `while` whose condition is not a literal is never reported this way. A server's accept loop is a legitimate infinite loop; the warning is advisory.
+This prints three warnings: one on the function (`contains a loop with no exit path, so it will run forever.`), one on the loop (`This loop looks infinite: its condition is always true and its body has no `break`, `continue` or `return`.`) and the unreachable `return x;` (E074). A `while` whose condition is not a literal is never reported this way. A server's accept loop is a legitimate infinite loop; the warning is advisory.
 
 ### Infinite recursion (E010)
 
@@ -1110,11 +1201,14 @@ fn main(): int {
 ```
 
 ```text
-── error at line 1, col 1 [E010 · control flow]
+── error at line 1, col 1 [E010 · recursion with no base case]
 
-  Infinite recursion detected in 'foo'.
+  I found infinite recursion in `foo`.
 
-  Hint: Every recursive function needs a base case — a path that returns without calling itself.
+  Hint: Add a base case, a path that returns without calling itself.
+
+  1 │ fn foo(): int {
+    │ ^~ this recursion has no way to stop
 
   Worth reading in full -- run `turf --explain E010` before you patch this one.
 ```
@@ -1145,15 +1239,21 @@ fn main(): int {
 ```
 
 ```text
-── error at line 12, col 14 [E018 · memory error]
+── error at line 12, col 14 [E018 · use after free]
 
-  Oops! You're using memory from 'p' after it was freed.
-  Note: freed here (line 11, col 13)
+  I cannot use the memory of `p` after it was freed.
+
+  Hint: Stop using `p` after it is released by `free()` or by a function declared `@ownership(releases: ...)`, or set the pointer to `null` after releasing it.
+
+  11 │         free(p);
+     │             - freed here
+  12 │         r = p[0];
+     │              ^ used here after it was freed
 
   Worth reading in full -- run `turf --explain E018` before you patch this one.
 ```
 
-When only some paths release the allocation, the same findings are warnings (`'p' may already have been freed on some path reaching this use.`). The analysis is not a full alias analysis: it follows plain variables and copies between them, and an allocation that escapes into a struct or another function is not tracked. Memory management is covered in [Memory & Safety](memory_and_safety.md).
+When only some paths release the allocation, the same findings are warnings (`` `p` may already have been freed on some path reaching this use. ``). The analysis is not a full alias analysis: it follows plain variables and copies between them, and an allocation that escapes into a struct or another function is not tracked. Memory management is covered in [Memory & Safety](memory_and_safety.md).
 
 ### Constant array indexes (E001)
 
@@ -1172,7 +1272,7 @@ An index that depends on a parameter or on input is checked at run time instead 
 
 ### Complexity and other warnings
 
-A function whose cyclomatic complexity (the number of independent paths through it) is above 15 gets an advisory warning, `Function 'f' has cyclomatic complexity 17 (threshold: 15). Consider breaking it into smaller functions.` Sixteen separate `if` statements, as here, are enough:
+A function whose cyclomatic complexity (the number of independent paths through it) is above 15 gets an advisory warning, `` Function `f` has cyclomatic complexity 17, above the threshold of 15. `` Sixteen separate `if` statements, as here, are enough:
 
 ```turflang
 fn f(x: int): int {
@@ -1204,20 +1304,23 @@ A few more warnings come from simpler checks that look at one expression or stat
 
 | Code | Warning | Fires on |
 |---|---|---|
-| E167 | `You're using '/' with zero — this will crash at runtime!` | a literal `0` as the divisor of `/` or `%` |
-| E156 | `You're assigning 'k' to itself — this doesn't do anything!` | `k = k;` |
-| E166 | `You're comparing 'x' with itself!` | `x == x`, `x < x` and so on |
-| E155 | `This comparison is redundant!` | `x == true`, `x != false` |
-| E152 | `Just so you know, you're creating a new 'n' that hides an older one!` | a local that shadows another in an enclosing scope |
-| E164 | `The loop variable 'i' is never changed by this loop's 'step' or its body, so it will loop forever` | a `for` whose variable nothing advances |
-| E162 | `This loop never reaches its end` | a `for` range whose step moves away from its end |
-| E165 | `The 'then' branch is empty` | an `if` or `else` with no statements |
-| E168 | `Both branches of this 'if' do the same thing!` | an `if` and `else` with identical bodies |
-| E154 | `Empty compare statement has no arms and no 'otherwise'` | a `compare` with no arm |
-| E169 | `'f' is declared to return a fallible type ('!T') but never actually returns an error.` | a `!T` function with no error path |
-| E153 | `Machine 'M' declares state 'S' with no incoming transitions.` | a state no edge leads into (expected for the initial state) |
-| E170, E171 | `Possible use after free`, `Possible double free` | a pointer used or freed again after `mem::free` on some path |
-| E172 | `'old_fn' is deprecated: use new_fn() instead` | a call to an item marked `@deprecated("...")` |
+| E167 | `I found '/' used with zero, which will crash at runtime.` | a literal `0` as the divisor of `/` or `%` |
+| E156 | `` `k` is assigned to itself, so this does nothing. `` | `k = k;` |
+| E166 | `` `x` is compared with itself, so the result is always true (unless the value can be NaN). `` | `x == x`, `x < x` and so on |
+| E155 | `` `b == true` is the same as `b`. `` | `x == true`, `x != false` |
+| E152 | `` This new `n` hides an older one. `` | a local that shadows another in an enclosing scope |
+| E164 | `` The loop variable `i` is never changed by this loop's `step` or its body, ... `` | a `for` whose variable nothing advances |
+| E162 | `This loop never reaches its end: 5..1 counts down, but the step counts up.` | a `for` range whose step moves away from its end |
+| E165 | `` The `then` branch is empty. `` | an `if` or `else` with no statements |
+| E168 | `` Both branches of this `if` do the same thing. `` | an `if` and `else` with identical bodies |
+| E154 | `` This `compare` has no `matches` arm and no `otherwise`, so it does nothing. `` | a `compare` with no arm |
+| E169 | `` `f` is declared to return a fallible type (`!T`) but never actually returns an error. `` | a `!T` function with no error path |
+| E153 | `` Machine `M` declares state `S` with no incoming transitions. `` | a state no edge leads into (expected for the initial state) |
+| E170, E171 | `` `p` may already have been freed on some path reaching this use. ``, `` `p` may already have been freed on some path reaching this call. `` | a pointer used or freed again after `mem::free` on some path |
+| E172 | `` `old_fn` is deprecated: use new_fn() instead `` | a call to an item marked `@deprecated("...")` |
+| E195 | `` The body of this `while` loop is empty. `` | a loop with no statements and no comment in its body (a `while` or `do` whose condition calls a function does not warn) |
+| E196 | `` The body of `reset` is empty. `` | a `void` function with no statements and no comment in its body, other than a `@test` function |
+| E197 | `` This `recover` block is empty, so the error is dropped without a trace. `` | a `recover ... run` block with no statements and no comment |
 
 Each can be [allowed or denied](#lint-levels) by its code.
 

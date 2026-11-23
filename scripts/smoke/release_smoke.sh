@@ -97,7 +97,8 @@ cat "$REL"/*.sha256 > "$REL/checksums.txt"
 LISTING=$(tar -tzf "$REL/$ARCHIVE_FILE")
 TOP=$(printf '%s\n' "$LISTING" | head -n 1 | cut -d/ -f1)
 for want in bin/turf bin/turfc lib/libturfrt.a lib/std/core/char.tr docs/errors/codes/E001.txt \
-            docs/slm/syntax_card.txt share/turf/examples/plotter/turf.toml LICENSE README.md; do
+            docs/slm/syntax_card.txt share/turf/examples/plotter/turf.toml share/turf/diagnostic-registry.json \
+            LICENSE README.md; do
   printf '%s\n' "$LISTING" | grep -qx "$TOP/$want" && pass "contains $want" || fail "archive lacks $want"
 done
 if [ "$SMART" = 1 ]; then

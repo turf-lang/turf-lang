@@ -1,0 +1,10 @@
+// LEC-003: one name can bind one value per pattern. Expected: E092.
+struct P { x: int, y: int }
+@test(compile_error, E092, "I found `x` bound twice in the same pattern")
+fn rejects_pattern_binds_name_twice(): void {
+    mut p: P = P::default();
+    compare p {
+        matches P { x, y: x }: return x; done
+        otherwise: return 0;
+    }
+}

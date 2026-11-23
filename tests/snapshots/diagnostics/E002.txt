@@ -1,0 +1,13 @@
+tests/48_unsized_array_params/fail_slice_bound_not_int.tr (1 error)
+
+── error at line 6, col 16 [E002 · index must be an integer]
+
+  A slice bound of `int[3]` must be an `int`, and I found a `double`.
+
+  Hint: Convert the bound with `to int`, e.g. `arr[(x to int)..3]`.
+
+  6 │     immut t = a[1.5..];
+    │                ^ this index is not an integer
+
+  Run `turf --explain E002` for more details.
+

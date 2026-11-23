@@ -1,0 +1,47 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+// SEM-004 (F-INIT-1, FREEZE.md §6.4): a struct declared without an
+// initializer is statically unassigned, exactly like a primitive local --
+// the eager zero-init Mechanism B used to give every struct (see
+// 07_default_init.tr) is removed. Reading a field before any assignment is
+// DefiniteAssignmentError (E008); `Point::default()` is the explicit,
+// mechanical replacement.
+struct Point {
+    x: int,
+    y: int
+}
+
+@test(compile_error, E008, "")
+fn rejects_struct_use_before_init(): void {
+    mut p: Point;
+    if p.x == 0 {
+        return;
+    }
+}
+
+// Regression test: an unknown/misspelled type name in a plain variable
+// declaration must be rejected with a clean "unknown type" diagnostic.
+// Before this fix, Resolver::visitVarDecl() never called
+// validateNamedType() at all (struct fields, function params, and return
+// types already did) -- `mut x: NoSuchStruct = 5;` compiled with no
+// "unknown type" diagnostic; it only reached the TypeChecker's ordinary
+// type-mismatch path ("Cannot initialise 'NoSuchStruct' variable 'x' with
+// value of type 'int'"), which is misleading since it implies NoSuchStruct
+// is a real type that just doesn't match int.
+
+@test(compile_error, E042, "")
+fn rejects_unknown_type_var_decl(): void {
+    mut x: NoSuchStruct = 5;
+}
+
+// A `void` function produces no value. Initialising a variable from one is E067
+// ("a void value can't be used here"), not the E066 "type mismatch" it used to
+// be reported as -- there is no type to convert, there is no value at all.
+fn log_it(msg: string): void {
+}
+
+@test(compile_error, E067, "I cannot store a `void` in `r`, which is a `string`.")
+fn rejects_void_value_initializer(): void {
+    mut r: string = log_it("hello");
+}

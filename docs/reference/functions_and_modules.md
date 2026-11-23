@@ -32,18 +32,21 @@ fn main(): int {
 }
 ```
 
-The shape is `fn name(param: Type, ...): ReturnType { body }`.
+The shape is `fn name(param: Type, ...): ReturnType { body }`. `function` may
+be written for `fn` where a declaration starts (`function add(a: int, b: int):
+int`); everywhere else `function` is an ordinary name, so a variable, field or
+parameter may be called `function`.
 
 - The return type is always written. A function that returns nothing says
-  `void`; leaving the `: type` out is `E106` ("Expected ':' followed by return
-  type after parameter list").
+  `void`; leaving the `: type` out is `E106` ("I expected a `:` followed by a
+  return type after the parameter list").
 - A function whose return type is not `void` must return on every path
   (`E009`: "The function 'g' promises to give back a result, but sometimes it
   doesn't!"). A returned value must match the declared type (`E064`).
 - A parameter's type can never be `void` (`E112`), and two parameters cannot
   share a name (`E033`).
 - A function is declared at the top level of a file. A function inside a
-  function body is `E038` ("Nested function definitions are not allowed").
+  function body is `E038` ("I cannot declare `inner` inside another function").
 - Order does not matter: a function can call one declared further down the
   file, and two functions can call each other.
 - `main` takes no parameters and returns `int` (the exit status) or `void`
@@ -53,7 +56,7 @@ The shape is `fn name(param: Type, ...): ReturnType { body }`.
   [Generics and operators](generics_and_operators.md).
 
 A call that passes the wrong number of arguments is `E044`; one whose argument
-types match nothing is `E056` ("No matching overload!"); calling a name that is
+types match nothing is `E056` ("No overload of `f` takes the argument types (string)"); calling a name that is
 not a function is `E041`.
 
 ### Parameters: by value and by reference
@@ -142,7 +145,7 @@ struct Counter { n: int }
 fn Counter.new(start: int): void { self.n = start; }
 fn Counter.bump(by: int): void { self.n += by; }
 fn Counter.get(): int { return self.n; }
-fn Counter.zero() static: Counter { return Counter::default(); }
+static fn Counter.zero(): Counter { return Counter::default(); }
 
 fn main(): int {
     mut c: Counter = Counter::new(5);
@@ -156,9 +159,11 @@ fn main(): int {
 
 - An **instance method** gets `self` implicitly and is called with `.` on a
   value: `c.bump(2)`. Inside it, `self.field` reads and writes the receiver.
-- A **static method** puts `static` after the parameter list, before the
-  return type, has no `self`, and is called as `Counter::zero()`. Calling it
-  through a value is `E052`.
+- A **static method** puts `static` in front of `fn` (`static fn
+  Counter.zero(): Counter`, `pub static fn` when public), has no `self`, and
+  is called as `Counter::zero()`. Calling it through a value is `E052`.
+  `static` after the parameter list declares the same method and is `E175`
+  (allow by default), whose `Fix:` moves the word.
 - `new` and `default` are the construction names. `Counter::default()`
   zero-fills; `Counter::new(args)` runs the method named `new` (without a
   `fn T.new`, `T::new(...)` is `E050`). `new` is never `static`, and `default`
@@ -303,7 +308,8 @@ What can be used as a value:
   function type can be written or inferred: `mut g = double_it;` gives `g` the
   type `fn(int): int`.
 - **Not an overloaded name.** If more than one overload has the name, there is
-  no single signature to take, and it is `E125` ("'combine' is overloaded"):
+  no single signature to take, and it is `E125` ("I cannot use `combine` as a function value, because it is
+  overloaded and has no single signature"):
 
   <!-- doc-example: fails E125 -->
   ```turflang
@@ -339,13 +345,13 @@ What can be used as a value:
   direct call can pass (`E137`); write a plain function that calls it and use
   that.
 - **Not a qualified name.** `io::printline` and `MathUtil::square` can be
-  called but not used as values (`E137`, "Not a value!"). Wrap the call in a
+  called but not used as values (`E137`, "I cannot use `io::printline` as a value, because a qualified function name can only be called"). Wrap the call in a
   function of your own, or import the plain name:
 
   <!-- doc-example: fails E137 -->
   ```turflang
   struct MathUtil {}
-  fn MathUtil.square(x: int) static: int { return x * x; }
+  static fn MathUtil.square(x: int): int { return x * x; }
 
   fn main(): int {
       mut g = MathUtil::square;
@@ -408,8 +414,11 @@ A literal is a receiver like a variable of its type: `21.double_it()` above,
 `4.is_even()`, `"hello".is_long()`. A minus sign is not part of an integer
 literal, and a call binds tighter than it, so `-1.abs()` is `-(1.abs())`,
 which is `-1`; write `(-1).abs()` for the absolute value of minus one. A
-decimal literal reads more clearly in parentheses, `(1.5).floor()`, than as
-`1.5.floor()`, where the eye has to decide which dot ends the number.
+decimal literal is written in parentheses, `(1.5).floor()`: in `1.5.floor()`
+the eye has to decide which dot ends the number. The unparenthesized form
+compiles to the same program and is warning E174 (it starts at `allow`;
+`--warn E174` turns it on), whose `Fix:` writes the parentheses in. TurfLang
+3.0 makes it an error.
 
 How the call is resolved:
 
@@ -439,8 +448,9 @@ The two sides of a UFCS call are matched differently:
   as written (`Box<string>`), so `b.f()` reaches `fn f(b: Box<string>)` and
   `fn<T> f(b: Box<T>)`.
 
-Failures: no candidate for the receiver is `E056` ("No visible 'describe'
-overload accepts a 'char' receiver via UFCS"):
+Failures: no candidate for the receiver is `E056` ("No visible `describe` takes a
+`char` as its receiver: a call with `.` matches the receiver's type exactly and
+never converts it"):
 
 <!-- doc-example: fails E056 -->
 ```turflang
@@ -454,7 +464,7 @@ fn main(): int {
 ```
 
 If two candidates from different modules match exactly and are equally good, the call is
-`E125` ("Ambiguous UFCS call"); name the module's function with `::` to choose.
+`E125` ("More than one visible function `describe_int` takes this receiver, so I cannot choose one"); name the module's function with `::` to choose.
 One tie is broken for you: when the exact matches include one declared in the
 receiver type's own prelude module (`double` for a `double`, `strings` for a
 `string`), that one wins.
@@ -483,7 +493,7 @@ pub extern fn my_alloc(size: int): void*;
 ```
 
 `pub @ownership(...)` is `E087`. An annotation can only precede a `fn` or an
-`extern fn`; before anything else it is `E110` ("Expected 'fn' or 'extern fn'
+`extern fn`; before anything else it is `E110` ("I expected `fn` or `extern fn`
 after an annotation"). A name the compiler does not know, or an argument that
 does not fit the declaration, is `E146`; a misspelling gets a "Did you mean"
 suggestion. An annotation is never silently ignored.
@@ -578,7 +588,7 @@ fn main(): int {
 ```
 
 (The `@ffi` lines, described next, bind these names to C's `malloc` and
-`free`; the checks care only about the `@ownership` lines.) Releasing `buf` twice is then `E017` ("Double free detected for 'buf'"), and
+`free`; the checks care only about the `@ownership` lines.) Releasing `buf` twice is then `E017` ("I found a second free of `buf`"), and
 using it after the release is `E018`. A release on only some paths leaves a
 warning, "may already have been freed", instead of an error. `@ownership`
 cannot yet be put on an instance method (`E146`). See
@@ -661,8 +671,8 @@ A file of tests needs no `main`. A normal build checks every test and leaves it
 out: the object is identical to the program's without the tests. A test has
 the privileges of its file, so it can call a private function beside it.
 Nothing else may call a test or use it as a value: that is `E173`
-("'name' is a test: `turf test` runs it, and nothing else may call it or use it
-as a value"). Move what a test and other code share into an ordinary function,
+("I cannot use the test `name`: `turf test` runs it, and nothing else may call it or use it
+as a function value"). Move what a test and other code share into an ordinary function,
 and call that from both. `turf test` (and
 `turfc --test`) builds a file with a line starting `@test` once, runs each test
 in a process of its own, and prints one line per test:
@@ -742,7 +752,7 @@ checked like any other, but the errors with the expected code belong to the
 test: they are not printed and the build succeeds. The test is never emitted.
 
 ```turflang
-@test(compile_error, E041, "Unknown function")
+@test(compile_error, E041, "function named")
 fn an_undeclared_function_is_rejected(): void {
     undeclared(1);
 }
@@ -793,9 +803,50 @@ fn the_old_name_still_works(): void {
 }
 ```
 
+#### Options
+
+After the outcome, options say how the test is run (TDP-2-026). Each is
+written once at most, in any order, as `name: value`, except `serial`, a bare
+word. Values are literals only.
+
+| Option | Value | Meaning |
+|---|---|---|
+| `skip: "reason"` | a string, not empty | Compiled and checked, not run. Reported as `SKIPPED (reason)`, listed under `Skipped Tests` and counted apart from passes and failures. A `compile_error` test with `skip:` is still compiled. |
+| `timeout: 2000` | milliseconds, a whole number more than 0 | The test fails if it has not ended within that time; its process (and any it started) is killed, and the file's other tests still run. Without it the run's `--timeout` applies. |
+| `levels: all`, `levels: [O0, O2]` | `all` is O0, O1, O2 and O3; a list names levels from `O0` … `O3` and `Os` | The file is built at each level and the test runs at each, reported as `name [-O2]`. The first level that fails ends the test, and the report names it. |
+| `stdout: "text"` | a string | What the test prints to stdout is exactly `text`. Without it, output is not checked. |
+| `tag: "net"`, `tag: ["net", "slow"]` | a string or a list of strings, none empty | `turfc --test --tag net` (`turf test --tag net`) runs only the `@test` functions with one of the tags given; `--skip-tag net` leaves out those with it. A file that is a test of its own has no tags, so `--tag` leaves it out. |
+| `serial` | none | The test never runs beside another. The tests of one file run one at a time, so this changes nothing yet; it marks the tests that must stay so. |
+
+```turflang
+import test;
+
+@test(skip: "waits for the new rounding rules")
+fn rounds_down(): void {
+    test::assert(7 / 2 == 4, "not yet");
+}
+
+@test(stdout: "3\n", levels: all, tag: ["io", "fast"])
+fn prints_three(): void {
+    io::printline(3);
+}
+
+@test(panic, "Division by zero", timeout: 2000, serial)
+fn dividing_by_zero_panics(): void {
+    immut zero: int = 0;
+    io::printline(10 / zero);
+}
+```
+
+`timeout:` and `stdout:` need a test that runs: a `compile_error` test with
+either is `E146`. The option names mean this only inside `@test(...)`; they
+reserve nothing. There are no retries and no setup hooks: a test calls its own
+helper.
+
 #### Mistakes in a `@test`
 
-A `@test` that cannot be understood is `E146`, with a hint listing the outcomes:
+A `@test` that cannot be understood is `E146`, with a hint listing the outcomes
+and the options:
 
 <!-- doc-example: fails E146 -->
 ```turflang
@@ -804,15 +855,11 @@ fn misspelt_outcome(): void {
 }
 ```
 
-The message names the rule: `'x' is not an outcome of '@test'`, `'compile_error'
-is an outcome, and an outcome is the first argument`, `'E999' is not a code the
-compiler has`, `'E172' is a warning's code, not an error's` (and the reverse),
-`A test takes no parameters`, `A test returns 'void' or '!void', not 'int'`,
-`A method cannot be a test`, `'main' cannot be a test`, `'@test' has no option
-'skip:'`, `'256' is not an exit status`, `A function has one '@test'`, `A test
-with an 'error' outcome returns '!void'`, `Error type 'T' has no variant 'V'` and
-`'T' is not an error type`. A `@test` function nested inside another function is
-`E038`; a call to a test is `E173`. `@test` takes no per-test options: `skip:`, `timeout:` and the like are `E146`.
+The message names the rule: `` `x` is not an outcome of `@test` ``, `` `compile_error` is an outcome, and an outcome is the first argument ``, `` `E999` is not a code the compiler has ``, `` `E172` is a warning's code, not an error's `` (and the reverse),
+`` A test takes no parameters ``, `` A test returns `void` or `!void`, not `int` ``,
+`` I cannot use a method as a test, because `@test` marks a top-level function ``, `` I cannot use `main` as a test, because it is the program's entry point ``, `` `@test` has no option `retries:` ``, `` `@test` has `skip:` twice ``, `` `timeout:` takes a whole number of milliseconds greater than 0 ``, `` `256` is not an exit status ``, `` A function has one `@test` ``, `` A test with an `error` outcome returns `!void` ``, `` The error type `T` has no variant `V` `` and
+`` I cannot use `T` in `@test`, because it is not an error type ``. A `@test` function nested inside another function is
+`E038`; a call to a test is `E173`.
 
 ---
 
@@ -824,7 +871,7 @@ program (its module is `main`, a name you never write); every file it imports
 is another module.
 
 A module is made of top-level declarations: functions, structs, enums, errors,
-machines, `extern fn`s, constants (`export immut`) and its own `import`s. Code
+machines, `extern fn`s, constants (`pub immut`) and its own `import`s. Code
 other than declarations does not run at the top level.
 
 ### Import forms
@@ -848,14 +895,14 @@ import list::List;     // List<int>, List::default()
 
 A file may write `m::` only for a module it imports itself. Importing `json`
 (which imports `list` for its own use) does not let your file write
-`list::List`: that is `E145` ("Module 'list' is not imported in this file"),
+`list::List`: that is `E145` ("I cannot find an import of module `list` in this file"),
 and the message gives the line to add. The prelude modules (section 7) need no
 import. The rule applies only to spelling `m::name`: you can still hold, pass
 and return a value whose type comes from a module you did not import, call its
 methods, call functions on it through the dot (UFCS), and use its operators.
 
 A bare import of the same name from two modules is an error at the second
-import (`E024`: "'Node' is imported from two different modules"); qualify one
+import (`E024`: "I found `Node` imported from two different modules"); qualify one
 of them instead. A name that does not exist in the module, or a module that
 cannot be found (`E027`), is reported at the import.
 
@@ -874,7 +921,7 @@ pub struct Point { pub x: int, pub y: int }
 
 pub fn Point.len(): int { return self.x + self.y; }
 pub fn origin(): Point { return Point::default(); }
-export immut LIMIT: int = 10;
+pub immut LIMIT: int = 10;
 
 // main.tr
 import shapes;
@@ -902,11 +949,11 @@ Counter::new(1)                // construction
 shapes::Point::default()       // module, type, then function
 ```
 
-- `io.printline("x")`: `E048`, "'.' can't be used here -- 'io' is a module".
-- `MathUtil.square(5)` on a type name: `E048`, "'MathUtil' is a struct type,
-  not an instance".
-- `p::get()` where `p` is a variable: `E029`, "'p' is a variable, not a type
-  or module".
+- `io.printline("x")`: `E048`, "I cannot use `.` on `io`, which is a module, not an instance".
+- `MathUtil.square(5)` on a type name: `E048`, "I cannot use `.` on `MathUtil`,
+  which is a struct type, not an instance".
+- `p::get()` where `p` is a variable: `E029`, "`p` is a variable, not a type
+  or module, so I cannot use `::` on it".
 - Calling a static method through a value, `m.square(2)`: `E052`.
 
 A local variable named like a module shadows it, by the ordinary scoping
@@ -920,13 +967,13 @@ fn main(): int {
 }
 ```
 
-### Constants: `export immut`
+### Constants: `pub immut`
 
-A module shares a constant with `export immut`:
+A module shares a constant with `pub immut`:
 
 ```turflang
-export immut LIMIT: int = 10;
-export immut RATIO: double = 0.5;
+pub immut LIMIT: int = 10;
+pub immut RATIO: double = 0.5;
 
 fn main(): int {
     printline(LIMIT * 2);      // 20
@@ -934,19 +981,22 @@ fn main(): int {
 }
 ```
 
-An `export` constant is always public (it is its own `pub`, so `pub export` is
-`E087`); other modules reach it as `m::LIMIT` or by name after an import. It is
-`immut` only (`export mut` is an error), appears only at the top level, and
+A `pub immut` constant is public: other modules reach it as `m::LIMIT` or by
+name after an import. A top-level `immut` without `pub` is private to its
+module, and another module that uses it gets `E088`. `export immut` means the
+same as `pub immut` and is `E176` (allow by default), whose `Fix:` writes `pub`;
+`pub export` is `E087`. A constant is `immut` only (`export mut` is `E021`, a
+top-level `mut` is `E087`), appears only at the top level, and
 its value must be a literal the compiler can fold: every use is replaced by the
 value, and there is no storage behind it. A number may start with one `-`
-(`export immut FLOOR: int = -40;`), and an integer literal is accepted for a
-`double` constant (`export immut ONE: double = 1;` is `1.0`); anything more is
+(`pub immut FLOOR: int = -40;`), and an integer literal is accepted for a
+`double` constant (`pub immut ONE: double = 1;` is `1.0`); anything more is
 `E022`.
 
 ### Circular imports
 
 If module `a` imports `b` and `b` imports `a`, or any longer loop does, the
-program is rejected with `E019` ("Circular import detected"), and the message
+program is rejected with `E019` ("I found a circular import"), and the message
 draws the loop. Two modules importing a third is not a cycle.
 
 ---
@@ -961,11 +1011,10 @@ standard library's, or be replaced by it. The error fires only when the name is
 actually imported by a file that can see both.
 
 ```text
-Module 'list' is ambiguous: 2 different files answer to that name.
+I found 2 different files that answer to the module name `list`.
     standard library  <install>/lib/std/collections/list.tr
     next to main.tr   ./list.tr
-  Hint: A module may not share its name with a standard-library module. Rename
-  ./list.tr (for example to 'my_list.tr') and import it by the new name.
+  Hint: Rename ./list.tr (for example to `my_list.tr`) and import it by the new name. A module may not share its name with a standard-library module.
 ```
 
 **For a single file** (`turf run file.tr`, `turfc file.tr`), the places are:
@@ -1020,8 +1069,8 @@ qualified (`math::PI`; a bare `PI` is `E040`), and methods are never bare.
 
 The other six modules are not flattened into bare names: their functions are
 reached as methods (`c.is_digit()`, `n.is_even()`, `s.length()`) or qualified
-(`strings::length(s)`). Calling `is_digit(c)` bare is `E041` ("Unknown
-function"); `int`, `double`, `bool` and `char` are also type keywords, so their
+(`strings::length(s)`). Calling `is_digit(c)` bare is `E041` ("I cannot find a function
+named `is_digit`"); `int`, `double`, `bool` and `char` are also type keywords, so their
 functions are reached by UFCS only, never as `int::is_even(n)`.
 
 ```turflang
@@ -1093,7 +1142,7 @@ Rules:
   the states of a `pub machine` are public; there is no per-variant `pub`.
 - **Operators follow their operand types.** An `operator` is usable wherever
   its operand types are, so `pub operator` is `E087`: make the type `pub`.
-- **`export immut` is its own `pub`.**
+- **`pub immut` is its own `pub`.**
 - `T::default()` is allowed from any module for any visible type: it only
   zero-fills.
 - A module's own code always sees its own private names, and a program's main
@@ -1114,10 +1163,10 @@ Used from another file, `p.x`, `p.len()`, `shapes::origin()` and
 message names the declaration, the file to edit and the public alternatives:
 
 ```text
-shapes::helper()            // E088: Function 'helper' is private to module 'shapes'.
-p.cache                     // E088: Field 'Point.cache' is private to module 'shapes'.
-p.refresh()                 // E088: Method 'Point.refresh' is private to module 'shapes'.
-shapes::Node::default()     // E088: Type 'Node' is private to module 'shapes'.
+shapes::helper()            // E088: I cannot use the function `helper`, which is private to module `shapes`.
+p.cache                     // E088: I cannot use the field `Point.cache`, which is private to module `shapes`.
+p.refresh()                 // E088: I cannot use the method `Point.refresh`, which is private to module `shapes`.
+shapes::Node::default()     // E088: I cannot use the type `Node`, which is private to module `shapes`.
 import shapes::helper;      // E088, at the import
 ```
 
@@ -1133,7 +1182,7 @@ module does export; the hint lists those.
 return type, a `pub` method's, or a `pub` field's type may not mention a type
 of the same module that is not `pub`, anywhere in it (`!Hidden`, `&Hidden`,
 `List<Hidden>`): an importer would receive values it cannot name. That is
-`E089` ("Public function 'make' exposes the private type 'Hidden'"), reported
+`E089` ("I cannot let the public function `make` expose the private type `Hidden`"), reported
 in the module that declares it. Make the type `pub`, or drop `pub` from the
 item. A private type may be used freely inside a `pub` function's body, and
 in a single-file program (nobody imports it) the rule never applies.
@@ -1210,7 +1259,7 @@ fn main(): int {
 A bare name `Node` means this file's own type, or one it brought in by name
 (`import m::Node;`, `m::[...]`, `m::[*]`); `m::Node` always names the module's
 type. If a bare name could mean two types, the use is `E085`
-("'Node' is ambiguous here -- it could mean more than one type"), naming both.
+("`Node` could mean more than one type here"), naming both.
 There is no rule that the local one wins. Write the imported one qualified and
 leave it out of the import (list the names you need instead of `[*]`):
 
@@ -1231,35 +1280,35 @@ arguments is an error.
 
 | Situation | Code | Message |
 |---|---|---|
-| Missing `: type` after the parameter list | `E106` | Expected ':' followed by return type |
-| `void` parameter | `E112` | 'void' cannot be a parameter's type |
-| Function declared inside a function | `E038` | Nested function definitions are not allowed |
+| Missing `: type` after the parameter list | `E106` | I expected a `:` followed by a return type after the parameter list |
+| `void` parameter | `E112` | I cannot give a parameter the type `void` |
+| Function declared inside a function | `E038` | I cannot declare `inner` inside another function |
 | Same name and parameters declared twice | `E011` | Duplicate function definition |
-| Non-void function without a return on every path | `E009` | promises to give back a result |
-| Wrong number of arguments | `E044` | called with N arguments |
-| No overload accepts the argument types | `E056` | No matching overload! |
-| Unknown function | `E041` | Unknown function |
-| Overloaded name used as a value | `E125` | is overloaded |
-| `m::f` or `T::method` used as a value | `E137` | Not a value! |
-| Two UFCS candidates match equally | `E125` | Ambiguous UFCS call |
-| `io.printline()`, `Type.static()` | `E048` | '.' can't be used here |
-| `variable::member` | `E029` | is a variable, not a type or module |
-| Static method called through a value | `E052` | is a static method |
-| `T::new()` with no `new` declared | `E050` | has no constructor |
-| `caller_location` in an unmarked function | `E084` | can only be used inside a function declared '@caller_location' |
-| Bare type name could mean two types | `E085` | is ambiguous here |
-| `pub` where it does nothing | `E087` | 'pub' can't be applied |
-| Private function, type, field or method used from another module | `E088` | is private to module |
-| `pub` item exposes a private type | `E089` | exposes the private type |
-| Two files answer to one module name | `E090` | is ambiguous |
-| Module exists but this package cannot import it | `E091` | not a dependency / internal to package |
-| Import cycle | `E019` | Circular import detected |
-| Module not found | `E027` | Could not find module |
-| `m::` written without `import m;` | `E145` | is not imported in this file |
-| Same name imported from two modules | `E024` | imported from two different modules |
-| Unknown annotation, or one that does not fit | `E146` | Unknown annotation |
-| Annotation before something other than a function | `E110` | Expected 'fn' or 'extern fn' after an annotation |
-| Double free of an `@ownership` pointer | `E017` | Double free detected |
-| Use after release | `E018` | using memory after it was freed |
+| Non-void function without a return on every path | `E009` | I found a path through `f` that ends without returning a result |
+| Wrong number of arguments | `E044` | `f` takes N arguments, and this call passes M |
+| No overload accepts the argument types | `E056` | No overload of `f` takes the argument types (...) |
+| Unknown function | `E041` | I cannot find a function named `f` |
+| Overloaded name used as a value | `E125` | I cannot use `f` as a function value, because it is overloaded and has no single signature |
+| `m::f` or `T::method` used as a value | `E137` | I cannot use `io::printline` as a value, because a qualified function name can only be called |
+| Two UFCS candidates match equally | `E125` | More than one visible function `f` takes this receiver, so I cannot choose one |
+| `io.printline()`, `Type.static()` | `E048` | I cannot use `.` on `io`, which is a module, not an instance |
+| `variable::member` | `E029` | `p` is a variable, not a type or module, so I cannot use `::` on it |
+| Static method called through a value | `E052` | `square` is a static method, so I cannot call it through an instance with `.` |
+| `T::new()` with no `new` declared | `E050` | I cannot call `Point::new(...)`, because `Point` has no constructor |
+| `caller_location` in an unmarked function | `E084` | I cannot use `caller_location` outside a function declared `@caller_location` |
+| Bare type name could mean two types | `E085` | `Node` could mean more than one type here |
+| `pub` where it does nothing | `E087` | I cannot apply `pub` to an operator (and similar) |
+| Private function, type, field or method used from another module | `E088` | I cannot use the function `helper`, which is private to module `shapes` |
+| `pub` item exposes a private type | `E089` | I cannot let the public function `make` expose the private type `Hidden` |
+| Two files answer to one module name | `E090` | I found 2 different files that answer to the module name `list` |
+| Module exists but this package cannot import it | `E091` | I cannot import package `geometry`, because it is not a dependency of `app` |
+| Import cycle | `E019` | I found a circular import: these modules import each other in a cycle |
+| Module not found | `E027` | I cannot find a module named `m` |
+| `m::` written without `import m;` | `E145` | I cannot find an import of module `m` in this file |
+| Same name imported from two modules | `E024` | I found `shared` imported from two different modules |
+| Unknown annotation, or one that does not fit | `E146` | I do not know an annotation named `@intrinsic` |
+| Annotation before something other than a function | `E110` | I expected `fn` or `extern fn` after an annotation |
+| Double free of an `@ownership` pointer | `E017` | I found a second free of `p` |
+| Use after release | `E018` | I cannot use the memory of `p` after it was freed |
 
 `turf explain E0NN` (for example `turf explain E088`) prints the long explanation of any code.

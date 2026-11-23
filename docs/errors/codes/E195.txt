@@ -1,0 +1,17 @@
+An empty loop body
+
+A `while`, `do`, `for` or `for ... in` loop whose body holds no statements does nothing on each pass:
+
+    mut arr: int[3] = [1, 2, 3];
+    for v in arr {
+    }                           // the body is empty -- WARNING
+
+Write what the loop should do, or remove the loop. A `while` whose condition calls a function does its work in the test (`while advance(&n) { }`), so it does not warn.
+
+If the loop is meant to do nothing, put a comment in the body saying why. A body holding a comment does not warn:
+
+    for i in 0..3 {
+        // counted, nothing else
+    }
+
+This is a warning, not an error -- compilation still succeeds. To silence it for a whole build, set its lint level to allow: `turf build --allow E195` (or `[lints] E195 = "allow"` in turf.toml).

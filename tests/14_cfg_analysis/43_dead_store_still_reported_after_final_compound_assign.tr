@@ -1,4 +1,4 @@
-// EXPECT-DIAG: assigned but the value is never read (dead store)
+// EXPECT-DIAG: The value assigned to
 // EXPECT-NO-DIAG: declared but never used
 // LEC-005 guard against over-correction of 42_...: a read-modify-write is a
 // READ of the old value, but its RESULT can still be dead. Here `x`'s only

@@ -21,6 +21,8 @@
 #include "analysis/CFG.h"
 #include "frontend/Lexer.h"
 #include "analysis/Lint.h"
+#include "analysis/UnusedDecls.h"
+#include "analysis/AnalysisFacts.h"
 #include "tooling/PackageGraph.h"
 #include "frontend/Parser.h"
 #include "resolve/Resolver.h"
@@ -99,11 +101,6 @@ public:
     SavedPackageGraph_ = std::move(g_PackageGraph);
     g_PackageGraph = PackageGraph();
 
-    // InitializeCompilerGlobals() replaces GlobalSymbolTable outright; the
-    // host's must survive it.
-    SavedGlobalSymbolTable_ = std::move(GlobalSymbolTable);
-    InitializeCompilerGlobals();
-
     PushParserCompileState();
     PushResolverCompileState();
 
@@ -116,7 +113,6 @@ public:
     PopResolverCompileState();
     PopParserCompileState();
 
-    GlobalSymbolTable = std::move(SavedGlobalSymbolTable_);
     DiagnosticEngine::restoreState(std::move(SavedDiagnostics_));
     TestRegistry::restore(std::move(SavedTests_));
 
@@ -151,7 +147,19 @@ private:
   DiagnosticEngine::State SavedDiagnostics_;
   TestRegistry::State SavedTests_;
   PackageGraph SavedPackageGraph_;
-  std::unique_ptr<SymbolTable> SavedGlobalSymbolTable_;
+
+public:
+  // The analysis's own symbol table (F-S2), current until the scope ends.
+  // The host compile's table, if any, is current again after: it was never
+  // touched. takeSymbols() hands it to the result, whose inferred types may
+  // point into what it registered.
+  std::unique_ptr<SymbolTable> takeSymbols() { return std::move(Symbols_); }
+
+private:
+  std::unique_ptr<SymbolTable> Symbols_ = std::make_unique<SymbolTable>();
+  SymbolTableScope SymbolsScope_{Symbols_.get()};
+  AnalysisFacts Facts_;
+  AnalysisFactsScope FactsScope_{&Facts_};
 };
 
 // One analysis at a time per process: everything GlobalStateScope saves is
@@ -280,6 +288,7 @@ Diagnostic toDiagnostic(const DiagnosticEngine::Diag &D,
   Out.Code = D.Code;
   Out.Message = stripAnsi(D.Msg);
   Out.Hint = stripAnsi(D.Hint);
+  Out.Label = stripAnsi(diagLabel(D));
   Out.Where = toLocation(D.Loc, D.Filename.empty() ? EntryPath : D.Filename);
   for (const auto &R : D.RelatedLocations)
     Out.Related.push_back(
@@ -291,7 +300,7 @@ bool isDeclarationStart(int Tok) {
   return Tok == TOK_FN || Tok == TOK_STRUCT || Tok == TOK_ENUM ||
          Tok == TOK_MACHINE || Tok == TOK_AT || Tok == TOK_EXTERN ||
          Tok == TOK_EXPORT || Tok == TOK_OPERATOR || Tok == TOK_ERROR ||
-         Tok == TOK_UNSAFE || Tok == TOK_PUB;
+         Tok == TOK_UNSAFE || Tok == TOK_PUB || Tok == TOK_STATIC || Tok == TOK_IMMUTABLE;
 }
 
 // The kinds main.cpp accepts from its "anything else" branch. Any other
@@ -375,12 +384,12 @@ std::vector<std::unique_ptr<ExprAST>> parseEntryFile(std::size_t &PreludeCount,
         SkipToNextTopLevelBoundary();
       } else if (isDeclarationStart(StartTok)) {
         if (Parser().CurTok == ';')
-          LogErrorAt(Lex().CurLoc, ErrCode::UnexpectedToken, "Unexpected ';'",
+          LogErrorAt(Lex().CurLoc, ErrCode::UnexpectedToken, "I did not expect a `;` here.",
                      SLM::ErrorCategory::SYNTAX_ERROR);
         AppendFlattenedTopLevelDecl(std::move(AST), Program, true);
       } else {
         if (Parser().CurTok != ';')
-          LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement",
+          LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "I expected a `;` after this statement.",
                      SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
         else
           getNextToken();
@@ -389,9 +398,8 @@ std::vector<std::unique_ptr<ExprAST>> parseEntryFile(std::size_t &PreludeCount,
           Program.push_back(std::move(AST));
         } else {
           LogErrorAt(spanOf(*AST).Loc, ErrCode::StatementOutsideFunction,
-                     "Statements are not allowed outside of a function. "
-                     "Please define 'fn main(): int' and move this code "
-                     "inside.\n  Hint: Wrap it: `fn main(): int { <this statement> return 0; }`.",
+                     "I found a statement outside a function."
+                     "\n  Hint: Move it into a function, as in `fn main(): int { <this statement> return 0; }`.",
                      SLM::ErrorCategory::SYNTAX_ERROR);
         }
       }
@@ -419,7 +427,7 @@ struct AnalysisResult::Impl {
   std::size_t PreludeCount = 0;
   std::unique_ptr<Resolver> R;
   std::unique_ptr<TypeChecker> TC;
-  // The analysis's own GlobalSymbolTable. Nothing queries it after
+  // The analysis's own symbol table (F-S2). Nothing queries it after
   // analyze() returns, but types the TypeChecker inferred may point into
   // what it registered, so it lives as long as they do.
   std::unique_ptr<SymbolTable> Types;
@@ -848,6 +856,18 @@ AnalysisResult analyze(const std::vector<SourceBuffer> &Buffers,
       }
       g_recoverActive = false;
     }
+    // AN-7: dead code, over a program the TypeChecker finished (its uses are
+    // what the passes recorded). A file with a `main` is a program's root.
+    if (HoistingClean && !DiagnosticEngine::hasErrors()) {
+      std::vector<const ExprAST *> Decls;
+      bool HasMain = false;
+      for (const auto &AST : I->Program) {
+        Decls.push_back(AST.get());
+        if (const auto *F = dynamic_cast<const FuncDefExprAST *>(AST.get()))
+          HasMain |= F->getName() == "main";
+      }
+      UnusedDecls::report(Decls, HasMain);
+    }
   }
 
   // The flow passes read what the Resolver and TypeChecker attached, so they
@@ -922,7 +942,7 @@ AnalysisResult analyze(const std::vector<SourceBuffer> &Buffers,
     I->Diagnostics.push_back(toDiagnostic(D, Entry.Path));
   }
 
-  I->Types = std::move(GlobalSymbolTable);
+  I->Types = Scope.takeSymbols();
   return AnalysisResult(std::move(I));
 }
 

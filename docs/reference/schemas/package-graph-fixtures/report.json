@@ -1,0 +1,45 @@
+{
+  "format": 1,
+  "root": "app",
+  "packages": {
+    "app": {
+      "src": "app/src",
+      "deps": ["shapes"],
+      "allow_unsafe": false,
+      "unsafe": {
+        "allow_unsafe": false,
+        "modules": 1,
+        "unsafe_modules": 0,
+        "unsafe_blocks": 0,
+        "extern_fns": 0,
+        "link_libraries": [],
+        "files": []
+      }
+    },
+    "shapes": {
+      "src": "shapes/src",
+      "deps": [],
+      "allow_unsafe": false,
+      "unsafe": {
+        "allow_unsafe": false,
+        "modules": 1,
+        "unsafe_modules": 0,
+        "unsafe_blocks": 0,
+        "extern_fns": 0,
+        "link_libraries": [],
+        "files": []
+      }
+    }
+  },
+  "stdlib": {
+    "unsafe": {
+      "allow_unsafe": true,
+      "modules": 0,
+      "unsafe_modules": 0,
+      "unsafe_blocks": 0,
+      "extern_fns": 0,
+      "link_libraries": [],
+      "files": []
+    }
+  }
+}

@@ -1,0 +1,13 @@
+tests/55_compiler_fixes/fail_fix_none_when_ambiguous.tr (1 error)
+
+── error at line 8, col 12 [E040 · unknown name]
+
+  I cannot find anything named `cax`.
+
+  Hint: Use a name from this file: `car`, `cat`
+
+  8 │     return cax - 1;
+    │            ^~~ nothing of this name is in scope
+
+  Run `turf --explain E040` for more details.
+

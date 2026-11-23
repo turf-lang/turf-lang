@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E043
-// EXPECT-DIAG: before telling me what it is
+// EXPECT-DIAG: I cannot use `x` before its declaration.
 // `x` IS declared in this function -- one line too late. E043, not E040
 // ("undeclared"): the hint tells the user to move the declaration up.
 fn main(): int {

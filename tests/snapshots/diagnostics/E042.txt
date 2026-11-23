@@ -1,0 +1,13 @@
+tests/38_monomorphization/fail_sizeof_unknown_type.tr (1 error)
+
+── error at line 7, col 12 [E042 · unknown type]
+
+  I cannot find a type named `Tin`.
+
+  Hint: Declare `Tin` before it is used, or check the spelling.
+
+  7 │     return sizeof(Tin);
+    │            ^~~~~~ no type of this name
+
+  Run `turf --explain E042` for more details.
+

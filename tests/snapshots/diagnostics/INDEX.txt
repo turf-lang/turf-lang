@@ -1,0 +1,194 @@
+# DX-10: the program each diagnostic code's snapshot is taken from.
+# `Exxx <program under tests/> [flags]`; regenerate the snapshots with
+# scripts/check/diagnostic_snapshots.py --write (--pick fills in new codes).
+
+E001 tests/43_check_elision/fail_bounds_still_caught_after_elision.tr
+E002 tests/48_unsized_array_params/fail_slice_bound_not_int.tr
+E003 tests/05_arrays_pointers_ffi/fail_array_decl_init_size_mismatch.tr
+E004 tests/48_unsized_array_params/fail_literal_sized_array_element_type.tr
+E005 tests/04_control_flow/fail_foreach_over_int.tr
+E007 tests/04_control_flow/fail_continue_outside_loop.tr
+E008 tests/10_default_init/fail_mut_bool_before_init.tr
+E009 tests/04_control_flow/fail_missing_return_on_one_path.tr
+E010 tests/14_cfg_analysis/fail_19_infinite_recursion_simple.tr
+E011 tests/07_functions_modules/fail_call_main_directly.tr
+E012 tests/14_cfg_analysis/fail_42_statement_after_return_is_e012.tr
+E014 tests/01_syntax/fail_bad_keyword.tr
+E016 tests/25_errors/fail_recover_as_err_bare_only.tr
+E017 tests/05_arrays_pointers_ffi/fail_double_free.tr
+E018 tests/05_arrays_pointers_ffi/fail_use_after_free.tr
+E019 tests/07_functions_modules/fail_circular_import_two.tr
+E020 tests/21_extern_conflict/fail_extern_conflicting_arity.tr
+E021 tests/07_functions_modules/fail_export_mut_not_supported.tr
+E022 tests/07_functions_modules/fail_export_array_no_initializer.tr
+E023 tests/07_functions_modules/fail_export_inside_function.tr
+E024 tests/07_functions_modules/fail_import_wildcard_collision.tr
+E025 tests/03_typechecker/fail_math_abs_string.tr
+E026 tests/02_resolver/fail_builtin_typo.tr
+E027 tests/07_functions_modules/fail_import_self.tr
+E028 tests/18_operator_overload/fail_operator_builtin_pair_int.tr
+E029 tests/07_functions_modules/fail_scope_operator_on_instance_value.tr
+E030 tests/07_functions_modules/fail_import_symbol_wrong_owner_type.tr
+E031 tests/55_compiler_fixes/fail_fix_unknown_qualifier.tr
+E032 tests/07_functions_modules/fail_bare_type_no_visibility.tr
+E033 tests/04_control_flow/fail_foreach_duplicate_names.tr
+E034 tests/06_structs/fail_duplicate_empty_struct.tr
+E035 tests/26_state_machines/fail_machine_invalid_transition_narrowed.tr
+E036 tests/26_state_machines/fail_machine_transition_wrong_type.tr
+E038 tests/57_test_functions/fail_test_nested.tr
+E039 tests/25_errors/fail_error_unknown_variant.tr
+E040 tests/55_compiler_fixes/fail_fix_none_when_ambiguous.tr
+E041 tests/16_sys_and_test_stdlib/fail_bare_assert_no_import.tr
+E042 tests/38_monomorphization/fail_sizeof_unknown_type.tr
+E043 tests/02_resolver/fail_use_before_declaration_in_function.tr
+E044 tests/24_first_class_functions/fail_wrong_arity_indirect_call.tr
+E045 tests/06_structs/fail_dot_call_new.tr
+E046 tests/06_structs/fail_constructor_cannot_be_static.tr
+E047 tests/06_structs/fail_default_construction_with_args.tr
+E048 tests/06_structs/fail_static_method_call.tr
+E049 tests/06_structs/fail_incomplete_constructor_never_assigned.tr
+E050 tests/06_structs/fail_no_constructor_defined.tr
+E051 tests/06_structs/fail_reserved_default_declared.tr
+E052 tests/07_functions_modules/fail_static_method_via_instance_no_args.tr
+E053 tests/06_structs/fail_static_outside_struct.tr
+E054 tests/55_compiler_fixes/fail_fix_unknown_method.tr
+E056 tests/03_typechecker/fail_null_param_primitive.tr
+E057 tests/03_typechecker/fail_logical_not_int.tr
+E058 tests/04_control_flow/fail_compare_missing_done.tr
+E059 tests/04_control_flow/fail_compare_type_mismatch.tr
+E060 tests/07_functions_modules/fail_export_assign_to_constant.tr
+E061 tests/01_syntax/fail_assign_true.tr
+E062 tests/03_typechecker/fail_null_coercion.tr
+E064 tests/07_functions_modules/fail_return_self_as_value.tr
+E065 tests/03_typechecker/fail_string_conversion.tr
+E066 tests/04_control_flow/fail_if_condition_string.tr
+E067 tests/39_nullable_references/fail_heap_of_void.tr
+E068 tests/45_pattern_matching/fail_pattern_unknown_field.tr
+E069 tests/06_structs/fail_self_containing_struct.tr
+E070 tests/35_numeric_literals/fail_bare_radix_prefix.tr
+E071 tests/35_numeric_literals/fail_invalid_radix_digit.tr
+E072 tests/35_numeric_literals/fail_trailing_separator.tr
+E073 tests/35_numeric_literals/fail_malformed_exponent.tr
+E074 tests/15_enums/local_type_declarations.tr --warn E074
+E075 tests/14_cfg_analysis/41_unreachable_block_and_dead_branch_warn.tr --warn E075
+E076 tests/36_numeric_semantics/fail_int32_literal_out_of_range.tr
+E077 tests/36_numeric_semantics/fail_int_literal_not_exact_as_double.tr
+E078 tests/36_numeric_semantics/fail_float_literal_overflow.tr
+E079 tests/38_monomorphization/fail_generic_recursion_depth.tr
+E080 tests/18_operator_overload/fail_operator_orphan_rule.tr
+E081 tests/39_nullable_references/fail_deref_without_check.tr
+E082 tests/07_functions_modules/fail_copy_out_of_unnarrowed_nullable.tr
+E083 tests/40_defer/fail_break_in_defer.tr
+E084 tests/42_caller_location/fail_caller_location_outside_marked_function.tr
+E085 tests/07_functions_modules/fail_type_identity_ambiguous_wildcard_vs_local.tr
+E086 tests/39_nullable_references/fail_escape_defer_in_loop.tr
+E087 tests/07_functions_modules/visibility/fail_pub_not_a_declaration.tr
+E088 tests/07_functions_modules/visibility/fail_private_method_call.tr
+E089 tests/07_functions_modules/visibility/fail_private_in_public_field.tr
+E090 tests/07_functions_modules/stdlib_shadow/fail_import_local_module_named_like_stdlib.tr
+E091 tests/snapshots/diagnostics/programs/E091/app/src/main.tr --package-graph tests/snapshots/diagnostics/programs/E091/graph.json
+E092 tests/45_pattern_matching/fail_pattern_wrong_struct.tr
+E093 tests/45_pattern_matching/fail_bool_compare_missing_value.tr
+E094 tests/45_pattern_matching/20_unreachable_arm_after_catch_all_warns.tr --warn E094
+E095 tests/25_errors/fail_try_in_defer.tr
+E096 tests/25_errors/fail_payload_field_missing_type.tr
+E097 tests/18_operator_overload/fail_generic_operator_param_not_in_operands.tr
+E098 tests/18_operator_overload/fail_index_result_field_postfix.tr
+E099 tests/01_syntax/fail_unterminated_string.tr
+E100 tests/01_syntax/fail_unknown_escape_sequence.tr
+E101 tests/17_char_type/fail_char_empty_literal.tr
+E102 tests/01_syntax/fail_typo_keyword_cascading_error.tr
+E103 tests/04_control_flow/fail_do_while_double_semicolon.tr
+E104 tests/01_syntax/fail_missing_brace.tr
+E105 tests/01_syntax/fail_missing_comma_between_struct_fields.tr
+E106 tests/01_syntax/fail_missing_colon_before_return_type.tr
+E107 tests/04_control_flow/fail_do_while_missing_open_brace.tr
+E108 tests/01_syntax/fail_parse_error_in_body_no_cascade.tr
+E109 tests/05_arrays_pointers_ffi/fail_sizeof_variable.tr
+E110 tests/04_control_flow/fail_do_while_missing_while.tr
+E111 tests/01_syntax/fail_deep_tree_of_short_chains.tr
+E112 tests/06_structs/fail_void_struct_field.tr
+E113 tests/45_pattern_matching/fail_pattern_old_struct_literal_still_rejected.tr
+E114 tests/06_structs/fail_duplicate_struct_field.tr
+E115 tests/18_operator_overload/fail_operator_unary_arity_mismatch.tr
+E116 tests/01_syntax/fail_extern_function_with_body.tr
+E117 tests/25_errors/fail_error_brace_and_semicolon.tr
+E118 tests/01_syntax/fail_statement_outside_function.tr
+E119 tests/01_syntax/fail_no_main_function.tr
+E120 tests/04_control_flow/fail_foreach_range_with_pair.tr
+E122 tests/05_arrays_pointers_ffi/fail_address_of_non_addressable.tr
+E123 tests/48_unsized_array_params/fail_empty_literal_sizes_nothing.tr
+E124 tests/03_typechecker/fail_bool_equals_int.tr
+E125 tests/24_first_class_functions/fail_ambiguous_function_ref.tr
+E126 tests/19_int32_type/fail_int32_increment.tr
+E127 tests/15_enums/fail_cast_out_of_range.tr
+E128 tests/37_guess_inference/fail_guess_no_init.tr
+E129 tests/37_guess_inference/fail_guess_null.tr
+E130 tests/05_arrays_pointers_ffi/fail_ptr_outside_unsafe.tr
+E131 tests/48_unsized_array_params/fail_unknown_array_method.tr
+E132 tests/25_errors/fail_recover_on_non_fallible.tr
+E133 tests/15_enums/fail_duplicate_matches_int_literal.tr
+E134 tests/09_boss_fights/fail_recursive_struct.tr
+E135 tests/03_typechecker/fail_call_literal.tr
+E136 tests/07_functions_modules/fail_nested_module_qualifier_call.tr
+E137 tests/42_caller_location/fail_caller_location_fn_as_value.tr
+E138 tests/07_functions_modules/fail_type_identity_generic_without_type_args.tr
+E139 tests/35_numeric_literals/fail_bare_trailing_dot.tr
+E140 tests/48_unsized_array_params/fail_unsized_struct_field.tr
+E141 tests/48_unsized_array_params/fail_immut_array_written_via_ufcs.tr
+E142 tests/48_unsized_array_params/fail_slice_of_list.tr
+E143 tests/48_unsized_array_params/fail_slice_end_past_length.tr
+E144 tests/48_unsized_array_params/fail_mut_guess_view_of_immut_array.tr
+E145 tests/07_functions_modules/fail_import_scope_diamond.tr
+E146 tests/42_caller_location/fail_at_decorator_unsupported.tr
+E147 tests/10_default_init/fail_default_reference_cycle_through_value.tr
+E148 tests/07_functions_modules/fail_type_identity_type_args_on_non_generic.tr
+E149 tests/15_enums/fail_literal_string_to_enum_unknown_variant.tr
+E150 tests/54_size_parameters/fail_size_parameter_on_method.tr
+E151 tests/06_structs/fail_local_generic_struct.tr
+E152 tests/05_arrays_pointers_ffi/16_alias_analysis_shadowing.tr --warn E152
+E153 tests/26_state_machines/fail_machine_narrowing_lost_after_loop.tr --warn E153
+E154 tests/04_control_flow/12_compare_empty.tr --warn E154
+E155 tests/14_cfg_analysis/47_lint_reaches_unsafe_block.tr --warn E155
+E156 tests/02_resolver/warn_self_assign.tr --warn E156
+E157 tests/14_cfg_analysis/34_do_while_in_for_no_break_warns.tr --warn E157
+E158 tests/14_cfg_analysis/01_high_complexity_warns.tr --warn E158
+E159 tests/14_cfg_analysis/33_do_while_nested_true_inner_break_outer_warns.tr --warn E159
+E160 tests/14_cfg_analysis/13_no_warn_compound_assign.tr --warn E160
+E161 tests/39_nullable_references/escape_mixed_paths_kept_local_ok.tr --warn E161
+E162 tests/04_control_flow/range_never_ends_warning.tr --warn E162
+E163 tests/14_cfg_analysis/12_dead_store_simple.tr --warn E163
+E164 tests/04_control_flow/warn_for_loop_var_never_advances.tr --warn E164
+E165 tests/04_control_flow/fail_break_outside_loop.tr --warn E165
+E166 tests/18_operator_overload/19_generic_operator_user_struct_forms.tr --warn E166
+E167 tests/14_cfg_analysis/45_lint_reaches_call_arguments.tr --warn E167
+E168 tests/14_cfg_analysis/42_identical_branches_warn.tr --warn E168
+E169 tests/41_gc/09_boxed_fallible_success_survives_collection.tr --warn E169
+E170 tests/49_annotations/conditional_free_is_a_warning.tr --warn E170
+E171 tests/49_annotations/conditional_free_is_a_warning.tr --warn E171
+E172 tests/49_annotations/deprecated_warns_on_call.tr --warn E172
+E173 tests/57_test_functions/fail_test_called_by_a_test.tr
+E174 tests/01_syntax/decimal_literal_receiver_allowed_by_default.tr --warn E174
+E175 tests/07_functions_modules/type_identity_method_on_imported_struct.tr --warn E175
+E176 tests/07_functions_modules/export_immut_warns.tr --warn E176
+E177 tests/07_functions_modules/type_identity_operators_errors_machines.tr --warn E177
+E178 tests/49_annotations/deprecated_warns_on_call.tr --warn E178
+E179 tests/57_test_functions/04_error_type_named_error.tr --warn E179
+E180 tests/14_cfg_analysis/unused_declarations_warn.tr --warn E180
+E181 tests/25_errors/24_try_passes_error_unchanged.tr --warn E181
+E182 tests/14_cfg_analysis/mutual_recursion_warns.tr --warn E182
+E183 tests/14_cfg_analysis/unreachable_base_case_warns.tr --warn E183
+E184 tests/14_cfg_analysis/endless_loops_warn.tr --warn E184
+E185 tests/14_cfg_analysis/endless_loops_warn.tr --warn E185
+E186 tests/14_cfg_analysis/endless_loops_warn.tr --warn E186
+E187 tests/05_arrays_pointers_ffi/manual_heap_leak_warns.tr --warn E187
+E188 tests/05_arrays_pointers_ffi/fail_null_raw_pointer_write_faults_at_zero.tr --warn E188
+E189 tests/05_arrays_pointers_ffi/unsafe_checks_warn.tr --warn E189
+E190 tests/05_arrays_pointers_ffi/unsafe_checks_warn.tr --warn E190
+E191 tests/05_arrays_pointers_ffi/unsafe_checks_warn.tr --warn E191
+E192 tests/46_stdlib_surface/02_runtime_modules.tr --warn E192
+E193 tests/06_structs/14_struct_stress.tr --warn E193
+E194 tests/05_arrays_pointers_ffi/unsafe_checks_warn.tr --warn E194
+E195 tests/04_control_flow/warn_for_loop_var_never_advances.tr --warn E195
+E196 tests/07_functions_modules/02_type_check_funcs.tr --warn E196
+E197 tests/14_cfg_analysis/empty_bodies_warn.tr --warn E197

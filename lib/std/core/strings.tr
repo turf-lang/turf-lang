@@ -548,7 +548,7 @@ pub fn trim_end(s: string): string {
 // delimiters) as a `List<string>`. See the block comment above for the
 // empty-delimiter and no-match behavior.
 pub fn split(s: string, delimiter: string): List<string> {
-    mut result: List<string> = List::default();
+    mut result: List<string> = List<string>::default();
     mut dlen: int = strlen(delimiter);
     mut slen: int = strlen(s);
     if dlen == 0 {

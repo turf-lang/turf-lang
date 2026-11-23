@@ -1,0 +1,12 @@
+// Test (fail): Ordering operators on enum values should be a type error
+// Cannot use <, >, <=, >= on enums — cast to int first
+enum Direction { North, East, South, West }
+
+@test(compile_error, E124, "I cannot order the enum `Direction` with `<`: only `==` and `!=` compare enum variants.")
+fn rejects_enum_ordering(): void {
+    immut d1: Direction = Direction::North;
+    immut d2: Direction = Direction::South;
+    if d1 < d2 {
+        return;
+    }
+}

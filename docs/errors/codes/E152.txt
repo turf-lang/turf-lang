@@ -5,7 +5,7 @@ Declaring a variable with the same name as one that is already visible creates a
     fn main(): int {
         immut count: int = 1;
         if count > 0 {
-            immut count: int = 2;   // WARNING: hides the 'count' above
+            immut count: int = 2;   // WARNING: This new `count` hides an older one.
             printline(count to string);
         }
         return count;

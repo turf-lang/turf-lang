@@ -43,7 +43,7 @@ INCORRECT:
         otherwise:
             mut noop: int = 0;
     }
-    // ERROR: 'ConnectionState' has no transition from 'Idle' to 'Closing'.
+    // ERROR: `ConnectionState` has no transition from `Idle` to `Closing`.
 
 WHAT THIS ERROR IS NOT:
   - Not about the target being the wrong TYPE of machine entirely -- that's

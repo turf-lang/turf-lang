@@ -72,7 +72,9 @@ while IFS= read -r file; do
       inside_struct=""
     fi
 
-    if [[ "$line" =~ ^pub[[:space:]]+(extern[[:space:]]+)?(from[[:space:]]+\"[a-z]+\"[[:space:]]+)?fn(\<[A-Za-z,:\ ]+\>)?[[:space:]]+([A-Za-z_0-9]+)\.([a-z_0-9]+)\( ]]; then
+    if [[ "$line" =~ ^pub[[:space:]]+(static[[:space:]]+)?fn(\<[A-Za-z,:\ ]+\>)?[[:space:]]+([A-Za-z_0-9]+)\.([a-z_0-9]+)\( ]]; then
+      check method "$mod" "${BASH_REMATCH[3]}.${BASH_REMATCH[4]}" "[.:]${BASH_REMATCH[4]}\\("
+    elif [[ "$line" =~ ^pub[[:space:]]+(extern[[:space:]]+)?(from[[:space:]]+\"[a-z]+\"[[:space:]]+)?fn(\<[A-Za-z,:\ ]+\>)?[[:space:]]+([A-Za-z_0-9]+)\.([a-z_0-9]+)\( ]]; then
       check method "$mod" "${BASH_REMATCH[4]}.${BASH_REMATCH[5]}" "[.:]${BASH_REMATCH[5]}\\("
     elif [[ "$line" =~ ^pub[[:space:]]+(extern[[:space:]]+)?(from[[:space:]]+\"[a-z]+\"[[:space:]]+)?fn(\<[A-Za-z,:\ ]+\>)?[[:space:]]+([a-z_0-9A-Z]+)\( ]]; then
       n=${BASH_REMATCH[4]}
@@ -82,8 +84,8 @@ while IFS= read -r file; do
     elif [[ "$line" =~ ^pub[[:space:]]+(struct|enum|error)[[:space:]]+([A-Za-z_0-9]+) ]]; then
       n=${BASH_REMATCH[2]}
       check "${BASH_REMATCH[1]}" "$mod" "$n" "(\\b${mod}::${n}\\b|\\b${n}\\b)"
-    elif [[ "$line" =~ ^export[[:space:]]+immut[[:space:]]+([A-Za-z_0-9]+) ]]; then
-      n=${BASH_REMATCH[1]}
+    elif [[ "$line" =~ ^(pub|public|export)[[:space:]]+immut[[:space:]]+([A-Za-z_0-9]+) ]]; then
+      n=${BASH_REMATCH[2]}
       check const "$mod" "$n" "\\b${mod}::${n}\\b"
     elif [ -n "$inside_struct" ] && [[ "$line" =~ ^[[:space:]]+pub[[:space:]]+([a-z_0-9]+): ]]; then
       n=${BASH_REMATCH[1]}

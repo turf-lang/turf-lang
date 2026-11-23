@@ -22,9 +22,9 @@ INCORRECT:
     mut a: int = 0b012;
     // ERROR: '2' isn't a valid digit in '0b01' (binary, 0-1) [E071]
     mut b: int = 0o8;
-    // ERROR: '8' isn't a valid digit in '0o' (octal, 0-7) [E071]
+    // ERROR: `8` is not a valid digit in `0o`, which is octal (0-7) [E071]
     mut c: int = 0xZZ;
-    // ERROR: 'Z' isn't a valid digit in '0x' (hexadecimal, 0-9/a-f) [E071]
+    // ERROR: `Z` is not a valid digit in `0x`, which is hexadecimal (0-9, a-f) [E071]
 
 WHAT THIS ERROR IS NOT:
   - Not E070 (MalformedRadixPrefixError) -- that fires only when NOTHING

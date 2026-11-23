@@ -1,0 +1,13 @@
+tests/25_errors/fail_recover_as_err_bare_only.tr (1 error)
+
+── error at line 16, col 31 [E016 · bare error as binding]
+
+  I cannot use `recover as err run` here, because every error this call can fail with is a bare `error Name;` declaration.
+
+  Hint: Use `recover run { ... }` or `recover produce value` instead, since they do not inspect which error happened. A bare error type carries no information to discriminate on.
+
+  16 │     mut y: int = maybeFail(5) recover as err run {
+     │                               ^~~~~~~ this error is not bound to a name
+
+  Run `turf --explain E016` for more details.
+

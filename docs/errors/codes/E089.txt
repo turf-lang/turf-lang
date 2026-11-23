@@ -3,12 +3,10 @@ A public function or field mentions a type that is not public
     // shapes.tr
     struct Hidden { pub n: int }          // private: no `pub`
     pub fn make(): Hidden { ... }
-    // ERROR: Public function 'make' exposes the private type 'Hidden'.
-    //   Note: 'Hidden' is declared in module 'shapes' without `pub`
-    //   Hint: Anything `pub` is visible to other modules, but 'Hidden' is
-    //   not, so they would receive values of a type they cannot name. Either
-    //   make the type public -- `pub struct Hidden` in shapes.tr -- or keep
-    //   the function internal by removing its `pub`.
+    // ERROR: I cannot let the public function `make` expose the private type `Hidden`.
+    //   Hint: Make the type public with `pub struct Hidden` in shapes.tr, or
+    //   keep the function internal by removing its `pub`. Other modules would
+    //   otherwise receive a `Hidden`, a type they cannot name.
 
 A `pub` function, method, extern function or field is a promise to every
 module that imports this one. If its signature or type names a private type
@@ -46,12 +44,12 @@ a `pub` signature:
     // src/geometry.tr, the root module of package 'geometry'
     import vecmath;                       // an internal module
     pub fn origin(): vecmath::Vec { ... }
-    // ERROR: Public function 'origin' of package 'geometry' exposes 'Vec', a
-    //   type of its internal module 'vecmath'.
-    //   Hint: Other packages import only 'geometry', its root module, so they
-    //   would receive values of a type they cannot name. Either move
-    //   `pub struct Vec` into the root module, geometry.tr, or keep the
-    //   function internal by removing its `pub`.
+    // ERROR: I cannot let the public function `origin` of package `geometry`
+    //   expose `Vec`, a type of its internal module `vecmath`.
+    //   Hint: Move `pub struct Vec` into the root module, `geometry.tr`, or
+    //   keep the function internal by removing its `pub`. Other packages
+    //   import only `geometry`, its root module, so they would receive a
+    //   `Vec`, a type they cannot name.
 
 Declare the types of a library's API in its root module. An internal module's
 own `pub` items may use its types freely: only the package imports them.

@@ -1,0 +1,13 @@
+tests/19_int32_type/fail_int32_increment.tr (1 error)
+
+── error at line 14, col 6 [E126 · operation not supported here]
+
+  I cannot use `++` on an `int32`: arithmetic on an `int32` gives an `int`.
+
+  Hint: Write it out: `c = (c + 1) to int32;`.
+
+  14 │     c++;
+     │      ^~ this is not supported here
+
+  Run `turf --explain E126` for more details.
+

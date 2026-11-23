@@ -1,0 +1,40 @@
+TURF E190 -- WRITE THROUGH A POINTER INTO AN IMMUT ARRAY (WARNING):
+
+CAUSE:
+  A pointer made from an `immut` array (`&a to int*`, `&a[i] to int*`) is
+  written through (`p[i] = v`, `p.f = v`, `p[i] += v`, `p[i]++`), changing
+  values declared never to change. This is a WARNING (it starts at `allow`).
+
+INCORRECT (compiles, but warns at `warn`):
+    fn patch(): int {
+        immut a: int[4] = [1, 2, 3, 4];
+        unsafe {
+            mut p: int* = &a to int*;
+            p[0] = 9;
+        }
+        return 0;
+    }
+
+    fn main(): int {
+        return 0;
+    }
+
+CORRECT:
+    fn patch(): int {
+        mut a: int[4] = [1, 2, 3, 4];
+        unsafe {
+            mut p: int* = &a to int*;
+            p[0] = 9;
+        }
+        return a[0];
+    }
+
+    fn main(): int {
+        return patch() - 9;
+    }
+
+FIX:
+  Declare the array with `mut`, or copy it into a `mut` array and point
+  into that.
+
+RELATED: E188, E191.

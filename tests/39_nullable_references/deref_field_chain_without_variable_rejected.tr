@@ -1,0 +1,10 @@
+// `p.next` is a `&?Node` nothing checked; with `next` null, reading `.val`
+// through it faults at -O0 and reads garbage at -O2 (FREEZE 6.6: a `&?T`
+// "must be null-tested before use"). Found by turf-fuzz probing.
+struct Node { val: int, next: &?Node }
+
+@test(compile_error, E081, "I cannot access the field `val` of `p.next`, which might be `null` here.")
+fn rejects_deref_field_chain_without_variable(): void {
+    mut p: &Node = heap(Node::default());
+    p.next.val;
+}

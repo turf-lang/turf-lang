@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E107
-// EXPECT-DIAG: Expected '{' to open the do-block body
+// EXPECT-DIAG: I expected a `{` to open the body of this `do` loop
 // Regression test (Issue #180 follow-up): a do-while's body must be a
 // braced block, same as while/if/for -- `do` immediately followed by
 // anything other than '{' must be rejected with "Expected '{' to open the

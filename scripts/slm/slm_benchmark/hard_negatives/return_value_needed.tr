@@ -1,0 +1,12 @@
+// HARD-NEGATIVE: `half` must return an `int`, and only the author knows which value a bare `return;` meant.
+fn half(n: int): int {
+    if n < 0 {
+        return;
+    }
+    return n / 2;
+}
+
+fn main(): int {
+    printline(half(8));
+    return 0;
+}

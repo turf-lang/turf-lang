@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E146
-// EXPECT-DIAG: 'E172' is a warning's code, not an error's
+// EXPECT-DIAG: `E172` is a warning's code, not an error's: write `@test(warning, E172, "...")`.
 // TDP-2-006: a compile_error test names an error's code; a warning's goes in
 // a warning outcome.
 @test(compile_error, E172, "deprecated")

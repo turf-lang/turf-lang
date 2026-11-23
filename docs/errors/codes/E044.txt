@@ -10,8 +10,10 @@ For example, if `add` is declared like this:
 
 ...then calling it with three arguments instead of two will trigger this error:
 
-    add(2, 3, 4);   // ERROR: 'add' was called with 3 arguments, but no overload accepts that many.
+    add(2, 3, 4);   // ERROR: I found no overload of `add` that takes 3 arguments.
 
 The fix is almost always just counting again -- look at the "Known overloads" list the error prints, and match your call to one of them exactly. Either you added or forgot an argument, or the function's own declaration needs to change if it's supposed to accept a different number of values.
+
+Sometimes the compiler can work out the edit for you and prints it as a `Fix:`. With one argument too many, it tries removing each argument in turn; if exactly one removal leaves arguments that fit, that is the fix. Above, `add(2, 3, 4)` gets none, because removing any of the three leaves two ints. With one argument too few, it passes a variable that has the missing parameter's name, if one is in scope: `area(width)` becomes `area(width, height)` when a `height` variable exists.
 
 One thing worth knowing about: if you're calling a method on a struct instance with `.` (like `thing.method(x)`) and that method is declared `static`, the argument count can look off by one in a confusing way, because `.` normally passes the instance itself in as a hidden first argument that a `static` method doesn't expect. If that's what's happening, Turf will usually catch it and tell you directly rather than leaving you to puzzle over a mismatched count -- but it's worth keeping in mind if the numbers don't seem to add up.

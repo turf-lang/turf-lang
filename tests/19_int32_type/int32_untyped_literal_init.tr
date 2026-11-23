@@ -4,7 +4,7 @@
 // 'double' elsewhere -- rather than being rejected as an 'int -> int32'
 // narrowing (that rule still applies to a genuinely `int`-TYPED value, see
 // fail_int32_implicit_narrow.tr and
-// tests/36_numeric_semantics/fail_implicit_narrow_int_to_int32.tr). Covers
+// tests/36_numeric_semantics/rejected_in_functions.tr: rejects_implicit_narrow_int_to_int32). Covers
 // every type-fixing site untypedLiteralAcquiresInt32() (TypeChecker.h) is
 // consulted from: VarDecl init, plain assignment, a call argument, and a
 // return value.

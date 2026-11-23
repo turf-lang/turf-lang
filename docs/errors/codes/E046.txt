@@ -11,7 +11,7 @@ Here's a `new` declared correctly, with no `static`:
 
 Adding `static` to that same declaration is what triggers this error:
 
-    fn Point.new(x: int, y: int) static: void {   // ERROR: 'new' can't be 'static'
+    static fn Point.new(x: int, y: int): void {   // ERROR: I cannot make `new` `static`.
         self.x = x;
         self.y = y;
     }

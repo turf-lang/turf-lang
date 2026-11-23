@@ -1,0 +1,14 @@
+// SY-4: `static` in both places is an error.
+// EXPECT-DIAG: E103
+// EXPECT-DIAG: I found `static` written twice for `Counter.limit`, once before `fn` and once after the parameters.
+struct Counter {
+    n: int
+}
+
+static fn Counter.limit() static: int {
+    return 100;
+}
+
+fn main(): int {
+    return Counter::limit();
+}

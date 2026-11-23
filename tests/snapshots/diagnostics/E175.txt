@@ -1,0 +1,17 @@
+tests/07_functions_modules/type_identity_node_a_module.tr (1 warning)
+
+── warning at line 22, col 22 [E175 · `static` after the parameter list]
+
+  `static` for `Node.origin` is written after the parameter list.
+
+  Hint: Move `static` before `fn`: `static fn Node.origin(...)`.
+
+  22 │ pub fn Node.origin() static: Node {
+     │                      ^~~~~~ `static` belongs before `fn`
+
+  Fix: move 'static' before 'fn'
+  22 │ pub static fn Node.origin(): Node {
+     │     ~~~~~~~~~              ^
+
+  Run `turf --explain E175` for more details.
+

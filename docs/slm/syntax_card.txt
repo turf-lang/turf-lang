@@ -3,7 +3,7 @@ TURF SYNTAX (only this; not C, Python or Rust):
     struct Point { x: int, y: int } // no `Point { x: 1 }` literals
     struct Box<T> { v: T }
     fn Point.sum(): int { return self.x + self.y; } // p.sum()
-    fn Point.origin() static: Point { return Point::default(); } // Point::origin()
+    static fn Point.origin(): Point { return Point::default(); } // Point::origin()
     fn<T> Box.get(): T { return self.v; } // methods of Box<T> repeat <T>
     fn main(): int {
         mut n: int = 5; // mut/immut name: Type = value

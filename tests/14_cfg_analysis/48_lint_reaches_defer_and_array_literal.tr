@@ -1,4 +1,4 @@
-// EXPECT-DIAG: '/' with zero
+// EXPECT-DIAG: `/` used with zero
 // LEC-005 / INV-LINT-1: `defer <stmt>` and an array literal's elements are
 // children the old lint chain never visited (only the division inside the
 // array literal is asserted by the text below; both shapes are linted by the

@@ -1,9 +1,9 @@
 // EXPECT-DIAG: E097
-// EXPECT-DIAG: 'operator []' declares type parameter 'T', but no operand mentions it
+// EXPECT-DIAG: `operator []` declares the type parameter `T`, but no operand mentions it
 // Negative test (LEC-006): operator calls have no type-argument syntax, so a
 // type parameter that appears only in the RETURN type can never be inferred.
 // Rejected at the declaration, not at every use.
-// Expected: E097, "declares type parameter 'T', but no operand mentions it".
+// Expected: E097, "declares the type parameter `T`, but no operand mentions it".
 struct Cell<T> {
     v: T,
     n: int

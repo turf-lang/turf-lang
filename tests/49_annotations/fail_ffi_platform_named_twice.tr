@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E146
-// EXPECT-DIAG: names the platform 'linux' twice
+// EXPECT-DIAG: `@ffi` names the platform `linux` twice; give each platform one symbol.
 // Only one symbol can be forwarded to per platform; a second entry used to be
 // silently ignored.
 

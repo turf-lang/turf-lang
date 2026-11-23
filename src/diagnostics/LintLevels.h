@@ -47,13 +47,14 @@ bool setLintSet(const std::string &Spec, int CompilerMinor, std::string &Err);
 /// caller only asks for a warning.
 Level levelOf(const std::string &Code);
 
-/// levelOf() for a code that was added in 2.<SinceMinor>: the registry row's
-/// own value is what levelOf() passes. Exists so the pin can be tested before a
-/// warning newer than 2.0 does.
-Level levelOfSince(const std::string &Code, int SinceMinor);
+/// levelOf() for a code that was added in 2.<SinceMinor> and starts at `allow`
+/// when @p AllowByDefault: the registry row's own values are what levelOf()
+/// passes. Exists so the pin and the default can be tested apart from a row.
+Level levelOfSince(const std::string &Code, int SinceMinor,
+                   bool AllowByDefault = false);
 
-/// True once any level or pin was set; DiagnosticEngine::add() skips the
-/// lookup otherwise.
+/// True once any level or pin was set (a tool that analyses several programs
+/// checks that reset() left nothing behind).
 bool anySet();
 
 /// Forgets every level and the pin (a tool that analyses several programs in

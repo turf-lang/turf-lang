@@ -24,8 +24,13 @@
 #include "diagnostics/ErrorCategory.h"
 #include "diagnostics/ErrorCodes.h"
 #include "diagnostics/DiagnosticsJson.h" // DX-2: --diagnostics=json
+#include "slm/SLMIntegration.h"        // SL-1: --smart=thorough
 #include "tooling/Formatter.h"
 #include "diagnostics/LintLevels.h"
+#include "analysis/UnusedDecls.h"
+#include "analysis/AnalysisFacts.h"
+#include "analysis/MutualRecursion.h"
+#include "analysis/Analysis.h" // runProgramFlowPasses()
 #include "frontend/Lexer.h"
 #include "analysis/Lint.h"
 #include "tooling/MigratePub.h"
@@ -148,8 +153,13 @@ static constexpr int TurfcInterfaceMajor = 1;
 // the root package's src/ when given a package graph) through `--test-build
 // <manifest>`, which only the runner passes. 1.12 (LB-2) adds
 // `--unsafe-report`, each package's unsafe surface as JSON; `turf audit` and
-// `turf graph --unsafe` ask for it.
-static constexpr int TurfcInterfaceMinor = 12;
+// `turf graph --unsafe` ask for it. 1.13 (TDP-2-026) adds the `@test` options
+// and `--test --tag <tag>` / `--skip-tag <tag>`; `turf test --tag` asks for it.
+// 1.14 (IF-3) adds `--registry-json`, the diagnostic-code registry with each
+// code's explanation; the release archive and the website's error pages read it.
+// 1.15 (SL-1) adds `--smart=thorough`: the model is asked for two more
+// samples and a fix they disagree with is shown as plausible.
+static constexpr int TurfcInterfaceMinor = 15;
 
 /// IF-1: the name of each addition to the driver interface, in the order of
 /// the history above, with the minor that added it. `turfc --version --json`
@@ -165,6 +175,8 @@ static constexpr InterfaceFeature InterfaceFeatures[] = {
     {"test-only", 7},             {"lint-levels", 8},
     {"diagnostics-json", 9},      {"version-json", 10},
     {"test-functions", 11},       {"unsafe-report", 12},
+    {"test-tags", 13},            {"registry-json", 14},
+    {"smart-thorough", 15},
 };
 
 // The exit statuses (FREEZE.md 6.21, F-CLI-1, REL-001). The split exists so a script
@@ -192,6 +204,7 @@ struct CompilerOptions {
   bool EmitLLVM = false;              // --emit-llvm: write .ll instead
   bool EmitObj = false;               // --emit-obj: write the .o, never link
   bool AIEnabled = false;             // --smart: enable SLM AI suggestions
+  bool SmartThorough = false;         // --smart=thorough: SL-1's ambiguity, from extra samples
   std::string SmartFixOutPath;        // --smart-write-fix=<path>: write the program with its shown fixes applied here: every compiler fix (TDP-2-001), or the --smart model's validated one
   bool AllowUnsafeModules = false;    // --allow-unsafe-modules: LANG-002, honor `unsafe module;` outside the install root
   bool DiagnosticsJson = false;       // --diagnostics=json: DX-2, one JSON object per diagnostic
@@ -460,6 +473,57 @@ static int runUnsafeReport(const std::string &GraphFile,
   return ExitOk;
 }
 
+// The file `turf --explain` shows for a code: its own page, else the
+// construct or category page (see the tiers above). Shared with
+// --registry-json, so the website's page and the terminal say the same.
+static std::string explainDocPath(const ErrorCodeEntry &Entry, bool *PerCode = nullptr) {
+  std::string DocPath = ErrorCodes::getHumanCodeDocPath(Entry.Code);
+  if (PerCode)
+    *PerCode = !DocPath.empty();
+  if (DocPath.empty()) {
+    std::string Keyword = SLM::extractContextKeyword(Entry.Description);
+    DocPath = InstalledDocPath(SLM::getCategoryDocPath(Entry.Category, Keyword));
+  }
+  return DocPath;
+}
+
+// IF-3: `turfc --registry-json` prints the V-5 registry as one JSON document
+// (docs/reference/schemas/diagnostic-registry.schema.json): every code, its
+// class name, title, category, severity, default lint level, the minor that
+// added it, whether it is retired, and its `--explain` text. The release
+// archive carries it as share/turf/diagnostic-registry.json.
+static int printRegistryJson() {
+  llvm::json::Array Codes;
+  for (size_t I = 0; I < AllErrorCodesCount; ++I) {
+    const ErrorCodeEntry &E = AllErrorCodes[I];
+    const bool Warning = ErrorCodes::isWarningCode(E);
+    bool PerCode = false;
+    std::ifstream Doc(explainDocPath(E, &PerCode));
+    llvm::json::Value Explanation = nullptr;
+    if (Doc.is_open()) {
+      std::stringstream Text;
+      Text << Doc.rdbuf();
+      Explanation = Text.str();
+    }
+    Codes.push_back(llvm::json::Object{
+        {"code", E.Code},
+        {"name", E.ClassName},
+        {"title", E.Description},
+        {"category", SLM::getCategoryName(E.Category)},
+        {"severity", Warning ? "warning" : "error"},
+        {"default_level", !Warning ? "error" : E.AllowByDefault ? "allow" : "warn"},
+        {"since", "2." + std::to_string(E.SinceMinor)},
+        {"retired", std::string(E.Description).find("(retired") != std::string::npos},
+        {"important", E.Important},
+        {"explanation", std::move(Explanation)},
+        {"explanation_source", PerCode ? "code" : "category"}});
+  }
+  llvm::json::Object Registry{{"format", 1}, {"turfc", TURF_VERSION}, {"codes", std::move(Codes)}};
+  llvm::outs() << llvm::json::Value(std::move(Registry)) << "\n";
+  llvm::outs().flush();
+  return ExitOk;
+}
+
 static void handleExplainFlagIfPresent(int argc, char **argv) {
   for (int i = 1; i < argc; ++i) {
     if (std::string(argv[i]) != "--explain")
@@ -483,15 +547,10 @@ static void handleExplainFlagIfPresent(int argc, char **argv) {
               << Colors::RESET << "  " << Entry->ClassName << " ("
               << SLM::getCategoryName(Entry->Category) << ")\n\n";
 
-    std::string DocPath = ErrorCodes::getHumanCodeDocPath(Entry->Code);
-    if (DocPath.empty()) {
-      std::string Keyword = SLM::extractContextKeyword(Entry->Description);
-      // Category docs come back relative; resolve them against the install
-      // root like the per-code ones (InstalledDocPath(), ErrorCodes.h), not
-      // against whatever directory `turf explain` was run from.
-      DocPath = InstalledDocPath(SLM::getCategoryDocPath(Entry->Category, Keyword));
-    }
-    std::ifstream Doc(DocPath);
+    // A category page comes back relative and is resolved against the install
+    // root like a per-code one (InstalledDocPath(), ErrorCodes.h), never
+    // against the directory `turf explain` was run from.
+    std::ifstream Doc(explainDocPath(*Entry));
     if (Doc.is_open()) {
       printHumanExplainDoc(Doc);
     } else {
@@ -511,7 +570,7 @@ static void handleExplainFlagIfPresent(int argc, char **argv) {
 /// no source file can be mistaken for it), and the unknown-option message
 /// below points there.
 static const char *turfcUsage() {
-  return "Usage: turfc <filename.tr> [-o output] [--emit-llvm | --emit-obj] [--smart]\n"
+  return "Usage: turfc <filename.tr> [-o output] [--emit-llvm | --emit-obj] [--smart[=thorough]]\n"
          "         [--smart-write-fix=<path>] [--link <libname>]\n"
          "         [--allow-unsafe-modules] [--stdlib-warnings] [--diagnostics=json|text]\n"
          "         [--allow <code>] [--warn <code>] [--deny <code>] [--lint-set <2.N>]\n"
@@ -522,9 +581,10 @@ static const char *turfcUsage() {
          "         [--dump-instantiations]\n"
          "       turfc --format [--write | --check [--skip-unlexable]] <filename.tr>...\n"
          "       turfc --migrate=pub [--write] <module.tr>...\n"
+         "       turfc --registry-json\n"
          "       turfc --unsafe-report (--package-graph <file> | <file.tr>...)\n"
          "       turfc --test [<tests-dir>] [--package-graph <file>] [--exclude <path>]\n"
-         "         [--only <path>]\n"
+         "         [--only <path>] [--tag <tag>] [--skip-tag <tag>]\n"
          "         [-O0|-O1|-O2|-O3|-Os] [-g] [--link <libname>] [--jobs <n>]\n"
          "         [--timeout <seconds>] [--diag-register <file>]\n"
          "         [--allow-unsafe-modules] [--stdlib-warnings]\n"
@@ -543,6 +603,7 @@ static const char *turfcUsage() {
 /// as `--targt=` against `--target=`.
 static const char *const KnownOptions[] = {
     "--emit-llvm",        "--emit-obj",     "--smart",        "--smart-write-fix=",
+    "--smart=thorough",
     "--allow-unsafe-modules", "--stdlib-warnings", "--check",
     "--module",           "--version",      "--dump-ast",
     "--dump-instantiations", "--resolve",   "--dump-resolver-symbols",
@@ -552,6 +613,7 @@ static const char *const KnownOptions[] = {
     "--target=",          "--explain",      "-mcpu=",
     "--test",             "--jobs",         "--timeout",
     "--diag-register",    "--exclude",      "--only",
+    "--tag",              "--skip-tag",
     "--skip-unlexable", "--allow",      "--warn",         "--deny",
     "--lint-set",         "--diagnostics=", "--test-build",
     "--unsafe-report",
@@ -639,6 +701,9 @@ static CompilerOptions parseArgs(int argc, char **argv) {
       opts.EmitObj = true;
     } else if (arg == "--smart") {
       opts.AIEnabled = true;
+    } else if (arg == "--smart=thorough") {
+      opts.AIEnabled = true;
+      opts.SmartThorough = true;
     } else if (arg.rfind("--smart-write-fix=", 0) == 0) {
       opts.SmartFixOutPath = arg.substr(std::string("--smart-write-fix=").size());
     } else if (arg == "--allow-unsafe-modules") {
@@ -962,6 +1027,14 @@ static int runTestMode(int argc, char **argv) {
       while (X.size() > 2 && X.compare(0, 2, "./") == 0)
         X.erase(0, 2);
       (Arg == "--only" ? T.Only : T.Excludes).push_back(X);
+    } else if (Arg == "--tag" || Arg == "--skip-tag") {
+      // TDP-2-026: select `@test` functions by their `tag:`.
+      std::string Tag = NeedValue(I, Arg);
+      if (Tag.empty()) {
+        std::cerr << "Error: option '" << Arg << "' needs a tag that is not empty.\n";
+        std::exit(ExitUsage);
+      }
+      (Arg == "--tag" ? T.Tags : T.SkipTags).push_back(Tag);
     } else if (Arg == "--diag-register") {
       T.DiagRegister = NeedValue(I, Arg);
     } else if (Arg == "--jobs") {
@@ -1678,6 +1751,8 @@ static int runCompilerMain(int argc, char **argv) {
   CompilerExecutablePath = llvm::sys::fs::getMainExecutable(argv[0], (void *)(intptr_t)runCompilerMain);
 
   for (int i = 1; i < argc; ++i) {
+    if (std::string(argv[i]) == "--registry-json")
+      return printRegistryJson();
     if (std::string(argv[i]) == "--version" &&
         std::any_of(argv + 1, argv + argc,
                     [](const char *A) { return std::string(A) == "--json"; }))
@@ -1759,6 +1834,7 @@ static int runCompilerMain(int argc, char **argv) {
 
   // Set the global AI flag so DiagnosticEngine knows whether to invoke the SLM.
   g_AIEnabled = opts.AIEnabled;
+  SLM::ExtraSamples = opts.SmartThorough ? SLM::ThoroughSamples : 0;
   g_SmartFixOutPath = opts.SmartFixOutPath;
   // LANG-002: must be set before any parsing happens -- HasRawPointerCapability()
   // (ParserModule.cpp) consults it for every `unsafe module;` pragma outside
@@ -1806,7 +1882,7 @@ static int runCompilerMain(int argc, char **argv) {
 
   // --format needs none of the lex/parse/resolve/typecheck/codegen
   // pipeline below -- just the raw source text -- so it short-circuits
-  // before any of that global state (GlobalSymbolTable, LLVM
+  // before any of that global state (Symbols(), LLVM
   // module, ...) gets initialized at all.
   if (opts.Format)
     return runFormat(opts.PositionalFiles, opts.FormatWrite, opts.Check, opts.FormatSkipUnlexable);
@@ -1852,7 +1928,13 @@ static int runCompilerMain(int argc, char **argv) {
     return 1;
   }
   ClearGlobalCFGs();
-  InitializeCompilerGlobals(); // GlobalSymbolTable + BinopPrecedence -- see Parser.h
+  // F-S2: this compile's symbol table, current until runCompilerMain()
+  // returns (SymbolTable.h). A compiler fix's re-check and the --smart
+  // sandbox analyse with tables of their own.
+  auto ProgramSymbols = std::make_unique<SymbolTable>();
+  SymbolTableScope ProgramSymbolsScope(ProgramSymbols.get());
+  AnalysisFacts ProgramFacts;
+  AnalysisFactsScope ProgramFactsScope(&ProgramFacts);
 
   // Pre-pass: hoist 'fn' function prototypes so that forward calls work.
   // We perform a second full parse of the file, i.e. only processing
@@ -1925,7 +2007,7 @@ static int runCompilerMain(int argc, char **argv) {
         if (Parser().CurTok == ';') { getNextToken(); continue; }
         if (Parser().CurTok == TOK_FN || Parser().CurTok == TOK_STRUCT || Parser().CurTok == TOK_ENUM ||
             Parser().CurTok == TOK_MACHINE ||
-            Parser().CurTok == TOK_AT || Parser().CurTok == TOK_EXTERN || Parser().CurTok == TOK_EXPORT ||
+            Parser().CurTok == TOK_AT || Parser().CurTok == TOK_EXTERN || Parser().CurTok == TOK_EXPORT || Parser().CurTok == TOK_STATIC || Parser().CurTok == TOK_IMMUTABLE ||
             Parser().CurTok == TOK_OPERATOR || Parser().CurTok == TOK_ERROR || Parser().CurTok == TOK_UNSAFE ||
             Parser().CurTok == TOK_PUB) {
           g_recoverActive = true;
@@ -1933,7 +2015,7 @@ static int runCompilerMain(int argc, char **argv) {
             auto AST = ParseExpression();
             if (AST) {
               if (Parser().CurTok == ';') {
-                LogErrorAt(Lex().CurLoc, ErrCode::UnexpectedToken, "Unexpected ';'", SLM::ErrorCategory::SYNTAX_ERROR);
+                LogErrorAt(Lex().CurLoc, ErrCode::UnexpectedToken, "I did not expect a `;` here.", SLM::ErrorCategory::SYNTAX_ERROR);
               }
               // NOTE: no LintExpression() call here (deliberately -- see the
               // "Phase Separation: Lint All" comment near FnASTs' declaration
@@ -1970,7 +2052,7 @@ static int runCompilerMain(int argc, char **argv) {
             auto AST = ParseImport();
             if (AST) {
               if (Parser().CurTok != ';') {
-                LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
+                LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "I expected a `;` after this statement.", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
               } else {
                 getNextToken(); // eat ';'
               }
@@ -2141,7 +2223,7 @@ static int runCompilerMain(int argc, char **argv) {
       // struct type while it was still opaque (zero fields). The opaque
       // llvm::StructType* object identity is correctly preserved and later
       // filled in via setBody() -- so by the time the module finishes,
-      // GlobalSymbolTable and LLVMTypeCache both point at a fully-populated
+      // Symbols() and LLVMTypeCache both point at a fully-populated
       // struct -- but the GEP instruction itself was already permanently
       // constructed while that type had no known fields, and its embedded
       // "indexed type" information doesn't get retroactively fixed up by a
@@ -2233,6 +2315,17 @@ static int runCompilerMain(int argc, char **argv) {
       // cleanly before its own codegen ever runs, so skipping this is always
       // safe when !PreTCClean, never a missed compile.
       if (PreTCClean) {
+        // F-S4a: the flow passes, as their own phase before any body is
+        // generated (Analysis.h, runProgramFlowPasses()).
+        {
+          std::vector<const ExprAST *> Decls;
+          for (const auto &AST : PrePassASTs)
+            Decls.push_back(AST.get());
+          runProgramFlowPasses(Decls);
+        }
+        // --check generates no function body: every diagnostic a body can
+        // have was raised above or by the Resolver and TypeChecker.
+        if (!opts.Check)
         for (auto &AST : PrePassASTs) {
           if (dynamic_cast<StructDeclExprAST *>(AST.get()))
             continue;
@@ -2254,18 +2347,20 @@ static int runCompilerMain(int argc, char **argv) {
           // Block ... does not have terminator") in an unrelated function.
           if (dynamic_cast<VarDeclExprAST *>(AST.get()))
             continue;
-          size_t SavedDepth = GlobalSymbolTable ? GlobalSymbolTable->GetDepth() : 0;
+          size_t SavedDepth = Symbols() ? Symbols()->GetDepth() : 0;
           g_recoverActive = true;
           try {
             AST->codegen();
           } catch (const RecoverUnwind &) {
-            if (GlobalSymbolTable) {
-              GlobalSymbolTable->ResetToDepth(SavedDepth);
-              GlobalSymbolTable->ResetEarlyExitForCurrentScope();
+            if (Symbols()) {
+              Symbols()->ResetToDepth(SavedDepth);
+              Symbols()->ResetEarlyExitForCurrentScope();
             }
           }
           g_recoverActive = false;
         }
+        // AN-3 (a): every function's CFG exists now, so the call graph does.
+        MutualRecursion::report(GlobalCFGs);
       }
 
   // Re-open for the main pass
@@ -2350,7 +2445,7 @@ static int runCompilerMain(int argc, char **argv) {
     // not a statement, and needs the exact same hoist-then-lint treatment.
     if (Parser().CurTok == TOK_FN || Parser().CurTok == TOK_STRUCT || Parser().CurTok == TOK_ENUM ||
         Parser().CurTok == TOK_MACHINE ||
-        Parser().CurTok == TOK_AT || Parser().CurTok == TOK_EXTERN || Parser().CurTok == TOK_EXPORT ||
+        Parser().CurTok == TOK_AT || Parser().CurTok == TOK_EXTERN || Parser().CurTok == TOK_EXPORT || Parser().CurTok == TOK_STATIC || Parser().CurTok == TOK_IMMUTABLE ||
         Parser().CurTok == TOK_OPERATOR || Parser().CurTok == TOK_ERROR || Parser().CurTok == TOK_UNSAFE ||
             Parser().CurTok == TOK_PUB) {
       g_recoverActive = true;
@@ -2358,7 +2453,7 @@ static int runCompilerMain(int argc, char **argv) {
         auto AST = ParseExpression();
         if (AST) {
           if (Parser().CurTok == ';') {
-            LogErrorAt(Lex().CurLoc, ErrCode::UnexpectedToken, "Unexpected ';'", SLM::ErrorCategory::SYNTAX_ERROR);
+            LogErrorAt(Lex().CurLoc, ErrCode::UnexpectedToken, "I did not expect a `;` here.", SLM::ErrorCategory::SYNTAX_ERROR);
           }
           // lint only — not re-codegenned. Also transparently flattens a
           // top-level `unsafe { }` block -- see AppendFlattenedTopLevelDecl()'s
@@ -2385,7 +2480,7 @@ static int runCompilerMain(int argc, char **argv) {
         auto AST = ParseImport();
         if (AST) {
           if (Parser().CurTok != ';') {
-            LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
+            LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "I expected a `;` after this statement.", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
           } else {
             getNextToken(); // eat ';'
           }
@@ -2410,7 +2505,7 @@ static int runCompilerMain(int argc, char **argv) {
       auto AST = ParseExpression();
       if (AST) {
         if (Parser().CurTok != ';') {
-          LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
+          LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "I expected a `;` after this statement.", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
         } else {
           getNextToken(); // eat ';'
         }
@@ -2435,9 +2530,8 @@ static int runCompilerMain(int argc, char **argv) {
           // `--explain` page -- the one message every first-time beginner who
           // pastes code at the top level meets. (issue #263)
           LogErrorAt(StmtLoc, ErrCode::StatementOutsideFunction,
-                     "Statements are not allowed outside of a function. "
-                     "Please define 'fn main(): int' and move this code "
-                     "inside.\n  Hint: Wrap it: `fn main(): int { <this statement> return 0; }`.",
+                     "I found a statement outside a function."
+                     "\n  Hint: Move it into a function, as in `fn main(): int { <this statement> return 0; }`.",
                      SLM::ErrorCategory::SYNTAX_ERROR);
           DiagnosticEngine::flushAll();
           // _Exit (not exit): this raw exit point bypasses the rest of the
@@ -2588,6 +2682,16 @@ static int runCompilerMain(int argc, char **argv) {
     }
     g_recoverActive = false;
 
+    // AN-7 (UnusedDecls.h): dead code, once the whole program has checked.
+    if (TCClean && !DiagnosticEngine::hasErrors()) {
+      std::vector<const ExprAST *> Decls;
+      for (const auto &AST : FnASTs)
+        Decls.push_back(AST.get());
+      for (const auto &AST : TopLevelASTs)
+        Decls.push_back(AST.get());
+      UnusedDecls::report(Decls, !opts.CheckAsModule);
+    }
+
     if (opts.RunTypeChecker) {
       if (TCClean)
         std::cerr << "\n[TypeChecker] Running type-inference pass (Issue #7)...\n"
@@ -2624,15 +2728,16 @@ static int runCompilerMain(int argc, char **argv) {
   // Phase Separation: Codegen All
   // Only non-fn top-level statements need codegen here. fn bodies were already
   // compiled in the pre-pass; codegenning them again would duplicate them.
-  size_t SavedDepth = GlobalSymbolTable ? GlobalSymbolTable->GetDepth() : 0;
+  size_t SavedDepth = Symbols() ? Symbols()->GetDepth() : 0;
+  if (!opts.Check)
   for (auto &AST : TopLevelASTs) {
     g_recoverActive = true;
     try {
       AST->codegen();
     } catch (const RecoverUnwind &) {
-      if (GlobalSymbolTable) {
-        GlobalSymbolTable->ResetToDepth(SavedDepth);
-        GlobalSymbolTable->ResetEarlyExitForCurrentScope();
+      if (Symbols()) {
+        Symbols()->ResetToDepth(SavedDepth);
+        Symbols()->ResetEarlyExitForCurrentScope();
       }
     }
     g_recoverActive = false;
@@ -2683,10 +2788,10 @@ static int runCompilerMain(int argc, char **argv) {
   // like check modes but all fall through to here and link an executable, so
   // a check-only mode did not exist -- and the `turf` front end's `check`
   // needs one that provably writes no file. This is the right return point,
-  // not "right after the TypeChecker": the CFG, definite-assignment, escape
-  // and lint diagnostics are raised inside FuncDefExprAST::codegen() during the
-  // pre-pass above (CodegenFunc.cpp), so every diagnostic a real compile can
-  // print has already been flushed by now. What is left below the entry-point
+  // not "right after the TypeChecker": lint, the CFG passes and shadowing are
+  // the flow phase before Codegen (runProgramFlowPasses(), F-S4a), which
+  // --check runs and which generates no code, so every diagnostic a real
+  // compile can print has already been flushed by now. What is left below the entry-point
   // check is only what needs a runnable program (runtime bootstrap,
   // optimization, object emission, link) and is deliberately skipped. All
   // --dump-* output prints before this line, so they combine with --check
@@ -2702,18 +2807,19 @@ static int runCompilerMain(int argc, char **argv) {
   // entry point is the one EmitTestHarness() just made.
   if (!(opts.Check && opts.CheckAsModule) && opts.TestManifest.empty()) {
     // Verify that an explicit 'main' function was defined in the primary module
+    // --check generated no bodies, so `main`'s prototype is what it has.
     Function *MainFunc = TheModule->getFunction("main");
-    if (!MainFunc || MainFunc->empty()) {
+    if (!MainFunc || (MainFunc->empty() && !opts.Check)) {
       // Through the diagnostic engine (issue #263), not a raw std::cerr: a
       // beginner who forgets `main` -- or runs `turf` on an importable module
       // -- used to get one uncoded "Error:" line and no `--explain`. Raised at
       // Line 0: it is about the whole file, not a place in it (printDiag()
       // then prints no "at line").
       std::string NoMain =
-          "No entry point found. Please define 'fn main(): int' in your file.";
+          "I found no entry point. Define `fn main(): int` in your file.";
       if (opts.Check)
-        NoMain += "\n  Hint: checking a module that is only ever imported? add "
-                  "--module: `turf check --module <file.tr>`";
+        NoMain += "\n  Hint: To check a module that is only ever imported, add "
+                  "`--module`: `turf check --module <file.tr>`.";
       LogErrorAt(SourceLocation{0, 0, ""}, ErrCode::MissingEntryPoint, NoMain,
                  SLM::ErrorCategory::DECLARATION);
       DiagnosticEngine::flushAll();

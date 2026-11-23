@@ -1,0 +1,14 @@
+tests/04_control_flow/fail_foreach_duplicate_names.tr (1 error)
+
+── error at line 5, col 5 [E033 · duplicate declaration]
+
+  I cannot declare `x` again, because it is already declared.
+  Note: first declared here (line 5, col 5)
+
+  Hint: Write `x = new_value;` without the type to change its value, or give the new variable a different name.
+
+  5 │     for (x, x) in numbers {
+    │     ^~~ declared a second time here
+
+  Run `turf --explain E033` for more details.
+

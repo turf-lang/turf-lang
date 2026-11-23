@@ -10,7 +10,12 @@
 #include "frontend/AST.h"
 
 inline std::unique_ptr<ExprAST> CloneExprAST(const ExprAST *Node) {
-  return Node ? Node->clone() : nullptr;
+  if (!Node)
+    return nullptr;
+  auto Copy = Node->clone();
+  if (Copy)
+    Copy->setSpan(Node->getSpan());
+  return Copy;
 }
 
 inline std::vector<std::unique_ptr<ExprAST>>

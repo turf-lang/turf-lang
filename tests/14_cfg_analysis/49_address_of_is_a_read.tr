@@ -1,5 +1,5 @@
 // EXPECT-NO-DIAG: never used
-// EXPECT-NO-DIAG: dead store
+// EXPECT-NO-DIAG: The value assigned to
 // LEC-005 / INV-LINT-1: the liveness walk (AnalysisVisitor) had no branch for
 // `&x`, so a variable whose only use is having its address taken was reported
 // "declared but never used". Taking an address is a use. The walk is now an

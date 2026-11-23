@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E130
-// EXPECT-DIAG: Raw pointer type 'ptr' cannot be used outside an 'unsafe' block
+// EXPECT-DIAG: I cannot use the raw pointer type `ptr` outside an `unsafe` block.
 // Regression test (issue #238): declaring a raw pointer-typed variable
 // (`ptr`/`T*`) outside an `unsafe { }` block must be rejected -- this is
 // the "declaration" leg of the three explicitly gated uses (declaration,

@@ -1,0 +1,77 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+import list::List;
+
+// A method of a generic struct takes its type arguments from the receiver.
+
+@test(compile_error, E148, "a method call takes no type arguments")
+fn rejects_type_arguments_on_a_method_call(): void {
+    mut l = List<int>::default();
+    l.push::<int>(1);
+}
+
+fn plain(x: int): int {
+    return x;
+}
+
+@test(compile_error, E148, "`plain` is not generic, so it takes no type arguments, and 1 is written.")
+fn rejects_type_arguments_on_a_plain_function(): void {
+    immut a: int = plain::<int>(3);
+}
+
+// Type arguments before '::' are for '::default()' and '::new(...)'.
+
+struct Box<T> {
+    val: T
+}
+
+fn<T> Box.make() static: int {
+    return 1;
+}
+
+@test(compile_error, E148, "only build a generic struct")
+fn rejects_type_arguments_on_a_static_method(): void {
+    immut a: int = Box<int>::make();
+}
+
+@test(compile_error, E148, "`v` is a variable, not a generic function, so it takes no type arguments.")
+fn rejects_type_arguments_on_a_variable(): void {
+    immut v: int = 2;
+    immut a: int = v::<int>;
+}
+
+// The receiver is argument 1: its T and the argument's must be one type.
+
+fn<T> pick(a: T, b: T): T {
+    return b;
+}
+
+@test(compile_error, E056, "`T` in `pick` is an `int` from argument 1 and a `string` from argument 2. One type parameter stands for one type.")
+fn rejects_ufcs_conflicting_type_arguments(): void {
+    mut a: int = 3;
+    io::printline(a.pick("s"));
+}
+
+// A written type argument fixes T; the receiver must then match it exactly.
+
+fn<T> twice(x: T): T {
+    return x;
+}
+
+@test(compile_error, E056, "No visible `twice` takes an `int` as its receiver: a call with `.` matches the receiver's type exactly and never converts it.")
+fn rejects_ufcs_written_type_argument_does_not_fit(): void {
+    mut a: int = 3;
+    io::printline(a.twice::<string>());
+}
+
+// The argument must fit the written type; nothing is inferred over it.
+
+fn<T> identity(x: T): T {
+    return x;
+}
+
+@test(compile_error, E056, "No overload of `identity` takes the argument types (int).")
+fn rejects_written_type_argument_does_not_fit(): void {
+    immut s: string = identity::<string>(3);
+}

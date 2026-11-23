@@ -1,0 +1,44 @@
+TURF E182 -- MUTUAL RECURSION WITH NO BASE CASE (WARNING):
+
+CAUSE:
+  Two or more functions call each other, and every path through every one
+  of them calls back into the cycle, so no call can ever return (the stack
+  overflows at run time). This is a WARNING (it starts at `allow`).
+
+INCORRECT (compiles, but warns at `warn`):
+    fn is_even(n: int): bool {
+        return is_odd(n - 1);
+    }
+
+    fn is_odd(n: int): bool {
+        return is_even(n - 1);
+    }
+
+    fn main(): int {
+        return 0;
+    }
+
+CORRECT (each function has a path that returns):
+    fn is_even(n: int): bool {
+        if n == 0 {
+            return true;
+        }
+        return is_odd(n - 1);
+    }
+
+    fn is_odd(n: int): bool {
+        if n == 0 {
+            return false;
+        }
+        return is_even(n - 1);
+    }
+
+    fn main(): int {
+        return 0;
+    }
+
+FIX:
+  Add a base case to one function of the cycle: a path that returns without
+  calling another function of the cycle.
+
+RELATED: E010 (one function that recurses on every path).

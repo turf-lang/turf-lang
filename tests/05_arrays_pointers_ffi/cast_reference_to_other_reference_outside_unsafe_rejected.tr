@@ -1,0 +1,20 @@
+// `r to &M` read an `N` as a bigger `M` in safe code, past the end of `n`
+// (found by turf-fuzz). A reference keeps its pointee type outside
+// `unsafe { }` (owner decision 2026-10-12).
+
+struct N {
+    v: int
+}
+
+struct M {
+    a: int,
+    b: int
+}
+
+@test(compile_error, E130, "I cannot convert a `&N` to the reference `&M` outside an `unsafe` block: it may point at nothing.")
+fn rejects_cast_reference_to_other_reference_outside_unsafe(): void {
+    mut n: N = N::default();
+    mut r: &N = &n;
+    mut c: &M = r to &M;
+    c.b;
+}

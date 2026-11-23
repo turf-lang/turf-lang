@@ -1,0 +1,65 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+import map::Map;
+
+// Inference does not widen: 2.5 is not passed to an int clone.
+fn<T> pair(a: T, b: T): T {
+    return b;
+}
+
+@test(compile_error, E056, "`T` in `pair` is an `int` from argument 1 and a `double` from argument 2. One type parameter stands for one type.")
+fn rejects_generic_conflicting_int_double(): void {
+    printline(pair(1, 2.5));
+}
+
+// The arguments of a generic constructor widen to the declared type but never
+// narrow: a double does not become an int on the way in.
+struct Box<T> {
+    v: T
+}
+
+fn<T> Box.new(v: T): void {
+    self.v = v;
+}
+
+@test(compile_error, E056, "Argument 1 is a `double`, and building a `Box<int>` needs an `int` there.")
+fn rejects_generic_constructor_no_narrowing(): void {
+    mut b: Box<int> = Box::new(2.5);
+    b.v;
+}
+
+// A receiver has no declared type to take an instantiation from, so
+// `Map::default().get(...)` cannot know K and V. It was an internal compiler
+// error ("failed to re-resolve") plus an E148 inside lib/std/collections/map.tr.
+
+@test(compile_error, E138, "`Map` is generic, so `Map::default()` needs type arguments, and nothing here says which.")
+fn rejects_generic_default_as_method_receiver(): void {
+    mut v: int = Map::default().get("nope");
+    v;
+}
+
+// `guess` has nothing to instantiate `id` at: the value's type would come
+// from the very thing being inferred.
+fn<T> id(x: T): T {
+    return x;
+}
+
+@test(compile_error, E137, "`id` is generic (fn<T>(T): T), and nothing here gives the function type its type arguments come from.")
+fn rejects_generic_function_value_without_type(): void {
+    mut f = id;
+}
+
+struct Plain {
+    n: int
+}
+
+fn<U> Plain.echo(x: U, y: U): int {
+    return 1;
+}
+
+@test(compile_error, E056, "`U` in `echo` is an `int` from argument 1 and a `bool` from argument 2. One type parameter stands for one type.")
+fn rejects_generic_method_conflicting_type_arguments(): void {
+    mut p: Plain = Plain::default();
+    p.echo(1, true);
+}

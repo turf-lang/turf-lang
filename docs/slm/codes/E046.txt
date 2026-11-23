@@ -18,8 +18,8 @@ CORRECT SYNTAX:
     }
 
 INCORRECT:
-    fn Point.new(x: int, y: int) static: void {   // ERROR: 'new' can't
-        self.x = x;                               //        be 'static'.
+    fn Point.new(x: int, y: int) static: void {   // ERROR: I cannot
+        self.x = x;                               //        make `new` `static`.
         self.y = y;
     }
 

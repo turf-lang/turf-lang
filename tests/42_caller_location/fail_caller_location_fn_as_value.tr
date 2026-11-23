@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E137
-// EXPECT-DIAG: 'where' is marked @caller_location, so it can't be used as a function value
+// EXPECT-DIAG: I cannot use `where` as a function value, because it is marked `@caller_location`
 // The hidden location argument is not part of `fn(): string`, so an indirect
 // call through `f` would have no location to pass.
 @caller_location

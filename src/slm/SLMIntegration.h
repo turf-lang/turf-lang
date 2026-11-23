@@ -2,6 +2,7 @@
 #define SLM_INTEGRATION_H
 
 #include "diagnostics/ErrorCategory.h" // for ErrorCategory
+#include "diagnostics/FixScore.h"     // SL-1
 #include "frontend/Lexer.h"            // for RelatedLocation
 #include <string>
 #include <vector>
@@ -14,9 +15,19 @@ namespace SLM {
 
 struct AISuggestion {
   float confidence = 0.0f;
+  // What the user reads about a fix, written after the sandbox accepted it by
+  // one more request that sees the error and the whole original-to-final
+  // edit (explainFix(), #364): a one-line summary and a short explanation.
+  // Empty until then, and empty for a fix whose explanation request fails
+  // (the fix is shown without one). Cached with the fix.
+  std::string summary;
   std::string explanation;
+  // The model's own reasoning before its edit (the fix request's first
+  // field, so a small model thinks before it writes code). Never shown,
+  // never cached: it is written before the sandbox runs, so it may doubt
+  // what the sandbox then settles.
+  std::string reasoning;
   std::string fix_mode = "NONE";
-  std::string suggested_comment;
   // The edit, as the model states it (schema version kSlmSchemaVersion, see
   // SLMIntegration.cpp): the lines it wants to change, copied from the code
   // it was shown, and what they should become. The model never says WHERE --
@@ -36,7 +47,6 @@ struct AISuggestion {
   int patchStart = 0;
   int patchEnd = 0;
   std::string patchText;
-  std::string warning;
   std::string self_reported_category; // Model's own assessment of error category
   bool valid = false;
   bool sandbox_validated = false; // Whether sandbox validation passed
@@ -57,6 +67,13 @@ struct AISuggestion {
   // answer meant a wrong one was replayed as attempt 1 on every later run.
   std::string cacheKey;
   bool fromCache = false;
+  // SL-1: the Fix Score of a validated suggestion (diagnostics/FixScore.h).
+  // Display is decided by its tier, never by `confidence`, which is kept as
+  // the old score for TURF_SLM_DEBUG and the benchmark's Brier score.
+  FixScore::Facts score;
+  // How far the sandbox re-checked it: "front end" or "analysis" (#363,
+  // Sandbox.h's SandboxDepth). Empty for a suggestion never sandboxed.
+  std::string sandboxDepth;
 };
 
 // The source lines [errorLine - contextSize, errorLine + contextSize], joined
@@ -64,6 +81,15 @@ struct AISuggestion {
 // marker. Verbatim on purpose, so any line copied out of it is a valid
 // `original_code`; which line the error is on travels in the prompt's own
 // "error_line" field. Empty when no source has been loaded.
+// SL-1, --smart=thorough: how many more answers the model is asked for
+// after one validates (0 without the flag). Each is sampled (temperature
+// ThoroughTemperature, seeded by its number, so a run repeats), checked in the
+// sandbox, and never cached; the number of different programs among the
+// validated ones is the suggestion's `Candidates`.
+inline constexpr int ThoroughSamples = 2;
+inline constexpr float ThoroughTemperature = 0.7f;
+extern int ExtraSamples;
+
 std::string getCodeContext(int errorLine, int contextSize = 10);
 
 // The coloured before/after of a validated suggestion, ready to print under
@@ -74,7 +100,7 @@ std::string getCodeContext(int errorLine, int contextSize = 10);
 // (SourceLines is never committed to), not from original_code/new_code, so a
 // fuzzy-matched copy shows what was really replaced. Empty when the
 // suggestion carries no validated patch.
-std::string renderPatchDiff(const AISuggestion &suggestion);
+std::string renderPatchDiff(const AISuggestion &suggestion, bool color = true);
 
 // Fetches a suggestion from the SLM based on the error message, source
 // context, and optional hint. Returns an empty AISuggestion if the SLM fails or times out.

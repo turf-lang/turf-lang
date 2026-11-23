@@ -9,8 +9,8 @@ Here's the correct way to build a struct:
 
 If you already have a `Point` called `p` and try to call `.new(...)` or `.default()` on it directly, Turf stops you:
 
-    p.new(3, 4);      // ERROR: 'new' can't be called on an instance with '.'
-    p.default();       // ERROR: 'default' can't be called on an instance with '.'
+    p.new(3, 4);      // ERROR: I cannot call `new` on an instance with `.`.
+    p.default();       // ERROR: I cannot call `default` on an instance with `.`.
 
 It's an easy slip to make, especially if you're used to languages where "calling a constructor again" on an existing object is a normal thing to do. In Turf it isn't -- construction always makes a brand-new value, and it always goes through `::` on the type name, not `.` on a variable.
 

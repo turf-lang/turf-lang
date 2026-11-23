@@ -95,14 +95,16 @@ static void checkAnnotations(const AnnotatedDecl &Decl,
         Spec = &S;
     }
     if (!Spec) {
-      std::string Hint = "The known annotations are: ";
+      std::string List;
       for (size_t I = 0; I < Names.size(); ++I)
-        Hint += (I ? ", @" : "@") + Names[I];
-      Hint += ".";
+        List += (I ? ", @" : "@") + Names[I];
       auto Near = SuggestionIndex::suggestVisible(Ann.Name, Names);
-      if (!Near.empty())
-        Hint = "Did you mean '@" + Near.front() + "'? " + Hint;
-      InvalidAnnotationError(Ann.Loc, "Unknown annotation '@" + Ann.Name + "'.",
+      std::string Hint = Near.empty()
+                             ? "Use one of the known annotations: " + List + "."
+                             : "Write `@" + Near.front() +
+                                   "` instead, or use one of the known annotations: " +
+                                   List + ".";
+      InvalidAnnotationError(Ann.Loc, "I do not know an annotation named `@" + Ann.Name + "`.",
                              Hint)
           .raise();
       continue;
@@ -113,12 +115,13 @@ static void checkAnnotations(const AnnotatedDecl &Decl,
       InvalidAnnotationError(
           Ann.Loc, Problem,
           Ann.Name == TestAnnotation::Name
-              ? std::string("'@test', or '@test(<outcome>, ...)', marks a function that takes "
-                            "nothing and returns 'void' or '!void'; the outcomes are ") +
-                    TestAnnotation::OutcomeList + "."
-              : std::string("An annotation states a fact about the declaration "
-                            "under it (e.g. '@ownership(acquires)' on a "
-                            "function that returns a fresh allocation)."))
+              ? std::string("Put `@test`, or `@test(<outcome>, <options>)`, on a function that "
+                            "takes nothing and returns `void` or `!void`. The outcomes are ") +
+                    TestAnnotation::OutcomeList + "; the options are " +
+                    TestAnnotation::OptionList + "."
+              : std::string("Put the annotation on a declaration it describes, as in "
+                            "`@ownership(acquires)` on a function that returns a "
+                            "fresh allocation."))
           .raise();
   }
 }
@@ -178,29 +181,29 @@ void Resolver::checkTestFunction(const FuncDefExprAST &Node) {
   TestAnnotation::Spec Spec;
   if (!Ann || !TestAnnotation::parse(*Ann, Spec).empty())
     return;
-  const char *Hint = "A test is a plain top-level function, with '@test' on the line "
-                     "above it: 'fn parses_a_port(): void { ... }'.";
+  const char *Hint = "Write the test as a plain top-level function with `@test` on the line "
+                     "above it, as in `fn parses_a_port(): void { ... }`.";
   if (!Node.getTypeParams().empty() || !Node.SizeParams.empty())
-    InvalidAnnotationError(Ann->Loc, "A test cannot be generic: 'turf test' has no type to run it with.",
+    InvalidAnnotationError(Ann->Loc, "I cannot run a generic function as a test, because `turf test` has no type to run it with.",
                            Hint)
         .raise();
   if (Node.getName().find('.') != std::string::npos)
-    InvalidAnnotationError(Ann->Loc, "A method cannot be a test; '@test' marks a top-level function.",
+    InvalidAnnotationError(Ann->Loc, "I cannot use a method as a test, because `@test` marks a top-level function.",
                            Hint)
         .raise();
   if (Node.getName() == "main")
-    InvalidAnnotationError(Ann->Loc, "'main' cannot be a test: it is the program's entry point.",
+    InvalidAnnotationError(Ann->Loc, "I cannot use `main` as a test, because it is the program's entry point.",
                            Hint)
         .raise();
   if (Node.hasCallerLocation())
-    InvalidAnnotationError(Ann->Loc, "A test has no caller, so it cannot be '@caller_location'.",
+    InvalidAnnotationError(Ann->Loc, "I cannot use `@caller_location` on a test, because a test has no caller.",
                            Hint)
         .raise();
   if (Spec.Kind == TestAnnotation::Outcome::Error) {
     // Resolved the way a written `Type::Variant` is: `ParseError`, an
     // imported `FsError`, or `fs::FsError`.
-    const char *ErrorHint = "An 'error' outcome names a variant of an error type the program "
-                            "declares or imports, e.g. '@test(error, ParseError::Empty)'.";
+    const char *ErrorHint = "Name a variant of an error type the program declares or imports, "
+                            "as in `@test(error, ParseError::Empty)`.";
     const size_t Sep = Spec.ErrorType.rfind("::");
     const std::string Qualifier = Sep == std::string::npos ? "" : Spec.ErrorType.substr(0, Sep);
     const std::string TypeName =
@@ -210,12 +213,12 @@ void Resolver::checkTestFunction(const FuncDefExprAST &Node) {
                   ? SymTable_.lookupErrorType(*Identity)
                   : nullptr;
     if (!ET)
-      InvalidAnnotationError(Ann->Loc, "'" + Spec.ErrorType + "' is not an error type.", ErrorHint)
+      InvalidAnnotationError(Ann->Loc, "I cannot use `" + Spec.ErrorType + "` in `@test`, because it is not an error type.", ErrorHint)
           .raise();
     else if (!ET->hasVariant(Spec.ErrorVariant))
       InvalidAnnotationError(Ann->Loc,
-                             "Error type '" + Spec.ErrorType + "' has no variant '" +
-                                 Spec.ErrorVariant + "'.",
+                             "The error type `" + Spec.ErrorType + "` has no variant `" +
+                                 Spec.ErrorVariant + "`.",
                              ErrorHint)
           .raise();
     else
@@ -279,12 +282,11 @@ void Resolver::resolveFuncDef(FuncDefExprAST &Node) {
       const auto OwnParams = Node.getTypeOnlyParams();
       if (std::find(OwnParams.begin(), OwnParams.end(), Receiver) != OwnParams.end()) {
         TypeError(Node.getNameLoc(), ErrCode::MethodOnNonStruct,
-                  "'" + Receiver + "' is a type parameter of '" + FullName +
-                      "', not a struct, so it cannot have methods.",
-                  "A method is declared on a struct: name the struct after "
-                  "the '<...>' list and give its type parameters other names, "
-                  "as in 'fn<T> Box.get(): T' for 'struct Box<T>'.",
-                  "No such struct!")
+                  "I cannot declare methods on `" + Receiver + "`, because it is a type parameter of `" +
+                      FullName + "` and not a struct.",
+                  "Name the struct after the `<...>` list and give the type "
+                  "parameters other names, as in `fn<T> Box.get(): T` for "
+                  "`struct Box<T>`.")
             .raise();
         return;
       }
@@ -329,12 +331,11 @@ void Resolver::resolveFuncDef(FuncDefExprAST &Node) {
         for (size_t i = 0; i < Generic->second.size(); ++i)
           Params += (i ? ", " : "") + Generic->second[i];
         TypeError(Node.getNameLoc(), ErrCode::MissingTypeArguments,
-                  "'" + Bare + "' is generic, so its method '" + MethodPart +
-                      "' must declare its type parameters too.",
-                  "Declare it as 'fn<" + Params + "> " + Bare + "." +
-                      MethodPart + "(...)' -- the same parameters as 'struct " +
-                      Bare + "<" + Params + ">'.",
-                  "Missing type parameters!")
+                  "`" + Bare + "` is generic, so its method `" + MethodPart +
+                      "` must declare the type parameters too.",
+                  "Declare it as `fn<" + Params + "> " + Bare + "." +
+                      MethodPart + "(...)`, with the same parameters as `struct " +
+                      Bare + "<" + Params + ">`.")
             // The hint above already IS the fix, so the compiler prints it
             // as the `Fix:` (issue #267: given this exact hint, a model
             // still answered `-> int` and `fn<Box<T>>`): insert the
@@ -362,9 +363,9 @@ void Resolver::resolveFuncDef(FuncDefExprAST &Node) {
   // a diagnostic that names the actual constraint.
   if (Node.getName() == "main" && !Node.getParams().empty()) {
     SemanticError(Node.getLoc(),
-                   "'main' cannot declare parameters -- it is the "
-                   "program's entry point and always has the implicit "
-                   "C-ABI signature (argc, argv).")
+                   "I cannot give `main` parameters, because it is the program's "
+                   "entry point.",
+                   "Remove the parameters from `main`.")
         .raise();
     return;
   }
@@ -397,7 +398,7 @@ void Resolver::resolveFuncDef(FuncDefExprAST &Node) {
   // TurfPointerType(NamedType(StructName))), so a genuinely misspelled
   // struct name in a method declaration (`fn Usre.grow()`) is caught here --
   // that specific check used to live in the Parser as an eager
-  // GlobalSymbolTable lookup, but had to be made lazy to support struct
+  // Symbols() lookup, but had to be made lazy to support struct
   // methods declared before their struct (see ParseFuncDef's comment); this
   // is where that validation now correctly belongs instead. (By this point
   // the substitution above has already turned any of this function's own
@@ -423,8 +424,13 @@ void Resolver::resolveFuncDef(FuncDefExprAST &Node) {
       // "declared here" note always say "line 0, column 0" for the FIRST
       // occurrence, regardless of where it actually was.
       ResolverSourceLocation ParamLoc{Param.Loc.Line, Param.Loc.Col};
-      SymTable_.declareVariable(Param.Name, Param.Type, ParamLoc,
-                                 /*IsImmutable=*/false, /*IsParameter=*/true);
+      auto Sym = SymTable_.declareVariable(Param.Name, Param.Type, ParamLoc,
+                                           /*IsImmutable=*/false, /*IsParameter=*/true);
+      if (Sym && Param.TypeLoc.EndCol > Param.TypeLoc.Col &&
+          Param.TypeLoc.EndLine == Param.TypeLoc.Line) {
+        Sym->TypeLoc = {Param.TypeLoc.Line, Param.TypeLoc.Col};
+        Sym->TypeEndCol = Param.TypeLoc.EndCol;
+      }
     } catch (const std::runtime_error &) {
       auto Prev = SymTable_.lookupVariable(Param.Name);
       // Point the error itself at the DUPLICATE parameter's own occurrence
@@ -436,7 +442,7 @@ void Resolver::resolveFuncDef(FuncDefExprAST &Node) {
         SourceLocation PrevLoc{Prev->DeclLoc.Line, Prev->DeclLoc.Col};
         DuplicateDeclarationError(ErrLoc, Param.Name, PrevLoc).raise();
       } else {
-        SyntaxError(ErrLoc, ErrCode::DuplicateDeclaration, "Duplicate declaration of '" + Param.Name + "'").raise();
+        SyntaxError(ErrLoc, ErrCode::DuplicateDeclaration, "I found `" + Param.Name + "` declared twice.").raise();
       }
     }
   }
@@ -682,10 +688,10 @@ void Resolver::validateNamedType(
         std::find(CurrentSizeParams_.begin(), CurrentSizeParams_.end(), Spelling) !=
             CurrentSizeParams_.end()) {
       TypeError(Loc, ErrCode::SizeParameter,
-                "'" + Spelling + "' is a size parameter, not a type: it can only "
-                "be an array's size, as in 'T[" + Spelling + "]'.",
-                "For a value of the element type, declare a type parameter too: "
-                "'fn<T, " + Spelling + ": size>' and use 'T'.")
+                "`" + Spelling + "` is a size parameter, so it can only "
+                "be an array's size, as in `T[" + Spelling + "]`.",
+                "Declare a type parameter too, as in `fn<T, " + Spelling +
+                ": size>`, and use `T` for the element type.")
           .raise();
       return std::nullopt;
     }
@@ -777,20 +783,18 @@ void Resolver::validateNamedType(
         const std::string Bare = TypeIdentity::bareName(GT->getBaseName());
         std::string Message, Hint;
         if (Expected == 0) {
-          Message = "'" + Bare + "' is not generic -- it takes no type arguments.";
-          Hint = "Write it as plain '" + Bare + "'.";
+          Message = "`" + Bare + "` is not generic, so it takes no type arguments.";
+          Hint = "Write it as plain `" + Bare + "`.";
         } else {
           std::string Params;
           for (size_t I = 0; I < Expected; ++I)
             Params += (I ? ", " : "") + Generic->second[I];
-          Message = "'" + Bare + "' takes " + std::to_string(Expected) +
+          Message = "`" + Bare + "` takes " + std::to_string(Expected) +
                     " type argument" + (Expected == 1 ? "" : "s") + " (" +
-                    Params + "), but " + std::to_string(Given) +
-                    (Given == 1 ? " was" : " were") + " given.";
-          Hint = "Give one type for each of '" + Bare + "<" + Params + ">'.";
+                    Params + "), but I found " + std::to_string(Given) + ".";
+          Hint = "Give one type for each of `" + Bare + "<" + Params + ">`.";
         }
-        TypeError(Loc, ErrCode::WrongTypeArgumentCount, Message, Hint,
-                  "Wrong number of type arguments!")
+        TypeError(Loc, ErrCode::WrongTypeArgumentCount, Message, Hint)
             .raise();
         return;
       }
@@ -804,7 +808,7 @@ void Resolver::validateNamedType(
   // (IntType, DoubleType, etc.) and never reach here as NamedType. A true
   // TurfGenericParamType instance is a different class entirely and is
   // correctly never matched here either -- but ParseType() never actually
-  // produces one for a type ANNOTATION (only GlobalSymbolTable's separate,
+  // produces one for a type ANNOTATION (only Symbols()'s separate,
   // Codegen-facing registration does), so the caller-supplied TypeParams
   // list below is what actually exempts `T` in `fn<T> f(x: T)`.
   //
@@ -831,9 +835,8 @@ void Resolver::validateNamedType(
         return;
       const std::string Bare = TypeIdentity::bareName(Id);
       TypeError(Loc, ErrCode::MissingTypeArguments,
-                "'" + Bare + "' is generic -- it needs type arguments here.",
-                "Write the instantiation you mean, e.g. '" + Bare + "<int>'.",
-                "Missing type arguments!")
+                "`" + Bare + "` is generic, so I need type arguments here.",
+                "Write the instantiation you mean, as in `" + Bare + "<int>`.")
           .raise();
     };
     if (NT->isResolvedIdentity()) {
@@ -944,11 +947,9 @@ void Resolver::visitStructDecl(StructDeclExprAST &Node) {
   if (FunctionNestingDepth_ > 0 && !Node.getTypeParams().empty()) {
     const std::string Bare = TypeIdentity::bareName(Node.getName());
     TypeError(Node.getLoc(), ErrCode::LocalGenericStruct,
-              "'" + Bare + "' is declared inside a function, so it can't have type "
-              "parameters.",
-              "Move 'struct " + Bare + "<...>' to the top level of the file, or "
-              "drop its type parameters and give its fields concrete types.",
-              "Generic struct inside a function!")
+              "I cannot give `" + Bare + "` type parameters, because it is declared inside a function.",
+              "Move `struct " + Bare + "<...>` to the top level of the file, or "
+              "remove its type parameters and give its fields concrete types.")
         .raise();
   }
   if (FunctionNestingDepth_ > 0)
@@ -1013,12 +1014,12 @@ void Resolver::visitStructDecl(StructDeclExprAST &Node) {
     for (auto &Field : Node.getFieldsMut())
       Field.Type = substituteTypeParams(Field.Type, TypeParams);
 
-    // OVH-006: GlobalSymbolTable's registered TurfStructType for this name
+    // OVH-006: Symbols()'s registered TurfStructType for this name
     // (ParseStructDecl(), built at PARSE time, directly from the as-parsed
     // Fields) is a SEPARATE object from this AST node -- the substitution
     // two lines up only ever updated the node's OWN field list, so every
     // downstream consumer that resolves a field type by looking the struct
-    // back up via GlobalSymbolTable->LookupType(Name) (TypeCheckerCall.cpp's
+    // back up via Symbols()->LookupType(Name) (TypeCheckerCall.cpp's
     // visitFieldAccess/visitMethodCall, CodegenCore.cpp's mirrors) saw the
     // stale, unsubstituted NamedType("T") forever, never a real
     // TurfGenericParamType. That NamedType then had to be told apart from an
@@ -1034,8 +1035,8 @@ void Resolver::visitStructDecl(StructDeclExprAST &Node) {
     // NamedType-vs-registered-type heuristics simply never fires for a
     // struct's own type parameter again, regardless of what else in the
     // program happens to be named the same.
-    if (GlobalSymbolTable)
-      GlobalSymbolTable->RegisterType(
+    if (Symbols())
+      Symbols()->RegisterType(
           Node.getName(),
           std::make_shared<TurfStructType>(Node.getName(), Node.getFields(),
                                            Node.getTypeParams()));
@@ -1070,7 +1071,7 @@ void Resolver::visitArrayDecl(ArrayDeclExprAST &Node) {
       SourceLocation PrevLoc{Prev->DeclLoc.Line, Prev->DeclLoc.Col};
       DuplicateDeclarationError(Node.getLoc(), Node.getName(), PrevLoc).raise();
     } else {
-      SyntaxError(Node.getLoc(), ErrCode::DuplicateDeclaration, "Duplicate declaration of '" + Node.getName() + "'").raise();
+      SyntaxError(Node.getLoc(), ErrCode::DuplicateDeclaration, "I found `" + Node.getName() + "` declared twice.").raise();
     }
   }
 }

@@ -1,0 +1,13 @@
+tests/18_operator_overload/19_generic_operator_user_struct_forms.tr (1 warning)
+
+── warning at line 67, col 21 [E166 · comparison with itself]
+
+  `ci` is compared with itself, so the result is always true (unless the value can be NaN).
+
+  Hint: Compare `ci` with a different variable.
+
+  67 │     test::assert(ci == ci, "Cell<int> == Cell<int>");
+     │                     ^~ this compares a value with itself
+
+  Run `turf --explain E166` for more details.
+

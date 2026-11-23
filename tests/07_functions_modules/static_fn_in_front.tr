@@ -1,0 +1,34 @@
+// SY-4 (TDP-2-024), issue #328: `static` is written in front of `fn`, with
+// `pub`/`public` before it and type parameters after `fn`. Every static rule
+// holds: the method has no `self` and is called as `T::m`.
+import test;
+
+struct Counter {
+    n: int
+}
+
+static fn Counter.zero(): Counter {
+    return Counter::default();
+}
+
+pub static fn Counter.from(n: int): Counter {
+    mut c: Counter = Counter::default();
+    c.n = n;
+    return c;
+}
+
+public static fn Counter.limit(): int {
+    return 100;
+}
+
+static fn<T> Counter.pick(a: T, b: T): T {
+    return b;
+}
+
+fn main(): int {
+    test::assert(Counter::zero().n == 0, "static fn");
+    test::assert(Counter::from(5).n == 5, "pub static fn");
+    test::assert(Counter::limit() == 100, "public static fn");
+    test::assert(Counter::pick(1, 2) == 2, "static fn<T>");
+    return 0;
+}

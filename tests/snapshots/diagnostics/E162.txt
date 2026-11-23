@@ -1,0 +1,24 @@
+tests/04_control_flow/range_never_ends_warning.tr (2 warnings)
+
+── warning at line 9, col 5 [E162 · range that never ends]
+
+  This loop never reaches its end: 5..1 counts down, but the step counts up.
+
+  Hint: Add a decreasing step: `for i in 5..1 step i-- { ... }`.
+
+  9 │     for i in 5..1 {
+    │     ^~~ this range never ends
+
+  Run `turf --explain E162` for more details.
+
+── warning at line 16, col 5 [E162 · range that never ends]
+
+  This loop never reaches its end: 1..5 counts up, but the step counts down.
+
+  Hint: Use an increasing step, such as the default.
+
+  16 │     for i in 1..5 step i-- {
+     │     ^~~ this range never ends
+
+  Run `turf --explain E162` for more details.
+

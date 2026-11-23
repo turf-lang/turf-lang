@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E052
-// EXPECT-DIAG: 'square' is a static method
+// EXPECT-DIAG: `square` is a static method
 // The no-argument form of fail_static_method_via_instance.tr. With no
 // argument, the receiver '.' passes as `self` made the count match the
 // static method's one parameter, so the call was accepted with the receiver

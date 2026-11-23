@@ -1,0 +1,13 @@
+tests/37_guess_inference/fail_guess_no_init.tr (1 error)
+
+── error at line 9, col 5 [E128 · missing initializer]
+
+  `x` is declared `guess` with no initial value, so I have nothing to infer its type from.
+
+  Hint: Give it an initial value, or write its type instead of `guess`.
+
+  9 │     mut x: guess;
+    │     ^~~ this has no initial value
+
+  Run `turf --explain E128` for more details.
+

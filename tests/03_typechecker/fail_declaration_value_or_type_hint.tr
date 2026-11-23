@@ -1,0 +1,7 @@
+// EXPECT-DIAG: E066
+// EXPECT-DIAG: Declare `count` as `bool`, or give it an `int` value.
+// #365: a declaration's type and value disagree; the hint names both sides.
+fn main(): int {
+    mut count: int = true;
+    return count;
+}

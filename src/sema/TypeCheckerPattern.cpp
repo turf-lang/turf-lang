@@ -17,6 +17,7 @@
  */
 
 #include "sema/TypeChecker.h"
+#include "sema/SpanLabels.h"
 
 #include "frontend/AST.h"
 #include "diagnostics/Errors.h"
@@ -70,8 +71,8 @@ TurfTypePtr resolveNamed(const TurfTypePtr &T) {
   if (!T)
     return T;
   if (const auto *NT = dynamic_cast<const NamedType *>(T.get()))
-    if (GlobalSymbolTable)
-      if (auto R = GlobalSymbolTable->LookupType(NT->getName()))
+    if (Symbols())
+      if (auto R = Symbols()->LookupType(NT->getName()))
         return R;
   return T;
 }
@@ -98,12 +99,11 @@ bool TypeChecker::checkPattern(
       // name must mean the same type on every path that reaches it.
       InvalidPatternError(
           B->getLoc(),
-          "'" + B->getName() + "' is bound as '" + BoundTy->getName() +
-              "' here but as '" + Prev->second->getName() +
-              "' in another header of the same arm.",
-          "Stacked `matches` headers share one body, so a name has to have "
-          "one type. Rename one of the bindings, or split the headers into "
-          "separate arms.")
+          "`" + B->getName() + "` is bound as " + SpanLabels::aType(BoundTy) +
+              " here and as " + SpanLabels::aType(Prev->second) +
+              " in another header of the same arm. Stacked `matches` headers "
+              "share one body, so a name has one type.",
+          "Rename one of the bindings, or split the headers into separate arms.")
           .raise();
       return true;
     }
@@ -125,8 +125,8 @@ bool TypeChecker::checkPattern(
       if (PT->isNullableReference()) {
         InvalidPatternError(
             S->getLoc(),
-            "can't destructure '" + ValueTy->getName() +
-                "': the reference may be null.",
+            "I cannot destructure `" + ValueTy->getName() +
+                "`: the reference may be `null`.",
             "Test it first (`if r != null { ... }`) and match the narrowed "
             "reference, or read the fields through `r.field` inside that "
             "branch.")
@@ -136,9 +136,9 @@ bool TypeChecker::checkPattern(
       if (!PT->isReference() && !SelfSubject) {
         InvalidPatternError(
             S->getLoc(),
-            "can't destructure the raw pointer '" + ValueTy->getName() + "'.",
-            "A pattern only looks through a safe reference ('&T'). Take a "
-            "'&T' to the value, or read its fields with '.field'.")
+            "I cannot destructure the raw pointer `" + ValueTy->getName() +
+                "`: a pattern only looks through a safe reference, `&T`.",
+            "Take a `&T` to it, or read its fields with `.field`.")
             .raise();
         return false;
       }
@@ -151,8 +151,8 @@ bool TypeChecker::checkPattern(
     TurfTypePtr Resolved = ValueTy;
     if (const auto *GT = dynamic_cast<const GenericType *>(ValueTy.get())) {
       GenericArgs = GT->getTypeArgs();
-      if (GlobalSymbolTable)
-        Resolved = GlobalSymbolTable->LookupType(GT->getBaseName());
+      if (Symbols())
+        Resolved = Symbols()->LookupType(GT->getBaseName());
     } else {
       Resolved = resolveNamed(ValueTy);
     }
@@ -160,12 +160,12 @@ bool TypeChecker::checkPattern(
     if (!STy) {
       InvalidPatternError(
           S->getLoc(),
-          "this is a struct pattern, but the value it is matched against has "
-          "type '" + (Ty ? Ty->getName() : std::string("<unknown>")) +
-              "', which is not a struct.",
-          "A struct pattern (`Point { x, y }`) destructures a struct value. "
-          "Match an int, string, char, bool or enum against a value "
-          "(`matches 3:`, `matches Color::Red:`) instead.")
+          "This is a struct pattern, and what it matches is " +
+              (Ty ? SpanLabels::aType(Ty) : std::string("of an unknown type")) +
+              ", not a struct.",
+          "Match an `int`, a `string`, a `char`, a `bool` or an enum with a "
+          "literal or a variant instead, e.g. `matches 3:` or "
+          "`matches Color::Red:`.")
           .raise();
       return false;
     }
@@ -176,8 +176,8 @@ bool TypeChecker::checkPattern(
     if (S->getTypeSpelling() && S->getTypeSpelling()->getName() != STy->getName()) {
       InvalidPatternError(
           S->getLoc(),
-          "this pattern destructures '" + S->getTypeSpelling()->getName() +
-              "', but the value being matched is a '" + STy->getName() + "'.",
+          "This pattern destructures " + SpanLabels::aType(S->getTypeSpelling()) +
+              ", and what it matches is " + SpanLabels::aType(STy) + ".",
           "Name the value's own struct: `" + TypeIdentity::bareName(STy->getName()) +
               " { ... }`.")
           .raise();
@@ -255,7 +255,7 @@ bool TypeChecker::checkPattern(
       if (!Missing.empty()) {
         std::string List;
         for (size_t I = 0; I < Missing.size(); ++I)
-          List += (I ? ", '" : "'") + Missing[I] + "'";
+          List += (I ? ", `" : "`") + Missing[I] + "`";
         const std::string Example =
             TypeIdentity::bareName(STy->getName()) + " { " +
             (S->getFields().empty() ? std::string()
@@ -263,11 +263,11 @@ bool TypeChecker::checkPattern(
             ".. }";
         InvalidPatternError(
             S->getLoc(),
-            "this pattern doesn't mention the field" +
-                std::string(Missing.size() > 1 ? "s " : " ") + List + " of '" +
-                STy->getName() + "'.",
+            "This pattern does not mention the field" +
+                std::string(Missing.size() > 1 ? "s " : " ") + List + " of `" +
+                STy->getName() + "`.",
             "List every field, or end the pattern with `..` to ignore the "
-            "ones you don't need: `" + Example + "`.")
+            "ones you do not need: `" + Example + "`.")
             .raise();
         return false;
       }
@@ -281,21 +281,21 @@ bool TypeChecker::checkPattern(
     if (!Subject || !(Subject->isAnyError() || Subject->isUserError())) {
       InvalidPatternError(
           EV->getLoc(),
-          "this is an error-variant pattern, but the value it is matched "
-          "against has type '" + (Ty ? Ty->getName() : std::string("<unknown>")) +
-              "', which is not an error.",
-          "An error-variant pattern (`IOError::NotFound(path)`) matches an "
-          "error value -- the `err` bound by `recover as err run`. Match an "
-          "int, string, char, bool or enum against a value instead "
-          "(`matches 3:`, `matches Color::Red:`).")
+          "This is an error-variant pattern, and what it matches is " +
+              (Ty ? SpanLabels::aType(Ty) : std::string("of an unknown type")) +
+              ", not an error.",
+          "Use an error-variant pattern, e.g. `IOError::NotFound(path)`, on "
+          "the `err` of `recover as err run`; match an `int`, a `string`, a "
+          "`char`, a `bool` or an enum with a literal or a variant, e.g. "
+          "`matches 3:`.")
           .raise();
       return false;
     }
 
     const auto *Head = dynamic_cast<const ScopeAccessExprAST *>(EV->getHead());
     const TurfUserErrorType *ET = nullptr;
-    if (Head && GlobalSymbolTable)
-      if (auto T = GlobalSymbolTable->LookupType(Head->getLeftName()))
+    if (Head && Symbols())
+      if (auto T = Symbols()->LookupType(Head->getLeftName()))
         ET = dynamic_cast<const TurfUserErrorType *>(T.get());
     const ErrorVariantInfo *Info = ET ? ET->getVariantInfo(Head->getRightName()) : nullptr;
     if (!Info) // The Resolver already reported an unknown type or variant.
@@ -310,10 +310,10 @@ bool TypeChecker::checkPattern(
     if (Subject->isUserError() && Subject->getName() != ET->getName()) {
       InvalidPatternError(
           EV->getLoc(),
-          "this pattern is over '" + Full + "', but the value being matched is "
-          "a '" + Subject->getName() + "'.",
-          "A value of the error type '" + Subject->getName() +
-              "' can only be one of its own variants -- name one of those.")
+          "This pattern is over `" + Full + "`, and what it matches is " +
+              SpanLabels::aType(Subject) + ".",
+          "Name one of the variants of `" + Subject->getName() +
+              "`: an error of that type is only ever one of its own.")
           .raise();
       return false;
     }
@@ -328,8 +328,8 @@ bool TypeChecker::checkPattern(
       if (N > 0) {
         InvalidPatternError(
             EV->getLoc(),
-            "'" + Full + "' has " + std::to_string(N) + " field" +
-                (N == 1 ? "" : "s") + ", so a pattern for it must say what to "
+            "`" + Full + "` has " + std::to_string(N) + " field" +
+                (N == 1 ? "" : "s") + ", so a pattern for it says what to "
                 "do with " + (N == 1 ? "it" : "them") + ".",
             "Write `" + Full + "(..)` to ignore the payload, or list the fields: `" +
                 Full + "(" + Info->Fields[0].Name + (N > 1 ? ", ..)" : ")") + "`.")
@@ -339,9 +339,9 @@ bool TypeChecker::checkPattern(
     } else {
       if (Listed == 0 && !EV->hasRest()) {
         InvalidPatternError(
-            EV->getLoc(), "'" + Full + "' has empty parentheses.",
-            N == 0 ? "'" + Full + "' has no fields: write it without parentheses, `" +
-                         Full + ":`."
+            EV->getLoc(), "`" + Full + "` has empty parentheses.",
+            N == 0 ? "Write it without parentheses, `" + Full +
+                         ":`: it has no fields."
                    : "List the fields (`" + Full + "(" + Info->Fields[0].Name +
                          (N > 1 ? ", ..)" : ")") + "`) or write `" + Full +
                          "(..)` to ignore them.")
@@ -351,10 +351,10 @@ bool TypeChecker::checkPattern(
       if (Listed > N) {
         InvalidPatternError(
             EV->getLoc(),
-            "this pattern lists " + std::to_string(Listed) + " field" +
-                (Listed == 1 ? "" : "s") + ", but '" + Full + "' declares " +
+            "This pattern lists " + std::to_string(Listed) + " field" +
+                (Listed == 1 ? "" : "s") + ", and `" + Full + "` declares " +
                 std::to_string(N) + ".",
-            N == 0 ? "'" + Full + "' has no fields; match it as `" + Full + ":`."
+            N == 0 ? "Match it as `" + Full + ":`: it has no fields."
                    : "Match one sub-pattern per declared field, in order.")
             .raise();
         return false;
@@ -362,14 +362,14 @@ bool TypeChecker::checkPattern(
       if (Listed < N && !EV->hasRest()) {
         std::string Missing;
         for (size_t I = Listed; I < N; ++I)
-          Missing += (I > Listed ? ", '" : "'") + Info->Fields[I].Name + "'";
+          Missing += (I > Listed ? ", `" : "`") + Info->Fields[I].Name + "`";
         InvalidPatternError(
             EV->getLoc(),
-            "this pattern doesn't mention the field" +
-                std::string(N - Listed > 1 ? "s " : " ") + Missing + " of '" + Full +
-                "'.",
+            "This pattern does not mention the field" +
+                std::string(N - Listed > 1 ? "s " : " ") + Missing + " of `" + Full +
+                "`.",
             "List every field, or end the pattern with `..` to ignore the ones "
-            "you don't need: `" + Full + "(" + (Listed ? "... , " : "") + "..)`.")
+            "you do not need: `" + Full + "(" + (Listed ? "... , " : "") + "..)`.")
             .raise();
         return false;
       }
@@ -402,15 +402,15 @@ bool TypeChecker::checkPattern(
     }();
     InvalidPatternError(
         Where,
-        IsDouble ? "a 'double' literal can't be a pattern."
-                 : "this field's pattern must be a literal, an enum variant, "
-                   "'_', a name to bind, or a nested struct pattern.",
+        IsDouble ? "A `double` literal cannot be a pattern: exact equality on "
+                   "a `double` is almost never what you mean."
+                 : "A field's pattern is a literal, an enum variant, `_`, a "
+                   "name to bind or a nested struct pattern.",
         IsDouble
-            ? "Exact equality on floating point is almost never what you "
-              "mean. Bind the field and test it in a guard: "
+            ? "Bind the field and test it in a guard: "
               "`matches P { x } if x > 0.5:`."
-            : "To compare a field with a variable or any other expression, "
-              "bind it and use a guard: `matches P { x } if x == limit:`.")
+            : "Bind the field and compare it in a guard: "
+              "`matches P { x } if x == limit:`.")
         .raise();
     return false;
   }
@@ -422,20 +422,19 @@ bool TypeChecker::checkPattern(
   if (!isComparableFieldType(FieldTy.get())) {
     InvalidPatternError(
         Where,
-        "a value can't be matched against a field of type '" +
-            (FieldTy ? FieldTy->getName() : std::string("<unknown>")) + "'.",
-        "Literal and enum-variant patterns test an int, int32, char, bool, "
-        "string or enum field. To test anything else, bind the field and use "
-        "a guard.")
+        "I cannot match a literal or a variant against a field that is " +
+            (FieldTy ? SpanLabels::aType(FieldTy) : std::string("of an unknown type")) +
+            ": they test an `int`, `int32`, `char`, `bool`, `string` or enum field.",
+        "Bind the field and test it in a guard.")
         .raise();
     return false;
   }
   if (PatTy && FieldTy && !typesCompatible(FieldTy.get(), PatTy.get())) {
     InvalidPatternError(
         Where,
-        "the field has type '" + FieldTy->getName() +
-            "' but this pattern has type '" + PatTy->getName() + "'.",
-        "A literal or variant pattern must have the field's own type.")
+        "The field is " + SpanLabels::aType(FieldTy) + ", and this pattern is " +
+            SpanLabels::aType(PatTy) + ".",
+        "Write a pattern of the field's own type, " + SpanLabels::aType(FieldTy) + ".")
         .raise();
     return false;
   }

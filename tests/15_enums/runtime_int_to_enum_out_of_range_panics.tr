@@ -1,0 +1,19 @@
+// A run-time int cast to an enum is checked against the variant range (owner
+// decision 2026-10-12): unchecked, `7 to Color` was a value with no variant
+// that an exhaustive `compare` let through (found by turf-fuzz). A constant
+// literal out of range is E127 at compile time instead.
+enum Color {
+    Red,
+    Green,
+    Blue
+}
+
+fn id(x: int): int {
+    return x;
+}
+
+@test(panic, "Invalid int to enum conversion")
+fn panics_runtime_int_to_enum_out_of_range(): void {
+    mut c: Color = id(7) to Color;
+    io::printline(c to int);
+}

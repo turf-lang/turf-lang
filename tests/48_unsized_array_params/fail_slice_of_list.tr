@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E142
-// EXPECT-DIAG: Cannot slice a value of type 'list::List<int>' with [a..b].
+// EXPECT-DIAG: I cannot slice a `list::List<int>` with `[a..b]`: only an array has slices.
 // Range slicing works on built-in arrays only (a List's elements live behind
 // its own private buffer).
 import list::List;

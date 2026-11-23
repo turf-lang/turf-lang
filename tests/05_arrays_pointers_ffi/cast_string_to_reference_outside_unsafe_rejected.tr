@@ -1,0 +1,14 @@
+// A `string` is a C pointer, so `s to &N` reinterpreted its bytes as an `N`
+// in safe code (found by turf-fuzz). Needs `unsafe { }` (owner decision
+// 2026-10-12).
+
+struct N {
+    v: int
+}
+
+@test(compile_error, E130, "I cannot convert a `string` to the reference `&N` outside an `unsafe` block: it may point at nothing.")
+fn rejects_cast_string_to_reference_outside_unsafe(): void {
+    mut s: string = "abcdefgh";
+    mut b: &N = s to &N;
+    b.v;
+}

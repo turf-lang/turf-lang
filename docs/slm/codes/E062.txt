@@ -13,7 +13,7 @@ CORRECT USAGE:
 
 INCORRECT:
     mut n: int = null;
-    // ERROR: Cannot assign 'null' to variable 'n' of type 'int'.
+    // ERROR: I cannot store `null` in `n`, which is an `int`.
 
 FIX:
   Either give the variable an actual value of its declared type, or, if

@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E134
-// EXPECT-DIAG: Cannot explicitly cast 'ptr' to 'Node'
+// EXPECT-DIAG: I cannot convert a `ptr` to a `Node` with `to`.
 // EXPECT-NO-DIAG: Unsafe pointer use
 // Raw pointers need `unsafe { }` (issue #238), here around the struct with a
 // `ptr` field and around the body. Without it this test was rejected on its

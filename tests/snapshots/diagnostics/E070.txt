@@ -1,0 +1,13 @@
+tests/35_numeric_literals/fail_bare_radix_prefix.tr (1 error)
+
+── error at line 7, col 18 [E070 · malformed radix prefix]
+
+  `0x` is not followed by any digit.
+
+  Hint: Write at least one hexadecimal (0-9, a-f) digit after `0x`.
+
+  7 │     mut x: int = 0x;
+    │                  ^ this radix prefix is malformed
+
+  Run `turf --explain E070` for more details.
+

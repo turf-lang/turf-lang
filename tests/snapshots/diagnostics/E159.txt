@@ -1,0 +1,24 @@
+tests/14_cfg_analysis/33_do_while_nested_true_inner_break_outer_warns.tr (2 warnings)
+
+── warning at line 13, col 1 [E159 · loop with no exit path]
+
+  Function `main` contains a loop with no exit path, so it will run forever.
+
+  Hint: Add a `break`, a `return` or a condition that can become false, so the loop can exit.
+
+  13 │ fn main(): int {
+     │ ^~ this loop has no way out
+
+  Run `turf --explain E159` for more details.
+
+── warning at line 26, col 5 [E074 · unreachable block]
+
+  I can never reach the code in `dowhile.end` inside `main`.
+
+  Hint: Check whether an `if` condition can never be true, or whether a `return` comes before this block.
+
+  26 │     return 0;
+     │     ^~~~~~ this block never runs
+
+  Run `turf --explain E074` for more details.
+

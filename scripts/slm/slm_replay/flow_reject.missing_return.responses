@@ -1,0 +1,3 @@
+{"reasoning": "x", "fix_mode": "MODIFY", "original_code": "    mut r: int = choose(2);\n    printline(r);\n    return 0;", "new_code": "    mut r: int = pick(2);\n    printline(r);", "category": "UNDECLARED_VARIABLE"}
+%%
+{"reasoning": "x", "fix_mode": "MODIFY", "original_code": "    mut r: int = choose(2);", "new_code": "    mut r: int = pick(2);", "category": "UNDECLARED_VARIABLE"}

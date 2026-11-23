@@ -1,0 +1,13 @@
+tests/26_state_machines/fail_machine_invalid_transition_narrowed.tr (1 error)
+
+── error at line 22, col 13 [E035 · invalid transition]
+
+  `ConnectionState` has no transition from `Idle` to `Closing`.
+
+  Hint: Add `Idle -> Closing,` to the declaration of `ConnectionState`, or transition to a state that `Idle` has an edge to.
+
+  22 │         conn.transition(ConnectionState::Closing);
+     │             ^ this transition is not allowed
+
+  Worth reading in full -- run `turf --explain E035` before you patch this one.
+

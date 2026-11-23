@@ -1,0 +1,21 @@
+An `unsafe` block that nothing needs
+
+`unsafe { }` marks the code that needs care: raw-pointer declarations, casts and dereferences. This block holds none of them, so it marks nothing and makes the real unsafe code harder to find:
+
+    fn bump(): int {
+        mut y: int = 1;
+        unsafe {                     // WARNING (E193 at `warn`)
+            y += 1;
+        }
+        return y;
+    }
+
+Remove the `unsafe { }` and keep its statements:
+
+    fn bump(): int {
+        mut y: int = 1;
+        y += 1;
+        return y;
+    }
+
+A block counts as needed when anything inside it, including a nested block, uses what `unsafe` allows. A top-level `unsafe { }` around a declaration is not checked. This warning starts at `allow` in 2.3: turn it on with `turf build --warn E193` (or `[lints] E193 = "warn"` in turf.toml).

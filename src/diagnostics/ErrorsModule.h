@@ -23,6 +23,21 @@ inline std::string DisplayModuleName(const std::string &Identity) {
 // The file a "mark it `pub` in <file>" hint names: the declaration's own file
 // when its location is known. `<module>.tr` was right while a module's name
 // was always its file stem, and is wrong for a dependency's `geometry/util`.
+std::string ResolveModuleFile(const std::string &ModuleName,
+                              const std::string &ImportingFile); // Parser.h
+
+// A declaration's location in module `Module`, with the module's file when
+// the symbol table kept only a line and column: a note without it would be
+// read as a place in the file being compiled, and drawn there (DX-5).
+inline SourceLocation InModuleFile(SourceLocation DeclLoc, const std::string &Module) {
+  if (DeclLoc.Filename.empty() && !Module.empty()) {
+    DeclLoc.Filename = ResolveModuleFile(Module, SourceFilename);
+    if (DeclLoc.Filename.empty())
+      DeclLoc.Filename = "<module " + Module + ">";
+  }
+  return DeclLoc;
+}
+
 inline std::string DeclaringFileName(const SourceLocation &DeclLoc,
                                      const std::string &Module) {
   if (DeclLoc.Filename.empty())
@@ -37,13 +52,12 @@ class ExportOutsideTopLevelError : public TurfError {
 public:
   ExportOutsideTopLevelError(SourceLocation Loc, const std::string &Name)
       : TurfError(Loc, Colors::BRIGHT_RED +
-                           "'export' can't be used inside a function: '" +
-                           Colors::CYAN + Name + Colors::BRIGHT_RED + "'.",
-                  "Move this declaration to the top level of the file "
-                  "(outside any function) if it needs to be exported. "
-                  "A regular 'mut " + Name + "' or 'immut " + Name +
-                  "' declaration (no 'export') is fine right here if it "
-                  "doesn't need to be shared with other files.") {
+                           "I cannot export `" + Colors::CYAN + Name +
+                           Colors::BRIGHT_RED + "` from inside a function.",
+                  "Move this declaration to the top level of the file, "
+                  "outside any function, if it needs to be exported. "
+                  "Otherwise declare it as `mut " + Name + "` or `immut " + Name +
+                  "`, without `export`.") {
     Category_ = SLM::ErrorCategory::DECLARATION;
   }
 };
@@ -53,11 +67,12 @@ class ExportMutNotSupportedError : public TurfError {
 public:
   ExportMutNotSupportedError(SourceLocation Loc, const std::string &Name)
       : TurfError(Loc, Colors::BRIGHT_RED +
-                           "'export mut' isn't supported yet: '" +
-                           Colors::CYAN + Name + Colors::BRIGHT_RED + "'.",
-                  "Only 'export immut' (a shared compile-time constant) "
-                  "is supported right now. Use 'export immut " + Name +
-                  ": <type> = <value>;' instead.") {
+                           "I cannot export `" + Colors::CYAN + Name +
+                           Colors::BRIGHT_RED +
+                           "` as `export mut`, which is not supported yet.",
+                  "Write `export immut " + Name + ": <type> = <value>;` "
+                  "instead: only a shared compile-time constant can be "
+                  "exported.") {
     Category_ = SLM::ErrorCategory::DECLARATION;
   }
 };
@@ -68,13 +83,13 @@ class ExportNonConstantInitializerError : public TurfError {
 public:
   ExportNonConstantInitializerError(SourceLocation Loc, const std::string &Name)
       : TurfError(Loc, Colors::BRIGHT_RED +
-                           "'export immut " + Colors::CYAN + Name +
+                           "I cannot compute `export immut " + Colors::CYAN + Name +
                            Colors::BRIGHT_RED +
-                           "' needs a literal value I can compute right now.",
-                  "Exported constants must be initialised with a plain "
-                  "literal (a number, which may start with '-', a string, or a bool), "
-                  "like 'export immut " + Name + ": int = 42;' -- not an "
-                  "expression or a call to another function.") {
+                           "` at compile time, which an exported constant needs.",
+                  "Initialise it with a plain literal: a number (which may "
+                  "start with `-`), a string or a bool, like `export immut " +
+                  Name + ": int = 42;`. An expression or a call to another "
+                  "function does not work.") {
     Category_ = SLM::ErrorCategory::DECLARATION;
   }
 };
@@ -90,14 +105,13 @@ public:
   OperatorBuiltinPairError(SourceLocation Loc, const std::string &OpSpelling,
                            const std::string &LhsType,
                            const std::string &RhsType)
-      : TurfError(Loc, Colors::BRIGHT_RED + "'operator " + OpSpelling +
+      : TurfError(Loc, Colors::BRIGHT_RED + "I cannot accept `operator " + OpSpelling +
                            "(" + LhsType + ", " + RhsType +
-                           ")' is not allowed." + Colors::RESET,
-                  "Both operand types are already built in -- overloading "
-                  "an operator between two builtin types would make "
-                  "ordinary arithmetic ambiguous. Operator overloads only "
-                  "make sense when at least one operand is a struct or "
-                  "'string'.") {
+                           ")`, because both operand types are built in." +
+                           Colors::RESET,
+                  "Make at least one operand a struct or a `string`: "
+                  "overloading an operator between two built-in types would "
+                  "make ordinary arithmetic ambiguous.") {
     Category_ = SLM::ErrorCategory::DECLARATION;
   }
 };
@@ -116,18 +130,16 @@ public:
                           const std::string &DeclaringModule,
                           const std::string &OperandTypeName,
                           const std::string &OperandOwningModule)
-      : TurfError(Loc, Colors::BRIGHT_RED + "'operator " + OpSpelling +
-                           "' does not own any of its operand types." +
+      : TurfError(Loc, Colors::BRIGHT_RED + "`operator " + OpSpelling +
+                           "` does not own any of its operand types." +
                            Colors::RESET,
-                  "'" + OperandTypeName + "' is declared in " +
+                  "Declare the operator in " +
                       (OperandOwningModule.empty() ? "the main file"
-                                                   : "module '" + OperandOwningModule + "'") +
-                      ", not in " +
-                      (DeclaringModule.empty() ? "the main file" : "module '" + DeclaringModule + "'") +
-                      " -- at least one operand of an operator declaration "
-                      "must be a struct or enum declared in the same "
-                      "module/file as the operator itself, so an operator's "
-                      "meaning never depends on import order.") {
+                                                   : "module `" + OperandOwningModule + "`") +
+                      ", where `" + OperandTypeName + "` is declared, or make "
+                      "an operand a struct or enum declared in " +
+                      (DeclaringModule.empty() ? "the main file" : "module `" + DeclaringModule + "`") +
+                      ". An operator then never depends on import order.") {
     Category_ = SLM::ErrorCategory::DECLARATION;
   }
 };
@@ -155,11 +167,11 @@ class OperatorTemporaryWriteError : public TurfError {
 public:
   OperatorTemporaryWriteError(SourceLocation Loc, const std::string &Problem)
       : TurfError(Loc, Colors::BRIGHT_RED + Problem + Colors::RESET,
-                  "'x[i]' returns the element by value, so this would only change "
-                  "a copy. Read the element into a variable, change that, and "
-                  "store it back: `mut e: T = x[i]; e.field = v; x[i] = e;`. "
-                  "Writing THROUGH a pointer or reference element, or into a "
-                  "nested list (`grid[i][j] = v`), is fine.") {
+                  "Read the element into a variable, change that, and store it "
+                  "back: `mut e: T = x[i]; e.field = v; x[i] = e;`. `x[i]` "
+                  "returns the element by value, so a write would change only "
+                  "a copy. Writing through a pointer or reference element, or "
+                  "into a nested list (`grid[i][j] = v`), is fine.") {
     Category_ = SLM::ErrorCategory::TYPE_MISMATCH;
   }
 };
@@ -180,15 +192,14 @@ public:
 class ConflictingExternDeclarationError : public TurfError {
 public:
   ConflictingExternDeclarationError(SourceLocation Loc, const std::string &Name)
-      : TurfError(Loc, Colors::BRIGHT_RED + "'extern fn " + Colors::CYAN +
+      : TurfError(Loc, Colors::BRIGHT_RED + "I found two `extern fn " + Colors::CYAN +
                            Name + Colors::BRIGHT_RED +
-                           "' conflicts with an earlier declaration of the "
-                           "same name." + Colors::RESET,
-                  "Two 'extern fn " + Name + "' declarations exist with "
-                  "different signatures (parameter types, return type, or "
-                  "variadic-ness). Only ONE C function can actually be "
-                  "called through this name -- make both declarations "
-                  "match exactly, or give one a different name.") {
+                           "` declarations with different signatures." +
+                           Colors::RESET,
+                  "Make both declarations match exactly in parameter types, "
+                  "return type and variadic-ness, or give one a different "
+                  "name. Only one C function can be called through this "
+                  "name.") {
     Category_ = SLM::ErrorCategory::DECLARATION;
   }
 };
@@ -207,10 +218,10 @@ public:
   // means every existing E027 expectation still holds.
   ModuleNotFoundError(SourceLocation Loc, const std::string &ModuleName,
                       const std::string &ExtraHint)
-      : TurfError(Loc, Colors::BRIGHT_RED + "Could not find module '" +
+      : TurfError(Loc, Colors::BRIGHT_RED + "I cannot find a module named `" +
                            Colors::CYAN + ModuleName + Colors::BRIGHT_RED +
-                           "'." + Colors::RESET,
-                  "Make sure the file '" + ModuleName + ".tr' exists in the standard library or your current directory." +
+                           "`." + Colors::RESET,
+                  "Check that the file `" + ModuleName + ".tr` exists in the standard library or your current directory." +
                       (ExtraHint.empty() ? "" : " " + ExtraHint)) {
     Category_ = SLM::ErrorCategory::DECLARATION;
   }
@@ -224,13 +235,13 @@ public:
   static ModuleNotFoundError inPackage(SourceLocation Loc, const std::string &ModuleName,
                                        const std::string &Package) {
     ModuleNotFoundError E(Loc, ModuleName);
-    E.Hint_ = "In a project, `import " + ModuleName + ";` names one of three "
-              "things: a module of this package (a file '" + ModuleName +
-              ".tr' anywhere under " + Package + "'s src/), a package listed "
-              "under [dependencies] in its turf.toml, or a standard-library "
-              "module. Check the spelling, create src/" + ModuleName +
-              ".tr, or add the dependency (`turf add " + ModuleName +
-              " --path <dir>`).";
+    E.Hint_ = "Check the spelling, create `src/" + ModuleName +
+              ".tr`, or add the dependency with `turf add " + ModuleName +
+              " --path <dir>`. In a project, `import " + ModuleName + ";` "
+              "names a module of this package (a file `" + ModuleName +
+              ".tr` anywhere under `" + Package + "`'s `src/`), a package "
+              "listed under [dependencies] in its `turf.toml`, or a "
+              "standard-library module.";
     return E;
   }
 };
@@ -256,10 +267,11 @@ public:
                        const std::vector<ModuleCandidateView> &Candidates)
       : TurfError(Loc, "") {
     Category_ = SLM::ErrorCategory::DECLARATION;
-    Message = Colors::BRIGHT_RED + "Module '" + Colors::CYAN + ModuleName +
-              Colors::BRIGHT_RED + "' is ambiguous: " +
+    Message = Colors::BRIGHT_RED + "I found " +
               std::to_string(Candidates.size()) +
-              " different files answer to that name." + Colors::RESET;
+              " different files that answer to the module name `" +
+              Colors::CYAN + ModuleName + Colors::BRIGHT_RED + "`." +
+              Colors::RESET;
     size_t Width = 0;
     for (const auto &C : Candidates)
       Width = std::max(Width, C.Kind.size());
@@ -284,18 +296,17 @@ public:
     for (size_t I = 0; I < Own.size(); ++I)
       Files += (I ? (I + 1 == Own.size() ? " and " : ", ") : "") + Own[I];
     if (HasStdlib && !Own.empty()) {
-      Hint_ = "A module may not share its name with a standard-library "
-              "module. Rename " + Files + " (for example to 'my_" +
-              ModuleName + ".tr') and import it by the new name.";
+      Hint_ = "Rename " + Files + " (for example to `my_" + ModuleName +
+              ".tr`) and import it by the new name. A module may not share "
+              "its name with a standard-library module.";
     } else if (HasDependency && !Own.empty()) {
       // A dependency is imported by its package name, which the user
       // cannot change from here; their own module can move.
-      Hint_ = "A module may not share its name with a dependency. Rename " +
-              Files + " (for example to 'my_" + ModuleName +
-              ".tr') and import it by the new name.";
+      Hint_ = "Rename " + Files + " (for example to `my_" + ModuleName +
+              ".tr`) and import it by the new name. A module may not share "
+              "its name with a dependency.";
     } else {
-      Hint_ = "These are different files that both answer to '" + ModuleName +
-              "'. Rename one of them, or delete the one you did not mean.";
+      Hint_ = "Rename one of them, or delete the one you did not mean.";
     }
   }
 };
@@ -321,17 +332,17 @@ public:
     ModuleNotImportableError E(Loc);
     std::string By;
     for (size_t I = 0; I < Requirers.size(); ++I)
-      By += (I ? ", '" : "'") + Requirers[I] + "'";
-    E.Message = Colors::BRIGHT_RED + "Package '" + Colors::CYAN + Package +
-                Colors::BRIGHT_RED + "' is not a dependency of '" + Importer +
-                "'." + Colors::RESET;
+      By += (I ? ", `" : "`") + Requirers[I] + "`";
+    E.Message = Colors::BRIGHT_RED + "I cannot import package `" + Colors::CYAN +
+                Package + Colors::BRIGHT_RED + "`, because it is not a "
+                "dependency of `" + Importer + "`." + Colors::RESET;
     if (!By.empty())
       E.Message += "\n    It is in this build because " + By +
                    (Requirers.size() == 1 ? " depends" : " depend") + " on it.";
-    E.Hint_ = "A package can import only its own modules, its direct "
-              "dependencies and the standard library. Add '" + Package +
-              "' to [dependencies] in " + Importer +
-              "'s turf.toml to import it here.";
+    E.Hint_ = "Add `" + Package + "` to [dependencies] in `" + Importer +
+              "`'s `turf.toml` to import it here. A package can import only "
+              "its own modules, its direct dependencies and the standard "
+              "library.";
     return E;
   }
 
@@ -341,13 +352,14 @@ public:
                  const std::string &Importer, const std::string &Owner,
                  const std::string &Path) {
     ModuleNotImportableError E(Loc);
-    E.Message = Colors::BRIGHT_RED + "Module '" + Colors::CYAN + Name +
-                Colors::BRIGHT_RED + "' is internal to package '" + Owner +
-                "'." + Colors::RESET + "\n    " + Path;
-    E.Hint_ = "Only a package's root module can be imported from outside it. "
-              "Import '" + Owner + "' and use what its root module makes "
-              "`pub`" + (Importer == Owner ? "" : "; if '" + Owner +
-              "' should offer this, its root module has to expose it") + ".";
+    E.Message = Colors::BRIGHT_RED + "I cannot import the module `" + Colors::CYAN +
+                Name + Colors::BRIGHT_RED + "`, because it is internal to "
+                "package `" + Owner + "`." + Colors::RESET + "\n    " + Path;
+    E.Hint_ = "Import `" + Owner + "` and use what its root module makes "
+              "`pub`" + (Importer == Owner ? "" : "; if `" + Owner +
+              "` should offer this, expose it from its root module") +
+              ". Only a package's root module can be imported from outside "
+              "it.";
     return E;
   }
 };
@@ -365,15 +377,15 @@ public:
   ModuleNotImportedError(SourceLocation Loc, const std::string &Module,
                          const std::string &InModule, bool HadSymbolImport,
                          const std::string &Spelled)
-      : TurfError(Loc, Colors::BRIGHT_RED + "Module '" + Colors::CYAN + Module +
-                           Colors::BRIGHT_RED + "' is not imported " +
+      : TurfError(Loc, Colors::BRIGHT_RED + "I cannot find an import of module `" +
+                           Colors::CYAN + Module + Colors::BRIGHT_RED + "` " +
                            (InModule.empty() ? std::string("in this file")
-                                             : "in module '" + InModule + "'") +
+                                             : "in module `" + InModule + "`") +
                            "." + Colors::RESET) {
     Category_ = SLM::ErrorCategory::DECLARATION;
     Hint_ = "Add `import " + Module + ";` at the top of " +
-            (InModule.empty() ? std::string("this file") : "'" + InModule + "'") +
-            " to use '" + Spelled + "'. ";
+            (InModule.empty() ? std::string("this file") : "`" + InModule + "`") +
+            " to use `" + Spelled + "`. ";
     if (HadSymbolImport)
       Hint_ += "`import " + Module + "::name;` brings in only that name, not the `" +
                Module + "::` qualifier, so both lines are needed to use both. ";
@@ -402,8 +414,8 @@ public:
   CircularImportError(SourceLocation Loc, const std::string &ModuleName,
                       const std::vector<ImportChainEntry> &Chain)
       : TurfError(Loc, Colors::BRIGHT_RED +
-                           "Circular import detected -- these modules are "
-                           "waiting on each other." + Colors::RESET) {
+                           "I found a circular import: these modules import "
+                           "each other in a cycle." + Colors::RESET) {
     Category_ = SLM::ErrorCategory::DECLARATION;
 
     // Render as a simple linear chain (A --imports--> B --imports--> ...
@@ -417,15 +429,15 @@ public:
                  Colors::BRIGHT_BLACK + "  --imports-->  " + Colors::RESET;
     }
     Diagram += Colors::CYAN + ModuleName + Colors::RESET + Colors::BRIGHT_RED +
-               "  <- back to the start!" + Colors::RESET;
+               "  <- back to the start" + Colors::RESET;
     Message += Diagram;
 
-    Hint_ = "Break the cycle by removing one of these imports, or moving "
-            "the code both sides actually need into a third module that "
-            "neither one has to import the other to reach.";
+    Hint_ = "Remove one of these imports, or move the code both sides need "
+            "into a third module that neither has to import the other to "
+            "reach.";
 
     for (const auto &Entry : Chain)
-      RelatedLocations_.push_back({Entry.Loc, "imports '" + Entry.ModuleName + "' here"});
+      RelatedLocations_.push_back({Entry.Loc, "imports `" + Entry.ModuleName + "` here"});
   }
 };
 // Raised by Resolver::visitScopeAccess/visitFuncCall when the left-hand
@@ -438,16 +450,16 @@ class UnknownScopeQualifierError : public TurfError {
 public:
   UnknownScopeQualifierError(SourceLocation Loc, const std::string &LeftName,
                              const RankedSuggestions &Suggestions)
-      : TurfError(Loc, Colors::BRIGHT_RED + "'" + Colors::CYAN + LeftName +
-                           Colors::BRIGHT_RED +
-                           "' isn't a known enum, struct, or module." + Colors::RESET) {
+      : TurfError(Loc, Colors::BRIGHT_RED + "I cannot find an enum, struct or "
+                           "module named `" + Colors::CYAN + LeftName +
+                           Colors::BRIGHT_RED + "`." + Colors::RESET) {
     Category_ = SLM::ErrorCategory::DECLARATION;
     Hint_ = suggestionsOrFallback(
         Suggestions,
-        "'::' only works after an enum name (Color::Red), an imported "
-        "module name (io::printline), or a struct type name for a static "
-        "method (StructName::method). Double-check the spelling, or make "
-        "sure you've imported the module.");
+        "Check the spelling, or import the module. `::` works only after an "
+        "enum name (`Color::Red`), an imported module name "
+        "(`io::printline`) or a struct type name for a static method "
+        "(`StructName::method`).");
     trySetDeterministicRename(LeftName, Suggestions, /*Qualifier=*/true);
   }
 };
@@ -464,21 +476,21 @@ class ScopeOperatorOnInstanceError : public TurfError {
 public:
   ScopeOperatorOnInstanceError(SourceLocation Loc, const std::string &Name,
                                const std::string &RightName)
-      : TurfError(Loc, Colors::BRIGHT_RED + "'" + Colors::CYAN + Name +
+      : TurfError(Loc, Colors::BRIGHT_RED + "`" + Colors::CYAN + Name +
                            Colors::BRIGHT_RED +
-                           "' is a variable, not a type or module -- '::' "
-                           "doesn't apply to it." + Colors::RESET) {
+                           "` is a variable, not a type or module, so I cannot "
+                           "use `::` on it." + Colors::RESET) {
     Category_ = SLM::ErrorCategory::DECLARATION;
-    Hint_ = "'::' is for namespace-qualified access (enum variants, module "
-            "functions, static methods) -- '" + Name + "' holds an "
-            "instance. Did you mean '" + Name + "." + RightName + "(...)'?";
+    Hint_ = "Write `" + Name + "." + RightName + "(...)` instead: `::` is for "
+            "enum variants, module functions and static methods, and `" +
+            Name + "` holds an instance.";
     // `Name` is a declared variable here (both raise sites check that), so
     // `Name::member` can only have meant `Name.member`; the sandbox still has
     // to agree that member exists on it.
     withDeterministicFix(Name + "::" + RightName, Name + "." + RightName,
-                         "'" + Name + "' is a variable holding an instance, "
-                         "and a member of an instance is reached with '.', "
-                         "not '::'.");
+                         "`" + Name + "` is a variable holding an instance, "
+                         "and a member of an instance is reached with `.`, "
+                         "not `::`.");
   }
 };
 // Raised when `import module::symbol;` / `module::[a, b]` / `module::[*]`
@@ -491,14 +503,14 @@ public:
   UnknownModuleSymbolError(SourceLocation Loc, const std::string &ModuleName,
                            const std::string &SymbolName,
                            const RankedSuggestions &Suggestions)
-      : TurfError(Loc, Colors::BRIGHT_RED + "Module '" + Colors::CYAN +
-                           ModuleName + Colors::BRIGHT_RED +
-                           "' has nothing named '" + Colors::CYAN + SymbolName +
-                           Colors::BRIGHT_RED + "'." + Colors::RESET) {
+      : TurfError(Loc, Colors::BRIGHT_RED + "I cannot find `" + Colors::CYAN +
+                           SymbolName + Colors::BRIGHT_RED + "` in the module `" +
+                           Colors::CYAN + ModuleName + Colors::BRIGHT_RED +
+                           "`." + Colors::RESET) {
     Category_ = SLM::ErrorCategory::DECLARATION;
     Hint_ = suggestionsOrFallback(
-        Suggestions, "Double-check the spelling, or check " + ModuleName +
-                         ".tr for its actual exported names.");
+        Suggestions, "Check the spelling, or look in `" + ModuleName +
+                         ".tr` for its exported names.");
     trySetDeterministicRename(SymbolName, Suggestions);
     trySetDeterministicModuleRename(SymbolName, Suggestions, ModuleName);
   }
@@ -517,18 +529,18 @@ public:
                              const std::string &FirstModule,
                              const std::string &SecondModule,
                              SourceLocation FirstImportLoc)
-      : TurfError(Loc, Colors::BRIGHT_RED + "'" + Colors::CYAN + SymbolName +
+      : TurfError(Loc, Colors::BRIGHT_RED + "I found `" + Colors::CYAN + SymbolName +
                            Colors::BRIGHT_RED +
-                           "' is imported from two different modules -- '" +
+                           "` imported from two different modules, `" +
                            Colors::CYAN + FirstModule + Colors::BRIGHT_RED +
-                           "' and '" + Colors::CYAN + SecondModule +
-                           Colors::BRIGHT_RED + "'." + Colors::RESET) {
+                           "` and `" + Colors::CYAN + SecondModule +
+                           Colors::BRIGHT_RED + "`." + Colors::RESET) {
     Category_ = SLM::ErrorCategory::DECLARATION;
-    Hint_ = "Either qualify one of them explicitly (`" + FirstModule +
+    Hint_ = "Qualify one of them explicitly (`" + FirstModule +
             "::" + SymbolName + "` or `" + SecondModule + "::" + SymbolName +
-            "`), or switch one of the wildcard/list imports to a more "
-            "targeted one that leaves '" + SymbolName + "' out.";
-    RelatedLocations_.push_back({FirstImportLoc, "'" + SymbolName + "' first imported from '" + FirstModule + "' here"});
+            "`), or switch one of the wildcard or list imports to a more "
+            "targeted one that leaves `" + SymbolName + "` out.";
+    RelatedLocations_.push_back({FirstImportLoc, "`" + SymbolName + "` first imported from `" + FirstModule + "` here"});
   }
 };
 // Raised when a struct/enum type name is real (declared SOMEWHERE in the
@@ -543,15 +555,15 @@ class UnqualifiedTypeNotVisibleError : public TurfError {
 public:
   UnqualifiedTypeNotVisibleError(SourceLocation Loc, const std::string &TypeName,
                                  const std::string &OwningModule)
-      : TurfError(Loc, Colors::BRIGHT_RED + "'" + Colors::CYAN + TypeName +
+      : TurfError(Loc, Colors::BRIGHT_RED + "I cannot use `" + Colors::CYAN + TypeName +
                            Colors::BRIGHT_RED +
-                           "' isn't visible here without qualification." +
+                           "` here without qualification." +
                            Colors::RESET) {
     Category_ = SLM::ErrorCategory::DECLARATION;
-    Hint_ = "'" + TypeName + "' is declared in module '" + OwningModule +
-            "'. Either use it qualified (`" + OwningModule + "::" + TypeName +
-            "`), or bring it into scope with `import " + OwningModule +
-            "::" + TypeName + ";`.";
+    Hint_ = "Write it qualified as `" + OwningModule + "::" + TypeName +
+            "`, or bring it into scope with `import " + OwningModule +
+            "::" + TypeName + ";`. `" + TypeName + "` is declared in module `" +
+            OwningModule + "`.";
   }
 };
 // FDN-003: a BARE type spelling that could mean two different types from
@@ -567,19 +579,19 @@ public:
   static std::string describe(const std::string &Identity) {
     auto P = Identity.find("::");
     return P == std::string::npos
-               ? "'" + Identity + "' declared in this program's main file"
-               : "'" + Identity + "' from module '" + Identity.substr(0, P) + "'";
+               ? "`" + Identity + "` declared in this program's main file"
+               : "`" + Identity + "` from module `" + Identity.substr(0, P) + "`";
   }
 
   AmbiguousTypeReferenceError(SourceLocation Loc, const std::string &Spelling,
                               const std::vector<std::string> &Identities)
-      : TurfError(Loc, Colors::BRIGHT_RED + "'" + Colors::CYAN + Spelling +
+      : TurfError(Loc, Colors::BRIGHT_RED + "`" + Colors::CYAN + Spelling +
                            Colors::BRIGHT_RED +
-                           "' is ambiguous here -- it could mean more than "
-                           "one type." + Colors::RESET) {
+                           "` could mean more than one type here." +
+                           Colors::RESET) {
     Category_ = SLM::ErrorCategory::DECLARATION;
     for (const auto &Id : Identities)
-      Message += "\n  " + Colors::BRIGHT_BLUE + "Note: could be " +
+      Message += "\n  " + Colors::BRIGHT_BLUE + "It could be " +
                  describe(Id) + Colors::RESET;
     std::string Qualified;
     for (const auto &Id : Identities)
@@ -591,9 +603,9 @@ public:
                 ? "Rename one of them, or import only the names you need "
                   "instead of the one that clashes."
                 : "Write the imported one qualified (`" + Qualified +
-                      "`) and leave '" + Spelling + "' out of the `import` "
-                      "(list the names you need instead of `[*]`), so '" +
-                      Spelling + "' means just one type.";
+                      "`) and leave `" + Spelling + "` out of the `import` "
+                      "(list the names you need instead of `[*]`), so `" +
+                      Spelling + "` means just one type.";
   }
 };
 // Phase 2: Module-scoped method lookup error
@@ -606,10 +618,10 @@ public:
                             const std::string &MethodName,
                             const RankedSuggestions &Suggestions)
       : TurfError(Loc,
-                  Colors::BRIGHT_RED + "Oops! Module '" + Colors::CYAN +
-                      ModuleName + Colors::BRIGHT_RED +
-                      "' has no function named '" + Colors::CYAN + MethodName +
-                      Colors::BRIGHT_RED + "'." + Colors::RESET) {
+                  Colors::BRIGHT_RED + "I cannot find a function named `" + Colors::CYAN +
+                      MethodName + Colors::BRIGHT_RED + "` in the module `" +
+                      Colors::CYAN + ModuleName + Colors::BRIGHT_RED + "`." +
+                      Colors::RESET) {
     // Left as the default GENERAL (a judgment call, DIAG-001 audit): could
     // arguably be UNDECLARED_VAR, but the ranked suggestions already do the
     // heavy lifting here.
@@ -621,8 +633,8 @@ public:
     // single "Hint: " lead-in, unlike every other Suggestions-based error
     // class in this file, which passes no prefix and reads cleanly.
     Hint_ = suggestionsOrFallback(Suggestions,
-      "Check the spelling of '" + MethodName + "', or declare `pub fn " +
-      MethodName + "(...)` in module '" + ModuleName + "'.");
+      "Check the spelling of `" + MethodName + "`, or declare `pub fn " +
+      MethodName + "(...)` in module `" + ModuleName + "`.");
     trySetDeterministicRename(MethodName, Suggestions);
   }
 };
@@ -665,86 +677,82 @@ public:
     std::string What;
     switch (W) {
     case Where::NotFollowedByDeclaration:
-      What = "'" + Pub + "' has to be followed by a declaration.";
-      Hint_ = "Put `pub` right before `fn`, `struct`, `enum`, `error`, "
-              "`machine` or `extern fn`, or before a struct field -- e.g. "
+      What = "I expected a declaration after `" + Pub + "`.";
+      Hint_ = "Put `pub` right before `fn`, `static fn`, `struct`, `enum`, "
+              "`error`, `machine`, `extern fn` or a module constant's `immut`, "
+              "or before a struct field, for example "
               "`pub fn area(r: int): int { ... }` or `pub struct Point { pub "
-              "x: int }`. (`public` is accepted as a synonym.)";
+              "x: int }`. `public` is accepted as a synonym.";
       break;
     case Where::WithExport:
-      What = "'" + Pub + "' can't be combined with 'export'.";
-      Hint_ = "`export immut NAME: T = value;` is already visible to every "
-              "module that imports this one -- `export` is its `pub`. Just "
-              "remove `pub`.";
+      What = "I cannot combine `" + Pub + "` with `export`.";
+      Hint_ = "Remove `export` and write `pub immut NAME: T = value;`: `pub` "
+              "alone makes the constant visible to importers.";
       break;
     case Where::OnOperator:
-      What = "'" + Pub + "' can't be applied to an operator.";
-      Hint_ = "An operator is visible wherever its operand types are, so "
-              "there is nothing to export. Remove `pub` from the `operator` "
-              "declaration; to let another module use `a + b` on your type, "
-              "make the type itself `pub`.";
+      What = "I cannot apply `" + Pub + "` to an operator.";
+      Hint_ = "Remove `pub` from the `operator` declaration, since an operator "
+              "is visible wherever its operand types are. To let another "
+              "module use `a + b` on your type, make the type itself `pub`.";
       break;
     case Where::OnImport:
-      What = "'" + Pub + "' can't be applied to an import.";
-      Hint_ = "An `import` only affects the file that writes it -- imports "
-              "are never re-exported. Remove `pub`, and have any module that "
-              "needs the imported names write its own `import`.";
+      What = "I cannot apply `" + Pub + "` to an import.";
+      Hint_ = "Remove `pub`, and have any module that needs the imported "
+              "names write its own `import`. An `import` only affects the "
+              "file that writes it and is never re-exported.";
       break;
     case Where::OnVariable:
-      What = "'" + Pub + "' can't be applied to a variable.";
-      Hint_ = "A top-level constant is declared `export immut NAME: T = "
-              "value;` -- `export` already makes it visible to importers. A "
-              "local variable is never visible outside its function, so "
-              "just remove `pub`.";
+      What = "I cannot apply `" + Pub + "` to a variable.";
+      Hint_ = "Remove `pub` from a local variable, which is never visible "
+              "outside its function. Declare a module constant at the top "
+              "level with `pub immut NAME: T = value;`.";
       break;
     case Where::OnEnumVariant:
-      What = "'" + Pub + "' can't be applied to an enum variant.";
-      Hint_ = "A variant is public exactly when its enum is. Remove `pub` "
-              "here and write `pub enum Name { ... }` instead -- every "
-              "variant then becomes visible to importers.";
+      What = "I cannot apply `" + Pub + "` to an enum variant.";
+      Hint_ = "Remove `pub` here and write `pub enum Name { ... }` instead: a "
+              "variant is public exactly when its enum is, so every variant "
+              "then becomes visible to importers.";
       break;
     case Where::OnErrorVariant:
-      What = "'" + Pub + "' can't be applied to an error variant.";
-      Hint_ = "A variant is public exactly when its `error` type is. Remove "
-              "`pub` here and write `pub error Name { ... }` instead.";
+      What = "I cannot apply `" + Pub + "` to an error variant.";
+      Hint_ = "Remove `pub` here and write `pub error Name { ... }` instead: a "
+              "variant is public exactly when its `error` type is.";
       break;
     case Where::OnMachineState:
-      What = "'" + Pub + "' can't be applied to a machine state or "
+      What = "I cannot apply `" + Pub + "` to a machine state or "
              "transition.";
-      Hint_ = "States and transitions are public exactly when their machine "
-              "is. Remove `pub` here and write `pub machine Name { ... }` "
-              "instead.";
+      Hint_ = "Remove `pub` here and write `pub machine Name { ... }` "
+              "instead: states and transitions are public exactly when their "
+              "machine is.";
       break;
     case Where::OnParameter:
-      What = "'" + Pub + "' can't appear in a parameter list.";
-      Hint_ = "Parameters are local to their function, so there is nothing "
-              "for `pub` to export -- and `pub`/`public` are reserved words, "
-              "so neither can be a parameter's name. To make the function "
-              "itself visible to importers, put `pub` before `fn`: `pub fn "
-              "name(x: int): int`.";
+      What = "I cannot accept `" + Pub + "` in a parameter list.";
+      Hint_ = "Remove it, since parameters are local to their function and "
+              "`pub` and `public` are reserved words that cannot name a "
+              "parameter. To make the function itself visible to importers, "
+              "put `pub` before `fn`: `pub fn name(x: int): int`.";
       break;
     case Where::OnUnsafeBlock:
-      What = "'" + Pub + "' can't be applied to an `unsafe` block.";
-      Hint_ = "`pub` belongs on the declarations inside the block -- write "
+      What = "I cannot apply `" + Pub + "` to an `unsafe` block.";
+      Hint_ = "Put `pub` on the declarations inside the block: write "
               "`unsafe { pub fn f(...) ... }`, not `pub unsafe { ... }`.";
       break;
     case Where::InsideFunction:
-      What = "'" + Pub + "' can't be used on a declaration inside a "
+      What = "I cannot use `" + Pub + "` on a declaration inside a "
              "function.";
-      Hint_ = "A declaration inside a function is local to it -- no other "
-              "module can ever see it, so there is nothing for `pub` to "
-              "do. Remove `pub`, or move the declaration to the top level "
-              "of the file if it should be shared.";
+      Hint_ = "Remove `pub`, or move the declaration to the top level of the "
+              "file if it should be shared. A declaration inside a function "
+              "is local to it, so no other module can see it.";
       break;
     case Where::UsedAsName:
-      What = "'" + Pub + "' is a reserved word and can't be used as a name.";
-      Hint_ = "`pub` and `public` are keywords -- they mark a declaration as "
-              "visible to other modules -- so they can't name a variable, "
-              "function or type. Pick another name, e.g. `is_public` or "
-              "`published`.";
+      What = "`" + Pub + "` is a reserved word, so I cannot use it as a name.";
+      Hint_ = "Pick another name, for example `is_public` or `published`: "
+              "`pub` and `public` are keywords that mark a declaration as "
+              "visible to other modules, so they cannot name a variable, "
+              "function or type.";
       break;
     case Where::BeforeDecorator:
-      What = "'" + Pub + "' has to come after a decorator, not before it.";
+      What = "I expected `" + Pub + "` after the decorator, not before it.";
       Hint_ = "Write the annotations first, then `pub`: `@caller_location` "
               "or `@ownership(...)` on its own line, followed by `pub fn "
               "name(...)` or `pub extern fn name(...)`.";
@@ -762,24 +770,24 @@ public:
     // declaration or a decorator order needs text this site never saw.
     switch (W) {
     case Where::WithExport:
-      removePub("'export' already makes the constant visible to every module "
-                "that imports this one, so `pub` adds nothing -- removing it "
+      removePub("`export` already makes the constant visible to every module "
+                "that imports this one, so `pub` adds nothing, and removing it "
                 "is the whole fix.");
       break;
     case Where::OnOperator:
       removePub("An operator is visible wherever its operand types are, so "
-                "`pub` has nothing to export here -- removing it is the fix.");
+                "`pub` has nothing to export here, and removing it is the fix.");
       break;
     case Where::OnImport:
       removePub("An `import` only affects the file that writes it and is "
-                "never re-exported, so `pub` has no meaning here -- removing "
+                "never re-exported, so `pub` has no meaning here, and removing "
                 "it is the fix.");
       break;
     case Where::OnEnumVariant:
     case Where::OnErrorVariant:
     case Where::OnMachineState:
       removePub("A variant (or state) is public exactly when its enclosing "
-                "declaration is, so `pub` on it is meaningless -- removing it "
+                "declaration is, so `pub` on it is meaningless, and removing it "
                 "is the fix. Mark the enclosing declaration `pub` if importers "
                 "should see it.");
       break;
@@ -848,7 +856,7 @@ private:
 class PrivateSymbolAccessError : public TurfError {
 public:
   /// Field and Method are about a member of a type: @p Owner names the type.
-  enum class Kind { Function, Type, Field, Method };
+  enum class Kind { Function, Type, Field, Method, Constant };
 
   /// @param Keyword what to write after `pub` -- "fn" for a function or
   ///        method, the declaring keyword ("struct"/"enum"/"error"/"machine")
@@ -869,40 +877,44 @@ public:
     std::string What, Shown, Fix, Noun;
     switch (K) {
     case Kind::Function:
-      What = "Function"; Shown = Name;
+      What = "function"; Shown = Name;
       Fix = "`pub " + Keyword + " " + Name + "(...)`"; Noun = "functions";
       break;
     case Kind::Type:
-      What = "Type"; Shown = Name;
+      What = "type"; Shown = Name;
       Fix = "`pub " + Keyword + " " + Name + "`"; Noun = "types";
       break;
     case Kind::Field:
-      What = "Field"; Shown = Owner + "." + Name;
+      What = "field"; Shown = Owner + "." + Name;
       Fix = "`pub " + Name + ": ...` inside `struct " + Owner + "`";
       Noun = "methods";
       break;
+    case Kind::Constant:
+      What = "constant"; Shown = Name;
+      Fix = "`pub immut " + Name + ": ...`"; Noun = "constants";
+      break;
     case Kind::Method:
-      What = "Method"; Shown = Owner + "." + Name;
+      What = "method"; Shown = Owner + "." + Name;
       Fix = "`pub fn " + Owner + "." + Name + "(...)`"; Noun = "methods";
       break;
     }
     const std::string ModuleShown = DisplayModuleName(Module);
     const std::string Subject = K == Kind::Field || K == Kind::Method
-                                    ? "'" + Owner + "'"
-                                    : "'" + ModuleShown + "'";
-    Message = Colors::BRIGHT_RED + What + " '" + Colors::CYAN + Shown +
-              Colors::BRIGHT_RED + "' is private to module '" + Colors::CYAN +
-              ModuleShown + Colors::BRIGHT_RED + "'." + Colors::RESET;
-    withRelated(DeclLoc, "'" + Shown + "' is declared in module '" + ModuleShown +
-                             "' without `pub`");
+                                    ? "`" + Owner + "`"
+                                    : "`" + ModuleShown + "`";
+    Message = Colors::BRIGHT_RED + "I cannot use the " + What + " `" + Colors::CYAN +
+              Shown + Colors::BRIGHT_RED + "`, which is private to module `" +
+              Colors::CYAN + ModuleShown + Colors::BRIGHT_RED + "`." + Colors::RESET;
+    withRelated(InModuleFile(DeclLoc, Module),
+                "declared in module `" + ModuleShown + "` without `pub`");
 
     const std::string File = DeclaringFileName(DeclLoc, Module);
-    Hint_ = "If '" + Shown + "' is meant to be used from other modules, mark "
-            "it `pub` in " + File + ": " + Fix + ".";
+    Hint_ = "Mark `" + Shown + "` as `pub` in " + File + " with " + Fix +
+            ", if other modules are meant to use it.";
     if (PublicAlternatives.empty()) {
       Hint_ += " " + Subject + " has no public " + Noun + " to use instead.";
     } else {
-      Hint_ += " Otherwise, " + Subject + " offers these public " + Noun + ": ";
+      Hint_ += " Otherwise, use one of the public " + Noun + " that " + Subject + " offers: ";
       size_t Shown = 0;
       for (const auto &Alt : PublicAlternatives) {
         if (Shown == 5) {
@@ -938,18 +950,17 @@ public:
       : TurfError(Loc, "") {
     Category_ = SLM::ErrorCategory::DECLARATION;
     const bool IsField = ItemKind == "field";
-    Message = Colors::BRIGHT_RED + "Public " + ItemKind + " '" + Colors::CYAN +
-              ItemName + Colors::BRIGHT_RED + "' exposes the private type '" +
-              Colors::CYAN + TypeName + Colors::BRIGHT_RED + "'." + Colors::RESET;
-    withRelated(TypeDeclLoc, "'" + TypeName + "' is declared in module '" +
-                                 DisplayModuleName(Module) + "' without `pub`");
+    Message = Colors::BRIGHT_RED + "I cannot let the public " + ItemKind + " `" + Colors::CYAN +
+              ItemName + Colors::BRIGHT_RED + "` expose the private type `" +
+              Colors::CYAN + TypeName + Colors::BRIGHT_RED + "`." + Colors::RESET;
+    withRelated(TypeDeclLoc, "declared in module `" +
+                                 DisplayModuleName(Module) + "` without `pub`");
     const std::string File = DeclaringFileName(TypeDeclLoc, Module);
-    Hint_ = "Anything `pub` is visible to other modules, but '" + TypeName +
-            "' is not, so they would receive values of a type they cannot "
-            "name. Either make the type public -- `pub " + TypeKeyword + " " +
-            TypeName + "` in " + File + " -- or keep " +
+    Hint_ = "Make the type public with `pub " + TypeKeyword + " " +
+            TypeName + "` in " + File + ", or keep " +
             (IsField ? "the field" : "the " + ItemKind) +
-            " internal by removing its `pub`.";
+            " internal by removing its `pub`. Other modules would otherwise "
+            "receive values of `" + TypeName + "`, a type they cannot name.";
   }
 
   /// The same leak one level up: a `pub` item of package @p Package's root
@@ -963,22 +974,22 @@ public:
       SourceLocation TypeDeclLoc) {
     PrivateInPublicError E(Loc);
     const bool IsField = ItemKind == "field";
-    E.Message = Colors::BRIGHT_RED + "Public " + ItemKind + " '" + Colors::CYAN +
-                ItemName + Colors::BRIGHT_RED + "' of package '" + Colors::CYAN +
-                Package + Colors::BRIGHT_RED + "' exposes '" + Colors::CYAN +
-                TypeName + Colors::BRIGHT_RED + "', a type of its internal module '" +
+    E.Message = Colors::BRIGHT_RED + "I cannot let the public " + ItemKind + " `" + Colors::CYAN +
+                ItemName + Colors::BRIGHT_RED + "` of package `" + Colors::CYAN +
+                Package + Colors::BRIGHT_RED + "` expose `" + Colors::CYAN +
+                TypeName + Colors::BRIGHT_RED + "`, a type of its internal module `" +
                 Colors::CYAN + DisplayModuleName(TypeModule) + Colors::BRIGHT_RED +
-                "'." + Colors::RESET;
-    E.withRelated(TypeDeclLoc, "'" + TypeName + "' is declared in module '" +
+                "`." + Colors::RESET;
+    E.withRelated(TypeDeclLoc, "declared in module `" +
                                    DisplayModuleName(TypeModule) +
-                                   "', which only package '" + Package +
-                                   "' can import");
-    E.Hint_ = "Other packages import only '" + Package + "', its root module, so "
-              "they would receive values of a type they cannot name. Either "
-              "move `pub " + TypeKeyword + " " + TypeName + "` into the root "
-              "module, " + Package + ".tr, or keep " +
+                                   "`, which only package `" + Package +
+                                   "` can import");
+    E.Hint_ = "Move `pub " + TypeKeyword + " " + TypeName + "` into the root "
+              "module, `" + Package + ".tr`, or keep " +
               (IsField ? "the field" : "the " + ItemKind) +
-              " internal by removing its `pub`.";
+              " internal by removing its `pub`. Other packages import only `" +
+              Package + "`, its root module, so they would receive values of `" +
+              TypeName + "`, a type they cannot name.";
     return E;
   }
 
@@ -1011,9 +1022,9 @@ class DeprecatedUseWarning : public TurfWarning {
 public:
   DeprecatedUseWarning(SourceLocation Loc, const std::string &Name,
                        const std::string &Message)
-      : TurfWarning(Loc, TurfWarning::WarningLabel() + "'" + Colors::CYAN +
+      : TurfWarning(Loc, TurfWarning::WarningLabel() + "`" + Colors::CYAN +
                              Name + Colors::BRIGHT_YELLOW +
-                             "' is deprecated: " + Message + Colors::RESET) {
+                             "` is deprecated: " + Message + Colors::RESET) {
     Category_ = SLM::ErrorCategory::DECLARATION;
   }
 };
@@ -1026,9 +1037,10 @@ class TestFunctionUseError : public TurfError {
 public:
   TestFunctionUseError(SourceLocation Loc, const std::string &Name)
       : TurfError(Loc,
-                  Colors::BRIGHT_RED + "'" + Colors::CYAN + Name + Colors::BRIGHT_RED +
-                      "' is a test: `turf test` runs it, and nothing else may call it or "
-                      "use it as a value." + Colors::RESET,
+                  Colors::BRIGHT_RED + "I cannot use the test `" + Colors::CYAN + Name +
+                      Colors::BRIGHT_RED +
+                      "`: `turf test` runs it, and nothing else may call it or "
+                      "use it as a function value." + Colors::RESET,
                   "Move what the test and this code share into an ordinary function, and "
                   "call that from both.") {
     Category_ = SLM::ErrorCategory::DECLARATION;

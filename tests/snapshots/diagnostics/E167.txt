@@ -1,0 +1,13 @@
+tests/14_cfg_analysis/45_lint_reaches_call_arguments.tr (1 warning)
+
+── warning at line 14, col 16 [E167 · division by a zero literal]
+
+  I found `/` used with zero, which will crash at runtime.
+
+  Hint: Change the right-hand side: division or modulo by zero is undefined behavior.
+
+  14 │     return f(a / 0);
+     │                ^ this divides by zero
+
+  Run `turf --explain E167` for more details.
+

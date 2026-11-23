@@ -1,0 +1,14 @@
+tests/38_monomorphization/fail_generic_recursion_depth.tr (1 error)
+
+── error at line 24, col 16 [E079 · generic instantiation limit exceeded]
+
+  I stopped a chain of generic instantiations at 65 deep.
+  chain: wrap<int> -> wrap<&int> -> wrap<&&int> -> wrap<&&&int> -> wrap<&&&&int> -> ... 56 more ... -> wrap<&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&... -> wrap<&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&... -> wrap<&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&... -> wrap<&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&...
+
+  Hint: Make the generic stop requesting a larger instantiation of itself at some concrete depth. A chain that never bottoms out, even an intentional one such as a type-level count, is past what I will instantiate.
+
+  24 │     return wrap(&v);
+     │                ^ instantiated too many times from here
+
+  Run `turf --explain E079` for more details.
+

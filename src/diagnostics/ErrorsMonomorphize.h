@@ -47,11 +47,11 @@ public:
                                   size_t Depth, size_t TotalCount = 0)
       : TurfError(Loc, Colors::BRIGHT_RED +
                             (TotalCount
-                                 ? "too many generic instantiations (" +
+                                 ? "I stopped at " +
                                        std::to_string(TotalCount) +
-                                       " distinct requests)."
-                                 : "generic instantiation depth exceeded (" +
-                                       std::to_string(Depth) + " deep).") +
+                                       " distinct generic instantiations."
+                                 : "I stopped a chain of generic instantiations "
+                                   "at " + std::to_string(Depth) + " deep.") +
                             Colors::RESET) {
     Category_ = SLM::ErrorCategory::DECLARATION;
     std::string Path;
@@ -62,16 +62,14 @@ public:
     Message += "\n  " + Colors::BRIGHT_GREEN + "chain: " + Colors::CYAN +
                Path + Colors::RESET;
     Hint_ = TotalCount
-        ? "Some generic keeps requesting new instantiations faster than it "
-          "can finish them -- typically one that grows its own type "
-          "argument in more than one way at once. If this is intentional, "
-          "it's past what this compiler will monomorphize; restructure it "
-          "to stop growing the type at some concrete depth."
-        : "A generic function or struct that requests a new instantiation "
-          "of itself every time it runs never bottoms out. If this is "
-          "intentional (e.g. a type-level Peano count), it's past what "
-          "this compiler will monomorphize -- restructure it to stop "
-          "growing the type at some concrete depth.";
+        ? "Make the generic stop growing its own type argument at some "
+          "concrete depth: it requests new instantiations faster than I can "
+          "finish them, typically by growing the type in more than one way "
+          "at once."
+        : "Make the generic stop requesting a larger instantiation of itself "
+          "at some concrete depth. A chain that never bottoms out, even an "
+          "intentional one such as a type-level count, is past what I will "
+          "instantiate.";
   }
 };
 

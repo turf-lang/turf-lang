@@ -168,7 +168,7 @@ public:
 // return / unreachable code (CFG::reportFlowDiagnostics()), the complexity and
 // infinite-loop warnings, definite assignment, value range, alias (E017/E018),
 // nullability, escape, liveness, recursion without a base case, and, for a
-// `fn S.new()`, the constructor's field assignment (needs GlobalSymbolTable to
+// `fn S.new()`, the constructor's field assignment (needs Symbols() to
 // know S). The one sequence both FuncDefExprAST::codegen() and the query
 // facade's AnalysisOptions::RunFlowAnalysis run, so they cannot drift apart.
 // An error raises, ending the sequence for this function.
@@ -179,5 +179,15 @@ public:
 //                 them reads it today).
 void runFunctionFlowPasses(CFG &Cfg, const std::string &Name, SourceLocation Loc,
                            const std::vector<SymbolID> &ParamIDs);
+
+// F-S4a: lint and the flow passes as a whole-program phase before Codegen.
+// Lints the body of every function reachable from `Decls` -- top-level
+// ones, the functions of imported modules and functions declared inside
+// others -- builds its CFG, runs runFunctionFlowPasses() on it, keeps it in GlobalCFGs, and records
+// the function in the compilation's AnalysisFacts (FlowChecked), so
+// FuncDefExprAST::codegen() does not lint it or run the passes again. A generic
+// template, a `compile_error` test and a function the Resolver gave no
+// symbol (a clone) are left to Codegen, which checks them as before.
+void runProgramFlowPasses(const std::vector<const ExprAST *> &Decls);
 
 #endif

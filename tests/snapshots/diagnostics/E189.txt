@@ -1,0 +1,24 @@
+tests/05_arrays_pointers_ffi/unsafe_checks_warn.tr (2 warnings)
+
+── warning at line 51, col 18 [E189 · freeing memory that was never allocated]
+
+  This frees `px` (`&x`), which did not come from an allocation: freeing it corrupts memory.
+
+  Hint: Free only what `mem::alloc` (or another allocating function) returned; the address of a variable is freed when its function returns.
+
+  51 │         mem::free(px);
+     │                  ^ this memory was never allocated
+
+  Run `turf --explain E189` for more details.
+
+── warning at line 106, col 9 [E163 · unused variable]
+
+  Variable `raw` is declared but never used.
+
+  Hint: Remove `raw`, or use it. If it is unused on purpose, rename it `_raw`, or pass `--allow E163`.
+
+  106 │         mut raw: int* = &t to int*;
+      │         ^ this variable is never used
+
+  Run `turf --explain E163` for more details.
+

@@ -1,0 +1,13 @@
+tests/04_control_flow/fail_missing_return_on_one_path.tr (1 error)
+
+── error at line 5, col 1 [E009 · missing return]
+
+  I found a path through `sign` that ends without returning a result.
+
+  Hint: Add a `return` statement to every path in `sign`, including each `if` and `else` branch.
+
+  5 │ fn sign(x: int): int {
+    │ ^~ a path through this function ends without a `return`
+
+  Run `turf --explain E009` for more details.
+

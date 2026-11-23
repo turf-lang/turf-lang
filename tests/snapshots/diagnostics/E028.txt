@@ -1,0 +1,13 @@
+tests/18_operator_overload/fail_operator_builtin_pair_int.tr (1 error)
+
+── error at line 5, col 1 [E028 · operator overload for two built-in types]
+
+  I cannot accept `operator +(int, int)`, because both operand types are built in.
+
+  Hint: Make at least one operand a struct or a `string`: overloading an operator between two built-in types would make ordinary arithmetic ambiguous.
+
+  5 │ operator +(a: int, b: int): int {
+    │ ^ both operands of this operator are built-in types
+
+  Run `turf --explain E028` for more details.
+

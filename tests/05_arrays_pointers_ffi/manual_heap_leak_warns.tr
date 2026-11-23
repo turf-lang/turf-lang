@@ -1,0 +1,86 @@
+// AN-5, issue #352: manual-heap memory that nothing frees and nothing lets
+// out of the function warns (E187, allow by default, turned on here): kept
+// in a variable and only read, or thrown away. Memory that is freed (also by
+// `defer` or through an alias), stored in a field, passed to a
+// function that keeps it, or tracked by a pool, and garbage-collected values, do
+// not warn.
+// LINT: --warn E187
+// EXPECT-DIAG: The memory allocated into `lost` is never freed
+// EXPECT-DIAG: This allocation is never freed: its result is thrown away
+// EXPECT-NO-DIAG: allocated into `freed`
+// EXPECT-NO-DIAG: allocated into `deferred`
+// EXPECT-NO-DIAG: allocated into `first`
+// EXPECT-NO-DIAG: allocated into `kept`
+// EXPECT-NO-DIAG: allocated into `given`
+import mem;
+import test;
+
+unsafe {
+    struct Holder {
+        p: void*,
+    }
+}
+
+fn Holder.new(): void {
+    unsafe {
+        self.p = null;
+    }
+}
+
+fn leaks(): void {
+    unsafe {
+        mut lost: void* = mem::alloc(32);
+        mem::zero(lost, 32);
+        test::assert(lost != null, "allocated");
+    }
+}
+
+fn throws_away(): void {
+    mem::alloc(8);
+}
+
+fn frees(): void {
+    unsafe {
+        mut freed: void* = mem::alloc(16);
+        mem::free(freed);
+        mut deferred: void* = mem::alloc(16);
+        defer mem::free(deferred);
+        mut first: void* = mem::alloc(16);
+        mut alias: void* = first;
+        mem::free(alias);
+    }
+}
+
+fn stores(h: Holder): void {
+    unsafe {
+        mut kept: void* = mem::alloc(16);
+        h.p = kept;
+    }
+}
+
+fn passes(): void {
+    unsafe {
+        mut given: void* = mem::alloc(16);
+        mem::root(given);
+        mem::unroot(given);
+        mem::free(given);
+    }
+}
+
+fn pooled(): void {
+    mut pool: mem::Pool = mem::Pool::default();
+    pool.track(mem::alloc(16));
+    mem::free_pool(pool);
+}
+
+fn main(): int {
+    frees();
+    passes();
+    pooled();
+    unsafe {
+        mut h: Holder = Holder::new();
+        stores(h);
+        mem::free(h.p);
+    }
+    return 0;
+}

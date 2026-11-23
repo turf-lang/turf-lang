@@ -1,0 +1,28 @@
+Freeing memory that was never allocated
+
+`mem::free` gives back memory that an allocation (`mem::alloc` and the other `@ownership(acquires)` functions) handed out. This frees something that did not come from one: the address of a variable. That memory belongs to the function's frame, and freeing it corrupts the allocator:
+
+    import mem;
+
+    fn wrong(): int {
+        mut x: int = 5;
+        unsafe {
+            mut p: void* = &x to void*;
+            mem::free(p);                // WARNING (E189 at `warn`)
+        }
+        return x;
+    }
+
+A variable's memory is released when its function returns; there is nothing to free. Free only what an allocation returned:
+
+    import mem;
+
+    fn right(): int {
+        unsafe {
+            mut p: void* = mem::alloc(8);
+            mem::free(p);
+        }
+        return 0;
+    }
+
+The compiler reports this only when every value the freed pointer could hold is such an address; a pointer that is ever given an allocation, a parameter or a call's result is never reported. This warning starts at `allow` in 2.3: turn it on with `turf build --warn E189` (or `[lints] E189 = "warn"` in turf.toml).

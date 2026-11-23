@@ -1,0 +1,12 @@
+// An element of a `List<&?Node>` read directly: unchecked before, like
+// fail_deref_field_chain_without_variable.tr.
+import list::List;
+
+struct Node { val: int, next: &?Node }
+
+@test(compile_error, E081, "I cannot access the field `val` of this `&?Node`, which might be `null`")
+fn rejects_deref_list_element_without_variable(): void {
+    mut l: List<&?Node> = List::default();
+    l.push(null);
+    l[0].val;
+}

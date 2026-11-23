@@ -1,0 +1,13 @@
+tests/07_functions_modules/fail_import_self.tr (1 error)
+
+── error at line 5, col 1 [E027 · module not found]
+
+  I cannot find a module named `fail_import_self`.
+
+  Hint: Check that the file `fail_import_self.tr` exists in the standard library or your current directory.
+
+  5 │ import fail_import_self;
+    │ ^~~~~~ no module of this name
+
+  Run `turf --explain E027` for more details.
+

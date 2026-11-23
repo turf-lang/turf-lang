@@ -1,0 +1,39 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+// One type parameter stands for one type; the first argument does not
+// silently decide it for the second.
+fn<T> pair(a: T, b: T): T {
+    return b;
+}
+
+@test(compile_error, E056, "`T` in `pair` is an `int` from argument 1 and a `string` from argument 2. One type parameter stands for one type.")
+fn rejects_generic_conflicting_type_arguments(): void {
+    printline(pair(1, "a"));
+}
+
+// A generic constructor's T comes from the declared type; the argument must
+// already have that type, since it is not converted on the way in.
+struct Box<T> {
+    v: T
+}
+
+fn<T> Box.new(v: T): void {
+    self.v = v;
+}
+
+@test(compile_error, E056, "Argument 1 is an `int`, and building a `Box<string>` needs a `string` there.")
+fn rejects_generic_constructor_string_arg(): void {
+    mut b: Box<string> = Box::new(42);
+}
+
+// An instantiation never changes how many parameters a function has.
+fn<T> id(x: T): T {
+    return x;
+}
+
+@test(compile_error, E066, "`id` is fn<T>(T): T, and no choice of `T` makes it `fn(int, int): int`.")
+fn rejects_generic_function_value_wrong_arity(): void {
+    immut f: fn(int, int): int = id;
+    f(1, 2);
+}

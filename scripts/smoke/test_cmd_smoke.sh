@@ -208,8 +208,8 @@ broken wrong_diag_text "FAILED (Rejected, but EXPECT-DIAG not met)" "does not co
 // EXPECT-DIAG: no such words
 fn main(): int { return "x"; }
 EOF
-broken no_diag_violated "FAILED (Rejected, but EXPECT-DIAG not met)" "EXPECT-NO-DIAG violated: the compiler output contains 'Wrong return type'" fail_x.tr <<'EOF'
-// EXPECT-NO-DIAG: Wrong return type
+broken no_diag_violated "FAILED (Rejected, but EXPECT-DIAG not met)" "EXPECT-NO-DIAG violated: the compiler output contains 'I cannot return'" fail_x.tr <<'EOF'
+// EXPECT-NO-DIAG: I cannot return
 fn main(): int { return "x"; }
 EOF
 broken plain_diag_pin "FAILED (EXPECT-DIAG)" "EXPECT-DIAG missed" plain.tr <<'EOF'
@@ -290,12 +290,12 @@ fn returns_with_error(): !void {
     return;
 }
 
-@test(compile_error, E041, "Unknown function")
+@test(compile_error, E041, "function named")
 fn ce_no_error(): void {
     io::printline(1);
 }
 
-@test(compile_error, E041, "Unknown function")
+@test(compile_error, E041, "function named")
 fn ce_another_code(): void {
     immut x: int = "text";
 }
@@ -374,7 +374,7 @@ expect_out "@test failures: the count" testfns "Failed:      16"
 tf() { expect_out "@test failure $1" testfns "$2"; }
 tf returns_assertion "it panicked; expected it to return"
 tf returns_with_error "it returned the error ParseError::Empty; expected it to return"
-tf ce_no_error "its body compiled without an error; expected E041 \"Unknown function\""
+tf ce_no_error "its body compiled without an error; expected E041 \"function named\""
 tf ce_another_code "its body has another error, E066 at line 42"
 tf ce_another_message "no E041 message contains \"nothing like this\""
 tf ce_another_fix "E041 at line 52: Fix: replace 'sqaure' with 'square'"
@@ -736,6 +736,86 @@ EOF
   expect_rc "a companion is not a test" helper_path 1
   expect_out "a companion is not a test" helper_path "no test matches"
 fi
+
+# --- @test options (TDP-2-026) -----------------------------------------------------
+# Each option doing what TDP-2-026's table says, and failing the way it should:
+# a skipped test is listed with its reason and counted apart, a test past its
+# `timeout:` is killed and the file's other tests still run, `stdout:` is exact,
+# `levels:` runs at each level and names the one a failure is at, and `--tag`
+# / `--skip-tag` select by `tag:`.
+O="$WORK/testopts"
+fixture "$O" tests/options.tr <<'EOF'
+import test;
+
+@test(skip: "waits for #123")
+fn set_aside(): void {
+    test::assert(false, "never runs");
+}
+
+@test(timeout: 300)
+fn loops_forever(): void {
+    mut i: int = 0;
+    while (true) {
+        i = i + 1;
+    }
+}
+
+@test(timeout: 5000)
+fn ends_in_time(): void {
+}
+
+@test(stdout: "3\n")
+fn prints_three(): void {
+    printline("3");
+}
+
+@test(stdout: "4\n")
+fn prints_the_wrong_thing(): void {
+    printline("3");
+}
+
+@test(levels: all, tag: "math")
+fn adds(): void {
+    test::assert(1 + 1 == 2, "1 + 1 is 2");
+}
+
+@test(levels: [O1, O2], tag: ["math", "slow"])
+fn fails_at_every_level(): void {
+    test::assert(false, "always");
+}
+
+@test(tag: "net", serial)
+fn binds_a_port(): void {
+}
+EOF
+c opts "$O" --test
+expect_rc "@test options" opts 1
+expect_out "skip: listed with its reason" opts "options.tr: set_aside ... SKIPPED (waits for #123)"
+expect_out "skip: counted apart" opts "Skipped:     1"
+expect_out "skip: listed in the summary" opts "tests/options.tr: set_aside: waits for #123"
+expect_out "timeout: kills the test" opts "options.tr: loops_forever ... TIMEOUT"
+expect_out "timeout: names its limit" opts 'the test did not end within its `timeout: 300` (milliseconds)'
+expect_out "timeout: the other tests still run" opts "options.tr: ends_in_time ... PASS"
+expect_out "stdout: exact match passes" opts "options.tr: prints_three ... PASS"
+expect_out "stdout: a mismatch fails" opts 'the test printed "3\n", and its `stdout:` is "4\n"'
+for L in O0 O1 O2 O3; do
+  expect_out "levels: all runs at -$L" opts "options.tr: adds [-$L] ... PASS"
+done
+expect_out "levels: a failure names its level" opts "options.tr: fails_at_every_level [-O1] ... FAILED"
+expect_no_out "levels: the first failing level ends the test" opts "fails_at_every_level [-O2]"
+expect_out "serial: accepted" opts "options.tr: binds_a_port ... PASS"
+expect_out "the summary counts every test once" opts "Total Tests: 8"
+c opts_tag "$O" --test --tag math
+expect_out "--tag runs the tagged tests" opts_tag "options.tr: adds [-O0] ... PASS"
+expect_no_out "--tag leaves the others out" opts_tag "binds_a_port"
+expect_no_out "--tag leaves the untagged out" opts_tag "prints_three"
+expect_out "--tag counts only what it ran" opts_tag "Total Tests: 2"
+c opts_skip_tag "$O" --test --skip-tag slow --skip-tag net
+expect_no_out "--skip-tag leaves a tagged test out" opts_skip_tag "fails_at_every_level"
+expect_no_out "--skip-tag leaves each named tag out" opts_skip_tag "binds_a_port"
+expect_out "--skip-tag runs the rest" opts_skip_tag "options.tr: prints_three ... PASS"
+c opts_empty_tag "$O" --test --tag ""
+expect_rc "--tag with an empty tag" opts_empty_tag 2
 
 if [ "$FAILED" -ne 0 ]; then
   echo "test_cmd_smoke: $FAILED check(s) failed"

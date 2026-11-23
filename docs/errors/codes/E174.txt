@@ -1,0 +1,23 @@
+A decimal number is the receiver of a call without parentheses
+
+A literal can be the receiver of a method call or a UFCS call, like a variable of its type. A decimal number written that way has two dots in a row of characters, its own and the call's:
+
+    fn half(x: double): double {
+        return x / 2.0;
+    }
+
+    fn main(): int {
+        printline(1.5.half());   // WARNING (E174 at `warn`): 0.75
+        return 0;
+    }
+
+Which dot ends the number is something the reader has to work out. Parentheses say it:
+
+    fn main(): int {
+        printline((1.5).half());   // 0.75
+        return 0;
+    }
+
+The compiler's `Fix:` writes the parentheses in. The program means the same either way. An integer receiver (`1.twice()`) has only the call's dot and is fine as it is; so is `-1.abs()`, which is `-(1.abs())`.
+
+This warning starts at `allow` in 2.3: turn it on with `turf build --warn E174` (or `[lints] E174 = "warn"` in turf.toml). TurfLang 3.0 makes the unparenthesized form an error, and `turf migrate 3.0` adds the parentheses.

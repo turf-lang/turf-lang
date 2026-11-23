@@ -1,0 +1,1 @@
+{"reasoning": "x", "fix_mode": "MODIFY", "original_code": "    total = total + tripple(3);", "new_code": "    unsafe { total = total + 3 * 3; }", "category": "UNDECLARED_VARIABLE"}

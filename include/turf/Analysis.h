@@ -8,7 +8,7 @@
  *          `AnalysisResult` that owns everything the analysis produced.
  *
  *          The front end is built on process-wide mutable globals (the
- *          lexer cursor, `GlobalSymbolTable`, the diagnostic list, the
+ *          lexer cursor, `Symbols()`, the diagnostic list, the
  *          import caches, the error-recovery flag -- see
  *          docs/planning/ARCHITECTURE_SIMPLIFICATION.md §1). Every tool that
  *          drove the pipeline directly had to save and restore those around
@@ -175,6 +175,9 @@ struct Diagnostic {
   std::string Message;
   std::string Hint;
   Location Where;
+  // What the underline at `Where` says (DX-5): "this is an `int`", or the
+  // code's own label. `Related` are the secondary spans, each with its own.
+  std::string Label;
   std::vector<RelatedInformation> Related;
 };
 

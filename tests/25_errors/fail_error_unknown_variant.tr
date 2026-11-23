@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E039
-// EXPECT-DIAG: Error type 'IOError' has no variant 'Nonexistent'
+// EXPECT-DIAG: I cannot find a variant `Nonexistent` in the error type `IOError`
 // Test (fail): referencing an unknown variant name of a real error type
 // must be rejected, with a suggestion when one is close.
 error IOError {

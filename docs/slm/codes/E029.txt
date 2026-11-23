@@ -28,7 +28,7 @@ CORRECT SYNTAX:
 INCORRECT:
     mut p: Point = Point::new(1, 2);
     p::sum();
-    // ERROR: 'p' is a variable, not a type or module -- '::' doesn't apply to it.
+    // ERROR: `p` is a variable, not a type or module, so I cannot use `::` on it.
 
 WHAT THIS ERROR IS NOT:
   - Not about the METHOD name being wrong -- `sum` may exist exactly as

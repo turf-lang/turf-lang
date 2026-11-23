@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E141
-// EXPECT-DIAG: 'a' is immutable, but 'fill' writes to the array it is given as 'arr'.
+// EXPECT-DIAG: `a` is immutable, and `fill` writes to the array it takes as `arr`. As an `int[]` parameter, it shares the caller's array, so the change would land in `a`.
 // A slice expression of an immutable array is rooted at that array.
 fn fill(arr: int[], x: int): void {
     for (i, _y) in arr {

@@ -63,7 +63,7 @@ for m in $PRELUDE; do
   PRELUDE_COUNT=$((PRELUDE_COUNT + 1))
   out=$(cd "$WORK/resolve" && "$TURF" --resolve "$f" 2>&1 | strip)
   # E119 (no entry point) is the one expected complaint of a library file.
-  errs=$(echo "$out" | grep -E '^── error|^Error:' | grep -v -e '\[E119[] ·]' -e 'No entry point found')
+  errs=$(echo "$out" | grep -E '^── error|^Error:' | grep -v -e '\[E119[] ·]' -e 'I found no entry point')
   if [ -n "$errs" ] || echo "$out" | grep -qi 'ambiguous'; then
     fail "prelude module $f does not resolve cleanly when compiled directly"
     echo "$out" | firsterrors

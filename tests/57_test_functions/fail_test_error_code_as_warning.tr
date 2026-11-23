@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E146
-// EXPECT-DIAG: 'E041' is an error's code, not a warning's
+// EXPECT-DIAG: `E041` is an error's code, not a warning's: write `@test(compile_error, E041, "...")`.
 // TDP-2-006: the reverse of fail_test_warning_code_as_error.tr.
 @test(warning, E041, "")
 fn a(): void {

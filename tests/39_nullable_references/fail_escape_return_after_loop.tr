@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E086
-// EXPECT-DIAG: can't be returned
+// EXPECT-DIAG: be returned
 // A reference into this frame, returned after a loop that never touches it.
 // EscapePass met a loop header's not-yet-computed back edge as an empty map,
 // so every provenance became Unknown (never flagged) and this compiled; the

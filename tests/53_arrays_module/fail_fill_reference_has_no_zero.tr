@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E128
-// EXPECT-DIAG: needs an initializer
+// EXPECT-DIAG: In this instantiation: The array `out`, a `(&Node)[2]`, needs an initial value: it would start zero-filled, and a reference cannot be null.
 // An array of non-null references has no zero value to start from; fill a
 // (&?Node)[2] from a &?Node instead.
 

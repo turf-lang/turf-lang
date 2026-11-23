@@ -1,0 +1,13 @@
+tests/41_gc/09_boxed_fallible_success_survives_collection.tr (1 warning)
+
+── warning at line 37, col 1 [E169 · fallible function that never fails]
+
+  `makeRec` is declared to return a fallible type (`!T`) but never actually returns an error.
+
+  Hint: Drop the `!` from the return type and return `T` directly if the function can never fail, or pass `--allow E169` to silence this.
+
+  37 │ fn makeRec(): !Rec {
+     │ ^~ this function never fails
+
+  Run `turf --explain E169` for more details.
+

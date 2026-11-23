@@ -1,0 +1,14 @@
+# Models that met the --smart qualification thresholds (SL-4).
+#
+# scripts/slm/qualify_model.sh <file.gguf> --record appends a line when a model
+# meets all three, measured on the benchmark's train split against the
+# rules-only path of the same compiler:
+#   1. utility: the model path's mean utility is at least the rules-only
+#      path's (model - rules >= 0, paired over every case);
+#   2. false confidence: at most 20% of the fixes it shows are wrong;
+#   3. determinism: the same input gives the same answer twice with the
+#      suggestion cache off (scripts/slm/slm_determinism_check.sh).
+# `--smart` prints one note when the model it loads is not listed here, and
+# runs it anyway: the user chooses the model.
+#
+# sha256<TAB>file<TAB>date<TAB>record

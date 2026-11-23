@@ -26,9 +26,9 @@ fn main(): int {
 A struct is a name followed by a brace-enclosed, comma-separated list of
 `field: type` pairs. A trailing comma is allowed and not required.
 
-- A field cannot be `void`. That is `E112`: `'void' cannot be a struct field's type`.
-- Two fields with the same name are `E114`: `Struct 'A' already has a field named 'x'`.
-- A struct name can be declared only once **per file** (`E034`: `A struct named 'A' is already declared`).
+- A field cannot be `void`. That is `E112`: ``I cannot give a struct field the type `void` ``.
+- Two fields with the same name are `E114`: ``Struct `A` already has a field named `x` ``.
+- A struct name can be declared only once **per file** (`E034`: ``I found a second struct named `A` ``).
   Another module may declare a struct with the same name; they are different
   types. See [Types belong to a module](#types-belong-to-a-module).
 
@@ -38,7 +38,7 @@ An empty struct is legal. It is useful as a namespace for
 ```turflang
 struct MathUtil {}
 
-fn MathUtil.square(x: int) static: int {
+static fn MathUtil.square(x: int): int {
     return x * x;
 }
 
@@ -51,7 +51,7 @@ fn main(): int {
 
 A field is read and written with `.`; fields of fields chain
 (`line.start.x`). Reading or writing a field that does not exist is `E068`
-(`Struct 'P' has no field named 'nope'`), and assigning a value of the wrong
+(``I cannot find a field named `nope` on the struct `P` ``), and assigning a value of the wrong
 type is `E066`.
 
 A struct declared in an imported module has private fields unless each field is marked `pub`, even if the struct itself is `pub`:
@@ -71,8 +71,8 @@ fn main(): int {
 ```
 
 Inside the declaring file nothing needs `pub`. From another module,
-`account.balance` is `E088` (`Field 'Account.balance' is private to module
-'account'`) while `account.owner` is fine. `Account::default()` is always
+`account.balance` is `E088` (``I cannot use the field `Account.balance`, which is private to module
+`account` ``) while `account.owner` is fine. `Account::default()` is always
 allowed, whatever the field visibility: it fills every field with its zero
 value, which cannot break an invariant that zero does not. Methods, types and
 the rest of the visibility rules are in
@@ -129,8 +129,8 @@ fn main(): int {
 ```
 
 An `immut` struct variable cannot be changed: assigning to a field, or
-calling a method that assigns to one of its own fields, is `E060` (`Oops! You
-can't change the value of 'c' because it's immutable`).
+calling a method that assigns to one of its own fields, is `E060` (``I cannot
+change `c`: it is immutable ``).
 
 ### Constructing a struct
 
@@ -140,8 +140,8 @@ There are exactly two ways to make a struct value, and both use `::`.
 every field its zero value: numbers are 0, `bool` is `false`, `string` is
 `""`, a `&?T` or raw pointer is `null`, an enum is its first variant, and
 nested structs and array elements are defaulted recursively. It cannot be
-declared by hand (`E051`: `'default' is reserved and can't be declared by
-hand`) and takes no arguments (`E047`).
+declared by hand (`E051`: ``I cannot accept a hand-written `default`, because it is
+reserved ``) and takes no arguments (`E047`).
 
 **`T::new(args...)`** is a constructor you write. It is an ordinary
 instance method called `new`; `self` is the value being built, and the call
@@ -166,19 +166,19 @@ fn main(): int {
 ```
 
 A struct with no `.new` method has no `::new(...)`: calling it is `E050`
-(`'Point' has no constructor -- 'Point::new(...)' can't be called`). A
+(``I cannot call `Point::new(...)`, because `Point` has no constructor ``). A
 constructor can validate or transform its inputs like any function.
 
 These rules apply to constructors:
 
 - `new` is reached only through `::`. `p.new(...)` on an existing value is
-  `E045` (`'new' can't be called on an instance with '.'`), and so is
+  `E045` (``I cannot call `new` on an instance with `.` ``), and so is
   `p.default()`.
 - `new` cannot be `static` (`E046`).
-- A call with the wrong number of arguments is `E044` (`'Point::new' was called with 1 argument, but no overload accepts that many`).
+- A call with the wrong number of arguments is `E044` (``I found no overload of `Point::new` that takes 2 arguments ``).
 - Every field must be assigned on **every** path through `new`. Missing one
-  on any path is `E049` (`'Point.new' doesn't assign every field on all
-  paths`, with `Not definitely assigned on every path: y`).
+  on any path is `E049` (`` `Point.new` does not assign every field on all
+  paths ``, with `Fields not assigned on every path: y`).
 
 ```turflang
 struct Point {
@@ -207,7 +207,7 @@ A field assigned unconditionally before a loop counts as covered, even if
 the loop only reassigns it conditionally.
 
 There is no brace-literal form. `Point { x: 1, y: 2 }` is `E113`
-(`'Point { ... }' is no longer valid syntax for constructing a struct`);
+(`` `Point { ... }` is not valid syntax for constructing a struct ``);
 write `Point::new(...)`, or `Point::default()` and assign the fields.
 
 A `&T` field cannot be null, so its default is a fresh `T::default()` on the
@@ -253,7 +253,7 @@ fn main(): int {
 ```
 
 A method may be declared before or after its struct in the file. Calling a
-method that does not exist is `E054` (`'User' has no method named 'nope'`).
+method that does not exist is `E054` (``I cannot find a method named `nope` on the struct `User` ``).
 A function that is not a method of the struct can also be called as `u.f()`
 when its first parameter is a `User`; see
 [UFCS](functions_and_modules.md#3-ufcs-calling-a-function-as-a-method).
@@ -261,13 +261,12 @@ when its first parameter is a `User`; see
 ### Static methods
 
 A **static** method has no `self`. It is declared like an instance method,
-with `static` after the parameter list and before the return type, and is
-called with `::`:
+with `static` in front of `fn`, and is called with `::`:
 
 ```turflang
 struct Temperature {}
 
-fn Temperature.to_fahrenheit(c: double) static: double {
+static fn Temperature.to_fahrenheit(c: double): double {
     return c * 9.0 / 5.0 + 32.0;
 }
 
@@ -279,14 +278,14 @@ fn main(): int {
 
 The ways to get this wrong:
 
-- `u.to_fahrenheit(1.0)` through an instance is `E052` (`'to_fahrenheit' is a
-  static method -- it can't be called through an instance with '.'`).
-- `Temperature.to_fahrenheit(1.0)` on the type name is `E048` (`'.' can't be
-  used here -- 'Temperature' is a struct type, not an instance`).
-- `t::to_fahrenheit(1.0)` with `::` on a variable is `E029` (`'t' is a
-  variable, not a type or module -- '::' doesn't apply to it`).
-- `static` on a function that is not a method is `E053` (`'static' can only
-  be used on a struct-bound method`).
+- `u.to_fahrenheit(1.0)` through an instance is `E052` (`` `to_fahrenheit` is a
+  static method, so I cannot call it through an instance with `.` ``).
+- `Temperature.to_fahrenheit(1.0)` on the type name is `E048` (``I cannot use `.` on
+  `Temperature`, which is a struct type, not an instance ``).
+- `t::to_fahrenheit(1.0)` with `::` on a variable is `E029` (`` `t` is a
+  variable, not a type or module, so I cannot use `::` on it ``).
+- `static` on a function that is not a method is `E053` (``I cannot use `static` on a function that does not belong to a
+  struct ``).
 - The old declaration form `fn Temperature::to_fahrenheit(...)` is `E113`;
   `::` is only for calling.
 
@@ -305,7 +304,7 @@ struct Box<T> {
 ```
 
 Every method on a generic struct repeats the struct's type parameters
-after `fn`. Omitting them is `E138` (`Missing type parameters!`: declare it
+after `fn`. Omitting them is `E138` (`` `Box` is generic, so its method `get` must declare the type parameters too ``: declare it
 as `fn<T> Box.get(...)`):
 
 ```turflang
@@ -317,14 +316,14 @@ fn<T> Box.get(): T { return self.val; }
 fn<T> Box.put(v: T): void { self.val = v; }
 
 // A static method repeats them too when it mentions `T`.
-fn<T> Box.of(v: T) static: Box<T> {
+static fn<T> Box.of(v: T): Box<T> {
     mut b: Box<T> = Box::default();
     b.val = v;
     return b;
 }
 
 // A static method that does not mention `T` needs none.
-fn Box.empty_label() static: string { return "box"; }
+static fn Box.empty_label(): string { return "box"; }
 
 fn main(): int {
     mut a: Box<int> = Box::of(41);
@@ -339,9 +338,9 @@ The same rule holds for a method you declare on a generic struct imported
 from a module (`fn<T> List.last_or(...)`). The type arguments come from the
 declared type of the variable: write `mut b: Box<int> = Box::default();`.
 Naming a generic struct with no arguments, `mut b: Box = ...`, is `E138`
-(`Missing type arguments!`); giving a type the wrong number of them,
+(`` `Box` is generic, so I need type arguments here ``); giving a type the wrong number of them,
 `Box<int, int>`, or any at all to a struct that declares none, is `E148`
-(`Wrong number of type arguments!`). Generics are covered in full in [Generics and
+(`` `Box` takes 1 type argument (T), but I found 2 ``). Generics are covered in full in [Generics and
 operator overloading](generics_and_operators.md#generic-structs-and-their-methods).
 
 ### Local type declarations
@@ -374,7 +373,7 @@ file:
 - Two functions cannot each declare a local `P`: the second is `E034`.
 - A local `P` cannot reuse the name of a top-level `P` in the same file: `E034`.
 - A local struct in a generic function cannot use that function's type
-  parameter; `T` is `E042` (`Unknown type 'T'`) there.
+  parameter; `T` is `E042` (``I cannot find a type named `T` ``) there.
 - A local struct cannot have type parameters of its own (`struct Box<T>`
   inside a function is `E151`); declare a generic struct at the top level.
 
@@ -383,7 +382,7 @@ file:
 struct P { x: int }
 
 fn f(): int {
-    struct P { y: int }     // E034: 'P' is already declared in this file
+    struct P { y: int }     // E034: I found a second struct named `P`
     mut p: P = P::default();
     return p.y;
 }
@@ -397,7 +396,7 @@ A struct's size must be computable from its declaration. A field that holds
 another struct **by value** (or an array of one) puts that whole struct
 inside this one, so a chain of by-value fields that comes back to the start
 would need infinite space. The compiler rejects it with `E069`
-(`struct 'A' cannot contain itself by value`) and names the whole cycle:
+(``I cannot let the struct `A` contain itself by value ``) and names the whole cycle:
 
 <!-- doc-example: fails E069 -->
 ```turflang
@@ -408,10 +407,15 @@ fn main(): int { return 0; }
 ```
 
 ```text
-error [E069]: struct 'A' cannot contain itself by value.
+I cannot let the struct `A` contain itself by value.
   cycle: A -> B -> A
-  Note: field 'A::b' has type 'B'
-  Note: field 'B::a' has type 'A'
+  Note: field `B::a` has type `A` (line 2, col 12)
+  Hint: Make one of these fields a reference or pointer (`&A`, `&?A`, `A*`) instead of holding the struct by value, which would give it no finite size.
+
+  1 │ struct A { b: B }
+    │ ^~~~~~     - field `A::b` has type `B`
+    │ │
+    │ this struct contains itself
 ```
 
 The direct form (`struct Node { me: Node }`) and the array form
@@ -492,8 +496,7 @@ fn main(): int {
 ```
 
 **Reading through a `&?T` requires a null check first.** A field read or
-a method call on it without a proven check is `E081` (`Possible null
-dereference: this '&?Node' value might be 'null'`). The check works on a
+a method call on it without a proven check is `E081` (``I cannot access the field `v` of `n`, which might be `null` here ``). The check works on a
 **variable** only: a `&?Node` that is a field, a call result or a list
 element (`a.next.val`) has to be stored in a variable and checked there:
 
@@ -579,8 +582,7 @@ a `&T`, so the node outlives the call that made it.
 A non-nullable `&T` link is legal, but a type that reaches itself through
 `&` fields has no `::default()`, because defaulting would have to build
 another one inside it forever. `Node::default()` on `struct Node { v: int,
-next: &Node }` is `E147` (`'Node' has no default value: ... it reaches itself
-through '&' fields`). Make a field on the cycle `&?Node`, or build the value
+next: &Node }` is `E147` (`` `Node` has no default: ... `Node` reaches itself through `&` fields, so that never ends ``). Make a field on the cycle `&?Node`, or build the value
 with `::new(...)`.
 
 #### With raw pointers
@@ -588,10 +590,8 @@ with `::new(...)`.
 A raw `T*` field is also legal, but a struct that has one must be declared
 inside `unsafe { }`, and so must every use of the field (see [FFI, `unsafe
 {}`, and Pointers](ffi_and_unsafe.md#4-raw-pointers-ptr-and-t)). Without
-the `unsafe`, the declaration is `E130` (`Raw pointer type 'Node*' cannot be
-used outside an 'unsafe' block`). Even inside `unsafe`, no ordinary function
-may take or return a raw pointer in its signature (`E130`, `Raw pointer in
-function signature!`):
+the `unsafe`, the declaration is `E130` (``I cannot use the raw pointer type `Node*` outside an `unsafe` block ``). Even inside `unsafe`, no ordinary function
+may take or return a raw pointer in its signature (`E130`, ``The parameter `p` of `f` cannot have the raw pointer type `Node*` ``):
 
 ```turflang
 unsafe {
@@ -624,8 +624,7 @@ declares it and its name, not by its name alone. Two modules may each
 declare `Node`, and your program may declare its own `List` or `Parser`
 whatever it imports; they are separate types, written `a::Node` and
 `b::Node`. Bare `Node` means your own file's type or one you imported by
-name. If a bare name could mean both, the use is `E085` (`'Node' is
-ambiguous here -- it could mean more than one type`) naming both; qualify the
+name. If a bare name could mean both, the use is `E085` (`` `Node` could mean more than one type here ``) naming both; qualify the
 imported one and leave it out of the import. `typeof(x)` prints
 `shapes::Node` for a module's type and the bare name for one in the main
 file.
@@ -652,8 +651,7 @@ module](functions_and_modules.md#9-types-belong-to-their-module).
 ### Struct equality
 
 `==` and `!=` are not defined for struct values. Comparing two structs
-with no `operator ==` for that type is `E124` (`Values can't be compared!
-Cannot compare struct values with '=='`). Compare the fields you care
+with no `operator ==` for that type is `E124` (``I cannot compare two `Point` structs with `==`: a struct has no built-in comparison ``). Compare the fields you care
 about, or declare `operator ==(a: T, b: T): bool` for the struct; see
 [Operator overloading](generics_and_operators.md#operator-overloading).
 
@@ -686,15 +684,14 @@ ordinal is its 0-based declaration order. Variants are reached with `::`.
 There is no explicit value syntax (`A = 5`) and no payload syntax
 (`A(int)`); both are `E105` parse errors.
 
-- A repeated variant name is `E114` (`Enum 'E' already has a variant named 'A'`).
-- A name that is not a variant is `E039` (`Enum 'E' has no variant 'C'`).
+- A repeated variant name is `E114` (``Enum `E` already has a variant named `A` ``).
+- A name that is not a variant is `E039` (``I cannot find a variant `C` in the enum `E` ``).
 - `E::default()` does not exist (`E135`: an enum variant is not callable);
   name the variant you want. A **struct field** of enum type defaults to
   the first variant.
 - Assigning a variant of another enum is `E066`.
 - `==` and `!=` work on two values of the same enum type with no overload.
-  Ordering operators (`<`, `>`, `<=`, `>=`) do not (`E124`: `Cannot use
-  ordering operators on enum type 'E'. Cast to int first`).
+  Ordering operators (`<`, `>`, `<=`, `>=`) do not (`E124`: ``I cannot order the enum `E` with `<`: only `==` and `!=` compare enum variants ``).
 
 ### Casts and built-in members
 
@@ -731,7 +728,7 @@ integer outside `0 <= n < COUNT`, or a string that names no variant, aborts
 the program (`Runtime Error: Invalid int to enum conversion.` or `Invalid
 string to enum conversion.`). So a value of an enum type is always one of its
 variants. A compile-time constant out of range, `(7 to E)`, is `E127`
-(`Value 7 is out of range for enum 'E'`).
+(``7 is not a variant of the enum `E`, whose variants are 0 to 1 ``).
 
 `VALUES` and `NAMES` are raw pointers, so reading them needs `unsafe { }`
 (`E130` otherwise):
@@ -759,9 +756,9 @@ fn main(): int {
 ### Matching with `compare`
 
 `compare` over an enum must cover every variant or end in `otherwise:`;
-otherwise it is `E093` (`Non-exhaustive enum comparison on 'E'`, listing
+otherwise it is `E093` (``This `compare` on `E` does not cover every case ``, listing
 the missing variants). Matching the same variant in two arms is `E133`
-(`Duplicate pattern!`).
+(``An earlier arm of this `compare` already matches this pattern, so this arm never runs.``).
 
 ```turflang
 enum Season { Spring, Summer, Autumn, Winter }

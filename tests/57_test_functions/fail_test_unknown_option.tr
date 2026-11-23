@@ -1,8 +1,8 @@
 // EXPECT-DIAG: E146
-// EXPECT-DIAG: '@test' has no option 'skip:'
-// TDP-2-006: `fix:` is the one option; the others (TDP-2-026) are not part of
-// the language yet, so writing one is an error rather than ignored.
-@test(skip: "later")
+// EXPECT-DIAG: `@test` has no option `retries:`. Its options are `skip:`, `timeout:`, `levels:`, `stdout:`, `tag:` and `serial`
+// TDP-2-026: an option name `@test` does not know is an error, with the options
+// listed, rather than ignored. There is deliberately no retry option.
+@test(retries: 3)
 fn a(): void {
 }
 

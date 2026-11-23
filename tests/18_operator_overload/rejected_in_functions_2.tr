@@ -1,0 +1,87 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+import list::List;
+
+// Negative test (LEC-006): `operator<T> ==(a: Cell<T>, b: Cell<T>)` binds T
+// from the operands and then requires EVERY substituted parameter to match
+// its operand exactly. T binds to int from the left operand; the right is a
+// Cell<string>, which is not `Cell<int>`, so no overload matches. (The binder
+// alone would accept this -- unify() skips a mismatch silently -- which is
+// why the substituted signature is re-checked.)
+// Expected: E066, "Cannot compare 'Cell<int>' with 'Cell<string>'".
+struct Cell<T> {
+    v: T,
+    n: int
+}
+
+fn<T> Cell.new(v: T): void {
+    self.v = v;
+    self.n = 1;
+}
+
+operator<T> ==(a: Cell<T>, b: Cell<T>): bool {
+    return true;
+}
+
+@test(compile_error, E124, "I cannot compare a `Cell<int>` with a `Cell<string>`.")
+fn rejects_generic_operator_mismatched_instantiations(): void {
+    mut a: Cell<int> = Cell::new(1);
+    mut b: Cell<string> = Cell::new("x");
+    if (a == b) {
+        return;
+    }
+}
+
+// `box[0] += 1` is a read AND a write. With only the setter declared there is
+// no read to perform; the read half is reported, as for a plain `box[0]`. It
+// must be a diagnostic whichever half is missing, never Codegen's "Base is not
+// an array or pointer" (found by turf-fuzz). The getter-only twin is
+// fail_index_compound_assign_getter_only.tr.
+struct IntBox {
+    a: int
+}
+
+operator []=(box: &IntBox, index: int, value: int): void {
+    box.a = value;
+}
+
+@test(compile_error, E126, "I cannot index an `IntBox`.")
+fn rejects_index_compound_assign_setter_only(): void {
+    mut box: IntBox = IntBox::default();
+    box[0] += 1;
+}
+
+// Negative test (LEC-006, E098): the compound-assignment form of
+// fail_index_result_field_assign.tr -- `bs[0].a += 1` updates the copy.
+// Expected: E098, "Cannot update part of the value an 'operator[]' read returned".
+
+struct Big {
+    a: int
+}
+
+fn Big.new(a: int): void {
+    self.a = a;
+}
+
+@test(compile_error, E098, "I cannot update part of what an `operator[]` read returned: it is a copy, so the update would be lost.")
+fn rejects_index_result_field_compound(): void {
+    mut bs: List<Big> = List::default();
+    bs.push(Big::new(1));
+    bs[0].a += 1;
+}
+
+// Negative test: indexing a struct with no operator[]= overload declared
+// at all must be a clean type error, not the "Internal error: Base is not
+// an array or pointer" ICE ArrayAccessExprAST::codegenLValue() would
+// otherwise hit.
+struct Vec2 {
+    x: int,
+    y: int
+}
+
+@test(compile_error, E056, "No `operator[]=` matches `Vec2[int] = int`.")
+fn rejects_operator_index_not_declared(): void {
+    mut v: Vec2 = Vec2::default();
+    v[0] = 5;
+}

@@ -3,7 +3,7 @@
 // later "restore the wrapper for compatibility" shows up as a failing test
 // instead of a quiet re-freeze of a name the 2.x surface deliberately lacks.
 // EXPECT-DIAG: E030
-// EXPECT-DIAG: has nothing named 'list_sort'
+// EXPECT-DIAG: I cannot find `list_sort` in the module
 import list::List;
 import list::list_sort;
 

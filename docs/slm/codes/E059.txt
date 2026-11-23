@@ -22,8 +22,7 @@ CORRECT USAGE:
 INCORRECT:
     compare code {
         matches "404":
-        // ERROR: Type mismatch in compare!
-        //   Subject has type 'int' but a matches arm has type 'string'.
+        // ERROR: I cannot match an `int` subject against a `string` arm.
             io::printline("Not Found");
         done
         otherwise:

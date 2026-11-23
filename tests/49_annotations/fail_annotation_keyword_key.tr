@@ -1,6 +1,6 @@
 // EXPECT-DIAG: E146
-// EXPECT-DIAG: Unknown '@ownership' argument 'error:'
-// EXPECT-NO-DIAG: Expected a word or a string
+// EXPECT-DIAG: I do not know the `@ownership` argument `error:`. The only keyed argument is `releases: <parameter>`.
+// EXPECT-NO-DIAG: I expected a word or a string
 // A keyword is a word in an annotation's arguments, so `error: x` parses (an
 // annotation such as `@diagnostics(error: ...)` needs that) and reaches the
 // pass that owns the name, which says what is wrong. It used to be a syntax

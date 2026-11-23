@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E067
-// EXPECT-DIAG: but returns 'void'
+// EXPECT-DIAG: I cannot return a `void` from a function that returns an `int`.
 // Returning a `void` call's result from a function that declares `int`: the
 // same E067 as initialising from it (not E064, wrong return type -- the
 // function does return the right kind of thing; there is just no value).

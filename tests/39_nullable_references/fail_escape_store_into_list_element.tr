@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E086
-// EXPECT-DIAG: can't be stored into a field that outlives this function
+// EXPECT-DIAG: be stored into a field that outlives this function
 // A collection's element lives in its heap buffer (and was checked when it
 // went in), so `l[0].next = &n` hands the caller's node a reference into
 // this frame (owner decision 2026-10-12, found by turf-fuzz).

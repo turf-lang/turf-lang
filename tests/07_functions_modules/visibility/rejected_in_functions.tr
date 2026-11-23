@@ -1,0 +1,127 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+import list::List;
+import visibility_lib_module::Guarded;
+import visibility_lib_module::Shown;
+import visibility_lib_module;
+
+// LEC-002 E088: `Guarded::new` is an ordinary method with its own visibility,
+// and it is private here (`Guarded::make` is the public way in).
+
+@test(compile_error, E088, "I cannot use the method `Guarded.new`, which is private to module")
+fn rejects_private_constructor(): void {
+    mut g: Guarded = Guarded::new(1);
+    g.v;
+}
+
+// LEC-002 E088: a variant is public exactly when its enum is, so
+// `m::HiddenColor::A` on a private enum is rejected.
+
+@test(compile_error, E088, "I cannot use the type `HiddenColor`, which is private to module")
+fn rejects_private_enum_variant(): void {
+    immut x: int = visibility_lib_module::HiddenColor::A to int;
+    x;
+}
+
+// LEC-002 E088: a module's own `extern fn` bindings are private unless
+// declared `pub extern fn` -- here `strlen` is not.
+
+@test(compile_error, E088, "I cannot use the function `strlen`, which is private to module")
+fn rejects_private_extern_call(): void {
+    visibility_lib_module::strlen("abc");
+}
+
+// LEC-002 E088: `secret` is a field of a `pub struct` but was not written
+// `pub`, so it is private to visibility_lib_module.
+
+@test(compile_error, E088, "I cannot use the field `Shown.secret`, which is private to module")
+fn rejects_private_field_read(): void {
+    mut s: Shown = Shown::default();
+    s.secret;
+}
+
+// LEC-002 E088: writing a private field is rejected the same way reading one
+// is -- an assignment's left-hand side goes through the same field check.
+
+@test(compile_error, E088, "I cannot use the field `Shown.secret`, which is private to module")
+fn rejects_private_field_write(): void {
+    mut s: Shown = Shown::default();
+    s.secret = 1;
+}
+
+// LEC-002 E088: `helper` is private to visibility_lib_module (declared without
+// `pub`), so another module cannot call it even fully qualified.
+
+@test(compile_error, E088, "I cannot use the function `helper`, which is private to module")
+fn rejects_private_function_qualified(): void {
+    visibility_lib_module::helper();
+}
+
+// LEC-002 E088: machine and error types follow the same rule as structs and
+// enums. `PubMachine` is fine; the private `HiddenMachine` is the error.
+
+@test(compile_error, E088, "I cannot use the type `HiddenMachine`, which is private to module")
+fn rejects_private_machine_and_error_types(): void {
+    immut ok: visibility_lib_module::PubMachine = visibility_lib_module::PubMachine::Off;
+    immut bad: visibility_lib_module::HiddenMachine = visibility_lib_module::HiddenMachine::Off;
+}
+
+// LEC-002 E088: `Type::method(...)` on a static method its module did not
+// mark `pub`.
+
+@test(compile_error, E088, "I cannot use the method `Shown.make_private`, which is private to module")
+fn rejects_private_static_method_call(): void {
+    mut s: Shown = Shown::make_private();
+    s.v;
+}
+
+// LEC-002 E088: the flagship case. A List's storage used to be reachable from
+// any module only because nothing could be private (STD-003 item 5); it is now
+// private to list.tr, and the hint points at the public methods (`get`, `set`,
+// `length`, ...) instead. Since LEC-009 the storage sits behind `h`, the handle
+// to the list's one shared header.
+
+@test(compile_error, E088, "I cannot use the field `List.h`, which is private to module `list`")
+fn rejects_private_stdlib_list_data(): void {
+    mut l: List<int> = List::default();
+    l.push(1);
+    l.h.len;
+}
+
+// LEC-002 E088: `Module::Hidden::default()` on a private type -- the type is
+// reached through the scope-access path, not a type annotation, so it needs
+// its own gate.
+
+@test(compile_error, E088, "I cannot use the type `Hidden`, which is private to module")
+fn rejects_private_type_default_construct(): void {
+    immut n: int = visibility_lib_module::Hidden::default().v;
+    n;
+}
+
+// LEC-002 E088: a private struct cannot be named from another module.
+
+@test(compile_error, E088, "I cannot use the type `Hidden`, which is private to module")
+fn rejects_private_type_qualified(): void {
+    mut h: visibility_lib_module::Hidden = visibility_lib_module::Hidden::default();
+    h.v;
+}
+
+// LEC-002 E088: visibility must not be bypassable by call syntax. `secret_twice`
+// is a free function the module did not mark `pub`, so `s.secret_twice()` may
+// not resolve to it through UFCS from another module.
+
+@test(compile_error, E088, "I cannot use the function `secret_twice`, which is private to module")
+fn rejects_private_ufcs_candidate(): void {
+    mut s: Shown = Shown::default();
+    s.secret_twice();
+}
+
+// LEC-002: E087 -- a declaration inside a function is local to it, so `pub`
+// there is rejected rather than silently ignored.
+@test(compile_error, E087, "I cannot use `pub` on a declaration inside a function.")
+fn rejects_pub_local_struct(): void {
+    pub struct Point { x: int }
+    mut p: Point = Point::default();
+    p.x;
+}

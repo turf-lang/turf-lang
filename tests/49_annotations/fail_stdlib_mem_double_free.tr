@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E017
-// EXPECT-DIAG: Double free detected for 'p'
+// EXPECT-DIAG: I found a second free of `p`
 // EXPECT-NO-DIAG: Unsafe pointer use
 // The standard library's own allocator is checked the same way a user's is:
 // `mem::alloc` says `@ownership(acquires)` and `mem::free` says

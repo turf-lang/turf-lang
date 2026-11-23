@@ -8,11 +8,12 @@ A name you used belongs to another module, which did not mark it `pub`
     import util;
     fn main(): int {
         return util::helper();
-        // ERROR: Function 'helper' is private to module 'util'.
-        //   Note: 'helper' is declared in module 'util' without `pub`
-        //   Hint: If 'helper' is meant to be used from other modules, mark
-        //   it `pub` in util.tr: `pub fn helper(...)`. Otherwise, 'util'
-        //   offers these public functions: api.
+        // ERROR: I cannot use the function `helper`, which is private to
+        //        module `util`.
+        //   Note: declared in module `util` without `pub`
+        //   Hint: Mark `helper` as `pub` in util.tr with `pub fn helper(...)`,
+        //   if other modules are meant to use it. Otherwise, use one of the
+        //   public functions that `util` offers: api.
     }
 
 Everything a module declares at its top level -- functions, structs, enums,
@@ -41,9 +42,9 @@ itself is `pub`:
 
     // main.tr
     p.x            // ok: a `pub` field
-    p.cache        // ERROR: Field 'Point.cache' is private to module 'shapes'.
+    p.cache        // ERROR: I cannot use the field `Point.cache`, which is private to module `shapes`.
     p.len()        // ok: a `pub` method
-    p.refresh()    // ERROR: Method 'Point.refresh' is private to module 'shapes'.
+    p.refresh()    // ERROR: I cannot use the method `Point.refresh`, which is private to module `shapes`.
     Point::default()   // always fine -- it only zero-fills, so it cannot
                        // break an invariant that zero cannot
 
@@ -75,4 +76,4 @@ a `pub` generic -- function or struct method -- whose body uses a private
 helper or a private field: when you instantiate it from your own file, the
 copy is still checked as the module that wrote it.
 
-`export immut` constants are always public: `export` is their `pub`.
+`pub immut` constants are always public: `export` is their `pub`.

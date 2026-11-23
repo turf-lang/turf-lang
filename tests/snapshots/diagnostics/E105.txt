@@ -1,0 +1,12 @@
+tests/01_syntax/fail_missing_comma_between_struct_fields.tr (1 error)
+
+── error at line 8, col 5 [E105 · missing comma]
+
+  I expected a `,` or a `}` after this field definition.
+  Hint: Separate struct fields with `,`, as in `x: int, y: int`, and put a `,` after the field on the line above this one.
+
+  8 │     y: int
+    │     ^ a `,` is missing here
+
+  Run `turf --explain E105` for more details.
+

@@ -1,0 +1,158 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+import list::List;
+
+// The copy is a temporary; there is nothing to assign to.
+@test(compile_error, E061, "I cannot assign to a function call's result: only a variable, a struct field or an array element can be assigned.")
+fn rejects_assign_to_copy_result(): void {
+    mut a: int[3] = [1, 2, 3];
+    a.copy() = [1];
+    a[0];
+}
+
+// Issue #260: an array becomes a slice only by being passed to a `T[]`
+// parameter; there is no conversion that makes one.
+fn sum(arr: int[]): int {
+    return arr[0];
+}
+
+@test(compile_error, E140, "A conversion cannot use the unsized array type `int[]`.")
+fn rejects_cast_to_unsized(): void {
+    mut a: int[2] = [1, 2];
+    sum(a to int[]);
+}
+
+// Two `int[3]`s share a type name, so `a == b` used to slip through the
+// type check and reach Codegen as a raw comparison of the whole aggregate:
+// an internal compiler error ("Invalid operand types for FCmp instruction").
+@test(compile_error, E124, "I cannot compare arrays with `==`.")
+fn rejects_compare_arrays(): void {
+    mut a: int[3] = [1, 2, 3];
+    mut b: int[3] = [1, 2, 3];
+    if a == b {
+        return;
+    }
+}
+
+// The same for slices, which used to compare their { pointer, length } pairs
+// the same broken way. "Equal" could mean same elements or same storage, so
+// it has to be written out.
+@test(compile_error, E124, "I cannot compare arrays with `!=`.")
+fn rejects_compare_slices(): void {
+    mut a: int[3] = [1, 2, 3];
+    immut v = a[..];
+    if v != a[1..] {
+        return;
+    }
+}
+
+// copy() returns a T[] (its length is not a compile-time fact), so it can't
+// initialize a T[N] variable.
+@test(compile_error, E003, "I cannot initialize `b`, an `int[3]`, from an `int[]`.")
+fn rejects_copy_into_sized_array(): void {
+    mut a: int[3] = [1, 2, 3];
+    mut b: int[3] = a.copy();
+    b[0];
+}
+
+// copy() is an array method; a string has none.
+@test(compile_error, E131, "I cannot call the method `copy` on a `string`: only a struct has methods.")
+fn rejects_copy_of_string(): void {
+    mut s: string = "abc";
+    mut t = s.copy();
+    t.length();
+}
+
+// A slice shares the array it looks at, so a `mut` one would let `t[0] = 9`
+// change the immutable `a`.
+@test(compile_error, E144, "`t` is a `mut` view of `a`, which is immutable. A slice shares its array, so writing through `t` would change `a`.")
+fn rejects_mut_view_of_immut_array(): void {
+    immut a: int[3] = [1, 2, 3];
+    mut t: int[] = a[1..];
+    t[0];
+}
+
+// ...and when an existing `mut` view is pointed at an immutable array later.
+@test(compile_error, E144, "`view` is a `mut` view of `fixed`, which is immutable. A slice shares its array, so writing through `view` would change `fixed`.")
+fn rejects_mut_view_rebound_to_immut_array(): void {
+    immut fixed: int[3] = [1, 2, 3];
+    mut scratch: int[3] = [4, 5, 6];
+    mut view: int[] = scratch[..];
+    view = fixed[1..];
+    view[0];
+}
+
+// A slice's length is only known at run time, so it can't become a T[N].
+// Before this was checked, Codegen stored the slice into b's storage.
+@test(compile_error, E003, "I cannot initialize `b`, an `int[3]`, from an `int[]`.")
+fn rejects_slice_into_sized_array(): void {
+    mut a: int[3] = [1, 2, 3];
+    immut v = a[..];
+    mut b: int[3] = v;
+    b[0];
+}
+
+// A slice is a view, not a place: `a[0..2] = b` would not copy b's elements
+// into a. (Assign the elements one by one, or fill() a slice.)
+@test(compile_error, E061, "")
+fn rejects_slice_is_not_assignable(): void {
+    mut a: int[3] = [1, 2, 3];
+    mut b: int[2] = [9, 9];
+    a[0..2] = b;
+}
+
+// A local slice is fine, but only its outermost dimension may be unsized.
+@test(compile_error, E140, "The variable `rows` cannot use the unsized array type `int[]` (inside `int[2][]`).")
+fn rejects_slice_local_inner_dimension(): void {
+    mut rows: int[2][] = [[1], [2]];
+}
+
+// A `T[]` variable is a view and needs an array to look at.
+@test(compile_error, E128, "The slice `v` has no array to view.")
+fn rejects_slice_local_without_initializer(): void {
+    mut v: int[];
+}
+
+// A negative bound counts from the end and stops at -length, like an index.
+@test(compile_error, E143, "The slice `[-4..]` of `int[3]` is out of range: the start is outside 0..3.")
+fn rejects_slice_negative_start_out_of_range(): void {
+    immut a: int[3] = [1, 2, 3];
+    immut t = a[-4..];
+    t.length();
+}
+
+// [2..1] is not "empty", it is a mistake: an empty slice is [i..i].
+@test(compile_error, E143, "the start comes after the end")
+fn rejects_slice_start_after_end(): void {
+    immut a: int[3] = [1, 2, 3];
+    immut t = a[2..1];
+    t.length();
+}
+
+// A `T[]` doesn't match a `T[N]` parameter, for the same reason: no
+// compile-time length to check it against.
+fn first(arr: int[3]): int {
+    return arr[0];
+}
+
+@test(compile_error, E056, "No overload of `first` takes the argument types (int[]).")
+fn rejects_slice_to_sized_parameter(): void {
+    mut a: int[3] = [1, 2, 3];
+    first(a[..]);
+}
+
+// Issue #260: a collection would keep its slices past the call that made them.
+
+@test(compile_error, E140, "The variable `l` cannot use the unsized array type `int[]` (inside `list::List<int[]>`).")
+fn rejects_unsized_generic_type_argument(): void {
+    mut l: List<int[]>;
+}
+
+// Writing an element of a slice expression writes the array it was taken
+// from.
+@test(compile_error, E060, "I cannot change `a`: it is immutable.")
+fn rejects_write_immut_array_through_slice_expr(): void {
+    immut a: int[3] = [1, 2, 3];
+    a[1..][0] = 5;
+}

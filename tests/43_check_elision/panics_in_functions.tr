@@ -1,0 +1,133 @@
+// F-11e: tests moved from fail_*.tr files that abort at run time, one function each;
+// each `@test(panic, ...)` names the text its panic prints.
+
+// OPT-002 safety guard: `i`'s address is taken and handed to `mutate()`,
+// which writes through it via a raw pointer inside `unsafe { }`.
+// markElidableChecks() must treat ANY address-taken variable as never
+// provably constant (collectAddressTaken()'s own doc comment,
+// ValueRange.cpp) -- a naive dataflow unaware of this aliasing would see
+// "i = 3, never reassigned" in `main`'s own AST and wrongly elide the
+// bounds check below. Without that guard this would be a genuine
+// out-of-bounds memory write with NO check at all, not merely a missed
+// diagnostic -- confirmed live (docs/development/changes/OPT-002.md) that
+// the guard keeps the check in the emitted IR; this is the regression test
+// for it actually firing at runtime.
+fn mutate(p: &int): void {
+    unsafe {
+        mut raw: int* = p to int*;
+        raw[0] = 99;
+    }
+}
+
+@test(panic, "Array index out of bounds")
+fn panics_address_taken_index_not_elided(): void {
+    mut arr: int[10];
+    mut i: int = 3;
+    mutate(&i);
+    arr[i] = 42; // i is now 99 -- genuinely out of bounds for a 10-element array
+}
+
+// The bounds-check twin of fail_overflow_write_in_defer_not_elided.tr: `i`
+// still looked like 0 after the `defer` set it to 1000000, so the bounds
+// check on `a[i]` was removed and the read went past the array (a
+// segmentation fault).
+@test(panic, "Array index out of bounds")
+fn panics_bounds_write_in_defer_not_elided(): void {
+    mut a: int[3] = [1, 2, 3];
+    mut i: int = 0;
+    if true {
+        defer i = 1000000;
+    }
+    printline(a[i]);
+}
+
+// The sub-expression twin of fail_overflow_copy_of_address_taken_not_elided.tr:
+// `(x * 1)` read the stale constant of an address-taken `x` because only a
+// bare `x` operand was checked, so `(x * 1) + 1` lost its overflow check.
+fn set_max(p: &int): void {
+    p[0] = 9223372036854775807;
+}
+
+@test(panic, "Integer overflow")
+fn panics_overflow_address_taken_in_subexpression_not_elided(): void {
+    mut x: int = 0;
+    set_max(&x);
+    mut w: int = (x * 1) + 1;
+    printline(w);
+}
+
+// `x++` as a call argument is a write inside an expression, which the
+// check-elision dataflow does not model: `x` still looked like
+// 9223372036854775806 at `x + 1`, so the check was removed and the sum
+// wrapped silently.
+fn id(v: int): int {
+    return v;
+}
+
+@test(panic, "Integer overflow")
+fn panics_overflow_postfix_in_argument_not_elided(): void {
+    mut x: int = 9223372036854775806;
+    mut z: int = id(x++);
+    mut y: int = x + 1;
+    printline(y + z);
+}
+
+// OPT-002 must never elide a check that ISN'T provably safe. `bigVal()`'s
+// return is a FuncCallExprAST -- markElidableChecks()'s evalConstExpr() has
+// no case for it at all (it only folds literals, plain-variable reads, and
+// +/-/* over already-known operands, per its own doc comment,
+// ValueRange.cpp), so `a` is correctly never treated as a known constant,
+// and `a + 1` must still trap at runtime exactly like it did before this
+// group existed.
+fn bigVal(): int {
+    return 9223372036854775807;
+}
+
+@test(panic, "Integer overflow")
+fn panics_overflow_still_traps_when_unprovable(): void {
+    mut a: int = bigVal();
+    a = a + 1;
+}
+
+// The dataflow that proves checks unnecessary (ValueRange.cpp) only models a
+// write that is a whole statement. `defer x = ...` runs at the end of the
+// `if` block, not where it is written, so the write was invisible: `x` still
+// looked like 1 at `x + 1`, the overflow check was removed, and the program
+// printed -9223372036854775808 with exit status 0.
+@test(panic, "Integer overflow")
+fn panics_overflow_write_in_defer_not_elided(): void {
+    mut x: int = 1;
+    if true {
+        defer x = 9223372036854775807;
+    }
+    mut y: int = x + 1;
+    printline(y);
+}
+
+// NM-2 (issue #348): `for i in 0..17` over an `int[16]` reaches index 16, so
+// the range [0, 16] does not prove the access and its bounds check stays.
+@test(panic, "Array index out of bounds")
+fn panics_range_index_still_caught(): void {
+    mut a: int[16];
+    mut t: int = 0;
+    for i in 0..17 {
+        t = t + a[i];
+    }
+    t;
+}
+
+// NM-2 (issue #348): just outside a proof the check stays. `i <= n` bounds
+// `i` by `n.Hi`, which is the largest `int` when nothing is known about `n`,
+// so `i += 1` is not proven safe and must still trap when `i` reaches it.
+fn climb(start: int, n: int): int {
+    mut i: int = start;
+    while i <= n {
+        i += 1;
+    }
+    return i;
+}
+
+@test(panic, "Integer overflow")
+fn panics_range_overflow_still_traps(): void {
+    climb(9223372036854775805, 9223372036854775807);
+}

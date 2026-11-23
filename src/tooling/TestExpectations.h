@@ -27,7 +27,15 @@ bool IsRuntimeAbortTest(const std::string &Source);
 
 /// `// EXPECT-DIAG: E011` / `// EXPECT-DIAG: some text` /
 /// `// EXPECT-NO-DIAG: some text`, matched against the compile output.
-std::vector<std::string> CheckDiag(const std::string &Source, const std::string &CompileOutput);
+/// With @p CodesOnly, only the markers that name a code are checked: what the
+/// compatibility promise covers (codes and exit statuses, not message text,
+/// decision D-6), which the 2.0 corpus gate holds a compiler to.
+std::vector<std::string> CheckDiag(const std::string &Source, const std::string &CompileOutput,
+                                   bool CodesOnly = false);
+
+/// Whether this run checks codes only (`TURF_TEST_DIAG_CODES_ONLY=1`, set by
+/// scripts/check/compat_corpus_check.py for tests/compat/2.0).
+bool DiagCodesOnly();
 
 /// `// EXPECT-FIX: <description>` (TDP-2-001): each marker names a `Fix:` line
 /// of the compile output exactly. With @p RequireAllPinned (the compiler's own
@@ -36,6 +44,13 @@ std::vector<std::string> CheckDiag(const std::string &Source, const std::string 
 /// A project's own tests opt in by writing the marker.
 std::vector<std::string> CheckFix(const std::string &Source, const std::string &CompileOutput,
                                   bool RequireAllPinned);
+
+/// The lint flags a test file asks to be compiled with: every
+/// `// LINT: --warn E174 --deny E163 --lint-set 2.2` line's flags, in order.
+/// Only --allow/--warn/--deny <code> and --lint-set <2.N>; anything else is
+/// reported in @p Bad (a test's flags are the lint levels a project would put
+/// in [lints], never other compiler options).
+std::vector<std::string> LintFlags(const std::string &Source, std::vector<std::string> &Bad);
 
 /// Whether @p Source has any `// EXPECT-FIX:` marker.
 bool HasFixMarker(const std::string &Source);
@@ -74,6 +89,15 @@ struct TestCase {
   /// The number the test program runs it by, -1 when it is not run.
   int Run = -1;
   std::vector<Diag> Errors, Warnings;
+  // TDP-2-026 options (TestAnnotation.h).
+  bool Skip = false;
+  std::string SkipReason;
+  int TimeoutMs = 0;
+  std::vector<std::string> Levels;
+  bool HasStdout = false;
+  std::string Stdout;
+  std::vector<std::string> Tags;
+  bool Serial = false;
 };
 
 /// Reads a manifest. On failure returns false and sets @p Error.
@@ -91,6 +115,13 @@ std::vector<std::string> JudgeWarnings(const TestCase &C);
 /// it printed, with the line the test program reports through.
 std::vector<std::string> JudgeRun(const TestCase &C, int Status, bool TimedOut,
                                   const std::string &Output);
+
+/// TDP-2-026 `stdout:`: what a test printed to stdout, @p Stdout without the
+/// line the test program reports its end through (`turf-test: ...`).
+std::string TestStdout(const std::string &Stdout);
+
+/// @p S as a quoted string with `\n` and `\t` written out, for a message.
+std::string Quoted(const std::string &S);
 
 /// @p Output without the lines the test program reports through.
 std::string ProgramOutput(const std::string &Output);

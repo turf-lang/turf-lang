@@ -22,7 +22,17 @@
 #include <algorithm>
 #include <unordered_set>
 
-std::unique_ptr<SymbolTable> GlobalSymbolTable;
+// The current compilation's table (SymbolTable.h, F-S2). Not an instance: the
+// compilation owns the table, and this only names the innermost live scope's.
+static SymbolTable *CurrentSymbols = nullptr;
+
+SymbolTable *Symbols() { return CurrentSymbols; }
+
+SymbolTableScope::SymbolTableScope(SymbolTable *Table) : Saved(CurrentSymbols) {
+  CurrentSymbols = Table;
+}
+
+SymbolTableScope::~SymbolTableScope() { CurrentSymbols = Saved; }
 
 SymbolTable::SymbolTable(const SymbolTable &Other)
     : ScopeStack(Other.ScopeStack), AllSymbols(Other.AllSymbols),
@@ -49,9 +59,6 @@ SymbolTable &SymbolTable::operator=(const SymbolTable &Other) {
   return *this;
 }
 
-void InitializeSymbolTable() {
-  GlobalSymbolTable = std::make_unique<SymbolTable>();
-}
 
 void SymbolTable::EnterScope() { ScopeStack.emplace_back(ScopeStack.size()); }
 

@@ -231,12 +231,12 @@ Added to `docs/development/INVARIANTS.md` under a new "Cleanup and
   `break` inside a `while` that is ITSELF the deferred statement is legal
   (contrast the fail_ test below), directly exercising
   `FindEscapingControlFlow()`'s `InLoop` tracking.
-- **Added** `tests/40_defer/fail_return_in_defer.tr` — the group's
+- **Added** `tests/40_defer/return_in_defer_rejected.tr: rejects_return_in_defer` — the group's
   required negative test (§8's own "Testing scope"): a bare `return`
   directly inside a `defer` is rejected (E083).
 - **Added** `tests/40_defer/fail_break_in_defer.tr` — same rule, for a bare
   `break` not absorbed by any loop.
-- **Added** `tests/40_defer/fail_defer_skipped_on_panic.tr`
+- **Added** `tests/40_defer/defer_skipped_on_panic_panics.tr: panics_defer_skipped_on_panic`
   (`RUNTIME_ABORT_EXPECTED`) — compiles, then aborts via a deliberately
   failing `test::assert()`. Proves the "compiles, then aborts" half of
   INV-DEFER-1 automatically; the "never prints `DEFERRED_RAN`" half was

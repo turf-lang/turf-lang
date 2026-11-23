@@ -1,5 +1,5 @@
 // EXPECT-DIAG: empty_compare_warned_once.tr (1 warning)
-// EXPECT-DIAG: Empty compare statement has no arms
+// EXPECT-DIAG: This `compare` has no `matches` arm and no `otherwise`, so it does nothing.
 // A parse-time warning is reported once; the main file is parsed twice and
 // each parse raised it.
 

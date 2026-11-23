@@ -1,0 +1,14 @@
+An `int` becomes a `double` and may lose precision
+
+A `double` holds every whole number exactly only up to 2^53 (9007199254740992). An `int` goes up to 2^63 - 1, so converting a large one to `double` -- with `to double`, or by storing it into, passing it as, or returning it as a `double` -- rounds away its last digits:
+
+    fn main(): int {
+        mut big: int = 9007199254740993;
+        mut d: double = big to double;   // WARNING (E181, when turned on): 9007199254740992.0
+        printline(d);
+        return 0;
+    }
+
+The warning is not shown when the compiler can prove the value is within +-2^53, for instance a constant or a literal that converts exactly.
+
+This check is opt-in: it starts at `allow` and stays a warning in every version. Turn it on with `turf build --warn E181` (or `[lints] E181 = "warn"` in turf.toml) for code where exact large integers matter.

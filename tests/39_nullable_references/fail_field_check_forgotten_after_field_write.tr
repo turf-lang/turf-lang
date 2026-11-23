@@ -1,0 +1,17 @@
+// EXPECT-DIAG: E082
+// EXPECT-DIAG: I cannot use `h.next` as a non-null reference here, because it might be `null`.
+// `o` may be the same node as `h`, so writing any `.next` forgets the check
+// on `h.next`.
+struct Node { val: int, next: &?Node }
+
+fn get(n: &Node): int { return n.val; }
+
+fn f(h: &Node, o: &Node): int {
+    if h.next != null {
+        o.next = null;
+        return get(h.next);
+    }
+    return 0;
+}
+
+fn main(): int { return 0; }

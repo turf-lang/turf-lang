@@ -1,7 +1,7 @@
 // EXPECT-DIAG: E079
-// EXPECT-DIAG: too many generic instantiations
+// EXPECT-DIAG: distinct generic instantiations
 // EXPECT-DIAG: chain: f<int> -> f<
-// EXPECT-NO-DIAG: generic instantiation depth exceeded
+// EXPECT-NO-DIAG: chain of generic instantiations
 // (The second hop is deliberately not pinned: which of f<Box<T>> / f<Pair<T>>
 // is the 4097th request depends on how many instantiations precede it, and
 // LEC-007 removing three non-generic functions from list.tr flipped it from

@@ -124,8 +124,13 @@ std::string render(const DiagnosticEngine::Diag &D, bool IsWarning) {
                {"start", llvm::json::Object{{"line", E.Line}, {"column", E.StartCol}}},
                {"end", llvm::json::Object{{"line", E.Line}, {"column", E.EndCol}}}}},
           {"replacement", E.Replacement}});
+    llvm::json::Array Flags;
+    for (const auto &F : FixScore::flags(D.Fix.Score))
+      Flags.push_back(F);
     Fix = llvm::json::Object{{"description", D.Fix.Description},
-                             {"edits", std::move(Edits)}};
+                             {"edits", std::move(Edits)},
+                             {"tier", FixScore::tierName(FixScore::tier(D.Fix.Score))},
+                             {"flags", std::move(Flags)}};
   }
 
   llvm::json::Object Obj{
@@ -138,6 +143,7 @@ std::string render(const DiagnosticEngine::Diag &D, bool IsWarning) {
       {"hint", orNull(Hint)},
       {"file", cleanPath(D.Filename)},
       {"span", D.Loc.Line > 0 ? llvm::json::Value(span(D.Loc)) : llvm::json::Value(nullptr)},
+      {"label", D.Loc.Line > 0 ? llvm::json::Value(stripAnsi(diagLabel(D))) : llvm::json::Value(nullptr)},
       {"related", std::move(Related)},
       {"fix", std::move(Fix)},
       {"denied", D.Denied}};

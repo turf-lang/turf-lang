@@ -1,0 +1,27 @@
+TURF E176 -- `export immut` INSTEAD OF `pub immut` (WARNING):
+
+CAUSE:
+  A module constant is declared `export immut NAME: T = value;`. This is
+  the older spelling of `pub immut`; it still compiles and warns (the
+  warning starts at `allow`).
+
+INCORRECT (compiles, but warns at `warn`):
+    export immut MAX_USERS: int = 100;
+
+    fn main(): int {
+        return MAX_USERS;
+    }
+
+CORRECT:
+    pub immut MAX_USERS: int = 100;
+
+    fn main(): int {
+        return MAX_USERS;
+    }
+
+FIX:
+  Replace `export` with `pub`. A constant only this module uses needs
+  neither: `immut RETRIES: int = 3;` at the top level is private.
+
+RELATED: E088 (a private constant used from another module), E021
+  (`mut` for a module-level value).

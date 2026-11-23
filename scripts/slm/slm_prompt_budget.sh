@@ -128,6 +128,41 @@ echo "  largest code page                     $biggest_n tokens ($(basename "$bi
 printf '%-34s %6s %6s  %s\n' "category doc" "doc" "total" "(total = scaffold + card + largest page + doc)"
 printf '%s' "$rows"
 
+# #364: the explanation request made once a fix is accepted. Its prompt is
+# small, but it is measured the same way: the real one, from a replayed
+# two-attempt fix (the user turn then carries the errors met on the way too).
+TURF_SLM_DUMP_PROMPT=1 TURF_SLM_REPLAY=scripts/slm/slm_replay/method_block.explain_after_retry.responses \
+    "$TURFC" --smart "$FIXTURE" 2>&1 |
+    sed -E 's/\x1b\[[0-9;]*m//g' |
+    awk '/^--- EXPLAIN SYSTEM PROMPT ---$/{f=1;next} /^--- END EXPLAIN USER PROMPT ---$/{f=0} /^--- (END EXPLAIN SYSTEM|EXPLAIN USER) PROMPT ---$/{next} f' >"$TMP/explain"
+if [ ! -s "$TMP/explain" ]; then
+    echo "slm_prompt_budget: the compiler printed no explanation prompt (did the replayed fix validate?)"
+    exit 2
+fi
+n_explain=$(tokens "$TMP/explain")
+echo "  explanation request (system + user)   $n_explain tokens"
+if [ "$n_explain" -gt "$LIMIT" ]; then
+    echo "FAIL the explanation request is over the $LIMIT-token cap"
+    fail=1
+fi
+
+# SL-6: the user turn is decoded in one batch too. The fullest one the replay
+# programs make (a call mismatch: params, callee, structs, known types and the
+# code window) is measured the same way.
+TURF_SLM_DEBUG=1 TURF_SLM_REPLAY=/dev/null "$TURFC" --smart scripts/slm/slm_replay/context_call.tr 2>&1 |
+    sed -E 's/\x1b\[[0-9;]*m//g' |
+    awk '/^--- USER PROMPT ---$/{f=1;next} /^-------------------$/{f=0} f' >"$TMP/user"
+if [ ! -s "$TMP/user" ]; then
+    echo "slm_prompt_budget: the compiler printed no user prompt for context_call.tr"
+    exit 2
+fi
+n_user=$(tokens "$TMP/user")
+echo "  user prompt with SL-6's fields         $n_user tokens"
+if [ "$n_user" -gt "$LIMIT" ]; then
+    echo "FAIL the user prompt is over the $LIMIT-token cap"
+    fail=1
+fi
+
 if [ $fail -ne 0 ]; then
     echo "slm_prompt_budget: FAILED -- over the $LIMIT-token cap, the model would lose the middle of its documentation; trim the doc"
     exit 1

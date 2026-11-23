@@ -1,0 +1,13 @@
+tests/45_pattern_matching/fail_pattern_wrong_struct.tr (1 error)
+
+── error at line 10, col 17 [E092 · invalid pattern]
+
+  This pattern destructures a `Q`, and what it matches is a `P`.
+
+  Hint: Name the value's own struct: `P { ... }`.
+
+  10 │         matches Q { x }: return x; done
+     │                 ^ this pattern is not valid
+
+  Run `turf --explain E092` for more details.
+

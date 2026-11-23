@@ -50,16 +50,16 @@ fn main(): int {
 }
 EOF
 out=$(compile unused.tr)
-echo "$out" | grep -q "Variable 'why' is declared but never used" \
+echo "$out" | grep -qF 'Variable `why` is declared but never used' \
   || fail "1: an unread binding should be reported unused. Got: $out"
-echo "$out" | grep -q "Variable 'x' is declared but never used" \
+echo "$out" | grep -qF 'Variable `x` is declared but never used' \
   && fail "4: a binding that is read was reported unused"
-echo "$out" | grep -q "'why' is assigned but the value is never read" \
+echo "$out" | grep -qF 'The value assigned to `why` is never read' \
   && fail "4: an unused binding was ALSO reported as a dead store"
 
 sed 's/why/_why/' unused.tr > quiet.tr
 out=$(compile quiet.tr)
-echo "$out" | grep -q "_why" && fail "2: a \`_name\` binding should be silent. Got: $out"
+echo "$out" | grep -qF 'Variable `_why` is declared but never used' && fail "2: a \`_name\` binding should be silent. Got: $out"
 
 cat > unreachable.tr <<'EOF'
 struct P { x: int }
@@ -82,7 +82,7 @@ EOF
 out=$(compile unreachable.tr)
 n=$(echo "$out" | grep -c "This arm can never run")
 [ "$n" = "1" ] || fail "3: expected exactly one 'This arm can never run', got $n. Output: $out"
-n=$(echo "$out" | grep -c "The 'otherwise' arm can never run")
+n=$(echo "$out" | grep -cF 'The `otherwise` arm can never run')
 [ "$n" = "1" ] || fail "3: expected exactly one otherwise warning, got $n. Output: $out"
 
 echo "pattern_warnings_smoke: all checks passed"

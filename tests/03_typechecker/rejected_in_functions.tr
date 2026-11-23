@@ -1,0 +1,256 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+import io;
+import math;
+import test;
+
+// A `char` used to be accepted as an array index (as its byte value, for the
+// `freq[s[i]]` idiom). That is banned: a character is not a position, so it
+// needs an explicit `(c to int)` like any other non-int value.
+@test(compile_error, E002, "An index into `int[128]` must be an `int`, and I found a `char`.")
+fn rejects_array_index_char(): void {
+    mut freq: int[128] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    mut s: string = "hello";
+    mut x: int = freq[s[0]];
+    x;
+}
+
+// A decimal is not a whole number: `a[1.5]` has no meaning, and Turf will not
+// guess whether `a[1.0]` meant index 1. Convert explicitly with `to int`.
+// (A `char` IS accepted as an index -- tests/13_string_stdlib/
+// 12_dsa_anagram_check.tr counts letters with `freq[word[i]]`.)
+@test(compile_error, E002, "An index into `int[3]` must be an `int`, and I found a `double`.")
+fn rejects_array_index_double(): void {
+    mut a: int[3] = [1, 2, 3];
+    mut d: double = 1.0;
+    mut x: int = a[d];
+    x;
+}
+
+// Issue #263: `arr["one"]` compiled with NO diagnostic at all -- E002's
+// `--explain` page promised "the compiler stops you here" and nothing did. A
+// string is not a whole number and cannot index an array.
+@test(compile_error, E002, "An index into `int[3]` must be an `int`, and I found a `string`.")
+fn rejects_array_index_string(): void {
+    mut a: int[3] = [1, 2, 3];
+    mut x: int = a["one"];
+    x;
+}
+
+// Regression test: `test::assert()` with zero arguments must be a clean compile
+// error, not a compiler crash.
+//
+// History: `assert` used to be a compiler intrinsic registered with
+// BuiltinInfo::Arity == -1 ("variadic/unknown") specifically because it
+// genuinely accepts either 1 or 2 args (condition, optional message) -- not
+// a single fixed count TypeChecker::visitFuncCall's generic single-arity
+// check could express. That disabled arity checking for it entirely, and a
+// 0-arg call reached CodegenIntrinsic's unbounds-checked Args[0] read and
+// crashed the compiler (SIGABRT) -- see changelog/ for the original fix.
+// `assert` is now an ordinary, real overloaded Turf function in
+// lib/std/test.tr (two overloads: 1-arg and 2-arg) -- a 0-arg call is
+// rejected by completely ordinary overload resolution ("no overload
+// accepts that many [arguments]"), the same mechanism any other
+// wrong-arity call to any function hits. Kept as a regression test to
+// confirm that migration didn't quietly reopen the 0-arg case.
+
+@test(compile_error, E044, "")
+fn rejects_assert_no_args(): void {
+    test::assert();
+}
+
+// Companion to fail_assert_no_args.tr: `test::assert()` called with 3+ arguments
+// must also be rejected -- assert takes a condition and an optional
+// message, never more. Back when assert was a compiler intrinsic this
+// silently compiled (extra args beyond the message were just ignored by
+// CodegenIntrinsic); now that it's an ordinary overloaded Turf function in
+// lib/std/test.tr (1-arg and 2-arg overloads only), a 4-arg call is
+// rejected by ordinary overload resolution instead.
+
+@test(compile_error, E044, "")
+fn rejects_assert_too_many(): void {
+    test::assert(true, "msg", "extra", "more");
+}
+
+// A bool is not a number.
+@test(compile_error, E057, "I cannot use `+` on a `bool` and an `int`.")
+fn rejects_bool_arithmetic(): void {
+    mut n: int = true + 1;
+    n;
+}
+
+@test(compile_error, E057, "The unary `-` needs a number, and I found a `bool`.")
+fn rejects_bool_negation(): void {
+    mut ok: bool = true;
+    printline(-ok);
+}
+
+@test(compile_error, E124, "I cannot compare a `bool` with a `bool` using `<`.")
+fn rejects_bool_ordering(): void {
+    mut ok: bool = true < false;
+}
+
+// Regression test: same crash as fail_call_literal.tr, via an indexed value.
+@test(compile_error, E135, "This expression is an `int`, not a function, so I cannot call it.")
+fn rejects_call_array_element(): void {
+    mut a: int[3] = [1, 2, 3];
+    a[0]();
+}
+
+// Regression test: same crash as fail_call_literal.tr, via a call's result.
+fn helper(): int { return 1; }
+
+@test(compile_error, E135, "This expression is an `int`, not a function, so I cannot call it.")
+fn rejects_call_result_of_call(): void {
+    helper()();
+}
+
+// `1 < 2 < 3` is `(1 < 2) < 3`, a bool compared with an int.
+@test(compile_error, E124, "I cannot compare a `bool` with an `int` using `<`.")
+fn rejects_chained_comparison(): void {
+    mut ok: bool = 1 < 2 < 3;
+}
+
+@test(compile_error, E057, "I cannot use `+` on an `int` and a `string`.")
+fn rejects_compound_assignment_type_mismatch(): void {
+    mut x: int = 5;
+    x += "hello";
+}
+
+// Regression test: `lengthof` was deleted entirely
+// (STRING_UFCS_OPERATOR_CHAR_RFC.md §7 step 7). A bare `lengthof(...)` call
+// must now be a clean "unknown function" error, not silently accepted and
+// not an internal compiler error -- `strings::length(s)` is the real
+// replacement.
+@test(compile_error, E041, "")
+fn rejects_lengthof_removed(): void {
+    mut n: int = lengthof("hello");
+}
+
+// `&&` and `||` combine bools; an int is not a condition.
+@test(compile_error, E057, "I cannot use `&&` on an `int` and a `bool`: both operands must be `bool`s.")
+fn rejects_logical_and_int(): void {
+    mut n: int = 1;
+    mut ok: bool = n && true;
+}
+
+// Regression test: `&&`/`||` between non-numeric, incompatible operands
+// (here two different struct types) must be rejected with a real, readable
+// error message.
+//
+// This was already rejected before the fix, but via a confusing path:
+// TypeChecker::inferRelationalType()'s "logical operators" check tested for
+// the literal characters '&'/'|' (the BITWISE operator tokens) instead of
+// TOK_AND/TOK_OR (the real && / || tokens) -- a check that could never
+// actually match, since visitBinary() routes bitwise '&'/'|' to a separate
+// code path before this function is ever called. The dead check meant a
+// genuine && / || silently fell through to unrelated "ordering operator"
+// logic, which for a genuinely invalid case formatted the operator into the
+// error message via `std::string(1, static_cast<char>(Op))` -- and TOK_AND/
+// TOK_OR's values (-20/-21) are not printable ASCII when cast to char, so
+// the message contained a garbage character instead of "&&"/"||". This test
+// doesn't assert on the message text (the test runner only checks
+// compile-fail status), but it does exercise the fixed code path directly.
+
+struct A { x: int }
+struct B { y: int }
+
+@test(compile_error, E057, "I cannot use `&&` on an `A` and a `B`: both operands must be `bool`s.")
+fn rejects_logical_operator_non_numeric(): void {
+    mut a: A = A::default();
+    mut b: B = B::default();
+    mut result: bool = a && b;
+}
+
+@test(compile_error, E057, "I cannot use `||` on a `bool` and a `double`: both operands must be `bool`s.")
+fn rejects_logical_or_double(): void {
+    mut x: double = 2.5;
+    mut ok: bool = false || x;
+}
+
+@test(compile_error, E044, "")
+fn rejects_math_abs_no_args(): void {
+    io::printline(math::abs());
+
+}
+
+@test(compile_error, E025, "No overload of `math::power` takes the argument types (bool, int).")
+fn rejects_math_power_bool(): void {
+    // Issue #10 regression test: bool must NOT be implicitly coerced to int.
+    // math::power expects (double, double) or (int, int) — passing a `bool`
+    // must be rejected by the TypeChecker with a type mismatch error.
+    io::printline(math::power(true, 2));
+
+}
+
+// Regression test: calling a method on a non-struct value (int, string,
+// pointer-to-non-struct) must be a clean compile error.
+//
+// Before this fix, TypeChecker::visitMethodCall()'s fallback ("be
+// permissive") left the call unresolved with zero diagnostic, and the pre-
+// pass's body codegen (src/driver/main.cpp, sub-pass 3b) ran anyway regardless of
+// whether the pre-pass TypeChecker had found any errors -- reaching
+// Codegen's `llvm::report_fatal_error("Internal error: method call on
+// unsupported type. This is a compiler bug.")` and ABORTING THE WHOLE
+// COMPILER PROCESS (SIGABRT), before the main-pass TypeChecker (which
+// correctly gates its own codegen) ever got a chance to run and print a
+// real diagnostic. Fixed by (a) TypeChecker raising a real error for this
+// case, and (b) gating the pre-pass's body-codegen sub-pass on the
+// pre-pass TypeChecker actually being clean (see PreTCClean in main.cpp).
+
+@test(compile_error, E131, "I cannot call the method `foo` on an `int`: only a struct has methods.")
+fn rejects_method_call_on_non_struct(): void {
+    mut x: int = 5;
+    x.foo();
+}
+
+@test(compile_error, E062, "")
+fn rejects_null_assign_bool(): void {
+    mut b: bool = null;
+}
+
+@test(compile_error, E062, "")
+fn rejects_null_assign_double(): void {
+    mut d: double = null;
+}
+
+@test(compile_error, E062, "")
+fn rejects_null_assign_string(): void {
+    mut s: string = null;
+}
+
+@test(compile_error, E124, "I cannot compare an `int` with a `null`.")
+fn rejects_null_compare_primitive(): void {
+    mut x: int = 42;
+    if x == null {
+        return;
+    }
+}
+
+@test(compile_error, E057, "`++` needs a number, and I found a `string`.")
+fn rejects_postfix_non_numeric(): void {
+    mut x: string = "hello";
+    x++;
+}
+
+// Regression test (was DISCOVERED_ISSUES.md #11): passing a custom struct
+// value directly to io::printline() (no matching overload exists) must be
+// rejected with a clean TypeChecker type-mismatch error, not crash the
+// compiler via the pre-pass codegen path (see fail_math_abs_string.tr for
+// the sibling issue #9, the same underlying architectural bypass).
+
+struct Point { x: int, y: int }
+
+@test(compile_error, E025, "No overload of `io::printline` takes the argument types (Point).")
+fn rejects_printline_custom_struct(): void {
+    mut p: Point = Point::default();
+    io::printline(p);
+}

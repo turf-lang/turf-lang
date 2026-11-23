@@ -1,0 +1,38 @@
+TURF E185 -- LOOP WHOSE EVERY EXIT IS NEVER TAKEN (WARNING):
+
+CAUSE:
+  Every way out of the loop (its test, a `break` or `return` behind an `if`)
+  is guarded by a test that the values the loop computes make false, so the
+  loop never ends. This is a WARNING (it starts at `allow`).
+
+INCORRECT (compiles, but warns at `warn`):
+    fn spin(): int {
+        mut i: int = 0;
+        while i >= 0 {
+            i = (i + 1) % 10;
+        }
+        return i;
+    }
+
+    fn main(): int {
+        return 0;
+    }
+
+CORRECT (the test can become false):
+    fn spin(): int {
+        mut i: int = 0;
+        while i < 9 {
+            i = (i + 1) % 10;
+        }
+        return i;
+    }
+
+    fn main(): int {
+        return spin() - 9;
+    }
+
+FIX:
+  Change the loop's test (or the `break` condition) so it can hold for the
+  values the loop computes, or change the computation it watches.
+
+RELATED: E184, E186, E183.

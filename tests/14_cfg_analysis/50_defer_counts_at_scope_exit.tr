@@ -1,4 +1,4 @@
-// EXPECT-NO-DIAG: dead store
+// EXPECT-NO-DIAG: The value assigned to
 // EXPECT-NO-DIAG: never used
 // A `defer`'s statement runs when its block exits, so liveness counts it
 // there, not where it is written. While it counted at its site, `defer

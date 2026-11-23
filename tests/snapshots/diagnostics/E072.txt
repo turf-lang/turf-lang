@@ -1,0 +1,13 @@
+tests/35_numeric_literals/fail_trailing_separator.tr (1 error)
+
+── error at line 7, col 18 [E072 · misplaced separator]
+
+  I cannot end a run of digits with `_`.
+
+  Hint: Remove the trailing underscore in `5_`: `_` goes only between digits, as in `1_000_000`.
+
+  7 │     mut x: int = 5_;
+    │                  ^ this separator is out of place
+
+  Run `turf --explain E072` for more details.
+

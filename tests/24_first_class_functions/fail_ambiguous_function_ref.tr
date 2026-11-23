@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E125
-// EXPECT-DIAG: 'combine' is overloaded
+// EXPECT-DIAG: I cannot use `combine` as a function value, because it is overloaded and has no single signature.
 // EXPECT-DIAG: Write a function with its own name that calls the overload you want
 // A bare, overloaded function name has no single unambiguous signature to
 // use as a first-class value -- must be rejected rather than silently

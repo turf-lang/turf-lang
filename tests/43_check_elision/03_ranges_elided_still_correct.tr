@@ -1,0 +1,60 @@
+// NM-2 (issue #348): the shapes the value ranges prove safe, so their
+// overflow or bounds checks are removed, still compute the right values: a
+// counter bounded by its loop condition, a range `for` indexing a fixed-size
+// array, values reduced by `%`, `&` and `>>`, a value bounded by an earlier
+// guard, and a counting-down `for`. If a range were wrong, a value here would
+// come out different.
+import test;
+
+fn count_to(n: int): int {
+    mut i: int = 0;
+    mut s: int = 0;
+    while i < n {
+        s = s + i % 10;
+        i += 1;
+    }
+    return s;
+}
+
+fn total(a: int[16]): int {
+    mut t: int = 0;
+    for i in 0..16 {
+        t = t + a[i];
+    }
+    return t;
+}
+
+fn reduced(x: int, a: int[16]): int {
+    return a[x & 15] + (x % 7) * 3 + (x >> 60);
+}
+
+fn guarded(n: int): int {
+    if n < 0 || n > 1000 {
+        return -1;
+    }
+    return n * n + 1;
+}
+
+fn countdown(a: int[8]): int {
+    mut s: int = 0;
+    for i in 7..-1 step i-- {
+        s = s * 2 + a[i];
+    }
+    return s;
+}
+
+fn main(): int {
+    mut a: int[16];
+    for i in 0..16 {
+        a[i] = i * 3;
+    }
+    mut b: int[8] = [1, 0, 1, 1, 0, 0, 1, 0];
+    test::assert(count_to(25) == 100, "loop counter");
+    test::assert(total(a) == 360, "range for over an array");
+    test::assert(reduced(37, a) == 15 + 6, "`&`, `%`, `>>`");
+    test::assert(reduced(9223372036854775807, a) == 45 + 0 + 7, "`&`, `%`, `>>` at the limit");
+    test::assert(guarded(30) == 901, "guarded product");
+    test::assert(guarded(5000) == -1, "guard");
+    test::assert(countdown(b) == 77, "counting down");
+    return 0;
+}

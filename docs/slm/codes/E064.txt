@@ -12,8 +12,7 @@ CORRECT USAGE:
 INCORRECT:
     fn square(n: int): int {
         return "nine";
-        // ERROR: Wrong return type in 'square'!
-        //   The function returns 'int', but you're trying to return 'string'.
+        // ERROR: I cannot return a `string` from a function that returns an `int`.
     }
 
 WHAT THIS ERROR IS NOT:

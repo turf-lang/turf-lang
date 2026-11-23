@@ -8,7 +8,9 @@ CAUSE:
   `extern fn` only), `@deprecated("message")` and `@test` (a top-level function
   with no parameters returning `void` or `!void`, optionally with an outcome
   first: `compile_error, E<code>, "text"`, `warning, E<code>, "text"`,
-  `no_warnings`, `panic, "text"`, `exit, <0..255>`, `error, Type::Variant`). An annotation states a fact about the declaration; a wrong
+  `no_warnings`, `panic, "text"`, `exit, <0..255>`, `error, Type::Variant`),
+  then options: `skip: "reason"`, `timeout: <ms>`, `levels: all` or
+  `levels: [O0, O2]`, `stdout: "text"`, `tag: "name"`, `serial`). An annotation states a fact about the declaration; a wrong
   one is rejected so it cannot silently switch a check off.
 
 CORRECT USAGE:
@@ -27,16 +29,20 @@ CORRECT USAGE:
     @test(exit, 3)
     fn leaves_with_three(): void { sys::exit(3); }
 
+    @test(panic, "Division by zero", timeout: 2000)
+    fn divides_by_zero(): void { immut z: int = 0; io::printline(10 / z); }
+
 INCORRECT:
-    @ownrship(acquires)                        // ERROR [E146]: Unknown annotation
+    @ownrship(acquires)                        // ERROR [E146]: I do not know an annotation named `@ownrship`
     @ownership(aquires)                        // ERROR [E146]: Unknown argument
     @ownership(acquires) fn n(): int { ... }   // ERROR [E146]: does not return a pointer
     @ownership(releases: q) extern fn f(p: int*): void;  // ERROR [E146]: q is not a parameter
     @ffi(macos: malloc_size) fn g(): int { ... }         // ERROR [E146]: only on an extern fn
-    @test(compile_eror, E041, "x") fn t(): void { }      // ERROR [E146]: not an outcome of '@test'
+    @test(compile_eror, E041, "x") fn t(): void { }      // ERROR [E146]: `compile_eror` is not an outcome of `@test`
     @test fn t(n: int): void { }                         // ERROR [E146]: A test takes no parameters
-    @test fn t(): int { return 1; }                      // ERROR [E146]: A test returns 'void' or '!void'
-    @test(exit, 256) fn t(): void { }                    // ERROR [E146]: '256' is not an exit status
+    @test fn t(): int { return 1; }                      // ERROR [E146]: A test returns `void` or `!void`, not `int`.
+    @test(exit, 256) fn t(): void { }                    // ERROR [E146]: `256` is not an exit status
+    @test(retries: 3) fn t(): void { }                   // ERROR [E146]: `@test` has no option `retries:`
 
 FIX:
   Correct the misspelt name or argument (the message suggests one), make the

@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E129
-// EXPECT-DIAG: 'Plain.make' declares type parameter 'U', but no parameter mentions it
+// EXPECT-DIAG: `Plain.make` declares the type parameter `U`, but no parameter mentions it
 // A method's own type parameter needs a parameter too; only the struct's
 // parameters come from the receiver.
 struct Plain {

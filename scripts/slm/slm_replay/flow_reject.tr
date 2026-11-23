@@ -1,0 +1,12 @@
+fn pick(n: int): int {
+    if n > 0 {
+        return 1;
+    }
+    return 0;
+}
+
+fn main(): int {
+    mut r: int = choose(2);
+    printline(r);
+    return 0;
+}

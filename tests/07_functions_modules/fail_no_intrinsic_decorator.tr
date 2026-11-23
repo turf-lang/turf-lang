@@ -1,6 +1,6 @@
 // EXPECT-DIAG: E146
-// EXPECT-DIAG: Unknown annotation '@intrinsic'
-// EXPECT-NO-DIAG: Expected '{'
+// EXPECT-DIAG: I do not know an annotation named `@intrinsic`
+// EXPECT-NO-DIAG: I expected a `{`
 // Regression test: the @intrinsic("name") decorator has been removed from
 // the compiler entirely (its only consumer, lib/std/io.tr's print/printline/
 // input, was rewritten to ordinary Turf functions delegating to extern fn

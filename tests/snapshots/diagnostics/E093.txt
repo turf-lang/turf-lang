@@ -1,0 +1,15 @@
+tests/45_pattern_matching/fail_bool_compare_missing_value.tr (1 error)
+
+── error at line 7, col 5 [E093 · non-exhaustive compare]
+
+  This `compare` on `bool` does not cover every case, and it has no `otherwise`.
+  Missing values:
+    false
+
+  Hint: Add `matches true:` and `matches false:` arms, or `otherwise:` for the rest. A guarded arm does not count: its guard may be false.
+
+  7 │     compare b {
+    │     ^~~~~~~ this `compare` does not cover every value
+
+  Run `turf --explain E093` for more details.
+

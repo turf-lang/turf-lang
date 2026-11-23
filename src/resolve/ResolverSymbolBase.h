@@ -77,6 +77,10 @@ struct VariableSymbol {
   std::string            Name;
   TurfTypePtr            Type;        ///< Frontend type (no LLVM involvement)
   ResolverSourceLocation DeclLoc;
+  /// DX-5: the written type (`string` in `s: string`) -- start, and the
+  /// column just after it. Line 0 when no type is written (`guess`).
+  ResolverSourceLocation TypeLoc;
+  int                    TypeEndCol = 0;
   size_t                 ScopeDepth; ///< 0 = global, 1 = first block, …
   bool                   IsImmutable = false;
   /// True if this symbol was declared as a function parameter rather than a
@@ -619,6 +623,9 @@ struct ResolverConstantSymbol {
   double DoubleVal = 0.0;
   bool BoolVal = false;
   std::string StringVal;
+  /// SY-5: `pub immut` (or `export immut`); a bare `immut` is private to its
+  /// module, and a qualified or imported use from elsewhere is E088.
+  bool IsPublic = true;
 };
 
 // Convert from the resolver's location type (no Lexer.h dependency at the

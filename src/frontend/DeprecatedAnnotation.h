@@ -32,16 +32,16 @@ inline std::string validate(const Annotation &Ann,
   // `@ffi`'s `platform: symbol` pairs, there is nothing to key this on --
   // one declaration deprecates in exactly one way.
   if (Ann.Args.size() != 1)
-    return "'@deprecated' takes exactly one argument: the message to show at "
-           "each use, e.g. '@deprecated(\"use new_fn() instead\")'.";
+    return "`@deprecated` takes exactly one argument: the message to show at "
+           "each use, e.g. `@deprecated(\"use new_fn() instead\")`.";
   if (!Ann.Args[0].Key.empty())
-    return "'@deprecated's argument is positional, not 'key: value' -- write "
-           "'@deprecated(\"use new_fn() instead\")'.";
+    return "The argument of `@deprecated` is positional, not `key: value`: write "
+           "`@deprecated(\"use new_fn() instead\")`.";
   if (!Ann.Args[0].IsString)
-    return "'@deprecated's argument must be a string literal, e.g. "
-           "'@deprecated(\"use new_fn() instead\")'.";
+    return "The argument of `@deprecated` must be a string literal, e.g. "
+           "`@deprecated(\"use new_fn() instead\")`.";
   if (Ann.Args[0].Value.empty())
-    return "'@deprecated(\"\")' needs a non-empty message saying what to use "
+    return "`@deprecated(\"\")` needs a non-empty message saying what to use "
            "instead.";
   return "";
 }

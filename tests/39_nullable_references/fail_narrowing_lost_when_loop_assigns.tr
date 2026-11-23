@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E081
-// EXPECT-DIAG: Possible null dereference: 'q' might be 'null' here
+// EXPECT-DIAG: `q`, which might be `null` here
 // The other direction of 08_narrowing_survives_loops.tr: a loop that may
 // assign the variable ends its null check, on the back edge and at the exit.
 struct Node { val: int, next: &?Node }

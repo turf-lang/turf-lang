@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: `skip:` takes the reason the test is set aside, a string that is not empty
+// TDP-2-026: a skipped test says why, so the reason is not empty.
+@test(skip: "")
+fn a(): void {
+}
+
+fn main(): int {
+    return 0;
+}

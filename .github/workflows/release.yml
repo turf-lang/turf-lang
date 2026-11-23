@@ -53,8 +53,14 @@ jobs:
         with:
           merge-multiple: true
 
+      # The installers are listed too: `turf upgrade` downloads the target
+      # release's own installer and refuses one that does not match its line
+      # here (turf-cli internal/upgrade). The archive lookups match whole
+      # archive names, so these lines are never taken for an archive.
       - name: Combine checksums
-        run: cat *.sha256 > checksums.txt
+        run: |
+          cat *.sha256 > checksums.txt
+          (cd scripts/install && sha256sum install.sh install.ps1) >> checksums.txt
 
       # REL-003 stage 4: Homebrew / Scoop / AUR recipes for the platforms this
       # release actually shipped, attached so whoever bumps those repositories

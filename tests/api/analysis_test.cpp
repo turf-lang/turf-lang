@@ -23,7 +23,9 @@
 #include "diagnostics/ErrorCategory.h"
 #include "diagnostics/ErrorCodes.h"
 #include "diagnostics/LintLevels.h"
+#include "diagnostics/PrimaryLabels.h"
 
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -212,7 +214,7 @@ static void testTopLevelStatementIsADiagnostic() {
   auto R = turf::analyze({{"top.tr", "fn main(): int {\n    return 0;\n}\n"
                                      "\nmain();\n"}});
   CHECK(!R.succeeded());
-  CHECK(hasDiagnostic(R, "Statements are not allowed outside of a function"));
+  CHECK(hasDiagnostic(R, "I found a statement outside a function"));
   // The rest of the file is still analysed.
   CHECK(R.definitionOf("top.tr", 1, 4).has_value());
 }
@@ -262,8 +264,9 @@ static void testUnsafeCapabilityDoesNotOutliveThePragma() {
 // progress, when the SLM Sandbox calls in -- must be exactly as it was.
 static void testHostStateIsRestored() {
   CurrentTest = "host state restored";
-  InitializeCompilerGlobals();
-  SymbolTable *HostTable = GlobalSymbolTable.get();
+  SymbolTable HostSymbols;
+  SymbolTableScope HostSymbolsScope(&HostSymbols);
+  SymbolTable *HostTable = Symbols();
   SourceFilename = "host.tr";
   MainSourceFilename = "host.tr";
   SourceLines = {"host line 1", "host line 2"};
@@ -290,7 +293,7 @@ static void testHostStateIsRestored() {
   auto R = turf::analyze({{"undef.tr", UndefinedVariable}}, Opts);
   CHECK(!R.succeeded());
 
-  CHECK(GlobalSymbolTable.get() == HostTable);
+  CHECK(Symbols() == HostTable);
   CHECK_EQ(SourceFilename, std::string("host.tr"));
   CHECK_EQ(MainSourceFilename, std::string("host.tr"));
   CHECK_EQ(SourceLines.size(), 2u);
@@ -372,7 +375,8 @@ static void testTwoLexersInterleave() {
 // import's parse, or an editor parsing several open files, needs.
 static void testTwoParsersInterleave() {
   CurrentTest = "two parsers interleave";
-  InitializeCompilerGlobals();
+  SymbolTable Table;
+  SymbolTableScope TableScope(&Table);
   std::istringstream AText("{ (alpha + [1, 2]) }");
   std::istringstream BText("(1 + 2) * beta");
   LexerState LA(AText, "a.tr");
@@ -472,8 +476,9 @@ static void testCancellation() {
 
   // Cancelled after each boundary in turn (the first asks, the second asks).
   for (int FireAt : {1, 2}) {
-    InitializeCompilerGlobals();
-    SymbolTable *HostTable = GlobalSymbolTable.get();
+    SymbolTable HostSymbols;
+    SymbolTableScope HostSymbolsScope(&HostSymbols);
+    SymbolTable *HostTable = Symbols();
     SourceFilename = "host.tr";
     MainSourceFilename = "host.tr";
     SourceLines = {"host line 1"};
@@ -503,7 +508,7 @@ static void testCancellation() {
     CHECK(!R.definitionOf("clean.tr", 2, 12).has_value());
     CHECK(R.symbolsInScope("clean.tr", 2, 12).empty());
     // And the host is exactly where it left off.
-    CHECK(GlobalSymbolTable.get() == HostTable);
+    CHECK(Symbols() == HostTable);
     CHECK_EQ(SourceFilename, std::string("host.tr"));
     CHECK_EQ(SourceLines.size(), 1u);
     CHECK(&Parser() == &HostParser);
@@ -664,7 +669,7 @@ static void testMissingStdlibIsADiagnostic(const ScratchDir &Dir) {
   auto R = turf::analyze({{"nostd.tr", "import io;\n\nfn main(): int {\n    return 0;\n}\n"}},
                          NoStdlib);
   CHECK(!R.succeeded());
-  CHECK(hasDiagnostic(R, "Could not find module"));
+  CHECK(hasDiagnostic(R, "I cannot find a module named"));
   CHECK_EQ(R.preludeImportCount(), 0u);
 
   // The failure left nothing behind: the next analysis, with the real
@@ -987,7 +992,7 @@ static void testFlowAnalysisIsOptIn() {
     int N = 0;
     for (const auto &D : Res.diagnostics())
       N += D.Level == turf::Severity::Warning &&
-           D.Message.find("'y' is declared but never used") != std::string::npos;
+           D.Message.find("Variable `y` is declared but never used") != std::string::npos;
     return N;
   };
   auto FlowPlain = turf::analyze({{"flow.tr", Flow}});
@@ -1130,10 +1135,10 @@ static void testVisibilityModifierPlacement() {
   };
   const std::string Main = "\nfn main(): int { return 0; }\n";
   const std::vector<std::pair<std::string, Case>> Rejected = {
-      {"pub export", {"", "pub export immut X: int = 1;", "Just remove `pub`"}},
+      {"pub export", {"", "pub export immut X: int = 1;", "Remove `export`"}},
       {"pub operator", {"", "pub operator +(a: string, b: int): string { return a; }", "make the type itself `pub`"}},
       {"pub import", {"", "pub import io;", "never re-exported"}},
-      {"pub immut", {"", "pub immut X: int = 1;", "export immut NAME"}},
+      {"top-level mut", {"", "mut X: int = 1;", "Write `immut` for a module constant"}},
       {"enum variant", {"", "enum E { pub A, B }", "pub enum Name"}},
       {"error variant", {"", "error E { pub A }", "pub error Name"}},
       {"machine state", {"", "machine M { pub A -> B }", "pub machine Name"}},
@@ -1141,7 +1146,7 @@ static void testVisibilityModifierPlacement() {
       {"pub unsafe", {"", "pub unsafe { }", "declarations inside the block"}},
       {"before decorator", {"", "pub @caller_location\nfn f(): string { return caller_location; }", "annotations first"}},
       {"not a declaration", {"", "pub 5;", "right before `fn`"}},
-      {"public spelling", {"", "public export immut X: int = 1;", "Just remove `pub`"}},
+      {"public spelling", {"", "public export immut X: int = 1;", "Remove `export`"}},
       {"reserved as variable", {"", "fn g(): int { mut pub: int = 1; return pub; }", "is_public"}},
       {"reserved as function", {"", "fn public(): int { return 1; }", "is_public"}},
       {"reserved as type", {"", "struct pub { x: int }", "is_public"}},
@@ -1235,7 +1240,7 @@ pub fn made(): nideep::Deep { return nideep::make(); }
       if (D.Code != "E145")
         continue;
       Found = true;
-      CHECK(D.Message.find("Module 'nideep' is not imported in this file") != std::string::npos);
+      CHECK(D.Message.find("I cannot find an import of module `nideep` in this file") != std::string::npos);
       CHECK(D.Hint.find(C.HintFragment) != std::string::npos);
       if (D.Hint.find(C.HintFragment) == std::string::npos)
         std::cerr << "    case '" << C.Label << "': hint was: " << D.Hint << "\n";
@@ -1255,7 +1260,7 @@ pub fn made(): nideep::Deep { return nideep::make(); }
     CHECK(!R.succeeded());
     bool Found = false;
     for (const auto &D : R.diagnostics())
-      if (D.Code == "E145" && D.Message.find("in module 'nileaky'") != std::string::npos)
+      if (D.Code == "E145" && D.Message.find("in module `nileaky`") != std::string::npos)
         Found = true;
     CHECK(Found);
   }
@@ -1339,12 +1344,12 @@ extern fn strlen(s: string): int;
       {"symbol import", "import vislib::helper;\nfn main(): int { return 0; }",
        "in vislib.tr"},
       {"list import", "import vislib::[api, helper];\nfn main(): int { return 0; }",
-       "vislib' offers these public functions: api, pick"},
+       "public functions that `vislib` offers: api, pick"},
       {"type annotation",
        "fn main(): int { mut h: vislib::Hidden = vislib::Hidden::default(); return 0; }",
        "`pub struct Hidden`"},
       {"type import", "import vislib::Hidden;\nfn main(): int { return 0; }",
-       "public types: Guarded, Shown"},
+       "public types that `vislib` offers: Guarded, Shown"},
       {"enum variant",
        "fn main(): int { immut x: int = vislib::HiddenColor::A to int; return x; }",
        "`pub enum HiddenColor`"},
@@ -1354,7 +1359,7 @@ extern fn strlen(s: string): int;
       // (the way to get at the data), a private method's names its siblings.
       {"field read",
        "fn main(): int { mut s: vislib::Shown = vislib::Shown::default(); return s.secret; }",
-       "`pub secret: ...` inside `struct Shown`. Otherwise, 'Shown' offers these public methods: get, make"},
+       "`pub secret: ...` inside `struct Shown`, if other modules are meant to use it. Otherwise, use one of the public methods that `Shown` offers: get, make"},
       {"field write",
        "fn main(): int { mut s: vislib::Shown = vislib::Shown::default(); s.secret = 1; return 0; }",
        "`pub secret: ...`"},
@@ -1384,10 +1389,10 @@ extern fn strlen(s: string): int;
       if (D.Hint.find(C.HintFragment) == std::string::npos)
         std::cerr << "    case '" << C.Label << "': hint was: " << D.Hint << "\n";
       CHECK(!D.Related.empty()); // the note at the declaration
-      CHECK(D.Message.find("private to module 'vislib'") != std::string::npos);
+      CHECK(D.Message.find("private to module `vislib`") != std::string::npos);
       // Never a raw `.`-joined internal key in a user-facing message: it
       // would read "Function 'Shown.hidden'" instead of naming what it is.
-      CHECK(D.Message.find("Function 'Shown") == std::string::npos);
+      CHECK(D.Message.find("the function `Shown") == std::string::npos);
       break;
     }
     CHECK(Found);
@@ -1431,23 +1436,23 @@ static void testPrivateInPublic(const ScratchDir &Dir) {
   const Case Cases[] = {
       {"return type",
        "struct Hidden { pub n: int }\npub fn make(): Hidden { return Hidden::default(); }",
-       "Public function 'make'", "`pub struct Hidden` in pipmod.tr"},
+       "public function `make`", "`pub struct Hidden` in pipmod.tr"},
       {"parameter",
        "enum Mode { A }\npub fn start(m: Mode): int { return 1; }",
-       "Public function 'start'", "`pub enum Mode` in pipmod.tr"},
+       "public function `start`", "`pub enum Mode` in pipmod.tr"},
       {"field",
        "struct Inner { pub n: int }\npub struct Outer { pub inner: Inner }",
-       "Public field 'Outer.inner'", "keep the field internal by removing its `pub`"},
+       "public field `Outer.inner`", "keep the field internal by removing its `pub`"},
       {"generic argument",
        "import list::List;\nstruct H { pub n: int }\npub fn all(): List<H> { return List::default(); }",
-       "Public function 'all'", "`pub struct H` in pipmod.tr"},
+       "public function `all`", "`pub struct H` in pipmod.tr"},
       {"method",
        "struct Token { pub id: int }\npub struct Lexer { pub pos: int }\n"
        "pub fn Lexer.accept(t: Token): int { return t.id; }",
-       "Public method 'Lexer.accept'", "keep the method internal"},
+       "public method `Lexer.accept`", "keep the method internal"},
       {"error union",
        "struct R { pub n: int }\npub fn try_make(): !R { return R::default(); }",
-       "Public function 'try_make'", "`pub struct R` in pipmod.tr"},
+       "public function `try_make`", "`pub struct R` in pipmod.tr"},
   };
   for (const auto &C : Cases) {
     Dir.write("pipmod.tr", C.Module);
@@ -1713,7 +1718,7 @@ static void testModuleNotFoundHintsAtProject(const ScratchDir &Dir) {
       CHECK(D->Hint.find("turf.toml") != std::string::npos);
       CHECK(D->Hint.find("only visible to `turf build`") != std::string::npos);
       // The standard hint is kept, in front of the new sentence.
-      CHECK(D->Hint.find("Make sure the file 'geometry.tr' exists") != std::string::npos);
+      CHECK(D->Hint.find("Check that the file `geometry.tr` exists") != std::string::npos);
     } else {
       std::cerr << render(R);
     }
@@ -1778,20 +1783,20 @@ static void testAnnotationDiagnostics() {
   };
   const Case Cases[] = {
       {"unknown name", "@ownrship(acquires)\nextern fn m(n: int): int*;\nfn main(): int { return 0; }\n",
-       "E146", "Unknown annotation '@ownrship'", "Did you mean '@ownership'"},
+       "E146", "I do not know an annotation named `@ownrship`", "Write `@ownership` instead"},
       {"argument does not fit", "@ownership(acquires)\nfn n(): int { return 0; }\nfn main(): int { return 0; }\n",
-       "E146", "does not return a pointer", "states a fact about the declaration"},
+       "E146", "does not return a pointer", "on a declaration it describes"},
       {"ffi on a function", "@ffi(macos: x)\nfn g(): int { return 0; }\nfn main(): int { return 0; }\n",
-       "E146", "only sit on an 'extern fn'", "states a fact about the declaration"},
+       "E146", "only sit on an `extern fn`", "on a declaration it describes"},
       {"keyword key reaches the owning pass", "@ownership(error: x)\nextern fn m(n: int): int*;\nfn main(): int { return 0; }\n",
-       "E146", "Unknown '@ownership' argument 'error:'", "states a fact about the declaration"},
+       "E146", "the `@ownership` argument `error:`", "on a declaration it describes"},
       {"malformed is still a syntax error", "@ownership(1 + 2)\nextern fn m(n: int): int*;\nfn main(): int { return 0; }\n",
-       "E103", "Expected a word or a string", ""},
+       "E103", "I expected a word or a string", ""},
       // TDP-2-006: `@test`'s own hint lists the outcomes.
       {"test outcome", "@test(skipped)\nfn t(): void {\n}\nfn main(): int { return 0; }\n",
-       "E146", "'skipped' is not an outcome of '@test'", "the outcomes are compile_error"},
+       "E146", "`skipped` is not an outcome of `@test`", "The outcomes are compile_error"},
       {"test code kind", "@test(compile_error, E172, \"\")\nfn t(): void {\n}\nfn main(): int { return 0; }\n",
-       "E146", "'E172' is a warning's code", "the outcomes are"},
+       "E146", "`E172` is a warning's code", "The outcomes are"},
   };
   for (const auto &C : Cases) {
     auto R = turf::analyze({{"ann.tr", C.Source}});
@@ -1843,7 +1848,7 @@ static void testPatternDiagnostics() {
   const Case Cases[] = {
       {"struct pattern on an int",
        "fn main(): int { mut n: int = 1; compare n { matches P { x }: return x; done otherwise: return 0; } }",
-       "E092", "destructures a struct value"},
+       "E092", "Match an `int`, a `string`"},
       {"wrong struct",
        "struct Q { x: int }\nfn main(): int { mut p: P = P::default(); compare p { matches Q { x }: return x; done otherwise: return 0; } }",
        "E092", "Name the value's own struct"},
@@ -1852,13 +1857,13 @@ static void testPatternDiagnostics() {
        "E092", "end the pattern with `..`"},
       {"non-literal field pattern",
        "fn main(): int { mut p: P = P::default(); compare p { matches P { x: 1 + 2, .. }: return 1; done otherwise: return 0; } }",
-       "E092", "bind it and use a guard"},
+       "E092", "Bind the field and compare it in a guard"},
       {"name bound twice",
        "fn main(): int { mut p: P = P::default(); compare p { matches P { x, y: x }: return x; done otherwise: return 0; } }",
-       "E092", "write '_' to ignore it"},
+       "E092", "write `_` to ignore it"},
       {"stacked headers bind different names",
        "fn main(): int { mut p: P = P::default(); mut r: int = 0; compare p { matches P { x, .. }: matches P { y, .. }: r = 1; done otherwise: r = 2; } return r; }",
-       "E092", "exactly the same names"},
+       "E092", "Give each header the same bindings"},
       {"guard not bool",
        "fn main(): int { mut p: P = P::default(); compare p { matches P { x, .. } if x + 1: return x; done otherwise: return 0; } }",
        "E092", "Write a comparison"},
@@ -1866,7 +1871,7 @@ static void testPatternDiagnostics() {
        "prefix one with an underscore"},
       {"guarded arm is not coverage",
        "fn main(): int { mut r: int = 0; compare Color::Red { matches Color::Red: r = 1; done matches Color::Green if r == 0: r = 2; done } return r; }",
-       "E093", "A guarded arm doesn't count"},
+       "E093", "A guarded arm does not count"},
       {"bool missing a value",
        "fn main(): int { mut r: int = 0; compare true { matches true: r = 1; done } return r; }",
        "E093", "`matches false:`"},
@@ -1934,16 +1939,16 @@ static void testErrorPayloadDiagnostics() {
   const Case Cases[] = {
       {"too few arguments",
        "fn f(): !int { return IOError::Denied(\"p\"); }\nfn main(): int { return 0; }",
-       "E096", "takes 2, or 3 with a trailing 'string' message"},
+       "E096", "takes 2, or 3 with a trailing `string` message"},
       {"wrong field type",
        "fn f(): !int { return IOError::Denied(\"p\", \"rw\"); }\nfn main(): int { return 0; }",
-       "E096", "Pass a value of type 'int' for 'mode'"},
+       "E096", "Pass an `int` for `mode`"},
       {"wrong message type",
        "fn f(): !int { return IOError::NotFound(\"p\", 3); }\nfn main(): int { return 0; }",
-       "E096", "must be a 'string'"},
+       "E096", "Pass a `string` message after the 1 payload field of `IOError::NotFound`"},
       {"bare reference to a fielded variant",
        "fn f(): !int { return IOError::NotFound; }\nfn main(): int { return 0; }",
-       "E096", "compare with '=='"},
+       "E096", "test for it in a `compare` with `matches IOError::NotFound(..):`"},
       {"field that is an error type",
        "error Outer { Wrapped(cause: IOError) }\nfn main(): int { return 0; }", "E096",
        "not another failure"},
@@ -1961,7 +1966,7 @@ static void testErrorPayloadDiagnostics() {
        "fn f(): int { immut v: int = open(\"x\") recover as err run { compare err { "
        "matches IOError::Timeout: return 1; done } }; return v; }\n"
        "fn main(): int { return 0; }",
-       "E093", "End the compare with 'otherwise:'"},
+       "E093", "End the `compare` with `otherwise:`"},
       {"declared error type, variant missing",
        "fn main(): int { mut e: IOError = IOError::Timeout; compare e { "
        "matches IOError::NotFound(_): return 1; done matches IOError::Timeout: return 2; done } "
@@ -1969,13 +1974,13 @@ static void testErrorPayloadDiagnostics() {
        "E093", "neither does one whose payload pattern can fail to match"},
       {"try in main",
        "fn main(): int { immut n: int = try open(\"x\"); return n; }", "E095",
-       "Handle the error here instead"},
+       "Handle the error here with"},
       {"try in a function returning int",
        "fn f(): int { return try open(\"x\"); }\nfn main(): int { return 0; }", "E095",
-       "Declare the function's return type as '!int'"},
+       "Declare the function `!int`"},
       {"try on a non-fallible operand",
        "fn f(): !int { return try plain(); }\nfn main(): int { return 0; }", "E095",
-       "drop the `try`"},
+       "Remove the `try`"},
       {"try inside a defer",
        "fn f(): !int { mut n: int = 0; defer n = try open(\"x\"); return n; }\n"
        "fn main(): int { return 0; }",
@@ -2053,20 +2058,20 @@ static void testGenericOperatorDiagnostics() {
       {"type parameter only in the return type",
        "operator<T> [](p: Cell<int>, i: int): T { return p.v; }\n"
        "fn main(): int { return 0; }",
-       "E097", "Use 'T' in an operand type"},
+       "E097", "Use `T` in an operand type"},
       {"no operand is an owned type",
        "operator<T> +(a: T, b: T): T { return a; }\nfn main(): int { return 0; }", "E097",
-       "A bare type parameter matches every type"},
+       "Make an operand a struct or enum declared here"},
       {"right operand of the wrong type is not widened",
        "operator<T> +(a: Cell<T>, k: int): Cell<T> { return a; }\n"
        "fn main(): int { mut c: Cell<string> = Cell::new(\"s\"); mut d: Cell<string> = c + 1.5; "
        "return 0; }",
-       "E057", "cannot apply '+' to 'Cell<string>' and 'double'"},
+       "E057", "I cannot use `+` on a `Cell<string>` and a `double`"},
       {"two instantiations do not unify",
        "operator<T> ==(a: Cell<T>, b: Cell<T>): bool { return true; }\n"
        "fn main(): int { mut a: Cell<int> = Cell::new(1); mut b: Cell<string> = Cell::new(\"x\"); "
        "if (a == b) { return 1; } return 0; }",
-       "E124", "Cannot compare 'Cell<int>' with 'Cell<string>'"},
+       "E124", "I cannot compare a `Cell<int>` with a `Cell<string>`"},
   };
   for (const auto &C : Cases) {
     auto R = turf::analyze({{"genop.tr", Prelude + C.Body + "\n"}});
@@ -2235,6 +2240,16 @@ static void testLintLevels() {
   LintLevels::reset();
   CHECK(!LintLevels::anySet());
 
+  // An allow-by-default warning is `allow` until its code is named, and the
+  // pin keeps a newer one at `allow` whatever its default.
+  CHECK(LintLevels::levelOfSince("E166", 0, true) == LintLevels::Level::Allow);
+  CHECK(LintLevels::setLevel("E166", LintLevels::Level::Warn, Err));
+  CHECK(LintLevels::levelOfSince("E166", 0, true) == LintLevels::Level::Warn);
+  LintLevels::reset();
+  CHECK(LintLevels::setLintSet("2.2", 5, Err));
+  CHECK(LintLevels::levelOfSince("E166", 3, false) == LintLevels::Level::Allow);
+  LintLevels::reset();
+
   // Every warning class has a row, so every warning can be named.
   for (size_t I = 0; I < AllErrorCodesCount; ++I) {
     const ErrorCodeEntry &E = AllErrorCodes[I];
@@ -2243,6 +2258,44 @@ static void testLintLevels() {
     }
   }
   LintLevels::reset();
+}
+
+// DX-5: every code has a primary label, worded by the style guide, and a
+// type mismatch labels its value and points back at the written type.
+static void testPrimaryLabels() {
+  CurrentTest = "primary span labels";
+  for (size_t I = 0; I < AllErrorCodesCount; ++I) {
+    const ErrorCodeEntry &E = AllErrorCodes[I];
+    const char *L = ErrorCodes::defaultLabel(E.Code);
+    if (!L || !*L) {
+      std::cerr << "  no primary label for " << E.Code << " (src/diagnostics/PrimaryLabels.h)\n";
+      CHECK(false);
+      continue;
+    }
+    const std::string Label = L;
+    // A lowercase phrase with no full stop (DIAGNOSTICS_STYLE.md).
+    CHECK(!std::isupper(static_cast<unsigned char>(Label[0])));
+    CHECK(Label.back() != '.' && Label.back() != '!');
+  }
+  for (const auto &Row : ErrorCodes::PrimaryLabels)
+    CHECK(ErrorCodes::lookupByCode(Row.Code) != nullptr);
+
+  auto R = turf::analyze({{"labels.tr",
+                           "fn main(): int {\n    immut s: string = 5;\n    return 0;\n}\n"}});
+  const turf::Diagnostic *D = nullptr;
+  for (const auto &X : R.diagnostics())
+    if (X.Code == "E066")
+      D = &X;
+  CHECK(D != nullptr);
+  if (!D)
+    return;
+  CHECK(D->Label == "this is an `int`");
+  CHECK(D->Where.Line == 2 && D->Where.Col == 23);
+  bool TypeSpan = false;
+  for (const auto &Rel : D->Related)
+    TypeSpan = TypeSpan || (Rel.Where.Line == 2 && Rel.Where.Col == 14 &&
+                            Rel.Message == "`s` is a `string` because of this");
+  CHECK(TypeSpan);
 }
 
 static void testImportedCandidateLocation() {
@@ -2295,26 +2348,26 @@ static void testUnsizedArrayDiagnostics() {
   const Case Cases[] = {
       {"local slice with an unsized inner dimension",
        "fn main(): int { mut a: int[2][] = [[1], [2]]; return 0; }", "E140",
-       "Variable 'a' can't use the unsized array type 'int[]'"},
+       "The variable `a` cannot use the unsized array type `int[]`"},
       {"slicing a string",
        "fn main(): int { immut s: string = \"hey\"; immut t = s[1..]; return 0; }", "E142",
-       "Cannot slice a value of type 'string'"},
+       "I cannot slice a `string` with `[a..b]`"},
       {"constant slice range past the end",
        "fn main(): int { immut a: int[3] = [1, 2, 3]; immut t = a[1..4]; return 0; }", "E143",
        "the end is outside 0..3"},
       {"mut view of an immutable array",
        "fn main(): int { immut a: int[3] = [1, 2, 3]; mut t = a[1..]; return t[0]; }", "E144",
-       "'t' is a 'mut' view of 'a', which is immutable."},
+       "`t` is a `mut` view of `a`, which is immutable."},
       {"return type", "fn f(): int[] { mut a: int[1] = [1]; return a; }\n"
                       "fn main(): int { return 0; }",
-       "E140", "The return type of 'f'"},
+       "E140", "The return type of `f`"},
       {"inner dimension", "fn f(r: int[3][]): int { return 0; }\nfn main(): int { return 0; }",
-       "E140", "(inside 'int[3][]')"},
+       "E140", "(inside `int[3][]`)"},
       {"written through a forwarded slice",
        "fn inner(x: int[]): void { x[0] = 1; }\n"
        "fn outer(a: int[]): void { inner(a); }\n"
        "fn main(): int { immut v: int[2] = [1, 2]; outer(v); return 0; }",
-       "E141", "'v' is immutable, but 'outer' writes to the array"},
+       "E141", "`v` is immutable, and `outer` writes to the array"},
   };
   for (const auto &C : Cases) {
     auto R = turf::analyze({{"slice.tr", std::string(C.Body) + "\n"}});
@@ -2364,12 +2417,12 @@ static void testTypeArgumentCount() {
   const Case Cases[] = {
       {"non-generic struct", "struct P { x: int }\n"
                              "fn main(): int { mut p: P<int> = P::default(); return p.x; }",
-       "'P' is not generic"},
+       "`P` is not generic"},
       {"enum", "enum E { A, B }\nfn main(): int { mut e: E<int> = E::A; return 0; }",
-       "'E' is not generic"},
+       "`E` is not generic"},
       {"too many", "struct B<T> { v: T }\n"
                    "fn main(): int { mut b: B<int, int> = B::default(); return b.v; }",
-       "'B' takes 1 type argument (T), but 2 were given"},
+       "`B` takes 1 type argument (T), but I found 2"},
   };
   for (const auto &C : Cases) {
     auto R = turf::analyze({{"targs.tr", std::string(C.Body) + "\n"}});
@@ -2398,7 +2451,7 @@ static void testLiteralNeverConverts() {
     auto R = turf::analyze({{"conv.tr", std::string(Body) + "\n"}});
     bool Found = false;
     for (const auto &D : R.diagnostics())
-      if (D.Code == "E149" && D.Message.find("would always panic") != std::string::npos)
+      if (D.Code == "E149" && D.Message.find("would panic every time it runs") != std::string::npos)
         Found = true;
     CHECK(Found);
     if (!Found)
@@ -2433,8 +2486,8 @@ static void testParseErrorRecoveryAndTypeNameHints() {
                              "    return x;\n"
                              "}\n"}});
     CHECK(!R.succeeded());
-    CHECK(hasDiagnostic(R, "Expected a function name after 'fn'"));
-    CHECK(!hasDiagnostic(R, "Statements are not allowed outside of a function"));
+    CHECK(hasDiagnostic(R, "I expected a function name after `fn`"));
+    CHECK(!hasDiagnostic(R, "I found a statement outside a function"));
     if (R.diagnostics().size() != 1)
       std::cerr << "    expected exactly one diagnostic, got:\n" << render(R);
     CHECK_EQ(R.diagnostics().size(), static_cast<size_t>(1));
@@ -2460,9 +2513,9 @@ static void testParseErrorRecoveryAndTypeNameHints() {
                              "}\n"
                              "fn main(): int { return 0; }\n"}});
     CHECK(!R.succeeded());
-    CHECK(hasDiagnostic(R, "Expected a function name after 'fn'"));
-    CHECK(hasDiagnostic(R, "Expected ';' after statement"));
-    CHECK(!hasDiagnostic(R, "Statements are not allowed outside of a function"));
+    CHECK(hasDiagnostic(R, "I expected a function name after `fn`"));
+    CHECK(hasDiagnostic(R, "I expected a `;` after this statement"));
+    CHECK(!hasDiagnostic(R, "I found a statement outside a function"));
   }
 
   // (A real stray top-level statement is still reported -- the fix removes the
@@ -2479,14 +2532,14 @@ static void testParseErrorRecoveryAndTypeNameHints() {
   const Case Cases[] = {
       {"struct used as a value",
        "struct Node { v: int }\nfn main(): int { mut a: int = Node; return a; }",
-       "E040", "'Node' is a struct, not a value", "mut Node: int = 5"},
+       "E040", "`Node` is a struct, not a value", "mut Node: int = 5"},
       {"struct called like a function",
        "struct Node { v: int }\nfn main(): int { mut a: Node = Node(5); return a.v; }",
        "E041", "no `Node(...)` constructor-call syntax", "import the module"},
       {"enum used as a value", "enum Color { Red }\nfn main(): int { mut c: int = Color; return c; }",
-       "E040", "'Color' is an enum, not a value", "mut Color: int = 5"},
+       "E040", "`Color` is an enum, not a value", "mut Color: int = 5"},
       {"unknown name keeps the create-it hint",
-       "fn main(): int { return counter; }", "E040", "Did you forget to create this variable",
+       "fn main(): int { return counter; }", "E040", "Declare it before you use it",
        "is a struct"},
   };
   for (const auto &C : Cases) {
@@ -2608,6 +2661,7 @@ int main() {
   testTypeArgumentCount();
   testLiteralNeverConverts();
   testImportedCandidateLocation();
+  testPrimaryLabels();
   testCompileErrorTests();
   testBuiltinDocRouting();
 

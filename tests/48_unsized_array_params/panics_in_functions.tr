@@ -1,0 +1,49 @@
+// F-11e: tests moved from fail_*.tr files that abort at run time, one function each;
+// each `@test(panic, ...)` names the text its panic prints.
+
+// Issue #260: indexing a `T[]` parameter is bounds-checked against the
+// caller's real length. It used to be raw pointer arithmetic, so `arr[3]` on
+// a three-element array silently read whatever came after it.
+fn at(arr: int[], i: int): int {
+    return arr[i];
+}
+
+@test(panic, "Array index out of bounds for 'arr'")
+fn panics_slice_index_out_of_bounds_runtime(): void {
+    mut a: int[3] = [1, 2, 3];
+    at(a, 3);
+}
+
+// Issue #260: a negative index counts back from the end of a `T[]` too, and
+// stops at -length: `arr[-4]` on a three-element slice is out of range. A
+// constant index is checked at run time here, since no length is known
+// before the call.
+fn last_but(arr: int[]): int {
+    return arr[-4];
+}
+
+@test(panic, "Array index out of bounds for 'arr'")
+fn panics_slice_negative_index_out_of_range_runtime(): void {
+    mut a: int[3] = [1, 2, 3];
+    last_but(a);
+}
+
+// A bound the compiler can't fold is checked when the slice is taken.
+@test(panic, "Slice range out of bounds for 'a'")
+fn panics_slice_range_out_of_bounds_runtime(): void {
+    mut a: int[3] = [1, 2, 3];
+    mut k: int = 4;
+    immut v = a[1..k];
+    v[0];
+}
+
+// start > end with run-time bounds, on a `T[]` parameter.
+fn part(arr: int[], s: int, e: int): int {
+    return arr[s..e].length();
+}
+
+@test(panic, "Slice range out of bounds for 'arr'")
+fn panics_slice_start_after_end_runtime(): void {
+    mut a: int[3] = [1, 2, 3];
+    part(a, 2, 1);
+}

@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E086
-// EXPECT-DIAG: can't be returned inside a struct or array value
+// EXPECT-DIAG: be returned inside a struct or array
 // F-MEM-5 through a by-value struct copy: `h.head` holds a reference to this
 // frame's `n`, and the struct is copied and returned, so the caller's copy
 // dangles. FDN-002 listed this as a residual (per-field tracking was a

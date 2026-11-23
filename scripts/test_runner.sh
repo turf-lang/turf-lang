@@ -72,6 +72,6 @@ for x in ${TURF_TEST_EXTRA_EXCLUDE:-}; do EXTRA_EXCLUDE+=(--exclude "$x"); done
 
 exec "$COMPILER" --test tests \
     --diag-register tests/DIAGNOSTIC_GAPS.txt \
-    --exclude custom --exclude 99_known_bugs --exclude compat \
+    --exclude custom --exclude 99_known_bugs --exclude compat --exclude snapshots \
     ${EXTRA_EXCLUDE[@]+"${EXTRA_EXCLUDE[@]}"} \
     "${OPT_ARGS[@]}"

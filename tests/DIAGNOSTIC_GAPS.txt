@@ -16,8 +16,9 @@
 # THE RULE (enforced by the runner, for every compile-time `fail_*.tr`):
 #   A test either carries `// EXPECT-DIAG: Exxx` for the code the compiler
 #   emits, or it has a line below (UNPINNED, or WRONG-REASON). A codeless error
-#   forces NO-CODE and an E066 that is not a type mismatch forces GENERIC-CODE
-#   even for a test that does pin a code. Anything else fails the suite.
+#   forces NO-CODE even for a test that does pin a code. An E066 that is not a
+#   type mismatch is listed as GENERIC-CODE by hand. Anything else fails the
+#   suite.
 #   Entries are also checked against reality, so a stale line fails too --
 #   fix the test/compiler, then delete the line.
 #
@@ -54,7 +55,7 @@
 #       compiler (or rewrite the test) so the intended diagnostic fires, pin
 #       its code, delete this line.
 #
-#   GENERIC-CODE  path  code=E066  title="Missing initializer!" [-- note]
+#   GENERIC-CODE  path  code=E066  title="has no initial value" [-- note]
 #       The compiler says the right thing, but files it under a catch-all
 #       code. E066 is `TypeError`, the one class every TypeChecker diagnostic
 #       goes through; its banner ("Type mismatch!", "No matching overload!",
@@ -86,10 +87,10 @@
 # the exit status, `// EXPECT-EXIT: 134`. Their only register kind is UNPINNED.
 #
 CASCADE tests/01_syntax/fail_deeply_nested_expression.tr errors=2 -- after the real error it adds a bogus second one: "Unexpected token -- expected a value, variable name, or expression here" at the next line
-CASCADE tests/01_syntax/fail_unterminated_string.tr errors=2 -- the lexer error is followed by a bogus "Expected ';' after statement" on the next line (the parser sees the string token end at the line break and the statement as unfinished): a beginner sees two errors for one mistake
+CASCADE tests/01_syntax/fail_unterminated_string.tr errors=2 -- the lexer error is followed by a bogus "I expected a `;` after this statement" on the next line (the parser sees the string token end at the line break and the statement as unfinished): a beginner sees two errors for one mistake
 CASCADE tests/01_syntax/fail_array_size_zero.tr errors=2 -- after "Array size must be a positive integer" the parser is left in the middle of the declaration and reports a bogus "Unexpected token" on the closing brace of the function
-CASCADE tests/07_functions_modules/fail_circular_import_three_module_chain.tr errors=2 -- the importer's FIRST printed error is a false "Could not find module 'chain_z_module'" (E027) -- the file exists, it is part of the cycle; the true cause, "Circular import detected" (E019), is printed second, under another file's header. A beginner is told a file is missing when it is not
-CASCADE tests/07_functions_modules/fail_circular_import_two.tr errors=2 -- same: a false "Could not find module 'cycle_b_module'" (E027) is printed before the real "Circular import detected" (E019)
-CASCADE tests/07_functions_modules/fail_import_syntax_error.tr errors=2 -- a syntax error INSIDE an imported module (E108, printed second, under the module's own header) makes the importer print "Could not find module" (E027): the module exists and has a typo, and the beginner is told it is missing
-CASCADE tests/07_functions_modules/fail_nested_broken_import.tr errors=2 -- same as fail_import_syntax_error, two import levels deep: "Could not find module 'nested_broken_import_level_b_module'" (E027) for a module that exists
+CASCADE tests/07_functions_modules/fail_circular_import_three_module_chain.tr errors=2 -- the importer's FIRST printed error is a false "I cannot find a module named `chain_z_module`" (E027) -- the file exists, it is part of the cycle; the true cause, "Circular import detected" (E019), is printed second, under another file's header. A beginner is told a file is missing when it is not
+CASCADE tests/07_functions_modules/fail_circular_import_two.tr errors=2 -- same: a false "I cannot find a module named `cycle_b_module`" (E027) is printed before the real "I found a circular import" (E019)
+CASCADE tests/07_functions_modules/fail_import_syntax_error.tr errors=2 -- a syntax error INSIDE an imported module (E108, printed second, under the module's own header) makes the importer print "I cannot find a module named" (E027): the module exists and has a typo, and the beginner is told it is missing
+CASCADE tests/07_functions_modules/fail_nested_broken_import.tr errors=2 -- same as fail_import_syntax_error, two import levels deep: "I cannot find a module named `nested_broken_import_level_b_module`" (E027) for a module that exists
 CASCADE tests/07_functions_modules/visibility/fail_pub_before_decorator.tr errors=2 -- after "'pub' has to come after a decorator" (E087) the decorator is left without a function, so a bogus "'caller_location' can only be used inside a function declared '@caller_location'" (E084) follows

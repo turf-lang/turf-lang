@@ -1,0 +1,13 @@
+tests/03_typechecker/fail_call_literal.tr (1 error)
+
+── error at line 7, col 6 [E135 · not callable]
+
+  This expression is an `int`, not a function, so I cannot call it.
+
+  Hint: Remove the `(...)`, or call a function or a variable that holds one.
+
+  7 │     5();
+    │      ^ this cannot be called
+
+  Run `turf --explain E135` for more details.
+

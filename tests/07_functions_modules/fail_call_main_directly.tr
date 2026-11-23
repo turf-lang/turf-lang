@@ -1,0 +1,12 @@
+// `main` is the program's entry point and cannot be called like an ordinary
+// function (its LLVM signature takes argc/argv, which a call with no
+// arguments cannot supply).
+// EXPECT-DIAG: E011
+// EXPECT-DIAG: I cannot call `main`
+fn helper(): int {
+    return main();
+}
+
+fn main(): int {
+    return 0;
+}

@@ -1,0 +1,1 @@
+{"reasoning": "area takes two ints.", "fix_mode": "MODIFY", "original_code": "    return area(p, n);", "new_code": "    return area(p.x, n);", "category": "TYPE_MISMATCH"}

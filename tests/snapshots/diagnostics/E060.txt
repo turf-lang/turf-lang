@@ -1,0 +1,16 @@
+tests/07_functions_modules/fail_export_assign_to_constant.tr (1 error)
+
+── error at line 8, col 11 [E060 · immutable assignment]
+
+  I cannot change `LIMIT`: it is immutable.
+
+  Hint: Declare it `mut` instead of `immut` to change it later.
+
+  5 │ export immut LIMIT: int = 5;
+    │        - declared immutable here
+    ┊
+  8 │     LIMIT = 10;
+    │           ^ this is immutable
+
+  Run `turf --explain E060` for more details.
+

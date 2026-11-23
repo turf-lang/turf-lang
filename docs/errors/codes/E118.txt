@@ -1,6 +1,6 @@
 Statements have to live inside a function
 
-A Turf file can declare things at its top level -- functions, structs, enums, imports, `extern` bindings, `export immut` constants -- but it can't *do* anything there. Statements (a call, an assignment, a variable, a `return`, an `if`) must be inside a function.
+A Turf file can declare things at its top level -- functions, structs, enums, imports, `extern` bindings, `pub immut` constants -- but it can't *do* anything there. Statements (a call, an assignment, a variable, a `return`, an `if`) must be inside a function.
 
     import io;
 

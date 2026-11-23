@@ -26,9 +26,7 @@ public:
   InvalidPatternError(SourceLocation Loc, const std::string &Problem,
                       const std::string &Hint)
       : TurfError(Loc,
-                  Colors::BRIGHT_RED + "Invalid pattern: " + Colors::RESET +
-                      Problem,
-                  Hint) {
+                  Problem, Hint) {
     Category_ = SLM::ErrorCategory::CONTROL_FLOW;
   }
 };
@@ -45,20 +43,21 @@ public:
  */
 class NonExhaustiveCompareError : public TurfError {
 public:
-  /// @p Kind completes "Non-exhaustive <Kind> on '<Subject>'." -- "enum
-  /// comparison" keeps the wording the enum-only check always used (the SLM
-  /// docs quote it). @p MissingLabel heads the list ("Missing variants:").
+  /// @p Kind ("enum comparison", ...) is not printed: the message names the
+  /// subject's type. @p MissingLabel heads the list ("Missing variants:").
   NonExhaustiveCompareError(SourceLocation Loc, const std::string &Kind,
                             const std::string &SubjectType,
                             const std::string &MissingLabel,
                             const std::vector<std::string> &Missing,
                             const std::string &Hint)
       : TurfError(Loc, "", Hint) {
-    std::string Msg = Colors::BRIGHT_RED + "Non-exhaustive " + Kind + " on '" +
-                      Colors::CYAN + SubjectType + Colors::BRIGHT_RED + "'." +
+    (void)Kind;
+    std::string Msg = Colors::BRIGHT_RED + "This `compare` on `" + Colors::CYAN +
+                      SubjectType + Colors::BRIGHT_RED +
+                      "` does not cover every case, and it has no `otherwise`." +
                       Colors::RESET;
     if (!Missing.empty()) {
-      Msg += "\n" + MissingLabel;
+      Msg += "\n  " + MissingLabel;
       for (const auto &M : Missing)
         Msg += "\n    " + M;
     }
@@ -81,11 +80,11 @@ public:
                         SourceLocation WhyLoc)
       : TurfWarning(
             Loc,
-            TurfWarning::WarningLabel() + What + " can never run." +
-                Colors::RESET,
-            "An earlier arm without a guard already matches every value, so "
-            "arms are never tried past it. Delete this arm, or move it above "
-            "the catch-all (arms are tried in source order).") {
+            TurfWarning::WarningLabel() + What +
+                " can never run, because an earlier arm without a guard "
+                "already matches every case." + Colors::RESET,
+            "Delete this arm, or move it above the catch-all: arms are tried "
+            "in source order.") {
     Category_ = SLM::ErrorCategory::CONTROL_FLOW;
     withRelated(WhyLoc, "this header matches everything");
   }

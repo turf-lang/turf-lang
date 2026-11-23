@@ -1,0 +1,14 @@
+Nothing in the file uses an import
+
+An `import` that nothing in its file uses -- no `module::name`, no imported name, no method of one of the module's types -- only slows the build and misleads the reader:
+
+    import math;   // WARNING (E179 at `warn`)
+
+    fn main(): int {
+        printline(2);
+        return 0;
+    }
+
+The compiler's `Fix:` removes the line. The prelude modules (`io`, `math`, `strings`, ...) are always available, so importing one of them again is never reported.
+
+This warning starts at `allow`: turn it on with `turf build --warn E179` (or `[lints] E179 = "warn"` in turf.toml).

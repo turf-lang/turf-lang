@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E034
-// EXPECT-DIAG: A struct named 'P' is already declared
+// EXPECT-DIAG: I found a second struct named `P`
 // A function-local `struct P` with the same name as a top-level `struct P`
 // in the same file: E034, for the same reason as
 // fail_duplicate_local_struct_in_two_functions.tr -- the local one used to

@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E086
-// EXPECT-DIAG: can't be returned
+// EXPECT-DIAG: be returned
 // One branch of the `give` is `&n`: when `c` holds, a reference into this
 // frame is returned (owner decision 2026-10-12, found by turf-fuzz).
 struct N { val: int, next: &?N }

@@ -1,0 +1,13 @@
+// LEC-003: same name, different types across stacked headers. Expected: E092.
+struct P { x: int, s: string }
+@test(compile_error, E092, "`v` is bound as a `string` here and as an `int` in another header of the same arm. Stacked `matches` headers share one body, so a name has one type.")
+fn rejects_stacked_headers_bind_different_types(): void {
+    mut p: P = P::default();
+    compare p {
+        matches P { x: v, .. }:
+        matches P { s: v, .. }:
+        return;
+        done
+        otherwise: return 2;
+    }
+}

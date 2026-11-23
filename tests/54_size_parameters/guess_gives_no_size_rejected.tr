@@ -1,0 +1,14 @@
+// 'guess' has no type to give: the size must be written.
+
+fn<T, N: size> fill(value: T): T[N] {
+    mut r: T[N];
+    for i in 0..N {
+        r[i] = value;
+    }
+    return r;
+}
+
+@test(compile_error, E129, "nothing says what type the result is")
+fn rejects_guess_gives_no_size(): void {
+    mut d = fill(0);
+}

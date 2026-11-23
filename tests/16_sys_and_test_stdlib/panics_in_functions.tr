@@ -1,0 +1,28 @@
+// F-11e: tests moved from fail_*.tr files that abort at run time, one function each;
+// each `@test(panic, ...)` names the text its panic prints.
+
+import test;
+
+// sys::abort flushes stdout before aborting.
+
+@test(panic, "printed before sys::abort")
+fn panics_sys_abort_keeps_stdout(): void {
+    printline("printed before sys::abort");
+    sys::abort();
+}
+
+// test::assert_eq() with mismatched values actually aborts at runtime --
+// must compile successfully, then abort at runtime.
+
+@test(panic, "assert_eq failed: 5 != 6")
+fn panics_test_assert_eq_mismatch_aborts(): void {
+    test::assert_eq(5, 6, "5 should never equal 6");
+}
+
+// A failing test::assert() actually aborts at runtime (via test::fail ->
+// sys::panic -> abort) -- must compile successfully, then abort at runtime.
+
+@test(panic, "1 should never equal 2")
+fn panics_test_assert_false_aborts(): void {
+    test::assert(1 == 2, "1 should never equal 2");
+}

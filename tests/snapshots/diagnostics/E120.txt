@@ -1,0 +1,12 @@
+tests/04_control_flow/fail_foreach_range_with_pair.tr (1 error)
+
+── error at line 4, col 5 [E120 · unsupported loop form]
+
+  I cannot use the `(index, value)` form in a range-based `for` loop.
+  Hint: Bind a single variable in a range-based `for` loop: `for i in 0..10 step i += 1 { }`.
+
+  4 │     for (index, value) in 0..10 step index += 1 {
+    │     ^~~ this loop form is not supported
+
+  Run `turf --explain E120` for more details.
+

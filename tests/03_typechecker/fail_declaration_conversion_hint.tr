@@ -1,0 +1,7 @@
+// EXPECT-DIAG: E066
+// EXPECT-DIAG: Declare `label` as `int`, or convert the value with `to string`.
+// #365: where a conversion exists, the value side is the `to`.
+fn main(): int {
+    mut label: string = 5;
+    return 0;
+}

@@ -87,7 +87,7 @@ static std::vector<size_t> LoopDeferDepth;
 // return/break/continue reachable from somewhere inside); each block still
 // pops its own frame exactly once, itself, when its own
 // BlockExprAST::codegen() call returns (same "owner does its own cleanup"
-// discipline GlobalSymbolTable::EnterScope()/ExitScope() already follows
+// discipline Symbols()::EnterScope()/ExitScope() already follows
 // around this identical early-exit machinery). A block whose own natural
 // end is never reached at runtime because this function already flushed
 // and returned/broke/continued through it still calls FlushPendingDefers()
@@ -215,8 +215,8 @@ Value *IfExprAST::codegen() {
 
 Value *BlockExprAST::codegen() {
   // Enter new scope
-  if (GlobalSymbolTable) {
-    GlobalSymbolTable->EnterScope();
+  if (Symbols()) {
+    Symbols()->EnterScope();
   }
 
   // LANG-003: this block's own `defer` frame. Pushed/popped here regardless
@@ -258,8 +258,8 @@ Value *BlockExprAST::codegen() {
     LastVal = Expr->codegen();
     if (!LastVal) {
       PendingDeferFrames.pop_back();
-      if (GlobalSymbolTable) {
-        GlobalSymbolTable->ExitScope();
+      if (Symbols()) {
+        Symbols()->ExitScope();
       }
       return nullptr;
     }
@@ -287,8 +287,8 @@ Value *BlockExprAST::codegen() {
   PendingDeferFrames.pop_back();
 
   // Exit scope
-  if (GlobalSymbolTable) {
-    GlobalSymbolTable->ExitScope();
+  if (Symbols()) {
+    Symbols()->ExitScope();
   }
 
   // An empty block is valid - it just produces no meaningful value.
@@ -459,12 +459,12 @@ Value *ForExprAST::codegen() {
       CreateEntryBlockAlloca(TheFunction, VarName, VarType.get());
   Builder->CreateStore(StartV, Alloca);
 
-  // Push a new scope in GlobalSymbolTable so the loop variable doesn't leak
+  // Push a new scope in Symbols() so the loop variable doesn't leak
   // out into the surrounding scope after the loop ends.
   // Previously, DeclareSymbol was called without EnterScope, causing the loop
   // variable to persist in the caller's scope — now fixed.
-  if (GlobalSymbolTable) {
-    GlobalSymbolTable->EnterScope();
+  if (Symbols()) {
+    Symbols()->EnterScope();
   }
 
   // Register loop variable in symbol table and NamedValues.
@@ -478,14 +478,14 @@ Value *ForExprAST::codegen() {
   }
   NamedValues[VarName] = {Alloca, VarType};
 
-  if (GlobalSymbolTable) {
-    GlobalSymbolTable->DeclareSymbol(VarName, VarType, Loc, Alloca);
+  if (Symbols()) {
+    Symbols()->DeclareSymbol(VarName, VarType, Loc, Alloca);
   }
 
   //  2. Evaluate end value
   Value *EndV = End->codegen();
   if (!EndV) {
-    if (GlobalSymbolTable) GlobalSymbolTable->ExitScope();
+    if (Symbols()) Symbols()->ExitScope();
     return nullptr;
   }
   EndV = CastToType(EndV, VarType, "forend");
@@ -550,7 +550,7 @@ Value *ForExprAST::codegen() {
   if (!Body->codegen()) {
     LoopBlocks.pop_back();
     LoopDeferDepth.pop_back();
-    if (GlobalSymbolTable) GlobalSymbolTable->ExitScope();
+    if (Symbols()) Symbols()->ExitScope();
     return nullptr;
   }
 
@@ -567,7 +567,7 @@ Value *ForExprAST::codegen() {
   Builder->SetInsertPoint(LoopStepBB);
 
   if (!Step->codegen()) {
-    if (GlobalSymbolTable) GlobalSymbolTable->ExitScope();
+    if (Symbols()) Symbols()->ExitScope();
     return nullptr;
   }
 
@@ -581,8 +581,8 @@ Value *ForExprAST::codegen() {
   Builder->SetInsertPoint(AfterBB);
 
   // Exit the for-loop scope — loop variable is no longer visible.
-  if (GlobalSymbolTable) {
-    GlobalSymbolTable->ExitScope();
+  if (Symbols()) {
+    Symbols()->ExitScope();
   }
 
   // Restore old NamedValues binding for backward-compatibility.
@@ -684,8 +684,8 @@ Value *ForEachExprAST::codegen() {
   // 3. Push a new scope so the loop variable(s) don't leak out after the
   //    loop ends, saving/restoring any pre-existing NamedValues bindings --
   //    exact mirror of ForExprAST::codegen()'s scope handling.
-  if (GlobalSymbolTable) {
-    GlobalSymbolTable->EnterScope();
+  if (Symbols()) {
+    Symbols()->EnterScope();
   }
 
   auto OldValueBinding = NamedValues.find(ValueVarName);
@@ -696,8 +696,8 @@ Value *ForEachExprAST::codegen() {
     HadOldValueBinding = true;
   }
   NamedValues[ValueVarName] = {ValueAlloca, ElemTy};
-  if (GlobalSymbolTable) {
-    GlobalSymbolTable->DeclareSymbol(ValueVarName, ElemTy, Loc, ValueAlloca);
+  if (Symbols()) {
+    Symbols()->DeclareSymbol(ValueVarName, ElemTy, Loc, ValueAlloca);
   }
 
   bool HadOldIndexBinding = false;
@@ -709,8 +709,8 @@ Value *ForEachExprAST::codegen() {
       HadOldIndexBinding = true;
     }
     NamedValues[IndexVarName] = {CounterAlloca, TurfInt()};
-    if (GlobalSymbolTable) {
-      GlobalSymbolTable->DeclareSymbol(IndexVarName, TurfInt(), Loc, CounterAlloca);
+    if (Symbols()) {
+      Symbols()->DeclareSymbol(IndexVarName, TurfInt(), Loc, CounterAlloca);
     }
   }
 
@@ -768,7 +768,7 @@ Value *ForEachExprAST::codegen() {
   if (!Body->codegen()) {
     LoopBlocks.pop_back();
     LoopDeferDepth.pop_back();
-    if (GlobalSymbolTable) GlobalSymbolTable->ExitScope();
+    if (Symbols()) Symbols()->ExitScope();
     return nullptr;
   }
 
@@ -798,8 +798,8 @@ Value *ForEachExprAST::codegen() {
   TheFunction->insert(TheFunction->end(), AfterBB);
   Builder->SetInsertPoint(AfterBB);
 
-  if (GlobalSymbolTable) {
-    GlobalSymbolTable->ExitScope();
+  if (Symbols()) {
+    Symbols()->ExitScope();
   }
 
   if (HadOldValueBinding) {
@@ -1096,8 +1096,8 @@ Value *ReturnExprAST::codegen() {
   }
 
   // Mark scope as having early exit for unreachable code detection
-  if (GlobalSymbolTable) {
-    GlobalSymbolTable->MarkEarlyExit();
+  if (Symbols()) {
+    Symbols()->MarkEarlyExit();
   }
 
   // `!T` (docs/architecture/errors_and_recover.md): the function's ACTUAL LLVM

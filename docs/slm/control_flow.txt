@@ -45,8 +45,7 @@ WHILE LOOP:
 BREAK AND CONTINUE:
   - `break` exits the innermost loop immediately.
   - `continue` skips to the step/condition of the innermost loop.
-  - Both are a compile error ("Control flow error! 'break'/'continue' used
-    outside of a loop") if used outside a loop body -- even if a function
+  - Both are a compile error if used outside a loop body -- even if a function
     containing one is never actually called.
 
   CORRECT EXAMPLE:

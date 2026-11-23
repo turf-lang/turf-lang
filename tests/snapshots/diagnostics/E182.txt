@@ -1,0 +1,27 @@
+tests/14_cfg_analysis/mutual_recursion_warns.tr (2 warnings)
+
+── warning at line 13, col 1 [E182 · mutual recursion with no base case]
+
+  The functions `ping`, `pong` call each other on every path, so none of them can ever return.
+  Note: `pong` is part of the cycle (line 17, col 1)
+
+  Hint: Give one of them a path that returns without calling back into the cycle: a base case, such as `if n == 0 { return 0; }`.
+
+  13 │ fn ping(n: int): int {
+     │ ^~ this recursion has no way to stop
+
+  Run `turf --explain E182` for more details.
+
+── warning at line 21, col 1 [E182 · mutual recursion with no base case]
+
+  The functions `a`, `b`, `c` call each other on every path, so none of them can ever return.
+  Note: `b` is part of the cycle (line 25, col 1)
+  Note: `c` is part of the cycle (line 29, col 1)
+
+  Hint: Give one of them a path that returns without calling back into the cycle: a base case, such as `if n == 0 { return 0; }`.
+
+  21 │ fn a(n: int): int {
+     │ ^~ this recursion has no way to stop
+
+  Run `turf --explain E182` for more details.
+

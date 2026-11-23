@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E086
-// EXPECT-DIAG: can't be returned
+// EXPECT-DIAG: be returned
 // `break` leaves the loop body, so its defer runs first: `p` is `&n` after
 // the loop.
 struct N { val: int, next: &?N }

@@ -1,6 +1,6 @@
 // EXPECT-DIAG: E040
 // EXPECT-FIX: replace 'myvvar' with 'myvar'
-// EXPECT-DIAG: It may be from the current file: 'myvar'
+// EXPECT-DIAG: Use a name from this file: `myvar`
 import test;
 
 fn main(): int {

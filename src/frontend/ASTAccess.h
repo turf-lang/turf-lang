@@ -1,6 +1,7 @@
 #ifndef AST_ACCESS_H
 #define AST_ACCESS_H
 
+#include "diagnostics/CompilerFix.h"
 #include "frontend/AST.h"
 #include "sema/Intrinsics.h"
 
@@ -20,6 +21,9 @@ public:
   const ExprAST *getCallee() const { return Callee.get(); }
   const SourceLocation &getLoc() const { return Loc; }
   const std::vector<std::unique_ptr<ExprAST>> &getArgs() const { return Args; }
+  // Where each argument and the ')' are written (SL-7: the fix for a wrong
+  // argument count). Set by the parser; empty for a call it did not parse.
+  CallArgSpans ArgSpans;
 
   /// All overloads matching the call name.  TypeChecker narrows this to one.
   /// clone() returns a fresh node, so this is empty in cloned trees.
@@ -102,8 +106,10 @@ public:
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitFuncCall(*this); }
   std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<FuncCallExprAST>(Loc, CloneExprAST(Callee.get()),
-                                             CloneExprList(Args));
+    auto Cloned = std::make_unique<FuncCallExprAST>(Loc, CloneExprAST(Callee.get()),
+                                                    CloneExprList(Args));
+    Cloned->ArgSpans = ArgSpans; // where the source writes it, like Loc
+    return Cloned;
     // Note: ResolvedCandidates, ResolvedCallTarget, GenericSubstitution,
     // ConstructedType and TypeOfOperand are intentionally NOT copied — cloned ASTs are stale
     // until re-resolved. ✓
@@ -340,20 +346,6 @@ public:
   std::vector<std::shared_ptr<ResolverFunctionSymbol>> ResolvedIndexSetCandidates;
   std::shared_ptr<ResolverFunctionSymbol> ResolvedIndexSetTarget;
 
-  /// OPT-002: set by a `ValueRangePass::markElidableChecks()` pre-pass that
-  /// runs BEFORE `Body->codegen()` (FuncDefExprAST::codegen(), CodegenFunc.cpp)
-  /// when the index provably resolves to the same in-range constant on every
-  /// path reaching this access -- the same constant-propagation dataflow the
-  /// EXISTING post-codegen `ValueRangePass::runOnCFG()` invocation already
-  /// uses to raise `ArrayBoundsError` for the out-of-range case (that call
-  /// site is untouched: a provably-OOB access still gets that diagnostic,
-  /// at the same point, exactly as before this field existed). Codegen
-  /// (CodegenArray.cpp) skips `EmitRuntimeBoundsCheck` when this is true --
-  /// F-OPT-2 (ARCHITECTURE_OVERHAUL.md §17.3): removal by proof only, never
-  /// by `-O` level. Not copied by clone() -- same contract as
-  /// ResolvedIndexGetTarget; a cloned (e.g. monomorphized) tree is
-  /// re-analyzed by its own FuncDefExprAST::codegen() call.
-  bool ProvenInBounds = false;
 
   llvm::Value *codegen() override;
   llvm::Value *codegenLValue() override;
@@ -414,6 +406,9 @@ public:
                     std::vector<std::unique_ptr<ExprAST>> Args = {})
       : Base(std::move(Base)), Method(std::move(Method)), Args(std::move(Args)),
         Loc(Loc), NameLoc(NameLoc) {}
+
+  // Where each argument and the ')' are written (SL-7), as FuncCallExprAST.
+  CallArgSpans ArgSpans;
 
   const SourceLocation &getLoc() const { return Loc; }
   const SourceLocation &getNameLoc() const { return NameLoc; }
@@ -482,6 +477,7 @@ public:
     auto Cloned = std::make_unique<MethodCallExprAST>(
         Loc, CloneExprAST(Base.get()), Method, NameLoc, CloneExprList(Args));
     Cloned->TypeArgs = TypeArgs;
+    Cloned->ArgSpans = ArgSpans;
     return Cloned;
     // Note: ResolvedCallTarget, ResolvedViaUFCS, UFCSLoadsReceiver, IsMachineTransition,
     // TransitionCompileTimeProven, and GenericSubstitution intentionally

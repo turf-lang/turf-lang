@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E086
-// EXPECT-DIAG: can't be returned
+// EXPECT-DIAG: be returned
 // Both branches of the `give` are this frame's storage, so its value is too.
 // EscapePass classified a `give` as Unknown (never flagged) and this compiled.
 // Found by turf-fuzz probing the F-MEM-5 boundary.

@@ -1,0 +1,13 @@
+tests/03_typechecker/fail_string_conversion.tr (1 error)
+
+── error at line 9, col 23 [E065 · no conversion to string]
+
+  I cannot convert a `Point` to a `string` with `to`.
+
+  Hint: Convert an `int`, a `double`, a `bool` or an enum variant with `to string`, e.g. `n to string`.
+
+  9 │     mut s: string = p to string;
+    │                       ^~ this has no conversion to `string`
+
+  Run `turf --explain E065` for more details.
+

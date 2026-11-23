@@ -12,10 +12,12 @@ CORRECT USAGE:
 
 INCORRECT:
     immut primes: int[3] = [2, 3, "five"];
-    // ERROR: Array element type mismatch! Array 'primes' holds 'int'
-    //   values, but you tried to store a 'string'.
+    // ERROR: I cannot put a `string` in an array of `int`.
 
 FIX:
-  Make every element in the initializer list the declared element type.
-  If a value is a different-but-convertible type, convert it explicitly
-  (`x to int`) rather than mixing types in the literal.
+  Decide which side is wrong. If the written element type is the mistake
+  (every value is an `int` and the code uses them as numbers), change the
+  declaration: `mut codes: int[3] = [10, 20, 30];`. If the values are, make
+  each one the declared element type: convert it with `to` where a
+  conversion exists (`x to char`), otherwise write a value of that type.
+  Never mix types in one literal.

@@ -1,0 +1,15 @@
+# GBNF grammar for the explanation of a fix the sandbox accepted (#364).
+# One short request after the fix is checked: a one-line summary, then the
+# explanation. Multi-line rule bodies are parenthesized (see
+# slm_suggestion.gbnf for why).
+
+root ::= "{" ws (
+         "\"summary\":"     ws string "," ws
+         "\"explanation\":" ws string
+         ) ws "}"
+
+string ::= "\"" string-char* "\""
+string-char ::= [^"\\\x00-\x1f] | "\\" escape
+escape ::= ["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F]
+
+ws ::= [ \t\n\r]*

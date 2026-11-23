@@ -60,15 +60,12 @@ public:
     if (C == ErrCode::VoidTypeNotAllowed)
       return "Use `void` only as a return type, `fn f(): void`; for a variable "
              "or parameter write a real type such as `int`.";
-    return "Check your spelling, punctuation like ';' or '}', and make sure "
-           "everything is closed properly.";
+    return "Check the spelling, then check that every `;`, `}`, `)` and `]` "
+           "is in place and that every bracket is closed.";
   }
   SyntaxError(SourceLocation Loc, const char *Code, const std::string &Msg,
               const std::string &Hint = "")
-      : TurfError(Loc, Colors::BRIGHT_RED +
-                           "Oops! There's a tiny mistake here:\n" +
-                           Colors::RESET + "  " + Msg,
-                  Hint.empty() ? defaultHintFor(Code) : Hint) {
+      : TurfError(Loc, Msg, Hint.empty() ? defaultHintFor(Code) : Hint) {
     Category_ = SLM::ErrorCategory::SYNTAX_ERROR;
     withCode(Code);
   }
@@ -77,22 +74,22 @@ public:
 class KeywordError : public TurfError {
 public:
   KeywordError(SourceLocation Loc, const std::string &Name)
-      : TurfError(Loc, Colors::BRIGHT_RED + "Hmm, I don't know the word '" +
-                           Colors::CYAN + Name + Colors::BRIGHT_RED + "'." +
+      : TurfError(Loc, Colors::BRIGHT_RED + "I do not know the word `" +
+                           Colors::CYAN + Name + Colors::BRIGHT_RED + "`." +
                            Colors::RESET) {
     Category_ = SLM::ErrorCategory::SYNTAX_ERROR;
 
     std::vector<std::string> Candidates = SuggestionIndex::suggestKeywords(Name);
 
     if (!Candidates.empty()) {
-      std::string sug = "Did you mean: ";
+      std::string sug = "Write ";
       for (size_t i = 0; i < Candidates.size(); ++i) {
-        sug += Colors::BRIGHT_YELLOW + "'" + Candidates[i] + "'" +
+        sug += Colors::BRIGHT_YELLOW + "`" + Candidates[i] + "`" +
                    Colors::BRIGHT_GREEN;
-        if (i != Candidates.size() - 1)
-          sug += ", ";
+        if (i + 1 < Candidates.size())
+          sug += (i + 2 == Candidates.size()) ? " or " : ", ";
       }
-      sug += "?";
+      sug += " instead.";
       Hint_ = sug;
       // SLM-001 item 1: unlike every other deterministic-fix site (Errors
       // Scope.h/Struct.h/Module.h), this isn't RankedSuggestions-shaped
@@ -101,7 +98,7 @@ public:
       if (Candidates.size() == 1)
         withDeterministicFix(Name, Candidates[0]);
     } else {
-      Hint_ = "Check if you spelled the keyword correctly.";
+      Hint_ = "Check the spelling of the keyword.";
     }
   }
 };
@@ -114,18 +111,18 @@ public:
 class MalformedRadixPrefixError : public TurfError {
 public:
   MalformedRadixPrefixError(SourceLocation Loc, const std::string &Prefix)
-      : TurfError(Loc, Colors::BRIGHT_RED + "'" + Colors::CYAN + Prefix +
+      : TurfError(Loc, Colors::BRIGHT_RED + "`" + Colors::CYAN + Prefix +
                            Colors::BRIGHT_RED +
-                           "' isn't followed by any digit." +
+                           "` is not followed by any digit." +
                            Colors::RESET) {
     Category_ = SLM::ErrorCategory::SYNTAX_ERROR;
-    Hint_ = "'" + Prefix + "' starts a " +
+    Hint_ = "Write at least one " +
             (Prefix.size() > 1 && (Prefix[1] == 'x' || Prefix[1] == 'X')
                  ? std::string("hexadecimal (0-9, a-f)")
              : Prefix.size() > 1 && (Prefix[1] == 'b' || Prefix[1] == 'B')
                  ? std::string("binary (0-1)")
                  : std::string("octal (0-7)")) +
-            " integer literal, but needs at least one digit after it.";
+            " digit after `" + Prefix + "`.";
   }
 };
 
@@ -141,19 +138,18 @@ class InvalidRadixDigitError : public TurfError {
 public:
   InvalidRadixDigitError(SourceLocation Loc, char BadDigit, int Radix,
                          const std::string &SpellingSoFar)
-      : TurfError(Loc, Colors::BRIGHT_RED + "'" + Colors::CYAN +
+      : TurfError(Loc, Colors::BRIGHT_RED + "`" + Colors::CYAN +
                            std::string(1, BadDigit) + Colors::BRIGHT_RED +
-                           "' isn't a valid digit in '" + Colors::CYAN +
-                           SpellingSoFar + Colors::BRIGHT_RED + "' (" +
-                           (Radix == 16   ? "hexadecimal, 0-9/a-f"
-                            : Radix == 2  ? "binary, 0-1"
-                                         : "octal, 0-7") +
-                           ")." + Colors::RESET) {
+                           "` is not a valid digit in `" + Colors::CYAN +
+                           SpellingSoFar + Colors::BRIGHT_RED + "`, which is " +
+                           (Radix == 16   ? "hexadecimal (0-9, a-f)"
+                            : Radix == 2  ? "binary (0-1)"
+                                         : "octal (0-7)") +
+                           "." + Colors::RESET) {
     Category_ = SLM::ErrorCategory::SYNTAX_ERROR;
-    Hint_ = "Every digit after '" + SpellingSoFar.substr(0, 2) +
-            "' must be valid in that radix. Double-check the digit, or "
-            "did you mean to write a decimal number instead (drop the '" +
-            SpellingSoFar.substr(0, 2) + "' prefix)?";
+    Hint_ = "Replace the digit with one that is valid after `" +
+            SpellingSoFar.substr(0, 2) + "`, or drop the `" +
+            SpellingSoFar.substr(0, 2) + "` prefix to write a decimal number.";
   }
 };
 
@@ -170,15 +166,15 @@ public:
   MisplacedSeparatorError(SourceLocation Loc, const std::string &SpellingSoFar,
                           bool Leading)
       : TurfError(Loc, Colors::BRIGHT_RED +
-                           std::string(Leading ? "A digit run can't start"
-                                               : "A digit run can't end") +
-                           " with '" + Colors::CYAN + "_" + Colors::BRIGHT_RED +
-                           "'." + Colors::RESET) {
+                           std::string(Leading ? "I cannot start a run of digits"
+                                               : "I cannot end a run of digits") +
+                           " with `" + Colors::CYAN + "_" + Colors::BRIGHT_RED +
+                           "`." + Colors::RESET) {
     Category_ = SLM::ErrorCategory::SYNTAX_ERROR;
-    Hint_ = "'_' is only a separator BETWEEN digits (like '1_000_000'), "
-            "never at the very start or end of a digit run. Remove the " +
+    Hint_ = "Remove the " +
             std::string(Leading ? "leading" : "trailing") +
-            " underscore in '" + SpellingSoFar + "'.";
+            " underscore in `" + SpellingSoFar +
+            "`: `_` goes only between digits, as in `1_000_000`.";
   }
 };
 
@@ -194,12 +190,12 @@ class MalformedExponentError : public TurfError {
 public:
   MalformedExponentError(SourceLocation Loc, const std::string &SpellingSoFar)
       : TurfError(Loc, Colors::BRIGHT_RED +
-                           "'" + Colors::CYAN + SpellingSoFar + Colors::BRIGHT_RED +
-                           "' has an exponent marker with no exponent after it." +
+                           "`" + Colors::CYAN + SpellingSoFar + Colors::BRIGHT_RED +
+                           "` has an exponent marker with no exponent after it." +
                            Colors::RESET) {
     Category_ = SLM::ErrorCategory::SYNTAX_ERROR;
-    Hint_ = "After 'e'/'E' (optionally followed by '+' or '-'), at least "
-            "one digit is required -- e.g. '1e6', '1.5e-3', '1E+10'.";
+    Hint_ = "Write at least one digit after `e` or `E`, with an optional `+` "
+            "or `-` before it, such as `1e6`, `1.5e-3` or `1E+10`.";
   }
 };
 
@@ -223,9 +219,9 @@ public:
 
   MalformedNumberError(SourceLocation Loc, const std::string &SpellingSoFar,
                        Kind K)
-      : TurfError(Loc, Colors::BRIGHT_RED + "'" + Colors::CYAN + SpellingSoFar +
+      : TurfError(Loc, Colors::BRIGHT_RED + "`" + Colors::CYAN + SpellingSoFar +
                            (K == Kind::TrailingPoint ? "." : "") +
-                           Colors::BRIGHT_RED + "' " + describe(K) +
+                           Colors::BRIGHT_RED + "` " + describe(K) +
                            Colors::RESET) {
     Category_ = SLM::ErrorCategory::SYNTAX_ERROR;
     Hint_ = hintFor(K, SpellingSoFar);
@@ -235,32 +231,69 @@ private:
   static std::string describe(Kind K) {
     switch (K) {
     case Kind::SecondPoint:
-      return "is followed by a second '.', but a number can have only one "
-             "decimal point.";
+      return "is followed by a second `.`. A number has only one decimal "
+             "point.";
     case Kind::TrailingPoint:
-      return "ends in a '.' with no digit after it.";
+      return "ends in a `.` with no digit after it.";
     case Kind::RadixPoint:
-      return "is followed by a '.', but hexadecimal, binary and octal "
-             "numbers are whole numbers.";
+      return "is followed by a `.`. Hexadecimal, binary and octal numbers "
+             "are whole numbers.";
     }
     return "is not a valid number.";
   }
   static std::string hintFor(Kind K, const std::string &S) {
     switch (K) {
     case Kind::SecondPoint:
-      return "'" + S + "' is already a complete number, so what follows the "
-             "second '.' looks like a second number run together with it. "
-             "Keep one '.' for a single decimal number, or put a ',' or an "
-             "operator between two separate values.";
+      return "Keep one `.` in the number, or put a `,` or an operator between "
+             "the two numbers.";
     case Kind::TrailingPoint:
-      return "A decimal number needs a digit after the point. Write '" + S +
-             ".0' for the decimal, or just '" + S + "' for the whole number.";
+      return "Write `" + S + ".0` for the decimal, or `" + S +
+             "` for the whole number.";
     case Kind::RadixPoint:
-      return "Drop the '.' and what follows it, or write the value as a "
-             "decimal number (with a '.') instead of hexadecimal, binary or "
-             "octal.";
+      return "Remove the `.` and what follows it, or write the number in "
+             "decimal.";
     }
     return "";
+  }
+};
+
+// SY-2 (b), TDP-2-022: `1.5.floor()`. The first '.' is the number's and the
+// second the call's, which the reader has to work out; `(1.5).floor()` says
+// it. An integer receiver (`1.twice()`) has one dot and is left alone.
+class DecimalLiteralReceiverWarning : public TurfWarning {
+public:
+  DecimalLiteralReceiverWarning(SourceLocation Loc, const std::string &Spelling)
+      : TurfWarning(Loc,
+                    "The decimal number `" + Spelling +
+                        "` is the receiver of a call, and its own dot sits "
+                        "right before the call's.",
+                    "Write `(" + Spelling + ")` so the dot that ends the number "
+                    "is clear.") {
+    Category_ = SLM::ErrorCategory::SYNTAX_ERROR;
+  }
+};
+
+// SY-4, TDP-2-024: `fn T.m() static: R`. `static` is written in front now,
+// `static fn T.m(): R`, where a reader looks for what kind of function it is.
+class StaticAfterParametersWarning : public TurfWarning {
+public:
+  StaticAfterParametersWarning(SourceLocation Loc, const std::string &FuncName)
+      : TurfWarning(Loc,
+                    "`static` for `" + FuncName +
+                        "` is written after the parameter list.",
+                    "Move `static` before `fn`: `static fn " + FuncName + "(...)`.") {
+    Category_ = SLM::ErrorCategory::SYNTAX_ERROR;
+  }
+};
+
+// SY-5, TDP-2-025: `export immut NAME: T = v;`. A module constant is
+// `pub immut` now, the word every other public declaration uses.
+class ExportImmutWarning : public TurfWarning {
+public:
+  explicit ExportImmutWarning(SourceLocation Loc)
+      : TurfWarning(Loc, "`export immut` is the old spelling of a public module constant.",
+                    "Write `pub immut` instead of `export immut`.") {
+    Category_ = SLM::ErrorCategory::SYNTAX_ERROR;
   }
 };
 

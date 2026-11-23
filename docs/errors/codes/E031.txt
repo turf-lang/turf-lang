@@ -15,7 +15,7 @@ Here's correct usage of all three kinds:
 The most common way to trip this is forgetting the import line:
 
     io::printline("hello");
-    // ERROR: 'io' isn't a known enum, struct, or module.
+    // ERROR: I cannot find an enum, struct or module named `io`.
 
 Even though `io` is a real module in the standard library, Turf won't know that unless you write `import io;` near the top of your file first.
 

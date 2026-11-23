@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E141
-// EXPECT-DIAG: 'a' is immutable, but 'tail_zero' writes to the array it is given as 'arr'.
+// EXPECT-DIAG: `a` is immutable, and `tail_zero` writes to the array it takes as `arr`. As an `int[]` parameter, it shares the caller's array, so the change would land in `a`.
 // The write is through local views of the parameter (`rest`, then `again`),
 // not the parameter itself -- E141 follows them.
 fn tail_zero(arr: int[]): void {

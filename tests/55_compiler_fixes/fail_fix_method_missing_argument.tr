@@ -1,0 +1,22 @@
+// EXPECT-DIAG: E044
+// EXPECT-FIX: pass 'label' as argument 2
+// A method's `self` is not among the arguments the call writes: `scaled`
+// takes two, and a `label` variable is in scope for the missing one.
+struct Box {
+    v: int
+}
+
+fn Box.new(v: int): void {
+    self.v = v;
+}
+
+fn Box.scaled(factor: int, label: string): int {
+    return self.v * factor;
+}
+
+fn main(): int {
+    mut b: Box = Box::new(2);
+    immut label: string = "x";
+    immut a: int = b.scaled(3);
+    return a - 6;
+}

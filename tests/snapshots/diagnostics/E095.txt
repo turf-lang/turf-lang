@@ -1,0 +1,13 @@
+tests/25_errors/fail_try_in_defer.tr (1 error)
+
+── error at line 18, col 15 [E095 · misplaced try]
+
+  I cannot use `try` in a deferred statement, because there is nowhere to pass the error on to.
+
+  Hint: Handle the error inside the deferred statement with `defer f() recover run { ... };`.
+
+  18 │     defer n = try open();
+     │               ^~~ this `try` is out of place
+
+  Run `turf --explain E095` for more details.
+

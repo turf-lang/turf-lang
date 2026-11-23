@@ -13,7 +13,7 @@ CORRECT:
 INCORRECT:
     mut count: int = 0;
     mut count: int = 5;
-    // ERROR: Wait a minute! You already created a variable named 'count'.
+    // ERROR: I cannot declare `count` again, because it is already declared.
     //   Note: first declared here (line 1, ...)
 
 WHAT THIS ERROR IS NOT:

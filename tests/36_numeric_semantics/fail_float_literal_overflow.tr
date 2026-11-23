@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E078
-// EXPECT-DIAG: rounds to infinity
+// EXPECT-DIAG: The literal `1e400` is too large for a `double`, which holds up to about 1.8e308.
 // SEM-002 (FREEZE.md §6.2 row 8): a float literal whose decimal->binary
 // rounding overflows to +inf is a hard error, unconditionally -- before
 // this group: silently became `inf` with zero diagnostics

@@ -1,0 +1,16 @@
+// turf-fuzz #39: a call of a `void` function as the argument infers T = void,
+// which gives the instantiation a parameter of type `void`, with no layout.
+// A written `x: void` is E112 in the parser; this is the same mistake reached
+// through inference, and the compiler hung in Codegen on it.
+// EXPECT-DIAG: E112
+// EXPECT-DIAG: gives the parameter `x` the type `void`, which is only a function's return type.
+fn<T> count_one(x: T): int {
+    return 1;
+}
+
+fn nothing(): void {
+}
+
+fn main(): int {
+    return count_one(nothing());
+}

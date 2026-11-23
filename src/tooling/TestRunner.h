@@ -54,8 +54,12 @@ struct TestRunOptions {
   /// is set, else every processor.
   int Jobs = 0;
   /// Seconds a test program may run. 0 means TURF_TEST_TIMEOUT_SEC if set,
-  /// else 5.
+  /// else 5. A test's own `timeout:` (TDP-2-026) replaces it for that test.
   int TimeoutSec = 0;
+  /// TDP-2-026 `--tag` / `--skip-tag`: with Tags, only the `@test` functions
+  /// carrying one of them run (a file that is a test of its own has no tags,
+  /// so it does not); a test carrying one of SkipTags does not run.
+  std::vector<std::string> Tags, SkipTags;
 };
 
 /// Runs every test under Opts.Dir and prints one line per test and a summary.

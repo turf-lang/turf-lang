@@ -1,0 +1,13 @@
+tests/14_cfg_analysis/47_lint_reaches_unsafe_block.tr (1 warning)
+
+── warning at line 6, col 15 [E155 · redundant comparison]
+
+  `b == true` is the same as `b`.
+
+  Hint: Write `b` instead of the comparison.
+
+  6 │         if (b == true) {
+    │               ^~ this comparison always has the same result
+
+  Run `turf --explain E155` for more details.
+

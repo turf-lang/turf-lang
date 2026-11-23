@@ -489,9 +489,9 @@ first line, the same file fails:
 EXPECT-DIAG missed: no [E066] in the compiler output
 fail_typo.tr (1 error)
 
-── error at line 5, col 44 [E026 · general]
+── error at line 5, col 44 [E026 · module method not found]
 
-  Oops! Module 'temperature' has no function named 'to_kelvn'.
+  I cannot find a function named `to_kelvn` in the module `temperature`.
   ...
 ```
 
@@ -513,8 +513,7 @@ mixed_up.tr (1 error)
 
 ── error at line 4, col 5 [E066 · type mismatch]
 
-  Type mismatch!
-  Cannot initialise 'double' variable 'k' with value of type '!double'.
+  I cannot store a `!double` in `k`, which is a `double`.
   ...
   Run `turf --explain E066` for more details.
 ```
@@ -663,9 +662,9 @@ shows the warning:
 EXPECT-NO-DIAG violated: the compiler output contains 'warning'
 ~/code/temperature/src/temperature.tr (1 warning)
 
-── warning at line 4, col 5 [E163 · control flow]
+── warning at line 4, col 5 [E163 · unused variable]
 
-  Warning: Variable 'spare' is declared but never used.
+  Variable `spare` is declared but never used.
   ...
 ```
 
@@ -724,7 +723,7 @@ contains the text, and also `exit, <status>`, `warning`, `no_warnings` and
 which replaces a `fail_*` file when the mistake sits inside one function:
 
 ```turflang
-@test(compile_error, E041, "Unknown function")
+@test(compile_error, E041, "function named")
 fn an_undeclared_function_is_rejected(): void {
     undeclared(1);
 }
@@ -739,6 +738,44 @@ project that denies `E172` in `[lints]` still builds, and the test still sees
 the warning. Nothing may call a test: that is `E173`, so move what a test and
 other code share into an ordinary function. The outcomes and rules are in the
 [reference](../reference/functions_and_modules.md#test).
+
+### Options: how a test is run
+
+After the outcome, `name: value` options say how the test is run. Each comes
+at most once, in any order, and every value is a literal:
+
+<!-- doc-example: skip continues src/temperature.tr, which declares to_kelvin -->
+```turflang
+@test(skip: "waits for the new rounding rules")
+fn rounds_to_tenths(): void {
+    test::assert(to_kelvin(0.05) == 273.2, "0.05 C rounds to 273.2 K");
+}
+
+@test(timeout: 2000, levels: all, tag: "slow")
+fn converts_a_million_readings(): void {
+    for i in 0..1000000 {
+        immut k: double = to_kelvin(i to double);
+    }
+}
+
+@test(stdout: "273.15\n", tag: ["io", "fast"])
+fn prints_freezing_in_kelvin(): void {
+    printline(to_kelvin(0.0));
+}
+```
+
+| Option | Value | What it does |
+|---|---|---|
+| `skip:` | a string, not empty | The test is compiled and checked, but not run. `turf test` reports it as `SKIPPED (reason)` and lists it under `Skipped Tests`, counted apart from the passes. |
+| `timeout:` | a whole number of milliseconds, more than 0 | The test fails with `TIMEOUT` if it has not ended in time; its process is killed and the file's other tests still run. Without it, `--timeout` applies. |
+| `levels:` | `all` (O0 to O3), or a list such as `[O0, O2]` from `O0` … `O3` and `Os` | The file is built at each level and the test runs at each, reported as `name [-O2]`; the first level that fails is the test's failure. |
+| `stdout:` | a string | What the test prints to stdout must be exactly this, with each line ending in `\n` on every platform (a Windows `\r\n` compares as `\n`). Without it, output is not checked. |
+| `tag:` | a string, or a list of strings | `turf test --tag slow` runs only the tests with that tag; `--skip-tag slow` runs the others. |
+| `serial` | none | The test never runs beside another. Tests of one file already run one after another, so this marks such a test for when they do not. |
+
+`timeout:` and `stdout:` need a test that runs, so a `compile_error` test
+cannot have them. A misspelt option, one written twice, or a value of the wrong
+kind is error `E146`, with the options listed in the hint.
 
 ## Shared helpers
 
@@ -782,9 +819,9 @@ Two things go wrong:
   --- tests/helpers.tr (Compile Error, exit 1):
   helpers.tr (1 error)
 
-  ── error [E119 · declaration]
+  ── error [E119 · no main function]
 
-    No entry point found. Please define 'fn main(): int' in your file.
+    I found no entry point. Define `fn main(): int` in your file.
   ```
 
 A test can import the package's own modules under `src/`, its direct
@@ -863,7 +900,10 @@ Running Turf Test Suites...
 ```
 
 There is no filter that selects tests by name inside a file: the unit is the
-file.
+file. `@test` functions can carry tags, though ([Options](#options-how-a-test-is-run)):
+`turf test --tag slow` runs only the `@test` functions tagged `slow`, and
+`--skip-tag slow` runs everything else. Both repeat; a file that is a test of
+its own, such as a `fail_*` file, has no tags, so `--tag` leaves it out.
 
 Running one test file with `turf run` works only for a test that imports
 nothing but the standard library:
@@ -875,8 +915,7 @@ $ echo $?
 ```
 
 A test that imports `temperature` has no access to `src/` when run that way, even
-from the project root, and fails with `Could not find module 'temperature'`
-(E027). The message says why: a project's modules are visible only to commands
+from the project root, and fails with error E027. The message says why: a project's modules are visible only to commands
 that build with the package graph, such as `turf test`, `turf build` and
 `turf run` with no file. For a single test of a project, exclude the others.
 

@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E007
-// EXPECT-DIAG: 'continue' used outside of a loop
+// EXPECT-DIAG: I cannot use `continue` outside of a loop
 fn main(): int {
     if true {
         continue;

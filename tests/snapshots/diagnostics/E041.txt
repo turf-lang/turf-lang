@@ -1,0 +1,13 @@
+tests/16_sys_and_test_stdlib/fail_bare_assert_no_import.tr (1 error)
+
+── error at line 9, col 11 [E041 · unknown function]
+
+  I cannot find a function named `assert`.
+
+  Hint: Check the spelling, or import the module that defines it.
+
+  9 │     assert(true);
+    │           ^ no function of this name
+
+  Run `turf --explain E041` for more details.
+

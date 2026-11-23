@@ -240,7 +240,8 @@ ChatPrompt formatChatPrompt(const llama_model *Model, const std::string &System,
  */
 std::string SLMEngine::generateSuggestion(const std::string &systemPrompt,
                                           const std::string &userPrompt,
-                                          const std::string &grammarStr) {
+                                          const std::string &grammarStr,
+                                          float temperature, unsigned seed) {
   if (!ctx)
     return "";
 
@@ -347,7 +348,7 @@ std::string SLMEngine::generateSuggestion(const std::string &systemPrompt,
   int total_tokens = CachedSystemTokens.size() + n_user;
 
   // Token-budget guard
-  static constexpr int GEN_BUDGET = 512;
+  static constexpr int GEN_BUDGET = kMaxAnswerTokens;
   if (total_tokens > n_ctx - GEN_BUDGET) {
     if (saved_stderr != -1) {
       dup2(saved_stderr, STDERR_FILENO);
@@ -436,7 +437,14 @@ std::string SLMEngine::generateSuggestion(const std::string &systemPrompt,
   // Greedy decoding: pick the highest-probability token deterministically.
   // Note: a temperature sampler is intentionally NOT chained before greedy —
   // temperature only reshapes the distribution and has zero effect on argmax.
-  llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
+  // --smart=thorough's extra answers are sampled instead, from a fixed seed
+  // so the same run gives the same answers.
+  if (temperature > 0.0f) {
+    llama_sampler_chain_add(sampler, llama_sampler_init_temp(temperature));
+    llama_sampler_chain_add(sampler, llama_sampler_init_dist(seed));
+  } else {
+    llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
+  }
 
   std::string result;
   // Longest stop token is "<|im_start|>" (13 chars). Keep a trailing window
@@ -447,7 +455,9 @@ std::string SLMEngine::generateSuggestion(const std::string &systemPrompt,
   const std::string STOP_IM_START = "<|im_start|>";
 
   const llama_vocab *vocab = llama_model_get_vocab(llama_get_model(ctx));
-  for (int i = 0; i < 512; i++) {
+  for (int i = 0; i < kMaxAnswerTokens; i++) {
+    if (std::chrono::steady_clock::now() >= Deadline)
+      break; // out of the run's budget: what there is fails to parse
     llama_token token = llama_sampler_sample(sampler, ctx, -1);
     if (llama_vocab_is_eog(vocab, token))
       break;

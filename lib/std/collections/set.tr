@@ -3,7 +3,7 @@ unsafe module;
 // set.tr — Set<T>: a collection of unique values.
 // Usage:
 //   import set::Set;
-//   mut s: Set<int> = Set::default();
+//   mut s: Set<int> = Set<int>::default();
 //   s.add(1);
 //   s.add(2);
 //   s.add(1);                  // no-op, already present
@@ -217,7 +217,7 @@ pub fn<T> Set.length(): int {
 // An independent set with the same members in the same order (F-COLL-1), so
 // `s.copy()[i] == s[i]` until either one changes.
 pub fn<T> Set.copy(): Set<T> {
-    mut out: Set<T> = Set::default();
+    mut out: Set<T> = Set<T>::default();
     mut i: int = 0;
     while i < self.h.len {
         out.add(self.h.items[i]);

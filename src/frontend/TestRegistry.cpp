@@ -161,7 +161,9 @@ std::vector<const Test *> mainFileTests() {
 //      "code": "E041", "text": "...", "fix": "...", "status": 3,
 //      "error": "ParseError::Empty",
 //      "errors": [{"code": "E041", "line": 14, "message": "...", "fix": "..."}],
-//      "warnings": [{"code": "E172", "line": 13, "message": "..."}]}]}
+//      "warnings": [{"code": "E172", "line": 13, "message": "..."}],
+//      "skip": "reason", "timeout_ms": 2000, "levels": ["O0", "O2"],
+//      "stdout": "...", "tags": ["net"], "serial": true}]}
 //
 // `outcome` is "returns" or the outcome word; `code`, `text`, `fix`, `status`
 // and `error` appear when the outcome has them. `run` is the number the test
@@ -169,6 +171,7 @@ std::vector<const Test *> mainFileTests() {
 // compile_error test). `errors` (compile_error only) and `warnings` are what
 // was reported inside the test; an error's `fix` is the description of the
 // fix the compiler checked for it, "" when it has none.
+// The options (TDP-2-026) appear only when the test's `@test` writes them.
 bool writeManifest(const std::string &Path, bool HasMain,
                    const std::vector<std::string> &RunnableOrder) {
   using TestAnnotation::Outcome;
@@ -214,6 +217,27 @@ bool writeManifest(const std::string &Path, bool HasMain,
     case Outcome::NoWarnings:
       break;
     }
+    // TDP-2-026: how the runner runs it.
+    if (T->Spec.Skip)
+      O["skip"] = T->Spec.SkipReason;
+    if (T->Spec.TimeoutMs > 0)
+      O["timeout_ms"] = T->Spec.TimeoutMs;
+    if (!T->Spec.Levels.empty()) {
+      llvm::json::Array L;
+      for (const auto &Lv : T->Spec.Levels)
+        L.push_back(Lv);
+      O["levels"] = std::move(L);
+    }
+    if (T->Spec.HasStdout)
+      O["stdout"] = T->Spec.Stdout;
+    if (!T->Spec.Tags.empty()) {
+      llvm::json::Array Tags;
+      for (const auto &Tg : T->Spec.Tags)
+        Tags.push_back(Tg);
+      O["tags"] = std::move(Tags);
+    }
+    if (T->Spec.Serial)
+      O["serial"] = true;
     llvm::json::Array Errors;
     for (DiagnosticEngine::Diag D : T->Errors) {
       // Only a test that names a fix pays for checking one (each check

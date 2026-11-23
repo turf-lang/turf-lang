@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E150
-// EXPECT-DIAG: An operator can't declare a size parameter
+// EXPECT-DIAG: on an operator
 
 struct V {
     a: int

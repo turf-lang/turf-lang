@@ -1,0 +1,18 @@
+// EXPECT-DIAG: E083
+// EXPECT-DIAG: I cannot let a deferred statement `return`
+// LANG-003: a `return` on an assignment's right-hand side escapes the defer
+// like one written as a statement. Codegen would otherwise run the deferred
+// `return` while flushing the defers for that same `return`, until the stack
+// overflowed (turf-fuzz #42).
+struct N { val: int, next: &?N }
+
+fn f(): &N {
+    mut n: N = N::default();
+    mut p: &N = &n;
+    defer p = return p;
+    return p;
+}
+
+fn main(): int {
+    return f().val;
+}

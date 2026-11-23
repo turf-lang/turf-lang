@@ -31,8 +31,8 @@ RETURN RULES:
   - `void`-returning functions may use a bare `return;` with no value, or
     omit the return statement on paths that just fall off the end.
   - Non-void functions must return a value on ALL control paths, or the
-    compiler rejects it: "The function 'foo' promises to give back a
-    result, but sometimes it doesn't!"
+    compiler rejects it: "I found a path through `foo` that ends without
+    returning a result."
   - The return value's type must exactly match the declared return type,
     or an explicit `to` cast must be used.
 
@@ -58,8 +58,8 @@ VOID VALUE MISUSE:
   or used inside a larger expression.
 
   INCORRECT:
-    mut x: int = void_func();     // ERROR: Cannot initialise 'int' variable
-                                 // 'x' with value of type 'void'.
+    mut x: int = void_func();     // ERROR: I cannot store a `void` in `x`,
+                                 // which is an `int`.
   CORRECT:
     void_func();                  // call it as a standalone statement
 

@@ -2,7 +2,7 @@ TURF E118 -- STATEMENT OUTSIDE A FUNCTION:
 
 CAUSE:
   A file's top level may DECLARE things (functions, structs, enums, errors, machines,
-  imports, `extern` bindings, `export immut` constants) but not DO anything. Statements
+  imports, `extern` bindings, `pub immut` constants) but not DO anything. Statements
   (a call, an assignment, a variable, `return`, `if`, ...) must be inside a function.
 
 INCORRECT:

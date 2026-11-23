@@ -1,8 +1,8 @@
-// EXPECT-NO-DIAG: dead store
+// EXPECT-NO-DIAG: The value assigned to
 // EXPECT-NO-DIAG: never used
 // EXPECT-NO-DIAG: is never read
 // EXPECT-NO-DIAG: no exit path
-// EXPECT-NO-DIAG: infinite loop
+// EXPECT-NO-DIAG: looks infinite
 // A `recover run { }` block is part of the function's control flow: a loop
 // inside it has its back edge, and its `return`, `break` and `continue` have
 // theirs. A value carried round a loop in the block, or set in the block

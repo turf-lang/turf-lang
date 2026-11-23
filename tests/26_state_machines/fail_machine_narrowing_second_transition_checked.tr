@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E035
-// EXPECT-DIAG: 'C' has no transition from 'Connecting' to 'Idle'
+// EXPECT-DIAG: `C` has no transition from `Connecting` to `Idle`
 machine C {
     Idle -> Connecting,
     Connecting -> Connected

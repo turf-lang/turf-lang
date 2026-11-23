@@ -44,7 +44,7 @@ fn main(): int {
 -1
 ```
 
-- Braces around each branch body are **mandatory**. There is no brace-less `if`; forgetting the `{` is error E107 (`Expected '{' after if-condition`), and the hint points you at `give` / `otherwise` for the single-expression case.
+- Braces around each branch body are **mandatory**. There is no brace-less `if`; forgetting the `{` is error E107 (`` I expected a `{` after the `if` condition ``), and the hint points you at `give` / `otherwise` for the single-expression case.
 - `elseif` (one word) chains further conditions. `else if` is accepted as well, but `elseif` is the spelling to use.
 - `else` is optional. An empty branch is legal (`if cond {} else { ... }`).
 - Branches are evaluated top to bottom; the first true condition wins and the rest are not evaluated.
@@ -156,9 +156,9 @@ fn main(): int {
 
 A post-test loop: the body always runs at least once, and the condition is checked after each pass. Parentheses around the condition are optional.
 
-- The body must be braced. `do x -= 1; while x > 0;` is error E107 (`Expected '{' to open the do-block body`).
-- The `while` after the closing brace is required (error E110, `Expected 'while' after do-block`).
-- A `do` / `while` is the one loop that ends in a **`;`** after its condition, since it does not close with a `}`. A missing one is error E102 (`Expected ';' after do-while loop`); a second, stray `;` is error E103 (`Unexpected ';'`).
+- The body must be braced. `do x -= 1; while x > 0;` is error E107 (`` I expected a `{` to open the body of this `do` loop ``).
+- The `while` after the closing brace is required (error E110, `` I expected `while` after the body of this `do` loop ``).
+- A `do` / `while` is the one loop that ends in a **`;`** after its condition, since it does not close with a `}`. A missing one is error E102 (`` I expected a `;` after this `do ... while` loop ``); a second, stray `;` is error E103 (`Unexpected ';'`).
 - The condition is outside the body's scope: a variable declared inside the body is not visible to it.
 
 <!-- doc-example: fails E040 -->
@@ -253,7 +253,7 @@ fn main(): int {
 10 7 4 1 
 ```
 
-The default step counts up, so `for i in 5..1 { ... }` never reaches its end and runs forever, as does any `step` that moves away from the end. When both bounds are constants and the step is the default or a literal `i++`, `i--`, `i += k` or `i -= k`, the compiler warns ("This loop never reaches its end"); otherwise it cannot tell.
+The default step counts up, so `for i in 5..1 { ... }` never reaches its end and runs forever, as does any `step` that moves away from the end. When both bounds are constants and the step is the default or a literal `i++`, `i--`, `i += k` or `i -= k`, the compiler warns ("This loop never reaches its end: 5..1 counts down, but the step counts up."); otherwise it cannot tell.
 
 ### The loop variable and the bounds
 
@@ -268,7 +268,7 @@ The default step counts up, so `for i in 5..1 { ... }` never reaches its end and
 A `step` need not mention the loop variable, but one that never changes it, in a body that does not change it either, is almost certainly a mistake. The compiler warns:
 
 ```text
-Warning: The loop variable 'i' is never changed by this loop's 'step' or its body, so it will loop forever: 'i' starts below the end value and never changes.
+The loop variable `i` is never changed by this loop's `step` or its body, so the loop runs forever, because `i` starts below the end value and never changes.
 ```
 
 If a different variable controls when the loop ends, use `while`.
@@ -287,7 +287,7 @@ fn main(): int {
 }
 ```
 
-The `(index, value)` pair form belongs to [for-each](#for-each-form); on a range it is error E120 (`The '(index, value)' form isn't supported for a range-based for-loop`).
+The `(index, value)` pair form belongs to [for-each](#for-each-form); on a range it is error E120 (`` I cannot use the `(index, value)` form in a range-based `for` loop ``).
 
 <!-- doc-example: fails E120 -->
 ```turflang
@@ -420,7 +420,7 @@ fn main(): int {
 - Each iteration reads the byte as it is then, so a byte the body changes before the loop reaches it is seen changed. If the body writes a `'\0'` that the loop then reaches, the string has become shorter than the loop's position, and the read panics with `String index out of bounds`, as `s[i]` would.
 - The bytes are bytes: a string holding UTF-8 text gives one `char` per byte, not per character, exactly like `s[i]` and `s.length()`.
 
-Arrays and strings are the only things for-each takes. A scalar, a struct, and the collection types `List`, `Map` and `Set` are rejected with error E005 (`for-each requires an array or a string!`). To walk a collection, loop over its indices:
+Arrays and strings are the only things for-each takes. A scalar, a struct, and the collection types `List`, `Map` and `Set` are rejected with error E005 (`` I cannot use for-each on the type `int`, which is not an array or a string. ``). To walk a collection, loop over its indices:
 
 ```turflang
 import io;
@@ -464,7 +464,7 @@ Both are bare keywords. There are no labels, so neither can name an outer loop.
 
 - `break` leaves the innermost enclosing loop.
 - `continue` jumps to that loop's next iteration. In a range `for` the `step` clause runs first.
-- Either one outside any loop is error E007 (`'break' used outside of a loop`, `'continue' used outside of a loop`).
+- Either one outside any loop is error E007 (`` I cannot use `break` outside of a loop ``, `` I cannot use `continue` outside of a loop ``).
 - They work the same way in `while`, `do` / `while`, range `for` and for-each, in any nesting, and inside a [`compare`](#compare--matches) arm (where they act on the loop around the `compare`).
 
 ```turflang
@@ -650,7 +650,7 @@ fn main(): int {
 
 A deferred statement is a single statement: a call, an assignment, a loop. A loop or other statement that ends in a `}` takes a `;` after it. A block (`defer { ... }`) or a declaration (`defer mut q: int = 3;`) is a syntax error.
 
-A deferred statement **cannot jump out of itself**. `return`, `break` and `continue` aimed at something outside the `defer` are error E083 (`A deferred statement can't 'return'`), and `try` is error E095, because a defer runs while the function is already leaving and has nowhere to go:
+A deferred statement **cannot jump out of itself**. `return`, `break` and `continue` aimed at something outside the `defer` are error E083 (`` I cannot let a deferred statement `return` ``), and `try` is error E095, because a defer runs while the function is already leaving and has nowhere to go:
 
 <!-- doc-example: fails E083 -->
 ```turflang
@@ -781,13 +781,13 @@ many
 
 - The subject and each `matches` value accept optional parentheses: `compare (x)`, `matches (1):`.
 - **Stacked headers.** Several `matches` headers in a row, with no statements between them, share the body that follows (`matches 1:` and `matches 2:` above). The body runs when any of them matches. It is not "fall through into the next arm": each arm is separate.
-- Every `matches` arm ends in `done`; leaving it out is error E058 (`Expected 'done' after matches arm body`). An arm needs at least one statement.
+- Every `matches` arm ends in `done`; leaving it out is error E058 (`` I expected `done` after the body of this `matches` arm ``). An arm needs at least one statement.
 - `otherwise` must be the last arm and may appear only once; a second one, or one that is not last, is error E058. It ends at the closing `}` of the `compare`, so it takes no `done`.
 - Any statement may appear in an arm, including `return`, `break` and `continue` (the last two act on the loop around the `compare`).
-- A subject can be an `int`, `char`, `string`, `bool`, an `enum` or [`machine`](state_machines.md), a struct, or an error value. A pattern whose type does not fit the subject is error E059 (`Subject has type 'string' but a matches arm has type 'int'`).
+- A subject can be an `int`, `char`, `string`, `bool`, an `enum` or [`machine`](state_machines.md), a struct, or an error value. A pattern whose type does not fit the subject is error E059 (`` I cannot match a `string` subject against an `int` arm. ``).
 - If no arm matches and there is no `otherwise`, the `compare` does nothing, except where the subject must be covered ([Exhaustiveness](#exhaustiveness)).
 - A `compare` with no arms and no `otherwise` compiles and warns that it is a no-op.
-- Matching a value that was already matched earlier in the same `compare` is error E133 (`Duplicate pattern`): the second arm could never run.
+- Matching a value that was already matched earlier in the same `compare` is error E133 (`` An earlier arm of this `compare` already matches this pattern, so this arm never runs. ``): the second arm could never run.
 
 <!-- doc-example: fails E133 -->
 ```turflang
@@ -962,7 +962,7 @@ Rules for struct patterns:
 
 - **A bare name always binds.** Inside a destructuring pattern, `Point { x: limit }` binds the field to a new name `limit`; it does not compare with an existing variable `limit`. To compare a field with a variable or any other expression, bind it and use a guard: `matches Point { x, .. } if x == limit:`.
 - **`double` literals are not patterns** (exact float equality is rarely what is meant; error E092). Bind the field and test it in a guard.
-- **Every field is listed, or the pattern ends in `..`.** `Point { x }` on a two-field struct is error E092 (`this pattern doesn't mention the field 'y' of 'P'`), so adding a field to a struct later cannot silently change what an existing pattern means.
+- **Every field is listed, or the pattern ends in `..`.** `Point { x }` on a two-field struct is error E092 (`` This pattern does not mention the field `y` of `P`. ``), so adding a field to a struct later cannot silently change what an existing pattern means.
 - **Fields are read as `p.field` reads them**, so another module's non-`pub` field cannot be named (error E088); write `..` to ignore it.
 - **What can be matched:** a struct value, a `&T` reference, and `self` inside a method. A `&?T` (which may be null) and a raw `T*` are refused (E092); test a `&?T` for null first.
 - A field named twice, an unknown field, a literal of the wrong type, and a struct pattern for a different struct than the subject are all E092 (or E068 for an unknown field), each with a message that names the field.
@@ -998,7 +998,7 @@ fn main(): int {
 100
 ```
 
-Assigning to a binding is error E060 (`You can't change the value of 'x' because it's immutable`).
+Assigning to a binding is error E060 (`` I cannot change `x`: it is immutable ``).
 
 #### Guards
 
@@ -1046,9 +1046,9 @@ Without an `otherwise`:
 
 | Subject | Requirement | Otherwise |
 |---|---|---|
-| `enum` or `machine` | every variant has an **unguarded** header | error E093 (`Non-exhaustive enum comparison`), listing the missing variants |
-| `bool` | both `true` and `false` have an unguarded header | error E093 (`Non-exhaustive bool comparison`) |
-| a declared `error` type | every variant has an unguarded variant pattern whose fields all match anything | error E093 (`Non-exhaustive error comparison`) |
+| `enum` or `machine` | every variant has an **unguarded** header | error E093 (`` This `compare` on `Color` does not cover every case ``), listing the missing variants |
+| `bool` | both `true` and `false` have an unguarded header | error E093 (`` This `compare` on `bool` does not cover every case ``) |
+| a declared `error` type | every variant has an unguarded variant pattern whose fields all match anything | error E093 (`` This `compare` on `E` does not cover every case ``) |
 | an error value from `recover as err run` | cannot be covered by variants; always needs `otherwise` or an unguarded `_` | error E093 |
 | `int`, `char`, `string`, or a struct with a refutable pattern | not required; if nothing matches, the `compare` does nothing | none |
 
@@ -1106,7 +1106,7 @@ blue
 
 ### Unreachable arms
 
-An arm, or the `otherwise`, that follows an unguarded header which already matches everything (`_`, or a struct pattern whose fields all bind or ignore) can never run. This is the warning E094 (`This arm can never run`, or `The 'otherwise' arm can never run`). The program still compiles; delete the arm or move it above the catch-all. A duplicate *value* pattern is the error E133 described above.
+An arm, or the `otherwise`, that follows an unguarded header which already matches everything (`_`, or a struct pattern whose fields all bind or ignore) can never run. This is the warning E094 (`` This arm can never run, because an earlier arm without a guard already matches every case. ``, or the same with `` The `otherwise` arm `` first). The program still compiles; delete the arm or move it above the catch-all. A duplicate *value* pattern is the error E133 described above.
 
 ```turflang
 import io;

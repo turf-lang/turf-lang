@@ -1,0 +1,13 @@
+tests/48_unsized_array_params/fail_slice_end_past_length.tr (1 error)
+
+── error at line 7, col 16 [E143 · slice range out of bounds]
+
+  The slice `[1..4]` of `int[3]` is out of range: the end is outside 0..3.
+
+  Hint: Use bounds with 0 <= start <= end <= length: the end is exclusive, so `arr[0..length]` is the whole array, and a negative bound counts from the end (`arr[-2..]` is the last 2 elements).
+
+  7 │     immut t = a[1..4];
+    │                ^ this range is outside the array
+
+  Run `turf --explain E143` for more details.
+

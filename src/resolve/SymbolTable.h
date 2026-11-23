@@ -274,10 +274,31 @@ public:
   RankedSuggestions GetRankedSuggestions(const std::string &Name) const;
 };
 
-// Global symbol table instance
-extern std::unique_ptr<SymbolTable> GlobalSymbolTable;
+// F-S2: the symbol table belongs to a compilation, never to the process.
+// The driver's compile and every analysis the query facade runs own one each
+// and make it current with a SymbolTableScope for as long as they run; the
+// Parser (struct and enum registration), the Resolver, the TypeChecker, the
+// monomorphizer and Codegen read the current one here. A nested analysis (a
+// compiler fix's re-check, the --smart sandbox) gets a table of its own, and
+// the outer compilation's is current again the moment it ends -- nothing is
+// saved and put back by hand.
+//
+// Null outside any compilation, so a stray read outside one is a visible
+// null rather than a stale table.
+SymbolTable *Symbols();
 
-// Initialize the global symbol table
-void InitializeSymbolTable();
+// Makes `Table` the current symbol table (Symbols()) for this scope's
+// lifetime and puts the previous one back after, the way ParserScope does for
+// the parser (Parser.h).
+class SymbolTableScope {
+public:
+  explicit SymbolTableScope(SymbolTable *Table);
+  ~SymbolTableScope();
+  SymbolTableScope(const SymbolTableScope &) = delete;
+  SymbolTableScope &operator=(const SymbolTableScope &) = delete;
+
+private:
+  SymbolTable *Saved;
+};
 
 #endif

@@ -1,0 +1,37 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+// LEC-004: a subject of a DECLARED error type can only hold that type's own
+// variants, so a pattern naming another error type's variant can never match:
+// E092.
+error IOError {
+    NotFound
+}
+
+error NetError {
+    Refused
+}
+
+@test(compile_error, E092, "This pattern is over `NetError::Refused`, and what it matches is an `IOError`.")
+fn rejects_error_pattern_wrong_type_for_declared_subject(): void {
+    mut e: IOError = IOError::NotFound;
+    compare e {
+        matches NetError::Refused:
+        return;
+        done
+        otherwise:
+        return;
+    }
+}
+
+// Test (fail): an error variant is a bare, non-callable name, exactly like
+// an `enum` variant -- calling it (even with zero arguments) is rejected,
+// not just calling it with the wrong arity (there is no arity at all).
+error MathError {
+    DivisionByZero,
+}
+
+@test(compile_error, E135, "I cannot call `MathError::DivisionByZero`, which is an error variant and not a function")
+fn rejects_error_variant_not_callable(): void {
+    mut e: MathError = MathError::DivisionByZero();
+}

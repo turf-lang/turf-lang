@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E028
-// EXPECT-DIAG: 'operator +(int32, int32)' is not allowed
+// EXPECT-DIAG: I cannot accept `operator +(int32, int32)`, because both operand types are built in
 // Negative test: int32 joins the builtin operand-type set, so
 // operator +(int32, int32) must be rejected as a builtin-pair overload,
 // same as operator +(int, int) already is.

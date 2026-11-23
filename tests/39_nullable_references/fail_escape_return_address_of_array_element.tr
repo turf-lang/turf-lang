@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E086
-// EXPECT-DIAG: can't be returned
+// EXPECT-DIAG: be returned
 // `&a[0]` of a local `N[2]` is inside this frame's storage. It used to be
 // Unknown for any `&expr[i]` (INV-MEM-3), because `&l.data[1]` indexes a heap
 // buffer through a raw pointer; field types now tell the two apart.

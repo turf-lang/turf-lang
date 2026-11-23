@@ -2,12 +2,12 @@ A module name matches more than one file
 
     // app/list.tr exists, and so does the standard library's list
     import list;
-    // ERROR: Module 'list' is ambiguous: 2 different files answer to that name.
+    // ERROR: I found 2 different files that answer to the module name `list`.
     //     standard library  <install>/lib/std/collections/list.tr
     //     next to main.tr   ./list.tr
-    //   Hint: A module may not share its name with a standard-library
-    //   module. Rename ./list.tr (for example to 'my_list.tr') and import
-    //   it by the new name.
+    //   Hint: Rename ./list.tr (for example to `my_list.tr`) and import it by
+    //   the new name. A module may not share its name with a
+    //   standard-library module.
 
 `import m;` names a module, not a file, and the compiler looks for `m.tr` in
 four places: the standard library, installed packages (lib/usr), the

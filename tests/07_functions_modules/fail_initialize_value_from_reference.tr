@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E066
-// EXPECT-DIAG: Copy the value out with `to`: `x to P`
+// EXPECT-DIAG: I cannot store a `&P` in `q`, which is a `P`.
 struct P { x: int }
 
 fn f(p: &P): int {

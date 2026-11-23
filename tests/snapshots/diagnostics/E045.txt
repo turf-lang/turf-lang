@@ -1,0 +1,13 @@
+tests/06_structs/fail_dot_call_new.tr (1 error)
+
+── error at line 22, col 6 [E045 · constructor called on instance]
+
+  I cannot call `new` on an instance with `.`.
+
+  Hint: Write `StructName::new(...)`: `new` never works through an existing instance.
+
+  22 │     p.new(3, 4);
+     │      ^ a constructor is called on its type, not an instance
+
+  Run `turf --explain E045` for more details.
+

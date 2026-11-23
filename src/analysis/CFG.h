@@ -6,10 +6,12 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 // Forward declarations
 class ExprAST;
+class ForExprAST;
 
 // Unique identifier for each basic block
 using BlockID = size_t;
@@ -46,6 +48,19 @@ private:
   bool IsReachable;             // Whether this block is reachable from entry
 
 public:
+  // What the value-range analysis (ValueRange.cpp) needs to narrow a value
+  // on an edge. A block ending in an `if`/`else if`/`while`/`do while` test
+  // holds that test as its last statement and records it here, with the
+  // successor taken when it is true and the one taken when it is false (null
+  // for a `while true`). A range `for` records itself on its test block
+  // (ForTest) and on its step block (ForStep), whose `step` expression is in
+  // no block's statements.
+  const ExprAST *BranchCond = nullptr;
+  TurfBasicBlock *TrueSucc = nullptr;
+  TurfBasicBlock *FalseSucc = nullptr;
+  const ForExprAST *ForTest = nullptr;
+  const ForExprAST *ForStep = nullptr;
+
   TurfBasicBlock(BlockID ID, std::string Name)
       : ID(ID), Name(std::move(Name)), Terminator(TerminatorKind::None),
         IsReachable(false) {}
@@ -173,6 +188,31 @@ public:
   // no base case exists. Uses DFS with a visited-set to handle CFG cycles
   // (loops within a recursive function) without infinite traversal.
   bool allPathsRecurse() const;
+
+  // AN-3 (a): the mangled names of every function a resolved call in this
+  // CFG reaches (the call graph's edges), and whether every path from entry
+  // to exit passes through a call to one of `Targets` (a call-graph cycle
+  // with no base case on any path, when every member says so).
+  std::vector<std::string> calledFunctions() const;
+  bool allPathsCallAnyOf(const std::unordered_set<std::string> &Targets) const;
+  const SourceLocation &getFuncLoc() const { return FuncLoc; }
+
+  // AN-3 (b): an edge the value-range analysis proved is never taken.
+  using Edge = std::pair<const TurfBasicBlock *, const TurfBasicBlock *>;
+  // Whether every path calls this function itself once the edges in Dead are
+  // removed (allPathsRecurse() with every edge), and the blocks from which
+  // the exit is reachable without a self call (a base case starts in one).
+  bool allPathsRecurseWithout(const std::set<Edge> &Dead) const;
+  std::unordered_set<const TurfBasicBlock *> blocksReachingExitWithoutSelfCall() const;
+
+private:
+  std::unordered_set<const TurfBasicBlock *> selfCallBlocks() const;
+  // allPathsRecurse()'s walk, for any set of "calls into the cycle" blocks,
+  // never following an edge in Dead.
+  bool allPathsThrough(const std::unordered_set<const TurfBasicBlock *> &Blocks,
+                       const std::set<Edge> &Dead = {}) const;
+
+public:
 
   // Diagnostics
   void reportFlowDiagnostics() const;

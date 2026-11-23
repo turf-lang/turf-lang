@@ -1,0 +1,27 @@
+tests/45_pattern_matching/20_unreachable_arm_after_catch_all_warns.tr (2 warnings)
+
+── warning at line 15, col 9 [E094 · unreachable compare arm]
+
+  This arm can never run, because an earlier arm without a guard already matches every case.
+
+  Hint: Delete this arm, or move it above the catch-all: arms are tried in source order.
+
+  12 │         matches _:
+     │                 - this header matches everything
+     ┊
+  15 │         matches Point { x: 3 }:
+     │         ^~~~~~~ this arm is never reached
+
+  Run `turf --explain E094` for more details.
+
+── warning at line 19, col 5 [E074 · unreachable block]
+
+  I can never reach the code in `compare.end` inside `main`.
+
+  Hint: Check whether an `if` condition can never be true, or whether a `return` comes before this block.
+
+  19 │     return 0;
+     │     ^~~~~~ this block never runs
+
+  Run `turf --explain E074` for more details.
+

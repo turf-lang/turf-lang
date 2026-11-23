@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: `stdout:` takes the exact text the test prints, a string
+// TDP-2-026: the expected output is a string literal.
+@test(stdout: 3)
+fn a(): void {
+}
+
+fn main(): int {
+    return 0;
+}

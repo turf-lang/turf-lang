@@ -1,0 +1,85 @@
+name: SLM drift (optional)
+# SL-4 (TDP-2-008): is the qualified --smart model still as good as when it was
+# qualified? Weekly, and by hand. It needs the model, which is never in the
+# repository: the job restores it from the Actions cache, keyed by the SHA-256
+# in the repository variable SLM_QUALIFIED_MODEL_SHA256, and skips (green, with
+# a notice) when the variable is unset or the cache holds nothing. To fill the
+# cache, run it by hand once with `model_url`; the download must hash to that
+# SHA-256. The model-free replay suite runs on every push in test.yml.
+on:
+  schedule:
+    - cron: "0 20 * * 0"  # Sunday 20:00 UTC
+  workflow_dispatch:
+    inputs:
+      model_url:
+        description: "Download the qualified model from here into the cache (once)"
+        required: false
+permissions:
+  contents: read
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      SHA: ${{ vars.SLM_QUALIFIED_MODEL_SHA256 }}
+    steps:
+      - name: Is a model configured?
+        id: cfg
+        run: |
+          if [ -z "$SHA" ]; then
+            echo "::notice::SLM_QUALIFIED_MODEL_SHA256 is not set; nothing to measure."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.cfg.outputs.run == 'true'
+        with:
+          submodules: true
+      - name: Restore the model
+        if: steps.cfg.outputs.run == 'true'
+        id: model
+        uses: actions/cache@v4
+        with:
+          path: slm-model/model.gguf
+          key: slm-model-${{ vars.SLM_QUALIFIED_MODEL_SHA256 }}
+      - name: Fetch the model (by hand, once)
+        if: steps.cfg.outputs.run == 'true' && steps.model.outputs.cache-hit != 'true' && inputs.model_url != ''
+        run: |
+          mkdir -p slm-model
+          curl -fL --retry 3 -o slm-model/model.gguf "${{ inputs.model_url }}"
+          echo "$SHA  slm-model/model.gguf" | sha256sum -c -
+      - name: Anything to run?
+        if: steps.cfg.outputs.run == 'true'
+        id: have
+        run: |
+          if [ -f slm-model/model.gguf ]; then echo "run=true" >> "$GITHUB_OUTPUT"
+          else echo "::notice::The model is not in the cache; run this workflow by hand with model_url."
+               echo "run=false" >> "$GITHUB_OUTPUT"; fi
+      - name: Install LLVM
+        if: steps.have.outputs.run == 'true'
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 22
+          sudo apt-get install -y llvm-22-dev cmake
+          echo "/usr/lib/llvm-22/bin" >> $GITHUB_PATH
+      - name: Build the smart compiler
+        if: steps.have.outputs.run == 'true'
+        run: ./scripts/cmake_build.sh --release
+      - name: Determinism
+        if: steps.have.outputs.run == 'true'
+        run: TURF_SLM_MODEL=$PWD/slm-model/model.gguf ./scripts/slm/slm_determinism_check.sh
+      - name: Benchmark, train split, both paths
+        if: steps.have.outputs.run == 'true'
+        run: |
+          TURF_SLM_MODEL=$PWD/slm-model/model.gguf python3 scripts/slm/slm_benchmark/run_benchmark.py \
+            --split train --paths rules,model --jobs 2 --out drift.json
+      - name: Compare with the qualification record
+        if: steps.have.outputs.run == 'true'
+        run: python3 scripts/slm/slm_benchmark/check_drift.py drift.json
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.have.outputs.run == 'true'
+        with:
+          name: slm-drift-record
+          path: drift.json

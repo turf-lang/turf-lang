@@ -1,0 +1,12 @@
+// HARD-NEGATIVE: `Point` has no field `z`; adding one to the struct and reading `x` or `y` instead are both reasonable.
+struct Point {
+    x: int,
+    y: int
+}
+
+fn main(): int {
+    mut p: Point = Point::default();
+    p.x = 1;
+    printline(p.z);
+    return 0;
+}

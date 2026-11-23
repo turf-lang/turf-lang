@@ -47,7 +47,7 @@ CATEGORY_WORD = {
 CONST_RE = re.compile(r'inline constexpr const char \*(\w+) = "(E\d{3})";')
 ROW_RE = re.compile(
     r'^\s*\{\s*(ErrCode::\w+|"E\d{3}"),\s*"(\w+)",\s*"((?:[^"\\]|\\.)*)",\s*'
-    r"SLM::ErrorCategory::(\w+)(?:\s*,\s*(true|false)(?:\s*,\s*(\d+))?)?\s*\},?\s*$",
+    r"SLM::ErrorCategory::(\w+)(?:\s*,\s*(true|false)(?:\s*,\s*(\d+)(?:\s*,\s*(true|false))?)?)?\s*\},?\s*$",
     re.M,
 )
 
@@ -58,7 +58,7 @@ def load():
     consts = dict(CONST_RE.findall(text))
     table = text[text.index("AllErrorCodes[] = {"):]
     rows = []
-    for first, cls, desc, cat, important, since in ROW_RE.findall(table):
+    for first, cls, desc, cat, important, since, allow in ROW_RE.findall(table):
         code = consts[first[len("ErrCode::"):]] if first.startswith("ErrCode::") else first.strip('"')
         retired = "(retired" in desc
         # isWarningCode() (ErrorCodes.h): a class name ending in `Warning`.
@@ -69,8 +69,9 @@ def load():
             "kind": "warning" if warning else "error",
             "since": "2.%d" % int(since or 0),
             # What the build does with it before anyone names a level: a warning
-            # starts at `warn` (LintLevels.h), an error has no level to choose.
-            "level": "warn" if warning else "error",
+            # starts at `warn` (LintLevels.h), or at `allow` when its row says
+            # AllowByDefault; an error has no level to choose.
+            "level": ("allow" if allow == "true" else "warn") if warning else "error",
             "category": CATEGORY_WORD[cat],
             "important": important == "true",
             "retired": retired,

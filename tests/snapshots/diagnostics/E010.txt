@@ -1,0 +1,13 @@
+tests/14_cfg_analysis/fail_19_infinite_recursion_simple.tr (1 error)
+
+── error at line 6, col 1 [E010 · recursion with no base case]
+
+  I found infinite recursion in `foo`.
+
+  Hint: Add a base case, a path that returns without calling itself.
+
+  6 │ fn foo(): int {
+    │ ^~ this recursion has no way to stop
+
+  Worth reading in full -- run `turf --explain E010` before you patch this one.
+

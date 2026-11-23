@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E017
-// EXPECT-DIAG: Double free detected for 'buf'
+// EXPECT-DIAG: I found a second free of `buf`
 // EXPECT-NO-DIAG: Unsafe pointer use
 // Article V: the double-free check is not about the names `malloc` and `free`.
 // A user's own allocator pair, under any names, is understood exactly as the

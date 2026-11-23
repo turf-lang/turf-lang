@@ -1,0 +1,109 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+import list::List;
+
+// Regression test (Issue #180 follow-up): a do-while's body is its own
+// block scope (Resolver::visitBlock() enters/exits a scope around it) and
+// Resolver::visitDoWhile() resolves the body BEFORE the condition -- by the
+// time the condition is resolved, the body's scope has already been exited.
+// A variable declared only inside the body must therefore be a
+// ReferenceError when read from the condition, exactly like real-world
+// do-while semantics (C/C++ have the identical rule: the condition sits
+// outside the body's own block scope).
+@test(compile_error, E040, "I cannot find anything named `finished`")
+fn rejects_do_while_cond_sees_body_var(): void {
+    do {
+        mut finished: bool = true;
+    } while finished;
+}
+
+@test(compile_error, E066, "The condition of `do-while` must be a `bool`, and I found a `double`.")
+fn rejects_do_while_condition_double(): void {
+    mut x: double = 1.0;
+    do {
+        x = x - 1.0;
+    } while x;
+}
+
+// Every branch's condition is checked, not only the first.
+@test(compile_error, E066, "The condition of `if` must be a `bool`, and I found an `int`.")
+fn rejects_elseif_condition_int(): void {
+    mut n: int = 2;
+    if n == 1 {
+        return;
+    } elseif n {
+        return;
+    }
+}
+
+// A bool is not a number to count with; this must not compile into a loop
+// that never ends.
+@test(compile_error, E066, "A `for` range bound must be an `int`, an `int32` or a `double`, and I found a `bool`.")
+fn rejects_for_range_bool_bounds(): void {
+    for i in true..false {
+        printline(i);
+    }
+}
+
+@test(compile_error, E066, "A `for` range bound must be an `int`, an `int32` or a `double`, and I found a `string`.")
+fn rejects_for_range_string_bound(): void {
+    for i in 0.."x" {
+        printline(i);
+    }
+}
+
+struct P {
+    x: int
+}
+
+@test(compile_error, E066, "A `for` range bound must be an `int`, an `int32` or a `double`, and I found a `P`.")
+fn rejects_for_range_struct_bound(): void {
+    mut p: P = P::default();
+    for i in p..3 {
+        printline(i);
+    }
+}
+
+@test(compile_error, E005, "I cannot use for-each on the type `list::List<int>`, which is not an array or a string.")
+fn rejects_foreach_over_list(): void {
+    mut l: List<int> = List::default();
+    for value in l {
+    }
+}
+
+struct Point {
+    x: int,
+    y: int
+}
+
+@test(compile_error, E005, "I cannot use for-each on the type `Point`, which is not an array or a string.")
+fn rejects_foreach_over_struct(): void {
+    mut p: Point = Point::default();
+    for value in p {
+    }
+}
+
+@test(compile_error, E005, "I cannot use for-each on the type `int`, which is not an array or a string.")
+fn rejects_foreach_pair_over_non_array(): void {
+    immut x: int = 5;
+    for (index, value) in x {
+    }
+}
+
+@test(compile_error, E066, "The condition of `give` must be a `bool`, and I found an `int`.")
+fn rejects_ternary_condition_int(): void {
+    mut n: int = 2;
+    immut k: int = n give 1 otherwise 0;
+    k;
+}
+
+// An int is not a condition; the loop says `n != 0`.
+@test(compile_error, E066, "The condition of `while` must be a `bool`, and I found an `int`.")
+fn rejects_while_condition_int(): void {
+    mut n: int = 3;
+    while n {
+        n = n - 1;
+    }
+    n;
+}

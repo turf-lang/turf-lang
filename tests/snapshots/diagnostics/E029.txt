@@ -1,0 +1,13 @@
+tests/07_functions_modules/fail_scope_operator_on_instance_value.tr (1 error)
+
+── error at line 19, col 20 [E029 · `::` used on a variable]
+
+  `p` is a variable, not a type or module, so I cannot use `::` on it.
+
+  Hint: Write `p.get(...)` instead: `::` is for enum variants, module functions and static methods, and `p` holds an instance.
+
+  19 │     immut y: int = p::get;
+     │                    ^ this is a variable, so it takes `.`
+
+  Run `turf --explain E029` for more details.
+

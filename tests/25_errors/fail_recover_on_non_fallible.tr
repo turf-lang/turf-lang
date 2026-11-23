@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E132
-// EXPECT-DIAG: 'recover' can only be used on a fallible ('!T') expression
+// EXPECT-DIAG: `recover` follows a call that can fail, one that returns `!T`, and this expression cannot fail.
 // Test (fail): 'recover' only makes sense on a '!T' expression -- using it
 // on a plain, always-succeeding expression must be rejected.
 fn main(): int {

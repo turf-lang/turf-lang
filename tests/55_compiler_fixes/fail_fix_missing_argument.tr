@@ -1,0 +1,14 @@
+// EXPECT-DIAG: E044
+// EXPECT-FIX: pass 'height' as argument 2
+// `area` misses its `height`, and a variable of that name is in scope, so the
+// fix passes it. `width` is already in its place.
+fn area(width: int, height: int): int {
+    return width * height;
+}
+
+fn main(): int {
+    immut width: int = 3;
+    immut height: int = 4;
+    immut a: int = area(width);
+    return a - 12;
+}

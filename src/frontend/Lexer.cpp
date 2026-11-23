@@ -20,6 +20,7 @@
 #include "diagnostics/Colors.h"
 #include "diagnostics/ErrorCodes.h"
 #include "diagnostics/LintLevels.h"
+#include "diagnostics/PrimaryLabels.h" // DX-5: a code's own primary label
 #include "diagnostics/DiagnosticsJson.h" // DX-2: --diagnostics=json
 #include "diagnostics/ErrorsLex.h" // MalformedRadixPrefixError and friends (SEM-001) -- see
                        // ErrorsLex.h's own top comment for why Lexer.cpp,
@@ -37,7 +38,9 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <map>
+#include <set>
 
 std::vector<std::string> SourceLines;
 std::map<std::string, std::vector<std::string>> AllSourceLines;
@@ -210,10 +213,32 @@ static std::string displayPath(const std::string &Path) {
   return Rel;
 }
 
+// SL-1: the facts of a rule fix that passed its re-check (FixScore.h). The
+// re-check is the validity gate; the rest is read from the file before and
+// after the fix and from the re-check's two analyses (SL-5).
+static void scoreCompilerFix(CompilerFix &Fix, const DiagnosticEngine::Diag &D,
+                             const std::vector<std::string> &Lines,
+                             FixScore::Program &P) {
+  FixScore::Facts &F = Fix.Score;
+  F.From = FixScore::Provenance::Rule;
+  F.Valid = true;
+  P.Before = Lines;
+  P.After = Lines;
+  for (int L = Fix.FirstLine; L <= Fix.LastLine; ++L)
+    P.After[L - 1] = Fix.NewLines[L - Fix.FirstLine];
+  P.Start = Fix.FirstLine;
+  P.End = Fix.LastLine;
+  P.ErrorLine = D.Loc.Line;
+  FixScore::describeProgram(F, P);
+  if (std::getenv("TURF_FIX_DEBUG"))
+    std::cerr << "[fix] " << D.Code << " line " << D.Loc.Line << ": tier "
+              << FixScore::tierName(FixScore::tier(F)) << "\n";
+}
+
 // TDP-2-001: builds and checks D's fix, at most once per diagnostic and for at
 // most CompilerFixes::MaxChecksPerCompile diagnostics in one compile. Any
-// error whose raise site attached fix-its, in a file the user wrote (never
-// lib/std), gets one when the re-check passes.
+// error or warning whose raise site attached fix-its, in a file the user wrote
+// (never lib/std), gets one when the re-check passes.
 // `D` must not be an element of DiagnosticEngine's own list (see flushAll()).
 static void checkCompilerFix(DiagnosticEngine::Diag &D) {
   static int Checks = 0;
@@ -223,7 +248,7 @@ static void checkCompilerFix(DiagnosticEngine::Diag &D) {
   const bool Debug = std::getenv("TURF_FIX_DEBUG") != nullptr;
   if (Debug)
     std::cerr << "[fix] " << D.Code << " line " << D.Loc.Line << ": looking\n";
-  if (D.FixChecked || D.IsWarning || D.Hints.FixIts.empty() ||
+  if (D.FixChecked || !D.Hints.hasFix() ||
       D.Code.empty() || IsLibStdWarningLocation(D.Filename))
     return;
   D.FixChecked = true;
@@ -231,6 +256,46 @@ static void checkCompilerFix(DiagnosticEngine::Diag &D) {
   if (Lines == AllSourceLines.end() ||
       Checks >= CompilerFixes::MaxChecksPerCompile)
     return;
+  // SL-7: alternatives, of which exactly one may pass. Every one is checked
+  // (one that is not cannot be ruled out), so they need the budget for all.
+  if (D.Hints.FixIts.empty()) {
+    const auto &Alts = D.Hints.FixAlternatives;
+    if (static_cast<int>(Alts.size()) > CompilerFixes::MaxChecksPerCompile - Checks) {
+      if (Debug)
+        std::cerr << "[fix] " << D.Code << " line " << D.Loc.Line << ": "
+                  << Alts.size() << " alternatives exceed the check budget\n";
+      return;
+    }
+    CompilerFix Passed;
+    int Passing = 0;
+    for (const auto &Alt : Alts) {
+      SLM::DiagnosticHints H;
+      H.FixIts = Alt.FixIts;
+      H.FixReason = Alt.FixReason;
+      H.FixDescription = Alt.FixDescription;
+      CompilerFix Fix;
+      if (!CompilerFixes::build(H, D.Loc.Line, Lines->second, Fix))
+        continue;
+      ++Checks;
+      FixScore::Program Scored;
+      if (!CompilerFixes::check(Fix, D.Filename, D.Code, D.Loc.Line, D.IsWarning, &Scored)) {
+        if (Debug)
+          std::cerr << "[fix] " << D.Code << " line " << D.Loc.Line << ": '"
+                    << Fix.Description << "' failed the re-check\n";
+        continue;
+      }
+      if (++Passing == 1) {
+        Passed = std::move(Fix);
+        scoreCompilerFix(Passed, D, Lines->second, Scored);
+      }
+    }
+    if (Passing == 1)
+      D.Fix = std::move(Passed);
+    else if (Debug && Passing > 1)
+      std::cerr << "[fix] " << D.Code << " line " << D.Loc.Line << ": "
+                << Passing << " alternatives pass, so none is shown\n";
+    return;
+  }
   CompilerFix Fix;
   if (!CompilerFixes::build(D.Hints, D.Loc.Line, Lines->second, Fix)) {
     if (Debug)
@@ -239,12 +304,14 @@ static void checkCompilerFix(DiagnosticEngine::Diag &D) {
     return;
   }
   ++Checks;
-  if (!CompilerFixes::check(Fix, D.Filename, D.Code, D.Loc.Line)) {
+  FixScore::Program Scored;
+  if (!CompilerFixes::check(Fix, D.Filename, D.Code, D.Loc.Line, D.IsWarning, &Scored)) {
     if (Debug)
       std::cerr << "[fix] " << D.Code << " line " << D.Loc.Line << ": '"
                 << Fix.Description << "' failed the re-check\n";
     return;
   }
+  scoreCompilerFix(Fix, D, Lines->second, Scored);
   D.Fix = std::move(Fix);
 }
 
@@ -285,6 +352,194 @@ static void writeCompilerFixes(const std::vector<DiagnosticEngine::Diag> &Diags)
     Out << L << '\n';
 }
 
+std::string diagLabel(const DiagnosticEngine::Diag &D) {
+  if (!D.Hints.Label.empty())
+    return D.Hints.Label;
+  if (const char *L = ErrorCodes::defaultLabel(D.Code.c_str()))
+    return L;
+  return "here";
+}
+
+namespace {
+
+// At most this many related locations are drawn as secondary spans; the rest
+// are notes. A list of every overload is a note, not a picture.
+constexpr size_t MaxSecondarySpans = 3;
+
+const std::vector<std::string> *diagFileLines(const DiagnosticEngine::Diag &D) {
+  auto It = AllSourceLines.find(D.Filename);
+  if (It == AllSourceLines.end() || D.Loc.Line < 1 ||
+      D.Loc.Line > static_cast<int>(It->second.size()))
+    return nullptr;
+  return &It->second;
+}
+
+// One underlined stretch of a snippet line: [Col, Col + Width), 1-based.
+struct SnippetSpan {
+  int Line = 0, Col = 1, Width = 1;
+  bool Primary = false;
+  std::string Label;
+};
+
+int spanWidth(const SourceLocation &L, const std::string &Text) {
+  int W = 1;
+  if (L.EndCol != -1 && L.EndLine == L.Line && L.EndCol > L.Col)
+    W = L.EndCol - L.Col;
+  const int Room = static_cast<int>(Text.size()) - (L.Col - 1);
+  return std::max(1, std::min(W, std::max(Room, 1)));
+}
+
+} // namespace
+
+// DX-5: which of D's related locations renderSnippet() draws: in D's own
+// file, on D's line or an earlier one, not at D's own position, and only the
+// first MaxSecondarySpans of those.
+static std::vector<bool> drawnRelated(const DiagnosticEngine::Diag &D) {
+  std::vector<bool> Drawn(D.RelatedLocations.size(), false);
+  const auto *Lines = diagFileLines(D);
+  if (!Lines)
+    return Drawn;
+  size_t Count = 0;
+  for (size_t I = 0; I < D.RelatedLocations.size() && Count < MaxSecondarySpans; ++I) {
+    const SourceLocation &L = D.RelatedLocations[I].Loc;
+    const bool SameFile = L.Filename.empty() || L.Filename == D.Filename;
+    if (!SameFile || L.Line < 1 || L.Line > D.Loc.Line || L.Col < 1 ||
+        L.Col > static_cast<int>((*Lines)[L.Line - 1].size()) ||
+        (L.Line == D.Loc.Line && L.Col == D.Loc.Col))
+      continue;
+    Drawn[I] = true;
+    ++Count;
+  }
+  return Drawn;
+}
+
+// DX-5: the snippet under a diagnostic. Every line that carries a span is
+// shown, in order, with a gap mark between lines that are not adjacent (one
+// line between is shown instead). On a line, the spans are underlined --
+// `^~~` for the primary, `---` for a secondary -- on one row when they do not
+// overlap, on rows below when they do. The rightmost span of a row has its
+// label beside it; the others hang below, joined to their span by `│`.
+static std::string renderSnippet(const DiagnosticEngine::Diag &D,
+                                 const std::vector<bool> &Drawn,
+                                 const std::string &AccentColor) {
+  const auto *Lines = diagFileLines(D);
+  if (!Lines)
+    return "";
+  std::vector<SnippetSpan> Spans;
+  {
+    const std::string &Text = (*Lines)[D.Loc.Line - 1];
+    SnippetSpan P;
+    P.Line = D.Loc.Line;
+    P.Col = std::max(D.Loc.Col, 1);
+    P.Width = spanWidth(SourceLocation{D.Loc.Line, P.Col, "", D.Loc.EndLine, D.Loc.EndCol}, Text);
+    P.Primary = true;
+    P.Label = diagLabel(D);
+    Spans.push_back(P);
+  }
+  for (size_t I = 0; I < D.RelatedLocations.size(); ++I) {
+    if (!Drawn[I])
+      continue;
+    const auto &R = D.RelatedLocations[I];
+    SnippetSpan S;
+    S.Line = R.Loc.Line;
+    S.Col = R.Loc.Col;
+    S.Width = spanWidth(R.Loc, (*Lines)[R.Loc.Line - 1]);
+    S.Label = R.Description;
+    Spans.push_back(S);
+  }
+
+  std::vector<int> Shown;
+  for (const auto &S : Spans)
+    Shown.push_back(S.Line);
+  std::sort(Shown.begin(), Shown.end());
+  Shown.erase(std::unique(Shown.begin(), Shown.end()), Shown.end());
+  // One line between two shown ones is shown itself; more are a gap.
+  for (size_t I = 1; I < Shown.size(); ++I)
+    if (Shown[I] - Shown[I - 1] == 2) {
+      Shown.insert(Shown.begin() + I, Shown[I - 1] + 1);
+      ++I;
+    }
+
+  const size_t NumWidth = std::to_string(Shown.back()).size();
+  const std::string Blank(NumWidth, ' ');
+  auto gutter = [&](const std::string &Num) {
+    return Colors::BRIGHT_BLACK + "  " + std::string(NumWidth - Num.size(), ' ') +
+           Num + " │ " + Colors::RESET;
+  };
+  auto colorOf = [&](const SnippetSpan &S) {
+    return S.Primary ? Colors::BOLD + AccentColor : Colors::BRIGHT_BLUE;
+  };
+
+  std::string Out = "\n";
+  for (size_t LI = 0; LI < Shown.size(); ++LI) {
+    const int Line = Shown[LI];
+    if (LI > 0 && Line - Shown[LI - 1] > 1)
+      Out += Colors::BRIGHT_BLACK + "  " + Blank + " ┊" + Colors::RESET + "\n";
+    Out += gutter(std::to_string(Line)) + (*Lines)[Line - 1] + "\n";
+
+    // This line's spans, in rows that do not overlap: the primary first.
+    std::vector<const SnippetSpan *> Here;
+    for (const auto &S : Spans)
+      if (S.Line == Line)
+        Here.push_back(&S);
+    std::stable_sort(Here.begin(), Here.end(), [](const SnippetSpan *A, const SnippetSpan *B) {
+      return A->Primary > B->Primary;
+    });
+    std::vector<std::vector<const SnippetSpan *>> Rows;
+    for (const SnippetSpan *S : Here) {
+      bool Placed = false;
+      for (auto &Row : Rows) {
+        bool Clear = true;
+        for (const SnippetSpan *O : Row)
+          Clear = Clear && (S->Col + S->Width < O->Col || O->Col + O->Width < S->Col);
+        if (Clear) {
+          Row.push_back(S);
+          Placed = true;
+          break;
+        }
+      }
+      if (!Placed)
+        Rows.push_back({S});
+    }
+
+    for (auto &Row : Rows) {
+      std::sort(Row.begin(), Row.end(), [](const SnippetSpan *A, const SnippetSpan *B) {
+        return A->Col < B->Col;
+      });
+      // The underlines, and the rightmost span's label beside its own.
+      std::string Marks;
+      int At = 1;
+      for (const SnippetSpan *S : Row) {
+        Marks += std::string(S->Col - At, ' ') + colorOf(*S) +
+                 (S->Primary ? "^" + std::string(S->Width - 1, '~')
+                             : std::string(S->Width, '-')) +
+                 Colors::RESET;
+        At = S->Col + S->Width;
+      }
+      const SnippetSpan *Last = Row.back();
+      Out += gutter("") + Marks + colorOf(*Last) + " " + Last->Label + Colors::RESET + "\n";
+      // The others' labels hang below, right to left.
+      for (size_t K = Row.size() - 1; K-- > 0;) {
+        auto bars = [&](size_t UpTo) {
+          std::string B;
+          int Col = 1;
+          for (size_t J = 0; J < UpTo; ++J) {
+            B += std::string(Row[J]->Col - Col, ' ') + colorOf(*Row[J]) + "│" + Colors::RESET;
+            Col = Row[J]->Col + 1;
+          }
+          return std::make_pair(B, Col);
+        };
+        auto [Above, ColA] = bars(K + 1);
+        Out += gutter("") + Above + "\n";
+        auto [Left, ColL] = bars(K);
+        Out += gutter("") + Left + std::string(Row[K]->Col - ColL, ' ') + colorOf(*Row[K]) +
+               Row[K]->Label + Colors::RESET + "\n";
+      }
+    }
+  }
+  return Out;
+}
+
 // Internal helper: physically print one diagnostic to stderr.
 static void printDiag(const DiagnosticEngine::Diag &D) {
   // A denied warning is an error even though its text still says "Warning:".
@@ -310,17 +565,13 @@ static void printDiag(const DiagnosticEngine::Diag &D) {
   if (D.Loc.Line > 0)
     std::cerr << "at line " << D.Loc.Line << ", col " << D.Loc.Col;
   if (!D.Code.empty()) {
-    // "[E138 · declaration]": the category comes from the registry row of the
-    // code (ErrorCodes.h), so a warning with a code shows it too. Anything
-    // that matches a code in the output matches on the "[E138" prefix, never
-    // on a closing bracket.
+    // "[E068 · unknown struct field]": the heading names the code's
+    // registered name (ErrorCodes.h, DX-9), never the --smart category, so a
+    // warning with a code shows its name too. Anything that matches a code
+    // in the output matches on the "[E068" prefix, never on what follows.
     std::string CategoryText;
-    if (const ErrorCodeEntry *Row = ErrorCodes::lookupByCode(D.Code)) {
-      CategoryText = SLM::getCategoryName(Row->Category);
-      for (char &C : CategoryText)
-        C = C == '_' ? ' ' : static_cast<char>(std::tolower(
-                                 static_cast<unsigned char>(C)));
-    }
+    if (const ErrorCodeEntry *Row = ErrorCodes::lookupByCode(D.Code))
+      CategoryText = ErrorCodes::headingName(*Row);
     std::cerr << (D.Loc.Line > 0 ? " " : "") << "[" << D.Code
               << (CategoryText.empty() ? "" : " · " + CategoryText) << "]";
   }
@@ -332,20 +583,14 @@ static void printDiag(const DiagnosticEngine::Diag &D) {
   // Message body — embedded ANSI codes from error classes render intact.
   std::cerr << "  " << D.Msg << "\n";
 
-  // Structural "declared here" / "candidate: ..." context -- e.g. where an
-  // earlier conflicting declaration or a rejected overload actually lives.
-  // ~30 call sites across the compiler already attach these via
-  // TurfError::withRelated()/RelatedLocations_, but until now they were
-  // ONLY ever fed to the SLM prompt as pinned context (see RelatedLocation's
-  // own doc comment) -- an ordinary compile with no --smart/--online never
-  // rendered them at all, so e.g. an extern-conflict or duplicate-
-  // 'otherwise'-arm error pointed at the new occurrence with no way to see
-  // where the original one was. Rendered as one blue note per location,
-  // mirroring the hand-rolled "Note: you first created it at line X..."
-  // wording a couple of error classes used to build manually before this
-  // existed (now redundant there and removed, see DuplicateDeclarationError/
-  // ShadowingWarning).
-  for (const auto &Rel : D.RelatedLocations) {
+  // The related locations drawn in the snippet below (DX-5): the secondary
+  // spans. The rest -- another file, a later line, beyond the first few --
+  // are notes here, one per location.
+  const std::vector<bool> Drawn = drawnRelated(D);
+  for (size_t I = 0; I < D.RelatedLocations.size(); ++I) {
+    if (Drawn[I])
+      continue;
+    const auto &Rel = D.RelatedLocations[I];
     // LEC-005: a note in a DIFFERENT file than the diagnostic (an
     // instantiation chain walks from the user's file into `lib/std`) names
     // it -- "line 125, col 29" alone would read as a position in the user's
@@ -370,39 +615,12 @@ static void printDiag(const DiagnosticEngine::Diag &D) {
               << " is a warning by default; its lint level here is deny."
               << Colors::RESET << "\n";
 
-  // Code snippet with │ gutter. Looked up from AllSourceLines (a persistent,
-  // cross-pass, per-file cache) via D.Filename, NOT the transient global
-  // SourceLines -- see AllSourceLines' doc comment in Lexer.h for why: by
-  // the time flushAll() runs, SourceLines reflects whatever file was parsed
-  // LAST (normally back to the main file), which is the wrong content for
-  // any diagnostic whose Loc originated inside an imported module.
-  auto FileLinesIt = AllSourceLines.find(D.Filename);
-  if (FileLinesIt != AllSourceLines.end() && D.Loc.Line > 0 &&
-      D.Loc.Line <= static_cast<int>(FileLinesIt->second.size())) {
-    const std::string &LineContent = FileLinesIt->second[D.Loc.Line - 1];
-    std::string LineNumStr = std::to_string(D.Loc.Line);
-    int CaretOffset = (D.Loc.Col > 0) ? D.Loc.Col - 1 : 0;
-
-    // Underline the token's full width when an end position was recorded
-    // (EndCol != -1, same line as the start -- see SourceLocation's own doc
-    // comment in Lexer.h for which token kinds populate this) instead of
-    // just a single '^'. Falls back to a bare '^' for locations with no end
-    // position yet (multi-token spans -- a whole sub-expression -- remain
-    // out of scope, see issue #241 Track D) or a degenerate zero-width span.
-    int SpanWidth = 1;
-    if (D.Loc.EndCol != -1 && D.Loc.EndLine == D.Loc.Line &&
-        D.Loc.EndCol > D.Loc.Col)
-      SpanWidth = D.Loc.EndCol - D.Loc.Col;
-    std::string Underline = "^" + std::string(SpanWidth - 1, '~');
-
-    std::cerr << "\n"
-              << Colors::BRIGHT_BLACK << "  " << LineNumStr << " \u2502 "
-              << Colors::RESET << LineContent << "\n"
-              << Colors::BRIGHT_BLACK << "  "
-              << std::string(LineNumStr.length(), ' ') << " \u2502 "
-              << Colors::RESET << std::string(CaretOffset, ' ') << Colors::BOLD
-              << AccentColor << Underline << " Here!" << Colors::RESET << "\n";
-  }
+  // Code snippet with │ gutter, the primary span labelled and the drawn
+  // related locations as secondary spans (DX-5, renderSnippet()). Looked up
+  // from AllSourceLines (a persistent, cross-pass, per-file cache) via
+  // D.Filename, NOT the transient global SourceLines: by the time flushAll()
+  // runs, SourceLines reflects whatever file was parsed LAST.
+  std::cerr << renderSnippet(D, Drawn, AccentColor);
 
   // TDP-2-001: the checked fix, as the corrected line(s).
   std::cerr << CompilerFixes::render(D.Fix);
@@ -515,8 +733,10 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
   // facade as an error). A denied warning inside lib/std stays the hidden
   // warning it is: the user did not write that code and cannot fix it, so
   // `--deny` must not fail a build over it (--stdlib-warnings opts back in).
+  // Asked even with no level set: a warning whose row is AllowByDefault is
+  // `allow` until something names it.
   bool Denied = false;
-  if (IsWarning && !OwnedByTest && !Code.empty() && LintLevels::anySet()) {
+  if (IsWarning && !OwnedByTest && !Code.empty()) {
     switch (LintLevels::levelOf(Code)) {
     case LintLevels::Level::Allow:
       return;
@@ -556,12 +776,15 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
         SLM::AISuggestion ai = SLM::validateAndApplySuggestion(
             Msg, Loc.Line, Hint, Related, Category, Hints, Code);
 
-        if (ai.valid && ai.confidence >= 0.8f && ai.fix_mode != "NONE") {
-          // Replace compiler message with high-confidence model suggestion.
+        // SL-1: the tier decides. A validated suggestion is `verified` or,
+        // with a flag raised, `plausible` and shown with the flag.
+        const FixScore::Tier tier = FixScore::tier(ai.score);
+        if (ai.valid && tier != FixScore::Tier::Rejected && ai.fix_mode != "NONE") {
+          // Replace the compiler's message with the model's suggestion.
           g_slmFiredThisPass = true;
           finalMessage = Colors::BOLD + Colors::BRIGHT_CYAN +
-                         "[Model Suggestion]" + Colors::RESET + "  " +
-                         ai.suggested_comment;
+                         "[Model Suggestion]" + Colors::RESET +
+                         (ai.summary.empty() ? std::string() : "  " + ai.summary);
 
           if (!ai.explanation.empty()) {
             finalMessage += "\n  " + Colors::CYAN +
@@ -577,11 +800,18 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
                             "Suggested fix:" + Colors::RESET + "\n    " +
                             patchDiff;
           }
+          if (tier == FixScore::Tier::Plausible)
+            finalMessage += "\n  " + Colors::YELLOW + FixScore::flagLine(ai.score) +
+                            Colors::RESET;
+          else
+            finalMessage += "\n  " + Colors::BRIGHT_BLACK +
+                            "Checked: it compiles, adds no warning, is a small "
+                            "edit, removes no call, `return` or assignment, "
+                            "changes no declaration, and adds no `unsafe`, "
+                            "`extern`, system import, raw pointer or `mem::` "
+                            "call." +
+                            Colors::RESET;
 
-          if (!ai.warning.empty()) {
-            finalMessage +=
-                "\n  " + Colors::YELLOW + "Note: " + Colors::RESET + ai.warning;
-          }
 
           // SLM-001 follow-up: write the full patched source out, if asked.
           // Deliberately gated on the SAME confidence/fix_mode check as the
@@ -661,10 +891,50 @@ void DiagnosticEngine::flushAll() {
   // first errors' fixes.
   // The check analyses the program again, which saves and restores this
   // list: it works on a copy, never on an element of the list itself.
+  //
+  // SL-1: a fix is valid only when its re-check can tell. After a syntax error
+  // the parser recovers at the next top-level declaration (LEC-005); until
+  // then, the errors it reports may exist only because of the first: their
+  // fixes pass the re-check (the original had the same errors) and leave a
+  // program that still does not parse. An error from a syntax error's line
+  // up to the next line that starts a declaration (in the first column, with
+  // a word or an annotation: `fn`, `pub`, `struct`, `@test`) gets no fix. That
+  // line is included: a broken statement can still swallow its first token.
+  std::map<std::string, std::vector<std::pair<int, int>>> Recovering; // file -> [from, to]
+  auto isSyntaxError = [](const Diag &D) {
+    const ErrorCodeEntry *Row = ErrorCodes::lookupByCode(D.Code);
+    return !D.IsWarning && Row && Row->Category == SLM::ErrorCategory::SYNTAX_ERROR;
+  };
+  auto nextDeclaration = [](const Diag &D) {
+    auto Lines = AllSourceLines.find(D.Filename);
+    if (Lines == AllSourceLines.end())
+      return std::numeric_limits<int>::max();
+    for (int L = D.Loc.Line + 1; L <= static_cast<int>(Lines->second.size()); ++L) {
+      const std::string &T = Lines->second[L - 1];
+      if (!T.empty() && (std::isalpha(static_cast<unsigned char>(T[0])) || T[0] == '_' ||
+                         T[0] == '@'))
+        return L;
+    }
+    return std::numeric_limits<int>::max();
+  };
   if (CompilerFixes::Enabled)
     for (size_t I = 0; I < Diagnostics.size(); ++I) {
-      if (Diagnostics[I].FixChecked || Diagnostics[I].Hints.FixIts.empty())
+      const Diag &Cur = Diagnostics[I];
+      bool InRecovery = false;
+      for (const auto &[From, To] : Recovering[Cur.Filename])
+        InRecovery = InRecovery || (static_cast<int>(Cur.Loc.Line) >= From &&
+                                    static_cast<int>(Cur.Loc.Line) <= To);
+      if (isSyntaxError(Cur))
+        Recovering[Cur.Filename].push_back({static_cast<int>(Cur.Loc.Line), nextDeclaration(Cur)});
+      if (Diagnostics[I].FixChecked || !Diagnostics[I].Hints.hasFix())
         continue;
+      if (InRecovery && !Diagnostics[I].IsWarning) {
+        if (std::getenv("TURF_FIX_DEBUG"))
+          std::cerr << "[fix] " << Diagnostics[I].Code << " line " << Diagnostics[I].Loc.Line
+                    << ": the parser is recovering from a syntax error, no fix\n";
+        Diagnostics[I].FixChecked = true;
+        continue;
+      }
       Diag D = Diagnostics[I];
       checkCompilerFix(D);
       Diagnostics[I].FixChecked = true;
@@ -799,25 +1069,25 @@ void LogErrorAt(SourceLocation Loc, const char *Code, const std::string &Msg,
     const std::string C = Code;
     const char *H = nullptr;
     if (C == ErrCode::MissingSemicolon)
-      H = "End the statement with ';' right after its last token, e.g. "
+      H = "End the statement with `;` right after its last token, as in "
           "`x = x + 1;` or `return 0;`.";
-    else if (C == ErrCode::UnexpectedToken && Msg.rfind("Unexpected ';'", 0) == 0)
-      H = "Remove the extra ';' -- a statement ends with exactly one.";
+    else if (C == ErrCode::UnexpectedToken && Msg.rfind("I did not expect a `;`", 0) == 0)
+      H = "Remove the extra `;`, because a statement ends with exactly one.";
     else if (C == ErrCode::UnexpectedToken)
       H = "Remove the token the arrow points at, or write what belongs there: "
-          "a value, a name, or a complete statement.";
+          "an expression, a name or a complete statement.";
     else if (C == ErrCode::MissingComma)
-      H = "Put a ',' between the items of the list, e.g. `a, b, c`, and close "
+      H = "Put a `,` between the items of the list, as in `a, b, c`, and close "
           "it with the matching bracket.";
     else if (C == ErrCode::MissingColon)
-      H = "Put a ':' there: a name is followed by its type (`x: int`) and a "
+      H = "Put a `:` there: a name is followed by its type (`x: int`) and a "
           "function's parameter list by its return type (`): int`).";
     else if (C == ErrCode::MissingOpeningDelimiter)
-      H = "Open the block with '{' (or the list with '(') at the spot the "
+      H = "Open the block with `{`, or the list with `(`, at the spot the "
           "arrow points to.";
     else if (C == ErrCode::ExpectedName)
-      H = "Write a name there: a letter or '_' followed by letters, digits "
-          "or '_', e.g. `total`.";
+      H = "Write a name there: a letter or `_` followed by letters, digits "
+          "or `_`, as in `total`.";
     else if (C == ErrCode::ExpectedKeyword)
       H = "Write the keyword the message names at the spot the arrow points "
           "to.";
@@ -825,15 +1095,15 @@ void LogErrorAt(SourceLocation Loc, const char *Code, const std::string &Msg,
       H = "Declare it with the parameter count its operator allows, e.g. "
           "`operator +(a: T, b: T): T { ... }`.";
     else if (C == ErrCode::ExternFunctionBody)
-      H = "End an `extern fn` declaration with ';' and no body, or drop "
+      H = "End an `extern fn` declaration with `;` and no body, or drop "
           "`extern` to write the body in Turf.";
     else if (C == ErrCode::StatementOutsideFunction)
-      H = "Move the statement into a function body, e.g. `fn main(): int { "
+      H = "Move the statement into a function body, as in `fn main(): int { "
           "... return 0; }`.";
     else if (C == ErrCode::InvalidArraySize)
-      H = "Give the array a whole-number size of at least 1, e.g. `int[3]`.";
+      H = "Give the array a whole-number size of at least 1, as in `int[3]`.";
     else if (C == ErrCode::MissingInitializer)
-      H = "Give the variable its value on the spot: `mut x: int = 5;`.";
+      H = "Give the variable its initial value on the spot: `mut x: int = 5;`.";
     else if (C == ErrCode::SizeParameter)
       H = "Declare `N: size` only on a free function, e.g. `fn<T, N: size> "
           "first(a: T[N]): T`; not on an operator, a method or a struct.";
@@ -1022,12 +1292,12 @@ static int gettokScan(LexerState &L) {
           // compile time, not silently miscompiled: an unrecognized
           // escape is now a clean error instead of a quiet pass-through.
           LogErrorAt(EscapeLoc, ErrCode::InvalidEscapeSequence,
-                     std::string("Unknown escape sequence '\\") +
+                     std::string("I do not know the escape sequence `\\") +
                          static_cast<char>(L.LastChar) +
-                         "' in string literal.\n  Hint: Recognized escapes "
-                         "are \\n \\t \\r \\0 \\a \\b \\f \\v \\\\ \\\" \\'. "
-                         "Did you mean to write a literal backslash? Use "
-                         "'\\\\' instead.", SLM::ErrorCategory::SYNTAX_ERROR);
+                         "` in this string literal.\n  Hint: Use one of the "
+                         "escapes `\\n`, `\\t`, `\\r`, `\\0`, `\\a`, `\\b`, `\\f`, `\\v`, `\\\\`, `\\\"` or `\\'`. "
+                         "To write a literal backslash, write "
+                         "`\\\\`.", SLM::ErrorCategory::SYNTAX_ERROR);
           L.StringVal += L.LastChar;
         }
       } else {
@@ -1047,16 +1317,16 @@ static int gettokScan(LexerState &L) {
     // a structured Hint_ field instead; LogErrorAt has no such field, so the
     // hint is appended directly into the message text).
     static const char *const UnterminatedStringHint =
-        "\n  Hint: Add a closing '\"' before the end of the line -- Turf "
-        "string literals can't span multiple lines. Need an actual line "
-        "break inside the string? Use the \\n escape instead.";
+        "\n  Hint: Add a closing `\"` before the end of the line, because a "
+        "Turf string literal cannot span multiple lines. To put a line "
+        "break inside the string, use the `\\n` escape.";
 
     if (L.LastChar == EOF) {
       // Ran off the end of the file with no closing '"' anywhere -- there is
       // truly nothing left to lex, so end the token stream here exactly as
       // the pre-existing behavior did.
       LogErrorAt(L.CurLoc, ErrCode::UnterminatedLiteral,
-                 std::string("Unterminated string literal") +
+                 std::string("I found a string literal that is never closed.") +
                      UnterminatedStringHint, SLM::ErrorCategory::SYNTAX_ERROR);
       return TOK_EOF;
     }
@@ -1071,7 +1341,7 @@ static int gettokScan(LexerState &L) {
       // CurCol -- so lexing (and line tracking) of the rest of the file
       // recovers cleanly instead of desyncing for every line that follows.
       LogErrorAt(L.CurLoc, ErrCode::UnterminatedLiteral,
-                 std::string("Unterminated string literal") +
+                 std::string("I found a string literal that is never closed.") +
                      UnterminatedStringHint, SLM::ErrorCategory::SYNTAX_ERROR);
       return TOK_STRING_LITERAL;
     }
@@ -1099,8 +1369,8 @@ static int gettokScan(LexerState &L) {
       // Empty literal '' -- consume the closing quote so the lexer doesn't
       // desync, report, and recover with a placeholder value.
       LogErrorAt(L.CurLoc, ErrCode::InvalidCharLiteral,
-                 "Empty char literal.\n  Hint: A char literal must contain "
-                 "exactly one character, e.g. 'a'.", SLM::ErrorCategory::SYNTAX_ERROR);
+                 "I found an empty char literal.\n  Hint: Write exactly "
+                 "one character between the quotes, as in `'a'`.", SLM::ErrorCategory::SYNTAX_ERROR);
       L.LastChar = L.Source->get();
       L.CurCol++;
       L.CharVal = '\0';
@@ -1112,8 +1382,8 @@ static int gettokScan(LexerState &L) {
       // the newline, so the next gettok() call's whitespace-skip recovers
       // line tracking cleanly instead of desyncing for the rest of the file.
       LogErrorAt(L.CurLoc, ErrCode::UnterminatedLiteral,
-                 std::string("Unterminated char literal") +
-                     "\n  Hint: Add a closing ''' after the character.", SLM::ErrorCategory::SYNTAX_ERROR);
+                 std::string("I found a char literal that is never closed.") +
+                     "\n  Hint: Add a closing `'` after the character.", SLM::ErrorCategory::SYNTAX_ERROR);
       return L.LastChar == EOF ? TOK_EOF : TOK_CHAR_LITERAL;
     }
 
@@ -1145,10 +1415,10 @@ static int gettokScan(LexerState &L) {
         L.CharVal = '\'';
       } else {
         LogErrorAt(EscapeLoc, ErrCode::InvalidEscapeSequence,
-                   std::string("Unknown escape sequence '\\") +
+                   std::string("I do not know the escape sequence `\\") +
                        static_cast<char>(L.LastChar) +
-                       "' in char literal.\n  Hint: Recognized escapes are "
-                       "\\n \\t \\r \\0 \\a \\b \\f \\v \\\\ \\\" \\'.", SLM::ErrorCategory::SYNTAX_ERROR);
+                       "` in this char literal.\n  Hint: Use one of the escapes "
+                       "`\\n`, `\\t`, `\\r`, `\\0`, `\\a`, `\\b`, `\\f`, `\\v`, `\\\\`, `\\\"` or `\\'`.", SLM::ErrorCategory::SYNTAX_ERROR);
         L.CharVal = static_cast<char>(L.LastChar);
       }
     } else {
@@ -1165,9 +1435,9 @@ static int gettokScan(LexerState &L) {
       // keeps lexing from a sane point instead of every later token being
       // offset by the stray characters.
       LogErrorAt(L.CurLoc, ErrCode::InvalidCharLiteral,
-                 "Char literal must contain exactly one character.\n  Hint: "
-                 "Use a string literal (\"ab\") for multiple characters, or "
-                 "check for a missing closing '.", SLM::ErrorCategory::SYNTAX_ERROR);
+                 "I found a char literal with more than one character.\n  Hint: "
+                 "Use a string literal such as `\"ab\"` for several characters, or "
+                 "add the missing closing `'`.", SLM::ErrorCategory::SYNTAX_ERROR);
       while (L.LastChar != '\'' && L.LastChar != EOF && L.LastChar != '\n') {
         L.LastChar = L.Source->get();
         L.CurCol++;

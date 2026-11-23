@@ -1,6 +1,6 @@
 // EXPECT-DIAG: E014
 // EXPECT-FIX: replace 'retrun' with 'return'
-// EXPECT-DIAG: Hmm, I don't know the word 'retrun'
+// EXPECT-DIAG: I do not know the word `retrun`
 // A single-candidate keyword typo ('retrun' -> 'return', edit distance 1),
 // through KeywordError (ErrorsLex.h), whose candidates are a plain vector from
 // SuggestionIndex::suggestKeywords(), not a RankedSuggestions. The compiler

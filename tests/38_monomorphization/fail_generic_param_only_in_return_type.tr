@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E129
-// EXPECT-DIAG: 'mk' declares type parameter 'T', but no parameter mentions it
+// EXPECT-DIAG: `mk` declares the type parameter `T`, but no parameter mentions it
 // T can only be inferred from an argument; reported at the declaration
 // rather than as a missing function at codegen.
 fn<T> mk(): T {

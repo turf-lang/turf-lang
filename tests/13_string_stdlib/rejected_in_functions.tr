@@ -1,0 +1,29 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+import io;
+import strings;
+
+// LEC-007: StringBuilder's buffer, length and capacity are private. `buf` is a
+// raw buffer whose NUL-terminator invariant only the methods maintain, and a
+// writable `cap` would let a caller claim room that is not there.
+
+@test(compile_error, E088, "")
+fn rejects_string_builder_private_field(): void {
+    mut sb: strings::StringBuilder = strings::StringBuilder::default();
+    sb.append("x");
+    sb.cap = 1000000;
+}
+
+// tests/13_string_stdlib/fail_string_ordering_non_string.tr
+// NEGATIVE TEST — must NOT compile (or must error at runtime).
+// Applying a string ordering operator to mixed types (string and int)
+// must be rejected by the TypeChecker.
+//
+// Expected: TypeChecker error — cannot compare 'string' with 'int' using '<'.
+
+@test(compile_error, E124, "I cannot compare a `string` with an `int` using `<`.")
+fn rejects_string_ordering_non_string(): void {
+    mut result: bool = "hello" < 42;
+    io::printline(result);
+}

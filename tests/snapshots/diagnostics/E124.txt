@@ -1,0 +1,13 @@
+tests/03_typechecker/fail_bool_equals_int.tr (1 error)
+
+── error at line 4, col 20 [E124 · values can't be compared]
+
+  I cannot compare a `bool` with an `int`.
+
+  Hint: Compare two operands of the same type, converting one with `to` where they differ.
+
+  4 │     printline(true == 1);
+    │                    ^~ these values cannot be compared
+
+  Run `turf --explain E124` for more details.
+

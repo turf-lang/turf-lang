@@ -1,0 +1,24 @@
+tests/14_cfg_analysis/endless_loops_warn.tr (2 warnings)
+
+── warning at line 62, col 5 [E185 · loop whose every exit is never taken]
+
+  This loop never ends: every way out of it is guarded by a test that the values reaching it make false.
+
+  Hint: Check the loop's test and each `break` condition against the values the loop computes.
+
+  62 │     while i >= 0 {
+     │     ^~~~~ no exit of this loop is ever taken
+
+  Run `turf --explain E185` for more details.
+
+── warning at line 70, col 5 [E185 · loop whose every exit is never taken]
+
+  This loop never ends: every way out of it is guarded by a test that the values reaching it make false.
+
+  Hint: Check the loop's test and each `break` condition against the values the loop computes.
+
+  70 │     while k > 0 {
+     │     ^~~~~ no exit of this loop is ever taken
+
+  Run `turf --explain E185` for more details.
+

@@ -18,7 +18,7 @@ CORRECT SYNTAX (two options):
 
 INCORRECT:
     mut l: List<int> = List::default();
-    // ERROR: 'List' isn't visible here without qualification.
+    // ERROR: I cannot use `List` here without qualification.
     //   (no `import list;` / `import list::List;` anywhere above)
 
 FIX:

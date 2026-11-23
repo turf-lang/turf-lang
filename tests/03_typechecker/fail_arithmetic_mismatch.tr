@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E057
-// EXPECT-DIAG: cannot apply '+' to 'int' and 'Point'
+// EXPECT-DIAG: I cannot use `+` on an `int` and a `Point`.
 import io;
 
 struct Point { x: int }

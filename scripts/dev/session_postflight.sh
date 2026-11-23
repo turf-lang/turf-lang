@@ -72,7 +72,7 @@ fi
 # test_runner.sh covers tests/ ONLY. A stdlib or showcase file left on removed
 # syntax sits broken indefinitely with the full suite green -- AGENTS.md
 # records a confirmed instance. Every lib/std module must resolve with no
-# error at all (other than the expected "No entry point found" a pure
+# error at all (other than the expected "I found no entry point" a pure
 # library file always reports). Until OVH-011
 # (docs/development/changes/OVH-011.md), list.tr and mem.tr could not
 # clear this bar: the prelude module `strings` does `import list::List`, so
@@ -89,11 +89,11 @@ else
   STD_BAD=0
   while IFS= read -r f; do
     out=$(./build/turfc --resolve "$f" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
-    # The expected "No entry point found" is matched by its CODE (E119,
-    # MissingEntryPoint): the header `── error [E119 · declaration]` and the
+    # The expected "I found no entry point" is matched by its CODE (E119,
+    # MissingEntryPoint): the header `── error [E119 · no main function]` and the
     # message are on separate lines, so filtering on the message text alone
     # (as this once did) let every library file through as a failure.
-    errs=$(echo "$out" | grep -E '^── error|^Error:' | grep -v -e 'No entry point found' -e '\[E119[] ·]')
+    errs=$(echo "$out" | grep -E '^── error|^Error:' | grep -v -e 'I found no entry point' -e '\[E119[] ·]')
     [ -z "$errs" ] && continue
     fail "$f does not resolve:"
     echo "$errs" | head -3 | sed 's/^/       /'
@@ -162,6 +162,14 @@ else
   else
     fail "--diagnostics=json disagrees with its schema, the text form or a fixture:"
     echo "$JSON_OUT" | head -8 | sed 's/^/       /'
+  fi
+
+  # DX-10 (#336): a snapshot of every diagnostic code, text and JSON.
+  if SNAP_OUT=$(python3 scripts/check/diagnostic_snapshots.py 2>&1); then
+    pass "$(echo "$SNAP_OUT" | tail -1)"
+  else
+    fail "a diagnostic differs from its snapshot (tests/snapshots/diagnostics/; --write after a deliberate change):"
+    echo "$SNAP_OUT" | head -12 | sed 's/^/       /'
   fi
 
   # DX-3 (issue #291): every error a fail_*.tr test reports prints a Hint:.
@@ -237,7 +245,7 @@ sweep_one() {  # $1 = path; echoes a reason if the name is wrong, else nothing
     has_main "$f" && echo "has a main() but is silently EXCLUDED by the runner's '_module.tr' substring filter"
   else
     case "$base" in fail_*) return ;; esac
-    has_main "$f" || echo "has no main() but IS run as a standalone test (it will fail with 'No entry point found')"
+    has_main "$f" || echo "has no main() but IS run as a standalone test (it will fail with 'I found no entry point')"
   fi
 }
 

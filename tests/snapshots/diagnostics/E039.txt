@@ -1,0 +1,13 @@
+tests/25_errors/fail_error_unknown_variant.tr (1 error)
+
+── error at line 10, col 31 [E039 · no such variant]
+
+  I cannot find a variant `Nonexistent` in the error type `IOError`.
+
+  Hint: Check the spelling against the variants declared in `IOError`.
+
+  10 │     mut e: IOError = IOError::Nonexistent;
+     │                               ^~~~~~~~~~~ no variant of this name
+
+  Run `turf --explain E039` for more details.
+

@@ -1,0 +1,38 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+// Negative test: char has no arithmetic (RFC §3) -- 'a' + 'b' must be
+// rejected at compile time. Arithmetic requires an explicit `to int` cast.
+@test(compile_error, E057, "I cannot use `+` on a `char` and a `char`.")
+fn rejects_char_arithmetic_add(): void {
+    mut c: char = 'a' + 'b';
+}
+
+// Negative test: char is deliberately NOT isNumeric() (RFC §3's exact-match
+// philosophy), so comparing a char against an int without an explicit cast
+// must be rejected, not silently coerced.
+@test(compile_error, E124, "I cannot compare a `char` with an `int`.")
+fn rejects_char_mismatched_compare(): void {
+    mut b: bool = 'a' == 1;
+}
+
+// Negative test: char does not implicitly participate in numeric arithmetic
+// with int either -- 'a' + 1 must be rejected, same as char + char.
+@test(compile_error, E057, "I cannot use `+` on a `char` and an `int`.")
+fn rejects_char_plus_int(): void {
+    mut c: char = 'a' + 1;
+}
+
+// SEM-004 (F-INIT-1): a `char` local declared without an initializer is
+// statically unassigned, same as int/double/bool/string -- reading it
+// before any assignment is DefiniteAssignmentError (E008). Before SEM-004,
+// `char` was one of the Mechanism-B types Codegen eagerly zeroed, so this
+// compiled; see 05_char_default_init.tr for the still-legal assign-then-use
+// shape.
+@test(compile_error, E008, "I cannot use `c` (type `char`) before it has a value")
+fn rejects_char_use_before_init(): void {
+    mut c: char;
+    if (c to int) == 0 {
+        return;
+    }
+}

@@ -1,0 +1,12 @@
+tests/04_control_flow/fail_do_while_missing_open_brace.tr (1 error)
+
+── error at line 9, col 5 [E107 · missing opening brace or parenthesis]
+
+  I expected a `{` to open the body of this `do` loop.
+  Hint: Wrap the body of a `do` loop in braces: `do { ... } while cond;`.
+
+  9 │     do while (true) {
+    │     ^~ an opening brace or parenthesis is missing here
+
+  Run `turf --explain E107` for more details.
+

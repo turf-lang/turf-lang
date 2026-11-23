@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E172
-// EXPECT-DIAG: 'add_old' is deprecated: use 'add' instead
+// EXPECT-DIAG: `add_old` is deprecated: use 'add' instead
 // TDP-2-003 V-2 (issue #286): `@deprecated("...")` warns at every call to the
 // function it decorates, with the exact message the declaration wrote. The
 // build still succeeds -- removal of a deprecated item is a 3.0 job (B-3),

@@ -10,7 +10,9 @@
  * @copyright Copyright (c) 2026 TurfLang contributors.  Apache License.
  */
 
+#include "sema/NullablePlace.h"
 #include "sema/TypeChecker.h"
+#include "sema/SpanLabels.h"
 
 // AST.h is needed for the full definition of every node type.
 // It drags in LLVM headers, but TypeChecker itself does not use any LLVM API.
@@ -18,6 +20,7 @@
 
 #include "resolve/SymbolTable.h"
 
+#include "diagnostics/CompilerFix.h"
 #include "diagnostics/Errors.h"
 #include "diagnostics/SuggestionIndex.h"
 
@@ -28,8 +31,10 @@
 #include "sema/Monomorphize.h" // TYPE-002 (S11b): report-only instantiation collector
 #include "frontend/Parser.h"       // IsPreludeModuleName — UFCS home-module tie-break
 #include "sema/TypeWalk.h" // SMP-002: shared unify()/collectParamOrder() walkers
+#include "analysis/AnalysisFacts.h"
 
 #include <algorithm>
+#include <regex>
 #include <cassert>
 #include <iostream>
 #include <optional>
@@ -40,7 +45,7 @@
 // The field scan's fallback reads through a NamedType that is not a
 // registered type (see TypeWalk::structTypeArgSubst()).
 static bool isRegisteredTypeName(const std::string &Name) {
-  return GlobalSymbolTable && GlobalSymbolTable->LookupType(Name) != nullptr;
+  return Symbols() && Symbols()->LookupType(Name) != nullptr;
 }
 
 
@@ -160,21 +165,29 @@ static bool isExternStringToPtrCoercion(const TurfType *ArgTy,
 // see TypeWalk::unify()'s own doc comment for why this is a best-effort
 // binder, not a second compatibility oracle).
 
-/// TYPE-002 (S11b): turn a (possibly partial) Subst map into the ordered
-/// TypeArgs vector an InstantiationRequest needs, using CanonicalOrder
-/// (from TypeWalk::collectParamOrder() above) to fix the index order. A
-/// name in CanonicalOrder with no Subst entry (a return-only phantom type
-/// parameter that never appeared in any argument position) is skipped --
-/// the request is still meaningful over the parameters that DID resolve.
+/// TYPE-002 (S11b): turn a Subst map into the ordered TypeArgs vector an
+/// InstantiationRequest needs. The drains pair TypeArgs POSITIONALLY with the
+/// template's declared type parameters (`Template->getTypeParams()`), so the
+/// order is the declaration's whenever the symbol carries it: the order the
+/// parameters first appear in (TypeWalk::collectParamOrder(), @p Fallback)
+/// differs for `fn<A, B> f(x: B, y: A)`, and bound A to B's type. A declared
+/// parameter with no Subst entry gives a null entry, which no site records
+/// (isFullyConcreteType(nullptr) is false): skipping it would shift every
+/// later argument onto the wrong parameter.
 static std::vector<TurfTypePtr> orderedTypeArgs(
-    const std::vector<std::string> &CanonicalOrder,
+    const std::vector<std::string> &DeclaredOrder,
+    const std::vector<std::string> &Fallback,
     const std::unordered_map<std::string, TurfTypePtr> &Subst) {
+  const std::vector<std::string> &Order =
+      DeclaredOrder.empty() ? Fallback : DeclaredOrder;
   std::vector<TurfTypePtr> Args;
-  Args.reserve(CanonicalOrder.size());
-  for (const auto &Name : CanonicalOrder) {
+  Args.reserve(Order.size());
+  for (const auto &Name : Order) {
     auto It = Subst.find(Name);
     if (It != Subst.end())
       Args.push_back(It->second);
+    else if (!DeclaredOrder.empty())
+      Args.push_back(nullptr);
   }
   return Args;
 }
@@ -260,7 +273,7 @@ void TypeChecker::typeGenericFunctionValue(VariableExprAST &Node) {
     if (Node.TypeArgs.size() != Ref.TypeParams.size() || !Ref.SizeParams.empty()) {
       const size_t Want = Ref.TypeParams.size();
       reportError(Node.getLoc(), ErrCode::WrongTypeArgumentCount,
-                  "'" + Name + "' is " + Generic + ", which takes " +
+                  "`" + Name + "` is " + Generic + ", which takes " +
                       std::to_string(Want) + " type argument" + (Want == 1 ? "" : "s") +
                       ", and " + std::to_string(Node.TypeArgs.size()) + " " +
                       (Node.TypeArgs.size() == 1 ? "is" : "are") + " written." +
@@ -271,9 +284,9 @@ void TypeChecker::typeGenericFunctionValue(VariableExprAST &Node) {
                   {},
                   Ref.SizeParams.empty()
                       ? "Write one type for each of its type parameters, in order."
-                      : "Store it where a function type is declared, e.g. 'immut f: "
-                        "fn(...): ... = " + Name + ";'.",
-                  "Wrong number of type arguments!");
+                      : "Store it where a function type is declared, e.g. `immut f: "
+                        "fn(...): ... = " + Name + ";`.",
+                  "");
       setType(&Node, nullptr);
       return;
     }
@@ -288,13 +301,13 @@ void TypeChecker::typeGenericFunctionValue(VariableExprAST &Node) {
         std::move(Params));
     if (Want && !FromWritten->isEquivalent(Want)) {
       reportError(Node.getLoc(), ErrCode::TypeMismatch,
-                  "'" + Node.getName() + "' with these type arguments is '" +
-                      FromWritten->getName() + "', but '" + Want->getName() +
-                      "' is expected here.",
+                  "With these type arguments, `" + Node.getName() + "` is `" +
+                      FromWritten->getName() + "`, and this place needs `" +
+                      Want->getName() + "`.",
                   {},
-                  "Make the type arguments match the expected function type, or "
-                  "drop them and let '" + Want->getName() + "' supply them.",
-                  "Type mismatch!");
+                  "Make the type arguments match `" + Want->getName() +
+                      "`, or remove them and let it supply them.",
+                  "");
       setType(&Node, nullptr);
       return;
     }
@@ -303,13 +316,12 @@ void TypeChecker::typeGenericFunctionValue(VariableExprAST &Node) {
 
   if (!Want) {
     reportError(Node.getLoc(), ErrCode::NotAValue,
-                "'" + Name + "' is generic (" + Generic + "), so as a value it "
-                "needs a function type to take its type arguments from, and "
-                "nothing here gives one.",
+                "`" + Name + "` is generic (" + Generic + "), and nothing here "
+                "gives the function type its type arguments come from.",
                 {},
-                "Write its type arguments, e.g. 'immut f = " + Name +
-                    "::<int>;', or use it where a function type is declared, "
-                    "e.g. 'immut f: fn(int): int = " + Name + ";'.");
+                "Write its type arguments, e.g. `immut f = " + Name +
+                    "::<int>;`, or store it where a function type is declared, "
+                    "e.g. `immut f: fn(int): int = " + Name + ";`.");
     setType(&Node, nullptr);
     return;
   }
@@ -337,14 +349,14 @@ void TypeChecker::typeGenericFunctionValue(VariableExprAST &Node) {
   }
   if (!Fits) {
     reportError(Node.getLoc(), ErrCode::TypeMismatch,
-                "'" + Name + "' is " + Generic + ", and no choice of " +
-                    (Ref.TypeParams.size() == 1 ? "'" + Ref.TypeParams[0] + "'"
+                "`" + Name + "` is " + Generic + ", and no choice of " +
+                    (Ref.TypeParams.size() == 1 ? "`" + Ref.TypeParams[0] + "`"
                                                 : std::string("its type arguments")) +
-                    " makes it '" + Want->getName() + "'.",
+                    " makes it `" + Want->getName() + "`.",
                 {},
-                "Check the expected function type against '" + Name +
-                    "''s parameters and return type.",
-                "Type mismatch!");
+                "Check `" + Want->getName() + "` against the parameters and the "
+                    "return type of `" + Name + "`.",
+                "");
     setType(&Node, nullptr);
     return;
   }
@@ -357,7 +369,7 @@ void TypeChecker::typeGenericFunctionValue(VariableExprAST &Node) {
     TypeWalk::collectParamOrder(P.Type, Order);
   if (Ref.ReturnType)
     TypeWalk::collectParamOrder(Ref.ReturnType, Order);
-  std::vector<TurfTypePtr> TypeArgs = orderedTypeArgs(Order, Subst);
+  std::vector<TurfTypePtr> TypeArgs = orderedTypeArgs(Ref.TypeParams, Order, Subst);
   for (const auto &A : TypeArgs)
     if (!isFullyConcreteType(A.get()))
       return; // inside a generic template: its own clone records the real one
@@ -397,11 +409,139 @@ void TypeChecker::noteConstructedArgs(
   }
 }
 
+namespace {
+// A type as the reader writes it: module qualifiers off (`List<Point>`, not
+// `list::List<geo::Point>`). The Fix that writes it in is re-checked, so a
+// name this spells wrongly gives no fix, never a wrong one.
+std::string spelledType(const TurfType *T) {
+  static const std::regex Qualifier("\\b[A-Za-z_][A-Za-z0-9_]*::");
+  return T ? std::regex_replace(T->getName(), Qualifier, "") : "?";
+}
+} // namespace
+
+
+namespace {
+// E147 (F-S4a: raised by the TypeChecker, so `--check` sees it): the walk
+// emitDefaultValueRec() (CodegenCore.cpp) makes to build `S::default()`,
+// without building anything. Every `&` field gets a fresh default value, so
+// a struct that reaches itself through `&` fields has none. Returns the
+// struct whose default was asked for and the one reached again, or nulls.
+const TurfStructType *defaultStructOf(const TurfType *T) {
+  if (auto *ST = dynamic_cast<const TurfStructType *>(T))
+    return ST;
+  if (!Symbols())
+    return nullptr;
+  TurfTypePtr Registered;
+  if (const auto *NT = dynamic_cast<const NamedType *>(T))
+    Registered = Symbols()->LookupType(NT->getName());
+  else if (const auto *GT = dynamic_cast<const GenericType *>(T))
+    Registered = Symbols()->LookupType(
+        Monomorphize::instantiatedDeclName(GT->getBaseName(), GT->getTypeArgs()));
+  return dynamic_cast<const TurfStructType *>(Registered.get());
+}
+
+std::pair<const TurfStructType *, const TurfStructType *>
+defaultReferenceCycle(const TurfType *T, std::vector<const TurfStructType *> &InProgress) {
+  if (auto *RT = dynamic_cast<const TurfReferenceType *>(T)) {
+    const TurfType *Pointee = RT->getPointee().get();
+    const TurfStructType *PST = defaultStructOf(Pointee);
+    if (PST && std::find(InProgress.begin(), InProgress.end(), PST) != InProgress.end())
+      return {InProgress.front(), PST};
+    if (PST) InProgress.push_back(PST);
+    auto Found = defaultReferenceCycle(PST ? PST : Pointee, InProgress);
+    if (PST) InProgress.pop_back();
+    return Found;
+  }
+  if (auto *AT = dynamic_cast<const ::ArrayType *>(T))
+    return AT->getSize() > 0 ? defaultReferenceCycle(AT->getElementType(), InProgress)
+                             : std::pair<const TurfStructType *, const TurfStructType *>{};
+  if (const TurfStructType *ST = defaultStructOf(T)) {
+    const bool Outer = InProgress.empty();
+    if (Outer) InProgress.push_back(ST);
+    for (const auto &Field : ST->getFields())
+      if (auto Found = defaultReferenceCycle(Field.Type.get(), InProgress); Found.first)
+        return Found;
+    if (Outer) InProgress.pop_back();
+  }
+  return {};
+}
+} // namespace
+
+namespace {
+// SL-7: the parameter names of a call's overloads, for
+// CompilerFixes::arityAlternatives(); a method's `self` is left out, since
+// the call never writes it among its arguments.
+void addOverloadParams(const ResolverFunctionSymbol &Sym,
+                       std::vector<std::vector<std::string>> &Out) {
+  if (Sym.isVarArg())
+    return;
+  std::vector<std::string> Names;
+  for (size_t I = 0; I < Sym.Params.size(); ++I)
+    if (!(I == 0 && Sym.Params[I].Name == "self"))
+      Names.push_back(Sym.Params[I].Name);
+  Out.push_back(std::move(Names));
+}
+// The TypeChecker keeps no scopes of its own (the Resolver annotated every
+// name), so a missing argument is tried under every parameter's name, and the
+// re-check rejects one that names no variable.
+bool anyName(const std::string &) { return true; }
+} // namespace
+
+void TypeChecker::noteIntToDouble(const ExprAST *E, const TurfType *To) {
+  AnalysisFacts *F = Facts();
+  if (!F || !E || !To || !To->isDouble())
+    return;
+  const TurfTypePtr From = getType(E);
+  if (From && From->isInt() && !From->isDouble())
+    F->IntToDouble.insert(E->getNodeID());
+}
+
+void TypeChecker::warnTypeArgsFromContext(const FuncCallExprAST &FC) {
+  const auto *SC = dynamic_cast<const ScopeAccessExprAST *>(FC.getCallee());
+  const auto *GT = dynamic_cast<const GenericType *>(FC.ConstructedType.get());
+  if (!SC || SC->LeftType || !GT || GT->getTypeArgs().empty())
+    return;
+  // LG-3: arguments that bind every type parameter take nothing from the
+  // context, whatever the context says.
+  if (SC->ResolvedKind == ScopeAccessKind::ConstructorCall) {
+    const auto *Target = FC.getResolvedCallTarget();
+    if (!Target)
+      return;
+    bool Unbound = false;
+    for (const auto &TP : Target->TypeParams)
+      Unbound |= !FC.GenericSubstitution.count(TP);
+    if (!Unbound)
+      return;
+  }
+  std::string Args = "<";
+  for (size_t I = 0; I < GT->getTypeArgs().size(); ++I)
+    Args += (I ? ", " : "") + spelledType(GT->getTypeArgs()[I].get());
+  Args += ">";
+  const SourceLocation &At = SC->getLeftLoc();
+  const std::string *Line = FixItSourceLine(At);
+  const std::string Tail = "::" + SC->getRightName();
+  if (!Line || At.Col < 1)
+    return;
+  const size_t Start = At.Col - 1;
+  const size_t Sep = Line->find(Tail, Start);
+  if (Sep == std::string::npos)
+    return;
+  const std::string Name = Line->substr(Start, Sep - Start);
+  const std::string Parens =
+      SC->ResolvedKind == ScopeAccessKind::DefaultConstruct ? "()" : "(...)";
+  TypeArgsFromContextWarning W(At, Name + Tail + Parens, Args, Name + Args + Tail + Parens);
+  W.withFixIt(At.Line, static_cast<int>(Sep) + 1, static_cast<int>(Sep) + 1, Args)
+      .withFixDescription("write '" + Name + Args + "'")
+      .emit();
+}
+
 void TypeChecker::noteConstructed(const ExprAST *E, const TurfTypePtr &Expected) {
+  noteIntToDouble(E, Expected.get());
   noteConstructedType(E, Expected);
   const auto *FC = dynamic_cast<const FuncCallExprAST *>(E);
   if (!FC || !FC->ConstructedType)
     return;
+  warnTypeArgsFromContext(*FC);
   const auto *Target = FC->getResolvedCallTarget();
   const auto *GT = dynamic_cast<const GenericType *>(FC->ConstructedType.get());
   if (!Target || !GT || Target->TypeParams.size() != GT->getTypeArgs().size())
@@ -432,23 +572,31 @@ void TypeChecker::noteConstructed(const ExprAST *E, const TurfTypePtr &Expected)
       continue;
     }
     reportError(FC->getLoc(), ErrCode::ArgumentType,
-                "Argument " + std::to_string(i + 1) + " is '" + From +
-                    "', but building a '" + GT->getName() + "' needs '" + To +
-                    "' there.",
+                "Argument " + std::to_string(i + 1) + " is " + SpanLabels::aTypeNamed(From) +
+                    ", and building " + SpanLabels::aType(GT) + " needs " +
+                    SpanLabels::aTypeNamed(To) + " there.",
                 {},
-                "A generic constructor's type arguments come from the type "
-                "being built; an argument converts to it only by an implicit "
-                "widening (int32 to int or double, int to double). Pass a '" +
-                    To + "' (e.g. `x to " + To + "`), or build the type the "
-                    "argument has.");
+                "Pass a `" + To + "` (e.g. `x to " + To + "`), or build the type "
+                    "the argument has: the type arguments come from the type "
+                    "being built.");
     return;
   }
-  if (!Widened || !MonoCollector_ || !isFullyConcreteType(GT))
+  // A type parameter no argument mentions (`fn<T> Box.new(k: int)`) is
+  // bound only here, by the type being built: the visit recorded no request
+  // for it, and without one the call named a function nothing emitted
+  // (turf-fuzz #28).
+  bool Unbound = false;
+  for (const auto &TP : Target->TypeParams)
+    Unbound |= !FC->GenericSubstitution.count(TP);
+  if ((!Widened && !Unbound) || !MonoCollector_ || !isFullyConcreteType(GT))
     return;
   std::vector<std::string> Order;
   for (size_t i = Offset; i < Target->Params.size(); ++i)
     TypeWalk::collectParamOrder(Target->Params[i].Type, Order);
-  std::vector<TurfTypePtr> TypeArgs = orderedTypeArgs(Order, Subst);
+  std::vector<TurfTypePtr> TypeArgs = orderedTypeArgs(Target->TypeParams, Order, Subst);
+  for (const auto &A : TypeArgs)
+    if (!isFullyConcreteType(A.get()))
+      return;
   auto *Site = const_cast<FuncCallExprAST *>(FC);
   MonoCollector_->forgetSite(Site);
   MonoCollector_->record({Monomorphize::InstantiationKind::FreeFunction,
@@ -562,10 +710,10 @@ std::string copyOutArgHint(const std::vector<CandPtr> &Cands,
     for (size_t I = 0; I < ArgTypes.size(); ++I) {
       const TurfType *Param = C->Params[I + Off].Type.get();
       if (ArgTypes[I] && TypeChecker::isCopyOut(ArgTypes[I].get(), Param))
-        return "Argument " + std::to_string(I + 1) + " is a '" + ArgTypes[I]->getName() +
-               "', which refers to the '" + Param->getName() +
-               "' the parameter takes. Copy the value out with `to`: `x to " +
-               Param->getName() + "` passes an independent copy.";
+        return "Copy argument " + std::to_string(I + 1) + " out with `to`: it is a `" +
+               ArgTypes[I]->getName() + "`, which refers to the `" + Param->getName() +
+               "` the parameter takes, and `x to " + Param->getName() +
+               "` passes an independent copy.";
     }
   }
   return "";
@@ -615,16 +763,16 @@ void TypeChecker::applyWrittenConstructedType(FuncCallExprAST &Node) {
   if (SC->ResolvedKind != ScopeAccessKind::DefaultConstruct &&
       SC->ResolvedKind != ScopeAccessKind::ConstructorCall) {
     reportError(SC->getLeftLoc(), ErrCode::WrongTypeArgumentCount,
-                "Type arguments written before '::" + SC->getRightName() +
-                    "' only build a generic struct: '" +
+                "Type arguments before `::" + SC->getRightName() +
+                    "` only build a generic struct, and `" +
                     SC->LeftType->getName() + "::" + SC->getRightName() +
-                    "' is not a '::default()' or '::new(...)'.",
+                    "` is not a `::default()` or a `::new(...)`.",
                 {},
-                "Drop the type arguments ('" +
+                "Remove the type arguments: `" +
                     TypeIdentity::bareName(SC->getLeftName()) + "::" +
-                    SC->getRightName() + "'); a generic function takes its own "
-                    "after '::', e.g. 'f::<int>(...)'.",
-                "Wrong number of type arguments!");
+                    SC->getRightName() + "`. A generic function takes its own "
+                    "after `::`, e.g. `f::<int>(...)`.",
+                "");
     setType(&Node, nullptr);
     return;
   }
@@ -709,6 +857,18 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
     // into a generic call as an inferred `T`, it is never re-read as a
     // spelling in the template's own module.
     setType(&Node, makeResolvedNamedType(ScopeCallee->getLeftName()));
+    std::vector<const TurfStructType *> InProgress;
+    if (TurfTypePtr T = getType(&Node))
+      if (auto [Outer, Cycle] = defaultReferenceCycle(T.get(), InProgress); Outer)
+        reportError(Node.getLoc(), ErrCode::DefaultThroughReferenceCycle,
+                    "`" + TypeIdentity::bareName(Outer->getName()) +
+                        "` has no default: defaulting it gives every `&` field a "
+                        "new default, and `" + TypeIdentity::bareName(Cycle->getName()) +
+                        "` reaches itself through `&` fields, so that never ends.",
+                    {},
+                    "Make one of the fields on the cycle `&?" +
+                        TypeIdentity::bareName(Cycle->getName()) +
+                        "` (it defaults to `null`), or build it with `::new(...)`.");
     return;
   }
 
@@ -730,8 +890,8 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
     const std::string Full =
         TypeIdentity::bareName(ScopeCallee->getLeftName()) + "::" + CalleeName;
     const ErrorVariantInfo *Info = nullptr;
-    if (GlobalSymbolTable)
-      if (auto T = GlobalSymbolTable->LookupType(ScopeCallee->getLeftName()))
+    if (Symbols())
+      if (auto T = Symbols()->LookupType(ScopeCallee->getLeftName()))
         if (const auto *ET = dynamic_cast<const TurfUserErrorType *>(T.get()))
           Info = ET->getVariantInfo(CalleeName);
     const size_t FieldCount = Info ? Info->Fields.size() : 0;
@@ -747,12 +907,11 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
           !literalAcquiresType(Arg, Field.Type.get())) {
         ErrorPayloadError(
             Node.getLoc(),
-            "'" + Full + "' field '" + Field.Name + "' has type '" +
-                Field.Type->getName() + "' but the argument has type '" +
-                ArgTypes[I]->getName() + "'.",
-            "Pass a value of type '" + Field.Type->getName() + "' for '" +
-                Field.Name + "' (argument " + std::to_string(I + 1) +
-                "), as the variant declares it.")
+            "The field `" + Field.Name + "` of `" + Full + "` is " +
+                SpanLabels::aType(Field.Type) + ", and argument " +
+                std::to_string(I + 1) + " is " + SpanLabels::aType(ArgTypes[I]) + ".",
+            "Pass " + SpanLabels::aType(Field.Type) + " for `" + Field.Name +
+                "`, as the variant declares it.")
             .raise();
       } else if (Field.Type) {
         checkLiteralRepresentable(Arg, Field.Type.get(), Node.getLoc());
@@ -768,13 +927,13 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
         !ArgTypes[FieldCount]->isNamed("string")) {
       ErrorPayloadError(
           Node.getLoc(),
-          "the last argument of '" + Full + "(...)' is its message, which must be "
-          "a 'string', but it has type '" + ArgTypes[FieldCount]->getName() + "'.",
+          "The last argument of `" + Full + "(...)` is its message, a `string`, "
+          "and I found " + SpanLabels::aType(ArgTypes[FieldCount]) + ".",
           FieldCount == 0
-              ? "Pass a 'string' expression as the error's message."
-              : "'" + Full + "' takes " + std::to_string(FieldCount) +
-                    " payload field" + (FieldCount == 1 ? "" : "s") +
-                    "; an extra argument after them must be a 'string' message.")
+              ? "Pass a `string` as the error's message."
+              : "Pass a `string` message after the " + std::to_string(FieldCount) +
+                    " payload field" + (FieldCount == 1 ? "" : "s") + " of `" +
+                    Full + "`, or remove the extra argument.")
           .raise();
     }
     // The registered TurfUserErrorType itself, exactly what a bare reference
@@ -783,8 +942,8 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
     // `AnyErrorType` and a value whose type isUserError(), which a NamedType
     // is not, so the comparison was a type error ("Cannot compare '<error>'
     // with 'E'") for as long as STD-002's construction returned the NamedType.
-    TurfTypePtr ErrTy = GlobalSymbolTable
-                            ? GlobalSymbolTable->LookupType(ScopeCallee->getLeftName())
+    TurfTypePtr ErrTy = Symbols()
+                            ? Symbols()->LookupType(ScopeCallee->getLeftName())
                             : nullptr;
     setType(&Node, ErrTy ? ErrTy : makeResolvedNamedType(ScopeCallee->getLeftName()));
     return;
@@ -810,14 +969,14 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
         SLM::DiagnosticHints Hints;
         Hints.Construct = IntrinsicName(Node.ResolvedIntrinsic);
         reportError(Node.getLoc(), ErrCode::WrongArity,
-                    "'" + CalleeName + "' expects " +
+                    "`" + CalleeName + "` takes " +
                         std::to_string(BI->Arity) + " argument" +
-                        (BI->Arity == 1 ? "" : "s") + ", got " +
+                        (BI->Arity == 1 ? "" : "s") + ", and this call passes " +
                         std::to_string(ArgCount) + ".",
-                    {}, "Call '" + CalleeName + "' with exactly " +
+                    {}, "Call `" + CalleeName + "` with exactly " +
                         std::to_string(BI->Arity) + " argument" +
                         (BI->Arity == 1 ? "" : "s") + ".",
-                    "Wrong argument count!", Hints);
+                    "", Hints);
         setType(&Node, nullptr);
         return;
       }
@@ -838,10 +997,10 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
       if (Node.isIntrinsic(BareIntrinsic::HashOf)) {
         if (!ArgTypes.empty() && ArgTypes[0] && ArgTypes[0]->isVoid()) {
           reportError(Node.getLoc(), ErrCode::VoidValue,
-                      "'hash_of(...)' has no value to hash: the argument is 'void'.",
+                      "`hash_of(...)` has nothing to hash: its argument is `void`.",
                       {}, "Hash a variable or an expression with a value, not a call to a "
                           "function declared `: void`.",
-                      "Cannot hash 'void'!");
+                      "");
           setType(&Node, nullptr);
           return;
         }
@@ -865,9 +1024,10 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
         if (SizeArg < ArgTypes.size() && ArgTypes[SizeArg] &&
             !ArgTypes[SizeArg]->isInt()) {
           reportError(Node.getLoc(), ErrCode::ArgumentType,
-                      "Argument " + std::to_string(SizeArg + 1) + " to '" +
-                          CalleeName + "' is a byte count and expects 'int', got '" +
-                          ArgTypes[SizeArg]->getName() + "'.");
+                      "Argument " + std::to_string(SizeArg + 1) + " of `" +
+                          CalleeName + "` is a byte count, so it is an `int`, and I found " +
+                          SpanLabels::aType(ArgTypes[SizeArg]) + ".",
+                      {}, "Convert the count with `to int`.");
           setType(&Node, nullptr);
           return;
         }
@@ -925,11 +1085,10 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
         // roadmap and FDN-002's Prereqs row.
         if (ArgTy->isVoid()) {
           reportError(Node.getLoc(), ErrCode::VoidValue,
-                      "'heap(...)' cannot allocate a 'void' value -- there "
-                      "is nothing to copy onto the heap.",
+                      "`heap(...)` has nothing to copy onto the heap: its argument is `void`.",
                       {}, "Pass a variable or an expression with a value to `heap(...)`, "
                           "not a call to a function declared `: void`.",
-                      "Cannot heap-allocate 'void'!");
+                      "");
           setType(&Node, nullptr);
           return;
         }
@@ -975,16 +1134,16 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
         for (const auto &Cand : ArityMatches)
           Related.push_back({candidateLocation(*Cand), "declared: " + Cand->signature()});
         reportError(Node.getLoc(), ErrCode::WrongTypeArgumentCount,
-                    "'" + CalleeName + "' " +
+                    "`" + CalleeName + "` " +
                         (Want == 0 ? std::string("is not generic, so it takes no type arguments")
                                    : "takes " + std::to_string(Want) + " type argument" +
                                          (Want == 1 ? "" : "s")) +
                         ", and " + std::to_string(Written->size()) + " " +
                         (Written->size() == 1 ? "is" : "are") + " written.",
                     Related,
-                    Want == 0 ? "Drop the '::<...>' and call it as '" + CalleeName + "(...)'."
+                    Want == 0 ? "Remove the `::<...>` and call it as `" + CalleeName + "(...)`."
                               : "Write one type for each of its type parameters, in order.",
-                    "Wrong number of type arguments!");
+                    "");
         setType(&Node, nullptr);
         return;
       }
@@ -1003,13 +1162,20 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
                              "overload: " + Cand->signature()});
         }
       }
+      std::vector<std::vector<std::string>> Params;
+      for (const auto &Cand : Node.ResolvedCandidates)
+        if (Cand)
+          addOverloadParams(*Cand, Params);
+      SLM::DiagnosticHints Hints;
+      Hints.FixAlternatives = CompilerFixes::arityAlternatives(
+          CalleeName, Node.ArgSpans, Params,
+          anyName);
       reportError(Node.getLoc(), ErrCode::WrongArity,
-                  "'" + CalleeName + "' called with " +
+                  "No overload of `" + CalleeName + "` takes " +
                       std::to_string(ArgCount) + " argument" +
-                      (ArgCount == 1 ? "" : "s") +
-                      "; known overloads: " + Overloads + ".",
+                      (ArgCount == 1 ? "" : "s") + ". The overloads are " + Overloads + ".",
                   Related, "Pass the arguments one of the overloads above takes: " + Overloads + ".",
-                  "Wrong argument count!");
+                  "", Hints);
       setType(&Node, nullptr);
       return;
     }
@@ -1018,6 +1184,8 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
     // For vararg functions, only check the declared (named) params.
     // Extra args beyond Cand->arity() are passed raw per C ABI.
     std::vector<std::shared_ptr<ResolverFunctionSymbol>> TypeMatches;
+    // DX-5: with one candidate, the first argument that does not fit it.
+    int OnlyBadArg = -1;
     for (const auto &Cand : ArityMatches) {
       bool AllOk = true;
       int CheckCount = std::min(ArgCount, Cand->arity());
@@ -1036,6 +1204,8 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
             !(Cand->IsExtern && isExternStringToPtrCoercion(ArgTy, ParamTy)) &&
             !literalAcquiresType(Node.getArgs()[i].get(), ParamTy)) {
           AllOk = false;
+          if (ArityMatches.size() == 1)
+            OnlyBadArg = i;
           break;
         }
       }
@@ -1080,18 +1250,44 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
       SLM::DiagnosticHints Hints;
       for (const auto &Arg : Node.getArgs())
         addIdentifierTypes(Arg.get(), Hints);
-      reportError(Node.getLoc(),
+      // DX-5: one candidate, so one argument is wrong: it is the primary
+      // span, and its parameter's written type the secondary.
+      SourceLocation At = Node.getLoc();
+      if (OnlyBadArg >= 0 && ArgTypes[OnlyBadArg]) {
+        const ExprAST *Arg = Node.getArgs()[OnlyBadArg].get();
+        At = SpanLabels::spanOf(Arg, At);
+        Hints.Label = SpanLabels::thisIs(ArgTypes[OnlyBadArg].get());
+        const auto &Cand = ArityMatches.front();
+        if (Cand && Cand->Decl &&
+            OnlyBadArg < static_cast<int>(Cand->Decl->getParams().size())) {
+          const ParamDecl &P = Cand->Decl->getParams()[OnlyBadArg];
+          if (P.TypeLoc.EndCol > P.TypeLoc.Col && P.TypeLoc.EndLine == P.TypeLoc.Line)
+            Related.push_back({P.TypeLoc, "`" + P.Name + "` is " +
+                                              SpanLabels::aType(P.Type.get()) +
+                                              " because of this"});
+        }
+      }
+      // SL-6: the one candidate's signature as Turf writes it, and the
+      // structs its parameters and the arguments are.
+      if (ArityMatches.size() == 1 && ArityMatches.front()) {
+        Hints.Callee = turfSignature(*ArityMatches.front());
+        for (const auto &P : ArityMatches.front()->Params)
+          addStructDecl(P.Type.get(), Hints);
+      }
+      for (const auto &A : ArgTypes)
+        addStructDecl(A.get(), Hints);
+      reportError(At,
                   IsModuleCall ? ErrCode::ModuleArityOrType : ErrCode::ArgumentType,
-                  "No overload of '" +
+                  "No overload of `" +
                       (IsModuleCall ? CandidateModule + "::" : std::string()) +
                       CalleeName +
-                      "' matches argument types (" + ArgTypeStr + ").",
+                      "` takes the argument types (" + ArgTypeStr + ").",
                   Related,
                   AnyNullArg
-                      ? "'null' is only valid for pointer-typed parameters -- "
-                        "none of the overloads above take a pointer here."
+                      ? "Pass something other than `null`: none of the overloads "
+                        "takes a pointer or a `&?` reference here."
                       : copyOutArgHint(ArityMatches, ArgTypes),
-                  "No matching overload!", Hints);
+                  "", Hints);
       setType(&Node, nullptr);
       return;
     }
@@ -1162,15 +1358,15 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
         if (Subst.count(SP))
           continue;
         reportError(Node.getLoc(), ErrCode::NothingToInfer,
-                    "Can't tell the size '" + SP + "' of the array '" + CalleeName +
-                        "' returns: no argument has it" +
-                        (ExpectedResult ? ", and '" + ExpectedResult->getName() +
-                                              "' is not an array of a fixed size."
+                    "I cannot tell the size `" + SP + "` of the array `" + CalleeName +
+                        "` returns: no argument has it" +
+                        (ExpectedResult ? ", and `" + ExpectedResult->getName() +
+                                              "` is not an array of a fixed size."
                                         : ", and nothing says what type the result is."),
                     {},
-                    "Store the result where its type is written, e.g. 'mut a: int[8] = " +
-                        CalleeName + "(...);'.",
-                    "Nothing to infer!");
+                    "Store the result where its type is written, e.g. `mut a: int[8] = " +
+                        CalleeName + "(...);`.",
+                    "");
         setType(&Node, nullptr);
         return;
       }
@@ -1189,12 +1385,10 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
         std::vector<std::string> Order;
         for (int i = 0; i < SubstCheckCount; ++i)
           TypeWalk::collectParamOrder(Best->Params[i].Type, Order);
-        // With a size parameter the return type may be what binds one, so
-        // the arguments follow the declaration's own order, which is the
-        // order the drain pairs them with.
-        if (!Best->SizeParams.empty())
-          Order = Best->TypeParams;
-        std::vector<TurfTypePtr> TypeArgs = orderedTypeArgs(Order, Subst);
+        // The arguments follow the declaration's own order, which is the
+        // order the drain pairs them with (orderedTypeArgs()).
+        std::vector<TurfTypePtr> TypeArgs =
+            orderedTypeArgs(Best->TypeParams, Order, Subst);
         // TYPE-002 (S14a): only a FULLY CONCRETE substitution is a real
         // instantiation request -- found live, not anticipated: a generic
         // function calling ANOTHER generic function through its own STILL-
@@ -1255,21 +1449,21 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
       TurfTypePtr CalleeTy = getType(Node.getCallee());
       if (CalleeTy && CalleeTy->isFunc()) {
         const std::string Shown =
-            ExprCallee ? "The called function value" : "'" + CalleeName + "'";
+            ExprCallee ? "The called function" : "`" + CalleeName + "`";
         const std::string ShownIn =
-            ExprCallee ? "the called function value" : "'" + CalleeName + "'";
+            ExprCallee ? "the called function" : "`" + CalleeName + "`";
         const auto *FT = static_cast<const FuncType *>(CalleeTy.get());
         const auto &ParamTypes = FT->getParamTypes();
         if (static_cast<int>(ParamTypes.size()) != ArgCount) {
           reportError(Node.getLoc(), ErrCode::WrongArity,
-                      Shown + " expects " +
+                      Shown + " takes " +
                           std::to_string(ParamTypes.size()) + " argument" +
-                          (ParamTypes.size() == 1 ? "" : "s") + ", got " +
+                          (ParamTypes.size() == 1 ? "" : "s") + ", and this call passes " +
                           std::to_string(ArgCount) + ".",
                       {}, "Call " + ShownIn + " with exactly " +
                           std::to_string(ParamTypes.size()) + " argument" +
                           (ParamTypes.size() == 1 ? "" : "s") + ".",
-                      "Wrong argument count!");
+                      "");
           setType(&Node, nullptr);
           return;
         }
@@ -1277,10 +1471,11 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
           if (ParamTypes[i] && ArgTypes[i] &&
               !typesCompatible(ArgTypes[i].get(), ParamTypes[i].get())) {
             reportError(Node.getLoc(), ErrCode::ArgumentType,
-                        "Argument " + std::to_string(i + 1) + " to " +
-                            ShownIn + " expects '" +
-                            ParamTypes[i]->getName() + "', got '" +
-                            ArgTypes[i]->getName() + "'.");
+                        "Argument " + std::to_string(i + 1) + " of " +
+                            ShownIn + " is " + SpanLabels::aType(ParamTypes[i]) +
+                            ", and I found " + SpanLabels::aType(ArgTypes[i]) + ".",
+                        {}, "Pass " + SpanLabels::aType(ParamTypes[i]) +
+                            ", converting with `to` where the types differ.");
             setType(&Node, nullptr);
             return;
           }
@@ -1296,10 +1491,10 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
       if (!ExprCallee) {
         if (CalleeTy)
           reportError(Node.getLoc(), ErrCode::NotCallable,
-                      "'" + CalleeName + "' is a variable of type '" +
-                          CalleeTy->getName() + "', not a function -- it can't be called.",
-                      {}, "Drop the '(...)' if you meant to use its value.",
-                      "Not callable!");
+                      "`" + CalleeName + "` is " + SpanLabels::aType(CalleeTy) +
+                          ", not a function, so I cannot call it.",
+                      {}, "Remove the `(...)` to use `" + CalleeName + "` itself.",
+                      "");
         setType(&Node, nullptr);
         return;
       }
@@ -1313,11 +1508,10 @@ void TypeChecker::visitFuncCallImpl(FuncCallExprAST &Node) {
     TurfTypePtr CalleeTy = getType(Node.getCallee());
     if (CalleeTy) {
       reportError(Node.getLoc(), ErrCode::NotCallable,
-                  "This expression has type '" + CalleeTy->getName() +
-                      "', not a function -- it can't be called.",
-                  {}, "Only a function, or a variable holding one, can be "
-                      "followed by '(...)'.",
-                  "Not callable!");
+                  "This expression is " + SpanLabels::aType(CalleeTy) +
+                      ", not a function, so I cannot call it.",
+                  {}, "Remove the `(...)`, or call a function or a variable that holds one.",
+                  "");
     }
     setType(&Node, nullptr);
     return;
@@ -1389,16 +1583,16 @@ bool TypeChecker::tryUFCSFallback(MethodCallExprAST &Node,
       for (const auto *C : ArityMatches)
         Related.push_back({candidateLocation(*C), "declared: " + C->signature()});
       reportError(Node.getNameLoc(), ErrCode::WrongTypeArgumentCount,
-                  "'" + MethodName + "' " +
+                  "`" + MethodName + "` " +
                       (Want == 0 ? std::string("is not generic, so it takes no type arguments")
                                  : "takes " + std::to_string(Want) + " type argument" +
                                        (Want == 1 ? "" : "s")) +
                       ", and " + std::to_string(Written.size()) + " " +
                       (Written.size() == 1 ? "is" : "are") + " written.",
                   Related,
-                  Want == 0 ? "Drop the '::<...>' and call it as 'x." + MethodName + "(...)'."
+                  Want == 0 ? "Remove the `::<...>` and call it as `x." + MethodName + "(...)`."
                             : "Write one type for each of its type parameters, in order.",
-                  "Wrong number of type arguments!");
+                  "");
       setType(&Node, nullptr);
       return true; // reported -- the caller must not also report
     }
@@ -1566,10 +1760,11 @@ bool TypeChecker::tryUFCSFallback(MethodCallExprAST &Node,
   }
   if (ExactMatches.size() > 1) {
     reportError(Node.getLoc(), ErrCode::AmbiguousCall,
-                "Ambiguous UFCS call to '" + MethodName +
-                    "': more than one visible free-function overload "
-                    "matches this call site exactly.",
-                {}, "", "Ambiguous call!");
+                "More than one visible function `" + MethodName +
+                    "` takes this receiver, so I cannot choose one.",
+                {}, "Remove one of the conflicting functions or imports, or "
+                    "call the one you mean as `module::" + MethodName + "(x, ...)`.",
+                "");
     setType(&Node, nullptr);
     return true; // handled (as an error) -- caller must not also report
   }
@@ -1590,7 +1785,7 @@ bool TypeChecker::tryUFCSFallback(MethodCallExprAST &Node,
     }
     checkSliceTypeArguments(Subst, MethodName, Node.getLoc()); // E140
     if (MonoCollector_) {
-      std::vector<TurfTypePtr> TypeArgs = orderedTypeArgs(Best->TypeParams, Subst);
+      std::vector<TurfTypePtr> TypeArgs = orderedTypeArgs(Best->TypeParams, {}, Subst);
       bool AllConcrete = TypeArgs.size() == Best->TypeParams.size();
       for (const auto &A : TypeArgs)
         AllConcrete &= isFullyConcreteType(A.get());
@@ -1651,6 +1846,12 @@ bool TypeChecker::rejectNullableNonVariableUse(const ExprAST *Base,
     return false;
   if (dynamic_cast<const VariableExprAST *>(Base))
     return false; // flow-sensitive: NullabilityPass decides, per path
+  // AN-4: a field path (`h.next.val`) is narrowed by `h.next != null` the
+  // same way; NullabilityPass proves the marked base or reports E081.
+  if (NullablePlace::isPlace(Base)) {
+    const_cast<ExprAST *>(Base)->NeedsNonNull = true;
+    return false;
+  }
 #ifndef TYPECHECKER_NO_ERRORS
   PossibleNullDereferenceError(
       Loc, PossibleNullDereferenceError::NotAVariable{}, BaseTy->getName(), Member,
@@ -1671,14 +1872,14 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
   // nothing to bind.
   if (!Node.TypeArgs.empty() && Node.getResolvedCallTarget() && !Node.ResolvedViaUFCS) {
     reportError(Node.getNameLoc(), ErrCode::WrongTypeArgumentCount,
-                "'" + Node.getMethod() + "' is a method, and a method call "
+                "`" + Node.getMethod() + "` is a method, and a method call "
                 "takes no type arguments.",
                 {},
-                "A method of a generic struct takes them from its receiver "
-                "('mut l = List<int>::default(); l." + Node.getMethod() +
-                    "(...)'). Only a generic function called through UFCS takes "
-                    "them: 'x.f::<int>()'.",
-                "Wrong number of type arguments!");
+                "Remove them: a method of a generic struct takes them from its "
+                "receiver (`mut l = List<int>::default(); l." + Node.getMethod() +
+                    "(...)`). Only a generic function called with `.` takes "
+                    "them, e.g. `x.f::<int>()`.",
+                "");
     setType(&Node, nullptr);
     return;
   }
@@ -1703,9 +1904,9 @@ void TypeChecker::rejectUninstantiatedReceiver(const ExprAST *Base) {
   const auto *FC = dynamic_cast<const FuncCallExprAST *>(Base);
   const auto *SC = FC ? dynamic_cast<const ScopeAccessExprAST *>(FC->getCallee()) : nullptr;
   if (!SC || SC->ResolvedKind != ScopeAccessKind::DefaultConstruct || FC->ConstructedType ||
-      !GlobalSymbolTable)
+      !Symbols())
     return;
-  auto T = GlobalSymbolTable->LookupType(SC->getLeftName());
+  auto T = Symbols()->LookupType(SC->getLeftName());
   const auto *STy = dynamic_cast<const TurfStructType *>(T.get());
   if (!STy || STy->getTypeParams().empty())
     return;
@@ -1714,12 +1915,12 @@ void TypeChecker::rejectUninstantiatedReceiver(const ExprAST *Base) {
   for (size_t I = 0; I < STy->getTypeParams().size(); ++I)
     Example += I ? ", int" : "int";
   reportError(FC->getLoc(), ErrCode::MissingTypeArguments,
-              "'" + Bare + "' is generic -- '" + Bare +
-                  "::default()' needs type arguments here, and nothing around it says which.",
+              "`" + Bare + "` is generic, so `" + Bare +
+                  "::default()` needs type arguments, and nothing here says which.",
               {},
               "Declare the value with its instantiation first, e.g. `mut b: " + Bare +
                   "<" + Example + "> = " + Bare + "::default();`, then use `b`.",
-              "Missing type arguments!");
+              "");
 }
 
 void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
@@ -1782,13 +1983,19 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
         Related.push_back({candidateLocation(*Cand),
                            "overload: " + ModuleName + "." + Cand->signature()});
       }
+      std::vector<std::vector<std::string>> Params;
+      for (const auto *Cand : Candidates)
+        addOverloadParams(*Cand, Params);
+      SLM::DiagnosticHints Hints;
+      Hints.FixAlternatives = CompilerFixes::arityAlternatives(
+          ModuleName + "::" + MethodName, Node.ArgSpans, Params,
+          anyName);
       reportError(Node.getLoc(), ErrCode::WrongArity,
-                  "'" + ModuleName + "::" + MethodName + "' called with " +
+                  "No overload of `" + ModuleName + "::" + MethodName + "` takes " +
                       std::to_string(ArgCount) + " argument" +
-                      (ArgCount == 1 ? "" : "s") +
-                      "; known overloads: " + Overloads + ".",
+                      (ArgCount == 1 ? "" : "s") + ". The overloads are " + Overloads + ".",
                   Related, "Pass the arguments one of the overloads above takes: " + Overloads + ".",
-                  "Wrong argument count!");
+                  "", Hints);
       setType(&Node, nullptr);
       return;
     }
@@ -1823,9 +2030,9 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
         Related.push_back({candidateLocation(*Cand),
                            "candidate: " + ModuleName + "." + Cand->signature()});
       reportError(Node.getLoc(), ErrCode::ModuleArityOrType,
-                  "No overload of '" + ModuleName + "::" + MethodName +
-                      "' matches argument types (" + ArgTypeStr + ").",
-                  Related, copyOutArgHint(ArityMatches, ArgTypes), "No matching overload!");
+                  "No overload of `" + ModuleName + "::" + MethodName +
+                      "` takes the argument types (" + ArgTypeStr + ").",
+                  Related, copyOutArgHint(ArityMatches, ArgTypes), "");
       setType(&Node, nullptr);
       return;
     }
@@ -1869,9 +2076,9 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
     TurfTypePtr BaseTy = getType(Node.getBase());
     bool IsStaticMethod = false;
     if (auto *Var = dynamic_cast<const VariableExprAST *>(Node.getBase())) {
-      if (Var->IsStructName && GlobalSymbolTable) {
+      if (Var->IsStructName && Symbols()) {
         IsStaticMethod = true;
-        BaseTy = GlobalSymbolTable->LookupType(Var->getName());
+        BaseTy = Symbols()->LookupType(Var->getName());
       }
     }
 
@@ -1913,8 +2120,8 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
     // Resolve NamedType to TurfStructType
     if (BaseTy) {
       if (auto *NT = dynamic_cast<const NamedType *>(BaseTy.get())) {
-        if (GlobalSymbolTable)
-          BaseTy = GlobalSymbolTable->LookupType(NT->getName());
+        if (Symbols())
+          BaseTy = Symbols()->LookupType(NT->getName());
       }
     }
     // Snapshot BaseTy here, BEFORE the bare-name GenericType->TurfStructType
@@ -1967,8 +2174,8 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
     // could reach (e.g. inside assert()), nowhere near the real cause.
     if (BaseTy) {
       if (auto *GT = dynamic_cast<const GenericType *>(BaseTy.get())) {
-        if (GlobalSymbolTable)
-          BaseTy = GlobalSymbolTable->LookupType(GT->getBaseName());
+        if (Symbols())
+          BaseTy = Symbols()->LookupType(GT->getBaseName());
       }
     }
     // ── Machine transition call (e.g. conn.transition(ConnectionState::X)) ──
@@ -1992,9 +2199,10 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
         if (MethodName == "transition") {
           if (ArgCount != 1) {
             reportError(Node.getLoc(), ErrCode::WrongArity,
-                        "'transition' expects exactly 1 argument (the target "
-                        "state), got " + std::to_string(ArgCount) + ".",
-                        {}, "", "Wrong argument count!");
+                        "`transition` takes 1 argument, the target state, and "
+                        "this call passes " + std::to_string(ArgCount) + ".",
+                        {}, "Pass the state to move to, e.g. `m.transition(State::Next)`.",
+                        "");
             setType(&Node, TurfVoid());
             return;
           }
@@ -2199,9 +2407,9 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
             Related.push_back({candidateLocation(*Cand),
                                "candidate: " + Cand->signature()});
           reportError(Node.getLoc(), ErrCode::ArgumentType,
-                      "No overload of '" + StructName + "." + MethodName +
-                          "' matches argument types (" + ArgTypeStr + ").",
-                      Related, copyOutArgHint(ArityMatches, ArgTypes), "No matching overload!");
+                      "No overload of `" + StructName + "." + MethodName +
+                          "` takes the argument types (" + ArgTypeStr + ").",
+                      Related, copyOutArgHint(ArityMatches, ArgTypes), "");
           setType(&Node, nullptr);
           return;
         }
@@ -2245,8 +2453,8 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
             // (`self.inner.bump()`), or aliasing.
             rejectOperatorTemporaryWrite(
                 Node.getBase(), Node.getLoc(),
-                "Cannot call '" + MethodName + "' on the value an 'operator[]' "
-                "read returned: it changes its receiver, but the receiver is a "
+                "I cannot call `" + MethodName + "` on what an `operator[]` "
+                "read returned: it changes its receiver, and the receiver is a "
                 "copy, so the change would be lost.",
                 /*PlaceIsStoreTarget=*/false);
             if (auto *BaseVarForImmut =
@@ -2304,7 +2512,7 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
           // found with GT's type args positionally.
           //
           // TurfGenericParamType, as of OVH-006 -- Resolver::visitStructDecl()
-          // now re-registers GlobalSymbolTable's TurfStructType for this
+          // now re-registers Symbols()'s TurfStructType for this
           // struct with the same substituted field list it writes onto the
           // AST node, so the Scan below hits the `GP` branch directly for an
           // ordinary generic struct field. (Before that fix, the registered
@@ -2461,7 +2669,7 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
                 int ParamOffset = IsStaticMethod ? 0 : 1;
                 for (int i = 0; i < ArgCount; ++i)
                   TypeWalk::collectParamOrder(Best->Params[i + ParamOffset].Type, Order);
-                std::vector<TurfTypePtr> TypeArgs = orderedTypeArgs(Order, MethodOwnSubst);
+                std::vector<TurfTypePtr> TypeArgs = orderedTypeArgs(Best->TypeParams, Order, MethodOwnSubst);
                 bool AllConcrete = true;
                 for (const auto &A : TypeArgs)
                   if (!isFullyConcreteType(A.get())) { AllConcrete = false; break; }
@@ -2549,9 +2757,9 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
             Err.withDeterministicFix(
                 RecvVar->getName() + "." + MethodName,
                 StructName + "::" + MethodName,
-                "'" + MethodName + "' is declared 'static', so it has no "
-                "'self' and is called on the struct itself: " + StructName +
-                    "::" + MethodName + "(...), not through an instance.");
+                "`" + MethodName + "` is `static`, so it has no `self`: call it "
+                "on the struct, `" + StructName + "::" + MethodName +
+                    "(...)`, not through an instance.");
           Err.raise();
         } else {
           // Unlike module functions (whose BaseName is the bare method
@@ -2572,6 +2780,13 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
                                      ArgCount, KnownSigs);
           for (const auto &R : Related)
             Err.withRelated(R.Loc, R.Description);
+          std::vector<std::vector<std::string>> Params;
+          for (const auto *Cand : Candidates)
+            addOverloadParams(*Cand, Params);
+          for (const auto &Alt : CompilerFixes::arityAlternatives(
+                   StructName + "." + MethodName, Node.ArgSpans, Params,
+                   anyName))
+            Err.withFixAlternative(Alt);
           Err.raise();
         }
         setType(&Node, nullptr);
@@ -2613,22 +2828,22 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
         const bool IsBuiltinName = MethodName == "length" || MethodName == "copy";
         reportError(Node.getLoc(), ErrCode::MethodOnNonStruct,
                     IsBuiltinName
-                        ? "'" + MethodName + "()' on an array takes no "
-                          "arguments, but was given " +
+                        ? "`" + MethodName + "()` on an array takes no "
+                          "arguments, and this call passes " +
                               std::to_string(ArgCount) + "."
-                        : "Arrays have no method '" + MethodName + "'.",
+                        : "An array has no method `" + MethodName + "`.",
                     {},
-                    "An array (here '" + BaseTy->getName() +
-                        "') has two built-in methods: length() and copy(). "
-                        "Slice a part first if you want only some elements: "
-                        "arr[1..3].copy().",
-                    "No such method!");
+                    "Use one of the 2 methods of `" + BaseTy->getName() +
+                        "`, `length()` and `copy()`, and slice first for some "
+                        "of its elements: `arr[1..3].copy()`.",
+                    "");
       } else if (NamedCandidates.empty()) {
         reportError(Node.getLoc(), ErrCode::MethodOnNonStruct,
-                    "Cannot call method '" + MethodName + "' on type '" +
-                        ReceiverTy->getName() +
-                        "' -- only struct instances have methods.",
-                    {}, "", "No such method!");
+                    "I cannot call the method `" + MethodName + "` on " +
+                        SpanLabels::aType(ReceiverTy) + ": only a struct has methods.",
+                    {}, "Call a function that takes " + SpanLabels::aType(ReceiverTy) +
+                        " instead, or check the spelling and the import.",
+                    "");
       } else {
         // A function named MethodName exists and IS visible for UFCS --
         // it just doesn't accept THIS receiver (wrong type -- UFCS's
@@ -2643,14 +2858,14 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
           Related.push_back({candidateLocation(*Cand),
                              "candidate: " + Cand->signature()});
         reportError(Node.getLoc(), ErrCode::ArgumentType,
-                    "No visible '" + MethodName + "' overload accepts a '" +
-                        ReceiverTy->getName() + "' receiver via UFCS.",
+                    "No visible `" + MethodName + "` takes " +
+                        SpanLabels::aType(ReceiverTy) + " as its receiver: a call "
+                        "with `.` matches the receiver's type exactly and never "
+                        "converts it.",
                     Related,
-                    "UFCS matches the receiver's type exactly -- it never "
-                    "coerces or widens it (e.g. char -> int). Either change "
-                    "the receiver's declared parameter type, or convert '" +
-                        MethodName + "'s receiver explicitly before calling.",
-                    "No matching overload!");
+                    "Convert the receiver with `to` before the call, or change "
+                        "the type of the first parameter of `" + MethodName + "`.",
+                    "");
       }
       setType(&Node, nullptr);
       return;
@@ -2664,10 +2879,38 @@ void TypeChecker::visitMethodCallImpl(MethodCallExprAST &Node) {
   // cheap safety net against ever reaching Codegen's fatal-error fallback
   // with zero diagnostic printed at all, in case some future code path
   // reaches here with a null BaseTy that ISN'T already covered elsewhere.
+  //
+  // A base reached through a template's open type parameter (`a.f.get()`
+  // with `a: T`) has no type in the template on purpose: whether `T` has
+  // the field `f` is checked per instantiation (FREEZE §6.1), and
+  // visitFieldAccess() leaves the field's type open. The call is left open
+  // the same way (turf-fuzz #34); the clone's own check reports a real
+  // error.
+  for (const ExprAST *E = Node.getBase(); E;) {
+    TurfTypePtr ET = getType(E);
+    if (ET && (isOpenTypeParam(ET.get()) ||
+               (ET->isReference() &&
+                isOpenTypeParam(static_cast<const TurfPointerType *>(ET.get())
+                                    ->getPointee().get())))) {
+      setType(&Node, nullptr);
+      return;
+    }
+    if (ET)
+      break; // a concrete type on the way: the gap is not the template's
+    if (const auto *FA = dynamic_cast<const FieldAccessExprAST *>(E))
+      E = FA->getBase();
+    else if (const auto *MC = dynamic_cast<const MethodCallExprAST *>(E))
+      E = MC->getBase();
+    else if (const auto *AA = dynamic_cast<const ArrayAccessExprAST *>(E))
+      E = AA->getBase();
+    else
+      break;
+  }
   reportError(Node.getLoc(), ErrCode::InternalCompilerError,
-              "Cannot determine the type of this method call's target -- "
-              "the expression before '." + MethodName + "' has no known type.",
-              {});
+              "I could not work out the type of the expression before `." +
+                  MethodName + "`. This is a compiler bug.",
+              {}, "Report it at https://github.com/turf-lang/turf-lang/issues with "
+                  "this program.");
   setType(&Node, nullptr);
 }
 
@@ -2707,8 +2950,8 @@ TurfTypePtr TypeChecker::instantiatedFieldType(
 
   if (FieldTy) {
     if (auto *NT = dynamic_cast<const NamedType *>(FieldTy.get())) {
-      if (GlobalSymbolTable) {
-        if (auto R = GlobalSymbolTable->LookupType(NT->getName()))
+      if (Symbols()) {
+        if (auto R = Symbols()->LookupType(NT->getName()))
           FieldTy = R;
       }
     }
@@ -2725,7 +2968,7 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
 
 #ifndef TYPECHECKER_NO_ERRORS
   // Resolve the base type and look up the field.
-  // GlobalSymbolTable is only available in the full build (not unit tests).
+  // Symbols() is only available in the full build (not unit tests).
   TurfTypePtr BaseTy = getType(Node.getBase());
 
   // `unsafe { }` gate (issue #238): field/member access through a raw
@@ -2767,11 +3010,11 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
       setType(&Node, TurfString());
     } else {
       reportError(Node.getNameLoc(), ErrCode::ErrorPayload,
-                  "An error value has no field '" + Node.getFieldName() +
-                      "' -- only 'message' is readable.",
-                  {}, "Use '.message' to read the string attached at "
-                      "'ErrorType::Variant(\"...\")' construction.",
-                  "No such field on an error value!");
+                  "An error has no field `" + Node.getFieldName() +
+                      "`: `message` is the only one.",
+                  {}, "Use `.message` to read the `string` given at "
+                      "`ErrorType::Variant(\"...\")`.",
+                  "");
       setType(&Node, TurfString());
     }
     return;
@@ -2786,8 +3029,8 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
   // Resolve NamedType to TurfStructType via symbol table
   if (BaseTy) {
     if (auto *NT = dynamic_cast<const NamedType *>(BaseTy.get())) {
-      if (GlobalSymbolTable)
-        BaseTy = GlobalSymbolTable->LookupType(NT->getName());
+      if (Symbols())
+        BaseTy = Symbols()->LookupType(NT->getName());
     }
   }
   // Resolve GenericType (e.g. a `Box<int>`-typed variable) to its underlying
@@ -2842,8 +3085,8 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
   }
   if (BaseTy) {
     if (auto *GT = dynamic_cast<const GenericType *>(BaseTy.get())) {
-      if (GlobalSymbolTable)
-        BaseTy = GlobalSymbolTable->LookupType(GT->getBaseName());
+      if (Symbols())
+        BaseTy = Symbols()->LookupType(GT->getBaseName());
     }
   }
 
@@ -2888,7 +3131,7 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
     // A concrete type that is not a struct has no fields at all. An open
     // generic parameter (a template's body, checked before it is cloned) is
     // left to its instantiations.
-    if (GlobalSymbolTable && isFullyConcreteType(BaseTy.get()) &&
+    if (Symbols() && isFullyConcreteType(BaseTy.get()) &&
         !dynamic_cast<const NamedType *>(BaseTy.get()) &&
         !dynamic_cast<const GenericType *>(BaseTy.get())) {
       UnknownStructFieldError(Node.getNameLoc(), UnknownStructFieldError::NotAStruct{},
@@ -2971,12 +3214,11 @@ void TypeChecker::visitRecoverExpr(RecoverExprAST &Node) {
 
   if (!WrappedTy || !WrappedTy->isErrorUnion()) {
     reportError(Node.getLoc(), ErrCode::InvalidRecover,
-               "'recover' can only be used on a fallible ('!T') expression.",
+               "`recover` follows a call that can fail, one that returns `!T`, "
+               "and this expression cannot fail.",
                {},
-               "Only a call whose declared return type is '!T' can be "
-               "followed by 'recover' -- an ordinary, non-fallible call has "
-               "nothing to recover from.",
-               "Invalid 'recover' use!");
+               "Remove the `recover`, or call a function that returns `!T`.",
+               "");
     setType(&Node, nullptr);
     return;
   }
@@ -2999,9 +3241,9 @@ void TypeChecker::visitRecoverExpr(RecoverExprAST &Node) {
     if (ProduceTy && SuccessTy && !typesCompatible(ProduceTy.get(), SuccessTy.get()) &&
         !literalAcquiresType(Node.getProduceExpr(), SuccessTy.get())) {
       reportError(Node.getLoc(), ErrCode::TypeMismatch,
-                  "'recover produce " + ProduceTy->getName() +
-                      "' doesn't match this call's success type '" +
-                      SuccessTy->getName() + "'.");
+                  "`recover produce` gives " + SpanLabels::aType(ProduceTy) +
+                      ", and this call succeeds with " + SpanLabels::aType(SuccessTy) + ".",
+                  {}, "Produce " + SpanLabels::aType(SuccessTy) + " instead.");
     } else if (ProduceTy && SuccessTy && ProduceTy->isNumeric() && SuccessTy->isNumeric() &&
                !sameTypeExact(ProduceTy.get(), SuccessTy.get()) &&
                !untypedLiteralAcquiresInt32(Node.getProduceExpr(), SuccessTy.get())) {
@@ -3009,13 +3251,12 @@ void TypeChecker::visitRecoverExpr(RecoverExprAST &Node) {
       // type exactly; an `int` for a `!double` is not widened (owner decision
       // 2026-10-13).
       reportError(Node.getLoc(), ErrCode::TypeMismatch,
-                  "'recover produce " + ProduceTy->getName() +
-                      "' doesn't match this call's success type '" +
-                      SuccessTy->getName() + "' exactly.",
+                  "`recover produce` gives " + SpanLabels::aType(ProduceTy) +
+                      ", and this call succeeds with " + SpanLabels::aType(SuccessTy) +
+                      ": the fallback is not converted.",
                   {},
-                  "The fallback is not widened. Write a '" + SuccessTy->getName() +
-                      "' value" +
-                      (SuccessTy->isDouble() ? " (`0.0`, or `(n to double)`)." : "."));
+                  "Produce " + SpanLabels::aType(SuccessTy) +
+                      (SuccessTy->isDouble() ? ", e.g. `0.0` or `(n to double)`." : "."));
     }
   } else {
     // Run / AsRun: per docs/architecture/errors_and_recover.md, a block that
@@ -3033,17 +3274,16 @@ void TypeChecker::visitRecoverExpr(RecoverExprAST &Node) {
     }
     if (!(SuccessTy && SuccessTy->isVoid()) && !AllPathsDiverge(Node.getBlock())) {
       reportError(Node.getLoc(), ErrCode::InvalidRecover,
-                  "'recover " +
+                  "A path through `recover " +
                       std::string(Node.getKind() == RecoverKind::AsRun
                                       ? "as " + Node.getBoundName() + " run"
                                       : "run") +
-                      "' must end every path with 'return' -- it doesn't "
-                      "produce a value, so falling through leaves this "
-                      "expression with nothing to evaluate to.",
+                      "` ends without a `return`, and the block gives the call "
+                      "nothing to stand for.",
                   {},
-                  "Either add 'return <value>;' on every path through the "
-                  "block, or use 'recover produce <value>;' instead.",
-                  "Non-diverging 'recover run'!");
+                  "End every path through the block with `return`, or use "
+                  "`recover produce <expression>;` instead.",
+                  "");
     }
   }
 
@@ -3067,10 +3307,9 @@ void TypeChecker::visitTry(TryExprAST &Node) {
   const TurfType *Declared =
       ReturnTypeStack_.empty() ? nullptr : ReturnTypeStack_.back().get();
   if (!Declared) {
-    TryMisuseError(Node.getLoc(), "'try' can only be used inside a function.",
-                   "It returns the error from the function it is in. At the top "
-                   "level there is none -- move this into a function that "
-                   "returns '!T'.")
+    TryMisuseError(Node.getLoc(), "`try` returns an error from the function it "
+                   "is in, and this one is outside every function.",
+                   "Move it into a function that returns `!T`.")
         .raise();
     return;
   }
@@ -3079,20 +3318,20 @@ void TypeChecker::visitTry(TryExprAST &Node) {
     if (Fn == "main") {
       TryMisuseError(
           Node.getLoc(),
-          "'main' returns '" + Declared->getName() + "', so there is nowhere to "
-          "propagate an error to.",
-          "Handle the error here instead: `f() recover as err run { ... return "
-          "1; };`, or `recover produce <value>` for a fallback. To use `try`, "
-          "move the fallible work into a function that returns '!T' and call "
-          "that from `main` with `recover`.")
+          "`main` returns " + SpanLabels::aType(Declared) + ", so `try` has "
+          "nowhere to return an error to.",
+          "Handle the error here with `f() recover as err run { ... return "
+          "1; };`, or `recover produce <expression>` for a fallback, or move the "
+          "work into a function that returns `!T` and call it from `main` with "
+          "`recover`.")
           .raise();
     } else {
       TryMisuseError(
           Node.getLoc(),
-          "this function returns '" + Declared->getName() + "', which can't "
-          "carry an error, so 'try' has nowhere to return one to.",
-          "Declare the function's return type as '!" + Declared->getName() +
-              "' so a failure can leave it, or handle the error in place with "
+          "This function returns " + SpanLabels::aType(Declared) + ", which "
+          "cannot carry an error, so `try` has nowhere to return one to.",
+          "Declare the function `!" + Declared->getName() +
+              "` so an error can leave it, or handle the error here with "
               "`recover`.")
           .raise();
     }
@@ -3102,11 +3341,9 @@ void TypeChecker::visitTry(TryExprAST &Node) {
   if (!OperandTy || !OperandTy->isErrorUnion()) {
     TryMisuseError(
         Node.getLoc(),
-        "'try' needs a fallible operand, but this has type '" +
-            (OperandTy ? OperandTy->getName() : std::string("<unknown>")) + "'.",
-        "`try` propagates the error of a call whose return type is '!T'. An "
-        "ordinary, non-fallible expression has no error to propagate -- drop "
-        "the `try`.")
+        "`try` needs a call that can fail, one that returns `!T`, and this is " +
+            (OperandTy ? SpanLabels::aType(OperandTy) : std::string("of an unknown type")) + ".",
+        "Remove the `try`: this expression has no error to return.")
         .raise();
     return;
   }
@@ -3142,8 +3379,8 @@ void TypeChecker::visitScopeAccess(ScopeAccessExprAST &Node) {
   // SOME type too, harmlessly, exactly like the comment above already
   // describes for ModuleFunctionRef/StaticMethodRef).
   if (Node.ResolvedKind == ScopeAccessKind::ErrorVariantRef) {
-    if (GlobalSymbolTable) {
-      if (auto ET = GlobalSymbolTable->LookupType(Node.getLeftName()))
+    if (Symbols()) {
+      if (auto ET = Symbols()->LookupType(Node.getLeftName()))
         setType(&Node, ET);
     }
     return;
@@ -3152,7 +3389,7 @@ void TypeChecker::visitScopeAccess(ScopeAccessExprAST &Node) {
   if (Node.ResolvedKind != ScopeAccessKind::EnumVariant)
     return;
 
-  auto ET = GlobalSymbolTable ? GlobalSymbolTable->LookupType(Node.getLeftName()) : nullptr;
+  auto ET = Symbols() ? Symbols()->LookupType(Node.getLeftName()) : nullptr;
   if (!ET) return; // Should not happen, Resolver catches this
 
   if (Node.getRightName() == "COUNT") {
@@ -3209,10 +3446,8 @@ void TypeChecker::visitArrayAccess(ArrayAccessExprAST &Node) {
                                 Node.getLoc(), R)) {
         if (Node.ResolvedIndexGetTarget) {
           reportError(Node.getLoc(), ErrCode::AmbiguousCall,
-                      "Ambiguous 'operator[](" + BaseTy->getName() + ", " +
-                          IndexTy->getName() +
-                          ")' call: more than one visible overload matches "
-                          "at this call site.");
+                      "More than one visible `operator[](" + BaseTy->getName() + ", " +
+                          IndexTy->getName() + ")` matches here, so I cannot choose one.");
           break;
         }
         Node.ResolvedIndexGetTarget = C;
@@ -3242,12 +3477,10 @@ void TypeChecker::visitArrayAccess(ArrayAccessExprAST &Node) {
       (BaseTy->isArray() || BaseTy->isString() ||
        dynamic_cast<const TurfPointerType *>(BaseTy.get()))) {
     reportError(Node.getLoc(), ErrCode::ArrayNonIntegerIndex,
-                "You used a value of type '" + IndexTy->getName() +
-                    "' as an index into '" + BaseTy->getName() + "'.",
-                {}, "Use an 'int' to index, like arr[0] or arr[i] where i is "
-                    "an int. To turn a number or a char into an int: "
-                    "(x to int).",
-                "Index must be an integer!");
+                "An index into `" + BaseTy->getName() + "` must be an `int`, and I found " +
+                    SpanLabels::aType(IndexTy) + ".",
+                {}, "Convert the index with `to int`, e.g. `arr[(x to int)]`.",
+                "");
   }
 
   if (BaseTy && BaseTy->isArray()) {
@@ -3258,11 +3491,11 @@ void TypeChecker::visitArrayAccess(ArrayAccessExprAST &Node) {
     // Issue #17 fix: if the element type is a NamedType (e.g. "User"), resolve
     // it to the actual TurfStructType via the symbol table. Without this,
     // arr[0].field fails because the type never becomes a struct.
-    // GlobalSymbolTable is only available in the full build (not unit tests).
+    // Symbols() is only available in the full build (not unit tests).
     if (ElemTy) {
       if (const auto *NT = dynamic_cast<const NamedType *>(ElemTy.get())) {
-        if (GlobalSymbolTable) {
-          if (auto Resolved = GlobalSymbolTable->LookupType(NT->getName()))
+        if (Symbols()) {
+          if (auto Resolved = Symbols()->LookupType(NT->getName()))
             ElemTy = Resolved;
         }
       }
@@ -3308,13 +3541,12 @@ void TypeChecker::visitArrayAccess(ArrayAccessExprAST &Node) {
         if (BaseTy->isNullableReference() || (Arr && Arr->getSize() < 0)) {
           const std::string Pointee = ElemTy ? ElemTy->getName() : "T";
           reportError(Node.getLoc(), ErrCode::UnsupportedOperation,
-                      "Cannot index a value of type '" + BaseTy->getName() + "'.",
+                      "I cannot index " + SpanLabels::aType(BaseTy) + ".",
                       {},
                       BaseTy->isNullableReference()
-                          ? "It may be null. Check it first and index a '&" + Pointee +
-                                "' made from it (`r to &" + Pointee + "` after `r != null`)."
-                          : "Only a reference to a fixed-size array (`&int[3]`) is "
-                            "indexed by element.");
+                          ? "Check it is not `null`, then index a `&" + Pointee +
+                                "` made from it: `r to &" + Pointee + "` after `r != null`."
+                          : "Index a reference to a fixed-size array, e.g. `&int[3]`.");
           setType(&Node, nullptr);
           return;
         }
@@ -3323,8 +3555,8 @@ void TypeChecker::visitArrayAccess(ArrayAccessExprAST &Node) {
       }
       if (ElemTy) {
         if (const auto *NT = dynamic_cast<const NamedType *>(ElemTy.get())) {
-          if (GlobalSymbolTable) {
-            if (auto Resolved = GlobalSymbolTable->LookupType(NT->getName()))
+          if (Symbols()) {
+            if (auto Resolved = Symbols()->LookupType(NT->getName()))
               ElemTy = Resolved;
           }
         }
@@ -3367,17 +3599,19 @@ void TypeChecker::visitArrayAccess(ArrayAccessExprAST &Node) {
       if (IsRead && !BaseTy->isGenericParam()) {
         if (Primitive || !DeclaredFor(Node.ResolvedIndexGetCandidates)) {
           reportError(Node.getLoc(), ErrCode::UnsupportedOperation,
-                      "Cannot index a value of type '" + BaseTy->getName() + "'.",
-                      {}, "Only arrays, strings, pointers, and types that define "
-                          "an 'operator []' can be indexed with [ ].");
+                      "I cannot index " + SpanLabels::aType(BaseTy) + ".",
+                      {}, "Index an array, a `string` or a pointer, or declare an "
+                          "`operator []` for `" + BaseTy->getName() + "`.");
         } else if (IndexTy && !TypeWalk::containsOpenParam(BaseTy.get(), TypeWalk::ParamScope::ThroughGenericArgs) &&
                    !TypeWalk::containsOpenParam(IndexTy.get(), TypeWalk::ParamScope::ThroughGenericArgs)) {
           // The type does declare an `operator[]`, but none takes this index
           // type (exact match only, F-OP-1). Same shape as the `[]=` message
           // in visitAssign().
           reportError(Node.getLoc(), ErrCode::ArgumentType,
-                      "No 'operator[]' overload matches '" + BaseTy->getName() +
-                          "[" + IndexTy->getName() + "]'.");
+                      "No `operator[]` matches `" + BaseTy->getName() +
+                          "[" + IndexTy->getName() + "]`.",
+                      {}, "Declare an `operator[]` that takes these types, or "
+                          "convert the index with `to`.");
         }
       }
       setType(&Node, nullptr);
@@ -3406,15 +3640,15 @@ bool TypeChecker::checkConsistentTypeArguments(
           sameTypeExact(It->second.Ty.get(), Ty.get()))
         continue;
       reportError(Loc, ErrCode::ArgumentType,
-                  "'" + Name + "' in '" + CalleeName + "' is '" +
-                      It->second.Ty->getName() + "' from argument " +
-                      std::to_string(It->second.Arg + 1) + " but '" +
-                      Ty->getName() + "' from argument " + std::to_string(i + 1) +
-                      "; one type parameter stands for one type.",
+                  "`" + Name + "` in `" + CalleeName + "` is " +
+                      SpanLabels::aType(It->second.Ty) + " from argument " +
+                      std::to_string(It->second.Arg + 1) + " and " +
+                      SpanLabels::aType(Ty) + " from argument " + std::to_string(i + 1) +
+                      ". One type parameter stands for one type.",
                   {},
                   "Convert one argument so both have the same type, e.g. `x to " +
                       It->second.Ty->getName() + "`.",
-                  "Conflicting type arguments!");
+                  "");
       return false;
     }
   }

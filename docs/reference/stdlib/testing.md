@@ -1,8 +1,8 @@
 # Testing: `test`
 
 Assertions for test programs, and how `turf test` runs them. Not prelude: it
-needs `import test;`, and a bare `assert(...)` without it is E041 ("Unknown
-function 'assert'").
+needs `import test;`, and a bare `assert(...)` without it is E041 ("I cannot find a function
+named `assert`").
 
 ```turflang
 import test;
@@ -31,7 +31,7 @@ call the same assertions.
 
 `assert_eq` and `assert_neq` exist for four types: `int`, `double`, `bool` and
 `string`. Both sides must be the same type. Other types have no overload (`char`
-is E025, "No matching overload!"); compare those with
+is E025, "No overload of `test::assert_eq` takes the argument types (char, char)"); compare those with
 `assert(a == b, "message")`.
 
 ### `assert`

@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E086
-// EXPECT-DIAG: can't be stored into a field that outlives this function
+// EXPECT-DIAG: be stored into a field that outlives this function
 // `h` is a by-value copy, but its `own` field is the reference the caller
 // passed: the node it points at is the caller's.
 struct N { val: int, next: &?N }

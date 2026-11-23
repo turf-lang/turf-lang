@@ -1,6 +1,6 @@
 // EXPECT-DIAG: E146
-// EXPECT-DIAG: Unknown '@ownership' argument 'aquires'
-// EXPECT-DIAG: Did you mean 'acquires'
+// EXPECT-DIAG: I do not know the `@ownership` argument `aquires`. Write `acquires` if you meant it. Use `acquires` or `releases: <parameter>`.
+// EXPECT-DIAG: I do not know the `@ownership` argument `aquires`. Write `acquires` if you meant it. Use `acquires` or `releases: <parameter>`.
 // A misspelt argument must be an error. Ignoring it would leave the function
 // looking annotated while the allocation check it was written for stayed off.
 

@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E092
-// EXPECT-DIAG: this pattern destructures 'Q', but the value being matched is a 'P'
+// EXPECT-DIAG: This pattern destructures a `Q`, and what it matches is a `P`.
 // LEC-003: the pattern must name the struct it is matched against.
 // Expected: E092.
 struct P { x: int }

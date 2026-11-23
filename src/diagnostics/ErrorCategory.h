@@ -60,6 +60,17 @@ struct DiagnosticHints {
   // "receiver", never inside the code.
   std::string ReceiverDecl;
 
+  // SL-6: more of what the model cannot read off the lines it is shown.
+  // `Structs`: the declarations of the structs a mismatch is about, other
+  // than ReceiverDecl (`struct Point { x: int, y: int }`), at most three.
+  // `Callee`: the signature of the function a call mismatch is about, in
+  // Turf's own syntax (`fn area(w: int, h: int): int`). `Params`: the
+  // parameters of the function the diagnostic is in (`n: int`), filled by the
+  // TypeChecker for every error it raises inside a function.
+  std::vector<std::string> Structs;
+  std::string Callee;
+  std::vector<std::string> Params;
+
   // The exact edit the raising site already knows fixes this diagnostic -- an
   // unambiguous "did you mean" rename, a missing `<T>`, a misplaced `pub`, a
   // missing ';' (see the withFixIt() family in Errors.h for which sites attach
@@ -77,8 +88,30 @@ struct DiagnosticHints {
   // that together move a word read "move 'pub' to just before 'fn'".
   std::string FixDescription;
 
+  // SL-7: fixes the raise site cannot choose between by itself -- which of
+  // the arguments of a call with one too many to delete, which return type a
+  // function with none declares. Each is a whole fix (its own FixIts, reason
+  // and description). Every one is checked like FixIts above, and the error
+  // gets a `Fix:` only when exactly one passes: two that pass mean the
+  // compiler cannot tell which was meant. Used only when FixIts is empty.
+  struct Alternative {
+    std::vector<FixIt> FixIts;
+    std::string FixReason;
+    std::string FixDescription;
+  };
+  std::vector<Alternative> FixAlternatives;
+
+  // DX-5: what the primary span's underline says -- "this is an 'int'".
+  // Empty: the code's own label (ErrorCodes::defaultLabel()). The secondary
+  // spans are the diagnostic's related locations, each labelled with its
+  // description.
+  std::string Label;
+
+  // A fix to check: FixIts, or alternatives to choose one from.
+  bool hasFix() const { return !FixIts.empty() || !FixAlternatives.empty(); }
+
   bool empty() const {
-    return KnownTypes.empty() && ReceiverDecl.empty() && FixIts.empty();
+    return KnownTypes.empty() && ReceiverDecl.empty() && !hasFix();
   }
 };
 

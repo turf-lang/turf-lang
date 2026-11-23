@@ -1,0 +1,32 @@
+// turf-fuzz #34: `a.inner.get()` with `a: T` reads a field of T, then calls a
+// method on it. Whether T has the field is known only per instantiation, so
+// the template leaves the call open, as it does `a.get()`; the compiler
+// called it an internal error. With a struct that has the field it runs.
+import test;
+
+struct Inner {
+    v: int
+}
+
+fn Inner.get(): int {
+    return self.v;
+}
+
+struct Outer {
+    inner: Inner
+}
+
+fn<T> read_inner(a: T): int {
+    return a.inner.get();
+}
+
+fn<T> never_called(a: T): int {
+    return a.x.y.z.get();
+}
+
+fn main(): int {
+    mut o: Outer = Outer::default();
+    o.inner.v = 41;
+    test::assert(read_inner(o) == 41, "a field chain through T reaches the method");
+    return 0;
+}

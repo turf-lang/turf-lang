@@ -1,0 +1,15 @@
+// Mirror of fail_index_read_with_setter_only.tr: a type with only
+// `operator []` can be read but not assigned through.
+struct IntBox {
+    a: int
+}
+
+operator [](box: IntBox, index: int): int {
+    return box.a;
+}
+
+@test(compile_error, E056, "No `operator[]=` matches `IntBox[int] = int`.")
+fn rejects_index_write_with_getter_only(): void {
+    mut box: IntBox = IntBox::default();
+    box[0] = 1;
+}

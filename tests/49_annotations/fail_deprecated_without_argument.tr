@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E146
-// EXPECT-DIAG: '@deprecated' takes exactly one argument
+// EXPECT-DIAG: `@deprecated` takes exactly one argument: the message to show at each use, e.g. `@deprecated("use new_fn() instead")`.
 // A bare `@deprecated` says nothing about what to use instead, so it is
 // rejected instead of warning with an empty message.
 

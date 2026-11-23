@@ -1,0 +1,33 @@
+TURF E181 -- `int` TO `double` THAT MAY LOSE PRECISION (WARNING, OPT-IN):
+
+CAUSE:
+  An `int` is converted to `double` (explicitly with `to double`, or by
+  being stored into, passed as or returned as a `double`) and the compiler
+  cannot prove it is within +-2^53, where every `int` converts exactly. This
+  is an opt-in WARNING; compilation succeeds.
+
+INCORRECT (compiles, but warns when E181 is turned on):
+    fn ratio(n: int): double {
+        return n to double;
+    }
+
+    fn main(): int {
+        printline(ratio(3));
+        return 0;
+    }
+
+CORRECT (keep the value an int where exactness matters):
+    fn ratio(n: int): int {
+        return n;
+    }
+
+    fn main(): int {
+        printline(ratio(3));
+        return 0;
+    }
+
+FIX:
+  Keep the value an `int`, or make sure it is within +-9007199254740992
+  before converting it. Nothing is wrong for values in that range.
+
+RELATED: E077 (an integer literal that is not exact as a double).

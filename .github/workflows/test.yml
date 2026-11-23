@@ -168,6 +168,12 @@ jobs:
       - name: Diagnostics as JSON match the schema and the text form
         run: python3 scripts/check/diagnostics_json_check.py
 
+      # DX-10 (#336): every registered code has a snapshot of its full text and
+      # its JSON line; a missing or stale one fails (--write after a deliberate
+      # change, reviewed as a diff).
+      - name: Every diagnostic matches its snapshot
+        run: python3 scripts/check/diagnostic_snapshots.py
+
       # DX-3 (issue #291): every error a fail_*.tr test reports prints a
       # concrete Hint: line; a raise site without one fails here.
       - name: Every reported error carries a hint
@@ -180,6 +186,11 @@ jobs:
       # `fn<T> Box.get(): T { ... }` taught the model code the compiler rejects.
       - name: SLM docs show only Turf the compiler accepts
         run: ./scripts/slm/slm_doc_examples_check.sh
+
+      # SL-3: the benchmark's held-out split is read only to score; anything
+      # that tunes the --smart path reads train.
+      - name: --smart tuning never reads the held-out benchmark split
+        run: python3 scripts/slm/slm_benchmark/check_heldout.py
 
       # SLM_IMPROVEMENT_PLAN C3: the system prompt (rules + syntax card + the
       # biggest code page + a category doc) must fit n_batch (4096 tokens), or
@@ -475,8 +486,12 @@ jobs:
         run: ./scripts/slm/slm_deterministic_fix_smoke.sh
       - name: SLM replay smoke test (recorded responses, never loads the model)
         run: ./scripts/slm/slm_replay_smoke.sh
+      - name: SLM benchmark scorer smoke test (SL-2; recorded responses, never loads the model)
+        run: ./scripts/slm/slm_benchmark_smoke.sh
       - name: SLM cache smoke test (positive and negative entries, never loads the model)
         run: ./scripts/slm/slm_cache_smoke.sh
+      - name: SLM model checks smoke test (SL-4 qualification note, memory, budget, cache fingerprint; never loads a model)
+        run: ./scripts/slm/slm_model_checks_smoke.sh
 
   # FDN-005 stage 3 (docs/planning/ROADMAP_v2.0.0.md): independent validation
   # of the collector via an ASan+UBSan-instrumented libturfrt

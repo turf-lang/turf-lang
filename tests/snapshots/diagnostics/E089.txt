@@ -1,0 +1,16 @@
+tests/07_functions_modules/visibility/fail_private_in_public_field_module.tr (1 error)
+
+── error at line 8, col 9 [E089 · private type in public signature]
+
+  I cannot let the public field `Outer.inner` expose the private type `Inner`.
+
+  Hint: Make the type public with `pub struct Inner` in fail_private_in_public_field_module.tr, or keep the field internal by removing its `pub`. Other modules would otherwise receive values of `Inner`, a type they cannot name.
+
+  3 │ struct Inner {
+    │ - declared in module `fail_private_in_public_field_module` without `pub`
+    ┊
+  8 │     pub inner: Inner
+    │         ^~~~~ this type is private, and the signature is `pub`
+
+  Worth reading in full -- run `turf --explain E089` before you patch this one.
+

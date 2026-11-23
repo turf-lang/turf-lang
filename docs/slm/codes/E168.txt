@@ -10,7 +10,7 @@ INCORRECT:
     if n > 2 {
         printline("big");
     } else {
-        printline("big");        // WARNING: same as the 'if' branch
+        printline("big");        // WARNING: Both branches of this `if` do the same thing.
     }
 
 CORRECT (the branches differ):

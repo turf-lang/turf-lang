@@ -10,7 +10,7 @@ import mem;
 
 Not prelude: it needs `import mem;`. Most `mem` code deals in `void*`, so it
 runs inside `unsafe { }` ([FFI and unsafe](../ffi_and_unsafe.md)). Using a raw
-pointer type outside `unsafe` is **E130** ("Unsafe pointer use").
+pointer type outside `unsafe` is **E130** ("I cannot use the raw pointer type `void*` outside an `unsafe` block").
 
 ## Which storage do I want
 
@@ -43,9 +43,9 @@ fn main(): int {
 ```
 
 The compiler checks a pointer from `mem::alloc` (and every function declared
-`@ownership(acquires)`) for a second `mem::free` of it, **E017** ("Double free
-detected"), and for a use after the free, **E018** ("You're using memory from
-'buf' after it was freed"), when it can see both on the same path.
+`@ownership(acquires)`) for a second `mem::free` of it, **E017** ("I found a second free
+of `buf`"), and for a use after the free, **E018** ("I cannot use the memory of
+`buf` after it was freed"), when it can see both on the same path.
 
 <!-- doc-example: fails E017 -->
 ```turflang
@@ -237,9 +237,9 @@ you hand it; it does not allocate for you.
 
 `Pool` is not generic and holds `void*` only. Its storage is manual memory that
 the collector never scans, so a GC value kept only there would be freed under
-it; the signature keeps one out. `mem::Pool<string>` is **E148** ("Wrong number
-of type arguments"), and `pool.track(s)` with a `string`, a collection or a
-struct is **E056** ("No matching overload"). Any `T*` converts to `void*` on its
+it; the signature keeps one out. `mem::Pool<string>` is **E148** ("`Pool` is not generic, so it takes no
+type arguments"), and `pool.track(s)` with a `string`, a collection or a
+struct is **E056** ("No overload of `mem::Pool.track` takes the argument types (string)"). Any `T*` converts to `void*` on its
 own.
 
 ### `Pool.track(item: void*): void`

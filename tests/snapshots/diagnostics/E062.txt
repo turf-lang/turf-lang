@@ -1,0 +1,13 @@
+tests/03_typechecker/fail_null_coercion.tr (1 error)
+
+── error at line 4, col 5 [E062 · null assignment]
+
+  I cannot store `null` in `x`, which is an `int`.
+
+  Hint: Declare it as a pointer or a `&?` reference to hold `null`, or give it an `int`.
+
+  4 │     mut x: int = null;
+    │     ^~~ this cannot hold `null`
+
+  Run `turf --explain E062` for more details.
+

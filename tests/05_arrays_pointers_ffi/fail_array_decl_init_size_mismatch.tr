@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E003
-// EXPECT-DIAG: Cannot initialize 'b' ('int[5]') from a value of type 'int[2]'.
+// EXPECT-DIAG: I cannot initialize `b`, an `int[5]`, from an `int[2]`.
 // Regression test: a sized array declaration's initializer EXPRESSION was
 // never type-checked (only an initializer LIST was). `mut b: int[5] = a;`
 // with `a: int[2]` compiled, and b[2..4] read whatever followed `a` on the

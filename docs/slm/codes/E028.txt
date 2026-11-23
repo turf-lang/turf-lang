@@ -29,7 +29,7 @@ INCORRECT:
     operator +(a: int, b: int): int {
         return a;
     }
-    // ERROR: 'operator +(int, int)' is not allowed.
+    // ERROR: I cannot accept `operator +(int, int)`, because both operand types are built in.
 
 FIX:
   Change at least one parameter's type to a struct you declared, or --

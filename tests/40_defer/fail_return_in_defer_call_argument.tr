@@ -1,0 +1,14 @@
+// EXPECT-DIAG: E083
+// EXPECT-DIAG: I cannot let a deferred statement `return`
+// LANG-003: a `return` in a call argument escapes the defer like one written
+// as a statement (turf-fuzz #42, the same crash as
+// fail_return_in_defer_assignment.tr).
+fn g(x: int): int {
+    return x;
+}
+
+fn main(): int {
+    mut p: int = 1;
+    defer g(return p);
+    return p;
+}

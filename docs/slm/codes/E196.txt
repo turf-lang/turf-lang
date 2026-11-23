@@ -1,0 +1,33 @@
+TURF E196 -- EMPTY FUNCTION BODY (WARNING):
+
+CAUSE:
+  A function that returns `void` (or `!void`) has a body with no statements
+  and no comment, so a call to it does nothing. A `@test` function does not
+  warn. This is a WARNING.
+
+INCORRECT (compiles, but warns):
+    fn reset(): void {
+    }
+
+    fn main(): int {
+        reset();
+        return 0;
+    }
+
+CORRECT:
+    fn reset(counter: &int): void {
+        counter[0] = 0;
+    }
+
+    fn main(): int {
+        mut n: int = 5;
+        reset(&n);
+        return n;
+    }
+
+FIX:
+  Write what the function should do, or remove it and its calls. Never empty
+  a function body to make another diagnostic go away. If doing nothing is
+  right, keep a comment in the body saying why.
+
+RELATED: E195, E197, E009 (a function returning a value with no `return`).

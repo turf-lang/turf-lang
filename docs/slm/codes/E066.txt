@@ -8,23 +8,21 @@ CAUSE:
   function-call arguments or ReturnTypeMismatchError for `return`). Real
   examples include a variable's declared type not matching its
   initializer, a duplicate `matches` pattern, a non-exhaustive enum match,
-  an out-of-range cast, or a missing struct-field initializer -- the exact
-  banner line above the message changes to describe which of these it is
-  ("Type mismatch!", "Non-exhaustive match!", "Missing initializer!",
-  "Duplicate pattern!", etc.), since not all of these are literally "two
-  types don't match."
+  an out-of-range cast, or a missing struct-field initializer -- the
+  message names which of these it is, since not all of these are literally
+  "two types don't match."
 
 CORRECT USAGE:
     mut n: int = 5;              // initializer type matches declared type
 
 INCORRECT:
     mut n: int = "five";
-    // ERROR: Type mismatch!
-    //   <specific detail about the clash follows>
+    // ERROR: I cannot store a `string` in `n`, which is an `int`.
 
 FIX:
-  Read the specific message text under the "Type mismatch!" (or other)
-  banner carefully -- it names the two concrete types (or the specific
+  Read the message carefully -- it names the two concrete types (or the specific
   structural issue, e.g. which enum variant wasn't handled) involved. Make
   the value's actual type match what was expected, or fix the declared
-  type if IT was actually the mistake.
+  type if IT was actually the mistake. For a declaration the hint names both
+  ("Declare `n` as `bool`, or give it an `int` value"): decide from the
+  surrounding code which side is wrong, and change only that side.

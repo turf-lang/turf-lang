@@ -16,7 +16,7 @@ CORRECT USAGE:
 INCORRECT:
     immut pi: double = 3.14159;
     pi = 3.14;
-    // ERROR: You can't change the value of 'pi' because it's immutable.
+    // ERROR: I cannot change `pi`: it is immutable.
 
 FIX:
   If the variable genuinely needs to change later, declare it with

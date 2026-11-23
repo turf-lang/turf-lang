@@ -1,0 +1,15 @@
+tests/05_arrays_pointers_ffi/fail_null_raw_pointer_write_faults_at_zero.tr (1 warning)
+
+── warning at line 10, col 10 [E188 · raw pointer that may be null, dereferenced]
+
+  `p` is a raw pointer that may be null here, and this reads or writes through it.
+
+  Hint: Test it first (`if p != null { ... }`), or use a `&T`, which is never null.
+
+   9 │         mut p: int* = null;
+     │         - declared here
+  10 │         p[0] = 5;
+     │          ^ this pointer may be null
+
+  Run `turf --explain E188` for more details.
+

@@ -32,7 +32,7 @@ directly -- use a `compare` / `matches` block instead:
   - EVERY variant must be covered, either by its own `matches` arm or by a
     trailing `otherwise:` -- omitting one without `otherwise:` is a
     compile-time error:
-      "Non-exhaustive enum comparison on 'Color'.
+      "This `compare` on `Color` does not cover every case, and it has no `otherwise`.
        Missing variants:
            Color::Blue"
   - A duplicate `matches` pattern, or a duplicate/misplaced `otherwise:`,
@@ -43,8 +43,8 @@ directly -- use a `compare` / `matches` block instead:
 
   Trying to use == or ordering operators directly on an enum:
     if (a < b) { }   // a, b: Color
-      // ERROR: "Cannot use ordering operators on enum type 'Color'. Cast
-      //         to int first: (a to int) < (b to int)"
+      // ERROR: "I cannot order the enum `Color` with `<`: only `==` and `!=`
+      //         compare enum variants." Hint: (a to int) < (b to int)"
 
 CASTING TO/FROM int:
     immut n: int = c to int;         // get the underlying variant index
@@ -53,8 +53,8 @@ CASTING TO/FROM int:
   Casting an out-of-range integer LITERAL to an enum type is rejected at
   compile time:
     mut bad: Color = 99 to Color;
-      // ERROR: "Value 99 is out of range for enum 'Color' (valid range:
-      //         0 to 2)."
+      // ERROR: "99 is not a variant of the enum `Color`, whose variants are
+      //         0 to 2."
   (A variable-valued cast, `some_int to Color` where some_int isn't a
   literal, can't be checked this way and is allowed through -- an
   out-of-range value there is only caught if something else notices.)

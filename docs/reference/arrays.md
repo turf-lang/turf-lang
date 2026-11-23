@@ -29,9 +29,9 @@ fn main(): int {
 ```
 
 The size is checked against the literal. Too few or too many elements is
-`E003` ("Array size mismatch!"), an element of the wrong type is `E004`
-("Array element type mismatch!"), and an array of one size cannot be assigned to
-a variable of another (`E066`, "Type mismatch!"):
+`E003` (array size mismatch), an element of the wrong type is `E004` (array
+element type mismatch), and an array of one size cannot be assigned to a
+variable of another (`E066`, type mismatch):
 
 <!-- doc-example: fails E003 -->
 ```turflang
@@ -182,8 +182,8 @@ index is wrong and otherwise at run time. See also
 
 ### Caught at compile time
 
-A constant index out of range does not compile (`E001`, "Array index out of
-bounds!"). The compiler follows constants through locals, so an index held in a
+A constant index out of range does not compile (`E001`, "I cannot use `arr[3]`, because `arr` has
+only 3 elements"). The compiler follows constants through locals, so an index held in a
 variable whose value is known is caught too, and so is one declared in a nested
 block. This also holds for a sized `T[N]` parameter, and for each dimension of a
 multidimensional array.
@@ -192,7 +192,7 @@ multidimensional array.
 ```turflang
 fn main(): int {
     mut arr: int[3] = [1, 2, 3];
-    return arr[3];       // E001: 'arr' has 3 elements (indices 0 to 2, or -1 to -3)
+    return arr[3];       // E001: I cannot use `arr[3]`, because `arr` has only 3 elements
 }
 ```
 
@@ -473,7 +473,7 @@ bound, and the result must satisfy `0 <= start <= end <= length`. `nums[5..]` on
 five elements and `nums[i..i]` are valid, **empty** slices; `nums[4..2]` is an
 error, not an empty slice.
 
-A range that is provably wrong is `E143` ("Slice range out of bounds!") at
+A range that is provably wrong is `E143` ("The slice `[2..5]` of `int[3]` is out of range") at
 compile time: constant bounds on a `T[N]`, or for a `T[]` a constant start after
 a constant end of the same sign. Any other bad range panics at run time with
 `Slice range out of bounds for 'nums'` and the program aborts. Bounds must be
@@ -620,7 +620,7 @@ fn main(): int {
 The loop variable is a copy of the element: assigning to it, or to a field of a
 struct element, does not change the array. Write through the index instead
 (`a[i] = ...`). A `List<T>`, a map, a struct or a scalar cannot be iterated with
-for-each (`E005`, "for-each requires an array or a string!"); iterate a list by index with a
+for-each (`E005`, "I cannot use for-each on the type `list::List<int>`, which is not an array or a string"); iterate a list by index with a
 range `for` and `l[i]`.
 
 ## Arrays of references: `(&T)[N]`

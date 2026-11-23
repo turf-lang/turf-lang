@@ -1,0 +1,42 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+// An inferred local is judged as a callee once its type is known; an `int`
+// one cannot be called.
+
+@test(compile_error, E135, "`n` is an `int`, not a function, so I cannot call it.")
+fn rejects_call_inferred_non_function(): void {
+    mut n = 3;
+    n(1);
+}
+
+// A call through an expression checks each argument's type.
+fn inc(x: int): int { return x + 1; }
+
+@test(compile_error, E056, "Argument 1 of the called function is an `int`, and I found a `string`.")
+fn rejects_wrong_argument_call_through_expression(): void {
+    mut ops: (fn(int): int)[1] = [inc];
+    ops[0]("one");
+}
+
+// Issue #187 acceptance criterion: "Passing a function with the wrong
+// signature emits a TypeChecker error."
+fn apply(f: fn(int): int, x: int): int {
+    return f(x);
+}
+
+fn stringify(n: double): string { return "x"; }
+
+@test(compile_error, E056, "No overload of `apply` takes the argument types (fn(double): string, int).")
+fn rejects_wrong_signature_argument(): void {
+    mutable result: int = apply(stringify, 5);
+}
+
+// Issue #187 acceptance criterion, vardecl form: a fn(...):... -typed
+// variable's initializer must match its declared signature exactly.
+fn describe(n: double): string { return "x"; }
+
+@test(compile_error, E066, "I cannot store a `fn(double): string` in `f`, which is a `fn(int): int`.")
+fn rejects_wrong_signature_vardecl(): void {
+    mutable f: fn(int): int = describe;
+}

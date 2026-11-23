@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E146
+// EXPECT-DIAG: `tag:` takes a string or a list of strings
+// TDP-2-026: tags are strings, `["net"]`, not words.
+@test(tag: [net])
+fn a(): void {
+}
+
+fn main(): int {
+    return 0;
+}

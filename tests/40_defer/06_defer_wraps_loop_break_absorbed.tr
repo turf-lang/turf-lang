@@ -3,8 +3,8 @@
 // `continue` inside a loop that itself begins INSIDE the deferred
 // statement is absorbed by that inner loop -- it can never reach past the
 // defer at all -- so it's legal, unlike fail_break_in_defer.tr's bare
-// `break`. This exercises FindEscapingControlFlow()'s `InLoop` tracking
-// (ResolverStmt.cpp) directly.
+// `break`. This exercises the loop depth that EscapingControlFlowFinder
+// (ResolverStmt.cpp) keeps.
 import test;
 
 struct Trail {

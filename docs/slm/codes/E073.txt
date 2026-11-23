@@ -17,7 +17,7 @@ CORRECT:
 
 INCORRECT:
     mut a: double = 1.5e;
-    // ERROR: '1.5e' has an exponent marker with no exponent after it [E073]
+    // ERROR: `1.5e` has an exponent marker with no exponent after it [E073]
     mut b: double = 1.5e+;
     // ERROR: sign with no digit after it [E073]
 

@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E101
-// EXPECT-DIAG: Empty char literal
+// EXPECT-DIAG: I found an empty char literal
 // Negative test: '' is an empty char literal -- a lexer-level error, since
 // a char literal must contain exactly one character.
 fn main(): int {

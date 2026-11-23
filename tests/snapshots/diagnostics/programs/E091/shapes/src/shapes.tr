@@ -1,0 +1,5 @@
+import geometry;
+
+pub fn scaled(x: int): int {
+    return geometry::area(x) * 2;
+}

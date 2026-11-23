@@ -1,0 +1,13 @@
+tests/14_cfg_analysis/unused_declarations_warn.tr (1 warning)
+
+── warning at line 43, col 8 [E180 · unused `pub` function in a program's root file]
+
+  Nothing calls the `pub` function `unused_pub`, and no other module can: this file is the program's root.
+
+  Hint: Remove `unused_pub`, or call it from `main`. `pub` has no effect in a program's root file.
+
+  43 │ pub fn unused_pub(): int {
+     │        ^~~~~~~~~~ nothing calls this `pub` function
+
+  Run `turf --explain E180` for more details.
+

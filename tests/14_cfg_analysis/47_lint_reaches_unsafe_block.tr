@@ -1,4 +1,4 @@
-// EXPECT-DIAG: This comparison is redundant
+// EXPECT-DIAG: is the same as
 // LEC-005 / INV-LINT-1: nothing in the old lint chain looked inside an
 // `unsafe { }` block, so every check was silently off there.
 fn dead(b: bool): int {

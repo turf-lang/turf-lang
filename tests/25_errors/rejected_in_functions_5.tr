@@ -1,0 +1,36 @@
+// F-11e: tests moved from fail_*.tr files, one function each; each `@test` names the
+// error its body must be rejected with.
+
+// Test (fail): Errors.md's own explicit example -- 'recover produce value'
+// is invalid when the call's success type is 'void' (there's no value to
+// produce a mismatched replacement for).
+error IOError {
+    FileNotFound,
+}
+
+fn writeFile(path: string): !void {
+    return IOError::FileNotFound;
+}
+
+@test(compile_error, E066, "`recover produce` gives an `int`, and this call succeeds with a `void`.")
+fn rejects_recover_produce_on_void_success(): void {
+    writeFile("a.txt") recover produce 42;
+}
+
+// Test (fail): "a recover block must evaluate to the function's success
+// type" (Errors.md) -- producing a string when the success type is int.
+error MathError {
+    DivisionByZero,
+}
+
+fn divide(a: int, b: int): !int {
+    if (b == 0) {
+        return MathError::DivisionByZero;
+    }
+    return a / b;
+}
+
+@test(compile_error, E066, "`recover produce` gives a `string`, and this call succeeds with an `int`.")
+fn rejects_recover_produce_type_mismatch(): void {
+    mut x: int = divide(10, 2) recover produce "oops";
+}

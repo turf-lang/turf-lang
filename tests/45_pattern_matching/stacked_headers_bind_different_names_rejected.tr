@@ -1,0 +1,16 @@
+// LEC-003: stacked headers share one body, so they bind the same names.
+// Expected: E092.
+struct P { x: int, y: int }
+@test(compile_error, E092, "stacked `matches` headers that bind different names")
+fn rejects_stacked_headers_bind_different_names(): void {
+    mut p: P = P::default();
+    mut r: int = 0;
+    compare p {
+        matches P { x, .. }:
+        matches P { y, .. }:
+        r = 1;
+        done
+        otherwise: r = 2;
+    }
+    r;
+}

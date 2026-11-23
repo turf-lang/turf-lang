@@ -1,0 +1,17 @@
+tests/55_compiler_fixes/fail_fix_unknown_method.tr (1 error)
+
+── error at line 14, col 7 [E054 · struct method not found]
+
+  I cannot find a method named `bmup` on the struct `Counter`.
+
+  Hint: Use a name from this file: `bump`
+
+  14 │     c.bmup();
+     │       ^~~~ the struct has no method of this name
+
+  Fix: replace 'bmup' with 'bump'
+  14 │     c.bump();
+     │       ~~~~
+
+  Run `turf --explain E054` for more details.
+

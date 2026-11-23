@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E086
-// EXPECT-DIAG: can't be stored in an error payload
+// EXPECT-DIAG: be stored in an error payload
 // An error value's payload is copied into a heap block so the error can be
 // returned; `&n` in it points into a frame that is gone by the time the
 // caller matches the error (owner decision 2026-10-12, found by turf-fuzz).

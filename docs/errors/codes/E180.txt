@@ -1,0 +1,15 @@
+A `pub` function in a program's root file that nothing calls
+
+`pub` makes a declaration visible to other modules, but nothing imports a program's root file (the one with `main`), so there `pub` changes nothing. A `pub` function there that nothing calls is dead code, like a private one (E178):
+
+    pub fn report(): int {   // WARNING (E180 at `warn`)
+        return 1;
+    }
+
+    fn main(): int {
+        return 0;
+    }
+
+Remove it or call it. A library module's `pub` functions are its interface and are never reported.
+
+This warning starts at `allow`: turn it on with `turf build --warn E180` (or `[lints] E180 = "warn"` in turf.toml).

@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E004
-// EXPECT-DIAG: Cannot initialize an array of 'int' with a value of type 'string'.
+// EXPECT-DIAG: I cannot put a `string` in an array of `int`.
 // A literal that sizes an unsized declaration is still checked against the
 // declared element type.
 fn main(): int {

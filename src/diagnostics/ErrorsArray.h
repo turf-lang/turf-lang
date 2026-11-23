@@ -9,18 +9,15 @@ public:
   ArrayBoundsError(SourceLocation Loc, const std::string &ArrayName,
                    long long Index, int ArraySize)
       : TurfError(Loc,
-                  Colors::BRIGHT_RED + "Array index out of bounds!\n" +
-                      Colors::RESET + "  You tried to access '" + Colors::CYAN +
+                  Colors::BRIGHT_RED + "I cannot use `" + Colors::CYAN +
                       ArrayName + "[" + std::to_string(Index) + "]" +
-                      Colors::RESET + "', but '" + Colors::CYAN + ArrayName +
-                      Colors::RESET + "' only has " +
-                      Colors::CYAN + std::to_string(ArraySize) + Colors::RESET +
-                      " elements (indices 0 to " +
-                      std::to_string(ArraySize - 1) + ", or -1 to -" +
-                      std::to_string(ArraySize) + " counting from the end).",
-                  "Array indices start at 0 and go up to size - 1; a "
-                  "negative index counts back from the end (-1 is the last "
-                  "element).") {
+                      Colors::BRIGHT_RED + "`, because `" + Colors::CYAN +
+                      ArrayName + Colors::BRIGHT_RED + "` has only " +
+                      std::to_string(ArraySize) + " element" +
+                      (ArraySize == 1 ? "" : "s") + "." + Colors::RESET,
+                  "Use an index from 0 to " + std::to_string(ArraySize - 1) +
+                      ", or `-1` to `-" + std::to_string(ArraySize) +
+                      "` to count from the end.") {
     Category_ = SLM::ErrorCategory::ARRAY_ERROR;
   }
 };
@@ -34,12 +31,13 @@ class ForEachNonArrayError : public TurfError {
 public:
   ForEachNonArrayError(SourceLocation Loc, const std::string &GotType)
       : TurfError(Loc,
-                  Colors::BRIGHT_RED + "for-each requires an array or a string!\n" +
-                      Colors::RESET + "  You tried to iterate over a value of type '" +
-                      Colors::CYAN + GotType + Colors::RESET + "'.",
-                  "for-each works on an array (T[N], or a T[] parameter) and "
-                  "on a string, byte by byte. Walk a List by index "
-                  "(`for i in 0..l.length()`) and a Map through keys().") {
+                  Colors::BRIGHT_RED + "I cannot use for-each on the type `" +
+                      Colors::CYAN + GotType + Colors::BRIGHT_RED +
+                      "`, which is not an array or a string." +
+                      Colors::RESET,
+                  "Loop over an array (`T[N]` or a `T[]` parameter) or a "
+                  "string, walk a `List` by index (`for i in 0..l.length()`), "
+                  "or loop over a `Map` through `keys()`.") {
     Category_ = SLM::ErrorCategory::ARRAY_ERROR;
   }
 };

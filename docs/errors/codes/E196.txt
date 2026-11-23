@@ -1,0 +1,18 @@
+An empty function body
+
+A function that returns nothing and whose body holds no statements does nothing when it is called:
+
+    fn reset(): void {
+    }                           // the body is empty -- WARNING
+
+Write the function, or remove it and its calls. A `@test` function may be empty (an empty test passes by returning), and a function that returns a value is reported by E009 instead.
+
+If the function is meant to do nothing, put a comment in the body saying why. A body holding a comment does not warn:
+
+    fn reset(): void {
+        // nothing to reset: the defaults are right
+    }
+
+A generic function warns once, however many types it is used with.
+
+This is a warning, not an error -- compilation still succeeds. To silence it for a whole build, set its lint level to allow: `turf build --allow E196` (or `[lints] E196 = "allow"` in turf.toml).

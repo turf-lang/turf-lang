@@ -22,7 +22,7 @@ CORRECT SYNTAX:
 INCORRECT:
     import io;
     io::printlne("hello");
-    // ERROR: Module 'io' has nothing named 'printlne'.
+    // ERROR: I cannot find `printlne` in the module `io`.
     //   (did-you-mean suggests 'printline' when it's a close match)
 
 FIX:

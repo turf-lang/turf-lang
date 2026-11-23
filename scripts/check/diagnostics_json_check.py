@@ -19,10 +19,22 @@ file's own directory, and fails when
     version other than the one diagnostics carry.
   - `turfc --unsafe-report` (LB-2), over a small project and over files, does
     not match docs/reference/schemas/unsafe-report.schema.json.
+  - a package graph (IF-2) does not match its schema: the fixtures under
+    docs/reference/schemas/package-graph-fixtures/ (package-graph.schema.json
+    and, for `turf graph --unsafe`, package-graph-report.schema.json), turfc
+    does not build and test the fixture project through them, turfc and the
+    schema disagree on a graph with an unknown package key, or (when build/turf
+    exists) what `turf graph` prints for examples/plotter does not match.
+  - `turfc --registry-json` (IF-3) does not match
+    docs/reference/schemas/diagnostic-registry.schema.json, lists a code
+    twice, gives a code that is not retired no explanation, or differs from
+    the four entries in docs/reference/schemas/diagnostic-registry-sample.json
+    (`--write` regenerates it).
 
 The schema is read from the published file and checked with the small subset
 of JSON Schema it uses (type, enum, const, pattern, required, properties,
-additionalProperties, items, minItems, minimum, oneOf, $ref), so this needs no
+additionalProperties (a schema or false), items, minItems, minimum, oneOf,
+$ref), so this needs no
 third-party package.
 
 Usage: scripts/check/diagnostics_json_check.py [--compiler build/turfc]
@@ -43,6 +55,13 @@ ROOT = Path(__file__).resolve().parents[2]
 SCHEMA = ROOT / "docs/reference/schemas/diagnostics.schema.json"
 VERSION_SCHEMA = ROOT / "docs/reference/schemas/version.schema.json"
 UNSAFE_SCHEMA = ROOT / "docs/reference/schemas/unsafe-report.schema.json"
+GRAPH_SCHEMA = ROOT / "docs/reference/schemas/package-graph.schema.json"
+REPORT_SCHEMA = ROOT / "docs/reference/schemas/package-graph-report.schema.json"
+GRAPH_FIXTURES = ROOT / "docs/reference/schemas/package-graph-fixtures"
+REGISTRY_SCHEMA = ROOT / "docs/reference/schemas/diagnostic-registry.schema.json"
+REGISTRY_SAMPLE = ROOT / "docs/reference/schemas/diagnostic-registry-sample.json"
+# An error with its own page, a warning at warn, one at allow, a retired code.
+REGISTRY_SAMPLE_CODES = ["E041", "E165", "E188", "E013"]
 FIXTURES = ROOT / "docs/reference/schemas/diagnostics-fixtures"
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 HEADER = re.compile(r"^── (error|warning)\b[^\[]*(?:\[(E\d{3}))?")
@@ -84,6 +103,10 @@ def validate(value, schema, root, where="$"):
                 if err:
                     return err
         extra = schema.get("additionalProperties")
+        if extra is False:
+            for key in value:
+                if key not in schema.get("properties", {}):
+                    return f"{where}: unknown key '{key}'"
         if isinstance(extra, dict):
             for key, sub in value.items():
                 if key not in schema.get("properties", {}):
@@ -220,6 +243,104 @@ def check_unsafe_report(compiler):
     return problems
 
 
+def check_package_graphs(compiler):
+    """IF-2: the package graph's schemas, fixtures and producers."""
+    graph = json.loads(GRAPH_SCHEMA.read_text())
+    report = json.loads(REPORT_SCHEMA.read_text())
+    problems = []
+    for name, schema in (("graph.json", graph), ("build-graph.json", graph),
+                         ("report.json", report)):
+        err = validate(json.loads((GRAPH_FIXTURES / name).read_text()), schema, schema)
+        if err:
+            problems.append(f"package-graph-fixtures/{name}: {err}")
+    env = dict(os.environ)
+    env.pop("TURF_HOME", None)
+    runs = {
+        "build": [compiler, "app/src/main.tr", "--package-graph", "build-graph.json", "--check"],
+        "test": [compiler, "--test", "app/tests", "--package-graph", "graph.json"],
+    }
+    for name, args in runs.items():
+        out = subprocess.run(args, cwd=GRAPH_FIXTURES, env=env, capture_output=True,
+                             text=True, timeout=300)
+        if out.returncode != 0:
+            problems.append(f"package-graph-fixtures ({name}): exit {out.returncode}: "
+                            f"{(out.stdout + out.stderr).strip()[-400:]}")
+    # The schema and turfc reject the same thing: an unknown package key.
+    with tempfile.TemporaryDirectory() as tmp:
+        bad = json.loads((GRAPH_FIXTURES / "build-graph.json").read_text())
+        bad["packages"]["app"]["alow_unsafe"] = True
+        for pkg in bad["packages"].values():
+            pkg["src"] = str(GRAPH_FIXTURES / pkg["src"])
+        (Path(tmp) / "bad.json").write_text(json.dumps(bad))
+        out = subprocess.run([compiler, str(GRAPH_FIXTURES / "app/src/main.tr"),
+                              "--package-graph", str(Path(tmp) / "bad.json"), "--check"],
+                             env=env, capture_output=True, text=True, timeout=120)
+        if out.returncode == 0:
+            problems.append("turfc accepts a package graph with an unknown package key")
+        if validate(bad, graph, graph) is None:
+            problems.append("package-graph.schema.json accepts an unknown package key")
+    # The producer: turf graph, when this build has the front end.
+    turf = Path(compiler).parent / "turf"
+    if turf.exists():
+        for flags, schema, label in (([], graph, "turf graph"),
+                                     (["--unsafe"], report, "turf graph --unsafe")):
+            out = subprocess.run([str(turf), "graph", "--offline", *flags],
+                                 cwd=ROOT / "examples/plotter", env=env,
+                                 capture_output=True, text=True, timeout=300)
+            if out.returncode != 0:
+                problems.append(f"{label}: exit {out.returncode}: {out.stderr.strip()}")
+                continue
+            try:
+                err = validate(json.loads(out.stdout), schema, schema)
+            except json.JSONDecodeError as e:
+                err = f"not JSON: {e}"
+            if err:
+                problems.append(f"{label} (examples/plotter): {err}")
+    return problems
+
+
+def registry(compiler):
+    env = dict(os.environ)
+    env.pop("TURF_HOME", None)
+    out = subprocess.run([compiler, "--registry-json"], env=env, capture_output=True,
+                         text=True, timeout=120)
+    if out.returncode != 0:
+        raise RuntimeError(f"exit {out.returncode}: {out.stderr.strip()}")
+    return json.loads(out.stdout)
+
+
+def registry_sample(reg):
+    by_code = {c["code"]: c for c in reg["codes"]}
+    return json.dumps({"format": reg["format"],
+                       "codes": [by_code[c] for c in REGISTRY_SAMPLE_CODES]},
+                      indent=1, ensure_ascii=False) + "\n"
+
+
+def check_registry(compiler):
+    """IF-3: the registry the release archive carries."""
+    schema = json.loads(REGISTRY_SCHEMA.read_text())
+    try:
+        reg = registry(compiler)
+    except (RuntimeError, json.JSONDecodeError) as e:
+        return [f"--registry-json: {e}"]
+    problems = []
+    err = validate(reg, schema, schema)
+    if err:
+        problems.append(f"--registry-json: {err}")
+        return problems
+    seen = set()
+    for c in reg["codes"]:
+        if c["code"] in seen:
+            problems.append(f"--registry-json: {c['code']} is listed twice")
+        seen.add(c["code"])
+        if not c["retired"] and not c["explanation"]:
+            problems.append(f"--registry-json: {c['code']} has no explanation")
+    if not REGISTRY_SAMPLE.exists() or REGISTRY_SAMPLE.read_text() != registry_sample(reg):
+        problems.append(f"{REGISTRY_SAMPLE.relative_to(ROOT)} differs from --registry-json "
+                        "(regenerate with --write if the change is meant)")
+    return problems
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--compiler", default=str(ROOT / "build/turfc"))
@@ -232,7 +353,8 @@ def main():
 
     failed = 0
     if not args.write:
-        for p in check_manifest(compiler) + check_unsafe_report(compiler):
+        for p in (check_manifest(compiler) + check_unsafe_report(compiler) +
+                  check_package_graphs(compiler) + check_registry(compiler)):
             print(f"FAIL {p}")
             failed += 1
     sources = json.loads((FIXTURES / "sources.json").read_text())
@@ -247,6 +369,8 @@ def main():
                   "(regenerate with --write if the change is meant)")
             failed += 1
     if args.write:
+        REGISTRY_SAMPLE.write_text(registry_sample(registry(compiler)))
+        print(f"wrote {REGISTRY_SAMPLE.relative_to(ROOT)}")
         return 0
 
     tests = sorted(p for p in (ROOT / "tests").rglob("fail_*.tr")
@@ -256,7 +380,7 @@ def main():
             for p in problems:
                 print(f"FAIL {path.relative_to(ROOT)}: {p}")
             failed += bool(problems)
-    print(f"diagnostics_json_check: the --version --json manifest, {len(tests)} "
+    print(f"diagnostics_json_check: the --version --json manifest, the package graph, {len(tests)} "
           f"fail_*.tr files, {len(sources)} fixtures, {failed} failing")
     return 1 if failed else 0
 

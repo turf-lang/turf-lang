@@ -1,0 +1,13 @@
+tests/07_functions_modules/visibility/fail_pub_not_a_declaration.tr (1 error)
+
+── error at line 5, col 1 [E087 · misplaced visibility modifier]
+
+  I expected a declaration after `pub`.
+
+  Hint: Put `pub` right before `fn`, `static fn`, `struct`, `enum`, `error`, `machine`, `extern fn` or a module constant's `immut`, or before a struct field, for example `pub fn area(r: int): int { ... }` or `pub struct Point { pub x: int }`. `public` is accepted as a synonym.
+
+  5 │ pub LIMIT = 10;
+    │ ^~~ this visibility modifier is out of place
+
+  Run `turf --explain E087` for more details.
+

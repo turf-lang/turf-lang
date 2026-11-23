@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E086
-// EXPECT-DIAG: can't be returned
+// EXPECT-DIAG: be returned
 // The defer runs at the end of each loop iteration, so after the loop `p` is
 // `&n` (when the loop ran): a defer counts at its block's exits, not where it
 // is written and not never (owner decision 2026-10-12).

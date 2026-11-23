@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E110
-// EXPECT-DIAG: Expected 'fn' or 'extern fn' after an annotation
+// EXPECT-DIAG: I expected `fn` or `extern fn` after an annotation
 // An annotation describes a function declaration; before a struct it has
 // nothing to describe.
 

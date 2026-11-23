@@ -1,0 +1,13 @@
+tests/07_functions_modules/fail_import_scope_diamond.tr (1 error)
+
+── error at line 11, col 7 [E145 · module not imported in this file]
+
+  I cannot find an import of module `import_scope_inner_module` in this file.
+
+  Hint: Add `import import_scope_inner_module;` at the top of this file to use `import_scope_inner_module::inner_value`. A module is not visible just because another import loaded it.
+
+  11 │     + import_scope_inner_module::inner_value();
+     │       ^~~~~~~~~~~~~~~~~~~~~~~~~ this module is not imported in this file
+
+  Run `turf --explain E145` for more details.
+

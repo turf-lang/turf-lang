@@ -434,6 +434,7 @@ add_library(turfcore STATIC
   src/tooling/UnsafeReport.cpp
   src/frontend/Lexer.cpp
   src/diagnostics/CompilerFix.cpp
+  src/diagnostics/FixScore.cpp
   src/diagnostics/DiagnosticsJson.cpp
   src/diagnostics/LintLevels.cpp
   src/analysis/Lint.cpp
@@ -471,6 +472,9 @@ add_library(turfcore STATIC
   src/sema/Types.cpp
   src/sema/TypeWalk.cpp
   src/analysis/ValueRange.cpp
+  src/analysis/UnusedDecls.cpp
+  src/analysis/AnalysisFacts.cpp
+  src/analysis/MutualRecursion.cpp
 )
 
 # `include` carries the public API (turf/Analysis.h); `src` lets every
@@ -512,6 +516,24 @@ foreach(_llvm_def ${LLVM_DEFINITIONS_LIST})
   list(APPEND LLVM_DEFINITIONS_CLEAN "${_llvm_def}")
 endforeach()
 target_compile_definitions(turfcore PUBLIC ${LLVM_DEFINITIONS_CLEAN})
+
+# SL-4: the llama.cpp revision --smart runs on is part of its cache
+# fingerprint (src/slm/SLMIntegration.cpp), so an answer cached by one
+# runtime is never served by another. "none" in a build without the runtime.
+set(TURF_LLAMA_REVISION "none")
+if(TURF_SMART)
+  execute_process(
+    COMMAND git -C external/llama.cpp rev-parse --short=12 HEAD
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    OUTPUT_VARIABLE _turf_llama_rev OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE _turf_llama_rev_status ERROR_QUIET)
+  if(_turf_llama_rev_status EQUAL 0 AND _turf_llama_rev)
+    set(TURF_LLAMA_REVISION "${_turf_llama_rev}")
+  else()
+    set(TURF_LLAMA_REVISION "unknown")
+  endif()
+endif()
+target_compile_definitions(turfcore PRIVATE TURF_LLAMA_REVISION="${TURF_LLAMA_REVISION}")
 
 target_compile_options(turfcore PRIVATE
   -Wall -Wextra -Wpedantic

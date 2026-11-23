@@ -1,0 +1,13 @@
+tests/14_cfg_analysis/endless_loops_warn.tr (1 warning)
+
+── warning at line 78, col 5 [E186 · loop whose every exit follows a call that ends the program]
+
+  This loop never finishes: every way out of it comes after a call that ends the program (`panic`, `abort` or `exit`).
+
+  Hint: If the loop is meant to stop, let it leave before that call; if ending the program is the way out, write the loop as `while true`.
+
+  78 │     while true {
+     │     ^~~~~ every exit of this loop ends the program first
+
+  Run `turf --explain E186` for more details.
+

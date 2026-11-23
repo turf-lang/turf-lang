@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E086
-// EXPECT-DIAG: can't be pushed into a collection inside a struct or array value
+// EXPECT-DIAG: be pushed into a collection inside a struct or array
 // The caller's List keeps a copy of `h`, and `h.head` points at this frame's
 // `n`.
 import list::List;

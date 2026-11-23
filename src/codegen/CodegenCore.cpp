@@ -46,7 +46,7 @@
 // The struct-substitution fallback reads through a NamedType that is not a
 // registered type (see TypeWalk::structTypeArgSubst()).
 static bool isRegisteredTypeName(const std::string &Name) {
-  return GlobalSymbolTable && GlobalSymbolTable->LookupType(Name) != nullptr;
+  return Symbols() && Symbols()->LookupType(Name) != nullptr;
 }
 
 using namespace llvm;
@@ -217,9 +217,9 @@ static llvm::StructType *getErrorValueType() {
 
 /// The registered declaration of error type @p ErrorTypeName, or nullptr.
 static const TurfUserErrorType *lookupErrorTypeDecl(const std::string &ErrorTypeName) {
-  if (!GlobalSymbolTable)
+  if (!Symbols())
     return nullptr;
-  auto T = GlobalSymbolTable->LookupType(ErrorTypeName);
+  auto T = Symbols()->LookupType(ErrorTypeName);
   return T ? dynamic_cast<const TurfUserErrorType *>(T.get()) : nullptr;
 }
 
@@ -790,7 +790,7 @@ llvm::Type *getLLVMType(const TurfType *T) {
         "a compiler bug.");
 
   // GenericType instantiations (e.g. List<int>) — TYPE-002 (S13b): look up
-  // the SPECIFIC per-instantiation struct, registered in GlobalSymbolTable/
+  // the SPECIFIC per-instantiation struct, registered in Symbols()/
   // LLVMTypeCache under its own mangled name by
   // Monomorphize::drainStructRequests() (S13a) and codegenned for real by
   // the ordinary, unmodified StructDeclExprAST::codegen() once its clone
@@ -863,14 +863,14 @@ llvm::Type *getLLVMType(const TurfType *T) {
   }
 
   // NamedType — may refer to a user-defined struct, enum, or error type
-  // registered in GlobalSymbolTable. Check GlobalSymbolTable first so
+  // registered in Symbols(). Check Symbols() first so
   // enums/error types resolve to their real representation instead of
   // falling through to the opaque-struct-forward-decl path below (which is
   // only correct for structs).
   if (dynamic_cast<const NamedType *>(T)) {
-    // Try to resolve through GlobalSymbolTable first
-    if (GlobalSymbolTable) {
-      if (auto Registered = GlobalSymbolTable->LookupType(T->getName())) {
+    // Try to resolve through Symbols() first
+    if (Symbols()) {
+      if (auto Registered = Symbols()->LookupType(T->getName())) {
         if (dynamic_cast<const TurfEnumType *>(Registered.get()))
           return LLVMTypeCache[Key] = llvm::Type::getInt64Ty(*TheContext);
         if (Registered->isUserError())
@@ -992,9 +992,9 @@ const TurfType *getExprType(const ExprAST *E) {
     if (!Op || !Op->ReturnType)
       return nullptr;
     const TurfType *RetTy = Op->ReturnType.get();
-    if (GlobalSymbolTable)
+    if (Symbols())
       if (const auto *NT = dynamic_cast<const NamedType *>(RetTy))
-        if (auto Resolved = GlobalSymbolTable->LookupType(NT->getName()))
+        if (auto Resolved = Symbols()->LookupType(NT->getName()))
           return Resolved.get();
     return RetTy;
   };
@@ -1063,7 +1063,7 @@ const TurfType *getExprType(const ExprAST *E) {
       // pointee type this function doesn't itself own (InnerTy here is
       // already whatever a NESTED getExprType() call returned -- itself
       // either a function-local `static const`/`TurfXxx().get()` singleton
-      // or a long-lived GlobalSymbolTable/ResolvedSymbol entry, per every
+      // or a long-lived Symbols()/ResolvedSymbol entry, per every
       // branch in this function -- so aliasing it with a no-op deleter is
       // safe: nothing here ever outlives what InnerTy already points at).
       if (FuncCall->isIntrinsic(BareIntrinsic::Heap)) {
@@ -1103,8 +1103,8 @@ const TurfType *getExprType(const ExprAST *E) {
       if (ScopeCallee &&
           (ScopeCallee->ResolvedKind == ScopeAccessKind::ConstructorCall ||
            ScopeCallee->ResolvedKind == ScopeAccessKind::DefaultConstruct)) {
-        if (GlobalSymbolTable) {
-          if (auto T = GlobalSymbolTable->LookupType(ScopeCallee->getLeftName()))
+        if (Symbols()) {
+          if (auto T = Symbols()->LookupType(ScopeCallee->getLeftName()))
             return T.get();
         }
         return nullptr;
@@ -1227,8 +1227,8 @@ const TurfType *getExprType(const ExprAST *E) {
                         Subst.emplace(GP->getName(), TurfTypePtr(const_cast<TurfType *>(ArgTy), [](TurfType*){}));
                       }
                     } else if (auto *NT = dynamic_cast<const NamedType *>(ParamTy.get())) {
-                      bool KnownElsewhere = GlobalSymbolTable &&
-                                           GlobalSymbolTable->LookupType(NT->getName()) != nullptr;
+                      bool KnownElsewhere = Symbols() &&
+                                           Symbols()->LookupType(NT->getName()) != nullptr;
                       if (!KnownElsewhere && !Subst.count(NT->getName()))
                         Subst.emplace(NT->getName(), TurfTypePtr(const_cast<TurfType *>(ArgTy), [](TurfType*){}));
                     } else if (auto *PPT = dynamic_cast<const TurfPointerType *>(ParamTy.get())) {
@@ -1284,8 +1284,8 @@ const TurfType *getExprType(const ExprAST *E) {
     // MethodCallExprAST::codegen(), crashing the WHOLE compiler process on
     // ANY static struct method call, correctly-typed arguments or not.
     // Confirmed: no test in the suite exercised this at all before now.
-    if (Var->IsStructName && GlobalSymbolTable) {
-      if (auto T = GlobalSymbolTable->LookupType(Var->getName()))
+    if (Var->IsStructName && Symbols()) {
+      if (auto T = Symbols()->LookupType(Var->getName()))
         return T.get();
     }
     if (Var->ResolvedSymbol && Var->ResolvedSymbol->Type)
@@ -1297,8 +1297,8 @@ const TurfType *getExprType(const ExprAST *E) {
     auto It = NamedValues.find(Var->getName());
     if (It != NamedValues.end() && It->second.Type)
       return It->second.Type.get();
-    if (GlobalSymbolTable) {
-      Symbol *Sym = GlobalSymbolTable->LookupSymbol(Var->getName());
+    if (Symbols()) {
+      Symbol *Sym = Symbols()->LookupSymbol(Var->getName());
       if (Sym)
         return Sym->Type.get();
     }
@@ -1338,9 +1338,9 @@ const TurfType *getExprType(const ExprAST *E) {
     // string, so there is no ambiguity between the two.
     if (ArrAcc->ResolvedIndexGetTarget && ArrAcc->ResolvedIndexGetTarget->ReturnType) {
       const TurfType *RetTy = ArrAcc->ResolvedIndexGetTarget->ReturnType.get();
-      if (GlobalSymbolTable) {
+      if (Symbols()) {
         if (const auto *NT = dynamic_cast<const NamedType *>(RetTy)) {
-          if (auto Resolved = GlobalSymbolTable->LookupType(NT->getName()))
+          if (auto Resolved = Symbols()->LookupType(NT->getName()))
             return Resolved.get();
         }
       }
@@ -1368,9 +1368,9 @@ const TurfType *getExprType(const ExprAST *E) {
       if (ElemTy) {
         // Issue #17 fix: resolve NamedType element types (e.g. struct User)
         // to TurfStructType so that arr[0].field codegen works correctly.
-        if (GlobalSymbolTable) {
+        if (Symbols()) {
           if (const auto *NT = dynamic_cast<const NamedType *>(ElemTy)) {
-            if (auto Resolved = GlobalSymbolTable->LookupType(NT->getName()))
+            if (auto Resolved = Symbols()->LookupType(NT->getName()))
               return Resolved.get();
           }
         }
@@ -1448,8 +1448,8 @@ const TurfType *getExprType(const ExprAST *E) {
     // below silently failed to match, falling through to `return nullptr`
     // with no other fallback since the Base isn't a VariableExprAST either.
     if (auto *NT = dynamic_cast<const NamedType *>(BaseTy)) {
-      if (GlobalSymbolTable) {
-        if (auto R = GlobalSymbolTable->LookupType(NT->getName()))
+      if (Symbols()) {
+        if (auto R = Symbols()->LookupType(NT->getName()))
           BaseTy = R.get();
       }
     }
@@ -1486,8 +1486,8 @@ const TurfType *getExprType(const ExprAST *E) {
       GenericTypeArgs = GT0->getTypeArgs();
 
     if (auto *GT = dynamic_cast<const GenericType *>(BaseTy)) {
-      if (GlobalSymbolTable) {
-        if (auto R = GlobalSymbolTable->LookupType(GT->getBaseName()))
+      if (Symbols()) {
+        if (auto R = Symbols()->LookupType(GT->getBaseName()))
           BaseTy = R.get();
       }
     }
@@ -1510,7 +1510,7 @@ const TurfType *getExprType(const ExprAST *E) {
       // NamedType/TurfGenericParamType name that isn't a known struct/enum
       // -- mirrors TypeChecker::visitMethodCall()'s identical Subst-
       // building code exactly (see that function's doc comment for why
-      // GlobalSymbolTable's copy of a generic struct's fields is
+      // Symbols()'s copy of a generic struct's fields is
       // permanently stuck as NamedType, never rewritten to
       // TurfGenericParamType).
       //
@@ -1618,8 +1618,8 @@ const TurfType *getExprType(const ExprAST *E) {
       BaseTy = PtrTy->getPointee().get();
     // Resolve NamedType base (e.g. field type from a parent struct field)
     if (auto *NT = dynamic_cast<const NamedType *>(BaseTy)) {
-      if (GlobalSymbolTable) {
-        if (auto R = GlobalSymbolTable->LookupType(NT->getName()))
+      if (Symbols()) {
+        if (auto R = Symbols()->LookupType(NT->getName()))
           BaseTy = R.get();
       }
     }
@@ -1642,8 +1642,8 @@ const TurfType *getExprType(const ExprAST *E) {
     if (auto *GT0 = dynamic_cast<const GenericType *>(BaseTy))
       GenericTypeArgs = GT0->getTypeArgs();
     if (auto *GT = dynamic_cast<const GenericType *>(BaseTy)) {
-      if (GlobalSymbolTable) {
-        if (auto R = GlobalSymbolTable->LookupType(GT->getBaseName()))
+      if (Symbols()) {
+        if (auto R = Symbols()->LookupType(GT->getBaseName()))
           BaseTy = R.get();
       }
     }
@@ -1661,7 +1661,7 @@ const TurfType *getExprType(const ExprAST *E) {
       // further `.value` field access on THAT would fail too. Mirrors the
       // identical scan-the-fields Subst-recovery technique the
       // MethodCallExprAST branch above already uses for method return
-      // types (GlobalSymbolTable's copy of a generic struct's fields is
+      // types (Symbols()'s copy of a generic struct's fields is
       // permanently stuck as NamedType/TurfGenericParamType, never
       // rewritten per-instantiation -- see that branch's own doc comment).
       if (!GenericTypeArgs.empty()) {
@@ -1733,8 +1733,8 @@ const TurfType *getExprType(const ExprAST *E) {
 
       // Resolve NamedType field types so chained access (a.b.c) works correctly.
       if (auto *NT = dynamic_cast<const NamedType *>(FieldTy.get())) {
-        if (GlobalSymbolTable) {
-          if (auto R = GlobalSymbolTable->LookupType(NT->getName()))
+        if (Symbols()) {
+          if (auto R = Symbols()->LookupType(NT->getName()))
             return R.get();
         }
       }
@@ -1796,8 +1796,8 @@ const TurfType *getExprType(const ExprAST *E) {
     if (EA->ResolvedKind == ScopeAccessKind::EnumVariant &&
         EA->getRightName() == "COUNT")
       return TurfInt().get();
-    if (GlobalSymbolTable) {
-      if (auto Registered = GlobalSymbolTable->LookupType(EA->getLeftName()))
+    if (Symbols()) {
+      if (auto Registered = Symbols()->LookupType(EA->getLeftName()))
         return Registered.get();
     }
   }
@@ -2154,8 +2154,8 @@ Value *CastToType(Value *Val, const TurfType *DestType,
     {
       const TurfType *ResolvedDest = DestType;
       if (const auto *NT = dynamic_cast<const NamedType *>(DestType)) {
-        if (GlobalSymbolTable) {
-          if (auto R = GlobalSymbolTable->LookupType(NT->getName()))
+        if (Symbols()) {
+          if (auto R = Symbols()->LookupType(NT->getName()))
             ResolvedDest = R.get();
         }
       }
@@ -2167,10 +2167,10 @@ Value *CastToType(Value *Val, const TurfType *DestType,
       // loads the CORRECT (possibly >8-byte) shape, not the erasure-era
       // shared one.
       if (const auto *GT = dynamic_cast<const GenericType *>(DestType)) {
-        if (GlobalSymbolTable) {
+        if (Symbols()) {
           std::string MangledName =
               Monomorphize::instantiatedDeclName(GT->getBaseName(), GT->getTypeArgs());
-          if (auto R = GlobalSymbolTable->LookupType(MangledName))
+          if (auto R = Symbols()->LookupType(MangledName))
             ResolvedDest = R.get();
         }
       }
@@ -2339,13 +2339,13 @@ llvm::Constant *GetDefaultValue(const TurfType *T) {
 static const TurfStructType *defaultStructOf(const TurfType *T) {
   if (auto *ST = dynamic_cast<const TurfStructType *>(T))
     return ST;
-  if (!GlobalSymbolTable)
+  if (!Symbols())
     return nullptr;
   TurfTypePtr Registered;
   if (const auto *NT = dynamic_cast<const NamedType *>(T))
-    Registered = GlobalSymbolTable->LookupType(NT->getName());
+    Registered = Symbols()->LookupType(NT->getName());
   else if (const auto *GT = dynamic_cast<const GenericType *>(T))
-    Registered = GlobalSymbolTable->LookupType(
+    Registered = Symbols()->LookupType(
         Monomorphize::instantiatedDeclName(GT->getBaseName(), GT->getTypeArgs()));
   return dynamic_cast<const TurfStructType *>(Registered.get());
 }
@@ -2363,13 +2363,13 @@ static llvm::Value *emitDefaultValueRec(const TurfType *T, SourceLocation Loc,
     const TurfStructType *PST = defaultStructOf(Pointee);
     if (PST && std::find(InProgress.begin(), InProgress.end(), PST) != InProgress.end()) {
       LogErrorAt(Loc, ErrCode::DefaultThroughReferenceCycle,
-                 "'" + TypeIdentity::bareName(InProgress.front()->getName()) +
-                     "' has no default value: defaulting it gives every '&' field a "
-                     "new default value, and '" + TypeIdentity::bareName(PST->getName()) +
-                     "' reaches itself through '&' fields, so that never ends."
-                     "\n  Hint: Make one of the fields on the cycle '&?" +
+                 "`" + TypeIdentity::bareName(InProgress.front()->getName()) +
+                     "` has no default, because defaulting it gives every `&` field a "
+                     "new default, and `" + TypeIdentity::bareName(PST->getName()) +
+                     "` reaches itself through `&` fields, so that never ends."
+                     "\n  Hint: Change one of the fields on the cycle to `&?" +
                      TypeIdentity::bareName(PST->getName()) +
-                     "' (it defaults to null), or build the value with '::new(...)'.",
+                     "` (it defaults to null), or build the struct with `::new(...)`.",
                  SLM::ErrorCategory::DECLARATION);
       Failed = true;
       return nullptr;
@@ -2684,12 +2684,12 @@ DIType *getDebugType(const TurfType *T) {
   // (the TOOL-001 gap FDN-003 recorded). A generic instantiation's struct is
   // registered under its monomorphized name, the same lookup getLLVMType()
   // does.
-  if (GlobalSymbolTable) {
+  if (Symbols()) {
     TurfTypePtr Registered;
     if (const auto *NT = dynamic_cast<const NamedType *>(T))
-      Registered = GlobalSymbolTable->LookupType(NT->getName());
+      Registered = Symbols()->LookupType(NT->getName());
     else if (const auto *GT = dynamic_cast<const GenericType *>(T))
-      Registered = GlobalSymbolTable->LookupType(
+      Registered = Symbols()->LookupType(
           Monomorphize::instantiatedDeclName(GT->getBaseName(), GT->getTypeArgs()));
     if (Registered && Registered.get() != T &&
         (dynamic_cast<const TurfStructType *>(Registered.get()) ||

@@ -115,7 +115,7 @@ producing an `Annotation`. After the annotations and an optional `pub` it
 requires `fn` (delegating to `ParseFuncDef(HasCallerLocation)`) or, when
 `@caller_location` stands alone, `operator`
 (`ParseOperatorDecl(HasCallerLocation)`). Anything else is an
-`Expected 'fn' or 'operator' after '@caller_location'` error. The flag goes
+``I expected `fn` or `operator` after `@caller_location` `` error. The flag goes
 straight into `FuncDefExprAST`'s constructor (`HasCallerLocation`,
 `src/frontend/ASTDecl.h`), a plain parameter and not a global or thread-local,
 which keeps the parser reentrant (matters for `Sandbox.cpp`'s incremental

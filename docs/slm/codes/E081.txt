@@ -31,18 +31,21 @@ FIX:
   the `defer`. If the value can never be null, declare it
   `&Box` (no `?`) and no check is needed.
 
-  Only a VARIABLE can be checked. If the message says "this '&?T' value" (the
-  `&?T` is a field, a call result or a list element, as in `n.next.val`),
-  store it in a variable first and check that:
+  A variable or a field reached from one (`n.next`, `n.next.next`) can be
+  checked. A check on a field lasts until the next function or method call
+  or the next write to a field with that name, so read the field before
+  calling anything:
 
     struct Node { val: int, next: &?Node }
 
     fn good(n: &Node): int {
-        mut r: &?Node = n.next;
-        if r != null {
-            return r.val;
+        if n.next != null {
+            return n.next.val;
         }
         return 0;
     }
+
+  Anything else (a call result, a list element: "this '&?T' value") is
+  stored in a variable first, and the variable is checked.
 
 RELATED: E082 (converting `&?T` to `&T` with `to` without the same proof).

@@ -25,10 +25,10 @@ CORRECT SYNTAX:
 
 INCORRECT:
     mut p: Point = Point::new(1, 2);
-    p.new(3, 4);        // ERROR: 'new' can't be called on an instance
-                         //        with '.'.
-    p.default();         // ERROR: 'default' can't be called on an
-                         //        instance with '.'.
+    p.new(3, 4);        // ERROR: I cannot call `new` on an instance
+                         //        with `.`.
+    p.default();         // ERROR: I cannot call `default` on an
+                         //        instance with `.`.
 
 WHAT THIS ERROR IS NOT:
   - Not about the constructor's arguments being wrong -- the call is

@@ -1,0 +1,33 @@
+A raw pointer indexed with no bound
+
+Indexing a raw pointer (`p[i]`) is pointer arithmetic: nothing checks that `i` stays inside the memory `p` points to, unlike an array index. The compiler warns when it can see no bound on the index -- it is not proven non-negative, or nothing limits it from above:
+
+    import mem;
+
+    fn fill(n: int): int {
+        unsafe {
+            mut p: int* = mem::alloc(80) to int*;
+            for i in 0..n {
+                p[i] = i;                // WARNING (E191 at `warn`): n may exceed 10
+            }
+            mem::free(p);
+        }
+        return 0;
+    }
+
+Make the bound visible, so the index provably stays inside the allocation:
+
+    import mem;
+
+    fn fill(n: int): int {
+        unsafe {
+            mut p: int* = mem::alloc(80) to int*;
+            for i in 0..10 {
+                p[i] = i;
+            }
+            mem::free(p);
+        }
+        return n;
+    }
+
+The bound comes from constants, a range `for`, tests on the path and `%`/`&` (the same ranges that remove overflow checks). This warning starts at `allow` in 2.3: turn it on with `turf build --warn E191` (or `[lints] E191 = "warn"` in turf.toml).

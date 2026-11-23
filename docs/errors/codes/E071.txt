@@ -10,9 +10,9 @@ valid digit in that particular base:
 This error means one of the characters right after the prefix isn't valid
 for the base you chose -- most often a simple typo:
 
-    mut x: int = 0b012;   // ERROR: '2' isn't valid in binary
-    mut y: int = 0o8;     // ERROR: '8' isn't valid in octal
-    mut z: int = 0xZZ;    // ERROR: 'Z' isn't a hex digit
+    mut x: int = 0b012;   // ERROR: `2` is not a valid digit in `0b`, which is binary (0-1)
+    mut y: int = 0o8;     // ERROR: `8` is not a valid digit in `0o`, which is octal (0-7)
+    mut z: int = 0xZZ;    // ERROR: `Z` is not a valid digit in `0x`, which is hexadecimal (0-9, a-f)
 
 The fix depends on what you actually meant:
 

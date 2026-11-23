@@ -39,7 +39,7 @@ two heaps is in [Memory and Safety](../memory_and_safety.md).
 
 `T::default()` of any collection is an empty, ready collection. A declaration
 with no initializer is not: the variable has no value yet, and using it is
-**E008** ("You're using 'l' before it has a value").
+**E008** ("I cannot use `l` (type `list::List<int>`) before it has a value").
 
 <!-- doc-example: fails E008 -->
 ```turflang
@@ -123,8 +123,8 @@ collection; copy the field with `.copy()` when you want them apart. `copy()`
 copies the elements as values: a copy of a `List<&Node>` holds the same nodes.
 
 Binding a collection with `immut` forbids the calls that change it
-(`l.push(1)` on an `immut` list is **E060**, "You can't change the value of 'l'
-because it's immutable"); reading calls such as `length()` and `get()` are fine.
+(`l.push(1)` on an `immut` list is **E060**, "I cannot change `l`: it is
+immutable"); reading calls such as `length()` and `get()` are fine.
 
 <!-- doc-example: fails E060 -->
 ```turflang
@@ -254,13 +254,12 @@ Two limits follow from `x[i]` returning the element **by value**:
 
 - `l[i].field` and `l[i].method()` read through the element, but a write into
   a field of that copy (`l[i].f = v`, `l[i].f += 1`) or a call to a method that
-  assigns to `self` is **E098** ("Cannot assign to part of the value an
-  'operator[]' read returned"). Read the element into a variable, change it, and
+  assigns to `self` is **E098** ("I cannot assign to part of what an
+  `operator[]` read returned: it is a copy, so the write would be lost"). Read the element into a variable, change it, and
   store it back: `mut e: T = l[i]; e.f = v; l[i] = e;`.
   A collection element is a handle, so `grid[i][j] = v` and `outer[i].push(v)`
   change the inner collection itself and are fine.
-- `m[k] += 1` is **E126** ("Compound assignment through 'operator[]' is not
-  supported"). Write `m[k] = m[k] + 1`.
+- `m[k] += 1` is **E126** ("I cannot use `+=` through `operator[]`"). Write `m[k] = m[k] + 1`.
 
 <!-- doc-example: fails E098 -->
 ```turflang
@@ -289,7 +288,7 @@ fn main(): int {
 ```
 
 `Set` has no `[]=`: a set's elements are unique, and overwriting a position
-could break that (`s[0] = 1` is **E056**, "No `operator[]=` overload matches").
+could break that (`s[0] = 1` is **E056**, "No `operator[]=` matches `set::Set<int>[int] = int`").
 
 ## Iteration
 
@@ -414,7 +413,7 @@ fn main(): int {
 ```
 
 Passing something that is not a function of that shape is **E056** ("No
-matching overload"). There is no sort for `Stack`, `Queue`, `Map` or `Set`;
+overload of `list::List.sort` takes the argument types (int)"). There is no sort for `Stack`, `Queue`, `Map` or `Set`;
 sort a `List` copy of the data.
 
 ## Keys: equality and hashing
@@ -430,11 +429,11 @@ type, field by field:
   are one key, wherever they came from.
 - **A struct**: you declare `operator ==` for it (comparing its fields), and the
   hash is computed from the fields, never from padding. A struct without an
-  `operator ==` cannot be a key: the compiler reports **E011** ("Cannot compare struct values
-  with '=='") at the `put` or `add`. A struct with `string`
+  `operator ==` cannot be a key: the compiler reports **E124** ("In this instantiation: I cannot compare two `Big`
+  structs with `==`: a struct has no built-in comparison") at the `put` or `add`. A struct with `string`
   fields compares and hashes those by content.
-- **A fixed array** cannot be a key: arrays do not support `==` (**E011**,
-  "Cannot compare arrays with '=='"). Wrap it in a struct with its own
+- **A fixed array** cannot be a key: arrays do not support `==` (**E124**,
+  "In this instantiation: I cannot compare arrays with `==`"). Wrap it in a struct with its own
   `operator ==`.
 
 The one rule you must keep: `a == b` has to imply the same hash. That holds

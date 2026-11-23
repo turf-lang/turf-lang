@@ -1,0 +1,13 @@
+tests/07_functions_modules/fail_static_method_via_instance_no_args.tr (1 error)
+
+── error at line 16, col 22 [E052 · static method called on instance]
+
+  `square` is a static method, so I cannot call it through an instance with `.`.
+
+  Hint: Call it as `MathUtil::square(...)`: `MathUtil.square` is declared `static` and takes no implicit `self`.
+
+  16 │     immut y: int = mu.square();
+     │                      ^ this method is `static`, so it has no instance
+
+  Run `turf --explain E052` for more details.
+

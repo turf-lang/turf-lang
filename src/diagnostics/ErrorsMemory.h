@@ -8,8 +8,8 @@ class UseAfterFreeError : public TurfError {
 public:
   UseAfterFreeError(SourceLocation Loc, const std::string &Name)
       : TurfError(Loc,
-                  Colors::BRIGHT_RED + "Oops! You're using memory from '" + Colors::CYAN + Name + Colors::BRIGHT_RED + "' after it was freed." + Colors::RESET,
-                  "Don't use memory after it has been released (by free() or any function declared '@ownership(releases: ...)'). Consider setting the pointer to null after releasing it.") {
+                  Colors::BRIGHT_RED + "I cannot use the memory of `" + Colors::CYAN + Name + Colors::BRIGHT_RED + "` after it was freed." + Colors::RESET,
+                  "Stop using `" + Name + "` after it is released by `free()` or by a function declared `@ownership(releases: ...)`, or set the pointer to `null` after releasing it.") {
     Category_ = SLM::ErrorCategory::MEMORY_ERROR;
   }
 };
@@ -18,8 +18,8 @@ class DoubleFreeError : public TurfError {
 public:
   DoubleFreeError(SourceLocation Loc, const std::string &Name)
       : TurfError(Loc,
-                  Colors::BRIGHT_RED + "Double free detected for '" + Colors::CYAN + Name + Colors::BRIGHT_RED + "'." + Colors::RESET,
-                  "Release a pointer once: free() and every function declared '@ownership(releases: ...)' release what they are given.") {
+                  Colors::BRIGHT_RED + "I found a second free of `" + Colors::CYAN + Name + Colors::BRIGHT_RED + "`." + Colors::RESET,
+                  "Release the pointer only once: `free()` and every function declared `@ownership(releases: ...)` release what they are given.") {
     Category_ = SLM::ErrorCategory::MEMORY_ERROR;
   }
 };
@@ -32,13 +32,12 @@ class PossibleUseAfterFreeWarning : public TurfWarning {
 public:
   PossibleUseAfterFreeWarning(SourceLocation Loc, const std::string &Name)
       : TurfWarning(Loc,
-                    TurfWarning::WarningLabel() + "'" + Colors::CYAN + Name +
+                    TurfWarning::WarningLabel() + "`" + Colors::CYAN + Name +
                         Colors::BRIGHT_YELLOW +
-                        "' may already have been freed on some path reaching this use." +
+                        "` may already have been freed on some path reaching this use." +
                         Colors::RESET,
-                    "It is released on at least one path that leads here. If a condition "
-                    "rules that path out, this is fine; otherwise don't use it after "
-                    "releasing it.") {
+                    "Avoid using `" + Name + "` after releasing it. If a condition "
+                    "rules that path out, pass `--allow E170` to silence this.") {
     Category_ = SLM::ErrorCategory::MEMORY_ERROR;
   }
 };
@@ -46,12 +45,12 @@ class PossibleDoubleFreeWarning : public TurfWarning {
 public:
   PossibleDoubleFreeWarning(SourceLocation Loc, const std::string &Name)
       : TurfWarning(Loc,
-                    TurfWarning::WarningLabel() + "'" + Colors::CYAN + Name +
+                    TurfWarning::WarningLabel() + "`" + Colors::CYAN + Name +
                         Colors::BRIGHT_YELLOW +
-                        "' may already have been freed on some path reaching this call." +
+                        "` may already have been freed on some path reaching this call." +
                         Colors::RESET,
-                    "It is released on at least one path that leads here. If a condition "
-                    "rules that path out, this is fine; otherwise release it only once.") {
+                    "Release `" + Name + "` only once. If a condition rules "
+                    "that path out, pass `--allow E171` to silence this.") {
     Category_ = SLM::ErrorCategory::MEMORY_ERROR;
   }
 };
@@ -78,38 +77,36 @@ public:
                                const std::string &MemberName,
                                Member Kind = Member::Field)
       : TurfError(Loc,
-                  Colors::BRIGHT_RED + "Possible null dereference: '" +
-                      Colors::CYAN + Name + Colors::BRIGHT_RED +
-                      "' might be 'null' here, but you're " + verb(Kind) +
-                      " its '" + Colors::CYAN + MemberName +
-                      Colors::BRIGHT_RED + "' " + noun(Kind) + "." +
+                  Colors::BRIGHT_RED + "I cannot " + hintVerb(Kind) + " the " +
+                      noun(Kind) + " `" + Colors::CYAN + MemberName +
+                      Colors::BRIGHT_RED + "` of `" + Colors::CYAN + Name +
+                      Colors::BRIGHT_RED + "`, which might be `null` here." +
                       Colors::RESET,
-                  "Add a null check first, e.g. 'if (" + Name +
-                      " != null) { ... }', and " + hintVerb(Kind) + " '." +
+                  "Add a null check first, for example `if (" + Name +
+                      " != null) { ... }`, and " + hintVerb(Kind) + " `." +
                       MemberName + (Kind == Member::Method ? "()" : "") +
-                      "' only inside it.") {
+                      "` only inside it.") {
     Category_ = SLM::ErrorCategory::MEMORY_ERROR;
   }
 
-  /// A `&?T` value that is not a variable: `p.next.val`, `get().val`,
-  /// `list[i].val`. Only a variable compared with `null` is ever narrowed
-  /// (NullabilityPass), so no check written around such an expression can
-  /// prove it; the fix is always to name the value first.
+  /// A `&?T` value that is neither a variable nor a field path: `get().val`,
+  /// `list[i].val`. Only a variable or a field path compared with `null` is
+  /// ever narrowed (NullabilityPass, AN-4), so no check written around such
+  /// an expression can prove it; the fix is always to name the value first.
   PossibleNullDereferenceError(SourceLocation Loc, NotAVariable,
                                const std::string &TypeName,
                                const std::string &MemberName,
                                Member Kind = Member::Field)
       : TurfError(Loc,
-                  Colors::BRIGHT_RED + "Possible null dereference: this '" +
-                      Colors::CYAN + TypeName + Colors::BRIGHT_RED +
-                      "' value might be 'null', but you're " + verb(Kind) +
-                      " its '" + Colors::CYAN + MemberName +
-                      Colors::BRIGHT_RED + "' " + noun(Kind) + "." +
-                      Colors::RESET,
-                  "A null check only works on a variable. Store the value in "
-                  "one and check that: 'mut r: " + TypeName +
+                  Colors::BRIGHT_RED + "I cannot " + hintVerb(Kind) + " the " +
+                      noun(Kind) + " `" + Colors::CYAN + MemberName +
+                      Colors::BRIGHT_RED + "` of this `" + Colors::CYAN +
+                      TypeName + Colors::BRIGHT_RED +
+                      "`, which might be `null`." + Colors::RESET,
+                  "Store it in a variable and check that, because a null check "
+                  "works only on a variable or a field (`a.next`): `mut r: " + TypeName +
                       " = ...; if (r != null) { ... r." + MemberName +
-                      (Kind == Member::Method ? "()" : "") + " ... }'.") {
+                      (Kind == Member::Method ? "()" : "") + " ... }`.") {
     Category_ = SLM::ErrorCategory::MEMORY_ERROR;
   }
 
@@ -145,34 +142,58 @@ public:
                               bool CopyOut = false)
       : TurfError(Loc,
                   Colors::BRIGHT_RED +
-                      (CopyOut ? "Cannot copy the value out of '" + Colors::CYAN + Name +
-                                     Colors::BRIGHT_RED + "' here"
-                               : "Cannot cast '" + Colors::CYAN + Name +
-                                     Colors::BRIGHT_RED + "' to a non-null reference here") +
-                      " -- it might be 'null'." + Colors::RESET,
-                  "Narrow it first with a direct null check, e.g. 'if (" +
+                      (CopyOut ? "I cannot copy `" + Colors::CYAN + Name +
+                                     Colors::BRIGHT_RED + "` out here"
+                               : "I cannot cast `" + Colors::CYAN + Name +
+                                     Colors::BRIGHT_RED + "` to a non-null reference here") +
+                      ", because it might be `null`." + Colors::RESET,
+                  "Narrow it first with a direct null check, for example `if (" +
                       Name + " != null) { ... " + Name +
                       (CopyOut ? " to T" : " to &T") +
-                      " ... }', so the cast only runs where it's "
+                      " ... }`, so the cast runs only where it is "
                       "known to be safe.") {
     Category_ = SLM::ErrorCategory::TYPE_MISMATCH;
   }
 
-  /// `(h.next to &Node)`: the operand is not a variable, so nothing can have
-  /// narrowed it (see PossibleNullDereferenceError's second constructor).
+  /// AN-4: a `&?T` variable or field path used as a `&T` without a cast.
+  enum class Use {
+    /// Passed, returned or stored as a `&T` where it is not proven non-null.
+    Converted,
+    /// Inside a `defer`: it runs at the scope's exits, where no check made
+    /// before them is known to hold.
+    Deferred
+  };
+  UnnarrowedNullableCastError(SourceLocation Loc, const std::string &Name, Use U)
+      : TurfError(Loc,
+                  Colors::BRIGHT_RED + "I cannot use `" + Colors::CYAN + Name +
+                      Colors::BRIGHT_RED + "` as a non-null reference " +
+                      (U == Use::Deferred ? "in a `defer`" : "here") +
+                      ", because it might be `null`." + Colors::RESET,
+                  U == Use::Deferred
+                      ? "Check it inside the deferred statement and cast there: `defer if " +
+                            Name + " != null { ... " + Name + " to &T ... }`."
+                      : "Check it first, `if " + Name + " != null { ... }`, and use it "
+                            "inside. A check on a field holds until the next call or "
+                            "the next write to a field of that name.") {
+    Category_ = SLM::ErrorCategory::TYPE_MISMATCH;
+  }
+
+  /// `(get() to &Node)`: the operand is neither a variable nor a field path,
+  /// so nothing can have narrowed it (see PossibleNullDereferenceError's
+  /// second constructor).
   UnnarrowedNullableCastError(SourceLocation Loc, NotAVariable,
                               const std::string &TypeName, bool CopyOut = false)
       : TurfError(Loc,
                   Colors::BRIGHT_RED +
-                      (CopyOut ? "Cannot copy the value out of this '" + Colors::CYAN +
-                                     TypeName + Colors::BRIGHT_RED + "' value"
-                               : "Cannot cast this '" + Colors::CYAN + TypeName +
-                                     Colors::BRIGHT_RED + "' value to a non-null reference") +
-                      " -- it might be 'null'." + Colors::RESET,
-                  "A null check only works on a variable. Store the value in "
-                  "one, check it, and cast inside the check: 'mut r: " +
-                      TypeName + " = ...; if (r != null) { ... r " +
-                      (CopyOut ? "to T" : "to &T") + " ... }'.") {
+                      (CopyOut ? "I cannot copy this `" + Colors::CYAN +
+                                     TypeName + Colors::BRIGHT_RED + "` out"
+                               : "I cannot cast this `" + Colors::CYAN + TypeName +
+                                     Colors::BRIGHT_RED + "` to a non-null reference") +
+                      ", because it might be `null`." + Colors::RESET,
+                  "Store it in a variable, check it, and cast inside the "
+                  "check, because a null check works only on a variable or a field (`a.next`): "
+                  "`mut r: " + TypeName + " = ...; if (r != null) { ... r " +
+                      (CopyOut ? "to T" : "to &T") + " ... }`.") {
     Category_ = SLM::ErrorCategory::TYPE_MISMATCH;
   }
 };
@@ -200,14 +221,14 @@ public:
                                const std::string &SinkDescription)
       : TurfError(Loc,
                   Colors::BRIGHT_RED +
-                      "A reference into this function's own local storage "
-                      "can't be " + Colors::CYAN + SinkDescription +
+                      "I cannot let a reference into this function's own "
+                      "local storage be " + Colors::CYAN + SinkDescription +
                       Colors::BRIGHT_RED +
-                      " -- it would dangle the moment this function returns."
+                      ", because it would dangle when this function returns."
                       + Colors::RESET,
-                  "heap(value) copies it onto the GC heap first and gives "
-                  "you back a reference that outlives this function; or "
-                  "return/store a reference you received as a parameter "
+                  "Copy it onto the GC heap first with `heap(value)`, which "
+                  "gives a reference that outlives this function, or "
+                  "return or store a reference you received as a parameter "
                   "instead of a local's.") {
     Category_ = SLM::ErrorCategory::MEMORY_ERROR;
   }
@@ -217,16 +238,122 @@ class BareErrorAsBindingError : public TurfError {
 public:
   BareErrorAsBindingError(SourceLocation Loc, const std::string &BoundName)
       : TurfError(Loc,
-                  Colors::BRIGHT_RED + "'recover as " + Colors::CYAN + BoundName +
+                  Colors::BRIGHT_RED + "I cannot use `recover as " + Colors::CYAN + BoundName +
                       Colors::BRIGHT_RED +
-                      " run' can't be used here -- every error this call can "
-                      "fail with is a bare 'error Name;' declaration." +
+                      " run` here, because every error this call can "
+                      "fail with is a bare `error Name;` declaration." +
                       Colors::RESET,
-                  "A bare error type carries no information to discriminate "
-                  "on (it only ever has a single DEFAULT variant) -- use "
-                  "'recover run { ... }' or 'recover produce value' instead, "
-                  "since they don't need to inspect which error happened.") {
+                  "Use `recover run { ... }` or `recover produce value` "
+                  "instead, since they do not inspect which error happened. A "
+                  "bare error type carries no information to discriminate "
+                  "on.") {
     Category_ = SLM::ErrorCategory::CONTROL_FLOW;
+  }
+};
+
+// ─── AN-1 (TDP-2-007, issue #349): checks on `unsafe` code ─────────────────
+// Warnings, each starting at `allow`; B-1 decides which become errors in 3.0.
+
+// E188: a dereference (field, index, method) through a raw-pointer variable
+// that is not proven non-null on every path (NullabilityPass).
+class RawPointerMaybeNullWarning : public TurfWarning {
+public:
+  RawPointerMaybeNullWarning(SourceLocation Loc, const std::string &Var)
+      : TurfWarning(Loc,
+                    "`" + Var + "` is a raw pointer that may be null here, and "
+                    "this reads or writes through it.",
+                    "Test it first (`if " + Var + " != null { ... }`), or use a "
+                    "`&T`, which is never null.") {
+    Category_ = SLM::ErrorCategory::MEMORY_ERROR;
+  }
+};
+
+// E189: freeing memory this function provably did not get from an
+// allocation: the address of a variable, or a number made into a pointer.
+class FreeOfNonHeapPointerWarning : public TurfWarning {
+public:
+  FreeOfNonHeapPointerWarning(SourceLocation Loc, const std::string &What)
+      : TurfWarning(Loc,
+                    "This frees " + What + ", which did not come from an "
+                    "allocation: freeing it corrupts memory.",
+                    "Free only what `mem::alloc` (or another allocating "
+                    "function) returned; the address of a variable is freed "
+                    "when its function returns.") {
+    Category_ = SLM::ErrorCategory::MEMORY_ERROR;
+  }
+};
+
+// E190: a write through a pointer made from an `immut` array.
+class WriteThroughImmutableArrayWarning : public TurfWarning {
+public:
+  WriteThroughImmutableArrayWarning(SourceLocation Loc, const std::string &Var,
+                                    const std::string &Array)
+      : TurfWarning(Loc,
+                    "This writes through `" + Var + "`, which points into `" +
+                    Array + "`, an `immut` array: the write changes a value "
+                    "declared never to change.",
+                    "Declare `" + Array + "` with `mut`, or copy it into a "
+                    "`mut` array and point into that.") {
+    Category_ = SLM::ErrorCategory::MEMORY_ERROR;
+  }
+};
+
+// E191: indexing a raw pointer with an index not proven within a known,
+// non-negative range (ValueRangePass).
+class UncheckedPointerIndexWarning : public TurfWarning {
+public:
+  UncheckedPointerIndexWarning(SourceLocation Loc, const std::string &Var)
+      : TurfWarning(Loc,
+                    "This indexes the raw pointer `" + Var + "` with an index "
+                    "the compiler cannot bound: nothing checks that it stays "
+                    "inside the memory `" + Var + "` points to.",
+                    "Keep the index in a range the code makes visible (a loop "
+                    "`for i in 0..N`, or a test `if i >= 0 && i < N`), or use an "
+                    "array, whose index is checked.") {
+    Category_ = SLM::ErrorCategory::MEMORY_ERROR;
+  }
+};
+
+// E192: an integer converted to a pointer or a reference.
+class IntToPointerCastWarning : public TurfWarning {
+public:
+  IntToPointerCastWarning(SourceLocation Loc, const std::string &Dest)
+      : TurfWarning(Loc,
+                    "This converts an integer to `" + Dest + "`: the compiler "
+                    "cannot know what, if anything, is at that address.",
+                    "Get the pointer from what it points to (`&x`, an "
+                    "allocation), or write `null` for no address.") {
+    Category_ = SLM::ErrorCategory::MEMORY_ERROR;
+  }
+};
+
+// E193: an `unsafe { }` block in which nothing needs it.
+class UnneededUnsafeBlockWarning : public TurfWarning {
+public:
+  explicit UnneededUnsafeBlockWarning(SourceLocation Loc)
+      : TurfWarning(Loc,
+                    "Nothing in this `unsafe { }` block needs it: it holds no "
+                    "raw-pointer declaration, cast or dereference.",
+                    "Remove the `unsafe { }` and keep its statements, so the "
+                    "unsafe blocks that remain mark the code that needs care. "
+                    "To silence this on purpose, pass `--allow E193`.") {
+    Category_ = SLM::ErrorCategory::MEMORY_ERROR;
+  }
+};
+
+// E194: an `unsafe { }` block with more statements than LargeUnsafeLimit.
+class LargeUnsafeBlockWarning : public TurfWarning {
+public:
+  static constexpr int LargeUnsafeLimit = 40;
+  LargeUnsafeBlockWarning(SourceLocation Loc, int Statements)
+      : TurfWarning(Loc,
+                    "This `unsafe { }` block holds " + std::to_string(Statements) +
+                    " statements (more than " + std::to_string(LargeUnsafeLimit) +
+                    "): the code that needs care is hard to find in it.",
+                    "Keep only the raw-pointer operations inside `unsafe { }`, "
+                    "and move the rest out, or into a function. To silence "
+                    "this on purpose, pass `--allow E194`.") {
+    Category_ = SLM::ErrorCategory::MEMORY_ERROR;
   }
 };
 

@@ -1,0 +1,15 @@
+// EXPECT-DIAG: E082
+// EXPECT-DIAG: I cannot use `h.next` as a non-null reference in a `defer`, because it might be `null`.
+// A deferred statement runs at the scope's exits, where a check made before
+// them is not known to hold.
+struct Node { val: int, next: &?Node }
+
+fn get(n: &Node): int { return n.val; }
+
+fn f(h: &Node): void {
+    if h.next != null {
+        defer get(h.next);
+    }
+}
+
+fn main(): int { return 0; }

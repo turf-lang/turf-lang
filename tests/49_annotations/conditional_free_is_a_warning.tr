@@ -1,5 +1,5 @@
-// EXPECT-DIAG: 'p' may already have been freed on some path reaching this call
-// EXPECT-DIAG: 'q' may already have been freed on some path reaching this use
+// EXPECT-DIAG: `p` may already have been freed on some path reaching this call
+// EXPECT-DIAG: `q` may already have been freed on some path reaching this use
 // EXPECT-NO-DIAG: E017
 // EXPECT-NO-DIAG: E018
 // A pointer released on SOME paths only is a warning, not an error: whether the

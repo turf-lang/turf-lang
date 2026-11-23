@@ -1,0 +1,15 @@
+tests/04_control_flow/fail_if_condition_string.tr (1 error)
+
+── error at line 6, col 8 [E066 · type mismatch]
+
+  The condition of `if` must be a `bool`, and I found a `string`.
+
+  Hint: Write a comparison, e.g. `n != 0` or `s.length() > 0`.
+
+  6 │     if "s" {
+    │     -- ^~~ this is a `string`
+    │     │
+    │     `if` needs a `bool`
+
+  Run `turf --explain E066` for more details.
+

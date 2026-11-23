@@ -1,6 +1,5 @@
 // EXPECT-DIAG: E150
-// EXPECT-DIAG: Expected 'size' after 'N:'
-
+// EXPECT-DIAG: I expected `size` after `N:`, because the only generic parameter written with `:` is a size parameter.
 fn<N: count> first(a: int[N]): int {
     return a[0];
 }

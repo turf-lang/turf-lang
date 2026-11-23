@@ -9,10 +9,10 @@ CAUSE:
   TRANSITIVE DEPENDENCY: the package is built only because something you depend
     on depends on it. Using it would break when that dependency stops needing it.
         // myapp depends on plotter; plotter depends on geometry
-        import geometry;     // ERROR: not a dependency of 'myapp'
+        import geometry;     // ERROR: I cannot import package `geometry`, because it is not a dependency of `myapp`.
   INTERNAL MODULE: every module of a package except its root module
     (src/<package name>.tr) is internal to that package.
-        import shapes;       // ERROR: Module 'shapes' is internal to 'geometry'
+        import shapes;       // ERROR: I cannot import the module `shapes`, because it is internal to package `geometry`.
 
 CORRECT (the importing package's turf.toml lists what it imports):
     [dependencies]

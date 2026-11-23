@@ -1,9 +1,9 @@
 // EXPECT-DIAG: E108
 // EXPECT-FIX: insert ';' at the end of line 24
 // EXPECT-DIAG: E102
-// EXPECT-DIAG: Expected a function name after 'fn'
-// EXPECT-DIAG: Expected ';' after statement
-// EXPECT-NO-DIAG: Statements are not allowed outside of a function
+// EXPECT-DIAG: I expected a function name after `fn`
+// EXPECT-DIAG: I expected a `;` after this statement
+// EXPECT-NO-DIAG: I found a statement outside a function
 // LEC-005: recovery must land on the closing brace of the BROKEN function --
 // not before it (the old behaviour: leftover body parsed as top-level
 // statements) and not after it (which would swallow the next function and

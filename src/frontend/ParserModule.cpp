@@ -255,7 +255,7 @@ void AppendFlattenedTopLevelDecl(std::unique_ptr<ExprAST> AST,
   };
   if (TooDeep(AST.get())) {
     LogErrorAt(WhereIs(AST.get()), ErrCode::NestingTooDeep,
-               "Expression nested too deeply to parse."
+               "I cannot parse this expression because it is nested too deeply."
                "\n  Hint: Move the inner part into a variable of its own (`mut part: int = ...;`) and use `part` here.",
                SLM::ErrorCategory::SYNTAX_ERROR);
     (void)AST.release();
@@ -286,15 +286,14 @@ void AppendFlattenedTopLevelDecl(std::unique_ptr<ExprAST> AST,
           (Vd && Vd->isExported());
       if (!IsDecl) {
         LogErrorAt(Vd ? Vd->getLoc() : BlockLoc, ErrCode::StatementOutsideFunction,
-                   "Statements are not allowed outside of a function, and a "
-                   "top-level 'unsafe { }' block holds only declarations. Move "
-                   "this code into a function, inside its own 'unsafe { }'.\n  Hint: Declare the function in the block (`fn f(): void { ... }`) and do the work inside it: `unsafe { ... }` stays around the call.",
+                   "I found a statement outside a function. A top-level "
+                   "`unsafe { }` block holds only declarations.\n  Hint: Declare a function in the block (`fn f(): void { ... }`), put the statement inside it, and call it from your code, with `unsafe { ... }` around the call.",
                    SLM::ErrorCategory::SYNTAX_ERROR);
         continue;
       }
       if (TooDeep(Child.get())) {
         LogErrorAt(WhereIs(Child.get()), ErrCode::NestingTooDeep,
-                   "Expression nested too deeply to parse."
+                   "I cannot parse this expression because it is nested too deeply."
                    "\n  Hint: Move the inner part into a variable of its own (`mut part: int = ...;`) and use `part` here.",
                    SLM::ErrorCategory::SYNTAX_ERROR);
         (void)Child.release();
@@ -549,14 +548,14 @@ static std::unique_ptr<ExprAST> ParseFileDeclarations(const std::string &Path) {
       continue;
     }
 
-    if (Parser().CurTok == TOK_FN || Parser().CurTok == TOK_STRUCT || Parser().CurTok == TOK_ENUM ||
+    if (Parser().CurTok == TOK_FN || Parser().CurTok == TOK_STATIC || Parser().CurTok == TOK_IMMUTABLE || Parser().CurTok == TOK_STRUCT || Parser().CurTok == TOK_ENUM ||
         Parser().CurTok == TOK_MACHINE || Parser().CurTok == TOK_AT ||
         Parser().CurTok == TOK_EXTERN || Parser().CurTok == TOK_EXPORT || Parser().CurTok == TOK_OPERATOR ||
         Parser().CurTok == TOK_ERROR || Parser().CurTok == TOK_UNSAFE || Parser().CurTok == TOK_PUB) {
       auto Expr = ParseExpression();
       if (Expr) {
         if (Parser().CurTok == ';') {
-          LogErrorAt(Lex().CurLoc, ErrCode::UnexpectedToken, "Unexpected ';'", SLM::ErrorCategory::SYNTAX_ERROR);
+          LogErrorAt(Lex().CurLoc, ErrCode::UnexpectedToken, "I did not expect a `;` here.", SLM::ErrorCategory::SYNTAX_ERROR);
           return nullptr;
         }
         // Flattens Expr first if it's a top-level `unsafe { }` block -- see
@@ -592,7 +591,7 @@ static std::unique_ptr<ExprAST> ParseFileDeclarations(const std::string &Path) {
       auto Expr = ParseImport();
       if (Expr) {
         if (Parser().CurTok != ';') {
-          LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement.", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
+          LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "I expected a `;` after this statement.", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
           return nullptr;
         }
         getNextToken(); // eat ';'
@@ -608,7 +607,7 @@ static std::unique_ptr<ExprAST> ParseFileDeclarations(const std::string &Path) {
     auto Expr = ParseExpression();
     if (Expr) {
       if (Parser().CurTok != ';') {
-        LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement.", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
+        LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "I expected a `;` after this statement.", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
         return nullptr;
       }
       getNextToken(); // eat ';'
@@ -794,7 +793,7 @@ bool ParseLeadingUnsafeModuleDecl(std::unique_ptr<ExprAST> &OutBlock) {
   if (Parser().CurTok == TOK_IDENTIFIER && Lex().IdentifierStr == "module") {
     getNextToken(); // consume 'module'
     if (Parser().CurTok != ';') {
-      SyntaxError(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after 'unsafe module'").raise();
+      SyntaxError(Lex().CurLoc, ErrCode::MissingSemicolon, "I expected a `;` after `unsafe module`.").raise();
       return true; // still: not a real unsafe-block AST for the caller
     }
     getNextToken(); // consume ';'
@@ -1587,7 +1586,7 @@ std::unique_ptr<ExprAST> ParseImport() {
   // CHAR_RFC.md §7 step 6) that are ALSO primitive-type keywords, so they
   // lex as TOK_TYPE_INT/TOK_TYPE_DOUBLE/TOK_TYPE_BOOL/TOK_TYPE_CHAR, not
   // TOK_IDENTIFIER -- without this, a user literally writing `import char;`
-  // hit "Expected module name after 'import'", even though the prelude
+  // hit "I expected a module name after `import`.", even though the prelude
   // mechanism itself loads char.tr internally just fine (it never goes
   // through this token-based path at all, see ParsePreludeImports()).
   // `string` (singular, the type keyword) doesn't need an entry here: the
@@ -1604,7 +1603,7 @@ std::unique_ptr<ExprAST> ParseImport() {
   } else if (Parser().CurTok == TOK_TYPE_CHAR) {
     ModuleName = "char";
   } else {
-    LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "Expected module name after 'import'", SLM::ErrorCategory::DECLARATION);
+    LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "I expected a module name after `import`.", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
   getNextToken();
@@ -1625,7 +1624,7 @@ std::unique_ptr<ExprAST> ParseImport() {
       if (Parser().CurTok == '*') {
         getNextToken(); // eat '*'
         if (Parser().CurTok != ']') {
-          LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "Expected ']' after '*' in import list", SLM::ErrorCategory::DECLARATION);
+          LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "I expected a `]` after `*` in this import list.", SLM::ErrorCategory::DECLARATION);
           return nullptr;
         }
         getNextToken(); // eat ']'
@@ -1634,7 +1633,7 @@ std::unique_ptr<ExprAST> ParseImport() {
         Mode = ImportMode::SymbolList;
         while (Parser().CurTok != ']' && Parser().CurTok != TOK_EOF) {
           if (Parser().CurTok != TOK_IDENTIFIER) {
-            LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "Expected a symbol name in import list", SLM::ErrorCategory::DECLARATION);
+            LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "I expected a symbol name in this import list.", SLM::ErrorCategory::DECLARATION);
             return nullptr;
           }
           RequestedSymbols.push_back({Lex().IdentifierStr, Lex().CurLoc});
@@ -1646,12 +1645,12 @@ std::unique_ptr<ExprAST> ParseImport() {
           }
         }
         if (Parser().CurTok != ']') {
-          LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "Expected ']' to close import list", SLM::ErrorCategory::DECLARATION);
+          LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "I expected a `]` to close this import list.", SLM::ErrorCategory::DECLARATION);
           return nullptr;
         }
         getNextToken(); // eat ']'
         if (RequestedSymbols.empty()) {
-          LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "Expected at least one symbol name in import list", SLM::ErrorCategory::DECLARATION);
+          LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "I expected at least one symbol name in this import list.", SLM::ErrorCategory::DECLARATION);
           return nullptr;
         }
       }
@@ -1661,7 +1660,7 @@ std::unique_ptr<ExprAST> ParseImport() {
       getNextToken();
     } else {
       LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName,
-                 "Expected a symbol name or '[' after '::' in import", SLM::ErrorCategory::DECLARATION);
+                 "I expected a symbol name or a `[` after `::` in this import.", SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
   }

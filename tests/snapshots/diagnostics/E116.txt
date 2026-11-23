@@ -1,0 +1,12 @@
+tests/01_syntax/fail_extern_function_with_body.tr (1 error)
+
+── error at line 5, col 1 [E116 · extern function with a body]
+
+  I cannot accept a body on an `extern` function declaration.
+  Hint: End the declaration of `malloc` with `;` and no body: `extern fn malloc(...): T;`. To write the body in Turf, remove `extern`.
+
+  5 │ extern fn malloc(size: int): ptr {
+    │ ^~~~~~ an `extern` function has no body
+
+  Run `turf --explain E116` for more details.
+

@@ -45,7 +45,7 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
     return nullptr;
 
   if (Parser().CurTok != '{') {
-    LogErrorAt(Lex().CurLoc, ErrCode::MissingOpeningDelimiter, "Expected '{' after if-condition. Use 'give ... otherwise ...' for single-expression ternary.", SLM::ErrorCategory::CONTROL_FLOW);
+    LogErrorAt(Lex().CurLoc, ErrCode::MissingOpeningDelimiter, "I expected a `{` after the `if` condition. To choose between two expressions, use `give ... otherwise ...`.", SLM::ErrorCategory::CONTROL_FLOW);
     return nullptr;
   }
 
@@ -65,9 +65,9 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
 
     if (Parser().CurTok != '{') {
       LogErrorAt(ElseifLoc, ErrCode::MissingOpeningDelimiter,
-                 "Expected '{' to open the elseif-block body."
-                            "\n  Hint: 'elseif' blocks must always use braces: "
-                            "elseif condition { ... }", SLM::ErrorCategory::CONTROL_FLOW);
+                 "I expected a `{` to open the body of this `elseif`."
+                            "\n  Hint: Wrap the body of an `elseif` in braces: "
+                            "`elseif condition { ... }`.", SLM::ErrorCategory::CONTROL_FLOW);
       return nullptr;
     }
     auto ElseifBody = ParseBlock();
@@ -115,13 +115,13 @@ std::unique_ptr<ExprAST> ParseBlock() {
   ParseRecursionGuard RecursionGuard;
   if (RecursionGuard.tooDeep()) {
     LogErrorAt(Lex().CurLoc, ErrCode::NestingTooDeep,
-               "Block nested too deeply to parse."
-               "\n  Hint: check for unbalanced '{'.", SLM::ErrorCategory::SYNTAX_ERROR);
+               "I cannot parse this block because it is nested too deeply."
+               "\n  Hint: Check for an unclosed `{`.", SLM::ErrorCategory::SYNTAX_ERROR);
     return nullptr;
   }
 
   if (Parser().CurTok != '{') {
-    LogErrorAt(Lex().CurLoc, ErrCode::MissingOpeningDelimiter, "Expected '{' to open a block", SLM::ErrorCategory::SYNTAX_ERROR);
+    LogErrorAt(Lex().CurLoc, ErrCode::MissingOpeningDelimiter, "I expected a `{` to open a block.", SLM::ErrorCategory::SYNTAX_ERROR);
     return nullptr;
   }
 
@@ -173,7 +173,7 @@ std::unique_ptr<ExprAST> ParseBlock() {
       continue;
     }
     if (Parser().CurTok == TOK_IF || Parser().CurTok == TOK_WHILE || Parser().CurTok == TOK_DO || Parser().CurTok == TOK_FOR ||
-        Parser().CurTok == TOK_FN || Parser().CurTok == TOK_STRUCT || Parser().CurTok == TOK_ENUM || Parser().CurTok == TOK_MACHINE ||
+        Parser().CurTok == TOK_FN || Parser().CurTok == TOK_STATIC || Parser().CurTok == TOK_STRUCT || Parser().CurTok == TOK_ENUM || Parser().CurTok == TOK_MACHINE ||
         Parser().CurTok == TOK_COMPARE || Parser().CurTok == TOK_ERROR || Parser().CurTok == TOK_UNSAFE ||
         Parser().CurTok == TOK_PUB || Parser().CurTok == TOK_AT) {
       // TOK_AT: `@name(args)` before a nested `extern fn` (or `fn`). Like
@@ -182,7 +182,7 @@ std::unique_ptr<ExprAST> ParseBlock() {
       auto Expr = ParseExpression();
       if (!Expr) return nullptr;
       if (Parser().CurTok == ';') {
-        LogErrorAt(Lex().CurLoc, ErrCode::UnexpectedToken, "Unexpected ';'", SLM::ErrorCategory::SYNTAX_ERROR);
+        LogErrorAt(Lex().CurLoc, ErrCode::UnexpectedToken, "I did not expect a `;` here.", SLM::ErrorCategory::SYNTAX_ERROR);
         return nullptr;
       }
       Exprs.push_back(std::move(Expr));
@@ -205,8 +205,8 @@ std::unique_ptr<ExprAST> ParseBlock() {
         for (const auto &KW : Keywords) {
           int MaxDist = KW.length() <= 3 ? 1 : 2;
           if (getDamerauLevenshteinDistance(PossibleKeyword, KW) <= MaxDist) {
-            Hint = "\n  Hint: Did you mean '" + KW + "' instead of '" +
-                   PossibleKeyword + "'?";
+            Hint = "\n  Hint: Replace `" + PossibleKeyword + "` with `" +
+                   KW + "` if you meant the keyword.";
             break;
           }
         }
@@ -216,7 +216,7 @@ std::unique_ptr<ExprAST> ParseBlock() {
       // trips it for `if`/`do`), so it does not make "the ';' is missing" a
       // guess: a statement that really starts with a misspelled keyword is an
       // unresolved name once the ';' is in, and the sandbox rejects that.
-      LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement." + Hint, SLM::ErrorCategory::SYNTAX_ERROR,
+      LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "I expected a `;` after this statement." + Hint, SLM::ErrorCategory::SYNTAX_ERROR,
                  MissingSemicolonHints());
       return nullptr;
     }
@@ -226,14 +226,19 @@ std::unique_ptr<ExprAST> ParseBlock() {
 
   if (Parser().CurTok != '}') {
     LogErrorAt(OpenBraceLoc, ErrCode::UnclosedDelimiter,
-               "Missing closing '}' — every '{' must have a matching '}'."
-               "\n  Hint: Add a '}' to close the block opened on line " +
+               "I did not find the `}` that closes this block."
+               "\n  Hint: Add a `}` to close the block opened on line " +
                    std::to_string(OpenBraceLoc.Line) + ".", SLM::ErrorCategory::SYNTAX_ERROR);
     return nullptr;
   }
   getNextToken();
 
-  return std::make_unique<BlockExprAST>(std::move(Exprs));
+  // From `{` to `}`: the empty-body warnings (E195-E197) read the source
+  // between them for a comment.
+  auto Block = std::make_unique<BlockExprAST>(std::move(Exprs));
+  Block->setSpan(SourceLocation{OpenBraceLoc.Line, OpenBraceLoc.Col, OpenBraceLoc.Filename,
+                                Lex().PrevTokEndLine, Lex().PrevTokEndCol});
+  return Block;
 }
 
 std::unique_ptr<ExprAST> ParseWhileExpr() {
@@ -248,8 +253,8 @@ std::unique_ptr<ExprAST> ParseWhileExpr() {
   if (Parser().CurTok != '{') {
     LogErrorAt(
         KeywordLoc, ErrCode::MissingOpeningDelimiter,
-        "Expected '{' to open the while-loop body."
-        "\n  Hint: while loops must use braces: while condition { ... }", SLM::ErrorCategory::CONTROL_FLOW);
+        "I expected a `{` to open the body of this `while` loop."
+        "\n  Hint: Wrap the body of a `while` loop in braces: `while condition { ... }`.", SLM::ErrorCategory::CONTROL_FLOW);
     return nullptr;
   }
 
@@ -283,8 +288,8 @@ std::unique_ptr<ExprAST> ParseWhileExpr() {
 std::unique_ptr<ExprAST> ParseUnsafeBlockBody(SourceLocation KeywordLoc) {
   if (Parser().CurTok != '{') {
     LogErrorAt(KeywordLoc, ErrCode::MissingOpeningDelimiter,
-               "Expected '{' to open an unsafe block."
-               "\n  Hint: unsafe blocks must use braces: unsafe { ... }", SLM::ErrorCategory::SYNTAX_ERROR);
+               "I expected a `{` to open this `unsafe` block."
+               "\n  Hint: Wrap the body of an `unsafe` block in braces: `unsafe { ... }`.", SLM::ErrorCategory::SYNTAX_ERROR);
     return nullptr;
   }
 
@@ -314,8 +319,8 @@ std::unique_ptr<ExprAST> ParseDoWhileExpr() {
   if (Parser().CurTok != '{') {
     LogErrorAt(
         KeywordLoc, ErrCode::MissingOpeningDelimiter,
-        "Expected '{' to open the do-block body."
-        "\n  Hint: do-while loops must use braces: do { ... } while cond;", SLM::ErrorCategory::CONTROL_FLOW);
+        "I expected a `{` to open the body of this `do` loop."
+        "\n  Hint: Wrap the body of a `do` loop in braces: `do { ... } while cond;`.", SLM::ErrorCategory::CONTROL_FLOW);
     return nullptr;
   }
 
@@ -324,7 +329,7 @@ std::unique_ptr<ExprAST> ParseDoWhileExpr() {
     return nullptr;
 
   if (Parser().CurTok != TOK_WHILE) {
-    LogErrorAt(Lex().CurLoc, ErrCode::ExpectedKeyword, "Expected 'while' after do-block\n  Hint: A do-block ends with its condition: `do { ... } while (cond);`.", SLM::ErrorCategory::CONTROL_FLOW);
+    LogErrorAt(Lex().CurLoc, ErrCode::ExpectedKeyword, "I expected `while` after the body of this `do` loop.\n  Hint: End the loop with its condition: `do { ... } while (cond);`.", SLM::ErrorCategory::CONTROL_FLOW);
     return nullptr;
   }
   getNextToken(); // eat 'while'
@@ -337,7 +342,7 @@ std::unique_ptr<ExprAST> ParseDoWhileExpr() {
     return nullptr;
 
   if (Parser().CurTok != ';') {
-    LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after do-while loop.", SLM::ErrorCategory::CONTROL_FLOW, MissingSemicolonHints());
+    LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "I expected a `;` after this `do ... while` loop.", SLM::ErrorCategory::CONTROL_FLOW, MissingSemicolonHints());
     return nullptr;
   }
   getNextToken(); // eat ';'
@@ -368,8 +373,8 @@ std::unique_ptr<ExprAST> ParseForExpr() {
 
     if (Parser().CurTok != TOK_IDENTIFIER) {
       LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName,
-                 "Expected an index variable name after '(' in a for-each loop."
-                         "\n  Hint: Correct syntax: for (index, value) in numbers { }", SLM::ErrorCategory::CONTROL_FLOW);
+                 "I expected an index variable name after `(` in this `for` loop."
+                         "\n  Hint: Write the loop as `for (index, value) in numbers { }`.", SLM::ErrorCategory::CONTROL_FLOW);
       return nullptr;
     }
     IndexVarName = Lex().IdentifierStr;
@@ -377,16 +382,16 @@ std::unique_ptr<ExprAST> ParseForExpr() {
 
     if (Parser().CurTok != ',') {
       LogErrorAt(Lex().CurLoc, ErrCode::MissingComma,
-                 "Expected ',' between the index and value variable names."
-                         "\n  Hint: Correct syntax: for (index, value) in numbers { }", SLM::ErrorCategory::CONTROL_FLOW);
+                 "I expected a `,` between the index and value variable names."
+                         "\n  Hint: Write the loop as `for (index, value) in numbers { }`.", SLM::ErrorCategory::CONTROL_FLOW);
       return nullptr;
     }
     getNextToken(); // eat ','
 
     if (Parser().CurTok != TOK_IDENTIFIER) {
       LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName,
-                 "Expected a value variable name after ',' in a for-each loop."
-                         "\n  Hint: Correct syntax: for (index, value) in numbers { }", SLM::ErrorCategory::CONTROL_FLOW);
+                 "I expected a value variable name after `,` in this `for` loop."
+                         "\n  Hint: Write the loop as `for (index, value) in numbers { }`.", SLM::ErrorCategory::CONTROL_FLOW);
       return nullptr;
     }
     VarName = Lex().IdentifierStr;
@@ -394,8 +399,8 @@ std::unique_ptr<ExprAST> ParseForExpr() {
 
     if (Parser().CurTok != ')') {
       LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter,
-                 "Expected ')' to close the '(index, value)' pair."
-                         "\n  Hint: Correct syntax: for (index, value) in numbers { }", SLM::ErrorCategory::CONTROL_FLOW);
+                 "I expected a `)` to close the `(index, value)` pair."
+                         "\n  Hint: Write the loop as `for (index, value) in numbers { }`.", SLM::ErrorCategory::CONTROL_FLOW);
       return nullptr;
     }
     getNextToken(); // eat ')'
@@ -404,18 +409,18 @@ std::unique_ptr<ExprAST> ParseForExpr() {
     getNextToken();
   } else {
     LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName,
-               "Expected a loop variable name (or '(index, value)') after 'for'."
-                       "\n  Hint: for i in 0..10 step i += 1 { }"
-                       "\n    or: for value in numbers { }"
-                       "\n    or: for (index, value) in numbers { }", SLM::ErrorCategory::CONTROL_FLOW);
+               "I expected a loop variable name or `(index, value)` after `for`."
+                       "\n  Hint: Write `for i in 0..10 step i += 1 { }`,"
+                       "\n    `for value in numbers { }`,"
+                       "\n    or `for (index, value) in numbers { }`.", SLM::ErrorCategory::CONTROL_FLOW);
     return nullptr;
   }
 
   if (Parser().CurTok != TOK_IN) {
     LogErrorAt(ForLoc, ErrCode::ExpectedKeyword,
-               "Expected 'in' after the loop variable in a for-loop."
-                       "\n  Hint: Correct syntax: for " +
-                           VarName + " in 0..10 step " + VarName + "++ { }", SLM::ErrorCategory::CONTROL_FLOW);
+               "I expected `in` after the loop variable of this `for` loop."
+                       "\n  Hint: Write the loop as `for " +
+                           VarName + " in 0..10 step " + VarName + "++ { }`.", SLM::ErrorCategory::CONTROL_FLOW);
     return nullptr;
   }
   getNextToken();
@@ -428,9 +433,9 @@ std::unique_ptr<ExprAST> ParseForExpr() {
   if (Parser().CurTok == TOK_RANGE) {
     if (IsPairForm) {
       LogErrorAt(ForLoc, ErrCode::InvalidLoopForm,
-                 "The '(index, value)' form isn't supported for a range-based for-loop."
-                 "\n  Hint: Range-based for only binds a single scalar variable: "
-                 "for i in 0..10 step i += 1 { }", SLM::ErrorCategory::CONTROL_FLOW);
+                 "I cannot use the `(index, value)` form in a range-based `for` loop."
+                 "\n  Hint: Bind a single variable in a range-based `for` loop: "
+                 "`for i in 0..10 step i += 1 { }`.", SLM::ErrorCategory::CONTROL_FLOW);
       return nullptr;
     }
 
@@ -458,9 +463,9 @@ std::unique_ptr<ExprAST> ParseForExpr() {
 
     if (Parser().CurTok != '{') {
       LogErrorAt(ForLoc, ErrCode::MissingOpeningDelimiter,
-                 "Expected '{' to open the for-loop body."
-                         "\n  Hint: Correct syntax: for " +
-                             VarName + " in 0..10 step " + VarName + "++ { }", SLM::ErrorCategory::CONTROL_FLOW);
+                 "I expected a `{` to open the body of this `for` loop."
+                         "\n  Hint: Write the loop as `for " +
+                             VarName + " in 0..10 step " + VarName + "++ { }`.", SLM::ErrorCategory::CONTROL_FLOW);
       return nullptr;
     }
 
@@ -476,10 +481,10 @@ std::unique_ptr<ExprAST> ParseForExpr() {
   // For-each: `for value in numbers { }`  /  `for (index, value) in numbers { }`
   if (Parser().CurTok != '{') {
     LogErrorAt(ForLoc, ErrCode::ExpectedKeyword,
-               "Expected '..' (range-based for) or '{' (for-each loop) here."
-                       "\n  Hint: for i in 0..10 step i += 1 { }"
-                       "\n    or: for value in numbers { }"
-                       "\n    or: for (index, value) in numbers { }", SLM::ErrorCategory::CONTROL_FLOW);
+               "I expected `..` for a range-based `for` loop or `{` for a `for ... in` loop here."
+                       "\n  Hint: Write `for i in 0..10 step i += 1 { }`,"
+                       "\n    `for value in numbers { }`,"
+                       "\n    or `for (index, value) in numbers { }`.", SLM::ErrorCategory::CONTROL_FLOW);
     return nullptr;
   }
 
@@ -536,7 +541,7 @@ std::unique_ptr<ExprAST> ParseErrorVariantPatternBody(std::unique_ptr<ExprAST> H
 
   while (Parser().CurTok != ')') {
     if (Parser().CurTok == TOK_EOF) {
-      LogErrorAt(Loc, ErrCode::UnclosedDelimiter, "Missing closing ')' for error pattern.",
+      LogErrorAt(Loc, ErrCode::UnclosedDelimiter, "I did not find the `)` that closes this error pattern.",
                  SLM::ErrorCategory::CONTROL_FLOW);
       return nullptr;
     }
@@ -549,8 +554,8 @@ std::unique_ptr<ExprAST> ParseErrorVariantPatternBody(std::unique_ptr<ExprAST> H
         getNextToken(); // a trailing comma after '..' is harmless
       if (Parser().CurTok != ')') {
         InvalidPatternError(Lex().CurLoc,
-                            "'..' must be the last thing in an error pattern.",
-                            "Move '..' to the end: `IOError::Denied(path, ..)`. "
+                            "I expected `..` to be the last item in this error pattern.",
+                            "Move `..` to the end: `IOError::Denied(path, ..)`. "
                             "It stands for every field you did not list.")
             .raise();
         return nullptr;
@@ -568,8 +573,8 @@ std::unique_ptr<ExprAST> ParseErrorVariantPatternBody(std::unique_ptr<ExprAST> H
       continue;
     }
     if (Parser().CurTok != ')') {
-      InvalidPatternError(Lex().CurLoc, "expected ',' or ')' after a field pattern.",
-                          "Separate a variant's fields with commas: "
+      InvalidPatternError(Lex().CurLoc, "I expected a `,` or a `)` after a field pattern.",
+                          "Separate the fields of a variant with commas: "
                           "`IOError::Denied(path, mode)`.")
           .raise();
       return nullptr;
@@ -593,7 +598,7 @@ std::unique_ptr<ExprAST> ParseStructPatternBody(SourceLocation Loc,
 
   while (Parser().CurTok != '}') {
     if (Parser().CurTok == TOK_EOF) {
-      LogErrorAt(Loc, ErrCode::UnclosedDelimiter, "Missing closing '}' for struct pattern.",
+      LogErrorAt(Loc, ErrCode::UnclosedDelimiter, "I did not find the `}` that closes this struct pattern.",
                  SLM::ErrorCategory::CONTROL_FLOW);
       return nullptr;
     }
@@ -606,8 +611,8 @@ std::unique_ptr<ExprAST> ParseStructPatternBody(SourceLocation Loc,
         getNextToken(); // a trailing comma after '..' is harmless
       if (Parser().CurTok != '}') {
         InvalidPatternError(Lex().CurLoc,
-                            "'..' must be the last thing in a struct pattern.",
-                            "Move '..' to the end: `Point { x, .. }`. It "
+                            "I expected `..` to be the last item in this struct pattern.",
+                            "Move `..` to the end: `Point { x, .. }`. It "
                             "stands for every field you did not list.")
             .raise();
         return nullptr;
@@ -617,9 +622,9 @@ std::unique_ptr<ExprAST> ParseStructPatternBody(SourceLocation Loc,
 
     if (Parser().CurTok != TOK_IDENTIFIER) {
       InvalidPatternError(
-          Lex().CurLoc, "expected a field name in a struct pattern.",
-          "List the struct's fields by name: `Point { x, y }` binds both, "
-          "`Point { x: 0, y }` tests x and binds y, and `..` ignores the rest.")
+          Lex().CurLoc, "I expected a field name in this struct pattern.",
+          "List the fields of the struct by name: `Point { x, y }` binds both, "
+          "`Point { x: 0, y }` tests `x` and binds `y`, and `..` ignores the rest.")
           .raise();
       return nullptr;
     }
@@ -646,8 +651,8 @@ std::unique_ptr<ExprAST> ParseStructPatternBody(SourceLocation Loc,
     }
     if (Parser().CurTok != '}') {
       InvalidPatternError(Lex().CurLoc,
-                          "expected ',' or '}' after a field pattern.",
-                          "Separate fields with commas: `Point { x, y }`.")
+                          "I expected a `,` or a `}` after a field pattern.",
+                          "Separate the fields with commas: `Point { x, y }`.")
           .raise();
       return nullptr;
     }
@@ -704,8 +709,8 @@ std::unique_ptr<ExprAST> ParsePattern(bool Nested) {
       Loc = S->getLoc();
     } else {
       InvalidPatternError(
-          Lex().CurLoc, "a '{' after a value is not a pattern.",
-          "A struct pattern names the struct first: `Point { x, y }` or "
+          Lex().CurLoc, "I cannot read a `{` after an expression as a pattern.",
+          "Name the struct first in a struct pattern: `Point { x, y }` or "
           "`geometry::Point { x, y }`.")
           .raise();
       return nullptr;
@@ -759,7 +764,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
 
   if (HasParen) {
     if (Parser().CurTok != ')') {
-      LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "Expected ')' to close the compare subject", SLM::ErrorCategory::CONTROL_FLOW);
+      LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "I expected a `)` to close the `compare` subject.", SLM::ErrorCategory::CONTROL_FLOW);
       return nullptr;
     }
     getNextToken(); // eat ')'
@@ -767,7 +772,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
 
   // ── Opening brace ────────────────────────────────────────────────────────
   if (Parser().CurTok != '{') {
-    LogErrorAt(CompareLoc, ErrCode::MissingOpeningDelimiter, "Expected '{' to open the compare block.", SLM::ErrorCategory::CONTROL_FLOW);
+    LogErrorAt(CompareLoc, ErrCode::MissingOpeningDelimiter, "I expected a `{` to open the `compare` block.", SLM::ErrorCategory::CONTROL_FLOW);
     return nullptr;
   }
   getNextToken(); // eat '{'
@@ -788,8 +793,8 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
     // ── 'otherwise' arm (optional, must be last) ─────────────────────────
     if (Parser().CurTok == TOK_OTHERWISE) {
       if (HasOther) {
-        CompareError(Lex().CurLoc, "Duplicate 'otherwise' arm in compare.")
-            .withRelated(OtherLoc, "first 'otherwise' arm here")
+        CompareError(Lex().CurLoc, "I found a second `otherwise` arm in this `compare`.")
+            .withRelated(OtherLoc, "first `otherwise` arm here")
             .raise();
         return nullptr;
       }
@@ -798,7 +803,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
       getNextToken(); // eat 'otherwise'
 
       if (Parser().CurTok != TOK_COLON) {
-        LogErrorAt(Lex().CurLoc, ErrCode::MissingColon, "Expected ':' after 'otherwise'.", SLM::ErrorCategory::CONTROL_FLOW);
+        LogErrorAt(Lex().CurLoc, ErrCode::MissingColon, "I expected a `:` after `otherwise`.", SLM::ErrorCategory::CONTROL_FLOW);
         return nullptr;
       }
       getNextToken(); // eat ':'
@@ -833,7 +838,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
           continue;
         }
         if (Parser().CurTok == TOK_IF || Parser().CurTok == TOK_WHILE || Parser().CurTok == TOK_DO || Parser().CurTok == TOK_FOR ||
-            Parser().CurTok == TOK_FN || Parser().CurTok == TOK_STRUCT || Parser().CurTok == TOK_ENUM || Parser().CurTok == TOK_MACHINE ||
+            Parser().CurTok == TOK_FN || Parser().CurTok == TOK_STATIC || Parser().CurTok == TOK_STRUCT || Parser().CurTok == TOK_ENUM || Parser().CurTok == TOK_MACHINE ||
             Parser().CurTok == TOK_COMPARE || Parser().CurTok == TOK_ERROR || Parser().CurTok == TOK_PUB) {
           auto E = ParseExpression();
           if (!E) return nullptr;
@@ -843,7 +848,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
         auto E = ParseExpression();
         if (!E) return nullptr;
         if (Parser().CurTok != ';') {
-          LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement in 'otherwise' arm.", SLM::ErrorCategory::CONTROL_FLOW, MissingSemicolonHints());
+          LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "I expected a `;` after this statement in the `otherwise` arm.", SLM::ErrorCategory::CONTROL_FLOW, MissingSemicolonHints());
           return nullptr;
         }
         getNextToken(); // eat ';'
@@ -856,15 +861,15 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
       // after it -- both stop the body loop above on the same condition, but
       // deserve their own specific message rather than collapsing to one.
       if (Parser().CurTok == TOK_OTHERWISE) {
-        CompareError(Lex().CurLoc, "Duplicate 'otherwise' arm in compare.")
-            .withRelated(OtherLoc, "first 'otherwise' arm here")
+        CompareError(Lex().CurLoc, "I found a second `otherwise` arm in this `compare`.")
+            .withRelated(OtherLoc, "first `otherwise` arm here")
             .raise();
         return nullptr;
       }
       if (Parser().CurTok != '}') {
         // There's something after otherwise — likely another matches arm
         CompareError(Lex().CurLoc,
-                     "'otherwise' must be the last arm in compare.")
+                     "I expected the `otherwise` arm to be the last arm in this `compare`.")
             .raise();
         return nullptr;
       }
@@ -875,13 +880,13 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
     if (Parser().CurTok != TOK_MATCHES) {
       // Unexpected token inside compare block — could be a keyword typo
       LogErrorAt(Lex().CurLoc, ErrCode::ExpectedKeyword,
-                 "Expected 'matches' or 'otherwise' inside compare block.", SLM::ErrorCategory::CONTROL_FLOW);
+                 "I expected `matches` or `otherwise` inside this `compare` block.", SLM::ErrorCategory::CONTROL_FLOW);
       return nullptr;
     }
 
     if (HasOther) {
       CompareError(Lex().CurLoc,
-                   "'otherwise' must be the last arm in compare.")
+                   "I expected the `otherwise` arm to be the last arm in this `compare`.")
           .raise();
       return nullptr;
     }
@@ -902,7 +907,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
         Val = ParseExpression();
         if (!Val) return nullptr;
         if (Parser().CurTok != ')') {
-          LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "Expected ')' to close matches pattern.", SLM::ErrorCategory::CONTROL_FLOW);
+          LogErrorAt(Lex().CurLoc, ErrCode::UnclosedDelimiter, "I expected a `)` to close this `matches` pattern.", SLM::ErrorCategory::CONTROL_FLOW);
           return nullptr;
         }
         getNextToken(); // eat ')'
@@ -922,7 +927,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
       }
 
       if (Parser().CurTok != TOK_COLON) {
-        LogErrorAt(Lex().CurLoc, ErrCode::MissingColon, "Expected ':' after matches pattern.", SLM::ErrorCategory::CONTROL_FLOW);
+        LogErrorAt(Lex().CurLoc, ErrCode::MissingColon, "I expected a `:` after this `matches` pattern.", SLM::ErrorCategory::CONTROL_FLOW);
         return nullptr;
       }
       getNextToken(); // eat ':'
@@ -948,8 +953,8 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
       if (Parser().CurTok == TOK_DONE || Parser().CurTok == TOK_OTHERWISE || Parser().CurTok == '}') {
         // Header has no body — error: missing body / done
         CompareError(ArmLoc,
-                     "Expected 'done' after matches arm body — "
-                     "arm has no body.")
+                     "I expected `done` after the body of this `matches` arm, "
+                     "but the arm has no body.")
             .raise();
         return nullptr;
       }
@@ -964,7 +969,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
       // Detect premature start of next arm (missing done)
       if (Parser().CurTok == TOK_MATCHES || Parser().CurTok == TOK_OTHERWISE) {
         CompareError(Lex().CurLoc,
-                     "Expected 'done' after matches arm body.")
+                     "I expected `done` after the body of this `matches` arm.")
             .raise();
         return nullptr;
       }
@@ -984,7 +989,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
         continue;
       }
       if (Parser().CurTok == TOK_IF || Parser().CurTok == TOK_WHILE || Parser().CurTok == TOK_DO || Parser().CurTok == TOK_FOR ||
-          Parser().CurTok == TOK_FN || Parser().CurTok == TOK_STRUCT || Parser().CurTok == TOK_ENUM || Parser().CurTok == TOK_MACHINE ||
+          Parser().CurTok == TOK_FN || Parser().CurTok == TOK_STATIC || Parser().CurTok == TOK_STRUCT || Parser().CurTok == TOK_ENUM || Parser().CurTok == TOK_MACHINE ||
           Parser().CurTok == TOK_COMPARE || Parser().CurTok == TOK_ERROR || Parser().CurTok == TOK_PUB) {
         auto E = ParseExpression();
         if (!E) return nullptr;
@@ -994,7 +999,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
       auto E = ParseExpression();
       if (!E) return nullptr;
       if (Parser().CurTok != ';') {
-        LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement in matches arm body.", SLM::ErrorCategory::CONTROL_FLOW, MissingSemicolonHints());
+        LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "I expected a `;` after this statement in the `matches` arm.", SLM::ErrorCategory::CONTROL_FLOW, MissingSemicolonHints());
         return nullptr;
       }
       getNextToken(); // eat ';'
@@ -1006,7 +1011,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
       getNextToken(); // eat 'done'
     } else {
       // Reached '}' or EOF without 'done'
-      CompareError(ArmLoc, "Expected 'done' after matches arm body.").raise();
+      CompareError(ArmLoc, "I expected `done` after the body of this `matches` arm.").raise();
       return nullptr;
     }
     (void)GotDone;
@@ -1022,7 +1027,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
   // ── Closing brace ────────────────────────────────────────────────────────
   if (Parser().CurTok != '}') {
     LogErrorAt(CompareLoc, ErrCode::UnclosedDelimiter,
-               "Missing closing '}' for compare block.", SLM::ErrorCategory::CONTROL_FLOW);
+               "I did not find the `}` that closes this `compare` block.", SLM::ErrorCategory::CONTROL_FLOW);
     return nullptr;
   }
   getNextToken(); // eat '}'
@@ -1044,7 +1049,7 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
   if (Parser().CurTok != TOK_IDENTIFIER) {
     if (RejectReservedWordAsName())
       return nullptr;
-    LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "Expected a variable name after 'mutable' or 'immutable'.", SLM::ErrorCategory::DECLARATION);
+    LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName, "I expected a variable name after `mutable` or `immutable`.", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
 
@@ -1069,6 +1074,10 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
     Type = ParseType();
     Parser().AllowGuessType = SavedAllowGuess;
     if (!Type) return nullptr;
+    // DX-5: the whole annotation, for a span that points at it. Only an
+    // annotation has an end; an omitted type leaves TypeLoc without one.
+    TypeLoc.EndLine = Lex().PrevTokEndLine;
+    TypeLoc.EndCol = Lex().PrevTokEndCol;
   } else {
     Type = TurfGuess();
   }
@@ -1078,10 +1087,10 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
   // later pass -- it isn't a style nit, it's a compiler hang).
   if (isDisallowedVoidType(Type.get())) {
     LogErrorAt(TypeLoc, ErrCode::VoidTypeNotAllowed,
-               "'void' cannot be a variable's type."
-               "\n  Hint: 'void' only makes sense as a function's return "
-               "type, e.g. fn f(): void { ... }. Give '" +
-                   Name + "' a real type instead, like int, string, or a "
+               "I cannot give a variable the type `void`."
+               "\n  Hint: Use `void` only as a function's return "
+               "type, as in `fn f(): void { ... }`. Give `" +
+                   Name + "` a real type instead, such as `int`, `string` or a "
                    "struct name.", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
@@ -1093,7 +1102,7 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
       TurfTypePtr ElemType = AT ? AT->getElementTypePtr() : Type;
 
       if (Parser().CurTok != ';') {
-        LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after array declaration.", SLM::ErrorCategory::DECLARATION, MissingSemicolonHints());
+        LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "I expected a `;` after this array declaration.", SLM::ErrorCategory::DECLARATION, MissingSemicolonHints());
         return nullptr;
       }
       getNextToken(); // eat ';'
@@ -1113,7 +1122,7 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
     // §11.6) against this same null-Init declaration.
     std::unique_ptr<ExprAST> Init = nullptr;
     if (Parser().CurTok != ';') {
-      LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after variable declaration.", SLM::ErrorCategory::DECLARATION, MissingSemicolonHints());
+      LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "I expected a `;` after this variable declaration.", SLM::ErrorCategory::DECLARATION, MissingSemicolonHints());
       return nullptr;
     }
     getNextToken(); // eat ';'
@@ -1141,7 +1150,7 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
           if (Parser().CurTok == ']')
             break;
           if (Parser().CurTok != ',') {
-            LogErrorAt(Lex().CurLoc, ErrCode::MissingComma, "Expected ',' or ']' in array initializer list", SLM::ErrorCategory::ARRAY_ERROR);
+            LogErrorAt(Lex().CurLoc, ErrCode::MissingComma, "I expected a `,` or a `]` in this array initializer list.", SLM::ErrorCategory::ARRAY_ERROR);
             return nullptr;
           }
           getNextToken(); // eat ','
@@ -1159,8 +1168,8 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
       if (ArraySize == -1) {
         if (InitList.empty()) {
           LogErrorAt(NameLoc, ErrCode::InvalidArraySize,
-                     "An empty literal can't give '" + Name +
-                         "' a size -- an array needs at least one element.\n  Hint: Give '" + Name + "' a size or a first element: `mut " + Name + ": int[3] = [0, 0, 0];` or `[1]`.",
+                     "An empty literal gives `" + Name +
+                         "` no size, and an array needs at least one element.\n  Hint: Give `" + Name + "` a size or a first element: `mut " + Name + ": int[3] = [0, 0, 0];` or `[1]`.",
                      SLM::ErrorCategory::ARRAY_ERROR);
           return nullptr;
         }
@@ -1172,7 +1181,7 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
         return nullptr;
     }
     if (Parser().CurTok != ';') {
-      LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement.", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
+      LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "I expected a `;` after this statement.", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
       return nullptr;
     }
     getNextToken(); // eat ';'
@@ -1186,7 +1195,7 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
   if (!Init) return nullptr;
 
   if (Parser().CurTok != ';') {
-    LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "Expected ';' after statement.", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
+    LogErrorAt(Lex().CurLoc, ErrCode::MissingSemicolon, "I expected a `;` after this statement.", SLM::ErrorCategory::SYNTAX_ERROR, MissingSemicolonHints());
     return nullptr;
   }
   getNextToken(); // eat ';'

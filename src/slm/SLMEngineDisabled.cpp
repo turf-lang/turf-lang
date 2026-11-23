@@ -49,7 +49,7 @@ bool SLMEngine::initialize(const std::string &) {
 
 std::string SLMEngine::generateSuggestion(const std::string &,
                                           const std::string &,
-                                          const std::string &) {
+                                          const std::string &, float, unsigned) {
   return "";
 }
 

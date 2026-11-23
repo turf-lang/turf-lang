@@ -1,6 +1,6 @@
 // EXPECT-DIAG: E040
-// EXPECT-DIAG: I can't find anything named 'counter'
-// EXPECT-DIAG: Did you forget to create this variable
+// EXPECT-DIAG: I cannot find anything named `counter`
+// EXPECT-DIAG: Declare it before you use it
 // EXPECT-NO-DIAG: is a struct
 // EXPECT-NO-DIAG: is an enum
 // LEC-005 guard against over-correction: the type-name hint branch must only

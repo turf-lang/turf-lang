@@ -1,0 +1,40 @@
+// LANG-003: a `break`/`continue` inside a loop that begins inside the deferred
+// statement stays in that loop, for every loop form: `do`/`while` and `for`
+// here, `while` in 06_defer_wraps_loop_break_absorbed.tr.
+import test;
+
+struct Trail {
+    count: int
+}
+
+fn Trail.new(): void {
+    self.count = 0;
+}
+
+fn deferredDoWhile(t: &Trail): void {
+    defer do {
+        t.count = t.count + 1;
+        if (t.count == 2) {
+            break;
+        }
+    } while (t.count < 5);;
+}
+
+fn deferredFor(t: &Trail): void {
+    defer for j in 0..4 {
+        if (j == 1) {
+            continue;
+        }
+        t.count = t.count + 10;
+    };
+}
+
+fn main(): int {
+    mut a: Trail = Trail::new();
+    deferredDoWhile(&a);
+    test::assert(a.count == 2, "break inside a deferred do/while leaves only that loop");
+    mut b: Trail = Trail::new();
+    deferredFor(&b);
+    test::assert(b.count == 30, "continue inside a deferred for skips one iteration");
+    return 0;
+}

@@ -1,0 +1,25 @@
+A loop's test never changes
+
+The test of this `while` or `do while` loop reads only variables that nothing inside the loop writes, and the test is the only way out of the loop. So the test gives the same answer every time: if the loop starts, it never ends.
+
+    fn wait(n: int): int {
+        mut s: int = 0;
+        while n > 0 {            // WARNING (E184 at `warn`): nothing changes `n`
+            s += 1;
+        }
+        return s;
+    }
+
+Change the variable inside the loop, or give the loop another way out:
+
+    fn wait(n: int): int {
+        mut s: int = 0;
+        mut left: int = n;
+        while left > 0 {
+            s += 1;
+            left -= 1;
+        }
+        return s;
+    }
+
+The compiler counts every way a variable can change: an assignment, `+=`, `++`, and anything that takes its address (`&n`) or captures it in a closure. A test that calls a function or reads a field is never reported, since the call may change what it reads. This warning starts at `allow` in 2.3: turn it on with `turf build --warn E184` (or `[lints] E184 = "warn"` in turf.toml).

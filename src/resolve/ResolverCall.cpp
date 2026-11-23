@@ -18,6 +18,7 @@
 
 #include "frontend/AST.h"
 #include "sema/Builtins.h"        // LookupBuiltin — for skipping bare intrinsics in visitFuncCall
+#include "diagnostics/CompilerFix.h"     // arityAlternatives (SL-7)
 #include "diagnostics/Errors.h"          // ReferenceError, DuplicateDeclarationError
 #include "diagnostics/ErrorsFlow.h"      // SemanticError
 #include "frontend/Parser.h"          // IsPreludeBareModule — the prelude tier of a bare call
@@ -107,8 +108,10 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
     // with a clear diagnostic instead of letting it crash the compiler.
     if (CalleeName == "main") {
       SemanticError(Node.getLoc(),
-                     "'main' cannot be called directly -- it is the "
-                     "program's entry point, not an ordinary function.")
+                     "I cannot call `main`, because it is the program's "
+                     "entry point.",
+                     "Move the code both places need into a function of its "
+                     "own, and call that from `main` and from here.")
           .raise();
       return;
     }
@@ -140,14 +143,12 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
         const_cast<VariableExprAST *>(VarCallee)->ResolvedSymbol = VarSym;
         return;
       }
-      const std::string VarType = VarSym->Type ? VarSym->Type->getName() : "a value";
+      const std::string VarType = VarSym->Type ? VarSym->Type->getName() : "unknown";
       TypeError(Node.getLoc(), ErrCode::NotCallable,
-                "'" + CalleeName + "' is a variable of type '" + VarType +
-                    "', not a function -- it can't be called.",
-                "The variable '" + CalleeName + "' shadows the function of the "
-                    "same name. Rename the variable, or drop the '(...)' if you "
-                    "meant to use its value.",
-                "Not callable!")
+                "I cannot call `" + CalleeName + "`, which is a variable of type `" +
+                    VarType + "` and not a function.",
+                "Rename the variable, or remove the `(...)` to use the variable "
+                "itself.")
           .raise();
       return;
     }
@@ -234,12 +235,10 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
     if (SymTable_.isEnumName(LeftName)) {
       // e.g. `Color::Red(...)` -- a real enum, but variants aren't callable.
       ScopeCallee->ResolvedKind = ScopeAccessKind::EnumVariant;
-      TypeError(Node.getLoc(), ErrCode::NotCallable, "'" + LeftName + "::" + CalleeName +
-                                   "' is an enum variant, not a function -- "
-                                   "it can't be called.",
-                "Drop the '(...)' -- '" + LeftName + "::" + CalleeName +
-                    "' is already a complete value on its own.",
-                "Not callable!")
+      TypeError(Node.getLoc(), ErrCode::NotCallable, "I cannot call `" + LeftName + "::" + CalleeName +
+                                   "`, which is an enum variant and not a function.",
+                "Remove the `(...)`, because `" + LeftName + "::" + CalleeName +
+                    "` is already a complete value.")
           .raise();
       return;
     }
@@ -280,12 +279,9 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
         // a variant with no fields is a value, not a function, exactly like a
         // plain `enum` variant just above.
         ScopeCallee->ResolvedKind = ScopeAccessKind::ErrorVariantRef;
-        TypeError(Node.getLoc(), ErrCode::NotCallable, "'" + Full + "' is an error variant, not a function -- "
-                                     "it can't be called.",
-                  "Drop the '(...)' -- '" + Full + "' is already a complete value on "
-                      "its own, or pass exactly one 'string' message: '" + Full +
-                      "(\"...\")'.",
-                  "Not callable!")
+        TypeError(Node.getLoc(), ErrCode::NotCallable, "I cannot call `" + Full + "`, which is an error variant and not a function.",
+                  "Remove the `(...)`, or pass exactly one `string` message, as in `" +
+                      Full + "(\"...\")`.")
             .raise();
         return;
       }
@@ -302,12 +298,12 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
       ScopeCallee->ResolvedKind = ScopeAccessKind::ErrorVariantRef;
       ErrorPayloadError(
           Node.getLoc(),
-          "'" + Full + "' declares " + std::to_string(FieldCount) + " field" +
-              (FieldCount == 1 ? "" : "s") + " (" + Sig + ") but was given " +
+          "`" + Full + "` declares " + std::to_string(FieldCount) + " field" +
+              (FieldCount == 1 ? "" : "s") + " (" + Sig + "), but I found " +
               std::to_string(ArgCount) + " argument" + (ArgCount == 1 ? "" : "s") + ".",
-          "Pass one argument per field, in order: '" + Full + "(...)' takes " +
+          "Pass one argument per field, in order: `" + Full + "(...)` takes " +
               std::to_string(FieldCount) + ", or " + std::to_string(FieldCount + 1) +
-              " with a trailing 'string' message.")
+              " with a trailing `string` message.")
           .raise();
       return;
     }
@@ -520,14 +516,11 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
       // identically to `io::printline(...)` regardless of what the leading
       // qualifier said. Confirmed live before this check existed.
       if (!ScopeCallee->getModuleQualifier().empty()) {
-        TypeError(Node.getLoc(), ErrCode::InvalidModuleQualifier, "'" + ScopeCallee->getModuleQualifier() +
-                                     "::" + LeftName +
-                                     "' -- modules can't be qualified by "
-                                     "another module; just write '" +
-                                     LeftName + "::" + CalleeName + "(...)'.",
-                  "Modules aren't nested inside each other -- drop the '" +
-                      ScopeCallee->getModuleQualifier() + "::' prefix.",
-                  "Invalid module qualifier!")
+        TypeError(Node.getLoc(), ErrCode::InvalidModuleQualifier, "I cannot qualify the module `" + LeftName + "` with `" +
+                                     ScopeCallee->getModuleQualifier() + "::`.",
+                  "Remove the `" + ScopeCallee->getModuleQualifier() +
+                      "::` prefix and write `" + LeftName + "::" + CalleeName +
+                      "(...)`.")
             .raise();
         return;
       }
@@ -715,6 +708,27 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
       Err.withRelated(toSourceLocation(Sym->DeclLoc), "candidate");
     for (const auto &Match : ModuleMatches)
       Err.withRelated(candidateLocation(*Match.Symbol), "candidate");
+    // SL-7: a call one argument away from an overload gets the edit that
+    // makes it fit, when exactly one such edit compiles.
+    std::vector<std::vector<std::string>> Overloads;
+    auto addOverload = [&](const ResolverFunctionSymbol &Sym) {
+      if (Sym.isVarArg())
+        return;
+      std::vector<std::string> Names;
+      for (const auto &P : Sym.Params)
+        Names.push_back(P.Name);
+      Overloads.push_back(std::move(Names));
+    };
+    for (const auto *Sym : CurrentFileMatches)
+      addOverload(*Sym);
+    for (const auto &Match : ModuleMatches)
+      addOverload(*Match.Symbol);
+    for (const auto &Alt : CompilerFixes::arityAlternatives(
+             CalleeName, Node.ArgSpans, Overloads,
+             [&](const std::string &Name) {
+               return SymTable_.lookupVariable(Name) != nullptr;
+             }))
+      Err.withFixAlternative(Alt);
     Err.raise();
     return;
   }
@@ -944,10 +958,9 @@ void Resolver::visitRecoverExpr(RecoverExprAST &Node) {
 void Resolver::visitTry(TryExprAST &Node) {
   if (DeferDepth_ > 0)
     TryMisuseError(
-        Node.getLoc(), "a deferred statement can't use 'try'.",
-        "A `defer` runs while the function is already returning, so it has "
-        "nowhere to propagate an error to. Handle the error inside the "
-        "deferred statement: `defer f() recover run { ... };`.")
+        Node.getLoc(), "I cannot use `try` in a deferred statement, because there is nowhere to pass the error on to.",
+        "Handle the error inside the deferred statement with "
+        "`defer f() recover run { ... };`.")
         .raise();
   visitChild(Node.getOperand());
 }
@@ -1025,11 +1038,9 @@ void Resolver::visitScopeAccess(ScopeAccessExprAST &Node) {
                Info->Fields[I].Type->getName();
       ErrorPayloadError(
           Node.getLoc(),
-          "'" + Full + "' declares payload fields (" + Sig +
-              ") so it can't be used as a value on its own.",
-          "Construct it with its payload: '" + Full + "(...)'. To test which "
-          "error occurred, compare with '==' or destructure it in a compare: "
-          "`matches " + Full + "(..):`.")
+          "I cannot use `" + Full + "` on its own, because it declares payload fields (" + Sig + ").",
+          "Construct it with its payload as `" + Full + "(...)`, or test for it "
+          "in a `compare` with `matches " + Full + "(..):`.")
           .raise();
     }
     return;
@@ -1043,6 +1054,10 @@ void Resolver::visitScopeAccess(ScopeAccessExprAST &Node) {
     // just below, since a constant genuinely IS usable as a value (unlike a
     // bare `module::function`).
     if (const auto *Const = SymTable_.findModuleConstant(LeftName, RightName)) {
+      if (!Const->IsPublic && LeftName != currentModuleName()) {
+        raisePrivateConstant(Node.getLoc(), LeftName, *Const);
+        return;
+      }
       Node.ResolvedKind = ScopeAccessKind::ModuleConstantRef;
       Node.ResolvedConstant = Const;
       return;
@@ -1050,14 +1065,11 @@ void Resolver::visitScopeAccess(ScopeAccessExprAST &Node) {
     // A module name IS real, but a function value is spelled by its bare
     // name (`twice` after `import m::twice;`); the qualified form is only
     // ever called.
-    TypeError(Node.getLoc(), ErrCode::NotAValue, "'" + LeftName + "::" + RightName +
-                                 "' can't be used as a value: a qualified "
-                                 "function name is only called, like '" +
-                                 LeftName + "::" + RightName + "(...)'.",
-              "To use the function as a value, import it by name (`import " +
-                  LeftName + "::" + RightName + ";`) and write '" + RightName +
-                  "'. To use its result, call it.",
-              "Not a value!")
+    TypeError(Node.getLoc(), ErrCode::NotAValue, "I cannot use `" + LeftName + "::" + RightName +
+                                 "` as a value, because a qualified function name can only be called.",
+              "Import it by name with `import " +
+                  LeftName + "::" + RightName + ";` and write `" + RightName +
+                  "`, or call it as `" + LeftName + "::" + RightName + "(...)`.")
         .raise();
     return;
   }
@@ -1066,13 +1078,10 @@ void Resolver::visitScopeAccess(ScopeAccessExprAST &Node) {
     // A struct name IS real, but a static method is only ever called; it
     // has no value form.
     Node.ResolvedKind = ScopeAccessKind::StaticMethodRef;
-    TypeError(Node.getLoc(), ErrCode::NotAValue, "'" + LeftName + "::" + RightName +
-                                 "' can't be used as a value: a static "
-                                 "method is only called, like '" +
-                                 LeftName + "::" + RightName + "(...)'.",
-              "To pass it around, wrap the call in a plain function and use "
-              "that function's name as the value.",
-              "Not a value!")
+    TypeError(Node.getLoc(), ErrCode::NotAValue, "I cannot use `" + LeftName + "::" + RightName +
+                                 "` as a value, because a static method can only be called.",
+              "Wrap the call in a plain function and use that function's name "
+              "as the value.")
         .raise();
     return;
   }

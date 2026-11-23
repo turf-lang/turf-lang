@@ -1,0 +1,13 @@
+tests/24_first_class_functions/fail_wrong_arity_indirect_call.tr (1 error)
+
+── error at line 7, col 13 [E044 · wrong number of arguments]
+
+  `f` takes 1 argument, and this call passes 2.
+
+  Hint: Call `f` with exactly 1 argument.
+
+  7 │     return f(x, x);
+    │             ^ this call has the wrong number of arguments
+
+  Run `turf --explain E044` for more details.
+

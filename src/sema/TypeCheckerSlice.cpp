@@ -16,6 +16,7 @@
  */
 
 #include "sema/TypeChecker.h"
+#include "sema/SpanLabels.h"
 
 #include "frontend/AST.h"
 #include "frontend/ASTChildWalker.h"
@@ -92,19 +93,19 @@ bool TypeChecker::checkUnsizedArrayPlacement(const TurfType *T, bool AllowAtTop,
   const ArrayType *Bad = findMisplacedUnsized(T, AllowAtTop);
   if (!Bad)
     return false;
-  std::string Msg = What + " can't use the unsized array type '" +
-                    Bad->getName() + "'";
+  std::string Msg = What + " cannot use the unsized array type `" +
+                    Bad->getName() + "`";
   if (Bad != T)
-    Msg += " (inside '" + T->getName() + "')";
+    Msg += " (inside `" + T->getName() + "`)";
   Msg += ".";
   reportError(Loc, ErrCode::UnsizedArrayPlacement, Msg, {},
               Hint.empty()
-                  ? "'" + Bad->getName() + "' only works as a function "
-                    "parameter's own type, where it accepts an array of any "
-                    "length. Everywhere else an array needs its size, e.g. '" +
-                    Bad->getElementType()->getName() + "[5]'."
+                  ? "Give the array its size, e.g. `" +
+                    Bad->getElementType()->getName() + "[5]`: `" + Bad->getName() +
+                    "` is only a parameter's type, where it takes an array of "
+                    "any length."
                   : Hint,
-              "Unsized array here!");
+              "");
   return true;
 }
 
@@ -115,11 +116,11 @@ void TypeChecker::checkSliceTypeArguments(
   for (const auto &[Name, Ty] : Subst) {
     if (checkUnsizedArrayPlacement(
             Ty.get(), /*AllowAtTop=*/false, Loc,
-            "The type parameter '" + Name + "' of '" + CalleeName + "'",
-            "A type parameter can't stand for an unsized array: a '" + Name +
-                "' value may be stored or returned, and a slice may not "
-                "outlive the call it was passed to. To take an array of any "
-                "length, declare the parameter as '" + Name + "[]' instead."))
+            "The type parameter `" + Name + "` of `" + CalleeName + "`",
+            "Declare the parameter as `" + Name + "[]` to take an array of any "
+                "length: a type parameter cannot stand for an unsized array, "
+                "since a `" + Name + "` may be stored or returned and a slice "
+                "may not outlive the call."))
       return;
   }
 }
@@ -158,21 +159,19 @@ void TypeChecker::visitSlice(SliceExprAST &Node) {
   if (!ArrTy) {
     std::string Hint;
     if (BaseTy->isString())
-      Hint = "A string can't be sliced with [a..b]: it is not an array of "
-             "elements but text ending at a zero byte. Use "
-             "strings::substring(s, start, end) for a new string.";
+      Hint = "Use `strings::substring(s, start, end)` for part of a `string`: "
+             "a `string` is text, not an array.";
     else if (dynamic_cast<const GenericType *>(BaseTy.get()) ||
              dynamic_cast<const TurfStructType *>(BaseTy.get()))
-      Hint = "Only a built-in array (like int[5], or an int[] parameter) can "
-             "be sliced. To take part of a collection, copy the elements you "
-             "need in a loop.";
+      Hint = "Copy the elements you need in a loop: only a built-in array, "
+             "such as an `int[5]` or an `int[]` parameter, has slices.";
     else
-      Hint = "Only a built-in array (like int[5], or an int[] parameter) can "
-             "be sliced.";
+      Hint = "Slice a built-in array instead, such as an `int[5]` or an "
+             "`int[]` parameter.";
     reportError(Node.getLoc(), ErrCode::SliceOfNonArray,
-                "Cannot slice a value of type '" + BaseTy->getName() +
-                    "' with [a..b].",
-                {}, Hint, "Not an array!");
+                "I cannot slice " + SpanLabels::aType(BaseTy.get()) +
+                    " with `[a..b]`: only an array has slices.",
+                {}, Hint, "");
     setType(&Node, nullptr);
     return;
   }
@@ -182,12 +181,11 @@ void TypeChecker::visitSlice(SliceExprAST &Node) {
     TurfTypePtr BTy = Bound ? getType(Bound) : nullptr;
     if (BTy && !BTy->isInt() && !BTy->isInt32()) {
       reportError(Node.getLoc(), ErrCode::ArrayNonIntegerIndex,
-                  "You used a value of type '" + BTy->getName() +
-                      "' as a slice bound of '" + BaseTy->getName() + "'.",
+                  "A slice bound of `" + BaseTy->getName() + "` must be an "
+                      "`int`, and I found " + SpanLabels::aType(BTy.get()) + ".",
                   {},
-                  "Slice bounds are ints, like arr[1..3] or arr[i..j]. To "
-                  "turn a number or a char into an int: (x to int).",
-                  "Index must be an integer!");
+                  "Convert the bound with `to int`, e.g. `arr[(x to int)..3]`.",
+                  "");
       setType(&Node, nullptr);
       return;
     }
@@ -222,14 +220,14 @@ void TypeChecker::visitSlice(SliceExprAST &Node) {
   }
   if (!Problem.empty()) {
     reportError(Node.getLoc(), ErrCode::SliceRangeOutOfBounds,
-                "The slice " + Written + " of '" + BaseTy->getName() +
-                    "' is out of range: " + Problem + ".",
+                "The slice `" + Written + "` of `" + BaseTy->getName() +
+                    "` is out of range: " + Problem + ".",
                 {},
-                "A slice [start..end] needs 0 <= start <= end <= length; the "
-                "end is exclusive, so arr[0..length] is the whole array and "
-                "arr[i..i] is empty. A negative bound counts from the end "
-                "(arr[-2..] is the last two elements).",
-                "Slice out of range!");
+                "Use bounds with 0 <= start <= end <= length: the end is "
+                "exclusive, so `arr[0..length]` is the whole array, and a "
+                "negative bound counts from the end (`arr[-2..]` is the last 2 "
+                "elements).",
+                "");
     setType(&Node, nullptr);
     return;
   }
@@ -259,14 +257,13 @@ bool TypeChecker::checkMutableViewSource(const ExprAST *Source,
     Related.push_back({toSourceLocation(Root->getResolvedSymbol()->DeclLoc),
                        "declared immutable here"});
   reportError(Loc, ErrCode::MutableViewOfImmutableArray,
-              "'" + ViewName + "' is a 'mut' view of '" + Root->getName() +
-                  "', which is immutable.",
+              "`" + ViewName + "` is a `mut` view of `" + Root->getName() +
+                  "`, which is immutable. A slice shares its array, so writing "
+                  "through `" + ViewName + "` would change `" + Root->getName() + "`.",
               Related,
-              "A slice shares the array it looks at, so writing through '" +
-                  ViewName + "' would change '" + Root->getName() +
-                  "'. Declare '" + ViewName + "' with 'immut' if you only "
-                  "read it, or make '" + Root->getName() + "' 'mut'.",
-              "Mutable view of an immutable array!");
+              "Declare `" + ViewName + "` with `immut` if you only read it, "
+                  "or make `" + Root->getName() + "` `mut`.",
+              "");
   return true;
 }
 
@@ -547,8 +544,8 @@ void TypeChecker::checkSliceWrites() {
         .withRelated(toSourceLocation(P.Array->DeclLoc), "declared immutable here")
         .withMutableDeclarationFix(toSourceLocation(P.Array->DeclLoc))
         .withRelated(toSourceLocation(P.Callee->DeclLoc),
-                     "'" + P.Callee->BaseName +
-                         "' changes it through a slice of one of its arrays")
+                     "`" + P.Callee->BaseName +
+                         "` changes it through a slice of one of its arrays")
         .raise();
   }
 
@@ -561,18 +558,17 @@ void TypeChecker::checkSliceWrites() {
     std::vector<RelatedLocation> Related;
     Related.push_back({toSourceLocation(P.Array->DeclLoc), "declared immutable here"});
     Related.push_back({toSourceLocation(P.Callee->DeclLoc),
-                       "'" + P.Callee->BaseName + "' changes its parameter '" +
-                           Param.Name + "'"});
+                       "`" + P.Callee->BaseName + "` changes its parameter `" +
+                           Param.Name + "`"});
     reportError(P.Loc, ErrCode::ImmutableArrayWrittenThroughSlice,
-                "'" + P.ArrayName + "' is immutable, but '" + P.Callee->BaseName +
-                    "' writes to the array it is given as '" + Param.Name + "'.",
+                "`" + P.ArrayName + "` is immutable, and `" + P.Callee->BaseName +
+                    "` writes to the array it takes as `" + Param.Name +
+                    "`. As " + SpanLabels::aType(Param.Type) + " parameter, it shares the "
+                    "caller's array, so the change would land in `" +
+                    P.ArrayName + "`.",
                 Related,
-                "An unsized parameter ('" + Param.Type->getName() +
-                    "') shares the caller's array instead of copying it, so "
-                    "the change would land in '" + P.ArrayName +
-                    "'. Declare '" + P.ArrayName +
-                    "' with 'mut', or copy it into a 'mut' array first and "
-                    "pass the copy.",
-                "Immutable array changed!");
+                "Declare `" + P.ArrayName + "` with `mut`, or copy it into a "
+                    "`mut` array and pass the copy.",
+                "");
   }
 }

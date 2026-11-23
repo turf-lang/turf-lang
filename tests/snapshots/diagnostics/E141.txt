@@ -1,0 +1,18 @@
+tests/48_unsized_array_params/fail_immut_array_written_via_ufcs.tr (1 error)
+
+── error at line 10, col 6 [E141 · immutable array passed to a function that changes it]
+
+  `a` is immutable, and `zero` writes to the array it takes as `arr`. As an `int[]` parameter, it shares the caller's array, so the change would land in `a`.
+
+  Hint: Declare `a` with `mut`, or copy it into a `mut` array and pass the copy.
+
+   4 │ fn zero(arr: int[]): void {
+     │    - `zero` changes its parameter `arr`
+     ┊
+   9 │     immut a: int[2] = [1, 2];
+     │           - declared immutable here
+  10 │     a.zero();
+     │      ^ this array is immutable
+
+  Run `turf --explain E141` for more details.
+

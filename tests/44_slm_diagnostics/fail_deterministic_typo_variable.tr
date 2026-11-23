@@ -1,6 +1,6 @@
 // EXPECT-DIAG: E040
 // EXPECT-FIX: replace 'cuont' with 'count'
-// EXPECT-DIAG: I can't find anything named 'cuont'
+// EXPECT-DIAG: I cannot find anything named `cuont`
 // `cuont` never resolves; `count` is the single close match
 // (SuggestionIndex::suggestVisible()), so the compiler prints the rename as
 // the diagnostic's Fix: in every build, checked first (TDP-2-001).

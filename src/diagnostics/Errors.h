@@ -168,6 +168,20 @@ public:
     return *this;
   }
 
+  // SL-6 (DiagnosticHints::Structs, Callee, Params). Chainable.
+  TurfError &withStructDecl(const std::string &Decl) {
+    Hints_.Structs.push_back(Decl);
+    return *this;
+  }
+  TurfError &withCallee(const std::string &Signature) {
+    Hints_.Callee = Signature;
+    return *this;
+  }
+  TurfError &withParam(const std::string &Param) {
+    Hints_.Params.push_back(Param);
+    return *this;
+  }
+
   // ── Fix-its (SLM-001 item 1, DiagnosticHints::FixIts) ──────────────────────
   //
   // A fix-it is an exact edit the raise site already knows. The compiler
@@ -189,6 +203,21 @@ public:
   TurfError &withFixIt(int Line, int StartCol, int EndCol,
                        const std::string &Replacement) {
     Hints_.FixIts.push_back({Line, StartCol, EndCol, Replacement});
+    return *this;
+  }
+
+  // One of several fixes the site cannot choose between
+  // (DiagnosticHints::FixAlternatives, SL-7): shown only if it is the one
+  // alternative whose re-check passes.
+  TurfError &withFixAlternative(const SLM::DiagnosticHints::Alternative &Alt) {
+    Hints_.FixAlternatives.push_back(Alt);
+    return *this;
+  }
+
+  // What the primary span's underline says (DiagnosticHints::Label, DX-5):
+  // "this is an 'int'". Without one, the code's own label.
+  TurfError &withLabel(const std::string &Label) {
+    Hints_.Label = Label;
     return *this;
   }
 
@@ -326,9 +355,8 @@ public:
     if (Any)
       Hints_.FixReason =
           Reason.empty()
-              ? "'" + OldName + "' isn't declared anywhere visible, but '" +
-                    NewName + "' is an exact, unambiguous match nearby, so "
-                    "this is almost certainly a typo."
+              ? "I cannot find `" + OldName + "`, and `" + NewName +
+                    "` is the one close match, so this is most likely a typo."
               : Reason;
     return *this;
   }
@@ -407,19 +435,21 @@ public:
     bool hasModule = !Suggestions.Module.empty();
 
     if (hasLocal) {
-      result += "\n  " + Colors::BRIGHT_GREEN + "It may be from the current file: ";
+      result += "\n  " + Colors::BRIGHT_GREEN + "Use a name from this file: ";
       for (size_t i = 0; i < Suggestions.Local.size(); ++i) {
-        result += Colors::BRIGHT_YELLOW + "'" + Suggestions.Local[i] + "'" + Colors::BRIGHT_GREEN;
+        result += Colors::BRIGHT_YELLOW + "`" + Suggestions.Local[i] + "`" + Colors::BRIGHT_GREEN;
         if (i != Suggestions.Local.size() - 1) result += ", ";
       }
     }
     
     if (hasModule) {
-      result += "\n  " + Colors::BRIGHT_GREEN + "Or, could be one of these from the imported files:";
+      result += std::string("\n  ") + Colors::BRIGHT_GREEN +
+                (hasLocal ? "Or use one of these from the imported modules:"
+                          : "Use one of these from the imported modules:");
       for (const auto &pair : Suggestions.Module) {
-        result += "\n    - In module '" + Colors::BRIGHT_CYAN + pair.first + Colors::BRIGHT_GREEN + "': ";
+        result += "\n    - In module `" + Colors::BRIGHT_CYAN + pair.first + Colors::BRIGHT_GREEN + "`: ";
         for (size_t i = 0; i < pair.second.size(); ++i) {
-          result += Colors::BRIGHT_YELLOW + "'" + pair.second[i] + "'" + Colors::BRIGHT_GREEN;
+          result += Colors::BRIGHT_YELLOW + "`" + pair.second[i] + "`" + Colors::BRIGHT_GREEN;
           if (i != pair.second.size() - 1) result += ", ";
         }
       }
@@ -467,6 +497,7 @@ protected:
   // AI-augmentation block is gated on `!IsWarning`), so no warning's
   // category is ever read. Kept for consistency and in case that changes.
   SLM::ErrorCategory Category_ = SLM::ErrorCategory::GENERAL;
+  SLM::DiagnosticHints Hints_; // a warning's fix-its (withFixIt())
 
 public:
   TurfWarning(SourceLocation Loc, const std::string &Msg,
@@ -488,6 +519,40 @@ public:
     return *this;
   }
 
+  // A warning's fix (TDP-2-001's `Fix:`, checked the way an error's is,
+  // CompilerFix.h): a retired spelling's replacement (SY-2 … SY-5, B-17). The
+  // edit is the raw one TurfError::withFixIt() takes, and the builder below
+  // checks the source text first, so a mis-pointed location gives no fix.
+  // What the primary span's underline says (DX-5), as TurfError::withLabel().
+  TurfWarning &withLabel(const std::string &Label) {
+    Hints_.Label = Label;
+    return *this;
+  }
+
+  TurfWarning &withFixIt(int Line, int StartCol, int EndCol,
+                         const std::string &Replacement) {
+    Hints_.FixIts.push_back({Line, StartCol, EndCol, Replacement});
+    return *this;
+  }
+
+  TurfWarning &withFixDescription(const std::string &Description) {
+    Hints_.FixDescription = Description;
+    return *this;
+  }
+
+  // Replace the text `Expected` that starts exactly at `At` with
+  // `Replacement`; nothing unless the line really reads `Expected` there.
+  TurfWarning &withTokenFixIt(const SourceLocation &At, const std::string &Expected,
+                              const std::string &Replacement) {
+    const std::string *Line = FixItSourceLine(At);
+    if (!Line || At.Col < 1 ||
+        !(At.Filename.empty() || Loc.Filename.empty() || At.Filename == Loc.Filename) ||
+        Line->compare(At.Col - 1, Expected.size(), Expected) != 0)
+      return *this;
+    return withFixIt(At.Line, At.Col, At.Col + static_cast<int>(Expected.size()),
+                     Replacement);
+  }
+
   // Mirrors TurfError::getCode() exactly (see its own doc comment) -- added
   // for HYG-001, the first warning classes (UnreachableBlockWarning,
   // DeadBranchWarning) to register a real "E0NN" code. Every other warning
@@ -503,17 +568,16 @@ public:
   // NEVER interrupts compilation flow — always returns normally.
   void emit() const {
     DiagnosticEngine::add(Loc, Message, Hint_, /*IsWarning=*/true,
-                          RelatedLocations_, Category_, getCode());
+                          RelatedLocations_, Category_, getCode(), Hints_);
   }
 
   void warn() const { emit(); }
 
-  // Shared "Warning: " label every subclass message below starts with.
-  // Extracted because ~15 subclasses across ErrorsFlow.h/ErrorsScope.h
-  // repeated this exact literal color-code sequence verbatim.
+  // The colour every warning message below starts in. The heading already
+  // says "warning" and emit() marks the diagnostic a warning, so the message
+  // itself starts with the fact.
   static std::string WarningLabel() {
-    return Colors::BOLD + Colors::BRIGHT_YELLOW + "Warning: " +
-           Colors::RESET + Colors::BRIGHT_YELLOW;
+    return Colors::BRIGHT_YELLOW;
   }
 };
 

@@ -1,7 +1,6 @@
 // EXPECT-DIAG: E066
-// EXPECT-DIAG: Type mismatch!
-// EXPECT-DIAG: with these type arguments is 'fn(string): string'
-
+// EXPECT-DIAG: With these type arguments, `identity` is `fn(string): string`, and this place needs `fn(int): int`.
+// EXPECT-DIAG: With these type arguments, `identity` is `fn(string): string`, and this place needs `fn(int): int`.
 fn<T> identity(x: T): T {
     return x;
 }

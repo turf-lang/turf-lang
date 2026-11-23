@@ -1,0 +1,13 @@
+tests/24_first_class_functions/fail_ambiguous_function_ref.tr (1 error)
+
+── error at line 12, col 36 [E125 · ambiguous call]
+
+  I cannot use `combine` as a function value, because it is overloaded and has no single signature.
+
+  Hint: Write a function with its own name that calls the overload you want, and use that as the value.
+
+  12 │     mutable f: fn(int, int): int = combine;
+     │                                    ^~~~~~~ more than one overload fits this call
+
+  Run `turf --explain E125` for more details.
+

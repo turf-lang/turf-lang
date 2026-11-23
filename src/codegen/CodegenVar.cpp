@@ -16,6 +16,7 @@
  * @date 2026-05-25
  */
 
+#include "analysis/AnalysisFacts.h"
 #include "codegen/Codegen.h"
 #include "frontend/AST.h"
 #include "analysis/Algorithms.h"
@@ -109,7 +110,7 @@ Value *VarDeclExprAST::codegen() {
 
 
   // Check for unreachable declaration
-  if (GlobalSymbolTable && GlobalSymbolTable->CurrentScopeHasEarlyExit()) {
+  if (Symbols() && Symbols()->CurrentScopeHasEarlyExit()) {
     // E012, not the retired E013: the same mistake, and the code the CFG pass
     // reports for it before Codegen ever runs (this is only the backstop).
     StatementAfterTerminatorError(Loc, "return, break or continue").raise();
@@ -117,8 +118,8 @@ Value *VarDeclExprAST::codegen() {
   }
 
   // Check for duplicate declaration in current scope
-  if (GlobalSymbolTable && GlobalSymbolTable->IsSymbolInCurrentScope(Name)) {
-    Symbol *Prev = GlobalSymbolTable->LookupSymbolInCurrentScope(Name);
+  if (Symbols() && Symbols()->IsSymbolInCurrentScope(Name)) {
+    Symbol *Prev = Symbols()->LookupSymbolInCurrentScope(Name);
     if (Prev) {
       DuplicateDeclarationError(Loc, Name, Prev->DeclLoc).raise();
     } else {
@@ -127,9 +128,10 @@ Value *VarDeclExprAST::codegen() {
     return nullptr;
   }
 
-  // Check for shadowing
-  if (GlobalSymbolTable) {
-    Symbol *Shadowed = GlobalSymbolTable->FindShadowedSymbol(Name);
+  // Check for shadowing, unless the phase before Codegen already did (E152,
+  // runProgramFlowPasses(), F-S4a).
+  if (Symbols() && !shadowChecked(getNodeID())) {
+    Symbol *Shadowed = Symbols()->FindShadowedSymbol(Name);
     if (Shadowed) {
       ShadowingWarning(Loc, Name, Shadowed->DeclLoc).warn();
     }
@@ -174,8 +176,8 @@ Value *VarDeclExprAST::codegen() {
           // locals`, while the same local initialized by any other call was
           // fine.
           emitLocalDebugVariable(SrcAlloca);
-          if (GlobalSymbolTable)
-            GlobalSymbolTable->DeclareSymbol(Name, Type, Loc, SrcAlloca);
+          if (Symbols())
+            Symbols()->DeclareSymbol(Name, Type, Loc, SrcAlloca);
           NamedValues[Name] = {SrcAlloca, Type};
           return Init;
         }
@@ -196,8 +198,8 @@ Value *VarDeclExprAST::codegen() {
   emitLocalDebugVariable(Alloca);
 
   // Register in symbol table
-  if (GlobalSymbolTable) {
-    GlobalSymbolTable->DeclareSymbol(Name, Type, Loc, Alloca);
+  if (Symbols()) {
+    Symbols()->DeclareSymbol(Name, Type, Loc, Alloca);
   }
 
   // Also keep in NamedValues for backward compatibility
@@ -236,8 +238,8 @@ Value *VariableExprAST::codegen() {
 
   // Use the mangled name resolved by Resolver/TypeChecker (Issue #5)
   Symbol *Sym = nullptr;
-  if (GlobalSymbolTable && ResolvedSymbol) {
-    Sym = GlobalSymbolTable->LookupSymbol(ResolvedSymbol->Name);
+  if (Symbols() && ResolvedSymbol) {
+    Sym = Symbols()->LookupSymbol(ResolvedSymbol->Name);
   }
 
   if (Sym) {
@@ -254,8 +256,8 @@ Value *VariableExprAST::codegen() {
 
   // Use-before-declaration error
   RankedSuggestions Suggestions;
-  if (GlobalSymbolTable) {
-    Suggestions = GlobalSymbolTable->GetRankedSuggestions(Name);
+  if (Symbols()) {
+    Suggestions = Symbols()->GetRankedSuggestions(Name);
   } else {
     std::vector<std::string> VisibleNames;
     for (const auto &pair : NamedValues) VisibleNames.push_back(pair.first);
@@ -277,8 +279,8 @@ Value *VariableExprAST::codegenLValue() {
     return nullptr;
   }
   Symbol *Sym = nullptr;
-  if (GlobalSymbolTable && ResolvedSymbol)
-    Sym = GlobalSymbolTable->LookupSymbol(ResolvedSymbol->Name);
+  if (Symbols() && ResolvedSymbol)
+    Sym = Symbols()->LookupSymbol(ResolvedSymbol->Name);
   if (Sym)
     return Sym->Alloca;
 
@@ -287,8 +289,8 @@ Value *VariableExprAST::codegenLValue() {
     return Iter->second.Alloca;
 
   RankedSuggestions Suggestions;
-  if (GlobalSymbolTable) {
-    Suggestions = GlobalSymbolTable->GetRankedSuggestions(Name);
+  if (Symbols()) {
+    Suggestions = Symbols()->GetRankedSuggestions(Name);
   } else {
     std::vector<std::string> VisibleNames;
     for (const auto &pair : NamedValues) VisibleNames.push_back(pair.first);
@@ -335,10 +337,10 @@ Value *AssignmentExprAST::codegen() {
         // write (a null here reads to every caller as "an error was already
         // reported").
         LogErrorAt(Loc, ErrCode::OperatorTemporaryWrite,
-                   "Cannot assign through 'operator[]=' on a temporary: the "
+                   "I cannot assign through `operator[]=` on a temporary, because the "
                    "container being indexed is the result of another "
-                   "'operator[]' call, so the write would only change a copy."
-                   "\n  Hint: read the inner container into a variable first, "
+                   "`operator[]` call, so the write would only change a copy."
+                   "\n  Hint: Read the inner container into a variable first, "
                    "write to it there, and store it back.",
                    SLM::ErrorCategory::TYPE_MISMATCH);
         return nullptr;
@@ -521,21 +523,21 @@ Value *CompoundAssignmentExprAST::codegen() {
   // literal re-walk of BinaryExprAST at the Codegen layer (each already had
   // its own div-by-zero check, above/below, before this group) -- see
   // EmitCheckedIntArith()'s own doc comment (CodegenCore.cpp). OPT-002:
-  // ProvenNoOverflow -- see BinaryExprAST::codegen()'s identical cases
+  // provenNoOverflow() -- see BinaryExprAST::codegen()'s identical cases
   // (CodegenExpr.cpp) for the contract.
   case '+':
     Result = isDouble ? Builder->CreateFAdd(LHSVal, CastRHS, "addtmp")
-             : ProvenNoOverflow ? Builder->CreateNSWAdd(LHSVal, CastRHS, "addtmp")
+             : provenNoOverflow(getNodeID()) ? Builder->CreateNSWAdd(LHSVal, CastRHS, "addtmp")
                                 : EmitCheckedIntArith('+', LHSVal, CastRHS, Loc);
     break;
   case '-':
     Result = isDouble ? Builder->CreateFSub(LHSVal, CastRHS, "subtmp")
-             : ProvenNoOverflow ? Builder->CreateNSWSub(LHSVal, CastRHS, "subtmp")
+             : provenNoOverflow(getNodeID()) ? Builder->CreateNSWSub(LHSVal, CastRHS, "subtmp")
                                 : EmitCheckedIntArith('-', LHSVal, CastRHS, Loc);
     break;
   case '*':
     Result = isDouble ? Builder->CreateFMul(LHSVal, CastRHS, "multmp")
-             : ProvenNoOverflow ? Builder->CreateNSWMul(LHSVal, CastRHS, "multmp")
+             : provenNoOverflow(getNodeID()) ? Builder->CreateNSWMul(LHSVal, CastRHS, "multmp")
                                 : EmitCheckedIntArith('*', LHSVal, CastRHS, Loc);
     break;
   case '/': {
@@ -599,8 +601,8 @@ Value *CompoundAssignmentExprAST::codegen() {
     break;
   case TOK_LSHIFT:
     // Checked -- see EmitCheckedShl()'s own doc comment (CodegenCore.cpp).
-    // OPT-002: ProvenNoOverflow, same contract as the '+'/'-'/'*' cases above.
-    Result = ProvenNoOverflow ? Builder->CreateShl(LHSVal, CastRHS, "lshiftassigntmp")
+    // OPT-002: provenNoOverflow(), same contract as the '+'/'-'/'*' cases above.
+    Result = provenNoOverflow(getNodeID()) ? Builder->CreateShl(LHSVal, CastRHS, "lshiftassigntmp")
                               : EmitCheckedShl(LHSVal, CastRHS, Loc);
     break;
   case TOK_RSHIFT:
@@ -673,14 +675,14 @@ Value *PostfixExprAST::codegen() {
     // Checked for int (never double) -- `x++`/`x--` is arithmetically
     // `x = x +/- 1`, so it gets the same SEM-002 overflow trap as any other
     // '+'/'-' -- see EmitCheckedIntArith()'s own doc comment (CodegenCore.cpp).
-    // OPT-002: ProvenNoOverflow, same contract as BinaryExprAST's cases
+    // OPT-002: provenNoOverflow(), same contract as BinaryExprAST's cases
     // (CodegenExpr.cpp).
     NewVal = isDouble ? Builder->CreateFAdd(OldVal, One, "inctmp")
-             : ProvenNoOverflow ? Builder->CreateNSWAdd(OldVal, One, "inctmp")
+             : provenNoOverflow(getNodeID()) ? Builder->CreateNSWAdd(OldVal, One, "inctmp")
                                 : EmitCheckedIntArith('+', OldVal, One, Loc);
   } else {
     NewVal = isDouble ? Builder->CreateFSub(OldVal, One, "dectmp")
-             : ProvenNoOverflow ? Builder->CreateNSWSub(OldVal, One, "dectmp")
+             : provenNoOverflow(getNodeID()) ? Builder->CreateNSWSub(OldVal, One, "dectmp")
                                 : EmitCheckedIntArith('-', OldVal, One, Loc);
   }
 

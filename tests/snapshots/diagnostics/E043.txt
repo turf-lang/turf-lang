@@ -1,0 +1,13 @@
+tests/02_resolver/fail_use_before_declaration_in_function.tr (1 error)
+
+── error at line 6, col 18 [E043 · use before declaration]
+
+  I cannot use `x` before its declaration.
+
+  Hint: Move the declaration of `x` above this line: a variable exists only from its declaration onwards.
+
+  6 │     mut y: int = x + 1;
+    │                  ^ used here before its declaration
+
+  Run `turf --explain E043` for more details.
+

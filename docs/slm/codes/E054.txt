@@ -32,7 +32,7 @@ CORRECT METHOD CALL SYNTAX:
 
 INCORRECT:
     c.incrament();
-    // ERROR: 'Counter' has no method named 'incrament'.
+    // ERROR: I cannot find a method named `incrament` on the struct `Counter`.
     //   (did-you-mean suggests 'increment' when it's a close match)
 
 WHAT THIS ERROR IS NOT:

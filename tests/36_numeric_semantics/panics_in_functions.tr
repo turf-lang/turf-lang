@@ -1,0 +1,185 @@
+// F-11e: tests moved from fail_*.tr files that abort at run time, one function each;
+// each `@test(panic, ...)` names the text its panic prints.
+
+// `v - -9223372036854775808` is v + 2^63, which does not fit for v >= 0.
+// Accepting the literal in every position must not turn into wrapping: the
+// checked arithmetic still traps (FREEZE.md §6.2 row 6, runtime signed).
+fn id(x: int): int {
+    return x;
+}
+
+@test(panic, "runtime check: Integer overflow")
+fn panics_intmin_literal_in_arithmetic_overflows_at_runtime(): void {
+    mut v: int = id(5);
+    mut r: int = v - -9223372036854775808;
+    r;
+}
+
+// SEM-002 (FREEZE.md §6.2 row 7): runtime signed integer '+' traps on
+// overflow instead of silently wrapping. Operands are ordinary variables
+// (not literals), so this can't be caught at compile time -- contrast with
+// fail_compile_time_literal_arithmetic_overflow.tr in this same folder.
+@test(panic, "runtime check: Integer overflow")
+fn panics_runtime_overflow_add(): void {
+    mut a: int = 9223372036854775807;
+    mut b: int = 1;
+    mut c: int = a + b;
+}
+
+// SEM-002: CompoundAssignmentExprAST has its own separate codegen path
+// (does not desugar through BinaryExprAST::codegen() -- CodegenVar.cpp's
+// own top comment) and so needed the same overflow-trap wiring
+// independently. Confirms '+=' traps exactly like '+' does.
+@test(panic, "runtime check: Integer overflow")
+fn panics_runtime_overflow_compound_assign(): void {
+    mut a: int = 9223372036854775807;
+    a += 1;
+}
+
+// SEM-002 (ARCHITECTURE_OVERHAUL.md §10.2's "one remaining overflow case"):
+// INT64_MIN / -1 has no representable int64 result -- LLVM's sdiv is
+// poison for this input (mirrors hardware idiv's own trap), caught
+// explicitly by EmitSignedDivOverflowGuard() (CodegenCore.cpp) right after
+// the pre-existing divide-by-zero check.
+@test(panic, "runtime check: Integer overflow")
+fn panics_runtime_overflow_div_intmin_negone(): void {
+    mut a: int = -9223372036854775807;
+    a = a - 1;
+    mut n: int = -1;
+    mut b: int = a / n;
+}
+
+// SEM-002 (FREEZE.md §6.2 row 7): runtime signed integer '*' traps on
+// overflow.
+@test(panic, "runtime check: Integer overflow")
+fn panics_runtime_overflow_mul(): void {
+    mut a: int = 4611686018427387904; // 2^62
+    mut b: int = 4;
+    mut c: int = a * b; // 2^64 -- overflows int64
+}
+
+// SEM-002 (FREEZE.md §6.2 row 7 names negation explicitly): negating a
+// genuine RUNTIME INT64_MIN value traps -- contrast with
+// 01_int_literal_bounds_round_trip.tr's `-9223372036854775808` LITERAL,
+// which is a different, always-legal case (unary '-' folds into an
+// untyped literal before any check; see UnaryExprAST::codegen()'s own
+// comment, CodegenExpr.cpp). Here the INT64_MIN value is computed at
+// runtime (via subtraction), so it's a genuine value being negated, not a
+// literal being folded.
+@test(panic, "runtime check: Integer overflow")
+fn panics_runtime_overflow_negate(): void {
+    mut a: int = -9223372036854775807;
+    a = a - 1;
+    mut b: int = -a;
+}
+
+// SEM-002: PostfixExprAST ('x++'/'x--') also has its own separate codegen
+// path and needed the same overflow-trap wiring independently -- 'x++' is
+// arithmetically 'x = x + 1', so it gets the same trap any other '+' does.
+@test(panic, "runtime check: Integer overflow")
+fn panics_runtime_overflow_postfix_increment(): void {
+    mut a: int = 9223372036854775807;
+    a++;
+}
+
+// SEM-002 (FREEZE.md §6.2 row 7 names '<<' explicitly): traps when a set
+// bit is shifted out past the sign bit. See EmitCheckedShl()'s own doc
+// comment (CodegenCore.cpp) for the exact overflow definition used (LLVM
+// has no llvm.shl.with.overflow intrinsic, unlike +/-/*).
+@test(panic, "runtime check: Integer overflow")
+fn panics_runtime_overflow_shl(): void {
+    mut a: int = 1;
+    mut s: int = 63;
+    mut b: int = a << s;
+}
+
+// '>>=' by a negative amount traps like '<<' and '>>' do. The compound form
+// has its own codegen path (CodegenVar.cpp), so it is pinned separately.
+@test(panic, "runtime check: Integer overflow")
+fn panics_runtime_overflow_shr_amount_negative(): void {
+    mut a: int = 7;
+    mut s: int = -1;
+    a >>= s;
+}
+
+// '>>' by 64 or more traps, the same rule and text as '<<' (found by
+// turf-fuzz: the unchecked ashr was poison, so the value varied by -O level).
+@test(panic, "runtime check: Integer overflow")
+fn panics_runtime_overflow_shr_amount_too_big(): void {
+    mut a: int = -5;
+    mut s: int = 64;
+    mut b: int = a >> s;
+}
+
+// SEM-002 (FREEZE.md §6.2 row 7): runtime signed integer '-' traps on
+// overflow (INT64_MIN - 1 has no representable int64 result).
+@test(panic, "runtime check: Integer overflow")
+fn panics_runtime_overflow_sub(): void {
+    mut a: int = -9223372036854775807;
+    mut b: int = 1;
+    a = a - 1;
+    mut c: int = a - b;
+}
+
+// C strtod reads hex; `to double` takes decimal text only.
+
+@test(panic, "Invalid string to double conversion")
+fn panics_runtime_string_to_double_hex(): void {
+    mut s: string = "0x" + "1F";
+    mut d: double = s to double;
+    printline(d);
+}
+
+// Text with no number panics; it is not 0.0.
+
+@test(panic, "Invalid string to double conversion")
+fn panics_runtime_string_to_double_not_a_number(): void {
+    mut s: string = "ab" + "c";
+    mut d: double = s to double;
+    printline(d);
+}
+
+// Text after the number is not ignored.
+
+@test(panic, "Invalid string to double conversion")
+fn panics_runtime_string_to_double_trailing_text(): void {
+    mut s: string = "1.5" + "x";
+    mut d: double = s to double;
+    printline(d);
+}
+
+// "3.5" is a double, not an int; `to int` does not truncate text.
+
+@test(panic, "Invalid string to int conversion")
+fn panics_runtime_string_to_int_fraction(): void {
+    mut s: string = "3" + ".5";
+    mut n: int = s to int;
+    n;
+}
+
+// No surrounding space and no leading `+`, as in parse_int.
+
+@test(panic, "Invalid string to int conversion")
+fn panics_runtime_string_to_int_leading_space(): void {
+    mut s: string = " " + "12";
+    mut n: int = s to int;
+    n;
+}
+
+// A value past the int range panics; it does not saturate.
+
+@test(panic, "Invalid string to int conversion")
+fn panics_runtime_string_to_int_out_of_range(): void {
+    mut s: string = "9223372036854775807" + "0";
+    mut n: int = s to int;
+    n;
+}
+
+// Text after the digits is not ignored: the whole string must be the number.
+
+@test(panic, "Invalid string to int conversion")
+fn panics_runtime_string_to_int_trailing_text(): void {
+    mut s: string = "12" + "abc";
+    mut n: int = s to int;
+    n;
+}

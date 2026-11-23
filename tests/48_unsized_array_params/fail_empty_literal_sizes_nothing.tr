@@ -1,5 +1,5 @@
 // EXPECT-DIAG: E123
-// EXPECT-DIAG: An empty literal can't give 'a' a size
+// EXPECT-DIAG: An empty literal gives `a` no size, and an array needs at least one element.
 // A literal gives an unsized declaration its size, so an empty one has no
 // size to give: an array needs at least one element.
 fn main(): int {

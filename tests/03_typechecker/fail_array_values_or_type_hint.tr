@@ -1,0 +1,8 @@
+// EXPECT-DIAG: E004
+// EXPECT-DIAG: Declare `codes` as `int[3]`, or convert each value with `to char`.
+// #365: the written type and the values disagree, and either may be the
+// mistake, so the hint names both.
+fn main(): int {
+    mut codes: char[3] = [10, 20, 30];
+    return 0;
+}

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/turf-lang/turf-lang/blob/master/docs/reference/schemas/package-graph.schema.json",
+  "title": "A package graph: turfc --package-graph's input, and what turf graph prints",
+  "description": "IF-2. The version is \"format\" (an integer, the schema's major version; turfc --version --json names the one it reads under schemas.package_graph). A key is added only with a driver interface minor that reads it (\"tests\": 1.3), because turfc rejects a package key it does not know; changing or removing a key is a new format. A relative path is relative to the graph file. turf build writes it without \"tests\"; turf test and turf graph add the root's \"tests\" when the project has one.",
+  "type": "object",
+  "required": ["format", "root", "packages"],
+  "properties": {
+    "format": { "const": 1 },
+    "root": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$", "description": "The package being built; a key of packages." },
+    "packages": {
+      "type": "object",
+      "description": "Every package of the graph, keyed by its name, which is how `import` spells it.",
+      "additionalProperties": { "$ref": "#/$defs/package" }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "package": {
+      "type": "object",
+      "required": ["src"],
+      "properties": {
+        "src": { "type": "string", "description": "The package's src/ directory." },
+        "deps": { "type": "array", "items": { "type": "string" }, "description": "The packages it imports, each once; each must be in packages, and a library (its src/ holds <name>.tr)." },
+        "allow_unsafe": { "type": "boolean", "description": "Whether the package's `unsafe module;` files are honored (the root's [unsafe] allow decides it for a dependency). Absent means false." },
+        "tests": { "type": "string", "description": "Since driver interface 1.3. The root package's tests/ directory; no other package has one." }
+      },
+      "additionalProperties": false
+    }
+  }
+}
