@@ -315,7 +315,7 @@ void TypeChecker::reportNothingToInferGeneric(const VarDeclExprAST &Node) {
     const std::string *Line = FixItSourceLine(SC->getLeftLoc());
     const SourceLocation &At = SC->getLeftLoc();
     if (Line && At.Col >= 1 &&
-        Line->compare(At.Col - 1, Struct.size(), Struct) == 0) {
+        LineReadsAt(Line, At.Col, Struct)) {
       const int Col = At.Col + static_cast<int>(Struct.size());
       Hints.FixIts.push_back({At.Line, Col, Col, Written});
       Hints.FixReason = "The arguments of `" + Struct + "::new` make every type "

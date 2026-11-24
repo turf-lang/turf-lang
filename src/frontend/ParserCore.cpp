@@ -1243,7 +1243,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     const SourceLocation MutLoc = Lex().CurLoc;
     const std::string *Line = FixItSourceLine(MutLoc);
     std::string Word = "mut";
-    if (Line && Line->compare(MutLoc.Col - 1, 7, "mutable") == 0)
+    if (LineReadsAt(Line, MutLoc.Col, "mutable"))
       Word = "mutable";
     TurfError Err(MutLoc,
                   "I cannot accept `" + Word +

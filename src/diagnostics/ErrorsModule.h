@@ -806,7 +806,7 @@ public:
     const std::string Spelling = pubSpellingAtLoc();
     const std::string *FnLine = FixItSourceLine(FnLoc);
     if (Spelling.empty() || !FnLine || FnLoc.Col < 1 ||
-        FnLine->compare(FnLoc.Col - 1, 2, "fn") != 0)
+        !LineReadsAt(FnLine, FnLoc.Col, "fn"))
       return *this;
     withTokenFixIt(Loc, Spelling, "", EatBlanks::After);
     withFixIt(FnLoc.Line, FnLoc.Col, FnLoc.Col, Spelling + " ");
@@ -827,7 +827,7 @@ private:
     for (const char *Word : {"public", "pub"}) {
       const std::string W(Word);
       const size_t End = Loc.Col - 1 + W.size();
-      if (Line->compare(Loc.Col - 1, W.size(), W) == 0 &&
+      if (LineReadsAt(Line, Loc.Col, W) &&
           (End >= Line->size() || !isIdentChar((*Line)[End])))
         return W;
     }

@@ -247,7 +247,7 @@ public:
                             EatBlanks Eat = EatBlanks::None) {
     const std::string *Line = FixItSourceLine(At);
     if (!Line || At.Col < 1 || !sameFileAsError(At) ||
-        Line->compare(At.Col - 1, Expected.size(), Expected) != 0)
+        !LineReadsAt(Line, At.Col, Expected))
       return *this;
     size_t Start = At.Col - 1, End = Start + Expected.size();
     if (Eat == EatBlanks::After)
@@ -267,7 +267,7 @@ public:
                                        const std::string &Text) {
     const std::string *Line = FixItSourceLine(At);
     if (!Line || At.Col < 1 || !sameFileAsError(At) ||
-        Line->compare(At.Col - 1, Token.size(), Token) != 0)
+        !LineReadsAt(Line, At.Col, Token))
       return *this;
     const int Col = At.Col + static_cast<int>(Token.size());
     return withFixIt(At.Line, Col, Col, Text);
@@ -547,7 +547,7 @@ public:
     const std::string *Line = FixItSourceLine(At);
     if (!Line || At.Col < 1 ||
         !(At.Filename.empty() || Loc.Filename.empty() || At.Filename == Loc.Filename) ||
-        Line->compare(At.Col - 1, Expected.size(), Expected) != 0)
+        !LineReadsAt(Line, At.Col, Expected))
       return *this;
     return withFixIt(At.Line, At.Col, At.Col + static_cast<int>(Expected.size()),
                      Replacement);

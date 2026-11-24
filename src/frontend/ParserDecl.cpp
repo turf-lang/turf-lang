@@ -1167,7 +1167,7 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation, SourceLocation Sta
     // Delete ` static` (the blank before it with it) and write `static `
     // before `fn`: one edit each, checked against the source text.
     if (const std::string *Line = FixItSourceLine(OldLoc);
-        Line && OldLoc.Col >= 2 && Line->compare(OldLoc.Col - 1, 6, "static") == 0 &&
+        OldLoc.Col >= 2 && LineReadsAt(Line, OldLoc.Col, "static") &&
         (*Line)[OldLoc.Col - 2] == ' ')
       W.withFixIt(OldLoc.Line, OldLoc.Col - 1, OldLoc.Col + 6, "");
     W.withTokenFixIt(FnLoc, "fn", "static fn")
@@ -1779,14 +1779,14 @@ std::unique_ptr<ExprAST> ParseStaticPrefixed() {
     const SourceLocation PubLoc = Lex().CurLoc;
     const std::string *Line = FixItSourceLine(PubLoc);
     std::string PubWord = "pub";
-    if (Line && Line->compare(PubLoc.Col - 1, 6, "public") == 0)
+    if (LineReadsAt(Line, PubLoc.Col, "public"))
       PubWord = "public";
     TurfError Err(StaticLoc,
                   "I expected `static` after `" + PubWord + "`, not before it.",
                   "Write `" + PubWord + " static fn`.");
     Err.withCode(ErrCode::MisplacedVisibility);
     if (Line && StaticLoc.Line == PubLoc.Line &&
-        Line->compare(StaticLoc.Col - 1, 6, "static") == 0 &&
+        LineReadsAt(Line, StaticLoc.Col, "static") &&
         PubLoc.Col == StaticLoc.Col + 7)
       Err.withFixIt(StaticLoc.Line, StaticLoc.Col,
                     PubLoc.Col + static_cast<int>(PubWord.size()),
@@ -1871,7 +1871,7 @@ std::unique_ptr<ExprAST> ParseVisibilityPrefixed() {
     // ParseModuleConstant() reports `pub mut`.
     std::string Word = "pub";
     if (const std::string *Line = FixItSourceLine(Mark.Loc);
-        Line && Line->compare(Mark.Loc.Col - 1, 6, "public") == 0)
+        LineReadsAt(Line, Mark.Loc.Col, "public"))
       Word = "public";
     return ParseModuleConstant(Mark.Loc, /*IsPublic=*/true, Word);
   }

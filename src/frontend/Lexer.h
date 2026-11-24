@@ -186,6 +186,10 @@ extern std::map<std::string, std::vector<std::string>> AllSourceLines;
 // FixIt-building call site reads to check that the source really says what it
 // is about to edit -- see TurfError::withFixIt() in Errors.h.
 const std::string *FixItSourceLine(const SourceLocation &Loc);
+// True when `Line` reads `Word` starting at the 1-based column `Col`. False for
+// a null line, a column before the line or past its end, or other text there,
+// so a location that does not match the source never throws or edits.
+bool LineReadsAt(const std::string *Line, int Col, const std::string &Word);
 // Reserved-word -> token-id table, consulted by gettok() after scanning any
 // identifier-shaped run of characters. Note that builtin/stdlib function
 // names (print, malloc, abs, ...) are deliberately NOT in this table -- they

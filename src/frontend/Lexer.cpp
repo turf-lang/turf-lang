@@ -72,6 +72,12 @@ const std::string *FixItSourceLine(const SourceLocation &Loc) {
   return &Lines[Loc.Line - 1];
 }
 
+bool LineReadsAt(const std::string *Line, int Col, const std::string &Word) {
+  if (!Line || Col < 1 || static_cast<size_t>(Col - 1) > Line->size())
+    return false;
+  return Line->compare(static_cast<size_t>(Col - 1), Word.size(), Word) == 0;
+}
+
 // DiagnosticEngine : static storage
 std::vector<DiagnosticEngine::Diag> DiagnosticEngine::Diagnostics;
 std::set<int> DiagnosticEngine::ErrorLines;
@@ -1261,6 +1267,11 @@ static int gettokScan(LexerState &L) {
         SourceLocation EscapeLoc{L.CurLine, L.CurCol, ""};
         L.LastChar = L.Source->get();
         L.CurCol++;
+        // A `\` at the end of the line does not continue the string: the
+        // literal is unclosed, and the newline stays unread so the line count
+        // stays right for the rest of the file.
+        if (L.LastChar == '\n' || L.LastChar == EOF)
+          break;
         if (L.LastChar == 'n') {
           L.StringVal += '\n';
         } else if (L.LastChar == 't') {
@@ -1391,6 +1402,14 @@ static int gettokScan(LexerState &L) {
       SourceLocation EscapeLoc{L.CurLine, L.CurCol, ""};
       L.LastChar = L.Source->get();
       L.CurCol++;
+      // `'\` at the end of the line: unclosed, as for a string above.
+      if (L.LastChar == EOF || L.LastChar == '\n') {
+        LogErrorAt(L.CurLoc, ErrCode::UnterminatedLiteral,
+                   std::string("I found a char literal that is never closed.") +
+                       "\n  Hint: Add a closing `'` after the character.",
+                   SLM::ErrorCategory::SYNTAX_ERROR);
+        return L.LastChar == EOF ? TOK_EOF : TOK_CHAR_LITERAL;
+      }
       if (L.LastChar == 'n') {
         L.CharVal = '\n';
       } else if (L.LastChar == 't') {
