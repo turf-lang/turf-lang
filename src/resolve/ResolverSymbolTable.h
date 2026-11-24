@@ -93,6 +93,9 @@ public:
     return ScopeTable_.isDeclaredInCurrentScope(Name);
   }
 
+  std::vector<std::string> getLocalVisibleNames() const {
+    return ScopeTable_.getLocalVisibleNames();
+  }
   std::vector<std::string> getAllVisibleNames() const {
     return ScopeTable_.getAllVisibleNames();
   }

@@ -144,6 +144,8 @@ inline constexpr const char *InvalidCast = "E134";
 inline constexpr const char *NotCallable = "E135";
 inline constexpr const char *InvalidModuleQualifier = "E136";
 inline constexpr const char *NotAValue = "E137";
+// F-1 phase 1: a lambda naming a local of the function around it.
+inline constexpr const char *UnknownName = "E040";
 inline constexpr const char *MissingTypeArguments = "E138";
 // Issue #260: `T[]` is a slice that only a parameter can hold.
 inline constexpr const char *UnsizedArrayPlacement = "E140";

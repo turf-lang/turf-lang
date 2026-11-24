@@ -68,8 +68,12 @@ std::unique_ptr<ExprAST> ParseModuleConstant(SourceLocation StartLoc, bool IsPub
                                              const std::string &Spelling);
 // `StaticLoc` is where a `static` written in front was (`static fn T.m()`,
 // SY-4); Line 0 when there was none.
+// `AsLambda` (F-1 phase 1): CurTok is the `fn` of `fn(params): R { ... }` in
+// an expression. The function gets LambdaName()'s name, is queued for
+// hoisting (ReserveHoistedLambda()), and what is returned is a reference to it.
 std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation = false,
-                                      SourceLocation StaticLoc = {});
+                                      SourceLocation StaticLoc = {},
+                                      bool AsLambda = false);
 // SY-4: `static` at the start of a declaration, before `fn` (CurTok ==
 // TOK_STATIC). `static pub fn` is E087 with a Fix that reorders the words.
 std::unique_ptr<ExprAST> ParseStaticPrefixed();

@@ -139,12 +139,22 @@ std::vector<std::string> ResolverModuleTable::getAllModuleNames() const {
   return Names;
 }
 
+// A lambda's function (Parser.h, LambdaName()) has a name no program can
+// write, the only one with an `@`. The name lists below are what suggestions
+// and completion offer, so they leave it out; lookups by name still find it.
+static bool isLambdaFunctionName(const std::string &Name) {
+  return Name.find('@') != std::string::npos;
+}
+
 std::vector<std::string> ResolverModuleTable::getModuleFunctionNames(
     const std::string &ModuleName) const {
   auto It = Modules_.find(ModuleName);
   if (It == Modules_.end())
     return {};
-  return It->second->getFunctionNames();
+  std::vector<std::string> Names = It->second->getFunctionNames();
+  Names.erase(std::remove_if(Names.begin(), Names.end(), isLambdaFunctionName),
+              Names.end());
+  return Names;
 }
 
 std::vector<std::string> ResolverModuleTable::getModulePublicFunctionNames(
@@ -249,7 +259,8 @@ ResolverModuleTable::getAllCurrentFileFunctionNames() const {
   std::vector<std::string> Names;
   Names.reserve(CurrentFileFunctions_.size());
   for (const auto &Pair : CurrentFileFunctions_)
-    Names.push_back(Pair.first);
+    if (!isLambdaFunctionName(Pair.first))
+      Names.push_back(Pair.first);
   std::sort(Names.begin(), Names.end());
   return Names;
 }
@@ -354,7 +365,7 @@ ResolverModuleTable::getAllModuleFunctionNames() const {
   std::vector<std::string> Names;
   for (const auto &ModPair : Modules_)
     for (const auto &FuncPair : ModPair.second->Functions)
-      if (Seen.insert(FuncPair.first).second)
+      if (!isLambdaFunctionName(FuncPair.first) && Seen.insert(FuncPair.first).second)
         Names.push_back(FuncPair.first);
   std::sort(Names.begin(), Names.end());
   return Names;

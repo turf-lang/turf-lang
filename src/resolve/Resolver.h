@@ -722,6 +722,18 @@ private:
   /// where a value or a function belongs), so it never raises.
   std::string visibleTypeKind(const std::string &Name) const;
 
+  /// F-1 phase 1: the locals in scope where each lambda is written, keyed by
+  /// module and the lambda's name (LambdaName()), recorded when the Resolver
+  /// meets the reference the Parser left in its place. The lambda itself is a
+  /// top-level function that comes after the declaration it was written in,
+  /// so the entry is there when its body is resolved.
+  std::unordered_map<std::string, std::vector<std::string>> LambdaOuterLocals_;
+  /// Raises E040 when the function being resolved is a lambda and @p Name is
+  /// a local of the function around it, which a lambda cannot use: it has no
+  /// environment to hold one. The caller has already found that @p Name is
+  /// not a local of the lambda itself.
+  void rejectOuterLocal(const std::string &Name, const SourceLocation &Loc) const;
+
   /// Walks every shape @p Ty can take (pointer, reference, array, generic
   /// arguments, error union, function type) and resolves each still-
   /// unresolved NamedType/GenericType base in place via

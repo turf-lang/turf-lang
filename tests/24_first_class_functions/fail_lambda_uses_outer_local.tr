@@ -1,0 +1,10 @@
+// EXPECT-DIAG: E040
+// EXPECT-DIAG: I cannot use `k` in this lambda, because `k` is a local of the function around it
+// A lambda is capture-free (#367): it has no environment to hold a local of
+// the function around it, so naming one is an error, not a typo to fix.
+
+fn main(): int {
+    mut k: int = 3;
+    immut f = fn(x: int): int { return x * k; };
+    return f(2);
+}

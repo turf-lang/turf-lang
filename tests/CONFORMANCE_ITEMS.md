@@ -1,7 +1,7 @@
 # Conformance items: one row per frozen decision
 
 `docs/development/FREEZE.md`'s appendix is the specification of the 2.0 language:
-85 numbered decisions, `F-GEN-1` to `F-PANIC-3`. This file says, for each one,
+88 numbered decisions, `F-GEN-1` to `F-FN-3`. This file says, for each one,
 which tests and scripts show it holds. `tests/CONFORMANCE.md` maps *areas* to
 folders; this maps *rules* to evidence, which is the question a conformance
 suite has to answer: "this sentence of the spec: where is it checked?"
@@ -119,3 +119,6 @@ Read the Note, then the test.
 | **F-PANIC-1** | S | `scripts/smoke/runtime_smoke.sh` | `tests/40_defer/defer_skipped_on_panic_panics.tr: panics_defer_skipped_on_panic` | A runtime panic (stack overflow, out of memory) aborts with exit 134, and a panic inside a function with a `defer` aborts without running it. |
 | **F-PANIC-2** | - | — | — | A permission for the compiler, not a behaviour: no Turf code runs once a panic has begun, so a program has nothing to observe. F-PANIC-3 is what the permission is used for. |
 | **F-PANIC-3** | N | — | `tests/43_check_elision/panics_in_functions.tr: panics_overflow_still_traps_when_unprovable`, `tests/43_check_elision/panics_in_functions.tr: panics_overflow_write_in_defer_not_elided` | A check that cannot be proved safe still panics, with its own kind (`EXPECT-RUNTIME: Integer overflow`). No pass runs a check late yet (NM-6, TDP-2-002); its tests join this row when it lands. |
+| **F-FN-1** | PN | `tests/24_first_class_functions/09_lambda_expressions.tr`, `tests/24_first_class_functions/10_lambda_in_generic_function.tr`, `tests/24_first_class_functions/11_lambda_from_module.tr` | `tests/24_first_class_functions/fail_generic_lambda.tr`, `tests/24_first_class_functions/fail_lambda_missing_return.tr`, `tests/24_first_class_functions/fail_lambda_uses_outer_local.tr` | A lambda is stored, passed, returned, called where written and nested; inside a generic function it has that function's type parameters. `fn<T>(` is E108, and a diagnostic names a lambda `lambda@LINE:COLUMN`. |
+| **F-FN-2** | PN | `tests/24_first_class_functions/02_assign_function_to_variable.tr`, `tests/24_first_class_functions/05_inferred_function_variable.tr` | `tests/24_first_class_functions/fail_ambiguous_function_ref.tr` | A named function is a value of its `fn(...)` type, inferred or declared; an overloaded name has no single signature (E125). |
+| **F-FN-3** | P | `tests/24_first_class_functions/12_lambda_as_c_callback.tr`, `tests/05_arrays_pointers_ffi/21_unsafe_module_capability_and_multi_extern.tr` | — | A named function and a lambda are each one C function pointer (`qsort`'s comparator). No value with an environment exists yet; F-1 phase 2 (#368) adds the rejection at a C-facing site, and its test joins this row. |

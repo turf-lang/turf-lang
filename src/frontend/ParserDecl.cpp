@@ -939,10 +939,14 @@ static SLM::DiagnosticHints MissingReturnTypeHints(const std::vector<ParamDecl> 
   return Hints;
 }
 
-std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation, SourceLocation StaticLoc) {
+std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation, SourceLocation StaticLoc,
+                                      bool AsLambda) {
   SourceLocation FnLoc = Lex().CurLoc;
   const bool StaticInFront = StaticLoc.Line > 0;
   getNextToken(); // consume TOK_FN
+  // Taken before the body is parsed, so a lambda inside this one comes after
+  // it (Parser.h).
+  const size_t LambdaSlot = AsLambda ? ReserveHoistedLambda() : 0;
 
   std::vector<std::string> TypeParams;
   // `N: size` declares a size parameter: an array length, not a type.
@@ -985,6 +989,11 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation, SourceLocation Sta
     getNextToken(); // eat '>'
   }
 
+  // A lambda has the enclosing function's type parameters (Parser.h,
+  // TypeParamsInScope); it cannot write its own (`fn<T>(` is rejected below).
+  if (AsLambda)
+    TypeParams = Parser().TypeParamsInScope;
+
   // Push scope to allow ParseType to resolve generic parameters. A size
   // parameter is not a type: ParseType() reads it only inside `[ ]`.
   SymbolScopeGuard Guard(!TypeParams.empty());
@@ -1003,17 +1012,44 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation, SourceLocation Sta
     }
     ~SizeParamScope() { Parser().SizeParamsInScope = Saved; }
   } SizeScope(SizeParams);
+  struct TypeParamScope {
+    std::vector<std::string> Saved;
+    explicit TypeParamScope(const std::vector<std::string> &Mine)
+        : Saved(Parser().TypeParamsInScope) {
+      Parser().TypeParamsInScope = Mine;
+    }
+    ~TypeParamScope() { Parser().TypeParamsInScope = Saved; }
+  } TypeScope(TypeParams);
 
-  // Expect TOK_IDENTIFIER → save as FuncName
-  if (RejectReservedWordAsName())
-    return nullptr;
-  if (Parser().CurTok != TOK_IDENTIFIER) {
-    LogErrorAt(FnLoc, ErrCode::ExpectedName, "I expected a function name after `fn`.\n  Hint: Name the function, as in `fn name(...): T { ... }`.", SLM::ErrorCategory::DECLARATION);
+  // `fn<T>(` is neither a lambda (they are never generic, FUTURE.md F-1)
+  // nor a declaration.
+  if (!AsLambda && !TypeParams.empty() && Parser().CurTok == '(') {
+    LogErrorAt(FnLoc, ErrCode::ExpectedName,
+               "I cannot give a lambda type parameters, so `fn<" + TypeParams[0] +
+                   ">(...)` needs a name."
+                   "\n  Hint: Declare a named generic function, as in `fn<" +
+                   TypeParams[0] + "> name(...): T { ... }`, and use `name` as the value.",
+               SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
-  std::string FuncName = Lex().IdentifierStr;
-  SourceLocation NameLoc = Lex().CurLoc;
-  getNextToken();
+
+  // Expect TOK_IDENTIFIER → save as FuncName. A lambda has no name of its
+  // own; it gets one no program can write (LambdaName()).
+  std::string FuncName;
+  SourceLocation NameLoc = FnLoc;
+  if (AsLambda) {
+    FuncName = LambdaName(FnLoc);
+  } else {
+    if (RejectReservedWordAsName())
+      return nullptr;
+    if (Parser().CurTok != TOK_IDENTIFIER) {
+      LogErrorAt(FnLoc, ErrCode::ExpectedName, "I expected a function name after `fn`.\n  Hint: Name the function, as in `fn name(...): T { ... }`.", SLM::ErrorCategory::DECLARATION);
+      return nullptr;
+    }
+    FuncName = Lex().IdentifierStr;
+    NameLoc = Lex().CurLoc;
+    getNextToken();
+  }
   std::string StructName = "";
   bool IsStaticMethodDecl = false;
 
@@ -1061,6 +1097,12 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation, SourceLocation Sta
   // noted (forgotten again only at the successful return below) and a call
   // to it is not reported as an unknown function as well.
   NoteFunctionParseStarted(FuncName);
+  // How the messages below name this function, and how their examples start:
+  // `f` and `f(a: int)` for a declaration, "the lambda" and `fn(a: int)` for
+  // a lambda, whose generated name is not one to show.
+  const std::string Named = AsLambda ? "the lambda" : "`" + FuncName + "`";
+  const std::string Head = AsLambda ? "fn" : FuncName;
+  const std::string FnHead = AsLambda ? "fn" : "fn " + FuncName;
 
   // Expect '('
   if (Parser().CurTok != '(') {
@@ -1080,8 +1122,8 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation, SourceLocation Sta
     }
     if (Parser().CurTok != TOK_IDENTIFIER) {
       LogErrorAt(Lex().CurLoc, ErrCode::ExpectedName,
-                 "I expected a parameter name in the parameter list of `" +
-                     FuncName + "`.\n  Hint: Give each parameter of `" + FuncName + "` a name and a type: `" + FuncName + "(a: int, b: int)`.", SLM::ErrorCategory::DECLARATION);
+                 "I expected a parameter name in the parameter list of " +
+                     Named + ".\n  Hint: Give each parameter of " + Named + " a name and a type: `" + Head + "(a: int, b: int)`.", SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
     std::string ParamName = Lex().IdentifierStr;
@@ -1090,8 +1132,8 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation, SourceLocation Sta
 
     if (Parser().CurTok != TOK_COLON) {
       LogErrorAt(Lex().CurLoc, ErrCode::MissingColon,
-                 "I expected a `:` after the parameter name `" + ParamName + "` in `" +
-                     FuncName + "`.\n  Hint: Give each parameter of `" + FuncName + "` a name and a type: `" + FuncName + "(a: int, b: int)`.", SLM::ErrorCategory::DECLARATION);
+                 "I expected a `:` after the parameter name `" + ParamName + "` in " +
+                     Named + ".\n  Hint: Give each parameter of " + Named + " a name and a type: `" + Head + "(a: int, b: int)`.", SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
     getNextToken(); // consume ':'
@@ -1100,8 +1142,8 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation, SourceLocation Sta
     TurfTypePtr ParamType = ParseType();
     if (!ParamType) {
       LogErrorAt(Lex().CurLoc, ErrCode::ExpectedType,
-                 "I expected a parameter type after `:` in the parameter list of `" +
-                     FuncName + "`.\n  Hint: Give each parameter of `" + FuncName + "` a name and a type: `" + FuncName + "(a: int, b: int)`.", SLM::ErrorCategory::DECLARATION);
+                 "I expected a parameter type after `:` in the parameter list of " +
+                     Named + ".\n  Hint: Give each parameter of " + Named + " a name and a type: `" + Head + "(a: int, b: int)`.", SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
     ParamTypeLoc.EndLine = Lex().PrevTokEndLine; // DX-5: the whole type
@@ -1131,7 +1173,7 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation, SourceLocation Sta
   if (Parser().CurTok != ')') {
     LogErrorAt(
         FnLoc, ErrCode::UnclosedDelimiter,
-        "I expected a `)` to close the parameter list of `" + FuncName + "`.", SLM::ErrorCategory::DECLARATION);
+        "I expected a `)` to close the parameter list of " + Named + ".", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
   getNextToken(); // eat ')'
@@ -1221,7 +1263,7 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation, SourceLocation Sta
 
   // Expect TOK_COLON
   if (Parser().CurTok != TOK_COLON) {
-    LogErrorAt(Lex().CurLoc, ErrCode::MissingColon, "I expected a `:` followed by a return type after the parameter list.\n  Hint: Write the return type after a `:`, as in `fn " + FuncName + "(...): int {`, or write `: void` if it returns nothing.", SLM::ErrorCategory::DECLARATION,
+    LogErrorAt(Lex().CurLoc, ErrCode::MissingColon, "I expected a `:` followed by a return type after the parameter list.\n  Hint: Write the return type after a `:`, as in `" + FnHead + "(...): int {`, or write `: void` if it returns nothing.", SLM::ErrorCategory::DECLARATION,
                MissingReturnTypeHints(Params));
     return nullptr;
   }
@@ -1246,14 +1288,14 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation, SourceLocation Sta
   // i: int): int ;` -- crashed the compiler instead of being diagnosed.
   if (Parser().CurTok == ';') {
     LogErrorAt(FnLoc, ErrCode::MissingOpeningDelimiter,
-               "`" + FuncName + "` has no body, and a function needs a `{ ... }` body.\n  Hint: Replace the `;` with a body, as in `fn " + FuncName + "(...): T { ... }`, or declare it with `extern fn` to call a C function.",
+               (AsLambda ? std::string("The lambda") : Named) + " has no body, and a function needs a `{ ... }` body.\n  Hint: Replace the `;` with a body, as in `" + FnHead + "(...): T { ... }`, or declare it with `extern fn` to call a C function.",
                SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
 
   // Expect '{' to open function body
   if (Parser().CurTok != '{') {
-    LogErrorAt(FnLoc, ErrCode::MissingOpeningDelimiter, "I expected a `{` to begin the body of `" + FuncName + "`.", SLM::ErrorCategory::DECLARATION);
+    LogErrorAt(FnLoc, ErrCode::MissingOpeningDelimiter, "I expected a `{` to begin the body of " + Named + ".", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
   FuncBodyTryScope TryScope;
@@ -1269,6 +1311,14 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation, SourceLocation Sta
   Def->UsesTry = TryScope.used();
   Def->SizeParams = SizeParams;
   NoteFunctionParsed(FuncName);
+  if (AsLambda) {
+    Def->IsLambda = true;
+    FillHoistedLambda(LambdaSlot, std::move(Def));
+    auto Ref = std::make_unique<VariableExprAST>(FnLoc, FuncName);
+    for (const auto &TP : TypeParams)
+      Ref->TypeArgs.push_back(std::make_shared<TurfGenericParamType>(TP));
+    return Ref;
+  }
   return Def;
 }
 

@@ -1,7 +1,7 @@
 // EXPECT-DIAG: E108
 // EXPECT-FIX: insert ';' at the end of line 24
 // EXPECT-DIAG: E102
-// EXPECT-DIAG: I expected a function name after `fn`
+// EXPECT-DIAG: I cannot give a lambda type parameters
 // EXPECT-DIAG: I expected a `;` after this statement
 // EXPECT-NO-DIAG: I found a statement outside a function
 // LEC-005: recovery must land on the closing brace of the BROKEN function --
@@ -13,7 +13,7 @@ fn first(): int {
     mut i: int = 0;
     while (i < 3) {
         if (i == 1) {
-            mut f = fn(a: int): int { return a; };
+            mut f = fn<T>(a: T): T { return a; };
         }
         i = i + 1;
     }

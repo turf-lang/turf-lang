@@ -2481,12 +2481,12 @@ static void testParseErrorRecoveryAndTypeNameHints() {
     auto R = turf::analyze({{"cascade.tr",
                              "fn main(): int {\n"
                              "    mut x: int = 1;\n"
-                             "    mut f = fn(a: int): int { return a; };\n"
+                             "    mut f = fn<T>(a: T): T { return a; };\n"
                              "    x = x + 1;\n"
                              "    return x;\n"
                              "}\n"}});
     CHECK(!R.succeeded());
-    CHECK(hasDiagnostic(R, "I expected a function name after `fn`"));
+    CHECK(hasDiagnostic(R, "I cannot give a lambda type parameters"));
     CHECK(!hasDiagnostic(R, "I found a statement outside a function"));
     if (R.diagnostics().size() != 1)
       std::cerr << "    expected exactly one diagnostic, got:\n" << render(R);
@@ -2501,7 +2501,7 @@ static void testParseErrorRecoveryAndTypeNameHints() {
                              "    mut i: int = 0;\n"
                              "    while (i < 3) {\n"
                              "        if (i == 1) {\n"
-                             "            mut f = fn(a: int): int { return a; };\n"
+                             "            mut f = fn<T>(a: T): T { return a; };\n"
                              "        }\n"
                              "        i = i + 1;\n"
                              "    }\n"
@@ -2513,7 +2513,7 @@ static void testParseErrorRecoveryAndTypeNameHints() {
                              "}\n"
                              "fn main(): int { return 0; }\n"}});
     CHECK(!R.succeeded());
-    CHECK(hasDiagnostic(R, "I expected a function name after `fn`"));
+    CHECK(hasDiagnostic(R, "I cannot give a lambda type parameters"));
     CHECK(hasDiagnostic(R, "I expected a `;` after this statement"));
     CHECK(!hasDiagnostic(R, "I found a statement outside a function"));
   }

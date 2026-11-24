@@ -775,7 +775,11 @@ void Resolver::validateGenericParamsInferable(const FuncDefExprAST &Node,
         .raise();
     return;
   }
+  // A lambda's type parameters are its enclosing function's, and its one
+  // reference names them (`lambda@L:C::<T>`): nothing is inferred.
   for (const auto &TP : Sym.TypeParams) {
+    if (Node.IsLambda)
+      break;
     if (std::find(Bound.begin(), Bound.end(), TP) != Bound.end() ||
         std::find(Sym.SizeParams.begin(), Sym.SizeParams.end(), TP) != Sym.SizeParams.end())
       continue;

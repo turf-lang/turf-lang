@@ -1,0 +1,8 @@
+// EXPECT-DIAG: E108
+// EXPECT-DIAG: I cannot give a lambda type parameters, so `fn<T>(...)` needs a name.
+// A lambda is never generic of its own; a named generic function is the value.
+
+fn main(): int {
+    immut f = fn<T>(y: T): T { return y; };
+    return 0;
+}

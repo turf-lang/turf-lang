@@ -1,0 +1,9 @@
+// EXPECT-DIAG: E108
+// EXPECT-DIAG: I expected a parameter name in the parameter list of the lambda.
+// EXPECT-DIAG: E103
+// A lambda's parse errors say "the lambda", never its generated name.
+
+fn main(): int {
+    immut h = fn(x: int, : int): int { return x; };
+    return 0;
+}

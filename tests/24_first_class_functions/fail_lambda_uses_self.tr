@@ -1,0 +1,14 @@
+// EXPECT-DIAG: E040
+// EXPECT-DIAG: I cannot use `self` in this lambda, because `self` is a local of the function around it
+// `self` is a parameter of the method, so a lambda in the method cannot use it.
+
+struct Counter { n: int }
+
+fn Counter.adder(): fn(int): int {
+    return fn(x: int): int { return x + self.n; };
+}
+
+fn main(): int {
+    mut c: Counter = Counter::default();
+    return c.adder()(1);
+}

@@ -61,6 +61,12 @@ struct ParserState {
   // parsed: inside it, `[N]` in a type is an array whose size is N. Set by
   // ParseFuncDef() for its whole declaration and body. See ParseType().
   std::vector<std::string> SizeParamsInScope;
+  // The type parameters (`T` in `fn<T>`) of the function being parsed, set by
+  // ParseFuncDef() like SizeParamsInScope. A lambda written in a generic
+  // function takes them as its own (F-1 phase 1): it is hoisted as `fn<T>
+  // lambda@L:C(...)` and its reference is `lambda@L:C::<T>`, so each
+  // instantiation of the function uses the lambda's matching instantiation.
+  std::vector<std::string> TypeParamsInScope;
   // LEC-003: true only while ParseCompareExpr() parses a `matches` header's
   // pattern. There `Name {` is the START of a struct pattern (`matches Point
   // { x, y }:`), not the removed struct brace-literal, so ParsePrimary()'s
@@ -391,5 +397,23 @@ bool WasDeclaredInsideTopLevelUnsafe(const ExprAST *Node);
 void AppendFlattenedTopLevelDecl(std::unique_ptr<ExprAST> AST,
                                  std::vector<std::unique_ptr<ExprAST>> &Target,
                                  bool RecordForSandbox);
+
+// F-1 phase 1: a lambda, `fn(x: int): int { ... }` in an expression, is an
+// unnamed top-level function. The parser builds it as a FuncDefExprAST named
+// LambdaName(its `fn`'s location), a name no program can write, and leaves a
+// VariableExprAST of that name where the lambda was, so every later pass sees
+// an ordinary private function and an ordinary function value.
+//
+// ReserveHoistedLambda() takes a slot when a lambda starts and
+// FillHoistedLambda() fills it when the lambda has parsed, so an outer lambda
+// comes before the lambdas inside it (the Resolver sees the outer one first).
+// AppendFlattenedTopLevelDecl() appends the filled slots after the
+// declaration they were written in; DiscardHoistedLambdas() drops them when
+// that declaration fails to parse.
+std::string LambdaName(const SourceLocation &FnLoc);
+bool IsLambdaName(const std::string &Name);
+size_t ReserveHoistedLambda();
+void FillHoistedLambda(size_t Slot, std::unique_ptr<ExprAST> Def);
+void DiscardHoistedLambdas();
 
 #endif

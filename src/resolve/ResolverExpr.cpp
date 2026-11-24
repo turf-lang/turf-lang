@@ -100,6 +100,9 @@ void Resolver::visitVariable(VariableExprAST &Node) {
   // (Monomorphize): there is no variable to find.
   if (Node.SizeValue)
     return;
+  if (IsLambdaName(Node.getName()))
+    LambdaOuterLocals_[currentModuleName() + "|" + Node.getName()] =
+        SymTable_.getLocalVisibleNames();
   auto Sym = SymTable_.lookupVariable(Node.getName());
   if (Sym) {
     // Issue #5: attach the resolved symbol to the AST node so future passes
@@ -108,6 +111,9 @@ void Resolver::visitVariable(VariableExprAST &Node) {
     Node.IsSizeParamRef = Sym->IsSizeParam;
     return;
   }
+  // Checked before the constants and functions below: a local of the
+  // enclosing function shadows them there, so that is what the name means.
+  rejectOuterLocal(Node.getName(), Node.getLoc());
 
   // Bare reference to an `export immut` constant -- checked AFTER ordinary
   // scoped variables (a local shadowing an exported name is not an error,
@@ -226,6 +232,22 @@ void Resolver::visitVariable(VariableExprAST &Node) {
 
   ReferenceError(Node.getLoc(), Node.getName(), Suggestions,
                  visibleTypeKind(Node.getName()))
+      .raise();
+}
+
+void Resolver::rejectOuterLocal(const std::string &Name, const SourceLocation &Loc) const {
+  if (!EnclosingFuncDef_ || !EnclosingFuncDef_->IsLambda)
+    return;
+  auto It = LambdaOuterLocals_.find(currentModuleName() + "|" + EnclosingFuncDef_->getName());
+  if (It == LambdaOuterLocals_.end() ||
+      std::find(It->second.begin(), It->second.end(), Name) == It->second.end())
+    return;
+  TypeError(Loc, ErrCode::UnknownName,
+            "I cannot use `" + Name + "` in this lambda, because `" + Name +
+                "` is a local of the function around it, and a lambda can use "
+                "only its own parameters and locals.",
+            "Pass `" + Name + "` to the lambda as a parameter, or declare a named "
+            "function that takes it.")
       .raise();
 }
 

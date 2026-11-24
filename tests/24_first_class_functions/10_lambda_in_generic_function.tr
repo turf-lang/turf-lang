@@ -1,0 +1,26 @@
+// A lambda written in a generic function has that function's type
+// parameters: each instantiation of the function uses its own instantiation
+// of the lambda, and a lambda that does not mention `T` works too.
+
+import test;
+
+fn<T> keep(x: T): T {
+    immut same = fn(y: T): T { return y; };
+    immut bump = fn(n: int): int { return n + 1; };
+    test::assert(bump(1) == 2, "a lambda that does not use T");
+    return same(x);
+}
+
+fn<T> second_of(a: T, b: T): T {
+    immut pick = fn(x: T, y: T): T { return y; };
+    return pick(a, b);
+}
+
+fn main(): int {
+    test::assert(keep("a") == "a", "T = string");
+    test::assert(keep(2.5) == 2.5, "T = double");
+    test::assert(keep(7) == 7, "T = int");
+    test::assert(second_of("x", "y") == "y", "two parameters of type T");
+    test::assert(second_of(true, false) == false, "T = bool");
+    return 0;
+}

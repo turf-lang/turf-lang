@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E009
+// EXPECT-DIAG: I found a path through `lambda@7:15` that ends without returning a result.
+// A lambda is checked like any function; a diagnostic about it names it
+// `lambda@LINE:COLUMN`, where its `fn` is.
+
+fn main(): int {
+    immut g = fn(x: int): int {
+        mut y: int = x;
+        y += 1;
+    };
+    return g(1);
+}

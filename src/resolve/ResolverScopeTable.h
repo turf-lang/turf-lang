@@ -100,6 +100,10 @@ public:
    */
   std::vector<std::string> getAllVisibleNames() const;
 
+  /// The names getAllVisibleNames() lists, without the global scope's: the
+  /// locals and parameters of the function being resolved.
+  std::vector<std::string> getLocalVisibleNames() const;
+
   /// Emits the "Variable Scopes" section of ResolverSymbolTable::dump().
   void dumpScopes(std::ostream &OS) const;
 

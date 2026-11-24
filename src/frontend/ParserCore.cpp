@@ -230,6 +230,8 @@ bool IsTopLevelBoundaryToken(int Tok) {
 }
 
 void SkipToNextTopLevelBoundary() {
+  // The declaration being skipped failed to parse; its lambdas go with it.
+  DiscardHoistedLambdas();
   // Every call site is a top-level per-statement recovery loop (main.cpp's
   // pre-pass/main-pass, the query facade's entry-file loop in
   // AnalysisFacade.cpp), so this runs where nesting should be top level.
@@ -1226,6 +1228,9 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     return nullptr;
 
   case TOK_FN:
+    // `fn(` is a lambda (F-1 phase 1); `fn name(` and `fn<T> name(` declare.
+    if (peekToken(0) == '(')
+      return ParseFuncDef(false, {}, /*AsLambda=*/true);
     return ParseFuncDef();
 
   case TOK_STATIC:

@@ -124,6 +124,11 @@ struct ParserCompileState {
   // NodeTypes_ map already uses for per-node side-state.
   std::unordered_set<const ExprAST *> UnsafeTopLevelDecls;
 
+  // F-1 phase 1: lambdas parsed in the current top-level declaration, in the
+  // order they start (Parser.h, ReserveHoistedLambda()). A null slot is a
+  // lambda that failed to parse.
+  std::vector<std::unique_ptr<ExprAST>> HoistedLambdas;
+
   // LANG-002/STD-001: files that parsed a leading `unsafe module;` capability
   // pragma (ParseLeadingUnsafeModuleDecl() below), keyed by the SAME
   // real_path()-canonicalized form HasRawPointerCapability() queries with, so
@@ -175,7 +180,30 @@ void ClearParsedTopLevelASTs() {
   // parser caches so a stale entry can't survive into the next compile in
   // the same process (a long-lived embedder, e.g. an LSP).
   Compile.UnsafeTopLevelDecls.clear();
+  Compile.HoistedLambdas.clear();
 }
+
+std::string LambdaName(const SourceLocation &FnLoc) {
+  return "lambda@" + std::to_string(FnLoc.Line) + ":" + std::to_string(FnLoc.Col);
+}
+
+bool IsLambdaName(const std::string &Name) {
+  // `@` never appears in an identifier, so only LambdaName() makes one.
+  return Name.rfind("lambda@", 0) == 0 ||
+         Name.find("::lambda@") != std::string::npos;
+}
+
+size_t ReserveHoistedLambda() {
+  Compile.HoistedLambdas.emplace_back();
+  return Compile.HoistedLambdas.size() - 1;
+}
+
+void FillHoistedLambda(size_t Slot, std::unique_ptr<ExprAST> Def) {
+  if (Slot < Compile.HoistedLambdas.size())
+    Compile.HoistedLambdas[Slot] = std::move(Def);
+}
+
+void DiscardHoistedLambdas() { Compile.HoistedLambdas.clear(); }
 
 
 static std::string CanonicalOrOriginal(const std::string &Path);
@@ -235,8 +263,24 @@ bool WasDeclaredInsideTopLevelUnsafe(const ExprAST *Node) {
 void AppendFlattenedTopLevelDecl(std::unique_ptr<ExprAST> AST,
                                  std::vector<std::unique_ptr<ExprAST>> &Target,
                                  bool RecordForSandbox) {
-  if (!AST)
+  if (!AST) {
+    DiscardHoistedLambdas();
     return;
+  }
+  // The lambdas written in this declaration follow it, outer before inner.
+  // Taken first: the declaration's own checks below may return early.
+  std::vector<std::unique_ptr<ExprAST>> Lambdas = std::move(Compile.HoistedLambdas);
+  Compile.HoistedLambdas.clear();
+  struct AppendLambdas {
+    std::vector<std::unique_ptr<ExprAST>> &Lambdas;
+    std::vector<std::unique_ptr<ExprAST>> &Target;
+    bool Record;
+    ~AppendLambdas() {
+      for (auto &L : Lambdas)
+        if (L)
+          AppendFlattenedTopLevelDecl(std::move(L), Target, Record);
+    }
+  } Append{Lambdas, Target, RecordForSandbox};
   // Every top-level declaration passes through here before any pass recurses
   // over it (the sandbox clone just below is the first). A tree deeper than
   // the parser's own nesting limit was built from pieces that were each within

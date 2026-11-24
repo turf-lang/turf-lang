@@ -1,0 +1,15 @@
+// EXPECT-DIAG: E040
+// EXPECT-DIAG: I cannot use `bump` in this lambda, because `bump` is a local of the function around it
+// The local `bump` shadows the function `bump` where the lambda is written,
+// so in the lambda `bump` means the local too, which it cannot use. Calling
+// the top-level function instead would silently change what the code says.
+
+fn bump(x: int): int {
+    return x + 1;
+}
+
+fn main(): int {
+    immut bump = fn(x: int): int { return x + 2; };
+    immut g = fn(x: int): int { return bump(x); };
+    return g(1);
+}

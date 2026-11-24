@@ -269,6 +269,10 @@ void TypeChecker::typeGenericFunctionValue(VariableExprAST &Node) {
   // LG-2: `immut g = identity::<int>;` -- the written type arguments are the
   // source the bare name lacks. With an expected type too, the two must agree.
   std::shared_ptr<FuncType> FromWritten;
+  // The written type arguments, which also bind a type parameter the
+  // signature never mentions (a lambda's in a generic function, Parser.h
+  // TypeParamsInScope): unifying with Want below could not.
+  TypeWalk::SubstMap Written;
   if (!Node.TypeArgs.empty()) {
     if (Node.TypeArgs.size() != Ref.TypeParams.size() || !Ref.SizeParams.empty()) {
       const size_t Want = Ref.TypeParams.size();
@@ -290,14 +294,13 @@ void TypeChecker::typeGenericFunctionValue(VariableExprAST &Node) {
       setType(&Node, nullptr);
       return;
     }
-    TypeWalk::SubstMap Subst;
     for (size_t I = 0; I < Ref.TypeParams.size(); ++I)
-      Subst.emplace(Ref.TypeParams[I], Node.TypeArgs[I]);
+      Written.emplace(Ref.TypeParams[I], Node.TypeArgs[I]);
     std::vector<TurfTypePtr> Params;
     for (const auto &P : Ref.Params)
-      Params.push_back(substituteReturnType(P.Type, Subst));
+      Params.push_back(substituteReturnType(P.Type, Written));
     FromWritten = std::make_shared<FuncType>(
-        Ref.ReturnType ? substituteReturnType(Ref.ReturnType, Subst) : nullptr,
+        Ref.ReturnType ? substituteReturnType(Ref.ReturnType, Written) : nullptr,
         std::move(Params));
     if (Want && !FromWritten->isEquivalent(Want)) {
       reportError(Node.getLoc(), ErrCode::TypeMismatch,
@@ -326,7 +329,7 @@ void TypeChecker::typeGenericFunctionValue(VariableExprAST &Node) {
     return;
   }
 
-  TypeWalk::SubstMap Subst;
+  TypeWalk::SubstMap Subst = Written;
   bool Fits = Want->getParamTypes().size() == Ref.Params.size();
   if (Fits) {
     for (size_t I = 0; I < Ref.Params.size(); ++I)

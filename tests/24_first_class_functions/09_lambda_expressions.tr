@@ -1,0 +1,49 @@
+// F-1 phase 1 (#367): `fn(params): R { ... }` is an expression whose value is
+// a function, used wherever a named function's value can be.
+
+import test;
+
+fn apply(f: fn(int): int, v: int): int {
+    return f(v);
+}
+
+fn make_adder(): fn(int): int {
+    return fn(x: int): int { return x + 100; };
+}
+
+fn main(): int {
+    immut twice = fn(x: int): int { return x * 2; };
+    test::assert(twice(4) == 8, "call through a variable");
+    test::assert(typeof(twice) == "fn(int): int", "its type is a function type");
+
+    test::assert(apply(fn(x: int): int { return x + 1; }, 4) == 5, "an argument");
+    test::assert(fn(a: int, b: int): int { return a - b; }(7, 2) == 5, "called where it is written");
+    test::assert(make_adder()(1) == 101, "returned from a function");
+
+    mut table: (fn(int): int)[2] = [twice, fn(x: int): int { return x * x; }];
+    test::assert(table[1](5) == 25, "an array element");
+    table[0] = fn(x: int): int { return 0 - x; };
+    test::assert(table[0](3) == -3, "assigned to an element");
+
+    mut f: fn(string): string = fn(s: string): string { return s + "!"; };
+    test::assert(f("hi") == "hi!", "a declared function type");
+
+    immut nested = fn(x: int): int {
+        immut inner = fn(y: int): int { return y + 10; };
+        return inner(x);
+    };
+    test::assert(nested(1) == 11, "a lambda inside a lambda");
+
+    immut shadow = fn(twice: int): int { return twice; };
+    test::assert(shadow(9) == 9, "a parameter may reuse an outer local's name");
+
+    immut log = fn(msg: string): void {
+        if msg == "" {
+            return;
+        }
+        test::assert(msg == "ok", "a void lambda returns early");
+    };
+    log("ok");
+    log("");
+    return 0;
+}

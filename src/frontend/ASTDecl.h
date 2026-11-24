@@ -270,6 +270,12 @@ public:
   /// sees every `try`) records it rather than a later scan trying to find one.
   bool UsesTry = false;
 
+  /// F-1 phase 1: this function was written as a lambda, `fn(x: int): int
+  /// { ... }` in an expression, and hoisted to the top level by the Parser
+  /// (Parser.h, LambdaName()). Its name is LambdaName()'s, which no program
+  /// can write, and it is private.
+  bool IsLambda = false;
+
   /// TDP-2-006 (TestRegistry.h): where the first token after the body's `}`
   /// is, set by ParseFuncDef(). A diagnostic from the `fn` up to here is
   /// "inside the test", which is what a compile_error test's outcome is
@@ -352,6 +358,7 @@ public:
     Cloned->setVisibility(getVisibility());
     Cloned->setAnnotations(getAnnotations());
     Cloned->UsesTry = UsesTry;
+    Cloned->IsLambda = IsLambda;
     Cloned->BodyEnd = BodyEnd;
     Cloned->RetTypeLoc = RetTypeLoc;
     Cloned->SizeParams = SizeParams;

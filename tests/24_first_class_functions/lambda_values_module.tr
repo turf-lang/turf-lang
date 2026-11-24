@@ -1,0 +1,14 @@
+// Companion of 11_lambda_from_module.tr: a module function that returns a
+// lambda, and a private one that takes one.
+
+pub fn make_scaler(): fn(int): int {
+    return fn(x: int): int { return x * 10; };
+}
+
+fn run(f: fn(int): int): int {
+    return f(4);
+}
+
+pub fn run_inc(): int {
+    return run(fn(x: int): int { return x + 1; });
+}

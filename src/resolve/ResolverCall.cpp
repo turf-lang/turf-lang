@@ -152,6 +152,7 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
           .raise();
       return;
     }
+    rejectOuterLocal(CalleeName, Node.getLoc());
 
     CurrentFileMatches = SymTable_.lookupCurrentFileFunctions(CalleeName);
 
@@ -822,6 +823,7 @@ void Resolver::visitMethodCall(MethodCallExprAST &Node) {
       BaseVar->ResolvedSymbol = ExistingVar;
       return;
     }
+    rejectOuterLocal(BaseVar->getName(), BaseVar->getLoc());
     if (SymTable_.hasModule(BaseVar->getName())) {
       // Base is a module qualifier used with '.' -- not allowed. '.' is
       // instance-member-access only; a module-qualified call must use

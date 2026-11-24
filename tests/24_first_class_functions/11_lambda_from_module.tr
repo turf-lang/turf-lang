@@ -1,0 +1,18 @@
+// A lambda written in an imported module is that module's private function:
+// its value crosses into the importer, and a lambda at the same line and
+// column in this file is a different function.
+
+import lambda_values_module;
+import test;
+
+pub fn make_scaler(): fn(int): int {
+    return fn(x: int): int { return x * 2; };
+}
+
+fn main(): int {
+    immut m = lambda_values_module::make_scaler();
+    test::assert(m(3) == 30, "the module's lambda");
+    test::assert(make_scaler()(3) == 6, "this file's lambda");
+    test::assert(lambda_values_module::run_inc() == 5, "a lambda passed inside the module");
+    return 0;
+}

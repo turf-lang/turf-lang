@@ -88,6 +88,16 @@ std::vector<std::string> ResolverScopeTable::getAllVisibleNames() const {
   return Names;
 }
 
+std::vector<std::string> ResolverScopeTable::getLocalVisibleNames() const {
+  std::vector<std::string> Names;
+  std::unordered_set<std::string> Seen;
+  for (size_t I = ScopeStack_.size(); I > 1; --I)
+    for (const auto &Pair : ScopeStack_[I - 1]->Symbols)
+      if (Seen.insert(Pair.first).second)
+        Names.push_back(Pair.first);
+  return Names;
+}
+
 void ResolverScopeTable::dumpScopes(std::ostream &OS) const {
   OS << "--- Variable Scopes (depth: " << Depth_ << ") ---\n";
   for (int i = static_cast<int>(ScopeStack_.size()) - 1; i >= 0; --i) {
