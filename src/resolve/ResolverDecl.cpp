@@ -1049,9 +1049,10 @@ void Resolver::visitStructDecl(StructDeclExprAST &Node) {
 
 
 void Resolver::visitArrayDecl(ArrayDeclExprAST &Node) {
-  // FDN-003: `mut a: Node[4];`'s element type is a spelling too.
-  resolveTypeSpellingsSilently(Node.getElementTypePtr(), currentModuleName(),
-                               CurrentFuncTypeParams_);
+  // FDN-003: `mut a: Node[4];`'s element type is a spelling too, checked
+  // and resolved like a plain variable's declared type (visitVarDecl), so an
+  // unknown element type is E042 here rather than a codegen failure later.
+  validateNamedType(Node.getElementTypePtr(), Node.getLoc(), CurrentFuncTypeParams_);
 
   // Resolve the initializer list expressions.
   for (const auto &Init : Node.getInitList())

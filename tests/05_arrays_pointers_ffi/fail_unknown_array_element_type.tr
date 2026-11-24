@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E042
+// EXPECT-DIAG: I cannot find a type named `Point`.
+// A fixed-size array's element type is checked like a variable's declared
+// type, so an unknown name is E042 at the declaration, not an internal error
+// at the first field access (turf-fuzz #46).
+fn main(): int {
+    mut pts: Point[3];
+    if pts[0].x == 0 {
+        return 1;
+    }
+    return 0;
+}
