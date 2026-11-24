@@ -1488,6 +1488,34 @@ Account: `docs/development/changes/TDP-2-002.md`, NM-6.
   (F-OPT-2); a late check is not a removal. The precise rule a compiler pass
   applies is NM-6's, in its change record.
 
+### 6.31 Function values and lambdas — FROZEN (TDP-2-009 phase 1, #367, 2026-11-24)
+
+Decided with F-1 phase 1, as ROADMAP_v3.0.0 Part 7's B-7 requires: the layout
+of a C-facing function value is fixed before F-1 phase 2 gives Turf function
+values an environment. Account: `docs/planning/FUTURE.md` F-1.
+
+- **A lambda is an unnamed function (F-FN-1).** `fn(x: int): int { return x
+  + 1; }` in an expression is a function value: parameters and return type
+  written as in a declaration, a block body, no arrow form and no implicit
+  return. It cannot name itself; recursion uses a named function. It has no
+  type parameters of its own (`fn<T>(...)` is E108); one written inside a
+  generic function has that function's, so each instantiation of the function
+  uses its own instantiation of the lambda. A diagnostic about a lambda names
+  it `lambda@LINE:COLUMN`, where its `fn` is.
+- **A named function is a value (F-FN-2).** A non-generic function's name,
+  used as a value, has the type `fn(P...): R`. A generic one takes its type
+  arguments from `name::<T>` or from the function type the place expects;
+  with neither it is E137. An overloaded function, a `@caller_location`
+  function and a `@test` function are not values.
+- **A C-facing function value is one pointer (F-FN-3, B-7).** A function type
+  in a position C reads (an `extern fn`'s parameter or return type, and a
+  field of a C-layout struct once those exist) is exactly one C function
+  pointer, and only a value with no environment may be stored there: a named
+  function, an instantiation of a generic one, or a lambda that captures
+  nothing. Whatever representation a capturing Turf function value gets (F-1
+  phase 2), a C-facing position never changes size or ABI; a capturing value
+  passed there is a compile-time error at that site, never a conversion.
+
 ## Appendix — frozen-decision IDs
 
 A change record's *Frozen decisions relied on* row cites these IDs
@@ -1583,6 +1611,9 @@ Overhaul (F-TYPE-1), whose third column points at their section above.
 | **F-PANIC-1** | A panic flushes stdout, prints to stderr and aborts the process; no `defer`, unwinding, `atexit` handler or finalizer runs, and nothing (`recover`, `try`, a test harness, a thread `join`) catches it. A panic on any thread ends the process. | §6.30 above (owner decision 2026-10-25) |
 | **F-PANIC-2** | Observable behaviour is output, exit status and the effects of calls, in source order; the program's own memory after a panic has begun is not observable. | §6.30 above |
 | **F-PANIC-3** | A mandated check may run after the operation it guards if nothing observable happens in between, the unchecked result reaches only memory and other late-checked arithmetic, and the panic's kind and location are those of the first check in place. Late is allowed; skipped still needs a proof (F-OPT-2). | §6.30 above |
+| **F-FN-1** | `fn(params): R { body }` in an expression is a lambda: an unnamed function, no arrow form, no implicit return, no name of its own to recurse with. No type parameters of its own (`fn<T>(` is E108); inside a generic function it has that function's. Diagnostics name it `lambda@LINE:COLUMN`. | §6.31 above (#367, 2026-11-24) |
+| **F-FN-2** | A non-generic function's name is a value of type `fn(P...): R`; a generic one's type arguments come from `name::<T>` or the expected function type, else E137; overloaded, `@caller_location` and `@test` functions are not values. | §6.31 above |
+| **F-FN-3** | B-7: a C-facing function type (`extern fn` parameter or return, a C-layout struct field) is one C function pointer and accepts only a value with no environment (named function, generic instantiation, capture-free lambda); a capturing value there is a compile-time error, never a conversion. | §6.31 above |
 
 ---
 
