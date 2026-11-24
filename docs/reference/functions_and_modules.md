@@ -369,6 +369,61 @@ What can be used as a value:
   }
   ```
 
+### Lambdas
+
+`fn(params): R { body }` written where a value goes is a **lambda**: a
+function with no name. Its parameters and return type are written as in a
+declaration, and its body is a block with `return` statements, as any
+function's is. Its value is a function value like a named function's: store
+it, pass it, return it, or call it where it is written.
+
+```turflang
+fn apply(f: fn(int): int, x: int): int { return f(x); }
+
+fn adder(): fn(int): int {
+    return fn(x: int): int { return x + 100; };
+}
+
+fn main(): int {
+    immut twice = fn(x: int): int { return x * 2; };
+    printline(twice(4));                                     // 8
+    printline(apply(fn(x: int): int { return x - 1; }, 4)); // 3
+    printline(adder()(1));                                   // 101
+
+    mut ops: (fn(int): int)[2] = [twice, fn(x: int): int { return x * x; }];
+    printline(ops[1](5));                                    // 25
+    return 0;
+}
+```
+
+- **A lambda uses only its own parameters and locals.** A local or parameter
+  of the function around it, `self` included, is `E040`; pass the value in
+  as a parameter instead:
+
+  <!-- doc-example: fails E040 -->
+  ```turflang
+  fn main(): int {
+      mut k: int = 3;
+      immut f = fn(x: int): int { return x * k; };
+      return f(2);
+  }
+  ```
+
+  Functions, module constants and other lambdas' values passed in are fine.
+  A local that shadows a function where the lambda is written shadows it in
+  the lambda too, so the name is still that local and still `E040`.
+- **No type parameters of its own.** `fn<T>(...)` is `E108`; write a named
+  generic function and use its name. A lambda written inside a generic
+  function can use that function's type parameters, and each instantiation of
+  the function gets its own copy of the lambda.
+- **No name.** A lambda cannot call itself; write a named function for
+  recursion. A diagnostic about a lambda names it `lambda@LINE:COLUMN`, the
+  place its `fn` is written ("I found a path through `lambda@7:15` that ends
+  without returning a result").
+- **One pointer.** A lambda's value is a plain function pointer, the same as a
+  named function's, so it can be passed to an `extern fn` that takes a
+  function type (see [Callbacks](ffi_and_unsafe.md#8-callbacks)).
+
 ---
 
 ## 3. UFCS: calling a function as a method
@@ -1288,6 +1343,8 @@ arguments is an error.
 | Wrong number of arguments | `E044` | `f` takes N arguments, and this call passes M |
 | No overload accepts the argument types | `E056` | No overload of `f` takes the argument types (...) |
 | Unknown function | `E041` | I cannot find a function named `f` |
+| A lambda uses a local of the function around it | `E040` | I cannot use `k` in this lambda, because `k` is a local of the function around it |
+| `fn<T>(...)`, a generic lambda | `E108` | I cannot give a lambda type parameters, so `fn<T>(...)` needs a name |
 | Overloaded name used as a value | `E125` | I cannot use `f` as a function value, because it is overloaded and has no single signature |
 | `m::f` or `T::method` used as a value | `E137` | I cannot use `io::printline` as a value, because a qualified function name can only be called |
 | Two UFCS candidates match equally | `E125` | More than one visible function `f` takes this receiver, so I cannot choose one |
